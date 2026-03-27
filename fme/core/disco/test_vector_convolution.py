@@ -42,19 +42,62 @@ class TestPrecomputeVectorConvolution:
         torch.testing.assert_close(idx_new, idx_ref)
         torch.testing.assert_close(vals_scalar, vals_ref)
 
-    def test_cos_sin_pythagorean(self):
-        """cos^2(γ) + sin^2(γ) = 1 at every support point."""
-        fb = _make_filter_basis()
+    @pytest.mark.parametrize(
+        "basis_type,kernel_shape",
+        [
+            ("piecewise linear", 3),
+            ("piecewise linear", 5),
+            ("morlet", (3, 3)),
+            ("zernike", 4),
+        ],
+    )
+    def test_cos_sin_pythagorean(self, basis_type, kernel_shape):
+        """cos^2(γ) + sin^2(γ) = 1 at every support point, all basis types."""
+        fb = get_filter_basis(kernel_shape, basis_type)
         _, vals_scalar, vals_cos, vals_sin = _precompute_vector_convolution_tensor_s2(
             IMG_SHAPE, IMG_SHAPE, fb, theta_cutoff=THETA_CUTOFF
         )
-        # vals_cos = vals_scalar * cos(γ), so
-        # vals_cos^2 + vals_sin^2 = vals_scalar^2
         nonzero = vals_scalar.abs() > 1e-10
         assert nonzero.any(), "expected some nonzero filter values"
         lhs = vals_cos[nonzero] ** 2 + vals_sin[nonzero] ** 2
         rhs = vals_scalar[nonzero] ** 2
         torch.testing.assert_close(lhs, rhs, atol=1e-5, rtol=1e-5)
+
+    @pytest.mark.parametrize(
+        "basis_type,kernel_shape",
+        [("piecewise linear", 3), ("morlet", (3, 3)), ("zernike", 4)],
+    )
+    def test_cos_sin_orthogonality(self, basis_type, kernel_shape):
+        """cos(γ) and sin(γ) patterns are orthogonal over each filter support.
+
+        For each (kernel index k, output latitude j), the weighted inner
+        product of the two vector filter components should vanish, verifying
+        they are perpendicular as functions over the filter support.
+        """
+        fb = get_filter_basis(kernel_shape, basis_type)
+        nlat_out = IMG_SHAPE[0]
+        K = fb.kernel_size
+        idx, vals_scalar, vals_cos, vals_sin = _precompute_vector_convolution_tensor_s2(
+            IMG_SHAPE, IMG_SHAPE, fb, theta_cutoff=THETA_CUTOFF
+        )
+        ker_idx = idx[0]
+        row_idx = idx[1]
+
+        for k in range(K):
+            for j in range(nlat_out):
+                mask = (ker_idx == k) & (row_idx == j)
+                if not mask.any():
+                    continue
+                # Weighted inner product of cos(γ) and sin(γ) patterns
+                # Using |vals_scalar| as weight (quadrature already merged)
+                inner = (vals_cos[mask] * vals_sin[mask]).sum()
+                norm = (vals_scalar[mask] ** 2).sum()
+                if norm > 1e-12:
+                    # Normalized inner product should be near zero
+                    assert abs(inner / norm) < 0.05, (
+                        f"cos/sin not orthogonal at k={k}, j={j}: "
+                        f"inner/norm={inner/norm:.4f}"
+                    )
 
     def test_same_meridian_zero_rotation(self):
         """Points on the same meridian (Δlon = 0) have frame rotation γ = 0."""
