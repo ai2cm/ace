@@ -3,13 +3,58 @@ import math
 import torch
 import torch.nn as nn
 
-from . import _filter_basis as _filter_basis_module
 from ._cache import lru_cache
 from ._convolution import _normalize_convolution_tensor_s2
 from ._disco_utils import _disco_s2_contraction_fft, _get_psi, _precompute_psi_banded
 from ._fft import rfft
-from ._filter_basis import FilterBasis
+from ._filter_basis import FilterBasis, get_filter_basis
 from ._quadrature import precompute_latitudes, precompute_longitudes
+
+
+class VectorFilterBasis:
+    """Pairs a scalar and vector radial filter basis.
+
+    The scalar basis (isotropic filters) is used for scalar→scalar and
+    vector→vector paths. The vector basis (oriented cos/sin filters) is
+    used for scalar→vector and vector→scalar paths. The two bases can
+    have different kernel shapes, allowing independent radial resolution
+    for isotropic and oriented operations.
+    """
+
+    def __init__(
+        self,
+        scalar_basis: FilterBasis,
+        vector_basis: FilterBasis,
+    ):
+        self.scalar_basis = scalar_basis
+        self.vector_basis = vector_basis
+
+    @property
+    def scalar_kernel_size(self) -> int:
+        return self.scalar_basis.kernel_size
+
+    @property
+    def vector_kernel_size(self) -> int:
+        return self.vector_basis.kernel_size
+
+    def __repr__(self):
+        return (
+            f"VectorFilterBasis("
+            f"scalar={self.scalar_basis}, "
+            f"vector={self.vector_basis})"
+        )
+
+
+def get_vector_filter_basis(
+    scalar_kernel_shape: int | tuple[int, ...],
+    vector_kernel_shape: int | tuple[int, ...],
+    basis_type: str = "piecewise linear",
+) -> VectorFilterBasis:
+    """Create a VectorFilterBasis from kernel shape parameters."""
+    return VectorFilterBasis(
+        scalar_basis=get_filter_basis(scalar_kernel_shape, basis_type),
+        vector_basis=get_filter_basis(vector_kernel_shape, basis_type),
+    )
 
 
 @lru_cache(typed=True, copy=True)
@@ -269,7 +314,7 @@ class VectorDiscoConvS2(nn.Module):
         if self.nlon_in % self.nlon_out != 0:
             raise ValueError("nlon_in must be divisible by nlon_out")
 
-        filter_basis = _filter_basis_module.get_filter_basis(
+        filter_basis = get_filter_basis(
             kernel_shape=kernel_shape, basis_type=basis_type
         )
         K = filter_basis.kernel_size
