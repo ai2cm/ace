@@ -53,7 +53,8 @@ class NoiseConditionedModel(torch.nn.Module):
     then calls the wrapped module with a fully populated Context.
 
     Args:
-        module: An nn.Module with forward signature (x, context: Context).
+        conditional_model: An nn.Module with forward signature
+            (x, context: Context).
         img_shape: Global spatial dimensions (lat, lon) of the input data.
         embed_dim_noise: Dimension of noise channels.
         embed_dim_pos: Dimension of learned positional embedding. 0 disables.
@@ -65,7 +66,7 @@ class NoiseConditionedModel(torch.nn.Module):
 
     def __init__(
         self,
-        module: torch.nn.Module,
+        conditional_model: torch.nn.Module,
         img_shape: tuple[int, int],
         embed_dim_noise: int = 256,
         embed_dim_pos: int = 0,
@@ -75,7 +76,7 @@ class NoiseConditionedModel(torch.nn.Module):
         mmax: int = 0,
     ):
         super().__init__()
-        self.conditional_model = module
+        self.conditional_model = conditional_model
         self.embed_dim = embed_dim_noise
         self.img_shape = img_shape
         self._inverse_sht = inverse_sht
