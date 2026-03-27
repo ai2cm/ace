@@ -19,6 +19,7 @@ import torch.nn as nn
 
 from fme.core.disco._quadrature import precompute_latitudes
 from fme.core.disco._vector_convolution import VectorDiscoConvS2
+from fme.core.shallow_water.modules import ScalarVectorProduct
 
 
 class ShallowWaterStepper(nn.Module):
@@ -82,8 +83,15 @@ class ShallowWaterStepper(nn.Module):
             bias=False,
         )
 
+        # Coriolis: f × V via ScalarVectorProduct
+        # f_coriolis is the scalar input, weight is pure rotation
+        self.coriolis = ScalarVectorProduct(n_scalar=1, n_vector=1)
+        with torch.no_grad():
+            self.coriolis.weight.zero_()
+            self.coriolis.weight[0, 0, 1] = 1.0  # pure 90° rotation
+
         # Freeze all parameters
-        for p in self.conv.parameters():
+        for p in self.parameters():
             p.requires_grad = False
 
         # Set weights for the linearized equations:
@@ -117,12 +125,8 @@ class ShallowWaterStepper(nn.Module):
         # Spatial tendencies from convolution
         dh_dt, duv_dt = self.conv(h, uv)
 
-        # Coriolis: f × V = f * (-v, u)
-        f = self.f_coriolis  # (1, 1, nlat, 1)
-        u = uv[..., 0]  # (B, 1, nlat, nlon)
-        v = uv[..., 1]
-        coriolis = torch.stack([-f * v, f * u], dim=-1)
-        duv_dt = duv_dt + coriolis
+        # Coriolis: f × V via ScalarVectorProduct
+        duv_dt = duv_dt + self.coriolis(self.f_coriolis, uv)
 
         return dh_dt, duv_dt
 
