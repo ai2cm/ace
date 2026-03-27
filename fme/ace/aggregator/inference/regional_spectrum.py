@@ -177,6 +177,7 @@ class RegionalSpectrumAggregator:
         self,
         region: LatLonRegion,
     ):
+        self._region = region
         self._power_spectrum: dict[str, torch.Tensor] = {}
         self._wavenumbers: torch.Tensor | None = None
         self._counts: dict[str, int] = defaultdict(int)
@@ -185,10 +186,11 @@ class RegionalSpectrumAggregator:
     def record_batch(self, data: TensorMapping):
         for name in data:
             # Expecting data of shape (batch, time, lat, lon)
-            batch_size = data[name].shape[0]
-            time_size = data[name].shape[1]
+            tensor = self._region.subset(data[name])
+            batch_size = tensor.shape[0]
+            time_size = tensor.shape[1]
 
-            wavenumbers, power_spectrum = compute_isotropic_spectrum(data)
+            wavenumbers, power_spectrum = compute_isotropic_spectrum(tensor)
 
             if self._wavenumbers is None:
                 # wavenumbers same for all variables / batches

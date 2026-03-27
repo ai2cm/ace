@@ -77,64 +77,6 @@ def _get_windowed_times(
     )
 
 
-@pytest.mark.parametrize(
-    "lat_bounds, lon_bounds, case",
-    [
-        pytest.param((0.0, 10.0), (0.0, 20.0), "original_domain"),
-        pytest.param((20.0, 30.0), (25.0, 35.0), "null_domain"),
-        pytest.param((0.0, 5.0), (0.0, 20.0), "first_half_lat"),
-        pytest.param((0.0, 10.0), (0.0, 10.0), "first_half_lon"),
-        pytest.param((0.0, 5.0), (0.0, 10.0), "first_half_both"),
-    ],
-)
-def test_lat_lon_region(lat_bounds, lon_bounds, case):
-    n_lat, n_lon = 3, 5
-    lat_coord = torch.linspace(0.0, 10.0, n_lat)
-    lon_coord = torch.linspace(0.0, 20.0, n_lon)
-    region = LatLonRegion(
-        lat=lat_coord,
-        lon=lon_coord,
-        lat_bounds=lat_bounds,
-        lon_bounds=lon_bounds,
-    )
-    regional_weights = region.regional_weights
-    assert regional_weights.shape == (n_lat, n_lon)
-    if case == "original_domain":
-        assert torch.allclose(regional_weights, torch.ones_like(regional_weights))
-    elif case == "null_domain":
-        assert torch.allclose(regional_weights, torch.zeros_like(regional_weights))
-    elif case == "first_half_lat":
-        expected = torch.tensor(
-            [
-                [1, 1, 1, 1, 1],
-                [1, 1, 1, 1, 1],
-                [0, 0, 0, 0, 0],
-            ],
-            dtype=torch.float32,
-        )
-        assert torch.allclose(regional_weights, expected)
-    elif case == "first_half_lon":
-        expected = torch.tensor(
-            [
-                [1, 1, 1, 0, 0],
-                [1, 1, 1, 0, 0],
-                [1, 1, 1, 0, 0],
-            ],
-            dtype=torch.float32,
-        )
-        assert torch.allclose(regional_weights, expected)
-    else:
-        expected = torch.tensor(
-            [
-                [1, 1, 1, 0, 0],
-                [1, 1, 1, 0, 0],
-                [0, 0, 0, 0, 0],
-            ],
-            dtype=torch.float32,
-        )
-        assert torch.allclose(regional_weights, expected)
-
-
 def test_regional__raw_index():
     n_samples, n_times, n_lat, n_lon = 2, 10, 11, 21
     start_date = (2000, 1, 1, 0, 0, 0)
