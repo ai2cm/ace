@@ -51,7 +51,7 @@ def compute_isotropic_spectrum(
     dx=1.0,
     dy=1.0,
     num_bins=None,
-    n_factor=4,
+    n_factor=2,
     remove_mean=True,
     detrend=None,
     window="Hann",
@@ -106,7 +106,7 @@ def compute_isotropic_spectrum(
     Ly = H * dy
 
     if num_bins is None:
-        num_bins = min(H, W) // n_factor
+        num_bins = min(H, W) // n_factor - 1
 
     # Apply regional weights if provided
     if weights is not None:
@@ -174,14 +174,7 @@ def compute_isotropic_spectrum(
     binned_psd_sum = torch.zeros(B_prime, num_bins, device=device, dtype=dtype)
     binned_psd_sum.scatter_add_(dim=1, index=bin_indices_batched, src=psd_flat_batched)
 
-    binned_counts = torch.bincount(bin_indices, minlength=num_bins)
-    binned_counts_safe = binned_counts.float()
-    binned_counts_safe[binned_counts_safe == 0] = torch.nan
-
-    iso_psd_binned = binned_psd_sum / binned_counts_safe.unsqueeze(0)
-    iso_spectrum = iso_psd_binned * k_bins_centers.unsqueeze(0)
-    iso_spectrum = iso_spectrum.reshape(B, C, num_bins)
-    iso_spectrum[..., 0] = torch.nan
+    iso_spectrum = binned_psd_sum.reshape(B, C, num_bins)
 
     if orig_dim == 2:
         iso_spectrum = iso_spectrum.squeeze(0).squeeze(0)
