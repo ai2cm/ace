@@ -322,3 +322,59 @@ When `kernel_shape` is provided instead of `vector_filter_basis`, a `VectorFilte
 9. **Gradient flow.** Verify gradients flow through all four weight blocks (W_ss, W_sv, W_vs, W_vv).
 
 10. **Bias correctness.** Bias is added to scalar outputs only. With zero weights and nonzero bias, scalar output equals the bias everywhere and vector output is zero.
+
+## Network Architecture
+
+### Scalar-Vector Interaction: ScalarVectorProduct
+
+The VectorDiscoConvS2 convolution and scalar nonlinearities alone cannot represent pointwise products of scalar and vector fields (e.g., f × V for Coriolis forcing). The vector→scalar path produces spatially smoothed projections, not local values, so individual vector components cannot be extracted as scalars, processed through a nonlinearity, and reassembled.
+
+A `ScalarVectorProduct` module fills this gap. For each (scalar channel, vector channel) pair, it applies a learned combination of scaling and 90° rotation:
+
+```
+v_out += w_scale * s * (u, v) + w_rotate * s * (-v, u)
+```
+
+The weight shape is `(N_s, N_v, 2)`, where the last dimension selects scale (direction-preserving) vs rotate (90° rotation). This is equivalent to pointwise complex multiplication: the scalar provides the magnitude and angle, the vector is the complex input. The operation is frame-consistent (pointwise, same meridian frame at each grid point) and isotropic (the same scalar value produces the same effect at every longitude).
+
+### Block Structure
+
+A single block combines spatial mixing (convolution), nonlinearity (on scalars), channel mixing (MLP on scalars), and scalar-vector interaction:
+
+```
+Input: (s, v)
+  │
+  ├─ VectorDiscoConvS2(s, v) → (s', v')     # spatial mixing, all 4 type paths
+  │
+  ├─ activation(s') → s'                     # nonlinearity on scalars only
+  │
+  ├─ MLP(s') → s'                            # 1×1 conv on scalars for channel mixing
+  │
+  ├─ ScalarVectorProduct(s', v') → Δv        # scalar-dependent vector modulation
+  │
+  └─ Residual: (s + s', v + v' + Δv)         # add to input
+```
+
+**Motivation for the ordering:**
+
+1. **Convolution first.** The spatial operator produces new scalar and vector features from all four type interactions (gradient, divergence, frame rotation, isotropic smoothing). This is the main information-mixing step.
+
+2. **Scalar nonlinearity.** Applied after convolution so that the new scalar features (including vector-derived quantities like divergence) can be transformed nonlinearly. Vectors do not receive nonlinearities — their nonlinear behavior comes indirectly from the scalar pathway in subsequent layers.
+
+3. **Scalar MLP before ScalarVectorProduct.** The 1×1 convolution (pointwise MLP) enriches the scalar features before they modulate vectors. This lets the network learn complex scalar functions (e.g., latitude-dependent coefficients, nonlinear combinations of scalar channels) that then drive vector scaling and rotation.
+
+4. **ScalarVectorProduct last (before residual).** The enriched scalar features modulate the vector features via pointwise scaling and rotation. This is where interactions like Coriolis forcing (latitude-dependent rotation of velocity) and scalar-vector products (e.g., pressure × velocity for mass flux) are represented.
+
+5. **Residual connection.** Adding the block's output to the input stabilizes training and allows the network to learn incremental updates. Both scalar and vector channels have residual connections, requiring the block's input and output channel counts to match.
+
+### What each block can represent
+
+With these components, a single block can approximate:
+
+- **Pressure gradient → velocity tendency:** convolution sv path (gradient of scalar) + scalar nonlinearity (for amplitude control)
+- **Velocity divergence → height tendency:** convolution vs path (divergence of vector)
+- **Coriolis rotation:** ScalarVectorProduct with f(lat) as a scalar feature rotating the velocity
+- **Advection-like transport:** convolution vv path (frame-rotated smoothing of vectors)
+- **Nonlinear scalar interactions:** MLP combining scalar features (e.g., h × div(V))
+
+Stacking multiple blocks builds depth: the output vectors of one block become inputs to the next block's convolution, enabling multi-scale and multi-step dynamics.
