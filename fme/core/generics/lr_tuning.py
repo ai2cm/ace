@@ -24,7 +24,7 @@ class LRTuningConfig:
     ``num_batches`` on the first batches of the epoch; the candidate uses a
     learning rate of ``current_lr * lr_factor``. Both are then validated. If
     the candidate's validation loss is less than the baseline's by at least
-    ``improvement_threshold`` times the pre-trial validation loss, the trainer
+    ``improvement_threshold`` times the baseline's validation loss, the trainer
     adopts the candidate's learning rate.
 
     Parameters:
@@ -34,15 +34,15 @@ class LRTuningConfig:
         lr_factor: Multiply the current LR by this to get the candidate LR.
         num_batches: Number of training batches for each fork in the trial.
         improvement_threshold: The candidate must beat the baseline's
-            validation loss by at least this fraction of the pre-trial
+            validation loss by at least this fraction of the baseline's
             validation loss (e.g. 0.01 means the candidate must be lower
-            by at least 1% of the pre-trial loss).
+            by at least 1% of the baseline loss).
     """
 
-    lr_factor: float
-    num_batches: int
+    lr_factor: float = 0.5
+    num_batches: int = 200
     epochs: Slice = dataclasses.field(default_factory=Slice)
-    improvement_threshold: float = 0.0
+    improvement_threshold: float = 0.001
 
 
 def run_lr_tuning_trial(
@@ -54,7 +54,6 @@ def run_lr_tuning_trial(
     copy_ema: Callable[[torch.nn.ModuleList], EMATracker],
     config: LRTuningConfig,
     current_lr: float,
-    pre_trial_val_loss: float,
     get_validation_aggregator: Callable[[], AggregatorABC],
     validate_using_ema: bool,
 ) -> float | None:
@@ -81,7 +80,6 @@ def run_lr_tuning_trial(
             current EMA state but tracking the given modules. Called twice.
         config: The LR tuning configuration.
         current_lr: The current learning rate.
-        pre_trial_val_loss: Validation loss from the end of the previous epoch.
         get_validation_aggregator: Factory for validation aggregators.
         validate_using_ema: Whether to use EMA parameters during validation.
 
@@ -139,11 +137,10 @@ def run_lr_tuning_trial(
     baseline_val_loss = baseline_val_logs["val/mean/loss"]
     candidate_val_loss = candidate_val_logs["val/mean/loss"]
 
-    threshold = baseline_val_loss - config.improvement_threshold * pre_trial_val_loss
+    threshold = baseline_val_loss - config.improvement_threshold * baseline_val_loss
 
     logging.info(
         f"LR tuning trial: baseline LR={current_lr}, candidate LR={candidate_lr}, "
-        f"pre-trial val loss={pre_trial_val_loss:.6f}, "
         f"baseline val loss={baseline_val_loss:.6f}, "
         f"candidate val loss={candidate_val_loss:.6f}, "
         f"threshold={threshold:.6f}"

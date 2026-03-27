@@ -257,7 +257,6 @@ class Trainer:
         self._no_optimization = NullOptimization()
         self._aggregator_builder = aggregator_builder
         self._ema = build_ema(stepper.modules)  # build before restore_checkpoint
-        self._last_val_loss: float | None = None
 
         resuming = os.path.isfile(self.paths.latest_checkpoint_path)
         if resuming:
@@ -328,11 +327,6 @@ class Trainer:
             return  # resumed mid-epoch, tuning already ran (or wasn't needed)
         if not cfg.epochs.contains(self._epochs_trained):
             return
-        if self._last_val_loss is None:
-            # No prior validation (start of training, evaluate_before_training=False).
-            # Run validation now to establish a baseline.
-            val_logs = self.validate_one_epoch()
-            self._last_val_loss = val_logs["val/mean/loss"]
 
         # set_epoch so the trial sees the same first N batches as the real epoch
         self.train_data.set_epoch(self._epochs_trained + 1)
@@ -345,7 +339,6 @@ class Trainer:
             copy_ema=self._copy_ema,
             config=cfg,
             current_lr=self.optimization.learning_rate,
-            pre_trial_val_loss=self._last_val_loss,
             get_validation_aggregator=(
                 self._aggregator_builder.get_validation_aggregator
             ),
@@ -379,7 +372,6 @@ class Trainer:
             else:
                 inference_logs = {}
             valid_loss = valid_logs["val/mean/loss"]
-            self._last_val_loss = valid_loss
             logging.info(f"Validation loss before training: {valid_loss}")
             logging.info("Logging to wandb")
             all_logs = valid_logs | inference_logs | {"epoch": self._epochs_trained}
@@ -409,7 +401,6 @@ class Trainer:
 
             train_loss = train_logs.get("train/mean/loss")
             valid_loss = valid_logs["val/mean/loss"]
-            self._last_val_loss = valid_loss
             inference_error = inference_logs.get(
                 "inference/time_mean_norm/rmse/channel_mean", None
             )

@@ -1210,13 +1210,13 @@ def test_lr_tuning_runs_and_keeps_lr(tmp_path: str):
     """When the candidate doesn't win, the LR stays the same."""
     max_epochs = 2
     # epochs=Slice(), max_epochs=2:
-    # Epoch 0 tune: _last_val_loss=None → validate(0.8), trial(0.7, 0.75)
-    #   threshold = 0.7 - 0.1*0.8 = 0.62; candidate 0.75 > 0.62 → baseline wins
+    # Epoch 0 tune: trial(0.7, 0.75)
+    #   threshold = 0.7 - 0.1*0.7 = 0.63; candidate 0.75 > 0.63 → baseline wins
     # Epoch 0: train + validate(0.6)
     # Epoch 1 tune: trial(0.5, 0.55)
-    #   threshold = 0.5 - 0.1*0.6 = 0.44; candidate 0.55 > 0.44 → baseline wins
+    #   threshold = 0.5 - 0.1*0.5 = 0.45; candidate 0.55 > 0.45 → baseline wins
     # Epoch 1: train + validate(0.4)
-    validation_losses = np.array([0.8, 0.7, 0.75, 0.6, 0.5, 0.55, 0.4])
+    validation_losses = np.array([0.7, 0.75, 0.6, 0.5, 0.55, 0.4])
     with mock_wandb():
         config, trainer = get_trainer(
             tmp_path,
@@ -1237,13 +1237,13 @@ def test_lr_tuning_runs_and_keeps_lr(tmp_path: str):
 def test_lr_tuning_adopts_candidate_lr(tmp_path: str):
     """When the candidate wins, the LR is updated."""
     max_epochs = 2
-    # Epoch 0 tune: _last_val_loss=None → validate(1.0), trial(0.9, 0.3)
-    #   threshold = 0.9 - 0.1*1.0 = 0.8; candidate 0.3 < 0.8 → candidate wins
+    # Epoch 0 tune: trial(0.9, 0.3)
+    #   threshold = 0.9 - 0.1*0.9 = 0.81; candidate 0.3 < 0.81 → candidate wins
     # Epoch 0: train + validate(0.5)
     # Epoch 1 tune: trial(0.45, 0.3)
-    #   threshold = 0.45 - 0.1*0.5 = 0.4; candidate 0.3 < 0.4 → candidate wins
+    #   threshold = 0.45 - 0.1*0.45 = 0.405; candidate 0.3 < 0.405 → candidate wins
     # Epoch 1: train + validate(0.3)
-    validation_losses = np.array([1.0, 0.9, 0.3, 0.5, 0.45, 0.3, 0.3])
+    validation_losses = np.array([0.9, 0.3, 0.5, 0.45, 0.3, 0.3])
     with mock_wandb():
         config, trainer = get_trainer(
             tmp_path,
@@ -1266,20 +1266,18 @@ def test_lr_tuning_respects_epochs_slice(tmp_path: str):
     """LR tuning only runs on epochs matching the slice."""
     max_epochs = 4
     # epochs=Slice(step=2), so tuning runs at epoch 0 and 2
-    # Epoch 0 tune: needs _last_val_loss=None → runs validate_one_epoch first
-    #   validate_one_epoch: 0.8
+    # Epoch 0 tune:
     #   trial baseline: 0.7, candidate: 0.3
-    #   threshold = 0.7 - 0.1*0.8 = 0.62; candidate 0.3 < 0.62 → candidate wins
+    #   threshold = 0.7 - 0.1*0.7 = 0.63; candidate 0.3 < 0.63 → candidate wins
     # Epoch 0 train + validate: 0.6
     # Epoch 1: no tuning. train + validate: 0.5
     # Epoch 2 tune:
     #   trial baseline: 0.4, candidate: 0.1
-    #   threshold = 0.4 - 0.1*0.5 = 0.35; candidate 0.1 < 0.35 → candidate wins
+    #   threshold = 0.4 - 0.1*0.4 = 0.36; candidate 0.1 < 0.36 → candidate wins
     # Epoch 2 train + validate: 0.3
     # Epoch 3: no tuning. train + validate: 0.2
     validation_losses = np.array(
         [
-            0.8,  # _maybe_tune_lr validate_one_epoch at epoch 0
             0.7,
             0.3,  # trial at epoch 0 (baseline, candidate)
             0.6,  # epoch 0 validate
@@ -1312,17 +1310,17 @@ def test_lr_tuning_respects_epochs_slice(tmp_path: str):
 
 
 def test_lr_tuning_with_evaluate_before_training(tmp_path: str):
-    """When evaluate_before_training=True, the pre-training validation
-    loss is used as _last_val_loss so _maybe_tune_lr doesn't re-validate."""
+    """When evaluate_before_training=True, training still proceeds normally
+    and LR tuning uses the trial's own baseline val loss for comparison."""
     max_epochs = 2
     # evaluate_before_training: val=0.9
-    # epoch 0 tune (uses _last_val_loss=0.9):
+    # epoch 0 tune:
     #   trial baseline: 0.8, candidate: 0.3
-    #   threshold = 0.8 - 0.1*0.9 = 0.71; candidate 0.3 < 0.71 → candidate wins
+    #   threshold = 0.8 - 0.1*0.8 = 0.72; candidate 0.3 < 0.72 → candidate wins
     # epoch 0 train + validate: 0.5
-    # epoch 1 tune (uses _last_val_loss=0.5):
+    # epoch 1 tune:
     #   trial baseline: 0.4, candidate: 0.45
-    #   threshold = 0.4 - 0.1*0.5 = 0.35; candidate 0.45 > 0.35 → baseline wins
+    #   threshold = 0.4 - 0.1*0.4 = 0.36; candidate 0.45 > 0.36 → baseline wins
     # epoch 1 train + validate: 0.3
     validation_losses = np.array(
         [
