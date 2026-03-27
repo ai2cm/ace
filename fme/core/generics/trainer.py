@@ -812,4 +812,4 @@ def epoch_checkpoint_enabled(
 ) -> bool:
     if save_epochs is None:
         return False
-    return epoch in range(max_epochs)[save_epochs.slice]
+    return epoch in range(max_epochs + 1)[save_epochs.slice]

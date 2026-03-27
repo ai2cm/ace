@@ -1369,12 +1369,24 @@ def test_count_parameters(module_list, expected_num_parameters):
 
 @pytest.mark.parametrize(
     "checkpoint_save_epochs,expected_save_epochs",
-    [(None, []), (Slice(start=-2), [2, 3]), (Slice(step=2), [0, 2])],
+    [(None, []), (Slice(start=-2), [3, 4]), (Slice(step=2), [0, 2, 4])],
 )
 def test_epoch_checkpoint_enabled(checkpoint_save_epochs, expected_save_epochs):
     max_epochs = 4
-    for i in range(max_epochs):
+    for i in range(max_epochs + 1):
         if i in expected_save_epochs:
             assert epoch_checkpoint_enabled(i, max_epochs, checkpoint_save_epochs)
         else:
             assert not epoch_checkpoint_enabled(i, max_epochs, checkpoint_save_epochs)
+
+
+def test_epoch_checkpoint_enabled_includes_final_epoch():
+    """The final epoch (epoch=max_epochs) should be eligible for checkpointing.
+
+    During training _epochs_trained takes values 1..max_epochs, so
+    epoch_checkpoint_enabled should accept max_epochs as a valid epoch.
+    """
+    max_epochs = 10
+    save_epochs = Slice(step=5)
+    assert epoch_checkpoint_enabled(5, max_epochs, save_epochs)
+    assert epoch_checkpoint_enabled(10, max_epochs, save_epochs)
