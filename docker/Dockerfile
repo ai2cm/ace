@@ -52,11 +52,8 @@ RUN apt-get update && apt-get install -y \
 RUN wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq &&\
 chmod +x /usr/bin/yq
 
-COPY docker/install_torch_harmonics_cuda.sh /tmp/install_torch_harmonics_cuda.sh
-RUN chmod +x /tmp/install_torch_harmonics_cuda.sh && /tmp/install_torch_harmonics_cuda.sh && rm /tmp/install_torch_harmonics_cuda.sh
-
-COPY docker/install_apex_groupnorm.sh /tmp/install_apex_groupnorm.sh
-RUN chmod +x /tmp/install_apex_groupnorm.sh && /tmp/install_apex_groupnorm.sh && rm /tmp/install_apex_groupnorm.sh
+COPY docker/install_torch_harmonics_cuda.sh docker/install_apex_groupnorm.sh docker/install_cuda_extensions.sh /tmp/docker/
+RUN chmod +x /tmp/docker/*.sh && /tmp/docker/install_cuda_extensions.sh && rm -rf /tmp/docker
 
 ENTRYPOINT ["/bin/bash"]
 
