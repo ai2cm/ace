@@ -3,7 +3,12 @@ import math
 import pytest
 import torch
 
-from fme.core.disco import DiscreteContinuousConvS2, VectorDiscoConvS2
+from fme.core.disco import (
+    DiscreteContinuousConvS2,
+    VectorDiscoConvS2,
+    VectorFilterBasis,
+    get_vector_filter_basis,
+)
 from fme.core.disco._convolution import _precompute_convolution_tensor_s2
 from fme.core.disco._disco_utils import _get_psi, _precompute_psi_banded
 from fme.core.disco._filter_basis import get_filter_basis
@@ -176,6 +181,7 @@ class TestBuildVectorPsiFft:
     def test_scalar_fft_matches_existing(self):
         """psi_scalar_fft matches the existing scalar-only pipeline."""
         fb = _make_filter_basis()
+        vfb = VectorFilterBasis(fb, fb)
         nlat_in, nlon_in = IMG_SHAPE
         nlat_out, nlon_out = IMG_SHAPE
         kernel_size = fb.kernel_size
@@ -193,29 +199,65 @@ class TestBuildVectorPsiFft:
         )
         psi_ref_fft, gather_ref = _precompute_psi_banded(psi_ref, nlat_in, nlon_in)
 
-        psi_scalar_fft, _, _, gather_new = build_vector_psi_fft(
+        psi_scalar_fft, _, _, s_gather, _, _, _ = build_vector_psi_fft(
             IMG_SHAPE,
             IMG_SHAPE,
-            fb,
+            vfb,
             theta_cutoff=THETA_CUTOFF,
         )
 
         torch.testing.assert_close(psi_scalar_fft, psi_ref_fft)
-        torch.testing.assert_close(gather_new, gather_ref)
+        torch.testing.assert_close(s_gather, gather_ref)
 
-    def test_fft_shapes(self):
-        """All three FFT tensors have the expected shape."""
+    def test_fft_shapes_equal_bases(self):
+        """FFT tensor shapes when K_s == K_v."""
         fb = _make_filter_basis()
-        psi_s, psi_c, psi_sin, gather = build_vector_psi_fft(
-            IMG_SHAPE, IMG_SHAPE, fb, theta_cutoff=THETA_CUTOFF
-        )
+        vfb = VectorFilterBasis(fb, fb)
+        (
+            psi_s,
+            psi_sc,
+            psi_ss,
+            s_g,
+            psi_vc,
+            psi_vs,
+            v_g,
+        ) = build_vector_psi_fft(IMG_SHAPE, IMG_SHAPE, vfb, theta_cutoff=THETA_CUTOFF)
         K = fb.kernel_size
         nlat_out = IMG_SHAPE[0]
         assert psi_s.shape[0] == K
         assert psi_s.shape[1] == nlat_out
-        assert psi_s.shape == psi_c.shape == psi_sin.shape
-        assert gather.shape[0] == nlat_out
-        assert gather.shape[1] == psi_s.shape[2]  # max_bw
+        # With equal bases, scalar and vector FFTs share K and bw
+        assert psi_s.shape == psi_sc.shape == psi_ss.shape
+        assert psi_vc.shape == psi_vs.shape == psi_s.shape
+        assert s_g.shape == v_g.shape
+
+    def test_fft_shapes_different_bases(self):
+        """FFT tensor shapes when K_s != K_v."""
+        vfb = get_vector_filter_basis(3, 5)
+        K_s = vfb.scalar_kernel_size
+        K_v = vfb.vector_kernel_size
+        assert K_s != K_v
+
+        (
+            psi_s,
+            psi_sc,
+            psi_ss,
+            s_g,
+            psi_vc,
+            psi_vs,
+            v_g,
+        ) = build_vector_psi_fft(IMG_SHAPE, IMG_SHAPE, vfb, theta_cutoff=THETA_CUTOFF)
+        nlat_out = IMG_SHAPE[0]
+        # Scalar-basis tensors have K_s
+        assert psi_s.shape[0] == K_s
+        assert psi_sc.shape[0] == K_s
+        assert psi_ss.shape[0] == K_s
+        # Vector-basis tensors have K_v
+        assert psi_vc.shape[0] == K_v
+        assert psi_vs.shape[0] == K_v
+        # All share nlat_out
+        assert psi_s.shape[1] == nlat_out
+        assert psi_vc.shape[1] == nlat_out
 
     @pytest.mark.parametrize(
         "basis_type,kernel_shape",
@@ -223,11 +265,18 @@ class TestBuildVectorPsiFft:
     )
     def test_works_with_different_basis_types(self, basis_type, kernel_shape):
         """Precomputation succeeds with different filter basis types."""
-        fb = get_filter_basis(kernel_shape, basis_type)
-        psi_s, psi_c, psi_sin, gather = build_vector_psi_fft(
-            IMG_SHAPE, IMG_SHAPE, fb, theta_cutoff=THETA_CUTOFF
-        )
-        assert psi_s.shape == psi_c.shape == psi_sin.shape
+        vfb = get_vector_filter_basis(kernel_shape, kernel_shape, basis_type)
+        (
+            psi_s,
+            psi_sc,
+            psi_ss,
+            _,
+            psi_vc,
+            psi_vs,
+            _,
+        ) = build_vector_psi_fft(IMG_SHAPE, IMG_SHAPE, vfb, theta_cutoff=THETA_CUTOFF)
+        assert psi_s.shape == psi_sc.shape == psi_ss.shape
+        assert psi_vc.shape == psi_vs.shape
 
 
 CONV_KWARGS: dict = dict(
@@ -265,6 +314,34 @@ class TestVectorDiscoConvS2:
             y_s, y_v = conv(x_s, x_v)
         assert y_s.shape == (B, n_s_out, *IMG_SHAPE)
         assert y_v.shape == (B, n_v_out, *IMG_SHAPE, 2)
+
+    def test_forward_shape_different_ks_kv(self):
+        """Output shapes correct when K_s != K_v."""
+        vfb = get_vector_filter_basis(3, 5)
+        conv = VectorDiscoConvS2(
+            in_channels_scalar=3,
+            in_channels_vector=2,
+            out_channels_scalar=4,
+            out_channels_vector=2,
+            in_shape=IMG_SHAPE,
+            out_shape=IMG_SHAPE,
+            vector_filter_basis=vfb,
+            theta_cutoff=THETA_CUTOFF,
+        )
+        B = 2
+        x_s = torch.randn(B, 3, *IMG_SHAPE)
+        x_v = torch.randn(B, 2, *IMG_SHAPE, 2)
+        with torch.no_grad():
+            y_s, y_v = conv(x_s, x_v)
+        assert y_s.shape == (B, 4, *IMG_SHAPE)
+        assert y_v.shape == (B, 2, *IMG_SHAPE, 2)
+        # Verify weight shapes reflect K_s vs K_v
+        K_s = vfb.scalar_kernel_size
+        K_v = vfb.vector_kernel_size
+        assert conv.W_ss.shape == (4, 3, K_s)
+        assert conv.W_vv.shape == (2, 2, K_s, 2)
+        assert conv.W_sv.shape == (2, 3, K_v, 2)
+        assert conv.W_vs.shape == (4, 2, K_v, 2)
 
     @pytest.mark.parametrize(
         "n_s_in,n_v_in,n_s_out,n_v_out",
