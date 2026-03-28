@@ -1,15 +1,15 @@
 """Linearized shallow water model on the sphere.
 
-Uses VectorDiscoConvS2 with fixed weights to approximate the spatial
-differential operators (gradient, divergence) in the linearized shallow
-water equations:
+Uses a VectorDiscoBlock with fixed weights to approximate the spatial
+differential operators (gradient, divergence) and Coriolis forcing in
+the linearized shallow water equations:
 
-    ∂h'/∂t = -H₀ ∇·V
-    ∂V/∂t  = -g ∇h' - f k×V
+    dh'/dt = -H0 div(V)
+    dV/dt  = -g grad(h') - f x V
 
-where h' is the perturbation depth (h - H₀), V = (u, v) is the velocity
-vector in the local meridian frame, g is gravity, H₀ is the mean depth,
-and f = 2Ω sin(lat) is the Coriolis parameter.
+where h' is the perturbation depth (h - H0), V = (u, v) is the velocity
+vector in the local meridian frame, g is gravity, H0 is the mean depth,
+and f = 2*omega*sin(lat) is the Coriolis parameter.
 """
 
 import math
@@ -18,16 +18,19 @@ import torch
 import torch.nn as nn
 
 from fme.core.disco._quadrature import precompute_latitudes
-from fme.core.disco._vector_convolution import VectorDiscoConvS2
-from fme.core.shallow_water.modules import ScalarVectorProduct
+from fme.core.shallow_water.block import VectorDiscoBlock
 
 
 class ShallowWaterStepper(nn.Module):
     """Linearized shallow water stepper on the sphere.
 
-    Uses a VectorDiscoConvS2 convolution with frozen weights to compute
-    the spatial tendencies, plus pointwise Coriolis forcing. Time
-    integration uses RK4.
+    Uses a single VectorDiscoBlock with frozen weights. The convolution
+    computes gradient and divergence, and the ScalarVectorProduct handles
+    Coriolis forcing. Time integration uses RK4.
+
+    The Coriolis parameter f(lat) is provided as a second scalar channel.
+    The block's convolution produces tendencies from h (channel 0) and V,
+    while the ScalarVectorProduct uses f (channel 1) to rotate V.
     """
 
     def __init__(
@@ -43,9 +46,9 @@ class ShallowWaterStepper(nn.Module):
         Args:
             shape: (nlat, nlon) grid dimensions.
             g: gravity (nondimensional, default 1.0).
-            mean_depth: mean fluid depth H₀ (nondimensional, default 1.0).
+            mean_depth: mean fluid depth H0 (nondimensional, default 1.0).
             omega: rotation rate (nondimensional, default 0.5 so f=sin(lat)).
-            kernel_shape: radial filter kernel shape for VectorDiscoConvS2.
+            kernel_shape: radial filter kernel shape.
             theta_cutoff: filter support radius (radians). Defaults to
                 2 grid spacings.
         """
@@ -57,57 +60,58 @@ class ShallowWaterStepper(nn.Module):
         if theta_cutoff is None:
             theta_cutoff = 2.0 * math.pi / (self.nlat - 1)
 
-        # Coriolis parameter f = 2Ω sin(lat)
+        # Coriolis parameter f = 2*omega*sin(lat), shape (1, 1, nlat, 1)
         colats, quad_weights = precompute_latitudes(self.nlat)
-        lats = math.pi / 2.0 - colats  # colatitude → latitude
+        lats = math.pi / 2.0 - colats
         f_coriolis = (2.0 * omega * torch.sin(lats)).float()
-        # Shape (1, 1, nlat, 1) for broadcasting with (B, C, H, W)
         self.register_buffer("f_coriolis", f_coriolis.reshape(1, 1, -1, 1))
 
         # Quadrature weights for area integrals, shape (nlat,)
-        # quad_weights integrate over cos(colat) d(colat),
-        # multiply by 2π/nlon for longitude to get area element
         area = (quad_weights * 2.0 * math.pi / self.nlon).float()
         self.register_buffer("area_weights", area)
 
-        # Convolution for spatial operators
-        self.conv = VectorDiscoConvS2(
-            in_channels_scalar=1,
-            in_channels_vector=1,
-            out_channels_scalar=1,
-            out_channels_vector=1,
-            in_shape=shape,
-            out_shape=shape,
+        # Block: 2 scalar channels (h, f), 1 vector channel (V)
+        # activation="none" preserves sign of tendencies for conservation
+        self.block = VectorDiscoBlock(
+            n_scalar=2,
+            n_vector=1,
+            shape=shape,
             kernel_shape=kernel_shape,
             theta_cutoff=theta_cutoff,
-            bias=False,
+            activation="none",
         )
-
-        # Coriolis: f × V via ScalarVectorProduct
-        # f_coriolis is the scalar input, weight is pure rotation
-        self.coriolis = ScalarVectorProduct(n_scalar=1, n_vector=1)
-        with torch.no_grad():
-            self.coriolis.weight.zero_()
-            self.coriolis.weight[0, 0, 1] = 1.0  # pure 90° rotation
 
         # Freeze all parameters
         for p in self.parameters():
             p.requires_grad = False
 
-        # Set weights for the linearized equations:
-        #   dh/dt = -H₀ div(V)   →  W_vs divergence component
-        #   dV/dt = -g grad(h)   →  W_sv gradient component
+        # Set convolution weights for the linearized equations:
+        #   dh/dt = -H0 div(V)  → W_vs[0, 0, :, 1] (divergence, channel 0)
+        #   dV/dt = -g grad(h)  → W_sv[0, 0, :, 1] (gradient from channel 0)
+        # f channel (channel 1) should not contribute to convolution output.
         with torch.no_grad():
-            self.conv.W_ss.zero_()
-            self.conv.W_vv.zero_()
-            self.conv.W_sv.zero_()
-            self.conv.W_vs.zero_()
-            # Divergence: vs path component 1
-            # (component 0 is curl-like due to φ=0→south convention)
-            self.conv.W_vs[0, 0, :, 1] = mean_depth
-            # Gradient: sv path component 1
-            # (component 0 is perpendicular gradient in physical coords)
-            self.conv.W_sv[0, 0, :, 1] = g
+            self.block.conv.W_ss.zero_()
+            # Pass through f via isotropic smoothing so sv_product sees it
+            self.block.conv.W_ss[1, 1, 0] = 1.0
+            self.block.conv.W_vv.zero_()
+            self.block.conv.W_sv.zero_()
+            self.block.conv.W_vs.zero_()
+            self.block.conv.W_vs[0, 0, :, 1] = mean_depth
+            self.block.conv.W_sv[0, 0, :, 1] = g
+            if self.block.conv.bias_scalar is not None:
+                self.block.conv.bias_scalar.zero_()
+
+            # Zero out scalar MLP (residual MLP, so zero = identity)
+            for module in self.block.scalar_mlp:
+                if hasattr(module, "weight"):
+                    module.weight.zero_()
+                if hasattr(module, "bias"):
+                    module.bias.zero_()
+
+            # ScalarVectorProduct: f (channel 1) rotates V (Coriolis)
+            assert self.block.sv_product is not None
+            self.block.sv_product.weight.zero_()
+            self.block.sv_product.weight[1, 0, 1] = 1.0
 
     def compute_tendencies(
         self, h: torch.Tensor, uv: torch.Tensor
@@ -122,11 +126,16 @@ class ShallowWaterStepper(nn.Module):
             dh_dt: shape (B, 1, nlat, nlon)
             duv_dt: shape (B, 1, nlat, nlon, 2)
         """
-        # Spatial tendencies from convolution
-        dh_dt, duv_dt = self.conv(h, uv)
+        B = h.shape[0]
+        # Build 2-channel scalar input: [h, f_coriolis]
+        f = self.f_coriolis.expand(B, 1, self.nlat, self.nlon)
+        x_scalar = torch.cat([h, f], dim=1)  # (B, 2, nlat, nlon)
 
-        # Coriolis: f × V via ScalarVectorProduct
-        duv_dt = duv_dt + self.coriolis(self.f_coriolis, uv)
+        # Block computes conv + activation + MLP + ScalarVectorProduct
+        # and adds residual. We subtract the residual to get the tendency.
+        y_scalar, y_vector = self.block(x_scalar, uv)
+        dh_dt = y_scalar[:, 0:1] - h  # remove residual for h channel
+        duv_dt = y_vector - uv  # remove residual for V
 
         return dh_dt, duv_dt
 
@@ -165,11 +174,10 @@ class ShallowWaterStepper(nn.Module):
         Returns:
             Integral value, shape (...)
         """
-        # area_weights has shape (nlat,), sum over lat and lon
         return (field * self.area_weights.unsqueeze(-1)).sum(dim=(-2, -1))
 
     def total_energy(self, h: torch.Tensor, uv: torch.Tensor) -> torch.Tensor:
-        """Compute total energy E = ½g h'² + ½H₀(u² + v²).
+        """Compute total energy E = 1/2 g h'^2 + 1/2 H0 (u^2 + v^2).
 
         Args:
             h: perturbation depth, shape (B, 1, nlat, nlon).
@@ -183,7 +191,7 @@ class ShallowWaterStepper(nn.Module):
         return self.integrate_area(pe + ke)
 
     def total_mass(self, h: torch.Tensor) -> torch.Tensor:
-        """Compute total mass ∫ h' dA.
+        """Compute total mass: integral of h' over sphere.
 
         Args:
             h: perturbation depth, shape (B, 1, nlat, nlon).

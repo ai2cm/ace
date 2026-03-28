@@ -1,6 +1,6 @@
 import torch
 
-from fme.core.shallow_water.modules import ScalarVectorProduct
+from fme.core.shallow_water.scalar_vector_product import ScalarVectorProduct
 
 H, W = 8, 16
 

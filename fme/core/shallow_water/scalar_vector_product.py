@@ -1,4 +1,4 @@
-"""Pointwise modules for scalar-vector interactions."""
+"""Pointwise scalar-vector interaction module."""
 
 import math
 

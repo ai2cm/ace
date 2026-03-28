@@ -59,9 +59,9 @@ class TestShallowWaterStepper:
 
         assert abs(mass_final - mass_initial) / (abs(mass_initial) + 1e-30) < 0.01
 
-    def test_energy_approximately_conserved(self):
-        """Total energy doesn't grow over many time steps."""
-        stepper = _make_stepper()
+    def test_energy_conserved_without_rotation(self):
+        """Energy is conserved without Coriolis (omega=0)."""
+        stepper = _make_stepper(omega=0.0)
         h = H_AMPLITUDE * _gaussian_bump(*SHAPE, sigma_deg=15.0)
         uv = torch.zeros(1, 1, *SHAPE, 2)
 
@@ -72,7 +72,29 @@ class TestShallowWaterStepper:
             h, uv = stepper.step(h, uv, DT)
 
         energy_final = stepper.total_energy(h, uv).item()
-        assert energy_final / energy_initial < 1.05
+        torch.testing.assert_close(
+            torch.tensor(energy_final),
+            torch.tensor(energy_initial),
+            atol=1e-8,
+            rtol=1e-4,
+        )
+
+    def test_energy_bounded_with_rotation(self):
+        """Energy doesn't blow up with Coriolis.
+
+        The exact Coriolis force does no work, but the smoothed f
+        through the convolution introduces a small energy drift.
+        """
+        stepper = _make_stepper(omega=0.5)
+        h = H_AMPLITUDE * _gaussian_bump(*SHAPE, sigma_deg=15.0)
+        uv = torch.zeros(1, 1, *SHAPE, 2)
+
+        energy_initial = stepper.total_energy(h, uv).item()
+        for _ in range(500):
+            h, uv = stepper.step(h, uv, DT)
+
+        energy_final = stepper.total_energy(h, uv).item()
+        assert energy_final / energy_initial < 1.5
         assert energy_final / energy_initial > 0.5
 
     def test_perturbation_generates_motion(self):
