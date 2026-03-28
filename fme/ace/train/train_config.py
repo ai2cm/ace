@@ -299,6 +299,11 @@ class TrainConfig:
                 "train_loader and weather_evaluation loader must both use labels or "
                 "both not use labels"
             )
+        if self.lr_tuning is not None and self.optimization.has_lr_schedule:
+            raise ValueError(
+                "lr_tuning and optimization.scheduler cannot both be specified; "
+                "lr_tuning is an alternative form of learning rate scheduling"
+            )
         if not is_local(self.experiment_dir):
             raise ValueError(
                 f"During training, experiment_dir must currently be a local "

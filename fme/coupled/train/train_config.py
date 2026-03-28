@@ -159,6 +159,13 @@ class TrainConfig:
     lr_tuning: LRTuningConfig | None = None
     resume_results: ResumeResultsConfig | None = None
 
+    def __post_init__(self):
+        if self.lr_tuning is not None and self.optimization.has_lr_schedule:
+            raise ValueError(
+                "lr_tuning and optimization.scheduler cannot both be specified; "
+                "lr_tuning is an alternative form of learning rate scheduling"
+            )
+
     @property
     def n_forward_steps(self) -> int:
         return self.n_coupled_steps

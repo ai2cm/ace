@@ -14,8 +14,8 @@ from fme.core.generics.data import DataLoader, GriddedDataABC
 from fme.core.generics.lr_tuning import LRTuningConfig, run_lr_tuning_trial
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
-from fme.core.optimization import Optimization
-from fme.core.scheduler import SchedulerConfig
+from fme.core.optimization import Optimization, OptimizationConfig
+from fme.core.scheduler import SchedulerConfig, SequentialSchedulerConfig
 from fme.core.training_history import TrainingJob
 from fme.core.typing_ import Slice, TensorDict
 
@@ -575,3 +575,26 @@ def test_trial_does_not_mutate_original_optimizer_state():
                 assert (
                     buf == current_state["optimizer_state_dict"]["state"][key][buf_name]
                 ), f"Optimizer state[{key}][{buf_name}] was mutated by the trial"
+
+
+def test_optimization_config_has_lr_schedule_default():
+    """Default OptimizationConfig has no LR schedule."""
+    config = OptimizationConfig()
+    assert config.has_lr_schedule is False
+
+
+def test_optimization_config_has_lr_schedule_with_scheduler():
+    """OptimizationConfig with a scheduler type has an LR schedule."""
+    config = OptimizationConfig(scheduler=SchedulerConfig(type="CosineAnnealingLR"))
+    assert config.has_lr_schedule is True
+
+
+def test_optimization_config_has_lr_schedule_with_sequential_scheduler():
+    """OptimizationConfig with a SequentialSchedulerConfig has an LR schedule."""
+    config = OptimizationConfig(
+        scheduler=SequentialSchedulerConfig(
+            schedulers=[SchedulerConfig(type="CosineAnnealingLR")],
+            milestones=[5],
+        )
+    )
+    assert config.has_lr_schedule is True
