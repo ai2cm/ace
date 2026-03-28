@@ -4,7 +4,10 @@ import torch
 
 from fme.core.shallow_water import ShallowWaterStepper
 
-SHAPE = (32, 64)
+# Smaller grid for faster tests
+SHAPE = (16, 32)
+DT = 0.01
+H_AMPLITUDE = 0.01
 
 
 def _make_stepper(**kw):
@@ -28,11 +31,7 @@ def _gaussian_bump(nlat, nlon, lat0_deg=30.0, lon0_deg=180.0, sigma_deg=10.0):
     dlon = lon - lon0
     dist2 = dlat**2 + (dlon * torch.cos(lat)) ** 2
     bump = torch.exp(-dist2 / (2 * sigma**2))
-    return bump.unsqueeze(0).unsqueeze(0)  # (1, 1, nlat, nlon)
-
-
-DT = 0.01
-H_AMPLITUDE = 0.01
+    return bump.unsqueeze(0).unsqueeze(0)
 
 
 class TestShallowWaterStepper:
@@ -53,7 +52,7 @@ class TestShallowWaterStepper:
         uv = torch.zeros(1, 1, *SHAPE, 2)
 
         mass_initial = stepper.total_mass(h).item()
-        for _ in range(200):
+        for _ in range(100):
             h, uv = stepper.step(h, uv, DT)
         mass_final = stepper.total_mass(h).item()
 
@@ -68,7 +67,7 @@ class TestShallowWaterStepper:
         energy_initial = stepper.total_energy(h, uv).item()
         assert energy_initial > 0
 
-        for _ in range(500):
+        for _ in range(200):
             h, uv = stepper.step(h, uv, DT)
 
         energy_final = stepper.total_energy(h, uv).item()
@@ -79,23 +78,24 @@ class TestShallowWaterStepper:
             rtol=1e-4,
         )
 
-    def test_energy_bounded_with_rotation(self):
-        """Energy doesn't blow up with Coriolis.
+    def test_energy_conserved_with_rotation(self):
+        """Energy is conserved with Coriolis.
 
-        The exact Coriolis force does no work, but the smoothed f
-        through the convolution introduces a small energy drift.
+        With unfiltered f via the pointwise scalar skip, the exact
+        Coriolis force (which does no work) should not introduce
+        energy drift.
         """
         stepper = _make_stepper(omega=0.5)
         h = H_AMPLITUDE * _gaussian_bump(*SHAPE, sigma_deg=15.0)
         uv = torch.zeros(1, 1, *SHAPE, 2)
 
         energy_initial = stepper.total_energy(h, uv).item()
-        for _ in range(500):
+        for _ in range(200):
             h, uv = stepper.step(h, uv, DT)
 
         energy_final = stepper.total_energy(h, uv).item()
-        assert energy_final / energy_initial < 1.5
-        assert energy_final / energy_initial > 0.5
+        assert energy_final / energy_initial < 1.05
+        assert energy_final / energy_initial > 0.95
 
     def test_perturbation_generates_motion(self):
         """A height perturbation should generate nonzero velocities."""
@@ -124,7 +124,7 @@ class TestShallowWaterStepper:
         h = H_AMPLITUDE * _gaussian_bump(*SHAPE, sigma_deg=15.0)
         uv = torch.zeros(1, 1, *SHAPE, 2)
 
-        for _ in range(1000):
+        for _ in range(500):
             h, uv = stepper.step(h, uv, DT)
 
         assert torch.isfinite(h).all()

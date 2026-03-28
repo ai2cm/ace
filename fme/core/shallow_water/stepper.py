@@ -91,8 +91,6 @@ class ShallowWaterStepper(nn.Module):
         # f channel (channel 1) should not contribute to convolution output.
         with torch.no_grad():
             self.block.conv.W_ss.zero_()
-            # Pass through f via isotropic smoothing so sv_product sees it
-            self.block.conv.W_ss[1, 1, 0] = 1.0
             self.block.conv.W_vv.zero_()
             self.block.conv.W_sv.zero_()
             self.block.conv.W_vs.zero_()
@@ -107,6 +105,15 @@ class ShallowWaterStepper(nn.Module):
                     module.weight.zero_()
                 if hasattr(module, "bias"):
                     module.bias.zero_()
+
+            # Pointwise scalar skip: pass f (channel 1) through unfiltered
+            assert self.block.pointwise_ss is not None
+            self.block.pointwise_ss.weight.zero_()
+            self.block.pointwise_ss.weight[1, 1, 0, 0] = 1.0  # f → f
+
+            # Pointwise vector skip: zero (not needed for physics)
+            assert self.block.pointwise_vv is not None
+            self.block.pointwise_vv.weight.zero_()
 
             # ScalarVectorProduct: f (channel 1) rotates V (Coriolis)
             assert self.block.sv_product is not None
