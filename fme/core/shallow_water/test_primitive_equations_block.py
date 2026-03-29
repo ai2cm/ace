@@ -93,14 +93,19 @@ class TestPrimitiveEquationsBlockStepper:
         )
 
     def test_full_tendency_matches_reference(self):
-        """All three tendencies (uv, T, q) must agree with PrimitiveEquationsStepper."""
+        """All three tendencies (uv, T, q) must agree with PrimitiveEquationsStepper.
+
+        Both implementations use the same discrete operators (grad_conv + dot
+        for T/q advection), so the tight 5e-3 tolerance applies to all fields.
+        The only source of numerical difference is the wider multi-channel
+        convolution in the dynamics block (float32 ULP noise, ~2e-7 m/s²).
+        """
         block, ref = _make_steppers()
         uv, T, q = _random_state()
 
         duv_b, dT_b, dq_b = block.compute_tendencies(uv, T, q)
         duv_r, dT_r, dq_r = ref.compute_tendencies(uv, T, q)
 
-        # Same float32 noise tolerance as test_momentum_tendency_matches_reference
         rtol = 5e-3
         for name, a, b in [("duv/dt", duv_b, duv_r), ("dT/dt", dT_b, dT_r), ("dq/dt", dq_b, dq_r)]:
             scale = b.abs().max().clamp(min=1e-10)
@@ -168,3 +173,48 @@ class TestPrimitiveEquationsBlockStepper:
         assert not torch.isnan(uv2).any()
         assert not torch.isnan(T2).any()
         assert not torch.isnan(q2).any()
+
+    def test_horizontal_advection_zero_wind(self):
+        """HorizontalAdvection returns zero tendency for zero velocity."""
+        from fme.core.shallow_water.primitive_equations_block import HorizontalAdvection
+        K, N = 3, 2
+        adv = HorizontalAdvection(n_tracers=N, n_levels=K, shape=SHAPE)
+        B = 2
+        scalars = torch.randn(B, K, N, *SHAPE)
+        uv = torch.zeros(B, K, *SHAPE, 2)
+        out = adv(scalars, uv)
+        assert out.abs().max() < 1e-10
+
+    def test_horizontal_advection_uniform_scalar(self):
+        """Gradient of a uniform scalar is zero, so advection is zero."""
+        from fme.core.shallow_water.primitive_equations_block import HorizontalAdvection
+        K, N = 2, 2
+        adv = HorizontalAdvection(n_tracers=N, n_levels=K, shape=SHAPE)
+        B = 1
+        scalars = torch.ones(B, K, N, *SHAPE)
+        uv = torch.randn(B, K, *SHAPE, 2)
+        out = adv(scalars, uv)
+        assert out.abs().max() < 1e-6
+
+    def test_horizontal_advection_matches_reference(self):
+        """HorizontalAdvection agrees tightly with PrimitiveEquationsStepper's advection."""
+        from fme.core.shallow_water.primitive_equations_block import HorizontalAdvection
+        from fme.core.shallow_water import PrimitiveEquationsStepper
+        K, N = 1, 1
+        adv = HorizontalAdvection(n_tracers=N, n_levels=K, shape=SHAPE)
+        ref = PrimitiveEquationsStepper(shape=SHAPE, n_levels=K, omega=0.0)
+        B = 1
+        T = torch.randn(B, K, *SHAPE)
+        uv = torch.randn(B, K, *SHAPE, 2)
+
+        # Reference: -V·∇T via gradient+dot
+        grad_T = ref._gradient(T)
+        dT_ref = -(uv[..., 0] * grad_T[..., 0] + uv[..., 1] * grad_T[..., 1])
+
+        # HorizontalAdvection: same grad_conv + dot
+        scalars = T.unsqueeze(2)
+        adv_out = adv(scalars, uv).squeeze(2)
+
+        scale = dT_ref.abs().max().clamp(min=1e-10)
+        rel_err = (adv_out - dT_ref).abs().max() / scale
+        assert rel_err < 5e-3, f"advection mismatch: rel_err={rel_err:.2e}"

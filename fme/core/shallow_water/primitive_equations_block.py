@@ -4,8 +4,8 @@ Equivalent to ``PrimitiveEquationsStepper`` but encodes the complete momentum
 tendency in a single ``VectorDiscoBlock`` forward pass by treating each
 vertical level as a separate channel.
 
-Channel layout (n_s = 4K + 1, n_v = K)
-----------------------------------------
+Block 1 — dynamics (n_s = 4K + 1, n_v = K)
+--------------------------------------------
 Channels are interleaved per level so that the folded view
 
     x_s[:, :4K].reshape(B, K, 4, H, W)
@@ -21,19 +21,36 @@ Channel 4K — f   Coriolis parameter (constant; passed through pointwise_ss)
 
 Vector channels 0..K-1 — V_k  horizontal velocity at each level.
 
-Physics encoded in the block
-------------------------------
-* W_sv:      lower-triangular T → -∇φ_k  (hydrostatic geopotential PGF)
-             diagonal      KE → -∇KE_k  (Lamb kinetic-energy term)
-* W_vs:      V_k → ζ_k (curl, component 0) and δ_k (div, component 1)
-* sv_product:  ζ_k × V_k  (+1, vorticity advection)
-               f   × V_k  (-1, Coriolis)
+HorizontalAdvection module (all tracers, any count)
+----------------------------------------------------
+Encodes horizontal advection via the DISCO gradient operator and a
+pointwise vector–vector dot product:
+
+    -V_k · ∇s_k  (gradient in one conv pass, dot product pointwise)
+
+A vector·vector dot product (→ scalar) is not in the current
+``VectorDiscoBlock`` (which has scalar×vector→vector via
+``ScalarVectorProduct``, but no vector·vector→scalar path).
+``HorizontalAdvection`` provides this as a standalone module that
+batches all K × n_tracers fields through a single ``grad_conv`` call.
+
+Physics encoded in Block 1
+----------------------------
+* W_sv:       lower-triangular T → -∇φ_k  (hydrostatic PGF)
+              diagonal      KE → -∇KE_k  (Lamb term)
+* W_vs:       V_k → ζ_k (curl), δ_k (div)
+* sv_product: ζ_k × V_k  (vorticity advection)
+              f   × V_k  (Coriolis)
+
+Physics encoded in HorizontalAdvection
+----------------------------------------
+* -V_k · ∇T_k  for each level k
+* -V_k · ∇q_k  for each level k
 
 Physics computed externally
 -----------------------------
-* KE precomputation (pointwise, before block call)
-* ω from vertically-integrated δ_k (extracted from block scalar output)
-* Horizontal T and q advection  (-V · ∇T,  -V · ∇q)
+* KE precomputation (pointwise, before Block 1)
+* ω from vertically-integrated δ_k (from Block 1 output)
 * T vertical coupling  (ω (κT/p − ∂T/∂p))
 * Optional ∇^(2n) diffusion
 """
@@ -64,15 +81,98 @@ def _ch(level: int, kind: int) -> int:
     return level * _N_KINDS + kind
 
 
-class PrimitiveEquationsBlockStepper(nn.Module):
-    """Multi-level isobaric primitive equations using a single VectorDiscoBlock.
+class HorizontalAdvection(nn.Module):
+    """Horizontal advection of scalar tracer fields on the sphere.
 
-    Equivalent to ``PrimitiveEquationsStepper`` in physics, but the full
-    momentum tendency (PGF + Coriolis + vorticity advection − ∇KE) is encoded
-    in one block pass via fixed weights.  Temperature and humidity tendencies
-    are still computed with conventional DISCO operators outside the block
-    (horizontal advection requires a dot-product operation not yet in the block
-    architecture).
+    Computes ``-V_k · ∇s_k`` for each (level, tracer) pair by:
+
+    1. Applying the DISCO gradient operator to every tracer field (batched).
+    2. Taking the pointwise dot product of the gradient with the wind.
+
+    All ``n_tracers`` tracers at level ``k`` share the same wind ``V_k``.
+    The computation is vectorised over ``K * n_tracers`` fields in a
+    single convolutional forward pass, making this efficient even for many
+    tracers.
+
+    .. note::
+       A vector·vector dot product (→ scalar) is not in the current
+       ``VectorDiscoBlock`` architecture, which has scalar×vector→vector
+       (``ScalarVectorProduct``) but no vector·vector→scalar pathway.
+       This module provides that capability for advection.
+
+    Args:
+        n_tracers: number of scalar fields per level.
+        n_levels: number of vertical levels K.
+        shape: ``(nlat, nlon)`` grid dimensions.
+        kernel_shape: DISCO filter kernel shape.
+        theta_cutoff: filter support radius (rad).
+    """
+
+    def __init__(
+        self,
+        n_tracers: int,
+        n_levels: int,
+        shape: tuple[int, int],
+        kernel_shape: int = 5,
+        theta_cutoff: float | None = None,
+    ):
+        super().__init__()
+        self.n_tracers = n_tracers
+        self.n_levels = n_levels
+        if theta_cutoff is None:
+            theta_cutoff = 2.0 * math.pi / (shape[0] - 1)
+        self.grad_conv = VectorDiscoConvS2(
+            in_channels_scalar=1,
+            in_channels_vector=0,
+            out_channels_scalar=0,
+            out_channels_vector=1,
+            in_shape=shape,
+            out_shape=shape,
+            kernel_shape=kernel_shape,
+            theta_cutoff=theta_cutoff,
+            bias=False,
+        )
+        for param in self.grad_conv.parameters():
+            param.requires_grad = False
+        with torch.no_grad():
+            self.grad_conv.W_sv.zero_()
+            self.grad_conv.W_sv[0, 0, :, 1] = 1.0 / R_EARTH
+
+    def forward(
+        self,
+        scalars: torch.Tensor,
+        uv: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute ``-V · ∇s`` for each tracer field.
+
+        Args:
+            scalars: ``(B, K, n_tracers, H, W)``
+            uv: ``(B, K, H, W, 2)``
+
+        Returns:
+            ``(B, K, n_tracers, H, W)`` tendency ``-V · ∇s``.
+        """
+        B, K, N, H, W = scalars.shape
+        # Batch all K*N gradient computations in one conv pass
+        s_flat = scalars.reshape(B * K * N, 1, H, W)
+        dummy_v = s_flat.new_zeros(B * K * N, 0, H, W, 2)
+        _, grad_s = self.grad_conv(s_flat, dummy_v)   # (B*K*N, 1, H, W, 2)
+        grad_s = grad_s.reshape(B, K, N, H, W, 2)
+
+        # V_k · ∇s_k, broadcast over the N tracer axis
+        uv_exp = uv.unsqueeze(2)  # (B, K, 1, H, W, 2)
+        return -(uv_exp[..., 0] * grad_s[..., 0] + uv_exp[..., 1] * grad_s[..., 1])
+
+
+class PrimitiveEquationsBlockStepper(nn.Module):
+    """Multi-level isobaric primitive equations using a VectorDiscoBlock + HorizontalAdvection.
+
+    Block 1 (``self.block``): encodes the full momentum tendency
+    (PGF + Coriolis + vorticity advection − ∇KE) in a single pass.
+
+    ``self.horiz_adv`` (``HorizontalAdvection``): computes -V·∇T and
+    -V·∇q by batching the DISCO gradient + pointwise dot product over all
+    levels and tracers in one conv call.
 
     State: ``(uv, T, q)`` — same as ``PrimitiveEquationsStepper``.
     """
@@ -163,7 +263,17 @@ class PrimitiveEquationsBlockStepper(nn.Module):
             activation="none",
         )
 
-        # ── Gradient conv for T/q advection (can't go in block) ──────────────
+        # ── HorizontalAdvection: T and q advection (batched grad + dot) ─────
+        # Initialises its own weights; not included in the freeze loop below.
+        self.horiz_adv = HorizontalAdvection(
+            n_tracers=2,  # T and q
+            n_levels=K,
+            shape=shape,
+            kernel_shape=kernel_shape,
+            theta_cutoff=theta_cutoff,
+        )
+
+        # ── Standalone convs used only for ∇²ˢ diffusion ─────────────────────
         disco_kw = dict(
             in_shape=shape, out_shape=shape,
             kernel_shape=kernel_shape, theta_cutoff=theta_cutoff, bias=False,
@@ -306,8 +416,8 @@ class PrimitiveEquationsBlockStepper(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Compute time tendencies for all prognostic variables.
 
-        The momentum tendency comes entirely from the block.  T and q
-        tendencies are computed with conventional operators outside the block.
+        Block 1 provides the full momentum tendency.
+        Block 2 (ScalarAdvectionBlock) provides horizontal T and q advection.
 
         Args:
             uv: velocity, shape (B, K, H, W, 2).
@@ -322,37 +432,31 @@ class PrimitiveEquationsBlockStepper(nn.Module):
         # ── Precompute KE per level ───────────────────────────────────────────
         ke = 0.5 * (uv[..., 0] ** 2 + uv[..., 1] ** 2)  # (B, K, H, W)
 
-        # ── Build block scalar input ──────────────────────────────────────────
-        # Interleaved layout: [T_0, KE_0, 0, 0, T_1, KE_1, 0, 0, ..., f]
+        # ── Block 1: encodes PGF + Coriolis + ζ×V − ∇KE ─────────────────────
         zeros = torch.zeros_like(T)
-        per_level = torch.stack(
-            [T, ke, zeros, zeros], dim=2
-        )  # (B, K, 4, H, W)
+        per_level = torch.stack([T, ke, zeros, zeros], dim=2)  # (B, K, 4, H, W)
         x_s_body = per_level.reshape(B, K * _N_KINDS, H, W)
-        f_exp = self.f_coriolis.expand(B, 1, H, W)
-        x_s = torch.cat([x_s_body, f_exp], dim=1)  # (B, 4K+1, H, W)
+        x_s = torch.cat([x_s_body, self.f_coriolis.expand(B, 1, H, W)], dim=1)
 
-        # ── Block forward: encodes PGF + Coriolis + ζ×V − ∇KE ───────────────
         y_s, y_v = self.block(x_s, uv)
         duv_dt = y_v - uv  # (B, K, H, W, 2)
 
-        # ── Extract divergence from block scalar output ───────────────────────
-        # x_s for ζ/δ channels was 0, so y_s[ζ/δ] = W_vs output = ζ_k / δ_k.
+        # Extract divergence δ_k — needed for Block 2 correction and ω
         y_s_per_level = y_s[:, : K * _N_KINDS].reshape(B, K, _N_KINDS, H, W)
         div = y_s_per_level[:, :, _DIV_KIND]  # (B, K, H, W)
 
         # ── ω from divergence ─────────────────────────────────────────────────
         omega = self._omega(div)  # (B, K, H, W)
 
-        # ── Temperature tendency ──────────────────────────────────────────────
-        grad_T = self._gradient(T)  # (B, K, H, W, 2)
-        dT_dt = -(uv[..., 0] * grad_T[..., 0] + uv[..., 1] * grad_T[..., 1])
+        # ── HorizontalAdvection: -V·∇T and -V·∇q ────────────────────────────
+        tracers = torch.stack([T, q], dim=2)   # (B, K, 2, H, W)
+        adv = self.horiz_adv(tracers, uv)       # (B, K, 2, H, W)
+        dT_dt = adv[:, :, 0]                    # -V·∇T
+        dq_dt = adv[:, :, 1]                    # -V·∇q
+
+        # ── T adiabatic vertical coupling ─────────────────────────────────────
         p_k = self.pressure_levels.view(1, K, 1, 1)
         dT_dt = dT_dt + omega * (self.R / C_P * T / p_k - self._dT_dp(T))
-
-        # ── Humidity tendency ─────────────────────────────────────────────────
-        grad_q = self._gradient(q)
-        dq_dt = -(uv[..., 0] * grad_q[..., 0] + uv[..., 1] * grad_q[..., 1])
 
         # ── Optional diffusion ────────────────────────────────────────────────
         if self.diffusion_coeff is not None:
