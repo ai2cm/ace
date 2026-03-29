@@ -10,7 +10,7 @@ level) coordinates. Evolves:
 Equations at each level k:
 
     dV_k/dt = -∇φ_k - f×V_k - ∇(|V_k|²/2) + ζ_k×V_k
-    dT_k/dt = -V_k · ∇T_k
+    dT_k/dt = -V_k · ∇T_k + ω_k · (κ·T_k/p_k − ∂T_k/∂p)
     dq_k/dt = -V_k · ∇q_k
 
 Geopotential (hydrostatic, diagnostic from T):
@@ -19,17 +19,25 @@ Geopotential (hydrostatic, diagnostic from T):
     φ_k = φ_{k-1} + R * T_{k-1} * ln(p_{k-1} / p_k)    for k ≥ 1
 
 where pressure levels p are ordered from surface (p_0, highest) to top
-(p_{K-1}, lowest).
+(p_{K-1}, lowest), and κ = R/c_p ≈ 0.286.
+
+The temperature equation is the full dry-adiabatic thermodynamic equation
+derived from dθ/dt = 0 (conservation of potential temperature):
+
+    ∂T/∂t = -V·∇T + ω·(κ·T/p − ∂T/∂p)
+
+where ω = dp/dt is the pressure vertical velocity (diagnostic, from
+continuity: ∂ω/∂p = -∇·V, integrated upward from ω=0 at the surface).
+The term κ·T/p·ω is adiabatic (de)compression heating/cooling, and
+-ω·∂T/∂p is vertical temperature advection.
 
 The momentum advection uses the Lamb form: (V·∇)V = ∇(|V|²/2) − ζ×V,
 where ζ = curl(V) is the vertical vorticity. This form separates into
 a gradient term (handled by the scalar→vector operator) and a vorticity
 rotation term (handled by ScalarVectorProduct).
 
-Temperature and humidity use the advective form −V·∇s, computed as a
-pointwise dot product of the velocity with the gradient of s. This form
-does not conserve total column integrals when the flow is divergent, which
-is expected for isobaric levels without vertical coupling.
+Humidity uses the advective form −V·∇q (passive tracer, no vertical
+coupling).
 """
 
 import math
@@ -42,6 +50,7 @@ from fme.core.disco._vector_convolution import VectorDiscoConvS2
 from fme.core.shallow_water.scalar_vector_product import ScalarVectorProduct
 
 R_EARTH = 6.371e6  # m, Earth's mean radius used to convert angular → physical gradients
+C_P = 1004.0  # J/kg/K, dry air specific heat at constant pressure
 
 
 class PrimitiveEquationsStepper(nn.Module):
@@ -112,6 +121,20 @@ class PrimitiveEquationsStepper(nn.Module):
             log_p_ratio = torch.zeros(0, dtype=torch.float32)
         self.register_buffer("log_p_ratio", log_p_ratio)
 
+        # Layer thicknesses Δp_k = p_{k-1/2} - p_{k+1/2}, shape (K,)
+        # Interface pressures:
+        #   p_{-1/2} = p[0]  (surface boundary; ω=0 here)
+        #   p_{k+1/2} = (p[k] + p[k+1]) / 2   for k = 0..K-2
+        #   p_{K-1/2} = 0    (top boundary)
+        if n_levels > 1:
+            p_lower = torch.cat([p[:1], 0.5 * (p[:-1] + p[1:])])   # shape (K,)
+            p_upper = torch.cat([0.5 * (p[:-1] + p[1:]), p.new_zeros(1)])  # shape (K,)
+        else:
+            p_lower = p[:1]
+            p_upper = p.new_zeros(1)
+        delta_p = (p_lower - p_upper).float()  # shape (K,), positive
+        self.register_buffer("delta_p", delta_p)
+
         if theta_cutoff is None:
             theta_cutoff = 2.0 * math.pi / (self.nlat - 1)
 
@@ -154,6 +177,21 @@ class PrimitiveEquationsStepper(nn.Module):
             bias=False,
         )
 
+        # Divergence operator: 1 vector → 1 scalar (divergence component)
+        # W_vs[..., 1] gives horizontal divergence ∇·V (per ShallowWaterStepper
+        # convention). Used to compute ω via the continuity equation.
+        self.div_conv = VectorDiscoConvS2(
+            in_channels_scalar=0,
+            in_channels_vector=1,
+            out_channels_scalar=1,
+            out_channels_vector=0,
+            in_shape=shape,
+            out_shape=shape,
+            kernel_shape=kernel_shape,
+            theta_cutoff=theta_cutoff,
+            bias=False,
+        )
+
         # Coriolis: ScalarVectorProduct(f, V_k) → f×V_k per level
         self.coriolis_product = ScalarVectorProduct(n_scalar=1, n_vector=1)
 
@@ -180,6 +218,11 @@ class PrimitiveEquationsStepper(nn.Module):
             # to physical vorticity (1/s) when V is in m/s.
             self.vort_conv.W_vs.zero_()
             self.vort_conv.W_vs[0, 0, :, 0] = 1.0 / R_EARTH
+
+            # Divergence: d=1 component of W_vs gives horizontal divergence
+            # ∇·V (same 1/R_EARTH scaling as vorticity).
+            self.div_conv.W_vs.zero_()
+            self.div_conv.W_vs[0, 0, :, 1] = 1.0 / R_EARTH
 
             # Coriolis: weight[s=0, v=0, mode=1] = 1.0 gives the 90°
             # rotation f×V following the ShallowWaterStepper convention.
@@ -242,6 +285,70 @@ class PrimitiveEquationsStepper(nn.Module):
         vort_flat, _ = self.vort_conv(dummy_s, uv_flat)  # (B*K, 1, H, W)
         return vort_flat.reshape(B, K, H, W)
 
+    def _divergence(self, uv: torch.Tensor) -> torch.Tensor:
+        """Compute horizontal divergence ∇·V at all levels.
+
+        Args:
+            uv: vector field, shape (B, K, H, W, 2).
+
+        Returns:
+            div: divergence, shape (B, K, H, W).
+        """
+        B, K, H, W, _ = uv.shape
+        uv_flat = uv.reshape(B * K, 1, H, W, 2)
+        dummy_s = uv.new_zeros(B * K, 0, H, W)
+        div_flat, _ = self.div_conv(dummy_s, uv_flat)  # (B*K, 1, H, W)
+        return div_flat.reshape(B, K, H, W)
+
+    def _omega(self, div: torch.Tensor) -> torch.Tensor:
+        """Compute vertical pressure velocity ω = dp/dt at each level.
+
+        Integrates the continuity equation ∂ω/∂p = -∇·V upward from the
+        surface (ω = 0 at p_{-1/2} = p[0]) to obtain ω at half-level
+        interfaces, then averages to level centres:
+
+            ω_{k+1/2} = ω_{k-1/2} + div_k · Δp_k
+            ω_k       = (ω_{k-1/2} + ω_{k+1/2}) / 2
+
+        Args:
+            div: horizontal divergence at each level, shape (B, K, H, W).
+
+        Returns:
+            omega: vertical pressure velocity at each level, shape (B, K, H, W).
+        """
+        B, K, H, W = div.shape
+        omega_half = div.new_zeros(B, K + 1, H, W)  # ω_{k-1/2}; omega_half[:,0]=0
+        for k in range(K):
+            omega_half[:, k + 1] = (
+                omega_half[:, k] + div[:, k] * self.delta_p[k]
+            )
+        return 0.5 * (omega_half[:, :-1] + omega_half[:, 1:])
+
+    def _dT_dp(self, T: torch.Tensor) -> torch.Tensor:
+        """Compute ∂T/∂p at each level by finite differences.
+
+        Uses central differences at interior levels and one-sided
+        differences at the surface and top boundaries.
+
+        Args:
+            T: temperature at each level, shape (B, K, H, W).
+
+        Returns:
+            dT_dp: shape (B, K, H, W).
+        """
+        p = self.pressure_levels  # shape (K,)
+        B, K, H, W = T.shape
+        dT_dp = T.new_zeros(B, K, H, W)
+        if K == 1:
+            return dT_dp
+        # Interior levels: central differences
+        for k in range(1, K - 1):
+            dT_dp[:, k] = (T[:, k + 1] - T[:, k - 1]) / (p[k + 1] - p[k - 1])
+        # Surface (k=0) and top (k=K-1): one-sided differences
+        dT_dp[:, 0] = (T[:, 1] - T[:, 0]) / (p[1] - p[0])
+        dT_dp[:, K - 1] = (T[:, K - 1] - T[:, K - 2]) / (p[K - 1] - p[K - 2])
+        return dT_dp
+
     def compute_tendencies(
         self,
         uv: torch.Tensor,
@@ -258,6 +365,8 @@ class PrimitiveEquationsStepper(nn.Module):
         Returns:
             duv_dt: velocity tendency, shape (B, K, H, W, 2).
             dT_dt: temperature tendency, shape (B, K, H, W).
+                Includes horizontal advection, adiabatic compression
+                heating, and vertical temperature advection.
             dq_dt: humidity tendency, shape (B, K, H, W).
         """
         B, K, H, W = T.shape
@@ -289,9 +398,18 @@ class PrimitiveEquationsStepper(nn.Module):
         #         = -∇φ - f×V - ∇KE + ζ×V
         duv_dt = -grad_phi - coriolis - grad_ke + vort_adv
 
-        # Temperature advection: -V_k · ∇T_k (advective form)
+        # Temperature: full dry-adiabatic thermodynamic equation
+        # dT/dt = -V·∇T + ω·(κ·T/p − ∂T/∂p)
+        # The first term is horizontal advection; the second combines
+        # adiabatic (de)compression heating (κ·T/p·ω) and vertical
+        # temperature advection (−ω·∂T/∂p). Derived from dθ/dt = 0.
         grad_T = self._gradient(T)  # (B, K, H, W, 2)
         dT_dt = -(uv[..., 0] * grad_T[..., 0] + uv[..., 1] * grad_T[..., 1])
+
+        div = self._divergence(uv)  # (B, K, H, W)
+        omega = self._omega(div)    # (B, K, H, W)
+        p_k = self.pressure_levels.view(1, K, 1, 1)
+        dT_dt = dT_dt + omega * (self.R / C_P * T / p_k - self._dT_dp(T))
 
         # Humidity advection: -V_k · ∇q_k (passive tracer)
         grad_q = self._gradient(q)  # (B, K, H, W, 2)

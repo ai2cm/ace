@@ -146,3 +146,6 @@ joblogs/
 uv.lock
 geostrophic_adjustment_phi_wind.png
 geostrophic_adjustment_vertical_day4.png
+jw_surface_T_anomaly.png
+jw_vorticity_500hPa.png
+jw_zonal_mean_u_day8.png
