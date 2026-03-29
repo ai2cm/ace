@@ -220,6 +220,41 @@ def _precompute_vector_convolution_tensor_s2(
         merge_quadrature=True,
     )
 
+    # Zero-mean correction for bearing-modulated filter components.
+    #
+    # The sv path (scalar→vector, gradient) uses cos_phi and sin_phi.
+    # The vs path (vector→scalar, divergence/vorticity) uses cos_beta
+    # and sin_beta.  For each (kernel k, output latitude t), the
+    # quadrature-weighted sum of each bearing array over its support
+    # should be zero: this ensures that ∇(const) = 0 and
+    # div/curl(const vector field) = 0 in the discrete operator.
+    #
+    # On a continuous sphere the antisymmetry of cos(φ) under
+    # φ → φ+π guarantees a zero integral; discretisation breaks
+    # this symmetry because the filter-support boundary splits
+    # antipodal grid-point pairs.  We correct by subtracting the
+    # out_vals-weighted mean of each bearing array from every
+    # element in that (k, t) slab.
+    #
+    # The isotropic values (out_vals) and frame-rotation values
+    # (cos_gamma, sin_gamma) are NOT corrected: a nonzero response
+    # to a constant is correct for smoothing filters and for the
+    # parallel-transport frame rotation.
+    ikernel = out_idx[0]
+    ilat_out = out_idx[1]
+    for ik in range(kernel_size):
+        for il in range(nlat_out):
+            mask = (ikernel == ik) & (ilat_out == il)
+            if not mask.any():
+                continue
+            w = out_vals[mask]
+            w_sum = w.sum()
+            if w_sum.abs() < 1e-12:
+                continue
+            for arr in (cos_p, sin_p, cos_b, sin_b):
+                weighted_mean = (w * arr[mask]).sum() / w_sum
+                arr[mask] = arr[mask] - weighted_mean
+
     # Angular-modulated values share the scalar normalization
     def _finalize(t):
         return (out_vals * t).to(dtype=torch.float32).contiguous()

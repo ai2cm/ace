@@ -71,12 +71,12 @@ class TestPrecomputeVectorConvolution:
             ("zernike", 4),
         ],
     )
-    def test_cos_sin_pythagorean(self, basis_type, kernel_shape):
-        """cos^2 + sin^2 = 1 for all angular pairs at every support point.
+    def test_cos_sin_pythagorean_gamma(self, basis_type, kernel_shape):
+        """cos_gamma^2 + sin_gamma^2 = psi^2 at every support point.
 
-        The bearing-based pairs (phi, beta) are zeroed at theta~0
-        (undefined bearing at the origin), so the identity only holds
-        where the angular values are nonzero.
+        The frame-rotation pair (gamma) encodes parallel transport and is
+        not subject to the zero-mean correction, so the pointwise
+        Pythagorean identity still holds exactly.
         """
         fb = get_filter_basis(kernel_shape, basis_type)
         r = _precompute(
@@ -88,23 +88,57 @@ class TestPrecomputeVectorConvolution:
         nz = r["vals"].abs() > 1e-10
         assert nz.any(), "expected some nonzero filter values"
         rhs = r["vals"][nz] ** 2
-
-        # gamma: defined everywhere (frame rotation is well-defined)
         c, s = r["cos_gamma"][nz], r["sin_gamma"][nz]
         torch.testing.assert_close(c**2 + s**2, rhs, atol=1e-5, rtol=1e-5)
 
-        # phi, beta: zeroed at theta~0, check only nonzero entries
+    @pytest.mark.parametrize(
+        "basis_type,kernel_shape",
+        [
+            ("piecewise linear", 3),
+            ("piecewise linear", 5),
+            ("morlet", (3, 3)),
+            ("zernike", 4),
+        ],
+    )
+    def test_bearing_arrays_zero_weighted_sum(self, basis_type, kernel_shape):
+        """Bearing arrays have zero out_vals-weighted sum in every (k, lat) slab.
+
+        This is the discrete analogue of ∫ ψ(r)·cos(φ) dΩ = 0, which
+        ensures that the gradient, divergence, and vorticity operators
+        return exactly zero when applied to a spatially-uniform field.
+        """
+        fb = get_filter_basis(kernel_shape, basis_type)
+        nlat_out = IMG_SHAPE[0]
+        K = fb.kernel_size
+        r = _precompute(
+            in_shape=IMG_SHAPE,
+            out_shape=IMG_SHAPE,
+            filter_basis=fb,
+            theta_cutoff=THETA_CUTOFF,
+        )
+        ker_idx = r["idx"][0]
+        row_idx = r["idx"][1]
+
         for name in ("phi", "beta"):
-            c, s = r[f"cos_{name}"][nz], r[f"sin_{name}"][nz]
-            lhs = c**2 + s**2
-            bearing_nz = lhs > 1e-10
-            assert bearing_nz.any()
-            torch.testing.assert_close(
-                lhs[bearing_nz],
-                rhs[bearing_nz],
-                atol=1e-5,
-                rtol=1e-5,
-            )
+            for arr_name in (f"cos_{name}", f"sin_{name}"):
+                arr = r[arr_name]
+                for k in range(K):
+                    for j in range(nlat_out):
+                        mask = (ker_idx == k) & (row_idx == j)
+                        if not mask.any():
+                            continue
+                        # arr = out_vals * cos_p_corrected (from _finalize).
+                        # The zero-mean correction guarantees
+                        # sum(out_vals * cos_p_corrected) = arr[mask].sum() = 0.
+                        w_sum = r["vals"][mask].abs().sum().item()
+                        if w_sum < 1e-12:
+                            continue
+                        weighted_sum = arr[mask].sum().item()
+                        assert abs(weighted_sum) / w_sum < 1e-5, (
+                            f"{arr_name} weighted sum not zero at "
+                            f"k={k}, lat={j}: "
+                            f"sum/|w|={weighted_sum/w_sum:.2e}"
+                        )
 
     @pytest.mark.parametrize(
         "basis_type,kernel_shape",
