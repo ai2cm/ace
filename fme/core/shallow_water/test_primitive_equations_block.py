@@ -96,9 +96,10 @@ class TestPrimitiveEquationsBlockStepper:
         """All three tendencies (uv, T, q) must agree with PrimitiveEquationsStepper.
 
         Both implementations use the same discrete operators (grad_conv + dot
-        for T/q advection), so the tight 5e-3 tolerance applies to all fields.
-        The only source of numerical difference is the wider multi-channel
-        convolution in the dynamics block (float32 ULP noise, ~2e-7 m/s²).
+        for T/q advection via HorizontalAdvection), so the tight 5e-3 tolerance
+        applies to all fields.  The only source of numerical difference is the
+        wider multi-channel convolution in the dynamics block (float32 ULP
+        noise, ~2e-7 m/s²).
         """
         block, ref = _make_steppers()
         uv, T, q = _random_state()
@@ -131,7 +132,7 @@ class TestPrimitiveEquationsBlockStepper:
         uv, T, q = _random_state(n_levels=1)
         duv_b, dT_b, dq_b = block.compute_tendencies(uv, T, q)
         duv_r, dT_r, dq_r = ref.compute_tendencies(uv, T, q)
-        for name, a, b in [("duv", duv_b, duv_r), ("dT", dT_b, dT_r)]:
+        for name, a, b in [("duv", duv_b, duv_r), ("dT", dT_b, dT_r), ("dq", dq_b, dq_r)]:
             scale = b.abs().max().clamp(min=1e-10)
             assert (a - b).abs().max() / scale < 5e-3, f"{name} mismatch (K=1)"
 
@@ -176,7 +177,7 @@ class TestPrimitiveEquationsBlockStepper:
 
     def test_horizontal_advection_zero_wind(self):
         """HorizontalAdvection returns zero tendency for zero velocity."""
-        from fme.core.shallow_water.primitive_equations_block import HorizontalAdvection
+        from fme.core.shallow_water import HorizontalAdvection
         K, N = 3, 2
         adv = HorizontalAdvection(n_tracers=N, n_levels=K, shape=SHAPE)
         B = 2
@@ -186,8 +187,8 @@ class TestPrimitiveEquationsBlockStepper:
         assert out.abs().max() < 1e-10
 
     def test_horizontal_advection_uniform_scalar(self):
-        """Gradient of a uniform scalar is zero, so advection is zero."""
-        from fme.core.shallow_water.primitive_equations_block import HorizontalAdvection
+        """Gradient of a uniform scalar is zero, so advection tendency is zero."""
+        from fme.core.shallow_water import HorizontalAdvection
         K, N = 2, 2
         adv = HorizontalAdvection(n_tracers=N, n_levels=K, shape=SHAPE)
         B = 1
@@ -197,8 +198,8 @@ class TestPrimitiveEquationsBlockStepper:
         assert out.abs().max() < 1e-6
 
     def test_horizontal_advection_matches_reference(self):
-        """HorizontalAdvection agrees tightly with PrimitiveEquationsStepper's advection."""
-        from fme.core.shallow_water.primitive_equations_block import HorizontalAdvection
+        """HorizontalAdvection agrees tightly with PrimitiveEquationsStepper's V·∇T."""
+        from fme.core.shallow_water import HorizontalAdvection
         from fme.core.shallow_water import PrimitiveEquationsStepper
         K, N = 1, 1
         adv = HorizontalAdvection(n_tracers=N, n_levels=K, shape=SHAPE)
@@ -207,7 +208,7 @@ class TestPrimitiveEquationsBlockStepper:
         T = torch.randn(B, K, *SHAPE)
         uv = torch.randn(B, K, *SHAPE, 2)
 
-        # Reference: -V·∇T via gradient+dot
+        # Reference: -V·∇T via gradient + dot
         grad_T = ref._gradient(T)
         dT_ref = -(uv[..., 0] * grad_T[..., 0] + uv[..., 1] * grad_T[..., 1])
 

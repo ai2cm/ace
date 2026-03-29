@@ -23,16 +23,16 @@ Vector channels 0..K-1 — V_k  horizontal velocity at each level.
 
 HorizontalAdvection module (all tracers, any count)
 ----------------------------------------------------
-Encodes horizontal advection via the DISCO gradient operator and a
-pointwise vector–vector dot product:
-
-    -V_k · ∇s_k  (gradient in one conv pass, dot product pointwise)
+Computes -V_k · ∇s_k via grad_conv (W_sv) + pointwise dot product.
+This batches all K × n_tracers gradient computations in a single conv
+forward pass.
 
 A vector·vector dot product (→ scalar) is not in the current
-``VectorDiscoBlock`` (which has scalar×vector→vector via
-``ScalarVectorProduct``, but no vector·vector→scalar path).
-``HorizontalAdvection`` provides this as a standalone module that
-batches all K × n_tracers fields through a single ``grad_conv`` call.
+VectorDiscoBlock architecture, so this cannot be encoded as a second
+block.  The product-rule alternative (div(sV) − sδ) also does not work
+because the DISCO divergence convolves s_j values at the source point j
+inside the sum, not at the output point i — see HorizontalAdvection's
+docstring for details.
 
 Physics encoded in Block 1
 ----------------------------
@@ -42,10 +42,10 @@ Physics encoded in Block 1
 * sv_product: ζ_k × V_k  (vorticity advection)
               f   × V_k  (Coriolis)
 
-Physics encoded in HorizontalAdvection
-----------------------------------------
-* -V_k · ∇T_k  for each level k
-* -V_k · ∇q_k  for each level k
+Physics encoded in HorizontalAdvection (self.horiz_adv)
+---------------------------------------------------------
+* -V_k · ∇T_k for each level k (DISCO gradient + pointwise dot)
+* -V_k · ∇q_k for each level k
 
 Physics computed externally
 -----------------------------
@@ -86,19 +86,28 @@ class HorizontalAdvection(nn.Module):
 
     Computes ``-V_k · ∇s_k`` for each (level, tracer) pair by:
 
-    1. Applying the DISCO gradient operator to every tracer field (batched).
+    1. Applying the DISCO gradient operator to every tracer field (batched
+       over all ``K * n_tracers`` fields in a single conv pass).
     2. Taking the pointwise dot product of the gradient with the wind.
 
-    All ``n_tracers`` tracers at level ``k`` share the same wind ``V_k``.
-    The computation is vectorised over ``K * n_tracers`` fields in a
-    single convolutional forward pass, making this efficient even for many
-    tracers.
-
     .. note::
-       A vector·vector dot product (→ scalar) is not in the current
-       ``VectorDiscoBlock`` architecture, which has scalar×vector→vector
-       (``ScalarVectorProduct``) but no vector·vector→scalar pathway.
-       This module provides that capability for advection.
+       Encoding V·∇s in a ``VectorDiscoBlock`` would require a
+       vector·vector dot product (→ scalar).  The existing
+       ``ScalarVectorProduct`` layer only computes scalar×vector→vector,
+       so there is no current block pathway for this operation.
+
+       The obvious alternative — the product-rule identity
+       ``V·∇s = div(sV) − s·div(V)`` — does NOT work with DISCO
+       operators because DISCO computes convolutions of the form
+       ``div(sV)_i = Σ_j ψ(i,j)·[cos_β(i,j)·s_j·u_j + …]``,
+       i.e., the scalar ``s_j`` appears at the *source* point inside
+       the convolution sum, not factored out at the output point i.
+       The product rule requires a pointwise factorisation that is not
+       satisfied by any finite-support convolutional operator.
+
+       Momentum advection avoids this via the vorticity form
+       (ζ×V − ∇KE), which replaces V·∇V with operations that are
+       native to the block.  No analogous reformulation exists for V·∇T.
 
     Args:
         n_tracers: number of scalar fields per level.
@@ -165,14 +174,15 @@ class HorizontalAdvection(nn.Module):
 
 
 class PrimitiveEquationsBlockStepper(nn.Module):
-    """Multi-level isobaric primitive equations using a VectorDiscoBlock + HorizontalAdvection.
+    """Multi-level isobaric primitive equations using a VectorDiscoBlock.
 
-    Block 1 (``self.block``): encodes the full momentum tendency
+    ``self.block`` (Block 1): encodes the full momentum tendency
     (PGF + Coriolis + vorticity advection − ∇KE) in a single pass.
 
-    ``self.horiz_adv`` (``HorizontalAdvection``): computes -V·∇T and
-    -V·∇q by batching the DISCO gradient + pointwise dot product over all
-    levels and tracers in one conv call.
+    ``self.horiz_adv`` (``HorizontalAdvection``): handles T and q
+    advection.  This cannot be a second VectorDiscoBlock because
+    V·∇T requires a vector·vector dot product not present in the block
+    architecture (see ``HorizontalAdvection`` docstring).
 
     State: ``(uv, T, q)`` — same as ``PrimitiveEquationsStepper``.
     """
@@ -263,8 +273,7 @@ class PrimitiveEquationsBlockStepper(nn.Module):
             activation="none",
         )
 
-        # ── HorizontalAdvection: T and q advection (batched grad + dot) ─────
-        # Initialises its own weights; not included in the freeze loop below.
+        # ── HorizontalAdvection: T and q (batched grad + dot) ────────────────
         self.horiz_adv = HorizontalAdvection(
             n_tracers=2,  # T and q
             n_levels=K,
@@ -449,10 +458,10 @@ class PrimitiveEquationsBlockStepper(nn.Module):
         omega = self._omega(div)  # (B, K, H, W)
 
         # ── HorizontalAdvection: -V·∇T and -V·∇q ────────────────────────────
-        tracers = torch.stack([T, q], dim=2)   # (B, K, 2, H, W)
-        adv = self.horiz_adv(tracers, uv)       # (B, K, 2, H, W)
-        dT_dt = adv[:, :, 0]                    # -V·∇T
-        dq_dt = adv[:, :, 1]                    # -V·∇q
+        tracers = torch.stack([T, q], dim=2)     # (B, K, 2, H, W)
+        adv = self.horiz_adv(tracers, uv)         # (B, K, 2, H, W)
+        dT_dt = adv[:, :, 0]
+        dq_dt = adv[:, :, 1]
 
         # ── T adiabatic vertical coupling ─────────────────────────────────────
         p_k = self.pressure_levels.view(1, K, 1, 1)
