@@ -77,6 +77,8 @@ class PrimitiveEquationsStepper(nn.Module):
         phi_surface: float = 0.0,
         kernel_shape: int = 5,
         theta_cutoff: float | None = None,
+        diffusion_coeff: float | None = None,
+        diffusion_order: int = 1,
     ):
         """
         Args:
@@ -92,6 +94,16 @@ class PrimitiveEquationsStepper(nn.Module):
             kernel_shape: radial filter kernel shape for differential ops.
             theta_cutoff: filter support radius in radians. Defaults to
                 2 grid spacings.
+            diffusion_coeff: kinematic diffusion coefficient ν (m²ⁿ/s) for
+                ∇^(2n) diffusion applied to V, T, and q.  None disables
+                diffusion entirely (default).  A positive value enables
+                scale-selective damping; combine with diffusion_order to
+                control the degree of scale-selectivity.  Rule of thumb for
+                order-1 (∇²) at grid spacing Δx with e-folding time τ at the
+                2Δx scale: ν ≈ Δx² / (π² τ).
+            diffusion_order: order n of the diffusion operator ∇^(2n).
+                1 → ∇² (Laplacian, least scale-selective),
+                2 → ∇⁴ (biharmonic, more scale-selective).  Default 1.
         """
         super().__init__()
         self.nlat, self.nlon = shape
@@ -99,6 +111,8 @@ class PrimitiveEquationsStepper(nn.Module):
         self.g = g
         self.R = R
         self.phi_surface = phi_surface
+        self.diffusion_coeff = diffusion_coeff
+        self.diffusion_order = diffusion_order
 
         if pressure_levels is None:
             pressure_levels = [
@@ -349,6 +363,23 @@ class PrimitiveEquationsStepper(nn.Module):
         dT_dp[:, K - 1] = (T[:, K - 1] - T[:, K - 2]) / (p[K - 1] - p[K - 2])
         return dT_dp
 
+    def _laplacian(self, s: torch.Tensor) -> torch.Tensor:
+        """Spherical Laplacian ∇²s = ∇·(∇s), shape (B, K, H, W)."""
+        return self._divergence(self._gradient(s))
+
+    def _apply_diffusion(self, s: torch.Tensor) -> torch.Tensor:
+        """Return the diffusion tendency (−1)^(n+1) · ν · ∇^(2n) s.
+
+        The sign alternates so that the operator is always dissipative:
+          n=1 (∇²): tendency = +ν ∇²s  (positive at minima → fills them in)
+          n=2 (∇⁴): tendency = −ν ∇⁴s  (negative where field peaks)
+        """
+        lap = self._laplacian(s)
+        for _ in range(self.diffusion_order - 1):
+            lap = self._laplacian(lap)
+        sign = (-1) ** (self.diffusion_order + 1)
+        return sign * self.diffusion_coeff * lap  # type: ignore[operator]
+
     def compute_tendencies(
         self,
         uv: torch.Tensor,
@@ -414,6 +445,16 @@ class PrimitiveEquationsStepper(nn.Module):
         # Humidity advection: -V_k · ∇q_k (passive tracer)
         grad_q = self._gradient(q)  # (B, K, H, W, 2)
         dq_dt = -(uv[..., 0] * grad_q[..., 0] + uv[..., 1] * grad_q[..., 1])
+
+        # Optional ∇^(2n) diffusion applied to all prognostic variables.
+        if self.diffusion_coeff is not None:
+            dT_dt = dT_dt + self._apply_diffusion(T)
+            dq_dt = dq_dt + self._apply_diffusion(q)
+            duv_dt = duv_dt + torch.stack(
+                [self._apply_diffusion(uv[..., 0]),
+                 self._apply_diffusion(uv[..., 1])],
+                dim=-1,
+            )
 
         return duv_dt, dT_dt, dq_dt
 
