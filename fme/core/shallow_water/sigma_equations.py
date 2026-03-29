@@ -261,42 +261,69 @@ class SigmaCoordinateStepper(nn.Module):
             phi[:, k] = phi[:, k - 1] + self.R * T[:, k - 1] * self.log_sig_ratio[k - 1]
         return phi
 
+    def _sigma_dot_interfaces(
+        self,
+        div: torch.Tensor,
+        uv: torch.Tensor,
+        grad_log_ps: torch.Tensor,
+        dp_s_dt: torch.Tensor,
+        p_s: torch.Tensor,
+    ) -> torch.Tensor:
+        """σ̇ at all K+1 interfaces, (B, K+1, H, W).
+
+        Integrates the continuity equation upward from σ̇=0 at the bottom
+        boundary (index 0).  The correct recurrence is:
+
+            σ̇_{k+1/2} = σ̇_{k-1/2}
+                         − [∂ln(p_s)/∂t + div_k + V_k·∇ln(p_s)] Δσ_k
+
+        The ∂ln(p_s)/∂t term ensures the top-boundary value (index K) is
+        zero (no mass flux through the model lid).
+
+        Args:
+            div:          (B, K, H, W)   — ∇·V
+            uv:           (B, K, H, W, 2)
+            grad_log_ps:  (B, H, W, 2)   — ∇ln(p_s)
+            dp_s_dt:      (B, H, W)      — ∂p_s/∂t (already computed)
+            p_s:          (B, H, W)      — surface pressure
+
+        Returns:
+            sigma_dot_half: (B, K+1, H, W)
+        """
+        B, K, H, W = div.shape
+        glps = grad_log_ps.unsqueeze(1)            # (B, 1, H, W, 2)
+        v_dot_glps = (uv * glps).sum(-1)           # (B, K, H, W)
+        d_ln_ps_dt = (dp_s_dt / p_s).unsqueeze(1)  # (B, 1, H, W) → broadcasts over K
+
+        sigma_dot_half = div.new_zeros(B, K + 1, H, W)
+        for k in range(K):
+            sigma_dot_half[:, k + 1] = (
+                sigma_dot_half[:, k]
+                - (d_ln_ps_dt[:, 0] + div[:, k] + v_dot_glps[:, k]) * self.delta_sigma[k]
+            )
+        return sigma_dot_half
+
     def _sigma_dot(
         self,
         div: torch.Tensor,
         uv: torch.Tensor,
         grad_log_ps: torch.Tensor,
+        dp_s_dt: torch.Tensor,
+        p_s: torch.Tensor,
     ) -> torch.Tensor:
-        """Compute σ̇ = dσ/dt at each level (diagnostic from continuity).
-
-        Integrates ∂(p_s σ̇)/∂σ = -∇·(p_s V) = -(p_s div + V·∇p_s)
-        upward from σ̇ = 0 at the surface boundary.
-
-        Since p_s appears on both sides, we compute (p_s σ̇) and divide:
-            (p_s σ̇)_{k+1/2} = (p_s σ̇)_{k-1/2} - [p_s div_k + V_k·∇p_s] Δσ_k
-        But we factor out p_s and work with (σ̇_half):
-            σ̇_{k+1/2} = σ̇_{k-1/2} - [div_k + V_k·∇(ln p_s)] Δσ_k
+        """Compute σ̇ = dσ/dt at each level (mid-level average of interfaces).
 
         Args:
-            div:          (B, K, H, W)    — ∇·V at each level
-            uv:           (B, K, H, W, 2) — velocity
-            grad_log_ps:  (B, H, W, 2)    — ∇(ln p_s)
+            div:          (B, K, H, W)
+            uv:           (B, K, H, W, 2)
+            grad_log_ps:  (B, H, W, 2)
+            dp_s_dt:      (B, H, W)
+            p_s:          (B, H, W)
 
         Returns:
             sigma_dot: (B, K, H, W)
         """
-        B, K, H, W = div.shape
-        # V_k · ∇(ln p_s): broadcast grad_log_ps over levels
-        glps = grad_log_ps.unsqueeze(1)   # (B, 1, H, W, 2)
-        v_dot_glps = (uv * glps).sum(-1)  # (B, K, H, W)
-
-        sigma_dot_half = div.new_zeros(B, K + 1, H, W)
-        # sigma_dot_half[:, 0] = 0  (surface BC: σ=1 fixed)
-        for k in range(K):
-            sigma_dot_half[:, k + 1] = (
-                sigma_dot_half[:, k]
-                - (div[:, k] + v_dot_glps[:, k]) * self.delta_sigma[k]
-            )
+        sigma_dot_half = self._sigma_dot_interfaces(div, uv, grad_log_ps, dp_s_dt, p_s)
         return 0.5 * (sigma_dot_half[:, :-1] + sigma_dot_half[:, 1:])
 
     def _dX_dsigma(self, X: torch.Tensor) -> torch.Tensor:
@@ -349,16 +376,18 @@ class SigmaCoordinateStepper(nn.Module):
         log_ps = torch.log(p_s)                        # (B, H, W)
         grad_log_ps = self._gradient_2d(log_ps)        # (B, H, W, 2)
 
-        # ── Divergence and σ̇ ─────────────────────────────────────────────
+        # ── Divergence ────────────────────────────────────────────────────
         div = self._divergence(uv)                     # (B, K, H, W)
-        sigma_dot = self._sigma_dot(div, uv, grad_log_ps)  # (B, K, H, W)
 
-        # ── Surface pressure tendency ─────────────────────────────────────
+        # ── Surface pressure tendency (must be computed before σ̇) ────────
         # ∂p_s/∂t = -p_s ∑_k [div_k + V_k·∇(ln p_s)] Δσ_k
         glps_bcast = grad_log_ps.unsqueeze(1)                   # (B,1,H,W,2)
         v_dot_glps = (uv * glps_bcast).sum(-1)                  # (B,K,H,W)
         dp_s_dt_integrand = (div + v_dot_glps) * self.delta_sigma.view(1, K, 1, 1)
         dp_s_dt = -p_s * dp_s_dt_integrand.sum(dim=1)           # (B, H, W)
+
+        # ── σ̇ (requires dp_s_dt to enforce top-boundary σ̇=0) ────────────
+        sigma_dot = self._sigma_dot(div, uv, grad_log_ps, dp_s_dt, p_s)  # (B, K, H, W)
 
         # ── Pressure gradient force ───────────────────────────────────────
         # PGF_k = -∇φ_k  -  R T_k ∇(ln p_s)

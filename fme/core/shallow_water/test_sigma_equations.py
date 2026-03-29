@@ -317,3 +317,46 @@ class TestSigmaCoordinateStepper:
             "convergent gradient flow at Gaussian peak should increase p_s there"
         )
         assert torch.isfinite(dp_s_dt).all()
+
+    def test_sigma_dot_top_boundary_is_zero(self):
+        """σ̇ at the top interface must be zero (no mass flux through the top).
+
+        The continuity equation requires a ∂ln(p_s)/∂t term in the σ̇
+        recurrence.  Without it the top-interface σ̇ equals ∂ln(p_s)/∂t
+        instead of zero, meaning spurious mass flux through the model lid.
+
+        The DISCO divergence operator acts on velocity component 1 (the
+        divergent/irrotational part), so we set both components nonzero to
+        produce a genuinely divergent flow.
+        """
+        stepper = _make_stepper(omega=0.0)
+        B = 1
+        bump = _gaussian_bump(*SHAPE, sigma_deg=15.0)
+        uv = torch.zeros(B, N_LEVELS, *SHAPE, 2)
+        uv[..., 0] = 10.0 * bump.unsqueeze(0).unsqueeze(0)
+        uv[..., 1] = 10.0 * bump.unsqueeze(0).unsqueeze(0)
+        p_s = torch.full((B, *SHAPE), P_SURFACE)
+
+        div = stepper._divergence(uv)
+        # Confirm the flow is genuinely divergent (otherwise test is vacuous)
+        assert div.abs().max() > 1e-8, "test requires nonzero divergence"
+
+        grad_log_ps = stepper._gradient_2d(torch.log(p_s))
+        glps = grad_log_ps.unsqueeze(1)
+        v_dot_glps = (uv * glps).sum(-1)
+        dp_s_dt = -p_s * (
+            (div + v_dot_glps) * stepper.delta_sigma.view(1, N_LEVELS, 1, 1)
+        ).sum(dim=1)
+
+        sigma_dot_half = stepper._sigma_dot_interfaces(
+            div, uv, grad_log_ps, dp_s_dt, p_s
+        )
+
+        # The top interface (index K) must carry zero mass flux.
+        # Without the ∂ln(p_s)/∂t correction the top equals d_ln_ps_dt ≈ div,
+        # so the ratio to div.abs().max() would be ≈ 1 rather than ≈ 0.
+        top = sigma_dot_half[:, -1]
+        rel_err = top.abs().max() / div.abs().max()
+        assert rel_err < 1e-3, (
+            f"top-interface σ̇ / div.max should be ≈ 0, got {rel_err:.3e}"
+        )
