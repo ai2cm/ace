@@ -80,87 +80,6 @@ def _ch(level: int, kind: int) -> int:
     return level * _N_KINDS + kind
 
 
-class HorizontalAdvection(nn.Module):
-    """Horizontal advection of scalar tracer fields on the sphere.
-
-    Computes ``-V_k · ∇s_k`` for each (level, tracer) pair by:
-
-    1. Applying the DISCO gradient operator to every tracer field (batched
-       over all ``K * n_tracers`` fields in a single conv pass).
-    2. Taking the pointwise dot product of the gradient with the wind.
-
-    .. note::
-       ``VectorDiscoConvS2`` now provides a ``W_vs2`` pathway that
-       computes this operation directly: it applies the bearing-gradient
-       filter to the scalar field and takes the pointwise dot product
-       with the local velocity.  ``PrimitiveEquationsBlockStepper`` uses
-       a dedicated ``adv_conv`` with ``W_vs2`` instead of this class.
-       ``HorizontalAdvection`` is retained as a self-contained reference
-       implementation.
-
-    Args:
-        n_tracers: number of scalar fields per level.
-        n_levels: number of vertical levels K.
-        shape: ``(nlat, nlon)`` grid dimensions.
-        kernel_shape: DISCO filter kernel shape.
-        theta_cutoff: filter support radius (rad).
-    """
-
-    def __init__(
-        self,
-        n_tracers: int,
-        n_levels: int,
-        shape: tuple[int, int],
-        kernel_shape: int = 5,
-        theta_cutoff: float | None = None,
-    ):
-        super().__init__()
-        self.n_tracers = n_tracers
-        self.n_levels = n_levels
-        if theta_cutoff is None:
-            theta_cutoff = 2.0 * math.pi / (shape[0] - 1)
-        self.grad_conv = VectorDiscoConvS2(
-            in_channels_scalar=1,
-            in_channels_vector=0,
-            out_channels_scalar=0,
-            out_channels_vector=1,
-            in_shape=shape,
-            out_shape=shape,
-            kernel_shape=kernel_shape,
-            theta_cutoff=theta_cutoff,
-            bias=False,
-        )
-        for param in self.grad_conv.parameters():
-            param.requires_grad = False
-        with torch.no_grad():
-            self.grad_conv.W_sv.zero_()
-            self.grad_conv.W_sv[0, 0, :, 1] = 1.0 / R_EARTH
-
-    def forward(
-        self,
-        scalars: torch.Tensor,
-        uv: torch.Tensor,
-    ) -> torch.Tensor:
-        """Compute ``-V · ∇s`` for each tracer field.
-
-        Args:
-            scalars: ``(B, K, n_tracers, H, W)``
-            uv: ``(B, K, H, W, 2)``
-
-        Returns:
-            ``(B, K, n_tracers, H, W)`` tendency ``-V · ∇s``.
-        """
-        B, K, N, H, W = scalars.shape
-        # Batch all K*N gradient computations in one conv pass
-        s_flat = scalars.reshape(B * K * N, 1, H, W)
-        dummy_v = s_flat.new_zeros(B * K * N, 0, H, W, 2)
-        _, grad_s = self.grad_conv(s_flat, dummy_v)   # (B*K*N, 1, H, W, 2)
-        grad_s = grad_s.reshape(B, K, N, H, W, 2)
-
-        # V_k · ∇s_k, broadcast over the N tracer axis
-        uv_exp = uv.unsqueeze(2)  # (B, K, 1, H, W, 2)
-        return -(uv_exp[..., 0] * grad_s[..., 0] + uv_exp[..., 1] * grad_s[..., 1])
-
 
 class PrimitiveEquationsBlockStepper(nn.Module):
     """Multi-level isobaric primitive equations using a VectorDiscoBlock.
@@ -171,7 +90,6 @@ class PrimitiveEquationsBlockStepper(nn.Module):
     ``self.adv_conv``: dedicated ``VectorDiscoConvS2`` that uses the
     ``W_vs2`` pathway (diagonal scalar-grad dot vector → scalar) to
     compute -V·∇T and -V·∇q for all K levels in one forward pass.
-    architecture (see ``HorizontalAdvection`` docstring).
 
     State: ``(uv, T, q)`` — same as ``PrimitiveEquationsStepper``.
     """
@@ -377,9 +295,9 @@ class PrimitiveEquationsBlockStepper(nn.Module):
         # Vector layout: indices 0..K-1 = V levels.
         self.adv_conv.W_ss.zero_()
         self.adv_conv.W_vs.zero_()
-        # d=1 matches the DISCO gradient convention used by HorizontalAdvection
-        # (W_sv[:,:,:,1]=1/R gives gradient (-f_sp/R, f_cp/R), so
-        # V·∇s = v*f_cp/R - u*f_sp/R = perp_comp/R, which is W_vs2 d=1).
+        # d=1: DISCO gradient convention — W_sv[:,:,:,1]=1/R gives
+        # gradient (-f_sp/R, f_cp/R), so V·∇s = (v*f_cp - u*f_sp)/R
+        # = perp_comp/R, which is W_vs2 d=1.
         W_vs2 = self.adv_conv.W_vs2  # shape (2K, K, K_v, 2)
         W_vs2.zero_()
         for k in range(K):
