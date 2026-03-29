@@ -121,3 +121,10 @@ exclude_also = [
 [[tool.mypy.overrides]]
 module = "fme.downscaling.modules.physicsnemo_unets_v2.*"
 ignore_errors = true
+
+[dependency-groups]
+dev = [
+    "fasteners>=0.20",
+    "pytest>=9.0.2",
+    "pytest-xdist>=3.8.0",
+]
