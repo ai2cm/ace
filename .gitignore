@@ -142,6 +142,7 @@ scratch/
 # Some in progress data pipelines get added here
 scripts/data_process/.nfs*
 
-joblogs/uv.lock
+joblogs/
+uv.lock
 geostrophic_adjustment_phi_wind.png
 geostrophic_adjustment_vertical_day4.png
