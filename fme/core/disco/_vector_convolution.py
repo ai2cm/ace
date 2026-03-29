@@ -525,6 +525,16 @@ class VectorDiscoConvS2(nn.Module):
         self.W_sv = nn.Parameter(v_scale * torch.randn(N_v_out, N_s_in, K_v, 2))
         self.W_vv = nn.Parameter(v_scale * torch.randn(N_v_out, N_v_in, K_s, 2))
 
+        # W_vs2: diagonal scalar-grad dot vector → scalar (advection-type).
+        # Only created when N_s_in == N_s_out and both scalar/vector channels
+        # are present.  Shape (N_s, N_v_in, K_v, 2) where the last dim indexes
+        # {V·∇s  (d=0),  V·∇⊥s  (d=1)}.  Each output scalar channel o
+        # receives only the contribution from input scalar channel c = o.
+        if N_s_in == N_s_out and N_s_in > 0 and N_v_in > 0:
+            self.W_vs2 = nn.Parameter(s_scale * torch.randn(N_s_in, N_v_in, K_v, 2))
+        else:
+            self.register_parameter("W_vs2", None)
+
         if bias and N_s_out > 0:
             self.bias_scalar = nn.Parameter(torch.zeros(N_s_out))
         else:
@@ -619,6 +629,21 @@ class VectorDiscoConvS2(nn.Module):
         y_s = torch.einsum("ock,bckxy->boxy", self.W_ss, f_s)
         dc = torch.stack([div, curl], dim=-1)
         y_s = y_s + torch.einsum("ockd,bckxyd->boxy", self.W_vs, dc)
+
+        # W_vs2: V·∇s diagonal advection term.
+        # grad_comp[b,c_v,c_s,k,x,y] = u*f_cp + v*f_sp  ≈ V·∇s
+        # perp_comp                   = -u*f_sp + v*f_cp ≈ V·∇⊥s
+        if self.W_vs2 is not None and N_v_in > 0 and N_s_in > 0:
+            u_e = u[:, :, None, None, :, :]   # (B, N_v_in, 1,      1,    H, W)
+            v_e = v[:, :, None, None, :, :]
+            fcp = f_cp[:, None, :, :, :, :]   # (B, 1,      N_s_in, K_v, H, W)
+            fsp = f_sp[:, None, :, :, :, :]
+            grad_comp = u_e * fcp + v_e * fsp   # (B, N_v_in, N_s_in, K_v, H, W)
+            perp_comp = v_e * fcp - u_e * fsp
+            adv_dc = torch.stack([grad_comp, perp_comp], dim=-1)
+            # einsum: (c, v, k, d), (B, v, c, k, H, W, d) -> (B, c, H, W)
+            y_s = y_s + torch.einsum("cvkd,bvckxyd->bcxy", self.W_vs2, adv_dc)
+
         if self.bias_scalar is not None:
             y_s = y_s + self.bias_scalar.reshape(1, -1, 1, 1)
 

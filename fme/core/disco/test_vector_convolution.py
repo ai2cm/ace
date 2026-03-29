@@ -624,3 +624,62 @@ class TestVectorDiscoConvS2:
         # dv/dx of cos(lon) ~ -sin(lon): curl output should vary
         mid = nlat // 2
         assert y_s[0, 0, mid].std() > 0.001, "curl output is flat"
+
+    def test_W_vs2_not_created_when_channels_differ(self):
+        """W_vs2 is None when N_s_in != N_s_out."""
+        conv = _make_conv(n_s_in=2, n_v_in=1, n_s_out=3, n_v_out=0, bias=False)
+        assert conv.W_vs2 is None
+
+    def test_W_vs2_created_when_channels_equal(self):
+        """W_vs2 exists when N_s_in == N_s_out and both have scalar+vector channels."""
+        n_s, n_v = 3, 2
+        conv = _make_conv(n_s_in=n_s, n_v_in=n_v, n_s_out=n_s, n_v_out=0, bias=False)
+        assert conv.W_vs2 is not None
+        assert conv.W_vs2.shape == (n_s, n_v, conv._vector_kernel_size, 2)
+
+    def test_W_vs2_zero_gives_same_as_no_W_vs2(self):
+        """W_vs2=0 leaves scalar output identical to having no W_vs2 contribution."""
+        n_s, n_v = 3, 2
+        conv = _make_conv(n_s_in=n_s, n_v_in=n_v, n_s_out=n_s, n_v_out=0, bias=False)
+        torch.manual_seed(0)
+        x_s = torch.randn(1, n_s, *IMG_SHAPE)
+        x_v = torch.randn(1, n_v, *IMG_SHAPE, 2)
+        with torch.no_grad():
+            conv.W_vs2.zero_()
+            y_s_with, _ = conv(x_s, x_v)
+            # Manually zero W_vs2, compare against baseline where it was never set
+            conv2 = _make_conv(n_s_in=n_s, n_v_in=n_v, n_s_out=n_s, n_v_out=0, bias=False)
+            conv2.W_ss.copy_(conv.W_ss)
+            conv2.W_vs.copy_(conv.W_vs)
+            conv2.W_vs2.zero_()
+            y_s_ref, _ = conv2(x_s, x_v)
+        torch.testing.assert_close(y_s_with, y_s_ref)
+
+    def test_W_vs2_advection_detects_gradient(self):
+        """W_vs2 set to unit gradient produces nonzero output for non-uniform scalar."""
+        nlat, nlon = IMG_SHAPE
+        n_s, n_v = 1, 1
+        conv = _make_conv(n_s_in=n_s, n_v_in=n_v, n_s_out=n_s, n_v_out=0, bias=False)
+
+        # Scalar with a lon gradient: s = cos(lon)
+        lon = torch.linspace(0, 2 * math.pi, nlon + 1)[:nlon]
+        x_s = torch.cos(lon).reshape(1, n_s, 1, nlon).repeat(1, 1, nlat, 1)
+        # Uniform zonal wind u=1, v=0
+        u = torch.ones(1, n_v, nlat, nlon)
+        v = torch.zeros_like(u)
+        x_v = torch.stack([u, v], dim=-1)
+
+        with torch.no_grad():
+            conv.W_ss.zero_()
+            conv.W_vs.zero_()
+            conv.W_vs2.zero_()
+            conv.W_vs2[0, 0, :, 0] = 1.0   # V·∇s direction
+
+        with torch.no_grad():
+            y_s, _ = conv(x_s, x_v)
+
+        # u*(∂cos(lon)/∂x) ~ -sin(lon): output should vary with lon
+        mid = nlat // 2
+        assert y_s[0, 0, mid].std() > 0.0, "W_vs2 advection output is exactly flat"
+        # Verify the sin-wave pattern (zero near lon=0 and lon=pi)
+        assert y_s[0, 0, mid].abs().max() > y_s[0, 0, mid, 0].abs()
