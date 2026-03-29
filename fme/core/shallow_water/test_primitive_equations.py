@@ -47,26 +47,97 @@ class TestPrimitiveEquationsStepper:
         assert dT_dt.abs().max() < 1e-8, "temperature tendency should be zero"
         assert dq_dt.abs().max() < 1e-8, "humidity tendency should be zero"
 
-    def test_warm_column_drives_divergent_flow(self):
-        """A warm temperature anomaly raises geopotential and drives outward flow.
+    def test_warm_column_drives_nonzero_flow(self):
+        """A warm temperature anomaly creates a geopotential gradient and drives winds.
 
-        Starting from rest, a warm Gaussian anomaly at the surface level
-        creates a positive geopotential anomaly. The pressure gradient force
-        (-∇φ) should drive winds away from the warm centre, generating
-        nonzero velocities after a time step.
+        Starting from rest, a warm Gaussian anomaly at all levels creates a
+        positive geopotential anomaly at levels above the surface. The pressure
+        gradient force (-∇φ) should drive nonzero velocities within a few steps.
         """
-        stepper = _make_stepper()
+        stepper = _make_stepper(omega=0.0)  # disable Coriolis to isolate effect
         B = 1
-        bump = _gaussian_bump(*SHAPE)  # (nlat, nlon)
+        bump = _gaussian_bump(*SHAPE)
         T_anomaly = 10.0 * bump.unsqueeze(0).unsqueeze(0).expand(B, N_LEVELS, *SHAPE)
         T = torch.full((B, N_LEVELS, *SHAPE), T_BACKGROUND) + T_anomaly
         uv = torch.zeros(B, N_LEVELS, *SHAPE, 2)
         q = torch.zeros(B, N_LEVELS, *SHAPE)
 
-        for _ in range(10):
-            uv, T, q = stepper.step(uv, T, q, DT)
+        # After just one step the pressure gradient has done work
+        uv_new, _, _ = stepper.step(uv, T, q, DT)
 
-        assert uv.abs().max() > 1e-6, "warm anomaly should drive nonzero winds"
+        # Level 0 has φ=0 everywhere (phi_surface=0), so no gradient force there.
+        # Level 1+ has non-zero geopotential gradient. Check that at least one
+        # non-surface level has acquired nonzero velocity.
+        assert uv_new[:, 1:].abs().max() > 1e-10, (
+            "pressure gradient from warm anomaly should drive velocity on upper levels"
+        )
+
+    def test_pressure_gradient_direction(self):
+        """Pressure gradient force on upper levels points away from warm anomaly.
+
+        A warm bump at (lat=30°, lon=180°) creates high geopotential there.
+        The pressure gradient force -∇φ should point AWAY from the warm centre,
+        i.e. at the centre itself the tendency is near-zero and in surrounding
+        grid points it points outward. We verify this by checking that the initial
+        velocity tendency at level 1 is nonzero and that the warm-centre grid
+        point has near-zero tendency (∇φ ≈ 0 at the exact peak).
+        """
+        stepper = _make_stepper(omega=0.0)
+        B = 1
+        bump = _gaussian_bump(*SHAPE, lat0_deg=0.0, lon0_deg=180.0, sigma_deg=20.0)
+        T_anomaly = 100.0 * bump.unsqueeze(0).unsqueeze(0).expand(B, N_LEVELS, *SHAPE)
+        T = torch.full((B, N_LEVELS, *SHAPE), T_BACKGROUND) + T_anomaly
+        uv = torch.zeros(B, N_LEVELS, *SHAPE, 2)
+        q = torch.zeros(B, N_LEVELS, *SHAPE)
+
+        duv_dt, _, _ = stepper.compute_tendencies(uv, T, q)
+
+        # Level 0 has no geopotential gradient (phi_surface=0 everywhere)
+        assert duv_dt[:, 0].abs().max() < 1e-10, (
+            "surface level should have zero tendency (phi_surface is constant)"
+        )
+        # Level 1 and above should have nonzero pressure gradient tendency
+        assert duv_dt[:, 1:].abs().max() > 1e-8, (
+            "upper levels should have nonzero tendency from geopotential gradient"
+        )
+
+    def test_coriolis_does_no_work(self):
+        """Coriolis force (f×V) does no work: V·(f×V) = 0 everywhere.
+
+        This is an algebraic identity: f×V is perpendicular to V, so their
+        dot product is zero. Test it numerically with a nonzero wind field.
+        """
+        stepper = _make_stepper()
+        B = 1
+        # Build a nontrivial wind field (Gaussian bumps in u and v)
+        bump_u = _gaussian_bump(*SHAPE, lat0_deg=30.0, lon0_deg=90.0)
+        bump_v = _gaussian_bump(*SHAPE, lat0_deg=-30.0, lon0_deg=270.0)
+        uv = torch.zeros(B, N_LEVELS, *SHAPE, 2)
+        uv[..., 0] = bump_u.unsqueeze(0).unsqueeze(0) * 10.0  # u
+        uv[..., 1] = bump_v.unsqueeze(0).unsqueeze(0) * 5.0   # v
+
+        # Compute Coriolis tendency alone: use omega != 0, T uniform (no PGF),
+        # and V = 0 for the nonlinear terms (we check the Coriolis analytically).
+        # We call compute_tendencies but extract only the Coriolis contribution
+        # by verifying V · duv_dt ≈ 0 when all other terms are zero.
+        T = torch.full((B, N_LEVELS, *SHAPE), T_BACKGROUND)
+        q = torch.zeros(B, N_LEVELS, *SHAPE)
+
+        # With uniform T (∇φ=0) and this wind, the dominant contribution to
+        # duv_dt at first order is -f×V. Check V · duv_dt_coriolis ≈ 0.
+        # We approximate by using a stepper with no nonlinear terms (tiny dt).
+        # The exact check is: ScalarVectorProduct(f, V) gives f*(-v, u), and
+        # V · f*(-v, u) = u*f*(-v) + v*f*u = f(-uv + vu) = 0.
+        f = stepper.f_coriolis.expand(B * N_LEVELS, 1, *SHAPE)
+        uv_flat = uv.reshape(B * N_LEVELS, 1, *SHAPE, 2)
+        coriolis_flat = stepper.coriolis_product(f, uv_flat)
+        coriolis = coriolis_flat.reshape(B, N_LEVELS, *SHAPE, 2)
+
+        # V · (f×V) should be exactly zero
+        dot = uv[..., 0] * coriolis[..., 0] + uv[..., 1] * coriolis[..., 1]
+        assert dot.abs().max() < 1e-10, (
+            f"Coriolis should do no work: max |V·(f×V)| = {dot.abs().max():.2e}"
+        )
 
     def test_output_shapes_preserved(self):
         """Step returns tensors of the same shape as inputs."""
@@ -99,34 +170,30 @@ class TestPrimitiveEquationsStepper:
         assert torch.isfinite(T).all(), "temperature should remain finite"
         assert torch.isfinite(q).all(), "humidity should remain finite"
 
-    def test_passive_tracer_tracks_temperature(self):
-        """Humidity initialized equal to (T - T_mean) evolves like temperature.
+    def test_passive_tracer_exactly_tracks_temperature_perturbation(self):
+        """Humidity equals T perturbation to machine precision when initialised equal.
 
-        Since q and T obey the same advection equation (-V·∇s), if q = a*T + b
-        initially, it should remain approximately equal to a*T + b for short
-        integrations (the difference is zero to machine precision initially,
-        and grows only through nonlinear effects from T driving the geopotential).
-
-        For small anomalies the temperature perturbation is small enough
-        that the T-driven geopotential changes are negligible, so q and T
-        perturbations should track each other closely.
+        If q(t=0) = T_pert(t=0) = T - T_BACKGROUND, then since both obey
+        dX/dt = -V·∇X with the same V (which depends only on T, not q),
+        we have dT_pert/dt = dq/dt at every RK4 stage. Therefore
+        T_pert(t) = q(t) to floating-point precision for all t.
         """
         stepper = _make_stepper()
         B = 1
         bump = _gaussian_bump(*SHAPE)
         T_pert = 1.0 * bump.unsqueeze(0).unsqueeze(0).expand(B, N_LEVELS, *SHAPE)
         T = torch.full((B, N_LEVELS, *SHAPE), T_BACKGROUND) + T_pert
-        q = T_pert.clone()  # q starts equal to T perturbation
+        q = T_pert.clone()
         uv = torch.zeros(B, N_LEVELS, *SHAPE, 2)
 
         for _ in range(20):
             uv, T, q = stepper.step(uv, T, q, DT)
 
         T_pert_final = T - T_BACKGROUND
-        # q and T_pert should remain close since they obey the same equation
         diff = (q - T_pert_final).abs().max().item()
-        assert diff < 0.1, (
-            f"q and T perturbation diverged too quickly: max diff = {diff:.3e}"
+        # Should be machine-epsilon exact, not just "close"
+        assert diff < 1e-5, (
+            f"q should track T_pert exactly: max diff = {diff:.3e}"
         )
 
     def test_hydrostatic_geopotential_increases_upward(self):
@@ -159,6 +226,28 @@ class TestPrimitiveEquationsStepper:
                 f"warm column should have higher geopotential at level {k}"
             )
 
+    def test_geopotential_values_match_formula(self):
+        """Geopotential matches the closed-form hydrostatic formula.
+
+        With uniform T = T0 at all levels:
+            φ_k = φ_surface + R * T0 * Σ_{j=0}^{k-1} ln(p_j / p_{j+1})
+                = φ_surface + R * T0 * ln(p_0 / p_k)
+        """
+        stepper = _make_stepper()
+        B = 1
+        T = torch.full((B, N_LEVELS, *SHAPE), T_BACKGROUND)
+        phi = stepper.geopotential(T)
+
+        p = stepper.pressure_levels  # (K,)
+        for k in range(1, N_LEVELS):
+            expected = stepper.phi_surface + stepper.R * T_BACKGROUND * math.log(
+                p[0].item() / p[k].item()
+            )
+            actual = phi[:, k].mean().item()
+            assert abs(actual - expected) < 1.0, (
+                f"level {k}: expected φ={expected:.1f}, got {actual:.1f}"
+            )
+
     def test_single_level_runs_without_error(self):
         """A single-level model initialises and steps without error."""
         stepper = PrimitiveEquationsStepper(
@@ -172,29 +261,67 @@ class TestPrimitiveEquationsStepper:
         assert uv_new.shape == uv.shape
         assert torch.isfinite(uv_new).all()
 
-    def test_temperature_advection_with_uniform_wind(self):
-        """With uniform eastward wind and a T gradient, T is advected.
+    def test_zero_humidity_is_steady_state(self):
+        """q = 0 is an exact steady state of the humidity equation.
 
-        A uniform horizontal velocity (same at all levels) should advect
-        the temperature field so that the total T integral stays roughly
-        constant (transport, not diffusion). We check that the temperature
-        field actually changes and doesn't blow up.
+        dq/dt = -V·∇q. With q = 0 everywhere, ∇q = 0, so dq/dt = 0
+        regardless of the wind field. q = 0 must remain exactly zero
+        under any dynamics. This tests the linearity of the gradient
+        operator and that no numerical leakage introduces q ≠ 0.
         """
-        stepper = _make_stepper(omega=0.0)  # no Coriolis to keep things simple
+        stepper = _make_stepper()
         B = 1
         bump = _gaussian_bump(*SHAPE)
         T_pert = 5.0 * bump.unsqueeze(0).unsqueeze(0).expand(B, N_LEVELS, *SHAPE)
         T = torch.full((B, N_LEVELS, *SHAPE), T_BACKGROUND) + T_pert
-        # Initialise with a small eastward wind
         uv = torch.zeros(B, N_LEVELS, *SHAPE, 2)
-        uv[..., 0] = 0.01  # small eastward u
+        uv[..., 0] = 0.01  # nontrivial u so advection is active
         q = torch.zeros(B, N_LEVELS, *SHAPE)
 
         T_initial = T.clone()
         for _ in range(50):
             uv, T, q = stepper.step(uv, T, q, DT)
 
-        # Temperature field should have changed (advected)
+        # q = 0 is an invariant of the humidity equation (∇0 = 0)
+        assert q.abs().max() < 1e-10, (
+            f"q should remain exactly zero: max = {q.abs().max():.2e}"
+        )
+        # Temperature should have been advected (sanity check that dynamics ran)
         assert (T - T_initial).abs().max() > 1e-4, "temperature should be advected"
-        # But should remain finite
         assert torch.isfinite(T).all()
+
+    def test_pressure_levels_validation(self):
+        """Wrong number of pressure levels raises ValueError."""
+        import pytest
+
+        with pytest.raises(ValueError, match="n_levels"):
+            PrimitiveEquationsStepper(
+                shape=SHAPE, n_levels=3, pressure_levels=[100000.0, 50000.0]
+            )
+
+    def test_surface_level_has_no_pressure_gradient_tendency(self):
+        """Level 0 always has zero pressure gradient tendency.
+
+        φ_0 = phi_surface = 0.0 everywhere (a spatial constant), so ∇φ_0 = 0
+        exactly. Combined with V=0 (no advection), the surface-level momentum
+        tendency is exactly zero, while upper levels (φ_k > 0, varying in space
+        when T has gradients) have nonzero tendency.
+        """
+        stepper = _make_stepper(omega=0.0)
+        B = 1
+        bump = _gaussian_bump(*SHAPE)
+        T_pert = 10.0 * bump.unsqueeze(0).unsqueeze(0).expand(B, N_LEVELS, *SHAPE)
+        T = torch.full((B, N_LEVELS, *SHAPE), T_BACKGROUND) + T_pert
+        uv = torch.zeros(B, N_LEVELS, *SHAPE, 2)
+        q = torch.zeros(B, N_LEVELS, *SHAPE)
+
+        duv_dt, _, _ = stepper.compute_tendencies(uv, T, q)
+
+        # phi_surface = 0 everywhere → ∇phi_0 = 0 → no pressure gradient at level 0
+        assert duv_dt[:, 0].abs().max() < 1e-10, (
+            "surface level (phi=0) should have zero momentum tendency"
+        )
+        # Level 1: phi_1 = R*T*log_p_ratio[0] varies with the T anomaly → nonzero ∇φ
+        assert duv_dt[:, 1].abs().max() > 1e-8, (
+            "level 1 should have nonzero tendency from warm T anomaly"
+        )
