@@ -41,6 +41,8 @@ from fme.core.disco._quadrature import precompute_latitudes
 from fme.core.disco._vector_convolution import VectorDiscoConvS2
 from fme.core.shallow_water.scalar_vector_product import ScalarVectorProduct
 
+R_EARTH = 6.371e6  # m, Earth's mean radius used to convert angular → physical gradients
+
 
 class PrimitiveEquationsStepper(nn.Module):
     """Multi-level hydrostatic primitive equations stepper on the sphere.
@@ -163,17 +165,21 @@ class PrimitiveEquationsStepper(nn.Module):
             param.requires_grad = False
 
         with torch.no_grad():
-            # Gradient: follow the ShallowWaterStepper convention
-            # W_sv[out_v=0, in_s=0, :, 1] = 1.0 approximates ∇s
+            # Gradient: W_sv[out_v=0, in_s=0, :, 1] approximates ∇s in
+            # angular units (per radian). Dividing by R_EARTH converts to
+            # physical units (per metre) so the pressure gradient force
+            # dV/dt = -∇φ has the correct m/s² dimension.
             self.grad_conv.W_sv.zero_()
-            self.grad_conv.W_sv[0, 0, :, 1] = 1.0
+            self.grad_conv.W_sv[0, 0, :, 1] = 1.0 / R_EARTH
 
             # Vorticity: the d=0 component of W_vs (the "div" variable in
             # the forward) gives the physical curl/vorticity operator, while
             # d=1 (the "curl" variable) gives divergence — as established by
             # the ShallowWaterStepper which uses W_vs[..., 1] for divergence.
+            # The 1/R_EARTH factor converts angular vorticity (per radian)
+            # to physical vorticity (1/s) when V is in m/s.
             self.vort_conv.W_vs.zero_()
-            self.vort_conv.W_vs[0, 0, :, 0] = 1.0
+            self.vort_conv.W_vs[0, 0, :, 0] = 1.0 / R_EARTH
 
             # Coriolis: weight[s=0, v=0, mode=1] = 1.0 gives the 90°
             # rotation f×V following the ShallowWaterStepper convention.
@@ -256,8 +262,13 @@ class PrimitiveEquationsStepper(nn.Module):
         """
         B, K, H, W = T.shape
 
-        # Hydrostatic geopotential from temperature
+        # Hydrostatic geopotential from temperature.
+        # Remove the spatial mean at each level before computing ∇φ: only
+        # horizontal spatial variations drive flow, and the spatially-uniform
+        # part causes spurious numerical forcing because the discrete DISCO
+        # gradient operator does not satisfy ∇(const) = 0 exactly.
         phi = self._hydrostatic_integration(T)  # (B, K, H, W)
+        phi = phi - phi.mean(dim=(-2, -1), keepdim=True)  # remove level mean
 
         # Pressure gradient force: -∇φ_k per level
         grad_phi = self._gradient(phi)  # (B, K, H, W, 2)
@@ -284,11 +295,16 @@ class PrimitiveEquationsStepper(nn.Module):
         duv_dt = -grad_phi - coriolis - grad_ke + vort_adv
 
         # Temperature advection: -V_k · ∇T_k (advective form)
-        grad_T = self._gradient(T)  # (B, K, H, W, 2)
+        # Subtract spatial mean before differentiating: only spatial variations
+        # drive advection, and the DISCO gradient operator has a small spurious
+        # response to spatially-uniform fields that would otherwise accumulate.
+        T_anom = T - T.mean(dim=(-2, -1), keepdim=True)
+        grad_T = self._gradient(T_anom)  # (B, K, H, W, 2)
         dT_dt = -(uv[..., 0] * grad_T[..., 0] + uv[..., 1] * grad_T[..., 1])
 
         # Humidity advection: -V_k · ∇q_k (passive tracer)
-        grad_q = self._gradient(q)  # (B, K, H, W, 2)
+        q_anom = q - q.mean(dim=(-2, -1), keepdim=True)
+        grad_q = self._gradient(q_anom)  # (B, K, H, W, 2)
         dq_dt = -(uv[..., 0] * grad_q[..., 0] + uv[..., 1] * grad_q[..., 1])
 
         return duv_dt, dT_dt, dq_dt
