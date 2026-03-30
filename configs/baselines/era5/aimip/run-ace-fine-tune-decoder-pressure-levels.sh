@@ -4,20 +4,8 @@ set -e
 
 JOB_NAME_BASE="ace-aimip-fine-tune-decoder-pressure-levels"
 JOB_GROUP="ace-aimip"
-PRESSURE_LEVEL_CONFIG_FILENAME="ace-fine-tune-decoder-pressure-level-config.yaml"
-PRESSURE_LEVEL_LR_WARMUP_CONFIG_FILENAME="ace-fine-tune-decoder-pressure-level-lr-warmup-config.yaml"
-PRESSURE_LEVEL_REWEIGHT_CONFIG_FILENAME="ace-fine-tune-decoder-pressure-level-reweight-config.yaml"
-PRESSURE_LEVEL_FROZEN_CONFIG_FILENAME="ace-fine-tune-decoder-pressure-level-frozen-config.yaml"
-PRESSURE_LEVEL_FROZEN_LR_WARMUP_CONFIG_FILENAME="ace-fine-tune-decoder-pressure-level-frozen-lr-warmup-config.yaml"
-PRESSURE_LEVEL_SEPARATE_DECODER_CONFIG_FILENAME="ace-fine-tune-decoder-pressure-level-separate-decoder-config.yaml"
 PRESSURE_LEVEL_SEPARATE_DECODER_LR_WARMUP_CONFIG_FILENAME="ace-fine-tune-decoder-pressure-level-separate-decoder-lr-warmup-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
-PRESSURE_LEVEL_CONFIG_PATH=$SCRIPT_PATH/$PRESSURE_LEVEL_CONFIG_FILENAME
-PRESSURE_LEVEL_LR_WARMUP_CONFIG_PATH=$SCRIPT_PATH/$PRESSURE_LEVEL_LR_WARMUP_CONFIG_FILENAME
-PRESSURE_LEVEL_REWEIGHT_CONFIG_PATH=$SCRIPT_PATH/$PRESSURE_LEVEL_REWEIGHT_CONFIG_FILENAME
-PRESSURE_LEVEL_FROZEN_CONFIG_PATH=$SCRIPT_PATH/$PRESSURE_LEVEL_FROZEN_CONFIG_FILENAME
-PRESSURE_LEVEL_FROZEN_LR_WARMUP_CONFIG_PATH=$SCRIPT_PATH/$PRESSURE_LEVEL_FROZEN_LR_WARMUP_CONFIG_FILENAME
-PRESSURE_LEVEL_SEPARATE_DECODER_CONFIG_PATH=$SCRIPT_PATH/$PRESSURE_LEVEL_SEPARATE_DECODER_CONFIG_FILENAME
 PRESSURE_LEVEL_SEPARATE_DECODER_LR_WARMUP_CONFIG_PATH=$SCRIPT_PATH/$PRESSURE_LEVEL_SEPARATE_DECODER_LR_WARMUP_CONFIG_FILENAME
 EXISTING_RESULTS_DATASET="01K9B1MXD6V26S8BQH5CKY514C"  # best checkpoint is ace-aimip-train-rs3
 BEAKER_USERNAME=bhenn1983
@@ -26,7 +14,7 @@ N_GPUS=4
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-python -m fme.ace.validate_config --config_type train $PRESSURE_LEVEL_CONFIG_PATH
+python -m fme.ace.validate_config --config_type train $PRESSURE_LEVEL_SEPARATE_DECODER_LR_WARMUP_CONFIG_PATH
 
 launch_job () {
 
@@ -63,60 +51,7 @@ launch_job () {
 
 }
 
-# random seed ensemble of fine-tuning existing decoder to produce pressure level outputs
-for SEED in 0 1 2 3; do
-    JOB_NAME="${JOB_NAME_BASE}-RS${SEED}"
-    OVERRIDE="seed=${SEED}"
-    launch_job $JOB_NAME $PRESSURE_LEVEL_CONFIG_PATH $OVERRIDE
-done
-
-# same as above but with LR warmup
-for SEED in 0 1; do
-    JOB_NAME="${JOB_NAME_BASE}-lr-warmup-RS${SEED}"
-    OVERRIDE="seed=${SEED}"
-    launch_job $JOB_NAME $PRESSURE_LEVEL_LR_WARMUP_CONFIG_PATH $OVERRIDE
-done
-
-# same as above but smaller ensemble with downweighted q1/q2/q3/q4 to avoid overfitting
-for SEED in 0 1; do
-    JOB_NAME="${JOB_NAME_BASE}-downweight-q-RS${SEED}"
-    OVERRIDE="seed=${SEED} \
-stepper.loss.weights.specific_total_water_1=0.1 \
-stepper.loss.weights.specific_total_water_2=0.25 \
-stepper.loss.weights.specific_total_water_3=0.5 \
-stepper.loss.weights.specific_total_water_4=0.5"
-    launch_job $JOB_NAME $PRESSURE_LEVEL_CONFIG_PATH $OVERRIDE
-done
-
-# fine tune with unfrozen decoder, but reweight (heavily downweight the fine-tuned variables)
-for SEED in 0 1; do
-    JOB_NAME="${JOB_NAME_BASE}-reweight-RS${SEED}"
-    OVERRIDE="seed=${SEED}"
-    launch_job $JOB_NAME $PRESSURE_LEVEL_REWEIGHT_CONFIG_PATH $OVERRIDE
-done
-
-# random seed ensemble of fine-tuning existing decoder to produce pressure level outputs, new weights only
-for SEED in 0 1; do
-    JOB_NAME="${JOB_NAME_BASE}-frozen-RS${SEED}"
-    OVERRIDE="seed=${SEED}"
-    launch_job $JOB_NAME $PRESSURE_LEVEL_FROZEN_CONFIG_PATH $OVERRIDE
-done
-
-# same as above but with LR warmup
-for SEED in 0 1; do
-    JOB_NAME="${JOB_NAME_BASE}-frozen-lr-warmup-RS${SEED}"
-    OVERRIDE="seed=${SEED}"
-    launch_job $JOB_NAME $PRESSURE_LEVEL_FROZEN_LR_WARMUP_CONFIG_PATH $OVERRIDE
-done
-
-# fine tune with separate decoder for pressure levels
-for SEED in 0 1; do
-    JOB_NAME="${JOB_NAME_BASE}-separate-decoder-RS${SEED}"
-    OVERRIDE="seed=${SEED}"
-    launch_job $JOB_NAME $PRESSURE_LEVEL_SEPARATE_DECODER_CONFIG_PATH $OVERRIDE
-done
-
-# same as above but with LR warmup
+# fine tune with separate decoder for pressure levels, with LR warmup
 for SEED in 0 1 2 3; do
     JOB_NAME="${JOB_NAME_BASE}-separate-decoder-lr-warmup-RS${SEED}"
     OVERRIDE="seed=${SEED}"
