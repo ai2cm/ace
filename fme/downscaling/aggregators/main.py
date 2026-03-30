@@ -73,7 +73,7 @@ class LossVsNoiseAggregator:
         self._inner_edges = edges[1:-1]
         self._bin_centers = ((edges[:-1] + edges[1:]) / 2).numpy()
 
-        self._total_sum = torch.zeros(n_bins, dtype=torch.float64)
+        self._total_sum = torch.zeros(n_bins, dtype=torch.float32)
         self._total_count = torch.zeros(n_bins, dtype=torch.int64)
         self._channel_sum: dict[str, torch.Tensor] = {}
         self._channel_count: dict[str, torch.Tensor] = {}
@@ -82,9 +82,9 @@ class LossVsNoiseAggregator:
         self, values: torch.Tensor, bin_indices: torch.Tensor, name: str
     ) -> None:
         if name not in self._channel_sum:
-            self._channel_sum[name] = torch.zeros(self._n_bins, dtype=torch.float64)
+            self._channel_sum[name] = torch.zeros(self._n_bins, dtype=torch.float32)
             self._channel_count[name] = torch.zeros(self._n_bins, dtype=torch.int64)
-        self._channel_sum[name].scatter_add_(0, bin_indices, values.to(torch.float64))
+        self._channel_sum[name].scatter_add_(0, bin_indices, values.to(torch.float32))
         self._channel_count[name].scatter_add_(
             0, bin_indices, torch.ones_like(bin_indices, dtype=torch.int64)
         )
@@ -110,7 +110,7 @@ class LossVsNoiseAggregator:
                 )
 
         stacked = torch.stack([value for value in per_channel.values()], dim=-1)
-        total_loss = torch.mean(stacked, dim=-1).to(torch.float64)
+        total_loss = torch.mean(stacked, dim=-1)
         self._total_sum.scatter_add_(0, bin_indices, total_loss)
         self._total_count.scatter_add_(
             0, bin_indices, torch.ones_like(bin_indices, dtype=torch.int64)
