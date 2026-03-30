@@ -41,6 +41,8 @@ class ModelOutputs:
     loss: torch.Tensor
     latent_steps: list[torch.Tensor] = dataclasses.field(default_factory=list)
     channel_losses: TensorDict = dataclasses.field(default_factory=dict)
+    sigma: torch.Tensor | None = None
+    per_sample_channel_loss: TensorDict = dataclasses.field(default_factory=dict)
 
 
 def _rename_normalizer(
@@ -451,6 +453,11 @@ class DiffusionModel:
                 name: torch.mean(weighted_loss[:, i, :, :])
                 for i, name in enumerate(self.out_packer.names)
             }
+            per_sample_channel_loss = {
+                name: torch.mean(weighted_loss[:, i, :, :], dim=(-2, -1)).detach()
+                for i, name in enumerate(self.out_packer.names)
+            }
+            sigma = conditioned_target.sigma[:, 0, 0, 0].detach()
 
         if self.config.predict_residual:
             denoised_norm = denoised_norm + base_prediction
@@ -464,6 +471,8 @@ class DiffusionModel:
             target=target,
             loss=loss,
             channel_losses=channel_losses,
+            sigma=sigma,
+            per_sample_channel_loss=per_sample_channel_loss,
             latent_steps=[],
         )
 
