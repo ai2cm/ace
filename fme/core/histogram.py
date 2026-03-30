@@ -540,6 +540,10 @@ class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
     """ComparedDynamicHistograms with support for upper-tailed, lower-tailed,
     and two-tailed distribution metrics. By default, variables not in either list
     two_tailed_variables or left_tailed_variables are treated as upper-tailed.
+
+    Percentiles values should be specified as the percentile of the upper tail.
+    This class will automatically compute the complementary percentile for the
+    lower tail.
     """
 
     def __init__(
@@ -605,6 +609,7 @@ class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
 
     def get_wandb(self) -> dict[str, float]:
         return_dict: dict[str, matplotlib.figure.Figure | float] = {}
+        target_dict: dict[str, float] = {}
 
         for field_name, histograms in self._get_histograms().items():
             target = histograms.get("target")
@@ -622,11 +627,8 @@ class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
                         target,
                         field_name,
                     )
-                    for key, value in return_dict.items():
-                        return_dict[f"prediction_frac_of_target/{key}"] = (
-                            value / target_dict[key]
-                        )
-
+        for key, value in target_dict.items():
+            return_dict[f"prediction_frac_of_target/{key}"] = value / target_dict[key]
         return return_dict
 
 
