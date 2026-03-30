@@ -762,7 +762,7 @@ class Aggregator:
             "eastward_wind_at_ten_meters",
             "northward_wind_at_ten_meters",
         ],
-        left_tailed_variables: list[str] | None = ["PRMSL"],
+        left_tailed_variables: list[str] | None = ["PRMSL", "PRESsfc"],
     ) -> None:
         self.downscale_factor = downscale_factor
 
