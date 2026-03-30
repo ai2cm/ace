@@ -283,6 +283,8 @@ def simplify_time_sample_dims(ds: xr.Dataset) -> xr.Dataset:
 
 
 def monthly_data_time_coord(ds: xr.Dataset) -> xr.Dataset:
+    """ACE data writer sets monthly time coordinates to the 15th of each month. Shift
+    these to the 1st of each month."""
     ds = ds.where(ds.counts > 0).dropna(dim="time")
     ds = ds.drop_vars("counts")
     month_starts = ds["time"].values - datetime.timedelta(days=14)
@@ -290,6 +292,8 @@ def monthly_data_time_coord(ds: xr.Dataset) -> xr.Dataset:
 
 
 def daily_data_time_coord(ds: xr.Dataset) -> xr.Dataset:
+    """ACE data writer averaging over 0, 6, 12, 18Z outputs results in a daily time
+    coordinate at 9Z. Shift these to 0Z."""
     day_starts = ds["time"].values - datetime.timedelta(hours=9)
     return ds.assign_coords({"time": day_starts})
 

@@ -9,7 +9,6 @@ from postprocess import (
     daily_data_time_coord,
     monthly_data_time_coord,
     nn_bounds,
-    simplify_time_sample_dims,
     stack_vertical_dimension,
     time_bounds,
 )
@@ -74,43 +73,6 @@ def test_stack_vertical_dimension_raises_for_multi_var_no_match():
         stack_vertical_dimension(
             ds, "plev", "ta", r"[0-9]+$", "air_temperature", "air temperature", "K"
         )
-
-
-# --- simplify_time_sample_dims ---
-
-
-def _make_ds_with_sample_and_valid_time(n_time: int = 3) -> xr.Dataset:
-    times = [cftime.datetime(2000, m, 15) for m in range(1, n_time + 1)]
-    init_time = cftime.datetime(2000, 1, 1)
-    da = xr.DataArray(
-        np.ones((1, n_time, 4)),
-        dims=["sample", "time", "x"],
-        coords={
-            "time": times,
-            "valid_time": ("time", times),
-            "init_time": init_time,
-        },
-    )
-    return xr.Dataset({"var": da})
-
-
-def test_simplify_time_sample_dims_removes_sample():
-    ds = _make_ds_with_sample_and_valid_time()
-    result = simplify_time_sample_dims(ds)
-    assert "sample" not in result.dims
-
-
-def test_simplify_time_sample_dims_promotes_valid_time():
-    ds = _make_ds_with_sample_and_valid_time()
-    result = simplify_time_sample_dims(ds)
-    assert "time" in result.coords
-    assert "valid_time" not in result.coords
-
-
-def test_simplify_time_sample_dims_drops_init_time():
-    ds = _make_ds_with_sample_and_valid_time()
-    result = simplify_time_sample_dims(ds)
-    assert "init_time" not in result.coords
 
 
 # --- monthly_data_time_coord ---
