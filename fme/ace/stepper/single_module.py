@@ -829,12 +829,15 @@ class Stepper:
         self._dataset_info = dataset_info
         self.forcing_deriver = config.derived_forcings.build(dataset_info)
 
-    def build_loss(self, loss_config: StepLossConfig) -> StepLoss:
+    def build_loss(self, loss_config: StepLossConfig, reduce: bool = True) -> StepLoss:
         """Build a StepLoss from the given config using this stepper's normalizer
         and dataset info.
 
         Args:
             loss_config: The loss configuration to build from.
+            reduce: If True (default), the returned StepLoss produces
+                a scalar.  If False, it returns a per-channel vector
+                of shape ``(n_channels,)``.
 
         Returns:
             A StepLoss built using this stepper's loss normalizer, gridded
@@ -846,6 +849,7 @@ class Stepper:
             out_names=self.loss_names,
             channel_dim=self.CHANNEL_DIM,
             normalizer=loss_normalizer,
+            reduce=reduce,
         )
 
     @property
@@ -1496,7 +1500,7 @@ class TrainStepper(
 
         self._prognostic_names = self._stepper.prognostic_names
         self._derive_func = self._stepper.derive_func
-        self._loss_obj = self._stepper.build_loss(config.loss)
+        self._loss_obj = self._stepper.build_loss(config.loss, reduce=False)
 
     def train_on_batch(
         self,

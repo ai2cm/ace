@@ -65,6 +65,7 @@ class WeightedMappingLoss:
         out_names: list[str],
         normalizer: StandardNormalizer,
         channel_dim: int = -3,
+        reduce: bool = True,
     ):
         """
         Args:
@@ -74,6 +75,10 @@ class WeightedMappingLoss:
             out_names: The names of the output variables.
             normalizer: The normalizer to use.
             channel_dim: The channel dimension of the input tensors.
+            reduce: If True (default), return the scalar loss from the
+                inner loss module.  If False, return a per-channel loss
+                vector of shape ``(n_channels,)`` via
+                ``_reduce_to_per_channel``.
         """
         self._weight_tensor = _construct_weight_tensor(
             weights, out_names, channel_dim=channel_dim
@@ -90,13 +95,13 @@ class WeightedMappingLoss:
         self.packer = Packer(out_names)
         self.channel_dim = channel_dim
         self.normalizer = normalizer
+        self.reduce = reduce
 
     def __call__(
         self,
         predict_dict: TensorMapping,
         target_dict: TensorMapping,
     ) -> torch.Tensor:
-        """Returns per-channel loss vector of shape ``(n_channels,)``."""
         predict_tensors = self.packer.pack(
             self.normalizer.normalize(predict_dict), axis=self.channel_dim
         )
@@ -108,10 +113,12 @@ class WeightedMappingLoss:
             predict_tensors = torch.where(nan_mask, 0.0, predict_tensors)
             target_tensors = torch.where(nan_mask, 0.0, target_tensors)
 
-        cdim = _channel_dim_positive(predict_tensors.ndim, self.channel_dim)
-        n_c = int(predict_tensors.shape[cdim])
         result = self.loss(predict_tensors, target_tensors)
-        return _reduce_to_per_channel(result, cdim, n_c)
+        if not self.reduce:
+            cdim = _channel_dim_positive(predict_tensors.ndim, self.channel_dim)
+            n_c = int(predict_tensors.shape[cdim])
+            return _reduce_to_per_channel(result, cdim, n_c)
+        return result
 
     def get_normalizer_state(self) -> dict[str, float]:
         return self.normalizer.get_state()
@@ -185,7 +192,7 @@ class AreaWeightedMSELoss(torch.nn.Module):
         self._area_weighted_mean = area_weighted_mean
 
     def __call__(self, x, y):
-        return self._area_weighted_mean((x - y) ** 2)
+        return torch.mean(self._area_weighted_mean((x - y) ** 2))
 
 
 class WeightedSum(torch.nn.Module):
@@ -427,14 +434,7 @@ class LossConfig:
         reduction: Literal["mean", "none"],
         gridded_operations: GriddedOperations | None,
     ) -> Any:
-        """Build a loss module.
-
-        Individual loss modules return their natural (unreduced) output.
-        Per-channel reduction is handled by ``WeightedMappingLoss``, not
-        by the loss modules themselves.  For L1/MSE the underlying PyTorch
-        loss always uses ``reduction="none"``; the ``reduction`` argument
-        is kept for API compatibility but has no effect for those types.
-
+        """
         Args:
             reduction: The reduction to apply to the loss, either "mean" or "none".
                 Only used if the loss function is L1, MSE, or LpLoss.
@@ -444,9 +444,9 @@ class LossConfig:
         if self.type == "LpLoss":
             main_loss = LpLoss(**self.kwargs)
         elif self.type == "L1":
-            main_loss = torch.nn.L1Loss(reduction="none")
+            main_loss = torch.nn.L1Loss(reduction=reduction)
         elif self.type == "MSE":
-            main_loss = torch.nn.MSELoss(reduction="none")
+            main_loss = torch.nn.MSELoss(reduction=reduction)
         elif self.type == "AreaWeightedMSE":
             if gridded_operations is None:
                 raise ValueError("gridded_operations is required for AreaWeightedMSE")
@@ -512,8 +512,10 @@ class StepLoss(torch.nn.Module):
             step: The step number, indexed from 0 for the first step.
 
         Returns:
-            Per-channel losses, shape ``(n_channels,)``.
-            Use ``tensor.sum()`` for the scalar loss to optimize.
+            The loss.  Shape depends on the ``reduce`` flag of the
+            underlying ``WeightedMappingLoss``: scalar when
+            ``reduce=True``, or ``(n_channels,)`` when
+            ``reduce=False``.
         """
         step_weight = (1.0 + self.sqrt_loss_decay_constant * step) ** (-0.5)
         return self.loss(predict_dict, target_dict) * step_weight
@@ -571,9 +573,11 @@ class StepLossConfig:
         out_names: list[str],
         normalizer: StandardNormalizer,
         channel_dim: int = -3,
+        reduce: bool = True,
     ) -> StepLoss:
+        reduction: Literal["mean", "none"] = "mean" if reduce else "none"
         loss = self.loss_config.build(
-            reduction="mean",
+            reduction=reduction,
             gridded_operations=gridded_ops,
         )
         return StepLoss(
@@ -583,6 +587,7 @@ class StepLossConfig:
                 out_names=out_names,
                 channel_dim=channel_dim,
                 normalizer=normalizer,
+                reduce=reduce,
             ),
             sqrt_loss_decay_constant=self.sqrt_loss_step_decay_constant,
         )
