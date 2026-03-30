@@ -1,6 +1,5 @@
 import collections
 import logging
-import math
 from collections import namedtuple
 from collections.abc import Mapping
 from typing import Literal
@@ -41,7 +40,7 @@ def _format_percentile_for_metric_key(p: float, reference_percentile: float) -> 
     # decimal places in the reference percentile
     s = repr(reference_percentile)
     if "." not in s:
-        return 0
+        return str(int(s))
     decimal_places = len(s.split(".")[1])
 
     rounded = round(p, decimal_places)
@@ -597,11 +596,11 @@ class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
     ) -> dict[str, float]:
         return_dict: dict[str, float] = {}
         tail = self._variable_distribution_tail(field_name)
-    
+
         for ref in self.percentiles:
             if field_name in self._left_tailed_variables:
                 p = 100.0 - ref
-            else:   # upper tailed or two-tailed
+            else:  # upper tailed or two-tailed
                 p = ref
             p_key = _format_percentile_for_metric_key(p, ref)
             if tail == "upper":
@@ -649,7 +648,7 @@ class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
         return return_dict
 
     def _get_percentile_metrics_for_field(
-            self, histogram: _Histogram, field_name: str
+        self, histogram: _Histogram, field_name: str
     ) -> dict[str, float]:
         tail = self._variable_distribution_tail(field_name)
         percentile_metrics: dict[str, float] = {}
@@ -676,12 +675,19 @@ class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
             return_dict[field_name] = fig
             plt.close(fig)
             if prediction is not None:
-                return_dict = self._get_percentile_metrics_for_field(prediction, field_name)
+                return_dict = self._get_percentile_metrics_for_field(
+                    prediction, field_name
+                )
 
                 if self._compute_percentile_frac and target is not None:
-                    target_dict = self._get_percentile_metrics_for_field(target, field_name,)
+                    target_dict = self._get_percentile_metrics_for_field(
+                        target,
+                        field_name,
+                    )
                     for key, value in return_dict.items():
-                        return_dict[f"prediction_frac_of_target/{key}"] = value / target_dict[key]
+                        return_dict[f"prediction_frac_of_target/{key}"] = (
+                            value / target_dict[key]
+                        )
 
         return return_dict
 
