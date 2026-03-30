@@ -197,8 +197,7 @@ def test__construct_weight_tensor():
 @pytest.mark.parametrize("scale", [1.0, 2.0])
 @pytest.mark.parametrize("reduce", [True, False])
 def test_WeightedMappingLoss(mean, scale, reduce):
-    reduction = "mean" if reduce else "none"
-    loss = torch.nn.MSELoss(reduction=reduction)
+    loss = torch.nn.MSELoss(reduction="none")
     n_channels = 5
     packer = Packer([f"var_{i}" for i in range(n_channels)])
     out_names = [f"var_{i}" for i in range(n_channels)]
@@ -211,13 +210,12 @@ def test_WeightedMappingLoss(mean, scale, reduce):
         weights={},
         out_names=out_names,
         normalizer=normalizer,
-        reduce=reduce,
     )
     x = torch.randn(15, n_channels, 10, 10).to(get_device(), dtype=torch.float)
     y = torch.randn(15, n_channels, 10, 10).to(get_device(), dtype=torch.float)
     x_mapping = {name: x[:, i, :, :] for i, name in enumerate(packer.names)}
     y_mapping = {name: y[:, i, :, :] for i, name in enumerate(packer.names)}
-    result = mapping_loss(x_mapping, y_mapping)
+    result = mapping_loss(x_mapping, y_mapping, reduce=reduce)
     expected_scalar = torch.nn.MSELoss()(x, y) / scale**2
     if reduce:
         assert result.shape == ()
@@ -263,7 +261,6 @@ def test_StepLossConfig_no_weights(reduce):
         out_names=out_names,
         channel_dim=channel_dim,
         normalizer=normalizer,
-        reduce=reduce,
     )
     packer = Packer(out_names)
 
@@ -273,8 +270,8 @@ def test_StepLossConfig_no_weights(reduce):
     y = packer.pack(y_mapping, axis=channel_dim)
 
     expected = loss(x, y)
-    result_step0 = mapping_loss(x_mapping, y_mapping, step=0)
-    result_step1 = mapping_loss(x_mapping, y_mapping, step=1)
+    result_step0 = mapping_loss(x_mapping, y_mapping, step=0, reduce=reduce)
+    result_step1 = mapping_loss(x_mapping, y_mapping, step=1, reduce=reduce)
     if reduce:
         torch.testing.assert_close(expected, result_step0)
         torch.testing.assert_close(expected, result_step1)
@@ -303,7 +300,6 @@ def test_StepLossConfig_weights(reduce):
         out_names=out_names,
         channel_dim=channel_dim,
         normalizer=normalizer,
-        reduce=reduce,
     )
 
     x0 = torch.ones(4, 5, 5).to(get_device())
@@ -314,7 +310,7 @@ def test_StepLossConfig_weights(reduce):
     x_mapping = {"var_0": x0, "var_1": x1}
     y_mapping = {"var_0": y0, "var_1": y1}
 
-    result = mapping_loss(x_mapping, y_mapping, step=0)
+    result = mapping_loss(x_mapping, y_mapping, step=0, reduce=reduce)
     expected = torch.tensor((16 + 0.25) / 2.0, device=get_device())
     if reduce:
         assert result.shape == ()
@@ -347,7 +343,6 @@ def test_StepLossConfig_with_step_loss_decay(sqrt_loss_step_decay_constant, redu
         out_names=out_names,
         channel_dim=channel_dim,
         normalizer=normalizer,
-        reduce=reduce,
     )
 
     x0 = torch.ones(4, 5, 5).to(get_device())
@@ -362,13 +357,13 @@ def test_StepLossConfig_with_step_loss_decay(sqrt_loss_step_decay_constant, redu
         return result.sum() if not reduce else result
 
     torch.testing.assert_close(
-        _scalar(mapping_loss(x_mapping, y_mapping, step=0)),
-        _scalar(mapping_loss(x_mapping, y_mapping, step=1))
+        _scalar(mapping_loss(x_mapping, y_mapping, step=0, reduce=reduce)),
+        _scalar(mapping_loss(x_mapping, y_mapping, step=1, reduce=reduce))
         * (1 + sqrt_loss_step_decay_constant) ** 0.5,
     )
     torch.testing.assert_close(
-        _scalar(mapping_loss(x_mapping, y_mapping, step=0)),
-        _scalar(mapping_loss(x_mapping, y_mapping, step=2))
+        _scalar(mapping_loss(x_mapping, y_mapping, step=0, reduce=reduce)),
+        _scalar(mapping_loss(x_mapping, y_mapping, step=2, reduce=reduce))
         * (1 + sqrt_loss_step_decay_constant * 2) ** 0.5,
     )
 
@@ -377,8 +372,7 @@ def test_StepLossConfig_with_step_loss_decay(sqrt_loss_step_decay_constant, redu
 @pytest.mark.parametrize("scale", [1.0, 2.0])
 @pytest.mark.parametrize("reduce", [True, False])
 def test_WeightedMappingLoss_with_ensemble_dim(mean, scale, reduce):
-    reduction = "mean" if reduce else "none"
-    loss = torch.nn.MSELoss(reduction=reduction)
+    loss = torch.nn.MSELoss(reduction="none")
     n_channels = 5
     n_ensemble = 3
     packer = Packer([f"var_{i}" for i in range(n_channels)])
@@ -392,7 +386,6 @@ def test_WeightedMappingLoss_with_ensemble_dim(mean, scale, reduce):
         weights={},
         out_names=out_names,
         normalizer=normalizer,
-        reduce=reduce,
     )
     x = torch.randn(15, n_ensemble, n_channels, 10, 10).to(
         get_device(), dtype=torch.float
@@ -400,7 +393,7 @@ def test_WeightedMappingLoss_with_ensemble_dim(mean, scale, reduce):
     y = torch.randn(15, 1, n_channels, 10, 10).to(get_device(), dtype=torch.float)
     x_mapping = {name: x[:, :, i, :, :] for i, name in enumerate(packer.names)}
     y_mapping = {name: y[:, :, i, :, :] for i, name in enumerate(packer.names)}
-    result = mapping_loss(x_mapping, y_mapping)
+    result = mapping_loss(x_mapping, y_mapping, reduce=reduce)
     expected_scalar = torch.nn.MSELoss()(x, y) / scale**2
     if reduce:
         assert result.shape == ()
@@ -412,8 +405,7 @@ def test_WeightedMappingLoss_with_ensemble_dim(mean, scale, reduce):
 
 @pytest.mark.parametrize("reduce", [True, False])
 def test_WeightedMappingLoss_with_target_nans(reduce):
-    reduction = "mean" if reduce else "none"
-    loss = torch.nn.MSELoss(reduction=reduction)
+    loss = torch.nn.MSELoss(reduction="none")
     n_channels = 5
     packer = Packer([f"var_{i}" for i in range(n_channels)])
     out_names = [f"var_{i}" for i in range(n_channels)]
@@ -426,7 +418,6 @@ def test_WeightedMappingLoss_with_target_nans(reduce):
         weights={},
         out_names=out_names,
         normalizer=normalizer,
-        reduce=reduce,
     )
     x = torch.randn(15, n_channels, 10, 10).to(get_device(), dtype=torch.float)
     y = torch.randn(15, n_channels, 10, 10).to(get_device(), dtype=torch.float)
@@ -435,7 +426,7 @@ def test_WeightedMappingLoss_with_target_nans(reduce):
     y_mapping[packer.names[0]][:, :, 0] = float("nan")
     x[:, 0, :, 0] = 0.0
     y[:, 0, :, 0] = 0.0
-    result = mapping_loss(x_mapping, y_mapping)
+    result = mapping_loss(x_mapping, y_mapping, reduce=reduce)
     mse = torch.nn.MSELoss()
     expected = mse(x, y)
     if reduce:
