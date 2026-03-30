@@ -9,7 +9,6 @@ import xarray as xr
 import yaml
 
 from fme.core.cli import prepare_directory
-from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.time import TimeSlice
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
@@ -27,31 +26,6 @@ from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
 from fme.downscaling.predictors import PatchPredictionConfig, PatchPredictor
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.typing_ import FineResCoarseResPair
-
-
-def _downscale_coord(coord: torch.tensor, downscale_factor: int):
-    """
-    This is a bandaid fix for the issue where BatchData does not
-    contain coords for the topography, which is fine-res in the no-target
-    generation case. The SampleAggregator requires the fine-res coords
-    for the predictions.
-
-    TODO: remove after topography refactors to have its own data container.
-    """
-    if len(coord.shape) != 1:
-        raise ValueError("coord tensor to downscale must be 1d")
-    spacing = coord[1] - coord[0]
-    # Compute edges from midpoints
-    first_edge = coord[0] - spacing / 2
-    last_edge = coord[-1] + spacing / 2
-
-    # Subdivide edges
-    step = spacing / downscale_factor
-    new_edges = torch.arange(first_edge, last_edge + step / 2, step)
-
-    # Compute new midpoints
-    coord_new = (new_edges[:-1] + new_edges[1:]) / 2
-    return coord_new.to(device=coord.device, dtype=coord.dtype)
 
 
 @dataclasses.dataclass
@@ -145,10 +119,7 @@ class EventDownscaler:
         logging.info(f"Running {self.event_name} event downscaling...")
         batch = next(iter(self.data.get_generator()))
         coarse_coords = batch[0].latlon_coordinates
-        fine_coords = LatLonCoordinates(
-            lat=_downscale_coord(coarse_coords.lat, self.model.downscale_factor),
-            lon=_downscale_coord(coarse_coords.lon, self.model.downscale_factor),
-        )
+        fine_coords = self.model.get_fine_coords_for_batch(batch)
         sample_agg = SampleAggregator(
             coarse=batch[0].data,
             latlon_coordinates=FineResCoarseResPair(

@@ -70,6 +70,7 @@ from fme.core.generics.data import GriddedDataABC, InferenceDataABC
 from fme.core.generics.inference import run_inference
 from fme.core.generics.metrics_aggregator import MetricsAggregator
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
+from fme.core.generics.validation import run_validation
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.timing import GlobalTimer
 from fme.core.training_history import TrainingJob
@@ -561,23 +562,17 @@ class Trainer:
             f"{self._epochs_trained} epochs"
         )
         self.valid_data.set_epoch(self._epochs_trained)
-        self.stepper.set_eval()
         aggregator = self._aggregator_builder.get_validation_aggregator()
         logging.info("Starting loop over validation data")
-        with torch.no_grad(), self.validation_context(), GlobalTimer():
-            for batch in self.valid_data.loader:
-                stepped = self.stepper.train_on_batch(
-                    batch,
-                    optimization=NullOptimization(),
-                    compute_derived_variables=True,
-                )
-                aggregator.record_batch(
-                    batch=stepped,
-                )
-        logging.info("Starting flush of reduced diagnostics to disk")
-        aggregator.flush_diagnostics(subdir=f"epoch_{self._epochs_trained:04d}")
-        logging.info("Getting validation aggregator logs")
-        return aggregator.get_logs(label="val")
+        return run_validation(
+            train_stepper=self.stepper,
+            validation_data=self.valid_data,
+            aggregator=aggregator,
+            diagnostics_subdir=f"epoch_{self._epochs_trained:04d}",
+            record_logs=lambda logs: None,
+            ema=self._ema,
+            validate_using_ema=self.config.validate_using_ema,
+        )
 
     def inference_one_epoch(
         self,
@@ -763,4 +758,4 @@ def epoch_checkpoint_enabled(
 ) -> bool:
     if save_epochs is None:
         return False
-    return epoch in range(max_epochs)[save_epochs.slice]
+    return epoch in range(max_epochs + 1)[save_epochs.slice]
