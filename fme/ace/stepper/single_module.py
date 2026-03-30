@@ -1627,9 +1627,11 @@ class TrainStepper(
                         for k, v in target_data.data.items()
                     }
                 )
-                step_loss = self._loss_obj(gen_step, target_step, step=step)
-                step_total = step_loss.sum()
-                metrics[f"loss_step_{step}"] = step_total.detach()
+                step_loss = self._loss_obj(
+                    gen_step, target_step, step=step, reduce=False
+                )
+                step_total_loss = step_loss.sum()
+                metrics[f"loss_step_{step}"] = step_total_loss.detach()
                 per_ch = self._loss_obj.loss.packer.unpack(step_loss.detach(), axis=0)
                 if per_channel_sum is None:
                     per_channel_sum = {k: v.clone() for k, v in per_ch.items()}
@@ -1637,7 +1639,7 @@ class TrainStepper(
                     for k in per_channel_sum:
                         per_channel_sum[k] = per_channel_sum[k] + per_ch[k]
             if optimize_step:
-                optimization.accumulate_loss(step_total)
+                optimization.accumulate_loss(step_total_loss)
         if per_channel_sum is not None:
             for k, v in per_channel_sum.items():
                 metrics[f"loss/{k}"] = v.detach()
