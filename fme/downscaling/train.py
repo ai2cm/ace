@@ -3,6 +3,7 @@ import contextlib
 import dataclasses
 import logging
 import os
+import re
 import shutil
 import time
 import uuid
@@ -179,7 +180,7 @@ class Trainer:
 
         self._best_valid_loss_name = "generation/metrics/relative_crps_bicubic"
         self._best_histogram_tail_name = (
-            "generation/histogram/abs_norm_tail_bias_above_percentile/99.99/"
+            "generation/histogram/prediction_frac_of_target/99.9999th-percentile"
         )
 
     def _update_weights_for_epoch(self, epoch: int) -> None:
@@ -530,10 +531,42 @@ class TrainerConfig:
         )
 
 
+def _get_complement_percentile_prefix(prefix):
+    """Given a prefix containing a percentile value, return a prefix with
+    100 minus that percentile. Returns None if no percentile pattern is found.
+    """
+    match = re.search(
+        r"(\d+(?:\.\d+)?)(?:th)?[-_/]percentile|percentile[-_/](\d+(?:\.\d+)?)",
+        prefix,
+    )
+    if match is None:
+        return None
+    if match.group(1) is not None:
+        num_str = match.group(1)
+        num_start, num_end = match.start(1), match.end(1)
+    else:
+        num_str = match.group(2)
+        num_start, num_end = match.start(2), match.end(2)
+    complement = 100 - float(num_str)
+    if "." in num_str:
+        decimal_places = len(num_str.split(".")[1])
+        complement_str = f"{complement:.{decimal_places}f}"
+    else:
+        complement_str = str(int(complement))
+    return prefix[:num_start] + complement_str + prefix[num_end:]
+
+
 def _get_channel_mean_scalar_metric(
     metrics, prefix="generation/metrics/relative_crps_bicubic"
 ):
-    channel_metric = [v for k, v in metrics.items() if k.startswith(prefix)]
+    prefixes = [prefix]
+    if "percentile" in prefix:
+        complement = _get_complement_percentile_prefix(prefix)
+        if complement is not None and complement != prefix:
+            prefixes.append(complement)
+    channel_metric = [
+        v for k, v in metrics.items() if any(k.startswith(p) for p in prefixes)
+    ]
     if len(channel_metric) == 0:
         return float("inf")
     else:

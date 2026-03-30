@@ -1,6 +1,5 @@
 import collections
 import logging
-import math
 from collections import namedtuple
 from collections.abc import Mapping
 from typing import Literal
@@ -26,35 +25,28 @@ def _add_trailing_slash(s):
         return s + "/"
 
 
-def _decimal_places_in_percentile(reference_percentile: float) -> int:
-    """Fractional digit count from ``repr`` of the configured percentile."""
-    s = repr(reference_percentile)
-    if "." not in s:
-        return 0
-    return len(s.split(".")[1])
-
-
 def _format_percentile_for_metric_key(p: float, reference_percentile: float) -> str:
     r"""
     Format *p* (the percentile passed to tail routines) for wandb keys.
 
     When *p* matches the configured reference (upper tail), use ``str(reference)``
-    so keys match e.g. ``99.0th-percentile``. For complementary tails
+    so keys match e.g. ``99.9th-percentile``. For complementary tails
     (``p = 100 - reference``), round using the reference's fractional width
     (e.g. ref ``99.9999`` -> ``0.0001``).
     """
-    if math.isclose(
-        p,
-        reference_percentile,
-        rel_tol=0.0,
-        abs_tol=1e-9 * max(1.0, abs(reference_percentile)),
-    ):
+    if p == reference_percentile:
         return str(reference_percentile)
-    decimals = _decimal_places_in_percentile(reference_percentile)
-    rounded = round(p, decimals)
-    if decimals == 0:
+
+    # decimal places in the reference percentile
+    s = repr(reference_percentile)
+    if "." not in s:
+        return str(int(s))
+    decimal_places = len(s.split(".")[1])
+
+    rounded = round(p, decimal_places)
+    if decimal_places == 0:
         return str(int(rounded))
-    return f"{rounded:.{decimals}f}"
+    return f"{rounded:.{decimal_places}f}"
 
 
 def trim_zero_bins(
@@ -132,19 +124,13 @@ def _abs_norm_tail_bias(
     target_counts: np.ndarray,
     predict_bin_edges: np.ndarray,
     target_bin_edges: np.ndarray,
-    tail: Literal["upper", "lower"] = "upper",
 ):
     pred_counts_rebinned = _rebin_counts(
         bin_edges=predict_bin_edges, counts=predict_counts, new_edges=target_bin_edges
     )
     bin_centers = 0.5 * (target_bin_edges[:-1] + target_bin_edges[1:])
     threshold = quantile(target_bin_edges, target_counts, percentile / 100.0)
-    if tail == "upper":
-        tail_mask = bin_centers > threshold
-    elif tail == "lower":
-        tail_mask = bin_centers < threshold
-    else:
-        raise ValueError(f"Invalid tail arg: {tail}. Must be 'upper' or 'lower'.")
+    tail_mask = bin_centers > threshold
 
     pred_density = (pred_counts_rebinned / np.sum(pred_counts_rebinned))[tail_mask]
     target_density = (target_counts / np.sum(target_counts))[tail_mask]
@@ -552,14 +538,19 @@ class ComparedDynamicHistograms:
 
 class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
     """ComparedDynamicHistograms with support for upper-tailed, lower-tailed,
-    and two-tailed distribution metrics.
+    and two-tailed distribution metrics. By default, variables not in either list
+    two_tailed_variables or left_tailed_variables are treated as upper-tailed.
+
+    Percentiles values should be specified as the percentile of the upper tail.
+    This class will automatically compute the complementary percentile for the
+    lower tail.
     """
 
     def __init__(
         self,
         n_bins: int,
         percentiles: list[float] | None = None,
-        compute_percentile_frac: bool = False,
+        compute_percentile_frac: bool = True,
         two_tailed_variables: list[str] | None = None,
         left_tailed_variables: list[str] | None = None,
     ) -> None:
@@ -581,7 +572,6 @@ class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
         return "upper"
 
     def _percentile_entries_for_field(self, field_name: str) -> list[tuple[float, str]]:
-        """(quantile_percentile, stable_key_fragment) pairs for wandb metric names."""
         tail = self._variable_distribution_tail(field_name)
         entries: list[tuple[float, str]] = []
         if tail == "upper":
@@ -594,69 +584,32 @@ class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
                 entries.append((p, _format_percentile_for_metric_key(p, ref)))
         else:
             for ref in self.percentiles:
-                p = 100.0 - ref
-                entries.append((p, _format_percentile_for_metric_key(p, ref)))
-            for ref in self.percentiles:
                 p = ref
                 entries.append((p, _format_percentile_for_metric_key(p, ref)))
+                entries.append((100.0 - ref, _format_percentile_for_metric_key(p, ref)))
         return entries
 
-    def _get_abs_norm_tail_biases_beyond_percentile(
-        self, field_name: str, prediction: _Histogram, target: _Histogram
+    def _get_percentile_metrics_for_field(
+        self, histogram: _Histogram, field_name: str
     ) -> dict[str, float]:
-        return_dict: dict[str, float] = {}
-        for ref in self.percentiles:
-            if field_name in self._left_tailed_variables:
-                p = 100.0 - ref
-            else:
-                p = ref
-            p_key = _format_percentile_for_metric_key(p, ref)
-            if self._variable_distribution_tail(field_name) == "upper":
-                return_dict[
-                    f"abs_norm_tail_bias_beyond_percentile/{p_key}/{field_name}"
-                ] = _abs_norm_tail_bias(
-                    percentile=p,
-                    predict_counts=prediction.counts,
-                    target_counts=target.counts,
-                    predict_bin_edges=prediction.bin_edges,
-                    target_bin_edges=target.bin_edges,
-                    tail="upper",
+        tail = self._variable_distribution_tail(field_name)
+        percentile_metrics: dict[str, float] = {}
+        for p in self.percentiles:
+            if tail in ["upper", "both"]:
+                p_key = _format_percentile_for_metric_key(p, p)
+                percentile_metrics[f"{p_key}th-percentile/{field_name}"] = quantile(
+                    histogram.bin_edges, histogram.counts, p / 100.0
                 )
-            elif self._variable_distribution_tail(field_name) == "lower":
-                return_dict[
-                    f"abs_norm_tail_bias_beyond_percentile/{p_key}/{field_name}"
-                ] = _abs_norm_tail_bias(
-                    percentile=p,
-                    predict_counts=prediction.counts,
-                    target_counts=target.counts,
-                    predict_bin_edges=prediction.bin_edges,
-                    target_bin_edges=target.bin_edges,
-                    tail="lower",
+            if tail in ["lower", "both"]:
+                p_key = _format_percentile_for_metric_key(100.0 - p, p)
+                percentile_metrics[f"{p_key}th-percentile/{field_name}"] = quantile(
+                    histogram.bin_edges, histogram.counts, (100.0 - p) / 100.0
                 )
-            else:
-                bias_upper = _abs_norm_tail_bias(
-                    percentile=p,
-                    predict_counts=prediction.counts,
-                    target_counts=target.counts,
-                    predict_bin_edges=prediction.bin_edges,
-                    target_bin_edges=target.bin_edges,
-                    tail="upper",
-                )
-                bias_lower = _abs_norm_tail_bias(
-                    percentile=p,
-                    predict_counts=prediction.counts,
-                    target_counts=target.counts,
-                    predict_bin_edges=prediction.bin_edges,
-                    target_bin_edges=target.bin_edges,
-                    tail="lower",
-                )
-                return_dict[
-                    f"abs_norm_tail_bias_beyond_percentile/{p_key}/{field_name}"
-                ] = (bias_upper + bias_lower) / 2.0
-        return return_dict
+        return percentile_metrics
 
     def get_wandb(self) -> dict[str, float]:
         return_dict: dict[str, matplotlib.figure.Figure | float] = {}
+        target_dict: dict[str, float] = {}
 
         for field_name, histograms in self._get_histograms().items():
             target = histograms.get("target")
@@ -664,32 +617,20 @@ class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
             fig = self._plot_histogram(target, prediction)
             return_dict[field_name] = fig
             plt.close(fig)
-            percentile_entries = self._percentile_entries_for_field(field_name)
-            if target is not None:
-                for p, p_key in percentile_entries:
-                    return_dict[f"target/{p_key}th-percentile/{field_name}"] = quantile(
-                        target.bin_edges, target.counts, p / 100.0
-                    )
             if prediction is not None:
-                for p, p_key in percentile_entries:
-                    return_dict[f"prediction/{p_key}th-percentile/{field_name}"] = (
-                        quantile(prediction.bin_edges, prediction.counts, p / 100.0)
-                    )
-                    if self._compute_percentile_frac and target is not None:
-                        return_dict[
-                            f"prediction_frac_of_target/{p_key}th-percentile/{field_name}"
-                        ] = (
-                            return_dict[f"prediction/{p_key}th-percentile/{field_name}"]
-                            / return_dict[f"target/{p_key}th-percentile/{field_name}"]
-                        )
+                return_dict.update(
+                    self._get_percentile_metrics_for_field(prediction, field_name)
+                )
 
-                if target is not None:
-                    return_dict.update(
-                        self._get_abs_norm_tail_biases_beyond_percentile(
-                            field_name, prediction, target
+                if self._compute_percentile_frac and target is not None:
+                    target_dict.update(
+                        self._get_percentile_metrics_for_field(
+                            target,
+                            field_name,
                         )
                     )
-
+        for key, value in target_dict.items():
+            return_dict[f"prediction_frac_of_target/{key}"] = value / return_dict[key]
         return return_dict
 
 

@@ -17,7 +17,7 @@ from fme.downscaling.test_utils import create_test_data_on_disk, data_paths_help
 from fme.downscaling.train import (
     Trainer,
     TrainerConfig,
-    WeightSchedule,
+    _get_complement_percentile_prefix,
     main,
     restore_checkpoint,
 )
@@ -341,21 +341,22 @@ def test_resume_two_workers(default_trainer_config, tmp_path, skip_slow: bool):
 
 
 @pytest.mark.parametrize(
-    "start_epoch, end_epoch, start_weight, end_weight, epoch_expected_weights",
+    "prefix, expected",
     [
-        (0, 10, 1.0, 1.0, {0: 1.0, 6: 1.0, 11: 1.0}),
-        (0, 10, 0.0, 1.0, {0: 0.0, 6: 0.6, 11: 1.0}),
-        (2, 10, 2, 10, {0: 2, 2: 2, 6: 6, 11: 10}),
+        (
+            "histogram/prediction_frac_of_target/99.99th-percentile/var0",
+            "histogram/prediction_frac_of_target/0.01th-percentile/var0",
+        ),
+        (
+            "some_metric/percentile/99.9999/var0",
+            "some_metric/percentile/0.0001/var0",
+        ),
+        (
+            "no_percentile_here/some_metric",
+            None,
+        ),
     ],
 )
-def test_weight_schedule(
-    start_epoch, end_epoch, start_weight, end_weight, epoch_expected_weights
-):
-    weight_schedule = WeightSchedule(
-        start_epoch=start_epoch,
-        end_epoch=end_epoch,
-        start_weight=start_weight,
-        end_weight=end_weight,
-    )
-    for epoch, weight in epoch_expected_weights.items():
-        assert weight_schedule.get_weight(epoch) == weight
+def test_get_complement_percentile_prefix(prefix, expected):
+    result = _get_complement_percentile_prefix(prefix)
+    assert result == expected
