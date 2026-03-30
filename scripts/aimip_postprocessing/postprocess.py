@@ -1,9 +1,10 @@
 """Post-process AIMIP inference results into CMIP6-compliant netCDF files.
 
 Reads raw ACE output netCDFs from GCS, applies CF-convention transformations,
-and uploads the results to GCS and/or DKRZ object storage.
+and uploads the results to GCS.
 """
 
+import argparse
 import dataclasses
 import datetime
 import logging
@@ -16,13 +17,10 @@ from pathlib import Path
 from typing import Callable, Literal
 
 import cftime
-import click
 import fsspec
 import numpy as np
-import s3fs
 import xarray as xr
 import yaml
-from dotenv import load_dotenv
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -42,7 +40,6 @@ CALENDAR = "proleptic_gregorian"
 OUTPUT_VERSION = "v20251130"
 LOCAL_DIR = "/tmp/aimip-ace/"
 MODEL_SOURCE_NAME = "ACE2-ERA5"
-DKRZ_REMOTE_PREFIX = f"ai-mip/Ai2/{MODEL_SOURCE_NAME}"
 
 DEFAULT_SIMULATIONS_FILE = Path(__file__).parent / "simulations.yaml"
 DEFAULT_FILES_FILE = Path(__file__).parent / "files.yaml"
@@ -416,99 +413,74 @@ def upload_to_gcs(local_path: str, gcs_path: str) -> None:
     subprocess.run(cmd, check=True, capture_output=True, text=True)
 
 
-def upload_to_dkrz(local_path: str, dkrz_path: str, fs_ace: s3fs.S3FileSystem) -> None:
-    fs_ace.put(local_path, dkrz_path, recursive=True)
-
-
 # --- CLI ---
 
 
-@click.command()
-@click.option(
-    "--raw-results-dir",
-    default=AIMIP_RAW_RESULTS_DIR,
-    show_default=True,
-    help="GCS directory containing raw inference results.",
-)
-@click.option(
-    "--processed-results-dir",
-    default=AIMIP_PROCESSED_RESULTS_DIR,
-    show_default=True,
-    help="GCS destination for processed results.",
-)
-@click.option(
-    "--local-dir",
-    default=LOCAL_DIR,
-    show_default=True,
-    help="Local scratch directory for intermediate files.",
-)
-@click.option(
-    "--output-version",
-    default=OUTPUT_VERSION,
-    show_default=True,
-    help="Version string included in output directory paths.",
-)
-@click.option(
-    "--simulation",
-    default=None,
-    help="Process only this simulation name. Default processes all simulations.",
-)
-@click.option(
-    "--simulations-file",
-    default=str(DEFAULT_SIMULATIONS_FILE),
-    show_default=True,
-    type=click.Path(exists=True, path_type=Path),
-    help="YAML file listing SimulationConfig entries.",
-)
-@click.option(
-    "--files-file",
-    default=str(DEFAULT_FILES_FILE),
-    show_default=True,
-    type=click.Path(exists=True, path_type=Path),
-    help="YAML file listing FileConfig entries.",
-)
-@click.option("--skip-gcs-upload", is_flag=True, help="Skip uploading results to GCS.")
-@click.option(
-    "--skip-dkrz-upload", is_flag=True, help="Skip uploading results to DKRZ."
-)
-def postprocess(
-    raw_results_dir: str,
-    processed_results_dir: str,
-    local_dir: str,
-    output_version: str,
-    simulation: str | None,
-    simulations_file: Path,
-    files_file: Path,
-    skip_gcs_upload: bool,
-    skip_dkrz_upload: bool,
-) -> None:
-    """Post-process AIMIP inference results into CMIP6-compliant netCDF files."""
-    load_dotenv()
+def _get_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Post-process AIMIP inference results into CMIP6-compliant netCDF files."  # noqa: E501
+    )
+    parser.add_argument(
+        "--raw-results-dir",
+        default=AIMIP_RAW_RESULTS_DIR,
+        help="GCS directory containing raw inference results.",
+    )
+    parser.add_argument(
+        "--processed-results-dir",
+        default=AIMIP_PROCESSED_RESULTS_DIR,
+        help="GCS destination for processed results.",
+    )
+    parser.add_argument(
+        "--local-dir",
+        default=LOCAL_DIR,
+        help="Local scratch directory for intermediate files.",
+    )
+    parser.add_argument(
+        "--output-version",
+        default=OUTPUT_VERSION,
+        help="Version string included in output directory paths.",
+    )
+    parser.add_argument(
+        "--simulation",
+        default=None,
+        help="Process only this simulation name. Default processes all simulations.",
+    )
+    parser.add_argument(
+        "--simulations-file",
+        default=DEFAULT_SIMULATIONS_FILE,
+        type=Path,
+        help="YAML file listing SimulationConfig entries.",
+    )
+    parser.add_argument(
+        "--files-file",
+        default=DEFAULT_FILES_FILE,
+        type=Path,
+        help="YAML file listing FileConfig entries.",
+    )
+    parser.add_argument(
+        "--skip-gcs-upload",
+        action="store_true",
+        help="Skip uploading results to GCS.",
+    )
+    return parser
 
-    simulations = load_simulations(simulations_file)
-    files = load_files(files_file)
 
-    if simulation is not None:
-        simulations = [s for s in simulations if s.name == simulation]
+def main(args: argparse.Namespace) -> None:
+    simulations = load_simulations(args.simulations_file)
+    files = load_files(args.files_file)
+
+    if args.simulation is not None:
+        simulations = [s for s in simulations if s.name == args.simulation]
         if not simulations:
-            raise click.BadParameter(
-                f"Simulation '{simulation}' not found in {simulations_file}."
+            raise ValueError(
+                f"Simulation '{args.simulation}' not found in {args.simulations_file}."
             )
-
-    if not skip_dkrz_upload:
-        fs_ace = s3fs.S3FileSystem(
-            client_kwargs={"endpoint_url": "https://s3.eu-dkrz-1.dkrz.cloud"},
-            key=os.environ["ACE_KEY"],
-            secret=os.environ["ACE_SECRET"],
-        )
-    else:
-        fs_ace = None
 
     for sim in simulations:
         variant_label = f"r{sim.realization_index}i1p1f1"
-        raw_simulation_directory = os.path.join(raw_results_dir, sim.name)
+        raw_simulation_directory = os.path.join(args.raw_results_dir, sim.name)
         local_processed_simulation_dir = os.path.join(
-            local_dir, sim.experiment_id, variant_label
+            args.local_dir, sim.experiment_id, variant_label
         )
         logger.info("Processing data for simulation %s...", sim.name)
 
@@ -604,7 +576,7 @@ def postprocess(
                 fc.table_id,
                 fc.varname,
                 fc.grid_label,
-                output_version,
+                args.output_version,
             )
             os.makedirs(local_processed_output_dir, exist_ok=True)
             local_processed_output_filepath = os.path.join(
@@ -612,17 +584,13 @@ def postprocess(
             )
             processed_file.to_netcdf(local_processed_output_filepath)
 
-        if not skip_gcs_upload:
+        if not args.skip_gcs_upload:
             logger.info("Uploading data to GCS for simulation %s.", sim.name)
-            upload_to_gcs(local_dir, processed_results_dir)
-
-        if not skip_dkrz_upload:
-            logger.info("Uploading data to DKRZ for simulation %s.", sim.name)
-            upload_to_dkrz(local_dir, DKRZ_REMOTE_PREFIX, fs_ace)  # type: ignore[arg-type]
+            upload_to_gcs(args.local_dir, args.processed_results_dir)
 
         logger.info("Deleting local data for simulation %s.", sim.name)
-        shutil.rmtree(local_dir)
+        shutil.rmtree(args.local_dir)
 
 
 if __name__ == "__main__":
-    postprocess()
+    main(_get_parser().parse_args())

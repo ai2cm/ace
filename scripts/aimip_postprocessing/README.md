@@ -1,6 +1,6 @@
 # AIMIP Postprocessing
 
-Post-process ACE AIMIP inference results into CMIP6-compliant netCDF files and upload them to GCS and DKRZ object storage.
+Post-process ACE AIMIP inference results into CMIP6-compliant netCDF files and upload them to GCS.
 
 The script reads raw output netCDFs from GCS, applies CF-convention transformations (coordinate standardization, vertical dimension stacking, bounds computation, metadata), and writes the results locally before uploading.
 
@@ -16,42 +16,22 @@ The script reads raw output netCDFs from GCS, applies CF-convention transformati
 
 ## Requirements
 
-The `fme` conda environment has the required dependencies. If you are running outside of that environment, install:
-
-```
-fsspec gcsfs s3fs xarray cftime python-dotenv click pyyaml netcdf4
-```
-
-## Environment variables
-
-DKRZ upload requires `ACE_KEY` and `ACE_SECRET`. Place them in a `.env` file in the working directory:
-
-```
-ACE_KEY=<your-key>
-ACE_SECRET=<your-secret>
-```
+The `fme` conda environment has all required dependencies. No additional installation is needed.
 
 ## Usage
 
-Process all simulations (uploads to GCS and DKRZ):
+Process all simulations (uploads to GCS):
 
 ```bash
 python postprocess.py
 ```
 
-Process a single simulation, skipping both uploads:
+Process a single simulation, skipping GCS upload:
 
 ```bash
 python postprocess.py \
     --simulation ace-aimip-inference-oct-1978-2024-IC1 \
-    --skip-gcs-upload \
-    --skip-dkrz-upload
-```
-
-Skip only DKRZ:
-
-```bash
-python postprocess.py --skip-dkrz-upload
+    --skip-gcs-upload
 ```
 
 Use custom simulation/file lists:
@@ -86,8 +66,6 @@ For example:
 ```
 /tmp/aimip-ace/aimip/r1i1p1f1/Amon/tas/gn/v20251130/tas_Amon_ACE2-ERA5_aimip_r1i1p1f1_gn_197810-202412.nc
 ```
-
-DKRZ outputs are uploaded to `ai-mip/Ai2/ACE2-ERA5/` with the same relative structure.
 
 ## Running tests
 
