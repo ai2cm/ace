@@ -871,6 +871,7 @@ class Aggregator:
         ssim_kwargs: Mapping[str, Any] | None = None,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
         include_positional_comparisons: bool = True,
+        log_loss_vs_noise: bool = False,
     ) -> None:
         self.downscale_factor = downscale_factor
 
@@ -911,7 +912,8 @@ class Aggregator:
 
         self.loss = Mean(torch.mean)
         self.channel_loss = Mean(torch.mean)
-        self.loss_vs_noise = LossVsNoiseAggregator()
+        self.log_loss_vs_noise = log_loss_vs_noise
+        self.loss_vs_noise = LossVsNoiseAggregator() if self.log_loss_vs_noise else None
         self._fine_latlon_coordinates: LatLonCoordinates | None = None
 
     @torch.no_grad()
@@ -955,7 +957,8 @@ class Aggregator:
         self.loss.record_batch({"loss": outputs.loss})
         if outputs.channel_losses:
             self.channel_loss.record_batch(outputs.channel_losses)
-        self.loss_vs_noise.record_batch(outputs)
+        if self.loss_vs_noise is not None:
+            self.loss_vs_noise.record_batch(outputs)
 
     def get_wandb(
         self,
@@ -970,7 +973,8 @@ class Aggregator:
         ret.update(self.loss.get_wandb(prefix))
         if self.channel_loss._count > 0:
             ret.update(self.channel_loss.get_wandb(f"{prefix}channel_loss/"))
-        ret.update(self.loss_vs_noise.get_wandb(prefix))
+        if self.loss_vs_noise is not None:
+            ret.update(self.loss_vs_noise.get_wandb(prefix))
         for comparison in self._comparisons:
             ret.update(comparison.get_wandb(prefix))
         for coarse_comparison in self._coarse_comparisons:

@@ -176,6 +176,7 @@ class Trainer:
             self.dims,
             self.model.downscale_factor,
             include_positional_comparisons=include_positional_comparisons,
+            log_loss_vs_noise=self.config.log_loss_vs_noise,
         )
         batch: PairedBatchData
         wandb = WandB.get_instance()
@@ -248,6 +249,7 @@ class Trainer:
                 self.dims,
                 self.model.downscale_factor,
                 include_positional_comparisons=include_positional_comparisons,
+                log_loss_vs_noise=self.config.log_loss_vs_noise,
             )
             generation_aggregator = GenerationAggregator(
                 self.dims,
@@ -414,6 +416,7 @@ class TrainerConfig:
     coarse_patch_extent_lat: int | None = None
     coarse_patch_extent_lon: int | None = None
     resume_results_dir: str | None = None
+    log_loss_vs_noise: bool = False
 
     def __post_init__(self):
         if (
