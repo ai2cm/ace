@@ -1,4 +1,4 @@
-"""Pointwise scalar-vector interaction module."""
+"""Pointwise scalar-vector interaction modules."""
 
 import math
 
@@ -59,3 +59,44 @@ class ScalarVectorProduct(nn.Module):
         out_u = (s * (w_s * u + w_r * (-v))).sum(dim=1)
         out_v = (s * (w_s * v + w_r * u)).sum(dim=1)
         return torch.stack([out_u, out_v], dim=-1)
+
+
+class VectorDotProduct(nn.Module):
+    """Pointwise weighted squared-magnitude of vector features → scalar features.
+
+    For each output scalar channel c:
+
+        output[c] = ∑_v  w[c, v] · (u_v² + v_v²)
+
+    The result is frame-invariant (rotation of the input vector field leaves the
+    output unchanged), since ``u² + v²`` is the squared Euclidean norm.
+
+    The canonical use-case is kinetic energy: with a diagonal weight ``w[k, k] = 0.5``
+    this gives ``KE_k = ½ |V_k|²`` for each level k.
+
+    Weight shape: ``(n_scalar, n_vector)``.
+    """
+
+    def __init__(self, n_scalar: int, n_vector: int):
+        """
+        Args:
+            n_scalar: number of output scalar channels.
+            n_vector: number of input vector channels.
+        """
+        super().__init__()
+        self.n_scalar = n_scalar
+        self.n_vector = n_vector
+        scale = 1.0 / math.sqrt(max(1, n_vector))
+        self.weight = nn.Parameter(scale * torch.randn(n_scalar, n_vector))
+
+    def forward(self, x_vector: torch.Tensor) -> torch.Tensor:
+        """Compute weighted squared magnitudes.
+
+        Args:
+            x_vector: ``(B, N_v, H, W, 2)``
+
+        Returns:
+            ``(B, N_s, H, W)``
+        """
+        mag_sq = (x_vector ** 2).sum(-1)           # (B, N_v, H, W)
+        return torch.einsum("sv,bvhw->bshw", self.weight, mag_sq)

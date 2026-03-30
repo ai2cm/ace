@@ -96,6 +96,7 @@ import torch.nn as nn
 from fme.core.disco._quadrature import precompute_latitudes
 from fme.core.disco._vector_convolution import VectorDiscoConvS2
 from fme.core.shallow_water.block import VectorDiscoBlock
+from fme.core.shallow_water.scalar_vector_product import VectorDotProduct
 
 R_EARTH = 6.371e6  # m
 C_P = 1004.0       # J/kg/K
@@ -222,6 +223,9 @@ class HybridCoordinateBlockStepper(nn.Module):
             activation="none",
         )
 
+        # ── ke_product: KE_k = ½|V_k|² via diagonal VectorDotProduct ────────────
+        self.ke_product = VectorDotProduct(n_scalar=K, n_vector=K)
+
         # ── adv_conv: -V·∇T and -V·∇q via W_vs2 ────────────────────────────
         self.adv_conv = VectorDiscoConvS2(
             in_channels_scalar=2 * K,
@@ -338,6 +342,11 @@ class HybridCoordinateBlockStepper(nn.Module):
         for k in range(K):
             W_vs2[k,     k, :, 1] = -1.0 / R_EARTH  # -V_k · ∇T_k
             W_vs2[K + k, k, :, 1] = -1.0 / R_EARTH  # -V_k · ∇q_k
+
+        # ── ke_product: diagonal weight 0.5 → KE_k = ½|V_k|² ───────────────
+        self.ke_product.weight.zero_()
+        for k in range(K):
+            self.ke_product.weight[k, k] = 0.5
 
         # ── Vertical linear layers ────────────────────────────────────────────
         # C_conv: row 0 = zeros (bottom BC), row k+1 = ones for columns ≤ k.
@@ -482,8 +491,8 @@ class HybridCoordinateBlockStepper(nn.Module):
         """
         B, K, H, W = T.shape
 
-        # ── Precompute KE, p_k, dp_k, φ_k ────────────────────────────────────
-        ke = 0.5 * (uv[..., 0] ** 2 + uv[..., 1] ** 2)  # (B, K, H, W)
+        # ── KE, p_k, dp_k, φ_k ───────────────────────────────────────────────
+        ke = self.ke_product(uv)  # (B, K, H, W)
         p_k  = self._level_pressures(p_s)                 # (B, K, H, W)
         dp_k = self._layer_dp(p_s)                        # (B, K, H, W)
         phi  = self._hydrostatic(T, p_k)                  # (B, K, H, W)

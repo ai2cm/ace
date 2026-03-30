@@ -1,6 +1,8 @@
+import math
+
 import torch
 
-from fme.core.shallow_water.scalar_vector_product import ScalarVectorProduct
+from fme.core.shallow_water.scalar_vector_product import ScalarVectorProduct, VectorDotProduct
 
 H, W = 8, 16
 
@@ -128,3 +130,73 @@ class TestScalarVectorProduct:
         assert x_v.grad is not None and x_v.grad.abs().max() > 0
         assert mod.weight.grad is not None
         assert mod.weight.grad.abs().max() > 0
+
+
+class TestVectorDotProduct:
+    def test_output_shape(self):
+        """Output shape is (B, N_s, H, W)."""
+        mod = VectorDotProduct(n_scalar=3, n_vector=2)
+        x_v = torch.randn(2, 2, H, W, 2)
+        y = mod(x_v)
+        assert y.shape == (2, 3, H, W)
+
+    def test_zero_input_gives_zero_output(self):
+        """Zero vector input produces zero scalar output."""
+        mod = VectorDotProduct(n_scalar=2, n_vector=3)
+        x_v = torch.zeros(1, 3, H, W, 2)
+        y = mod(x_v)
+        assert y.abs().max() < 1e-10
+
+    def test_diagonal_weight_gives_ke(self):
+        """Diagonal weight 0.5 computes KE = ½(u² + v²) per channel."""
+        K = 3
+        mod = VectorDotProduct(n_scalar=K, n_vector=K)
+        with torch.no_grad():
+            mod.weight.zero_()
+            for k in range(K):
+                mod.weight[k, k] = 0.5
+
+        x_v = torch.randn(2, K, H, W, 2)
+        y = mod(x_v)
+
+        expected = 0.5 * (x_v[..., 0] ** 2 + x_v[..., 1] ** 2)  # (B, K, H, W)
+        torch.testing.assert_close(y, expected)
+
+    def test_rotation_invariant(self):
+        """Rotating the input vector field leaves the output unchanged."""
+        mod = VectorDotProduct(n_scalar=2, n_vector=2)
+        x_v = torch.randn(1, 2, H, W, 2)
+
+        angle = math.pi / 4
+        c, s = math.cos(angle), math.sin(angle)
+        x_v_rot = torch.stack(
+            [c * x_v[..., 0] - s * x_v[..., 1],
+             s * x_v[..., 0] + c * x_v[..., 1]],
+            dim=-1,
+        )
+
+        y     = mod(x_v)
+        y_rot = mod(x_v_rot)
+        torch.testing.assert_close(y, y_rot)
+
+    def test_linearity_in_weight(self):
+        """Doubling the weight doubles the output."""
+        mod = VectorDotProduct(n_scalar=2, n_vector=2)
+        x_v = torch.randn(1, 2, H, W, 2)
+
+        y1 = mod(x_v)
+        with torch.no_grad():
+            mod.weight.mul_(2.0)
+        y2 = mod(x_v)
+
+        torch.testing.assert_close(y2, 2.0 * y1)
+
+    def test_gradient_flows(self):
+        """Gradients flow to the input and weights."""
+        mod = VectorDotProduct(n_scalar=2, n_vector=2)
+        x_v = torch.randn(1, 2, H, W, 2, requires_grad=True)
+        y = mod(x_v)
+        y.sum().backward()
+
+        assert x_v.grad is not None and x_v.grad.abs().max() > 0
+        assert mod.weight.grad is not None and mod.weight.grad.abs().max() > 0

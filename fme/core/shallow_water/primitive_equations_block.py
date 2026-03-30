@@ -62,6 +62,7 @@ import torch.nn as nn
 from fme.core.disco._quadrature import precompute_latitudes
 from fme.core.disco._vector_convolution import VectorDiscoConvS2
 from fme.core.shallow_water.block import VectorDiscoBlock
+from fme.core.shallow_water.scalar_vector_product import VectorDotProduct
 
 
 R_EARTH = 6.371e6  # m
@@ -180,6 +181,9 @@ class PrimitiveEquationsBlockStepper(nn.Module):
             activation="none",
         )
 
+        # ── ke_product: KE_k = ½|V_k|² via diagonal VectorDotProduct ────────────
+        self.ke_product = VectorDotProduct(n_scalar=K, n_vector=K)
+
         # ── adv_conv: T and q advection via W_vs2 ────────────────────────────
         # n_s = 2K: T_0..T_{K-1} then q_0..q_{K-1}; n_v = K velocity levels.
         # Only W_vs2 is used; all other weights are zeroed in _init_physics_weights.
@@ -284,6 +288,11 @@ class PrimitiveEquationsBlockStepper(nn.Module):
         # ── Zero pointwise_vv (no direct vector skip needed) ─────────────────
         self.block.pointwise_vv.weight.zero_()
 
+        # ── ke_product: diagonal weight 0.5 → KE_k = ½|V_k|² ───────────────
+        self.ke_product.weight.zero_()
+        for k in range(K):
+            self.ke_product.weight[k, k] = 0.5
+
         # ── Gradient/div convs: used only for ∇²ˢ diffusion ─────────────────
         self.grad_conv.W_sv.zero_()
         self.grad_conv.W_sv[0, 0, :, 1] = 1.0 / R_EARTH
@@ -367,8 +376,8 @@ class PrimitiveEquationsBlockStepper(nn.Module):
         """
         B, K, H, W = T.shape
 
-        # ── Precompute KE per level ───────────────────────────────────────────
-        ke = 0.5 * (uv[..., 0] ** 2 + uv[..., 1] ** 2)  # (B, K, H, W)
+        # ── KE per level via ke_product ───────────────────────────────────────
+        ke = self.ke_product(uv)  # (B, K, H, W)
 
         # ── Block 1: encodes PGF + Coriolis + ζ×V − ∇KE ─────────────────────
         zeros = torch.zeros_like(T)
