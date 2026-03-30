@@ -124,19 +124,13 @@ def _abs_norm_tail_bias(
     target_counts: np.ndarray,
     predict_bin_edges: np.ndarray,
     target_bin_edges: np.ndarray,
-    tail: Literal["upper", "lower"] = "upper",
 ):
     pred_counts_rebinned = _rebin_counts(
         bin_edges=predict_bin_edges, counts=predict_counts, new_edges=target_bin_edges
     )
     bin_centers = 0.5 * (target_bin_edges[:-1] + target_bin_edges[1:])
     threshold = quantile(target_bin_edges, target_counts, percentile / 100.0)
-    if tail == "upper":
-        tail_mask = bin_centers > threshold
-    elif tail == "lower":
-        tail_mask = bin_centers < threshold
-    else:
-        raise ValueError(f"Invalid tail arg: {tail}. Must be 'upper' or 'lower'.")
+    tail_mask = bin_centers > threshold
 
     pred_density = (pred_counts_rebinned / np.sum(pred_counts_rebinned))[tail_mask]
     target_density = (target_counts / np.sum(target_counts))[tail_mask]
@@ -590,62 +584,6 @@ class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
                 entries.append((p, _format_percentile_for_metric_key(p, ref)))
                 entries.append((100.0 - ref, _format_percentile_for_metric_key(p, ref)))
         return entries
-
-    def _get_abs_norm_tail_biases_beyond_percentile(
-        self, field_name: str, prediction: _Histogram, target: _Histogram
-    ) -> dict[str, float]:
-        return_dict: dict[str, float] = {}
-        tail = self._variable_distribution_tail(field_name)
-
-        for ref in self.percentiles:
-            if field_name in self._left_tailed_variables:
-                p = 100.0 - ref
-            else:  # upper tailed or two-tailed
-                p = ref
-            p_key = _format_percentile_for_metric_key(p, ref)
-            if tail == "upper":
-                return_dict[
-                    f"abs_norm_tail_bias_beyond_percentile/{p_key}/{field_name}"
-                ] = _abs_norm_tail_bias(
-                    percentile=p,
-                    predict_counts=prediction.counts,
-                    target_counts=target.counts,
-                    predict_bin_edges=prediction.bin_edges,
-                    target_bin_edges=target.bin_edges,
-                    tail=tail,
-                )
-            elif tail == "lower":
-                return_dict[
-                    f"abs_norm_tail_bias_beyond_percentile/{p_key}/{field_name}"
-                ] = _abs_norm_tail_bias(
-                    percentile=p,
-                    predict_counts=prediction.counts,
-                    target_counts=target.counts,
-                    predict_bin_edges=prediction.bin_edges,
-                    target_bin_edges=target.bin_edges,
-                    tail=tail,
-                )
-            else:
-                bias_upper = _abs_norm_tail_bias(
-                    percentile=p,
-                    predict_counts=prediction.counts,
-                    target_counts=target.counts,
-                    predict_bin_edges=prediction.bin_edges,
-                    target_bin_edges=target.bin_edges,
-                    tail="upper",
-                )
-                bias_lower = _abs_norm_tail_bias(
-                    percentile=100.0 - p,
-                    predict_counts=prediction.counts,
-                    target_counts=target.counts,
-                    predict_bin_edges=prediction.bin_edges,
-                    target_bin_edges=target.bin_edges,
-                    tail="lower",
-                )
-                return_dict[
-                    f"abs_norm_tail_bias_beyond_percentile/{p_key}/{field_name}"
-                ] = (bias_upper + bias_lower) / 2.0
-        return return_dict
 
     def _get_percentile_metrics_for_field(
         self, histogram: _Histogram, field_name: str
