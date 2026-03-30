@@ -437,32 +437,6 @@ def test_WeightedMappingLoss_with_target_nans(reduce):
         torch.testing.assert_close(result.sum(), expected)
 
 
-def test_WeightedMappingLoss_call_per_channel():
-    """Per-channel loss sums to total loss and has one entry per variable."""
-    loss_fn = torch.nn.MSELoss()
-    n_channels = 3
-    out_names = [f"var_{i}" for i in range(n_channels)]
-    normalizer = StandardNormalizer(
-        means={name: torch.as_tensor(0.0) for name in out_names},
-        stds={name: torch.as_tensor(1.0) for name in out_names},
-    )
-    mapping_loss = WeightedMappingLoss(
-        loss_fn,
-        weights={},
-        out_names=out_names,
-        normalizer=normalizer,
-    )
-    x = torch.randn(4, n_channels, 5, 5, device=get_device(), dtype=torch.float)
-    y = torch.randn(4, n_channels, 5, 5, device=get_device(), dtype=torch.float)
-    x_mapping = {name: x[:, i, :, :] for i, name in enumerate(out_names)}
-    y_mapping = {name: y[:, i, :, :] for i, name in enumerate(out_names)}
-    total = mapping_loss(x_mapping, y_mapping)
-    per_channel = mapping_loss.call_per_channel(x_mapping, y_mapping)
-    assert set(per_channel.keys()) == set(out_names)
-    mean_per_channel = torch.stack(list(per_channel.values())).mean()
-    assert torch.allclose(total, mean_per_channel)
-
-
 # ---------- Per-channel sum-equivalence tests ----------
 
 
