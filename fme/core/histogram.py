@@ -550,7 +550,7 @@ class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
         self,
         n_bins: int,
         percentiles: list[float] | None = None,
-        compute_percentile_frac: bool = False,
+        compute_percentile_frac: bool = True,
         two_tailed_variables: list[str] | None = None,
         left_tailed_variables: list[str] | None = None,
     ) -> None:
@@ -618,17 +618,19 @@ class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
             return_dict[field_name] = fig
             plt.close(fig)
             if prediction is not None:
-                return_dict = self._get_percentile_metrics_for_field(
-                    prediction, field_name
+                return_dict.update(
+                    self._get_percentile_metrics_for_field(prediction, field_name)
                 )
 
                 if self._compute_percentile_frac and target is not None:
-                    target_dict = self._get_percentile_metrics_for_field(
-                        target,
-                        field_name,
+                    target_dict.update(
+                        self._get_percentile_metrics_for_field(
+                            target,
+                            field_name,
+                        )
                     )
         for key, value in target_dict.items():
-            return_dict[f"prediction_frac_of_target/{key}"] = value / target_dict[key]
+            return_dict[f"prediction_frac_of_target/{key}"] = value / return_dict[key]
         return return_dict
 
 
