@@ -263,6 +263,13 @@ class OptimizationConfig:
                 DeprecationWarning,
             )
 
+    @property
+    def has_lr_schedule(self) -> bool:
+        """Whether a learning rate scheduler is configured."""
+        if isinstance(self.scheduler, SequentialSchedulerConfig):
+            return True
+        return self.scheduler.type is not None
+
     def build(self, modules: torch.nn.ModuleList, max_epochs: int) -> Optimization:
         parameters = itertools.chain(*[module.parameters() for module in modules])
         return Optimization(
