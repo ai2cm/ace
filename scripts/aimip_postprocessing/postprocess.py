@@ -66,13 +66,13 @@ class FileConfig:
     units: str
 
 
-def load_simulations(path: Path) -> list[SimulationConfig]:
+def load_simulation_configs(path: Path) -> list[SimulationConfig]:
     with open(path) as f:
         items = yaml.safe_load(f)
     return [SimulationConfig(**item) for item in items]
 
 
-def load_files(path: Path) -> list[FileConfig]:
+def load_file_configs(path: Path) -> list[FileConfig]:
     with open(path) as f:
         items = yaml.safe_load(f)
     return [FileConfig(**item) for item in items]
@@ -208,9 +208,6 @@ def stack_vertical_dimension(
     vertical_dim_name: str,
     output_varname: str,
     level_pattern: str,
-    standard_name: str,
-    long_name: str,
-    units: str,
 ) -> xr.Dataset:
     """Take a dataset of 2D variables with vertical coordinate in their name,
     and stack them as a dataarray along a vertical dimension."""
@@ -470,8 +467,8 @@ def _get_parser() -> argparse.ArgumentParser:
 
 
 def main(args: argparse.Namespace) -> None:
-    simulations = load_simulations(args.simulations_file)
-    files = load_files(args.files_file)
+    simulations = load_simulation_configs(args.simulations_file)
+    files = load_file_configs(args.files_file)
 
     if args.simulation is not None:
         simulations = [s for s in simulations if s.name == args.simulation]
@@ -544,9 +541,6 @@ def main(args: argparse.Namespace) -> None:
                     vertical_coordinate,
                     fc.varname,
                     r"[0-9]+$",
-                    fc.standard_name,
-                    fc.long_name,
-                    fc.units,
                 )
                 .pipe(add_coord_bounds)
                 .pipe(encode_time_coords)

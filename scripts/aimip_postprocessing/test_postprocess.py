@@ -23,9 +23,7 @@ def test_stack_vertical_dimension_stacks_level_variables():
             "ta850": xr.DataArray(np.ones((3, 4)) * 2, dims=["lat", "lon"]),
         }
     )
-    result = stack_vertical_dimension(
-        ds, "plev", "ta", r"[0-9]+$", "air_temperature", "air temperature", "K"
-    )
+    result = stack_vertical_dimension(ds, "plev", "ta", r"[0-9]+$")
     assert "ta" in result.data_vars
     assert "plev" in result.dims
     assert result["ta"].shape == (2, 3, 4)
@@ -40,24 +38,14 @@ def test_stack_vertical_dimension_sorted_by_level():
             "ta500": xr.DataArray(np.full((2,), 0.5), dims=["x"]),
         }
     )
-    result = stack_vertical_dimension(
-        ds, "plev", "ta", r"[0-9]+$", "air_temperature", "air temperature", "K"
-    )
+    result = stack_vertical_dimension(ds, "plev", "ta", r"[0-9]+$")
     assert list(result["plev"].values) == [100.0, 500.0, 850.0]
 
 
 def test_stack_vertical_dimension_single_variable_passthrough():
     data = xr.DataArray(np.ones((3, 4)), dims=["lat", "lon"])
     ds = xr.Dataset({"tas": data})
-    result = stack_vertical_dimension(
-        ds,
-        "plev",
-        "tas",
-        r"[0-9]+$",
-        "air_temperature",
-        "air temperature at 2 meters",
-        "K",
-    )
+    result = stack_vertical_dimension(ds, "plev", "tas", r"[0-9]+$")
     assert "tas" in result.data_vars
     assert "plev" not in result.dims
 
@@ -70,9 +58,7 @@ def test_stack_vertical_dimension_raises_for_multi_var_no_match():
         }
     )
     with pytest.raises(ValueError):
-        stack_vertical_dimension(
-            ds, "plev", "ta", r"[0-9]+$", "air_temperature", "air temperature", "K"
-        )
+        stack_vertical_dimension(ds, "plev", "ta", r"[0-9]+$")
 
 
 # --- monthly_data_time_coord ---
