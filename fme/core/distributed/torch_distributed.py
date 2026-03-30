@@ -32,7 +32,7 @@ class TorchDistributed(DistributedBackend):
                     torch.distributed.init_process_group(
                         backend="nccl",
                         init_method="env://",
-                        timeout=timedelta(minutes=20),
+                        timeout=timedelta(minutes=60),
                     )
                 else:
                     torch.distributed.init_process_group(
@@ -223,17 +223,6 @@ class TorchDistributed(DistributedBackend):
 
     def zonal_mean(self, data: torch.Tensor) -> torch.Tensor:
         return data.nanmean(dim=-1)
-
-    def gradient_magnitude_percent_diff(
-        self,
-        truth: torch.Tensor,
-        predicted: torch.Tensor,
-        weights: torch.Tensor,
-        dim: tuple[int, ...],
-    ) -> torch.Tensor:
-        return metrics.gradient_magnitude_percent_diff(
-            truth, predicted, weights=weights, dim=dim
-        )
 
     def shutdown(self):
         logger.debug(f"Shutting down rank {self.rank}")

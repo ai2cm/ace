@@ -111,10 +111,12 @@ def test_predictor_runs(tmp_path, very_fast_only: bool):
         n_samples,
     )
     model_config = get_model_config(coarse_shape, downscale_factor=downscale_factor)
+    static_inputs = load_static_inputs({"HGTsfc": fine_data_path})
     model = model_config.build(
         coarse_shape=coarse_shape,
         downscale_factor=downscale_factor,
-        static_inputs=load_static_inputs({"HGTsfc": fine_data_path}),
+        full_fine_coords=static_inputs.coords,
+        static_inputs=static_inputs,
     )
     with open(predictor_config_path) as f:
         predictor_config = yaml.safe_load(f)
@@ -147,7 +149,7 @@ def test_predictor_renaming(
     coarse_shape = (4, 4)
     downscale_factor = 2
     renaming = {"var0": "var0_renamed", "var1": "var1_renamed"}
-    predictor_config_path, _ = create_predictor_config(
+    predictor_config_path, fine_data_path = create_predictor_config(
         tmp_path,
         n_samples,
         model_renaming=renaming,
@@ -158,7 +160,13 @@ def test_predictor_renaming(
     model_config = get_model_config(
         coarse_shape, downscale_factor, use_fine_topography=False
     )
-    model = model_config.build(coarse_shape=coarse_shape, downscale_factor=2)
+    static_inputs = load_static_inputs({"HGTsfc": fine_data_path})
+    model = model_config.build(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=static_inputs.coords,
+        static_inputs=static_inputs,
+    )
     with open(predictor_config_path) as f:
         predictor_config = yaml.safe_load(f)
     os.makedirs(
