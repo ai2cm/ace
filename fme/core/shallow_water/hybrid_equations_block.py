@@ -50,25 +50,42 @@ adv_conv  (VectorDiscoConvS2, W_vs2 only, n_s = 2K, n_v = K)
     W_vs2[k,   k, :, 1] = -1/R  →  -V_k · ∇T_k
     W_vs2[K+k, k, :, 1] = -1/R  →  -V_k · ∇q_k
 
-Explicit computations (no DISCO)
-----------------------------------
+Vertical linear layers  (frozen Conv2d(·, ·, 1) — no loops)
+-------------------------------------------------------------
+These replace Python for-loops with frozen pointwise-in-space 1×1 convolutions
+that mix level channels.  They can be unfrozen to learn deviations from the
+hard-coded physics.
+
+hydrostatic_conv  Conv2d(K-1, K, 1)   lower-triangular all-ones
+    input : increments[j] = R T_j ln(p_j/p_{j+1}),  j = 0..K-2   (B, K-1, H, W)
+    output: φ_k - φ_surface = ∑_{j<k} increment[j]                (B, K,   H, W)
+
+C_conv            Conv2d(K, K+1, 1)   lower-triangular all-ones, row 0 = 0
+    input : per-level forcing = -Δb ∂p_s/∂t - Δp div - Δb V·∇p_s (B, K,   H, W)
+    output: C_{k+1/2} = ∑_{j≤k} forcing[j],  C_{-1/2} = 0        (B, K+1, H, W)
+
+dX_dp_num_conv    Conv2d(K, K, 1)     tridiagonal central-difference stencil
+    input : X (scalar field over levels)                           (B, K, H, W)
+    output: numerators of ∂X/∂p  (divided pointwise by Δp)        (B, K, H, W)
+
+Explicit computations (no DISCO, no loops)
+------------------------------------------
 * KE_k = 0.5(u² + v²)             (nonlinear, before block)
 * p_k = a_k + b_k p_s             (pointwise, before block)
 * dp_k = Δa_k + Δb_k p_s         (pointwise, before block)
-* φ_k  hydrostatic recurrence     (state-dependent log-ratio, before block)
+* log_ratio, increments for φ_k   (pointwise; log-ratio is state-dependent)
 * V_k · ∇p_s = V_k · y_v[:,K]    (pointwise dot with block output)
-* ∂p_s/∂t                        (vertical sum)
+* ∂p_s/∂t                        (pointwise sum over levels)
 * PGF correction -(RT b/p)∇p_s   (pointwise; b/p_k is state-dependent)
-* C_k recurrence                  (vertical, state-dependent)
+* Δp denominators for ∂X/∂p      (pointwise; p_k is state-dependent)
 * ω_k = b_k(∂p_s/∂t + V·∇p_s)+C_k (pointwise)
-* ∂X/∂p finite differences        (vertical)
 * Vertical advection -C_k ∂X/∂p  (pointwise)
 * Adiabatic T term (κT/p) ω       (pointwise)
 
 Two DISCO passes (block + adv_conv) suffice because:
 * All remaining explicit terms are either pointwise nonlinearities with
-  state-dependent coefficients, or vertical recurrences/differences — none
-  involve additional horizontal spatial filtering.
+  state-dependent coefficients, or vertical operations handled by the
+  frozen Conv2d layers above — none require additional horizontal filtering.
 """
 
 import math
@@ -218,6 +235,16 @@ class HybridCoordinateBlockStepper(nn.Module):
             bias=False,
         )
 
+        # ── Vertical linear layers (replace for-loops, frozen) ──────────────
+        # Each is a 1×1 Conv2d acting pointwise over (H, W), mixing K levels.
+        self.C_conv = nn.Conv2d(K, K + 1, 1, bias=False)
+        if K >= 2:
+            self.hydrostatic_conv = nn.Conv2d(K - 1, K, 1, bias=False)
+            self.dX_dp_num_conv = nn.Conv2d(K, K, 1, bias=False)
+        else:
+            self.hydrostatic_conv = None
+            self.dX_dp_num_conv = None
+
         # ── Diffusion convs (1-channel, used with reshape for K levels) ──────
         disco_kw = dict(
             in_shape=shape, out_shape=shape,
@@ -312,6 +339,32 @@ class HybridCoordinateBlockStepper(nn.Module):
             W_vs2[k,     k, :, 1] = -1.0 / R_EARTH  # -V_k · ∇T_k
             W_vs2[K + k, k, :, 1] = -1.0 / R_EARTH  # -V_k · ∇q_k
 
+        # ── Vertical linear layers ────────────────────────────────────────────
+        # C_conv: row 0 = zeros (bottom BC), row k+1 = ones for columns ≤ k.
+        # Encodes C_{k+1/2} = ∑_{j=0}^{k} forcing_j.
+        W_C = self.C_conv.weight  # (K+1, K, 1, 1)
+        W_C.zero_()
+        for k in range(K):
+            W_C[k + 1, : k + 1, 0, 0] = 1.0
+
+        # hydrostatic_conv: strictly lower-triangular all-ones.
+        # output[k] = ∑_{j=0}^{k-1} increment[j]  →  φ_k - φ_surface.
+        if self.hydrostatic_conv is not None:
+            W_H = self.hydrostatic_conv.weight  # (K, K-1, 1, 1)
+            W_H.zero_()
+            for k in range(1, K):
+                W_H[k, :k, 0, 0] = 1.0
+
+        # dX_dp_num_conv: tridiagonal stencil for central-difference numerators.
+        # Bottom and top boundaries use one-sided differences.
+        if self.dX_dp_num_conv is not None:
+            W_dX = self.dX_dp_num_conv.weight  # (K, K, 1, 1)
+            W_dX.zero_()
+            W_dX[0, 0, 0, 0] = -1.0;  W_dX[0, 1, 0, 0] = +1.0        # bottom
+            for k in range(1, K - 1):                                   # interior
+                W_dX[k, k - 1, 0, 0] = -1.0;  W_dX[k, k + 1, 0, 0] = +1.0
+            W_dX[K-1, K-2, 0, 0] = -1.0;  W_dX[K-1, K-1, 0, 0] = +1.0  # top
+
     # ── Physics helpers (identical to HybridCoordinateStepper) ───────────────
 
     def _level_pressures(self, p_s: torch.Tensor) -> torch.Tensor:
@@ -327,18 +380,19 @@ class HybridCoordinateBlockStepper(nn.Module):
         return da + db * p_s.unsqueeze(1)
 
     def _hydrostatic(self, T: torch.Tensor, p_k: torch.Tensor) -> torch.Tensor:
-        """Geopotential from T via hydrostatic balance.
+        """Geopotential via hydrostatic balance using hydrostatic_conv.
 
-        φ_0 = φ_surface
-        φ_k = φ_{k-1} + R T_{k-1} ln(p_{k-1}/p_k)   k ≥ 1
+        φ_k = φ_surface + ∑_{j<k} R T_j ln(p_j/p_{j+1})
+
+        The log-pressure ratio is spatially varying (hybrid coords), so it is
+        computed pointwise; the cumulative sum is encoded in hydrostatic_conv.
         """
         B, K, H, W = T.shape
-        phi = T.new_zeros(B, K, H, W)
-        phi[:, 0] = self.phi_surface
-        for k in range(1, K):
-            log_ratio = torch.log(p_k[:, k - 1] / p_k[:, k])
-            phi[:, k] = phi[:, k - 1] + self.R * T[:, k - 1] * log_ratio
-        return phi
+        if self.hydrostatic_conv is None:  # K == 1
+            return T.new_full((B, 1, H, W), self.phi_surface)
+        log_ratio  = torch.log(p_k[:, :-1] / p_k[:, 1:])   # (B, K-1, H, W)
+        increments = self.R * T[:, :-1] * log_ratio          # (B, K-1, H, W)
+        return self.phi_surface + self.hydrostatic_conv(increments)
 
     def _C_interfaces(
         self,
@@ -348,36 +402,38 @@ class HybridCoordinateBlockStepper(nn.Module):
         dp_k: torch.Tensor,
         dp_s_dt: torch.Tensor,
     ) -> torch.Tensor:
-        """C = (∂p/∂η)η̇ at K+1 interfaces, (B, K+1, H, W).
+        """C = (∂p/∂η)η̇ at K+1 interfaces via C_conv (lower-triangular cumsum).
 
-        C_{k+1/2} = C_{k-1/2} - Δb_k ∂p_s/∂t - Δp_k div_k - Δb_k V_k·∇p_s
-        Bottom BC: C_{-1/2} = 0.
+        forcing_k = -Δb_k ∂p_s/∂t - Δp_k div_k - Δb_k V_k·∇p_s
+        C_{k+1/2} = ∑_{j=0}^{k} forcing_j,   C_{-1/2} = 0  (row 0 of C_conv)
         """
         B, K, H, W = div.shape
         v_dot_gps = (uv * grad_ps.unsqueeze(1)).sum(-1)  # (B, K, H, W)
         db = self.delta_b.view(1, K, 1, 1)
-        C_half = div.new_zeros(B, K + 1, H, W)
-        for k in range(K):
-            C_half[:, k + 1] = (
-                C_half[:, k]
-                - db[:, k] * dp_s_dt
-                - dp_k[:, k] * div[:, k]
-                - db[:, k] * v_dot_gps[:, k]
-            )
-        return C_half
+        forcing = (
+            -db * dp_s_dt.unsqueeze(1)
+            - dp_k * div
+            - db * v_dot_gps
+        )  # (B, K, H, W)
+        return self.C_conv(forcing)  # (B, K+1, H, W)
 
     def _dX_dp(self, X: torch.Tensor, p_k: torch.Tensor) -> torch.Tensor:
-        """∂X/∂p by central differences; one-sided at top/bottom boundaries."""
+        """∂X/∂p via dX_dp_num_conv (tridiagonal stencil) ÷ pointwise Δp.
+
+        dX_dp_num_conv encodes the fixed finite-difference numerators; the
+        pressure-difference denominators are state-dependent (hybrid coords)
+        and are divided in pointwise after the conv.
+        """
         B, K, H, W = X.shape
-        dX = X.new_zeros(B, K, H, W)
-        if K == 1:
-            return dX
-        for k in range(1, K - 1):
-            dp = p_k[:, k + 1] - p_k[:, k - 1]
-            dX[:, k] = (X[:, k + 1] - X[:, k - 1]) / dp
-        dX[:, 0]     = (X[:, 1]     - X[:, 0])     / (p_k[:, 1]     - p_k[:, 0])
-        dX[:, K - 1] = (X[:, K - 1] - X[:, K - 2]) / (p_k[:, K - 1] - p_k[:, K - 2])
-        return dX
+        if self.dX_dp_num_conv is None:  # K == 1
+            return X.new_zeros(B, K, H, W)
+        numerators = self.dX_dp_num_conv(X)               # (B, K, H, W)
+        dp = p_k.new_empty(B, K, H, W)
+        dp[:, 0]   = p_k[:, 1]   - p_k[:, 0]             # bottom one-sided
+        dp[:, K-1] = p_k[:, K-1] - p_k[:, K-2]           # top one-sided
+        if K >= 3:
+            dp[:, 1:-1] = p_k[:, 2:] - p_k[:, :-2]       # interior central
+        return numerators / dp
 
     # ── Diffusion helpers ─────────────────────────────────────────────────────
 
