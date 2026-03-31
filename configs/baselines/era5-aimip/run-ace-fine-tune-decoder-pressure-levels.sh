@@ -8,7 +8,7 @@ PRESSURE_LEVEL_SEPARATE_DECODER_LR_WARMUP_CONFIG_FILENAME="ace-fine-tune-pressur
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 PRESSURE_LEVEL_SEPARATE_DECODER_LR_WARMUP_CONFIG_PATH=$SCRIPT_PATH/$PRESSURE_LEVEL_SEPARATE_DECODER_LR_WARMUP_CONFIG_FILENAME
 EXISTING_RESULTS_DATASET="01K9B1MXD6V26S8BQH5CKY514C"  # best checkpoint is ace-aimip-train-rs3
-BEAKER_USERNAME=bhenn1983
+BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=4
 

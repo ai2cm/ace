@@ -17,7 +17,7 @@ FINE_TUNED_SEPARATE_DECODER_CHECKPOINT_IDS=("01KAKXY0EK24K7BZK2N8SPJ5SJ"\
 CONFIG_FILENAME="ace-evaluator-seed-selection-single-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
-BEAKER_USERNAME=bhenn1983
+BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script

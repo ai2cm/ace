@@ -7,7 +7,7 @@ JOB_GROUP="ace-aimip"
 CONFIG_FILENAME="ace-train-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
-BEAKER_USERNAME=bhenn1983
+BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=4
 

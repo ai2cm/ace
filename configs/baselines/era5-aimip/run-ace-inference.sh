@@ -6,7 +6,7 @@ JOB_NAME_BASE="ace-aimip-inference-oct-1978-2024"
 JOB_GROUP="ace-aimip"
 # this is from ace-aimip-fine-tune-decoder-pressure-levels-separate-decoder-lr-warmup-RS0
 EXISTING_RESULTS_DATASET="01KAKXY0EK24K7BZK2N8SPJ5SJ"
-BEAKER_USERNAME=bhenn1983
+BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 REPO_ROOT=$(git rev-parse --show-toplevel)
