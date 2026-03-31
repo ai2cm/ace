@@ -553,6 +553,8 @@ class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
         compute_percentile_frac: bool = True,
         two_tailed_variables: list[str] | None = None,
         left_tailed_variables: list[str] | None = None,
+        right_tailed_variables: list[str] | None = None,
+        default_tail: Literal["upper", "lower", "both"] = "upper",
     ) -> None:
         super().__init__(
             n_bins=n_bins,
@@ -561,6 +563,8 @@ class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
         )
         self._two_tailed_variables = two_tailed_variables or []
         self._left_tailed_variables = left_tailed_variables or []
+        self._right_tailed_variables = right_tailed_variables or []
+        self._default_tail = default_tail
 
     def _variable_distribution_tail(
         self, field_name: str
@@ -569,25 +573,9 @@ class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
             return "both"
         if field_name in self._left_tailed_variables:
             return "lower"
-        return "upper"
-
-    def _percentile_entries_for_field(self, field_name: str) -> list[tuple[float, str]]:
-        tail = self._variable_distribution_tail(field_name)
-        entries: list[tuple[float, str]] = []
-        if tail == "upper":
-            for ref in self.percentiles:
-                p = ref
-                entries.append((p, _format_percentile_for_metric_key(p, ref)))
-        elif tail == "lower":
-            for ref in self.percentiles:
-                p = 100.0 - ref
-                entries.append((p, _format_percentile_for_metric_key(p, ref)))
-        else:
-            for ref in self.percentiles:
-                p = ref
-                entries.append((p, _format_percentile_for_metric_key(p, ref)))
-                entries.append((100.0 - ref, _format_percentile_for_metric_key(p, ref)))
-        return entries
+        if field_name in self._right_tailed_variables:
+            return "upper"
+        return self._default_tail
 
     def _get_percentile_metrics_for_field(
         self, histogram: _Histogram, field_name: str
@@ -608,30 +596,32 @@ class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
         return percentile_metrics
 
     def get_wandb(self) -> dict[str, float]:
-        return_dict: dict[str, matplotlib.figure.Figure | float] = {}
-        target_dict: dict[str, float] = {}
+        return_metrics: dict[str, matplotlib.figure.Figure | float] = {}
+        target_metrics: dict[str, float] = {}
 
         for field_name, histograms in self._get_histograms().items():
             target = histograms.get("target")
             prediction = histograms.get("prediction")
             fig = self._plot_histogram(target, prediction)
-            return_dict[field_name] = fig
+            return_metrics[field_name] = fig
             plt.close(fig)
             if prediction is not None:
-                return_dict.update(
+                return_metrics.update(
                     self._get_percentile_metrics_for_field(prediction, field_name)
                 )
 
                 if self._compute_percentile_frac and target is not None:
-                    target_dict.update(
+                    target_metrics.update(
                         self._get_percentile_metrics_for_field(
                             target,
                             field_name,
                         )
                     )
-        for key, value in target_dict.items():
-            return_dict[f"prediction_frac_of_target/{key}"] = value / return_dict[key]
-        return return_dict
+        for key, value in target_metrics.items():
+            return_metrics[f"prediction_frac_of_target/{key}"] = (
+                value / return_metrics[key]
+            )
+        return return_metrics
 
 
 def _normalize_histogram(counts, bin_edges):

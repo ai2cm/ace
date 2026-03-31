@@ -747,6 +747,11 @@ class Aggregator:
         include_positional_comparisons: Include comparison metrics that output
             positional maps (e.g. mean maps).  This should be disabled when
             using random subsetting because averaged maps won't make sense.
+        two_tailed_variables: List of variables to compute two-tailed metrics for
+            if present in the data. Defaults to
+            ["eastward_wind_at_ten_meters", "northward_wind_at_ten_meters"].
+        left_tailed_variables: List of variables to compute left-tailed metrics for
+            if present in the data. Defaults to ["PRMSL", "PRESsfc"].
     """
 
     def __init__(
@@ -758,16 +763,20 @@ class Aggregator:
         ssim_kwargs: Mapping[str, Any] | None = None,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
         include_positional_comparisons: bool = True,
-        two_tailed_variables: list[str] | None = [
-            "eastward_wind_at_ten_meters",
-            "northward_wind_at_ten_meters",
-        ],
-        left_tailed_variables: list[str] | None = ["PRMSL", "PRESsfc"],
+        two_tailed_variables: list[str] | None = None,
+        left_tailed_variables: list[str] | None = None,
     ) -> None:
         self.downscale_factor = downscale_factor
 
         if ssim_kwargs is None:
             ssim_kwargs = {}
+        if two_tailed_variables is None:
+            two_tailed_variables = [
+                "eastward_wind_at_ten_meters",
+                "northward_wind_at_ten_meters",
+            ]
+        if left_tailed_variables is None:
+            left_tailed_variables = ["PRMSL", "PRESsfc"]
 
         # Folded samples into batch dimension
         self._comparisons: list[_ComparisonAggregator] = [

@@ -472,8 +472,12 @@ class TrainerConfig:
 
 
 def _get_complement_percentile_prefix(prefix):
-    """Given a prefix containing a percentile value, return a prefix with
+    """
+    Given a prefix containing a percentile value, return a prefix with
     100 minus that percentile. Returns None if no percentile pattern is found.
+    Ex. "prediction_frac_of_target/99.9999th-percentile"
+        -> "prediction_frac_of_target/0.0001th-percentile", or
+        "some_var/percentile/99.9999" -> "some_var/percentile/0.0001".
     """
     match = re.search(
         r"(\d+(?:\.\d+)?)(?:th)?[-_/]percentile|percentile[-_/](\d+(?:\.\d+)?)",
