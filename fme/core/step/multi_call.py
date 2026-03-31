@@ -7,9 +7,10 @@ import torch
 from torch import nn
 
 from fme.core.dataset_info import DatasetInfo
-from fme.core.multi_call import MultiCall, MultiCallConfig, StepMethod
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
+from fme.core.step._multi_call import MultiCall, MultiCallConfig, StepMethod
+from fme.core.step.args import StepArgs
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -193,6 +194,9 @@ class MultiCallStepConfig(StepConfigABC):
     def get_ocean(self) -> OceanConfig | None:
         return self.wrapped_step.get_ocean()
 
+    def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
+        self.wrapped_step.replace_prescribed_prognostic_names(names)
+
     def replace_multi_call(self, multi_call: MultiCallConfig | None):
         self.config = multi_call
 
@@ -286,19 +290,15 @@ class MultiCallStep(StepABC):
 
     def step(
         self,
-        input: TensorMapping,
-        next_step_input_data: TensorMapping,
+        args: StepArgs,
         wrapper: Callable[[torch.nn.Module], torch.nn.Module] = lambda x: x,
     ) -> TensorDict:
         state = self._wrapped_step.step(
-            input,
-            next_step_input_data,
+            args=args,
             wrapper=wrapper,
         )
         if self._multi_call is not None:
-            multi_called_outputs = self._multi_call.step(
-                input, next_step_input_data, wrapper=wrapper
-            )
+            multi_called_outputs = self._multi_call.step(args=args, wrapper=wrapper)
             state = {**multi_called_outputs, **state}
         return state
 

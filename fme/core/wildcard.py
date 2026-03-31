@@ -1,3 +1,4 @@
+import logging
 import re
 from collections.abc import Callable
 
@@ -37,65 +38,78 @@ class UnusedRuleError(ValueError):
     pass
 
 
-class MissingParameterError(ValueError):
-    pass
-
-
-class ConflictingRuleError(ValueError):
-    pass
-
-
-def apply_by_wildcard(
+def apply_by_include(
     model: nn.Module,
     func: Callable[[nn.Module, str], None],
     include: list[str],
-    exclude: list[str],
-    raise_if_unused: bool = False,
 ):
     """
     Apply a function to parameters in a model by wildcard rules.
+
+    All parameters not included are excluded. Raises if an include rule
+    is unmatched.
 
     Parameters:
         model: The model to apply the function to.
         func: The function to apply to the parameters.
         include: A list of wildcard patterns to include.
-        exclude: A list of wildcard patterns to exclude.
-        raise_if_unused: Whether to raise an error if there are include or
-            exclude rules that do not match any parameters. The "*" pattern
-            is exempted and will not be checked, as it is often used to
-            match "all parameters" in an empty list.
     """
-    missing_parameters = []
     remaining_includes = set(include)
-    remaining_excludes = set(exclude)
     _drop_from_set(remaining_includes, "*")
-    _drop_from_set(remaining_excludes, "*")
+    applied_names = set()
     for name in model.state_dict().keys():
         matching_include = _get_matching_pattern(include, name)
         if matching_include is not None:
             _drop_from_set(remaining_includes, matching_include)
-            matching_exclude = _get_matching_pattern(exclude, name)
-            if matching_exclude is not None:
-                raise ConflictingRuleError(
-                    f"Parameter {name} is matched by both include rule "
-                    f"{matching_include} and exclude rule {matching_exclude}"
-                )
             func(model, name)
-        else:
-            matching_exclude = _get_matching_pattern(exclude, name)
-            if matching_exclude is not None:
-                _drop_from_set(remaining_excludes, matching_exclude)
-            else:
-                missing_parameters.append(name)
-    if len(missing_parameters) > 0:
-        raise MissingParameterError(
-            f"Model has parameters {missing_parameters} which are not "
-            f"specified in either include {include} "
-            f"or exclude {exclude}"
-        )
-    if raise_if_unused and (len(remaining_includes) > 0 or len(remaining_excludes) > 0):
+            applied_names.add(name)
+    if len(remaining_includes) > 0:
         raise UnusedRuleError(
-            f"Model has include and/or exclude rules that do not match any parameters, "
-            f"include rules: {remaining_includes}, exclude rules: {remaining_excludes}"
+            f"Model has include rules that do not match any parameters, "
+            f"include rules: {remaining_includes}, "
+            f"parameters: {list(model.state_dict().keys())}"
         )
+    logging.info(f"Applied function to parameters: {applied_names}")
+    logging.info(
+        f"Skipped parameters: {set(model.state_dict().keys()) - applied_names}"
+    )
+    return model
+
+
+def apply_by_exclude(
+    model: nn.Module,
+    func: Callable[[nn.Module, str], None],
+    exclude: list[str],
+):
+    """
+    Apply a function to parameters in a model by wildcard rules.
+
+    All parameters not excluded are included. Raises if an exclude rule
+    is unmatched.
+
+    Parameters:
+        model: The model to apply the function to.
+        func: The function to apply to the parameters.
+        exclude: A list of wildcard patterns to exclude.
+    """
+    remaining_excludes = set(exclude)
+    _drop_from_set(remaining_excludes, "*")
+    applied_names = set()
+    for name in model.state_dict().keys():
+        matching_exclude = _get_matching_pattern(exclude, name)
+        if matching_exclude is not None:
+            _drop_from_set(remaining_excludes, matching_exclude)
+        else:
+            func(model, name)
+            applied_names.add(name)
+    if len(remaining_excludes) > 0:
+        raise UnusedRuleError(
+            f"Model has exclude rules that do not match any parameters, "
+            f"exclude rules: {remaining_excludes}, "
+            f"parameters: {list(model.state_dict().keys())}"
+        )
+    logging.info(f"Applied function to parameters: {applied_names}")
+    logging.info(
+        f"Skipped parameters: {set(model.state_dict().keys()) - applied_names}"
+    )
     return model

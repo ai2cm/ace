@@ -20,7 +20,7 @@ def test_write_single_timestep():
         data={"air_temperature": torch.rand((n_samples, n_time, n_lat, n_lon))},
         time=xr.DataArray(np.random.rand(n_samples, n_time), dims=["sample", "time"]),
         horizontal_dims=["lat", "lon"],
-        labels=[set() for _ in range(n_samples)],
+        labels=None,
     )
     with tempfile.TemporaryDirectory() as tmpdir:
         _write(
@@ -65,7 +65,7 @@ def test_write_multiple_timesteps():
         data={"air_temperature": torch.rand((n_samples, n_time, n_lat, n_lon))},
         time=xr.DataArray(np.random.rand(n_samples, n_time), dims=["sample", "time"]),
         horizontal_dims=["lat", "lon"],
-        labels=[set() for _ in range(n_samples)],
+        labels=None,
     )
     with tempfile.TemporaryDirectory() as tmpdir:
         _write(

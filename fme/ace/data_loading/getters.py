@@ -1,14 +1,18 @@
 import logging
+from collections.abc import Sequence
 
 import torch.utils.data
 
 from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.data_loading.dataloader import get_data_loader
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
+from fme.core.dataset.dataset import DatasetItem
 from fme.core.dataset.merged import MergeNoConcatDatasetConfig
+from fme.core.dataset.subset import SubsetDataset
 from fme.core.dataset.xarray import XarrayDataConfig, XarrayDataset
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
+from fme.core.labels import LabelEncoding
 
 from .batch_data import PrognosticState
 from .config import DataLoaderConfig
@@ -24,13 +28,17 @@ logger = logging.getLogger(__name__)
 
 
 class CollateFn:
-    def __init__(self, horizontal_dims: list[str]):
+    def __init__(
+        self, horizontal_dims: list[str], label_encoding: LabelEncoding | None = None
+    ):
         self.horizontal_dims = horizontal_dims
+        self.label_encoding = label_encoding
 
-    def __call__(self, samples):
+    def __call__(self, samples: Sequence[DatasetItem]) -> BatchData:
         return BatchData.from_sample_tuples(
             samples,
             horizontal_dims=self.horizontal_dims,
+            label_encoding=self.label_encoding,
         )
 
 
@@ -41,8 +49,13 @@ def _get_sampler(
 ) -> torch.utils.data.Sampler:
     dist = Distributed.get_instance()
     if sample_with_replacement_dataset_size is not None:
+        dist.require_no_spatial_parallelism(
+            "sample_with_replacement is not supported with spatial "
+            "parallelism. Spatial co-ranks would draw different samples, "
+            "producing corrupted data after scatter_spatial reassembly."
+        )
         local_sample_with_replacement_dataset_size = (
-            sample_with_replacement_dataset_size // dist.world_size
+            sample_with_replacement_dataset_size // dist.total_data_parallel_ranks
         )
         sampler = torch.utils.data.RandomSampler(
             dataset,
@@ -58,6 +71,7 @@ def get_gridded_data(
     config: DataLoaderConfig,
     train: bool,
     requirements: DataRequirements,
+    _force_forkserver: bool = False,
 ) -> GriddedData:
     """
     Args:
@@ -65,22 +79,25 @@ def get_gridded_data(
         train: Whether loader is intended for training or validation data; if True,
             then data will be shuffled.
         requirements: Data requirements for the model.
+        _force_forkserver: Whether to force using forkserver multiprocessing context.
+            This is useful for debugging or testing in cases where forkserver is not
+            the default, but should generally be unused in production code.
     """
-    n_timesteps_preloaded = config.time_buffer + requirements.n_timesteps
+    n_timesteps_preloaded = requirements.n_timesteps_schedule.add(config.time_buffer)
     dataset, properties = config.get_dataset(requirements.names, n_timesteps_preloaded)
 
     if config.time_buffer > 0:
         # include requirements.n_timesteps - 1 steps of overlap so that no samples are
         # skipped at the boundaries of the preloaded timesteps
         start_every_n = config.time_buffer + 1
-        indices = range(len(dataset))[::start_every_n]
-        dataset = torch.utils.data.Subset(dataset, indices)
+        indices = list(range(len(dataset))[::start_every_n])
+        dataset = SubsetDataset(dataset, indices)
 
     dist = Distributed.get_instance()
 
     sampler = _get_sampler(dataset, config.sample_with_replacement, train)
 
-    if config.zarr_engine_used:
+    if _force_forkserver or (config.zarr_engine_used and config.num_data_workers > 0):
         # GCSFS and S3FS are not fork-safe, so we need to use forkserver
         # reading zarr with async from weka also requires forkserver
         mp_context = "forkserver"
@@ -92,17 +109,25 @@ def get_gridded_data(
     dist = Distributed.get_instance()
     batch_size = dist.local_batch_size(int(config.batch_size))
 
+    if config.available_labels is not None:
+        label_encoding = LabelEncoding(sorted(list(config.available_labels)))
+    else:
+        label_encoding = None
+
     dataloader = get_data_loader(
         dataset=dataset,
         batch_size=batch_size,
-        n_window_timesteps=requirements.n_timesteps,
+        n_window_timesteps=requirements.n_timesteps_schedule,
         time_buffer=config.time_buffer,
         num_workers=config.num_data_workers,
         sampler=sampler,
         shuffled=train,
         drop_last=True,
         pin_memory=using_gpu(),
-        collate_fn=CollateFn(list(properties.horizontal_coordinates.dims)),
+        collate_fn=CollateFn(
+            list(properties.horizontal_coordinates.dims),
+            label_encoding,
+        ),
         multiprocessing_context=mp_context,
         persistent_workers=persistent_workers,
         prefetch_factor=config.prefetch_factor,
@@ -111,9 +136,19 @@ def get_gridded_data(
     return GriddedData(
         loader=dataloader,
         properties=properties,
-        sampler=sampler,
         modifier=config.augmentation.build_modifier(),
     )
+
+
+_WORKER_DIST_CX = None  # needed so it doesn't get garbage collected and finalized
+
+
+def _forkserver_worker_init_fn(worker_id: int) -> None:
+    global _WORKER_DIST_CX
+    _WORKER_DIST_CX = Distributed.context()
+    _WORKER_DIST_CX.__enter__()
+    # don't need to exit the context on workers as they are not
+    # initialized/managed by torchrun
 
 
 def get_inference_data(
@@ -124,6 +159,7 @@ def get_inference_data(
     label_override: list[str] | None = None,
     surface_temperature_name: str | None = None,
     ocean_fraction_name: str | None = None,
+    _force_forkserver: bool = False,
 ) -> InferenceGriddedData:
     """
     Args:
@@ -140,6 +176,9 @@ def get_inference_data(
             set to None if no ocean temperature prescribing is being used.
         ocean_fraction_name: Name of the ocean fraction variable. Can be set to None
             if no ocean temperature prescribing is being used.
+        _force_forkserver: Whether to force using forkserver multiprocessing context.
+            This is useful for debugging or testing in cases where forkserver is not
+            the default, but should generally be unused in production code.
 
     Returns:
         A data loader for inference with coordinates and metadata.
@@ -154,14 +193,16 @@ def get_inference_data(
     )
     properties = dataset.properties
 
-    if config.zarr_engine_used:
+    if config.zarr_engine_used or _force_forkserver:
         # GCSFS and S3FS are not fork-safe, so we need to use forkserver
         # persist workers since startup is slow
         mp_context = "forkserver"
         persistent_workers = True
+        worker_init_fn = _forkserver_worker_init_fn
     else:
         mp_context = None
         persistent_workers = False
+        worker_init_fn = None
 
     logging.info(f"Multiprocessing inference context: {mp_context or 'fork'}")
 
@@ -174,6 +215,7 @@ def get_inference_data(
         pin_memory=using_gpu(),
         multiprocessing_context=mp_context,
         persistent_workers=persistent_workers,
+        worker_init_fn=worker_init_fn,
     )
     gridded_data = InferenceGriddedData(
         loader=loader,
@@ -218,7 +260,9 @@ def get_forcing_data(
         raise NotImplementedError("code assumes initial time only has 1 timestep")
     if isinstance(config.dataset, XarrayDataConfig):
         available_times = XarrayDataset(
-            config.dataset, window_requirements.names, window_requirements.n_timesteps
+            config.dataset,
+            window_requirements.names,
+            window_requirements.n_timesteps_schedule,
         ).all_times
     elif isinstance(config.dataset, MergeNoConcatDatasetConfig):
         # Some forcing variables may not be in the first dataset,
@@ -227,7 +271,7 @@ def get_forcing_data(
             available_times = XarrayDataset(
                 config.dataset.merge[0],
                 names=[],
-                n_timesteps=window_requirements.n_timesteps,
+                n_timesteps=window_requirements.n_timesteps_schedule,
             ).all_times
         else:
             raise ValueError("Forcing data cannot be concatenated.")

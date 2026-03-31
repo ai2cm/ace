@@ -1,9 +1,8 @@
 import datetime
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sized
-from typing import Generic, Literal, TypeVar
+from collections.abc import Mapping
+from typing import Literal
 
 import numpy as np
-import torch
 import xarray as xr
 
 from fme.ace.data_loading.augmentation import BatchModifierABC, NullModifier
@@ -14,24 +13,12 @@ from fme.core.coordinates import HorizontalCoordinates, VerticalCoordinate
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset_info import DatasetInfo
-from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
-
-T = TypeVar("T", covariant=True)
-
-
-U = TypeVar("U")
-
-
-class SizedMap(Generic[T, U], Sized, Iterable[U]):
-    def __init__(self, func: Callable[[T], U], iterable: DataLoader[T]):
-        self._func = func
-        self._iterable = iterable
-
-    def __len__(self) -> int:
-        return len(self._iterable)
-
-    def __iter__(self) -> Iterator[U]:
-        return map(self._func, self._iterable)
+from fme.core.generics.data import (
+    DataLoader,
+    GriddedDataABC,
+    InferenceDataABC,
+    SizedMap,
+)
 
 
 class GriddedData(GriddedDataABC[BatchData]):
@@ -49,7 +36,6 @@ class GriddedData(GriddedDataABC[BatchData]):
         loader: DataLoaderABC,
         properties: DatasetProperties,
         modifier: BatchModifierABC = NullModifier(),
-        sampler: torch.utils.data.Sampler | None = None,
     ):
         """
         Args:
@@ -58,19 +44,18 @@ class GriddedData(GriddedDataABC[BatchData]):
             properties: Batch-constant properties for the dataset, such as variable
                 metadata and coordinate information. Data can be on any device.
             modifier: Modifier for the data loader.
-            sampler: Optional sampler for the data loader. Provided to allow support for
-                distributed training.
 
         Note:
             While input data can be on any device, all data exposed from this class
             will be on the current device.
         """
         self._loader = loader
-        self._properties = properties.to_device()
+        self._global_properties = properties.to_device()
+        shape = self._global_properties.horizontal_coordinates.shape
+        self._global_img_shape: tuple[int, int] = (shape[-2], shape[-1])
+        self._properties = self._global_properties.localize()
         self._timestep = self._properties.timestep
         self._vertical_coordinate = self._properties.vertical_coordinate
-        self._mask_provider = self._properties.mask_provider
-        self._sampler = sampler
         self._modifier = modifier
         self._batch_size: int | None = None
 
@@ -78,14 +63,19 @@ class GriddedData(GriddedDataABC[BatchData]):
     def loader(self) -> DataLoader[BatchData]:
         return self._get_gpu_loader(self._loader)
 
-    def subset_loader(self, start_batch: int) -> DataLoader[BatchData]:
-        return self._get_gpu_loader(self._loader.subset(start_batch))
+    def subset_loader(
+        self, start_batch: int | None = None, stop_batch: int | None = None
+    ) -> DataLoader[BatchData]:
+        return self._get_gpu_loader(
+            self._loader.subset(start_batch=start_batch, stop_batch=stop_batch)
+        )
 
     def _get_gpu_loader(
         self, base_loader: DataLoader[BatchData]
     ) -> DataLoader[BatchData]:
         def modify_and_on_device(batch: BatchData) -> BatchData:
-            return self._modifier(batch).to_device()
+            batch = self._modifier(batch)
+            return batch.to_device().scatter_spatial(self._global_img_shape)
 
         return SizedMap(modify_and_on_device, base_loader)
 
@@ -96,11 +86,12 @@ class GriddedData(GriddedDataABC[BatchData]):
     @property
     def dataset_info(self) -> DatasetInfo:
         return DatasetInfo(
-            horizontal_coordinates=self.horizontal_coordinates,
-            vertical_coordinate=self._vertical_coordinate,
-            mask_provider=self._mask_provider,
+            horizontal_coordinates=self._global_properties.horizontal_coordinates,
+            vertical_coordinate=self._global_properties.vertical_coordinate,
+            mask_provider=self._global_properties.mask_provider,
             timestep=self._timestep,
-            variable_metadata=self._properties.variable_metadata,
+            variable_metadata=self._global_properties.variable_metadata,
+            all_labels=self._global_properties.all_labels,
         )
 
     @property
@@ -139,6 +130,12 @@ class GriddedData(GriddedDataABC[BatchData]):
         """
         self._loader.set_epoch(epoch)
 
+    def alternate_shuffle(self):
+        """
+        Change the random shuffle of the data loader for the current epoch.
+        """
+        self._loader.alternate_shuffle()
+
 
 def get_initial_condition(
     loader: DataLoader[BatchData],
@@ -167,7 +164,7 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
     ):
         """
         Args:
-            loader: torch DataLoader, which returns batches of type BatchData.
+            loader: DataLoader, which returns batches of type BatchData.
                 Data can be on any device (but will typically be on CPU).
             initial_condition: Initial condition for the inference, or a requirements
                 object specifying how to extract the initial condition from the first
@@ -180,22 +177,24 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
             will be on the current device.
         """
         self._loader = loader
-        self._properties = properties.to_device()
+        self._global_properties = properties.to_device()
+        shape = self._global_properties.horizontal_coordinates.shape
+        self._global_img_shape: tuple[int, int] = (shape[-2], shape[-1])
+        self._properties = self._global_properties.localize()
         self._n_initial_conditions: int | None = None
         if isinstance(initial_condition, PrognosticStateDataRequirements):
             self._initial_condition: PrognosticState = get_initial_condition(
-                loader, initial_condition
+                self.loader, initial_condition
             )
         else:
             self._initial_condition = initial_condition.to_device()
-        self._initial_time: xr.DataArray | None = None
 
     @property
     def loader(self) -> DataLoader[BatchData]:
-        def on_device(batch: BatchData) -> BatchData:
-            return batch.to_device()
+        def scatter_and_on_device(batch: BatchData) -> BatchData:
+            return batch.to_device().scatter_spatial(self._global_img_shape)
 
-        return SizedMap(on_device, self._loader)
+        return SizedMap(scatter_and_on_device, self._loader)
 
     @property
     def variable_metadata(self) -> dict[str, VariableMetadata]:
@@ -203,12 +202,13 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
 
     @property
     def dataset_info(self) -> DatasetInfo:
+        """Always returns global datasets regardless of model parallelism."""
         return DatasetInfo(
-            horizontal_coordinates=self.horizontal_coordinates,
-            vertical_coordinate=self._vertical_coordinate,
-            mask_provider=self._properties.mask_provider,
+            horizontal_coordinates=self._global_properties.horizontal_coordinates,
+            vertical_coordinate=self._global_properties.vertical_coordinate,
+            mask_provider=self._global_properties.mask_provider,
             timestep=self.timestep,
-            all_labels=self._properties.all_labels,
+            all_labels=self._global_properties.all_labels,
         )
 
     @property
@@ -249,13 +249,7 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
 
     @property
     def initial_time(self) -> xr.DataArray:
-        if self._initial_time is None:
-            for batch in self.loader:
-                self._initial_time = batch.time.isel(time=0)
-                break
-            else:
-                raise ValueError("No data found in loader")
-        return self._initial_time
+        return self.initial_condition.as_batch_data().time.isel(time=0)
 
 
 class PSType:

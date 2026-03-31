@@ -15,27 +15,46 @@ from fme.downscaling.data.datasets import (
     LatLonCoordinates,
     PairedBatchItem,
 )
+from fme.downscaling.data.patching import Patch, _HorizontalSlice
 from fme.downscaling.data.utils import BatchedLatLonCoordinates, ClosedInterval
 
 
-def test_ContiguousDistributedSampler():
-    dataset = list(range(20))
+@pytest.mark.parametrize("drop_last", [True, False])
+def test_ContiguousDistributedSampler(drop_last):
+    dataset = list(range(22))
     world_size = 4
     samplers = [
         ContiguousDistributedSampler(
-            dataset,
-            num_replicas=world_size,
-            rank=i,
+            dataset, num_replicas=world_size, rank=i, drop_last=drop_last
         )
         for i in range(world_size)
     ]
     sampled = []
-    for sampler in samplers:
+    batches = []
+    for i, sampler in enumerate(samplers):
         rank_batch = list(iter(sampler))
-        # assert sample elements are consecutive integers
-        assert all([b - a == 1 for a, b in zip(rank_batch[:-1], rank_batch[1:])])
-        sampled += rank_batch
-    assert sampled == dataset
+        batches.append(rank_batch)
+    # assert sample elements are consecutive integers
+
+    for i, rank_batch in enumerate(batches):
+        if drop_last:
+            # drop last two, divide first 20 elements into 4 ranks of size 5
+            assert len(rank_batch) == 5
+            assert all([b - a == 1 for a, b in zip(rank_batch[:-1], rank_batch[1:])])
+        else:
+            # each batch padded to cover full dataset of length 22 -> 4 ranks of size 6
+            if i == 3:
+                # last batch is padded with the starting elements
+                assert rank_batch == [15, 16, 17, 18, 19, 20, 21]
+            else:
+                assert len(rank_batch) == 5
+                assert all(
+                    [b - a == 1 for a, b in zip(rank_batch[:-1], rank_batch[1:])]
+                )
+
+    sampled = sum(batches, [])
+    if drop_last:
+        assert sampled == dataset[:20]
 
 
 def random_named_tensor(var_names, shape):
@@ -195,10 +214,11 @@ def test_horizontal_subset(
         lat=torch.linspace(0.0, 1.0, n_lat), lon=torch.linspace(0.0, 1.0, n_lon)
     )
 
-    datum: tuple[dict[str, torch.Tensor], xr.DataArray, set[str]] = (
+    datum: tuple[dict[str, torch.Tensor], xr.DataArray, set[str], int] = (
         {"x": torch.zeros(batch_size, n_timesteps, n_lat, n_lon)},
         xr.DataArray([0.0]),
         set(),
+        0,
     )
     base_dataset = MagicMock(spec=torch.utils.data.Dataset)
     properties = MagicMock(spec=DatasetProperties)
@@ -212,7 +232,7 @@ def test_horizontal_subset(
         lon_interval=ClosedInterval(float(lon_interval[0]), float(lon_interval[1])),
     )
 
-    subset, _, labels = dataset[0]
+    subset, _, labels, _ = dataset[0]
     assert labels is properties.all_labels
     assert subset["x"].shape == (
         batch_size,
@@ -269,6 +289,7 @@ def get_mock_dataset(field_leading_dim=1):
             {"x": torch.rand(field_leading_dim, 8, 16)},
             data_array([0]),
             set(),
+            0,
         )
     )
     return dataset
@@ -381,3 +402,63 @@ def test_BatchData_slice_latlon():
         batch_slice.data["x"],
         batch.data["x"][:, lat_slice, lon_slice],
     )
+
+
+def _make_batch_data_for_patching(batch_size=2):
+    """Create a 2×4×4 BatchData with known arange values for patch testing."""
+    n_lat, n_lon = 4, 4
+    lat = torch.arange(n_lat, dtype=torch.float32)
+    lon = torch.arange(n_lon, dtype=torch.float32)
+    data = {
+        "x": torch.arange(batch_size * n_lat * n_lon, dtype=torch.float32).reshape(
+            batch_size, n_lat, n_lon
+        )
+    }
+    time = xr.DataArray(list(range(batch_size)), dims=["batch"])
+    latlon_coordinates = BatchedLatLonCoordinates(
+        lat=lat.unsqueeze(0).expand(batch_size, -1).clone(),
+        lon=lon.unsqueeze(0).expand(batch_size, -1).clone(),
+    )
+    return BatchData(data=data, time=time, latlon_coordinates=latlon_coordinates)
+
+
+def test_batch_data_generate_from_patches():
+    batch = _make_batch_data_for_patching()
+    patches = [
+        Patch(
+            input_slice=_HorizontalSlice(y=slice(1, 3), x=slice(None)),
+            output_slice=_HorizontalSlice(y=slice(None), x=slice(None)),
+        ),
+        Patch(
+            input_slice=_HorizontalSlice(y=slice(0, 2), x=slice(2, 3)),
+            output_slice=_HorizontalSlice(y=slice(None), x=slice(None)),
+        ),
+    ]
+    generated = list(batch.generate_from_patches(patches))
+
+    assert len(generated) == 2
+
+    # Patch 0: rows 1-2, all columns
+    expected_lat = torch.tensor([[1.0, 2.0], [1.0, 2.0]])
+    expected_lon = torch.tensor([[0.0, 1.0, 2.0, 3.0], [0.0, 1.0, 2.0, 3.0]])
+    assert torch.equal(generated[0].latlon_coordinates.lat, expected_lat)
+    assert torch.equal(generated[0].latlon_coordinates.lon, expected_lon)
+    assert torch.equal(generated[0].data["x"], batch.data["x"][:, 1:3, :])
+
+    # Patch 1: rows 0-1, column 2
+    expected_lat = torch.tensor([[0.0, 1.0], [0.0, 1.0]])
+    expected_lon = torch.tensor([[2.0], [2.0]])
+    assert torch.equal(generated[1].latlon_coordinates.lat, expected_lat)
+    assert torch.equal(generated[1].latlon_coordinates.lon, expected_lon)
+    assert torch.equal(generated[1].data["x"], batch.data["x"][:, 0:2, 2:3])
+
+
+def test_batch_data_apply_patch_already_patched_raises():
+    batch = _make_batch_data_for_patching()
+    patch = Patch(
+        input_slice=_HorizontalSlice(y=slice(1, 3), x=slice(None)),
+        output_slice=_HorizontalSlice(y=slice(None), x=slice(None)),
+    )
+    (patched,) = list(batch.generate_from_patches([patch]))
+    with pytest.raises(ValueError, match="previously patched"):
+        list(patched.generate_from_patches([patch]))

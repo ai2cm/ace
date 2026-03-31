@@ -6,16 +6,20 @@ import datetime
 from pathlib import Path
 from unittest import mock
 
-import dacite
 import numpy as np
 import pytest
 import torch
 
-from fme.ace.stepper import Stepper, StepperConfig, parameter_init
+from fme.ace.stepper import Stepper, StepperConfig
+from fme.ace.stepper.parameter_init import (
+    FrozenParameterConfig,
+    ParameterClassification,
+    ParameterInitializationConfig,
+)
+from fme.ace.stepper.single_module import load_weights_and_history
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
-from fme.core.loss import StepLossConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry.module import ModuleSelector
 from fme.core.step.single_module import SingleModuleStepConfig
@@ -62,7 +66,6 @@ def test_builder_with_weights_loads_same_state(tmpdir):
                 ),
             ),
         ),
-        loss=StepLossConfig(),
     )
     stepper = stepper_config.get_stepper(dataset_info=get_dataset_info())
     torch.save(
@@ -71,20 +74,15 @@ def test_builder_with_weights_loads_same_state(tmpdir):
         },
         str(tmpdir / "weights.ckpt"),
     )
-    parameter_init_config = parameter_init.ParameterInitializationConfig(
+    parameter_init_config = ParameterInitializationConfig(
         weights_path=str(tmpdir / "weights.ckpt"),
     )
-    stepper_config_data = dataclasses.asdict(stepper_config)
-    with_builder_stepper_config_data = {
-        **stepper_config_data,
-        "parameter_init": parameter_init_config,
-    }
     dataset_info = get_dataset_info()
-    with_builder_stepper = dacite.from_dict(
-        StepperConfig,
-        with_builder_stepper_config_data,
-        config=dacite.Config(strict=True),
-    ).get_stepper(dataset_info=dataset_info)
+    parameter_initializer = parameter_init_config.build(load_weights_and_history)
+    with_builder_stepper = stepper_config.get_stepper(
+        dataset_info=dataset_info,
+        parameter_initializer=parameter_initializer,
+    )
     assert len(with_builder_stepper.modules) == 1
     assert_same_state(
         with_builder_stepper.modules[0].state_dict(),
@@ -155,22 +153,22 @@ def test_builder_with_weights_sfno_init(
     """
     Integration test for the BuilderWithWeights stepper with a SFNO.
     """
-    with_builder_stepper_config_data, _, stepper = get_config(
+    with_builder_stepper_config_data, _, stepper, param_init_config = get_config(
         loaded_shape, extra_built_layer, tmpdir
     )
     dataset_info = get_dataset_info(img_shape=built_shape)
+    config = StepperConfig.from_state(with_builder_stepper_config_data)
+    initializer = param_init_config.build(load_weights_and_history)
     if expect_exception:
         with pytest.raises(ValueError):
-            with_builder_stepper = StepperConfig.from_state(
-                with_builder_stepper_config_data
-            ).get_stepper(
+            with_builder_stepper = config.get_stepper(
                 dataset_info=dataset_info,
+                parameter_initializer=initializer,
             )
     else:
-        with_builder_stepper = StepperConfig.from_state(
-            with_builder_stepper_config_data
-        ).get_stepper(
+        with_builder_stepper = config.get_stepper(
             dataset_info=dataset_info,
+            parameter_initializer=initializer,
         )
         assert len(with_builder_stepper.modules) == 1
         if extra_built_layer:
@@ -215,7 +213,6 @@ def get_config(
                 ),
             ),
         ),
-        loss=StepLossConfig(),
     )
     dataset_info = get_dataset_info(img_shape=loaded_shape)
     stepper = stepper_config.get_stepper(dataset_info=dataset_info)
@@ -230,7 +227,7 @@ def get_config(
         },
         str(tmpdir / "weights.ckpt"),
     )
-    parameter_init_config = parameter_init.ParameterInitializationConfig(
+    parameter_init_config = ParameterInitializationConfig(
         weights_path=str(tmpdir / "weights.ckpt"),
     )
     with_builder_stepper_config_data = dataclasses.asdict(
@@ -254,25 +251,27 @@ def get_config(
                     ),
                 ),
             ),
-            loss=StepLossConfig(),
-            parameter_init=parameter_init_config,
         )
     )
     return (
         with_builder_stepper_config_data,
         dataset_info,
         stepper,
+        parameter_init_config,
     )
 
 
 def test_with_weights_saved_stepper_does_not_need_untuned_weights(tmpdir):
     img_shape = (16, 32)
-    with_builder_stepper_config_data, dataset_info, stepper = get_config(
-        loaded_shape=img_shape, extra_built_layer=False, tmpdir=tmpdir
+    with_builder_stepper_config_data, dataset_info, stepper, param_init_config = (
+        get_config(loaded_shape=img_shape, extra_built_layer=False, tmpdir=tmpdir)
     )
-    with_builder_stepper = StepperConfig.from_state(
-        with_builder_stepper_config_data
-    ).get_stepper(dataset_info=dataset_info)
+    config = StepperConfig.from_state(with_builder_stepper_config_data)
+    initializer = param_init_config.build(load_weights_and_history)
+    with_builder_stepper = config.get_stepper(
+        dataset_info=dataset_info,
+        parameter_initializer=initializer,
+    )
     stepper_state = with_builder_stepper.get_state()
     # should be able to initialize stepper from its state without the untuned weights
     (tmpdir / "weights.ckpt").remove()
@@ -310,13 +309,7 @@ class ComplexModule(torch.nn.Module):
 )
 def test_frozen_parameter_config(apply_config: bool):
     module = ComplexModule(10, 20)
-    config = parameter_init.FrozenParameterConfig(
-        include=[
-            "linear2.*",
-            "custom_param",
-            "linear1.custom_param",
-            "linear1.linear.bias",
-        ],
+    config = FrozenParameterConfig(
         exclude=["linear1.linear.weight"],
     )
     if apply_config:
@@ -330,7 +323,7 @@ def test_frozen_parameter_config(apply_config: bool):
         loss.backward()
         optimizer.step()
     for name, param in module.named_parameters():
-        if name in config.exclude:
+        if config.exclude is not None and name in config.exclude:
             assert not torch.allclose(param.data, original_state[name])
         else:
             if apply_config:
@@ -342,22 +335,32 @@ def test_frozen_parameter_config(apply_config: bool):
 @pytest.mark.parametrize(
     "include, exclude, expect_exception",
     [
-        pytest.param(["*"], ["*"], True, id="both"),
-        pytest.param(["*"], [], False, id="include"),
-        pytest.param([], ["*"], False, id="exclude"),
-        pytest.param(["linear1.*"], ["linear1.*"], True, id="both_same"),
-        pytest.param(["linear1.*"], ["linear2.*"], False, id="both_different"),
-        pytest.param(["linear1.*"], [], False, id="include"),
-        pytest.param([], ["linear1.*"], False, id="exclude"),
-        pytest.param(["linear1.*.weight"], ["linear1.*"], True, id="internal_wildcard"),
+        pytest.param(
+            [
+                "linear2.*",
+                "custom_param",
+                "linear1.custom_param",
+                "linear1.linear.bias",
+            ],
+            ["linear1.linear.weight"],
+            True,
+            id="both",
+        ),
+        pytest.param([], ["linear1.linear.weight"], False, id="one"),
     ],
 )
-def test_frozen_parameter_config_no_overlaps(include, exclude, expect_exception):
+def test_frozen_parameter_config_raises_on_apply_if_both_given(
+    include, exclude, expect_exception
+):
+    module = ComplexModule(10, 20)
+    config = FrozenParameterConfig(
+        include=include, exclude=exclude
+    )  # for backwards compatibility, cannot raise at init time
     if expect_exception:
         with pytest.raises(ValueError):
-            parameter_init.FrozenParameterConfig(include=include, exclude=exclude)
+            config.apply(module)
     else:
-        parameter_init.FrozenParameterConfig(include=include, exclude=exclude)
+        config.apply(module)
 
 
 def test_parameter_init_with_regularizer(tmpdir):
@@ -371,10 +374,10 @@ def test_parameter_init_with_regularizer(tmpdir):
     device = get_device()
     saved_module = ComplexModule(10, 20).to(device)
     weights_path = str(tmpdir / "weights.ckpt")
-    config = parameter_init.ParameterInitializationConfig(
+    config = ParameterInitializationConfig(
         weights_path=weights_path,
         parameters=[
-            parameter_init.ParameterClassification(
+            ParameterClassification(
                 exclude=["linear1.linear.weight"],
             ),
         ],
@@ -434,7 +437,7 @@ def test_parameter_init_weights_loaded_once(tmpdir):
     )
     weights_path = str(tmpdir / "weights.ckpt")
     module = SimpleLinearModule(10, 20).to(get_device())
-    config = parameter_init.ParameterInitializationConfig(
+    config = ParameterInitializationConfig(
         weights_path=weights_path,
         parameters=[],
     )

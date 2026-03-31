@@ -17,20 +17,22 @@ dataset_computation:
     time_dim: 360
     latitude_dim: 180
     longitude_dim: 360
-n_split: 500
+n_split: 100
 dask:
-  n_workers: 64
+  n_workers: 8
   use_gateway: true
   cluster_options:
     worker_resource_allocation: "8CPU, 57.9Gi"
     idle_timeout_minutes: 10
-stats:
-  output_directory: gs://leap-scratch/jpdunc23
-  data_type: CM4
-  beaker_dataset: not_used
 filesystem:
   protocol: s3
   storage_options:
     profile: ai2
     client_kwargs:
       endpoint_url: https://nyu1.osn.mghpcc.org
+stats:
+  output_directory: /dev/null
+  start_date: null
+  end_date: null
+  data_type: CM4
+  beaker_dataset: not_used

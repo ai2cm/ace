@@ -2,7 +2,8 @@ import contextlib
 
 import torch
 
-from fme.core import distributed
+from fme.core import metrics
+from fme.core.distributed import distributed
 
 
 class MockDistributed:
@@ -41,9 +42,33 @@ class MockDistributed:
         Note this uses the actual implementation but mocks the underlying
         distributed calls.
         """
-        return distributed.gather_irregular(
-            tensor, self.reduce_max, self.gather, is_distributed=self.is_distributed()
+        return self.gather(tensor)  # this is single-process, can't be irregular
+
+    def get_local_slices(self, tensor_shape, data_parallel_dim=None):
+        return tuple(slice(None) for _ in tensor_shape)
+
+    def spatial_reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
+        return tensor
+
+    def weighted_mean(self, data, weights, dim, keepdim=False) -> torch.Tensor:
+        return metrics.weighted_mean(data, weights, dim=dim, keepdim=keepdim)
+
+    def zonal_mean(self, data: torch.Tensor) -> torch.Tensor:
+        return data.nanmean(dim=-1)
+
+    def gather_spatial_tensor(
+        self, tensor: torch.Tensor, img_shape: tuple[int, int]
+    ) -> torch.Tensor:
+        return tensor
+
+    def gradient_magnitude_percent_diff(
+        self, truth, predicted, weights, dim, img_shape
+    ) -> torch.Tensor:
+        result = metrics.gradient_magnitude_percent_diff(
+            truth, predicted, weights=weights, dim=dim
         )
+        result.fill_(self.fill_value)
+        return result
 
 
 @contextlib.contextmanager

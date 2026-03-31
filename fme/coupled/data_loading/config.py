@@ -2,6 +2,7 @@ import dataclasses
 from collections.abc import Sequence
 
 from fme.core.dataset.merged import MergeNoConcatDatasetConfig
+from fme.core.dataset.utils import accumulate_labels
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.distributed import Distributed
 
@@ -23,6 +24,10 @@ class CoupledDatasetConfig:
     ) -> Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig]:
         return [self.ocean, self.atmosphere]
 
+    @property
+    def coupled_configs(self) -> Sequence["CoupledDatasetConfig"]:
+        return [self]
+
 
 @dataclasses.dataclass
 class CoupledDatasetWithOptionalOceanConfig:
@@ -43,6 +48,21 @@ class CoupledDatasetWithOptionalOceanConfig:
 
 
 @dataclasses.dataclass
+class CoupledConcatDatasetConfig:
+    """
+    Parameters:
+        concat: A sequence of configurations each defining a coupled dataset
+            to be loaded. This sequence of datasets will be concatenated.
+    """
+
+    concat: Sequence[CoupledDatasetConfig]
+
+    @property
+    def coupled_configs(self) -> Sequence[CoupledDatasetConfig]:
+        return self.concat
+
+
+@dataclasses.dataclass
 class CoupledDataLoaderConfig:
     """
     Parameters:
@@ -57,7 +77,7 @@ class CoupledDataLoaderConfig:
 
     """
 
-    dataset: Sequence[CoupledDatasetConfig]
+    dataset: CoupledConcatDatasetConfig | CoupledDatasetConfig
     batch_size: int
     num_data_workers: int = 1
     prefetch_factor: int | None = None
@@ -72,9 +92,27 @@ class CoupledDataLoaderConfig:
             )
         self._zarr_engine_used = any(
             ds.zarr_engine_used
-            for ds_coupled in self.dataset
+            for ds_coupled in self.dataset.coupled_configs
             for ds in ds_coupled.data_configs
             if ds is not None
+        )
+
+    @property
+    def atmosphere_available_labels(self) -> set[str] | None:
+        """
+        Return the labels that are available in the atmosphere dataset.
+        """
+        return accumulate_labels(
+            [ds.atmosphere.available_labels for ds in self.dataset.coupled_configs]
+        )
+
+    @property
+    def ocean_available_labels(self) -> set[str] | None:
+        """
+        Return the labels that are available in the ocean dataset.
+        """
+        return accumulate_labels(
+            [ds.ocean.available_labels for ds in self.dataset.coupled_configs]
         )
 
     @property

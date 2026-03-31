@@ -8,6 +8,7 @@ import torch
 
 from fme.ace.aggregator import InferenceEvaluatorAggregatorConfig
 from fme.ace.aggregator.one_step.main import OneStepAggregator
+from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_gridded_data, get_inference_data
 from fme.ace.data_loading.gridded_data import GriddedData, InferenceGriddedData
@@ -16,6 +17,7 @@ from fme.ace.train.train_config import InlineInferenceConfig
 from fme.core.cli import ResumeResultsConfig
 from fme.core.coordinates import VerticalCoordinate
 from fme.core.ema import EMAConfig, EMATracker
+from fme.core.generics.lr_tuning import LRTuningConfig
 from fme.core.generics.trainer import EndOfBatchCallback, EndOfEpochCallback
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.logging_utils import LoggingConfig
@@ -39,10 +41,14 @@ class TrainConfig:
         optimization: Configuration for the optimization.
         logging: Configuration for logging.
         max_epochs: Total number of epochs to train for.
-        save_checkpoint: Whether to save checkpoints.
+        save_checkpoint: Whether to save checkpoints. If false, no checkpoints
+            are saved regardless of other checkpoint configuration settings. If
+            true, checkpoints are saved at the end of the training loop, after
+            evaluation, and on catching a termination signal.
         experiment_dir: Directory where checkpoints and logs are saved.
         inference: Configuration for inline inference.
         n_forward_steps: Number of forward steps to take gradient over.
+        train_aggregator: Configuration for the train aggregator.
         seed: Random seed for reproducibility. If set, is used for all types of
             randomization, including data shuffling and model initialization.
             If unset, weight initialization is not reproducible but data shuffling is.
@@ -60,6 +66,9 @@ class TrainConfig:
             for the most recent epoch
             (and the best epochs if validate_using_ema == True).
         log_train_every_n_batches: How often to log batch_loss during training.
+        train_evaluation_samples: Number of samples to evaluate on after training
+            on each epoch. The remainder samples after dividing by the batch size
+            are discarded.
         checkpoint_every_n_batches: How often to save checkpoints.
         segment_epochs: Exit after training for at most this many epochs
             in current job, without exceeding `max_epochs`. Use this if training
@@ -88,6 +97,9 @@ class TrainConfig:
     experiment_dir: str
     inference: InlineInferenceConfig
     n_forward_steps: int
+    train_aggregator: TrainAggregatorConfig = dataclasses.field(
+        default_factory=lambda: TrainAggregatorConfig(spherical_power_spectrum=False)
+    )
     seed: int | None = None
     copy_weights_after_batch: CopyWeightsConfig = dataclasses.field(
         default_factory=lambda: CopyWeightsConfig(exclude=["*"])
@@ -97,20 +109,31 @@ class TrainConfig:
     checkpoint_save_epochs: Slice | None = None
     ema_checkpoint_save_epochs: Slice | None = None
     log_train_every_n_batches: int = 100
+    train_evaluation_samples: int = 1000
     checkpoint_every_n_batches: int = 1000
     segment_epochs: int | None = None
     save_per_epoch_diagnostics: bool = False
     evaluate_before_training: bool = False
     save_best_inference_epoch_checkpoints: bool = False
+    lr_tuning: LRTuningConfig | None = None
     resume_results: ResumeResultsConfig | None = None
 
     def __post_init__(self):
         if self.n_forward_steps != 1:
             raise NotImplementedError("Only n_forward_steps=1 is currently supported")
+        if self.lr_tuning is not None and self.optimization.has_lr_schedule:
+            raise ValueError(
+                "lr_tuning and optimization.scheduler cannot both be specified; "
+                "lr_tuning is an alternative form of learning rate scheduling"
+            )
 
     def set_random_seed(self):
         if self.seed is not None:
             set_seed(self.seed)
+
+    @property
+    def train_evaluation_batches(self) -> int:
+        return self.train_evaluation_samples // self.train_loader.batch_size
 
     @property
     def inference_n_forward_steps(self) -> int:

@@ -6,14 +6,15 @@ import os
 from collections.abc import Mapping, Sequence
 from typing import Literal
 
+import cftime
 import dacite
 import numpy as np
+import numpy.typing as npt
 import torch
 import xarray as xr
 from xarray.coding.times import CFDatetimeCoder
 
 import fme
-import fme.core.logging_utils as logging_utils
 from fme.ace.aggregator.inference import InferenceAggregatorConfig
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.data_loading.getters import get_forcing_data
@@ -33,10 +34,11 @@ from fme.ace.stepper import (
 )
 from fme.ace.stepper.single_module import StepperConfig
 from fme.core.cli import prepare_config, prepare_directory
+from fme.core.cloud import makedirs
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import IncompatibleDatasetInfo
-from fme.core.dicts import to_flat_dict
 from fme.core.generics.inference import get_record_to_wandb, run_inference
+from fme.core.labels import BatchLabels
 from fme.core.logging_utils import LoggingConfig
 from fme.core.timing import GlobalTimer
 
@@ -91,7 +93,10 @@ class InitialConditionConfig:
 
 
 def get_initial_condition(
-    ds: xr.Dataset, prognostic_names: Sequence[str], labels: list[str], n_ensemble: int
+    ds: xr.Dataset,
+    prognostic_names: Sequence[str],
+    labels: list[str] | None,
+    n_ensemble: int,
 ) -> PrognosticState:
     """Given a dataset, extract a mapping of variables to tensors.
     and the time coordinate corresponding to the initial conditions.
@@ -130,11 +135,16 @@ def get_initial_condition(
             f"and {n_samples}."
         )
 
+    if labels is not None:
+        batch_labels = BatchLabels(torch.ones(n_samples, len(labels)), names=labels)
+    else:
+        batch_labels = None
+
     batch_data = BatchData.new_on_cpu(
         data=initial_condition,
         time=initial_times,
         horizontal_dims=["lat", "lon"],
-        labels=[set(labels)] * n_samples,
+        labels=batch_labels,
     )
     batch_data = batch_data.broadcast_ensemble(n_ensemble=n_ensemble)
     return batch_data.get_start(prognostic_names, n_ic_timesteps=1)
@@ -146,7 +156,29 @@ class InferenceConfig:
     Configuration for running inference.
 
     Parameters:
-        experiment_dir: Directory to save results to.
+        experiment_dir: Directory to save results to. This can be a local
+            directory, like ``/results``, or a remote directory prefixed with a
+            protocol recognized by ``fsspec``, like ``gs://bucket/results``.
+
+            .. note::
+                While most types of output can be written to a remote
+                ``experiment_dir``, there are some limitations:
+
+                - To write raw or time-coarsened data, the zarr writer must be
+                  used. See the ``files`` parameter of the
+                  :class:`fme.ace.DataWriterConfig` for more details on how this
+                  can be configured. Note that monthly coarsened data cannot
+                  currently be written to zarr, and hence a remote directory,
+                  since it uses a different code path than uniformly coarsened
+                  data.
+                - Piping logging output to a file in the ``experiment_dir``
+                  is not supported. To silence the warning related to this, set
+                  ``log_to_file`` to ``False`` in the
+                  :class:`fme.ace.LoggingConfig`.
+
+                There are no restrictions on the types of output that can be
+                written to a local ``experiment_dir``.
+
         n_forward_steps: Number of steps to run the model forward for.
         checkpoint_path: Path to stepper checkpoint to load.
         logging: Configuration for logging.
@@ -185,7 +217,7 @@ class InferenceConfig:
     )
     stepper_override: StepperOverrideConfig | None = None
     allow_incompatible_dataset: bool = False
-    labels: list[str] = dataclasses.field(default_factory=list)
+    labels: list[str] | None = None
     n_ensemble_per_ic: int = 1
 
     def __post_init__(self):
@@ -203,14 +235,9 @@ class InferenceConfig:
                     )
 
     def configure_logging(self, log_filename: str):
-        self.logging.configure_logging(self.experiment_dir, log_filename)
-
-    def configure_wandb(
-        self, env_vars: dict | None = None, resumable: bool = False, **kwargs
-    ):
-        config = to_flat_dict(dataclasses.asdict(self))
-        self.logging.configure_wandb(
-            config=config, env_vars=env_vars, resumable=resumable, **kwargs
+        config = dataclasses.asdict(self)
+        self.logging.configure_logging(
+            self.experiment_dir, log_filename, config=config, resumable=False
         )
 
     def load_stepper(self) -> Stepper:
@@ -223,7 +250,7 @@ class InferenceConfig:
 
     def get_data_writer(
         self,
-        n_initial_conditions: int,
+        initial_condition_times: npt.NDArray[cftime.datetime],
         timestep: datetime.timedelta,
         coords: Mapping[str, np.ndarray],
         variable_metadata: Mapping[str, VariableMetadata],
@@ -231,7 +258,7 @@ class InferenceConfig:
         return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
             # each batch contains all samples, for different times
-            n_initial_conditions=n_initial_conditions,
+            initial_condition_times=initial_condition_times,
             n_timesteps=self.n_forward_steps,
             timestep=timestep,
             variable_metadata=variable_metadata,
@@ -265,18 +292,11 @@ def run_inference_from_config(config: InferenceConfig):
     timer = GlobalTimer.get_instance()
     timer.start_outer("inference")
     with timer.context("initialization"):
-        if not os.path.isdir(config.experiment_dir):
-            os.makedirs(config.experiment_dir, exist_ok=True)
+        makedirs(config.experiment_dir, exist_ok=True)
         config.configure_logging(log_filename="inference_out.log")
-        env_vars = logging_utils.retrieve_env_vars()
-        beaker_url = logging_utils.log_beaker_url()
-        config.configure_wandb(env_vars=env_vars, notes=beaker_url)
 
         if fme.using_gpu():
             torch.backends.cudnn.benchmark = True
-
-        logging_utils.log_versions()
-        logging.info(f"Current device is {fme.get_device()}")
 
         stepper_config = config.load_stepper_config()
         data_requirements = stepper_config.get_forcing_window_data_requirements(
@@ -286,8 +306,8 @@ def run_inference_from_config(config: InferenceConfig):
         initial_condition = get_initial_condition(
             config.initial_condition.get_dataset(),
             stepper_config.prognostic_names,
-            config.labels,
-            config.n_ensemble_per_ic,
+            labels=config.labels,
+            n_ensemble=config.n_ensemble_per_ic,
         )
         stepper = config.load_stepper()
         stepper.set_eval()
@@ -325,19 +345,19 @@ def run_inference_from_config(config: InferenceConfig):
         )
 
         writer = config.get_data_writer(
-            n_initial_conditions=data.n_initial_conditions,
+            initial_condition_times=data.initial_time.to_numpy(),
             timestep=data.timestep,
             coords=data.coords,
             variable_metadata=variable_metadata,
         )
     logging.info("Starting inference")
-    record_logs = get_record_to_wandb(label="inference")
+    logger = get_record_to_wandb(label="inference")
     run_inference(
         predict=stepper.predict_paired,
         data=data,
         writer=writer,
         aggregator=aggregator,
-        record_logs=record_logs,
+        record_logs=logger.log,
     )
 
     with timer.context("final_writer_flush"):
@@ -349,7 +369,7 @@ def run_inference_from_config(config: InferenceConfig):
     timer.stop_outer("inference")
     total_steps = config.n_forward_steps * data.n_initial_conditions
     inference_duration = timer.get_duration("inference")
-    wandb_logging_duration = timer.get_duration("wandb_logging")
+    wandb_logging_duration = timer.get_duration("inference/wandb_logging")
     total_steps_per_second = total_steps / (inference_duration - wandb_logging_duration)
     timer.log_durations()
     logging.info(
@@ -358,10 +378,10 @@ def run_inference_from_config(config: InferenceConfig):
     )
     summary_logs = {
         "total_steps_per_second": total_steps_per_second,
-        **timer.get_durations(),
         **aggregator.get_summary_logs(),
     }
-    record_logs([summary_logs])
+    logger.log_to_current_step(summary_logs)
+    logger.log_to_current_step(timer.get_durations(), label="")
 
 
 def run_segmented_inference(config: InferenceConfig, segments: int):

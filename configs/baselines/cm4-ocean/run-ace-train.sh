@@ -8,8 +8,8 @@ CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=8
-PRIORITY="normal"
+N_GPUS=4
+PRIORITY="high"
 WORKSPACE="ai2/ace"
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
@@ -32,7 +32,10 @@ EXPERIMENT_ID=$(
       --workspace $WORKSPACE \
       --priority $PRIORITY \
       --preemptible \
-      --cluster ai2/ceres-cirrascale \
+      --cluster ai2/ceres \
+      --cluster ai2/jupiter \
+      --cluster ai2/neptune \
+      --cluster ai2/saturn \
       --env WANDB_USERNAME=$BEAKER_USERNAME \
       --env WANDB_NAME=$JOB_NAME \
       --env WANDB_JOB_TYPE=training \

@@ -1,12 +1,12 @@
 import dataclasses
 from collections.abc import Sequence
 
-import torch
-
 from fme.ace.data_loading.augmentation import AugmentationConfig
 from fme.core.dataset.concat import ConcatDatasetConfig
+from fme.core.dataset.dataset import DatasetABC
 from fme.core.dataset.merged import MergeDatasetConfig
 from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.distributed import Distributed
 
@@ -58,19 +58,31 @@ class DataLoaderConfig:
     sample_with_replacement: int | None = None
     time_buffer: int = 0
 
+    @property
+    def using_labels(self) -> bool:
+        return self.available_labels is not None
+
     def get_dataset(
         self,
         names: Sequence[str],
-        n_timesteps: int,
-    ) -> tuple[torch.utils.data.Dataset, DatasetProperties]:
+        n_timesteps: IntSchedule,
+    ) -> tuple[DatasetABC, DatasetProperties]:
         return self.dataset.build(names, n_timesteps)
+
+    @property
+    def available_labels(self) -> set[str] | None:
+        """
+        Return the labels that are available in the dataset.
+        """
+        return self.dataset.available_labels
 
     def __post_init__(self):
         dist = Distributed.get_instance()
-        if self.batch_size % dist.world_size != 0:
+        if self.batch_size % dist.total_data_parallel_ranks != 0:
             raise ValueError(
-                "batch_size must be divisible by the number of parallel "
-                f"workers, got {self.batch_size} and {dist.world_size}"
+                "batch_size must be divisible by the number of data-parallel "
+                f"workers, got {self.batch_size} and "
+                f"{dist.total_data_parallel_ranks}"
             )
         self._zarr_engine_used = self.dataset.zarr_engine_used
         if self.time_buffer < 0:

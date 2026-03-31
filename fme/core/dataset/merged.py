@@ -5,9 +5,11 @@ import xarray as xr
 
 from fme.core.dataset.concat import ConcatDatasetConfig
 from fme.core.dataset.config import DatasetConfigABC
-from fme.core.dataset.dataset import DatasetABC
+from fme.core.dataset.dataset import DatasetABC, DatasetItem
 from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.time import RepeatedInterval, TimeSlice
+from fme.core.dataset.utils import accumulate_labels
 from fme.core.dataset.xarray import XarrayDataConfig, get_raw_paths
 from fme.core.typing_ import Slice, TensorDict
 
@@ -41,27 +43,46 @@ class MergedXarrayDataset(DatasetABC):
                          must have the same number of steps per sample item."
                 )
 
-    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray, set[str]]:
+    def __getitem__(self, idx: int) -> DatasetItem:
+        tensors: TensorDict = {}
+        labels = None
+        epochs = []
+        for dataset in self.datasets:
+            ds_tensors, time, ds_labels, ds_epoch = dataset[idx]
+            if labels is None:
+                labels = ds_labels
+            else:
+                if ds_labels is not None:
+                    labels = labels.union(ds_labels)
+            tensors.update(ds_tensors)
+            epochs.append(ds_epoch)
+        if not all(epoch == epochs[0] for epoch in epochs):
+            raise ValueError(
+                "All datasets in a merged dataset must have the same epoch."
+            )
+        return tensors, time, labels, epochs[0]
+
+    def get_sample_by_time_slice(self, time_slice: slice) -> DatasetItem:
         tensors: TensorDict = {}
         for dataset in self.datasets:
-            ds_tensors, time, labels = dataset[idx]
+            ds_tensors, time, labels, epoch = dataset.get_sample_by_time_slice(
+                time_slice
+            )
             tensors.update(ds_tensors)
-        return tensors, time, labels
-
-    def __len__(self) -> int:
-        return len(self.datasets[0])
-
-    def get_sample_by_time_slice(
-        self, time_slice: slice
-    ) -> tuple[TensorDict, xr.DataArray, set[str]]:
-        tensors: TensorDict = {}
-        for dataset in self.datasets:
-            ds_tensors, time, labels = dataset.get_sample_by_time_slice(time_slice)
-            tensors.update(ds_tensors)
-        return tensors, time, labels
+        return tensors, time, labels, epoch
 
     @property
     def all_times(self) -> xr.CFTimeIndex:
+        """
+        Like sample_start_times, but includes all times in the dataset, including
+        final times which are not valid as a start index.
+
+        This is relevant for inference, where we may use get_sample_by_time_slice to
+        retrieve time windows directly.
+
+        If this dataset does not support inference,
+        this will raise a NotImplementedError.
+        """
         return self.datasets[0].all_times
 
     @property
@@ -88,6 +109,10 @@ class MergedXarrayDataset(DatasetABC):
             raise ValueError("No dataset available to determine properties")
         return data_properties
 
+    def set_epoch(self, epoch: int):
+        for dataset in self.datasets:
+            dataset.set_epoch(epoch)
+
 
 @dataclasses.dataclass
 class MergeDatasetConfig(DatasetConfigABC):
@@ -103,28 +128,30 @@ class MergeDatasetConfig(DatasetConfigABC):
 
     merge: Sequence[ConcatDatasetConfig | XarrayDataConfig]
 
-    def __post_init__(self):
-        self.zarr_engine_used = False
+    @property
+    def zarr_engine_used(self) -> bool:
         for ds in self.merge:
-            if isinstance(ds, ConcatDatasetConfig):
-                if ds.zarr_engine_used:
-                    self.zarr_engine_used = ds.zarr_engine_used
-                    break
-            elif isinstance(ds, XarrayDataConfig):
-                if ds.engine == "zarr":
-                    self.zarr_engine_used = True
-                    break
+            if ds.zarr_engine_used:
+                return True
+        return False
 
     def build(
         self,
         names: Sequence[str],
-        n_timesteps: int,
+        n_timesteps: IntSchedule,
     ):
         return get_merged_datasets(
             self,
             names,
             n_timesteps,
         )
+
+    @property
+    def available_labels(self) -> set[str] | None:
+        """
+        Return the labels that are available in the dataset.
+        """
+        return accumulate_labels([ds.available_labels for ds in self.merge])
 
 
 @dataclasses.dataclass
@@ -143,13 +170,6 @@ class MergeNoConcatDatasetConfig(DatasetConfigABC):
 
     merge: Sequence[XarrayDataConfig]
 
-    def __post_init__(self):
-        self.zarr_engine_used = False
-        for ds in self.merge:
-            if ds.engine == "zarr":
-                self.zarr_engine_used = True
-                break
-
     def update_subset(self, subset: Slice | TimeSlice | RepeatedInterval):
         for ds in self.merge:
             ds.update_subset(subset)
@@ -161,7 +181,7 @@ class MergeNoConcatDatasetConfig(DatasetConfigABC):
     def build(
         self,
         names: Sequence[str],
-        n_timesteps: int,
+        n_timesteps: IntSchedule,
     ) -> tuple[MergedXarrayDataset, DatasetProperties]:
         return get_merged_datasets(
             MergeDatasetConfig(merge=self.merge),
@@ -169,11 +189,25 @@ class MergeNoConcatDatasetConfig(DatasetConfigABC):
             n_timesteps,
         )
 
+    @property
+    def available_labels(self) -> set[str] | None:
+        """
+        Return the labels that are available in the dataset.
+        """
+        return accumulate_labels([ds.available_labels for ds in self.merge])
+
+    @property
+    def zarr_engine_used(self) -> bool:
+        for ds in self.merge:
+            if ds.engine == "zarr":
+                return True
+        return False
+
 
 def get_merged_datasets(
     merged_config: MergeDatasetConfig | MergeNoConcatDatasetConfig,
     names: Sequence[str],
-    n_timesteps: int,
+    n_timesteps: IntSchedule,
 ) -> tuple[MergedXarrayDataset, DatasetProperties]:
     merged_xarray_datasets = []
     merged_properties: DatasetProperties | None = None

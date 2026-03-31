@@ -14,7 +14,10 @@ import xarray as xr
 import yaml
 
 import fme
-from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregatorConfig
+from fme.ace.aggregator.inference.main import (
+    InferenceEvaluatorAggregatorConfig,
+    StepMeanEntry,
+)
 from fme.ace.aggregator.one_step.main import OneStepAggregatorConfig
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.inference import (
@@ -36,10 +39,13 @@ from fme.ace.registry.test_hpx import (
 )
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
 from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
-from fme.ace.stepper.single_module import StepperConfig
+from fme.ace.stepper.single_module import StepperConfig, TrainStepperConfig
 from fme.ace.stepper.time_length_probabilities import (
+    TimeLength,
+    TimeLengthMilestone,
     TimeLengthProbabilities,
     TimeLengthProbability,
+    TimeLengthSchedule,
 )
 from fme.ace.testing import (
     DimSizes,
@@ -61,12 +67,9 @@ from fme.core.coordinates import (
     LatLonCoordinates,
 )
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
+from fme.core.dataset.concat import ConcatDatasetConfig
 from fme.core.dataset.xarray import XarrayDataConfig
-from fme.core.generics.trainer import (
-    _restore_checkpoint,
-    count_parameters,
-    epoch_checkpoint_enabled,
-)
+from fme.core.generics.trainer import _restore_checkpoint
 from fme.core.logging_utils import LoggingConfig
 from fme.core.loss import StepLossConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
@@ -80,7 +83,6 @@ from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
 from fme.core.testing.model import compare_parameters, compare_restored_parameters
 from fme.core.testing.wandb import mock_wandb
-from fme.core.typing_ import Slice
 
 JOB_SUBMISSION_SCRIPT_PATH = (
     pathlib.PurePath(__file__).parent / "run-train-and-inference.sh"
@@ -111,6 +113,7 @@ def _get_test_yaml_files(
     skip_inline_inference=False,
     time_buffer=1,
     use_time_length_probabilities=True,
+    use_schedule=False,
     derived_forcings=None,
 ):
     input_time_size = 1
@@ -180,6 +183,11 @@ def _get_test_yaml_files(
         else:
             spatial_dimensions_str = "latlon"
 
+    if nettype == "NoiseConditionedSFNO":
+        conditional = True
+    else:
+        conditional = False
+
     if nettype == "SphericalFourierNeuralOperatorNet":
         corrector_config: AtmosphereCorrectorConfig | CorrectorSelector = (
             CorrectorSelector(
@@ -210,11 +218,15 @@ def _get_test_yaml_files(
                     if monthly_data_filename is not None
                     else None
                 ),
+                log_step_means=[]
+                if inference_forward_steps < 20
+                else [StepMeanEntry(step=20)],
             ),
             loader=InferenceDataLoaderConfig(
                 dataset=XarrayDataConfig(
                     data_path=str(valid_data_path),
                     spatial_dimensions=spatial_dimensions_str,
+                    labels=[] if conditional else None,
                 ),
                 start_indices=InferenceInitialConditionIndices(
                     first=0,
@@ -232,11 +244,15 @@ def _get_test_yaml_files(
                     if monthly_data_filename is not None
                     else None
                 ),
+                log_step_means=[]
+                if inference_forward_steps < 20
+                else [StepMeanEntry(step=20)],
             ),
             loader=InferenceDataLoaderConfig(
                 dataset=XarrayDataConfig(
                     data_path=str(valid_data_path),
                     spatial_dimensions=spatial_dimensions_str,
+                    labels=["era5"] if conditional else None,
                 ),
                 start_indices=InferenceInitialConditionIndices(
                     first=0,
@@ -249,20 +265,53 @@ def _get_test_yaml_files(
         )
 
     if use_time_length_probabilities:
-        train_n_forward_steps = TimeLengthProbabilities(
-            outcomes=[
-                TimeLengthProbability(steps=1, probability=0.5),
-                TimeLengthProbability(steps=n_forward_steps, probability=0.5),
-            ]
+        train_n_forward_steps: TimeLength | TimeLengthSchedule = (
+            TimeLengthProbabilities(
+                outcomes=[
+                    TimeLengthProbability(steps=1, probability=0.5),
+                    TimeLengthProbability(steps=n_forward_steps, probability=0.5),
+                ]
+            )
         )
+    elif use_schedule:
+        train_n_forward_steps = TimeLengthSchedule(
+            start_value=TimeLengthProbabilities(
+                outcomes=[
+                    TimeLengthProbability(steps=1, probability=0.5),
+                    TimeLengthProbability(steps=n_forward_steps, probability=0.5),
+                ]
+            ),
+            milestones=[TimeLengthMilestone(epoch=1, value=n_forward_steps + 1)],
+        )
+        max_epochs = 2
     else:
         train_n_forward_steps = n_forward_steps
 
+    if crps_training:
+        loss = StepLossConfig(
+            type="EnsembleLoss",
+            kwargs={"crps_weight": 1.0, "energy_score_weight": 0.0},
+        )
+        n_ensemble: int = 2
+    else:
+        loss = StepLossConfig(type="MSE")
+        n_ensemble = 1
+
     train_config = TrainConfig(
         train_loader=DataLoaderConfig(
-            dataset=XarrayDataConfig(
-                data_path=str(train_data_path),
-                spatial_dimensions=spatial_dimensions_str,
+            dataset=ConcatDatasetConfig(
+                concat=[
+                    XarrayDataConfig(
+                        data_path=str(train_data_path),
+                        labels=["era5"] if conditional else None,
+                        spatial_dimensions=spatial_dimensions_str,
+                    ),
+                    XarrayDataConfig(
+                        data_path=str(train_data_path),
+                        labels=[] if conditional else None,
+                        spatial_dimensions=spatial_dimensions_str,
+                    ),
+                ],
             ),
             batch_size=2,
             num_data_workers=0,
@@ -273,12 +322,14 @@ def _get_test_yaml_files(
             dataset=XarrayDataConfig(
                 data_path=str(valid_data_path),
                 spatial_dimensions=spatial_dimensions_str,
+                labels=["era5"] if conditional else None,
             ),
             batch_size=2,
             num_data_workers=0,
         ),
         optimization=OptimizationConfig(
             use_gradient_accumulation=True,
+            enable_automatic_mixed_precision=True,
             optimizer_type="Adam",
             lr=0.001,
             kwargs=dict(weight_decay=0.01),
@@ -288,15 +339,11 @@ def _get_test_yaml_files(
             ),
         ),
         stepper=StepperConfig(
-            loss=StepLossConfig(type="MSE"),
-            crps_training=crps_training,
-            train_n_forward_steps=train_n_forward_steps,
             derived_forcings=derived_forcings,
             step=StepSelector(
                 type="single_module",
                 config=dataclasses.asdict(
                     SingleModuleStepConfig(
-                        crps_training=crps_training,
                         in_names=in_variable_names,
                         out_names=out_variable_names,
                         normalization=NetworkAndLossNormalizationConfig(
@@ -311,6 +358,7 @@ def _get_test_yaml_files(
                         ),
                         builder=ModuleSelector(
                             type=nettype,
+                            conditional=conditional,
                             config=net_config,
                         ),
                         ocean=OceanConfig(
@@ -321,6 +369,11 @@ def _get_test_yaml_files(
                     )
                 ),
             ),
+        ),
+        stepper_training=TrainStepperConfig(
+            loss=loss,
+            n_ensemble=n_ensemble,
+            train_n_forward_steps=train_n_forward_steps,
         ),
         inference=inline_inference_config,
         weather_evaluation=weather_evaluation_config,
@@ -348,12 +401,14 @@ def _get_test_yaml_files(
         ),
         aggregator=InferenceEvaluatorAggregatorConfig(
             log_video=True,
+            log_step_means=[],
         ),
         logging=logging_config,
         loader=InferenceDataLoaderConfig(
             dataset=XarrayDataConfig(
                 data_path=str(valid_data_path),
                 spatial_dimensions=spatial_dimensions_str,
+                labels=["era5"] if conditional else None,
             ),
             start_indices=InferenceInitialConditionIndices(
                 first=0,
@@ -406,6 +461,7 @@ def _setup(
     time_buffer=1,
     use_time_length_probabilities=True,
     derived_forcings=None,
+    use_schedule: bool = False,
 ):
     if not path.exists():
         path.mkdir()
@@ -504,18 +560,19 @@ def _setup(
         time_buffer=time_buffer,
         use_time_length_probabilities=use_time_length_probabilities,
         derived_forcings=derived_forcings,
+        use_schedule=use_schedule,
     )
     return train_config_filename, inference_config_filename
 
 
 @pytest.mark.parametrize(
-    "nettype, crps_training, log_validation_maps, use_healpix",
+    "nettype, crps_training, log_validation_maps, use_healpix, use_schedule",
     [
-        ("SphericalFourierNeuralOperatorNet", False, True, False),
-        ("NoiseConditionedSFNO", True, False, False),
-        ("HEALPixRecUNet", False, False, True),
-        ("Samudra", False, False, False),
-        ("NoiseConditionedSFNO", False, False, False),
+        ("NoiseConditionedSFNO", True, False, False, True),
+        ("SphericalFourierNeuralOperatorNet", False, True, False, False),
+        ("HEALPixRecUNet", False, False, True, False),
+        ("Samudra", False, False, False, False),
+        ("NoiseConditionedSFNO", False, False, False, False),
     ],
 )
 def test_train_and_inference(
@@ -524,6 +581,7 @@ def test_train_and_inference(
     crps_training,
     log_validation_maps: bool,
     use_healpix: bool,
+    use_schedule: bool,
     very_fast_only: bool,
 ):
     """Ensure that ACE training and subsequent standalone inference run without errors.
@@ -531,6 +589,11 @@ def test_train_and_inference(
     Args:
         tmp_path: pytext fixture for temporary workspace.
         nettype: parameter indicating model architecture to use.
+        crps_training: parameter indicating whether to use CRPS training.
+        log_validation_maps: parameter indicating whether to log validation maps.
+        use_healpix: parameter indicating whether to use HEALPix grid.
+        use_schedule: parameter indicating whether to use
+            a schedule for n_forward_steps.
         very_fast_only: parameter indicating whether to skip slow tests.
     """
     if very_fast_only:
@@ -546,6 +609,7 @@ def test_train_and_inference(
         use_healpix=use_healpix,
         crps_training=crps_training,
         save_per_epoch_diagnostics=True,
+        use_schedule=use_schedule,
         log_validation_maps=log_validation_maps,
     )
     # using pdb requires calling main functions directly
@@ -819,6 +883,7 @@ def test_restore_checkpoint(
             )
 
 
+@pytest.mark.serial
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
 @pytest.mark.skipif(
     fme.get_device().type == "mps", reason="MPS does not support multi-device training."
@@ -855,8 +920,10 @@ def _create_copy_weights_after_batch_config(
 ):
     with open(path_to_train_config_yaml) as config_file:
         config_data = yaml.safe_load(config_file)
-        config_data["stepper"]["parameter_init"] = {"weights_path": path_to_checkpoint}
-        config_data["copy_weights_after_batch"] = [{"include": ["*"], "exclude": []}]
+        config_data["stepper_training"]["parameter_init"] = {
+            "weights_path": path_to_checkpoint
+        }
+        config_data["copy_weights_after_batch"] = [{"include": ["*"], "exclude": None}]
         config_data["experiment_dir"] = experiment_dir
         with tempfile.NamedTemporaryFile(
             mode="w", delete=False, suffix=".yaml"
@@ -886,31 +953,6 @@ def test_copy_weights_after_batch(tmp_path, nettype, skip_slow: bool):
         train_config, ckpt, experiment_dir=str(tmp_path / "fine_tuning_dir")
     )
     train_main(yaml_config=fine_tuning_config)
-
-
-@pytest.mark.parametrize(
-    "checkpoint_save_epochs,expected_save_epochs",
-    [(None, []), (Slice(start=-2), [2, 3]), (Slice(step=2), [0, 2])],
-)
-def test_epoch_checkpoint_enabled(checkpoint_save_epochs, expected_save_epochs):
-    max_epochs = 4
-    for i in range(max_epochs):
-        if i in expected_save_epochs:
-            assert epoch_checkpoint_enabled(i, max_epochs, checkpoint_save_epochs)
-        else:
-            assert not epoch_checkpoint_enabled(i, max_epochs, checkpoint_save_epochs)
-
-
-@pytest.mark.parametrize(
-    "module_list,expected_num_parameters",
-    [
-        (torch.nn.ModuleList([torch.nn.Linear(10, 5), torch.nn.Linear(5, 2)]), 67),
-        (torch.nn.ModuleList([]), 0),
-    ],
-)
-def test_count_parameters(module_list, expected_num_parameters):
-    num_parameters = count_parameters(module_list)
-    assert num_parameters == expected_num_parameters
 
 
 def test_train_without_inline_inference(tmp_path, very_fast_only: bool):
@@ -985,3 +1027,49 @@ def test_train_and_inference_with_derived_forcings(
     with mock_wandb() as wandb:
         wandb.configure(log_to_wandb=True)
         inference_evaluator_main(yaml_config=inference_config)
+
+
+def test_train_with_non_local_experiment_dir_error():
+    """Test that an error is raised if the experiment_dir is not local during
+    training. This test can be removed when we support non-local experiment
+    directories in training."""
+    non_local_experiment_dir = "memory://path/to/experiment_dir"
+
+    # Construct dummy configurations for the rest of the training config, since
+    # all we are testing is that an error is raised upon construction.
+    step = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                in_names=[],
+                out_names=[],
+                normalization=NetworkAndLossNormalizationConfig(
+                    network=NormalizationConfig(
+                        global_means_path="",
+                        global_stds_path="",
+                    ),
+                ),
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet", config={}
+                ),
+            ),
+        ),
+    )
+    stepper = StepperConfig(step=step)
+    dummy_data_loader = DataLoaderConfig(
+        dataset=XarrayDataConfig(data_path=""),
+        batch_size=1,
+    )
+
+    with pytest.raises(ValueError, match="local directory"):
+        TrainConfig(
+            experiment_dir=non_local_experiment_dir,
+            stepper=stepper,
+            train_loader=dummy_data_loader,
+            validation_loader=dummy_data_loader,
+            optimization=OptimizationConfig(),
+            logging=LoggingConfig(),
+            max_epochs=1,
+            save_checkpoint=False,
+            inference=None,
+        )

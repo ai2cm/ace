@@ -37,12 +37,27 @@ def randn_like(x: torch.Tensor, **kwargs):
         return torch.randn_like(x, **kwargs)
 
 
-def randn(shape: torch.Size, **kwargs):
+def randn(shape: torch.Size, **kwargs) -> torch.Tensor:
     if USE_CPU_RANDN:
         device = kwargs.pop("device", None)
         return torch.randn(shape, device="cpu", **kwargs).to(device)
     else:
         return torch.randn(shape, **kwargs)
+
+
+def log_normal_sample(
+    p_mean: float, p_std: float, shape: torch.Size, dtype: torch.dtype
+) -> torch.Tensor:
+    rnd = randn(shape, dtype=dtype)
+    return (rnd * p_std + p_mean).exp()
+
+
+def log_uniform_sample(
+    p_min: float, p_max: float, shape: torch.Size, dtype: torch.dtype
+) -> torch.Tensor:
+    return torch.exp(
+        torch.empty(shape, dtype=dtype).uniform_(np.log(p_min), np.log(p_max))
+    )
 
 
 @contextlib.contextmanager
@@ -59,3 +74,14 @@ def use_cpu_randn():
     USE_CPU_RANDN = True
     yield
     USE_CPU_RANDN = old_use_cpu_randn
+
+
+def alternate_seed(seed: int) -> int:
+    """
+    Get the alternate seed given a seed.
+
+    Used when a new deterministic random shuffle is desired.
+    """
+    g = torch.Generator()
+    g.manual_seed(seed)
+    return int(torch.randint(0, 2**31, (1,), generator=g).item())

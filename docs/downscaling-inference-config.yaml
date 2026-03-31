@@ -1,0 +1,47 @@
+experiment_dir: /output_directory
+patch:
+  divide_generation: true
+  composite_prediction: true
+  coarse_horizontal_overlap: 1
+model:
+  checkpoint_path: /HiRO.ckpt
+  rename:
+    eastward_wind_at_ten_meters: UGRD10m
+    northward_wind_at_ten_meters: VGRD10m
+data:
+  coarse:
+  - data_path: /output_directory
+    engine: zarr
+    file_pattern: output_6hourly_predictions_ic0000.zarr
+  batch_size: 4
+  num_data_workers: 2
+  strict_ensemble: False
+outputs:
+  - name: "PNW_ensemble0000"
+    save_vars: ["PRATEsfc"]
+    n_ens: 1
+    max_samples_per_gpu: 32
+    time_range:
+      start_time: "2014-01-01T00:00:00"
+      stop_time: "2023-12-31T18:00:00"
+    lat_extent:
+      start: 32.9
+      stop: 50.0
+    lon_extent:
+      start: 233.0
+      stop: 250.0
+  - name: "WA_AR_20230206" # Example of a single event downscaling (may not exist in stochastically generated ACE outputs)
+    save_vars: ["PRATEsfc"]
+    n_ens: 16
+    max_samples_per_gpu: 8
+    event_time: "2023-02-06T06:00:00"
+    lat_extent:
+        start: 36.0
+        stop:  52.0
+    lon_extent:
+        start: 228.0
+        stop: 244.0
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true

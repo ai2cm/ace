@@ -23,16 +23,21 @@ class CoupledDataRequirements:
         n_steps_fast = int(n_steps_fast)
 
         # check for misconfigured DataRequirements n_timesteps in the atmosphere
-        slow_n_steps = self.ocean_requirements.n_timesteps
+        # note this only checks initial values, if a schedule is used we will not check
+        # errors after milestones.
+        slow_n_steps = self.ocean_requirements.n_timesteps_schedule.get_value(0)
         fast_n_steps = (slow_n_steps - 1) * n_steps_fast + 1
-        if self.atmosphere_requirements.n_timesteps != fast_n_steps:
+        atmosphere_n_timesteps = (
+            self.atmosphere_requirements.n_timesteps_schedule.get_value(0)
+        )
+        if atmosphere_n_timesteps != fast_n_steps:
             raise ValueError(
                 f"Atmosphere dataset timestep is {self.atmosphere_timestep} and "
                 f"ocean dataset timestep is {self.ocean_timestep}, "
                 f"so we need {n_steps_fast} atmosphere steps for each of the "
                 f"{slow_n_steps - 1} ocean steps, giving {fast_n_steps} total "
                 "timepoints (including IC) per sample, but atmosphere dataset "
-                f"was configured to return {self.atmosphere_requirements.n_timesteps} "
+                f"was configured to return {atmosphere_n_timesteps} "
                 "steps."
             )
         self._n_steps_fast = n_steps_fast

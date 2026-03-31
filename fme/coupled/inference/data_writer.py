@@ -3,8 +3,12 @@ import datetime
 import os
 from collections.abc import Mapping
 
+import cftime
+import numpy.typing as npt
+
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.main import DataWriterConfig, PairedDataWriter
+from fme.core.cloud import makedirs
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.writer import WriterABC
 from fme.coupled.data_loading.batch_data import (
@@ -37,7 +41,7 @@ class CoupledDataWriterConfig:
     def build_paired(
         self,
         experiment_dir: str,
-        n_initial_conditions: int,
+        initial_condition_times: npt.NDArray[cftime.datetime],
         n_timesteps_ocean: int,
         n_timesteps_atmosphere: int,
         ocean_timestep: datetime.timedelta,
@@ -47,15 +51,13 @@ class CoupledDataWriterConfig:
         dataset_metadata: dict[str, DatasetMetadata],
     ) -> "CoupledPairedDataWriter":
         ocean_dir = os.path.join(experiment_dir, OCEAN_OUTPUT_DIR_NAME)
-        if not os.path.exists(ocean_dir):
-            os.makedirs(ocean_dir)
+        makedirs(ocean_dir, exist_ok=True)
         atmos_dir = os.path.join(experiment_dir, ATMOSPHERE_OUTPUT_DIR_NAME)
-        if not os.path.exists(atmos_dir):
-            os.makedirs(atmos_dir)
+        makedirs(atmos_dir, exist_ok=True)
         return CoupledPairedDataWriter(
             ocean_writer=self.ocean.build_paired(
                 experiment_dir=ocean_dir,
-                n_initial_conditions=n_initial_conditions,
+                initial_condition_times=initial_condition_times,
                 n_timesteps=n_timesteps_ocean,
                 timestep=ocean_timestep,
                 variable_metadata=variable_metadata,
@@ -64,7 +66,7 @@ class CoupledDataWriterConfig:
             ),
             atmosphere_writer=self.atmosphere.build_paired(
                 experiment_dir=atmos_dir,
-                n_initial_conditions=n_initial_conditions,
+                initial_condition_times=initial_condition_times,
                 n_timesteps=n_timesteps_atmosphere,
                 timestep=atmosphere_timestep,
                 variable_metadata=variable_metadata,

@@ -1,7 +1,6 @@
 import datetime
 import logging
 import warnings
-from collections.abc import Sequence
 
 import torch
 import torch.utils.data
@@ -13,8 +12,11 @@ from fme.core.dataset.merged import MergeNoConcatDatasetConfig
 from fme.core.dataset.xarray import XarrayDataConfig, XarrayDataset
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
+from fme.core.labels import LabelEncoding
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
+from fme.coupled.data_loading.concat import ConcatDataset
 from fme.coupled.data_loading.config import (
+    CoupledConcatDatasetConfig,
     CoupledDataLoaderConfig,
     CoupledDatasetConfig,
 )
@@ -38,19 +40,37 @@ from fme.coupled.requirements import (
 
 from .inference import ExplicitIndices
 
+_COUPLED_WORKER_DIST_CX = None
+
+
+def _coupled_forkserver_worker_init_fn(worker_id: int) -> None:
+    global _COUPLED_WORKER_DIST_CX
+    _COUPLED_WORKER_DIST_CX = Distributed.context()
+    _COUPLED_WORKER_DIST_CX.__enter__()
+    # don't need to exit the context on workers as they are not
+    # initialized/managed by torchrun
+
 
 class CollateFn:
     def __init__(
-        self, ocean_horizontal_dims: list[str], atmosphere_horizontal_dims: list[str]
+        self,
+        ocean_horizontal_dims: list[str],
+        atmosphere_horizontal_dims: list[str],
+        ocean_label_encoding: LabelEncoding | None = None,
+        atmosphere_label_encoding: LabelEncoding | None = None,
     ):
         self.ocean_horizontal_dims = ocean_horizontal_dims
         self.atmosphere_horizontal_dims = atmosphere_horizontal_dims
+        self.ocean_label_encoding = ocean_label_encoding
+        self.atmosphere_label_encoding = atmosphere_label_encoding
 
     def __call__(self, samples: list[CoupledDatasetItem]) -> CoupledBatchData:
         return CoupledBatchData.collate_fn(
             samples,
             ocean_horizontal_dims=self.ocean_horizontal_dims,
             atmosphere_horizontal_dims=self.atmosphere_horizontal_dims,
+            ocean_label_encoding=self.ocean_label_encoding,
+            atmosphere_label_encoding=self.atmosphere_label_encoding,
         )
 
 
@@ -62,14 +82,12 @@ def get_dataset(
     ocean: torch.utils.data.Dataset
     atmosphere: torch.utils.data.Dataset
     ocean, ocean_properties = config.ocean.build(
-        ocean_reqs.names, ocean_reqs.n_timesteps
+        ocean_reqs.names, ocean_reqs.n_timesteps_schedule
     )
     atmosphere, atmosphere_properties = config.atmosphere.build(
-        atmosphere_reqs.names, atmosphere_reqs.n_timesteps
+        atmosphere_reqs.names, atmosphere_reqs.n_timesteps_schedule
     )
-    properties = CoupledDatasetProperties(
-        ocean.sample_start_times, ocean_properties, atmosphere_properties
-    )
+    properties = CoupledDatasetProperties(ocean_properties, atmosphere_properties)
     dataset = CoupledDataset(
         ocean=ocean,
         atmosphere=atmosphere,
@@ -80,13 +98,13 @@ def get_dataset(
 
 
 def get_datasets(
-    configs: Sequence[CoupledDatasetConfig],
+    configs: CoupledConcatDatasetConfig | CoupledDatasetConfig,
     requirements: CoupledDataRequirements,
     strict: bool = True,
-) -> tuple[torch.utils.data.ConcatDataset[CoupledDataset], CoupledDatasetProperties]:
+) -> tuple[ConcatDataset, CoupledDatasetProperties]:
     datasets = []
     properties: CoupledDatasetProperties | None = None
-    for coupled_data_config in configs:
+    for coupled_data_config in configs.coupled_configs:
         ds, prop = get_dataset(coupled_data_config, requirements)
         datasets.append(ds)
         if properties is None:
@@ -102,7 +120,7 @@ def get_datasets(
             properties.update(prop)
     if properties is None:
         raise ValueError("At least one dataset must be provided.")
-    dataset = torch.utils.data.ConcatDataset(datasets)
+    dataset = ConcatDataset(datasets)
     return dataset, properties
 
 
@@ -143,19 +161,34 @@ def get_gridded_data(
     else:
         kwargs = {"prefetch_factor": config.prefetch_factor}
 
-    dataloader = torch.utils.data.DataLoader(
+    if config.ocean_available_labels is not None:
+        ocean_label_encoding = LabelEncoding(
+            sorted(list(config.ocean_available_labels))
+        )
+    else:
+        ocean_label_encoding = None
+    if config.atmosphere_available_labels is not None:
+        atmosphere_label_encoding = LabelEncoding(
+            sorted(list(config.atmosphere_available_labels))
+        )
+    else:
+        atmosphere_label_encoding = None
+
+    dataloader = CoupledDataLoader(
         dataset,
+        CollateFn(
+            ocean_horizontal_dims=list(properties.ocean.horizontal_coordinates.dims),
+            ocean_label_encoding=ocean_label_encoding,
+            atmosphere_label_encoding=atmosphere_label_encoding,
+            atmosphere_horizontal_dims=list(
+                properties.atmosphere.horizontal_coordinates.dims
+            ),
+        ),
         batch_size=batch_size,
         num_workers=config.num_data_workers,
         sampler=sampler,
         drop_last=True,
         pin_memory=using_gpu(),
-        collate_fn=CollateFn(
-            ocean_horizontal_dims=list(properties.ocean.horizontal_coordinates.dims),
-            atmosphere_horizontal_dims=list(
-                properties.atmosphere.horizontal_coordinates.dims
-            ),
-        ),
         multiprocessing_context=mp_context,
         persistent_workers=persistent_workers,
         **kwargs,
@@ -164,18 +197,13 @@ def get_gridded_data(
     if len(dataloader) == 0:
         raise ValueError(
             "No batches in dataloader: "
-            f"{len(dataloader.dataset)} samples, {len(dataloader)} batches. "
-            f"Batch size is {dataloader.batch_size}"
+            f"{dataloader.n_samples} samples, "
+            f"batch size is {dataloader.batch_size}"
         )
 
     return GriddedData(
-        loader=CoupledDataLoader(
-            dataloader,
-            sampler=sampler,
-            dataset=dataset,
-        ),
+        loader=dataloader,
         properties=properties,
-        sampler=sampler,
     )
 
 
@@ -185,6 +213,7 @@ def get_inference_data(
     window_requirements: CoupledDataRequirements,
     initial_condition: CoupledPrognosticState | CoupledPrognosticStateDataRequirements,
     dataset_info: CoupledDatasetInfo | None = None,
+    _force_forkserver: bool = False,
 ) -> InferenceGriddedData:
     initial_time = None
     if isinstance(initial_condition, CoupledPrognosticState):
@@ -200,14 +229,16 @@ def get_inference_data(
     )
     properties = dataset.properties
 
-    if config.zarr_engine_used:
+    if config.zarr_engine_used or _force_forkserver:
         # GCSFS and S3FS are not fork-safe, so we need to use forkserver
         # persist workers since startup is slow
         mp_context = "forkserver"
         persistent_workers = True
+        worker_init_fn = _coupled_forkserver_worker_init_fn
     else:
         mp_context = None
         persistent_workers = False
+        worker_init_fn = None
 
     logging.info(f"Multiprocessing inference context: {mp_context or 'fork'}")
 
@@ -220,6 +251,7 @@ def get_inference_data(
         pin_memory=using_gpu(),
         multiprocessing_context=mp_context,
         persistent_workers=persistent_workers,
+        worker_init_fn=worker_init_fn,
     )
     inference_data = InferenceGriddedData(
         loader=loader,
@@ -281,7 +313,7 @@ def get_forcing_data(
             available_times = XarrayDataset(
                 config.ocean.dataset,
                 window_requirements.ocean_requirements.names,
-                window_requirements.ocean_requirements.n_timesteps,
+                window_requirements.ocean_requirements.n_timesteps_schedule,
             ).all_times
         elif isinstance(config.ocean.dataset, MergeNoConcatDatasetConfig):
             # Some forcing variables may not be in the first dataset,
@@ -290,7 +322,7 @@ def get_forcing_data(
                 available_times = XarrayDataset(
                     config.ocean.dataset.merge[0],
                     names=[],
-                    n_timesteps=window_requirements.ocean_requirements.n_timesteps,
+                    n_timesteps=window_requirements.ocean_requirements.n_timesteps_schedule,
                 ).all_times
             else:
                 raise ValueError("Forcing data cannot be concatenated.")

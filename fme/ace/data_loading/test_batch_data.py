@@ -5,10 +5,14 @@ import xarray as xr
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData
 from fme.core.device import get_device
+from fme.core.labels import BatchLabels
 
 
-def assert_metadata_equal(a: BatchData, b: BatchData):
+def assert_metadata_equal(a: BatchData, b: BatchData, check_labels: bool = True):
     assert a.horizontal_dims == b.horizontal_dims
+    assert a.epoch == b.epoch
+    if check_labels:
+        assert a.labels == b.labels
 
 
 def get_batch_data(
@@ -18,8 +22,16 @@ def get_batch_data(
     horizontal_dims: list[str],
     n_lat: int = 8,
     n_lon: int = 16,
+    n_labels: int = 0,
 ):
     device = get_device()
+    if n_labels == 0:
+        labels = None
+    else:
+        labels = BatchLabels(
+            torch.zeros(n_samples, n_labels, device=device),
+            [f"label_{i}" for i in range(n_labels)],
+        )
     return BatchData(
         data={
             name: torch.randn(n_samples, n_times, n_lat, n_lon, device=device)
@@ -27,8 +39,86 @@ def get_batch_data(
         },
         time=xr.DataArray(np.random.rand(n_samples, n_times), dims=["sample", "time"]),
         horizontal_dims=horizontal_dims,
-        labels=[set() for _ in range(n_samples)],
+        labels=labels,
     )
+
+
+def test_to_device():
+    names = ["foo", "bar"]
+    n_samples = 2
+    n_times = 5
+    n_lat = 8
+    n_lon = 16
+    horizontal_dims = ["lat", "lon"]
+    batch_data = get_batch_data(
+        names=names,
+        n_samples=n_samples,
+        n_times=n_times,
+        horizontal_dims=horizontal_dims,
+        n_lat=n_lat,
+        n_lon=n_lon,
+    )
+    device_data = batch_data.to_device()
+    device = get_device()
+    assert_metadata_equal(device_data, batch_data)
+    for name in names:
+        assert device_data.data[name].device == device
+        np.testing.assert_allclose(
+            device_data.data[name].cpu().numpy(),
+            batch_data.data[name].cpu().numpy(),
+        )
+    if batch_data.labels is not None:
+        assert device_data.labels.tensor.device == device
+        np.testing.assert_allclose(
+            device_data.labels.tensor.cpu().numpy(),
+            batch_data.labels.tensor.cpu().numpy(),
+        )
+
+
+def test_to_cpu():
+    names = ["foo", "bar"]
+    n_samples = 2
+    n_times = 5
+    n_lat = 8
+    n_lon = 16
+    horizontal_dims = ["lat", "lon"]
+    batch_data = get_batch_data(
+        names=names,
+        n_samples=n_samples,
+        n_times=n_times,
+        horizontal_dims=horizontal_dims,
+        n_lat=n_lat,
+        n_lon=n_lon,
+    )
+    cpu_data = batch_data.to_cpu()
+    assert_metadata_equal(cpu_data, batch_data)
+    for name in names:
+        assert cpu_data.data[name].device.type == "cpu"
+        np.testing.assert_allclose(
+            cpu_data.data[name].cpu().numpy(),
+            batch_data.data[name].cpu().numpy(),
+        )
+    if batch_data.labels is not None:
+        assert cpu_data.labels.tensor.device.type == "cpu"
+        np.testing.assert_allclose(
+            cpu_data.labels.tensor.cpu().numpy(),
+            batch_data.labels.tensor.cpu().numpy(),
+        )
+
+
+@pytest.mark.parametrize(
+    "epoch_1, epoch_2",
+    [
+        (None, 0),
+        (0, 1),
+    ],
+)
+def test_from_sample_tuples_raises_on_mismatched_epochs(epoch_1: int, epoch_2: int):
+    sample1 = ({"x": torch.zeros(2, 3)}, xr.DataArray([0]), None, epoch_1)
+    sample2 = ({"x": torch.zeros(2, 3)}, xr.DataArray([0]), None, epoch_2)
+
+    with pytest.raises(ValueError, match="same epoch"):
+        BatchData.from_sample_tuples([sample1, sample2])
 
 
 @pytest.mark.parametrize(
@@ -222,6 +312,7 @@ def test_broadcast_ensemble(n_ensemble):
         horizontal_dims=horizontal_dims,
         n_lat=n_lat,
         n_lon=n_lon,
+        n_labels=2,
     )
 
     gen_data = get_batch_data(
@@ -231,10 +322,16 @@ def test_broadcast_ensemble(n_ensemble):
         horizontal_dims=horizontal_dims,
         n_lat=n_lat,
         n_lon=n_lon,
+        n_labels=2,
     )
 
     ensemble_target_data = target_data.broadcast_ensemble(n_ensemble=1)
     ensemble_gen_data = gen_data.broadcast_ensemble(n_ensemble=n_ensemble)
+
+    assert ensemble_target_data.labels.tensor.shape == (n_samples, 2)
+    assert ensemble_gen_data.labels.tensor.shape == (n_ensemble * n_samples, 2)
+    assert ensemble_target_data.labels.names == ["label_0", "label_1"]
+    assert ensemble_gen_data.labels.names == ["label_0", "label_1"]
 
     # make sure original data is unchanged and that broadcasting with an_ensemble=1 just
     # copies the BatchData object
@@ -255,14 +352,16 @@ def test_broadcast_ensemble(n_ensemble):
     )
 
     # assert metadata is shapes are correct after ensembling
-    assert len(ensemble_gen_data.labels) == n_ensemble * n_samples
+    assert ensemble_gen_data.labels.tensor.shape[0] == n_ensemble * n_samples
     assert len(ensemble_gen_data.time.sample) == n_ensemble * n_samples
     assert len(ensemble_gen_data.time.time) == n_times
 
     for i in range(n_ensemble):
-        assert (
-            ensemble_gen_data.labels[i * n_samples : (i * n_samples) + n_samples]
-            == gen_data.labels
+        torch.testing.assert_close(
+            ensemble_gen_data.labels.tensor[
+                i * n_samples : (i * n_samples) + n_samples
+            ],
+            gen_data.labels.tensor,
         )
         assert ensemble_gen_data.time[
             i * n_samples : (i * n_samples) + n_samples
@@ -274,7 +373,9 @@ def test_broadcast_ensemble(n_ensemble):
             gen_data.data["bar"][i],
         )
 
-    assert_metadata_equal(ensemble_gen_data, gen_data)
+    assert_metadata_equal(
+        ensemble_gen_data, gen_data, check_labels=False
+    )  # labels checked above
 
 
 @pytest.mark.parametrize("n_ensemble", [1, 2, 3])

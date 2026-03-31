@@ -29,11 +29,11 @@ def test_logs_labels_exist():
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
     logs = agg.record_batch(
-        PairedData(
+        PairedData.new_on_device(
             reference=target_data,
             prediction=gen_data,
             time=time,
-            labels=[set() for _ in range(n_sample)],
+            labels=None,
         ),
     )
     assert len(logs) == n_time
@@ -81,11 +81,11 @@ def test_logs_labels_exist_with_reference_time_means():
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
     logs = agg.record_batch(
-        PairedData(
+        PairedData.new_on_device(
             reference=target_data,
             prediction=gen_data,
             time=time,
-            labels=[set() for _ in range(n_sample)],
+            labels=None,
         ),
     )
     assert len(logs) == n_time
@@ -123,11 +123,11 @@ def test_flush_diagnostics(tmpdir):
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
     agg.record_batch(
-        data=PairedData(
+        data=PairedData.new_on_device(
             prediction=gen_data,
             reference=target_data,
             time=time,
-            labels=[set() for _ in range(n_sample)],
+            labels=None,
         ),
     )
     agg.flush_diagnostics()

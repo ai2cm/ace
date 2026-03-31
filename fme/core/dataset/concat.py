@@ -5,15 +5,17 @@ import torch
 import xarray as xr
 
 from fme.core.dataset.config import DatasetConfigABC
-from fme.core.dataset.dataset import DatasetABC
+from fme.core.dataset.dataset import DatasetABC, DatasetItem
 from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset.schedule import IntSchedule
+from fme.core.dataset.utils import accumulate_labels
 from fme.core.dataset.xarray import XarrayDataConfig, get_xarray_datasets
-from fme.core.typing_ import TensorDict
 
 
 class XarrayConcat(DatasetABC):
-    def __init__(self, datasets: Sequence[DatasetABC]):
+    def __init__(self, datasets: Sequence[DatasetABC], strict: bool = True):
         self._dataset = torch.utils.data.ConcatDataset(datasets)
+        self._wrapped_datasets = datasets
         sample_start_times = datasets[0].sample_start_times
         for dataset in datasets[1:]:
             sample_start_times = sample_start_times.append(dataset.sample_start_times)
@@ -28,12 +30,9 @@ class XarrayConcat(DatasetABC):
         self._sample_n_times = datasets[0].sample_n_times
         self._properties = datasets[0].properties.copy()
         for dataset in datasets[1:]:
-            self._properties.update(dataset.properties)
+            self._properties.update(dataset.properties, strict=strict)
 
-    def __len__(self):
-        return len(self._dataset)
-
-    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray, set[str]]:
+    def __getitem__(self, idx: int) -> DatasetItem:
         return self._dataset[idx]
 
     @property
@@ -41,13 +40,25 @@ class XarrayConcat(DatasetABC):
         return self._sample_start_times
 
     @property
+    def all_times(self) -> xr.CFTimeIndex:
+        """
+        Like sample_start_times, but includes all times in the dataset, including
+        final times which are not valid as a start index.
+
+        This is relevant for inference, where we may use get_sample_by_time_slice to
+        retrieve time windows directly.
+
+        If this dataset does not support inference,
+        this will raise a NotImplementedError.
+        """
+        raise NotImplementedError("Concat datasets do not support inference.")
+
+    @property
     def sample_n_times(self) -> int:
         """The length of the time dimension of each sample."""
         return self._sample_n_times
 
-    def get_sample_by_time_slice(
-        self, time_slice: slice
-    ) -> tuple[TensorDict, xr.DataArray, set[str]]:
+    def get_sample_by_time_slice(self, time_slice: slice) -> DatasetItem:
         raise NotImplementedError(
             "Concat datasets do not support getting samples by time slice, "
             "and should not be configurable for inference. Is there a bug?."
@@ -60,17 +71,21 @@ class XarrayConcat(DatasetABC):
     def validate_inference_length(self, max_start_index: int, max_window_len: int):
         raise ValueError("Concat datasets do not support inference.")
 
+    def set_epoch(self, epoch: int):
+        for dataset in self._wrapped_datasets:
+            dataset.set_epoch(epoch)
+
 
 def get_dataset(
     dataset_configs: Sequence[XarrayDataConfig],
     names: Sequence[str],
-    n_timesteps: int,
+    n_timesteps: IntSchedule,
     strict: bool = True,
 ) -> tuple[XarrayConcat, DatasetProperties]:
     datasets, properties = get_xarray_datasets(
         dataset_configs, names, n_timesteps, strict=strict
     )
-    ensemble = XarrayConcat(datasets)
+    ensemble = XarrayConcat(datasets, strict=strict)
     return ensemble, properties
 
 
@@ -94,7 +109,7 @@ class ConcatDatasetConfig(DatasetConfigABC):
     def build(
         self,
         names: Sequence[str],
-        n_timesteps: int,
+        n_timesteps: IntSchedule,
     ) -> tuple[DatasetABC, DatasetProperties]:
         return get_dataset(
             self.concat,
@@ -102,3 +117,10 @@ class ConcatDatasetConfig(DatasetConfigABC):
             n_timesteps,
             strict=self.strict,
         )
+
+    @property
+    def available_labels(self) -> set[str] | None:
+        """
+        Return the labels that are available in the dataset.
+        """
+        return accumulate_labels([ds.available_labels for ds in self.concat])

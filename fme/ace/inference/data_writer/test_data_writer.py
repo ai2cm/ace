@@ -3,6 +3,7 @@ from typing import NamedTuple
 
 import cftime
 import numpy as np
+import numpy.typing as npt
 import pytest
 import torch
 import xarray as xr
@@ -21,6 +22,7 @@ from fme.ace.inference.data_writer.raw import get_batch_lead_time_microseconds
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.ace.inference.data_writer.zarr import ZarrWriterConfig
 from fme.core.device import get_device
+from fme.core.labels import BatchLabels
 from fme.core.typing_ import TensorMapping
 
 CALENDAR_CFTIME = {
@@ -32,6 +34,36 @@ CALENDAR_CFTIME = {
 SECONDS_PER_HOUR = 3600
 MICROSECONDS_PER_SECOND = 1_000_000
 TIMESTEP = datetime.timedelta(hours=6)
+
+
+def get_initial_condition_times(
+    batch_start_time: tuple[int, int, int, int, int, int],
+    calendar: str,
+    n_initial_conditions: int,
+    separation_timedelta: datetime.timedelta = datetime.timedelta(hours=0),
+    model_timestep: datetime.timedelta = TIMESTEP,
+) -> npt.NDArray[cftime.datetime]:
+    """Generate an array of initial condition times.
+
+    Args:
+        batch_start_time: The start time of the first batch as a tuple of
+            year, month, day, hour, minute, second. The calendar is specified by
+            the calendar parameter. The first initial condition time will be the
+            batch_start_time minus the model timestep.
+        calendar: The calendar to use.
+        n_initial_conditions: The number of initial condition times to generate.
+        separation_timedelta: The time between initial condition times.
+        model_timestep: The timestep of the model.
+
+    Returns:
+        An array of initial condition times.
+    """
+    base_datetime = CALENDAR_CFTIME[calendar](*batch_start_time)
+    initial_condition_times = []
+    for i in range(n_initial_conditions):
+        time = base_datetime + separation_timedelta * i - model_timestep
+        initial_condition_times.append(time)
+    return np.array(initial_condition_times)
 
 
 def test_data_writer_config_save_names():
@@ -54,7 +86,9 @@ def get_paired_data(
     return PairedData(
         prediction=prediction,
         reference=reference,
-        labels=[set() for _ in range(n_samples)],
+        labels=BatchLabels.new_from_set(
+            set(), n_samples=n_samples, device=get_device()
+        ),
         time=time,
     )
 
@@ -169,10 +203,14 @@ class TestDataWriter:
         coords,
     ):
         n_initial_conditions = 2
+        start_time = (2020, 1, 1, 0, 0, 0)
+        initial_condition_times = get_initial_condition_times(
+            start_time, calendar, n_initial_conditions
+        )
         n_timesteps = 6
         writer = PairedDataWriter(
             str(tmp_path),
-            n_initial_conditions=n_initial_conditions,
+            initial_condition_times=initial_condition_times,
             n_timesteps=n_timesteps,
             timestep=TIMESTEP,
             variable_metadata=sample_metadata,
@@ -182,7 +220,6 @@ class TestDataWriter:
             save_names=None,
             dataset_metadata=DatasetMetadata(source={"inference_version": "1.0"}),
         )
-        start_time = (2020, 1, 1, 0, 0, 0)
         end_time = (2020, 1, 1, 12, 0, 0)
         batch_time = self.get_batch_time(
             start_time=start_time,
@@ -219,7 +256,7 @@ class TestDataWriter:
         # Open the file and check the data
         dataset = Dataset(tmp_path / "autoregressive_predictions.nc", "r")
         assert dataset["time"].units == "microseconds"
-        assert dataset["init_time"].units == "microseconds since 1970-01-01 00:00:00"
+        assert dataset["init_time"].units == "microseconds since 1970-01-01"
         assert dataset["init_time"].calendar == calendar
         assert "source.inference_version" in dataset.ncattrs()
         assert dataset.getncattr("source.inference_version") == "1.0"
@@ -265,23 +302,20 @@ class TestDataWriter:
             expected_lead_times = xr.DataArray(
                 [
                     MICROSECONDS_PER_SECOND * SECONDS_PER_HOUR * i
-                    for i in np.arange(0, 31, 6)
+                    for i in np.arange(6, 37, 6)
                 ],
                 dims="time",
             ).assign_coords(
                 {
                     "time": [
                         MICROSECONDS_PER_SECOND * SECONDS_PER_HOUR * i
-                        for i in np.arange(0, 31, 6)
+                        for i in np.arange(6, 37, 6)
                     ]
                 }
             )
             xr.testing.assert_equal(ds["time"], expected_lead_times)
             expected_init_times = xr.DataArray(
-                [
-                    CALENDAR_CFTIME[calendar](*start_time)
-                    for _ in range(n_initial_conditions)
-                ],
+                initial_condition_times,
                 dims=["sample"],
             )
             expected_init_times = expected_init_times.assign_coords(
@@ -315,6 +349,7 @@ class TestDataWriter:
         [
             pytest.param(None, id="None"),
             pytest.param(["temp", "humidity", "pressure"], id="subset"),
+            pytest.param(["temp", "missing_var"], id="missing_var"),
         ],
     )
     def test_append_batch_save_names(
@@ -326,9 +361,14 @@ class TestDataWriter:
         save_names,
     ):
         n_samples = 2
+        calendar = "julian"
+        start_time = (2020, 1, 1, 0, 0, 0)
+        initial_condition_times = get_initial_condition_times(
+            start_time, calendar, n_samples
+        )
         writer = PairedDataWriter(
             str(tmp_path),
-            n_initial_conditions=n_samples,
+            initial_condition_times=initial_condition_times,
             n_timesteps=4,  # unused
             timestep=TIMESTEP,
             variable_metadata=sample_metadata,
@@ -394,9 +434,14 @@ class TestDataWriter:
         self, sample_metadata, sample_target_data, sample_prediction_data, tmp_path
     ):
         n_samples = 2
+        calendar = "julian"
+        start_time = (2020, 1, 1, 0, 0, 0)
+        initial_condition_times = get_initial_condition_times(
+            start_time, calendar, n_samples
+        )
         writer = PairedDataWriter(
             str(tmp_path),
-            n_initial_conditions=n_samples,
+            initial_condition_times=initial_condition_times,
             n_timesteps=3,
             timestep=TIMESTEP,
             variable_metadata=sample_metadata,
@@ -406,7 +451,6 @@ class TestDataWriter:
             save_names=None,
             dataset_metadata=DatasetMetadata(),
         )
-        start_time = (2020, 1, 1, 0, 0, 0)
         end_time = (2020, 1, 1, 12, 0, 0)
         batch_time = self.get_batch_time(
             start_time=start_time,
@@ -425,6 +469,10 @@ class TestDataWriter:
 
     def test_prediction_only_append_batch(self, sample_metadata, tmp_path, calendar):
         n_samples = 2
+        start_time = (2020, 1, 1, 0, 0, 0)
+        initial_condition_times = get_initial_condition_times(
+            start_time, calendar, n_samples
+        )
         n_timesteps = 8
         coarsen_factor = 2
         device = get_device()
@@ -452,7 +500,7 @@ class TestDataWriter:
 
         writer = DataWriter(
             str(tmp_path),
-            n_initial_conditions=n_samples,
+            initial_condition_times=initial_condition_times,
             n_timesteps=n_timesteps,
             variable_metadata=sample_metadata,
             coords={"lat": np.arange(4), "lon": np.arange(5)},
@@ -464,7 +512,6 @@ class TestDataWriter:
             files=[region_config],
             dataset_metadata=DatasetMetadata(source={"inference_version": "1.0"}),
         )
-        start_time = (2020, 1, 1, 0, 0, 0)
         end_time = (2020, 1, 1, 18, 0, 0)
         batch_time = self.get_batch_time(
             start_time=start_time,
@@ -551,9 +598,13 @@ class TestDataWriter:
         tmp_path,
     ):
         n_samples = 2
+        calendar = "julian"
+        start_time = (2020, 1, 1, 0, 0, 0)
+        initial_condition_times = get_initial_condition_times(
+            start_time, calendar, n_samples, separation_timedelta=TIMESTEP
+        )
         n_timesteps = 8
         coarsen_factor = 2
-        calendar = "julian"
         n_lat, n_lon = 4, 5
 
         device = get_device()
@@ -579,7 +630,7 @@ class TestDataWriter:
         )
         writer = DataWriter(
             str(tmp_path),
-            n_initial_conditions=n_samples,
+            initial_condition_times=initial_condition_times,
             n_timesteps=n_timesteps,
             variable_metadata=sample_metadata,
             coords={"lat": np.arange(n_lat), "lon": np.arange(n_lon)},
@@ -591,7 +642,6 @@ class TestDataWriter:
             files=[region_config],
             dataset_metadata=DatasetMetadata(source={"inference_version": "1.0"}),
         )
-        start_time = (2020, 1, 1, 0, 0, 0)
         end_time = (2020, 1, 1, 18, 0, 0)
         batch_time = self.get_batch_time(
             start_time=start_time,

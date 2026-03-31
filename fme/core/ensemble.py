@@ -21,19 +21,27 @@ def get_crps(
     Returns:
         The CRPS loss.
     """
-    if gen.shape[1] != 2:
-        raise NotImplementedError(
-            "CRPS loss is written here specifically for 2 ensemble members, "
-            f"got {gen.shape[1]} ensemble members. "
-            "Update this function (and its tests) to support more."
-        )
-    # CRPS is `E[|X - y|] - 1/2 E[|X - X'|]`
-    # below we compute the first term as the average of two ensemble members
-    # meaning the 0.5 factor can be pulled out
-    epsilon = (1 - alpha) / 2
-    target_term = torch.abs(gen - target).mean(axis=1)
-    internal_term = -0.5 * torch.abs(gen[:, 0, ...] - gen[:, 1, ...])
-    return target_term + (1 - epsilon) * internal_term
+    n_ens = gen.shape[1]
+    epsilon = (1.0 - alpha) / 2.0
+
+    # Term 1: E|X - y|
+    target_term = torch.mean(torch.abs(gen - target), dim=1)
+
+    if n_ens == 1:
+        internal_term = torch.zeros_like(target_term)
+    else:
+        # Indices for unique pairs i < j
+        idx = torch.triu_indices(n_ens, n_ens, offset=1, device=gen.device)
+        i, j = idx[0], idx[1]  # [n_pairs]
+
+        # Only materialize the needed pairs: [B, n_pairs, ...]
+        pairwise = (gen[:, i, ...] - gen[:, j, ...]).abs()
+
+        # Mean over pairs
+        internal_term = -0.5 * pairwise.mean(dim=1)
+
+    crps = target_term + (1.0 - epsilon) * internal_term
+    return crps
 
 
 def get_energy_score(

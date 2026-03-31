@@ -1,6 +1,7 @@
 """This file contains unit tests related to creating torch Datasets from climate
 data (e.g. netCDF files)."""
 
+import datetime
 import math
 import os
 import pathlib
@@ -30,12 +31,24 @@ from fme.ace.data_loading.inference import (
 )
 from fme.ace.data_loading.perturbation import PerturbationSelector, SSTPerturbation
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.coordinates import (
+    HybridSigmaPressureCoordinate,
+    LatLonCoordinates,
+    NullVerticalCoordinate,
+)
 from fme.core.dataset.concat import ConcatDatasetConfig
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.merged import MergeDatasetConfig, MergeNoConcatDatasetConfig
+from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset.schedule import IntMilestone, IntSchedule
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.device import using_gpu
+from fme.core.distributed.distributed import Distributed
+from fme.core.mask_provider import MaskProvider
+from fme.core.testing.regression import validate_tensor_dict
 from fme.core.typing_ import Slice
+
+DATA_DIR = pathlib.Path(__file__).parent / "testdata"
 
 
 def _get_coords(dim_sizes, calendar, timestep_size=1, timestep_start=0):
@@ -62,7 +75,7 @@ def _save_netcdf(
     filename, dim_sizes, variable_names, calendar, timestep_size=1, timestep_start=0
 ):
     data_vars = {}
-    for name in variable_names:
+    for name in sorted(variable_names):
         if name == "constant_mask":
             data = np.ones(list(dim_sizes.values()))
         else:
@@ -81,6 +94,10 @@ def _save_netcdf(
     return ds
 
 
+N_LAT = 16
+N_LON = 32
+
+
 def _create_dataset_on_disk(
     data_dir: pathlib.Path,
     calendar: str = "proleptic_gregorian",
@@ -93,7 +110,7 @@ def _create_dataset_on_disk(
     timestep_start=0,
 ) -> pathlib.Path:
     if data_dim_sizes is None:
-        data_dim_sizes = {"time": n_times, "lat": 16, "lon": 32}
+        data_dim_sizes = {"time": n_times, "lat": N_LAT, "lon": N_LON}
     seed = 0
     np.random.seed(seed)
     mask_name = "mask"
@@ -116,7 +133,12 @@ def _create_dataset_on_disk(
     return data_path
 
 
-def test_ensemble_loader(tmp_path, num_ensemble_members=3):
+@pytest.mark.parametrize(
+    "num_data_workers, force_forkserver", [(0, False), (3, False), (3, True)]
+)
+def test_ensemble_loader(
+    tmp_path, num_data_workers: int, force_forkserver: bool, num_ensemble_members=3
+):
     """Tests that the ensemble loader returns the correct number of samples."""
 
     # Create a dataset for each ensemble member. We assume that each member
@@ -133,7 +155,7 @@ def test_ensemble_loader(tmp_path, num_ensemble_members=3):
             concat=[XarrayDataConfig(data_path=str(path)) for path in netcdfs]
         ),
         batch_size=1,
-        num_data_workers=0,
+        num_data_workers=num_data_workers,
     )
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
@@ -141,7 +163,12 @@ def test_ensemble_loader(tmp_path, num_ensemble_members=3):
     n_timesteps = 3  # hard coded to match `_create_dataset_on_disk`.
     samples_per_member = n_timesteps - window_timesteps + 1
 
-    data = get_gridded_data(config, True, requirements)
+    data = get_gridded_data(
+        config,
+        train=True,
+        requirements=requirements,
+        _force_forkserver=force_forkserver,
+    )
     assert data.n_batches == samples_per_member * num_ensemble_members
     assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)
 
@@ -179,21 +206,101 @@ def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1
     assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)
 
 
+@pytest.mark.parallel
 def test_xarray_loader(tmp_path):
     """Checks that vertical coordinates are present."""
-    _create_dataset_on_disk(tmp_path)
+    dist = Distributed.get_instance()
+    tmp_path = dist.scatter_object(tmp_path)  # get the root value
+    global_batch_size = 24
+    if dist.is_root():
+        # TODO: investigate why this test fails if we
+        # increment n_times below by 1 (so it's + 2)
+        _create_dataset_on_disk(tmp_path, n_times=global_batch_size + 1)
+    dist.barrier()  # make sure the data's there before we load it
+    local_batch_size = dist.local_batch_size(global_batch_size)
+    config = DataLoaderConfig(
+        dataset=ConcatDatasetConfig(
+            concat=[XarrayDataConfig(data_path=tmp_path, n_repeats=1)]
+        ),
+        batch_size=global_batch_size,
+        num_data_workers=0,
+    )
+    window_timesteps = 2  # 1 initial condition and 1 step forward
+    requirements = DataRequirements(["foo"], window_timesteps)
+    data = get_gridded_data(config, False, requirements)  # type: ignore
+    assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)
+    assert data._vertical_coordinate.ak.device == fme.get_device()
+    first_batch = next(iter(data.loader))
+    assert first_batch.data["foo"].shape[0] == (local_batch_size)
+    gathered_data = {}
+    for name, tensor in sorted(first_batch.data.items()):
+        gathered_tensor = dist.gather_global(
+            tensor,
+            global_shape=(global_batch_size,)
+            + tuple(tensor.shape[1:-2])
+            + (N_LAT, N_LON),
+        )
+        if dist.is_root():
+            assert gathered_tensor is not None
+            # batch order is not guaranteed, so we need to sort
+            # for the regression test
+            batch_items = [gathered_tensor[i] for i in range(global_batch_size)]
+            gathered_tensor = torch.cat(
+                sorted(batch_items, key=lambda x: x[0, 0, 0].item()), dim=0
+            )
+        gathered_data[name] = gathered_tensor
+    if dist.is_root():
+        validate_tensor_dict(
+            gathered_data,
+            DATA_DIR / "test_xarray_loader_regression.pt",
+        )
+    # TODO: it would be very helpful to implement scatter_object or something
+    # similar to ensure other attributes like time, labels, horizontal_dims, epoch,
+    # and n_ensemble are identical (i.e. have the correct value) across ranks
+
+
+@pytest.mark.parametrize(
+    "workers, force_zarr_engine_used", [(0, False), (0, True), (1, True)]
+)
+def test_xarray_loader_scheduled_epoch(
+    tmp_path,
+    force_zarr_engine_used: bool,
+    workers: int,
+    very_fast_only: bool,
+):
+    """Checks that vertical coordinates are present."""
+    if very_fast_only and workers > 0:
+        pytest.skip("Skipping non-fast tests")
+    _create_dataset_on_disk(tmp_path, n_times=4)
     config = DataLoaderConfig(
         dataset=ConcatDatasetConfig(
             concat=[XarrayDataConfig(data_path=tmp_path, n_repeats=1)]
         ),
         batch_size=1,
-        num_data_workers=0,
+        num_data_workers=workers,
+        prefetch_factor=2 if workers != 0 else None,
     )
-    window_timesteps = 2  # 1 initial condition and 1 step forward
+    if force_zarr_engine_used:
+        assert hasattr(config, "_zarr_engine_used")
+        config._zarr_engine_used = True
+    window_timesteps = IntSchedule(
+        start_value=2, milestones=[IntMilestone(epoch=1, value=3)]
+    )
     requirements = DataRequirements(["foo"], window_timesteps)
     data = get_gridded_data(config, True, requirements)  # type: ignore
     assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)
     assert data._vertical_coordinate.ak.device == fme.get_device()
+    batch = next(iter(data.loader))
+    assert batch.data["foo"].shape[1] == 2  # window_timesteps at start_value
+    assert batch.epoch is None
+    data.set_epoch(0)
+    batch = next(iter(data.loader))
+    assert batch.data["foo"].shape[1] == 2  # window_timesteps at start_value
+    assert batch.epoch == 0
+    data.set_epoch(1)
+    batch = next(iter(data.loader))
+    assert batch.data["foo"].shape[1] == 3  # window_timesteps at milestone value
+    assert batch.epoch == 1
 
 
 def test_xarray_loader_sample_with_replacement(tmp_path):
@@ -213,6 +320,7 @@ def test_xarray_loader_sample_with_replacement(tmp_path):
     assert data._vertical_coordinate.ak.device == fme.get_device()
     epoch_samples = list(data.loader)
     assert len(epoch_samples) == 10
+    data.set_epoch(1)  # should not raise an error
 
 
 def test_xarray_loader_using_merged_dataset(tmp_path, tmp_path_factory):
@@ -246,6 +354,49 @@ def test_xarray_loader_using_merged_dataset(tmp_path, tmp_path_factory):
     data = get_gridded_data(config, True, requirements)  # type: ignore
     assert "foo" in data.variable_metadata.keys()
     assert "foo2" in data.variable_metadata.keys()
+
+
+def test_xarray_loader_labels(tmp_path, tmp_path_factory):
+    _create_dataset_on_disk(tmp_path)
+    other_path = tmp_path_factory.mktemp("other")
+    _create_dataset_on_disk(
+        other_path,
+        filename="other_source.nc",
+    )
+
+    config = DataLoaderConfig(
+        dataset=ConcatDatasetConfig(
+            concat=[
+                XarrayDataConfig(
+                    data_path=tmp_path, file_pattern="data*.nc", labels=["labelled"]
+                ),
+                XarrayDataConfig(
+                    data_path=other_path,
+                    file_pattern="other_source*.nc",
+                    n_repeats=1,
+                    labels=[],
+                ),
+            ]
+        ),
+        batch_size=1,
+        num_data_workers=0,
+    )
+    window_timesteps = 2  # 1 initial condition and 1 step forward
+    requirements = DataRequirements(["foo"], window_timesteps)
+    data = get_gridded_data(config, True, requirements)  # type: ignore
+    seen_labelled = False
+    seen_unlabelled = False
+    for batch in data.loader:
+        assert batch.labels is not None
+        assert batch.labels.names == ["labelled"]
+        if torch.sum(batch.labels.tensor) > 0:
+            seen_labelled = True
+        else:
+            seen_unlabelled = True
+    if not seen_labelled:
+        raise AssertionError("Did not see labelled data in batches")
+    if not seen_unlabelled:
+        raise AssertionError("Did not see unlabelled data in batches")
 
 
 def test_xarray_loader_using_merged_dataset_errors_if_different_time(
@@ -354,7 +505,14 @@ def test_loader_n_repeats_but_not_infer_timestep_error(tmp_path):
         )
 
 
-def test_inference_data_loader(tmp_path):
+@pytest.mark.parametrize(
+    "num_data_workers, force_forkserver", [(0, False), (3, False), (3, True)]
+)
+def test_inference_data_loader(
+    tmp_path, num_data_workers: int, force_forkserver: bool, very_fast_only: bool
+):
+    if very_fast_only and force_forkserver:
+        pytest.skip("Skipping non-fast tests")
     _create_dataset_on_disk(tmp_path, n_times=14)
     batch_size = 2
     step = 7
@@ -366,6 +524,7 @@ def test_inference_data_loader(tmp_path):
         start_indices=InferenceInitialConditionIndices(
             first=0, n_initial_conditions=batch_size, interval=step
         ),
+        num_data_workers=num_data_workers,
     )
     n_forward_steps_in_memory = 3
     window_requirements = DataRequirements(
@@ -381,6 +540,7 @@ def test_inference_data_loader(tmp_path):
         total_forward_steps=6,
         window_requirements=window_requirements,
         initial_condition=initial_condition_requirements,
+        _force_forkserver=force_forkserver,
     )
     data_loader = data.loader
     batch_data = next(iter(data_loader))
@@ -676,7 +836,7 @@ def test_forcing_loader_loads_merged_dataset(tmp_path, tmp_path_factory):
     initial_condition = BatchData.new_on_cpu(
         data={"foo": torch.randn(1, 1, 1, 1), "foo2": torch.randn(1, 1, 1, 1)},
         time=xr.DataArray(time_values, dims=["sample", "time"]),
-        labels=[set()],
+        labels=None,
     )
     data = get_forcing_data(
         config,
@@ -800,6 +960,31 @@ def test_inference_persistence_names(tmp_path):
     torch.testing.assert_close(first_item["foo"], second_item["foo"])
     # ensure this is not the case for another variable
     assert not torch.all(first_item["bar"] == second_item["bar"])
+
+
+def test_inference_dataset_label_override_without_dataset_labels(tmp_path):
+    _create_dataset_on_disk(tmp_path, n_times=14)
+    config = InferenceDataLoaderConfig(
+        dataset=XarrayDataConfig(data_path=tmp_path),
+        start_indices=ExplicitIndices([0]),
+    )
+    window_requirements = DataRequirements(
+        names=["foo", "bar"],
+        n_timesteps=3,
+    )
+    dataset = InferenceDataset(
+        config,
+        total_forward_steps=3,
+        requirements=window_requirements,
+        label_override=["era5"],
+    )
+    batch = dataset[0]
+    # assert that the labels are not None and are the correct labels set during
+    # inference config initialization
+    assert batch.labels is not None
+    assert batch.labels.names == ["era5"]
+    assert batch.labels.tensor.shape[0] == 1
+    assert batch.labels.tensor.shape[1] == 1
 
 
 def test_zarr_engine_used_sequence():
@@ -956,6 +1141,45 @@ def test_time_buffer(
         assert sum(window_matches) == 1
 
 
+@pytest.mark.parametrize("time_buffer", [0, 2])
+@pytest.mark.parametrize(
+    "shuffle",
+    [True, False],
+)
+def test_set_epoch(tmp_path, time_buffer, shuffle: bool):
+    start_n_timesteps = 2
+    updated_n_timesteps = 3
+    n_times = (start_n_timesteps + time_buffer) * (
+        updated_n_timesteps + time_buffer
+    )  # must evenly divide for this test's assertions
+    _create_dataset_on_disk(tmp_path, n_times=n_times)
+    dataset_times = xr.open_dataset(
+        os.path.join(tmp_path, "data.nc"),
+        decode_times=xr.coders.CFDatetimeCoder(use_cftime=True),
+    )["time"].values
+    n_times = len(dataset_times)
+
+    config = DataLoaderConfig(
+        dataset=XarrayDataConfig(data_path=tmp_path),
+        batch_size=1,
+        num_data_workers=0,
+        time_buffer=time_buffer,
+    )
+    requirements = DataRequirements(
+        ["foo"],
+        n_timesteps=IntSchedule(
+            start_value=start_n_timesteps,
+            milestones=[IntMilestone(epoch=1, value=updated_n_timesteps)],
+        ),
+    )
+    data = get_gridded_data(config, shuffle, requirements)
+    for epoch, expected_n_timesteps in [(0, 2), (1, 3)]:
+        data.set_epoch(epoch)
+        assert len(data.loader) == n_times - 3 + 1
+        for batch in data.loader:
+            assert batch.n_timesteps == expected_n_timesteps
+
+
 @pytest.mark.parametrize(
     "time_buffer",
     [0, 2],
@@ -977,3 +1201,175 @@ def test_pinned_memory(tmp_path, time_buffer: int):
     for batch in loader:
         tensor = next(iter(batch.data.values()))
         assert tensor.is_pinned() is using_gpu()
+
+
+@pytest.mark.parallel
+def test_localize_properties():
+    """Verify DatasetProperties.localize() partitions coords and masks across ranks."""
+    dist = Distributed.get_instance()
+    n_lat, n_lon = N_LAT, N_LON
+    lat = torch.linspace(-90.0, 90.0, n_lat)
+    lon = torch.linspace(0.0, 360.0, n_lon)
+    coords = LatLonCoordinates(lat=lat, lon=lon)
+    mask_tensor = torch.arange(n_lat * n_lon, dtype=torch.float32).reshape(
+        1, n_lat, n_lon
+    )
+    mask_provider = MaskProvider(masks={"mask_test": mask_tensor})
+    timestep = datetime.timedelta(hours=6)
+    metadata = {"temp": VariableMetadata(units="K", long_name="Temperature")}
+    vertical = NullVerticalCoordinate()
+    props = DatasetProperties(
+        variable_metadata=metadata,
+        vertical_coordinate=vertical,
+        horizontal_coordinates=coords,
+        mask_provider=mask_provider,
+        timestep=timestep,
+        is_remote=False,
+        all_labels=None,
+    )
+
+    local = props.localize()
+
+    # Unchanged fields
+    assert local.variable_metadata is metadata
+    assert local.vertical_coordinate is vertical
+    assert local.timestep == timestep
+
+    # Gather local coordinates to root and verify full, non-overlapping coverage.
+    assert isinstance(local.horizontal_coordinates, LatLonCoordinates)
+    local_lat = local.horizontal_coordinates.lat.tolist()
+    local_lon = local.horizontal_coordinates.lon.tolist()
+    all_lats = dist.gather_object(local_lat)
+    all_lons = dist.gather_object(local_lon)
+    if dist.is_root():
+        assert all_lats is not None and all_lons is not None
+        # Spatial co-ranks (same data_parallel_rank) should have distinct
+        # lat/lon slices whose union covers the global coordinates exactly.
+        combined_lat = sorted(set(v for rank_lat in all_lats for v in rank_lat))
+        combined_lon = sorted(set(v for rank_lon in all_lons for v in rank_lon))
+        assert combined_lat == lat.tolist(), "lat coverage incomplete or has gaps"
+        assert combined_lon == lon.tolist(), "lon coverage incomplete or has gaps"
+
+    # Gather local masks to root and verify they tile to the global mask.
+    assert isinstance(local.mask_provider, MaskProvider)
+    local_mask = local.mask_provider.masks["mask_test"]
+    h_slice, w_slice = dist.get_local_slices((n_lat, n_lon))
+    all_slices = dist.gather_object((h_slice, w_slice))
+    all_masks = dist.gather_object(local_mask.tolist())
+    if dist.is_root():
+        assert all_slices is not None and all_masks is not None
+        canvas = torch.zeros_like(mask_tensor)
+        for (hs, ws), mask_data in zip(all_slices, all_masks):
+            canvas[..., hs, ws] += torch.tensor(mask_data)
+        # Each cell should be covered once per data-parallel rank (spatial
+        # co-ranks have distinct slices, data-parallel ranks have identical ones).
+        expected_count = dist.total_data_parallel_ranks
+        torch.testing.assert_close(canvas, mask_tensor * expected_count)
+
+
+@pytest.fixture
+def _global_properties():
+    """Build a DatasetProperties with a non-trivial mask so that localize()
+    produces observably different objects under spatial parallelism."""
+    n_lat, n_lon = N_LAT, N_LON
+    lat = torch.linspace(-90.0, 90.0, n_lat)
+    lon = torch.linspace(0.0, 360.0, n_lon)
+    coords = LatLonCoordinates(lat=lat, lon=lon)
+    timestep = datetime.timedelta(hours=6)
+    metadata = {"temp": VariableMetadata(units="K", long_name="Temperature")}
+    vertical = NullVerticalCoordinate()
+    mask = torch.ones(n_lat, n_lon)
+    mask_provider = MaskProvider(masks={"mask_land": mask})
+    return DatasetProperties(
+        variable_metadata=metadata,
+        vertical_coordinate=vertical,
+        horizontal_coordinates=coords,
+        mask_provider=mask_provider,
+        timestep=timestep,
+        is_remote=False,
+        all_labels=None,
+    )
+
+
+def _assert_dataset_info_uses_global_properties(dataset_info, props):
+    """Check that every field in dataset_info matches the *global* properties,
+    not the localized ones."""
+    n_lat, n_lon = N_LAT, N_LON
+
+    # img_shape must be the full global grid
+    assert dataset_info.img_shape == (n_lat, n_lon)
+
+    # horizontal_coordinates must match the full global shape
+    assert dataset_info.horizontal_coordinates.shape[-2:] == (n_lat, n_lon)
+
+    # vertical_coordinate type must match
+    assert type(dataset_info.vertical_coordinate) is type(props.vertical_coordinate)
+
+    # mask_provider must have the same keys as the global (non-localized) one
+    info_masks = dataset_info.mask_provider.masks
+    prop_masks = props.mask_provider.masks
+    assert set(info_masks.keys()) == set(prop_masks.keys())
+    for key in prop_masks:
+        assert info_masks[key].shape == prop_masks[key].shape
+
+
+@pytest.mark.parallel
+def test_gridded_data_dataset_info_not_localized(_global_properties):
+    """dataset_info built by GriddedData must use global properties so that
+    models receiving img_shape don't double-partition via get_local_slices."""
+    from unittest.mock import MagicMock
+
+    from fme.ace.data_loading.gridded_data import GriddedData
+
+    mock_loader = MagicMock()
+    mock_loader.__len__ = MagicMock(return_value=1)
+    mock_loader.batch_size = 1
+
+    gridded = GriddedData(loader=mock_loader, properties=_global_properties)
+    _assert_dataset_info_uses_global_properties(
+        gridded.dataset_info, _global_properties
+    )
+
+    # Sanity-check: under spatial parallelism the *local* shape differs
+    dist = Distributed.get_instance()
+    if dist.world_size != dist.total_data_parallel_ranks:
+        local_shape = gridded.horizontal_coordinates.shape[-2:]
+        assert local_shape != (N_LAT, N_LON)
+        assert gridded.dataset_info.img_shape == (N_LAT, N_LON)
+
+
+@pytest.mark.parallel
+def test_inference_gridded_data_dataset_info_not_localized(_global_properties):
+    """dataset_info built by InferenceGriddedData must use global properties."""
+    from unittest.mock import MagicMock
+
+    from fme.ace.data_loading.gridded_data import InferenceGriddedData
+
+    # Build a minimal PrognosticState as initial condition
+    data = {"temp": torch.randn(1, 1, N_LAT, N_LON)}
+    time = xr.DataArray(
+        [[np.datetime64("2000-01-01")]],
+        dims=["sample", "time"],
+    )
+    batch = BatchData(data=data, time=time)
+    initial_condition = PrognosticState(batch)
+
+    mock_loader = MagicMock()
+    mock_loader.__len__ = MagicMock(return_value=1)
+    mock_loader.__iter__ = MagicMock(return_value=iter([]))
+
+    inference = InferenceGriddedData(
+        loader=mock_loader,
+        initial_condition=initial_condition,
+        properties=_global_properties,
+    )
+    _assert_dataset_info_uses_global_properties(
+        inference.dataset_info, _global_properties
+    )
+
+    # Sanity-check: under spatial parallelism the *local* shape differs
+    dist = Distributed.get_instance()
+    if dist.world_size != dist.total_data_parallel_ranks:
+        local_shape = inference.horizontal_coordinates.shape[-2:]
+        assert local_shape != (N_LAT, N_LON)
+        assert inference.dataset_info.img_shape == (N_LAT, N_LON)

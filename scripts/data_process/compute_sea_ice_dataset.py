@@ -14,6 +14,7 @@ import xarray as xr
 import yaml
 from compute_dataset import ChunkingConfig, StandardDimMapping
 from compute_ocean_dataset import DaskConfig, FileSystemConfig, StaticDataConfig
+from get_stats import StatsConfig
 from ocean_emulators.preprocessing import horizontal_regrid, rotate_vectors
 from ocean_emulators.simulation_preprocessing.gfdl_cm4 import sis2_preprocessing
 from ocean_emulators.simulation_preprocessing.gfdl_om4 import convert_super_grid
@@ -165,7 +166,8 @@ def compute_lazy_dataset(
         ds, ds_target_grid, wetmask_name=sea_ice_names.sea_surface_fraction
     )
     for var, attrs in attrs.items():
-        ds[var].attrs = attrs
+        if var in ds.data_vars:
+            ds[var].attrs = attrs
 
     ds[sea_ice_names.sea_surface_fraction] = ds[
         sea_ice_names.sea_surface_fraction
@@ -204,6 +206,8 @@ class SeaIceDatasetConfig:
 
     Attributes:
         runs: mapping of short names to full paths of reference datasets.
+        data_output_directory: path to parent directory where the output zarr
+            will be written.
         dataset_computation: configuration details for compute_lazy_dataset.
         n_split: number of xpartition partitions to use when writing the data.
         dask: (optional) configuration for the dask cluster.
@@ -212,10 +216,12 @@ class SeaIceDatasetConfig:
     """
 
     runs: Mapping[str, str]
+    data_output_directory: str
     dataset_computation: SeaIceDatasetComputationConfig
     n_split: int = 10
     dask: DaskConfig | None = None
     filesystem: FileSystemConfig | None = None
+    stats: StatsConfig | None = None
 
     @classmethod
     def from_file(cls, path: str) -> "SeaIceDatasetConfig":

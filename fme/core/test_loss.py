@@ -231,7 +231,7 @@ def test_StepLossConfig_no_weights():
     n_channels = 5
     out_names = [f"var_{i}" for i in range(n_channels)]
     channel_dim = -3
-    area = torch.tensor([])  # area not used by this config
+    area = torch.ones(1, 1)  # area not used by this config
     gridded_operations: GriddedOperations = LatLonOperations(area)
     mapping_loss_config = StepLossConfig(sqrt_loss_step_decay_constant=0.0)
     loss = loss_config.build(reduction="mean", gridded_operations=gridded_operations)
@@ -259,7 +259,7 @@ def test_StepLossConfig_no_weights():
 def test_StepLossConfig_weights():
     out_names = ["var_0", "var_1"]
     channel_dim = -3
-    area = torch.tensor([])  # area not used by this config
+    area = torch.ones(1, 1)  # area not used by this config
     mapping_loss_config = StepLossConfig(
         type="MSE", weights={"var_0": 4.0, "var_1": 1.0}
     )
@@ -292,7 +292,7 @@ def test_StepLossConfig_weights():
 def test_StepLossConfig_with_step_loss_decay(sqrt_loss_step_decay_constant):
     out_names = ["var_0", "var_1"]
     channel_dim = -3
-    area = torch.tensor([])  # area not used by this config
+    area = torch.ones(1, 1)  # area not used by this config
     mapping_loss_config = StepLossConfig(
         type="MSE",
         weights={"var_0": 4.0, "var_1": 1.0},

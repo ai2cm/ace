@@ -33,8 +33,10 @@ def test_inference_evaluator_aggregator_channel_mean_names(
 
     agg = InferenceEvaluatorAggregator(
         dataset_info=ds_info,
-        n_timesteps=n_timesteps,
+        n_ic_steps=1,
+        n_forward_steps=n_timesteps - 1,
         initial_time=initial_time,
+        log_step_means=[],
         normalize=lambda x: dict(x),
         log_zonal_mean_images=False,
         log_video=False,
@@ -63,7 +65,7 @@ def test_inference_evaluator_aggregator_channel_mean_names(
     paired_data = PairedData.new_on_device(
         prediction=gen_data,
         reference=target_data,
-        labels=[set() for _ in range(batch_size)],
+        labels=None,
         time=time,
     )
     agg.record_batch(paired_data)

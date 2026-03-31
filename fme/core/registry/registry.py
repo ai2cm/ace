@@ -1,9 +1,13 @@
 from collections.abc import Callable, Mapping
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Protocol, Self, TypeVar
 
-import dacite
 
-T = TypeVar("T")
+class HasFromState(Protocol):
+    @classmethod
+    def from_state(cls, state: Mapping[str, Any]) -> Self: ...
+
+
+T = TypeVar("T", bound=HasFromState)
 
 
 class Registry(Generic[T]):
@@ -51,8 +55,5 @@ class Registry(Generic[T]):
         return register_func
 
     def get(self, type_name: str, config: Mapping[str, Any]) -> T:
-        return dacite.from_dict(
-            data_class=self._types[type_name],
-            data=config,
-            config=dacite.Config(strict=True),
-        )
+        cls = self._types[type_name]
+        return cls.from_state(config)

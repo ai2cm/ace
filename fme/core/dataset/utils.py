@@ -18,6 +18,26 @@ from fme.core.coordinates import (
 SLICE_NONE = slice(None)
 
 
+def accumulate_labels(labels: list[set[str] | None]) -> set[str] | None:
+    """
+    Accumulate labels from multiple sources.
+    """
+    if any(label is None for label in labels):
+        if not all(label is None for label in labels):
+            raise ValueError(
+                "All datasets must have labels listed, "
+                "or no labels must be listed. Provide an explicit empty list "
+                "for datasets with no labels."
+            )
+        return None
+    all_labels: set[str] = set()
+    for label in labels:
+        if label is None:
+            raise RuntimeError("Check above should prevent this case.")
+        all_labels.update(label)
+    return all_labels
+
+
 def _get_indexers(
     variable: xr.Variable, dims: Sequence[Hashable]
 ) -> tuple[slice | None, ...]:

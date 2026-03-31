@@ -2,6 +2,7 @@ import dataclasses
 
 import numpy as np
 
+from fme.core.dataset.schedule import IntMilestone, IntSchedule, ValidatedMilestones
 from fme.core.distributed import Distributed
 
 
@@ -51,3 +52,65 @@ class TimeLengthProbabilities:
         self.initialize_rng()  # jit, if not called externally
         assert self._rng is not None
         return self._rng.choice(self._n_times, p=self._probabilities)
+
+
+TimeLength = TimeLengthProbabilities | int
+
+
+@dataclasses.dataclass
+class TimeLengthMilestone:
+    """
+    A milestone for a time length schedule.
+    """
+
+    epoch: int
+    value: TimeLength
+
+
+@dataclasses.dataclass
+class TimeLengthSchedule:
+    """
+    A schedule for a time length value.
+    """
+
+    start_value: TimeLength
+    milestones: list[TimeLengthMilestone]
+
+    def __post_init__(self):
+        self._validated_milestones = ValidatedMilestones(
+            start_value=self.start_value, milestones=self.milestones
+        )
+
+    @classmethod
+    def from_constant(cls, value: TimeLength) -> "TimeLengthSchedule":
+        """
+        Create a TimeLengthSchedule that always returns the same value.
+
+        Parameters:
+            value: The constant value.
+
+        Returns:
+            A TimeLengthSchedule instance.
+        """
+        return cls(start_value=value, milestones=[])
+
+    def get_value(self, epoch: int) -> TimeLength:
+        return self._validated_milestones.get_value(epoch)
+
+    @property
+    def max_n_forward_steps(self) -> IntSchedule:
+        """
+        Get a schedule of the maximum number of forward steps.
+        """
+        if isinstance(self.start_value, int):
+            max_start = self.start_value
+        else:
+            max_start = self.start_value.max_n_forward_steps
+        max_milestones = []
+        for milestone in self.milestones:
+            if isinstance(milestone.value, int):
+                max_value = milestone.value
+            else:
+                max_value = milestone.value.max_n_forward_steps
+            max_milestones.append(IntMilestone(epoch=milestone.epoch, value=max_value))
+        return IntSchedule(start_value=max_start, milestones=max_milestones)

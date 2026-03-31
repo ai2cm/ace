@@ -1,10 +1,9 @@
 docs/available_modules.rst
 docs/available_steps.rst
 docs/_build
-filtered_repo/
-files_excluded_by_filter.txt
 
 .vscode
+*.pytest-serial.lock
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

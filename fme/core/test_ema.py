@@ -2,13 +2,14 @@ import pytest
 import torch
 from torch import nn
 
+from fme.core.device import get_device
 from fme.core.ema import EMATracker
 
 
 class ExampleModel(nn.Module):
     def __init__(self):
         super().__init__()
-        self.weight = nn.Parameter(torch.randn(10))
+        self.weight = nn.Parameter(torch.randn(10, device=get_device()))
 
     def forward(self, x):
         return self.weight * x

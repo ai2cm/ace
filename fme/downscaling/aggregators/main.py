@@ -534,6 +534,8 @@ class MeanMapAggregator:
         self._name = ensure_trailing_slash(name)
         self._mean_target = Mean(batch_mean)
         self._mean_prediction = Mean(batch_mean)
+        # corresponds to 40 x 80 deg at 3km resolution, in comparison CONUS is 28x65 deg
+        self.max_img_upload_size = 3276800
 
     @torch.no_grad()
     def record_batch(self, target: TensorMapping, prediction: TensorMapping) -> None:
@@ -583,19 +585,20 @@ class MeanMapAggregator:
         metrics = {}
         spectra = {}
         for var_name in target.keys():
-            gap = torch.full(
-                (target[var_name].shape[-2], self.gap_width),
-                float(target[var_name].min()),
-                device=target[var_name].device,
-            )
-            maps[f"maps/{self._name}full-field/{var_name}"] = torch.cat(
-                (prediction[var_name], gap, target[var_name]), dim=1
-            )
-            maps[f"maps/{self._name}log10_relative_mean/{var_name}"] = relative[
-                var_name
-            ]
             error = prediction[var_name] - target[var_name]
-            maps[f"maps/{self._name}error/{var_name}"] = error
+            if target[var_name].nelement() < self.max_img_upload_size:
+                gap = torch.full(
+                    (target[var_name].shape[-2], self.gap_width),
+                    float(target[var_name].min()),
+                    device=target[var_name].device,
+                )
+                maps[f"maps/{self._name}full-field/{var_name}"] = torch.cat(
+                    (prediction[var_name], gap, target[var_name]), dim=1
+                )
+                maps[f"maps/{self._name}log10_relative_mean/{var_name}"] = relative[
+                    var_name
+                ]
+                maps[f"maps/{self._name}error/{var_name}"] = error
             metrics[f"metrics/{self._name}bias/{var_name}"] = error.mean()
 
             spectra_prefix = ensure_trailing_slash(f"power_spectrum_of_{self._name}")
@@ -794,6 +797,7 @@ class Aggregator:
             ]
 
         self.loss = Mean(torch.mean)
+        self.channel_loss = Mean(torch.mean)
         self._fine_latlon_coordinates: LatLonCoordinates | None = None
 
     @torch.no_grad()
@@ -835,6 +839,8 @@ class Aggregator:
             coarse_comparison_aggregator.record_batch(target, prediction, coarse)
 
         self.loss.record_batch({"loss": outputs.loss})
+        if outputs.channel_losses:
+            self.channel_loss.record_batch(outputs.channel_losses)
 
     def get_wandb(
         self,
@@ -847,6 +853,8 @@ class Aggregator:
 
         ret: dict[str, Any] = {}
         ret.update(self.loss.get_wandb(prefix))
+        if self.channel_loss._count > 0:
+            ret.update(self.channel_loss.get_wandb(f"{prefix}channel_loss/"))
         for comparison in self._comparisons:
             ret.update(comparison.get_wandb(prefix))
         for coarse_comparison in self._coarse_comparisons:

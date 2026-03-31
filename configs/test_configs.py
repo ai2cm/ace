@@ -48,7 +48,9 @@ def test_evaluator_configs_are_valid():
 
 
 def test_downscaling_train_configs_are_valid():
-    downscaling_files = get_yaml_files("**/downscaling/*train*.yaml")
+    downscaling_files = get_yaml_files("**/downscaling/*train*.yaml") + get_yaml_files(
+        "**/downscaling-hiro-global/*train*.yaml"
+    )
     for file in downscaling_files:
         validate_config(file, DownscalingTrainConfig)
 

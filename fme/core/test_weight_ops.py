@@ -116,21 +116,18 @@ class NestedModule1(nn.Module):
 @pytest.mark.parametrize(
     "include, exclude, expected_applied, expected_error",
     [
-        pytest.param(["*"], [], ["weight", "nested.weight"], None, id="include all"),
+        pytest.param(["*"], None, ["weight", "nested.weight"], None, id="include all"),
+        pytest.param([], [], ["weight", "nested.weight"], None, id="exclude none"),
         pytest.param([], ["*"], [], None, id="exclude all"),
-        pytest.param(["weight"], ["nested.*"], ["weight"], None, id="weight included"),
-        pytest.param(["*"], ["nested.*"], [], ValueError, id="nested param in both"),
-        pytest.param(["*"], ["weight"], [], ValueError, id="* include with an exclude"),
-        pytest.param([], ["weight"], [], ValueError, id="missing weight using exclude"),
-        pytest.param(["weight"], [], [], ValueError, id="missing weight using include"),
+        pytest.param(["weight"], None, ["weight"], None, id="weight included"),
         pytest.param(
-            ["*.weight"], [], [], ValueError, id="mising weight using wildcard include"
+            ["weight"], ["nested.*"], [], ValueError, id="both include and exclude"
         ),
     ],
 )
 def test_apply_copy_weights_config(
     include: list[str],
-    exclude: list[str],
+    exclude: list[str] | None,
     expected_applied: list[str],
     expected_error: type[Exception] | None,
 ):

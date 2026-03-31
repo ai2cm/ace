@@ -1,22 +1,25 @@
 import copy
 import datetime
 from collections.abc import Iterable, Mapping, Sequence
-from math import ceil
 from pathlib import Path
 
 import cftime
 import numpy as np
+import numpy.typing as npt
 import torch
 import xarray as xr
 from netCDF4 import Dataset
 
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
+from fme.ace.inference.data_writer.raw import infer_calendar
 from fme.ace.inference.data_writer.utils import (
     DIM_INFO_HEALPIX,
     DIM_INFO_LATLON,
     get_all_names,
 )
+from fme.core.cloud import is_local
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.writer import DATETIME_ENCODING_UNITS
 
 LEAD_TIME_DIM = "time"
 LEAD_TIME_UNITS = "months"
@@ -25,11 +28,6 @@ INIT_TIME = "init_time"
 VALID_TIME = "valid_time"
 TIME_UNITS = "days since 1970-01-01 00:00:00"
 COUNTS = "counts"
-
-
-def months_for_timesteps(n_timesteps: int, timestep: datetime.timedelta) -> int:
-    steps_per_day = datetime.timedelta(days=1) / timestep
-    return ceil(n_timesteps * (12.0 / (365.24 * steps_per_day))) + 2
 
 
 class PairedMonthlyDataWriter:
@@ -43,7 +41,7 @@ class PairedMonthlyDataWriter:
     def __init__(
         self,
         path: str,
-        n_samples: int,
+        initial_condition_times: npt.NDArray[cftime.datetime],
         n_timesteps: int,
         timestep: datetime.timedelta,
         save_names: Sequence[str] | None,
@@ -51,12 +49,10 @@ class PairedMonthlyDataWriter:
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
     ):
-        n_months = months_for_timesteps(n_timesteps, timestep)
         self._target_writer = MonthlyDataWriter(
             path=path,
             label="monthly_mean_target",
-            n_samples=n_samples,
-            n_months=n_months,
+            initial_condition_times=initial_condition_times,
             save_names=save_names,
             variable_metadata=variable_metadata,
             coords=coords,
@@ -65,8 +61,7 @@ class PairedMonthlyDataWriter:
         self._prediction_writer = MonthlyDataWriter(
             path=path,
             label="monthly_mean_predictions",
-            n_samples=n_samples,
-            n_months=n_months,
+            initial_condition_times=initial_condition_times,
             save_names=save_names,
             variable_metadata=variable_metadata,
             coords=coords,
@@ -102,8 +97,7 @@ class MonthlyDataWriter:
         self,
         path: str,
         label: str,
-        n_samples: int,
-        n_months: int,
+        initial_condition_times: npt.NDArray[cftime.datetime],
         save_names: Sequence[str] | None,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
@@ -113,8 +107,8 @@ class MonthlyDataWriter:
         Args:
             path: Directory to write netCDF file(s).
             label: Label to append to the filename.
-            n_samples: Number of samples to write to the file, each sample being
-                an ensemble member.
+            initial_condition_times: 1D array of initial condition times
+                (start time for each inference run).
             n_months: Number of months to write to the file.
             save_names: Names of variables to save in the predictions netcdf file.
                 If None, all predicted variables will be saved.
@@ -122,18 +116,27 @@ class MonthlyDataWriter:
             coords: Coordinate data to be written to the file.
             dataset_metadata: Metadata for the dataset.
         """
+        if not is_local(path):
+            raise ValueError("MonthlyDataWriter only supports local file systems.")
         filename = str(Path(path) / f"{label}.nc")
+        n_initial_conditions = len(initial_condition_times)
+        calendar = infer_calendar(initial_condition_times)
         self._save_names = save_names
         self.variable_metadata = variable_metadata
         self.coords = coords
         self.dataset = Dataset(filename, "w", format="NETCDF4")
-        self.dataset.createDimension(LEAD_TIME_DIM, n_months)
+        self.dataset.createDimension(LEAD_TIME_DIM, None)  # unlimited dimension
         self.dataset.createVariable(LEAD_TIME_DIM, "i8", (LEAD_TIME_DIM,))
         self.dataset.variables[LEAD_TIME_DIM].units = LEAD_TIME_UNITS
-        self.dataset.variables[LEAD_TIME_DIM][:] = np.arange(n_months)
-        self.dataset.createDimension(ENSEMBLE_DIM, n_samples)
+        self.dataset.createDimension(ENSEMBLE_DIM, n_initial_conditions)
         self.dataset.createVariable(INIT_TIME, "i8", (ENSEMBLE_DIM,))
-        self.dataset.variables[INIT_TIME].units = TIME_UNITS
+        self.dataset.variables[INIT_TIME].units = DATETIME_ENCODING_UNITS
+        self.dataset.variables[INIT_TIME].calendar = calendar
+        self.dataset.variables[INIT_TIME][:] = cftime.date2num(
+            initial_condition_times,
+            units=self.dataset.variables[INIT_TIME].units,
+            calendar=self.dataset.variables[INIT_TIME].calendar,
+        )
         self.dataset.createVariable(COUNTS, "i8", (ENSEMBLE_DIM, LEAD_TIME_DIM))
         self.dataset.createVariable(
             VALID_TIME,
@@ -144,36 +147,23 @@ class MonthlyDataWriter:
             ),
         )
         self.dataset.variables[VALID_TIME].units = TIME_UNITS
-        self.dataset.variables[COUNTS][:] = 0
+        self.dataset.variables[VALID_TIME].calendar = calendar
         dataset_metadata = copy.copy(dataset_metadata)
         dataset_metadata.title = f"ACE {label.replace('_', ' ')} data file"
         for key, value in dataset_metadata.as_flat_str_dict().items():
             self.dataset.setncattr(key, value)
-        self._init_years = np.full([n_samples], -1, dtype=int)
-        self._init_months = np.full([n_samples], -1, dtype=int)
+        self._init_years = np.full([n_initial_conditions], -1, dtype=int)
+        self._init_months = np.full([n_initial_conditions], -1, dtype=int)
         self._dataset_dims_created = False
 
     def _get_initial_year_and_month(
         self,
         years: np.ndarray,
         months: np.ndarray,
-        calendar: str,
     ) -> tuple[np.ndarray, np.ndarray]:
-        reference_date = cftime.datetime(1970, 1, 1, calendar=calendar)
         if self._init_years[0] == -1:
             self._init_years[:] = years
             self._init_months[:] = months
-            n_months = self.dataset.variables[LEAD_TIME_DIM].shape[0]
-            days_since_reference = get_days_since_reference(
-                years=years,
-                months=months,
-                n_months=n_months,
-                reference_date=reference_date,
-                calendar=calendar,
-            )
-            self.dataset.variables[INIT_TIME][:] = days_since_reference[:, 0]
-            # use the 15th of each month, which is 14 days into the month
-            self.dataset.variables[VALID_TIME][:, :] = days_since_reference + 14
         return (self._init_years, self._init_months)
 
     def _get_month_indices(self, batch_time: xr.DataArray) -> np.ndarray:
@@ -191,12 +181,11 @@ class MonthlyDataWriter:
         Returns:
             Month indices for the batch of data.
         """
-        calendar = batch_time.dt.calendar
         years = batch_time.dt.year.values
         # datetime months are 1-indexed, we want 0-indexed
         months = batch_time.dt.month.values - 1
         init_years, init_months = self._get_initial_year_and_month(
-            years=years[:, 0], months=months[:, 0], calendar=calendar
+            years=years[:, 0], months=months[:, 0]
         )
         return 12 * (years - init_years[:, None]) + (months - init_months[:, None])
 
@@ -204,6 +193,37 @@ class MonthlyDataWriter:
         self, *data_varnames: Iterable[str]
     ) -> Iterable[str]:
         return get_all_names(*data_varnames, allowlist=self._save_names)
+
+    def _extend_lead_time(self, old_size: int, new_size: int):
+        lead_time = self.dataset.variables[LEAD_TIME_DIM]
+        lead_time[old_size:new_size] = np.arange(old_size, new_size)
+
+    def _extend_valid_time(self, old_size: int, new_size: int):
+        n_months = new_size - old_size
+        if n_months > 0:
+            valid_time = self.dataset.variables[VALID_TIME]
+            calendar = valid_time.calendar
+            reference_date = cftime.datetime(1970, 1, 1, calendar=calendar)
+            days_since_reference = get_days_since_reference(
+                years=self._init_years,
+                months=self._init_months,
+                n_months=n_months,
+                reference_date=reference_date,
+                calendar=calendar,
+                month_offset=old_size,
+            )
+            # use the 15th of each month, which is 14 days into the month
+            valid_time[:, old_size:new_size] = days_since_reference + 14
+
+    def _extend_variable(
+        self,
+        variable_name: str,
+        old_size: int,
+        new_size: int,
+        initial_value: int | float,
+    ):
+        variable = self.dataset.variables[variable_name]
+        variable[:, old_size:new_size] = initial_value
 
     def append_batch(
         self,
@@ -249,6 +269,14 @@ class MonthlyDataWriter:
         months = self._get_month_indices(batch_time)
         month_min = np.min(months)
         month_range = np.max(months) - month_min + 1
+
+        old_size = self.dataset.variables[LEAD_TIME_DIM].size
+        new_size = month_min + month_range
+
+        self._extend_lead_time(old_size, new_size)
+        self._extend_valid_time(old_size, new_size)
+        self._extend_variable(COUNTS, old_size, new_size, initial_value=0)
+
         count_data = self.dataset.variables[COUNTS][
             :, month_min : month_min + month_range
         ]
@@ -261,7 +289,6 @@ class MonthlyDataWriter:
                     dims,
                     fill_value=np.nan,
                 )
-                self.dataset.variables[variable_name][:] = 0.0
                 if variable_name in self.variable_metadata:
                     self.dataset.variables[
                         variable_name
@@ -279,6 +306,7 @@ class MonthlyDataWriter:
             # Have to extract the data and write it back as `.at` does not play nicely
             # with netCDF4
             # We pull just the month subset we need for speed reasons
+            self._extend_variable(variable_name, old_size, new_size, initial_value=0.0)
             month_data = self.dataset.variables[variable_name][
                 :, month_min : month_min + month_range
             ]
@@ -370,6 +398,7 @@ def get_days_since_reference(
     reference_date: cftime.datetime,
     n_months: int,
     calendar: str,
+    month_offset: int = 0,
 ) -> np.ndarray:
     """
     Get the days since a reference date for each month.
@@ -380,8 +409,10 @@ def get_days_since_reference(
         reference_date: Reference date for the calendar.
         n_months: Number of months to compute starting at each sample (year, month).
         calendar: Calendar to use.
+        month_offset: Optional offset to enable computing days since the reference for
+            a range of elapsed months that does not start at zero (default 0).
     """
-    months_elapsed = np.arange(n_months)
+    months_elapsed = np.arange(month_offset, month_offset + n_months)
     calendar_month = (months[:, None] + months_elapsed[None, :]) % 12
     calendar_year = years[:, None] + (months[:, None] + months_elapsed[None, :]) // 12
     days_since_reference = np.zeros_like(calendar_month, dtype=np.int64)

@@ -1,11 +1,9 @@
 import abc
 import dataclasses
-import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from typing import Any, ClassVar, Self, TypeVar, final
 
-# we use Type to distinguish from type attr of StepSelector
-from typing import Any, ClassVar, Type, TypeVar, cast, final  # noqa: UP035
-
+import dacite
 import torch
 from torch import nn
 
@@ -13,6 +11,7 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
 from fme.core.registry.registry import Registry
+from fme.core.step.args import StepArgs
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -107,6 +106,10 @@ class StepConfigABC(abc.ABC):
     def get_ocean(self) -> OceanConfig | None:
         pass
 
+    def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
+        """Replace prescribed prognostic names (e.g. when loading from checkpoint)."""
+        pass
+
     @abc.abstractmethod
     def load(self):
         """
@@ -114,27 +117,26 @@ class StepConfigABC(abc.ABC):
         """
         pass
 
-
-T = TypeVar("T", bound=StepConfigABC)
+    @classmethod
+    def from_state(cls, state: Mapping[str, Any]) -> Self:
+        return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
 
 
 @dataclasses.dataclass
 class StepSelector(StepConfigABC):
     type: str
     config: dict[str, Any]
-    registry: ClassVar[Registry] = Registry()
+    registry: ClassVar[Registry[StepConfigABC]] = Registry[StepConfigABC]()
 
     def __post_init__(self):
-        self._step_config_instance: StepConfigABC = cast(
-            StepConfigABC, self.registry.get(self.type, self.config)
-        )
+        self._step_config_instance = self.registry.get(self.type, self.config)
 
     @property
     def n_ic_timesteps(self) -> int:
         return self._step_config_instance.n_ic_timesteps
 
     @classmethod
-    def register(cls, name: str) -> Callable[[Type[T]], Type[T]]:  # noqa: UP006
+    def register(cls, name: str):
         return cls.registry.register(name)
 
     def get_step(
@@ -206,12 +208,16 @@ class StepSelector(StepConfigABC):
     def get_ocean(self) -> OceanConfig | None:
         return self._step_config_instance.get_ocean()
 
+    def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
+        self._step_config_instance.replace_prescribed_prognostic_names(names)
+        self.config = dataclasses.asdict(self._step_config_instance)
+
     def load(self):
         self._step_config_instance.load()
         self.config = dataclasses.asdict(self._step_config_instance)
 
 
-class StepABC(abc.ABC, nn.Module):
+class StepABC(abc.ABC):
     SelfType = TypeVar("SelfType", bound="StepABC")
 
     @property
@@ -317,49 +323,20 @@ class StepABC(abc.ABC, nn.Module):
     @abc.abstractmethod
     def step(
         self: SelfType,
-        input: TensorMapping,
-        next_step_input_data: TensorMapping,
+        args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> TensorDict:
         """
         Step the model forward one timestep given input data.
 
         Args:
-            input: Mapping from variable name to tensor of shape
-                [n_batch, n_lat, n_lon]. This data is used as input for pytorch
-                module(s) and is assumed to contain all input variables
-                and be denormalized.
-            next_step_input_data: Mapping from variable name to tensor of shape
-                [n_batch, n_lat, n_lon]. This must contain the necessary input
-                data at the output timestep, such as might be needed to prescribe
-                sea surface temperature or use a corrector.
+            args: The arguments to the step function.
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
             The denormalized output data at the next time step.
         """
         pass
-
-    @final
-    def forward(
-        self, input: TensorMapping, next_step_input_data: TensorMapping
-    ) -> TensorDict:
-        return self.step(input, next_step_input_data)
-
-    @final
-    def export(
-        self: SelfType,
-        input: TensorMapping,
-        next_step_input_data: TensorMapping,
-    ) -> torch.export.ExportedProgram:
-        """
-        Script the step function.
-        """
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", message=".*does not reference an nn.Module.*"
-            )
-            return torch.export.export(self, (input, next_step_input_data))
 
     @abc.abstractmethod
     def get_state(self) -> dict[str, Any]:

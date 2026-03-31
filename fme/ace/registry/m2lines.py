@@ -1,6 +1,6 @@
 import dataclasses
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 from fme.ace.models.graphcast import GRAPHCAST_AVAIL
 from fme.ace.models.graphcast.main import GraphCast
@@ -25,6 +25,7 @@ class SamudraBuilder(ModuleConfig):
     norm: str = "instance"
     norm_kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
     upscale_factor: int = 4
+    checkpoint_strategy: Literal["all", "simple"] | None = None
 
     def __post_init__(self):
         if "num_features" in self.norm_kwargs:
@@ -38,6 +39,8 @@ class SamudraBuilder(ModuleConfig):
         n_out_channels: int,
         dataset_info: DatasetInfo,
     ):
+        if len(dataset_info.all_labels) > 0:
+            raise ValueError("Samudra does not support labels")
         return Samudra(
             input_channels=n_in_channels,
             output_channels=n_out_channels,
@@ -48,6 +51,7 @@ class SamudraBuilder(ModuleConfig):
             norm=self.norm,
             norm_kwargs=self.norm_kwargs,
             upscale_factor=self.upscale_factor,
+            checkpoint_strategy=self.checkpoint_strategy,
         )
 
 

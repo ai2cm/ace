@@ -1,5 +1,5 @@
 runs:
-  2025-07-17-CM4-piControl-ocean-1deg-200yr: s3://emulators/ai2_colab/2024-11-01-CM4-pre-industrial-control-simulation/
+  2025-10-15-cm4-piControl-200yr-ocean-no-smoothing: s3://emulators/ai2_colab/2024-11-01-CM4-pre-industrial-control-simulation/
 data_output_directory: gs://leap-scratch/jpdunc23
 dataset_computation:
   shift_timestamps_to_avg_interval_midpoint: true
@@ -43,15 +43,15 @@ dask:
   cluster_options:
     worker_resource_allocation: "8CPU, 57.9Gi"
     idle_timeout_minutes: 10
-stats:
-  output_directory: /pscratch/sd/e/elynnwu/fme-dataset/2024-11-12-cm4-piControl-200yr-dataset-stats
-  start_date: "0200-01-01"
-  end_date: "0250-01-01"
-  data_type: CM4
-  beaker_dataset: not_used
 filesystem:
   protocol: s3
   storage_options:
     profile: ai2
     client_kwargs:
       endpoint_url: https://nyu1.osn.mghpcc.org
+stats:
+  output_directory: /dev/null
+  start_date: null
+  end_date: null
+  data_type: CM4
+  beaker_dataset: not_used

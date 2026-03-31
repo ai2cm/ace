@@ -2,13 +2,19 @@ import datetime
 import logging
 from collections import namedtuple
 
+import numpy as np
 import torch
+import xarray as xr
 
-from fme.ace.data_loading.gridded_data import SizedMap
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset_info import DatasetInfo
-from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
+from fme.core.generics.data import (
+    DataLoader,
+    GriddedDataABC,
+    InferenceDataABC,
+    SizedMap,
+)
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
 from fme.coupled.data_loading.data_typing import (
     CoupledCoords,
@@ -51,8 +57,12 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
     def loader(self) -> DataLoader[CoupledBatchData]:
         return self._get_gpu_loader(self._loader)
 
-    def subset_loader(self, start_batch: int) -> DataLoader[CoupledBatchData]:
-        return self._get_gpu_loader(self._loader.subset(start_batch))
+    def subset_loader(
+        self, start_batch: int | None = None, stop_batch: int | None = None
+    ) -> DataLoader[CoupledBatchData]:
+        return self._get_gpu_loader(
+            self._loader.subset(start_batch=start_batch, stop_batch=stop_batch)
+        )
 
     def _get_gpu_loader(
         self, base_loader: DataLoader[CoupledBatchData]
@@ -126,10 +136,14 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
         """
         Set the epoch for the data loader sampler, if it is a distributed sampler.
         """
-        if self._sampler is not None and isinstance(
-            self._sampler, torch.utils.data.DistributedSampler
-        ):
-            self._sampler.set_epoch(epoch)
+        self._loader.set_epoch(epoch)
+
+    def alternate_shuffle(self):
+        """
+        Set the random shuffle of the data loader for the current epoch
+        to the "alternate" shuffle.
+        """
+        self._loader.alternate_shuffle()
 
     def log_info(self, name: str):
         logging.info(
@@ -235,3 +249,16 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
     @property
     def coords(self) -> CoupledCoords:
         return self._properties.coords
+
+    @property
+    def initial_time(self) -> xr.DataArray:
+        atmosphere_data = self.initial_condition.as_batch_data().atmosphere_data
+        ocean_data = self.initial_condition.as_batch_data().ocean_data
+        atmosphere_initial_time = atmosphere_data.time.isel(time=0)
+        ocean_initial_time = ocean_data.time.isel(time=0)
+        np.testing.assert_array_equal(
+            atmosphere_initial_time,
+            ocean_initial_time,
+            err_msg="Atmosphere and ocean initial times must be the same",
+        )
+        return atmosphere_initial_time
