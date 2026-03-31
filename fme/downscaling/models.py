@@ -738,12 +738,10 @@ class CheckpointModelConfig:
                 self._rename.get(name, name)
                 for name in checkpoint_data["model"]["config"]["out_names"]
             ]
-            if "high_res_conditioning" in checkpoint_data["model"]["config"]:
+            high_res = checkpoint_data["model"]["config"].get("high_res_conditioning")
+            if high_res is not None:
                 checkpoint_data["model"]["config"]["high_res_conditioning"] = [
-                    self._rename.get(name, name)
-                    for name in checkpoint_data["model"]["config"][
-                        "high_res_conditioning"
-                    ]
+                    self._rename.get(name, name) for name in high_res
                 ]
             self._checkpoint_data = checkpoint_data
             self._checkpoint_is_loaded = True
