@@ -66,6 +66,7 @@ class LossVsNoiseAggregator:
             raise ValueError("n_bins must be >= 1")
         if log10_sigma_min >= log10_sigma_max:
             raise ValueError("log10_sigma_min must be less than log10_sigma_max")
+        self._dist = Distributed.get_instance()
 
         self._name = ensure_trailing_slash(name)
         self._n_bins = n_bins
@@ -139,33 +140,41 @@ class LossVsNoiseAggregator:
 
     def get_wandb(self, prefix: str = "") -> Mapping[str, Any]:
         prefix = ensure_trailing_slash(prefix)
-        if torch.sum(self._total_count) == 0:
+        total_sum = self._dist.reduce_sum(self._total_sum)
+        total_count = self._dist.reduce_sum(self._total_count)
+        if total_sum is None or total_count is None:
+            return {}
+        if torch.sum(total_count) == 0:
             return {}
 
         ret: dict[str, Any] = {}
-        total_count = self._total_count.numpy()
+        total_count_np = total_count.numpy()
         total_mean = np.divide(
-            self._total_sum.numpy(),
-            total_count,
-            out=np.zeros_like(self._total_sum.numpy()),
-            where=total_count > 0,
+            total_sum.numpy(),
+            total_count_np,
+            out=np.zeros_like(total_sum.numpy()),
+            where=total_count_np > 0,
         )
         ret[f"{prefix}{self._name}total"] = self._plot_binned(
             y_values=total_mean,
-            counts=total_count,
+            counts=total_count_np,
             title="Total weighted loss vs noise",
         )
         for name in sorted(self._channel_sum):
-            count = self._channel_count[name].numpy()
+            ch_sum = self._dist.reduce_sum(self._channel_sum[name])
+            ch_count = self._dist.reduce_sum(self._channel_count[name])
+            if ch_sum is None or ch_count is None:
+                continue
+            ch_count_np = ch_count.numpy()
             mean = np.divide(
-                self._channel_sum[name].numpy(),
-                count,
-                out=np.zeros_like(self._channel_sum[name].numpy()),
-                where=count > 0,
+                ch_sum.numpy(),
+                ch_count_np,
+                out=np.zeros_like(ch_sum.numpy()),
+                where=ch_count_np > 0,
             )
             ret[f"{prefix}{self._name}{name}"] = self._plot_binned(
                 y_values=mean,
-                counts=count,
+                counts=ch_count_np,
                 title=f"{name} weighted loss vs noise",
             )
         return ret
