@@ -7,6 +7,7 @@ import torch
 
 from fme.core.histogram import (
     ComparedDynamicHistograms,
+    ComparedDynamicTailsHistograms,
     DynamicHistogram,
     DynamicHistogramAggregator,
     _normalize_histogram,
@@ -277,3 +278,33 @@ def test_dynamic_histogram_aggregator(shape, percentiles):
         assert var in ds
         assert f"{var}_bin_edges" in ds
         assert len(ds[var]) == n_bins
+
+
+def test_compared_dynamic_tails_histograms():
+    n_bins = 300
+    histogram = ComparedDynamicTailsHistograms(
+        n_bins,
+        percentiles=[99.9999],
+        two_tailed_variables=["y"],
+        left_tailed_variables=["z"],
+    )
+    shape = (2, 8, 16)
+    target = {
+        "x": torch.ones(*shape),
+        "y": torch.zeros(*shape),
+        "z": torch.zeros(*shape),
+    }
+    prediction = {
+        "x": torch.rand(*shape),
+        "y": torch.rand(*shape),
+        "z": torch.rand(*shape),
+    }
+    histogram.record_batch(target, prediction)
+    wandb_result = histogram.get_wandb()
+
+    for var in ["x", "y"]:
+        assert f"99.9999th-percentile/{var}" in wandb_result
+        assert f"prediction_frac_of_target/99.9999th-percentile/{var}" in wandb_result
+    for var in ["y", "z"]:
+        assert f"0.0001th-percentile/{var}" in wandb_result
+        assert f"prediction_frac_of_target/0.0001th-percentile/{var}" in wandb_result
