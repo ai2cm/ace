@@ -6,6 +6,7 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import wandb
 import xarray as xr
 
 from fme.ace.aggregator.one_step.snapshot import (
@@ -118,7 +119,7 @@ class LossVsNoiseAggregator:
                 )
             per_channel[name] = channel_loss[in_range]
 
-        stacked = torch.stack([value for value in per_channel.values()], dim=-1)
+        stacked = torch.stack(list(per_channel.values()), dim=-1)
         total_loss = torch.mean(stacked, dim=-1)
         self._total_sum.scatter_add_(0, bin_indices, total_loss)
         self._total_count.scatter_add_(
@@ -130,13 +131,37 @@ class LossVsNoiseAggregator:
     def _plot_binned(self, y_values: np.ndarray, counts: np.ndarray, title: str) -> Any:
         fig, ax = plt.subplots()
         mask = counts > 0
-        ax.plot(self._bin_centers[mask], y_values[mask], marker="o", linewidth=1.0)
+        ax.plot(
+            self._bin_centers[mask],
+            y_values[mask],
+            marker="o",
+            linewidth=1.0,
+            label="loss",
+        )
         ax.set_xlabel("log10(sigma)")
         ax.set_ylabel("mean weighted loss")
         ax.set_title(title)
         ax.grid(True, alpha=0.3)
+
+        ax2 = ax.twinx()
+        bin_width = float(self._bin_centers[1] - self._bin_centers[0])
+        ax2.bar(
+            self._bin_centers[mask],
+            counts[mask].astype(float),
+            width=bin_width * 0.6,
+            alpha=0.25,
+            color="gray",
+            label="bin count",
+        )
+        ax2.set_ylabel("bin count")
+
+        lines, labels = ax.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax.legend(lines + lines2, labels + labels2)
+
+        image = wandb.Image(fig)
         plt.close(fig)
-        return fig
+        return image
 
     def get_wandb(self, prefix: str = "") -> Mapping[str, Any]:
         prefix = ensure_trailing_slash(prefix)

@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 import torch
+import wandb
 import xarray as xr
 
 from fme.core import get_device, metrics
@@ -241,7 +242,7 @@ def test_loss_vs_noise_aggregator_get_wandb(prefix: str):
         f"{prefix}/metrics/loss_vs_noise/y",
     }
     for value in logs.values():
-        assert hasattr(value, "savefig")
+        assert isinstance(value, wandb.Image)
 
 
 @pytest.mark.parametrize("n_latent_steps", [0, 2])
