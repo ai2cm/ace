@@ -236,7 +236,7 @@ def test_loss_vs_noise_aggregator_get_wandb(prefix: str):
 
     logs = aggregator.get_wandb(prefix=prefix)
     assert set(logs.keys()) == {
-        f"{prefix}/metrics/loss_vs_noise/total",
+        f"{prefix}/metrics/loss_vs_noise/channel_mean",
         f"{prefix}/metrics/loss_vs_noise/x",
         f"{prefix}/metrics/loss_vs_noise/y",
     }

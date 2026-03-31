@@ -155,10 +155,10 @@ class LossVsNoiseAggregator:
             out=np.zeros_like(total_sum.numpy()),
             where=total_count_np > 0,
         )
-        ret[f"{prefix}{self._name}total"] = self._plot_binned(
+        ret[f"{prefix}{self._name}channel_mean"] = self._plot_binned(
             y_values=total_mean,
             counts=total_count_np,
-            title="Total weighted loss vs noise",
+            title="Channel-mean weighted loss vs noise",
         )
         for name in sorted(self._channel_sum):
             ch_sum = self._dist.reduce_sum(self._channel_sum[name])
