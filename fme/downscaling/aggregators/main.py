@@ -60,7 +60,7 @@ class LossVsNoiseAggregator:
         name: str = "metrics/loss_vs_noise",
         n_bins: int = 40,
         log10_sigma_min: float = -3.0,
-        log10_sigma_max: float = 3.2,
+        log10_sigma_max: float = 3.5,
     ) -> None:
         if n_bins < 1:
             raise ValueError("n_bins must be >= 1")
@@ -69,6 +69,8 @@ class LossVsNoiseAggregator:
 
         self._name = ensure_trailing_slash(name)
         self._n_bins = n_bins
+        self._log10_sigma_min = log10_sigma_min
+        self._log10_sigma_max = log10_sigma_max
         edges = torch.linspace(log10_sigma_min, log10_sigma_max, n_bins + 1)
         self._inner_edges = edges[1:-1]
         self._bin_centers = ((edges[:-1] + edges[1:]) / 2).numpy()
@@ -98,16 +100,22 @@ class LossVsNoiseAggregator:
         if torch.any(sigma <= 0):
             raise ValueError("Sigma must be strictly positive for log10 binning")
         log_sigma = torch.log10(sigma)
-        # Indices in [0, n_bins-1], with out-of-range values placed in edge bins.
-        bin_indices = torch.bucketize(log_sigma, self._inner_edges)
+        in_range = (log_sigma >= self._log10_sigma_min) & (
+            log_sigma <= self._log10_sigma_max
+        )
+        if not torch.any(in_range):
+            return
+        # Indices in [0, n_bins-1] for values within the configured sigma range.
+        bin_indices = torch.bucketize(log_sigma[in_range], self._inner_edges)
 
         per_channel: TensorDict = {}
         for name, loss in outputs.per_sample_channel_loss.items():
-            per_channel[name] = loss.detach().flatten().cpu()
-            if per_channel[name].shape != sigma.shape:
+            channel_loss = loss.detach().flatten().cpu()
+            if channel_loss.shape != sigma.shape:
                 raise ValueError(
                     "Expected per-sample channel losses and sigma to share batch shape"
                 )
+            per_channel[name] = channel_loss[in_range]
 
         stacked = torch.stack([value for value in per_channel.values()], dim=-1)
         total_loss = torch.mean(stacked, dim=-1)
