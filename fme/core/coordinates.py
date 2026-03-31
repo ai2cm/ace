@@ -340,10 +340,18 @@ class DepthCoordinate(VerticalCoordinate):
                 f"{self.mask.shape}."
             )
         self._dz = dz_from_idepth(self.idepth, self.mask, self.deptho)
+        if self.deptho is not None:
+            self._sea_floor_depth = self.deptho
+        else:
+            self._sea_floor_depth = self._dz.sum(dim=-1)
 
     @property
     def dz(self) -> torch.Tensor:
         return self._dz
+
+    @property
+    def sea_floor_depth(self) -> torch.Tensor:
+        return self._sea_floor_depth
 
     def __len__(self):
         """The number of vertical layer interfaces."""
