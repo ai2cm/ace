@@ -351,7 +351,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     timer.stop("initialization")
     logging.info("Starting inference")
-    record_logs = get_record_to_wandb(label="inference")
+    logger = get_record_to_wandb(label="inference")
     if config.prediction_loader is not None:
         prediction_data = get_inference_data(
             config=config.prediction_loader,
@@ -372,8 +372,8 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             target_data=data,
             deriver=deriver,
             writer=writer,
-            record_logs=record_logs,
-            restrict_to_all_names=stepper_config.all_names,
+            record_logs=logger.log,
+            all_names=stepper_config.all_names,
         )
     else:
         run_inference(
@@ -381,7 +381,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             data=data,
             aggregator=aggregator,
             writer=writer,
-            record_logs=record_logs,
+            record_logs=logger.log,
         )
 
     timer.start("final_writer_flush")
@@ -406,7 +406,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     summary_logs = {
         "total_steps_per_second": total_steps_per_second,
-        **timer.get_durations(),
         **aggregator.get_summary_logs(),
     }
-    record_logs([summary_logs])
+    logger.log_to_current_step(summary_logs)
+    logger.log_to_current_step(timer.get_durations(), label="")
