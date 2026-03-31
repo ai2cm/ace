@@ -390,10 +390,10 @@ class DiffusionModel:
                 for i, name in enumerate(self.out_packer.names)
             }
             per_sample_channel_loss = {
-                name: torch.mean(weighted_loss[:, i, :, :], dim=(-2, -1)).detach()
+                name: torch.mean(weighted_loss[:, i, :, :], dim=(-2, -1))
                 for i, name in enumerate(self.out_packer.names)
             }
-            sigma = conditioned_target.sigma[:, 0, 0, 0].detach()
+            sigma = conditioned_target.sigma[:, 0, 0, 0]
 
         if self.config.predict_residual:
             denoised_norm = denoised_norm + base_prediction
