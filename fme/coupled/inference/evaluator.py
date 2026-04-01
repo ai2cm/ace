@@ -7,6 +7,7 @@ import dacite
 import torch
 
 import fme
+from fme.ace.stepper import StepperOverrideConfig, apply_stepper_override
 from fme.ace.stepper import load_stepper as load_single_stepper
 from fme.ace.stepper import load_stepper_config as load_single_stepper_config
 from fme.core.cli import prepare_config, prepare_directory
@@ -61,6 +62,9 @@ class StandaloneComponentCheckpointsConfig:
         atmosphere: The atmosphere component configuration. The stepper
             configuration must include 'ocean'.
         sst_name: Name of the sea surface temperature field in the ocean data.
+        ocean_stepper_override: Optional overrides when loading the ocean Stepper.
+        atmosphere_stepper_override: Optional overrides when loading the atmosphere
+            Stepper (e.g. prescribed_prognostic_names for inference).
 
     """
 
@@ -68,6 +72,8 @@ class StandaloneComponentCheckpointsConfig:
     atmosphere: StandaloneComponentConfig
     sst_name: str = "sst"
     ocean_fraction_prediction: CoupledOceanFractionConfig | None = None
+    ocean_stepper_override: StepperOverrideConfig | None = None
+    atmosphere_stepper_override: StepperOverrideConfig | None = None
 
     def load_stepper_config(self) -> CoupledStepperConfig:
         return CoupledStepperConfig(
@@ -84,8 +90,10 @@ class StandaloneComponentCheckpointsConfig:
         )
 
     def load_stepper(self) -> CoupledStepper:
-        ocean = load_single_stepper(self.ocean.path)
-        atmosphere = load_single_stepper(self.atmosphere.path)
+        ocean = load_single_stepper(self.ocean.path, self.ocean_stepper_override)
+        atmosphere = load_single_stepper(
+            self.atmosphere.path, self.atmosphere_stepper_override
+        )
         dataset_info = CoupledDatasetInfo(
             ocean=ocean.training_dataset_info,
             atmosphere=atmosphere.training_dataset_info,
@@ -133,12 +141,20 @@ def load_stepper_config(
 
 def load_stepper(
     checkpoint_path: str | pathlib.Path | StandaloneComponentCheckpointsConfig,
+    atmosphere_stepper_override: StepperOverrideConfig | None = None,
+    ocean_stepper_override: StepperOverrideConfig | None = None,
 ) -> CoupledStepper:
     """Load a coupled stepper.
 
     Args:
         checkpoint_path: The path to the serialized CoupledStepper checkpoint, or a
             StandaloneComponentCheckpointsConfig.
+        atmosphere_stepper_override: When loading a single coupled checkpoint, optional
+            overrides for the atmosphere Stepper (ignored for
+            StandaloneComponentCheckpointsConfig).
+        ocean_stepper_override: When loading a single coupled checkpoint, optional
+            overrides for the ocean Stepper (ignored for
+            StandaloneComponentCheckpointsConfig).
 
     Returns:
         The CoupledStepper serialized in the checkpoint or constructed from the
@@ -154,7 +170,12 @@ def load_stepper(
         )
         return checkpoint_path.load_stepper()
 
-    return load_coupled_stepper(checkpoint_path)
+    stepper = load_coupled_stepper(checkpoint_path)
+    if atmosphere_stepper_override is not None:
+        apply_stepper_override(stepper.atmosphere, atmosphere_stepper_override)
+    if ocean_stepper_override is not None:
+        apply_stepper_override(stepper.ocean, ocean_stepper_override)
+    return stepper
 
 
 @dataclasses.dataclass
