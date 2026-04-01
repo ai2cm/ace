@@ -1,0 +1,120 @@
+experiment_dir: /results
+n_coupled_steps: 146
+coupled_steps_in_memory: 1
+checkpoint_path: /ckpt.tar
+aggregator:
+  log_histograms: true
+ocean_stepper_override:
+  prescribed_prognostic_names:
+  - thetao_11
+  - thetao_12
+  - thetao_13
+  - thetao_14
+  - thetao_15
+  - thetao_16
+  - thetao_17
+  - thetao_18
+  - so_11
+  - so_12
+  - so_13
+  - so_14
+  - so_15
+  - so_16
+  - so_17
+  - so_18
+  - uo_11
+  - uo_12
+  - uo_13
+  - uo_14
+  - uo_15
+  - uo_16
+  - uo_17
+  - uo_18
+  - vo_11
+  - vo_12
+  - vo_13
+  - vo_14
+  - vo_15
+  - vo_16
+  - vo_17
+  - vo_18
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: true
+    names:
+    - sst
+    - zos
+    - thetao_0
+    - thetao_1
+    - thetao_2
+    - thetao_3
+    - thetao_4
+    - thetao_5
+    - thetao_6
+    - vo_0
+    - vo_1
+    - vo_2
+    - vo_3
+    - vo_4
+    - vo_5
+    - vo_6
+    - uo_0
+    - uo_1
+    - uo_2
+    - uo_3
+    - uo_4
+    - uo_5
+    - uo_6
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: true
+    names:
+    - DLWRFsfc
+    - DSWRFsfc
+    - ULWRFsfc
+    - USWRFsfc
+    - LHTFLsfc
+    - SHTFLsfc
+    - PRATEsfc
+    - eastward_surface_wind_stress
+    - northward_surface_wind_stress
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
+loader:
+  num_data_workers: 1
+  dataset:
+    ocean:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2025-06-03-cm4-piControl-200yr-coupled-ocean.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2025-04-16-cm4-piControl-ocean-200yr-dataset.zarr
+        engine: zarr
+    atmosphere:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2025-06-03-cm4-piControl-200yr-coupled-interpolate_sst-atmosphere.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+        engine: zarr
+  start_indices:
+    times:
+    - '0319-01-01T00:00:00'
+    - '0319-01-31T00:00:00'
+    - '0319-03-02T00:00:00'
+    - '0319-04-01T00:00:00'
+    - '0319-05-01T00:00:00'
+    - '0319-05-31T00:00:00'
+    - '0319-06-30T00:00:00'
+    - '0319-07-30T00:00:00'
+    - '0319-09-03T00:00:00'
+    - '0319-10-03T00:00:00'
+    - '0319-11-02T00:00:00'
+    - '0319-12-02T00:00:00'

@@ -72,6 +72,42 @@ def make_config(year, times):
         "coupled_steps_in_memory": 1,
         "checkpoint_path": "/ckpt.tar",
         "aggregator": {"log_histograms": True},
+        "ocean_stepper_override": {
+            "prescribed_prognostic_names": [
+                "thetao_11",
+                "thetao_12",
+                "thetao_13",
+                "thetao_14",
+                "thetao_15",
+                "thetao_16",
+                "thetao_17",
+                "thetao_18",
+                "so_11",
+                "so_12",
+                "so_13",
+                "so_14",
+                "so_15",
+                "so_16",
+                "so_17",
+                "so_18",
+                "uo_11",
+                "uo_12",
+                "uo_13",
+                "uo_14",
+                "uo_15",
+                "uo_16",
+                "uo_17",
+                "uo_18",
+                "vo_11",
+                "vo_12",
+                "vo_13",
+                "vo_14",
+                "vo_15",
+                "vo_16",
+                "vo_17",
+                "vo_18",
+            ],
+        },
         "data_writer": {
             "ocean": {
                 "save_prediction_files": False,
@@ -190,7 +226,9 @@ def main():
 
         config = make_config(year, times)
 
-        filename = os.path.join(OUTPUT_DIR, f"evaluator-config-yr{year:04d}.yaml")
+        filename = os.path.join(
+            OUTPUT_DIR, f"evaluator-config-override-deep-ocean-yr{year:04d}.yaml"
+        )
 
         with open(filename, "w") as f:
             yaml.dump(config, f, sort_keys=False)
