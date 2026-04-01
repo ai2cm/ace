@@ -370,6 +370,30 @@ class CoupledStepperConfig:
                 self.ocean_fraction_prediction.land_fraction_name
             )
 
+    def refresh_ocean_forcing_window_names(self) -> None:
+        """Recompute ocean forcing window names after the ocean stepper config is
+        mutated (e.g. inference-time ``prescribed_prognostic_names``).
+        """
+        prescribed_ocean = _get_prescribed_prognostic_names_from_step(
+            self.ocean.stepper.step
+        )
+        self._ocean_forcing_window_names = list(
+            set(self._ocean_forcing_exogenous_names)
+            .difference(set(self._shared_forcing_exogenous_names))
+            .union(prescribed_ocean)
+        )
+
+    def refresh_atmosphere_forcing_window_names(self) -> None:
+        """Recompute atmosphere forcing window names after the atmosphere stepper
+        config is mutated (e.g. inference-time prescribed prognostics).
+        """
+        prescribed_atmosphere = _get_prescribed_prognostic_names_from_step(
+            self.atmosphere.stepper.step
+        )
+        self._atmosphere_forcing_window_names = list(
+            set(self._atmosphere_forcing_exogenous_names).union(prescribed_atmosphere)
+        )
+
     @property
     def timestep(self) -> datetime.timedelta:
         # the "coupled timestep" is the same as the ocean's
