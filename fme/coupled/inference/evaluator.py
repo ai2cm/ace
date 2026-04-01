@@ -250,6 +250,11 @@ def load_stepper(
         apply_stepper_override(stepper.atmosphere, atmosphere_stepper_override)
     if ocean_stepper_override is not None:
         apply_stepper_override(stepper.ocean, ocean_stepper_override)
+    # Overrides mutate shared StepperConfig; refresh cached forcing-window
+    # name lists on CoupledStepperConfig
+    # (see sync_coupled_stepper_runtime_stepper_configs).
+    stepper._config.refresh_ocean_forcing_window_names()
+    stepper._config.refresh_atmosphere_forcing_window_names()
     return stepper
 
 

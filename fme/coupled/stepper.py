@@ -1698,11 +1698,27 @@ class CoupledTrainStepper(
         return stepped
 
 
+def sync_coupled_stepper_runtime_stepper_configs(stepper: CoupledStepper) -> None:
+    """Align nested ``StepperConfig`` on ``CoupledStepperConfig`` with loaded steppers.
+
+    Serialized coupled checkpoints store ``CoupledStepperConfig`` and each
+    ``Stepper`` state separately; after ``from_state`` the nested component
+    ``StepperConfig`` objects may differ from ``stepper.ocean._config`` /
+    ``stepper.atmosphere._config``. Inference overrides mutate only the latter, so
+    :meth:`CoupledStepper._get_ocean_forcings` must read forcing-window names from
+    the same config objects that ``predict_generator`` uses.
+    """
+    stepper._config.ocean.stepper = stepper.ocean._config
+    stepper._config.atmosphere.stepper = stepper.atmosphere._config
+
+
 def load_coupled_stepper(checkpoint_path: str | pathlib.Path) -> CoupledStepper:
     logging.info(f"Loading trained coupled model checkpoint from {checkpoint_path}")
     checkpoint = torch.load(
         checkpoint_path, map_location=fme.get_device(), weights_only=False
     )
     stepper = CoupledStepper.from_state(checkpoint["stepper"])
-
+    sync_coupled_stepper_runtime_stepper_configs(stepper)
+    stepper._config.refresh_ocean_forcing_window_names()
+    stepper._config.refresh_atmosphere_forcing_window_names()
     return stepper
