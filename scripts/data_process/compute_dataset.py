@@ -271,6 +271,8 @@ class DatasetComputationConfig:
         mask_soil_moisture: (optional) whether to mask soil moisture content using soil
             temperature. This is useful for CM4 dataset, where soil moisture content is
             zero instead of NaN over the oceans.
+        CO2_concentration: (optional) CO2 concentration in volume mixing ratio.
+            This is used for E3SM dataset to add time-invariant CO2 concentration.
     """
 
     reference_vertical_coordinate_file: str
@@ -295,6 +297,7 @@ class DatasetComputationConfig:
     validate_vertical_coarsening_indices_land: bool = True
     reference_vertical_coordinate_file_land: Optional[str] = None
     mask_soil_moisture: bool = False
+    CO2_concentration: Optional[float] = None
 
 
 @dataclasses.dataclass
@@ -320,7 +323,7 @@ class DatasetConfig:
             data = yaml.safe_load(file)
 
         return dacite.from_dict(
-            data_class=cls, data=data, config=dacite.Config(cast=[tuple], strict=True)
+            data_class=cls, data=data, config=dacite.Config(cast=[tuple])
         )
 
 

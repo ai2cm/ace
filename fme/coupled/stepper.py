@@ -1,8 +1,9 @@
+import contextlib
 import dataclasses
 import datetime
 import logging
 import pathlib
-from collections.abc import Generator, Iterable
+from collections.abc import Callable, Generator, Iterable
 from typing import Any, Literal
 
 import dacite
@@ -21,6 +22,8 @@ from fme.ace.stepper import (
     stack_list_of_tensor_dicts,
 )
 from fme.ace.stepper.parameter_init import (
+    ParameterInitializationConfig,
+    ParameterInitializer,
     StepperWeightsAndHistory,
     Weights,
     WeightsAndHistoryLoader,
@@ -52,7 +55,7 @@ from fme.coupled.requirements import (
     CoupledDataRequirements,
     CoupledPrognosticStateDataRequirements,
 )
-from fme.coupled.typing_ import CoupledTensorMapping
+from fme.coupled.typing_ import CoupledNames, CoupledTensorMapping
 
 
 @dataclasses.dataclass
@@ -230,7 +233,6 @@ class CoupledStepperConfig:
             ocean fraction to replace the ocean fraction variable specified in the
             atmosphere's OceanConfig. If the atmosphere uses the ocean fraction as
             an ML forcing, the generated ocean fraction is also passed as an input.
-        parameter_init: The parameter initialization configuration.
 
     """
 
@@ -238,17 +240,16 @@ class CoupledStepperConfig:
     atmosphere: ComponentConfig
     sst_name: str = "sst"
     ocean_fraction_prediction: CoupledOceanFractionConfig | None = None
-    parameter_init: CoupledParameterInitConfig = dataclasses.field(
-        default_factory=lambda: CoupledParameterInitConfig()
-    )
 
     def __post_init__(self):
         self._validate_component_configs()
 
         atmosphere_ocean_config = self.atmosphere.stepper.get_ocean()
-        # this was already checked in _validate_component_configs, so an
-        # assertion will do fine here to appease mypy
-        assert atmosphere_ocean_config is not None
+        if atmosphere_ocean_config is None:
+            raise RuntimeError(
+                "atmosphere ocean config is None after validation; "
+                "this should not happen"
+            )
         self._atmosphere_ocean_config = atmosphere_ocean_config
 
         # set timesteps
@@ -386,6 +387,20 @@ class CoupledStepperConfig:
         return self._shared_forcing_exogenous_names
 
     @property
+    def all_names(self) -> CoupledNames:
+        """All variable names to log (outputs plus input-only forcings)."""
+        atmosphere_names = list(
+            set(
+                self.atmosphere.stepper.output_names
+                + self._atmosphere_forcing_exogenous_names
+            )
+        )
+        ocean_names = list(
+            set(self.ocean.stepper.output_names + self._ocean_forcing_exogenous_names)
+        )
+        return CoupledNames(ocean=ocean_names, atmosphere=atmosphere_names)
+
+    @property
     def atmosphere_to_ocean_forcing_names(self) -> list[str]:
         """Ocean forcing variables that are outputs of the atmosphere."""
         return self._atmosphere_to_ocean_forcing_names
@@ -396,17 +411,6 @@ class CoupledStepperConfig:
         return self._ocean_to_atmosphere_forcing_names
 
     def _validate_component_configs(self):
-        # validate parameter_init
-        if self.parameter_init.checkpoint_path is not None:
-            if (
-                self.atmosphere.stepper.parameter_init.weights_path is not None
-                or self.ocean.stepper.parameter_init.weights_path is not None
-            ):
-                raise ValueError(
-                    "Please specify CoupledParameterInitConfig.checkpoint_path or the "
-                    "component Steppers' ParameterInitializationConfig.weights_path, "
-                    "but not both."
-                )
         # validate atmosphere's OceanConfig
         atmosphere_ocean_config = self.atmosphere.stepper.get_ocean()
         if atmosphere_ocean_config is None:
@@ -553,7 +557,7 @@ class CoupledStepperConfig:
     def _get_ocean_stepper(
         self,
         dataset_info: DatasetInfo,
-        load_weights_and_history: WeightsAndHistoryLoader,
+        parameter_initializer: ParameterInitializer | None = None,
     ) -> Stepper:
         if dataset_info.timestep != self.ocean_timestep:
             raise ValueError(
@@ -562,14 +566,13 @@ class CoupledStepperConfig:
             )
         return self.ocean.stepper.get_stepper(
             dataset_info=dataset_info,
-            apply_parameter_init=True,
-            load_weights_and_history=load_weights_and_history,
+            parameter_initializer=parameter_initializer,
         )
 
     def _get_atmosphere_stepper(
         self,
         dataset_info: DatasetInfo,
-        load_weights_and_history: WeightsAndHistoryLoader,
+        parameter_initializer: ParameterInitializer | None = None,
     ) -> Stepper:
         if dataset_info.timestep != self.atmosphere_timestep:
             raise ValueError(
@@ -579,25 +582,25 @@ class CoupledStepperConfig:
             )
         return self.atmosphere.stepper.get_stepper(
             dataset_info=dataset_info,
-            apply_parameter_init=True,
-            load_weights_and_history=load_weights_and_history,
+            parameter_initializer=parameter_initializer,
         )
 
     def get_stepper(
         self,
         dataset_info: CoupledDatasetInfo,
+        ocean_parameter_initializer: ParameterInitializer | None = None,
+        atmosphere_parameter_initializer: ParameterInitializer | None = None,
     ):
         logging.info("Initializing coupler")
-        loaders = self.parameter_init.build_weights_and_history_loaders()
         return CoupledStepper(
             config=self,
             ocean=self._get_ocean_stepper(
                 dataset_info=dataset_info.ocean,
-                load_weights_and_history=loaders.ocean,
+                parameter_initializer=ocean_parameter_initializer,
             ),
             atmosphere=self._get_atmosphere_stepper(
                 dataset_info=dataset_info.atmosphere,
-                load_weights_and_history=loaders.atmosphere,
+                parameter_initializer=atmosphere_parameter_initializer,
             ),
             dataset_info=dataset_info,
         )
@@ -621,6 +624,8 @@ class CoupledStepperConfig:
         state_copy = state.copy()
         if "sst_mask_name" in state_copy:
             del state_copy["sst_mask_name"]
+        if "parameter_init" in state_copy:
+            del state_copy["parameter_init"]
         for component_key in ["ocean", "atmosphere"]:
             if "loss_contributions" in state_copy[component_key]:
                 del state_copy[component_key]["loss_contributions"]
@@ -777,6 +782,9 @@ class CoupledStepperTrainLoss:
             atmosphere=self._loss_objs["atmosphere"].effective_loss_scaling,
         )
 
+    def step_is_optimized(self, realm: str, step: int) -> bool:
+        return self._loss_objs[realm].step_is_optimized(step)
+
     def __call__(
         self,
         prediction: ComponentStepPrediction,
@@ -841,7 +849,7 @@ class CoupledStepper:
             "config": self._config.get_state(),
             "atmosphere_state": self.atmosphere.get_state(),
             "ocean_state": self.ocean.get_state(),
-            "dataset_info": self._dataset_info.to_state(),
+            "dataset_info": self._dataset_info.get_state(),
         }
 
     def load_state(self, state: dict[str, Any]):
@@ -1052,6 +1060,7 @@ class CoupledStepper:
         initial_condition: CoupledPrognosticState,
         forcing_data: CoupledBatchData,
         optimizer: OptimizationABC,
+        step_is_optimized: Callable[[str, int], bool] = lambda n, c: True,
     ) -> Generator[ComponentStepPrediction, None, None]:
         if (
             initial_condition.atmosphere_data.as_batch_data().n_timesteps
@@ -1109,11 +1118,16 @@ class CoupledStepper:
             atmos_steps = []
 
             # predict and yield atmosphere steps
-            for i_inner, atmos_step in enumerate(atmos_generator):
+            for i_inner in range(self.n_inner_steps):
+                atmos_step_num = i_outer * self.n_inner_steps + i_inner
+                optimized = step_is_optimized("atmosphere", atmos_step_num)
+                context = contextlib.nullcontext() if optimized else torch.no_grad()
+                with context:
+                    atmos_step = next(atmos_generator)
                 yield ComponentStepPrediction(
                     realm="atmosphere",
                     data=atmos_step,
-                    step=(i_outer * self.n_inner_steps + i_inner),
+                    step=atmos_step_num,
                 )
                 atmos_step = optimizer.detach_if_using_gradient_accumulation(atmos_step)
                 atmos_steps.append(atmos_step)
@@ -1139,16 +1153,21 @@ class CoupledStepper:
                 labels=ocean_window.labels,
             )
             # predict and yield a single ocean step
-            ocean_step = next(
-                iter(
-                    self.ocean.get_prediction_generator(
-                        ocean_ic_state,
-                        ocean_forcings,
-                        n_forward_steps=1,
-                        optimizer=optimizer,
+            ocean_optimized = step_is_optimized("ocean", i_outer)
+            ocean_context = (
+                contextlib.nullcontext() if ocean_optimized else torch.no_grad()
+            )
+            with ocean_context:
+                ocean_step = next(
+                    iter(
+                        self.ocean.get_prediction_generator(
+                            ocean_ic_state,
+                            ocean_forcings,
+                            n_forward_steps=1,
+                            optimizer=optimizer,
+                        )
                     )
                 )
-            )
             yield ComponentStepPrediction(
                 realm="ocean",
                 data=ocean_step,
@@ -1156,28 +1175,25 @@ class CoupledStepper:
             )
 
             # prepare ic states for next coupled step
+            atmos_ic_data = {
+                k: v.unsqueeze(self.atmosphere.TIME_DIM)
+                for k, v in atmos_steps[-1].items()
+            }
             atmos_ic_state = PrognosticState(
                 BatchData(
-                    data=optimizer.detach_if_using_gradient_accumulation(
-                        {
-                            k: v.unsqueeze(self.atmosphere.TIME_DIM)
-                            for k, v in atmos_steps[-1].items()
-                        }
-                    ),
+                    data=optimizer.detach_if_using_gradient_accumulation(atmos_ic_data),
                     time=atmos_window.time.isel(
                         time=slice(-self.atmosphere.n_ic_timesteps, None)
                     ),
                     labels=atmos_window.labels,
                 )
             )
+            ocean_ic_data = {
+                k: v.unsqueeze(self.ocean.TIME_DIM) for k, v in ocean_step.items()
+            }
             ocean_ic_state = PrognosticState(
                 BatchData(
-                    data=optimizer.detach_if_using_gradient_accumulation(
-                        {
-                            k: v.unsqueeze(self.ocean.TIME_DIM)
-                            for k, v in ocean_step.items()
-                        }
-                    ),
+                    data=optimizer.detach_if_using_gradient_accumulation(ocean_ic_data),
                     time=ocean_window.time.isel(time=slice(-self.n_ic_timesteps, None)),
                     labels=ocean_window.labels,
                 )
@@ -1327,6 +1343,9 @@ class ComponentTrainingConfig:
     loss_contributions: LossContributionsConfig = dataclasses.field(
         default_factory=lambda: LossContributionsConfig()
     )
+    parameter_init: ParameterInitializationConfig = dataclasses.field(
+        default_factory=lambda: ParameterInitializationConfig()
+    )
 
 
 @dataclasses.dataclass
@@ -1341,18 +1360,28 @@ class CoupledTrainStepperConfig:
 
     ocean: ComponentTrainingConfig
     atmosphere: ComponentTrainingConfig
+    parameter_init: CoupledParameterInitConfig = dataclasses.field(
+        default_factory=lambda: CoupledParameterInitConfig()
+    )
 
-    def get_train_stepper(self, stepper: CoupledStepper) -> "CoupledTrainStepper":
+    def __post_init__(self):
+        """Validate that parameter_init is not specified in conflicting ways.
+
+        Raises ValueError if CoupledParameterInitConfig.checkpoint_path is set
+        alongside component-level weights_path values.
         """
-        Build a CoupledTrainStepper from this configuration and a CoupledStepper.
+        if self.parameter_init.checkpoint_path is not None:
+            if (
+                self.atmosphere.parameter_init.weights_path is not None
+                or self.ocean.parameter_init.weights_path is not None
+            ):
+                raise ValueError(
+                    "Please specify CoupledParameterInitConfig.checkpoint_path "
+                    "or the component training configs' "
+                    "ParameterInitializationConfig.weights_path, but not both."
+                )
 
-        Args:
-            stepper: The underlying coupled stepper for inference operations.
-
-        Returns:
-            A CoupledTrainStepper wrapping the given stepper with training
-            functionality.
-        """
+    def _build_loss(self, stepper: "CoupledStepper") -> "CoupledStepperTrainLoss":
         ocean_step_loss = stepper.ocean.build_loss(self.ocean.loss)
         atmos_step_loss = stepper.atmosphere.build_loss(self.atmosphere.loss)
         ocean_loss = self.ocean.loss_contributions.build(
@@ -1361,7 +1390,37 @@ class CoupledTrainStepperConfig:
         atmos_loss = self.atmosphere.loss_contributions.build(
             atmos_step_loss, stepper.atmosphere.TIME_DIM
         )
-        loss = CoupledStepperTrainLoss(ocean_loss, atmos_loss)
+        return CoupledStepperTrainLoss(ocean_loss, atmos_loss)
+
+    def get_train_stepper(
+        self,
+        stepper_config: CoupledStepperConfig,
+        dataset_info: CoupledDatasetInfo,
+    ) -> "CoupledTrainStepper":
+        """
+        Build a CoupledTrainStepper from this configuration.
+
+        Args:
+            stepper_config: The CoupledStepper configuration.
+            dataset_info: Information about the coupled training datasets.
+
+        Returns:
+            A CoupledTrainStepper wrapping the given or built stepper with
+            training functionality.
+        """
+        loaders = self.parameter_init.build_weights_and_history_loaders()
+        ocean_initializer = self.ocean.parameter_init.build(
+            load_weights_and_history=loaders.ocean,
+        )
+        atmosphere_initializer = self.atmosphere.parameter_init.build(
+            load_weights_and_history=loaders.atmosphere,
+        )
+        stepper = stepper_config.get_stepper(
+            dataset_info=dataset_info,
+            ocean_parameter_initializer=ocean_initializer,
+            atmosphere_parameter_initializer=atmosphere_initializer,
+        )
+        loss = self._build_loss(stepper)
         return CoupledTrainStepper(
             stepper=stepper,
             loss=loss,
@@ -1489,6 +1548,7 @@ class CoupledTrainStepper(
                 input_data,
                 data,
                 optimization,
+                step_is_optimized=self._loss.step_is_optimized,
             )
             output_list = []
             for gen_step in output_generator:

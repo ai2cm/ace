@@ -10,6 +10,16 @@ import sys
 import torch
 
 from fme.core.benchmark.benchmark import get_benchmarks
+from fme.core.distributed.distributed import Distributed
+from fme.core.wandb import WandB
+
+
+def _json_default(obj):
+    """json.dumps ``default`` hook that converts tensors to Python objects."""
+    if isinstance(obj, torch.Tensor):
+        return obj.tolist()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
 
 RESULTS_PATH = pathlib.Path(os.path.abspath(os.path.dirname(__file__))) / "results"
 
@@ -54,53 +64,87 @@ def get_device_name() -> str:
 
 
 def main(
-    name: str | None, iters: int, output_dir: pathlib.Path, child: str | None = None
+    benchmark_name: str | None,
+    iters: int,
+    output_dir: pathlib.Path,
+    child: str | None = None,
+    wandb_project: str | None = None,
+    all_labels: bool = False,
+    ignore_benchmark_names: list[str] = [],
 ) -> int:
     output_dir.mkdir(exist_ok=True)
     device_name = get_device_name()
+    safe_device_name = device_name.replace(" ", "_").replace("/", "_").lower()
 
     logging.info(f"Running benchmarks on device: {device_name}")
     benchmarks = get_benchmarks()
-    if name is not None:
-        if name not in benchmarks:
+    if benchmark_name is not None:
+        if benchmark_name not in benchmarks:
             logging.error(
-                f"Specified benchmark {name} not found. "
+                f"Specified benchmark {benchmark_name} not found. "
                 f"Available benchmarks: {', '.join(benchmarks.keys())}"
             )
             return 1
-        benchmarks_to_run = {name: benchmarks[name]}
+        benchmarks_to_run = {benchmark_name: benchmarks[benchmark_name]}
     else:
-        benchmarks_to_run = benchmarks
+        benchmarks_to_run = {
+            k: v for k, v in benchmarks.items() if k not in ignore_benchmark_names
+        }
 
     def get_label(name):
         return f"{name} on {device_name} at commit {get_git_commit()}"
 
     def get_filename(name, extension) -> pathlib.Path:
         safe_name = name.replace("/", "_").replace(".", "_").lower()
-        safe_device_name = device_name.replace(" ", "_").replace("/", "_").lower()
         return (
             output_dir
             / f"{safe_name}_{safe_device_name}_{get_git_commit()}.{extension}"
         )
 
-    for name, cls in benchmarks_to_run.items():
-        logging.info(f"Running benchmark: {name}")
+    wandb_logs = {}
+    for benchmark_name, cls in benchmarks_to_run.items():
+        logging.info(f"Running benchmark: {benchmark_name}")
         result = cls.run_benchmark(iters=iters)
-        png_filename = get_filename(name, "png")
+        wandb_logs.update(
+            {
+                f"{benchmark_name}/{log_name}": value
+                for log_name, value in result.get_logs(max_depth=1).items()
+            }
+        )
+        png_filename = get_filename(benchmark_name, "png")
         logging.info(f"Saving result image to {png_filename}")
-        result.to_png(png_filename, label=get_label(name))
-        result_data = json.dumps(dataclasses.asdict(result), indent=2)
+        result.to_png(
+            png_filename, label=get_label(benchmark_name), all_labels=all_labels
+        )
+        result_data = json.dumps(
+            dataclasses.asdict(result), indent=2, default=_json_default
+        )
         logging.info(f"Result: {result_data}")
-        with open(get_filename(name, "json"), "w") as f:
+        with open(get_filename(benchmark_name, "json"), "w") as f:
             logging.info(f"Saving result json to {f.name}")
             f.write(result_data)
         if child is not None:
-            child_name = f"{name}.{child}"
+            child_name = f"{benchmark_name}.{child}"
             child_label = get_label(child_name)
             logging.info(f"Generating benchmark result for child timer: {child_label}")
             png_filename = get_filename(child_name, "png")
             logging.info(f"Saving child result image to {png_filename}")
-            result.to_png(png_filename, label=child_label, child=child)
+            result.to_png(
+                png_filename, label=child_label, child=child, all_labels=all_labels
+            )
+
+    if wandb_project is not None:
+        entity, project = wandb_project.split("/")
+        wandb = WandB.get_instance()
+        wandb.configure(log_to_wandb=True)
+        wandb_name = f"{get_git_commit()}-{safe_device_name}"
+        wandb.init(
+            resumable=False,
+            project=project,
+            entity=entity,
+            name=wandb_name,
+        )
+        wandb.log(wandb_logs, step=0, commit=True)
     return 0
 
 
@@ -148,17 +192,53 @@ if __name__ == "__main__":
             "results will be saved in a 'results' directory next to this script."
         ),
     )
+    parser.add_argument(
+        "--all-labels",
+        action="store_true",
+        default=False,
+        help=(
+            "Show labels on all chart segments. Else will show labels for "
+            "blocks >= 5% of total."
+        ),
+    )
+    parser.add_argument(
+        "--wandb-project",
+        type=str,
+        default=None,
+        help=(
+            "Weights & Biases entity and project, in the format <entity>/<project>. "
+            "By default, logging to wandb is disabled."
+        ),
+    )
+    parser.add_argument(
+        "--ignore",
+        action="append",
+        nargs="+",
+        default=None,
+        help=(
+            "Benchmark names to skip. Can be provided multiple times, e.g. "
+            "--ignore benchmark_a benchmark_b --ignore benchmark_c."
+        ),
+    )
     args = parser.parse_args()
     if args.output_dir is not None:
         output_dir = pathlib.Path(args.output_dir)
     else:
         output_dir = RESULTS_PATH
 
-    sys.exit(
-        main(
-            name=args.name,
+    if args.ignore is not None:
+        ignored = [name for group in args.ignore for name in group]
+    else:
+        ignored = []
+
+    with Distributed.context():
+        return_code = main(
+            benchmark_name=args.name,
             iters=args.iters,
             child=args.child,
             output_dir=output_dir,
+            wandb_project=args.wandb_project,
+            all_labels=args.all_labels,
+            ignore_benchmark_names=ignored,
         )
-    )
+    sys.exit(return_code)

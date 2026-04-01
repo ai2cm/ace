@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 import wandb
 
+from fme.core.disk_metric_logger import DiskMetricLogger
 from fme.core.distributed import Distributed
 
 WANDB_RUN_ID_FILE = "wandb_run_id"
@@ -111,11 +112,14 @@ class WandB:
         self._enabled = False
         self._configured = False
         self._id = None
+        self._disk_logger: DiskMetricLogger | None = None
 
-    def configure(self, log_to_wandb: bool):
+    def configure(self, log_to_wandb: bool, metrics_log_dir: str | None = None):
         dist = Distributed.get_instance()
         self._enabled = log_to_wandb and dist.is_root()
         self._configured = True
+        if metrics_log_dir is not None and dist.is_root():
+            self._disk_logger = DiskMetricLogger(metrics_log_dir)
 
     def init(
         self,
@@ -160,11 +164,19 @@ class WandB:
         if self._enabled:
             wandb.watch(modules)
 
-    def log(self, data: Mapping[str, Any], step=None, sleep=None):
+    def log(
+        self,
+        data: Mapping[str, Any],
+        step: int,
+        sleep: float | None = None,
+        commit: bool | None = None,
+    ):
         if self._enabled:
-            wandb.log(dict(data), step=step)
+            wandb.log(dict(data), step=step, commit=commit)
             if sleep is not None:
                 time.sleep(sleep)
+        if self._disk_logger is not None:
+            self._disk_logger.log(dict(data), step=step)
         dist = Distributed.get_instance()
         dist.barrier()
 

@@ -6,7 +6,7 @@ import torch
 
 from .typing_ import TensorDict, TensorMapping
 
-_FORCE_CPU: bool = False
+_FORCE_CPU: bool = os.environ.get("FME_FORCE_CPU", "0") == "1"
 
 
 @contextlib.contextmanager

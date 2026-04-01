@@ -10,6 +10,8 @@ from fme.core.corrector.ocean import (
     OceanCorrectorConfig,
     OceanHeatContentBudgetConfig,
     SeaIceFractionConfig,
+    SurfaceEnergyFluxCorrectionConfig,
+    _compute_ocean_net_surface_energy_flux,
 )
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.mask_provider import MaskProvider
@@ -26,33 +28,10 @@ _MASK[_LAT, _LON, :] = 0.0
 
 
 class _MockDepth:
-    def __len__(self) -> int:
-        return len(self.get_idepth())
-
-    def get_mask(self) -> torch.Tensor:
-        return _MASK
-
-    def get_mask_level(self, level: int):
-        return _MASK.select(-1, level)
-
-    def get_mask_tensor_for(self, name: str) -> torch.Tensor | None:
-        if name.endswith("_1"):
-            return _MASK.select(-1, 1)
-        else:
-            return _MASK.select(-1, 0)
-
-    def get_idepth(self) -> torch.Tensor:
-        return torch.tensor([0, 5, 15], device=DEVICE)
-
     def depth_integral(self, integrand: torch.Tensor) -> torch.Tensor:
-        thickness = self.get_idepth().diff(dim=-1)
+        idepth = torch.tensor([0, 5, 15], device=DEVICE)
+        thickness = idepth.diff(dim=-1)
         return torch.nansum(_MASK * integrand * thickness, dim=-1)
-
-    def build_output_masker(self):
-        raise NotImplementedError
-
-    def to(self, device: str) -> "_MockDepth":
-        return self
 
 
 _VERTICAL_COORD = _MockDepth()
@@ -140,12 +119,12 @@ def test_ocean_corrector_has_negative_ocean_fraction():
     assert not (gen_data_corrected["sea_ice_fraction"] < 0.0).any()
 
 
-def test_sea_ice_thickness_correction():
+def test_zero_where_ice_free_names():
     config = OceanCorrectorConfig(
         sea_ice_fraction_correction=SeaIceFractionConfig(
             sea_ice_fraction_name="sea_ice_fraction",
             land_fraction_name="land_fraction",
-            sea_ice_thickness_name="HI",
+            zero_where_ice_free_names=["HI"],
         ),
     )
     ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
@@ -165,14 +144,170 @@ def test_sea_ice_thickness_correction():
     )
 
 
+def test_zero_where_ice_free_names_multiple_variables():
+    config = OceanCorrectorConfig(
+        sea_ice_fraction_correction=SeaIceFractionConfig(
+            sea_ice_fraction_name="sea_ice_fraction",
+            land_fraction_name="land_fraction",
+            zero_where_ice_free_names=["HI", "HS"],
+        ),
+    )
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    timestep = datetime.timedelta(seconds=3600)
+    input_data = {"land_fraction": torch.ones(IMG_SHAPE, device=DEVICE)}
+    input_data["land_fraction"][:3, :3] = torch.rand(3, 3, device=DEVICE)
+    gen_data = {
+        "sea_ice_fraction": torch.rand(IMG_SHAPE, device=DEVICE),
+        "HI": torch.rand(IMG_SHAPE, device=DEVICE) * 10,
+        "HS": torch.rand(IMG_SHAPE, device=DEVICE) * 5,
+    }
+    corrector = OceanCorrector(config, ops, None, timestep)
+    gen_data_corrected = corrector(input_data, gen_data, {})
+    sea_ice_zero = gen_data_corrected["sea_ice_fraction"] == 0.0
+    for name in ["HI", "HS"]:
+        values = gen_data_corrected[name]
+        torch.testing.assert_close(
+            torch.where(sea_ice_zero, values, 0.0), torch.zeros_like(values)
+        )
+
+
+def test_from_state_migrates_sea_ice_thickness_name():
+    state = {
+        "sea_ice_fraction_correction": {
+            "sea_ice_fraction_name": "ocean_sea_ice_fraction",
+            "land_fraction_name": "land_fraction",
+            "sea_ice_thickness_name": "HI",
+            "remove_negative_ocean_fraction": False,
+        },
+    }
+    config = OceanCorrectorConfig.from_state(state)
+    assert config.sea_ice_fraction_correction is not None
+    assert config.sea_ice_fraction_correction.zero_where_ice_free_names == ["HI"]
+
+
+def test_from_state_migrates_sea_ice_thickness_name_none():
+    state = {
+        "sea_ice_fraction_correction": {
+            "sea_ice_fraction_name": "ocean_sea_ice_fraction",
+            "land_fraction_name": "land_fraction",
+            "sea_ice_thickness_name": None,
+            "remove_negative_ocean_fraction": False,
+        },
+    }
+    config = OceanCorrectorConfig.from_state(state)
+    assert config.sea_ice_fraction_correction is not None
+    assert config.sea_ice_fraction_correction.zero_where_ice_free_names == []
+
+
+def _make_atmos_forcing_data(shape, device=DEVICE):
+    """Build atmosphere forcing tensors needed for the surface energy flux
+    correction tests."""
+    return {
+        "DSWRFsfc": torch.full(shape, 200.0, device=device),
+        "USWRFsfc": torch.full(shape, 50.0, device=device),
+        "DLWRFsfc": torch.full(shape, 300.0, device=device),
+        "ULWRFsfc": torch.full(shape, 350.0, device=device),
+        "LHTFLsfc": torch.full(shape, 100.0, device=device),
+        "SHTFLsfc": torch.full(shape, 20.0, device=device),
+        "PRATEsfc": torch.full(shape, 1e-4, device=device),
+        "total_frozen_precipitation_rate": torch.full(shape, 1e-5, device=device),
+    }
+
+
+def test_surface_energy_flux_correction_resid():
+    config = OceanCorrectorConfig(
+        surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+            method="residual_prediction"
+        ),
+    )
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    timestep = datetime.timedelta(seconds=3600)
+    corrector = OceanCorrector(config, ops, None, timestep)
+
+    sst = torch.full(IMG_SHAPE, 300.0, device=DEVICE)
+    gen_hfds = torch.full(IMG_SHAPE, 5.0, device=DEVICE)
+    sea_ice_fraction = torch.zeros(IMG_SHAPE, device=DEVICE)
+    sea_ice_fraction[0, :] = 0.3
+    land_fraction = torch.zeros(IMG_SHAPE, device=DEVICE)
+    land_fraction[-1, :] = 1.0
+
+    gen_data = {
+        "sst": sst,
+        "hfds": gen_hfds,
+        "sea_ice_fraction": sea_ice_fraction,
+    }
+    forcing_data = {
+        "land_fraction": land_fraction,
+        **_make_atmos_forcing_data(IMG_SHAPE),
+    }
+    input_data = {**forcing_data, **gen_data}
+
+    ocean_fraction = 1 - land_fraction - sea_ice_fraction
+    expected_net_flux = _compute_ocean_net_surface_energy_flux(input_data, sst)
+    expected_hfds = gen_hfds + ocean_fraction * expected_net_flux
+
+    corrected = corrector(input_data, gen_data, forcing_data)
+    torch.testing.assert_close(corrected["hfds"], expected_hfds)
+    # on land ocean_fraction is 0, so hfds is unchanged
+    torch.testing.assert_close(corrected["hfds"][-1, :], gen_hfds[-1, :])
+    # with sea ice, correction is reduced relative to ice-free rows
+    ice_row_correction = (corrected["hfds"][0, 0] - gen_hfds[0, 0]).abs()
+    open_row_correction = (corrected["hfds"][1, 0] - gen_hfds[1, 0]).abs()
+    assert ice_row_correction < open_row_correction
+
+
+def test_surface_energy_flux_correction_prescribed():
+    config = OceanCorrectorConfig(
+        surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+            method="prescribed"
+        ),
+    )
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    timestep = datetime.timedelta(seconds=3600)
+    corrector = OceanCorrector(config, ops, None, timestep)
+
+    sst = torch.full(IMG_SHAPE, 300.0, device=DEVICE)
+    gen_hfds = torch.full(IMG_SHAPE, 5.0, device=DEVICE)
+    sea_ice_fraction = torch.zeros(IMG_SHAPE, device=DEVICE)
+    sea_ice_fraction[0, :] = 0.3
+    land_fraction = torch.zeros(IMG_SHAPE, device=DEVICE)
+    land_fraction[-1, :] = 1.0
+
+    gen_data = {
+        "sst": sst,
+        "hfds": gen_hfds,
+        "sea_ice_fraction": sea_ice_fraction,
+    }
+    forcing_data = {
+        "land_fraction": land_fraction,
+        **_make_atmos_forcing_data(IMG_SHAPE),
+    }
+    input_data = {**forcing_data, **gen_data}
+
+    ocean_fraction = 1 - land_fraction - sea_ice_fraction
+    net_flux = _compute_ocean_net_surface_energy_flux(input_data, sst)
+    expected_hfds = net_flux * ocean_fraction + gen_hfds * (1 - ocean_fraction)
+
+    corrected = corrector(input_data, gen_data, forcing_data)
+    torch.testing.assert_close(corrected["hfds"], expected_hfds)
+    # on land (ocean_fraction=0), hfds equals gen_hfds
+    torch.testing.assert_close(corrected["hfds"][-1, :], gen_hfds[-1, :])
+    # in open ocean (no ice, no land), hfds equals net_flux
+    open_ocean_row = 1
+    torch.testing.assert_close(
+        corrected["hfds"][open_ocean_row, :], net_flux[open_ocean_row, :]
+    )
+
+
 @pytest.mark.parametrize(
-    "hfds_in_gen_data",
+    "hfds_type",
     [
-        pytest.param(False, id="hfds_in_input"),
-        pytest.param(True, id="hfds_in_gen"),
+        pytest.param("input", id="hfds_in_input"),
+        pytest.param("gen", id="hfds_in_gen"),
+        pytest.param("total_area", id="hfds_total_area_in_gen"),
     ],
 )
-def test_ocean_heat_content_correction(hfds_in_gen_data):
+def test_ocean_heat_content_correction(hfds_type):
     config = OceanCorrectorConfig(
         ocean_heat_content_correction=OceanHeatContentBudgetConfig(
             method="scaled_temperature",
@@ -196,6 +331,8 @@ def test_ocean_heat_content_correction(hfds_in_gen_data):
     idepth = torch.tensor([2.5, 10, 20])
     depth_coordinate = DepthCoordinate(idepth, mask)
 
+    sea_surface_fraction = mask[:, :, :, 0]
+
     input_data_dict = {
         "thetao_0": torch.ones(nsamples, nlat, nlon),
         "thetao_1": torch.ones(nsamples, nlat, nlon),
@@ -206,13 +343,23 @@ def test_ocean_heat_content_correction(hfds_in_gen_data):
         "thetao_1": torch.ones(nsamples, nlat, nlon) * 2,
         "sst": torch.ones(nsamples, nlat, nlon) * 2 + 273.15,
     }
-    if hfds_in_gen_data:
+    if hfds_type == "gen":
         gen_data_dict["hfds"] = torch.ones(nsamples, nlat, nlon)
+    elif hfds_type == "total_area":
+        # hfds_total_area is already weighted by sea_surface_fraction also
+        # include hfds with a different value to verify hfds_total_area takes
+        # priority
+        gen_data_dict["hfds"] = (
+            torch.ones(nsamples, nlat, nlon) * 100
+        )  # should be ignored
+        gen_data_dict["hfds_total_area"] = (
+            torch.ones(nsamples, nlat, nlon) * sea_surface_fraction
+        )
     else:
         input_data_dict["hfds"] = torch.ones(nsamples, nlat, nlon)
     forcing_data_dict = {
         "hfgeou": torch.ones(nsamples, nlat, nlon),
-        "sea_surface_fraction": mask[:, :, :, 0],
+        "sea_surface_fraction": sea_surface_fraction,
     }
     input_data = OceanData(input_data_dict, depth_coordinate)
     gen_data = OceanData(gen_data_dict, depth_coordinate)
