@@ -1,8 +1,9 @@
 # ERA5 AIMIP Baseline
 
 This directory contains scripts and configurations for training and running an ACE2 model on ERA5
-data for the AIMIP evaluation protocol. This configuration is referred to as **ACE2.1-ERA5**. The model predicts pressure-level diagnostic variables over
-1978–2024 with multiple initial conditions and SST perturbation scenarios.
+data for the AIMIP evaluation protocol. This configuration is referred to as **ACE2.1-ERA5**. The
+model predicts pressure-level diagnostic variables over 1978–2024 with multiple initial conditions
+and SST perturbation scenarios.
 
 ## Workflow
 
@@ -27,12 +28,14 @@ bash run-ace-evaluator-seed-selection-single.sh
 
 Evaluate all 4 trained checkpoints to select the best seed for fine-tuning.
 
-- `run-ace-evaluator-seed-selection.sh` — snapshot evaluations across 7 representative years
-  (1980, 1985, 1990, 1995, 2000, 2005, 2010). Config: `ace-evaluator-seed-selection-config.yaml`.
+- `run-ace-evaluator-seed-selection.sh` — 7x 5-year evaluations (starting in 1980, 1985, 1990,
+  1995, 2000, 2005, 2010). Config: `ace-evaluator-seed-selection-config.yaml`.
 - `run-ace-evaluator-seed-selection-single.sh` — single continuous 36-year run (1978-10-01 to
   2014-12-31). Config: `ace-evaluator-seed-selection-single-config.yaml`.
 
-After reviewing results, update the base checkpoint ID in `run-ace-fine-tune-decoder-pressure-levels.sh`.
+The best seed is chosen based on comparing the time-mean climate and trend skill, both in
+the 7x 5-year and 36-year evaluations; this is somewhat subjective. The chosen seed is used
+in `run-ace-fine-tune-decoder-pressure-levels.sh`.
 
 ### 3. Fine-tune
 
@@ -47,8 +50,9 @@ diagnostic variables (TMP, Q, UGRD, VGRD, h at 13 pressure levels plus near-surf
 ### 4. Evaluate fine-tuned seeds
 
 Re-run both evaluator scripts from step 2. The scripts already include checkpoint IDs for both
-the trained and fine-tuned ensemble members, enabling direct comparison. After reviewing results,
-update the checkpoint ID in `run-ace-inference.sh` to the best fine-tuned seed.
+the trained and fine-tuned ensemble members, enabling direct comparison. After evaluating seeds
+similarly as before (though there is little variability due frozen prognostic state), the best
+checkpoint ID is used in `run-ace-inference.sh`.
 
 ### 5. Run inference
 
