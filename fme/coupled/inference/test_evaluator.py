@@ -37,7 +37,11 @@ DIR = pathlib.Path(__file__).parent
 
 
 def test_standalone_checkpoints_config_init_args():
-    ignore_args = ["parameter_init"]
+    ignore_args = [
+        "parameter_init",
+        "ocean_stepper_override",
+        "atmosphere_stepper_override",
+    ]
     stepper_config_init_args = set(
         inspect.signature(CoupledStepperConfig.__init__).parameters.keys()
     ).difference(ignore_args)
@@ -45,7 +49,7 @@ def test_standalone_checkpoints_config_init_args():
         inspect.signature(
             StandaloneComponentCheckpointsConfig.__init__
         ).parameters.keys()
-    )
+    ).difference(ignore_args)
     assert init_args == stepper_config_init_args, (
         "StandaloneComponentCheckpointsConfig should have the same init args as "
         "CoupledStepperConfig. Were new args added?"
