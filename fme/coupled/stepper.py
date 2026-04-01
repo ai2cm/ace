@@ -1520,7 +1520,6 @@ class CoupledTrainStepper(
                 Use `NullOptimization` to disable training.
             compute_derived_variables: Whether to compute derived variables for the
                 prediction and target atmosphere data.
-
         """
         # get initial condition prognostic variables
         input_data = CoupledPrognosticState(
