@@ -1,0 +1,336 @@
+- varname: hus
+  table_id: Amon
+  time_range: "197810-202412"
+  grid_label: gn
+  standard_name: specific_humidity
+  long_name: specific humidity
+  units: "1"
+- varname: hus
+  table_id: day
+  time_range: "19781001-19791231"
+  grid_label: gn
+  standard_name: specific_humidity
+  long_name: specific humidity
+  units: "1"
+- varname: hus
+  table_id: day
+  time_range: "20240101-20241231"
+  grid_label: gn
+  standard_name: specific_humidity
+  long_name: specific humidity
+  units: "1"
+- varname: hus
+  table_id: Amon
+  time_range: "197810-202412"
+  grid_label: gr
+  standard_name: specific_humidity
+  long_name: specific humidity
+  units: "1"
+- varname: hus
+  table_id: day
+  time_range: "19781001-19791231"
+  grid_label: gr
+  standard_name: specific_humidity
+  long_name: specific humidity
+  units: "1"
+- varname: hus
+  table_id: day
+  time_range: "20240101-20241231"
+  grid_label: gr
+  standard_name: specific_humidity
+  long_name: specific humidity
+  units: "1"
+- varname: huss
+  table_id: Amon
+  time_range: "197810-202412"
+  grid_label: gn
+  standard_name: surface_specific_humidity
+  long_name: specific humidity at 2 meters
+  units: "1"
+- varname: huss
+  table_id: day
+  time_range: "19781001-19791231"
+  grid_label: gn
+  standard_name: surface_specific_humidity
+  long_name: specific humidity at 2 meters
+  units: "1"
+- varname: huss
+  table_id: day
+  time_range: "20240101-20241231"
+  grid_label: gn
+  standard_name: surface_specific_humidity
+  long_name: specific humidity at 2 meters
+  units: "1"
+- varname: pr
+  table_id: Amon
+  time_range: "197810-202412"
+  grid_label: gn
+  standard_name: precipitation_flux
+  long_name: precipitation flux at the surface
+  units: kg m-2 s-1
+- varname: pr
+  table_id: day
+  time_range: "19781001-19791231"
+  grid_label: gn
+  standard_name: precipitation_flux
+  long_name: precipitation flux at the surface
+  units: kg m-2 s-1
+- varname: pr
+  table_id: day
+  time_range: "20240101-20241231"
+  grid_label: gn
+  standard_name: precipitation_flux
+  long_name: precipitation flux at the surface
+  units: kg m-2 s-1
+- varname: ps
+  table_id: Amon
+  time_range: "197810-202412"
+  grid_label: gn
+  standard_name: surface_air_pressure
+  long_name: air pressure at the surface
+  units: Pa
+- varname: ps
+  table_id: day
+  time_range: "19781001-19791231"
+  grid_label: gn
+  standard_name: surface_air_pressure
+  long_name: air pressure at the surface
+  units: Pa
+- varname: ps
+  table_id: day
+  time_range: "20240101-20241231"
+  grid_label: gn
+  standard_name: surface_air_pressure
+  long_name: air pressure at the surface
+  units: Pa
+- varname: ta
+  table_id: Amon
+  time_range: "197810-202412"
+  grid_label: gn
+  standard_name: air_temperature
+  long_name: air temperature
+  units: K
+- varname: ta
+  table_id: day
+  time_range: "19781001-19791231"
+  grid_label: gn
+  standard_name: air_temperature
+  long_name: air temperature
+  units: K
+- varname: ta
+  table_id: day
+  time_range: "20240101-20241231"
+  grid_label: gn
+  standard_name: air_temperature
+  long_name: air temperature
+  units: K
+- varname: ta
+  table_id: Amon
+  time_range: "197810-202412"
+  grid_label: gr
+  standard_name: air_temperature
+  long_name: air temperature
+  units: K
+- varname: ta
+  table_id: day
+  time_range: "19781001-19791231"
+  grid_label: gr
+  standard_name: air_temperature
+  long_name: air temperature
+  units: K
+- varname: ta
+  table_id: day
+  time_range: "20240101-20241231"
+  grid_label: gr
+  standard_name: air_temperature
+  long_name: air temperature
+  units: K
+- varname: tas
+  table_id: Amon
+  time_range: "197810-202412"
+  grid_label: gn
+  standard_name: air_temperature
+  long_name: air temperature at 2 meters
+  units: K
+- varname: tas
+  table_id: day
+  time_range: "19781001-19791231"
+  grid_label: gn
+  standard_name: air_temperature
+  long_name: air temperature at 2 meters
+  units: K
+- varname: tas
+  table_id: day
+  time_range: "20240101-20241231"
+  grid_label: gn
+  standard_name: air_temperature
+  long_name: air temperature at 2 meters
+  units: K
+- varname: ts
+  table_id: Amon
+  time_range: "197810-202412"
+  grid_label: gn
+  standard_name: surface_temperature
+  long_name: surface temperature
+  units: K
+- varname: ts
+  table_id: day
+  time_range: "19781001-19791231"
+  grid_label: gn
+  standard_name: surface_temperature
+  long_name: surface temperature
+  units: K
+- varname: ts
+  table_id: day
+  time_range: "20240101-20241231"
+  grid_label: gn
+  standard_name: surface_temperature
+  long_name: surface temperature
+  units: K
+- varname: ua
+  table_id: Amon
+  time_range: "197810-202412"
+  grid_label: gn
+  standard_name: eastward_wind
+  long_name: eastward wind
+  units: m s-1
+- varname: ua
+  table_id: day
+  time_range: "19781001-19791231"
+  grid_label: gn
+  standard_name: eastward_wind
+  long_name: eastward wind
+  units: m s-1
+- varname: ua
+  table_id: day
+  time_range: "20240101-20241231"
+  grid_label: gn
+  standard_name: eastward_wind
+  long_name: eastward wind
+  units: m s-1
+- varname: ua
+  table_id: Amon
+  time_range: "197810-202412"
+  grid_label: gr
+  standard_name: eastward_wind
+  long_name: eastward wind
+  units: m s-1
+- varname: ua
+  table_id: day
+  time_range: "19781001-19791231"
+  grid_label: gr
+  standard_name: eastward_wind
+  long_name: eastward wind
+  units: m s-1
+- varname: ua
+  table_id: day
+  time_range: "20240101-20241231"
+  grid_label: gr
+  standard_name: eastward_wind
+  long_name: eastward wind
+  units: m s-1
+- varname: uas
+  table_id: Amon
+  time_range: "197810-202412"
+  grid_label: gn
+  standard_name: eastward_wind
+  long_name: eastward wind at 10 meters
+  units: m s-1
+- varname: uas
+  table_id: day
+  time_range: "19781001-19791231"
+  grid_label: gn
+  standard_name: eastward_wind
+  long_name: eastward wind at 10 meters
+  units: m s-1
+- varname: uas
+  table_id: day
+  time_range: "20240101-20241231"
+  grid_label: gn
+  standard_name: eastward_wind
+  long_name: eastward wind at 10 meters
+  units: m s-1
+- varname: va
+  table_id: Amon
+  time_range: "197810-202412"
+  grid_label: gn
+  standard_name: northward_wind
+  long_name: northward wind
+  units: m s-1
+- varname: va
+  table_id: day
+  time_range: "19781001-19791231"
+  grid_label: gn
+  standard_name: northward_wind
+  long_name: northward wind
+  units: m s-1
+- varname: va
+  table_id: day
+  time_range: "20240101-20241231"
+  grid_label: gn
+  standard_name: northward_wind
+  long_name: northward wind
+  units: m s-1
+- varname: va
+  table_id: Amon
+  time_range: "197810-202412"
+  grid_label: gr
+  standard_name: northward_wind
+  long_name: northward wind
+  units: m s-1
+- varname: va
+  table_id: day
+  time_range: "19781001-19791231"
+  grid_label: gr
+  standard_name: northward_wind
+  long_name: northward wind
+  units: m s-1
+- varname: va
+  table_id: day
+  time_range: "20240101-20241231"
+  grid_label: gr
+  standard_name: northward_wind
+  long_name: northward wind
+  units: m s-1
+- varname: vas
+  table_id: Amon
+  time_range: "197810-202412"
+  grid_label: gn
+  standard_name: northward_wind
+  long_name: northward wind at 10 meters
+  units: m s-1
+- varname: vas
+  table_id: day
+  time_range: "19781001-19791231"
+  grid_label: gn
+  standard_name: northward_wind
+  long_name: northward wind at 10 meters
+  units: m s-1
+- varname: vas
+  table_id: day
+  time_range: "20240101-20241231"
+  grid_label: gn
+  standard_name: northward_wind
+  long_name: northward wind at 10 meters
+  units: m s-1
+- varname: zg
+  table_id: Amon
+  time_range: "197810-202412"
+  grid_label: gr
+  standard_name: geopotential_height
+  long_name: geopotential height
+  units: m
+- varname: zg
+  table_id: day
+  time_range: "19781001-19791231"
+  grid_label: gr
+  standard_name: geopotential_height
+  long_name: geopotential height
+  units: m
+- varname: zg
+  table_id: day
+  time_range: "20240101-20241231"
+  grid_label: gr
+  standard_name: geopotential_height
+  long_name: geopotential height
+  units: m
