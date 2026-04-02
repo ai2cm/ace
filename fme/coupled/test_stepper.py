@@ -1330,8 +1330,8 @@ def test_predict_paired():
     )
     data = coupled_data.data
 
-    atmos_prognostic_names = coupler.atmosphere.prognostic_names
-    ocean_prognostic_names = coupler.ocean.prognostic_names
+    atmos_prognostic_names = coupler.atmosphere.get_prognostic_names()
+    ocean_prognostic_names = coupler.ocean.get_prognostic_names()
     atmos_prognostic = data.atmosphere_data.get_start(
         atmos_prognostic_names, n_ic_timesteps=1
     )
@@ -1457,8 +1457,8 @@ def test_predict_paired_with_derived_variables():
     )
     data = coupled_data.data
 
-    atmos_prognostic_names = coupler.atmosphere.prognostic_names
-    ocean_prognostic_names = coupler.ocean.prognostic_names
+    atmos_prognostic_names = coupler.atmosphere.get_prognostic_names()
+    ocean_prognostic_names = coupler.ocean.get_prognostic_names()
     atmos_prognostic = data.atmosphere_data.get_start(
         atmos_prognostic_names, n_ic_timesteps=1
     )

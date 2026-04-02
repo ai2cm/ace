@@ -22,15 +22,19 @@ from fme.core.distributed.distributed import Distributed
 from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.labels import BatchLabels
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
-from fme.core.registry import ModuleSelector
+from fme.core.registry import ModuleSelector, SeparatedModuleSelector
+from fme.core.registry.testing import register_test_types
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallConfig, MultiCallStepConfig
 from fme.core.step.secondary_decoder import SecondaryDecoderConfig
+from fme.core.step.separated_module import SeparatedModuleStepConfig
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.typing_ import TensorDict
 
 from .radiation import SeparateRadiationStepConfig
+
+register_test_types()
 
 DEFAULT_IMG_SHAPE = (45, 90)
 
@@ -374,6 +378,64 @@ def get_fcn3_selector(
     )
 
 
+def get_separated_module_selector(
+    dir: pathlib.Path | None = None,
+) -> StepSelector:
+    normalization = get_network_and_loss_normalization_config(
+        names=[
+            "forcing_shared",
+            "forcing_rad",
+            "prog_main",
+            "diagnostic_rad",
+        ],
+        dir=dir,
+    )
+    return StepSelector(
+        type="separated_module",
+        config=dataclasses.asdict(
+            SeparatedModuleStepConfig(
+                builder=SeparatedModuleSelector(
+                    type="test_simple",
+                    config={},
+                ),
+                forcing_names=["forcing_shared", "forcing_rad"],
+                prognostic_names=["prog_main"],
+                diagnostic_names=["diagnostic_rad"],
+                normalization=normalization,
+            ),
+        ),
+    )
+
+
+def get_separated_module_with_prognostics_selector(
+    dir: pathlib.Path | None = None,
+) -> StepSelector:
+    normalization = get_network_and_loss_normalization_config(
+        names=[
+            "forcing_a",
+            "prog_a",
+            "prog_b",
+            "diag_a",
+        ],
+        dir=dir,
+    )
+    return StepSelector(
+        type="separated_module",
+        config=dataclasses.asdict(
+            SeparatedModuleStepConfig(
+                builder=SeparatedModuleSelector(
+                    type="test_simple",
+                    config={},
+                ),
+                forcing_names=["forcing_a"],
+                prognostic_names=["prog_a", "prog_b"],
+                diagnostic_names=["diag_a"],
+                normalization=normalization,
+            ),
+        ),
+    )
+
+
 def get_multi_call_selector(
     dir: pathlib.Path | None = None,
 ) -> StepSelector:
@@ -403,6 +465,8 @@ SELECTOR_GETTERS = [
     get_separate_radiation_selector,
     get_single_module_selector,
     get_single_module_noise_conditioned_selector,
+    get_separated_module_selector,
+    get_separated_module_with_prognostics_selector,
     get_multi_call_selector,
 ]
 
