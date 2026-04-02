@@ -3,7 +3,16 @@ import torch.nn.functional as F
 
 
 class SmoothFloodFill:
-    """Apply fast flood filling with smooth transitions for NaN regions."""
+    """Fill NaN regions using flood fill with smooth boundary transitions.
+
+    Operates in three phases: (1) mean-fill deep interior NaN pixels that
+    would not be reached within ``num_steps`` of edge expansion, (2) iterative
+    neighbor-averaging that grows valid pixels inward from the boundary, and
+    (3) Gaussian blur interpolation across the original valid/NaN boundary to
+    avoid sharp seams.
+
+    Interior masks are computed once per variable name and cached.
+    """
 
     def __init__(
         self,
@@ -11,6 +20,15 @@ class SmoothFloodFill:
         blur_kernel_size: int = 5,
         blur_sigma: float = 1.0,
     ):
+        """
+        Args:
+            num_steps: Number of iterative flood-fill expansion steps.
+                Also determines which NaN pixels are classified as "interior"
+                (unreachable within this many steps).
+            blur_kernel_size: Size of the Gaussian blur kernel applied in the
+                final smoothing pass.
+            blur_sigma: Standard deviation of the Gaussian blur kernel.
+        """
         self._num_steps = num_steps
         self._blur_kernel_size = blur_kernel_size
         self._blur_sigma = blur_sigma
@@ -30,6 +48,17 @@ class SmoothFloodFill:
         return self._interior_masks[name]
 
     def __call__(self, tensor: torch.Tensor, name: str) -> torch.Tensor:
+        """Fill NaN regions in ``tensor`` and return the filled result.
+
+        Args:
+            tensor: Data tensor of shape (B, C, H, W) potentially containing
+                NaN values to be filled.
+            name: Variable name, used to look up (or compute and cache) the
+                interior mask for this field.
+
+        Returns:
+            Tensor of the same shape with NaN regions filled.
+        """
         interior_mask = self._get_interior_mask(tensor, name)
         if interior_mask is None:
             return tensor
@@ -45,11 +74,20 @@ class SmoothFloodFill:
 
 def _get_interior_mask(nan_mask: torch.Tensor, num_steps: int) -> torch.Tensor:
     """
-    Finds NaN pixels that remain unfilled after `num_steps` of flood fill.
+    Finds NaN pixels that remain unfilled after ``num_steps`` of flood fill.
+
+    Simulates the iterative edge-expansion process using a 3x3 convolution
+    with circular padding on the longitude axis. Pixels still marked as NaN
+    after all steps are considered "interior" and will be mean-filled rather
+    than edge-blended.
 
     Args:
         nan_mask: Boolean tensor of shape (..., H, W) where True = NaN.
-        num_steps: Number of flood fill steps to define interior mask.
+        num_steps: Number of flood fill expansion steps to simulate.
+
+    Returns:
+        Boolean tensor of the same shape as ``nan_mask``, where True marks
+        interior NaN pixels unreachable within ``num_steps``.
     """
     isnan_mask = nan_mask.clone()
     valid_mask = (~isnan_mask).float()
@@ -75,10 +113,23 @@ def _get_interior_mask(nan_mask: torch.Tensor, num_steps: int) -> torch.Tensor:
     return isnan_mask.view(orig_shape)
 
 
-def separable_gaussian_blur(
+def _separable_gaussian_blur(
     tensor: torch.Tensor, blur_kernel_size: int = 5, blur_sigma: float = 1.0
 ) -> torch.Tensor:
-    """Applies a separable Gaussian blur with circular padding on the X-axis."""
+    """Applies a separable Gaussian blur with circular padding on the X-axis.
+
+    The blur is applied as two 1-D convolutions (latitude then longitude).
+    Longitude padding is circular to handle periodicity; latitude uses replicate
+    padding to avoid polar artifacts.
+
+    Args:
+        tensor: Input tensor of shape (B, C, H, W).
+        blur_kernel_size: Size of the 1-D Gaussian kernel.
+        blur_sigma: Standard deviation of the Gaussian kernel.
+
+    Returns:
+        Blurred tensor of the same shape as the input.
+    """
     B, C, H, W = tensor.shape
     k = blur_kernel_size
 
@@ -105,6 +156,17 @@ def separable_gaussian_blur(
 def _spatial_mean_fill(
     tensor: torch.Tensor,
 ) -> torch.Tensor:
+    """Replace remaining NaN pixels with the per-(batch, channel) spatial mean.
+
+    Used as a fallback after iterative flood fill to handle isolated NaN
+    pixels that have no valid neighbors.
+
+    Args:
+        tensor: Tensor of shape (B, C, H, W) that may still contain NaNs.
+
+    Returns:
+        Tensor of the same shape with NaNs replaced by spatial means.
+    """
     mean = tensor.nanmean(dim=(-2, -1), keepdim=True)
     tensor = torch.where(tensor.isnan(), mean, tensor)
     return tensor
@@ -117,7 +179,42 @@ def _fast_flood_fill(
     blur_sigma: float = 1.0,
     interior_mask: torch.Tensor = None,
 ) -> tuple[torch.Tensor, int]:
-    # --- Setup ---
+    """Fill NaN regions using iterative neighbor-averaging with smooth blending.
+
+    The algorithm has three phases:
+
+    1. **Interior mean-fill**: NaN pixels flagged by ``interior_mask`` are
+       replaced with the per-(batch, channel) spatial mean of valid pixels.
+       This avoids wasting expansion steps on deep-interior pixels.
+    2. **Edge-blend expansion**: A 3x3 average-pooling loop grows valid pixels
+       into the remaining NaN region one layer per step. Longitude padding is
+       circular; latitude padding is zero. Stops after ``num_steps`` iterations
+       (or when no NaN pixels remain if ``num_steps`` is None).
+    3. **Gaussian smoothing**: A separable Gaussian blur is used to smoothly
+       interpolate across the original valid/NaN boundary, preventing sharp
+       seams between real and filled data.
+
+    Any NaN pixels still remaining after steps 1--2 (e.g. fully isolated
+    pixels with no valid neighbors) are filled with the spatial mean as a
+    fallback before the smoothing pass.
+
+    Args:
+        tensor: Input tensor of shape (B, C, H, W) with NaN values to fill.
+        num_steps: Maximum number of edge-expansion iterations. If None, the
+            loop runs until all NaN pixels are filled or no further progress
+            can be made.
+        blur_kernel_size: Size of the Gaussian blur kernel for the final
+            smoothing pass.
+        blur_sigma: Standard deviation of the Gaussian blur kernel.
+        interior_mask: Boolean tensor broadcastable to (B, C, H, W) marking
+            NaN pixels to mean-fill before the expansion loop. Typically
+            produced by ``_get_interior_mask``.
+
+    Returns:
+        A tuple of (filled_tensor, steps_taken) where filled_tensor has the
+        same shape as the input with all NaNs replaced, and steps_taken is
+        the number of edge-expansion iterations performed.
+    """
     B, C, H, W = tensor.shape
     original_valid_mask = (~tensor.isnan()).to(dtype=tensor.dtype)
 
@@ -126,7 +223,7 @@ def _fast_flood_fill(
     x = torch.nan_to_num(x, nan=0.0)
     valid_mask = (~isnan_mask).to(dtype=tensor.dtype)
 
-    # --- Pre-fill Interior (The "Mean-Fill" Step) ---
+    # Pre-fill interior with the nanmean
     if interior_mask is not None:
         # Compute spatial mean of valid ocean pixels per map
         mean_vals = tensor.nanmean(dim=(-2, -1), keepdim=True).view(B * C, 1, 1, 1)
@@ -139,7 +236,7 @@ def _fast_flood_fill(
         valid_mask = torch.where(int_mask, 1.0, valid_mask)
         isnan_mask = isnan_mask & ~int_mask
 
-    # --- Iterative Average Pooling (The "Edge-Blend" Step) ---
+    # Iterative average pooling
     kernel = torch.ones(1, 1, 3, 3, device=tensor.device, dtype=tensor.dtype)
     steps_taken = 0
 
@@ -177,8 +274,8 @@ def _fast_flood_fill(
     tensor = _spatial_mean_fill(tensor)
 
     # Apply Gaussian blur
-    blurred_tensor = separable_gaussian_blur(tensor, blur_kernel_size, blur_sigma)
-    blurred_valid_mask = separable_gaussian_blur(
+    blurred_tensor = _separable_gaussian_blur(tensor, blur_kernel_size, blur_sigma)
+    blurred_valid_mask = _separable_gaussian_blur(
         original_valid_mask, blur_kernel_size, blur_sigma
     )
 
