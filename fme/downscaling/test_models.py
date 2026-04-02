@@ -624,6 +624,9 @@ def test_checkpoint_model_build(tmp_path):
     )
     assert torch.equal(loaded_model.full_fine_coords.lat.cpu(), fine_coords.lat.cpu())
     assert torch.equal(loaded_model.full_fine_coords.lon.cpu(), fine_coords.lon.cpu())
+    assert (
+        not loaded_model.module.training
+    ), "Module should be in eval mode after build() to disable dropout"
 
 
 def test_build_raises_when_static_inputs_coords_mismatch_full_fine_coords():
