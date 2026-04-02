@@ -75,6 +75,32 @@ def _get_interior_mask(nan_mask: torch.Tensor, num_steps: int) -> torch.Tensor:
     return isnan_mask.view(orig_shape)
 
 
+def separable_gaussian_blur(
+    tensor: torch.Tensor, blur_kernel_size: int = 5, blur_sigma: float = 1.0
+) -> torch.Tensor:
+    """Applies a separable Gaussian blur with circular padding on the X-axis."""
+    B, C, H, W = tensor.shape
+    k = blur_kernel_size
+
+    coords = torch.arange(
+        -k // 2 + 1.0, k // 2 + 1.0, device=tensor.device, dtype=tensor.dtype
+    )
+
+    gauss_1d = torch.exp(-(coords**2) / (2 * blur_sigma**2))
+    gauss_1d = gauss_1d / gauss_1d.sum()
+
+    kernel_y = gauss_1d.view(1, 1, k, 1)
+    kernel_x = gauss_1d.view(1, 1, 1, k)
+
+    x_blur = tensor.reshape(B * C, 1, H, W)
+
+    blurred_y = F.conv2d(x_blur, kernel_y, padding=(k // 2, 0))
+    padded_blur_y = F.pad(blurred_y, (k // 2, k // 2, 0, 0), mode="circular")
+    blurred_x = F.conv2d(padded_blur_y, kernel_x, padding=0)
+
+    return blurred_x.view(B, C, H, W)
+
+
 def _spatial_mean_fill(
     tensor: torch.Tensor,
 ) -> torch.Tensor:
@@ -92,7 +118,7 @@ def _fast_flood_fill(
 ) -> tuple[torch.Tensor, int]:
     # --- Setup ---
     B, C, H, W = tensor.shape
-    original_isnan_mask = tensor.isnan()
+    original_valid_mask = (~tensor.isnan()).float()
 
     x = tensor.reshape(B * C, 1, H, W)
     isnan_mask = x.isnan()
@@ -149,25 +175,15 @@ def _fast_flood_fill(
     # Fallback for remaining isolated NaNs
     tensor = _spatial_mean_fill(tensor)
 
-    # --- Separable Gaussian Blur ---
-    k = blur_kernel_size
-    coords = torch.arange(
-        -k // 2 + 1.0, k // 2 + 1.0, device=tensor.device, dtype=tensor.dtype
+    # Apply Gaussian blur
+    blurred_tensor = separable_gaussian_blur(tensor, blur_kernel_size, blur_sigma)
+    blurred_valid_mask = separable_gaussian_blur(
+        original_valid_mask, blur_kernel_size, blur_sigma
     )
 
-    gauss_1d = torch.exp(-(coords**2) / (2 * blur_sigma**2))
-    gauss_1d = gauss_1d / gauss_1d.sum()
-
-    kernel_y = gauss_1d.view(1, 1, k, 1)
-    kernel_x = gauss_1d.view(1, 1, 1, k)
-
-    x_blur = tensor.view(B * C, 1, H, W)
-
-    blurred_y = F.conv2d(x_blur, kernel_y, padding=(k // 2, 0))
-    padded_blur_y = F.pad(blurred_y, (k // 2, k // 2, 0, 0), mode="circular")
-    blurred_x = F.conv2d(padded_blur_y, kernel_x, padding=0)
-
-    blurred_tensor = blurred_x.view(B, C, H, W)
-    tensor = torch.where(original_isnan_mask, blurred_tensor, tensor)
+    # smoothly interpolate across the boundary
+    tensor = (tensor * blurred_valid_mask) + (
+        blurred_tensor * (1.0 - blurred_valid_mask)
+    )
 
     return tensor, steps_taken
