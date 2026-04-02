@@ -264,13 +264,23 @@ def compute_surface_precipitation_rate(
     liquid_precip_density: float = LIQUID_PRECIP_DENSITY,
     output_name: str = SURFACE_PRECIPITATION,
     standard_names=None,
+    include_snow_rate: bool = False,
 ):
     if total_precip_rate_name not in ds.variables:
-        # see https://github.com/E3SM-Project/e3sm_diags/blob/f80253a063fde83dd8b588a7e144622d702718fb/e3sm_diags/derivations/formulas.py#L230-L233
-        precip = (
-            ds[standard_names.surface_ice_rate]
-            + ds[standard_names.convective_liquid_ice_rate]
-        )
+        if include_snow_rate:
+            # ACE-EAMv2 checkpoint includes snow rate in the total precip rate
+            precip = (
+                ds[standard_names.surface_snow_rate]
+                + ds[standard_names.surface_ice_rate]
+                + ds[standard_names.convective_snow_rate]
+                + ds[standard_names.convective_liquid_ice_rate]
+            )
+        else:
+            # see https://github.com/E3SM-Project/e3sm_diags/blob/f80253a063fde83dd8b588a7e144622d702718fb/e3sm_diags/derivations/formulas.py#L230-L233
+            precip = (
+                ds[standard_names.surface_ice_rate]
+                + ds[standard_names.convective_liquid_ice_rate]
+            )
         precip.attrs["long_name"] = "Total surface precipitation rate"
         ds[total_precip_rate_name] = precip
     else:
