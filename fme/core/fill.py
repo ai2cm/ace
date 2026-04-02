@@ -118,12 +118,12 @@ def _fast_flood_fill(
 ) -> tuple[torch.Tensor, int]:
     # --- Setup ---
     B, C, H, W = tensor.shape
-    original_valid_mask = (~tensor.isnan()).float()
+    original_valid_mask = (~tensor.isnan()).to(dtype=tensor.dtype)
 
     x = tensor.reshape(B * C, 1, H, W)
     isnan_mask = x.isnan()
     x = torch.nan_to_num(x, nan=0.0)
-    valid_mask = (~isnan_mask).float()
+    valid_mask = (~isnan_mask).to(dtype=tensor.dtype)
 
     # --- Pre-fill Interior (The "Mean-Fill" Step) ---
     if interior_mask is not None:
