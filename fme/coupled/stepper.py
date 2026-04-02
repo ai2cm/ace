@@ -1546,6 +1546,46 @@ class CoupledTrainStepper(
     def update_training_history(self, training_job: TrainingJob) -> None:
         self._stepper.update_training_history(training_job)
 
+    def _process_component_step(
+        self,
+        gen_step: ComponentStepPrediction,
+        forward_data: TensorMapping,
+        time_dim: int,
+        n_total_steps: int,
+        n_ensemble: int,
+        optimization: OptimizationABC,
+        metrics: ComponentStepMetrics,
+        output_list: list[ComponentStepPrediction],
+    ) -> None:
+        target_step = {
+            k: v.select(time_dim, gen_step.step) for k, v in forward_data.items()
+        }
+        if n_ensemble > 1:
+            gen_step_data_unfolded = unfold_ensemble_dim(gen_step.data, n_ensemble)
+            gen_step_for_loss = ComponentStepPrediction(
+                realm=gen_step.realm,
+                data=gen_step_data_unfolded,
+                step=gen_step.step,
+            )
+        else:
+            gen_step_for_loss = gen_step
+        target_step_ensemble = add_ensemble_dim(target_step)
+        step_loss = self._loss(
+            gen_step_for_loss,
+            target_step_ensemble,
+            n_total_steps=n_total_steps,
+        )
+        if step_loss is not None:
+            label = f"loss/{gen_step.realm}_step_{gen_step.step}"
+            metrics.add_metric(label, step_loss.detach(), gen_step.realm)
+        if step_loss is not None:
+            optimization.accumulate_loss(step_loss)
+        if n_ensemble > 1:
+            gen_step_to_append = gen_step_for_loss.detach(optimization)
+        else:
+            gen_step_to_append = gen_step.detach(optimization)
+        output_list.append(gen_step_to_append)
+
     def train_on_batch(
         self,
         data: CoupledBatchData,
@@ -1616,39 +1656,16 @@ class CoupledTrainStepper(
                     )
                     with grad_context:
                         gen_step = next(output_iterator)
-                        target_step = {
-                            k: v.select(self.atmosphere.TIME_DIM, gen_step.step)
-                            for k, v in atmos_forward_data.data.items()
-                        }
-                        if n_ensemble > 1:
-                            gen_step_data_unfolded = unfold_ensemble_dim(
-                                gen_step.data, n_ensemble
-                            )
-                            gen_step_for_loss = ComponentStepPrediction(
-                                realm=gen_step.realm,
-                                data=gen_step_data_unfolded,
-                                step=gen_step.step,
-                            )
-                        else:
-                            gen_step_for_loss = gen_step
-                        target_step_ensemble = add_ensemble_dim(target_step)
-                        step_loss = self._loss(
-                            gen_step_for_loss,
-                            target_step_ensemble,
+                        self._process_component_step(
+                            gen_step=gen_step,
+                            forward_data=atmos_forward_data.data,
+                            time_dim=self.atmosphere.TIME_DIM,
                             n_total_steps=n_total_atmos_steps,
+                            n_ensemble=n_ensemble,
+                            optimization=optimization,
+                            metrics=metrics,
+                            output_list=output_list,
                         )
-                        if step_loss is not None:
-                            label = f"loss/{gen_step.realm}_step_{gen_step.step}"
-                            metrics.add_metric(
-                                label, step_loss.detach(), gen_step.realm
-                            )
-                    if step_loss is not None:
-                        optimization.accumulate_loss(step_loss)
-                    if n_ensemble > 1:
-                        gen_step_to_append = gen_step_for_loss.detach(optimization)
-                    else:
-                        gen_step_to_append = gen_step.detach(optimization)
-                    output_list.append(gen_step_to_append)
 
                 optimize = self._loss.step_is_optimized(
                     "ocean",
@@ -1658,37 +1675,16 @@ class CoupledTrainStepper(
                 grad_context = contextlib.nullcontext() if optimize else torch.no_grad()
                 with grad_context:
                     gen_step = next(output_iterator)
-                    target_step = {
-                        k: v.select(self.ocean.TIME_DIM, gen_step.step)
-                        for k, v in ocean_forward_data.data.items()
-                    }
-                    if n_ensemble > 1:
-                        gen_step_data_unfolded = unfold_ensemble_dim(
-                            gen_step.data, n_ensemble
-                        )
-                        gen_step_for_loss = ComponentStepPrediction(
-                            realm=gen_step.realm,
-                            data=gen_step_data_unfolded,
-                            step=gen_step.step,
-                        )
-                    else:
-                        gen_step_for_loss = gen_step
-                    target_step_ensemble = add_ensemble_dim(target_step)
-                    step_loss = self._loss(
-                        gen_step_for_loss,
-                        target_step_ensemble,
+                    self._process_component_step(
+                        gen_step=gen_step,
+                        forward_data=ocean_forward_data.data,
+                        time_dim=self.ocean.TIME_DIM,
                         n_total_steps=n_outer_steps,
+                        n_ensemble=n_ensemble,
+                        optimization=optimization,
+                        metrics=metrics,
+                        output_list=output_list,
                     )
-                    if step_loss is not None:
-                        label = f"loss/{gen_step.realm}_step_{gen_step.step}"
-                        metrics.add_metric(label, step_loss.detach(), gen_step.realm)
-                if step_loss is not None:
-                    optimization.accumulate_loss(step_loss)
-                if n_ensemble > 1:
-                    gen_step_to_append = gen_step_for_loss.detach(optimization)
-                else:
-                    gen_step_to_append = gen_step.detach(optimization)
-                output_list.append(gen_step_to_append)
 
         loss = optimization.get_accumulated_loss().detach()
         optimization.step_weights()
