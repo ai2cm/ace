@@ -268,7 +268,7 @@ def compute_surface_precipitation_rate(
     if total_precip_rate_name not in ds.variables:
         # see https://github.com/E3SM-Project/e3sm_diags/blob/f80253a063fde83dd8b588a7e144622d702718fb/e3sm_diags/derivations/formulas.py#L230-L233
         precip = (
-            + ds[standard_names.surface_ice_rate]
+            ds[standard_names.surface_ice_rate]
             + ds[standard_names.convective_liquid_ice_rate]
         )
         precip.attrs["long_name"] = "Total surface precipitation rate"

@@ -162,7 +162,9 @@ def main(config, year):
         if "xtime" in ds.data_vars:
             tstart = ds.xtime.values[0].decode("utf-8").replace("_", " ")
             tend = ds.xtime.values[-1].decode("utf-8").replace("_", " ")
-        elif "xtime_startMonthly" in ds.data_vars and "xtime_endMonthly" in ds.data_vars:
+        elif (
+            "xtime_startMonthly" in ds.data_vars and "xtime_endMonthly" in ds.data_vars
+        ):
             tstart = ds.xtime_startMonthly.values[0].decode("utf-8").replace("_", " ")
             tend = ds.xtime_endMonthly.values[-1].decode("utf-8").replace("_", " ")
         else:
