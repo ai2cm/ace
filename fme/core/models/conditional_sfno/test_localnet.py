@@ -226,6 +226,45 @@ def test_no_big_skip():
     assert output.shape == (n_samples, output_channels, *img_shape)
 
 
+@pytest.mark.parametrize(
+    "kernel_shape, basis_type",
+    [
+        ((1, 1), "morlet"),
+        ((5, 1), "morlet"),
+        ((3, 5), "morlet"),
+        ((3, 3), "piecewise linear"),
+        ((3, 1), "piecewise linear"),
+    ],
+)
+def test_can_call_localnet_with_kernel_shape(kernel_shape, basis_type):
+    input_channels = 2
+    output_channels = 3
+    img_shape = (9, 18)
+    n_samples = 4
+    device = get_device()
+    params = LocalNetConfig(
+        embed_dim=16,
+        kernel_shape=kernel_shape,
+        basis_type=basis_type,
+        block_types=["disco", "disco"],
+    )
+    model = get_lat_lon_localnet(
+        params=params,
+        img_shape=img_shape,
+        in_chans=input_channels,
+        out_chans=output_channels,
+    ).to(device)
+    x = torch.randn(n_samples, input_channels, *img_shape, device=device)
+    context = Context(
+        embedding_scalar=torch.randn(n_samples, 0, device=device),
+        labels=torch.randn(n_samples, 0, device=device),
+        noise=torch.randn(n_samples, 0, *img_shape, device=device),
+        embedding_pos=torch.randn(n_samples, 0, *img_shape, device=device),
+    )
+    output = model(x, context)
+    assert output.shape == (n_samples, output_channels, *img_shape)
+
+
 def test_unknown_filter_type_raises():
     with pytest.raises(ValueError, match="Invalid block type"):
         LocalNetConfig(block_types=["spectral"])  # type: ignore[list-item]

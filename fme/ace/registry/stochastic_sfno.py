@@ -14,9 +14,6 @@ from fme.core.models.conditional_sfno.sfnonet import (
     SFNONetConfig,
     get_lat_lon_sfnonet,
 )
-from fme.core.models.conditional_sfno.sfnonet import (
-    SphericalFourierNeuralOperatorNet as ConditionalSFNO,
-)
 
 
 def isotropic_noise(
@@ -48,21 +45,43 @@ def isotropic_noise(
     return isht(alm)
 
 
-class NoiseConditionedSFNO(torch.nn.Module):
+class NoiseConditionedModel(torch.nn.Module):
+    """Wraps a context-based module with noise and optional label conditioning.
+
+    Generates noise (gaussian by default, or isotropic via an inverse SHT)
+    and optional positional embeddings (with label-position interaction),
+    then calls the wrapped module with a fully populated Context.
+
+    Args:
+        conditional_model: An nn.Module with forward signature
+            (x, context: Context).
+        img_shape: Global spatial dimensions (lat, lon) of the input data.
+        embed_dim_noise: Dimension of noise channels.
+        embed_dim_pos: Dimension of learned positional embedding. 0 disables.
+        embed_dim_labels: Dimension of label embeddings. 0 disables.
+        inverse_sht: Optional inverse spherical harmonic transform callable.
+            If provided, isotropic noise is generated via SHT; otherwise
+            gaussian noise is used.
+    """
+
     def __init__(
         self,
-        conditional_model: ConditionalSFNO,
+        conditional_model: torch.nn.Module,
         img_shape: tuple[int, int],
-        noise_type: Literal["isotropic", "gaussian"] = "gaussian",
         embed_dim_noise: int = 256,
         embed_dim_pos: int = 0,
         embed_dim_labels: int = 0,
+        inverse_sht: Callable[[torch.Tensor], torch.Tensor] | None = None,
+        lmax: int = 0,
+        mmax: int = 0,
     ):
         super().__init__()
         self.conditional_model = conditional_model
         self.embed_dim = embed_dim_noise
-        self.noise_type = noise_type
         self.img_shape = img_shape
+        self._inverse_sht = inverse_sht
+        self._lmax = lmax
+        self._mmax = mmax
         self.label_pos_embed: torch.nn.Parameter | None = None
         # register pos embed if pos_embed_dim != 0
         if embed_dim_pos != 0:
@@ -91,24 +110,20 @@ class NoiseConditionedSFNO(torch.nn.Module):
         self, x: torch.Tensor, labels: torch.Tensor | None = None
     ) -> torch.Tensor:
         x = x.reshape(-1, *x.shape[-3:])
-        if self.noise_type == "isotropic":
-            lmax = self.conditional_model.itrans_up.lmax
-            mmax = self.conditional_model.itrans_up.mmax
+        if self._inverse_sht is not None:
             noise = isotropic_noise(
                 (x.shape[0], self.embed_dim),
-                lmax,
-                mmax,
-                self.conditional_model.itrans_up,
+                self._lmax,
+                self._mmax,
+                self._inverse_sht,
                 device=x.device,
             )
-        elif self.noise_type == "gaussian":
+        else:
             noise = torch.randn(
                 [x.shape[0], self.embed_dim, *x.shape[-2:]],
                 device=x.device,
                 dtype=x.dtype,
             )
-        else:
-            raise ValueError(f"Invalid noise type: {self.noise_type}")
 
         h_slice, w_slice = Distributed.get_instance().get_local_slices(self.img_shape)
 
@@ -133,6 +148,10 @@ class NoiseConditionedSFNO(torch.nn.Module):
                 noise=noise,
             ),
         )
+
+
+# Backward-compatible alias
+NoiseConditionedSFNO = NoiseConditionedModel
 
 
 # this is based on the call signature of SphericalFourierNeuralOperatorNet at
@@ -293,11 +312,21 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
                 embed_dim_labels=len(dataset_info.all_labels),
             ),
         )
-        return NoiseConditionedSFNO(
+        if self.noise_type == "isotropic":
+            inverse_sht = sfno_net.itrans_up
+            lmax = inverse_sht.lmax
+            mmax = inverse_sht.mmax
+        else:
+            inverse_sht = None
+            lmax = 0
+            mmax = 0
+        return NoiseConditionedModel(
             sfno_net,
-            noise_type=self.noise_type,
             embed_dim_noise=self.noise_embed_dim,
             embed_dim_pos=self.context_pos_embed_dim,
             embed_dim_labels=len(dataset_info.all_labels),
             img_shape=dataset_info.img_shape,
+            inverse_sht=inverse_sht,
+            lmax=lmax,
+            mmax=mmax,
         )
