@@ -70,13 +70,14 @@ optimization:
 stepper_training:
   ocean:
     loss:
-      type: MSE
+      type: {loss_type}
+      kwargs: {loss_kwargs}
     loss_contributions:
       weight: {loss_ocean_weight}
   atmosphere:
     loss:
-      type: {atmos_loss_type}
-      kwargs: {atmos_loss_kwargs}
+      type: {loss_type}
+      kwargs: {loss_kwargs}
     loss_contributions:
       n_steps: {loss_atmos_n_steps}
 stepper:
@@ -204,12 +205,12 @@ def _write_test_yaml_files(
     # Configure atmosphere network and loss based on crps_training
     if crps_training:
         atmos_network_type = "NoiseConditionedSFNO"
-        atmos_loss_type = "EnsembleLoss"
-        atmos_loss_kwargs = "{'crps_weight': 1.0, 'energy_score_weight': 0.0}"
+        loss_type = "EnsembleLoss"
+        loss_kwargs = "{'crps_weight': 1.0, 'energy_score_weight': 0.0}"
     else:
         atmos_network_type = "SphericalFourierNeuralOperatorNet"
-        atmos_loss_type = "MSE"
-        atmos_loss_kwargs = "{}"
+        loss_type = "MSE"
+        loss_kwargs = "{}"
 
     train_config = _TRAIN_CONFIG_TEMPLATE.format(
         experiment_dir=exper_dir,
@@ -235,8 +236,8 @@ def _write_test_yaml_files(
         loss_atmos_n_steps=loss_atmos_n_steps,
         loss_ocean_weight=loss_ocean_weight,
         atmos_network_type=atmos_network_type,
-        atmos_loss_type=atmos_loss_type,
-        atmos_loss_kwargs=atmos_loss_kwargs,
+        loss_type=loss_type,
+        loss_kwargs=loss_kwargs,
     )
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".yaml") as f_train:
         f_train.write(train_config)
