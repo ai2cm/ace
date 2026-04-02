@@ -94,7 +94,8 @@ def separable_gaussian_blur(
 
     x_blur = tensor.reshape(B * C, 1, H, W)
 
-    blurred_y = F.conv2d(x_blur, kernel_y, padding=(k // 2, 0))
+    padded_x_blur = F.pad(x_blur, (0, 0, k // 2, k // 2), mode="replicate")
+    blurred_y = F.conv2d(padded_x_blur, kernel_y, padding=0)
     padded_blur_y = F.pad(blurred_y, (k // 2, k // 2, 0, 0), mode="circular")
     blurred_x = F.conv2d(padded_blur_y, kernel_x, padding=0)
 
