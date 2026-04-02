@@ -17,10 +17,10 @@ from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
-from fme.core.histogram import ComparedDynamicHistograms
+from fme.core.histogram import ComparedDynamicTailsHistograms
 from fme.core.typing_ import TensorMapping
 from fme.core.wandb import WandB
-from fme.downscaling.aggregators.adapters import ComparedDynamicHistogramsAdapter
+from fme.downscaling.aggregators.adapters import ComparedDynamicTailsHistogramsAdapter
 from fme.downscaling.data import PairedBatchData
 
 from ..metrics_and_maths import (
@@ -747,6 +747,11 @@ class Aggregator:
         include_positional_comparisons: Include comparison metrics that output
             positional maps (e.g. mean maps).  This should be disabled when
             using random subsetting because averaged maps won't make sense.
+        two_tailed_variables: List of variables to compute two-tailed metrics for
+            if present in the data. Defaults to
+            ["eastward_wind_at_ten_meters", "northward_wind_at_ten_meters"].
+        left_tailed_variables: List of variables to compute left-tailed metrics for
+            if present in the data. Defaults to ["PRMSL", "PRESsfc"].
     """
 
     def __init__(
@@ -758,21 +763,32 @@ class Aggregator:
         ssim_kwargs: Mapping[str, Any] | None = None,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
         include_positional_comparisons: bool = True,
+        two_tailed_variables: list[str] | None = None,
+        left_tailed_variables: list[str] | None = None,
     ) -> None:
         self.downscale_factor = downscale_factor
 
         if ssim_kwargs is None:
             ssim_kwargs = {}
+        if two_tailed_variables is None:
+            two_tailed_variables = [
+                "eastward_wind_at_ten_meters",
+                "northward_wind_at_ten_meters",
+            ]
+        if left_tailed_variables is None:
+            left_tailed_variables = ["PRMSL", "PRESsfc"]
 
         # Folded samples into batch dimension
         self._comparisons: list[_ComparisonAggregator] = [
             MeanComparison(metrics.root_mean_squared_error, name="metrics/rmse"),
             SnapshotAggregator(dims, variable_metadata, name="snapshot"),
-            ComparedDynamicHistogramsAdapter(
-                histograms=ComparedDynamicHistograms(
+            ComparedDynamicTailsHistogramsAdapter(
+                histograms=ComparedDynamicTailsHistograms(
                     n_bins=n_histogram_bins,
                     percentiles=percentiles,
                     compute_percentile_frac=True,
+                    two_tailed_variables=two_tailed_variables,
+                    left_tailed_variables=left_tailed_variables,
                 ),
                 name="histogram",
             ),
@@ -797,6 +813,7 @@ class Aggregator:
             ]
 
         self.loss = Mean(torch.mean)
+        self.channel_loss = Mean(torch.mean)
         self._fine_latlon_coordinates: LatLonCoordinates | None = None
 
     @torch.no_grad()
@@ -838,6 +855,8 @@ class Aggregator:
             coarse_comparison_aggregator.record_batch(target, prediction, coarse)
 
         self.loss.record_batch({"loss": outputs.loss})
+        if outputs.channel_losses:
+            self.channel_loss.record_batch(outputs.channel_losses)
 
     def get_wandb(
         self,
@@ -850,6 +869,8 @@ class Aggregator:
 
         ret: dict[str, Any] = {}
         ret.update(self.loss.get_wandb(prefix))
+        if self.channel_loss._count > 0:
+            ret.update(self.channel_loss.get_wandb(f"{prefix}channel_loss/"))
         for comparison in self._comparisons:
             ret.update(comparison.get_wandb(prefix))
         for coarse_comparison in self._coarse_comparisons:

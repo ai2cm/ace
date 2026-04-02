@@ -3,6 +3,7 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
+from fme.core.atmosphere_data import HasAtmosphereVerticalIntegral
 from fme.core.coordinates import (
     HorizontalCoordinates,
     NullVerticalCoordinate,
@@ -14,6 +15,7 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.utils import decode_timestep, encode_timestep
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.mask_provider import MaskProvider, MaskProviderABC, NullMaskProvider
+from fme.core.ocean_data import HasOceanDepthIntegral
 
 
 class MissingDatasetInfo(ValueError):
@@ -120,11 +122,10 @@ class DatasetInfo:
                     f"{self._vertical_coordinate} != {other._vertical_coordinate}"
                 )
         if self._mask_provider is not None and other._mask_provider is not None:
-            if self._mask_provider != other._mask_provider:
-                issues.append(
-                    f"mask_provider is not compatible, "
-                    f"{self._mask_provider} != {other._mask_provider}"
-                )
+            try:
+                self._mask_provider.assert_compatible_with(other._mask_provider)
+            except AssertionError as e:
+                issues.append(f"mask_provider is not compatible: {e}")
         if self._timestep is not None:
             if self._timestep != other._timestep:
                 issues.append(
@@ -183,6 +184,28 @@ class DatasetInfo:
         return self._vertical_coordinate
 
     @property
+    def atmosphere_vertical_coordinate(self) -> HasAtmosphereVerticalIntegral | None:
+        if isinstance(self._vertical_coordinate, HasAtmosphereVerticalIntegral):
+            return self._vertical_coordinate
+        elif isinstance(self._vertical_coordinate, NullVerticalCoordinate):
+            return None
+        raise RuntimeError(
+            f"{self._vertical_coordinate} cannot be used as an atmosphere vertical "
+            "coordinate."
+        )
+
+    @property
+    def ocean_vertical_coordinate(self) -> HasOceanDepthIntegral | None:
+        if isinstance(self._vertical_coordinate, HasOceanDepthIntegral):
+            return self._vertical_coordinate
+        elif isinstance(self._vertical_coordinate, NullVerticalCoordinate):
+            return None
+        raise RuntimeError(
+            f"{self._vertical_coordinate} cannot be used as an ocean vertical "
+            "coordinate."
+        )
+
+    @property
     def mask_provider(self) -> MaskProvider:
         if self._mask_provider is None:
             raise MissingDatasetInfo("mask_provider")
@@ -217,9 +240,9 @@ class DatasetInfo:
             all_labels=self._all_labels,
         )
 
-    def to_state(self) -> dict[str, Any]:
+    def get_state(self) -> dict[str, Any]:
         if self._gridded_operations is not None:
-            gridded_operations = self._gridded_operations.to_state()
+            gridded_operations = self._gridded_operations.get_state()
         else:
             gridded_operations = None
         if self._img_shape is not None:
@@ -229,7 +252,7 @@ class DatasetInfo:
         if self._horizontal_coordinates is None:
             horizontal_coordinates = None
         else:
-            horizontal_coordinates = self._horizontal_coordinates.to_state()
+            horizontal_coordinates = self._horizontal_coordinates.get_state()
         if self._vertical_coordinate is None:
             vertical_coordinate = None
         else:
@@ -237,7 +260,7 @@ class DatasetInfo:
         if self._mask_provider is None:
             mask_provider = None
         else:
-            mask_provider = self._mask_provider.to_state()
+            mask_provider = self._mask_provider.get_state()
         if self._timestep is None:
             timestep = None
         else:
@@ -257,13 +280,21 @@ class DatasetInfo:
     def from_state(cls, state: dict[str, Any]) -> "DatasetInfo":
         if state.get("gridded_operations") is not None:
             # this is for backwards compatibility with older serialized states
-            assert state.get("horizontal_coordinates") is None
+            if state.get("horizontal_coordinates") is not None:
+                raise ValueError(
+                    "Cannot have both 'gridded_operations' and "
+                    "'horizontal_coordinates' in state."
+                )
             gridded_ops = GriddedOperations.from_state(state["gridded_operations"])
         else:
             gridded_ops = None
         if state.get("img_shape") is not None:
             # this is for backwards compatibility with older serialized states
-            assert state.get("horizontal_coordinates") is None
+            if state.get("horizontal_coordinates") is not None:
+                raise ValueError(
+                    "Cannot have both 'img_shape' and "
+                    "'horizontal_coordinates' in state."
+                )
             img_shape = state["img_shape"]
         else:
             img_shape = None

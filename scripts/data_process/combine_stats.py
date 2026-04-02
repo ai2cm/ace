@@ -1,4 +1,5 @@
 import dataclasses
+import logging
 import shutil
 import tempfile
 from typing import Dict, List
@@ -29,9 +30,24 @@ class StatsConfig:
 
 
 @dataclasses.dataclass
+class TimeCoarsenConfig:
+    """
+    Configuration for time coarsening of a dataset.
+
+    Attributes:
+        data_output_directory: Directory to save the coarsened datasets as zarr stores.
+        stats_output_directory: Directory to save the stats of the coarsened datasets.
+    """
+
+    data_output_directory: str
+    stats_output_directory: str
+
+
+@dataclasses.dataclass
 class Config:
     runs: Dict[str, str]
     stats: StatsConfig
+    time_coarsen: TimeCoarsenConfig | None = None
 
 
 def _make_history_string(config_filename: str, stats_output_dir: str):
@@ -50,6 +66,16 @@ def open_datasets(roots: List[str], filename: str) -> List[xr.Dataset]:
     return datasets
 
 
+def _combined_stats_exist(output_directory: str, subdirectory: str) -> bool:
+    """Check if combined stats already exist."""
+    path = output_directory + f"/{subdirectory}/centering.nc"
+    if output_directory.startswith("gs:"):
+        fs = fsspec.filesystem("gs")
+        return fs.exists(path)
+    else:
+        return fsspec.filesystem("file").exists(path)
+
+
 def combine_stats(
     stats_roots: list[str],
     output_directory: str,
@@ -62,6 +88,13 @@ def combine_stats(
     Args:
         stats_roots: List of root directories with the stats to combine.
     """
+    if _combined_stats_exist(output_directory, subdirectory):
+        logging.info(
+            f"Combined stats already exist at "
+            f"{output_directory}/{subdirectory}. Skipping."
+        )
+        return
+
     with tempfile.TemporaryDirectory() as tmpdir, xr.set_options(keep_attrs=True):
         for filename in (
             "centering.nc",
@@ -133,6 +166,7 @@ def main(config_yaml: str):
     Arguments:
     config_yaml -- Path to the configuration file for the data processing pipeline.
     """
+    logging.basicConfig(level=logging.INFO)
     with open(config_yaml, "r") as f:
         config_data = yaml.load(f, Loader=yaml.CLoader)
     config = dacite.from_dict(data_class=Config, data=config_data)
@@ -147,6 +181,20 @@ def main(config_yaml: str):
         output_directory=config.stats.output_directory,
         history=_make_history_string(config_yaml, config.stats.output_directory),
     )
+
+    if config.time_coarsen is not None:
+        stats_roots = [
+            config.time_coarsen.stats_output_directory + "/" + run + "/"
+            for run in config.runs.keys()
+            if run not in config.stats.exclude_runs
+        ]
+        combine_stats(
+            stats_roots=stats_roots,
+            output_directory=config.time_coarsen.stats_output_directory,
+            history=_make_history_string(
+                config_yaml, config.time_coarsen.stats_output_directory
+            ),
+        )
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ import yaml
 from matplotlib.axes import Axes
 
 from fme.core import metrics
+from fme.core.distributed.distributed import Distributed
 
 DATASETS_DIR = os.path.join(os.path.dirname(__file__), "interp-datasets")
 OUT_DIR = os.path.join(os.path.dirname(__file__), "output")
@@ -452,4 +453,5 @@ if __name__ == "__main__":
     config = dacite.from_dict(
         data_class=Config, data=data, config=dacite.Config(strict=True)
     )
-    main(config)
+    with Distributed.context():
+        main(config)

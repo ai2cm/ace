@@ -14,6 +14,7 @@ import yaml
 from scipy.optimize import curve_fit
 
 from fme.core import metrics
+from fme.core.distributed.distributed import Distributed
 
 
 @dataclasses.dataclass
@@ -204,9 +205,10 @@ if __name__ == "__main__":
     with open(args.data_config, "r") as f:
         data_config = dacite.from_dict(DataConfig, yaml.safe_load(f))
 
-    main(
-        dataset=data_config.get_dataset(),
-        years_per_ensemble=data_config.years_per_ensemble,
-        amip=data_config.is_amip,
-        stats_path=data_config.stats_path,
-    )
+    with Distributed.context():
+        main(
+            dataset=data_config.get_dataset(),
+            years_per_ensemble=data_config.years_per_ensemble,
+            amip=data_config.is_amip,
+            stats_path=data_config.stats_path,
+        )
