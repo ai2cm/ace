@@ -1,8 +1,9 @@
+import contextlib
 import dataclasses
 import datetime
 import logging
 import pathlib
-from collections.abc import Generator, Iterable
+from collections.abc import Callable, Generator, Iterable
 from typing import Any, Literal
 
 import dacite
@@ -781,6 +782,9 @@ class CoupledStepperTrainLoss:
             atmosphere=self._loss_objs["atmosphere"].effective_loss_scaling,
         )
 
+    def step_is_optimized(self, realm: str, step: int) -> bool:
+        return self._loss_objs[realm].step_is_optimized(step)
+
     def __call__(
         self,
         prediction: ComponentStepPrediction,
@@ -1056,6 +1060,7 @@ class CoupledStepper:
         initial_condition: CoupledPrognosticState,
         forcing_data: CoupledBatchData,
         optimizer: OptimizationABC,
+        step_is_optimized: Callable[[str, int], bool] = lambda n, c: True,
     ) -> Generator[ComponentStepPrediction, None, None]:
         if (
             initial_condition.atmosphere_data.as_batch_data().n_timesteps
@@ -1113,11 +1118,16 @@ class CoupledStepper:
             atmos_steps = []
 
             # predict and yield atmosphere steps
-            for i_inner, atmos_step in enumerate(atmos_generator):
+            for i_inner in range(self.n_inner_steps):
+                atmos_step_num = i_outer * self.n_inner_steps + i_inner
+                optimized = step_is_optimized("atmosphere", atmos_step_num)
+                context = contextlib.nullcontext() if optimized else torch.no_grad()
+                with context:
+                    atmos_step = next(atmos_generator)
                 yield ComponentStepPrediction(
                     realm="atmosphere",
                     data=atmos_step,
-                    step=(i_outer * self.n_inner_steps + i_inner),
+                    step=atmos_step_num,
                 )
                 atmos_step = optimizer.detach_if_using_gradient_accumulation(atmos_step)
                 atmos_steps.append(atmos_step)
@@ -1143,16 +1153,21 @@ class CoupledStepper:
                 labels=ocean_window.labels,
             )
             # predict and yield a single ocean step
-            ocean_step = next(
-                iter(
-                    self.ocean.get_prediction_generator(
-                        ocean_ic_state,
-                        ocean_forcings,
-                        n_forward_steps=1,
-                        optimizer=optimizer,
+            ocean_optimized = step_is_optimized("ocean", i_outer)
+            ocean_context = (
+                contextlib.nullcontext() if ocean_optimized else torch.no_grad()
+            )
+            with ocean_context:
+                ocean_step = next(
+                    iter(
+                        self.ocean.get_prediction_generator(
+                            ocean_ic_state,
+                            ocean_forcings,
+                            n_forward_steps=1,
+                            optimizer=optimizer,
+                        )
                     )
                 )
-            )
             yield ComponentStepPrediction(
                 realm="ocean",
                 data=ocean_step,
@@ -1160,28 +1175,25 @@ class CoupledStepper:
             )
 
             # prepare ic states for next coupled step
+            atmos_ic_data = {
+                k: v.unsqueeze(self.atmosphere.TIME_DIM)
+                for k, v in atmos_steps[-1].items()
+            }
             atmos_ic_state = PrognosticState(
                 BatchData(
-                    data=optimizer.detach_if_using_gradient_accumulation(
-                        {
-                            k: v.unsqueeze(self.atmosphere.TIME_DIM)
-                            for k, v in atmos_steps[-1].items()
-                        }
-                    ),
+                    data=optimizer.detach_if_using_gradient_accumulation(atmos_ic_data),
                     time=atmos_window.time.isel(
                         time=slice(-self.atmosphere.n_ic_timesteps, None)
                     ),
                     labels=atmos_window.labels,
                 )
             )
+            ocean_ic_data = {
+                k: v.unsqueeze(self.ocean.TIME_DIM) for k, v in ocean_step.items()
+            }
             ocean_ic_state = PrognosticState(
                 BatchData(
-                    data=optimizer.detach_if_using_gradient_accumulation(
-                        {
-                            k: v.unsqueeze(self.ocean.TIME_DIM)
-                            for k, v in ocean_step.items()
-                        }
-                    ),
+                    data=optimizer.detach_if_using_gradient_accumulation(ocean_ic_data),
                     time=ocean_window.time.isel(time=slice(-self.n_ic_timesteps, None)),
                     labels=ocean_window.labels,
                 )
@@ -1536,6 +1548,7 @@ class CoupledTrainStepper(
                 input_data,
                 data,
                 optimization,
+                step_is_optimized=self._loss.step_is_optimized,
             )
             output_list = []
             for gen_step in output_generator:

@@ -33,6 +33,7 @@ from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
+from fme.core.generics.lr_tuning import LRTuningConfig
 from fme.core.generics.trainer import EndOfBatchCallback, EndOfEpochCallback
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import Optimization, OptimizationConfig
@@ -267,6 +268,7 @@ class TrainConfig:
     )
     evaluate_before_training: bool = False
     save_best_inference_epoch_checkpoints: bool = False
+    lr_tuning: LRTuningConfig | None = None
     resume_results: ResumeResultsConfig | None = None
 
     def __post_init__(self):
@@ -296,6 +298,11 @@ class TrainConfig:
             raise ValueError(
                 "train_loader and weather_evaluation loader must both use labels or "
                 "both not use labels"
+            )
+        if self.lr_tuning is not None and self.optimization.has_lr_schedule:
+            raise ValueError(
+                "lr_tuning and optimization.scheduler cannot both be specified; "
+                "lr_tuning is an alternative form of learning rate scheduling"
             )
         if not is_local(self.experiment_dir):
             raise ValueError(

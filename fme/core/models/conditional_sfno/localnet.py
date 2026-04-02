@@ -14,6 +14,7 @@ from .lora import LoRAConv2d
 from .sfnonet import DiscreteContinuousConvS2, NoLayerNorm, _compute_cutoff_radius
 
 BlockType = Literal["disco", "conv1x1"]
+BasisType = Literal["morlet", "piecewise linear", "zernike"]
 
 
 @dataclasses.dataclass
@@ -23,6 +24,11 @@ class LocalNetConfig:
     Attributes:
         type: Discriminator tag for union deserialization.
         embed_dim: Dimension of the embeddings.
+        kernel_shape: Shape of the DISCO convolution filter basis, passed
+            to the filter basis constructor. Only affects 'disco' blocks.
+        basis_type: Type of filter basis for the DISCO convolution
+            ('morlet', 'piecewise linear', or 'zernike').
+            Only affects 'disco' blocks.
         block_types: List of filter types for each block ('disco', 'conv1x1').
             The length determines the number of blocks.
         global_layer_norm: Whether to reduce along the spatial domain when
@@ -43,8 +49,19 @@ class LocalNetConfig:
 
     type: Literal["localnet"] = "localnet"
     embed_dim: int = 256
+    kernel_shape: tuple[int, int] = (3, 3)
+    basis_type: BasisType = "morlet"
     block_types: list[BlockType] = dataclasses.field(
-        default_factory=lambda: ["disco"] * 12
+        default_factory=lambda: [
+            "disco",
+            "disco",
+            "disco",
+            "disco",
+            "conv1x1",
+            "conv1x1",
+            "conv1x1",
+            "conv1x1",
+        ]
     )
     global_layer_norm: bool = False
     use_mlp: bool = True
@@ -53,8 +70,8 @@ class LocalNetConfig:
     encoder_layers: int = 1
     pos_embed: bool = True
     big_skip: bool = True
-    normalize_big_skip: bool = False
-    affine_norms: bool = False
+    normalize_big_skip: bool = True
+    affine_norms: bool = True
     lora_rank: int = 0
     lora_alpha: float | None = None
 
@@ -63,8 +80,7 @@ class LocalNetConfig:
         for i, bt in enumerate(self.block_types):
             if bt not in valid:
                 raise ValueError(
-                    f"Invalid block type {bt!r} at index {i}, "
-                    f"must be one of {valid}"
+                    f"Invalid block type {bt!r} at index {i}, must be one of {valid}"
                 )
 
 
@@ -94,6 +110,8 @@ class LocalFilterLayer(nn.Module):
         embed_dim,
         img_shape: tuple[int, int],
         filter_type="disco",
+        kernel_shape: tuple[int, int] = (3, 3),
+        basis_type: BasisType = "morlet",
         data_grid="equiangular",
         lora_rank: int = 0,
         lora_alpha: float | None = None,
@@ -104,16 +122,16 @@ class LocalFilterLayer(nn.Module):
             nlat, nlon = img_shape
             theta_cutoff = 2 * _compute_cutoff_radius(
                 nlat=nlat,
-                kernel_shape=(3, 3),
-                basis_type="morlet",
+                kernel_shape=kernel_shape,
+                basis_type=basis_type,
             )
             self.filter = DiscreteContinuousConvS2(
                 embed_dim,
                 embed_dim,
                 in_shape=img_shape,
                 out_shape=img_shape,
-                kernel_shape=(3, 3),
-                basis_type="morlet",
+                kernel_shape=kernel_shape,
+                basis_type=basis_type,
                 basis_norm_mode="mean",
                 groups=1,
                 grid_in=data_grid,
@@ -143,6 +161,8 @@ class LocalBlock(nn.Module):
         img_shape: tuple[int, int],
         context_config: ContextConfig,
         filter_type="disco",
+        kernel_shape: tuple[int, int] = (3, 3),
+        basis_type: BasisType = "morlet",
         data_grid="equiangular",
         global_layer_norm: bool = False,
         mlp_ratio=2.0,
@@ -173,6 +193,8 @@ class LocalBlock(nn.Module):
             embed_dim,
             img_shape=img_shape,
             filter_type=filter_type,
+            kernel_shape=kernel_shape,
+            basis_type=basis_type,
             data_grid=data_grid,
             lora_rank=lora_rank,
             lora_alpha=lora_alpha,
@@ -343,6 +365,8 @@ class LocalNet(torch.nn.Module):
         self.in_chans = in_chans
         self.out_chans = out_chans
         self.embed_dim = params.embed_dim
+        self.kernel_shape = params.kernel_shape
+        self.basis_type = params.basis_type
         self.num_layers = len(params.block_types)
         self.use_mlp = params.use_mlp
         self.encoder_layers = params.encoder_layers
@@ -401,6 +425,8 @@ class LocalNet(torch.nn.Module):
                 img_shape=self.img_shape,
                 context_config=context_config,
                 filter_type=block_type,
+                kernel_shape=self.kernel_shape,
+                basis_type=self.basis_type,
                 data_grid=self.data_grid,
                 global_layer_norm=self.global_layer_norm,
                 mlp_ratio=self.mlp_ratio,
