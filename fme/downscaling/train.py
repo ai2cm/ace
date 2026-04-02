@@ -3,6 +3,7 @@ import contextlib
 import dataclasses
 import logging
 import os
+import re
 import shutil
 import time
 import uuid
@@ -11,12 +12,12 @@ import dacite
 import torch
 import yaml
 
-import fme.core.logging_utils as logging_utils
 from fme.core.cli import prepare_directory
 from fme.core.device import get_device
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
+from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
 from fme.core.wandb import WandB
@@ -25,19 +26,9 @@ from fme.downscaling.data import (
     PairedBatchData,
     PairedDataLoaderConfig,
     PairedGriddedData,
-    StaticInputs,
-    get_normalized_topography,
+    load_static_inputs,
 )
 from fme.downscaling.models import DiffusionModel, DiffusionModelConfig
-
-
-def count_parameters(modules: torch.nn.ModuleList) -> int:
-    parameters = 0
-    for module in modules:
-        for parameter in module.parameters():
-            if parameter.requires_grad:
-                parameters += parameter.numel()
-    return parameters
 
 
 def _save_checkpoint(trainer: "Trainer", path: str) -> None:
@@ -151,7 +142,7 @@ class Trainer:
 
         self._best_valid_loss_name = "generation/metrics/relative_crps_bicubic"
         self._best_histogram_tail_name = (
-            "generation/histogram/abs_norm_tail_bias_above_percentile/99.99/"
+            "generation/histogram/prediction_frac_of_target/99.9999th-percentile"
         )
 
     def _get_batch_generator(
@@ -184,11 +175,11 @@ class Trainer:
             self.train_data, random_offset=True, shuffle=True
         )
         outputs = None
-        for i, (batch, static_inputs) in enumerate(train_batch_generator):
+        for i, batch in enumerate(train_batch_generator):
             self.num_batches_seen += 1
             if i % 10 == 0:
-                logging.info(f"Training on batch {i+1}")
-            outputs = self.model.train_on_batch(batch, static_inputs, self.optimization)
+                logging.info(f"Training on batch {i + 1}")
+            outputs = self.model.train_on_batch(batch, self.optimization)
             self.ema(self.model.modules)
             with torch.no_grad():
                 train_aggregator.record_batch(
@@ -260,10 +251,8 @@ class Trainer:
             validation_batch_generator = self._get_batch_generator(
                 self.validation_data, random_offset=False, shuffle=False
             )
-            for batch, static_inputs in validation_batch_generator:
-                outputs = self.model.train_on_batch(
-                    batch, static_inputs, self.null_optimization
-                )
+            for batch in validation_batch_generator:
+                outputs = self.model.train_on_batch(batch, self.null_optimization)
                 validation_aggregator.record_batch(
                     outputs=outputs,
                     coarse=batch.coarse.data,
@@ -271,7 +260,6 @@ class Trainer:
                 )
                 generated_outputs = self.model.generate_on_batch(
                     batch,
-                    static_inputs=static_inputs,
                     n_samples=self.config.generate_n_samples,
                 )
                 # Add sample dimension to coarse values for generation comparison
@@ -406,7 +394,7 @@ class TrainerConfig:
     experiment_dir: str
     save_checkpoints: bool
     logging: LoggingConfig
-    static_inputs: dict[str, str] | None = None
+    static_inputs: dict[str, str] = dataclasses.field(default_factory=dict)
     ema: EMAConfig = dataclasses.field(default_factory=EMAConfig)
     validate_using_ema: bool = False
     generate_n_samples: int = 1
@@ -434,23 +422,17 @@ class TrainerConfig:
         return os.path.join(self.experiment_dir, "checkpoints")
 
     def build(self) -> Trainer:
-        static_inputs_fields = self.static_inputs or {}
-        static_inputs = StaticInputs(
-            fields=[
-                get_normalized_topography(path, topography_name=key)
-                for key, path in static_inputs_fields.items()
-            ]
+        static_inputs = (
+            load_static_inputs(self.static_inputs) if self.static_inputs else None
         )
 
         train_data: PairedGriddedData = self.train_data.build(
             train=True,
             requirements=self.model.data_requirements,
-            static_inputs=static_inputs,
         )
         validation_data: PairedGriddedData = self.validation_data.build(
             train=False,
             requirements=self.model.data_requirements,
-            static_inputs=static_inputs,
         )
         if self.coarse_patch_extent_lat and self.coarse_patch_extent_lon:
             model_coarse_shape = (
@@ -463,6 +445,7 @@ class TrainerConfig:
         downscaling_model = self.model.build(
             model_coarse_shape,
             train_data.downscale_factor,
+            full_fine_coords=train_data.fine_coords,
             static_inputs=static_inputs,
         )
 
@@ -480,20 +463,52 @@ class TrainerConfig:
         )
 
     def configure_logging(self, log_filename: str):
-        self.logging.configure_logging(self.experiment_dir, log_filename)
-
-    def configure_wandb(self, resumable: bool = True, **kwargs):
         config = to_flat_dict(dataclasses.asdict(self))
-        env_vars = logging_utils.retrieve_env_vars()
-        self.logging.configure_wandb(
-            config=config, env_vars=env_vars, resumable=resumable, **kwargs
+        self.logging.configure_logging(
+            self.experiment_dir, log_filename, config=config, resumable=True
         )
+
+
+def _get_complement_percentile_prefix(prefix):
+    """
+    Given a prefix containing a percentile value, return a prefix with
+    100 minus that percentile. Returns None if no percentile pattern is found.
+    Ex. "prediction_frac_of_target/99.9999th-percentile"
+        -> "prediction_frac_of_target/0.0001th-percentile", or
+        "some_var/percentile/99.9999" -> "some_var/percentile/0.0001".
+    """
+    match = re.search(
+        r"(\d+(?:\.\d+)?)(?:th)?[-_/]percentile|percentile[-_/](\d+(?:\.\d+)?)",
+        prefix,
+    )
+    if match is None:
+        return None
+    if match.group(1) is not None:
+        num_str = match.group(1)
+        num_start, num_end = match.start(1), match.end(1)
+    else:
+        num_str = match.group(2)
+        num_start, num_end = match.start(2), match.end(2)
+    complement = 100 - float(num_str)
+    if "." in num_str:
+        decimal_places = len(num_str.split(".")[1])
+        complement_str = f"{complement:.{decimal_places}f}"
+    else:
+        complement_str = str(int(complement))
+    return prefix[:num_start] + complement_str + prefix[num_end:]
 
 
 def _get_channel_mean_scalar_metric(
     metrics, prefix="generation/metrics/relative_crps_bicubic"
 ):
-    channel_metric = [v for k, v in metrics.items() if k.startswith(prefix)]
+    prefixes = [prefix]
+    if "percentile" in prefix:
+        complement = _get_complement_percentile_prefix(prefix)
+        if complement is not None and complement != prefix:
+            prefixes.append(complement)
+    channel_metric = [
+        v for k, v in metrics.items() if any(k.startswith(p) for p in prefixes)
+    ]
     if len(channel_metric) == 0:
         return float("inf")
     else:
@@ -533,9 +548,6 @@ def main(config_path: str):
     prepare_directory(train_config.experiment_dir, config)
 
     train_config.configure_logging(log_filename="out.log")
-    logging_utils.log_versions()
-    beaker_url = logging_utils.log_beaker_url()
-    train_config.configure_wandb(notes=beaker_url)
     logging.info("Starting training")
     trainer = train_config.build()
 
@@ -554,4 +566,5 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    main(args.config_path)
+    with Distributed.context():
+        main(args.config_path)

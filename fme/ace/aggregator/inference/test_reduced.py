@@ -55,7 +55,7 @@ def test_single_target_mean_aggregator():
     n_window = 3
     nx = 2
     ny = 2
-    area_weights = torch.ones(ny).to(fme.get_device())
+    area_weights = torch.ones(nx, ny).to(fme.get_device())
     torch.manual_seed(0)
 
     agg = SingleTargetMeanAggregator(

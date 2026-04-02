@@ -11,7 +11,7 @@ from fme.ace.data_loading.dataloader import (
 from fme.ace.data_loading.getters import CollateFn
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.subset import SubsetDataset
-from fme.core.dataset.testing import TestingDataset
+from fme.core.dataset.testing import MockDataset
 from fme.core.distributed import Distributed
 
 
@@ -30,7 +30,7 @@ def get_sample_tuples(start: int, end: int, times_per_batch: int):
 
 
 def get_batch_time(batch: BatchData):
-    return TestingDataset.time_to_int(batch.time.values[0, 0])
+    return MockDataset.time_to_int(batch.time.values[0, 0])
 
 
 def get_data_loader(
@@ -42,7 +42,7 @@ def get_data_loader(
 ):
     inner_times_per_batch = times_per_batch + time_buffer
     n_skip = time_buffer + 1
-    dataset: TestingDataset | SubsetDataset = TestingDataset.new(
+    dataset: MockDataset | SubsetDataset = MockDataset.new(
         n_times=end - start,
         varnames=["var1"],
         sample_n_times=inner_times_per_batch,

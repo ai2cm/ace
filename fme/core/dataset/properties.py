@@ -38,6 +38,20 @@ class DatasetProperties:
             self.all_labels,
         )
 
+    def localize(self) -> "DatasetProperties":
+        """Return a copy with coordinates and masks sliced to the local
+        spatial chunk based on the current distributed layout.
+        """
+        return DatasetProperties(
+            self.variable_metadata,
+            self.vertical_coordinate,
+            self.horizontal_coordinates.localize(),
+            self.mask_provider.localize(),
+            self.timestep,
+            self.is_remote,
+            self.all_labels,
+        )
+
     def update(self, other: "DatasetProperties", strict: bool = True):
         try:
             if self.timestep != other.timestep:

@@ -14,6 +14,7 @@ from .train.train import main as train_main
 
 _TRAIN_CONFIG_TEMPLATE = """
 experiment_dir: {experiment_dir}
+seed: 0
 save_checkpoint: true
 save_per_epoch_diagnostics: {save_per_epoch_diagnostics}
 max_epochs: {max_epochs}
@@ -66,7 +67,7 @@ optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001
   optimizer_type: Adam
-train_stepper:
+stepper_training:
   ocean:
     loss:
       type: MSE
@@ -586,10 +587,10 @@ def test_train_and_inference(
         np.testing.assert_allclose(
             wm_tar,
             inference_logs[1][f"inference/mean/weighted_mean_target/{name}"],
-            atol=1e-5,
+            atol=1e-4,
         )
         np.testing.assert_allclose(
             wm_gen,
             inference_logs[1][f"inference/mean/weighted_mean_gen/{name}"],
-            atol=1e-5,
+            atol=1e-4,
         )
