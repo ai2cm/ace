@@ -136,9 +136,10 @@ def main(config, year):
         boundary="fill",
         periodic=False,
         fill_value=0.0,
+        autoparse_metadata=False,
     )
     vertical_target_interface_levels = np.array(
-        config.ocean_vertical_target_layer_levels
+        config.ocean_vertical_target_interface_levels
     )
     ds_coarsened = xr.Dataset()
     coarsened_thickness = grid.transform(
@@ -158,8 +159,14 @@ def main(config, year):
         )
         ds_coarsened[var] = current_coarsened / coarsened_thickness
     if config.reindex_time:
-        tstart = ds.xtime.values[0].decode("utf-8").replace("_", " ")
-        tend = ds.xtime.values[-1].decode("utf-8").replace("_", " ")
+        if "xtime" in ds.data_vars:
+            tstart = ds.xtime.values[0].decode("utf-8").replace("_", " ")
+            tend = ds.xtime.values[-1].decode("utf-8").replace("_", " ")
+        elif "xtime_startMonthly" in ds.data_vars and "xtime_endMonthly" in ds.data_vars:
+            tstart = ds.xtime_startMonthly.values[0].decode("utf-8").replace("_", " ")
+            tend = ds.xtime_endMonthly.values[-1].decode("utf-8").replace("_", " ")
+        else:
+            raise ValueError("No time dimension found")
         timestamps = xr.date_range(
             start=tstart,
             end=tend,
