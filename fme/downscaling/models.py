@@ -67,9 +67,11 @@ class PairedNormalizationConfig:
         in_names: list[str],
         out_names: list[str],
         rename: dict[str, str] | None = None,
+        high_res_conditioning: list[str] | None = None,
     ) -> FineResCoarseResPair[StandardNormalizer]:
         coarse = self.coarse.build(list(set(in_names).union(out_names)))
-        fine = self.fine.build(out_names)
+        fine_names = list(set(out_names).union(set(high_res_conditioning or [])))
+        fine = self.fine.build(fine_names)
 
         return FineResCoarseResPair[StandardNormalizer](
             coarse=_rename_normalizer(coarse, rename),
@@ -113,6 +115,10 @@ class DiffusionModelConfig:
         p_std: The std of the noise distribution used during training.
             Deprecated. Use training_noise_distribution field instead.
             This is kept for backwards compatibility.
+        high_res_conditioning: Optional list of fine-resolution variable names
+            to use as additional model inputs. These are appended as extra
+            channels after the interpolated coarse input. Must not overlap
+            with in_names or out_names.
     """
 
     module: DiffusionModuleRegistrySelector
@@ -132,6 +138,7 @@ class DiffusionModelConfig:
     ) = None
     p_mean: float | None = None
     p_std: float | None = None
+    high_res_conditioning: list[str] | None = None
 
     def __post_init__(self):
         self._interpolate_input = self.module.expects_interpolated_input
@@ -140,6 +147,24 @@ class DiffusionModelConfig:
                 "Fine topography can only be used when predicting on interpolated"
                 " coarse input"
             )
+        if self.high_res_conditioning:
+            if not self._interpolate_input:
+                raise ValueError(
+                    "high_res_conditioning can only be used when predicting on"
+                    " interpolated coarse input"
+                )
+            overlap_with_in = set(self.high_res_conditioning) & set(self.in_names)
+            if overlap_with_in:
+                raise ValueError(
+                    f"high_res_conditioning names {overlap_with_in} must not be"
+                    " in in_names"
+                )
+            overlap_with_out = set(self.high_res_conditioning) & set(self.out_names)
+            if overlap_with_out:
+                raise ValueError(
+                    f"high_res_conditioning names {overlap_with_out} must not be"
+                    " in out_names"
+                )
         if self.p_mean is not None and self.p_std is not None:
             if self.training_noise_distribution is None:
                 warnings.warn(
@@ -188,7 +213,17 @@ class DiffusionModelConfig:
         invert_rename = {v: k for k, v in (rename or {}).items()}
         orig_in_names = [invert_rename.get(name, name) for name in self.in_names]
         orig_out_names = [invert_rename.get(name, name) for name in self.out_names]
-        normalizer = self.normalization.build(orig_in_names, orig_out_names, rename)
+        orig_high_res_conditioning = (
+            [invert_rename.get(name, name) for name in self.high_res_conditioning]
+            if self.high_res_conditioning
+            else None
+        )
+        normalizer = self.normalization.build(
+            orig_in_names,
+            orig_out_names,
+            rename,
+            high_res_conditioning=orig_high_res_conditioning,
+        )
         loss = self.loss.build(reduction="none", gridded_operations=None)
         # We always use standard score normalization, so sigma_data is
         # always 1.0. See below for standard score normalization:
@@ -196,7 +231,11 @@ class DiffusionModelConfig:
         sigma_data = 1.0
 
         num_static_in_channels = len(static_inputs.fields) if static_inputs else 0
-        n_in_channels = len(self.in_names) + num_static_in_channels
+        n_in_channels = (
+            len(self.in_names)
+            + len(self.high_res_conditioning or [])
+            + num_static_in_channels
+        )
         if self.use_fine_topography and (
             not static_inputs or len(static_inputs.fields) == 0
         ):
@@ -245,8 +284,9 @@ class DiffusionModelConfig:
     @property
     def data_requirements(self) -> DataRequirements:
         # Requires output names in coarse for aggregators checking relative measures
+        high_res = set(self.high_res_conditioning or [])
         return DataRequirements(
-            fine_names=self.out_names,
+            fine_names=list(set(self.out_names).union(high_res)),
             coarse_names=list(set(self.in_names).union(self.out_names)),
             n_timesteps=1,
             use_fine_topography=self.use_fine_topography,
@@ -319,10 +359,12 @@ class DiffusionModel:
         self.loss = loss
         self.in_packer = Packer(config.in_names)
         self.out_packer = Packer(config.out_names)
+        self._high_res_packer = Packer(config.high_res_conditioning or [])
         self.config = config
         self._channel_axis = -3
         self.full_fine_coords = full_fine_coords.to(get_device())
         self.static_inputs = static_inputs.to_device() if static_inputs else None
+        self._raw_module = module
 
     @property
     def modules(self) -> torch.nn.ModuleList:
@@ -407,6 +449,18 @@ class DiffusionModel:
             return interpolated
         return normalized
 
+    def _append_high_res_conditioning(
+        self, inputs: torch.Tensor, fine: TensorMapping
+    ) -> torch.Tensor:
+        """Normalize and append high_res_conditioning channels from fine data."""
+        high_res_names = self.config.high_res_conditioning
+        if not high_res_names:
+            return inputs
+        fine_inputs = filter_tensor_mapping(fine, high_res_names)
+        fine_norm = self.normalizer.fine.normalize(fine_inputs)
+        packed = self._high_res_packer.pack(fine_norm, axis=self._channel_axis)
+        return torch.cat([inputs, packed], dim=self._channel_axis)
+
     def train_on_batch(
         self,
         batch: PairedBatchData,
@@ -416,6 +470,7 @@ class DiffusionModel:
         _static_inputs = self._subset_static_if_available(batch.coarse)
         coarse, fine = batch.coarse.data, batch.fine.data
         inputs_norm = self._get_input_from_coarse(coarse, _static_inputs)
+        inputs_norm = self._append_high_res_conditioning(inputs_norm, fine)
         targets_norm = self.out_packer.pack(
             self.normalizer.fine.normalize(dict(fine)), axis=self._channel_axis
         )
@@ -473,10 +528,13 @@ class DiffusionModel:
         coarse_data: TensorMapping,
         static_inputs: StaticInputs | None,
         n_samples: int = 1,
+        fine_data: TensorMapping | None = None,
     ) -> tuple[TensorDict, torch.Tensor, list[torch.Tensor]]:
         # Internal method; external callers should use generate_on_batch /
         # generate_on_batch_no_target.
         inputs_ = self._get_input_from_coarse(coarse_data, static_inputs)
+        if fine_data is not None:
+            inputs_ = self._append_high_res_conditioning(inputs_, fine_data)
         # expand samples and fold to
         # [batch * n_samples, output_channels, height, width]
         inputs_ = _repeat_batch_by_samples(inputs_, n_samples)
@@ -490,7 +548,7 @@ class DiffusionModel:
         latents = torch.randn(outputs_shape).to(device=get_device())
 
         generated_norm, latent_steps = edm_sampler(
-            self.module,
+            self._raw_module,
             latents,
             inputs_,
             S_churn=self.config.churn,
@@ -526,9 +584,12 @@ class DiffusionModel:
         self,
         batch: BatchData,
         n_samples: int = 1,
+        fine_data: TensorMapping | None = None,
     ) -> TensorDict:
         _static_inputs = self._subset_static_if_available(batch)
-        generated, _, _ = self.generate(batch.data, _static_inputs, n_samples)
+        generated, _, _ = self.generate(
+            batch.data, _static_inputs, n_samples, fine_data=fine_data
+        )
         return generated
 
     @torch.no_grad()
@@ -540,7 +601,7 @@ class DiffusionModel:
         _static_inputs = self._subset_static_if_available(batch.coarse)
         coarse, fine = batch.coarse.data, batch.fine.data
         generated, generated_norm, latent_steps = self.generate(
-            coarse, _static_inputs, n_samples
+            coarse, _static_inputs, n_samples, fine_data=fine
         )
 
         targets_norm = self.out_packer.pack(
@@ -677,6 +738,11 @@ class CheckpointModelConfig:
                 self._rename.get(name, name)
                 for name in checkpoint_data["model"]["config"]["out_names"]
             ]
+            high_res = checkpoint_data["model"]["config"].get("high_res_conditioning")
+            if high_res is not None:
+                checkpoint_data["model"]["config"]["high_res_conditioning"] = [
+                    self._rename.get(name, name) for name in high_res
+                ]
             self._checkpoint_data = checkpoint_data
             self._checkpoint_is_loaded = True
             if self.model_updates is not None:
