@@ -10,7 +10,7 @@ evaluate_before_training: true
 ema:
   decay: 0.999
 max_epochs: 20
-n_coupled_steps: 4
+n_coupled_steps: 2
 inference:
   n_coupled_steps: 1440
   coupled_steps_in_memory: 8
@@ -140,7 +140,7 @@ stepper_training:
     parameter_init:
       weights_path: /ocean_ckpt.tar
     loss_contributions:
-      n_steps: 4
+      n_steps: 2
       weight: 1.0
     loss:
       type: EnsembleLoss
@@ -148,16 +148,49 @@ stepper_training:
         crps_weight: 0.9
         energy_score_weight: 0.1
   atmosphere:
-    parameter_init:
-      weights_path: /atmos_ckpt.tar
-      parameters:
-        - frozen:
-            include:
-              - '*'
     loss_contributions:
-      n_steps: 0
+      n_steps:
+        outcomes:
+          - steps: 1
+            probability: 0.6
+          - steps: 2
+            probability: 0.2
+          - steps: 4
+            probability: 0.1
+          - steps: 12
+            probability: 0.05
+          - steps: 20
+            probability: 0.025
+          - steps: 21
+            probability: 0.025
+      optimize_last_step_only: true
     loss:
-      type: MSE # not used
+      type: EnsembleLoss
+      kwargs:
+        crps_weight: 0.9
+        energy_score_weight: 0.1
+      weights:
+        air_temperature_0: 0.5
+        air_temperature_1: 0.5
+        eastward_wind_0: 0.5
+        northward_wind_0: 0.5
+        specific_total_water_0: 0.5
+        specific_total_water_1: 0.25
+        specific_total_water_2: 0.5
+        PRATEsfc: 0.5
+        h500: 10
+        TMP850: 5
+        Q2m: 0.5
+        TMP2m: 10
+        UGRD10m: 2.5
+        VGRD10m: 2.5
+        DLWRFsfc: 2
+        ULWRFsfc: 5
+        USWRFsfc: 2
+        DSWRFsfc: 2
+        USWRFtoa: 2
+        tendency_of_total_water_path_due_to_advection: 0.5
+        PRESsfc: 3
 stepper:
   ocean_fraction_prediction:
     land_fraction_name: land_fraction
