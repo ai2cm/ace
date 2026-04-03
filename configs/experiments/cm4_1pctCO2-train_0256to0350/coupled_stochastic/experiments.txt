@@ -3,3 +3,5 @@ group|tag|experiment_id|status|checkpoint|priority|preemptible|override|results_
 fto_stochastic-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_cbj61w53|rs0|01KN804ZEXN589C78JN0WGJMDD|training|best_inference_ckpt|normal|--not-preemptible
 
 ft_stochastic_ncs2-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_cbj61w53|rs0|01KN8YXBEJPGH8ZTEV1JDYB82H|training|best_inference_ckpt|normal|--not-preemptible
+
+ft_stochastic_ncs2-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_cbj61w53|rs0|01KNA13NFM5BTJG34HT8R4Y1NR|training|best_inference_ckpt|normal|--not-preemptible
