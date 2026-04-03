@@ -193,25 +193,6 @@ def _separable_gaussian_blur(
     return blurred_x.view(B, C, H, W)
 
 
-def _spatial_mean_fill(
-    tensor: torch.Tensor,
-) -> torch.Tensor:
-    """Replace remaining NaN pixels with the per-(batch, channel) spatial mean.
-
-    Used as a fallback after iterative flood fill to handle isolated NaN
-    pixels that have no valid neighbors.
-
-    Args:
-        tensor: Tensor of shape (B, C, H, W) that may still contain NaNs.
-
-    Returns:
-        Tensor of the same shape with NaNs replaced by spatial means.
-    """
-    mean = tensor.nanmean(dim=(-2, -1), keepdim=True)
-    tensor = torch.where(tensor.isnan(), mean, tensor)
-    return tensor
-
-
 def _fast_flood_fill(
     tensor: torch.Tensor,
     num_steps: int = 4,
@@ -235,10 +216,6 @@ def _fast_flood_fill(
     3. **Gaussian smoothing**: A separable Gaussian blur is used to smoothly
        interpolate across the original valid/NaN boundary, preventing sharp
        seams between real and filled data.
-
-    Any NaN pixels still remaining after steps 1--2 (e.g. fully isolated
-    pixels with no valid neighbors) are filled with the spatial mean as a
-    fallback before the smoothing pass.
 
     Args:
         tensor: Input tensor of shape (B, C, H, W) with NaN values to fill.
@@ -276,17 +253,20 @@ def _fast_flood_fill(
         original_valid_mask = valid_mask.view(B, C, H, W).clone()
 
     # Pre-fill interior with the nanmean
-    if interior_mask is not None:
-        # Compute spatial mean of valid ocean pixels per map
-        mean_vals = tensor.nanmean(dim=(-2, -1), keepdim=True).view(B * C, 1, 1, 1)
 
-        # Ensure mask shape matches x for broadcasting
-        int_mask = interior_mask.expand(1, 1, H, W)
+    if interior_mask is None:
+        interior_mask = _get_interior_mask(isnan_mask, num_steps=num_steps)
 
-        # Inject mean into interior and mark as valid
-        x = torch.where(int_mask, mean_vals, x)
-        valid_mask = torch.where(int_mask, 1.0, valid_mask)
-        isnan_mask = isnan_mask & ~int_mask
+    # Ensure mask shape matches x for broadcasting
+    interior_mask = interior_mask.expand(1, 1, H, W)
+
+    # Compute spatial mean of valid ocean pixels per map
+    mean_vals = tensor.nanmean(dim=(-2, -1), keepdim=True).view(B * C, 1, 1, 1)
+
+    # Inject mean into interior and mark as valid
+    x = torch.where(interior_mask, mean_vals, x)
+    valid_mask = torch.where(interior_mask, 1.0, valid_mask)
+    isnan_mask = isnan_mask & ~interior_mask
 
     # Iterative average pooling
     kernel = torch.ones(1, 1, 3, 3, device=tensor.device, dtype=tensor.dtype)
@@ -310,9 +290,6 @@ def _fast_flood_fill(
         isnan_mask = isnan_mask & ~can_update
 
     tensor = x.view(B, C, H, W)
-
-    # Fallback for remaining isolated NaNs
-    tensor = _spatial_mean_fill(tensor)
 
     # Apply Gaussian blur
     blurred_tensor = _separable_gaussian_blur(tensor, blur_kernel_size, blur_sigma)
