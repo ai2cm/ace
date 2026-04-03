@@ -1,11 +1,10 @@
-import dataclasses
+from typing import NamedTuple
 
 import torch
 import torch.nn.functional as F
 
 
-@dataclasses.dataclass
-class _Masks:
+class _Masks(NamedTuple):
     interior: torch.Tensor
     valid: torch.Tensor
     blurred_valid: torch.Tensor
