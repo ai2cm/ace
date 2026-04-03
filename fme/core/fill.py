@@ -208,11 +208,9 @@ def _fast_flood_fill(
 
     1. **Interior mean-fill**: NaN pixels flagged by ``interior_mask`` are
        replaced with the per-(batch, time) spatial mean of valid pixels.
-       This avoids wasting expansion steps on deep-interior pixels.
     2. **Edge-blend expansion**: A 3x3 average-pooling loop grows valid pixels
        into the remaining NaN region one layer per step. Longitude padding is
-       circular; latitude padding is zero. Stops after ``num_steps`` iterations
-       (or when no NaN pixels remain if ``num_steps`` is None).
+       circular; latitude padding is zero. Stops after ``num_steps`` iterations.
     3. **Gaussian smoothing**: A separable Gaussian blur is used to smoothly
        interpolate across the original valid/NaN boundary, preventing sharp
        seams between real and filled data.
@@ -223,9 +221,11 @@ def _fast_flood_fill(
         blur_kernel_size: Size of the Gaussian blur kernel for the final
             smoothing pass.
         blur_sigma: Standard deviation of the Gaussian blur kernel.
-        interior_mask: Boolean tensor broadcastable to (B, T, H, W) marking
-            NaN pixels to mean-fill before the expansion loop. Typically
-            produced by ``_get_interior_mask``.
+        interior_mask: Boolean tensor broadcastable to (B, T, H, W) marking NaN
+            pixels to mean-fill before the expansion loop. Typically produced by
+            ``_get_interior_mask`` with the same value of ``num_steps``. Note
+            that NaNs may remain in the output the interior mask was created
+            using fewer than ``num_steps``.
         spatial_valid_mask: Pre-computed boolean mask of shape (H, W) where
             True marks valid (non-NaN) pixels. When provided, avoids
             per-element NaN scanning of the input tensor.
@@ -234,7 +234,8 @@ def _fast_flood_fill(
             from scratch (the mask is constant for a given NaN pattern).
 
     Returns:
-        Filled tensor of the same shape as the input with all NaNs replaced.
+        Filled tensor of the same shape as the input with NaNs replaced.
+
     """
     B, T, H, W = tensor.shape
     x = tensor.reshape(B * T, 1, H, W)
