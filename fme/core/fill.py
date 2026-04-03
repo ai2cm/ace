@@ -1,5 +1,14 @@
+import dataclasses
+
 import torch
 import torch.nn.functional as F
+
+
+@dataclasses.dataclass
+class _Masks:
+    interior: torch.Tensor
+    valid: torch.Tensor
+    blurred_valid: torch.Tensor
 
 
 class SmoothFloodFill:
@@ -33,20 +42,25 @@ class SmoothFloodFill:
         self._num_steps = num_steps
         self._blur_kernel_size = blur_kernel_size
         self._blur_sigma = blur_sigma
-        self._interior_masks: dict[str, torch.Tensor | None] = {}
+        self._masks: dict[str, _Masks | None] = {}
 
-    def _get_interior_mask(
-        self, tensor: torch.Tensor, name: str
-    ) -> torch.Tensor | None:
-        if name in self._interior_masks:
-            return self._interior_masks[name]
+    def _get_masks(self, tensor: torch.Tensor, name: str) -> _Masks | None:
+        if name in self._masks:
+            return self._masks[name]
         spatial_slice = tensor[(0,) * (tensor.ndim - 2)]
         nan_mask = spatial_slice.isnan()
+
         if nan_mask.any():
-            self._interior_masks[name] = _get_interior_mask(nan_mask, self._num_steps)
+            self._masks[name] = _create_masks(
+                nan_mask,
+                num_steps=self._num_steps,
+                blur_kernel_size=self._blur_kernel_size,
+                blur_sigma=self._blur_sigma,
+                dtype=tensor.dtype,
+            )
         else:
-            self._interior_masks[name] = None
-        return self._interior_masks[name]
+            self._masks[name] = None
+        return self._masks[name]
 
     def __call__(self, tensor: torch.Tensor, name: str) -> torch.Tensor:
         """Fill NaN regions in ``tensor`` and return the filled result.
@@ -60,17 +74,40 @@ class SmoothFloodFill:
         Returns:
             Tensor of the same shape with NaN regions filled.
         """
-        interior_mask = self._get_interior_mask(tensor, name)
-        if interior_mask is None:
+        masks = self._get_masks(tensor, name)
+        if masks is None:
             return tensor
-        filled = _fast_flood_fill(
+
+        return _fast_flood_fill(
             tensor,
             num_steps=self._num_steps,
             blur_kernel_size=self._blur_kernel_size,
             blur_sigma=self._blur_sigma,
-            interior_mask=interior_mask,
+            interior_mask=masks.interior,
+            spatial_valid_mask=masks.valid,
+            blurred_valid_mask=masks.blurred_valid,
         )
-        return filled
+
+
+def _create_masks(
+    nan_mask: torch.Tensor,
+    num_steps: int,
+    blur_kernel_size: int,
+    blur_sigma: float,
+    dtype: torch.dtype,
+) -> _Masks:
+    interior_mask = _get_interior_mask(nan_mask, num_steps)
+    valid_mask = ~nan_mask
+    blurred_valid_mask = _separable_gaussian_blur(
+        valid_mask[None, None].to(dtype=dtype),
+        blur_kernel_size=blur_kernel_size,
+        blur_sigma=blur_sigma,
+    )
+    return _Masks(
+        interior=interior_mask,
+        valid=valid_mask,
+        blurred_valid=blurred_valid_mask,
+    )
 
 
 def _get_interior_mask(nan_mask: torch.Tensor, num_steps: int) -> torch.Tensor:
@@ -115,7 +152,9 @@ def _get_interior_mask(nan_mask: torch.Tensor, num_steps: int) -> torch.Tensor:
 
 
 def _separable_gaussian_blur(
-    tensor: torch.Tensor, blur_kernel_size: int = 5, blur_sigma: float = 1.0
+    tensor: torch.Tensor,
+    blur_kernel_size: int,
+    blur_sigma: float,
 ) -> torch.Tensor:
     """Applies a separable Gaussian blur with circular padding on the X-axis.
 
@@ -179,6 +218,8 @@ def _fast_flood_fill(
     blur_kernel_size: int = 5,
     blur_sigma: float = 1.0,
     interior_mask: torch.Tensor | None = None,
+    spatial_valid_mask: torch.Tensor | None = None,
+    blurred_valid_mask: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Fill NaN regions using iterative neighbor-averaging with smooth blending.
 
@@ -210,17 +251,31 @@ def _fast_flood_fill(
         interior_mask: Boolean tensor broadcastable to (B, C, H, W) marking
             NaN pixels to mean-fill before the expansion loop. Typically
             produced by ``_get_interior_mask``.
+        spatial_valid_mask: Pre-computed boolean mask of shape (H, W) where
+            True marks valid (non-NaN) pixels. When provided, avoids
+            per-element NaN scanning of the input tensor.
+        blurred_valid_mask: Pre-computed Gaussian-blurred valid mask,
+            broadcastable to (B, C, H, W). When provided, skips computing it
+            from scratch (the mask is constant for a given NaN pattern).
 
     Returns:
         Filled tensor of the same shape as the input with all NaNs replaced.
     """
     B, C, H, W = tensor.shape
-    original_valid_mask = (~tensor.isnan()).to(dtype=tensor.dtype)
-
     x = tensor.reshape(B * C, 1, H, W)
-    isnan_mask = x.isnan()
+
+    if spatial_valid_mask is not None:
+        valid_mask = spatial_valid_mask.expand(1, 1, H, W)
+        isnan_mask = ~valid_mask
+        valid_mask = valid_mask.to(dtype=tensor.dtype)
+    else:
+        isnan_mask = x.isnan()
+        valid_mask = (~isnan_mask).to(dtype=tensor.dtype)
+
     x = torch.nan_to_num(x, nan=0.0)
-    valid_mask = (~isnan_mask).to(dtype=tensor.dtype)
+
+    if blurred_valid_mask is None:
+        original_valid_mask = valid_mask.view(B, C, H, W).clone()
 
     # Pre-fill interior with the nanmean
     if interior_mask is not None:
@@ -228,7 +283,7 @@ def _fast_flood_fill(
         mean_vals = tensor.nanmean(dim=(-2, -1), keepdim=True).view(B * C, 1, 1, 1)
 
         # Ensure mask shape matches x for broadcasting
-        int_mask = interior_mask.expand(B, C, H, W).reshape(B * C, 1, H, W)
+        int_mask = interior_mask.expand(1, 1, H, W)
 
         # Inject mean into interior and mark as valid
         x = torch.where(int_mask, mean_vals, x)
@@ -274,9 +329,10 @@ def _fast_flood_fill(
 
     # Apply Gaussian blur
     blurred_tensor = _separable_gaussian_blur(tensor, blur_kernel_size, blur_sigma)
-    blurred_valid_mask = _separable_gaussian_blur(
-        original_valid_mask, blur_kernel_size, blur_sigma
-    )
+    if blurred_valid_mask is None:
+        blurred_valid_mask = _separable_gaussian_blur(
+            original_valid_mask, blur_kernel_size, blur_sigma
+        )
 
     # smoothly interpolate across the boundary
     tensor = (tensor * blurred_valid_mask) + (
