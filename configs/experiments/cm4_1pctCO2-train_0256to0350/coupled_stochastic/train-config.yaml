@@ -148,6 +148,8 @@ stepper_training:
         crps_weight: 0.9
         energy_score_weight: 0.1
   atmosphere:
+    parameter_init:
+      weights_path: /atmos_ckpt.tar
     loss_contributions:
       n_steps:
         outcomes:
