@@ -214,7 +214,7 @@ def _spatial_mean_fill(
 
 def _fast_flood_fill(
     tensor: torch.Tensor,
-    num_steps: int | None = None,
+    num_steps: int = 4,
     blur_kernel_size: int = 5,
     blur_sigma: float = 1.0,
     interior_mask: torch.Tensor | None = None,
@@ -242,9 +242,7 @@ def _fast_flood_fill(
 
     Args:
         tensor: Input tensor of shape (B, C, H, W) with NaN values to fill.
-        num_steps: Maximum number of edge-expansion iterations. If None, the
-            loop runs until all NaN pixels are filled or no further progress
-            can be made.
+        num_steps: Maximum number of edge-expansion iterations.
         blur_kernel_size: Size of the Gaussian blur kernel for the final
             smoothing pass.
         blur_sigma: Standard deviation of the Gaussian blur kernel.
@@ -292,14 +290,8 @@ def _fast_flood_fill(
 
     # Iterative average pooling
     kernel = torch.ones(1, 1, 3, 3, device=tensor.device, dtype=tensor.dtype)
-    step = 0
 
-    while True:
-        if num_steps is not None and step >= num_steps:
-            break
-        elif not isnan_mask.any():
-            break
-
+    for _ in range(num_steps):
         pad_mask = F.pad(valid_mask, (1, 1, 0, 0), mode="circular")
         pad_mask = F.pad(pad_mask, (0, 0, 1, 1), mode="constant", value=0.0)
 
@@ -311,16 +303,11 @@ def _fast_flood_fill(
 
         can_update = isnan_mask & (neighbor_count > 0)
 
-        if num_steps is None and not can_update.any():
-            break
-
         local_avg = torch.where(neighbor_count > 0, neighbor_sum / neighbor_count, 0.0)
 
         x = torch.where(can_update, local_avg, x)
         valid_mask = torch.where(can_update, 1.0, valid_mask)
         isnan_mask = isnan_mask & ~can_update
-
-        step += 1
 
     tensor = x.view(B, C, H, W)
 
