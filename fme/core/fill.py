@@ -66,7 +66,7 @@ class SmoothFloodFill:
         """Fill NaN regions in ``tensor`` and return the filled result.
 
         Args:
-            tensor: Data tensor of shape (B, C, H, W) potentially containing
+            tensor: Data tensor of shape (B, T, H, W) potentially containing
                 NaN values to be filled.
             name: Variable name, used to look up (or compute and cache) the
                 interior mask for this field.
@@ -163,14 +163,14 @@ def _separable_gaussian_blur(
     padding to avoid polar artifacts.
 
     Args:
-        tensor: Input tensor of shape (B, C, H, W).
+        tensor: Input tensor of shape (B, T, H, W).
         blur_kernel_size: Size of the 1-D Gaussian kernel.
         blur_sigma: Standard deviation of the Gaussian kernel.
 
     Returns:
         Blurred tensor of the same shape as the input.
     """
-    B, C, H, W = tensor.shape
+    B, T, H, W = tensor.shape
     k = blur_kernel_size
 
     coords = torch.arange(
@@ -183,14 +183,14 @@ def _separable_gaussian_blur(
     kernel_y = gauss_1d.view(1, 1, k, 1)
     kernel_x = gauss_1d.view(1, 1, 1, k)
 
-    x_blur = tensor.reshape(B * C, 1, H, W)
+    x_blur = tensor.reshape(B * T, 1, H, W)
 
     padded_x_blur = F.pad(x_blur, (0, 0, k // 2, k // 2), mode="replicate")
     blurred_y = F.conv2d(padded_x_blur, kernel_y, padding=0)
     padded_blur_y = F.pad(blurred_y, (k // 2, k // 2, 0, 0), mode="circular")
     blurred_x = F.conv2d(padded_blur_y, kernel_x, padding=0)
 
-    return blurred_x.view(B, C, H, W)
+    return blurred_x.view(B, T, H, W)
 
 
 def _fast_flood_fill(
@@ -207,7 +207,7 @@ def _fast_flood_fill(
     The algorithm has three phases:
 
     1. **Interior mean-fill**: NaN pixels flagged by ``interior_mask`` are
-       replaced with the per-(batch, channel) spatial mean of valid pixels.
+       replaced with the per-(batch, time) spatial mean of valid pixels.
        This avoids wasting expansion steps on deep-interior pixels.
     2. **Edge-blend expansion**: A 3x3 average-pooling loop grows valid pixels
        into the remaining NaN region one layer per step. Longitude padding is
@@ -218,26 +218,26 @@ def _fast_flood_fill(
        seams between real and filled data.
 
     Args:
-        tensor: Input tensor of shape (B, C, H, W) with NaN values to fill.
+        tensor: Input tensor of shape (B, T, H, W) with NaN values to fill.
         num_steps: Maximum number of edge-expansion iterations.
         blur_kernel_size: Size of the Gaussian blur kernel for the final
             smoothing pass.
         blur_sigma: Standard deviation of the Gaussian blur kernel.
-        interior_mask: Boolean tensor broadcastable to (B, C, H, W) marking
+        interior_mask: Boolean tensor broadcastable to (B, T, H, W) marking
             NaN pixels to mean-fill before the expansion loop. Typically
             produced by ``_get_interior_mask``.
         spatial_valid_mask: Pre-computed boolean mask of shape (H, W) where
             True marks valid (non-NaN) pixels. When provided, avoids
             per-element NaN scanning of the input tensor.
         blurred_valid_mask: Pre-computed Gaussian-blurred valid mask,
-            broadcastable to (B, C, H, W). When provided, skips computing it
+            broadcastable to (B, T, H, W). When provided, skips computing it
             from scratch (the mask is constant for a given NaN pattern).
 
     Returns:
         Filled tensor of the same shape as the input with all NaNs replaced.
     """
-    B, C, H, W = tensor.shape
-    x = tensor.reshape(B * C, 1, H, W)
+    B, T, H, W = tensor.shape
+    x = tensor.reshape(B * T, 1, H, W)
 
     if spatial_valid_mask is not None:
         valid_mask = spatial_valid_mask.expand(1, 1, H, W)
@@ -250,7 +250,7 @@ def _fast_flood_fill(
     x = torch.nan_to_num(x, nan=0.0)
 
     if blurred_valid_mask is None:
-        original_valid_mask = valid_mask.view(B, C, H, W).clone()
+        original_valid_mask = valid_mask.view(B, T, H, W).clone()
 
     # Pre-fill interior with the nanmean
 
@@ -261,7 +261,7 @@ def _fast_flood_fill(
     interior_mask = interior_mask.expand(1, 1, H, W)
 
     # Compute spatial mean of valid ocean pixels per map
-    mean_vals = tensor.nanmean(dim=(-2, -1), keepdim=True).view(B * C, 1, 1, 1)
+    mean_vals = tensor.nanmean(dim=(-2, -1), keepdim=True).view(B * T, 1, 1, 1)
 
     # Inject mean into interior and mark as valid
     x = torch.where(interior_mask, mean_vals, x)
@@ -289,7 +289,7 @@ def _fast_flood_fill(
         valid_mask = torch.where(can_update, 1.0, valid_mask)
         isnan_mask = isnan_mask & ~can_update
 
-    tensor = x.view(B, C, H, W)
+    tensor = x.view(B, T, H, W)
 
     # Apply Gaussian blur
     blurred_tensor = _separable_gaussian_blur(tensor, blur_kernel_size, blur_sigma)
