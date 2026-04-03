@@ -1778,27 +1778,15 @@ def load_stepper_config(
     return stepper._config
 
 
-def load_stepper(
-    checkpoint_path: str | pathlib.Path,
-    override_config: StepperOverrideConfig | None = None,
-) -> Stepper:
-    """Load a stepper, optionally overriding certain aspects.
+def apply_stepper_override(
+    stepper: Stepper, override_config: StepperOverrideConfig | None = None
+) -> None:
+    """Apply optional inference-time overrides to a loaded stepper.
 
-    Args:
-        checkpoint_path: The path to the serialized checkpoint.
-        override_config: Configuration options to override (optional).
-
-    Returns:
-        The stepper serialized in the checkpoint, with appropriate options
-        overridden.
+    Used by load_stepper and by coupled inference when loading component steppers.
     """
     if override_config is None:
         override_config = StepperOverrideConfig()
-
-    checkpoint = torch.load(
-        checkpoint_path, map_location=get_device(), weights_only=False
-    )
-    stepper = Stepper.from_state(checkpoint["stepper"])
 
     if override_config.ocean != "keep":
         logging.info(
@@ -1828,4 +1816,25 @@ def load_stepper(
         stepper.replace_prescribed_prognostic_names(
             override_config.prescribed_prognostic_names
         )
+
+
+def load_stepper(
+    checkpoint_path: str | pathlib.Path,
+    override_config: StepperOverrideConfig | None = None,
+) -> Stepper:
+    """Load a stepper, optionally overriding certain aspects.
+
+    Args:
+        checkpoint_path: The path to the serialized checkpoint.
+        override_config: Configuration options to override (optional).
+
+    Returns:
+        The stepper serialized in the checkpoint, with appropriate options
+        overridden.
+    """
+    checkpoint = torch.load(
+        checkpoint_path, map_location=get_device(), weights_only=False
+    )
+    stepper = Stepper.from_state(checkpoint["stepper"])
+    apply_stepper_override(stepper, override_config)
     return stepper
