@@ -17,6 +17,13 @@ def test_smooth_flood_fill():
     )
     filled = flood_fill(data, "name")
 
+    # Verify mask caching: a second call should reuse the same cached mask
+    # and produce the same result.
+    cached_mask = flood_fill._interior_masks["name"]
+    filled2 = flood_fill(data, "name")
+    assert flood_fill._interior_masks["name"] is cached_mask
+    torch.testing.assert_close(filled, filled2)
+
     # 1. No NaNs in output
     assert not filled.isnan().any(), "Output should contain no NaNs"
 

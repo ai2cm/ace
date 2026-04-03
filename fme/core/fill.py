@@ -11,12 +11,13 @@ class SmoothFloodFill:
     (3) Gaussian blur interpolation across the original valid/NaN boundary to
     avoid sharp seams.
 
-    Interior masks are computed once per variable name and cached.
+    Interior masks are computed once per variable name and cached, so the
+    NaN region for each variable must not change between calls.
     """
 
     def __init__(
         self,
-        num_steps: int,
+        num_steps: int = 4,
         blur_kernel_size: int = 5,
         blur_sigma: float = 1.0,
     ):
@@ -62,7 +63,7 @@ class SmoothFloodFill:
         interior_mask = self._get_interior_mask(tensor, name)
         if interior_mask is None:
             return tensor
-        filled, _ = _fast_flood_fill(
+        filled = _fast_flood_fill(
             tensor,
             num_steps=self._num_steps,
             blur_kernel_size=self._blur_kernel_size,
@@ -177,8 +178,8 @@ def _fast_flood_fill(
     num_steps: int | None = None,
     blur_kernel_size: int = 5,
     blur_sigma: float = 1.0,
-    interior_mask: torch.Tensor = None,
-) -> tuple[torch.Tensor, int]:
+    interior_mask: torch.Tensor | None = None,
+) -> torch.Tensor:
     """Fill NaN regions using iterative neighbor-averaging with smooth blending.
 
     The algorithm has three phases:
@@ -211,9 +212,7 @@ def _fast_flood_fill(
             produced by ``_get_interior_mask``.
 
     Returns:
-        A tuple of (filled_tensor, steps_taken) where filled_tensor has the
-        same shape as the input with all NaNs replaced, and steps_taken is
-        the number of edge-expansion iterations performed.
+        Filled tensor of the same shape as the input with all NaNs replaced.
     """
     B, C, H, W = tensor.shape
     original_valid_mask = (~tensor.isnan()).to(dtype=tensor.dtype)
@@ -238,10 +237,10 @@ def _fast_flood_fill(
 
     # Iterative average pooling
     kernel = torch.ones(1, 1, 3, 3, device=tensor.device, dtype=tensor.dtype)
-    steps_taken = 0
+    step = 0
 
     while True:
-        if num_steps is not None and steps_taken >= num_steps:
+        if num_steps is not None and step >= num_steps:
             break
         elif not isnan_mask.any():
             break
@@ -266,7 +265,7 @@ def _fast_flood_fill(
         valid_mask = torch.where(can_update, 1.0, valid_mask)
         isnan_mask = isnan_mask & ~can_update
 
-        steps_taken += 1
+        step += 1
 
     tensor = x.view(B, C, H, W)
 
@@ -284,4 +283,4 @@ def _fast_flood_fill(
         blurred_tensor * (1.0 - blurred_valid_mask)
     )
 
-    return tensor, steps_taken
+    return tensor
