@@ -1,5 +1,5 @@
 experiment_dir: /results
-save_checkpoint: true
+save_checkpoint: false
 save_best_inference_epoch_checkpoints: false
 checkpoint_every_n_batches: 100
 ema_checkpoint_save_epochs:
@@ -9,7 +9,7 @@ validate_using_ema: true
 evaluate_before_training: true
 ema:
   decay: 0.999
-max_epochs: 20
+max_epochs: 1
 n_coupled_steps: 4
 inference:
   n_coupled_steps: 1440
@@ -51,7 +51,7 @@ logging:
   log_to_screen: true
   log_to_wandb: true
   log_to_file: true
-  project: ace-samudra-coupled-cm4
+  project: coupled-emulator
   entity: ai2cm
 train_loader:
   batch_size: 16
