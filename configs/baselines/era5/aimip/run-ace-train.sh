@@ -2,9 +2,9 @@
 
 set -e
 
-JOB_NAME_BASE="ace-aimip-dataset-temp7-skin-temp-only-1step"
-JOB_GROUP="ace-aimip-dataset-temp7-skin-temp-only-1step"
-CONFIG_FILENAME="ace-train-skin-temp-only-dataset.yaml"
+JOB_NAME_BASE="ace-aimip-dataset-zonal-interp-sst-fill-no-strato"
+JOB_GROUP="ace-aimip-dataset"
+CONFIG_FILENAME="ace-train-no-strato-aimip-dataset-zonal-interp-sst-mask.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
