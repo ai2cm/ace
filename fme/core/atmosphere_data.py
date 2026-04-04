@@ -1,6 +1,6 @@
 import re
 from collections.abc import Mapping
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 import torch
 
@@ -67,6 +67,7 @@ ATMOSPHERE_FIELD_NAME_PREFIXES = {
 }
 
 
+@runtime_checkable
 class HasAtmosphereVerticalIntegral(Protocol):
     def vertical_integral(
         self,

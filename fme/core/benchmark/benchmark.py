@@ -1,6 +1,7 @@
 import abc
 import dataclasses
 import pathlib
+import time
 from collections.abc import Callable
 from typing import Self
 
@@ -13,13 +14,49 @@ from fme.core.benchmark.timer import CUDATimer, NullTimer, Timer, TimerResult
 from fme.core.typing_ import TensorDict
 
 
+class CPUEventPair:
+    def __init__(self):
+        self.start_time = None
+        self.end_time = None
+
+    def record_start(self):
+        if self.start_time is not None:
+            raise RuntimeError(
+                "record_start has already been called on this CPUEventPair."
+            )
+        self.start_time = time.time()
+
+    def record_end(self):
+        if self.start_time is None:
+            raise RuntimeError("record_start must be called before record_end")
+        if self.end_time is not None:
+            raise RuntimeError(
+                "record_end has already been called on this CPUEventPair."
+            )
+        self.end_time = time.time()
+
+    def elapsed_time_ms(self) -> float:
+        if self.start_time is None or self.end_time is None:
+            raise RuntimeError(
+                "Both record_start and record_end must be called "
+                "before elapsed_time_ms can be called."
+            )
+        return (self.end_time - self.start_time) * 1000
+
+
 @dataclasses.dataclass
 class BenchmarkResult:
     memory: MemoryResult
     timer: TimerResult
+    cpu_time: float
+    diagnostics: dict = dataclasses.field(default_factory=dict)
 
     def __repr__(self) -> str:
-        return f"BenchmarkResult(memory={self.memory}, timer={self.timer})"
+        return (
+            f"BenchmarkResult(memory={self.memory}, timer={self.timer}, "
+            f"diagnostics={self.diagnostics})"
+            f"cpu_time={self.cpu_time})"
+        )
 
     def asdict(self) -> dict:
         return dataclasses.asdict(self)
@@ -39,19 +76,29 @@ class BenchmarkResult:
             self.memory.assert_close(other.memory, rtol=rtol)
         except AssertionError as e:
             raise AssertionError(f"Memory results differ: {e}") from e
+        if not torch.isclose(
+            torch.tensor(self.cpu_time), torch.tensor(other.cpu_time), rtol=rtol
+        ):
+            raise AssertionError(
+                f"CPU times differ: {self.cpu_time} vs {other.cpu_time} "
+                f"given rtol={rtol}"
+            )
+
+    def get_logs(self, max_depth: int) -> dict[str, float]:
+        logs = {
+            "max_alloc_mb": self.memory.max_alloc / (1024.0 * 1024.0),
+        }
+        logs.update(self.timer.get_logs(max_depth=max_depth))
+        return logs
 
     def to_png(
-        self, path: str | pathlib.Path, label: str, child: str | None = None
+        self,
+        path: str | pathlib.Path,
+        label: str,
+        child: str | None = None,
+        all_labels: bool = False,
     ) -> None:
         # note this function was generated with AI
-        def avg_time(t: TimerResult) -> float:
-            return float(t.avg_time)
-
-        def self_time(t: TimerResult) -> float:
-            t_avg = avg_time(t)
-            c_avg = sum(avg_time(c) for c in t.children.values())
-            return max(t_avg - c_avg, 0.0)
-
         def fmt_time(ms: float) -> str:
             if ms >= 1000.0:
                 return f"{ms/1000.0:.2f}s"
@@ -62,7 +109,7 @@ class BenchmarkResult:
         def label_ok(name: str, ms: float, frac_of_root: float) -> bool:
             if not name:
                 return False
-            return frac_of_root >= 0.05
+            return all_labels or frac_of_root >= 0.05
 
         def ordered_children(t: TimerResult) -> list[tuple[str, TimerResult]]:
             return list(t.children.items())  # maintain dict order (insertion order)
@@ -83,7 +130,17 @@ class BenchmarkResult:
                 if part not in root.children:
                     raise ValueError(f"Child '{child}' not found in timer results.")
                 root = root.children[part]
-        root_avg = avg_time(root)
+        root_count = root.count
+
+        def avg_total_time_per_root_iter(t: TimerResult) -> float:
+            return float(t.count * t.avg_time) / root_count
+
+        def self_time(t: TimerResult) -> float:
+            t_total = avg_total_time_per_root_iter(t)
+            c_total = sum(avg_total_time_per_root_iter(c) for c in t.children.values())
+            return max(t_total - c_total, 0.0)
+
+        root_avg = avg_total_time_per_root_iter(root)
 
         max_alloc_mb = self.memory.max_alloc / (1024.0 * 1024.0)
 
@@ -127,7 +184,7 @@ class BenchmarkResult:
         lvl1_segments: list[tuple[str, float, tuple[float, float, float, float]]] = []
         for n1, t1 in lvl1:
             base = cmap(lvl1_index[n1] % cmap.N)
-            lvl1_segments.append((n1, avg_time(t1), base))
+            lvl1_segments.append((n1, avg_total_time_per_root_iter(t1), base))
         r_self = self_time(root)
         if r_self > 0.0:
             lvl1_segments.append(("", r_self, gray))
@@ -193,7 +250,13 @@ class BenchmarkResult:
                 # First child is closest to parent; later children are lighter.
                 lighten = 0.10 + (0.55 * (i / max(k - 1, 1)))
                 rgb = blend_with_white(parent_rgb, lighten)
-                lvl2_segments.append((n2, avg_time(t2), (rgb[0], rgb[1], rgb[2], 1.0)))
+                lvl2_segments.append(
+                    (
+                        n2,
+                        avg_total_time_per_root_iter(t2),
+                        (rgb[0], rgb[1], rgb[2], 1.0),
+                    )
+                )
 
             s1 = self_time(t1)
             if s1 > 0.0:
@@ -254,13 +317,19 @@ class BenchmarkABC(abc.ABC):
         for _ in range(warmup):
             benchmark.run_instance(null_timer)
         timer = CUDATimer()
+        cpu_timer = CPUEventPair()
         with benchmark_memory() as bm:
+            cpu_timer.record_start()
             for _ in range(iters):
                 with timer:
-                    benchmark.run_instance(timer)
+                    last_iter_result = benchmark.run_instance(timer)
+            torch.cuda.synchronize()
+            cpu_timer.record_end()
         return BenchmarkResult(
             timer=timer.result,
+            cpu_time=cpu_timer.elapsed_time_ms(),
             memory=bm.result,
+            diagnostics=last_iter_result.get("diagnostics", {}),
         )
 
     @classmethod

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import TypeVar
 
 import torch
+import torch.nn as nn
+
+T = TypeVar("T")
 
 
 class DistributedBackend(ABC):
@@ -40,9 +44,7 @@ class DistributedBackend(ABC):
     def local_batch_size(self, batch_size: int) -> int: ...
 
     @abstractmethod
-    def get_local_slices(
-        self, tensor_shape, rank: int, data_parallel_dim: int | None
-    ): ...
+    def get_local_slices(self, tensor_shape, data_parallel_dim: int | None = None): ...
 
     @abstractmethod
     def reduce_mean(self, tensor: torch.Tensor) -> torch.Tensor | None: ...
@@ -80,6 +82,12 @@ class DistributedBackend(ABC):
         ...
 
     @abstractmethod
+    def gather_object(self, obj: T) -> list[T] | None: ...
+
+    @abstractmethod
+    def scatter_object(self, obj: T) -> T: ...
+
+    @abstractmethod
     def gather_irregular(self, tensor: torch.Tensor) -> list[torch.Tensor] | None:
         """
         Gather a tensor from all processes to the root process. The rank tensors
@@ -110,3 +118,53 @@ class DistributedBackend(ABC):
 
     @abstractmethod
     def shutdown(self): ...
+
+    @abstractmethod
+    def get_sht(
+        self,
+        nlat: int,
+        nlon: int,
+        lmax: int | None = None,
+        mmax: int | None = None,
+        grid: str = "legendre-gauss",
+    ) -> nn.Module:
+        """Create a forward SHT (possibly distributed)."""
+        ...
+
+    @abstractmethod
+    def get_isht(
+        self,
+        nlat: int,
+        nlon: int,
+        lmax: int | None = None,
+        mmax: int | None = None,
+        grid: str = "legendre-gauss",
+    ) -> nn.Module:
+        """Create an inverse SHT (possibly distributed)."""
+        ...
+
+    @abstractmethod
+    def get_disco_conv_s2(self, *args, **kwargs) -> nn.Module:
+        """Create a disco conv S2 instance (possibly distributed)."""
+        ...
+
+    @abstractmethod
+    def spatial_reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
+        """All-reduce sum across spatial (h, w) ranks. Identity for non-spatial."""
+        ...
+
+    @abstractmethod
+    def weighted_mean(
+        self,
+        data: torch.Tensor,
+        weights: torch.Tensor,
+        dim: tuple[int, ...],
+        keepdim: bool = False,
+    ) -> torch.Tensor:
+        """Compute a weighted mean, correctly handling spatial parallelism."""
+        ...
+
+    @abstractmethod
+    def zonal_mean(self, data: torch.Tensor) -> torch.Tensor:
+        """Compute the zonal mean (mean over longitude dimension)."""
+        ...

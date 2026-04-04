@@ -283,8 +283,7 @@ class FCN3StepConfig(StepConfigABC):
     @property
     def next_step_input_names(self) -> list[str]:
         """Names of variables provided in next_step_input_data."""
-        input_only_names = set(self.input_names).difference(self.output_names)
-        result = set(input_only_names)
+        result = set(self.input_names).difference(self.output_names)
         if self.ocean is not None:
             result = result.union(self.ocean.forcing_names)
         result = result.union(self.prescribed_prognostic_names)
@@ -327,11 +326,7 @@ class FCN3StepConfig(StepConfigABC):
         init_weights: Callable[[list[nn.Module]], None],
     ) -> "FCN3Step":
         logging.info("Initializing stepper from provided config")
-        corrector = dataset_info.vertical_coordinate.build_corrector(
-            config=self.corrector,
-            gridded_operations=dataset_info.gridded_operations,
-            timestep=dataset_info.timestep,
-        )
+        corrector = self.corrector.get_corrector(dataset_info)
         normalizer = self.normalization.get_network_normalizer(self._normalize_names)
         return FCN3Step(
             config=self,

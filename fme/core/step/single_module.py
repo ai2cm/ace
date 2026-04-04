@@ -207,11 +207,7 @@ class SingleModuleStepConfig(StepConfigABC):
         init_weights: Callable[[list[nn.Module]], None],
     ) -> "SingleModuleStep":
         logging.info("Initializing stepper from provided config")
-        corrector = dataset_info.vertical_coordinate.build_corrector(
-            config=self.corrector,
-            gridded_operations=dataset_info.gridded_operations,
-            timestep=dataset_info.timestep,
-        )
+        corrector = self.corrector.get_corrector(dataset_info)
         normalizer = self.normalization.get_network_normalizer(self._normalize_names)
         return SingleModuleStep(
             config=self,
@@ -456,4 +452,8 @@ def step_with_adjustments(
     for name in prescribed_prognostic_names:
         if name in next_step_input_data:
             output = {**output, name: next_step_input_data[name]}
+        else:
+            raise ValueError(
+                f"prescribed_prognostic_name '{name}' not in next_step_input_data"
+            )
     return output

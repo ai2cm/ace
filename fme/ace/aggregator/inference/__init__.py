@@ -3,4 +3,5 @@ from .main import (
     InferenceAggregatorConfig,
     InferenceEvaluatorAggregator,
     InferenceEvaluatorAggregatorConfig,
+    StepMeanEntry,
 )

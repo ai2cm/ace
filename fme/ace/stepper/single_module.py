@@ -101,7 +101,7 @@ class SingleModuleStepperConfig:
         corrector: The corrector configuration.
         next_step_forcing_names: Names of forcing variables for the next timestep.
         prescribed_prognostic_names: Prognostic variable names to overwrite from
-            forcing data at each step during inference (e.g. air_temperature_7).
+            forcing data at each step during inference.
         loss_normalization: The normalization configuration for the loss.
         residual_normalization: Optional alternative to configure loss normalization.
             If provided, it will be used for all *prognostic* variables in loss scaling.
@@ -252,8 +252,6 @@ class SingleModuleStepperConfig:
         """
         return StepperConfig(
             step=self._to_step_config(normalizer, loss_normalizer),
-            loss=self.loss,
-            parameter_init=self.parameter_init,
         )
 
     def _to_step_config(
@@ -502,40 +500,15 @@ class StepperConfig:
 
     Parameters:
         step: The step configuration.
-        loss: The loss configuration.
-        optimize_last_step_only: Whether to optimize only the last step.
-        n_ensemble: The number of ensemble members evaluated for each training
-            batch member. Default is 2 if the loss type is EnsembleLoss, otherwise
-            the default is 1. Must be 2 for EnsembleLoss to be valid.
-        parameter_init: The parameter initialization configuration.
         input_masking: Config for masking step inputs.
-        train_n_forward_steps: The number of timesteps to train on and associated
-            sampling probabilities. By default, the stepper will train on the full
-            number of timesteps present in the training dataset samples. Values must
-            be less than or equal to the number of timesteps present
-            in the training dataset samples.
         derived_forcings: Configuration for deriving forcing variables.
     """
 
     step: StepSelector
-    loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
-    optimize_last_step_only: bool = False
-    n_ensemble: int = -1  # sentinel value to avoid None typing of attribute
-    parameter_init: ParameterInitializationConfig = dataclasses.field(
-        default_factory=lambda: ParameterInitializationConfig()
-    )
-    train_n_forward_steps: TimeLength | TimeLengthSchedule | None = None
-    input_masking: StaticMaskingConfig | None = None  # inference
+    input_masking: StaticMaskingConfig | None = None
     derived_forcings: DerivedForcingsConfig = dataclasses.field(
         default_factory=lambda: DerivedForcingsConfig()
-    )  # inference
-
-    def __post_init__(self):
-        if self.n_ensemble == -1:
-            if self.loss.type == "EnsembleLoss":
-                self.n_ensemble = 2
-            else:
-                self.n_ensemble = 1
+    )
 
     @property
     def n_ic_timesteps(self) -> int:
@@ -585,33 +558,32 @@ class StepperConfig:
     def get_stepper(
         self,
         dataset_info: DatasetInfo,
-        apply_parameter_init: bool = True,
+        parameter_initializer: ParameterInitializer | None = None,
         training_history: TrainingHistory | None = None,
-        load_weights_and_history: WeightsAndHistoryLoader = load_weights_and_history,
     ):
         """
         Args:
             dataset_info: Information about the training dataset.
-            apply_parameter_init: Whether to apply parameter initialization.
+            parameter_initializer: The parameter initializer to use for loading
+                weights from an external source. If None, no parameter
+                initialization is applied.
             training_history: History of the stepper's training jobs.
-            load_weights_and_history: Function for loading weights and history.
-                Default implementation loads a Trainer checkpoint containing
-                a Stepper.
 
         """
         logging.info("Initializing stepper from provided config")
-        if apply_parameter_init:
-            parameter_initializer = self.get_parameter_initializer(
-                load_weights_and_history
-            )
-        else:
+        if parameter_initializer is None:
             parameter_initializer = ParameterInitializer()
         step = self.step.get_step(
             dataset_info, init_weights=parameter_initializer.freeze_weights
         )
-        derive_func = dataset_info.vertical_coordinate.build_derive_function(
-            dataset_info.timestep
-        )
+        try:
+            derive_func = dataset_info.vertical_coordinate.build_derive_function(
+                dataset_info.timestep, dataset_info.horizontal_coordinates
+            )
+        except MissingDatasetInfo:
+            derive_func = dataset_info.vertical_coordinate.build_derive_function(
+                dataset_info.timestep
+            )
         if self.input_masking is None:
             input_masking = NullMasking()
         else:
@@ -713,8 +685,16 @@ class StepperConfig:
     @classmethod
     def remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
         state_copy = state.copy()
-        if "crps_training" in state_copy:
-            del state_copy["crps_training"]  # training value, ok to break
+        for key in [
+            "crps_training",
+            "loss",
+            "optimize_last_step_only",
+            "n_ensemble",
+            "parameter_init",
+            "train_n_forward_steps",
+        ]:
+            if key in state_copy:
+                del state_copy[key]
         return state_copy
 
     def replace_ocean(self, ocean: OceanConfig | None):
@@ -724,7 +704,12 @@ class StepperConfig:
         return self.step.get_ocean()
 
     def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
-        """Replace prescribed prognostic names (e.g. when loading from checkpoint)."""
+        """Replace prescribed prognostic names (e.g. when loading from checkpoint).
+
+        Used for inference / evaluation where the trained ckpt does not contain
+        prescribed_prognostic_names and we need to overwrite
+        prescribed_prognostic_names.
+        """
         self.step.replace_prescribed_prognostic_names(names)
 
     def replace_multi_call(
@@ -756,30 +741,11 @@ class StepperConfig:
         self.derived_forcings.validate_replacement(derived_forcings)
         self.derived_forcings = derived_forcings
 
-    def get_parameter_initializer(
-        self,
-        load_weights_and_history: WeightsAndHistoryLoader,
-    ) -> ParameterInitializer:
-        """
-        Get the parameter initializer for this stepper configuration.
-        """
-        return self.parameter_init.build(
-            load_weights_and_history=load_weights_and_history
-        )
-
     @classmethod
     def from_state(cls, state) -> "StepperConfig":
         state = cls.remove_deprecated_keys(state)
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
-        )
-
-    def get_train_stepper_config(self) -> "TrainStepperConfig":
-        return TrainStepperConfig(
-            loss=self.loss,
-            optimize_last_step_only=self.optimize_last_step_only,
-            n_ensemble=self.n_ensemble,
-            train_n_forward_steps=self.train_n_forward_steps,
         )
 
 
@@ -953,7 +919,7 @@ class Stepper:
         state = self._step_obj.get_state()
         new_state = self._config.replace_multi_call(multi_call, state)
         new_stepper: Stepper = self._config.get_stepper(
-            dataset_info=self._dataset_info, apply_parameter_init=False
+            dataset_info=self._dataset_info,
         )
         new_stepper._step_obj.load_state(new_state)
         self._step_obj = new_stepper._step_obj
@@ -968,7 +934,6 @@ class Stepper:
         self._config.replace_ocean(ocean)
         new_stepper: Stepper = self._config.get_stepper(
             dataset_info=self._dataset_info,
-            apply_parameter_init=False,
         )
         new_stepper._step_obj.load_state(self._step_obj.get_state())
         self._step_obj = new_stepper._step_obj
@@ -983,7 +948,6 @@ class Stepper:
         self._config.replace_prescribed_prognostic_names(names)
         new_stepper: Stepper = self._config.get_stepper(
             dataset_info=self._dataset_info,
-            apply_parameter_init=False,
         )
         new_stepper._step_obj.load_state(self._step_obj.get_state())
         self._step_obj = new_stepper._step_obj
@@ -1299,7 +1263,7 @@ class Stepper:
         """
         return {
             "config": self._config.as_loaded_dict(),
-            "dataset_info": self._dataset_info.to_state(),
+            "dataset_info": self._dataset_info.get_state(),
             "step": self._step_obj.get_state(),
             "training_history": self._training_history.get_state(),
         }
@@ -1381,8 +1345,7 @@ class Stepper:
         stepper = config.get_stepper(
             dataset_info=dataset_info,
             training_history=training_history,
-            # don't need to initialize weights, we're about to load_state
-            apply_parameter_init=False,
+            # no parameter_initializer: we're about to load_state
         )
         stepper.load_state(state)
         return stepper
@@ -1412,12 +1375,16 @@ class TrainStepperConfig:
             number of timesteps present in the training dataset samples. Values must
             be less than or equal to the number of timesteps present
             in the training dataset samples.
+        parameter_init: The parameter initialization configuration for fine-tuning.
     """
 
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
     optimize_last_step_only: bool = False
     n_ensemble: int = -1  # sentinel value to avoid None typing of attribute
     train_n_forward_steps: TimeLength | TimeLengthSchedule | None = None
+    parameter_init: ParameterInitializationConfig = dataclasses.field(
+        default_factory=lambda: ParameterInitializationConfig()
+    )
 
     def __post_init__(self):
         if self.n_ensemble == -1:
@@ -1434,16 +1401,54 @@ class TrainStepperConfig:
             return self.train_n_forward_steps
         return TimeLengthSchedule.from_constant(self.train_n_forward_steps)
 
-    def get_train_stepper(self, stepper: Stepper) -> "TrainStepper":
+    def _get_parameter_initializer(
+        self,
+        load_weights_and_history_fn: WeightsAndHistoryLoader = load_weights_and_history,
+    ) -> ParameterInitializer:
         """
-        Build a TrainStepper from this configuration and a Stepper.
+        Build a ParameterInitializer from this configuration.
 
         Args:
-            stepper: The underlying stepper for inference operations.
+            load_weights_and_history_fn: Function for loading weights and history.
+                Default implementation loads a Trainer checkpoint containing
+                a Stepper.
+        """
+        return self.parameter_init.build(
+            load_weights_and_history=load_weights_and_history_fn
+        )
+
+    def get_train_stepper(
+        self,
+        stepper_config: StepperConfig,
+        dataset_info: DatasetInfo,
+        load_weights_and_history_fn: WeightsAndHistoryLoader = load_weights_and_history,
+    ) -> "TrainStepper":
+        """
+        Build a TrainStepper from this configuration and a StepperConfig.
+
+        Builds the ParameterInitializer from this config's parameter_init,
+        passes it to StepperConfig.get_stepper() for weight loading and
+        freezing during model construction, then wraps the result in a
+        TrainStepper.
+
+        Args:
+            stepper_config: The stepper configuration for building the model.
+            dataset_info: Information about the training dataset.
+            load_weights_and_history_fn: Function for loading weights and
+                history. Default implementation loads a Trainer checkpoint
+                containing a Stepper.
 
         Returns:
-            A TrainStepper wrapping the given stepper with training functionality.
+            A TrainStepper wrapping the built stepper with training
+            functionality.
         """
+        parameter_initializer = self._get_parameter_initializer(
+            load_weights_and_history_fn
+        )
+        stepper = stepper_config.get_stepper(
+            dataset_info=dataset_info,
+            parameter_initializer=parameter_initializer,
+        )
         return TrainStepper(
             stepper=stepper,
             config=self,
@@ -1746,7 +1751,7 @@ class StepperOverrideConfig:
         derived_forcings: Derived forcings configuration to override that used in
             producing a serialized stepper.
         prescribed_prognostic_names: List of prognostic variable names to overwrite
-            from forcing at each step during inference (e.g. ["air_temperature_7"]).
+            from forcing at each step during inference.
     """
 
     ocean: Literal["keep"] | OceanConfig | None = "keep"
