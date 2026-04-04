@@ -495,40 +495,23 @@ def test_run_inference_simple(
         )
         for i in range(0, n_iterations * n_forward_steps, n_forward_steps)
     ]
-    mock_writer = get_mock_writer()
     mock_aggregator = get_mock_aggregator(n_ic_timesteps)
 
     with GlobalTimer(), torch.no_grad():
-        with mock_wandb() as wandb:
-            wandb.configure(log_to_wandb=True)
-            record_logs = unittest.mock.MagicMock(
-                side_effect=get_record_to_wandb("inference").log
-            )  # this init must be within mock_wandb context
+        with unittest.mock.patch(
+            "fme.core.generics.inference.wandb_module"
+        ) as mock_wandb_mod:
             run_inference(
                 predict=stepper.predict,
                 data=SimpleInferenceData(initial_condition, loader),
-                writer=mock_writer,
                 aggregator=mock_aggregator,
-                record_logs=record_logs,
             )
-            wandb_logs = wandb.get_logs()
         timer = GlobalTimer.get_instance()
         times = timer.get_durations()
-        assert times["wandb_logging"] > 0
-        assert times["data_writer"] > 0
         assert times["aggregator"] > 0
-        assert mock_writer.write.call_count == 2
         assert mock_aggregator.record_initial_condition.call_count == 1
-        assert mock_writer.append_batch.call_count == n_iterations
         assert mock_aggregator.record_batch.call_count == n_iterations
-        assert len(wandb_logs) == n_ic_timesteps + n_iterations * n_forward_steps
-        assert wandb_logs == [
-            {"inference/step": i}
-            for i in range(n_ic_timesteps + n_iterations * n_forward_steps)
-        ]
-        assert (
-            record_logs.call_count == n_iterations + 1
-        )  # +1 for the initial condition
+        assert mock_wandb_mod.log.call_count == n_iterations + 1  # windows + summary
 
 
 def test_wandb_step_logger_with_label():
@@ -590,3 +573,90 @@ def test_get_record_to_wandb_returns_step_logger():
         logger = get_record_to_wandb(label="test")
         assert isinstance(logger, WandBStepLogger)
         assert logger.step == 0
+
+
+def test_run_inference_timing_instrumentation():
+    """Verify per-window timing instrumentation produces correct wandb logs."""
+    n_ic_timesteps = 1
+    n_forward_steps = 2
+    n_windows = 3
+
+    stepper = PlusOneStepper(n_ic_timesteps=n_ic_timesteps)
+    initial_condition = get_batch_data_with_time(
+        start_time=0,
+        n_timesteps=n_ic_timesteps,
+    ).get_start(prognostic_names=["var"], n_ic_timesteps=n_ic_timesteps)
+    loader = [
+        get_batch_data_with_time(
+            start_time=i,
+            n_timesteps=n_ic_timesteps + n_forward_steps,
+        )
+        for i in range(0, n_windows * n_forward_steps, n_forward_steps)
+    ]
+    mock_aggregator = get_mock_aggregator(n_ic_timesteps)
+
+    with GlobalTimer(), torch.no_grad():
+        with unittest.mock.patch(
+            "fme.core.generics.inference.wandb_module"
+        ) as mock_wandb_mod:
+            run_inference(
+                predict=stepper.predict,
+                data=SimpleInferenceData(initial_condition, loader),
+                aggregator=mock_aggregator,
+            )
+
+    assert mock_aggregator.record_initial_condition.call_count == 1
+    assert mock_aggregator.record_batch.call_count == n_windows
+
+    calls = mock_wandb_mod.log.call_args_list
+    assert len(calls) == n_windows + 1  # per-window + summary
+
+    per_window_keys = {
+        "rank_0/data_loading_s",
+        "rank_0/forward_pass_s",
+        "rank_0/aggregator_s",
+        "rank_0/total_s",
+        "spread_s",
+        "max_total_s",
+        "min_total_s",
+        "window_index",
+    }
+    cumulative_total = 0.0
+    for i in range(n_windows):
+        args, kwargs = calls[i]
+        data = args[0]
+        assert kwargs["step"] == i
+        assert set(data.keys()) == per_window_keys
+        assert data["window_index"] == i
+        assert data["rank_0/data_loading_s"] >= 0
+        assert data["rank_0/forward_pass_s"] >= 0
+        assert data["rank_0/aggregator_s"] >= 0
+        assert data["rank_0/total_s"] > 0
+        expected_total = (
+            data["rank_0/data_loading_s"]
+            + data["rank_0/forward_pass_s"]
+            + data["rank_0/aggregator_s"]
+        )
+        assert data["rank_0/total_s"] == pytest.approx(expected_total)
+        assert data["spread_s"] == 0.0  # single rank
+        assert data["max_total_s"] == data["rank_0/total_s"]
+        assert data["min_total_s"] == data["rank_0/total_s"]
+        cumulative_total += data["rank_0/total_s"]
+
+    summary_args, summary_kwargs = calls[n_windows]
+    summary = summary_args[0]
+    assert summary_kwargs["step"] == n_windows
+    summary_keys = {
+        "summary/rank_0/data_loading_s",
+        "summary/rank_0/forward_pass_s",
+        "summary/rank_0/aggregator_s",
+        "summary/rank_0/total_s",
+        "summary/max_total_s",
+        "summary/min_total_s",
+        "summary/spread_s",
+        "summary/n_windows",
+    }
+    assert set(summary.keys()) == summary_keys
+    assert summary["summary/n_windows"] == n_windows
+    assert summary["summary/rank_0/total_s"] == pytest.approx(cumulative_total)
+    assert summary["summary/spread_s"] == 0.0  # single rank
