@@ -57,3 +57,5 @@ fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0-ep17|01KKJY7YAPTQJF
 fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KKQWTQTEZAAKXGZRW6Q0V5Q8|run_1yr|best_inference_ckpt|high|--not-preemptible
 
 ft_fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KMKZZJCT9PXYZBBFCZ66C3QB|training|best_inference_ckpt|normal|--not-preemptible
+
+coupled-inline-inference-timings|rs0|01KNB04QWE6587MKP361XJRXXR|training|best_inference_ckpt|normal|--not-preemptible
