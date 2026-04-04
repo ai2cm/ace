@@ -612,10 +612,10 @@ def test_run_inference_timing_instrumentation():
     assert len(calls) == n_windows + 1  # per-window + summary
 
     per_window_keys = {
-        "rank_0/data_loading_s",
-        "rank_0/forward_pass_s",
-        "rank_0/aggregator_s",
-        "rank_0/total_s",
+        "data_loading_s/rank_0",
+        "forward_pass_s/rank_0",
+        "aggregator_s/rank_0",
+        "total_s/rank_0",
         "spread_s",
         "max_total_s",
         "min_total_s",
@@ -628,29 +628,29 @@ def test_run_inference_timing_instrumentation():
         assert kwargs["step"] == i
         assert set(data.keys()) == per_window_keys
         assert data["window_index"] == i
-        assert data["rank_0/data_loading_s"] >= 0
-        assert data["rank_0/forward_pass_s"] >= 0
-        assert data["rank_0/aggregator_s"] >= 0
-        assert data["rank_0/total_s"] > 0
+        assert data["data_loading_s/rank_0"] >= 0
+        assert data["forward_pass_s/rank_0"] >= 0
+        assert data["aggregator_s/rank_0"] >= 0
+        assert data["total_s/rank_0"] > 0
         expected_total = (
-            data["rank_0/data_loading_s"]
-            + data["rank_0/forward_pass_s"]
-            + data["rank_0/aggregator_s"]
+            data["data_loading_s/rank_0"]
+            + data["forward_pass_s/rank_0"]
+            + data["aggregator_s/rank_0"]
         )
-        assert data["rank_0/total_s"] == pytest.approx(expected_total)
+        assert data["total_s/rank_0"] == pytest.approx(expected_total)
         assert data["spread_s"] == 0.0  # single rank
-        assert data["max_total_s"] == data["rank_0/total_s"]
-        assert data["min_total_s"] == data["rank_0/total_s"]
-        cumulative_total += data["rank_0/total_s"]
+        assert data["max_total_s"] == data["total_s/rank_0"]
+        assert data["min_total_s"] == data["total_s/rank_0"]
+        cumulative_total += data["total_s/rank_0"]
 
     summary_args, summary_kwargs = calls[n_windows]
     summary = summary_args[0]
     assert summary_kwargs["step"] == n_windows
     summary_keys = {
-        "summary/rank_0/data_loading_s",
-        "summary/rank_0/forward_pass_s",
-        "summary/rank_0/aggregator_s",
-        "summary/rank_0/total_s",
+        "summary/data_loading_s/rank_0",
+        "summary/forward_pass_s/rank_0",
+        "summary/aggregator_s/rank_0",
+        "summary/total_s/rank_0",
         "summary/max_total_s",
         "summary/min_total_s",
         "summary/spread_s",
@@ -658,5 +658,5 @@ def test_run_inference_timing_instrumentation():
     }
     assert set(summary.keys()) == summary_keys
     assert summary["summary/n_windows"] == n_windows
-    assert summary["summary/rank_0/total_s"] == pytest.approx(cumulative_total)
+    assert summary["summary/total_s/rank_0"] == pytest.approx(cumulative_total)
     assert summary["summary/spread_s"] == 0.0  # single rank

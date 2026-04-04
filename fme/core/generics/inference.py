@@ -200,7 +200,7 @@ def run_inference(
             wandb_data: dict[str, Any] = {}
             for r, rt in enumerate(all_timings):
                 for key, val in rt.items():
-                    wandb_data[f"rank_{r}/{key}"] = val
+                    wandb_data[f"{key}/rank_{r}"] = val
             totals = [rt["total_s"] for rt in all_timings]
             wandb_data["spread_s"] = max(totals) - min(totals)
             wandb_data["max_total_s"] = max(totals)
@@ -221,7 +221,7 @@ def run_inference(
         summary: dict[str, Any] = {}
         for r, rc in enumerate(all_cumulative):
             for key, val in rc.items():
-                summary[f"summary/rank_{r}/{key}"] = val
+                summary[f"summary/{key}/rank_{r}"] = val
         rank_totals = [rc["total_s"] for rc in all_cumulative]
         summary["summary/max_total_s"] = max(rank_totals)
         summary["summary/min_total_s"] = min(rank_totals)
