@@ -30,7 +30,7 @@ from fme.core.dataset.config import DatasetConfigABC
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.time import RepeatedInterval, TimeSlice
-from fme.core.dataset.utils import FillNaNsConfig
+from fme.core.dataset.utils import FillNaNsConfig, _zonal_interp_periodic
 from fme.core.mask_provider import MaskProvider
 from fme.core.stacker import Stacker
 from fme.core.typing_ import Slice, TensorDict
@@ -550,6 +550,15 @@ class XarrayDataConfig(DatasetConfigABC):
             )
         self.torch_dtype  # check it can be retrieved
         self._default_file_pattern_check()
+        if (
+            self.fill_nans is not None
+            and self.fill_nans.zonal_interp_variables
+            and self.spatial_dimensions != "latlon"
+        ):
+            raise ValueError(
+                "zonal_interp_variables can only be used with "
+                "spatial_dimensions='latlon'."
+            )
 
     @property
     def zarr_engine_used(self) -> bool:
@@ -983,6 +992,10 @@ class XarrayDataset(DatasetABC):
             for name in self._time_invariant_names:
                 variable = ds[name].variable
                 if self.fill_nans is not None:
+                    if name in self.fill_nans.zonal_interp_variables:
+                        variable = variable.copy(
+                            data=_zonal_interp_periodic(variable.values)
+                        )
                     variable = variable.fillna(self.fill_nans.value)
                 tensors[name] = as_broadcasted_tensor(variable, self.dims, shape)
             ds.close()
