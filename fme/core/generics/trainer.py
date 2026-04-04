@@ -364,19 +364,11 @@ class Trainer:
             and self._epochs_trained == 0
             and self._current_epoch_num_batches_seen == 0
         ):
-            logging.info("Starting validation before training")
-            valid_logs = self.validate_one_epoch()
+            logging.info("Starting inline inference timing run")
             if self._epochs_trained in inference_epochs:
-                logging.info("Starting inline inference before training")
-                inference_logs = self.inference_one_epoch()
-            else:
-                inference_logs = {}
-            valid_loss = valid_logs["val/mean/loss"]
-            logging.info(f"Validation loss before training: {valid_loss}")
-            logging.info("Logging to wandb")
-            all_logs = valid_logs | inference_logs | {"epoch": self._epochs_trained}
-            wandb = WandB.get_instance()
-            wandb.log(all_logs, step=self.num_batches_seen)
+                self.inference_one_epoch()
+            logging.info("Inference timing complete, exiting")
+            return
 
         while self._epochs_trained < segment_max_epochs:
             if self._do_gc_collect:
@@ -765,11 +757,10 @@ def inference_one_epoch(
             data=dataset,
             aggregator=aggregator,
         )
-    logging.info("Starting flush of reduced diagnostics to disk")
-    aggregator.flush_diagnostics(subdir=f"epoch_{epoch:04d}")
-    logging.info("Getting inline inference aggregator logs")
-    logs = aggregator.get_summary_logs()
-    return {f"{label}/{k}": v for k, v in logs.items()}
+        timer = GlobalTimer.get_instance()
+        timer.log_durations()
+    logging.info("Inference timing run complete, skipping flush/summary")
+    return {}
 
 
 def _restore_checkpoint(trainer: Trainer, checkpoint_path):
