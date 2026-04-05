@@ -56,7 +56,7 @@ train_loader:
       zonal_interp_variables:
         - sea_surface_temperature
 validation_loader:
-  batch_size: 128
+  batch_size: 64
   num_data_workers: 16
   prefetch_factor: 4
   dataset:
