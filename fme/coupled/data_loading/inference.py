@@ -171,7 +171,7 @@ class InferenceDataset(torch.utils.data.Dataset):
                 continue
             i_window_start = i_start + self._start_indices[i_member]
             samples.append(self._dataset[i_window_start])
-        return CoupledBatchData.collate_fn(
+        result = CoupledBatchData.collate_fn(
             samples,
             ocean_horizontal_dims=list(
                 self.properties.horizontal_coordinates.ocean.dims
@@ -181,6 +181,16 @@ class InferenceDataset(torch.utils.data.Dataset):
             ),
             ocean_label_encoding=None,
             atmosphere_label_encoding=None,
+        )
+        remaining_steps = self._total_coupled_steps - i_start
+        actual_coupled_steps = min(self._coupled_steps_in_memory, remaining_steps)
+        ocean_n_times = actual_coupled_steps + 1
+        atmos_n_times = actual_coupled_steps * self._properties.n_inner_steps + 1
+        return CoupledBatchData(
+            ocean_data=result.ocean_data.select_time_slice(slice(0, ocean_n_times)),
+            atmosphere_data=result.atmosphere_data.select_time_slice(
+                slice(0, atmos_n_times)
+            ),
         )
 
     def __getitem__(self, index) -> CoupledBatchData:
@@ -247,9 +257,12 @@ def _make_dummy_ocean_forcing(
         all_labels=set(),
     )
     ts = dataset_info.ocean.timestep
+    coupled_steps_in_memory = ocean_reqs.n_timesteps_schedule.get_value(0) - 1
+    n_windows = ceil(total_coupled_steps / coupled_steps_in_memory)
+    padded_coupled_steps = n_windows * coupled_steps_in_memory
     ocean = DummyDataset(
         start_time=initial_time.squeeze().values.flat[0],
-        end_time=initial_time.squeeze().values.flat[-1] + ts * total_coupled_steps,
+        end_time=initial_time.squeeze().values.flat[-1] + ts * padded_coupled_steps,
         timestep=ts,
         n_timesteps=ocean_reqs.n_timesteps_schedule,
         horizontal_coordinates=dataset_info.ocean.horizontal_coordinates,
