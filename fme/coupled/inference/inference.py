@@ -33,6 +33,7 @@ from fme.coupled.inference.data_writer import (
 from fme.coupled.stepper import CoupledStepper, CoupledStepperConfig
 
 from .evaluator import (
+    CoupledStepperOverrideConfig,
     StandaloneComponentCheckpointsConfig,
     load_stepper,
     load_stepper_config,
@@ -122,7 +123,11 @@ class InferenceConfig:
             at a time, will load one more step for initial condition.
         data_writer: Configuration for data writers.
         aggregator: Configuration for inference aggregator.
-        n_ensemble_per_ic: Number of ensemble members per initial condition
+        n_ensemble_per_ic: Number of ensemble members per initial condition.
+        stepper_override: Override config for ocean and atmosphere steppers at
+            inference time (optional). Contains ``ocean`` and ``atmosphere``
+            components, each a StepperOverrideConfig or None. Applied when loading
+            from either a single coupled checkpoint path or separate checkpoints.
     """
 
     experiment_dir: str
@@ -139,6 +144,7 @@ class InferenceConfig:
         default_factory=lambda: InferenceAggregatorConfig()
     )
     n_ensemble_per_ic: int = 1
+    stepper_override: CoupledStepperOverrideConfig | None = None
 
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)
@@ -147,10 +153,20 @@ class InferenceConfig:
         )
 
     def load_stepper(self) -> CoupledStepper:
-        return load_stepper(self.checkpoint_path)
+        override = self.stepper_override
+        return load_stepper(
+            self.checkpoint_path,
+            stepper_override_ocean=override.ocean if override else None,
+            stepper_override_atmosphere=override.atmosphere if override else None,
+        )
 
     def load_stepper_config(self) -> CoupledStepperConfig:
-        return load_stepper_config(self.checkpoint_path)
+        override = self.stepper_override
+        return load_stepper_config(
+            self.checkpoint_path,
+            stepper_override_ocean=override.ocean if override else None,
+            stepper_override_atmosphere=override.atmosphere if override else None,
+        )
 
     def get_data_writer(
         self,

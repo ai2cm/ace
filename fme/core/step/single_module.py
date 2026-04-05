@@ -8,7 +8,7 @@ import dacite
 import torch
 from torch import nn
 
-from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
+from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo
@@ -193,6 +193,23 @@ class SingleModuleStepConfig(StepConfigABC):
                     f"{self.out_names}"
                 )
         self.prescribed_prognostic_names = names
+
+    def replace_total_energy_budget_correction(
+        self, value: EnergyBudgetConfig | None
+    ) -> None:
+        """Replace total energy budget correction."""
+        if isinstance(self.corrector, AtmosphereCorrectorConfig):
+            self.corrector = dataclasses.replace(
+                self.corrector, total_energy_budget_correction=value
+            )
+        else:
+            new_config = dict(self.corrector.config)
+            new_config["total_energy_budget_correction"] = (
+                None if value is None else dataclasses.asdict(value)
+            )
+            self.corrector = CorrectorSelector(
+                type=self.corrector.type, config=new_config
+            )
 
     @classmethod
     def _remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:

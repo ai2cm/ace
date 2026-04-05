@@ -33,7 +33,7 @@ from fme.core.coordinates import (
     SerializableVerticalCoordinate,
     VerticalCoordinate,
 )
-from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
+from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.utils import encode_timestep
@@ -741,6 +741,12 @@ class StepperConfig:
         self.derived_forcings.validate_replacement(derived_forcings)
         self.derived_forcings = derived_forcings
 
+    def replace_total_energy_budget_correction(
+        self, value: EnergyBudgetConfig | None
+    ) -> None:
+        """Replace total energy budget correction (e.g. turn off during evaluation)."""
+        self.step.replace_total_energy_budget_correction(value)
+
     @classmethod
     def from_state(cls, state) -> "StepperConfig":
         state = cls.remove_deprecated_keys(state)
@@ -961,6 +967,22 @@ class Stepper:
         """
         self._config.replace_derived_forcings(derived_forcings)
         self.forcing_deriver = derived_forcings.build(self._dataset_info)
+
+    def replace_total_energy_budget_correction(
+        self, value: EnergyBudgetConfig | None
+    ) -> None:
+        """
+        Replace the total energy budget correction (e.g. turn off during evaluation).
+
+        Args:
+            value: The new total energy budget correction config or None to disable.
+        """
+        self._config.replace_total_energy_budget_correction(value)
+        new_stepper: Stepper = self._config.get_stepper(
+            dataset_info=self._dataset_info,
+        )
+        new_stepper._step_obj.load_state(self._step_obj.get_state())
+        self._step_obj = new_stepper._step_obj
 
     def get_base_weights(self) -> Weights | None:
         """
@@ -1752,12 +1774,15 @@ class StepperOverrideConfig:
             producing a serialized stepper.
         prescribed_prognostic_names: List of prognostic variable names to overwrite
             from forcing at each step during inference.
+        total_energy_budget_correction: Total energy budget correction config to use
+            for the atmosphere corrector. Use ``None`` to turn off during evaluation.
     """
 
     ocean: Literal["keep"] | OceanConfig | None = "keep"
     multi_call: Literal["keep"] | MultiCallConfig | None = "keep"
     derived_forcings: Literal["keep"] | DerivedForcingsConfig = "keep"
     prescribed_prognostic_names: Literal["keep"] | list[str] = "keep"
+    total_energy_budget_correction: Literal["keep"] | EnergyBudgetConfig | None = "keep"
 
 
 def load_stepper_config(
@@ -1799,7 +1824,13 @@ def load_stepper(
         checkpoint_path, map_location=get_device(), weights_only=False
     )
     stepper = Stepper.from_state(checkpoint["stepper"])
+    apply_stepper_override(stepper, override_config)
+    return stepper
 
+
+def apply_stepper_override(
+    stepper: Stepper, override_config: StepperOverrideConfig
+) -> None:
     if override_config.ocean != "keep":
         logging.info(
             "Overriding training ocean configuration with a new ocean configuration."
@@ -1828,4 +1859,29 @@ def load_stepper(
         stepper.replace_prescribed_prognostic_names(
             override_config.prescribed_prognostic_names
         )
-    return stepper
+
+    if override_config.total_energy_budget_correction != "keep":
+        logging.info(
+            "Overriding total_energy_budget_correction with %s.",
+            override_config.total_energy_budget_correction,
+        )
+        stepper.replace_total_energy_budget_correction(
+            override_config.total_energy_budget_correction
+        )
+
+
+def apply_stepper_override_to_config(
+    stepper_config: StepperConfig, override_config: StepperOverrideConfig
+) -> None:
+    if override_config.ocean != "keep":
+        stepper_config.replace_ocean(override_config.ocean)
+    if override_config.derived_forcings != "keep":
+        stepper_config.replace_derived_forcings(override_config.derived_forcings)
+    if override_config.prescribed_prognostic_names != "keep":
+        stepper_config.replace_prescribed_prognostic_names(
+            override_config.prescribed_prognostic_names
+        )
+    if override_config.total_energy_budget_correction != "keep":
+        stepper_config.replace_total_energy_budget_correction(
+            override_config.total_energy_budget_correction
+        )
