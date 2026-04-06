@@ -2,20 +2,20 @@
 
 set -e
 
-JOB_NAME_BASE="ace-aimip-inference-aimip-skin-temp-only"
+JOB_NAME_BASE="ace-aimip-inference-aimip-no-strato-zonal-interp-pert-over-land"
 JOB_GROUP="ace-aimip"
 # this is from ace-aimip-fine-tune-decoder-pressure-levels-separate-decoder-lr-warmup-RS0
-EXISTING_RESULTS_DATASET="01KJZK9Y9XCSQA1WYCSRD7GJQ3"
+EXISTING_RESULTS_DATASET="01KNF8ERTHMJJRYS498VXBPKRJ"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
-AIMIP_INFERENCE_P0K_CONFIG_FILENAME="ace-aimip-inference-p0k-skin-temp-only.yaml"
+AIMIP_INFERENCE_P0K_CONFIG_FILENAME="ace-aimip-inference-p0k-zonal-interp-over-land-perts.yaml"
 AIMIP_INFERENCE_BASE_P0K_CONFIG_PATH=$SCRIPT_PATH/$AIMIP_INFERENCE_P0K_CONFIG_FILENAME
-AIMIP_INFERENCE_P2K_CONFIG_FILENAME="ace-aimip-inference-p2k-skin-temp-only.yaml"
+AIMIP_INFERENCE_P2K_CONFIG_FILENAME="ace-aimip-inference-p2k-zonal-interp-over-land-perts.yaml"
 AIMIP_INFERENCE_BASE_P2K_CONFIG_PATH=$SCRIPT_PATH/$AIMIP_INFERENCE_P2K_CONFIG_FILENAME
-AIMIP_INFERENCE_P4K_CONFIG_FILENAME="ace-aimip-inference-p4k-skin-temp-only.yaml"
+AIMIP_INFERENCE_P4K_CONFIG_FILENAME="ace-aimip-inference-p4k-zonal-interp-over-land-perts.yaml"
 AIMIP_INFERENCE_BASE_P4K_CONFIG_PATH=$SCRIPT_PATH/$AIMIP_INFERENCE_P4K_CONFIG_FILENAME
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
