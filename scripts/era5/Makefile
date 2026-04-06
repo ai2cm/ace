@@ -10,6 +10,11 @@ OUTPUT_GRID_ONE_DEGREE=F90
 OUTPUT_PATH_FOUR_DEGREE=gs://vcm-ml-intermediate/2026-03-19-era5-4deg-8layer-1940-2025.zarr
 OUTPUT_GRID_FOUR_DEGREE=F22.5
 
+# Pressure level run parameters
+PRESSURE_LEVEL_START_TIME=1940-01-01T12:00:00
+PRESSURE_LEVEL_END_TIME=2025-12-31T18:00:00
+PRESSURE_LEVEL_OUTPUT_PATH=gs://vcm-ml-intermediate/era5-pressure-levels-1deg-1940-2025.zarr
+
 # Test run parameters
 START_TIME_TEST_RUN ?= 2025-12-30T00:00:00
 END_TIME_TEST_RUN ?= 2025-12-31T18:00:00
@@ -59,6 +64,17 @@ era5_dataflow_four_degree:
 		$(START_TIME) \
 		$(END_TIME) \
 		--check_data_validity
+
+.PHONY: era5_pressure_level_dataflow
+era5_pressure_level_dataflow:
+	cd pipeline && \
+		conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) \
+		./run-pressure-level-pipeline.sh \
+		DataflowRunner \
+		$(PRESSURE_LEVEL_OUTPUT_PATH) \
+		$(OUTPUT_GRID_ONE_DEGREE) \
+		$(PRESSURE_LEVEL_START_TIME) \
+		$(PRESSURE_LEVEL_END_TIME)
 
 .PHONY: era5_dataflow_test_run
 era5_dataflow_test_run:
