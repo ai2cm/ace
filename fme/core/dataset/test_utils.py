@@ -16,6 +16,7 @@ from fme.core.coordinates import (
 from .utils import (
     _broadcast_array_to_tensor,
     _get_indexers,
+    _zonal_interp_periodic,
     accumulate_labels,
     as_broadcasted_tensor,
     decode_timestep,
@@ -204,3 +205,46 @@ def test__broadcast_array_to_tensor_raises_assertion_error():
     arr = np.zeros(3)
     with pytest.raises(ValueError, match="matching time dimension"):
         _broadcast_array_to_tensor(arr, (TIME_DIM, LAT_DIM, LON_DIM), (4, 2, 3))
+
+
+class TestZonalInterpPeriodic:
+    def test_no_nans_unchanged(self):
+        arr = np.array([[1.0, 2.0, 3.0, 4.0, 5.0]])
+        result = _zonal_interp_periodic(arr)
+        np.testing.assert_array_equal(result, arr)
+
+    def test_all_nan_row_unchanged(self):
+        arr = np.full((1, 6), np.nan)
+        result = _zonal_interp_periodic(arr)
+        assert np.all(np.isnan(result))
+
+    def test_interior_nan_interpolated(self):
+        arr = np.array([[1.0, np.nan, 3.0, 4.0, 5.0, 6.0]])
+        result = _zonal_interp_periodic(arr)
+        assert not np.any(np.isnan(result))
+        np.testing.assert_allclose(result[0, 1], 2.0)
+
+    def test_periodic_boundary(self):
+        """NaNs at the edges should be filled using values wrapped from the
+        opposite end of the array."""
+        arr = np.array([[np.nan, 2.0, 3.0, 4.0, 5.0, np.nan]])
+        result = _zonal_interp_periodic(arr)
+        assert not np.any(np.isnan(result))
+        # Padded array is [4, 5, NaN, | NaN, 2, 3, 4, 5, NaN, | NaN, 2, 3].
+        # Index 0 (padded idx 3) is interpolated between padded (1,5) and
+        # (4,2) giving 3.0; index 5 (padded idx 8) similarly gives 4.0.
+        np.testing.assert_allclose(result[0, 0], 3.0)
+        np.testing.assert_allclose(result[0, -1], 4.0)
+
+    def test_3d_array(self):
+        arr = np.ones((2, 3, 8))
+        arr[:, :, 2] = np.nan
+        result = _zonal_interp_periodic(arr)
+        assert not np.any(np.isnan(result))
+        np.testing.assert_allclose(result[:, :, 2], 1.0)
+
+    def test_original_values_preserved(self):
+        arr = np.array([[10.0, np.nan, np.nan, 40.0, 50.0, 60.0]])
+        result = _zonal_interp_periodic(arr)
+        np.testing.assert_array_equal(result[0, 3:], arr[0, 3:])
+        np.testing.assert_array_equal(result[0, 0], arr[0, 0])

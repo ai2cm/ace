@@ -797,6 +797,44 @@ def test_fill_nans(mock_data_fixture, engine, file_pattern, request):
     assert torch.all(data["constant_var"][:, 0, 0] == 0)
 
 
+@pytest.mark.parametrize(
+    "mock_data_fixture, engine, file_pattern",
+    [
+        ("mock_monthly_netcdfs_with_nans", "netcdf4", "*.nc"),
+        ("mock_monthly_zarr_with_nans", "zarr", "*.zarr"),
+    ],
+)
+def test_fill_nans_zonal_interp(mock_data_fixture, engine, file_pattern, request):
+    mock_data: MockData = request.getfixturevalue(mock_data_fixture)
+    nan_config = FillNaNsConfig(zonal_interp_variables=["foo"])
+    config = XarrayDataConfig(
+        data_path=mock_data.tmpdir,
+        fill_nans=nan_config,
+        engine=engine,
+        file_pattern=file_pattern,
+    )
+    names = mock_data.var_names.all_names
+    dataset = xarray_dataset_constructor(config, names, 2)
+    data, _, _, _ = dataset[0]
+    # "foo" NaNs at lon=0 should be interpolated, not filled with constant 0
+    assert not torch.any(torch.isnan(data["foo"][0, :, 0]))
+    assert not torch.all(data["foo"][0, :, 0] == 0)
+    # "bar" also had NaNs but is not in zonal_interp_variables,
+    # so it should be filled with constant 0
+    assert torch.all(data["bar"][0, :, 0] == 0)
+    # constant_var is not in zonal_interp_variables, filled with constant 0
+    assert torch.all(data["constant_var"][:, 0, 0] == 0)
+
+
+def test_fill_nans_zonal_interp_healpix_raises():
+    with pytest.raises(ValueError, match="zonal_interp_variables"):
+        XarrayDataConfig(
+            data_path="/unused",
+            spatial_dimensions="healpix",
+            fill_nans=FillNaNsConfig(zonal_interp_variables=["sst"]),
+        )
+
+
 def test_keep_nans(mock_monthly_netcdfs_with_nans):
     config_keep_nan = XarrayDataConfig(data_path=mock_monthly_netcdfs_with_nans.tmpdir)
     names = mock_monthly_netcdfs_with_nans.var_names.all_names
