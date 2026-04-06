@@ -1,10 +1,12 @@
 experiment_dir: /results
-save_checkpoint: true
+timing_only:
+  type: inline_inference
+max_epochs: 1
+save_checkpoint: false
 validate_using_ema: true
-evaluate_before_training: true
+evaluate_before_training: false
 ema:
   decay: 0.999
-max_epochs: 20
 inference:
   n_forward_steps: 28810
   forward_steps_in_memory: 43
