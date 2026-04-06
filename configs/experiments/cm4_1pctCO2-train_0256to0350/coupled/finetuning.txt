@@ -1,3 +1,3 @@
 group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
 
-coupled-inline-inference-timings|rs0|ace-samudra-coupled-cm4|p859icbl|ckpt|train|high|h100|4|800GiB|3|ai2/ace|seed=0
+coupled-timing_only-inline_inference-8xH100|rs0|ace-samudra-coupled-cm4|p859icbl|ckpt|train|high|h100|8|800GiB|3|ai2/ace|seed=0
