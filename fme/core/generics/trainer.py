@@ -50,6 +50,7 @@
 
 import abc
 import contextlib
+import dataclasses
 import gc
 import logging
 import os
@@ -58,7 +59,7 @@ import sys
 import time
 import uuid
 from collections.abc import Callable, Mapping
-from typing import Any, ClassVar, Generic, Protocol, TypeVar
+from typing import Any, ClassVar, Generic, Literal, Protocol, TypeVar
 
 import torch
 
@@ -89,6 +90,23 @@ class EndOfEpochCallback(Protocol):
 
 def null_end_of_epoch_callback(epoch: int) -> Mapping[str, Any]:
     return {}
+
+
+@dataclasses.dataclass
+class TimingOnlyConfig:
+    """Configuration for timing-only mode.
+
+    When provided as the ``timing_only`` field of a TrainConfig, training and
+    validation loops are skipped and only the selected timing instrumentation
+    runs for each configured inference epoch.
+
+    Attributes:
+        type: The timing mode to run. Currently only ``"inline_inference"``
+            is supported, which runs timed inline inference each inference
+            epoch.
+    """
+
+    type: Literal["inline_inference"]
 
 
 class TrainConfigProtocol(Protocol):
@@ -135,6 +153,9 @@ class TrainConfigProtocol(Protocol):
 
     @property
     def save_best_inference_epoch_checkpoints(self) -> bool: ...
+
+    @property
+    def timing_only(self) -> TimingOnlyConfig | None: ...
 
     @property
     def lr_tuning(self) -> LRTuningConfig | None: ...
