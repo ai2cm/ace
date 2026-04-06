@@ -1,10 +1,12 @@
 experiment_dir: /results
-save_checkpoint: true
+timing_only:
+  type: inline_inference
+max_epochs: 1
+save_checkpoint: false
 validate_using_ema: true
-evaluate_before_training: true
+evaluate_before_training: false
 ema:
   decay: 0.999
-max_epochs: 20
 inference:
   n_forward_steps: 28810
   forward_steps_in_memory: 43
@@ -81,9 +83,23 @@ optimization:
   kwargs:
     fused: true
     weight_decay: 0.01
-stepper:
+stepper_training:
   parameter_init:
     weights_path: /ckpt.tar
+  n_ensemble: 2
+  train_n_forward_steps:
+    outcomes:
+      - steps: 1
+        probability: 0.6
+      - steps: 2
+        probability: 0.2
+      - steps: 4
+        probability: 0.1
+      - steps: 12
+        probability: 0.05
+      - steps: 20
+        probability: 0.05
+  optimize_last_step_only: true
   loss:
     type: EnsembleLoss
     weights:
@@ -98,9 +114,6 @@ stepper:
       h500: 10
       TMP850: 5
       Q2m: 0.5
-      TMP2m: 10
-      UGRD10m: 2.5
-      VGRD10m: 2.5
       DLWRFsfc: 2
       ULWRFsfc: 5
       USWRFsfc: 2
@@ -111,6 +124,7 @@ stepper:
     kwargs:
       crps_weight: 0.9
       energy_score_weight: 0.1
+stepper:
   step:
     type: single_module
     config:
@@ -120,6 +134,7 @@ stepper:
         config:
           embed_dim: 384
           noise_embed_dim: 64
+          noise_type: isotropic
           filter_type: linear
           use_mlp: true
           num_layers: 8
@@ -127,7 +142,6 @@ stepper:
           separable: false
           spectral_layers: 3
           spectral_transform: sht
-          noise_type: isotropic
       normalization:
         network:
           global_means_path: /atmos_stats/centering.nc
@@ -261,17 +275,3 @@ stepper:
         - VGRD10m
         - eastward_surface_wind_stress
         - northward_surface_wind_stress
-  n_ensemble: 2
-  train_n_forward_steps:
-    outcomes:
-      - steps: 1
-        probability: 0.6
-      - steps: 2
-        probability: 0.2
-      - steps: 4
-        probability: 0.1
-      - steps: 12
-        probability: 0.05
-      - steps: 20
-        probability: 0.05
-  optimize_last_step_only: true
