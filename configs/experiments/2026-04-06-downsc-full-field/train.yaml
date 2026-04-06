@@ -1,7 +1,7 @@
 static_inputs:
   HGTsfc: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
   land_fraction: /climate-default/2025-11-19-X-SHiELD-AMIP-downscaling-land-fraction/3km/land_fraction.zarr
-log_loss_vs_noise: true
+log_loss_vs_noise: false
 model:
   use_amp_bf16: true
   out_names:
