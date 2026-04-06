@@ -204,7 +204,8 @@ def run_timed_inference(
     predict: PredictFunction[PS, FD, SD],
     data: InferenceDataABC[PS, FD],
     aggregator: InferenceAggregatorABC[PS, SD],
-):
+    label: str = "timing",
+) -> dict[str, float]:
     """Run inference with per-window timing instrumentation.
 
     Like ``run_inference`` but omits writer/record_logs and instead collects
@@ -212,15 +213,19 @@ def run_timed_inference(
     After each window, timing is gathered across ranks via ``gather_object``
     (which doubles as a sync point) and logged to wandb on root.
 
+    Returns the local rank's cumulative timing dict (keys: ``data_loading_s``,
+    ``forward_pass_s``, ``aggregator_s``, ``total_s``, ``n_windows``).
+
     Args:
         predict: The prediction function to use.
         data: Provides an initial condition and appropriately aligned windows of
             forcing data.
         aggregator: Aggregator for collecting and reducing metrics.
+        label: Prefix for wandb keys logged per window.
     """
     dist = Distributed.get_instance()
     timer = GlobalTimer.get_instance()
-    logger = _TimingLogger(label="timing")
+    logger = _TimingLogger(label=label)
     looper = Looper(predict=predict, data=data)
 
     with timer.context("aggregator"):
@@ -283,17 +288,5 @@ def run_timed_inference(
             f"total={window_timing['total_s']:.2f}s"
         )
 
-    all_cumulative = dist.gather_object(cumulative)
-    if dist.is_root() and all_cumulative is not None:
-        summary: dict[str, Any] = {}
-        for r, rc in enumerate(all_cumulative):
-            for key, val in rc.items():
-                summary[f"summary/{key}/rank_{r}"] = val
-        rank_totals = [rc["total_s"] for rc in all_cumulative]
-        summary["summary/max_total_s"] = max(rank_totals)
-        summary["summary/min_total_s"] = min(rank_totals)
-        summary["summary/spread_s"] = max(rank_totals) - min(rank_totals)
-        summary["summary/n_windows"] = n_windows
-    else:
-        summary = {}
-    logger.log(summary)
+    cumulative["n_windows"] = float(n_windows)
+    return cumulative
