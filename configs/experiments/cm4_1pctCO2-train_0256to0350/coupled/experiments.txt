@@ -61,3 +61,5 @@ ft_fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KMKZZJCT9PXYZB
 coupled-inline-inference-timings|rs0|01KNB04QWE6587MKP361XJRXXR|training|best_inference_ckpt|normal|--not-preemptible
 
 coupled-timing_only-inline_inference-8xH100|rs0|01KNJB017KABHQ0N80P6E9EN61|training|best_inference_ckpt|normal|--not-preemptible
+
+coupled-timing_only-inline_inference-8xH100|rs0|01KNJBRKGDEDEWENQYE0GRHHXB|training|best_inference_ckpt|normal|--not-preemptible
