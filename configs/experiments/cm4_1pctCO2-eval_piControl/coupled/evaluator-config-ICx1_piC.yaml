@@ -36,4 +36,4 @@ loader:
           engine: zarr
   start_indices:
     times:
-      - '0310-12-29T12:00:00'
+      - '0151-01-03T12:00:00'
