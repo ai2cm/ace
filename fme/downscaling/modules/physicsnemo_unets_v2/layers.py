@@ -220,10 +220,10 @@ class Conv2d(torch.nn.Module):
         f = torch.as_tensor(resample_filter, dtype=torch.float32)
         f = f.ger(f).unsqueeze(0).unsqueeze(1) / f.sum().square()
         self.register_buffer("resample_filter", f if up or down else None)
+        _validate_amp(self.amp_mode)
 
     def forward(self, x):
         weight, bias, resample_filter = self.weight, self.bias, self.resample_filter
-        _validate_amp(self.amp_mode)
         if not self.amp_mode:
             if self.weight is not None and self.weight.dtype != x.dtype:
                 weight = self.weight.to(x.dtype)
@@ -354,10 +354,10 @@ class Linear(torch.nn.Module):
             if bias
             else None
         )
+        _validate_amp(self.amp_mode)
 
     def forward(self, x):
         weight, bias = self.weight, self.bias
-        _validate_amp(self.amp_mode)
         if not self.amp_mode:
             if self.weight is not None and self.weight.dtype != x.dtype:
                 weight = self.weight.to(x.dtype)
@@ -395,10 +395,10 @@ class FourierEmbedding(torch.nn.Module):
         super().__init__()
         self.register_buffer("freqs", torch.randn(num_channels // 2) * scale)
         self.amp_mode = amp_mode
+        _validate_amp(self.amp_mode)
 
     def forward(self, x):
         freqs = self.freqs
-        _validate_amp(self.amp_mode)
         if not self.amp_mode:
             if x.dtype != self.freqs.dtype:
                 freqs = self.freqs.to(x.dtype)
@@ -482,6 +482,7 @@ class PositionalEmbedding(torch.nn.Module):
             pow = np.arange(half_embed_dim, dtype=np.float32) / half_embed_dim
             w = np.exp(-np.log(self.max_positions) * pow)
             self.register_buffer("freqs", torch.from_numpy(w).float())
+        _validate_amp(self.amp_mode)
 
     def _cos_sin_embedding(self, x):
         freqs = torch.arange(
@@ -489,7 +490,6 @@ class PositionalEmbedding(torch.nn.Module):
         )
         freqs = freqs / (self.freq_embed_dim // 2 - (1 if self.endpoint else 0))
         freqs = (1 / self.max_positions) ** freqs
-        _validate_amp(self.amp_mode)
         if not self.amp_mode:
             if freqs.dtype != x.dtype:
                 freqs = freqs.to(x.dtype)
@@ -838,12 +838,12 @@ class UNetBlock(torch.nn.Module):
         # Commented out after vendorizing because we do not attempt to load
         # legacy checkpoints, this is only used in SongUNetv2
         # self.register_load_state_dict_pre_hook(self._migrate_attention_module)
+        _validate_amp(self.amp_mode)
 
     def forward(self, x, emb):
         orig = x
         x = self.conv0(self.norm0(x))
         params = self.affine(emb).unsqueeze(2).unsqueeze(3)
-        _validate_amp(self.amp_mode)
         if not self.amp_mode:
             if params.dtype != x.dtype:
                 params = params.to(x.dtype)  # type: ignore
