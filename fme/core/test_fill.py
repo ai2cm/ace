@@ -17,6 +17,10 @@ def test_smooth_flood_fill():
     )
     filled = flood_fill(data, "name")
 
+    # Verify mask caching: a second call should produce the same result.
+    filled2 = flood_fill(data, "name")
+    torch.testing.assert_close(filled, filled2)
+
     # 1. No NaNs in output
     assert not filled.isnan().any(), "Output should contain no NaNs"
 

@@ -11,6 +11,9 @@ from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.metrics import spherical_power_spectrum
 from fme.core.typing_ import TensorMapping
+from fme.core.wandb import Image
+
+from ..plotting import plot_paneled_data
 
 
 class SphericalPowerSpectrumAggregator:
@@ -28,6 +31,8 @@ class SphericalPowerSpectrumAggregator:
         self._power_spectrum: dict[str, torch.Tensor] = {}
         self._counts: dict[str, int] = defaultdict(int)
         self._nan_fill_fn = nan_fill_fn
+        self._filled_maps: dict[str, torch.Tensor] = {}
+        self._first_batch = True
 
     @torch.no_grad()
     def record_batch(self, data: TensorMapping):
@@ -35,6 +40,8 @@ class SphericalPowerSpectrumAggregator:
             batch_size = data[name].shape[0]
             time_size = data[name].shape[1]
             tensor = self._nan_fill_fn(data[name], name)
+            if self._first_batch:
+                self._filled_maps[name] = tensor[0, -1].cpu()
             power_spectrum = spherical_power_spectrum(tensor, self._real_sht)
             mean_power_spectrum = torch.mean(power_spectrum, dim=(0, 1))
             new_count = batch_size * time_size
@@ -47,6 +54,7 @@ class SphericalPowerSpectrumAggregator:
                 ) / (new_count + self._counts[name])
                 self._power_spectrum[name] = weighted_average
             self._counts[name] += new_count
+        self._first_batch = False
 
     def get_mean(self) -> dict[str, torch.Tensor]:
         dist = Distributed.get_instance()
@@ -59,6 +67,9 @@ class SphericalPowerSpectrumAggregator:
                 _mean_spectrum = dist.reduce_mean(_mean_spectrum)
             logs[name] = _mean_spectrum
         return logs
+
+    def get_map(self) -> dict[str, torch.Tensor]:
+        return self._filled_maps
 
 
 class PairedSphericalPowerSpectrumAggregator:
@@ -91,8 +102,8 @@ class PairedSphericalPowerSpectrumAggregator:
         self._target_aggregator.record_batch(target_data)
 
     @torch.no_grad()
-    def get_logs(self, label: str) -> dict[str, plt.Figure | float]:
-        logs: dict[str, plt.Figure | float] = {}
+    def get_logs(self, label: str) -> dict[str, plt.Figure | float | Image]:
+        logs: dict[str, plt.Figure | float | Image] = {}
         gen_spectrum = self._gen_aggregator.get_mean()
         target_spectrum = self._target_aggregator.get_mean()
         if self._report_plot:
@@ -109,6 +120,16 @@ class PairedSphericalPowerSpectrumAggregator:
         metrics = _get_spectrum_metrics(gen_spectrum, target_spectrum)
         for name, value in metrics.items():
             logs[f"{label}/{name}"] = value
+        gen_maps = self._gen_aggregator.get_map()
+        target_maps = self._target_aggregator.get_map()
+        for name in gen_maps:
+            if name in target_maps:
+                image = plot_paneled_data(
+                    [[gen_maps[name].numpy()], [target_maps[name].numpy()]],
+                    diverging=False,
+                    caption="gen (top) / target (bottom)",
+                )
+                logs[f"{label}/nan_filled/{name}"] = image
         return logs
 
     @torch.no_grad()
