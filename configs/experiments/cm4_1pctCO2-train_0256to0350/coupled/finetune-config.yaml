@@ -1,4 +1,7 @@
 experiment_dir: /results
+timing_only:
+  type: inline_inference
+max_epochs: 3
 save_checkpoint: false
 save_best_inference_epoch_checkpoints: false
 checkpoint_every_n_batches: 100
@@ -9,7 +12,6 @@ validate_using_ema: true
 evaluate_before_training: true
 ema:
   decay: 0.999
-max_epochs: 1
 n_coupled_steps: 4
 inference:
   n_coupled_steps: 1440
