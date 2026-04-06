@@ -17,6 +17,11 @@ forcing_loader:
     data_path: /climate-default
     file_pattern: 2026-02-18-era5-1deg-combined-aimip-forcing-1978-2022.zarr
     engine: zarr
+    fill_nans:
+        method: constant
+        value: 0.0
+        zonal_interp_variables:
+          - sea_surface_temperature
   num_data_workers: 8
   perturbations:
     sst:
