@@ -83,11 +83,11 @@ train_data:
         start_time: '2014-01-01T00:00:00'
         stop_time: '2022-12-31T23:59:00'
   lat_extent:
-    start: -66 #0
-    stop: 70 # 35
-  # lon_extent:
-  #   start: 75
-  #   stop: 195
+    start: 0
+    stop:  35
+  lon_extent:
+    start: 75
+    stop: 195
   strict_ensemble: false
 validation_data:
   batch_size: 16
