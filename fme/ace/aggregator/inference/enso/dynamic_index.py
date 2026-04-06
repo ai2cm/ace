@@ -1,10 +1,9 @@
-import abc
 import logging
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, ClassVar
+from typing import Any
 
 import cftime
 import numpy as np
@@ -18,39 +17,9 @@ from fme.core.typing_ import TensorDict, TensorMapping
 
 from ...plotting import plot_mean_and_samples
 
-SAMPLE_DIM, TIME_DIM, LAT_DIM, LON_DIM = 0, 1, -2, -1
+SAMPLE_DIM, TIME_DIM = 0, 1
 
 SEA_SURFACE_TEMPERATURE_NAMES = ["sst", "surface_temperature", "TS"]
-
-
-class Region(abc.ABC):
-    @property
-    @abc.abstractmethod
-    def regional_weights(self) -> torch.Tensor: ...
-
-
-@dataclass
-class LatLonRegion(Region):
-    lat: torch.Tensor
-    lon: torch.Tensor
-    lat_bounds: tuple[float, float]
-    lon_bounds: tuple[float, float]
-    horizontal_dims: ClassVar[tuple[int, int]] = (LAT_DIM, LON_DIM)
-
-    def __post_init__(self):
-        lat_mask = (
-            (self.lat >= self.lat_bounds[0]) & (self.lat <= self.lat_bounds[1])
-        ).unsqueeze(self.horizontal_dims[1])
-        lon_mask = (
-            (self.lon >= self.lon_bounds[0]) & (self.lon <= self.lon_bounds[1])
-        ).unsqueeze(self.horizontal_dims[0])
-        self._regional_weights = torch.where(
-            torch.logical_and(lat_mask, lon_mask), 1.0, 0.0
-        )
-
-    @property
-    def regional_weights(self) -> torch.Tensor:
-        return self._regional_weights
 
 
 def compute_power_spectrum(

@@ -8,7 +8,7 @@ import torch
 import xarray as xr
 
 from fme.ace.data_loading.batch_data import PairedData, PrognosticState
-from fme.core.coordinates import LatLonCoordinates
+from fme.core.coordinates import DepthCoordinate, LatLonCoordinates, LatLonRegion
 from fme.core.dataset_info import DatasetInfo
 from fme.core.diagnostics import get_reduced_diagnostics, write_reduced_diagnostics
 from fme.core.generics.aggregator import (
@@ -24,12 +24,12 @@ from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
 from .annual import GlobalMeanAnnualAggregator, PairedGlobalMeanAnnualAggregator
 from .enso import (
     EnsoCoefficientEvaluatorAggregator,
-    LatLonRegion,
     PairedRegionalIndexAggregator,
     RegionalIndexAggregator,
 )
 from .histogram import HistogramAggregator
 from .reduced import MeanAggregator, SingleTargetMeanAggregator
+from .regional_spectrum import PairedRegionalSpectrumAggregator
 from .seasonal import SeasonalAggregator
 from .spectrum import PairedSphericalPowerSpectrumAggregator
 from .time_mean import TimeMeanAggregator, TimeMeanEvaluatorAggregator
@@ -41,6 +41,8 @@ APPROXIMATELY_TWO_YEARS = datetime.timedelta(days=730)
 SLIGHTLY_LESS_THAN_FIVE_YEARS = datetime.timedelta(days=1800)
 NINO34_LAT = (-5, 5)
 NINO34_LON = (190, 240)
+OCEAN_SPECTRA_LAT = (-35, 35)
+OCEAN_SPECTRA_LON = (180, 240)
 
 
 class _Aggregator(Protocol):
@@ -337,12 +339,29 @@ class InferenceEvaluatorAggregator(
                 channel_mean_names=self._channel_mean_names,
             )
         try:
-            self._aggregators["power_spectrum"] = (
-                PairedSphericalPowerSpectrumAggregator(
-                    gridded_operations=ops,
-                    report_plot=True,
+            if isinstance(dataset_info.vertical_coordinate, DepthCoordinate):
+                if isinstance(horizontal_coordinates, LatLonCoordinates):
+                    ocean_spectra_region = LatLonRegion(
+                        lat_bounds=OCEAN_SPECTRA_LAT,
+                        lon_bounds=OCEAN_SPECTRA_LON,
+                        lat=horizontal_coordinates.lat,
+                        lon=horizontal_coordinates.lon,
+                    )
+                    self._aggregators["power_spectrum"] = (
+                        PairedRegionalSpectrumAggregator(
+                            ocean_spectra_region,
+                            report_plot=True,
+                        )
+                    )
+                else:
+                    raise NotImplementedError
+            else:
+                self._aggregators["power_spectrum"] = (
+                    PairedSphericalPowerSpectrumAggregator(
+                        gridded_operations=ops,
+                        report_plot=True,
+                    )
                 )
-            )
         except NotImplementedError:
             logging.warning(
                 "Power spectrum aggregator not implemented for this grid type, "

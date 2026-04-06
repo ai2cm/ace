@@ -3,7 +3,7 @@ import dataclasses
 import math
 from collections.abc import Callable, Mapping
 from datetime import timedelta
-from typing import Literal, TypeVar
+from typing import ClassVar, Literal, TypeVar
 
 import dacite
 import numpy as np
@@ -591,6 +591,56 @@ class HorizontalCoordinates(abc.ABC):
     @abc.abstractmethod
     def get_state(self) -> TensorMapping:
         pass
+
+
+LAT_DIM, LON_DIM = -2, -1
+
+
+@dataclasses.dataclass
+class LatLonRegion:
+    lat: torch.Tensor
+    lon: torch.Tensor
+    lat_bounds: tuple[float, float]
+    lon_bounds: tuple[float, float]
+    horizontal_dims: ClassVar[tuple[int, int]] = (LAT_DIM, LON_DIM)
+
+    def __post_init__(self):
+        lat_mask = (
+            (self.lat >= self.lat_bounds[0]) & (self.lat <= self.lat_bounds[1])
+        ).unsqueeze(self.horizontal_dims[1])
+        lon_mask = (
+            (self.lon >= self.lon_bounds[0]) & (self.lon <= self.lon_bounds[1])
+        ).unsqueeze(self.horizontal_dims[0])
+        self._regional_weights = torch.where(
+            torch.logical_and(lat_mask, lon_mask), 1.0, 0.0
+        )
+        lat_indices = torch.where(
+            (self.lat >= self.lat_bounds[0]) & (self.lat <= self.lat_bounds[1])
+        )[0]
+        lon_indices = torch.where(
+            (self.lon >= self.lon_bounds[0]) & (self.lon <= self.lon_bounds[1])
+        )[0]
+        if len(lat_indices) == 0 or len(lon_indices) == 0:
+            self._lat_start = 0
+            self._lat_len = 0
+            self._lon_start = 0
+            self._lon_len = 0
+        else:
+            self._lat_start = lat_indices[0].item()
+            self._lat_len = lat_indices[-1].item() - self._lat_start + 1
+            self._lon_start = lon_indices[0].item()
+            self._lon_len = lon_indices[-1].item() - self._lon_start + 1
+
+    @property
+    def regional_weights(self) -> torch.Tensor:
+        return self._regional_weights
+
+    def subset(self, data: torch.Tensor) -> torch.Tensor:
+        """Slice the horizontal dimensions to the region's lat/lon bounds."""
+        lat_dim, lon_dim = self.horizontal_dims
+        data = data.narrow(lat_dim % data.ndim, self._lat_start, self._lat_len)
+        data = data.narrow(lon_dim % data.ndim, self._lon_start, self._lon_len)
+        return data
 
 
 @dataclasses.dataclass

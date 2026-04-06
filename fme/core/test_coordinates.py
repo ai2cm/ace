@@ -8,6 +8,7 @@ from fme.core.coordinates import (
     HEALPixCoordinates,
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
+    LatLonRegion,
     dz_from_idepth,
 )
 from fme.core.mask_provider import MaskProvider
@@ -405,3 +406,101 @@ def test_healpix_coordinates_xyz(pad: bool):
 
         assert np.allclose(distances_x, mean_distances_x, atol=0.03)
         assert np.allclose(distances_y, mean_distances_y, atol=0.03)
+
+
+class TestLatLonRegion:
+    N_LAT, N_LON = 3, 5
+    LAT = torch.linspace(0.0, 10.0, N_LAT)
+    LON = torch.linspace(0.0, 20.0, N_LON)
+
+    @pytest.mark.parametrize(
+        "lat_bounds, lon_bounds, expected",
+        [
+            pytest.param(
+                (0.0, 10.0),
+                (0.0, 20.0),
+                torch.ones(N_LAT, N_LON),
+                id="original_domain",
+            ),
+            pytest.param(
+                (20.0, 30.0),
+                (25.0, 35.0),
+                torch.zeros(N_LAT, N_LON),
+                id="null_domain",
+            ),
+            pytest.param(
+                (0.0, 5.0),
+                (0.0, 20.0),
+                torch.tensor(
+                    [[1, 1, 1, 1, 1], [1, 1, 1, 1, 1], [0, 0, 0, 0, 0]],
+                    dtype=torch.float32,
+                ),
+                id="first_half_lat",
+            ),
+            pytest.param(
+                (0.0, 10.0),
+                (0.0, 10.0),
+                torch.tensor(
+                    [[1, 1, 1, 0, 0], [1, 1, 1, 0, 0], [1, 1, 1, 0, 0]],
+                    dtype=torch.float32,
+                ),
+                id="first_half_lon",
+            ),
+            pytest.param(
+                (0.0, 5.0),
+                (0.0, 10.0),
+                torch.tensor(
+                    [[1, 1, 1, 0, 0], [1, 1, 1, 0, 0], [0, 0, 0, 0, 0]],
+                    dtype=torch.float32,
+                ),
+                id="first_half_both",
+            ),
+        ],
+    )
+    def test_regional_weights(self, lat_bounds, lon_bounds, expected):
+        region = LatLonRegion(
+            lat=self.LAT,
+            lon=self.LON,
+            lat_bounds=lat_bounds,
+            lon_bounds=lon_bounds,
+        )
+        assert region.regional_weights.shape == (self.N_LAT, self.N_LON)
+        torch.testing.assert_close(region.regional_weights, expected)
+
+    def test_subset_selects_region(self):
+        region = LatLonRegion(
+            lat=self.LAT, lon=self.LON, lat_bounds=(0.0, 5.0), lon_bounds=(0.0, 10.0)
+        )
+        data = torch.arange(self.N_LAT * self.N_LON, dtype=torch.float32).reshape(
+            self.N_LAT, self.N_LON
+        )
+        result = region.subset(data)
+        expected = data[:2, :3]
+        torch.testing.assert_close(result, expected)
+
+    def test_subset_full_domain(self):
+        region = LatLonRegion(
+            lat=self.LAT, lon=self.LON, lat_bounds=(0.0, 10.0), lon_bounds=(0.0, 20.0)
+        )
+        data = torch.randn(self.N_LAT, self.N_LON)
+        result = region.subset(data)
+        torch.testing.assert_close(result, data)
+
+    def test_subset_with_leading_dims(self):
+        """Data with shape (batch, time, lat, lon) should be subsetted correctly."""
+        region = LatLonRegion(
+            lat=self.LAT, lon=self.LON, lat_bounds=(0.0, 5.0), lon_bounds=(0.0, 10.0)
+        )
+        batch, time = 2, 4
+        data = torch.randn(batch, time, self.N_LAT, self.N_LON)
+        result = region.subset(data)
+        assert result.shape == (batch, time, 2, 3)
+        torch.testing.assert_close(result, data[:, :, :2, :3])
+
+    def test_subset_empty_region(self):
+        region = LatLonRegion(
+            lat=self.LAT, lon=self.LON, lat_bounds=(20.0, 30.0), lon_bounds=(25.0, 35.0)
+        )
+        data = torch.randn(self.N_LAT, self.N_LON)
+        result = region.subset(data)
+        assert result.numel() == 0

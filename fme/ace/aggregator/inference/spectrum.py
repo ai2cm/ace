@@ -12,6 +12,32 @@ from fme.core.metrics import spherical_power_spectrum
 from fme.core.typing_ import TensorMapping
 
 
+def update_running_mean_spectrum(
+    power_spectrum_dict: dict[str, torch.Tensor],
+    counts_dict: dict[str, int],
+    name: str,
+    power_spectrum: torch.Tensor,
+    batch_size: int,
+    time_size: int,
+) -> None:
+    """Update a running weighted average of power spectra in-place.
+
+    NOTE: Mutates power_spectrum_dict and counts_dict.
+
+    """
+    mean_power_spectrum = torch.mean(power_spectrum, dim=(0, 1))
+    new_count = batch_size * time_size
+    if name not in power_spectrum_dict:
+        power_spectrum_dict[name] = mean_power_spectrum
+    else:
+        weighted_average = (
+            new_count * mean_power_spectrum
+            + counts_dict[name] * power_spectrum_dict[name]
+        ) / (new_count + counts_dict[name])
+        power_spectrum_dict[name] = weighted_average
+    counts_dict[name] += new_count
+
+
 class SphericalPowerSpectrumAggregator:
     """Average the power spectrum over batch and time dimensions."""
 
@@ -29,17 +55,14 @@ class SphericalPowerSpectrumAggregator:
             batch_size = data[name].shape[0]
             time_size = data[name].shape[1]
             power_spectrum = spherical_power_spectrum(data[name], self._real_sht)
-            mean_power_spectrum = torch.mean(power_spectrum, dim=(0, 1))
-            new_count = batch_size * time_size
-            if name not in self._power_spectrum:
-                self._power_spectrum[name] = mean_power_spectrum
-            else:
-                weighted_average = (
-                    new_count * mean_power_spectrum
-                    + self._counts[name] * self._power_spectrum[name]
-                ) / (new_count + self._counts[name])
-                self._power_spectrum[name] = weighted_average
-            self._counts[name] += new_count
+            update_running_mean_spectrum(
+                self._power_spectrum,
+                self._counts,
+                name,
+                power_spectrum,
+                batch_size,
+                time_size,
+            )
 
     def get_mean(self) -> dict[str, torch.Tensor]:
         dist = Distributed.get_instance()
