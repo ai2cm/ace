@@ -50,6 +50,7 @@
 
 import abc
 import contextlib
+import dataclasses
 import gc
 import logging
 import os
@@ -58,7 +59,7 @@ import sys
 import time
 import uuid
 from collections.abc import Callable, Mapping
-from typing import Any, ClassVar, Generic, Protocol, TypeVar
+from typing import Any, ClassVar, Generic, Literal, Protocol, TypeVar
 
 import torch
 
@@ -67,7 +68,7 @@ from fme.core.distributed import Distributed
 from fme.core.ema import EMATracker
 from fme.core.generics.aggregator import AggregatorABC, InferenceAggregatorABC
 from fme.core.generics.data import GriddedDataABC, InferenceDataABC
-from fme.core.generics.inference import run_inference
+from fme.core.generics.inference import run_inference, run_timed_inference
 from fme.core.generics.lr_tuning import LRTuningConfig, run_lr_tuning_trial
 from fme.core.generics.metrics_aggregator import MetricsAggregator
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
@@ -89,6 +90,23 @@ class EndOfEpochCallback(Protocol):
 
 def null_end_of_epoch_callback(epoch: int) -> Mapping[str, Any]:
     return {}
+
+
+@dataclasses.dataclass
+class TimingOnlyConfig:
+    """Configuration for timing-only mode.
+
+    When provided as the ``timing_only`` field of a TrainConfig, training and
+    validation loops are skipped and only the selected timing instrumentation
+    runs for each configured inference epoch.
+
+    Attributes:
+        type: The timing mode to run. Currently only ``"inline_inference"``
+            is supported, which runs timed inline inference each inference
+            epoch.
+    """
+
+    type: Literal["inline_inference"]
 
 
 class TrainConfigProtocol(Protocol):
@@ -135,6 +153,9 @@ class TrainConfigProtocol(Protocol):
 
     @property
     def save_best_inference_epoch_checkpoints(self) -> bool: ...
+
+    @property
+    def timing_only(self) -> TimingOnlyConfig | None: ...
 
     @property
     def lr_tuning(self) -> LRTuningConfig | None: ...
@@ -359,16 +380,29 @@ class Trainer:
                 self._start_epoch + self.config.segment_epochs, self.config.max_epochs
             )
 
+        if self.config.timing_only is not None:
+            logging.info("Starting timing-only run")
+            self.timed_inference(inference_epochs, segment_max_epochs)
+            return
+
         if (
             self.config.evaluate_before_training
             and self._epochs_trained == 0
             and self._current_epoch_num_batches_seen == 0
         ):
-            logging.info("Starting inline inference timing run")
+            logging.info("Starting validation before training")
+            valid_logs = self.validate_one_epoch()
             if self._epochs_trained in inference_epochs:
-                self.inference_one_epoch()
-            logging.info("Inference timing complete, exiting")
-            return
+                logging.info("Starting inline inference before training")
+                inference_logs = self.inference_one_epoch()
+            else:
+                inference_logs = {}
+            valid_loss = valid_logs["val/mean/loss"]
+            logging.info(f"Validation loss before training: {valid_loss}")
+            logging.info("Logging to wandb")
+            all_logs = valid_logs | inference_logs | {"epoch": self._epochs_trained}
+            wandb = WandB.get_instance()
+            wandb.log(all_logs, step=self.num_batches_seen)
 
         while self._epochs_trained < segment_max_epochs:
             if self._do_gc_collect:
@@ -632,6 +666,54 @@ class Trainer:
             epoch=self._epochs_trained,
         )
 
+    def timed_inference_one_epoch(self):
+        assert self.config.timing_only is not None
+        return timed_inference_one_epoch(
+            stepper=self.stepper,
+            validation_context=self.validation_context,
+            dataset=self._inference_data,
+            aggregator=self._aggregator_builder.get_inference_aggregator(),
+            label=self.config.timing_only.type,
+            epoch=self._epochs_trained,
+        )
+
+    def timed_inference(self, inference_epochs, segment_max_epochs):
+        assert self.config.timing_only is not None
+        timing_type = self.config.timing_only.type
+        wandb = WandB.get_instance()
+        dist = Distributed.get_instance()
+        epoch_timings: list[dict[str, float]] = []
+        while self._epochs_trained < segment_max_epochs:
+            self._epochs_trained += 1
+            self._current_epoch_num_batches_seen = 0
+            if (
+                self._epochs_trained in inference_epochs
+                and timing_type == "inline_inference"
+            ):
+                epoch_timings.append(self.timed_inference_one_epoch())
+            wandb.log({"epoch": self._epochs_trained}, step=self.num_batches_seen)
+        if epoch_timings:
+            n_epochs = len(epoch_timings)
+            mean_timing = {
+                k: sum(t[k] for t in epoch_timings) / n_epochs for k in epoch_timings[0]
+            }
+            all_means = dist.gather_object(mean_timing)
+            if dist.is_root() and all_means is not None:
+                summary: dict[str, Any] = {}
+                for r, rm in enumerate(all_means):
+                    for key, val in rm.items():
+                        summary[f"{timing_type}/summary/{key}/rank_{r}"] = val
+                rank_totals = [rm["total_s"] for rm in all_means]
+                summary[f"{timing_type}/summary/max_total_s"] = max(rank_totals)
+                summary[f"{timing_type}/summary/min_total_s"] = min(rank_totals)
+                summary[f"{timing_type}/summary/spread_s"] = max(rank_totals) - min(
+                    rank_totals
+                )
+                summary[f"{timing_type}/summary/n_epochs"] = n_epochs
+            else:
+                summary = {}
+            wandb.log(summary, step=self.num_batches_seen)
+
     def save_checkpoint(
         self,
         checkpoint_path: str,
@@ -757,10 +839,31 @@ def inference_one_epoch(
             data=dataset,
             aggregator=aggregator,
         )
-        timer = GlobalTimer.get_instance()
-        timer.log_durations()
-    logging.info("Inference timing run complete, skipping flush/summary")
-    return {}
+    logging.info("Starting flush of reduced diagnostics to disk")
+    aggregator.flush_diagnostics(subdir=f"epoch_{epoch:04d}")
+    logging.info("Getting inline inference aggregator logs")
+    logs = aggregator.get_summary_logs()
+    return {f"{label}/{k}": v for k, v in logs.items()}
+
+
+def timed_inference_one_epoch(
+    stepper: TrainStepperABC[PS, BD, FD, SD, TO],
+    validation_context: Callable[[], contextlib.AbstractContextManager],
+    dataset: InferenceDataABC[PS, FD],
+    aggregator: InferenceAggregatorABC[PS, SD],
+    label: str,
+    epoch: int,
+) -> dict[str, float]:
+    stepper.set_eval()
+    with torch.no_grad(), validation_context(), GlobalTimer():
+        result = run_timed_inference(
+            predict=stepper.predict_paired,
+            data=dataset,
+            aggregator=aggregator,
+            label=label,
+        )
+        GlobalTimer.get_instance().log_durations()
+    return result
 
 
 def _restore_checkpoint(trainer: Trainer, checkpoint_path):

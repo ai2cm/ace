@@ -8,7 +8,7 @@ from fme.core.cli import ResumeResultsConfig
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.lr_tuning import LRTuningConfig
-from fme.core.generics.trainer import EndOfBatchCallback
+from fme.core.generics.trainer import EndOfBatchCallback, TimingOnlyConfig
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import Optimization, OptimizationConfig
 from fme.core.rand import set_seed
@@ -156,6 +156,7 @@ class TrainConfig:
     save_per_epoch_diagnostics: bool = False
     evaluate_before_training: bool = True
     save_best_inference_epoch_checkpoints: bool = False
+    timing_only: TimingOnlyConfig | None = None
     lr_tuning: LRTuningConfig | None = None
     resume_results: ResumeResultsConfig | None = None
 
