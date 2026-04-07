@@ -6,7 +6,7 @@ SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the reposi
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=8
+N_GPUS=4
 
 cd "$REPO_ROOT"
 
@@ -45,11 +45,11 @@ run_training() {
     -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train "$CONFIG_PATH"
 }
 
-base_name="train-climsst-camulator-1deg"
+base_name="train-era5-aimip-zonal-sst-camulator"
 
-stats_1deg_dataset="jeremym/2023-08-09-vertically-resolved-1deg-fme-ensemble-dataset-stats"
+stats_1deg_dataset="oliverwm/era5-1deg-8layer-stats-1990-2019-v2"
 
 # To run a subset of these, comment out the ones you don't want to run
 # and if needed use `--allow-dirty` in the gantry run command above.
 # run_training "train-baseline.yaml" "$base_name-baseline" "$stats_1deg_dataset"
-run_training "train-baseline.yaml" "$base_name-baseline-1deg" "$stats_1deg_dataset"
+run_training "train-camulator-aimip-no-strato-zonal-interp-ssts.yaml" "$base_name" "$stats_1deg_dataset"
