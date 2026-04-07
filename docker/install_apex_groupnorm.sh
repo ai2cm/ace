@@ -12,14 +12,9 @@ INSTALL_DIR="${1:-/tmp/nvidia-apex}"
 echo "=== Installing NVIDIA Apex GroupNorm ==="
 echo "Install directory: $INSTALL_DIR"
 
-# Step 1: Install CUDA toolkit via conda
+# Step 1: Clone Apex
 echo ""
-echo "[1/3] Installing CUDA toolkit (nvcc) via conda..."
-conda install -y -c nvidia cuda-nvcc=12.8 cuda-toolkit=12.8
-
-# Step 2: Clone Apex
-echo ""
-echo "[2/3] Cloning NVIDIA Apex..."
+echo "[1/2] Cloning NVIDIA Apex..."
 if [ -d "$INSTALL_DIR" ]; then
     echo "Directory exists, removing..."
     rm -rf "$INSTALL_DIR"
@@ -33,17 +28,12 @@ git checkout FETCH_HEAD
 # Fix missing <tuple> include in group_norm_v2 (required for std::make_tuple, std::get)
 sed -i '1a #include <tuple>' apex/contrib/csrc/group_norm_v2/gn_cuda_host_template.cuh
 
-# Step 3: Build and install
+# Step 2: Build and install
 echo ""
-echo "[3/3] Building Apex with GroupNorm extension only..."
+echo "[2/2] Building Apex with GroupNorm extension only..."
 CPLUS_INCLUDE_PATH=/opt/conda/targets/x86_64-linux/include:$CPLUS_INCLUDE_PATH \
     APEX_GROUP_NORM=1 \
     pip install -v --no-build-isolation --no-cache-dir ./
-
-# Remove CUDA build tools to save space
-echo "Removing CUDA build tools..."
-conda remove -y cuda-nvcc cuda-toolkit --force
-conda clean -afy
 
 # Clean up source directory
 echo ""

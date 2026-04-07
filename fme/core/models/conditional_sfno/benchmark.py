@@ -91,7 +91,6 @@ def get_block_benchmark(filter_num_groups: int) -> type[BenchmarkABC]:
                 img_shape=(H, L),
                 embed_dim=C,
                 filter_type="linear",
-                operator_type="dhconv",
                 use_mlp=True,
                 context_config=context_config,
                 filter_num_groups=G,

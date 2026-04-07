@@ -6,6 +6,7 @@ import pytest
 import torch
 
 from fme.core.coordinates import (
+    DepthCoordinate,
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
     NullVerticalCoordinate,
@@ -66,7 +67,7 @@ from fme.core.metrics import spherical_area_weights
     ],
 )
 def test_dataset_info_round_trip(dataset_info: DatasetInfo):
-    state = dataset_info.to_state()
+    state = dataset_info.get_state()
     dataset_info_reloaded = DatasetInfo.from_state(state)
     assert dataset_info == dataset_info_reloaded
 
@@ -410,3 +411,46 @@ def test_masked_gridded_ops():
         mask_provider=mask_provider,
     )
     assert dataset_info.gridded_operations == expected_gridded_ops
+
+
+def _make_hybrid_sigma_pressure_coordinate():
+    return HybridSigmaPressureCoordinate(ak=torch.arange(10), bk=torch.arange(10))
+
+
+def _make_depth_coordinate():
+    return DepthCoordinate(
+        idepth=torch.arange(4, dtype=torch.float),
+        mask=torch.ones(3),
+    )
+
+
+class TestAtmosphereVerticalCoordinate:
+    def test_returns_coordinate_for_atmosphere(self):
+        vc = _make_hybrid_sigma_pressure_coordinate()
+        info = DatasetInfo(vertical_coordinate=vc)
+        assert info.atmosphere_vertical_coordinate is vc
+
+    def test_returns_none_for_null(self):
+        info = DatasetInfo(vertical_coordinate=NullVerticalCoordinate())
+        assert info.atmosphere_vertical_coordinate is None
+
+    def test_raises_for_ocean_coordinate(self):
+        info = DatasetInfo(vertical_coordinate=_make_depth_coordinate())
+        with pytest.raises(RuntimeError, match="atmosphere vertical coordinate"):
+            info.atmosphere_vertical_coordinate
+
+
+class TestOceanVerticalCoordinate:
+    def test_returns_coordinate_for_ocean(self):
+        vc = _make_depth_coordinate()
+        info = DatasetInfo(vertical_coordinate=vc)
+        assert info.ocean_vertical_coordinate is vc
+
+    def test_returns_none_for_null(self):
+        info = DatasetInfo(vertical_coordinate=NullVerticalCoordinate())
+        assert info.ocean_vertical_coordinate is None
+
+    def test_raises_for_atmosphere_coordinate(self):
+        info = DatasetInfo(vertical_coordinate=_make_hybrid_sigma_pressure_coordinate())
+        with pytest.raises(RuntimeError, match="ocean vertical coordinate"):
+            info.ocean_vertical_coordinate

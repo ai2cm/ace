@@ -6,8 +6,10 @@ import os
 from collections.abc import Mapping, Sequence
 from typing import Literal
 
+import cftime
 import dacite
 import numpy as np
+import numpy.typing as npt
 import torch
 import xarray as xr
 from xarray.coding.times import CFDatetimeCoder
@@ -248,7 +250,7 @@ class InferenceConfig:
 
     def get_data_writer(
         self,
-        n_initial_conditions: int,
+        initial_condition_times: npt.NDArray[cftime.datetime],
         timestep: datetime.timedelta,
         coords: Mapping[str, np.ndarray],
         variable_metadata: Mapping[str, VariableMetadata],
@@ -256,7 +258,7 @@ class InferenceConfig:
         return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
             # each batch contains all samples, for different times
-            n_initial_conditions=n_initial_conditions,
+            initial_condition_times=initial_condition_times,
             n_timesteps=self.n_forward_steps,
             timestep=timestep,
             variable_metadata=variable_metadata,
@@ -343,19 +345,19 @@ def run_inference_from_config(config: InferenceConfig):
         )
 
         writer = config.get_data_writer(
-            n_initial_conditions=data.n_initial_conditions,
+            initial_condition_times=data.initial_time.to_numpy(),
             timestep=data.timestep,
             coords=data.coords,
             variable_metadata=variable_metadata,
         )
     logging.info("Starting inference")
-    record_logs = get_record_to_wandb(label="inference")
+    logger = get_record_to_wandb(label="inference")
     run_inference(
         predict=stepper.predict_paired,
         data=data,
         writer=writer,
         aggregator=aggregator,
-        record_logs=record_logs,
+        record_logs=logger.log,
     )
 
     with timer.context("final_writer_flush"):
@@ -367,7 +369,7 @@ def run_inference_from_config(config: InferenceConfig):
     timer.stop_outer("inference")
     total_steps = config.n_forward_steps * data.n_initial_conditions
     inference_duration = timer.get_duration("inference")
-    wandb_logging_duration = timer.get_duration("wandb_logging")
+    wandb_logging_duration = timer.get_duration("inference/wandb_logging")
     total_steps_per_second = total_steps / (inference_duration - wandb_logging_duration)
     timer.log_durations()
     logging.info(
@@ -376,10 +378,10 @@ def run_inference_from_config(config: InferenceConfig):
     )
     summary_logs = {
         "total_steps_per_second": total_steps_per_second,
-        **timer.get_durations(),
         **aggregator.get_summary_logs(),
     }
-    record_logs([summary_logs])
+    logger.log_to_current_step(summary_logs)
+    logger.log_to_current_step(timer.get_durations(), label="")
 
 
 def run_segmented_inference(config: InferenceConfig, segments: int):

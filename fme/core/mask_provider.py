@@ -6,6 +6,7 @@ from typing import Any, TypeVar
 
 import torch
 
+from fme.core.distributed import Distributed
 from fme.core.masking import NullMasking, StaticMasking
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -28,7 +29,12 @@ class MaskProviderABC(abc.ABC):
     def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]: ...
 
     @abc.abstractmethod
-    def to_state(self) -> dict[str, Any]: ...
+    def localize(self: SelfType) -> SelfType:
+        """Return a copy with masks sliced to the local spatial chunk."""
+        ...
+
+    @abc.abstractmethod
+    def get_state(self) -> dict[str, Any]: ...
 
 
 class _NullMaskProvider(MaskProviderABC):
@@ -36,6 +42,9 @@ class _NullMaskProvider(MaskProviderABC):
         return None
 
     def to(self, device: str) -> "_NullMaskProvider":
+        return self
+
+    def localize(self) -> "_NullMaskProvider":
         return self
 
     def update(self, other: MaskProviderABC) -> None:
@@ -47,7 +56,7 @@ class _NullMaskProvider(MaskProviderABC):
     def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]:
         return NullMasking()
 
-    def to_state(self) -> dict[str, Any]:
+    def get_state(self) -> dict[str, Any]:
         return {"masks": {}}
 
 
@@ -124,6 +133,16 @@ class MaskProvider(MaskProviderABC):
             {name: tensor.to(device) for name, tensor in self.masks.items()}
         )
 
+    def localize(self) -> "MaskProvider":
+        if not self._masks:
+            return self
+        return MaskProvider(
+            {
+                k: v[Distributed.get_instance().get_local_slices(v.shape)].contiguous()
+                for k, v in self._masks.items()
+            }
+        )
+
     def update(self, other: "MaskProvider") -> None:
         """Update the MaskProvider's masks with masks from another MaskProvider.
 
@@ -175,7 +194,7 @@ class MaskProvider(MaskProviderABC):
             except AssertionError:
                 raise AssertionError(f"mask values differ for '{name}'")
 
-    def to_state(self) -> dict[str, Any]:
+    def get_state(self) -> dict[str, Any]:
         return {"masks": self.masks}
 
     @classmethod
