@@ -84,7 +84,7 @@ train_data:
     stop: 70.0
   strict_ensemble: false
 validation_data:
-  batch_size: 76
+  batch_size: 32
   num_data_workers: 4
   fine:
   - data_path: /climate-default/2026-02-23-X-SHiELD-AMIP-plus-4K-downscaling
