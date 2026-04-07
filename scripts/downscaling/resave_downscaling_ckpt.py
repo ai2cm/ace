@@ -34,14 +34,18 @@ def _migrate_model_state(
 
     Returns updated model state (may be the same object if no migration needed).
     """
-    raw_static = model_state.get("static_inputs")
-    if raw_static is None:
+    raw_static = model_state.get("static_inputs", {})
+    if not raw_static and not static_inputs_config:
         return model_state  # no static inputs, nothing to do
 
     if _has_coords_in_state(raw_static):
         return model_state  # already in a loadable format
 
     # Old format: no coords at all. Reload from config files.
+    print(
+        "Migrating model state to new StaticInputs format with coordinates. "
+        f"Using static inputs config: {static_inputs_config}"
+    )
     static_inputs = load_static_inputs(static_inputs_config)
     new_model_state = dict(model_state)
     new_model_state["static_inputs"] = static_inputs.get_state()
