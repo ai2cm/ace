@@ -63,3 +63,5 @@ coupled-inline-inference-timings|rs0|01KNB04QWE6587MKP361XJRXXR|training|best_in
 coupled-timing_only-inline_inference-8xH100|rs0|01KNJB017KABHQ0N80P6E9EN61|training|best_inference_ckpt|normal|--not-preemptible
 
 coupled-timing_only-inline_inference-8xH100|rs0|01KNJBRKGDEDEWENQYE0GRHHXB|training|best_inference_ckpt|normal|--not-preemptible
+
+coupled-timing_only-inline_inference-8xH100-nw4-csim2|rs0|01KNJKY01495YJXW1H4TES10FB|training|best_inference_ckpt|normal|--not-preemptible
