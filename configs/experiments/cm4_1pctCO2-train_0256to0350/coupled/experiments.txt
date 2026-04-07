@@ -54,6 +54,6 @@ fto-1pctCO2_0256to0350-correct_budgets-422nakro_mb4prsz7|rs0|01KHZCG9C3VCY3VBRHK
 
 fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0-ep17|01KKJY7YAPTQJFXX9BR0AYEHJ0|skip|best_inference_ckpt|urgent|--not-preemptible||||b200
 
-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KKQWTQTEZAAKXGZRW6Q0V5Q8|run_1yr|best_inference_ckpt|high|--not-preemptible
+fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KKQWTQTEZAAKXGZRW6Q0V5Q8|run_ICx1_piC|best_inference_ckpt|high|--not-preemptible
 
 ft_fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KMKZZJCT9PXYZBBFCZ66C3QB|training|best_inference_ckpt|normal|--not-preemptible
