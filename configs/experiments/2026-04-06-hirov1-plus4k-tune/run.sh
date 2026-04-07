@@ -14,11 +14,11 @@ NGPU=4
 IMAGE="$(cat $REPO_ROOT/latest_deps_only_image.txt)"
 
 # Previous model used for fine-tuning log-normal
-JOB_NAME="finetune-HiRO-v1-on-xshield-amip-plus4K-100km-to-3km"
-CHECKPOINT_DATASET="01KNJMW3F501NGTFRJTZE5MGP4"
+# JOB_NAME="finetune-HiRO-v1-on-xshield-amip-plus4K-100km-to-3km"
+# CHECKPOINT_DATASET="01KNJMW3F501NGTFRJTZE5MGP4"
 
-# JOB_NAME="finetune-HiRO-v1-log-uniform-on-xshield-amip-plus4K-100km-to-3km"
-# CHECKPOINT_DATASET="01KNJM638TD09QEE698NQCAFJC"
+JOB_NAME="finetune-HiRO-v1-log-uniform-on-xshield-amip-plus4K-100km-to-3km"
+CHECKPOINT_DATASET="01KNJM638TD09QEE698NQCAFJC"
 
 
 wandb_group=""
