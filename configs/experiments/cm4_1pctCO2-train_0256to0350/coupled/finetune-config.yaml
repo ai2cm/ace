@@ -1,7 +1,7 @@
 experiment_dir: /results
 timing_only:
   type: inline_inference
-max_epochs: 3
+max_epochs: 1
 save_checkpoint: false
 save_best_inference_epoch_checkpoints: false
 checkpoint_every_n_batches: 100
@@ -15,9 +15,9 @@ ema:
 n_coupled_steps: 4
 inference:
   n_coupled_steps: 1440
-  coupled_steps_in_memory: 8
+  coupled_steps_in_memory: 2
   loader:
-    num_data_workers: 1
+    num_data_workers: 4
     dataset:
       ocean:
         merge:
