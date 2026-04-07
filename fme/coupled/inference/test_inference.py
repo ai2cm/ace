@@ -132,6 +132,43 @@ def _setup(
 
 
 @pytest.mark.parametrize(
+    ("n_coupled_steps", "coupled_steps_in_memory"),
+    [
+        (3, 2),
+        (5, 3),
+    ],
+)
+def test_inference_n_coupled_steps_divisible_by_coupled_steps_in_memory(
+    tmp_path: pathlib.Path,
+    n_coupled_steps: int,
+    coupled_steps_in_memory: int,
+    very_fast_only: bool,
+):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+
+    ocean_in_names = ["o_prog", "sst", "mask_0", "a_diag"]
+    ocean_out_names = ["o_prog", "sst", "o_diag"]
+    atmos_in_names = ["a_prog", "surface_temperature", "forcing_var", "ocean_fraction"]
+    atmos_out_names = ["a_prog", "surface_temperature", "a_diag"]
+
+    with pytest.raises(
+        ValueError,
+        match="n_coupled_steps must be divisible by coupled_steps_in_memory",
+    ):
+        _setup(
+            ocean_in_names=ocean_in_names,
+            ocean_out_names=ocean_out_names,
+            atmos_in_names=atmos_in_names,
+            atmos_out_names=atmos_out_names,
+            tmp_path=tmp_path,
+            n_coupled_steps=n_coupled_steps,
+            coupled_steps_in_memory=coupled_steps_in_memory,
+            n_initial_conditions=1,
+        )
+
+
+@pytest.mark.parametrize(
     ("n_coupled_steps,coupled_steps_in_memory,n_initial_conditions"),
     [
         (2, 2, 3),

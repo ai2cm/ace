@@ -140,6 +140,12 @@ class InferenceConfig:
     )
     n_ensemble_per_ic: int = 1
 
+    def __post_init__(self):
+        if self.n_coupled_steps % self.coupled_steps_in_memory:
+            raise ValueError(
+                "n_coupled_steps must be divisible by coupled_steps_in_memory"
+            )
+
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)
         self.logging.configure_logging(
