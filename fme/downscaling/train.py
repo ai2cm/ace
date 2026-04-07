@@ -25,6 +25,7 @@ from fme.downscaling.data import (
     PairedBatchData,
     PairedDataLoaderConfig,
     PairedGriddedData,
+    StaticInputs,
     load_static_inputs,
 )
 from fme.downscaling.models import DiffusionModel, DiffusionModelConfig
@@ -61,6 +62,11 @@ def restore_checkpoint(trainer: "Trainer") -> None:
         trainer.epoch_checkpoint_path, map_location=get_device(), weights_only=False
     )
     trainer.model.module.load_state_dict(checkpoint["model"]["module"])
+    static_inputs_state = checkpoint["model"].get("static_inputs")
+    if static_inputs_state is not None:
+        trainer.model.static_inputs = StaticInputs.from_state(
+            static_inputs_state
+        ).to_device()
     trainer.optimization.load_state(checkpoint["optimization"])
 
     trainer.num_batches_seen = checkpoint["num_batches_seen"]
