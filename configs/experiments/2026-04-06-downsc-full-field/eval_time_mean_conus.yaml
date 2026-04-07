@@ -41,13 +41,13 @@ data:
         start_time: '2023-01-01T00:00:00'
         #start: 0
         #stop: 2
-  # CONUS
+  # Western US
   lat_extent:
-    start: 22.0
-    stop: 50.0
+    start: 36
+    stop: 52
   lon_extent:
-    start: 230.0
-    stop: 295.0
+    start: 228
+    stop: 244
   batch_size: 2
   num_data_workers: 2
   strict_ensemble: false

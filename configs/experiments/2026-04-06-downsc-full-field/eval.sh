@@ -2,8 +2,8 @@
 
 set -e
 
-JOB_NAME="eval-xshield-amip-100km-to-3km-full-field-precip-events"
-CONFIG_FILENAME="eval_events.yaml"
+JOB_NAME="eval-xshield-amip-100km-to-3km-full-field-precip-WUS"
+CONFIG_FILENAME="eval_time_mean_conus.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
