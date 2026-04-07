@@ -46,7 +46,7 @@ run_training() {
 
 base_name="train-era5-aimip-zonal-sst-camulator"
 
-stats_1deg_dataset="oliverwm/era5-1deg-8layer-stats-1990-2019-v2"
+stats_1deg_dataset="andrep/era5-1deg-combined-aimip-forcing-1979-2014-stats"
 
 # To run a subset of these, comment out the ones you don't want to run
 # and if needed use `--allow-dirty` in the gantry run command above.
