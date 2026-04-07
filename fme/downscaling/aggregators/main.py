@@ -180,7 +180,7 @@ class LossVsNoiseAggregator:
         total_count = total_count.cpu().numpy()
 
         total_mean = np.divide(
-            total_sum.numpy(),
+            total_sum,
             total_count,
             out=np.zeros_like(total_sum),
             where=total_count > 0,
@@ -199,7 +199,7 @@ class LossVsNoiseAggregator:
             ch_mean = np.divide(
                 ch_sum,
                 ch_count,
-                out=np.zeros_like(ch_sum.numpy()),
+                out=np.zeros_like(ch_sum),
                 where=ch_count > 0,
             )
             means[name] = ch_mean
