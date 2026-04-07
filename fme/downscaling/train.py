@@ -62,6 +62,9 @@ def restore_checkpoint(trainer: "Trainer") -> None:
         trainer.epoch_checkpoint_path, map_location=get_device(), weights_only=False
     )
     trainer.model.module.load_state_dict(checkpoint["model"]["module"])
+    trainer.model.config = DiffusionModelConfig.from_state(
+        checkpoint["model"]["config"]
+    )
     static_inputs_state = checkpoint["model"].get("static_inputs")
     if static_inputs_state is not None:
         trainer.model.static_inputs = StaticInputs.from_state(
