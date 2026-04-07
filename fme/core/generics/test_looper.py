@@ -20,8 +20,10 @@ from fme.core.generics.inference import (
     Looper,
     PredictFunction,
     WandBStepLogger,
+    _TimingLogger,
     get_record_to_wandb,
     run_inference,
+    run_timed_inference,
 )
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry.module import ModuleSelector
@@ -590,3 +592,154 @@ def test_get_record_to_wandb_returns_step_logger():
         logger = get_record_to_wandb(label="test")
         assert isinstance(logger, WandBStepLogger)
         assert logger.step == 0
+
+
+def test_looper_timing_attributes():
+    """Verify Looper exposes per-call timing attributes after each step."""
+    n_ic_timesteps = 1
+    n_forward_steps = 2
+    n_windows = 3
+
+    stepper = PlusOneStepper(n_ic_timesteps=n_ic_timesteps)
+    initial_condition = get_batch_data_with_time(
+        start_time=0,
+        n_timesteps=n_ic_timesteps,
+    ).get_start(prognostic_names=["var"], n_ic_timesteps=n_ic_timesteps)
+    loader = [
+        get_batch_data_with_time(
+            start_time=i,
+            n_timesteps=n_ic_timesteps + n_forward_steps,
+        )
+        for i in range(0, n_windows * n_forward_steps, n_forward_steps)
+    ]
+
+    with GlobalTimer(), torch.no_grad():
+        looper = Looper(
+            predict=stepper.predict,
+            data=SimpleInferenceData(initial_condition, loader),
+        )
+        assert looper.last_data_loading_s == 0.0
+        assert looper.last_forward_pass_s == 0.0
+        for _ in looper:
+            assert looper.last_data_loading_s >= 0
+            assert looper.last_forward_pass_s >= 0
+
+
+def test_timing_logger():
+    """Unit test for _TimingLogger: prefix, step increment, WandB.log calls."""
+    with mock_wandb() as wandb:
+        wandb.configure(log_to_wandb=True)
+        logger = _TimingLogger(label="test_label")
+        assert logger.step == 0
+
+        logger.log({"data_loading_s": 1.0, "forward_pass_s": 2.0})
+        assert logger.step == 1
+
+        logger.log({"data_loading_s": 3.0})
+        assert logger.step == 2
+
+        logs = wandb.get_logs()
+        assert logs[0] == {
+            "test_label/data_loading_s": 1.0,
+            "test_label/forward_pass_s": 2.0,
+        }
+        assert logs[1] == {"test_label/data_loading_s": 3.0}
+
+
+def test_timing_logger_empty_dict():
+    """_TimingLogger logs even when dict is empty (barrier sync)."""
+    with mock_wandb() as wandb:
+        wandb.configure(log_to_wandb=True)
+        logger = _TimingLogger(label="timing")
+        logger.log({})
+        assert logger.step == 1
+        logs = wandb.get_logs()
+        assert logs[0] == {}
+
+
+def test_timing_logger_no_label():
+    """_TimingLogger with empty label passes keys unprefixed."""
+    with mock_wandb() as wandb:
+        wandb.configure(log_to_wandb=True)
+        logger = _TimingLogger(label="")
+        logger.log({"x": 5.0})
+        assert logger.step == 1
+        logs = wandb.get_logs()
+        assert logs[0] == {"x": 5.0}
+
+
+def test_run_timed_inference_produces_timing_logs():
+    """Test run_timed_inference produces correct per-window and cumulative timing."""
+    n_ic_timesteps = 1
+    n_forward_steps = 2
+    n_windows = 3
+    mock_derive_func = unittest.mock.MagicMock(
+        side_effect=lambda batch_data, forcing_data: batch_data
+    )
+    stepper = PlusOneStepper(
+        n_ic_timesteps=n_ic_timesteps, derive_func=mock_derive_func
+    )
+    initial_condition = get_batch_data_with_time(
+        start_time=0,
+        n_timesteps=n_ic_timesteps,
+    ).get_start(prognostic_names=["var"], n_ic_timesteps=n_ic_timesteps)
+    loader = [
+        get_batch_data_with_time(
+            start_time=i,
+            n_timesteps=n_ic_timesteps + n_forward_steps,
+        )
+        for i in range(0, n_windows * n_forward_steps, n_forward_steps)
+    ]
+    mock_aggregator = get_mock_aggregator(n_ic_timesteps)
+
+    with GlobalTimer(), torch.no_grad():
+        with mock_wandb() as wandb:
+            wandb.configure(log_to_wandb=True)
+            cumulative = run_timed_inference(
+                predict=stepper.predict,
+                data=SimpleInferenceData(initial_condition, loader),
+                aggregator=mock_aggregator,
+                label="inline_inference",
+            )
+            logs = wandb.get_logs()
+
+    assert mock_aggregator.record_initial_condition.call_count == 1
+    assert mock_aggregator.record_batch.call_count == n_windows
+
+    assert set(cumulative.keys()) == {
+        "data_loading_s",
+        "forward_pass_s",
+        "aggregator_s",
+        "total_s",
+        "n_windows",
+    }
+    assert cumulative["n_windows"] == n_windows
+    assert cumulative["data_loading_s"] >= 0
+    assert cumulative["forward_pass_s"] >= 0
+    assert cumulative["aggregator_s"] >= 0
+    assert cumulative["total_s"] == pytest.approx(
+        cumulative["data_loading_s"]
+        + cumulative["forward_pass_s"]
+        + cumulative["aggregator_s"]
+    )
+
+    assert len(logs) == n_windows
+    for i, log in enumerate(logs):
+        assert "inline_inference/data_loading_s/rank_0" in log
+        assert "inline_inference/forward_pass_s/rank_0" in log
+        assert "inline_inference/aggregator_s/rank_0" in log
+        assert "inline_inference/total_s/rank_0" in log
+        assert "inline_inference/spread_s" in log
+        assert "inline_inference/max_total_s" in log
+        assert "inline_inference/min_total_s" in log
+        assert "inline_inference/window_index" in log
+        assert log["inline_inference/window_index"] == i
+        total = log["inline_inference/total_s/rank_0"]
+        assert total == pytest.approx(
+            log["inline_inference/data_loading_s/rank_0"]
+            + log["inline_inference/forward_pass_s/rank_0"]
+            + log["inline_inference/aggregator_s/rank_0"]
+        )
+        assert log["inline_inference/spread_s"] == 0.0
+        assert log["inline_inference/max_total_s"] == total
+        assert log["inline_inference/min_total_s"] == total

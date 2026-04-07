@@ -24,6 +24,7 @@ from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.trainer import (
     AggregatorBuilderABC,
     CheckpointPaths,
+    TimingOnlyConfig,
     TrainConfigProtocol,
     Trainer,
     TrainOutputABC,
@@ -236,6 +237,7 @@ class Config:
     evaluate_before_training: bool = False
     save_best_inference_epoch_checkpoints: bool = False
     lr_tuning: LRTuningConfig | None = None
+    timing_only: TimingOnlyConfig | None = None
 
     def __post_init__(self):
         start_epoch = 0 if self.evaluate_before_training else 1
@@ -343,6 +345,7 @@ def get_trainer(
     n_validation_batches: int = 5,
     save_checkpoint: bool = True,
     lr_tuning: LRTuningConfig | None = None,
+    timing_only: TimingOnlyConfig | None = None,
 ) -> tuple[TrainConfigProtocol, Trainer]:
     if checkpoint_dir is None:
         checkpoint_dir = os.path.join(tmp_path, "checkpoints")
@@ -419,6 +422,7 @@ def get_trainer(
         save_best_inference_epoch_checkpoints=save_best_inference_epoch_checkpoints,
         save_checkpoint=save_checkpoint,
         lr_tuning=lr_tuning,
+        timing_only=timing_only,
     )
     aggregator_builder = AggregatorBuilder(
         train_losses=train_losses,
@@ -1388,3 +1392,108 @@ def test_epoch_checkpoint_enabled_includes_final_epoch():
     save_epochs = Slice(step=5)
     assert epoch_checkpoint_enabled(5, max_epochs, save_epochs)
     assert epoch_checkpoint_enabled(10, max_epochs, save_epochs)
+
+
+def test_timing_only_skips_train_and_validate(tmp_path: str):
+    """When timing_only is set, train/validate are skipped and timed inference runs."""
+    max_epochs = 2
+    with mock_wandb():
+        LoggingConfig(log_to_wandb=True)._configure_wandb(
+            experiment_dir=tmp_path, config={}, resumable=True
+        )
+        config, trainer = get_trainer(
+            tmp_path,
+            max_epochs=max_epochs,
+            timing_only=TimingOnlyConfig(type="inline_inference"),
+            save_checkpoint=False,
+        )
+        with (
+            unittest.mock.patch.object(trainer, "train_one_epoch") as mock_train,
+            unittest.mock.patch.object(trainer, "validate_one_epoch") as mock_validate,
+            unittest.mock.patch.object(
+                trainer,
+                "timed_inference_one_epoch",
+                return_value={
+                    "data_loading_s": 0.1,
+                    "forward_pass_s": 0.2,
+                    "aggregator_s": 0.05,
+                    "total_s": 0.35,
+                    "n_windows": 1.0,
+                },
+            ) as mock_timed,
+        ):
+            trainer.train()
+            mock_train.assert_not_called()
+            mock_validate.assert_not_called()
+            assert mock_timed.call_count == max_epochs
+
+
+def test_timing_only_logs_summary(tmp_path: str):
+    """Timing-only mode logs cross-epoch summary to wandb."""
+    max_epochs = 2
+    with mock_wandb() as wandb:
+        LoggingConfig(log_to_wandb=True)._configure_wandb(
+            experiment_dir=tmp_path, config={}, resumable=True
+        )
+        config, trainer = get_trainer(
+            tmp_path,
+            max_epochs=max_epochs,
+            timing_only=TimingOnlyConfig(type="inline_inference"),
+            save_checkpoint=False,
+        )
+        timing_result = {
+            "data_loading_s": 0.1,
+            "forward_pass_s": 0.2,
+            "aggregator_s": 0.05,
+            "total_s": 0.35,
+            "n_windows": 1.0,
+        }
+        with unittest.mock.patch.object(
+            trainer,
+            "timed_inference_one_epoch",
+            return_value=timing_result,
+        ):
+            trainer.train()
+        logs = wandb.get_logs()
+        all_keys: set[str] = set()
+        for log in logs:
+            all_keys.update(log.keys())
+        assert "inline_inference/summary/total_s/rank_0" in all_keys
+        assert "inline_inference/summary/data_loading_s/rank_0" in all_keys
+        assert "inline_inference/summary/max_total_s" in all_keys
+        assert "inline_inference/summary/min_total_s" in all_keys
+        assert "inline_inference/summary/spread_s" in all_keys
+        assert "inline_inference/summary/n_epochs" in all_keys
+
+
+def test_timing_only_config_type():
+    """TimingOnlyConfig stores type correctly and has no default."""
+    cfg = TimingOnlyConfig(type="inline_inference")
+    assert cfg.type == "inline_inference"
+
+
+def test_timing_only_config_field():
+    """timing_only field exists on the protocol-conforming Config, defaults to None."""
+    config = Config()
+    assert config.timing_only is None
+    config_with = Config(timing_only=TimingOnlyConfig(type="inline_inference"))
+    assert config_with.timing_only is not None
+    assert config_with.timing_only.type == "inline_inference"
+
+
+def test_timing_only_config_on_ace_train_config():
+    """timing_only field exists on ACE TrainConfig and defaults to None."""
+    from fme.ace.train.train_config import TrainConfig as AceTrainConfig
+
+    assert "timing_only" in AceTrainConfig.__dataclass_fields__
+    field = AceTrainConfig.__dataclass_fields__["timing_only"]
+    assert field.default is None
+
+
+def test_timing_only_config_on_coupled_train_config():
+    """timing_only field exists on coupled TrainConfig and defaults to None."""
+    from fme.coupled.train.train_config import TrainConfig as CoupledTrainConfig
+
+    assert "timing_only" in CoupledTrainConfig.__dataclass_fields__
+    field = CoupledTrainConfig.__dataclass_fields__["timing_only"]
+    assert field.default is None
