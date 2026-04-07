@@ -167,6 +167,7 @@ class CrossFormerStepConfig(StepConfigABC):
     next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
     prescribed_prognostic_names: list[str] = dataclasses.field(default_factory=list)
     residual_prediction: bool = False
+    atmosphere_level_start: int = 0
 
     def __post_init__(self):
         for name in self.next_step_forcing_names:
@@ -177,16 +178,17 @@ class CrossFormerStepConfig(StepConfigABC):
                 )
         atmosphere_out_names = []
         atmosphere_in_names = []
+        level_start = self.atmosphere_level_start
         # the CrossFormer model expects atmosphere "channels" to be the faster
         # dimension so that they can be encoded together, meaning we must
         # replicate that ordering here.
         for name in self.atmosphere_prognostic_names:
-            for i in range(self.atmosphere_levels):
+            for i in range(level_start, level_start + self.atmosphere_levels):
                 atmosphere_in_names.append(f"{name}_{i}")
                 atmosphere_out_names.append(f"{name}_{i}")
         if self.atmosphere_diagnostic_names is not None:
             for name in self.atmosphere_diagnostic_names:
-                for i in range(self.atmosphere_levels):
+                for i in range(level_start, level_start + self.atmosphere_levels):
                     atmosphere_out_names.append(f"{name}_{i}")
         self.atmosphere_input_names = atmosphere_in_names
         self.atmosphere_output_names = atmosphere_out_names
