@@ -202,6 +202,7 @@ def test_map_aggregator(n_steps: int):
     aggregator.get_wandb()
 
 
+@pytest.mark.parallel
 @pytest.mark.parametrize("prefix", ["train", "validation"])
 def test_loss_vs_noise_aggregator_get_wandb(prefix: str):
     aggregator = LossVsNoiseAggregator(n_bins=8)
