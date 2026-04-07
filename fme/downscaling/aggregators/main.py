@@ -165,10 +165,13 @@ class LossVsNoiseAggregator:
 
     def get_wandb(self, prefix: str = "") -> Mapping[str, Any]:
         prefix = ensure_trailing_slash(prefix)
-        total_sum = self._dist.reduce_sum(self._total_sum)
-        total_count = self._dist.reduce_sum(self._total_count)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        total_sum = self._dist.reduce_sum(self._total_sum.to(device))
+        total_count = self._dist.reduce_sum(self._total_count.to(device))
         if total_sum is None or total_count is None:
             return {}
+        total_sum = total_sum.cpu()
+        total_count = total_count.cpu()
         if torch.sum(total_count) == 0:
             return {}
 
@@ -186,10 +189,12 @@ class LossVsNoiseAggregator:
             title="Channel-mean weighted loss vs noise",
         )
         for name in sorted(self._channel_sum):
-            ch_sum = self._dist.reduce_sum(self._channel_sum[name])
-            ch_count = self._dist.reduce_sum(self._channel_count[name])
+            ch_sum = self._dist.reduce_sum(self._channel_sum[name].to(device))
+            ch_count = self._dist.reduce_sum(self._channel_count[name].to(device))
             if ch_sum is None or ch_count is None:
                 continue
+            ch_sum = ch_sum.cpu()
+            ch_count = ch_count.cpu()
             ch_count_np = ch_count.numpy()
             mean = np.divide(
                 ch_sum.numpy(),
