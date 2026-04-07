@@ -30,7 +30,7 @@ from fme.core.dataset.config import DatasetConfigABC
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.time import RepeatedInterval, TimeSlice
-from fme.core.dataset.utils import FillNaNsConfig
+from fme.core.dataset.utils import FillNaNsConfig, _zonal_interp_periodic
 from fme.core.mask_provider import MaskProvider
 from fme.core.stacker import Stacker
 from fme.core.typing_ import Slice, TensorDict
@@ -59,8 +59,32 @@ VariableNames = namedtuple(
 )
 
 
+# Pattern for trailing _N (level index) on 3D variable names, used to infer
+# which ak/bk interface indices are needed from the requested variable names.
+_LEVEL_INDEX_PATTERN = re.compile(r"_(\d+)$")
+
+
+def _infer_atmosphere_level_indices_from_names(
+    names: Sequence[str],
+) -> list[int] | None:
+    """Infer atmosphere level indices from variable names (e.g. air_temperature_1 -> 1).
+
+    Returns sorted unique level indices from names matching *_N, or None if none found.
+    """
+    indices = set()
+    for name in names:
+        match = _LEVEL_INDEX_PATTERN.search(name)
+        if match is not None:
+            indices.add(int(match.group(1)))
+    if not indices:
+        return None
+    return sorted(indices)
+
+
 def _get_vertical_coordinate(
-    ds: xr.Dataset, dtype: torch.dtype | None
+    ds: xr.Dataset,
+    dtype: torch.dtype | None,
+    atmosphere_level_indices: list[int] | None = None,
 ) -> VerticalCoordinate:
     """
     Get vertical coordinate from a dataset.
@@ -71,10 +95,18 @@ def _get_vertical_coordinate(
     `idepth_N` then a depth coordinate will be returned. If neither thing
     is true, a hybrid sigma-pressure coordinate of lenght 0 is returned.
 
+    When atmosphere_level_indices is provided (e.g. [1, 2, ..., 7] for no level 0),
+    only the ak/bk interface values needed for those layers are kept. For layers
+    [min, ..., max] we keep interfaces min through max+1 (inclusive), so that
+    ak_0/bk_0 are dropped when level 0 is not requested.
+
     Args:
         ds: Dataset to get vertical coordinates from.
         dtype: Data type of the returned tensors. If None, the dtype is not
             changed from the original in ds.
+        atmosphere_level_indices: If set, for hybrid sigma-pressure only keep
+            ak_N/bk_N for N in [min(indices), max(indices)+1]. Enables dropping
+            e.g. ak_0/bk_0 when training without the surface level.
     """
     ak_mapping = {
         int(v[3:]): torch.as_tensor(ds[v].values)
@@ -86,6 +118,17 @@ def _get_vertical_coordinate(
         for v in ds.variables
         if v.startswith("bk_")
     }
+    if (
+        atmosphere_level_indices is not None
+        and len(ak_mapping) > 0
+        and len(bk_mapping) > 0
+    ):
+        min_lev = min(atmosphere_level_indices)
+        max_lev = max(atmosphere_level_indices)
+        # Interfaces bounding layers min_lev..max_lev are min_lev through max_lev+1
+        keep = set(range(min_lev, max_lev + 2))
+        ak_mapping = {k: v for k, v in ak_mapping.items() if k in keep}
+        bk_mapping = {k: v for k, v in bk_mapping.items() if k in keep}
     ak_list = [ak_mapping[k] for k in sorted(ak_mapping.keys())]
     bk_list = [bk_mapping[k] for k in sorted(bk_mapping.keys())]
 
@@ -507,6 +550,15 @@ class XarrayDataConfig(DatasetConfigABC):
             )
         self.torch_dtype  # check it can be retrieved
         self._default_file_pattern_check()
+        if (
+            self.fill_nans is not None
+            and self.fill_nans.zonal_interp_variables
+            and self.spatial_dimensions != "latlon"
+        ):
+            raise ValueError(
+                "zonal_interp_variables can only be used with "
+                "spatial_dimensions='latlon'."
+            )
 
     @property
     def zarr_engine_used(self) -> bool:
@@ -580,7 +632,14 @@ class XarrayDataset(DatasetABC):
             self._static_derived_names,
         ) = self._group_variable_names_by_time_type()
 
-        self._vertical_coordinate = _get_vertical_coordinate(first_dataset, self.dtype)
+        atmosphere_level_indices = _infer_atmosphere_level_indices_from_names(
+            self._names
+        )
+        self._vertical_coordinate = _get_vertical_coordinate(
+            first_dataset,
+            self.dtype,
+            atmosphere_level_indices=atmosphere_level_indices,
+        )
         self.overwrite = config.overwrite
 
         self._nonspacetime_dims = get_nonspacetime_dimensions(
@@ -933,6 +992,10 @@ class XarrayDataset(DatasetABC):
             for name in self._time_invariant_names:
                 variable = ds[name].variable
                 if self.fill_nans is not None:
+                    if name in self.fill_nans.zonal_interp_variables:
+                        variable = variable.copy(
+                            data=_zonal_interp_periodic(variable.values)
+                        )
                     variable = variable.fillna(self.fill_nans.value)
                 tensors[name] = as_broadcasted_tensor(variable, self.dims, shape)
             ds.close()

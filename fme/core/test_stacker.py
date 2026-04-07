@@ -128,3 +128,18 @@ def test_inferred_stacker(data_names, expected_prefix_map, expected_level_names)
             tensors = [data[name] for name in expected_levels]
             expected_stacked = torch.stack(tensors, dim=-1)
             assert torch.allclose(stacked, expected_stacked)
+
+
+def test_stacker_allows_non_zero_based_levels():
+    """With require_contiguous_zero_based=False, levels can start at 1 (no level 0)."""
+    prefix_map = {"air_temperature": ["air_temperature_"]}
+    data_names = ["air_temperature_1", "air_temperature_2", "air_temperature_3"]
+    data = {name: torch.rand(2, 2) for name in data_names}
+    stacker = Stacker(prefix_map, require_contiguous_zero_based=False)
+    names = stacker.get_all_level_names("air_temperature", data)
+    assert names == ["air_temperature_1", "air_temperature_2", "air_temperature_3"]
+    stacked = stacker("air_temperature", data)
+    assert stacked.shape == (2, 2, 3)
+    assert torch.allclose(stacked[..., 0], data["air_temperature_1"])
+    assert torch.allclose(stacked[..., 1], data["air_temperature_2"])
+    assert torch.allclose(stacked[..., 2], data["air_temperature_3"])

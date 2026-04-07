@@ -79,4 +79,5 @@ cd $REPO_ROOT && gantry run \
     --weka climate-default:/climate-default \
     --budget ai2/climate \
     --install "pip install --no-deps ." \
+    --allow-dirty \
     -- bash -c "$cmds"

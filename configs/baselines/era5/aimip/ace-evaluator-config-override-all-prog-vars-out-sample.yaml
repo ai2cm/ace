@@ -1,0 +1,58 @@
+experiment_dir: /results
+n_forward_steps: 18980
+forward_steps_in_memory: 50
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+      - '2009-01-01T00:00:00'
+  dataset:
+    data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
+  num_data_workers: 16
+aggregator:
+  log_zonal_mean_images: false
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+stepper_override:
+  prescribed_prognostic_names:
+    - PRESsfc
+    - surface_temperature
+    - air_temperature_0
+    - air_temperature_1
+    - air_temperature_2
+    - air_temperature_3
+    - air_temperature_4
+    - air_temperature_5
+    - air_temperature_6
+    - air_temperature_7
+    - specific_total_water_0
+    - specific_total_water_1
+    - specific_total_water_2
+    - specific_total_water_3
+    - specific_total_water_4
+    - specific_total_water_5
+    - specific_total_water_6
+    - specific_total_water_7
+    - eastward_wind_0
+    - eastward_wind_1
+    - eastward_wind_2
+    - eastward_wind_3
+    - eastward_wind_4
+    - eastward_wind_5
+    - eastward_wind_6
+    - eastward_wind_7
+    - northward_wind_0
+    - northward_wind_1
+    - northward_wind_2
+    - northward_wind_3
+    - northward_wind_4
+    - northward_wind_5
+    - northward_wind_6
+    - northward_wind_7

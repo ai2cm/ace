@@ -36,6 +36,7 @@ from fme.core.dataset.xarray import (
     _get_raw_times,
     _get_timestep,
     _get_vertical_coordinate,
+    _infer_atmosphere_level_indices_from_names,
     _repeat_and_increment_time,
     get_xarray_dataset,
 )
@@ -797,6 +798,44 @@ def test_fill_nans(mock_data_fixture, engine, file_pattern, request):
     assert torch.all(data["constant_var"][:, 0, 0] == 0)
 
 
+@pytest.mark.parametrize(
+    "mock_data_fixture, engine, file_pattern",
+    [
+        ("mock_monthly_netcdfs_with_nans", "netcdf4", "*.nc"),
+        ("mock_monthly_zarr_with_nans", "zarr", "*.zarr"),
+    ],
+)
+def test_fill_nans_zonal_interp(mock_data_fixture, engine, file_pattern, request):
+    mock_data: MockData = request.getfixturevalue(mock_data_fixture)
+    nan_config = FillNaNsConfig(zonal_interp_variables=["foo"])
+    config = XarrayDataConfig(
+        data_path=mock_data.tmpdir,
+        fill_nans=nan_config,
+        engine=engine,
+        file_pattern=file_pattern,
+    )
+    names = mock_data.var_names.all_names
+    dataset = xarray_dataset_constructor(config, names, 2)
+    data, _, _, _ = dataset[0]
+    # "foo" NaNs at lon=0 should be interpolated, not filled with constant 0
+    assert not torch.any(torch.isnan(data["foo"][0, :, 0]))
+    assert not torch.all(data["foo"][0, :, 0] == 0)
+    # "bar" also had NaNs but is not in zonal_interp_variables,
+    # so it should be filled with constant 0
+    assert torch.all(data["bar"][0, :, 0] == 0)
+    # constant_var is not in zonal_interp_variables, filled with constant 0
+    assert torch.all(data["constant_var"][:, 0, 0] == 0)
+
+
+def test_fill_nans_zonal_interp_healpix_raises():
+    with pytest.raises(ValueError, match="zonal_interp_variables"):
+        XarrayDataConfig(
+            data_path="/unused",
+            spatial_dimensions="healpix",
+            fill_nans=FillNaNsConfig(zonal_interp_variables=["sst"]),
+        )
+
+
 def test_keep_nans(mock_monthly_netcdfs_with_nans):
     config_keep_nan = XarrayDataConfig(data_path=mock_monthly_netcdfs_with_nans.tmpdir)
     names = mock_monthly_netcdfs_with_nans.var_names.all_names
@@ -973,12 +1012,54 @@ def test__get_vertical_coordinate_null():
     assert vertical_coordinate == NullVerticalCoordinate()
 
 
+def test__infer_atmosphere_level_indices_from_names():
+    assert _infer_atmosphere_level_indices_from_names(["air_temperature_1"]) == [1]
+    assert _infer_atmosphere_level_indices_from_names(
+        ["air_temperature_7", "air_temperature_1", "specific_total_water_3"]
+    ) == [1, 3, 7]
+    assert (
+        _infer_atmosphere_level_indices_from_names(["PRESsfc", "surface_temperature"])
+        is None
+    )
+    assert _infer_atmosphere_level_indices_from_names([]) is None
+
+
 def test__get_vertical_coordinate_hybrid_sigma_pressure():
     data = xr.Dataset({"ak_0": 1.0, "bk_0": 0.5, "ak_1": 2.0, "bk_1": 1.5})
     vertical_coordinate = _get_vertical_coordinate(data, dtype=None)
     assert isinstance(vertical_coordinate, HybridSigmaPressureCoordinate)
     assert vertical_coordinate.ak[0] == 1.0
     assert vertical_coordinate.bk[0] == 0.5
+
+
+def test__get_vertical_coordinate_drops_ak0_bk0_when_level_indices_omit_zero():
+    """When atmosphere_level_indices is [1, 2], only interfaces 1..3 are kept;
+    ak_0/bk_0 are dropped."""
+    data = xr.Dataset(
+        {
+            "ak_0": 0.0,
+            "bk_0": 0.0,
+            "ak_1": 1.0,
+            "bk_1": 0.1,
+            "ak_2": 2.0,
+            "bk_2": 0.2,
+            "ak_3": 3.0,
+            "bk_3": 0.3,
+        }
+    )
+    vertical_coordinate = _get_vertical_coordinate(
+        data, dtype=None, atmosphere_level_indices=[1, 2]
+    )
+    assert isinstance(vertical_coordinate, HybridSigmaPressureCoordinate)
+    # Interfaces for layers 1 and 2 are 1, 2, 3 (ak_0/bk_0 dropped)
+    assert len(vertical_coordinate.ak) == 3
+    assert len(vertical_coordinate.bk) == 3
+    assert vertical_coordinate.ak[0] == 1.0
+    assert vertical_coordinate.ak[1] == 2.0
+    assert vertical_coordinate.ak[2] == 3.0
+    assert vertical_coordinate.bk[0] == 0.1
+    assert vertical_coordinate.bk[1] == 0.2
+    assert vertical_coordinate.bk[2] == 0.3
 
 
 @pytest.mark.parametrize("has_deptho", [False, True], ids=["no_deptho", "with_deptho"])

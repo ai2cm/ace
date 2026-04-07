@@ -93,8 +93,8 @@ dataset_computation:
       - soil_fraction
       - lake_fraction
   standard_names:
-    longitude_dim: lon
-    latitude_dim: lat
+    longitude_dim: longitude
+    latitude_dim: latitude
     graupel_mixing_ratio: None
     rain_mixing_ratio: None
     snow_mixing_ratio: None

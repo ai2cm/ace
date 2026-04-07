@@ -288,6 +288,44 @@ def main(
             run_segmented_inference(config, segments)
 
 
+def _save_sst_diagnostic(
+    data,
+    sst_name: str,
+    experiment_dir: str,
+):
+    """Save the first forcing window's SST field to NetCDF for sanity checking.
+    The saved file includes the SST after zonal interpolation and any
+    perturbations, with no NaN masking applied, so land values are visible.
+    """
+    first_batch = next(iter(data.loader))
+    if sst_name not in first_batch.data:
+        logging.warning(f"SST diagnostic: '{sst_name}' not in forcing batch, skipping.")
+        return
+    sst_tensor = first_batch.data[sst_name]
+    sst_np = sst_tensor.cpu().numpy()
+    coords_dict = {
+        k: v.cpu().numpy() if isinstance(v, torch.Tensor) else v
+        for k, v in data.coords.items()
+    }
+    lat = coords_dict.get("lat")
+    lon = coords_dict.get("lon")
+    if lat is None or lon is None:
+        logging.warning("SST diagnostic: lat/lon coords not found, skipping.")
+        return
+    dims = ["sample", "time", "lat", "lon"]
+    ds = xr.Dataset(
+        {sst_name: (dims, sst_np)},
+        coords={"lat": lat, "lon": lon},
+    )
+    path = os.path.join(experiment_dir, "sst_diagnostic.nc")
+    ds.to_netcdf(path)
+    logging.info(
+        f"SST diagnostic saved to {path} "
+        f"(shape={sst_np.shape}, min={sst_np.min():.2f}, "
+        f"max={sst_np.max():.2f}, has_nan={np.isnan(sst_np).any()})"
+    )
+
+
 def run_inference_from_config(config: InferenceConfig):
     timer = GlobalTimer.get_instance()
     timer.start_outer("inference")
@@ -350,6 +388,12 @@ def run_inference_from_config(config: InferenceConfig):
             coords=data.coords,
             variable_metadata=variable_metadata,
         )
+
+        if stepper.surface_temperature_name is not None:
+            _save_sst_diagnostic(
+                data, stepper.surface_temperature_name, config.experiment_dir
+            )
+
     logging.info("Starting inference")
     logger = get_record_to_wandb(label="inference")
     run_inference(

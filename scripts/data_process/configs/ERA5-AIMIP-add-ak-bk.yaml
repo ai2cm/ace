@@ -1,0 +1,20 @@
+variable_sources:
+  2024-06-20-era5-1deg-8layer-1940-2022.zarr:
+    - ak_0
+    - ak_1
+    - ak_2
+    - ak_3
+    - ak_4
+    - ak_5
+    - ak_6
+    - ak_7
+    - ak_8
+    - bk_0
+    - bk_1
+    - bk_2
+    - bk_3
+    - bk_4
+    - bk_5
+    - bk_6
+    - bk_7
+    - bk_8

@@ -83,6 +83,19 @@ def get_gridded_data(
             This is useful for debugging or testing in cases where forkserver is not
             the default, but should generally be unused in production code.
     """
+    level_0_like = [
+        n for n in requirements.names if n.endswith("_0") and n != "label_0"
+    ]
+    if level_0_like:
+        logger.info(
+            "Data requirements include level-0-like variables: %s (from step "
+            "config). For no-stratosphere, remove from in_names/out_names.",
+            level_0_like[:10],
+        )
+    logger.info(
+        "Data requirements: %d variables requested (names from step config)",
+        len(requirements.names),
+    )
     n_timesteps_preloaded = requirements.n_timesteps_schedule.add(config.time_buffer)
     dataset, properties = config.get_dataset(requirements.names, n_timesteps_preloaded)
 

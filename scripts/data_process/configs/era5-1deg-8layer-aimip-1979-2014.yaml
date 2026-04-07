@@ -1,0 +1,9 @@
+runs:
+  2026-02-18-era5-1deg-combined-aimip-forcing-1978-2022: ""  # no real data source, config only for computing stats
+data_output_directory: gs://vcm-ml-intermediate
+stats:
+  output_directory: gs://vcm-ml-intermediate/2026-02-18-era5-1deg-combined-aimip-forcing-1979-2014-stats
+  beaker_dataset: era5-1deg-combined-aimip-forcing-1979-2014-stats
+  start_date: "1979-01-01"
+  end_date: "2014-12-31"
+  data_type: ERA5
