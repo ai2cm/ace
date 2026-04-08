@@ -119,13 +119,6 @@ def make_config(year, times):
                 "save_prediction_files": False,
                 "save_monthly_files": True,
                 "names": [
-                    "DLWRFsfc",
-                    "DSWRFsfc",
-                    "ULWRFsfc",
-                    "USWRFsfc",
-                    "LHTFLsfc",
-                    "SHTFLsfc",
-                    "PRATEsfc",
                     "eastward_surface_wind_stress",
                     "northward_surface_wind_stress",
                 ],
@@ -205,7 +198,7 @@ def main():
 
         filename = os.path.join(
             OUTPUT_DIR,
-            f"evaluator-config-override-atmosphere-forcing-yr{year:04d}.yaml",
+            f"evaluator-config-override-atmosphere-forcing-winds-only-yr{year:04d}.yaml",
         )
 
         with open(filename, "w") as f:
