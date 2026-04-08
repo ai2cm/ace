@@ -1,21 +1,34 @@
 import dataclasses
+import warnings
 from collections.abc import Mapping
 from typing import Any
 
 import dacite
 import torch
 
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.packer import Packer
-from fme.core.rand import randn, randn_like
 from fme.core.typing_ import TensorDict, TensorMapping
-from fme.downscaling.data import BatchData, PairedBatchData, StaticInputs
+from fme.downscaling.data import (
+    BatchData,
+    ClosedInterval,
+    PairedBatchData,
+    StaticInputs,
+    adjust_fine_coord_range,
+    load_coords_from_path,
+)
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
+from fme.downscaling.noise import (
+    LogNormalNoiseDistribution,
+    LogUniformNoiseDistribution,
+    condition_with_noise_for_training,
+)
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.samplers import stochastic_sampler as edm_sampler
 from fme.downscaling.typing_ import FineResCoarseResPair
@@ -86,8 +99,6 @@ class DiffusionModelConfig:
         in_names: The input variable names for the diffusion model.
         out_names: The output variable names for the diffusion model.
         normalization: The normalization configurations for the diffusion model.
-        p_mean: The mean of noise distribution used during training.
-        p_std: The std of the noise distribution used during training.
         sigma_min: Min noise level for generation.
         sigma_max: Max noise level for generation.
         churn: The amount of stochasticity during generation.
@@ -95,6 +106,13 @@ class DiffusionModelConfig:
         use_fine_topography: Whether to use fine topography in the model.
         use_amp_bf16: Whether to use automatic mixed precision (bfloat16) in the
             UNetDiffusionModule.
+        training_noise_distribution: Noise distribution to use during training.
+        p_mean: The mean of noise distribution used during training.
+            Deprecated. Use training_noise_distribution field instead.
+            This is kept for backwards compatibility.
+        p_std: The std of the noise distribution used during training.
+            Deprecated. Use training_noise_distribution field instead.
+            This is kept for backwards compatibility.
     """
 
     module: DiffusionModuleRegistrySelector
@@ -102,8 +120,6 @@ class DiffusionModelConfig:
     in_names: list[str]
     out_names: list[str]
     normalization: PairedNormalizationConfig
-    p_mean: float
-    p_std: float
     sigma_min: float
     sigma_max: float
     churn: float
@@ -111,6 +127,11 @@ class DiffusionModelConfig:
     predict_residual: bool
     use_fine_topography: bool = False
     use_amp_bf16: bool = False
+    training_noise_distribution: (
+        LogNormalNoiseDistribution | LogUniformNoiseDistribution | None
+    ) = None
+    p_mean: float | None = None
+    p_std: float | None = None
 
     def __post_init__(self):
         self._interpolate_input = self.module.expects_interpolated_input
@@ -119,11 +140,48 @@ class DiffusionModelConfig:
                 "Fine topography can only be used when predicting on interpolated"
                 " coarse input"
             )
+        if self.p_mean is not None and self.p_std is not None:
+            if self.training_noise_distribution is None:
+                warnings.warn(
+                    "p_mean and p_std are deprecated. "
+                    f"Use training_noise_distribution field instead."
+                )
+            else:
+                raise ValueError(
+                    "Training noise should be specified in training_noise_distribution "
+                    "field only. Both training_noise_distribution and p_mean, p_std "
+                    "were specified. The latter two fields are deprecated."
+                )
+        if self.training_noise_distribution is None and (
+            self.p_mean is None or self.p_std is None
+        ):
+            raise ValueError(
+                "Noise distribution must be specified in training_noise_distribution "
+                "field or in p_mean and p_std fields."
+            )
+
+    @property
+    def noise_distribution(
+        self,
+    ) -> LogNormalNoiseDistribution | LogUniformNoiseDistribution:
+        """
+        Returns NoiseDistribution object to use for sampling noise in training.
+        """
+        if self.training_noise_distribution is not None:
+            return self.training_noise_distribution
+        elif self.p_mean is not None and self.p_std is not None:
+            return LogNormalNoiseDistribution(p_mean=self.p_mean, p_std=self.p_std)
+        else:
+            raise ValueError(
+                "Noise distribution must be specified in training_noise_distribution "
+                "or in p_mean and p_std fields."
+            )
 
     def build(
         self,
         coarse_shape: tuple[int, int],
         downscale_factor: int,
+        full_fine_coords: LatLonCoordinates,
         rename: dict[str, str] | None = None,
         static_inputs: StaticInputs | None = None,
     ) -> "DiffusionModel":
@@ -137,9 +195,22 @@ class DiffusionModelConfig:
         # https://en.wikipedia.org/wiki/Standard_score
         sigma_data = 1.0
 
-        n_in_channels = len(self.in_names)
-        if static_inputs is not None:
-            n_in_channels += len(static_inputs.fields)
+        num_static_in_channels = len(static_inputs.fields) if static_inputs else 0
+        n_in_channels = len(self.in_names) + num_static_in_channels
+        if self.use_fine_topography and (
+            not static_inputs or len(static_inputs.fields) == 0
+        ):
+            raise ValueError(
+                "use_fine_topography is enabled but no static input fields were found. "
+                "At least one static input field must be provided when using fine "
+                "topography."
+            )
+
+        if static_inputs and static_inputs.coords != full_fine_coords:
+            raise ValueError(
+                "static_inputs coordinates do not match full_fine_coords. "
+                "Static inputs must be defined on the same grid as the model output."
+            )
 
         module = self.module.build(
             n_in_channels=n_in_channels,
@@ -158,6 +229,7 @@ class DiffusionModelConfig:
             coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
             sigma_data=sigma_data,
+            full_fine_coords=full_fine_coords,
             static_inputs=static_inputs,
         )
 
@@ -204,51 +276,6 @@ def _separate_interleaved_samples(tensor: torch.Tensor, n_samples: int) -> torch
     return tensor.reshape(n_batch, n_samples, *tensor.shape[1:])
 
 
-@dataclasses.dataclass
-class ConditionedTarget:
-    """
-    A class to hold the conditioned targets and the loss weighting.
-
-    Attributes:
-        latents: The normalized targets with noise added.
-        sigma: The noise level.
-        weight: The loss weighting.
-    """
-
-    latents: torch.Tensor
-    sigma: torch.Tensor
-    weight: torch.Tensor
-
-
-def condition_with_noise_for_training(
-    targets_norm: torch.Tensor,
-    p_std: float,
-    p_mean: float,
-    sigma_data: float,
-) -> ConditionedTarget:
-    """
-    Condition the targets with noise for training.
-
-    Args:
-        targets_norm: The normalized targets.
-        p_std: The standard deviation of the noise distribution used during training.
-        p_mean: The mean of the noise distribution used during training.
-        sigma_data: The standard deviation of the data,
-            used to determine loss weighting.
-
-    Returns:
-        The conditioned targets and the loss weighting.
-    """
-    rnd_normal = randn([targets_norm.shape[0], 1, 1, 1], device=targets_norm.device)
-    # This is taken from EDM's original implementation in EDMLoss:
-    # https://github.com/NVlabs/edm/blob/008a4e5316c8e3bfe61a62f874bddba254295afb/training/loss.py#L72-L80  # noqa: E501
-    sigma = (rnd_normal * p_std + p_mean).exp()
-    weight = (sigma**2 + sigma_data**2) / (sigma * sigma_data) ** 2
-    noise = randn_like(targets_norm) * sigma
-    latents = targets_norm + noise
-    return ConditionedTarget(latents=latents, sigma=sigma, weight=weight)
-
-
 class DiffusionModel:
     def __init__(
         self,
@@ -259,6 +286,7 @@ class DiffusionModel:
         coarse_shape: tuple[int, int],
         downscale_factor: int,
         sigma_data: float,
+        full_fine_coords: LatLonCoordinates,
         static_inputs: StaticInputs | None = None,
     ) -> None:
         """
@@ -270,14 +298,17 @@ class DiffusionModel:
             normalizer: The normalizer object used for data normalization.
             loss: The loss function used for training the model.
             coarse_shape: The height (lat) and width (lon) of the
-                coarse-resolution input data.
+                coarse-resolution input data used to train the model
+                (same as patch extent, if training on patches).
             downscale_factor: The factor by which the data is downscaled from
                 coarse to fine.
             sigma_data: The standard deviation of the data, used for diffusion
                 model preconditioning.
-            static_inputs: Optional static inputs to the model that may be loaded
-                from saved checkpoint. If required by the model but not passed at
-                init, they are expected to be provided in the loaded dataset.
+            full_fine_coords: The full fine-resolution domain coordinates.
+                Serves as the canonical source of truth for the model output grid.
+            static_inputs: Static inputs to the model. May be None when
+                no static data is needed. If present, coordinates
+                must match full_fine_coords.
         """
         self.coarse_shape = coarse_shape
         self.downscale_factor = downscale_factor
@@ -290,11 +321,48 @@ class DiffusionModel:
         self.out_packer = Packer(config.out_names)
         self.config = config
         self._channel_axis = -3
-        self.static_inputs = static_inputs
+        self.full_fine_coords = full_fine_coords.to(get_device())
+        self.static_inputs = static_inputs.to_device() if static_inputs else None
 
     @property
     def modules(self) -> torch.nn.ModuleList:
         return torch.nn.ModuleList([self.module])
+
+    def _get_fine_interval_from_batch(
+        self, batch: BatchData
+    ) -> tuple[ClosedInterval, ClosedInterval]:
+        coarse_lat = batch.latlon_coordinates.lat[0]
+        coarse_lon = batch.latlon_coordinates.lon[0]
+        fine_lat_interval = adjust_fine_coord_range(
+            batch.lat_interval,
+            full_coarse_coord=coarse_lat,
+            full_fine_coord=self.full_fine_coords.lat,
+            downscale_factor=self.downscale_factor,
+        )
+        fine_lon_interval = adjust_fine_coord_range(
+            batch.lon_interval,
+            full_coarse_coord=coarse_lon,
+            full_fine_coord=self.full_fine_coords.lon,
+            downscale_factor=self.downscale_factor,
+        )
+        return fine_lat_interval, fine_lon_interval
+
+    def get_fine_coords_for_batch(self, batch: BatchData) -> LatLonCoordinates:
+        """Return fine-resolution coordinates matching the spatial extent of batch."""
+        lat_interval, lon_interval = self._get_fine_interval_from_batch(batch)
+        return LatLonCoordinates(
+            lat=lat_interval.subset_of(self.full_fine_coords.lat),
+            lon=lon_interval.subset_of(self.full_fine_coords.lon),
+        )
+
+    def _subset_static_if_available(self, batch: BatchData) -> StaticInputs | None:
+        if self.static_inputs is None:
+            return None
+        fine_lat_interval, fine_lon_interval = self._get_fine_interval_from_batch(batch)
+        return self.static_inputs.subset(
+            lat_interval=fine_lat_interval,
+            lon_interval=fine_lon_interval,
+        )
 
     @property
     def fine_shape(self) -> tuple[int, int]:
@@ -302,7 +370,8 @@ class DiffusionModel:
 
     def _get_fine_shape(self, coarse_shape: tuple[int, int]) -> tuple[int, int]:
         """
-        Calculate the fine shape based on the coarse shape and downscale factor.
+        Calculate the fine shape based on the coarse shape of data used to train
+        the model and the downscaling factor.
         """
         return (
             coarse_shape[0] * self.downscale_factor,
@@ -318,21 +387,21 @@ class DiffusionModel:
         )
         interpolated = interpolate(normalized, self.downscale_factor)
 
-        if self.config.use_fine_topography:
-            if static_inputs is None:
+        if self.config.use_fine_topography and static_inputs is not None:
+            expected_shape = interpolated.shape[-2:]
+            if static_inputs.shape != expected_shape:
                 raise ValueError(
-                    "Static inputs must be provided for each batch when use of fine "
-                    "static inputs is enabled."
+                    f"Subsetted static input shape {static_inputs.shape} does not "
+                    f"match expected fine spatial shape {expected_shape}."
                 )
-            else:
-                n_batches = normalized.shape[0]
-                # Join normalized static inputs to input (see dataset for details)
-                for field in static_inputs.fields:
-                    topo = field.data.unsqueeze(0).repeat(n_batches, 1, 1)
-                    topo = topo.unsqueeze(self._channel_axis)
-                    interpolated = torch.concat(
-                        [interpolated, topo], axis=self._channel_axis
-                    )
+            n_batches = normalized.shape[0]
+            # Join normalized static inputs to input (see dataset for details)
+            fields: list[torch.Tensor] = [interpolated]
+            for field in static_inputs.fields:
+                static_field = field.data.unsqueeze(0).repeat(n_batches, 1, 1)
+                static_field = static_field.unsqueeze(self._channel_axis)
+                fields.append(static_field)
+            interpolated = torch.concat(fields, dim=self._channel_axis)
 
         if self.config._interpolate_input:
             return interpolated
@@ -341,12 +410,12 @@ class DiffusionModel:
     def train_on_batch(
         self,
         batch: PairedBatchData,
-        static_inputs: StaticInputs | None,
         optimizer: Optimization | NullOptimization,
     ) -> ModelOutputs:
         """Performs a denoising training step on a batch of data."""
+        _static_inputs = self._subset_static_if_available(batch.coarse)
         coarse, fine = batch.coarse.data, batch.fine.data
-        inputs_norm = self._get_input_from_coarse(coarse, static_inputs)
+        inputs_norm = self._get_input_from_coarse(coarse, _static_inputs)
         targets_norm = self.out_packer.pack(
             self.normalizer.fine.normalize(dict(fine)), axis=self._channel_axis
         )
@@ -364,7 +433,7 @@ class DiffusionModel:
             targets_norm = targets_norm - base_prediction
 
         conditioned_target = condition_with_noise_for_training(
-            targets_norm, self.config.p_std, self.config.p_mean, self.sigma_data
+            targets_norm, self.config.noise_distribution, self.sigma_data
         )
 
         denoised_norm = self.module(
@@ -405,6 +474,8 @@ class DiffusionModel:
         static_inputs: StaticInputs | None,
         n_samples: int = 1,
     ) -> tuple[TensorDict, torch.Tensor, list[torch.Tensor]]:
+        # Internal method; external callers should use generate_on_batch /
+        # generate_on_batch_no_target.
         inputs_ = self._get_input_from_coarse(coarse_data, static_inputs)
         # expand samples and fold to
         # [batch * n_samples, output_channels, height, width]
@@ -454,22 +525,22 @@ class DiffusionModel:
     def generate_on_batch_no_target(
         self,
         batch: BatchData,
-        static_inputs: StaticInputs | None,
         n_samples: int = 1,
     ) -> TensorDict:
-        generated, _, _ = self.generate(batch.data, static_inputs, n_samples)
+        _static_inputs = self._subset_static_if_available(batch)
+        generated, _, _ = self.generate(batch.data, _static_inputs, n_samples)
         return generated
 
     @torch.no_grad()
     def generate_on_batch(
         self,
         batch: PairedBatchData,
-        static_inputs: StaticInputs | None,
         n_samples: int = 1,
     ) -> ModelOutputs:
+        _static_inputs = self._subset_static_if_available(batch.coarse)
         coarse, fine = batch.coarse.data, batch.fine.data
         generated, generated_norm, latent_steps = self.generate(
-            coarse, static_inputs, n_samples
+            coarse, _static_inputs, n_samples
         )
 
         targets_norm = self.out_packer.pack(
@@ -487,7 +558,7 @@ class DiffusionModel:
 
     def get_state(self) -> Mapping[str, Any]:
         if self.static_inputs is not None:
-            static_inputs_state = self.static_inputs.to_state()
+            static_inputs_state = self.static_inputs.get_state()
         else:
             static_inputs_state = None
 
@@ -496,6 +567,7 @@ class DiffusionModel:
             "module": self.module.state_dict(),
             "coarse_shape": self.coarse_shape,
             "downscale_factor": self.downscale_factor,
+            "full_fine_coords": self.full_fine_coords.get_state(),
             "static_inputs": static_inputs_state,
         }
 
@@ -504,15 +576,35 @@ class DiffusionModel:
         cls,
         state: Mapping[str, Any],
     ) -> "DiffusionModel":
-        config = DiffusionModelConfig.from_state(state["config"])
-        # backwards compatibility for models before static inputs serialization
-        if state.get("static_inputs") is not None:
-            static_inputs = StaticInputs.from_state(state["static_inputs"]).to_device()
+        """
+        Reconstruct model from state (used during training checkpoint resumption).
+        Requires full_fine_coords in state. For old checkpoints without it, use
+        CheckpointModelConfig with fine_coordinates_path for backwards compatibility.
+        """
+        static_inputs_state = state.get("static_inputs")
+        static_inputs = (
+            StaticInputs.from_state(static_inputs_state)
+            if static_inputs_state
+            else None
+        )
+        full_fine_coords_state = state.get("full_fine_coords")
+        if full_fine_coords_state is not None:
+            full_fine_coords = LatLonCoordinates(
+                lat=full_fine_coords_state["lat"],
+                lon=full_fine_coords_state["lon"],
+            )
         else:
-            static_inputs = None
+            raise ValueError(
+                "No full_fine_coords found in loaded state for DiffusionModel. "
+                "Must use CheckpointModelConfig with fine_coordinates_path provided "
+                "for backwards compatibility loading of old checkpoints without "
+                "full_fine_coords in state."
+            )
+        config = DiffusionModelConfig.from_state(state["config"])
         model = config.build(
             state["coarse_shape"],
             state["downscale_factor"],
+            full_fine_coords=full_fine_coords,
             static_inputs=static_inputs,
         )
         model.module.load_state_dict(state["module"], strict=True)
@@ -538,9 +630,14 @@ class CheckpointModelConfig:
     Parameters:
         checkpoint_path: The path to the checkpoint file.
         rename: Optional mapping of {old: new} model input/output names to rename.
-        fine_topography_path: Optional path to the fine topography file, if needed.
-            This is useful when no fine res data is used during evaluation but the
-            model still needs fine res static input data.
+        static_inputs: Optional mapping of {field_name: path} for static inputs to
+            the model. Useful when no fine res data is available during evaluation
+            but the model requires static input data. Raises an error if the
+            checkpoint already has static inputs from training.
+        fine_topography_path: Deprecated. Use static_inputs instead.
+        fine_coordinates_path: Optional path to a netCDF/zarr file containing lat/lon
+            coordinates for the full fine domain. Used for old checkpoints that have
+            no static_inputs and no stored fine_coords.
         model_updates: Optional mapping of {key: new_value} model config updates to
             apply when loading the model. This is useful for running evaluation with
             updated parameters than at training time. Use with caution; not all
@@ -549,7 +646,9 @@ class CheckpointModelConfig:
 
     checkpoint_path: str
     rename: dict[str, str] | None = None
+    static_inputs: dict[str, str] | None = None
     fine_topography_path: str | None = None
+    fine_coordinates_path: str | None = None
     model_updates: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
@@ -559,6 +658,12 @@ class CheckpointModelConfig:
         self._rename = self.rename or {}
         if "module" in (self.model_updates or {}):
             raise ValueError("'module' cannot be updated in model_updates.")
+        if self.fine_topography_path is not None:
+            raise ValueError(
+                "fine_topography_path is deprecated and will be removed in "
+                "a future release. Use static_inputs instead, "
+                "e.g., static_inputs: {HGTsfc: <path>}.",
+            )
 
     @property
     def _checkpoint(self) -> Mapping[str, Any]:
@@ -572,9 +677,6 @@ class CheckpointModelConfig:
                 self._rename.get(name, name)
                 for name in checkpoint_data["model"]["config"]["out_names"]
             ]
-            # backwards compatibility for models before static inputs serialization
-            checkpoint_data["model"].setdefault("static_inputs", None)
-
             self._checkpoint_data = checkpoint_data
             self._checkpoint_is_loaded = True
             if self.model_updates is not None:
@@ -582,24 +684,54 @@ class CheckpointModelConfig:
                     checkpoint_data["model"]["config"][k] = v
         return self._checkpoint_data
 
+    @staticmethod
+    def _get_coords_backwards_compatible(
+        coords_from_state: dict | None,
+        fine_coordinates_path: str | None,
+    ) -> LatLonCoordinates:
+        if coords_from_state and fine_coordinates_path:
+            raise ValueError(
+                "Checkpoint contains fine coordinates but fine_coordinates_path is also"
+                " provided. Backwards compatibility loading only supports a single "
+                "source of fine coordinates info."
+            )
+        if coords_from_state is not None:
+            return LatLonCoordinates(
+                lat=coords_from_state["lat"],
+                lon=coords_from_state["lon"],
+            )
+        elif fine_coordinates_path is not None:
+            return load_coords_from_path(fine_coordinates_path)
+        else:
+            raise ValueError(
+                "No fine coordinates found in checkpoint state and no "
+                "fine_coordinates_path provided. One of these must be provided to "
+                "load the model using CheckpointModelConfig."
+            )
+
     def build(
         self,
     ) -> DiffusionModel:
-        if self._checkpoint["model"]["static_inputs"] is not None:
-            static_inputs = StaticInputs.from_state(
-                self._checkpoint["model"]["static_inputs"]
-            )
-        else:
-            static_inputs = None
+        checkpoint_model: dict = self._checkpoint["model"]
+        full_fine_coords = self._get_coords_backwards_compatible(
+            checkpoint_model.get("full_fine_coords"),
+            self.fine_coordinates_path,
+        )
+        static_inputs = StaticInputs.from_state_backwards_compatible(
+            state=checkpoint_model.get("static_inputs") or {},
+            static_inputs_config=self.static_inputs or {},
+        )
         model = _CheckpointModelConfigSelector.from_state(
             self._checkpoint["model"]["config"]
         ).build(
             coarse_shape=self._checkpoint["model"]["coarse_shape"],
             downscale_factor=self._checkpoint["model"]["downscale_factor"],
+            full_fine_coords=full_fine_coords,
             rename=self._rename,
             static_inputs=static_inputs,
         )
         model.module.load_state_dict(self._checkpoint["model"]["module"])
+        model.module.eval()
         return model
 
     @property

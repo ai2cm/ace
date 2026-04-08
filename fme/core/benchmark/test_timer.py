@@ -23,6 +23,7 @@ def test_new_if_available(is_available: bool):
     not torch.cuda.is_available(),
     reason="CUDA is not available, skipping CUDATimer tests.",
 )
+@pytest.mark.serial  # should not run in parallel with xdist
 def test_timer_with_child():
     timer = CUDATimer()
     with timer:

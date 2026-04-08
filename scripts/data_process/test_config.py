@@ -6,6 +6,7 @@ import yaml
 from append_dataset import DatasetAppendConfig
 from combine_stats import Config as CombineStatsConfig
 from create_coupled_datasets import CreateCoupledDatasetsConfig
+from create_coupled_ic import CreateCoupledICConfig
 from get_stats import Config as GetStatsConfig
 from upload_stats import Config as UploadStatsConfig
 
@@ -25,6 +26,12 @@ IGNORE_CONFIGS_WITH_SUFFIX = [
     "-append.yaml",
     "-coupled.yaml",
     "-vertical-coarsen.yaml",
+    "-coupled-ic.yaml",
+]
+COUPLED_IC_CONFIG_YAMLS = [
+    os.path.join(DIRNAME + "/configs", f)
+    for f in os.listdir(DIRNAME + "/configs")
+    if f.endswith("-coupled-ic.yaml")
 ]
 
 
@@ -69,3 +76,14 @@ def test_valid_create_coupled_datasets_config(filename):
     with open(filename, "r") as f:
         config_data = yaml.load(f, Loader=yaml.CLoader)
     dacite.from_dict(data_class=CreateCoupledDatasetsConfig, data=config_data)
+
+
+@pytest.mark.parametrize("filename", COUPLED_IC_CONFIG_YAMLS)
+def test_valid_create_coupled_ic_config(filename):
+    with open(filename, "r") as f:
+        config_data = yaml.load(f, Loader=yaml.CLoader)
+    dacite.from_dict(
+        data_class=CreateCoupledICConfig,
+        data=config_data,
+        config=dacite.Config(cast=[tuple], strict=True),
+    )

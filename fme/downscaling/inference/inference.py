@@ -3,21 +3,17 @@ import logging
 from dataclasses import dataclass, field
 
 import dacite
+import numpy as np
 import torch
 import yaml
 
 from fme.core.cli import prepare_directory
+from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
 
-from ..data import DataLoaderConfig, StaticInputs
+from ..data import DataLoaderConfig
 from ..models import CheckpointModelConfig, DiffusionModel
-from ..predictors import (
-    CascadePredictor,
-    CascadePredictorConfig,
-    PatchPredictionConfig,
-    PatchPredictor,
-)
-from ..train import count_parameters
+from ..predictors import PatchPredictionConfig, PatchPredictor
 from .output import DownscalingOutput, EventConfig, TimeRangeConfig
 from .work_items import LoadedSliceWorkItem
 
@@ -32,7 +28,7 @@ class Downscaler:
 
     def __init__(
         self,
-        model: DiffusionModel | CascadePredictor,
+        model: DiffusionModel,
         outputs: list[DownscalingOutput],
         output_dir: str = ".",
     ):
@@ -55,9 +51,9 @@ class Downscaler:
 
     def _get_generation_model(
         self,
-        static_inputs: StaticInputs,
+        input_shape: tuple[int, int],
         output: DownscalingOutput,
-    ) -> DiffusionModel | PatchPredictor | CascadePredictor:
+    ) -> DiffusionModel | PatchPredictor:
         """
         Set up the model, wrapping with PatchPredictor if needed.  While models are
         probably capable of generating any domain size, we haven't tested for domains
@@ -65,20 +61,22 @@ class Downscaler:
         the user to use patching for larger domains because that provides better
         generations.
         """
-        model_patch_shape = self.model.fine_shape
-        actual_shape = tuple(static_inputs.shape)
+        model_patch_shape = self.model.coarse_shape
 
-        if model_patch_shape == actual_shape:
+        if model_patch_shape == input_shape:
             # short circuit, no patching necessary
             return self.model
         elif any(
             expected > actual
-            for expected, actual in zip(model_patch_shape, actual_shape)
+            for expected, actual in zip(model_patch_shape, input_shape)
         ):
             # we don't support generating regions smaller than the model patch size
             raise ValueError(
                 f"Model coarse shape {model_patch_shape} is larger than "
-                f"actual topography shape {actual_shape} for output {output.name}."
+                f"actual input shape {input_shape} for output {output.name}."
+                "We do not support generating outputs with a smaller spatial extent"
+                " than the model's trained patch size. Please adjust the spatial extent"
+                " to be at least as large as the model's input patch size."
             )
         elif output.patch.needs_patch_predictor:
             # Use a patch predictor
@@ -91,14 +89,14 @@ class Downscaler:
             # User should enable patching
             raise ValueError(
                 f"Model coarse shape {model_patch_shape} does not match "
-                f"actual input shape {actual_shape} for output {output.name}, "
+                f"actual input shape {input_shape} for output {output.name}, "
                 "and patch prediction is not configured. Generation for larger domains "
                 "requires patch prediction."
             )
 
     def _on_device_generator(self, loader):
-        for loaded_item, topography in loader:
-            yield loaded_item.to_device(), topography.to_device()
+        for loaded_item in loader:
+            yield loaded_item.to_device()
 
     def run_output_generation(self, output: DownscalingOutput):
         """Execute the generation loop for this output."""
@@ -110,20 +108,20 @@ class Downscaler:
         total_batches = len(output.data.loader)
 
         loaded_item: LoadedSliceWorkItem
-        static_inputs: StaticInputs
-        for i, (loaded_item, static_inputs) in enumerate(output.data.get_generator()):
-            if writer is None:
-                writer = output.get_writer(
-                    latlon_coords=static_inputs.coords,
-                    output_dir=self.output_dir,
-                )
-                writer.initialize_store(
-                    static_inputs.fields[0].data.cpu().numpy().dtype
-                )
+        for i, loaded_item in enumerate(output.data.get_generator()):
+            input_shape = loaded_item.batch.horizontal_shape
             if model is None:
                 model = self._get_generation_model(
-                    static_inputs=static_inputs, output=output
+                    input_shape=input_shape, output=output
                 )
+
+            if writer is None:
+                fine_latlon_coords = model.get_fine_coords_for_batch(loaded_item.batch)
+                writer = output.get_writer(
+                    latlon_coords=fine_latlon_coords,
+                    output_dir=self.output_dir,
+                )
+                writer.initialize_store(np.float32)
 
             logging.info(
                 f"[{output.name}] Batch {i+1}/{total_batches}, "
@@ -132,7 +130,6 @@ class Downscaler:
 
             output_data = model.generate_on_batch_no_target(
                 loaded_item.batch,
-                static_inputs=static_inputs,
                 n_samples=loaded_item.n_ens,
             )
             output_np = {key: value.cpu().numpy() for key, value in output_data.items()}
@@ -223,17 +220,17 @@ class InferenceConfig:
             entity: my_organization
     """
 
-    model: CheckpointModelConfig | CascadePredictorConfig
+    model: CheckpointModelConfig
     data: DataLoaderConfig
     experiment_dir: str
     outputs: list[EventConfig | TimeRangeConfig]
     logging: LoggingConfig
     patch: PatchPredictionConfig = field(default_factory=PatchPredictionConfig)
 
-    def configure_logging(self, log_filename: str, resumable: bool = False):
+    def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)
         self.logging.configure_logging(
-            self.experiment_dir, log_filename, config=config, resumable=resumable
+            self.experiment_dir, log_filename, config=config, resumable=True
         )
 
     def build(self) -> Downscaler:
@@ -243,7 +240,7 @@ class InferenceConfig:
                 loader_config=self.data,
                 requirements=self.model.data_requirements,
                 patch=self.patch,
-                static_inputs_from_checkpoint=model.static_inputs,
+                fine_shape=model.fine_shape,
             )
             for output_cfg in self.outputs
         ]
@@ -261,7 +258,7 @@ def main(config_path: str):
     )
     prepare_directory(generation_config.experiment_dir, config)
 
-    generation_config.configure_logging(log_filename="out.log", resumable=True)
+    generation_config.configure_logging(log_filename="out.log")
 
     logging.info("Starting downscaling generation...")
     downscaler = generation_config.build()

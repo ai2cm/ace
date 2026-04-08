@@ -33,6 +33,7 @@ from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
+from fme.core.generics.lr_tuning import LRTuningConfig
 from fme.core.generics.trainer import EndOfBatchCallback, EndOfEpochCallback
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import Optimization, OptimizationConfig
@@ -55,8 +56,8 @@ class WeatherEvaluationConfig:
     """
 
     loader: InferenceDataLoaderConfig
-    n_forward_steps: int = 2
-    forward_steps_in_memory: int = 2
+    n_forward_steps: int
+    forward_steps_in_memory: int
     epochs: Slice = dataclasses.field(default_factory=lambda: Slice())
     aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
         default_factory=lambda: InferenceEvaluatorAggregatorConfig(
@@ -81,6 +82,9 @@ class WeatherEvaluationConfig:
             # log_global_mean_norm_time_series must be False for inline inference.
             self.aggregator.log_global_mean_time_series = False
             self.aggregator.log_global_mean_norm_time_series = False
+
+        for log_step_mean in self.aggregator.log_step_means:
+            log_step_mean.validate(self.n_forward_steps)
 
     @property
     def using_labels(self) -> bool:
@@ -112,8 +116,8 @@ class InlineInferenceConfig:
     """
 
     loader: InferenceDataLoaderConfig
-    n_forward_steps: int = 2
-    forward_steps_in_memory: int = 2
+    n_forward_steps: int
+    forward_steps_in_memory: int
     epochs: Slice = dataclasses.field(default_factory=lambda: Slice())
     aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
         default_factory=lambda: InferenceEvaluatorAggregatorConfig(
@@ -138,6 +142,9 @@ class InlineInferenceConfig:
             # log_global_mean_norm_time_series must be False for inline inference.
             self.aggregator.log_global_mean_time_series = False
             self.aggregator.log_global_mean_norm_time_series = False
+
+        for log_step_mean in self.aggregator.log_step_means:
+            log_step_mean.validate(self.n_forward_steps)
 
     @property
     def using_labels(self) -> bool:
@@ -261,6 +268,7 @@ class TrainConfig:
     )
     evaluate_before_training: bool = False
     save_best_inference_epoch_checkpoints: bool = False
+    lr_tuning: LRTuningConfig | None = None
     resume_results: ResumeResultsConfig | None = None
 
     def __post_init__(self):
@@ -290,6 +298,11 @@ class TrainConfig:
             raise ValueError(
                 "train_loader and weather_evaluation loader must both use labels or "
                 "both not use labels"
+            )
+        if self.lr_tuning is not None and self.optimization.has_lr_schedule:
+            raise ValueError(
+                "lr_tuning and optimization.scheduler cannot both be specified; "
+                "lr_tuning is an alternative form of learning rate scheduling"
             )
         if not is_local(self.experiment_dir):
             raise ValueError(
@@ -459,12 +472,11 @@ class TrainBuilders:
             dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
             aggregator = self.config.weather_evaluation.aggregator.build(
                 dataset_info=dataset_info,
-                n_timesteps=self.config.weather_evaluation.n_forward_steps
-                + n_ic_timesteps,
+                n_ic_steps=n_ic_timesteps,
+                n_forward_steps=self.config.weather_evaluation.n_forward_steps,
                 initial_time=data.initial_time,
                 normalize=normalize,
                 output_dir=output_dir,
-                record_step_20=self.config.weather_evaluation.n_forward_steps >= 20,
                 channel_mean_names=channel_mean_names,
                 save_diagnostics=save_diagnostics,
             )

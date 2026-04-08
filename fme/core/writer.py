@@ -12,6 +12,8 @@ from fme.core.distributed import Distributed
 
 logger = logging.getLogger(__name__)
 DATETIME_ENCODING_UNITS = "microseconds since 1970-01-01"
+TIMEDELTA_ENCODING_UNITS = "microseconds"
+TIMEDELTA_ENCODING_DTYPE = "timedelta64[us]"
 
 
 def _encode_cftime_times(times, calendar="julian"):

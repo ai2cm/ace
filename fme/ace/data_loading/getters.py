@@ -49,8 +49,13 @@ def _get_sampler(
 ) -> torch.utils.data.Sampler:
     dist = Distributed.get_instance()
     if sample_with_replacement_dataset_size is not None:
+        dist.require_no_spatial_parallelism(
+            "sample_with_replacement is not supported with spatial "
+            "parallelism. Spatial co-ranks would draw different samples, "
+            "producing corrupted data after scatter_spatial reassembly."
+        )
         local_sample_with_replacement_dataset_size = (
-            sample_with_replacement_dataset_size // dist.world_size
+            sample_with_replacement_dataset_size // dist.total_data_parallel_ranks
         )
         sampler = torch.utils.data.RandomSampler(
             dataset,
@@ -66,6 +71,7 @@ def get_gridded_data(
     config: DataLoaderConfig,
     train: bool,
     requirements: DataRequirements,
+    _force_forkserver: bool = False,
 ) -> GriddedData:
     """
     Args:
@@ -73,6 +79,9 @@ def get_gridded_data(
         train: Whether loader is intended for training or validation data; if True,
             then data will be shuffled.
         requirements: Data requirements for the model.
+        _force_forkserver: Whether to force using forkserver multiprocessing context.
+            This is useful for debugging or testing in cases where forkserver is not
+            the default, but should generally be unused in production code.
     """
     n_timesteps_preloaded = requirements.n_timesteps_schedule.add(config.time_buffer)
     dataset, properties = config.get_dataset(requirements.names, n_timesteps_preloaded)
@@ -88,7 +97,7 @@ def get_gridded_data(
 
     sampler = _get_sampler(dataset, config.sample_with_replacement, train)
 
-    if config.zarr_engine_used and config.num_data_workers > 0:
+    if _force_forkserver or (config.zarr_engine_used and config.num_data_workers > 0):
         # GCSFS and S3FS are not fork-safe, so we need to use forkserver
         # reading zarr with async from weka also requires forkserver
         mp_context = "forkserver"
@@ -131,6 +140,17 @@ def get_gridded_data(
     )
 
 
+_WORKER_DIST_CX = None  # needed so it doesn't get garbage collected and finalized
+
+
+def _forkserver_worker_init_fn(worker_id: int) -> None:
+    global _WORKER_DIST_CX
+    _WORKER_DIST_CX = Distributed.context()
+    _WORKER_DIST_CX.__enter__()
+    # don't need to exit the context on workers as they are not
+    # initialized/managed by torchrun
+
+
 def get_inference_data(
     config: InferenceDataLoaderConfig,
     total_forward_steps: int,
@@ -139,6 +159,7 @@ def get_inference_data(
     label_override: list[str] | None = None,
     surface_temperature_name: str | None = None,
     ocean_fraction_name: str | None = None,
+    _force_forkserver: bool = False,
 ) -> InferenceGriddedData:
     """
     Args:
@@ -155,6 +176,9 @@ def get_inference_data(
             set to None if no ocean temperature prescribing is being used.
         ocean_fraction_name: Name of the ocean fraction variable. Can be set to None
             if no ocean temperature prescribing is being used.
+        _force_forkserver: Whether to force using forkserver multiprocessing context.
+            This is useful for debugging or testing in cases where forkserver is not
+            the default, but should generally be unused in production code.
 
     Returns:
         A data loader for inference with coordinates and metadata.
@@ -169,14 +193,16 @@ def get_inference_data(
     )
     properties = dataset.properties
 
-    if config.zarr_engine_used:
+    if config.zarr_engine_used or _force_forkserver:
         # GCSFS and S3FS are not fork-safe, so we need to use forkserver
         # persist workers since startup is slow
         mp_context = "forkserver"
         persistent_workers = True
+        worker_init_fn = _forkserver_worker_init_fn
     else:
         mp_context = None
         persistent_workers = False
+        worker_init_fn = None
 
     logging.info(f"Multiprocessing inference context: {mp_context or 'fork'}")
 
@@ -189,6 +215,7 @@ def get_inference_data(
         pin_memory=using_gpu(),
         multiprocessing_context=mp_context,
         persistent_workers=persistent_workers,
+        worker_init_fn=worker_init_fn,
     )
     gridded_data = InferenceGriddedData(
         loader=loader,
