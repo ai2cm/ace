@@ -571,9 +571,6 @@ def test_train_and_inference(tmp_path, very_fast_only: bool):
 
     tm_logs = wandb_logs[-1]
     for name, metric in tm_logs.items():
-        if "power_spectrum" in name:
-            # power spectra not well defined for masked data
-            continue
         if isinstance(metric, float):
             assert not np.isnan(metric), f"{name} should not be NaN"
 
