@@ -131,40 +131,21 @@ def _setup(
     return config, mock_data, atmos_steps_per_ocean_step
 
 
-@pytest.mark.parametrize(
-    ("n_coupled_steps", "coupled_steps_in_memory"),
-    [
-        (3, 2),
-        (5, 3),
-    ],
-)
-def test_inference_n_coupled_steps_divisible_by_coupled_steps_in_memory(
-    tmp_path: pathlib.Path,
-    n_coupled_steps: int,
-    coupled_steps_in_memory: int,
-    very_fast_only: bool,
-):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-
-    ocean_in_names = ["o_prog", "sst", "mask_0", "a_diag"]
-    ocean_out_names = ["o_prog", "sst", "o_diag"]
-    atmos_in_names = ["a_prog", "surface_temperature", "forcing_var", "ocean_fraction"]
-    atmos_out_names = ["a_prog", "surface_temperature", "a_diag"]
+def test_inference_n_coupled_steps_divisible_by_coupled_steps_in_memory():
+    from unittest.mock import MagicMock
 
     with pytest.raises(
         ValueError,
         match="n_coupled_steps must be divisible by coupled_steps_in_memory",
     ):
-        _setup(
-            ocean_in_names=ocean_in_names,
-            ocean_out_names=ocean_out_names,
-            atmos_in_names=atmos_in_names,
-            atmos_out_names=atmos_out_names,
-            tmp_path=tmp_path,
-            n_coupled_steps=n_coupled_steps,
-            coupled_steps_in_memory=coupled_steps_in_memory,
-            n_initial_conditions=1,
+        InferenceConfig(
+            experiment_dir="test",
+            n_coupled_steps=3,
+            checkpoint_path="test.pt",
+            logging=MagicMock(),
+            initial_condition=MagicMock(),
+            forcing_loader=MagicMock(),
+            coupled_steps_in_memory=2,
         )
 
 

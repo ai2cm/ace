@@ -296,83 +296,20 @@ def _create_dataset_info_for_stepper(
     return dataset_info, mock_data
 
 
-@pytest.mark.parametrize(
-    ("n_coupled_steps", "coupled_steps_in_memory"),
-    [
-        (3, 2),
-        (5, 3),
-    ],
-)
-def test_evaluator_n_coupled_steps_divisible_by_coupled_steps_in_memory(
-    tmp_path: pathlib.Path,
-    n_coupled_steps: int,
-    coupled_steps_in_memory: int,
-    very_fast_only: bool,
-):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-
-    ocean_in_names = ["o_prog", "sst", "mask_0", "a_diag", "thetao_0"]
-    ocean_out_names = ["o_prog", "sst", "o_diag", "thetao_0"]
-    atmos_in_names = ["a_prog", "surface_temperature", "ocean_fraction"]
-    atmos_out_names = ["a_prog", "surface_temperature", "a_diag"]
-
-    stepper_data_dir = tmp_path / "stepper_data"
-    dataset_info, mock_data = _create_dataset_info_for_stepper(
-        ocean_in_names=ocean_in_names,
-        ocean_out_names=ocean_out_names,
-        atmos_in_names=atmos_in_names,
-        atmos_out_names=atmos_out_names,
-        n_coupled_steps=n_coupled_steps,
-        n_initial_conditions=1,
-        data_dir=stepper_data_dir,
-    )
-    checkpoint_path = save_coupled_stepper(
-        tmp_path,
-        ocean_in_names=ocean_in_names,
-        ocean_out_names=ocean_out_names,
-        atmos_in_names=atmos_in_names,
-        atmos_out_names=atmos_out_names,
-        dataset_info=dataset_info,
-        save_standalone_component_checkpoints=False,
-        ocean_timedelta=mock_data.ocean.timedelta,
-        atmosphere_timedelta=mock_data.atmosphere.timedelta,
-    )
-    inference_data_config = InferenceDataLoaderConfig(
-        dataset=CoupledDatasetWithOptionalOceanConfig(
-            ocean=XarrayDataConfig(data_path=mock_data.ocean.data_dir),
-            atmosphere=XarrayDataConfig(
-                data_path=mock_data.atmosphere.data_dir,
-            ),
-        ),
-        start_indices=InferenceInitialConditionIndices(
-            first=0, n_initial_conditions=1, interval=1
-        ),
-    )
+def test_evaluator_n_coupled_steps_divisible_by_coupled_steps_in_memory():
+    from unittest.mock import MagicMock
 
     with pytest.raises(
         ValueError,
         match="n_coupled_steps must be divisible by coupled_steps_in_memory",
     ):
         InferenceEvaluatorConfig(
-            experiment_dir=str(tmp_path),
-            n_coupled_steps=n_coupled_steps,
-            checkpoint_path=checkpoint_path,
-            logging=LoggingConfig(
-                log_to_screen=True, log_to_file=False, log_to_wandb=True
-            ),
-            loader=inference_data_config,
-            data_writer=CoupledDataWriterConfig(
-                ocean=DataWriterConfig(
-                    save_prediction_files=True,
-                    save_monthly_files=True,
-                ),
-                atmosphere=DataWriterConfig(
-                    save_prediction_files=True,
-                    save_monthly_files=True,
-                ),
-            ),
-            coupled_steps_in_memory=coupled_steps_in_memory,
+            experiment_dir="test",
+            n_coupled_steps=3,
+            checkpoint_path="test.pt",
+            logging=MagicMock(),
+            loader=MagicMock(),
+            coupled_steps_in_memory=2,
         )
 
 
