@@ -51,6 +51,7 @@ logging:
   log_to_file: true
   project: ace-samudra-coupled-cm4
   entity: ai2cm
+  metrics_log_dir: /results/metrics
 train_loader:
   batch_size: 16
   num_data_workers: 2
