@@ -29,10 +29,11 @@ gantry run \
     --task-name $JOB_NAME \
     --description 'Run coupled prediction loader eval' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-    --workspace ai2/climate-titan \
-    --priority urgent \
+    --workspace ai2/ace \
+    --priority high \
     --not-preemptible \
-    --cluster titan \
+    --cluster jupiter \
+    --cluster ceres \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
     --env WANDB_JOB_TYPE=inference \
