@@ -1,4 +1,5 @@
 resume_results_dir: /previous_results
+resume_wandb: false
 static_inputs:
   HGTsfc: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
 log_loss_vs_noise: true
