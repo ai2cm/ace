@@ -1606,6 +1606,7 @@ class TrainStepper(
                     "data requirements are retrieved, so this is a bug."
                 )
             n_forward_steps = stochastic_n_forward_steps
+        per_channel_sum: dict[str, torch.Tensor] | None = None
         for step in range(n_forward_steps):
             optimize_step = (
                 step == n_forward_steps - 1 or not self._config.optimize_last_step_only
@@ -1626,10 +1627,22 @@ class TrainStepper(
                         for k, v in target_data.data.items()
                     }
                 )
-                step_loss = self._loss_obj(gen_step, target_step, step=step)
-                metrics[f"loss_step_{step}"] = step_loss.detach()
+                step_loss = self._loss_obj(
+                    gen_step, target_step, step=step, reduce=False
+                )
+                step_total_loss = step_loss.sum()
+                metrics[f"loss_step_{step}"] = step_total_loss.detach()
+                per_ch = self._loss_obj.loss.packer.unpack(step_loss.detach(), axis=0)
+                if per_channel_sum is None:
+                    per_channel_sum = {k: v.clone() for k, v in per_ch.items()}
+                else:
+                    for k in per_channel_sum:
+                        per_channel_sum[k] = per_channel_sum[k] + per_ch[k]
             if optimize_step:
-                optimization.accumulate_loss(step_loss)
+                optimization.accumulate_loss(step_total_loss)
+        if per_channel_sum is not None:
+            for k, v in per_channel_sum.items():
+                metrics[f"loss/{k}"] = v.detach()
         return output_list
 
     def update_training_history(self, training_job: TrainingJob) -> None:
