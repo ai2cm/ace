@@ -240,6 +240,23 @@ class DatasetInfo:
             all_labels=self._all_labels,
         )
 
+    def update_vertical_coordinate(
+        self, vertical_coordinate: VerticalCoordinate
+    ) -> "DatasetInfo":
+        """
+        Return a new DatasetInfo with the vertical coordinate replaced.
+        """
+        return DatasetInfo(
+            horizontal_coordinates=self._horizontal_coordinates,
+            vertical_coordinate=vertical_coordinate,
+            mask_provider=self._mask_provider,
+            timestep=self._timestep,
+            variable_metadata=self._variable_metadata,
+            gridded_operations=self._gridded_operations,
+            img_shape=self._img_shape,
+            all_labels=self._all_labels,
+        )
+
     def get_state(self) -> dict[str, Any]:
         if self._gridded_operations is not None:
             gridded_operations = self._gridded_operations.get_state()

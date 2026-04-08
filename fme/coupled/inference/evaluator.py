@@ -182,6 +182,10 @@ class InferenceEvaluatorConfig:
         prediction_loader: Configuration for prediction data to evaluate. If given,
             model evaluation will not run, and instead predictions will be evaluated.
             Model checkpoint will still be used to determine inputs and outputs.
+        use_dataset_vertical_coordinate: If True, override the vertical
+            coordinate stored in the checkpoint with the one constructed from
+            the inference dataset. Useful when the dataset has been updated
+            (e.g. to include ``deptho``) after the checkpoint was trained.
     """
 
     experiment_dir: str
@@ -197,6 +201,7 @@ class InferenceEvaluatorConfig:
         default_factory=lambda: InferenceEvaluatorAggregatorConfig()
     )
     prediction_loader: InferenceDataLoaderConfig | None = None
+    use_dataset_vertical_coordinate: bool = False
 
     def __post_init__(self):
         _validate_coupled_steps_config(
@@ -336,6 +341,15 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         dataset_info=stepper.training_dataset_info,
     )
     stepper.set_eval()
+
+    if config.use_dataset_vertical_coordinate:
+        logging.info("Overriding checkpoint vertical coordinates with dataset values")
+        stepper.ocean.update_vertical_coordinate(
+            data.ocean_properties.vertical_coordinate
+        )
+        stepper.atmosphere.update_vertical_coordinate(
+            data.atmosphere_properties.vertical_coordinate
+        )
 
     aggregator_config: InferenceEvaluatorAggregatorConfig = config.aggregator
     batch = next(iter(data.loader))

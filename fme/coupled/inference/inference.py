@@ -122,6 +122,10 @@ class InferenceConfig:
         data_writer: Configuration for data writers.
         aggregator: Configuration for inference aggregator.
         n_ensemble_per_ic: Number of ensemble members per initial condition
+        use_dataset_vertical_coordinate: If True, override the vertical
+            coordinate stored in the checkpoint with the one constructed from
+            the forcing dataset. Useful when the dataset has been updated
+            (e.g. to include ``deptho``) after the checkpoint was trained.
     """
 
     experiment_dir: str
@@ -138,6 +142,7 @@ class InferenceConfig:
         default_factory=lambda: InferenceAggregatorConfig()
     )
     n_ensemble_per_ic: int = 1
+    use_dataset_vertical_coordinate: bool = False
 
     def __post_init__(self):
         _validate_coupled_steps_config(
@@ -247,6 +252,15 @@ def run_inference_from_config(config: InferenceConfig):
         initial_condition=initial_condition,
         dataset_info=stepper.training_dataset_info,
     )
+
+    if config.use_dataset_vertical_coordinate:
+        logging.info("Overriding checkpoint vertical coordinates with dataset values")
+        stepper.ocean.update_vertical_coordinate(
+            data.ocean_properties.vertical_coordinate
+        )
+        stepper.atmosphere.update_vertical_coordinate(
+            data.atmosphere_properties.vertical_coordinate
+        )
 
     aggregator_config: InferenceAggregatorConfig = config.aggregator
     variable_metadata = get_derived_variable_metadata() | data.variable_metadata
