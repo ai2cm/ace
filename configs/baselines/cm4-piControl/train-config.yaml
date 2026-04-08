@@ -441,7 +441,7 @@ stepper:
           ocean:
             surface_temperature_name: surface_temperature
             ocean_fraction_name: ocean_fraction
-            interpolate: false
+            interpolate: true
           corrector:
             conserve_dry_air: true
             moisture_budget_correction: advection_and_precipitation
@@ -466,6 +466,7 @@ stepper:
             - DSWRFtoa
           in_names:
             - land_fraction
+            - lake_fraction
             - ocean_fraction
             - sea_ice_fraction
             - DSWRFtoa
@@ -559,6 +560,5 @@ stepper:
             - tendency_of_total_water_path_due_to_advection
             - TMP850
             - h500
-            # ocean coupling variables (diagnostic for now)
             - eastward_surface_wind_stress
             - northward_surface_wind_stress

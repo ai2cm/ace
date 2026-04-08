@@ -10,7 +10,7 @@ CONFIG_PATH="${SCRIPT_PATH}${CONFIG_FILENAME}"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=4
-STATS_DATA=jamesd/2025-07-11-cm4-piControl-200yr-coupled-stats-atmosphere
+STATS_DATA=jamesd/2025-06-03-cm4-piControl-200yr-coupled-stats-atmosphere
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
