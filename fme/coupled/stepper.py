@@ -936,9 +936,8 @@ class CoupledStepper:
 
         Args:
             atmos_data: Atmosphere batch data, including initial condition and forward
-                steps. May be broadcasted for ensemble training.
-            ocean_ic: Ocean initial condition state, including SST. Should be
-                broadcasted to match atmosphere batch size if ensemble training.
+                steps.
+            ocean_ic: Ocean initial condition state, including SST.
         """
         time_dim = self.atmosphere.TIME_DIM
         sizes = [-1] * len(next(iter(atmos_data.values())).shape)
