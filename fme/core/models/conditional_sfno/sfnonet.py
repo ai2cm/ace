@@ -14,8 +14,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import dataclasses
 import math
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Callable, Tuple
 
 import torch
 import torch.nn as nn
@@ -39,8 +40,78 @@ from .layers import (
     DropPath,
 )
 from .lora import LoRAConv2d
-from .s2convolutions import SpectralAttentionS2, SpectralConvS2
+from .s2convolutions import SpectralConvS2
 from .makani.spectral_convolution import SpectralConv
+
+
+@dataclasses.dataclass
+class SFNONetConfig:
+    """Configuration parameters for SphericalFourierNeuralOperatorNet.
+
+    Attributes:
+        embed_dim: Dimension of the embeddings.
+        filter_type: Type of spectral filter to use ('linear', 'makani-linear',
+            'local').
+        scale_factor: Scale factor for input/output resolution. Must be 1
+            (other values are not implemented for conditional layer norm).
+        global_layer_norm: Whether to reduce along the spatial domain when
+            applying layer normalization.
+        num_layers: Number of Fourier Neural Operator blocks.
+        use_mlp: Whether to use an MLP in each FNO block.
+        mlp_ratio: Ratio of MLP hidden dimension to the embedding dimension.
+        activation_function: Activation function name ('relu', 'gelu', 'silu').
+        encoder_layers: Number of convolutional layers in the encoder/decoder.
+        pos_embed: Whether to use a learned positional embedding.
+        drop_rate: Dropout rate.
+        drop_path_rate: Stochastic depth rate (drop path).
+        hard_thresholding_fraction: Fraction of spectral modes to retain.
+        big_skip: Whether to use a big skip connection from input to decoder.
+        checkpointing: Gradient checkpointing level (0=none, 1=encoder/decoder,
+            3=all blocks).
+        filter_num_groups: Number of groups in grouped spectral convolutions.
+        filter_residual: Whether to filter residual connections through a
+            SHT round-trip.
+        filter_output: Whether to filter the output through a SHT round-trip.
+        local_blocks: List of block indices to use local (DISCO) filters
+            instead of spectral filters.
+        normalize_big_skip: Whether to normalize the big skip connection.
+        affine_norms: Whether to use element-wise affine parameters in the
+            normalization layers.
+        lora_rank: Rank of LoRA adaptations outside spectral convolutions.
+            0 disables LoRA.
+        lora_alpha: Strength of LoRA adaptations outside spectral convolutions.
+            Defaults to lora_rank if None.
+        spectral_lora_rank: Rank of LoRA adaptations for spectral convolutions.
+            0 disables LoRA.
+        spectral_lora_alpha: Strength of LoRA adaptations for spectral
+            convolutions. Defaults to spectral_lora_rank if None.
+    """
+
+    embed_dim: int = 256
+    filter_type: str = "linear"
+    scale_factor: int = 1
+    global_layer_norm: bool = False
+    num_layers: int = 12
+    use_mlp: bool = True
+    mlp_ratio: float = 2.0
+    activation_function: str = "gelu"
+    encoder_layers: int = 1
+    pos_embed: bool = True
+    drop_rate: float = 0.0
+    drop_path_rate: float = 0.0
+    hard_thresholding_fraction: float = 1.0
+    big_skip: bool = True
+    checkpointing: int = 0
+    filter_num_groups: int = 1
+    filter_residual: bool = False
+    filter_output: bool = False
+    local_blocks: list[int] | None = None
+    normalize_big_skip: bool = False
+    affine_norms: bool = False
+    lora_rank: int = 0
+    lora_alpha: float | None = None
+    spectral_lora_rank: int = 0
+    spectral_lora_alpha: float | None = None
 
 
 # heuristic for finding theta_cutoff
@@ -79,17 +150,6 @@ class SpectralFilterLayer(nn.Module):
         inverse_transform,
         embed_dim,
         filter_type="linear",
-        operator_type="block-diagonal",
-        sparsity_threshold=0.0,
-        use_complex_kernels=True,
-        hidden_size_factor=1,
-        rank=1.0,
-        factorization=None,
-        separable=False,
-        complex_network=True,
-        complex_activation="real",
-        spectral_layers=1,
-        drop_rate=0.0,
         num_groups=1,
         filter_residual=False,
         lora_rank: int = 0,
@@ -110,12 +170,7 @@ class SpectralFilterLayer(nn.Module):
                 inverse_transform,
                 embed_dim,
                 embed_dim,
-                operator_type=operator_type,
-                rank=rank,
-                factorization=factorization,
-                separable=separable,
                 bias=True,
-                use_tensorly=False if factorization is None else True,
                 filter_residual=filter_residual,
                 lora_rank=lora_rank,
                 lora_alpha=lora_alpha,
@@ -172,24 +227,15 @@ class FourierNeuralOperatorBlock(nn.Module):
         img_shape: Tuple[int, int],
         context_config: ContextConfig,
         filter_type="linear",
-        operator_type="diagonal",
         global_layer_norm: bool = False,
         mlp_ratio=2.0,
         drop_rate=0.0,
         drop_path=0.0,
         act_layer=nn.GELU,
-        sparsity_threshold=0.0,
-        use_complex_kernels=True,
-        rank=1.0,
-        factorization=None,
-        separable=False,
         inner_skip="linear",
         outer_skip=None,  # None, nn.linear or nn.Identity
         concat_skip=False,
         use_mlp=False,
-        complex_network=True,
-        complex_activation="real",
-        spectral_layers=1,
         checkpointing=0,
         filter_residual=False,
         affine_norms=False,
@@ -219,17 +265,6 @@ class FourierNeuralOperatorBlock(nn.Module):
             inverse_transform,
             embed_dim,
             filter_type,
-            operator_type,
-            sparsity_threshold,
-            use_complex_kernels=use_complex_kernels,
-            hidden_size_factor=mlp_ratio,
-            rank=rank,
-            factorization=factorization,
-            separable=separable,
-            complex_network=complex_network,
-            complex_activation=complex_activation,
-            spectral_layers=spectral_layers,
-            drop_rate=drop_rate,
             filter_residual=filter_residual,
             num_groups=filter_num_groups,
             lora_rank=spectral_lora_rank,
@@ -357,10 +392,11 @@ class NoLayerNorm(nn.Module):
 
 
 def get_lat_lon_sfnonet(
-    params,
+    params: SFNONetConfig,
     in_chans: int,
     out_chans: int,
     img_shape: Tuple[int, int],
+    data_grid: str = "equiangular",
     context_config: ContextConfig = ContextConfig(
         embed_dim_scalar=0,
         embed_dim_noise=0,
@@ -369,14 +405,8 @@ def get_lat_lon_sfnonet(
     ),
 ) -> "SphericalFourierNeuralOperatorNet":
     h, w = img_shape
-    hard_thresholding_fraction = (
-        params.hard_thresholding_fraction
-        if hasattr(params, "hard_thresholding_fraction")
-        else 1.0
-    )
-    modes_lat = int(h * hard_thresholding_fraction)
-    modes_lon = int((w // 2 + 1) * hard_thresholding_fraction)
-    data_grid = params.data_grid if hasattr(params, "data_grid") else "equiangular"
+    modes_lat = int(h * params.hard_thresholding_fraction)
+    modes_lon = int((w // 2 + 1) * params.hard_thresholding_fraction)
 
     dist = Distributed.get_instance()
 
@@ -413,294 +443,80 @@ def get_lat_lon_sfnonet(
 
 
 class SphericalFourierNeuralOperatorNet(torch.nn.Module):
-    """
-    Spherical Fourier Neural Operator Network
+    """Spherical Fourier Neural Operator Network.
 
-    Parameters
-    ----------
-    params : dict
-        Dictionary of parameters
-    img_shape : tuple
-        Shape of the input channels, by default (721, 1440)
-    get_pos_embed : Callable
-        Function to get the positional embedding
-    trans_down : nn.Module
-        Transform from input space to spectral space
-    itrans_up : nn.Module
-        Transform from spectral space to output space
-    trans : nn.Module
-        Transform from intermediate data space to spectral space
-    itrans : nn.Module
-        Transform from spectral space to intermediate data space
-    filter_type : str, optional
-        Type of filter to use ('linear', 'non-linear'), by default "non-linear"
-    operator_type : str, optional
-        Type of operator to use ('diaginal', 'dhconv'), by default "diagonal"
-    scale_factor : int, optional
-        Scale factor to use, by default 16
-    in_chans : int, optional
-        Number of input channels, by default 2
-    out_chans : int, optional
-        Number of output channels, by default 2
-    embed_dim : int, optional
-        Dimension of the embeddings, by default 256
-    context_config : ContextConfig, optional
-        Context configuration, by default
-        ContextConfig(embed_dim_scalar=0, embed_dim_2d=0)
-    num_layers : int, optional
-        Number of layers in the network, by default 12
-    use_mlp : int, optional
-        Whether to use MLP, by default True
-    mlp_ratio : int, optional
-        Ratio of MLP to use, by default 2.0
-    activation_function : str, optional
-        Activation function to use, by default "gelu"
-    encoder_layers : int, optional
-        Number of layers in the encoder, by default 1
-    pos_embed : bool, optional
-        Whether to use positional embedding, by default True
-    drop_rate : float, optional
-        Dropout rate, by default 0.0
-    drop_path_rate : float, optional
-        Dropout path rate, by default 0.0
-    num_blocks : int, optional
-        Number of blocks in the network, by default 16
-    sparsity_threshold : float, optional
-        Threshold for sparsity, by default 0.0
-    hard_thresholding_fraction : float, optional
-        Fraction of hard thresholding to apply, by default 1.0
-    use_complex_kernels : bool, optional
-        Whether to use complex kernels, by default True
-    big_skip : bool, optional
-        Whether to use big skip connections, by default True
-    rank : float, optional
-        Rank of the approximation, by default 1.0
-    factorization : Any, optional
-        Type of factorization to use, by default None
-    separable : bool, optional
-        Whether to use separable convolutions, by default False
-    complex_network : bool, optional
-        Whether to use a complex network architecture, by default True
-    complex_activation : str, optional
-        Type of complex activation function to use, by default "real"
-    spectral_layers : int, optional
-        Number of spectral layers, by default 3
-    checkpointing : int, optional
-        Number of checkpointing segments, by default 0
-    local_blocks: List[int], optional
-        List of blocks to use local filters, by default []
-    normalize_big_skip: bool, optional
-        Whether to normalize the big_skip connection, by default False
-    affine_norms: bool, optional
-        Whether to use element-wise affine parameters in the normalization layers,
-        by default False.
-
-    Example:
-    --------
-    >>> from modulus.models.sfno.sfnonet import SphericalFourierNeuralOperatorNet as SFNO
-    >>> model = SFNO(
-    ...         params={},
-    ...         img_shape=(8, 16),
-    ...         scale_factor=4,
-    ...         in_chans=2,
-    ...         out_chans=2,
-    ...         embed_dim=16,
-    ...         num_layers=2,
-    ...         encoder_layers=1,
-    ...         num_blocks=4,
-    ...         spectral_layers=2,
-    ...         use_mlp=True,)
-    >>> model(torch.randn(1, 2, 8, 16)).shape
-    torch.Size([1, 2, 8, 16])
+    Args:
+        params: Model configuration. See ``SFNONetConfig`` for details.
+        img_shape: Spatial dimensions (lat, lon) of the input data.
+        get_pos_embed: Factory function that returns a learned positional
+            embedding parameter.
+        trans_down: Spherical harmonic transform from input grid to spectral
+            space (used for the first layer).
+        itrans_up: Inverse spherical harmonic transform from spectral space
+            to the output grid (used for the last layer).
+        trans: Spherical harmonic transform for intermediate layers.
+        itrans: Inverse spherical harmonic transform for intermediate layers.
+        in_chans: Number of input channels.
+        out_chans: Number of output channels.
+        context_config: Configuration for conditional context embeddings
+            (scalar, noise, positional, labels).
     """
 
     def __init__(
         self,
-        params,
+        params: SFNONetConfig,
         img_shape: Tuple[int, int],
         get_pos_embed: Callable[[], nn.Parameter],
         trans_down: nn.Module,
         itrans_up: nn.Module,
         trans: nn.Module,
         itrans: nn.Module,
-        filter_type: str = "linear",
-        operator_type: str = "diagonal",
-        scale_factor: int = 1,
-        in_chans: int = 2,
-        out_chans: int = 2,
-        embed_dim: int = 256,
+        in_chans: int,
+        out_chans: int,
         context_config: ContextConfig = ContextConfig(
             embed_dim_scalar=0,
             embed_dim_labels=0,
             embed_dim_noise=0,
             embed_dim_pos=0,
         ),
-        global_layer_norm: bool = False,
-        num_layers: int = 12,
-        use_mlp: int = True,
-        mlp_ratio: float = 2.0,
-        activation_function: str = "gelu",
-        encoder_layers: int = 1,
-        pos_embed: bool = True,
-        drop_rate: float = 0.0,
-        drop_path_rate: float = 0.0,
-        num_blocks: int = 16,
-        sparsity_threshold: float = 0.0,
-        hard_thresholding_fraction: float = 1.0,
-        use_complex_kernels: bool = True,
-        big_skip: bool = True,
-        rank: float = 1.0,
-        factorization: Any = None,
-        separable: bool = False,
-        complex_network: bool = True,
-        complex_activation: str = "real",
-        spectral_layers: int = 3,
-        checkpointing: int = 0,
-        filter_num_groups: int = 1,
-        filter_residual: bool = False,
-        filter_output: bool = False,
-        local_blocks: Optional[List[int]] = None,
-        normalize_big_skip: bool = False,
-        affine_norms: bool = False,
-        lora_rank: int = 0,
-        lora_alpha: float | None = None,
-        spectral_lora_rank: int = 0,
-        spectral_lora_alpha: float | None = None,
     ):
         super(SphericalFourierNeuralOperatorNet, self).__init__()
 
-        self.params = params
-        self.filter_type = (
-            params.filter_type if hasattr(params, "filter_type") else filter_type
-        )
-        self.filter_residual = (
-            params.filter_residual
-            if hasattr(params, "filter_residual")
-            else filter_residual
-        )
-        self.filter_output = (
-            params.filter_output if hasattr(params, "filter_output") else filter_output
-        )
-        self.mlp_ratio = params.mlp_ratio if hasattr(params, "mlp_ratio") else mlp_ratio
-        self.operator_type = (
-            params.operator_type if hasattr(params, "operator_type") else operator_type
-        )
-        self.img_shape = (
-            (params.img_shape_x, params.img_shape_y)
-            if hasattr(params, "img_shape_x") and hasattr(params, "img_shape_y")
-            else img_shape
-        )
+        self.filter_type = params.filter_type
+        self.filter_residual = params.filter_residual
+        self.filter_output = params.filter_output
+        self.mlp_ratio = params.mlp_ratio
+        self.img_shape = img_shape
         self._spatial_h_slice, self._spatial_w_slice = (
             Distributed.get_instance().get_local_slices(self.img_shape)
         )
-        self.scale_factor = (
-            params.scale_factor if hasattr(params, "scale_factor") else scale_factor
-        )
-        if self.scale_factor != 1:
+        if params.scale_factor != 1:
             raise NotImplementedError(
                 "scale factor must be 1 as it is not implemented for "
                 "conditional layer normalization"
             )
-        self.global_layer_norm = (
-            params.global_layer_norm
-            if hasattr(params, "global_layer_norm")
-            else global_layer_norm
-        )
-        self.in_chans = (
-            params.N_in_channels if hasattr(params, "N_in_channels") else in_chans
-        )
-        self.out_chans = (
-            params.N_out_channels if hasattr(params, "N_out_channels") else out_chans
-        )
-        self.embed_dim = self.num_features = (
-            params.embed_dim if hasattr(params, "embed_dim") else embed_dim
-        )
-        self.num_layers = (
-            params.num_layers if hasattr(params, "num_layers") else num_layers
-        )
-        self.num_blocks = (
-            params.num_blocks if hasattr(params, "num_blocks") else num_blocks
-        )
-        self.hard_thresholding_fraction = (
-            params.hard_thresholding_fraction
-            if hasattr(params, "hard_thresholding_fraction")
-            else hard_thresholding_fraction
-        )
-        self.use_mlp = params.use_mlp if hasattr(params, "use_mlp") else use_mlp
-        self.activation_function = (
-            params.activation_function
-            if hasattr(params, "activation_function")
-            else activation_function
-        )
-        self.encoder_layers = (
-            params.encoder_layers
-            if hasattr(params, "encoder_layers")
-            else encoder_layers
-        )
-        self._use_pos_embed = (
-            params.pos_embed if hasattr(params, "pos_embed") else pos_embed
-        )
-        self.big_skip = params.big_skip if hasattr(params, "big_skip") else big_skip
-        self.rank = params.rank if hasattr(params, "rank") else rank
-        self.factorization = (
-            params.factorization if hasattr(params, "factorization") else factorization
-        )
-        self.separable = params.separable if hasattr(params, "separable") else separable
-        self.complex_network = (
-            params.complex_network
-            if hasattr(params, "complex_network")
-            else complex_network
-        )
-        self.complex_activation = (
-            params.complex_activation
-            if hasattr(params, "complex_activation")
-            else complex_activation
-        )
-        self.spectral_layers = (
-            params.spectral_layers
-            if hasattr(params, "spectral_layers")
-            else spectral_layers
-        )
-        self.checkpointing = (
-            params.checkpointing if hasattr(params, "checkpointing") else checkpointing
-        )
-        local_blocks = (
-            params.local_blocks if hasattr(params, "local_blocks") else local_blocks
-        )
-        if local_blocks is not None:
-            self.local_blocks = [i for i in range(self.num_layers) if i in local_blocks]
+        self.global_layer_norm = params.global_layer_norm
+        self.in_chans = in_chans
+        self.out_chans = out_chans
+        self.embed_dim = params.embed_dim
+        self.num_layers = params.num_layers
+        self.use_mlp = params.use_mlp
+        self.encoder_layers = params.encoder_layers
+        self._use_pos_embed = params.pos_embed
+        self.big_skip = params.big_skip
+        self.checkpointing = params.checkpointing
+        if params.local_blocks is not None:
+            self.local_blocks = [
+                i for i in range(self.num_layers) if i in params.local_blocks
+            ]
         else:
             self.local_blocks = []
-        normalize_big_skip = (
-            params.normalize_big_skip
-            if hasattr(params, "normalize_big_skip")
-            else normalize_big_skip
-        )
-        self.affine_norms = (
-            params.affine_norms if hasattr(params, "affine_norms") else affine_norms
-        )
-        self.filter_num_groups = (
-            params.filter_num_groups
-            if hasattr(params, "filter_num_groups")
-            else filter_num_groups
-        )
-        self.lora_rank = params.lora_rank if hasattr(params, "lora_rank") else lora_rank
-        self.lora_alpha = (
-            params.lora_alpha if hasattr(params, "lora_alpha") else lora_alpha
-        )
-        self.spectral_lora_rank = (
-            params.spectral_lora_rank
-            if hasattr(params, "spectral_lora_rank")
-            else spectral_lora_rank
-        )
-        self.spectral_lora_alpha = (
-            params.spectral_lora_alpha
-            if hasattr(params, "spectral_lora_alpha")
-            else spectral_lora_alpha
-        )
-
-        # no global padding because we removed the horizontal distributed code
-        self.padding = (0, 0)
+        self.affine_norms = params.affine_norms
+        self.filter_num_groups = params.filter_num_groups
+        self.lora_rank = params.lora_rank
+        self.lora_alpha = params.lora_alpha
+        self.spectral_lora_rank = params.spectral_lora_rank
+        self.spectral_lora_alpha = params.spectral_lora_alpha
 
         self.trans_down = trans_down
         self.itrans_up = itrans_up
@@ -722,14 +538,12 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             self.filter_output_up = nn.Identity()
 
         # determine activation function
-        if self.activation_function == "relu":
-            self.activation_function = nn.ReLU
-        elif self.activation_function == "gelu":
-            self.activation_function = nn.GELU
-        elif self.activation_function == "silu":
-            self.activation_function = nn.SiLU
-        else:
-            raise ValueError(f"Unknown activation function {self.activation_function}")
+        activation_functions = {"relu": nn.ReLU, "gelu": nn.GELU, "silu": nn.SiLU}
+        if params.activation_function not in activation_functions:
+            raise ValueError(
+                f"Unknown activation function {params.activation_function}"
+            )
+        act_layer = activation_functions[params.activation_function]
 
         # encoder
         encoder_hidden_dim = self.embed_dim
@@ -746,7 +560,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                     lora_alpha=self.lora_alpha,
                 )
             )
-            encoder_modules.append(self.activation_function())
+            encoder_modules.append(act_layer())
             current_dim = encoder_hidden_dim
         encoder_modules.append(
             LoRAConv2d(
@@ -761,8 +575,12 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         self.encoder = nn.Sequential(*encoder_modules)
 
         # dropout
-        self.pos_drop = nn.Dropout(p=drop_rate) if drop_rate > 0.0 else nn.Identity()
-        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, self.num_layers)]
+        self.pos_drop = (
+            nn.Dropout(p=params.drop_rate) if params.drop_rate > 0.0 else nn.Identity()
+        )
+        dpr = [
+            x.item() for x in torch.linspace(0, params.drop_path_rate, self.num_layers)
+        ]
 
         # FNO blocks
         self.blocks = nn.ModuleList([])
@@ -788,23 +606,14 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                 img_shape=self.img_shape,
                 context_config=context_config,
                 filter_type=block_filter_type,
-                operator_type=self.operator_type,
-                mlp_ratio=self.mlp_ratio,
-                drop_rate=drop_rate,
-                drop_path=dpr[i],
-                act_layer=self.activation_function,
-                sparsity_threshold=sparsity_threshold,
                 global_layer_norm=self.global_layer_norm,
-                use_complex_kernels=use_complex_kernels,
+                mlp_ratio=self.mlp_ratio,
+                drop_rate=params.drop_rate,
+                drop_path=dpr[i],
+                act_layer=act_layer,
                 inner_skip=inner_skip,
                 outer_skip=outer_skip,
                 use_mlp=self.use_mlp,
-                rank=self.rank,
-                factorization=self.factorization,
-                separable=self.separable,
-                complex_network=self.complex_network,
-                complex_activation=self.complex_activation,
-                spectral_layers=self.spectral_layers,
                 checkpointing=self.checkpointing,
                 filter_residual=self.filter_residual,
                 affine_norms=self.affine_norms,
@@ -832,7 +641,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                     lora_alpha=self.lora_alpha,
                 )
             )
-            decoder_modules.append(self.activation_function())
+            decoder_modules.append(act_layer())
             current_dim = decoder_hidden_dim
         decoder_modules.append(
             LoRAConv2d(
@@ -852,7 +661,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         else:
             self.pos_embed = None
 
-        if normalize_big_skip:
+        if params.normalize_big_skip:
             self.norm_big_skip = ConditionalLayerNorm(
                 in_chans,
                 img_shape=self.img_shape,

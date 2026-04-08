@@ -202,6 +202,7 @@ def test_map_aggregator(n_steps: int):
     aggregator.get_wandb()
 
 
+@pytest.mark.parallel
 @pytest.mark.parametrize("prefix", ["train", "validation"])
 def test_loss_vs_noise_aggregator_get_wandb(prefix: str):
     aggregator = LossVsNoiseAggregator(n_bins=8)
@@ -209,22 +210,22 @@ def test_loss_vs_noise_aggregator_get_wandb(prefix: str):
         prediction={},
         target={},
         latent_steps=[],
-        loss=torch.tensor(0.0),
-        sigma=torch.tensor([0.1, 1.0]),
+        loss=torch.tensor(0.0, device=get_device()),
+        sigma=torch.tensor([0.1, 1.0], device=get_device()),
         per_sample_channel_loss={
-            "x": torch.tensor([1.0, 2.0]),
-            "y": torch.tensor([2.0, 4.0]),
+            "x": torch.tensor([1.0, 2.0], device=get_device()),
+            "y": torch.tensor([2.0, 4.0], device=get_device()),
         },
     )
     outputs_b = ModelOutputs(
         prediction={},
         target={},
         latent_steps=[],
-        loss=torch.tensor(0.0),
-        sigma=torch.tensor([10.0]),
+        loss=torch.tensor(0.0, device=get_device()),
+        sigma=torch.tensor([10.0], device=get_device()),
         per_sample_channel_loss={
-            "x": torch.tensor([3.0]),
-            "y": torch.tensor([6.0]),
+            "x": torch.tensor([3.0], device=get_device()),
+            "y": torch.tensor([6.0], device=get_device()),
         },
     )
     aggregator.record_batch(outputs_a)
@@ -237,7 +238,7 @@ def test_loss_vs_noise_aggregator_get_wandb(prefix: str):
 
     logs = aggregator.get_wandb(prefix=prefix)
     assert set(logs.keys()) == {
-        f"{prefix}/metrics/loss_vs_noise/channel_mean",
+        f"{prefix}/metrics/loss_vs_noise/all_channels",
         f"{prefix}/metrics/loss_vs_noise/x",
         f"{prefix}/metrics/loss_vs_noise/y",
     }

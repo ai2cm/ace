@@ -6,7 +6,6 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import wandb
 import xarray as xr
 
 from fme.ace.aggregator.one_step.snapshot import (
@@ -73,12 +72,14 @@ class LossVsNoiseAggregator:
         self._n_bins = n_bins
         self._log10_sigma_min = log10_sigma_min
         self._log10_sigma_max = log10_sigma_max
-        edges = torch.linspace(log10_sigma_min, log10_sigma_max, n_bins + 1)
+        edges = torch.linspace(
+            log10_sigma_min, log10_sigma_max, n_bins + 1, device=get_device()
+        )
         self._inner_edges = edges[1:-1]
-        self._bin_centers = ((edges[:-1] + edges[1:]) / 2).numpy()
+        self._bin_centers = ((edges[:-1] + edges[1:]) / 2).cpu().numpy()
 
-        self._total_sum = torch.zeros(n_bins, dtype=torch.float32)
-        self._total_count = torch.zeros(n_bins, dtype=torch.int64)
+        self._total_sum = torch.zeros(n_bins, dtype=torch.float32, device=get_device())
+        self._total_count = torch.zeros(n_bins, dtype=torch.int64, device=get_device())
         self._channel_sum: dict[str, torch.Tensor] = {}
         self._channel_count: dict[str, torch.Tensor] = {}
 
@@ -86,8 +87,12 @@ class LossVsNoiseAggregator:
         self, values: torch.Tensor, bin_indices: torch.Tensor, name: str
     ) -> None:
         if name not in self._channel_sum:
-            self._channel_sum[name] = torch.zeros(self._n_bins, dtype=torch.float32)
-            self._channel_count[name] = torch.zeros(self._n_bins, dtype=torch.int64)
+            self._channel_sum[name] = torch.zeros(
+                self._n_bins, dtype=torch.float32, device=get_device()
+            )
+            self._channel_count[name] = torch.zeros(
+                self._n_bins, dtype=torch.int64, device=get_device()
+            )
         self._channel_sum[name].scatter_add_(0, bin_indices, values.to(torch.float32))
         self._channel_count[name].scatter_add_(
             0, bin_indices, torch.ones_like(bin_indices, dtype=torch.int64)
@@ -98,7 +103,7 @@ class LossVsNoiseAggregator:
         if outputs.sigma is None or not outputs.per_sample_channel_loss:
             return
 
-        sigma = outputs.sigma.detach().flatten().cpu()
+        sigma = outputs.sigma.detach().flatten()
         if torch.any(sigma <= 0):
             raise ValueError("Sigma must be strictly positive for log10 binning")
         log_sigma = torch.log10(sigma)
@@ -112,7 +117,7 @@ class LossVsNoiseAggregator:
 
         per_channel: TensorDict = {}
         for name, loss in outputs.per_sample_channel_loss.items():
-            channel_loss = loss.detach().flatten().cpu()
+            channel_loss = loss.detach().flatten()
             if channel_loss.shape != sigma.shape:
                 raise ValueError(
                     "Expected per-sample channel losses and sigma to share batch shape"
@@ -129,6 +134,7 @@ class LossVsNoiseAggregator:
             self._accumulate(values=values, bin_indices=bin_indices, name=name)
 
     def _plot_binned(self, y_values: np.ndarray, counts: np.ndarray, title: str) -> Any:
+        wandb = WandB.get_instance()
         fig, ax = plt.subplots()
         mask = counts > 0
         ax.plot(
@@ -163,43 +169,55 @@ class LossVsNoiseAggregator:
         plt.close(fig)
         return image
 
-    def get_wandb(self, prefix: str = "") -> Mapping[str, Any]:
-        prefix = ensure_trailing_slash(prefix)
+    def _get(self):
+        means, counts = {}, {}
+
         total_sum = self._dist.reduce_sum(self._total_sum)
         total_count = self._dist.reduce_sum(self._total_count)
         if total_sum is None or total_count is None:
             return {}
-        if torch.sum(total_count) == 0:
-            return {}
+        total_sum = total_sum.cpu().numpy()
+        total_count = total_count.cpu().numpy()
 
-        ret: dict[str, Any] = {}
-        total_count_np = total_count.numpy()
         total_mean = np.divide(
-            total_sum.numpy(),
-            total_count_np,
-            out=np.zeros_like(total_sum.numpy()),
-            where=total_count_np > 0,
+            total_sum,
+            total_count,
+            out=np.zeros_like(total_sum),
+            where=total_count > 0,
         )
-        ret[f"{prefix}{self._name}channel_mean"] = self._plot_binned(
-            y_values=total_mean,
-            counts=total_count_np,
-            title="Channel-mean weighted loss vs noise",
-        )
+
+        means["all_channels"] = total_mean
+        counts["all_channels"] = total_count
+
         for name in sorted(self._channel_sum):
             ch_sum = self._dist.reduce_sum(self._channel_sum[name])
             ch_count = self._dist.reduce_sum(self._channel_count[name])
             if ch_sum is None or ch_count is None:
                 continue
-            ch_count_np = ch_count.numpy()
-            mean = np.divide(
-                ch_sum.numpy(),
-                ch_count_np,
-                out=np.zeros_like(ch_sum.numpy()),
-                where=ch_count_np > 0,
+            ch_sum = ch_sum.cpu().numpy()
+            ch_count = ch_count.cpu().numpy()
+            ch_mean = np.divide(
+                ch_sum,
+                ch_count,
+                out=np.zeros_like(ch_sum),
+                where=ch_count > 0,
             )
+            means[name] = ch_mean
+            counts[name] = ch_count
+
+        return means, counts
+
+    def get_wandb(self, prefix: str = "") -> Mapping[str, Any]:
+        prefix = ensure_trailing_slash(prefix)
+        means, counts = self._get()
+        ret: dict[str, Any] = {}
+        if sum(counts["all_channels"]) == 0:
+            return ret
+
+        for name in sorted(means):
             ret[f"{prefix}{self._name}{name}"] = self._plot_binned(
-                y_values=mean,
-                counts=ch_count_np,
+                y_values=means[name],
+                counts=counts[name],
                 title=f"{name} weighted loss vs noise",
             )
         return ret
@@ -902,6 +920,11 @@ class Aggregator:
         include_positional_comparisons: Include comparison metrics that output
             positional maps (e.g. mean maps).  This should be disabled when
             using random subsetting because averaged maps won't make sense.
+        two_tailed_variables: List of variables to compute two-tailed metrics for
+            if present in the data. Defaults to
+            ["eastward_wind_at_ten_meters", "northward_wind_at_ten_meters"].
+        left_tailed_variables: List of variables to compute left-tailed metrics for
+            if present in the data. Defaults to ["PRMSL", "PRESsfc"].
     """
 
     def __init__(
@@ -913,17 +936,21 @@ class Aggregator:
         ssim_kwargs: Mapping[str, Any] | None = None,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
         include_positional_comparisons: bool = True,
-        two_tailed_variables: list[str] | None = [
-            "eastward_wind_at_ten_meters",
-            "northward_wind_at_ten_meters",
-        ],
-        left_tailed_variables: list[str] | None = ["PRMSL", "PRESsfc"],
-        log_loss_vs_noise: bool = True,
+        log_loss_vs_noise: bool = False,
+        two_tailed_variables: list[str] | None = None,
+        left_tailed_variables: list[str] | None = None,
     ) -> None:
         self.downscale_factor = downscale_factor
 
         if ssim_kwargs is None:
             ssim_kwargs = {}
+        if two_tailed_variables is None:
+            two_tailed_variables = [
+                "eastward_wind_at_ten_meters",
+                "northward_wind_at_ten_meters",
+            ]
+        if left_tailed_variables is None:
+            left_tailed_variables = ["PRMSL", "PRESsfc"]
 
         # Folded samples into batch dimension
         self._comparisons: list[_ComparisonAggregator] = [
