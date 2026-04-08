@@ -1,6 +1,6 @@
 experiment_dir: /results
 n_coupled_steps: 14598
-coupled_steps_in_memory: 18
+coupled_steps_in_memory: 2
 checkpoint_path: /ckpt.tar
 data_writer:
   ocean:
@@ -19,7 +19,7 @@ logging:
   project: ace-samudra-coupled-cm4
   entity: ai2cm
 loader:
-  num_data_workers: 1
+  num_data_workers: 4
   dataset:
     ocean:
       merge:
