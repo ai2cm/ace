@@ -4,6 +4,7 @@ from fme.ace.aggregator.inference import StepMeanEntry
 from fme.ace.aggregator.one_step import OneStepAggregatorConfig
 from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.augmentation import AugmentationConfig
+from fme.ace.data_loading.getters import get_forcing_data
 from fme.ace.data_loading.inference import (
     ExplicitIndices,
     InferenceInitialConditionIndices,
@@ -73,6 +74,7 @@ from fme.core.dataset.merged import MergeDatasetConfig, MergeNoConcatDatasetConf
 from fme.core.dataset.time import RepeatedInterval, TimeSlice
 from fme.core.dataset.utils import FillNaNsConfig
 from fme.core.dataset.xarray import OverwriteConfig, XarrayDataConfig
+from fme.core.generics.lr_tuning import LRTuningConfig
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.loss import StepLossConfig
 from fme.core.masking import StaticMaskingConfig
@@ -91,6 +93,7 @@ from fme.core.step.multi_call import MultiCallConfig
 from fme.core.typing_ import Slice
 
 from . import step
+from .inference.inference import get_initial_condition
 from .train.train import run_train
 from .train.train_config import (
     CopyWeightsConfig,
