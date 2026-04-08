@@ -3,14 +3,14 @@ save_checkpoint: true
 save_best_inference_epoch_checkpoints: false
 checkpoint_every_n_batches: 100
 ema_checkpoint_save_epochs:
-  step: 5
+  step: 1
 log_train_every_n_batches: 10
 validate_using_ema: true
 evaluate_before_training: true
 ema:
   decay: 0.999
-max_epochs: 20
-n_coupled_steps: 4
+max_epochs: 5
+n_coupled_steps: 3
 inference:
   n_coupled_steps: 1440
   coupled_steps_in_memory: 2
@@ -128,7 +128,7 @@ optimization:
     type: CosineAnnealingLR
     step_each_iteration: true
     kwargs:
-      T_max: 8660
+      T_max: 2165
 stepper_training:
   parameter_init:
     checkpoint_path: /ckpt.tar
@@ -137,7 +137,7 @@ stepper_training:
     parameter_init:
       weights_path: null # required
     loss_contributions:
-      n_steps: 4
+      n_steps: 3
       weight: 1.0
     loss:
       type: EnsembleLoss
@@ -159,10 +159,18 @@ stepper_training:
           - steps: 12
             probability: 0.05
           - steps: 20
-            probability: 0.05
+            probability: 0.025
+          - steps: 40
+            probability: 0.0125
+          - steps: 60
+            probability: 0.0125
       optimize_last_step_only: true
+      weight: 1.0
     loss:
       type: EnsembleLoss
+      kwargs:
+        crps_weight: 0.9
+        energy_score_weight: 0.1
       weights:
         air_temperature_0: 0.5
         air_temperature_1: 0.5
@@ -182,9 +190,6 @@ stepper_training:
         USWRFtoa: 2
         tendency_of_total_water_path_due_to_advection: 0.5
         PRESsfc: 3
-      kwargs:
-        crps_weight: 0.9
-        energy_score_weight: 0.1
 stepper:
   ocean:
     timedelta: 5D
