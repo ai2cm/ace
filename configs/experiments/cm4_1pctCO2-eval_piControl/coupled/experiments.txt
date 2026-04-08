@@ -1,2 +1,2 @@
 group|tag|experiment_id|status|checkpoint|priority|preemptible|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7-DEBUG-20steps-0151|rs0|01KKQWTQTEZAAKXGZRW6Q0V5Q8|run_ICx1_piC|best_inference_ckpt|high|--not-preemptible||||h100
+fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KKQWTQTEZAAKXGZRW6Q0V5Q8|run_ICx1_piC|best_inference_ckpt|high|--not-preemptible||||h100
