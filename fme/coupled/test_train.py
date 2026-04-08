@@ -261,8 +261,8 @@ def _write_test_yaml_files(
 @pytest.mark.parametrize(
     "loss_atmos_n_steps, crps_training",
     [
-        # (3, False),
-        # (0, False),
+        (3, False),
+        (0, False),
         (3, True),  # CRPS training with EnsembleLoss
     ],
 )
