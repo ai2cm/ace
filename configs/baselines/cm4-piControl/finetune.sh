@@ -11,10 +11,10 @@ JOB_GROUP="cm4-piControl-coupled"
 EXISTING_RESULTS_DATASET="TODO"  # beaker dataset ID from coupled training (train.sh)
 CKPT_TYPE="best_inference_ckpt"
 
-SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
-SCRIPT_PATH=${SCRIPT_PATH%/}
-BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
+SCRIPT_PATH=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+SCRIPT_PATH=${SCRIPT_PATH#$REPO_ROOT/}
+BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 N_GPUS=4
 
 ATMOS_STATS_DATA=jamesd/2025-06-03-cm4-piControl-200yr-coupled-stats-atmosphere
@@ -28,10 +28,10 @@ TEMPLATE_CONFIG_PATH="${SCRIPT_PATH}/finetune-config-template.yaml"
 CONFIG_PATH="${SCRIPT_PATH}/finetune-config.yaml"
 
 cp "${SCRIPT_PATH}/uncoupled-atmos/train-config.yaml" ./atmos-config.yaml
-sed -i 's/statsdata/atmos_stats/g' ./atmos-config.yaml
+sed -i'' -e 's/statsdata/atmos_stats/g' ./atmos-config.yaml
 
 cp "${SCRIPT_PATH}/uncoupled-ocean/train-config.yaml" ./ocean-config.yaml
-sed -i 's/statsdata/ocean_stats/g' ./ocean-config.yaml
+sed -i'' -e 's/statsdata/ocean_stats/g' ./ocean-config.yaml
 
 cp "$TEMPLATE_CONFIG_PATH" "$CONFIG_PATH"
 
