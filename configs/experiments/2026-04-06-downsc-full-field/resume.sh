@@ -16,7 +16,7 @@ wandb_group=""
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=8 # TODO: change to 8 after testing
+N_GPUS=4 # TODO: change to 8 after testing
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
@@ -31,7 +31,7 @@ gantry run \
     --workspace ai2/climate-titan \
     --priority urgent \
     --preemptible \
-    --cluster ai2/titan \
+    --cluster ai2/jupiter \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
