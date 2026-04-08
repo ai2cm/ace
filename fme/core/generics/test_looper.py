@@ -590,3 +590,76 @@ def test_get_record_to_wandb_returns_step_logger():
         logger = get_record_to_wandb(label="test")
         assert isinstance(logger, WandBStepLogger)
         assert logger.step == 0
+
+
+class AllNanStepper:
+    """Stepper that returns all-NaN output for testing NaN validation."""
+
+    def __init__(self, n_ic_timesteps: int = 1):
+        self.n_ic_timesteps = n_ic_timesteps
+
+    def predict(
+        self,
+        initial_condition: PrognosticState,
+        forcing: BatchData,
+        compute_derived_variables: bool = False,
+    ) -> tuple[BatchData, PrognosticState]:
+        ic_state = initial_condition.as_batch_data()
+        n_forward_steps = forcing.time.shape[1] - self.n_ic_timesteps
+        out_tensor = torch.full(
+            (
+                ic_state.data["var"].shape[0],
+                n_forward_steps,
+                *ic_state.data["var"].shape[2:],
+            ),
+            float("nan"),
+            device=ic_state.data["var"].device,
+        )
+        data = BatchData.new_on_device(
+            data={"var": out_tensor},
+            time=forcing.time[:, self.n_ic_timesteps :],
+            labels=None,
+        )
+        return data, data.get_end(["var"], self.n_ic_timesteps)
+
+
+def _run_inference_with_nan_stepper(nan_check_interval: int | None):
+    n_ic_timesteps = 1
+    n_forward_steps = 2
+    stepper = AllNanStepper(n_ic_timesteps=n_ic_timesteps)
+    initial_condition = get_batch_data_with_time(
+        start_time=0,
+        n_timesteps=n_ic_timesteps,
+    ).get_start(prognostic_names=["var"], n_ic_timesteps=n_ic_timesteps)
+    loader = [
+        get_batch_data_with_time(
+            start_time=i,
+            n_timesteps=n_ic_timesteps + n_forward_steps,
+        )
+        for i in range(0, 3 * n_forward_steps, n_forward_steps)
+    ]
+    mock_aggregator = get_mock_aggregator(n_ic_timesteps)
+    with GlobalTimer(), torch.no_grad():
+        with mock_wandb() as wandb:
+            wandb.configure(log_to_wandb=True)
+            run_inference(
+                predict=stepper.predict,
+                data=SimpleInferenceData(initial_condition, loader),
+                aggregator=mock_aggregator,
+                nan_check_interval=nan_check_interval,
+            )
+
+
+def test_run_inference_raises_on_all_nan():
+    with pytest.raises(ValueError, match="entirely NaN"):
+        _run_inference_with_nan_stepper(nan_check_interval=1)
+
+
+def test_run_inference_nan_check_disabled():
+    _run_inference_with_nan_stepper(nan_check_interval=None)
+
+
+def test_run_inference_nan_check_interval_skips_unchecked_windows():
+    """With interval=2, window 0 is checked (and raises) but window 1 would not be."""
+    with pytest.raises(ValueError, match="entirely NaN"):
+        _run_inference_with_nan_stepper(nan_check_interval=2)

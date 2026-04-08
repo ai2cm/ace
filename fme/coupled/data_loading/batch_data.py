@@ -198,3 +198,9 @@ class CoupledPairedData:
                 labels=prediction.atmosphere_data.labels,
             ),
         )
+
+    def raise_if_any_variable_all_nan(self, context: str = "") -> None:
+        self.ocean_data.raise_if_any_variable_all_nan(f"{context} ocean".strip())
+        self.atmosphere_data.raise_if_any_variable_all_nan(
+            f"{context} atmosphere".strip()
+        )

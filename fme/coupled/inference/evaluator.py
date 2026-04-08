@@ -192,6 +192,7 @@ class InferenceEvaluatorConfig:
         default_factory=lambda: InferenceEvaluatorAggregatorConfig()
     )
     prediction_loader: InferenceDataLoaderConfig | None = None
+    nan_check_interval: int | None = 1
 
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)
@@ -382,6 +383,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             aggregator=aggregator,
             writer=writer,
             record_logs=logger.log,
+            nan_check_interval=config.nan_check_interval,
         )
 
     timer.start("final_writer_flush")

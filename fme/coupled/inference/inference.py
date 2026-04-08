@@ -137,6 +137,7 @@ class InferenceConfig:
         default_factory=lambda: InferenceAggregatorConfig()
     )
     n_ensemble_per_ic: int = 1
+    nan_check_interval: int | None = 1
 
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)
@@ -267,6 +268,7 @@ def run_inference_from_config(config: InferenceConfig):
         aggregator=aggregator,
         writer=writer,
         record_logs=logger.log,
+        nan_check_interval=config.nan_check_interval,
     )
 
     timer.start("final_writer_flush")

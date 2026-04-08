@@ -219,6 +219,7 @@ class InferenceConfig:
     allow_incompatible_dataset: bool = False
     labels: list[str] | None = None
     n_ensemble_per_ic: int = 1
+    nan_check_interval: int | None = 1
 
     def __post_init__(self):
         if self.data_writer.time_coarsen is not None:
@@ -358,6 +359,7 @@ def run_inference_from_config(config: InferenceConfig):
         writer=writer,
         aggregator=aggregator,
         record_logs=logger.log,
+        nan_check_interval=config.nan_check_interval,
     )
 
     with timer.context("final_writer_flush"):

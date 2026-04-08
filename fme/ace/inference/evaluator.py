@@ -228,6 +228,7 @@ class InferenceEvaluatorConfig:
     stepper_override: StepperOverrideConfig | None = None
     allow_incompatible_dataset: bool = False
     validation: ValidationConfig | None = None
+    nan_check_interval: int | None = 1
 
     def __post_init__(self):
         if self.data_writer.time_coarsen is not None:
@@ -450,6 +451,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             aggregator=aggregator,
             writer=writer,
             record_logs=logger.log,
+            nan_check_interval=config.nan_check_interval,
         )
 
     with timer.context("final_writer_flush"):

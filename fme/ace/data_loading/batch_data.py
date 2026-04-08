@@ -16,6 +16,7 @@ from fme.core.distributed import Distributed
 from fme.core.labels import BatchLabels, LabelEncoding
 from fme.core.tensors import repeat_interleave_batch_dim, unfold_ensemble_dim
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
+from fme.core.validation import raise_if_any_variable_all_nan
 
 SelfType = TypeVar("SelfType", bound="BatchData")
 
@@ -464,6 +465,9 @@ class BatchData:
         self.data = {name: tensor.pin_memory() for name, tensor in self.data.items()}
         return self
 
+    def raise_if_any_variable_all_nan(self, context: str = "") -> None:
+        raise_if_any_variable_all_nan(self.data, context)
+
 
 @dataclasses.dataclass
 class PairedData:
@@ -533,3 +537,7 @@ class PairedData:
             labels=labels,
             time=time,
         )
+
+    def raise_if_any_variable_all_nan(self, context: str = "") -> None:
+        raise_if_any_variable_all_nan(self.prediction, f"{context} prediction".strip())
+        raise_if_any_variable_all_nan(self.reference, f"{context} reference".strip())

@@ -1,6 +1,8 @@
 import pytest
+import torch
 
 from fme.core.typing_ import Slice, _shift_bound
+from fme.core.validation import raise_if_any_variable_all_nan
 
 
 @pytest.mark.parametrize(
@@ -48,3 +50,31 @@ def test_slice_shift_left(batch_values, batch_start_idx, expected_values):
     sl = Slice(5, 15, None)
     shifted = Slice.shift_left(sl, batch_start_idx)
     assert batch_values[shifted.slice] == expected_values
+
+
+def test_raise_if_any_variable_all_nan_raises():
+    data = {"good": torch.ones(2, 3), "bad": torch.full((2, 3), float("nan"))}
+    with pytest.raises(ValueError, match="bad.*entirely NaN"):
+        raise_if_any_variable_all_nan(data)
+
+
+def test_raise_if_any_variable_all_nan_with_context():
+    data = {"x": torch.full((1,), float("nan"))}
+    with pytest.raises(ValueError, match="ocean prediction.*'x'.*entirely NaN"):
+        raise_if_any_variable_all_nan(data, context="ocean prediction")
+
+
+def test_raise_if_any_variable_all_nan_passes_for_valid_data():
+    data = {"a": torch.ones(2, 3), "b": torch.zeros(4)}
+    raise_if_any_variable_all_nan(data)
+
+
+def test_raise_if_any_variable_all_nan_passes_for_partial_nan():
+    tensor = torch.ones(2, 3)
+    tensor[0, 0] = float("nan")
+    data = {"partial": tensor}
+    raise_if_any_variable_all_nan(data)
+
+
+def test_raise_if_any_variable_all_nan_passes_for_empty_mapping():
+    raise_if_any_variable_all_nan({})

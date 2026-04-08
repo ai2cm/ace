@@ -120,6 +120,7 @@ def run_inference(
     aggregator: InferenceAggregatorABC[PS, SD],
     writer: WriterABC[PS, SD] | None = None,
     record_logs: Callable[[InferenceLogs], None] | None = None,
+    nan_check_interval: int | None = 1,
 ):
     """Run extended inference loop given initial condition and forcing data.
 
@@ -131,6 +132,9 @@ def run_inference(
         writer: Data writer for saving the inference results to disk.
         record_logs: Function for recording logs. By default, logs are recorded to
             wandb.
+        nan_check_interval: How often (in windows) to check for variables that are
+            entirely NaN. ``1`` checks every window, ``N`` checks every N-th
+            window, and ``None`` disables the check.
     """
     if record_logs is None:
         record_logs = get_record_to_wandb(label="inference").log
@@ -151,6 +155,12 @@ def run_inference(
         logging.info(
             f"Inference: processing output from window {i + 1} of {n_windows}."
         )
+        if (
+            nan_check_interval is not None
+            and i % nan_check_interval == 0
+            and hasattr(batch, "raise_if_any_variable_all_nan")
+        ):
+            batch.raise_if_any_variable_all_nan()
         with timer.context("data_writer"):
             writer.append_batch(
                 batch=batch,
