@@ -11,9 +11,9 @@ max_epochs: 20
 n_coupled_steps: 4
 inference:
   n_coupled_steps: 1440
-  coupled_steps_in_memory: 8
+  coupled_steps_in_memory: 2
   loader:
-    num_data_workers: 1
+    num_data_workers: 4
     dataset:
       ocean:
         merge:
