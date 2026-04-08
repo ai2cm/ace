@@ -94,13 +94,11 @@ class CoupledInitialConditionConfig:
             ocean_data=get_initial_condition(
                 ds=ocean,
                 prognostic_names=ocean_prognostic_names,
-                labels=None,
                 n_ensemble=n_ensemble_per_ic,
             ),
             atmosphere_data=get_initial_condition(
                 ds=atmos,
                 prognostic_names=atmosphere_prognostic_names,
-                labels=None,
                 n_ensemble=n_ensemble_per_ic,
             ),
         )
