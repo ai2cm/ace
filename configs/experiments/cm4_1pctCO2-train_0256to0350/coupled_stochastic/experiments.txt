@@ -4,3 +4,5 @@ fto_stochastic-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_cbj61w53|rs0|01KN804Z
 fto_stochastic-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_cbj61w53|rs0|01KN804ZEXN589C78JN0WGJMDD|run_140yr|best_inference_ckpt|high|--not-preemptible
 
 ft_stochastic_ncs2-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_cbj61w53|rs0|01KNAE3N028WHAYWG581V4ETZ2|trained|best_inference_ckpt|normal|--not-preemptible
+
+ft_fto_stochastic_ncs3_5ep-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KNNRNA7ZBHH8YWBEVHAW138N|training|best_inference_ckpt|normal|--not-preemptible
