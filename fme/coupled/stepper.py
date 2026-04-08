@@ -1518,11 +1518,27 @@ class CoupledTrainStepper(
         CoupledTrainOutput,
     ],
 ):
-    """
-    Wrapper around CoupledStepper that adds training functionality.
+    """Wrapper around CoupledStepper that adds training functionality.
 
     This class composes a CoupledStepper (for inference) with training-specific
     loss configuration and implements the train_on_batch method.
+
+    Stochastic training assumptions (n_ensemble > 1):
+        Ensemble training broadcasts each batch member into n_ensemble copies
+        along the batch dimension; the copies receive identical inputs, so
+        divergent outputs depend entirely on model stochasticity (e.g., noise
+        conditioning).
+
+        We currently assume that the atmosphere component is stochastic. If it
+        is not, the first n_inner_steps atmosphere steps (before the first ocean
+        step) will produce identical outputs across ensemble members, doubling
+        compute with no benefit.
+
+        On the other hand, even when the ocean component itself is deterministic,
+        its optimization is effectively stochastic so long as the atmosphere is
+        stochastic: the ocean receives atmosphere-averaged forcings that differ
+        across ensemble members.
+
     """
 
     def __init__(
@@ -1602,6 +1618,7 @@ class CoupledTrainStepper(
             ocean_data=data.ocean_data.broadcast_ensemble(n_ensemble),
             atmosphere_data=data.atmosphere_data.broadcast_ensemble(n_ensemble),
         )
+        # get initial condition prognostic variables
         input_data = CoupledPrognosticState(
             atmosphere_data=data_ensemble.atmosphere_data.get_start(
                 self.atmosphere.prognostic_names, self.n_ic_timesteps
@@ -1684,6 +1701,7 @@ class CoupledTrainStepper(
         ocean_gen_data, atmos_gen_data = _process_ensemble_output_list(
             output_list
         )  # NOTE: must call AFTER optimization.step_weights()
+
         ocean_stepped = TrainOutput(
             metrics=metrics.get_ocean_metrics(),
             gen_data=ocean_gen_data,
