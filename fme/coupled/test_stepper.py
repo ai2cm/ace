@@ -933,6 +933,7 @@ def get_stepper_config(
     ocean_timedelta: str = OCEAN_TIMEDELTA,
     atmosphere_timedelta: str = ATMOS_TIMEDELTA,
     ocean_fraction_prediction: CoupledOceanFractionConfig | None = None,
+    ocean_prescribed_prognostic_names: list[str] | None = None,
 ):
     # CoupledStepper requires that both component datasets include prognostic
     # surface temperature variables and that the atmosphere data includes an
@@ -953,6 +954,8 @@ def get_stepper_config(
         )
     if ocean_builder is None:
         ocean_builder = ModuleSelector(type="prebuilt", config={"module": TimesTwo()})
+
+    ocean_prescribed = list(ocean_prescribed_prognostic_names or [])
 
     config = CoupledStepperConfig(
         atmosphere=ComponentConfig(
@@ -991,6 +994,7 @@ def get_stepper_config(
                             in_names=ocean_in_names,
                             out_names=ocean_out_names,
                             next_step_forcing_names=next_step_forcing_names,
+                            prescribed_prognostic_names=ocean_prescribed,
                             normalization=NetworkAndLossNormalizationConfig(
                                 network=NormalizationConfig(
                                     means={name: 0.0 for name in ocean_norm_names},
@@ -1288,6 +1292,71 @@ def test__get_ocean_forcings():
     torch.testing.assert_close(
         new_ocean_forcings["o_exog"], expected_ocean_forcings["o_exog"]
     )
+
+
+def test_ocean_forcing_window_names_include_prescribed_prognostics():
+    "Prescribed ocean prognostics (e.g. SST, layer T) must appear in forcing window."
+    ocean_in_names = ["o_exog", "exog", "sst", "a_diag", "sfc_temp", "thetao_18"]
+    ocean_out_names = ["sst", "thetao_18"]
+    atmos_in_names = ["exog", "ocean_frac", "sfc_temp"]
+    atmos_out_names = ["a_diag", "sfc_temp"]
+    config = get_stepper_config(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmosphere_in_names=atmos_in_names,
+        atmosphere_out_names=atmos_out_names,
+        sst_name_in_ocean_data="sst",
+        sfc_temp_name_in_atmosphere_data="sfc_temp",
+        ocean_fraction_name="ocean_frac",
+        ocean_prescribed_prognostic_names=["sst", "thetao_18"],
+    )
+    assert set(config.ocean_forcing_window_names) == (
+        set(config.ocean_forcing_exogenous_names)
+        - set(config.shared_forcing_exogenous_names)
+        | {"sst", "thetao_18"}
+    )
+    reqs = config.get_forcing_window_data_requirements(1)
+    assert "thetao_18" in reqs.ocean_requirements.names
+    assert "sst" in reqs.ocean_requirements.names
+
+
+def test__get_ocean_forcings_includes_prescribed_prognostic_tensors():
+    torch.manual_seed(1)
+    ocean_in_names = ["o_exog", "exog", "sst", "a_diag", "sfc_temp", "thetao_18"]
+    ocean_out_names = ["sst", "thetao_18"]
+    atmos_in_names = ["exog", "ocean_frac", "sfc_temp"]
+    atmos_out_names = ["a_diag", "sfc_temp"]
+    config = get_stepper_config(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmosphere_in_names=atmos_in_names,
+        atmosphere_out_names=atmos_out_names,
+        sst_name_in_ocean_data="sst",
+        sfc_temp_name_in_atmosphere_data="sfc_temp",
+        ocean_fraction_name="ocean_frac",
+        ocean_prescribed_prognostic_names=["thetao_18"],
+    )
+    vertical_coord = Mock(spec=CoupledVerticalCoordinate)
+    vertical_coord.atmosphere = NullVerticalCoordinate()
+    vertical_coord.ocean = NullVerticalCoordinate()
+    dataset_info = CoupledDatasetInfoBuilder(vcoord=vertical_coord).dataset_info
+    coupler = config.get_stepper(dataset_info)
+    ocean_shape = (1, 2, N_LAT, N_LON)
+    atmos_shape = (1, 2, N_LAT, N_LON)
+    ocean_data = {
+        "o_exog": torch.rand(*ocean_shape, device=fme.get_device()),
+        "sst": torch.rand(*ocean_shape, device=fme.get_device()),
+        "thetao_18": torch.rand(*ocean_shape, device=fme.get_device()),
+    }
+    atmos_gen = {
+        "a_diag": torch.rand(*atmos_shape, device=fme.get_device()),
+        "sfc_temp": torch.rand(*atmos_shape, device=fme.get_device()),
+    }
+    atmos_forcings = {"exog": torch.rand(*atmos_shape, device=fme.get_device())}
+    new_ocean_forcings = coupler._get_ocean_forcings(
+        ocean_data, atmos_gen, atmos_forcings
+    )
+    torch.testing.assert_close(new_ocean_forcings["thetao_18"], ocean_data["thetao_18"])
 
 
 def test_predict_paired():
