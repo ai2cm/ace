@@ -3,9 +3,9 @@
 set -e
 
 #JOB_NAME="eval-xshield-amip-100km-to-3km-0.5sigmaexp-tropics-events"
-JOB_NAME="eval-xshield-amip-100km-to-3km-winds-multivar-prate0-till600-exp0.75-evalmode-tropics"
+JOB_NAME="eval-xshield-amip-100km-to-3km-multivar-coarse-prmsl-tropics-pac"
 
-CONFIG_FILENAME="eval-tropic-pac.yaml"
+CONFIG_FILENAME="eval-coarse-prmsl-tropic-pac.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
