@@ -50,6 +50,7 @@ from fme.core.coordinates import (
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
 )
+from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.dataset_info import DatasetInfo
@@ -86,6 +87,7 @@ def save_plus_one_stepper(
     ocean=None,
     multi_call: MultiCallConfig | None = None,
     derived_forcings: DerivedForcingsConfig | None = None,
+    total_energy_budget_correction: EnergyBudgetConfig | None = None,
 ):
     if multi_call is None:
         all_names = list(set(in_names).union(out_names))
@@ -128,6 +130,9 @@ def save_plus_one_stepper(
                                             means={name: mean for name in all_names},
                                             stds={name: std for name in all_names},
                                         ),
+                                    ),
+                                    corrector=AtmosphereCorrectorConfig(
+                                        total_energy_budget_correction=total_energy_budget_correction,
                                     ),
                                     ocean=ocean,
                                 ),

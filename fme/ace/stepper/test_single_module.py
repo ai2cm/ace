@@ -58,6 +58,7 @@ from fme.core.coordinates import (
     LatLonCoordinates,
     VerticalCoordinate,
 )
+from fme.core.corrector.atmosphere import EnergyBudgetConfig
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
@@ -98,6 +99,8 @@ SOLAR_CONSTANT_AS_VALUE = ValueConfig(S0)
 INSOLATION_CONFIG = InsolationConfig(INSOLATION_NAME, SOLAR_CONSTANT_AS_VALUE)
 DERIVED_FORCINGS_CONFIG = DerivedForcingsConfig(insolation=INSOLATION_CONFIG)
 EMPTY_DERIVED_FORCINGS_CONFIG = DerivedForcingsConfig()
+EMPTY_ENERGY_BUDGET_CONFIG = None
+DEFAULT_ENERGY_BUDGET_CONFIG = EnergyBudgetConfig(method="constant_temperature")
 
 
 def get_data(names: Iterable[str], n_samples, n_time, epoch: int = 0) -> SphericalData:
@@ -1418,67 +1421,99 @@ LOAD_STEPPER_TESTS = {
         None,
         None,
         EMPTY_DERIVED_FORCINGS_CONFIG,
+        EMPTY_ENERGY_BUDGET_CONFIG,
         OCEAN_CONFIG,
+        "keep",
         "keep",
         "keep",
         OCEAN_CONFIG,
         None,
         EMPTY_DERIVED_FORCINGS_CONFIG,
+        EMPTY_ENERGY_BUDGET_CONFIG,
     ),
     "persist-ocean": (
         OCEAN_CONFIG,
         None,
         EMPTY_DERIVED_FORCINGS_CONFIG,
+        EMPTY_ENERGY_BUDGET_CONFIG,
+        "keep",
         "keep",
         "keep",
         "keep",
         OCEAN_CONFIG,
         None,
         EMPTY_DERIVED_FORCINGS_CONFIG,
+        EMPTY_ENERGY_BUDGET_CONFIG,
     ),
     "override-multi-call": (
         None,
         None,
         EMPTY_DERIVED_FORCINGS_CONFIG,
+        EMPTY_ENERGY_BUDGET_CONFIG,
         "keep",
         MULTI_CALL_CONFIG,
+        "keep",
         "keep",
         None,
         MULTI_CALL_CONFIG,
         EMPTY_DERIVED_FORCINGS_CONFIG,
+        EMPTY_ENERGY_BUDGET_CONFIG,
     ),
     "persist-multi-call": (
         None,
         MULTI_CALL_CONFIG,
         EMPTY_DERIVED_FORCINGS_CONFIG,
+        EMPTY_ENERGY_BUDGET_CONFIG,
+        "keep",
         "keep",
         "keep",
         "keep",
         None,
         MULTI_CALL_CONFIG,
         EMPTY_DERIVED_FORCINGS_CONFIG,
+        EMPTY_ENERGY_BUDGET_CONFIG,
     ),
     "override-all": (
         None,
         None,
         EMPTY_DERIVED_FORCINGS_CONFIG,
+        EMPTY_ENERGY_BUDGET_CONFIG,
         OCEAN_CONFIG,
         MULTI_CALL_CONFIG,
         DERIVED_FORCINGS_CONFIG,
+        DEFAULT_ENERGY_BUDGET_CONFIG,
         OCEAN_CONFIG,
         MULTI_CALL_CONFIG,
         DERIVED_FORCINGS_CONFIG,
+        DEFAULT_ENERGY_BUDGET_CONFIG,
     ),
     "persist-all": (
         OCEAN_CONFIG,
         MULTI_CALL_CONFIG,
         DERIVED_FORCINGS_CONFIG,
+        DEFAULT_ENERGY_BUDGET_CONFIG,
+        "keep",
         "keep",
         "keep",
         "keep",
         OCEAN_CONFIG,
         MULTI_CALL_CONFIG,
         DERIVED_FORCINGS_CONFIG,
+        DEFAULT_ENERGY_BUDGET_CONFIG,
+    ),
+    "override-energy-budget-correction": (
+        OCEAN_CONFIG,
+        MULTI_CALL_CONFIG,
+        DERIVED_FORCINGS_CONFIG,
+        DEFAULT_ENERGY_BUDGET_CONFIG,
+        "keep",
+        "keep",
+        "keep",
+        EMPTY_ENERGY_BUDGET_CONFIG,
+        OCEAN_CONFIG,
+        MULTI_CALL_CONFIG,
+        DERIVED_FORCINGS_CONFIG,
+        EMPTY_ENERGY_BUDGET_CONFIG,
     ),
 }
 
@@ -1488,12 +1523,15 @@ LOAD_STEPPER_TESTS = {
         "serialized_ocean_config",
         "serialized_multi_call_config",
         "serialized_derived_forcings_config",
+        "serialized_total_energy_budget_correction_config",
         "overriding_ocean_config",
         "overriding_multi_call_config",
         "overriding_derived_forcings_config",
+        "overriding_total_energy_budget_correction_config",
         "expected_ocean_config",
         "expected_multi_call_config",
         "expected_derived_forcings_config",
+        "expected_total_energy_budget_correction_config",
     ),
     list(LOAD_STEPPER_TESTS.values()),
     ids=list(LOAD_STEPPER_TESTS.keys()),
@@ -1503,12 +1541,19 @@ def test_load_stepper_and_load_stepper_config(
     serialized_ocean_config: OceanConfig | None,
     serialized_multi_call_config: MultiCallConfig | None,
     serialized_derived_forcings_config: DerivedForcingsConfig,
+    serialized_total_energy_budget_correction_config: EnergyBudgetConfig | None,
     overriding_ocean_config: Literal["keep"] | OceanConfig | None,
     overriding_multi_call_config: Literal["keep"] | MultiCallConfig | None,
     overriding_derived_forcings_config: Literal["keep"] | DerivedForcingsConfig,
+    overriding_total_energy_budget_correction_config: Literal["keep"]
+    | EnergyBudgetConfig
+    | None,
     expected_ocean_config: OceanConfig | None,
     expected_multi_call_config: MultiCallConfig | None,
     expected_derived_forcings_config: DerivedForcingsConfig,
+    expected_total_energy_budget_correction_config: Literal["keep"]
+    | EnergyBudgetConfig
+    | None,
     very_fast_only: bool,
 ):
     if very_fast_only:
@@ -1545,6 +1590,7 @@ def test_load_stepper_and_load_stepper_config(
         ocean=serialized_ocean_config,
         multi_call=serialized_multi_call_config,
         derived_forcings=serialized_derived_forcings_config,
+        total_energy_budget_correction=serialized_total_energy_budget_correction_config,
     )
 
     # First check that load_stepper_config and load_stepper functions load
@@ -1565,6 +1611,7 @@ def test_load_stepper_and_load_stepper_config(
         ocean=overriding_ocean_config,
         multi_call=overriding_multi_call_config,
         derived_forcings=overriding_derived_forcings_config,
+        total_energy_budget_correction=overriding_total_energy_budget_correction_config,
     )
 
     stepper_config = load_stepper_config(stepper_path, stepper_override)
@@ -1576,6 +1623,10 @@ def test_load_stepper_and_load_stepper_config(
     validate_stepper_ocean(stepper, expected_ocean_config)
     validate_stepper_multi_call(stepper, expected_multi_call_config)
     assert stepper.config.derived_forcings == expected_derived_forcings_config
+    assert (
+        _get_corrector_total_energy_budget_correction(stepper)
+        == expected_total_energy_budget_correction_config
+    )
     assert isinstance(stepper.forcing_deriver, ForcingDeriver)
 
 
@@ -1587,6 +1638,13 @@ def _get_inner_single_module_config(stepper: Stepper):
     if isinstance(stepper._step_obj, MultiCallStep):
         return stepper._step_obj._wrapped_step.config
     return stepper._step_obj.config
+
+
+def _get_corrector_total_energy_budget_correction(stepper: Stepper):
+    """Get total_energy_budget_correction from the stepper's inner corrector config."""
+    config = _get_inner_single_module_config(stepper)
+    corrector = config.corrector
+    return corrector.total_energy_budget_correction
 
 
 def validate_stepper_prescribed_prognostic_names(

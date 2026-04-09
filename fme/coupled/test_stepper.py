@@ -21,6 +21,7 @@ from fme.core.coordinates import (
     NullVerticalCoordinate,
     VerticalCoordinate,
 )
+from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
 from fme.core.dataset_info import DatasetInfo
 from fme.core.loss import StepLossConfig
 from fme.core.mask_provider import MaskProvider
@@ -933,6 +934,7 @@ def get_stepper_config(
     ocean_timedelta: str = OCEAN_TIMEDELTA,
     atmosphere_timedelta: str = ATMOS_TIMEDELTA,
     ocean_fraction_prediction: CoupledOceanFractionConfig | None = None,
+    atmosphere_total_energy_budget_correction: EnergyBudgetConfig | None = None,
 ):
     # CoupledStepper requires that both component datasets include prognostic
     # surface temperature variables and that the atmosphere data includes an
@@ -954,6 +956,25 @@ def get_stepper_config(
     if ocean_builder is None:
         ocean_builder = ModuleSelector(type="prebuilt", config={"module": TimesTwo()})
 
+    atmosphere_step_kwargs: dict = {
+        "builder": atmosphere_builder,
+        "in_names": atmosphere_in_names,
+        "out_names": atmosphere_out_names,
+        "normalization": NetworkAndLossNormalizationConfig(
+            network=NormalizationConfig(
+                means={name: 0.0 for name in atmos_norm_names},
+                stds={name: 1.0 for name in atmos_norm_names},
+            ),
+        ),
+        "ocean": OceanConfig(
+            surface_temperature_name=sfc_temp_name_in_atmosphere_data,
+            ocean_fraction_name=ocean_fraction_name,
+        ),
+    }
+    if atmosphere_total_energy_budget_correction is not None:
+        atmosphere_step_kwargs["corrector"] = AtmosphereCorrectorConfig(
+            total_energy_budget_correction=atmosphere_total_energy_budget_correction
+        )
     config = CoupledStepperConfig(
         atmosphere=ComponentConfig(
             timedelta=atmosphere_timedelta,
@@ -961,21 +982,7 @@ def get_stepper_config(
                 step=StepSelector(
                     type="single_module",
                     config=dataclasses.asdict(
-                        SingleModuleStepConfig(
-                            builder=atmosphere_builder,
-                            in_names=atmosphere_in_names,
-                            out_names=atmosphere_out_names,
-                            normalization=NetworkAndLossNormalizationConfig(
-                                network=NormalizationConfig(
-                                    means={name: 0.0 for name in atmos_norm_names},
-                                    stds={name: 1.0 for name in atmos_norm_names},
-                                ),
-                            ),
-                            ocean=OceanConfig(
-                                surface_temperature_name=sfc_temp_name_in_atmosphere_data,
-                                ocean_fraction_name=ocean_fraction_name,
-                            ),
-                        ),
+                        SingleModuleStepConfig(**atmosphere_step_kwargs),
                     ),
                 ),
             ),
