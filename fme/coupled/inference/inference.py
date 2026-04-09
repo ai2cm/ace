@@ -233,8 +233,8 @@ def run_inference_from_config(config: InferenceConfig):
     )
     logging.info("Loading initial condition data")
     initial_condition = config.initial_condition.get_initial_condition(
-        ocean_prognostic_names=stepper_config.ocean.stepper.prognostic_names,
-        atmosphere_prognostic_names=stepper_config.atmosphere.stepper.prognostic_names,
+        ocean_prognostic_names=stepper_config.ocean.stepper.get_prognostic_names(),
+        atmosphere_prognostic_names=stepper_config.atmosphere.stepper.get_prognostic_names(),
         n_ensemble_per_ic=config.n_ensemble_per_ic,
     )
     stepper = config.load_stepper()

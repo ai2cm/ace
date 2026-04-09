@@ -305,7 +305,7 @@ def run_inference_from_config(config: InferenceConfig):
         logging.info("Loading initial condition data")
         initial_condition = get_initial_condition(
             config.initial_condition.get_dataset(),
-            stepper_config.prognostic_names,
+            stepper_config.get_prognostic_names(),
             labels=config.labels,
             n_ensemble=config.n_ensemble_per_ic,
         )

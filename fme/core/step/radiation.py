@@ -15,7 +15,6 @@ from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
-from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.args import StepArgs
@@ -128,7 +127,8 @@ class SeparateRadiationStepConfig(StepConfigABC):
             extra_residual_scaled_names = []
         return self.normalization.get_loss_normalizer(
             names=self._normalize_names + extra_names,
-            residual_scaled_names=self.prognostic_names + extra_residual_scaled_names,
+            residual_scaled_names=self.get_prognostic_names()
+            + extra_residual_scaled_names,
         )
 
     @classmethod
@@ -288,7 +288,6 @@ class SeparateRadiationStep(StepABC):
         self.radiation_module = radiation_module.to(get_device())
         self._img_shape = dataset_info.img_shape
         self._config = config
-        self._no_optimization = NullOptimization()
 
         init_weights(self.modules)
         dist = Distributed.get_instance()
@@ -395,7 +394,7 @@ class SeparateRadiationStep(StepABC):
             corrector=self._corrector,
             ocean=self.ocean,
             residual_prediction=self._config.residual_prediction,
-            prognostic_names=self.prognostic_names,
+            prognostic_names=self.get_prognostic_names(),
         )
 
     def get_regularizer_loss(self) -> torch.Tensor:

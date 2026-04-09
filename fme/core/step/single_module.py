@@ -17,7 +17,6 @@ from fme.core.dicts import add_names
 from fme.core.distributed import Distributed
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
-from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.args import StepArgs
@@ -114,7 +113,8 @@ class SingleModuleStepConfig(StepConfigABC):
             extra_residual_scaled_names = []
         return self.normalization.get_loss_normalizer(
             names=self._normalize_names + extra_names,
-            residual_scaled_names=self.prognostic_names + extra_residual_scaled_names,
+            residual_scaled_names=self.get_prognostic_names()
+            + extra_residual_scaled_names,
         )
 
     @classmethod
@@ -279,7 +279,6 @@ class SingleModuleStep(StepABC):
         init_weights(self.modules)
         self._img_shape = dataset_info.img_shape
         self._config = config
-        self._no_optimization = NullOptimization()
 
         self.module = self.module.wrap_module(dist.wrap_module)
         self.secondary_decoder = self.secondary_decoder.wrap_module(dist.wrap_module)
@@ -369,7 +368,7 @@ class SingleModuleStep(StepABC):
             corrector=self._corrector,
             ocean=self.ocean,
             residual_prediction=self._config.residual_prediction,
-            prognostic_names=self.prognostic_names,
+            prognostic_names=self.get_prognostic_names(),
             prescribed_prognostic_names=self._config.prescribed_prognostic_names,
         )
 
