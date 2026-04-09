@@ -119,7 +119,7 @@ validation_loader:
 optimization:
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
-  lr: 0.00001
+  lr: 0.0001
   optimizer_type: AdamW
   kwargs:
     fused: true
@@ -128,7 +128,7 @@ optimization:
     type: CosineAnnealingLR
     step_each_iteration: true
     kwargs:
-      T_max: 2165
+      T_max: 4330
 stepper_training:
   parameter_init:
     checkpoint_path: /ckpt.tar
