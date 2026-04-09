@@ -3,17 +3,27 @@
 
 set -e
 
-JOB_NAME_BASE="ace-era5-pt-multi-step-shield-ft-lr1e-4-rs0"
+# JOB_NAME_BASE="ace-era5-plus-ramped-random-co2-c96-pt-multi-step-shield-ft-lr1e-4-rs0-inference-year-step122"
+JOB_NAME_BASE="ace-era5-hybrid-localnet-stochastic-rs0-inference-year-best-inf-ckpt"
 JOB_GROUP="ace-foundation-model"
-
-EXISTING_RESULTS_DATASET="01KMCBQGB98GSGC79ZBSXKWWYR"
+# this is from ace-aimip-fine-tune-decoder-pressure-levels-separate-decoder-lr-warmup-RS0
+EXISTING_RESULTS_DATASET="01KMSXRDV3QAGMG2YQ6ZHJKJSF"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
-INFERENCE_CONFIG_FILENAME="ace-inference-era5-ssp245-gcs.yaml"
-python -m fme.ace.validate_config --config_type inference $INFERENCE_CONFIG_FILENAME
+AIMIP_INFERENCE_P0K_CONFIG_FILENAME="ace-inference-era5-p0k.yaml"
+AIMIP_INFERENCE_BASE_P0K_CONFIG_PATH=$SCRIPT_PATH/$AIMIP_INFERENCE_P0K_CONFIG_FILENAME
+AIMIP_INFERENCE_P2K_CONFIG_FILENAME="ace-inference-era5-p2k.yaml"
+AIMIP_INFERENCE_BASE_P2K_CONFIG_PATH=$SCRIPT_PATH/$AIMIP_INFERENCE_P2K_CONFIG_FILENAME
+AIMIP_INFERENCE_P4K_CONFIG_FILENAME="ace-inference-era5-p4k.yaml"
+AIMIP_INFERENCE_BASE_P4K_CONFIG_PATH=$SCRIPT_PATH/$AIMIP_INFERENCE_P4K_CONFIG_FILENAME
+
+cd $REPO_ROOT  # so config path is valid no matter where we are running this script
+
+python -m fme.ace.validate_config --config_type inference $AIMIP_INFERENCE_BASE_P2K_CONFIG_PATH
+python -m fme.ace.validate_config --config_type inference $AIMIP_INFERENCE_BASE_P4K_CONFIG_PATH
 
 launch_job () {
 
@@ -53,8 +63,19 @@ launch_job () {
 
 }
 
-JOB_NAME="${JOB_NAME_BASE}-ssp245-ACE-forcing-dataset-inference"
+# same as above but use SST perturbed by +2K and +4K
+JOB_NAME="${JOB_NAME_BASE}-p0k"
 OVERRIDE=""
 echo "Launching job: $JOB_NAME"
-launch_job "$JOB_NAME" "$INFERENCE_CONFIG_FILENAME" "$OVERRIDE"
+launch_job "$JOB_NAME" "$AIMIP_INFERENCE_BASE_P0K_CONFIG_PATH" "$OVERRIDE"
+
+JOB_NAME="${JOB_NAME_BASE}-p2k"
+OVERRIDE=""
+echo "Launching job: $JOB_NAME"
+launch_job "$JOB_NAME" "$AIMIP_INFERENCE_BASE_P2K_CONFIG_PATH" "$OVERRIDE"
+
+JOB_NAME="${JOB_NAME_BASE}-p4k"
+OVERRIDE=""
+echo "Launching job: $JOB_NAME"
+launch_job "$JOB_NAME" "$AIMIP_INFERENCE_BASE_P4K_CONFIG_PATH" "$OVERRIDE"
 
