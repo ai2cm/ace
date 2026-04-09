@@ -34,14 +34,14 @@ inference:
     start_indices:
       times:
         # 4 from piControl, 4 from 1pctCO2
-        - '0151-01-03T12:00:00'
-        - '0162-06-22T12:00:00'
-        - '0173-12-09T12:00:00'
-        - '0185-05-28T12:00:00'
         - '0251-01-03T12:00:00'
         - '0262-06-22T12:00:00'
         - '0273-12-09T12:00:00'
         - '0285-05-28T12:00:00'
+        - '0296-11-14T12:00:00'
+        - '0308-05-03T12:00:00'
+        - '0319-10-20T12:00:00'
+        - '0331-04-08T12:00:00'
   aggregator:
     log_zonal_mean_images: false
     log_histograms: false
@@ -110,7 +110,7 @@ train_loader:
               engine: zarr
               subset:
                 start_time: '0151-01-03T12:00:00' # earlier times nan
-              stop_time: '0245-12-29T12:00:00'
+                stop_time: '0245-12-29T12:00:00'
 validation_loader:
   batch_size: 16
   num_data_workers: 2
