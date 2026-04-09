@@ -407,7 +407,7 @@ def get_trainer(
             for param in module.parameters():
                 if param not in opt.optimizer.state:
                     opt.optimizer.state[param] = {
-                        "step": torch.tensor(0.0),
+                        "step": torch.tensor(0.0, device=param.data.device),
                         "exp_avg": torch.zeros_like(param.data),
                         "exp_avg_sq": torch.zeros_like(param.data),
                     }
