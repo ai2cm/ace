@@ -758,7 +758,7 @@ class Trainer:
                 self._epochs_trained
             )
             logging.info(f"Saving epoch checkpoint to {epoch_checkpoint_path}")
-            self.save_checkpoint(epoch_checkpoint_path)
+            self.save_checkpoint(epoch_checkpoint_path, include_optimization=True)
 
 
 def inference_one_epoch(
