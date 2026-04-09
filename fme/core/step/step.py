@@ -353,3 +353,8 @@ class StepABC(abc.ABC):
         Load the state of the step object.
         """
         pass
+
+    @abc.abstractmethod
+    def to(self: SelfType, device: str) -> SelfType:
+        """Move the step's tensors and modules to the specified device."""
+        pass

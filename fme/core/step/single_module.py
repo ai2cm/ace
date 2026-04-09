@@ -402,6 +402,14 @@ class SingleModuleStep(StepABC):
         if "secondary_decoder" in state:
             self.secondary_decoder.load_module_state(state["secondary_decoder"])
 
+    def to(self, device: str) -> "SingleModuleStep":
+        """Move the step's tensors and modules to the specified device."""
+        self.module = self.module.to(device)
+        self.secondary_decoder = self.secondary_decoder.to(device)
+        self._normalizer = self._normalizer.to(device)
+        self._corrector.to(device)
+        return self
+
 
 def step_with_adjustments(
     input: TensorMapping,

@@ -175,6 +175,15 @@ class StandardNormalizer:
             fill_nans_on_denormalize=state.get("fill_nans_on_denormalize", False),
         )
 
+    def to(self, device: str) -> "StandardNormalizer":
+        """Move the normalizer's tensors to the specified device."""
+        return StandardNormalizer(
+            means={k: v.to(device) for k, v in self.means.items()},
+            stds={k: v.to(device) for k, v in self.stds.items()},
+            fill_nans_on_normalize=self._fill_nans_on_normalize,
+            fill_nans_on_denormalize=self._fill_nans_on_denormalize,
+        )
+
     def get_normalization_config(self) -> NormalizationConfig:
         return NormalizationConfig(
             means={k: float(v.cpu().numpy().item()) for k, v in self.means.items()},

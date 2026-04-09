@@ -131,6 +131,10 @@ class StaticMasking:
         exclude = self._exclude_regex and re.match(self._exclude_regex, name)
         return not exclude
 
+    def to(self, device: str) -> "StaticMasking":
+        self._mask = self._mask.to(device)
+        return self
+
     def __call__(self, data: TensorMapping) -> TensorDict:
         """
         Apply masking to the data for standard names recognized by a stacker.
@@ -166,5 +170,8 @@ class StaticMasking:
 
 
 class NullMasking:
+    def to(self, device: str) -> "NullMasking":
+        return self
+
     def __call__(self, data: TensorMapping) -> TensorDict:
         return dict(data)

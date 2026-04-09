@@ -165,6 +165,11 @@ class OceanCorrector(CorrectorABC):
         self._vertical_coordinate = vertical_coordinate
         self._timestep = timestep
 
+    def to(self, device: str) -> "OceanCorrector":
+        if self._vertical_coordinate is not None:
+            self._vertical_coordinate = self._vertical_coordinate.to(device)
+        return self
+
     def __call__(
         self,
         input_data: TensorMapping,

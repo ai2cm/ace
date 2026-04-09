@@ -39,3 +39,6 @@ class CorrectorABC(abc.ABC):
         gen_data: TensorMapping,
         forcing_data: TensorMapping,
     ) -> TensorDict: ...
+
+    @abc.abstractmethod
+    def to(self, device: str) -> "CorrectorABC": ...
