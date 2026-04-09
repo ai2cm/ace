@@ -13,6 +13,7 @@ SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the reposi
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
 INFERENCE_CONFIG_FILENAME="ace-inference-era5-ssp245-gcs.yaml"
+INFERENCE_CONFIG_PATH=$SCRIPT_PATH/$INFERENCE_CONFIG_FILENAME
 python -m fme.ace.validate_config --config_type inference $INFERENCE_CONFIG_FILENAME
 
 launch_job () {
@@ -56,5 +57,5 @@ launch_job () {
 JOB_NAME="${JOB_NAME_BASE}-ssp245-ACE-forcing-dataset-inference"
 OVERRIDE=""
 echo "Launching job: $JOB_NAME"
-launch_job "$JOB_NAME" "$INFERENCE_CONFIG_FILENAME" "$OVERRIDE"
+launch_job "$JOB_NAME" "$INFERENCE_CONFIG_PATH" "$OVERRIDE"
 
