@@ -800,6 +800,17 @@ def _restore_checkpoint(trainer: Trainer, checkpoint_path):
     trainer._ema = EMATracker.from_state(checkpoint["ema"], trainer.stepper.modules)
 
 
+def _tensors_to_device(obj, device: torch.device):
+    """Recursively move all tensors in a nested dict/list to *device*."""
+    if isinstance(obj, torch.Tensor):
+        return obj.to(device)
+    elif isinstance(obj, dict):
+        return {k: _tensors_to_device(v, device) for k, v in obj.items()}
+    elif isinstance(obj, list | tuple):
+        return type(obj)(_tensors_to_device(v, device) for v in obj)
+    return obj
+
+
 def _load_finetune_optimization_state(optimization: Optimization, checkpoint_path: str):
     """Load optimizer (and optionally grad scaler) state for fine-tuning.
 
@@ -807,18 +818,22 @@ def _load_finetune_optimization_state(optimization: Optimization, checkpoint_pat
     checkpoint. Scheduler state and training counters are not restored, so
     the current config's schedule starts from scratch. The configured
     learning rate is preserved.
+
+    The checkpoint is loaded on CPU so that only the optimization state
+    (not model weights, EMA, etc.) is transferred to the training device.
     """
     lr = optimization.learning_rate
-    checkpoint = torch.load(
-        checkpoint_path, map_location=fme.get_device(), weights_only=False
-    )
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     if "optimization" not in checkpoint:
         raise ValueError(
             f"Checkpoint at {checkpoint_path} does not contain optimization "
             "state. Only checkpoints saved with include_optimization=True "
             "(i.e. ckpt.tar) support fine-tune optimization loading."
         )
-    optimization.load_optimizer_state_for_finetuning(checkpoint["optimization"], lr=lr)
+    optim_state = checkpoint["optimization"]
+    del checkpoint
+    optim_state = _tensors_to_device(optim_state, fme.get_device())
+    optimization.load_optimizer_state_for_finetuning(optim_state, lr=lr)
 
 
 def count_parameters(modules: torch.nn.ModuleList) -> int:
