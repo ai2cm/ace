@@ -195,6 +195,25 @@ class Optimization(OptimizationABC):
         for param_group in self.optimizer.param_groups:
             param_group["lr"] = lr
 
+    def load_optimizer_state_for_finetuning(self, state: dict, lr: float):
+        """Load optimizer and grad scaler state from a checkpoint for fine-tuning.
+
+        Restores the optimizer state dict (e.g. Adam momentum buffers) and,
+        if available, the grad scaler state. Does NOT restore the scheduler
+        state, so the current config's schedule starts from scratch. After
+        loading, re-applies the given ``lr`` because
+        ``optimizer.load_state_dict`` overwrites param-group learning rates.
+
+        Args:
+            state: The optimization state dict as saved by ``get_state()``,
+                containing at least ``"optimizer_state_dict"``.
+            lr: The learning rate to set after loading.
+        """
+        self.optimizer.load_state_dict(state["optimizer_state_dict"])
+        self.set_learning_rate(lr)
+        if self.gscaler is not None and state.get("gscaler_state_dict") is not None:
+            self.gscaler.load_state_dict(state["gscaler_state_dict"])
+
     def get_state(self):
         """
         Returns state as a serializable data structure.
