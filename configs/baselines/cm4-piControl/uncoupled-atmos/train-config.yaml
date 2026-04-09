@@ -3,89 +3,79 @@ save_checkpoint: true
 validate_using_ema: true
 ema:
   decay: 0.999
-max_epochs: 50 # this is about equivalent to the amount of trainign for ACE2-ERA5/ACE2-SHiELD
+max_epochs: 50
 n_forward_steps: 2
 inference:
-  n_forward_steps: 7300 # 5 years
-  forward_steps_in_memory: 50
+  n_forward_steps: 29200
+  forward_steps_in_memory: 40
   loader:
     start_indices:
       times:
-        # total of 120 years with 5yr rollouts
-        - "0301-01-01T06:00:00"
-        - "0301-03-01T00:00:00"
-        - "0301-04-29T00:00:00"
-        - "0301-06-26T18:00:00"
-        - "0301-08-24T18:00:00"
-        - "0301-10-22T12:00:00"
-        - "0301-12-20T12:00:00"
-        - "0302-02-17T06:00:00"
-        - "0302-04-17T06:00:00"
-        - "0302-06-15T00:00:00"
-        - "0302-08-13T00:00:00"
-        - "0302-10-10T18:00:00"
-        - "0302-12-08T18:00:00"
-        - "0303-02-05T12:00:00"
-        - "0303-04-05T12:00:00"
-        - "0303-06-03T06:00:00"
-        - "0303-08-01T06:00:00"
-        - "0303-09-29T00:00:00"
-        - "0303-11-27T00:00:00"
-        - "0304-01-24T18:00:00"
-        - "0304-03-24T18:00:00"
-        - "0304-05-22T12:00:00"
-        - "0304-07-20T12:00:00"
-        - "0304-09-17T06:00:00"
-        - "0304-11-15T06:00:00"
-        - "0305-01-13T00:00:00"
-        - "0305-03-13T00:00:00"
-        - "0305-05-10T18:00:00"
-        - "0305-07-08T18:00:00"
-        - "0305-09-05T12:00:00"
-        - "0305-11-03T12:00:00"
-        - "0306-01-01T06:00:00"
+        - '0151-01-01T06:00:00'
+        - '0171-01-01T06:00:00'
+        - '0191-01-01T06:00:00'
+        - '0211-01-01T06:00:00'
+        - '0231-01-01T06:00:00'
+        - '0251-01-01T06:00:00'
+        - '0271-01-01T06:00:00'
+        - '0291-01-01T06:00:00'
     dataset:
-      data_path: /climate-default
-      file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
-      engine: zarr
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2025-06-03-cm4-piControl-200yr-coupled-interpolate_sst-atmosphere.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+        engine: zarr
     num_data_workers: 4
   aggregator:
-    log_histograms: true
-    time_mean_reference_data: /statsdata/time-mean.nc
+    log_histograms: false
 logging:
   log_to_screen: true
   log_to_wandb: true
   log_to_file: true
-  project: ace2-cm4
+  project: SamudrACE-CM4-piControl
   entity: ai2cm
 train_loader:
   batch_size: 16
-  num_data_workers: 16
+  num_data_workers: 4
   prefetch_factor: 4
   dataset:
-    data_path: /climate-default
-    file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
-    engine: zarr
-    subset:
-      stop_time: '0301-01-01T06:00:00'
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2025-06-03-cm4-piControl-200yr-coupled-interpolate_sst-atmosphere.zarr
+      engine: zarr
+      subset:
+        stop_time: '0306-01-01T06:00:00'
+    - data_path: /climate-default
+      file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+      engine: zarr
+      subset:
+        stop_time: '0306-01-01T06:00:00'
 validation_loader:
   batch_size: 64
-  num_data_workers: 16
+  num_data_workers: 4
   prefetch_factor: 4
   dataset:
-    data_path: /climate-default
-    file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
-    engine: zarr
-    subset:
-      start_time: '0301-01-01T06:00:00'
-      stop_time: '0311-01-01T06:00:00'
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2025-06-03-cm4-piControl-200yr-coupled-interpolate_sst-atmosphere.zarr
+      engine: zarr
+      subset:
+        start_time: '0306-01-01T06:00:00'
+        stop_time: '0311-01-01T06:00:00'
+    - data_path: /climate-default
+      file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+      engine: zarr
+      subset:
+        start_time: '0306-01-01T06:00:00'
+        stop_time: '0311-01-01T06:00:00'
 optimization:
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
   lr: 0.0001
-  optimizer_type: AdamW
+  optimizer_type: FusedAdam
   kwargs:
-    fused: true
     weight_decay: 0.01
 stepper_training:
   loss:
@@ -113,14 +103,16 @@ stepper:
     type: single_module
     config:
       builder:
-        type: NoiseConditionedSFNO
+        type: SphericalFourierNeuralOperatorNet
         config:
           embed_dim: 384
-          noise_embed_dim: 0
           filter_type: linear
+          hard_thresholding_fraction: 1.0
           use_mlp: true
+          normalization_layer: instance_norm
           num_layers: 8
           operator_type: dhconv
+          scale_factor: 1
           separable: false
           spectral_layers: 3
           spectral_transform: sht
@@ -134,6 +126,7 @@ stepper:
       ocean:
         surface_temperature_name: surface_temperature
         ocean_fraction_name: ocean_fraction
+        interpolate: true
       corrector:
         conserve_dry_air: true
         moisture_budget_correction: advection_and_precipitation
@@ -158,6 +151,7 @@ stepper:
       - DSWRFtoa
       in_names:
       - land_fraction
+      - lake_fraction
       - ocean_fraction
       - sea_ice_fraction
       - DSWRFtoa
@@ -251,6 +245,5 @@ stepper:
       - tendency_of_total_water_path_due_to_advection
       - TMP850
       - h500
-      # ocean coupling variables (diagnostic for now)
       - eastward_surface_wind_stress
       - northward_surface_wind_stress
