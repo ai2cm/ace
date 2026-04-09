@@ -18,7 +18,7 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.histogram import ComparedDynamicTailsHistograms
-from fme.core.typing_ import TensorMapping
+from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators.adapters import ComparedDynamicTailsHistogramsAdapter
 from fme.downscaling.data import PairedBatchData
@@ -48,6 +48,179 @@ def ensure_trailing_slash(key: str) -> str:
 
 def _tensor_mapping_to_numpy(data: TensorMapping) -> TensorMapping:
     return {k: v.cpu().numpy() for k, v in data.items()}
+
+
+class LossVsNoiseAggregator:
+    """
+    Aggregates binned diffusion losses as a function of sampled noise level.
+    """
+
+    def __init__(
+        self,
+        name: str = "metrics/loss_vs_noise",
+        n_bins: int = 40,
+        log10_sigma_min: float = -3.0,
+        log10_sigma_max: float = 3.5,
+    ) -> None:
+        if n_bins < 1:
+            raise ValueError("n_bins must be >= 1")
+        if log10_sigma_min >= log10_sigma_max:
+            raise ValueError("log10_sigma_min must be less than log10_sigma_max")
+        self._dist = Distributed.get_instance()
+
+        self._name = ensure_trailing_slash(name)
+        self._n_bins = n_bins
+        self._log10_sigma_min = log10_sigma_min
+        self._log10_sigma_max = log10_sigma_max
+        edges = torch.linspace(
+            log10_sigma_min, log10_sigma_max, n_bins + 1, device=get_device()
+        )
+        self._inner_edges = edges[1:-1]
+        self._bin_centers = ((edges[:-1] + edges[1:]) / 2).cpu().numpy()
+
+        self._total_sum = torch.zeros(n_bins, dtype=torch.float32, device=get_device())
+        self._total_count = torch.zeros(n_bins, dtype=torch.int64, device=get_device())
+        self._channel_sum: dict[str, torch.Tensor] = {}
+        self._channel_count: dict[str, torch.Tensor] = {}
+
+    def _accumulate(
+        self, values: torch.Tensor, bin_indices: torch.Tensor, name: str
+    ) -> None:
+        if name not in self._channel_sum:
+            self._channel_sum[name] = torch.zeros(
+                self._n_bins, dtype=torch.float32, device=get_device()
+            )
+            self._channel_count[name] = torch.zeros(
+                self._n_bins, dtype=torch.int64, device=get_device()
+            )
+        self._channel_sum[name].scatter_add_(0, bin_indices, values.to(torch.float32))
+        self._channel_count[name].scatter_add_(
+            0, bin_indices, torch.ones_like(bin_indices, dtype=torch.int64)
+        )
+
+    @torch.no_grad()
+    def record_batch(self, outputs: ModelOutputs) -> None:
+        if outputs.sigma is None or not outputs.per_sample_channel_loss:
+            return
+
+        sigma = outputs.sigma.detach().flatten()
+        if torch.any(sigma <= 0):
+            raise ValueError("Sigma must be strictly positive for log10 binning")
+        log_sigma = torch.log10(sigma)
+        in_range = (log_sigma >= self._log10_sigma_min) & (
+            log_sigma <= self._log10_sigma_max
+        )
+        if not torch.any(in_range):
+            return
+        # Indices in [0, n_bins-1] for values within the configured sigma range.
+        bin_indices = torch.bucketize(log_sigma[in_range], self._inner_edges)
+
+        per_channel: TensorDict = {}
+        for name, loss in outputs.per_sample_channel_loss.items():
+            channel_loss = loss.detach().flatten()
+            if channel_loss.shape != sigma.shape:
+                raise ValueError(
+                    "Expected per-sample channel losses and sigma to share batch shape"
+                )
+            per_channel[name] = channel_loss[in_range]
+
+        stacked = torch.stack(list(per_channel.values()), dim=-1)
+        total_loss = torch.mean(stacked, dim=-1)
+        self._total_sum.scatter_add_(0, bin_indices, total_loss)
+        self._total_count.scatter_add_(
+            0, bin_indices, torch.ones_like(bin_indices, dtype=torch.int64)
+        )
+        for name, values in per_channel.items():
+            self._accumulate(values=values, bin_indices=bin_indices, name=name)
+
+    def _plot_binned(self, y_values: np.ndarray, counts: np.ndarray, title: str) -> Any:
+        wandb = WandB.get_instance()
+        fig, ax = plt.subplots()
+        mask = counts > 0
+        ax.plot(
+            self._bin_centers[mask],
+            y_values[mask],
+            marker="o",
+            linewidth=1.0,
+            label="loss",
+        )
+        ax.set_xlabel("log10(sigma)")
+        ax.set_ylabel("mean weighted loss")
+        ax.set_title(title)
+        ax.grid(True, alpha=0.3)
+
+        ax2 = ax.twinx()
+        bin_width = float(self._bin_centers[1] - self._bin_centers[0])
+        ax2.bar(
+            self._bin_centers[mask],
+            counts[mask].astype(float),
+            width=bin_width * 0.6,
+            alpha=0.25,
+            color="gray",
+            label="bin count",
+        )
+        ax2.set_ylabel("bin count")
+
+        lines, labels = ax.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax.legend(lines + lines2, labels + labels2)
+
+        image = wandb.Image(fig)
+        plt.close(fig)
+        return image
+
+    def _get(self):
+        means, counts = {}, {}
+
+        total_sum = self._dist.reduce_sum(self._total_sum)
+        total_count = self._dist.reduce_sum(self._total_count)
+        if total_sum is None or total_count is None:
+            return {}
+        total_sum = total_sum.cpu().numpy()
+        total_count = total_count.cpu().numpy()
+
+        total_mean = np.divide(
+            total_sum,
+            total_count,
+            out=np.zeros_like(total_sum),
+            where=total_count > 0,
+        )
+
+        means["all_channels"] = total_mean
+        counts["all_channels"] = total_count
+
+        for name in sorted(self._channel_sum):
+            ch_sum = self._dist.reduce_sum(self._channel_sum[name])
+            ch_count = self._dist.reduce_sum(self._channel_count[name])
+            if ch_sum is None or ch_count is None:
+                continue
+            ch_sum = ch_sum.cpu().numpy()
+            ch_count = ch_count.cpu().numpy()
+            ch_mean = np.divide(
+                ch_sum,
+                ch_count,
+                out=np.zeros_like(ch_sum),
+                where=ch_count > 0,
+            )
+            means[name] = ch_mean
+            counts[name] = ch_count
+
+        return means, counts
+
+    def get_wandb(self, prefix: str = "") -> Mapping[str, Any]:
+        prefix = ensure_trailing_slash(prefix)
+        means, counts = self._get()
+        ret: dict[str, Any] = {}
+        if sum(counts["all_channels"]) == 0:
+            return ret
+
+        for name in sorted(means):
+            ret[f"{prefix}{self._name}{name}"] = self._plot_binned(
+                y_values=means[name],
+                counts=counts[name],
+                title=f"{name} weighted loss vs noise",
+            )
+        return ret
 
 
 def _get_spectrum_metrics(
@@ -763,6 +936,7 @@ class Aggregator:
         ssim_kwargs: Mapping[str, Any] | None = None,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
         include_positional_comparisons: bool = True,
+        log_loss_vs_noise: bool = False,
         two_tailed_variables: list[str] | None = None,
         left_tailed_variables: list[str] | None = None,
     ) -> None:
@@ -814,6 +988,8 @@ class Aggregator:
 
         self.loss = Mean(torch.mean)
         self.channel_loss = Mean(torch.mean)
+        self.log_loss_vs_noise = log_loss_vs_noise
+        self.loss_vs_noise = LossVsNoiseAggregator() if self.log_loss_vs_noise else None
         self._fine_latlon_coordinates: LatLonCoordinates | None = None
 
     @torch.no_grad()
@@ -857,6 +1033,8 @@ class Aggregator:
         self.loss.record_batch({"loss": outputs.loss})
         if outputs.channel_losses:
             self.channel_loss.record_batch(outputs.channel_losses)
+        if self.loss_vs_noise is not None:
+            self.loss_vs_noise.record_batch(outputs)
 
     def get_wandb(
         self,
@@ -871,6 +1049,8 @@ class Aggregator:
         ret.update(self.loss.get_wandb(prefix))
         if self.channel_loss._count > 0:
             ret.update(self.channel_loss.get_wandb(f"{prefix}channel_loss/"))
+        if self.loss_vs_noise is not None:
+            ret.update(self.loss_vs_noise.get_wandb(prefix))
         for comparison in self._comparisons:
             ret.update(comparison.get_wandb(prefix))
         for coarse_comparison in self._coarse_comparisons:
