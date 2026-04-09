@@ -139,6 +139,9 @@ class TrainConfigProtocol(Protocol):
     @property
     def lr_tuning(self) -> LRTuningConfig | None: ...
 
+    @property
+    def finetune_optimization_checkpoint_path(self) -> str | None: ...
+
     def get_inference_epochs(self) -> list[int]: ...
 
 
@@ -262,6 +265,14 @@ class Trainer:
         if resuming:
             logging.info(f"Resuming training from {self.paths.latest_checkpoint_path}")
             self.restore_checkpoint(self.paths.latest_checkpoint_path)
+        elif config.finetune_optimization_checkpoint_path is not None:
+            logging.info(
+                "Loading optimizer state for fine-tuning from "
+                f"{config.finetune_optimization_checkpoint_path}"
+            )
+            _load_finetune_optimization_state(
+                self.optimization, config.finetune_optimization_checkpoint_path
+            )
 
         wandb = WandB.get_instance()
         wandb.watch(self.stepper.modules)
@@ -787,6 +798,27 @@ def _restore_checkpoint(trainer: Trainer, checkpoint_path):
     trainer._best_validation_loss = checkpoint["best_validation_loss"]
     trainer._best_inference_error = checkpoint["best_inference_error"]
     trainer._ema = EMATracker.from_state(checkpoint["ema"], trainer.stepper.modules)
+
+
+def _load_finetune_optimization_state(optimization: Optimization, checkpoint_path: str):
+    """Load optimizer (and optionally grad scaler) state for fine-tuning.
+
+    Only loads the optimizer state dict and grad scaler state from the
+    checkpoint. Scheduler state and training counters are not restored, so
+    the current config's schedule starts from scratch. The configured
+    learning rate is preserved.
+    """
+    lr = optimization.learning_rate
+    checkpoint = torch.load(
+        checkpoint_path, map_location=fme.get_device(), weights_only=False
+    )
+    if "optimization" not in checkpoint:
+        raise ValueError(
+            f"Checkpoint at {checkpoint_path} does not contain optimization "
+            "state. Only checkpoints saved with include_optimization=True "
+            "(i.e. ckpt.tar) support fine-tune optimization loading."
+        )
+    optimization.load_optimizer_state_for_finetuning(checkpoint["optimization"], lr=lr)
 
 
 def count_parameters(modules: torch.nn.ModuleList) -> int:
