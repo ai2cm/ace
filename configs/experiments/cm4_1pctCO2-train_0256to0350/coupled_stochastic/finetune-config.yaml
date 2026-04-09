@@ -2,14 +2,14 @@ experiment_dir: /results
 save_checkpoint: true
 save_best_inference_epoch_checkpoints: false
 checkpoint_every_n_batches: 100
-ema_checkpoint_save_epochs:
+checkpoint_save_epochs:
   step: 1
 log_train_every_n_batches: 10
 validate_using_ema: true
 evaluate_before_training: true
 ema:
   decay: 0.999
-max_epochs: 5
+max_epochs: 10
 n_coupled_steps: 3
 inference:
   n_coupled_steps: 1440
@@ -119,16 +119,22 @@ validation_loader:
 optimization:
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
-  lr: 0.0001
+  lr: 0.00001
   optimizer_type: AdamW
   kwargs:
     fused: true
     weight_decay: 0.01
   scheduler:
-    type: CosineAnnealingLR
-    step_each_iteration: true
-    kwargs:
-      T_max: 4330
+    schedulers:
+      - type: LinearLR
+        step_each_iteration: true
+        kwargs:
+          start_factor: 0.01
+          end_factor: 1
+          total_iters: 2000
+      - type: ConstantLR
+        step_each_iteration: true
+    milestones: [2000]
 stepper_training:
   parameter_init:
     checkpoint_path: /ckpt.tar
