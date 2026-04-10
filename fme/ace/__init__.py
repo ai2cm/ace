@@ -4,6 +4,7 @@ from fme.ace.aggregator.inference import StepMeanEntry
 from fme.ace.aggregator.one_step import OneStepAggregatorConfig
 from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.augmentation import AugmentationConfig
+from fme.ace.data_loading.getters import get_forcing_data
 from fme.ace.data_loading.inference import (
     ExplicitIndices,
     InferenceInitialConditionIndices,
@@ -67,6 +68,7 @@ from fme.ace.stepper.time_length_probabilities import (
 from fme.ace.train.train_config import WeatherEvaluationConfig
 from fme.core.cli import ResumeResultsConfig
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
+from fme.core.corrector.ice import IceCorrectorConfig
 from fme.core.corrector.ocean import OceanCorrectorConfig
 from fme.core.dataset.concat import ConcatDatasetConfig
 from fme.core.dataset.merged import MergeDatasetConfig, MergeNoConcatDatasetConfig
@@ -92,6 +94,7 @@ from fme.core.step.multi_call import MultiCallConfig
 from fme.core.typing_ import Slice
 
 from . import step
+from .inference.inference import get_initial_condition
 from .train.train import run_train
 from .train.train_config import (
     CopyWeightsConfig,

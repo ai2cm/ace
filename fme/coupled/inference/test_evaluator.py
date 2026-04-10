@@ -296,6 +296,23 @@ def _create_dataset_info_for_stepper(
     return dataset_info, mock_data
 
 
+def test_evaluator_n_coupled_steps_divisible_by_coupled_steps_in_memory():
+    from unittest.mock import MagicMock
+
+    with pytest.raises(
+        ValueError,
+        match="n_coupled_steps must be divisible by coupled_steps_in_memory",
+    ):
+        InferenceEvaluatorConfig(
+            experiment_dir="test",
+            n_coupled_steps=3,
+            checkpoint_path="test.pt",
+            logging=MagicMock(),
+            loader=MagicMock(),
+            coupled_steps_in_memory=2,
+        )
+
+
 @pytest.mark.parametrize(
     "n_coupled_steps,coupled_steps_in_memory,n_initial_conditions,"
     "save_standalone_component_checkpoints,use_prediction_data",

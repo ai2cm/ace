@@ -5,42 +5,46 @@ import pytest
 import torch
 
 from fme.core.loss import StepLoss
-from fme.core.typing_ import TensorMapping
+from fme.core.typing_ import EnsembleTensorDict, TensorMapping
 
 from .loss import LossContributionsConfig, StepLossABC, StepPredictionABC
-from .stepper import ComponentStepPrediction, CoupledStepperTrainLoss
+from .stepper import ComponentEnsembleStepPrediction, CoupledStepperTrainLoss
 
 
 def step_and_target_gen(
     n_atmos_per_ocean=2,
-) -> Generator[tuple[ComponentStepPrediction, TensorMapping], None, None]:
+) -> Generator[tuple[ComponentEnsembleStepPrediction, TensorMapping], None, None]:
     torch.manual_seed(0)
     atmos_step = 0
     ocean_step = 0
     while True:
         yield (
-            ComponentStepPrediction(
+            ComponentEnsembleStepPrediction(
                 realm="atmosphere",
-                data={"a": torch.rand(1, 1, 3), "b": torch.rand(1, 1, 3)},
+                data=EnsembleTensorDict(
+                    {"a": torch.rand(1, 1, 1, 3), "b": torch.rand(1, 1, 1, 3)}
+                ),
                 step=atmos_step,
             ),
-            {"a": torch.rand(1, 1, 3), "b": torch.zeros(1, 1, 3)},
+            {"a": torch.rand(1, 1, 1, 3), "b": torch.zeros(1, 1, 1, 3)},
         )
         if atmos_step % n_atmos_per_ocean == 1:
             yield (
-                ComponentStepPrediction(
+                ComponentEnsembleStepPrediction(
                     realm="ocean",
-                    data={"o": torch.rand(1, 1, 3), "c": torch.rand(1, 1, 3)},
+                    data=EnsembleTensorDict(
+                        {"o": torch.rand(1, 1, 1, 3), "c": torch.rand(1, 1, 1, 3)}
+                    ),
                     step=ocean_step,
                 ),
-                {"o": torch.rand(1, 1, 3), "c": torch.zeros(1, 1, 3)},
+                {"o": torch.rand(1, 1, 1, 3), "c": torch.zeros(1, 1, 1, 3)},
             )
             ocean_step += 1
         atmos_step += 1
 
 
 @pytest.fixture(scope="module")
-def steps_thru_atmos_7() -> list[tuple[ComponentStepPrediction, TensorMapping]]:
+def steps_thru_atmos_7() -> list[tuple[ComponentEnsembleStepPrediction, TensorMapping]]:
     """
     Fixture to generate a sequence of steps and targets
     """
