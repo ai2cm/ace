@@ -59,7 +59,7 @@ declare -A PRE_TRAINED_WEIGHTS_DATASETS=( \
 # done
 
 # for seed in 0 1
-for seed in 2
+for seed in 3
 do
     job_name="ace-shield-multi-step-fine-tune-energy-conserving-full-rs${seed}"
     # Offset seed for fine-tuning so that data shuffling is different than
@@ -78,7 +78,7 @@ do
         --description 'Run ACE training' \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
         --workspace ai2/climate-titan \
-        --priority urgent \
+        --priority high \
         --preemptible \
         --cluster ai2/titan \
         --env WANDB_NAME=$job_name \
