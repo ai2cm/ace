@@ -3,7 +3,7 @@ import dataclasses
 import datetime
 import logging
 import pathlib
-from collections.abc import Callable, Generator, Iterable
+from collections.abc import Generator, Iterable
 from typing import Any, Literal
 
 import dacite
@@ -1022,7 +1022,6 @@ class CoupledStepper:
         initial_condition: CoupledPrognosticState,
         forcing_data: CoupledBatchData,
         optimizer: OptimizationABC,
-        step_is_optimized: Callable[[str, int], bool] = lambda n, c: True,
     ) -> Generator[ComponentStepPrediction, None, None]:
         if (
             initial_condition.atmosphere_data.as_batch_data().n_timesteps
@@ -1082,10 +1081,7 @@ class CoupledStepper:
             # predict and yield atmosphere steps
             for i_inner in range(self.n_inner_steps):
                 atmos_step_num = i_outer * self.n_inner_steps + i_inner
-                optimized = step_is_optimized("atmosphere", atmos_step_num)
-                context = contextlib.nullcontext() if optimized else torch.no_grad()
-                with context:
-                    atmos_step = next(atmos_generator)
+                atmos_step = next(atmos_generator)
                 yield ComponentStepPrediction(
                     realm="atmosphere",
                     data=atmos_step,
@@ -1116,21 +1112,16 @@ class CoupledStepper:
                 labels=ocean_window.labels,
             )
             # predict and yield a single ocean step
-            ocean_optimized = step_is_optimized("ocean", i_outer)
-            ocean_context = (
-                contextlib.nullcontext() if ocean_optimized else torch.no_grad()
-            )
-            with ocean_context:
-                ocean_step = next(
-                    iter(
-                        self.ocean.get_prediction_generator(
-                            ocean_ic_state,
-                            ocean_forcings,
-                            n_forward_steps=1,
-                            optimizer=optimizer,
-                        )
+            ocean_step = next(
+                iter(
+                    self.ocean.get_prediction_generator(
+                        ocean_ic_state,
+                        ocean_forcings,
+                        n_forward_steps=1,
+                        optimizer=optimizer,
                     )
                 )
+            )
             yield ComponentStepPrediction(
                 realm="ocean",
                 data=ocean_step,
@@ -1390,16 +1381,22 @@ class CoupledStepperTrainLoss:
             atmosphere=self._loss_objs["atmosphere"].effective_loss_scaling,
         )
 
-    def step_is_optimized(self, realm: str, step: int) -> bool:
-        return self._loss_objs[realm].step_is_optimized(step)
+    def step_is_optimized(
+        self,
+        realm: Literal["ocean", "atmosphere"],
+        step: int,
+        n_total_steps: int,
+    ) -> bool:
+        return self._loss_objs[realm].step_is_optimized(step, n_total_steps)
 
     def __call__(
         self,
         prediction: ComponentEnsembleStepPrediction,
         target_data: TensorMapping,
+        n_total_steps: int | None = None,
     ) -> torch.Tensor | None:
         loss_obj = self._loss_objs[prediction.realm]
-        if loss_obj.step_is_optimized(prediction.step):
+        if loss_obj.step_is_optimized(prediction.step, n_total_steps):
             return loss_obj(prediction, target_data)
         return None
 
@@ -1604,6 +1601,37 @@ class CoupledTrainStepper(
     def update_training_history(self, training_job: TrainingJob) -> None:
         self._stepper.update_training_history(training_job)
 
+    def _accumulate_step_loss(
+        self,
+        gen_step: ComponentStepPrediction,
+        forward_data: TensorMapping,
+        time_dim: int,
+        n_total_steps: int,
+        n_ensemble: int,
+        optimization: OptimizationABC,
+        metrics: ComponentStepMetrics,
+        output_list: list[ComponentEnsembleStepPrediction],
+    ) -> None:
+        target_step = {
+            k: v.select(time_dim, gen_step.step) for k, v in forward_data.items()
+        }
+        ensemble_step = ComponentEnsembleStepPrediction(
+            realm=gen_step.realm,
+            data=unfold_ensemble_dim(gen_step.data, n_ensemble),
+            step=gen_step.step,
+        )
+        target_step_ensemble = add_ensemble_dim(target_step)
+        step_loss = self._loss(ensemble_step, target_step_ensemble, n_total_steps)
+        if step_loss is not None:
+            label = f"loss/{gen_step.realm}_step_{gen_step.step}"
+            metrics.add_metric(label, step_loss.detach(), gen_step.realm)
+            optimization.accumulate_loss(step_loss)
+        output_list.append(
+            ensemble_step.detach_if_using_gradient_accumulation(
+                optimization
+            )  # eagerly detach
+        )
+
     def _accumulate_loss(
         self,
         data: CoupledBatchData,
@@ -1630,36 +1658,47 @@ class CoupledTrainStepper(
             input_data,
             data_ensemble,
             optimization,
-            step_is_optimized=self._loss.step_is_optimized,
         )
+        output_iterator = iter(output_generator)
         output_list: list[ComponentEnsembleStepPrediction] = []
-        for gen_step in output_generator:
-            if gen_step.realm == "ocean":
-                target_step = {
-                    k: v.select(self.ocean.TIME_DIM, gen_step.step)
-                    for k, v in ocean_forward_data.data.items()
-                }
-            else:
-                target_step = {
-                    k: v.select(self.atmosphere.TIME_DIM, gen_step.step)
-                    for k, v in atmos_forward_data.data.items()
-                }
-            ensemble_step = ComponentEnsembleStepPrediction(
-                realm=gen_step.realm,
-                data=unfold_ensemble_dim(gen_step.data, n_ensemble),
-                step=gen_step.step,
-            )
-            target_step_ensemble = add_ensemble_dim(target_step)
-            step_loss = self._loss(ensemble_step, target_step_ensemble)
-            if step_loss is not None:
-                label = f"loss/{gen_step.realm}_step_{gen_step.step}"
-                metrics.add_metric(label, step_loss.detach(), gen_step.realm)
-                optimization.accumulate_loss(step_loss)
-            output_list.append(
-                ensemble_step.detach_if_using_gradient_accumulation(
-                    optimization
-                )  # eagerly detach
-            )
+        n_outer_steps = data.ocean_data.n_timesteps - self.n_ic_timesteps
+        n_total_atmos_steps = n_outer_steps * self.n_inner_steps
+        for i_outer in range(n_outer_steps):
+            for i_inner in range(self.n_inner_steps):
+                global_atmos_step = i_outer * self.n_inner_steps + i_inner
+                optimize = self._loss.step_is_optimized(
+                    "atmosphere",
+                    global_atmos_step,
+                    n_total_atmos_steps,
+                )
+                grad_context = contextlib.nullcontext() if optimize else torch.no_grad()
+                with grad_context:
+                    gen_step = next(output_iterator)
+                    self._accumulate_step_loss(
+                        gen_step=gen_step,
+                        forward_data=atmos_forward_data.data,
+                        time_dim=self.atmosphere.TIME_DIM,
+                        n_total_steps=n_total_atmos_steps,
+                        n_ensemble=n_ensemble,
+                        optimization=optimization,
+                        metrics=metrics,
+                        output_list=output_list,
+                    )
+            optimize = self._loss.step_is_optimized("ocean", i_outer, n_outer_steps)
+            grad_context = contextlib.nullcontext() if optimize else torch.no_grad()
+            with grad_context:
+                gen_step = next(output_iterator)
+                self._accumulate_step_loss(
+                    gen_step=gen_step,
+                    forward_data=ocean_forward_data.data,
+                    time_dim=self.ocean.TIME_DIM,
+                    n_total_steps=n_outer_steps,
+                    n_ensemble=n_ensemble,
+                    optimization=optimization,
+                    metrics=metrics,
+                    output_list=output_list,
+                )
+
         return output_list
 
     def train_on_batch(
