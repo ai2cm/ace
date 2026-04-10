@@ -180,7 +180,11 @@ class Trainer:
             self.num_batches_seen += 1
             if i % 10 == 0:
                 logging.info(f"Training on batch {i + 1}")
-            outputs = self.model.train_on_batch(batch, self.optimization)
+            outputs = self.model.train_on_batch(
+                batch,
+                self.optimization,
+                loss_weight_exponent=self.config.loss_weight_exponent,
+            )
             self.ema(self.model.modules)
             with torch.no_grad():
                 train_aggregator.record_batch(
@@ -254,7 +258,11 @@ class Trainer:
                 self.validation_data, random_offset=False, shuffle=False
             )
             for batch in validation_batch_generator:
-                outputs = self.model.train_on_batch(batch, self.null_optimization)
+                outputs = self.model.train_on_batch(
+                    batch,
+                    self.null_optimization,
+                    loss_weight_exponent=self.config.loss_weight_exponent,
+                )
                 validation_aggregator.record_batch(
                     outputs=outputs,
                     coarse=batch.coarse.data,
@@ -396,6 +404,7 @@ class TrainerConfig:
     experiment_dir: str
     save_checkpoints: bool
     logging: LoggingConfig
+    loss_weight_exponent: float = 1.0
     static_inputs: dict[str, str] = dataclasses.field(default_factory=dict)
     ema: EMAConfig = dataclasses.field(default_factory=EMAConfig)
     validate_using_ema: bool = False
