@@ -210,6 +210,9 @@ class InferenceEvaluatorConfig:
             before inference. When provided, validation runs first and produces
             metrics prefixed with ``val/`` (e.g. ``val/mean/weighted_rmse``),
             mirroring the validation done at the end of each training epoch.
+        n_ensemble_per_ic: Number of ensemble members per initial condition. Useful for
+            stochastic model evaluation. n_ensemble_per_ic = 1 is default behavior.
+            Cannot be used together with prediction_loader.
     """
 
     experiment_dir: str
@@ -228,8 +231,14 @@ class InferenceEvaluatorConfig:
     stepper_override: StepperOverrideConfig | None = None
     allow_incompatible_dataset: bool = False
     validation: ValidationConfig | None = None
+    n_ensemble_per_ic: int = 1
 
     def __post_init__(self):
+        if self.n_ensemble_per_ic > 1 and self.prediction_loader is not None:
+            raise ValueError(
+                "n_ensemble_per_ic > 1 cannot be used with prediction_loader, "
+                "as ensemble members require a stochastic model to differ."
+            )
         if self.data_writer.time_coarsen is not None:
             self.data_writer.time_coarsen.validate(
                 self.forward_steps_in_memory,
@@ -343,6 +352,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             total_forward_steps=config.n_forward_steps,
             window_requirements=window_requirements,
             initial_condition=initial_condition_requirements,
+            n_ensemble=config.n_ensemble_per_ic,
         )
 
         stepper = config.load_stepper()

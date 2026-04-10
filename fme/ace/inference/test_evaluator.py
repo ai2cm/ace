@@ -1441,3 +1441,112 @@ def test_inference_with_validation(tmp_path: pathlib.Path, validation_config_kwa
         ), f"Inference metrics should still be present"
 
     assert os.path.isdir(tmp_path / "validation")
+
+
+def test_n_ensemble_per_ic(tmp_path: pathlib.Path):
+    """With n_ensemble_per_ic > 1, output should have n_ics * n_ensemble samples.
+    For a deterministic model all members from the same IC are identical."""
+    in_names = ["var"]
+    out_names = ["var"]
+    n_ensemble_per_ic = 3
+    n_forward_steps = 2
+    stepper_path = tmp_path / "stepper"
+
+    horizontal = [DimSize("lat", 4), DimSize("lon", 8)]
+    dim_sizes = DimSizes(
+        n_time=n_forward_steps + 1,
+        horizontal=horizontal,
+        nz_interface=2,
+    )
+    save_plus_one_stepper(
+        stepper_path,
+        in_names,
+        out_names,
+        mean=0.0,
+        std=1.0,
+        data_shape=dim_sizes.shape_nd,
+    )
+    data = FV3GFSData(
+        path=tmp_path,
+        names=list(set(in_names).union(out_names)),
+        dim_sizes=dim_sizes,
+        time_varying_values=[float(i) for i in range(dim_sizes.n_time)],
+        timestep_days=TIMESTEP.total_seconds() / 86400,
+        save_vertical_coordinate=False,
+    )
+    config = InferenceEvaluatorConfig(
+        experiment_dir=str(tmp_path),
+        n_forward_steps=n_forward_steps,
+        checkpoint_path=str(stepper_path),
+        logging=LoggingConfig(
+            log_to_screen=True,
+            log_to_file=False,
+            log_to_wandb=False,
+        ),
+        loader=data.inference_data_loader_config,
+        aggregator=InferenceEvaluatorAggregatorConfig(
+            log_video=False,
+            log_step_means=[],
+        ),
+        data_writer=DataWriterConfig(
+            save_prediction_files=False,
+            save_monthly_files=False,
+            files=[FileWriterConfig("autoregressive")],
+        ),
+        forward_steps_in_memory=1,
+        allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
+        n_ensemble_per_ic=n_ensemble_per_ic,
+    )
+    config_filename = tmp_path / "config.yaml"
+    with open(config_filename, "w") as f:
+        yaml.dump(dataclasses.asdict(config), f)
+
+    main(yaml_config=str(config_filename))
+
+    prediction_ds = xr.open_dataset(
+        tmp_path / "autoregressive_predictions.nc", decode_timedelta=False
+    )
+    n_ics = data.inference_data_loader_config.n_initial_conditions
+    assert prediction_ds.sizes["sample"] == n_ics * n_ensemble_per_ic
+
+    # For a deterministic model, all ensemble members from the same IC should be
+    # identical. Samples are laid out as IC0-member0, IC0-member1, ..., IC1-member0,
+    # ... (repeat_interleave order).
+    for ic_idx in range(n_ics):
+        member_0 = prediction_ds["var"].isel(sample=ic_idx * n_ensemble_per_ic)
+        for member_idx in range(1, n_ensemble_per_ic):
+            xr.testing.assert_equal(
+                member_0,
+                prediction_ds["var"].isel(
+                    sample=ic_idx * n_ensemble_per_ic + member_idx
+                ),
+            )
+
+
+def test_n_ensemble_per_ic_raises_with_prediction_loader(tmp_path: pathlib.Path):
+    """n_ensemble_per_ic > 1 is incompatible with prediction_loader."""
+    horizontal = [DimSize("lat", 4), DimSize("lon", 8)]
+    dim_sizes = DimSizes(n_time=3, horizontal=horizontal, nz_interface=2)
+    data = FV3GFSData(
+        path=tmp_path,
+        names=["var"],
+        dim_sizes=dim_sizes,
+        time_varying_values=[float(i) for i in range(dim_sizes.n_time)],
+        timestep_days=TIMESTEP.total_seconds() / 86400,
+        save_vertical_coordinate=False,
+    )
+    with pytest.raises(ValueError, match="n_ensemble_per_ic"):
+        InferenceEvaluatorConfig(
+            experiment_dir=str(tmp_path),
+            n_forward_steps=2,
+            checkpoint_path="dummy",
+            logging=LoggingConfig(
+                log_to_screen=False,
+                log_to_file=False,
+                log_to_wandb=False,
+            ),
+            loader=data.inference_data_loader_config,
+            prediction_loader=data.inference_data_loader_config,
+            forward_steps_in_memory=1,
+            n_ensemble_per_ic=2,
+        )

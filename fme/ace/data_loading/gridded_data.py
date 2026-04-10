@@ -161,6 +161,7 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
         loader: DataLoader[BatchData],
         initial_condition: PrognosticState | PrognosticStateDataRequirements,
         properties: DatasetProperties,
+        n_ensemble: int = 1,
     ):
         """
         Args:
@@ -171,6 +172,9 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
                 batch of data. Data can be on any device.
             properties: Batch-constant properties for the dataset, such as variable
                 metadata and coordinate information. Data can be on any device.
+            n_ensemble: Number of ensemble members per initial condition. Each batch
+                from the loader will be replicated this many times along the sample
+                dimension, producing n_ic * n_ensemble samples per batch.
 
         Note:
             While input data can be on any device, all data exposed from this class
@@ -182,17 +186,29 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
         self._global_img_shape: tuple[int, int] = (shape[-2], shape[-1])
         self._properties = self._global_properties.localize()
         self._n_initial_conditions: int | None = None
+        self._n_ensemble = n_ensemble
         if isinstance(initial_condition, PrognosticStateDataRequirements):
+            # The IC is extracted from self.loader, which already applies
+            # broadcast_ensemble, so no explicit broadcast is needed here.
             self._initial_condition: PrognosticState = _get_initial_condition(
                 self.loader, initial_condition
             )
         else:
             self._initial_condition = initial_condition.to_device()
+            if n_ensemble > 1:
+                self._initial_condition = PrognosticState(
+                    self._initial_condition.as_batch_data().broadcast_ensemble(
+                        n_ensemble
+                    )
+                )
 
     @property
     def loader(self) -> DataLoader[BatchData]:
         def scatter_and_on_device(batch: BatchData) -> BatchData:
-            return batch.to_device().scatter_spatial(self._global_img_shape)
+            batch = batch.to_device().scatter_spatial(self._global_img_shape)
+            if self._n_ensemble > 1:
+                batch = batch.broadcast_ensemble(self._n_ensemble)
+            return batch
 
         return SizedMap(scatter_and_on_device, self._loader)
 

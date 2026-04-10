@@ -159,6 +159,7 @@ def get_inference_data(
     label_override: list[str] | None = None,
     surface_temperature_name: str | None = None,
     ocean_fraction_name: str | None = None,
+    n_ensemble: int = 1,
     _force_forkserver: bool = False,
 ) -> InferenceGriddedData:
     """
@@ -176,6 +177,8 @@ def get_inference_data(
             set to None if no ocean temperature prescribing is being used.
         ocean_fraction_name: Name of the ocean fraction variable. Can be set to None
             if no ocean temperature prescribing is being used.
+        n_ensemble: Number of ensemble members per initial condition. Each batch will
+            be replicated this many times along the sample dimension.
         _force_forkserver: Whether to force using forkserver multiprocessing context.
             This is useful for debugging or testing in cases where forkserver is not
             the default, but should generally be unused in production code.
@@ -221,6 +224,7 @@ def get_inference_data(
         loader=loader,
         initial_condition=initial_condition,
         properties=properties,
+        n_ensemble=n_ensemble,
     )
 
     return gridded_data
