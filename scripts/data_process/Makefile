@@ -312,7 +312,7 @@ xshield_amip_dataset_and_stats:
 
 .PHONY: xshield_amip_plus_4K_dataset_and_stats
 xshield_amip_plus_4K_dataset_and_stats:
-	./compute_dataset.sh --config configs/X-SHiELD-AMIP-plus-4K-1deg-$(LAYERS)-1yr.yaml
+	./compute_dataset.sh --config configs/X-SHiELD-AMIP-plus-4K-$(RESOLUTION)-$(LAYERS)-1yr.yaml
 
 .PHONY: shield_c96_ramped_climSST_random_CO2_ensemble_dataset
 shield_c96_ramped_climSST_random_CO2_ensemble_dataset:
