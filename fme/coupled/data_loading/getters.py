@@ -213,6 +213,7 @@ def get_inference_data(
     window_requirements: CoupledDataRequirements,
     initial_condition: CoupledPrognosticState | CoupledPrognosticStateDataRequirements,
     dataset_info: CoupledDatasetInfo | None = None,
+    n_ensemble: int = 1,
     _force_forkserver: bool = False,
 ) -> InferenceGriddedData:
     initial_time = None
@@ -257,6 +258,7 @@ def get_inference_data(
         loader=loader,
         initial_condition=initial_condition,
         properties=properties,
+        n_ensemble=n_ensemble,
     )
 
     return inference_data

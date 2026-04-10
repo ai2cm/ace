@@ -438,3 +438,91 @@ def test_inference_backwards_compatibility(tmp_path: pathlib.Path):
         checkpoint_path=str(stepper_path),
         mock_data=mock_data,
     )
+
+
+def test_n_ensemble_per_ic(tmp_path: pathlib.Path):
+    """With n_ensemble_per_ic > 1, output should have n_ics * n_ensemble samples.
+    For a deterministic model all members from the same IC are identical."""
+    ocean_in_names = ["o_prog", "sst", "mask_0"]
+    ocean_out_names = ["o_prog", "sst"]
+    atmos_in_names = ["a_prog", "surface_temperature", "ocean_fraction"]
+    atmos_out_names = ["a_prog", "surface_temperature"]
+    n_coupled_steps = 2
+    n_initial_conditions = 1
+    n_ensemble_per_ic = 3
+
+    data_dir = tmp_path / "data"
+    dataset_info, mock_data = _create_dataset_info_for_stepper(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmos_in_names=atmos_in_names,
+        atmos_out_names=atmos_out_names,
+        n_coupled_steps=n_coupled_steps,
+        n_initial_conditions=n_initial_conditions,
+        data_dir=data_dir,
+    )
+    checkpoint_path = save_coupled_stepper(
+        tmp_path,
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmos_in_names=atmos_in_names,
+        atmos_out_names=atmos_out_names,
+        dataset_info=dataset_info,
+        ocean_timedelta=mock_data.ocean.timedelta,
+        atmosphere_timedelta=mock_data.atmosphere.timedelta,
+    )
+    inference_data_config = InferenceDataLoaderConfig(
+        dataset=CoupledDatasetWithOptionalOceanConfig(
+            ocean=XarrayDataConfig(data_path=mock_data.ocean.data_dir),
+            atmosphere=XarrayDataConfig(data_path=mock_data.atmosphere.data_dir),
+        ),
+        start_indices=InferenceInitialConditionIndices(
+            first=0, n_initial_conditions=n_initial_conditions, interval=1
+        ),
+    )
+    config = InferenceEvaluatorConfig(
+        experiment_dir=str(tmp_path),
+        n_coupled_steps=n_coupled_steps,
+        checkpoint_path=checkpoint_path,
+        logging=LoggingConfig(log_to_screen=True, log_to_file=False, log_to_wandb=False),
+        loader=inference_data_config,
+        coupled_steps_in_memory=1,
+        n_ensemble_per_ic=n_ensemble_per_ic,
+    )
+    config_filename = tmp_path / "config.yaml"
+    with open(config_filename, "w") as f:
+        yaml.dump(dataclasses.asdict(config), f)
+
+    main(yaml_config=str(config_filename))
+
+    ocean_ds = xr.open_dataset(
+        tmp_path / "ocean" / "autoregressive_predictions.nc", decode_timedelta=False
+    )
+    atmos_ds = xr.open_dataset(
+        tmp_path / "atmosphere" / "autoregressive_predictions.nc",
+        decode_timedelta=False,
+    )
+    assert ocean_ds.sizes["sample"] == n_initial_conditions * n_ensemble_per_ic
+    assert atmos_ds.sizes["sample"] == n_initial_conditions * n_ensemble_per_ic
+
+    # For a deterministic model, all ensemble members from the same IC are identical.
+    for ds, var in [(ocean_ds, ocean_out_names[0]), (atmos_ds, atmos_out_names[0])]:
+        member_0 = ds[var].isel(sample=0)
+        for member_idx in range(1, n_ensemble_per_ic):
+            xr.testing.assert_equal(member_0, ds[var].isel(sample=member_idx))
+
+
+def test_n_ensemble_per_ic_raises_with_prediction_loader(tmp_path: pathlib.Path):
+    """n_ensemble_per_ic > 1 is incompatible with prediction_loader."""
+    from unittest.mock import MagicMock
+
+    with pytest.raises(ValueError, match="n_ensemble_per_ic"):
+        InferenceEvaluatorConfig(
+            experiment_dir=str(tmp_path),
+            n_coupled_steps=2,
+            checkpoint_path="dummy.pt",
+            logging=MagicMock(),
+            loader=MagicMock(),
+            prediction_loader=MagicMock(),
+            n_ensemble_per_ic=2,
+        )

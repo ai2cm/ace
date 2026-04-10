@@ -149,6 +149,12 @@ class CoupledBatchData:
             ),
         )
 
+    def broadcast_ensemble(self: SelfType, n_ensemble: int) -> SelfType:
+        return self.__class__(
+            ocean_data=self.ocean_data.broadcast_ensemble(n_ensemble),
+            atmosphere_data=self.atmosphere_data.broadcast_ensemble(n_ensemble),
+        )
+
     def pin_memory(self: SelfType) -> SelfType:
         self.ocean_data = self.ocean_data.pin_memory()
         self.atmosphere_data = self.atmosphere_data.pin_memory()

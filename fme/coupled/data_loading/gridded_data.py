@@ -168,13 +168,17 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
         initial_condition: CoupledPrognosticState
         | CoupledPrognosticStateDataRequirements,
         properties: CoupledDatasetProperties,
+        n_ensemble: int = 1,
     ):
         self._loader = loader
         self._properties = properties.to_device()
         self._n_initial_conditions: int | None = None
+        self._n_ensemble = n_ensemble
         if isinstance(initial_condition, CoupledPrognosticStateDataRequirements):
+            # The IC is extracted from self.loader, which already applies
+            # broadcast_ensemble, so no explicit broadcast is needed here.
             self._initial_condition: CoupledPrognosticState = _get_initial_condition(
-                loader, initial_condition
+                self.loader, initial_condition
             )
         else:
             self._initial_condition = initial_condition.to_device()
@@ -201,10 +205,13 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
 
     @property
     def loader(self) -> DataLoader[CoupledBatchData]:
-        def on_device(x: CoupledBatchData) -> CoupledBatchData:
-            return x.to_device()
+        def on_device_and_broadcast(x: CoupledBatchData) -> CoupledBatchData:
+            x = x.to_device()
+            if self._n_ensemble > 1:
+                x = x.broadcast_ensemble(self._n_ensemble)
+            return x
 
-        return SizedMap(on_device, self._loader)
+        return SizedMap(on_device_and_broadcast, self._loader)
 
     @property
     def dataset_info(self) -> CoupledDatasetInfo:

@@ -182,6 +182,9 @@ class InferenceEvaluatorConfig:
         prediction_loader: Configuration for prediction data to evaluate. If given,
             model evaluation will not run, and instead predictions will be evaluated.
             Model checkpoint will still be used to determine inputs and outputs.
+        n_ensemble_per_ic: Number of ensemble members per initial condition. Useful for
+            stochastic model evaluation. n_ensemble_per_ic = 1 is default behavior.
+            Cannot be used together with prediction_loader.
     """
 
     experiment_dir: str
@@ -197,8 +200,14 @@ class InferenceEvaluatorConfig:
         default_factory=lambda: InferenceEvaluatorAggregatorConfig()
     )
     prediction_loader: InferenceDataLoaderConfig | None = None
+    n_ensemble_per_ic: int = 1
 
     def __post_init__(self):
+        if self.n_ensemble_per_ic > 1 and self.prediction_loader is not None:
+            raise ValueError(
+                "n_ensemble_per_ic > 1 cannot be used with prediction_loader, "
+                "as ensemble members require a stochastic model to differ."
+            )
         _validate_coupled_steps_config(
             self.n_coupled_steps, self.coupled_steps_in_memory
         )
@@ -334,6 +343,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         window_requirements=window_requirements,
         initial_condition=initial_condition_requirements,
         dataset_info=stepper.training_dataset_info,
+        n_ensemble=config.n_ensemble_per_ic,
     )
     stepper.set_eval()
 
