@@ -108,6 +108,9 @@ PostProcessFnType = Callable[[TensorMapping], TensorDict]
 
 
 class NullPostProcessFn:
+    def to(self, device: str) -> "NullPostProcessFn":
+        return self
+
     def __call__(self, data: TensorMapping) -> TensorDict:
         return dict(data)
 

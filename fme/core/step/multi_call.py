@@ -323,3 +323,8 @@ class MultiCallStep(StepABC):
             state: The ML model state of the multi-call step.
         """
         self._wrapped_step.load_state(state["wrapped_step"])
+
+    def to(self, device: str) -> "MultiCallStep":
+        """Move the step's tensors and modules to the specified device."""
+        self._wrapped_step.to(device)
+        return self

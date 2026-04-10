@@ -240,6 +240,28 @@ class DatasetInfo:
             all_labels=self._all_labels,
         )
 
+    def to(self, device: str) -> "DatasetInfo":
+        """Move tensor-holding components to the specified device."""
+        horizontal_coordinates = self._horizontal_coordinates
+        if horizontal_coordinates is not None:
+            horizontal_coordinates = horizontal_coordinates.to(device)
+        vertical_coordinate = self._vertical_coordinate
+        if vertical_coordinate is not None:
+            vertical_coordinate = vertical_coordinate.to(device)
+        mask_provider = self._mask_provider
+        if mask_provider is not None:
+            mask_provider = mask_provider.to(device)
+        return DatasetInfo(
+            horizontal_coordinates=horizontal_coordinates,
+            vertical_coordinate=vertical_coordinate,
+            mask_provider=mask_provider,
+            timestep=self._timestep,
+            variable_metadata=self._variable_metadata,
+            gridded_operations=self._gridded_operations,
+            img_shape=self._img_shape,
+            all_labels=self._all_labels,
+        )
+
     def get_state(self) -> dict[str, Any]:
         if self._gridded_operations is not None:
             gridded_operations = self._gridded_operations.get_state()

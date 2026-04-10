@@ -58,6 +58,9 @@ class HasAtmosphereVerticalIntegral(Protocol):
     def get_bk(self) -> torch.Tensor:
         pass
 
+    def to(self, device: str) -> "HasAtmosphereVerticalIntegral":
+        pass
+
 
 class AtmosphereData:
     """Container for atmospheric data for accessing variables and providing

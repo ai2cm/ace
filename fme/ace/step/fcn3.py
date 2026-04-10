@@ -507,3 +507,10 @@ class FCN3Step(StepABC):
             state: The state to load.
         """
         self.module.load_state_dict(state["module"])
+
+    def to(self, device: str) -> "FCN3Step":
+        """Move the step's tensors and modules to the specified device."""
+        self.module = self.module.to(device)
+        self._normalizer = self._normalizer.to(device)
+        self._corrector.to(device)
+        return self

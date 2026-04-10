@@ -162,6 +162,11 @@ class AtmosphereCorrector(CorrectorABC):
         else:
             self._dry_air_precision = torch.float64
 
+    def to(self, device: str) -> "AtmosphereCorrector":
+        if self._vertical_coordinate is not None:
+            self._vertical_coordinate = self._vertical_coordinate.to(device)
+        return self
+
     def __call__(
         self,
         input_data: TensorMapping,

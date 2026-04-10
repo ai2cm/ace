@@ -37,6 +37,8 @@ class HasOceanDepthIntegral(Protocol):
         integrand: torch.Tensor,
     ) -> torch.Tensor: ...
 
+    def to(self, device: str) -> "HasOceanDepthIntegral": ...
+
 
 class HasCellAreaInMetersSquared(Protocol):
     """Protocol for objects that can provide cell areas in square meters."""

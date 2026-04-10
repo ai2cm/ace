@@ -420,3 +420,11 @@ class SeparateRadiationStep(StepABC):
         """
         self.module.load_state(state["module"])
         self.radiation_module.load_state(state["radiation_module"])
+
+    def to(self, device: str) -> "SeparateRadiationStep":
+        """Move the step's tensors and modules to the specified device."""
+        self.module = self.module.to(device)
+        self.radiation_module = self.radiation_module.to(device)
+        self._normalizer = self._normalizer.to(device)
+        self._corrector.to(device)
+        return self

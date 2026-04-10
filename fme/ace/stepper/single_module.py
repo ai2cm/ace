@@ -343,8 +343,8 @@ class TrainOutput(TrainOutputABC):
     target_data: EnsembleTensorDict
     time: xr.DataArray
     normalize: Callable[[TensorDict], TensorDict]
-    derive_func: Callable[[TensorMapping, TensorMapping], TensorDict] = (
-        lambda x, _: dict(x)
+    derive_func: Callable[[TensorMapping, TensorMapping], TensorDict] = lambda x, _: (
+        dict(x)
     )
 
     def __post_init__(self):
@@ -1350,6 +1350,16 @@ class Stepper:
         stepper.load_state(state)
         return stepper
 
+    def to(self, device: str) -> "Stepper":
+        """Move the stepper's tensors and modules to the specified device."""
+        self._step_obj.to(device)
+        self._dataset_info = self._dataset_info.to(device)
+        if hasattr(self._input_process_func, "to"):
+            self._input_process_func.to(device)
+        if hasattr(self._output_process_func, "to"):
+            self._output_process_func.to(device)
+        return self
+
     def set_eval(self) -> None:
         for module in self.modules:
             module.eval()
@@ -1795,10 +1805,10 @@ def load_stepper(
     if override_config is None:
         override_config = StepperOverrideConfig()
 
-    checkpoint = torch.load(
-        checkpoint_path, map_location=get_device(), weights_only=False
-    )
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     stepper = Stepper.from_state(checkpoint["stepper"])
+    del checkpoint
+    stepper.to(get_device())
 
     if override_config.ocean != "keep":
         logging.info(

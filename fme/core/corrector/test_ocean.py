@@ -33,6 +33,9 @@ class _MockDepth:
         thickness = idepth.diff(dim=-1)
         return torch.nansum(_MASK * integrand * thickness, dim=-1)
 
+    def to(self, device: str) -> "_MockDepth":
+        return self
+
 
 _VERTICAL_COORD = _MockDepth()
 

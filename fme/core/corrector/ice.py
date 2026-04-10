@@ -212,6 +212,9 @@ class IceCorrector(CorrectorABC):
         self._gridded_operations = gridded_operations
         self._timestep = timestep
 
+    def to(self, device: str) -> "IceCorrector":
+        return self
+
     def __call__(
         self,
         input_data: TensorMapping,

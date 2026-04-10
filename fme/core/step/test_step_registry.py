@@ -70,6 +70,9 @@ class MockStep(StepABC):
     def load_state(self, state):
         pass
 
+    def to(self, device: str) -> "MockStep":
+        return self
+
 
 @StepSelector.register("mock")
 @dataclasses.dataclass
