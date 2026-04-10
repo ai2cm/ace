@@ -413,6 +413,7 @@ class DiffusionModel:
         self,
         batch: PairedBatchData,
         optimizer: Optimization | NullOptimization,
+        loss_weight_exponent: float = 1.0,
     ) -> ModelOutputs:
         """Performs a denoising training step on a batch of data."""
         _static_inputs = self._subset_static_if_available(batch.coarse)
@@ -435,7 +436,10 @@ class DiffusionModel:
             targets_norm = targets_norm - base_prediction
 
         conditioned_target = condition_with_noise_for_training(
-            targets_norm, self.config.noise_distribution, self.sigma_data
+            targets_norm,
+            self.config.noise_distribution,
+            self.sigma_data,
+            loss_weight_exponent=loss_weight_exponent,
         )
 
         denoised_norm = self.module(
