@@ -4,8 +4,9 @@ Fetch netCDF event files from a beaker dataset and generate map and histogram
 plots for each variable (coarse, target, and predicted ensemble samples).
 
 This works with saved event outputs from `fme.downscaling.evaluator` from a
-beaker experiment. It downloads the experiment files to a temporary directory,
-parses filenames for *YYYYMMDD*.nc event outputs, and optionally merges in
+beaker experiment. It downloads the dataset to a temporary directory, finds
+``*.nc`` files recursively (including plain ``{event_name}.nc`` from
+``EventEvaluator``, not only ``*_YYYYMMDD*.nc``), and optionally merges in
 coarse data for map comparison.
 
 Usage:
@@ -257,16 +258,38 @@ def detect_variable_pairs(ds: xr.Dataset) -> list[str]:
     return sorted(predicted & target)
 
 
-def filename_to_datetime(filename: str) -> cftime.DatetimeJulian:
-    match = re.search(r"(\d{4})(\d{2})(\d{2})(?:T(\d{2}))?", filename)
-    if match is None:
-        raise ValueError(f"Could not parse date from filename: {filename}")
-    return cftime.DatetimeJulian(
-        int(match.group(1)),
-        int(match.group(2)),
-        int(match.group(3)),
-        int(match.group(4) or 12),
+def infer_event_datetime_for_coarse(path: str | Path) -> cftime.DatetimeJulian:
+    """Parse an event date from *path* for coarse-field time selection.
+
+    Tries ``YYYYMMDD`` (and optional ``T{hour}``) anywhere in the string, then
+    ISO ``YYYY-MM-DD``. EventEvaluator saves ``{event_name}.nc`` with no date;
+    in that case we fall back to ``TIME_SEL.start`` and warn so maps still run.
+    """
+    s = str(path)
+    match = re.search(r"(\d{4})(\d{2})(\d{2})(?:T(\d{2}))?", s)
+    if match is not None:
+        return cftime.DatetimeJulian(
+            int(match.group(1)),
+            int(match.group(2)),
+            int(match.group(3)),
+            int(match.group(4) or 12),
+        )
+    iso = re.search(r"(\d{4})-(\d{2})-(\d{2})", s)
+    if iso is not None:
+        return cftime.DatetimeJulian(
+            int(iso.group(1)),
+            int(iso.group(2)),
+            int(iso.group(3)),
+            12,
+        )
+    warnings.warn(
+        f"No date found in path {s!r}; using coarse time {TIME_SEL.start!r} for "
+        "merge_coarse. Include YYYYMMDD in the file or parent path, or verify "
+        "coarse data covers this time.",
+        UserWarning,
+        stacklevel=2,
     )
+    return TIME_SEL.start
 
 
 def add_wind_speed(ds: xr.Dataset) -> xr.Dataset:
@@ -314,11 +337,11 @@ def main():
     print(f"Fetching beaker dataset: {beaker_id}")
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        fetch_beaker_dataset(beaker_id, temp_dir)
-
-        event_files = find_event_files(temp_dir)
+        # fetch_beaker_dataset may return a cache dir; temp_dir is empty on cache hit.
+        data_dir = fetch_beaker_dataset(beaker_id, temp_dir)
+        event_files = find_event_files(data_dir)
         if not event_files:
-            print(f"No event files found in dataset {beaker_id}")
+            print(f"No event files found in dataset {beaker_id} (searched {data_dir})")
             return
 
         print(f"Found {len(event_files)} event file(s)")
@@ -331,7 +354,7 @@ def main():
 
             event = xr.open_dataset(nc_file)
             event = merge_coarse(
-                event, coarse, datetime=filename_to_datetime(nc_file.name)
+                event, coarse, datetime=infer_event_datetime_for_coarse(nc_file)
             )
             event = add_wind_speed(event)
             variables = detect_variable_pairs(event)

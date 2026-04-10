@@ -42,11 +42,26 @@ def fetch_beaker_dataset(
 
 
 def find_event_files(directory: str) -> dict[str, Path]:
-    """Find netCDF files matching the event naming pattern, keyed by event name."""
-    event_files = {}
-    for p in sorted(Path(directory).glob("*.nc")):
-        # extract event name
+    """Find netCDF event outputs under *directory*, including nested paths.
+
+    * Filenames like ``<event_name>_YYYYMMDD*.nc`` are keyed by *event_name*
+      (same behavior as before).
+    * Other ``*.nc`` files — e.g. plain ``{event_name}.nc`` written by
+      :class:`fme.downscaling.evaluator.EventEvaluator` when
+      ``save_generated_samples`` is true — are keyed by the path stem relative
+      to *directory*, with ``/`` replaced by ``__`` so Beaker's nested layouts
+      still produce unique keys.
+
+    Excludes ``evaluator_maps_and_metrics.nc`` (aggregate metrics, not events).
+    """
+    root = Path(directory).resolve()
+    event_files: dict[str, Path] = {}
+    for p in sorted(root.rglob("*.nc")):
+        print(p.name)
         matched = _EVENT_FILE_RE.match(p.name)
         if matched:
-            event_files[matched.group(1)] = p
+            key = matched.group(1)
+        else:
+            key = p.relative_to(root).with_suffix("").as_posix().replace("/", "__")
+        event_files[key] = p
     return event_files

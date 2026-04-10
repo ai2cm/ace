@@ -5,8 +5,8 @@ comparing ensemble predictions against targets for each variable.
 
 This will work for saved event outputs from `fme.downscaling.evaluator`
 from a beaker experiment.  It downloads the experiment files to a temporary
-directory and then parses the filenames for <event_name>_YYYYMMDD*.nc to look
-for single-event outputs.
+directory, discovers ``*.nc`` files recursively (including ``*_YYYYMMDD*.nc``
+and plain ``{event_name}.nc`` from the evaluator), then plots each event file.
 
 Usage:
     python plot_beaker_histograms.py <beaker_dataset_id> [--output-dir <path>]
@@ -178,11 +178,10 @@ def main():
     print(f"Fetching beaker dataset: {beaker_id}")
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        fetch_beaker_dataset(beaker_id, temp_dir)
-
-        event_files = find_event_files(temp_dir)
+        data_dir = fetch_beaker_dataset(beaker_id, temp_dir)
+        event_files = find_event_files(data_dir)
         if not event_files:
-            print(f"No event files found in dataset {beaker_id}")
+            print(f"No event files found in dataset {beaker_id} (searched {data_dir})")
             return
 
         print(f"Found {len(event_files)} event file(s)")
