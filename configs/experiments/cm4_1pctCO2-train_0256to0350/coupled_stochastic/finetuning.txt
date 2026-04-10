@@ -1,3 +1,3 @@
 group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
 
-ft_fto_stochastic_ncs3_10ep_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|ace-samudra-coupled-cm4|ju5l96b1|best_inference_ckpt|train|urgent|b200|8|800GiB|3|ai2/climate-titan|seed=0
+ft_fto_stochastic_ncs4_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|ace-samudra-coupled-cm4|ju5l96b1|best_inference_ckpt|train|urgent|b200|8|800GiB|3|ai2/climate-titan|seed=0
