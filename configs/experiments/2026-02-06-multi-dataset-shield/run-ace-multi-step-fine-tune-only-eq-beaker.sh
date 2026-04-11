@@ -35,7 +35,7 @@ do
         --workspace ai2/climate-titan \
         --priority urgent \
         --preemptible \
-        --cluster ai2/jupiter \
+        --cluster ai2/titan \
         --env WANDB_NAME=$job_name \
         --env WANDB_USERNAME=$WANDB_USERNAME \
         --env WANDB_JOB_TYPE=training \
