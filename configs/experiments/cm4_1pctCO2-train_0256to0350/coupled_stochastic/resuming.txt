@@ -1,3 +1,3 @@
 group|tag|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|ocean_results_dataset|atmos_results_dataset
 
-ft_fto_stochastic_ncs3_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|ace-samudra-coupled-cm4|pp0wgwoh|train|urgent|b200|8|800GiB|3|ai2/climate-titan|max_epochs=40 checkpoint_save_epochs.step=4  resume_results.resume_wandb=True
+ft_fto_stochastic_ncs4_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|ace-samudra-coupled-cm4|frrl348q|train|high|b200|8|800GiB|3|ai2/climate-titan|max_epochs=40 resume_results.resume_wandb=True
