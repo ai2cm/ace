@@ -8,6 +8,7 @@ from fme.core.wildcard import (
     UnusedRuleError,
     apply_by_exclude,
     apply_by_include,
+    parse_3d_varname,
     wildcard_match,
 )
 
@@ -123,3 +124,24 @@ def test_apply_by_exclude(exclude, expected_applied, expected_error):
 
     if expected_error is None:
         assert applied == set(expected_applied)
+
+
+@pytest.mark.parametrize(
+    "name, expected",
+    [
+        ("specific_humidity_3", ("specific_humidity", 3)),
+        ("temp_10", ("temp", 10)),
+        ("temp_10_suffix", None),
+        ("surface_var", None),
+    ],
+)
+def test_parse_3d_varname(name, expected):
+    returned = parse_3d_varname(name)
+    if expected is None:
+        assert returned is None
+    else:
+        assert returned is not None
+        expected_name, expected_level = expected
+        returned_name, returned_level = returned
+        assert returned_name == expected_name
+        assert returned_level == expected_level

@@ -1,6 +1,5 @@
 import abc
 import logging
-import re
 from collections.abc import Callable
 from typing import Any, TypeVar
 
@@ -9,8 +8,7 @@ import torch
 from fme.core.distributed import Distributed
 from fme.core.masking import NullMasking, StaticMasking
 from fme.core.typing_ import TensorDict, TensorMapping
-
-LEVEL_PATTERN = re.compile(r"_(\d+)$")
+from fme.core.wildcard import parse_3d_varname
 
 
 class MaskProviderABC(abc.ABC):
@@ -120,9 +118,9 @@ class MaskProvider(MaskProviderABC):
         if mask_name in self.masks:
             return self.masks[mask_name]
         # level specific for 3D vars
-        match = LEVEL_PATTERN.search(name)
-        if match:
-            level = int(match.group(1))
+        parsed = parse_3d_varname(name)
+        if parsed:
+            level = parsed[1]
             mask_name = f"mask_{level}"
             return self.masks.get(mask_name, None)
         # 2D mask or None
