@@ -1,0 +1,3 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
+
+BK-v1124-ACES-E3SMv3-piControl-100yr|rs2|ace-eamv3|gvot5r9r|best_inference_ckpt|train|high|h100|8||3||seed=0

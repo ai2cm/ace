@@ -1,0 +1,140 @@
+experiment_dir: /results
+save_checkpoint: true
+validate_using_ema: true
+evaluate_before_training: true
+ema:
+  decay: 0.999
+max_epochs: 25
+inference:
+  n_forward_steps: 17520
+  forward_steps_in_memory: 40
+  loader:
+    start_indices:
+      times:
+      - '0401-01-03T12:00:00'
+      - '0413-01-03T12:00:00'
+      - '0425-01-03T12:00:00'
+      - '0437-01-03T12:00:00'
+      - '0449-01-03T12:00:00'
+      - '0461-01-03T12:00:00'
+      - '0473-01-03T12:00:00'
+      - '0484-01-03T12:00:00'
+    dataset:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-sea_ice.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr.zarr
+        engine: zarr
+    num_data_workers: 4
+  aggregator:
+    log_histograms: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-eamv3
+  entity: ai2cm
+  metrics_log_dir: /results/metrics
+train_loader:
+  batch_size: 16
+  num_data_workers: 4
+  prefetch_factor: 4
+  time_buffer: 10
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-sea_ice.zarr
+      engine: zarr
+      subset:
+        start_time: '0401-01-03T12:00:00'
+        stop_time: '0496-01-01T00:00:00'
+    - data_path: /climate-default
+      file_pattern: 2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr.zarr
+      engine: zarr
+      subset:
+        start_time: '0401-01-03T12:00:00'
+        stop_time: '0496-01-01T00:00:00'
+validation_loader:
+  batch_size: 64
+  num_data_workers: 4
+  prefetch_factor: 4
+  time_buffer: 10
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-sea_ice.zarr
+      engine: zarr
+      subset:
+        start_time: '0496-01-01T06:00:00'
+        stop_time: '0499-12-31T18:00:00'
+    - data_path: /climate-default
+      file_pattern: 2025-10-21-E3SMv3-coupled-piControl-atmosphere-100yr.zarr
+      engine: zarr
+      subset:
+        start_time: '0496-01-01T06:00:00'
+        stop_time: '0499-12-31T18:00:00'
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+stepper_training:
+  parameter_init:
+    weights_path: /ckpt.tar
+  n_ensemble: 2
+  train_n_forward_steps:
+    outcomes:
+      - steps: 1
+        probability: 0.6
+      - steps: 2
+        probability: 0.2
+      - steps: 4
+        probability: 0.1
+      - steps: 12
+        probability: 0.05
+      - steps: 20
+        probability: 0.05
+  optimize_last_step_only: true
+  loss:
+    type: EnsembleLoss
+    weights:
+      T_0: 0.5
+      T_1: 0.5
+      U_0: 0.5
+      V_0: 0.5
+      specific_total_water_0: 0.25
+      specific_total_water_1: 0.25
+      specific_total_water_2: 0.5
+      surface_precipitation_rate: 2
+      FLDS: 2
+      surface_upward_longwave_flux: 5
+      surface_upward_shortwave_flux: 2
+      FSDS: 2
+      top_of_atmos_upward_shortwave_flux: 2
+      tendency_of_total_water_path_due_to_advection: 0.5
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
+stepper:
+  step:
+    type: single_module
+    config:
+      residual_prediction: false
+      builder:
+        type: NoiseConditionedSFNO
+        config:
+          embed_dim: 384
+          noise_embed_dim: 64
+          noise_type: isotropic
+          filter_type: linear
+          use_mlp: true
+          num_layers: 8
+          operator_type: dhconv
+          separable: false
+          spectral_layers: 3
+          spectral_transform: sht
