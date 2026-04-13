@@ -37,7 +37,7 @@ class ClosedInterval:
     def __contains__(self, value: float):
         return self.start <= value <= self.stop
 
-    def slice_of(self, coords: torch.Tensor) -> slice:
+    def slice_from(self, coords: torch.Tensor) -> slice:
         """
         Return a slice that selects all elements of `coords` within this
         specified interval. This assumes `coords` is monotonically increasing.
@@ -62,6 +62,13 @@ class ClosedInterval:
             )
         indices = mask.nonzero(as_tuple=True)[0]
         return slice(indices[0].item(), indices[-1].item() + 1)
+
+    def subset_of(self, coords: torch.Tensor) -> torch.Tensor:
+        """
+        Return a subset of `coords` that falls within this specified interval.
+        This assumes `coords` is monotonically increasing.
+        """
+        return coords[self.slice_from(coords)]
 
 
 def scale_slice(slice_: slice, scale: int) -> slice:
@@ -116,6 +123,13 @@ def adjust_fine_coord_range(
 
     If downscale factor is not provided, it is assumed that the coarse and fine
     coordinate tensors correspond to the same region bounds.
+
+    Raises:
+        ValueError: If coord_range is too close to the boundary of full_fine_coord
+            such that fewer than downscale_factor // 2 fine points exist beyond the
+            outermost selected coarse point on either side. For global latitude grids,
+            this is avoided by restricting coord_range to within ±88° (i.e. away from
+            the poles).
     """
     if downscale_factor is None:
         if full_fine_coord.shape[0] % full_coarse_coord.shape[0] != 0:
@@ -132,6 +146,19 @@ def adjust_fine_coord_range(
     n_half_fine = downscale_factor // 2
     coarse_min = full_coarse_coord[full_coarse_coord >= coord_range.start][0]
     coarse_max = full_coarse_coord[full_coarse_coord <= coord_range.stop][-1]
+
+    n_fine_below = int((full_fine_coord < coarse_min).sum())
+    n_fine_above = int((full_fine_coord > coarse_max).sum())
+    if n_fine_below < n_half_fine or n_fine_above < n_half_fine:
+        raise ValueError(
+            f"coord_range {coord_range} is too close to the boundary of "
+            f"full_fine_coord [{full_fine_coord.min():.2f}, "
+            f"{full_fine_coord.max():.2f}]. Need at least {n_half_fine} fine "
+            f"point(s) beyond each coarse boundary; got {n_fine_below} below "
+            f"and {n_fine_above} above. Restrict the coordinate range away from "
+            f"the domain edges."
+        )
+
     fine_min = full_fine_coord[full_fine_coord < coarse_min][-n_half_fine]
     fine_max = full_fine_coord[full_fine_coord > coarse_max][n_half_fine - 1]
 

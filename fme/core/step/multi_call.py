@@ -6,7 +6,6 @@ from typing import Any, TypeVar
 import torch
 from torch import nn
 
-from fme.core.corrector.atmosphere import EnergyBudgetConfig
 from fme.core.dataset_info import DatasetInfo
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
@@ -197,11 +196,6 @@ class MultiCallStepConfig(StepConfigABC):
 
     def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
         self.wrapped_step.replace_prescribed_prognostic_names(names)
-
-    def replace_total_energy_budget_correction(
-        self, value: EnergyBudgetConfig | None
-    ) -> None:
-        self.wrapped_step.replace_total_energy_budget_correction(value)
 
     def replace_multi_call(self, multi_call: MultiCallConfig | None):
         self.config = multi_call

@@ -3,6 +3,7 @@ import pathlib
 from collections.abc import Iterable, Mapping
 from copy import copy
 
+import fsspec
 import numpy as np
 import torch
 import torch.jit
@@ -242,7 +243,8 @@ def load_dict_from_netcdf(
         defaults: Dictionary of default values for each variable, if not found
             in the netCDF file.
     """
-    ds = xr.open_dataset(path, mask_and_scale=False)
+    with fsspec.open(path, "rb") as f:
+        ds = xr.load_dataset(f, mask_and_scale=False)
 
     result = {}
     if names is None:

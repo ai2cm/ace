@@ -34,6 +34,7 @@ from fme.coupled.stepper import CoupledStepper, CoupledStepperConfig
 
 from .evaluator import (
     StandaloneComponentCheckpointsConfig,
+    _validate_coupled_steps_config,
     load_stepper,
     load_stepper_config,
 )
@@ -93,13 +94,11 @@ class CoupledInitialConditionConfig:
             ocean_data=get_initial_condition(
                 ds=ocean,
                 prognostic_names=ocean_prognostic_names,
-                labels=None,
                 n_ensemble=n_ensemble_per_ic,
             ),
             atmosphere_data=get_initial_condition(
                 ds=atmos,
                 prognostic_names=atmosphere_prognostic_names,
-                labels=None,
                 n_ensemble=n_ensemble_per_ic,
             ),
         )
@@ -139,6 +138,11 @@ class InferenceConfig:
         default_factory=lambda: InferenceAggregatorConfig()
     )
     n_ensemble_per_ic: int = 1
+
+    def __post_init__(self):
+        _validate_coupled_steps_config(
+            self.n_coupled_steps, self.coupled_steps_in_memory
+        )
 
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)
@@ -260,15 +264,15 @@ def run_inference_from_config(config: InferenceConfig):
     )
 
     writer = config.get_data_writer(data=data)
-    timer.stop()
+    timer.stop("initialization")
     logging.info("Starting inference")
-    record_logs = get_record_to_wandb(label="inference")
+    logger = get_record_to_wandb(label="inference")
     run_inference(
         predict=stepper.predict_paired,
         data=data,
         aggregator=aggregator,
         writer=writer,
-        record_logs=record_logs,
+        record_logs=logger.log,
     )
 
     timer.start("final_writer_flush")
@@ -276,14 +280,14 @@ def run_inference_from_config(config: InferenceConfig):
     writer.finalize()
     logging.info("Writing reduced metrics to disk in netcdf format.")
     aggregator.flush_diagnostics()
-    timer.stop()
+    timer.stop("final_writer_flush")
 
     timer.stop_outer("inference")
     total_steps = (
         config.n_coupled_steps * stepper.n_inner_steps
     ) * data.n_initial_conditions
     inference_duration = timer.get_duration("inference")
-    wandb_logging_duration = timer.get_duration("wandb_logging")
+    wandb_logging_duration = timer.get_duration("inference/wandb_logging")
     total_steps_per_second = total_steps / (inference_duration - wandb_logging_duration)
     timer.log_durations()
     logging.info(
@@ -293,7 +297,7 @@ def run_inference_from_config(config: InferenceConfig):
 
     summary_logs = {
         "total_steps_per_second": total_steps_per_second,
-        **timer.get_durations(),
         **aggregator.get_summary_logs(),
     }
-    record_logs([summary_logs])
+    logger.log_to_current_step(summary_logs)
+    logger.log_to_current_step(timer.get_durations())

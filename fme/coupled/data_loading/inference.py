@@ -90,9 +90,6 @@ class InferenceDataset(torch.utils.data.Dataset):
         requirements: CoupledDataRequirements,
         dataset_info: CoupledDatasetInfo | None = None,
         initial_time: xr.DataArray | None = None,
-        *,
-        rank: int | None = None,
-        world_size: int | None = None,
     ):
         ocean_reqs = requirements.ocean_requirements
         atmosphere_reqs = requirements.atmosphere_requirements
@@ -140,17 +137,6 @@ class InferenceDataset(torch.utils.data.Dataset):
             max_start_index=max(self._start_indices),
             max_window_len=self._total_coupled_steps + 1,
         )
-        if rank is not None and world_size is not None:
-            self._rank = rank
-            self._world_size = world_size
-        else:
-            try:
-                dist = Distributed.get_instance()
-                self._rank = dist.rank
-                self._world_size = dist.world_size
-            except RuntimeError:
-                self._rank = 0
-                self._world_size = 1
 
     def _update_ocean_mask(
         self,
@@ -176,11 +162,12 @@ class InferenceDataset(torch.utils.data.Dataset):
         return ocean_properties
 
     def _get_batch_data(self, index) -> CoupledBatchData:
+        dist = Distributed.get_instance()
         i_start = index * self._coupled_steps_in_memory
         samples = []
         for i_member in range(self._n_initial_conditions):
             # check if sample is one this local rank should process
-            if i_member % self._world_size != self._rank:
+            if i_member % dist.world_size != dist.rank:
                 continue
             i_window_start = i_start + self._start_indices[i_member]
             samples.append(self._dataset[i_window_start])
@@ -197,10 +184,11 @@ class InferenceDataset(torch.utils.data.Dataset):
         )
 
     def __getitem__(self, index) -> CoupledBatchData:
+        dist = Distributed.get_instance()
         result = self._get_batch_data(index)
         assert (
             result.ocean_data.time.shape[0]
-            == self._n_initial_conditions // self._world_size
+            == self._n_initial_conditions // dist.world_size
         )
         return result
 

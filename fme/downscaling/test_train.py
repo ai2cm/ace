@@ -14,7 +14,13 @@ import yaml
 from fme.core.testing.model import compare_restored_parameters
 from fme.core.testing.wandb import mock_wandb
 from fme.downscaling.test_utils import create_test_data_on_disk, data_paths_helper
-from fme.downscaling.train import Trainer, TrainerConfig, main, restore_checkpoint
+from fme.downscaling.train import (
+    Trainer,
+    TrainerConfig,
+    _get_complement_percentile_prefix,
+    main,
+    restore_checkpoint,
+)
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 NUM_TIMESTEPS = 4
@@ -287,6 +293,7 @@ def test_resume(default_trainer_config, tmp_path, very_fast_only: bool):
             mock.assert_called()
 
 
+@pytest.mark.serial
 def test_resume_two_workers(default_trainer_config, tmp_path, skip_slow: bool):
     """Make sure the training is resumed from a checkpoint when restarted, using
     torchrun with NPROC_PER_NODE set to 2."""
@@ -311,3 +318,25 @@ def test_resume_two_workers(default_trainer_config, tmp_path, skip_slow: bool):
     initial_process.check_returncode()
     resume_process = subprocess.run(command)
     resume_process.check_returncode()
+
+
+@pytest.mark.parametrize(
+    "prefix, expected",
+    [
+        (
+            "histogram/prediction_frac_of_target/99.99th-percentile/var0",
+            "histogram/prediction_frac_of_target/0.01th-percentile/var0",
+        ),
+        (
+            "some_metric/percentile/99.9999/var0",
+            "some_metric/percentile/0.0001/var0",
+        ),
+        (
+            "no_percentile_here/some_metric",
+            None,
+        ),
+    ],
+)
+def test_get_complement_percentile_prefix(prefix, expected):
+    result = _get_complement_percentile_prefix(prefix)
+    assert result == expected

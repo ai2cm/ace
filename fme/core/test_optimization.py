@@ -416,6 +416,125 @@ def test_sequential_scheduler_reload():
         assert torch.allclose(model_first_final_state[k], model_second_final_state[k])
 
 
+def _build_optimization(
+    parameters, lr=0.001, optimizer_type="Adam", max_epochs=10
+) -> Optimization:
+    """Helper to construct an Optimization with common test defaults."""
+    return Optimization(
+        parameters=parameters,
+        optimizer_type=optimizer_type,
+        lr=lr,
+        max_epochs=max_epochs,
+        scheduler=SchedulerConfig(),
+        enable_automatic_mixed_precision=False,
+        kwargs={},
+    )
+
+
+def test_set_learning_rate():
+    model = nn.Linear(1, 1).to(fme.get_device())
+    optimization = _build_optimization(model.parameters())
+    assert optimization.learning_rate == 0.001
+    optimization.set_learning_rate(0.01)
+    assert optimization.learning_rate == 0.01
+
+
+def test_set_learning_rate_null():
+    optimization = NullOptimization()
+    optimization.set_learning_rate(0.01)  # should not raise
+
+
+def test_load_state_into_different_parameters():
+    """
+    Test that optimizer state (including momentum) can be loaded from one
+    Optimization into another built with different parameter objects but
+    the same structure. This is the pattern used by LR tuning trials,
+    where we deepcopy a model and need the fork's optimizer to start
+    with the original's momentum.
+    """
+    torch.manual_seed(0)
+    model = nn.Linear(2, 2).to(fme.get_device())
+    x = torch.randn(10, 2).to(fme.get_device())
+
+    optimization = _build_optimization(model.parameters())
+
+    # Train a few steps to build up momentum state
+    for _ in range(3):
+        loss = model(x).sum()
+        optimization.accumulate_loss(loss)
+        optimization.step_weights()
+
+    saved_state = optimization.get_state()
+
+    # Create a new model with the same structure but different parameter objects
+    model2 = copy.deepcopy(model)
+    optimization2 = _build_optimization(model2.parameters())
+    optimization2.load_state(saved_state)
+
+    # Train both for one more step on identical data and verify identical results
+    x2 = x.clone()
+    loss1 = model(x).sum()
+    optimization.accumulate_loss(loss1)
+    optimization.step_weights()
+
+    loss2 = model2(x2).sum()
+    optimization2.accumulate_loss(loss2)
+    optimization2.step_weights()
+
+    for p1, p2 in zip(model.parameters(), model2.parameters()):
+        assert torch.allclose(
+            p1, p2
+        ), "Parameters should match after identical training"
+
+
+def test_load_state_then_set_learning_rate():
+    """
+    Test that set_learning_rate works correctly after loading state,
+    which is the pattern used to create a candidate fork at a different LR.
+    """
+    torch.manual_seed(0)
+    model = nn.Linear(2, 2).to(fme.get_device())
+    x = torch.randn(10, 2).to(fme.get_device())
+
+    optimization = _build_optimization(model.parameters())
+
+    # Train a few steps
+    for _ in range(3):
+        loss = model(x).sum()
+        optimization.accumulate_loss(loss)
+        optimization.step_weights()
+
+    saved_state = optimization.get_state()
+
+    # Build a new optimization, load state, then override LR
+    model2 = copy.deepcopy(model)
+    optimization2 = _build_optimization(model2.parameters())
+    optimization2.load_state(saved_state)
+    optimization2.set_learning_rate(0.0005)
+
+    assert optimization2.learning_rate == 0.0005
+
+    # Verify it actually trains at the new LR (different from original)
+    x2 = x.clone()
+
+    loss1 = model(x).sum()
+    optimization.accumulate_loss(loss1)
+    optimization.step_weights()
+
+    loss2 = model2(x2).sum()
+    optimization2.accumulate_loss(loss2)
+    optimization2.step_weights()
+
+    # With different LRs, parameters should diverge
+    params_match = all(
+        torch.allclose(p1, p2)
+        for p1, p2 in zip(model.parameters(), model2.parameters())
+    )
+    assert (
+        not params_match
+    ), "Parameters should differ when trained at different learning rates"
+
+
 def test_scheduler_step_timing():
     """
     Test that schedulers step at the correct timing based on

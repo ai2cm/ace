@@ -16,18 +16,6 @@
 import torch
 
 
-# for the factorized spectral convolution
-@torch.jit.script
-def _contract_rank(
-    xc: torch.Tensor, wc: torch.Tensor, ac: torch.Tensor, bc: torch.Tensor
-) -> torch.Tensor:
-    resc = torch.einsum("bixy,ior,xr,yr->boxy", xc, wc, ac, bc)
-    return resc
-
-
-# new contractions set to replace older ones. We use complex
-
-
 @torch.jit.script
 def _contract_lmwise(ac: torch.Tensor, bc: torch.Tensor) -> torch.Tensor:
     resc = torch.einsum("bgixy,gioxy->bgoxy", ac, bc)
@@ -37,12 +25,6 @@ def _contract_lmwise(ac: torch.Tensor, bc: torch.Tensor) -> torch.Tensor:
 @torch.jit.script
 def _contract_lwise(ac: torch.Tensor, bc: torch.Tensor) -> torch.Tensor:
     resc = torch.einsum("bgixy,giox->bgoxy", ac, bc)
-    return resc
-
-
-@torch.jit.script
-def _contract_mwise(ac: torch.Tensor, bc: torch.Tensor) -> torch.Tensor:
-    resc = torch.einsum("bgixy,gioy->bgoxy", ac, bc)
     return resc
 
 
