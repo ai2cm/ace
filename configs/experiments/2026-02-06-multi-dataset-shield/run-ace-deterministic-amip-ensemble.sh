@@ -44,6 +44,12 @@ for model in "${!MODELS[@]}"; do
         spin_up_n_forward_steps="$((SPIN_UP_MAXIMUM_N_FORWARD_STEPS - initial_condition + 1))"
         spin_up_log_to_wandb=false  # Disable logging to wandb in spin up case.
 
+        if [ "$model" = "ACE2-SHiELD" ]; then
+            ocean_interpolate=false
+        else
+            ocean_interpolate=true
+        fi
+
         job_name=${DATE}-$model-amip-ic$initial_condition
         spin_up_overrides="\
             experiment_dir=$SPIN_UP_EXPERIMENT_DIR \
@@ -57,7 +63,7 @@ for model in "${!MODELS[@]}"; do
             logging.log_to_wandb=$spin_up_log_to_wandb \
             stepper_override.ocean.surface_temperature_name=surface_temperature \
             stepper_override.ocean.ocean_fraction_name=ocean_fraction \
-            stepper_override.ocean.interpolate=true \
+            stepper_override.ocean.interpolate=$ocean_interpolate \
             stepper_override.ocean.slab=null \
         "
         main_overrides="\
@@ -70,7 +76,7 @@ for model in "${!MODELS[@]}"; do
             n_forward_steps=$MAIN_N_FORWARD_STEPS \
             stepper_override.ocean.surface_temperature_name=surface_temperature \
             stepper_override.ocean.ocean_fraction_name=ocean_fraction \
-            stepper_override.ocean.interpolate=true \
+            stepper_override.ocean.interpolate=$ocean_interpolate \
             stepper_override.ocean.slab=null \
         "
 
