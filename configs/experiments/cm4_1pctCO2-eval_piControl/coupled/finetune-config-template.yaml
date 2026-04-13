@@ -7,7 +7,7 @@ validate_using_ema: true
 evaluate_before_training: true
 ema:
   decay: 0.999
-max_epochs: 5
+max_epochs: 20
 n_coupled_steps: 4
 inference:
   n_coupled_steps: 1440
@@ -33,7 +33,6 @@ inference:
             engine: zarr
     start_indices:
       times:
-        # 4 from piControl, 4 from 1pctCO2
         - '0251-01-03T12:00:00'
         - '0262-06-22T12:00:00'
         - '0273-12-09T12:00:00'
@@ -90,13 +89,13 @@ train_loader:
               engine: zarr
               subset:
                 start_time: '0151-01-03T12:00:00' # earlier times nan
-                stop_time: '0245-12-29T12:00:00'
+                stop_time: '0182-12-29T12:00:00'
             - data_path: /climate-default
               file_pattern: 2025-10-15-cm4-piControl-200yr-ocean-no-smoothing.zarr
               engine: zarr
               subset:
                 start_time: '0151-01-03T12:00:00' # earlier times nan
-                stop_time: '0245-12-29T12:00:00'
+                stop_time: '0182-12-29T12:00:00'
         atmosphere:
           merge:
             - data_path: /climate-default
@@ -104,13 +103,13 @@ train_loader:
               engine: zarr
               subset:
                 start_time: '0151-01-03T12:00:00' # earlier times nan
-                stop_time: '0245-12-29T12:00:00'
+                stop_time: '0182-12-29T12:00:00'
             - data_path: /climate-default
               file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
               engine: zarr
               subset:
                 start_time: '0151-01-03T12:00:00' # earlier times nan
-                stop_time: '0245-12-29T12:00:00'
+                stop_time: '0182-12-29T12:00:00'
 validation_loader:
   batch_size: 16
   num_data_workers: 2
