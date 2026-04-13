@@ -1,3 +1,3 @@
 group|tag|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|ocean_results_dataset|atmos_results_dataset
 
-fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|ace-samudra-coupled-cm4|8qp78h24|train|urgent|h100|8|800GiB|3||resume_results.resume_wandb=true max_epochs=40||01KKEDG5KG6C88QTQZSDKZ18YH|01KBZP41YFCKYXWZEGSTCDV9S7
+fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|ace-samudra-coupled-cm4|8qp78h24|train|high|h100|8|800GiB|3||resume_results.resume_wandb=true max_epochs=40||01KKEDG5KG6C88QTQZSDKZ18YH|01KBZP41YFCKYXWZEGSTCDV9S7
