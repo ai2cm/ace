@@ -531,6 +531,181 @@ def test_get_fine_coords_for_batch():
     assert torch.allclose(result.lon, expected_lon)
 
 
+def _make_multi_var_batch_data(
+    shape: tuple[int, int, int],
+    lat_values: list[float],
+    lon_values: list[float],
+    names: list[str],
+) -> BatchData:
+    batch_size, lat_size, lon_size = shape
+    data = {
+        name: torch.ones(batch_size, lat_size, lon_size, device=get_device())
+        for name in names
+    }
+    time = xr.DataArray(range(batch_size), dims=["batch"])
+    lat = torch.tensor(lat_values, dtype=torch.float32)
+    lon = torch.tensor(lon_values, dtype=torch.float32)
+    latlon = BatchedLatLonCoordinates(
+        lat=lat.unsqueeze(0).expand(batch_size, -1),
+        lon=lon.unsqueeze(0).expand(batch_size, -1),
+    )
+    return BatchData(data=data, time=time, latlon_coordinates=latlon)
+
+
+def _make_multi_var_paired_batch(
+    coarse_shape: tuple[int, int],
+    fine_shape: tuple[int, int],
+    coarse_names: list[str],
+    fine_names: list[str],
+    batch_size: int = 2,
+) -> PairedBatchData:
+    lat_c, lon_c = coarse_shape
+    lat_f, lon_f = fine_shape
+    fine_lat = _get_monotonic_coordinate(lat_f, stop=lat_f)
+    fine_lon = _get_monotonic_coordinate(lon_f, stop=lon_f)
+    coarse_lat = _get_monotonic_coordinate(lat_c, stop=lat_f)
+    coarse_lon = _get_monotonic_coordinate(lon_c, stop=lon_f)
+    fine = _make_multi_var_batch_data(
+        (batch_size, lat_f, lon_f), fine_lat, fine_lon, fine_names
+    )
+    coarse = _make_multi_var_batch_data(
+        (batch_size, lat_c, lon_c), coarse_lat, coarse_lon, coarse_names
+    )
+    return PairedBatchData(fine=fine, coarse=coarse)
+
+
+def test_high_res_conditioning_train_and_generate():
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    batch_size = 2
+    in_names = ["x"]
+    out_names = ["x"]
+    high_res_conditioning = ["y"]
+    normalizer = PairedNormalizationConfig(
+        NormalizationConfig(means={"x": 0.0, "y": 0.0}, stds={"x": 1.0, "y": 1.0}),
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+    )
+    config = DiffusionModelConfig(
+        module=DiffusionModuleRegistrySelector(
+            "unet_diffusion_song", {"model_channels": 4}
+        ),
+        loss=LossConfig(type="MSE"),
+        in_names=in_names,
+        out_names=out_names,
+        normalization=normalizer,
+        p_mean=-1.0,
+        p_std=1.0,
+        sigma_min=0.1,
+        sigma_max=1.0,
+        churn=0.5,
+        num_diffusion_generation_steps=3,
+        predict_residual=False,
+        use_fine_topography=False,
+        high_res_conditioning=high_res_conditioning,
+    )
+    fine_coords = make_fine_coords(fine_shape)
+    model = config.build(
+        coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=fine_coords,
+        static_inputs=StaticInputs(fields=[], coords=fine_coords),
+    )
+
+    batch = _make_multi_var_paired_batch(
+        coarse_shape,
+        fine_shape,
+        coarse_names=["x"],
+        fine_names=["x", "y"],
+        batch_size=batch_size,
+    )
+    optimization = OptimizationConfig().build(modules=[model.module], max_epochs=2)
+    train_outputs = model.train_on_batch(batch, optimization)
+    assert train_outputs.prediction["x"].shape == (batch_size, *fine_shape)
+
+    generated_outputs = model.generate_on_batch(batch)
+    assert generated_outputs.prediction["x"].shape == (batch_size, 1, *fine_shape)
+
+
+def test_high_res_conditioning_data_requirements():
+    normalizer = PairedNormalizationConfig(
+        NormalizationConfig(means={"x": 0.0, "y": 0.0}, stds={"x": 1.0, "y": 1.0}),
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+    )
+    config = DiffusionModelConfig(
+        module=DiffusionModuleRegistrySelector(
+            "unet_diffusion_song", {"model_channels": 4}
+        ),
+        loss=LossConfig(type="MSE"),
+        in_names=["x"],
+        out_names=["x"],
+        normalization=normalizer,
+        p_mean=-1.0,
+        p_std=1.0,
+        sigma_min=0.1,
+        sigma_max=1.0,
+        churn=0.5,
+        num_diffusion_generation_steps=3,
+        predict_residual=False,
+        use_fine_topography=False,
+        high_res_conditioning=["y"],
+    )
+    reqs = config.data_requirements
+    assert "y" in reqs.fine_names
+    assert "y" not in reqs.coarse_names
+
+
+def test_high_res_conditioning_not_in_out_names_raises():
+    normalizer = PairedNormalizationConfig(
+        NormalizationConfig(means={"x": 0.0, "y": 0.0}, stds={"x": 1.0, "y": 1.0}),
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+    )
+    with pytest.raises(ValueError, match="must not be in out_names"):
+        DiffusionModelConfig(
+            module=DiffusionModuleRegistrySelector(
+                "unet_diffusion_song", {"model_channels": 4}
+            ),
+            loss=LossConfig(type="MSE"),
+            in_names=["x"],
+            out_names=["x", "y"],
+            normalization=normalizer,
+            p_mean=-1.0,
+            p_std=1.0,
+            sigma_min=0.1,
+            sigma_max=1.0,
+            churn=0.5,
+            num_diffusion_generation_steps=3,
+            predict_residual=False,
+            use_fine_topography=False,
+            high_res_conditioning=["y"],
+        )
+
+
+def test_high_res_conditioning_not_in_in_names_raises():
+    normalizer = PairedNormalizationConfig(
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+    )
+    with pytest.raises(ValueError, match="must not be in in_names"):
+        DiffusionModelConfig(
+            module=DiffusionModuleRegistrySelector(
+                "unet_diffusion_song", {"model_channels": 4}
+            ),
+            loss=LossConfig(type="MSE"),
+            in_names=["x"],
+            out_names=["x"],
+            normalization=normalizer,
+            p_mean=-1.0,
+            p_std=1.0,
+            sigma_min=0.1,
+            sigma_max=1.0,
+            churn=0.5,
+            num_diffusion_generation_steps=3,
+            predict_residual=False,
+            use_fine_topography=False,
+            high_res_conditioning=["x"],
+        )
+
+
 def test_checkpoint_config_topography_raises():
     with pytest.raises(ValueError):
         CheckpointModelConfig(
