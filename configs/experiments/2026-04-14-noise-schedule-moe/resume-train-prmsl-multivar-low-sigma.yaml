@@ -1,11 +1,9 @@
+resume_results_dir: /previous_results
 loss_weight_exponent: 0.75
-log_loss_vs_noise: true
 static_inputs:
   HGTsfc: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
   land_fraction: /climate-default/2025-11-19-X-SHiELD-AMIP-downscaling-land-fraction/3km/land_fraction.zarr
 model:
-  loss_weights:
-    PRATEsfc: 0.2
   use_amp_bf16: true
   out_names:
   - eastward_wind_at_ten_meters
@@ -21,7 +19,7 @@ model:
     type: MSE
   module:
     config:
-      model_channels: 256
+      model_channels: 128
       attn_resolutions: []
       num_blocks: 1
       channel_mult_emb: 6
@@ -30,8 +28,9 @@ model:
       - 2
       - 2
       - 2
-      - 1
-      - 1
+      - 2
+      - 2
+      - 2
       use_apex_gn: true
     type: unet_diffusion_song_v2
   normalization:
@@ -140,7 +139,7 @@ validation_data:
   drop_last: true
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
-max_epochs: 500
+max_epochs: 750
 validate_interval: 50
 experiment_dir: /results
 save_checkpoints: false
