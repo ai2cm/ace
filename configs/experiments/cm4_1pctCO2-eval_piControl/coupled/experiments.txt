@@ -1,8 +1,8 @@
 group|tag|experiment_id|status|checkpoint|priority|preemptible|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KKQWTQTEZAAKXGZRW6Q0V5Q8|done|best_inference_ckpt|high|--not-preemptible||||h100
+fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KKQWTQTEZAAKXGZRW6Q0V5Q8|run_140yr|best_inference_ckpt|high|--not-preemptible||||h100
 
 fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KNSXG3WZWMG9R3JMRHATHZE7|done|best_inference_ckpt|high|--not-preemptible||||h100
-fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KNSXG3WZWMG9R3JMRHATHZE7|run_140yr|best_inference_ckpt|high|--not-preemptible||||h100
+fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KNSXG3WZWMG9R3JMRHATHZE7|done|best_inference_ckpt|high|--not-preemptible||||h100
 
 fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KP43V4GDM8A7FNGKPW1R80WH|training|best_inference_ckpt|normal|--not-preemptible
 
