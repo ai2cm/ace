@@ -346,6 +346,22 @@ def test_depth_integral_gradient_with_mask():
     assert torch.all(torch.isfinite(integrand.grad))
 
 
+def test_with_deptho():
+    idepth = torch.tensor([0.0, 10.0, 50.0])
+    mask = torch.ones(2, 3, 2)
+    coord = DepthCoordinate(idepth=idepth, mask=mask)
+    assert coord.deptho is None
+
+    deptho = torch.full((2, 3), 40.0)
+    updated = coord.with_deptho(deptho)
+    assert updated.deptho is not None
+    torch.testing.assert_close(updated.deptho, deptho)
+    torch.testing.assert_close(updated.idepth, idepth)
+    torch.testing.assert_close(updated.mask, mask)
+    # original unchanged
+    assert coord.deptho is None
+
+
 @pytest.mark.skipif(e2ghpx is None, reason="earth2grid is not available")
 @pytest.mark.parametrize("pad", [True, False])
 def test_healpix_coordinates_xyz(pad: bool):

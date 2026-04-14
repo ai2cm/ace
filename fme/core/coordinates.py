@@ -368,6 +368,14 @@ class DepthCoordinate(VerticalCoordinate):
     def coords(self) -> dict[str, np.ndarray]:
         return {"idepth": self.idepth.cpu().numpy()}
 
+    def with_deptho(self, deptho: torch.Tensor) -> "DepthCoordinate":
+        """Return a new DepthCoordinate with the given ``deptho`` attached."""
+        return DepthCoordinate(
+            idepth=self.idepth,
+            mask=self.mask,
+            deptho=deptho,
+        )
+
     def to(self, device: str) -> "DepthCoordinate":
         return DepthCoordinate(
             idepth=self.idepth.to(device),
