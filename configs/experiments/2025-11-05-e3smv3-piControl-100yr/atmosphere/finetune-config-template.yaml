@@ -138,3 +138,11 @@ stepper:
           separable: false
           spectral_layers: 3
           spectral_transform: sht
+      normalization:
+        network:
+          global_means_path: /atmos_stats/uncoupled_atmosphere/centering.nc
+          global_stds_path: /atmos_stats/uncoupled_atmosphere/scaling-full-field.nc
+          fill_nans_on_normalize: false
+        residual:
+          global_means_path: /atmos_stats/uncoupled_atmosphere/centering.nc
+          global_stds_path: /atmos_stats/uncoupled_atmosphere/scaling-residual.nc
