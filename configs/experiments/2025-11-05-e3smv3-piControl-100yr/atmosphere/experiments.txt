@@ -9,3 +9,5 @@ ACE-v1124-train-95yr-i61rgcxy||01KHSFWPX3N2ZCP2JWNZ31RDN4|run_ICx5|best_inferenc
 BK-v1124-ACES-E3SMv3-piControl-100yr|rs2||training|best_inference_ckpt|normal|--not-preemptible
 
 BK-v1124-ACES-E3SMv3-piControl-100yr|rs2|01KP583ASD1XC9VV341AFY6YYJ|training|best_inference_ckpt|normal|--not-preemptible
+
+BK-v1124-ACES-E3SMv3-piControl-100yr|rs2|01KP6EA95E2FN0NFXPTPGA58YD|training|best_inference_ckpt|normal|--not-preemptible
