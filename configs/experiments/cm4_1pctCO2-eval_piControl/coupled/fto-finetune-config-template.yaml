@@ -89,13 +89,13 @@ train_loader:
               engine: zarr
               subset:
                 start_time: '0151-01-03T12:00:00' # earlier times nan
-                stop_time: '0245-12-29T12:00:00'
+                stop_time: '0182-12-29T12:00:00'
             - data_path: /climate-default
               file_pattern: 2025-10-15-cm4-piControl-200yr-ocean-no-smoothing.zarr
               engine: zarr
               subset:
                 start_time: '0151-01-03T12:00:00' # earlier times nan
-                stop_time: '0245-12-29T12:00:00'
+                stop_time: '0182-12-29T12:00:00'
         atmosphere:
           merge:
             - data_path: /climate-default
@@ -103,13 +103,13 @@ train_loader:
               engine: zarr
               subset:
                 start_time: '0151-01-03T12:00:00' # earlier times nan
-                stop_time: '0245-12-29T12:00:00'
+                stop_time: '0182-12-29T12:00:00'
             - data_path: /climate-default
               file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
               engine: zarr
               subset:
                 start_time: '0151-01-03T12:00:00' # earlier times nan
-                stop_time: '0245-12-29T12:00:00'
+                stop_time: '0182-12-29T12:00:00'
 validation_loader:
   batch_size: 16
   num_data_workers: 2
@@ -146,16 +146,22 @@ validation_loader:
 optimization:
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
-  lr: 0.00001
+  lr: 0.0001
   optimizer_type: AdamW
   kwargs:
     fused: true
     weight_decay: 0.01
   scheduler:
-    type: CosineAnnealingLR
-    step_each_iteration: true
-    kwargs:
-      T_max: 8660
+    schedulers:
+      - type: LinearLR
+        step_each_iteration: true
+        kwargs:
+          start_factor: 0.01
+          end_factor: 1
+          total_iters: 2000
+      - type: ConstantLR
+        step_each_iteration: true
+    milestones: [2000]
 stepper_training:
   parameter_init:
     checkpoint_path: /ckpt.tar
@@ -170,9 +176,12 @@ stepper_training:
   atmosphere:
     parameter_init:
       weights_path: null
+      parameters:
+        - frozen:
+            include:
+              - '*'
     loss_contributions:
-      n_steps: 2
-      weight: 1.0
+      n_steps: 0
     loss:
       type: MSE
       weights:
