@@ -39,4 +39,3 @@ loader:
   start_indices:
     times:
       - '0311-01-01T00:00:00'
-use_dataset_vertical_coordinate: true
