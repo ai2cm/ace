@@ -3,9 +3,9 @@
 set -e
 
 #JOB_NAME="eval-xshield-amip-100km-to-3km-0.5sigmaexp-tropics-events"
-JOB_NAME="eval-xshield-amip-100km-to-3km-multivar-coarse-prmsl-tropics-pac"
+JOB_NAME="eval-xshield-amip-100km-to-3km-denoising-moe-events"
 
-CONFIG_FILENAME="eval-coarse-prmsl-tropic-pac.yaml"
+CONFIG_FILENAME="eval-coarse-prmsl-events.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -21,7 +21,8 @@ NGPU=2
 
 IMAGE="$(cat latest_deps_only_image.txt)"
 
-EXISTING_RESULTS_DATASET=01KMH2EMVN0WA3E6GFC2WAFFQ0
+EXISTING_RESULTS_DATASET_HIGH_SIGMA=01KNWGPBT9WYD4BCR5GQ5Q78H0
+EXISTING_RESULTS_DATASET_LOW_SIGMA=01KNWGZB0DF16P0EMMA5Y1PZZQ
 wandb_group=""
 
 #--not-preemptible \
@@ -34,7 +35,6 @@ gantry run \
     --description 'Run 100km to 3km evaluation on coarsened X-SHiELD' \
     --workspace ai2/climate-titan \
     --priority urgent \
-    --not-preemptible \
     --cluster ai2/jupiter \
     --cluster ai2/titan \
     --beaker-image $IMAGE \
@@ -45,7 +45,8 @@ gantry run \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-annak \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset $EXISTING_RESULTS_DATASET:checkpoints:/checkpoints  \
+    --dataset $EXISTING_RESULTS_DATASET_HIGH_SIGMA:checkpoints:/checkpoints_high_sigma  \
+    --dataset $EXISTING_RESULTS_DATASET_LOW_SIGMA:checkpoints:/checkpoints_low_sigma  \
     --weka climate-default:/climate-default \
     --gpus $NGPU \
     --shared-memory 400GiB \
