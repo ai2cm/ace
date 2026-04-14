@@ -6,8 +6,8 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-100km-to-3km-multivar-sig200-2000"
-CONFIG_FILENAME="train-prmsl-multivar-high-sigma.yaml"
+JOB_NAME="xshield-downscaling-100km-to-3km-multivar-sig0.005-200-downweight-prate"
+CONFIG_FILENAME="train-prmsl-multivar-low-sigma.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME

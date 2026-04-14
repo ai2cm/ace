@@ -1,4 +1,7 @@
 loss_weight_exponent: 0.75
+log_loss_vs_noise: true
+loss_weights:
+  PRATEsfc: 0.2
 static_inputs:
   HGTsfc: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
   land_fraction: /climate-default/2025-11-19-X-SHiELD-AMIP-downscaling-land-fraction/3km/land_fraction.zarr
@@ -27,9 +30,8 @@ model:
       - 2
       - 2
       - 2
-      - 2
-      - 2
-      - 2
+      - 1
+      - 1
       use_apex_gn: true
     type: unet_diffusion_song_v2
   normalization:

@@ -108,6 +108,9 @@ class DiffusionModelConfig:
         use_fine_topography: Whether to use fine topography in the model.
         use_amp_bf16: Whether to use automatic mixed precision (bfloat16) in the
             UNetDiffusionModule.
+        loss_weights: Per-variable weights applied to the loss. Keys are
+            variable names from out_names and values are multiplicative
+            weights. Variables not listed default to 1.0.
         training_noise_distribution: Noise distribution to use during training.
         p_mean: The mean of noise distribution used during training.
             Deprecated. Use training_noise_distribution field instead.
@@ -129,6 +132,7 @@ class DiffusionModelConfig:
     predict_residual: bool
     use_fine_topography: bool = False
     use_amp_bf16: bool = False
+    loss_weights: dict[str, float] = dataclasses.field(default_factory=dict)
     training_noise_distribution: (
         LogNormalNoiseDistribution | LogUniformNoiseDistribution | None
     ) = None
@@ -325,6 +329,18 @@ class DiffusionModel:
         self._channel_axis = -3
         self.full_fine_coords = full_fine_coords.to(get_device())
         self.static_inputs = static_inputs.to_device() if static_inputs else None
+        self._loss_weight_tensor = self._build_loss_weight_tensor(
+            config.loss_weights, config.out_names
+        )
+
+    @staticmethod
+    def _build_loss_weight_tensor(
+        weights: dict[str, float], out_names: list[str]
+    ) -> torch.Tensor:
+        values = [weights.get(name, 1.0) for name in out_names]
+        return torch.tensor(values, dtype=torch.float32, device=get_device()).reshape(
+            1, len(out_names), 1, 1
+        )
 
     @property
     def modules(self) -> torch.nn.ModuleList:
@@ -445,8 +461,10 @@ class DiffusionModel:
         denoised_norm = self.module(
             conditioned_target.latents, inputs_norm, conditioned_target.sigma
         )
-        weighted_loss = conditioned_target.weight * self.loss(
-            denoised_norm, targets_norm
+        weighted_loss = (
+            conditioned_target.weight
+            * self._loss_weight_tensor
+            * self.loss(denoised_norm, targets_norm)
         )
         loss = torch.mean(weighted_loss)
         optimizer.accumulate_loss(loss)

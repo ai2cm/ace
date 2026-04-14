@@ -331,6 +331,99 @@ def test_normalizer_serialization(tmp_path):
     assert model_from_disk.normalizer.coarse.stds == {"x": 1}
 
 
+def test_loss_weights_scale_channel_losses():
+    """Per-variable loss_weights should scale each channel's contribution."""
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    batch_size = 2
+    out_names = ["a", "b"]
+
+    normalizer = PairedNormalizationConfig(
+        NormalizationConfig(means={"a": 0.0, "b": 0.0}, stds={"a": 1.0, "b": 1.0}),
+        NormalizationConfig(means={"a": 0.0, "b": 0.0}, stds={"a": 1.0, "b": 1.0}),
+    )
+    fine_coords = make_fine_coords(fine_shape)
+
+    def _build_model(loss_weights):
+        return DiffusionModelConfig(
+            module=DiffusionModuleRegistrySelector(
+                "unet_diffusion_song", {"model_channels": 4}
+            ),
+            loss=LossConfig(type="MSE"),
+            in_names=["a"],
+            out_names=out_names,
+            normalization=normalizer,
+            p_mean=-1.0,
+            p_std=1.0,
+            sigma_min=0.1,
+            sigma_max=1.0,
+            churn=0.5,
+            num_diffusion_generation_steps=3,
+            predict_residual=False,
+            use_fine_topography=False,
+            loss_weights=loss_weights,
+        ).build(
+            coarse_shape,
+            2,
+            full_fine_coords=fine_coords,
+        )
+
+    model_uniform = _build_model({})
+    model_weighted = _build_model({"a": 0.0, "b": 2.0})
+
+    # Copy weights so both models produce identical predictions
+    model_weighted.module.load_state_dict(model_uniform.module.state_dict())
+
+    def _make_batch():
+        coarse_data = {
+            "a": torch.randn(batch_size, *coarse_shape, device=get_device()),
+            "b": torch.randn(batch_size, *coarse_shape, device=get_device()),
+        }
+        fine_data = {
+            "a": torch.randn(batch_size, *fine_shape, device=get_device()),
+            "b": torch.randn(batch_size, *fine_shape, device=get_device()),
+        }
+        coarse_lat = _get_monotonic_coordinate(coarse_shape[0], stop=fine_shape[0])
+        coarse_lon = _get_monotonic_coordinate(coarse_shape[1], stop=fine_shape[1])
+        fine_lat = _get_monotonic_coordinate(fine_shape[0], stop=fine_shape[0])
+        fine_lon = _get_monotonic_coordinate(fine_shape[1], stop=fine_shape[1])
+        time = xr.DataArray(range(batch_size), dims=["batch"])
+        coarse_batch = BatchData(
+            data=coarse_data,
+            time=time,
+            latlon_coordinates=BatchedLatLonCoordinates(
+                lat=coarse_lat.unsqueeze(0).expand(batch_size, -1),
+                lon=coarse_lon.unsqueeze(0).expand(batch_size, -1),
+            ),
+        )
+        fine_batch = BatchData(
+            data=fine_data,
+            time=time,
+            latlon_coordinates=BatchedLatLonCoordinates(
+                lat=fine_lat.unsqueeze(0).expand(batch_size, -1),
+                lon=fine_lon.unsqueeze(0).expand(batch_size, -1),
+            ),
+        )
+        return PairedBatchData(fine=fine_batch, coarse=coarse_batch)
+
+    torch.manual_seed(0)
+    batch = _make_batch()
+    optimization = OptimizationConfig().build(
+        modules=[model_uniform.module], max_epochs=2
+    )
+    torch.manual_seed(42)
+    out_uniform = model_uniform.train_on_batch(batch, optimization)
+
+    optimization_w = OptimizationConfig().build(
+        modules=[model_weighted.module], max_epochs=2
+    )
+    torch.manual_seed(42)
+    out_weighted = model_weighted.train_on_batch(batch, optimization_w)
+
+    assert out_weighted.channel_losses["a"] == pytest.approx(0.0, abs=1e-7)
+    assert out_weighted.channel_losses["b"] > out_uniform.channel_losses["b"]
+
+
 def test_use_fine_topography_raises_when_module_does_not_use_interpolated_input():
     normalization_config = PairedNormalizationConfig(
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),

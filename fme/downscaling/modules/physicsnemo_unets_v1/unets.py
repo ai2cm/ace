@@ -296,7 +296,7 @@ class SongUNet(torch.nn.Module):
             res = self.img_shape_y >> level
             if level == len(channel_mult) - 1:
                 self.dec[f"{res}x{res}_in0"] = UNetBlock(
-                    in_channels=cout, out_channels=cout, attention=True, **block_kwargs
+                    in_channels=cout, out_channels=cout, attention=res in attn_resolutions, **block_kwargs
                 )
                 self.dec[f"{res}x{res}_in1"] = UNetBlock(
                     in_channels=cout, out_channels=cout, **block_kwargs
