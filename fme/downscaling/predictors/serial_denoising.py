@@ -119,10 +119,14 @@ class _SigmaDispatchModule:
             (lo, hi, mod) for lo, hi, mod in self._entries if lo <= s <= hi
         ]
         if not candidates:
-            raise ValueError(
-                f"sigma={s} is not covered by any expert range "
-                f"(entries={self._entries!r})."
-            )
+            # Clamp to the nearest boundary expert when sigma falls outside
+            # all registered ranges (below the global min or above the global max).
+            if s < min(lo for lo, _, _ in self._entries):
+                _, _, mod = min(self._entries, key=lambda t: t[0])
+                return mod(x, x_lr, sigma)
+            else:
+                _, _, mod = max(self._entries, key=lambda t: t[1])
+                return mod(x, x_lr, sigma)
         # Prefer the expert with the smallest sigma_max (lower-noise range).
         _lo, _hi, mod = min(candidates, key=lambda t: (t[1], t[0]))
         return mod(x, x_lr, sigma)
@@ -146,15 +150,13 @@ class DenoisingMoECheckpointConfig:
 
     denoising_range_configs: list[DenoisingRangeModelConfig]
     num_diffusion_generation_steps: int
-    churn: float
+    churn: float = 0.0
 
     def __post_init__(self) -> None:
         _validate_sigma_ranges(self.denoising_range_configs)
 
     def build(self) -> "DenoisingScheduleSequentialPredictor":
-        experts = [
-            rc.checkpoint_config.build() for rc in self.denoising_range_configs
-        ]
+        experts = [rc.checkpoint_config.build() for rc in self.denoising_range_configs]
         _validate_experts_compatible(experts)
         sigma_ranges = [
             (rc.sigma_min, rc.sigma_max) for rc in self.denoising_range_configs
@@ -307,7 +309,9 @@ class DenoisingScheduleSequentialPredictor:
         )
         targets_norm = _repeat_batch_by_samples(targets_norm, n_samples)
 
-        targets = filter_tensor_mapping(batch.fine.data, set(self._primary.out_packer.names))
+        targets = filter_tensor_mapping(
+            batch.fine.data, set(self._primary.out_packer.names)
+        )
         targets = {k: v.unsqueeze(1) for k, v in targets.items()}
 
         loss = self._primary.loss(generated_norm, targets_norm)
