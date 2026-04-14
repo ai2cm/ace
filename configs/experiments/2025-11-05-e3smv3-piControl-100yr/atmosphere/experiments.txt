@@ -5,3 +5,5 @@ ACE-v1124-train-95yr-ebpeysbb-from-AMIP||01KJ6G1J4RNGFGX7HYDDGS0BBR|done|best_in
 ACE-v1124-train-95yr-gvot5r9r||01KHYDB3NYWXN3NVGYY0YF4BMZ|done|best_inference_ckpt|high|--not-preemptible||01KHYDB3NYWXN3NVGYY0YF4BMZ||h100
 ACE-v1124-train-95yr-iz4loy3b||01KHSEHN89741818YK56ZAV4BT|run_ICx5|best_inference_ckpt|high|--not-preemptible||01KHSEHNGJ8XK2M15RH6VWB8FG||h100
 ACE-v1124-train-95yr-i61rgcxy||01KHSFWPX3N2ZCP2JWNZ31RDN4|run_ICx5|best_inference_ckpt|high|--not-preemptible||01KHSFWQ4T7DH6SYKV8PRMRSJ3||h100
+
+BK-v1124-ACES-E3SMv3-piControl-100yr|rs2||training|best_inference_ckpt|normal|--not-preemptible
