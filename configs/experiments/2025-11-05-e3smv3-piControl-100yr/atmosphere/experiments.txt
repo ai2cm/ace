@@ -7,3 +7,5 @@ ACE-v1124-train-95yr-iz4loy3b||01KHSEHN89741818YK56ZAV4BT|run_ICx5|best_inferenc
 ACE-v1124-train-95yr-i61rgcxy||01KHSFWPX3N2ZCP2JWNZ31RDN4|run_ICx5|best_inference_ckpt|high|--not-preemptible||01KHSFWQ4T7DH6SYKV8PRMRSJ3||h100
 
 BK-v1124-ACES-E3SMv3-piControl-100yr|rs2||training|best_inference_ckpt|normal|--not-preemptible
+
+BK-v1124-ACES-E3SMv3-piControl-100yr|rs2|01KP583ASD1XC9VV341AFY6YYJ|training|best_inference_ckpt|normal|--not-preemptible
