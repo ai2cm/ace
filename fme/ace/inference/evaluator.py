@@ -347,6 +347,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
         stepper = config.load_stepper()
         stepper.set_eval()
+        stepper.backfill_deptho(data.dataset_info.vertical_coordinate)
 
         if not config.allow_incompatible_dataset:
             try:

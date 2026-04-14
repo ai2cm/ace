@@ -877,6 +877,26 @@ class Stepper:
                 self._dataset_info.timestep
             )
 
+    def backfill_deptho(self, dataset_vertical_coordinate: VerticalCoordinate) -> None:
+        """Adopt ``deptho`` from the dataset if the checkpoint lacks it.
+
+        Delegates to :meth:`VerticalCoordinate.adopt_deptho` so that
+        only coordinate types that support ``deptho`` need to know
+        about it.  If the checkpoint coordinate is unchanged, this is
+        a no-op.
+        """
+        try:
+            ckpt_vc = self.training_dataset_info.vertical_coordinate
+        except MissingDatasetInfo:
+            return
+        updated = ckpt_vc.adopt_deptho(dataset_vertical_coordinate)
+        if updated is not ckpt_vc:
+            logging.info(
+                "Backfilling deptho from dataset into checkpoint's "
+                "ocean vertical coordinate"
+            )
+            self.update_vertical_coordinate(updated)
+
     @property
     def surface_temperature_name(self) -> str | None:
         return self._step_obj.surface_temperature_name

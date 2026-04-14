@@ -321,6 +321,7 @@ def run_inference_from_config(config: InferenceConfig):
             ocean_fraction_name=stepper.ocean_fraction_name,
             label_override=config.labels,
         )
+        stepper.backfill_deptho(data.dataset_info.vertical_coordinate)
 
         if not config.allow_incompatible_dataset:
             try:

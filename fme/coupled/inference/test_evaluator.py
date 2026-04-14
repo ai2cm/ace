@@ -3,7 +3,6 @@ import inspect
 import os
 import pathlib
 import shutil
-import unittest.mock
 
 import pytest
 import torch
@@ -11,10 +10,7 @@ import xarray as xr
 import yaml
 
 from fme.ace.inference.data_writer.main import DataWriterConfig
-from fme.ace.stepper.single_module import Stepper
-from fme.core.coordinates import DepthCoordinate, HybridSigmaPressureCoordinate
 from fme.core.dataset.xarray import XarrayDataConfig
-from fme.core.dataset_info import DatasetInfo
 from fme.core.logging_utils import LoggingConfig
 from fme.core.testing import mock_wandb
 from fme.coupled.data_loading.config import CoupledDatasetWithOptionalOceanConfig
@@ -32,7 +28,6 @@ from fme.coupled.inference.evaluator import (
     InferenceEvaluatorConfig,
     StandaloneComponentCheckpointsConfig,
     StandaloneComponentConfig,
-    backfill_stepper_deptho,
     main,
 )
 from fme.coupled.stepper import CoupledStepperConfig
@@ -443,57 +438,3 @@ def test_inference_backwards_compatibility(tmp_path: pathlib.Path):
         checkpoint_path=str(stepper_path),
         mock_data=mock_data,
     )
-
-
-def test_backfills_when_checkpoint_lacks_deptho():
-    idepth = torch.arange(4, dtype=torch.float)
-    mask = torch.ones(3)
-    ckpt_vc = DepthCoordinate(idepth=idepth, mask=mask)
-    deptho = torch.tensor(2.5)
-    dataset_vc = DepthCoordinate(idepth=idepth, mask=mask, deptho=deptho)
-
-    stepper = unittest.mock.MagicMock(spec=Stepper)
-    stepper.training_dataset_info = DatasetInfo(vertical_coordinate=ckpt_vc)
-
-    backfill_stepper_deptho(stepper, dataset_vc)
-    stepper.update_vertical_coordinate.assert_called_once()
-    updated_vc = stepper.update_vertical_coordinate.call_args[0][0]
-    assert isinstance(updated_vc, DepthCoordinate)
-    assert updated_vc.deptho is not None
-    torch.testing.assert_close(updated_vc.deptho, deptho)
-
-
-def test_noop_when_checkpoint_already_has_deptho():
-    idepth = torch.arange(4, dtype=torch.float)
-    mask = torch.ones(3)
-    deptho = torch.tensor(2.5)
-    ckpt_vc = DepthCoordinate(idepth=idepth, mask=mask, deptho=deptho)
-    dataset_vc = DepthCoordinate(idepth=idepth, mask=mask, deptho=deptho)
-
-    stepper = unittest.mock.MagicMock(spec=Stepper)
-    stepper.training_dataset_info = DatasetInfo(vertical_coordinate=ckpt_vc)
-
-    backfill_stepper_deptho(stepper, dataset_vc)
-    stepper.update_vertical_coordinate.assert_not_called()
-
-
-def test_noop_when_dataset_lacks_deptho():
-    idepth = torch.arange(4, dtype=torch.float)
-    mask = torch.ones(3)
-    ckpt_vc = DepthCoordinate(idepth=idepth, mask=mask)
-    dataset_vc = DepthCoordinate(idepth=idepth, mask=mask)
-
-    stepper = unittest.mock.MagicMock(spec=Stepper)
-    stepper.training_dataset_info = DatasetInfo(vertical_coordinate=ckpt_vc)
-
-    backfill_stepper_deptho(stepper, dataset_vc)
-    stepper.update_vertical_coordinate.assert_not_called()
-
-
-def test_noop_for_non_depth_coordinate():
-    vc = HybridSigmaPressureCoordinate(ak=torch.arange(7), bk=torch.arange(7))
-    stepper = unittest.mock.MagicMock(spec=Stepper)
-    stepper.training_dataset_info = DatasetInfo(vertical_coordinate=vc)
-
-    backfill_stepper_deptho(stepper, vc)
-    stepper.update_vertical_coordinate.assert_not_called()

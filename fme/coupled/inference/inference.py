@@ -35,7 +35,6 @@ from fme.coupled.stepper import CoupledStepper, CoupledStepperConfig
 from .evaluator import (
     StandaloneComponentCheckpointsConfig,
     _validate_coupled_steps_config,
-    backfill_stepper_deptho,
     load_stepper,
     load_stepper_config,
 )
@@ -248,7 +247,7 @@ def run_inference_from_config(config: InferenceConfig):
         initial_condition=initial_condition,
         dataset_info=stepper.training_dataset_info,
     )
-    backfill_stepper_deptho(stepper.ocean, data.ocean_properties.vertical_coordinate)
+    stepper.ocean.backfill_deptho(data.ocean_properties.vertical_coordinate)
 
     aggregator_config: InferenceAggregatorConfig = config.aggregator
     variable_metadata = get_derived_variable_metadata() | data.variable_metadata

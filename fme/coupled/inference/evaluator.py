@@ -9,11 +9,8 @@ import torch
 import fme
 from fme.ace.stepper import load_stepper as load_single_stepper
 from fme.ace.stepper import load_stepper_config as load_single_stepper_config
-from fme.ace.stepper.single_module import Stepper
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.cloud import makedirs
-from fme.core.coordinates import DepthCoordinate, VerticalCoordinate
-from fme.core.dataset_info import MissingDatasetInfo
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.logging_utils import LoggingConfig
@@ -163,36 +160,6 @@ def load_stepper(
 def _validate_coupled_steps_config(n_coupled_steps: int, coupled_steps_in_memory: int):
     if n_coupled_steps % coupled_steps_in_memory:
         raise ValueError("n_coupled_steps must be divisible by coupled_steps_in_memory")
-
-
-def backfill_stepper_deptho(
-    stepper: Stepper,
-    dataset_vertical_coordinate: VerticalCoordinate,
-) -> None:
-    """Adopt ``deptho`` from the dataset if the stepper's checkpoint lacks it.
-
-    If the stepper was trained with a ``DepthCoordinate`` that has no ``deptho``
-    but the inference dataset provides one, the stepper's vertical coordinate
-    and ``derive_func`` are updated in-place so that depth integrals account
-    for partial bottom cells.  Otherwise this is a no-op.
-    """
-    try:
-        ckpt_vc = stepper.training_dataset_info.vertical_coordinate
-    except MissingDatasetInfo:
-        return
-    if (
-        isinstance(ckpt_vc, DepthCoordinate)
-        and ckpt_vc.deptho is None
-        and isinstance(dataset_vertical_coordinate, DepthCoordinate)
-        and dataset_vertical_coordinate.deptho is not None
-    ):
-        logging.info(
-            "Backfilling deptho from dataset into checkpoint's "
-            "ocean vertical coordinate"
-        )
-        stepper.update_vertical_coordinate(
-            ckpt_vc.with_deptho(dataset_vertical_coordinate.deptho)
-        )
 
 
 @dataclasses.dataclass
@@ -369,7 +336,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         dataset_info=stepper.training_dataset_info,
     )
     stepper.set_eval()
-    backfill_stepper_deptho(stepper.ocean, data.ocean_properties.vertical_coordinate)
+    stepper.ocean.backfill_deptho(data.ocean_properties.vertical_coordinate)
 
     aggregator_config: InferenceEvaluatorAggregatorConfig = config.aggregator
     batch = next(iter(data.loader))

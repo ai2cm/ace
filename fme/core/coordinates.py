@@ -139,6 +139,14 @@ class VerticalCoordinate(abc.ABC):
     ) -> DeriveFnABC:
         pass
 
+    def adopt_deptho(self, other: "VerticalCoordinate") -> "VerticalCoordinate":
+        """Return a coordinate updated with ``deptho`` from *other*, if applicable.
+
+        The default returns *self* unchanged.  Subclasses that support
+        ``deptho`` (e.g. :class:`DepthCoordinate`) override this.
+        """
+        return self
+
     @property
     @abc.abstractmethod
     def coords(self) -> dict[str, np.ndarray]:
@@ -375,6 +383,15 @@ class DepthCoordinate(VerticalCoordinate):
             mask=self.mask,
             deptho=deptho,
         )
+
+    def adopt_deptho(self, other: "VerticalCoordinate") -> "DepthCoordinate":
+        if (
+            self.deptho is None
+            and isinstance(other, DepthCoordinate)
+            and other.deptho is not None
+        ):
+            return self.with_deptho(other.deptho)
+        return self
 
     def to(self, device: str) -> "DepthCoordinate":
         return DepthCoordinate(
