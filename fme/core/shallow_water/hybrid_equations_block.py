@@ -144,6 +144,32 @@ def _ch(level: int, kind: int) -> int:
     return level * _N_KINDS + kind
 
 
+def isobaric_coefficients(
+    pressure_levels: list[float],
+) -> tuple[list[float], list[float], list[float], list[float]]:
+    """Convert isobaric pressure levels to hybrid coefficients with b=0.
+
+    Interface pressures are midpoints between adjacent levels, with the
+    surface interface at p[0] and the top interface at 0.
+
+    Args:
+        pressure_levels: pressure at each level (Pa), surface-to-top.
+
+    Returns:
+        ``(a_mid, b_mid, a_interface, b_interface)``
+    """
+    K = len(pressure_levels)
+    p = pressure_levels
+    a_mid = list(p)
+    b_mid = [0.0] * K
+    a_int: list[float] = [p[0]]
+    for k in range(K - 1):
+        a_int.append(0.5 * (p[k] + p[k + 1]))
+    a_int.append(0.0)
+    b_int = [0.0] * (K + 1)
+    return a_mid, b_mid, a_int, b_int
+
+
 class HybridCoordinateBlockStepper(nn.Module):
     """Multi-level primitive equations in hybrid σ-p coordinates using VectorDiscoBlock.
 
@@ -189,6 +215,11 @@ class HybridCoordinateBlockStepper(nn.Module):
         DISCO filter parameters.
     diffusion_coeff:
         Optional ν for ∇² diffusion (m²/s). None disables diffusion.
+    isobaric:
+        If True, treat as isobaric (fixed pressure levels, b=0).
+        Skips vertical advection of V and q, PGF correction, and
+        surface pressure tendency. Use ``isobaric_coefficients`` to
+        convert pressure levels to hybrid coefficients.
     """
 
     def __init__(
@@ -204,6 +235,7 @@ class HybridCoordinateBlockStepper(nn.Module):
         kernel_shape: int = 5,
         theta_cutoff: float | None = None,
         diffusion_coeff: float | None = None,
+        isobaric: bool = False,
     ):
         super().__init__()
         self.nlat, self.nlon = shape
@@ -222,6 +254,7 @@ class HybridCoordinateBlockStepper(nn.Module):
         self.R = R
         self.phi_surface = phi_surface
         self.diffusion_coeff = diffusion_coeff
+        self.isobaric = isobaric
 
         a_m = torch.tensor(a_mid, dtype=torch.float32)
         b_m = torch.tensor(b_mid, dtype=torch.float32)
@@ -521,34 +554,39 @@ class HybridCoordinateBlockStepper(nn.Module):
         # duv includes: -∇KE - ∇φ + ζ×V - f×V (+ ν∇²V if diffusion)
         duv_dt = y_v[:, :K]  # (B, K, H, W, 2)
 
-        # ── Surface pressure tendency ──────────────────────────────────────────
-        db = self.delta_b.view(1, K, 1, 1)
-        v_dot_gps = (uv * grad_ps.unsqueeze(1)).sum(-1)  # (B, K, H, W)
-        dp_s_dt = (dp_k * div + db * v_dot_gps).sum(dim=1)  # (B, H, W)
+        # ── Vertical operations ────────────────────────────────────────────────
+        if not self.isobaric:
+            # Full hybrid: surface pressure tendency, C interfaces, PGF
+            # correction, vertical advection of V and q.
+            db = self.delta_b.view(1, K, 1, 1)
+            v_dot_gps = (uv * grad_ps.unsqueeze(1)).sum(-1)  # (B, K, H, W)
+            dp_s_dt = (dp_k * div + db * v_dot_gps).sum(dim=1)  # (B, H, W)
 
-        # ── C interfaces and mid-level C ───────────────────────────────────────
-        C_half = self._C_interfaces(div, uv, grad_ps, dp_k, dp_s_dt)
-        C_k = 0.5 * (C_half[:, :-1] + C_half[:, 1:])  # (B, K, H, W)
+            C_half = self._C_interfaces(div, uv, grad_ps, dp_k, dp_s_dt)
+            C_k = 0.5 * (C_half[:, :-1] + C_half[:, 1:])  # (B, K, H, W)
 
-        # ── PGF correction: -(R T b / p) ∇p_s ────────────────────────────────
-        b_k = self.b_mid.view(1, K, 1, 1)
-        pgf_corr = -(self.R * T * b_k / p_k).unsqueeze(-1) * grad_ps.unsqueeze(1)
+            b_k = self.b_mid.view(1, K, 1, 1)
+            pgf_corr = -(self.R * T * b_k / p_k).unsqueeze(-1) * grad_ps.unsqueeze(1)
+            dV0_dp = self._dX_dp(uv[..., 0], p_k)
+            dV1_dp = self._dX_dp(uv[..., 1], p_k)
+            vert_adv_uv = torch.stack([-C_k * dV0_dp, -C_k * dV1_dp], dim=-1)
+            duv_dt = duv_dt + pgf_corr + vert_adv_uv
 
-        # ── Vertical advection of V: -C_k ∂V/∂p ──────────────────────────────
-        dV0_dp = self._dX_dp(uv[..., 0], p_k)
-        dV1_dp = self._dX_dp(uv[..., 1], p_k)
-        vert_adv_uv = torch.stack([-C_k * dV0_dp, -C_k * dV1_dp], dim=-1)
+            omega = b_k * (dp_s_dt.unsqueeze(1) + v_dot_gps) + C_k
+        else:
+            # Isobaric: omega from cumulative divergence, no V/q vertical
+            # advection, no PGF correction, no surface pressure evolution.
+            C_half = self.C_conv(-dp_k * div)
+            omega = 0.5 * (C_half[:, :-1] + C_half[:, 1:])
+            dp_s_dt = p_s.new_zeros(B, H, W)
 
-        duv_dt = duv_dt + pgf_corr + vert_adv_uv
-
-        # ── ω and adiabatic T ─────────────────────────────────────────────────
-        omega = b_k * (dp_s_dt.unsqueeze(1) + v_dot_gps) + C_k
+        # ── ω and adiabatic T (common) ────────────────────────────────────────
         kappa = self.R / C_P
         dT_dp = self._dX_dp(T, p_k)
         dT_dt = dT_dt + omega * (kappa * T / p_k - dT_dp)
 
-        # ── Vertical advection of q ───────────────────────────────────────────
-        dq_dt = dq_dt - C_k * self._dX_dp(q, p_k)
+        if not self.isobaric:
+            dq_dt = dq_dt - C_k * self._dX_dp(q, p_k)
 
         return duv_dt, dT_dt, dq_dt, dp_s_dt
 

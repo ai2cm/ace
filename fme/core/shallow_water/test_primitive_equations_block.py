@@ -152,21 +152,28 @@ class TestPrimitiveEquationsBlockStepper:
         uv, T, q = _random_state()
         B, K, H, W = T.shape
 
-        # Run block and extract δ channels
+        # Run the inner hybrid stepper's block and extract δ channels
+        hyb = block.stepper
         ke = 0.5 * (uv[..., 0] ** 2 + uv[..., 1] ** 2)
-        from fme.core.shallow_water.primitive_equations_block import _DIV_KIND, _N_KINDS
+        from fme.core.shallow_water.hybrid_equations_block import _DIV_KIND, _N_KINDS
 
-        T_anom = T - T.mean(dim=(-2, -1), keepdim=True)
+        p_s = block._constant_ps(uv)
+        p_k = hyb._level_pressures(p_s)
+        phi = hyb._hydrostatic(T, p_k)
+        phi_anom = phi - phi.mean(dim=(-2, -1), keepdim=True)
+        ps_anom = p_s - p_s.mean(dim=(-2, -1), keepdim=True)
         zeros = torch.zeros_like(T)
-        per_level = torch.stack([T_anom, ke, zeros, zeros, T, q], dim=2)
+        per_level = torch.stack([ke, phi_anom, zeros, zeros, T, q], dim=2)
         x_s = torch.cat(
             [
                 per_level.reshape(B, K * _N_KINDS, H, W),
-                block.f_coriolis.expand(B, 1, H, W),
+                hyb.f_coriolis.expand(B, 1, H, W),
+                ps_anom.unsqueeze(1),
             ],
             dim=1,
         )
-        y_s, _ = block.block(x_s, uv)
+        x_v = torch.cat([uv, uv.new_zeros(B, 1, H, W, 2)], dim=1)
+        y_s, _ = hyb.block(x_s, x_v)
         div_block = y_s[:, : K * _N_KINDS].reshape(B, K, _N_KINDS, H, W)[
             :, :, _DIV_KIND
         ]
