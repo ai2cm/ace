@@ -130,6 +130,7 @@ def test_loss_contributions(steps_thru_atmos_7):
     atmosphere_loss = atmos_loss_config.build(
         loss_obj=mock_step_loss,
         time_dim=1,
+        max_n_steps=20,
     )
     ocean_loss = _StepLoss(loss_obj=mae_loss)
     loss_obj = CoupledStepperTrainLoss(
@@ -176,6 +177,7 @@ def test_loss_contributions_optimize_last_step_only(steps_thru_atmos_7):
     atmosphere_loss = atmos_loss_config.build(
         loss_obj=mock_step_loss,
         time_dim=1,
+        max_n_steps=n_total_atmos,
     )
     ocean_loss_config = LossContributionsConfig(
         n_steps=3,
@@ -184,6 +186,7 @@ def test_loss_contributions_optimize_last_step_only(steps_thru_atmos_7):
     ocean_loss = ocean_loss_config.build(
         loss_obj=Mock(spec=StepLoss, side_effect=mae_loss),
         time_dim=1,
+        max_n_steps=n_total_ocean,
     )
     loss_obj = CoupledStepperTrainLoss(
         ocean_loss=ocean_loss,
@@ -193,11 +196,7 @@ def test_loss_contributions_optimize_last_step_only(steps_thru_atmos_7):
     expected_metrics: dict[str, torch.Tensor | None] = {}
     for prediction, target_data in steps_thru_atmos_7:
         label = f"{prediction.realm}_{prediction.step}"
-        if prediction.realm == "atmosphere":
-            n_total = n_total_atmos
-        else:
-            n_total = n_total_ocean
-        metrics[label] = loss_obj(prediction, target_data, n_total_steps=n_total)
+        metrics[label] = loss_obj(prediction, target_data)
         if prediction.realm == "atmosphere":
             # n_steps=6, n_total=8 → last optimized step = min(6,8)-1 = 5
             if prediction.step == 5:
@@ -234,23 +233,14 @@ def test_step_is_optimized_last_step_only(
     loss = config.build(
         loss_obj=Mock(spec=StepLoss),
         time_dim=1,
+        max_n_steps=n_total_steps,
     )
     for step in range(n_total_steps):
-        result = loss.step_is_optimized(step, n_total_steps)
+        result = loss.step_is_optimized(step)
         if step == expected_optimized_step:
             assert result, f"step {step} should be optimized"
         else:
             assert not result, f"step {step} should not be optimized"
-
-
-def test_step_is_optimized_last_step_only_requires_n_total_steps():
-    config = LossContributionsConfig(optimize_last_step_only=True)
-    loss = config.build(
-        loss_obj=Mock(spec=StepLoss),
-        time_dim=1,
-    )
-    with pytest.raises(ValueError, match="n_total_steps is required"):
-        loss.step_is_optimized(0)
 
 
 def test_step_is_optimized_last_step_only_weight_zero():
@@ -258,9 +248,10 @@ def test_step_is_optimized_last_step_only_weight_zero():
     loss = config.build(
         loss_obj=Mock(spec=StepLoss),
         time_dim=1,
+        max_n_steps=5,
     )
     # weight=0 → NullLossContributions, always returns False
-    assert not loss.step_is_optimized(0, n_total_steps=5)
+    assert not loss.step_is_optimized(0)
 
 
 @pytest.mark.parametrize("ocean_config_kwargs", [{"n_steps": 0}, {"weight": 0.0}])
@@ -270,11 +261,13 @@ def test_null_loss_contributions(steps_thru_atmos_7, ocean_config_kwargs):
     atmosphere_loss = atmos_loss_config.build(
         loss_obj=Mock(spec=StepLoss, return_value=torch.tensor(5.25)),
         time_dim=1,
+        max_n_steps=10,
     )
     ocean_loss_config = LossContributionsConfig(**ocean_config_kwargs)
     ocean_loss = ocean_loss_config.build(
         loss_obj=Mock(spec=StepLoss, return_value=torch.tensor(42.0)),
         time_dim=1,
+        max_n_steps=10,
     )
     loss_obj = CoupledStepperTrainLoss(
         ocean_loss=ocean_loss,

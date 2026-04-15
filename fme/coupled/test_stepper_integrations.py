@@ -204,6 +204,7 @@ def test_stepper_parameter_init_integration(
         ),
     )
     train_stepper_config = CoupledTrainStepperConfig(
+        n_coupled_steps=1,
         ocean=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
             parameter_init=ParameterInitializationConfig(weights_path=ocean_path),
@@ -247,6 +248,7 @@ class _LearnableTimesTwo(torch.nn.Module):
 
 def _build_train_stepper_and_data(atmos_n_steps):
     train_stepper_config = CoupledTrainStepperConfig(
+        n_coupled_steps=1,
         ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
         atmosphere=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
@@ -315,6 +317,7 @@ def test_optimize_last_step_only_with_gradient_accumulation():
     """optimize_last_step_only should work correctly with gradient accumulation:
     only the last step per realm produces a loss metric and accumulates a loss."""
     train_stepper_config = CoupledTrainStepperConfig(
+        n_coupled_steps=2,
         ocean=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
             loss_contributions=LossContributionsConfig(optimize_last_step_only=True),

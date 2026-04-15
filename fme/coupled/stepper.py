@@ -1385,18 +1385,16 @@ class CoupledStepperTrainLoss:
         self,
         realm: Literal["ocean", "atmosphere"],
         step: int,
-        n_total_steps: int,
     ) -> bool:
-        return self._loss_objs[realm].step_is_optimized(step, n_total_steps)
+        return self._loss_objs[realm].step_is_optimized(step)
 
     def __call__(
         self,
         prediction: ComponentEnsembleStepPrediction,
         target_data: TensorMapping,
-        n_total_steps: int | None = None,
     ) -> torch.Tensor | None:
         loss_obj = self._loss_objs[prediction.realm]
-        if loss_obj.step_is_optimized(prediction.step, n_total_steps):
+        if loss_obj.step_is_optimized(prediction.step):
             return loss_obj(prediction, target_data)
         return None
 
@@ -1417,6 +1415,7 @@ class CoupledTrainStepperConfig:
     """Configuration for training-specific aspects of a coupled stepper.
 
     Parameters:
+        n_coupled_steps: Number of forward coupled steps in the optimization.
         ocean: The configuration for the ocean component.
         atmosphere: The configuration for the atmosphere component.
         n_ensemble: The number of ensemble members evaluated for each training
@@ -1427,6 +1426,7 @@ class CoupledTrainStepperConfig:
             fine-tuning a previously-trained coupled stepper.
     """
 
+    n_coupled_steps: int
     ocean: ComponentTrainingConfig
     atmosphere: ComponentTrainingConfig
     n_ensemble: int = -1  # sentinel value to avoid None typing of attribute
@@ -1460,14 +1460,18 @@ class CoupledTrainStepperConfig:
             else:
                 self.n_ensemble = 1
 
-    def _build_loss(self, stepper: CoupledStepper) -> CoupledStepperTrainLoss:
+    def _build_loss(
+        self, stepper: CoupledStepper, n_coupled_steps: int
+    ) -> CoupledStepperTrainLoss:
         ocean_step_loss = stepper.ocean.build_loss(self.ocean.loss)
         atmos_step_loss = stepper.atmosphere.build_loss(self.atmosphere.loss)
+        max_n_steps_ocean = n_coupled_steps
+        max_n_steps_atmos = n_coupled_steps * stepper.n_inner_steps
         ocean_loss = self.ocean.loss_contributions.build(
-            ocean_step_loss, stepper.ocean.TIME_DIM
+            ocean_step_loss, stepper.ocean.TIME_DIM, max_n_steps=max_n_steps_ocean
         )
         atmos_loss = self.atmosphere.loss_contributions.build(
-            atmos_step_loss, stepper.atmosphere.TIME_DIM
+            atmos_step_loss, stepper.atmosphere.TIME_DIM, max_n_steps=max_n_steps_atmos
         )
         return CoupledStepperTrainLoss(ocean_loss, atmos_loss)
 
@@ -1549,7 +1553,7 @@ class CoupledTrainStepper(
         """
         self._stepper = stepper
         self._config = config
-        self._loss = self._config._build_loss(stepper)
+        self._loss = self._config._build_loss(stepper, config.n_coupled_steps)
 
     @property
     def ocean(self) -> Stepper:
@@ -1606,7 +1610,6 @@ class CoupledTrainStepper(
         gen_step: ComponentStepPrediction,
         forward_data: TensorMapping,
         time_dim: int,
-        n_total_steps: int,
         n_ensemble: int,
         optimization: OptimizationABC,
         metrics: ComponentStepMetrics,
@@ -1621,7 +1624,7 @@ class CoupledTrainStepper(
             step=gen_step.step,
         )
         target_step_ensemble = add_ensemble_dim(target_step)
-        step_loss = self._loss(ensemble_step, target_step_ensemble, n_total_steps)
+        step_loss = self._loss(ensemble_step, target_step_ensemble)
         if step_loss is not None:
             label = f"loss/{gen_step.realm}_step_{gen_step.step}"
             metrics.add_metric(label, step_loss.detach(), gen_step.realm)
@@ -1662,14 +1665,12 @@ class CoupledTrainStepper(
         output_iterator = iter(output_generator)
         output_list: list[ComponentEnsembleStepPrediction] = []
         n_outer_steps = data.ocean_data.n_timesteps - self.n_ic_timesteps
-        n_total_atmos_steps = n_outer_steps * self.n_inner_steps
         for i_outer in range(n_outer_steps):
             for i_inner in range(self.n_inner_steps):
                 global_atmos_step = i_outer * self.n_inner_steps + i_inner
                 optimize = self._loss.step_is_optimized(
                     "atmosphere",
                     global_atmos_step,
-                    n_total_atmos_steps,
                 )
                 grad_context = contextlib.nullcontext() if optimize else torch.no_grad()
                 with grad_context:
@@ -1682,13 +1683,12 @@ class CoupledTrainStepper(
                         gen_step=gen_step,
                         forward_data=atmos_forward_data.data,
                         time_dim=self.atmosphere.TIME_DIM,
-                        n_total_steps=n_total_atmos_steps,
                         n_ensemble=n_ensemble,
                         optimization=optimization,
                         metrics=metrics,
                         output_list=output_list,
                     )
-            optimize = self._loss.step_is_optimized("ocean", i_outer, n_outer_steps)
+            optimize = self._loss.step_is_optimized("ocean", i_outer)
             grad_context = contextlib.nullcontext() if optimize else torch.no_grad()
             with grad_context:
                 gen_step = next(output_iterator)
@@ -1697,7 +1697,6 @@ class CoupledTrainStepper(
                     gen_step=gen_step,
                     forward_data=ocean_forward_data.data,
                     time_dim=self.ocean.TIME_DIM,
-                    n_total_steps=n_outer_steps,
                     n_ensemble=n_ensemble,
                     optimization=optimization,
                     metrics=metrics,
