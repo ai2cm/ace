@@ -68,6 +68,7 @@ from fme.core.ema import EMATracker
 from fme.core.generics.aggregator import AggregatorABC, InferenceAggregatorABC
 from fme.core.generics.data import GriddedDataABC, InferenceDataABC
 from fme.core.generics.inference import run_inference
+from fme.core.generics.lr_tuning import LRTuningConfig, run_lr_tuning_trial
 from fme.core.generics.metrics_aggregator import MetricsAggregator
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.generics.validation import run_validation
@@ -134,6 +135,9 @@ class TrainConfigProtocol(Protocol):
 
     @property
     def save_best_inference_epoch_checkpoints(self) -> bool: ...
+
+    @property
+    def lr_tuning(self) -> LRTuningConfig | None: ...
 
     def get_inference_epochs(self) -> list[int]: ...
 
@@ -245,6 +249,8 @@ class Trainer:
         self.stepper = stepper
         self.stepper.update_training_history(TrainingJob.from_env())
 
+        self._build_optimization = build_optimization
+        self._build_ema = build_ema
         self.optimization = build_optimization(stepper.modules)
         self._end_of_batch_callback = end_of_batch_callback
         self._end_of_epoch_callback = end_of_epoch_callback
@@ -301,6 +307,47 @@ class Trainer:
         dist = Distributed.get_instance()
         return self.config.save_checkpoint and dist.is_root()
 
+    def _copy_stepper(self) -> TrainStepperABC:
+        """Create a copy of the stepper via its state serialization API."""
+        import copy
+
+        new_stepper = copy.deepcopy(self.stepper)
+        new_stepper.load_state(copy.deepcopy(self.stepper.get_state()))
+        return new_stepper
+
+    def _copy_ema(self, modules: torch.nn.ModuleList) -> EMATracker:
+        """Create a new EMATracker initialized from the current EMA state."""
+        return EMATracker.from_state(self._ema.get_state(), modules)
+
+    def _maybe_tune_lr(self):
+        cfg = self.config.lr_tuning
+        if cfg is None:
+            return
+        if self._current_epoch_num_batches_seen > 0:
+            return  # resumed mid-epoch, tuning already ran (or wasn't needed)
+        if not cfg.epochs.contains(self._epochs_trained):
+            return
+
+        # set_epoch so the trial sees the same first N batches as the real epoch
+        self.train_data.set_epoch(self._epochs_trained + 1)
+        new_lr = run_lr_tuning_trial(
+            train_data=self.train_data,
+            valid_data=self.valid_data,
+            optimization=self.optimization,
+            copy_stepper=self._copy_stepper,
+            build_optimization=self._build_optimization,
+            copy_ema=self._copy_ema,
+            config=cfg,
+            current_lr=self.optimization.learning_rate,
+            get_validation_aggregator=(
+                self._aggregator_builder.get_validation_aggregator
+            ),
+            validate_using_ema=self.config.validate_using_ema,
+        )
+        if new_lr is not None:
+            logging.info(f"LR tuning: adopting candidate LR {new_lr}")
+            self.optimization.set_learning_rate(new_lr)
+
     def train(self):
         logging.info("Starting Training Loop...")
 
@@ -339,6 +386,7 @@ class Trainer:
             logging.info(
                 f"Beginning epoch after {self._epochs_trained} complete epochs"
             )
+            self._maybe_tune_lr()
             start_time = time.time()
             train_logs = self.train_one_epoch()
             train_end = time.time()
@@ -755,4 +803,4 @@ def epoch_checkpoint_enabled(
 ) -> bool:
     if save_epochs is None:
         return False
-    return epoch in range(max_epochs)[save_epochs.slice]
+    return epoch in range(max_epochs + 1)[save_epochs.slice]

@@ -2,13 +2,12 @@
 
 set -e
 
-JOB_NAME="ace2-cm4-atmosphere-evaluator"
-JOB_GROUP="ace2-cm4-atmosphere"
-EXISTING_RESULTS_DATASET="01K0JF7H54WVDF5FGSAFAP04GJ"  # this contains the checkpoint to use for inference
-CONFIG_FILENAME="ace-evaluator-config.yaml"
+JOB_NAME="cm4-piControl-ocean-evaluator"
+JOB_GROUP="cm4-piControl-ocean"
+EXISTING_RESULTS_DATASET="01JX4DEKY2A13D6Y95T53DSVCQ"  # beaker dataset ID containing the training checkpoint
+CONFIG_FILENAME="evaluator-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH="${SCRIPT_PATH}${CONFIG_FILENAME}"
- # since we use a service account API key for wandb, we use the beaker username to set the wandb username
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
@@ -19,13 +18,15 @@ python -m fme.ace.validate_config --config_type evaluator $CONFIG_PATH
 gantry run \
     --name $JOB_NAME \
     --task-name $JOB_NAME \
-    --description 'Run ACE evaluator for CM4 atmosphere data' \
+    --description "Samudra CM4 piControl ocean evaluator" \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
     --priority normal \
     --not-preemptible \
-    --cluster ai2/saturn-cirrascale \
     --cluster ai2/ceres-cirrascale \
+    --cluster ai2/jupiter-cirrascale \
+    --cluster ai2/saturn-cirrascale \
+    --weka climate-default:/climate-default \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
     --env WANDB_JOB_TYPE=inference \
@@ -36,7 +37,6 @@ gantry run \
     --dataset $EXISTING_RESULTS_DATASET:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
     --gpus 1 \
     --shared-memory 50GiB \
-    --weka climate-default:/climate-default \
     --budget ai2/climate \
     --system-python \
     --install "pip install --no-deps ." \

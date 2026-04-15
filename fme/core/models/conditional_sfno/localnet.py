@@ -52,7 +52,16 @@ class LocalNetConfig:
     kernel_shape: tuple[int, int] = (3, 3)
     basis_type: BasisType = "morlet"
     block_types: list[BlockType] = dataclasses.field(
-        default_factory=lambda: ["disco"] * 12
+        default_factory=lambda: [
+            "disco",
+            "disco",
+            "disco",
+            "disco",
+            "conv1x1",
+            "conv1x1",
+            "conv1x1",
+            "conv1x1",
+        ]
     )
     global_layer_norm: bool = False
     use_mlp: bool = True
@@ -61,8 +70,8 @@ class LocalNetConfig:
     encoder_layers: int = 1
     pos_embed: bool = True
     big_skip: bool = True
-    normalize_big_skip: bool = False
-    affine_norms: bool = False
+    normalize_big_skip: bool = True
+    affine_norms: bool = True
     lora_rank: int = 0
     lora_alpha: float | None = None
 

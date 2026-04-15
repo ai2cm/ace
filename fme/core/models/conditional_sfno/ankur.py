@@ -34,7 +34,7 @@ class AnkurLocalNetConfig:
 
     type: Literal["ankurlocalnet"] = "ankurlocalnet"
     embed_dim: int = 256
-    use_disco_encoder: bool = False
+    use_disco_encoder: bool = True
     disco_kernel_size: int = 3
     pos_embed: bool = False
     activation_function: str = "gelu"
