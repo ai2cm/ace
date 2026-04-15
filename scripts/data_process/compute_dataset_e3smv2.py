@@ -128,7 +128,7 @@ def open_coupled_dataset(
                 ds = ds.isel(time=0, drop=True)
             for varname in input_variable_names["time_invariant"]:
                 if varname not in datasets and varname in ds.variables:
-                    datasets[varname] = ds
+                    datasets[varname] = ds[varname]
         if key != "time_invariant":
             dataset_dirs[key] = os.path.join(input_dir, key)
             ds = xr.open_mfdataset(
@@ -137,7 +137,7 @@ def open_coupled_dataset(
                 chunks=chunks,
                 data_vars="minimal",
                 coords="minimal",
-            ).drop(["time_bnds"], errors="ignore")
+            ).drop_vars(["time_bnds", "mdt", "date", "date_written"], errors="ignore")
             datasets[key] = ds
     ds = xr.merge(datasets.values(), compat="override", join="override")
     return ds
@@ -430,7 +430,14 @@ def construct_lazy_dataset(
         outer_chunks = config.chunking.get_chunks(config.standard_names)
     else:
         outer_chunks = config.sharding.get_chunks(config.standard_names)
-    ds = ds.chunk(outer_chunks).astype(np.float32)
+    ds = ds.chunk(outer_chunks)
+    ds = ds.assign(
+        {
+            name: ds[name].astype(np.float32)
+            for name in ds
+            if np.issubdtype(ds[name].dtype, np.number)
+        }
+    )
     ds.attrs["history"] = (
         "Dataset computed by full-model/scripts/e3smv2_data_process"
         "/compute_dataset_e3smv2.py"
