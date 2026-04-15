@@ -474,14 +474,25 @@ class VectorDiscoConvS2(nn.Module):
         self.scalar_gather_idx = s_gather
         self.vector_gather_idx = v_gather
 
-        # Weight init: scale so total output variance ≈ 1
+        # Weight init: scale so total output variance ≈ 1.
+        #
+        # The DISCO filter basis is normalized to preserve the mean of
+        # constant fields (so that unit gradient weights give the actual
+        # gradient, etc.). However, spatial averaging inherently reduces
+        # variance (by Cauchy-Schwarz, if weights sum to 1 then
+        # Σ wᵢ² < 1). The bearing filters (ψ·cos φ, ψ·sin φ) attenuate
+        # further because the angular modulation is zero-mean, causing
+        # additional cancellation. We probe each filter path with white
+        # noise to measure the actual variance attenuation, then
+        # incorporate it into the fan-in so the weight scale compensates.
         N_s_in = in_channels_scalar
         N_v_in = in_channels_vector
         N_s_out = out_channels_scalar
         N_v_out = out_channels_vector
 
-        s_fan = max(1, N_s_in * K_s + 2 * N_v_in * K_v)
-        v_fan = max(1, 2 * N_s_in * K_v + 2 * N_v_in * K_s)
+        alpha = self._probe_filter_variance(K_s, K_v)
+        s_fan = max(1, N_s_in * K_s * alpha["ss"] + 2 * N_v_in * K_v * alpha["vs"])
+        v_fan = max(1, 2 * N_s_in * K_v * alpha["sv"] + 2 * N_v_in * K_s * alpha["vv"])
         s_scale = 1.0 / math.sqrt(s_fan)
         v_scale = 1.0 / math.sqrt(v_fan)
 
@@ -504,6 +515,76 @@ class VectorDiscoConvS2(nn.Module):
             self.bias_scalar = nn.Parameter(torch.zeros(N_s_out))
         else:
             self.bias_scalar = None
+
+    @torch.no_grad()
+    def _probe_filter_variance(self, K_s: int, K_v: int) -> dict[str, float]:
+        """Measure variance attenuation of each DISCO filter path.
+
+        The DISCO basis is normalized to preserve the mean of constant
+        fields (``basis_norm_mode="mean"``), which is correct for encoding
+        physics operators. But spatial averaging inherently reduces
+        variance: if filter weights sum to 1 then Σ wᵢ² < 1 by
+        Cauchy-Schwarz. The bearing filters (ψ·cos φ, ψ·sin φ) attenuate
+        further because the zero-mean angular modulation causes
+        additional cancellation. The standard fan-in init assumes
+        unit-variance filter outputs, so without correction it
+        under-scales the weights.
+
+        This method probes each filter contraction with white noise and
+        returns the ratio output_var / input_var.  The caller multiplies
+        the nominal fan-in of each path by this factor so the weight
+        scale compensates for the attenuation.
+
+        Returns a dict with keys ``"ss"`` (isotropic), ``"vs"``
+        (bearing-at-input), ``"sv"`` (bearing-at-output), ``"vv"``
+        (frame-rotation).
+        """
+        H, W = self.nlat_out, self.nlon_out
+        probe = torch.randn(1, 1, H, W, device=self.psi_scalar_fft.device)
+        in_var = probe.var().item()
+        if in_var < 1e-10:
+            return {"ss": 1.0, "vs": 1.0, "sv": 1.0, "vv": 1.0}
+
+        def _ratio(psi, gather):
+            f = _disco_s2_contraction_fft(probe, psi, gather, W)
+            return f.var().item() / in_var
+
+        alpha_ss = max(_ratio(self.psi_scalar_fft, self.scalar_gather_idx), 1e-6)
+
+        if K_v > 0:
+            alpha_sv = max(
+                0.5
+                * (
+                    _ratio(self.psi_v_cos_p_fft, self.vector_gather_idx)
+                    + _ratio(self.psi_v_sin_p_fft, self.vector_gather_idx)
+                ),
+                1e-6,
+            )
+            alpha_vs = max(
+                0.5
+                * (
+                    _ratio(self.psi_v_cos_b_fft, self.vector_gather_idx)
+                    + _ratio(self.psi_v_sin_b_fft, self.vector_gather_idx)
+                ),
+                1e-6,
+            )
+        else:
+            alpha_sv = 1.0
+            alpha_vs = 1.0
+
+        if K_s > 0:
+            alpha_vv = max(
+                0.5
+                * (
+                    _ratio(self.psi_s_cos_g_fft, self.scalar_gather_idx)
+                    + _ratio(self.psi_s_sin_g_fft, self.scalar_gather_idx)
+                ),
+                1e-6,
+            )
+        else:
+            alpha_vv = 1.0
+
+        return {"ss": alpha_ss, "vs": alpha_vs, "sv": alpha_sv, "vv": alpha_vv}
 
     def _apply(self, fn, recurse=True):
         super()._apply(fn, recurse=recurse)
