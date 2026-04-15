@@ -43,6 +43,7 @@ class VectorDiscoNetworkConfig:
     mlp_hidden_factor: int = 2
     activation: str = "gelu"
     residual_blocks: bool = True
+    num_groups: int = 1
     context: ContextConfig = dataclasses.field(
         default_factory=lambda: ContextConfig(
             embed_dim_scalar=0,
@@ -98,6 +99,7 @@ class VectorDiscoNetwork(nn.Module):
                     activation=config.activation,
                     residual=config.residual_blocks,
                     context_config=config.context,
+                    num_groups=config.num_groups,
                 )
                 for _ in range(config.n_blocks)
             ]
@@ -139,9 +141,12 @@ class VectorDiscoNetwork(nn.Module):
             # stays moderate (~4x) despite the weaker contraction.
             block.conv.W_sv.data.mul_(0.7)
             nn.init.zeros_(block.conv.W_vv)
+            # Diagonal damping: W_vv[o, o_within_group, 0, 0] = -0.1
+            # With groups, output channel o maps to within-group index o % Gv.
             Nv = block.conv.out_channels_vector
+            Gv = block.conv.W_vv.shape[1]
             for o in range(Nv):
-                block.conv.W_vv.data[o, o, 0, 0] = -0.1
+                block.conv.W_vv.data[o, o % Gv, 0, 0] = -0.1
             if block.scalar_mlp is not None:
                 # Zero the output layer of the MLP (last Conv2d)
                 for module in reversed(list(block.scalar_mlp.modules())):

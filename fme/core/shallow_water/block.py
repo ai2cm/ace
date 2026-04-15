@@ -82,6 +82,7 @@ class VectorDiscoBlock(nn.Module):
         residual: bool = True,
         post_norm: bool = True,
         context_config: ContextConfig | None = None,
+        num_groups: int = 1,
     ):
         """Initialize the block.
 
@@ -102,6 +103,10 @@ class VectorDiscoBlock(nn.Module):
             context_config: conditioning dimensions for the post-norm.
                 Required when post_norm is True. When all embed dims are 0,
                 the norm is unconditional (plain channel layer norm).
+            num_groups: number of channel groups for the convolution,
+                pointwise skip, and sv_product. Channels are divided into
+                groups that only interact within themselves. The scalar MLP
+                and post-norm remain ungrouped to provide cross-group mixing.
         """
         super().__init__()
 
@@ -117,11 +122,14 @@ class VectorDiscoBlock(nn.Module):
             basis_type=basis_type,
             theta_cutoff=theta_cutoff,
             bias=True,
+            num_groups=num_groups,
         )
 
-        # Pointwise (delta function) skip connections
+        # Pointwise (delta function) skip connections (grouped)
         if n_scalar > 0:
-            self.pointwise_ss = nn.Conv2d(n_scalar, n_scalar, 1, bias=False)
+            self.pointwise_ss = nn.Conv2d(
+                n_scalar, n_scalar, 1, bias=False, groups=num_groups
+            )
         else:
             self.pointwise_ss = None
 
@@ -151,7 +159,7 @@ class VectorDiscoBlock(nn.Module):
 
         if n_scalar > 0 and n_vector > 0:
             self.sv_product: ScalarVectorProduct | None = ScalarVectorProduct(
-                n_scalar, n_vector
+                n_scalar, n_vector, num_groups=num_groups
             )
         else:
             self.sv_product = None

@@ -20,17 +20,24 @@ class ScalarVectorProduct(nn.Module):
     same meridian frame at each grid point).
     """
 
-    def __init__(self, n_scalar: int, n_vector: int):
+    def __init__(self, n_scalar: int, n_vector: int, num_groups: int = 1):
         """
         Args:
             n_scalar: number of input scalar channels.
             n_vector: number of input/output vector channels.
+            num_groups: number of channel groups. Each group of Gs=n_scalar/G
+                scalars interacts only with its Gv=n_vector/G vectors.
         """
         super().__init__()
         self.n_scalar = n_scalar
         self.n_vector = n_vector
-        scale = 1.0 / math.sqrt(max(1, n_scalar))
-        self.weight = nn.Parameter(scale * torch.randn(n_scalar, n_vector, 2))
+        self.num_groups = num_groups
+        Gs = n_scalar // num_groups
+        scale = 1.0 / math.sqrt(max(1, Gs))
+        # Weight shape: (n_scalar, Gv, 2) — each scalar channel interacts
+        # only with the Gv vector channels in its group.
+        Gv = n_vector // num_groups
+        self.weight = nn.Parameter(scale * torch.randn(n_scalar, Gv, 2))
 
     def forward(
         self,
@@ -46,19 +53,25 @@ class ScalarVectorProduct(nn.Module):
         Returns:
             Vector output (B, N_v, H, W, 2), same shape as x_vector.
         """
-        # s: (B, N_s, H, W) → (B, N_s, 1, H, W)
-        s = x_scalar.unsqueeze(2)
-        u = x_vector[..., 0].unsqueeze(1)  # (B, 1, N_v, H, W)
-        v = x_vector[..., 1].unsqueeze(1)  # (B, 1, N_v, H, W)
+        B, N_s, H, W = x_scalar.shape
+        G = self.num_groups
+        Gs = N_s // G
+        Gv = self.weight.shape[1]
 
-        # w: (N_s, N_v) for each of scale and rotate
-        w_s = self.weight[:, :, 0].reshape(1, self.n_scalar, self.n_vector, 1, 1)
-        w_r = self.weight[:, :, 1].reshape(1, self.n_scalar, self.n_vector, 1, 1)
+        # Reshape to (B, G, Gs, H, W) and (B, G, Gv, H, W, 2)
+        s = x_scalar.reshape(B, G, Gs, H, W).unsqueeze(3)  # (B, G, Gs, 1, H, W)
+        u = x_vector[..., 0].reshape(B, G, Gv, H, W).unsqueeze(2)  # (B,G,1,Gv,H,W)
+        v = x_vector[..., 1].reshape(B, G, Gv, H, W).unsqueeze(2)
 
-        # (B, N_s, N_v, H, W) for each component, sum over N_s
-        out_u = (s * (w_s * u + w_r * (-v))).sum(dim=1)
-        out_v = (s * (w_s * v + w_r * u)).sum(dim=1)
-        return torch.stack([out_u, out_v], dim=-1)
+        # w: (G, Gs, Gv, 2)
+        w = self.weight.reshape(G, Gs, Gv, 2)
+        w_s = w[:, :, :, 0].reshape(1, G, Gs, Gv, 1, 1)
+        w_r = w[:, :, :, 1].reshape(1, G, Gs, Gv, 1, 1)
+
+        # (B, G, Gs, Gv, H, W) for each component, sum over Gs
+        out_u = (s * (w_s * u + w_r * (-v))).sum(dim=2)  # (B, G, Gv, H, W)
+        out_v = (s * (w_s * v + w_r * u)).sum(dim=2)
+        return torch.stack([out_u, out_v], dim=-1).reshape(B, -1, H, W, 2)
 
 
 class VectorDotProduct(nn.Module):

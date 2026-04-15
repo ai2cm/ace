@@ -411,6 +411,7 @@ class VectorDiscoConvS2(nn.Module):
         grid_out: str = "equiangular",
         bias: bool = True,
         theta_cutoff: float | None = None,
+        num_groups: int = 1,
     ):
         super().__init__()
 
@@ -425,6 +426,22 @@ class VectorDiscoConvS2(nn.Module):
         self.in_channels_vector = in_channels_vector
         self.out_channels_scalar = out_channels_scalar
         self.out_channels_vector = out_channels_vector
+        self.num_groups = num_groups
+        G = num_groups
+        if G > 1:
+            if in_channels_scalar % G or out_channels_scalar % G:
+                raise ValueError(
+                    f"scalar channels ({in_channels_scalar}, {out_channels_scalar})"
+                    f" must be divisible by num_groups={G}"
+                )
+            if in_channels_vector > 0 and (
+                in_channels_vector % G or out_channels_vector % G
+            ):
+                raise ValueError(
+                    f"vector channels ({in_channels_vector},"
+                    f" {out_channels_vector})"
+                    f" must be divisible by num_groups={G}"
+                )
         self.nlat_in, self.nlon_in = in_shape
         self.nlat_out, self.nlon_out = out_shape
 
@@ -485,29 +502,34 @@ class VectorDiscoConvS2(nn.Module):
         # additional cancellation. We probe each filter path with white
         # noise to measure the actual variance attenuation, then
         # incorporate it into the fan-in so the weight scale compensates.
+        # Per-group channel counts for weight shapes.
         N_s_in = in_channels_scalar
         N_v_in = in_channels_vector
         N_s_out = out_channels_scalar
         N_v_out = out_channels_vector
+        Gs = N_s_in // G  # scalars per group (input)
+        Gv = N_v_in // G  # vectors per group (input)
 
         alpha = self._probe_filter_variance(K_s, K_v)
-        s_fan = max(1, N_s_in * K_s * alpha["ss"] + 2 * N_v_in * K_v * alpha["vs"])
-        v_fan = max(1, 2 * N_s_in * K_v * alpha["sv"] + 2 * N_v_in * K_s * alpha["vv"])
+        s_fan = max(1, Gs * K_s * alpha["ss"] + 2 * Gv * K_v * alpha["vs"])
+        v_fan = max(1, 2 * Gs * K_v * alpha["sv"] + 2 * Gv * K_s * alpha["vv"])
         s_scale = 1.0 / math.sqrt(s_fan)
         v_scale = 1.0 / math.sqrt(v_fan)
 
-        self.W_ss = nn.Parameter(s_scale * torch.randn(N_s_out, N_s_in, K_s))
-        self.W_vs = nn.Parameter(s_scale * torch.randn(N_s_out, N_v_in, K_v, 2))
-        self.W_sv = nn.Parameter(v_scale * torch.randn(N_v_out, N_s_in, K_v, 2))
-        self.W_vv = nn.Parameter(v_scale * torch.randn(N_v_out, N_v_in, K_s, 2))
+        # Weight shapes use per-group channel counts. The group dimension
+        # is folded into the outer channel dimension:
+        #   W_ss: (G*Gso, Gs, K_s) = (N_s_out, Gs, K_s)
+        # The forward pass reshapes to (G, Gso, Gs, ...) for the einsum.
+        self.W_ss = nn.Parameter(s_scale * torch.randn(N_s_out, Gs, K_s))
+        self.W_vs = nn.Parameter(s_scale * torch.randn(N_s_out, Gv, K_v, 2))
+        self.W_sv = nn.Parameter(v_scale * torch.randn(N_v_out, Gs, K_v, 2))
+        self.W_vv = nn.Parameter(v_scale * torch.randn(N_v_out, Gv, K_s, 2))
 
-        # W_vs2: diagonal scalar-grad dot vector → scalar (advection-type).
-        # Only created when N_s_in == N_s_out and both scalar/vector channels
-        # are present.  Shape (N_s, N_v_in, K_v, 2) where the last dim indexes
-        # {V·∇s  (d=0),  V·∇⊥s  (d=1)}.  Each output scalar channel o
-        # receives only the contribution from input scalar channel c = o.
+        # W_vs2: V·∇s advection term, per-group.
+        # Shape (N_s, Gv, K_v, 2) — each scalar channel interacts only
+        # with the Gv vector channels in its group.
         if N_s_in == N_s_out and N_s_in > 0 and N_v_in > 0:
-            self.W_vs2 = nn.Parameter(s_scale * torch.randn(N_s_in, N_v_in, K_v, 2))
+            self.W_vs2 = nn.Parameter(s_scale * torch.randn(N_s_in, Gv, K_v, 2))
         else:
             self.register_parameter("W_vs2", None)
 
@@ -629,6 +651,9 @@ class VectorDiscoConvS2(nn.Module):
         H, W = self.nlat_out, self.nlon_out
         s_g = self.scalar_gather_idx
         v_g = self.vector_gather_idx
+        G = self.num_groups
+        Gs = N_s_in // G
+        Gv = N_v_in // G
 
         # --- Scalar input contractions (3 calls) ---
         if N_s_in > 0:
@@ -671,40 +696,81 @@ class VectorDiscoConvS2(nn.Module):
             div = x_scalar.new_zeros(B, 0, K_v, H, W)
             curl = div
 
-        # --- Scalar output ---
-        y_s = torch.einsum("ock,bckxy->boxy", self.W_ss, f_s)
-        dc = torch.stack([div, curl], dim=-1)
-        y_s = y_s + torch.einsum("ockd,bckxyd->boxy", self.W_vs, dc)
+        # --- Scalar output (grouped) ---
+        N_s_out = self.out_channels_scalar
+        if N_s_in > 0:
+            f_s_g = f_s.reshape(B, G, Gs, K_s, H, W)
+            Gso = N_s_out // G
+            W_ss_g = self.W_ss.reshape(G, Gso, Gs, K_s)
+            y_s = torch.einsum("gock,bgckxy->bgoxy", W_ss_g, f_s_g).reshape(B, -1, H, W)
+        else:
+            y_s = x_scalar.new_zeros(B, N_s_out, H, W)
 
-        # W_vs2: V·∇s diagonal advection term.
-        # grad_comp[b,c_v,c_s,k,x,y] = u*f_cp + v*f_sp  ≈ V·∇s
-        # perp_comp                   = -u*f_sp + v*f_cp ≈ V·∇⊥s
+        if N_v_in > 0:
+            dc = torch.stack([div, curl], dim=-1)  # (B, N_v_in, K_v, H, W, 2)
+            dc_g = dc.reshape(B, G, Gv, K_v, H, W, 2)
+            W_vs_g = self.W_vs.reshape(G, -1, Gv, K_v, 2)
+            y_s = y_s + torch.einsum("gockd,bgckxyd->bgoxy", W_vs_g, dc_g).reshape(
+                B, -1, H, W
+            )
+
+        # W_vs2: V·∇s advection term (grouped).
+        # Per group: (B, Gv, Gs, K_v, H, W) intermediate instead of
+        # (B, N_v_in, N_s_in, K_v, H, W), reducing memory by factor G.
         if self.W_vs2 is not None and N_v_in > 0 and N_s_in > 0:
-            u_e = u[:, :, None, None, :, :]  # (B, N_v_in, 1,      1,    H, W)
-            v_e = v[:, :, None, None, :, :]
-            fcp = f_cp[:, None, :, :, :, :]  # (B, 1,      N_s_in, K_v, H, W)
-            fsp = f_sp[:, None, :, :, :, :]
-            grad_comp = u_e * fcp + v_e * fsp  # (B, N_v_in, N_s_in, K_v, H, W)
-            perp_comp = v_e * fcp - u_e * fsp
+            u_g = u.reshape(B, G, Gv, H, W)
+            v_g_vec = v.reshape(B, G, Gv, H, W)
+            fcp_g = f_cp.reshape(B, G, Gs, K_v, H, W)
+            fsp_g = f_sp.reshape(B, G, Gs, K_v, H, W)
+
+            u_e = u_g[:, :, :, None, None, :, :]  # (B, G, Gv, 1, 1, H, W)
+            v_e = v_g_vec[:, :, :, None, None, :, :]
+            fcp_e = fcp_g[:, :, None, :, :, :, :]  # (B, G, 1, Gs, K_v, H, W)
+            fsp_e = fsp_g[:, :, None, :, :, :, :]
+            grad_comp = u_e * fcp_e + v_e * fsp_e  # (B, G, Gv, Gs, K_v, H, W)
+            perp_comp = v_e * fcp_e - u_e * fsp_e
             adv_dc = torch.stack([grad_comp, perp_comp], dim=-1)
-            # einsum: (c, v, k, d), (B, v, c, k, H, W, d) -> (B, c, H, W)
-            y_s = y_s + torch.einsum("cvkd,bvckxyd->bcxy", self.W_vs2, adv_dc)
+            W_vs2_g = self.W_vs2.reshape(G, Gs, Gv, K_v, 2)
+            # (G,Gs,Gv,Kv,2) x (B,G,Gv,Gs,Kv,H,W,2) -> (B,G,Gs,H,W)
+            y_s = y_s + torch.einsum("gcvkd,bgvckxyd->bgcxy", W_vs2_g, adv_dc).reshape(
+                B, -1, H, W
+            )
 
         if self.bias_scalar is not None:
             y_s = y_s + self.bias_scalar.reshape(1, -1, 1, 1)
 
-        # --- Vector output ---
-        # scalar → vector (bearing φ filter: gradient + perp gradient)
-        M_u_s = torch.stack([f_cp, -f_sp], dim=-1)
-        M_v_s = torch.stack([f_sp, f_cp], dim=-1)
-        y_u = torch.einsum("ockd,bckxyd->boxy", self.W_sv, M_u_s)
-        y_v = torch.einsum("ockd,bckxyd->boxy", self.W_sv, M_v_s)
+        # --- Vector output (grouped) ---
+        N_v_out = self.out_channels_vector
+        if N_v_out > 0 and N_s_in > 0:
+            M_u_s = torch.stack([f_cp, -f_sp], dim=-1)
+            M_v_s = torch.stack([f_sp, f_cp], dim=-1)
+            M_u_s_g = M_u_s.reshape(B, G, Gs, K_v, H, W, 2)
+            M_v_s_g = M_v_s.reshape(B, G, Gs, K_v, H, W, 2)
+            Gvo = N_v_out // G
+            W_sv_g = self.W_sv.reshape(G, Gvo, Gs, K_v, 2)
+            y_u = torch.einsum("gockd,bgckxyd->bgoxy", W_sv_g, M_u_s_g).reshape(
+                B, -1, H, W
+            )
+            y_v = torch.einsum("gockd,bgckxyd->bgoxy", W_sv_g, M_v_s_g).reshape(
+                B, -1, H, W
+            )
+        else:
+            y_u = x_scalar.new_zeros(B, N_v_out, H, W)
+            y_v = x_scalar.new_zeros(B, N_v_out, H, W)
 
-        # vector → vector (scalar filter: stretch + 90° rotation)
-        M_u_v = torch.stack([conv_u, -conv_v], dim=-1)
-        M_v_v = torch.stack([conv_v, conv_u], dim=-1)
-        y_u = y_u + torch.einsum("ockd,bckxyd->boxy", self.W_vv, M_u_v)
-        y_v = y_v + torch.einsum("ockd,bckxyd->boxy", self.W_vv, M_v_v)
+        if N_v_out > 0 and N_v_in > 0:
+            M_u_v = torch.stack([conv_u, -conv_v], dim=-1)
+            M_v_v = torch.stack([conv_v, conv_u], dim=-1)
+            M_u_v_g = M_u_v.reshape(B, G, Gv, K_s, H, W, 2)
+            M_v_v_g = M_v_v.reshape(B, G, Gv, K_s, H, W, 2)
+            Gvo = N_v_out // G
+            W_vv_g = self.W_vv.reshape(G, Gvo, Gv, K_s, 2)
+            y_u = y_u + torch.einsum("gockd,bgckxyd->bgoxy", W_vv_g, M_u_v_g).reshape(
+                B, -1, H, W
+            )
+            y_v = y_v + torch.einsum("gockd,bgckxyd->bgoxy", W_vv_g, M_v_v_g).reshape(
+                B, -1, H, W
+            )
 
         y_vector = torch.stack([y_u, y_v], dim=-1)
         return y_s, y_vector
