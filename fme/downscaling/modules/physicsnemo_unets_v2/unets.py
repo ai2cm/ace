@@ -202,6 +202,10 @@ class SongUNetv2(torch.nn.Module):
     additive_pos_embed : bool, optional, default=False
         If ``True``, adds a learnable positional embedding after the first
         convolution layer. Used in StormCast model.
+    bottleneck_attention : bool, optional, default=True
+        If ``True``, applies self-attention in the bottleneck decoder block
+        (``_in0``), matching the original EDM implementation. Set to ``False``
+        to disable attention at the bottleneck.
 
         *Note:* Those positional embeddings encode spatial position information
         of the image pixels, unlike the ``embedding_type`` parameter which encodes
@@ -315,6 +319,7 @@ class SongUNetv2(torch.nn.Module):
         act: str = "silu",
         profile_mode: bool = False,
         amp_mode: bool = True,
+        bottleneck_attention: bool = True,
     ):
         valid_embedding_types = ["fourier", "positional", "zero"]
         if embedding_type not in valid_embedding_types:
@@ -497,7 +502,7 @@ class SongUNetv2(torch.nn.Module):
             res = self.img_shape_y >> level
             if level == len(channel_mult) - 1:
                 self.dec[f"{res}x{res}_in0"] = UNetBlock(
-                    in_channels=cout, out_channels=cout, attention=res in attn_resolutions, **block_kwargs
+                    in_channels=cout, out_channels=cout, attention=bottleneck_attention, **block_kwargs
                 )
                 self.dec[f"{res}x{res}_in1"] = UNetBlock(
                     in_channels=cout, out_channels=cout, **block_kwargs

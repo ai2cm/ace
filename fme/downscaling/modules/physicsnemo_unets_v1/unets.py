@@ -145,6 +145,7 @@ class SongUNet(torch.nn.Module):
         resample_filter: List[int] = [1, 1],
         checkpoint_level: int = 0,
         additive_pos_embed: bool = False,
+        bottleneck_attention: bool = True,
     ):
         valid_embedding_types = ["fourier", "positional", "zero"]
         if embedding_type not in valid_embedding_types:
@@ -296,7 +297,7 @@ class SongUNet(torch.nn.Module):
             res = self.img_shape_y >> level
             if level == len(channel_mult) - 1:
                 self.dec[f"{res}x{res}_in0"] = UNetBlock(
-                    in_channels=cout, out_channels=cout, attention=res in attn_resolutions, **block_kwargs
+                    in_channels=cout, out_channels=cout, attention=bottleneck_attention, **block_kwargs
                 )
                 self.dec[f"{res}x{res}_in1"] = UNetBlock(
                     in_channels=cout, out_channels=cout, **block_kwargs
