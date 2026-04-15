@@ -116,6 +116,7 @@ stepper:
         mlp_hidden_factor: 1
         activation: gelu
         residual_blocks: true
+        num_groups: 8
       normalization:
         network:
           global_means_path: /statsdata/centering.nc
