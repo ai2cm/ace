@@ -52,4 +52,4 @@ run_training() {
 
 base_name="vector-disco"
 
-run_training "pretrain-1-step-era5.yaml" "$base_name-1-step-pre-training-era5-only-rs0"
+run_training "train-v64s384-8blk.yaml" "$base_name-v64s384-8blk"

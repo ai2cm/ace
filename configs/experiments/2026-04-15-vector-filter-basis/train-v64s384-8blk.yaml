@@ -113,7 +113,7 @@ stepper:
         n_vector_channels: 64
         n_blocks: 8
         kernel_shape: 5
-        mlp_hidden_factor: 2
+        mlp_hidden_factor: 1
         activation: gelu
         residual_blocks: true
       normalization:
