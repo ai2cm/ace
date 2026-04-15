@@ -328,11 +328,6 @@ class Trainer:
             return  # resumed mid-epoch, tuning already ran (or wasn't needed)
         if not cfg.epochs.contains(self._epochs_trained):
             return
-        if self._last_val_loss is None:
-            # No prior validation (start of training, evaluate_before_training=False).
-            # Run validation now to establish a baseline.
-            val_logs = self.validate_one_epoch()
-            self._last_val_loss = val_logs["val/mean/loss"]
 
         # set_epoch so the trial sees the same first N batches as the real epoch
         self.train_data.set_epoch(self._epochs_trained + 1)
@@ -345,7 +340,6 @@ class Trainer:
             copy_ema=self._copy_ema,
             config=cfg,
             current_lr=self.optimization.learning_rate,
-            pre_trial_val_loss=self._last_val_loss,
             get_validation_aggregator=(
                 self._aggregator_builder.get_validation_aggregator
             ),
@@ -618,17 +612,15 @@ class Trainer:
         self.valid_data.set_epoch(self._epochs_trained)
         aggregator = self._aggregator_builder.get_validation_aggregator()
         logging.info("Starting loop over validation data")
-        logs = run_validation(
-            stepper=self.stepper,
-            valid_data=self.valid_data,
+        return run_validation(
+            train_stepper=self.stepper,
+            validation_data=self.valid_data,
             aggregator=aggregator,
+            diagnostics_subdir=f"epoch_{self._epochs_trained:04d}",
+            record_logs=lambda logs: None,
             ema=self._ema,
             validate_using_ema=self.config.validate_using_ema,
         )
-        logging.info("Starting flush of reduced diagnostics to disk")
-        aggregator.flush_diagnostics(subdir=f"epoch_{self._epochs_trained:04d}")
-        logging.info("Getting validation aggregator logs")
-        return logs
 
     def inference_one_epoch(
         self,
@@ -814,4 +806,4 @@ def epoch_checkpoint_enabled(
 ) -> bool:
     if save_epochs is None:
         return False
-    return epoch in range(max_epochs)[save_epochs.slice]
+    return epoch in range(max_epochs + 1)[save_epochs.slice]

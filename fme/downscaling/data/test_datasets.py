@@ -15,6 +15,7 @@ from fme.downscaling.data.datasets import (
     LatLonCoordinates,
     PairedBatchItem,
 )
+from fme.downscaling.data.patching import Patch, _HorizontalSlice
 from fme.downscaling.data.utils import BatchedLatLonCoordinates, ClosedInterval
 
 
@@ -401,3 +402,63 @@ def test_BatchData_slice_latlon():
         batch_slice.data["x"],
         batch.data["x"][:, lat_slice, lon_slice],
     )
+
+
+def _make_batch_data_for_patching(batch_size=2):
+    """Create a 2×4×4 BatchData with known arange values for patch testing."""
+    n_lat, n_lon = 4, 4
+    lat = torch.arange(n_lat, dtype=torch.float32)
+    lon = torch.arange(n_lon, dtype=torch.float32)
+    data = {
+        "x": torch.arange(batch_size * n_lat * n_lon, dtype=torch.float32).reshape(
+            batch_size, n_lat, n_lon
+        )
+    }
+    time = xr.DataArray(list(range(batch_size)), dims=["batch"])
+    latlon_coordinates = BatchedLatLonCoordinates(
+        lat=lat.unsqueeze(0).expand(batch_size, -1).clone(),
+        lon=lon.unsqueeze(0).expand(batch_size, -1).clone(),
+    )
+    return BatchData(data=data, time=time, latlon_coordinates=latlon_coordinates)
+
+
+def test_batch_data_generate_from_patches():
+    batch = _make_batch_data_for_patching()
+    patches = [
+        Patch(
+            input_slice=_HorizontalSlice(y=slice(1, 3), x=slice(None)),
+            output_slice=_HorizontalSlice(y=slice(None), x=slice(None)),
+        ),
+        Patch(
+            input_slice=_HorizontalSlice(y=slice(0, 2), x=slice(2, 3)),
+            output_slice=_HorizontalSlice(y=slice(None), x=slice(None)),
+        ),
+    ]
+    generated = list(batch.generate_from_patches(patches))
+
+    assert len(generated) == 2
+
+    # Patch 0: rows 1-2, all columns
+    expected_lat = torch.tensor([[1.0, 2.0], [1.0, 2.0]])
+    expected_lon = torch.tensor([[0.0, 1.0, 2.0, 3.0], [0.0, 1.0, 2.0, 3.0]])
+    assert torch.equal(generated[0].latlon_coordinates.lat, expected_lat)
+    assert torch.equal(generated[0].latlon_coordinates.lon, expected_lon)
+    assert torch.equal(generated[0].data["x"], batch.data["x"][:, 1:3, :])
+
+    # Patch 1: rows 0-1, column 2
+    expected_lat = torch.tensor([[0.0, 1.0], [0.0, 1.0]])
+    expected_lon = torch.tensor([[2.0], [2.0]])
+    assert torch.equal(generated[1].latlon_coordinates.lat, expected_lat)
+    assert torch.equal(generated[1].latlon_coordinates.lon, expected_lon)
+    assert torch.equal(generated[1].data["x"], batch.data["x"][:, 0:2, 2:3])
+
+
+def test_batch_data_apply_patch_already_patched_raises():
+    batch = _make_batch_data_for_patching()
+    patch = Patch(
+        input_slice=_HorizontalSlice(y=slice(1, 3), x=slice(None)),
+        output_slice=_HorizontalSlice(y=slice(None), x=slice(None)),
+    )
+    (patched,) = list(batch.generate_from_patches([patch]))
+    with pytest.raises(ValueError, match="previously patched"):
+        list(patched.generate_from_patches([patch]))

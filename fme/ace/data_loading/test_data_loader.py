@@ -1,6 +1,7 @@
 """This file contains unit tests related to creating torch Datasets from climate
 data (e.g. netCDF files)."""
 
+import datetime
 import math
 import os
 import pathlib
@@ -30,14 +31,20 @@ from fme.ace.data_loading.inference import (
 )
 from fme.ace.data_loading.perturbation import PerturbationSelector, SSTPerturbation
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.coordinates import (
+    HybridSigmaPressureCoordinate,
+    LatLonCoordinates,
+    NullVerticalCoordinate,
+)
 from fme.core.dataset.concat import ConcatDatasetConfig
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.merged import MergeDatasetConfig, MergeNoConcatDatasetConfig
+from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.schedule import IntMilestone, IntSchedule
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.device import using_gpu
 from fme.core.distributed.distributed import Distributed
-from fme.core.distributed.model_torch_distributed import ModelTorchDistributed
+from fme.core.mask_provider import MaskProvider
 from fme.core.testing.regression import validate_tensor_dict
 from fme.core.typing_ import Slice
 
@@ -203,10 +210,6 @@ def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1
 def test_xarray_loader(tmp_path):
     """Checks that vertical coordinates are present."""
     dist = Distributed.get_instance()
-    if isinstance(dist._distributed, ModelTorchDistributed):
-        pytest.xfail(
-            "ModelTorchDistributed slicing along spatial dimensions is not implemented."
-        )
     tmp_path = dist.scatter_object(tmp_path)  # get the root value
     global_batch_size = 24
     if dist.is_root():
@@ -959,6 +962,31 @@ def test_inference_persistence_names(tmp_path):
     assert not torch.all(first_item["bar"] == second_item["bar"])
 
 
+def test_inference_dataset_label_override_without_dataset_labels(tmp_path):
+    _create_dataset_on_disk(tmp_path, n_times=14)
+    config = InferenceDataLoaderConfig(
+        dataset=XarrayDataConfig(data_path=tmp_path),
+        start_indices=ExplicitIndices([0]),
+    )
+    window_requirements = DataRequirements(
+        names=["foo", "bar"],
+        n_timesteps=3,
+    )
+    dataset = InferenceDataset(
+        config,
+        total_forward_steps=3,
+        requirements=window_requirements,
+        label_override=["era5"],
+    )
+    batch = dataset[0]
+    # assert that the labels are not None and are the correct labels set during
+    # inference config initialization
+    assert batch.labels is not None
+    assert batch.labels.names == ["era5"]
+    assert batch.labels.tensor.shape[0] == 1
+    assert batch.labels.tensor.shape[1] == 1
+
+
 def test_zarr_engine_used_sequence():
     config = DataLoaderConfig(
         dataset=ConcatDatasetConfig(
@@ -1173,3 +1201,175 @@ def test_pinned_memory(tmp_path, time_buffer: int):
     for batch in loader:
         tensor = next(iter(batch.data.values()))
         assert tensor.is_pinned() is using_gpu()
+
+
+@pytest.mark.parallel
+def test_localize_properties():
+    """Verify DatasetProperties.localize() partitions coords and masks across ranks."""
+    dist = Distributed.get_instance()
+    n_lat, n_lon = N_LAT, N_LON
+    lat = torch.linspace(-90.0, 90.0, n_lat)
+    lon = torch.linspace(0.0, 360.0, n_lon)
+    coords = LatLonCoordinates(lat=lat, lon=lon)
+    mask_tensor = torch.arange(n_lat * n_lon, dtype=torch.float32).reshape(
+        1, n_lat, n_lon
+    )
+    mask_provider = MaskProvider(masks={"mask_test": mask_tensor})
+    timestep = datetime.timedelta(hours=6)
+    metadata = {"temp": VariableMetadata(units="K", long_name="Temperature")}
+    vertical = NullVerticalCoordinate()
+    props = DatasetProperties(
+        variable_metadata=metadata,
+        vertical_coordinate=vertical,
+        horizontal_coordinates=coords,
+        mask_provider=mask_provider,
+        timestep=timestep,
+        is_remote=False,
+        all_labels=None,
+    )
+
+    local = props.localize()
+
+    # Unchanged fields
+    assert local.variable_metadata is metadata
+    assert local.vertical_coordinate is vertical
+    assert local.timestep == timestep
+
+    # Gather local coordinates to root and verify full, non-overlapping coverage.
+    assert isinstance(local.horizontal_coordinates, LatLonCoordinates)
+    local_lat = local.horizontal_coordinates.lat.tolist()
+    local_lon = local.horizontal_coordinates.lon.tolist()
+    all_lats = dist.gather_object(local_lat)
+    all_lons = dist.gather_object(local_lon)
+    if dist.is_root():
+        assert all_lats is not None and all_lons is not None
+        # Spatial co-ranks (same data_parallel_rank) should have distinct
+        # lat/lon slices whose union covers the global coordinates exactly.
+        combined_lat = sorted(set(v for rank_lat in all_lats for v in rank_lat))
+        combined_lon = sorted(set(v for rank_lon in all_lons for v in rank_lon))
+        assert combined_lat == lat.tolist(), "lat coverage incomplete or has gaps"
+        assert combined_lon == lon.tolist(), "lon coverage incomplete or has gaps"
+
+    # Gather local masks to root and verify they tile to the global mask.
+    assert isinstance(local.mask_provider, MaskProvider)
+    local_mask = local.mask_provider.masks["mask_test"]
+    h_slice, w_slice = dist.get_local_slices((n_lat, n_lon))
+    all_slices = dist.gather_object((h_slice, w_slice))
+    all_masks = dist.gather_object(local_mask.tolist())
+    if dist.is_root():
+        assert all_slices is not None and all_masks is not None
+        canvas = torch.zeros_like(mask_tensor)
+        for (hs, ws), mask_data in zip(all_slices, all_masks):
+            canvas[..., hs, ws] += torch.tensor(mask_data)
+        # Each cell should be covered once per data-parallel rank (spatial
+        # co-ranks have distinct slices, data-parallel ranks have identical ones).
+        expected_count = dist.total_data_parallel_ranks
+        torch.testing.assert_close(canvas, mask_tensor * expected_count)
+
+
+@pytest.fixture
+def _global_properties():
+    """Build a DatasetProperties with a non-trivial mask so that localize()
+    produces observably different objects under spatial parallelism."""
+    n_lat, n_lon = N_LAT, N_LON
+    lat = torch.linspace(-90.0, 90.0, n_lat)
+    lon = torch.linspace(0.0, 360.0, n_lon)
+    coords = LatLonCoordinates(lat=lat, lon=lon)
+    timestep = datetime.timedelta(hours=6)
+    metadata = {"temp": VariableMetadata(units="K", long_name="Temperature")}
+    vertical = NullVerticalCoordinate()
+    mask = torch.ones(n_lat, n_lon)
+    mask_provider = MaskProvider(masks={"mask_land": mask})
+    return DatasetProperties(
+        variable_metadata=metadata,
+        vertical_coordinate=vertical,
+        horizontal_coordinates=coords,
+        mask_provider=mask_provider,
+        timestep=timestep,
+        is_remote=False,
+        all_labels=None,
+    )
+
+
+def _assert_dataset_info_uses_global_properties(dataset_info, props):
+    """Check that every field in dataset_info matches the *global* properties,
+    not the localized ones."""
+    n_lat, n_lon = N_LAT, N_LON
+
+    # img_shape must be the full global grid
+    assert dataset_info.img_shape == (n_lat, n_lon)
+
+    # horizontal_coordinates must match the full global shape
+    assert dataset_info.horizontal_coordinates.shape[-2:] == (n_lat, n_lon)
+
+    # vertical_coordinate type must match
+    assert type(dataset_info.vertical_coordinate) is type(props.vertical_coordinate)
+
+    # mask_provider must have the same keys as the global (non-localized) one
+    info_masks = dataset_info.mask_provider.masks
+    prop_masks = props.mask_provider.masks
+    assert set(info_masks.keys()) == set(prop_masks.keys())
+    for key in prop_masks:
+        assert info_masks[key].shape == prop_masks[key].shape
+
+
+@pytest.mark.parallel
+def test_gridded_data_dataset_info_not_localized(_global_properties):
+    """dataset_info built by GriddedData must use global properties so that
+    models receiving img_shape don't double-partition via get_local_slices."""
+    from unittest.mock import MagicMock
+
+    from fme.ace.data_loading.gridded_data import GriddedData
+
+    mock_loader = MagicMock()
+    mock_loader.__len__ = MagicMock(return_value=1)
+    mock_loader.batch_size = 1
+
+    gridded = GriddedData(loader=mock_loader, properties=_global_properties)
+    _assert_dataset_info_uses_global_properties(
+        gridded.dataset_info, _global_properties
+    )
+
+    # Sanity-check: under spatial parallelism the *local* shape differs
+    dist = Distributed.get_instance()
+    if dist.world_size != dist.total_data_parallel_ranks:
+        local_shape = gridded.horizontal_coordinates.shape[-2:]
+        assert local_shape != (N_LAT, N_LON)
+        assert gridded.dataset_info.img_shape == (N_LAT, N_LON)
+
+
+@pytest.mark.parallel
+def test_inference_gridded_data_dataset_info_not_localized(_global_properties):
+    """dataset_info built by InferenceGriddedData must use global properties."""
+    from unittest.mock import MagicMock
+
+    from fme.ace.data_loading.gridded_data import InferenceGriddedData
+
+    # Build a minimal PrognosticState as initial condition
+    data = {"temp": torch.randn(1, 1, N_LAT, N_LON)}
+    time = xr.DataArray(
+        [[np.datetime64("2000-01-01")]],
+        dims=["sample", "time"],
+    )
+    batch = BatchData(data=data, time=time)
+    initial_condition = PrognosticState(batch)
+
+    mock_loader = MagicMock()
+    mock_loader.__len__ = MagicMock(return_value=1)
+    mock_loader.__iter__ = MagicMock(return_value=iter([]))
+
+    inference = InferenceGriddedData(
+        loader=mock_loader,
+        initial_condition=initial_condition,
+        properties=_global_properties,
+    )
+    _assert_dataset_info_uses_global_properties(
+        inference.dataset_info, _global_properties
+    )
+
+    # Sanity-check: under spatial parallelism the *local* shape differs
+    dist = Distributed.get_instance()
+    if dist.world_size != dist.total_data_parallel_ranks:
+        local_shape = inference.horizontal_coordinates.shape[-2:]
+        assert local_shape != (N_LAT, N_LON)
+        assert inference.dataset_info.img_shape == (N_LAT, N_LON)

@@ -87,9 +87,9 @@ class Optimization(OptimizationABC):
         enable_automatic_mixed_precision: bool,
         kwargs: Mapping[str, Any],
         use_gradient_accumulation: bool = False,
-        get_checkpoint: Callable[
-            [int], Checkpoint | NoCheckpoint
-        ] = lambda _: NoCheckpoint(),
+        get_checkpoint: Callable[[int], Checkpoint | NoCheckpoint] = lambda _: (
+            NoCheckpoint()
+        ),
     ):
         if optimizer_type == "FusedAdam":
             self.optimizer = torch.optim.AdamW(parameters, lr=lr, fused=True, **kwargs)
@@ -191,6 +191,10 @@ class Optimization(OptimizationABC):
             self.gscaler.update()
         self._accumulated_loss = torch.tensor(0.0, device=get_device())
 
+    def set_learning_rate(self, lr: float):
+        for param_group in self.optimizer.param_groups:
+            param_group["lr"] = lr
+
     def get_state(self):
         """
         Returns state as a serializable data structure.
@@ -203,10 +207,6 @@ class Optimization(OptimizationABC):
             ),
         }
         return state
-
-    def set_learning_rate(self, lr: float):
-        for param_group in self.optimizer.param_groups:
-            param_group["lr"] = lr
 
     def load_state(self, state):
         """
@@ -262,6 +262,13 @@ class OptimizationConfig:
                 "FusedAdam is deprecated. Use AdamW with fused=True in kwargs instead.",
                 DeprecationWarning,
             )
+
+    @property
+    def has_lr_schedule(self) -> bool:
+        """Whether a learning rate scheduler is configured."""
+        if isinstance(self.scheduler, SequentialSchedulerConfig):
+            return True
+        return self.scheduler.type is not None
 
     def build(self, modules: torch.nn.ModuleList, max_epochs: int) -> Optimization:
         parameters = itertools.chain(*[module.parameters() for module in modules])

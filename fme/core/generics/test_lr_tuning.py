@@ -14,8 +14,8 @@ from fme.core.generics.data import DataLoader, GriddedDataABC
 from fme.core.generics.lr_tuning import LRTuningConfig, run_lr_tuning_trial
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
-from fme.core.optimization import Optimization
-from fme.core.scheduler import SchedulerConfig
+from fme.core.optimization import Optimization, OptimizationConfig
+from fme.core.scheduler import SchedulerConfig, SequentialSchedulerConfig
 from fme.core.training_history import TrainingJob
 from fme.core.typing_ import Slice, TensorDict
 
@@ -172,7 +172,7 @@ def _make_aggregator_factory(*losses: float):
 
 
 def test_candidate_wins():
-    """Candidate wins when its loss is below baseline - threshold * pre_trial."""
+    """Candidate wins when its loss is below baseline - threshold * baseline."""
     stepper = _Stepper()
     train_data = _TrainData(n_batches=5)
     valid_data = _TrainData(n_batches=3)
@@ -184,8 +184,8 @@ def test_candidate_wins():
         improvement_threshold=0.1,
     )
 
-    # pre_trial=1.0, baseline=0.8, candidate=0.5
-    # threshold = 0.8 - 0.1*1.0 = 0.7; candidate 0.5 < 0.7 → candidate wins
+    # baseline=0.8, candidate=0.5
+    # threshold = 0.8 - 0.1*0.8 = 0.72; candidate 0.5 < 0.72 → candidate wins
     result = run_lr_tuning_trial(
         train_data=train_data,
         valid_data=valid_data,
@@ -195,7 +195,6 @@ def test_candidate_wins():
         copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
-        pre_trial_val_loss=1.0,
         get_validation_aggregator=_make_aggregator_factory(0.8, 0.5),
         validate_using_ema=False,
     )
@@ -216,8 +215,8 @@ def test_candidate_below_threshold():
         improvement_threshold=0.5,
     )
 
-    # pre_trial=1.0, baseline=0.8, candidate=0.75
-    # threshold = 0.8 - 0.5*1.0 = 0.3; candidate 0.75 > 0.3 → baseline wins
+    # baseline=0.8, candidate=0.75
+    # threshold = 0.8 - 0.5*0.8 = 0.4; candidate 0.75 > 0.4 → baseline wins
     result = run_lr_tuning_trial(
         train_data=train_data,
         valid_data=valid_data,
@@ -227,7 +226,6 @@ def test_candidate_below_threshold():
         copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
-        pre_trial_val_loss=1.0,
         get_validation_aggregator=_make_aggregator_factory(0.8, 0.75),
         validate_using_ema=False,
     )
@@ -248,8 +246,8 @@ def test_candidate_worsens():
         improvement_threshold=0.1,
     )
 
-    # pre_trial=1.0, baseline=0.9, candidate=1.1
-    # threshold = 0.9 - 0.1*1.0 = 0.8; candidate 1.1 > 0.8 → baseline wins
+    # baseline=0.9, candidate=1.1
+    # threshold = 0.9 - 0.1*0.9 = 0.81; candidate 1.1 > 0.81 → baseline wins
     result = run_lr_tuning_trial(
         train_data=train_data,
         valid_data=valid_data,
@@ -259,7 +257,6 @@ def test_candidate_worsens():
         copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
-        pre_trial_val_loss=1.0,
         get_validation_aggregator=_make_aggregator_factory(0.9, 1.1),
         validate_using_ema=False,
     )
@@ -280,8 +277,8 @@ def test_both_worsen():
         improvement_threshold=0.1,
     )
 
-    # pre_trial=1.0, baseline=1.2, candidate=1.3
-    # threshold = 1.2 - 0.1*1.0 = 1.1; candidate 1.3 > 1.1 → baseline wins
+    # baseline=1.2, candidate=1.3
+    # threshold = 1.2 - 0.1*1.2 = 1.08; candidate 1.3 > 1.08 → baseline wins
     result = run_lr_tuning_trial(
         train_data=train_data,
         valid_data=valid_data,
@@ -291,7 +288,6 @@ def test_both_worsen():
         copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
-        pre_trial_val_loss=1.0,
         get_validation_aggregator=_make_aggregator_factory(1.2, 1.3),
         validate_using_ema=False,
     )
@@ -312,8 +308,8 @@ def test_baseline_worsens_candidate_improves():
         improvement_threshold=0.1,
     )
 
-    # pre_trial=1.0, baseline=1.1, candidate=0.5
-    # threshold = 1.1 - 0.1*1.0 = 1.0; candidate 0.5 < 1.0 → candidate wins
+    # baseline=1.1, candidate=0.5
+    # threshold = 1.1 - 0.1*1.1 = 0.99; candidate 0.5 < 0.99 → candidate wins
     result = run_lr_tuning_trial(
         train_data=train_data,
         valid_data=valid_data,
@@ -323,7 +319,6 @@ def test_baseline_worsens_candidate_improves():
         copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
-        pre_trial_val_loss=1.0,
         get_validation_aggregator=_make_aggregator_factory(1.1, 0.5),
         validate_using_ema=False,
     )
@@ -356,7 +351,6 @@ def test_does_not_mutate_original_stepper():
         copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
-        pre_trial_val_loss=1.0,
         get_validation_aggregator=_make_aggregator_factory(0.8, 0.5),
         validate_using_ema=False,
     )
@@ -389,7 +383,6 @@ def test_uses_subset_loader_with_num_batches():
         copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
-        pre_trial_val_loss=1.0,
         get_validation_aggregator=_make_aggregator_factory(0.9, 0.8),
         validate_using_ema=False,
     )
@@ -420,7 +413,6 @@ def test_with_ema_validation():
         copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
-        pre_trial_val_loss=1.0,
         get_validation_aggregator=_make_aggregator_factory(0.8, 0.5),
         validate_using_ema=True,
     )
@@ -456,7 +448,6 @@ def test_trial_does_not_mutate_original_ema_num_updates():
         copy_ema=_make_copy_ema(ema),
         config=config,
         current_lr=0.01,
-        pre_trial_val_loss=1.0,
         get_validation_aggregator=_make_aggregator_factory(0.8, 0.5),
         validate_using_ema=False,
     )
@@ -493,7 +484,6 @@ def test_trial_does_not_mutate_original_ema_params():
         copy_ema=_make_copy_ema(ema),
         config=config,
         current_lr=0.01,
-        pre_trial_val_loss=1.0,
         get_validation_aggregator=_make_aggregator_factory(0.8, 0.5),
         validate_using_ema=False,
     )
@@ -567,7 +557,6 @@ def test_trial_does_not_mutate_original_optimizer_state():
         copy_ema=_make_copy_ema(ema),
         config=config,
         current_lr=0.01,
-        pre_trial_val_loss=1.0,
         get_validation_aggregator=_make_aggregator_factory(0.8, 0.5),
         validate_using_ema=False,
     )
@@ -586,3 +575,26 @@ def test_trial_does_not_mutate_original_optimizer_state():
                 assert (
                     buf == current_state["optimizer_state_dict"]["state"][key][buf_name]
                 ), f"Optimizer state[{key}][{buf_name}] was mutated by the trial"
+
+
+def test_optimization_config_has_lr_schedule_default():
+    """Default OptimizationConfig has no LR schedule."""
+    config = OptimizationConfig()
+    assert config.has_lr_schedule is False
+
+
+def test_optimization_config_has_lr_schedule_with_scheduler():
+    """OptimizationConfig with a scheduler type has an LR schedule."""
+    config = OptimizationConfig(scheduler=SchedulerConfig(type="CosineAnnealingLR"))
+    assert config.has_lr_schedule is True
+
+
+def test_optimization_config_has_lr_schedule_with_sequential_scheduler():
+    """OptimizationConfig with a SequentialSchedulerConfig has an LR schedule."""
+    config = OptimizationConfig(
+        scheduler=SequentialSchedulerConfig(
+            schedulers=[SchedulerConfig(type="CosineAnnealingLR")],
+            milestones=[5],
+        )
+    )
+    assert config.has_lr_schedule is True

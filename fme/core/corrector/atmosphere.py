@@ -1,9 +1,8 @@
 import dataclasses
 import datetime
-from collections.abc import Callable, Mapping
-from typing import Any, Literal, Protocol
+from collections.abc import Callable
+from typing import Literal, Protocol
 
-import dacite
 import torch
 
 import fme
@@ -13,8 +12,9 @@ from fme.core.atmosphere_data import (
     compute_layer_thickness,
 )
 from fme.core.constants import GRAVITY, SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME
-from fme.core.corrector.registry import CorrectorABC
+from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
 from fme.core.corrector.utils import force_positive
+from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -40,7 +40,7 @@ class EnergyBudgetConfig:
 
 @CorrectorSelector.register("atmosphere_corrector")
 @dataclasses.dataclass
-class AtmosphereCorrectorConfig:
+class AtmosphereCorrectorConfig(CorrectorConfigABC):
     r"""
     Configuration for the post-step state corrector.
 
@@ -132,10 +132,15 @@ class AtmosphereCorrectorConfig:
     force_positive_names: list[str] = dataclasses.field(default_factory=list)
     total_energy_budget_correction: EnergyBudgetConfig | None = None
 
-    @classmethod
-    def from_state(cls, state: Mapping[str, Any]) -> "AtmosphereCorrectorConfig":
-        return dacite.from_dict(
-            data_class=cls, data=state, config=dacite.Config(strict=True)
+    def get_corrector(
+        self,
+        dataset_info: DatasetInfo,
+    ) -> "AtmosphereCorrector":
+        return AtmosphereCorrector(
+            self,
+            dataset_info.gridded_operations,
+            dataset_info.atmosphere_vertical_coordinate,
+            dataset_info.timestep,
         )
 
 

@@ -416,17 +416,24 @@ def test_sequential_scheduler_reload():
         assert torch.allclose(model_first_final_state[k], model_second_final_state[k])
 
 
-def test_set_learning_rate():
-    model = nn.Linear(1, 1).to(fme.get_device())
-    optimization = Optimization(
-        parameters=model.parameters(),
-        optimizer_type="Adam",
-        lr=0.001,
-        max_epochs=10,
+def _build_optimization(
+    parameters, lr=0.001, optimizer_type="Adam", max_epochs=10
+) -> Optimization:
+    """Helper to construct an Optimization with common test defaults."""
+    return Optimization(
+        parameters=parameters,
+        optimizer_type=optimizer_type,
+        lr=lr,
+        max_epochs=max_epochs,
         scheduler=SchedulerConfig(),
         enable_automatic_mixed_precision=False,
         kwargs={},
     )
+
+
+def test_set_learning_rate():
+    model = nn.Linear(1, 1).to(fme.get_device())
+    optimization = _build_optimization(model.parameters())
     assert optimization.learning_rate == 0.001
     optimization.set_learning_rate(0.01)
     assert optimization.learning_rate == 0.01
@@ -449,15 +456,7 @@ def test_load_state_into_different_parameters():
     model = nn.Linear(2, 2).to(fme.get_device())
     x = torch.randn(10, 2).to(fme.get_device())
 
-    optimization = Optimization(
-        parameters=model.parameters(),
-        optimizer_type="Adam",
-        lr=0.001,
-        max_epochs=10,
-        scheduler=SchedulerConfig(),
-        enable_automatic_mixed_precision=False,
-        kwargs={},
-    )
+    optimization = _build_optimization(model.parameters())
 
     # Train a few steps to build up momentum state
     for _ in range(3):
@@ -469,15 +468,7 @@ def test_load_state_into_different_parameters():
 
     # Create a new model with the same structure but different parameter objects
     model2 = copy.deepcopy(model)
-    optimization2 = Optimization(
-        parameters=model2.parameters(),
-        optimizer_type="Adam",
-        lr=0.001,
-        max_epochs=10,
-        scheduler=SchedulerConfig(),
-        enable_automatic_mixed_precision=False,
-        kwargs={},
-    )
+    optimization2 = _build_optimization(model2.parameters())
     optimization2.load_state(saved_state)
 
     # Train both for one more step on identical data and verify identical results
@@ -505,15 +496,7 @@ def test_load_state_then_set_learning_rate():
     model = nn.Linear(2, 2).to(fme.get_device())
     x = torch.randn(10, 2).to(fme.get_device())
 
-    optimization = Optimization(
-        parameters=model.parameters(),
-        optimizer_type="Adam",
-        lr=0.001,
-        max_epochs=10,
-        scheduler=SchedulerConfig(),
-        enable_automatic_mixed_precision=False,
-        kwargs={},
-    )
+    optimization = _build_optimization(model.parameters())
 
     # Train a few steps
     for _ in range(3):
@@ -525,15 +508,7 @@ def test_load_state_then_set_learning_rate():
 
     # Build a new optimization, load state, then override LR
     model2 = copy.deepcopy(model)
-    optimization2 = Optimization(
-        parameters=model2.parameters(),
-        optimizer_type="Adam",
-        lr=0.001,
-        max_epochs=10,
-        scheduler=SchedulerConfig(),
-        enable_automatic_mixed_precision=False,
-        kwargs={},
-    )
+    optimization2 = _build_optimization(model2.parameters())
     optimization2.load_state(saved_state)
     optimization2.set_learning_rate(0.0005)
 
