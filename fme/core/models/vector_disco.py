@@ -15,6 +15,7 @@ import dataclasses
 import torch
 import torch.nn as nn
 
+from fme.core.models.conditional_sfno.layers import Context, ContextConfig
 from fme.core.shallow_water.block import PointwiseVectorTransform, VectorDiscoBlock
 
 
@@ -30,6 +31,9 @@ class VectorDiscoNetworkConfig:
         mlp_hidden_factor: Scalar MLP hidden dim = n_scalar_channels * this.
         activation: Activation function name ("gelu", "relu", "none").
         residual_blocks: Whether VectorDiscoBlocks use internal residuals.
+        context: Conditioning dimensions for the post-norm in each block.
+            Supports noise injection and positional embedding. When all
+            embed dims are 0 (default), the norm is unconditional.
     """
 
     n_scalar_channels: int = 64
@@ -39,6 +43,14 @@ class VectorDiscoNetworkConfig:
     mlp_hidden_factor: int = 2
     activation: str = "gelu"
     residual_blocks: bool = True
+    context: ContextConfig = dataclasses.field(
+        default_factory=lambda: ContextConfig(
+            embed_dim_scalar=0,
+            embed_dim_labels=0,
+            embed_dim_noise=0,
+            embed_dim_pos=0,
+        )
+    )
 
 
 class VectorDiscoNetwork(nn.Module):
@@ -85,6 +97,7 @@ class VectorDiscoNetwork(nn.Module):
                     mlp_hidden_factor=config.mlp_hidden_factor,
                     activation=config.activation,
                     residual=config.residual_blocks,
+                    context_config=config.context,
                 )
                 for _ in range(config.n_blocks)
             ]
@@ -117,6 +130,11 @@ class VectorDiscoNetwork(nn.Module):
                 nn.init.zeros_(block.sv_product.weight)
             if block.pointwise_vv is not None:
                 nn.init.zeros_(block.pointwise_vv.weight)
+            # Zero the vector→vector conv path so initial vector output
+            # comes only from W_sv (scalar→vector). This prevents
+            # variance growth through the W_vv residual path; the network
+            # learns to use W_vv during training.
+            nn.init.zeros_(block.conv.W_vv)
             if block.scalar_mlp is not None:
                 # Zero the output layer of the MLP (last Conv2d)
                 for module in reversed(list(block.scalar_mlp.modules())):
@@ -130,12 +148,15 @@ class VectorDiscoNetwork(nn.Module):
         self,
         scalars: torch.Tensor,
         vectors: torch.Tensor,
+        context: Context | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Forward pass.
 
         Args:
             scalars: (B, N_in_s, H, W)
             vectors: (B, N_in_v, H, W, 2)
+            context: Optional conditioning context (noise, positional
+                embedding, etc.) passed to each block's post-norm.
 
         Returns:
             scalar_out: (B, N_out_s, H, W)
@@ -145,6 +166,6 @@ class VectorDiscoNetwork(nn.Module):
         v = self.vector_encoder(vectors)
 
         for block in self.blocks:
-            s, v = block(s, v)
+            s, v = block(s, v, context=context)
 
         return self.scalar_decoder(s), self.vector_decoder(v)

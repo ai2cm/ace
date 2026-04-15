@@ -66,24 +66,30 @@ class TestVectorDiscoNetwork:
         assert v_out.shape == (B, N_OUT_VECTORS, *IMG_SHAPE, 2)
 
     def test_gaussian_input_output_variance(self):
-        """With random decoder weights, outputs are well-behaved.
+        """With random decoder weights, outputs are well-behaved at 12 blocks.
 
-        Verifies that the network architecture and block initialization
-        don't cause variance explosion or collapse through the encoder →
-        blocks → decoder path. We re-initialize only the decoder (which
-        is zero-init by default) to produce nonzero output.
+        Verifies that the post-norm (ChannelLayerNorm on scalars after
+        each block's residual) controls variance through deep stacks.
+        We re-initialize the decoder to produce nonzero output.
         """
-        torch.manual_seed(5)  # seed chosen to keep ratios moderate
-        net = _make_network()
+        torch.manual_seed(0)
+        config = VectorDiscoNetworkConfig(
+            n_scalar_channels=8,
+            n_vector_channels=4,
+            n_blocks=12,
+            kernel_shape=3,
+        )
+        img_shape = (8, 16)
+        n_in_s, n_out_s, n_in_v, n_out_v = 6, 4, 3, 3
+        net = VectorDiscoNetwork(config, n_in_s, n_out_s, n_in_v, n_out_v, img_shape)
         # Re-init decoder to produce nonzero output
         torch.nn.init.kaiming_uniform_(net.scalar_decoder.weight)
         n_v_in = net.vector_decoder.n_in
         net.vector_decoder.weight.data.normal_(0, 1.0 / math.sqrt(max(1, n_v_in)))
 
-        B = 4
-        torch.manual_seed(0)
-        scalars = torch.randn(B, N_IN_SCALARS, *IMG_SHAPE)
-        vectors = torch.randn(B, N_IN_VECTORS, *IMG_SHAPE, 2)
+        B = 2
+        scalars = torch.randn(B, n_in_s, *img_shape)
+        vectors = torch.randn(B, n_in_v, *img_shape, 2)
 
         with torch.no_grad():
             s_out, v_out = net(scalars, vectors)
@@ -91,7 +97,6 @@ class TestVectorDiscoNetwork:
         assert torch.isfinite(s_out).all(), "scalar output contains NaN/Inf"
         assert torch.isfinite(v_out).all(), "vector output contains NaN/Inf"
 
-        # Check variance ratio: output variance vs input variance
         s_in_var = scalars.var().item()
         v_in_var = vectors.var().item()
         s_out_var = s_out.var().item()
@@ -100,14 +105,6 @@ class TestVectorDiscoNetwork:
         s_ratio = s_out_var / max(s_in_var, 1e-10)
         v_ratio = v_out_var / max(v_in_var, 1e-10)
 
-        # Report if variance changes by more than 2x.
-        # Residual blocks accumulate variance without layer norm: each
-        # block adds ~unit-variance conv output to the identity, so after
-        # N blocks variance grows roughly as (1+1)^N. The vector path
-        # grows faster because scalar-to-vector cross-talk (W_sv) feeds
-        # growing scalar values into the vector stream. Layer norm would
-        # control this; without it, ~3-6x scalar and ~6-25x vector
-        # growth is expected for 2 blocks.
         if s_ratio > 2.0 or s_ratio < 0.5:
             print(
                 f"NOTE: scalar variance ratio = {s_ratio:.2f} "
@@ -119,11 +116,16 @@ class TestVectorDiscoNetwork:
                 f"(in={v_in_var:.4f}, out={v_out_var:.4f})"
             )
 
-        # Hard threshold: generous to avoid flaky failures. The vector
-        # path runs hotter due to scalar→vector cross-talk through
-        # residual blocks.
+        # Post-norm controls scalar variance to ~2x regardless of depth.
+        # Vector variance grows linearly with depth (~1x per block from
+        # W_sv residual accumulation), which is expected for a residual
+        # network without vector normalization.
         assert s_ratio < 10.0, f"scalar variance exploded: ratio={s_ratio:.2f}"
-        assert v_ratio < 30.0, f"vector variance exploded: ratio={v_ratio:.2f}"
+        n_blocks = config.n_blocks
+        assert v_ratio < 3.0 * n_blocks, (
+            f"vector variance exploded: ratio={v_ratio:.2f} "
+            f"(limit={3.0 * n_blocks:.0f}x for {n_blocks} blocks)"
+        )
         assert s_ratio > 0.1, f"scalar variance collapsed: ratio={s_ratio:.2f}"
         assert v_ratio > 0.1, f"vector variance collapsed: ratio={v_ratio:.2f}"
 

@@ -79,6 +79,7 @@ class ShallowWaterStepper(nn.Module):
             kernel_shape=kernel_shape,
             theta_cutoff=theta_cutoff,
             activation="none",
+            post_norm=False,
         )
 
         # Freeze all parameters

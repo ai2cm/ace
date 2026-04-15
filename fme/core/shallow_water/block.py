@@ -6,6 +6,11 @@ import torch
 import torch.nn as nn
 
 from fme.core.disco._vector_convolution import VectorDiscoConvS2, VectorFilterBasis
+from fme.core.models.conditional_sfno.layers import (
+    ConditionalLayerNorm,
+    Context,
+    ContextConfig,
+)
 from fme.core.shallow_water.scalar_vector_product import ScalarVectorProduct
 
 
@@ -75,6 +80,8 @@ class VectorDiscoBlock(nn.Module):
         mlp_hidden_factor: int = 2,
         activation: str = "gelu",
         residual: bool = True,
+        post_norm: bool = True,
+        context_config: ContextConfig | None = None,
     ):
         """Initialize the block.
 
@@ -89,6 +96,12 @@ class VectorDiscoBlock(nn.Module):
             mlp_hidden_factor: MLP hidden dim = n_scalar * this factor.
             activation: activation function name ("relu", "gelu", "none").
             residual: whether to add the block input to the output.
+            post_norm: whether to apply ConditionalLayerNorm to scalars
+                after the residual. Set to False for frozen-weight physics
+                blocks.
+            context_config: conditioning dimensions for the post-norm.
+                Required when post_norm is True. When all embed dims are 0,
+                the norm is unconditional (plain channel layer norm).
         """
         super().__init__()
 
@@ -146,16 +159,41 @@ class VectorDiscoBlock(nn.Module):
         self.residual = residual
         self.activation = act_cls()
 
+        # Post-norm: ConditionalLayerNorm on scalars after the residual
+        # connection. Only scalars are normalized — vectors pass through
+        # unnormalized so their magnitudes remain physically meaningful.
+        # Post-norm controls total scalar variance by normalizing the
+        # accumulated state (initial + residual), which also controls
+        # vector variance through the W_sv path in subsequent blocks.
+        # When conditioning dims are all 0, this is a plain channel norm.
+        if post_norm and n_scalar > 0:
+            if context_config is None:
+                context_config = ContextConfig(
+                    embed_dim_scalar=0,
+                    embed_dim_labels=0,
+                    embed_dim_noise=0,
+                    embed_dim_pos=0,
+                )
+            self.scalar_post_norm: ConditionalLayerNorm | None = ConditionalLayerNorm(
+                n_channels=n_scalar,
+                img_shape=shape,
+                context_config=context_config,
+            )
+        else:
+            self.scalar_post_norm = None
+
     def forward(
         self,
         x_scalar: torch.Tensor,
         x_vector: torch.Tensor,
+        context: Context | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Forward pass through the block.
 
         Args:
             x_scalar: (B, N_s, H, W)
             x_vector: (B, N_v, H, W, 2)
+            context: Optional conditioning context for the post-norm.
 
         Returns:
             y_scalar: (B, N_s, H, W)
@@ -183,5 +221,17 @@ class VectorDiscoBlock(nn.Module):
 
         # 5. Residual
         if self.residual:
-            return x_scalar + s, x_vector + v
+            s, v = x_scalar + s, x_vector + v
+
+        # 6. Scalar post-norm (conditional on context if provided)
+        if self.scalar_post_norm is not None:
+            if context is None:
+                context = Context(
+                    embedding_scalar=None,
+                    embedding_pos=None,
+                    labels=None,
+                    noise=None,
+                )
+            s = self.scalar_post_norm(s, context)
+
         return s, v

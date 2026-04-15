@@ -296,6 +296,7 @@ class HybridCoordinateBlockStepper(nn.Module):
             theta_cutoff=theta_cutoff,
             activation="none",
             residual=False,
+            post_norm=False,
         )
 
         # ── ke_product: KE_k = ½|V_k|² via diagonal VectorDotProduct ────────
