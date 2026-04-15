@@ -137,7 +137,7 @@ class GriddedData(GriddedDataABC[BatchData]):
         self._loader.alternate_shuffle()
 
 
-def get_initial_condition(
+def _get_initial_condition(
     loader: DataLoader[BatchData],
     requirements: PrognosticStateDataRequirements,
 ) -> PrognosticState:
@@ -183,7 +183,7 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
         self._properties = self._global_properties.localize()
         self._n_initial_conditions: int | None = None
         if isinstance(initial_condition, PrognosticStateDataRequirements):
-            self._initial_condition: PrognosticState = get_initial_condition(
+            self._initial_condition: PrognosticState = _get_initial_condition(
                 self.loader, initial_condition
             )
         else:
