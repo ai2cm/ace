@@ -117,15 +117,10 @@ class TestVectorDiscoNetwork:
             )
 
         # Post-norm controls scalar variance to ~2x regardless of depth.
-        # Vector variance grows linearly with depth (~1x per block from
-        # W_sv residual accumulation), which is expected for a residual
-        # network without vector normalization.
+        # W_vv damping init makes vector residual updates contractive,
+        # bounding vector variance to ~2-3x regardless of depth.
         assert s_ratio < 10.0, f"scalar variance exploded: ratio={s_ratio:.2f}"
-        n_blocks = config.n_blocks
-        assert v_ratio < 3.0 * n_blocks, (
-            f"vector variance exploded: ratio={v_ratio:.2f} "
-            f"(limit={3.0 * n_blocks:.0f}x for {n_blocks} blocks)"
-        )
+        assert v_ratio < 10.0, f"vector variance exploded: ratio={v_ratio:.2f}"
         assert s_ratio > 0.1, f"scalar variance collapsed: ratio={s_ratio:.2f}"
         assert v_ratio > 0.1, f"vector variance collapsed: ratio={v_ratio:.2f}"
 

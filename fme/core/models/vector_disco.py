@@ -130,11 +130,18 @@ class VectorDiscoNetwork(nn.Module):
                 nn.init.zeros_(block.sv_product.weight)
             if block.pointwise_vv is not None:
                 nn.init.zeros_(block.pointwise_vv.weight)
-            # Zero the vector→vector conv path so initial vector output
-            # comes only from W_sv (scalar→vector). This prevents
-            # variance growth through the W_vv residual path; the network
-            # learns to use W_vv during training.
+            # Initialize W_vv as a diagonal contraction on the identity-like
+            # basis (k=0, d=0). With the residual connection, this gives:
+            #   v_new = (1-α)*v_old + W_sv_contribution
+            # which is a contractive map that bounds vector variance
+            # regardless of depth, instead of the linear growth from
+            # zero-init W_vv. The network learns to adjust W_vv during
+            # training.
             nn.init.zeros_(block.conv.W_vv)
+            Nv = block.conv.out_channels_vector
+            alpha = 0.2
+            for o in range(Nv):
+                block.conv.W_vv.data[o, o, 0, 0] = -alpha
             if block.scalar_mlp is not None:
                 # Zero the output layer of the MLP (last Conv2d)
                 for module in reversed(list(block.scalar_mlp.modules())):
