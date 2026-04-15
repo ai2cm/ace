@@ -20,9 +20,10 @@ declare -A MODELS=( \
     # [no-random-co2-energy-conserving-rs0]="01KHGDA8TVGP9JKWVJ1N0SMHCN" \
     # [no-random-co2-energy-conserving-rs1]="01KH4SDT1Q5246GZ307W8AW4M3" \
     # [full-rs0]="01KHKJ02SQM8S8T4B6030F94CV" \
-    [full-rs1]="01KHJ5EQ04XTFG46QCKX3TTAHF" \
-    [full-energy-conserving-rs0]="01KHJ5F1M6YKVZESPZAAVVD6G8" \
+    # [full-rs1]="01KHJ5EQ04XTFG46QCKX3TTAHF" \
+    # [full-energy-conserving-rs0]="01KHJ5F1M6YKVZESPZAAVVD6G8" \
     # [full-energy-conserving-rs1]="01KHCXABVNA3TJW0ZT5F4YDDQT" \
+    ["only-eq-rs0-intermediate"]="01KP8M1T7F3NGVSPH2J7VNWNN4" \
 )
 
 for name in "${!MODELS[@]}"; do
