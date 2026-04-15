@@ -130,18 +130,18 @@ class VectorDiscoNetwork(nn.Module):
                 nn.init.zeros_(block.sv_product.weight)
             if block.pointwise_vv is not None:
                 nn.init.zeros_(block.pointwise_vv.weight)
-            # Initialize W_vv as a diagonal contraction on the identity-like
-            # basis (k=0, d=0). With the residual connection, this gives:
-            #   v_new = (1-α)*v_old + W_sv_contribution
-            # which is a contractive map that bounds vector variance
-            # regardless of depth, instead of the linear growth from
-            # zero-init W_vv. The network learns to adjust W_vv during
-            # training.
+            # Scale down W_sv and initialize W_vv as a mild diagonal
+            # contraction. Together these bound vector variance through
+            # deep stacks while preserving most of the input signal:
+            #   v_new = (1-α)*v_old + scaled_W_sv_contribution
+            # With α=0.1 the input retains ~28% through 12 blocks.
+            # W_sv is scaled to 0.7x so that the equilibrium variance
+            # stays moderate (~4x) despite the weaker contraction.
+            block.conv.W_sv.data.mul_(0.7)
             nn.init.zeros_(block.conv.W_vv)
             Nv = block.conv.out_channels_vector
-            alpha = 0.2
             for o in range(Nv):
-                block.conv.W_vv.data[o, o, 0, 0] = -alpha
+                block.conv.W_vv.data[o, o, 0, 0] = -0.1
             if block.scalar_mlp is not None:
                 # Zero the output layer of the MLP (last Conv2d)
                 for module in reversed(list(block.scalar_mlp.modules())):
