@@ -74,6 +74,7 @@ class VectorDiscoBlock(nn.Module):
         theta_cutoff: float | None = None,
         mlp_hidden_factor: int = 2,
         activation: str = "gelu",
+        residual: bool = True,
     ):
         """Initialize the block.
 
@@ -87,6 +88,7 @@ class VectorDiscoBlock(nn.Module):
             theta_cutoff: filter support radius.
             mlp_hidden_factor: MLP hidden dim = n_scalar * this factor.
             activation: activation function name ("relu", "gelu", "none").
+            residual: whether to add the block input to the output.
         """
         super().__init__()
 
@@ -141,6 +143,7 @@ class VectorDiscoBlock(nn.Module):
         else:
             self.sv_product = None
 
+        self.residual = residual
         self.activation = act_cls()
 
     def forward(
@@ -179,4 +182,6 @@ class VectorDiscoBlock(nn.Module):
             v = v + self.sv_product(s, x_vector)
 
         # 5. Residual
-        return x_scalar + s, x_vector + v
+        if self.residual:
+            return x_scalar + s, x_vector + v
+        return s, v

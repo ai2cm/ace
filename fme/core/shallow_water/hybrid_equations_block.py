@@ -1,99 +1,66 @@
 """Multi-level hydrostatic primitive equations in hybrid σ-p coordinates,
-encoded in a VectorDiscoBlock.
+encoded in a single VectorDiscoBlock pass.
 
-The same physics as ``HybridCoordinateStepper`` but expressed in as few
-DISCO forward passes as possible:
+The same physics as ``HybridCoordinateStepper`` but with all horizontal
+operations (dynamics, advection, diffusion) packed into one DISCO forward
+pass.
 
-Block 1  (n_s = 4K + 2,  n_v = K + 1)
----------------------------------------
-Per-level scalar channels — 4 kinds each:
+Block  (n_s = 6K + 2,  n_v = K + 1,  residual = False)
+--------------------------------------------------------
+Per-level scalar channels — 6 kinds each:
 
     kind 0 — KE_k   kinetic energy (precomputed pointwise)
     kind 1 — φ_k    geopotential (precomputed via hydrostatic recurrence)
     kind 2 — ζ_k    vorticity   (zero input; filled by W_vs curl)
     kind 3 — δ_k    divergence  (zero input; filled by W_vs div)
+    kind 4 — T_k    temperature (advected by W_vs2, diffused by W_ss)
+    kind 5 — q_k    specific humidity (advected by W_vs2, diffused by W_ss)
 
-Channel 4K   — f    Coriolis parameter (constant, passes through pointwise_ss)
-Channel 4K+1 — p_s  surface pressure (used by W_sv for ∇p_s)
+Channel 6K   — f    Coriolis parameter (passes through pointwise_ss)
+Channel 6K+1 — p_s  surface pressure (used by W_sv for ∇p_s)
 
 Vector channels 0..K-1 — V_k  horizontal velocity at each level
 Vector channel  K      — dedicated ∇p_s output (zero input; filled by W_sv)
 
-Encodings in Block 1
---------------------
-W_vs  (diagonal, V_k → ζ_k and δ_k):
-    W_vs[ch(k, ZETA), k, :, 0] = 1/R  →  ζ_k  (curl)
-    W_vs[ch(k, DIV),  k, :, 1] = 1/R  →  δ_k  (divergence)
+Encodings
+---------
+W_vs:   V_k → ζ_k (curl) and δ_k (divergence)
+W_sv:   φ_k, KE_k → -∇φ_k, -∇KE_k; p_s → +∇p_s
+W_vs2:  -V_k·∇T_k, -V_k·∇q_k (horizontal advection)
+W_ss:   ν∇²T_k, ν∇²q_k (scalar diffusion, approximate Laplacian)
+W_vv:   ν∇²V_k (velocity diffusion, approximate Laplacian)
+sv_product: ζ_k×V_k (vorticity advection), -f×V_k (Coriolis)
 
-W_sv  (three groups):
-    W_sv[k, ch(k, PHI),  :, 1] = -1/R  →  -∇φ_k     (hydrostatic PGF)
-    W_sv[k, ch(k, KE),   :, 1] = -1/R  →  -∇KE_k    (Lamb term)
-    W_sv[K, ps_ch,       :, 1] = +1/R  →  +∇p_s     (dedicated vector ch. K)
+Block output (residual=False → raw tendencies)
+----------------------------------------------
+    y_v[:, :K]  =  -∇KE - ∇φ + ζ×V - f×V + ν∇²V    (partial momentum)
+    y_v[:, K]   =  ∇p_s                               (gradient)
+    y_s T_k     =  -V·∇T + ν∇²T                      (partial T tendency)
+    y_s q_k     =  -V·∇q + ν∇²q                      (partial q tendency)
+    y_s ζ_k/δ_k =  vorticity / divergence
 
-pointwise_ss:
-    [f_ch, f_ch] = 1  →  f passes through for sv_product
-    (all other rows zero)
+Vertical linear layers  (frozen Conv2d(·, ·, 1))
+-------------------------------------------------
+hydrostatic_conv:  φ_k via cumulative sum of R T ln(p/p+1) increments
+C_conv:            C_{k+1/2} via cumulative sum of per-level forcing
+dX_dp_num_conv:    ∂X/∂p numerators via tridiagonal stencil
 
-sv_product:
-    weight[ch(k, ZETA), k, 1] = +1   →  +ζ_k × V_k  (vorticity advection)
-    weight[f_ch,        k, 1] = -1   →  -f   × V_k  (Coriolis), k = 0..K-1
+Explicit computations (pointwise, no DISCO)
+-------------------------------------------
+KE, p_k, dp_k, φ_k (inputs), V·∇p_s, ∂p_s/∂t, PGF correction,
+ω, vertical advection, adiabatic T.
 
-Block 1 output
---------------
-    y_v[:, :K] - uv  =  -∇KE_k - ∇φ_k + ζ_k×V_k - f×V_k     (partial momentum)
-    y_v[:, K]        =  ∇p_s                                    (vector gradient)
-    y_s[:, ch(k, ZETA)]  =  ζ_k
-    y_s[:, ch(k, DIV)]   =  δ_k
-
-adv_conv  (VectorDiscoConvS2, W_vs2 only, n_s = 2K, n_v = K)
------------------------------------------------------------
-    W_vs2[k,   k, :, 1] = -1/R  →  -V_k · ∇T_k
-    W_vs2[K+k, k, :, 1] = -1/R  →  -V_k · ∇q_k
-
-Vertical linear layers  (frozen Conv2d(·, ·, 1) — no loops)
--------------------------------------------------------------
-These replace Python for-loops with frozen pointwise-in-space 1×1 convolutions
-that mix level channels.  They can be unfrozen to learn deviations from the
-hard-coded physics.
-
-hydrostatic_conv  Conv2d(K-1, K, 1)   lower-triangular all-ones
-    input : increments[j] = R T_j ln(p_j/p_{j+1}),  j = 0..K-2   (B, K-1, H, W)
-    output: φ_k - φ_surface = ∑_{j<k} increment[j]                (B, K,   H, W)
-
-C_conv            Conv2d(K, K+1, 1)   lower-triangular all-ones, row 0 = 0
-    input : per-level forcing = -Δb ∂p_s/∂t - Δp div - Δb V·∇p_s (B, K,   H, W)
-    output: C_{k+1/2} = ∑_{j≤k} forcing[j],  C_{-1/2} = 0        (B, K+1, H, W)
-
-dX_dp_num_conv    Conv2d(K, K, 1)     tridiagonal central-difference stencil
-    input : X (scalar field over levels)                           (B, K, H, W)
-    output: numerators of ∂X/∂p  (divided pointwise by Δp)        (B, K, H, W)
-
-Explicit computations (no DISCO, no loops)
-------------------------------------------
-* KE_k = 0.5(u² + v²)             (nonlinear, before block)
-* p_k = a_k + b_k p_s             (pointwise, before block)
-* dp_k = Δa_k + Δb_k p_s         (pointwise, before block)
-* log_ratio, increments for φ_k   (pointwise; log-ratio is state-dependent)
-* V_k · ∇p_s = V_k · y_v[:,K]    (pointwise dot with block output)
-* ∂p_s/∂t                        (pointwise sum over levels)
-* PGF correction -(RT b/p)∇p_s   (pointwise; b/p_k is state-dependent)
-* Δp denominators for ∂X/∂p      (pointwise; p_k is state-dependent)
-* ω_k = b_k(∂p_s/∂t + V·∇p_s)+C_k (pointwise)
-* Vertical advection -C_k ∂X/∂p  (pointwise)
-* Adiabatic T term (κT/p) ω       (pointwise)
-
-Two DISCO passes (block + adv_conv) suffice because:
-* All remaining explicit terms are either pointwise nonlinearities with
-  state-dependent coefficients, or vertical operations handled by the
-  frozen Conv2d layers above — none require additional horizontal filtering.
+One DISCO pass suffices because all remaining explicit terms are either
+pointwise nonlinearities with state-dependent coefficients, or vertical
+operations handled by the frozen Conv2d layers.
 """
 
 import math
-from typing import Any
 
 import torch
 import torch.nn as nn
 
+from fme.core.disco._disco_utils import _disco_s2_contraction_fft
 from fme.core.disco._quadrature import precompute_latitudes
 from fme.core.disco._vector_convolution import VectorDiscoConvS2
 from fme.core.shallow_water.block import VectorDiscoBlock
@@ -107,7 +74,69 @@ _KE_KIND = 0
 _PHI_KIND = 1
 _ZETA_KIND = 2
 _DIV_KIND = 3
-_N_KINDS = 4
+_T_KIND = 4
+_Q_KIND = 5
+_N_KINDS = 6
+
+
+def _legendre_p(degree: int, x: torch.Tensor) -> torch.Tensor:
+    """Legendre polynomial P_l(x) via Bonnet's recurrence."""
+    if degree == 0:
+        return torch.ones_like(x)
+    if degree == 1:
+        return x.clone()
+    p_prev = torch.ones_like(x)
+    p_curr = x.clone()
+    for i in range(1, degree):
+        p_next = ((2 * i + 1) * x * p_curr - i * p_prev) / (i + 1)
+        p_prev = p_curr
+        p_curr = p_next
+    return p_curr
+
+
+def _compute_laplacian_weights(conv: VectorDiscoConvS2) -> torch.Tensor:
+    """Compute scalar kernel weights approximating ∇² on the unit sphere.
+
+    Uses Legendre polynomial test fields whose eigenvalues under the
+    Laplace-Beltrami operator are known exactly:
+        ∇² P_l(cos θ) = -l(l+1) P_l(cos θ).
+
+    Returns a (K_s,) tensor *w* such that, for a single channel,
+    ``einsum('k,...k...->...', w, scalar_basis_contractions)`` approximates
+    the unit-sphere Laplacian of the input field.
+    """
+    K_s = conv._scalar_kernel_size
+    H = conv.nlat_out
+    W = conv.nlon_out
+    device = conv.psi_scalar_fft.device
+
+    colats = precompute_latitudes(H)[0].to(device)
+    cos_colat = torch.cos(colats)  # (H,)
+
+    n_tests = K_s + 2  # slightly overdetermined for robustness
+    A_rows: list[torch.Tensor] = []
+    b_rows: list[torch.Tensor] = []
+
+    for degree in range(n_tests):
+        p_l = _legendre_p(degree, cos_colat)  # (H,)
+        field = p_l.reshape(1, 1, H, 1).expand(1, 1, H, W).contiguous()
+
+        # Scalar basis contractions: (1, 1, K_s, H, W)
+        f_s = _disco_s2_contraction_fft(
+            field, conv.psi_scalar_fft, conv.scalar_gather_idx, W
+        )
+        # Average over longitude (isotropic → longitude-independent)
+        f_s_avg = f_s[0, 0, :, :, :].mean(dim=-1).T  # (H, K_s)
+
+        target = -degree * (degree + 1) * p_l  # (H,)
+
+        A_rows.append(f_s_avg)
+        b_rows.append(target)
+
+    A = torch.cat(A_rows, dim=0)  # (n_tests*H, K_s)
+    b = torch.cat(b_rows, dim=0)  # (n_tests*H,)
+
+    return torch.linalg.lstsq(A, b.unsqueeze(-1)).solution.squeeze(-1)
 
 
 def _ch(level: int, kind: int) -> int:
@@ -118,10 +147,23 @@ def _ch(level: int, kind: int) -> int:
 class HybridCoordinateBlockStepper(nn.Module):
     """Multi-level primitive equations in hybrid σ-p coordinates using VectorDiscoBlock.
 
-    Encodes the full horizontal dynamics in two DISCO forward passes:
-    - ``self.block`` (Block 1): vorticity, divergence, -∇KE, -∇φ, Coriolis,
-      vorticity advection, and ∇p_s — all in one ``VectorDiscoBlock`` pass.
-    - ``self.adv_conv``: horizontal T and q advection via W_vs2.
+    Encodes all horizontal dynamics in a single DISCO forward pass:
+
+    ``self.block`` (n_s = 6K+2, n_v = K+1):
+        Per-level scalar channels (6 kinds per level):
+            KE_k, φ_k, ζ_k, δ_k, T_k, q_k
+
+        Plus global channels: f (Coriolis), p_s (surface pressure).
+
+        Vector channels: V_0..V_{K-1} (wind), plus ∇p_s (channel K).
+
+    Block encodings:
+        W_vs   — V_k → ζ_k (curl) and δ_k (divergence)
+        W_sv   — φ_k, KE_k → -∇φ_k, -∇KE_k; p_s → +∇p_s
+        W_vs2  — -V_k·∇T_k, -V_k·∇q_k (horizontal advection)
+        W_ss   — ν∇²T_k, ν∇²q_k (scalar diffusion via Laplacian weights)
+        W_vv   — ν∇²V_k (velocity diffusion via Laplacian weights)
+        sv_product — ζ_k×V_k (vorticity advection), -f×V_k (Coriolis)
 
     The remaining terms (hydrostatic φ recurrence, PGF correction, ∂p_s/∂t,
     C_k, ω, vertical advection) are computed explicitly because they involve
@@ -145,8 +187,8 @@ class HybridCoordinateBlockStepper(nn.Module):
         Surface geopotential (m²/s²).
     kernel_shape, theta_cutoff:
         DISCO filter parameters.
-    diffusion_coeff, diffusion_order:
-        Optional ∇^(2n) hyperdiffusion.
+    diffusion_coeff:
+        Optional ν for ∇² diffusion (m²/s). None disables diffusion.
     """
 
     def __init__(
@@ -162,7 +204,6 @@ class HybridCoordinateBlockStepper(nn.Module):
         kernel_shape: int = 5,
         theta_cutoff: float | None = None,
         diffusion_coeff: float | None = None,
-        diffusion_order: int = 1,
     ):
         super().__init__()
         self.nlat, self.nlon = shape
@@ -181,7 +222,6 @@ class HybridCoordinateBlockStepper(nn.Module):
         self.R = R
         self.phi_surface = phi_surface
         self.diffusion_coeff = diffusion_coeff
-        self.diffusion_order = diffusion_order
 
         a_m = torch.tensor(a_mid, dtype=torch.float32)
         b_m = torch.tensor(b_mid, dtype=torch.float32)
@@ -210,8 +250,8 @@ class HybridCoordinateBlockStepper(nn.Module):
             (quad_weights * 2.0 * math.pi / self.nlon).float(),
         )
 
-        # ── Block 1 (n_s = 4K+2, n_v = K+1) ────────────────────────────────
-        # 4 kinds per level (KE, φ, ζ, δ), plus f (4K) and p_s (4K+1).
+        # ── Block (n_s = 6K+2, n_v = K+1) ──────────────────────────────────
+        # 6 kinds per level (KE, φ, ζ, δ, T, q), plus f and p_s.
         # K velocity channels (0..K-1) plus one dedicated ∇p_s channel (K).
         n_s = K * _N_KINDS + 2
         n_v = K + 1
@@ -222,23 +262,11 @@ class HybridCoordinateBlockStepper(nn.Module):
             kernel_shape=kernel_shape,
             theta_cutoff=theta_cutoff,
             activation="none",
+            residual=False,
         )
 
-        # ── ke_product: KE_k = ½|V_k|² via diagonal VectorDotProduct ────────────
+        # ── ke_product: KE_k = ½|V_k|² via diagonal VectorDotProduct ────────
         self.ke_product = VectorDotProduct(n_scalar=K, n_vector=K)
-
-        # ── adv_conv: -V·∇T and -V·∇q via W_vs2 ────────────────────────────
-        self.adv_conv = VectorDiscoConvS2(
-            in_channels_scalar=2 * K,
-            in_channels_vector=K,
-            out_channels_scalar=2 * K,
-            out_channels_vector=0,
-            in_shape=shape,
-            out_shape=shape,
-            kernel_shape=kernel_shape,
-            theta_cutoff=theta_cutoff,
-            bias=False,
-        )
 
         # ── Vertical linear layers (replace for-loops, frozen) ──────────────
         # Each is a 1×1 Conv2d acting pointwise over (H, W), mixing K levels.
@@ -249,29 +277,6 @@ class HybridCoordinateBlockStepper(nn.Module):
         else:
             self.hydrostatic_conv = None
             self.dX_dp_num_conv = None
-
-        # ── Diffusion convs (1-channel, used with reshape for K levels) ──────
-        disco_kw: dict[str, Any] = dict(
-            in_shape=shape,
-            out_shape=shape,
-            kernel_shape=kernel_shape,
-            theta_cutoff=theta_cutoff,
-            bias=False,
-        )
-        self.grad_conv = VectorDiscoConvS2(
-            in_channels_scalar=1,
-            in_channels_vector=0,
-            out_channels_scalar=0,
-            out_channels_vector=1,
-            **disco_kw,
-        )
-        self.div_conv = VectorDiscoConvS2(
-            in_channels_scalar=0,
-            in_channels_vector=1,
-            out_channels_scalar=1,
-            out_channels_vector=0,
-            **disco_kw,
-        )
 
         for param in self.parameters():
             param.requires_grad = False
@@ -298,21 +303,36 @@ class HybridCoordinateBlockStepper(nn.Module):
             self.block.conv.bias_scalar.zero_()
 
         # ── W_vs: V_k → ζ_k (curl, d=0) and δ_k (div, d=1) ─────────────────
-        # W_vs shape: (n_s, n_v=K+1, K_v, 2)
-        # Diagonal coupling: V_k feeds only level-k scalar channels.
-        # Vector channel K (∇p_s) contributes nothing to scalars.
         W_vs = self.block.conv.W_vs
         for k in range(K):
             W_vs[_ch(k, _ZETA_KIND), k, :, 0] = 1.0 / R_EARTH  # curl → ζ_k
             W_vs[_ch(k, _DIV_KIND), k, :, 1] = 1.0 / R_EARTH  # div  → δ_k
 
         # ── W_sv: -∇φ_k and -∇KE_k into velocity ch.; +∇p_s into ch. K ──────
-        # W_sv shape: (n_v=K+1, n_s, K_v, 2)
         W_sv = self.block.conv.W_sv
         for k in range(K):
             W_sv[k, _ch(k, _PHI_KIND), :, 1] = -1.0 / R_EARTH  # -∇φ_k  → V_k
             W_sv[k, _ch(k, _KE_KIND), :, 1] = -1.0 / R_EARTH  # -∇KE_k → V_k
         W_sv[K, ps_ch, :, 1] = 1.0 / R_EARTH  # +∇p_s → dedicated channel K
+
+        # ── W_vs2: -V_k·∇T_k and -V_k·∇q_k (horizontal advection) ──────────
+        assert self.block.conv.W_vs2 is not None
+        W_vs2 = self.block.conv.W_vs2
+        for k in range(K):
+            W_vs2[_ch(k, _T_KIND), k, :, 1] = -1.0 / R_EARTH  # -V_k · ∇T_k
+            W_vs2[_ch(k, _Q_KIND), k, :, 1] = -1.0 / R_EARTH  # -V_k · ∇q_k
+
+        # ── W_ss / W_vv: diffusion via Laplacian weights ─────────────────────
+        if self.diffusion_coeff is not None:
+            lap_w = _compute_laplacian_weights(self.block.conv)
+            nu_R2 = self.diffusion_coeff / R_EARTH**2
+            # Scalar diffusion: ν∇²T_k and ν∇²q_k
+            for k in range(K):
+                self.block.conv.W_ss[_ch(k, _T_KIND), _ch(k, _T_KIND)] = nu_R2 * lap_w
+                self.block.conv.W_ss[_ch(k, _Q_KIND), _ch(k, _Q_KIND)] = nu_R2 * lap_w
+            # Vector diffusion: ν∇²V_k (stretch component d=0 only)
+            for k in range(K):
+                self.block.conv.W_vv[k, k, :, 0] = nu_R2 * lap_w
 
         # ── pointwise_ss: only f passes through ──────────────────────────────
         self.block.pointwise_ss.weight.zero_()
@@ -327,8 +347,6 @@ class HybridCoordinateBlockStepper(nn.Module):
                     module.bias.zero_()
 
         # ── sv_product: +ζ_k×V_k (Lamb) and -f×V_k (Coriolis) ───────────────
-        # weight shape: (n_s, n_v=K+1, 2)   index 1 = rotation (rot90)
-        # Column K (∇p_s channel) stays zero — no sv_product for ∇p_s.
         assert self.block.sv_product is not None
         self.block.sv_product.weight.zero_()
         for k in range(K):
@@ -339,45 +357,23 @@ class HybridCoordinateBlockStepper(nn.Module):
         assert self.block.pointwise_vv is not None
         self.block.pointwise_vv.weight.zero_()
 
-        # ── Gradient/div convs: used only for ∇²ˢ diffusion ──────────────────
-        self.grad_conv.W_sv.zero_()
-        self.grad_conv.W_sv[0, 0, :, 1] = 1.0 / R_EARTH
-        self.div_conv.W_vs.zero_()
-        self.div_conv.W_vs[0, 0, :, 1] = 1.0 / R_EARTH
-
-        # ── adv_conv: -V·∇T and -V·∇q via W_vs2 ─────────────────────────────
-        # Scalar layout: indices 0..K-1 = T levels, K..2K-1 = q levels.
-        self.adv_conv.W_ss.zero_()
-        self.adv_conv.W_vs.zero_()
-        W_vs2 = self.adv_conv.W_vs2  # shape (2K, K, K_v, 2)
-        W_vs2.zero_()
-        for k in range(K):
-            W_vs2[k, k, :, 1] = -1.0 / R_EARTH  # -V_k · ∇T_k
-            W_vs2[K + k, k, :, 1] = -1.0 / R_EARTH  # -V_k · ∇q_k
-
         # ── ke_product: diagonal weight 0.5 → KE_k = ½|V_k|² ───────────────
         self.ke_product.weight.zero_()
         for k in range(K):
             self.ke_product.weight[k, k] = 0.5
 
         # ── Vertical linear layers ────────────────────────────────────────────
-        # C_conv: row 0 = zeros (bottom BC), row k+1 = ones for columns ≤ k.
-        # Encodes C_{k+1/2} = ∑_{j=0}^{k} forcing_j.
         W_C = self.C_conv.weight  # (K+1, K, 1, 1)
         W_C.zero_()
         for k in range(K):
             W_C[k + 1, : k + 1, 0, 0] = 1.0
 
-        # hydrostatic_conv: strictly lower-triangular all-ones.
-        # output[k] = ∑_{j=0}^{k-1} increment[j]  →  φ_k - φ_surface.
         if self.hydrostatic_conv is not None:
             W_H = self.hydrostatic_conv.weight  # (K, K-1, 1, 1)
             W_H.zero_()
             for k in range(1, K):
                 W_H[k, :k, 0, 0] = 1.0
 
-        # dX_dp_num_conv: tridiagonal stencil for central-difference numerators.
-        # Bottom and top boundaries use one-sided differences.
         if self.dX_dp_num_conv is not None:
             W_dX = self.dX_dp_num_conv.weight  # (K, K, 1, 1)
             W_dX.zero_()
@@ -457,31 +453,6 @@ class HybridCoordinateBlockStepper(nn.Module):
             dp[:, 1:-1] = p_k[:, 2:] - p_k[:, :-2]  # interior central
         return numerators / dp
 
-    # ── Diffusion helpers ─────────────────────────────────────────────────────
-
-    def _gradient(self, s: torch.Tensor) -> torch.Tensor:
-        """∇s for (B, K, H, W) → (B, K, H, W, 2) via grad_conv."""
-        B, K, H, W = s.shape
-        s_flat = s.reshape(B * K, 1, H, W)
-        dummy = s.new_zeros(B * K, 0, H, W, 2)
-        _, g = self.grad_conv(s_flat, dummy)
-        return g.reshape(B, K, H, W, 2)
-
-    def _laplacian(self, s: torch.Tensor) -> torch.Tensor:
-        """∇²s = ∇·(∇s) for (B, K, H, W)."""
-        B, K, H, W = s.shape
-        grad = self._gradient(s)
-        uv_flat = grad.reshape(B * K, 1, H, W, 2)
-        dummy_s = grad.new_zeros(B * K, 0, H, W)
-        d_flat, _ = self.div_conv(dummy_s, uv_flat)
-        return d_flat.reshape(B, K, H, W)
-
-    def _apply_diffusion(self, s: torch.Tensor) -> torch.Tensor:
-        lap = self._laplacian(s)
-        for _ in range(self.diffusion_order - 1):
-            lap = self._laplacian(lap)
-        return (-1) ** (self.diffusion_order + 1) * self.diffusion_coeff * lap  # type: ignore[operator]
-
     # ── Main tendency computation ─────────────────────────────────────────────
 
     def compute_tendencies(
@@ -517,7 +488,7 @@ class HybridCoordinateBlockStepper(nn.Module):
         phi_anom = phi - phi.mean(dim=(-2, -1), keepdim=True)
         ps_anom = p_s - p_s.mean(dim=(-2, -1), keepdim=True)
         zeros = torch.zeros_like(T)
-        per_level = torch.stack([ke, phi_anom, zeros, zeros], dim=2)
+        per_level = torch.stack([ke, phi_anom, zeros, zeros, T, q], dim=2)
         x_s_body = per_level.reshape(B, K * _N_KINDS, H, W)
         x_s = torch.cat(
             [
@@ -526,7 +497,7 @@ class HybridCoordinateBlockStepper(nn.Module):
                 ps_anom.unsqueeze(1),
             ],
             dim=1,
-        )  # (B, 4K+2, H, W)
+        )  # (B, 6K+2, H, W)
 
         x_v = torch.cat(
             [
@@ -536,16 +507,19 @@ class HybridCoordinateBlockStepper(nn.Module):
             dim=1,
         )  # (B, K+1, H, W, 2)
 
-        # ── Block 1: one pass → momentum, ζ, δ, ∇p_s ─────────────────────────
+        # ── Single block pass → momentum, ζ, δ, ∇p_s, advection, diffusion ──
         y_s, y_v = self.block(x_s, x_v)
 
-        # Extract divergence and ∇p_s from block output
+        # Extract per-level outputs from scalar channels
         y_s_levels = y_s[:, : K * _N_KINDS].reshape(B, K, _N_KINDS, H, W)
         div = y_s_levels[:, :, _DIV_KIND]  # (B, K, H, W)
-        grad_ps = y_v[:, K]  # (B, H, W, 2)
+        dT_dt = y_s_levels[:, :, _T_KIND]  # -V·∇T (+ ν∇²T if diffusion)
+        dq_dt = y_s_levels[:, :, _Q_KIND]  # -V·∇q (+ ν∇²q if diffusion)
 
-        # Partial momentum tendency: -∇KE_k - ∇φ_k + ζ_k×V_k - f×V_k
-        duv_partial = y_v[:, :K] - uv  # (B, K, H, W, 2)
+        # Vector outputs: momentum tendency and ∇p_s
+        grad_ps = y_v[:, K]  # (B, H, W, 2)
+        # duv includes: -∇KE - ∇φ + ζ×V - f×V (+ ν∇²V if diffusion)
+        duv_dt = y_v[:, :K]  # (B, K, H, W, 2)
 
         # ── Surface pressure tendency ──────────────────────────────────────────
         db = self.delta_b.view(1, K, 1, 1)
@@ -565,13 +539,7 @@ class HybridCoordinateBlockStepper(nn.Module):
         dV1_dp = self._dX_dp(uv[..., 1], p_k)
         vert_adv_uv = torch.stack([-C_k * dV0_dp, -C_k * dV1_dp], dim=-1)
 
-        duv_dt = duv_partial + pgf_corr + vert_adv_uv
-
-        # ── adv_conv (W_vs2): -V·∇T and -V·∇q ────────────────────────────────
-        tq = torch.cat([T, q], dim=1)  # (B, 2K, H, W)
-        dTq, _ = self.adv_conv(tq, uv)  # (B, 2K, H, W)
-        dT_dt = dTq[:, :K]
-        dq_dt = dTq[:, K:]
+        duv_dt = duv_dt + pgf_corr + vert_adv_uv
 
         # ── ω and adiabatic T ─────────────────────────────────────────────────
         omega = b_k * (dp_s_dt.unsqueeze(1) + v_dot_gps) + C_k
@@ -581,15 +549,6 @@ class HybridCoordinateBlockStepper(nn.Module):
 
         # ── Vertical advection of q ───────────────────────────────────────────
         dq_dt = dq_dt - C_k * self._dX_dp(q, p_k)
-
-        # ── Optional diffusion ────────────────────────────────────────────────
-        if self.diffusion_coeff is not None:
-            dT_dt = dT_dt + self._apply_diffusion(T)
-            dq_dt = dq_dt + self._apply_diffusion(q)
-            duv_dt = duv_dt + torch.stack(
-                [self._apply_diffusion(uv[..., 0]), self._apply_diffusion(uv[..., 1])],
-                dim=-1,
-            )
 
         return duv_dt, dT_dt, dq_dt, dp_s_dt
 

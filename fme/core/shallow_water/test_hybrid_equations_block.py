@@ -6,6 +6,7 @@ basic smoke tests for shape, stability, and mass conservation.
 """
 
 import math
+import pathlib
 
 import pytest
 import torch
@@ -16,6 +17,7 @@ from fme.core.shallow_water.hybrid_equations import (
     sigma_coefficients,
 )
 from fme.core.shallow_water.hybrid_equations_block import HybridCoordinateBlockStepper
+from fme.core.testing.regression import validate_tensor_dict
 
 SHAPE = (16, 32)
 N_LEVELS = 3
@@ -162,3 +164,61 @@ class TestHybridCoordinateBlockStepper:
         assert torch.isfinite(uv).all()
         assert torch.isfinite(T).all()
         assert torch.isfinite(p_s).all()
+
+    def test_tendencies_with_diffusion_match_reference(self):
+        """Block tendencies with diffusion match reference stepper."""
+        block, ref = _make_steppers(omega=7.292e-5, diffusion_coeff=1e5)
+
+        B = 1
+        bump = _gaussian_bump(*SHAPE, sigma_deg=20.0)
+        T_pert = 10.0 * bump.unsqueeze(0).unsqueeze(0).expand(B, N_LEVELS, *SHAPE)
+        T = torch.full((B, N_LEVELS, *SHAPE), T_BACKGROUND) + T_pert
+        uv = torch.zeros(B, N_LEVELS, *SHAPE, 2)
+        uv[..., 0] = 5.0 * bump.unsqueeze(0).unsqueeze(0)
+        uv[..., 1] = 3.0 * bump.unsqueeze(0).unsqueeze(0)
+        q = 0.01 * bump.unsqueeze(0).unsqueeze(0).expand(B, N_LEVELS, *SHAPE)
+        p_s = torch.full((B, *SHAPE), P_SURFACE) + 500.0 * bump.unsqueeze(0)
+
+        duv_b, dT_b, dq_b, dps_b = block.compute_tendencies(uv, T, q, p_s)
+        duv_r, dT_r, dq_r, dps_r = ref.compute_tendencies(uv, T, q, p_s)
+
+        # The block uses a single-pass Laplacian approximation (W_ss/W_vv)
+        # instead of the exact two-pass ∇·∇. The different discrete operator
+        # produces ~10% relative error which is acceptable for numerical
+        # stabilization diffusion.
+        rtol = 1.5e-1
+
+        def _check(a, b, name):
+            scale = a.abs().max().clamp(min=1e-10)
+            err = (a - b).abs().max() / scale
+            assert err < rtol, f"{name}: relative error {err:.2e} > {rtol}"
+
+        _check(duv_b, duv_r, "duv/dt")
+        _check(dT_b, dT_r, "dT/dt")
+        _check(dq_b, dq_r, "dq/dt")
+        _check(dps_b, dps_r, "dp_s/dt")
+
+    def test_regression_tendencies_no_diffusion(self):
+        """Regression test: exact tendency output is locked down."""
+        block, _ = _make_steppers(omega=7.292e-5, diffusion_coeff=None)
+
+        B = 1
+        bump = _gaussian_bump(*SHAPE, sigma_deg=20.0)
+        T_pert = 10.0 * bump.unsqueeze(0).unsqueeze(0).expand(B, N_LEVELS, *SHAPE)
+        T = torch.full((B, N_LEVELS, *SHAPE), T_BACKGROUND) + T_pert
+        uv = torch.zeros(B, N_LEVELS, *SHAPE, 2)
+        uv[..., 0] = 5.0 * bump.unsqueeze(0).unsqueeze(0)
+        uv[..., 1] = 3.0 * bump.unsqueeze(0).unsqueeze(0)
+        q = 0.01 * bump.unsqueeze(0).unsqueeze(0).expand(B, N_LEVELS, *SHAPE)
+        p_s = torch.full((B, *SHAPE), P_SURFACE) + 500.0 * bump.unsqueeze(0)
+
+        duv, dT, dq, dps = block.compute_tendencies(uv, T, q, p_s)
+
+        baseline_dir = pathlib.Path(__file__).parent / "baselines"
+        baseline_dir.mkdir(exist_ok=True)
+        validate_tensor_dict(
+            {"duv": duv, "dT": dT, "dq": dq, "dps": dps},
+            baseline_dir / "hybrid_block_tendencies_no_diffusion.pt",
+            rtol=1e-5,
+            atol=1e-6,
+        )
