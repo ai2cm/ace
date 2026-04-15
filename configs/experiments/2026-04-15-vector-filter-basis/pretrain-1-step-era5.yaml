@@ -75,7 +75,7 @@ optimization:
   use_gradient_accumulation: true
   kwargs:
     weight_decay: 0.01
-stepper:
+stepper_training:
   n_ensemble: 2
   train_n_forward_steps: 1
   optimize_last_step_only: true
@@ -103,6 +103,7 @@ stepper:
     kwargs:
       crps_weight: 0.9
       energy_score_weight: 0.1
+stepper:
   step:
     type: vector_disco
     config:
