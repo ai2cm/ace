@@ -1674,6 +1674,10 @@ class CoupledTrainStepper(
                 grad_context = contextlib.nullcontext() if optimize else torch.no_grad()
                 with grad_context:
                     gen_step = next(output_iterator)
+                    assert (
+                        gen_step.realm == "atmosphere"
+                        and gen_step.step == global_atmos_step
+                    )
                     self._accumulate_step_loss(
                         gen_step=gen_step,
                         forward_data=atmos_forward_data.data,
@@ -1688,6 +1692,7 @@ class CoupledTrainStepper(
             grad_context = contextlib.nullcontext() if optimize else torch.no_grad()
             with grad_context:
                 gen_step = next(output_iterator)
+                assert gen_step.realm == "ocean" and gen_step.step == i_outer
                 self._accumulate_step_loss(
                     gen_step=gen_step,
                     forward_data=ocean_forward_data.data,
