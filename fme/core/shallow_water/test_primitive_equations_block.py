@@ -1,11 +1,14 @@
 """Tests for PrimitiveEquationsBlockStepper."""
 
+import pathlib
+
 import torch
 
 from fme.core.shallow_water.primitive_equations import PrimitiveEquationsStepper
 from fme.core.shallow_water.primitive_equations_block import (
     PrimitiveEquationsBlockStepper,
 )
+from fme.core.testing.regression import validate_tensor_dict
 
 SHAPE = (32, 64)
 N_LEVELS = 4
@@ -153,8 +156,9 @@ class TestPrimitiveEquationsBlockStepper:
         ke = 0.5 * (uv[..., 0] ** 2 + uv[..., 1] ** 2)
         from fme.core.shallow_water.primitive_equations_block import _DIV_KIND, _N_KINDS
 
+        T_anom = T - T.mean(dim=(-2, -1), keepdim=True)
         zeros = torch.zeros_like(T)
-        per_level = torch.stack([T, ke, zeros, zeros], dim=2)
+        per_level = torch.stack([T_anom, ke, zeros, zeros, T, q], dim=2)
         x_s = torch.cat(
             [
                 per_level.reshape(B, K * _N_KINDS, H, W),
@@ -189,3 +193,42 @@ class TestPrimitiveEquationsBlockStepper:
         assert not torch.isnan(uv2).any()
         assert not torch.isnan(T2).any()
         assert not torch.isnan(q2).any()
+
+    def test_tendencies_with_diffusion_match_reference(self):
+        """Block tendencies with diffusion match reference stepper."""
+        block, ref = _make_steppers(diffusion_coeff=1e5)
+        uv, T, q = _random_state()
+
+        duv_b, dT_b, dq_b = block.compute_tendencies(uv, T, q)
+        duv_r, dT_r, dq_r = ref.compute_tendencies(uv, T, q)
+
+        rtol = 1.5e-1
+        for name, a, b in [
+            ("duv/dt", duv_b, duv_r),
+            ("dT/dt", dT_b, dT_r),
+            ("dq/dt", dq_b, dq_r),
+        ]:
+            scale = b.abs().max().clamp(min=1e-10)
+            rel_err = (a - b).abs().max() / scale
+            assert rel_err < rtol, f"{name}: rel_err={rel_err:.2e}"
+
+    def test_regression_tendencies_no_diffusion(self):
+        """Regression test: exact tendency output is locked down."""
+        small_shape = (16, 32)
+        block = PrimitiveEquationsBlockStepper(shape=small_shape, n_levels=N_LEVELS)
+        uv, T, q = _random_state()
+        # Downsample to smaller grid
+        uv = uv[:, :, : small_shape[0], : small_shape[1]]
+        T = T[:, :, : small_shape[0], : small_shape[1]]
+        q = q[:, :, : small_shape[0], : small_shape[1]]
+
+        duv, dT, dq = block.compute_tendencies(uv, T, q)
+
+        baseline_dir = pathlib.Path(__file__).parent / "baselines"
+        baseline_dir.mkdir(exist_ok=True)
+        validate_tensor_dict(
+            {"duv": duv, "dT": dT, "dq": dq},
+            baseline_dir / "prim_block_tendencies_no_diffusion.pt",
+            rtol=1e-5,
+            atol=1e-6,
+        )
