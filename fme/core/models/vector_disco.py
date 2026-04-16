@@ -34,6 +34,10 @@ class VectorDiscoNetworkConfig:
         kernel_shape: DISCO filter kernel shape.
         mlp_hidden_factor: Scalar MLP hidden dim = n_scalar_channels * this.
         activation: Activation function name ("gelu", "relu", "none").
+        scalar_encoder_layers: Number of hidden layers in the scalar
+            encoder/decoder MLP. 0 (default) uses a single Conv2d.
+            N>=1 uses N x (Conv2d + activation) + final Conv2d,
+            matching the SFNO encoder architecture.
         residual_blocks: Whether VectorDiscoBlocks use internal residuals.
         num_groups: Number of channel groups for the convolution.
         embed_dim_noise: Dimension of noise embedding for conditional
@@ -50,6 +54,7 @@ class VectorDiscoNetworkConfig:
     kernel_shape: int = 5
     mlp_hidden_factor: int = 2
     activation: str = "gelu"
+    scalar_encoder_layers: int = 0
     residual_blocks: bool = True
     num_groups: int = 1
     embed_dim_noise: int = 0
@@ -110,8 +115,22 @@ class VectorDiscoNetwork(nn.Module):
             embed_dim_pos=config.embed_dim_pos,
         )
 
-        # Encoder (+ norm so the first block receives bounded scalars)
-        self.scalar_encoder = nn.Conv2d(n_in_scalars, Ns, 1)
+        # Scalar encoder: either a single Conv2d (0 layers) or an MLP
+        # with hidden layers matching the SFNO encoder pattern.
+        activations = {"relu": nn.ReLU, "gelu": nn.GELU, "none": nn.Identity}
+        act_cls = activations[config.activation]
+        n_enc_layers = config.scalar_encoder_layers
+        if n_enc_layers == 0:
+            self.scalar_encoder = nn.Conv2d(n_in_scalars, Ns, 1)
+        else:
+            enc_modules: list[nn.Module] = []
+            current_dim = n_in_scalars
+            for _ in range(n_enc_layers):
+                enc_modules.append(nn.Conv2d(current_dim, Ns, 1, bias=True))
+                enc_modules.append(act_cls())
+                current_dim = Ns
+            enc_modules.append(nn.Conv2d(current_dim, Ns, 1, bias=False))
+            self.scalar_encoder = nn.Sequential(*enc_modules)
         self.scalar_encoder_norm = ChannelLayerNorm(Ns)
         self.vector_encoder = PointwiseVectorTransform(n_in_vectors, Nv)
 
@@ -142,8 +161,18 @@ class VectorDiscoNetwork(nn.Module):
             ]
         )
 
-        # Decoder
-        self.scalar_decoder = nn.Conv2d(Ns, n_out_scalars, 1)
+        # Scalar decoder (mirrors encoder structure)
+        if n_enc_layers == 0:
+            self.scalar_decoder = nn.Conv2d(Ns, n_out_scalars, 1)
+        else:
+            dec_modules: list[nn.Module] = []
+            current_dim = Ns
+            for _ in range(n_enc_layers):
+                dec_modules.append(nn.Conv2d(current_dim, Ns, 1, bias=True))
+                dec_modules.append(act_cls())
+                current_dim = Ns
+            dec_modules.append(nn.Conv2d(current_dim, n_out_scalars, 1))
+            self.scalar_decoder = nn.Sequential(*dec_modules)
         self.vector_decoder = PointwiseVectorTransform(Nv, n_out_vectors)
 
         self._init_weights()
@@ -159,9 +188,13 @@ class VectorDiscoNetwork(nn.Module):
         - MLP output layer in each block (residual branch; zero means
           MLP initially contributes nothing)
         """
-        nn.init.zeros_(self.scalar_decoder.weight)
-        if self.scalar_decoder.bias is not None:
-            nn.init.zeros_(self.scalar_decoder.bias)
+        # Zero-init the last Conv2d in the scalar decoder
+        for module in reversed(list(self.scalar_decoder.modules())):
+            if isinstance(module, nn.Conv2d):
+                nn.init.zeros_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+                break
         nn.init.zeros_(self.vector_decoder.weight)
 
         for block in self.blocks:

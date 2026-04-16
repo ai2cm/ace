@@ -65,6 +65,19 @@ class TestVectorDiscoNetwork:
         assert s_out.shape == (B, N_OUT_SCALARS, *IMG_SHAPE)
         assert v_out.shape == (B, N_OUT_VECTORS, *IMG_SHAPE, 2)
 
+    def test_mlp_encoder(self):
+        """Network with scalar_encoder_layers=1 runs and produces zero init output."""
+        net = _make_network(scalar_encoder_layers=1)
+        B = 1
+        scalars = torch.randn(B, N_IN_SCALARS, *IMG_SHAPE)
+        vectors = torch.randn(B, N_IN_VECTORS, *IMG_SHAPE, 2)
+        s_out, v_out = net(scalars, vectors)
+        assert s_out.shape == (B, N_OUT_SCALARS, *IMG_SHAPE)
+        assert v_out.shape == (B, N_OUT_VECTORS, *IMG_SHAPE, 2)
+        # Decoder last layer is zero-init, so output should be zero
+        assert s_out.abs().max() == 0.0
+        assert v_out.abs().max() == 0.0
+
     def test_gaussian_input_output_variance(self):
         """With random decoder weights, outputs are well-behaved at 12 blocks.
 
