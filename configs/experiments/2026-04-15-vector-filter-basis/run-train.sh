@@ -53,4 +53,6 @@ run_training() {
 base_name="vector-disco"
 
 # run_training "train-v16s128-8blk-residual.yaml" "$base_name-v16s128-8blk-residual"
-run_training "train-v48s384-8blk-residual.yaml" "$base_name-v48s384-8blk-residual"
+# run_training "train-v48s384-8blk-residual.yaml" "$base_name-v48s384-8blk-residual"
+run_training "train-v16s128-8blk-residual-conditioned.yaml" "$base_name-v16s128-8blk-residual-conditioned"
+run_training "train-v48s384-8blk-residual-conditioned.yaml" "$base_name-v48s384-8blk-residual-conditioned"
