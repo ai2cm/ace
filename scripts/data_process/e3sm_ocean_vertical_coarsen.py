@@ -96,8 +96,38 @@ def main(config, year):
     ice = xr.open_mfdataset(
         filenames_ice, combine="nested", concat_dim=config.time_dimension
     )
+    if config.reindex_time:
+        tstart = ice.xtime_startDaily.values[0].decode("utf-8").replace("_", " ")
+        tend = ice.xtime_endDaily.values[-1].decode("utf-8").replace("_", " ")
+        timestamps = xr.date_range(
+            start=tstart,
+            end=tend,
+            freq=config.time_frequency,
+            use_cftime=True,
+            calendar="noleap",
+        )
+        ice = ice.assign_coords({config.time_dimension: timestamps})
     ice = ice[config.ice_variable_names]
     ds = xr.open_mfdataset(filenames_ocn)[config.ocean_variable_names]
+    if config.reindex_time:
+        if "xtime" in ds.data_vars:
+            tstart = ds.xtime.values[0].decode("utf-8").replace("_", " ")
+            tend = ds.xtime.values[-1].decode("utf-8").replace("_", " ")
+        elif (
+            "xtime_startMonthly" in ds.data_vars and "xtime_endMonthly" in ds.data_vars
+        ):
+            tstart = ds.xtime_startMonthly.values[0].decode("utf-8").replace("_", " ")
+            tend = ds.xtime_endMonthly.values[-1].decode("utf-8").replace("_", " ")
+        else:
+            raise ValueError("No time dimension found")
+        timestamps = xr.date_range(
+            start=tstart,
+            end=tend,
+            freq=config.time_frequency,
+            use_cftime=True,
+            calendar="noleap",
+        )
+        ds = ds.assign_coords({config.time_dimension: timestamps})
     ds = ds.assign_coords(
         {
             f"{config.vertical_layer_dimension}": grid[config.vertical_layer_dimension],
@@ -158,25 +188,6 @@ def main(config, year):
             method="conservative",
         )
         ds_coarsened[var] = current_coarsened / coarsened_thickness
-    if config.reindex_time:
-        if "xtime" in ds.data_vars:
-            tstart = ds.xtime.values[0].decode("utf-8").replace("_", " ")
-            tend = ds.xtime.values[-1].decode("utf-8").replace("_", " ")
-        elif (
-            "xtime_startMonthly" in ds.data_vars and "xtime_endMonthly" in ds.data_vars
-        ):
-            tstart = ds.xtime_startMonthly.values[0].decode("utf-8").replace("_", " ")
-            tend = ds.xtime_endMonthly.values[-1].decode("utf-8").replace("_", " ")
-        else:
-            raise ValueError("No time dimension found")
-        timestamps = xr.date_range(
-            start=tstart,
-            end=tend,
-            freq=config.time_frequency,
-            use_cftime=True,
-            calendar="noleap",
-        )
-        ds = ds.assign_coords({config.time_dimension: timestamps})
     ds = xr.merge([ds_coarsened, vars_2d, ice])
     ds = ds.chunk({config.time_dimension: 1})
     ds = config.rename(ds)
