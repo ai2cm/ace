@@ -109,8 +109,8 @@ stepper:
     config:
       residual_prediction: false
       network:
-        n_scalar_channels: 384
-        n_vector_channels: 64
+        n_scalar_channels: 128
+        n_vector_channels: 16
         n_blocks: 8
         kernel_shape: 3
         mlp_hidden_factor: 1
