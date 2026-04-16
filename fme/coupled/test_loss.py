@@ -266,7 +266,7 @@ def test_stochastic_n_steps_sample_changes_step_is_optimized():
         ]
     )
     config = LossContributionsConfig(n_steps=sampler)
-    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1)
+    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1, max_n_steps=4)
     # before sampling, _n_steps is max_n_forward_steps = 2
     assert loss.step_is_optimized(0)
     assert loss.step_is_optimized(1)
@@ -291,7 +291,7 @@ def test_stochastic_n_steps_deterministic_outcome():
         ]
     )
     config = LossContributionsConfig(n_steps=sampler)
-    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1)
+    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1, max_n_steps=4)
     loss.sample_n_steps()
     assert loss.step_is_optimized(0)
     assert loss.step_is_optimized(1)
@@ -314,7 +314,7 @@ def test_stochastic_n_steps_samples_vary():
         ]
     )
     config = LossContributionsConfig(n_steps=sampler)
-    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1)
+    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1, max_n_steps=5)
     seen_optimized_step_3 = False
     seen_not_optimized_step_1 = False
     for _ in range(100):
@@ -331,7 +331,7 @@ def test_stochastic_n_steps_samples_vary():
 
 def test_sample_n_steps_noop_for_float_config():
     config = LossContributionsConfig(n_steps=5.0)
-    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1)
+    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1, max_n_steps=5)
     loss.sample_n_steps()
     assert loss.step_is_optimized(4)
     assert not loss.step_is_optimized(5)

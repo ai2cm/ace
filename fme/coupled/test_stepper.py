@@ -1781,6 +1781,7 @@ def test_train_on_batch_stochastic_n_steps():
         outcomes=[TimeLengthProbability(steps=1, probability=1.0)]
     )
     train_stepper_config = CoupledTrainStepperConfig(
+        n_coupled_steps=1,
         ocean=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
             loss_contributions=LossContributionsConfig(n_steps=ocean_sampler),
