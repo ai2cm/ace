@@ -6,9 +6,9 @@ patch:
   coarse_horizontal_overlap: 1
 model:
   checkpoint_path: /checkpoints/best_histogram_tail.ckpt
-  fine_coordinates_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
-  static_inputs:
-    HGTsfc: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
+  # fine_coordinates_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
+  # static_inputs:
+  #   HGTsfc: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
 data:
   coarse:
   - data_path: /climate-default/2026-02-23-X-SHiELD-AMIP-plus-4K-downscaling
