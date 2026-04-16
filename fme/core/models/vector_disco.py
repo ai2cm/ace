@@ -129,7 +129,11 @@ class VectorDiscoNetwork(nn.Module):
 
         for block in self.blocks:
             if block.sv_product is not None:
-                nn.init.zeros_(block.sv_product.weight)
+                # Small random init (0.1x default scale) rather than zero.
+                # Gives immediate gradient signal for learning Coriolis-like
+                # and vorticity-advection couplings, without the variance
+                # issues of full-scale random init.
+                block.sv_product.weight.data.mul_(0.1)
             if block.pointwise_vv is not None:
                 nn.init.zeros_(block.pointwise_vv.weight)
             # Scale down W_sv and initialize W_vv as a mild diagonal
