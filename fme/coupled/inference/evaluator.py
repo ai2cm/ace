@@ -157,6 +157,11 @@ def load_stepper(
     return load_coupled_stepper(checkpoint_path)
 
 
+def _validate_coupled_steps_config(n_coupled_steps: int, coupled_steps_in_memory: int):
+    if n_coupled_steps % coupled_steps_in_memory:
+        raise ValueError("n_coupled_steps must be divisible by coupled_steps_in_memory")
+
+
 @dataclasses.dataclass
 class InferenceEvaluatorConfig:
     """
@@ -192,6 +197,11 @@ class InferenceEvaluatorConfig:
         default_factory=lambda: InferenceEvaluatorAggregatorConfig()
     )
     prediction_loader: InferenceDataLoaderConfig | None = None
+
+    def __post_init__(self):
+        _validate_coupled_steps_config(
+            self.n_coupled_steps, self.coupled_steps_in_memory
+        )
 
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)
@@ -238,7 +248,7 @@ class InferenceEvaluatorConfig:
         }
         return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
-            n_initial_conditions=self.loader.n_initial_conditions,
+            initial_condition_times=data.initial_time.to_numpy(),
             n_timesteps_ocean=self.n_coupled_steps,
             n_timesteps_atmosphere=self.n_coupled_steps * data.n_inner_steps,
             ocean_timestep=data.ocean_timestep,
@@ -349,9 +359,9 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     writer = config.get_data_writer(data)
 
-    timer.stop()
+    timer.stop("initialization")
     logging.info("Starting inference")
-    record_logs = get_record_to_wandb(label="inference")
+    logger = get_record_to_wandb(label="inference")
     if config.prediction_loader is not None:
         prediction_data = get_inference_data(
             config=config.prediction_loader,
@@ -372,8 +382,8 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             target_data=data,
             deriver=deriver,
             writer=writer,
-            record_logs=record_logs,
-            restrict_to_all_names=stepper_config.all_names,
+            record_logs=logger.log,
+            all_names=stepper_config.all_names,
         )
     else:
         run_inference(
@@ -381,7 +391,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             data=data,
             aggregator=aggregator,
             writer=writer,
-            record_logs=record_logs,
+            record_logs=logger.log,
         )
 
     timer.start("final_writer_flush")
@@ -389,14 +399,14 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     writer.finalize()
     logging.info("Writing reduced metrics to disk in netcdf format.")
     aggregator.flush_diagnostics()
-    timer.stop()
+    timer.stop("final_writer_flush")
 
     timer.stop_outer("inference")
     total_steps = (
         config.n_coupled_steps * stepper.n_inner_steps
     ) * config.loader.n_initial_conditions
     inference_duration = timer.get_duration("inference")
-    wandb_logging_duration = timer.get_duration("wandb_logging")
+    wandb_logging_duration = timer.get_duration("inference/wandb_logging")
     total_steps_per_second = total_steps / (inference_duration - wandb_logging_duration)
     timer.log_durations()
     logging.info(
@@ -406,7 +416,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     summary_logs = {
         "total_steps_per_second": total_steps_per_second,
-        **timer.get_durations(),
         **aggregator.get_summary_logs(),
     }
-    record_logs([summary_logs])
+    logger.log_to_current_step(summary_logs)
+    logger.log_to_current_step(timer.get_durations(), label="")

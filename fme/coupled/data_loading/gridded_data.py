@@ -2,7 +2,9 @@ import datetime
 import logging
 from collections import namedtuple
 
+import numpy as np
 import torch
+import xarray as xr
 
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.properties import DatasetProperties
@@ -150,7 +152,7 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
         )
 
 
-def get_initial_condition(
+def _get_initial_condition(
     loader: DataLoader[CoupledBatchData],
     requirements: CoupledPrognosticStateDataRequirements,
 ) -> CoupledPrognosticState:
@@ -171,7 +173,7 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
         self._properties = properties.to_device()
         self._n_initial_conditions: int | None = None
         if isinstance(initial_condition, CoupledPrognosticStateDataRequirements):
-            self._initial_condition: CoupledPrognosticState = get_initial_condition(
+            self._initial_condition: CoupledPrognosticState = _get_initial_condition(
                 loader, initial_condition
             )
         else:
@@ -247,3 +249,16 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
     @property
     def coords(self) -> CoupledCoords:
         return self._properties.coords
+
+    @property
+    def initial_time(self) -> xr.DataArray:
+        atmosphere_data = self.initial_condition.as_batch_data().atmosphere_data
+        ocean_data = self.initial_condition.as_batch_data().ocean_data
+        atmosphere_initial_time = atmosphere_data.time.isel(time=0)
+        ocean_initial_time = ocean_data.time.isel(time=0)
+        np.testing.assert_array_equal(
+            atmosphere_initial_time,
+            ocean_initial_time,
+            err_msg="Atmosphere and ocean initial times must be the same",
+        )
+        return atmosphere_initial_time

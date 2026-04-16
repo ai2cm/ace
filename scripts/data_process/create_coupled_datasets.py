@@ -82,7 +82,7 @@ def _get_stats(
                 end_date=end_date,
             ),
             input_zarr=input_zarr_path,
-            run_name=run_name,
+            out_dir=stats_dir,
             debug=False,
         )
     return stats_dir

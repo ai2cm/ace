@@ -52,6 +52,7 @@ dev = [
     "pytest",
     "pytest-cov",
     "pytest-xdist",
+    "fasteners",
 ]
 docs = [
     "furo==2024.04.27",

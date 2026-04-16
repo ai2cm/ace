@@ -1,6 +1,7 @@
 import logging
 import warnings
 from collections import defaultdict
+from collections.abc import Callable
 
 import matplotlib.pyplot as plt
 import torch
@@ -15,17 +16,26 @@ from fme.core.typing_ import TensorMapping
 class SphericalPowerSpectrumAggregator:
     """Average the power spectrum over batch and time dimensions."""
 
-    def __init__(self, gridded_operations: GriddedOperations):
+    def __init__(
+        self,
+        gridded_operations: GriddedOperations,
+        nan_fill_fn: Callable[[torch.Tensor, str], torch.Tensor] = lambda x, _: x,
+    ):
+        Distributed.get_instance().require_no_spatial_parallelism(
+            "SphericalPowerSpectrumAggregator does not support spatial parallelism."
+        )
         self._real_sht = gridded_operations.get_real_sht()
         self._power_spectrum: dict[str, torch.Tensor] = {}
         self._counts: dict[str, int] = defaultdict(int)
+        self._nan_fill_fn = nan_fill_fn
 
     @torch.no_grad()
     def record_batch(self, data: TensorMapping):
         for name in data:
             batch_size = data[name].shape[0]
             time_size = data[name].shape[1]
-            power_spectrum = spherical_power_spectrum(data[name], self._real_sht)
+            tensor = self._nan_fill_fn(data[name], name)
+            power_spectrum = spherical_power_spectrum(tensor, self._real_sht)
             mean_power_spectrum = torch.mean(power_spectrum, dim=(0, 1))
             new_count = batch_size * time_size
             if name not in self._power_spectrum:
@@ -58,9 +68,14 @@ class PairedSphericalPowerSpectrumAggregator:
         self,
         gridded_operations: GriddedOperations,
         report_plot: bool,
+        nan_fill_fn: Callable[[torch.Tensor, str], torch.Tensor] = lambda x, _: x,
     ):
-        self._gen_aggregator = SphericalPowerSpectrumAggregator(gridded_operations)
-        self._target_aggregator = SphericalPowerSpectrumAggregator(gridded_operations)
+        self._gen_aggregator = SphericalPowerSpectrumAggregator(
+            gridded_operations, nan_fill_fn
+        )
+        self._target_aggregator = SphericalPowerSpectrumAggregator(
+            gridded_operations, nan_fill_fn
+        )
         self._report_plot = report_plot
 
     @torch.no_grad()
