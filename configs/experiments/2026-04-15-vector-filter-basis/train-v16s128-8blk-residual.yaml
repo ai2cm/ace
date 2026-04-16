@@ -72,6 +72,7 @@ optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001
   optimizer_type: FusedAdam
+  max_grad_norm: 1.0
   use_gradient_accumulation: true
   kwargs:
     weight_decay: 0.01
