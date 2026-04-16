@@ -39,6 +39,7 @@ from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
+from fme.core.distributed import Distributed
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
@@ -1628,9 +1629,30 @@ class TrainStepper(
                 )
                 step_loss = self._loss_obj(gen_step, target_step, step=step)
                 metrics[f"loss_step_{step}"] = step_loss.detach()
+                self._check_loss(step_loss, data, step)
             if optimize_step:
                 optimization.accumulate_loss(step_loss)
         return output_list
+
+    def _check_loss(self, loss: torch.Tensor, data: BatchData, step: int) -> None:
+        # Use print (not logging) so all ranks report, not just rank 0.
+        loss_val = loss.detach().item()
+        rank = Distributed.get_instance().rank
+        if torch.isnan(loss) or torch.isinf(loss):
+            times = data.time[:, 0]  # initial time per sample
+            print(
+                f"[rank {rank}] ERROR: NaN/Inf loss at forward step {step}. "
+                f"Batch initial times: {[str(t) for t in times]}",
+                flush=True,
+            )
+        elif loss_val > 100:
+            times = data.time[:, 0]
+            print(
+                f"[rank {rank}] WARNING: Large loss ({loss_val:.2e}) at "
+                f"forward step {step}. "
+                f"Batch initial times: {[str(t) for t in times]}",
+                flush=True,
+            )
 
     def update_training_history(self, training_job: TrainingJob) -> None:
         """
