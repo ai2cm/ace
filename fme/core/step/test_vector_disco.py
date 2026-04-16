@@ -180,16 +180,16 @@ class TestVectorDiscoStep:
         assert abs(step._wind_scale - expected_scale) < 1e-4
 
     def test_coriolis_latitude_pattern(self):
-        """Coriolis should be zero at equator and maximal at poles."""
+        """Coriolis (sin(lat)) should be zero at equator, ±1 at poles."""
         config = _make_config()
         dataset_info = _make_dataset_info()
         step = config.get_step(dataset_info, init_weights=lambda m: None)
 
         coriolis = step.coriolis.squeeze()  # (H, W)
         mid_lat = IMG_SHAPE[0] // 2
-        # Equator should be near zero
-        assert coriolis[mid_lat, 0].abs() < 1e-4
-        # Poles should be maximal (and opposite sign)
+        # Near equator should be small
+        assert coriolis[mid_lat, 0].abs() < 0.2
+        # Poles should be ±1 (O(1) magnitude, not O(10^-4))
         assert coriolis[0, 0] < 0  # south pole, negative
         assert coriolis[-1, 0] > 0  # north pole, positive
 

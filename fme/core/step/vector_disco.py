@@ -236,11 +236,13 @@ class VectorDiscoStep(StepABC):
         # Wind speed scale from normalizer statistics
         self._wind_scale = _compute_wind_scale(normalizer, u_in, v_in)
 
-        # Coriolis parameter: f = 2ω sin(lat), shape (1, 1, H, W)
+        # Coriolis parameter: sin(lat), shape (1, 1, H, W).
+        # Normalized to O(1) magnitude so the encoder can use it
+        # directly alongside other normalized scalar inputs. The
+        # physical scale (2ω) is absorbed into the learned weights.
         assert dataset_info.horizontal_coordinates is not None
         lat_grid, _ = dataset_info.horizontal_coordinates.meshgrid
-        omega = 7.292e-5  # Earth rotation rate (rad/s)
-        coriolis = (2.0 * omega * torch.sin(torch.deg2rad(lat_grid))).float()
+        coriolis = torch.sin(torch.deg2rad(lat_grid)).float()
         self.coriolis = coriolis.unsqueeze(0).unsqueeze(0).to(get_device())
 
         # Build ocean
