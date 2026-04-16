@@ -41,9 +41,21 @@ train_loader:
   dataset:
     strict: false
     concat:
+      # Cut around dates when ERA5 parallel streams were merged.
+      # See Section 3 of Hersbach 2020 (https://doi.org/10.1002/qj.3803)
+      # Bad dates: 1986-04-01, 1993-08-01, 2000-01-01, 2010-01-01,
+      # 2015-01-01. Each skip removes the 18Z→00Z discontinuity.
       - data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
         subset:
           start_time: '1979-01-01T00:00:00'
+          stop_time: '1986-03-31T18:00:00'
+      - data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
+        subset:
+          start_time: '1986-04-01T00:00:00'
+          stop_time: '1993-07-31T18:00:00'
+      - data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
+        subset:
+          start_time: '1993-08-01T00:00:00'
           stop_time: '1995-12-31'
       - data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
         subset:
