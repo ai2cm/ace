@@ -1370,15 +1370,18 @@ class TrainStepperConfig:
         n_ensemble: The number of ensemble members evaluated for each training
             batch member. Default is 2 if the loss type is EnsembleLoss, otherwise
             the default is 1. Must be 2 for EnsembleLoss to be valid.
-        train_n_forward_steps: The number of timesteps to train on and (optionally)
-            associated sampling probabilities.
+        train_n_forward_steps: The number of timesteps to train on and associated
+            sampling probabilities. By default, the stepper will train on the full
+            number of timesteps present in the training dataset samples. Values must
+            be less than or equal to the number of timesteps present
+            in the training dataset samples.
         parameter_init: The parameter initialization configuration for fine-tuning.
     """
 
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
     optimize_last_step_only: bool = False
     n_ensemble: int = -1  # sentinel value to avoid None typing of attribute
-    train_n_forward_steps: TimeLength | TimeLengthSchedule = 1
+    train_n_forward_steps: TimeLength | TimeLengthSchedule | None = None
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
@@ -1391,7 +1394,9 @@ class TrainStepperConfig:
                 self.n_ensemble = 1
 
     @property
-    def train_n_forward_steps_schedule(self) -> TimeLengthSchedule:
+    def train_n_forward_steps_schedule(self) -> TimeLengthSchedule | None:
+        if self.train_n_forward_steps is None:
+            return None
         if isinstance(self.train_n_forward_steps, TimeLengthSchedule):
             return self.train_n_forward_steps
         return TimeLengthSchedule.from_constant(self.train_n_forward_steps)
