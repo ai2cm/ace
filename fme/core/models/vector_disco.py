@@ -15,7 +15,11 @@ import dataclasses
 import torch
 import torch.nn as nn
 
-from fme.core.models.conditional_sfno.layers import Context, ContextConfig
+from fme.core.models.conditional_sfno.layers import (
+    ChannelLayerNorm,
+    Context,
+    ContextConfig,
+)
 from fme.core.shallow_water.block import PointwiseVectorTransform, VectorDiscoBlock
 
 
@@ -83,8 +87,9 @@ class VectorDiscoNetwork(nn.Module):
         Ns = config.n_scalar_channels
         Nv = config.n_vector_channels
 
-        # Encoder
+        # Encoder (+ norm so the first block receives bounded scalars)
         self.scalar_encoder = nn.Conv2d(n_in_scalars, Ns, 1)
+        self.scalar_encoder_norm = ChannelLayerNorm(Ns)
         self.vector_encoder = PointwiseVectorTransform(n_in_vectors, Nv)
 
         # Blocks
@@ -178,7 +183,7 @@ class VectorDiscoNetwork(nn.Module):
             scalar_out: (B, N_out_s, H, W)
             vector_out: (B, N_out_v, H, W, 2)
         """
-        s = self.scalar_encoder(scalars)
+        s = self.scalar_encoder_norm(self.scalar_encoder(scalars))
         v = self.vector_encoder(vectors)
 
         for block in self.blocks:
