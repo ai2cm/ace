@@ -2,12 +2,9 @@
 
 set -e
 
-JOB_NAME="evaluate-HiRO-xshield-amip-plus4K-100km-to-3km-maritime-generate"
 # JOB_NAME="evaluate-HiRO-xshield-amip-control-100km-to-3km-maritime-generate"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
-CONFIG_PATH="$SCRIPT_PATH/config-plus4k-tropic.yaml"
-# CONFIG_PATH="$SCRIPT_PATH/config-control-tropic.yaml"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
@@ -19,11 +16,17 @@ IMAGE="$(cat $REPO_ROOT/latest_deps_only_image.txt)"
 # HiROv1
 EXISTING_RESULTS_DATASET=01K8RWE83W8BEEAT2KRS94FVCD # best hist checkpoint from job using global validation
 
+# CONFIG_PATH="$SCRIPT_PATH/config-plus4k-tropic.yaml"
+# JOB_NAME="evaluate-HiRO-xshield-amip-plus4K-100km-to-3km-maritime-generate"
+
+CONFIG_PATH="$SCRIPT_PATH/config-control-tropic.yaml"
+JOB_NAME="evaluate-HiRO-xshield-amip-control-100km-to-3km-maritime-generate-v2"
+
 # HiROv1 fine-tuned
-EXISTING_RESULTS_DATASET=01KNM6H3JB1ZNS76HX17AAZRF7
+# EXISTING_RESULTS_DATASET=01KNM6H3JB1ZNS76HX17AAZRF7
 
 # HiROv1 fine-tuned using log uniform noise distribution
-EXISTING_RESULTS_DATASET=01KNN2VFZC9AAK4NQR7QK5REDC
+# EXISTING_RESULTS_DATASET=01KNN2VFZC9AAK4NQR7QK5REDC
 
 wandb_group=""
 
