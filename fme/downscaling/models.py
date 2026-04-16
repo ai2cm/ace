@@ -752,16 +752,36 @@ class CheckpointModelConfig:
             state=checkpoint_model.get("static_inputs") or {},
             static_inputs_config=self.static_inputs or {},
         )
-        model = _CheckpointModelConfigSelector.from_state(
-            self._checkpoint["model"]["config"]
-        ).build(
+        checkpoint_config = self._checkpoint["model"]["config"]
+        model = _CheckpointModelConfigSelector.from_state(checkpoint_config).build(
             coarse_shape=self._checkpoint["model"]["coarse_shape"],
             downscale_factor=self._checkpoint["model"]["downscale_factor"],
             full_fine_coords=full_fine_coords,
             rename=self._rename,
             static_inputs=static_inputs,
         )
-        model.module.load_state_dict(self._checkpoint["model"]["module"])
+        try:
+            model.module.load_state_dict(self._checkpoint["model"]["module"])
+        except RuntimeError:
+            module_net_config = checkpoint_config.get("module", {}).get("config", {})
+            if "bottleneck_attention" not in module_net_config:
+                patched_config = {
+                    **checkpoint_config,
+                    "module": {
+                        **checkpoint_config["module"],
+                        "config": {**module_net_config, "bottleneck_attention": False},
+                    },
+                }
+                model = _CheckpointModelConfigSelector.from_state(patched_config).build(
+                    coarse_shape=self._checkpoint["model"]["coarse_shape"],
+                    downscale_factor=self._checkpoint["model"]["downscale_factor"],
+                    full_fine_coords=full_fine_coords,
+                    rename=self._rename,
+                    static_inputs=static_inputs,
+                )
+                model.module.load_state_dict(self._checkpoint["model"]["module"])
+            else:
+                raise
         model.module.eval()
         return model
 

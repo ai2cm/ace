@@ -3,9 +3,9 @@
 set -e
 
 #JOB_NAME="eval-xshield-amip-100km-to-3km-0.5sigmaexp-tropics-events"
-JOB_NAME="eval-xshield-amip-100km-to-3km-denoising-moe-events"
+JOB_NAME="eval-xshield-amip-100km-to-3km-denoising-moe-prate-downweighted-tropic-pac"
 
-CONFIG_FILENAME="eval-coarse-prmsl-events.yaml"
+CONFIG_FILENAME="eval-coarse-prmsl-tropic-pac.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -22,7 +22,7 @@ NGPU=2
 IMAGE="$(cat latest_deps_only_image.txt)"
 
 EXISTING_RESULTS_DATASET_HIGH_SIGMA=01KNWGPBT9WYD4BCR5GQ5Q78H0
-EXISTING_RESULTS_DATASET_LOW_SIGMA=01KNWGZB0DF16P0EMMA5Y1PZZQ
+EXISTING_RESULTS_DATASET_LOW_SIGMA=01KP75VEYFY5PEGYX3Z9MHGTXW
 wandb_group=""
 
 #--not-preemptible \
@@ -35,6 +35,7 @@ gantry run \
     --description 'Run 100km to 3km evaluation on coarsened X-SHiELD' \
     --workspace ai2/climate-titan \
     --priority urgent \
+    --not-preemptible \
     --cluster ai2/jupiter \
     --cluster ai2/titan \
     --beaker-image $IMAGE \

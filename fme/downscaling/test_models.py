@@ -722,6 +722,56 @@ def test_checkpoint_model_build(tmp_path):
     ), "Module should be in eval mode after build() to disable dropout"
 
 
+def test_checkpoint_model_build_old_checkpoint_without_bottleneck_attention(tmp_path):
+    """CheckpointModelConfig.build() falls back to bottleneck_attention=False for old
+    checkpoints whose module config lacks the bottleneck_attention key.
+
+    Old checkpoints were trained with bottleneck_attention=False (hardcoded), so
+    their weights don't have the in0 attention layers.  After the bottleneck_attention
+    parameter was added with a default of True, loading would fail with a missing-key
+    RuntimeError.  The fix retries with bottleneck_attention=False.
+    """
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    fine_coords = make_fine_coords(fine_shape)
+    normalizer = PairedNormalizationConfig(
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+    )
+    # Build the "old" model explicitly with bottleneck_attention=False
+    model = DiffusionModelConfig(
+        module=DiffusionModuleRegistrySelector(
+            "unet_diffusion_song",
+            {"model_channels": 4, "bottleneck_attention": False},
+        ),
+        loss=LossConfig(type="MSE"),
+        in_names=["x"],
+        out_names=["x"],
+        normalization=normalizer,
+        p_mean=-1.0,
+        p_std=1.0,
+        sigma_min=0.1,
+        sigma_max=1.0,
+        churn=0.5,
+        num_diffusion_generation_steps=3,
+        predict_residual=True,
+        use_fine_topography=False,
+    ).build(
+        coarse_shape,
+        2,
+        full_fine_coords=fine_coords,
+        static_inputs=StaticInputs(fields=[], coords=fine_coords),
+    )
+    state = {"model": model.get_state()}
+    # Strip bottleneck_attention to simulate a checkpoint saved before the field existed
+    del state["model"]["config"]["module"]["config"]["bottleneck_attention"]
+    checkpoint_path = tmp_path / "old.ckpt"
+    torch.save(state, checkpoint_path)
+
+    loaded_model = CheckpointModelConfig(checkpoint_path=str(checkpoint_path)).build()
+    assert not loaded_model.module.training
+
+
 def test_build_raises_when_static_inputs_coords_mismatch_full_fine_coords():
     """Building with static_inputs whose coords differ from full_fine_coords raises."""
     coarse_shape = (8, 16)
