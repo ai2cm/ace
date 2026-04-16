@@ -16,8 +16,14 @@ cd $REPO_ROOT  # so config path is valid no matter where we are running this scr
 NGPU=8
 IMAGE="$(cat $REPO_ROOT/latest_deps_only_image.txt)"
 
-#EXISTING_RESULTS_DATASET=01K8P3P5205396WR50FCMZR6P7 # best crps checkpoint from job using global validation
+# HiROv1
 EXISTING_RESULTS_DATASET=01K8RWE83W8BEEAT2KRS94FVCD # best hist checkpoint from job using global validation
+
+# HiROv1 fine-tuned
+EXISTING_RESULTS_DATASET=01KNM6H3JB1ZNS76HX17AAZRF7
+
+# HiROv1 fine-tuned using log uniform noise distribution
+EXISTING_RESULTS_DATASET=01KNN2VFZC9AAK4NQR7QK5REDC
 
 wandb_group=""
 
