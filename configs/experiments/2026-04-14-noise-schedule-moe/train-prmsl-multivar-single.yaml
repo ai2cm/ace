@@ -46,9 +46,9 @@ model:
   churn: 0.0
   training_noise_distribution:
     p_min: 0.005
-    p_max: 200.0
+    p_max: 2000.0
   predict_residual: true
-  sigma_max: 200.0
+  sigma_max: 2000.0
   sigma_min: 0.005
   use_fine_topography: true
 optimization:
