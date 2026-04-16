@@ -2,7 +2,6 @@ experiment_dir: train_output
 save_checkpoint: true
 validate_using_ema: true
 max_epochs: 80
-n_forward_steps: 1
 inference:
   n_forward_steps: 7300  # 5 years
   forward_steps_in_memory: 50
@@ -50,6 +49,7 @@ optimization:
   optimizer_type: AdamW
   # can also set kwargs: fused: true for performance if using GPU
 stepper_training:
+  n_forward_steps: 1
   loss:
     type: MSE
 stepper:
