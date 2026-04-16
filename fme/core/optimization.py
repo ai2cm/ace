@@ -86,6 +86,7 @@ class Optimization(OptimizationABC):
         scheduler: SchedulerConfig | SequentialSchedulerConfig,
         enable_automatic_mixed_precision: bool,
         kwargs: Mapping[str, Any],
+        max_grad_norm: float | None = None,
         use_gradient_accumulation: bool = False,
         get_checkpoint: Callable[
             [int], Checkpoint | NoCheckpoint
@@ -106,6 +107,7 @@ class Optimization(OptimizationABC):
             self.gscaler = None
         self.scheduler = scheduler.build(self.optimizer, max_epochs)
         self._accumulated_loss = torch.tensor(0.0, device=get_device())
+        self._max_grad_norm = max_grad_norm
         self._use_gradient_accumulation = use_gradient_accumulation
         self._get_checkpoint = get_checkpoint
 
@@ -185,6 +187,13 @@ class Optimization(OptimizationABC):
     def step_weights(self):
         if not self._use_gradient_accumulation:
             self._backward(self._accumulated_loss)
+        if self._max_grad_norm is not None:
+            if self.gscaler is not None:
+                self.gscaler.unscale_(self.optimizer)
+            torch.nn.utils.clip_grad_norm_(
+                self.optimizer.param_groups[0]["params"],
+                self._max_grad_norm,
+            )
         self._step_weights()
         self.optimizer.zero_grad()
         if self.gscaler is not None:
@@ -236,6 +245,8 @@ class OptimizationConfig:
             precision.
         scheduler: The type of scheduler to use. If none is given, no scheduler
             will be used.
+        max_grad_norm: Maximum gradient norm for clipping. If None, no
+            clipping is applied. A value of 1.0 is a reasonable starting point.
         use_gradient_accumulation: Whether to use gradient accumulation. This must be
             supported by the stepper being optimized, which may accumulate gradients
             from separate losses to reduce memory consumption. The stepper may choose
@@ -251,6 +262,7 @@ class OptimizationConfig:
     scheduler: SchedulerConfig | SequentialSchedulerConfig = dataclasses.field(
         default_factory=lambda: SchedulerConfig()
     )
+    max_grad_norm: float | None = None
     use_gradient_accumulation: bool = False
     checkpoint: CheckpointConfig = dataclasses.field(
         default_factory=lambda: CheckpointConfig()
@@ -273,6 +285,7 @@ class OptimizationConfig:
             scheduler=self.scheduler,
             enable_automatic_mixed_precision=self.enable_automatic_mixed_precision,
             kwargs=self.kwargs,
+            max_grad_norm=self.max_grad_norm,
             use_gradient_accumulation=self.use_gradient_accumulation,
             get_checkpoint=self.checkpoint.build,
         )
