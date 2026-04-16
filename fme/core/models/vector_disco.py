@@ -38,6 +38,8 @@ class VectorDiscoNetworkConfig:
         num_groups: Number of channel groups for the convolution.
         embed_dim_noise: Dimension of noise embedding for conditional
             layer norm. 0 disables noise conditioning.
+        noise_type: Type of noise ("gaussian" or "isotropic"). Isotropic
+            noise has spatially uniform power spectrum on the sphere.
         embed_dim_pos: Dimension of learned positional embedding for
             conditional layer norm. 0 disables positional conditioning.
     """
@@ -51,6 +53,7 @@ class VectorDiscoNetworkConfig:
     residual_blocks: bool = True
     num_groups: int = 1
     embed_dim_noise: int = 0
+    noise_type: str = "gaussian"
     embed_dim_pos: int = 0
 
 
@@ -83,7 +86,22 @@ class VectorDiscoNetwork(nn.Module):
         Ns = config.n_scalar_channels
         Nv = config.n_vector_channels
         self._embed_dim_noise = config.embed_dim_noise
+        self._noise_type = config.noise_type
         self._img_shape = img_shape
+
+        # Set up isotropic noise generator if needed
+        if config.embed_dim_noise > 0 and config.noise_type == "isotropic":
+            from fme.core.distributed import Distributed
+
+            dist = Distributed.get_instance()
+            nlat, nlon = img_shape
+            self._isht = dist.get_isht(nlat, nlon, grid="equiangular")
+            self._lmax = nlat
+            self._mmax = nlon // 2 + 1
+        else:
+            self._isht = None
+            self._lmax = 0
+            self._mmax = 0
 
         context_config = ContextConfig(
             embed_dim_scalar=0,
@@ -198,13 +216,24 @@ class VectorDiscoNetwork(nn.Module):
 
         # Build context for conditional layer norm
         if self._embed_dim_noise > 0:
-            noise = torch.randn(
-                B,
-                self._embed_dim_noise,
-                *self._img_shape,
-                device=scalars.device,
-                dtype=scalars.dtype,
-            )
+            if self._noise_type == "isotropic" and self._isht is not None:
+                from fme.ace.registry.stochastic_sfno import isotropic_noise
+
+                noise = isotropic_noise(
+                    (B, self._embed_dim_noise),
+                    self._lmax,
+                    self._mmax,
+                    self._isht,
+                    device=scalars.device,
+                )
+            else:
+                noise = torch.randn(
+                    B,
+                    self._embed_dim_noise,
+                    *self._img_shape,
+                    device=scalars.device,
+                    dtype=scalars.dtype,
+                )
         else:
             noise = None
 
