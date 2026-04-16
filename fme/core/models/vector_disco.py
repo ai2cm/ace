@@ -35,9 +35,11 @@ class VectorDiscoNetworkConfig:
         mlp_hidden_factor: Scalar MLP hidden dim = n_scalar_channels * this.
         activation: Activation function name ("gelu", "relu", "none").
         residual_blocks: Whether VectorDiscoBlocks use internal residuals.
-        context: Conditioning dimensions for the post-norm in each block.
-            Supports noise injection and positional embedding. When all
-            embed dims are 0 (default), the norm is unconditional.
+        num_groups: Number of channel groups for the convolution.
+        embed_dim_noise: Dimension of noise embedding for conditional
+            layer norm. 0 disables noise conditioning.
+        embed_dim_pos: Dimension of learned positional embedding for
+            conditional layer norm. 0 disables positional conditioning.
     """
 
     n_scalar_channels: int = 64
@@ -48,14 +50,8 @@ class VectorDiscoNetworkConfig:
     activation: str = "gelu"
     residual_blocks: bool = True
     num_groups: int = 1
-    context: ContextConfig = dataclasses.field(
-        default_factory=lambda: ContextConfig(
-            embed_dim_scalar=0,
-            embed_dim_labels=0,
-            embed_dim_noise=0,
-            embed_dim_pos=0,
-        )
-    )
+    embed_dim_noise: int = 0
+    embed_dim_pos: int = 0
 
 
 class VectorDiscoNetwork(nn.Module):
@@ -86,11 +82,29 @@ class VectorDiscoNetwork(nn.Module):
         super().__init__()
         Ns = config.n_scalar_channels
         Nv = config.n_vector_channels
+        self._embed_dim_noise = config.embed_dim_noise
+        self._img_shape = img_shape
+
+        context_config = ContextConfig(
+            embed_dim_scalar=0,
+            embed_dim_labels=0,
+            embed_dim_noise=config.embed_dim_noise,
+            embed_dim_pos=config.embed_dim_pos,
+        )
 
         # Encoder (+ norm so the first block receives bounded scalars)
         self.scalar_encoder = nn.Conv2d(n_in_scalars, Ns, 1)
         self.scalar_encoder_norm = ChannelLayerNorm(Ns)
         self.vector_encoder = PointwiseVectorTransform(n_in_vectors, Nv)
+
+        # Learned positional embedding (conditions the post-norm in each block)
+        if config.embed_dim_pos > 0:
+            self.pos_embed: nn.Parameter | None = nn.Parameter(
+                torch.zeros(1, config.embed_dim_pos, *img_shape)
+            )
+            nn.init.trunc_normal_(self.pos_embed, std=0.02)
+        else:
+            self.pos_embed = None
 
         # Blocks
         self.blocks = nn.ModuleList(
@@ -103,7 +117,7 @@ class VectorDiscoNetwork(nn.Module):
                     mlp_hidden_factor=config.mlp_hidden_factor,
                     activation=config.activation,
                     residual=config.residual_blocks,
-                    context_config=config.context,
+                    context_config=context_config,
                     num_groups=config.num_groups,
                 )
                 for _ in range(config.n_blocks)
@@ -169,20 +183,43 @@ class VectorDiscoNetwork(nn.Module):
         self,
         scalars: torch.Tensor,
         vectors: torch.Tensor,
-        context: Context | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Forward pass.
 
         Args:
             scalars: (B, N_in_s, H, W)
             vectors: (B, N_in_v, H, W, 2)
-            context: Optional conditioning context (noise, positional
-                embedding, etc.) passed to each block's post-norm.
 
         Returns:
             scalar_out: (B, N_out_s, H, W)
             vector_out: (B, N_out_v, H, W, 2)
         """
+        B = scalars.shape[0]
+
+        # Build context for conditional layer norm
+        if self._embed_dim_noise > 0:
+            noise = torch.randn(
+                B,
+                self._embed_dim_noise,
+                *self._img_shape,
+                device=scalars.device,
+                dtype=scalars.dtype,
+            )
+        else:
+            noise = None
+
+        if self.pos_embed is not None:
+            embedding_pos = self.pos_embed.expand(B, -1, -1, -1)
+        else:
+            embedding_pos = None
+
+        context = Context(
+            embedding_scalar=None,
+            embedding_pos=embedding_pos,
+            labels=None,
+            noise=noise,
+        )
+
         s = self.scalar_encoder_norm(self.scalar_encoder(scalars))
         v = self.vector_encoder(vectors)
 
