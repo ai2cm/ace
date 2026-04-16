@@ -714,27 +714,35 @@ class VectorDiscoConvS2(nn.Module):
                 B, -1, H, W
             )
 
-        # W_vs2: V·∇s advection term (grouped).
-        # Per group: (B, Gv, Gs, K_v, H, W) intermediate instead of
-        # (B, N_v_in, N_s_in, K_v, H, W), reducing memory by factor G.
+        # W_vs2: V·∇s advection term (grouped, contraction-first).
+        # Instead of materializing the full (B, G, Gv, Gs, Kv, H, W) outer
+        # product of velocity and filtered scalars, we contract over the
+        # vector dimension first:
+        #   eff_u[b,g,c,k,h,w] = Σ_v W[g,c,v,k,d=0] * u[b,g,v,h,w]
+        #   eff_v[b,g,c,k,h,w] = Σ_v W[g,c,v,k,d=0] * v[b,g,v,h,w]
+        # Then dot with the filtered scalar gradients:
+        #   y_s += Σ_k (eff_u * f_cp + eff_v * f_sp)  (grad component)
+        #        + Σ_k (eff_v2 * f_cp - eff_u2 * f_sp) (perp component)
+        # Peak intermediate: (B, G, Gs, Kv, H, W) — no Gv dimension.
         if self.W_vs2 is not None and N_v_in > 0 and N_s_in > 0:
             u_g = u.reshape(B, G, Gv, H, W)
             v_g_vec = v.reshape(B, G, Gv, H, W)
             fcp_g = f_cp.reshape(B, G, Gs, K_v, H, W)
             fsp_g = f_sp.reshape(B, G, Gs, K_v, H, W)
 
-            u_e = u_g[:, :, :, None, None, :, :]  # (B, G, Gv, 1, 1, H, W)
-            v_e = v_g_vec[:, :, :, None, None, :, :]
-            fcp_e = fcp_g[:, :, None, :, :, :, :]  # (B, G, 1, Gs, K_v, H, W)
-            fsp_e = fsp_g[:, :, None, :, :, :, :]
-            grad_comp = u_e * fcp_e + v_e * fsp_e  # (B, G, Gv, Gs, K_v, H, W)
-            perp_comp = v_e * fcp_e - u_e * fsp_e
-            adv_dc = torch.stack([grad_comp, perp_comp], dim=-1)
             W_vs2_g = self.W_vs2.reshape(G, Gs, Gv, K_v, 2)
-            # (G,Gs,Gv,Kv,2) x (B,G,Gv,Gs,Kv,H,W,2) -> (B,G,Gs,H,W)
-            y_s = y_s + torch.einsum("gcvkd,bgvckxyd->bgcxy", W_vs2_g, adv_dc).reshape(
-                B, -1, H, W
-            )
+            # Contract velocity over Gv first → (B, G, Gs, Kv, H, W)
+            # d=0: grad component weights, d=1: perp component weights
+            eff_u_grad = torch.einsum("gcvk,bgvxy->bgckxy", W_vs2_g[..., 0], u_g)
+            eff_v_grad = torch.einsum("gcvk,bgvxy->bgckxy", W_vs2_g[..., 0], v_g_vec)
+            eff_u_perp = torch.einsum("gcvk,bgvxy->bgckxy", W_vs2_g[..., 1], u_g)
+            eff_v_perp = torch.einsum("gcvk,bgvxy->bgckxy", W_vs2_g[..., 1], v_g_vec)
+
+            # Dot with filtered scalar gradients, sum over kernel basis
+            y_s = y_s + (
+                (eff_u_grad * fcp_g + eff_v_grad * fsp_g)
+                + (eff_v_perp * fcp_g - eff_u_perp * fsp_g)
+            ).sum(dim=3).reshape(B, -1, H, W)
 
         if self.bias_scalar is not None:
             y_s = y_s + self.bias_scalar.reshape(1, -1, 1, 1)
