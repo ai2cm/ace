@@ -1,8 +1,8 @@
-ocean_input_file_pattern: /global/cfs/cdirs/m4492/data/E3SMv3-v3.LR.piControl_bonus/archive/ocn/hist/v3.LR.piControl_bonus.mpaso.hist.am.timeSeriesStatsCustom
-ice_input_file_pattern: /global/cfs/cdirs/m4492/data/E3SMv3-v3.LR.piControl_bonus/archive/ice/hist/v3.LR.piControl_bonus.mpassi.hist.am.timeSeriesStatsCustom
-nc_grid_path: /pscratch/sd/e/elynnwu/e3smv3-couple-run/v3_LR_piControl_bonus_mpaso_vertical_info.nc
+ocean_input_file_pattern: /Users/elynnw/Downloads/2026-04-16-trial-run/fme_verify_data/legacy_rundir/SMS_P512.ne30pg2_r05_IcoswISC30E3r5.WCYCL1850.pm-cpu_gnu.allactive-fme_legacy_output.20260415_184918_5sgv84.mpaso.hist.am.timeSeriesStatsCustom
+ice_input_file_pattern: /Users/elynnw/Downloads/2026-04-16-trial-run/fme_verify_data/legacy_rundir/SMS_P512.ne30pg2_r05_IcoswISC30E3r5.WCYCL1850.pm-cpu_gnu.allactive-fme_legacy_output.20260415_184918_5sgv84.mpassi.hist.am.timeSeriesStatsDaily
+nc_grid_path: /Users/elynnw/Downloads/2026-04-16-trial-run/fme_verify_data/legacy_rundir/v3_LR_piControl_bonus_mpaso_vertical_info.nc
 reindex_time: True
-time_frequency: 5D
+time_frequency: 1D
 time_dimension: Time
 spatial_dimension: nCells
 vertical_layer_dimension: nVertLevels
@@ -29,9 +29,9 @@ ocean_variable_names:
  - timeCustom_avg_surfaceFrictionVelocity
  - xtime
 ice_variable_names:
- - timeCustom_avg_iceAreaCell
- - timeCustom_avg_iceVolumeCell
- - timeCustom_avg_snowVolumeCell
+ - timeDaily_avg_iceAreaCell
+ - timeDaily_avg_iceVolumeCell
+ - timeDaily_avg_snowVolumeCell
 add_sst: True
 renaming:
   Time: time
@@ -76,5 +76,5 @@ ocean_vertical_target_interface_levels:
   - 3380.0
   - 4620.0
   - 6380.0
-output_path: /pscratch/sd/e/elynnwu/e3smv3-couple-run/v3.LR.piControl_bonus/vertical_coarsened_test
-output_prefix: v3.LR.piControl_bonus.ocn.ice
+output_path: /Users/elynnw/Downloads/2026-04-16-trial-run/fme_verify_data/legacy_rundir/vertical_coarsened
+output_prefix: SMS_P512.ne30pg2_r05_IcoswISC30E3r5.WCYCL1850

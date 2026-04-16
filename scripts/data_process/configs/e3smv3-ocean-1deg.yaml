@@ -7,7 +7,7 @@ dataset_computation:
   nc_grid_path: not-used
   nc_mosaic_path: not-used
   nc_target_grid_path: not-used
-  ocean_dataset_nc_files: /pscratch/sd/e/elynnwu/e3smv3-couple-run/v3.LR.piControl_bonus/vertical_coarsened/1deg/*.nc
+  ocean_dataset_nc_files: /Users/elynnw/Downloads/2026-04-16-trial-run/fme_verify_data/legacy_rundir/vertical_coarsened/1deg/*.nc
   compute_e3sm_surface_downward_heat_flux: True
   sharding:
     time_dim: 50
@@ -33,8 +33,8 @@ dataset_computation:
     timeCustom_avg_windStressMeridional: tauuo
     timeCustom_avg_windStressZonal: tauvo
     timeCustom_avg_ssh: zos
-    timeCustom_avg_iceAreaCell: sea_ice_fraction
-    timeCustom_avg_iceVolumeCell: sea_ice_volume
+    timeDaily_avg_iceAreaCell: sea_ice_fraction
+    timeDaily_avg_iceVolumeCell: sea_ice_volume
     timeCustom_avg_rainFlux: rain_flux
     timeCustom_avg_snowFlux: snow_flux
     timeCustom_avg_frazilIceFreshwaterFlux: frazil_flux
@@ -43,12 +43,6 @@ dataset_computation:
     timeCustom_avg_longWaveHeatFluxDown: lw_heat_flux_down
     timeCustom_avg_shortWaveHeatFlux: sw_heat_flux
     nVertLevelsP1: depth_center
-  spatial_filter:
-    enabled: true
-    filter_scale: 4
-    exclude_from_filtering:
-      - timeCustom_avg_iceAreaCell
-      - timeCustom_avg_iceVolumeCell
   ocean_vertical_target_layer_levels:
   - 10.0
   - 25.0

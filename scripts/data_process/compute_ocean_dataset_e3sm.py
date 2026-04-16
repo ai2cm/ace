@@ -150,7 +150,7 @@ def construct_lazy_dataset(
     ds = rename_and_split_dataset_to_individual_layer(ds, config)
     ds = mask_out_sea_surface_height(ds, config)
     ds = get_vertical_coarsened_wetmask(ds, config)
-    ds = ensure_nans_outside_mask(ds, config)
+    # ds = ensure_nans_outside_mask(ds, config)
     ds = add_idepths(ds, config)
     ds = config.shift_timestamps(ds)
     ds = ds.astype(np.float32)
