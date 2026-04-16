@@ -45,15 +45,17 @@ class TestVectorDiscoNetwork:
         assert s_out.shape == (B, N_OUT_SCALARS, *IMG_SHAPE)
         assert v_out.shape == (B, N_OUT_VECTORS, *IMG_SHAPE, 2)
 
-    def test_zero_init_decoder(self):
-        """With zero-initialized decoder, initial output is zero."""
+    def test_vector_decoder_zero_init(self):
+        """Vector decoder is zero-init (identity under residual prediction)."""
         net = _make_network()
         B = 1
         scalars = torch.randn(B, N_IN_SCALARS, *IMG_SHAPE)
         vectors = torch.randn(B, N_IN_VECTORS, *IMG_SHAPE, 2)
         s_out, v_out = net(scalars, vectors)
-        assert s_out.abs().max() == 0.0
+        # Vector decoder is zero-init → zero output
         assert v_out.abs().max() == 0.0
+        # Scalar decoder has default init → nonzero output
+        assert s_out.abs().max() > 0.0
 
     def test_residual_blocks_false(self):
         """Network with residual_blocks=False runs without error."""
@@ -66,7 +68,7 @@ class TestVectorDiscoNetwork:
         assert v_out.shape == (B, N_OUT_VECTORS, *IMG_SHAPE, 2)
 
     def test_mlp_encoder(self):
-        """Network with scalar_encoder_layers=1 runs and produces zero init output."""
+        """Network with scalar_encoder_layers=1 runs correctly."""
         net = _make_network(scalar_encoder_layers=1)
         B = 1
         scalars = torch.randn(B, N_IN_SCALARS, *IMG_SHAPE)
@@ -74,9 +76,7 @@ class TestVectorDiscoNetwork:
         s_out, v_out = net(scalars, vectors)
         assert s_out.shape == (B, N_OUT_SCALARS, *IMG_SHAPE)
         assert v_out.shape == (B, N_OUT_VECTORS, *IMG_SHAPE, 2)
-        # Decoder last layer is zero-init, so output should be zero
-        assert s_out.abs().max() == 0.0
-        assert v_out.abs().max() == 0.0
+        assert v_out.abs().max() == 0.0  # vector decoder still zero-init
 
     def test_gaussian_input_output_variance(self):
         """With random decoder weights, outputs are well-behaved at 12 blocks.

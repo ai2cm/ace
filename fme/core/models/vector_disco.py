@@ -180,21 +180,12 @@ class VectorDiscoNetwork(nn.Module):
     def _init_weights(self):
         """Initialize weights for well-behaved forward pass.
 
-        Zero-initializes:
-        - Decoder weights (so initial network output is zero, enabling
-          residual prediction to start as identity)
-        - sv_product weights in each block (multiplicative term; random
-          init causes variance explosion through stacked blocks)
-        - MLP output layer in each block (residual branch; zero means
-          MLP initially contributes nothing)
+        The scalar decoder keeps its default (Kaiming) init so that
+        diagnostic variables (output-only, no residual) start with
+        nonzero predictions. The vector decoder is zero-initialized
+        so that wind predictions start as identity (input + 0 = input)
+        under residual prediction.
         """
-        # Zero-init the last Conv2d in the scalar decoder
-        for module in reversed(list(self.scalar_decoder.modules())):
-            if isinstance(module, nn.Conv2d):
-                nn.init.zeros_(module.weight)
-                if module.bias is not None:
-                    nn.init.zeros_(module.bias)
-                break
         nn.init.zeros_(self.vector_decoder.weight)
 
         for block in self.blocks:
