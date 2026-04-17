@@ -24,6 +24,20 @@ except ImportError:
 
 
 @dataclasses.dataclass
+class TimeSlice:
+    """
+    Optional time slice to apply before coarsening.
+
+    Attributes:
+        start: Start time (ISO 8601 string, e.g. "2000-01-01T00:00:00"). Inclusive.
+        stop: Stop time (ISO 8601 string). Inclusive.
+    """
+
+    start: str | None = None
+    stop: str | None = None
+
+
+@dataclasses.dataclass
 class TimeCoarsenConfig:
     """
     Configuration for time coarsening of a dataset.
@@ -58,6 +72,7 @@ class TimeCoarsenConfig:
     sharding: dict[str, int] | None = dataclasses.field(
         default_factory=lambda: {"time": 360}
     )
+    time_slice: TimeSlice = dataclasses.field(default_factory=TimeSlice)
 
 
 @dataclasses.dataclass
@@ -92,6 +107,9 @@ def _set_attributes(
     attributes["window_names"] = json.dumps(config.window_names)
     attributes["constant_prefixes"] = json.dumps(config.constant_prefixes)
     attributes["coarsen_factor"] = config.factor
+    if config.time_slice.start is not None or config.time_slice.stop is not None:
+        attributes["time_slice.start"] = str(config.time_slice.start)
+        attributes["time_slice.stop"] = str(config.time_slice.stop)
     history_entry = (
         f"Dataset coarsened by a factor of {config.factor} "
         "by scripts/data_process/time_coarsen.py."
@@ -108,6 +126,8 @@ def coarsen(ds: xr.Dataset, config: TimeCoarsenConfig) -> xr.Dataset:
 
     Works with both eager (numpy) and lazy (dask) arrays.
     """
+    if config.time_slice.start is not None or config.time_slice.stop is not None:
+        ds = ds.sel(time=slice(config.time_slice.start, config.time_slice.stop))
     constant_names = [
         name
         for name in ds.data_vars
