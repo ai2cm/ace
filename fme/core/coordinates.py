@@ -612,8 +612,8 @@ class LatLonCoordinates(HorizontalCoordinates):
     def __eq__(self, other) -> bool:
         if not isinstance(other, LatLonCoordinates):
             return False
-        lat_eq = torch.allclose(self.lat, other.lat)
-        lon_eq = torch.allclose(self.lon, other.lon)
+        lat_eq = torch.allclose(self.lat.cpu(), other.lat.cpu())
+        lon_eq = torch.allclose(self.lon.cpu(), other.lon.cpu())
         return lat_eq and lon_eq
 
     def __repr__(self) -> str:
