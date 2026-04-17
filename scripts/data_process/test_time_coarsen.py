@@ -134,7 +134,6 @@ def test_process_path_pair() -> None:
 
 
 def test_coarsen_time_slice() -> None:
-    # Dataset with 6 daily timesteps starting 2000-01-01 (simulating an offset start)
     times = xr.date_range("2000-01-01", periods=6, freq="1D")
     ds = xr.Dataset(
         {
