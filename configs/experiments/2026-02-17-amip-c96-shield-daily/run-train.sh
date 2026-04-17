@@ -6,7 +6,7 @@ SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the reposi
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=4
+N_GPUS=2
 
 cd "$REPO_ROOT"
 
@@ -58,7 +58,8 @@ run_training() {
 # run_training "train-amip-c96-shield-daily-lr1e-2-lrtune-v2.yaml" "train-amip-c96-shield-daily-lr1e-2-lrtune-v2"
 # run_training "train-amip-c96-shield-daily-lr1e-3-lrtune-v2-bootstrap.yaml" "train-amip-c96-shield-daily-lr1e-3-lrtune-v2-bootstrap"
 run_training "train-daily-era5-4deg-lrtune.yaml" "train-daily-era5-4deg-lrtune"
-run_training "train-daily-era5-1deg-lrtune.yaml" "train-daily-era5-1deg-lrtune"
+run_training "train-daily-era5-4deg-n1024-lrtune.yaml" "train-daily-era5-4deg-n1024-lrtune"
+# run_training "train-daily-era5-1deg-lrtune.yaml" "train-daily-era5-1deg-lrtune"
 # run_training "train-amip-c96-shield-daily-pos16.yaml" "train-amip-c96-shield-daily-pos16"
 # run_training "train-amip-c96-shield-daily-pos16-rsop.yaml" "train-amip-c96-shield-daily-pos16-rsop"
 # run_training "train-amip-c96-shield-daily-e1c7d2-pos16-rsop.yaml" "train-amip-c96-shield-daily-e1c7d2-pos16-rsop"
