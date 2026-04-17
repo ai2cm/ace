@@ -249,7 +249,7 @@ era5_1deg_stats_beaker_dataset:
 
 .PHONY: era5_1deg_16layer_stats_beaker_dataset
 era5_1deg_16layer_stats_beaker_dataset:
-	./compute_stats.sh --config configs/era5-1deg-16layer-1940-2025.yaml
+	./compute_stats.sh --config configs/era5-1deg-16layer-1940-2022.yaml
 
 .PHONY: compute_cm4_trial_run_atmosphere_dataset
 compute_cm4_trial_run_atmosphere_dataset:
