@@ -69,6 +69,24 @@ def _build_variable_loss_weight_tensor(
 
 
 @dataclasses.dataclass
+class LossWeightsConfig:
+    """
+    Configuration for loss weighting during training.
+
+    Parameters:
+        output_channels: Per-variable multiplicative weights applied to the loss.
+            Keys are variable names from out_names; variables not listed default to 1.0.
+        noise_weight_exponent: Exponent applied to the EDM noise-level loss weight
+            ``(sigma^2 + sigma_data^2) / (sigma * sigma_data)^2``. The default
+            of 1.0 gives the standard EDM weighting (~1/sigma^2 for small sigma).
+            Use values less than 1.0 to reduce relative weighting of low-noise steps.
+    """
+
+    output_channels: dict[str, float] = dataclasses.field(default_factory=dict)
+    noise_weight_exponent: float = 1.0
+
+
+@dataclasses.dataclass
 class PairedNormalizationConfig:
     fine: NormalizationConfig
     coarse: NormalizationConfig
@@ -117,9 +135,8 @@ class DiffusionModelConfig:
         use_fine_topography: Whether to use fine topography in the model.
         use_amp_bf16: Whether to use automatic mixed precision (bfloat16) in the
             UNetDiffusionModule.
-        loss_weights: Per-variable weights applied to the loss. Keys are
-            variable names from out_names and values are multiplicative
-            weights. Variables not listed default to 1.0.
+        loss_weights: Weighting configuration for the training loss, including
+            per-variable channel weights and the noise-level weight exponent.
         training_noise_distribution: Noise distribution to use during training.
         p_mean: The mean of noise distribution used during training.
             Deprecated. Use training_noise_distribution field instead.
@@ -141,7 +158,9 @@ class DiffusionModelConfig:
     predict_residual: bool
     use_fine_topography: bool = False
     use_amp_bf16: bool = False
-    loss_weights: dict[str, float] = dataclasses.field(default_factory=dict)
+    loss_weights: LossWeightsConfig = dataclasses.field(
+        default_factory=LossWeightsConfig
+    )
     training_noise_distribution: (
         LogNormalNoiseDistribution | LogUniformNoiseDistribution | None
     ) = None
@@ -339,7 +358,7 @@ class DiffusionModel:
         self.full_fine_coords = full_fine_coords.to(get_device())
         self.static_inputs = static_inputs.to_device() if static_inputs else None
         self._loss_weight_tensor = _build_variable_loss_weight_tensor(
-            config.loss_weights, config.out_names
+            config.loss_weights.output_channels, config.out_names
         )
 
     @property
@@ -429,7 +448,6 @@ class DiffusionModel:
         self,
         batch: PairedBatchData,
         optimizer: Optimization | NullOptimization,
-        loss_weight_exponent: float = 1.0,
     ) -> ModelOutputs:
         """Performs a denoising training step on a batch of data."""
         _static_inputs = self._subset_static_if_available(batch.coarse)
@@ -455,7 +473,7 @@ class DiffusionModel:
             targets_norm,
             self.config.noise_distribution,
             self.sigma_data,
-            loss_weight_exponent=loss_weight_exponent,
+            loss_weight_exponent=self.config.loss_weights.noise_weight_exponent,
         )
 
         denoised_norm = self.module(
