@@ -59,6 +59,15 @@ def _rename_normalizer(
     return StandardNormalizer(means=new_means, stds=new_stds)
 
 
+def _build_variable_loss_weight_tensor(
+    weights: dict[str, float], out_names: list[str]
+) -> torch.Tensor:
+    values = [weights.get(name, 1.0) for name in out_names]
+    return torch.tensor(values, dtype=torch.float32, device=get_device()).reshape(
+        1, len(out_names), 1, 1
+    )
+
+
 @dataclasses.dataclass
 class PairedNormalizationConfig:
     fine: NormalizationConfig
@@ -329,17 +338,8 @@ class DiffusionModel:
         self._channel_axis = -3
         self.full_fine_coords = full_fine_coords.to(get_device())
         self.static_inputs = static_inputs.to_device() if static_inputs else None
-        self._loss_weight_tensor = self._build_loss_weight_tensor(
+        self._loss_weight_tensor = _build_variable_loss_weight_tensor(
             config.loss_weights, config.out_names
-        )
-
-    @staticmethod
-    def _build_loss_weight_tensor(
-        weights: dict[str, float], out_names: list[str]
-    ) -> torch.Tensor:
-        values = [weights.get(name, 1.0) for name in out_names]
-        return torch.tensor(values, dtype=torch.float32, device=get_device()).reshape(
-            1, len(out_names), 1, 1
         )
 
     @property
@@ -461,7 +461,7 @@ class DiffusionModel:
         denoised_norm = self.module(
             conditioned_target.latents, inputs_norm, conditioned_target.sigma
         )
-        weighted_loss = (
+        weighted_loss = (  # has dims (batch, channels, lat, lon)
             conditioned_target.weight
             * self._loss_weight_tensor
             * self.loss(denoised_norm, targets_norm)
