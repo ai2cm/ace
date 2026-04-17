@@ -135,15 +135,20 @@ def coarsen(ds: xr.Dataset, config: TimeCoarsenConfig) -> xr.Dataset:
                 "which is not allowed."
             )
     ds_constants = ds[constant_names]
-    ds_snapshot = ds[config.snapshot_names].isel(
-        time=slice(config.factor - 1, None, config.factor)
-    )
-    ds_window = (
-        ds[config.window_names]
-        .coarsen(time=config.factor, boundary="trim")
-        .mean()
-        .drop("time")
-    )  # use time of snapshots
+    snapshot_slice = slice(config.factor - 1, None, config.factor)
+    if config.snapshot_names:
+        ds_snapshot = ds[config.snapshot_names].isel(time=snapshot_slice)
+    else:
+        ds_snapshot = xr.Dataset(coords={"time": ds.time.isel(time=snapshot_slice)})
+    if config.window_names:
+        ds_window = (
+            ds[config.window_names]
+            .coarsen(time=config.factor, boundary="trim")
+            .mean()
+            .drop("time")
+        )  # use time of snapshots
+    else:
+        ds_window = xr.Dataset()
     ds_coarsened = xr.merge([ds_snapshot, ds_window, ds_constants])
     _set_attributes(ds_coarsened, ds.attrs, config)
     return ds_coarsened
