@@ -74,7 +74,6 @@ def test_coarsen_empty_snapshot_names() -> None:
     )
     ds_out = coarsen(ds, config)
     expected_slice = slice(factor - 1, None, factor)
-    assert ds_out.sizes["time"] == len(ds.time) // factor
     xr.testing.assert_equal(ds_out["time"], ds["time"].isel(time=expected_slice))
     xr.testing.assert_equal(
         ds_out["DSWRFtoa"],
@@ -99,7 +98,6 @@ def test_coarsen_empty_window_names() -> None:
     )
     ds_out = coarsen(ds, config)
     expected_slice = slice(factor - 1, None, factor)
-    assert ds_out.sizes["time"] == len(ds.time) // factor
     xr.testing.assert_equal(ds_out["time"], ds["time"].isel(time=expected_slice))
     xr.testing.assert_equal(ds_out["temp"], ds["temp"].isel(time=expected_slice))
     assert "DSWRFtoa" not in ds_out
