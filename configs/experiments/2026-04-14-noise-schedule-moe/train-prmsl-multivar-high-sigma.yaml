@@ -1,9 +1,10 @@
-loss_weight_exponent: 0.75
 log_loss_vs_noise: true
 static_inputs:
   HGTsfc: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
   land_fraction: /climate-default/2025-11-19-X-SHiELD-AMIP-downscaling-land-fraction/3km/land_fraction.zarr
 model:
+  loss_weights:
+    noise_weight_exponent: 0.75
   use_amp_bf16: true
   out_names:
   - eastward_wind_at_ten_meters
@@ -19,13 +20,13 @@ model:
     type: MSE
   module:
     config:
-      model_channels: 128
+      model_channels: 64
       attn_resolutions: []
+      bottleneck_attention: false
       num_blocks: 1
       channel_mult_emb: 6
       channel_mult:
       - 1
-      - 2
       - 2
       - 2
       - 2
