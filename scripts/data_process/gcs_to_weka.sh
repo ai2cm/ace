@@ -17,18 +17,17 @@ Options:
   -h, --help  Show this help message and exit.
 
 Example:
-  $(basename "$0") gs://vcm-ml-intermediate/2024-03-01-era5-1deg/train.zarr
   $(basename "$0") gs://vcm-ml-intermediate/2024-03-01-era5-1deg/train.zarr /climate-default/my-data
 EOF
 }
 
-if [[ $# -lt 1 || "$1" == "-h" || "$1" == "--help" ]]; then
+if [[ $# -lt 2 || "$1" == "-h" || "$1" == "--help" ]]; then
     usage
     exit 0
 fi
 
 GS_PATH="$1"
-WEKA_PATH="${2:-/climate-default}"
+WEKA_PATH="$2"
 
 # Validate gs:// prefix
 if [[ "$GS_PATH" != gs://* ]]; then
