@@ -331,6 +331,7 @@ class Trainer:
 
         # set_epoch so the trial sees the same first N batches as the real epoch
         self.train_data.set_epoch(self._epochs_trained + 1)
+        self.valid_data.set_epoch(self._epochs_trained + 1)
         new_lr = run_lr_tuning_trial(
             train_data=self.train_data,
             valid_data=self.valid_data,
