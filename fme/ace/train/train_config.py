@@ -303,6 +303,11 @@ class TrainConfig:
                 "n_forward_steps must be specified in stepper_training "
                 "to determine data loading requirements."
             )
+        if self.stepper_training.n_forward_steps_schedule is None:
+            raise RuntimeError(
+                "expected n_forward_steps_schedule to be defined when "
+                "n_forward_steps is not None, is there a bug?"
+            )
 
     def set_random_seed(self):
         if self.seed is not None:
