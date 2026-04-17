@@ -17,23 +17,27 @@ time_coarsen:
     latitude: 180
     longitude: 360
   factor: 4
-  data_output_directory: gs://vcm-ml-intermediate/2026-03-19-era5-1deg-8layer-daily-1940-2025
-  stats_output_directory: gs://vcm-ml-intermediate/2026-03-19-era5-1deg-8layer-daily-stats-1990-2019
+  data_output_directory: gs://vcm-ml-intermediate/2026-04-17-era5-1deg-8layer-daily-1940-2025
+  stats_output_directory: gs://vcm-ml-intermediate/2026-04-17-era5-1deg-8layer-daily-stats-1990-2019
   snapshot_names:
     - DPT2m
     - PRESsfc
+    - Q10
     - Q200
     - Q2m
     - Q500
     - Q850
+    - TMP10
     - TMP200
     - TMP2m
     - TMP500
     - TMP850
+    - UGRD10
     - UGRD10m
     - UGRD200
     - UGRD500
     - UGRD850
+    - VGRD10
     - VGRD10m
     - VGRD200
     - VGRD500
@@ -54,6 +58,7 @@ time_coarsen:
     - eastward_wind_5
     - eastward_wind_6
     - eastward_wind_7
+    - h10
     - h1000
     - h200
     - h250
@@ -105,3 +110,5 @@ time_coarsen:
     - land_fraction
     - latitude
     - longitude
+  input_time_slice:  # ensures coarsened data starts on 1940-01-03T00:00:00
+    start: "1940-01-02T06:00:00"
