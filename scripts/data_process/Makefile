@@ -245,7 +245,7 @@ e3smv2_1deg_climSST_dataset:
 
 .PHONY: era5_1deg_stats_beaker_dataset
 era5_1deg_stats_beaker_dataset:
-	./compute_stats.sh --config configs/era5-1deg-8layer-1940-2022.yaml
+	./compute_stats.sh --config configs/era5-1deg-8layer-1940-2025.yaml
 
 .PHONY: era5_1deg_16layer_stats_beaker_dataset
 era5_1deg_16layer_stats_beaker_dataset:
