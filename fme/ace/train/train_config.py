@@ -298,9 +298,9 @@ class TrainConfig:
                 f"During training, experiment_dir must currently be a local "
                 f"directory, got {self.experiment_dir!r}."
             )
-        if self.stepper_training.train_n_forward_steps is None:
+        if self.stepper_training.n_forward_steps is None:
             raise ValueError(
-                "train_n_forward_steps must be specified in stepper_training "
+                "n_forward_steps must be specified in stepper_training "
                 "to determine data loading requirements."
             )
 
@@ -352,12 +352,12 @@ class TrainBuilders:
 
     def _get_n_forward_steps(self) -> int | IntSchedule:
         """Get n_forward_steps for data loading requirements."""
-        if self.config.stepper_training.train_n_forward_steps_schedule is None:
+        if self.config.stepper_training.n_forward_steps_schedule is None:
             raise ValueError(
-                "train_n_forward_steps must be specified in stepper_training "
+                "n_forward_steps must be specified in stepper_training "
                 "to determine data loading requirements."
             )
-        schedule = self.config.stepper_training.train_n_forward_steps_schedule
+        schedule = self.config.stepper_training.n_forward_steps_schedule
         return schedule.max_n_forward_steps
 
     def _get_train_window_data_requirements(self) -> DataRequirements:
