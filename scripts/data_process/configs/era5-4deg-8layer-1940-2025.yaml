@@ -102,5 +102,5 @@ time_coarsen:
     - land_fraction
     - latitude
     - longitude
-  time_slice:  # ensures coarsened data starts on 1940-01-03T00:00:00
+  input_time_slice:  # ensures coarsened data starts on 1940-01-03T00:00:00
     start: "1940-01-02T06:00:00"

@@ -133,7 +133,7 @@ def test_process_path_pair() -> None:
     assert len(ds_coarsened.attrs) == 6  # no unexpected attrs
 
 
-def test_coarsen_time_slice() -> None:
+def test_coarsen_input_time_slice() -> None:
     times = xr.date_range("2000-01-01", periods=6, freq="1D")
     ds = xr.Dataset(
         {
@@ -149,7 +149,7 @@ def test_coarsen_time_slice() -> None:
         snapshot_names=["temp"],
         window_names=["temp_tendency"],
         constant_prefixes=[],
-        time_slice=TimeSlice(start="2000-01-02"),
+        input_time_slice=TimeSlice(start="2000-01-02"),
     )
     ds_coarsened = coarsen(ds, config)
     # Slicing to start at Jan 2 gives [Jan 2..6] (5 times).
@@ -159,5 +159,4 @@ def test_coarsen_time_slice() -> None:
         ds_coarsened["time"],
         xr.DataArray(times[2::2], dims=["time"]),  # Jan 3, Jan 5
     )
-    assert ds_coarsened.attrs["time_slice.start"] == "2000-01-02"
-    assert ds_coarsened.attrs["time_slice.stop"] == "None"
+    assert "start='2000-01-02', stop=None" in ds_coarsened.attrs["history"]

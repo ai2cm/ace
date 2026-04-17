@@ -72,7 +72,7 @@ class TimeCoarsenConfig:
     sharding: dict[str, int] | None = dataclasses.field(
         default_factory=lambda: {"time": 360}
     )
-    time_slice: TimeSlice = dataclasses.field(default_factory=TimeSlice)
+    input_time_slice: TimeSlice = dataclasses.field(default_factory=TimeSlice)
 
 
 @dataclasses.dataclass
@@ -107,13 +107,21 @@ def _set_attributes(
     attributes["window_names"] = json.dumps(config.window_names)
     attributes["constant_prefixes"] = json.dumps(config.constant_prefixes)
     attributes["coarsen_factor"] = config.factor
-    if config.time_slice.start is not None or config.time_slice.stop is not None:
-        attributes["time_slice.start"] = str(config.time_slice.start)
-        attributes["time_slice.stop"] = str(config.time_slice.stop)
     history_entry = (
         f"Dataset coarsened by a factor of {config.factor} "
         "by scripts/data_process/time_coarsen.py."
     )
+    if (
+        config.input_time_slice.start is not None
+        or config.input_time_slice.stop is not None
+    ):
+        history_entry += (
+            f" Input was time-subsetted to start={config.input_time_slice.start!r}, "
+            f"stop={config.input_time_slice.stop!r} prior to coarsening. "
+            "The time bounds of the resulting dataset will likely differ slightly "
+            "from this slice. Input subsetting is typically used to facilitate "
+            "aligning the times of different coarsened datasets."
+        )
     if "history" in attributes:
         attributes["history"] = attributes["history"] + " " + history_entry
     else:
@@ -126,8 +134,13 @@ def coarsen(ds: xr.Dataset, config: TimeCoarsenConfig) -> xr.Dataset:
 
     Works with both eager (numpy) and lazy (dask) arrays.
     """
-    if config.time_slice.start is not None or config.time_slice.stop is not None:
-        ds = ds.sel(time=slice(config.time_slice.start, config.time_slice.stop))
+    if (
+        config.input_time_slice.start is not None
+        or config.input_time_slice.stop is not None
+    ):
+        ds = ds.sel(
+            time=slice(config.input_time_slice.start, config.input_time_slice.stop)
+        )
     constant_names = [
         name
         for name in ds.data_vars
