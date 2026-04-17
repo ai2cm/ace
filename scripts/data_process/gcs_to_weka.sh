@@ -3,7 +3,7 @@ set -e
 
 usage() {
     cat <<EOF
-Usage: $(basename "$0") GS_PATH [WEKA_PATH]
+Usage: $(basename "$0") GS_PATH WEKA_PATH
 
 Submits a Beaker/Gantry job that copies data from a Google Cloud Storage path
 to a local Weka directory.
