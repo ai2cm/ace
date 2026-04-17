@@ -156,7 +156,8 @@ def test_coarsen_time_slice() -> None:
     # factor=2 with trim → 2 output snapshots at indices 1 and 3 of the sliced
     # dataset, i.e. Jan 3 and Jan 5.
     xr.testing.assert_equal(
-        ds_coarsened["time"], xr.DataArray(times[2::2], dims=["time"])  # Jan 3, Jan 5
+        ds_coarsened["time"],
+        xr.DataArray(times[2::2], dims=["time"]),  # Jan 3, Jan 5
     )
     assert ds_coarsened.attrs["time_slice.start"] == "2000-01-02"
     assert ds_coarsened.attrs["time_slice.stop"] == "None"
