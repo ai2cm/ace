@@ -9,7 +9,7 @@ stats:
   data_type: ERA5
 time_coarsen:
   factor: 4
-  data_output_directory: gs://vcm-ml-intermediate/2026-04-17-era5-4deg-8layer-daily-1940-2022
+  data_output_directory: gs://vcm-ml-intermediate/2026-04-17-era5-4deg-8layer-daily-1940-2025
   stats_output_directory: gs://vcm-ml-intermediate/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019
   snapshot_names:
     - DPT2m
