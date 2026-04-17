@@ -2,7 +2,7 @@ import json
 
 import numpy as np
 import xarray as xr
-from time_coarsen import TimeCoarsenConfig, process_path_pair
+from time_coarsen import TimeCoarsenConfig, coarsen, process_path_pair
 from zarr.codecs import BloscCodec
 
 from fme.ace.testing import DimSize, DimSizes, get_nd_dataset
@@ -49,6 +49,60 @@ def write_v3_with_chunks(ds: xr.Dataset, path: str) -> None:
         encoding[name] = {"chunks": chunks, "compressor": compressor, "shards": shards}
 
     ds.to_zarr(path, mode="w", zarr_version=3, encoding=encoding)
+
+
+def _make_simple_dataset(n_times: int = 4) -> xr.Dataset:
+    return xr.Dataset(
+        {
+            "temp": (["time"], np.arange(n_times, dtype=float)),
+            "DSWRFtoa": (["time"], np.arange(n_times, dtype=float)),
+        },
+        coords={"time": xr.date_range("2000-01-01", periods=n_times, freq="6h")},
+    )
+
+
+def test_coarsen_empty_snapshot_names() -> None:
+    factor = 2
+    ds = _make_simple_dataset()
+    config = TimeCoarsenConfig(
+        factor=factor,
+        data_output_directory="",
+        stats_output_directory="",
+        snapshot_names=[],
+        window_names=["DSWRFtoa"],
+        constant_prefixes=[],
+    )
+    ds_out = coarsen(ds, config)
+    expected_slice = slice(factor - 1, None, factor)
+    assert ds_out.sizes["time"] == len(ds.time) // factor
+    xr.testing.assert_equal(ds_out["time"], ds["time"].isel(time=expected_slice))
+    xr.testing.assert_equal(
+        ds_out["DSWRFtoa"],
+        ds["DSWRFtoa"]
+        .coarsen(time=factor, boundary="trim")
+        .mean()
+        .assign_coords(time=ds["time"].isel(time=expected_slice)),
+    )
+    assert "temp" not in ds_out
+
+
+def test_coarsen_empty_window_names() -> None:
+    factor = 2
+    ds = _make_simple_dataset()
+    config = TimeCoarsenConfig(
+        factor=factor,
+        data_output_directory="",
+        stats_output_directory="",
+        snapshot_names=["temp"],
+        window_names=[],
+        constant_prefixes=[],
+    )
+    ds_out = coarsen(ds, config)
+    expected_slice = slice(factor - 1, None, factor)
+    assert ds_out.sizes["time"] == len(ds.time) // factor
+    xr.testing.assert_equal(ds_out["time"], ds["time"].isel(time=expected_slice))
+    xr.testing.assert_equal(ds_out["temp"], ds["temp"].isel(time=expected_slice))
+    assert "DSWRFtoa" not in ds_out
 
 
 def test_process_path_pair() -> None:
