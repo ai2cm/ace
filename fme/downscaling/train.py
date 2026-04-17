@@ -183,7 +183,6 @@ class Trainer:
             outputs = self.model.train_on_batch(
                 batch,
                 self.optimization,
-                loss_weight_exponent=self.config.loss_weight_exponent,
             )
             self.ema(self.model.modules)
             with torch.no_grad():
@@ -261,7 +260,6 @@ class Trainer:
                 outputs = self.model.train_on_batch(
                     batch,
                     self.null_optimization,
-                    loss_weight_exponent=self.config.loss_weight_exponent,
                 )
                 validation_aggregator.record_batch(
                     outputs=outputs,
