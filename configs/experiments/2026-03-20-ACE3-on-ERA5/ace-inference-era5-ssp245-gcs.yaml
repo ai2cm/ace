@@ -14,7 +14,7 @@ initial_condition:
       - '2016-01-01T00:00:00'
 forcing_loader:
   dataset:
-    data_path: /climate-default/2026-04-07-cm4-ssp245-ACE-forcing-dataset
+    data_path: /climate-default
     file_pattern: 2026-04-07-cm4-ssp245-ACE-forcing-dataset.zarr
     engine: zarr
   num_data_workers: 8
