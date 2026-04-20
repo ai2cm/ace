@@ -100,7 +100,11 @@ class _SigmaDispatchModule:
     """
     Routes ``net(x, x_lr, sigma)`` to the expert whose inclusive sigma range
     contains ``sigma``. At a boundary shared by two experts, the one with the
-    smaller ``sigma_max`` (lower-noise segment) is used.
+    smaller ``sigma_max`` (lower-noise segment) is used. If sigma is outside
+    the range of all experts, the nearest boundary expert is used.
+
+    Assumes the sigma ranges and corresponding modules are sorted by
+    sigma_min ascending.
     """
 
     def __init__(
@@ -118,6 +122,8 @@ class _SigmaDispatchModule:
                 strict=True,
             )
         )
+        self._min_sigma = sigma_ranges[0][0]
+        self._max_sigma = sigma_ranges[-1][1]
 
     def __call__(
         self,
@@ -125,22 +131,22 @@ class _SigmaDispatchModule:
         x_lr: torch.Tensor,
         sigma: torch.Tensor,
     ) -> torch.Tensor:
-        s = float(sigma.detach().float().cpu().reshape(-1)[0].item())
+        s = float(sigma.item())
         candidates: list[tuple[float, float, torch.nn.Module]] = [
-            (lo, hi, mod) for lo, hi, mod in self._entries if lo <= s <= hi
+            (lo, hi, module) for lo, hi, module in self._entries if lo <= s <= hi
         ]
         if not candidates:
             # Clamp to the nearest boundary expert when sigma falls outside
             # all registered ranges (below the global min or above the global max).
             if s < min(lo for lo, _, _ in self._entries):
-                _, _, mod = min(self._entries, key=lambda t: t[0])
-                return mod(x, x_lr, sigma)
+                _, _, module = self._entries[0]
+                return module(x, x_lr, sigma)
             else:
-                _, _, mod = max(self._entries, key=lambda t: t[1])
-                return mod(x, x_lr, sigma)
-        # Prefer the expert with the smallest sigma_max (lower-noise range).
-        _lo, _hi, mod = min(candidates, key=lambda t: (t[1], t[0]))
-        return mod(x, x_lr, sigma)
+                _, _, module = self._entries[-1]
+                return module(x, x_lr, sigma)
+        # if on boundary, uses expert with the smallest sigma_max
+        _lo, _hi, module = candidates[0]
+        return module(x, x_lr, sigma)
 
 
 @dataclasses.dataclass
