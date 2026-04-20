@@ -13,7 +13,7 @@ source "$SCRIPT_DIR/lib.sh"
 if [[ "$#" -lt 2 ]]; then
   echo "Usage: $0 <experiment_dir> <config_subdirectory> [--dry-run]"
   echo "  - <experiment_dir>: Path to experiment directory (e.g., experiments/2025-08-08-jamesd/coupled or experiments/2025-08-08-jamesd/uncoupled)"
-  echo "  - <config_subdirectory>: Subdirectory containing the inference config files (evaluator-config-*.yaml)"
+  echo "  - <config_subdirectory>: Subdirectory containing the inference config files (inference-config-*.yaml)"
   echo "  - --dry-run: Preview actions without launching jobs"
   exit 1
 fi
@@ -40,7 +40,7 @@ fi
 
 # Construct full paths
 FULL_EXPERIMENT_DIR="$REPO_ROOT/$EXPERIMENT_DIR"
-INPUT_PATH="$FULL_EXPERIMENT_DIR/$CONFIG_SUBDIR/experiments-inference.txt"
+INPUT_PATH="$FULL_EXPERIMENT_DIR/$CONFIG_SUBDIR/experiments.txt"
 
 # Print dry-run header (no stats for inference)
 if [[ "$DRY_RUN" == "true" ]]; then
@@ -91,9 +91,9 @@ while read TRAIN_EXPER; do
     # Derive config tag and filename from STATUS
     # Example: if STATUS is "run_ICx1"
     # CURRENT_CONFIG_TAG becomes "ICx1"
-    # CURRENT_CONFIG_FILENAME becomes "evaluator-config-ICx1.yaml" (shared naming with eval workflow)
+    # CURRENT_CONFIG_FILENAME becomes "inference-config-ICx1.yaml"
     CURRENT_CONFIG_TAG=${STATUS#run_}
-    CURRENT_CONFIG_FILENAME="evaluator-config-${CURRENT_CONFIG_TAG}.yaml"
+    CURRENT_CONFIG_FILENAME="inference-config-${CURRENT_CONFIG_TAG}.yaml"
 
     JOB_GROUP="${JOB_GROUP}-inference_${CKPT}-${CURRENT_CONFIG_TAG}"
 

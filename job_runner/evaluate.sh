@@ -13,7 +13,7 @@ source "$SCRIPT_DIR/lib.sh"
 if [[ "$#" -lt 2 ]]; then
   echo "Usage: $0 <experiment_dir> <config_subdirectory> [--dry-run]"
   echo "  - <experiment_dir>: Path to experiment directory (e.g., experiments/2025-08-08-jamesd/coupled or experiments/2025-08-08-jamesd/uncoupled)"
-  echo "  - <config_subdirectory>: Subdirectory containing the evaluator config files"
+  echo "  - <config_subdirectory>: Subdirectory containing the evaluator config files (evaluator-config-*.yaml)"
   echo "  - --dry-run: Preview actions without launching jobs"
   exit 1
 fi
