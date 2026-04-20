@@ -189,8 +189,6 @@ class TrainConfig:
             used to select checkpoints, but is used to provide metrics.
         stepper_training: Training-specific configuration including loss, ensemble
             settings, parameter initialization, and forward step scheduling.
-        n_forward_steps: Number of forward steps during training. Cannot be given
-            at the same time as train_n_forward_steps in stepper_training.
         train_aggregator: Configuration for the train aggregator.
         seed: Random seed for reproducibility. If set, is used for all types of
             randomization, including data shuffling and model initialization.
@@ -245,7 +243,6 @@ class TrainConfig:
     stepper_training: TrainStepperConfig = dataclasses.field(
         default_factory=lambda: TrainStepperConfig()
     )
-    n_forward_steps: int | None = None
     train_aggregator: TrainAggregatorConfig = dataclasses.field(
         default_factory=lambda: TrainAggregatorConfig()
     )
@@ -272,14 +269,6 @@ class TrainConfig:
     resume_results: ResumeResultsConfig | None = None
 
     def __post_init__(self):
-        if (
-            self.stepper_training.train_n_forward_steps is not None
-            and self.n_forward_steps is not None
-        ):
-            raise ValueError(
-                "stepper_training.train_n_forward_steps may not be given at the same "
-                "time as n_forward_steps at the top level"
-            )
         if self.train_loader.using_labels != self.validation_loader.using_labels:
             raise ValueError(
                 "train_loader and validation_loader must both use labels or both not "
@@ -308,6 +297,16 @@ class TrainConfig:
             raise ValueError(
                 f"During training, experiment_dir must currently be a local "
                 f"directory, got {self.experiment_dir!r}."
+            )
+        if self.stepper_training.n_forward_steps is None:
+            raise ValueError(
+                "n_forward_steps must be specified in stepper_training "
+                "to determine data loading requirements."
+            )
+        if self.stepper_training.n_forward_steps_schedule is None:
+            raise RuntimeError(
+                "expected n_forward_steps_schedule to be defined when "
+                "n_forward_steps is not None, is there a bug?"
             )
 
     def set_random_seed(self):
@@ -358,13 +357,13 @@ class TrainBuilders:
 
     def _get_n_forward_steps(self) -> int | IntSchedule:
         """Get n_forward_steps for data loading requirements."""
-        schedule = self.config.stepper_training.train_n_forward_steps_schedule
-        if schedule is not None:
-            return schedule.max_n_forward_steps
-        assert isinstance(
-            self.config.n_forward_steps, int
-        )  # this is already validated in TrainConfig.__post_init__
-        return self.config.n_forward_steps
+        if self.config.stepper_training.n_forward_steps_schedule is None:
+            raise ValueError(
+                "n_forward_steps must be specified in stepper_training "
+                "to determine data loading requirements."
+            )
+        schedule = self.config.stepper_training.n_forward_steps_schedule
+        return schedule.max_n_forward_steps
 
     def _get_train_window_data_requirements(self) -> DataRequirements:
         n_forward_steps = self._get_n_forward_steps()

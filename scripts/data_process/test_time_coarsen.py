@@ -2,7 +2,7 @@ import json
 
 import numpy as np
 import xarray as xr
-from time_coarsen import TimeCoarsenConfig, process_path_pair
+from time_coarsen import TimeCoarsenConfig, TimeSlice, coarsen, process_path_pair
 from zarr.codecs import BloscCodec
 
 from fme.ace.testing import DimSize, DimSizes, get_nd_dataset
@@ -131,3 +131,32 @@ def test_process_path_pair() -> None:
     )
     assert ds_coarsened.attrs["coarsen_factor"] == config.factor
     assert len(ds_coarsened.attrs) == 6  # no unexpected attrs
+
+
+def test_coarsen_input_time_slice() -> None:
+    times = xr.date_range("2000-01-01", periods=6, freq="1D")
+    ds = xr.Dataset(
+        {
+            "temp": xr.DataArray(np.arange(6.0), dims=["time"]),
+            "temp_tendency": xr.DataArray(np.arange(6.0), dims=["time"]),
+        },
+        coords={"time": times},
+    )
+    config = TimeCoarsenConfig(
+        factor=2,
+        data_output_directory="",
+        stats_output_directory="",
+        snapshot_names=["temp"],
+        window_names=["temp_tendency"],
+        constant_prefixes=[],
+        input_time_slice=TimeSlice(start="2000-01-02"),
+    )
+    ds_coarsened = coarsen(ds, config)
+    # Slicing to start at Jan 2 gives [Jan 2..6] (5 times).
+    # factor=2 with trim → 2 output snapshots at indices 1 and 3 of the sliced
+    # dataset, i.e. Jan 3 and Jan 5.
+    xr.testing.assert_equal(
+        ds_coarsened["time"],
+        xr.DataArray(times[2::2], dims=["time"]),  # Jan 3, Jan 5
+    )
+    assert "start='2000-01-02', stop=None" in ds_coarsened.attrs["history"]
