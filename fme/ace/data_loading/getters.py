@@ -49,8 +49,13 @@ def _get_sampler(
 ) -> torch.utils.data.Sampler:
     dist = Distributed.get_instance()
     if sample_with_replacement_dataset_size is not None:
+        dist.require_no_spatial_parallelism(
+            "sample_with_replacement is not supported with spatial "
+            "parallelism. Spatial co-ranks would draw different samples, "
+            "producing corrupted data after scatter_spatial reassembly."
+        )
         local_sample_with_replacement_dataset_size = (
-            sample_with_replacement_dataset_size // dist.world_size
+            sample_with_replacement_dataset_size // dist.total_data_parallel_ranks
         )
         sampler = torch.utils.data.RandomSampler(
             dataset,

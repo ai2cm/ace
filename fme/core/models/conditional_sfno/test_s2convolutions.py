@@ -107,8 +107,6 @@ def test_spectral_conv_s2_lora():
         inverse_transform=isht,
         in_channels=in_channels,
         out_channels=out_channels,
-        operator_type="dhconv",
-        use_tensorly=False,
     )
     assert conv1.lora_A is None
     assert conv1.lora_B is None
@@ -117,8 +115,6 @@ def test_spectral_conv_s2_lora():
         inverse_transform=isht,
         in_channels=in_channels,
         out_channels=out_channels,
-        operator_type="dhconv",
-        use_tensorly=False,
         lora_rank=4,
         lora_alpha=8,
     )

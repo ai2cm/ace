@@ -12,6 +12,7 @@ from torch.utils.data import default_collate
 
 from fme.core.dataset.dataset import DatasetItem
 from fme.core.device import get_device
+from fme.core.distributed import Distributed
 from fme.core.labels import BatchLabels, LabelEncoding
 from fme.core.tensors import repeat_interleave_batch_dim, unfold_ensemble_dim
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
@@ -168,6 +169,18 @@ class BatchData:
             horizontal_dims=self.horizontal_dims,
             epoch=self.epoch,
             labels=self.labels.to(device) if self.labels is not None else None,
+            n_ensemble=self.n_ensemble,
+        )
+
+    def scatter_spatial(self, global_img_shape: tuple[int, int]) -> "BatchData":
+        """Slice data tensors to the local spatial chunk."""
+        dist = Distributed.get_instance()
+        return self.__class__(
+            data=dist.scatter_spatial(dict(self.data), global_img_shape),
+            time=self.time,
+            horizontal_dims=self.horizontal_dims,
+            epoch=self.epoch,
+            labels=self.labels,
             n_ensemble=self.n_ensemble,
         )
 

@@ -11,6 +11,7 @@ from fme.ace.data_loading.batch_data import PairedData, PrognosticState
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.diagnostics import get_reduced_diagnostics, write_reduced_diagnostics
+from fme.core.fill import SmoothFloodFill
 from fme.core.generics.aggregator import (
     InferenceAggregatorABC,
     InferenceLog,
@@ -355,9 +356,11 @@ class InferenceEvaluatorAggregator(
                     )
                 )
         try:
+            flood_fill = SmoothFloodFill(num_steps=4)
             self._aggregators["power_spectrum"] = (
                 PairedSphericalPowerSpectrumAggregator(
                     gridded_operations=ops,
+                    nan_fill_fn=flood_fill,
                     report_plot=True,
                 )
             )

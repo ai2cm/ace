@@ -168,14 +168,3 @@ class DistributedBackend(ABC):
     def zonal_mean(self, data: torch.Tensor) -> torch.Tensor:
         """Compute the zonal mean (mean over longitude dimension)."""
         ...
-
-    @abstractmethod
-    def gradient_magnitude_percent_diff(
-        self,
-        truth: torch.Tensor,
-        predicted: torch.Tensor,
-        weights: torch.Tensor,
-        dim: tuple[int, ...],
-    ) -> torch.Tensor:
-        """Compute percent difference of weighted mean gradient magnitude."""
-        ...
