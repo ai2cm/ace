@@ -4,7 +4,6 @@ validate_using_ema: true
 ema:
   decay: 0.999
 max_epochs: 50
-n_forward_steps: 2
 inference:
   n_forward_steps: 28810
   forward_steps_in_memory: 43
@@ -83,6 +82,7 @@ optimization:
     fused: true
     weight_decay: 0.01
 stepper_training:
+  n_forward_steps: 2
   loss:
     type: MSE
     weights:

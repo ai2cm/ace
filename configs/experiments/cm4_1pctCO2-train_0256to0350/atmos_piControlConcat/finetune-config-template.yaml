@@ -4,7 +4,6 @@ validate_using_ema: true
 ema:
   decay: 0.999
 max_epochs: 20
-n_forward_steps: <N_FORWARD_STEPS>
 inference:
   n_forward_steps: 28810
   forward_steps_in_memory: 43
@@ -99,5 +98,6 @@ optimization:
     fused: true
     weight_decay: 0.01
 stepper_training:
+  n_forward_steps: <N_FORWARD_STEPS>
   parameter_init:
     weights_path: /ckpt.tar
