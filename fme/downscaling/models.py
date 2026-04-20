@@ -523,38 +523,38 @@ class DiffusionModel:
             latent_steps=[],
         )
 
-    @torch.no_grad()
-    def generate(
+    def prepare_generation_inputs(
         self,
         coarse_data: TensorMapping,
         static_inputs: StaticInputs | None,
-        n_samples: int = 1,
-    ) -> tuple[TensorDict, torch.Tensor, list[torch.Tensor]]:
-        # Internal method; external callers should use generate_on_batch /
-        # generate_on_batch_no_target.
-        inputs_ = self._get_input_from_coarse(coarse_data, static_inputs)
-        # expand samples and fold to
-        # [batch * n_samples, output_channels, height, width]
-        inputs_ = _repeat_batch_by_samples(inputs_, n_samples)
-        coarse_input_shape = next(iter(coarse_data.values())).shape[-2:]
+        n_samples: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Normalize coarse input and build random latents for generation.
 
+        Returns:
+            inputs: Normalized (and optionally interpolated) coarse input,
+                repeated ``n_samples`` times along the batch dimension.
+            latents: Random noise tensor shaped for the fine output grid.
+        """
+        inputs = self._get_input_from_coarse(coarse_data, static_inputs)
+        inputs = _repeat_batch_by_samples(inputs, n_samples)
+        coarse_input_shape = next(iter(coarse_data.values())).shape[-2:]
         outputs_shape = (
-            inputs_.shape[0],
+            inputs.shape[0],
             len(self.out_packer.names),
             *self._get_fine_shape(coarse_input_shape),
         )
         latents = torch.randn(outputs_shape).to(device=get_device())
+        return inputs, latents
 
-        generated_norm, latent_steps = edm_sampler(
-            self.module,
-            latents,
-            inputs_,
-            S_churn=self.config.churn,
-            sigma_min=self.config.sigma_min,
-            sigma_max=self.config.sigma_max,
-            num_steps=self.config.num_diffusion_generation_steps,
-        )
-
+    def postprocess_generated(
+        self,
+        generated_norm: torch.Tensor,
+        coarse_data: TensorMapping,
+        n_samples: int,
+        latent_steps: list[torch.Tensor],
+    ) -> tuple[TensorDict, torch.Tensor, list[torch.Tensor]]:
+        """Add residual, separate samples, and denormalize sampler output."""
         if self.config.predict_residual:
             base_prediction = interpolate(
                 self.out_packer.pack(
@@ -568,7 +568,6 @@ class DiffusionModel:
             generated_norm = generated_norm + _repeat_batch_by_samples(
                 base_prediction, n_samples
             )
-
         generated_norm_reshaped = _separate_interleaved_samples(
             generated_norm, n_samples
         )
@@ -576,6 +575,29 @@ class DiffusionModel:
             self.out_packer.unpack(generated_norm_reshaped, axis=self._channel_axis)
         )
         return generated, generated_norm, latent_steps
+
+    @torch.no_grad()
+    def generate(
+        self,
+        coarse_data: TensorMapping,
+        static_inputs: StaticInputs | None,
+        n_samples: int = 1,
+    ) -> tuple[TensorDict, torch.Tensor, list[torch.Tensor]]:
+        inputs, latents = self.prepare_generation_inputs(
+            coarse_data, static_inputs, n_samples
+        )
+        generated_norm, latent_steps = edm_sampler(
+            self.module,
+            latents,
+            inputs,
+            S_churn=self.config.churn,
+            sigma_min=self.config.sigma_min,
+            sigma_max=self.config.sigma_max,
+            num_steps=self.config.num_diffusion_generation_steps,
+        )
+        return self.postprocess_generated(
+            generated_norm, coarse_data, n_samples, latent_steps
+        )
 
     @torch.no_grad()
     def generate_on_batch_no_target(
