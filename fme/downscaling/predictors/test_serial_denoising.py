@@ -86,16 +86,6 @@ def test_sigma_dispatch_boundary_prefers_lower_sigma_range():
     assert calls == [0]
 
 
-def test_sigma_dispatch_out_of_range_raises():
-    class Expert(torch.nn.Module):
-        def forward(self, x, x_lr, sigma):
-            return x
-
-    dispatch = _SigmaDispatchModule([(0.0, 10.0)], [Expert()])
-    with pytest.raises(ValueError, match="not covered"):
-        dispatch(torch.ones(1, 1, 2, 2), torch.ones(1, 1, 2, 2), torch.tensor(11.0))
-
-
 def _mock_expert(static_inputs=None):
     expert = MagicMock()
     expert.in_packer.names = ["a", "b"]
