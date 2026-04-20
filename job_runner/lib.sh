@@ -160,7 +160,7 @@ git_commit_and_push() {
 run_gantry_training_job() {
     local REPO_ROOT=$(git rev-parse --show-toplevel)
     local DESCRIPTION="${1:-Training job}"
-    local PREEMPTIBLE="${PREEMPTIBLE:---preemptible}"
+    local PREEMPTIBLE="${PREEMPTIBLE:---min-runtime 0}"
 
     # Build override string
     local OVERRIDE=""
