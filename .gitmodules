@@ -1,0 +1,3 @@
+[submodule "FastGen"]
+	path = FastGen
+	url = https://github.com/NVlabs/FastGen

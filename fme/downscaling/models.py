@@ -14,6 +14,7 @@ from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.packer import Packer
 from fme.core.typing_ import TensorDict, TensorMapping
+from fme.downscaling.condition import build_condition_tensor
 from fme.downscaling.data import (
     BatchData,
     ClosedInterval,
@@ -425,31 +426,16 @@ class DiffusionModel:
     def _get_input_from_coarse(
         self, coarse: TensorMapping, static_inputs: StaticInputs | None
     ) -> torch.Tensor:
-        inputs = filter_tensor_mapping(coarse, self.in_packer.names)
-        normalized = self.in_packer.pack(
-            self.normalizer.coarse.normalize(inputs), axis=self._channel_axis
+        return build_condition_tensor(
+            coarse=coarse,
+            packer=self.in_packer,
+            coarse_normalizer=self.normalizer.coarse,
+            downscale_factor=self.downscale_factor,
+            use_fine_topography=self.config.use_fine_topography,
+            interpolate_input=bool(self.config._interpolate_input),
+            static_inputs=static_inputs,
+            channel_axis=self._channel_axis,
         )
-        interpolated = interpolate(normalized, self.downscale_factor)
-
-        if self.config.use_fine_topography and static_inputs is not None:
-            expected_shape = interpolated.shape[-2:]
-            if static_inputs.shape != expected_shape:
-                raise ValueError(
-                    f"Subsetted static input shape {static_inputs.shape} does not "
-                    f"match expected fine spatial shape {expected_shape}."
-                )
-            n_batches = normalized.shape[0]
-            # Join normalized static inputs to input (see dataset for details)
-            fields: list[torch.Tensor] = [interpolated]
-            for field in static_inputs.fields:
-                static_field = field.data.unsqueeze(0).repeat(n_batches, 1, 1)
-                static_field = static_field.unsqueeze(self._channel_axis)
-                fields.append(static_field)
-            interpolated = torch.concat(fields, dim=self._channel_axis)
-
-        if self.config._interpolate_input:
-            return interpolated
-        return normalized
 
     def train_on_batch(
         self,
