@@ -95,7 +95,7 @@ while read TRAIN_EXPER; do
     CURRENT_CONFIG_TAG=${STATUS#run_}
     CURRENT_CONFIG_FILENAME="inference-config-${CURRENT_CONFIG_TAG}.yaml"
 
-    JOB_GROUP="${JOB_GROUP}-inference_${CKPT}-${CURRENT_CONFIG_TAG}"
+    JOB_GROUP="${JOB_GROUP}-inf_${CKPT}-${CURRENT_CONFIG_TAG}"
 
     # Construct JOB_NAME using TAG if present
     if [[ -n "$TAG" ]]; then
