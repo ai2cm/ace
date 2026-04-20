@@ -83,6 +83,19 @@ def _validate_experts_compatible(experts: list[DiffusionModel]) -> None:
             raise ValueError(
                 "All experts must share the same predict_residual setting."
             )
+        if (m.static_inputs is None) != (primary.static_inputs is None):
+            raise ValueError(
+                "All experts must either have static_inputs=None or all "
+                "must have static_inputs; got a mix."
+            )
+        if (
+            m.static_inputs is not None
+            and primary.static_inputs is not None
+            and m.static_inputs.coords != primary.static_inputs.coords
+        ):
+            raise ValueError(
+                "All experts must share the same static_inputs coordinates."
+            )
 
 
 class _SigmaDispatchModule:

@@ -3,10 +3,12 @@ from unittest.mock import MagicMock
 import pytest
 import torch
 
+from fme.core.coordinates import LatLonCoordinates
 from fme.downscaling.predictors.serial_denoising import (
     DenoisingMoECheckpointConfig,
     DenoisingRangeModelConfig,
     _SigmaDispatchModule,
+    _validate_experts_compatible,
     _validate_sigma_ranges,
 )
 
@@ -92,3 +94,55 @@ def test_sigma_dispatch_out_of_range_raises():
     dispatch = _SigmaDispatchModule([(0.0, 10.0)], [Expert()])
     with pytest.raises(ValueError, match="not covered"):
         dispatch(torch.ones(1, 1, 2, 2), torch.ones(1, 1, 2, 2), torch.tensor(11.0))
+
+
+def _mock_expert(static_inputs=None):
+    expert = MagicMock()
+    expert.in_packer.names = ["a", "b"]
+    expert.out_packer.names = ["c"]
+    expert.coarse_shape = (4, 8)
+    expert.downscale_factor = 4
+    expert.config.predict_residual = False
+    expert.static_inputs = static_inputs
+    return expert
+
+
+def test_validate_experts_compatible_mixed_static_inputs_raises():
+    e0 = _mock_expert(static_inputs=None)
+    e1 = _mock_expert(static_inputs=MagicMock())
+    with pytest.raises(ValueError, match="static_inputs"):
+        _validate_experts_compatible([e0, e1])
+
+
+def test_validate_experts_compatible_mismatched_static_coords_raises():
+    si0 = MagicMock()
+    si0.coords = LatLonCoordinates(
+        lat=torch.linspace(-90, 90, 16), lon=torch.linspace(0, 360, 32)
+    )
+    si1 = MagicMock()
+    si1.coords = LatLonCoordinates(
+        lat=torch.linspace(-90, 90, 8), lon=torch.linspace(0, 360, 16)
+    )
+    e0 = _mock_expert(static_inputs=si0)
+    e1 = _mock_expert(static_inputs=si1)
+    with pytest.raises(ValueError, match="static_inputs coordinates"):
+        _validate_experts_compatible([e0, e1])
+
+
+def test_validate_experts_compatible_matching_static_inputs():
+    coords = LatLonCoordinates(
+        lat=torch.linspace(-90, 90, 16), lon=torch.linspace(0, 360, 32)
+    )
+    si0 = MagicMock()
+    si0.coords = coords
+    si1 = MagicMock()
+    si1.coords = coords
+    e0 = _mock_expert(static_inputs=si0)
+    e1 = _mock_expert(static_inputs=si1)
+    _validate_experts_compatible([e0, e1])
+
+
+def test_validate_experts_compatible_both_none_static_inputs():
+    e0 = _mock_expert(static_inputs=None)
+    e1 = _mock_expert(static_inputs=None)
+    _validate_experts_compatible([e0, e1])
