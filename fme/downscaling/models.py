@@ -552,8 +552,7 @@ class DiffusionModel:
         generated_norm: torch.Tensor,
         coarse_data: TensorMapping,
         n_samples: int,
-        latent_steps: list[torch.Tensor],
-    ) -> tuple[TensorDict, torch.Tensor, list[torch.Tensor]]:
+    ) -> tuple[TensorDict, torch.Tensor]:
         """Add residual, separate samples, and denormalize sampler output."""
         if self.config.predict_residual:
             base_prediction = interpolate(
@@ -574,7 +573,7 @@ class DiffusionModel:
         generated = self.normalizer.fine.denormalize(
             self.out_packer.unpack(generated_norm_reshaped, axis=self._channel_axis)
         )
-        return generated, generated_norm, latent_steps
+        return generated, generated_norm
 
     @torch.no_grad()
     def generate(
@@ -595,9 +594,10 @@ class DiffusionModel:
             sigma_max=self.config.sigma_max,
             num_steps=self.config.num_diffusion_generation_steps,
         )
-        return self.postprocess_generated(
-            generated_norm, coarse_data, n_samples, latent_steps
+        generated, generated_norm = self.postprocess_generated(
+            generated_norm, coarse_data, n_samples
         )
+        return generated, generated_norm, latent_steps
 
     @torch.no_grad()
     def generate_on_batch_no_target(
