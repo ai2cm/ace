@@ -48,7 +48,7 @@ class _TrackedExpert(torch.nn.Module):
 
     def forward(self, x, x_lr, sigma):
         self._calls.append(self.which)
-        return x * 0 + float(self.which)
+        return float(self.which)
 
 
 def _two_expert_dispatch():
@@ -63,9 +63,9 @@ def test_sigma_dispatch_routes_to_correct_expert():
     dispatch, calls = _two_expert_dispatch()
     x = torch.ones(1, 1, 4, 4)
     out_high = dispatch(x, x, torch.tensor(5.0))
-    assert out_high.mean().item() == 0.0
+    assert out_high == 0.0
     out_low = dispatch(x, x, torch.tensor(15.0))
-    assert out_low.mean().item() == 1.0
+    assert out_low == 1.0
     assert calls == [0, 1]
 
 
@@ -73,7 +73,7 @@ def test_sigma_dispatch_boundary_prefers_lower_sigma_range():
     dispatch, calls = _two_expert_dispatch()
     x = torch.ones(1, 1, 4, 4)
     out = dispatch(x, x, torch.tensor(10.0))
-    assert out.mean().item() == 0.0
+    assert out == 0.0
     assert calls == [0]
 
 
