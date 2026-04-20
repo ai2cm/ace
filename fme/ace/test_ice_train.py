@@ -459,9 +459,9 @@ def test_train_and_inference(tmp_path, very_fast_only: bool):
 
     assert "val/mean/loss" in all_inference_logs
     for var in ["siconc", "LSRCc", "LSNKc", "XPRTc"]:
-        assert (
-            f"val/mean/weighted_rmse/{var}" in all_inference_logs
-        ), f"Expected val/mean/weighted_rmse/{var} in inference logs"
+        assert f"val/mean/weighted_rmse/{var}" in all_inference_logs, (
+            f"Expected val/mean/weighted_rmse/{var} in inference logs"
+        )
     validation_output_dir = results_dir / "validation"
     assert validation_output_dir.exists()
 
