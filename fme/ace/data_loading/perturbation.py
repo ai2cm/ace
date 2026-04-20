@@ -91,9 +91,15 @@ def _get_ocean_mask(ocean_fraction: torch.Tensor, cutoff: float = 0.5) -> torch.
 class ConstantConfig(PerturbationConfig):
     """
     Configuration for a constant perturbation.
+
+    Parameters:
+        amplitude: The amplitude of the perturbation.
+        ocean_fraction_cutoff: Minimum ocean fraction to apply the perturbation.
+            If None, the perturbation is applied to all grid points.
     """
 
     amplitude: float = 1.0
+    ocean_fraction_cutoff: float | None = 0.5
 
     def apply_perturbation(
         self,
@@ -102,8 +108,11 @@ class ConstantConfig(PerturbationConfig):
         lon: torch.Tensor,
         ocean_fraction: torch.Tensor,
     ):
-        ocean_mask = _get_ocean_mask(ocean_fraction)
-        data[ocean_mask] += self.amplitude  # type: ignore
+        if self.ocean_fraction_cutoff is None:
+            data += self.amplitude
+        else:
+            ocean_mask = _get_ocean_mask(ocean_fraction, self.ocean_fraction_cutoff)
+            data[ocean_mask] += self.amplitude  # type: ignore
 
 
 @PerturbationSelector.register("greens_function")
@@ -120,6 +129,8 @@ class GreensFunctionConfig(PerturbationConfig):
         lon_center: The longitude at the center of the patch in degrees.
         lat_width: latitudinal width of the patch in degrees.
         lon_width: longitudinal width of the patch in degrees.
+        ocean_fraction_cutoff: Minimum ocean fraction to apply the perturbation.
+            If None, the perturbation is applied to all grid points.
     """
 
     amplitude: float = 1.0
@@ -127,6 +138,7 @@ class GreensFunctionConfig(PerturbationConfig):
     lon_center: float = 0.0
     lat_width: float = 10.0
     lon_width: float = 10.0
+    ocean_fraction_cutoff: float | None = 0.5
 
     def __post_init__(self):
         self._lat_center_rad = np.deg2rad(self.lat_center)
@@ -166,7 +178,6 @@ class GreensFunctionConfig(PerturbationConfig):
         lat_in_patch = torch.abs(lat - self.lat_center) < self.lat_width / 2.0
         lon_in_patch, lon_shifted = self._wrap_longitude_discontinuity(lon)
         mask = lat_in_patch & lon_in_patch
-        ocean_mask = _get_ocean_mask(ocean_fraction)
         perturbation = self.amplitude * (
             torch.cos(
                 torch.pi
@@ -185,4 +196,7 @@ class GreensFunctionConfig(PerturbationConfig):
         )
         mask = mask.expand(data.shape)
         perturbation = perturbation.expand(data.shape)
-        data[mask & ocean_mask] += perturbation[mask & ocean_mask]
+        if self.ocean_fraction_cutoff is not None:
+            ocean_mask = _get_ocean_mask(ocean_fraction, self.ocean_fraction_cutoff)
+            mask = mask & ocean_mask
+        data[mask] += perturbation[mask]
