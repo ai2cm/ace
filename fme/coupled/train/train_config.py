@@ -7,6 +7,7 @@ import torch
 from fme.core.cli import ResumeResultsConfig
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
+from fme.core.generics.lr_tuning import LRTuningConfig
 from fme.core.generics.trainer import EndOfBatchCallback
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import Optimization, OptimizationConfig
@@ -139,7 +140,6 @@ class TrainConfig:
     save_checkpoint: bool
     experiment_dir: str
     inference: InlineInferenceConfig
-    n_coupled_steps: int
     seed: int | None = None
     copy_weights_after_batch: CopyWeightsConfig = dataclasses.field(
         default_factory=lambda: CopyWeightsConfig(exclude=["*"])
@@ -155,7 +155,19 @@ class TrainConfig:
     save_per_epoch_diagnostics: bool = False
     evaluate_before_training: bool = True
     save_best_inference_epoch_checkpoints: bool = False
+    lr_tuning: LRTuningConfig | None = None
     resume_results: ResumeResultsConfig | None = None
+
+    def __post_init__(self):
+        if self.lr_tuning is not None and self.optimization.has_lr_schedule:
+            raise ValueError(
+                "lr_tuning and optimization.scheduler cannot both be specified; "
+                "lr_tuning is an alternative form of learning rate scheduling"
+            )
+
+    @property
+    def n_coupled_steps(self) -> int:
+        return self.stepper_training.n_coupled_steps
 
     @property
     def n_forward_steps(self) -> int:

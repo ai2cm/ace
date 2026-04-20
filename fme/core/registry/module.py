@@ -60,6 +60,7 @@ class ModuleConfig(abc.ABC):
 
 CONDITIONAL_BUILDERS = [
     "NoiseConditionedSFNO",
+    "LocalNet",
 ]
 
 
