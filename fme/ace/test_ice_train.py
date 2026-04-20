@@ -202,7 +202,7 @@ stepper:
         config:
           latent_dimension: 4
           activation: SiLU
-          meshes: 6
+          meshes: 4
           M0: 4
           bias: true
           radius_fraction: 1
