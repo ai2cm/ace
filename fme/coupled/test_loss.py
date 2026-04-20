@@ -174,6 +174,9 @@ def test_loss_contributions_optimize_last_step_only(steps_thru_atmos_7):
             loss += (gen[key] - target[key]).abs().mean() / (step + 1)
         return loss
 
+    def mae_loss_as_output(gen, target, step: int):
+        return _wrap_as_loss_output(mae_loss(gen, target, step))
+
     n_total_atmos = 8
     n_total_ocean = 4
     atmos_loss_config = LossContributionsConfig(
@@ -181,7 +184,7 @@ def test_loss_contributions_optimize_last_step_only(steps_thru_atmos_7):
         weight=1 / 3,
         optimize_last_step_only=True,
     )
-    mock_step_loss = Mock(spec=StepLoss, side_effect=mae_loss)
+    mock_step_loss = Mock(spec=StepLoss, side_effect=mae_loss_as_output)
     atmosphere_loss = atmos_loss_config.build(
         loss_obj=mock_step_loss,
         time_dim=1,
@@ -192,7 +195,7 @@ def test_loss_contributions_optimize_last_step_only(steps_thru_atmos_7):
         optimize_last_step_only=True,
     )
     ocean_loss = ocean_loss_config.build(
-        loss_obj=Mock(spec=StepLoss, side_effect=mae_loss),
+        loss_obj=Mock(spec=StepLoss, side_effect=mae_loss_as_output),
         time_dim=1,
         max_n_steps=n_total_ocean,
     )
