@@ -62,6 +62,11 @@ def _rename_normalizer(
 def _build_variable_loss_weight_tensor(
     weights: dict[str, float], out_names: list[str]
 ) -> torch.Tensor:
+    for name in weights:
+        if name not in out_names:
+            raise ValueError(
+                f"Name {name} in loss_weights.output_channels is not in out_names"
+            )
     values = [weights.get(name, 1.0) for name in out_names]
     return torch.tensor(values, dtype=torch.float32, device=get_device()).reshape(
         1, len(out_names), 1, 1
@@ -80,6 +85,8 @@ class LossWeightsConfig:
             ``(sigma^2 + sigma_data^2) / (sigma * sigma_data)^2``. The default
             of 1.0 gives the standard EDM weighting (~1/sigma^2 for small sigma).
             Use values less than 1.0 to reduce relative weighting of low-noise steps.
+            We find that 0.75 improves performance for winds and sea level pressure,
+            which are dominated by low-noise samples in the default EDM weighting.
     """
 
     output_channels: dict[str, float] = dataclasses.field(default_factory=dict)
