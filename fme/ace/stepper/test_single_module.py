@@ -152,21 +152,19 @@ def get_scalar_data(names, value):
 def test_stepper_no_train_step_specified():
     stepper = _init_train_stepper(loss=StepLossConfig(type="MSE"))
     stepper._init_for_epoch(0)
-    assert stepper._train_n_forward_steps_sampler is None
+    assert stepper._n_forward_steps_sampler is None
 
 
 def test_stepper_step_int():
-    stepper = _init_train_stepper(
-        train_n_forward_steps=2, loss=StepLossConfig(type="MSE")
-    )
-    assert stepper._train_n_forward_steps_schedule is not None
+    stepper = _init_train_stepper(n_forward_steps=2, loss=StepLossConfig(type="MSE"))
+    assert stepper._n_forward_steps_schedule is not None
     stepper._init_for_epoch(0)
-    assert stepper._train_n_forward_steps_sampler is not None
+    assert stepper._n_forward_steps_sampler is not None
 
 
 def test_stepper_step_probabilities():
     stepper = _init_train_stepper(
-        train_n_forward_steps=TimeLengthProbabilities(
+        n_forward_steps=TimeLengthProbabilities(
             outcomes=[
                 TimeLengthProbability(steps=1, probability=0.5),
                 TimeLengthProbability(steps=2, probability=0.5),
@@ -174,14 +172,14 @@ def test_stepper_step_probabilities():
         ),
         loss=StepLossConfig(type="MSE"),
     )
-    assert stepper._train_n_forward_steps_schedule is not None
+    assert stepper._n_forward_steps_schedule is not None
     stepper._init_for_epoch(0)
-    assert stepper._train_n_forward_steps_sampler is not None
+    assert stepper._n_forward_steps_sampler is not None
 
 
 def test_stepper_step_schedule():
     stepper = _init_train_stepper(
-        train_n_forward_steps=TimeLengthSchedule(
+        n_forward_steps=TimeLengthSchedule(
             start_value=1,
             milestones=[
                 TimeLengthMilestone(
@@ -197,9 +195,9 @@ def test_stepper_step_schedule():
         ),
         loss=StepLossConfig(type="MSE"),
     )
-    assert stepper._train_n_forward_steps_schedule is not None
+    assert stepper._n_forward_steps_schedule is not None
     stepper._init_for_epoch(0)
-    assert stepper._train_n_forward_steps_sampler is not None
+    assert stepper._n_forward_steps_sampler is not None
 
 
 def test_train_on_batch_normalizer_changes_only_norm_data():
@@ -603,14 +601,14 @@ def test_train_on_batch_requires_epoch(has_epoch: bool, uses_scheduling: bool):
     optimization = optimization_config.build(modules=[module], max_epochs=2)
 
     if uses_scheduling:
-        train_n_forward_steps: TimeLengthSchedule | TimeLength = TimeLengthSchedule(
+        n_forward_steps: TimeLengthSchedule | TimeLength = TimeLengthSchedule(
             start_value=2,
             milestones=[
                 TimeLengthMilestone(epoch=1, value=3),
             ],
         )
     else:
-        train_n_forward_steps = 2
+        n_forward_steps = 2
 
     config = StepperConfig(
         step=StepSelector(
@@ -633,7 +631,7 @@ def test_train_on_batch_requires_epoch(has_epoch: bool, uses_scheduling: bool):
 
     stepper = _get_train_stepper(
         config,
-        train_n_forward_steps=train_n_forward_steps,
+        n_forward_steps=n_forward_steps,
         loss=StepLossConfig(type="MSE"),
     )
     if uses_scheduling and not has_epoch:
