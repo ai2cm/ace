@@ -55,18 +55,18 @@ def _two_expert_dispatch():
     calls: list[int] = []
     e0 = _TrackedExpert(0, calls)
     e1 = _TrackedExpert(1, calls)
-    dispatch = _SigmaDispatchModule([(0.0, 10.0), (10.0, 20.0)], [e0, e1])
+    dispatch = _SigmaDispatchModule([(1.0, 10.0), (10.0, 20.0)], [e0, e1])
     return dispatch, calls
 
 
 def test_sigma_dispatch_routes_to_correct_expert():
     dispatch, calls = _two_expert_dispatch()
     x = torch.ones(1, 1, 4, 4)
-    out_high = dispatch(x, x, torch.tensor(5.0))
-    assert out_high == 0.0
-    out_low = dispatch(x, x, torch.tensor(15.0))
-    assert out_low == 1.0
-    assert calls == [0, 1]
+    assert dispatch(x, x, torch.tensor(0.0)) == 0.0
+    assert dispatch(x, x, torch.tensor(5.0)) == 0.0
+    assert dispatch(x, x, torch.tensor(15.0)) == 1.0
+    assert dispatch(x, x, torch.tensor(25.0)) == 1.0
+    assert calls == [0, 0, 1, 1]
 
 
 def test_sigma_dispatch_boundary_prefers_lower_sigma_range():
