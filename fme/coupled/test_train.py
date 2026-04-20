@@ -18,7 +18,6 @@ seed: 0
 save_checkpoint: true
 save_per_epoch_diagnostics: {save_per_epoch_diagnostics}
 max_epochs: {max_epochs}
-n_coupled_steps: {n_coupled_steps}
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -68,6 +67,7 @@ optimization:
   lr: 0.0001
   optimizer_type: Adam
 stepper_training:
+  n_coupled_steps: {n_coupled_steps}
   ocean:
     loss:
       type: {loss_type}
