@@ -3,16 +3,14 @@ import dataclasses
 import torch
 
 from fme.core.coordinates import LatLonCoordinates
-from fme.core.device import get_device
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.downscaling.data import BatchData, PairedBatchData, StaticInputs
-from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
+from fme.downscaling.metrics_and_maths import filter_tensor_mapping
 from fme.downscaling.models import (
     CheckpointModelConfig,
     DiffusionModel,
     ModelOutputs,
     _repeat_batch_by_samples,
-    _separate_interleaved_samples,
 )
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.samplers import stochastic_sampler as edm_sampler
@@ -252,48 +250,20 @@ class DenoisingScheduleSequentialPredictor:
         static_inputs: StaticInputs | None,
         n_samples: int = 1,
     ) -> tuple[TensorDict, torch.Tensor, list[torch.Tensor]]:
-        inputs_ = self._primary._get_input_from_coarse(coarse_data, static_inputs)
-        inputs_ = _repeat_batch_by_samples(inputs_, n_samples)
-        coarse_input_shape = next(iter(coarse_data.values())).shape[-2:]
-
-        outputs_shape = (
-            inputs_.shape[0],
-            len(self._primary.out_packer.names),
-            *self._primary._get_fine_shape(coarse_input_shape),
+        latents, inputs = self._primary.prepare_generation_inputs(
+            coarse_data, static_inputs, n_samples
         )
-        latents = torch.randn(outputs_shape).to(device=get_device())
-
         generated_norm, latent_steps = edm_sampler(
             self._dispatch_module,
             latents,
-            inputs_,
+            inputs,
             S_churn=self._churn,
             sigma_min=self._sigma_schedule_min,
             sigma_max=self._sigma_schedule_max,
             num_steps=self._num_diffusion_generation_steps,
         )
-
-        if self._primary.config.predict_residual:
-            base_prediction = interpolate(
-                self._primary.out_packer.pack(
-                    self._primary.normalizer.coarse.normalize(
-                        {k: coarse_data[k] for k in self._primary.out_packer.names}
-                    ),
-                    axis=self._primary._channel_axis,
-                ),
-                self._primary.downscale_factor,
-            )
-            generated_norm = generated_norm + _repeat_batch_by_samples(
-                base_prediction, n_samples
-            )
-
-        generated_norm_reshaped = _separate_interleaved_samples(
-            generated_norm, n_samples
-        )
-        generated = self._primary.normalizer.fine.denormalize(
-            self._primary.out_packer.unpack(
-                generated_norm_reshaped, axis=self._primary._channel_axis
-            )
+        generated, generated_norm = self._primary.postprocess_generated(
+            generated_norm, coarse_data, n_samples
         )
         return generated, generated_norm, latent_steps
 
