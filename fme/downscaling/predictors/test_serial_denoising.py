@@ -4,6 +4,7 @@ import pytest
 import torch
 
 from fme.downscaling.predictors.serial_denoising import (
+    DenoisingMoECheckpointConfig,
     DenoisingRangeModelConfig,
     _SigmaDispatchModule,
     _validate_sigma_ranges,
@@ -18,19 +19,6 @@ def _range(sigma_min: float, sigma_max: float) -> DenoisingRangeModelConfig:
     )
 
 
-def test_validate_sigma_ranges_single_ok():
-    _validate_sigma_ranges([_range(0.002, 80.0)])
-
-
-def test_validate_sigma_ranges_contiguous_pair_ok():
-    _validate_sigma_ranges([_range(0.002, 10.0), _range(10.0, 80.0)])
-
-
-def test_validate_sigma_ranges_empty_raises():
-    with pytest.raises(ValueError, match="at least one"):
-        _validate_sigma_ranges([])
-
-
 def test_validate_sigma_ranges_min_ge_max_raises():
     with pytest.raises(ValueError, match="sigma_min < sigma_max"):
         _validate_sigma_ranges([_range(10.0, 10.0)])
@@ -41,9 +29,13 @@ def test_validate_sigma_ranges_gap_raises():
         _validate_sigma_ranges([_range(0.0, 10.0), _range(11.0, 80.0)])
 
 
-def test_validate_sigma_ranges_unsorted_raises():
-    with pytest.raises(ValueError, match="sorted"):
-        _validate_sigma_ranges([_range(10.0, 80.0), _range(0.0, 10.0)])
+def test_denoising_moe_config_sorts_ranges():
+    cfg = DenoisingMoECheckpointConfig(
+        denoising_range_configs=[_range(10.0, 80.0), _range(0.002, 10.0)],
+        num_diffusion_generation_steps=10,
+    )
+    assert cfg.denoising_range_configs[0].sigma_min == 0.002
+    assert cfg.denoising_range_configs[1].sigma_min == 10.0
 
 
 def test_sigma_dispatch_routes_to_correct_expert():

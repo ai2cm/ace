@@ -153,6 +153,9 @@ class DenoisingMoECheckpointConfig:
     churn: float = 0.0
 
     def __post_init__(self) -> None:
+        self.denoising_range_configs = sorted(
+            self.denoising_range_configs, key=lambda c: c.sigma_min
+        )
         _validate_sigma_ranges(self.denoising_range_configs)
 
     def build(self) -> "DenoisingScheduleSequentialPredictor":
