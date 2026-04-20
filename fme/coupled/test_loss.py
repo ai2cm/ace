@@ -4,11 +4,16 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from fme.core.loss import StepLoss
+from fme.core.loss import LossOutput, StepLoss
 from fme.core.typing_ import TensorMapping
 
 from .loss import LossContributionsConfig, StepLossABC, StepPredictionABC
 from .stepper import ComponentStepPrediction, CoupledStepperTrainLoss
+
+
+def _wrap_as_loss_output(value: torch.Tensor) -> LossOutput:
+    """Wrap a scalar tensor as a LossOutput for mocking StepLoss."""
+    return LossOutput(_loss=value, _channel_dim=0, _channel_names=["mock"])
 
 
 def step_and_target_gen(
@@ -118,11 +123,14 @@ def test_loss_contributions(steps_thru_atmos_7):
             loss += (gen[key] - target[key]).abs().mean() / (step + 1)
         return loss
 
+    def mae_loss_as_output(gen, target, step: int):
+        return _wrap_as_loss_output(mae_loss(gen, target, step))
+
     atmos_loss_config = LossContributionsConfig(
         n_steps=6,
         weight=1 / 3,
     )
-    mock_step_loss = Mock(spec=StepLoss, side_effect=mae_loss)
+    mock_step_loss = Mock(spec=StepLoss, side_effect=mae_loss_as_output)
     atmosphere_loss = atmos_loss_config.build(
         loss_obj=mock_step_loss,
         time_dim=1,
@@ -156,15 +164,20 @@ def test_loss_contributions(steps_thru_atmos_7):
 
 @pytest.mark.parametrize("ocean_config_kwargs", [{"n_steps": 0}, {"weight": 0.0}])
 def test_null_loss_contributions(steps_thru_atmos_7, ocean_config_kwargs):
-    # test LossContributionsConfig with n_steps = 0
     atmos_loss_config = LossContributionsConfig()
     atmosphere_loss = atmos_loss_config.build(
-        loss_obj=Mock(spec=StepLoss, return_value=torch.tensor(5.25)),
+        loss_obj=Mock(
+            spec=StepLoss,
+            return_value=_wrap_as_loss_output(torch.tensor(5.25)),
+        ),
         time_dim=1,
     )
     ocean_loss_config = LossContributionsConfig(**ocean_config_kwargs)
     ocean_loss = ocean_loss_config.build(
-        loss_obj=Mock(spec=StepLoss, return_value=torch.tensor(42.0)),
+        loss_obj=Mock(
+            spec=StepLoss,
+            return_value=_wrap_as_loss_output(torch.tensor(42.0)),
+        ),
         time_dim=1,
     )
     loss_obj = CoupledStepperTrainLoss(

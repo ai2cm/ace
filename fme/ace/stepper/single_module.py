@@ -1626,10 +1626,8 @@ class TrainStepper(
                         for k, v in target_data.data.items()
                     }
                 )
-                step_loss = self._loss_obj(
-                    gen_step, target_step, step=step, reduce=False
-                )
-                step_total_loss = step_loss.sum()
+                step_loss = self._loss_obj(gen_step, target_step, step=step)
+                step_total_loss = step_loss.total()
                 metrics[f"loss_step_{step}"] = step_total_loss.detach()
             if optimize_step:
                 optimization.accumulate_loss(step_total_loss)
