@@ -361,11 +361,19 @@ class CrossFormerStep(StepABC):
             n_aux_channels=len(config.forcing_names),
             img_shape=img_shape,
         )
+        n_params = sum(p.numel() for p in module.parameters())
+        logging.info(
+            f"CrossFormer built: {n_params:,} params, "
+            f"img_shape={img_shape}, moving to {get_device()}"
+        )
         module = module.to(get_device())
+        logging.info("CrossFormer moved to device, running init_weights")
         init_weights([module])
 
+        logging.info("Wrapping module in DDP")
         dist = Distributed.get_instance()
         self.module = dist.wrap_module(module)
+        logging.info("DDP wrapping complete")
         self._img_shape = img_shape
         self._config = config
         self._no_optimization = NullOptimization()
