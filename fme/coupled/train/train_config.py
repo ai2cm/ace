@@ -140,7 +140,6 @@ class TrainConfig:
     save_checkpoint: bool
     experiment_dir: str
     inference: InlineInferenceConfig
-    n_coupled_steps: int
     seed: int | None = None
     copy_weights_after_batch: CopyWeightsConfig = dataclasses.field(
         default_factory=lambda: CopyWeightsConfig(exclude=["*"])
@@ -166,6 +165,10 @@ class TrainConfig:
                 "lr_tuning and optimization.scheduler cannot both be specified; "
                 "lr_tuning is an alternative form of learning rate scheduling"
             )
+
+    @property
+    def n_coupled_steps(self) -> int:
+        return self.stepper_training.n_coupled_steps
 
     @property
     def n_forward_steps(self) -> int:

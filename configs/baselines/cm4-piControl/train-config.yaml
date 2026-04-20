@@ -4,7 +4,6 @@ validate_using_ema: true
 ema:
   decay: 0.999
 max_epochs: 20
-n_coupled_steps: 4
 inference:
   n_coupled_steps: 1456
   coupled_steps_in_memory: 8
@@ -120,6 +119,7 @@ optimization:
     weight_decay: 0.01
   use_gradient_accumulation: true
 stepper_training:
+  n_coupled_steps: 4
   ocean:
     parameter_init:
       weights_path: /ocean_ckpt.tar
