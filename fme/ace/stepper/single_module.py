@@ -343,8 +343,8 @@ class TrainOutput(TrainOutputABC):
     target_data: EnsembleTensorDict
     time: xr.DataArray
     normalize: Callable[[TensorDict], TensorDict]
-    derive_func: Callable[[TensorMapping, TensorMapping], TensorDict] = (
-        lambda x, _: dict(x)
+    derive_func: Callable[[TensorMapping, TensorMapping], TensorDict] = lambda x, _: (
+        dict(x)
     )
 
     def __post_init__(self):
@@ -1370,7 +1370,7 @@ class TrainStepperConfig:
         n_ensemble: The number of ensemble members evaluated for each training
             batch member. Default is 2 if the loss type is EnsembleLoss, otherwise
             the default is 1. Must be 2 for EnsembleLoss to be valid.
-        train_n_forward_steps: The number of timesteps to train on and associated
+        n_forward_steps: The number of timesteps to train on and associated
             sampling probabilities. By default, the stepper will train on the full
             number of timesteps present in the training dataset samples. Values must
             be less than or equal to the number of timesteps present
@@ -1381,7 +1381,7 @@ class TrainStepperConfig:
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
     optimize_last_step_only: bool = False
     n_ensemble: int = -1  # sentinel value to avoid None typing of attribute
-    train_n_forward_steps: TimeLength | TimeLengthSchedule | None = None
+    n_forward_steps: TimeLength | TimeLengthSchedule | None = None
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
@@ -1394,12 +1394,12 @@ class TrainStepperConfig:
                 self.n_ensemble = 1
 
     @property
-    def train_n_forward_steps_schedule(self) -> TimeLengthSchedule | None:
-        if self.train_n_forward_steps is None:
+    def n_forward_steps_schedule(self) -> TimeLengthSchedule | None:
+        if self.n_forward_steps is None:
             return None
-        if isinstance(self.train_n_forward_steps, TimeLengthSchedule):
-            return self.train_n_forward_steps
-        return TimeLengthSchedule.from_constant(self.train_n_forward_steps)
+        if isinstance(self.n_forward_steps, TimeLengthSchedule):
+            return self.n_forward_steps
+        return TimeLengthSchedule.from_constant(self.n_forward_steps)
 
     def _get_parameter_initializer(
         self,
@@ -1487,10 +1487,10 @@ class TrainStepper(
         self._stepper = stepper
         self._config = config
 
-        self._train_n_forward_steps_sampler: TimeLengthProbabilities | None = None
-        self._train_n_forward_steps_schedule: TimeLengthSchedule | None = None
-        if config.train_n_forward_steps_schedule is not None:
-            self._train_n_forward_steps_schedule = config.train_n_forward_steps_schedule
+        self._n_forward_steps_sampler: TimeLengthProbabilities | None = None
+        self._n_forward_steps_schedule: TimeLengthSchedule | None = None
+        if config.n_forward_steps_schedule is not None:
+            self._n_forward_steps_schedule = config.n_forward_steps_schedule
 
         self._epoch: int | None = None  # to keep track of cached values
 
@@ -1595,8 +1595,8 @@ class TrainStepper(
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)
-        if self._train_n_forward_steps_sampler is not None:
-            stochastic_n_forward_steps = self._train_n_forward_steps_sampler.sample()
+        if self._n_forward_steps_sampler is not None:
+            stochastic_n_forward_steps = self._n_forward_steps_sampler.sample()
             if stochastic_n_forward_steps > n_forward_steps:
                 raise RuntimeError(
                     "The number of forward steps to train on "
@@ -1690,8 +1690,8 @@ class TrainStepper(
     def _init_for_epoch(self, epoch: int | None):
         if (
             epoch is None
-            and self._train_n_forward_steps_schedule is not None
-            and len(self._train_n_forward_steps_schedule.milestones) > 0
+            and self._n_forward_steps_schedule is not None
+            and len(self._n_forward_steps_schedule.milestones) > 0
         ):
             raise EpochNotProvidedError(
                 "current configuration requires epoch to be provided "
@@ -1699,13 +1699,13 @@ class TrainStepper(
             )
         if self._epoch == epoch:
             return
-        if self._train_n_forward_steps_schedule is not None:
+        if self._n_forward_steps_schedule is not None:
             assert epoch is not None  # already checked, but needed for mypy
-            self._train_n_forward_steps_sampler = probabilities_from_time_length(
-                self._train_n_forward_steps_schedule.get_value(epoch)
+            self._n_forward_steps_sampler = probabilities_from_time_length(
+                self._n_forward_steps_schedule.get_value(epoch)
             )
         else:
-            self._train_n_forward_steps_sampler = None
+            self._n_forward_steps_sampler = None
         self._epoch = epoch
 
     def set_eval(self) -> None:

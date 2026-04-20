@@ -22,6 +22,7 @@ from fme.downscaling.models import (
     DiffusionModel,
     DiffusionModelConfig,
     PairedNormalizationConfig,
+    _build_variable_loss_weight_tensor,
     _repeat_batch_by_samples,
     _separate_interleaved_samples,
 )
@@ -667,3 +668,16 @@ def test_from_state_raises_for_unresolvable_old_checkpoint(tmp_path):
 
     with pytest.raises(ValueError, match="full_fine_coords"):
         DiffusionModel.from_state(state)
+
+
+def test__build_variable_loss_weight_tensor():
+    weights = {"x": 0.5, "z": 2.0}
+    out_names = ["x", "y", "z"]
+    n_out_channels = len(out_names)
+    result = _build_variable_loss_weight_tensor(weights, out_names)
+    assert result.shape == (1, n_out_channels, 1, 1)
+    loss = torch.rand(2, n_out_channels, 2, 2, device=get_device())
+    weighted_loss = loss * result
+    assert torch.allclose(weighted_loss[:, 0], loss[:, 0] * 0.5)
+    assert torch.allclose(weighted_loss[:, 1], loss[:, 1])
+    assert torch.allclose(weighted_loss[:, 2], loss[:, 2] * 2.0)
