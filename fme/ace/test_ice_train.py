@@ -266,7 +266,7 @@ validation:
       spatial_dimensions: latlon
     batch_size: 2
   stepper_training:
-    train_n_forward_steps: 2
+    n_forward_steps: 2
   aggregator:
     log_snapshots: false
     log_mean_maps: false
