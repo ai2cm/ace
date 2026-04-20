@@ -59,6 +59,40 @@ def _rename_normalizer(
     return StandardNormalizer(means=new_means, stds=new_stds)
 
 
+def _build_variable_loss_weight_tensor(
+    weights: dict[str, float], out_names: list[str]
+) -> torch.Tensor:
+    for name in weights:
+        if name not in out_names:
+            raise ValueError(
+                f"Name {name} in loss_weights.output_channels is not in out_names"
+            )
+    values = [weights.get(name, 1.0) for name in out_names]
+    return torch.tensor(values, dtype=torch.float32, device=get_device()).reshape(
+        1, len(out_names), 1, 1
+    )
+
+
+@dataclasses.dataclass
+class LossWeightsConfig:
+    """
+    Configuration for loss weighting during training.
+
+    Parameters:
+        output_channels: Per-variable multiplicative weights applied to the loss.
+            Keys are variable names from out_names; variables not listed default to 1.0.
+        noise_weight_exponent: Exponent applied to the EDM noise-level loss weight
+            ``(sigma^2 + sigma_data^2) / (sigma * sigma_data)^2``. The default
+            of 1.0 gives the standard EDM weighting (~1/sigma^2 for small sigma).
+            Use values less than 1.0 to reduce relative weighting of low-noise steps.
+            We find that 0.75 improves performance for winds and sea level pressure,
+            which are dominated by low-noise samples in the default EDM weighting.
+    """
+
+    output_channels: dict[str, float] = dataclasses.field(default_factory=dict)
+    noise_weight_exponent: float = 1.0
+
+
 @dataclasses.dataclass
 class PairedNormalizationConfig:
     fine: NormalizationConfig
@@ -108,6 +142,8 @@ class DiffusionModelConfig:
         use_fine_topography: Whether to use fine topography in the model.
         use_amp_bf16: Whether to use automatic mixed precision (bfloat16) in the
             UNetDiffusionModule.
+        loss_weights: Weighting configuration for the training loss, including
+            per-variable channel weights and the noise-level weight exponent.
         training_noise_distribution: Noise distribution to use during training.
         p_mean: The mean of noise distribution used during training.
             Deprecated. Use training_noise_distribution field instead.
@@ -129,6 +165,9 @@ class DiffusionModelConfig:
     predict_residual: bool
     use_fine_topography: bool = False
     use_amp_bf16: bool = False
+    loss_weights: LossWeightsConfig = dataclasses.field(
+        default_factory=LossWeightsConfig
+    )
     training_noise_distribution: (
         LogNormalNoiseDistribution | LogUniformNoiseDistribution | None
     ) = None
@@ -325,6 +364,9 @@ class DiffusionModel:
         self._channel_axis = -3
         self.full_fine_coords = full_fine_coords.to(get_device())
         self.static_inputs = static_inputs.to_device() if static_inputs else None
+        self._loss_weight_tensor = _build_variable_loss_weight_tensor(
+            config.loss_weights.output_channels, config.out_names
+        )
 
     @property
     def modules(self) -> torch.nn.ModuleList:
@@ -435,14 +477,19 @@ class DiffusionModel:
             targets_norm = targets_norm - base_prediction
 
         conditioned_target = condition_with_noise_for_training(
-            targets_norm, self.config.noise_distribution, self.sigma_data
+            targets_norm,
+            self.config.noise_distribution,
+            self.sigma_data,
+            loss_weight_exponent=self.config.loss_weights.noise_weight_exponent,
         )
 
         denoised_norm = self.module(
             conditioned_target.latents, inputs_norm, conditioned_target.sigma
         )
-        weighted_loss = conditioned_target.weight * self.loss(
-            denoised_norm, targets_norm
+        weighted_loss = (  # has dims (batch, channels, lat, lon)
+            conditioned_target.weight
+            * self._loss_weight_tensor
+            * self.loss(denoised_norm, targets_norm)
         )
         loss = torch.mean(weighted_loss)
         optimizer.accumulate_loss(loss)
@@ -476,38 +523,38 @@ class DiffusionModel:
             latent_steps=[],
         )
 
-    @torch.no_grad()
-    def generate(
+    def prepare_generation_inputs(
         self,
         coarse_data: TensorMapping,
         static_inputs: StaticInputs | None,
-        n_samples: int = 1,
-    ) -> tuple[TensorDict, torch.Tensor, list[torch.Tensor]]:
-        # Internal method; external callers should use generate_on_batch /
-        # generate_on_batch_no_target.
-        inputs_ = self._get_input_from_coarse(coarse_data, static_inputs)
-        # expand samples and fold to
-        # [batch * n_samples, output_channels, height, width]
-        inputs_ = _repeat_batch_by_samples(inputs_, n_samples)
-        coarse_input_shape = next(iter(coarse_data.values())).shape[-2:]
+        n_samples: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Normalize coarse input and build random latents for generation.
 
+        Returns:
+            inputs: Normalized (and optionally interpolated) coarse input,
+                repeated ``n_samples`` times along the batch dimension.
+            latents: Random noise tensor shaped for the fine output grid.
+        """
+        inputs = self._get_input_from_coarse(coarse_data, static_inputs)
+        inputs = _repeat_batch_by_samples(inputs, n_samples)
+        coarse_input_shape = next(iter(coarse_data.values())).shape[-2:]
         outputs_shape = (
-            inputs_.shape[0],
+            inputs.shape[0],
             len(self.out_packer.names),
             *self._get_fine_shape(coarse_input_shape),
         )
         latents = torch.randn(outputs_shape).to(device=get_device())
+        return inputs, latents
 
-        generated_norm, latent_steps = edm_sampler(
-            self.module,
-            latents,
-            inputs_,
-            S_churn=self.config.churn,
-            sigma_min=self.config.sigma_min,
-            sigma_max=self.config.sigma_max,
-            num_steps=self.config.num_diffusion_generation_steps,
-        )
-
+    def postprocess_generated(
+        self,
+        generated_norm: torch.Tensor,
+        coarse_data: TensorMapping,
+        n_samples: int,
+        latent_steps: list[torch.Tensor],
+    ) -> tuple[TensorDict, torch.Tensor, list[torch.Tensor]]:
+        """Add residual, separate samples, and denormalize sampler output."""
         if self.config.predict_residual:
             base_prediction = interpolate(
                 self.out_packer.pack(
@@ -521,7 +568,6 @@ class DiffusionModel:
             generated_norm = generated_norm + _repeat_batch_by_samples(
                 base_prediction, n_samples
             )
-
         generated_norm_reshaped = _separate_interleaved_samples(
             generated_norm, n_samples
         )
@@ -529,6 +575,29 @@ class DiffusionModel:
             self.out_packer.unpack(generated_norm_reshaped, axis=self._channel_axis)
         )
         return generated, generated_norm, latent_steps
+
+    @torch.no_grad()
+    def generate(
+        self,
+        coarse_data: TensorMapping,
+        static_inputs: StaticInputs | None,
+        n_samples: int = 1,
+    ) -> tuple[TensorDict, torch.Tensor, list[torch.Tensor]]:
+        inputs, latents = self.prepare_generation_inputs(
+            coarse_data, static_inputs, n_samples
+        )
+        generated_norm, latent_steps = edm_sampler(
+            self.module,
+            latents,
+            inputs,
+            S_churn=self.config.churn,
+            sigma_min=self.config.sigma_min,
+            sigma_max=self.config.sigma_max,
+            num_steps=self.config.num_diffusion_generation_steps,
+        )
+        return self.postprocess_generated(
+            generated_norm, coarse_data, n_samples, latent_steps
+        )
 
     @torch.no_grad()
     def generate_on_batch_no_target(
