@@ -10,7 +10,6 @@ evaluate_before_training: true
 ema:
   decay: 0.999
 max_epochs: 10
-n_coupled_steps: 4
 inference:
   n_coupled_steps: 1440
   coupled_steps_in_memory: 2
@@ -136,6 +135,7 @@ optimization:
         step_each_iteration: true
     milestones: [2000]
 stepper_training:
+  n_coupled_steps: 4
   parameter_init:
     checkpoint_path: /ckpt.tar
   n_ensemble: 2
