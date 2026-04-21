@@ -370,14 +370,17 @@ def cache_step_input(
     checkpoint_path: pathlib.Path,
 ):
     if checkpoint_path.exists():
-        checkpoint = torch.load(checkpoint_path, map_location=fme.get_device())
+        checkpoint = torch.load(checkpoint_path, map_location="cpu")
         step.load_state(checkpoint["step_state_dict"])
-        input_data = checkpoint["input_data"]
-        next_step_input_data = checkpoint["next_step_input_data"]
+        device = fme.get_device()
+        input_data = {k: v.to(device) for k, v in checkpoint["input_data"].items()}
+        next_step_input_data = {
+            k: v.to(device) for k, v in checkpoint["next_step_input_data"].items()
+        }
         label_tensor = checkpoint["label_tensor"]
         if label_tensor is not None:
             assert isinstance(labels, BatchLabels)
-            labels.tensor[:] = label_tensor
+            labels.tensor[:] = label_tensor.to(device)
         return step, input_data, next_step_input_data, labels
     else:
         checkpoint = {
@@ -395,8 +398,10 @@ def cache_step_input(
 
 def cache_step_output(output_data: TensorDict, checkpoint_path: pathlib.Path):
     if checkpoint_path.exists():
-        checkpoint = torch.load(checkpoint_path, map_location=fme.get_device())
-        expected_output = checkpoint["output_data"]
+        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+        expected_output = {
+            k: v.to(fme.get_device()) for k, v in checkpoint["output_data"].items()
+        }
         for name in output_data.keys():
             torch.testing.assert_close(output_data[name], expected_output[name])
     else:

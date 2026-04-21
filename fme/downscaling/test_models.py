@@ -172,7 +172,7 @@ def test_module_serialization(tmp_path):
 
     torch.save(model.get_state(), tmp_path / "test.ckpt")
     model_from_disk = DiffusionModel.from_state(
-        torch.load(tmp_path / "test.ckpt", weights_only=False),
+        torch.load(tmp_path / "test.ckpt", map_location="cpu", weights_only=False),
     )
     assert all(
         torch.equal(p1, p2)
@@ -323,7 +323,7 @@ def test_normalizer_serialization(tmp_path):
     os.remove(tmp_path / "stds.nc")
 
     model_from_disk = DiffusionModel.from_state(
-        torch.load(tmp_path / "test.ckpt", weights_only=False),
+        torch.load(tmp_path / "test.ckpt", map_location="cpu", weights_only=False),
     )
 
     assert model_from_disk.normalizer.fine.means == {"x": 0}
