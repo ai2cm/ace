@@ -24,8 +24,8 @@ from fme.downscaling.data import (
 )
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
 from fme.downscaling.predictors import (
-    DenoisingMoECheckpointConfig,
-    DenoisingScheduleSequentialPredictor,
+    DenoisingMoEConfig,
+    DenoisingMoEPredictor,
     PatchPredictionConfig,
     PatchPredictor,
 )
@@ -89,7 +89,7 @@ class EventDownscaler:
         self,
         event_name: str,
         data: GriddedData,
-        model: DiffusionModel | DenoisingScheduleSequentialPredictor,
+        model: DiffusionModel | DenoisingMoEPredictor,
         experiment_dir: str,
         n_samples: int,
         patch: PatchPredictionConfig = PatchPredictionConfig(
@@ -165,7 +165,7 @@ class Downscaler:
     def __init__(
         self,
         data: GriddedData,
-        model: DiffusionModel | DenoisingScheduleSequentialPredictor,
+        model: DiffusionModel | DenoisingMoEPredictor,
         experiment_dir: str,
         n_samples: int,
         patch: PatchPredictionConfig = PatchPredictionConfig(
@@ -242,7 +242,7 @@ class Downscaler:
 
 @dataclasses.dataclass
 class DownscalerConfig:
-    model: DenoisingMoECheckpointConfig | CheckpointModelConfig
+    model: DenoisingMoEConfig | CheckpointModelConfig
     experiment_dir: str
     data: DataLoaderConfig
     logging: LoggingConfig

@@ -1,14 +1,14 @@
 from .composite import PatchPredictionConfig, PatchPredictor
 from .serial_denoising import (
-    DenoisingMoECheckpointConfig,
-    DenoisingRangeModelConfig,
-    DenoisingScheduleSequentialPredictor,
+    DenoisingExpertCheckpointConfig,
+    DenoisingMoEConfig,
+    DenoisingMoEPredictor,
 )
 
 __all__ = [
-    "DenoisingMoECheckpointConfig",
-    "DenoisingRangeModelConfig",
-    "DenoisingScheduleSequentialPredictor",
+    "DenoisingMoEConfig",
+    "DenoisingExpertCheckpointConfig",
+    "DenoisingMoEPredictor",
     "PatchPredictionConfig",
     "PatchPredictor",
 ]

@@ -5,16 +5,16 @@ import torch
 
 from fme.core.coordinates import LatLonCoordinates
 from fme.downscaling.predictors.serial_denoising import (
-    DenoisingMoECheckpointConfig,
-    DenoisingRangeModelConfig,
+    DenoisingExpertCheckpointConfig,
+    DenoisingMoEConfig,
     _SigmaDispatchModule,
     _validate_experts_compatible,
     _validate_sigma_ranges,
 )
 
 
-def _range(sigma_min: float, sigma_max: float) -> DenoisingRangeModelConfig:
-    return DenoisingRangeModelConfig(
+def _range(sigma_min: float, sigma_max: float) -> DenoisingExpertCheckpointConfig:
+    return DenoisingExpertCheckpointConfig(
         checkpoint_config=MagicMock(),
         sigma_min=sigma_min,
         sigma_max=sigma_max,
@@ -32,12 +32,12 @@ def test_validate_sigma_ranges_gap_raises():
 
 
 def test_denoising_moe_config_sorts_ranges():
-    cfg = DenoisingMoECheckpointConfig(
-        denoising_range_configs=[_range(10.0, 80.0), _range(0.002, 10.0)],
+    cfg = DenoisingMoEConfig(
+        denoising_expert_configs=[_range(10.0, 80.0), _range(0.002, 10.0)],
         num_diffusion_generation_steps=10,
     )
-    assert cfg.denoising_range_configs[0].sigma_min == 0.002
-    assert cfg.denoising_range_configs[1].sigma_min == 10.0
+    assert cfg.denoising_expert_configs[0].sigma_min == 0.002
+    assert cfg.denoising_expert_configs[1].sigma_min == 10.0
 
 
 class _TrackedExpert(torch.nn.Module):

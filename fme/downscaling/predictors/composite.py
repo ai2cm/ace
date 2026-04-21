@@ -12,9 +12,7 @@ from fme.downscaling.data.patching import Patch, get_patches
 from fme.downscaling.models import DiffusionModel, ModelOutputs
 
 if TYPE_CHECKING:
-    from fme.downscaling.predictors.serial_denoising import (
-        DenoisingScheduleSequentialPredictor,
-    )
+    from fme.downscaling.predictors.serial_denoising import DenoisingMoEPredictor
 
 
 @dataclasses.dataclass
@@ -60,7 +58,7 @@ class PatchPredictor:
 
     def __init__(
         self,
-        model: DiffusionModel | DenoisingScheduleSequentialPredictor,
+        model: DiffusionModel | DenoisingMoEPredictor,
         coarse_yx_patch_extent: tuple[int, int] | None = None,
         coarse_horizontal_overlap: int = 1,
     ):

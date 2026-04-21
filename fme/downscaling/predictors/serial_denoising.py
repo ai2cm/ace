@@ -17,12 +17,9 @@ from fme.downscaling.samplers import stochastic_sampler as edm_sampler
 
 
 @dataclasses.dataclass
-class DenoisingRangeModelConfig:
+class DenoisingExpertCheckpointConfig:
     """
     One expert checkpoint and the sigma interval (inclusive) it handles.
-
-    Ranges across experts must be sorted by ``sigma_min`` ascending, contiguous
-    (each ``sigma_max`` equals the next ``sigma_min``), and non-overlapping.
     """
 
     checkpoint_config: CheckpointModelConfig
@@ -149,37 +146,39 @@ class _SigmaDispatchModule:
 
 
 @dataclasses.dataclass
-class DenoisingMoECheckpointConfig:
+class DenoisingMoEConfig:
     """
-    Load multiple checkpoints and route denoising steps to the expert whose
+    Configuration for mixture of experts specializing in different parts of
+    the denoising schedule.
+    Loads multiple checkpoints and route denoising steps to the expert whose
     sigma range contains the current noise level.
 
-    ``denoising_range_configs`` must list non-overlapping contiguous intervals
-    in ascending ``sigma_min`` order. Overall schedule bounds are the minimum
-    ``sigma_min`` and maximum ``sigma_max`` across ranges.
+    ``denoising_range_configs`` must list non-overlapping contiguous intervals.
+    The overall schedule bounds are the minimum ``sigma_min`` and maximum ``sigma_max``
+    across all ranges.
 
     Parameters:
-        denoising_range_configs: One entry per expert (checkpoint + sigma range).
+        denoising_expert_configs: One entry per expert (checkpoint + sigma range).
         num_diffusion_generation_steps: EDM sampler step count for the full schedule.
-        churn: EDM sampler churn (stochasticity) for the full schedule.
+        churn: EDM sampler churn (stochasticity) for the full schedule. Default 0.0.
     """
 
-    denoising_range_configs: list[DenoisingRangeModelConfig]
+    denoising_expert_configs: list[DenoisingExpertCheckpointConfig]
     num_diffusion_generation_steps: int
     churn: float = 0.0
 
     def __post_init__(self) -> None:
-        self.denoising_range_configs = sorted(
-            self.denoising_range_configs, key=lambda c: c.sigma_min
+        self.denoising_expert_configs = sorted(
+            self.denoising_expert_configs, key=lambda c: c.sigma_min
         )
 
-    def build(self) -> "DenoisingScheduleSequentialPredictor":
-        experts = [rc.checkpoint_config.build() for rc in self.denoising_range_configs]
+    def build(self) -> "DenoisingMoEPredictor":
+        experts = [rc.checkpoint_config.build() for rc in self.denoising_expert_configs]
         _validate_experts_compatible(experts)
         sigma_ranges = [
-            (rc.sigma_min, rc.sigma_max) for rc in self.denoising_range_configs
+            (rc.sigma_min, rc.sigma_max) for rc in self.denoising_expert_configs
         ]
-        return DenoisingScheduleSequentialPredictor(
+        return DenoisingMoEPredictor(
             experts=experts,
             sigma_ranges=sigma_ranges,
             num_diffusion_generation_steps=self.num_diffusion_generation_steps,
@@ -188,12 +187,12 @@ class DenoisingMoECheckpointConfig:
 
     @property
     def data_requirements(self) -> DataRequirements:
-        return self.denoising_range_configs[0].checkpoint_config.data_requirements
+        return self.denoising_expert_configs[0].checkpoint_config.data_requirements
 
 
-class DenoisingScheduleSequentialPredictor:
+class DenoisingMoEPredictor:
     """
-    Multiple ``DiffusionModel`` experts, each used for part of the EDM sigma
+    Mixture of ``DiffusionModel`` experts, each used for part of the EDM sigma
     schedule. Behaves like ``DiffusionModel`` for generation and patching.
     """
 
