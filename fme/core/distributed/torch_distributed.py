@@ -14,7 +14,7 @@ from torch.nn.parallel import DistributedDataParallel
 from fme.core import metrics
 from fme.core.device import get_device, using_gpu, using_srun
 
-from .base import DistributedBackend
+from .base import DistributedBackend, _use_torch_harmonics_disco
 from .non_distributed import DummyWrapper
 
 logger = logging.getLogger(__name__)
@@ -207,6 +207,9 @@ class TorchDistributed(DistributedBackend):
         return th.InverseRealSHT(nlat, nlon, lmax=lmax, mmax=mmax, grid=grid).float()
 
     def get_disco_conv_s2(self, *args, **kwargs) -> nn.Module:
+        if _use_torch_harmonics_disco(kwargs.get("basis_type")):
+            return th.DiscreteContinuousConvS2(*args, **kwargs).float()
+
         from fme.core.disco import DiscreteContinuousConvS2
 
         return DiscreteContinuousConvS2(*args, **kwargs).float()

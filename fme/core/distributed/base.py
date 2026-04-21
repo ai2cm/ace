@@ -8,6 +8,27 @@ import torch.nn as nn
 
 T = TypeVar("T")
 
+try:
+    import disco_cuda_extension  # noqa: F401
+
+    _disco_cuda_available = True
+except ImportError:
+    _disco_cuda_available = False
+
+
+def _use_torch_harmonics_disco(basis_type: str | None) -> bool:
+    """Return True when torch-harmonics' DISCO should be used instead of our fork.
+
+    We prefer torch-harmonics when its optimized CUDA kernels are available and
+    we're running on GPU, since those kernels are faster than our FFT path.
+    For CPU or when the CUDA extension is missing, our FFT-based fork is faster
+    than torch-harmonics' sparse-torch fallback.  We also always use our fork
+    for the "isotropic morlet" basis which torch-harmonics does not support.
+    """
+    if basis_type == "isotropic morlet":
+        return False
+    return _disco_cuda_available and torch.cuda.is_available()
+
 
 class DistributedBackend(ABC):
     """
