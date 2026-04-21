@@ -27,6 +27,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 
 
 def _extract_text(content):
@@ -192,7 +193,8 @@ def _format_tool_md(tool):
     name = tool["tool"]
     if name == "Bash":
         desc = tool.get("description", "")
-        cmd = tool.get("command", "")
+        cmd = tool.get("command", "").replace("\n", " ")
+        cmd = _escape_details_tags(cmd)
         if len(cmd) > 120:
             cmd = cmd[:120] + "..."
         return f"**Bash** {desc}  \n`{cmd}`"
@@ -206,6 +208,21 @@ def _format_tool_md(tool):
         return f"**Agent** ({sub}) {desc}"
     else:
         return f"**{name}**"
+
+
+def _escape_details_tags(text):
+    """Escape <details> and </details> HTML tags in free text.
+
+    The transcript is wrapped in an outer <details> block, so literal
+    occurrences of these tags in assistant responses would break the
+    nesting.  Replace them with HTML entities so they render visually
+    but don't act as real HTML.
+    """
+    text = re.sub(r"<details(?=[>\s/])", "&lt;details", text)
+    text = re.sub(r"</details\s*>", "&lt;/details&gt;", text)
+    text = re.sub(r"<summary(?=[>\s/])", "&lt;summary", text)
+    text = re.sub(r"</summary\s*>", "&lt;/summary&gt;", text)
+    return text
 
 
 def render_markdown(turns):
@@ -255,7 +272,7 @@ def render_markdown(turns):
         for resp in turn["responses"]:
             if "text" in resp:
                 flush_tools()
-                lines.append(resp["text"])
+                lines.append(_escape_details_tags(resp["text"]))
                 lines.append("")
             if "tools" in resp:
                 tool_buffer.extend(resp["tools"])
@@ -334,42 +351,54 @@ def post_or_update_pr_comment(md_body, session_id, ts_str):
 
     comment_id = _find_existing_comment(pr_number, marker)
 
-    if comment_id:
-        # Update existing comment.
-        subprocess.run(
-            [
-                "gh",
-                "api",
-                f"repos/{{owner}}/{{repo}}/issues/comments/{comment_id}",
-                "--method",
-                "PATCH",
-                "--field",
-                f"body={full_body}",
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        print(f"Updated existing PR comment (id {comment_id}) on PR #{pr_number}")
-    else:
-        # Create new comment.
-        subprocess.run(
-            [
-                "gh",
-                "pr",
-                "comment",
-                pr_number,
-                "--body",
-                full_body,
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        print(f"Created new PR comment on PR #{pr_number}")
+    # Write body to a temp file to avoid shell argument length limits and
+    # special-character issues.
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
+        tmp.write(full_body)
+        tmp_path = tmp.name
+
+    try:
+        if comment_id:
+            # Update existing comment via the API, piping the JSON payload
+            # through stdin (--input -) to avoid CLI arg limits.
+            payload = json.dumps({"body": full_body})
+            subprocess.run(
+                [
+                    "gh",
+                    "api",
+                    f"repos/{{owner}}/{{repo}}/issues/comments/{comment_id}",
+                    "--method",
+                    "PATCH",
+                    "--input",
+                    "-",
+                ],
+                input=payload,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            print(f"Updated existing PR comment (id {comment_id}) on PR #{pr_number}")
+        else:
+            # Create new comment.
+            subprocess.run(
+                [
+                    "gh",
+                    "pr",
+                    "comment",
+                    pr_number,
+                    "--body-file",
+                    tmp_path,
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            print(f"Created new PR comment on PR #{pr_number}")
+    finally:
+        os.unlink(tmp_path)
 
 
-def extract(session_id):
+def extract(session_id, *, dry_run=False):
     input_path = find_session_file(session_id)
 
     with open(input_path) as f:
@@ -380,19 +409,43 @@ def extract(session_id):
 
     turns = parse_turns(entries)
     md_body = render_markdown(turns)
-    post_or_update_pr_comment(md_body, session_id, ts_str)
+
+    if dry_run:
+        id_prefix = session_id.split("-")[0]
+        marker = _COMMENT_MARKER.format(session_id)
+        summary = f"Claude Code transcript log — {ts_str}-{id_prefix}"
+        print(
+            f"{marker}\n"
+            f"<details>\n"
+            f"<summary>{summary}</summary>\n\n"
+            f"{md_body}\n\n"
+            f"</details>"
+        )
+    else:
+        post_or_update_pr_comment(md_body, session_id, ts_str)
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2 or sys.argv[1] in ("-h", "--help"):
+    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
         print(
-            f"Usage: {sys.argv[0]} <session_id>\n"
+            f"Usage: {sys.argv[0]} [--dry-run] <session_id>\n"
             f"\n"
             f"Finds ~/.claude/projects/.../<session_id>.jsonl, extracts\n"
             f"the transcript, and posts (or updates) a collapsible PR\n"
             f"comment with the Markdown transcript.\n"
             f"\n"
-            f"Requires the ``gh`` CLI and a PR open for the current branch."
+            f"Options:\n"
+            f"  --dry-run  Print the comment body to stdout instead of\n"
+            f"             posting to GitHub.\n"
+            f"\n"
+            f"Requires the ``gh`` CLI and a PR open for the current\n"
+            f"branch (unless --dry-run is used)."
         )
         sys.exit(0 if "--help" in sys.argv else 1)
-    extract(sys.argv[1])
+
+    dry_run = "--dry-run" in sys.argv
+    args = [a for a in sys.argv[1:] if a != "--dry-run"]
+    if len(args) != 1:
+        print("Error: expected exactly one session_id argument", file=sys.stderr)
+        sys.exit(1)
+    extract(args[0], dry_run=dry_run)
