@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch_harmonics as th
 
 from fme.core import metrics
+from fme.core.disco import DiscreteContinuousConvS2
 
 from .base import DistributedBackend, _use_torch_harmonics_disco
 
@@ -117,9 +118,6 @@ class NonDistributed(DistributedBackend):
     def get_disco_conv_s2(self, *args, **kwargs) -> nn.Module:
         if _use_torch_harmonics_disco(kwargs.get("basis_type")):
             return th.DiscreteContinuousConvS2(*args, **kwargs).float()
-
-        from fme.core.disco import DiscreteContinuousConvS2
-
         return DiscreteContinuousConvS2(*args, **kwargs).float()
 
     def spatial_reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
