@@ -9,8 +9,7 @@ validate_using_ema: true
 evaluate_before_training: true
 ema:
   decay: 0.999
-max_epochs: 10
-n_coupled_steps: 4
+max_epochs: 5
 inference:
   n_coupled_steps: 1440
   coupled_steps_in_memory: 2
@@ -136,6 +135,7 @@ optimization:
         step_each_iteration: true
     milestones: [2000]
 stepper_training:
+  n_coupled_steps: 4
   parameter_init:
     checkpoint_path: /ckpt.tar
   n_ensemble: 2
@@ -191,6 +191,9 @@ stepper_training:
         h500: 10
         TMP850: 5
         Q2m: 0.5
+        TMP2m: 10
+        UGRD10m: 2.5
+        VGRD10m: 2.5
         DLWRFsfc: 2
         ULWRFsfc: 5
         USWRFsfc: 2
