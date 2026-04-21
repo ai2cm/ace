@@ -1,32 +1,32 @@
 r"""Extract a structured transcript from a Claude Code session file.
 
-Produces both a JSONL file (one turn per line, for programmatic access)
-and a Markdown file (readable on GitHub) from a Claude Code session log.
+Posts the rendered Markdown transcript as a collapsible comment on the
+current branch's pull request.  If a comment for the same session
+already exists, it is updated in place.
 
 Each entry represents one "turn" — starting when the user submits a
 message and ending when control returns to the user.
 
 Usage:
-    python scripts/claude_logs/extract_transcript.py <session_id> <log_folder>
+    python scripts/claude_logs/extract_transcript.py <session_id>
 
     Finds the session file under ~/.claude/projects/, extracts the
-    start timestamp, and writes:
-        scripts/claude_logs/logs/<log_folder>/<timestamp>-<session_id_prefix>.jsonl
-        scripts/claude_logs/logs/<log_folder>/<timestamp>-<session_id_prefix>.md
+    transcript, and posts (or updates) a collapsible PR comment.
+    Requires ``gh`` CLI authenticated and a PR open for the current
+    branch.
 
 Example:
     python scripts/claude_logs/extract_transcript.py \
-        9c55f925-6cb6-48f1-813b-a63ec61d5191 \
-        2026-03-27-vector-filter-basis
+        9c55f925-6cb6-48f1-813b-a63ec61d5191
 """
 
 import glob
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
-
-LOGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
 
 
 def _extract_text(content):
@@ -187,16 +187,6 @@ def parse_turns(entries):
     return turns
 
 
-def write_jsonl(turns, path):
-    """Write turns as JSONL (one JSON object per line)."""
-    with open(path, "w") as f:
-        for turn in turns:
-            f.write(json.dumps(turn, ensure_ascii=False))
-            f.write("\n")
-    n_resp = sum(len(t.get("responses", [])) for t in turns)
-    print(f"Wrote {path} ({len(turns)} turns, {n_resp} responses)")
-
-
 def _format_tool_md(tool):
     """Format a single tool call as a one-line markdown string."""
     name = tool["tool"]
@@ -218,8 +208,8 @@ def _format_tool_md(tool):
         return f"**{name}**"
 
 
-def write_markdown(turns, path):
-    """Write turns as a GitHub-renderable Markdown file."""
+def render_markdown(turns):
+    """Render turns as a GitHub-renderable Markdown string."""
     lines = []
 
     for i, turn in enumerate(turns):
@@ -272,13 +262,114 @@ def write_markdown(turns, path):
 
         flush_tools()
 
-    with open(path, "w") as f:
-        f.write("\n".join(lines))
-
-    print(f"Wrote {path} ({len(turns)} turns)")
+    return "\n".join(lines)
 
 
-def extract(session_id, log_folder):
+# ---------------------------------------------------------------------------
+# PR comment helpers (require ``gh`` CLI)
+# ---------------------------------------------------------------------------
+
+_COMMENT_MARKER = "<!-- claude-transcript: {} -->"
+
+
+def _check_gh():
+    """Ensure the ``gh`` CLI is available."""
+    if shutil.which("gh") is None:
+        print("Error: 'gh' CLI not found on PATH", file=sys.stderr)
+        sys.exit(1)
+
+
+def _get_pr_number():
+    """Return the PR number for the current branch, or exit with an error."""
+    result = subprocess.run(
+        ["gh", "pr", "view", "--json", "number", "-q", ".number"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(
+            "Error: no pull request found for the current branch.\n"
+            "Open a PR first, then re-run this script.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return result.stdout.strip()
+
+
+def _find_existing_comment(pr_number, marker):
+    """Find a PR comment containing *marker* and return its ID, or None."""
+    result = subprocess.run(
+        [
+            "gh",
+            "api",
+            f"repos/{{owner}}/{{repo}}/issues/{pr_number}/comments",
+            "--paginate",
+            "-q",
+            f'.[] | select(.body | contains("{marker}")) | .id',
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    # Take the first match.
+    return result.stdout.strip().splitlines()[0]
+
+
+def post_or_update_pr_comment(md_body, session_id, ts_str):
+    """Post a new PR comment or update an existing one for *session_id*."""
+    _check_gh()
+    pr_number = _get_pr_number()
+    id_prefix = session_id.split("-")[0]
+    marker = _COMMENT_MARKER.format(session_id)
+    summary = f"Claude Code transcript log — {ts_str}-{id_prefix}"
+
+    full_body = (
+        f"{marker}\n"
+        f"<details>\n"
+        f"<summary>{summary}</summary>\n\n"
+        f"{md_body}\n\n"
+        f"</details>"
+    )
+
+    comment_id = _find_existing_comment(pr_number, marker)
+
+    if comment_id:
+        # Update existing comment.
+        subprocess.run(
+            [
+                "gh",
+                "api",
+                f"repos/{{owner}}/{{repo}}/issues/comments/{comment_id}",
+                "--method",
+                "PATCH",
+                "--field",
+                f"body={full_body}",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        print(f"Updated existing PR comment (id {comment_id}) on PR #{pr_number}")
+    else:
+        # Create new comment.
+        subprocess.run(
+            [
+                "gh",
+                "pr",
+                "comment",
+                pr_number,
+                "--body",
+                full_body,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        print(f"Created new PR comment on PR #{pr_number}")
+
+
+def extract(session_id):
     input_path = find_session_file(session_id)
 
     with open(input_path) as f:
@@ -286,31 +377,22 @@ def extract(session_id, log_folder):
 
     ts = _get_session_start_timestamp(entries)
     ts_str = _format_timestamp_for_filename(ts)
-    id_prefix = session_id.split("-")[0]
-
-    out_dir = os.path.join(LOGS_DIR, log_folder)
-    os.makedirs(out_dir, exist_ok=True)
-    stem = os.path.join(out_dir, f"{ts_str}-{id_prefix}")
 
     turns = parse_turns(entries)
-    write_jsonl(turns, stem + ".jsonl")
-    write_markdown(turns, stem + ".md")
+    md_body = render_markdown(turns)
+    post_or_update_pr_comment(md_body, session_id, ts_str)
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3 or sys.argv[1] in ("-h", "--help"):
+    if len(sys.argv) != 2 or sys.argv[1] in ("-h", "--help"):
         print(
-            f"Usage: {sys.argv[0]} <session_id> <log_folder>\n"
+            f"Usage: {sys.argv[0]} <session_id>\n"
             f"\n"
             f"Finds ~/.claude/projects/.../<session_id>.jsonl, extracts\n"
-            f"the transcript, and writes to scripts/claude_logs/logs/<log_folder>/.\n"
+            f"the transcript, and posts (or updates) a collapsible PR\n"
+            f"comment with the Markdown transcript.\n"
             f"\n"
-            f"Output filenames include the session start time and ID\n"
-            f"prefix, e.g.:\n"
-            f"    scripts/claude_logs/logs/<log_folder>/"
-            f"2026-03-26T1817-9c55f925.jsonl\n"
-            f"    scripts/claude_logs/logs/<log_folder>/"
-            f"2026-03-26T1817-9c55f925.md"
+            f"Requires the ``gh`` CLI and a PR open for the current branch."
         )
         sys.exit(0 if "--help" in sys.argv else 1)
-    extract(sys.argv[1], sys.argv[2])
+    extract(sys.argv[1])
