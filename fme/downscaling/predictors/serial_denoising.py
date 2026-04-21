@@ -172,13 +172,13 @@ class DenoisingMoEConfig:
             self.denoising_expert_configs, key=lambda c: c.sigma_min
         )
 
-    def build(self) -> "DenoisingScheduleMoEPredictor":
+    def build(self) -> "DenoisingMoEPredictor":
         experts = [rc.checkpoint_config.build() for rc in self.denoising_expert_configs]
         _validate_experts_compatible(experts)
         sigma_ranges = [
             (rc.sigma_min, rc.sigma_max) for rc in self.denoising_expert_configs
         ]
-        return DenoisingScheduleMoEPredictor(
+        return DenoisingMoEPredictor(
             experts=experts,
             sigma_ranges=sigma_ranges,
             num_diffusion_generation_steps=self.num_diffusion_generation_steps,
@@ -190,7 +190,7 @@ class DenoisingMoEConfig:
         return self.denoising_expert_configs[0].checkpoint_config.data_requirements
 
 
-class DenoisingScheduleMoEPredictor:
+class DenoisingMoEPredictor:
     """
     Mixture of ``DiffusionModel`` experts, each used for part of the EDM sigma
     schedule. Behaves like ``DiffusionModel`` for generation and patching.
