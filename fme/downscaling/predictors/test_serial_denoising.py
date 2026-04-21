@@ -23,12 +23,12 @@ def _range(sigma_min: float, sigma_max: float) -> DenoisingRangeModelConfig:
 
 def test_validate_sigma_ranges_min_ge_max_raises():
     with pytest.raises(ValueError, match="sigma_min < sigma_max"):
-        _validate_sigma_ranges([_range(10.0, 10.0)])
+        _validate_sigma_ranges([(10.0, 10.0)])
 
 
 def test_validate_sigma_ranges_gap_raises():
     with pytest.raises(ValueError, match="contiguous"):
-        _validate_sigma_ranges([_range(0.0, 10.0), _range(11.0, 80.0)])
+        _validate_sigma_ranges([(0.0, 10.0), (11.0, 80.0)])
 
 
 def test_denoising_moe_config_sorts_ranges():

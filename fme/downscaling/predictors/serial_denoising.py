@@ -30,26 +30,23 @@ class DenoisingRangeModelConfig:
     sigma_max: float
 
 
-def _validate_sigma_ranges(configs: list[DenoisingRangeModelConfig]) -> None:
-    if not configs:
-        raise ValueError("denoising_range_configs must contain at least one entry.")
-    for c in configs:
-        if c.sigma_min >= c.sigma_max:
+def _validate_sigma_ranges(sigma_ranges: list[tuple[float, float]]) -> None:
+    if not sigma_ranges:
+        raise ValueError("sigma_ranges must contain at least one entry.")
+    for s_min, s_max in sigma_ranges:
+        if s_min >= s_max:
             raise ValueError(
-                f"Each range needs sigma_min < sigma_max; got "
-                f"[{c.sigma_min}, {c.sigma_max}]."
+                f"Each range needs sigma_min < sigma_max; got " f"[{s_min}, {s_max}]."
             )
-    for i in range(len(configs) - 1):
-        if configs[i].sigma_min >= configs[i + 1].sigma_min:
-            raise ValueError(
-                "denoising_range_configs must be sorted by sigma_min ascending."
-            )
-    for i in range(len(configs) - 1):
-        if configs[i].sigma_max != configs[i + 1].sigma_min:
+    for i in range(len(sigma_ranges) - 1):
+        if sigma_ranges[i][0] >= sigma_ranges[i + 1][0]:
+            raise ValueError("sigma_ranges must be sorted by sigma_min ascending.")
+    for i in range(len(sigma_ranges) - 1):
+        if sigma_ranges[i][1] != sigma_ranges[i + 1][0]:
             raise ValueError(
                 "Sigma ranges must be contiguous: "
-                f"configs[{i}].sigma_max ({configs[i].sigma_max}) must equal "
-                f"configs[{i + 1}].sigma_min ({configs[i + 1].sigma_min}). "
+                f"sigma_ranges[{i}] max ({sigma_ranges[i][1]}) must equal "
+                f"sigma_ranges[{i + 1}] min ({sigma_ranges[i + 1][0]}). "
                 "List ranges in ascending sigma order."
             )
 
@@ -122,6 +119,8 @@ class _SigmaDispatchModule:
                 strict=True,
             )
         )
+        _validate_sigma_ranges(sigma_ranges)
+
         self._min_sigma = sigma_ranges[0][0]
         self._max_sigma = sigma_ranges[-1][1]
 
@@ -173,7 +172,6 @@ class DenoisingMoECheckpointConfig:
         self.denoising_range_configs = sorted(
             self.denoising_range_configs, key=lambda c: c.sigma_min
         )
-        _validate_sigma_ranges(self.denoising_range_configs)
 
     def build(self) -> "DenoisingScheduleSequentialPredictor":
         experts = [rc.checkpoint_config.build() for rc in self.denoising_range_configs]
@@ -213,8 +211,9 @@ class DenoisingScheduleSequentialPredictor:
         self._experts = experts
         self._primary = experts[0]
         self._sigma_ranges = sigma_ranges
-        self._sigma_schedule_min = min(lo for lo, _ in sigma_ranges)
-        self._sigma_schedule_max = max(hi for _, hi in sigma_ranges)
+        _validate_sigma_ranges(sigma_ranges)
+        self._sigma_schedule_min = sigma_ranges[0][0]
+        self._sigma_schedule_max = sigma_ranges[-1][1]
         self._num_diffusion_generation_steps = num_diffusion_generation_steps
         self._churn = churn
         self._dispatch_module = _SigmaDispatchModule(
