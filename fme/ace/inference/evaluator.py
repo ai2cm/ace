@@ -270,11 +270,11 @@ class InferenceEvaluatorConfig:
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ) -> PairedDataWriter:
+        # initial_condition_times from data.initial_time already has one entry per
+        # sample (n_ic * n_ensemble_per_ic); do not repeat by n_ensemble_per_ic again.
         return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
-            initial_condition_times=np.repeat(
-                initial_condition_times, self.n_ensemble_per_ic
-            ),
+            initial_condition_times=initial_condition_times,
             n_timesteps=self.n_forward_steps,
             timestep=timestep,
             variable_metadata=variable_metadata,
