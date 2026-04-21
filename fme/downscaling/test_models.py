@@ -670,6 +670,48 @@ def test_from_state_raises_for_unresolvable_old_checkpoint(tmp_path):
         DiffusionModel.from_state(state)
 
 
+def test_DiffusionModel_from_state_places_coords_on_device():
+    """from_state should place coordinate tensors on get_device()."""
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    fine_coords = make_fine_coords(fine_shape)
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=fine_coords,
+        use_fine_topography=False,
+        static_inputs=StaticInputs(fields=[], coords=fine_coords),
+    )
+    state = model.get_state()
+    # force CPU tensors in state to test device transfer
+    state["full_fine_coords"] = {
+        k: v.cpu() for k, v in state["full_fine_coords"].items()
+    }
+    restored = DiffusionModel.from_state(state)
+    device = get_device()
+    assert restored.full_fine_coords.lat.device == device
+    assert restored.full_fine_coords.lon.device == device
+
+
+def test_DiffusionModel_from_state_decouples_coord_memory():
+    """from_state should not share memory with the input state dict."""
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    fine_coords = make_fine_coords(fine_shape)
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=fine_coords,
+        use_fine_topography=False,
+        static_inputs=StaticInputs(fields=[], coords=fine_coords),
+    )
+    state = model.get_state()
+    original_lat = state["full_fine_coords"]["lat"]
+    restored = DiffusionModel.from_state(state)
+    original_lat.fill_(999.0)
+    assert restored.full_fine_coords.lat.max().item() < 999.0
+
+
 def test__build_variable_loss_weight_tensor():
     weights = {"x": 0.5, "z": 2.0}
     out_names = ["x", "y", "z"]
