@@ -43,16 +43,60 @@ pip install hydra-core boto3 torchvision   # FastGen extras not in fme env
 | Variable | Required | Description |
 |---|---|---|
 | `ACE_TEACHER_CKPT` | **yes** | Path to the pre-trained CONUS 100 km→25 km teacher `.ckpt` |
+| `WANDB_API_KEY` | **yes** | W&B API key (or store in `./credentials/wandb_api.txt`) |
 | `ACE_C_OUT` | no | Number of output channels (default `7`) |
 | `ACE_H_FINE` | no | Fine-grid height in pixels (default `512`) |
 | `ACE_W_FINE` | no | Fine-grid width in pixels (default `512`) |
 | `ACE_STUDENT_STEPS` | no | Student inference steps (default per config; see table above) |
-| `FASTGEN_OUTPUT_ROOT` | no | Where FastGen writes logs/checkpoints (FastGen default: `./output`) |
+| `FASTGEN_OUTPUT_ROOT` | no | Root directory for checkpoints and the config snapshot (default: `./FASTGEN_OUTPUT`) |
 
 ```bash
 export ACE_TEACHER_CKPT=/path/to/conus-100km-25km-teacher.ckpt
+export WANDB_API_KEY=<your-key>
 export FASTGEN_OUTPUT_ROOT=/path/to/experiment/output
 ```
+
+### 4. W&B run configuration
+
+Each run is tracked in W&B under three identifiers that **must be set per run**
+via config overrides — the spike configs only set `group`; `project` and `name`
+default to `"fastgen"` and `"debug"` if not overridden.
+
+```bash
+torchrun --nproc_per_node 8 \
+    -m fme.downscaling.distillation.fastgen_train \
+    --config fme/downscaling/distillation/configs/sft_spike.py \
+    --teacher-checkpoint "$ACE_TEACHER_CKPT" \
+    --data-yaml configs/baselines/downscaling/train-conus-100km-to-25km-augusta.yaml \
+    - log_config.project=ace-distillation \
+      log_config.group=ace_downscaling_sft_spike \
+      log_config.name=sft-run1
+```
+
+| Field | Spike config default | Recommendation |
+|---|---|---|
+| `log_config.project` | `"fastgen"` | Set to `"ace-distillation"` (or your team project) |
+| `log_config.group` | set per config (e.g. `"ace_downscaling_sft_spike"`) | Keep as-is to group runs by method |
+| `log_config.name` | `"debug"` | Set to a unique run name, e.g. `"sft-run1"` or `"fdistill-lr2e-6"` |
+| `log_config.wandb_mode` | `"online"` | Set to `"disabled"` to suppress W&B entirely |
+
+Checkpoints and the `config.yaml` snapshot are written to:
+`$FASTGEN_OUTPUT_ROOT/<project>/<group>/<name>/`
+
+To disable W&B without changing the config file:
+
+```bash
+- log_config.wandb_mode=disabled
+```
+
+**What gets logged:**
+
+| Metric | Cadence | W&B key pattern |
+|---|---|---|
+| Per-loss averages (averaged across DDP ranks) | every 500 iters | `train/<loss_name>` |
+| Learning rate | every 500 iters | `optimizer/lr_<optimizer_name>` |
+| Student sample images vs. real targets | every 500 iters | `train_media/student/generation`, `train_media/data/real` |
+| Validation losses | every 1 000 iters | `val0/<loss_name>` |
 
 ---
 
