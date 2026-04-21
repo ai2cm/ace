@@ -1,5 +1,4 @@
 import dataclasses
-import datetime
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -10,41 +9,50 @@ from torch import nn
 
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
-from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
-from fme.core.dicts import add_names
 from fme.core.distributed import Distributed
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
+from fme.core.registry.module import Module
 from fme.core.step.args import StepArgs
 from fme.core.step.secondary_decoder import (
     NoSecondaryDecoder,
     SecondaryDecoder,
     SecondaryDecoderConfig,
 )
+from fme.core.step.single_module import step_with_adjustments
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
-DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
-DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
 
-
-@StepSelector.register("single_module")
-@StepSelector.register("default")
+@StepSelector.register("secondary_module")
 @dataclasses.dataclass
-class SingleModuleStepConfig(StepConfigABC):
+class SecondaryModuleStepConfig(StepConfigABC):
     """
-    Configuration for a single module stepper.
+    Configuration for a stepper with a primary and secondary module.
+
+    The primary module (builder) produces the main output variables. The
+    secondary module (secondary_builder) receives the same input and produces
+    additional full-field outputs and/or residual corrections.
 
     Parameters:
-        builder: The module builder.
+        builder: The primary module builder.
         in_names: Names of input variables.
-        out_names: Names of output variables.
+        out_names: Names of output variables from the primary module.
         normalization: The normalization configuration.
+        secondary_builder: Builder for the secondary network that receives
+            the same input as the primary module.
+        secondary_out_names: Names of variables output by the secondary network
+            as full fields (used directly as output). Must not overlap with
+            out_names.
+        secondary_residual_out_names: Names of variables for which the secondary
+            network predicts a residual correction. If the name is also in
+            out_names, the residual is added to the backbone's output;
+            otherwise it is added to the (normalized) input value.
         secondary_decoder: Configuration for the secondary decoder that computes
             additional diagnostic variables from outputs.
         ocean: The ocean configuration.
@@ -59,6 +67,9 @@ class SingleModuleStepConfig(StepConfigABC):
     in_names: list[str]
     out_names: list[str]
     normalization: NetworkAndLossNormalizationConfig
+    secondary_builder: ModuleSelector
+    secondary_out_names: list[str] = dataclasses.field(default_factory=list)
+    secondary_residual_out_names: list[str] = dataclasses.field(default_factory=list)
     secondary_decoder: SecondaryDecoderConfig | None = None
     ocean: OceanConfig | None = None
     corrector: AtmosphereCorrectorConfig | CorrectorSelector = dataclasses.field(
@@ -69,7 +80,6 @@ class SingleModuleStepConfig(StepConfigABC):
     residual_prediction: bool = False
 
     def __post_init__(self):
-        self.crps_training = None  # unused, kept for backwards compatibility
         for name in self.prescribed_prognostic_names:
             if name not in self.out_names:
                 raise ValueError(
@@ -85,16 +95,42 @@ class SingleModuleStepConfig(StepConfigABC):
                 raise ValueError(
                     f"next_step_forcing_name is an output variable: '{name}'"
                 )
+        all_secondary_names = set(self.secondary_out_names) | set(
+            self.secondary_residual_out_names
+        )
         if self.secondary_decoder is not None:
             for name in self.secondary_decoder.secondary_diagnostic_names:
                 if name in self.in_names:
                     raise ValueError(
                         f"secondary_diagnostic_name is an input variable: '{name}'"
                     )
-                if name in self.out_names:
+                if name in set(self.out_names) | all_secondary_names:
                     raise ValueError(
                         f"secondary_diagnostic_name is an output variable: '{name}'"
                     )
+        if not self.secondary_out_names and not self.secondary_residual_out_names:
+            raise ValueError(
+                "at least one of secondary_out_names or "
+                "secondary_residual_out_names must be non-empty"
+            )
+        overlap = set(self.secondary_out_names) & set(self.out_names)
+        if overlap:
+            raise ValueError(
+                f"secondary_out_names must not overlap with out_names. "
+                f"Overlap: {overlap}"
+            )
+        overlap = set(self.secondary_out_names) & set(self.secondary_residual_out_names)
+        if overlap:
+            raise ValueError(
+                f"secondary_out_names must not overlap with "
+                f"secondary_residual_out_names. Overlap: {overlap}"
+            )
+        for name in self.secondary_residual_out_names:
+            if name not in self.out_names and name not in self.in_names:
+                raise ValueError(
+                    f"secondary_residual_out_name '{name}' must be in "
+                    f"out_names or in_names: {self.out_names}, {self.in_names}"
+                )
 
     @property
     def n_ic_timesteps(self) -> int:
@@ -118,8 +154,7 @@ class SingleModuleStepConfig(StepConfigABC):
         )
 
     @classmethod
-    def from_state(cls, state) -> "SingleModuleStepConfig":
-        state = cls._remove_deprecated_keys(state)
+    def from_state(cls, state) -> "SecondaryModuleStepConfig":
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
         )
@@ -151,12 +186,17 @@ class SingleModuleStepConfig(StepConfigABC):
 
     @property
     def output_names(self) -> list[str]:
-        secondary_names = (
+        secondary_decoder_names = (
             self.secondary_decoder.secondary_diagnostic_names
             if self.secondary_decoder is not None
             else []
         )
-        return list(set(self.out_names).union(secondary_names))
+        return list(
+            set(self.out_names)
+            .union(secondary_decoder_names)
+            .union(self.secondary_out_names)
+            .union(self.secondary_residual_out_names)
+        )
 
     @property
     def next_step_input_names(self) -> list[str]:
@@ -194,22 +234,15 @@ class SingleModuleStepConfig(StepConfigABC):
                 )
         self.prescribed_prognostic_names = names
 
-    @classmethod
-    def _remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
-        state_copy = state.copy()
-        if "crps_training" in state_copy:
-            del state_copy["crps_training"]
-        return state_copy
-
     def get_step(
         self,
         dataset_info: DatasetInfo,
         init_weights: Callable[[list[nn.Module]], None],
-    ) -> "SingleModuleStep":
+    ) -> "SecondaryModuleStep":
         logging.info("Initializing stepper from provided config")
         corrector = self.corrector.get_corrector(dataset_info)
         normalizer = self.normalization.get_network_normalizer(self._normalize_names)
-        return SingleModuleStep(
+        return SecondaryModuleStep(
             config=self,
             dataset_info=dataset_info,
             corrector=corrector,
@@ -221,9 +254,9 @@ class SingleModuleStepConfig(StepConfigABC):
         self.normalization.load()
 
 
-class SingleModuleStep(StepABC):
+class SecondaryModuleStep(StepABC):
     """
-    Step class for a single pytorch module.
+    Step class with a primary and secondary pytorch module.
     """
 
     TIME_DIM = 1
@@ -231,7 +264,7 @@ class SingleModuleStep(StepABC):
 
     def __init__(
         self,
-        config: SingleModuleStepConfig,
+        config: SecondaryModuleStepConfig,
         dataset_info: DatasetInfo,
         corrector: CorrectorABC,
         normalizer: StandardNormalizer,
@@ -243,7 +276,6 @@ class SingleModuleStep(StepABC):
             dataset_info: Information about the dataset.
             corrector: The corrector to use at the end of each step.
             normalizer: The normalizer to use.
-            timestep: Timestep of the model.
             init_weights: Function to initialize the weights of the module.
         """
         super().__init__()
@@ -267,6 +299,17 @@ class SingleModuleStep(StepABC):
 
         dist = Distributed.get_instance()
 
+        all_secondary_names = (
+            config.secondary_out_names + config.secondary_residual_out_names
+        )
+        secondary_module = config.secondary_builder.build(
+            n_in_channels=n_in_channels,
+            n_out_channels=len(all_secondary_names),
+            dataset_info=dataset_info,
+        )
+        self.secondary_module: Module = secondary_module.to(get_device())
+        self.secondary_out_packer: Packer = Packer(all_secondary_names)
+
         if config.secondary_decoder is not None:
             self.secondary_decoder: SecondaryDecoder | NoSecondaryDecoder = (
                 config.secondary_decoder.build(
@@ -282,6 +325,7 @@ class SingleModuleStep(StepABC):
         self._no_optimization = NullOptimization()
 
         self.module = self.module.wrap_module(dist.wrap_module)
+        self.secondary_module = self.secondary_module.wrap_module(dist.wrap_module)
         self.secondary_decoder = self.secondary_decoder.wrap_module(dist.wrap_module)
         self._timestep = dataset_info.timestep
 
@@ -290,7 +334,7 @@ class SingleModuleStep(StepABC):
         self.out_names = config.out_names
 
     @property
-    def config(self) -> SingleModuleStepConfig:
+    def config(self) -> SecondaryModuleStepConfig:
         return self._config
 
     @property
@@ -329,6 +373,7 @@ class SingleModuleStep(StepABC):
             A list of modules being trained.
         """
         modules = [self.module.torch_module]
+        modules.append(self.secondary_module.torch_module)
         modules.extend(self.secondary_decoder.torch_modules)
         return nn.ModuleList(modules)
 
@@ -355,6 +400,20 @@ class SingleModuleStep(StepABC):
                 labels=args.labels,
             )
             output_dict = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
+            secondary_tensor = self.secondary_module.wrap_module(wrapper)(
+                input_tensor,
+                labels=args.labels,
+            )
+            secondary_dict = self.secondary_out_packer.unpack(
+                secondary_tensor, axis=self.CHANNEL_DIM
+            )
+            for name in self._config.secondary_out_names:
+                output_dict[name] = secondary_dict[name]
+            for name in self._config.secondary_residual_out_names:
+                if name in output_dict:
+                    output_dict[name] = output_dict[name] + secondary_dict[name]
+                else:
+                    output_dict[name] = input_norm[name] + secondary_dict[name]
             secondary_output_dict = self.secondary_decoder.wrap_module(wrapper)(
                 output_tensor.detach()  # detach avoids changing base outputs
             )
@@ -381,11 +440,11 @@ class SingleModuleStep(StepABC):
         Returns:
             The state of the stepper.
         """
-        state = {
+        return {
             "module": self.module.get_state(),
+            "secondary_module": self.secondary_module.get_state(),
             "secondary_decoder": self.secondary_decoder.get_module_state(),
         }
-        return state
 
     def load_state(self, state: dict[str, Any]) -> None:
         """
@@ -394,66 +453,7 @@ class SingleModuleStep(StepABC):
         Args:
             state: The state to load.
         """
-        module = state["module"]
-        if "module.device_buffer" in module:
-            # for backwards compatibility with old checkpoints
-            del module["module.device_buffer"]
-        self.module.load_state(module)
+        self.module.load_state(state["module"])
+        self.secondary_module.load_state(state["secondary_module"])
         if "secondary_decoder" in state:
             self.secondary_decoder.load_module_state(state["secondary_decoder"])
-
-
-def step_with_adjustments(
-    input: TensorMapping,
-    next_step_input_data: TensorMapping,
-    network_calls: Callable[[TensorDict], TensorDict],
-    normalizer: StandardNormalizer,
-    corrector: CorrectorABC,
-    ocean: Ocean | None,
-    residual_prediction: bool,
-    prognostic_names: list[str],
-    prescribed_prognostic_names: list[str] | None = None,
-) -> TensorDict:
-    """
-    Step the model forward one timestep given input data.
-
-    Args:
-        input: Mapping from variable name to tensor of shape
-            [n_batch, n_lat, n_lon] containing denormalized data from the
-            initial timestep. In practice this contains the ML inputs.
-        next_step_input_data: Mapping from variable name to tensor of shape
-            [n_batch, n_lat, n_lon] containing denormalized data from
-            the output timestep. In practice this contains the necessary data
-            at the output timestep for the ocean model and corrector.
-        network_calls: Callable[[TensorMapping], TensorDict] that takes a
-            normalized input and returns a normalized output.
-        normalizer: The normalizer to use.
-        corrector: The corrector to use at the end of each step.
-        ocean: The ocean model to use.
-        residual_prediction: Whether to use residual prediction.
-        prognostic_names: Names of prognostic variables.
-        prescribed_prognostic_names: Prognostic names to overwrite from
-            next_step_input_data after the ocean step (e.g. for inference).
-
-    Returns:
-        The denormalized output data at the next time step.
-    """
-    if prescribed_prognostic_names is None:
-        prescribed_prognostic_names = []
-    input_norm = normalizer.normalize(input)
-    output_norm = network_calls(input_norm)
-    if residual_prediction:
-        output_norm = add_names(input_norm, output_norm, prognostic_names)
-    output = normalizer.denormalize(output_norm)
-    if corrector is not None:
-        output = corrector(input, output, next_step_input_data)
-    if ocean is not None:
-        output = ocean(input, output, next_step_input_data)
-    for name in prescribed_prognostic_names:
-        if name in next_step_input_data:
-            output = {**output, name: next_step_input_data[name]}
-        else:
-            raise ValueError(
-                f"prescribed_prognostic_name '{name}' not in next_step_input_data"
-            )
-    return output
