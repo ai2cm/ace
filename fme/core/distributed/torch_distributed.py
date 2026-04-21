@@ -32,13 +32,13 @@ class TorchDistributed(DistributedBackend):
                     torch.distributed.init_process_group(
                         backend="nccl",
                         init_method="env://",
-                        timeout=timedelta(minutes=60),
+                        timeout=timedelta(minutes=30),
                     )
                 else:
                     torch.distributed.init_process_group(
                         backend="gloo",
                         init_method="env://",
-                        timeout=timedelta(minutes=60),
+                        timeout=timedelta(minutes=30),
                     )
             self.world_size = torch.distributed.get_world_size()
             local_rank = int(os.environ["LOCAL_RANK"])
@@ -56,7 +56,7 @@ class TorchDistributed(DistributedBackend):
                 init_method=f"file://{shared_dist_file}",
                 rank=self.rank,
                 world_size=self.world_size,
-                timeout=timedelta(minutes=60),
+                timeout=timedelta(minutes=30),
             )
             if using_gpu():
                 # this assumes one GPU per process in the SLURM setting
