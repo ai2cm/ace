@@ -746,7 +746,9 @@ class CheckpointModelConfig:
     @property
     def _checkpoint(self) -> Mapping[str, Any]:
         if not self._checkpoint_is_loaded:
-            checkpoint_data = torch.load(self.checkpoint_path, weights_only=False)
+            checkpoint_data = torch.load(
+                self.checkpoint_path, map_location="cpu", weights_only=False
+            )
             checkpoint_data["model"]["config"]["in_names"] = [
                 self._rename.get(name, name)
                 for name in checkpoint_data["model"]["config"]["in_names"]
