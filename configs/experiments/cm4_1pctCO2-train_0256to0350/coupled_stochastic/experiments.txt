@@ -11,3 +11,5 @@ ft_fto_stochastic_ncs3_10ep-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KNRCQCF5V
 ft_fto_stochastic_ncs3_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KNW432G50TY9WKN7C9HMVS1E|training|best_inference_ckpt|normal|--not-preemptible
 
 ft_fto_stochastic_ncs4_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KNZHD7DGXC8YCVMVS00QZQNX|run_140yr|best_inference_ckpt|high|--not-preemptible
+
+ft_fto_stochastic_ncs4_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0||training|best_inference_ckpt|normal|--not-preemptible
