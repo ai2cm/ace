@@ -113,7 +113,7 @@ class ValidationConfig:
             settings, and forward step scheduling. Set this to match the training
             configuration if you want ``val/mean/loss`` to be directly comparable.
             The number of forward steps is derived from
-            ``stepper_training.train_n_forward_steps`` (defaults to 1 if unset).
+            ``stepper_training.n_forward_steps`` (defaults to 1 if unset).
 
     """
 
@@ -131,9 +131,9 @@ class ValidationConfig:
                 "stepper_training.parameter_init is not used for validation within "
                 "inference evaluator jobs."
             )
-        if isinstance(self.stepper_training.train_n_forward_steps, TimeLengthSchedule):
+        if isinstance(self.stepper_training.n_forward_steps, TimeLengthSchedule):
             raise ValueError(
-                "stepper_training.train_n_forward_steps may not be a "
+                "stepper_training.n_forward_steps may not be a "
                 "TimeLengthSchedule for validation within inference evaluator jobs. "
                 "Use TimeLengthProbabilities or an int instead."
             )
@@ -141,13 +141,13 @@ class ValidationConfig:
     def get_n_forward_steps(self) -> int:
         """Resolve the effective number of forward steps for validation.
 
-        Derives the value from ``stepper_training.train_n_forward_steps``.
+        Derives the value from ``stepper_training.n_forward_steps``.
         Defaults to 1 for standard single-step validation if unset.
         """
-        train_n = self.stepper_training.train_n_forward_steps
+        train_n = self.stepper_training.n_forward_steps
         if train_n is None:
             logging.info(
-                "stepper_training.train_n_forward_steps was not configured for "
+                "stepper_training.n_forward_steps was not configured for "
                 "validation within the inference evaluator job, defaulting to "
                 "n_forward_steps=1."
             )

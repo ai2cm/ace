@@ -1335,13 +1335,13 @@ def test_evaluator_with_non_local_experiment_dir(
     [
         pytest.param(dict(), id="default"),
         pytest.param(
-            dict(stepper_training=TrainStepperConfig(train_n_forward_steps=1)),
+            dict(stepper_training=TrainStepperConfig(n_forward_steps=1)),
             id="stepper_training_int",
         ),
         pytest.param(
             dict(
                 stepper_training=TrainStepperConfig(
-                    train_n_forward_steps=TimeLengthProbabilities(
+                    n_forward_steps=TimeLengthProbabilities(
                         outcomes=[TimeLengthProbability(steps=1, probability=1.0)]
                     )
                 )
