@@ -327,7 +327,11 @@ class DiscreteContinuousConvS2(DiscreteContinuousConv):
         psi_fft_conj, gather_idx = _precompute_psi_banded(
             psi_sparse, self.nlat_in, self.nlon_in
         )
-        self.register_buffer("psi_fft_conj", psi_fft_conj, persistent=False)
+        # Store as plain attributes (not buffers) because psi_fft_conj is
+        # complex-valued and gather_idx is integer-typed; DDP's
+        # _broadcast_coalesced cannot handle either dtype.  These tensors are
+        # deterministic across ranks so synchronisation is unnecessary.
+        self.psi_fft_conj = psi_fft_conj
         self.psi_gather_idx = gather_idx
 
     def _apply(self, fn, recurse=True):
@@ -338,6 +342,7 @@ class DiscreteContinuousConvS2(DiscreteContinuousConv):
         self.psi_ker_idx = fn(self.psi_ker_idx)
         self.psi_row_idx = fn(self.psi_row_idx)
         self.psi_col_idx = fn(self.psi_col_idx)
+        self.psi_fft_conj = fn(self.psi_fft_conj)
         self.psi_gather_idx = fn(self.psi_gather_idx)
         return self
 
