@@ -8,7 +8,9 @@ data_writer:
     save_monthly_files: false
   atmosphere:
     save_prediction_files: false
-    save_monthly_files: false
+    save_monthly_files: true
+    names:
+      - surface_temperature
 logging:
   log_to_screen: true
   log_to_wandb: true
