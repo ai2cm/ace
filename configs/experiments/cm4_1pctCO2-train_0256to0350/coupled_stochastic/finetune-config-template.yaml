@@ -191,6 +191,9 @@ stepper_training:
         h500: 10
         TMP850: 5
         Q2m: 0.5
+        TMP2m: 10
+        UGRD10m: 2.5
+        VGRD10m: 2.5
         DLWRFsfc: 2
         ULWRFsfc: 5
         USWRFsfc: 2
