@@ -1,6 +1,7 @@
 import pytest
 import torch
 
+from fme.core.device import get_device
 from fme.core.mask_provider import MaskProvider, NullMaskProvider
 
 
@@ -81,12 +82,12 @@ def test_mask_provider_empty_init():
 def test_mask_provider_to_device():
     # test moving masks to a different device
     masks = {"mask_temp": torch.tensor([1, 0], dtype=torch.float32)}
-    provider_cpu = MaskProvider(masks=masks)
+    provider = MaskProvider(masks=masks)
     # using 'meta' device for testing without needing specific hardware
-    provider_meta = provider_cpu.to("meta")
+    provider_meta = provider.to("meta")
     assert provider_meta.masks["mask_temp"].device == torch.device("meta")
     # original provider should be unchanged
-    assert provider_cpu.masks["mask_temp"].device == torch.device("cpu")
+    assert provider.masks["mask_temp"].device == torch.device("cpu")
 
 
 def test_mask_provider_update_success():
@@ -118,12 +119,11 @@ def test_mask_provider_update_uses_first_overlapped_keys():
     provider1 = MaskProvider(masks=masks1.copy())
     provider2 = MaskProvider(masks=masks2.copy())
     provider1.update(provider2)
-    assert torch.equal(provider1.masks["mask_common"], masks1["mask_common"])
+    assert torch.equal(
+        provider1.masks["mask_common"],
+        torch.tensor([0, 0]),
+    )
     assert "mask_humidity" in provider1.masks
-
-    # Ensure original provider mask is unchanged
-    for name, mask in masks1.items():
-        assert torch.equal(mask, masks1[name])
 
 
 @pytest.mark.parametrize(
@@ -265,3 +265,19 @@ def test_null_mask_provider_update_err():
     mask_provider = MaskProvider(masks={"mask_2d": torch.rand(2, 2)})
     with pytest.raises(ValueError, match="mask_2d"):
         NullMaskProvider.update(mask_provider)
+
+
+def test_from_state_places_tensors_on_device():
+    state = {"masks": {"mask_2d": torch.tensor([[1.0, 0.0], [0.0, 1.0]], device="cpu")}}
+    provider = MaskProvider.from_state(state)
+    device = get_device()
+    for tensor in provider.masks.values():
+        assert tensor.device == device
+
+
+def test_from_state_decouples_memory():
+    masks = {"mask_2d": torch.tensor([[1.0, 0.0], [0.0, 1.0]], device="cpu")}
+    state = {"masks": masks}
+    provider = MaskProvider.from_state(state)
+    masks["mask_2d"].fill_(999.0)
+    assert provider.masks["mask_2d"].max().item() == 1.0
