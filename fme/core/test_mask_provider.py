@@ -191,7 +191,8 @@ def test_mask_provider_eq(masks1, masks2, expected_equal: bool):
 def test_mask_provider_round_trip(mask_provider: MaskProvider):
     state = mask_provider.get_state()
     reloaded_provider = MaskProvider.from_state(state)
-    assert mask_provider == reloaded_provider
+    device = get_device()
+    assert mask_provider.to(str(device)) == reloaded_provider
 
 
 @pytest.mark.parametrize(

@@ -45,10 +45,11 @@ def test_StaticInputs_serialize():
     state = static_inputs.get_state()
     assert "coords" in state
     reconstructed = StaticInputs.from_state(state)
-    assert reconstructed[0].data.equal(static_inputs[0].data)
-    assert reconstructed[1].data.equal(static_inputs[1].data)
-    assert torch.equal(reconstructed.coords.lat, static_inputs.coords.lat)
-    assert torch.equal(reconstructed.coords.lon, static_inputs.coords.lon)
+    device = get_device()
+    assert reconstructed[0].data.equal(static_inputs[0].data.to(device))
+    assert reconstructed[1].data.equal(static_inputs[1].data.to(device))
+    assert torch.equal(reconstructed.coords.lat, static_inputs.coords.lat.to(device))
+    assert torch.equal(reconstructed.coords.lon, static_inputs.coords.lon.to(device))
 
 
 def test_StaticInputs_from_state_raises_on_missing_coords():
@@ -68,9 +69,10 @@ def test_StaticInputs_from_state_legacy_coords_in_fields():
         "fields": [{"data": data, "coords": {"lat": coords.lat, "lon": coords.lon}}],
     }
     result = StaticInputs.from_state(old_state)
-    assert torch.equal(result[0].data, data)
-    assert torch.equal(result.coords.lat, coords.lat)
-    assert torch.equal(result.coords.lon, coords.lon)
+    device = get_device()
+    assert torch.equal(result[0].data, data.to(device))
+    assert torch.equal(result.coords.lat, coords.lat.to(device))
+    assert torch.equal(result.coords.lon, coords.lon.to(device))
 
 
 def test_from_state_backwards_compatible_has_coords():
@@ -82,7 +84,7 @@ def test_from_state_backwards_compatible_has_coords():
         state=state, static_inputs_config={}
     )
     assert result is not None
-    assert torch.equal(result[0].data, data)
+    assert torch.equal(result[0].data, data.to(get_device()))
 
 
 def test_from_state_backwards_compatible_no_state_no_config():
