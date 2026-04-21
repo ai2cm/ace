@@ -36,7 +36,7 @@ def test_noise_conditioned_sfno_conditioning():
     n_pos = 8
     n_labels = 4
     model = NoiseConditionedSFNO(
-        module=mock_sfno,
+        conditional_model=mock_sfno,
         img_shape=img_shape,
         embed_dim_noise=n_noise,
         embed_dim_pos=n_pos,
