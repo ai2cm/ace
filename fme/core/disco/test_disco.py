@@ -1,3 +1,4 @@
+import pytest
 import torch
 import torch_harmonics as th
 
@@ -28,7 +29,17 @@ def test_forward_shape():
     assert y.shape == (2, out_channels, *img_shape)
 
 
-def test_matches_torch_harmonics_reference():
+@pytest.mark.parametrize(
+    "basis_type, basis_norm_mode, grid",
+    [
+        ("morlet", "mean", "equiangular"),
+        ("morlet", "mean", "legendre-gauss"),
+        ("morlet", "individual", "equiangular"),
+        ("piecewise linear", "mean", "equiangular"),
+        ("piecewise linear", "mean", "legendre-gauss"),
+    ],
+)
+def test_matches_torch_harmonics_reference(basis_type, basis_norm_mode, grid):
     """Output matches the torch-harmonics sparse-matrix implementation."""
     torch.manual_seed(0)
     img_shape = (16, 32)
@@ -38,11 +49,11 @@ def test_matches_torch_harmonics_reference():
         in_shape=img_shape,
         out_shape=img_shape,
         kernel_shape=(3, 3),
-        basis_type="morlet",
-        basis_norm_mode="mean",
+        basis_type=basis_type,
+        basis_norm_mode=basis_norm_mode,
         groups=1,
-        grid_in="equiangular",
-        grid_out="equiangular",
+        grid_in=grid,
+        grid_out=grid,
         bias=False,
         theta_cutoff=0.5,
     )
