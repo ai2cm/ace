@@ -61,7 +61,7 @@ class LossContributionsConfig:
 
     Parameters:
         n_steps: The number of consecutive steps contributing to the loss,
-            starting from the first. Can be a float (including ``inf`` for all
+            starting from the first. Can be a float (defaults to ``inf`` for all
             steps) or a ``TimeLengthProbabilities`` for stochastic per-batch
             sampling.
         weight: (optional) Weight applied to each step loss for the given realm.
