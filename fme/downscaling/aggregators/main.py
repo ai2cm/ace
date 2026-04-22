@@ -18,6 +18,7 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.histogram import ComparedDynamicTailsHistograms
+from fme.core.tensor_dict_accumulator import TensorDictAccumulator
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators.adapters import ComparedDynamicTailsHistogramsAdapter
@@ -274,35 +275,25 @@ class Mean:
         name: str = "",
     ) -> None:
         self._mapped_metric = map_tensor_mapping(metric)
-        self._sum: TensorMapping | None = None
-        self._count: int = 0
-        self._add = map_tensor_mapping(torch.add)
-        self._dist = Distributed.get_instance()
+        self._accumulator = TensorDictAccumulator()
         self._name = ensure_trailing_slash(name)
+
+    @property
+    def count(self) -> int:
+        return self._accumulator.count
 
     @torch.no_grad()
     def record_batch(self, data: TensorMapping) -> None:
         """
         Record the metric for the current batch.
         """
-        metric = self._mapped_metric(data)
-
-        if self._sum is None:
-            self._sum = {k: torch.zeros_like(v) for k, v in metric.items()}
-
-        self._sum = self._add(self._sum, metric)
-        self._count += 1
+        self._accumulator.add(self._mapped_metric(data))
 
     def get(self) -> TensorMapping:
         """
         Calculates and return the current mean of the metric values.
         """
-        if self._sum is None:
-            raise ValueError("No values have been added to the running average")
-        return {
-            k: self._dist.reduce_mean(self._sum[k] / self._count)
-            for k in sorted(list(self._sum))
-        }
+        return self._accumulator.get_distributed_mean()
 
     def get_wandb(self, prefix: str = "") -> Mapping[str, Any]:
         """
@@ -331,32 +322,25 @@ class SumComparison:
         name: str = "",
     ) -> None:
         self._mapped_metric = map_tensor_mapping(metric)
-        self._sum: TensorMapping | None = None
-        self._add = map_tensor_mapping(torch.add)
-        self._dist = Distributed.get_instance()
-        self._count = 0
+        self._accumulator = TensorDictAccumulator()
         self._name = ensure_trailing_slash(name)
+
+    @property
+    def count(self) -> int:
+        return self._accumulator.count
 
     @torch.no_grad()
     def record_batch(self, target: TensorMapping, prediction: TensorMapping) -> None:
         """
         Record the metric for the current target and prediction batch.
         """
-        metric = self._mapped_metric(target, prediction)
-
-        if self._sum is None:
-            self._sum = {k: torch.zeros_like(v) for k, v in metric.items()}
-
-        self._sum = self._add(self._sum, metric)
-        self._count += 1
+        self._accumulator.add(self._mapped_metric(target, prediction))
 
     def get(self) -> TensorMapping:
         """
         Calculates and return the current sum of the metric values.
         """
-        if self._sum is None:
-            raise ValueError("No values have been added to the running sum")
-        return {k: self._dist.reduce_sum(self._sum[k]) for k in sorted(list(self._sum))}
+        return self._accumulator.get_distributed_sum()
 
     def get_wandb(self, prefix: str = "") -> Mapping[str, Any]:
         """
@@ -388,11 +372,12 @@ class MeanComparison:
         name: str = "",
     ) -> None:
         self._mapped_metric = map_tensor_mapping(metric) if metric is not None else None
-        self._sum: TensorMapping | None = None
-        self._count: int = 0
-        self._add = map_tensor_mapping(torch.add)
-        self._dist = Distributed.get_instance()
+        self._accumulator = TensorDictAccumulator()
         self._name = ensure_trailing_slash(name)
+
+    @property
+    def count(self) -> int:
+        return self._accumulator.count
 
     @torch.no_grad()
     def record_batch(
@@ -416,23 +401,13 @@ class MeanComparison:
             metric = self._mapped_metric(target, prediction)
         else:
             raise ValueError("No metric function provided to MeanComparisonAggregator")
-
-        if self._sum is None:
-            self._sum = {k: torch.zeros_like(v) for k, v in metric.items()}
-
-        self._sum = self._add(self._sum, metric)
-        self._count += 1
+        self._accumulator.add(metric)
 
     def get(self) -> TensorMapping:
         """
         Calculates and returns the current mean of the comparison metric values.
         """
-        if self._sum is None:
-            raise ValueError("No values have been added to the running average")
-        return {
-            k: self._dist.reduce_mean(self._sum[k] / self._count)
-            for k in sorted(list(self._sum))
-        }
+        return self._accumulator.get_distributed_mean()
 
     def get_wandb(self, prefix: str = "") -> Mapping[str, Any]:
         """
@@ -1047,7 +1022,7 @@ class Aggregator:
 
         ret: dict[str, Any] = {}
         ret.update(self.loss.get_wandb(prefix))
-        if self.channel_loss._count > 0:
+        if self.channel_loss.count > 0:
             ret.update(self.channel_loss.get_wandb(f"{prefix}channel_loss/"))
         if self.loss_vs_noise is not None:
             ret.update(self.loss_vs_noise.get_wandb(prefix))
