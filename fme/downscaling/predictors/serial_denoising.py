@@ -51,42 +51,10 @@ def _validate_sigma_ranges(sigma_ranges: list[tuple[float, float]]) -> None:
 def _validate_experts_compatible(experts: list[DiffusionModel]) -> None:
     primary = experts[0]
     for m in experts[1:]:
-        if m.in_packer.names != primary.in_packer.names:
+        if m.metadata != primary.metadata:
             raise ValueError(
-                "All experts must share the same input names; "
-                f"got {m.in_packer.names} vs {primary.in_packer.names}."
-            )
-        if m.out_packer.names != primary.out_packer.names:
-            raise ValueError(
-                "All experts must share the same output names; "
-                f"got {m.out_packer.names} vs {primary.out_packer.names}."
-            )
-        if m.coarse_shape != primary.coarse_shape:
-            raise ValueError(
-                "All experts must share the same coarse_shape; "
-                f"got {m.coarse_shape} vs {primary.coarse_shape}."
-            )
-        if m.downscale_factor != primary.downscale_factor:
-            raise ValueError(
-                "All experts must share the same downscale_factor; "
-                f"got {m.downscale_factor} vs {primary.downscale_factor}."
-            )
-        if m.config.predict_residual != primary.config.predict_residual:
-            raise ValueError(
-                "All experts must share the same predict_residual setting."
-            )
-        if (m.static_inputs is None) != (primary.static_inputs is None):
-            raise ValueError(
-                "All experts must either have static_inputs=None or all "
-                "must have static_inputs; got a mix."
-            )
-        if (
-            m.static_inputs is not None
-            and primary.static_inputs is not None
-            and m.static_inputs.coords != primary.static_inputs.coords
-        ):
-            raise ValueError(
-                "All experts must share the same static_inputs coordinates."
+                "All experts must share the same metadata; "
+                f"got {m.metadata} vs {primary.metadata}."
             )
 
 
