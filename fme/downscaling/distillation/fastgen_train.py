@@ -8,11 +8,24 @@ Usage::
     python -m fme.downscaling.distillation.fastgen_train \\
         --config fme/downscaling/distillation/configs/sft_spike.py \\
         --teacher-checkpoint /path/to/teacher.ckpt \\
-        --data-yaml /path/to/train-conus-100km-to-25km.yaml \\
+        --data-yaml /path/to/coarse-only.yaml \\
         [- model.net_optimizer.lr=2e-5 ...]
 
 The ``-`` separator before FastGen key=value overrides is required by
 FastGen's ``override_config_with_opts`` (mirrors its own CLI convention).
+
+The data YAML only needs a coarse dataset — fine ground-truth data is not
+required.  The teacher's EDM sampler generates x0 targets at training time.
+Minimal example::
+
+    train_data:
+      coarse:
+        - data_path: /path/to/coarse.zarr
+          file_pattern: "*.nc"
+          engine: zarr
+      batch_size: 1
+      num_data_workers: 4
+      strict_ensemble: false
 
 Environment variables:
     ACE_TEACHER_CKPT  — fallback when ``--teacher-checkpoint`` is not set.
@@ -33,8 +46,8 @@ import torch
 import yaml
 
 from fme.core.distributed.distributed import Distributed
-from fme.downscaling.data import PairedDataLoaderConfig
-from fme.downscaling.data.datasets import PairedGriddedData
+from fme.downscaling.data.config import DataLoaderConfig
+from fme.downscaling.data.datasets import GriddedData
 from fme.downscaling.distillation.fastgen_loader import AceConditionBuilder
 from fme.downscaling.distillation.fastgen_teacher import AceDiffusionTeacher
 from fme.downscaling.models import CheckpointModelConfig
@@ -57,7 +70,7 @@ def _copy_ace_teacher(teacher: AceDiffusionTeacher) -> AceDiffusionTeacher:
 
 
 class AceInfiniteDataLoader:
-    """Infinite iterator wrapping ACE's ``PairedGriddedData`` for FastGen.
+    """Infinite iterator wrapping ACE's ``GriddedData`` for FastGen.
 
     FastGen's ``Trainer`` reads ``.batch_size`` and ``.sampler_start_idx``
     directly from ``config.dataloader_train``, then calls
@@ -66,7 +79,7 @@ class AceInfiniteDataLoader:
     as-is), and finally iterates it via ``iter()`` / ``next()``.
 
     Args:
-        data: Built ``PairedGriddedData`` from ``PairedDataLoaderConfig.build()``.
+        data: Built ``GriddedData`` from ``DataLoaderConfig.build()``.
         condition_builder: ``AceConditionBuilder`` wrapping the teacher model.
         batch_size: Per-GPU batch size (mirrors the ACE data config value).
         patch_extent_yx: Optional ``(lat_tiles, lon_tiles)`` in *coarse* grid
@@ -75,7 +88,7 @@ class AceInfiniteDataLoader:
 
     def __init__(
         self,
-        data: PairedGriddedData,
+        data: GriddedData,
         condition_builder: AceConditionBuilder,
         batch_size: int,
         patch_extent_yx: tuple[int, int] | None = None,
@@ -95,17 +108,17 @@ class AceInfiniteDataLoader:
             )
 
 
-def _load_data_config(yaml_path: str) -> PairedDataLoaderConfig:
-    """Parse a downscaling training YAML into a ``PairedDataLoaderConfig``.
+def _load_data_config(yaml_path: str) -> DataLoaderConfig:
+    """Parse a coarse-only data YAML into a ``DataLoaderConfig``.
 
-    Accepts both a bare ``PairedDataLoaderConfig`` dict and the standard
-    training YAML format that nests the data config under a ``train_data:`` key.
+    Accepts both a bare ``DataLoaderConfig`` dict and the standard training
+    YAML format that nests the data config under a ``train_data:`` key.
     """
     with open(yaml_path) as f:
         raw = yaml.safe_load(f)
     data_dict = raw.get("train_data", raw)
     return dacite.from_dict(
-        data_class=PairedDataLoaderConfig,
+        data_class=DataLoaderConfig,
         data=data_dict,
         config=dacite.Config(strict=False),
     )
@@ -240,18 +253,17 @@ def main() -> None:
     )
 
     # ------------------------------------------------------------------
-    # 5. Build ACE data pipeline.
+    # 5. Build ACE data pipeline (coarse-only).
     #
-    #    We pass a NonDistributed-backed Distributed to PairedDataLoaderConfig
-    #    so ACE's sampler logic (DistributedSampler vs plain sampler) stays
-    #    on the single-rank path.  FastGen's DDP wrapper handles gradient
-    #    synchronisation across model replicas; each rank will see the same
-    #    full dataset (acceptable for the spike).
+    #    We pass a NonDistributed-backed Distributed so ACE's sampler logic
+    #    stays on the single-rank path.  FastGen's DDP wrapper handles
+    #    gradient synchronisation across model replicas; each rank sees the
+    #    same full dataset (acceptable for the spike).
     # ------------------------------------------------------------------
     data_cfg = _load_data_config(args.data_yaml)
     ace_dist = Distributed(force_non_distributed=True)
-    train_data = data_cfg.build(train=True, requirements=requirements, dist=ace_dist)
-    condition_builder = AceConditionBuilder(teacher_model)
+    train_data = data_cfg.build(requirements=requirements, dist=ace_dist)
+    condition_builder = AceConditionBuilder(teacher_model, teacher)
 
     ace_loader = AceInfiniteDataLoader(
         data=train_data,
@@ -295,24 +307,12 @@ def main() -> None:
     # 8. Dryrun smoke test — verify shapes before launching real training.
     # ------------------------------------------------------------------
     if args.dryrun:
-        logger.info("Dryrun: verifying teacher forward-pass shapes.")
+        logger.info("Dryrun: verifying teacher sampling and batch shapes.")
+        teacher.freeze()
         batch = next(iter(ace_loader))
         logger.info(
-            f"Dryrun batch shapes — real: {tuple(batch['real'].shape)}, "
+            f"Dryrun OK — real: {tuple(batch['real'].shape)}, "
             f"condition: {tuple(batch['condition'].shape)}"
-        )
-        x0, cond = batch["real"][:1], batch["condition"][:1]
-        del batch
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        t = torch.full((1,), 0.5, device=x0.device)
-        teacher.freeze()
-        with torch.no_grad():
-            x0_hat = teacher(x0 + 0.5 * torch.randn_like(x0), t, condition=cond)
-        logger.info(
-            f"Dryrun OK — real: {tuple(x0.shape)}, "
-            f"condition: {tuple(cond.shape)}, "
-            f"x0_hat: {tuple(x0_hat.shape)}"
         )
         return
 
