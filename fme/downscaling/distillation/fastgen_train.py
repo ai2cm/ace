@@ -329,5 +329,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    warnings.filterwarnings("ignore", "Grad strides do not match bucket view strides")
+    os.environ.setdefault("FME_DISTRIBUTED_BACKEND", "none")
     with Distributed.context():
         main()
