@@ -297,8 +297,15 @@ def main() -> None:
     if args.dryrun:
         logger.info("Dryrun: verifying teacher forward-pass shapes.")
         batch = next(iter(ace_loader))
-        x0, cond = batch["real"], batch["condition"]
-        t = torch.full((x0.shape[0],), 0.5)
+        logger.info(
+            f"Dryrun batch shapes — real: {tuple(batch['real'].shape)}, "
+            f"condition: {tuple(batch['condition'].shape)}"
+        )
+        x0, cond = batch["real"][:1], batch["condition"][:1]
+        del batch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        t = torch.full((1,), 0.5, device=x0.device)
         teacher.freeze()
         with torch.no_grad():
             x0_hat = teacher(x0 + 0.5 * torch.randn_like(x0), t, condition=cond)
