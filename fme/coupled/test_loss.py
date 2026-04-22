@@ -13,7 +13,7 @@ from .stepper import ComponentEnsembleStepPrediction, CoupledStepperTrainLoss
 
 def _wrap_as_loss_output(value: torch.Tensor) -> LossOutput:
     """Wrap a scalar tensor as a LossOutput for mocking StepLoss."""
-    return LossOutput(_loss=value, _channel_dim=0, _channel_names=["mock"])
+    return LossOutput(loss=value, channel_dim=0, channel_names=["mock"])
 
 
 def step_and_target_gen(

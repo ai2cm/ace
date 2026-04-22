@@ -49,7 +49,6 @@ def _reduce_to_per_channel(
     return loss_value.mean(dim=dims) / n_channels
 
 
-@dataclasses.dataclass
 class LossOutput:
     """Container for loss values returned by WeightedMappingLoss/StepLoss.
 
@@ -59,9 +58,15 @@ class LossOutput:
     know the internal tensor layout.
     """
 
-    _loss: torch.Tensor
-    _channel_dim: int
-    _channel_names: list[str]
+    def __init__(
+        self,
+        loss: torch.Tensor,
+        channel_dim: int,
+        channel_names: list[str],
+    ):
+        self._loss = loss
+        self._channel_dim = channel_dim
+        self._channel_names = channel_names
 
     def total(self) -> torch.Tensor:
         """Scalar mean over all dimensions -- the optimization target."""
@@ -146,9 +151,9 @@ class WeightedMappingLoss:
         result = self.loss(predict_tensors, target_tensors)
         cdim = _channel_dim_positive(predict_tensors.ndim, self.channel_dim)
         return LossOutput(
-            _loss=result,
-            _channel_dim=cdim,
-            _channel_names=list(self.packer.names),
+            loss=result,
+            channel_dim=cdim,
+            channel_names=list(self.packer.names),
         )
 
     def get_normalizer_state(self) -> dict[str, float]:
@@ -548,9 +553,9 @@ class StepLoss(torch.nn.Module):
         step_weight = (1.0 + self.sqrt_loss_decay_constant * step) ** (-0.5)
         output = self.loss(predict_dict, target_dict)
         return LossOutput(
-            _loss=output._loss * step_weight,
-            _channel_dim=output._channel_dim,
-            _channel_names=output._channel_names,
+            loss=output._loss * step_weight,
+            channel_dim=output._channel_dim,
+            channel_names=output._channel_names,
         )
 
 
