@@ -48,5 +48,7 @@ run_evaluator() {
 
 # run_evaluator "evaluator-6h.yaml" "01KJKM724X54EMA1JFEE5JWX9V" "amip-c96-shield-evaluator-6h"
 # run_evaluator "evaluator-daily.yaml" "01KJCVYVEB52QATDCZ3ZA74TDT" "amip-c96-shield-evaluator-daily"
-run_evaluator "evaluator-6h.yaml" "01KJKM724X54EMA1JFEE5JWX9V" "amip-c96-shield-evaluator-6h-best-ckpt" "best_ckpt.tar"
-run_evaluator "evaluator-daily.yaml" "01KJCVYVEB52QATDCZ3ZA74TDT" "amip-c96-shield-evaluator-daily-best-ckpt" "best_ckpt.tar"
+# run_evaluator "evaluator-6h.yaml" "01KJKM724X54EMA1JFEE5JWX9V" "amip-c96-shield-evaluator-6h-best-ckpt" "best_ckpt.tar"
+# run_evaluator "evaluator-daily.yaml" "01KJCVYVEB52QATDCZ3ZA74TDT" "amip-c96-shield-evaluator-daily-best-ckpt" "best_ckpt.tar"
+run_evaluator "evaluator-daily-era5-4deg.yaml" "01KPECMV6PVEJQFE5BEQA6MD8V" "daily-era5-4deg-evaluator" "best_ckpt.tar"
+run_evaluator "evaluator-daily-era5-1deg.yaml" "01KPECPJX91S8NJ22PSSCAES3N" "daily-era5-1deg-evaluator" "best_ckpt.tar"
