@@ -12,8 +12,8 @@ from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
 
 from ..data import DataLoaderConfig
-from ..models import CheckpointModelConfig, DiffusionModel
-from ..predictors import PatchPredictionConfig, PatchPredictor
+from ..predictor import CheckpointModelConfig
+from ..predictors import BasePredictor, PatchPredictionConfig, PatchPredictor
 from .output import DownscalingOutput, EventConfig, TimeRangeConfig
 from .work_items import LoadedSliceWorkItem
 
@@ -28,7 +28,7 @@ class Downscaler:
 
     def __init__(
         self,
-        model: DiffusionModel,
+        model: BasePredictor,
         outputs: list[DownscalingOutput],
         output_dir: str = ".",
     ):
@@ -53,7 +53,7 @@ class Downscaler:
         self,
         input_shape: tuple[int, int],
         output: DownscalingOutput,
-    ) -> DiffusionModel | PatchPredictor:
+    ) -> BasePredictor | PatchPredictor:
         """
         Set up the model, wrapping with PatchPredictor if needed.  While models are
         probably capable of generating any domain size, we haven't tested for domains

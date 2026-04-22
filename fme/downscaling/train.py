@@ -29,6 +29,7 @@ from fme.downscaling.data import (
     load_static_inputs,
 )
 from fme.downscaling.models import DiffusionModel, DiffusionModelConfig
+from fme.downscaling.predictors import BasePredictor
 
 
 def _save_checkpoint(trainer: "Trainer", path: str) -> None:
@@ -89,6 +90,7 @@ class Trainer:
         config: "TrainerConfig",
     ) -> None:
         self.model = model
+        self.predictor = BasePredictor(model)
         self.optimization = optimization
         self.null_optimization = NullOptimization()
         self.train_data = train_data
@@ -266,7 +268,7 @@ class Trainer:
                     coarse=batch.coarse.data,
                     batch=batch,
                 )
-                generated_outputs = self.model.generate_on_batch(
+                generated_outputs = self.predictor.generate_on_batch(
                     batch,
                     n_samples=self.config.generate_n_samples,
                 )

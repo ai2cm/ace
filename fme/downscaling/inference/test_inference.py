@@ -26,13 +26,13 @@ from fme.downscaling.inference.output import (
     TimeRangeConfig,
 )
 from fme.downscaling.models import (
-    CheckpointModelConfig,
     DiffusionModelConfig,
     DiffusionModuleRegistrySelector,
     LossConfig,
     NormalizationConfig,
     PairedNormalizationConfig,
 )
+from fme.downscaling.predictor import CheckpointModelConfig
 from fme.downscaling.predictors import PatchPredictionConfig, PatchPredictor
 from fme.downscaling.test_evaluator import LinearDownscalingDiffusion
 

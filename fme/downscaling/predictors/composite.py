@@ -6,7 +6,8 @@ from fme.core.coordinates import LatLonCoordinates
 from fme.core.typing_ import TensorDict
 from fme.downscaling.data import BatchData, PairedBatchData, scale_tuple
 from fme.downscaling.data.patching import Patch, get_patches
-from fme.downscaling.models import DiffusionModel, ModelOutputs
+from fme.downscaling.models import ModelOutputs
+from fme.downscaling.predictors.base import BasePredictor
 
 
 @dataclasses.dataclass
@@ -52,13 +53,13 @@ class PatchPredictor:
 
     def __init__(
         self,
-        model: DiffusionModel,
+        model: BasePredictor,
         coarse_yx_patch_extent: tuple[int, int] | None = None,
         coarse_horizontal_overlap: int = 1,
     ):
         """
         Args:
-            model: the model to use for generating predictions.
+            model: the predictor to use for generating predictions.
             coarse_yx_patch_extent: The shape of the coarse region passed
                 to the downscaling model for prediction. If None, will be
                 inferred from model.coarse_shape.

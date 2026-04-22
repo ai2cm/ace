@@ -18,7 +18,6 @@ from fme.downscaling.data import (
     StaticInputs,
 )
 from fme.downscaling.models import (
-    CheckpointModelConfig,
     DiffusionModel,
     DiffusionModelConfig,
     PairedNormalizationConfig,
@@ -28,6 +27,8 @@ from fme.downscaling.models import (
 )
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.noise import LogNormalNoiseDistribution
+from fme.downscaling.predictor import CheckpointModelConfig
+from fme.downscaling.predictors import BasePredictor
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 
@@ -272,9 +273,10 @@ def test_diffusion_model_train_and_generate(predict_residual, use_fine_topograph
     train_outputs = model.train_on_batch(batch, optimization)
     assert torch.allclose(train_outputs.target["x"], batch.fine.data["x"])
 
+    predictor = BasePredictor(model)
     n_generated_samples = 2
     generated_outputs = [
-        model.generate_on_batch(batch) for _ in range(n_generated_samples)
+        predictor.generate_on_batch(batch) for _ in range(n_generated_samples)
     ]
 
     for generated_output in generated_outputs:
@@ -381,7 +383,8 @@ def test_DiffusionModel_generate_on_batch_no_target():
     coarse_lon = _get_monotonic_coordinate(coarse_shape[1], stop=fine_shape[1])
     coarse_batch = make_batch_data((batch_size, *coarse_shape), coarse_lat, coarse_lon)
 
-    samples = model.generate_on_batch_no_target(
+    predictor = BasePredictor(model)
+    samples = predictor.generate_on_batch_no_target(
         coarse_batch,
         n_samples=n_generated_samples,
     )
@@ -413,6 +416,7 @@ def test_DiffusionModel_generate_on_batch_no_target_arbitrary_input_size():
         use_fine_topography=True,
         static_inputs=static_inputs,
     )
+    predictor = BasePredictor(model)
     n_ensemble = 2
     batch_size = 2
 
@@ -424,7 +428,9 @@ def test_DiffusionModel_generate_on_batch_no_target_arbitrary_input_size():
         coarse_batch = make_batch_data(
             (batch_size, *alternative_input_shape), coarse_lat, coarse_lon
         )
-        samples = model.generate_on_batch_no_target(coarse_batch, n_samples=n_ensemble)
+        samples = predictor.generate_on_batch_no_target(
+            coarse_batch, n_samples=n_ensemble
+        )
 
         assert samples["x"].shape == (
             batch_size,
@@ -597,10 +603,14 @@ def test_checkpoint_model_build_with_fine_coordinates_path(tmp_path):
         checkpoint_path=str(checkpoint_path),
         fine_coordinates_path=str(coords_path),
     )
-    loaded_model = config.build()
-    assert loaded_model.full_fine_coords is not None
-    assert torch.equal(loaded_model.full_fine_coords.lat.cpu(), fine_coords.lat.cpu())
-    assert torch.equal(loaded_model.full_fine_coords.lon.cpu(), fine_coords.lon.cpu())
+    loaded_predictor = config.build()
+    assert loaded_predictor.full_fine_coords is not None
+    assert torch.equal(
+        loaded_predictor.full_fine_coords.lat.cpu(), fine_coords.lat.cpu()
+    )
+    assert torch.equal(
+        loaded_predictor.full_fine_coords.lon.cpu(), fine_coords.lon.cpu()
+    )
 
 
 def test_checkpoint_model_build(tmp_path):
@@ -618,15 +628,23 @@ def test_checkpoint_model_build(tmp_path):
     checkpoint_path = tmp_path / "test.ckpt"
     torch.save({"model": model.get_state()}, checkpoint_path)
 
-    loaded_model = CheckpointModelConfig(checkpoint_path=str(checkpoint_path)).build()
+    loaded_predictor = CheckpointModelConfig(
+        checkpoint_path=str(checkpoint_path)
+    ).build()
     assert all(
         torch.equal(p1, p2)
-        for p1, p2 in zip(model.module.parameters(), loaded_model.module.parameters())
+        for p1, p2 in zip(
+            model.module.parameters(), loaded_predictor.model.module.parameters()
+        )
     )
-    assert torch.equal(loaded_model.full_fine_coords.lat.cpu(), fine_coords.lat.cpu())
-    assert torch.equal(loaded_model.full_fine_coords.lon.cpu(), fine_coords.lon.cpu())
+    assert torch.equal(
+        loaded_predictor.full_fine_coords.lat.cpu(), fine_coords.lat.cpu()
+    )
+    assert torch.equal(
+        loaded_predictor.full_fine_coords.lon.cpu(), fine_coords.lon.cpu()
+    )
     assert (
-        not loaded_model.module.training
+        not loaded_predictor.model.module.training
     ), "Module should be in eval mode after build() to disable dropout"
 
 
