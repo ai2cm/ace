@@ -49,6 +49,6 @@ run_training() {
     -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train "$CONFIG_PATH"
 }
 
-base_name="ace-cross-climate-arch-eval"
+base_name="train-cross-climate"
 
-run_training "one-step-pre-train-config.yaml" "$base_name-pre-train-rs0"
+run_training "train-config.yaml" "$base_name-rs0"
