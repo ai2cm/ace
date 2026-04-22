@@ -164,8 +164,6 @@ def main() -> None:
 
     # Defer all FastGen imports until after arg parsing so `--help` works
     # in environments without the full FastGen dependency chain installed.
-    from omegaconf import DictConfig
-
     import fastgen.utils.distributed.ddp as _fastgen_ddp
     import fastgen.utils.logging_utils as logger
     from fastgen.configs.config_utils import override_config_with_opts, serialize_config
@@ -175,6 +173,7 @@ def main() -> None:
     from fastgen.utils.distributed import clean_up, is_rank0, synchronize, world_size
     from fastgen.utils.io_utils import set_env_vars
     from fastgen.utils.scripts import set_cuda_backend
+    from omegaconf import DictConfig
 
     logger.set_log_level(args.log_level)
 
@@ -214,7 +213,10 @@ def main() -> None:
     # ------------------------------------------------------------------
     # 3. Load ACE teacher checkpoint.
     # ------------------------------------------------------------------
-    ckpt_config = CheckpointModelConfig(checkpoint_path=args.teacher_checkpoint)
+    ckpt_config = CheckpointModelConfig(
+        checkpoint_path=args.teacher_checkpoint,
+        fine_coordinates_path="/climate-default/2026-02-23-X-SHiELD-AMIP-plus-4K-downscaling/3km.zarr",
+    )
     requirements = ckpt_config.data_requirements
     teacher_model = ckpt_config.build()
     teacher = AceDiffusionTeacher(teacher_model)
