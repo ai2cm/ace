@@ -1,37 +1,55 @@
+
 #!/bin/bash
 
 set -e
 
-# https://askubuntu.com/questions/893911/when-writing-a-bash-script-how-do-i-get-the-absolute-path-of-the-location-of-th
-SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
+BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
+WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
+REPO_ROOT=$(git rev-parse --show-toplevel)
+N_GPUS=4
 
-COMMIT=3d05b879ffb9a8208a4db845e140db2f3bde376e
-URSA_CONDA_DIR=$HOME/software/vcm-workflow-control/examples/ace/ursa-conda
-TRAIN_SUBMISSION_SCRIPT=$URSA_CONDA_DIR/run-train-ursa.sh
-SCRATCH=/scratch4/GFDL/gfdlhires/$USER
-FME_VENV=$($URSA_CONDA_DIR/make-venv.sh $COMMIT $SCRATCH/fme-env $SCRATCH | tail -n 1)
+cd "$REPO_ROOT"
 
-# If resuming a failed job, provide its slurm job ID below and uncomment;
-# note that information entered above should be consistent with that of
-# the failed job.
-# export RESUME_JOB_ID=12345678
+run_training() {
+  local config_filename="$1"
+  local job_name="$2"
+  local CONFIG_PATH="$SCRIPT_PATH/$config_filename"
 
-CONFIG_FILENAME="one-step-pre-train-config.yaml"
-CONFIG_PATH=$SCRIPT_DIR/$CONFIG_FILENAME
-WANDB_USERNAME=jeremym_ai2
-export WANDB_RUN_GROUP=ace-cross-climate-arch-eval
-for seed in 0 1 2 3
-do
-    override="seed=${seed}"
-    wandb_name=ace-cross-climate-arch-eval-pre-train-rs${seed}
-    conda run --prefix $FME_VENV \
-	    python -m fme.ace.validate_config --config_type train $CONFIG_PATH --override $override
-    $TRAIN_SUBMISSION_SCRIPT \
-        $FME_VENV \
-        $CONFIG_PATH \
-        $URSA_CONDA_DIR \
-        $SCRATCH \
-        $wandb_name \
-        $WANDB_USERNAME \
-        $override
-done
+  python -m fme.ace.validate_config --config_type train "$CONFIG_PATH"
+
+  # Extract additional args from config header
+  local extra_args=()
+  while IFS= read -r line; do
+    [[ "$line" =~ ^#\ arg:\ (.*) ]] && extra_args+=(${BASH_REMATCH[1]})
+  done < "$CONFIG_PATH"
+
+  gantry run \
+    --name "$job_name" \
+    --description 'Cross-climate generalization stochastic pretraining' \
+    --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
+    --workspace ai2/ace \
+    --priority high \
+    --preemptible \
+    --cluster ai2/titan \
+    --env WANDB_USERNAME="$WANDB_USERNAME" \
+    --env WANDB_NAME="$job_name" \
+    --env WANDB_JOB_TYPE=training \
+    --env WANDB_RUN_GROUP=ace-cross-climate-arch-eval \
+    --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
+    --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
+    --dataset-secret google-credentials:/tmp/google_application_credentials.json \
+    --gpus "$N_GPUS" \
+    --shared-memory 400GiB \
+    --weka climate-default:/climate-default \
+    --budget ai2/climate \
+    --allow-dirty \
+    --system-python \
+    --install "pip install --no-deps ." \
+    "${extra_args[@]}" \
+    -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train "$CONFIG_PATH"
+}
+
+base_name="ace-cross-climate-arch-eval"
+
+run_training "one-step-pre-train-config.yaml" "$base_name-pre-train-rs0"

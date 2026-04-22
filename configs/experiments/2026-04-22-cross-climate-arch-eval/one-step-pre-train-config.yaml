@@ -10,15 +10,15 @@ inference:
   loader:
     start_indices:
       times:
-        # 1xCO2 SOM segment (in-distribution anchor)
-        - "2033-01-01T00:00:00"
-        - "2033-06-06T12:00:00"
-        - "2033-11-09T18:00:00"
-        - "2034-04-15T06:00:00"
-        - "2034-09-18T18:00:00"
-        - "2035-02-22T06:00:00"
-        - "2035-07-28T12:00:00"
-        - "2036-01-01T00:00:00"
+        # # 1xCO2 SOM segment (in-distribution anchor)
+        # - "2033-01-01T00:00:00"
+        # - "2033-06-06T12:00:00"
+        # - "2033-11-09T18:00:00"
+        # - "2034-04-15T06:00:00"
+        # - "2034-09-18T18:00:00"
+        # - "2035-02-22T06:00:00"
+        # - "2035-07-28T12:00:00"
+        # - "2036-01-01T00:00:00"
         # 2xCO2 SOM segment (held-out generalization target)
         - "2041-01-01T00:00:00"
         - "2041-06-06T12:00:00"
@@ -28,15 +28,15 @@ inference:
         - "2043-02-22T06:00:00"
         - "2043-07-28T12:00:00"
         - "2044-01-01T00:00:00"
-        # 4xCO2 SOM segment (in-distribution anchor)
-        - "2049-01-01T00:00:00"
-        - "2049-06-06T12:00:00"
-        - "2049-11-09T18:00:00"
-        - "2050-04-15T06:00:00"
-        - "2050-09-18T18:00:00"
-        - "2051-02-22T06:00:00"
-        - "2051-07-28T12:00:00"
-        - "2052-01-01T00:00:00"
+        # # 4xCO2 SOM segment (in-distribution anchor)
+        # - "2049-01-01T00:00:00"
+        # - "2049-06-06T12:00:00"
+        # - "2049-11-09T18:00:00"
+        # - "2050-04-15T06:00:00"
+        # - "2050-09-18T18:00:00"
+        # - "2051-02-22T06:00:00"
+        # - "2051-07-28T12:00:00"
+        # - "2052-01-01T00:00:00"
     dataset:
       data_path: /scratch4/GFDL/gfdlhires/Spencer.Clark/data/public/SHiELD-SOM-C96
       file_pattern: concatenated-1xCO2-2xCO2-4xCO2-ic_0003.zarr
@@ -139,7 +139,12 @@ optimization:
     weight_decay: 0.01
 stepper:
   n_ensemble: 2
-  train_n_forward_steps: 1
+  n_forward_steps:
+    outcomes:
+      - steps: 1
+        probability: 0.9
+      - steps: 2
+        probability: 0.1
   optimize_last_step_only: true
   loss:
     type: EnsembleLoss
