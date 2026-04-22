@@ -276,7 +276,6 @@ class Mean:
     ) -> None:
         self._mapped_metric = map_tensor_mapping(metric)
         self._accumulator = TensorDictAccumulator()
-        self._dist = Distributed.get_instance()
         self._name = ensure_trailing_slash(name)
 
     @property
@@ -294,10 +293,7 @@ class Mean:
         """
         Calculates and return the current mean of the metric values.
         """
-        means = self._accumulator.get_mean()
-        if means is None:
-            raise ValueError("No values have been added to the running average")
-        return {k: self._dist.reduce_mean(means[k]) for k in sorted(means)}
+        return self._accumulator.get_distributed_mean()
 
     def get_wandb(self, prefix: str = "") -> Mapping[str, Any]:
         """
@@ -327,7 +323,6 @@ class SumComparison:
     ) -> None:
         self._mapped_metric = map_tensor_mapping(metric)
         self._accumulator = TensorDictAccumulator()
-        self._dist = Distributed.get_instance()
         self._name = ensure_trailing_slash(name)
 
     @property
@@ -345,10 +340,7 @@ class SumComparison:
         """
         Calculates and return the current sum of the metric values.
         """
-        sums = self._accumulator.get_sum()
-        if sums is None:
-            raise ValueError("No values have been added to the running sum")
-        return {k: self._dist.reduce_sum(sums[k]) for k in sorted(sums)}
+        return self._accumulator.get_distributed_sum()
 
     def get_wandb(self, prefix: str = "") -> Mapping[str, Any]:
         """
@@ -381,7 +373,6 @@ class MeanComparison:
     ) -> None:
         self._mapped_metric = map_tensor_mapping(metric) if metric is not None else None
         self._accumulator = TensorDictAccumulator()
-        self._dist = Distributed.get_instance()
         self._name = ensure_trailing_slash(name)
 
     @property
@@ -416,10 +407,7 @@ class MeanComparison:
         """
         Calculates and returns the current mean of the comparison metric values.
         """
-        means = self._accumulator.get_mean()
-        if means is None:
-            raise ValueError("No values have been added to the running average")
-        return {k: self._dist.reduce_mean(means[k]) for k in sorted(means)}
+        return self._accumulator.get_distributed_mean()
 
     def get_wandb(self, prefix: str = "") -> Mapping[str, Any]:
         """

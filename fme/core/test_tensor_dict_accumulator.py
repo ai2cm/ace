@@ -65,3 +65,30 @@ def test_device_override():
     total = acc.get_sum()
     assert total is not None
     assert total["a"].device.type == "cpu"
+
+
+def test_get_distributed_sum_non_distributed():
+    acc = TensorDictAccumulator()
+    acc.add({"b": torch.tensor([10.0]), "a": torch.tensor([1.0])})
+    acc.add({"b": torch.tensor([20.0]), "a": torch.tensor([2.0])})
+    result = acc.get_distributed_sum()
+    assert list(result) == ["a", "b"]
+    assert torch.equal(result["a"], torch.tensor([3.0]))
+    assert torch.equal(result["b"], torch.tensor([30.0]))
+
+
+def test_get_distributed_mean_non_distributed():
+    acc = TensorDictAccumulator()
+    acc.add({"a": torch.tensor([1.0]), "b": torch.tensor([10.0])})
+    acc.add({"a": torch.tensor([3.0]), "b": torch.tensor([20.0])})
+    result = acc.get_distributed_mean()
+    assert torch.equal(result["a"], torch.tensor([2.0]))
+    assert torch.equal(result["b"], torch.tensor([15.0]))
+
+
+def test_get_distributed_raises_when_empty():
+    acc = TensorDictAccumulator()
+    with pytest.raises(ValueError, match="No values"):
+        acc.get_distributed_sum()
+    with pytest.raises(ValueError, match="No values"):
+        acc.get_distributed_mean()
