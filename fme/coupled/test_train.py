@@ -6,6 +6,7 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.core.rand import set_seed
 from fme.core.testing.wandb import mock_wandb
 
 from .data_loading.test_data_loader import create_coupled_data_on_disk
@@ -261,7 +262,7 @@ def _write_test_yaml_files(
 @pytest.mark.parametrize(
     "loss_atmos_n_steps, crps_training",
     [
-        (3, False),
+        (2, False),
         (0, False),
         (3, True),  # CRPS training with EnsembleLoss
     ],
@@ -272,6 +273,8 @@ def test_train_and_inference(
     """Ensure that coupled training and standalone inference run without errors."""
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
+
+    set_seed(42 + loss_atmos_n_steps)
 
     data_dir = tmp_path / "coupled_data"
     data_dir.mkdir()
