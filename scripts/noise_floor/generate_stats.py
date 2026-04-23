@@ -24,7 +24,9 @@ class DataConfig:
     end_date: Optional[str] = None
 
     def get_dataset(self) -> xr.Dataset:
-        datasets = [xr.open_zarr(path) for path in self.paths]
+        chunks = {"time": "auto"}
+        with dask.config.set({"array.chunk-size": "128MiB"}):
+            datasets = [xr.open_zarr(path, chunks=chunks) for path in self.paths]
         ds = xr.concat(datasets, "sample")
         ds = ds.sel(time=slice(self.start_date, self.end_date))
         return ds
