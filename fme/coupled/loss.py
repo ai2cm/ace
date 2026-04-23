@@ -3,6 +3,7 @@ import dataclasses
 
 import torch
 
+from fme.ace.stepper.time_length_probabilities import TimeLengthProbabilities
 from fme.core.device import get_device
 from fme.core.loss import StepLoss
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -28,6 +29,14 @@ class StepLossABC(abc.ABC):
     @abc.abstractmethod
     def effective_loss_scaling(self) -> TensorDict: ...
 
+    def sample_n_steps(self) -> None:
+        """Sample a new effective n_steps for the current batch.
+
+        No-op by default; override in subclasses that support stochastic
+        n_steps via ``TimeLengthProbabilities``.
+        """
+        pass
+
     @abc.abstractmethod
     def step_is_optimized(self, step: int) -> bool:
         """Returns True if the given step should contribute to the loss.
@@ -51,8 +60,10 @@ class LossContributionsConfig:
     Configuration for loss contributions.
 
     Parameters:
-        n_steps: (optional) The number of consecutive steps contributing to the loss,
-            starting from the first.
+        n_steps: The number of consecutive steps contributing to the loss,
+            starting from the first. Can be a float (defaults to ``inf`` for all
+            steps) or a ``TimeLengthProbabilities`` for stochastic per-batch
+            sampling.
         weight: (optional) Weight applied to each step loss for the given realm.
             Each step contributes equally to the total loss.
         optimize_last_step_only: If True, only the last step within the training
@@ -62,7 +73,7 @@ class LossContributionsConfig:
 
     """
 
-    n_steps: float = float("inf")
+    n_steps: TimeLengthProbabilities | float = float("inf")
     weight: float = 1.0
     optimize_last_step_only: bool = False
 
@@ -72,7 +83,9 @@ class LossContributionsConfig:
         time_dim: int,
         max_n_steps: int,
     ) -> StepLossABC:
-        if self.n_steps == 0 or self.weight == 0.0:
+        if self.weight == 0.0:
+            return NullLossContributions(loss_obj)
+        if isinstance(self.n_steps, int | float) and self.n_steps == 0:
             return NullLossContributions(loss_obj)
         return LossContributions(
             n_steps=self.n_steps,
@@ -112,7 +125,7 @@ class NullLossContributions(StepLossABC):
 class LossContributions(StepLossABC):
     def __init__(
         self,
-        n_steps: float,
+        n_steps: TimeLengthProbabilities | float,
         weight: float,
         optimize_last_step_only: bool,
         loss_obj: StepLoss,
@@ -120,11 +133,20 @@ class LossContributions(StepLossABC):
         max_n_steps: int,
     ):
         self._loss = loss_obj
-        self._n_steps = n_steps
+        if isinstance(n_steps, TimeLengthProbabilities):
+            self._n_steps_sampler: TimeLengthProbabilities | None = n_steps
+            self._n_steps: float = float(n_steps.max_n_forward_steps)
+        else:
+            self._n_steps_sampler = None
+            self._n_steps = n_steps
         self._weight = weight
         self._optimize_last_step_only = optimize_last_step_only
         self._time_dim = time_dim
         self._max_n_steps = max_n_steps
+
+    def sample_n_steps(self) -> None:
+        if self._n_steps_sampler is not None:
+            self._n_steps = float(self._n_steps_sampler.sample())
 
     @property
     def effective_loss_scaling(self) -> TensorDict:
