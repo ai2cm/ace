@@ -438,6 +438,5 @@ class ModelTorchDistributed(DistributedBackend):
         return thd.DistributedDiscreteContinuousConvS2(*args, **kwargs)
 
     def shutdown(self):
-        self.barrier()
         logger.debug("Shutting down rank %d", self._rank)
         DistributedManager.cleanup()
