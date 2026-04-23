@@ -89,7 +89,7 @@ class MaskProvider(MaskProviderABC):
 
     """
 
-    def __init__(self, masks: TensorDict | None = None):
+    def __init__(self, masks: TensorMapping | None = None):
         if masks is None:
             self._masks = {}
         else:

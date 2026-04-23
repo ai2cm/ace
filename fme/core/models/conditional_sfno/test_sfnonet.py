@@ -164,15 +164,9 @@ def load_or_cache_model_state(
     path: str,
 ):
     if os.path.exists(path):
-        data = torch.load(path, map_location="cpu")
-        device = get_device()
-        x = data.pop("x").to(device)
-        context_data = data.pop("context")
-        context_data = {
-            k: v.to(device) if isinstance(v, torch.Tensor) else v
-            for k, v in context_data.items()
-        }
-        context = Context.from_dict(context_data)
+        data = torch.load(path, map_location=get_device())
+        x = data.pop("x")
+        context = Context.from_dict(data.pop("context"))
         model.load_state_dict(data)
     else:
         data = model.state_dict()
