@@ -100,6 +100,7 @@ def test_paired_spherical_power_spectrum_aggregator_get_dataset():
         expected_values,
         dims=["source", "wavenumber"],
         coords={"source": ["prediction", "target"], "wavenumber": expected_wavenumber},
+        attrs={"long_name": "spherical power spectrum of a", "units": "unknown_units"},
     )
     expected = xr.Dataset({"a": expected_da})
     xr.testing.assert_identical(result, expected)

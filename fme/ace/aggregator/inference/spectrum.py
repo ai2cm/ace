@@ -88,9 +88,10 @@ class SphericalPowerSpectrumAggregator:
             if metadata is not None:
                 long_name = f"spherical power spectrum of {metadata.long_name}"
                 units = f"({metadata.units})^2"
-                attrs = {"long_name": long_name, "units": units}
             else:
-                attrs = {}
+                long_name = f"spherical power spectrum of {name}"
+                units = "unknown_units"
+            attrs = {"long_name": long_name, "units": units}
             data_vars[name] = xr.DataArray(
                 spectrum_np,
                 dims=["wavenumber"],
