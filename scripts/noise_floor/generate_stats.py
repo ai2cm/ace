@@ -13,9 +13,6 @@ import xarray as xr
 import yaml
 from scipy.optimize import curve_fit
 
-from fme.core import metrics
-from fme.core.distributed.distributed import Distributed
-
 
 @dataclasses.dataclass
 class DataConfig:
@@ -146,10 +143,8 @@ def get_output_datasets(
     amip: bool,
 ) -> Tuple[xr.Dataset, xr.Dataset, xr.Dataset]:
     lat = dataset["grid_yt"]
-    area = xr.DataArray(
-        metrics.spherical_area_weights(lat.values, dataset.sizes["grid_xt"]),
-        dims=["grid_yt", "grid_xt"],
-    )
+    # Xarray automatically broadcasts these 1D weights in weighted operations
+    area = np.cos(np.deg2rad(lat))
     annual = get_annual(dataset)
     available_years = annual.sizes["year"]
     if available_years != years_per_ensemble:
@@ -205,10 +200,9 @@ if __name__ == "__main__":
     with open(args.data_config, "r") as f:
         data_config = dacite.from_dict(DataConfig, yaml.safe_load(f))
 
-    with Distributed.context():
-        main(
-            dataset=data_config.get_dataset(),
-            years_per_ensemble=data_config.years_per_ensemble,
-            amip=data_config.is_amip,
-            stats_path=data_config.stats_path,
-        )
+    main(
+        dataset=data_config.get_dataset(),
+        years_per_ensemble=data_config.years_per_ensemble,
+        amip=data_config.is_amip,
+        stats_path=data_config.stats_path,
+    )

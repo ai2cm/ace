@@ -9,7 +9,6 @@ import xarray as xr
 import yaml
 from scipy.optimize import curve_fit
 
-from fme.core.distributed.distributed import Distributed
 from fme.core.wandb import WandB
 
 
@@ -152,14 +151,13 @@ if __name__ == "__main__":
         )
 
     rmse_means, rmse_stdevs = data_config.get_datasets()
-    with Distributed.context():
-        main(
-            rmse_means=rmse_means,
-            rmse_stdevs=rmse_stdevs,
-            varnames=data_config.names,
-            window_years=args.window_years,
-            batches=args.batches,
-            project=args.project,
-            entity=args.entity,
-            name=args.name,
-        )
+    main(
+        rmse_means=rmse_means,
+        rmse_stdevs=rmse_stdevs,
+        varnames=data_config.names,
+        window_years=args.window_years,
+        batches=args.batches,
+        project=args.project,
+        entity=args.entity,
+        name=args.name,
+    )
