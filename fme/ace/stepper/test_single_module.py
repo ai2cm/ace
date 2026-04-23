@@ -1662,6 +1662,17 @@ def test_load_stepper_with_prescribed_prognostic_override(
     torch.testing.assert_close(output.data["var"], expected_var)
 
 
+class _LargeLinear(torch.nn.Module):
+    """Module defined at module scope so it can be pickled by torch.save."""
+
+    def __init__(self, size: int):
+        super().__init__()
+        self.linear = torch.nn.Linear(size, size)
+
+    def forward(self, x):
+        return self.linear(x)
+
+
 @pytest.mark.skipif(
     not torch.cuda.is_available(), reason="measures peak GPU memory allocation"
 )
@@ -1674,14 +1685,6 @@ def test_load_stepper_does_not_double_buffer_on_gpu(tmp_path: pathlib.Path):
     tensors that temporarily coexisted with the originals. Peak GPU allocation
     during load_stepper should stay close to the stepper's on-device size.
     """
-
-    class LargeLinear(torch.nn.Module):
-        def __init__(self, size: int):
-            super().__init__()
-            self.linear = torch.nn.Linear(size, size)
-
-        def forward(self, x):
-            return self.linear(x)
 
     in_names = ["var"]
     out_names = ["var"]
@@ -1703,7 +1706,7 @@ def test_load_stepper_does_not_double_buffer_on_gpu(tmp_path: pathlib.Path):
                 config=dataclasses.asdict(
                     SingleModuleStepConfig(
                         builder=ModuleSelector(
-                            type="prebuilt", config={"module": LargeLinear(size)}
+                            type="prebuilt", config={"module": _LargeLinear(size)}
                         ),
                         in_names=in_names,
                         out_names=out_names,
