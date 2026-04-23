@@ -523,6 +523,10 @@ def test_inference_data_loader(
     force_forkserver: bool,
     very_fast_only: bool,
 ):
+    # PyTorch DataLoader with workers routinely exceeds the 3s --very-fast CI budget
+    # (see test_xarray_loader_scheduled_epoch for the same pattern).
+    if very_fast_only and num_data_workers > 0:
+        pytest.skip("inference dataloader with workers is too slow for --very-fast")
     _create_dataset_on_disk(tmp_path, n_times=14)
     batch_size = 2
     step = 7
