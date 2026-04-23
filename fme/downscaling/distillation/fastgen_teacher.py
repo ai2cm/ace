@@ -121,7 +121,8 @@ class AceDiffusionTeacher(FastGenNetwork):
             x0 prediction, shape ``[B, C_out, H, W]``.
         """
         # ACE's EDMPrecond reshapes sigma internally to [B, 1, 1, 1].
-        return self._ace_module(x_t, condition, t)
+        with torch.amp.autocast(x_t.device.type, dtype=torch.bfloat16):
+            return self._ace_module(x_t, condition, t)
 
     # ------------------------------------------------------------------
     # Sampling (used by FastGen for visualisation during training)
@@ -150,7 +151,8 @@ class AceDiffusionTeacher(FastGenNetwork):
         from fme.downscaling.samplers import stochastic_sampler
 
         n_steps = num_steps if num_steps > 0 else self._default_num_steps
-        with torch.no_grad():
+        device_type = noise.device.type
+        with torch.no_grad(), torch.amp.autocast(device_type, dtype=torch.bfloat16):
             generated, _ = stochastic_sampler(
                 self._ace_module,
                 noise,

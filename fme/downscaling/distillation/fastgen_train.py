@@ -265,10 +265,20 @@ def main() -> None:
     train_data = data_cfg.build(requirements=requirements, dist=ace_dist)
     condition_builder = AceConditionBuilder(teacher_model, teacher)
 
+    fine_h, fine_w = config.model.input_shape[1], config.model.input_shape[2]
+    coarse_patch_yx = (
+        fine_h // teacher_model.downscale_factor,
+        fine_w // teacher_model.downscale_factor,
+    )
+    domain_h, domain_w = train_data.shape
+    patch_extent_yx = (
+        coarse_patch_yx if (domain_h, domain_w) != coarse_patch_yx else None
+    )
     ace_loader = AceInfiniteDataLoader(
         data=train_data,
         condition_builder=condition_builder,
         batch_size=data_cfg.batch_size,
+        patch_extent_yx=patch_extent_yx,
     )
     config.dataloader_train = ace_loader
 
