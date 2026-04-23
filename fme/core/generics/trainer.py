@@ -196,7 +196,7 @@ def chain_signal_handler(sig, handler):
         handler(signum, frame)
         if callable(prev_handler):
             prev_handler(signum, frame)
-        sys.exit(0)
+        sys.exit(1)
 
     signal.signal(sig, on_sig)
 
