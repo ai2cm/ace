@@ -535,6 +535,90 @@ def test_load_state_then_set_learning_rate():
     ), "Parameters should differ when trained at different learning rates"
 
 
+def test_load_optimizer_state_for_finetuning():
+    """load_optimizer_state_for_finetuning restores momentum buffers, applies a
+    new LR, and leaves the scheduler in its initial state."""
+    torch.manual_seed(0)
+    model = nn.Linear(2, 2).to(fme.get_device())
+    x = torch.randn(10, 2).to(fme.get_device())
+
+    optimization = _build_optimization(model.parameters(), lr=0.001)
+    assert optimization.optimizer.state_dict()["state"] == {}
+
+    for _ in range(3):
+        loss = model(x).sum()
+        optimization.accumulate_loss(loss)
+        optimization.step_weights()
+    optimization.step_scheduler(is_iteration=False)
+
+    assert optimization.optimizer.state_dict()["state"] != {}
+
+    saved_state = optimization.get_state()
+
+    model2 = copy.deepcopy(model)
+    new_lr = 0.01
+    optimization2 = _build_optimization(model2.parameters(), lr=new_lr)
+    fresh_scheduler_state = optimization2.scheduler.state_dict()
+
+    optimization2.load_optimizer_state_for_finetuning(saved_state, lr=new_lr)
+
+    assert optimization2.learning_rate == new_lr
+
+    orig_opt_state = optimization.optimizer.state_dict()["state"]
+    loaded_opt_state = optimization2.optimizer.state_dict()["state"]
+    for param_id in orig_opt_state:
+        for key in ("exp_avg", "exp_avg_sq"):
+            torch.testing.assert_close(
+                loaded_opt_state[param_id][key], orig_opt_state[param_id][key]
+            )
+
+    assert optimization2.scheduler.state_dict() == fresh_scheduler_state
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="GradScaler requires CUDA")
+def test_load_optimizer_state_for_finetuning_with_gscaler():
+    """load_optimizer_state_for_finetuning restores grad scaler state when AMP
+    is enabled on both the source and target Optimization."""
+    torch.manual_seed(0)
+    model = nn.Linear(2, 2).to(fme.get_device())
+    x = torch.randn(10, 2).to(fme.get_device())
+
+    optimization = Optimization(
+        parameters=model.parameters(),
+        optimizer_type="Adam",
+        lr=0.001,
+        max_epochs=10,
+        scheduler=SchedulerConfig(),
+        enable_automatic_mixed_precision=True,
+        kwargs={},
+    )
+
+    for _ in range(3):
+        with optimization.autocast():
+            loss = model(x).sum()
+        optimization.accumulate_loss(loss)
+        optimization.step_weights()
+
+    saved_state = optimization.get_state()
+    assert saved_state["gscaler_state_dict"] != {}
+
+    model2 = copy.deepcopy(model)
+    optimization2 = Optimization(
+        parameters=model2.parameters(),
+        optimizer_type="Adam",
+        lr=0.01,
+        max_epochs=10,
+        scheduler=SchedulerConfig(),
+        enable_automatic_mixed_precision=True,
+        kwargs={},
+    )
+
+    optimization2.load_optimizer_state_for_finetuning(saved_state, lr=0.01)
+
+    assert optimization2.gscaler is not None
+    assert optimization2.gscaler.state_dict() == saved_state["gscaler_state_dict"]
+
+
 def test_scheduler_step_timing():
     """
     Test that schedulers step at the correct timing based on

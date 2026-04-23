@@ -116,6 +116,7 @@ class TrainConfig:
     evaluate_before_training: bool = False
     save_best_inference_epoch_checkpoints: bool = False
     lr_tuning: LRTuningConfig | None = None
+    finetune_optimization_checkpoint_path: str | None = None
     resume_results: ResumeResultsConfig | None = None
 
     def __post_init__(self):
