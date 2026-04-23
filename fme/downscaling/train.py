@@ -13,7 +13,6 @@ import torch
 import yaml
 
 from fme.core.cli import prepare_directory
-from fme.core.device import get_device
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
@@ -59,7 +58,7 @@ def restore_checkpoint(trainer: "Trainer") -> None:
         raise ValueError("Cannot restore checkpoint without a checkpoint path")
 
     checkpoint = torch.load(
-        trainer.epoch_checkpoint_path, map_location=get_device(), weights_only=False
+        trainer.epoch_checkpoint_path, map_location="cpu", weights_only=False
     )
     trainer.model.module.load_state_dict(checkpoint["model"]["module"])
     trainer.optimization.load_state(checkpoint["optimization"])
@@ -73,7 +72,7 @@ def restore_checkpoint(trainer: "Trainer") -> None:
 
     trainer.validate_using_ema = checkpoint["validate_using_ema"]
     ema_checkpoint = torch.load(
-        trainer.ema_checkpoint_path, map_location=get_device(), weights_only=False
+        trainer.ema_checkpoint_path, map_location="cpu", weights_only=False
     )
     ema_model = trainer.model.from_state(ema_checkpoint["model"])
     trainer.ema = EMATracker.from_state(ema_checkpoint["ema"], ema_model.modules)
