@@ -707,6 +707,7 @@ class InferenceAggregator(
             aggregators["power_spectrum"] = SphericalPowerSpectrumAggregator(
                 gridded_operations=gridded_operations,
                 nan_fill_fn=SmoothFloodFill(num_steps=4),
+                report_plot=True,
             )
         except NotImplementedError:
             logging.warning(

@@ -1,9 +1,10 @@
-import logging
 import warnings
 from collections import defaultdict
 from collections.abc import Callable
 
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 import torch
 import xarray as xr
 
@@ -20,6 +21,7 @@ class SphericalPowerSpectrumAggregator:
         self,
         gridded_operations: GriddedOperations,
         nan_fill_fn: Callable[[torch.Tensor, str], torch.Tensor] = lambda x, _: x,
+        report_plot: bool = True,
     ):
         Distributed.get_instance().require_no_spatial_parallelism(
             "SphericalPowerSpectrumAggregator does not support spatial parallelism."
@@ -28,6 +30,7 @@ class SphericalPowerSpectrumAggregator:
         self._power_spectrum: dict[str, torch.Tensor] = {}
         self._counts: dict[str, int] = defaultdict(int)
         self._nan_fill_fn = nan_fill_fn
+        self._report_plot = report_plot
 
     @torch.no_grad()
     def record_batch(self, data: TensorMapping, i_time_start: int = 0):
@@ -63,19 +66,24 @@ class SphericalPowerSpectrumAggregator:
     @torch.no_grad()
     def get_logs(self, label: str) -> dict[str, plt.Figure]:
         logs: dict[str, plt.Figure] = {}
-        for name, spectrum in self.get_mean().items():
-            fig = _plot_spectrum_pair(spectrum.cpu(), target=None)
-            logs[f"{label}/{name}"] = fig
-            plt.close(fig)
+        if self._report_plot:
+            for name, spectrum in self.get_mean().items():
+                fig = _plot_spectrum_pair(spectrum.cpu(), target=None)
+                logs[f"{label}/{name}"] = fig
+                plt.close(fig)
         return logs
 
     @torch.no_grad()
     def get_dataset(self) -> xr.Dataset:
-        logging.debug(
-            "get_dataset not implemented for SphericalPowerSpectrumAggregator. "
-            "Returning an empty dataset."
-        )
-        return xr.Dataset()
+        data_vars = {}
+        for name, spectrum in self.get_mean().items():
+            spectrum_np = spectrum.cpu().numpy()
+            data_vars[name] = xr.DataArray(
+                spectrum_np,
+                dims=["wavenumber"],
+                coords={"wavenumber": np.arange(len(spectrum_np))},
+            )
+        return xr.Dataset(data_vars)
 
 
 class PairedSphericalPowerSpectrumAggregator:
@@ -130,11 +138,12 @@ class PairedSphericalPowerSpectrumAggregator:
 
     @torch.no_grad()
     def get_dataset(self) -> xr.Dataset:
-        logging.debug(
-            "get_dataset not implemented for PairedSphericalPowerSpectrumAggregator. "
-            "Returning an empty dataset."
-        )
-        return xr.Dataset()
+        gen_ds = self._gen_aggregator.get_dataset()
+        target_ds = self._target_aggregator.get_dataset()
+        if not gen_ds or not target_ds:
+            return xr.Dataset()
+        source = pd.Index(["prediction", "target"], name="source")
+        return xr.concat([gen_ds, target_ds], dim=source)
 
 
 def _get_spectrum_metrics(
