@@ -1852,6 +1852,70 @@ def test_get_serialized_stepper_vertical_coordinate():
     assert isinstance(vertical_coordinate, VerticalCoordinate)
 
 
+class TestBackfillDeptho:
+    def test_backfills_when_checkpoint_lacks_deptho(self):
+        stepper = _get_stepper(["a"], ["a"])
+        idepth = torch.arange(4, dtype=torch.float)
+        mask = torch.ones(3)
+        ckpt_vc = DepthCoordinate(idepth=idepth, mask=mask)
+        stepper.update_vertical_coordinate(ckpt_vc)
+        vc = stepper.training_dataset_info.vertical_coordinate
+        assert isinstance(vc, DepthCoordinate)
+        assert vc.deptho is None
+
+        deptho = torch.tensor(2.5)
+        dataset_vc = DepthCoordinate(idepth=idepth, mask=mask, deptho=deptho)
+        stepper.backfill_deptho(dataset_vc)
+
+        updated_vc = stepper.training_dataset_info.vertical_coordinate
+        assert isinstance(updated_vc, DepthCoordinate)
+        assert updated_vc.deptho is not None
+        torch.testing.assert_close(updated_vc.deptho, deptho)
+
+    def test_noop_when_checkpoint_already_has_deptho(self):
+        stepper = _get_stepper(["a"], ["a"])
+        idepth = torch.arange(4, dtype=torch.float)
+        mask = torch.ones(3)
+        deptho = torch.tensor(2.5)
+        ckpt_vc = DepthCoordinate(idepth=idepth, mask=mask, deptho=deptho)
+        stepper.update_vertical_coordinate(ckpt_vc)
+
+        dataset_vc = DepthCoordinate(
+            idepth=idepth, mask=mask, deptho=torch.tensor(999.0)
+        )
+        stepper.backfill_deptho(dataset_vc)
+
+        updated_vc = stepper.training_dataset_info.vertical_coordinate
+        assert isinstance(updated_vc, DepthCoordinate)
+        torch.testing.assert_close(updated_vc.deptho, deptho)
+
+    def test_noop_when_dataset_lacks_deptho(self):
+        stepper = _get_stepper(["a"], ["a"])
+        idepth = torch.arange(4, dtype=torch.float)
+        mask = torch.ones(3)
+        ckpt_vc = DepthCoordinate(idepth=idepth, mask=mask)
+        stepper.update_vertical_coordinate(ckpt_vc)
+
+        dataset_vc = DepthCoordinate(idepth=idepth, mask=mask)
+        stepper.backfill_deptho(dataset_vc)
+
+        vc = stepper.training_dataset_info.vertical_coordinate
+        assert isinstance(vc, DepthCoordinate)
+        assert vc.deptho is None
+
+    def test_noop_for_non_depth_coordinate(self):
+        stepper = _get_stepper(["a"], ["a"])
+        original_vc = stepper.training_dataset_info.vertical_coordinate
+        assert isinstance(original_vc, HybridSigmaPressureCoordinate)
+
+        other_vc = HybridSigmaPressureCoordinate(
+            ak=torch.arange(4, dtype=torch.float),
+            bk=torch.arange(4, dtype=torch.float),
+        )
+        stepper.backfill_deptho(other_vc)
+        assert stepper.training_dataset_info.vertical_coordinate == original_vc
+
+
 def _get_stepper_with_input_masking(dataset_info_has_mask_provider: bool = True):
     # basic StepperConfig with input_masking configured
     config = StepperConfig(

@@ -856,6 +856,47 @@ class Stepper:
     def derive_func(self) -> Callable[[TensorMapping, TensorMapping], TensorDict]:
         return self._derive_func
 
+    def update_vertical_coordinate(
+        self, vertical_coordinate: VerticalCoordinate
+    ) -> None:
+        """Replace the vertical coordinate and rebuild ``derive_func``.
+
+        This allows overriding the checkpoint-serialized vertical coordinate
+        (e.g. to pick up a newly-added ``deptho`` field from the dataset).
+        """
+        self._dataset_info = self._dataset_info.update_vertical_coordinate(
+            vertical_coordinate
+        )
+        try:
+            self._derive_func = vertical_coordinate.build_derive_function(
+                self._dataset_info.timestep,
+                self._dataset_info.horizontal_coordinates,
+            )
+        except MissingDatasetInfo:
+            self._derive_func = vertical_coordinate.build_derive_function(
+                self._dataset_info.timestep
+            )
+
+    def backfill_deptho(self, dataset_vertical_coordinate: VerticalCoordinate) -> None:
+        """Adopt ``deptho`` from the dataset if the checkpoint lacks it.
+
+        Delegates to :meth:`VerticalCoordinate.adopt_deptho` so that
+        only coordinate types that support ``deptho`` need to know
+        about it.  If the checkpoint coordinate is unchanged, this is
+        a no-op.
+        """
+        try:
+            ckpt_vc = self.training_dataset_info.vertical_coordinate
+        except MissingDatasetInfo:
+            return
+        updated = ckpt_vc.adopt_deptho(dataset_vertical_coordinate)
+        if updated is not ckpt_vc:
+            logging.info(
+                "Backfilling deptho from dataset into checkpoint's "
+                "ocean vertical coordinate"
+            )
+            self.update_vertical_coordinate(updated)
+
     @property
     def surface_temperature_name(self) -> str | None:
         return self._step_obj.surface_temperature_name
