@@ -52,7 +52,7 @@ gantry run \
     --gpus $N_GPUS \
     --shared-memory 400GiB \
     --weka climate-default:/climate-default \
-    --budget atec/climate \
+    --budget ai2/atec-climate \
     --system-python \
     --install "pip install --no-deps ." \
     -- bash -c "\

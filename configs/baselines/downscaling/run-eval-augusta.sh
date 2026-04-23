@@ -31,7 +31,7 @@ gantry run \
     --preemptible \
     --cluster ai2/augusta-google-1 \
     --gpus $NGPU \
-    --budget atec/climate \
+    --budget ai2/atec-climate \
     --beaker-image $DEPS_ONLY_IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \

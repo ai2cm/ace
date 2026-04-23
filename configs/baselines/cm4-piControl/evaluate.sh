@@ -36,7 +36,7 @@ gantry run \
     --dataset $EXISTING_RESULTS_DATASET:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
     --gpus 1 \
     --shared-memory 50GiB \
-    --budget atec/climate \
+    --budget ai2/atec-climate \
     --system-python \
     --install "pip install --no-deps ." \
     -- python -I -m fme.coupled.evaluator $CONFIG_PATH

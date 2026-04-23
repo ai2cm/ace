@@ -39,7 +39,7 @@ run_training() {
     --gpus "$N_GPUS" \
     --shared-memory 400GiB \
     --weka climate-default:/climate-default \
-    --budget atec/climate \
+    --budget ai2/atec-climate \
     --system-python \
     --install "pip install --no-deps ." \
     -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train "$CONFIG_PATH"
