@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import numpy as np
 import pytest
 import torch
 import torch_harmonics
@@ -59,17 +60,22 @@ def test_spherical_power_spectrum_aggregator_get_dataset():
     )
     data = {"a": torch.randn(2, 3, nlat, nlon, device=DEVICE)}
     agg.record_batch(data)
-    ds = agg.get_dataset()
-    assert set(ds.data_vars) == {"a"}
-    assert ds.sizes == {"wavenumber": nlat}
-    assert list(ds.coords["wavenumber"].to_numpy()) == list(range(nlat))
-    assert ds["a"].attrs["long_name"] == "spherical power spectrum of temperature"
-    assert ds["a"].attrs["units"] == "(K)^2"
+    result = agg.get_dataset()
     sht = torch_harmonics.RealSHT(nlat, nlon, grid=grid).to(DEVICE)
-    expected = torch.mean(spherical_power_spectrum(data["a"], sht), dim=(0, 1))
-    torch.testing.assert_close(
-        torch.as_tensor(ds["a"].to_numpy(), device=DEVICE), expected
+    expected_values = torch.mean(spherical_power_spectrum(data["a"], sht), dim=(0, 1))
+    expected_attrs = {
+        "long_name": "spherical power spectrum of temperature",
+        "units": "(K)^2",
+    }
+    expected_wavenumber = np.arange(nlat)
+    expected_da = xr.DataArray(
+        expected_values.cpu().numpy(),
+        dims=["wavenumber"],
+        coords={"wavenumber": expected_wavenumber},
+        attrs=expected_attrs,
     )
+    expected = xr.Dataset({"a": expected_da})
+    xr.testing.assert_identical(result, expected)
 
 
 def test_paired_spherical_power_spectrum_aggregator_get_dataset():
@@ -80,23 +86,23 @@ def test_paired_spherical_power_spectrum_aggregator_get_dataset():
     gen_data = {"a": torch.randn(2, 3, nlat, nlon, device=DEVICE)}
     target_data = {"a": torch.randn(2, 3, nlat, nlon, device=DEVICE)}
     agg.record_batch(target_data=target_data, gen_data=gen_data)
-    ds = agg.get_dataset()
-    assert set(ds.data_vars) == {"a"}
-    assert ds.sizes == {"source": 2, "wavenumber": nlat}
-    assert list(ds.coords["source"].to_numpy()) == ["prediction", "target"]
+    result = agg.get_dataset()
     sht = torch_harmonics.RealSHT(nlat, nlon, grid=grid).to(DEVICE)
     expected_gen = torch.mean(spherical_power_spectrum(gen_data["a"], sht), dim=(0, 1))
     expected_target = torch.mean(
         spherical_power_spectrum(target_data["a"], sht), dim=(0, 1)
     )
-    torch.testing.assert_close(
-        torch.as_tensor(ds["a"].sel(source="prediction").to_numpy(), device=DEVICE),
-        expected_gen,
+    expected_values = np.stack(
+        [expected_gen.cpu().numpy(), expected_target.cpu().numpy()]
     )
-    torch.testing.assert_close(
-        torch.as_tensor(ds["a"].sel(source="target").to_numpy(), device=DEVICE),
-        expected_target,
+    expected_wavenumber = np.arange(nlat)
+    expected_da = xr.DataArray(
+        expected_values,
+        dims=["source", "wavenumber"],
+        coords={"source": ["prediction", "target"], "wavenumber": expected_wavenumber},
     )
+    expected = xr.Dataset({"a": expected_da})
+    xr.testing.assert_identical(result, expected)
 
 
 def test_paired_spherical_power_spectrum_aggregator_get_dataset_no_data():
