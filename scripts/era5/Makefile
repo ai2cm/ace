@@ -13,7 +13,7 @@ OUTPUT_GRID_FOUR_DEGREE=F22.5
 # Pressure level run parameters
 PRESSURE_LEVEL_START_TIME=2020-01-01T12:00:00
 PRESSURE_LEVEL_END_TIME=2025-12-31T18:00:00
-PRESSURE_LEVEL_OUTPUT_PATH=gs://vcm-ml-intermediate/2026-04-23-era5-pressure-levels-1deg-2020-2025.zarr
+PRESSURE_LEVEL_OUTPUT_PATH=gs://vcm-ml-scratch/oliwm/2026-04-23-era5-pressure-levels-1deg-2020-2025.zarr
 
 # Test run parameters
 START_TIME_TEST_RUN ?= 2025-12-30T00:00:00

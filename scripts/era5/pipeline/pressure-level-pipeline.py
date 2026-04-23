@@ -13,6 +13,7 @@ import logging
 
 import apache_beam as beam
 import numpy as np
+import pandas as pd
 import xarray as xr
 import xarray_beam as xbeam
 import xesmf as xe
@@ -142,8 +143,8 @@ def _make_zarr_store(url: str, read_only: bool = True):
 def open_full_37(variables, time_slice) -> xr.Dataset:
     ds = xr.open_zarr(_make_zarr_store(URL_FULL_37), chunks=None)
     ds = ds[variables]
-    ds_start = ds.time.min().values.item()
-    ds_stop = ds.time.max().values.item()
+    ds_start = pd.Timestamp(ds.time.min().values)
+    ds_stop = pd.Timestamp(ds.time.max().values)
     assert time_slice.start >= ds_start, "Start time out of bounds"
     assert time_slice.stop <= ds_stop, "End time out of bounds"
     ds = ds.sel(time=time_slice)
@@ -260,8 +261,6 @@ def main():
     assert end_time.hour % 6 == 0, "end_time hour must be a multiple of 6"
     assert args.output_time_shardsize % args.process_time_chunksize == 0
     assert args.output_time_shardsize % args.output_time_chunksize == 0
-
-    import pandas as pd
 
     output_time_slice = slice(start_time, end_time, TIME_STEP)
     output_time = pd.date_range(start_time, end_time, freq=f"{TIME_STEP}h")
