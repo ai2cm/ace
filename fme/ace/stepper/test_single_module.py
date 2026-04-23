@@ -3,7 +3,6 @@ import datetime
 import gc
 import os
 import pathlib
-import tempfile
 import unittest
 import unittest.mock
 from collections import namedtuple
@@ -1689,17 +1688,19 @@ def test_load_stepper_does_not_double_buffer_on_gpu(tmp_path: pathlib.Path):
     in_names = ["var"]
     out_names = ["var"]
     size = 1024  # ~4 MiB of float32 weights
+    # Keep img_shape small so grid-sized allocations inside
+    # LatLonOperations (area_weights buffers, validation temporaries) do not
+    # dominate the peak and obscure what this test is checking.
+    img_shape = (5, 5)
     stepper_path = tmp_path / "stepper"
 
-    with tempfile.TemporaryDirectory() as temp_dir:
-        mean_filename = pathlib.Path(temp_dir) / "means.nc"
-        std_filename = pathlib.Path(temp_dir) / "stds.nc"
-        xr.Dataset({n: xr.DataArray(0.0) for n in in_names + out_names}).to_netcdf(
-            mean_filename
-        )
-        xr.Dataset({n: xr.DataArray(1.0) for n in in_names + out_names}).to_netcdf(
-            std_filename
-        )
+    # Build and save the stepper inside a helper so its locals are released
+    # before we start measuring. In particular, StepperConfig pins on-device
+    # copies of the module via StepSelector._step_config_instance and (after
+    # get_state()'s call to as_loaded_dict) via the re-assigned
+    # StepSelector.config dict. pytest's assertion rewriting keeps test-body
+    # locals alive past `del`, so we stash them in a separate frame.
+    def _save_stepper():
         config = StepperConfig(
             step=StepSelector(
                 type="single_module",
@@ -1720,13 +1721,19 @@ def test_load_stepper_does_not_double_buffer_on_gpu(tmp_path: pathlib.Path):
                 ),
             ),
         )
-        dataset_info = get_dataset_info(img_shape=(size, size))
+        dataset_info = get_dataset_info(img_shape=img_shape)
         stepper = config.get_stepper(dataset_info=dataset_info)
         torch.save({"stepper": stepper.get_state()}, stepper_path)
-        del stepper
 
+    _save_stepper()
     gc.collect()
     torch.cuda.empty_cache()
+
+    # Some tensors from the save phase persist in PyTorch's C++ layer past
+    # `del` + `gc.collect()` and aren't reachable via `gc.get_objects()`.
+    # Measure peak growth during load relative to this baseline rather than
+    # assuming it starts at zero.
+    baseline_alloc = torch.cuda.memory_allocated()
 
     with benchmark_memory() as bm:
         loaded = load_stepper(stepper_path)
@@ -1738,12 +1745,14 @@ def test_load_stepper_does_not_double_buffer_on_gpu(tmp_path: pathlib.Path):
         p.element_size() * p.nelement() for p in torch_module.parameters()
     ) + sum(b.element_size() * b.nelement() for b in torch_module.buffers())
 
-    # Before the fix, peak allocation would be ~2x the model size because
+    # Before the fix, peak growth would be ~2x the model size because
     # torch.load placed one copy on GPU and Stepper.from_state created a
     # second copy on GPU before the first was released.
-    assert bm.result.max_alloc < 1.5 * model_size, (
-        f"peak GPU alloc during load_stepper ({bm.result.max_alloc} bytes) "
-        f"exceeded 1.5x the loaded model size ({model_size} bytes), "
+    peak_growth = bm.result.max_alloc - baseline_alloc
+    assert peak_growth < 1.5 * model_size, (
+        f"peak GPU alloc growth during load_stepper ({peak_growth} bytes, "
+        f"peak={bm.result.max_alloc}, baseline={baseline_alloc}) exceeded 1.5x "
+        f"the loaded model size ({model_size} bytes), "
         "suggesting a second copy of the weights was briefly held on GPU"
     )
 
