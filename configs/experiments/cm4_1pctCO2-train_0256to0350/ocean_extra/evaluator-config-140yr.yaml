@@ -26,4 +26,4 @@ aggregator:
   log_histograms: true
 data_writer:
   save_prediction_files: false
-  save_monthly_files: true
+  save_monthly_files: false
