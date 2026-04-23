@@ -5,7 +5,7 @@ data_writer:
   save_prediction_files: false
 experiment_dir: /results
 forward_steps_in_memory: 40
-n_forward_steps: 1460
+n_forward_steps: 121200 #2099 - 2016
 initial_condition:
   path: /climate-default/2026-03-19-era5-1deg-8layer-1940-2025.zarr
   engine: zarr
