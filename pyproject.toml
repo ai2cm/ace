@@ -94,6 +94,7 @@ ignore = ["D1", "D200", "D205", "D212", "E203", "W293", "F541", "E402"]
 [tool.ruff.lint.per-file-ignores]
 "*/__init__.py" = ["F401"]
 "scripts/*" = ["D", "UP"]  # scripts may run in different python env, so ignore UP rules
+"scripts/era5_investigation/*" = ["D", "E501", "UP"]  # exploratory analysis with tabular output
 "test_*.py" = ["D"]
 
 [tool.ruff.lint.pydocstyle]
