@@ -11,6 +11,7 @@ from fme.ace.aggregator.inference.spectrum import (
     get_positive_and_negative_power_bias,
     get_smallest_scale_power_bias,
 )
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.metrics import spherical_power_spectrum
 
@@ -52,13 +53,18 @@ def test_spherical_power_spectrum_aggregator_get_dataset():
     nlat, nlon = 8, 16
     grid = "legendre-gauss"
     gridded_operations = get_gridded_operations(nlat, nlon)
-    agg = SphericalPowerSpectrumAggregator(gridded_operations, report_plot=False)
+    metadata = {"a": VariableMetadata(units="K", long_name="temperature")}
+    agg = SphericalPowerSpectrumAggregator(
+        gridded_operations, report_plot=False, variable_metadata=metadata
+    )
     data = {"a": torch.randn(2, 3, nlat, nlon, device=DEVICE)}
     agg.record_batch(data)
     ds = agg.get_dataset()
     assert set(ds.data_vars) == {"a"}
     assert ds.sizes == {"wavenumber": nlat}
     assert list(ds.coords["wavenumber"].to_numpy()) == list(range(nlat))
+    assert ds["a"].attrs["long_name"] == "spherical power spectrum of temperature"
+    assert ds["a"].attrs["units"] == "(K)^2"
     sht = torch_harmonics.RealSHT(nlat, nlon, grid=grid).to(DEVICE)
     expected = torch.mean(spherical_power_spectrum(data["a"], sht), dim=(0, 1))
     torch.testing.assert_close(

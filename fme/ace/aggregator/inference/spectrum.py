@@ -1,6 +1,6 @@
 import warnings
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,6 +8,7 @@ import pandas as pd
 import torch
 import xarray as xr
 
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.metrics import spherical_power_spectrum
@@ -22,6 +23,7 @@ class SphericalPowerSpectrumAggregator:
         gridded_operations: GriddedOperations,
         nan_fill_fn: Callable[[torch.Tensor, str], torch.Tensor] = lambda x, _: x,
         report_plot: bool = True,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
     ):
         Distributed.get_instance().require_no_spatial_parallelism(
             "SphericalPowerSpectrumAggregator does not support spatial parallelism."
@@ -31,6 +33,9 @@ class SphericalPowerSpectrumAggregator:
         self._counts: dict[str, int] = defaultdict(int)
         self._nan_fill_fn = nan_fill_fn
         self._report_plot = report_plot
+        self._variable_metadata: Mapping[str, VariableMetadata] = (
+            variable_metadata or {}
+        )
 
     @torch.no_grad()
     def record_batch(self, data: TensorMapping, i_time_start: int = 0):
@@ -78,10 +83,19 @@ class SphericalPowerSpectrumAggregator:
         data_vars = {}
         for name, spectrum in self.get_mean().items():
             spectrum_np = spectrum.cpu().numpy()
+            wavenumber = np.arange(len(spectrum_np))
+            metadata = self._variable_metadata.get(name)
+            if metadata is not None:
+                long_name = f"spherical power spectrum of {metadata.long_name}"
+                units = f"({metadata.units})^2"
+                attrs = {"long_name": long_name, "units": units}
+            else:
+                attrs = {}
             data_vars[name] = xr.DataArray(
                 spectrum_np,
                 dims=["wavenumber"],
-                coords={"wavenumber": np.arange(len(spectrum_np))},
+                coords={"wavenumber": wavenumber},
+                attrs=attrs,
             )
         return xr.Dataset(data_vars)
 
@@ -94,12 +108,13 @@ class PairedSphericalPowerSpectrumAggregator:
         gridded_operations: GriddedOperations,
         report_plot: bool,
         nan_fill_fn: Callable[[torch.Tensor, str], torch.Tensor] = lambda x, _: x,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
     ):
         self._gen_aggregator = SphericalPowerSpectrumAggregator(
-            gridded_operations, nan_fill_fn
+            gridded_operations, nan_fill_fn, variable_metadata=variable_metadata
         )
         self._target_aggregator = SphericalPowerSpectrumAggregator(
-            gridded_operations, nan_fill_fn
+            gridded_operations, nan_fill_fn, variable_metadata=variable_metadata
         )
         self._report_plot = report_plot
 
