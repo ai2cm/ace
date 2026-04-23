@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import dataclasses
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -7,6 +10,9 @@ from fme.core.typing_ import TensorDict
 from fme.downscaling.data import BatchData, PairedBatchData, scale_tuple
 from fme.downscaling.data.patching import Patch, get_patches
 from fme.downscaling.models import DiffusionModel, ModelOutputs
+
+if TYPE_CHECKING:
+    from fme.downscaling.predictors.serial_denoising import DenoisingMoEPredictor
 
 
 @dataclasses.dataclass
@@ -52,7 +58,7 @@ class PatchPredictor:
 
     def __init__(
         self,
-        model: DiffusionModel,
+        model: DiffusionModel | DenoisingMoEPredictor,
         coarse_yx_patch_extent: tuple[int, int] | None = None,
         coarse_horizontal_overlap: int = 1,
     ):
