@@ -194,7 +194,7 @@ shield_som_c96_spin_up_dataset:
 
 .PHONY: shield_som_ensemble_c96_dataset
 shield_som_ensemble_c96_dataset:
-	./compute_dataset.sh --config configs/shield-som-ensemble-c96-$(RESOLUTION)-$(LAYERS).yaml
+	./compute_dataset.sh --dataset --stats --time-coarsen --config configs/shield-som-ensemble-c96-$(RESOLUTION)-$(LAYERS).yaml
 
 .PHONY: shield_som_abrupt_co2_increase_c96_dataset
 shield_som_abrupt_co2_increase_c96_dataset:
@@ -245,7 +245,7 @@ e3smv2_1deg_climSST_dataset:
 
 .PHONY: era5_1deg_stats_beaker_dataset
 era5_1deg_stats_beaker_dataset:
-	./compute_stats.sh --config configs/era5-1deg-8layer-1940-2022.yaml
+	./compute_stats.sh --config configs/era5-1deg-8layer-1940-2025.yaml
 
 .PHONY: era5_1deg_16layer_stats_beaker_dataset
 era5_1deg_16layer_stats_beaker_dataset:
@@ -308,7 +308,7 @@ shield_amip_c96_idealized_0p1_heating_ensemble_dataset:
 
 .PHONY: xshield_amip_dataset_and_stats
 xshield_amip_dataset_and_stats:
-	./compute_dataset.sh --config configs/X-SHiELD-AMIP-1deg-$(LAYERS)-11yr.yaml
+	./compute_dataset.sh --dataset --stats --time-coarsen --config configs/X-SHiELD-AMIP-$(RESOLUTION)-$(LAYERS)-11yr.yaml
 
 .PHONY: xshield_amip_plus_4K_dataset_and_stats
 xshield_amip_plus_4K_dataset_and_stats:

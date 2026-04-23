@@ -199,10 +199,10 @@ class EMATracker:
             The state of the EMA tracker.
         """
         return {
-            "decay": self.decay,
-            "num_updates": self.num_updates,
+            "decay": self.decay.clone(),
+            "num_updates": self.num_updates.clone(),
             "faster_decay_at_start": self._faster_decay_at_start,
-            "module_name_to_ema_name": self._module_name_to_ema_name,
+            "module_name_to_ema_name": dict(self._module_name_to_ema_name),
             "ema_params": {
                 name: param.clone().detach() for name, param in self._ema_params.items()
             },

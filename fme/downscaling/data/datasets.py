@@ -138,8 +138,8 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
                 f"expected lon_min < {self.lon_interval.start + 360.0}"
             )
 
-        self._lats_slice = self.lat_interval.slice_of(self._orig_coords.lat)
-        self._lons_slice = self.lon_interval.slice_of(self._orig_coords.lon)
+        self._lats_slice = self.lat_interval.slice_from(self._orig_coords.lat)
+        self._lons_slice = self.lon_interval.slice_from(self._orig_coords.lon)
         self._latlon_coordinates = LatLonCoordinates(
             lat=self._orig_coords.lat[self._lats_slice],
             lon=self._orig_coords.lon[self._lons_slice],
@@ -337,6 +337,7 @@ class PairedGriddedData:
     dims: list[str]
     variable_metadata: Mapping[str, VariableMetadata]
     all_times: xr.CFTimeIndex
+    fine_coords: LatLonCoordinates
 
     @property
     def loader(self) -> DataLoader[PairedBatchItem]:

@@ -34,6 +34,7 @@ from fme.coupled.stepper import CoupledStepper, CoupledStepperConfig
 
 from .evaluator import (
     StandaloneComponentCheckpointsConfig,
+    _validate_coupled_steps_config,
     load_stepper,
     load_stepper_config,
 )
@@ -93,13 +94,11 @@ class CoupledInitialConditionConfig:
             ocean_data=get_initial_condition(
                 ds=ocean,
                 prognostic_names=ocean_prognostic_names,
-                labels=None,
                 n_ensemble=n_ensemble_per_ic,
             ),
             atmosphere_data=get_initial_condition(
                 ds=atmos,
                 prognostic_names=atmosphere_prognostic_names,
-                labels=None,
                 n_ensemble=n_ensemble_per_ic,
             ),
         )
@@ -139,6 +138,11 @@ class InferenceConfig:
         default_factory=lambda: InferenceAggregatorConfig()
     )
     n_ensemble_per_ic: int = 1
+
+    def __post_init__(self):
+        _validate_coupled_steps_config(
+            self.n_coupled_steps, self.coupled_steps_in_memory
+        )
 
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)

@@ -43,6 +43,33 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
+class _AutogradAllReduce(torch.autograd.Function):
+    """Autograd-aware all-reduce (sum) for spatial parallelism.
+    Forward: all-reduce (sum) the input across the given process group.
+    Backward: identity — gradients pass through without communication.
+    This makes ``spatial_reduce_sum`` differentiable so that gradients
+    flow correctly through the loss computation path::
+        AreaWeightedMSELoss → area_weighted_mean → weighted_mean
+            → spatial_reduce_sum (uses this function)
+    Without this, the raw ``torch.distributed.all_reduce`` would break
+    the autograd graph because it is an in-place, non-differentiable op.
+    """
+
+    @staticmethod
+    def forward(
+        ctx,
+        input: torch.Tensor,
+        group: torch.distributed.ProcessGroup,
+    ) -> torch.Tensor:
+        output = input.clone()
+        torch.distributed.all_reduce(output, group=group)
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor):
+        return grad_output, None
+
+
 class ModelTorchDistributed(DistributedBackend):
     """Distributed backend with spatial model parallelism.
 
@@ -305,22 +332,60 @@ class ModelTorchDistributed(DistributedBackend):
     def wrap_module(self, module: torch.nn.Module) -> torch.nn.Module:
         """Wrap with DDP over the **data** process group.
 
-        For now, we assume spatial communication is expected to be handled
-        inside the model layers themselves. If we need to change course, we
-        can revisit...
+        Spatial model parallelism is handled by:
+        - Forward: communication inside model layers (distributed SHT/iSHT)
+        - Backward: gradient hooks registered here that all-reduce across
+          spatial ranks, so every rank sees the global-mean gradient.
+
+        ``broadcast_buffers=False`` is required because the SHT/iSHT layers
+        store precomputed Legendre polynomial buffers.  DDP's default
+        buffer broadcast modifies these in-place between forward calls,
+        which breaks autograd's tensor-version tracking.
         """
         if any(p.requires_grad for p in module.parameters()):
             if using_gpu():
                 output_device = [self._device_id]
             else:
                 output_device = None
-            return DistributedDataParallel(
+            wrapped = DistributedDataParallel(
                 SyncBatchNorm.convert_sync_batchnorm(module),
                 device_ids=self._device_ids,
                 output_device=output_device,
                 process_group=self._data_group,
+                broadcast_buffers=False,
             )
+            self._register_spatial_grad_hooks(wrapped)
+            return wrapped
         return DummyWrapper(module)
+
+    def _register_spatial_grad_hooks(self, module: torch.nn.Module) -> None:
+        """All-reduce gradients across spatial ranks after each backward.
+
+        Each spatial rank only sees its local slice of the input, so its
+        gradient is a partial sum.  This hook sums those partials so
+        that every rank applies the same weight update.
+
+        The hook fires via ``register_hook`` on each parameter, which is
+        invoked with the per-backward gradient tensor before it is
+        accumulated into ``.grad`` and before DDP's data-parallel
+        all-reduce. The two reductions commute (orthogonal groups), so
+        ordering does not matter.
+        """
+        if self._h_size <= 1 and self._w_size <= 1:
+            return
+        spatial_group = self._spatial_group
+
+        def _hook(grad: torch.Tensor) -> torch.Tensor:
+            if grad is None:
+                return grad
+
+            reduced = grad.contiguous().clone()
+            torch.distributed.all_reduce(reduced, group=spatial_group)
+            return reduced
+
+        for p in module.parameters():
+            if p.requires_grad:
+                p.register_hook(_hook)
 
     def barrier(self):
         """Global barrier across all ranks."""
@@ -329,7 +394,7 @@ class ModelTorchDistributed(DistributedBackend):
 
     def spatial_reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
         if self._h_size > 1 or self._w_size > 1:
-            torch.distributed.all_reduce(tensor, group=self._spatial_group)
+            return _AutogradAllReduce.apply(tensor, self._spatial_group)
         return tensor
 
     def weighted_mean(
@@ -373,6 +438,5 @@ class ModelTorchDistributed(DistributedBackend):
         return thd.DistributedDiscreteContinuousConvS2(*args, **kwargs)
 
     def shutdown(self):
-        self.barrier()
         logger.debug("Shutting down rank %d", self._rank)
         DistributedManager.cleanup()
