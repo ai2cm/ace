@@ -49,6 +49,39 @@ def _reduce_to_per_channel(
     return loss_value.mean(dim=dims) / n_channels
 
 
+class LossOutput:
+    """Container for loss values returned by WeightedMappingLoss/StepLoss.
+
+    Wraps the raw unreduced loss tensor and provides convenience methods
+    for obtaining the scalar total or per-channel breakdowns. This
+    isolates reduction logic so callers and aggregators don't need to
+    know the internal tensor layout.
+    """
+
+    def __init__(
+        self,
+        loss: torch.Tensor,
+        channel_dim: int,
+        channel_names: list[str],
+    ):
+        self._loss = loss
+        self._channel_dim = channel_dim
+        self._channel_names = channel_names
+
+    def total(self) -> torch.Tensor:
+        """Scalar mean over all dimensions -- the optimization target."""
+        if self._loss.ndim > 0:
+            return self._loss.mean()
+        return self._loss
+
+    def get_channel_losses(self) -> dict[str, torch.Tensor]:
+        """Per-channel scalar losses keyed by variable name."""
+        reduced = _reduce_to_per_channel(
+            self._loss, self._channel_dim, len(self._channel_names)
+        )
+        return dict(zip(self._channel_names, reduced.unbind(0)))
+
+
 class NaNLoss(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -95,15 +128,14 @@ class WeightedMappingLoss:
         self,
         predict_dict: TensorMapping,
         target_dict: TensorMapping,
-        reduce: bool = True,
-    ) -> torch.Tensor:
+    ) -> LossOutput:
         """
         Args:
             predict_dict: The predicted data.
             target_dict: The target data.
-            reduce: If True (default), return a scalar loss.
-                If False, return a per-channel loss vector of
-                shape ``(n_channels,)``.
+
+        Returns:
+            A ``LossOutput`` wrapping the raw unreduced loss tensor.
         """
         predict_tensors = self.packer.pack(
             self.normalizer.normalize(predict_dict), axis=self.channel_dim
@@ -117,13 +149,12 @@ class WeightedMappingLoss:
             target_tensors = torch.where(nan_mask, 0.0, target_tensors)
 
         result = self.loss(predict_tensors, target_tensors)
-        if not reduce:
-            cdim = _channel_dim_positive(predict_tensors.ndim, self.channel_dim)
-            n_c = int(predict_tensors.shape[cdim])
-            return _reduce_to_per_channel(result, cdim, n_c)
-        if result.ndim > 0:
-            return result.mean()
-        return result
+        cdim = _channel_dim_positive(predict_tensors.ndim, self.channel_dim)
+        return LossOutput(
+            loss=result,
+            channel_dim=cdim,
+            channel_names=list(self.packer.names),
+        )
 
     def get_normalizer_state(self) -> dict[str, float]:
         return self.normalizer.get_state()
@@ -509,23 +540,23 @@ class StepLoss(torch.nn.Module):
         predict_dict: TensorMapping,
         target_dict: TensorMapping,
         step: int,
-        reduce: bool = True,
-    ) -> torch.Tensor:
+    ) -> LossOutput:
         """
         Args:
             predict_dict: The predicted data.
             target_dict: The target data.
             step: The step number, indexed from 0 for the first step.
-            reduce: If True (default), return a scalar loss.
-                If False, return a per-channel loss vector of
-                shape ``(n_channels,)``.
 
         Returns:
-            The loss, scalar or ``(n_channels,)`` depending on
-            ``reduce``.
+            A ``LossOutput`` wrapping the step-weighted loss tensor.
         """
         step_weight = (1.0 + self.sqrt_loss_decay_constant * step) ** (-0.5)
-        return self.loss(predict_dict, target_dict, reduce=reduce) * step_weight
+        output = self.loss(predict_dict, target_dict)
+        return LossOutput(
+            loss=output._loss * step_weight,
+            channel_dim=output._channel_dim,
+            channel_names=output._channel_names,
+        )
 
 
 @dataclasses.dataclass
