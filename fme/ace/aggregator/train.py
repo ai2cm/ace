@@ -9,6 +9,7 @@ from fme.ace.aggregator.one_step.spectrum import PairedSphericalPowerSpectrumAgg
 from fme.ace.stepper import TrainOutput
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
+from fme.core.fill import SmoothFloodFill
 from fme.core.generics.aggregator import AggregatorABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.tensors import fold_ensemble_dim, fold_sized_ensemble_dim
@@ -59,10 +60,12 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
         self._paired_aggregators: dict[str, Aggregator] = {}
         if config.spherical_power_spectrum:
             try:
+                flood_fill = SmoothFloodFill(num_steps=4)
                 self._paired_aggregators["power_spectrum"] = (
                     PairedSphericalPowerSpectrumAggregator(
                         gridded_operations=operations,
                         report_plot=False,
+                        nan_fill_fn=flood_fill,
                     )
                 )
             except NotImplementedError:

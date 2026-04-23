@@ -30,8 +30,10 @@ class StepLossABC(abc.ABC):
 
     @abc.abstractmethod
     def step_is_optimized(self, step: int) -> bool:
-        """Returns True if the step is less than to the number of
-        steps contributing to the loss.
+        """Returns True if the given step should contribute to the loss.
+
+        Args:
+            step: The step index to check.
         """
         ...
 
@@ -53,24 +55,32 @@ class LossContributionsConfig:
             starting from the first.
         weight: (optional) Weight applied to each step loss for the given realm.
             Each step contributes equally to the total loss.
+        optimize_last_step_only: If True, only the last step within the training
+            horizon defined by ``n_steps`` is optimized (i.e. contributes to the
+            loss and has gradients enabled). The optimized step index is
+            ``min(n_steps, n_total_steps) - 1``.
 
     """
 
     n_steps: float = float("inf")
     weight: float = 1.0
+    optimize_last_step_only: bool = False
 
     def build(
         self,
         loss_obj: StepLoss,
         time_dim: int,
+        max_n_steps: int,
     ) -> StepLossABC:
         if self.n_steps == 0 or self.weight == 0.0:
             return NullLossContributions(loss_obj)
         return LossContributions(
             n_steps=self.n_steps,
             weight=self.weight,
+            optimize_last_step_only=self.optimize_last_step_only,
             loss_obj=loss_obj,
             time_dim=time_dim,
+            max_n_steps=max_n_steps,
         )
 
 
@@ -104,28 +114,39 @@ class LossContributions(StepLossABC):
         self,
         n_steps: float,
         weight: float,
+        optimize_last_step_only: bool,
         loss_obj: StepLoss,
         time_dim: int,
+        max_n_steps: int,
     ):
         self._loss = loss_obj
         self._n_steps = n_steps
         self._weight = weight
+        self._optimize_last_step_only = optimize_last_step_only
         self._time_dim = time_dim
+        self._max_n_steps = max_n_steps
 
     @property
     def effective_loss_scaling(self) -> TensorDict:
         return self._loss.effective_loss_scaling
 
     def step_is_optimized(self, step: int) -> bool:
-        """Returns True if the step is less than to the number of steps and
-        weight is != 0. The first step number is assumed to be 0.
+        """Returns True if the step should contribute to the loss.
 
+        When ``optimize_last_step_only`` is False (default), returns True for
+        steps ``0`` through ``n_steps - 1``. When True, returns True only for
+        the step at index ``min(n_steps, n_total_steps) - 1``.
         """
-        return step < self._n_steps and self._weight != 0.0
+        if self._weight == 0.0:
+            return False
+        if self._optimize_last_step_only:
+            last_optimized_step = min(self._n_steps, self._max_n_steps) - 1
+            return step == last_optimized_step
+        return step < self._n_steps
 
     def __call__(
         self, prediction: StepPredictionABC, target_data: TensorMapping
-    ) -> torch.Tensor:
+    ) -> torch.Tensor | None:
         if self.step_is_optimized(prediction.step):
             return (
                 self._weight
