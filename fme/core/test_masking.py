@@ -1,17 +1,14 @@
-import re
-
 import pytest
 import torch
 
 import fme
 from fme.core.masking import StaticMasking, StaticMaskingConfig
+from fme.core.wildcard import parse_3d_varname
 
 DEVICE = fme.get_device()
 
 
 class _Mask:
-    LEVEL_PATTERN = re.compile(r"_(\d+)$")
-
     def __init__(
         self,
         mask_2d: torch.Tensor | None = None,
@@ -23,12 +20,12 @@ class _Mask:
     def get_mask_tensor_for(self, name: str) -> torch.Tensor | None:
         if name == "mask_ignored":
             return None
-        match = self.LEVEL_PATTERN.search(name)
-        if match:
+        parsed = parse_3d_varname(name)
+        if parsed:
             # 3D variable
             if self.mask_3d is None:
                 return None
-            level = int(match.group(1))
+            level = parsed[1]  # level number from the variable name
             return self.mask_3d.select(dim=-1, index=level)
         else:
             # 2D variable

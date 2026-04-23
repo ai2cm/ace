@@ -1,9 +1,9 @@
-import re
 from collections.abc import Iterable, Mapping
 
 import torch
 
 from fme.core.typing_ import TensorMapping
+from fme.core.wildcard import parse_3d_varname
 
 
 def unstack(tensor: torch.Tensor, names: list[str], dim: int = -1) -> TensorMapping:
@@ -31,8 +31,6 @@ def unstack(tensor: torch.Tensor, names: list[str], dim: int = -1) -> TensorMapp
 class Stacker:
     """Handles extraction and stacking of data tensors for 3D variables."""
 
-    LEVEL_PATTERN = re.compile(r"_(\d+)$")
-
     def __init__(
         self,
         prefix_map: Mapping[str, list[str]] | None = None,
@@ -57,13 +55,13 @@ class Stacker:
             raise RuntimeError("Prefix map has already been built.")
         prefix_map = {}
         for name in names:
-            match = self.LEVEL_PATTERN.search(name)
-            if match is None:
+            parsed = parse_3d_varname(name)
+            if parsed is None:
                 # 2D variable
                 prefix_map[name] = [name]
             else:
-                # 3D variable, +1 to include "_" in the prefix
-                prefix_name = name[: match.start() + 1]
+                # 3D variable, parsed[0] is the stripped prefix so add "_"
+                prefix_name = parsed[0] + "_"
                 prefix_map[prefix_name] = [prefix_name]
         self._prefix_map = prefix_map
 
@@ -142,13 +140,14 @@ class Stacker:
 
         levels = []
         for name in names:
-            match = self.LEVEL_PATTERN.search(name)
-            if match is None:
+            parsed = parse_3d_varname(name)
+            if parsed is None:
                 raise ValueError(
                     f"Invalid field name {name}, is a prefix variable "
                     "but does not end in _{number}."
                 )
-            levels.append(int(match.group(1)))
+            level = parsed[1]
+            levels.append(level)
 
         for i, level in enumerate(sorted(levels)):
             if i != level:
