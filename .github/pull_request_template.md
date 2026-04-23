@@ -6,5 +6,6 @@ Changes:
 
 - [ ] Tests added
 - [ ] If dependencies changed, "deps only" image rebuilt and "latest_deps_only_image.txt" file updated
+- [ ] An AI coding agent assisted in creating this PR
 
 Resolves #<github issues> (delete if none)
