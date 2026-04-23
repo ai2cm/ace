@@ -1630,17 +1630,17 @@ class TrainStepper(
                 step_loss = self._loss_obj(gen_step, target_step, step=step)
                 step_total_loss = step_loss.total()
                 metrics[f"loss_step_{step}"] = step_total_loss.detach()
-                per_ch = self._loss_obj.loss.packer.unpack(step_loss.detach(), axis=0)
+                per_ch = step_loss.get_channel_losses()
                 if per_channel_sum is None:
-                    per_channel_sum = {k: v.clone() for k, v in per_ch.items()}
+                    per_channel_sum = {k: v.detach().clone() for k, v in per_ch.items()}
                 else:
                     for k in per_channel_sum:
-                        per_channel_sum[k] = per_channel_sum[k] + per_ch[k]
+                        per_channel_sum[k] = per_channel_sum[k] + per_ch[k].detach()
             if optimize_step:
                 optimization.accumulate_loss(step_total_loss)
         if per_channel_sum is not None:
             for k, v in per_channel_sum.items():
-                metrics[f"loss/{k}"] = v.detach()
+                metrics[f"loss/{k}"] = v
         return output_list
 
     def update_training_history(self, training_job: TrainingJob) -> None:
