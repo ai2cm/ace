@@ -30,7 +30,7 @@ class SphericalPowerSpectrumAggregator:
         self._nan_fill_fn = nan_fill_fn
 
     @torch.no_grad()
-    def record_batch(self, data: TensorMapping):
+    def record_batch(self, data: TensorMapping, i_time_start: int = 0):
         for name in data:
             batch_size = data[name].shape[0]
             time_size = data[name].shape[1]
@@ -59,6 +59,23 @@ class SphericalPowerSpectrumAggregator:
                 _mean_spectrum = dist.reduce_mean(_mean_spectrum)
             logs[name] = _mean_spectrum
         return logs
+
+    @torch.no_grad()
+    def get_logs(self, label: str) -> dict[str, plt.Figure]:
+        logs: dict[str, plt.Figure] = {}
+        for name, spectrum in self.get_mean().items():
+            fig = _plot_spectrum_pair(spectrum.cpu(), target=None)
+            logs[f"{label}/{name}"] = fig
+            plt.close(fig)
+        return logs
+
+    @torch.no_grad()
+    def get_dataset(self) -> xr.Dataset:
+        logging.debug(
+            "get_dataset not implemented for SphericalPowerSpectrumAggregator. "
+            "Returning an empty dataset."
+        )
+        return xr.Dataset()
 
 
 class PairedSphericalPowerSpectrumAggregator:
