@@ -115,7 +115,10 @@ class RegridConfig:
 
 @dataclass
 class FillConfig:
-    strategy: str = "persistence_down"
+    # Nearest-above-in-the-vertical fill for below-surface cells: each
+    # column's below-surface levels inherit the lowest above-surface
+    # level's value. (Not time persistence; just column-wise NN in plev.)
+    strategy: str = "nearest_above"
     emit_mask: bool = True
 
 

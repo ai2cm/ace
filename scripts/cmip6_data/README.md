@@ -181,7 +181,9 @@ Driven by the YAML config + the inventory. For each selected
 3. Validate `cell_methods` / vertical / grid.
 4. Regrid horizontally to F22.5 (Gauss-Legendre 45 x 90) via `xesmf`
    (bilinear for state, conservative for fluxes).
-5. Apply below-surface persistence fill + emit mask channel.
+5. Apply below-surface nearest-above fill + emit time-varying
+   `below_surface_mask(time, plev, lat, lon)` (uint8, single shared
+   field).
 6. Compute derived `ta_derived_layer_{0..6}` from `zg` + `hus`.
 7. Linear-interpolate monthly forcings (`ts`, `siconc`) onto the daily
    time axis; broadcast static fields along time (or leave as
@@ -197,92 +199,63 @@ comes later if needed.
 Normalization stats (per-model, NaN-aware) are a separate later step,
 computed from the produced zarrs.
 
+## Resolved Issues
+
+- **Issue 1 — Config design.** Single YAML per script, loaded via
+  `dacite` into dataclasses in `config.py`. Top-level `defaults:` +
+  `selection:` + sparse `overrides:` list. See `ProcessConfig` and
+  `InventoryConfig`.
+- **Issue 3 — Member caps.** `require_i = 1` and `max_members_per_f = 3`
+  at ingest, applied per `(source_id, experiment, p, f)` label.
+  Deterministic selection by `(variant_f, variant_r)`.
+- **Issue 4 — Time subset.** Pilot: `historical` 2010, `ssp585` 2015
+  (one full year each). Set `defaults.time_subset: null` for full range.
+- **Issue 5 — Pangeo-only vs ESGF.** Pangeo-only. `ta` replaced by
+  derived layer-T; `ps` replaced by `psl` + topography mask. Confirmed
+  via full inventory pass.
+- **Issue 8 — Regridding.** `xesmf` targeting Gauss-Legendre F22.5
+  (45 x 90). Conservative for fluxes/precip, bilinear for state.
+  Weights cached per source grid.
+- **Forcings wiring.** Monthly `ts` (`Amon`) + `siconc` (`SImon`)
+  interpolated to daily; static `sftlf` + `orog` (`fx`) broadcast.
+  ~21 source_ids have full core + forcing + static coverage in Pangeo.
+- **Issue 7 — Below-surface masking.** Single shared time-varying
+  `below_surface_mask(time, plev, lat, lon)` (uint8) per dataset.
+  Primary derivation: NaN union across 3D plev variables (captures
+  day-to-day surface-pressure variation via the model's own masking
+  decisions). Fallback: `zg < orog` (still time-varying via `zg`).
+  Drop dataset if both unavailable. Masked cells in 3D variables get
+  nearest-above-in-the-vertical fill — each column's below-surface
+  levels inherit the lowest above-surface level's value, handling any
+  number of consecutive masked bottom levels. `mask_source` recorded
+  in `index.parquet`.
+
 ## Open Issues (to work through sequentially)
 
-### Issue 1 — YAML/dacite config design
-
-Shape of the config file. Proposed: a single YAML loaded into a dataclass
-via `dacite`, with a top-level `defaults:` section plus a `datasets:` list
-of per-entry overrides. Per-entry entries can be sparse — most datasets
-inherit everything from defaults, exceptional ones set fields explicitly.
-Open: exact dataclass schema, override semantics, how time subsetting knobs
-are expressed (per-dataset vs global).
-
-### Issue 2 — Label schema
-
-Working proposal: label = `(source_id, p)`. Need to confirm this matches
-the user's intent given "physics configuration (model and hyperparameters),
-not ensemble member". Alternatives: `source_id` alone (simpler, conflates
-p-variants within a model), or `(source_id, p, f)` (includes forcing
-variants as separate labels).
-
-### Issue 3 — Member inclusion & caps
-
-Base assumption: ingest all members. Some models publish dozens of
-historical members; others publish one. Decision: do we cap per model at
-ingest time (simpler pipeline, loses data) or ingest everything and cap at
-training time (more flexible, bigger dataset)? Related: whether member
-filtering is expressed in the YAML config.
-
-### Issue 4 — Time subsetting for pilot
-
-"Drastically subset" requires a concrete rule. Options: N years per
-experiment per model (e.g. 2 years of historical + 2 years of ssp585),
-single year, or a specific decade. Must be a config knob that can be set to
-"full" to produce the full dataset without code changes.
-
-### Issue 5 — Pangeo-only vs ESGF (resolved)
-
-Inventory run against the Pangeo GCS CMIP6 catalog (`table_id=day`,
-`historical` + `ssp585`, 22 candidate variables) — 8,615 rows across 53
-source_ids, 163 historical members, 142 ssp585 members.
-
-Key gaps found:
-
-- `ta` in `day`: only **3 models** publish it (CNRM-CM6-1, CanESM5,
-  GFDL-CM4) despite `ua`/`va`/`hus` each appearing for **47 models**.
-- `ps` in `day`: **zero models**; only published at 6-hourly or monthly
-  cadences.
-- `zg`: 36 models; `huss`: 41; the 2D fields `pr`/`tas`/`psl` are near-
-  universal (50–53 models).
-
-Resolution: **Pangeo-only**, with `ta` replaced by derived layer-mean
-temperatures (see Derived variables) and `ps` replaced by `psl` + mask.
-Expected coverage with the revised core set (`ua`, `va`, `hus`, `zg`,
-`tas`, `huss`, `psl`, `pr`): ~30 models with full core + at least one
-member per experiment. Good enough for the pilot; ESGF revisited only if
-the embedding clearly needs more sources.
-
-### Issue 6 — Chunking strategy
+### Issue 6 — Chunking strategy (next)
 
 Training reads short windows (2–4 timesteps at a time). Chunking must be
 small enough to avoid reading huge unused blocks per window, large enough
-to avoid GCS per-object overhead. At 4°×4° with `plev8`, one timestep of a
-3D field is ~130 KB; chunking `time=32` gives ~4 MB chunks, likely a
-reasonable balance. Need to confirm the target chunk size and whether to
-differ between 2D and 3D variables.
+to avoid GCS per-object overhead. At F22.5 (45×90) with `plev8`, one
+timestep of a 3D field is ~130 KB; chunking `time=32` gives ~4 MB chunks,
+likely a reasonable balance. Need to confirm the target chunk size and
+whether to differ between 2D and 3D variables.
 
-### Issue 7 — Below-surface masking (confirm)
+### Issue 2 — Label schema
 
-Proposed: **persistence fill** from the lowest valid level downward, plus
-a per-variable **mask channel** so the model sees where fills were
-applied. Applies mainly to the lowest `plev8` level (1000 hPa) over high
-topography and sometimes 850 hPa. Confirm and decide whether the mask
-channel is per-variable or a single shared surface-topography mask.
-
-### Issue 8 — Regridding methods (confirm)
-
-Proposed: conservative for fluxes and `pr`; bilinear for state. Cache
-regrid weights per source grid. Confirm, and decide whether any variable
-needs nearest-neighbor (e.g., categorical fields — unlikely in our list).
+Working proposal: label = `(source_id, p)` (strict reading). Realization
+`r` and initialization `i` are ensemble variation; forcing `f` is an
+external input, not physics. Confirm that the stored label column is
+just these two pieces, and whether we also record `f` for downstream
+analysis even if it's not part of the label.
 
 ### Issue 9 — `index.parquet` schema
 
 What to record per dataset: `source_id`, `experiment`, `variant_label`,
-native calendar, native horizontal grid, `grid_label` used, regrid method,
-time range, variables present, flags (e.g., `cell_methods` validation
-result, data-quality issues, ESGF vs Pangeo source). Need a concrete
-schema.
+parsed `r`/`i`/`p`/`f`, label columns from Issue 2, native calendar,
+native horizontal grid, `grid_label` used, regrid method, time range,
+variables present, data-quality flags. Decided together with the
+processing script.
 
 ## Deferred / Future Issues
 
