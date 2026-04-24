@@ -773,9 +773,7 @@ def inference_one_epoch(
 
 
 def _restore_checkpoint(trainer: Trainer, checkpoint_path):
-    checkpoint = torch.load(
-        checkpoint_path, map_location=fme.get_device(), weights_only=False
-    )
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     trainer.stepper.load_state(checkpoint["stepper"])
     trainer.optimization.load_state(checkpoint["optimization"])
     trainer.num_batches_seen = checkpoint["num_batches_seen"]

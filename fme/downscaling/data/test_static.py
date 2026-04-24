@@ -3,6 +3,8 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.core.device import get_device
+
 from .static import StaticInput, StaticInputs, _load_coords_from_ds
 
 
@@ -43,10 +45,11 @@ def test_StaticInputs_serialize():
     state = static_inputs.get_state()
     assert "coords" in state
     reconstructed = StaticInputs.from_state(state)
-    assert reconstructed[0].data.equal(static_inputs[0].data)
-    assert reconstructed[1].data.equal(static_inputs[1].data)
-    assert torch.equal(reconstructed.coords.lat, static_inputs.coords.lat)
-    assert torch.equal(reconstructed.coords.lon, static_inputs.coords.lon)
+    device = get_device()
+    assert reconstructed[0].data.equal(static_inputs[0].data.to(device))
+    assert reconstructed[1].data.equal(static_inputs[1].data.to(device))
+    assert torch.equal(reconstructed.coords.lat, static_inputs.coords.lat.to(device))
+    assert torch.equal(reconstructed.coords.lon, static_inputs.coords.lon.to(device))
 
 
 def test_StaticInputs_from_state_raises_on_missing_coords():
@@ -66,9 +69,10 @@ def test_StaticInputs_from_state_legacy_coords_in_fields():
         "fields": [{"data": data, "coords": {"lat": coords.lat, "lon": coords.lon}}],
     }
     result = StaticInputs.from_state(old_state)
-    assert torch.equal(result[0].data, data)
-    assert torch.equal(result.coords.lat, coords.lat)
-    assert torch.equal(result.coords.lon, coords.lon)
+    device = get_device()
+    assert torch.equal(result[0].data, data.to(device))
+    assert torch.equal(result.coords.lat, coords.lat.to(device))
+    assert torch.equal(result.coords.lon, coords.lon.to(device))
 
 
 def test_from_state_backwards_compatible_has_coords():
@@ -80,7 +84,7 @@ def test_from_state_backwards_compatible_has_coords():
         state=state, static_inputs_config={}
     )
     assert result is not None
-    assert torch.equal(result[0].data, data)
+    assert torch.equal(result[0].data, data.to(get_device()))
 
 
 def test_from_state_backwards_compatible_no_state_no_config():
@@ -125,6 +129,40 @@ def test_from_state_backwards_compatible_raises_state_and_config():
             state=state,
             static_inputs_config={"HGTsfc": "some/path"},
         )
+
+
+def test_StaticInput_from_state_places_on_device():
+    state = {"data": torch.zeros(4, 4, device="cpu")}
+    result = StaticInput.from_state(state)
+    assert result.data.device == get_device()
+
+
+def test_StaticInput_from_state_decouples_memory():
+    original = torch.zeros(4, 4, device="cpu")
+    result = StaticInput.from_state({"data": original})
+    original.fill_(999.0)
+    assert result.data.max().item() == 0.0
+
+
+def test_StaticInputs_from_state_places_on_device():
+    coords = _make_coords(n=4)
+    data = torch.arange(16, dtype=torch.float32).reshape(4, 4)
+    state = StaticInputs([StaticInput(data)], coords=coords).get_state()
+    result = StaticInputs.from_state(state)
+    device = get_device()
+    assert result[0].data.device == device
+    assert result.coords.lat.device == device
+    assert result.coords.lon.device == device
+
+
+def test_StaticInputs_from_state_decouples_memory():
+    coords = _make_coords(n=4)
+    data = torch.arange(16, dtype=torch.float32).reshape(4, 4)
+    state = StaticInputs([StaticInput(data)], coords=coords).get_state()
+    original_lat = state["coords"]["lat"]
+    result = StaticInputs.from_state(state)
+    original_lat.fill_(999.0)
+    assert result.coords.lat.max().item() < 999.0
 
 
 def test__load_coords_from_ds():
