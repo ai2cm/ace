@@ -160,14 +160,14 @@ Issue 6 (inner `time=1`, outer `time=365`).
 
 ## Dependencies
 
-Runtime deps (assumed present in the `fme` conda env): `numpy`,
-`xarray`, `pandas`, `zarr`, `fsspec`, `dacite`, `pyyaml`.
+See `requirements.txt`. Most are already present in the base `fme`
+conda env (numpy, pandas, xarray, zarr, fsspec, dacite, pyyaml); the
+file also lists what `process.py` additionally needs (`xesmf`,
+`gcsfs`, `cftime`, `pyarrow`).
 
-Processing-script-only deps (installed if/when we run `process.py`):
-`xesmf` + `esmpy` (regridding), `dask`.
-
-Optional: `pyarrow` (or `fastparquet`) — enables `index.parquet`
-output. Without it, only `index.csv` is written.
+**Install**: `pip install -r requirements.txt` works for most of it,
+but `xesmf`/`esmpy` wrap the ESMF C library and install more reliably
+via conda: `conda install -c conda-forge xesmf esmpy`.
 
 ## Extraction Approach (high level)
 
