@@ -523,38 +523,37 @@ class DiffusionModel:
             latent_steps=[],
         )
 
-    @torch.no_grad()
-    def generate(
+    def prepare_generation_inputs(
         self,
         coarse_data: TensorMapping,
         static_inputs: StaticInputs | None,
-        n_samples: int = 1,
-    ) -> tuple[TensorDict, torch.Tensor, list[torch.Tensor]]:
-        # Internal method; external callers should use generate_on_batch /
-        # generate_on_batch_no_target.
-        inputs_ = self._get_input_from_coarse(coarse_data, static_inputs)
-        # expand samples and fold to
-        # [batch * n_samples, output_channels, height, width]
-        inputs_ = _repeat_batch_by_samples(inputs_, n_samples)
-        coarse_input_shape = next(iter(coarse_data.values())).shape[-2:]
+        n_samples: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Normalize coarse input and build random latents for generation.
 
+        Returns:
+            inputs: Normalized (and optionally interpolated) coarse input,
+                repeated ``n_samples`` times along the batch dimension.
+            latents: Random noise tensor shaped for the fine output grid.
+        """
+        inputs = self._get_input_from_coarse(coarse_data, static_inputs)
+        inputs = _repeat_batch_by_samples(inputs, n_samples)
+        coarse_input_shape = next(iter(coarse_data.values())).shape[-2:]
         outputs_shape = (
-            inputs_.shape[0],
+            inputs.shape[0],
             len(self.out_packer.names),
             *self._get_fine_shape(coarse_input_shape),
         )
         latents = torch.randn(outputs_shape).to(device=get_device())
+        return inputs, latents
 
-        generated_norm, latent_steps = edm_sampler(
-            self.module,
-            latents,
-            inputs_,
-            S_churn=self.config.churn,
-            sigma_min=self.config.sigma_min,
-            sigma_max=self.config.sigma_max,
-            num_steps=self.config.num_diffusion_generation_steps,
-        )
-
+    def postprocess_generated(
+        self,
+        generated_norm: torch.Tensor,
+        coarse_data: TensorMapping,
+        n_samples: int,
+    ) -> tuple[TensorDict, torch.Tensor]:
+        """Add residual, separate samples, and denormalize sampler output."""
         if self.config.predict_residual:
             base_prediction = interpolate(
                 self.out_packer.pack(
@@ -568,12 +567,35 @@ class DiffusionModel:
             generated_norm = generated_norm + _repeat_batch_by_samples(
                 base_prediction, n_samples
             )
-
         generated_norm_reshaped = _separate_interleaved_samples(
             generated_norm, n_samples
         )
         generated = self.normalizer.fine.denormalize(
             self.out_packer.unpack(generated_norm_reshaped, axis=self._channel_axis)
+        )
+        return generated, generated_norm
+
+    @torch.no_grad()
+    def generate(
+        self,
+        coarse_data: TensorMapping,
+        static_inputs: StaticInputs | None,
+        n_samples: int = 1,
+    ) -> tuple[TensorDict, torch.Tensor, list[torch.Tensor]]:
+        inputs, latents = self.prepare_generation_inputs(
+            coarse_data, static_inputs, n_samples
+        )
+        generated_norm, latent_steps = edm_sampler(
+            self.module,
+            latents,
+            inputs,
+            S_churn=self.config.churn,
+            sigma_min=self.config.sigma_min,
+            sigma_max=self.config.sigma_max,
+            num_steps=self.config.num_diffusion_generation_steps,
+        )
+        generated, generated_norm = self.postprocess_generated(
+            generated_norm, coarse_data, n_samples
         )
         return generated, generated_norm, latent_steps
 
@@ -646,8 +668,8 @@ class DiffusionModel:
         full_fine_coords_state = state.get("full_fine_coords")
         if full_fine_coords_state is not None:
             full_fine_coords = LatLonCoordinates(
-                lat=full_fine_coords_state["lat"],
-                lon=full_fine_coords_state["lon"],
+                lat=full_fine_coords_state["lat"].to(get_device(), copy=True),
+                lon=full_fine_coords_state["lon"].to(get_device(), copy=True),
             )
         else:
             raise ValueError(
@@ -724,7 +746,9 @@ class CheckpointModelConfig:
     @property
     def _checkpoint(self) -> Mapping[str, Any]:
         if not self._checkpoint_is_loaded:
-            checkpoint_data = torch.load(self.checkpoint_path, weights_only=False)
+            checkpoint_data = torch.load(
+                self.checkpoint_path, map_location="cpu", weights_only=False
+            )
             checkpoint_data["model"]["config"]["in_names"] = [
                 self._rename.get(name, name)
                 for name in checkpoint_data["model"]["config"]["in_names"]
@@ -753,8 +777,8 @@ class CheckpointModelConfig:
             )
         if coords_from_state is not None:
             return LatLonCoordinates(
-                lat=coords_from_state["lat"],
-                lon=coords_from_state["lon"],
+                lat=coords_from_state["lat"].to(get_device(), copy=True),
+                lon=coords_from_state["lon"].to(get_device(), copy=True),
             )
         elif fine_coordinates_path is not None:
             return load_coords_from_path(fine_coordinates_path)
