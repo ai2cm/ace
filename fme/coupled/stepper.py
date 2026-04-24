@@ -1723,6 +1723,7 @@ class CoupledTrainStepper(
                 Use `NullOptimization` to disable training.
             compute_derived_variables: Whether to compute derived variables for the
                 prediction and target atmosphere data.
+
         """
         atmos_forward_data = self.atmosphere.get_forward_data(
             data.atmosphere_data,

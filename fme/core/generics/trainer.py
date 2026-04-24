@@ -544,10 +544,7 @@ class Trainer:
                 stop_batch=self.config.train_evaluation_batches
             ):
                 with GlobalTimer():
-                    stepped = self.stepper.train_on_batch(
-                        batch,
-                        self._no_optimization,
-                    )
+                    stepped = self.stepper.train_on_batch(batch, self._no_optimization)
                 aggregator.record_batch(stepped)
         if (
             self._should_save_checkpoints()
