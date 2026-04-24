@@ -1,7 +1,7 @@
 checkpoint_path: /ckpt.tar
 allow_incompatible_dataset: true
 data_writer:
-  save_monthly_files: false
+  save_monthly_files: true
   save_prediction_files: false
 experiment_dir: /results
 forward_steps_in_memory: 40
