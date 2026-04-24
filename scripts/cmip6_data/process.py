@@ -414,7 +414,15 @@ def _interp_monthly_to_daily(
     daily_time: xr.DataArray,
     method: str,
 ) -> xr.DataArray:
-    return monthly.interp(time=daily_time, method=method)
+    """Interpolate monthly values onto the daily axis; constant-value
+    extrapolation at the start and end of the series (daily stamps
+    outside the first / last monthly bracket take the nearest monthly
+    value).
+    """
+    interp = monthly.interp(time=daily_time, method=method)
+    # bfill handles leading NaN (days before the first monthly point);
+    # ffill handles trailing NaN (days after the last monthly point).
+    return interp.bfill("time").ffill("time")
 
 
 def _apply_time_subset(ds: xr.Dataset, cfg: ResolvedDatasetConfig) -> xr.Dataset:
@@ -607,6 +615,20 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
                 monthly_r[var], day_regridded["time"], cfg.forcing_interpolation
             )
             day_regridded[var] = interp
+
+        # 11b. Sea-ice fraction is only defined over ocean cells — emit
+        # a time-invariant ``siconc_mask`` from the regridded ocean-grid
+        # coverage, then replace the residual land NaN with 0 so the
+        # stored data is NaN-free. The mask is a 2D (lat, lon) uint8
+        # (1 = valid / ocean, 0 = land or missing source coverage); we
+        # take it from the first timestep, since the valid-cell pattern
+        # is time-invariant for sea-ice fraction.
+        if "siconc" in day_regridded:
+            valid = (~day_regridded["siconc"].isel(time=0).isnull()).astype("uint8")
+            day_regridded = day_regridded.assign(
+                siconc_mask=valid.rename("siconc_mask")
+            )
+            day_regridded["siconc"] = day_regridded["siconc"].fillna(0.0)
 
         # 12. Attach static fields (broadcast along time implicitly at read).
         if static_ds is not None:
