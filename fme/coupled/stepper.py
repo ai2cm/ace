@@ -1381,6 +1381,10 @@ class CoupledStepperTrainLoss:
             atmosphere=self._loss_objs["atmosphere"].effective_loss_scaling,
         )
 
+    def sample_n_steps(self) -> None:
+        for loss_obj in self._loss_objs.values():
+            loss_obj.sample_n_steps()
+
     def step_is_optimized(
         self,
         realm: Literal["ocean", "atmosphere"],
@@ -1730,6 +1734,7 @@ class CoupledTrainStepper(
         )
 
         metrics = ComponentStepMetrics()
+        self._loss.sample_n_steps()
         optimization.set_mode(self.modules)
         with optimization.autocast():
             output_list = self._accumulate_loss(
@@ -1787,9 +1792,7 @@ class CoupledTrainStepper(
 
 def load_coupled_stepper(checkpoint_path: str | pathlib.Path) -> CoupledStepper:
     logging.info(f"Loading trained coupled model checkpoint from {checkpoint_path}")
-    checkpoint = torch.load(
-        checkpoint_path, map_location=fme.get_device(), weights_only=False
-    )
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     stepper = CoupledStepper.from_state(checkpoint["stepper"])
 
     return stepper
