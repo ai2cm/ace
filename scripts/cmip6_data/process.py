@@ -382,6 +382,11 @@ def _compute_derived_layer_T(ds: xr.Dataset) -> xr.Dataset:
     """Add ``ta_derived_layer_{0..N-1}`` from zg + hus + plev via the
     hypsometric equation. One layer value per gap between adjacent
     plev levels, assigned to the log-pressure midpoint.
+
+    Must be called on *un-filled* zg / hus. Running this on nearest-
+    above-filled zg would force ``dz = 0`` below surface and collapse
+    the derived T to zero; see ``_fill_derived_layer_T`` for the
+    post-derivation fill.
     """
     plev_pa = ds["plev"].values  # Pa
     z = ds["zg"]  # m
@@ -407,6 +412,31 @@ def _compute_derived_layer_T(ds: xr.Dataset) -> xr.Dataset:
         }
         out[f"ta_derived_layer_{i}"] = t.drop_vars("plev", errors="ignore")
     return ds.assign(**out)
+
+
+def _fill_derived_layer_T(ds: xr.Dataset, mask: xr.DataArray) -> xr.Dataset:
+    """Cascading nearest-above fill for ``ta_derived_layer_*``.
+
+    Layer ``i`` is treated as invalid where either bounding level
+    (``plev[i]`` or ``plev[i+1]``) is below-surface per ``mask``, since
+    the layer-mean hypsometric formula uses the model's below-surface
+    extrapolation there and produces unphysical values.
+
+    The fill cascades top-down: layer N-2 is always valid (stratosphere);
+    each layer ``i < N-2`` inherits layer ``i+1`` where invalid. Runs
+    once per layer, so consecutive masked bottom layers all resolve to
+    the topmost valid layer's value.
+    """
+    layer_vars = sorted(v for v in ds.data_vars if v.startswith("ta_derived_layer_"))
+    n_layers = len(layer_vars)
+    if n_layers < 2:
+        return ds
+    for i in range(n_layers - 2, -1, -1):
+        layer_mask = (mask.isel(plev=i) | mask.isel(plev=i + 1)).astype(bool)
+        this_var = f"ta_derived_layer_{i}"
+        above_var = f"ta_derived_layer_{i + 1}"
+        ds[this_var] = ds[this_var].where(~layer_mask, ds[above_var])
+    return ds
 
 
 def _interp_monthly_to_daily(
@@ -457,21 +487,107 @@ def _clear_stale_encoding(ds: xr.Dataset) -> xr.Dataset:
     return ds
 
 
+# Per-variable (min, max) physical bounds. Values outside these get
+# flagged as sanity-check warnings. Loose bounds chosen to catch real
+# bugs (wrong units, wrong sign, wrong derivation) without firing on
+# normal climatological extremes. Variables not listed here are not
+# checked.
+_SANITY_RANGES: dict[str, tuple[float, float]] = {
+    # Winds (m/s)
+    "ua": (-200.0, 200.0),
+    "va": (-200.0, 200.0),
+    "uas": (-100.0, 100.0),
+    "vas": (-100.0, 100.0),
+    "sfcWind": (0.0, 100.0),
+    # Specific humidity (kg/kg)
+    "hus": (0.0, 0.05),
+    "huss": (0.0, 0.05),
+    # Temperatures (K)
+    "ts": (180.0, 340.0),
+    "tas": (180.0, 340.0),
+    # Pressure (Pa)
+    "psl": (8.0e4, 1.1e5),
+    # Precipitation rate (kg/m2/s) — daily means rarely exceed 1 mm/s
+    "pr": (0.0, 0.01),
+    # Sea-ice fraction — CMIP6 siconc is percent
+    "siconc": (0.0, 100.0),
+    # Radiation fluxes (W/m2) — rough global bounds
+    "rsdt": (0.0, 600.0),
+    "rsut": (0.0, 600.0),
+    "rlut": (0.0, 400.0),
+    "rsds": (0.0, 600.0),
+    "rsus": (0.0, 600.0),
+    "rlds": (0.0, 600.0),
+    "rlus": (0.0, 700.0),
+    # Turbulent fluxes (W/m2)
+    "hfss": (-800.0, 800.0),
+    "hfls": (-300.0, 800.0),
+    # Land / ocean fractions (percent)
+    "sftlf": (0.0, 100.0),
+    # Orography (m)
+    "orog": (-500.0, 9000.0),
+}
+
+# Derived layer-mean temperatures get a tighter physical bound.
+_DERIVED_T_RANGE = (150.0, 350.0)
+
+
+def _run_sanity_checks(ds: xr.Dataset) -> list[str]:
+    """Run cheap per-variable range checks and a tas-vs-derived-T0
+    sanity comparison. Returns a list of human-readable warnings; an
+    empty list means all checks passed.
+    """
+    messages: list[str] = []
+
+    for var, (lo, hi) in _SANITY_RANGES.items():
+        if var not in ds.data_vars:
+            continue
+        arr = ds[var]
+        vmin = float(arr.min())
+        vmax = float(arr.max())
+        if vmin < lo or vmax > hi:
+            messages.append(
+                f"{var} out of expected range [{lo}, {hi}]: "
+                f"min={vmin:.3g}, max={vmax:.3g}"
+            )
+
+    lo, hi = _DERIVED_T_RANGE
+    for i in range(8):
+        var = f"ta_derived_layer_{i}"
+        if var not in ds.data_vars:
+            continue
+        arr = ds[var]
+        vmin = float(arr.min())
+        vmax = float(arr.max())
+        if vmin < lo or vmax > hi:
+            messages.append(
+                f"{var} out of range [{lo}, {hi}] K: " f"min={vmin:.2f}, max={vmax:.2f}"
+            )
+
+    # Compare the lowest derived-T layer (1000 - 850 hPa mean, effective
+    # pressure ~925 hPa, ~750 m altitude) to tas (2 m). A typical
+    # tropospheric lapse rate (6.5 K/km) puts them ~5 K apart globally;
+    # allow generous 15 K tolerance.
+    if "tas" in ds.data_vars and "ta_derived_layer_0" in ds.data_vars:
+        tas_mean = float(ds["tas"].mean())
+        layer0_mean = float(ds["ta_derived_layer_0"].mean())
+        diff = tas_mean - layer0_mean
+        if abs(diff) > 15.0:
+            messages.append(
+                f"global mean tas={tas_mean:.2f} K vs ta_derived_layer_0="
+                f"{layer0_mean:.2f} K differ by {diff:+.2f} K "
+                "(lapse-rate sanity expects a few K)"
+            )
+
+    return messages
+
+
 def _write_zarr(ds: xr.Dataset, path: str, cfg: ResolvedDatasetConfig) -> None:
     """Write ``ds`` to ``path`` with zarr v3 chunks + shards per the
     config. time dim uses (chunk_time, shard_time); other dims are
     single chunk / single shard (full extent).
     """
     ds = _clear_stale_encoding(ds)
-
-    # Materialize the dataset before writing. The xesmf Regridder wraps
-    # the ESMF C library, which is not thread-safe; leaving the regrid
-    # lazy in the dask graph lets dask parallelise per-chunk, and the
-    # resulting concurrent Regridder.__call__ invocations can silently
-    # produce NaN for some chunks. Computing up front runs the regrid
-    # once, sequentially, and gives deterministic output.
-    logging.info("  materializing dataset in memory before write...")
-    ds = ds.load()
 
     chunk_time = cfg.chunking.chunk_time
     shard_time = cfg.chunking.shard_time
@@ -588,20 +704,29 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
             static_ds = static_regridded
             row.regrid_methods.update(static_methods)
 
-        # 9. Below-surface mask + nearest-above fill.
+        # 9. Below-surface mask computed from the un-filled 3D fields.
         orog: Optional[xr.DataArray] = None
         if static_ds is not None and "orog" in static_ds:
             orog = static_ds["orog"]
         mask, row.mask_source = _compute_below_surface_mask(day_regridded, orog)
+
+        # 10. Derive layer-mean T from the un-filled zg + hus. Running
+        # this on filled zg would force dz = 0 in below-surface columns
+        # (nearest-above fill copies zg[i+1] down, so zg[i] == zg[i+1])
+        # and collapse the derived T to zero. Do it first, then fill.
+        day_regridded = _compute_derived_layer_T(day_regridded)
+
+        # 11. Nearest-above fill for the level-valued 3D state.
         for v in ("ua", "va", "hus", "zg"):
             if v in day_regridded:
                 day_regridded[v] = _nearest_above_fill(day_regridded[v], mask)
         day_regridded = day_regridded.assign(below_surface_mask=mask)
 
-        # 10. Derived layer-mean T from filled zg + hus.
-        day_regridded = _compute_derived_layer_T(day_regridded)
+        # 12. Cascading fill for the derived layer T — layer i is
+        # invalid where either bounding level is below surface.
+        day_regridded = _fill_derived_layer_T(day_regridded, mask)
 
-        # 11. Monthly forcings -> daily.
+        # 13. Monthly forcings -> daily.
         for table, var in (("Amon", "ts"), ("SImon", "siconc")):
             z = task.zstores.get(table, {}).get(var)
             if not z:
@@ -616,26 +741,30 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
             )
             day_regridded[var] = interp
 
-        # 11b. Sea-ice fraction is only defined over ocean cells — emit
+        # 13b. Sea-ice fraction is only defined over ocean cells — emit
         # a time-invariant ``siconc_mask`` from the regridded ocean-grid
         # coverage, then replace the residual land NaN with 0 so the
         # stored data is NaN-free. The mask is a 2D (lat, lon) uint8
         # (1 = valid / ocean, 0 = land or missing source coverage); we
         # take it from the first timestep, since the valid-cell pattern
-        # is time-invariant for sea-ice fraction.
+        # is time-invariant for sea-ice fraction. Regridding can leave
+        # tiny negative rounding residuals (~1e-15) and values slightly
+        # above 100; clip to the physical [0, 100] range.
         if "siconc" in day_regridded:
             valid = (~day_regridded["siconc"].isel(time=0).isnull()).astype("uint8")
             day_regridded = day_regridded.assign(
                 siconc_mask=valid.rename("siconc_mask")
             )
-            day_regridded["siconc"] = day_regridded["siconc"].fillna(0.0)
+            day_regridded["siconc"] = (
+                day_regridded["siconc"].fillna(0.0).clip(0.0, 100.0)
+            )
 
-        # 12. Attach static fields (broadcast along time implicitly at read).
+        # 14. Attach static fields (broadcast along time implicitly at read).
         if static_ds is not None:
             for v in static_ds.data_vars:
                 day_regridded[v] = static_ds[v]
 
-        # 13. Sanity count of NaN cells in the filled 3D state. Should
+        # 15. Sanity count of NaN cells in the filled 3D state. Should
         # be zero; any non-zero is a sign the fill logic missed
         # something. Uses eager .compute() because dask arrays don't
         # support .item().
@@ -645,13 +774,30 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
                 nan_total += int(day_regridded[v].isnull().sum().compute())
         row.n_nan_input_cells = nan_total
 
-        # 14. Populate time metadata.
+        # 16. Populate time metadata.
         row.n_timesteps = int(day_regridded.sizes.get("time", 0))
         if row.n_timesteps:
             row.time_start = str(day_regridded["time"].values[0])
             row.time_end = str(day_regridded["time"].values[-1])
 
-        # 15. Write zarr + record variables.
+        # 17. Materialize the whole dataset before writing. xesmf's
+        # Regridder wraps the ESMF C library, which is not thread-safe;
+        # leaving the regrid lazy in the dask graph lets dask parallelise
+        # per-chunk, and the resulting concurrent Regridder calls can
+        # silently produce NaN chunks. Loading up front runs the regrid
+        # once, sequentially, and gives deterministic output. It also
+        # lets the sanity checks run on materialised data cheaply.
+        logging.info("  materializing dataset in memory before write...")
+        day_regridded = day_regridded.load()
+
+        # 18. Sanity checks — advisory only. Failures go to warnings.
+        sanity = _run_sanity_checks(day_regridded)
+        if sanity:
+            row.warnings.extend(sanity)
+            for msg in sanity:
+                logging.warning("  sanity: %s", msg)
+
+        # 19. Write zarr + record variables.
         day_regridded.attrs["label"] = label
         day_regridded.attrs["source_id"] = task.source_id
         day_regridded.attrs["experiment"] = task.experiment

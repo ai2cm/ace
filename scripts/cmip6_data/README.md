@@ -106,6 +106,37 @@ scales; far below inter-model spread.
 Variables are named `ta_derived_layer_*` throughout (never `ta`) to keep
 it unambiguous that these are proxies, not native CMIP6 temperatures.
 
+**Vertical-grid note (important for downstream masking).** The derived
+temperatures live on **layers between adjacent plev levels**, so there
+are only 7 of them when plev has 8 levels. This is a different
+vertical grid from `ua`/`va`/`hus`/`zg`, which are on the 8 plev
+levels themselves. The shape of each `ta_derived_layer_i` is
+`(time, lat, lon)`; the layer pressure is the log-midpoint
+`sqrt(plev[i] * plev[i+1])`.
+
+**Masking derived T.** The stored `below_surface_mask(time, plev, lat,
+lon)` is on plev levels, so users need to combine the two bounding
+levels of each layer to get a layer mask. Layer `i` is invalid
+wherever either `plev[i]` or `plev[i+1]` is below surface:
+
+```python
+import xarray as xr
+
+ds = xr.open_zarr(<path-to-dataset.zarr>, consolidated=True)
+i = 0  # e.g. the 1000-850 hPa layer
+layer_mask_i = (
+    ds.below_surface_mask.isel(plev=i)
+    | ds.below_surface_mask.isel(plev=i + 1)
+).astype(bool)
+ta_layer_i_valid = ds[f"ta_derived_layer_{i}"].where(~layer_mask_i)
+```
+
+During ingest we apply a **cascading nearest-above fill** to the
+derived T layers (top-down: each masked layer inherits the layer
+above), so the stored values are NaN-free and physically plausible
+even in below-surface columns. Downstream code that wants to ignore
+filled cells should apply the layer mask recipe above.
+
 ### Vertical & horizontal grid
 
 - **Vertical**: `plev8` = {1000, 850, 700, 500, 250, 100, 50, 10} hPa.
