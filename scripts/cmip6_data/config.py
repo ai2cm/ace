@@ -209,8 +209,9 @@ class Selection:
 @dataclass
 class ProcessConfig:
     inventory_path: str
+    # index.csv (+ index.parquet when an engine is available) are written
+    # at ``<output_directory>/index.*`` by process.py.
     output_directory: str
-    index_path: str
     defaults: DefaultsConfig = field(default_factory=DefaultsConfig)
     selection: Selection = field(default_factory=Selection)
     overrides: list[Override] = field(default_factory=list)

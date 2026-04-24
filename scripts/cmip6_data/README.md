@@ -144,17 +144,19 @@ it unambiguous that these are proxies, not native CMIP6 temperatures.
 ### Storage layout
 
 ```
-gs://<bucket>/cmip6-daily-pilot/
-  v0/
-    <source_id>/<experiment>/<variant_label>/
-      data.zarr
-    stats/
-      <source_id>/{mean,std}.nc      # per-model for now; see Issue 7
-    index.parquet                    # one row per dataset
+<output_directory>/                     # e.g. ./data/cmip6-daily-pilot/v0
+  <source_id>/<experiment>/<variant_label>/
+    data.zarr/                          # one per (src, exp, member)
+      metadata.json                     # sidecar; also serves as the
+                                        # "done marker" for resumable
+                                        # re-runs
+  index.csv                             # one row per dataset attempted
+  index.parquet                         # ditto, when pyarrow available
+  stats/<source_id>/{mean,std}.nc       # later, per-model
 ```
 
-One zarr per `(source_id, experiment, variant_label)`. Chunked with
-short-window training in mind; see **Issue 6**.
+One zarr per `(source_id, experiment, variant_label)`. Chunk/shard per
+Issue 6 (inner `time=1`, outer `time=365`).
 
 ## Dependencies
 
@@ -189,26 +191,30 @@ Driven by the YAML config + the inventory. For each selected
 1. Drop if any core variable missing.
 2. Open each variable's zarr (state, forcings from `Amon`/`SImon`,
    static from `fx`).
-3. Validate `cell_methods` / vertical / grid.
-4. Regrid horizontally to F22.5 (Gauss-Legendre 45 x 90) via `xesmf`
-   (bilinear for state, conservative for fluxes).
-5. Apply below-surface nearest-above fill + emit time-varying
-   `below_surface_mask(time, plev, lat, lon)` (uint8, single shared
-   field).
-6. Compute derived `ta_derived_layer_{0..6}` from `zg` + `hus`.
-7. Linear-interpolate monthly forcings (`ts`, `siconc`) onto the daily
-   time axis; broadcast static fields along time (or leave as
-   time-invariant coords, TBD with Issue 9).
+3. Validate `cell_methods`.
+4. Regrid to F22.5 (Gauss-Legendre 45 x 90) via `xesmf` (bilinear for
+   state, conservative for fluxes).
+5. Below-surface nearest-above fill + emit time-varying
+   `below_surface_mask(time, plev, lat, lon)` (uint8).
+6. Derived `ta_derived_layer_{0..6}` from `zg` + `hus`.
+7. Linear-interpolate monthly forcings onto the daily axis; attach
+   static fields.
 8. Time-subset per config.
-9. Write zarr via fsspec (local or gs://).
-10. Record metadata to `index.parquet`.
+9. Write zarr with zarr v3 chunks+shards; drop sidecar metadata.json.
+10. Append a row to the central `index.{csv,parquet}`.
+
+**Resumability.** Re-running is cheap: the `metadata.json` sidecar
+serves as the "completed" marker. A complete sidecar → skip. A zarr
+directory without a sidecar → treated as partial, deleted, and
+re-processed. `--force` rebuilds everything; `--dry-run` lists the
+selection without processing; `--source-ids`/`--max-datasets` are
+debug aids.
 
 Per-dataset jobs are embarrassingly parallel. Pilot runs locally
-(single-process dask, no argo) for debuggability; a batch/argo wrapper
-comes later if needed.
+(single-process; dask + argo wrapping comes later if needed).
 
-Normalization stats (per-model, NaN-aware) are a separate later step,
-computed from the produced zarrs.
+Normalization stats (per-model, NaN-aware) are a separate later step
+over the produced zarrs.
 
 ## Resolved Issues
 
@@ -267,9 +273,12 @@ computed from the produced zarrs.
 
 ## Open Issues
 
-All pre-processing-script issues resolved. Remaining work is in
-**Tasks 11 + 12**: write `process.py`, including the derived
-layer-mean temperature computation.
+All planning issues resolved. `process.py` has landed with resumable
+orchestration, selection logic, and the full pipeline stubbed in (mask
+derivation, nearest-above fill, derived layer-T, monthly-to-daily
+interpolation, zarr write with chunks+shards). Remaining work is
+**end-to-end validation**: install `xesmf`+`esmpy`, run against a
+single-model subset, and iterate on anything that breaks.
 
 ## Deferred / Future Issues
 

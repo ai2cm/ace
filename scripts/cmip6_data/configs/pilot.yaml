@@ -1,6 +1,6 @@
-inventory_path: ./inventory.parquet
+inventory_path: ./inventory.csv
 output_directory: ./data/cmip6-daily-pilot/v0
-index_path: ./data/cmip6-daily-pilot/v0/index.parquet
+# index_path is derived at process.py runtime: <output_directory>/index.{csv,parquet}
 
 # Drastically subset the pilot run. Remove this section (or null it out)
 # to produce the full-range dataset without code changes.
