@@ -5,3 +5,6 @@ inventory.csv.gz
 
 # Processed data outputs
 data/
+
+# Diagnostic / scratch zarrs
+tmp_*.zarr/
