@@ -4,7 +4,6 @@ from collections.abc import Callable, Mapping
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 import torch
 import xarray as xr
 
@@ -164,8 +163,9 @@ class PairedSphericalPowerSpectrumAggregator:
         target_ds = self._target_aggregator.get_dataset()
         if not gen_ds or not target_ds:
             return xr.Dataset()
-        source = pd.Index(["prediction", "target"], name="source")
-        return xr.concat([gen_ds, target_ds], dim=source)
+        source = ["prediction", "target"]
+        ds = xr.concat([gen_ds, target_ds], dim="source")
+        return ds.assign_coords(source=source)
 
 
 def _get_spectrum_metrics(
