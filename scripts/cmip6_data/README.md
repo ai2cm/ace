@@ -229,17 +229,14 @@ computed from the produced zarrs.
   levels inherit the lowest above-surface level's value, handling any
   number of consecutive masked bottom levels. `mask_source` recorded
   in `index.parquet`.
+- **Issue 6 — Chunking.** Matches the `scripts/data_process`
+  convention: inner zarr v3 chunks of `time=1` (per-timestep), outer
+  shards of `time=365` (~one shard per year per variable). Per-shard
+  size: 3D ~47 MB, 2D ~6 MB, mask ~12 MB — all within healthy
+  GCS-object bounds. `shard_time: None` available as a debug escape
+  hatch for unsharded writes.
 
 ## Open Issues (to work through sequentially)
-
-### Issue 6 — Chunking strategy (next)
-
-Training reads short windows (2–4 timesteps at a time). Chunking must be
-small enough to avoid reading huge unused blocks per window, large enough
-to avoid GCS per-object overhead. At F22.5 (45×90) with `plev8`, one
-timestep of a 3D field is ~130 KB; chunking `time=32` gives ~4 MB chunks,
-likely a reasonable balance. Need to confirm the target chunk size and
-whether to differ between 2D and 3D variables.
 
 ### Issue 2 — Label schema
 

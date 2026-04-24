@@ -124,7 +124,13 @@ class FillConfig:
 
 @dataclass
 class ChunkingConfig:
-    time: int = 32
+    # Inner zarr v3 chunk size along time. Per-timestep chunks match the
+    # existing scripts/data_process convention and minimise read amplification
+    # for training's short time windows.
+    chunk_time: int = 1
+    # Outer shard size along time. Groups inner chunks into a single GCS
+    # object. None = unsharded (debug only). 365 = ~one shard per year.
+    shard_time: Optional[int] = 365
 
 
 @dataclass
