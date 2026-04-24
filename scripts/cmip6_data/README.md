@@ -154,6 +154,12 @@ filled cells should apply the layer mask recipe above.
   **bilinear** for state fields (pressure-level state doesn't close a
   mass-weighted budget, so bilinear's smoothness is preferable).
   Weights cached per source grid.
+  Conservative regridding preserves the area-weighted integral but
+  can leave sub-epsilon floating-point residuals (e.g., tiny negatives
+  in a physically non-negative flux). We deliberately do **not** clip
+  those — clipping would break the integral conservation. The sanity
+  checks tolerate a small ``_EPS`` margin below / above the nominal
+  physical range for this reason.
 
 ### Temporal
 

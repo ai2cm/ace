@@ -455,11 +455,39 @@ def _interp_monthly_to_daily(
     return interp.bfill("time").ffill("time")
 
 
+_ISO_DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
+
+
+def _clip_date_for_calendar(date_str: str, calendar: str) -> str:
+    """Clip a ``YYYY-MM-DD`` string to a valid day in the target
+    calendar. Mostly matters for ``360_day``, where every month has
+    exactly 30 days — so ``2010-12-31`` is an invalid date and would
+    raise in ``xr.Dataset.sel(time=slice(...))``.
+
+    For ``noleap`` Feb 29 is invalid but we don't currently produce
+    that date in our configs; the 360_day case is the common one.
+    """
+    if calendar != "360_day":
+        return date_str
+    m = _ISO_DATE_RE.match(date_str)
+    if not m:
+        return date_str
+    y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    d = min(d, 30)
+    return f"{y:04d}-{mo:02d}-{d:02d}"
+
+
 def _apply_time_subset(ds: xr.Dataset, cfg: ResolvedDatasetConfig) -> xr.Dataset:
     window = cfg.time_subset.get(cfg.experiment)
     if window is None:
         return ds
-    return ds.sel(time=slice(window.start, window.end))
+    if "time" in ds.dims:
+        calendar = str(ds["time"].dt.calendar)
+    else:
+        calendar = "standard"
+    start = _clip_date_for_calendar(window.start, calendar)
+    end = _clip_date_for_calendar(window.end, calendar)
+    return ds.sel(time=slice(start, end))
 
 
 _STALE_ENCODING_KEYS = (
@@ -490,40 +518,45 @@ def _clear_stale_encoding(ds: xr.Dataset) -> xr.Dataset:
 # Per-variable (min, max) physical bounds. Values outside these get
 # flagged as sanity-check warnings. Loose bounds chosen to catch real
 # bugs (wrong units, wrong sign, wrong derivation) without firing on
-# normal climatological extremes. Variables not listed here are not
-# checked.
+# (a) normal climatological extremes or (b) sub-epsilon floating-point
+# residuals from conservative regridding — whose output we trust to
+# preserve the area-weighted integral, so clipping would break that.
+# Variables not listed here are not checked.
+_EPS = 0.01  # tolerance for conservative-regrid rounding noise
+
 _SANITY_RANGES: dict[str, tuple[float, float]] = {
     # Winds (m/s)
     "ua": (-200.0, 200.0),
     "va": (-200.0, 200.0),
     "uas": (-100.0, 100.0),
     "vas": (-100.0, 100.0),
-    "sfcWind": (0.0, 100.0),
-    # Specific humidity (kg/kg)
-    "hus": (0.0, 0.05),
-    "huss": (0.0, 0.05),
+    "sfcWind": (-_EPS, 100.0),
+    # Specific humidity (kg/kg) — non-negative
+    "hus": (-_EPS, 0.05),
+    "huss": (-_EPS, 0.05),
     # Temperatures (K)
     "ts": (180.0, 340.0),
     "tas": (180.0, 340.0),
     # Pressure (Pa)
     "psl": (8.0e4, 1.1e5),
     # Precipitation rate (kg/m2/s) — daily means rarely exceed 1 mm/s
-    "pr": (0.0, 0.01),
+    "pr": (-_EPS, 0.01),
     # Sea-ice fraction — CMIP6 siconc is percent
-    "siconc": (0.0, 100.0),
+    "siconc": (-_EPS, 100.0 + _EPS),
     # Radiation fluxes (W/m2) — rough global bounds
-    "rsdt": (0.0, 600.0),
-    "rsut": (0.0, 600.0),
-    "rlut": (0.0, 400.0),
-    "rsds": (0.0, 600.0),
-    "rsus": (0.0, 600.0),
-    "rlds": (0.0, 600.0),
-    "rlus": (0.0, 700.0),
-    # Turbulent fluxes (W/m2)
-    "hfss": (-800.0, 800.0),
-    "hfls": (-300.0, 800.0),
+    "rsdt": (-_EPS, 600.0),
+    "rsut": (-_EPS, 600.0),
+    "rlut": (-_EPS, 400.0),
+    "rsds": (-_EPS, 600.0),
+    "rsus": (-_EPS, 600.0),
+    "rlds": (-_EPS, 600.0),
+    "rlus": (-_EPS, 700.0),
+    # Turbulent fluxes (W/m2) — tropics + downward storms can reach
+    # ~1000 at daily mean. Widened vs the v0 bounds.
+    "hfss": (-1000.0, 1000.0),
+    "hfls": (-500.0, 1200.0),
     # Land / ocean fractions (percent)
-    "sftlf": (0.0, 100.0),
+    "sftlf": (-_EPS, 100.0 + _EPS),
     # Orography (m)
     "orog": (-500.0, 9000.0),
 }
@@ -747,17 +780,18 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
         # stored data is NaN-free. The mask is a 2D (lat, lon) uint8
         # (1 = valid / ocean, 0 = land or missing source coverage); we
         # take it from the first timestep, since the valid-cell pattern
-        # is time-invariant for sea-ice fraction. Regridding can leave
-        # tiny negative rounding residuals (~1e-15) and values slightly
-        # above 100; clip to the physical [0, 100] range.
+        # is time-invariant for sea-ice fraction. We deliberately do
+        # *not* clip the ocean values to [0, 100] — conservative
+        # regridding's output preserves the area-weighted integral and
+        # clipping would break that. Rounding can leave sub-epsilon
+        # values outside the nominal range; the sanity checks tolerate
+        # that.
         if "siconc" in day_regridded:
             valid = (~day_regridded["siconc"].isel(time=0).isnull()).astype("uint8")
             day_regridded = day_regridded.assign(
                 siconc_mask=valid.rename("siconc_mask")
             )
-            day_regridded["siconc"] = (
-                day_regridded["siconc"].fillna(0.0).clip(0.0, 100.0)
-            )
+            day_regridded["siconc"] = day_regridded["siconc"].fillna(0.0)
 
         # 14. Attach static fields (broadcast along time implicitly at read).
         if static_ds is not None:
