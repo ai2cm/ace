@@ -134,8 +134,14 @@ class SSRBiasMetric(ReducedMetric):
         if self._total_unbiased_mse is None or self._total_variance is None:
             raise ValueError("No batches have been recorded.")
         spread = self._total_variance.sqrt()
-        skill = self._total_unbiased_mse.sqrt()
-        return spread / skill - 1
+        # Clamp to avoid NaN from sqrt of negative values. The unbiased MSE
+        # correction (mse - variance/n_ensemble) can overshoot with small
+        # ensembles or few batches, producing negative values at some grid
+        # cells that do not indicate spread truly exceeding skill.
+        skill = torch.clamp(self._total_unbiased_mse, min=0.0).sqrt()
+        # When skill is zero (clamped or genuinely perfect), SSR is undefined.
+        # Use -1 as the convention (equivalent to zero spread).
+        return torch.where(skill > 0, spread / skill - 1, torch.tensor(-1.0))
 
 
 class _EnsembleAggregator:
@@ -227,7 +233,7 @@ class _EnsembleAggregator:
                 if self._log_mean_maps:
                     data[f"{metric}/mean_map/{key}"] = plot_paneled_data(
                         [[metric_value.cpu().numpy()]],
-                        diverging=key in self._diverging_metrics,
+                        diverging=metric in self._diverging_metrics,
                         caption=self._get_caption(key),
                     )
         return data
