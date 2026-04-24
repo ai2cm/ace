@@ -103,6 +103,12 @@ def test_paired_spherical_power_spectrum_aggregator_get_dataset():
         attrs={"long_name": "spherical power spectrum of a", "units": "unknown_units"},
     )
     expected = xr.Dataset({"a": expected_da})
+
+    # Check the source coordinate is a unicode dtype (kind "U") rather than a
+    # string dtype (kind "T"). Xarray currently does not support serializing
+    # string dtype values to netCDF, but will in the future:
+    # https://github.com/pydata/xarray/pull/11218.
+    assert result.source.dtype.kind == "U"
     xr.testing.assert_identical(result, expected)
 
 
