@@ -1,11 +1,3 @@
-"""Unit tests for :class:`BatchData` and :class:`PairedData`.
-
-`assert_batchdata_equal_up_to_device` and `assert_paired_data_equal_up_to_device`
-iterate all dataclass fields so new public attributes (e.g. ``n_ensemble``) are
-covered. For a focused PR, ship changes in ``batch_data.py`` with this file;
-downstream call sites can follow in a second PR.
-"""
-
 import dataclasses
 
 import numpy as np
@@ -44,22 +36,22 @@ def assert_batchdata_equal_up_to_device(a: BatchData, b: BatchData) -> None:
         va = getattr(a, field.name)
         vb = getattr(b, field.name)
         if field.name == "data":
-            assert set(va) == set(vb)  # type: ignore[union-attr]
-            for k in va:  # type: ignore[union-attr]
+            assert set(va) == set(vb)
+            for k in va:
                 torch.testing.assert_close(
-                    va[k].detach().cpu(),  # type: ignore[call-overload]
-                    vb[k].detach().cpu(),  # type: ignore[call-overload]
+                    va[k].detach().cpu(),
+                    vb[k].detach().cpu(),
                 )
         elif field.name == "time":
-            assert bool(va.equals(vb))  # type: ignore[union-attr]
+            assert bool(va.equals(vb))
         elif field.name == "labels":
             if va is None or vb is None:
                 assert va is None and vb is None
             else:
-                assert va.names == vb.names  # type: ignore[union-attr]
-                torch.testing.assert_close(  # type: ignore[union-attr]
-                    va.tensor.cpu(),  # type: ignore[union-attr]
-                    vb.tensor.cpu(),  # type: ignore[union-attr]
+                assert va.names == vb.names
+                torch.testing.assert_close(
+                    va.tensor.cpu(),
+                    vb.tensor.cpu(),
                 )
         else:
             assert va == vb
@@ -71,22 +63,22 @@ def assert_paired_data_equal_up_to_device(a: PairedData, b: PairedData) -> None:
         va = getattr(a, field.name)
         vb = getattr(b, field.name)
         if field.name in ("prediction", "reference"):
-            assert set(va) == set(vb)  # type: ignore[union-attr]
-            for k in va:  # type: ignore[union-attr]
+            assert set(va) == set(vb)
+            for k in va:
                 torch.testing.assert_close(
-                    va[k].detach().cpu(),  # type: ignore[call-overload]
-                    vb[k].detach().cpu(),  # type: ignore[call-overload]
+                    va[k].detach().cpu(),
+                    vb[k].detach().cpu(),
                 )
         elif field.name == "time":
-            assert bool(va.equals(vb))  # type: ignore[union-attr]
+            assert bool(va.equals(vb))
         elif field.name == "labels":
             if va is None or vb is None:
                 assert va is None and vb is None
             else:
-                assert va.names == vb.names  # type: ignore[union-attr]
-                torch.testing.assert_close(  # type: ignore[union-attr]
-                    va.tensor.cpu(),  # type: ignore[union-attr]
-                    vb.tensor.cpu(),  # type: ignore[union-attr]
+                assert va.names == vb.names
+                torch.testing.assert_close(
+                    va.tensor.cpu(),
+                    vb.tensor.cpu(),
                 )
         else:
             assert va == vb
