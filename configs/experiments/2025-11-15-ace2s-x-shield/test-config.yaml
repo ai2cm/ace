@@ -36,8 +36,6 @@ train_loader:
     subset:
       start_time: '1979-01-01T00:00:00'
       stop_time: '1980-12-31'
-  batch_size: 2
-  num_data_workers: 2
 validation_loader:
   batch_size: 2
   num_data_workers: 2
@@ -53,9 +51,9 @@ optimization:
   use_gradient_accumulation: true
   kwargs:
     weight_decay: 0.01
-stepper:
+stepper_training:
   n_ensemble: 2
-  train_n_forward_steps: 1
+  n_forward_steps: 1
   optimize_last_step_only: true
   loss:
     type: EnsembleLoss
@@ -81,6 +79,7 @@ stepper:
     kwargs:
       crps_weight: 0.9
       energy_score_weight: 0.1
+stepper:
   step:
     type: single_module
     config:
