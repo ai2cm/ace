@@ -92,8 +92,11 @@ class TimeWindow:
 
 @dataclass
 class TargetGrid:
-    lat_step: float = 4.0
-    lon_step: float = 4.0
+    # Gauss-Legendre grid spec; see grid.py / GAUSSIAN_GRID_N.
+    # F<N> gives nlat=2N, nlon=4N. F22.5 is a ~4 deg grid (45 x 90).
+    # Gauss-Legendre over regular lat-lon so spherical-harmonic
+    # transforms on the processed data are exact.
+    name: str = "F22.5"
 
 
 @dataclass

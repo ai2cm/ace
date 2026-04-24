@@ -111,11 +111,18 @@ it unambiguous that these are proxies, not native CMIP6 temperatures.
 - **Vertical**: `plev8` = {1000, 850, 700, 500, 250, 100, 50, 10} hPa.
   Pressure-level vertical departs from the project's hybrid-sigma baseline
   convention; pressure levels are used directly.
-- **Horizontal**: 4°×4° regular lat-lon (pilot resolution chosen to keep
-  dataset size small). Prefer `grid_label=gr` if already on lat-lon; else
-  regrid from `gn` with `xesmf` — **conservative** for fluxes and precip,
+- **Horizontal**: Gauss-Legendre `F22.5` — a full rectangular
+  `(nlat=45, nlon=90)` lat-lon grid where latitudes are the
+  Gauss-Legendre quadrature nodes (not equispaced) and longitudes are
+  equispaced at 4°. Chosen so spherical-harmonic transforms on the
+  processed data are exact; matches the project's existing
+  `gaussian_grid_45_by_90` convention. Grid built by
+  `grid.make_target_grid("F22.5")` (see `grid.py`).
+- **Regridding**: `xesmf` targeting `F22.5`. **Conservative** for fluxes
+  and precip (preserves spatial integrals across coarsening);
   **bilinear** for state fields (pressure-level state doesn't close a
   mass-weighted budget, so bilinear's smoothness is preferable).
+  Weights cached per source grid.
 
 ### Temporal
 
@@ -172,7 +179,8 @@ Driven by the YAML config + the inventory. For each selected
 2. Open each variable's zarr (state, forcings from `Amon`/`SImon`,
    static from `fx`).
 3. Validate `cell_methods` / vertical / grid.
-4. Regrid horizontally to the F22.5 target (Gauss-Legendre 4°).
+4. Regrid horizontally to F22.5 (Gauss-Legendre 45 x 90) via `xesmf`
+   (bilinear for state, conservative for fluxes).
 5. Apply below-surface persistence fill + emit mask channel.
 6. Compute derived `ta_derived_layer_{0..6}` from `zg` + `hus`.
 7. Linear-interpolate monthly forcings (`ts`, `siconc`) onto the daily
