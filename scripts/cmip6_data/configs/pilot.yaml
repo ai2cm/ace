@@ -1,0 +1,27 @@
+inventory_path: ./inventory.parquet
+output_directory: ./data/cmip6-daily-pilot/v0
+index_path: ./data/cmip6-daily-pilot/v0/index.parquet
+
+# Drastically subset the pilot run. Remove this section (or null it out)
+# to produce the full-range dataset without code changes.
+defaults:
+  time_subset:
+    historical: {start: "2000-01-01", end: "2001-12-31"}
+    ssp585: {start: "2015-01-01", end: "2016-12-31"}
+
+# target_grid, regrid, fill, chunking, and variable lists all take
+# dataclass defaults — only set them here to deviate from the default.
+
+selection:
+  # source_ids: null         # default: all models in the inventory
+  experiments: [historical, ssp585]
+  # max_members: null        # default: no cap
+
+# Per-dataset overrides. Sparse; match on any subset of
+# (source_id, experiment, variant_label). source_id is required.
+overrides: []
+# Example:
+# overrides:
+#   - match: {source_id: GISS-E2-1-G, variant_label: r1i1p3f1}
+#     time_subset:
+#       historical: {start: "2005-01-01", end: "2006-12-31"}

@@ -1,0 +1,5 @@
+output_path: ./inventory.parquet
+# variables, experiments, table_id all take dataclass defaults:
+#   variables = CORE_VARIABLES + OPTIONAL_VARIABLES
+#   experiments = [historical, ssp585]
+#   table_id = day
