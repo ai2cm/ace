@@ -252,6 +252,51 @@ def _load_existing_sidecar(zarr_path: str) -> Optional[DatasetIndexRow]:
     return DatasetIndexRow(**filtered)
 
 
+def _scan_all_sidecars(output_directory: str) -> list[DatasetIndexRow]:
+    """Walk ``output_directory`` for every ``metadata.json`` sidecar
+    written by prior runs and return the deserialised rows. Used so
+    the central index always reflects the full on-disk state, even
+    when the current run only touched a subset of datasets.
+    """
+    fs, rel = fsspec.core.url_to_fs(output_directory.rstrip("/"))
+    if not fs.exists(rel):
+        return []
+    pattern = f"{rel}/**/metadata.json"
+    paths = fs.glob(pattern)
+    rows: list[DatasetIndexRow] = []
+    allowed = {f.name for f in dataclasses.fields(DatasetIndexRow)}
+    for p in paths:
+        with fs.open(p, "r") as f:
+            data = json.load(f)
+        filtered = {k: v for k, v in data.items() if k in allowed}
+        rows.append(DatasetIndexRow(**filtered))
+    return rows
+
+
+def _merge_rows_for_index(
+    run_rows: list[DatasetIndexRow],
+    output_directory: str,
+) -> list[DatasetIndexRow]:
+    """Combine this run's rows with every sidecar on disk.
+
+    Precedence: for a given ``(source_id, experiment, variant_label)``
+    triple, the current run's row wins (it may reflect a fresh
+    failure / skip even when an older sidecar exists). Sidecars for
+    datasets not touched this run are included verbatim so the index
+    stays complete when running with ``--source-ids``.
+    """
+
+    def _key(r: DatasetIndexRow) -> tuple[str, str, str]:
+        return (r.source_id, r.experiment, r.variant_label)
+
+    this_run = {_key(r): r for r in run_rows}
+    combined: dict[tuple[str, str, str], DatasetIndexRow] = {}
+    for row in _scan_all_sidecars(output_directory):
+        combined[_key(row)] = row
+    combined.update(this_run)
+    return sorted(combined.values(), key=_key)
+
+
 # ---------------------------------------------------------------------------
 # Per-dataset processing
 # ---------------------------------------------------------------------------
@@ -936,13 +981,20 @@ def main() -> None:
         return
 
     rows = run(config, tasks, force=args.force)
-    write_index(rows, config.output_directory)
 
-    # Final status summary.
+    # Central index: merge this-run's rows with every sidecar on disk so
+    # narrow --source-ids / --max-datasets re-runs don't truncate the
+    # index to the subset just processed.
+    all_rows = _merge_rows_for_index(rows, config.output_directory)
+    write_index(all_rows, config.output_directory)
+
+    # Final status summary covers only datasets attempted in THIS run.
     by_status: dict[str, int] = {}
     for r in rows:
         by_status[r.status] = by_status.get(r.status, 0) + 1
-    logging.info("Done. Status breakdown: %s", by_status)
+    logging.info(
+        "Done. This run: %s; index now lists %d datasets.", by_status, len(all_rows)
+    )
 
 
 if __name__ == "__main__":
