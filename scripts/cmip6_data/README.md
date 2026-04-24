@@ -235,23 +235,29 @@ computed from the produced zarrs.
   size: 3D ~47 MB, 2D ~6 MB, mask ~12 MB — all within healthy
   GCS-object bounds. `shard_time: None` available as a debug escape
   hatch for unsharded writes.
+- **Issue 2 — Label schema.** Strict reading: label =
+  `(source_id, physics_index p)`. Realization `r`, initialization `i`,
+  and forcing `f` are within-label variation. Stored both as two
+  scalar coords in each zarr (`label_source_id`, `label_physics_index`)
+  and as a composite string coord (`label`) of the form
+  `{source_id}.p{p}` — e.g. `"CanESM5.p1"`, `"GISS-E2-1-G.p3"`. The
+  physics index is always included, even for source_ids with a single
+  `p` value, so the label maps 1:1 to CMIP6 metadata. Helper:
+  `config.make_label(source_id, p)`. Inventory shows ~57 labels across
+  53 source_ids (3 models publish alternate `p`: CMCC-CM2-SR5,
+  CanESM5, GISS-E2-1-G). `variant_label` and parsed `r`/`i`/`f` are
+  also retained in the zarr and index for downstream flexibility,
+  though they are not part of the label.
 
 ## Open Issues (to work through sequentially)
 
-### Issue 2 — Label schema
-
-Working proposal: label = `(source_id, p)` (strict reading). Realization
-`r` and initialization `i` are ensemble variation; forcing `f` is an
-external input, not physics. Confirm that the stored label column is
-just these two pieces, and whether we also record `f` for downstream
-analysis even if it's not part of the label.
-
-### Issue 9 — `index.parquet` schema
+### Issue 9 — `index.parquet` schema (next)
 
 What to record per dataset: `source_id`, `experiment`, `variant_label`,
-parsed `r`/`i`/`p`/`f`, label columns from Issue 2, native calendar,
-native horizontal grid, `grid_label` used, regrid method, time range,
-variables present, data-quality flags. Decided together with the
+parsed `r`/`i`/`p`/`f`, label columns (`label_source_id`,
+`label_physics_index`, `label`), native calendar, native horizontal
+grid, `grid_label` used, regrid method, time range, variables present,
+`mask_source` flag, any data-quality flags. Decided together with the
 processing script.
 
 ## Deferred / Future Issues

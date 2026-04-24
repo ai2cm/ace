@@ -67,6 +67,19 @@ FORCING_VARIABLES: list[str] = ["ts", "siconc"]
 # ``orog``  = surface altitude (orography).
 STATIC_VARIABLES: list[str] = ["sftlf", "orog"]
 
+
+def make_label(source_id: str, physics_index: int) -> str:
+    """Compose the composite embedding label from (source_id, p).
+
+    The embedding treats each ``(source_id, p)`` pair as a distinct
+    "model" — realization (r), initialization (i), and forcing (f) are
+    within-label variation. The physics index is always included, even
+    for source_ids that publish only one ``p`` value, so the label
+    maps 1:1 to CMIP6 metadata.
+    """
+    return f"{source_id}.p{physics_index}"
+
+
 # Variables regridded conservatively; everything else is bilinear by default.
 FLUX_LIKE_VARIABLES: frozenset[str] = frozenset(
     {
@@ -311,6 +324,7 @@ __all__ = [
     "FORCING_VARIABLES",
     "STATIC_VARIABLES",
     "FLUX_LIKE_VARIABLES",
+    "make_label",
     "TimeWindow",
     "TargetGrid",
     "RegridConfig",
