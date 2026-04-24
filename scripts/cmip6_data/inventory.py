@@ -46,19 +46,25 @@ def query_catalog(config: InventoryConfig) -> pd.DataFrame:
     df = pd.read_csv(PANGEO_CATALOG_URL)
     logging.info("Catalog has %d total rows", len(df))
 
-    mask = (
-        df["table_id"].eq(config.table_id)
-        & df["experiment_id"].isin(config.experiments)
-        & df["variable_id"].isin(config.variables)
-    )
-    subset = df.loc[mask].reset_index(drop=True)
-    logging.info(
-        "Filtered to %d rows (table_id=%s, %d experiments, %d variables)",
-        len(subset),
-        config.table_id,
-        len(config.experiments),
-        len(config.variables),
-    )
+    pieces: list[pd.DataFrame] = []
+    for query in config.queries:
+        mask = df["table_id"].eq(query.table_id) & df["variable_id"].isin(
+            query.variables
+        )
+        if query.filter_by_experiment:
+            mask &= df["experiment_id"].isin(config.experiments)
+        piece = df.loc[mask]
+        logging.info(
+            "  %-8s %d rows (%d variables, filter_by_experiment=%s)",
+            query.table_id,
+            len(piece),
+            len(query.variables),
+            query.filter_by_experiment,
+        )
+        pieces.append(piece)
+
+    subset = pd.concat(pieces, ignore_index=True)
+    logging.info("Filtered total: %d rows across %d queries", len(subset), len(pieces))
     return subset
 
 
@@ -140,54 +146,85 @@ def write_inventory(df: pd.DataFrame, path: str) -> None:
         )
 
 
-def summarize(df: pd.DataFrame, core_variables: list[str]) -> str:
+def summarize(
+    df: pd.DataFrame,
+    core_variables: list[str],
+    forcing_variables: list[str],
+    static_variables: list[str],
+) -> str:
     lines = [f"Total rows: {len(df)}"]
     lines.append(f"Unique source_ids: {df['source_id'].nunique()}")
     lines.append("")
 
-    lines.append("Rows per experiment:")
-    for exp, sub in df.groupby("experiment_id"):
+    # Per-table breakdown
+    lines.append("Per-table rows / models / (distinct) members:")
+    for tab, sub in df.groupby("table_id"):
         lines.append(
-            f"  {exp}: {sub['source_id'].nunique()} models, "
-            f"{sub['member_id'].nunique()} distinct members, "
-            f"{len(sub)} rows"
+            f"  {tab:<8} {len(sub):>5} rows, "
+            f"{sub['source_id'].nunique():>3} models, "
+            f"{sub['member_id'].nunique():>4} distinct members"
         )
     lines.append("")
 
-    # Members per (source_id, experiment)
+    day = df[df["table_id"] == "day"]
+
+    # Members per (source_id, experiment) in day table
     members = (
-        df.groupby(["source_id", "experiment_id"])["member_id"]
+        day.groupby(["source_id", "experiment_id"])["member_id"]
         .nunique()
         .reset_index(name="n_members")
     )
-    lines.append("Members per (source_id, experiment_id) — top 10 by count:")
+    lines.append("Members per (source_id, experiment_id) in 'day' — top 10:")
     for _, row in members.sort_values("n_members", ascending=False).head(10).iterrows():
         lines.append(
             f"  {row['source_id']:<24} {row['experiment_id']:<12} {row['n_members']}"
         )
-    lines.append(f"  (median n_members = {int(members['n_members'].median())})")
+    if len(members):
+        lines.append(f"  (median n_members = {int(members['n_members'].median())})")
     lines.append("")
 
-    # Core-variable coverage per (source_id, experiment_id, member_id)
-    have_vars = df.groupby(["source_id", "experiment_id", "member_id"])[
+    # Core-variable coverage in day table
+    have_core = day.groupby(["source_id", "experiment_id", "member_id"])[
         "variable_id"
     ].agg(set)
-    full_core = have_vars.apply(lambda s: set(core_variables).issubset(s))
+    full_core = have_core.apply(lambda s: set(core_variables).issubset(s))
     n_full = int(full_core.sum())
     n_total = len(full_core)
     lines.append(
-        f"Datasets with ALL core variables: {n_full} / {n_total} "
-        f"({(n_full / n_total * 100 if n_total else 0):.0f}%)"
+        f"day-table datasets with ALL core variables: {n_full} / {n_total} "
+        f"({(n_full / n_total * 100 if n_total else 0):.0f}%) — "
+        f"{full_core[full_core].reset_index().source_id.nunique()} models"
     )
 
-    # Per-variable source_id coverage
+    # Forcing coverage
+    models_day = set(day["source_id"].unique())
+    models_by_table_var: dict[tuple[str, str], set[str]] = {}
+    for (tab, var), sub in df.groupby(["table_id", "variable_id"]):
+        models_by_table_var[(tab, var)] = set(sub["source_id"].unique())
+
     lines.append("")
-    lines.append("Models publishing each variable (any experiment, any member):")
-    per_var = (
-        df.groupby("variable_id")["source_id"].nunique().sort_values(ascending=False)
+    lines.append("Forcing-variable coverage (intersected with day-table models):")
+    # ts is in Amon, siconc in SImon, sftlf/orog in fx
+    for var in forcing_variables:
+        hits = set()
+        for tab in ("Amon", "SImon"):
+            hits |= models_by_table_var.get((tab, var), set())
+        hits &= models_day
+        lines.append(f"  {var:<10} {len(hits)} / {len(models_day)} day-table models")
+    for var in static_variables:
+        hits = models_by_table_var.get(("fx", var), set()) & models_day
+        lines.append(f"  {var:<10} {len(hits)} / {len(models_day)} day-table models")
+
+    # Per-variable global coverage (any experiment, any member)
+    lines.append("")
+    lines.append("Models publishing each (table_id, variable_id):")
+    per = (
+        df.groupby(["table_id", "variable_id"])["source_id"]
+        .nunique()
+        .sort_values(ascending=False)
     )
-    for var, n in per_var.items():
-        lines.append(f"  {var:<10} {n}")
+    for (tab, var), n in per.items():
+        lines.append(f"  {tab:<8} {var:<10} {n}")
 
     return "\n".join(lines)
 
@@ -207,10 +244,10 @@ def main() -> None:
     df = build_inventory(config, enrich_stores=args.enrich_stores)
     write_inventory(df, config.output_path)
 
-    from config import CORE_VARIABLES
+    from config import CORE_VARIABLES, FORCING_VARIABLES, STATIC_VARIABLES
 
     print()
-    print(summarize(df, CORE_VARIABLES))
+    print(summarize(df, CORE_VARIABLES, FORCING_VARIABLES, STATIC_VARIABLES))
 
 
 if __name__ == "__main__":

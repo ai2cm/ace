@@ -56,6 +56,17 @@ OPTIONAL_VARIABLES: list[str] = [
 # derived / proxy fields.
 DIAGNOSTIC_VARIABLES: list[str] = ["ta", "ps"]
 
+# Monthly-cadence forcings, interpolated to daily during processing.
+# ``ts`` = surface temperature (SST over ocean, ice top temp over sea ice,
+# land skin temp over land) — correct atmosphere-only lower boundary.
+# ``siconc`` = sea-ice fraction (ocean-model grid; regridded to target).
+FORCING_VARIABLES: list[str] = ["ts", "siconc"]
+
+# Static per-model fields pulled from the CMIP6 ``fx`` table.
+# ``sftlf`` = land fraction (land-sea mask).
+# ``orog``  = surface altitude (orography).
+STATIC_VARIABLES: list[str] = ["sftlf", "orog"]
+
 # Variables regridded conservatively; everything else is bilinear by default.
 FLUX_LIKE_VARIABLES: frozenset[str] = frozenset(
     {
@@ -116,6 +127,12 @@ class DefaultsConfig:
     optional_variables: list[str] = field(
         default_factory=lambda: list(OPTIONAL_VARIABLES)
     )
+    forcing_variables: list[str] = field(
+        default_factory=lambda: list(FORCING_VARIABLES)
+    )
+    static_variables: list[str] = field(default_factory=lambda: list(STATIC_VARIABLES))
+    # Temporal interpolation for monthly forcings onto the daily time axis.
+    forcing_interpolation: str = "linear"
     time_subset: dict[str, TimeWindow] = field(default_factory=dict)
     target_grid: TargetGrid = field(default_factory=TargetGrid)
     regrid: RegridConfig = field(default_factory=RegridConfig)
@@ -155,8 +172,13 @@ class Override:
 class Selection:
     source_ids: Optional[list[str]] = None
     experiments: list[str] = field(default_factory=lambda: ["historical", "ssp585"])
-    # Max members per (source_id, experiment); None = no cap.
-    max_members: Optional[int] = None
+    # Keep only this initialization_index (i). None = keep all i.
+    require_i: Optional[int] = 1
+    # Cap on realizations (r) within each label slice
+    # (source_id, experiment, variant_p, variant_f). None = no cap.
+    # When a label has multiple f values, the cap is applied per f, so a
+    # model with 2 f values keeps up to 2 * max_members_per_f realizations.
+    max_members_per_f: Optional[int] = 3
 
 
 @dataclass
@@ -187,6 +209,9 @@ class ProcessConfig:
             variant_label=variant_label,
             core_variables=list(self.defaults.core_variables),
             optional_variables=list(self.defaults.optional_variables),
+            forcing_variables=list(self.defaults.forcing_variables),
+            static_variables=list(self.defaults.static_variables),
+            forcing_interpolation=self.defaults.forcing_interpolation,
             time_subset=time_subset,
             target_grid=self.defaults.target_grid,
             regrid=self.defaults.regrid,
@@ -206,6 +231,9 @@ class ResolvedDatasetConfig:
     variant_label: str
     core_variables: list[str]
     optional_variables: list[str]
+    forcing_variables: list[str]
+    static_variables: list[str]
+    forcing_interpolation: str
     time_subset: dict[str, TimeWindow]
     target_grid: TargetGrid
     regrid: RegridConfig
@@ -214,15 +242,42 @@ class ResolvedDatasetConfig:
 
 
 @dataclass
+class CatalogQuery:
+    """A single (table_id, variables) filter against the CMIP6 catalog."""
+
+    table_id: str
+    variables: list[str]
+    # If False, this query ignores the top-level experiments filter — used
+    # for ``fx`` (static) where the same data exists across experiments and
+    # we just want it once per model.
+    filter_by_experiment: bool = True
+
+
+def _default_inventory_queries() -> list[CatalogQuery]:
+    return [
+        CatalogQuery(
+            table_id="day",
+            variables=(
+                list(CORE_VARIABLES)
+                + list(OPTIONAL_VARIABLES)
+                + list(DIAGNOSTIC_VARIABLES)
+            ),
+        ),
+        CatalogQuery(table_id="Amon", variables=["ts"]),
+        CatalogQuery(table_id="SImon", variables=["siconc"]),
+        CatalogQuery(
+            table_id="fx",
+            variables=list(STATIC_VARIABLES),
+            filter_by_experiment=False,
+        ),
+    ]
+
+
+@dataclass
 class InventoryConfig:
     output_path: str  # fsspec URL to write the inventory table
-    variables: list[str] = field(
-        default_factory=lambda: (
-            list(CORE_VARIABLES) + list(OPTIONAL_VARIABLES) + list(DIAGNOSTIC_VARIABLES)
-        )
-    )
+    queries: list[CatalogQuery] = field(default_factory=_default_inventory_queries)
     experiments: list[str] = field(default_factory=lambda: ["historical", "ssp585"])
-    table_id: str = "day"
 
     @classmethod
     def from_file(cls, path: str) -> "InventoryConfig":
@@ -241,6 +296,8 @@ __all__ = [
     "CORE_VARIABLES",
     "OPTIONAL_VARIABLES",
     "DIAGNOSTIC_VARIABLES",
+    "FORCING_VARIABLES",
+    "STATIC_VARIABLES",
     "FLUX_LIKE_VARIABLES",
     "TimeWindow",
     "TargetGrid",
@@ -253,5 +310,6 @@ __all__ = [
     "Selection",
     "ProcessConfig",
     "ResolvedDatasetConfig",
+    "CatalogQuery",
     "InventoryConfig",
 ]

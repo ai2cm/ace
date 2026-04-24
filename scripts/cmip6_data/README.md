@@ -56,6 +56,34 @@ See **Derived variables** below for details.
 - Surface turbulent fluxes: `hfss`, `hfls`
 - Surface wind: `sfcWind`, `uas`, `vas`
 
+### Forcings (atmosphere-only lower boundary)
+
+Pulled from monthly tables and **interpolated to daily** at ingest
+(ocean thermal inertia and sea-ice variability are slow enough that
+monthly → daily is acceptable; true daily availability is essentially
+nil for these fields in Pangeo).
+
+- `ts` from `Amon` — surface temperature (SST over ocean, ice-top temp
+  over sea ice, skin temp over land). The correct atmosphere-only
+  lower-boundary quantity. 64 models publish it.
+- `siconc` from `SImon` — sea-ice fraction on the ocean grid;
+  regridded to the F22.5 target. 57 models.
+
+### Static per-model fields
+
+From the CMIP6 `fx` table; broadcast along time by the data loader.
+
+- `sftlf` — land fraction (land-sea mask). 51 models.
+- `orog` — surface altitude (orography). 47 models.
+
+### Expected model coverage
+
+From the inventory run: **~21 source_ids** satisfy all of (full `day`
+core coverage) + `ts` + `siconc` + `sftlf` + `orog` across at least one
+member; **~25** if `orog` is treated as optional. The multi-member cap
+(Issue 3) retains up to 3 realizations per `(source_id, experiment, p,
+f)` label, yielding the effective pilot dataset.
+
 ### Derived variables
 
 **Layer-mean temperature `ta_derived_layer_{0..6}`.** Computed at ingest
@@ -141,14 +169,18 @@ Driven by the YAML config + the inventory. For each selected
 `(source_id, experiment, variant_label)`:
 
 1. Drop if any core variable missing.
-2. Open each variable's zarr.
+2. Open each variable's zarr (state, forcings from `Amon`/`SImon`,
+   static from `fx`).
 3. Validate `cell_methods` / vertical / grid.
-4. Regrid horizontally to the 4°×4° target.
+4. Regrid horizontally to the F22.5 target (Gauss-Legendre 4°).
 5. Apply below-surface persistence fill + emit mask channel.
 6. Compute derived `ta_derived_layer_{0..6}` from `zg` + `hus`.
-7. Time-subset per config.
-8. Write zarr via fsspec (local or gs://).
-9. Record metadata to `index.parquet`.
+7. Linear-interpolate monthly forcings (`ts`, `siconc`) onto the daily
+   time axis; broadcast static fields along time (or leave as
+   time-invariant coords, TBD with Issue 9).
+8. Time-subset per config.
+9. Write zarr via fsspec (local or gs://).
+10. Record metadata to `index.parquet`.
 
 Per-dataset jobs are embarrassingly parallel. Pilot runs locally
 (single-process dask, no argo) for debuggability; a batch/argo wrapper
