@@ -52,4 +52,4 @@ run_training() {
     -- torchrun --nproc_per_node $N_GPUS -m fme.ace.train $CONFIG_PATH
 }
 
-run_training "ace-train-config.yaml" "ace2-era5-train" "ace2-era5"
+run_training "ace-train-per-channel-loss-smoke.yaml" "ace2-era5-train-per-loss-test" "ace2-era5"
