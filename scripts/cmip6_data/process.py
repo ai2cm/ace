@@ -424,12 +424,46 @@ def _apply_time_subset(ds: xr.Dataset, cfg: ResolvedDatasetConfig) -> xr.Dataset
     return ds.sel(time=slice(window.start, window.end))
 
 
+_STALE_ENCODING_KEYS = (
+    # zarr v2 codec metadata that zarr v3 can't consume — strip before
+    # writing to avoid silent misinterpretation.
+    "compressors",
+    "filters",
+    "preferred_chunks",
+    # Source chunk shapes; we're re-chunking, so don't carry the old.
+    "chunks",
+    "shards",
+    # CMIP6 convention: 1e+20 as sentinel fill. zarr v3 floats store NaN
+    # natively; keep it simple and let xarray write NaN as NaN.
+    "_FillValue",
+    "missing_value",
+    "dtype",
+)
+
+
+def _clear_stale_encoding(ds: xr.Dataset) -> xr.Dataset:
+    ds = ds.copy(deep=False)
+    for var in {**ds.coords, **ds.data_vars}.values():
+        for k in _STALE_ENCODING_KEYS:
+            var.encoding.pop(k, None)
+    return ds
+
+
 def _write_zarr(ds: xr.Dataset, path: str, cfg: ResolvedDatasetConfig) -> None:
     """Write ``ds`` to ``path`` with zarr v3 chunks + shards per the
     config. time dim uses (chunk_time, shard_time); other dims are
     single chunk / single shard (full extent).
     """
-    import zarr  # noqa: F401  (ensure zarr is importable)
+    ds = _clear_stale_encoding(ds)
+
+    # Materialize the dataset before writing. The xesmf Regridder wraps
+    # the ESMF C library, which is not thread-safe; leaving the regrid
+    # lazy in the dask graph lets dask parallelise per-chunk, and the
+    # resulting concurrent Regridder.__call__ invocations can silently
+    # produce NaN for some chunks. Computing up front runs the regrid
+    # once, sequentially, and gives deterministic output.
+    logging.info("  materializing dataset in memory before write...")
+    ds = ds.load()
 
     chunk_time = cfg.chunking.chunk_time
     shard_time = cfg.chunking.shard_time
@@ -579,15 +613,15 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
             for v in static_ds.data_vars:
                 day_regridded[v] = static_ds[v]
 
-        # 13. Sanity count of NaN cells *before* filling (over 3D inputs).
-        # For now we record the NaN count of the filled output; it should be 0.
-        row.n_nan_input_cells = int(
-            sum(
-                int(day_regridded[v].isnull().sum().item())
-                for v in ("ua", "va", "hus", "zg")
-                if v in day_regridded
-            )
-        )
+        # 13. Sanity count of NaN cells in the filled 3D state. Should
+        # be zero; any non-zero is a sign the fill logic missed
+        # something. Uses eager .compute() because dask arrays don't
+        # support .item().
+        nan_total = 0
+        for v in ("ua", "va", "hus", "zg"):
+            if v in day_regridded:
+                nan_total += int(day_regridded[v].isnull().sum().compute())
+        row.n_nan_input_cells = nan_total
 
         # 14. Populate time metadata.
         row.n_timesteps = int(day_regridded.sizes.get("time", 0))

@@ -95,6 +95,9 @@ def write_index(rows: list[DatasetIndexRow], output_directory: str) -> None:
     csv_path = f"{root}/index.csv"
     parquet_path = f"{root}/index.parquet"
 
+    fs, rel = fsspec.core.url_to_fs(root)
+    fs.makedirs(rel, exist_ok=True)
+
     df.to_csv(csv_path, index=False)
     logging.info("Wrote %d rows to %s", len(df), csv_path)
 
