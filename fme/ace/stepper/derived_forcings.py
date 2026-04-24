@@ -87,8 +87,8 @@ class ForcingDeriver:
         return BatchData(
             data=forcing_dict,
             time=forcing.time,
-            horizontal_dims=forcing.horizontal_dims,
             labels=forcing.labels,
-            n_ensemble=forcing.n_ensemble,
+            horizontal_dims=forcing.horizontal_dims,
             epoch=forcing.epoch,
+            n_ensemble=forcing.n_ensemble,
         )

@@ -1190,8 +1190,6 @@ class DiffusionStepper(
 def load_stepper(
     checkpoint_path: str | pathlib.Path,
 ) -> DiffusionStepper:
-    checkpoint = torch.load(
-        checkpoint_path, map_location=get_device(), weights_only=False
-    )
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     stepper = DiffusionStepper.from_state(checkpoint["stepper"])
     return stepper

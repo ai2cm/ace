@@ -1795,9 +1795,7 @@ class CoupledTrainStepper(
 
 def load_coupled_stepper(checkpoint_path: str | pathlib.Path) -> CoupledStepper:
     logging.info(f"Loading trained coupled model checkpoint from {checkpoint_path}")
-    checkpoint = torch.load(
-        checkpoint_path, map_location=fme.get_device(), weights_only=False
-    )
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     stepper = CoupledStepper.from_state(checkpoint["stepper"])
 
     return stepper
