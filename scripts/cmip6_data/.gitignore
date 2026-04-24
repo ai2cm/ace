@@ -1,0 +1,7 @@
+# Inventory output (produced by inventory.py)
+inventory.csv
+inventory.parquet
+inventory.csv.gz
+
+# Processed data outputs
+data/

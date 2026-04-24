@@ -33,8 +33,21 @@ config knobs to scale up to the full roster later.
 
 **Core state (required — any model missing any of these is dropped):**
 
-`ta`, `ua`, `va`, `hus`, `zg` (3D on `plev8`); `tas`, `huss`, `ps`, `psl`,
-`pr` (2D).
+3D on `plev8`: `ua`, `va`, `hus`, `zg`
+2D: `tas`, `huss`, `psl`, `pr`
+
+Notably **absent from core**:
+
+- `ta` (air temperature on `plev`) — Pangeo daily coverage is essentially
+  nil (3 models). Instead we derive 7 layer-mean temperatures from `zg` +
+  `hus` via the hypsometric equation at ingest time and store them as
+  `ta_derived_layer_{0..6}`. This is a proxy, not a true temperature; it's
+  treated as derived throughout and labelled as such in the zarr.
+- `ps` (surface pressure) — not published at daily cadence by any CMIP6
+  model. `psl` (mean sea-level pressure) + a topography/`zg`-derived
+  surface mask stand in for surface pressure when needed.
+
+See **Derived variables** below for details.
 
 **Optional (include per-model when published):**
 
@@ -42,6 +55,28 @@ config knobs to scale up to the full roster later.
 - Surface radiation: `rsds`, `rsus`, `rlds`, `rlus`
 - Surface turbulent fluxes: `hfss`, `hfls`
 - Surface wind: `sfcWind`, `uas`, `vas`
+
+### Derived variables
+
+**Layer-mean temperature `ta_derived_layer_{0..6}`.** Computed at ingest
+from `zg` and `hus` using the hypsometric equation under hydrostatic
+balance — an excellent approximation for daily means at 4°×4°:
+
+```
+T_v^{layer_i}  = g · (z_{i+1} - z_i) / (R_d · ln(p_i / p_{i+1}))
+q^{layer_i}    = (q_i + q_{i+1}) / 2
+T^{layer_i}    = T_v^{layer_i} / (1 + 0.608 · q^{layer_i})
+```
+
+with `R_d = 287.05 J/kg/K`, `g = 9.80665 m/s²`. All inputs are co-located
+on `plev8` levels, so the computation is just differences and averages
+along the `plev` dimension — no interpolation. The 7 layer values live at
+the log-pressure midpoints `√(p_i · p_{i+1})`. Expected error from
+applying an instantaneous relation to daily means is <<1 K at these
+scales; far below inter-model spread.
+
+Variables are named `ta_derived_layer_*` throughout (never `ta`) to keep
+it unambiguous that these are proxies, not native CMIP6 temperatures.
 
 ### Vertical & horizontal grid
 
@@ -110,9 +145,10 @@ Driven by the YAML config + the inventory. For each selected
 3. Validate `cell_methods` / vertical / grid.
 4. Regrid horizontally to the 4°×4° target.
 5. Apply below-surface persistence fill + emit mask channel.
-6. Time-subset per config.
-7. Write zarr via fsspec (local or gs://).
-8. Record metadata to `index.parquet`.
+6. Compute derived `ta_derived_layer_{0..6}` from `zg` + `hus`.
+7. Time-subset per config.
+8. Write zarr via fsspec (local or gs://).
+9. Record metadata to `index.parquet`.
 
 Per-dataset jobs are embarrassingly parallel. Pilot runs locally
 (single-process dask, no argo) for debuggability; a batch/argo wrapper
@@ -155,15 +191,27 @@ experiment per model (e.g. 2 years of historical + 2 years of ssp585),
 single year, or a specific decade. Must be a config knob that can be set to
 "full" to produce the full dataset without code changes.
 
-### Issue 5 — Pangeo-only vs ESGF
+### Issue 5 — Pangeo-only vs ESGF (resolved)
 
-How much model coverage do we lose by excluding ESGF? Pangeo's daily-table
-coverage is selective — plausibly 40–70% of CMIP6 daily publishers.
-Recommendation for pilot: **exclude ESGF** to keep the pipeline simple
-(zarr in, zarr out; no netCDF download-and-convert; no DRS bookkeeping);
-revisit if the Pangeo roster is too thin. Need to confirm, and decide how
-we measure "too thin" — an inventory pass against Pangeo is cheap and
-would give us the number.
+Inventory run against the Pangeo GCS CMIP6 catalog (`table_id=day`,
+`historical` + `ssp585`, 22 candidate variables) — 8,615 rows across 53
+source_ids, 163 historical members, 142 ssp585 members.
+
+Key gaps found:
+
+- `ta` in `day`: only **3 models** publish it (CNRM-CM6-1, CanESM5,
+  GFDL-CM4) despite `ua`/`va`/`hus` each appearing for **47 models**.
+- `ps` in `day`: **zero models**; only published at 6-hourly or monthly
+  cadences.
+- `zg`: 36 models; `huss`: 41; the 2D fields `pr`/`tas`/`psl` are near-
+  universal (50–53 models).
+
+Resolution: **Pangeo-only**, with `ta` replaced by derived layer-mean
+temperatures (see Derived variables) and `ps` replaced by `psl` + mask.
+Expected coverage with the revised core set (`ua`, `va`, `hus`, `zg`,
+`tas`, `huss`, `psl`, `pr`): ~30 models with full core + at least one
+member per experiment. Good enough for the pilot; ESGF revisited only if
+the embedding clearly needs more sources.
 
 ### Issue 6 — Chunking strategy
 

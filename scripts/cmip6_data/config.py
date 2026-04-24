@@ -14,16 +14,19 @@ import dacite
 import yaml
 
 CORE_VARIABLES: list[str] = [
-    # 3D state on plev8 (required)
-    "ta",
+    # 3D state on plev8 (required).
+    # ``ta`` is excluded because Pangeo daily coverage is essentially nil
+    # (3 models); layer-mean T is derived from zg + hus in the processing
+    # step instead and stored as ta_derived_layer_{0..6}.
     "ua",
     "va",
     "hus",
     "zg",
-    # 2D state (required)
+    # 2D state (required).
+    # ``ps`` is excluded because no CMIP6 model publishes surface
+    # pressure at daily cadence; ``psl`` + a topography mask substitutes.
     "tas",
     "huss",
-    "ps",
     "psl",
     "pr",
 ]
@@ -46,6 +49,12 @@ OPTIONAL_VARIABLES: list[str] = [
     "uas",
     "vas",
 ]
+
+# Variables tracked by the inventory for visibility, but not required or
+# used in processing. ``ta`` and ``ps`` are here so inventory summaries
+# show their (sparse) coverage even though we substitute them with
+# derived / proxy fields.
+DIAGNOSTIC_VARIABLES: list[str] = ["ta", "ps"]
 
 # Variables regridded conservatively; everything else is bilinear by default.
 FLUX_LIKE_VARIABLES: frozenset[str] = frozenset(
@@ -208,7 +217,9 @@ class ResolvedDatasetConfig:
 class InventoryConfig:
     output_path: str  # fsspec URL to write the inventory table
     variables: list[str] = field(
-        default_factory=lambda: list(CORE_VARIABLES) + list(OPTIONAL_VARIABLES)
+        default_factory=lambda: (
+            list(CORE_VARIABLES) + list(OPTIONAL_VARIABLES) + list(DIAGNOSTIC_VARIABLES)
+        )
     )
     experiments: list[str] = field(default_factory=lambda: ["historical", "ssp585"])
     table_id: str = "day"
@@ -229,6 +240,7 @@ def _load_yaml(cls, path: str):
 __all__ = [
     "CORE_VARIABLES",
     "OPTIONAL_VARIABLES",
+    "DIAGNOSTIC_VARIABLES",
     "FLUX_LIKE_VARIABLES",
     "TimeWindow",
     "TargetGrid",
