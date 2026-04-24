@@ -365,6 +365,7 @@ class InferenceEvaluatorAggregator(
                     gridded_operations=ops,
                     nan_fill_fn=flood_fill,
                     report_plot=True,
+                    variable_metadata=dataset_info.variable_metadata,
                 )
             )
         except NotImplementedError:
@@ -750,6 +751,8 @@ class InferenceAggregator(
             aggregators["power_spectrum"] = SphericalPowerSpectrumAggregator(
                 gridded_operations=gridded_operations,
                 nan_fill_fn=SmoothFloodFill(num_steps=4),
+                report_plot=True,
+                variable_metadata=dataset_info.variable_metadata,
             )
         except NotImplementedError:
             logging.warning(
