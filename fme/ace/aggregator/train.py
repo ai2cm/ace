@@ -15,9 +15,6 @@ from fme.core.gridded_ops import GriddedOperations
 from fme.core.tensors import fold_ensemble_dim, fold_sized_ensemble_dim
 from fme.core.typing_ import TensorMapping
 
-# Metric key prefix for per-variable loss (must match stepper's metrics["loss/<var>"]).
-PER_CHANNEL_LOSS_PREFIX = "loss/"
-
 
 @dataclasses.dataclass
 class TrainAggregatorConfig:
@@ -84,11 +81,8 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
     def record_batch(self, batch: TrainOutput):
         self._loss += batch.metrics["loss"]
         self._n_loss_batches += 1
-        if self._per_channel_loss_enabled:
-            for key, value in batch.metrics.items():
-                if not key.startswith(PER_CHANNEL_LOSS_PREFIX):
-                    continue
-                var_name = key.removeprefix(PER_CHANNEL_LOSS_PREFIX)
+        if self._per_channel_loss_enabled and batch.per_channel_losses is not None:
+            for var_name, value in batch.per_channel_losses.items():
                 acc = self._per_channel_loss.get(
                     var_name,
                     torch.tensor(0.0, device=get_device(), dtype=value.dtype),

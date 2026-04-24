@@ -104,26 +104,22 @@ def test_aggregator_logs_per_channel_loss():
     )
     agg.record_batch(
         batch=TrainOutput(
-            metrics={
-                "loss": torch.tensor(1.0, device=device),
-                "loss/a": torch.tensor(0.5, device=device),
-            },
+            metrics={"loss": torch.tensor(1.0, device=device)},
             target_data=target_data,
             gen_data=gen_data,
             time=xr.DataArray(np.zeros((batch_size, n_time)), dims=["sample", "time"]),
             normalize=lambda x: x,
+            per_channel_losses={"a": torch.tensor(0.5, device=device)},
         ),
     )
     agg.record_batch(
         batch=TrainOutput(
-            metrics={
-                "loss": torch.tensor(2.0, device=device),
-                "loss/a": torch.tensor(1.0, device=device),
-            },
+            metrics={"loss": torch.tensor(2.0, device=device)},
             target_data=target_data,
             gen_data=gen_data,
             time=xr.DataArray(np.zeros((batch_size, n_time)), dims=["sample", "time"]),
             normalize=lambda x: x,
+            per_channel_losses={"a": torch.tensor(1.0, device=device)},
         ),
     )
     logs = agg.get_logs(label="train")
@@ -155,14 +151,12 @@ def test_aggregator_per_channel_loss_disabled():
     )
     agg.record_batch(
         batch=TrainOutput(
-            metrics={
-                "loss": torch.tensor(1.0, device=device),
-                "loss/a": torch.tensor(0.5, device=device),
-            },
+            metrics={"loss": torch.tensor(1.0, device=device)},
             target_data=target_data,
             gen_data=gen_data,
             time=xr.DataArray(np.zeros((batch_size, n_time)), dims=["sample", "time"]),
             normalize=lambda x: x,
+            per_channel_losses={"a": torch.tensor(0.5, device=device)},
         ),
     )
     logs = agg.get_logs(label="train")
