@@ -112,10 +112,16 @@ class PairedSphericalPowerSpectrumAggregator:
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
     ):
         self._gen_aggregator = SphericalPowerSpectrumAggregator(
-            gridded_operations, nan_fill_fn, variable_metadata=variable_metadata
+            gridded_operations,
+            nan_fill_fn,
+            report_plot=False,
+            variable_metadata=variable_metadata,
         )
         self._target_aggregator = SphericalPowerSpectrumAggregator(
-            gridded_operations, nan_fill_fn, variable_metadata=variable_metadata
+            gridded_operations,
+            nan_fill_fn,
+            report_plot=False,
+            variable_metadata=variable_metadata,
         )
         self._report_plot = report_plot
 
