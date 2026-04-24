@@ -1,7 +1,9 @@
 import matplotlib.pyplot as plt
+import numpy as np
 import pytest
 import torch
 import torch_harmonics
+import xarray as xr
 
 import fme
 from fme.ace.aggregator.inference.spectrum import (
@@ -10,6 +12,7 @@ from fme.ace.aggregator.inference.spectrum import (
     get_positive_and_negative_power_bias,
     get_smallest_scale_power_bias,
 )
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.metrics import spherical_power_spectrum
 
@@ -20,12 +23,13 @@ def get_gridded_operations(nlat: int, nlon: int):
     return LatLonOperations(torch.ones(nlat, nlon))
 
 
-def test_spherical_power_spectrum_aggregator():
+@pytest.mark.parametrize("report_plot", [True, False])
+def test_spherical_power_spectrum_aggregator(report_plot: bool):
     nlat = 8
     nlon = 16
     grid = "legendre-gauss"
     gridded_operations = get_gridded_operations(nlat, nlon)
-    agg = SphericalPowerSpectrumAggregator(gridded_operations)
+    agg = SphericalPowerSpectrumAggregator(gridded_operations, report_plot=report_plot)
     data = {"a": torch.randn(2, 2, nlat, nlon, device=fme.get_device())}
     data2 = {"a": torch.randn(2, 3, nlat, nlon, device=fme.get_device())}
     agg.record_batch(data)
@@ -38,6 +42,75 @@ def test_spherical_power_spectrum_aggregator():
     data_concat = torch.cat([data["a"], data2["a"]], dim=1)
     expected_value = torch.mean(spherical_power_spectrum(data_concat, sht), dim=(0, 1))
     torch.testing.assert_close(result["a"], expected_value)
+
+    logs = agg.get_logs("spectrum")
+    if report_plot:
+        assert isinstance(logs["spectrum/a"], plt.Figure)
+    else:
+        assert "spectrum/a" not in logs
+
+
+def test_spherical_power_spectrum_aggregator_get_dataset():
+    nlat, nlon = 8, 16
+    grid = "legendre-gauss"
+    gridded_operations = get_gridded_operations(nlat, nlon)
+    metadata = {"a": VariableMetadata(units="K", long_name="temperature")}
+    agg = SphericalPowerSpectrumAggregator(
+        gridded_operations, report_plot=False, variable_metadata=metadata
+    )
+    data = {"a": torch.randn(2, 3, nlat, nlon, device=DEVICE)}
+    agg.record_batch(data)
+    result = agg.get_dataset()
+    sht = torch_harmonics.RealSHT(nlat, nlon, grid=grid).to(DEVICE)
+    expected_values = torch.mean(spherical_power_spectrum(data["a"], sht), dim=(0, 1))
+    expected_attrs = {
+        "long_name": "spherical power spectrum of temperature",
+        "units": "(K)^2",
+    }
+    expected_wavenumber = np.arange(nlat)
+    expected_da = xr.DataArray(
+        expected_values.cpu().numpy(),
+        dims=["wavenumber"],
+        coords={"wavenumber": expected_wavenumber},
+        attrs=expected_attrs,
+    )
+    expected = xr.Dataset({"a": expected_da})
+    xr.testing.assert_identical(result, expected)
+
+
+def test_paired_spherical_power_spectrum_aggregator_get_dataset():
+    nlat, nlon = 8, 16
+    grid = "legendre-gauss"
+    gridded_operations = get_gridded_operations(nlat, nlon)
+    agg = PairedSphericalPowerSpectrumAggregator(gridded_operations, report_plot=False)
+    gen_data = {"a": torch.randn(2, 3, nlat, nlon, device=DEVICE)}
+    target_data = {"a": torch.randn(2, 3, nlat, nlon, device=DEVICE)}
+    agg.record_batch(target_data=target_data, gen_data=gen_data)
+    result = agg.get_dataset()
+    sht = torch_harmonics.RealSHT(nlat, nlon, grid=grid).to(DEVICE)
+    expected_gen = torch.mean(spherical_power_spectrum(gen_data["a"], sht), dim=(0, 1))
+    expected_target = torch.mean(
+        spherical_power_spectrum(target_data["a"], sht), dim=(0, 1)
+    )
+    expected_values = np.stack(
+        [expected_gen.cpu().numpy(), expected_target.cpu().numpy()]
+    )
+    expected_wavenumber = np.arange(nlat)
+    expected_da = xr.DataArray(
+        expected_values,
+        dims=["source", "wavenumber"],
+        coords={"source": ["prediction", "target"], "wavenumber": expected_wavenumber},
+        attrs={"long_name": "spherical power spectrum of a", "units": "unknown_units"},
+    )
+    expected = xr.Dataset({"a": expected_da})
+    xr.testing.assert_identical(result, expected)
+
+
+def test_paired_spherical_power_spectrum_aggregator_get_dataset_no_data():
+    nlat, nlon = 8, 16
+    gridded_operations = get_gridded_operations(nlat, nlon)
+    agg = PairedSphericalPowerSpectrumAggregator(gridded_operations, report_plot=False)
+    xr.testing.assert_identical(agg.get_dataset(), xr.Dataset())
 
 
 @pytest.mark.parametrize("report_plot", [True, False])
