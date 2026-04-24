@@ -156,6 +156,17 @@ gs://<bucket>/cmip6-daily-pilot/
 One zarr per `(source_id, experiment, variant_label)`. Chunked with
 short-window training in mind; see **Issue 6**.
 
+## Dependencies
+
+Runtime deps (assumed present in the `fme` conda env): `numpy`,
+`xarray`, `pandas`, `zarr`, `fsspec`, `dacite`, `pyyaml`.
+
+Processing-script-only deps (installed if/when we run `process.py`):
+`xesmf` + `esmpy` (regridding), `dask`.
+
+Optional: `pyarrow` (or `fastparquet`) — enables `index.parquet`
+output. Without it, only `index.csv` is written.
+
 ## Extraction Approach (high level)
 
 Split into two scripts:
@@ -237,28 +248,28 @@ computed from the produced zarrs.
   hatch for unsharded writes.
 - **Issue 2 — Label schema.** Strict reading: label =
   `(source_id, physics_index p)`. Realization `r`, initialization `i`,
-  and forcing `f` are within-label variation. Stored both as two
-  scalar coords in each zarr (`label_source_id`, `label_physics_index`)
-  and as a composite string coord (`label`) of the form
-  `{source_id}.p{p}` — e.g. `"CanESM5.p1"`, `"GISS-E2-1-G.p3"`. The
-  physics index is always included, even for source_ids with a single
-  `p` value, so the label maps 1:1 to CMIP6 metadata. Helper:
-  `config.make_label(source_id, p)`. Inventory shows ~57 labels across
-  53 source_ids (3 models publish alternate `p`: CMCC-CM2-SR5,
-  CanESM5, GISS-E2-1-G). `variant_label` and parsed `r`/`i`/`f` are
-  also retained in the zarr and index for downstream flexibility,
-  though they are not part of the label.
+  and forcing `f` are within-label variation. Stored as a scalar
+  coord on each zarr and as a column in the index, in composite
+  `{source_id}.p{p}` form (e.g. `"CanESM5.p1"`, `"GISS-E2-1-G.p3"`).
+  Always includes `.pN` even for single-`p` source_ids, mapping 1:1
+  to CMIP6 metadata. Helper: `config.make_label`. Inventory shows ~57
+  labels across 53 source_ids (3 models publish alternate `p`:
+  CMCC-CM2-SR5, CanESM5, GISS-E2-1-G). `variant_label` and parsed
+  `r`/`i`/`f` are also retained in the zarr and index for downstream
+  flexibility, though they are not part of the label itself.
+- **Issue 9 — Index schema.** `DatasetIndexRow` dataclass in
+  `index.py` captures identity, provenance (input zstores), processing
+  (regrid methods, mask source, target grid), output (zarr path, time
+  range, variables present), and audit (status, skip_reason, warnings).
+  Outputs: `index.csv` always; `index.parquet` when a parquet engine
+  is available; per-successful-zarr `metadata.json` sidecar alongside
+  the data.
 
-## Open Issues (to work through sequentially)
+## Open Issues
 
-### Issue 9 — `index.parquet` schema (next)
-
-What to record per dataset: `source_id`, `experiment`, `variant_label`,
-parsed `r`/`i`/`p`/`f`, label columns (`label_source_id`,
-`label_physics_index`, `label`), native calendar, native horizontal
-grid, `grid_label` used, regrid method, time range, variables present,
-`mask_source` flag, any data-quality flags. Decided together with the
-processing script.
+All pre-processing-script issues resolved. Remaining work is in
+**Tasks 11 + 12**: write `process.py`, including the derived
+layer-mean temperature computation.
 
 ## Deferred / Future Issues
 
