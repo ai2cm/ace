@@ -73,6 +73,19 @@ _SKIP_VARS = ("below_surface_mask", "siconc_mask")
 _SCALAR_NAMES = (
     "mean",
     "std",
+    # Variance decomposition: ``clim_std`` is the area-weighted spatial
+    # std of the time-mean climatology; ``anom_std`` is the std of the
+    # remaining (X - time_mean) anomaly. Identity (orthogonal):
+    # ``std**2 = clim_std**2 + anom_std**2`` exactly under uniform
+    # time weighting + area-summed-to-1 spatial weights. ``clim_var_frac``
+    # = ``clim_std**2 / std**2`` is the share of total variance carried
+    # by the static spatial pattern; high values (e.g. ``ts`` ~ 0.99)
+    # mean total ``std`` mostly reflects "warm tropics vs cold poles"
+    # and ``d1_std / std`` understates day-to-day predictability — use
+    # ``d1_std / anom_std`` instead.
+    "clim_std",
+    "anom_std",
+    "clim_var_frac",
     "d1_mean",
     "d1_std",
     "p01",
@@ -127,6 +140,26 @@ def _stats_for_time_field(arr: np.ndarray, w2d: np.ndarray) -> dict[str, float]:
     out["p50"] = float(np.percentile(val_v, 50))
     out["p99"] = float(np.percentile(val_v, 99))
     out["skewness"], out["kurtosis"] = _moment_stats(val_v, out["mean"], out["std"])
+
+    # Variance decomposition: total = climatology + anomaly. The
+    # climatology contribution is the spatial std of the time-mean
+    # field; the anomaly is whatever's left.
+    time_mean = np.nanmean(arr, axis=0)  # (lat, lon)
+    finite_clim = np.isfinite(time_mean)
+    if finite_clim.any() and out["std"] > 0:
+        clim_w = w2d[finite_clim]
+        clim_w = clim_w / clim_w.sum()
+        clim_v = time_mean[finite_clim]
+        clim_mean = float(np.sum(clim_v * clim_w))
+        clim_var = float(np.sum((clim_v - clim_mean) ** 2 * clim_w))
+        clim_std = float(np.sqrt(max(clim_var, 0.0)))
+        out["clim_std"] = clim_std
+        total_var = out["std"] ** 2
+        # ``clim_var > total_var`` shouldn't happen analytically but
+        # can by O(eps) due to weighting/precision; clamp.
+        anom_var = max(total_var - clim_var, 0.0)
+        out["anom_std"] = float(np.sqrt(anom_var))
+        out["clim_var_frac"] = float(min(max(clim_var / total_var, 0.0), 1.0))
 
     # One-step finite difference in time.
     if arr.shape[0] > 1:
