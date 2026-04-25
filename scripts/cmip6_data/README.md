@@ -253,6 +253,31 @@ Per-dataset jobs are embarrassingly parallel. Pilot runs locally
 Normalization stats (per-model, NaN-aware) are a separate later step
 over the produced zarrs.
 
+### `make_presence.py` — variable-presence views
+
+Joins the central `index.csv` with the inventory to produce a
+per-dataset view of "what's in this dataset, what was available in
+the source, and what wasn't." Outputs four files into
+`<output_directory>/`:
+
+- `presence.csv` and `presence.parquet`: wide pivot, one row per
+  attempted dataset, one column per variable. Cell encoding is
+  `2` (written), `1` (available in source but not written), or
+  `0` (not in source). Plus identity, status, calendar, mask
+  source, warning count, and zarr path.
+- `presence.png`: heatmap of the same matrix, columns grouped by
+  category (core → derived → forcing → static → optional), rows
+  sorted by `(source_id, experiment, variant_label)`. A side
+  stripe shows dataset status. Skipped rows show up as walls of
+  amber (source had it, we didn't ingest).
+- `presence.md`: per-model rollup with one-line dataset summaries
+  and a category-coverage table.
+
+Run via:
+```
+python make_presence.py --config configs/pilot.yaml
+```
+
 ## Resolved Issues
 
 - **Issue 1 — Config design.** Single YAML per script, loaded via
