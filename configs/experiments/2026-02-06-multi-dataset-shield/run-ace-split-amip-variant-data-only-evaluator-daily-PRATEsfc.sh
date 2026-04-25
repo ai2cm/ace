@@ -14,7 +14,7 @@ REFERENCE_MODEL="01KHGDAMB2BDZQS8JFF65A2YDR"
 CHECKPOINT_PATH=training_checkpoints/best_inference_ckpt.tar
 
 GCS_ROOT="gs://vcm-ml-experiments/spencerc/2026-04-25-amip-plus-4K-data-only-inference"
-TRAIN_AND_VALIDATE_EXPERIMENT_DIR="${GCS_ROOT}/SHiELD/train-and-validate"
+TRAIN_AND_VALIDATE_EXPERIMENT_DIR="/results/train-and-validate"
 TEST_EXPERIMENT_DIR="${GCS_ROOT}/SHiELD/test"
 
 # xr.date_range("1980", "2012", freq="6h", inclusive="left")

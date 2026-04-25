@@ -33,16 +33,16 @@ declare -A MODELS=( \
 SPIN_UP_N_FORWARD_STEPS=1459
 # xr.date_range("1980", "2012", freq="6h", inclusive="left")
 TRAIN_AND_VALIDATE_N_FORWARD_STEPS=46752
-# xr.date_range("2012", "2022", freq="6h", inclusive="left")
+# xr.date_range("2012", "2021", freq="6h", inclusive="left")
 TEST_N_FORWARD_STEPS=13152
 
 GCS_ROOT="gs://vcm-ml-experiments/spencerc/2026-04-25-amip-plus-4K-inference"
 AMIP_PLUS_4K_DATA_ROOT="/climate-default/2025-04-29-c96-1deg-shield-amip-p4k-dataset"
+SPIN_UP_EXPERIMENT_DIR="/results/spin-up"
+TRAIN_AND_VALIDATE_EXPERIMENT_DIR="/results/train-and-validate"
 
 for name in "${!MODELS[@]}"; do
     job_name="${DATE}-${name}-split-amip-plus-4K-inference"
-    spin_up_experiment_dir="${GCS_ROOT}/${name}/spin-up"
-    train_and_validate_experiment_dir="${GCS_ROOT}/${name}/train-and-validate"
     test_experiment_dir="${GCS_ROOT}/${name}/test"
 
     existing_results_dataset=${MODELS[$name]}
@@ -54,7 +54,7 @@ for name in "${!MODELS[@]}"; do
     fi
 
     spin_up_override="\
-        experiment_dir=${spin_up_experiment_dir} \
+        experiment_dir=${SPIN_UP_EXPERIMENT_DIR} \
         n_forward_steps=${SPIN_UP_N_FORWARD_STEPS} \
         initial_condition.start_indices.times=[1979-01-01T06:00:00] \
         initial_condition.path=${AMIP_PLUS_4K_DATA_ROOT}/${ENSEMBLE_ID}.zarr \
@@ -70,7 +70,7 @@ for name in "${!MODELS[@]}"; do
     "
     python -m fme.ace.validate_config --config_type inference $CONFIG_PATH --override $spin_up_override
     train_and_validate_override="\
-        experiment_dir=${train_and_validate_experiment_dir} \
+        experiment_dir=${TRAIN_AND_VALIDATE_EXPERIMENT_DIR} \
         n_forward_steps=${TRAIN_AND_VALIDATE_N_FORWARD_STEPS} \
         initial_condition.start_indices=null \
         initial_condition.path=${SPIN_UP_EXPERIMENT_DIR}/restart.nc \
