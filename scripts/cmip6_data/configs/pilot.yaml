@@ -21,9 +21,18 @@ selection:
 
 # Per-dataset overrides. Sparse; match on any subset of
 # (source_id, experiment, variant_label). source_id is required.
-overrides: []
-# Example:
-# overrides:
-#   - match: {source_id: GISS-E2-1-G, variant_label: r1i1p3f1}
-#     time_subset:
-#       historical: {start: "2005-01-01", end: "2006-12-31"}
+overrides:
+  # CESM2-WACCM historical r2i1p1f1 has its psl variable concatenated
+  # twice end-to-end on Pangeo (mirror-side ingest error; see README's
+  # "Known Pangeo data-quality issues"). The two halves are
+  # bit-identical, so dedupe is safe — but we want this to be opt-in,
+  # not silent.
+  - match:
+      source_id: CESM2-WACCM
+      experiment: historical
+      variant_label: r2i1p1f1
+    allow_dedupe: true
+# Example time_subset override:
+# - match: {source_id: GISS-E2-1-G, variant_label: r1i1p3f1}
+#   time_subset:
+#     historical: {start: "2005-01-01", end: "2006-12-31"}

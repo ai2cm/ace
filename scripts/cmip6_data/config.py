@@ -171,6 +171,13 @@ class DefaultsConfig:
     regrid: RegridConfig = field(default_factory=RegridConfig)
     fill: FillConfig = field(default_factory=FillConfig)
     chunking: ChunkingConfig = field(default_factory=ChunkingConfig)
+    # If False (default), duplicate timestamps in a source variable
+    # cause the dataset to be skipped with a descriptive reason.
+    # Enable per-dataset via an override after manually verifying that
+    # the duplicates are a publishing artefact rather than a real
+    # simulation boundary; the runtime still verifies data identity
+    # before merging.
+    allow_dedupe: bool = False
 
 
 @dataclass
@@ -199,6 +206,7 @@ class Match:
 class Override:
     match: Match
     time_subset: Optional[dict[str, TimeWindow]] = None
+    allow_dedupe: Optional[bool] = None
 
 
 @dataclass
@@ -233,10 +241,13 @@ class ProcessConfig:
     ) -> "ResolvedDatasetConfig":
         """Apply overrides on top of defaults for one dataset."""
         time_subset = dict(self.defaults.time_subset)
+        allow_dedupe = self.defaults.allow_dedupe
         for override in self.overrides:
             if override.match.matches(source_id, experiment, variant_label):
                 if override.time_subset is not None:
                     time_subset = dict(override.time_subset)
+                if override.allow_dedupe is not None:
+                    allow_dedupe = override.allow_dedupe
         return ResolvedDatasetConfig(
             source_id=source_id,
             experiment=experiment,
@@ -251,6 +262,7 @@ class ProcessConfig:
             regrid=self.defaults.regrid,
             fill=self.defaults.fill,
             chunking=self.defaults.chunking,
+            allow_dedupe=allow_dedupe,
         )
 
 
@@ -273,6 +285,7 @@ class ResolvedDatasetConfig:
     regrid: RegridConfig
     fill: FillConfig
     chunking: ChunkingConfig
+    allow_dedupe: bool = False
 
 
 @dataclass

@@ -312,6 +312,17 @@ over the produced zarrs.
 
 ### Known Pangeo data-quality issues (to raise with Pangeo)
 
+- **CESM2-WACCM `historical r2i1p1f1` `psl`** has its 1850–2014
+  series **stored twice end-to-end** in the Pangeo mirror at
+  `gs://cmip6/.../day/psl/gn/v20190227/`. Both halves are
+  bit-identical (we verify with `np.allclose`); the other day-table
+  variables for the same member are clean (60226 timestamps, no
+  duplicates). Symptoms point at a mirror-side ingest error where
+  the per-variable concatenation appended the same source-file list
+  twice without truncating. Until Pangeo re-publishes, the pilot
+  enables `allow_dedupe: true` for this dataset via the per-dataset
+  override in `pilot.yaml`.
+
 - **ACCESS-CM2 `ssp585 r1i1p1f1`** has variables backed by
   inconsistent underlying zarr stores:
 

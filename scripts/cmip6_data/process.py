@@ -327,7 +327,16 @@ class _SimulationBoundaryError(ValueError):
     """
 
 
-def _resolve_time_duplicates(ds: xr.Dataset, var_name: str) -> tuple[xr.Dataset, str]:
+class _DuplicateTimestampsError(ValueError):
+    """Raised when duplicate time indices are detected and the
+    resolved config does not enable ``allow_dedupe``. Caller is
+    expected to convert this into a skipped-dataset row.
+    """
+
+
+def _resolve_time_duplicates(
+    ds: xr.Dataset, var_name: str, allow_dedupe: bool = False
+) -> tuple[xr.Dataset, str]:
     """Detect duplicate timestamps and decide how to handle them.
 
     Returns ``(ds, message)`` where ``ds`` is the cleaned dataset and
@@ -348,6 +357,14 @@ def _resolve_time_duplicates(ds: xr.Dataset, var_name: str) -> tuple[xr.Dataset,
     vals, counts = np.unique(times, return_counts=True)
     dup_times = vals[counts > 1]
     n_dup = int(counts[counts > 1].sum() - len(dup_times))
+
+    if not allow_dedupe:
+        raise _DuplicateTimestampsError(
+            f"{var_name}: {n_dup} duplicate timestamp(s) detected; "
+            "to permit dedupe, manually verify the duplicates are a "
+            "publishing artefact (not a real simulation boundary) and "
+            "set ``allow_dedupe: true`` in an override for this dataset"
+        )
 
     # Load the whole variable into memory once. The caller is expected
     # to have already time-subset to a small window (a year or so), so
@@ -760,8 +777,12 @@ _SANITY_RANGES: dict[str, tuple[float, float]] = {
     # ~1000 at daily mean. Widened vs the v0 bounds.
     "hfss": (-1000.0, 1000.0),
     "hfls": (-500.0, 1200.0),
-    # Land / ocean fractions (percent)
-    "sftlf": (-_EPS, 100.0 + _EPS),
+    # Land / ocean fractions (percent). Conservative regridding from
+    # a binary {0, 100} mask onto a coarse target can leave a few
+    # percent of overshoot from edge-cell weighting; observed up to
+    # ~103% on CESM2-WACCM, so the upper bound is generous. Anything
+    # over 105 is unphysical and should still trip.
+    "sftlf": (-_EPS, 105.0),
     # Orography (m)
     "orog": (-500.0, 9000.0),
 }
@@ -1012,12 +1033,14 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
 
                 # Time dedupe (raises _SimulationBoundaryError for
                 # non-identical duplicates; caught below).
-                ds_v, msg = _resolve_time_duplicates(ds_v, v)
+                ds_v, msg = _resolve_time_duplicates(
+                    ds_v, v, allow_dedupe=cfg.allow_dedupe
+                )
                 if msg:
                     row.warnings.append(msg)
 
                 groups.setdefault(_grid_fingerprint(ds_v), []).append(ds_v)
-        except _SimulationBoundaryError as e:
+        except (_SimulationBoundaryError, _DuplicateTimestampsError) as e:
             row.status = "skipped"
             row.skip_reason = str(e)
             return row
@@ -1105,7 +1128,9 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
                 # variable itself doesn't have — survive the open and
                 # are available to xesmf's conservative regridder.
                 monthly = _open_zstore(z)
-                monthly, dup_msg = _resolve_time_duplicates(monthly, var)
+                monthly, dup_msg = _resolve_time_duplicates(
+                    monthly, var, allow_dedupe=cfg.allow_dedupe
+                )
                 if dup_msg:
                     row.warnings.append(dup_msg)
                 monthly = _apply_time_subset(monthly, cfg)
