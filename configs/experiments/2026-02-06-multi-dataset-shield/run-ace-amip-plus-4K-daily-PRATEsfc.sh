@@ -118,7 +118,7 @@ for name in "${!MODELS[@]}"; do
         --gpus 1 \
         --shared-memory 20GiB \
         --weka climate-default:/climate-default \
-        --budget atec/climate \
+        --budget ai2/climate \
         --system-python \
         --install "pip install --no-deps ." \
         -- /bin/bash -c "\
