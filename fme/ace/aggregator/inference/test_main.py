@@ -10,7 +10,7 @@ from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregator,
     StepMeanEntry,
 )
-from fme.ace.data_loading.batch_data import BatchData, PairedData
+from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
@@ -103,15 +103,13 @@ def test_inference_evaluator_aggregator_channel_mean_names(
 
 def test_inference_evaluator_aggregator_ensemble():
     channel_mean_names = ["a", "b"]
-    n_ic_steps = 1
+    n_ic_steps = 2
     n_forward_steps = 39
-    n_timesteps = n_ic_steps + n_forward_steps
     nx, ny = 4, 4
-    batch_size = 2
     n_ensemble = 2
 
     ds_info = get_ds_info(nx, ny)
-    initial_time = xr.DataArray(np.zeros((batch_size,)), dims=["sample"])
+    initial_time = xr.DataArray(np.zeros((n_ensemble,)), dims=["sample"])
 
     agg = InferenceEvaluatorAggregator(
         dataset_info=ds_info,
@@ -132,28 +130,101 @@ def test_inference_evaluator_aggregator_ensemble():
         log_step_means=[StepMeanEntry(step=20)],
     )
 
+    ic_data = BatchData.new_for_testing(
+        names=["a", "b", "c"],
+        n_samples=n_ensemble,
+        n_timesteps=n_ic_steps,
+        img_shape=(nx, ny),
+    )
+    agg.record_initial_condition(PrognosticState(ic_data))
+
     target_data = BatchData.new_for_testing(
         names=["a", "b", "c"],
-        n_samples=1,
-        n_timesteps=n_timesteps,
+        n_samples=n_ensemble,
+        n_timesteps=n_forward_steps,
         img_shape=(nx, ny),
     )
-
     gen_data = BatchData.new_for_testing(
         names=["a", "b", "c"],
-        n_samples=1,
-        n_timesteps=n_timesteps,
+        n_samples=n_ensemble,
+        n_timesteps=n_forward_steps,
         img_shape=(nx, ny),
     )
-
-    target_data = target_data.broadcast_ensemble(n_ensemble=n_ensemble)
-    gen_data = gen_data.broadcast_ensemble(n_ensemble=n_ensemble)
+    gen_data.time = target_data.time
 
     paired_data = PairedData.from_batch_data(prediction=gen_data, reference=target_data)
     agg.record_batch(paired_data)
 
     summary_logs = agg.get_summary_logs()
     for varname in ["a", "b", "c"]:
-        assert f"ensemble_step_20/crps/{varname}" in summary_logs
+        assert f"ensemble_mean_step_20/crps/{varname}" in summary_logs
+        assert f"ensemble_mean_step_20/ssr_bias/{varname}" in summary_logs
+
+
+def test_inference_evaluator_aggregator_ensemble_windowed():
+    """Test ensemble metrics with windowed batches matching production flow,
+    where data arrives in chunks across multiple record_batch calls."""
+    n_ic_steps = 2
+    n_forward_steps = 30
+    nx, ny = 4, 4
+    n_ensemble = 3
+    window_size = 10
+
+    ds_info = get_ds_info(nx, ny)
+    initial_time = xr.DataArray(np.zeros((n_ensemble,)), dims=["sample"])
+
+    agg = InferenceEvaluatorAggregator(
+        dataset_info=ds_info,
+        n_ic_steps=n_ic_steps,
+        n_forward_steps=n_forward_steps,
+        initial_time=initial_time,
+        normalize=lambda x: dict(x),
+        log_zonal_mean_images=False,
+        log_video=False,
+        log_seasonal_means=False,
+        log_global_mean_time_series=False,
+        log_global_mean_norm_time_series=False,
+        log_histograms=False,
+        channel_mean_names=["a", "b"],
+        log_nino34_index=False,
+        save_diagnostics=False,
+        n_ensemble_per_ic=n_ensemble,
+        log_step_means=[StepMeanEntry(step=20)],
+    )
+
+    ic_data = BatchData.new_for_testing(
+        names=["a", "b", "c"],
+        n_samples=n_ensemble,
+        n_timesteps=n_ic_steps,
+        img_shape=(nx, ny),
+    )
+    agg.record_initial_condition(PrognosticState(ic_data))
+
+    for i_start in range(0, n_forward_steps, window_size):
+        i_end = min(i_start + window_size, n_forward_steps)
+        chunk_size = i_end - i_start
+        target = BatchData.new_for_testing(
+            names=["a", "b", "c"],
+            n_samples=n_ensemble,
+            n_timesteps=chunk_size,
+            img_shape=(nx, ny),
+        )
+        gen = BatchData.new_for_testing(
+            names=["a", "b", "c"],
+            n_samples=n_ensemble,
+            n_timesteps=chunk_size,
+            img_shape=(nx, ny),
+        )
+        gen.time = target.time
+        paired = PairedData.from_batch_data(prediction=gen, reference=target)
+        agg.record_batch(paired)
+
+    summary_logs = agg.get_summary_logs()
     for varname in ["a", "b", "c"]:
-        assert f"ensemble_step_20/ssr_bias/{varname}" in summary_logs
+        key_crps = f"ensemble_mean_step_20/crps/{varname}"
+        key_ssr = f"ensemble_mean_step_20/ssr_bias/{varname}"
+        assert key_crps in summary_logs, f"Missing {key_crps}"
+        assert key_ssr in summary_logs, f"Missing {key_ssr}"
+        assert np.isfinite(
+            summary_logs[key_ssr]
+        ), f"{key_ssr} is not finite: {summary_logs[key_ssr]}"
