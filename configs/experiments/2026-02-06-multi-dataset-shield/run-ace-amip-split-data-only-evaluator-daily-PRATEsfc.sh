@@ -54,11 +54,9 @@ for ensemble_id in "ic_0001"; do
         --name $job_name \
         --description 'Run ACE AMIP data-only evaluator' \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-        --workspace ai2/ace \
-        --priority high \
-        --not-preemptible \
-        --cluster ai2/jupiter \
-        --cluster ai2/ceres \
+        --workspace ai2/climate-titan \
+        --priority urgent \
+        --preemptible \
         --cluster ai2/titan \
         --env WANDB_USERNAME=$WANDB_USERNAME \
         --env WANDB_NAME=$job_name \
@@ -71,7 +69,6 @@ for ensemble_id in "ic_0001"; do
         --gpus 1 \
         --shared-memory 20GiB \
         --weka climate-default:/climate-default \
-        --budget ai2/climate \
         --system-python \
         --install "pip install --no-deps ." \
         -- /bin/bash -c "\
