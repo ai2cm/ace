@@ -119,7 +119,7 @@ class InlineInferenceConfig:
     loader: InferenceDataLoaderConfig
     n_forward_steps: int
     forward_steps_in_memory: int
-    n_ensemble_per_ic: int = 2
+    n_ensemble_per_ic: int = 1
     epochs: Slice = dataclasses.field(default_factory=lambda: Slice())
     aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
         default_factory=lambda: InferenceEvaluatorAggregatorConfig(
