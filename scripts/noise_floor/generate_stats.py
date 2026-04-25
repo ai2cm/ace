@@ -7,6 +7,7 @@ from typing import Callable, List, Optional, Sequence, Tuple
 
 import dacite
 import dask.diagnostics
+import distributed
 import fsspec
 import numpy as np
 import xarray as xr
@@ -144,9 +145,9 @@ def get_output_datasets(
     years_per_ensemble: int,
     amip: bool,
 ) -> Tuple[xr.Dataset, xr.Dataset, xr.Dataset]:
+    lon = dataset["grid_xt"]
     lat = dataset["grid_yt"]
-    # Xarray automatically broadcasts these 1D weights in weighted operations
-    area = np.cos(np.deg2rad(lat))
+    area = np.cos(np.deg2rad(lat)).broadcast_like(lon)
     annual = get_annual(dataset)
     available_years = annual.sizes["year"]
     if available_years != years_per_ensemble:
@@ -154,9 +155,7 @@ def get_output_datasets(
             f"There are {available_years} years of data available, "
             f"but received value {years_per_ensemble} for years_per_ensemble."
         )
-    with dask.diagnostics.ProgressBar():
-        with dask.config.set(scheduler="processes"):
-            annual = annual.isel(year=range(0, years_per_ensemble)).load()
+    annual = annual.isel(year=range(0, years_per_ensemble)).load()
     m, s = combine_window_stats(
         [1, 2, 5, 10],
         years_per_ensemble,
@@ -202,9 +201,10 @@ if __name__ == "__main__":
     with open(args.data_config, "r") as f:
         data_config = dacite.from_dict(DataConfig, yaml.safe_load(f))
 
-    main(
-        dataset=data_config.get_dataset(),
-        years_per_ensemble=data_config.years_per_ensemble,
-        amip=data_config.is_amip,
-        stats_path=data_config.stats_path,
-    )
+    with distributed.Client(n_workers=16) as client:
+        main(
+            dataset=data_config.get_dataset(),
+            years_per_ensemble=data_config.years_per_ensemble,
+            amip=data_config.is_amip,
+            stats_path=data_config.stats_path,
+        )
