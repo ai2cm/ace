@@ -317,6 +317,36 @@ interpolation, zarr write with chunks+shards). Remaining work is
 **end-to-end validation**: install `xesmf`+`esmpy`, run against a
 single-model subset, and iterate on anything that breaks.
 
+### Known Pangeo data-quality issues (to raise with Pangeo)
+
+- **ACCESS-CM2 `ssp585 r1i1p1f1`** has variables backed by
+  inconsistent underlying zarr stores:
+
+  | variable | time range |
+  |----------|-----------|
+  | `ua`, `va`, `zg`, `psl`, `uas` | 2015-2100 (standard ssp585) |
+  | `sfcWind`, `huss`, `hfss` | 2015-2300 (ssp585 + extension) |
+  | `tas`, `hfls` | 2201-2300 (just the tail — ssp585-over?) |
+  | `pr` | 2251-2300 (only the last 50 years) |
+
+  Taking the intersection across the CMIP6-required ssp585 window
+  gives zero timesteps. Our pipeline detects this and skips with a
+  descriptive reason. Other members (`r2`, `r3`, etc.) and historical
+  runs are fine — this is a per-(member) catalog anomaly, not a
+  systematic ACCESS-CM2 problem.
+
+### Known regridding limitations
+
+- **CESM2 SImon `siconc`** trips ESMF's regridder with `rc = 506`
+  even with correctly-converted `(N+1, M+1)` vertex bounds (via
+  `cf_xarray.bounds_to_vertices`). Likely a pole/tripolar-pivot
+  cell issue in CESM2's specific ocean grid. The per-forcing
+  try/except catches it and writes the rest of the dataset
+  without siconc; the sidecar records the failure in `warnings`.
+  Fixing it properly probably means clamping out-of-range lat
+  values before handing the grid to xesmf, or switching to a
+  different regridding backend for ocean grids.
+
 ## Deferred / Future Issues
 
 - **Heterogeneous variables at train time.** Core code change in
