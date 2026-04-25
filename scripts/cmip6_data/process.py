@@ -775,7 +775,72 @@ def _run_sanity_checks(ds: xr.Dataset) -> list[str]:
                 "(lapse-rate sanity expects a few K)"
             )
 
+    # Time-evolution continuity.
+    if "time" in ds.dims and ds.sizes["time"] > 1:
+        messages.extend(_time_continuity_messages(ds))
+
     return messages
+
+
+def _time_delta_seconds(a, b) -> float:
+    """Return ``(b - a).total_seconds()``, tolerant of both cftime
+    and numpy datetime64 time coords."""
+    try:
+        return float((b - a).total_seconds())
+    except AttributeError:
+        # numpy timedelta64
+        return float((b - a) / np.timedelta64(1, "s"))
+
+
+_DAY_SECONDS = 86400.0
+# Day-to-day jumps in global means above these magnitudes are almost
+# certainly physical discontinuities (simulation boundary, restart
+# with different state, corrupted write). Climatological daily swings
+# in global means are <<1 for both of these under any model.
+_GLOBAL_MEAN_JUMP_TOL: dict[str, float] = {
+    "tas": 2.0,  # K
+    "psl": 500.0,  # Pa
+}
+
+
+def _time_continuity_messages(ds: xr.Dataset) -> list[str]:
+    """Flag non-uniform strides and unusually large day-to-day jumps
+    in global means. Advisory: non-empty return goes into
+    ``row.warnings`` rather than failing the dataset.
+    """
+    out: list[str] = []
+    times = ds["time"].values
+    # 1) Stride uniformity. Daily data: every gap must be 86400 s.
+    strides = np.array(
+        [_time_delta_seconds(times[i], times[i + 1]) for i in range(len(times) - 1)]
+    )
+    not_daily = np.abs(strides - _DAY_SECONDS) > 1.0  # 1 s slack
+    n_bad = int(not_daily.sum())
+    if n_bad:
+        first_bad = int(np.argmax(not_daily))
+        out.append(
+            f"time stride non-uniform: {n_bad} gap(s) deviate from 86400 s "
+            f"(first at index {first_bad}: {strides[first_bad]:.1f} s between "
+            f"{times[first_bad]} and {times[first_bad + 1]})"
+        )
+
+    # 2) Day-to-day global-mean jumps for tas and psl. Anything above the
+    # tolerances is flagged; it's very cheap (one .mean() then .diff()).
+    for var, tol in _GLOBAL_MEAN_JUMP_TOL.items():
+        if var not in ds.data_vars:
+            continue
+        gm = ds[var].mean(dim=[d for d in ds[var].dims if d != "time"]).values
+        delta = np.abs(np.diff(gm))
+        max_d = float(delta.max()) if delta.size else 0.0
+        if max_d > tol:
+            i_bad = int(np.argmax(delta))
+            out.append(
+                f"{var} global-mean day-to-day |delta| up to {max_d:.3g} "
+                f"exceeds tol {tol:.3g} (at index {i_bad}: "
+                f"{times[i_bad]} -> {times[i_bad + 1]}) — possible "
+                "simulation discontinuity"
+            )
+    return out
 
 
 def _write_zarr(ds: xr.Dataset, path: str, cfg: ResolvedDatasetConfig) -> None:
