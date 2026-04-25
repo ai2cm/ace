@@ -916,76 +916,81 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
             row.skip_reason = f"missing core variables: {missing_core}"
             return row
 
-        # 2. Open day-table vars (core + optional if present).
+        # 2. Open + per-variable regrid. Merging before regridding
+        #    breaks on models that publish different day-table
+        #    variables on different native grids (e.g. HadGEM3-GC31-LL
+        #    has ua/va on staggered u-points and scalars on cell
+        #    centres — ``join="inner"`` of their lats is empty). We
+        #    resolve the staggering against the common F22.5 target by
+        #    regridding each variable separately, then merging only on
+        #    time. This also lets us stream per-var time-subsets so the
+        #    regrid runs only on the bytes we keep.
         all_day_vars = cfg.core_variables + [
             v for v in cfg.optional_variables if v in day_zs
         ]
-        opened: list[xr.Dataset] = []
+        target = make_target_grid(cfg.target_grid.name)
+        row.cell_methods_mismatch = []
+        var_pieces: list[xr.Dataset] = []
         try:
             for v in all_day_vars:
                 ds_v = _open_zstore(day_zs[v])[[v]]
+
+                # Time dedupe (raises _SimulationBoundaryError for
+                # non-identical duplicates; caught below).
                 ds_v, msg = _resolve_time_duplicates(ds_v, v)
                 if msg:
                     row.warnings.append(msg)
-                opened.append(ds_v)
+
+                # cell_methods check (source-side; post-regrid values
+                # are conceptually still "time: mean").
+                mismatches = _validate_cell_methods(ds_v, [v])
+                row.cell_methods_mismatch.extend(mismatches)
+
+                # Capture native calendar from the first opened variable.
+                if not row.native_calendar and "time" in ds_v.dims:
+                    try:
+                        row.native_calendar = str(ds_v["time"].dt.calendar)
+                    except (AttributeError, TypeError) as e:
+                        row.warnings.append(f"could not read native calendar: {e}")
+
+                # Normalise plev order (no-op on 2D vars).
+                ds_v = _normalize_plev(ds_v)
+
+                # Per-variable time subset so we don't regrid bytes
+                # we'd throw away anyway.
+                ds_v = _apply_time_subset(ds_v, cfg)
+                if ds_v.sizes.get("time", 0) == 0:
+                    row.status = "skipped"
+                    row.skip_reason = f"no timesteps in configured time_subset for {v}"
+                    return row
+
+                # Regrid to F22.5.
+                ds_v_r, methods = _regrid_variables(ds_v, target, cfg)
+                row.regrid_methods.update(methods)
+                var_pieces.append(ds_v_r)
         except _SimulationBoundaryError as e:
             row.status = "skipped"
             row.skip_reason = str(e)
             return row
-        # join="inner" takes the intersection of coord indexes — saves
-        # us from cases like ACCESS-CM2 where different day-table
-        # variables for the same member are published on slightly
-        # different lat/lon/time grids. Outer join (xarray's old
-        # default) would expand with NaN and break downstream .dt and
-        # regrid steps.
-        day_ds = xr.merge(opened, compat="override", join="inner")
 
-        # Catastrophic Pangeo-catalogue quirks can land us here with a
-        # zero-length time axis — e.g. ACCESS-CM2 ssp585 r1 has some
-        # variables covering 2015-2100 and others 2201-2300, so the
-        # intersection is empty. Nothing we can do with that dataset;
-        # skip cleanly.
-        if "time" in day_ds.dims and day_ds.sizes["time"] == 0:
+        if row.cell_methods_mismatch:
+            row.warnings.append(
+                f"cell_methods != 'time: mean' for {row.cell_methods_mismatch}"
+            )
+
+        # Merge on the common F22.5 grid. Spatial dims are now
+        # uniform across variables; inner-join handles any residual
+        # time-axis mismatch (e.g., ACCESS-CM2 ssp585 r1's
+        # non-overlapping variable time ranges).
+        day_regridded = xr.merge(var_pieces, compat="override", join="inner")
+
+        if "time" in day_regridded.dims and day_regridded.sizes["time"] == 0:
             row.status = "skipped"
             row.skip_reason = (
                 "empty merged time dim — source variables have "
                 "non-overlapping time ranges (publisher quirk)"
             )
             return row
-
-        # 3. Cell-methods validation.
-        row.cell_methods_mismatch = _validate_cell_methods(day_ds, all_day_vars)
-        if row.cell_methods_mismatch:
-            row.warnings.append(
-                f"cell_methods != 'time: mean' for {row.cell_methods_mismatch}"
-            )
-
-        # 4. Capture native calendar.
-        if "time" in day_ds.dims:
-            try:
-                row.native_calendar = str(day_ds["time"].dt.calendar)
-            except (AttributeError, TypeError) as e:
-                # Happens if the merged time coord ended up as object
-                # dtype — belt-and-suspenders with the join="inner"
-                # change above, which should prevent this. Log and
-                # continue.
-                row.warnings.append(f"could not read native calendar: {e}")
-
-        # 5. Normalise plev ordering so index 0 is closest to the surface.
-        day_ds = _normalize_plev(day_ds)
-
-        # 6. Time-subset now (before regrid) to avoid regridding data
-        #    we're going to throw away.
-        day_ds = _apply_time_subset(day_ds, cfg)
-        if day_ds.sizes.get("time", 0) == 0:
-            row.status = "skipped"
-            row.skip_reason = "no timesteps in configured time_subset"
-            return row
-
-        # 7. Regrid day variables to the target grid.
-        target = make_target_grid(cfg.target_grid.name)
-        day_regridded, methods_used = _regrid_variables(day_ds, target, cfg)
-        row.regrid_methods.update(methods_used)
 
         # 8. Static fields from fx — regrid once, drop time.
         static_ds: Optional[xr.Dataset] = None
