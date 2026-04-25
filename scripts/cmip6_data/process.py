@@ -345,32 +345,36 @@ def _resolve_time_duplicates(ds: xr.Dataset, var_name: str) -> tuple[xr.Dataset,
     if len(times) == np.unique(times).size:
         return ds, ""
 
-    # Find duplicated timestamps.
     vals, counts = np.unique(times, return_counts=True)
     dup_times = vals[counts > 1]
     n_dup = int(counts[counts > 1].sum() - len(dup_times))
 
-    da = ds[var_name]
-    for t in dup_times:
-        idxs = np.where(times == t)[0]
-        first = da.isel(time=idxs[0]).load()
-        for i in idxs[1:]:
-            other = da.isel(time=i).load()
-            # ``equal_nan=True`` so matching NaN patterns don't count
-            # as a difference. Generous rtol for float rounding across
-            # duplicated file writes.
-            if not np.allclose(first, other, equal_nan=True, rtol=1e-5, atol=0):
-                raise _SimulationBoundaryError(
-                    f"duplicate time {t} in {var_name} has materially "
-                    "different data across copies — looks like a "
-                    "simulation-boundary stitch. Republish this "
-                    "dataset with the two halves in separate stores "
-                    "before ingesting."
-                )
+    # Load the whole variable into memory once. The caller is expected
+    # to have already time-subset to a small window (a year or so), so
+    # this is bounded — much faster than per-duplicate .load() round
+    # trips, which hit GCS for each pair.
+    arr = ds[var_name].load().values  # (time, ...) numpy
+    sort_idx = np.argsort(times, kind="stable")
+    times_sorted = times[sort_idx]
+    arr_sorted = arr[sort_idx]
+
+    # Walk the sorted array; whenever consecutive timestamps match,
+    # compare the corresponding data slices.
+    same = times_sorted[:-1] == times_sorted[1:]
+    for i in np.where(same)[0]:
+        a, b = arr_sorted[i], arr_sorted[i + 1]
+        if not np.allclose(a, b, equal_nan=True, rtol=1e-5, atol=0):
+            raise _SimulationBoundaryError(
+                f"duplicate time {times_sorted[i]} in {var_name} has "
+                "materially different data across copies — looks like "
+                "a simulation-boundary stitch. Republish this dataset "
+                "with the two halves in separate stores before "
+                "ingesting."
+            )
 
     # All duplicate pairs are data-identical → safe to dedupe.
     return (
-        ds.drop_duplicates("time", keep="first"),
+        ds.isel(time=np.unique(times, return_index=True)[1]),
         f"{var_name}: {n_dup} duplicate timestamp(s) detected "
         "(data-identical, safely deduplicated)",
     )
@@ -657,19 +661,38 @@ def _clip_date_for_calendar(date_str: str, calendar: str) -> str:
 
 
 def _apply_time_subset(ds: xr.Dataset, cfg: ResolvedDatasetConfig) -> xr.Dataset:
+    """Restrict ``ds`` to ``cfg.time_subset[cfg.experiment]``.
+
+    Uses a boolean mask + ``isel`` rather than ``ds.sel(time=slice(...))``
+    so a source with duplicate time indices (e.g. CESM2-WACCM
+    historical r2's psl, where every timestamp appears twice) doesn't
+    blow up with ``Cannot get left slice bound for non-unique label``.
+    """
     window = cfg.time_subset.get(cfg.experiment)
-    if window is None:
+    if window is None or "time" not in ds.dims:
         return ds
-    if "time" in ds.dims:
-        try:
-            calendar = str(ds["time"].dt.calendar)
-        except (AttributeError, TypeError):
-            calendar = "standard"
-    else:
+
+    try:
+        calendar = str(ds["time"].dt.calendar)
+    except (AttributeError, TypeError):
         calendar = "standard"
     start = _clip_date_for_calendar(window.start, calendar)
     end = _clip_date_for_calendar(window.end, calendar)
-    return ds.sel(time=slice(start, end))
+
+    times = ds["time"].values
+    # Construct comparable bounds in the same flavour as ``times`` (cftime
+    # vs numpy datetime64).
+    if len(times) and hasattr(times[0], "calendar"):
+        date_type = type(times[0])
+        sy, sm, sd = (int(x) for x in start.split("-"))
+        ey, em, ed = (int(x) for x in end.split("-"))
+        start_dt = date_type(sy, sm, sd)
+        end_dt = date_type(ey, em, ed)
+    else:
+        start_dt = np.datetime64(start)
+        end_dt = np.datetime64(end)
+    mask = (times >= start_dt) & (times <= end_dt)
+    return ds.isel(time=np.where(mask)[0])
 
 
 _STALE_ENCODING_KEYS = (
@@ -960,12 +983,6 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
             for v in all_day_vars:
                 ds_v = _open_zstore(day_zs[v])[[v]]
 
-                # Time dedupe (raises _SimulationBoundaryError for
-                # non-identical duplicates; caught below).
-                ds_v, msg = _resolve_time_duplicates(ds_v, v)
-                if msg:
-                    row.warnings.append(msg)
-
                 # cell_methods check (source-side; post-regrid values
                 # are conceptually still "time: mean").
                 mismatches = _validate_cell_methods(ds_v, [v])
@@ -981,13 +998,23 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
                 # Normalise plev order (no-op on 2D vars).
                 ds_v = _normalize_plev(ds_v)
 
-                # Per-variable time subset so we don't regrid bytes
-                # we'd throw away anyway.
+                # Time-subset BEFORE dedupe so the dedupe loop only
+                # checks duplicates within the (small) window we're
+                # going to use. CESM2-WACCM has hundreds of duplicate
+                # timestamps spread across its 165-year historical
+                # store, and loading every duplicate's full 3D field
+                # from GCS to compare values dominates the run time.
                 ds_v = _apply_time_subset(ds_v, cfg)
                 if ds_v.sizes.get("time", 0) == 0:
                     row.status = "skipped"
                     row.skip_reason = f"no timesteps in configured time_subset for {v}"
                     return row
+
+                # Time dedupe (raises _SimulationBoundaryError for
+                # non-identical duplicates; caught below).
+                ds_v, msg = _resolve_time_duplicates(ds_v, v)
+                if msg:
+                    row.warnings.append(msg)
 
                 groups.setdefault(_grid_fingerprint(ds_v), []).append(ds_v)
         except _SimulationBoundaryError as e:
