@@ -40,7 +40,7 @@ import sys
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Hashable, Optional
 
 import fsspec
 import numpy as np
@@ -392,6 +392,25 @@ def _validate_cell_methods(ds: xr.Dataset, variables: list[str]) -> list[str]:
         if not _EXPECTED_MEAN_CELL_METHODS.search(cm):
             mismatches.append(v)
     return mismatches
+
+
+def _grid_fingerprint(ds: xr.Dataset) -> Hashable:
+    """Hashable identifier for the source dataset's lat/lon grid.
+
+    Variables that share a fingerprint share a regridding target — we
+    can merge them and build a single ``xesmf.Regridder`` per
+    (grid, method). Two variables that publish on staggered grids
+    (HadGEM3 u-points vs scalars, etc.) get distinct fingerprints
+    and stay in separate buckets.
+    """
+    lat = ds["lat"].values
+    lon = ds["lon"].values
+    return (
+        tuple(lat.shape),
+        lat.tobytes(),
+        tuple(lon.shape),
+        lon.tobytes(),
+    )
 
 
 def _normalize_regrid_source(ds: xr.Dataset) -> xr.Dataset:
@@ -916,21 +935,27 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
             row.skip_reason = f"missing core variables: {missing_core}"
             return row
 
-        # 2. Open + per-variable regrid. Merging before regridding
-        #    breaks on models that publish different day-table
-        #    variables on different native grids (e.g. HadGEM3-GC31-LL
-        #    has ua/va on staggered u-points and scalars on cell
-        #    centres — ``join="inner"`` of their lats is empty). We
-        #    resolve the staggering against the common F22.5 target by
-        #    regridding each variable separately, then merging only on
-        #    time. This also lets us stream per-var time-subsets so the
-        #    regrid runs only on the bytes we keep.
+        # 2. Open + group-by-grid regrid. Naively merging before
+        #    regridding breaks on models that publish different
+        #    day-table variables on different native grids (e.g.
+        #    HadGEM3-GC31-LL has ua/va on staggered u-points and
+        #    scalars on cell centres — ``join="inner"`` of their
+        #    lats is empty). Per-variable regrid is safe but builds
+        #    one xesmf ``Regridder`` per variable per method, ~30
+        #    ESMF calls per dataset and dramatically slow.
+        #
+        #    Compromise: bucket variables by their native grid
+        #    fingerprint and regrid each bucket as one sub-dataset.
+        #    Most models have one or two distinct grids across their
+        #    day variables, so this stays at 2-4 Regridder builds per
+        #    dataset (one per (grid, method)) while still handling
+        #    staggered grids correctly.
         all_day_vars = cfg.core_variables + [
             v for v in cfg.optional_variables if v in day_zs
         ]
         target = make_target_grid(cfg.target_grid.name)
         row.cell_methods_mismatch = []
-        var_pieces: list[xr.Dataset] = []
+        groups: dict[Hashable, list[xr.Dataset]] = {}
         try:
             for v in all_day_vars:
                 ds_v = _open_zstore(day_zs[v])[[v]]
@@ -964,10 +989,7 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
                     row.skip_reason = f"no timesteps in configured time_subset for {v}"
                     return row
 
-                # Regrid to F22.5.
-                ds_v_r, methods = _regrid_variables(ds_v, target, cfg)
-                row.regrid_methods.update(methods)
-                var_pieces.append(ds_v_r)
+                groups.setdefault(_grid_fingerprint(ds_v), []).append(ds_v)
         except _SimulationBoundaryError as e:
             row.status = "skipped"
             row.skip_reason = str(e)
@@ -977,12 +999,24 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
             row.warnings.append(
                 f"cell_methods != 'time: mean' for {row.cell_methods_mismatch}"
             )
+        if len(groups) > 1:
+            row.warnings.append(
+                f"day vars span {len(groups)} distinct native grids "
+                "(staggered or otherwise); regridded per-group to F22.5"
+            )
 
-        # Merge on the common F22.5 grid. Spatial dims are now
-        # uniform across variables; inner-join handles any residual
-        # time-axis mismatch (e.g., ACCESS-CM2 ssp585 r1's
-        # non-overlapping variable time ranges).
-        day_regridded = xr.merge(var_pieces, compat="override", join="inner")
+        # Per-grid merge (within a group, all vars share lat/lon, so
+        # ``join="inner"`` is a spatial no-op) and regrid.
+        regridded_pieces: list[xr.Dataset] = []
+        for grid_dss in groups.values():
+            merged_grid = xr.merge(grid_dss, compat="override", join="inner")
+            piece, methods = _regrid_variables(merged_grid, target, cfg)
+            row.regrid_methods.update(methods)
+            regridded_pieces.append(piece)
+
+        # Final merge across grid groups — all on F22.5 now, so the
+        # spatial join is trivial; only the time axis is intersected.
+        day_regridded = xr.merge(regridded_pieces, compat="override", join="inner")
 
         if "time" in day_regridded.dims and day_regridded.sizes["time"] == 0:
             row.status = "skipped"
