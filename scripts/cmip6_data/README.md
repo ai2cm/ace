@@ -339,6 +339,22 @@ over the produced zarrs.
   runs are fine — this is a per-(member) catalog anomaly, not a
   systematic ACCESS-CM2 problem.
 
+### Known model-side data quirks (sanity warnings observed, datasets still write)
+
+- **INM-CM4-8 `zg` at 10 hPa** is ~22 km in a subset of grid cells
+  vs the expected ~32 km elsewhere. Drops layer-6 (50-10 hPa)
+  thickness to ~2.9 km in those cells, which makes
+  `ta_derived_layer_6` come out ~61 K (clearly unphysical — the
+  real polar stratosphere is ~190-220 K). Likely a fill-value /
+  QC issue in INM-CM4-8's published `zg` at the very top of the
+  atmosphere.
+- **CESM2-FV2 `sftlf`** comes back from the conservative regrid at
+  up to ~114% in some cells (way beyond the typical few-percent
+  edge overshoot). Source publication likely has cells with
+  values outside [0, 100] or with an unusual fill-value scheme
+  that conservative weighting amplifies. Doesn't break the data,
+  but the land-mask numerics are off.
+
 ### Known regridding / data-pipeline limitations
 
 - **CESM2 SImon `siconc`** trips ESMF's regridder with `rc = 506`
