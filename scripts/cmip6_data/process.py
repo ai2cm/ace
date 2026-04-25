@@ -740,7 +740,13 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
         opened: list[xr.Dataset] = []
         for v in all_day_vars:
             opened.append(_open_zstore(day_zs[v])[[v]])
-        day_ds = xr.merge(opened, compat="override")
+        # join="inner" takes the intersection of coord indexes — saves
+        # us from cases like ACCESS-CM2 where different day-table
+        # variables for the same member are published on slightly
+        # different lat/lon/time grids. Outer join (xarray's old
+        # default) would expand with NaN and break downstream .dt and
+        # regrid steps.
+        day_ds = xr.merge(opened, compat="override", join="inner")
 
         # 3. Cell-methods validation.
         row.cell_methods_mismatch = _validate_cell_methods(day_ds, all_day_vars)
@@ -751,7 +757,14 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
 
         # 4. Capture native calendar.
         if "time" in day_ds.dims:
-            row.native_calendar = str(day_ds["time"].dt.calendar)
+            try:
+                row.native_calendar = str(day_ds["time"].dt.calendar)
+            except (AttributeError, TypeError) as e:
+                # Happens if the merged time coord ended up as object
+                # dtype — belt-and-suspenders with the join="inner"
+                # change above, which should prevent this. Log and
+                # continue.
+                row.warnings.append(f"could not read native calendar: {e}")
 
         # 5. Normalise plev ordering so index 0 is closest to the surface.
         day_ds = _normalize_plev(day_ds)
@@ -804,19 +817,30 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
         # invalid where either bounding level is below surface.
         day_regridded = _fill_derived_layer_T(day_regridded, mask)
 
-        # 13. Monthly forcings -> daily.
+        # 13. Monthly forcings -> daily. Curvilinear ocean grids (e.g.
+        # SImon siconc on a tripolar grid) occasionally trip xesmf's
+        # regridder with ``ESMC_FieldRegridStore failed`` or similar.
+        # Catch per-forcing so the rest of the dataset still gets
+        # written; the model just loses that one forcing variable.
         for table, var in (("Amon", "ts"), ("SImon", "siconc")):
             z = task.zstores.get(table, {}).get(var)
             if not z:
                 row.warnings.append(f"missing forcing {var} from {table}")
                 continue
-            monthly = _open_zstore(z)[[var]]
-            monthly = _apply_time_subset(monthly, cfg)
-            monthly_r, methods_used = _regrid_variables(monthly, target, cfg)
-            row.regrid_methods.update(methods_used)
-            interp = _interp_monthly_to_daily(
-                monthly_r[var], day_regridded["time"], cfg.forcing_interpolation
-            )
+            try:
+                monthly = _open_zstore(z)[[var]]
+                monthly = _apply_time_subset(monthly, cfg)
+                monthly_r, methods_used = _regrid_variables(monthly, target, cfg)
+                row.regrid_methods.update(methods_used)
+                interp = _interp_monthly_to_daily(
+                    monthly_r[var], day_regridded["time"], cfg.forcing_interpolation
+                )
+            except Exception as e:  # noqa: BLE001
+                logging.warning("  forcing %s from %s failed: %s", var, table, e)
+                row.warnings.append(
+                    f"forcing {var} from {table} failed: {type(e).__name__}: {e}"
+                )
+                continue
             day_regridded[var] = interp
 
         # 13b. Sea-ice fraction is only defined over ocean cells — emit

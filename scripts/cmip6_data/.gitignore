@@ -8,3 +8,8 @@ data/
 
 # Diagnostic / scratch zarrs
 tmp_*.zarr/
+
+# ESMF (xesmf backend) log files — emitted as PET*.ESMF_LogFile
+# on regrid failures
+*.ESMF_LogFile
+PET*.ESMF_LogFile
