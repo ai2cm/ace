@@ -310,13 +310,6 @@ over the produced zarrs.
 
 ## Open Issues
 
-All planning issues resolved. `process.py` has landed with resumable
-orchestration, selection logic, and the full pipeline stubbed in (mask
-derivation, nearest-above fill, derived layer-T, monthly-to-daily
-interpolation, zarr write with chunks+shards). Remaining work is
-**end-to-end validation**: install `xesmf`+`esmpy`, run against a
-single-model subset, and iterate on anything that breaks.
-
 ### Known Pangeo data-quality issues (to raise with Pangeo)
 
 - **ACCESS-CM2 `ssp585 r1i1p1f1`** has variables backed by
@@ -335,7 +328,7 @@ single-model subset, and iterate on anything that breaks.
   runs are fine — this is a per-(member) catalog anomaly, not a
   systematic ACCESS-CM2 problem.
 
-### Known regridding limitations
+### Known regridding / data-pipeline limitations
 
 - **CESM2 SImon `siconc`** trips ESMF's regridder with `rc = 506`
   even with correctly-converted `(N+1, M+1)` vertex bounds (via
@@ -346,6 +339,29 @@ single-model subset, and iterate on anything that breaks.
   Fixing it properly probably means clamping out-of-range lat
   values before handing the grid to xesmf, or switching to a
   different regridding backend for ocean grids.
+- **`use_cftime=True` deprecation warning** in `_open_zstore`. The
+  kwarg form is deprecated in newer xarray; should migrate to
+  ``decode_times=xr.coders.CFDatetimeCoder(use_cftime=True)``.
+  Cosmetic for now.
+- **Zarr v3 `NullTerminatedBytes` + consolidated-metadata warnings**
+  on every write. Both flag v3-portability concerns but don't affect
+  xarray+zarr-python reads. Eventually: drop string scalar coords
+  (``type``, ``height``) and decide whether to keep
+  ``consolidated=True``.
+
+### Deferred engineering work
+
+- **Per-dataset presence table.** The central `index.csv` already
+  carries `variables_present` per dataset as a JSON list; a readable
+  cross-model pivot (rows = dataset, columns = variable, values = 1/0)
+  would make it easy to eyeball coverage at a glance. Easy follow-up.
+- **Normalization stats**. Per-model mean/std over the produced
+  zarrs. Separate later step; not yet written.
+- **Proper `siconc` regridding for CESM2 (and any similarly affected
+  models)**. Investigate pole/tripolar cell trimming or bypass.
+- **Sanity-check upper bounds for `hfss`/`hfls`** were tuned to the
+  models we've seen so far. May need further widening for more
+  extreme publications.
 
 ## Deferred / Future Issues
 
