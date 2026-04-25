@@ -45,7 +45,7 @@ TEST_N_FORWARD_STEPS=13152
 
 for model in "${!MODELS[@]}"; do
     dataset_id="${MODELS[$model]}"
-    test_experiment_dir="${GCS_ROOT}/${name}/test"
+    test_experiment_dir="${GCS_ROOT}/${model}/test"
 
     for initial_condition in "${!INITIAL_CONDITIONS[@]}"; do
         spin_up_initial_condition_time="${INITIAL_CONDITIONS[$initial_condition]}"
