@@ -24,7 +24,7 @@ fto-1pctCO2_0256to0350-condSFNO-c0fmwhnn_fruab0nq|rs0|01KBENEAVH5R9DTCMGS4B8QKHA
 
 fto-1pctCO2_0256to0350-condSFNO-ewbpxamu_kd5obbep|rs0|01KC02TX1NJ2K3PGWJ0F207ZSZ|trained|best_inference_ckpt|normal|--not-preemptible
 
-fto-1pctCO2_0256to0350-condSFNO-c0fmwhnn_kd5obbep|rs0|01KC02VQT8JF6439QMAG425D62|trained|best_inference_ckpt|normal|--not-preemptible
+fto-1pctCO2_0256to0350-condSFNO-c0fmwhnn_kd5obbep|rs0|01KC02VQT8JF6439QMAG425D62|run_140yr|best_inference_ckpt|high|--not-preemptible
 
 ft_fto-1pctCO2_0256to0350-ubyk6ome|rs0|01KBEH4M4SE36B4CSZX53QWVMY|trained|best_inference_ckpt|low|--not-preemptible
 
@@ -54,7 +54,6 @@ fto-1pctCO2_0256to0350-correct_budgets-422nakro_mb4prsz7|rs0|01KHZCG9C3VCY3VBRHK
 
 fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0-ep17|01KKJY7YAPTQJFXX9BR0AYEHJ0|skip|best_inference_ckpt|urgent|--not-preemptible||||b200
 
-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KKQWTQTEZAAKXGZRW6Q0V5Q8|run_ICx1|best_inference_ckpt|high|--not-preemptible
-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KKQWTQTEZAAKXGZRW6Q0V5Q8|run_140yr|best_inference_ckpt|high|--not-preemptible
+fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KKQWTQTEZAAKXGZRW6Q0V5Q8|trained|best_inference_ckpt|high|--not-preemptible
 
 ft_fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KMKZZJCT9PXYZBBFCZ66C3QB|training|best_inference_ckpt|normal|--not-preemptible
