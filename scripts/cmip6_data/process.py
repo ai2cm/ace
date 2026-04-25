@@ -303,11 +303,19 @@ def _merge_rows_for_index(
 
 
 def _open_zstore(url: str) -> xr.Dataset:
-    """Open a Pangeo GCS zarr. Consolidated metadata; don't decode times
-    yet — we'll do that explicitly after harmonising coords.
+    """Open a Pangeo GCS zarr with cftime-decoded times.
+
+    We force ``use_cftime=True`` because CMIP6 ssp585 extends to 2100
+    and the time axis ends up as ``cftime.datetime`` for some models
+    (``dates out of range`` for numpy's ``datetime64[ns]``, which
+    maxes out at year 2262 but xarray's default decoder picks up
+    extrapolated bounds that overrun it for a few publishers). Mixing
+    cftime day-table times with datetime64 Amon times later blows up
+    ``interp(time=...)`` with a ``UFuncTypeError``. All-cftime avoids
+    that.
     """
     mapper = fsspec.get_mapper(url)
-    return xr.open_zarr(mapper, consolidated=True, decode_times=True)
+    return xr.open_zarr(mapper, consolidated=True, use_cftime=True)
 
 
 _EXPECTED_MEAN_CELL_METHODS = re.compile(r"time:\s*mean")
@@ -328,12 +336,61 @@ def _validate_cell_methods(ds: xr.Dataset, variables: list[str]) -> list[str]:
     return mismatches
 
 
+def _normalize_regrid_source(ds: xr.Dataset) -> xr.Dataset:
+    """Prepare ``ds`` so xesmf's conservative regridder can ingest it.
+
+    Two things happen:
+
+    * **Rename CMIP6 bounds to xesmf's names.** xesmf looks for
+      ``lon_b`` / ``lat_b``; CMIP6 publishes ``lon_bnds`` / ``lat_bnds``
+      on rectilinear grids and ``vertices_longitude`` /
+      ``vertices_latitude`` on curvilinear ocean grids (tripolar etc.).
+    * **Convert CF-style (N, M, 4) vertex bounds to xesmf's (N+1, M+1)
+      corner mesh.** CMIP6 2D bounds store four corners per cell
+      (counterclockwise from bottom-left); xesmf wants shared-corner
+      arrays that are one larger in each direction. Uses
+      ``cf_xarray.bounds_to_vertices``.
+    """
+    import cf_xarray  # noqa: F401  (registers the bounds helper)
+    from cf_xarray import bounds_to_vertices
+
+    ds = ds.copy()
+    for src, dst in (
+        ("vertices_longitude", "lon_b"),
+        ("vertices_latitude", "lat_b"),
+        ("lon_bnds", "lon_b"),
+        ("lat_bnds", "lat_b"),
+    ):
+        if src in ds.variables and dst not in ds.variables:
+            ds = ds.rename({src: dst})
+
+    for name in ("lon_b", "lat_b"):
+        if name not in ds.variables:
+            continue
+        da = ds[name]
+        # If already 1D (N+1,) or 2D (N+1, M+1) in corner form,
+        # leave it alone. If it's a CF-style (N, 2) or (N, M, 4), convert.
+        if da.ndim == 3 and da.shape[-1] == 4:
+            bounds_dim = da.dims[-1]
+            ds = ds.drop_vars(name).assign_coords(
+                {name: bounds_to_vertices(da, bounds_dim=bounds_dim)}
+            )
+        elif da.ndim == 2 and da.shape[-1] == 2:
+            bounds_dim = da.dims[-1]
+            ds = ds.drop_vars(name).assign_coords(
+                {name: bounds_to_vertices(da, bounds_dim=bounds_dim)}
+            )
+
+    return ds
+
+
 def _make_regridder(source_ds: xr.Dataset, target: xr.Dataset, method: str):
     """Build an xESMF regridder, importing lazily so this module can be
     loaded in envs without xESMF (e.g. unit tests on the selection logic).
     """
     import xesmf
 
+    source_ds = _normalize_regrid_source(source_ds)
     return xesmf.Regridder(source_ds, target, method, periodic=True)
 
 
@@ -527,7 +584,10 @@ def _apply_time_subset(ds: xr.Dataset, cfg: ResolvedDatasetConfig) -> xr.Dataset
     if window is None:
         return ds
     if "time" in ds.dims:
-        calendar = str(ds["time"].dt.calendar)
+        try:
+            calendar = str(ds["time"].dt.calendar)
+        except (AttributeError, TypeError):
+            calendar = "standard"
     else:
         calendar = "standard"
     start = _clip_date_for_calendar(window.start, calendar)
@@ -828,8 +888,17 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
                 row.warnings.append(f"missing forcing {var} from {table}")
                 continue
             try:
-                monthly = _open_zstore(z)[[var]]
+                # Keep the full dataset (not ``[[var]]``) so cell-bounds
+                # coords like ``lat_bnds`` / ``vertices_longitude`` —
+                # which carry an extra ``d2`` / ``vertices`` dim the
+                # variable itself doesn't have — survive the open and
+                # are available to xesmf's conservative regridder.
+                monthly = _open_zstore(z)
                 monthly = _apply_time_subset(monthly, cfg)
+                # Keep only ``var`` as a data_var; everything else can
+                # live as coords or be dropped by the regridder.
+                drop = [v for v in monthly.data_vars if v != var]
+                monthly = monthly.drop_vars(drop, errors="ignore")
                 monthly_r, methods_used = _regrid_variables(monthly, target, cfg)
                 row.regrid_methods.update(methods_used)
                 interp = _interp_monthly_to_daily(

@@ -80,9 +80,13 @@ def make_label(source_id: str, physics_index: int) -> str:
     return f"{source_id}.p{physics_index}"
 
 
-# Variables regridded conservatively; everything else is bilinear by default.
+# Variables regridded conservatively; everything else is bilinear by
+# default. Fractions (siconc, sftlf, sftof) count as conservative too —
+# we want the area-weighted mean across the coarser target cell, and
+# bilinear of a {0, 1}-ish field tends to drift.
 FLUX_LIKE_VARIABLES: frozenset[str] = frozenset(
     {
+        # Radiative + turbulent fluxes
         "pr",
         "rsdt",
         "rsut",
@@ -93,6 +97,10 @@ FLUX_LIKE_VARIABLES: frozenset[str] = frozenset(
         "rlus",
         "hfss",
         "hfls",
+        # Fractions
+        "siconc",
+        "sftlf",
+        "sftof",
     }
 )
 
