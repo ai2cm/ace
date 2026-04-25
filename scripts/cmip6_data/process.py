@@ -808,6 +808,19 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
         # regrid steps.
         day_ds = xr.merge(opened, compat="override", join="inner")
 
+        # Catastrophic Pangeo-catalogue quirks can land us here with a
+        # zero-length time axis — e.g. ACCESS-CM2 ssp585 r1 has some
+        # variables covering 2015-2100 and others 2201-2300, so the
+        # intersection is empty. Nothing we can do with that dataset;
+        # skip cleanly.
+        if "time" in day_ds.dims and day_ds.sizes["time"] == 0:
+            row.status = "skipped"
+            row.skip_reason = (
+                "empty merged time dim — source variables have "
+                "non-overlapping time ranges (publisher quirk)"
+            )
+            return row
+
         # 3. Cell-methods validation.
         row.cell_methods_mismatch = _validate_cell_methods(day_ds, all_day_vars)
         if row.cell_methods_mismatch:
