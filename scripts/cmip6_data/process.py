@@ -318,6 +318,64 @@ def _open_zstore(url: str) -> xr.Dataset:
     return xr.open_zarr(mapper, consolidated=True, use_cftime=True)
 
 
+class _SimulationBoundaryError(ValueError):
+    """Raised when duplicate time indices carry materially different
+    data — a strong signal that two stitched simulations (e.g., a
+    historical run and its ssp585 continuation) were concatenated into
+    a single zarr without care. Silently deduplicating would hide a
+    real discontinuity, so we stop and surface the issue.
+    """
+
+
+def _resolve_time_duplicates(ds: xr.Dataset, var_name: str) -> tuple[xr.Dataset, str]:
+    """Detect duplicate timestamps and decide how to handle them.
+
+    Returns ``(ds, message)`` where ``ds`` is the cleaned dataset and
+    ``message`` is a non-empty warning string when duplicates were
+    found and safely deduplicated (every duplicate pair was
+    data-identical — the classic CMIP file-splice redundancy). If the
+    duplicate timestamps carry *different* data, raise
+    ``_SimulationBoundaryError`` so the caller skips the dataset; a
+    real simulation boundary needs to be split into two separate
+    zarr stores, not silently merged.
+    """
+    if "time" not in ds.dims:
+        return ds, ""
+    times = ds["time"].values
+    if len(times) == np.unique(times).size:
+        return ds, ""
+
+    # Find duplicated timestamps.
+    vals, counts = np.unique(times, return_counts=True)
+    dup_times = vals[counts > 1]
+    n_dup = int(counts[counts > 1].sum() - len(dup_times))
+
+    da = ds[var_name]
+    for t in dup_times:
+        idxs = np.where(times == t)[0]
+        first = da.isel(time=idxs[0]).load()
+        for i in idxs[1:]:
+            other = da.isel(time=i).load()
+            # ``equal_nan=True`` so matching NaN patterns don't count
+            # as a difference. Generous rtol for float rounding across
+            # duplicated file writes.
+            if not np.allclose(first, other, equal_nan=True, rtol=1e-5, atol=0):
+                raise _SimulationBoundaryError(
+                    f"duplicate time {t} in {var_name} has materially "
+                    "different data across copies — looks like a "
+                    "simulation-boundary stitch. Republish this "
+                    "dataset with the two halves in separate stores "
+                    "before ingesting."
+                )
+
+    # All duplicate pairs are data-identical → safe to dedupe.
+    return (
+        ds.drop_duplicates("time", keep="first"),
+        f"{var_name}: {n_dup} duplicate timestamp(s) detected "
+        "(data-identical, safely deduplicated)",
+    )
+
+
 _EXPECTED_MEAN_CELL_METHODS = re.compile(r"time:\s*mean")
 
 
@@ -798,8 +856,17 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
             v for v in cfg.optional_variables if v in day_zs
         ]
         opened: list[xr.Dataset] = []
-        for v in all_day_vars:
-            opened.append(_open_zstore(day_zs[v])[[v]])
+        try:
+            for v in all_day_vars:
+                ds_v = _open_zstore(day_zs[v])[[v]]
+                ds_v, msg = _resolve_time_duplicates(ds_v, v)
+                if msg:
+                    row.warnings.append(msg)
+                opened.append(ds_v)
+        except _SimulationBoundaryError as e:
+            row.status = "skipped"
+            row.skip_reason = str(e)
+            return row
         # join="inner" takes the intersection of coord indexes — saves
         # us from cases like ACCESS-CM2 where different day-table
         # variables for the same member are published on slightly
@@ -907,6 +974,9 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
                 # variable itself doesn't have — survive the open and
                 # are available to xesmf's conservative regridder.
                 monthly = _open_zstore(z)
+                monthly, dup_msg = _resolve_time_duplicates(monthly, var)
+                if dup_msg:
+                    row.warnings.append(dup_msg)
                 monthly = _apply_time_subset(monthly, cfg)
                 # Keep only ``var`` as a data_var; everything else can
                 # live as coords or be dropped by the regridder.
