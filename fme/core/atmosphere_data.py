@@ -165,6 +165,26 @@ class AtmosphereData:
         return self._get("toa_up_lw_radiative_flux")
 
     @property
+    def sfc_down_sw_radiative_flux(self) -> torch.Tensor:
+        return self._get("sfc_down_sw_radiative_flux")
+
+    @property
+    def sfc_up_sw_radiative_flux(self) -> torch.Tensor:
+        return self._get("sfc_up_sw_radiative_flux")
+
+    @property
+    def sfc_down_lw_radiative_flux(self) -> torch.Tensor:
+        return self._get("sfc_down_lw_radiative_flux")
+
+    @property
+    def sfc_up_lw_radiative_flux(self) -> torch.Tensor:
+        return self._get("sfc_up_lw_radiative_flux")
+
+    @property
+    def sensible_heat_flux(self) -> torch.Tensor:
+        return self._get("sensible_heat_flux")
+
+    @property
     def surface_pressure_due_to_dry_air(self) -> torch.Tensor:
         if self._vertical_coordinate is None:
             raise ValueError("Vertical coordinate must be provided to compute dry air.")

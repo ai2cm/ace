@@ -1,13 +1,14 @@
 import dataclasses
 import datetime
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, Literal, Protocol
 
 import torch
 
-from fme.core.atmosphere_data import AtmosphereData
+from fme.core.atmosphere_data import ATMOSPHERE_FIELD_NAME_PREFIXES, AtmosphereData
 from fme.core.constants import (
     FREEZING_TEMPERATURE_KELVIN,
+    LATENT_HEAT_OF_FREEZING,
     LATENT_HEAT_OF_VAPORIZATION,
     SPECIFIC_HEAT_OF_SEA_WATER_CM4,
 )
@@ -84,6 +85,88 @@ class OceanHeatContentBudgetConfig:
     constant_unaccounted_heating: float = 0.0
 
 
+# Atomic contributions to the net surface energy flux into the ocean. Each
+# entry is a callable taking (AtmosphereData, sst) and returning a tensor with
+# the signed contribution of that atomic term in W/m^2.
+_ATOMIC_CONTRIBUTIONS: dict[
+    str, Callable[[AtmosphereData, torch.Tensor], torch.Tensor]
+] = {
+    "sw_down": lambda atmos, sst: atmos.sfc_down_sw_radiative_flux,
+    "sw_up": lambda atmos, sst: -atmos.sfc_up_sw_radiative_flux,
+    "lw_down": lambda atmos, sst: atmos.sfc_down_lw_radiative_flux,
+    "lw_up": lambda atmos, sst: -atmos.sfc_up_lw_radiative_flux,
+    "lhf_turbulent": lambda atmos, sst: -atmos.latent_heat_flux,
+    "shf_turbulent": lambda atmos, sst: -atmos.sensible_heat_flux,
+    "frozen_precip_latent": (
+        lambda atmos, sst: -LATENT_HEAT_OF_FREEZING * atmos.frozen_precipitation_rate
+    ),
+    "lhf_mass": lambda atmos, sst: -(
+        SPECIFIC_HEAT_OF_SEA_WATER_CM4
+        * (atmos.latent_heat_flux / LATENT_HEAT_OF_VAPORIZATION)
+        * (sst - FREEZING_TEMPERATURE_KELVIN)
+    ),
+    "precip_mass": lambda atmos, sst: (
+        SPECIFIC_HEAT_OF_SEA_WATER_CM4
+        * atmos.precipitation_rate
+        * (sst - FREEZING_TEMPERATURE_KELVIN)
+    ),
+    "frozen_precip_mass": lambda atmos, sst: (
+        SPECIFIC_HEAT_OF_SEA_WATER_CM4
+        * atmos.frozen_precipitation_rate
+        * (sst - FREEZING_TEMPERATURE_KELVIN)
+    ),
+}
+
+# Mapping from a user-facing flux variable / bucket name to the set of atomic
+# contributions it implies. The atomic decomposition lets the user combine
+# granular variable names (e.g. "latent_heat_flux") with bucket names (e.g.
+# "net_surface_energy_flux") without double-counting overlapping terms.
+_NAME_TO_ATOMIC_CONTRIBUTIONS: dict[str, frozenset[str]] = {
+    "sfc_down_sw_radiative_flux": frozenset({"sw_down"}),
+    "sfc_up_sw_radiative_flux": frozenset({"sw_up"}),
+    "sfc_down_lw_radiative_flux": frozenset({"lw_down"}),
+    "sfc_up_lw_radiative_flux": frozenset({"lw_up"}),
+    "latent_heat_flux": frozenset({"lhf_turbulent", "lhf_mass"}),
+    "sensible_heat_flux": frozenset({"shf_turbulent"}),
+    "precipitation_rate": frozenset({"precip_mass"}),
+    "frozen_precipitation_rate": frozenset(
+        {"frozen_precip_latent", "frozen_precip_mass"}
+    ),
+    "net_surface_energy_flux": frozenset(
+        {
+            "sw_down",
+            "sw_up",
+            "lw_down",
+            "lw_up",
+            "lhf_turbulent",
+            "shf_turbulent",
+            "frozen_precip_latent",
+        }
+    ),
+    "net_surface_energy_flux_without_frozen_precip": frozenset(
+        {"sw_down", "sw_up", "lw_down", "lw_up", "lhf_turbulent", "shf_turbulent"}
+    ),
+}
+
+# Atmosphere flux variables that are valid `names` entries but whose key in
+# ATMOSPHERE_FIELD_NAME_PREFIXES does not contain "surface" or "sfc".
+_VALID_FLUX_NAMES_NOT_MATCHING_PATTERN = [
+    "latent_heat_flux",
+    "sensible_heat_flux",
+    "precipitation_rate",
+    "frozen_precipitation_rate",
+]
+
+# AtmosphereData @property names that contain "surface" or "sfc" — discovered at
+# import so that conceptual buckets like net_surface_energy_flux are accepted in
+# `names` automatically when added to AtmosphereData.
+_ATMOSPHERE_DATA_SURFACE_PROPERTIES = frozenset(
+    name
+    for name, attr in vars(AtmosphereData).items()
+    if isinstance(attr, property) and ("surface" in name or "sfc" in name)
+)
+
+
 @dataclasses.dataclass
 class SurfaceEnergyFluxCorrectionConfig:
     """Configuration for correcting the generated hfds using
@@ -102,10 +185,46 @@ class SurfaceEnergyFluxCorrectionConfig:
 
     Parameters:
         method: Method to use for the correction.
+        names: Atmosphere flux terms to include in the net_flux computation.
+            "default" (the default) uses the legacy hard-coded combination of
+            sw/lw radiative fluxes, latent and sensible heat fluxes, frozen
+            precipitation latent heat, and the sst-dependent mass-heat fluxes
+            from precipitation, frozen precipitation, and evaporation. A list
+            of strings selects a specific subset; each name is decomposed into
+            atomic contributions (e.g. "latent_heat_flux" implies both the
+            turbulent term and the implicit evaporation mass-heat term) and
+            overlapping atomic contributions across listed names are summed
+            once. Valid names are keys of ATMOSPHERE_FIELD_NAME_PREFIXES that
+            contain "surface" or "sfc", a small private list of additional
+            atmosphere flux variables, and AtmosphereData @property names that
+            contain "surface" or "sfc" (e.g. "net_surface_energy_flux").
 
     """
 
     method: Literal["residual_prediction", "prescribed"]
+    names: Literal["default"] | list[str] = "default"
+
+    def __post_init__(self):
+        if self.names == "default":
+            return
+        allow_set = (
+            {k for k in ATMOSPHERE_FIELD_NAME_PREFIXES if "surface" in k or "sfc" in k}
+            | set(_VALID_FLUX_NAMES_NOT_MATCHING_PATTERN)
+            | _ATMOSPHERE_DATA_SURFACE_PROPERTIES
+        )
+        unknown = [n for n in self.names if n not in allow_set]
+        if unknown:
+            raise ValueError(
+                f"Surface flux name(s) {unknown} are not recognized atmospheric "
+                f"surface variables. Allowed: {sorted(allow_set)}"
+            )
+        unsupported = [n for n in self.names if n not in _NAME_TO_ATOMIC_CONTRIBUTIONS]
+        if unsupported:
+            raise ValueError(
+                f"Surface flux name(s) {unsupported} are recognized atmospheric "
+                f"surface variables but are not yet supported as flux terms. "
+                f"Supported: {sorted(_NAME_TO_ATOMIC_CONTRIBUTIONS)}"
+            )
 
 
 @CorrectorSelector.register("ocean_corrector")
@@ -181,6 +300,7 @@ class OceanCorrector(CorrectorABC):
                 gen_data,
                 forcing_data,
                 method=self._config.surface_energy_flux_correction.method,
+                names=self._config.surface_energy_flux_correction.names,
             )
         if self._config.ocean_heat_content_correction is not None:
             if self._vertical_coordinate is None:
@@ -204,27 +324,50 @@ class OceanCorrector(CorrectorABC):
 def _compute_ocean_net_surface_energy_flux(
     forcing_data: TensorMapping,
     sst: torch.Tensor,
+    names: Literal["default"] | list[str] = "default",
 ) -> torch.Tensor:
     """Compute the net surface energy flux into the ocean from atmospheric
     forcing variables and the sea surface temperature.
 
-    This extends the atmosphere net surface energy flux with SST-dependent
-    heat transport by precipitation and evaporation.
+    With ``names="default"``, the default combination is computed: the
+    atmosphere net surface energy flux plus SST-dependent mass-heat transport
+    by precipitation, frozen precipitation, and evaporation.
+
+    With a list of ``names``, each name is decomposed into atomic contributions
+    via ``_NAME_TO_ATOMIC_CONTRIBUTIONS`` and the union of contributions across
+    all names is summed.
     """
     atmos = AtmosphereData(forcing_data)
-    base_flux = (
-        atmos.net_surface_energy_flux
-    )  # missing: - calving * LATENT_HEAT_OF_FREEZING
-    mass_heat_flux = (
-        SPECIFIC_HEAT_OF_SEA_WATER_CM4
-        * (
-            atmos.precipitation_rate
-            + atmos.frozen_precipitation_rate
-            - (atmos.latent_heat_flux / LATENT_HEAT_OF_VAPORIZATION)
-        )  # missing: + river runoff + calving
-        * (sst - FREEZING_TEMPERATURE_KELVIN)
+    if names == "default":
+        base_flux = (
+            atmos.net_surface_energy_flux
+        )  # missing: - calving * LATENT_HEAT_OF_FREEZING
+        mass_heat_flux = (
+            SPECIFIC_HEAT_OF_SEA_WATER_CM4
+            * (
+                atmos.precipitation_rate
+                + atmos.frozen_precipitation_rate
+                - (atmos.latent_heat_flux / LATENT_HEAT_OF_VAPORIZATION)
+            )  # missing: + river runoff + calving
+            * (sst - FREEZING_TEMPERATURE_KELVIN)
+        )
+        return base_flux + mass_heat_flux
+    atomic_ids: set[str] = set().union(
+        *(_NAME_TO_ATOMIC_CONTRIBUTIONS[n] for n in names)
     )
-    return base_flux + mass_heat_flux
+    total = torch.zeros_like(sst)
+    # Sort for reproducible summation order across runs (set iteration order is
+    # otherwise hash-randomized).
+    for atomic_id in sorted(atomic_ids):
+        try:
+            total = total + _ATOMIC_CONTRIBUTIONS[atomic_id](atmos, sst)
+        except KeyError as e:
+            raise RuntimeError(
+                f"Cannot compute surface energy flux contribution {atomic_id!r} "
+                f"required by names={names}: forcing data is missing variable "
+                f"{e.args[0]!r}."
+            ) from e
+    return total
 
 
 def _correct_hfds(
@@ -232,6 +375,7 @@ def _correct_hfds(
     gen_data: TensorMapping,
     forcing_data: TensorMapping,
     method: Literal["residual_prediction", "prescribed"],
+    names: Literal["default"] | list[str] = "default",
 ) -> TensorDict:
     """Apply surface energy flux correction to the generated hfds.
 
@@ -246,7 +390,7 @@ def _correct_hfds(
     forcing = OceanData(forcing_data)
     ocean_fraction = input.ocean_fraction
     net_flux = _compute_ocean_net_surface_energy_flux(
-        forcing_data, input.sea_surface_temperature
+        forcing_data, input.sea_surface_temperature, names=names
     )
     out = dict(gen_data)
     if "hfds" in gen_data:
