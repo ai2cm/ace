@@ -5,7 +5,7 @@ set -e
 DATE="2026-04-25"
 ENSEMBLE_ID="ic_0001"
 
-CONFIG_FILENAME="ace-amip-inference-config.yaml"
+CONFIG_FILENAME="ace-amip-inference-config-daily-PRATEsfc.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
