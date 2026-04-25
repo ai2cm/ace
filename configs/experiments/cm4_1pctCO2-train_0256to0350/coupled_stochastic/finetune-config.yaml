@@ -165,7 +165,9 @@ stepper_training:
           - steps: 12
             probability: 0.05
           - steps: 20
-            probability: 0.05
+            probability: 0.025
+          - steps: 40
+            probability: 0.025
       optimize_last_step_only: true
       weight: 1.0
     loss:
