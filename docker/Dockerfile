@@ -60,7 +60,9 @@ ENTRYPOINT ["/bin/bash"]
 FROM deps-only AS distillation
 
 COPY FastGen/ /tmp/fastgen/
-RUN uv pip install /tmp/fastgen/ --system
+# annotators/ is git-ignored in FastGen repo so has no __init__.py; add one so find_packages() picks it up
+RUN touch /tmp/fastgen/fastgen/third_party/annotators/__init__.py && \
+    uv pip install /tmp/fastgen/ --system && rm -rf /tmp/fastgen/
 
 ENTRYPOINT ["/bin/bash"]
 

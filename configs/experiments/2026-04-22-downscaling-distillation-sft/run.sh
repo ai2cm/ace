@@ -10,7 +10,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 
 cd $REPO_ROOT
 
-NGPU=1
+NGPU=4
 IMAGE="$(cat $REPO_ROOT/latest_distillation_image.txt)"
 
 TEACHER_DATASET=01KNM6H3JB1ZNS76HX17AAZRF7
