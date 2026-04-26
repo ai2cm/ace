@@ -120,7 +120,7 @@ validation_loader:
 optimization:
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
-  lr: 0.0001
+  lr: 0.00001
   optimizer_type: AdamW
   kwargs:
     fused: true
@@ -132,21 +132,25 @@ optimization:
         kwargs:
           start_factor: 0.01
           end_factor: 1
-          total_iters: 4000
+          total_iters: 2000
       - type: ConstantLR
         step_each_iteration: true
-    milestones: [4000]
+    milestones: [2000]
 stepper_training:
-  n_coupled_steps: 4
+  n_coupled_steps: 2
   parameter_init:
     checkpoint_path: /ckpt.tar
   n_ensemble: 2
   ocean:
     parameter_init:
       weights_path: null # required
+      parameters:
+        - frozen:
+            include:
+              - '*'
     loss_contributions:
-      n_steps: 4
-      weight: 1.0
+      n_steps: 0
+      weight: 0.0
     loss:
       type: EnsembleLoss
       kwargs:
