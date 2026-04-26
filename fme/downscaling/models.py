@@ -122,6 +122,20 @@ class PairedNormalizationConfig:
         self.coarse.load()
 
 
+@dataclasses.dataclass(frozen=True)
+class DiffusionModelMetadata:
+    in_names: list[str]
+    out_names: list[str]
+    coarse_shape: tuple[int, int]
+    downscale_factor: int
+    sigma_data: float
+    predict_residual: bool
+    use_fine_topography: bool
+    full_fine_coords: LatLonCoordinates
+    has_static_inputs: bool
+    static_inputs_coords: LatLonCoordinates | None
+
+
 @dataclasses.dataclass
 class DiffusionModelConfig:
     """
@@ -687,6 +701,23 @@ class DiffusionModel:
         )
         model.module.load_state_dict(state["module"], strict=True)
         return model
+
+    @property
+    def metadata(self):
+        return DiffusionModelMetadata(
+            in_names=self.config.in_names,
+            out_names=self.config.out_names,
+            coarse_shape=self.coarse_shape,
+            downscale_factor=self.downscale_factor,
+            sigma_data=self.sigma_data,
+            predict_residual=self.config.predict_residual,
+            use_fine_topography=self.config.use_fine_topography,
+            full_fine_coords=self.full_fine_coords,
+            has_static_inputs=self.static_inputs is not None,
+            static_inputs_coords=self.static_inputs.coords
+            if self.static_inputs
+            else None,
+        )
 
 
 @dataclasses.dataclass
