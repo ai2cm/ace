@@ -3,13 +3,15 @@ save_checkpoint: true
 save_best_inference_epoch_checkpoints: false
 checkpoint_every_n_batches: 100
 checkpoint_save_epochs:
-  step: 4
+  start: 1
+  step: 1
+  stop: 6
 log_train_every_n_batches: 10
 validate_using_ema: true
 evaluate_before_training: true
 ema:
   decay: 0.999
-max_epochs: 10
+max_epochs: 5
 inference:
   n_coupled_steps: 1440
   coupled_steps_in_memory: 2
@@ -118,7 +120,7 @@ validation_loader:
 optimization:
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
-  lr: 0.00001
+  lr: 0.0001
   optimizer_type: AdamW
   kwargs:
     fused: true
@@ -130,10 +132,10 @@ optimization:
         kwargs:
           start_factor: 0.01
           end_factor: 1
-          total_iters: 2000
+          total_iters: 4000
       - type: ConstantLR
         step_each_iteration: true
-    milestones: [2000]
+    milestones: [4000]
 stepper_training:
   n_coupled_steps: 4
   parameter_init:
