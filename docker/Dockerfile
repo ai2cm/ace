@@ -57,6 +57,13 @@ RUN chmod +x /tmp/docker/*.sh && /tmp/docker/install_cuda_extensions.sh && rm -r
 
 ENTRYPOINT ["/bin/bash"]
 
+FROM deps-only AS distillation
+
+COPY FastGen/ /tmp/fastgen/
+RUN pip install /tmp/fastgen/ && rm -rf /tmp/fastgen/
+
+ENTRYPOINT ["/bin/bash"]
+
 FROM deps-only AS nsight
 
 ENV DEBIAN_FRONTEND=noninteractive
