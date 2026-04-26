@@ -60,7 +60,7 @@ ENTRYPOINT ["/bin/bash"]
 FROM deps-only AS distillation
 
 COPY FastGen/ /tmp/fastgen/
-RUN pip install /tmp/fastgen/ && rm -rf /tmp/fastgen/
+RUN uv pip install /tmp/fastgen/ --system && rm -rf /tmp/fastgen/
 
 ENTRYPOINT ["/bin/bash"]
 

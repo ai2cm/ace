@@ -46,7 +46,7 @@ build_deps_only_image:
 
 build_distillation_image:
 	DOCKER_BUILDKIT=1 docker build --platform=linux/amd64 -f docker/Dockerfile -t $(IMAGE)-distillation:$(VERSION) --target distillation .
-	beaker image create $(IMAGE)-distillation:$(VERSION) --name $(IMAGE)-distillation-$(VERSION) --workspace ai2/climate
+	beaker image create $(IMAGE)-distillation:$(VERSION) --name $(IMAGE)-distillation-$(VERSION) --workspace ai2/andrep
 	echo "$(USERNAME)/$(IMAGE)-distillation-$(VERSION)" > latest_distillation_image.txt
 
 build_nsight_image:
