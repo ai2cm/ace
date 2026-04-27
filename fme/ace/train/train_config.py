@@ -111,6 +111,7 @@ class InlineInferenceConfig:
         n_forward_steps: number of forward steps to take
         forward_steps_in_memory: number of forward steps to take before
             re-reading data from disk
+        n_ensemble_per_ic: number of initial condition based ensembles
         epochs: epochs on which to run inference. By default runs inference every epoch.
         aggregator: configuration of inline inference aggregator.
     """
@@ -118,6 +119,7 @@ class InlineInferenceConfig:
     loader: InferenceDataLoaderConfig
     n_forward_steps: int
     forward_steps_in_memory: int
+    n_ensemble_per_ic: int = 1
     epochs: Slice = dataclasses.field(default_factory=lambda: Slice())
     aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
         default_factory=lambda: InferenceEvaluatorAggregatorConfig(
@@ -160,6 +162,7 @@ class InlineInferenceConfig:
             total_forward_steps=self.n_forward_steps,
             window_requirements=window_requirements,
             initial_condition=initial_condition,
+            n_ensemble=self.n_ensemble_per_ic,
         )
 
 
