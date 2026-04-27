@@ -292,8 +292,17 @@ def main() -> None:
         fine_w // teacher_model.downscale_factor,
     )
     domain_h, domain_w = train_data.shape
-    patch_extent_yx = (
-        coarse_patch_yx if (domain_h, domain_w) != coarse_patch_yx else None
+    # Only patch when the domain is strictly larger than the patch in both dims.
+    # If domain <= patch in either dim, drop_partial_patches would silently drop
+    # every patch and the loader would yield nothing.
+    if domain_h > coarse_patch_yx[0] and domain_w > coarse_patch_yx[1]:
+        patch_extent_yx: tuple[int, int] | None = coarse_patch_yx
+    else:
+        patch_extent_yx = None
+    print(
+        f"[fastgen_train] domain={domain_h}x{domain_w} coarse_patch={coarse_patch_yx} "
+        f"patch_extent_yx={patch_extent_yx}",
+        flush=True,
     )
     ace_loader = AceInfiniteDataLoader(
         data=train_data,
