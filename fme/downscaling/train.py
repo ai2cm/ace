@@ -13,7 +13,6 @@ import torch
 import yaml
 
 from fme.core.cli import prepare_directory
-from fme.core.device import get_device
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
@@ -59,7 +58,7 @@ def restore_checkpoint(trainer: "Trainer") -> None:
         raise ValueError("Cannot restore checkpoint without a checkpoint path")
 
     checkpoint = torch.load(
-        trainer.epoch_checkpoint_path, map_location=get_device(), weights_only=False
+        trainer.epoch_checkpoint_path, map_location="cpu", weights_only=False
     )
     trainer.model.module.load_state_dict(checkpoint["model"]["module"])
     trainer.optimization.load_state(checkpoint["optimization"])
@@ -73,7 +72,7 @@ def restore_checkpoint(trainer: "Trainer") -> None:
 
     trainer.validate_using_ema = checkpoint["validate_using_ema"]
     ema_checkpoint = torch.load(
-        trainer.ema_checkpoint_path, map_location=get_device(), weights_only=False
+        trainer.ema_checkpoint_path, map_location="cpu", weights_only=False
     )
     ema_model = trainer.model.from_state(ema_checkpoint["model"])
     trainer.ema = EMATracker.from_state(ema_checkpoint["ema"], ema_model.modules)
@@ -180,7 +179,10 @@ class Trainer:
             self.num_batches_seen += 1
             if i % 10 == 0:
                 logging.info(f"Training on batch {i + 1}")
-            outputs = self.model.train_on_batch(batch, self.optimization)
+            outputs = self.model.train_on_batch(
+                batch,
+                self.optimization,
+            )
             self.ema(self.model.modules)
             with torch.no_grad():
                 train_aggregator.record_batch(
@@ -254,7 +256,10 @@ class Trainer:
                 self.validation_data, random_offset=False, shuffle=False
             )
             for batch in validation_batch_generator:
-                outputs = self.model.train_on_batch(batch, self.null_optimization)
+                outputs = self.model.train_on_batch(
+                    batch,
+                    self.null_optimization,
+                )
                 validation_aggregator.record_batch(
                     outputs=outputs,
                     coarse=batch.coarse.data,

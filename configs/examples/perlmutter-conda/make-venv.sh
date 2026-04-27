@@ -9,13 +9,13 @@ else
     rm -rf $SCRATCH/ace-slurm-env/temp/
     mkdir -p $SCRATCH/ace-slurm-env/temp/
     cd $SCRATCH/ace-slurm-env/temp/
-    git clone git@github.com:ai2cm/full-model.git
+    git clone git@github.com:ai2cm/ace.git
     if [ $? -ne 0 ]; then
-        echo "Failed to clone repository git@github.com:ai2cm/full-model.git"
+        echo "Failed to clone repository git@github.com:ai2cm/ace.git"
         exit 1
     fi
 
-    cd $SCRATCH/ace-slurm-env/temp/full-model
+    cd $SCRATCH/ace-slurm-env/temp/ace
     git checkout "$COMMIT"
     if [ $? -ne 0 ]; then
         echo "Failed to checkout commit: $COMMIT"
@@ -27,7 +27,7 @@ else
     conda create -p $ENVIRONMENT_PATH python=3.11 pip -y
     conda run --no-capture-output -p $ENVIRONMENT_PATH python -m pip install uv
     conda run --no-capture-output -p $ENVIRONMENT_PATH uv pip install -c constraints.txt .[dev,docs]
-    rm -rf $SCRATCH/ace-slurm-env/temp/full-model
+    rm -rf $SCRATCH/ace-slurm-env/temp/ace
 fi
 
 echo $ENVIRONMENT_PATH

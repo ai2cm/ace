@@ -265,16 +265,14 @@ def _get_test_yaml_files(
         )
 
     if use_time_length_probabilities:
-        train_n_forward_steps: TimeLength | TimeLengthSchedule = (
-            TimeLengthProbabilities(
-                outcomes=[
-                    TimeLengthProbability(steps=1, probability=0.5),
-                    TimeLengthProbability(steps=n_forward_steps, probability=0.5),
-                ]
-            )
+        n_forward_steps_arg: TimeLength | TimeLengthSchedule = TimeLengthProbabilities(
+            outcomes=[
+                TimeLengthProbability(steps=1, probability=0.5),
+                TimeLengthProbability(steps=n_forward_steps, probability=0.5),
+            ]
         )
     elif use_schedule:
-        train_n_forward_steps = TimeLengthSchedule(
+        n_forward_steps_arg = TimeLengthSchedule(
             start_value=TimeLengthProbabilities(
                 outcomes=[
                     TimeLengthProbability(steps=1, probability=0.5),
@@ -285,7 +283,7 @@ def _get_test_yaml_files(
         )
         max_epochs = 2
     else:
-        train_n_forward_steps = n_forward_steps
+        n_forward_steps_arg = n_forward_steps
 
     if crps_training:
         loss = StepLossConfig(
@@ -373,7 +371,7 @@ def _get_test_yaml_files(
         stepper_training=TrainStepperConfig(
             loss=loss,
             n_ensemble=n_ensemble,
-            train_n_forward_steps=train_n_forward_steps,
+            n_forward_steps=n_forward_steps_arg,
         ),
         inference=inline_inference_config,
         weather_evaluation=weather_evaluation_config,
@@ -671,9 +669,9 @@ def test_train_and_inference(
         tmp_path / "results" / "training_checkpoints" / "best_inference_ckpt.tar"
     )
     assert best_checkpoint_path.exists()
-    checkpoint_training_history = torch.load(best_checkpoint_path, weights_only=False)[
-        "stepper"
-    ].get("training_history")
+    checkpoint_training_history = torch.load(
+        best_checkpoint_path, map_location="cpu", weights_only=False
+    )["stepper"].get("training_history")
     assert checkpoint_training_history is not None
     assert len(checkpoint_training_history) == 1
     assert "git_sha" in checkpoint_training_history[0].keys()

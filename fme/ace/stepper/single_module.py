@@ -38,7 +38,6 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
-from fme.core.device import get_device
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
@@ -343,9 +342,10 @@ class TrainOutput(TrainOutputABC):
     target_data: EnsembleTensorDict
     time: xr.DataArray
     normalize: Callable[[TensorDict], TensorDict]
-    derive_func: Callable[[TensorMapping, TensorMapping], TensorDict] = (
-        lambda x, _: dict(x)
+    derive_func: Callable[[TensorMapping, TensorMapping], TensorDict] = lambda x, _: (
+        dict(x)
     )
+    per_channel_losses: dict[str, torch.Tensor] | None = None
 
     def __post_init__(self):
         for v in self.target_data.values():
@@ -395,6 +395,7 @@ class TrainOutput(TrainOutputABC):
             time=self.time[:, n_ic_timesteps:],
             normalize=self.normalize,
             derive_func=self.derive_func,
+            per_channel_losses=self.per_channel_losses,
         )
 
     def copy(self) -> "TrainOutput":
@@ -406,6 +407,7 @@ class TrainOutput(TrainOutputABC):
             time=self.time,
             normalize=self.normalize,
             derive_func=self.derive_func,
+            per_channel_losses=self.per_channel_losses,
         )
 
     def prepend_initial_condition(
@@ -432,6 +434,7 @@ class TrainOutput(TrainOutputABC):
             time=xr.concat([batch_data.time, self.time], dim="time"),
             normalize=self.normalize,
             derive_func=self.derive_func,
+            per_channel_losses=self.per_channel_losses,
         )
 
     def compute_derived_variables(
@@ -450,6 +453,7 @@ class TrainOutput(TrainOutputABC):
             time=self.time,
             normalize=self.normalize,
             derive_func=self.derive_func,
+            per_channel_losses=self.per_channel_losses,
         )
 
     def get_metrics(self) -> TensorDict:
@@ -1370,7 +1374,7 @@ class TrainStepperConfig:
         n_ensemble: The number of ensemble members evaluated for each training
             batch member. Default is 2 if the loss type is EnsembleLoss, otherwise
             the default is 1. Must be 2 for EnsembleLoss to be valid.
-        train_n_forward_steps: The number of timesteps to train on and associated
+        n_forward_steps: The number of timesteps to train on and associated
             sampling probabilities. By default, the stepper will train on the full
             number of timesteps present in the training dataset samples. Values must
             be less than or equal to the number of timesteps present
@@ -1381,7 +1385,7 @@ class TrainStepperConfig:
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
     optimize_last_step_only: bool = False
     n_ensemble: int = -1  # sentinel value to avoid None typing of attribute
-    train_n_forward_steps: TimeLength | TimeLengthSchedule | None = None
+    n_forward_steps: TimeLength | TimeLengthSchedule | None = None
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
@@ -1394,12 +1398,12 @@ class TrainStepperConfig:
                 self.n_ensemble = 1
 
     @property
-    def train_n_forward_steps_schedule(self) -> TimeLengthSchedule | None:
-        if self.train_n_forward_steps is None:
+    def n_forward_steps_schedule(self) -> TimeLengthSchedule | None:
+        if self.n_forward_steps is None:
             return None
-        if isinstance(self.train_n_forward_steps, TimeLengthSchedule):
-            return self.train_n_forward_steps
-        return TimeLengthSchedule.from_constant(self.train_n_forward_steps)
+        if isinstance(self.n_forward_steps, TimeLengthSchedule):
+            return self.n_forward_steps
+        return TimeLengthSchedule.from_constant(self.n_forward_steps)
 
     def _get_parameter_initializer(
         self,
@@ -1487,10 +1491,10 @@ class TrainStepper(
         self._stepper = stepper
         self._config = config
 
-        self._train_n_forward_steps_sampler: TimeLengthProbabilities | None = None
-        self._train_n_forward_steps_schedule: TimeLengthSchedule | None = None
-        if config.train_n_forward_steps_schedule is not None:
-            self._train_n_forward_steps_schedule = config.train_n_forward_steps_schedule
+        self._n_forward_steps_sampler: TimeLengthProbabilities | None = None
+        self._n_forward_steps_schedule: TimeLengthSchedule | None = None
+        if config.n_forward_steps_schedule is not None:
+            self._n_forward_steps_schedule = config.n_forward_steps_schedule
 
         self._epoch: int | None = None  # to keep track of cached values
 
@@ -1533,7 +1537,7 @@ class TrainStepper(
         data = self._stepper.forcing_deriver(data)
 
         optimization.set_mode(self._stepper.modules)
-        output_list = self._accumulate_loss(
+        output_list, per_channel_losses = self._accumulate_loss(
             input_data,
             data,
             target_data,
@@ -1556,6 +1560,7 @@ class TrainStepper(
             time=target_data.time,
             normalize=self.normalizer.normalize,
             derive_func=self._derive_func,
+            per_channel_losses=per_channel_losses,
         )
         ic = data.get_start(
             set(data.data.keys()), self.n_ic_timesteps
@@ -1573,7 +1578,7 @@ class TrainStepper(
         target_data: BatchData,
         optimization: OptimizationABC,
         metrics: dict[str, float],
-    ) -> list[EnsembleTensorDict]:
+    ) -> tuple[list[EnsembleTensorDict], dict[str, torch.Tensor] | None]:
         input_data = data.get_start(self._prognostic_names, self.n_ic_timesteps)
         # output from self.predict_paired does not include initial condition
         n_forward_steps = data.time.shape[1] - self.n_ic_timesteps
@@ -1595,8 +1600,8 @@ class TrainStepper(
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)
-        if self._train_n_forward_steps_sampler is not None:
-            stochastic_n_forward_steps = self._train_n_forward_steps_sampler.sample()
+        if self._n_forward_steps_sampler is not None:
+            stochastic_n_forward_steps = self._n_forward_steps_sampler.sample()
             if stochastic_n_forward_steps > n_forward_steps:
                 raise RuntimeError(
                     "The number of forward steps to train on "
@@ -1606,6 +1611,7 @@ class TrainStepper(
                     "data requirements are retrieved, so this is a bug."
                 )
             n_forward_steps = stochastic_n_forward_steps
+        per_channel_sum: dict[str, torch.Tensor] | None = None
         for step in range(n_forward_steps):
             optimize_step = (
                 step == n_forward_steps - 1 or not self._config.optimize_last_step_only
@@ -1627,10 +1633,17 @@ class TrainStepper(
                     }
                 )
                 step_loss = self._loss_obj(gen_step, target_step, step=step)
-                metrics[f"loss_step_{step}"] = step_loss.detach()
+                step_total_loss = step_loss.total()
+                metrics[f"loss_step_{step}"] = step_total_loss.detach()
+                per_ch = step_loss.get_channel_losses()
+                if per_channel_sum is None:
+                    per_channel_sum = {k: v.detach().clone() for k, v in per_ch.items()}
+                else:
+                    for k in per_channel_sum:
+                        per_channel_sum[k] = per_channel_sum[k] + per_ch[k].detach()
             if optimize_step:
-                optimization.accumulate_loss(step_loss)
-        return output_list
+                optimization.accumulate_loss(step_total_loss)
+        return output_list, per_channel_sum
 
     def update_training_history(self, training_job: TrainingJob) -> None:
         """
@@ -1689,8 +1702,8 @@ class TrainStepper(
     def _init_for_epoch(self, epoch: int | None):
         if (
             epoch is None
-            and self._train_n_forward_steps_schedule is not None
-            and len(self._train_n_forward_steps_schedule.milestones) > 0
+            and self._n_forward_steps_schedule is not None
+            and len(self._n_forward_steps_schedule.milestones) > 0
         ):
             raise EpochNotProvidedError(
                 "current configuration requires epoch to be provided "
@@ -1698,13 +1711,13 @@ class TrainStepper(
             )
         if self._epoch == epoch:
             return
-        if self._train_n_forward_steps_schedule is not None:
+        if self._n_forward_steps_schedule is not None:
             assert epoch is not None  # already checked, but needed for mypy
-            self._train_n_forward_steps_sampler = probabilities_from_time_length(
-                self._train_n_forward_steps_schedule.get_value(epoch)
+            self._n_forward_steps_sampler = probabilities_from_time_length(
+                self._n_forward_steps_schedule.get_value(epoch)
             )
         else:
-            self._train_n_forward_steps_sampler = None
+            self._n_forward_steps_sampler = None
         self._epoch = epoch
 
     def set_eval(self) -> None:
@@ -1795,9 +1808,7 @@ def load_stepper(
     if override_config is None:
         override_config = StepperOverrideConfig()
 
-    checkpoint = torch.load(
-        checkpoint_path, map_location=get_device(), weights_only=False
-    )
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     stepper = Stepper.from_state(checkpoint["stepper"])
 
     if override_config.ocean != "keep":

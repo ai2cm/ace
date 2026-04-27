@@ -32,7 +32,10 @@ from .enso import (
 from .histogram import HistogramAggregator
 from .reduced import MeanAggregator, SingleTargetMeanAggregator
 from .seasonal import SeasonalAggregator
-from .spectrum import PairedSphericalPowerSpectrumAggregator
+from .spectrum import (
+    PairedSphericalPowerSpectrumAggregator,
+    SphericalPowerSpectrumAggregator,
+)
 from .time_mean import TimeMeanAggregator, TimeMeanEvaluatorAggregator
 from .video import VideoAggregator
 from .zonal_mean import ZonalMeanAggregator
@@ -344,6 +347,7 @@ class InferenceEvaluatorAggregator(
                     gridded_operations=ops,
                     nan_fill_fn=flood_fill,
                     report_plot=True,
+                    variable_metadata=dataset_info.variable_metadata,
                 )
             )
         except NotImplementedError:
@@ -700,6 +704,18 @@ class InferenceAggregator(
             dataset_info.timestep,
             dataset_info.variable_metadata,
         )
+        try:
+            aggregators["power_spectrum"] = SphericalPowerSpectrumAggregator(
+                gridded_operations=gridded_operations,
+                nan_fill_fn=SmoothFloodFill(num_steps=4),
+                report_plot=True,
+                variable_metadata=dataset_info.variable_metadata,
+            )
+        except NotImplementedError:
+            logging.warning(
+                "Power spectrum aggregator not implemented for this grid type, "
+                "omitting."
+            )
         if (
             isinstance(horizontal_coordinates, LatLonCoordinates)
             and isinstance(gridded_operations, LatLonOperations)
@@ -718,7 +734,7 @@ class InferenceAggregator(
         self._aggregators = aggregators
         self._summary_aggregators = {
             name: aggregators[name]
-            for name in ["time_mean", "annual", "enso_index"]
+            for name in ["time_mean", "annual", "enso_index", "power_spectrum"]
             if name in aggregators
         }
         self._time_dependent_aggregator_names = ["annual", "enso_index"]
