@@ -121,6 +121,8 @@ def select_datasets(
     day = day[day["experiment_id"].isin(sel.experiments)]
     if sel.source_ids is not None:
         day = day[day["source_id"].isin(sel.source_ids)]
+    if sel.exclude_source_ids:
+        day = day[~day["source_id"].isin(sel.exclude_source_ids)]
     if sel.require_i is not None:
         day = day[day["variant_i"] == sel.require_i]
 

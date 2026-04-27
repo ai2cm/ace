@@ -212,6 +212,11 @@ class Override:
 @dataclass
 class Selection:
     source_ids: Optional[list[str]] = None
+    # Source IDs to exclude (applied after the ``source_ids`` filter).
+    # Use to drop models whose published data has known quality issues
+    # we don't want to ingest, e.g. INM-CM4-8 (anomalous ``zg`` at the
+    # top of atmosphere — see README).
+    exclude_source_ids: list[str] = field(default_factory=list)
     experiments: list[str] = field(default_factory=lambda: ["historical", "ssp585"])
     # Keep only this initialization_index (i). None = keep all i.
     require_i: Optional[int] = 1

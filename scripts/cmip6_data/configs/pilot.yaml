@@ -14,6 +14,12 @@ defaults:
 
 selection:
   # source_ids: null              # default: all models in the inventory
+  exclude_source_ids:
+    # INM-CM4-8 publishes anomalously low ``zg`` at 10 hPa for a
+    # subset of grid cells, which collapses the derived layer-6 T to
+    # ~60 K (unphysical). See README's "Known model-side data quirks"
+    # and figures/inm_cm4_8_zg_top.png.
+    - INM-CM4-8
   experiments: [historical, ssp585]
   # require_i: 1                  # default: i1 only; null = keep all i
   # max_members_per_f: 3          # default: 3 r per (source_id, exp, p, f)
