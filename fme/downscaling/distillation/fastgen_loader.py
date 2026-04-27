@@ -73,21 +73,12 @@ class AceConditionBuilder:
             ``[B, C, H_fine, W_fine]``.
         """
         m = self._model
-        print(
-            "[fastgen_loader] build_fastgen_batch: building condition from coarse data",
-            flush=True,
-        )
         static_inputs = m._subset_static_if_available(batch)
         condition = m._get_input_from_coarse(batch.data, static_inputs)
 
         B = condition.shape[0]
         C_out = len(m.out_packer.names)
         H_fine, W_fine = condition.shape[-2:]
-        print(
-            f"[fastgen_loader] build_fastgen_batch: condition shape={tuple(condition.shape)}, "
-            f"starting teacher sample (B={B} C_out={C_out} H={H_fine} W={W_fine})",
-            flush=True,
-        )
         noise = torch.randn(B, C_out, H_fine, W_fine, device=condition.device)
 
         with torch.no_grad():
@@ -95,10 +86,6 @@ class AceConditionBuilder:
                 noise, condition, num_steps=self._teacher_num_steps
             )
 
-        print(
-            f"[fastgen_loader] build_fastgen_batch: teacher sample complete, x0 shape={tuple(x0.shape)}",
-            flush=True,
-        )
         return {
             "real": x0,
             "condition": condition,
@@ -122,28 +109,21 @@ class AceConditionBuilder:
             shuffle: If True and patch_extent_yx is set, shuffle patches
                 within each time step before yielding.
         """
+        import fastgen.utils.logging_utils as _logger
+
         if patch_extent_yx is not None:
-            print(
-                f"[fastgen_loader] iter_fastgen_batches: using patch extent yx={patch_extent_yx}",
-                flush=True,
+            _logger.debug(
+                f"iter_fastgen_batches: using patch extent yx={patch_extent_yx}"
             )
             gen = data.get_patched_generator(
                 yx_patch_extent=patch_extent_yx, shuffle=shuffle
             )
         else:
-            print(
-                "[fastgen_loader] iter_fastgen_batches: using full-domain generator",
-                flush=True,
-            )
+            _logger.debug("iter_fastgen_batches: using full-domain generator")
             gen = data.get_generator()
 
-        print(
-            "[fastgen_loader] iter_fastgen_batches: generator created, waiting for first batch...",
-            flush=True,
+        _logger.debug(
+            "iter_fastgen_batches: generator created, waiting for first batch..."
         )
-        for i, batch in enumerate(gen):
-            print(
-                f"[fastgen_loader] iter_fastgen_batches: got batch {i} from data loader",
-                flush=True,
-            )
+        for batch in gen:
             yield self.build_fastgen_batch(batch)

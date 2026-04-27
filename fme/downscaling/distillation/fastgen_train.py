@@ -70,6 +70,58 @@ def _copy_ace_teacher(teacher: AceDiffusionTeacher) -> AceDiffusionTeacher:
     return copy.deepcopy(teacher)
 
 
+class _CheckpointPruner:
+    """Deletes old checkpoints after each save, keeping only the most recent N.
+
+    Injected directly into ``Trainer.callbacks._callbacks`` after trainer init
+    so it doesn't need a FastGen ``_target_`` DictConfig entry.
+
+    Only rank-0 performs deletions; other ranks skip silently.
+
+    Args:
+        save_dir: Local directory where FastGen writes ``{iter:07d}.pth`` files.
+        max_to_keep: Number of most-recent checkpoints to retain.
+    """
+
+    def __init__(self, save_dir: str, max_to_keep: int) -> None:
+        self._save_dir = save_dir
+        self._max_to_keep = max_to_keep
+
+    # Satisfy FastGen's ``assert isinstance(_callback, Callback)`` check — we
+    # implement only the one hook we need rather than inheriting the full class.
+    def on_save_checkpoint_success(
+        self,
+    ) -> None:
+        try:
+            from fastgen.utils.distributed import is_rank0
+        except ImportError:
+            return
+        if not is_rank0():
+            return
+        try:
+            names = [f for f in os.listdir(self._save_dir) if f.endswith(".pth")]
+        except FileNotFoundError:
+            return
+        iterations = []
+        for name in names:
+            try:
+                iterations.append(int(name.split(".")[0]))
+            except ValueError:
+                pass
+        iterations.sort()
+        to_delete = iterations[: max(0, len(iterations) - self._max_to_keep)]
+        for it in to_delete:
+            target = os.path.join(self._save_dir, f"{it:07d}.pth")
+            try:
+                os.remove(target)
+            except OSError:
+                pass
+
+    # No-op stubs for all other FastGen callback hooks.
+    def __getattr__(self, name: str):
+        return lambda *args, **kwargs: None
+
+
 class AceInfiniteDataLoader:
     """Infinite iterator wrapping ACE's ``GriddedData`` for FastGen.
 
@@ -165,7 +217,10 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         default=0,
         dest="teacher_num_steps",
-        help="Teacher EDM sampler steps per training batch. 0 uses the checkpoint default.",
+        help=(
+            "Teacher EDM sampler steps per training batch. 0 uses the "
+            "checkpoint default."
+        ),
     )
     parser.add_argument(
         "--dryrun",
@@ -209,8 +264,6 @@ def main() -> None:
 
     # Defer all FastGen imports until after arg parsing so `--help` works
     # in environments without the full FastGen dependency chain installed.
-    from omegaconf import DictConfig
-
     # Patch FastGen's to_wandb to handle non-RGB tensors (ACE outputs C != 3).
     # WandbCallback.to_wandb asserts C == 3; we replicate the first channel to
     # RGB so sample logging works regardless of the number of output channels.
@@ -224,6 +277,7 @@ def main() -> None:
     from fastgen.utils.distributed import clean_up, is_rank0, synchronize, world_size
     from fastgen.utils.io_utils import set_env_vars
     from fastgen.utils.scripts import set_cuda_backend
+    from omegaconf import DictConfig
 
     _orig_to_wandb = _wandb_mod.to_wandb
 
@@ -309,6 +363,7 @@ def main() -> None:
     #    same full dataset (acceptable for the spike).
     # ------------------------------------------------------------------
     data_cfg = _load_data_config(args.data_yaml)
+    data_cfg.shuffle = True
     ace_dist = Distributed(force_non_distributed=True)
     train_data = data_cfg.build(requirements=requirements, dist=ace_dist)
     condition_builder = AceConditionBuilder(
@@ -328,10 +383,9 @@ def main() -> None:
         patch_extent_yx: tuple[int, int] | None = coarse_patch_yx
     else:
         patch_extent_yx = None
-    print(
-        f"[fastgen_train] domain={domain_h}x{domain_w} coarse_patch={coarse_patch_yx} "
-        f"patch_extent_yx={patch_extent_yx}",
-        flush=True,
+    logger.info(
+        f"domain={domain_h}x{domain_w} coarse_patch={coarse_patch_yx} "
+        f"patch_extent_yx={patch_extent_yx}"
     )
     ace_loader = AceInfiniteDataLoader(
         data=train_data,
@@ -396,6 +450,10 @@ def main() -> None:
 
     logger.info("Initialising FastGen Trainer...")
     fastgen_trainer = Trainer(config)
+    fastgen_trainer.callbacks._callbacks["ckpt_pruner"] = _CheckpointPruner(
+        save_dir=config.trainer.checkpointer.save_dir,
+        max_to_keep=20,
+    )
     synchronize()
 
     fastgen_trainer.run(model)

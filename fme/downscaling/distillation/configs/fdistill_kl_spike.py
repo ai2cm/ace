@@ -19,10 +19,9 @@ Adapted from:
 
 import os
 
-from omegaconf import DictConfig
-
 import fastgen.configs.methods.config_f_distill as config_f_distill_default
 from fastgen.configs.callbacks import EMA_CONST_CALLBACKS
+from omegaconf import DictConfig
 
 TEACHER_CKPT_PATH = os.environ.get("ACE_TEACHER_CKPT", "")
 
@@ -81,9 +80,9 @@ def create_config():
     # ----------------------------------------------------------------- trainer
     config.trainer.ddp = True
     config.trainer.batch_size_global = 32
-    config.trainer.max_iter = 200_000
-    config.trainer.save_ckpt_iter = 10_000
-    config.trainer.logging_iter = 500
+    config.trainer.max_iter = 100_000
+    config.trainer.save_ckpt_iter = 130
+    config.trainer.logging_iter = 130
 
     config.log_config.group = ""
 

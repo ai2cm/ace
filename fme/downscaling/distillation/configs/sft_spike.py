@@ -17,10 +17,9 @@ Adapted from:
 
 import os
 
-from omegaconf import DictConfig
-
 import fastgen.configs.methods.config_sft as config_sft_default
 from fastgen.configs.callbacks import EMA_CONST_CALLBACKS
+from omegaconf import DictConfig
 
 # Path to the pre-trained ACE teacher checkpoint.
 # Override via: config.model.pretrained_model_path = "/path/to/teacher.ckpt"
@@ -84,8 +83,8 @@ def create_config():
     config.trainer.ddp = True
     config.trainer.batch_size_global = 32  # start small for GPU budget
     config.trainer.max_iter = 50_000
-    config.trainer.save_ckpt_iter = 5_000
-    config.trainer.logging_iter = 500
+    config.trainer.save_ckpt_iter = 130
+    config.trainer.logging_iter = 130
 
     config.log_config.group = ""
 

@@ -171,6 +171,8 @@ class DataLoaderConfig:
         drop_last: Use drop_last option in sampler. Defaults to False. If True,
             drop the last samples required to have even batch sizes across ranks.
             If false, pad with extra samples to make ranks have the same size batches.
+        shuffle: If True, shuffle samples in time each epoch. Defaults to False.
+            Not meaningful for one-shot generation; set to True for training.
     """
 
     coarse: Sequence[
@@ -188,6 +190,7 @@ class DataLoaderConfig:
     )
     repeat: int = 1
     drop_last: bool = False
+    shuffle: bool = False
 
     def __post_init__(self):
         enforce_lat_bounds(self.lat_extent)
@@ -274,12 +277,19 @@ class DataLoaderConfig:
         all_times = xr_dataset.sample_start_times
         if dist is None:
             dist = Distributed.get_instance()
-        # Shuffle is not used for generation, it is set to False.
-        sampler = (
-            ContiguousDistributedSampler(dataset, drop_last=self.drop_last)
-            if dist.is_distributed()
-            else None
-        )
+        if dist.is_distributed():
+            if self.shuffle:
+                sampler = DistributedSampler(
+                    dataset, shuffle=True, drop_last=self.drop_last
+                )
+            else:
+                sampler = ContiguousDistributedSampler(
+                    dataset, drop_last=self.drop_last
+                )
+        elif self.shuffle:
+            sampler = RandomSampler(dataset)
+        else:
+            sampler = None
         dataloader = DataLoader(
             dataset,
             batch_size=dist.local_batch_size(int(self.batch_size)),
