@@ -366,19 +366,39 @@ python make_presence.py --config configs/pilot.yaml
 
 ### Known model-side data quirks (sanity warnings observed, datasets still write)
 
-- **INM-CM4-8 `zg` at 10 hPa** is as low as ~22 km in a subset of
-  grid cells, vs the expected ~32 km. Layer-6 (50-10 hPa) thickness
-  collapses to ~2.9 km there and `ta_derived_layer_6` reads ~61 K
-  (real polar stratosphere is 190-220 K). Likely a fill-value / QC
-  issue in INM-CM4-8's published `zg` at the very top of the
-  atmosphere.
+- **INM-CM4-8 `zg` at 10 hPa** drops to as low as ~22 km in a small
+  set of grid cells vs the expected ~32 km. Layer-6 (50-10 hPa)
+  thickness collapses to ~2.9 km at those cells and the hypsometric
+  `ta_derived_layer_6` reads ~61 K (real polar stratosphere is
+  190-220 K).
+
+  Diagnosis (verified against the raw Pangeo zarrs, not our
+  pipeline output):
+  - 33 affected (cell, day) pairs in 2010 across 7.9 million
+    (cell, day) points at native 120 × 180 resolution — about 4 in
+    a million.
+  - **Each affected cell appears on exactly one day** and the bad
+    cells are scattered across both poles, mid-latitudes, and the
+    tropics with no spatial coherence.
+  - **The values are present in the source zarr** (min = 20,530 m
+    at native res before our regrid).
+  - **INM-CM5-0** — same publishing centre, same cmorization
+    pipeline — is clean (zero cells below 25 km in 2010), so this
+    is not a pipeline-side artefact.
+
+  Most likely cause: numerical edge cases in INM-CM4-8's
+  stratospheric output. INM-CM4-8 is the lower-top precursor to
+  INM-CM5-0; 10 hPa sits right at or above its model top, so each
+  cell at that level is sensitive to interpolation from limited
+  native levels and to occasional one-step instabilities that
+  hyperdiffusion damps out the next day.
 
   **INM-CM4-8 is excluded from training** via
   `selection.exclude_source_ids` in `pilot.yaml`; the data on disk
   is preserved for inspection but new ingest runs skip it.
-  See `figures/inm_cm4_8_zg_top.png` — the ~22 km minimum zg at 10 hPa
-  shows up as scattered dark pixels in the spatial map and a low-end
-  histogram tail (down to ~22,125 m) that the reference CanESM5 lacks.
+  See `figures/inm_cm4_8_zg_top.png` — the bad cells appear as
+  scattered dark pixels in the spatial map and a low-end histogram
+  tail (down to ~22,125 m) that the reference CanESM5 lacks.
 
 - **CESM2-FV2 `sftlf`** comes back from the conservative regrid at up
   to ~114% along the **southernmost row of the target grid** (lat
