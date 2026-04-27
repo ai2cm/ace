@@ -172,6 +172,12 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     warnings.filterwarnings("ignore", "Grad strides do not match bucket view strides")
 
+    # Set forkserver before any CUDA/distributed init so zarr DataLoader workers
+    # start in a clean process without an inherited CUDA context, preventing hangs.
+    import multiprocessing
+
+    multiprocessing.set_start_method("forkserver", force=True)
+
     # Parse args first so that `--help` exits before any FastGen imports.
     args = _parse_args()
 
