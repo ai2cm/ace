@@ -344,7 +344,6 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         initial_condition_requirements = (
             stepper_config.get_prognostic_state_data_requirements()
         )
-        initial_condition_requirements.n_ensemble = config.n_ensemble_per_ic
         data = get_inference_data(
             config=config.loader,
             total_forward_steps=config.n_forward_steps,
