@@ -197,3 +197,5 @@ time_coarsen:
     - HGTsfc
     - grid_xt
     - grid_yt
+  input_time_slice:  # ensures coarsened data starts on 2019-10-21T00:00:00
+    start: "2019-10-20T06:00:00"
