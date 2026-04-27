@@ -31,7 +31,7 @@ gantry run \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset $TEACHER_DATASET:/checkpoints \
+    --dataset $TEACHER_DATASET:checkpoints:/checkpoints \
     --weka climate-default:/climate-default \
     --gpus $NGPU \
     --shared-memory 100GiB \
