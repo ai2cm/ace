@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import copy
 import importlib
+import multiprocessing
 import os
 import warnings
 from typing import TYPE_CHECKING
@@ -174,8 +175,6 @@ def main() -> None:
 
     # Set forkserver before any CUDA/distributed init so zarr DataLoader workers
     # start in a clean process without an inherited CUDA context, preventing hangs.
-    import multiprocessing
-
     multiprocessing.set_start_method("forkserver", force=True)
 
     # Parse args first so that `--help` exits before any FastGen imports.
