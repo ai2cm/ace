@@ -62,10 +62,15 @@ class AceDiffusionTeacher(FastGenNetwork):
             max_t=cfg.sigma_max,
         )
 
-        # Unwrap DDP so FastGen can re-wrap the bare module itself.
+        # Unwrap DDP / DummyWrapper so FastGen can re-wrap the bare module itself.
+        # Module chain: DiffusionModel.module → DummyWrapper → EDMPrecond → SongUNet
+        from fme.core.distributed.non_distributed import DummyWrapper
+
         raw_module = (
             model.module.module if isinstance(model.module, DDP) else model.module
         )
+        if isinstance(raw_module, DummyWrapper):
+            raw_module = raw_module.module
         self._ace_module = raw_module
 
         # Stash sampling hyperparameters from the teacher config.
