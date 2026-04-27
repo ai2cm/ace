@@ -90,7 +90,7 @@ class _CheckpointPruner:
     # Satisfy FastGen's ``assert isinstance(_callback, Callback)`` check — we
     # implement only the one hook we need rather than inheriting the full class.
     def on_save_checkpoint_success(
-        self,
+        self, model=None, iteration: int = 0, path: str = ""
     ) -> None:
         try:
             from fastgen.utils.distributed import is_rank0
@@ -139,6 +139,8 @@ class AceInfiniteDataLoader:
             units for patch-based training.  ``None`` uses full-domain batches.
         shuffle: If True, shuffle patches within each time step. Only
             meaningful when patch_extent_yx is set.
+        random_offset: If True, apply a random spatial offset each epoch so
+            patch boundaries vary. Only meaningful when patch_extent_yx is set.
     """
 
     def __init__(
@@ -148,6 +150,7 @@ class AceInfiniteDataLoader:
         batch_size: int,
         patch_extent_yx: tuple[int, int] | None = None,
         shuffle: bool = False,
+        random_offset: bool = False,
     ) -> None:
         self.batch_size = batch_size
         # Trainer may set this for sampler resumption; we accept but ignore it
@@ -157,11 +160,15 @@ class AceInfiniteDataLoader:
         self._builder = condition_builder
         self._patch_extent_yx = patch_extent_yx
         self._shuffle = shuffle
+        self._random_offset = random_offset
 
     def __iter__(self):
         while True:
             yield from self._builder.iter_fastgen_batches(
-                self._data, patch_extent_yx=self._patch_extent_yx, shuffle=self._shuffle
+                self._data,
+                patch_extent_yx=self._patch_extent_yx,
+                shuffle=self._shuffle,
+                random_offset=self._random_offset,
             )
 
 
@@ -393,6 +400,7 @@ def main() -> None:
         batch_size=data_cfg.batch_size,
         patch_extent_yx=patch_extent_yx,
         shuffle=patch_extent_yx is not None,
+        random_offset=patch_extent_yx is not None,
     )
     config.dataloader_train = ace_loader
 

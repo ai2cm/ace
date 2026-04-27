@@ -97,6 +97,7 @@ class AceConditionBuilder:
         data: GriddedData,
         patch_extent_yx: tuple[int, int] | None = None,
         shuffle: bool = False,
+        random_offset: bool = False,
     ) -> Iterator[dict[str, torch.Tensor]]:
         """Iterate over a ``GriddedData`` loader, yielding FastGen dicts.
 
@@ -108,6 +109,9 @@ class AceConditionBuilder:
                 training.
             shuffle: If True and patch_extent_yx is set, shuffle patches
                 within each time step before yielding.
+            random_offset: If True and patch_extent_yx is set, apply a
+                random spatial offset to each patch extraction so patch
+                boundaries vary across epochs.
         """
         import fastgen.utils.logging_utils as _logger
 
@@ -116,7 +120,9 @@ class AceConditionBuilder:
                 f"iter_fastgen_batches: using patch extent yx={patch_extent_yx}"
             )
             gen = data.get_patched_generator(
-                yx_patch_extent=patch_extent_yx, shuffle=shuffle
+                yx_patch_extent=patch_extent_yx,
+                shuffle=shuffle,
+                random_offset=random_offset,
             )
         else:
             _logger.debug("iter_fastgen_batches: using full-domain generator")

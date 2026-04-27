@@ -44,6 +44,7 @@ def create_config():
     # ------------------------------------------------------------------ model
     config.model.input_shape = [C_OUT, H_FINE, W_FINE]
     config.model.precision_amp = "bfloat16"
+    config.model.grad_scaler_enabled = False
 
     # Forward KL (mass-covering) — the critical switch for tail preservation.
     config.model.f_distill.f_div = "kl"
@@ -55,7 +56,7 @@ def create_config():
     # Noise distribution matching ACE's training distribution.
     config.model.sample_t_cfg.time_dist_type = "lognormal"
     config.model.sample_t_cfg.train_p_mean = -1.2
-    config.model.sample_t_cfg.train_p_std = 1.2
+    config.model.sample_t_cfg.train_p_std = 1.8
 
     config.model.pretrained_model_path = TEACHER_CKPT_PATH
 
