@@ -346,6 +346,33 @@ def main() -> None:
     logger.info(f"Teacher loaded from {args.teacher_checkpoint!r}")
 
     # ------------------------------------------------------------------
+    # 3b. Auto-configure the DMD2 discriminator from the teacher's UNet.
+    #
+    #     The default Discriminator_EDM_CIFAR10_Config uses in_channels=256
+    #     at all_res=[32,16,8], which won't match ACE's 512×512 UNet.  We
+    #     introspect the loaded UNet's encoder blocks and replace the
+    #     discriminator with one that matches the deepest encoder level
+    #     (bottleneck features — most semantically rich, single channel count).
+    # ------------------------------------------------------------------
+    if hasattr(config.model, "discriminator"):
+        from fastgen.networks.discriminators import Discriminator_EDM as _DiscEDM
+
+        enc_info = teacher.encoder_feature_info()
+        # enc_info: [(block_key, out_channels, resolution), ...] finest→coarsest
+        deepest_idx = len(enc_info) - 1
+        _, disc_channels, _ = enc_info[deepest_idx]
+        all_res = [res for _, _, res in enc_info]
+        config.model.discriminator = L(_DiscEDM)(
+            feature_indices={deepest_idx},
+            all_res=all_res,
+            in_channels=disc_channels,
+        )
+        logger.info(
+            f"DMD2 discriminator: feature_index={deepest_idx}, "
+            f"all_res={all_res}, in_channels={disc_channels}"
+        )
+
+    # ------------------------------------------------------------------
     # 4. Inject teacher into FastGen config as a deepcopy factory.
     #
     #    FastGen calls instantiate(config.model.net) twice: once for the
@@ -354,6 +381,7 @@ def main() -> None:
     #    deepcopy so freezing the teacher-copy never affects the student.
     # ------------------------------------------------------------------
     config.model.net = L(_copy_ace_teacher)(teacher=teacher)
+    config.model.pretrained_model_path = ""  # weights come from deepcopy above
     config.model.use_ema = []
 
     # Strip EMA callbacks — they fire on EMA objects that no longer exist.

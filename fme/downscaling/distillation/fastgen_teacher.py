@@ -20,12 +20,13 @@ without any changes to the ACE model weights.
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Generator
 from typing import TYPE_CHECKING, Any
 
 import torch
-from torch.nn.parallel import DistributedDataParallel as DDP
-
 from fastgen.networks.network import FastGenNetwork
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 if TYPE_CHECKING:
     from fme.downscaling.models import DiffusionModel
@@ -85,6 +86,70 @@ class AceDiffusionTeacher(FastGenNetwork):
         self._ace_module.train()
 
     # ------------------------------------------------------------------
+    # Encoder feature introspection (used by DMD2 discriminator wiring)
+    # ------------------------------------------------------------------
+
+    def encoder_feature_info(self) -> list[tuple[str, int, int]]:
+        """Return ``(block_key, out_channels, resolution)`` for the last encoder
+        block at each UNet level, ordered finest→coarsest.
+
+        Both ``SongUNet`` (v1) and ``SongUNetv2`` name their encoder blocks
+        ``"{res}x{res}_block{idx}"``.  The last block at each resolution is the
+        one whose activations are used as discriminator features.
+        """
+        unet = self._ace_module.model
+        res_to_info: dict[int, tuple[str, int, int]] = {}
+        for key, block in unet.enc.items():
+            if "_block" not in key or "aux" in key:
+                continue
+            parts = key.rsplit("_block", 1)
+            try:
+                res = int(parts[0].split("x")[0])
+                block_idx = int(parts[1])
+            except (ValueError, IndexError):
+                continue
+            channels = getattr(block, "out_channels", None)
+            if channels is None:
+                continue
+            if res not in res_to_info or block_idx > res_to_info[res][2]:
+                res_to_info[res] = (key, channels, block_idx)
+        result = []
+        for res in sorted(res_to_info.keys(), reverse=True):
+            key, channels, _ = res_to_info[res]
+            result.append((key, channels, res))
+        return result
+
+    @contextlib.contextmanager
+    def _capture_encoder_features(
+        self, feature_indices: set[int]
+    ) -> Generator[dict[int, torch.Tensor], None, None]:
+        """Context manager: register hooks, run forward, yield captured dict."""
+        info = self.encoder_feature_info()
+        captured: dict[int, torch.Tensor] = {}
+        handles = []
+        for fi in sorted(feature_indices):
+            if fi < len(info):
+                block_key, _, _ = info[fi]
+                block = self._ace_module.model.enc[block_key]
+
+                def _make_hook(idx: int):
+                    def _hook(
+                        module: torch.nn.Module,
+                        inp: tuple,
+                        out: torch.Tensor,
+                    ) -> None:
+                        captured[idx] = out
+
+                    return _hook
+
+                handles.append(block.register_forward_hook(_make_hook(fi)))
+        try:
+            yield captured
+        finally:
+            for h in handles:
+                h.remove()
+
+    # ------------------------------------------------------------------
     # FastGenNetwork abstract interface
     # ------------------------------------------------------------------
 
@@ -99,7 +164,7 @@ class AceDiffusionTeacher(FastGenNetwork):
         return_logvar: bool = False,
         fwd_pred_type: str | None = None,
         **fwd_kwargs,
-    ) -> torch.Tensor | list[torch.Tensor] | tuple[torch.Tensor, torch.Tensor]:
+    ) -> torch.Tensor | list[torch.Tensor] | tuple[torch.Tensor, list[torch.Tensor]]:
         """Denoise ``x_t`` conditioned on ``condition`` at noise level ``t``.
 
         In FastGen's EDM schedule ``t == sigma``, so we pass ``t`` directly
@@ -111,18 +176,32 @@ class AceDiffusionTeacher(FastGenNetwork):
             condition: Dense conditioning tensor ``[B, C_cond, H, W]`` built
                 by ``build_condition_tensor`` / ``AceConditionBuilder``.
             r: Unused; accepted for FastGenNetwork interface compatibility.
-            return_features_early: Unused; FastGenNetwork interface compat.
-            feature_indices: Unused; FastGenNetwork interface compat.
+            return_features_early: If True with ``feature_indices``, returns
+                just the captured encoder feature list (no x0).
+            feature_indices: Set of encoder-level indices whose last block
+                activations to capture.  Index 0 = finest resolution.
             return_logvar: Unused; FastGenNetwork interface compat.
             fwd_pred_type: Unused; FastGenNetwork interface compat.
             **fwd_kwargs: Unused; FastGenNetwork interface compat.
 
         Returns:
-            x0 prediction, shape ``[B, C_out, H, W]``.
+            - Normal: x0 prediction ``[B, C_out, H, W]``.
+            - ``return_features_early=True``: list of captured feature tensors.
+            - ``feature_indices`` only: ``[x0, [feat_0, feat_1, ...]]``.
         """
-        # ACE's EDMPrecond reshapes sigma internally to [B, 1, 1, 1].
-        with torch.amp.autocast(x_t.device.type, dtype=torch.bfloat16):
-            return self._ace_module(x_t, condition, t)
+        if not feature_indices:
+            with torch.amp.autocast(x_t.device.type, dtype=torch.bfloat16):
+                return self._ace_module(x_t, condition, t)
+
+        with self._capture_encoder_features(feature_indices) as captured:
+            with torch.amp.autocast(x_t.device.type, dtype=torch.bfloat16):
+                x0 = self._ace_module(x_t, condition, t)
+
+        feat_list = [captured[i] for i in sorted(feature_indices) if i in captured]
+
+        if return_features_early:
+            return feat_list
+        return [x0, feat_list]
 
     # ------------------------------------------------------------------
     # Sampling (used by FastGen for visualisation during training)
