@@ -24,15 +24,12 @@ Usage
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 import torch
 
 from fme.downscaling.data.datasets import BatchData, GriddedData
-
-logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from fme.downscaling.distillation.fastgen_teacher import AceDiffusionTeacher
@@ -70,29 +67,29 @@ class AceConditionBuilder:
             ``[B, C, H_fine, W_fine]``.
         """
         m = self._model
-        logger.info("build_fastgen_batch: building condition from coarse data")
+        print(
+            "[fastgen_loader] build_fastgen_batch: building condition from coarse data",
+            flush=True,
+        )
         static_inputs = m._subset_static_if_available(batch)
         condition = m._get_input_from_coarse(batch.data, static_inputs)
 
         B = condition.shape[0]
         C_out = len(m.out_packer.names)
         H_fine, W_fine = condition.shape[-2:]
-        logger.info(
-            "build_fastgen_batch: condition shape=%s, starting teacher sample "
-            "(B=%d C_out=%d H=%d W=%d)",
-            tuple(condition.shape),
-            B,
-            C_out,
-            H_fine,
-            W_fine,
+        print(
+            f"[fastgen_loader] build_fastgen_batch: condition shape={tuple(condition.shape)}, "
+            f"starting teacher sample (B={B} C_out={C_out} H={H_fine} W={W_fine})",
+            flush=True,
         )
         noise = torch.randn(B, C_out, H_fine, W_fine, device=condition.device)
 
         with torch.no_grad():
             x0 = self._teacher.sample(noise, condition)
 
-        logger.info(
-            "build_fastgen_batch: teacher sample complete, x0 shape=%s", tuple(x0.shape)
+        print(
+            f"[fastgen_loader] build_fastgen_batch: teacher sample complete, x0 shape={tuple(x0.shape)}",
+            flush=True,
         )
         return {"real": x0, "condition": condition}
 
@@ -111,17 +108,25 @@ class AceConditionBuilder:
                 training.
         """
         if patch_extent_yx is not None:
-            logger.info(
-                "iter_fastgen_batches: using patch extent yx=%s", patch_extent_yx
+            print(
+                f"[fastgen_loader] iter_fastgen_batches: using patch extent yx={patch_extent_yx}",
+                flush=True,
             )
             gen = data.get_patched_generator(yx_patch_extent=patch_extent_yx)
         else:
-            logger.info("iter_fastgen_batches: using full-domain generator")
+            print(
+                "[fastgen_loader] iter_fastgen_batches: using full-domain generator",
+                flush=True,
+            )
             gen = data.get_generator()
 
-        logger.info(
-            "iter_fastgen_batches: generator created, waiting for first batch..."
+        print(
+            "[fastgen_loader] iter_fastgen_batches: generator created, waiting for first batch...",
+            flush=True,
         )
         for i, batch in enumerate(gen):
-            logger.info("iter_fastgen_batches: got batch %d from data loader", i)
+            print(
+                f"[fastgen_loader] iter_fastgen_batches: got batch {i} from data loader",
+                flush=True,
+            )
             yield self.build_fastgen_batch(batch)
