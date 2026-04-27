@@ -68,5 +68,6 @@ gantry run \
     -- torchrun --nproc-per-node $NGPU -m fme.downscaling.distillation.fastgen_train \
         --config $CONFIG \
         --teacher-checkpoint $ACE_TEACHER_CKPT \
+        --teacher-num-steps 15 \
         --data-yaml $SCRIPT_PATH/data-config.yaml \
         - log_config.name=$JOB_NAME

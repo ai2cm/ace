@@ -49,9 +49,15 @@ class AceConditionBuilder:
             run the EDM sampler for x0 target generation.
     """
 
-    def __init__(self, model: DiffusionModel, teacher: AceDiffusionTeacher) -> None:
+    def __init__(
+        self,
+        model: DiffusionModel,
+        teacher: AceDiffusionTeacher,
+        teacher_num_steps: int = 0,
+    ) -> None:
         self._model = model
         self._teacher = teacher
+        self._teacher_num_steps = teacher_num_steps
 
     def build_fastgen_batch(
         self,
@@ -85,7 +91,9 @@ class AceConditionBuilder:
         noise = torch.randn(B, C_out, H_fine, W_fine, device=condition.device)
 
         with torch.no_grad():
-            x0 = self._teacher.sample(noise, condition)
+            x0 = self._teacher.sample(
+                noise, condition, num_steps=self._teacher_num_steps
+            )
 
         print(
             f"[fastgen_loader] build_fastgen_batch: teacher sample complete, x0 shape={tuple(x0.shape)}",

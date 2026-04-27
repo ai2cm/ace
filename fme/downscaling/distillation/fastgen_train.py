@@ -161,6 +161,13 @@ def _parse_args() -> argparse.Namespace:
         help="Logging level (DEBUG, INFO, WARNING, ...).",
     )
     parser.add_argument(
+        "--teacher-num-steps",
+        type=int,
+        default=0,
+        dest="teacher_num_steps",
+        help="Teacher EDM sampler steps per training batch. 0 uses the checkpoint default.",
+    )
+    parser.add_argument(
         "--dryrun",
         action="store_true",
         help="Load teacher, build one batch, run one forward pass, and exit.",
@@ -304,7 +311,9 @@ def main() -> None:
     data_cfg = _load_data_config(args.data_yaml)
     ace_dist = Distributed(force_non_distributed=True)
     train_data = data_cfg.build(requirements=requirements, dist=ace_dist)
-    condition_builder = AceConditionBuilder(teacher_model, teacher)
+    condition_builder = AceConditionBuilder(
+        teacher_model, teacher, teacher_num_steps=args.teacher_num_steps
+    )
 
     fine_h, fine_w = config.model.input_shape[1], config.model.input_shape[2]
     coarse_patch_yx = (
