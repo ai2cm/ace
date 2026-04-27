@@ -119,6 +119,7 @@ def get_gridded_data(
         batch_size=batch_size,
         n_window_timesteps=requirements.n_timesteps_schedule,
         time_buffer=config.time_buffer,
+        time_buffer_pool_size=config.time_buffer_pool_size,
         num_workers=config.num_data_workers,
         sampler=sampler,
         shuffled=train,
