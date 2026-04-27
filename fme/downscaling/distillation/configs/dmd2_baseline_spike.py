@@ -23,7 +23,7 @@ from fastgen.configs.callbacks import EMA_CONST_CALLBACKS
 
 TEACHER_CKPT_PATH = os.environ.get("ACE_TEACHER_CKPT", "")
 
-C_OUT = int(os.environ.get("ACE_C_OUT", "7"))
+C_OUT = int(os.environ.get("ACE_C_OUT", "1"))
 H_FINE = int(os.environ.get("ACE_H_FINE", "512"))
 W_FINE = int(os.environ.get("ACE_W_FINE", "512"))
 
@@ -65,11 +65,12 @@ def create_config():
     config.model.student_sample_steps = STUDENT_STEPS
 
     # ----------------------------------------------------------------- trainer
+    config.trainer.ddp = True
     config.trainer.batch_size_global = 32
     config.trainer.max_iter = 200_000
     config.trainer.save_ckpt_iter = 10_000
     config.trainer.logging_iter = 500
 
-    config.log_config.group = "ace_downscaling_dmd2_baseline_spike"
+    config.log_config.group = ""
 
     return config

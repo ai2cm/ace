@@ -85,6 +85,8 @@ class AceInfiniteDataLoader:
         batch_size: Per-GPU batch size (mirrors the ACE data config value).
         patch_extent_yx: Optional ``(lat_tiles, lon_tiles)`` in *coarse* grid
             units for patch-based training.  ``None`` uses full-domain batches.
+        shuffle: If True, shuffle patches within each time step. Only
+            meaningful when patch_extent_yx is set.
     """
 
     def __init__(
@@ -93,6 +95,7 @@ class AceInfiniteDataLoader:
         condition_builder: AceConditionBuilder,
         batch_size: int,
         patch_extent_yx: tuple[int, int] | None = None,
+        shuffle: bool = False,
     ) -> None:
         self.batch_size = batch_size
         # Trainer may set this for sampler resumption; we accept but ignore it
@@ -101,11 +104,12 @@ class AceInfiniteDataLoader:
         self._data = data
         self._builder = condition_builder
         self._patch_extent_yx = patch_extent_yx
+        self._shuffle = shuffle
 
     def __iter__(self):
         while True:
             yield from self._builder.iter_fastgen_batches(
-                self._data, patch_extent_yx=self._patch_extent_yx
+                self._data, patch_extent_yx=self._patch_extent_yx, shuffle=self._shuffle
             )
 
 
@@ -325,6 +329,7 @@ def main() -> None:
         condition_builder=condition_builder,
         batch_size=data_cfg.batch_size,
         patch_extent_yx=patch_extent_yx,
+        shuffle=patch_extent_yx is not None,
     )
     config.dataloader_train = ace_loader
 

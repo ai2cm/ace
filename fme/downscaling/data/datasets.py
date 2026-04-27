@@ -313,6 +313,7 @@ class GriddedData:
         overlap: int = 0,
         drop_partial_patches: bool = True,
         random_offset: bool = False,
+        shuffle: bool = False,
     ) -> Iterator["BatchData"]:
         patched_generator = patched_batch_gen_from_loader(
             loader=self.loader,
@@ -321,6 +322,7 @@ class GriddedData:
             coarse_overlap=overlap,
             drop_partial_patches=drop_partial_patches,
             random_offset=random_offset,
+            shuffle=shuffle,
         )
 
         return cast(

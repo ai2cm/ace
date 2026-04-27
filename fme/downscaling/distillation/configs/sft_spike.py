@@ -87,6 +87,6 @@ def create_config():
     config.trainer.save_ckpt_iter = 5_000
     config.trainer.logging_iter = 500
 
-    config.log_config.group = "ace_downscaling_sft_spike"
+    config.log_config.group = ""
 
     return config
