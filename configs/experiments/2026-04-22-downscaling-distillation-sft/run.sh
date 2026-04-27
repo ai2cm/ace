@@ -29,7 +29,7 @@ case "$METHOD" in
         ;;
 esac
 
-JOB_NAME="ace-downscaling-distillation-${METHOD}-spike"
+JOB_NAME="ace-downscaling-distillation-${METHOD}"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
@@ -47,7 +47,7 @@ gantry run \
     --name $JOB_NAME \
     --description "$DESCRIPTION" \
     --workspace ai2/climate-titan \
-    --priority urgent \
+    --priority high \
     --preemptible \
     --cluster ai2/titan \
     --beaker-image $IMAGE \
