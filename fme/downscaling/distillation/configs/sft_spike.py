@@ -81,6 +81,7 @@ def create_config():
     config.model.student_sample_steps = 18
 
     # ----------------------------------------------------------------- trainer
+    config.trainer.ddp = True
     config.trainer.batch_size_global = 32  # start small for GPU budget
     config.trainer.max_iter = 50_000
     config.trainer.save_ckpt_iter = 5_000

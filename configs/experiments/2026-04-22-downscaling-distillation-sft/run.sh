@@ -38,7 +38,7 @@ gantry run \
     --budget ai2/climate \
     --system-python \
     --install "pip install --no-deps ." \
-    -- python -m fme.downscaling.distillation.fastgen_train \
+    -- torchrun --nproc-per-node $NGPU -m fme.downscaling.distillation.fastgen_train \
         --config fme/downscaling/distillation/configs/sft_spike.py \
         --teacher-checkpoint $ACE_TEACHER_CKPT \
         --data-yaml $SCRIPT_PATH/data-config.yaml
