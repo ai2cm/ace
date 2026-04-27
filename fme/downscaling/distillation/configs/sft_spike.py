@@ -32,7 +32,7 @@ TEACHER_CKPT_PATH = os.environ.get(
 # Output dimensions: ACE CONUS 100km→25km outputs ~C variables at 512×512
 # (coarse 16×16, downscale_factor=32 → fine 512×512).
 # Set C_out to the number of output channels from the teacher checkpoint.
-C_OUT = int(os.environ.get("ACE_C_OUT", "7"))
+C_OUT = int(os.environ.get("ACE_C_OUT", "1"))
 H_FINE = int(os.environ.get("ACE_H_FINE", "512"))
 W_FINE = int(os.environ.get("ACE_W_FINE", "512"))
 

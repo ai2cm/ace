@@ -200,6 +200,10 @@ def main() -> None:
     # in environments without the full FastGen dependency chain installed.
     from omegaconf import DictConfig
 
+    # Patch FastGen's to_wandb to handle non-RGB tensors (ACE outputs C != 3).
+    # WandbCallback.to_wandb asserts C == 3; we replicate the first channel to
+    # RGB so sample logging works regardless of the number of output channels.
+    import fastgen.callbacks.wandb as _wandb_mod
     import fastgen.utils.distributed.ddp as _fastgen_ddp
     import fastgen.utils.logging_utils as logger
     from fastgen.configs.config_utils import override_config_with_opts, serialize_config
@@ -209,6 +213,18 @@ def main() -> None:
     from fastgen.utils.distributed import clean_up, is_rank0, synchronize, world_size
     from fastgen.utils.io_utils import set_env_vars
     from fastgen.utils.scripts import set_cuda_backend
+
+    _orig_to_wandb = _wandb_mod.to_wandb
+
+    def _ace_to_wandb(tensor: torch.Tensor, *args, **kwargs):
+        if tensor.ndim >= 3 and tensor.shape[-3] != 3:
+            first_chan = tensor.narrow(tensor.ndim - 3, 0, 1)
+            expand_shape = list(tensor.shape)
+            expand_shape[-3] = 3
+            tensor = first_chan.expand(expand_shape)
+        return _orig_to_wandb(tensor, *args, **kwargs)
+
+    _wandb_mod.to_wandb = _ace_to_wandb
 
     logger.set_log_level(args.log_level)
 
