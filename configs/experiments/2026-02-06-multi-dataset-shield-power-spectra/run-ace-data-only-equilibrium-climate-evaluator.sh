@@ -44,7 +44,7 @@ for climate in "3xCO2"; do
             --name $job_name \
             --description 'Run equilibrium climate data-only evaluator' \
             --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-            --workspace ai2/climtae-titan \
+            --workspace ai2/climate-titan \
             --priority urgent \
             --preemptible \
             --cluster ai2/titan \
