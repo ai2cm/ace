@@ -63,7 +63,7 @@ class AceDiffusionTeacher(FastGenNetwork):
         )
 
         # Unwrap DDP / DummyWrapper so FastGen can re-wrap the bare module itself.
-        # Module chain: DiffusionModel.module → DummyWrapper → EDMPrecond → SongUNet
+        # Module chain: DiffusionModel.module → DummyWrapper → UNetDiffusionModule
         from fme.core.distributed.non_distributed import DummyWrapper
 
         raw_module = (
@@ -94,6 +94,27 @@ class AceDiffusionTeacher(FastGenNetwork):
     # Encoder feature introspection (used by DMD2 discriminator wiring)
     # ------------------------------------------------------------------
 
+    def _get_songunet(self) -> torch.nn.Module:
+        """Traverse wrappers to reach the SongUNet (the module with `.enc`).
+
+        Actual chain: UNetDiffusionModule → .unet (EDMPrecond) → .model (SongUNet).
+        We step through known wrapper attributes until we find a module that
+        exposes `.enc`, so this is robust to future wrapper changes.
+        """
+        m = self._ace_module
+        for attr in ("unet", "model", "module"):
+            candidate = getattr(m, attr, None)
+            if candidate is not None and hasattr(candidate, "enc"):
+                return candidate
+            if candidate is not None:
+                m = candidate
+        if hasattr(m, "enc"):
+            return m
+        raise AttributeError(
+            f"Cannot find SongUNet with .enc; "
+            f"outermost module is {type(self._ace_module).__name__}"
+        )
+
     def encoder_feature_info(self) -> list[tuple[str, int, int]]:
         """Return ``(block_key, out_channels, resolution)`` for the last encoder
         block at each UNet level, ordered finest→coarsest.
@@ -102,7 +123,7 @@ class AceDiffusionTeacher(FastGenNetwork):
         ``"{res}x{res}_block{idx}"``.  The last block at each resolution is the
         one whose activations are used as discriminator features.
         """
-        unet = self._ace_module.model
+        unet = self._get_songunet()
         res_to_info: dict[int, tuple[str, int, int]] = {}
         for key, block in unet.enc.items():
             if "_block" not in key or "aux" in key:
@@ -135,7 +156,7 @@ class AceDiffusionTeacher(FastGenNetwork):
         for fi in sorted(feature_indices):
             if fi < len(info):
                 block_key, _, _ = info[fi]
-                block = self._ace_module.model.enc[block_key]
+                block = self._get_songunet().enc[block_key]
 
                 def _make_hook(idx: int):
                     def _hook(
