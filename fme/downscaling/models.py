@@ -682,8 +682,8 @@ class DiffusionModel:
         full_fine_coords_state = state.get("full_fine_coords")
         if full_fine_coords_state is not None:
             full_fine_coords = LatLonCoordinates(
-                lat=full_fine_coords_state["lat"],
-                lon=full_fine_coords_state["lon"],
+                lat=full_fine_coords_state["lat"].to(get_device(), copy=True),
+                lon=full_fine_coords_state["lon"].to(get_device(), copy=True),
             )
         else:
             raise ValueError(
@@ -777,7 +777,9 @@ class CheckpointModelConfig:
     @property
     def _checkpoint(self) -> Mapping[str, Any]:
         if not self._checkpoint_is_loaded:
-            checkpoint_data = torch.load(self.checkpoint_path, weights_only=False)
+            checkpoint_data = torch.load(
+                self.checkpoint_path, map_location="cpu", weights_only=False
+            )
             checkpoint_data["model"]["config"]["in_names"] = [
                 self._rename.get(name, name)
                 for name in checkpoint_data["model"]["config"]["in_names"]
@@ -806,8 +808,8 @@ class CheckpointModelConfig:
             )
         if coords_from_state is not None:
             return LatLonCoordinates(
-                lat=coords_from_state["lat"],
-                lon=coords_from_state["lon"],
+                lat=coords_from_state["lat"].to(get_device(), copy=True),
+                lon=coords_from_state["lon"].to(get_device(), copy=True),
             )
         elif fine_coordinates_path is not None:
             return load_coords_from_path(fine_coordinates_path)
