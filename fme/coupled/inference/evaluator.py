@@ -123,9 +123,7 @@ def load_stepper_config(
         return checkpoint_path.load_stepper_config()
 
     logging.info(f"Loading trained coupled model checkpoint from {checkpoint_path}")
-    checkpoint = torch.load(
-        checkpoint_path, map_location=fme.get_device(), weights_only=False
-    )
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     config = CoupledStepperConfig.from_state(checkpoint["stepper"]["config"])
 
     return config
