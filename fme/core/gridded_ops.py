@@ -288,13 +288,13 @@ class LatLonOperations(GriddedOperations):
         grid: str = "legendre-gauss",
     ):
         self._validate_area_weights(area_weights)
-        self._cpu_area_global = area_weights.to("cpu")
+        self._cpu_area_global = area_weights.to("cpu", copy=True)
         dist = Distributed.get_instance()
         nlat, nlon = area_weights.shape[-2], area_weights.shape[-1]
         h_slice, w_slice = dist.get_local_slices((nlat, nlon))
-        local_weights = area_weights[..., h_slice, w_slice]
-        self._device_area = local_weights.to(get_device())
-        self._cpu_area = local_weights.to("cpu")
+        local_weights = self._cpu_area_global[..., h_slice, w_slice]
+        self._device_area = local_weights.to(get_device(), copy=True)
+        self._cpu_area = local_weights.to("cpu", copy=True)
         self._device_mask_provider = mask_provider.to(get_device())
         self._cpu_mask_provider = mask_provider.to("cpu")
         self._grid = grid

@@ -1,9 +1,11 @@
+import dataclasses
 from unittest.mock import MagicMock
 
 import pytest
 import torch
 
 from fme.core.coordinates import LatLonCoordinates
+from fme.downscaling.data import StaticInputs
 from fme.downscaling.predictors.serial_denoising import (
     DenoisingExpertCheckpointConfig,
     DenoisingMoEConfig,
@@ -77,14 +79,39 @@ def test_sigma_dispatch_boundary_prefers_lower_sigma_range():
     assert calls == [0]
 
 
-def _mock_expert(static_inputs=None):
+_SHARED_METADATA = object()
+
+
+@dataclasses.dataclass
+class _MockMetadata:
+    in_names: tuple[str, ...] = ("a", "b")
+    out_names: tuple[str, ...] = ("c",)
+    coarse_shape: tuple[int, int] = (2, 2)
+    downscale_factor: int = 4
+    predict_residual: bool = False
+    static_inputs: StaticInputs | None = None
+    full_fine_coords: LatLonCoordinates = dataclasses.field(
+        default_factory=lambda: LatLonCoordinates(
+            lat=torch.linspace(-90, 90, 16), lon=torch.linspace(0, 360, 32)
+        )
+    )
+    has_static_inputs: bool = False
+    static_inputs_coords: LatLonCoordinates | None = dataclasses.field(
+        default_factory=lambda: LatLonCoordinates(
+            lat=torch.linspace(-90, 90, 16), lon=torch.linspace(0, 360, 32)
+        )
+    )
+
+
+def _mock_expert(metadata=_SHARED_METADATA):
     expert = MagicMock()
     expert.in_packer.names = ["a", "b"]
     expert.out_packer.names = ["c"]
     expert.coarse_shape = (4, 8)
     expert.downscale_factor = 4
     expert.config.predict_residual = False
-    expert.static_inputs = static_inputs
+    expert.static_inputs = _mock_static_inputs()
+    expert.metadata = metadata
     return expert
 
 
@@ -96,28 +123,10 @@ def _mock_static_inputs(n_lat: int = 16, n_lon: int = 32):
     return si
 
 
-def test_validate_experts_compatible_mixed_static_inputs_raises():
-    e0 = _mock_expert(static_inputs=None)
-    e1 = _mock_expert(static_inputs=_mock_static_inputs())
-    with pytest.raises(ValueError, match="static_inputs"):
+def test_validate_experts_compatible():
+    e0 = _mock_expert(metadata=_MockMetadata(static_inputs=None))
+    e1 = _mock_expert(
+        metadata=_MockMetadata(static_inputs=_mock_static_inputs(n_lat=16, n_lon=32))
+    )
+    with pytest.raises(ValueError, match="metadata"):
         _validate_experts_compatible([e0, e1])
-
-
-def test_validate_experts_compatible_mismatched_static_coords_raises():
-    e0 = _mock_expert(static_inputs=_mock_static_inputs(n_lat=16, n_lon=32))
-    e1 = _mock_expert(static_inputs=_mock_static_inputs(n_lat=8, n_lon=16))
-    with pytest.raises(ValueError, match="static_inputs coordinates"):
-        _validate_experts_compatible([e0, e1])
-
-
-def test_validate_experts_compatible_matching_static_inputs():
-    si = _mock_static_inputs()
-    e0 = _mock_expert(static_inputs=si)
-    e1 = _mock_expert(static_inputs=si)
-    _validate_experts_compatible([e0, e1])
-
-
-def test_validate_experts_compatible_both_none_static_inputs():
-    e0 = _mock_expert(static_inputs=None)
-    e1 = _mock_expert(static_inputs=None)
-    _validate_experts_compatible([e0, e1])

@@ -1,14 +1,23 @@
 from collections.abc import Callable, Generator
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 
 import pytest
 import torch
 
-from fme.core.loss import StepLoss
+from fme.ace.stepper.time_length_probabilities import (
+    TimeLengthProbabilities,
+    TimeLengthProbability,
+)
+from fme.core.loss import LossOutput, StepLoss
 from fme.core.typing_ import EnsembleTensorDict, TensorMapping
 
 from .loss import LossContributionsConfig, StepLossABC, StepPredictionABC
 from .stepper import ComponentEnsembleStepPrediction, CoupledStepperTrainLoss
+
+
+def _wrap_as_loss_output(value: torch.Tensor) -> LossOutput:
+    """Wrap a scalar tensor as a LossOutput for mocking StepLoss."""
+    return LossOutput(loss=value, channel_dim=0, channel_names=["mock"])
 
 
 def step_and_target_gen(
@@ -122,11 +131,14 @@ def test_loss_contributions(steps_thru_atmos_7):
             loss += (gen[key] - target[key]).abs().mean() / (step + 1)
         return loss
 
+    def mae_loss_as_output(gen, target, step: int):
+        return _wrap_as_loss_output(mae_loss(gen, target, step))
+
     atmos_loss_config = LossContributionsConfig(
         n_steps=6,
         weight=1 / 3,
     )
-    mock_step_loss = Mock(spec=StepLoss, side_effect=mae_loss)
+    mock_step_loss = Mock(spec=StepLoss, side_effect=mae_loss_as_output)
     atmosphere_loss = atmos_loss_config.build(
         loss_obj=mock_step_loss,
         time_dim=1,
@@ -166,6 +178,9 @@ def test_loss_contributions_optimize_last_step_only(steps_thru_atmos_7):
             loss += (gen[key] - target[key]).abs().mean() / (step + 1)
         return loss
 
+    def mae_loss_as_output(gen, target, step: int):
+        return _wrap_as_loss_output(mae_loss(gen, target, step))
+
     n_total_atmos = 8
     n_total_ocean = 4
     atmos_loss_config = LossContributionsConfig(
@@ -173,7 +188,7 @@ def test_loss_contributions_optimize_last_step_only(steps_thru_atmos_7):
         weight=1 / 3,
         optimize_last_step_only=True,
     )
-    mock_step_loss = Mock(spec=StepLoss, side_effect=mae_loss)
+    mock_step_loss = Mock(spec=StepLoss, side_effect=mae_loss_as_output)
     atmosphere_loss = atmos_loss_config.build(
         loss_obj=mock_step_loss,
         time_dim=1,
@@ -184,7 +199,7 @@ def test_loss_contributions_optimize_last_step_only(steps_thru_atmos_7):
         optimize_last_step_only=True,
     )
     ocean_loss = ocean_loss_config.build(
-        loss_obj=Mock(spec=StepLoss, side_effect=mae_loss),
+        loss_obj=Mock(spec=StepLoss, side_effect=mae_loss_as_output),
         time_dim=1,
         max_n_steps=n_total_ocean,
     )
@@ -254,18 +269,158 @@ def test_step_is_optimized_last_step_only_weight_zero():
     assert not loss.step_is_optimized(0)
 
 
+def test_stochastic_n_steps_sample_changes_step_is_optimized():
+    sampler = TimeLengthProbabilities(
+        outcomes=[
+            TimeLengthProbability(steps=2, probability=1.0),
+        ]
+    )
+    config = LossContributionsConfig(n_steps=sampler)
+    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1, max_n_steps=4)
+    # before sampling, _n_steps is max_n_forward_steps = 2
+    assert loss.step_is_optimized(0)
+    assert loss.step_is_optimized(1)
+    assert not loss.step_is_optimized(2)
+
+    # after sampling (deterministic: always 2), same behavior
+    loss.sample_n_steps()
+    assert loss.step_is_optimized(0)
+    assert loss.step_is_optimized(1)
+    assert not loss.step_is_optimized(2)
+
+
+def test_stochastic_n_steps_deterministic_outcome():
+    sampler = TimeLengthProbabilities(
+        outcomes=[
+            TimeLengthProbability(steps=3, probability=1.0),
+        ]
+    )
+    config = LossContributionsConfig(n_steps=sampler)
+    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1, max_n_steps=4)
+    loss.sample_n_steps()
+    assert loss.step_is_optimized(0)
+    assert loss.step_is_optimized(1)
+    assert loss.step_is_optimized(2)
+    assert not loss.step_is_optimized(3)
+
+
+def test_stochastic_n_steps_samples_vary():
+    """With multiple outcomes, repeated sampling should eventually produce
+    different effective n_steps values."""
+    sampler = TimeLengthProbabilities(
+        outcomes=[
+            TimeLengthProbability(steps=1, probability=0.5),
+            TimeLengthProbability(steps=4, probability=0.5),
+        ]
+    )
+    config = LossContributionsConfig(n_steps=sampler)
+    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1, max_n_steps=5)
+    seen_optimized_step_3 = False
+    seen_not_optimized_step_1 = False
+    for _ in range(20):  # about 1 in a million prob of test failure
+        loss.sample_n_steps()
+        if loss.step_is_optimized(3):
+            seen_optimized_step_3 = True
+        if not loss.step_is_optimized(1):
+            seen_not_optimized_step_1 = True
+        if seen_optimized_step_3 and seen_not_optimized_step_1:
+            break
+    assert seen_optimized_step_3, "should sometimes sample n_steps=4"
+    assert seen_not_optimized_step_1, "should sometimes sample n_steps=1"
+
+
+class TestOptimizeLastStepOnlyStochastic:
+    def _build(self, sampler, max_n_steps=6):
+        config = LossContributionsConfig(n_steps=sampler, optimize_last_step_only=True)
+        return config.build(
+            loss_obj=Mock(spec=StepLoss), time_dim=1, max_n_steps=max_n_steps
+        )
+
+    def _sampler(self, outcomes):
+        return TimeLengthProbabilities(
+            outcomes=[
+                TimeLengthProbability(steps=s, probability=p) for s, p in outcomes
+            ]
+        )
+
+    def test_before_sampling(self):
+        sampler = self._sampler([(2, 0.5), (5, 0.5)])
+        loss = self._build(sampler, max_n_steps=6)
+        # _n_steps = max_n_forward_steps = 5; last optimized = min(5,6)-1 = 4
+        for step in range(6):
+            if step == 4:
+                assert loss.step_is_optimized(step), f"step {step} should be optimized"
+            else:
+                assert not loss.step_is_optimized(
+                    step
+                ), f"step {step} should not be optimized"
+
+    def test_deterministic_sample(self):
+        sampler = self._sampler([(3, 1.0)])
+        loss = self._build(sampler, max_n_steps=6)
+        loss.sample_n_steps()
+        # _n_steps = 3; last optimized = min(3,6)-1 = 2
+        for step in range(6):
+            if step == 2:
+                assert loss.step_is_optimized(step), f"step {step} should be optimized"
+            else:
+                assert not loss.step_is_optimized(
+                    step
+                ), f"step {step} should not be optimized"
+
+    def test_varying_samples(self):
+        sampler = self._sampler([(2, 0.5), (5, 0.5)])
+        loss = self._build(sampler, max_n_steps=6)
+        seen_step_1 = False  # min(2,6)-1 = 1
+        seen_step_4 = False  # min(5,6)-1 = 4
+        for _ in range(20):  # about 1 in a million prob of test failure
+            loss.sample_n_steps()
+            if loss.step_is_optimized(1) and not loss.step_is_optimized(4):
+                seen_step_1 = True
+            if loss.step_is_optimized(4) and not loss.step_is_optimized(1):
+                seen_step_4 = True
+            if seen_step_1 and seen_step_4:
+                break
+        assert seen_step_1, "should sometimes optimize only step 1 (n_steps=2)"
+        assert seen_step_4, "should sometimes optimize only step 4 (n_steps=5)"
+
+
+def test_sample_n_steps_noop_for_float_config():
+    config = LossContributionsConfig(n_steps=5.0)
+    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1, max_n_steps=5)
+    loss.sample_n_steps()
+    assert loss.step_is_optimized(4)
+    assert not loss.step_is_optimized(5)
+
+
+def test_coupled_stepper_train_loss_sample_n_steps_delegates():
+    ocean_loss = MagicMock(spec=StepLossABC)
+    atmos_loss = MagicMock(spec=StepLossABC)
+    coupled_loss = CoupledStepperTrainLoss(
+        ocean_loss=ocean_loss, atmosphere_loss=atmos_loss
+    )
+    coupled_loss.sample_n_steps()
+    ocean_loss.sample_n_steps.assert_called_once()
+    atmos_loss.sample_n_steps.assert_called_once()
+
+
 @pytest.mark.parametrize("ocean_config_kwargs", [{"n_steps": 0}, {"weight": 0.0}])
 def test_null_loss_contributions(steps_thru_atmos_7, ocean_config_kwargs):
-    # test LossContributionsConfig with n_steps = 0
     atmos_loss_config = LossContributionsConfig()
     atmosphere_loss = atmos_loss_config.build(
-        loss_obj=Mock(spec=StepLoss, return_value=torch.tensor(5.25)),
+        loss_obj=Mock(
+            spec=StepLoss,
+            return_value=_wrap_as_loss_output(torch.tensor(5.25)),
+        ),
         time_dim=1,
         max_n_steps=10,
     )
     ocean_loss_config = LossContributionsConfig(**ocean_config_kwargs)
     ocean_loss = ocean_loss_config.build(
-        loss_obj=Mock(spec=StepLoss, return_value=torch.tensor(42.0)),
+        loss_obj=Mock(
+            spec=StepLoss,
+            return_value=_wrap_as_loss_output(torch.tensor(42.0)),
+        ),
         time_dim=1,
         max_n_steps=10,
     )

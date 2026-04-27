@@ -13,6 +13,7 @@ from torch.nn.parallel import DistributedDataParallel
 
 from fme.core import metrics
 from fme.core.device import get_device, using_gpu, using_srun
+from fme.core.disco import DiscreteContinuousConvS2
 
 from .base import DistributedBackend
 from .non_distributed import DummyWrapper
@@ -210,7 +211,7 @@ class TorchDistributed(DistributedBackend):
         return th.InverseRealSHT(nlat, nlon, lmax=lmax, mmax=mmax, grid=grid).float()
 
     def get_disco_conv_s2(self, *args, **kwargs) -> nn.Module:
-        return th.DiscreteContinuousConvS2(*args, **kwargs).float()
+        return DiscreteContinuousConvS2(*args, **kwargs).float()
 
     def spatial_reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
         return tensor

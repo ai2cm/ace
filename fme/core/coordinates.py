@@ -489,6 +489,11 @@ class SerializableVerticalCoordinate:
 
     @classmethod
     def from_state(cls, state) -> VerticalCoordinate:
+        device = get_device()
+        state = {
+            k: v.to(device, copy=True) if isinstance(v, torch.Tensor) else v
+            for k, v in state.items()
+        }
         return dacite.from_dict(
             data_class=cls,
             data={"vertical_coordinate": state},
@@ -862,6 +867,11 @@ class SerializableHorizontalCoordinates:
 
     @classmethod
     def from_state(cls, state) -> HorizontalCoordinates:
+        device = get_device()
+        state = {
+            k: v.to(device, copy=True) if isinstance(v, torch.Tensor) else v
+            for k, v in state.items()
+        }
         return dacite.from_dict(
             data_class=cls,
             data={"horizontal_coordinates": state},
