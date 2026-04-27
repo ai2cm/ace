@@ -381,14 +381,16 @@ python make_presence.py --config configs/pilot.yaml
   histogram tail (down to ~22,125 m) that the reference CanESM5 lacks.
 
 - **CESM2-FV2 `sftlf`** comes back from the conservative regrid at up
-  to ~114% in some cells (way beyond the typical few-percent edge
-  overshoot). The overshoot concentrates at the southernmost grid
-  row, so this is a polar conservative-regrid edge effect against
-  CESM2-FV2's specific source grid layout, not generic publisher
-  noise. Doesn't break the data; the land-mask numerics are off in
-  those cells. See `figures/cesm2_fv2_sftlf_overshoot.png` — the
-  histogram shows CESM2-FV2's small mass beyond 100% that CanESM5
-  doesn't have, and the map highlights the southernmost row in red.
+  to ~114% along the **southernmost row of the target grid** (lat
+  ≈ -87 to -90°). The rest of the field is in [0, 100] as expected.
+  The defect is purely the row of polar cells, so it's a regridder
+  pole-handling effect against CESM2-FV2's specific source grid
+  layout — same family of issue as the CESM2 SImon siconc rc=506
+  failure. Doesn't break the data; the land-mask numerics are off
+  in that one row of cells. Worth either masking out the
+  southernmost row at training time or fixing the pole-cell
+  weighting in xesmf as a follow-up. See
+  `figures/cesm2_fv2_sftlf_overshoot.png`.
 
 ### Known regridding / data-pipeline limitations
 

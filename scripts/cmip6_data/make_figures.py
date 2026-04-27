@@ -167,7 +167,8 @@ def figure_cesm2fv2_sftlf(out_dir: str, fig_path: Path) -> None:
     plt.colorbar(over_im, ax=ax_map, label="% land (overshoot region)", pad=0.08)
 
     fig.suptitle(
-        "Known model-side quirk: CESM2-FV2 sftlf overshoots 100% in coastal cells"
+        "Known model-side quirk: CESM2-FV2 sftlf overshoots 100% along the "
+        "southernmost (~-87 to -90 deg) row of the F22.5 target grid"
     )
     fig.tight_layout()
     fig_path.parent.mkdir(parents=True, exist_ok=True)
