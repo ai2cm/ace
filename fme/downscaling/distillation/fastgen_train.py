@@ -329,6 +329,13 @@ def main() -> None:
     # ------------------------------------------------------------------
     # 9. Instantiate FastGen model and run training.
     # ------------------------------------------------------------------
+    # FastGen loads checkpoints with weights_only=True; ACE checkpoints contain
+    # numpy scalars which are not allowlisted by default in PyTorch >= 2.6.
+    import numpy
+    import torch.serialization
+
+    torch.serialization.add_safe_globals([numpy._core.multiarray.scalar])
+
     config.model_class.config = config.model
     model = instantiate(config.model_class)
     config.model_class.config = None
