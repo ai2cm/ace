@@ -10,7 +10,7 @@ train_data:
   num_data_workers: 0
   strict_ensemble: false
   lat_extent:
-    start: 36.0
+    start: 34.0
     stop: 50.0
   lon_extent:
     start: 234.0

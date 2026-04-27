@@ -91,7 +91,11 @@ class AceConditionBuilder:
             f"[fastgen_loader] build_fastgen_batch: teacher sample complete, x0 shape={tuple(x0.shape)}",
             flush=True,
         )
-        return {"real": x0, "condition": condition}
+        return {
+            "real": x0,
+            "condition": condition,
+            "neg_condition": torch.zeros_like(condition),
+        }
 
     def iter_fastgen_batches(
         self,
