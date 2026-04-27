@@ -175,6 +175,22 @@ def main() -> None:
     # Parse args first so that `--help` exits before any FastGen imports.
     args = _parse_args()
 
+    # FastGen loads ACE checkpoints with weights_only=True, but ACE checkpoints
+    # contain numpy C types that aren't in PyTorch's default allowlist. Patch
+    # torch.load globally before FastGen is imported so every load site is covered.
+    import functools
+
+    import torch as _torch
+
+    _orig_load = _torch.load
+
+    @functools.wraps(_orig_load)
+    def _patched_load(*args, **kwargs):
+        kwargs["weights_only"] = False
+        return _orig_load(*args, **kwargs)
+
+    _torch.load = _patched_load
+
     # Defer all FastGen imports until after arg parsing so `--help` works
     # in environments without the full FastGen dependency chain installed.
     from omegaconf import DictConfig
@@ -329,13 +345,6 @@ def main() -> None:
     # ------------------------------------------------------------------
     # 9. Instantiate FastGen model and run training.
     # ------------------------------------------------------------------
-    # FastGen loads checkpoints with weights_only=True; ACE checkpoints contain
-    # numpy scalars which are not allowlisted by default in PyTorch >= 2.6.
-    import numpy
-    import torch.serialization
-
-    torch.serialization.add_safe_globals([numpy._core.multiarray.scalar])
-
     config.model_class.config = config.model
     model = instantiate(config.model_class)
     config.model_class.config = None
