@@ -58,7 +58,7 @@ run_training() {
 # run_training "train-amip-c96-shield-daily-lr1e-2-lrtune-v2.yaml" "train-amip-c96-shield-daily-lr1e-2-lrtune-v2"
 # run_training "train-amip-c96-shield-daily-lr1e-3-lrtune-v2-bootstrap.yaml" "train-amip-c96-shield-daily-lr1e-3-lrtune-v2-bootstrap"
 run_training "train-daily-era5-4deg-lrtune.yaml" "train-daily-era5-4deg-lrtune"
-run_training "train-daily-era5-4deg-n1024-lrtune.yaml" "train-daily-era5-4deg-n1024-lrtune"
+# run_training "train-daily-era5-4deg-n1024-lrtune.yaml" "train-daily-era5-4deg-n1024-lrtune"
 # run_training "train-daily-era5-1deg-lrtune.yaml" "train-daily-era5-1deg-lrtune"
 # run_training "train-amip-c96-shield-daily-pos16.yaml" "train-amip-c96-shield-daily-pos16"
 # run_training "train-amip-c96-shield-daily-pos16-rsop.yaml" "train-amip-c96-shield-daily-pos16-rsop"

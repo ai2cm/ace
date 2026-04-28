@@ -36,6 +36,7 @@ train_loader:
   batch_size: 8
   num_data_workers: 8
   prefetch_factor: 4
+  time_buffer: 32
   dataset:
     strict: false
     concat:
@@ -89,6 +90,7 @@ validation_loader:
   batch_size: 64
   num_data_workers: 8
   prefetch_factor: 4
+  time_buffer: 128
   dataset:
     strict: false
     concat:
