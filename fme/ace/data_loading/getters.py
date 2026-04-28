@@ -185,8 +185,10 @@ def get_inference_data(
     Returns:
         A data loader for inference with coordinates and metadata.
     """
-    # Use n_ensemble=1 in the dataset so broadcast never runs in DataLoader workers.
-    # Ensemble expansion is done in the stepper (and for IC in get_initial_condition).
+    # Always n_ensemble=1 in the dataset so DataLoader workers never call
+    # broadcast_ensemble (avoids worker issues; matches train/val). The requested
+    # n_ensemble is passed through to InferenceGriddedData for IC expansion and the
+    # stepper, not the dataset.
     dataset = InferenceDataset(
         config=config,
         total_forward_steps=total_forward_steps,

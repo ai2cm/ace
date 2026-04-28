@@ -177,7 +177,12 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
             properties: Batch-constant properties for the dataset, such as variable
                 metadata and coordinate information. Data can be on any device.
             n_ensemble_per_ic: Number of ensemble members per initial condition.
-                Loader yields single-ensemble batches; expansion happens in the stepper.
+                The loader always yields single-ensemble ``BatchData`` (see
+                ``get_inference_data`` and ``InferenceDataset``). If
+                ``initial_condition`` is given as requirements, the IC is expanded
+                here in ``_get_initial_condition`` via ``broadcast_ensemble``. Forcing
+                windows stay single-ensemble per sample until the stepper, which
+                may broadcast them to match an IC with ``n_ensemble > 1``.
 
         Note:
             While input data can be on any device, all data exposed from this class
