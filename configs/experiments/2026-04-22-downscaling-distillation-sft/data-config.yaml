@@ -6,7 +6,7 @@ train_data:
       subset:
         start_time: '2014-01-01T00:00:00'
         stop_time: '2022-12-31T23:59:00'
-  batch_size: 12
+  batch_size: 4
   num_data_workers: 2
   strict_ensemble: false
   lat_extent:

@@ -66,7 +66,7 @@ def create_config():
 
     # ----------------------------------------------------------------- trainer
     config.trainer.ddp = True
-    config.trainer.batch_size_global = 16
+    config.trainer.batch_size_global = 32
     config.trainer.max_iter = 100_000
     config.trainer.save_ckpt_iter = 130
     config.trainer.logging_iter = 130
