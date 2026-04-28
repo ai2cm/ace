@@ -5,7 +5,6 @@ set -e
 
 CONFIG_FILENAME="tune-xshield-1yr-even-split.yaml"
 
-
 SCRIPT_PATH=$(git rev-parse --show-prefix)
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
@@ -20,20 +19,15 @@ SEED_OFFSET=10
 cd $REPO_ROOT
 
 # two different ACE2SOM seeds
-declare -A PRE_TRAINED_WEIGHTS_DATASETS=( \
-    [0]="01KHJ5F1M6YKVZESPZAAVVD6G8" \
-    [1]="01KHCEF1SBYCZCGDM78N1CJC3H" \
-)
+PRE_TRAINED_WEIGHTS_DATASETS=("01KHJ5F1M6YKVZESPZAAVVD6G8" "01KHCEF1SBYCZCGDM78N1CJC3H")
 
-#PRE_TRAINED_WEIGHTS_DATASET=01KHJ5F1M6YKVZESPZAAVVD6G8
-
-
-python -m fme.ace.validate_config --config_type train $CONFIG_PATH --override $override
 
 for seed in {0..1}; do
     job_name="ace2som-xshield-tune-1yr-even-split-seed${seed}"
     fine_tune_seed=$((seed + SEED_OFFSET))
-    override="seed=${fine_tune_seed} \
+    override="seed=${fine_tune_seed}"
+    python -m fme.ace.validate_config --config_type train $CONFIG_PATH --override $override
+
     gantry run \
         --name $job_name \
         --description 'Run ACE training' \
@@ -50,12 +44,13 @@ for seed in {0..1}; do
         --env-secret WANDB_API_KEY=wandb-api-key-annak \
         --dataset-secret google-credentials:/tmp/google_application_credentials.json \
         --dataset $STATS_DATASET:/statsdata \
-        --dataset ${PRE_TRAINED_WEIGHTS_DATASETS[${seed}]}:/pre-trained-weights \
+        --dataset ${PRE_TRAINED_WEIGHTS_DATASETS[$seed]}:/pre-trained-weights \
         --gpus $N_GPUS \
         --shared-memory 400GiB \
         --weka climate-default:/climate-default \
         --budget ai2/climate \
-        --system-python \
+        --no-python \
         --install "pip install --no-deps ." \
+        --allow-dirty \
         -- torchrun --nproc_per_node $N_GPUS -m fme.ace.train $CONFIG_PATH --override $override
 done
