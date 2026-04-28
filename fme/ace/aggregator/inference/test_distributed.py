@@ -1,5 +1,6 @@
 import torch
 
+from fme.ace.aggregator.inference.data import InferenceBatchData
 from fme.ace.aggregator.inference.reduced import MeanAggregator
 from fme.ace.aggregator.inference.time_mean import TimeMeanEvaluatorAggregator
 from fme.core.device import get_device
@@ -20,7 +21,15 @@ def test_mean_metrics_call_distributed():
             LatLonOperations(area_weights), target="denorm", n_timesteps=3
         )
         sample_data = {"a": data_a}
-        agg.record_batch(sample_data, sample_data, sample_data, sample_data)
+        batch = InferenceBatchData(
+            prediction=sample_data,
+            prediction_norm=sample_data,
+            target=sample_data,
+            target_norm=sample_data,
+            time=None,
+            i_time_start=0,
+        )
+        agg.record_batch(batch)
         logs = agg.get_logs(label="metrics")
         table = logs["metrics/series"]
         # assert all data past the first column in the WandB table is -1
@@ -41,12 +50,15 @@ def test_time_mean_metrics_call_distributed():
         )
         target_data = {"a": torch.ones([2, 3, 4, 4], device=get_device())}
         gen_data = {"a": torch.randn([2, 3, 4, 4], device=get_device())}
-        agg.record_batch(
-            target_data=target_data,
-            gen_data=gen_data,
-            target_data_norm=target_data,
-            gen_data_norm=gen_data,
+        batch = InferenceBatchData(
+            prediction=gen_data,
+            prediction_norm=gen_data,
+            target=target_data,
+            target_norm=target_data,
+            time=None,
+            i_time_start=0,
         )
+        agg.record_batch(batch)
         logs = agg.get_logs(label="metrics")
         # the reduction happens on the time-means, so the gen and target data should
         # be filled identically and all errors will be zero, even though we gave them

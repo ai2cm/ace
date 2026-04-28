@@ -11,7 +11,8 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.metrics import spherical_power_spectrum
-from fme.core.typing_ import TensorMapping
+
+from .data import InferenceBatchData
 
 
 class SphericalPowerSpectrumAggregator:
@@ -37,11 +38,12 @@ class SphericalPowerSpectrumAggregator:
         )
 
     @torch.no_grad()
-    def record_batch(self, data: TensorMapping, i_time_start: int = 0):
-        for name in data:
-            batch_size = data[name].shape[0]
-            time_size = data[name].shape[1]
-            tensor = self._nan_fill_fn(data[name], name)
+    def record_batch(self, data: InferenceBatchData):
+        prediction = data.prediction
+        for name in prediction:
+            batch_size = prediction[name].shape[0]
+            time_size = prediction[name].shape[1]
+            tensor = self._nan_fill_fn(prediction[name], name)
             power_spectrum = spherical_power_spectrum(tensor, self._real_sht)
             mean_power_spectrum = torch.mean(power_spectrum, dim=(0, 1))
             new_count = batch_size * time_size
@@ -125,16 +127,30 @@ class PairedSphericalPowerSpectrumAggregator:
         self._report_plot = report_plot
 
     @torch.no_grad()
-    def record_batch(
-        self,
-        target_data: TensorMapping,
-        gen_data: TensorMapping,
-        target_data_norm: TensorMapping | None = None,
-        gen_data_norm: TensorMapping | None = None,
-        i_time_start: int = 0,
-    ):
-        self._gen_aggregator.record_batch(gen_data)
-        self._target_aggregator.record_batch(target_data)
+    def record_batch(self, data: InferenceBatchData):
+        self._gen_aggregator.record_batch(
+            InferenceBatchData(
+                prediction=data.prediction,
+                prediction_norm=data.prediction_norm,
+                target=None,
+                target_norm=None,
+                time=data.time,
+                i_time_start=data.i_time_start,
+            )
+        )
+        if data.target is not None:
+            self._target_aggregator.record_batch(
+                InferenceBatchData(
+                    prediction=data.target,
+                    prediction_norm=data.target_norm
+                    if data.target_norm is not None
+                    else {},
+                    target=None,
+                    target_norm=None,
+                    time=data.time,
+                    i_time_start=data.i_time_start,
+                )
+            )
 
     @torch.no_grad()
     def get_logs(self, label: str) -> dict[str, plt.Figure | float]:

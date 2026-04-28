@@ -2,7 +2,8 @@ import torch
 import xarray as xr
 
 from fme.core.histogram import ComparedDynamicHistograms
-from fme.core.typing_ import TensorMapping
+
+from .data import InferenceBatchData
 
 
 class HistogramAggregator:
@@ -12,13 +13,11 @@ class HistogramAggregator:
     @torch.no_grad()
     def record_batch(
         self,
-        target_data: TensorMapping,
-        gen_data: TensorMapping,
-        target_data_norm: TensorMapping,
-        gen_data_norm: TensorMapping,
-        i_time_start: int = 0,
+        data: InferenceBatchData,
     ):
-        self._histograms.record_batch(target_data, gen_data)
+        if data.target is None:
+            raise ValueError("HistogramAggregator requires target data.")
+        self._histograms.record_batch(data.target, data.prediction)
 
     @torch.no_grad()
     def get_logs(self, label: str):

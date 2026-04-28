@@ -14,6 +14,8 @@ from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Table, WandB
 
+from .data import InferenceBatchData
+
 
 @dataclasses.dataclass
 class _SeriesData:
@@ -250,20 +252,24 @@ class MeanAggregator:
     @torch.no_grad()
     def record_batch(
         self,
-        target_data: TensorMapping,
-        gen_data: TensorMapping,
-        target_data_norm: TensorMapping,
-        gen_data_norm: TensorMapping,
-        i_time_start: int = 0,
+        data: InferenceBatchData,
     ):
         if self._target == "norm":
-            target_data = target_data_norm
-            gen_data = gen_data_norm
+            target_data = data.target_norm
+            gen_data = data.prediction_norm
+        else:
+            target_data = data.target
+            gen_data = data.prediction
+        if target_data is None:
+            raise ValueError(
+                f"Target data is None for target type '{self._target}'. "
+                "MeanAggregator requires target data."
+            )
         for metric in self._variable_metrics.values():
             metric.record(
                 target=target_data,
                 gen=gen_data,
-                i_time_start=i_time_start,
+                i_time_start=data.i_time_start,
             )
         self._n_batches += 1
 
@@ -442,13 +448,12 @@ class SingleTargetMeanAggregator:
     @torch.no_grad()
     def record_batch(
         self,
-        data: TensorMapping,
-        i_time_start: int = 0,
+        data: InferenceBatchData,
     ):
         for metric in self._variable_metrics.values():
             metric.record(
-                tensors=data,
-                i_time_start=i_time_start,
+                tensors=data.prediction,
+                i_time_start=data.i_time_start,
             )
         self._n_batches += 1
 

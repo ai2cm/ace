@@ -13,6 +13,7 @@ from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Image
 
 from ..plotting import plot_paneled_data
+from .data import InferenceBatchData
 
 
 @dataclasses.dataclass
@@ -144,12 +145,14 @@ class ZonalMeanAggregator:
 
     def record_batch(
         self,
-        target_data: TensorMapping,
-        gen_data: TensorMapping,
-        target_data_norm: TensorMapping,
-        gen_data_norm: TensorMapping,
-        i_time_start: int,
+        data: InferenceBatchData,
     ):
+        if data.target is None:
+            raise ValueError("ZonalMeanAggregator requires target data.")
+        target_data = data.target
+        gen_data = data.prediction
+        i_time_start = data.i_time_start
+
         if self._target_data is None:
             self._target_data = self._initialize_zeros_zonal_mean_from_batch(
                 target_data, self._n_timesteps

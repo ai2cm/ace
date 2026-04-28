@@ -14,6 +14,8 @@ from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorMapping
 from fme.core.wandb import Image
 
+from .data import InferenceBatchData
+
 
 class SeasonalAggregator:
     def __init__(
@@ -29,13 +31,14 @@ class SeasonalAggregator:
     @torch.no_grad()
     def record_batch(
         self,
-        time: xr.DataArray,
-        target_data: TensorMapping,
-        gen_data: TensorMapping,
+        data: InferenceBatchData,
     ):
         """Record a batch of data for computing time variability statistics."""
-        target_data = {name: value.cpu() for name, value in target_data.items()}
-        gen_data = {name: value.cpu() for name, value in gen_data.items()}
+        assert data.time is not None
+        assert data.target is not None
+        time = data.time
+        target_data = {name: value.cpu() for name, value in data.target.items()}
+        gen_data = {name: value.cpu() for name, value in data.prediction.items()}
         target_ds = _to_dataset(target_data, time)
         gen_ds = _to_dataset(gen_data, time)
 
