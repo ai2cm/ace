@@ -4,13 +4,13 @@ fto_stochastic-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_cbj61w53|rs0|01KN804Z
 
 ft_stochastic_ncs2-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_cbj61w53|rs0|01KNAE3N028WHAYWG581V4ETZ2|trained|best_inference_ckpt|normal|--not-preemptible
 
-ft_fto_stochastic_ncs3_5ep-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KNNRNA7ZBHH8YWBEVHAW138N|run_140yr|best_inference_ckpt|high|--not-preemptible
+ft_fto_stochastic_ncs3_5ep-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KNNRNA7ZBHH8YWBEVHAW138N|trained|best_inference_ckpt|high|--not-preemptible
 
 ft_fto_stochastic_ncs3_10ep-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KNRCQCF5VWETHB0NTB9TT957|trained|best_inference_ckpt|normal|--not-preemptible
 
 ft_fto_stochastic_ncs3_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KNW432G50TY9WKN7C9HMVS1E|training|best_inference_ckpt|normal|--not-preemptible
 
-ft_fto_stochastic_ncs4_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KNZHD7DGXC8YCVMVS00QZQNX|run_140yr|best_inference_ckpt|high|--not-preemptible
+ft_fto_stochastic_ncs4_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KNZHD7DGXC8YCVMVS00QZQNX|trained|best_inference_ckpt|high|--not-preemptible
 
 ft_fto_stochastic_ncs4_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KPS7D8XNEC2R8GGSBZTYQPE4|training|best_inference_ckpt|normal|--not-preemptible
 
@@ -32,4 +32,4 @@ ft_fto_stochastic_ncs4mas40_wu4k_LRp0001-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs
 
 fta_ft_fto_stoch_mas40_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQ6FQZ40BSV0FX90BR27PVRX|training|best_inference_ckpt|normal|--not-preemptible
 
-fta_ft_fto_stoch_mas40_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQ7W2EY25BTZSE85CTZ39HB2|training|best_inference_ckpt|normal|--not-preemptible
+fta_ft_fto_stoch_mas40_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQ7W2EY25BTZSE85CTZ39HB2|run_140yr|best_inference_ckpt|normal|--not-preemptible
