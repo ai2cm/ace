@@ -19,8 +19,8 @@ from omegaconf import DictConfig
 
 import fastgen.configs.methods.config_scm as config_scm_default
 from fastgen.configs.callbacks import EMA_CONST_CALLBACKS
-from fastgen.utils import LambdaInverseSquareRootScheduler
 from fastgen.utils import LazyCall as L
+from fastgen.utils.lr_scheduler import LambdaInverseSquareRootScheduler
 
 TEACHER_CKPT_PATH = os.environ.get("ACE_TEACHER_CKPT", "")
 
