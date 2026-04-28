@@ -63,10 +63,8 @@ from fme.ace.aggregator import (
     OneStepAggregatorConfig,
     TrainAggregator,
 )
-from fme.ace.aggregator.inference.main import (
-    InferenceEvaluatorAggregator,
-    InferenceEvaluatorAggregatorConfig,
-)
+from fme.ace.aggregator.inference.config import InferenceEvaluatorAggregatorConfig
+from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregator
 from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.ace.stepper import TrainOutput

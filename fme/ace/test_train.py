@@ -14,7 +14,7 @@ import xarray as xr
 import yaml
 
 import fme
-from fme.ace.aggregator.inference.main import (
+from fme.ace.aggregator.inference.config import (
     InferenceEvaluatorAggregatorConfig,
     StepMeanEntry,
 )
