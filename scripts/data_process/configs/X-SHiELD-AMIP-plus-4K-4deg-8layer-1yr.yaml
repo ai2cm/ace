@@ -1,13 +1,16 @@
 runs:
-  2026-02-12-X-SHiELD-AMIP-plus-4K-1deg-8layer-1yr: gs://vcm-ml-raw-flexible-retention/2026-02-09-X-SHiELD-AMIP-plus-4K-FME/regridded-zarrs/gaussian_grid_180_by_360/plus-4K
+  2026-02-12-X-SHiELD-AMIP-plus-4K-4deg-8layer-1yr: gs://vcm-ml-raw-flexible-retention/2026-02-09-X-SHiELD-AMIP-plus-4K-FME/regridded-zarrs/gaussian_grid_45_by_90/plus-4K
 data_output_directory: gs://vcm-ml-intermediate
 stats:
-  output_directory: gs://vcm-ml-intermediate/2026-02-12-X-SHiELD-AMIP-plus-4K-1deg-8layer-1yr-stats
-  beaker_dataset: 2026-02-12-X-SHiELD-AMIP-plus-4K-1deg-8layer-1yr-stats
+  output_directory: gs://vcm-ml-intermediate/2026-02-12-X-SHiELD-AMIP-plus-4K-4deg-8layer-1yr-stats
+  beaker_dataset: 2026-02-12-X-SHiELD-AMIP-plus-4K-4deg-8layer-1yr-stats
   start_date: "2020-01-01T06:00:00"  # Ignore first roughly 2.5 months as spin-up.
   end_date: "2021-01-01T00:00:00"  # Span exactly 1 year (note datetime string indexing is inclusive).
   data_type: FV3GFS
 dataset_computation:
+  sharding:
+    time_dim: 3600
+  n_split: 10
   reference_vertical_coordinate_file: gs://vcm-ml-raw-flexible-retention/2024-03-10-C96-SHiELD-FME-reference/vertical-coordinate-file/fv_core.res.nc
   vertical_coarsening_indices:
     - [0, 11]
@@ -102,3 +105,97 @@ dataset_computation:
       - global_mean_co2
   standard_names:
     total_frozen_precip_rate: None
+time_coarsen:
+  factor: 4
+  data_output_directory: gs://vcm-ml-intermediate/2026-02-12-X-SHiELD-AMIP-plus-4K-4deg-daily-8layer-1yr-fme-dataset
+  stats_output_directory: gs://vcm-ml-intermediate/2026-02-12-X-SHiELD-AMIP-plus-4K-4deg-daily-8layer-1yr-fme-dataset-stats
+  snapshot_names:
+    - PRESsfc
+    - PRMSL
+    - Q2m
+    - RH200
+    - RH500
+    - RH850
+    - TMP200
+    - TMP2m
+    - TMP500
+    - TMP850
+    - UGRD1000
+    - UGRD10m
+    - UGRD200
+    - UGRD500
+    - UGRD850
+    - VGRD1000
+    - VGRD10m
+    - VGRD200
+    - VGRD500
+    - VGRD850
+    - air_temperature_0
+    - air_temperature_1
+    - air_temperature_2
+    - air_temperature_3
+    - air_temperature_4
+    - air_temperature_5
+    - air_temperature_6
+    - air_temperature_7
+    - eastward_wind_0
+    - eastward_wind_1
+    - eastward_wind_2
+    - eastward_wind_3
+    - eastward_wind_4
+    - eastward_wind_5
+    - eastward_wind_6
+    - eastward_wind_7
+    - h1000
+    - h50
+    - h500
+    - h850
+    - land_fraction
+    - northward_wind_0
+    - northward_wind_1
+    - northward_wind_2
+    - northward_wind_3
+    - northward_wind_4
+    - northward_wind_5
+    - northward_wind_6
+    - northward_wind_7
+    - ocean_fraction
+    - sea_ice_fraction
+    - snow_cover_fraction
+    - soil_moisture_0
+    - soil_moisture_1
+    - soil_moisture_2
+    - soil_moisture_3
+    - specific_total_water_0
+    - specific_total_water_1
+    - specific_total_water_2
+    - specific_total_water_3
+    - specific_total_water_4
+    - specific_total_water_5
+    - specific_total_water_6
+    - specific_total_water_7
+    - surface_temperature
+    - total_water_path
+  window_names:
+    - DLWRFsfc
+    - DSWRFsfc
+    - DSWRFtoa
+    - LHTFLsfc
+    - PRATEsfc
+    - SHTFLsfc
+    - ULWRFsfc
+    - ULWRFtoa
+    - USWRFsfc
+    - USWRFtoa
+    - global_mean_co2
+    - tendency_of_total_water_path
+    - tendency_of_total_water_path_due_to_advection
+    - total_frozen_precipitation_rate
+  constant_prefixes:
+    - ak_
+    - bk_
+    - HGTsfc
+    - grid_xt
+    - grid_yt
+  input_time_slice:  # ensures coarsened data starts on 2019-10-21T00:00:00
+    start: "2019-10-20T06:00:00"
