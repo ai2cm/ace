@@ -96,6 +96,7 @@ from . import step
 from .inference.inference import get_initial_condition
 from .train.train import run_train
 from .train.train_config import (
+    AdditionalInferenceConfig,
     CopyWeightsConfig,
     DataLoaderConfig,
     EMAConfig,

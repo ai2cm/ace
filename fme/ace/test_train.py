@@ -55,7 +55,12 @@ from fme.ace.testing import (
 )
 from fme.ace.train.train import build_trainer, prepare_directory
 from fme.ace.train.train import main as train_main
-from fme.ace.train.train_config import InlineInferenceConfig, TrainBuilders, TrainConfig
+from fme.ace.train.train_config import (
+    AdditionalInferenceConfig,
+    InlineInferenceConfig,
+    TrainBuilders,
+    TrainConfig,
+)
 from fme.core.coordinates import (
     HEALPixCoordinates,
     HorizontalCoordinates,
@@ -204,7 +209,7 @@ def _get_test_yaml_files(
     )
     if skip_inline_inference:
         inline_inference_config = None
-        additional_inference_config = None
+        additional_inference_configs: list[AdditionalInferenceConfig] = []
     else:
         inline_inference_config = InlineInferenceConfig(
             aggregator=InferenceEvaluatorAggregatorConfig(
@@ -232,32 +237,37 @@ def _get_test_yaml_files(
             n_forward_steps=inference_forward_steps,
             forward_steps_in_memory=2,
         )
-        additional_inference_config = InlineInferenceConfig(
-            aggregator=InferenceEvaluatorAggregatorConfig(
-                monthly_reference_data=(
-                    str(monthly_data_filename)
-                    if monthly_data_filename is not None
-                    else None
+        additional_inference_configs = [
+            AdditionalInferenceConfig(
+                name="weather_eval",
+                config=InlineInferenceConfig(
+                    aggregator=InferenceEvaluatorAggregatorConfig(
+                        monthly_reference_data=(
+                            str(monthly_data_filename)
+                            if monthly_data_filename is not None
+                            else None
+                        ),
+                        log_step_means=[]
+                        if inference_forward_steps < 20
+                        else [StepMeanEntry(step=20)],
+                    ),
+                    loader=InferenceDataLoaderConfig(
+                        dataset=XarrayDataConfig(
+                            data_path=str(valid_data_path),
+                            spatial_dimensions=spatial_dimensions_str,
+                            labels=["era5"] if conditional else None,
+                        ),
+                        start_indices=InferenceInitialConditionIndices(
+                            first=0,
+                            n_initial_conditions=2,
+                            interval=1,
+                        ),
+                    ),
+                    n_forward_steps=inference_forward_steps,
+                    forward_steps_in_memory=2,
                 ),
-                log_step_means=[]
-                if inference_forward_steps < 20
-                else [StepMeanEntry(step=20)],
             ),
-            loader=InferenceDataLoaderConfig(
-                dataset=XarrayDataConfig(
-                    data_path=str(valid_data_path),
-                    spatial_dimensions=spatial_dimensions_str,
-                    labels=["era5"] if conditional else None,
-                ),
-                start_indices=InferenceInitialConditionIndices(
-                    first=0,
-                    n_initial_conditions=2,
-                    interval=1,
-                ),
-            ),
-            n_forward_steps=inference_forward_steps,
-            forward_steps_in_memory=2,
-        )
+        ]
 
     if use_time_length_probabilities:
         n_forward_steps_arg: TimeLength | TimeLengthSchedule = TimeLengthProbabilities(
@@ -369,7 +379,7 @@ def _get_test_yaml_files(
             n_forward_steps=n_forward_steps_arg,
         ),
         inference=inline_inference_config,
-        additional_inference=additional_inference_config,
+        additional_inference=additional_inference_configs,
         max_epochs=max_epochs,
         segment_epochs=segment_epochs,
         save_checkpoint=True,

@@ -99,6 +99,16 @@ class InlineInferenceConfig:
 
 
 @dataclasses.dataclass
+class AdditionalInferenceConfig:
+    name: str
+    config: InlineInferenceConfig
+
+    def __post_init__(self):
+        if not self.name:
+            raise ValueError("AdditionalInferenceConfig name must be non-empty.")
+
+
+@dataclasses.dataclass
 class TrainConfig:
     """
     Configuration for training a model.
@@ -119,9 +129,9 @@ class TrainConfig:
         inference: Configuration for inline inference.
             If None, no inline inference is run,
             and no "best_inline_inference" checkpoint will be saved.
-        additional_inference: Configuration for additional inference.
-            If None, no additional inference is run. Additional inference is
-            not used to select checkpoints, but is used to provide metrics.
+        additional_inference: Configurations for additional inference runs.
+            Each entry has a name (used as wandb log prefix) and config.
+            Not used to select checkpoints, but used to provide metrics.
         stepper_training: Training-specific configuration including loss, ensemble
             settings, parameter initialization, and forward step scheduling.
         train_aggregator: Configuration for the train aggregator.
@@ -186,7 +196,9 @@ class TrainConfig:
         default_factory=list
     )
     ema: EMAConfig = dataclasses.field(default_factory=lambda: EMAConfig())
-    additional_inference: InlineInferenceConfig | None = None
+    additional_inference: list[AdditionalInferenceConfig] = dataclasses.field(
+        default_factory=list
+    )
     validate_using_ema: bool = False
     checkpoint_save_epochs: Slice | None = None
     ema_checkpoint_save_epochs: Slice | None = None
@@ -216,13 +228,16 @@ class TrainConfig:
                 "train_loader and inference loader must both use labels or both not "
                 "use labels"
             )
-        if self.additional_inference is not None and (
-            self.train_loader.using_labels != self.additional_inference.using_labels
-        ):
-            raise ValueError(
-                "train_loader and additional_inference loader must both use labels or "
-                "both not use labels"
-            )
+        additional_inference_names: set[str] = set()
+        for entry in self.additional_inference:
+            if entry.name in additional_inference_names:
+                raise ValueError(f"Duplicate additional_inference name: {entry.name!r}")
+            additional_inference_names.add(entry.name)
+            if self.train_loader.using_labels != entry.config.using_labels:
+                raise ValueError(
+                    f"train_loader and additional_inference {entry.name!r} loader "
+                    "must both use labels or both not use labels"
+                )
         if self.lr_tuning is not None and self.optimization.has_lr_schedule:
             raise ValueError(
                 "lr_tuning and optimization.scheduler cannot both be specified; "
@@ -391,39 +406,47 @@ class TrainBuilders:
         save_diagnostics: bool,
         n_ic_timesteps: int,
     ) -> EndOfEpochCallback:
-        if self.config.additional_inference is not None:
+        entries_data: list[
+            tuple[AdditionalInferenceConfig, InferenceGriddedData, DatasetInfo]
+        ] = []
+        for entry in self.config.additional_inference:
             window_requirements = (
                 self.config.stepper.get_evaluation_window_data_requirements(
-                    self.config.additional_inference.forward_steps_in_memory
+                    entry.config.forward_steps_in_memory
                 )
             )
-            data = self.config.additional_inference.get_inference_data(
+            data = entry.config.get_inference_data(
                 window_requirements=window_requirements,
                 initial_condition=self.config.stepper.get_prognostic_state_data_requirements(),
             )
             dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
+            entries_data.append((entry, data, dataset_info))
 
-            def end_of_epoch_ops(epoch: int) -> Mapping[str, Any]:
-                if self.config.additional_inference is not None:
-                    if self.config.additional_inference.epochs.contains(epoch):
-                        aggregator = self.config.additional_inference.aggregator.build(
-                            dataset_info=dataset_info,
-                            n_ic_steps=n_ic_timesteps,
-                            n_forward_steps=self.config.additional_inference.n_forward_steps,
-                            initial_time=data.initial_time,
-                            normalize=normalize,
-                            output_dir=output_dir,
-                            channel_mean_names=channel_mean_names,
-                            save_diagnostics=save_diagnostics,
-                        )
-                        return inference_one_epoch(
+        def end_of_epoch_ops(epoch: int) -> Mapping[str, Any]:
+            all_logs: dict[str, Any] = {}
+            for entry, data, dataset_info in entries_data:
+                if entry.config.epochs.contains(epoch):
+                    entry_output_dir = os.path.join(
+                        output_dir, "additional_inference", entry.name
+                    )
+                    aggregator = entry.config.aggregator.build(
+                        dataset_info=dataset_info,
+                        n_ic_steps=n_ic_timesteps,
+                        n_forward_steps=entry.config.n_forward_steps,
+                        initial_time=data.initial_time,
+                        normalize=normalize,
+                        output_dir=entry_output_dir,
+                        channel_mean_names=channel_mean_names,
+                        save_diagnostics=save_diagnostics,
+                    )
+                    all_logs.update(
+                        inference_one_epoch(
                             data,
                             aggregator,
-                            "additional_inference",
+                            entry.name,
                             epoch,
                         )
-                return {}
+                    )
+            return all_logs
 
-            return end_of_epoch_ops
-
-        return lambda epoch: {}
+        return end_of_epoch_ops
