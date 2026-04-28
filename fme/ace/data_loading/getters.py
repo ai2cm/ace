@@ -177,7 +177,8 @@ def get_inference_data(
             set to None if no ocean temperature prescribing is being used.
         ocean_fraction_name: Name of the ocean fraction variable. Can be set to None
             if no ocean temperature prescribing is being used.
-        n_ensemble: Number of ensemble members per initial condition.
+        n_ensemble: Number of ensemble members per initial condition (passed to
+            ``InferenceGriddedData`` only; ``InferenceDataset`` does not broadcast).
         _force_forkserver: Whether to force using forkserver multiprocessing context.
             This is useful for debugging or testing in cases where forkserver is not
             the default, but should generally be unused in production code.
@@ -185,10 +186,6 @@ def get_inference_data(
     Returns:
         A data loader for inference with coordinates and metadata.
     """
-    # Always n_ensemble=1 in the dataset so DataLoader workers never call
-    # broadcast_ensemble (avoids worker issues; matches train/val). The requested
-    # n_ensemble is passed through to InferenceGriddedData for IC expansion and the
-    # stepper, not the dataset.
     dataset = InferenceDataset(
         config=config,
         total_forward_steps=total_forward_steps,
@@ -196,7 +193,6 @@ def get_inference_data(
         surface_temperature_name=surface_temperature_name,
         ocean_fraction_name=ocean_fraction_name,
         label_override=label_override,
-        n_ensemble=1,
     )
     properties = dataset.properties
 
