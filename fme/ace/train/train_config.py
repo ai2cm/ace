@@ -39,67 +39,6 @@ from fme.core.weight_ops import CopyWeightsConfig
 
 
 @dataclasses.dataclass
-class WeatherEvaluationConfig:
-    """
-    Parameters:
-        loader: configuration for the data loader used during weather evaluation
-        n_forward_steps: number of forward steps to take
-        forward_steps_in_memory: number of forward steps to take before
-            re-reading data from disk
-        epochs: epochs on which to run weather evaluation. By default runs
-            weather evaluation every epoch.
-        aggregator: configuration of weather evaluation aggregator.
-    """
-
-    loader: InferenceDataLoaderConfig
-    n_forward_steps: int
-    forward_steps_in_memory: int
-    epochs: Slice = dataclasses.field(default_factory=lambda: Slice())
-    aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
-        default_factory=lambda: InferenceEvaluatorAggregatorConfig(
-            log_global_mean_time_series=False, log_global_mean_norm_time_series=False
-        )
-    )
-
-    def __post_init__(self):
-        dist = Distributed.get_instance()
-        if self.loader.start_indices.n_initial_conditions % dist.world_size != 0:
-            raise ValueError(
-                "Number of inference initial conditions must be divisible by the "
-                "number of parallel workers, got "
-                f"{self.loader.start_indices.n_initial_conditions} and "
-                f"{dist.world_size}."
-            )
-        if (
-            self.aggregator.log_global_mean_time_series
-            or self.aggregator.log_global_mean_norm_time_series
-        ):
-            # Both of log_global_mean_time_series and
-            # log_global_mean_norm_time_series must be False for inline inference.
-            self.aggregator.log_global_mean_time_series = False
-            self.aggregator.log_global_mean_norm_time_series = False
-
-        for log_step_mean in self.aggregator.log_step_means:
-            log_step_mean.validate(self.n_forward_steps)
-
-    @property
-    def using_labels(self) -> bool:
-        return self.loader.using_labels
-
-    def get_inference_data(
-        self,
-        window_requirements: DataRequirements,
-        initial_condition: PrognosticStateDataRequirements,
-    ) -> InferenceGriddedData:
-        return get_inference_data(
-            config=self.loader,
-            total_forward_steps=self.n_forward_steps,
-            window_requirements=window_requirements,
-            initial_condition=initial_condition,
-        )
-
-
-@dataclasses.dataclass
 class InlineInferenceConfig:
     """
     Parameters:
@@ -247,7 +186,7 @@ class TrainConfig:
         default_factory=list
     )
     ema: EMAConfig = dataclasses.field(default_factory=lambda: EMAConfig())
-    weather_evaluation: WeatherEvaluationConfig | None = None
+    weather_evaluation: InlineInferenceConfig | None = None
     validate_using_ema: bool = False
     checkpoint_save_epochs: Slice | None = None
     ema_checkpoint_save_epochs: Slice | None = None

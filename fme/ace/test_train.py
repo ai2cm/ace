@@ -55,12 +55,7 @@ from fme.ace.testing import (
 )
 from fme.ace.train.train import build_trainer, prepare_directory
 from fme.ace.train.train import main as train_main
-from fme.ace.train.train_config import (
-    InlineInferenceConfig,
-    TrainBuilders,
-    TrainConfig,
-    WeatherEvaluationConfig,
-)
+from fme.ace.train.train_config import InlineInferenceConfig, TrainBuilders, TrainConfig
 from fme.core.coordinates import (
     HEALPixCoordinates,
     HorizontalCoordinates,
@@ -237,7 +232,7 @@ def _get_test_yaml_files(
             n_forward_steps=inference_forward_steps,
             forward_steps_in_memory=2,
         )
-        weather_evaluation_config = WeatherEvaluationConfig(
+        weather_evaluation_config = InlineInferenceConfig(
             aggregator=InferenceEvaluatorAggregatorConfig(
                 monthly_reference_data=(
                     str(monthly_data_filename)
