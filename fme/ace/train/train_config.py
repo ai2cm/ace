@@ -19,11 +19,7 @@ from fme.ace.data_loading.gridded_data import (
     InferenceGriddedData,
 )
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig
-from fme.ace.requirements import (
-    DataRequirements,
-    NullDataRequirements,
-    PrognosticStateDataRequirements,
-)
+from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.ace.stepper import TrainStepper
 from fme.ace.stepper.single_module import StepperConfig, TrainStepperConfig
 from fme.core.cli import ResumeResultsConfig
@@ -371,18 +367,6 @@ class TrainBuilders:
             n_forward_steps
         )
 
-    def _get_evaluation_window_data_requirements(self) -> DataRequirements:
-        if self.config.inference is None:
-            return NullDataRequirements
-        return self.config.stepper.get_evaluation_window_data_requirements(
-            self.config.inference.forward_steps_in_memory
-        )
-
-    def _get_initial_condition_data_requirements(
-        self,
-    ) -> PrognosticStateDataRequirements:
-        return self.config.stepper.get_prognostic_state_data_requirements()
-
     def get_train_data(self) -> GriddedData:
         data_requirements = self._get_train_window_data_requirements()
         return get_gridded_data(
@@ -405,9 +389,14 @@ class TrainBuilders:
         if self.config.inference is None:
             return ErrorInferenceData()  # type: ignore
         else:
+            window_requirements = (
+                self.config.stepper.get_evaluation_window_data_requirements(
+                    self.config.inference.forward_steps_in_memory
+                )
+            )
             return self.config.inference.get_inference_data(
-                window_requirements=self._get_evaluation_window_data_requirements(),
-                initial_condition=self._get_initial_condition_data_requirements(),
+                window_requirements=window_requirements,
+                initial_condition=self.config.stepper.get_prognostic_state_data_requirements(),
             )
 
     def get_optimization(self, modules: torch.nn.ModuleList) -> Optimization:
@@ -464,9 +453,14 @@ class TrainBuilders:
         n_ic_timesteps: int,
     ) -> EndOfEpochCallback:
         if self.config.weather_evaluation is not None:
+            window_requirements = (
+                self.config.stepper.get_evaluation_window_data_requirements(
+                    self.config.weather_evaluation.forward_steps_in_memory
+                )
+            )
             data = self.config.weather_evaluation.get_inference_data(
-                window_requirements=self._get_evaluation_window_data_requirements(),
-                initial_condition=self._get_initial_condition_data_requirements(),
+                window_requirements=window_requirements,
+                initial_condition=self.config.stepper.get_prognostic_state_data_requirements(),
             )
             dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
             aggregator = self.config.weather_evaluation.aggregator.build(
