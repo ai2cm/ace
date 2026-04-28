@@ -1,0 +1,19 @@
+checkpoint_path: /ckpt.tar
+allow_incompatible_dataset: true
+data_writer:
+  save_monthly_files: true
+  save_prediction_files: false
+experiment_dir: /results
+forward_steps_in_memory: 40
+n_forward_steps: 121200 #2099 - 2016
+initial_condition:
+  path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs/2016010100.nc
+  start_indices:
+    times:
+      - '2016-01-01T00:00:00'
+forcing_loader:
+  dataset:
+    data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
+  num_data_workers: 8
+logging:
+  project: ace
