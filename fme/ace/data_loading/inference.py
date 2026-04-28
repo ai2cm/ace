@@ -341,8 +341,6 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
         assert result.time.shape[0] == (
             self._n_initial_conditions // dist.total_data_parallel_ranks
         )
-        # Ensemble expansion (n_ensemble_per_ic > 1) is done outside the dataset—see
-        # InferenceGriddedData._get_initial_condition and the stepper—not here.
         return result
 
     def __len__(self) -> int:

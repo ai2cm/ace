@@ -11,6 +11,7 @@ from fme.ace.aggregator import (
 )
 from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregator
 from fme.ace.aggregator.train import TrainAggregatorConfig
+from fme.ace.data_loading.batch_data import PrognosticState
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_gridded_data, get_inference_data
 from fme.ace.data_loading.gridded_data import (
@@ -157,13 +158,18 @@ class InlineInferenceConfig:
         window_requirements: DataRequirements,
         initial_condition: PrognosticStateDataRequirements,
     ) -> InferenceGriddedData:
-        return get_inference_data(
+        data = get_inference_data(
             config=self.loader,
             total_forward_steps=self.n_forward_steps,
             window_requirements=window_requirements,
             initial_condition=initial_condition,
-            n_ensemble=self.n_ensemble_per_ic,
         )
+        if self.n_ensemble_per_ic > 1:
+            ic = data.initial_condition.as_batch_data()
+            data._initial_condition = PrognosticState(
+                ic.broadcast_ensemble(self.n_ensemble_per_ic)
+            )
+        return data
 
 
 @dataclasses.dataclass
