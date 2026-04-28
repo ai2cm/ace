@@ -119,9 +119,9 @@ class TrainConfig:
         inference: Configuration for inline inference.
             If None, no inline inference is run,
             and no "best_inline_inference" checkpoint will be saved.
-        weather_evaluation: Configuration for weather evaluation.
-            If None, no weather evaluation is run. Weather evaluation is not
-            used to select checkpoints, but is used to provide metrics.
+        additional_inference: Configuration for additional inference.
+            If None, no additional inference is run. Additional inference is
+            not used to select checkpoints, but is used to provide metrics.
         stepper_training: Training-specific configuration including loss, ensemble
             settings, parameter initialization, and forward step scheduling.
         train_aggregator: Configuration for the train aggregator.
@@ -186,7 +186,7 @@ class TrainConfig:
         default_factory=list
     )
     ema: EMAConfig = dataclasses.field(default_factory=lambda: EMAConfig())
-    weather_evaluation: InlineInferenceConfig | None = None
+    additional_inference: InlineInferenceConfig | None = None
     validate_using_ema: bool = False
     checkpoint_save_epochs: Slice | None = None
     ema_checkpoint_save_epochs: Slice | None = None
@@ -216,11 +216,11 @@ class TrainConfig:
                 "train_loader and inference loader must both use labels or both not "
                 "use labels"
             )
-        if self.weather_evaluation is not None and (
-            self.train_loader.using_labels != self.weather_evaluation.using_labels
+        if self.additional_inference is not None and (
+            self.train_loader.using_labels != self.additional_inference.using_labels
         ):
             raise ValueError(
-                "train_loader and weather_evaluation loader must both use labels or "
+                "train_loader and additional_inference loader must both use labels or "
                 "both not use labels"
             )
         if self.lr_tuning is not None and self.optimization.has_lr_schedule:
@@ -391,25 +391,25 @@ class TrainBuilders:
         save_diagnostics: bool,
         n_ic_timesteps: int,
     ) -> EndOfEpochCallback:
-        if self.config.weather_evaluation is not None:
+        if self.config.additional_inference is not None:
             window_requirements = (
                 self.config.stepper.get_evaluation_window_data_requirements(
-                    self.config.weather_evaluation.forward_steps_in_memory
+                    self.config.additional_inference.forward_steps_in_memory
                 )
             )
-            data = self.config.weather_evaluation.get_inference_data(
+            data = self.config.additional_inference.get_inference_data(
                 window_requirements=window_requirements,
                 initial_condition=self.config.stepper.get_prognostic_state_data_requirements(),
             )
             dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
 
             def end_of_epoch_ops(epoch: int) -> Mapping[str, Any]:
-                if self.config.weather_evaluation is not None:
-                    if self.config.weather_evaluation.epochs.contains(epoch):
-                        aggregator = self.config.weather_evaluation.aggregator.build(
+                if self.config.additional_inference is not None:
+                    if self.config.additional_inference.epochs.contains(epoch):
+                        aggregator = self.config.additional_inference.aggregator.build(
                             dataset_info=dataset_info,
                             n_ic_steps=n_ic_timesteps,
-                            n_forward_steps=self.config.weather_evaluation.n_forward_steps,
+                            n_forward_steps=self.config.additional_inference.n_forward_steps,
                             initial_time=data.initial_time,
                             normalize=normalize,
                             output_dir=output_dir,
@@ -419,7 +419,7 @@ class TrainBuilders:
                         return inference_one_epoch(
                             data,
                             aggregator,
-                            "weather_eval",
+                            "additional_inference",
                             epoch,
                         )
                 return {}

@@ -204,7 +204,7 @@ def _get_test_yaml_files(
     )
     if skip_inline_inference:
         inline_inference_config = None
-        weather_evaluation_config = None
+        additional_inference_config = None
     else:
         inline_inference_config = InlineInferenceConfig(
             aggregator=InferenceEvaluatorAggregatorConfig(
@@ -232,7 +232,7 @@ def _get_test_yaml_files(
             n_forward_steps=inference_forward_steps,
             forward_steps_in_memory=2,
         )
-        weather_evaluation_config = InlineInferenceConfig(
+        additional_inference_config = InlineInferenceConfig(
             aggregator=InferenceEvaluatorAggregatorConfig(
                 monthly_reference_data=(
                     str(monthly_data_filename)
@@ -369,7 +369,7 @@ def _get_test_yaml_files(
             n_forward_steps=n_forward_steps_arg,
         ),
         inference=inline_inference_config,
-        weather_evaluation=weather_evaluation_config,
+        additional_inference=additional_inference_config,
         max_epochs=max_epochs,
         segment_epochs=segment_epochs,
         save_checkpoint=True,
