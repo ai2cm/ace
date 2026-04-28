@@ -456,15 +456,12 @@ class InferenceEvaluatorAggregator(
                 )
             )
 
+        summary_aggregators_list = list(self._aggregators.items()) + list(
+            self._time_dependent_aggregators.items()
+        )
         if self.n_ensemble_per_ic > 1:
-            summary_aggregators_list = (
-                list(self._aggregators.items())
-                + list(self._time_dependent_aggregators.items())
-                + list(self._ensemble_aggregators.items())
-            )
-        else:
-            summary_aggregators_list = list(self._aggregators.items()) + list(
-                self._time_dependent_aggregators.items()
+            summary_aggregators_list.extend(
+                self._ensemble_aggregators.items()
             )
 
         self._summary_aggregators = {
