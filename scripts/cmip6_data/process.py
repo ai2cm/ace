@@ -1411,9 +1411,14 @@ def main() -> None:
     by_status: dict[str, int] = {}
     for r in rows:
         by_status[r.status] = by_status.get(r.status, 0) + 1
-    logging.info(
-        "Done. This run: %s; index now lists %d datasets.", by_status, len(all_rows)
-    )
+    if args.skip_index:
+        logging.info("Done. This run: %s (index update skipped).", by_status)
+    else:
+        logging.info(
+            "Done. This run: %s; index now lists %d datasets.",
+            by_status,
+            len(all_rows),
+        )
 
 
 if __name__ == "__main__":
