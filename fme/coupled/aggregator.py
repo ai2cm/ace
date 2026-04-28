@@ -10,7 +10,13 @@ from fme.ace.aggregator.inference.main import (
     InferenceAggregator as InferenceAggregator_,
 )
 from fme.ace.aggregator.inference.main import (
+    InferenceAggregatorConfig as AceInferenceAggregatorConfig,
+)
+from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregator as InferenceEvaluatorAggregator_,
+)
+from fme.ace.aggregator.inference.main import (
+    InferenceEvaluatorAggregatorConfig as AceInferenceEvaluatorAggregatorConfig,
 )
 from fme.ace.aggregator.inference.main import StepMeanEntry
 from fme.ace.aggregator.one_step.main import OneStepAggregator as OneStepAggregator_
@@ -238,19 +244,6 @@ class InferenceEvaluatorAggregatorConfig:
         ocean_channel_mean_names: Sequence[str] | None = None,
         atmosphere_channel_mean_names: Sequence[str] | None = None,
     ) -> "InferenceEvaluatorAggregator":
-        if self.monthly_reference_data is None:
-            monthly_reference_data = None
-        else:
-            monthly_reference_data = xr.open_dataset(
-                self.monthly_reference_data, decode_timedelta=False
-            )
-        if self.time_mean_reference_data is None:
-            time_mean = None
-        else:
-            time_mean = xr.open_dataset(
-                self.time_mean_reference_data, decode_timedelta=False
-            )
-
         if n_timesteps_atmosphere > 2**15 and self.log_zonal_mean_images:
             # matplotlib raises an error if image size is too large, and we plot
             # one pixel per timestep in the zonal mean images.
@@ -260,28 +253,71 @@ class InferenceEvaluatorAggregatorConfig:
                 "log_zonal_mean_images=False or "
                 "decrease n_coupled_steps to avoid this warning."
             )
-            log_zonal_mean_images = False
+            log_zonal_mean_images: bool | int = False
         else:
             log_zonal_mean_images = self.log_zonal_mean_images
 
-        return InferenceEvaluatorAggregator(
-            dataset_info=dataset_info,
-            n_timesteps_ocean=n_timesteps_ocean,
-            n_timesteps_atmosphere=n_timesteps_atmosphere,
-            initial_time=initial_time,
-            save_diagnostics=save_diagnostics,
-            output_dir=output_dir,
+        ocean_ace_config = AceInferenceEvaluatorAggregatorConfig(
             log_histograms=self.log_histograms,
             log_video=self.log_video,
-            enable_extended_videos=self.log_extended_video,
+            log_extended_video=self.log_extended_video,
             log_zonal_mean_images=log_zonal_mean_images,
             log_seasonal_means=self.log_seasonal_means,
             log_global_mean_time_series=self.log_global_mean_time_series,
             log_global_mean_norm_time_series=self.log_global_mean_norm_time_series,
-            monthly_reference_data=monthly_reference_data,
-            time_mean_reference_data=time_mean,
-            ocean_normalize=ocean_normalize,
-            atmosphere_normalize=atmosphere_normalize,
+            monthly_reference_data=self.monthly_reference_data,
+            time_mean_reference_data=self.time_mean_reference_data,
+            log_nino34_index=True,
+            log_step_means=[StepMeanEntry(step=20, name="mean_step_20")]
+            if n_timesteps_ocean >= 20
+            else [],
+        )
+        atmosphere_ace_config = AceInferenceEvaluatorAggregatorConfig(
+            log_histograms=self.log_histograms,
+            log_video=self.log_video,
+            log_extended_video=self.log_extended_video,
+            log_zonal_mean_images=log_zonal_mean_images,
+            log_seasonal_means=self.log_seasonal_means,
+            log_global_mean_time_series=self.log_global_mean_time_series,
+            log_global_mean_norm_time_series=self.log_global_mean_norm_time_series,
+            monthly_reference_data=self.monthly_reference_data,
+            time_mean_reference_data=self.time_mean_reference_data,
+            log_nino34_index=False,
+            log_step_means=[StepMeanEntry(step=20, name="mean_step_20")]
+            if n_timesteps_atmosphere >= 20
+            else [],
+        )
+
+        ocean_agg = ocean_ace_config.build(
+            dataset_info=dataset_info.ocean,
+            n_ic_steps=1,
+            n_forward_steps=n_timesteps_ocean - 1,
+            initial_time=initial_time,
+            normalize=ocean_normalize,
+            output_dir=(
+                os.path.join(output_dir, "ocean") if output_dir is not None else None
+            ),
+            channel_mean_names=ocean_channel_mean_names,
+            save_diagnostics=save_diagnostics,
+        )
+        atmosphere_agg = atmosphere_ace_config.build(
+            dataset_info=dataset_info.atmosphere,
+            n_ic_steps=1,
+            n_forward_steps=n_timesteps_atmosphere - 1,
+            initial_time=initial_time,
+            normalize=atmosphere_normalize,
+            output_dir=(
+                os.path.join(output_dir, "atmosphere")
+                if output_dir is not None
+                else None
+            ),
+            channel_mean_names=atmosphere_channel_mean_names,
+            save_diagnostics=save_diagnostics,
+        )
+
+        return InferenceEvaluatorAggregator(
+            ocean=ocean_agg,
+            atmosphere=atmosphere_agg,
             ocean_channel_mean_names=ocean_channel_mean_names,
             atmosphere_channel_mean_names=atmosphere_channel_mean_names,
         )
@@ -349,84 +385,12 @@ class InferenceEvaluatorAggregator(
 ):
     def __init__(
         self,
-        dataset_info: CoupledDatasetInfo,
-        n_timesteps_ocean: int,
-        n_timesteps_atmosphere: int,
-        initial_time: xr.DataArray,
-        ocean_normalize: Callable[[TensorMapping], TensorDict],
-        atmosphere_normalize: Callable[[TensorMapping], TensorDict],
-        save_diagnostics: bool = True,
-        output_dir: str | None = None,
-        log_video: bool = False,
-        enable_extended_videos: bool = False,
-        log_zonal_mean_images: bool = False,
-        log_seasonal_means: bool = False,
-        log_global_mean_time_series: bool = True,
-        log_global_mean_norm_time_series: bool = True,
-        monthly_reference_data: xr.Dataset | None = None,
-        log_histograms: bool = False,
-        time_mean_reference_data: xr.Dataset | None = None,
+        ocean: InferenceEvaluatorAggregator_,
+        atmosphere: InferenceEvaluatorAggregator_,
         ocean_channel_mean_names: Sequence[str] | None = None,
         atmosphere_channel_mean_names: Sequence[str] | None = None,
     ):
-        self._record_ocean_step_20 = n_timesteps_ocean >= 20
-        self._record_atmos_step_20 = n_timesteps_atmosphere >= 20
-
-        self._aggregators = {
-            "ocean": InferenceEvaluatorAggregator_(
-                dataset_info=dataset_info.ocean,
-                n_ic_steps=1,
-                n_forward_steps=n_timesteps_ocean - 1,
-                initial_time=initial_time,
-                log_histograms=log_histograms,
-                log_video=log_video,
-                enable_extended_videos=enable_extended_videos,
-                log_zonal_mean_images=log_zonal_mean_images,
-                log_seasonal_means=log_seasonal_means,
-                log_global_mean_time_series=log_global_mean_time_series,
-                log_global_mean_norm_time_series=log_global_mean_norm_time_series,
-                monthly_reference_data=monthly_reference_data,
-                time_mean_reference_data=time_mean_reference_data,
-                log_step_means=[StepMeanEntry(step=20, name="mean_step_20")]
-                if self._record_ocean_step_20
-                else [],
-                channel_mean_names=ocean_channel_mean_names,
-                normalize=ocean_normalize,
-                save_diagnostics=save_diagnostics,
-                output_dir=(
-                    os.path.join(output_dir, "ocean")
-                    if output_dir is not None
-                    else None
-                ),
-            ),
-            "atmosphere": InferenceEvaluatorAggregator_(
-                dataset_info=dataset_info.atmosphere,
-                n_ic_steps=1,
-                n_forward_steps=n_timesteps_atmosphere - 1,
-                initial_time=initial_time,
-                log_histograms=log_histograms,
-                log_video=log_video,
-                enable_extended_videos=enable_extended_videos,
-                log_zonal_mean_images=log_zonal_mean_images,
-                log_seasonal_means=log_seasonal_means,
-                log_global_mean_time_series=log_global_mean_time_series,
-                log_global_mean_norm_time_series=log_global_mean_norm_time_series,
-                monthly_reference_data=monthly_reference_data,
-                time_mean_reference_data=time_mean_reference_data,
-                log_step_means=[StepMeanEntry(step=20, name="mean_step_20")]
-                if self._record_atmos_step_20
-                else [],
-                channel_mean_names=atmosphere_channel_mean_names,
-                normalize=atmosphere_normalize,
-                save_diagnostics=save_diagnostics,
-                output_dir=(
-                    os.path.join(output_dir, "atmosphere")
-                    if output_dir is not None
-                    else None
-                ),
-                log_nino34_index=False,
-            ),
-        }
+        self._aggregators = {"ocean": ocean, "atmosphere": atmosphere}
         self._num_channels_ocean: int | None = None
         if ocean_channel_mean_names is not None:
             self._num_channels_ocean = len(ocean_channel_mean_names)
@@ -539,26 +503,29 @@ class InferenceAggregatorConfig:
         n_timesteps_atmosphere: int,
         output_dir: str,
     ) -> "InferenceAggregator":
-        if self.atmosphere_time_mean_reference_data is None:
-            atmos_time_mean = None
-        else:
-            atmos_time_mean = xr.open_dataset(
-                self.atmosphere_time_mean_reference_data, decode_timedelta=False
-            )
-        if self.ocean_time_mean_reference_data is None:
-            ocean_time_mean = None
-        else:
-            ocean_time_mean = xr.open_dataset(
-                self.ocean_time_mean_reference_data, decode_timedelta=False
-            )
-        return InferenceAggregator(
-            dataset_info=dataset_info,
-            n_timesteps_ocean=n_timesteps_ocean,
-            n_timesteps_atmosphere=n_timesteps_atmosphere,
-            output_dir=output_dir,
+        ocean_ace_config = AceInferenceAggregatorConfig(
+            time_mean_reference_data=self.ocean_time_mean_reference_data,
             log_global_mean_time_series=self.log_global_mean_time_series,
-            atmosphere_time_mean_reference_data=atmos_time_mean,
-            ocean_time_mean_reference_data=ocean_time_mean,
+        )
+        atmosphere_ace_config = AceInferenceAggregatorConfig(
+            time_mean_reference_data=self.atmosphere_time_mean_reference_data,
+            log_global_mean_time_series=self.log_global_mean_time_series,
+        )
+        ocean_agg = ocean_ace_config.build(
+            dataset_info=dataset_info.ocean,
+            n_timesteps=n_timesteps_ocean,
+            output_dir=os.path.join(output_dir, "ocean"),
+            save_diagnostics=True,
+        )
+        atmosphere_agg = atmosphere_ace_config.build(
+            dataset_info=dataset_info.atmosphere,
+            n_timesteps=n_timesteps_atmosphere,
+            output_dir=os.path.join(output_dir, "atmosphere"),
+            save_diagnostics=True,
+        )
+        return InferenceAggregator(
+            ocean=ocean_agg,
+            atmosphere=atmosphere_agg,
         )
 
 
@@ -577,57 +544,10 @@ class InferenceAggregator(
 
     def __init__(
         self,
-        dataset_info: CoupledDatasetInfo,
-        n_timesteps_ocean: int,
-        n_timesteps_atmosphere: int,
-        save_diagnostics: bool = True,
-        output_dir: str | None = None,
-        atmosphere_time_mean_reference_data: xr.Dataset | None = None,
-        ocean_time_mean_reference_data: xr.Dataset | None = None,
-        log_global_mean_time_series: bool = True,
+        ocean: InferenceAggregator_,
+        atmosphere: InferenceAggregator_,
     ):
-        """
-        Args:
-            dataset_info: The coordinates of the dataset.
-            n_timesteps_ocean: Number of timesteps for ocean.
-            n_timesteps_atmosphere: Number of timesteps for atmosphere.
-            save_diagnostics: Whether to save diagnostics.
-            output_dir: Directory to save diagnostic output.
-            atmosphere_time_mean_reference_data: Reference time means for atmosphere.
-            ocean_time_mean_reference_data: Reference time means for ocean.
-            log_global_mean_time_series: Whether to log global mean time series metrics.
-        """
-        if save_diagnostics and output_dir is None:
-            raise ValueError("Output directory must be set to save diagnostics")
-        self._log_time_series = log_global_mean_time_series
-        self._save_diagnostics = save_diagnostics
-        self._output_dir = output_dir
-        self._aggregators = {
-            "ocean": InferenceAggregator_(
-                dataset_info=dataset_info.ocean,
-                n_timesteps=n_timesteps_ocean,
-                save_diagnostics=save_diagnostics,
-                output_dir=(
-                    os.path.join(output_dir, "ocean")
-                    if output_dir is not None
-                    else None
-                ),
-                log_global_mean_time_series=log_global_mean_time_series,
-                time_mean_reference_data=ocean_time_mean_reference_data,
-            ),
-            "atmosphere": InferenceAggregator_(
-                dataset_info=dataset_info.atmosphere,
-                n_timesteps=n_timesteps_atmosphere,
-                save_diagnostics=save_diagnostics,
-                output_dir=(
-                    os.path.join(output_dir, "atmosphere")
-                    if output_dir is not None
-                    else None
-                ),
-                log_global_mean_time_series=log_global_mean_time_series,
-                time_mean_reference_data=atmosphere_time_mean_reference_data,
-            ),
-        }
+        self._aggregators = {"ocean": ocean, "atmosphere": atmosphere}
 
     @property
     def ocean(self) -> InferenceAggregator_:
@@ -639,7 +559,7 @@ class InferenceAggregator(
 
     @property
     def log_time_series(self) -> bool:
-        return self._log_time_series
+        return self.ocean.log_time_series
 
     @torch.no_grad()
     def record_batch(self, data: CoupledPairedData) -> InferenceLogs:
