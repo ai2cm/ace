@@ -1,0 +1,13 @@
+cftime
+dacite
+dask
+fsspec
+gcsfs
+matplotlib
+numpy
+pandas
+pyarrow
+pyyaml
+scipy
+xarray>=2025.1.2
+zarr>=3.0.3

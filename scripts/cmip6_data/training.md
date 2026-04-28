@@ -34,45 +34,36 @@ the mask at each timestep during the forward pass, correctly tracking the
 moving below-surface boundary. The mask variables are included in the
 training data as forcing inputs (in `in_names` but not `out_names`).
 
-### 3. Atmosphere corrector depends on hybrid sigma-pressure coordinates
+### ~~3. Atmosphere corrector depends on hybrid sigma-pressure coordinates~~ (non-issue)
 
-**Problem.** The `AtmosphereCorrector`
-(`fme/core/corrector/atmosphere.py:147`) assumes a
-`HybridSigmaPressureCoordinate` for dry-air conservation (requires `ak`/`bk`
-coefficients, line 291–295), moisture budget correction (requires
-`vertical_integral` with surface-pressure-dependent layer thicknesses), and
-energy budget correction (similar dependency). Constant pressure-level data
-has none of these.
+Not blocking. When no `HybridSigmaPressureCoordinate` is configured,
+`DatasetInfo.atmosphere_vertical_coordinate` returns `None`
+(`fme/core/dataset_info.py:193`). The corrector features that require
+vertical integrals — `conserve_dry_air`, `moisture_budget_correction`,
+`total_energy_budget_correction` — each check for `None` and raise a
+clear `ValueError` if enabled without a coordinate. All three default
+to off. The features that *don't* need a coordinate
+(`force_positive_names`, `zero_global_mean_moisture_advection`) work
+as-is.
 
-**Approach for smoke test.** Disable all corrector features that require
-vertical coordinates. The following are compatible with pressure-level data
-and should be kept:
+For pressure-level data, vertical integrals are not physically
+meaningful (levels, not layers with mass), so the disabled features
+are not just a workaround — they are correctly inapplicable.
 
-- `force_positive_names` — clamps fields to zero (line 182–185)
-- `zero_global_mean_moisture_advection` — removes the global-mean moisture
-  advection tendency (line 199–203), no vertical integral needed
+### ~~4. Normalization statistics~~ (resolved)
 
-Set `conserve_dry_air: false`, `moisture_budget_correction: null`, and
-`total_energy_budget_correction: null`.
+Resolved: `make_normalization.py` reads the processed zarrs directly,
+selects the first ensemble member per source model, concatenates both
+experiments in time, and computes area-weighted global stats. Models
+are averaged with equal weight. Outputs:
 
-**Future.** Implement a `ConstantPressureLevelCoordinate` class in
-`fme/core/coordinates.py` with constant `vertical_integral` (fixed `dp`
-per level, no surface-pressure dependence). Wire it into the corrector
-so budget closures work on pressure-level data.
+- `centering.nc` / `scaling.nc` — full-field global mean and std
+- `residual_centering.nc` / `residual_scaling.nc` — one-step-
+  difference mean and std
+- `time_mean_map.nc` — per-variable time-mean spatial field (lat, lon)
 
-### 4. Normalization statistics
-
-**Problem.** The fme normalizer (`fme/core/normalizer.py`) requires
-per-variable global means and stds as netCDF files (paths set via
-`global_means_path` and `global_stds_path`). The CMIP6 pipeline computes
-per-dataset statistics (`compute_stats.py`) but does not yet produce the
-pooled global-mean/global-std netCDF files in the format fme expects.
-
-**Approach.** Write a script that pools the per-dataset stats into
-single-variable-per-entry netCDF files. After flattening (issue 1), variable
-names become `ua1000`, `ua850`, ..., `ta_derived_layer_1000_850`, ..., `tas`, etc. and
-each needs a mean and std entry. For residual normalization, produce a second
-pair of files using the `d1_std` values from `compute_stats.py`.
+All files are scalar-per-variable netCDFs compatible with fme's
+`NormalizationConfig(global_means_path=..., global_stds_path=...)`.
 
 ### 5. Training configuration complexity
 

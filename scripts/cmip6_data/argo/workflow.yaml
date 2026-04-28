@@ -1,0 +1,246 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: cmip6-daily-pilot-
+spec:
+  entrypoint: cmip6-daily-pilot
+  volumes:
+    - name: gcp-key-secret
+      secret:
+        defaultMode: 420
+        secretName: gcp-key
+  arguments:
+    parameters:
+    - name: config
+    - name: dataset_keys
+      # Space-separated "source_id/experiment/variant_label" triples,
+      # one per dataset to process.  Built by submit.sh from the
+      # inventory + config via process.py --dry-run.
+    - name: datasets_count_minus_one
+    - name: run_process
+      value: "false"
+    - name: run_stats
+      value: "false"
+    - name: run_normalization
+      value: "false"
+  templates:
+    # ------------------------------------------------------------------
+    # Entry point: sequential stages, each with a conditional gate.
+    # ------------------------------------------------------------------
+    - name: cmip6-daily-pilot
+      steps:
+      - - name: process-dataset
+          when: "{{workflow.parameters.run_process}} == true"
+          template: process-dataset
+          arguments:
+            parameters:
+            - name: dataset_index
+              value: "{{item}}"
+          withSequence:
+            start: "0"
+            end: "{{workflow.parameters.datasets_count_minus_one}}"
+      - - name: rebuild-index
+          when: "{{workflow.parameters.run_process}} == true"
+          template: rebuild-index
+      - - name: compute-stats
+          when: "{{workflow.parameters.run_stats}} == true"
+          template: compute-stats
+      - - name: make-normalization
+          when: "{{workflow.parameters.run_normalization}} == true"
+          template: make-normalization
+      - - name: make-presence
+          when: "{{workflow.parameters.run_stats}} == true"
+          template: make-presence
+
+    # ------------------------------------------------------------------
+    # process-dataset: run process.py for one (source_id, exp, member).
+    # Each pod downloads from Pangeo GCS and writes to the configured
+    # output_directory (a GCS path).
+    # ------------------------------------------------------------------
+    - name: process-dataset
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: highmem-sim-pool
+      inputs:
+        parameters:
+          - name: dataset_index
+      container:
+        image: us-central1-docker.pkg.dev/vcm-ml/full-model/cmip6-processing:latest
+        resources:
+          limits:
+            cpu: "8000m"
+            memory: "32Gi"
+          requests:
+            cpu: "8000m"
+            memory: "32Gi"
+        command: ["bash", "-c", "-e"]
+        args:
+          - |
+            cat << 'CONFIGEOF' > config.yaml
+            {{workflow.parameters.config}}
+            CONFIGEOF
+
+            idx={{inputs.parameters.dataset_index}}
+            keys=({{workflow.parameters.dataset_keys}})
+            key="${keys[${idx}]}"
+
+            source_id=$(echo "${key}" | cut -d/ -f1)
+            experiment=$(echo "${key}" | cut -d/ -f2)
+            variant=$(echo "${key}" | cut -d/ -f3)
+
+            echo "Processing ${source_id} ${experiment} ${variant}"
+            python process.py \
+              --config config.yaml \
+              --force \
+              --skip-index \
+              --source-ids "${source_id}" \
+              --experiments "${experiment}" \
+              --variant-labels "${variant}" \
+              --max-datasets 1
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret
+
+    # ------------------------------------------------------------------
+    # rebuild-index: scan all metadata.json sidecars on GCS to rebuild
+    # index.csv after parallel processing.
+    # ------------------------------------------------------------------
+    - name: rebuild-index
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: med-sim-pool
+      container:
+        image: us-central1-docker.pkg.dev/vcm-ml/full-model/cmip6-processing:latest
+        resources:
+          limits:
+            cpu: "4000m"
+            memory: "8Gi"
+          requests:
+            cpu: "4000m"
+            memory: "8Gi"
+        command: ["bash", "-c", "-e"]
+        args:
+          - |
+            cat << 'CONFIGEOF' > config.yaml
+            {{workflow.parameters.config}}
+            CONFIGEOF
+
+            python rebuild_index.py --config config.yaml
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret
+
+    # ------------------------------------------------------------------
+    # compute-stats: per-dataset statistics (all datasets, single pod).
+    # The grid is small (45x90) so this runs sequentially.
+    # ------------------------------------------------------------------
+    - name: compute-stats
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: med-sim-pool
+      container:
+        image: us-central1-docker.pkg.dev/vcm-ml/full-model/cmip6-processing:latest
+        resources:
+          limits:
+            cpu: "4000m"
+            memory: "16Gi"
+          requests:
+            cpu: "4000m"
+            memory: "16Gi"
+        command: ["bash", "-c", "-e"]
+        args:
+          - |
+            cat << 'CONFIGEOF' > config.yaml
+            {{workflow.parameters.config}}
+            CONFIGEOF
+
+            python compute_stats.py --config config.yaml --force
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret
+
+    # ------------------------------------------------------------------
+    # make-normalization: pooled centering/scaling/time-mean files.
+    # ------------------------------------------------------------------
+    - name: make-normalization
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: med-sim-pool
+      container:
+        image: us-central1-docker.pkg.dev/vcm-ml/full-model/cmip6-processing:latest
+        resources:
+          limits:
+            cpu: "8000m"
+            memory: "32Gi"
+          requests:
+            cpu: "8000m"
+            memory: "32Gi"
+        command: ["bash", "-c", "-e"]
+        args:
+          - |
+            cat << 'CONFIGEOF' > config.yaml
+            {{workflow.parameters.config}}
+            CONFIGEOF
+
+            python make_normalization.py --config config.yaml
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret
+
+    # ------------------------------------------------------------------
+    # make-presence: presence table, heatmap, markdown rollup.
+    # ------------------------------------------------------------------
+    - name: make-presence
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: med-sim-pool
+      container:
+        image: us-central1-docker.pkg.dev/vcm-ml/full-model/cmip6-processing:latest
+        resources:
+          limits:
+            cpu: "4000m"
+            memory: "8Gi"
+          requests:
+            cpu: "4000m"
+            memory: "8Gi"
+        command: ["bash", "-c", "-e"]
+        args:
+          - |
+            cat << 'CONFIGEOF' > config.yaml
+            {{workflow.parameters.config}}
+            CONFIGEOF
+
+            python make_presence.py --config config.yaml
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret

@@ -28,11 +28,13 @@ Usage:
 """
 
 import argparse
+import io
 import json
 import logging
 import sys
 from pathlib import Path
 
+import fsspec
 import numpy as np
 import pandas as pd
 
@@ -274,7 +276,11 @@ def write_heatmap(presence: pd.DataFrame, path: str) -> None:
 
     fig.suptitle("CMIP6 daily pilot — variable presence by dataset", fontsize=11)
     fig.tight_layout()
-    fig.savefig(path, dpi=130, bbox_inches="tight")
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=130, bbox_inches="tight")
+    buf.seek(0)
+    with fsspec.open(path, "wb") as f:
+        f.write(buf.read())
     plt.close(fig)
     logging.info("Wrote heatmap %s", path)
 
@@ -346,7 +352,8 @@ def write_markdown(presence: pd.DataFrame, path: str) -> None:
                 cells.append(f"{count}/{total}")
         lines.append(f"| {source_id} | " + " | ".join(cells) + " |")
     lines.append("")
-    Path(path).write_text("\n".join(lines))
+    with fsspec.open(path, "w") as f:
+        f.write("\n".join(lines))
     logging.info("Wrote markdown %s", path)
 
 
@@ -381,7 +388,8 @@ def main() -> None:
     index_path = f"{out_dir}/index.csv"
 
     inv = pd.read_csv(inv_path)
-    if not Path(index_path).exists():
+    fs, rel = fsspec.core.url_to_fs(index_path)
+    if not fs.exists(rel):
         raise FileNotFoundError(
             f"Could not find {index_path}. Run process.py first to produce the index."
         )

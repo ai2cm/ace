@@ -29,6 +29,7 @@ import logging
 import sys
 from pathlib import Path
 
+import fsspec
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -291,6 +292,12 @@ def main() -> None:
         action="store_true",
         help="Recompute stats.nc even where it already exists.",
     )
+    parser.add_argument(
+        "--source-ids",
+        nargs="+",
+        default=None,
+        help="Optional subset of source_ids to compute stats for.",
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
@@ -302,6 +309,8 @@ def main() -> None:
     idx = pd.read_csv(index_path)
 
     ok = idx[idx.status == "ok"].reset_index(drop=True)
+    if args.source_ids is not None:
+        ok = ok[ok.source_id.isin(args.source_ids)].reset_index(drop=True)
     logging.info("Found %d ok datasets in the index.", len(ok))
 
     grid_name = cfg.defaults.target_grid.name
@@ -311,7 +320,7 @@ def main() -> None:
 
     for i, r in ok.iterrows():
         zarr_path = r.output_zarr
-        stats_path = Path(zarr_path).parent / "stats.nc"
+        stats_path = zarr_path.rstrip("/").rsplit("/", 1)[0] + "/stats.nc"
         identity = {
             "source_id": r.source_id,
             "experiment": r.experiment,
@@ -319,11 +328,13 @@ def main() -> None:
             "label": r.get("label", ""),
         }
 
-        if stats_path.exists() and not args.force:
+        fs, rel = fsspec.core.url_to_fs(stats_path)
+        if fs.exists(rel) and not args.force:
             logging.info("[%d/%d] reuse %s", i + 1, len(ok), stats_path)
-            stats_ds = xr.open_dataset(stats_path)
-            rows.extend(_rows_from_stats_ds(stats_ds, identity))
-            stats_ds.close()
+            with fs.open(rel, "rb") as fobj:
+                stats_ds = xr.open_dataset(fobj)
+                rows.extend(_rows_from_stats_ds(stats_ds, identity))
+                stats_ds.close()
             n_reused += 1
             continue
 
@@ -339,8 +350,8 @@ def main() -> None:
         stats_ds, dataset_rows = compute_dataset_stats(ds, w2d)
         for k, val in identity.items():
             stats_ds.attrs[k] = val
-        stats_path.parent.mkdir(parents=True, exist_ok=True)
-        stats_ds.to_netcdf(stats_path)
+        with fs.open(rel, "wb") as fobj:
+            stats_ds.to_netcdf(fobj)
         ds.close()
 
         for row in dataset_rows:

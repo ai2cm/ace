@@ -1350,10 +1350,29 @@ def main() -> None:
         help="Optional subset of source_ids to process (overrides config).",
     )
     parser.add_argument(
+        "--experiments",
+        nargs="+",
+        default=None,
+        help="Optional subset of experiments to process (overrides config).",
+    )
+    parser.add_argument(
+        "--variant-labels",
+        nargs="+",
+        default=None,
+        help="Optional subset of variant labels to process (post-selection filter).",
+    )
+    parser.add_argument(
         "--max-datasets",
         type=int,
         default=None,
         help="Limit to this many datasets (after selection). Debug aid.",
+    )
+    parser.add_argument(
+        "--skip-index",
+        action="store_true",
+        help="Skip writing the central index. Useful when running many "
+        "parallel jobs that each process a single dataset; a separate "
+        "rebuild_index.py run consolidates the sidecars afterward.",
     )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -1361,9 +1380,14 @@ def main() -> None:
     config = ProcessConfig.from_file(args.config)
     if args.source_ids is not None:
         config.selection.source_ids = args.source_ids
+    if args.experiments is not None:
+        config.selection.experiments = args.experiments
 
     inventory = _load_inventory(config.inventory_path)
     tasks = select_datasets(inventory, config)
+    if args.variant_labels is not None:
+        allowed = set(args.variant_labels)
+        tasks = [t for t in tasks if t.variant_label in allowed]
     if args.max_datasets is not None:
         tasks = tasks[: args.max_datasets]
 
@@ -1376,11 +1400,12 @@ def main() -> None:
 
     rows = run(config, tasks, force=args.force)
 
-    # Central index: merge this-run's rows with every sidecar on disk so
-    # narrow --source-ids / --max-datasets re-runs don't truncate the
-    # index to the subset just processed.
-    all_rows = _merge_rows_for_index(rows, config.output_directory)
-    write_index(all_rows, config.output_directory)
+    if not args.skip_index:
+        # Central index: merge this-run's rows with every sidecar on disk so
+        # narrow --source-ids / --max-datasets re-runs don't truncate the
+        # index to the subset just processed.
+        all_rows = _merge_rows_for_index(rows, config.output_directory)
+        write_index(all_rows, config.output_directory)
 
     # Final status summary covers only datasets attempted in THIS run.
     by_status: dict[str, int] = {}
