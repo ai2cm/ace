@@ -476,7 +476,16 @@ python make_presence.py --config configs/pilot.yaml
 
 - **Heterogeneous variables at train time.** Core code change in
   `fme/core/dataset/` and the stepper to allow per-dataset variable
-  subsets. Tracked separately from this pilot.
+  subsets. Tracked separately from this pilot. Once this is supported,
+  revisit the "core variable" gate in `process.py` — currently any
+  model missing any core variable is dropped entirely, but with
+  heterogeneous-variable training we should allow a certain number of
+  core variables to be missing. This would recover a significant
+  number of models: e.g. 8 models have `hus` on pressure levels but
+  not `huss` (near-surface specific humidity), and 17 models lack
+  `zg` (geopotential height). Some of these could also be addressed
+  by deriving missing variables from available ones (e.g. approximating
+  `huss` from the 1000 hPa level of `hus`).
 - **Calendar heterogeneity across datasets.** Each dataset records its
   native calendar now; cross-dataset handling (does `ConcatDatasetConfig`
   tolerate mixed calendars?) is a later concern.
