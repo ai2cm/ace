@@ -4,7 +4,7 @@ validate_using_ema: true
 evaluate_before_training: true
 ema:
   decay: 0.999
-max_epochs: 2
+max_epochs: 10
 inference:
   n_forward_steps: 7280 #2019-2024
   forward_steps_in_memory: 40
@@ -72,8 +72,10 @@ optimization:
   kwargs:
     weight_decay: 0.01
 stepper_training:
+  parameter_init:
+    weights_path: /pre-trained-weights/training_checkpoints/best_ckpt.tar
   n_ensemble: 2
-  train_n_forward_steps:
+  n_forward_steps:
     outcomes:
       - steps: 1
         probability: 0.6
@@ -113,10 +115,15 @@ stepper_training:
 stepper:
   step:
     type: single_module
-    secondary_decoder:
-      secondary_diagnostic_names:
-      - PRMSL
     config:
+      secondary_decoder:
+        secondary_diagnostic_names:
+        - PRMSL
+        network:
+          type: MLP
+          config:
+            hidden_dim: 256
+            depth: 2
       residual_prediction: false
       builder:
         type: NoiseConditionedSFNO
