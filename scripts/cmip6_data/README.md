@@ -33,7 +33,8 @@ config knobs to scale up to the full roster later.
 
 **Core state (required — any model missing any of these is dropped):**
 
-3D on `plev8`: `ua`, `va`, `hus`, `zg`
+On `plev8` (flattened to pressure-named 2D variables in the zarr
+output — see **Plev flattening** below): `ua`, `va`, `hus`, `zg`
 2D: `tas`, `huss`, `psl`, `pr`
 
 Notably **absent from core**:
@@ -41,8 +42,9 @@ Notably **absent from core**:
 - `ta` (air temperature on `plev`) — Pangeo daily coverage is essentially
   nil (3 models). Instead we derive 7 layer-mean temperatures from `zg` +
   `hus` via the hypsometric equation at ingest time and store them as
-  `ta_derived_layer_{0..6}`. This is a proxy, not a true temperature; it's
-  treated as derived throughout and labelled as such in the zarr.
+  `ta_derived_layer_{lo}_{hi}` (e.g. `ta_derived_layer_1000_850`). This
+  is a proxy, not a true temperature; it's treated as derived throughout
+  and labelled as such in the zarr.
 - `ps` (surface pressure) — not published at daily cadence by any CMIP6
   model. `psl` (mean sea-level pressure) + a topography/`zg`-derived
   surface mask stand in for surface pressure when needed.
@@ -86,49 +88,49 @@ f)` label, yielding the effective pilot dataset.
 
 ### Derived variables
 
-**Layer-mean temperature `ta_derived_layer_{0..6}`.** Computed at ingest
-from `zg` and `hus` using the hypsometric equation under hydrostatic
-balance — an excellent approximation for daily means at 4°×4°:
+**Layer-mean temperature `ta_derived_layer_{lo}_{hi}`.** Computed at
+ingest from `zg` and `hus` using the hypsometric equation under
+hydrostatic balance — an excellent approximation for daily means at
+4°×4°:
 
 ```
-T_v^{layer_i}  = g · (z_{i+1} - z_i) / (R_d · ln(p_i / p_{i+1}))
-q^{layer_i}    = (q_i + q_{i+1}) / 2
-T^{layer_i}    = T_v^{layer_i} / (1 + 0.608 · q^{layer_i})
+T_v^{layer}  = g · (z_hi - z_lo) / (R_d · ln(p_lo / p_hi))
+q^{layer}    = (q_lo + q_hi) / 2
+T^{layer}    = T_v^{layer} / (1 + 0.608 · q^{layer})
 ```
 
-with `R_d = 287.05 J/kg/K`, `g = 9.80665 m/s²`. All inputs are co-located
-on `plev8` levels, so the computation is just differences and averages
-along the `plev` dimension — no interpolation. The 7 layer values live at
-the log-pressure midpoints `√(p_i · p_{i+1})`. Expected error from
-applying an instantaneous relation to daily means is <<1 K at these
-scales; far below inter-model spread.
+with `R_d = 287.05 J/kg/K`, `g = 9.80665 m/s²`. All inputs are
+co-located on `plev8` levels, so the computation is just differences
+and averages along the `plev` dimension — no interpolation. The 7
+layers are named by their bounding pressures:
+`ta_derived_layer_1000_850`, `ta_derived_layer_850_700`, ...,
+`ta_derived_layer_50_10`. Expected error from applying an
+instantaneous relation to daily means is <<1 K at these scales; far
+below inter-model spread.
 
-Variables are named `ta_derived_layer_*` throughout (never `ta`) to keep
-it unambiguous that these are proxies, not native CMIP6 temperatures.
+Variables are named `ta_derived_layer_*` throughout (never `ta`) to
+keep it unambiguous that these are proxies, not native CMIP6
+temperatures.
 
 **Vertical-grid note (important for downstream masking).** The derived
 temperatures live on **layers between adjacent plev levels**, so there
 are only 7 of them when plev has 8 levels. This is a different
 vertical grid from `ua`/`va`/`hus`/`zg`, which are on the 8 plev
-levels themselves. The shape of each `ta_derived_layer_i` is
-`(time, lat, lon)`; the layer pressure is the log-midpoint
-`sqrt(plev[i] * plev[i+1])`.
+levels themselves. The shape of each layer variable is
+`(time, lat, lon)`.
 
-**Masking derived T.** The stored `below_surface_mask(time, plev, lat,
-lon)` is on plev levels, so users need to combine the two bounding
-levels of each layer to get a layer mask. Layer `i` is invalid
-wherever either `plev[i]` or `plev[i+1]` is below surface:
+**Masking derived T.** The stored per-level
+`below_surface_mask{hPa}(time, lat, lon)` variables (see **Plev
+flattening**) give the mask at each pressure level. To mask a derived
+layer, combine its two bounding levels — a layer is invalid wherever
+either bounding level is below surface:
 
 ```python
 import xarray as xr
 
 ds = xr.open_zarr(<path-to-dataset.zarr>, consolidated=True)
-i = 0  # e.g. the 1000-850 hPa layer
-layer_mask_i = (
-    ds.below_surface_mask.isel(plev=i)
-    | ds.below_surface_mask.isel(plev=i + 1)
-).astype(bool)
-ta_layer_i_valid = ds[f"ta_derived_layer_{i}"].where(~layer_mask_i)
+layer_mask = (ds["below_surface_mask1000"] | ds["below_surface_mask850"]).astype(bool)
+ta_valid = ds["ta_derived_layer_1000_850"].where(~layer_mask)
 ```
 
 During ingest we apply a **cascading nearest-above fill** to the
@@ -160,6 +162,25 @@ filled cells should apply the layer mask recipe above.
   those — clipping would break the integral conservation. The sanity
   checks tolerate a small ``_EPS`` margin below / above the nominal
   physical range for this reason.
+
+### Plev flattening
+
+The zarr output **does not** store a `plev` dimension. Instead,
+`process.py` flattens every variable with a vertical dimension into
+pressure-named 2D variables before writing:
+
+**On-level variables** (`plev` dim) use `{var}{hPa}`:
+- `ua` → `ua1000`, `ua850`, `ua700`, `ua500`, `ua250`, `ua100`, `ua50`, `ua10`
+- Same pattern for `va`, `hus`, `zg`, and `below_surface_mask`
+
+**Derived layer variables** (`plev_layer` dim) use
+`{var}_{lo_hPa}_{hi_hPa}`:
+- `ta_derived_layer` → `ta_derived_layer_1000_850`,
+  `ta_derived_layer_850_700`, ..., `ta_derived_layer_50_10`
+
+This makes all stored variables uniformly `(time, lat, lon)` or
+`(lat, lon)`, which is compatible with the fme data loader. The
+pressure values are readable directly from the variable name.
 
 ### Temporal
 
@@ -237,8 +258,10 @@ Driven by the YAML config + the inventory. For each selected
 7. Linear-interpolate monthly forcings onto the daily axis; attach
    static fields.
 8. Time-subset per config.
-9. Write zarr with zarr v3 chunks+shards; drop sidecar metadata.json.
-10. Append a row to the central `index.{csv,parquet}`.
+9. Flatten `plev` dimension into pressure-named 2D variables (see
+   **Plev flattening**).
+10. Write zarr with zarr v3 chunks+shards; drop sidecar metadata.json.
+11. Append a row to the central `index.{csv,parquet}`.
 
 **Resumability.** Re-running is cheap: the `metadata.json` sidecar
 serves as the "completed" marker. A complete sidecar → skip. A zarr
@@ -298,9 +321,11 @@ python make_presence.py --config configs/pilot.yaml
 - **Forcings wiring.** Monthly `ts` (`Amon`) + `siconc` (`SImon`)
   interpolated to daily; static `sftlf` + `orog` (`fx`) broadcast.
   ~21 source_ids have full core + forcing + static coverage in Pangeo.
-- **Issue 7 — Below-surface masking.** Single shared time-varying
-  `below_surface_mask(time, plev, lat, lon)` (uint8) per dataset.
-  Primary derivation: NaN union across 3D plev variables (captures
+- **Issue 7 — Below-surface masking.** Per-level time-varying
+  `below_surface_mask{hPa}(time, lat, lon)` (uint8) per dataset
+  (flattened from a single `(time, plev, lat, lon)` array; see
+  **Plev flattening**). Primary derivation: NaN union across 3D plev
+  variables (captures
   day-to-day surface-pressure variation via the model's own masking
   decisions). Fallback: `zg < orog` (still time-varying via `zg`).
   Drop dataset if both unavailable. Masked cells in 3D variables get

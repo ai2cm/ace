@@ -10,36 +10,25 @@ training run on the CMIP6 daily pressure-level data produced by
 
 These must be resolved before a smoke-test run can start.
 
-### 1. Data format: mixed dimensionality in zarr output
+### ~~1. Data format: mixed dimensionality in zarr output~~ (resolved)
 
-**Problem.** The processed zarr stores 3D state variables (`ua`, `va`, `hus`,
-`zg`) with dims `(time, plev, lat, lon)`, while 2D variables (`tas`, `psl`,
-`pr`, forcing/static fields, and the derived `ta_derived_layer_*`) have dims
-`(time, lat, lon)` or `(lat, lon)`. The fme data loader
-(`fme/core/dataset/xarray.py`) discovers the highest-dimensional variable and
-uses its shape as `final_shape` for all variables. When a 2D variable doesn't
-match this 4D shape, `load_series_data` raises
-`ValueError("If broadcasting, array must be 1D")`
-(`fme/core/dataset/utils.py:206`).
-
-**Approach.** Update `process.py` to flatten the `plev` dimension into
-per-level 2D variables before writing the zarr: `ua_0` through `ua_7`,
-`va_0` through `va_7`, etc. Similarly flatten `below_surface_mask` into
-per-level variables `below_surface_mask_0` through `below_surface_mask_7`.
-This makes all variables uniformly `(time, lat, lon)` or `(lat, lon)`,
-compatible with the fme data loader without modifications.
+Resolved: `_flatten_plev_variables` in `process.py` splits 3D variables
+into pressure-named 2D variables before writing: `ua1000` through
+`ua10`, `below_surface_mask1000` through `below_surface_mask10`, and
+`ta_derived_layer_1000_850` through `ta_derived_layer_50_10`. All
+variables are now uniformly `(time, lat, lon)` or `(lat, lon)`.
 
 ### 2. Time-varying below-surface mask
 
-**Problem.** The CMIP6 data has `below_surface_mask(time, plev, lat, lon)` that
-varies over time (surface pressure changes move the boundary). After flattening
-(issue 1), this becomes per-level variables like
-`below_surface_mask_0(time, lat, lon)`. But fme's `MaskProvider`
+**Problem.** The CMIP6 data has a time-varying below-surface mask that
+varies over time (surface pressure changes move the boundary). After
+flattening (issue 1), this becomes per-level variables like
+`below_surface_mask1000(time, lat, lon)`. But fme's `MaskProvider`
 (`fme/core/mask_provider.py:67`) only supports time-invariant masks — it loads
 masks once from the first timestep and broadcasts them.
 
 **Approach.** Use a CMIP6-specific step object (or corrector) that consumes
-the per-level `below_surface_mask_N` variables as ordinary time-varying data
+the per-level `below_surface_mask{hPa}` variables as ordinary time-varying data
 variables rather than relying on fme's `MaskProvider`. This step would apply
 the mask at each timestep during the forward pass, correctly tracking the
 moving below-surface boundary. The mask variables are included in the
@@ -81,7 +70,7 @@ pooled global-mean/global-std netCDF files in the format fme expects.
 
 **Approach.** Write a script that pools the per-dataset stats into
 single-variable-per-entry netCDF files. After flattening (issue 1), variable
-names become `ua_0`, `ua_1`, ..., `ta_derived_layer_0`, ..., `tas`, etc. and
+names become `ua1000`, `ua850`, ..., `ta_derived_layer_1000_850`, ..., `tas`, etc. and
 each needs a mean and std entry. For residual normalization, produce a second
 pair of files using the `d1_std` values from `compute_stats.py`.
 
@@ -147,9 +136,11 @@ have consistent metadata, including variable sets. Training on the union of
 all variables would fail for models missing some.
 
 **Smoke-test workaround.** Train only on the intersection of variables
-available across all (non-excluded) models — the core variables (`ua`, `va`,
-`hus`, `zg`, `tas`, `huss`, `psl`, `pr`) plus derived layers
-(`ta_derived_layer_0`–`6`). Do not include optional variables.
+available across all (non-excluded) models — the core variables (e.g.
+`ua1000`–`ua10`, `va1000`–`va10`, `hus1000`–`hus10`, `zg1000`–`zg10`,
+`tas`, `huss`, `psl`, `pr`) plus derived layers
+(`ta_derived_layer_1000_850`–`ta_derived_layer_50_10`). Do not include
+optional variables.
 
 **Future.** Support heterogeneous variable sets across datasets in the
 concat loader. One approach: fill missing optional variables with a

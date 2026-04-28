@@ -68,7 +68,12 @@ def area_weights_2d(grid_name: str, n_lon: int) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 # Variables we don't need stats for (mask channels — uninformative).
-_SKIP_VARS = ("below_surface_mask", "siconc_mask")
+# Includes both pre-flatten (below_surface_mask) and post-flatten
+# pressure-named forms (below_surface_mask1000, etc.).
+_SKIP_VARS = frozenset(
+    ("below_surface_mask", "siconc_mask")
+    + tuple(f"below_surface_mask{p}" for p in (1000, 850, 700, 500, 250, 100, 50, 10))
+)
 
 _SCALAR_NAMES = (
     "mean",

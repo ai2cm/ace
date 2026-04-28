@@ -47,8 +47,25 @@ from config import (  # noqa: E402
 
 # Variables that aren't in any of the user-facing lists but appear in
 # the produced zarr — derived T layers and the masks/static fields.
-DERIVED_VARIABLES = [f"ta_derived_layer_{i}" for i in range(7)]
+# These are conceptual names for the presence table columns; the zarr
+# stores pressure-named variants (ua1000, ta_derived_layer_1000_850, etc.).
+DERIVED_VARIABLES = ["ta_derived_layer"]
 EXTRA_VARIABLES = ["below_surface_mask", "siconc_mask"]
+
+_PLEV8_HPA = [1000, 850, 700, 500, 250, 100, 50, 10]
+_3D_CORE = {"ua", "va", "hus", "zg"}
+
+
+def _flattened_forms(var: str) -> list[str]:
+    """Return the pressure-named zarr variable(s) for a conceptual variable."""
+    if var in _3D_CORE or var == "below_surface_mask":
+        return [f"{var}{p}" for p in _PLEV8_HPA]
+    if var == "ta_derived_layer":
+        return [
+            f"ta_derived_layer_{_PLEV8_HPA[i]}_{_PLEV8_HPA[i+1]}"
+            for i in range(len(_PLEV8_HPA) - 1)
+        ]
+    return [var]
 
 
 def _categorised_variables() -> dict[str, list[str]]:
@@ -159,7 +176,7 @@ def build_presence_table(
             "output_zarr": r.get("output_zarr", ""),
         }
         for v in var_order:
-            if v in present:
+            if any(f in present for f in _flattened_forms(v)):
                 record[v] = 2
             elif v in avail:
                 record[v] = 1
