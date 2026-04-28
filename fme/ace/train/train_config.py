@@ -463,20 +463,20 @@ class TrainBuilders:
                 initial_condition=self.config.stepper.get_prognostic_state_data_requirements(),
             )
             dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
-            aggregator = self.config.weather_evaluation.aggregator.build(
-                dataset_info=dataset_info,
-                n_ic_steps=n_ic_timesteps,
-                n_forward_steps=self.config.weather_evaluation.n_forward_steps,
-                initial_time=data.initial_time,
-                normalize=normalize,
-                output_dir=output_dir,
-                channel_mean_names=channel_mean_names,
-                save_diagnostics=save_diagnostics,
-            )
 
             def end_of_epoch_ops(epoch: int) -> Mapping[str, Any]:
                 if self.config.weather_evaluation is not None:
                     if self.config.weather_evaluation.epochs.contains(epoch):
+                        aggregator = self.config.weather_evaluation.aggregator.build(
+                            dataset_info=dataset_info,
+                            n_ic_steps=n_ic_timesteps,
+                            n_forward_steps=self.config.weather_evaluation.n_forward_steps,
+                            initial_time=data.initial_time,
+                            normalize=normalize,
+                            output_dir=output_dir,
+                            channel_mean_names=channel_mean_names,
+                            save_diagnostics=save_diagnostics,
+                        )
                         return inference_one_epoch(
                             data,
                             aggregator,
