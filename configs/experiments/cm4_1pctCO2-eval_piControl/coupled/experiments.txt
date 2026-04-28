@@ -6,7 +6,8 @@ fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KNS
 
 fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KP43V4GDM8A7FNGKPW1R80WH|training|best_inference_ckpt|normal|--not-preemptible
 
-fto-25-75-split-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KP44XC9J47C3BNJ8JMJ203TW|training|best_inference_ckpt|normal|--not-preemptible
+fto-25-75-split-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KP44XC9J47C3BNJ8JMJ203TW|run_140yr|best_inference_ckpt|high|--not-preemptible||||h100
+fto-25-75-split-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KP44XC9J47C3BNJ8JMJ203TW|run_ICx1_piC|best_inference_ckpt|high|--not-preemptible||||h100
 
 ft-fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KP76CVQVGKXD8DNGGBTC7BFE|training|best_inference_ckpt|normal|--not-preemptible
 
@@ -14,5 +15,5 @@ ft-fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0||t
 
 ft-fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KP772N2D01FRDZJ45AK1ZMKD|training|best_inference_ckpt|normal|--not-preemptible
 
-fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7-epoch20|rs0|01KP43V4GDM8A7FNGKPW1R80WH|run_140yr|best_inference_ckpt|high|--not-preemptible||01KPB3S9A4TTZ4KSY7Y9ZXVRPA||h100
-fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7-epoch20|rs0|01KP43V4GDM8A7FNGKPW1R80WH|run_ICx1_piC|best_inference_ckpt|high|--not-preemptible||01KPB3S9A4TTZ4KSY7Y9ZXVRPA||h100
+fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KP43V4GDM8A7FNGKPW1R80WH|run_140yr|best_inference_ckpt|high|--not-preemptible||||h100
+fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KP43V4GDM8A7FNGKPW1R80WH|run_ICx1_piC|best_inference_ckpt|high|--not-preemptible||||h100
