@@ -36,7 +36,7 @@ gantry run \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --gpus $N_GPUS \
     --shared-memory 400GiB \
-    --budget ai2/climate \
+    --budget ai2/atec-climate \
     --system-python \
     --install "pip install --no-deps ." \
     -- torchrun --nproc_per_node $N_GPUS -m fme.downscaling.train $CONFIG_PATH

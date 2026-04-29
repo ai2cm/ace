@@ -61,6 +61,8 @@ def get_filter_basis(
         return PiecewiseLinearFilterBasis(kernel_shape=kernel_shape)
     elif basis_type == "morlet":
         return MorletFilterBasis(kernel_shape=kernel_shape)
+    elif basis_type == "isotropic morlet":
+        return IsotropicMorletFilterBasis(kernel_shape=kernel_shape)
     elif basis_type == "zernike":
         return ZernikeFilterBasis(kernel_shape=kernel_shape)
     else:
@@ -219,6 +221,66 @@ class MorletFilterBasis(FilterBasis):
         )
 
         vals = self.hann_window(r, width=width) * harmonic
+        return iidx, vals
+
+
+class IsotropicMorletFilterBasis(FilterBasis):
+    """Morlet-style filter basis using only radial modes.
+
+    Each basis function is a product of a Hann radial window and a 1-D
+    Fourier harmonic in the normalised radial coordinate ``r / r_cutoff``.
+    Because none of the basis functions depend on the azimuthal angle
+    ``phi``, any learned linear combination is guaranteed to be isotropic
+    (radially symmetric).
+
+    ``kernel_shape`` is a single integer giving the number of radial modes.
+    If a tuple is provided, only the first element is used.
+    """
+
+    kernel_shape: int
+
+    def __init__(self, kernel_shape: int | list[int] | tuple[int, ...]):
+        if isinstance(kernel_shape, list | tuple):
+            kernel_shape = kernel_shape[0]
+        if not isinstance(kernel_shape, int):
+            raise ValueError(
+                f"expected kernel_shape to be an integer "
+                f"but got {kernel_shape} instead."
+            )
+        super().__init__(kernel_shape=kernel_shape)
+
+    @property
+    def kernel_size(self) -> int:
+        return self.kernel_shape
+
+    def compute_support_vals(
+        self,
+        r: torch.Tensor,
+        phi: torch.Tensor,
+        r_cutoff: float,
+        width: float = 1.0,
+    ):
+        ikernel = torch.arange(self.kernel_size, device=r.device).reshape(-1, 1, 1)
+
+        iidx = torch.argwhere(
+            (r <= r_cutoff)
+            & torch.full_like(ikernel, True, dtype=torch.bool, device=r.device)
+        )
+
+        r_norm = r[iidx[:, 1], iidx[:, 2]] / r_cutoff
+        n = ikernel[iidx[:, 0], 0, 0]
+
+        # Radial Fourier modes: cos/sin pattern identical to Morlet but in r.
+        harmonic = torch.where(
+            n % 2 == 1,
+            torch.sin(torch.ceil(n / 2) * math.pi * r_norm / width),
+            torch.cos(torch.ceil(n / 2) * math.pi * r_norm / width),
+        )
+
+        # Hann radial envelope
+        window = torch.cos(0.5 * torch.pi * r_norm / width) ** 2
+        vals = window * harmonic
+
         return iidx, vals
 
 

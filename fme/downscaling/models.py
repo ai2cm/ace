@@ -1,6 +1,7 @@
 import dataclasses
 import warnings
 from collections.abc import Mapping
+from functools import cached_property
 from typing import Any
 
 import dacite
@@ -120,6 +121,21 @@ class PairedNormalizationConfig:
         """
         self.fine.load()
         self.coarse.load()
+
+
+@dataclasses.dataclass(frozen=True)
+class DiffusionModelMetadata:
+    in_names: list[str]
+    out_names: list[str]
+    coarse_shape: tuple[int, int]
+    downscale_factor: int
+    sigma_data: float
+    predict_residual: bool
+    use_fine_topography: bool
+    full_fine_coords: LatLonCoordinates
+    num_static_inputs: int
+    # Avoid runtime failures for frozen class with unhashable field
+    __hash__ = None  # type: ignore[assignment]
 
 
 @dataclasses.dataclass
@@ -668,8 +684,8 @@ class DiffusionModel:
         full_fine_coords_state = state.get("full_fine_coords")
         if full_fine_coords_state is not None:
             full_fine_coords = LatLonCoordinates(
-                lat=full_fine_coords_state["lat"],
-                lon=full_fine_coords_state["lon"],
+                lat=full_fine_coords_state["lat"].to(get_device(), copy=True),
+                lon=full_fine_coords_state["lon"].to(get_device(), copy=True),
             )
         else:
             raise ValueError(
@@ -687,6 +703,22 @@ class DiffusionModel:
         )
         model.module.load_state_dict(state["module"], strict=True)
         return model
+
+    @cached_property
+    def metadata(self):
+        return DiffusionModelMetadata(
+            in_names=self.config.in_names,
+            out_names=self.config.out_names,
+            coarse_shape=self.coarse_shape,
+            downscale_factor=self.downscale_factor,
+            sigma_data=self.sigma_data,
+            predict_residual=self.config.predict_residual,
+            use_fine_topography=self.config.use_fine_topography,
+            full_fine_coords=self.full_fine_coords,
+            num_static_inputs=len(self.static_inputs.fields)
+            if self.static_inputs
+            else 0,
+        )
 
 
 @dataclasses.dataclass
@@ -746,7 +778,9 @@ class CheckpointModelConfig:
     @property
     def _checkpoint(self) -> Mapping[str, Any]:
         if not self._checkpoint_is_loaded:
-            checkpoint_data = torch.load(self.checkpoint_path, weights_only=False)
+            checkpoint_data = torch.load(
+                self.checkpoint_path, map_location="cpu", weights_only=False
+            )
             checkpoint_data["model"]["config"]["in_names"] = [
                 self._rename.get(name, name)
                 for name in checkpoint_data["model"]["config"]["in_names"]
@@ -775,8 +809,8 @@ class CheckpointModelConfig:
             )
         if coords_from_state is not None:
             return LatLonCoordinates(
-                lat=coords_from_state["lat"],
-                lon=coords_from_state["lon"],
+                lat=coords_from_state["lat"].to(get_device(), copy=True),
+                lon=coords_from_state["lon"].to(get_device(), copy=True),
             )
         elif fine_coordinates_path is not None:
             return load_coords_from_path(fine_coordinates_path)

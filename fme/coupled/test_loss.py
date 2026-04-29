@@ -8,11 +8,16 @@ from fme.ace.stepper.time_length_probabilities import (
     TimeLengthProbabilities,
     TimeLengthProbability,
 )
-from fme.core.loss import StepLoss
+from fme.core.loss import LossOutput, StepLoss
 from fme.core.typing_ import EnsembleTensorDict, TensorMapping
 
 from .loss import LossContributionsConfig, StepLossABC, StepPredictionABC
 from .stepper import ComponentEnsembleStepPrediction, CoupledStepperTrainLoss
+
+
+def _wrap_as_loss_output(value: torch.Tensor) -> LossOutput:
+    """Wrap a scalar tensor as a LossOutput for mocking StepLoss."""
+    return LossOutput(loss=value, channel_dim=0, channel_names=["mock"])
 
 
 def step_and_target_gen(
@@ -126,11 +131,14 @@ def test_loss_contributions(steps_thru_atmos_7):
             loss += (gen[key] - target[key]).abs().mean() / (step + 1)
         return loss
 
+    def mae_loss_as_output(gen, target, step: int):
+        return _wrap_as_loss_output(mae_loss(gen, target, step))
+
     atmos_loss_config = LossContributionsConfig(
         n_steps=6,
         weight=1 / 3,
     )
-    mock_step_loss = Mock(spec=StepLoss, side_effect=mae_loss)
+    mock_step_loss = Mock(spec=StepLoss, side_effect=mae_loss_as_output)
     atmosphere_loss = atmos_loss_config.build(
         loss_obj=mock_step_loss,
         time_dim=1,
@@ -170,6 +178,9 @@ def test_loss_contributions_optimize_last_step_only(steps_thru_atmos_7):
             loss += (gen[key] - target[key]).abs().mean() / (step + 1)
         return loss
 
+    def mae_loss_as_output(gen, target, step: int):
+        return _wrap_as_loss_output(mae_loss(gen, target, step))
+
     n_total_atmos = 8
     n_total_ocean = 4
     atmos_loss_config = LossContributionsConfig(
@@ -177,7 +188,7 @@ def test_loss_contributions_optimize_last_step_only(steps_thru_atmos_7):
         weight=1 / 3,
         optimize_last_step_only=True,
     )
-    mock_step_loss = Mock(spec=StepLoss, side_effect=mae_loss)
+    mock_step_loss = Mock(spec=StepLoss, side_effect=mae_loss_as_output)
     atmosphere_loss = atmos_loss_config.build(
         loss_obj=mock_step_loss,
         time_dim=1,
@@ -188,7 +199,7 @@ def test_loss_contributions_optimize_last_step_only(steps_thru_atmos_7):
         optimize_last_step_only=True,
     )
     ocean_loss = ocean_loss_config.build(
-        loss_obj=Mock(spec=StepLoss, side_effect=mae_loss),
+        loss_obj=Mock(spec=StepLoss, side_effect=mae_loss_as_output),
         time_dim=1,
         max_n_steps=n_total_ocean,
     )
@@ -395,16 +406,21 @@ def test_coupled_stepper_train_loss_sample_n_steps_delegates():
 
 @pytest.mark.parametrize("ocean_config_kwargs", [{"n_steps": 0}, {"weight": 0.0}])
 def test_null_loss_contributions(steps_thru_atmos_7, ocean_config_kwargs):
-    # test LossContributionsConfig with n_steps = 0
     atmos_loss_config = LossContributionsConfig()
     atmosphere_loss = atmos_loss_config.build(
-        loss_obj=Mock(spec=StepLoss, return_value=torch.tensor(5.25)),
+        loss_obj=Mock(
+            spec=StepLoss,
+            return_value=_wrap_as_loss_output(torch.tensor(5.25)),
+        ),
         time_dim=1,
         max_n_steps=10,
     )
     ocean_loss_config = LossContributionsConfig(**ocean_config_kwargs)
     ocean_loss = ocean_loss_config.build(
-        loss_obj=Mock(spec=StepLoss, return_value=torch.tensor(42.0)),
+        loss_obj=Mock(
+            spec=StepLoss,
+            return_value=_wrap_as_loss_output(torch.tensor(42.0)),
+        ),
         time_dim=1,
         max_n_steps=10,
     )
