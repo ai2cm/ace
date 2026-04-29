@@ -4,12 +4,13 @@ output_directory: gs://vcm-ml-intermediate/2026-04-28-cmip6-daily-pilot/v0
 defaults:
   time_subset:
     historical: {start: "2010-01-01", end: "2010-12-31"}
+    ssp245: {start: "2015-01-01", end: "2015-12-31"}
     ssp585: {start: "2015-01-01", end: "2015-12-31"}
 
 selection:
   exclude_source_ids:
     - INM-CM4-8
-  experiments: [historical, ssp585]
+  experiments: [historical, ssp245, ssp585]
 
 overrides:
   - match:

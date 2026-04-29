@@ -35,7 +35,6 @@ import argparse
 import dataclasses
 import json
 import logging
-import re
 import sys
 import traceback
 from dataclasses import dataclass, field
@@ -43,20 +42,31 @@ from pathlib import Path
 from typing import Hashable, Optional
 
 import fsspec
-import numpy as np
 import pandas as pd
 import xarray as xr
 
 sys.path.insert(0, str(Path(__file__).parent))
-from config import ProcessConfig, ResolvedDatasetConfig, make_label  # noqa: E402
+from config import ProcessConfig, make_label  # noqa: E402
 from grid import make_target_grid  # noqa: E402
 from index import DatasetIndexRow, write_index, write_sidecar  # noqa: E402
-
-# Physics constants for hypsometric layer-mean T derivation.
-R_D = 287.05  # J / (kg K), dry-air gas constant
-G = 9.80665  # m / s^2, standard gravity
-EPS = 0.608  # (R_v / R_d) - 1, for virtual-to-actual temperature
-
+from processing import (  # noqa: E402
+    DuplicateTimestampsError,
+    SimulationBoundaryError,
+    apply_time_subset,
+    compute_below_surface_mask,
+    compute_derived_layer_T,
+    fill_derived_layer_T,
+    flatten_plev_variables,
+    grid_fingerprint,
+    interp_monthly_to_daily,
+    nearest_above_fill,
+    normalize_plev,
+    regrid_variables,
+    resolve_time_duplicates,
+    run_sanity_checks,
+    validate_cell_methods,
+    write_zarr,
+)
 
 # ---------------------------------------------------------------------------
 # Task selection
@@ -320,681 +330,6 @@ def _open_zstore(url: str) -> xr.Dataset:
     return xr.open_zarr(mapper, consolidated=True, use_cftime=True)
 
 
-class _SimulationBoundaryError(ValueError):
-    """Raised when duplicate time indices carry materially different
-    data — a strong signal that two stitched simulations (e.g., a
-    historical run and its ssp585 continuation) were concatenated into
-    a single zarr without care. Silently deduplicating would hide a
-    real discontinuity, so we stop and surface the issue.
-    """
-
-
-class _DuplicateTimestampsError(ValueError):
-    """Raised when duplicate time indices are detected and the
-    resolved config does not enable ``allow_dedupe``. Caller is
-    expected to convert this into a skipped-dataset row.
-    """
-
-
-def _resolve_time_duplicates(
-    ds: xr.Dataset, var_name: str, allow_dedupe: bool = False
-) -> tuple[xr.Dataset, str]:
-    """Detect duplicate timestamps and decide how to handle them.
-
-    Returns ``(ds, message)`` where ``ds`` is the cleaned dataset and
-    ``message`` is a non-empty warning string when duplicates were
-    found and safely deduplicated (every duplicate pair was
-    data-identical — the classic CMIP file-splice redundancy). If the
-    duplicate timestamps carry *different* data, raise
-    ``_SimulationBoundaryError`` so the caller skips the dataset; a
-    real simulation boundary needs to be split into two separate
-    zarr stores, not silently merged.
-    """
-    if "time" not in ds.dims:
-        return ds, ""
-    times = ds["time"].values
-    if len(times) == np.unique(times).size:
-        return ds, ""
-
-    vals, counts = np.unique(times, return_counts=True)
-    dup_times = vals[counts > 1]
-    n_dup = int(counts[counts > 1].sum() - len(dup_times))
-
-    if not allow_dedupe:
-        raise _DuplicateTimestampsError(
-            f"{var_name}: {n_dup} duplicate timestamp(s) detected; "
-            "to permit dedupe, manually verify the duplicates are a "
-            "publishing artefact (not a real simulation boundary) and "
-            "set ``allow_dedupe: true`` in an override for this dataset"
-        )
-
-    # Load the whole variable into memory once. The caller is expected
-    # to have already time-subset to a small window (a year or so), so
-    # this is bounded — much faster than per-duplicate .load() round
-    # trips, which hit GCS for each pair.
-    arr = ds[var_name].load().values  # (time, ...) numpy
-    sort_idx = np.argsort(times, kind="stable")
-    times_sorted = times[sort_idx]
-    arr_sorted = arr[sort_idx]
-
-    # Walk the sorted array; whenever consecutive timestamps match,
-    # compare the corresponding data slices.
-    same = times_sorted[:-1] == times_sorted[1:]
-    for i in np.where(same)[0]:
-        a, b = arr_sorted[i], arr_sorted[i + 1]
-        if not np.allclose(a, b, equal_nan=True, rtol=1e-5, atol=0):
-            raise _SimulationBoundaryError(
-                f"duplicate time {times_sorted[i]} in {var_name} has "
-                "materially different data across copies — looks like "
-                "a simulation-boundary stitch. Republish this dataset "
-                "with the two halves in separate stores before "
-                "ingesting."
-            )
-
-    # All duplicate pairs are data-identical → safe to dedupe.
-    return (
-        ds.isel(time=np.unique(times, return_index=True)[1]),
-        f"{var_name}: {n_dup} duplicate timestamp(s) detected "
-        "(data-identical, safely deduplicated)",
-    )
-
-
-_EXPECTED_MEAN_CELL_METHODS = re.compile(r"time:\s*mean")
-
-
-def _validate_cell_methods(ds: xr.Dataset, variables: list[str]) -> list[str]:
-    """Return the subset of ``variables`` whose ``cell_methods`` attr
-    does not contain ``time: mean``. Variables missing from ``ds`` are
-    silently ignored here — absence is handled upstream.
-    """
-    mismatches = []
-    for v in variables:
-        if v not in ds.data_vars:
-            continue
-        cm = str(ds[v].attrs.get("cell_methods", ""))
-        if not _EXPECTED_MEAN_CELL_METHODS.search(cm):
-            mismatches.append(v)
-    return mismatches
-
-
-def _grid_fingerprint(ds: xr.Dataset) -> Hashable:
-    """Hashable identifier for the source dataset's lat/lon grid.
-
-    Variables that share a fingerprint share a regridding target — we
-    can merge them and build a single ``xesmf.Regridder`` per
-    (grid, method). Two variables that publish on staggered grids
-    (HadGEM3 u-points vs scalars, etc.) get distinct fingerprints
-    and stay in separate buckets.
-    """
-    lat = ds["lat"].values
-    lon = ds["lon"].values
-    return (
-        tuple(lat.shape),
-        lat.tobytes(),
-        tuple(lon.shape),
-        lon.tobytes(),
-    )
-
-
-def _normalize_regrid_source(ds: xr.Dataset) -> xr.Dataset:
-    """Prepare ``ds`` so xesmf's conservative regridder can ingest it.
-
-    Two things happen:
-
-    * **Rename CMIP6 bounds to xesmf's names.** xesmf looks for
-      ``lon_b`` / ``lat_b``; CMIP6 publishes ``lon_bnds`` / ``lat_bnds``
-      on rectilinear grids and ``vertices_longitude`` /
-      ``vertices_latitude`` on curvilinear ocean grids (tripolar etc.).
-    * **Convert CF-style (N, M, 4) vertex bounds to xesmf's (N+1, M+1)
-      corner mesh.** CMIP6 2D bounds store four corners per cell
-      (counterclockwise from bottom-left); xesmf wants shared-corner
-      arrays that are one larger in each direction. Uses
-      ``cf_xarray.bounds_to_vertices``.
-    """
-    import cf_xarray  # noqa: F401  (registers the bounds helper)
-    from cf_xarray import bounds_to_vertices
-
-    ds = ds.copy()
-    for src, dst in (
-        ("vertices_longitude", "lon_b"),
-        ("vertices_latitude", "lat_b"),
-        ("lon_bnds", "lon_b"),
-        ("lat_bnds", "lat_b"),
-    ):
-        if src in ds.variables and dst not in ds.variables:
-            ds = ds.rename({src: dst})
-
-    for name in ("lon_b", "lat_b"):
-        if name not in ds.variables:
-            continue
-        da = ds[name]
-        # If already 1D (N+1,) or 2D (N+1, M+1) in corner form,
-        # leave it alone. If it's a CF-style (N, 2) or (N, M, 4), convert.
-        if da.ndim == 3 and da.shape[-1] == 4:
-            bounds_dim = da.dims[-1]
-            ds = ds.drop_vars(name).assign_coords(
-                {name: bounds_to_vertices(da, bounds_dim=bounds_dim)}
-            )
-        elif da.ndim == 2 and da.shape[-1] == 2:
-            bounds_dim = da.dims[-1]
-            ds = ds.drop_vars(name).assign_coords(
-                {name: bounds_to_vertices(da, bounds_dim=bounds_dim)}
-            )
-
-    return ds
-
-
-def _make_regridder(source_ds: xr.Dataset, target: xr.Dataset, method: str):
-    """Build an xESMF regridder, importing lazily so this module can be
-    loaded in envs without xESMF (e.g. unit tests on the selection logic).
-    """
-    import xesmf
-
-    source_ds = _normalize_regrid_source(source_ds)
-    return xesmf.Regridder(source_ds, target, method, periodic=True)
-
-
-def _regrid_variables(
-    ds: xr.Dataset,
-    target_grid: xr.Dataset,
-    cfg: ResolvedDatasetConfig,
-) -> tuple[xr.Dataset, dict[str, str]]:
-    """Regrid all data variables in ``ds`` to ``target_grid``. Returns
-    the regridded dataset and a dict ``{variable: method}``.
-    """
-    method_for = cfg.regrid.method_for
-    # Group variables by method so we make one Regridder per method.
-    by_method: dict[str, list[str]] = {}
-    for v in ds.data_vars:
-        by_method.setdefault(method_for(v), []).append(v)
-
-    pieces = []
-    used: dict[str, str] = {}
-    for method, vars_ in by_method.items():
-        sub = ds[vars_]
-        regridder = _make_regridder(sub, target_grid, method)
-        pieces.append(regridder(sub, keep_attrs=True))
-        used.update({v: method for v in vars_})
-
-    regridded = xr.merge(pieces)
-    # Preserve non-horizontal coords (time, plev, etc.) that xESMF strips.
-    for coord in ds.coords:
-        if coord not in regridded.coords and ds[coord].ndim <= 1:
-            regridded = regridded.assign_coords({coord: ds[coord]})
-    return regridded, used
-
-
-_PLEV8_DEFAULT_HPA = np.array([1000, 850, 700, 500, 250, 100, 50, 10], dtype=np.float64)
-
-
-def _normalize_plev(ds: xr.Dataset) -> xr.Dataset:
-    """Ensure plev axis is descending-in-altitude: index 0 is the lowest
-    pressure level (= 1000 hPa), index 7 is the highest (= 10 hPa).
-    CMIP6 publishes plev in Pa with either ascending or descending
-    order; we normalise to descending-pressure.
-    """
-    if "plev" not in ds.dims:
-        return ds
-    plev = ds["plev"].values
-    if len(plev) > 1 and plev[0] < plev[-1]:
-        ds = ds.isel(plev=slice(None, None, -1))
-    return ds
-
-
-def _compute_below_surface_mask(
-    ds: xr.Dataset,
-    orog: Optional[xr.DataArray],
-) -> tuple[xr.DataArray, str]:
-    """Return (mask, source) where mask is a time-varying uint8 array
-    with dims (time, plev, lat, lon). ``source`` is one of
-    ``nan_union`` or ``orog_static``.
-    """
-    three_d = [v for v in ("ua", "va", "hus", "zg") if v in ds.data_vars]
-    if three_d:
-        nan_union = ds[three_d[0]].isnull()
-        for v in three_d[1:]:
-            nan_union = nan_union | ds[v].isnull()
-        if bool(nan_union.any()):
-            return nan_union.astype("uint8").rename("below_surface_mask"), "nan_union"
-
-    if orog is None:
-        raise RuntimeError(
-            "Cannot derive below_surface_mask: no NaN pattern and no orog."
-        )
-    # zg is time-varying (altitude of pressure level varies with synoptic
-    # state); orog is static. Broadcasting makes the result time-varying.
-    mask = (ds["zg"] < orog).astype("uint8").rename("below_surface_mask")
-    return mask, "orog_static"
-
-
-def _nearest_above_fill(da: xr.DataArray, mask: xr.DataArray) -> xr.DataArray:
-    """Fill below-surface cells in ``da`` with the value at the lowest
-    above-surface level in that column. Works for any number of
-    consecutive masked bottom levels.
-
-    ``da`` is (time, plev, lat, lon); ``mask`` is uint8 same shape.
-    Plev axis is assumed descending in altitude (index 0 = 1000 hPa).
-    """
-    filled = da.where(mask == 0)
-    filled = filled.bfill("plev")
-    return filled
-
-
-def _compute_derived_layer_T(ds: xr.Dataset) -> xr.Dataset:
-    """Add ``ta_derived_layer(time, plev_layer, lat, lon)`` from zg + hus
-    via the hypsometric equation. One layer value per gap between adjacent
-    plev levels. The ``plev_layer`` coordinate stores the log-pressure
-    midpoint of each layer in Pa; the dimension order matches ``plev``
-    (bottom-up: index 0 = layer between the two highest-pressure levels).
-
-    Must be called on *un-filled* zg / hus. Running this on nearest-
-    above-filled zg would force ``dz = 0`` below surface and collapse
-    the derived T to zero; see ``_fill_derived_layer_T`` for the
-    post-derivation fill.
-    """
-    plev_pa = ds["plev"].values  # Pa, descending-pressure order
-    z = ds["zg"]  # m
-    q = ds["hus"]  # kg/kg
-    layers = []
-    n_layers = len(plev_pa) - 1
-    for i in range(n_layers):
-        p_lo = plev_pa[i]  # higher pressure (lower altitude)
-        p_hi = plev_pa[i + 1]
-        dz = z.isel(plev=i + 1) - z.isel(plev=i)
-        q_mean = 0.5 * (q.isel(plev=i) + q.isel(plev=i + 1))
-        tv = G * dz / (R_D * np.log(p_lo / p_hi))
-        t = tv / (1.0 + EPS * q_mean)
-        layers.append(t.drop_vars("plev", errors="ignore"))
-    plev_layer = np.array(
-        [np.sqrt(plev_pa[i] * plev_pa[i + 1]) for i in range(n_layers)]
-    )
-    ta = xr.concat(layers, dim="plev_layer").assign_coords(plev_layer=plev_layer)
-    ta.attrs = {
-        "long_name": "derived layer-mean temperature from hypsometric equation",
-        "units": "K",
-        "derivation": "hypsometric from zg + hus",
-    }
-    return ds.assign(ta_derived_layer=ta)
-
-
-def _fill_derived_layer_T(ds: xr.Dataset, mask: xr.DataArray) -> xr.Dataset:
-    """Cascading nearest-above fill for ``ta_derived_layer``.
-
-    Layer ``i`` (in the internal bottom-up ordering along ``plev_layer``)
-    is treated as invalid where either bounding plev level (``plev[i]``
-    or ``plev[i+1]``) is below-surface per ``mask``, since the
-    hypsometric formula uses the model's below-surface extrapolation
-    there and produces unphysical values.
-
-    The fill cascades top-down: the topmost layer is always valid
-    (stratosphere); each layer below inherits the layer above where
-    invalid.
-    """
-    if "ta_derived_layer" not in ds.data_vars:
-        return ds
-    ta = ds["ta_derived_layer"]
-    n_layers = ta.sizes["plev_layer"]
-    if n_layers < 2:
-        return ds
-    for i in range(n_layers - 2, -1, -1):
-        layer_mask = (mask.isel(plev=i) | mask.isel(plev=i + 1)).astype(bool)
-        ta_i = ta.isel(plev_layer=i)
-        ta_above = ta.isel(plev_layer=i + 1)
-        ta.loc[dict(plev_layer=ta["plev_layer"].values[i])] = ta_i.where(
-            ~layer_mask, ta_above
-        )
-    ds["ta_derived_layer"] = ta
-    return ds
-
-
-def _interp_monthly_to_daily(
-    monthly: xr.DataArray,
-    daily_time: xr.DataArray,
-    method: str,
-) -> xr.DataArray:
-    """Interpolate monthly values onto the daily axis; constant-value
-    extrapolation at the start and end of the series (daily stamps
-    outside the first / last monthly bracket take the nearest monthly
-    value).
-    """
-    interp = monthly.interp(time=daily_time, method=method)
-    # bfill handles leading NaN (days before the first monthly point);
-    # ffill handles trailing NaN (days after the last monthly point).
-    return interp.bfill("time").ffill("time")
-
-
-_ISO_DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
-
-
-def _clip_date_for_calendar(date_str: str, calendar: str) -> str:
-    """Clip a ``YYYY-MM-DD`` string to a valid day in the target
-    calendar. Mostly matters for ``360_day``, where every month has
-    exactly 30 days — so ``2010-12-31`` is an invalid date and would
-    raise in ``xr.Dataset.sel(time=slice(...))``.
-
-    For ``noleap`` Feb 29 is invalid but we don't currently produce
-    that date in our configs; the 360_day case is the common one.
-    """
-    if calendar != "360_day":
-        return date_str
-    m = _ISO_DATE_RE.match(date_str)
-    if not m:
-        return date_str
-    y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
-    d = min(d, 30)
-    return f"{y:04d}-{mo:02d}-{d:02d}"
-
-
-def _apply_time_subset(ds: xr.Dataset, cfg: ResolvedDatasetConfig) -> xr.Dataset:
-    """Restrict ``ds`` to ``cfg.time_subset[cfg.experiment]``.
-
-    Uses a boolean mask + ``isel`` rather than ``ds.sel(time=slice(...))``
-    so a source with duplicate time indices (e.g. CESM2-WACCM
-    historical r2's psl, where every timestamp appears twice) doesn't
-    blow up with ``Cannot get left slice bound for non-unique label``.
-    """
-    window = cfg.time_subset.get(cfg.experiment)
-    if window is None or "time" not in ds.dims:
-        return ds
-
-    try:
-        calendar = str(ds["time"].dt.calendar)
-    except (AttributeError, TypeError):
-        calendar = "standard"
-    start = _clip_date_for_calendar(window.start, calendar)
-    end = _clip_date_for_calendar(window.end, calendar)
-
-    times = ds["time"].values
-    # Construct comparable bounds in the same flavour as ``times`` (cftime
-    # vs numpy datetime64).
-    if len(times) and hasattr(times[0], "calendar"):
-        date_type = type(times[0])
-        sy, sm, sd = (int(x) for x in start.split("-"))
-        ey, em, ed = (int(x) for x in end.split("-"))
-        start_dt = date_type(sy, sm, sd)
-        end_dt = date_type(ey, em, ed)
-    else:
-        start_dt = np.datetime64(start)
-        end_dt = np.datetime64(end)
-    mask = (times >= start_dt) & (times <= end_dt)
-    return ds.isel(time=np.where(mask)[0])
-
-
-_STALE_ENCODING_KEYS = (
-    # zarr v2 codec metadata that zarr v3 can't consume — strip before
-    # writing to avoid silent misinterpretation.
-    "compressors",
-    "filters",
-    "preferred_chunks",
-    # Source chunk shapes; we're re-chunking, so don't carry the old.
-    "chunks",
-    "shards",
-    # CMIP6 convention: 1e+20 as sentinel fill. zarr v3 floats store NaN
-    # natively; keep it simple and let xarray write NaN as NaN.
-    "_FillValue",
-    "missing_value",
-    "dtype",
-)
-
-
-def _clear_stale_encoding(ds: xr.Dataset) -> xr.Dataset:
-    ds = ds.copy(deep=False)
-    for var in {**ds.coords, **ds.data_vars}.values():
-        for k in _STALE_ENCODING_KEYS:
-            var.encoding.pop(k, None)
-    return ds
-
-
-# Per-variable (min, max) physical bounds. Values outside these get
-# flagged as sanity-check warnings. Loose bounds chosen to catch real
-# bugs (wrong units, wrong sign, wrong derivation) without firing on
-# (a) normal climatological extremes or (b) sub-epsilon floating-point
-# residuals from conservative regridding — whose output we trust to
-# preserve the area-weighted integral, so clipping would break that.
-# Variables not listed here are not checked.
-_EPS = 0.01  # tolerance for conservative-regrid rounding noise
-
-_SANITY_RANGES: dict[str, tuple[float, float]] = {
-    # Winds (m/s)
-    "ua": (-200.0, 200.0),
-    "va": (-200.0, 200.0),
-    "uas": (-100.0, 100.0),
-    "vas": (-100.0, 100.0),
-    "sfcWind": (-_EPS, 100.0),
-    # Specific humidity (kg/kg) — non-negative
-    "hus": (-_EPS, 0.05),
-    "huss": (-_EPS, 0.05),
-    # Temperatures (K)
-    "ts": (180.0, 340.0),
-    "tas": (180.0, 340.0),
-    # Pressure (Pa)
-    "psl": (8.0e4, 1.1e5),
-    # Precipitation rate (kg/m2/s) — daily means rarely exceed 1 mm/s
-    "pr": (-_EPS, 0.01),
-    # Sea-ice fraction — CMIP6 siconc is percent
-    "siconc": (-_EPS, 100.0 + _EPS),
-    # Radiation fluxes (W/m2) — rough global bounds
-    "rsdt": (-_EPS, 600.0),
-    "rsut": (-_EPS, 600.0),
-    "rlut": (-_EPS, 400.0),
-    "rsds": (-_EPS, 600.0),
-    "rsus": (-_EPS, 600.0),
-    "rlds": (-_EPS, 600.0),
-    "rlus": (-_EPS, 700.0),
-    # Turbulent fluxes (W/m2) — tropics + downward storms can reach
-    # ~1000 at daily mean. Widened vs the v0 bounds.
-    "hfss": (-1000.0, 1000.0),
-    "hfls": (-500.0, 1200.0),
-    # Land / ocean fractions (percent). Conservative regridding from
-    # a binary {0, 100} mask onto a coarse target can leave a few
-    # percent of overshoot from edge-cell weighting; observed up to
-    # ~103% on CESM2-WACCM, so the upper bound is generous. Anything
-    # over 105 is unphysical and should still trip.
-    "sftlf": (-_EPS, 105.0),
-    # Orography (m)
-    "orog": (-500.0, 9000.0),
-}
-
-# Derived layer-mean temperatures get a tighter physical bound.
-_DERIVED_T_RANGE = (150.0, 350.0)
-
-
-def _run_sanity_checks(ds: xr.Dataset) -> list[str]:
-    """Run cheap per-variable range checks and a tas-vs-derived-T0
-    sanity comparison. Returns a list of human-readable warnings; an
-    empty list means all checks passed.
-    """
-    messages: list[str] = []
-
-    for var, (lo, hi) in _SANITY_RANGES.items():
-        if var not in ds.data_vars:
-            continue
-        arr = ds[var]
-        vmin = float(arr.min())
-        vmax = float(arr.max())
-        if vmin < lo or vmax > hi:
-            messages.append(
-                f"{var} out of expected range [{lo}, {hi}]: "
-                f"min={vmin:.3g}, max={vmax:.3g}"
-            )
-
-    if "ta_derived_layer" in ds.data_vars:
-        lo, hi = _DERIVED_T_RANGE
-        arr = ds["ta_derived_layer"]
-        vmin = float(arr.min())
-        vmax = float(arr.max())
-        if vmin < lo or vmax > hi:
-            messages.append(
-                f"ta_derived_layer out of range [{lo}, {hi}] K: "
-                f"min={vmin:.2f}, max={vmax:.2f}"
-            )
-
-    # Compare the lowest derived-T layer (1000–850 hPa mean, effective
-    # pressure ~925 hPa, ~750 m altitude) to tas (2 m). A typical
-    # tropospheric lapse rate (6.5 K/km) puts them ~5 K apart globally;
-    # allow generous 15 K tolerance. plev_layer index 0 is the lowest
-    # layer (highest pressure) in the internal bottom-up ordering.
-    if "tas" in ds.data_vars and "ta_derived_layer" in ds.data_vars:
-        tas_mean = float(ds["tas"].mean())
-        layer0_mean = float(ds["ta_derived_layer"].isel(plev_layer=0).mean())
-        diff = tas_mean - layer0_mean
-        if abs(diff) > 15.0:
-            messages.append(
-                f"global mean tas={tas_mean:.2f} K vs ta_derived_layer "
-                f"lowest layer={layer0_mean:.2f} K differ by {diff:+.2f} K "
-                "(lapse-rate sanity expects a few K)"
-            )
-
-    # Time-evolution continuity.
-    if "time" in ds.dims and ds.sizes["time"] > 1:
-        messages.extend(_time_continuity_messages(ds))
-
-    return messages
-
-
-def _time_delta_seconds(a, b) -> float:
-    """Return ``(b - a).total_seconds()``, tolerant of both cftime
-    and numpy datetime64 time coords."""
-    try:
-        return float((b - a).total_seconds())
-    except AttributeError:
-        # numpy timedelta64
-        return float((b - a) / np.timedelta64(1, "s"))
-
-
-_DAY_SECONDS = 86400.0
-# Day-to-day jumps in global means above these magnitudes are almost
-# certainly physical discontinuities (simulation boundary, restart
-# with different state, corrupted write). Climatological daily swings
-# in global means are <<1 for both of these under any model.
-_GLOBAL_MEAN_JUMP_TOL: dict[str, float] = {
-    "tas": 2.0,  # K
-    "psl": 500.0,  # Pa
-}
-
-
-def _time_continuity_messages(ds: xr.Dataset) -> list[str]:
-    """Flag non-uniform strides and unusually large day-to-day jumps
-    in global means. Advisory: non-empty return goes into
-    ``row.warnings`` rather than failing the dataset.
-    """
-    out: list[str] = []
-    times = ds["time"].values
-    # 1) Stride uniformity. Daily data: every gap must be 86400 s.
-    strides = np.array(
-        [_time_delta_seconds(times[i], times[i + 1]) for i in range(len(times) - 1)]
-    )
-    not_daily = np.abs(strides - _DAY_SECONDS) > 1.0  # 1 s slack
-    n_bad = int(not_daily.sum())
-    if n_bad:
-        first_bad = int(np.argmax(not_daily))
-        out.append(
-            f"time stride non-uniform: {n_bad} gap(s) deviate from 86400 s "
-            f"(first at index {first_bad}: {strides[first_bad]:.1f} s between "
-            f"{times[first_bad]} and {times[first_bad + 1]})"
-        )
-
-    # 2) Day-to-day global-mean jumps for tas and psl. Anything above the
-    # tolerances is flagged; it's very cheap (one .mean() then .diff()).
-    for var, tol in _GLOBAL_MEAN_JUMP_TOL.items():
-        if var not in ds.data_vars:
-            continue
-        gm = ds[var].mean(dim=[d for d in ds[var].dims if d != "time"]).values
-        delta = np.abs(np.diff(gm))
-        max_d = float(delta.max()) if delta.size else 0.0
-        if max_d > tol:
-            i_bad = int(np.argmax(delta))
-            out.append(
-                f"{var} global-mean day-to-day |delta| up to {max_d:.3g} "
-                f"exceeds tol {tol:.3g} (at index {i_bad}: "
-                f"{times[i_bad]} -> {times[i_bad + 1]}) — possible "
-                "simulation discontinuity"
-            )
-    return out
-
-
-def _plev_hpa_label(plev_pa: float) -> str:
-    """Format a pressure value in Pa as an integer hPa string."""
-    return str(round(plev_pa / 100))
-
-
-def _flatten_plev_variables(ds: xr.Dataset) -> xr.Dataset:
-    """Split variables with a ``plev`` or ``plev_layer`` dimension into
-    per-level 2D variables named by pressure.
-
-    On-level variables (``plev`` dim) are named ``{var}{hPa}``, e.g.
-    ``ua1000``, ``ua850``, ..., ``ua10``.
-
-    Between-level derived layers (``plev_layer`` dim) are named
-    ``{var}_{lo_hPa}_{hi_hPa}``, e.g. ``ta_derived_layer_1000_850``.
-
-    Both ``plev`` and ``plev_layer`` coordinates are dropped from the
-    returned dataset, making all variables uniformly
-    ``(time, lat, lon)`` or ``(lat, lon)``.
-    """
-    plev_vars = [v for v in ds.data_vars if "plev" in ds[v].dims]
-    layer_vars = [v for v in ds.data_vars if "plev_layer" in ds[v].dims]
-    if not plev_vars and not layer_vars:
-        return ds
-
-    new_vars: dict[str, xr.DataArray] = {}
-
-    if plev_vars:
-        plev_pa = ds["plev"].values
-        for v in plev_vars:
-            da = ds[v]
-            for i in range(da.sizes["plev"]):
-                label = _plev_hpa_label(plev_pa[i])
-                level_da = da.isel(plev=i).drop_vars("plev", errors="ignore")
-                new_vars[f"{v}{label}"] = level_da
-
-    if layer_vars:
-        plev_pa = ds["plev"].values
-        for v in layer_vars:
-            da = ds[v]
-            for i in range(da.sizes["plev_layer"]):
-                lo = _plev_hpa_label(plev_pa[i])
-                hi = _plev_hpa_label(plev_pa[i + 1])
-                level_da = da.isel(plev_layer=i).drop_vars(
-                    "plev_layer", errors="ignore"
-                )
-                new_vars[f"{v}_{lo}_{hi}"] = level_da
-
-    ds = ds.drop_vars(plev_vars + layer_vars)
-    ds = ds.drop_vars(["plev", "plev_layer"], errors="ignore")
-    return ds.assign(**new_vars)
-
-
-def _write_zarr(ds: xr.Dataset, path: str, cfg: ResolvedDatasetConfig) -> None:
-    """Write ``ds`` to ``path`` with zarr v3 chunks + shards per the
-    config. time dim uses (chunk_time, shard_time); other dims are
-    single chunk / single shard (full extent).
-    """
-    ds = _clear_stale_encoding(ds)
-
-    chunk_time = cfg.chunking.chunk_time
-    shard_time = cfg.chunking.shard_time
-
-    encoding: dict[str, dict] = {}
-    for v in list(ds.data_vars) + list(ds.coords):
-        var = ds[v]
-        chunks = []
-        shards: list[int] = []
-        for dim, size in zip(var.dims, var.shape):
-            if dim == "time":
-                chunks.append(min(chunk_time, size))
-                shards.append(min(shard_time or size, size))
-            else:
-                chunks.append(size)
-                shards.append(size)
-        enc: dict = {"chunks": tuple(chunks)}
-        if shard_time is not None and "time" in var.dims:
-            enc["shards"] = tuple(shards)
-        encoding[v] = enc
-
-    ds.to_zarr(path, mode="w", encoding=encoding, consolidated=True, zarr_format=3)
-
-
 def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
     """Full pipeline for one dataset. Exceptions are caught and reflected
     as ``status=failed`` rows so one bad dataset doesn't block the rest.
@@ -1065,7 +400,7 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
 
                 # cell_methods check (source-side; post-regrid values
                 # are conceptually still "time: mean").
-                mismatches = _validate_cell_methods(ds_v, [v])
+                mismatches = validate_cell_methods(ds_v, [v])
                 row.cell_methods_mismatch.extend(mismatches)
 
                 # Capture native calendar from the first opened variable.
@@ -1076,7 +411,7 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
                         row.warnings.append(f"could not read native calendar: {e}")
 
                 # Normalise plev order (no-op on 2D vars).
-                ds_v = _normalize_plev(ds_v)
+                ds_v = normalize_plev(ds_v)
 
                 # Time-subset BEFORE dedupe so the dedupe loop only
                 # checks duplicates within the (small) window we're
@@ -1084,22 +419,22 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
                 # timestamps spread across its 165-year historical
                 # store, and loading every duplicate's full 3D field
                 # from GCS to compare values dominates the run time.
-                ds_v = _apply_time_subset(ds_v, cfg)
+                ds_v = apply_time_subset(ds_v, cfg)
                 if ds_v.sizes.get("time", 0) == 0:
                     row.status = "skipped"
                     row.skip_reason = f"no timesteps in configured time_subset for {v}"
                     return row
 
-                # Time dedupe (raises _SimulationBoundaryError for
+                # Time dedupe (raises SimulationBoundaryError for
                 # non-identical duplicates; caught below).
-                ds_v, msg = _resolve_time_duplicates(
+                ds_v, msg = resolve_time_duplicates(
                     ds_v, v, allow_dedupe=cfg.allow_dedupe
                 )
                 if msg:
                     row.warnings.append(msg)
 
-                groups.setdefault(_grid_fingerprint(ds_v), []).append(ds_v)
-        except (_SimulationBoundaryError, _DuplicateTimestampsError) as e:
+                groups.setdefault(grid_fingerprint(ds_v), []).append(ds_v)
+        except (SimulationBoundaryError, DuplicateTimestampsError) as e:
             row.status = "skipped"
             row.skip_reason = str(e)
             return row
@@ -1119,7 +454,7 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
         regridded_pieces: list[xr.Dataset] = []
         for grid_dss in groups.values():
             merged_grid = xr.merge(grid_dss, compat="override", join="inner")
-            piece, methods = _regrid_variables(merged_grid, target, cfg)
+            piece, methods = regrid_variables(merged_grid, target, cfg)
             row.regrid_methods.update(methods)
             regridded_pieces.append(piece)
 
@@ -1144,7 +479,7 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
                 _open_zstore(fx_zs[v])[[v]].squeeze(drop=True) for v in fx_have
             ]
             fx_merged = xr.merge(fx_pieces, compat="override")
-            static_regridded, static_methods = _regrid_variables(fx_merged, target, cfg)
+            static_regridded, static_methods = regrid_variables(fx_merged, target, cfg)
             static_ds = static_regridded
             row.regrid_methods.update(static_methods)
 
@@ -1152,23 +487,26 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
         orog: Optional[xr.DataArray] = None
         if static_ds is not None and "orog" in static_ds:
             orog = static_ds["orog"]
-        mask, row.mask_source = _compute_below_surface_mask(day_regridded, orog)
+        mask, row.mask_source = compute_below_surface_mask(day_regridded, orog)
 
         # 10. Derive layer-mean T from the un-filled zg + hus. Running
         # this on filled zg would force dz = 0 in below-surface columns
         # (nearest-above fill copies zg[i+1] down, so zg[i] == zg[i+1])
         # and collapse the derived T to zero. Do it first, then fill.
-        day_regridded = _compute_derived_layer_T(day_regridded)
+        day_regridded = compute_derived_layer_T(day_regridded)
 
         # 11. Nearest-above fill for the level-valued 3D state.
-        for v in ("ua", "va", "hus", "zg"):
-            if v in day_regridded:
-                day_regridded[v] = _nearest_above_fill(day_regridded[v], mask)
-        day_regridded = day_regridded.assign(below_surface_mask=mask)
+        # When no mask is available (no orog, no NaN pattern), skip
+        # filling and don't write a mask variable.
+        if mask is not None:
+            for v in ("ua", "va", "hus", "zg"):
+                if v in day_regridded:
+                    day_regridded[v] = nearest_above_fill(day_regridded[v], mask)
+            day_regridded = day_regridded.assign(below_surface_mask=mask)
 
-        # 12. Cascading fill for the derived layer T — layer i is
-        # invalid where either bounding level is below surface.
-        day_regridded = _fill_derived_layer_T(day_regridded, mask)
+            # 12. Cascading fill for the derived layer T — layer i is
+            # invalid where either bounding level is below surface.
+            day_regridded = fill_derived_layer_T(day_regridded, mask)
 
         # 13. Monthly forcings -> daily. Curvilinear ocean grids (e.g.
         # SImon siconc on a tripolar grid) occasionally trip xesmf's
@@ -1189,19 +527,19 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
                 # variable itself doesn't have — survive the open and
                 # are available to xesmf's conservative regridder.
                 monthly = _open_zstore(z)
-                monthly, dup_msg = _resolve_time_duplicates(
+                monthly, dup_msg = resolve_time_duplicates(
                     monthly, var, allow_dedupe=cfg.allow_dedupe
                 )
                 if dup_msg:
                     row.warnings.append(dup_msg)
-                monthly = _apply_time_subset(monthly, cfg)
+                monthly = apply_time_subset(monthly, cfg)
                 # Keep only ``var`` as a data_var; everything else can
                 # live as coords or be dropped by the regridder.
                 drop = [v for v in monthly.data_vars if v != var]
                 monthly = monthly.drop_vars(drop, errors="ignore")
-                monthly_r, methods_used = _regrid_variables(monthly, target, cfg)
+                monthly_r, methods_used = regrid_variables(monthly, target, cfg)
                 row.regrid_methods.update(methods_used)
-                interp = _interp_monthly_to_daily(
+                interp = interp_monthly_to_daily(
                     monthly_r[var], day_regridded["time"], cfg.forcing_interpolation
                 )
             except Exception as e:  # noqa: BLE001
@@ -1263,21 +601,21 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
         day_regridded = day_regridded.load()
 
         # 18. Sanity checks — advisory only. Failures go to warnings.
-        sanity = _run_sanity_checks(day_regridded)
+        sanity = run_sanity_checks(day_regridded)
         if sanity:
             row.warnings.extend(sanity)
             for msg in sanity:
                 logging.warning("  sanity: %s", msg)
 
         # 19. Flatten plev dimensions into pressure-named 2D variables.
-        day_regridded = _flatten_plev_variables(day_regridded)
+        day_regridded = flatten_plev_variables(day_regridded)
 
         # 20. Write zarr + record variables.
         day_regridded.attrs["label"] = label
         day_regridded.attrs["source_id"] = task.source_id
         day_regridded.attrs["experiment"] = task.experiment
         day_regridded.attrs["variant_label"] = task.variant_label
-        _write_zarr(day_regridded, zarr_path, cfg)
+        write_zarr(day_regridded, zarr_path, cfg)
         row.variables_present = sorted(day_regridded.data_vars)
         row.status = "ok"
         return row
