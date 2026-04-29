@@ -164,7 +164,7 @@ while read RESUMING; do
 
     # Append to experiments.txt
     append_to_experiments_file_with_dry_run "$EXPERIMENT_DIR" "$CONFIG_SUBDIR" "$JOB_GROUP" "$TAG" \
-        "$EXPERIMENT_ID" "training" "best_inference_ckpt" "normal" "--min-runtime 8h --no-auto-resume" "$GIT_BRANCH"
+        "$EXPERIMENT_ID" "training" "best_inference_ckpt" "normal" "--min-runtime 8h" "$GIT_BRANCH"
 
 done <"$INPUT_PATH"
 

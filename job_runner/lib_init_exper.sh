@@ -66,7 +66,7 @@ create_input_txt_files() {
                 > "$EXPERIMENT_DIR/finetuning.txt"
 
             # Create experiments.txt with header
-            echo "group|tag|experiment_id|status|checkpoint|priority|preemptible|override|results_dataset|workspace" \
+            echo "group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace" \
                 > "$EXPERIMENT_DIR/experiments.txt"
 
             # Create resuming.txt with header
@@ -84,7 +84,7 @@ create_input_txt_files() {
                 > "$EXPERIMENT_DIR/finetuning.txt"
 
             # Create experiments.txt with header
-            echo "group|tag|experiment_id|status|checkpoint|priority|preemptible|override|results_dataset|workspace" \
+            echo "group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace" \
                 > "$EXPERIMENT_DIR/experiments.txt"
 
             # Create resuming.txt with header
@@ -94,7 +94,7 @@ create_input_txt_files() {
 
         *)
             echo "Warning: Unknown template type '$TEMPLATE_TYPE', creating generic files" >&2
-            echo "group|tag|experiment_id|status|checkpoint|priority|preemptible|override|results_dataset|workspace" \
+            echo "group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace" \
                 > "$EXPERIMENT_DIR/experiments.txt"
             ;;
     esac

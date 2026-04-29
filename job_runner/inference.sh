@@ -72,7 +72,7 @@ while read TRAIN_EXPER; do
     STATUS=$(echo "$TRAIN_EXPER" | cut -d"|" -f4)
     CKPT=$(echo "$TRAIN_EXPER" | cut -d"|" -f5)
     PRIORITY=$(echo "$TRAIN_EXPER" | cut -d"|" -f6)
-    PREEMPTIBLE=$(echo "$TRAIN_EXPER" | cut -d"|" -f7)
+    MIN_RUNTIME=$(echo "$TRAIN_EXPER" | cut -d"|" -f7)
     OVERRIDE_ARGS=$(echo "$TRAIN_EXPER" | cut -d"|" -f8)
     EXISTING_RESULTS_DATASET=$(echo "$TRAIN_EXPER" | cut -d"|" -f9)
     WORKSPACE=$(echo "$TRAIN_EXPER" | cut -d"|" -f10)
@@ -121,8 +121,8 @@ while read TRAIN_EXPER; do
         PRIORITY=normal
     fi
 
-    if [[ -z $PREEMPTIBLE ]]; then
-        PREEMPTIBLE="--min-runtime 8h --no-auto-resume"
+    if [[ -z $MIN_RUNTIME ]]; then
+        MIN_RUNTIME="--min-runtime 8h"
     fi
 
     if [[ -z $EXISTING_RESULTS_DATASET ]]; then
@@ -181,7 +181,7 @@ while read TRAIN_EXPER; do
         echo " - Training results dataset ID: ${EXISTING_RESULTS_DATASET}"
         echo " - Cluster: ${CLUSTER}"
         echo " - Priority: ${PRIORITY}"
-        echo " - ${PREEMPTIBLE}"
+        echo " - ${MIN_RUNTIME}"
         echo " - --override args: ${OVERRIDE_ARGS}"
 
         echo
@@ -198,7 +198,8 @@ while read TRAIN_EXPER; do
             --description "Run ${EXPERIMENT_DIR} inference" \
             --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
             --priority "$PRIORITY" \
-            $PREEMPTIBLE \
+            $MIN_RUNTIME \
+            --no-auto-resume \
             "${CLUSTER_ARGS[@]}" \
             --workspace "$WORKSPACE" \
             --weka climate-default:/climate-default \
