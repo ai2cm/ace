@@ -65,7 +65,6 @@ from fme.ace.stepper.time_length_probabilities import (
     TimeLengthProbability,
     TimeLengthSchedule,
 )
-from fme.ace.train.train_config import WeatherEvaluationConfig
 from fme.core.cli import ResumeResultsConfig
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.ice import IceCorrectorConfig
@@ -97,6 +96,7 @@ from . import step
 from .inference.inference import get_initial_condition
 from .train.train import run_train
 from .train.train_config import (
+    AdditionalInferenceConfig,
     CopyWeightsConfig,
     DataLoaderConfig,
     EMAConfig,
