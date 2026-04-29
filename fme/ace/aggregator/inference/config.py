@@ -93,6 +93,7 @@ class InferenceEvaluatorAggregatorConfig:
         output_dir: str | None = None,
         channel_mean_names: Sequence[str] | None = None,
         save_diagnostics: bool = True,
+        n_ensemble_per_ic: int = 1,
     ) -> InferenceEvaluatorAggregator:
         from .main import InferenceEvaluatorAggregator
 
@@ -130,6 +131,7 @@ class InferenceEvaluatorAggregatorConfig:
             log_nino34_index=self.log_nino34_index,
             normalize=normalize,
             save_diagnostics=save_diagnostics,
+            n_ensemble_per_ic=n_ensemble_per_ic,
         )
 
 

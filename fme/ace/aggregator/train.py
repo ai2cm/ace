@@ -4,8 +4,9 @@ from typing import Protocol
 
 import torch
 
+from fme.ace.aggregator.inference.data import InferenceBatchData
+from fme.ace.aggregator.inference.spectrum import PairedSphericalPowerSpectrumAggregator
 from fme.ace.aggregator.one_step.reduced import MeanAggregator
-from fme.ace.aggregator.one_step.spectrum import PairedSphericalPowerSpectrumAggregator
 from fme.ace.stepper import TrainOutput
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
@@ -41,6 +42,28 @@ class Aggregator(Protocol):
         pass
 
 
+class _TrainSpectrumAdapter:
+    """Adapts PairedSphericalPowerSpectrumAggregator for the training context."""
+
+    def __init__(self, inner: PairedSphericalPowerSpectrumAggregator):
+        self._inner = inner
+
+    def record_batch(self, target_data: TensorMapping, gen_data: TensorMapping):
+        self._inner.record_batch(
+            InferenceBatchData(
+                prediction=gen_data,
+                prediction_norm=gen_data,
+                target=target_data,
+                target_norm=target_data,
+                time=None,
+                i_time_start=0,
+            )
+        )
+
+    def get_logs(self, label: str) -> dict[str, torch.Tensor]:
+        return self._inner.get_logs(label)
+
+
 class TrainAggregator(AggregatorABC[TrainOutput]):
     """
     Aggregates statistics for the first timestep.
@@ -58,7 +81,7 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
         if config.spherical_power_spectrum:
             try:
                 flood_fill = SmoothFloodFill(num_steps=4)
-                self._paired_aggregators["power_spectrum"] = (
+                self._paired_aggregators["power_spectrum"] = _TrainSpectrumAdapter(
                     PairedSphericalPowerSpectrumAggregator(
                         gridded_operations=operations,
                         report_plot=False,

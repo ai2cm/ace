@@ -20,6 +20,7 @@ from fme.core.gridded_ops import LatLonOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Table, WandB
 
+from ..one_step.ensemble import get_one_step_ensemble_aggregator
 from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
 from .annual import GlobalMeanAnnualAggregator, PairedGlobalMeanAnnualAggregator
 from .config import StepMeanEntry
@@ -101,6 +102,7 @@ class InferenceEvaluatorAggregator(
         channel_mean_names: Sequence[str] | None = None,
         log_nino34_index: bool = True,
         save_diagnostics: bool = True,
+        n_ensemble_per_ic: int = 1,
     ):
         """
         Args:
@@ -128,11 +130,14 @@ class InferenceEvaluatorAggregator(
                 provided, all available variables will be used.
             log_nino34_index: Whether to log the Nino34 index.
             save_diagnostics: Whether to save reduced diagnostics to disk.
+            n_ensemble_per_ic: Number of ensemble members per initial condition.
         """
         if save_diagnostics and output_dir is None:
             raise ValueError("Output directory must be set to save diagnostics")
         self._channel_mean_names = channel_mean_names
         self._aggregators: dict[str, Any] = {}
+        self.n_ensemble_per_ic = n_ensemble_per_ic
+        self._ensemble_aggregators: dict[str, Any] = {}
         self._save_diagnostics = save_diagnostics
         self._output_dir = output_dir
         timestep = dataset_info.timestep
@@ -185,6 +190,15 @@ class InferenceEvaluatorAggregator(
                     channel_mean_names=self._channel_mean_names,
                 )
             )
+            if n_ensemble_per_ic > 1:
+                self._ensemble_aggregators["ensemble_step_20"] = (
+                    get_one_step_ensemble_aggregator(
+                        gridded_operations=ops,
+                        target_time=20,
+                        log_mean_maps=False,
+                        metadata=dataset_info.variable_metadata,
+                    )
+                )
         try:
             flood_fill = SmoothFloodFill(num_steps=4)
             self._aggregators["power_spectrum"] = (
@@ -276,9 +290,14 @@ class InferenceEvaluatorAggregator(
                 gridded_operations=ops,
                 variable_metadata=dataset_info.variable_metadata,
             )
+
+        summary_aggregators_list = list(self._aggregators.items())
+        if self.n_ensemble_per_ic > 1:
+            summary_aggregators_list.extend(self._ensemble_aggregators.items())
+
         self._summary_aggregators = {
             name: agg
-            for name, agg in self._aggregators.items()
+            for name, agg in summary_aggregators_list
             if name not in self._streaming_names
         }
         self._n_timesteps_seen = 0
@@ -308,6 +327,16 @@ class InferenceEvaluatorAggregator(
         )
         for aggregator in self._aggregators.values():
             aggregator.record_batch(batch)
+        if self.n_ensemble_per_ic > 1:
+            unfolded_target_data, unfolded_prediction_data = (
+                data.as_ensemble_tensor_dicts(data.n_ensemble)
+            )
+            for ensemble_aggregator in self._ensemble_aggregators.values():
+                ensemble_aggregator.record_batch(
+                    target_data=unfolded_target_data,
+                    gen_data=unfolded_prediction_data,
+                    i_time_start=self._n_timesteps_seen,
+                )
         n_times = data.time.shape[1]
         logs = self._get_inference_logs_slice(
             step_slice=slice(self._n_timesteps_seen, self._n_timesteps_seen + n_times),
@@ -367,6 +396,9 @@ class InferenceEvaluatorAggregator(
         logs = {}
         for name, aggregator in self._aggregators.items():
             logs.update(aggregator.get_logs(label=name))
+        if self.n_ensemble_per_ic > 1:
+            for name, ensemble_aggregator in self._ensemble_aggregators.items():
+                logs.update(ensemble_aggregator.get_logs(label=name))
         return logs
 
     @torch.no_grad()
