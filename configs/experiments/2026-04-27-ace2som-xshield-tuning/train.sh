@@ -3,7 +3,7 @@
 set -e
 
 
-CONFIG_FILENAME="tune-xshield-1yr-even-split.yaml"
+CONFIG_FILENAME="tune-xshield-1yr-even-split-decoder-only.yaml"
 
 SCRIPT_PATH=$(git rev-parse --show-prefix)
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -21,9 +21,12 @@ cd $REPO_ROOT
 # two different ACE2SOM seeds
 PRE_TRAINED_WEIGHTS_DATASETS=("01KHJ5F1M6YKVZESPZAAVVD6G8" "01KHCEF1SBYCZCGDM78N1CJC3H")
 
+# tuned on XSHiELD, seed 0
+TUNED_DATASET=01KQAZ8HBV7K6XZWGPMF159VV2
 
-for seed in {0..1}; do
-    job_name="ace2som-xshield-tune-1yr-even-split-seed${seed}"
+#        --dataset ${PRE_TRAINED_WEIGHTS_DATASETS[$seed]}:/pre-trained-weights \
+for seed in {0..0}; do
+    job_name="ace2som-xshield-tune-1yr-even-split-decoder-only-seed${seed}"
     fine_tune_seed=$((seed + SEED_OFFSET))
     override="seed=${fine_tune_seed}"
     python -m fme.ace.validate_config --config_type train $CONFIG_PATH --override $override
@@ -44,7 +47,7 @@ for seed in {0..1}; do
         --env-secret WANDB_API_KEY=wandb-api-key-annak \
         --dataset-secret google-credentials:/tmp/google_application_credentials.json \
         --dataset $STATS_DATASET:/statsdata \
-        --dataset ${PRE_TRAINED_WEIGHTS_DATASETS[$seed]}:/pre-trained-weights \
+        --dataset $TUNED_DATASET:/pre-trained-weights \
         --gpus $N_GPUS \
         --shared-memory 400GiB \
         --weka climate-default:/climate-default \
