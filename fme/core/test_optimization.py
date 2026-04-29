@@ -614,6 +614,48 @@ def test_load_optimizer_state_for_finetuning_param_group_mismatch():
         target.load_optimizer_state_for_finetuning(saved_state)
 
 
+def test_load_optimizer_state_for_finetuning_does_not_leak_hparams():
+    """Per-group hyperparameters from the checkpoint do not leak into the
+    freshly-built optimizer. Even keys absent from the finetune config (e.g.
+    ``amsgrad`` set on the source, or optimizer-type-specific or
+    scheduler-injected keys) are scrubbed: the finetune config is
+    authoritative."""
+    torch.manual_seed(0)
+    source_model = nn.Linear(2, 2).to(fme.get_device())
+    source = Optimization(
+        parameters=source_model.parameters(),
+        optimizer_type="Adam",
+        lr=0.001,
+        max_epochs=10,
+        scheduler=SchedulerConfig(),
+        enable_automatic_mixed_precision=False,
+        kwargs={"amsgrad": True},
+    )
+    saved_state = source.get_state()
+    # Simulate a stray key from the source side that the target should not
+    # adopt (e.g. an optimizer-type-specific flag, or a scheduler-injected
+    # key like ``initial_lr`` from a scheduler the target is not using).
+    for group in saved_state["optimizer_state_dict"]["param_groups"]:
+        group["bogus_source_only_flag"] = True
+
+    target_model = nn.Linear(2, 2).to(fme.get_device())
+    target = Optimization(
+        parameters=target_model.parameters(),
+        optimizer_type="Adam",
+        lr=0.001,
+        max_epochs=10,
+        scheduler=SchedulerConfig(),
+        enable_automatic_mixed_precision=False,
+        kwargs={"amsgrad": False},
+    )
+
+    target.load_optimizer_state_for_finetuning(saved_state)
+
+    for group in target.optimizer.param_groups:
+        assert group["amsgrad"] is False
+        assert "bogus_source_only_flag" not in group
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="GradScaler requires CUDA")
 def test_load_optimizer_state_for_finetuning_with_gscaler():
     """load_optimizer_state_for_finetuning restores grad scaler state when AMP

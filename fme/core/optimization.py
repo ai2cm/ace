@@ -199,11 +199,13 @@ class Optimization(OptimizationABC):
         """Load optimizer and grad scaler state from a checkpoint for fine-tuning.
 
         Restores per-parameter optimizer state (e.g. Adam momentum buffers) and,
-        if available, the grad scaler state. Preserves the freshly-built
-        optimizer's per-group hyperparameters (``lr``, ``weight_decay``,
-        ``betas``, ``eps``, ...) from the current finetune config rather than
-        adopting the values stored in the checkpoint. Scheduler state is not
-        restored, so the configured schedule starts from scratch.
+        if available, the grad scaler state. The freshly-built optimizer's
+        per-group hyperparameters (``lr``, ``weight_decay``, ``betas``, ``eps``,
+        ...) from the current finetune config are authoritative; any per-group
+        hyperparameters from the checkpoint (including optimizer-type-specific
+        flags like ``fused``/``amsgrad`` and scheduler-injected keys like
+        ``initial_lr``) are discarded. Scheduler state is not restored, so the
+        configured schedule starts from scratch.
 
         Args:
             state: The optimization state dict as saved by ``get_state()``,
@@ -230,8 +232,11 @@ class Optimization(OptimizationABC):
                 "between the source checkpoint and the current run. "
                 f"Underlying error: {e}"
             ) from e
-        for group, snap in zip(self.optimizer.param_groups, fresh_hparams):
-            group.update(snap)
+        for group, hparams in zip(self.optimizer.param_groups, fresh_hparams):
+            for k in list(group.keys()):
+                if k != "params":
+                    del group[k]
+            group.update(hparams)
         if self.gscaler is not None and state.get("gscaler_state_dict") is not None:
             self.gscaler.load_state_dict(state["gscaler_state_dict"])
 
