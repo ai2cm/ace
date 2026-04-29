@@ -6,19 +6,19 @@ ema:
   decay: 0.999
 max_epochs: 10
 inference:
-  n_forward_steps: 7280 #2019-2024
+  n_forward_steps: 3640 #2019-2024
   forward_steps_in_memory: 40
   loader:
     start_indices:
       times:
         - '2018-01-01T00:00:00'
-        - '2018-02-15T00:00:00'
+        #- '2018-02-15T00:00:00'
         - '2018-04-01T00:00:00'
-        - '2018-05-15T00:00:00'
+        #- '2018-05-15T00:00:00'
         - '2018-07-01T00:00:00'
-        - '2018-08-15T00:00:00'
+        #- '2018-08-15T00:00:00'
         - '2018-10-01T00:00:00'
-        - '2018-11-15T00:00:00'
+       # - '2018-11-15T00:00:00'
     dataset:
       data_path: /climate-default/
       file_pattern: 2025-09-11-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
@@ -44,8 +44,8 @@ train_loader:
       file_pattern: 2025-09-11-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
       engine: zarr
       subset:
-        start_time: '2014-01-01T00:00:00'
-        stop_time: '2015-01-01T00:00:00' #'2022-12-31T23:59:00'
+        start_time: '2016-01-01T00:00:00'
+        stop_time: '2016-01-01T00:00:00' #'2022-12-31T23:59:00'
     - data_path: /climate-default/
       file_pattern: 2026-02-12-X-SHiELD-AMIP-plus-4K-1deg-8layer-1yr.zarr
       engine: zarr
@@ -109,6 +109,7 @@ stepper_training:
       USWRFtoa: 2
       tendency_of_total_water_path_due_to_advection: 0.5
       PRESsfc: 3
+      PRMSL: 3
     kwargs:
       crps_weight: 0.9
       energy_score_weight: 0.1
@@ -116,14 +117,6 @@ stepper:
   step:
     type: single_module
     config:
-      secondary_decoder:
-        secondary_diagnostic_names:
-        - PRMSL
-        network:
-          type: MLP
-          config:
-            hidden_dim: 256
-            depth: 2
       residual_prediction: false
       builder:
         type: NoiseConditionedSFNO
@@ -271,3 +264,4 @@ stepper:
         - TMP850
         - h500
         - total_frozen_precipitation_rate
+        - PRMSL
