@@ -814,13 +814,13 @@ def _load_finetune_optimization_state(optimization: Optimization, checkpoint_pat
 
     Only loads the optimizer state dict and grad scaler state from the
     checkpoint. Scheduler state and training counters are not restored, so
-    the current config's schedule starts from scratch. The configured
-    learning rate is preserved.
+    the current config's schedule starts from scratch. All freshly-built
+    optimizer per-group hyperparameters (lr, weight_decay, betas, eps, ...)
+    are preserved from the current job's TrainConfig.
 
     The checkpoint is loaded on CPU so that only the optimization state
     (not model weights, EMA, etc.) is transferred to the training device.
     """
-    lr = optimization.learning_rate
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     if "optimization" not in checkpoint:
         raise ValueError(
@@ -831,7 +831,7 @@ def _load_finetune_optimization_state(optimization: Optimization, checkpoint_pat
     optim_state = checkpoint["optimization"]
     del checkpoint
     optim_state = _tensors_to_device(optim_state, fme.get_device())
-    optimization.load_optimizer_state_for_finetuning(optim_state, lr=lr)
+    optimization.load_optimizer_state_for_finetuning(optim_state)
 
 
 def count_parameters(modules: torch.nn.ModuleList) -> int:
