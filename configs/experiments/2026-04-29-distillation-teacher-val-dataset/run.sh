@@ -42,4 +42,5 @@ gantry run \
     --system-python \
     --install "pip install --no-deps ." \
     -- torchrun --nproc-per-node $NGPU -m fme.downscaling.inference \
-        $SCRIPT_PATH/generate-teacher-val.yaml
+        $SCRIPT_PATH/generate-teacher-val.yaml \
+        --overwrite

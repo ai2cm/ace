@@ -1,5 +1,7 @@
 import dataclasses
 import logging
+import os
+import shutil
 from dataclasses import dataclass, field
 
 import dacite
@@ -8,6 +10,7 @@ import torch
 import yaml
 
 from fme.core.cli import prepare_directory
+from fme.core.distributed import Distributed
 from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
 
@@ -230,7 +233,7 @@ class InferenceConfig:
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)
         self.logging.configure_logging(
-            self.experiment_dir, log_filename, config=config, resumable=True
+            self.experiment_dir, log_filename, config=config, resumable=False
         )
 
     def build(self) -> Downscaler:
@@ -247,7 +250,7 @@ class InferenceConfig:
         return Downscaler(model=model, outputs=outputs, output_dir=self.experiment_dir)
 
 
-def main(config_path: str):
+def main(config_path: str, overwrite: bool = False):
     with open(config_path) as f:
         config = yaml.safe_load(f)
 
@@ -256,6 +259,13 @@ def main(config_path: str):
         data=config,
         config=dacite.Config(strict=True),
     )
+
+    if overwrite:
+        dist = Distributed.get_instance()
+        if dist.is_root() and os.path.exists(generation_config.experiment_dir):
+            logging.info(f"--overwrite: removing {generation_config.experiment_dir}")
+            shutil.rmtree(generation_config.experiment_dir)
+
     prepare_directory(generation_config.experiment_dir, config)
 
     generation_config.configure_logging(log_filename="out.log")

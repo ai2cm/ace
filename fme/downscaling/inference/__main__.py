@@ -27,10 +27,15 @@ from .inference import main
 def parse_args():
     parser = argparse.ArgumentParser(description="Downscaling generation script")
     parser.add_argument("config_path", type=str, help="Path to the config file")
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Delete the experiment directory before running, starting from scratch.",
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
     with Distributed.context():
-        main(args.config_path)
+        main(args.config_path, overwrite=args.overwrite)
