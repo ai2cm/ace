@@ -38,6 +38,12 @@ overrides:
       experiment: historical
       variant_label: r2i1p1f1
     allow_dedupe: true
+  # AWI-ESM-1-1-LR's unstructured ocean grid (~127k cells) causes xesmf
+  # to build a 127k×127k weight matrix for siconc regridding, which
+  # either OOMs or hangs indefinitely depending on available memory.
+  - match:
+      source_id: AWI-ESM-1-1-LR
+    skip_forcing_variables: [siconc]
 # Example time_subset override:
 # - match: {source_id: GISS-E2-1-G, variant_label: r1i1p3f1}
 #   time_subset:

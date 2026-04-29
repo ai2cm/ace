@@ -207,6 +207,7 @@ class Override:
     match: Match
     time_subset: Optional[dict[str, TimeWindow]] = None
     allow_dedupe: Optional[bool] = None
+    skip_forcing_variables: Optional[list[str]] = None
 
 
 @dataclass
@@ -247,19 +248,26 @@ class ProcessConfig:
         """Apply overrides on top of defaults for one dataset."""
         time_subset = dict(self.defaults.time_subset)
         allow_dedupe = self.defaults.allow_dedupe
+        forcing_variables = list(self.defaults.forcing_variables)
         for override in self.overrides:
             if override.match.matches(source_id, experiment, variant_label):
                 if override.time_subset is not None:
                     time_subset = dict(override.time_subset)
                 if override.allow_dedupe is not None:
                     allow_dedupe = override.allow_dedupe
+                if override.skip_forcing_variables is not None:
+                    forcing_variables = [
+                        v
+                        for v in forcing_variables
+                        if v not in override.skip_forcing_variables
+                    ]
         return ResolvedDatasetConfig(
             source_id=source_id,
             experiment=experiment,
             variant_label=variant_label,
             core_variables=list(self.defaults.core_variables),
             optional_variables=list(self.defaults.optional_variables),
-            forcing_variables=list(self.defaults.forcing_variables),
+            forcing_variables=forcing_variables,
             static_variables=list(self.defaults.static_variables),
             forcing_interpolation=self.defaults.forcing_interpolation,
             time_subset=time_subset,

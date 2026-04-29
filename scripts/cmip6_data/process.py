@@ -1176,6 +1176,8 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
         # Catch per-forcing so the rest of the dataset still gets
         # written; the model just loses that one forcing variable.
         for table, var in (("Amon", "ts"), ("SImon", "siconc")):
+            if var not in cfg.forcing_variables:
+                continue
             z = task.zstores.get(table, {}).get(var)
             if not z:
                 row.warnings.append(f"missing forcing {var} from {table}")
