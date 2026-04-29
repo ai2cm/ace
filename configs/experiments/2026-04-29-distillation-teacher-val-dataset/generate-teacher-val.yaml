@@ -1,0 +1,34 @@
+experiment_dir: /climate-default/2026-04-29-distillation-teacher-val-dataset
+
+model:
+  checkpoint_path: /checkpoints/best_histogram_tail.ckpt
+
+data:
+  coarse:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 100km.zarr
+      engine: zarr
+  batch_size: 16
+  num_data_workers: 2
+  strict_ensemble: false
+
+outputs:
+  - name: conus_val_2023
+    n_ens: 12
+    max_samples_per_gpu: 16
+    time_range:
+      start_time: "2023-01-01T00:00:00"
+      stop_time: "2023-12-31T23:59:59"
+    lat_extent:
+      start: 22.0
+      stop: 50.0
+    lon_extent:
+      start: 230.0
+      stop: 295.0
+
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: andrep-downscaling
+  entity: ai2cm
