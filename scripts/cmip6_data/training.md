@@ -18,47 +18,16 @@ into pressure-named 2D variables before writing: `ua1000` through
 `ta_derived_layer_1000_850` through `ta_derived_layer_50_10`. All
 variables are now uniformly `(time, lat, lon)` or `(lat, lon)`.
 
-### 2. Time-varying below-surface mask
+### ~~2. Time-varying below-surface mask~~ (deferred)
 
-**Problem.** The CMIP6 data has a time-varying below-surface mask that
-varies over time (surface pressure changes move the boundary). After
-flattening (issue 1), this becomes per-level variables like
-`below_surface_mask1000(time, lat, lon)`. But fme's `MaskProvider`
-(`fme/core/mask_provider.py:67`) only supports time-invariant masks — it loads
-masks once from the first timestep and broadcasts them.
+Not blocking the smoke test. The processed data includes nearest-above
+filled values in below-surface cells, so all variables are continuous
+and NaN-free. The smoke test trains on the filled data using the
+standard `SingleModuleStepConfig`, omitting mask variables from
+`in_names`/`out_names`. The model wastes some capacity learning
+extrapolated below-surface values, but the pipeline is valid end-to-end.
 
-This has three sub-problems:
-
-1. **Output masking in normalized space.** The model must fill below-surface
-   cells with zero in *normalized* space, not denormalized space. This
-   means masking must happen between the network forward pass and
-   denormalization — inside the step, not as a post-step wrapper. A
-   composition-based step wrapper cannot intervene at this point in
-   `step_with_adjustments`, so a dedicated `StepABC` implementation
-   (derived from `SingleModuleStep`) is needed.
-
-2. **Mask prediction.** The model must *predict* the below-surface mask at
-   the output timestep (in `out_names`), not just consume it as a forcing
-   input. The mask boundary moves with surface pressure, so the model
-   needs to learn to predict where the boundary is. The mask variables
-   are in both `in_names` and `out_names`.
-
-3. **Cross-entropy mask loss.** The mask is a binary classification target,
-   not a regression target. A special loss (or loss wrapper) must apply
-   cross-entropy loss to the mask variables and standard regression loss
-   to the non-mask variables. Additionally, for non-mask variables at
-   below-surface cells, the regression loss should be zeroed out (or
-   down-weighted), since the target values there are unphysical
-   extrapolations from the CMIP6 model.
-
-**Approach.** Implement a CMIP6-specific `StepABC` subclass (based on
-`SingleModuleStep`) that:
-- Includes `below_surface_mask{hPa}` variables in both `in_names` and
-  `out_names`.
-- After the network forward pass (in normalized space), replaces
-  below-surface cells with zero before denormalization.
-- Pairs with a loss object that uses cross-entropy on mask channels and
-  per-cell-masked regression on non-mask channels.
+See issue 13 for the full mask-aware training plan.
 
 ### ~~3. Atmosphere corrector depends on hybrid sigma-pressure coordinates~~ (non-issue)
 
@@ -167,6 +136,50 @@ concat loader. One approach: fill missing optional variables with a
 configurable default (e.g. zero or NaN + mask) so that all datasets
 present the same variable interface to the model. Another: per-variable
 presence flags in the batch so the model and loss can handle missingness.
+
+### 13. Mask-aware training for below-surface cells
+
+**Problem.** The CMIP6 data has a time-varying below-surface mask that
+changes over time (surface pressure changes move the boundary). After
+flattening (issue 1), this becomes per-level variables like
+`below_surface_mask1000(time, lat, lon)`. The smoke test sidesteps
+this by training on nearest-above filled data (issue 2), but
+production training should handle masks properly.
+
+This has three sub-problems:
+
+1. **Input/output masking in normalized space.** `Cmip6Step`
+   (`fme/ace/step/cmip6.py`) already handles this: mask variables
+   bypass normalization, input below-surface cells are zeroed in
+   normalized space before the network, sigmoid is applied to mask
+   outputs, and masks are excluded from residual prediction. The step
+   does *not* mask outputs — that is left to the loss and to the
+   next-step input masking during inference.
+
+2. **NaN in below-surface target data.** The data pipeline (`process.py`)
+   currently fills below-surface cells with nearest-above values.
+   For mask-aware training, the pipeline should instead write NaN in
+   below-surface cells. `make_normalization.py` already handles NaN
+   correctly (skips mask variables, uses `np.isfinite` filtering).
+   The existing `WeightedMappingLoss` zeros loss for NaN target cells,
+   so the regression loss is automatically excluded for below-surface
+   cells once the data has NaN there.
+
+3. **Cross-entropy mask loss.** The mask is a binary classification
+   target, not a regression target. A loss wrapper or composite loss
+   is needed that applies cross-entropy to mask channels and standard
+   regression to non-mask channels. The existing `StepLossConfig`
+   does not support mixed loss types per channel.
+
+**Approach.** When ready to move beyond the smoke test:
+- Update `process.py` to write NaN in below-surface cells instead of
+  nearest-above fill.
+- Recompute normalization statistics (which will now exclude
+  below-surface cells).
+- Add a composite loss that combines BCE on mask channels with
+  regression on non-mask channels.
+- Use `Cmip6StepConfig` (type `"cmip6"`) instead of
+  `SingleModuleStepConfig` in the training YAML.
 
 ### 8. No surface pressure variable
 
