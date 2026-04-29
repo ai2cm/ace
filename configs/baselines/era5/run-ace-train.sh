@@ -57,6 +57,6 @@ base_name="ace2s"
 run_training "ace-train-config-1-step-pretrain.yaml" "$base_name-era5-1-step-pre-training-rs0"
 
 # For the finetuning stage take beaker dataset id from the above job and add it to
-# train-x-shield-multi-step-fine-tuning.yaml then uncomment next line
+# ace-train-config-multi-step-finetuning.yaml then uncomment next line
 
 # run_training "ace-train-config-multi-step-finetuning.yaml" "$base_name-era5-multi-step-fine-tuning-rs0"
