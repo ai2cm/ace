@@ -124,7 +124,8 @@ class Downscaler:
                     latlon_coords=fine_latlon_coords,
                     output_dir=self.output_dir,
                 )
-                writer.initialize_store(np.float32)
+                data_vars = output.save_vars or self.model.out_packer.names
+                writer.initialize_store(np.float32, data_vars=data_vars)
 
             logging.info(
                 f"[{output.name}] Batch {i+1}/{total_batches}, "
