@@ -254,6 +254,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     lora_alpha: float | None = None
     spectral_lora_rank: int = 0
     spectral_lora_alpha: float | None = None
+    filter_preserves_global_mean: bool = False
 
     def __post_init__(self):
         if self.context_pos_embed_dim > 0 and self.pos_embed:
@@ -298,6 +299,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             lora_alpha=self.lora_alpha,
             spectral_lora_rank=self.spectral_lora_rank,
             spectral_lora_alpha=self.spectral_lora_alpha,
+            filter_preserves_global_mean=self.filter_preserves_global_mean,
         )
         sfno_net = get_lat_lon_sfnonet(
             params=sfno_config,
