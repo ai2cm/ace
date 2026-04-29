@@ -326,17 +326,35 @@ def test_filter_preserves_global_mean():
 
 def test_filter_preserves_global_mean_allows_grad():
     torch.manual_seed(0)
-    nlat, nlon, embed_dim = 16, 32, 8
+    input_channels = 2
+    output_channels = 3
+    img_shape = (9, 18)
     device = get_device()
-    conv, _ = _make_spectral_conv(nlat, nlon, embed_dim, preserve_global_mean=True)
-    conv = conv.to(device)
-
-    x = torch.randn(2, embed_dim, nlat, nlon, device=device)
-    output, _ = conv(x)
+    params = SFNONetConfig(
+        embed_dim=16,
+        num_layers=2,
+        filter_type="linear",
+        filter_preserves_global_mean=True,
+    )
+    model = get_lat_lon_sfnonet(
+        params=params,
+        img_shape=img_shape,
+        in_chans=input_channels,
+        out_chans=output_channels,
+    ).to(device)
+    x = torch.randn(2, input_channels, *img_shape, device=device)
+    context = Context(
+        embedding_scalar=torch.zeros(2, 0, device=device),
+        labels=torch.zeros(2, 0, device=device),
+        noise=None,
+        embedding_pos=None,
+    )
+    output = model(x, context)
     output.sum().backward()
-
-    assert conv.weight.grad is not None
-    assert not torch.all(conv.weight.grad == 0)
+    for block in model.blocks:
+        weight = block.filter.filter.weight
+        assert weight.grad is not None
+        assert not torch.all(weight.grad == 0)
 
 
 def test_can_call_sfnonet_with_filter_preserves_global_mean():
