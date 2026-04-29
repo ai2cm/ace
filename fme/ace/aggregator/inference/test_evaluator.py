@@ -9,6 +9,7 @@ import xarray as xr
 
 from fme.ace.aggregator.inference import (
     InferenceEvaluatorAggregatorConfig,
+    MetricConfig,
     StepMeanEntry,
 )
 from fme.ace.data_loading.batch_data import BatchData, PairedData
@@ -342,4 +343,134 @@ def test_agg_raises_without_output_dir():
             normalize=lambda x: dict(x),
             save_diagnostics=True,
             output_dir=None,
+        )
+
+
+def test_metric_config_invalid_type():
+    with pytest.raises(ValueError, match="Unknown metric type"):
+        MetricConfig(type="nonexistent")
+
+
+def test_metric_config_step_mean_requires_step():
+    with pytest.raises(ValueError, match="step is required"):
+        MetricConfig(type="step_mean")
+
+
+def test_metric_config_duplicate_names():
+    with pytest.raises(ValueError, match="Duplicate metric names"):
+        InferenceEvaluatorAggregatorConfig(
+            metrics=[
+                MetricConfig(type="mean"),
+                MetricConfig(type="mean"),
+            ],
+        )
+
+
+def test_metric_config_get_name_defaults():
+    assert MetricConfig(type="mean").get_name() == "mean"
+    assert MetricConfig(type="mean", target="norm").get_name() == "mean_norm"
+    assert MetricConfig(type="step_mean", step=5).get_name() == "mean_step_5"
+    assert (
+        MetricConfig(type="step_mean", step=5, target="norm").get_name()
+        == "mean_step_5_norm"
+    )
+    assert MetricConfig(type="time_mean").get_name() == "time_mean"
+    assert MetricConfig(type="time_mean", target="norm").get_name() == "time_mean_norm"
+    assert MetricConfig(type="power_spectrum").get_name() == "power_spectrum"
+    assert MetricConfig(type="histogram").get_name() == "histogram"
+    assert MetricConfig(type="mean", name="custom").get_name() == "custom"
+
+
+def test_metrics_list_builds_and_records():
+    """Test that the metrics list config path produces a working aggregator."""
+    torch.manual_seed(0)
+    n_sample, n_time, nx, ny = 2, 5, 8, 4
+    ds_info = get_ds_info(nx, ny)
+    initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
+
+    agg = InferenceEvaluatorAggregatorConfig(
+        metrics=[
+            MetricConfig(type="mean"),
+            MetricConfig(type="mean", target="norm"),
+            MetricConfig(type="time_mean"),
+            MetricConfig(type="step_mean", step=3),
+        ],
+    ).build(
+        dataset_info=ds_info,
+        n_ic_steps=1,
+        n_forward_steps=n_time - 1,
+        initial_time=initial_time,
+        normalize=lambda x: dict(x),
+        save_diagnostics=False,
+    )
+    logs = agg.record_batch(
+        data=PairedData.new_on_device(
+            prediction={
+                "a": torch.randn(n_sample, n_time, ny, nx, device=get_device())
+            },
+            reference={"a": torch.randn(n_sample, n_time, ny, nx, device=get_device())},
+            time=xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"]),
+            labels=None,
+        ),
+    )
+    assert len(logs) == n_time
+    assert "mean/weighted_rmse/a" in logs[0]
+    assert "mean_norm/weighted_rmse/a" in logs[0]
+
+    summary_logs = agg.get_summary_logs()
+    assert "time_mean/rmse/a" in summary_logs
+    assert "mean_step_3/weighted_rmse/a" in summary_logs
+
+
+def test_metrics_list_variable_filter():
+    """Test that the variables field on MetricConfig filters correctly."""
+    torch.manual_seed(0)
+    n_sample, n_time, nx, ny = 2, 5, 8, 4
+    ds_info = get_ds_info(nx, ny)
+    initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
+
+    agg = InferenceEvaluatorAggregatorConfig(
+        metrics=[
+            MetricConfig(type="mean", variables=["a"]),
+            MetricConfig(type="time_mean", variables=["b"]),
+        ],
+    ).build(
+        dataset_info=ds_info,
+        n_ic_steps=1,
+        n_forward_steps=n_time - 1,
+        initial_time=initial_time,
+        normalize=lambda x: dict(x),
+        save_diagnostics=False,
+    )
+    agg.record_batch(
+        data=PairedData.new_on_device(
+            prediction={
+                "a": torch.randn(n_sample, n_time, ny, nx, device=get_device()),
+                "b": torch.randn(n_sample, n_time, ny, nx, device=get_device()),
+            },
+            reference={
+                "a": torch.randn(n_sample, n_time, ny, nx, device=get_device()),
+                "b": torch.randn(n_sample, n_time, ny, nx, device=get_device()),
+            },
+            time=xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"]),
+            labels=None,
+        ),
+    )
+    summary = agg.get_summary_logs()
+    assert "time_mean/rmse/b" in summary
+    assert "time_mean/rmse/a" not in summary
+
+
+def test_metrics_list_step_mean_exceeds_steps():
+    ds_info = get_ds_info(nx=4, ny=4)
+    with pytest.raises(ValueError, match="step_mean step 100 exceeds"):
+        InferenceEvaluatorAggregatorConfig(
+            metrics=[MetricConfig(type="step_mean", step=100)],
+        ).build(
+            dataset_info=ds_info,
+            n_ic_steps=1,
+            n_forward_steps=5,
+            initial_time=get_zero_time(shape=[1, 0], dims=["sample", "time"]),
+            normalize=lambda x: dict(x),
+            save_diagnostics=False,
         )
