@@ -2,6 +2,7 @@ import dataclasses
 from collections.abc import Sequence
 
 from fme.ace.data_loading.augmentation import AugmentationConfig
+from fme.ace.data_loading.cmip6 import Cmip6DataConfig
 from fme.core.dataset.concat import ConcatDatasetConfig
 from fme.core.dataset.dataset import DatasetABC
 from fme.core.dataset.merged import MergeDatasetConfig
@@ -48,7 +49,9 @@ class DataLoaderConfig:
         pre-loaded window.
     """
 
-    dataset: ConcatDatasetConfig | MergeDatasetConfig | XarrayDataConfig
+    dataset: (
+        Cmip6DataConfig | ConcatDatasetConfig | MergeDatasetConfig | XarrayDataConfig
+    )
     batch_size: int
     num_data_workers: int = 0
     prefetch_factor: int | None = None

@@ -4,6 +4,7 @@ from fme.ace.aggregator.inference import StepMeanEntry
 from fme.ace.aggregator.one_step import OneStepAggregatorConfig
 from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.augmentation import AugmentationConfig
+from fme.ace.data_loading.cmip6 import Cmip6DataConfig
 from fme.ace.data_loading.getters import get_forcing_data
 from fme.ace.data_loading.inference import (
     ExplicitIndices,

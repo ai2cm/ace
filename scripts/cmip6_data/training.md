@@ -65,19 +65,22 @@ are averaged with equal weight. Outputs:
 All files are scalar-per-variable netCDFs compatible with fme's
 `NormalizationConfig(global_means_path=..., global_stds_path=...)`.
 
-### 5. Training configuration complexity
+### ~~5. Training configuration complexity~~ (resolved)
 
-**Problem.** A training run on this data requires listing ~76 individual zarr
-paths (one per model/experiment/member), each with its own label, inside a
-`ConcatDatasetConfig`. Writing this out manually in YAML is error-prone
-and huge.
+Resolved: `Cmip6DataConfig` (`fme/ace/data_loading/cmip6.py`) reads
+`index.csv` from a data directory, filters by status/source_id/
+experiment/realization, and programmatically builds a
+`ConcatDatasetConfig` with per-dataset `XarrayDataConfig` entries and
+labels.  Added to the `DataLoaderConfig.dataset` union type so it can
+be specified directly in training YAML:
 
-**Approach.** Create a lightweight configuration frontend
-(e.g. `Cmip6DatasetConfig`) that takes the `index.csv` path and
-output directory, reads the index, and programmatically builds the
-`ConcatDatasetConfig` with per-dataset `XarrayDataConfig` entries and labels.
-This keeps the user-facing YAML small while the expansion happens at
-config-load time.
+```yaml
+dataset:
+  data_dir: /path/to/cmip6-daily-pilot/v0
+  source_ids: [ACCESS-CM2, CESM2]   # optional; null = all
+  experiments: [historical, ssp585]
+  realizations: [1, 2]              # optional; null = all
+```
 
 ---
 
@@ -196,6 +199,5 @@ sufficient; refine after examining training loss by variable.
 INM-CM4-8 is already excluded from training via `pilot.yaml`
 (`selection.exclude_source_ids`). The CESM2-FV2 `sftlf` overshoot at the
 south pole and CESM2-WACCM deduplication are handled at ingest. No
-additional training-side filtering is needed, but the config frontend
-(issue 5) should respect the index `status` column and only include
-`"ok"` datasets.
+additional training-side filtering is needed. `Cmip6DataConfig`
+(issue 5) filters to `status == "ok"` datasets automatically.
