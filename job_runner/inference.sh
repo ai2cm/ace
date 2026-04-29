@@ -122,7 +122,7 @@ while read TRAIN_EXPER; do
     fi
 
     if [[ -z $PREEMPTIBLE ]]; then
-        PREEMPTIBLE=--not-preemptible
+        PREEMPTIBLE="--min-runtime 8h --no-auto-resume"
     fi
 
     if [[ -z $EXISTING_RESULTS_DATASET ]]; then

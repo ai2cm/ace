@@ -154,7 +154,7 @@ git_commit_and_push() {
 #   Optional:
 #     CHECKPOINT_DATASET_ARGS (array) - additional dataset mounts
 #     OVERRIDE_ARGS - config override arguments
-#     PREEMPTIBLE (default: --preemptible)
+#     PREEMPTIBLE (default: --min-runtime 0)
 #   Note: CONFIG_PATH must be relative to repo root for gantry run
 # Returns: Experiment ID
 run_gantry_training_job() {
@@ -255,9 +255,9 @@ build_job_name() {
 #   $6 - STATUS (e.g., "training")
 #   $7 - CHECKPOINT (e.g., "best_inference_ckpt")
 #   $8 - PRIORITY (e.g., "normal")
-#   $9 - PREEMPTIBLE_FLAG (e.g., "--not-preemptible")
+#   $9 - PREEMPTIBLE_FLAG (e.g., "--min-runtime 8h --no-auto-resume")
 #   $10 - GIT_BRANCH
-# Example: append_to_experiments_file "$EXPERIMENT_DIR" "$CONFIG_SUBDIR" "$JOB_GROUP" "$TAG" "$EXPERIMENT_ID" "training" "best_inference_ckpt" "normal" "--not-preemptible" "$GIT_BRANCH"
+# Example: append_to_experiments_file "$EXPERIMENT_DIR" "$CONFIG_SUBDIR" "$JOB_GROUP" "$TAG" "$EXPERIMENT_ID" "training" "best_inference_ckpt" "normal" "--min-runtime 8h --no-auto-resume" "$GIT_BRANCH"
 append_to_experiments_file() {
     local EXPERIMENT_DIR="$1"
     local CONFIG_SUBDIR="$2"
