@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any, Protocol, runtime_checkable
+from collections.abc import Sequence
+from typing import Any, Protocol
 
+import torch
 import xarray as xr
 
 from fme.core.typing_ import TensorMapping
@@ -28,11 +30,39 @@ class InferenceBatchData:
     time: xr.DataArray | None
     i_time_start: int
 
+    @classmethod
+    def new_test_data(
+        cls,
+        names: Sequence[str] = ("a",),
+        shape: tuple[int, ...] = (2, 3, 4, 8),
+        target: bool = False,
+        time: xr.DataArray | None = None,
+        i_time_start: int = 0,
+    ) -> InferenceBatchData:
+        prediction = {name: torch.randn(*shape) for name in names}
+        if target:
+            target_data = {name: torch.randn(*shape) for name in names}
+            target_norm = {name: torch.randn(*shape) for name in names}
+        else:
+            target_data = None
+            target_norm = None
+        return cls(
+            prediction=prediction,
+            prediction_norm={name: torch.randn(*shape) for name in names},
+            target=target_data,
+            target_norm=target_norm,
+            time=time,
+            i_time_start=i_time_start,
+        )
 
-@runtime_checkable
+
 class SubAggregator(Protocol):
     def record_batch(self, data: InferenceBatchData) -> None: ...
 
     def get_logs(self, label: str) -> dict[str, Any]: ...
 
     def get_dataset(self) -> xr.Dataset: ...
+
+
+class TimeSeriesLogs(Protocol):
+    def get_logs(self, label: str, step_slice: slice = ...) -> dict[str, Any]: ...

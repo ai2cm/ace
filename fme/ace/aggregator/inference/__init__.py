@@ -1,6 +1,7 @@
-from .config import (
+from .main import (
+    InferenceAggregator,
     InferenceAggregatorConfig,
+    InferenceEvaluatorAggregator,
     InferenceEvaluatorAggregatorConfig,
     StepMeanEntry,
 )
-from .main import InferenceAggregator, InferenceEvaluatorAggregator

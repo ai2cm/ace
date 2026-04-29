@@ -6,13 +6,13 @@ from collections.abc import Callable, Mapping, Sequence
 import torch
 import xarray as xr
 
-from fme.ace.aggregator.inference.config import StepMeanEntry
 from fme.ace.aggregator.inference.main import (
     InferenceAggregator as InferenceAggregator_,
 )
 from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregator as InferenceEvaluatorAggregator_,
 )
+from fme.ace.aggregator.inference.main import StepMeanEntry
 from fme.ace.aggregator.one_step.main import OneStepAggregator as OneStepAggregator_
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device

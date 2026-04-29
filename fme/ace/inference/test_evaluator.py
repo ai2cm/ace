@@ -16,7 +16,7 @@ import torch
 import xarray as xr
 import yaml
 
-from fme.ace.aggregator.inference.config import (
+from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregatorConfig,
     StepMeanEntry,
 )
