@@ -27,12 +27,38 @@ flattening (issue 1), this becomes per-level variables like
 (`fme/core/mask_provider.py:67`) only supports time-invariant masks — it loads
 masks once from the first timestep and broadcasts them.
 
-**Approach.** Use a CMIP6-specific step object (or corrector) that consumes
-the per-level `below_surface_mask{hPa}` variables as ordinary time-varying data
-variables rather than relying on fme's `MaskProvider`. This step would apply
-the mask at each timestep during the forward pass, correctly tracking the
-moving below-surface boundary. The mask variables are included in the
-training data as forcing inputs (in `in_names` but not `out_names`).
+This has three sub-problems:
+
+1. **Output masking in normalized space.** The model must fill below-surface
+   cells with zero in *normalized* space, not denormalized space. This
+   means masking must happen between the network forward pass and
+   denormalization — inside the step, not as a post-step wrapper. A
+   composition-based step wrapper cannot intervene at this point in
+   `step_with_adjustments`, so a dedicated `StepABC` implementation
+   (derived from `SingleModuleStep`) is needed.
+
+2. **Mask prediction.** The model must *predict* the below-surface mask at
+   the output timestep (in `out_names`), not just consume it as a forcing
+   input. The mask boundary moves with surface pressure, so the model
+   needs to learn to predict where the boundary is. The mask variables
+   are in both `in_names` and `out_names`.
+
+3. **Cross-entropy mask loss.** The mask is a binary classification target,
+   not a regression target. A special loss (or loss wrapper) must apply
+   cross-entropy loss to the mask variables and standard regression loss
+   to the non-mask variables. Additionally, for non-mask variables at
+   below-surface cells, the regression loss should be zeroed out (or
+   down-weighted), since the target values there are unphysical
+   extrapolations from the CMIP6 model.
+
+**Approach.** Implement a CMIP6-specific `StepABC` subclass (based on
+`SingleModuleStep`) that:
+- Includes `below_surface_mask{hPa}` variables in both `in_names` and
+  `out_names`.
+- After the network forward pass (in normalized space), replaces
+  below-surface cells with zero before denormalization.
+- Pairs with a loss object that uses cross-entropy on mask channels and
+  per-cell-masked regression on non-mask channels.
 
 ### ~~3. Atmosphere corrector depends on hybrid sigma-pressure coordinates~~ (non-issue)
 
