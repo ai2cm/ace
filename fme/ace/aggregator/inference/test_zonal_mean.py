@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import torch
 
-from fme.ace.aggregator.inference.data import InferenceBatchData
+from fme.ace.aggregator.inference.data import InferenceBatchData, make_dummy_time
 from fme.ace.aggregator.inference.zonal_mean import ZonalMeanAggregator
 from fme.core import get_device
 
@@ -15,12 +15,13 @@ def zonal_mean(data: torch.Tensor) -> torch.Tensor:
 
 
 def _make_batch_data(target_data, gen_data, i_time_start=0) -> InferenceBatchData:
+    sample = next(iter(gen_data.values()))
     return InferenceBatchData(
         prediction=gen_data,
         prediction_norm={},
         target=target_data,
         target_norm=None,
-        time=None,
+        time=make_dummy_time(sample.shape[0], sample.shape[1]),
         i_time_start=i_time_start,
     )
 

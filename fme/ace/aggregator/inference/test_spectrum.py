@@ -6,7 +6,7 @@ import torch_harmonics
 import xarray as xr
 
 import fme
-from fme.ace.aggregator.inference.data import InferenceBatchData
+from fme.ace.aggregator.inference.data import InferenceBatchData, make_dummy_time
 from fme.ace.aggregator.inference.spectrum import (
     PairedSphericalPowerSpectrumAggregator,
     SphericalPowerSpectrumAggregator,
@@ -39,7 +39,7 @@ def test_spherical_power_spectrum_aggregator(report_plot: bool):
             prediction_norm={},
             target=None,
             target_norm=None,
-            time=None,
+            time=make_dummy_time(2, 2),
             i_time_start=0,
         )
     )
@@ -49,7 +49,7 @@ def test_spherical_power_spectrum_aggregator(report_plot: bool):
             prediction_norm={},
             target=None,
             target_norm=None,
-            time=None,
+            time=make_dummy_time(2, 3),
             i_time_start=0,
         )
     )
@@ -84,7 +84,7 @@ def test_spherical_power_spectrum_aggregator_get_dataset():
             prediction_norm={},
             target=None,
             target_norm=None,
-            time=None,
+            time=make_dummy_time(2, 3),
             i_time_start=0,
         )
     )
@@ -119,7 +119,7 @@ def test_paired_spherical_power_spectrum_aggregator_get_dataset():
             prediction_norm={},
             target=target_data,
             target_norm={},
-            time=None,
+            time=make_dummy_time(2, 3),
             i_time_start=0,
         )
     )
@@ -171,7 +171,7 @@ def test_paired_spherical_power_spectrum_aggregator(report_plot: bool):
             prediction_norm={},
             target=data,
             target_norm={},
-            time=None,
+            time=make_dummy_time(2, 3),
             i_time_start=0,
         )
     )

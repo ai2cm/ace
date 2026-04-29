@@ -4,7 +4,7 @@ from typing import Protocol
 
 import torch
 
-from fme.ace.aggregator.inference.data import InferenceBatchData
+from fme.ace.aggregator.inference.data import InferenceBatchData, make_dummy_time
 from fme.ace.aggregator.inference.spectrum import PairedSphericalPowerSpectrumAggregator
 from fme.ace.aggregator.one_step.reduced import MeanAggregator
 from fme.ace.stepper import TrainOutput
@@ -49,13 +49,14 @@ class _TrainSpectrumAdapter:
         self._inner = inner
 
     def record_batch(self, target_data: TensorMapping, gen_data: TensorMapping):
+        sample = next(iter(gen_data.values()))
         self._inner.record_batch(
             InferenceBatchData(
                 prediction=gen_data,
                 prediction_norm=gen_data,
                 target=target_data,
                 target_norm=target_data,
-                time=None,
+                time=make_dummy_time(sample.shape[0], sample.shape[1]),
                 i_time_start=0,
             )
         )

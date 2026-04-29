@@ -124,7 +124,6 @@ class EnsoCoefficientEvaluatorAggregator:
         We need to track sums for each sample since the index will be different
         for each time period.
         """
-        assert data.time is not None
         assert data.target is not None
         time = data.time
         target_data = data.target

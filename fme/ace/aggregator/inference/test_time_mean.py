@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from fme.ace.aggregator.inference.data import InferenceBatchData
+from fme.ace.aggregator.inference.data import InferenceBatchData, make_dummy_time
 from fme.ace.aggregator.inference.time_mean import (
     TimeMeanAggregator,
     TimeMeanEvaluatorAggregator,
@@ -32,7 +32,7 @@ def test_rmse_of_time_mean_all_channels():
             prediction_norm=gen_data_norm,
             target=target_data_norm,
             target_norm=target_data_norm,
-            time=None,
+            time=make_dummy_time(2, 3),
             i_time_start=0,
         )
     )
@@ -65,7 +65,7 @@ def test_custom_channel_mean_names():
             prediction_norm=gen_data_norm,
             target=target_data_norm,
             target_norm=target_data_norm,
-            time=None,
+            time=make_dummy_time(2, 3),
             i_time_start=0,
         )
     )
@@ -96,7 +96,7 @@ def test_mean_all_channels_not_in_denorm():
             prediction_norm=gen_data,
             target=target_data,
             target_norm=target_data,
-            time=None,
+            time=make_dummy_time(2, 3),
             i_time_start=0,
         )
     )
@@ -127,7 +127,7 @@ def test_bias_values():
             prediction_norm=gen_data,
             target=target_data,
             target_norm=target_data,
-            time=None,
+            time=make_dummy_time(2, 3),
             i_time_start=0,
         )
     )
@@ -160,7 +160,7 @@ def test_aggregator_mean_values():
             prediction_norm=data,
             target=None,
             target_norm=None,
-            time=None,
+            time=make_dummy_time(2, 3),
             i_time_start=0,
         )
     )

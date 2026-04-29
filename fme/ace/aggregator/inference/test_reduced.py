@@ -2,7 +2,7 @@ import numpy as np
 import torch
 
 import fme
-from fme.ace.aggregator.inference.data import InferenceBatchData
+from fme.ace.aggregator.inference.data import InferenceBatchData, make_dummy_time
 from fme.ace.aggregator.inference.reduced import (
     AreaWeightedReducedMetric,
     SingleTargetMeanAggregator,
@@ -68,12 +68,13 @@ def test_single_target_mean_aggregator():
         prediction = {
             "a": data_a[:, i * n_time_per_window : (i + 1) * n_time_per_window]
         }
+        n_time_actual = next(iter(prediction.values())).shape[1]
         batch_data = InferenceBatchData(
             prediction=prediction,
             prediction_norm={},
             target=None,
             target_norm=None,
-            time=None,
+            time=make_dummy_time(n_sample, n_time_actual),
             i_time_start=i * n_time_per_window,
         )
         agg.record_batch(data=batch_data)

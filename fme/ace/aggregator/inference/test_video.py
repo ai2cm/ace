@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import torch
 
-from fme.ace.aggregator.inference.data import InferenceBatchData
+from fme.ace.aggregator.inference.data import InferenceBatchData, make_dummy_time
 from fme.ace.aggregator.inference.video import VideoAggregator
 from fme.core.device import get_device
 from fme.core.typing_ import TensorDict
@@ -89,7 +89,7 @@ def test_video_data(offsets: np.ndarray):
                 prediction_norm={},
                 target=target_window,
                 target_norm=None,
-                time=None,
+                time=make_dummy_time(n_samples, n_window_in_memory),
                 i_time_start=i_start,
             )
         )
@@ -137,7 +137,7 @@ def test_video_data_without_extended_videos(offsets: np.ndarray):
                 prediction_norm={},
                 target=target_window,
                 target_norm=None,
-                time=None,
+                time=make_dummy_time(n_samples, n_window_in_memory),
                 i_time_start=i_start,
             )
         )
@@ -191,7 +191,7 @@ def test_video_data_values_on_random_inputs(n_batches: int):
                         i_end=(nb + 1) * samples_per_batch,
                     ),
                     target_norm=None,
-                    time=None,
+                    time=make_dummy_time(samples_per_batch, n_window_in_memory),
                     i_time_start=i_start,
                 )
             )

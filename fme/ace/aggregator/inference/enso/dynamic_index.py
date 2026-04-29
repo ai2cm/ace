@@ -136,7 +136,6 @@ class RegionalIndexAggregator:
         self._already_logged: list[str] = []
 
     def record_batch(self, data: InferenceBatchData) -> None:
-        assert data.time is not None
         time = data.time
         prediction = data.prediction
         for sst_name in self.sea_surface_temperature_names:

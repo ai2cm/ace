@@ -34,7 +34,6 @@ class SeasonalAggregator:
         data: InferenceBatchData,
     ):
         """Record a batch of data for computing time variability statistics."""
-        assert data.time is not None
         assert data.target is not None
         time = data.time
         target_data = {name: value.cpu() for name, value in data.target.items()}

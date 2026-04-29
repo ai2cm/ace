@@ -170,7 +170,6 @@ class GlobalMeanAnnualAggregator:
     @torch.no_grad()
     def record_batch(self, data: InferenceBatchData):
         """Record a batch of data for computing time variability statistics."""
-        assert data.time is not None
         time = data.time
         data_area_mean = {
             name: tensor.cpu()

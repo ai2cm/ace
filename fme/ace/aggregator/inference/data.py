@@ -1,13 +1,24 @@
 from __future__ import annotations
 
 import dataclasses
+import datetime
 from collections.abc import Sequence
 from typing import Any, Protocol
 
+import cftime
 import torch
 import xarray as xr
 
 from fme.core.typing_ import TensorMapping
+
+
+def make_dummy_time(n_sample: int, n_time: int) -> xr.DataArray:
+    base = cftime.DatetimeProlepticGregorian(2000, 1, 1)
+    times = [base + datetime.timedelta(hours=6 * i) for i in range(n_time)]
+    return xr.DataArray(
+        [times for _ in range(n_sample)],
+        dims=["sample", "time"],
+    )
 
 
 @dataclasses.dataclass
@@ -19,7 +30,7 @@ class InferenceBatchData:
         prediction_norm: Normalized prediction tensors.
         target: Denormalized target tensors, or None for single-series inference.
         target_norm: Normalized target tensors, or None for single-series inference.
-        time: Datetime array of shape (sample, time), or None if not available.
+        time: Datetime array of shape (sample, time).
         i_time_start: Global timestep offset for this batch.
     """
 
@@ -27,7 +38,7 @@ class InferenceBatchData:
     prediction_norm: TensorMapping
     target: TensorMapping | None
     target_norm: TensorMapping | None
-    time: xr.DataArray | None
+    time: xr.DataArray
     i_time_start: int
 
     @classmethod
@@ -39,6 +50,8 @@ class InferenceBatchData:
         time: xr.DataArray | None = None,
         i_time_start: int = 0,
     ) -> InferenceBatchData:
+        if time is None:
+            time = make_dummy_time(n_sample=shape[0], n_time=shape[1])
         prediction = {name: torch.randn(*shape) for name in names}
         if target:
             target_data = {name: torch.randn(*shape) for name in names}

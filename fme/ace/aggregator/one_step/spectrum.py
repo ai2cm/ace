@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import xarray as xr
 
-from fme.ace.aggregator.inference.data import InferenceBatchData
+from fme.ace.aggregator.inference.data import InferenceBatchData, make_dummy_time
 from fme.ace.aggregator.inference.spectrum import PairedSphericalPowerSpectrumAggregator
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorMapping
@@ -48,13 +48,14 @@ class SpectrumAggregator:
                 key: value[:, i_time_target : i_time_target + 1, ...]
                 for key, value in gen_data.items()
             }
+            sample = next(iter(gen_data.values()))
             self._wrapped.record_batch(
                 InferenceBatchData(
                     prediction=gen_data,
                     prediction_norm=gen_data_norm,
                     target=target_data,
                     target_norm=target_data_norm,
-                    time=None,
+                    time=make_dummy_time(sample.shape[0], sample.shape[1]),
                     i_time_start=i_time_start,
                 )
             )

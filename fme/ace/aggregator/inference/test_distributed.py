@@ -1,6 +1,6 @@
 import torch
 
-from fme.ace.aggregator.inference.data import InferenceBatchData
+from fme.ace.aggregator.inference.data import InferenceBatchData, make_dummy_time
 from fme.ace.aggregator.inference.reduced import MeanAggregator
 from fme.ace.aggregator.inference.time_mean import TimeMeanEvaluatorAggregator
 from fme.core.device import get_device
@@ -26,7 +26,7 @@ def test_mean_metrics_call_distributed():
             prediction_norm=sample_data,
             target=sample_data,
             target_norm=sample_data,
-            time=None,
+            time=make_dummy_time(2, 3),
             i_time_start=0,
         )
         agg.record_batch(batch)
@@ -55,7 +55,7 @@ def test_time_mean_metrics_call_distributed():
             prediction_norm=gen_data,
             target=target_data,
             target_norm=target_data,
-            time=None,
+            time=make_dummy_time(2, 3),
             i_time_start=0,
         )
         agg.record_batch(batch)
