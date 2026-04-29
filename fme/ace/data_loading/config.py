@@ -32,6 +32,12 @@ class DataLoaderConfig:
             required number of timesteps for a single batch. Setting this to greater
             than 0 should improve data loading performance, however, it also decreases
             the independence of subsequent batches if shuffled batches are desired.
+        time_buffer_pool_size: Number of pre-loaded windows to hold in memory
+            simultaneously when `time_buffer > 0`. Output batches are drawn by
+            randomly selecting a pool slot and then a sub-window within that slot.
+            Increasing this value improves the independence of consecutive batches
+            at the cost of higher memory usage (proportional to pool_size).
+            Requires `time_buffer > 0`.
 
     Note:
         Setting `time_buffer` to a value greater than 0 results in pre-loading
@@ -57,6 +63,7 @@ class DataLoaderConfig:
     )
     sample_with_replacement: int | None = None
     time_buffer: int = 0
+    time_buffer_pool_size: int = 1
 
     @property
     def using_labels(self) -> bool:
@@ -89,6 +96,17 @@ class DataLoaderConfig:
             raise ValueError(
                 "time_buffer must be greater than or equal to 0. "
                 f"Got {self.time_buffer}"
+            )
+        if self.time_buffer_pool_size < 1:
+            raise ValueError(
+                "time_buffer_pool_size must be greater than or equal to 1. "
+                f"Got {self.time_buffer_pool_size}"
+            )
+        if self.time_buffer == 0 and self.time_buffer_pool_size > 1:
+            raise ValueError(
+                "time_buffer_pool_size > 1 requires time_buffer > 0. "
+                f"Got time_buffer={self.time_buffer}, "
+                f"time_buffer_pool_size={self.time_buffer_pool_size}"
             )
 
     @property
