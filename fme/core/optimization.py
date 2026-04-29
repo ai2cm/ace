@@ -195,22 +195,48 @@ class Optimization(OptimizationABC):
         for param_group in self.optimizer.param_groups:
             param_group["lr"] = lr
 
-    def load_optimizer_state_for_finetuning(self, state: dict, lr: float):
+    def load_optimizer_state_for_finetuning(self, state: dict):
         """Load optimizer and grad scaler state from a checkpoint for fine-tuning.
 
-        Restores the optimizer state dict (e.g. Adam momentum buffers) and,
-        if available, the grad scaler state. Does NOT restore the scheduler
-        state, so the current config's schedule starts from scratch. After
-        loading, re-applies the given ``lr`` because
-        ``optimizer.load_state_dict`` overwrites param-group learning rates.
+        Restores per-parameter optimizer state (e.g. Adam momentum buffers) and,
+        if available, the grad scaler state. The freshly-built optimizer's
+        per-group hyperparameters (``lr``, ``weight_decay``, ``betas``, ``eps``,
+        ...) from the current finetune config are authoritative; any per-group
+        hyperparameters from the checkpoint (including optimizer-type-specific
+        flags like ``fused``/``amsgrad`` and scheduler-injected keys like
+        ``initial_lr``) are discarded. Scheduler state is not restored, so the
+        configured schedule starts from scratch.
 
         Args:
             state: The optimization state dict as saved by ``get_state()``,
                 containing at least ``"optimizer_state_dict"``.
-            lr: The learning rate to set after loading.
+
+        Raises:
+            ValueError: If the checkpoint's parameter groups are not
+                structurally compatible with the freshly-built optimizer
+                (e.g. different group count or per-group parameter count).
         """
-        self.optimizer.load_state_dict(state["optimizer_state_dict"])
-        self.set_learning_rate(lr)
+        fresh_hparams = [
+            {k: v for k, v in g.items() if k != "params"}
+            for g in self.optimizer.param_groups
+        ]
+        try:
+            self.optimizer.load_state_dict(state["optimizer_state_dict"])
+        except ValueError as e:
+            raise ValueError(
+                "Failed to load optimizer state for fine-tuning: parameter "
+                "groups in the checkpoint are incompatible with the "
+                "freshly-built optimizer (e.g. group count or per-group "
+                "parameter count mismatch). This typically indicates the "
+                "model architecture or trainable-parameter set changed "
+                "between the source checkpoint and the current run. "
+                f"Underlying error: {e}"
+            ) from e
+        for group, hparams in zip(self.optimizer.param_groups, fresh_hparams):
+            for k in list(group.keys()):
+                if k != "params":
+                    del group[k]
+            group.update(hparams)
         if self.gscaler is not None and state.get("gscaler_state_dict") is not None:
             self.gscaler.load_state_dict(state["gscaler_state_dict"])
 

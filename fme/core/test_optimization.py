@@ -536,13 +536,23 @@ def test_load_state_then_set_learning_rate():
 
 
 def test_load_optimizer_state_for_finetuning():
-    """load_optimizer_state_for_finetuning restores momentum buffers, applies a
-    new LR, and leaves the scheduler in its initial state."""
+    """load_optimizer_state_for_finetuning restores momentum buffers from the
+    checkpoint while preserving the freshly-configured per-group hyperparameters
+    (lr, weight_decay, betas) and leaves the scheduler in its initial state."""
     torch.manual_seed(0)
     model = nn.Linear(2, 2).to(fme.get_device())
     x = torch.randn(10, 2).to(fme.get_device())
 
-    optimization = _build_optimization(model.parameters(), lr=0.001)
+    source_kwargs = {"weight_decay": 0.1, "betas": (0.85, 0.995)}
+    optimization = Optimization(
+        parameters=model.parameters(),
+        optimizer_type="Adam",
+        lr=0.001,
+        max_epochs=10,
+        scheduler=SchedulerConfig(),
+        enable_automatic_mixed_precision=False,
+        kwargs=source_kwargs,
+    )
     assert optimization.optimizer.state_dict()["state"] == {}
 
     for _ in range(3):
@@ -557,12 +567,25 @@ def test_load_optimizer_state_for_finetuning():
 
     model2 = copy.deepcopy(model)
     new_lr = 0.01
-    optimization2 = _build_optimization(model2.parameters(), lr=new_lr)
+    new_weight_decay = 0.05
+    new_betas = (0.9, 0.999)
+    optimization2 = Optimization(
+        parameters=model2.parameters(),
+        optimizer_type="Adam",
+        lr=new_lr,
+        max_epochs=10,
+        scheduler=SchedulerConfig(),
+        enable_automatic_mixed_precision=False,
+        kwargs={"weight_decay": new_weight_decay, "betas": new_betas},
+    )
     fresh_scheduler_state = optimization2.scheduler.state_dict()
 
-    optimization2.load_optimizer_state_for_finetuning(saved_state, lr=new_lr)
+    optimization2.load_optimizer_state_for_finetuning(saved_state)
 
-    assert optimization2.learning_rate == new_lr
+    for group in optimization2.optimizer.param_groups:
+        assert group["lr"] == new_lr
+        assert group["weight_decay"] == new_weight_decay
+        assert group["betas"] == new_betas
 
     orig_opt_state = optimization.optimizer.state_dict()["state"]
     loaded_opt_state = optimization2.optimizer.state_dict()["state"]
@@ -573,6 +596,64 @@ def test_load_optimizer_state_for_finetuning():
             )
 
     assert optimization2.scheduler.state_dict() == fresh_scheduler_state
+
+
+def test_load_optimizer_state_for_finetuning_param_group_mismatch():
+    """load_optimizer_state_for_finetuning raises an informative ValueError
+    when the checkpoint's parameter groups are incompatible with the
+    freshly-built optimizer (e.g. different number of parameters)."""
+    torch.manual_seed(0)
+    source_model = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2)).to(fme.get_device())
+    source = _build_optimization(source_model.parameters())
+    saved_state = source.get_state()
+
+    target_model = nn.Linear(2, 2).to(fme.get_device())
+    target = _build_optimization(target_model.parameters())
+
+    with pytest.raises(ValueError, match="incompatible"):
+        target.load_optimizer_state_for_finetuning(saved_state)
+
+
+def test_load_optimizer_state_for_finetuning_does_not_leak_hparams():
+    """Per-group hyperparameters from the checkpoint do not leak into the
+    freshly-built optimizer. Even keys absent from the finetune config (e.g.
+    ``amsgrad`` set on the source, or optimizer-type-specific or
+    scheduler-injected keys) are scrubbed: the finetune config is
+    authoritative."""
+    torch.manual_seed(0)
+    source_model = nn.Linear(2, 2).to(fme.get_device())
+    source = Optimization(
+        parameters=source_model.parameters(),
+        optimizer_type="Adam",
+        lr=0.001,
+        max_epochs=10,
+        scheduler=SchedulerConfig(),
+        enable_automatic_mixed_precision=False,
+        kwargs={"amsgrad": True},
+    )
+    saved_state = source.get_state()
+    # Simulate a stray key from the source side that the target should not
+    # adopt (e.g. an optimizer-type-specific flag, or a scheduler-injected
+    # key like ``initial_lr`` from a scheduler the target is not using).
+    for group in saved_state["optimizer_state_dict"]["param_groups"]:
+        group["bogus_source_only_flag"] = True
+
+    target_model = nn.Linear(2, 2).to(fme.get_device())
+    target = Optimization(
+        parameters=target_model.parameters(),
+        optimizer_type="Adam",
+        lr=0.001,
+        max_epochs=10,
+        scheduler=SchedulerConfig(),
+        enable_automatic_mixed_precision=False,
+        kwargs={"amsgrad": False},
+    )
+
+    target.load_optimizer_state_for_finetuning(saved_state)
+
+    for group in target.optimizer.param_groups:
+        assert group["amsgrad"] is False
+        assert "bogus_source_only_flag" not in group
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="GradScaler requires CUDA")
@@ -613,7 +694,7 @@ def test_load_optimizer_state_for_finetuning_with_gscaler():
         kwargs={},
     )
 
-    optimization2.load_optimizer_state_for_finetuning(saved_state, lr=0.01)
+    optimization2.load_optimizer_state_for_finetuning(saved_state)
 
     assert optimization2.gscaler is not None
     assert optimization2.gscaler.state_dict() == saved_state["gscaler_state_dict"]
