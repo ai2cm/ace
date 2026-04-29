@@ -1,5 +1,4 @@
 import dataclasses
-import datetime
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -10,7 +9,6 @@ from torch import nn
 
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
-from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.dicts import add_names
@@ -29,21 +27,25 @@ from fme.core.step.secondary_decoder import (
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
-DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
-DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
-
 
 @StepSelector.register("cmip6")
 @dataclasses.dataclass
 class Cmip6StepConfig(StepConfigABC):
     """
-    Configuration for a single module stepper.
+    Configuration for a CMIP6 pressure-level stepper.
+
+    Extends the single-module step pattern with handling for time-varying
+    below-surface masks.  Mask variables (identified by ``mask_variable_prefix``)
+    bypass normalization, have sigmoid applied to their network outputs, and
+    are excluded from residual prediction.
 
     Parameters:
         builder: The module builder.
         in_names: Names of input variables.
         out_names: Names of output variables.
         normalization: The normalization configuration.
+        mask_variable_prefix: Prefix that identifies below-surface mask variables
+            in in_names/out_names (e.g. "below_surface_mask").
         secondary_decoder: Configuration for the secondary decoder that computes
             additional diagnostic variables from outputs.
         ocean: The ocean configuration.
@@ -58,6 +60,7 @@ class Cmip6StepConfig(StepConfigABC):
     in_names: list[str]
     out_names: list[str]
     normalization: NetworkAndLossNormalizationConfig
+    mask_variable_prefix: str = "below_surface_mask"
     secondary_decoder: SecondaryDecoderConfig | None = None
     ocean: OceanConfig | None = None
     corrector: AtmosphereCorrectorConfig | CorrectorSelector = dataclasses.field(
@@ -69,6 +72,12 @@ class Cmip6StepConfig(StepConfigABC):
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
+        self.mask_in_names = [
+            n for n in self.in_names if n.startswith(self.mask_variable_prefix)
+        ]
+        self.mask_out_names = [
+            n for n in self.out_names if n.startswith(self.mask_variable_prefix)
+        ]
         for name in self.prescribed_prognostic_names:
             if name not in self.out_names:
                 raise ValueError(
@@ -125,8 +134,12 @@ class Cmip6StepConfig(StepConfigABC):
 
     @property
     def _normalize_names(self):
-        """Names of variables which require normalization. I.e. inputs/outputs."""
-        return list(set(self.in_names).union(self.output_names))
+        """Names of variables which require normalization.
+
+        Mask variables are excluded — they bypass the normalizer.
+        """
+        all_mask = set(self.mask_in_names) | set(self.mask_out_names)
+        return list(set(self.in_names).union(self.output_names) - all_mask)
 
     @property
     def input_names(self) -> list[str]:
@@ -222,7 +235,11 @@ class Cmip6StepConfig(StepConfigABC):
 
 class Cmip6Step(StepABC):
     """
-    Step class for a single pytorch module.
+    Step class for CMIP6 pressure-level data with time-varying below-surface
+    masks.
+
+    Mask variables bypass the normalizer, have sigmoid applied to their
+    network outputs, and are excluded from residual prediction.
     """
 
     TIME_DIM = 1
@@ -236,15 +253,6 @@ class Cmip6Step(StepABC):
         normalizer: StandardNormalizer,
         init_weights: Callable[[list[nn.Module]], None],
     ):
-        """
-        Args:
-            config: The configuration.
-            dataset_info: Information about the dataset.
-            corrector: The corrector to use at the end of each step.
-            normalizer: The normalizer to use.
-            timestep: Timestep of the model.
-            init_weights: Function to initialize the weights of the module.
-        """
         super().__init__()
         n_in_channels = len(config.in_names)
         n_out_channels = len(config.out_names)
@@ -287,6 +295,11 @@ class Cmip6Step(StepABC):
         self._corrector = corrector
         self.in_names = config.in_names
         self.out_names = config.out_names
+        self._mask_in_names = set(config.mask_in_names)
+        self._mask_out_names = set(config.mask_out_names)
+        self._non_mask_prognostic_names = [
+            n for n in self.prognostic_names if n not in self._mask_out_names
+        ]
 
     @property
     def config(self) -> Cmip6StepConfig:
@@ -336,41 +349,56 @@ class Cmip6Step(StepABC):
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> TensorDict:
-        """
-        Step the model forward one timestep given input data.
+        input_data = args.input
 
-        Args:
-            args: The arguments to the step function.
-            wrapper: Wrapper to apply over each nn.Module before calling.
+        # Mask variables bypass the normalizer.
+        mask_input = {k: input_data[k] for k in self._mask_in_names if k in input_data}
+        input_norm = self.normalizer.normalize(input_data)
+        input_norm.update(mask_input)
 
-        Returns:
-            The denormalized output data at the next time step.
-        """
-
-        def network_call(input_norm: TensorDict) -> TensorDict:
-            input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
-            output_tensor = self.module.wrap_module(wrapper)(
-                input_tensor,
-                labels=args.labels,
-            )
-            output_dict = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
-            secondary_output_dict = self.secondary_decoder.wrap_module(wrapper)(
-                output_tensor.detach()  # detach avoids changing base outputs
-            )
-            output_dict.update(secondary_output_dict)
-            return output_dict
-
-        return step_with_adjustments(
-            input=args.input,
-            next_step_input_data=args.next_step_input_data,
-            network_calls=network_call,
-            normalizer=self.normalizer,
-            corrector=self._corrector,
-            ocean=self.ocean,
-            residual_prediction=self._config.residual_prediction,
-            prognostic_names=self.prognostic_names,
-            prescribed_prognostic_names=self._config.prescribed_prognostic_names,
+        # Network forward pass.
+        input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
+        output_tensor = self.module.wrap_module(wrapper)(
+            input_tensor, labels=args.labels
         )
+        output_norm = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
+        secondary_output = self.secondary_decoder.wrap_module(wrapper)(
+            output_tensor.detach()
+        )
+        output_norm.update(secondary_output)
+
+        # Sigmoid on mask outputs (network produces logits, we want probabilities).
+        for name in self._mask_out_names:
+            if name in output_norm:
+                output_norm[name] = torch.sigmoid(output_norm[name])
+
+        # Residual prediction — masks are excluded (they are binary, not residuals).
+        if self._config.residual_prediction:
+            output_norm = add_names(
+                input_norm, output_norm, self._non_mask_prognostic_names
+            )
+
+        # Extract mask outputs before denormalization (they bypass it).
+        mask_output = {
+            k: output_norm.pop(k)
+            for k in list(self._mask_out_names)
+            if k in output_norm
+        }
+        output = self.normalizer.denormalize(output_norm)
+        output.update(mask_output)
+
+        if self._corrector is not None:
+            output = self._corrector(input_data, output, args.next_step_input_data)
+        if self.ocean is not None:
+            output = self.ocean(input_data, output, args.next_step_input_data)
+        for name in self._config.prescribed_prognostic_names:
+            if name in args.next_step_input_data:
+                output = {**output, name: args.next_step_input_data[name]}
+            else:
+                raise ValueError(
+                    f"prescribed_prognostic_name '{name}' not in next_step_input_data"
+                )
+        return output
 
     def get_regularizer_loss(self):
         return torch.tensor(0.0)
@@ -400,59 +428,3 @@ class Cmip6Step(StepABC):
         self.module.load_state(module)
         if "secondary_decoder" in state:
             self.secondary_decoder.load_module_state(state["secondary_decoder"])
-
-
-def step_with_adjustments(
-    input: TensorMapping,
-    next_step_input_data: TensorMapping,
-    network_calls: Callable[[TensorDict], TensorDict],
-    normalizer: StandardNormalizer,
-    corrector: CorrectorABC,
-    ocean: Ocean | None,
-    residual_prediction: bool,
-    prognostic_names: list[str],
-    prescribed_prognostic_names: list[str] | None = None,
-) -> TensorDict:
-    """
-    Step the model forward one timestep given input data.
-
-    Args:
-        input: Mapping from variable name to tensor of shape
-            [n_batch, n_lat, n_lon] containing denormalized data from the
-            initial timestep. In practice this contains the ML inputs.
-        next_step_input_data: Mapping from variable name to tensor of shape
-            [n_batch, n_lat, n_lon] containing denormalized data from
-            the output timestep. In practice this contains the necessary data
-            at the output timestep for the ocean model and corrector.
-        network_calls: Callable[[TensorMapping], TensorDict] that takes a
-            normalized input and returns a normalized output.
-        normalizer: The normalizer to use.
-        corrector: The corrector to use at the end of each step.
-        ocean: The ocean model to use.
-        residual_prediction: Whether to use residual prediction.
-        prognostic_names: Names of prognostic variables.
-        prescribed_prognostic_names: Prognostic names to overwrite from
-            next_step_input_data after the ocean step (e.g. for inference).
-
-    Returns:
-        The denormalized output data at the next time step.
-    """
-    if prescribed_prognostic_names is None:
-        prescribed_prognostic_names = []
-    input_norm = normalizer.normalize(input)
-    output_norm = network_calls(input_norm)
-    if residual_prediction:
-        output_norm = add_names(input_norm, output_norm, prognostic_names)
-    output = normalizer.denormalize(output_norm)
-    if corrector is not None:
-        output = corrector(input, output, next_step_input_data)
-    if ocean is not None:
-        output = ocean(input, output, next_step_input_data)
-    for name in prescribed_prognostic_names:
-        if name in next_step_input_data:
-            output = {**output, name: next_step_input_data[name]}
-        else:
-            raise ValueError(
-                f"prescribed_prognostic_name '{name}' not in next_step_input_data"
-            )
-    return output
