@@ -37,7 +37,6 @@ train_loader:
   num_data_workers: 4
   prefetch_factor: 4
   time_buffer: 1
-  sample_with_replacement: 250
   dataset:
     data_path: /climate-default/
     file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr

@@ -27,7 +27,7 @@ LEARNING_RATES=(1e-4)  #1e-6)
 for seed in 0; do
     for lr in "${LEARNING_RATES[@]}"; do
 
-        job_name="ace-era5-pt-multi-step-shield-ft-preserve-global-mean-lr${lr}-rs${seed}"
+        job_name="ace-era5-pt-multi-step-shield-ft-preserve-global-mean-full-dataset-lr${lr}-rs${seed}"
 
         fine_tune_seed=$((seed + SEED_OFFSET))
 
