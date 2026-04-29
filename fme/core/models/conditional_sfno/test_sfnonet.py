@@ -6,10 +6,12 @@ from torch import nn
 
 from fme.ace.models.modulus.sfnonet import SphericalFourierNeuralOperatorNet
 from fme.core.device import get_device
+from fme.core.distributed import Distributed
 from fme.core.models.conditional_sfno.benchmark import get_block_benchmark
 from fme.core.testing.regression import validate_tensor
 
 from .layers import Context, ContextConfig
+from .s2convolutions import SpectralConvS2
 from .sfnonet import SFNONetConfig, get_lat_lon_sfnonet
 
 DIR = os.path.abspath(os.path.dirname(__file__))
@@ -280,3 +282,87 @@ def test_block_speed():
         f"{grouped.memory.max_alloc / 1e6:.2f} MB for grouped and "
         f"{ungrouped.memory.max_alloc / 1e6:.2f} MB for ungrouped."
     )
+
+
+def _make_spectral_conv(nlat, nlon, embed_dim, preserve_global_mean, bias=False):
+    dist = Distributed.get_instance()
+    modes_lat = nlat
+    modes_lon = nlon // 2 + 1
+    sht = dist.get_sht(
+        nlat, nlon, lmax=modes_lat, mmax=modes_lon, grid="legendre-gauss"
+    )
+    isht = dist.get_isht(
+        nlat, nlon, lmax=modes_lat, mmax=modes_lon, grid="legendre-gauss"
+    )
+    conv = SpectralConvS2(
+        sht,
+        isht,
+        embed_dim,
+        embed_dim,
+        bias=bias,
+        preserve_global_mean=preserve_global_mean,
+    )
+    return conv, sht
+
+
+def test_filter_preserves_global_mean():
+    torch.manual_seed(0)
+    nlat, nlon, embed_dim = 16, 32, 8
+    device = get_device()
+    conv, sht = _make_spectral_conv(nlat, nlon, embed_dim, preserve_global_mean=True)
+    conv = conv.to(device)
+    sht = sht.to(device)
+
+    x = torch.randn(2, embed_dim, nlat, nlon, device=device)
+    with torch.no_grad():
+        output, _ = conv(x)
+
+    x_spectral = sht(x.float())
+    out_spectral = sht(output.float())
+    torch.testing.assert_close(
+        out_spectral[:, :, 0, :], x_spectral[:, :, 0, :], atol=1e-5, rtol=1e-5
+    )
+
+
+def test_filter_preserves_global_mean_allows_grad():
+    torch.manual_seed(0)
+    nlat, nlon, embed_dim = 16, 32, 8
+    device = get_device()
+    conv, _ = _make_spectral_conv(nlat, nlon, embed_dim, preserve_global_mean=True)
+    conv = conv.to(device)
+
+    x = torch.randn(2, embed_dim, nlat, nlon, device=device)
+    output, _ = conv(x)
+    output.sum().backward()
+
+    assert conv.weight.grad is not None
+    assert not torch.all(conv.weight.grad == 0)
+
+
+def test_can_call_sfnonet_with_filter_preserves_global_mean():
+    torch.manual_seed(0)
+    input_channels = 2
+    output_channels = 3
+    img_shape = (9, 18)
+    device = get_device()
+    params = SFNONetConfig(
+        embed_dim=16,
+        num_layers=2,
+        filter_type="linear",
+        filter_preserves_global_mean=True,
+    )
+    model = get_lat_lon_sfnonet(
+        params=params,
+        img_shape=img_shape,
+        in_chans=input_channels,
+        out_chans=output_channels,
+    ).to(device)
+    x = torch.randn(2, input_channels, *img_shape, device=device)
+    context = Context(
+        embedding_scalar=torch.zeros(2, 0, device=device),
+        labels=torch.zeros(2, 0, device=device),
+        noise=None,
+        embedding_pos=None,
+    )
+    output = model(x, context)
+    assert output.shape == (2, output_channels, *img_shape)
