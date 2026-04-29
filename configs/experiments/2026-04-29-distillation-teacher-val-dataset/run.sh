@@ -19,9 +19,10 @@ cd $REPO_ROOT
 NGPU=8
 IMAGE="$(cat $REPO_ROOT/latest_distillation_image.txt)"
 TEACHER_DATASET=01KNM6H3JB1ZNS76HX17AAZRF7
+JOB_NAME=ace-downscaling-distillation-teacher-val-CONUS-2023
 
 gantry run \
-    --name ace-downscaling-distillation-teacher-val \
+    --name $JOB_NAME \
     --description "Generate pre-saved teacher validation dataset (CONUS 2023, n_ens=12)" \
     --workspace ai2/climate-titan \
     --priority urgent \
@@ -29,6 +30,7 @@ gantry run \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_JOB_TYPE=inference \
+    --env WANDB_NAME=$JOB_NAME \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
