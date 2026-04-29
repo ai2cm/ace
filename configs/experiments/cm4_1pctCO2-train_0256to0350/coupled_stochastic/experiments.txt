@@ -33,3 +33,5 @@ ft_fto_stochastic_ncs4mas40_wu4k_LRp0001-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs
 fta_ft_fto_stoch_mas40_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQ6FQZ40BSV0FX90BR27PVRX|training|best_inference_ckpt|normal|--not-preemptible
 
 fta_ft_fto_stoch_mas40_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQ7W2EY25BTZSE85CTZ39HB2|run_140yr|best_inference_ckpt|normal|--not-preemptible
+
+fta_ft_fto_stoch_mas40_cd5epLRp00001-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQDENWQ2HFQP7MH1HCQDR2JA|training|best_inference_ckpt|normal|--not-preemptible
