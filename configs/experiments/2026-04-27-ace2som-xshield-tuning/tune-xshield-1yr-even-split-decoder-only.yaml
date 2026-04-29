@@ -6,24 +6,24 @@ ema:
   decay: 0.999
 max_epochs: 100
 inference:
-  n_forward_steps: 1460 #7280 #2019-2024
+  n_forward_steps: 360 #7280 #2019-2024
   forward_steps_in_memory: 40
   loader:
     start_indices:
       times:
         - '2018-01-01T00:00:00'
-        # - '2018-02-15T00:00:00'
-        # - '2018-04-01T00:00:00'
+        #- '2018-02-15T00:00:00'
+        - '2018-04-01T00:00:00'
         # - '2018-05-15T00:00:00'
-        # - '2018-07-01T00:00:00'
+        - '2018-07-01T00:00:00'
         # - '2018-08-15T00:00:00'
-        # - '2018-10-01T00:00:00'
+        - '2018-10-01T00:00:00'
         # - '2018-11-15T00:00:00'
     dataset:
       data_path: /climate-default/
       file_pattern: 2025-09-11-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
       engine: zarr
-    num_data_workers: 8
+    num_data_workers: 1
   aggregator:
     log_histograms: true
 logging:
