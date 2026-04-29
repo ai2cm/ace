@@ -20,11 +20,7 @@ from fme.ace.data_loading.gridded_data import (
     InferenceGriddedData,
 )
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig
-from fme.ace.requirements import (
-    DataRequirements,
-    NullDataRequirements,
-    PrognosticStateDataRequirements,
-)
+from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.ace.stepper import TrainStepper
 from fme.ace.stepper.single_module import StepperConfig, TrainStepperConfig
 from fme.core.cli import ResumeResultsConfig
@@ -41,67 +37,6 @@ from fme.core.optimization import Optimization, OptimizationConfig
 from fme.core.rand import set_seed
 from fme.core.typing_ import Slice, TensorDict, TensorMapping
 from fme.core.weight_ops import CopyWeightsConfig
-
-
-@dataclasses.dataclass
-class WeatherEvaluationConfig:
-    """
-    Parameters:
-        loader: configuration for the data loader used during weather evaluation
-        n_forward_steps: number of forward steps to take
-        forward_steps_in_memory: number of forward steps to take before
-            re-reading data from disk
-        epochs: epochs on which to run weather evaluation. By default runs
-            weather evaluation every epoch.
-        aggregator: configuration of weather evaluation aggregator.
-    """
-
-    loader: InferenceDataLoaderConfig
-    n_forward_steps: int
-    forward_steps_in_memory: int
-    epochs: Slice = dataclasses.field(default_factory=lambda: Slice())
-    aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
-        default_factory=lambda: InferenceEvaluatorAggregatorConfig(
-            log_global_mean_time_series=False, log_global_mean_norm_time_series=False
-        )
-    )
-
-    def __post_init__(self):
-        dist = Distributed.get_instance()
-        if self.loader.start_indices.n_initial_conditions % dist.world_size != 0:
-            raise ValueError(
-                "Number of inference initial conditions must be divisible by the "
-                "number of parallel workers, got "
-                f"{self.loader.start_indices.n_initial_conditions} and "
-                f"{dist.world_size}."
-            )
-        if (
-            self.aggregator.log_global_mean_time_series
-            or self.aggregator.log_global_mean_norm_time_series
-        ):
-            # Both of log_global_mean_time_series and
-            # log_global_mean_norm_time_series must be False for inline inference.
-            self.aggregator.log_global_mean_time_series = False
-            self.aggregator.log_global_mean_norm_time_series = False
-
-        for log_step_mean in self.aggregator.log_step_means:
-            log_step_mean.validate(self.n_forward_steps)
-
-    @property
-    def using_labels(self) -> bool:
-        return self.loader.using_labels
-
-    def get_inference_data(
-        self,
-        window_requirements: DataRequirements,
-        initial_condition: PrognosticStateDataRequirements,
-    ) -> InferenceGriddedData:
-        return get_inference_data(
-            config=self.loader,
-            total_forward_steps=self.n_forward_steps,
-            window_requirements=window_requirements,
-            initial_condition=initial_condition,
-        )
 
 
 @dataclasses.dataclass
@@ -173,6 +108,16 @@ class InlineInferenceConfig:
 
 
 @dataclasses.dataclass
+class AdditionalInferenceConfig:
+    name: str
+    config: InlineInferenceConfig
+
+    def __post_init__(self):
+        if not self.name:
+            raise ValueError("AdditionalInferenceConfig name must be non-empty.")
+
+
+@dataclasses.dataclass
 class TrainConfig:
     """
     Configuration for training a model.
@@ -193,9 +138,9 @@ class TrainConfig:
         inference: Configuration for inline inference.
             If None, no inline inference is run,
             and no "best_inline_inference" checkpoint will be saved.
-        weather_evaluation: Configuration for weather evaluation.
-            If None, no weather evaluation is run. Weather evaluation is not
-            used to select checkpoints, but is used to provide metrics.
+        additional_inference: Configurations for additional inference runs.
+            Each entry has a name (used as wandb log prefix) and config.
+            Not used to select checkpoints, but used to provide metrics.
         stepper_training: Training-specific configuration including loss, ensemble
             settings, parameter initialization, and forward step scheduling.
         train_aggregator: Configuration for the train aggregator.
@@ -260,7 +205,9 @@ class TrainConfig:
         default_factory=list
     )
     ema: EMAConfig = dataclasses.field(default_factory=lambda: EMAConfig())
-    weather_evaluation: WeatherEvaluationConfig | None = None
+    additional_inference: list[AdditionalInferenceConfig] = dataclasses.field(
+        default_factory=list
+    )
     validate_using_ema: bool = False
     checkpoint_save_epochs: Slice | None = None
     ema_checkpoint_save_epochs: Slice | None = None
@@ -290,13 +237,16 @@ class TrainConfig:
                 "train_loader and inference loader must both use labels or both not "
                 "use labels"
             )
-        if self.weather_evaluation is not None and (
-            self.train_loader.using_labels != self.weather_evaluation.using_labels
-        ):
-            raise ValueError(
-                "train_loader and weather_evaluation loader must both use labels or "
-                "both not use labels"
-            )
+        additional_inference_names: set[str] = set()
+        for entry in self.additional_inference:
+            if entry.name in additional_inference_names:
+                raise ValueError(f"Duplicate additional_inference name: {entry.name!r}")
+            additional_inference_names.add(entry.name)
+            if self.train_loader.using_labels != entry.config.using_labels:
+                raise ValueError(
+                    f"train_loader and additional_inference {entry.name!r} loader "
+                    "must both use labels or both not use labels"
+                )
         if self.lr_tuning is not None and self.optimization.has_lr_schedule:
             raise ValueError(
                 "lr_tuning and optimization.scheduler cannot both be specified; "
@@ -380,18 +330,6 @@ class TrainBuilders:
             n_forward_steps
         )
 
-    def _get_evaluation_window_data_requirements(self) -> DataRequirements:
-        if self.config.inference is None:
-            return NullDataRequirements
-        return self.config.stepper.get_evaluation_window_data_requirements(
-            self.config.inference.forward_steps_in_memory
-        )
-
-    def _get_initial_condition_data_requirements(
-        self,
-    ) -> PrognosticStateDataRequirements:
-        return self.config.stepper.get_prognostic_state_data_requirements()
-
     def get_train_data(self) -> GriddedData:
         data_requirements = self._get_train_window_data_requirements()
         return get_gridded_data(
@@ -414,9 +352,14 @@ class TrainBuilders:
         if self.config.inference is None:
             return ErrorInferenceData()  # type: ignore
         else:
+            window_requirements = (
+                self.config.stepper.get_evaluation_window_data_requirements(
+                    self.config.inference.forward_steps_in_memory
+                )
+            )
             return self.config.inference.get_inference_data(
-                window_requirements=self._get_evaluation_window_data_requirements(),
-                initial_condition=self._get_initial_condition_data_requirements(),
+                window_requirements=window_requirements,
+                initial_condition=self.config.stepper.get_prognostic_state_data_requirements(),
             )
 
     def get_optimization(self, modules: torch.nn.ModuleList) -> Optimization:
@@ -472,34 +415,48 @@ class TrainBuilders:
         save_diagnostics: bool,
         n_ic_timesteps: int,
     ) -> EndOfEpochCallback:
-        if self.config.weather_evaluation is not None:
-            data = self.config.weather_evaluation.get_inference_data(
-                window_requirements=self._get_evaluation_window_data_requirements(),
-                initial_condition=self._get_initial_condition_data_requirements(),
+        entries_data: list[
+            tuple[AdditionalInferenceConfig, InferenceGriddedData, DatasetInfo]
+        ] = []
+        for entry in self.config.additional_inference:
+            window_requirements = (
+                self.config.stepper.get_evaluation_window_data_requirements(
+                    entry.config.forward_steps_in_memory
+                )
+            )
+            data = entry.config.get_inference_data(
+                window_requirements=window_requirements,
+                initial_condition=self.config.stepper.get_prognostic_state_data_requirements(),
             )
             dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
-            aggregator = self.config.weather_evaluation.aggregator.build(
-                dataset_info=dataset_info,
-                n_ic_steps=n_ic_timesteps,
-                n_forward_steps=self.config.weather_evaluation.n_forward_steps,
-                initial_time=data.initial_time,
-                normalize=normalize,
-                output_dir=output_dir,
-                channel_mean_names=channel_mean_names,
-                save_diagnostics=save_diagnostics,
-            )
+            entries_data.append((entry, data, dataset_info))
 
-            def end_of_epoch_ops(epoch: int) -> Mapping[str, Any]:
-                if self.config.weather_evaluation is not None:
-                    if self.config.weather_evaluation.epochs.contains(epoch):
-                        return inference_one_epoch(
+        def end_of_epoch_ops(epoch: int) -> Mapping[str, Any]:
+            all_logs: dict[str, Any] = {}
+            for entry, data, dataset_info in entries_data:
+                if entry.config.epochs.contains(epoch):
+                    entry_output_dir = os.path.join(
+                        output_dir, "additional_inference", entry.name
+                    )
+                    aggregator = entry.config.aggregator.build(
+                        dataset_info=dataset_info,
+                        n_ic_steps=n_ic_timesteps,
+                        n_forward_steps=entry.config.n_forward_steps,
+                        initial_time=data.initial_time,
+                        normalize=normalize,
+                        output_dir=entry_output_dir,
+                        channel_mean_names=channel_mean_names,
+                        save_diagnostics=save_diagnostics,
+                        n_ensemble_per_ic=entry.config.n_ensemble_per_ic,
+                    )
+                    all_logs.update(
+                        inference_one_epoch(
                             data,
                             aggregator,
-                            "weather_eval",
+                            entry.name,
                             epoch,
                         )
-                return {}
+                    )
+            return all_logs
 
-            return end_of_epoch_ops
-
-        return lambda epoch: {}
+        return end_of_epoch_ops
