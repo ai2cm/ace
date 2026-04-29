@@ -5,6 +5,7 @@ dask
 fsspec
 gcsfs
 matplotlib
+netcdf4
 numpy
 pandas
 pyarrow

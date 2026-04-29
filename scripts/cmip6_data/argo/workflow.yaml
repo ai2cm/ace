@@ -92,7 +92,6 @@ spec:
             echo "Processing ${source_id} ${experiment} ${variant}"
             python process.py \
               --config config.yaml \
-              --force \
               --skip-index \
               --source-ids "${source_id}" \
               --experiments "${experiment}" \
@@ -167,7 +166,7 @@ spec:
             {{workflow.parameters.config}}
             CONFIGEOF
 
-            python compute_stats.py --config config.yaml --force
+            python compute_stats.py --config config.yaml
         env:
           - name: GOOGLE_APPLICATION_CREDENTIALS
             value: /secret/gcp-credentials/key.json

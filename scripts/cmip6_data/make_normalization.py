@@ -25,6 +25,7 @@ Usage:
 import argparse
 import logging
 import sys
+import tempfile
 from pathlib import Path
 
 import fsspec
@@ -223,8 +224,12 @@ def _write_scalar_nc(
         )
         data_vars[var] = da
     ds = xr.Dataset(data_vars, attrs=global_attrs)
-    with fsspec.open(path, "wb") as f:
-        ds.to_netcdf(f)
+    # Write to a local tempfile first: scipy's netCDF backend calls
+    # seek() on flush, which fsspec's GCS write streams don't support.
+    with tempfile.NamedTemporaryFile(suffix=".nc") as tmp:
+        ds.to_netcdf(tmp.name)
+        with fsspec.open(path, "wb") as f:
+            f.write(open(tmp.name, "rb").read())
     logging.info("Wrote %s (%d variables)", path, len(data_vars))
 
 
@@ -249,8 +254,11 @@ def _write_map_nc(
         data_vars[var] = da
     coords = {"lat": lat, "lon": lon}
     ds = xr.Dataset(data_vars, coords=coords, attrs=global_attrs)
-    with fsspec.open(path, "wb") as f:
-        ds.to_netcdf(f)
+    # See _write_scalar_nc for why we use a tempfile.
+    with tempfile.NamedTemporaryFile(suffix=".nc") as tmp:
+        ds.to_netcdf(tmp.name)
+        with fsspec.open(path, "wb") as f:
+            f.write(open(tmp.name, "rb").read())
     logging.info("Wrote %s (%d variables)", path, len(data_vars))
 
 

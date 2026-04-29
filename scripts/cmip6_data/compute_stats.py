@@ -304,7 +304,8 @@ def main() -> None:
     cfg = ProcessConfig.from_file(args.config)
     out_dir = cfg.output_directory.rstrip("/")
     index_path = f"{out_dir}/index.csv"
-    if not Path(index_path).exists():
+    fs, rel = fsspec.core.url_to_fs(index_path)
+    if not fs.exists(rel):
         raise FileNotFoundError(f"{index_path} not found; run process.py first")
     idx = pd.read_csv(index_path)
 
@@ -331,8 +332,13 @@ def main() -> None:
         fs, rel = fsspec.core.url_to_fs(stats_path)
         if fs.exists(rel) and not args.force:
             logging.info("[%d/%d] reuse %s", i + 1, len(ok), stats_path)
-            with fs.open(rel, "rb") as fobj:
-                stats_ds = xr.open_dataset(fobj)
+            import tempfile
+
+            with tempfile.NamedTemporaryFile(suffix=".nc") as tmp:
+                with fs.open(rel, "rb") as fobj:
+                    tmp.write(fobj.read())
+                    tmp.flush()
+                stats_ds = xr.open_dataset(tmp.name)
                 rows.extend(_rows_from_stats_ds(stats_ds, identity))
                 stats_ds.close()
             n_reused += 1
@@ -350,8 +356,14 @@ def main() -> None:
         stats_ds, dataset_rows = compute_dataset_stats(ds, w2d)
         for k, val in identity.items():
             stats_ds.attrs[k] = val
-        with fs.open(rel, "wb") as fobj:
-            stats_ds.to_netcdf(fobj)
+        import tempfile
+
+        # Write to a local tempfile first: scipy's netCDF backend calls
+        # seek() on flush, which fsspec's GCS write streams don't support.
+        with tempfile.NamedTemporaryFile(suffix=".nc") as tmp:
+            stats_ds.to_netcdf(tmp.name)
+            with fs.open(rel, "wb") as fobj:
+                fobj.write(open(tmp.name, "rb").read())
         ds.close()
 
         for row in dataset_rows:
