@@ -41,7 +41,7 @@ class StaticInput:
 
     @classmethod
     def from_state(cls, state: dict) -> "StaticInput":
-        return cls(data=state["data"])
+        return cls(data=state["data"].to(get_device(), copy=True))
 
 
 _LAT_NAMES = ("lat", "latitude", "grid_yt")
@@ -196,8 +196,8 @@ class StaticInputs:
                 StaticInput.from_state(field_state) for field_state in state["fields"]
             ],
             coords=LatLonCoordinates(
-                lat=state["coords"]["lat"],
-                lon=state["coords"]["lon"],
+                lat=state["coords"]["lat"].to(get_device(), copy=True),
+                lon=state["coords"]["lon"].to(get_device(), copy=True),
             ),
         )
 

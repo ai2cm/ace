@@ -18,6 +18,7 @@ from fme.core.dataset_info import (
     MissingDatasetInfo,
     get_keys_with_conflicts,
 )
+from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.mask_provider import MaskProvider
 from fme.core.metrics import spherical_area_weights
@@ -33,11 +34,12 @@ from fme.core.metrics import spherical_area_weights
         pytest.param(
             DatasetInfo(
                 horizontal_coordinates=LatLonCoordinates(
-                    lat=torch.arange(-4, 4), lon=torch.arange(16)
+                    lat=torch.arange(-4, 4, device=get_device()),
+                    lon=torch.arange(16, device=get_device()),
                 ),
                 vertical_coordinate=HybridSigmaPressureCoordinate(
-                    ak=torch.arange(10),
-                    bk=torch.arange(10),
+                    ak=torch.arange(10, device=get_device()),
+                    bk=torch.arange(10, device=get_device()),
                 ),
                 timestep=datetime.timedelta(hours=1),
             ),
@@ -46,9 +48,12 @@ from fme.core.metrics import spherical_area_weights
         pytest.param(
             DatasetInfo(
                 horizontal_coordinates=LatLonCoordinates(
-                    lat=torch.arange(-4, 4), lon=torch.arange(16)
+                    lat=torch.arange(-4, 4, device=get_device()),
+                    lon=torch.arange(16, device=get_device()),
                 ),
-                mask_provider=MaskProvider(masks={"mask_0": torch.ones(10, 10)}),
+                mask_provider=MaskProvider(
+                    masks={"mask_0": torch.ones(10, 10, device=get_device())}
+                ),
                 timestep=datetime.timedelta(hours=1),
             ),
             id="mask_provider",
