@@ -22,7 +22,11 @@ from fme.downscaling.data import (
     GriddedData,
     enforce_lat_bounds,
 )
-from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
+from fme.downscaling.models import (
+    CheckpointModelConfig,
+    DiffusionModel,
+    FastgenStudentConfig,
+)
 from fme.downscaling.predictors import PatchPredictionConfig, PatchPredictor
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.typing_ import FineResCoarseResPair
@@ -237,7 +241,7 @@ class Downscaler:
 
 @dataclasses.dataclass
 class DownscalerConfig:
-    model: CheckpointModelConfig
+    model: CheckpointModelConfig | FastgenStudentConfig
     experiment_dir: str
     data: DataLoaderConfig
     logging: LoggingConfig

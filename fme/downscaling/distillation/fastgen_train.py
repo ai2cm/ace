@@ -49,6 +49,9 @@ import yaml
 from fme.core.distributed.distributed import Distributed
 from fme.downscaling.data.config import DataLoaderConfig
 from fme.downscaling.data.datasets import GriddedData
+from fme.downscaling.distillation.best_student_callback import (
+    BestStudentCheckpointCallback,
+)
 from fme.downscaling.distillation.fastgen_loader import AceConditionBuilder
 from fme.downscaling.distillation.fastgen_teacher import AceDiffusionTeacher
 from fme.downscaling.models import CheckpointModelConfig
@@ -235,6 +238,28 @@ def _parse_args() -> argparse.Namespace:
         help="Load teacher, build one batch, run one forward pass, and exit.",
     )
     parser.add_argument(
+        "--val-dataset",
+        default=None,
+        dest="val_dataset",
+        metavar="ZARR",
+        help=(
+            "Path to a pre-saved teacher validation zarr produced by "
+            "generate_val_dataset.py (time, ensemble, lat, lon). "
+            "When set together with --val-data-yaml, the best student "
+            "checkpoint (by validation RMSE) is saved in ACE format."
+        ),
+    )
+    parser.add_argument(
+        "--val-data-yaml",
+        default=None,
+        dest="val_data_yaml",
+        metavar="YAML",
+        help=(
+            "Downscaling data YAML describing the coarse validation split. "
+            "Must cover the same time steps as --val-dataset."
+        ),
+    )
+    parser.add_argument(
         "opts",
         default=None,
         nargs=argparse.REMAINDER,
@@ -274,6 +299,8 @@ def main() -> None:
     # Patch FastGen's to_wandb to handle non-RGB tensors (ACE outputs C != 3).
     # WandbCallback.to_wandb asserts C == 3; we replicate the first channel to
     # RGB so sample logging works regardless of the number of output channels.
+    from omegaconf import DictConfig
+
     import fastgen.callbacks.wandb as _wandb_mod
     import fastgen.utils.distributed.ddp as _fastgen_ddp
     import fastgen.utils.logging_utils as logger
@@ -284,7 +311,6 @@ def main() -> None:
     from fastgen.utils.distributed import clean_up, is_rank0, synchronize, world_size
     from fastgen.utils.io_utils import set_env_vars
     from fastgen.utils.scripts import set_cuda_backend
-    from omegaconf import DictConfig
 
     _orig_to_wandb = _wandb_mod.to_wandb
 
@@ -490,6 +516,30 @@ def main() -> None:
         save_dir=config.trainer.checkpointer.save_dir,
         max_to_keep=20,
     )
+
+    if args.val_dataset and args.val_data_yaml:
+        val_data_cfg = _load_data_config(args.val_data_yaml)
+        val_data_cfg.shuffle = False
+        ace_dist_val = Distributed(force_non_distributed=True)
+        coarse_val_data = val_data_cfg.build(
+            requirements=requirements, dist=ace_dist_val
+        )
+        best_student_path = os.path.join(
+            config.trainer.checkpointer.save_dir, "best_student.ckpt"
+        )
+        fastgen_trainer.callbacks._callbacks["best_student"] = (
+            BestStudentCheckpointCallback(
+                val_dataset_path=args.val_dataset,
+                coarse_val_data=coarse_val_data,
+                teacher_model=teacher_model,
+                best_checkpoint_path=best_student_path,
+            )
+        )
+        logger.info(
+            f"BestStudentCheckpointCallback active: val={args.val_dataset}, "
+            f"best_ckpt={best_student_path}"
+        )
+
     synchronize()
 
     fastgen_trainer.run(model)

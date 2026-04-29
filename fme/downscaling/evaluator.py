@@ -17,7 +17,11 @@ from fme.downscaling.data import (
     PairedGriddedData,
     enforce_lat_bounds,
 )
-from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
+from fme.downscaling.models import (
+    CheckpointModelConfig,
+    DiffusionModel,
+    FastgenStudentConfig,
+)
 from fme.downscaling.predict import EventConfig
 from fme.downscaling.predictors import PatchPredictionConfig, PatchPredictor
 from fme.downscaling.requirements import DataRequirements
@@ -172,7 +176,7 @@ class PairedEventConfig(EventConfig):
 
 @dataclasses.dataclass
 class EvaluatorConfig:
-    model: CheckpointModelConfig
+    model: CheckpointModelConfig | FastgenStudentConfig
     experiment_dir: str
     data: PairedDataLoaderConfig
     logging: LoggingConfig

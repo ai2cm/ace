@@ -796,3 +796,81 @@ class CheckpointModelConfig:
     @property
     def out_names(self):
         return self._checkpoint["model"]["config"]["out_names"]
+
+
+@dataclasses.dataclass
+class FastgenStudentConfig:
+    """
+    Loads a distilled student model from a FastGen training checkpoint (.pth)
+    for use in the existing ACE eval pipeline without requiring conversion to
+    ACE checkpoint format first.
+
+    The student denoiser weights are hot-swapped into a teacher model built
+    from the ACE checkpoint, so grid metadata, variable names, and
+    normalisation are inherited from the teacher.
+
+    Parameters:
+        fastgen_checkpoint_path: Path to the FastGen training checkpoint (.pth),
+            e.g. ``/checkpoints/<iter_id>.pth``. Must contain a ``model.net``
+            entry whose keys are prefixed with ``_ace_module.``.
+        teacher_checkpoint_path: Path to the ACE teacher checkpoint (.ckpt).
+        rename: Optional ``{old: new}`` variable name remapping forwarded to
+            the underlying CheckpointModelConfig.
+        fine_coordinates_path: Optional path for old teacher checkpoints that
+            lack embedded fine coordinates.
+        model_updates: Optional ``{key: value}`` overrides applied to the
+            loaded model config (e.g. ``num_diffusion_generation_steps``).
+    """
+
+    fastgen_checkpoint_path: str
+    teacher_checkpoint_path: str
+    rename: dict[str, str] | None = None
+    fine_coordinates_path: str | None = None
+    model_updates: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        self._teacher_config = CheckpointModelConfig(
+            checkpoint_path=self.teacher_checkpoint_path,
+            rename=self.rename,
+            fine_coordinates_path=self.fine_coordinates_path,
+            model_updates=self.model_updates,
+        )
+
+    def _extract_student_weights(self) -> dict[str, Any]:
+        state = torch.load(self.fastgen_checkpoint_path, weights_only=False)
+        net_state: dict[str, Any] = state["model"]["net"]
+        # FastGen saves the pre-DDP model, so no "module." prefix is expected.
+        # Strip it defensively in case the checkpoint was produced differently.
+        if net_state and all(k.startswith("module.") for k in net_state):
+            net_state = {k[len("module.") :]: v for k, v in net_state.items()}
+        prefix = "_ace_module."
+        student_weights = {
+            k[len(prefix) :]: v for k, v in net_state.items() if k.startswith(prefix)
+        }
+        if not student_weights:
+            raise ValueError(
+                f"No keys with prefix '{prefix}' found in FastGen checkpoint net "
+                f"state dict. Keys found (first 5): {list(net_state.keys())[:5]}"
+            )
+        return student_weights
+
+    def build(self) -> DiffusionModel:
+        from torch.nn.parallel import DistributedDataParallel as DDP
+
+        model = self._teacher_config.build()
+        student_weights = self._extract_student_weights()
+        raw = model.module.module if isinstance(model.module, DDP) else model.module
+        raw.load_state_dict(student_weights, strict=True)
+        return model
+
+    @property
+    def data_requirements(self) -> DataRequirements:
+        return self._teacher_config.data_requirements
+
+    @property
+    def in_names(self) -> list[str]:
+        return self._teacher_config.in_names
+
+    @property
+    def out_names(self) -> list[str]:
+        return self._teacher_config.out_names

@@ -12,7 +12,7 @@ from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
 
 from ..data import DataLoaderConfig
-from ..models import CheckpointModelConfig, DiffusionModel
+from ..models import CheckpointModelConfig, DiffusionModel, FastgenStudentConfig
 from ..predictors import PatchPredictionConfig, PatchPredictor
 from .output import DownscalingOutput, EventConfig, TimeRangeConfig
 from .work_items import LoadedSliceWorkItem
@@ -220,7 +220,7 @@ class InferenceConfig:
             entity: my_organization
     """
 
-    model: CheckpointModelConfig
+    model: CheckpointModelConfig | FastgenStudentConfig
     data: DataLoaderConfig
     experiment_dir: str
     outputs: list[EventConfig | TimeRangeConfig]
