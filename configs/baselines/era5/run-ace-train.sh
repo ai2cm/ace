@@ -28,7 +28,7 @@ run_training() {
   gantry run \
     --name "$job_name" \
     --task-name "$job_name" \
-    --description 'Run ACE2-ERA5 training' \
+    --description 'Run ACE2S-ERA5 training' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
     --priority normal \
@@ -52,4 +52,11 @@ run_training() {
     -- torchrun --nproc_per_node $N_GPUS -m fme.ace.train $CONFIG_PATH
 }
 
-run_training "ace-train-config.yaml" "ace2-era5-train" "ace2-era5"
+base_name="ace2s"
+
+run_training "ace-train-config-1-step-pretrain.yaml" "$base_name-era5-1-step-pre-training-rs0"
+
+# For the finetuning stage take beaker dataset id from the above job and add it to
+# train-x-shield-multi-step-fine-tuning.yaml then uncomment next line
+
+# run_training "ace-train-config-multi-step-finetuning.yaml" "$base_name-era5-multi-step-fine-tuning-rs0"
