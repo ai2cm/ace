@@ -199,6 +199,41 @@ def test_state_round_trip():
         torch.testing.assert_close(out1[name], out2[name])
 
 
+def test_nan_inputs_in_masked_regions_produce_valid_outputs():
+    """NaN values in below-surface input cells should not poison outputs."""
+    config = _get_cmip6_config(
+        in_names=["ta1000", "ta850", "below_surface_mask1000", "below_surface_mask850"],
+        out_names=[
+            "ta1000",
+            "ta850",
+            "below_surface_mask1000",
+            "below_surface_mask850",
+        ],
+    )
+    step = _build_step(config)
+    input_data = _tensor_dict(step.input_names)
+    next_step = _tensor_dict(step.next_step_input_names)
+
+    # Mark some cells as below-surface (mask=1) and put NaN in data there.
+    mask_1000 = torch.zeros(N_SAMPLES, *IMG_SHAPE, device=fme.get_device())
+    mask_1000[:, :2, :] = 1.0  # first two latitude rows are below surface
+    input_data["below_surface_mask1000"] = mask_1000
+    input_data["ta1000"] = input_data["ta1000"].clone()
+    input_data["ta1000"][:, :2, :] = float("nan")
+
+    mask_850 = torch.zeros(N_SAMPLES, *IMG_SHAPE, device=fme.get_device())
+    input_data["below_surface_mask850"] = mask_850  # nothing masked at 850
+
+    output = step.step(
+        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
+    )
+
+    # No output should contain NaN — input NaN must not leak through the
+    # network.  (Output masking is left to the loss / downstream consumer.)
+    for name in output:
+        assert not torch.isnan(output[name]).any(), name
+
+
 def test_loss_normalizer_excludes_masks():
     """get_loss_normalizer should not include mask variables."""
     config = _get_cmip6_config(

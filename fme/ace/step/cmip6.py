@@ -28,6 +28,26 @@ from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
+def _build_mask_map(
+    mask_names: list[str],
+    data_names: list[str],
+    all_mask_names: set[str],
+    prefix: str,
+) -> dict[str, list[str]]:
+    """Map each mask variable to the data variables it covers.
+
+    The link is the suffix after ``prefix``: ``below_surface_mask1000``
+    covers every non-mask variable whose name ends with ``1000``.
+    """
+    result: dict[str, list[str]] = {}
+    for mask_name in mask_names:
+        suffix = mask_name[len(prefix) :]
+        result[mask_name] = [
+            n for n in data_names if n.endswith(suffix) and n not in all_mask_names
+        ]
+    return result
+
+
 @StepSelector.register("cmip6")
 @dataclasses.dataclass
 class Cmip6StepConfig(StepConfigABC):
@@ -300,6 +320,11 @@ class Cmip6Step(StepABC):
         self._non_mask_prognostic_names = [
             n for n in self.prognostic_names if n not in self._mask_out_names
         ]
+        all_mask = self._mask_in_names | self._mask_out_names
+        prefix = config.mask_variable_prefix
+        self._input_mask_map = _build_mask_map(
+            config.mask_in_names, config.in_names, all_mask, prefix
+        )
 
     @property
     def config(self) -> Cmip6StepConfig:
@@ -356,6 +381,17 @@ class Cmip6Step(StepABC):
         input_norm = self.normalizer.normalize(input_data)
         input_norm.update(mask_input)
 
+        # Zero out below-surface cells in normalized space so NaN doesn't
+        # enter the network.
+        for mask_name, data_names in self._input_mask_map.items():
+            if mask_name in input_norm:
+                mask = input_norm[mask_name] > 0.5
+                for data_name in data_names:
+                    if data_name in input_norm:
+                        input_norm[data_name] = input_norm[data_name].masked_fill(
+                            mask, 0.0
+                        )
+
         # Network forward pass.
         input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
         output_tensor = self.module.wrap_module(wrapper)(
@@ -398,6 +434,7 @@ class Cmip6Step(StepABC):
                 raise ValueError(
                     f"prescribed_prognostic_name '{name}' not in next_step_input_data"
                 )
+
         return output
 
     def get_regularizer_loss(self):
