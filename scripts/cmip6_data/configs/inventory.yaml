@@ -1,5 +1,5 @@
 output_path: ./inventory.csv
 # variables, experiments, table_id all take dataclass defaults:
 #   variables = CORE_VARIABLES + OPTIONAL_VARIABLES
-#   experiments = [historical, ssp585]
+#   experiments = [historical, ssp245, ssp585]
 #   table_id = day

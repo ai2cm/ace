@@ -218,7 +218,9 @@ class Selection:
     # we don't want to ingest, e.g. INM-CM4-8 (anomalous ``zg`` at the
     # top of atmosphere — see README).
     exclude_source_ids: list[str] = field(default_factory=list)
-    experiments: list[str] = field(default_factory=lambda: ["historical", "ssp585"])
+    experiments: list[str] = field(
+        default_factory=lambda: ["historical", "ssp245", "ssp585"]
+    )
     # Keep only this initialization_index (i). None = keep all i.
     require_i: Optional[int] = 1
     # Cap on realizations (r) within each label slice
@@ -337,7 +339,9 @@ def _default_inventory_queries() -> list[CatalogQuery]:
 class InventoryConfig:
     output_path: str  # fsspec URL to write the inventory table
     queries: list[CatalogQuery] = field(default_factory=_default_inventory_queries)
-    experiments: list[str] = field(default_factory=lambda: ["historical", "ssp585"])
+    experiments: list[str] = field(
+        default_factory=lambda: ["historical", "ssp245", "ssp585"]
+    )
 
     @classmethod
     def from_file(cls, path: str) -> "InventoryConfig":

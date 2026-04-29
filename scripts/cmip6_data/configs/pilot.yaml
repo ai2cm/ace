@@ -7,6 +7,7 @@ output_directory: ./data/cmip6-daily-pilot/v0
 defaults:
   time_subset:
     historical: {start: "2010-01-01", end: "2010-12-31"}
+    ssp245: {start: "2015-01-01", end: "2015-12-31"}
     ssp585: {start: "2015-01-01", end: "2015-12-31"}
 
 # target_grid, regrid, fill, chunking, and variable lists all take
@@ -20,7 +21,7 @@ selection:
     # ~60 K (unphysical). See README's "Known model-side data quirks"
     # and figures/inm_cm4_8_zg_top.png.
     - INM-CM4-8
-  experiments: [historical, ssp585]
+  experiments: [historical, ssp245, ssp585]
   # require_i: 1                  # default: i1 only; null = keep all i
   # max_members_per_f: 3          # default: 3 r per (source_id, exp, p, f)
                                   # null = no cap
