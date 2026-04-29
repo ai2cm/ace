@@ -11,6 +11,7 @@ from fme.ace.aggregator import (
 )
 from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregator
 from fme.ace.aggregator.train import TrainAggregatorConfig
+from fme.ace.data_loading.batch_data import PrognosticState
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_gridded_data, get_inference_data
 from fme.ace.data_loading.gridded_data import (
@@ -46,6 +47,7 @@ class InlineInferenceConfig:
         n_forward_steps: number of forward steps to take
         forward_steps_in_memory: number of forward steps to take before
             re-reading data from disk
+        n_ensemble_per_ic: number of initial condition based ensembles
         epochs: epochs on which to run inference. By default runs inference every epoch.
         aggregator: configuration of inline inference aggregator.
     """
@@ -53,6 +55,7 @@ class InlineInferenceConfig:
     loader: InferenceDataLoaderConfig
     n_forward_steps: int
     forward_steps_in_memory: int
+    n_ensemble_per_ic: int = 1
     epochs: Slice = dataclasses.field(default_factory=lambda: Slice())
     aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
         default_factory=lambda: InferenceEvaluatorAggregatorConfig(
@@ -90,12 +93,18 @@ class InlineInferenceConfig:
         window_requirements: DataRequirements,
         initial_condition: PrognosticStateDataRequirements,
     ) -> InferenceGriddedData:
-        return get_inference_data(
+        data = get_inference_data(
             config=self.loader,
             total_forward_steps=self.n_forward_steps,
             window_requirements=window_requirements,
             initial_condition=initial_condition,
         )
+        if self.n_ensemble_per_ic > 1:
+            ic = data.initial_condition.as_batch_data()
+            data._initial_condition = PrognosticState(
+                ic.broadcast_ensemble(self.n_ensemble_per_ic)
+            )
+        return data
 
 
 @dataclasses.dataclass
