@@ -154,13 +154,15 @@ git_commit_and_push() {
 #   Optional:
 #     CHECKPOINT_DATASET_ARGS (array) - additional dataset mounts
 #     OVERRIDE_ARGS - config override arguments
-#     PREEMPTIBLE (default: --min-runtime 0)
+#     MIN_RUNTIME (default: 0) - gantry --min-runtime value, e.g. "0", "30m", "1h", "8h"
 #   Note: CONFIG_PATH must be relative to repo root for gantry run
+#   Note: training jobs always keep auto-resume enabled (server default);
+#         we never emit --no-auto-resume on the training path.
 # Returns: Experiment ID
 run_gantry_training_job() {
     local REPO_ROOT=$(git rev-parse --show-toplevel)
     local DESCRIPTION="${1:-Training job}"
-    local PREEMPTIBLE="${PREEMPTIBLE:---min-runtime 0}"
+    local MIN_RUNTIME="${MIN_RUNTIME:-0}"
 
     # Build override string
     local OVERRIDE=""
@@ -179,7 +181,7 @@ run_gantry_training_job() {
             --description "$DESCRIPTION" \
             --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
             --priority "$PRIORITY" \
-            $PREEMPTIBLE \
+            --min-runtime "$MIN_RUNTIME" \
             --retries "$RETRIES" \
             "${CLUSTER_ARGS[@]}" \
             --weka climate-default:/climate-default \
@@ -343,6 +345,7 @@ print_detailed_job_info() {
     echo "  N_GPUS: $N_GPUS"
     echo "  SHARED_MEM: $SHARED_MEM"
     echo "  RETRIES: $RETRIES"
+    echo "  MIN_RUNTIME: ${MIN_RUNTIME:-0}"
     echo "  WORKSPACE: $WORKSPACE"
     echo "  OVERRIDE_ARGS: ${OVERRIDE_ARGS:-(none)}"
     echo

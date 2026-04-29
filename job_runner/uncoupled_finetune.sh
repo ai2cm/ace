@@ -79,6 +79,7 @@ while read FINETUNING; do
     WORKSPACE=$(echo "$FINETUNING" | cut -d"|" -f12)
     OVERRIDE_ARGS=$(echo "$FINETUNING" | cut -d"|" -f13)
     EXISTING_RESULTS_DATASET=$(echo "$FINETUNING" | cut -d"|" -f14)
+    MIN_RUNTIME=$(echo "$FINETUNING" | cut -d"|" -f15)
 
     if [[ "$STATUS" != "train" ]]; then
         SKIPPED_JOBS=$((SKIPPED_JOBS + 1))
@@ -89,6 +90,10 @@ while read FINETUNING; do
 
     if [[ -z $RETRIES ]]; then
         RETRIES=0
+    fi
+
+    if [[ -z $MIN_RUNTIME ]]; then
+        MIN_RUNTIME=0
     fi
 
     JOB_GROUP="${GROUP}"
@@ -149,7 +154,7 @@ while read FINETUNING; do
     fi
 
     # Run the job (use relative path for CONFIG_PATH)
-    CONFIG_PATH="$CONFIG_PATH_REL" EXPERIMENT_ID=$(run_gantry_training_job_with_dry_run "Run uncoupled fine-tuning: ${JOB_GROUP}")
+    CONFIG_PATH="$CONFIG_PATH_REL" MIN_RUNTIME="$MIN_RUNTIME" EXPERIMENT_ID=$(run_gantry_training_job_with_dry_run "Run uncoupled fine-tuning: ${JOB_GROUP}")
 
     # Append to experiments.txt
     append_to_experiments_file_with_dry_run "$EXPERIMENT_DIR" "$CONFIG_SUBDIR" "$JOB_GROUP" "$TAG" \
