@@ -2,7 +2,7 @@
 
 set -e
 
-CONFIG_FILENAME="multi-step-fine-tune-config-era5-1940-2020.yaml"
+CONFIG_FILENAME="multi-step-fine-tune-config-era5-preserves-global-mean.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
@@ -27,7 +27,7 @@ LEARNING_RATES=(1e-4)  #1e-6)
 for seed in 0; do
     for lr in "${LEARNING_RATES[@]}"; do
 
-        job_name="ace-era5-pt-multi-step-shield-ft-1940-2020-lr${lr}-rs${seed}"
+        job_name="ace-era5-pt-multi-step-shield-ft-preserve-global-mean-lr${lr}-rs${seed}"
 
         fine_tune_seed=$((seed + SEED_OFFSET))
 
