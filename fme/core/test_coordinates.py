@@ -8,8 +8,11 @@ from fme.core.coordinates import (
     HEALPixCoordinates,
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
+    SerializableHorizontalCoordinates,
+    SerializableVerticalCoordinate,
     dz_from_idepth,
 )
+from fme.core.device import get_device
 from fme.core.mask_provider import MaskProvider
 
 try:
@@ -455,3 +458,73 @@ def test_healpix_coordinates_xyz(pad: bool):
 
         assert np.allclose(distances_x, mean_distances_x, atol=0.03)
         assert np.allclose(distances_y, mean_distances_y, atol=0.03)
+
+
+def _cpu_tensor(*args, **kwargs) -> torch.Tensor:
+    return torch.tensor(*args, device="cpu", **kwargs)
+
+
+def test_vertical_coordinate_from_state_places_tensors_on_device():
+    state = {"ak": _cpu_tensor([1.0, 2.0, 3.0]), "bk": _cpu_tensor([4.0, 5.0, 6.0])}
+    coord = SerializableVerticalCoordinate.from_state(state)
+    device = get_device()
+    assert isinstance(coord, HybridSigmaPressureCoordinate)
+    assert coord.ak.device == device
+    assert coord.bk.device == device
+
+
+def test_vertical_coordinate_from_state_decouples_memory():
+    state = {"ak": _cpu_tensor([1.0, 2.0, 3.0]), "bk": _cpu_tensor([4.0, 5.0, 6.0])}
+    coord = SerializableVerticalCoordinate.from_state(state)
+    assert isinstance(coord, HybridSigmaPressureCoordinate)
+    state["ak"].fill_(999.0)
+    assert coord.ak[0].item() == 1.0
+
+
+def test_depth_coordinate_from_state_places_tensors_on_device():
+    state = {
+        "idepth": _cpu_tensor([0.0, 10.0, 20.0]),
+        "mask": _cpu_tensor([[1.0, 1.0]]),
+    }
+    coord = SerializableVerticalCoordinate.from_state(state)
+    device = get_device()
+    assert isinstance(coord, DepthCoordinate)
+    assert coord.idepth.device == device
+    assert coord.mask.device == device
+
+
+def test_horizontal_latlon_from_state_places_tensors_on_device():
+    state = {
+        "lat": _cpu_tensor([10.0, 20.0, 30.0]),
+        "lon": _cpu_tensor([0.0, 90.0, 180.0, 270.0]),
+    }
+    coord = SerializableHorizontalCoordinates.from_state(state)
+    device = get_device()
+    assert isinstance(coord, LatLonCoordinates)
+    assert coord.lat.device == device
+    assert coord.lon.device == device
+
+
+def test_horizontal_latlon_from_state_decouples_memory():
+    state = {
+        "lat": _cpu_tensor([10.0, 20.0, 30.0]),
+        "lon": _cpu_tensor([0.0, 90.0, 180.0, 270.0]),
+    }
+    coord = SerializableHorizontalCoordinates.from_state(state)
+    assert isinstance(coord, LatLonCoordinates)
+    state["lat"].fill_(999.0)
+    assert coord.lat[0].item() == 10.0
+
+
+def test_horizontal_healpix_from_state_places_tensors_on_device():
+    state = {
+        "face": _cpu_tensor(list(range(12)), dtype=torch.long),
+        "height": _cpu_tensor(list(range(4)), dtype=torch.long),
+        "width": _cpu_tensor(list(range(4)), dtype=torch.long),
+    }
+    coord = SerializableHorizontalCoordinates.from_state(state)
+    device = get_device()
+    assert isinstance(coord, HEALPixCoordinates)
+    assert coord.face.device == device
+    assert coord.height.device == device
+    assert coord.width.device == device

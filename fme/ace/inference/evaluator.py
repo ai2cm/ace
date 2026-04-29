@@ -13,7 +13,7 @@ import torch
 import fme
 from fme.ace.aggregator import OneStepAggregatorConfig
 from fme.ace.aggregator.inference import InferenceEvaluatorAggregatorConfig
-from fme.ace.data_loading.batch_data import BatchData
+from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_gridded_data, get_inference_data
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig
@@ -210,6 +210,9 @@ class InferenceEvaluatorConfig:
             before inference. When provided, validation runs first and produces
             metrics prefixed with ``val/`` (e.g. ``val/mean/weighted_rmse``),
             mirroring the validation done at the end of each training epoch.
+        n_ensemble_per_ic: Number of ensemble members per initial condition. Useful for
+            stochastic model weather inference. n_ensemble_per_ic = 1 is default
+            inference behavior.
     """
 
     experiment_dir: str
@@ -228,6 +231,7 @@ class InferenceEvaluatorConfig:
     stepper_override: StepperOverrideConfig | None = None
     allow_incompatible_dataset: bool = False
     validation: ValidationConfig | None = None
+    n_ensemble_per_ic: int = 1
 
     def __post_init__(self):
         if self.data_writer.time_coarsen is not None:
@@ -266,6 +270,8 @@ class InferenceEvaluatorConfig:
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ) -> PairedDataWriter:
+        # initial_condition_times from data.initial_time already has one entry per
+        # sample (n_ic * n_ensemble_per_ic); do not repeat by n_ensemble_per_ic again.
         return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
             initial_condition_times=initial_condition_times,
@@ -344,7 +350,11 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             window_requirements=window_requirements,
             initial_condition=initial_condition_requirements,
         )
-
+        if config.n_ensemble_per_ic > 1:
+            ic = data.initial_condition.as_batch_data()
+            data._initial_condition = PrognosticState(
+                ic.broadcast_ensemble(config.n_ensemble_per_ic)
+            )
         stepper = config.load_stepper()
         stepper.set_eval()
         stepper.backfill_deptho(data.dataset_info.vertical_coordinate)
@@ -414,6 +424,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             channel_mean_names=stepper.loss_names,
             normalize=stepper.normalizer.normalize,
             output_dir=config.experiment_dir,
+            n_ensemble_per_ic=config.n_ensemble_per_ic,
         )
 
         writer = config.get_data_writer(
@@ -432,6 +443,11 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             window_requirements=window_requirements,
             initial_condition=initial_condition_requirements,
         )
+        if config.n_ensemble_per_ic > 1:
+            ic = prediction_data.initial_condition.as_batch_data()
+            prediction_data._initial_condition = PrognosticState(
+                ic.broadcast_ensemble(config.n_ensemble_per_ic)
+            )
         deriver = _Deriver(
             n_ic_timesteps=stepper_config.n_ic_timesteps,
             derive_func=stepper.derive_func,

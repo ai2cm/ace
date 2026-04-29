@@ -61,7 +61,7 @@ class LossContributionsConfig:
 
     Parameters:
         n_steps: The number of consecutive steps contributing to the loss,
-            starting from the first. Can be a float (including ``inf`` for all
+            starting from the first. Can be a float (defaults to ``inf`` for all
             steps) or a ``TimeLengthProbabilities`` for stochastic per-batch
             sampling.
         weight: (optional) Weight applied to each step loss for the given realm.
@@ -170,7 +170,6 @@ class LossContributions(StepLossABC):
         self, prediction: StepPredictionABC, target_data: TensorMapping
     ) -> torch.Tensor | None:
         if self.step_is_optimized(prediction.step):
-            return self._weight * self._loss(
-                prediction.data, target_data, prediction.step
-            )
+            loss_output = self._loss(prediction.data, target_data, prediction.step)
+            return self._weight * loss_output.total()
         return torch.tensor(0.0, device=get_device())

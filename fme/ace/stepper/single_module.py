@@ -38,7 +38,6 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
-from fme.core.device import get_device
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
@@ -346,6 +345,7 @@ class TrainOutput(TrainOutputABC):
     derive_func: Callable[[TensorMapping, TensorMapping], TensorDict] = lambda x, _: (
         dict(x)
     )
+    per_channel_losses: dict[str, torch.Tensor] | None = None
 
     def __post_init__(self):
         for v in self.target_data.values():
@@ -395,6 +395,7 @@ class TrainOutput(TrainOutputABC):
             time=self.time[:, n_ic_timesteps:],
             normalize=self.normalize,
             derive_func=self.derive_func,
+            per_channel_losses=self.per_channel_losses,
         )
 
     def copy(self) -> "TrainOutput":
@@ -406,6 +407,7 @@ class TrainOutput(TrainOutputABC):
             time=self.time,
             normalize=self.normalize,
             derive_func=self.derive_func,
+            per_channel_losses=self.per_channel_losses,
         )
 
     def prepend_initial_condition(
@@ -432,6 +434,7 @@ class TrainOutput(TrainOutputABC):
             time=xr.concat([batch_data.time, self.time], dim="time"),
             normalize=self.normalize,
             derive_func=self.derive_func,
+            per_channel_losses=self.per_channel_losses,
         )
 
     def compute_derived_variables(
@@ -450,6 +453,7 @@ class TrainOutput(TrainOutputABC):
             time=self.time,
             normalize=self.normalize,
             derive_func=self.derive_func,
+            per_channel_losses=self.per_channel_losses,
         )
 
     def get_metrics(self) -> TensorDict:
@@ -481,6 +485,7 @@ def process_ensemble_prediction_generator_list(
 def process_prediction_generator_list(
     output_list: list[TensorDict],
     time: xr.DataArray,
+    n_ensemble: int,
     labels: BatchLabels | None = None,
     horizontal_dims: list[str] | None = None,
 ) -> BatchData:
@@ -490,6 +495,7 @@ def process_prediction_generator_list(
         time=time,
         horizontal_dims=horizontal_dims,
         labels=labels,
+        n_ensemble=n_ensemble,
     )
 
 
@@ -1204,6 +1210,7 @@ class Stepper:
             time=forcing_data.time[:, self.n_ic_timesteps :],
             horizontal_dims=forcing_data.horizontal_dims,
             labels=forcing.labels,
+            n_ensemble=forcing.n_ensemble,
         )
         if compute_derived_variables:
             with timer.context("compute_derived_variables"):
@@ -1251,6 +1258,10 @@ class Stepper:
             final state, which can be used as a new initial condition.
         """
         forcing = self.forcing_deriver(forcing)
+        if forcing.n_ensemble == 1 and initial_condition.as_batch_data().n_ensemble > 1:
+            forcing = forcing.broadcast_ensemble(
+                n_ensemble=initial_condition.as_batch_data().n_ensemble
+            )
         prediction, new_initial_condition = self.predict(
             initial_condition,
             forcing,
@@ -1574,7 +1585,7 @@ class TrainStepper(
         data = self._stepper.forcing_deriver(data)
 
         optimization.set_mode(self._stepper.modules)
-        output_list = self._accumulate_loss(
+        output_list, per_channel_losses = self._accumulate_loss(
             input_data,
             data,
             target_data,
@@ -1597,6 +1608,7 @@ class TrainStepper(
             time=target_data.time,
             normalize=self.normalizer.normalize,
             derive_func=self._derive_func,
+            per_channel_losses=per_channel_losses,
         )
         ic = data.get_start(
             set(data.data.keys()), self.n_ic_timesteps
@@ -1614,7 +1626,7 @@ class TrainStepper(
         target_data: BatchData,
         optimization: OptimizationABC,
         metrics: dict[str, float],
-    ) -> list[EnsembleTensorDict]:
+    ) -> tuple[list[EnsembleTensorDict], dict[str, torch.Tensor] | None]:
         input_data = data.get_start(self._prognostic_names, self.n_ic_timesteps)
         # output from self.predict_paired does not include initial condition
         n_forward_steps = data.time.shape[1] - self.n_ic_timesteps
@@ -1647,6 +1659,7 @@ class TrainStepper(
                     "data requirements are retrieved, so this is a bug."
                 )
             n_forward_steps = stochastic_n_forward_steps
+        per_channel_sum: dict[str, torch.Tensor] | None = None
         for step in range(n_forward_steps):
             optimize_step = (
                 step == n_forward_steps - 1 or not self._config.optimize_last_step_only
@@ -1668,10 +1681,17 @@ class TrainStepper(
                     }
                 )
                 step_loss = self._loss_obj(gen_step, target_step, step=step)
-                metrics[f"loss_step_{step}"] = step_loss.detach()
+                step_total_loss = step_loss.total()
+                metrics[f"loss_step_{step}"] = step_total_loss.detach()
+                per_ch = step_loss.get_channel_losses()
+                if per_channel_sum is None:
+                    per_channel_sum = {k: v.detach().clone() for k, v in per_ch.items()}
+                else:
+                    for k in per_channel_sum:
+                        per_channel_sum[k] = per_channel_sum[k] + per_ch[k].detach()
             if optimize_step:
-                optimization.accumulate_loss(step_loss)
-        return output_list
+                optimization.accumulate_loss(step_total_loss)
+        return output_list, per_channel_sum
 
     def update_training_history(self, training_job: TrainingJob) -> None:
         """
@@ -1836,9 +1856,7 @@ def load_stepper(
     if override_config is None:
         override_config = StepperOverrideConfig()
 
-    checkpoint = torch.load(
-        checkpoint_path, map_location=get_device(), weights_only=False
-    )
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     stepper = Stepper.from_state(checkpoint["stepper"])
 
     if override_config.ocean != "keep":

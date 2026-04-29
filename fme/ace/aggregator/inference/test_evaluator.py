@@ -73,9 +73,10 @@ def regress_logs(
             f"Regression file {regression_file} did not exist, so it was created"
         )
     else:
-        raw_logs_loaded = torch.load(regression_file)
+        raw_logs_loaded = torch.load(regression_file, map_location="cpu")
         assert set(raw_logs.keys()) == set(raw_logs_loaded.keys())
         for key, value in raw_logs.items():
+            value = value.cpu() if isinstance(value, torch.Tensor) else value
             torch.testing.assert_close(
                 value, raw_logs_loaded[key], rtol=1e-3, atol=1e-3
             )

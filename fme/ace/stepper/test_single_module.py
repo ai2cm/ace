@@ -1,5 +1,6 @@
 import dataclasses
 import datetime
+import gc
 import os
 import pathlib
 import unittest
@@ -51,6 +52,7 @@ from fme.ace.stepper.time_length_probabilities import (
 )
 from fme.ace.testing import DimSizes
 from fme.core import AtmosphereData
+from fme.core.benchmark.memory import benchmark_memory
 from fme.core.coordinates import (
     DepthCoordinate,
     DimSize,
@@ -77,6 +79,7 @@ from fme.core.registry.module import ModuleSelector
 from fme.core.step import SingleModuleStepConfig, StepSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallConfig
+from fme.core.step.single_module import SingleModuleStep
 from fme.core.testing.regression import validate_tensor_dict
 from fme.core.training_history import TrainingJob
 from fme.core.typing_ import EnsembleTensorDict
@@ -1656,6 +1659,102 @@ def test_load_stepper_with_prescribed_prognostic_override(
     output, _ = stepper.predict(input_data, forcing_data)
     expected_var = forcing_data.data["var"][:, 1 : n_steps + 1]
     torch.testing.assert_close(output.data["var"], expected_var)
+
+
+class _LargeLinear(torch.nn.Module):
+    """Module defined at module scope so it can be pickled by torch.save."""
+
+    def __init__(self, size: int):
+        super().__init__()
+        self.linear = torch.nn.Linear(size, size)
+
+    def forward(self, x):
+        return self.linear(x)
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="measures peak GPU memory allocation"
+)
+def test_load_stepper_does_not_double_buffer_on_gpu(tmp_path: pathlib.Path):
+    """Loading a stepper should not briefly hold two copies of its weights
+    on GPU.
+
+    Before changing torch.load to map_location="cpu", the checkpoint was
+    loaded directly to GPU, and Stepper.from_state then created new on-device
+    tensors that temporarily coexisted with the originals. Peak GPU allocation
+    during load_stepper should stay close to the stepper's on-device size.
+    """
+
+    in_names = ["var"]
+    out_names = ["var"]
+    size = 1024  # ~4 MiB of float32 weights
+    # Keep img_shape small so grid-sized allocations inside
+    # LatLonOperations (area_weights buffers, validation temporaries) do not
+    # dominate the peak and obscure what this test is checking.
+    img_shape = (5, 5)
+    stepper_path = tmp_path / "stepper"
+
+    # Build and save the stepper inside a helper so its locals are released
+    # before we start measuring. In particular, StepperConfig pins on-device
+    # copies of the module via StepSelector._step_config_instance and (after
+    # get_state()'s call to as_loaded_dict) via the re-assigned
+    # StepSelector.config dict. pytest's assertion rewriting keeps test-body
+    # locals alive past `del`, so we stash them in a separate frame.
+    def _save_stepper():
+        config = StepperConfig(
+            step=StepSelector(
+                type="single_module",
+                config=dataclasses.asdict(
+                    SingleModuleStepConfig(
+                        builder=ModuleSelector(
+                            type="prebuilt", config={"module": _LargeLinear(size)}
+                        ),
+                        in_names=in_names,
+                        out_names=out_names,
+                        normalization=NetworkAndLossNormalizationConfig(
+                            network=NormalizationConfig(
+                                means={n: 0.0 for n in in_names + out_names},
+                                stds={n: 1.0 for n in in_names + out_names},
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        dataset_info = get_dataset_info(img_shape=img_shape)
+        stepper = config.get_stepper(dataset_info=dataset_info)
+        torch.save({"stepper": stepper.get_state()}, stepper_path)
+
+    _save_stepper()
+    gc.collect()
+    torch.cuda.empty_cache()
+
+    # Some tensors from the save phase persist in PyTorch's C++ layer past
+    # `del` + `gc.collect()` and aren't reachable via `gc.get_objects()`.
+    # Measure peak growth during load relative to this baseline rather than
+    # assuming it starts at zero.
+    baseline_alloc = torch.cuda.memory_allocated()
+
+    with benchmark_memory() as bm:
+        loaded = load_stepper(stepper_path)
+
+    step_obj = loaded._step_obj
+    assert isinstance(step_obj, SingleModuleStep)
+    torch_module = step_obj.module.torch_module
+    model_size = sum(
+        p.element_size() * p.nelement() for p in torch_module.parameters()
+    ) + sum(b.element_size() * b.nelement() for b in torch_module.buffers())
+
+    # Before the fix, peak growth would be ~2x the model size because
+    # torch.load placed one copy on GPU and Stepper.from_state created a
+    # second copy on GPU before the first was released.
+    peak_growth = bm.result.max_alloc - baseline_alloc
+    assert peak_growth < 1.5 * model_size, (
+        f"peak GPU alloc growth during load_stepper ({peak_growth} bytes, "
+        f"peak={bm.result.max_alloc}, baseline={baseline_alloc}) exceeded 1.5x "
+        f"the loaded model size ({model_size} bytes), "
+        "suggesting a second copy of the weights was briefly held on GPU"
+    )
 
 
 def get_regression_stepper_and_data(
