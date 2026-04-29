@@ -25,13 +25,14 @@ PRE_TRAINED_WEIGHTS_DATASETS=("01KHJ5F1M6YKVZESPZAAVVD6G8" "01KHCEF1SBYCZCGDM78N
 ACE2S_CKPT=01KQDG7X72D4E2JJTGQ0ZF9J9T
 
 # tuned on XSHiELD, seed 0
-TUNED_DATASET=01KQAZ8HBV7K6XZWGPMF159VV2
+TUNED_DATASET=01KQD8NF9HQD1QY2X0S132YH72
+
 
 #       --dataset $TUNED_DATASET:/pre-trained-weights \
 #        --dataset ${PRE_TRAINED_WEIGHTS_DATASETS[$seed]}:/pre-trained-weights \
 for seed in {0..0}; do
     #job_name="ace2som-xshield-tune-1yr-even-split-single-decoder-seed${seed}"
-    job_name="ace2s-ckpt-xshield-tune-1yr-even-split-single-decoder-seed${seed}"
+    job_name="ace2som-xshield-continue-tune-1yr-even-split-single-decoder-seed${seed}"
     fine_tune_seed=$((seed + SEED_OFFSET))
     override="seed=${fine_tune_seed}"
     python -m fme.ace.validate_config --config_type train $CONFIG_PATH --override $override
@@ -52,7 +53,7 @@ for seed in {0..0}; do
         --env-secret WANDB_API_KEY=wandb-api-key-annak \
         --dataset-secret google-credentials:/tmp/google_application_credentials.json \
         --dataset $STATS_DATASET:/statsdata \
-        --dataset $ACE2S_CKPT:training_checkpoints/ACE2S.ckpt:/pre-trained-weights/training_checkpoints/best_ckpt.tar \
+        --dataset $TUNED_DATASET:/pre-trained-weights \
         --gpus $N_GPUS \
         --shared-memory 400GiB \
         --weka climate-default:/climate-default \

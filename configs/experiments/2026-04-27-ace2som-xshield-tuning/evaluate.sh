@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# uses best_ckpt.tar instead of best_inference_ckpt.tar to avoid q0
+# determining best ckpt. this is effectively the last ckpt from tuning
+
 set -e
 
 
@@ -17,7 +20,7 @@ cd $REPO_ROOT
 MODEL_CHECKPOINT_DATASETS=("01KQD8NF9HQD1QY2X0S132YH72" "01KQD8NMEYCVQ835WQV751MNYP")
 
 
-for seed in {0..0}; do
+for seed in {1..1}; do
     job_name="evaluate-4k-ace2som-xshield-tune-1yr-even-split-single-decoder-seed${seed}"
     gantry run \
         --name $job_name \
@@ -35,8 +38,7 @@ for seed in {0..0}; do
         --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
         --env-secret WANDB_API_KEY=wandb-api-key-annak \
         --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-        --dataset $STATS_DATASET:/statsdata \
-        --dataset ${MODEL_CHECKPOINT_DATASETS[$seed]}:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
+        --dataset ${MODEL_CHECKPOINT_DATASETS[$seed]}:training_checkpoints/best_ckpt.tar:/ckpt.tar \
         --gpus 1 \
         --shared-memory 400GiB \
         --weka climate-default:/climate-default \
@@ -44,5 +46,6 @@ for seed in {0..0}; do
         --no-python \
         --install "pip install --no-deps ." \
         --allow-dirty \
-        -- torchrun --nproc_per_node $N_GPUS -m fme.ace.train $CONFIG_PATH --override $override
+        --no-python \
+        -- python -m fme.ace.evaluator $CONFIG_PATH
 done

@@ -4,7 +4,7 @@ validate_using_ema: true
 evaluate_before_training: true
 ema:
   decay: 0.999
-max_epochs: 10
+max_epochs: 20
 inference:
   n_forward_steps: 3640 #2019-2024
   forward_steps_in_memory: 40
@@ -95,8 +95,8 @@ stepper_training:
       air_temperature_1: 0.5
       eastward_wind_0: 0.5
       northward_wind_0: 0.5
-      specific_total_water_0: 0.5
-      specific_total_water_1: 0.25
+      specific_total_water_0: 0.05
+      specific_total_water_1: 0.025
       specific_total_water_2: 0.5
       PRATEsfc: 0.5
       h500: 10
@@ -109,7 +109,7 @@ stepper_training:
       USWRFtoa: 2
       tendency_of_total_water_path_due_to_advection: 0.5
       PRESsfc: 3
-      PRMSL: 3
+      PRMSL: 20
     kwargs:
       crps_weight: 0.9
       energy_score_weight: 0.1
