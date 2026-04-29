@@ -104,12 +104,6 @@ class Distributed:
         - ``FME_DISTRIBUTED_BACKEND=none`` to force
           :class:`NonDistributed`
         """
-        if not cls._entered:
-            raise RuntimeError(
-                "Distributed.get_instance() called before entering context. "
-                "Please use Distributed.context() to wrap the training process, "
-                "or ensure that get_instance() is only called within the context."
-            )
         global singleton
         if singleton is None:
             backend_env = os.environ.get("FME_DISTRIBUTED_BACKEND")
@@ -128,6 +122,12 @@ class Distributed:
                 )
             else:
                 singleton = cls()
+        if not cls._entered and singleton.world_size > 1:
+            raise RuntimeError(
+                "Distributed.get_instance() called before entering context. "
+                "Please use Distributed.context() to wrap the training process, "
+                "or ensure that get_instance() is only called within the context."
+            )
         return singleton
 
     @classmethod
