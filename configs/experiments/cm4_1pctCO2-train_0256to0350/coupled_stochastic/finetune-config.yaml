@@ -2,10 +2,10 @@ experiment_dir: /results
 save_checkpoint: true
 save_best_inference_epoch_checkpoints: false
 checkpoint_every_n_batches: 100
-checkpoint_save_epochs:
+checkpoint_save_epochs: null
+ema_checkpoint_save_epochs:
   start: 1
   step: 1
-  stop: 6
 log_train_every_n_batches: 10
 validate_using_ema: true
 evaluate_before_training: true
@@ -126,16 +126,12 @@ optimization:
     fused: true
     weight_decay: 0.01
   scheduler:
-    schedulers:
-      - type: LinearLR
-        step_each_iteration: true
-        kwargs:
-          start_factor: 0.01
-          end_factor: 1
-          total_iters: 2000
-      - type: ConstantLR
-        step_each_iteration: true
-    milestones: [2000]
+    type: LinearLR
+    step_each_iteration: true
+    kwargs:
+      start_factor: 1.0
+      end_factor: 0
+      total_iters: 2165
 stepper_training:
   n_coupled_steps: 2
   parameter_init:
