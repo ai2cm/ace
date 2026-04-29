@@ -447,6 +447,7 @@ class TrainBuilders:
                         output_dir=entry_output_dir,
                         channel_mean_names=channel_mean_names,
                         save_diagnostics=save_diagnostics,
+                        n_ensemble_per_ic=entry.config.n_ensemble_per_ic,
                     )
                     all_logs.update(
                         inference_one_epoch(

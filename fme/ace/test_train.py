@@ -266,6 +266,7 @@ def _get_test_yaml_files(
                     ),
                     n_forward_steps=inference_forward_steps,
                     forward_steps_in_memory=2,
+                    n_ensemble_per_ic=2,
                 ),
             ),
         ]
@@ -635,6 +636,18 @@ def test_train_and_inference(
         assert ensemble_step_20_keys, (
             "expected at least one ensemble_step_20 metric in inline inference "
             "epoch log"
+        )
+        weather_eval_keys = [k for k in epoch_logs if k.startswith("weather_eval/")]
+        assert weather_eval_keys, (
+            "expected at least one weather_eval metric in additional_inference "
+            "epoch log"
+        )
+        weather_eval_ensemble_keys = [
+            k for k in epoch_logs if "weather_eval/ensemble_step_20/" in k
+        ]
+        assert weather_eval_ensemble_keys, (
+            "expected at least one ensemble_step_20 metric in weather_eval "
+            "additional_inference epoch log"
         )
 
     validation_output_dir = tmp_path / "results" / "output" / "val" / "epoch_0001"
