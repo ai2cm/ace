@@ -1,5 +1,10 @@
 experiment_dir: /climate-default/2026-04-29-distillation-teacher-val-dataset
 
+patch:
+  divide_generation: true
+  composite_prediction: true
+  coarse_horizontal_overlap: 0
+
 model:
   checkpoint_path: /checkpoints/best_histogram_tail.ckpt
   fine_coordinates_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
