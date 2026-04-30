@@ -1,8 +1,19 @@
 # CMIP6 Daily Training: Issues and Plan
 
 This document tracks issues blocking or relevant to running a smoke-test
-training run on the CMIP6 daily pressure-level data produced by
-`scripts/cmip6_data/process.py`.
+training run on the CMIP6 daily pressure-level data produced by the
+`scripts/cmip6_data/` pipeline (`process.py` for Pangeo, `process_esgf.py`
+for ESGF).
+
+## Current status
+
+**Data preparation**: 37 models eligible, 120+ datasets processed (Pangeo
+complete, ESGF backfill in progress). Normalization statistics computed.
+`Cmip6DataConfig` data loader implemented and tested.
+
+**Next step**: smoke-test training run on the atmosphere-only core
+variables using the existing data. Ocean variables (`Oday`/`Omon`) are
+planned but deferred — the smoke test proceeds without them.
 
 ---
 

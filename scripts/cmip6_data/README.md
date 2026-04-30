@@ -2,9 +2,8 @@
 
 Pilot project to download and stage a multi-model CMIP6 daily-mean dataset
 for an ACE-style emulator with a per-model label embedding. Scope is
-deliberately narrow: daily cadence only, CMIP6 only, Pangeo catalog only
-(unless revisited), no training runs, drastically time-subset at first with
-config knobs to scale up to the full roster later.
+deliberately narrow: daily cadence only, CMIP6 only, drastically time-subset
+at first with config knobs to scale up to the full roster later.
 
 ## Goals
 
@@ -12,7 +11,9 @@ config knobs to scale up to the full roster later.
   every included model for both `historical` and `ssp585`. Holdout and
   per-model member caps are future concerns, not ingest-time decisions.
 - Support ~30–50 CMIP6 models to train a robust source-model label
-  embedding that can be fine-tuned on unseen models.
+  embedding that can be fine-tuned on unseen models. Current count:
+  37 models (32 from Pangeo, 5 ESGF-only) with 146 eligible
+  model/experiment/member combinations.
 - Heterogeneous variable sets across models are expected; ingest records
   what each model has. Downstream training support for heterogeneous
   variables is a separate future code change.
@@ -23,7 +24,7 @@ config knobs to scale up to the full roster later.
 
 ### Experiments & members
 
-- `historical` (1850–2014) and `ssp585` (2015–2100).
+- `historical` (1850–2014), `ssp245` (2015–2100), and `ssp585` (2015–2100).
 - **All available members** by default. Whether a per-model cap is applied
   is a future decision.
 - Experiment is recorded as metadata and may be used in experiments, but
@@ -71,6 +72,37 @@ nil for these fields in Pangeo).
 - `siconc` from `SImon` — sea-ice fraction on the ocean grid;
   regridded to the F22.5 target. 57 models.
 
+### Ocean variables (planned — not yet in pipeline)
+
+Daily ocean surface fields from `Oday` (include when available, do not
+drop models that lack them):
+
+- `tos` — sea surface temperature (~42 models on ESGF, 29 on Pangeo).
+  Better than the monthly `ts` forcing for SST since it's daily and
+  ocean-specific. Ocean-grid only (NaN over land).
+- `sos` — sea surface salinity (~34 models).
+- `tossq`, `sossq` — squared SST/SSS for sub-daily variance (~25–27 models).
+- `omldamax` — daily max mixed layer depth (~28 models).
+
+Monthly 2D ocean diagnostics from `Omon` (interpolated to daily, as
+with `ts`/`siconc`) to provide deep-ocean memory without 3D data
+volume:
+
+- `zos` — sea surface height. Integrates full-column density, so it
+  encodes deep heat/salt content in a single 2D field (~56 models).
+- `hfds` — net downward heat flux at ocean surface (~51 models).
+- `mlotst` — mixed layer depth (~34 models).
+- `tob` — ocean bottom temperature (~29 models).
+
+All ocean variables live on curvilinear/tripolar ocean grids and
+require regridding to F22.5 (bilinear; conservative generally fails
+for ocean grids lacking usable vertex bounds — same issue as `siconc`).
+
+**Not included:** 3D ocean fields (`thetao`, `so`, `uo`, `vo`) due to
+data volume at 50–75 depth levels. Surface chlorophyll (`chlos`) may be
+added as an optional diagnostic if cheap, but is not a priority for
+physical climate.
+
 ### Static per-model fields
 
 From the CMIP6 `fx` table; broadcast along time by the data loader.
@@ -80,11 +112,13 @@ From the CMIP6 `fx` table; broadcast along time by the data loader.
 
 ### Expected model coverage
 
-From the inventory run: **~21 source_ids** satisfy all of (full `day`
-core coverage) + `ts` + `siconc` + `sftlf` + `orog` across at least one
-member; **~25** if `orog` is treated as optional. The multi-member cap
-(Issue 3) retains up to 3 realizations per `(source_id, experiment, p,
-f)` label, yielding the effective pilot dataset.
+**37 models** satisfy all core variable requirements across both the
+Pangeo catalog and ESGF, yielding **146 eligible tasks**
+(model/experiment/member combinations): 60 historical, 48 ssp245,
+38 ssp585. 32 models are sourced from Pangeo GCS mirrors; 5 are
+ESGF-only (ACCESS-ESM1-5, AWI-ESM-1-REcoM, CESM2-WACCM-FV2,
+FGOALS-f3-L, IPSL-CM6A-LR). The multi-member cap (Issue 3) retains
+up to 3 realizations per `(source_id, experiment, p, f)` label.
 
 ### Derived variables
 
@@ -265,19 +299,19 @@ via conda: `conda install -c conda-forge xesmf esmpy`.
 
 ## Extraction Approach (high level)
 
-Split into two scripts:
+Two pipelines feed the same output directory and index:
 
-### `inventory.py` — dataset discovery & metadata
+### `inventory.py` — Pangeo dataset discovery & metadata
 
 Queries the Pangeo GCS CMIP6 intake-esm catalog for our variable list ×
 experiments and emits a tidy table (parquet/csv) with one row per
 `(source_id, experiment, variant_label, variable)` and enough columns to
 answer cross-model comparison questions: variables present, grid_label,
 native calendar, time range, horizontal/vertical grid info, member counts
-per model. Used both to measure Pangeo coverage (Issue 5) and as input to
-the processing script's planning step. No data movement — metadata only.
+per model. Used both to measure Pangeo coverage and as input to
+`process.py`. No data movement — metadata only.
 
-### `process.py` — per-dataset processing
+### `process.py` — Pangeo per-dataset processing
 
 Driven by the YAML config + the inventory. For each selected
 `(source_id, experiment, variant_label)`:
@@ -299,11 +333,25 @@ Driven by the YAML config + the inventory. For each selected
 10. Write zarr with zarr v3 chunks+shards; drop sidecar metadata.json.
 11. Append a row to the central `index.{csv,parquet}`.
 
-**Resumability.** Re-running is cheap: the `metadata.json` sidecar
-serves as the "completed" marker. A complete sidecar → skip. A zarr
-directory without a sidecar → treated as partial, deleted, and
-re-processed. `--force` rebuilds everything; `--dry-run` lists the
-selection without processing; `--source-ids`/`--max-datasets` are
+### `process_esgf.py` — ESGF per-dataset processing
+
+Supplements `process.py` for models not on Pangeo's GCS mirror and
+for additional experiments/members not available there. Driven by
+`configs/process_esgf.yaml` + `inventory_esgf.csv`. Same output
+format, same zarr layout and sidecar convention.
+
+Key difference: downloads NetCDF files from ESGF HTTP servers one
+variable at a time (to cap disk usage at ~50 GB), processes each
+variable through regridding, then merges. Downloaded files are cached
+in a scratch directory and cleaned up per-variable after regridding.
+
+Currently adds 5 ESGF-only models (ACCESS-ESM1-5, AWI-ESM-1-REcoM,
+CESM2-WACCM-FV2, FGOALS-f3-L, IPSL-CM6A-LR) and backfills ~30
+additional experiment/member combinations for models already processed
+via Pangeo.
+
+**Resumability.** Same as `process.py`: `metadata.json` sidecar marks
+completion. `--force` rebuilds; `--source-ids`/`--max-datasets` are
 debug aids.
 
 Per-dataset jobs are embarrassingly parallel. Pilot runs locally
@@ -348,9 +396,10 @@ python make_presence.py --config configs/pilot.yaml
   Deterministic selection by `(variant_f, variant_r)`.
 - **Issue 4 — Time subset.** Pilot: `historical` 2010, `ssp585` 2015
   (one full year each). Set `defaults.time_subset: null` for full range.
-- **Issue 5 — Pangeo-only vs ESGF.** Pangeo-only. `ta` replaced by
-  derived layer-T; `ps` replaced by `psl` + topography mask. Confirmed
-  via full inventory pass.
+- **Issue 5 — Pangeo-only vs ESGF.** Both Pangeo and ESGF are used.
+  Pangeo provides the bulk of the data (32 models); ESGF adds 5 new
+  models and ~30 backfill tasks via `process_esgf.py`. `ta` replaced
+  by derived layer-T; `ps` replaced by `psl` + topography mask.
 - **Issue 8 — Regridding.** `xesmf` targeting Gauss-Legendre F22.5
   (45 x 90). Conservative for fluxes/precip, bilinear for state.
   Weights cached per source grid.
@@ -473,6 +522,15 @@ python make_presence.py --config configs/pilot.yaml
   weighting in xesmf as a follow-up. See
   `figures/cesm2_fv2_sftlf_overshoot.png`.
 
+### Known ESGF data-quality issues
+
+- **CESM2-WACCM-FV2** publishes files on ESGF with overlapping time
+  ranges that produce data-identical duplicate timestamps after
+  concatenation. Handled via `allow_dedupe: true` override in
+  `configs/process_esgf.yaml`. The duplicates are verified to be
+  data-identical before deduplication; materially different duplicates
+  (indicating a simulation boundary) raise `SimulationBoundaryError`.
+
 ### Known regridding / data-pipeline limitations
 
 - **CESM2 SImon `siconc`** trips ESMF's regridder with `rc = 506`
@@ -484,10 +542,9 @@ python make_presence.py --config configs/pilot.yaml
   Fixing it properly probably means clamping out-of-range lat
   values before handing the grid to xesmf, or switching to a
   different regridding backend for ocean grids.
-- **`use_cftime=True` deprecation warning** in `_open_zstore`. The
-  kwarg form is deprecated in newer xarray; should migrate to
-  ``decode_times=xr.coders.CFDatetimeCoder(use_cftime=True)``.
-  Cosmetic for now.
+- **`use_cftime=True` deprecation warning** — migrated to
+  ``decode_times=xr.coders.CFDatetimeCoder(use_cftime=True)`` in
+  both pipelines.
 - **Zarr v3 `NullTerminatedBytes` + consolidated-metadata warnings**
   on every write. Both flag v3-portability concerns but don't affect
   xarray+zarr-python reads. Eventually: drop string scalar coords
@@ -510,6 +567,20 @@ python make_presence.py --config configs/pilot.yaml
 
 ## Deferred / Future Issues
 
+- **Ocean variable ingestion.** Daily `Oday` variables (`tos`, `sos`,
+  `tossq`, `sossq`, `omldamax`) and monthly `Omon` variables (`zos`,
+  `hfds`, `mlotst`, `tob`) are planned but not yet in the pipeline.
+  Requires adding ocean table queries to inventory, handling
+  curvilinear ocean grids (bilinear fallback), and deciding whether
+  `tos` replaces or supplements `ts` as the SST forcing. See
+  **Ocean variables** section above for availability counts.
+- **Radiative forcing for coupled runs.** Model-diagnosed CO2/CH4
+  (`AERmon`) is available for only ~3 models. For coupled
+  ocean-atmosphere runs, options are: (1) use input4MIPs prescribed
+  forcing (scenario, year) → shared scalar time series, (2) encode
+  scenario+time and let the model learn the forcing trajectory, or
+  (3) use TOA incoming solar (`rsdt`) as a proxy for radiative
+  forcing and time encoding for the rest.
 - **Heterogeneous variables at train time.** Core code change in
   `fme/core/dataset/` and the stepper to allow per-dataset variable
   subsets. Tracked separately from this pilot. Once this is supported,
