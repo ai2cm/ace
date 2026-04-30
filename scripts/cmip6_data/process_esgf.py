@@ -312,7 +312,7 @@ def _open_netcdf_files(paths: list[Path], variable: str) -> xr.Dataset:
     """Open and concatenate a list of NetCDF files along time."""
     datasets = []
     for p in sorted(paths):
-        ds = xr.open_dataset(p, use_cftime=True)
+        ds = xr.open_dataset(p, decode_times=xr.coders.CFDatetimeCoder(use_cftime=True))
         if variable in ds.data_vars:
             keep = [variable] + [v for v in ds.data_vars if v in BOUNDS_NAMES]
             datasets.append(ds[keep])
