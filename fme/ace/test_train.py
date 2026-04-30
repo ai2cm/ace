@@ -39,7 +39,11 @@ from fme.ace.registry.test_hpx import (
 )
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
 from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
-from fme.ace.stepper.single_module import StepperConfig, TrainStepperConfig
+from fme.ace.stepper.single_module import (
+    CheckpointStepperConfig,
+    StepperConfig,
+    TrainStepperConfig,
+)
 from fme.ace.stepper.time_length_probabilities import (
     TimeLength,
     TimeLengthMilestone,
@@ -52,6 +56,7 @@ from fme.ace.testing import (
     MonthlyReferenceData,
     save_nd_netcdf,
     save_scalar_netcdf,
+    save_stepper_checkpoint,
 )
 from fme.ace.train.train import build_trainer, prepare_directory
 from fme.ace.train.train import main as train_main
@@ -1097,3 +1102,68 @@ def test_train_with_non_local_experiment_dir_error():
             save_checkpoint=False,
             inference=None,
         )
+
+
+def test_train_config_with_checkpoint_stepper(tmp_path: pathlib.Path):
+    checkpoint_path = tmp_path / "checkpoint.tar"
+    original_config = save_stepper_checkpoint(checkpoint_path)
+    dummy_data_loader = DataLoaderConfig(
+        dataset=XarrayDataConfig(data_path=""),
+        batch_size=1,
+    )
+    train_config = TrainConfig(
+        experiment_dir=str(tmp_path / "experiment"),
+        stepper=CheckpointStepperConfig(checkpoint_path=str(checkpoint_path)),
+        stepper_training=TrainStepperConfig(n_forward_steps=2),
+        train_loader=dummy_data_loader,
+        validation_loader=dummy_data_loader,
+        optimization=OptimizationConfig(),
+        logging=LoggingConfig(),
+        max_epochs=1,
+        save_checkpoint=False,
+        inference=None,
+    )
+    assert isinstance(train_config.stepper_config, StepperConfig)
+    assert (
+        train_config.stepper_config.derived_forcings == original_config.derived_forcings
+    )
+    assert train_config.stepper_config.step.type == original_config.step.type
+
+
+def test_train_config_with_stepper_config_sets_stepper_config(tmp_path: pathlib.Path):
+    step = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                in_names=[],
+                out_names=[],
+                normalization=NetworkAndLossNormalizationConfig(
+                    network=NormalizationConfig(
+                        global_means_path="",
+                        global_stds_path="",
+                    ),
+                ),
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet", config={}
+                ),
+            ),
+        ),
+    )
+    stepper = StepperConfig(step=step)
+    dummy_data_loader = DataLoaderConfig(
+        dataset=XarrayDataConfig(data_path=""),
+        batch_size=1,
+    )
+    train_config = TrainConfig(
+        experiment_dir=str(tmp_path / "experiment"),
+        stepper=stepper,
+        stepper_training=TrainStepperConfig(n_forward_steps=2),
+        train_loader=dummy_data_loader,
+        validation_loader=dummy_data_loader,
+        optimization=OptimizationConfig(),
+        logging=LoggingConfig(),
+        max_epochs=1,
+        save_checkpoint=False,
+        inference=None,
+    )
+    assert train_config.stepper_config is stepper
