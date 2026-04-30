@@ -1,6 +1,6 @@
 group|tag|exper_id|status|ckpt_type|priority|premptible_flag|override|results_dataset|workspace
 
-1pct_nosmooth_0256to0350-ocean_extra|rs0|01KHJB41R1GEHTRQ8MXHF7NS3M|run_140yr|best_inference_ckpt|normal|--not-preemptible
+1pct_nosmooth_0256to0350-ocean_extra|rs0|01KHJB41R1GEHTRQ8MXHF7NS3M|trained|best_inference_ckpt|normal|--not-preemptible
 
 1pct_nosmooth_0256to0350-ocean_extra-ft_correctOHC_50Ep|rs0|01KHT9KJMM3Q55K0C1ZA4BCV16|trained|best_ckpt|normal|--not-preemptible
 
@@ -41,3 +41,5 @@ group|tag|exper_id|status|ckpt_type|priority|premptible_flag|override|results_da
 1pct_nosmooth_0256to0350-hfds_prescribed-ft_OHC_OSC|rs0|01KKZ29EDG5X7KN4EMSP102Y8D|training|best_inference_ckpt|normal|--not-preemptible
 
 1pct_nosmooth_0256to0350-hfds_prescribed-ft_gqmfjs2j_w_OSC|rs0|01KKZMVVTGNKZ1P2M3W48PS5R2|training|best_inference_ckpt|normal|--not-preemptible
+
+ace-samudra-coupled-cm4-8ez70kzy-decoupled_samudra|||run_140yr|best_inference_ckpt|high|||01KQE68R17KDYVS3585JPY2R32
