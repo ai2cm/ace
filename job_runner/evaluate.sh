@@ -80,8 +80,8 @@ while read TRAIN_EXPER; do
     EXISTING_RESULTS_OCEAN_DATASET=$(echo "$TRAIN_EXPER" | cut -d"|" -f12)
     EXISTING_RESULTS_ATMOS_DATASET=$(echo "$TRAIN_EXPER" | cut -d"|" -f13)
 
-    # Check if STATUS starts with "run_"
-    if [[ ! "$STATUS" =~ ^run_ ]]; then
+    # Check if STATUS starts with "run_" (but not "run_inf_", which is for inference)
+    if [[ ! "$STATUS" =~ ^run_ ]] || [[ "$STATUS" =~ ^run_inf_ ]]; then
         SKIPPED_JOBS=$((SKIPPED_JOBS + 1))
         continue
     fi
@@ -227,8 +227,8 @@ if [[ "$DRY_RUN" == "true" ]]; then
     echo "SUMMARY"
     echo "----------------------------------------"
     echo "Total Jobs in File: $TOTAL_JOBS"
-    echo "  - Will Process: $PROCESSED_JOBS (STATUS=run_*)"
-    echo "  - Will Skip: $SKIPPED_JOBS (STATUS!=run_*)"
+    echo "  - Will Process: $PROCESSED_JOBS (STATUS=run_*, excluding run_inf_*)"
+    echo "  - Will Skip: $SKIPPED_JOBS (STATUS!=run_* or STATUS=run_inf_*)"
     echo
     echo "Actions that WOULD be taken:"
     echo "  - Launch $PROCESSED_JOBS evaluation jobs"

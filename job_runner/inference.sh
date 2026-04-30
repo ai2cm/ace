@@ -80,8 +80,8 @@ while read TRAIN_EXPER; do
     EXISTING_RESULTS_OCEAN_DATASET=$(echo "$TRAIN_EXPER" | cut -d"|" -f12)
     EXISTING_RESULTS_ATMOS_DATASET=$(echo "$TRAIN_EXPER" | cut -d"|" -f13)
 
-    # Check if STATUS starts with "run_"
-    if [[ ! "$STATUS" =~ ^run_ ]]; then
+    # Check if STATUS starts with "run_inf_"
+    if [[ ! "$STATUS" =~ ^run_inf_ ]]; then
         SKIPPED_JOBS=$((SKIPPED_JOBS + 1))
         continue
     fi
@@ -89,10 +89,10 @@ while read TRAIN_EXPER; do
     PROCESSED_JOBS=$((PROCESSED_JOBS + 1))
 
     # Derive config tag and filename from STATUS
-    # Example: if STATUS is "run_ICx1"
+    # Example: if STATUS is "run_inf_ICx1"
     # CURRENT_CONFIG_TAG becomes "ICx1"
     # CURRENT_CONFIG_FILENAME becomes "inference-config-ICx1.yaml"
-    CURRENT_CONFIG_TAG=${STATUS#run_}
+    CURRENT_CONFIG_TAG=${STATUS#run_inf_}
     CURRENT_CONFIG_FILENAME="inference-config-${CURRENT_CONFIG_TAG}.yaml"
 
     JOB_GROUP="${JOB_GROUP}-inf_${CKPT}-${CURRENT_CONFIG_TAG}"
@@ -227,8 +227,8 @@ if [[ "$DRY_RUN" == "true" ]]; then
     echo "SUMMARY"
     echo "----------------------------------------"
     echo "Total Jobs in File: $TOTAL_JOBS"
-    echo "  - Will Process: $PROCESSED_JOBS (STATUS=run_*)"
-    echo "  - Will Skip: $SKIPPED_JOBS (STATUS!=run_*)"
+    echo "  - Will Process: $PROCESSED_JOBS (STATUS=run_inf_*)"
+    echo "  - Will Skip: $SKIPPED_JOBS (STATUS!=run_inf_*)"
     echo
     echo "Actions that WOULD be taken:"
     echo "  - Launch $PROCESSED_JOBS inference jobs"
