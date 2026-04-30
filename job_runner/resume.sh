@@ -79,6 +79,7 @@ while read RESUMING; do
     EXISTING_RESULTS_DATASET=$(echo "$RESUMING" | cut -d"|" -f13)
     EXISTING_RESULTS_OCEAN_DATASET=$(echo "$RESUMING" | cut -d"|" -f14)
     EXISTING_RESULTS_ATMOS_DATASET=$(echo "$RESUMING" | cut -d"|" -f15)
+    MIN_RUNTIME=$(echo "$RESUMING" | cut -d"|" -f16)
 
     if [[ "$STATUS" != "train" ]]; then
         SKIPPED_JOBS=$((SKIPPED_JOBS + 1))
@@ -89,6 +90,10 @@ while read RESUMING; do
 
     if [[ -z $RETRIES ]]; then
         RETRIES=0
+    fi
+
+    if [[ -z $MIN_RUNTIME ]]; then
+        MIN_RUNTIME=0
     fi
 
     JOB_GROUP="${GROUP}"
@@ -155,11 +160,11 @@ while read RESUMING; do
     OVERRIDE_ARGS="resume_results.existing_dir=/existing-results ${OVERRIDE_ARGS}"
 
     # Run the job using run_gantry_training_job
-    EXPERIMENT_ID=$(run_gantry_training_job_with_dry_run "Resume ${EXPERIMENT_DIR} pretraining: ${JOB_GROUP}")
+    EXPERIMENT_ID=$(MIN_RUNTIME="$MIN_RUNTIME" run_gantry_training_job_with_dry_run "Resume ${EXPERIMENT_DIR} pretraining: ${JOB_GROUP}")
 
     # Append to experiments.txt
     append_to_experiments_file_with_dry_run "$EXPERIMENT_DIR" "$CONFIG_SUBDIR" "$JOB_GROUP" "$TAG" \
-        "$EXPERIMENT_ID" "training" "best_inference_ckpt" "normal" "--not-preemptible" "$GIT_BRANCH"
+        "$EXPERIMENT_ID" "training" "best_inference_ckpt" "normal" "--min-runtime 8h" "$GIT_BRANCH"
 
 done <"$INPUT_PATH"
 

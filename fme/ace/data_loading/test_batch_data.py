@@ -1,3 +1,5 @@
+import dataclasses
+
 import numpy as np
 import pytest
 import torch
@@ -6,13 +8,80 @@ import xarray as xr
 from fme.ace.data_loading.batch_data import BatchData, PairedData
 from fme.core.device import get_device
 from fme.core.labels import BatchLabels
+from fme.core.typing_ import TensorDict
 
 
-def assert_metadata_equal(a: BatchData, b: BatchData, check_labels: bool = True):
+def assert_metadata_equal(
+    a: BatchData,
+    b: BatchData,
+    check_labels: bool = True,
+    check_n_ensemble: bool = True,
+):
     assert a.horizontal_dims == b.horizontal_dims
     assert a.epoch == b.epoch
+    if check_n_ensemble:
+        assert a.n_ensemble == b.n_ensemble
     if check_labels:
         assert a.labels == b.labels
+
+
+def assert_batchdata_equal_up_to_device(a: BatchData, b: BatchData) -> None:
+    """
+    Assert that two BatchData objects are the same, comparing tensor *values* on CPU
+    so that `.device` differences on tensor fields are ignored. Compares all
+    public dataclass fields so new fields (e.g. n_ensemble) are covered without
+    having to update only ``assert_metadata_equal``.
+    """
+    for field in dataclasses.fields(BatchData):
+        va = getattr(a, field.name)
+        vb = getattr(b, field.name)
+        if field.name == "data":
+            assert set(va) == set(vb)
+            for k in va:
+                torch.testing.assert_close(
+                    va[k].detach().cpu(),
+                    vb[k].detach().cpu(),
+                )
+        elif field.name == "time":
+            assert bool(va.equals(vb))
+        elif field.name == "labels":
+            if va is None or vb is None:
+                assert va is None and vb is None
+            else:
+                assert va.names == vb.names
+                torch.testing.assert_close(
+                    va.tensor.cpu(),
+                    vb.tensor.cpu(),
+                )
+        else:
+            assert va == vb
+
+
+def assert_paired_data_equal_up_to_device(a: PairedData, b: PairedData) -> None:
+    """Like ``assert_batchdata_equal_up_to_device`` for ``PairedData``."""
+    for field in dataclasses.fields(PairedData):
+        va = getattr(a, field.name)
+        vb = getattr(b, field.name)
+        if field.name in ("prediction", "reference"):
+            assert set(va) == set(vb)
+            for k in va:
+                torch.testing.assert_close(
+                    va[k].detach().cpu(),
+                    vb[k].detach().cpu(),
+                )
+        elif field.name == "time":
+            assert bool(va.equals(vb))
+        elif field.name == "labels":
+            if va is None or vb is None:
+                assert va is None and vb is None
+            else:
+                assert va.names == vb.names
+                torch.testing.assert_close(
+                    va.tensor.cpu(),
+                    vb.tensor.cpu(),
+                )
+        else:
+            assert va == vb
 
 
 def get_batch_data(
@@ -23,6 +92,7 @@ def get_batch_data(
     n_lat: int = 8,
     n_lon: int = 16,
     n_labels: int = 0,
+    n_ensemble: int = 1,
 ):
     device = get_device()
     if n_labels == 0:
@@ -40,6 +110,7 @@ def get_batch_data(
         time=xr.DataArray(np.random.rand(n_samples, n_times), dims=["sample", "time"]),
         horizontal_dims=horizontal_dims,
         labels=labels,
+        n_ensemble=n_ensemble,
     )
 
 
@@ -374,8 +445,8 @@ def test_broadcast_ensemble(n_ensemble):
         )
 
     assert_metadata_equal(
-        ensemble_gen_data, gen_data, check_labels=False
-    )  # labels checked above
+        ensemble_gen_data, gen_data, check_labels=False, check_n_ensemble=False
+    )  # n_ensemble and labels intentionally differ; labels checked above
 
 
 @pytest.mark.parametrize("n_ensemble", [1, 2, 3])
@@ -428,3 +499,130 @@ def test_ensemble_data_size(n_ensemble):
             ensemble_gen_data.ensemble_data["bar"][:, ensemble_idx, ...],
             ensemble_gen_data.ensemble_data["bar"][:, ensemble_idx + 1, ...],
         )
+
+
+def test_n_ensemble_preserved_across_batchdata_transforms():
+    """
+    Regression: any ``BatchData`` method that returns a new ``BatchData`` must
+    forward ``n_ensemble`` (see dataclass and ``broadcast_ensemble``/dataloader
+    invariants). Bundle these tests when splitting a focused PR for batch
+    container fixes.
+    """
+    n_e = 3
+    names = ["foo", "bar", "qux"]
+    n_samples, n_times = 2, 5
+    base = get_batch_data(
+        names=names,
+        n_samples=n_samples,
+        n_times=n_times,
+        horizontal_dims=["lat", "lon"],
+        n_ensemble=n_e,
+    )
+    assert base.remove_initial_condition(1).n_ensemble == n_e
+    assert base.select_time_slice(slice(0, 2)).n_ensemble == n_e
+    assert base.subset_names(["foo", "qux"]).n_ensemble == n_e
+    ic = base.get_start(["foo", "bar"], 2)
+    assert ic.as_batch_data().n_ensemble == n_e
+    assert base.prepend(ic).n_ensemble == n_e
+    bcpu = base.to_cpu()
+    if torch.cuda.is_available():
+        bcpu.pin_memory()
+    assert bcpu.n_ensemble == n_e
+    assert base.to_device().n_ensemble == n_e
+    assert base.to_cpu().n_ensemble == n_e
+
+    derived = base.compute_derived_variables(lambda a, f: TensorDict({}), base)
+    assert derived.n_ensemble == n_e
+    assert_batchdata_equal_up_to_device(derived, base)
+    a = get_batch_data(
+        names=["x"],
+        n_samples=1,
+        n_times=2,
+        horizontal_dims=["lat", "lon"],
+        n_ensemble=n_e,
+    )
+    b = a.to_device().to_cpu()
+    assert_batchdata_equal_up_to_device(a, b)
+
+
+def test_batchdata_broadcast_ensemble_does_not_move_cpu_tensors_to_default_device():
+    time = xr.DataArray(np.random.rand(2, 3), dims=["sample", "time"])
+    base = BatchData(
+        data={"a": torch.zeros(2, 3, 4, 4, device=torch.device("cpu"))},
+        time=time,
+        horizontal_dims=["lat", "lon"],
+        n_ensemble=1,
+    )
+    out = base.broadcast_ensemble(2)
+    for v in out.data.values():
+        assert v.device == torch.device("cpu")
+
+
+def test_paired_data_from_batch_data_copies_n_ensemble():
+    n_e = 2
+    t = get_batch_data(
+        names=["foo", "bar"],
+        n_samples=1,
+        n_times=2,
+        horizontal_dims=["lat", "lon"],
+        n_ensemble=n_e,
+    )
+    g = get_batch_data(
+        names=["bar"],
+        n_samples=1,
+        n_times=2,
+        horizontal_dims=["lat", "lon"],
+        n_ensemble=n_e,
+    )
+    g.time = t.time
+    paired = PairedData.from_batch_data(prediction=g, reference=t)
+    assert paired.n_ensemble == n_e
+
+
+def test_paired_data_equal_up_to_device_helper_matches_new_on_device():
+    """Exercises the field-by-field ``PairedData`` comparison helper."""
+    t = get_batch_data(
+        names=["foo", "bar"],
+        n_samples=1,
+        n_times=2,
+        horizontal_dims=["lat", "lon"],
+        n_ensemble=1,
+    )
+    g = get_batch_data(
+        names=["bar"],
+        n_samples=1,
+        n_times=2,
+        horizontal_dims=["lat", "lon"],
+        n_ensemble=1,
+    )
+    g.time = t.time
+    a = PairedData.from_batch_data(prediction=g, reference=t)
+    b = PairedData.new_on_device(
+        a.prediction, a.reference, a.time, a.labels, n_ensemble=a.n_ensemble
+    )
+    assert_paired_data_equal_up_to_device(a, b)
+
+
+def test_paired_data_as_ensemble_tensor_dicts_shape():
+    n_ensemble, n_s, n_t = 2, 1, 3
+    t = get_batch_data(
+        names=["foo", "bar"],
+        n_samples=n_s * n_ensemble,
+        n_times=n_t,
+        horizontal_dims=["lat", "lon"],
+        n_ensemble=1,
+    )
+    g = get_batch_data(
+        names=["bar"],
+        n_samples=n_s * n_ensemble,
+        n_times=n_t,
+        horizontal_dims=["lat", "lon"],
+        n_ensemble=1,
+    )
+    g.time = t.time
+    p = PairedData.from_batch_data(prediction=g, reference=t)
+    u_ref, u_pred = p.as_ensemble_tensor_dicts(n_ensemble)
+    for name in p.reference:
+        assert u_ref[name].shape[:2] == (n_s, n_ensemble)
+    for name in p.prediction:
+        assert u_pred[name].shape[:2] == (n_s, n_ensemble)
