@@ -8,8 +8,7 @@ CONFIG_FILENAME="ace-som-inference-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
 
-INITIAL_CONDITION_ROOT=/climate-default/2026-04-29-ACE2S-SHiELD-SSP-reference-datasets/initial-conditions
-INITIAL_CONDITION_PATH=2026-04-30-SSP-SHiELD-SOM-initial-condition-dataset.zarr
+INITIAL_CONDITION_PATH=/climate-default/2026-04-29-ACE2S-SHiELD-SSP-reference-datasets/initial-conditions/2026-04-30-SSP-SHiELD-SOM-initial-condition-dataset.zarr
 
 FORCING_ROOT=/climate-default/2026-04-29-ACE2S-SHiELD-SSP-reference-datasets/forcing
 FORCING_PATH=2026-04-29-SSP245-CO2-with-repeating-SHiELD-SOM-forcing-1997-2099.zarr
