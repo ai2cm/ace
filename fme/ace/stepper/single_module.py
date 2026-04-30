@@ -760,6 +760,9 @@ class CheckpointStepperConfig:
     """
     Defines a stepper by loading its configuration from a saved checkpoint.
 
+    Does not affect weight initialization, which is handled in a different
+    configuration (likely parameter initialization under stepper_training).
+
     Parameters:
         checkpoint_path: Path to a serialized checkpoint containing a stepper.
     """
