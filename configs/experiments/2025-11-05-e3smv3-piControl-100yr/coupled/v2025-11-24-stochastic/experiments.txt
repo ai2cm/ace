@@ -1,2 +1,4 @@
 
 fto-stochastic-v1124-train-95yr-cep1srse-dso4ysdg|||training|best_inference_ckpt|normal|--min-runtime 8h
+
+fto-stochastic-v1124-train-95yr-cep1srse-dso4ysdg||01KQFWHG5FF4SAZNGSN5ZT6W4Z|training|best_inference_ckpt|normal|--min-runtime 8h
