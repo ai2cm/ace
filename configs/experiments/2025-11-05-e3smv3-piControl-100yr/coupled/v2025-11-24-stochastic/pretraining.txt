@@ -1,2 +1,2 @@
 group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|existing_atmos_ID|existing_ocean_ID
-fto-stochastic-v1124-train-95yr-cep1srse-dso4ysdg||ocean-emulator-e3sm|dso4ysdg|best_inference_ckpt|ace-eamv3|cep1srse|best_inference_ckpt|train|high|b100|8|800GiB|2|ai2/climate-titan||01KPN3FC0KCB8AEWYXD467TXES|01KHNFEB0236W1PRHD2KKN1BP1
+fto-stochastic-v1124-train-95yr-cep1srse-dso4ysdg||ocean-emulator-e3sm|dso4ysdg|best_inference_ckpt|ace-eamv3|cep1srse|best_inference_ckpt|train|high|b200|8|800GiB|2|ai2/climate-titan||01KPN3FC0KCB8AEWYXD467TXES|01KHNFEB0236W1PRHD2KKN1BP1
