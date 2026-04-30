@@ -16,7 +16,7 @@ FORCING_PATH=2026-04-29-SSP245-CO2-with-repeating-SHiELD-SOM-forcing-1997-2099.z
 N_FORWARD_STEPS=150476
 
 declare -A MODELS=( \
-    # [published-baseline-rs3]="01J4BR6J5AW32ZDQ77VZ60P4KT" \
+    [published-baseline-rs3]="01J4BR6J5AW32ZDQ77VZ60P4KT" \
     # [no-random-co2-rs0]="01KHGDAMB2BDZQS8JFF65A2YDR" \
     # [no-random-co2-rs1]="01KH4SDCYN1NF2RP2JXZS0WZ1Y" \
     # [no-random-co2-energy-conserving-rs0]="01KHGDA8TVGP9JKWVJ1N0SMHCN" \
@@ -32,7 +32,7 @@ cd $REPO_ROOT  # so config path is valid no matter where we are running this scr
 
 for model in "${!MODELS[@]}"; do
     dataset_id="${MODELS[$model]}"
-    job_name=${DATE}-$model-SSP245-inference
+    job_name=${DATE}-$model-SSP245-monthly-outputs-inference
     overrides="\
         forcing_loader.dataset.data_path=$FORCING_ROOT \
         forcing_loader.dataset.engine=zarr \
@@ -42,6 +42,7 @@ for model in "${!MODELS[@]}"; do
         initial_condition.start_indices.times=[1997-01-01T00:00:00] \
         n_forward_steps=$N_FORWARD_STEPS \
         data_writer.files=[] \
+        data_writer.save_monthly_files=true \
     "
 
     python -m fme.ace.validate_config --config_type inference $CONFIG_PATH --override $overrides
