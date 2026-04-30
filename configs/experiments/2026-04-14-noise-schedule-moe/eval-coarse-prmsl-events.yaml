@@ -5,7 +5,7 @@ patch:
   composite_prediction: true
   coarse_horizontal_overlap: 1
 model:
-  denoising_range_configs:
+  denoising_expert_configs:
     - checkpoint_config:
         checkpoint_path: /checkpoints_low_sigma/best.ckpt
       sigma_min: 0.005

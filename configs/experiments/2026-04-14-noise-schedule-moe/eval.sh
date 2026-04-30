@@ -2,10 +2,10 @@
 
 set -e
 
-#JOB_NAME="eval-xshield-amip-100km-to-3km-0.5sigmaexp-tropics-events"
-JOB_NAME="eval-xshield-amip-100km-to-3km-denoising-moe-prate-downweighted-lowcap-events"
+JOB_NAME="eval-global-trained-denoising-moe-tropics"
+#JOB_NAME="eval-global-trained-denoising-moe-events"
 
-CONFIG_FILENAME="eval-coarse-prmsl-events.yaml"
+CONFIG_FILENAME="eval-coarse-prmsl-tropic-pac.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -21,8 +21,8 @@ NGPU=2
 
 IMAGE="$(cat latest_deps_only_image.txt)"
 
-EXISTING_RESULTS_DATASET_HIGH_SIGMA=01KPENHKMV00PDWV4DB8AB3PVZ
-EXISTING_RESULTS_DATASET_LOW_SIGMA=01KPMR6NQATP413CKYH89C5AAP
+EXISTING_RESULTS_DATASET_HIGH_SIGMA=01KQ8N5Z78FGZRTC0FBGB5A3S9
+EXISTING_RESULTS_DATASET_LOW_SIGMA=01KQ88Q970VDZYZYFB4S2621TZ
 wandb_group=""
 
 #--not-preemptible \

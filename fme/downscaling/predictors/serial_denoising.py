@@ -121,7 +121,7 @@ class DenoisingMoEConfig:
     Loads multiple checkpoints and route denoising steps to the expert whose
     sigma range contains the current noise level.
 
-    ``denoising_range_configs`` must list non-overlapping contiguous intervals.
+    ``denoising_expert_configs`` must list non-overlapping contiguous intervals.
     The overall schedule bounds are the minimum ``sigma_min`` and maximum ``sigma_max``
     across all ranges.
 
