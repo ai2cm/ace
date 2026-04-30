@@ -17,11 +17,14 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 
 cd $REPO_ROOT
 
-MODEL_CHECKPOINT_DATASETS=("01KQD8NF9HQD1QY2X0S132YH72" "01KQD8NMEYCVQ835WQV751MNYP")
+#MODEL_CHECKPOINT_DATASETS=("01KQD8NF9HQD1QY2X0S132YH72" "01KQD8NMEYCVQ835WQV751MNYP")
+
+# trained till prmsl power spectrum is ok
+MODEL_CHECKPOINT_DATASETS=("01KQDQTJ6SN7WHCYFKAER9G93F")
 
 
-for seed in {1..1}; do
-    job_name="evaluate-4k-ace2som-xshield-tune-1yr-even-split-single-decoder-seed${seed}"
+for seed in {0..0}; do
+    job_name="evaluate-4k-ace2som-xshield-continue-tune-1yr-even-split-single-decoder-seed${seed}"
     gantry run \
         --name $job_name \
         --description 'Run ACE training' \

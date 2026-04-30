@@ -19,6 +19,7 @@ loader:
   num_data_workers: 16
 aggregator:
   log_zonal_mean_images: false
+  log_histograms: true
 data_writer:
   save_prediction_files: false
   save_monthly_files: false
