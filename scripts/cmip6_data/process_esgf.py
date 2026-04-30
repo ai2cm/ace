@@ -46,6 +46,7 @@ from esgf import (  # noqa: E402
     cleanup_scratch_dir,
     cleanup_variable_files,
     download_file,
+    filter_files_by_time,
     query_files,
     scratch_dir_for_dataset,
 )
@@ -337,6 +338,20 @@ def _download_and_regrid_variable(
     if not fileset.files:
         return None
 
+    tw = cfg.time_subset.get(task.experiment)
+    if tw is not None:
+        n_before = len(fileset.files)
+        fileset = filter_files_by_time(fileset, tw.start, tw.end)
+        if n_before != len(fileset.files):
+            logging.info(
+                "    time filter: %d → %d files (of %d)",
+                n_before,
+                len(fileset.files),
+                n_before,
+            )
+        if not fileset.files:
+            return None
+
     logging.info(
         "    downloading %d files (%.1f GB) for %s ...",
         len(fileset.files),
@@ -351,15 +366,17 @@ def _download_and_regrid_variable(
     logging.info("    opening and concatenating %s ...", variable)
     ds = _open_netcdf_files(local_paths, variable)
     ds = normalize_plev(ds)
-    ds = apply_time_subset(ds, cfg)
-
-    if ds.sizes.get("time", 0) == 0:
-        cleanup_variable_files(scratch, variable)
-        return None
-
-    ds, msg = resolve_time_duplicates(ds, variable, allow_dedupe=cfg.allow_dedupe)
-    if msg:
-        logging.warning("    %s", msg)
+    if table_id == "fx":
+        if "time" in ds.dims:
+            ds = ds.isel(time=0, drop=True)
+    else:
+        ds = apply_time_subset(ds, cfg)
+        if ds.sizes.get("time", 0) == 0:
+            cleanup_variable_files(scratch, variable)
+            return None
+        ds, msg = resolve_time_duplicates(ds, variable, allow_dedupe=cfg.allow_dedupe)
+        if msg:
+            logging.warning("    %s", msg)
 
     logging.info("    regridding %s ...", variable)
     regridded, _ = regrid_variables(ds, target_grid, cfg)

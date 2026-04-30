@@ -271,11 +271,47 @@ def scratch_dir_for_dataset(
     return Path(base_scratch) / source_id / experiment_id / member_id
 
 
+def filter_files_by_time(
+    fileset: ESGFFileSet,
+    start: str,
+    end: str,
+) -> ESGFFileSet:
+    """Return a new ESGFFileSet with only files overlapping [start, end].
+
+    ``start`` and ``end`` are ISO-like date strings (e.g. "2010-01-01").
+    File time ranges use ESGF filename conventions: 4-8 digit strings
+    representing year, year-month, or year-month-day.  Files without
+    time metadata (e.g. fx) are always kept.
+    """
+    start_s = start.replace("-", "")
+    end_s = end.replace("-", "")
+    kept: list[ESGFFile] = []
+    for f in fileset.files:
+        if not f.time_start or not f.time_end:
+            kept.append(f)
+            continue
+        f_start = f.time_start.ljust(8, "0")
+        f_end = f.time_end.ljust(8, "9")
+        q_start = start_s.ljust(8, "0")
+        q_end = end_s.ljust(8, "9")
+        if f_start <= q_end and f_end >= q_start:
+            kept.append(f)
+    return ESGFFileSet(
+        source_id=fileset.source_id,
+        experiment_id=fileset.experiment_id,
+        member_id=fileset.member_id,
+        table_id=fileset.table_id,
+        variable_id=fileset.variable_id,
+        files=kept,
+    )
+
+
 __all__ = [
     "ESGFFile",
     "ESGFFileSet",
     "query_files",
     "download_file",
+    "filter_files_by_time",
     "cleanup_variable_files",
     "cleanup_scratch_dir",
     "scratch_dir_for_dataset",
