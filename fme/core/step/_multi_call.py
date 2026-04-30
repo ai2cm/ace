@@ -1,13 +1,12 @@
 import dataclasses
-import re
 from collections.abc import Callable
 
 from torch import nn
 
 from fme.core.step.args import StepArgs
 from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.wildcard import parse_3d_varname
 
-LEVEL_PATTERN = re.compile(r"_(\d+)$")
 TEMPLATE = "{name}{suffix}"
 
 
@@ -37,10 +36,10 @@ def get_multi_call_name(name: str, suffix: str) -> str:
        >>> fme.core.multi_call.get_multi_call_name("bar_0", "_with_quartered_co2")
        'bar_with_quartered_co2_0'
     """
-    match = LEVEL_PATTERN.search(name)
-    if match is not None:
-        name = name[: match.start()]
-        suffix = suffix + match.group(0)
+    parsed = parse_3d_varname(name)
+    if parsed is not None:
+        name = parsed[0]
+        suffix = suffix + "_" + str(parsed[1])
     return TEMPLATE.format(name=name, suffix=suffix)
 
 
