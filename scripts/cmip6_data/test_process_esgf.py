@@ -27,7 +27,9 @@ def _write_netcdf(
 ) -> None:
     lat = np.linspace(-60, 60, nlat)
     lon = np.linspace(0, 315, nlon)
-    time = xr.cftime_range("2010-01-01", periods=ntime, freq="D", calendar="noleap")
+    time = xr.date_range(
+        "2010-01-01", periods=ntime, freq="D", calendar="noleap", use_cftime=True
+    )
 
     coords: dict = {"lat": lat, "lon": lon, "time": time}
     dims = ["time", "lat", "lon"]
@@ -95,7 +97,9 @@ def test_open_netcdf_files_concat_multiple():
             p = Path(tmpdir) / f"tas_day_{i}.nc"
             lat = np.linspace(-60, 60, 4)
             lon = np.linspace(0, 315, 8)
-            time = xr.cftime_range(start, periods=5, freq="D", calendar="noleap")
+            time = xr.date_range(
+                start, periods=5, freq="D", calendar="noleap", use_cftime=True
+            )
             data = np.zeros((5, 4, 8), dtype=np.float32)
             ds = xr.Dataset(
                 {"tas": xr.DataArray(data, dims=["time", "lat", "lon"])},
@@ -132,6 +136,26 @@ def test_open_netcdf_files_with_plev():
         ds = _open_netcdf_files([p], "ua")
         assert "plev" in ds.dims
         assert ds.sizes["plev"] == 3
+
+
+def test_open_netcdf_files_overlapping_times():
+    """Files with overlapping time ranges concat with duplicates."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        lat = np.linspace(-60, 60, 4)
+        lon = np.linspace(0, 315, 8)
+        for i, (start, n) in enumerate([("2010-01-01", 10), ("2010-01-08", 10)]):
+            p = Path(tmpdir) / f"tas_day_{i}.nc"
+            time = xr.date_range(
+                start, periods=n, freq="D", calendar="noleap", use_cftime=True
+            )
+            data = np.ones((n, 4, 8), dtype=np.float32) * (i + 1)
+            ds = xr.Dataset(
+                {"tas": xr.DataArray(data, dims=["time", "lat", "lon"])},
+                coords={"lat": lat, "lon": lon, "time": time},
+            )
+            ds.to_netcdf(p)
+        ds = _open_netcdf_files(list(Path(tmpdir).glob("*.nc")), "tas")
+        assert ds.sizes["time"] == 20
 
 
 # ---------------------------------------------------------------------------
