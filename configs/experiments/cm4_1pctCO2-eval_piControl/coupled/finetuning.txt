@@ -1,5 +1,6 @@
 group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
 
 fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|ace-samudra-coupled-cm4|p859icbl|best_inference_ckpt|skip|high||8|800GiB|3
-fto-25-75-split-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|ace-samudra-coupled-cm4|p859icbl|best_inference_ckpt|training|high||8|800GiB|3
-ft-fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|ace-samudra-coupled-cm4|8qp78h24|best_inference_ckpt|train|high||8|800GiB|3|||01KNSXG43AH12K2HZARN30QQ4Z
+fto-25-75-split-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|ace-samudra-coupled-cm4|p859icbl|best_inference_ckpt|skip|high||8|800GiB|3
+ft-fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|ace-samudra-coupled-cm4|8qp78h24|best_inference_ckpt|skip|high||8|800GiB|3|||01KNSXG43AH12K2HZARN30QQ4Z
+fto-75-25-split-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|ace-samudra-coupled-cm4|p859icbl|best_inference_ckpt|train|high||8|800GiB|3
