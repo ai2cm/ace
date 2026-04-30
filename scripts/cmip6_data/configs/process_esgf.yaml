@@ -1,0 +1,21 @@
+output_directory: ./data/cmip6-daily-pilot/v0
+
+esgf:
+  search_node: https://esgf-data.dkrz.de/esg-search/search
+  scratch_dir: ./scratch
+
+defaults:
+  time_subset:
+    historical: {start: "2010-01-01", end: "2010-12-31"}
+    ssp245: {start: "2015-01-01", end: "2015-12-31"}
+    ssp585: {start: "2015-01-01", end: "2015-12-31"}
+
+selection:
+  exclude_source_ids:
+    - INM-CM4-8
+  experiments: [historical, ssp245, ssp585]
+
+overrides:
+  - match:
+      source_id: AWI-ESM-1-1-LR
+    skip_forcing_variables: [siconc]
