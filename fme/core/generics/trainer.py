@@ -140,7 +140,7 @@ class TrainConfigProtocol(Protocol):
     def lr_tuning(self) -> LRTuningConfig | None: ...
 
     @property
-    def finetune_optimization_checkpoint_path(self) -> str | None: ...
+    def resume_optimization_ckpt_path(self) -> str | None: ...
 
     def get_inference_epochs(self) -> list[int]: ...
 
@@ -265,13 +265,13 @@ class Trainer:
         if resuming:
             logging.info(f"Resuming training from {self.paths.latest_checkpoint_path}")
             self.restore_checkpoint(self.paths.latest_checkpoint_path)
-        elif config.finetune_optimization_checkpoint_path is not None:
+        elif config.resume_optimization_ckpt_path is not None:
             logging.info(
                 "Loading optimizer state for fine-tuning from "
-                f"{config.finetune_optimization_checkpoint_path}"
+                f"{config.resume_optimization_ckpt_path}"
             )
             _load_finetune_optimization_state(
-                self.optimization, config.finetune_optimization_checkpoint_path
+                self.optimization, config.resume_optimization_ckpt_path
             )
 
         wandb = WandB.get_instance()

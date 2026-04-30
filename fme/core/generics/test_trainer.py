@@ -237,7 +237,7 @@ class Config:
     evaluate_before_training: bool = False
     save_best_inference_epoch_checkpoints: bool = False
     lr_tuning: LRTuningConfig | None = None
-    finetune_optimization_checkpoint_path: str | None = None
+    resume_optimization_ckpt_path: str | None = None
 
     def __post_init__(self):
         start_epoch = 0 if self.evaluate_before_training else 1
@@ -345,7 +345,7 @@ def get_trainer(
     n_validation_batches: int = 5,
     save_checkpoint: bool = True,
     lr_tuning: LRTuningConfig | None = None,
-    finetune_optimization_checkpoint_path: str | None = None,
+    resume_optimization_ckpt_path: str | None = None,
     lr: float = 0.01,
 ) -> tuple[TrainConfigProtocol, Trainer]:
     if checkpoint_dir is None:
@@ -434,7 +434,7 @@ def get_trainer(
         save_best_inference_epoch_checkpoints=save_best_inference_epoch_checkpoints,
         save_checkpoint=save_checkpoint,
         lr_tuning=lr_tuning,
-        finetune_optimization_checkpoint_path=finetune_optimization_checkpoint_path,
+        resume_optimization_ckpt_path=resume_optimization_ckpt_path,
     )
     aggregator_builder = AggregatorBuilder(
         train_losses=train_losses,
@@ -1484,7 +1484,7 @@ def test_finetune_optimization_checkpoint_loads_optimizer_state(tmp_path: str):
         max_epochs=1,
         n_train_batches=4,
         stepper_module_values=np.array([2.0]),
-        finetune_optimization_checkpoint_path=stage1_ckpt_path,
+        resume_optimization_ckpt_path=stage1_ckpt_path,
         lr=configured_lr,
     )
 
@@ -1516,7 +1516,7 @@ def test_finetune_optimization_checkpoint_loads_optimizer_state(tmp_path: str):
 
 def test_resume_takes_precedence_over_finetune_path(tmp_path: str):
     """When a ckpt.tar exists in the checkpoint dir (preemption resume),
-    Trainer resumes from it and ignores finetune_optimization_checkpoint_path."""
+    Trainer resumes from it and ignores resume_optimization_ckpt_path."""
     _, trainer = get_trainer(
         tmp_path,
         max_epochs=2,
@@ -1533,7 +1533,7 @@ def test_resume_takes_precedence_over_finetune_path(tmp_path: str):
         max_epochs=2,
         n_train_batches=4,
         stepper_module_values=np.array([1.0, 2.0]),
-        finetune_optimization_checkpoint_path=ckpt_path,
+        resume_optimization_ckpt_path=ckpt_path,
     )
 
     assert resumed_trainer._epochs_trained == 2
