@@ -34,6 +34,7 @@ for model in "${!MODELS[@]}"; do
     dataset_id="${MODELS[$model]}"
     job_name=${DATE}-$model-SSP245-monthly-outputs-inference
     overrides="\
+        experiment_dir=/results \
         forcing_loader.dataset.data_path=$FORCING_ROOT \
         forcing_loader.dataset.engine=zarr \
         forcing_loader.dataset.file_pattern=$FORCING_PATH \
