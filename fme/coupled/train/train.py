@@ -11,9 +11,10 @@ import fme
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.distributed import Distributed
-from fme.core.generics.trainer import AggregatorBuilderABC, Trainer
+from fme.core.generics.trainer import AggregatorBuilderABC, Trainer, inference_one_epoch
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.coupled.aggregator import (
+    InferenceEvaluatorAggregator,
     InferenceEvaluatorAggregatorConfig,
     OneStepAggregator,
     TrainAggregator,
@@ -61,7 +62,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
         save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
         output_dir=config.output_dir,
     )
-    return Trainer(
+    trainer = Trainer(
         train_data=train_data,
         validation_data=validation_data,
         inference_data=inference_data,
@@ -72,6 +73,36 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
         aggregator_builder=aggregator_builder,
         end_of_batch_callback=end_of_batch_ops,
     )
+
+    def inference(
+        data,
+        aggregator: InferenceEvaluatorAggregator,
+        label: str,
+        epoch: int,
+    ):
+        logging.info(f"Starting additional inference run {label!r}")
+        return inference_one_epoch(
+            stepper=stepper,
+            validation_context=trainer.validation_context,
+            dataset=data,
+            aggregator=aggregator,
+            label=label,
+            epoch=epoch,
+        )
+
+    end_of_epoch_ops = builder.get_end_of_epoch_callback(
+        inference,
+        ocean_normalize=stepper.ocean.normalizer.normalize,
+        atmosphere_normalize=stepper.atmosphere.normalizer.normalize,
+        output_dir=config.output_dir,
+        variable_metadata=variable_metadata,
+        save_diagnostics=config.save_per_epoch_diagnostics,
+        n_ic_timesteps_ocean=stepper.ocean.n_ic_timesteps,
+        n_ic_timesteps_atmosphere=stepper.atmosphere.n_ic_timesteps,
+        n_inner_steps=stepper.n_inner_steps,
+    )
+    trainer.set_end_of_epoch_callback(end_of_epoch_ops)
+    return trainer
 
 
 class CoupledAggregatorBuilder(
