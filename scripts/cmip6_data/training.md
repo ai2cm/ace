@@ -12,8 +12,14 @@ complete, ESGF backfill in progress). Normalization statistics computed.
 `Cmip6DataConfig` data loader implemented and tested.
 
 **Next step**: smoke-test training run on the atmosphere-only core
-variables using the existing data. Ocean variables (`Oday`/`Omon`) are
-planned but deferred — the smoke test proceeds without them.
+variables using the existing data. The following are planned but deferred
+until after the smoke test works end-to-end:
+- Ocean variables (`Oday`/`Omon`)
+- External forcings (CO2, SO2 emissions, BC emissions, forest fraction
+  from input4MIPs/LUH2)
+- Causal forcing fix (switch monthly interpolation to previous-month
+  scheme)
+- Daily forcing data where available (`Oday` tos, `Eday` ts)
 
 ---
 
@@ -211,6 +217,52 @@ be applied.
 
 **Smoke-test impact.** Not blocking. The corrector features that need `ps`
 are already disabled (issue 3). `psl` is included as a prognostic variable.
+
+### 14. Causal forcing for monthly boundary conditions
+
+**Problem.** The current pipeline interpolates monthly `ts` and `siconc`
+to daily by placing monthly means at month midpoints and linearly
+interpolating. This is non-causal: on day 20 of month N, the
+interpolated value already contains information from month N+1's mean.
+For an autoregressive emulator, this is future leakage. **Results
+produced with the current interpolation are not scientifically valid.**
+
+**Decision.** Use the **previous month's mean** for each day — strictly
+causal, with ~15–45 day staleness that is acceptable for slowly-varying
+boundary conditions. Longer-term, replace with daily data from
+`Oday`/`Eday` where available. The previous-month scheme becomes the
+fallback for models without daily data.
+
+**Implementation.** This is a data-loading transform, not a pipeline
+change — the stored monthly data stays the same. The data loader
+supplies the previous month's mean for each daily timestep.
+
+**Smoke-test impact.** The smoke test can proceed with the current
+non-causal interpolation to validate the training pipeline end-to-end,
+but this **must be fixed before any scientific use** of the results.
+
+### 15. External forcings (CO2, aerosol emissions, land use)
+
+**Problem.** The model needs external forcing information to distinguish
+between scenarios (historical vs ssp245 vs ssp585). Without it, the
+model cannot generalize to different forcing pathways.
+
+**Decision.** Include four input4MIPs forcing fields as a compact
+representation of the forcing state:
+- **CO2 concentration** — global scalar (annual), dominant GHG forcing
+- **SO2 emissions** — gridded (monthly), aerosol cooling with strong
+  regional/weather-scale signatures
+- **BC emissions** — gridded (monthly), absorbing aerosol
+- **Total forest fraction** — gridded (annual, from LUH2), land use
+  change proxy
+
+These are prescribed forcings shared across all models within a
+scenario. Stored per experiment (one copy per scenario time window).
+The spatial patterns provide weather-scale inductive bias beyond what a
+scalar scenario label would offer.
+
+**Smoke-test impact.** Not blocking. The smoke test proceeds without
+external forcings. Time and scenario encoding can stand in temporarily.
 
 ---
 

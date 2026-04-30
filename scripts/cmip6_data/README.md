@@ -61,16 +61,57 @@ See **Derived variables** below for details.
 
 ### Forcings (atmosphere-only lower boundary)
 
-Pulled from monthly tables and **interpolated to daily** at ingest
-(ocean thermal inertia and sea-ice variability are slow enough that
-monthly → daily is acceptable; true daily availability is essentially
-nil for these fields in Pangeo).
+Pulled from monthly tables. For each day, the model receives the
+**previous month's mean** — strictly causal, no future leakage. (The
+current interpolation approach of placing monthly means at month
+midpoints and linearly interpolating is non-causal: values on day 20
+of month N already contain information from month N+1. The
+previous-month scheme eliminates this at the cost of ~15–45 day
+staleness, which is acceptable for slowly-varying boundary conditions.)
+
+Daily data from `Oday`/`Eday` tables will replace the monthly forcing
+for models that have it (see **Ocean variables** below); the
+previous-month scheme is the fallback for models without daily data.
 
 - `ts` from `Amon` — surface temperature (SST over ocean, ice-top temp
-  over sea ice, skin temp over land). The correct atmosphere-only
-  lower-boundary quantity. 64 models publish it.
+  over sea ice, skin temp over land). 64 models publish it.
 - `siconc` from `SImon` — sea-ice fraction on the ocean grid;
   regridded to the F22.5 target. 57 models.
+
+### External forcings (planned — not yet in pipeline)
+
+Prescribed input4MIPs forcing fields, shared across all models within
+a scenario. These are the boundary conditions that distinguish
+historical from ssp245 from ssp585. Stored per experiment (one copy
+per scenario's time window).
+
+- **CO2 concentration** (global scalar, annual) — dominant greenhouse
+  gas forcing. Captures ~80% of the radiative forcing difference
+  between scenarios.
+- **SO2 emissions** (gridded monthly) — anthropogenic sulfate aerosol
+  precursor. Drives spatially heterogeneous aerosol cooling that
+  differs dramatically between SSPs. Weather-scale effects on cloud
+  microphysics and precipitation.
+- **BC emissions** (gridded monthly) — black carbon. Absorbing aerosol
+  with regional warming effects and impacts on atmospheric stability.
+- **Total forest fraction** (gridded annual, from LUH2) — land use
+  change proxy. Affects surface albedo, roughness, and
+  evapotranspiration with immediate weather-scale signatures.
+
+These four fields were chosen as a compact set that captures the main
+independent axes of forcing variation between scenarios: greenhouse
+warming (CO2), aerosol cooling (SO2, BC), and land surface change
+(forest fraction). With only 3 scenarios (historical, ssp245, ssp585)
+the forcings are collinear in the climate mean, but their spatial
+patterns provide weather-scale inductive bias — the model can learn
+local forcing→response relationships (e.g. high SO2 → brighter clouds)
+that generalize across grid cells.
+
+Other input4MIPs forcings (CH4, N2O, CFC equivalents, ozone, volcanic
+aerosol, solar irradiance, biomass burning) are deferred. Most are
+either strongly correlated with CO2 across scenarios (CH4, N2O),
+identical across all scenarios (solar, volcanic), or of secondary
+importance. They can be added later as more scenarios are included.
 
 ### Ocean variables (planned — not yet in pipeline)
 
