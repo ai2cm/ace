@@ -14,6 +14,7 @@ Data-source-agnostic helpers used by both the Pangeo pipeline
 - zarr writing with chunk/shard encoding
 """
 
+import logging
 import re
 from typing import Hashable, Optional
 
@@ -196,14 +197,31 @@ def normalize_regrid_source(ds: xr.Dataset) -> xr.Dataset:
     return ds
 
 
-def make_regridder(source_ds: xr.Dataset, target: xr.Dataset, method: str):
+def _has_bounds(ds: xr.Dataset) -> bool:
+    return "lon_b" in ds.variables and "lat_b" in ds.variables
+
+
+def make_regridder(source_ds: xr.Dataset, target: xr.Dataset, method: str) -> tuple:
     """Build an xESMF regridder, importing lazily so this module can be
     loaded in envs without xESMF (e.g. unit tests on the selection logic).
+
+    Returns ``(regridder, actual_method)`` — the method may differ from the
+    request if conservative was requested but no grid bounds are available
+    (common for ocean-grid variables like siconc).
     """
     import xesmf
 
     source_ds = normalize_regrid_source(source_ds)
-    return xesmf.Regridder(source_ds, target, method, periodic=True)
+    actual_method = method
+    if method == "conservative" and not _has_bounds(source_ds):
+        logging.warning(
+            "  no lon_b/lat_b for conservative regridding, falling back to bilinear"
+        )
+        actual_method = "bilinear"
+    return (
+        xesmf.Regridder(source_ds, target, actual_method, periodic=True),
+        actual_method,
+    )
 
 
 def regrid_variables(
@@ -219,13 +237,23 @@ def regrid_variables(
     for v in ds.data_vars:
         by_method.setdefault(method_for(v), []).append(v)
 
+    _BOUNDS_NAMES = {
+        "lon_bnds",
+        "lat_bnds",
+        "lon_b",
+        "lat_b",
+        "vertices_longitude",
+        "vertices_latitude",
+    }
+    bounds_to_keep = [v for v in ds.data_vars if v in _BOUNDS_NAMES]
+
     pieces = []
     used: dict[str, str] = {}
     for method, vars_ in by_method.items():
-        sub = ds[vars_]
-        regridder = make_regridder(sub, target_grid, method)
+        sub = ds[vars_ + bounds_to_keep]
+        regridder, actual_method = make_regridder(sub, target_grid, method)
         pieces.append(regridder(sub, keep_attrs=True))
-        used.update({v: method for v in vars_})
+        used.update({v: actual_method for v in vars_})
 
     regridded = xr.merge(pieces)
     for coord in ds.coords:

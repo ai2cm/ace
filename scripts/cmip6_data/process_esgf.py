@@ -326,8 +326,10 @@ def _download_and_regrid_variable(
     target_grid: xr.Dataset,
     config: ESGFProcessConfig,
     scratch: Path,
-) -> Optional[xr.Dataset]:
-    """Download, regrid, and return one variable. Cleans up native files."""
+) -> tuple[Optional[xr.Dataset], dict[str, str]]:
+    """Download, regrid, and return one variable. Cleans up native files.
+
+    Returns ``(regridded_ds, {variable: method})``."""
     cfg = config.resolve(task.source_id, task.experiment, task.variant_label)
     node = config.esgf.search_node
 
@@ -336,7 +338,7 @@ def _download_and_regrid_variable(
         node, task.source_id, task.experiment, task.variant_label, table_id, variable
     )
     if not fileset.files:
-        return None
+        return None, {}
 
     tw = cfg.time_subset.get(task.experiment)
     if tw is not None:
@@ -350,7 +352,7 @@ def _download_and_regrid_variable(
                 n_before,
             )
         if not fileset.files:
-            return None
+            return None, {}
 
     logging.info(
         "    downloading %d files (%.1f GB) for %s ...",
@@ -373,17 +375,17 @@ def _download_and_regrid_variable(
         ds = apply_time_subset(ds, cfg)
         if ds.sizes.get("time", 0) == 0:
             cleanup_variable_files(scratch, variable)
-            return None
+            return None, {}
         ds, msg = resolve_time_duplicates(ds, variable, allow_dedupe=cfg.allow_dedupe)
         if msg:
             logging.warning("    %s", msg)
 
     logging.info("    regridding %s ...", variable)
-    regridded, _ = regrid_variables(ds, target_grid, cfg)
+    regridded, methods = regrid_variables(ds, target_grid, cfg)
     regridded = regridded.load()
 
     cleanup_variable_files(scratch, variable)
-    return regridded
+    return regridded, methods
 
 
 def process_one_esgf(
@@ -430,9 +432,10 @@ def process_one_esgf(
         for v in all_day_vars:
             try:
                 logging.info("  [%s] processing day/%s ...", task.source_id, v)
-                result = _download_and_regrid_variable(
+                result, methods = _download_and_regrid_variable(
                     task, v, "day", target, config, scratch
                 )
+                row.regrid_methods.update(methods)
                 if result is not None:
                     regridded_vars[v] = result
             except (SimulationBoundaryError, DuplicateTimestampsError) as e:
@@ -481,9 +484,10 @@ def process_one_esgf(
             if not has_it:
                 continue
             logging.info("  [%s] processing fx/%s ...", task.source_id, static_var)
-            result = _download_and_regrid_variable(
+            result, methods = _download_and_regrid_variable(
                 task, static_var, "fx", target, config, scratch
             )
+            row.regrid_methods.update(methods)
             if result is not None:
                 if static_ds is None:
                     static_ds = result
@@ -519,9 +523,10 @@ def process_one_esgf(
                 continue
             try:
                 logging.info("  [%s] processing %s/%s ...", task.source_id, table, var)
-                result = _download_and_regrid_variable(
+                result, methods = _download_and_regrid_variable(
                     task, var, table, target, config, scratch
                 )
+                row.regrid_methods.update(methods)
                 if result is not None:
                     interp = interp_monthly_to_daily(
                         result[var],
