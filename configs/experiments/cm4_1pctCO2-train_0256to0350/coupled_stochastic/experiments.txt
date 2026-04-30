@@ -34,7 +34,7 @@ fta_ft_fto_stoch_mas40_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQ6FQZ40B
 
 fta_ft_fto_stoch_mas40_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQ7W2EY25BTZSE85CTZ39HB2|trained|best_inference_ckpt|normal|--not-preemptible
 
-fta_ft_fto_stoch_mas40_cd5epLRp00001-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQDENWQ2HFQP7MH1HCQDR2JA|run_140yr|ema_ckpt_0004|high|--min-runtime 6h
+fta_ft_fto_stoch_mas40_cd5epLRp00001-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQDENWQ2HFQP7MH1HCQDR2JA|run_ic0251_100yr|ema_ckpt_0004|high|--min-runtime 6h
 
 fta_ft_fto_stoch_mas40_cd10epLRp00001-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQE6DP5009P6T7WFTNVJAZ6T|training|best_inference_ckpt|normal|--min-runtime 8h
 
