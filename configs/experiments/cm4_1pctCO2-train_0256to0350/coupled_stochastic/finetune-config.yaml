@@ -2,8 +2,8 @@ experiment_dir: /results
 save_checkpoint: true
 save_best_inference_epoch_checkpoints: false
 checkpoint_every_n_batches: 100
-checkpoint_save_epochs: null
-ema_checkpoint_save_epochs:
+ema_checkpoint_save_epochs: null
+checkpoint_save_epochs:
   start: 1
   step: 1
 log_train_every_n_batches: 10
@@ -126,27 +126,27 @@ optimization:
     fused: true
     weight_decay: 0.01
   scheduler:
-    type: LinearLR
-    step_each_iteration: true
-    kwargs:
-      start_factor: 1.0
-      end_factor: 0
-      total_iters: 2165
+    schedulers:
+      - type: LinearLR
+        step_each_iteration: true
+        kwargs:
+          start_factor: 0.01
+          end_factor: 1
+          total_iters: 2000
+      - type: ConstantLR
+        step_each_iteration: true
+    milestones: [2000]
 stepper_training:
-  n_coupled_steps: 2
+  n_coupled_steps: 4
   parameter_init:
     checkpoint_path: /ckpt.tar
   n_ensemble: 2
   ocean:
     parameter_init:
       weights_path: null # required
-      parameters:
-        - frozen:
-            include:
-              - '*'
     loss_contributions:
-      n_steps: 0
-      weight: 0.0
+      n_steps: 4
+      weight: 1.0
     loss:
       type: EnsembleLoss
       kwargs:
