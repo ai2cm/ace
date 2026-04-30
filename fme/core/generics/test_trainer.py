@@ -460,7 +460,10 @@ def test_trainer(tmp_path: str, checkpoint_save_epochs: Slice | None):
         save_epochs = []
     for i in range(config.max_epochs):
         if i in save_epochs:
-            assert os.path.exists(paths.epoch_checkpoint_path(i))
+            epoch_path = paths.epoch_checkpoint_path(i)
+            assert os.path.exists(epoch_path)
+            ckpt = torch.load(epoch_path, weights_only=False)
+            assert "optimization" in ckpt
         else:
             assert not os.path.exists(paths.epoch_checkpoint_path(i))
         assert not os.path.exists(paths.ema_epoch_checkpoint_path(i))
