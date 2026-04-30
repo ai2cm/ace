@@ -7,4 +7,6 @@ ft_fto_stochastic_ncs4mas60_wu4k_LRp0001-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs
 ft_fto_stochastic_ncs5mas40_wu4k_LRp0001-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|ace-samudra-coupled-cm4|ju5l96b1|best_inference_ckpt|update_config|high|b200|8|800GiB|3|ai2/climate-titan|seed=0 max_epochs=10
 
 # Use finetune_optimization_checkpoint_path
-fta_ft_fto_stoch_mas40_cd10epLRp00001-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|ace-samudra-coupled-cm4|8ez70kzy|ckpt|train|urgent|b200|8|800GiB|3|ai2/climate-titan|seed=0 max_epochs=10 finetune_optimization_checkpoint_path='/ckpt.tar'
+fta_ft_fto_stoch_mas40_cd10epLRp00001-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|ace-samudra-coupled-cm4|8ez70kzy|ckpt|update_config|urgent|b200|8|800GiB|3|ai2/climate-titan|seed=0 max_epochs=10 finetune_optimization_checkpoint_path='/ckpt.tar'
+
+ft_fta_ft_fto_stoch_ncs4mas40_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|ace-samudra-coupled-cm4|8ez70kzy|best_inference_ckpt|train|urgent|b200|8|800GiB|3|ai2/climate-titan|seed=0 max_epochs=5
