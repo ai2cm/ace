@@ -42,4 +42,4 @@ group|tag|exper_id|status|ckpt_type|priority|min_runtime|override|results_datase
 
 1pct_nosmooth_0256to0350-hfds_prescribed-ft_gqmfjs2j_w_OSC|rs0|01KKZMVVTGNKZ1P2M3W48PS5R2|training|best_inference_ckpt|normal|--not-preemptible
 
-ace-samudra-coupled-cm4-8ez70kzy-decoupled_samudra|||run_140yr|best_inference_ckpt|high|1h||01KQE68R17KDYVS3585JPY2R32
+ace-samudra-coupled-cm4-8ez70kzy-decoupled_samudra|||run_140yr|best_inference_ckpt|high|--min-runtime 1h||01KQE68R17KDYVS3585JPY2R32
