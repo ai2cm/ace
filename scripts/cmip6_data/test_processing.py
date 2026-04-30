@@ -8,6 +8,7 @@ import pytest
 import xarray as xr
 from config import RegridConfig, ResolvedDatasetConfig, TimeWindow
 from processing import (
+    BOUNDS_NAMES,
     DuplicateTimestampsError,
     SimulationBoundaryError,
     _has_bounds,
@@ -260,17 +261,7 @@ def test_regrid_preserves_bounds_for_conservative():
     ds = _rectilinear_ds(nlat=10, nlon=20, ntime=3, variables=["pr"], with_bounds=True)
     target = make_target_grid("F22.5")
 
-    # Simulate what regrid_variables does: subset to just the data vars
-    # plus the bounds we now carry over.
-    _BOUNDS_NAMES = {
-        "lon_bnds",
-        "lat_bnds",
-        "lon_b",
-        "lat_b",
-        "vertices_longitude",
-        "vertices_latitude",
-    }
-    bounds_to_keep = [v for v in ds.data_vars if v in _BOUNDS_NAMES]
+    bounds_to_keep = [v for v in ds.data_vars if v in BOUNDS_NAMES]
     sub = ds[["pr"] + bounds_to_keep]
 
     regridder, actual_method = make_regridder(sub, target, "conservative")

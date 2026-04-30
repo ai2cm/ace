@@ -27,6 +27,17 @@ R_D = 287.05  # J / (kg K), dry-air gas constant
 G = 9.80665  # m / s^2, standard gravity
 EPS = 0.608  # (R_v / R_d) - 1, for virtual-to-actual temperature
 
+BOUNDS_NAMES: frozenset[str] = frozenset(
+    {
+        "lon_bnds",
+        "lat_bnds",
+        "lon_b",
+        "lat_b",
+        "vertices_longitude",
+        "vertices_latitude",
+    }
+)
+
 
 # ---------------------------------------------------------------------------
 # Duplicate-timestamp handling
@@ -237,15 +248,7 @@ def regrid_variables(
     for v in ds.data_vars:
         by_method.setdefault(method_for(v), []).append(v)
 
-    _BOUNDS_NAMES = {
-        "lon_bnds",
-        "lat_bnds",
-        "lon_b",
-        "lat_b",
-        "vertices_longitude",
-        "vertices_latitude",
-    }
-    bounds_to_keep = [v for v in ds.data_vars if v in _BOUNDS_NAMES]
+    bounds_to_keep = [v for v in ds.data_vars if v in BOUNDS_NAMES]
 
     pieces = []
     used: dict[str, str] = {}

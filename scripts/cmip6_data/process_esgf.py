@@ -53,6 +53,7 @@ from esgf import (  # noqa: E402
 from grid import make_target_grid  # noqa: E402
 from index import DatasetIndexRow, write_index, write_sidecar  # noqa: E402
 from processing import (  # noqa: E402
+    BOUNDS_NAMES,
     DuplicateTimestampsError,
     SimulationBoundaryError,
     apply_time_subset,
@@ -307,23 +308,13 @@ def _merge_rows_for_index(
 # ---------------------------------------------------------------------------
 
 
-_BOUNDS_NAMES = {
-    "lon_bnds",
-    "lat_bnds",
-    "lon_b",
-    "lat_b",
-    "vertices_longitude",
-    "vertices_latitude",
-}
-
-
 def _open_netcdf_files(paths: list[Path], variable: str) -> xr.Dataset:
     """Open and concatenate a list of NetCDF files along time."""
     datasets = []
     for p in sorted(paths):
         ds = xr.open_dataset(p, use_cftime=True)
         if variable in ds.data_vars:
-            keep = [variable] + [v for v in ds.data_vars if v in _BOUNDS_NAMES]
+            keep = [variable] + [v for v in ds.data_vars if v in BOUNDS_NAMES]
             datasets.append(ds[keep])
     if not datasets:
         raise ValueError(f"No data found for {variable} in {len(paths)} files")
