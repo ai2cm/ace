@@ -109,10 +109,29 @@ class ForcingPerturbation:
         for var_name, selectors in self.variables.items():
             perturbations = [s.build() for s in selectors]
             std = self.stds.get(var_name)
-            for p in perturbations:
-                if isinstance(p, StdScaledPerturbationConfig) and std is not None:
-                    p.set_std(std)
+            if std is not None:
+                for p in perturbations:
+                    if isinstance(p, StdScaledPerturbationConfig):
+                        p.set_std(std)
             self.built_perturbations[var_name] = perturbations
+
+    def set_stds_from_normalizer(
+        self, normalizer_stds: dict[str, torch.Tensor]
+    ) -> None:
+        """Populate stds from a normalizer's stds dict (e.g. from checkpoint).
+
+        Only sets stds for variables that have StdScaledPerturbationConfig
+        perturbations and don't already have a std set via the config.
+        """
+        for var_name, perturbations in self.built_perturbations.items():
+            if var_name in self.stds:
+                continue  # already set from config, don't override
+            if var_name in normalizer_stds:
+                std = float(normalizer_stds[var_name])
+                self.stds[var_name] = std
+                for p in perturbations:
+                    if isinstance(p, StdScaledPerturbationConfig):
+                        p.set_std(std)
 
     def reset(self) -> None:
         """Reset all stateful perturbations (e.g. at start of new IC window)."""

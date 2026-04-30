@@ -17,6 +17,7 @@ from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_gridded_data, get_inference_data
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig
+from fme.ace.data_loading.perturbation import ForcingPerturbation
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.default_metadata import get_default_variable_metadata
@@ -336,7 +337,15 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         if fme.using_gpu():
             torch.backends.cudnn.benchmark = True
 
-        stepper_config = config.load_stepper_config()
+        stepper = config.load_stepper()
+        stepper.set_eval()
+        stepper_config = stepper.config
+
+        if isinstance(config.loader.perturbations, ForcingPerturbation):
+            config.loader.perturbations.set_stds_from_normalizer(
+                stepper.normalizer.stds
+            )
+
         logging.info("Initializing data loader")
         window_requirements = stepper_config.get_evaluation_window_data_requirements(
             n_forward_steps=config.forward_steps_in_memory
@@ -355,8 +364,6 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             data._initial_condition = PrognosticState(
                 ic.broadcast_ensemble(config.n_ensemble_per_ic)
             )
-        stepper = config.load_stepper()
-        stepper.set_eval()
 
         if not config.allow_incompatible_dataset:
             try:
