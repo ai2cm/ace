@@ -4,7 +4,7 @@ validate_using_ema: true
 evaluate_before_training: true
 ema:
   decay: 0.999
-max_epochs: 2
+max_epochs: 20
 inference:
   n_forward_steps: 21900 #2009 - 2025
   forward_steps_in_memory: 40
