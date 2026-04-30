@@ -155,23 +155,13 @@ stepper_training:
   atmosphere:
     parameter_init:
       weights_path: null
+      parameters:
+        - frozen:
+            include:
+              - '*'
     loss_contributions:
-      n_steps:
-        outcomes:
-          - steps: 1
-            probability: 0.6
-          - steps: 2
-            probability: 0.2
-          - steps: 4
-            probability: 0.1
-          - steps: 12
-            probability: 0.05
-          - steps: 20
-            probability: 0.025
-          - steps: 40
-            probability: 0.025
-      optimize_last_step_only: true
-      weight: 1.0
+      n_steps: 0
+      weight: 0.0
     loss:
       type: EnsembleLoss
       kwargs:

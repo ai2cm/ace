@@ -9,4 +9,5 @@ ft_fto_stochastic_ncs5mas40_wu4k_LRp0001-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs
 # Use finetune_optimization_checkpoint_path
 fta_ft_fto_stoch_mas40_cd10epLRp00001-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|ace-samudra-coupled-cm4|8ez70kzy|ckpt|update_config|urgent|b200|8|800GiB|3|ai2/climate-titan|seed=0 max_epochs=10 finetune_optimization_checkpoint_path='/ckpt.tar'
 
-ft_fta_ft_fto_stoch_ncs4mas40_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|ace-samudra-coupled-cm4|8ez70kzy|best_inference_ckpt|train|urgent|b200|8|800GiB|3|ai2/climate-titan|seed=0 max_epochs=5
+# fto after ftaCD5ep4 (epoch 4 of fta w/ 5-epoch LR cooldown)
+fto_ftaCD5ep4_ft_fto_stoch_ncs4_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|ace-samudra-coupled-cm4|7g73g0kc|ema_ckpt_0004|train|urgent|b200|8|800GiB|3|ai2/climate-titan|seed=0 max_epochs=5
