@@ -318,7 +318,7 @@ def _open_netcdf_files(paths: list[Path], variable: str) -> xr.Dataset:
             datasets.append(ds[keep])
     if not datasets:
         raise ValueError(f"No data found for {variable} in {len(paths)} files")
-    return xr.concat(datasets, dim="time")
+    return xr.concat(datasets, dim="time", data_vars="minimal")
 
 
 def _download_and_regrid_variable(
