@@ -29,7 +29,13 @@ from fme.ace.data_loading.inference import (
     InferenceInitialConditionIndices,
     TimestampList,
 )
-from fme.ace.data_loading.perturbation import PerturbationSelector, SSTPerturbation
+from fme.ace.data_loading.perturbation import (
+    ForcingPerturbation,
+    PerturbationSelector,
+    RedNoiseConfig,
+    SSTPerturbation,
+    WhiteNoiseConfig,
+)
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.core.coordinates import (
     HybridSigmaPressureCoordinate,
@@ -933,6 +939,253 @@ def test_inference_data_with_perturbations(tmp_path):
         original_foo[:1, :, :] + 2.0,
         data.initial_condition.as_batch_data().data["foo"].cpu().numpy()[0, :, :, :],
     )
+
+
+def test_inference_data_with_forcing_perturbation_white_noise(tmp_path):
+    _create_dataset_on_disk(tmp_path, n_times=14)
+    batch_size = 1
+    step = 7
+    config = InferenceDataLoaderConfig(
+        dataset=XarrayDataConfig(
+            data_path=tmp_path,
+            n_repeats=1,
+        ),
+        start_indices=InferenceInitialConditionIndices(
+            first=0, n_initial_conditions=batch_size, interval=step
+        ),
+        perturbations=ForcingPerturbation(
+            variables={
+                "foo": [
+                    PerturbationSelector(
+                        type="white_noise",
+                        config={"amplitude": 0.1, "seed": 42, "ocean_mask": False},
+                    )
+                ],
+            },
+        ),
+    )
+    n_forward_steps_in_memory = 3
+    original_foo = xr.open_dataset(
+        os.path.join(tmp_path, "data.nc"), decode_times=False
+    )["foo"].values[0 : n_forward_steps_in_memory + 1, :, :]
+    window_requirements = DataRequirements(
+        names=["foo", "constant_mask"],
+        n_timesteps=n_forward_steps_in_memory + 1,
+    )
+    initial_condition_requirements = PrognosticStateDataRequirements(
+        names=["foo"],
+        n_timesteps=1,
+    )
+    data = get_inference_data(
+        config,
+        total_forward_steps=6,
+        window_requirements=window_requirements,
+        initial_condition=initial_condition_requirements,
+    )
+    batch_data = next(iter(data.loader))
+    perturbed = batch_data.data["foo"].cpu().numpy()[0, :, :, :]
+    # data should be perturbed (not equal to original)
+    assert not np.allclose(original_foo, perturbed)
+    # but perturbation should be small (amplitude=0.1)
+    assert np.allclose(original_foo, perturbed, atol=1.0)
+
+
+def test_inference_data_with_forcing_perturbation_red_noise(tmp_path):
+    _create_dataset_on_disk(tmp_path, n_times=14)
+    batch_size = 1
+    step = 7
+    config = InferenceDataLoaderConfig(
+        dataset=XarrayDataConfig(
+            data_path=tmp_path,
+            n_repeats=1,
+        ),
+        start_indices=InferenceInitialConditionIndices(
+            first=0, n_initial_conditions=batch_size, interval=step
+        ),
+        perturbations=ForcingPerturbation(
+            variables={
+                "foo": [
+                    PerturbationSelector(
+                        type="red_noise",
+                        config={
+                            "amplitude": 0.1,
+                            "decorrelation_steps": 5.0,
+                            "seed": 42,
+                            "ocean_mask": False,
+                        },
+                    )
+                ],
+            },
+        ),
+    )
+    n_forward_steps_in_memory = 3
+    original_foo = xr.open_dataset(
+        os.path.join(tmp_path, "data.nc"), decode_times=False
+    )["foo"].values[0 : n_forward_steps_in_memory + 1, :, :]
+    window_requirements = DataRequirements(
+        names=["foo", "constant_mask"],
+        n_timesteps=n_forward_steps_in_memory + 1,
+    )
+    initial_condition_requirements = PrognosticStateDataRequirements(
+        names=["foo"],
+        n_timesteps=1,
+    )
+    data = get_inference_data(
+        config,
+        total_forward_steps=6,
+        window_requirements=window_requirements,
+        initial_condition=initial_condition_requirements,
+    )
+    batch_data = next(iter(data.loader))
+    perturbed = batch_data.data["foo"].cpu().numpy()[0, :, :, :]
+    assert not np.allclose(original_foo, perturbed)
+    assert np.allclose(original_foo, perturbed, atol=1.0)
+
+
+def test_forcing_perturbation_with_std_scaling(tmp_path):
+    _create_dataset_on_disk(tmp_path, n_times=14)
+    batch_size = 1
+    step = 7
+    # amplitude=0.1 with std=10.0 -> physical_amplitude=1.0
+    config = InferenceDataLoaderConfig(
+        dataset=XarrayDataConfig(
+            data_path=tmp_path,
+            n_repeats=1,
+        ),
+        start_indices=InferenceInitialConditionIndices(
+            first=0, n_initial_conditions=batch_size, interval=step
+        ),
+        perturbations=ForcingPerturbation(
+            variables={
+                "foo": [
+                    PerturbationSelector(
+                        type="white_noise",
+                        config={"amplitude": 0.1, "seed": 42, "ocean_mask": False},
+                    )
+                ],
+            },
+            stds={"foo": 10.0},
+        ),
+    )
+    n_forward_steps_in_memory = 3
+    original_foo = xr.open_dataset(
+        os.path.join(tmp_path, "data.nc"), decode_times=False
+    )["foo"].values[0 : n_forward_steps_in_memory + 1, :, :]
+    window_requirements = DataRequirements(
+        names=["foo", "constant_mask"],
+        n_timesteps=n_forward_steps_in_memory + 1,
+    )
+    initial_condition_requirements = PrognosticStateDataRequirements(
+        names=["foo"],
+        n_timesteps=1,
+    )
+    data = get_inference_data(
+        config,
+        total_forward_steps=6,
+        window_requirements=window_requirements,
+        initial_condition=initial_condition_requirements,
+    )
+    batch_data = next(iter(data.loader))
+    perturbed = batch_data.data["foo"].cpu().numpy()[0, :, :, :]
+    # physical amplitude is 1.0, so perturbations should be larger
+    assert not np.allclose(original_foo, perturbed, atol=0.5)
+
+
+def test_forcing_perturbation_invalid_variable(tmp_path):
+    _create_dataset_on_disk(tmp_path, n_times=14)
+    batch_size = 1
+    step = 7
+    config = InferenceDataLoaderConfig(
+        dataset=XarrayDataConfig(
+            data_path=tmp_path,
+            n_repeats=1,
+        ),
+        start_indices=InferenceInitialConditionIndices(
+            first=0, n_initial_conditions=batch_size, interval=step
+        ),
+        perturbations=ForcingPerturbation(
+            variables={
+                "nonexistent_var": [
+                    PerturbationSelector(
+                        type="white_noise",
+                        config={"amplitude": 0.1, "ocean_mask": False},
+                    )
+                ],
+            },
+        ),
+    )
+    n_forward_steps_in_memory = 3
+    window_requirements = DataRequirements(
+        names=["foo", "constant_mask"],
+        n_timesteps=n_forward_steps_in_memory + 1,
+    )
+    dataset = InferenceDataset(
+        config,
+        total_forward_steps=6,
+        requirements=window_requirements,
+    )
+    with pytest.raises(ValueError, match="not found in data"):
+        dataset[0]
+
+
+def test_red_noise_temporal_correlation():
+    """Test that red noise has temporal correlation while white noise doesn't."""
+    red_noise = RedNoiseConfig(
+        amplitude=1.0, decorrelation_steps=100.0, ocean_mask=False
+    )
+    white_noise = WhiteNoiseConfig(amplitude=1.0, ocean_mask=False)
+
+    shape = (1, 100, 100)
+    lat = torch.zeros(100, 100)
+    lon = torch.zeros(100, 100)
+    ocean_frac = torch.ones(100, 100)
+
+    n_steps = 50
+    red_samples = []
+    white_samples = []
+    for _ in range(n_steps):
+        red_data = torch.zeros(shape)
+        white_data = torch.zeros(shape)
+        red_noise.apply_perturbation(red_data, lat, lon, ocean_frac)
+        white_noise.apply_perturbation(white_data, lat, lon, ocean_frac)
+        red_samples.append(red_data.mean().item())
+        white_samples.append(white_data.mean().item())
+
+    # Compute lag-1 autocorrelation
+    red_arr = np.array(red_samples)
+    white_arr = np.array(white_samples)
+    red_autocorr = np.corrcoef(red_arr[:-1], red_arr[1:])[0, 1]
+    white_autocorr = np.corrcoef(white_arr[:-1], white_arr[1:])[0, 1]
+
+    # Red noise should have significantly higher autocorrelation
+    assert red_autocorr > 0.8, f"Red noise autocorr {red_autocorr} too low"
+    assert abs(white_autocorr) < 0.5, f"White noise autocorr {white_autocorr} too high"
+
+
+def test_red_noise_reset():
+    """Test that reset clears state and produces fresh noise."""
+    noise = RedNoiseConfig(
+        amplitude=1.0, decorrelation_steps=10.0, ocean_mask=False, seed=42
+    )
+    shape = (1, 10, 10)
+    lat = torch.zeros(10, 10)
+    lon = torch.zeros(10, 10)
+    ocean_frac = torch.ones(10, 10)
+
+    # Generate a few steps
+    data1 = torch.zeros(shape)
+    noise.apply_perturbation(data1, lat, lon, ocean_frac)
+    data2 = torch.zeros(shape)
+    noise.apply_perturbation(data2, lat, lon, ocean_frac)
+
+    # Reset and re-seed
+    noise.reset()
+    noise._generator = None
+    data3 = torch.zeros(shape)
+    noise.apply_perturbation(data3, lat, lon, ocean_frac)
+
+    # After reset with same seed, first step should match
+    torch.testing.assert_close(data1, data3)
 
 
 def test_inference_persistence_names(tmp_path):

@@ -37,6 +37,10 @@ class PerturbationConfig(abc.ABC):
         ocean_fraction: torch.Tensor,
     ) -> None: ...
 
+    def reset(self) -> None:
+        """Reset any internal state. Override for stateful perturbations."""
+        pass
+
 
 @dataclasses.dataclass
 class PerturbationSelector:
@@ -82,8 +86,64 @@ class SSTPerturbation:
         ]
 
 
+@dataclasses.dataclass
+class ForcingPerturbation:
+    """
+    Configuration for perturbations applied to arbitrary forcing variables
+    during inference.
+
+    Parameters:
+        variables: Mapping from variable name to list of perturbation selectors.
+            Each variable can have multiple perturbations applied sequentially.
+        stds: Optional mapping from variable name to its standard deviation.
+            When provided, perturbation amplitudes specified as fractions
+            are scaled by the variable's std. This is typically populated
+            from the model checkpoint's normalization statistics.
+    """
+
+    variables: dict[str, list[PerturbationSelector]]
+    stds: dict[str, float] = dataclasses.field(default_factory=dict)
+
+    def __post_init__(self):
+        self.built_perturbations: dict[str, list[PerturbationConfig]] = {}
+        for var_name, selectors in self.variables.items():
+            perturbations = [s.build() for s in selectors]
+            std = self.stds.get(var_name)
+            for p in perturbations:
+                if isinstance(p, StdScaledPerturbationConfig) and std is not None:
+                    p.set_std(std)
+            self.built_perturbations[var_name] = perturbations
+
+    def reset(self) -> None:
+        """Reset all stateful perturbations (e.g. at start of new IC window)."""
+        for perturbations in self.built_perturbations.values():
+            for p in perturbations:
+                p.reset()
+
+
 def _get_ocean_mask(ocean_fraction: torch.Tensor, cutoff: float = 0.5) -> torch.Tensor:
     return ocean_fraction > cutoff
+
+
+@dataclasses.dataclass
+class StdScaledPerturbationConfig(PerturbationConfig):
+    """Base class for perturbations whose amplitude is a fraction of the
+    variable's standard deviation.
+    """
+
+    amplitude: float = 0.1
+
+    def __post_init__(self):
+        self._std: float | None = None
+
+    def set_std(self, std: float) -> None:
+        self._std = std
+
+    @property
+    def physical_amplitude(self) -> float:
+        if self._std is not None:
+            return self.amplitude * self._std
+        return self.amplitude
 
 
 @PerturbationSelector.register("constant")
@@ -186,3 +246,112 @@ class GreensFunctionConfig(PerturbationConfig):
         mask = mask.expand(data.shape)
         perturbation = perturbation.expand(data.shape)
         data[mask & ocean_mask] += perturbation[mask & ocean_mask]
+
+
+@PerturbationSelector.register("white_noise")
+@dataclasses.dataclass
+class WhiteNoiseConfig(StdScaledPerturbationConfig):
+    """
+    i.i.d. Gaussian noise applied at each timestep.
+
+    Parameters:
+        amplitude: Noise standard deviation as a fraction of the variable's
+            standard deviation. If no std is provided, used as absolute value.
+        ocean_mask: Whether to apply noise only over ocean points.
+        seed: Optional random seed for reproducibility.
+    """
+
+    ocean_mask: bool = True
+    seed: int | None = None
+
+    def apply_perturbation(
+        self,
+        data: torch.Tensor,
+        lat: torch.Tensor,
+        lon: torch.Tensor,
+        ocean_fraction: torch.Tensor,
+    ):
+        generator = None
+        if self.seed is not None:
+            generator = torch.Generator(device=data.device)
+            generator.manual_seed(self.seed)
+        noise = torch.randn(data.shape, device=data.device, generator=generator)
+        noise *= self.physical_amplitude
+        if self.ocean_mask:
+            mask = _get_ocean_mask(ocean_fraction).expand(data.shape)
+            data[mask] += noise[mask]
+        else:
+            data += noise
+
+
+@PerturbationSelector.register("red_noise")
+@dataclasses.dataclass
+class RedNoiseConfig(StdScaledPerturbationConfig):
+    """
+    Temporally correlated AR(1) noise. At each timestep, the noise is:
+        noise_t = alpha * noise_{t-1} + sqrt(1 - alpha^2) * white_noise
+    where alpha = exp(-1 / decorrelation_steps), ensuring the stationary
+    variance of the noise process equals (physical_amplitude)^2.
+
+    Parameters:
+        amplitude: Noise standard deviation as a fraction of the variable's
+            standard deviation. If no std is provided, used as absolute value.
+        decorrelation_steps: Number of timesteps for the autocorrelation
+            to decay to 1/e. For example, at 6-hour timesteps:
+            10 steps = 2.5 days, 40 steps = 10 days, 120 steps = 30 days.
+        ocean_mask: Whether to apply noise only over ocean points.
+        seed: Optional random seed for reproducibility.
+    """
+
+    decorrelation_steps: float = 10.0
+    ocean_mask: bool = True
+    seed: int | None = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        if self.decorrelation_steps <= 0:
+            raise ValueError("decorrelation_steps must be positive")
+        self._alpha = np.exp(-1.0 / self.decorrelation_steps)
+        self._innovation_scale = np.sqrt(1.0 - self._alpha**2)
+        self._previous_noise: torch.Tensor | None = None
+        self._generator: torch.Generator | None = None
+
+    def reset(self) -> None:
+        self._previous_noise = None
+
+    def apply_perturbation(
+        self,
+        data: torch.Tensor,
+        lat: torch.Tensor,
+        lon: torch.Tensor,
+        ocean_fraction: torch.Tensor,
+    ):
+        if self._generator is None and self.seed is not None:
+            self._generator = torch.Generator(device=data.device)
+            self._generator.manual_seed(self.seed)
+
+        innovation = torch.randn(
+            data.shape, device=data.device, generator=self._generator
+        )
+
+        if self._previous_noise is None:
+            # First timestep: draw from stationary distribution
+            noise = innovation
+        else:
+            if self._previous_noise.shape != data.shape:
+                # Shape changed (e.g. last window is shorter), reset
+                noise = innovation
+            else:
+                noise = (
+                    self._alpha * self._previous_noise
+                    + self._innovation_scale * innovation
+                )
+
+        self._previous_noise = noise.clone()
+
+        scaled_noise = noise * self.physical_amplitude
+        if self.ocean_mask:
+            mask = _get_ocean_mask(ocean_fraction).expand(data.shape)
+            data[mask] += scaled_noise[mask]
+        else:
+            data += scaled_noise
