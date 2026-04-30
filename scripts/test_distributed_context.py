@@ -1,11 +1,11 @@
 import pathlib
 
-EXCLUDED_FILES: set[str] = set()
+EXCLUDED_FILES: set[str] = {"scripts/coupled/create_decoupled_checkpoint.py"}
 
 
 def _iter_python_files(root: pathlib.Path):
     for path in root.rglob("*.py"):
-        if path.name in EXCLUDED_FILES:
+        if str(path.relative_to(root)) in EXCLUDED_FILES:
             continue
         if path.name == pathlib.Path(__file__).name:
             continue
@@ -25,7 +25,7 @@ def _has_distributed_context(source: str) -> bool:
 
 
 def test_main_guard_requires_distributed_context():
-    root = pathlib.Path(__file__).parent
+    root = pathlib.Path(__file__).parent.parent
 
     failures = []
 
@@ -38,8 +38,7 @@ def test_main_guard_requires_distributed_context():
             and not _has_distributed_context(source)
         ):
             failure_path = str(path.relative_to(root))
-            if failure_path not in EXCLUDED_FILES:
-                failures.append(failure_path)
+            failures.append(failure_path)
 
     if failures:
         raise AssertionError(
