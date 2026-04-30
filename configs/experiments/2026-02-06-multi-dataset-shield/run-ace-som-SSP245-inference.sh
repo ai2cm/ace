@@ -64,7 +64,6 @@ for model in "${!MODELS[@]}"; do
         --gpus 1 \
         --shared-memory 20GiB \
         --weka climate-default:/climate-default \
-        --budget ai2/climate \
         --system-python \
         --install "pip install --no-deps ." \
         -- python -I -m fme.ace.inference $CONFIG_PATH --override $overrides
