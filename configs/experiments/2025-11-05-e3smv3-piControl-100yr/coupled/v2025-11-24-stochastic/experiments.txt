@@ -1,0 +1,2 @@
+
+fto-stochastic-v1124-train-95yr-cep1srse-dso4ysdg|||training|best_inference_ckpt|normal|--min-runtime 8h
