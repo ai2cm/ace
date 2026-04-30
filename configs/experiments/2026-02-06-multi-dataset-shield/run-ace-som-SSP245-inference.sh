@@ -32,7 +32,7 @@ cd $REPO_ROOT  # so config path is valid no matter where we are running this scr
 
 for model in "${!MODELS[@]}"; do
     dataset_id="${MODELS[$model]}"
-    job_name=${DATE}-$model-SSP245-monthly-outputs-inference
+    job_name=${DATE}-$model-SSP245-inference-limited-monthly-outputs
     overrides="\
         experiment_dir=/results \
         forcing_loader.dataset.data_path=$FORCING_ROOT \
@@ -44,6 +44,7 @@ for model in "${!MODELS[@]}"; do
         n_forward_steps=$N_FORWARD_STEPS \
         data_writer.files=[] \
         data_writer.save_monthly_files=true \
+        data_writer.names=[TMP2m] \
     "
 
     python -m fme.ace.validate_config --config_type inference $CONFIG_PATH --override $overrides
