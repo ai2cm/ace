@@ -163,6 +163,42 @@ filled cells should apply the layer mask recipe above.
   checks tolerate a small ``_EPS`` margin below / above the nominal
   physical range for this reason.
 
+  **Regrid method by variable.** The *requested* method is determined
+  by `RegridConfig.method_for()` in `config.py`: variables in
+  `FLUX_LIKE_VARIABLES` get conservative, everything else bilinear.
+  The *actual* method may differ if the source file lacks the grid
+  bounds (`lon_bnds`/`lat_bnds` or equivalent) that conservative
+  regridding requires — in that case `make_regridder` falls back to
+  bilinear and logs a warning. The actual method used for each
+  variable is recorded in the `regrid_methods` field of the dataset
+  index row and the per-dataset `metadata.json` sidecar.
+
+  | Variable | Category | Requested | Actual (typical) | Notes |
+  |----------|----------|-----------|------------------|-------|
+  | `ua`, `va`, `hus`, `zg` | core (plev) | bilinear | bilinear | |
+  | `tas`, `huss`, `psl` | core (2D) | bilinear | bilinear | |
+  | `pr` | core (2D flux) | conservative | conservative | atmos grid has bounds |
+  | `rsdt`, `rsut`, `rlut` | optional (TOA) | conservative | conservative | atmos grid has bounds |
+  | `rsds`, `rsus`, `rlds`, `rlus` | optional (sfc rad) | conservative | conservative | atmos grid has bounds |
+  | `hfss`, `hfls` | optional (sfc turb) | conservative | conservative | atmos grid has bounds |
+  | `sfcWind`, `uas`, `vas` | optional (wind) | bilinear | bilinear | |
+  | `ts` | forcing (Amon) | bilinear | bilinear | |
+  | `siconc` | forcing (SImon) | conservative | **bilinear** | ocean grid; see below |
+  | `sftlf` | static (fx) | conservative | conservative | atmos grid has bounds |
+  | `orog` | static (fx) | bilinear | bilinear | |
+
+  **`siconc` fallback.** Sea-ice concentration is published on the
+  ocean grid (`SImon` table), which for most CMIP6 models is a
+  curvilinear or tripolar grid whose vertex bounds are either absent
+  or in a format that `xesmf`'s conservative regridder cannot ingest
+  (e.g. CESM2's tripolar pivot cells cause `rc = 506`). The pipeline
+  falls back to bilinear for `siconc` in practice for nearly all
+  models. Since `siconc` is a fraction field (0–100%), bilinear
+  interpolation can produce slight undershoot/overshoot near sharp
+  ice edges; the sanity checks tolerate this. A model whose ocean
+  grid *does* carry usable rectilinear bounds would get conservative
+  as requested — the actual method is always recorded per-variable.
+
 ### Plev flattening
 
 The zarr output **does not** store a `plev` dimension. Instead,
