@@ -244,18 +244,18 @@ def regrid_variables(
     the regridded dataset and a dict ``{variable: method}``.
     """
     method_for = cfg.regrid.method_for
+    bounds_vars = [v for v in ds.data_vars if v in BOUNDS_NAMES]
     by_method: dict[str, list[str]] = {}
     for v in ds.data_vars:
-        by_method.setdefault(method_for(v), []).append(v)
-
-    bounds_to_keep = [v for v in ds.data_vars if v in BOUNDS_NAMES]
+        if v not in BOUNDS_NAMES:
+            by_method.setdefault(method_for(v), []).append(v)
 
     pieces = []
     used: dict[str, str] = {}
     for method, vars_ in by_method.items():
-        sub = ds[vars_ + bounds_to_keep]
+        sub = ds[vars_ + bounds_vars]
         regridder, actual_method = make_regridder(sub, target_grid, method)
-        pieces.append(regridder(sub, keep_attrs=True))
+        pieces.append(regridder(ds[vars_], keep_attrs=True))
         used.update({v: actual_method for v in vars_})
 
     regridded = xr.merge(pieces)

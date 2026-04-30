@@ -69,7 +69,7 @@ def _rectilinear_ds(
 
     lat = np.linspace(-85, 85, nlat)
     lon = np.linspace(2, 358, nlon)
-    time = xr.cftime_range("2010-01-01", periods=ntime, freq="D", calendar="noleap")
+    time = xr.date_range("2010-01-01", periods=ntime, freq="D", calendar="noleap")
 
     coords: dict = {"lat": lat, "lon": lon, "time": time}
     dims = ["time", "lat", "lon"]
@@ -142,7 +142,7 @@ def test_resolve_no_duplicates():
 
 def test_resolve_identical_duplicates():
     ds = _rectilinear_ds(ntime=3)
-    dup = xr.concat([ds, ds.isel(time=[0])], dim="time")
+    dup = xr.concat([ds, ds.isel(time=[0])], dim="time", data_vars="minimal")
     result, msg = resolve_time_duplicates(dup, "tas", allow_dedupe=True)
     assert "deduplicated" in msg
     assert result.sizes["time"] == 3
@@ -150,7 +150,7 @@ def test_resolve_identical_duplicates():
 
 def test_resolve_raises_without_allow_dedupe():
     ds = _rectilinear_ds(ntime=3)
-    dup = xr.concat([ds, ds.isel(time=[0])], dim="time")
+    dup = xr.concat([ds, ds.isel(time=[0])], dim="time", data_vars="minimal")
     with pytest.raises(DuplicateTimestampsError):
         resolve_time_duplicates(dup, "tas", allow_dedupe=False)
 
@@ -159,7 +159,7 @@ def test_resolve_raises_on_boundary_mismatch():
     ds = _rectilinear_ds(ntime=3)
     ds2 = ds.copy(deep=True)
     ds2["tas"].values[0] += 999.0
-    dup = xr.concat([ds, ds2.isel(time=[0])], dim="time")
+    dup = xr.concat([ds, ds2.isel(time=[0])], dim="time", data_vars="minimal")
     with pytest.raises(SimulationBoundaryError):
         resolve_time_duplicates(dup, "tas", allow_dedupe=True)
 
@@ -296,6 +296,24 @@ def test_regrid_mixed_methods():
     assert methods["ua"] == "bilinear"
     assert methods["pr"] == "conservative"
     assert result["ua"].shape == result["pr"].shape
+
+
+def test_regrid_flux_only_with_bounds():
+    """Regridding a single flux variable with bounds must not crash.
+
+    Bounds get classified as bilinear data vars if included in
+    by_method, causing an empty-dataset regrid that fails with
+    'cannot rename lat_new'.
+    """
+    from grid import make_target_grid
+
+    ds = _rectilinear_ds(nlat=10, nlon=20, ntime=3, variables=["pr"], with_bounds=True)
+    cfg = _make_cfg()
+    target = make_target_grid("F22.5")
+    result, methods = regrid_variables(ds, target, cfg)
+    assert methods["pr"] == "conservative"
+    assert "lat_bnds" not in result.data_vars
+    assert "lon_bnds" not in result.data_vars
 
 
 # ---------------------------------------------------------------------------
@@ -504,16 +522,14 @@ def test_fill_derived_layer_T_fills_bottom_layers():
 
 
 def test_interp_monthly_to_daily_linear():
-    monthly_time = xr.cftime_range(
-        "2010-01-15", periods=12, freq="MS", calendar="noleap"
-    )
+    monthly_time = xr.date_range("2010-01-15", periods=12, freq="MS", calendar="noleap")
     monthly = xr.DataArray(
         np.linspace(280, 300, 12).astype(np.float32),
         dims=["time"],
         coords={"time": monthly_time},
     )
     daily_time = xr.DataArray(
-        xr.cftime_range("2010-01-01", periods=365, freq="D", calendar="noleap"),
+        xr.date_range("2010-01-01", periods=365, freq="D", calendar="noleap"),
         dims=["time"],
     )
     result = interp_monthly_to_daily(monthly, daily_time, "linear")
@@ -522,16 +538,14 @@ def test_interp_monthly_to_daily_linear():
 
 
 def test_interp_monthly_to_daily_extrapolates_edges():
-    monthly_time = xr.cftime_range(
-        "2010-02-15", periods=2, freq="MS", calendar="noleap"
-    )
+    monthly_time = xr.date_range("2010-02-15", periods=2, freq="MS", calendar="noleap")
     monthly = xr.DataArray(
         np.array([280.0, 290.0], dtype=np.float32),
         dims=["time"],
         coords={"time": monthly_time},
     )
     daily_time = xr.DataArray(
-        xr.cftime_range("2010-01-01", periods=120, freq="D", calendar="noleap"),
+        xr.date_range("2010-01-01", periods=120, freq="D", calendar="noleap"),
         dims=["time"],
     )
     result = interp_monthly_to_daily(monthly, daily_time, "linear")
