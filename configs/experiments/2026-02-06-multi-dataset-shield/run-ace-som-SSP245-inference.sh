@@ -39,6 +39,7 @@ for model in "${!MODELS[@]}"; do
         forcing_loader.dataset.file_pattern=$FORCING_PATH \
         initial_condition.path=$INITIAL_CONDITION_PATH \
         initial_condition.engine=zarr \
+        initial_condition.start_indices.times=[1997-01-01T00:00:00] \
         n_forward_steps=$N_FORWARD_STEPS \
         data_writer.files=[] \
     "
