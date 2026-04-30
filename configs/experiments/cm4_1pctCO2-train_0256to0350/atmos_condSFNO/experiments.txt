@@ -1,4 +1,4 @@
-group|tag|experiment_id|status|checkpoint|priority|preemptible|override|results_dataset|workspace|cluster
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
 
 cm4_1pctCO2-train_0256to0350-condSFNO|rs0|01KB4EESJXCN7J3E2A63YA9JZB|trained|best_inference_ckpt|normal|--not-preemptible
 
@@ -6,7 +6,7 @@ cm4_1pctCO2-train_0256to0350-condSFNO|rs1|01KB4EFE21A9Q8VT5PFN2QWZCR|trained|bes
 
 ft_5ep_w_EC-cm4_1pctCO2-train_0256to0350-condSFNO|rs0|01KBZP38BX7NCDP4Y428VSSDEN|trained|best_inference_ckpt|normal|--not-preemptible
 
-ft_5ep_w_EC-cm4_1pctCO2-train_0256to0350-condSFNO|rs1|01KBZP41XMBZ8WB8QWM3FQZQ9C|run_140yr|best_inference_ckpt|high|--not-preemptible
+ft_5ep_w_EC-cm4_1pctCO2-train_0256to0350-condSFNO|rs1|01KBZP41XMBZ8WB8QWM3FQZQ9C|trained|best_inference_ckpt|high|--not-preemptible
 
 aceS-cm4_1pctCO2_0256to0350-condSFNO|rs0|01KHZG19J8SFKZ3PDYCCEZNH1X|trained|best_inference_ckpt|urgent|--not-preemptible||||b200|||100GiB
 
@@ -17,3 +17,5 @@ cm4_1pctCO2-train_0256to0350-condSFNO-init_bugfix|rs1|01KJ5XN6NRQQYGGQ4D192FBJMG
 cm4_1pctCO2-train_0256to0350-condSFNO-init_bugfix|rs2|01KJGPNXN82C4XG0CR7TH43JTZ|training|best_inference_ckpt|normal|--not-preemptible
 
 cm4_1pctCO2-train_0256to0350-condSFNO-init_bugfix|rs3|01KJGPP96NWWPT4TZ47VJRX1K5|training|best_inference_ckpt|normal|--not-preemptible
+
+ace-samudra-coupled-cm4-8ez70kzy-decoupled_ace2|||run_140yr|best_inference_ckpt|high|||01KQE5SG85JVF4DMEZBY8C2XKH
