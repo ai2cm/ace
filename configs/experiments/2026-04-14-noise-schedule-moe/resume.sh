@@ -6,7 +6,7 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-100km-to-3km-multivar-sig0.005-200-resume"
+JOB_NAME="xshield-downscaling-100km-to-3km-multivar-global-sig0.005-200-tropics-resume"
 CONFIG_FILENAME="resume-train-prmsl-multivar-low-sigma.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
@@ -22,7 +22,7 @@ cd $REPO_ROOT  # so config path is valid no matter where we are running this scr
 
 IMAGE=$(cat $REPO_ROOT/latest_deps_only_image.txt)
 
-PREVIOUS_RESULTS_DATASET="01KNWGZB0DF16P0EMMA5Y1PZZQ"
+PREVIOUS_RESULTS_DATASET="01KQ88Q970VDZYZYFB4S2621TZ"
 
 
 gantry run \

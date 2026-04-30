@@ -1,13 +1,10 @@
-resume_results_dir: /previous_results
-loss_weight_exponent: 0.75
+log_loss_vs_noise: true
 static_inputs:
   HGTsfc: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
   land_fraction: /climate-default/2025-11-19-X-SHiELD-AMIP-downscaling-land-fraction/3km/land_fraction.zarr
 model:
   loss_weights:
     noise_weight_exponent: 0.75
-    output_channels:
-      PRATEsfc: 0.2
   use_amp_bf16: true
   out_names:
   - eastward_wind_at_ten_meters
@@ -23,9 +20,9 @@ model:
     type: MSE
   module:
     config:
-      bottleneck_attention: false
       model_channels: 128
       attn_resolutions: []
+      bottleneck_attention: false
       num_blocks: 1
       channel_mult_emb: 6
       channel_mult:
@@ -33,8 +30,8 @@ model:
       - 2
       - 2
       - 2
-      - 1
-      - 1
+      - 2
+      - 2
       use_apex_gn: true
     type: unet_diffusion_song_v2
   normalization:
@@ -47,11 +44,11 @@ model:
   num_diffusion_generation_steps: 18
   churn: 0.0
   training_noise_distribution:
-    p_min: 0.005
-    p_max: 200.0
+    p_min: 200
+    p_max: 2000.0
   predict_residual: true
-  sigma_max: 200.0
-  sigma_min: 0.005
+  sigma_max: 2000.0
+  sigma_min: 200
   use_fine_topography: true
 optimization:
   lr: 0.0001
@@ -60,8 +57,8 @@ ema:
   decay: 0.999
 validate_using_ema: true
 train_data:
-  sample_with_replacement: 640
-  batch_size: 120
+  sample_with_replacement: 144
+  batch_size: 48
   num_data_workers: 2
   fine:
   - merge:
@@ -92,8 +89,8 @@ train_data:
         start_time: '2014-01-01T00:00:00'
         stop_time: '2022-12-31T23:59:00'
   lat_extent:
-    start: -30
-    stop: 30
+    start: -66.0
+    stop: 70
   strict_ensemble: false
 validation_data:
   batch_size: 16
@@ -131,17 +128,14 @@ validation_data:
         stop_time: '2024-01-01T00:00:00'
         step: 9
   lat_extent:
-    start: 0
-    stop: 35
-  lon_extent:
-    start: 75
-    stop: 195
+    start: -30
+    stop: 30
   strict_ensemble: false
   drop_last: true
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
-max_epochs: 400
-validate_interval: 50
+max_epochs: 100
+validate_interval: 10
 experiment_dir: /results
 save_checkpoints: false
 logging:
