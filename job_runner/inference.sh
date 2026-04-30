@@ -13,7 +13,7 @@ source "$SCRIPT_DIR/lib.sh"
 if [[ "$#" -lt 2 ]]; then
   echo "Usage: $0 <experiment_dir> <config_subdirectory> [--dry-run]"
   echo "  - <experiment_dir>: Path to experiment directory (e.g., experiments/2025-08-08-jamesd/coupled or experiments/2025-08-08-jamesd/uncoupled)"
-  echo "  - <config_subdirectory>: Subdirectory containing the inference config files (evaluator-config-*.yaml)"
+  echo "  - <config_subdirectory>: Subdirectory containing the inference config files (inference-config-*.yaml)"
   echo "  - --dry-run: Preview actions without launching jobs"
   exit 1
 fi
@@ -40,7 +40,7 @@ fi
 
 # Construct full paths
 FULL_EXPERIMENT_DIR="$REPO_ROOT/$EXPERIMENT_DIR"
-INPUT_PATH="$FULL_EXPERIMENT_DIR/$CONFIG_SUBDIR/experiments-inference.txt"
+INPUT_PATH="$FULL_EXPERIMENT_DIR/$CONFIG_SUBDIR/experiments.txt"
 
 # Print dry-run header (no stats for inference)
 if [[ "$DRY_RUN" == "true" ]]; then
@@ -81,8 +81,8 @@ while read TRAIN_EXPER; do
     EXISTING_RESULTS_ATMOS_DATASET=$(echo "$TRAIN_EXPER" | cut -d"|" -f13)
     RESTART_DATASET=$(echo "$TRAIN_EXPER" | cut -d"|" -f14)
 
-    # Check if STATUS starts with "run_"
-    if [[ ! "$STATUS" =~ ^run_ ]]; then
+    # Check if STATUS starts with "run_inf_"
+    if [[ ! "$STATUS" =~ ^run_inf_ ]]; then
         SKIPPED_JOBS=$((SKIPPED_JOBS + 1))
         continue
     fi
@@ -90,13 +90,13 @@ while read TRAIN_EXPER; do
     PROCESSED_JOBS=$((PROCESSED_JOBS + 1))
 
     # Derive config tag and filename from STATUS
-    # Example: if STATUS is "run_ICx1"
+    # Example: if STATUS is "run_inf_ICx1"
     # CURRENT_CONFIG_TAG becomes "ICx1"
-    # CURRENT_CONFIG_FILENAME becomes "inference-config-ICx1.yaml" (shared naming with eval workflow)
-    CURRENT_CONFIG_TAG=${STATUS#run_}
+    # CURRENT_CONFIG_FILENAME becomes "inference-config-ICx1.yaml"
+    CURRENT_CONFIG_TAG=${STATUS#run_inf_}
     CURRENT_CONFIG_FILENAME="inference-config-${CURRENT_CONFIG_TAG}.yaml"
 
-    JOB_GROUP="${JOB_GROUP}-inference_${CKPT}-${CURRENT_CONFIG_TAG}"
+    JOB_GROUP="${JOB_GROUP}-inf_${CKPT}-${CURRENT_CONFIG_TAG}"
 
     # Construct JOB_NAME using TAG if present
     if [[ -n "$TAG" ]]; then
@@ -235,8 +235,8 @@ if [[ "$DRY_RUN" == "true" ]]; then
     echo "SUMMARY"
     echo "----------------------------------------"
     echo "Total Jobs in File: $TOTAL_JOBS"
-    echo "  - Will Process: $PROCESSED_JOBS (STATUS=run_*)"
-    echo "  - Will Skip: $SKIPPED_JOBS (STATUS!=run_*)"
+    echo "  - Will Process: $PROCESSED_JOBS (STATUS=run_inf_*)"
+    echo "  - Will Skip: $SKIPPED_JOBS (STATUS!=run_inf_*)"
     echo
     echo "Actions that WOULD be taken:"
     echo "  - Launch $PROCESSED_JOBS inference jobs"
