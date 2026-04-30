@@ -348,6 +348,89 @@ class InventoryConfig:
         return _load_yaml(cls, path)
 
 
+ESGF_DEFAULT_NODE = "https://esgf-data.dkrz.de/esg-search/search"
+
+
+@dataclass
+class ESGFConfig:
+    """ESGF-specific settings for the ESGF processing pipeline."""
+
+    search_node: str = ESGF_DEFAULT_NODE
+    scratch_dir: str = "./scratch"
+
+
+@dataclass
+class ESGFProcessConfig:
+    """Top-level config for the ESGF processing pipeline.
+
+    Shares most fields with ``ProcessConfig`` but adds ESGF-specific
+    settings and does not require ``inventory_path`` (the ESGF pipeline
+    discovers datasets via the ESGF search API at runtime).
+    """
+
+    output_directory: str
+    esgf: ESGFConfig = field(default_factory=ESGFConfig)
+    defaults: DefaultsConfig = field(default_factory=DefaultsConfig)
+    selection: Selection = field(default_factory=Selection)
+    overrides: list[Override] = field(default_factory=list)
+
+    @classmethod
+    def from_file(cls, path: str) -> "ESGFProcessConfig":
+        return _load_yaml(cls, path)
+
+    def resolve(
+        self, source_id: str, experiment: str, variant_label: str
+    ) -> "ResolvedDatasetConfig":
+        """Apply overrides on top of defaults for one dataset."""
+        time_subset = dict(self.defaults.time_subset)
+        allow_dedupe = self.defaults.allow_dedupe
+        forcing_variables = list(self.defaults.forcing_variables)
+        for override in self.overrides:
+            if override.match.matches(source_id, experiment, variant_label):
+                if override.time_subset is not None:
+                    time_subset = dict(override.time_subset)
+                if override.allow_dedupe is not None:
+                    allow_dedupe = override.allow_dedupe
+                if override.skip_forcing_variables is not None:
+                    forcing_variables = [
+                        v
+                        for v in forcing_variables
+                        if v not in override.skip_forcing_variables
+                    ]
+        return ResolvedDatasetConfig(
+            source_id=source_id,
+            experiment=experiment,
+            variant_label=variant_label,
+            core_variables=list(self.defaults.core_variables),
+            optional_variables=list(self.defaults.optional_variables),
+            forcing_variables=forcing_variables,
+            static_variables=list(self.defaults.static_variables),
+            forcing_interpolation=self.defaults.forcing_interpolation,
+            time_subset=time_subset,
+            target_grid=self.defaults.target_grid,
+            regrid=self.defaults.regrid,
+            fill=self.defaults.fill,
+            chunking=self.defaults.chunking,
+            allow_dedupe=allow_dedupe,
+        )
+
+
+@dataclass
+class ESGFInventoryConfig:
+    """Config for the ESGF inventory discovery script."""
+
+    output_path: str
+    search_node: str = ESGF_DEFAULT_NODE
+    queries: list[CatalogQuery] = field(default_factory=_default_inventory_queries)
+    experiments: list[str] = field(
+        default_factory=lambda: ["historical", "ssp245", "ssp585"]
+    )
+
+    @classmethod
+    def from_file(cls, path: str) -> "ESGFInventoryConfig":
+        return _load_yaml(cls, path)
+
+
 def _load_yaml(cls, path: str):
     with open(path) as f:
         data = yaml.safe_load(f) or {}
@@ -363,6 +446,7 @@ __all__ = [
     "FORCING_VARIABLES",
     "STATIC_VARIABLES",
     "FLUX_LIKE_VARIABLES",
+    "ESGF_DEFAULT_NODE",
     "make_label",
     "TimeWindow",
     "TargetGrid",
@@ -377,4 +461,7 @@ __all__ = [
     "ResolvedDatasetConfig",
     "CatalogQuery",
     "InventoryConfig",
+    "ESGFConfig",
+    "ESGFProcessConfig",
+    "ESGFInventoryConfig",
 ]
