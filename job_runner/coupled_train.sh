@@ -86,6 +86,7 @@ while read PRETRAINING; do
     RETRIES=$(echo "$PRETRAINING" | cut -d"|" -f14)
     WORKSPACE=$(echo "$PRETRAINING" | cut -d"|" -f15)
     OVERRIDE_ARGS=$(echo "$PRETRAINING" | cut -d"|" -f16)
+    MIN_RUNTIME=$(echo "$PRETRAINING" | cut -d"|" -f17)
 
     if [[ "$STATUS" != "train" ]]; then
         SKIPPED_JOBS=$((SKIPPED_JOBS + 1))
@@ -96,6 +97,10 @@ while read PRETRAINING; do
 
     if [[ -z $RETRIES ]]; then
         RETRIES=0
+    fi
+
+    if [[ -z $MIN_RUNTIME ]]; then
+        MIN_RUNTIME=0
     fi
 
     JOB_GROUP="${GROUP}"
@@ -161,11 +166,11 @@ while read PRETRAINING; do
     fi
 
     # Run the job (use relative path for CONFIG_PATH)
-    CONFIG_PATH="$CONFIG_PATH_REL" EXPERIMENT_ID=$(run_gantry_training_job_with_dry_run "Run coupled training from uncoupled pretraining: ${JOB_GROUP}")
+    CONFIG_PATH="$CONFIG_PATH_REL" MIN_RUNTIME="$MIN_RUNTIME" EXPERIMENT_ID=$(run_gantry_training_job_with_dry_run "Run coupled training from uncoupled pretraining: ${JOB_GROUP}")
 
     # Append to experiments.txt
     append_to_experiments_file_with_dry_run "$EXPERIMENT_DIR" "$CONFIG_SUBDIR" "$JOB_GROUP" "$TAG" \
-        "$EXPERIMENT_ID" "training" "best_inference_ckpt" "normal" "--not-preemptible" "$GIT_BRANCH"
+        "$EXPERIMENT_ID" "training" "best_inference_ckpt" "normal" "--min-runtime 8h" "$GIT_BRANCH"
 
 done <"$INPUT_PATH"
 

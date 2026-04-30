@@ -172,12 +172,26 @@ This is useful for:
 
 Each job type reads from a pipe-delimited text file:
 
-- **Coupled training**: `pretraining.txt` (16 fields)
-- **Uncoupled training**: `training.txt` (10 fields)
-- **Coupled fine-tuning**: `finetuning.txt` (14 fields)
-- **Uncoupled fine-tuning**: `finetuning.txt` (14 fields)
-- **Resume**: `resuming.txt` (13 fields)
+- **Coupled training**: `pretraining.txt` (17 fields)
+- **Uncoupled training**: `training.txt` (11 fields)
+- **Coupled fine-tuning**: `finetuning.txt` (15 fields)
+- **Uncoupled fine-tuning**: `finetuning.txt` (15 fields)
+- **Resume**: `resuming.txt` (16 fields)
 - **Evaluate**: `experiments.txt` (10 fields)
+
+### `min_runtime` Field (Optional, Training Inputs)
+
+All training-related input files (`pretraining.txt`, `training.txt`, `finetuning.txt`,
+`resuming.txt`) include an optional `min_runtime` field as the last column. It is
+passed directly to gantry as `--min-runtime <value>` and controls how long a job
+is protected from preemption before it can be interrupted.
+
+- **Format**: A gantry-style duration string (e.g. `0`, `30m`, `1h`, `8h`).
+- **Default**: `0` (the server default — preemptible at any time).
+- **Auto-resume**: Training jobs always have auto-resume enabled (server default);
+  `--no-auto-resume` is never emitted on the training path.
+- **Example values**: `0` for short test runs, `1h` to protect a checkpoint cycle,
+  `8h` for a fully protected run.
 
 ### TAG Field (Optional)
 
