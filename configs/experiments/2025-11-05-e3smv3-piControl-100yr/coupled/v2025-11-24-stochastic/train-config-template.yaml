@@ -7,7 +7,6 @@ validate_using_ema: true
 ema:
   decay: 0.999
 max_epochs: 20
-n_coupled_steps: 4
 inference:
   n_coupled_steps: 876
   coupled_steps_in_memory: 2
@@ -135,7 +134,7 @@ optimization:
         step_each_iteration: true
     milestones: [1800]
 stepper_training:
-  n_coupled_steps: 2
+  n_coupled_steps: 4
   n_ensemble: 2
   ocean:
     parameter_init:
