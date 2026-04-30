@@ -307,13 +307,24 @@ def _merge_rows_for_index(
 # ---------------------------------------------------------------------------
 
 
+_BOUNDS_NAMES = {
+    "lon_bnds",
+    "lat_bnds",
+    "lon_b",
+    "lat_b",
+    "vertices_longitude",
+    "vertices_latitude",
+}
+
+
 def _open_netcdf_files(paths: list[Path], variable: str) -> xr.Dataset:
     """Open and concatenate a list of NetCDF files along time."""
     datasets = []
     for p in sorted(paths):
         ds = xr.open_dataset(p, use_cftime=True)
         if variable in ds.data_vars:
-            datasets.append(ds[[variable]])
+            keep = [variable] + [v for v in ds.data_vars if v in _BOUNDS_NAMES]
+            datasets.append(ds[keep])
     if not datasets:
         raise ValueError(f"No data found for {variable} in {len(paths)} files")
     return xr.concat(datasets, dim="time")
