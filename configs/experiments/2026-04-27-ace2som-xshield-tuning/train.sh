@@ -3,7 +3,7 @@
 set -e
 
 
-CONFIG_FILENAME="tune-xshield-1yr-5-1-split.yaml"
+CONFIG_FILENAME="tune-xshield-1yr-1-2-split.yaml"
 
 SCRIPT_PATH=$(git rev-parse --show-prefix)
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -24,15 +24,18 @@ PRE_TRAINED_WEIGHTS_DATASETS=("01KHJ5F1M6YKVZESPZAAVVD6G8" "01KHCEF1SBYCZCGDM78N
 # ACE2S ckpt used in paper
 ACE2S_CKPT=01KQDG7X72D4E2JJTGQ0ZF9J9T
 
-# tuned on XSHiELD, seed 0
+# tuned on XSHiELD, 1-1, seed 0
 TUNED_DATASET=01KQD8NF9HQD1QY2X0S132YH72
+
+# tuned on 5-1 split, seed 0
+PRE_TRAINED_WEIGHTS_DATASETS_5_1=("01KQG2R8RCWH1ZJS0FK3P9Z8C4", "01KQG2RE1A9BC3G0JD46T3HM18")
 
 
 #       --dataset $TUNED_DATASET:/pre-trained-weights \
 #        --dataset ${PRE_TRAINED_WEIGHTS_DATASETS[$seed]}:/pre-trained-weights \
-for seed in {0..1}; do
+for seed in {0..0}; do
     #job_name="ace2som-xshield-tune-1yr-even-split-single-decoder-seed${seed}"
-    job_name="ace2som-xshield-continue-tune-1yr-5-1-split-single-decoder-seed${seed}"
+    job_name="ace2som-xshield-continue-tune-1yr-1-2-split-single-decoder-seed${seed}"
     fine_tune_seed=$((seed + SEED_OFFSET))
     override="seed=${fine_tune_seed}"
     python -m fme.ace.validate_config --config_type train $CONFIG_PATH --override $override
@@ -53,8 +56,7 @@ for seed in {0..1}; do
         --env-secret WANDB_API_KEY=wandb-api-key-annak \
         --dataset-secret google-credentials:/tmp/google_application_credentials.json \
         --dataset $STATS_DATASET:/statsdata \
-        --dataset ${PRE_TRAINED_WEIGHTS_DATASETS[$seed]}:/pre-trained-weights \
-        --dataset $TUNED_DATASET:/pre-trained-weights \
+        --dataset ${PRE_TRAINED_WEIGHTS_DATASETS_5_1[$seed]}:/pre-trained-weights \
         --gpus $N_GPUS \
         --shared-memory 400GiB \
         --weka climate-default:/climate-default \
