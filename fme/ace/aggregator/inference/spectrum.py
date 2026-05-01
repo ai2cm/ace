@@ -11,6 +11,7 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.metrics import spherical_power_spectrum
+from fme.core.typing_ import TensorMapping
 
 from .data import InferenceBatchData
 
@@ -39,7 +40,10 @@ class SphericalPowerSpectrumAggregator:
 
     @torch.no_grad()
     def record_batch(self, data: InferenceBatchData):
-        prediction = data.prediction
+        self.record_data(data.prediction)
+
+    @torch.no_grad()
+    def record_data(self, prediction: TensorMapping):
         for name in prediction:
             batch_size = prediction[name].shape[0]
             time_size = prediction[name].shape[1]
@@ -128,11 +132,18 @@ class PairedSphericalPowerSpectrumAggregator:
 
     @torch.no_grad()
     def record_batch(self, data: InferenceBatchData):
-        self._gen_aggregator.record_batch(data.replace(target=None, target_norm=None))
-        if data.has_target:
-            self._target_aggregator.record_batch(
-                data.replace(prediction=data.target, target=None, target_norm=None)
-            )
+        target = data.target if data.has_target else None
+        self.record_paired_data(prediction=data.prediction, target=target)
+
+    @torch.no_grad()
+    def record_paired_data(
+        self,
+        prediction: TensorMapping,
+        target: TensorMapping | None,
+    ):
+        self._gen_aggregator.record_data(prediction)
+        if target is not None:
+            self._target_aggregator.record_data(target)
 
     @torch.no_grad()
     def get_logs(self, label: str) -> dict[str, plt.Figure | float]:
