@@ -13,7 +13,7 @@ import torch
 import fme
 from fme.ace.aggregator import OneStepAggregatorConfig
 from fme.ace.aggregator.inference import InferenceEvaluatorAggregatorConfig
-from fme.ace.data_loading.batch_data import BatchData
+from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_gridded_data, get_inference_data
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig
@@ -352,6 +352,11 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             initial_condition=initial_condition_requirements,
             n_ensemble=config.n_ensemble_per_ic,
         )
+        if config.n_ensemble_per_ic > 1:
+            ic = data.initial_condition.as_batch_data()
+            data._initial_condition = PrognosticState(
+                ic.broadcast_ensemble(config.n_ensemble_per_ic)
+            )
         stepper = config.load_stepper()
         stepper.set_eval()
 
@@ -440,6 +445,11 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             initial_condition=initial_condition_requirements,
             n_ensemble=config.n_ensemble_per_ic,
         )
+        if config.n_ensemble_per_ic > 1:
+            ic = prediction_data.initial_condition.as_batch_data()
+            prediction_data._initial_condition = PrognosticState(
+                ic.broadcast_ensemble(config.n_ensemble_per_ic)
+            )
         deriver = _Deriver(
             n_ic_timesteps=stepper_config.n_ic_timesteps,
             derive_func=stepper.derive_func,
