@@ -2,14 +2,13 @@ experiment_dir: /results
 save_checkpoint: true
 save_best_inference_epoch_checkpoints: false
 checkpoint_every_n_batches: 100
-ema_checkpoint_save_epochs:
-  step: 5
+checkpoint_save_epochs: null
 log_train_every_n_batches: 10
 validate_using_ema: true
 evaluate_before_training: true
 ema:
   decay: 0.999
-max_epochs: 20
+max_epochs: 40
 inference:
   n_coupled_steps: 1440
   coupled_steps_in_memory: 2
@@ -130,19 +129,29 @@ optimization:
         kwargs:
           start_factor: 0.01
           end_factor: 1
-          total_iters: 2000
+          total_iters: 3000
       - type: ConstantLR
         step_each_iteration: true
     milestones: [2000]
 stepper_training:
-  n_coupled_steps: 2
+  n_coupled_steps: 4
   n_ensemble: 2
   ocean:
     parameter_init:
       weights_path: /ocean_ckpt.tar
     loss_contributions:
-      n_steps: 2
       weight: 1.0
+      n_steps:
+        outcomes:
+          - steps: 0
+            probability: 0.1
+          - steps: 1
+            probability: 0.3
+          - steps: 2
+            probability: 0.3
+          - steps: 4
+            probability: 0.3
+      optimize_last_step_only: false
     loss:
       type: EnsembleLoss
       kwargs:
@@ -152,20 +161,21 @@ stepper_training:
     parameter_init:
       weights_path: /atmos_ckpt.tar
     loss_contributions:
+      weight: 1.0
       n_steps:
         outcomes:
+          - steps: 0
+            probability: 0.025
           - steps: 1
-            probability: 0.6
+            probability: 0.29
           - steps: 2
-            probability: 0.2
+            probability: 0.29
           - steps: 4
-            probability: 0.1
-          - steps: 12
-            probability: 0.05
-          - steps: 20
-            probability: 0.025
+            probability: 0.29
           - steps: 21
-            probability: 0.025
+            probability: 0.1
+          - steps: 41
+            probability: 0.05
       optimize_last_step_only: true
     loss:
       type: EnsembleLoss
