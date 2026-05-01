@@ -10,6 +10,8 @@ from fme.core.distributed import Distributed
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import WandB
 
+from .data import InferenceBatchData
+
 wandb = WandB.get_instance()
 
 
@@ -321,29 +323,24 @@ class VideoAggregator:
     @torch.no_grad()
     def record_batch(
         self,
-        target_data: TensorMapping,
-        gen_data: TensorMapping,
-        target_data_norm: TensorMapping | None = None,
-        gen_data_norm: TensorMapping | None = None,
-        i_time_start: int = 0,
+        data: InferenceBatchData,
     ):
-        del target_data_norm, gen_data_norm  # intentionally unused
         self._mean_data.record_batch(
-            target_data=target_data,
-            gen_data=gen_data,
-            i_time_start=i_time_start,
+            target_data=data.target,
+            gen_data=data.prediction,
+            i_time_start=data.i_time_start,
         )
         if self._error_data is not None:
             self._error_data.record_batch(
-                target_data=target_data,
-                gen_data=gen_data,
-                i_time_start=i_time_start,
+                target_data=data.target,
+                gen_data=data.prediction,
+                i_time_start=data.i_time_start,
             )
         if self._variance_data is not None:
             self._variance_data.record_batch(
-                target_data=target_data,
-                gen_data=gen_data,
-                i_time_start=i_time_start,
+                target_data=data.target,
+                gen_data=data.prediction,
+                i_time_start=data.i_time_start,
             )
 
     @torch.no_grad()

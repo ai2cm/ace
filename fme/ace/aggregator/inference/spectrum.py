@@ -13,6 +13,8 @@ from fme.core.gridded_ops import GriddedOperations
 from fme.core.metrics import spherical_power_spectrum
 from fme.core.typing_ import TensorMapping
 
+from .data import InferenceBatchData
+
 
 class SphericalPowerSpectrumAggregator:
     """Average the power spectrum over batch and time dimensions."""
@@ -37,11 +39,15 @@ class SphericalPowerSpectrumAggregator:
         )
 
     @torch.no_grad()
-    def record_batch(self, data: TensorMapping, i_time_start: int = 0):
-        for name in data:
-            batch_size = data[name].shape[0]
-            time_size = data[name].shape[1]
-            tensor = self._nan_fill_fn(data[name], name)
+    def record_batch(self, data: InferenceBatchData):
+        self.record_data(data.prediction)
+
+    @torch.no_grad()
+    def record_data(self, prediction: TensorMapping):
+        for name in prediction:
+            batch_size = prediction[name].shape[0]
+            time_size = prediction[name].shape[1]
+            tensor = self._nan_fill_fn(prediction[name], name)
             power_spectrum = spherical_power_spectrum(tensor, self._real_sht)
             mean_power_spectrum = torch.mean(power_spectrum, dim=(0, 1))
             new_count = batch_size * time_size
@@ -125,16 +131,19 @@ class PairedSphericalPowerSpectrumAggregator:
         self._report_plot = report_plot
 
     @torch.no_grad()
-    def record_batch(
+    def record_batch(self, data: InferenceBatchData):
+        target = data.target if data.has_target else None
+        self.record_paired_data(prediction=data.prediction, target=target)
+
+    @torch.no_grad()
+    def record_paired_data(
         self,
-        target_data: TensorMapping,
-        gen_data: TensorMapping,
-        target_data_norm: TensorMapping | None = None,
-        gen_data_norm: TensorMapping | None = None,
-        i_time_start: int = 0,
+        prediction: TensorMapping,
+        target: TensorMapping | None,
     ):
-        self._gen_aggregator.record_batch(gen_data)
-        self._target_aggregator.record_batch(target_data)
+        self._gen_aggregator.record_data(prediction)
+        if target is not None:
+            self._target_aggregator.record_data(target)
 
     @torch.no_grad()
     def get_logs(self, label: str) -> dict[str, plt.Figure | float]:

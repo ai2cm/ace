@@ -13,6 +13,7 @@ from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Image
 
 from ..plotting import plot_paneled_data
+from .data import InferenceBatchData
 
 
 @dataclasses.dataclass
@@ -119,17 +120,23 @@ class TimeMeanAggregator:
     @torch.no_grad()
     def record_batch(
         self,
-        data: TensorMapping,
-        i_time_start: int = 0,
+        data: InferenceBatchData,
     ):
-        ignore_initial = i_time_start == 0
-        self._data = self._add_or_initialize_time_mean(self._data, data, ignore_initial)
-        if self._n_samples is None:
-            self._n_samples = data[list(data)[0]].size(0)
-        if ignore_initial:
-            self._n_timesteps = data[list(data)[0]].size(1) - 1
+        if self._target == "denorm":
+            tensor_data = data.prediction
         else:
-            self._n_timesteps += data[list(data)[0]].size(1)
+            tensor_data = data.prediction_norm
+        i_time_start = data.i_time_start
+        ignore_initial = i_time_start == 0
+        self._data = self._add_or_initialize_time_mean(
+            self._data, tensor_data, ignore_initial
+        )
+        if self._n_samples is None:
+            self._n_samples = tensor_data[list(tensor_data)[0]].size(0)
+        if ignore_initial:
+            self._n_timesteps = tensor_data[list(tensor_data)[0]].size(1) - 1
+        else:
+            self._n_timesteps += tensor_data[list(tensor_data)[0]].size(1)
         if not self._reference_validated:
             if self._reference_means is not None:
                 self.get_logs(label="")
@@ -282,17 +289,20 @@ class TimeMeanEvaluatorAggregator:
     @torch.no_grad()
     def record_batch(
         self,
-        target_data: TensorMapping,
-        gen_data: TensorMapping,
-        target_data_norm: TensorMapping,
-        gen_data_norm: TensorMapping,
-        i_time_start: int = 0,
+        data: InferenceBatchData,
     ):
         if self._target == "norm":
-            target_data = target_data_norm
-            gen_data = gen_data_norm
-        self._target_agg.record_batch(target_data, i_time_start)
-        self._gen_agg.record_batch(gen_data, i_time_start)
+            target_tensor = data.target_norm
+            gen_tensor = data.prediction_norm
+        else:
+            target_tensor = data.target
+            gen_tensor = data.prediction
+        target_batch = data.replace(
+            prediction=target_tensor, prediction_norm=target_tensor
+        )
+        gen_batch = data.replace(prediction=gen_tensor, prediction_norm=gen_tensor)
+        self._target_agg.record_batch(target_batch)
+        self._gen_agg.record_batch(gen_batch)
 
     def _get_target_gen_pairs(self) -> list[_TargetGenPair]:
         target_data = self._target_agg.get_data()
