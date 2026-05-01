@@ -94,6 +94,7 @@ class SpectralConvS2(nn.Module):
         filter_residual: bool = False,
         lora_rank: int = 0,
         lora_alpha: float | None = None,
+        preserve_global_mean: bool = False,
     ):  # pragma: no cover
         super(SpectralConvS2, self).__init__()
 
@@ -126,6 +127,8 @@ class SpectralConvS2(nn.Module):
         l_start, l_stop, _ = l_slice.indices(self.modes_lat)
         self.modes_lat_local = l_stop - l_start
         self._l_slice = l_slice
+        self._preserve_global_mean = preserve_global_mean
+        self._has_global_mean = l_start == 0
 
         scale = math.sqrt(1 / (in_channels)) * torch.ones(self.modes_lat, 1, 1, 2)
         # seemingly the first weight is not really complex, so we need to account for that
@@ -302,6 +305,8 @@ class SpectralConvS2(nn.Module):
                 weight_local,
             )
             xp = xp + self.lora_scaling * lora_update
+            if self._preserve_global_mean and self._has_global_mean:
+                xp = torch.cat([x[..., :1, :], xp[..., 1:, :]], dim=-2)
             xp = xp.reshape(B, self.out_channels, H, W)
             x = xp.contiguous()
 
