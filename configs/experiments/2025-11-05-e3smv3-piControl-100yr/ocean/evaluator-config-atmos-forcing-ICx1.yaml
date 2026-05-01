@@ -20,15 +20,9 @@ loader:
       - data_path: /climate-default
         file_pattern: 2025-11-24-E3SMv3-piControl-100yr-coupled-ocean.zarr
         engine: zarr
-        subset:
-          start_time: '0401-01-03T12:00:00'
-          stop_time: '0441-01-03T12:00:00'
       - data_path: /climate-default
         file_pattern: 2025-11-24-E3SM-piControl-ocean-ice-19-levs-no-smoothing.zarr
         engine: zarr
-        subset:
-          start_time: '0401-01-03T12:00:00'
-          stop_time: '0441-01-03T12:00:00'
   num_data_workers: 4
 data_writer:
   save_prediction_files: false
