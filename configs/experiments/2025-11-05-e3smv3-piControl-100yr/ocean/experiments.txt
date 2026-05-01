@@ -1,9 +1,5 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace
 Samudra-v1124-train-95yr-dso4ysdg||01KHNFEB0236W1PRHD2KKN1BP1|done|best_inference_ckpt|high|||01KHNFEB0236W1PRHD2KKN1BP1||h100
 Samudra-v1124-train-95yr-mohzi23t||01KHNEWWZ8W8BR7SBWJMTB6GJ6|done|best_inference_ckpt|high|||01KHNEWWZ8W8BR7SBWJMTB6GJ6||h100
-Samudra-v1124-train-95yr-dso4ysdg||01KHNFEB0236W1PRHD2KKN1BP1|run_wp-white-amp0.1-ICx5|best_inference_ckpt|high|||01KHNFEB0236W1PRHD2KKN1BP1||h100
-Samudra-v1124-train-95yr-dso4ysdg||01KHNFEB0236W1PRHD2KKN1BP1|run_wp-red-tau1-amp0.1-ICx5|best_inference_ckpt|high|||01KHNFEB0236W1PRHD2KKN1BP1||h100
-Samudra-v1124-train-95yr-dso4ysdg||01KHNFEB0236W1PRHD2KKN1BP1|run_wp-red-tau6-amp0.1-ICx5|best_inference_ckpt|high|||01KHNFEB0236W1PRHD2KKN1BP1||h100
-Samudra-v1124-train-95yr-dso4ysdg||01KHNFEB0236W1PRHD2KKN1BP1|run_wp-red-tau24-amp0.1-ICx5|best_inference_ckpt|high|||01KHNFEB0236W1PRHD2KKN1BP1||h100
-Samudra-v1124-train-95yr-dso4ysdg||01KHNFEB0236W1PRHD2KKN1BP1|run_wp-red-tau73-amp0.1-ICx5|best_inference_ckpt|high|||01KHNFEB0236W1PRHD2KKN1BP1||h100
+Samudra-v1124-train-95yr-dso4ysdg||01KHNFEB0236W1PRHD2KKN1BP1|done|best_inference_ckpt|high|||01KHNFEB0236W1PRHD2KKN1BP1||h100
 Samudra-v1124-train-95yr-dso4ysdg||01KHNFEB0236W1PRHD2KKN1BP1|run_atmos-forcing-ICx1|best_inference_ckpt|high|||01KHNFEB0236W1PRHD2KKN1BP1||h100
