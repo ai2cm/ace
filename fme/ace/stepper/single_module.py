@@ -755,6 +755,24 @@ class StepperConfig:
         )
 
 
+@dataclasses.dataclass
+class CheckpointStepperConfig:
+    """
+    Defines a stepper by loading its configuration from a saved checkpoint.
+
+    Does not affect weight initialization, which is handled in a different
+    configuration (likely parameter initialization under stepper_training).
+
+    Parameters:
+        checkpoint_path: Path to a serialized checkpoint containing a stepper.
+    """
+
+    checkpoint_path: str
+
+    def to_stepper_config(self) -> StepperConfig:
+        return load_stepper_config_from_checkpoint(self.checkpoint_path)
+
+
 class EpochNotProvidedError(ValueError):
     pass
 
@@ -1778,6 +1796,22 @@ class StepperOverrideConfig:
     multi_call: Literal["keep"] | MultiCallConfig | None = "keep"
     derived_forcings: Literal["keep"] | DerivedForcingsConfig = "keep"
     prescribed_prognostic_names: Literal["keep"] | list[str] = "keep"
+
+
+def load_stepper_config_from_checkpoint(
+    checkpoint_path: str | pathlib.Path,
+) -> StepperConfig:
+    """Load a stepper configuration from a checkpoint without instantiating
+    the model.
+
+    Args:
+        checkpoint_path: The path to the serialized checkpoint.
+
+    Returns:
+        The configuration of the stepper serialized in the checkpoint.
+    """
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    return StepperConfig.from_stepper_state(checkpoint["stepper"])
 
 
 def load_stepper_config(

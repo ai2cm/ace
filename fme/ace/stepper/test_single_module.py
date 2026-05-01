@@ -31,6 +31,7 @@ from fme.ace.stepper.derived_forcings import DerivedForcingsConfig, ForcingDeriv
 from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
 from fme.ace.stepper.single_module import (
     AtmosphereCorrectorConfig,
+    CheckpointStepperConfig,
     EpochNotProvidedError,
     SingleModuleStepperConfig,
     Stepper,
@@ -42,6 +43,7 @@ from fme.ace.stepper.single_module import (
     get_serialized_stepper_vertical_coordinate,
     load_stepper,
     load_stepper_config,
+    load_stepper_config_from_checkpoint,
 )
 from fme.ace.stepper.time_length_probabilities import (
     TimeLength,
@@ -2358,3 +2360,28 @@ def test_ocean_derived_variables_integration(
         # hfds is diagnostic, so the generated net_energy_flux_into_ocean
         # differs from the reference
         assert not torch.allclose(pred_flux, ref_flux)
+
+
+def test_load_stepper_config_from_checkpoint(tmp_path: pathlib.Path):
+    from fme.ace.testing import save_stepper_checkpoint
+
+    checkpoint_path = tmp_path / "checkpoint.tar"
+    original_config = save_stepper_checkpoint(checkpoint_path)
+    loaded_config = load_stepper_config_from_checkpoint(checkpoint_path)
+    assert isinstance(loaded_config, StepperConfig)
+    assert loaded_config.derived_forcings == original_config.derived_forcings
+    assert loaded_config.step.type == original_config.step.type
+
+
+def test_checkpoint_stepper_config_to_stepper_config(tmp_path: pathlib.Path):
+    from fme.ace.testing import save_stepper_checkpoint
+
+    checkpoint_path = tmp_path / "checkpoint.tar"
+    original_config = save_stepper_checkpoint(checkpoint_path)
+    checkpoint_config = CheckpointStepperConfig(
+        checkpoint_path=str(checkpoint_path),
+    )
+    loaded_config = checkpoint_config.to_stepper_config()
+    assert isinstance(loaded_config, StepperConfig)
+    assert loaded_config.derived_forcings == original_config.derived_forcings
+    assert loaded_config.step.type == original_config.step.type
