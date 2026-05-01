@@ -1,12 +1,40 @@
 from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 import torch
 import xarray as xr
 
-from fme.ace.aggregator.inference.spectrum import PairedSphericalPowerSpectrumAggregator
+from fme.ace.aggregator.inference.data import InferenceBatchData
+from fme.ace.aggregator.inference.spectrum import (
+    PairedSphericalPowerSpectrumAggregator as _InferencePairedSpectrumAgg,
+)
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorMapping
+
+
+class PairedSphericalPowerSpectrumAggregator:
+    """Wraps the inference PairedSphericalPowerSpectrumAggregator for one-step use."""
+
+    def __init__(self, **kwargs: Any):
+        self._inner = _InferencePairedSpectrumAgg(**kwargs)
+
+    def record_batch(self, target_data: TensorMapping, gen_data: TensorMapping) -> None:
+        batch = InferenceBatchData(
+            prediction=gen_data,
+            prediction_norm=gen_data,
+            target=target_data,
+            target_norm=target_data,
+            time=None,
+            i_time_start=0,
+        )
+        self._inner.record_batch(batch)
+
+    def get_logs(self, label: str) -> dict[str, Any]:
+        return self._inner.get_logs(label)
+
+    def get_dataset(self) -> xr.Dataset:
+        return self._inner.get_dataset()
 
 
 class SpectrumAggregator:
@@ -16,7 +44,7 @@ class SpectrumAggregator:
         target_time: int = 1,
         nan_fill_fn: Callable[[torch.Tensor, str], torch.Tensor] = lambda x, _: x,
     ):
-        self._wrapped = PairedSphericalPowerSpectrumAggregator(
+        self._wrapped = _InferencePairedSpectrumAgg(
             gridded_operations=gridded_operations,
             report_plot=False,
             nan_fill_fn=nan_fill_fn,
