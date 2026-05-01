@@ -1,5 +1,4 @@
 resume_results_dir: /previous_results
-loss_weight_exponent: 0.75
 static_inputs:
   HGTsfc: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
   land_fraction: /climate-default/2025-11-19-X-SHiELD-AMIP-downscaling-land-fraction/3km/land_fraction.zarr
