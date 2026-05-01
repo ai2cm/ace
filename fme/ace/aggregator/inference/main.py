@@ -505,13 +505,11 @@ class InferenceEvaluatorAggregatorConfig:
                     )
             try:
                 flood_fill = SmoothFloodFill(num_steps=4)
-                aggregators["power_spectrum"] = (
-                    PairedSphericalPowerSpectrumAggregator(
-                        gridded_operations=ops,
-                        nan_fill_fn=flood_fill,
-                        report_plot=True,
-                        variable_metadata=dataset_info.variable_metadata,
-                    )
+                aggregators["power_spectrum"] = PairedSphericalPowerSpectrumAggregator(
+                    gridded_operations=ops,
+                    nan_fill_fn=flood_fill,
+                    report_plot=True,
+                    variable_metadata=dataset_info.variable_metadata,
                 )
             except NotImplementedError:
                 logging.warning(
@@ -587,14 +585,12 @@ class InferenceEvaluatorAggregatorConfig:
                         ),
                     )
             if n_timesteps * timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS:
-                aggregators["enso_coefficient"] = (
-                    EnsoCoefficientEvaluatorAggregator(
-                        initial_time,
-                        n_timesteps - 1,
-                        timestep,
-                        gridded_operations=ops,
-                        variable_metadata=dataset_info.variable_metadata,
-                    )
+                aggregators["enso_coefficient"] = EnsoCoefficientEvaluatorAggregator(
+                    initial_time,
+                    n_timesteps - 1,
+                    timestep,
+                    gridded_operations=ops,
+                    variable_metadata=dataset_info.variable_metadata,
                 )
 
         return InferenceEvaluatorAggregator(
