@@ -11,6 +11,7 @@ encoder_layers: 1
 factorization: null
 filter_num_groups: 1
 filter_output: false
+filter_preserves_global_mean: false
 filter_residual: false
 filter_type: linear
 global_layer_norm: false
