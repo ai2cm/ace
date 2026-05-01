@@ -17,6 +17,28 @@ def _channel_dim_positive(ndim: int, channel_dim: int) -> int:
     return channel_dim if channel_dim >= 0 else ndim + channel_dim
 
 
+def _find_channel_dim(
+    result: torch.Tensor,
+    n_channels: int,
+    input_ndim: int,
+    channel_dim: int,
+) -> int:
+    """Determine the channel dimension index in the loss output tensor.
+
+    Some loss functions reduce away spatial or ensemble dimensions, so the
+    channel dim position in the output may differ from the input.  We first
+    try the position implied by the input layout; if the output has fewer
+    dims we scan for a dimension whose size matches ``n_channels``.
+    """
+    cdim = _channel_dim_positive(input_ndim, channel_dim)
+    if result.ndim > cdim and result.shape[cdim] == n_channels:
+        return cdim
+    for i in range(result.ndim):
+        if result.shape[i] == n_channels:
+            return i
+    return cdim
+
+
 def _uniform_broadcast_per_channel(
     total: torch.Tensor, n_channels: int
 ) -> torch.Tensor:
@@ -149,7 +171,10 @@ class WeightedMappingLoss:
             target_tensors = torch.where(nan_mask, 0.0, target_tensors)
 
         result = self.loss(predict_tensors, target_tensors)
-        cdim = _channel_dim_positive(predict_tensors.ndim, self.channel_dim)
+        n_channels = len(self.packer.names)
+        cdim = _find_channel_dim(
+            result, n_channels, predict_tensors.ndim, self.channel_dim
+        )
         return LossOutput(
             loss=result,
             channel_dim=cdim,
@@ -223,12 +248,20 @@ class LpLoss(torch.nn.Module):
 
 
 class AreaWeightedMSELoss(torch.nn.Module):
-    def __init__(self, area_weighted_mean: Callable[[torch.Tensor], torch.Tensor]):
+    def __init__(
+        self,
+        area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
+        reduction: Literal["mean", "none"] = "mean",
+    ):
         super().__init__()
         self._area_weighted_mean = area_weighted_mean
+        self._reduction = reduction
 
     def __call__(self, x, y):
-        return torch.mean(self._area_weighted_mean((x - y) ** 2))
+        result = self._area_weighted_mean((x - y) ** 2)
+        if self._reduction == "mean":
+            return torch.mean(result)
+        return result
 
 
 class WeightedSum(torch.nn.Module):
@@ -242,7 +275,7 @@ class WeightedSum(torch.nn.Module):
         """
         Args:
             modules: A list of modules, each of which takes two tensors and
-                returns a scalar tensor.
+                returns a tensor. Outputs are broadcast-added with their weights.
             weights: A list of weights to apply to the outputs of the modules.
         """
         super().__init__()
@@ -339,9 +372,14 @@ class EnergyScoreLoss(torch.nn.Module):
     .. [1] https://sites.stat.washington.edu/people/raftery/Research/PDF/Gneiting2007jasa.pdf
     """
 
-    def __init__(self, sht: Callable[[torch.Tensor], torch.Tensor]):
+    def __init__(
+        self,
+        sht: Callable[[torch.Tensor], torch.Tensor],
+        reduction: Literal["mean", "none"] = "mean",
+    ):
         super().__init__()
         self.sht = sht
+        self._reduction = reduction
         self.scaling: torch.Tensor | None = None
         self.mode_weights: torch.Tensor | None = None
 
@@ -350,20 +388,18 @@ class EnergyScoreLoss(torch.nn.Module):
         y_hat = self.sht(y)
         if self.scaling is None:
             self.scaling = 2 * (x_hat.shape[-2] * x_hat.shape[-1]) ** 0.5
+        energy_score = get_energy_score(x_hat, y_hat)
         if self.mode_weights is None:
-            # we need to weight the modes properly,
-            # with each m mode contributing twice for m!=0:
-            H, W = x_hat.shape[-2:]
+            H, W = energy_score.shape[-2:]
             self.mode_weights = 2 * torch.ones(
-                (*([1] * (x_hat.ndim - 1)), H, W),
-                device=x_hat.device,
+                (*([1] * (energy_score.ndim - 2)), H, W),
+                device=energy_score.device,
             )
             self.mode_weights[..., 0] = 1
-        return (
-            (get_energy_score(x_hat, y_hat) * self.mode_weights)
-            .sum(dim=(-2, -1))
-            .mean()
-        ) / self.scaling
+        per_sample = (energy_score * self.mode_weights).sum(dim=(-2, -1)) / self.scaling
+        if self._reduction == "mean":
+            return per_sample.mean()
+        return per_sample
 
 
 class CRPSLoss(torch.nn.Module):
@@ -375,12 +411,16 @@ class CRPSLoss(torch.nn.Module):
     avoiding numerical issues with fair CRPS.
     """
 
-    def __init__(self, alpha: float):
+    def __init__(self, alpha: float, reduction: Literal["mean", "none"] = "mean"):
         super().__init__()
         self.alpha = alpha
+        self._reduction = reduction
 
     def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        return get_crps(x, y, alpha=self.alpha).mean()
+        crps = get_crps(x, y, alpha=self.alpha)
+        if self._reduction == "mean":
+            return crps.mean()
+        return crps.mean(dim=(-2, -1))
 
 
 class EnsembleLoss(torch.nn.Module):
@@ -389,6 +429,7 @@ class EnsembleLoss(torch.nn.Module):
         crps_weight: float,
         energy_score_weight: float,
         sht: Callable[[torch.Tensor], torch.Tensor],
+        reduction: Literal["mean", "none"] = "mean",
     ):
         super().__init__()
         if crps_weight < 0 or energy_score_weight < 0:
@@ -401,8 +442,8 @@ class EnsembleLoss(torch.nn.Module):
                 "crps_weight and energy_score_weight must sum to a positive value, "
                 f"got {crps_weight} and {energy_score_weight}"
             )
-        self.crps_loss = CRPSLoss(alpha=0.95)
-        self.energy_score_loss = EnergyScoreLoss(sht=sht)
+        self.crps_loss = CRPSLoss(alpha=0.95, reduction=reduction)
+        self.energy_score_loss = EnergyScoreLoss(sht=sht, reduction=reduction)
 
         self.crps_weight = crps_weight
         self.energy_score_weight = energy_score_weight
@@ -473,7 +514,6 @@ class LossConfig:
         """
         Args:
             reduction: The reduction to apply to the loss, either "mean" or "none".
-                Only used if the loss function is L1, MSE, or LpLoss.
             gridded_operations: The gridded operations to use in the case that
                 the loss function requires use of the horizontal dimensions.
         """
@@ -486,7 +526,9 @@ class LossConfig:
         elif self.type == "AreaWeightedMSE":
             if gridded_operations is None:
                 raise ValueError("gridded_operations is required for AreaWeightedMSE")
-            main_loss = AreaWeightedMSELoss(gridded_operations.area_weighted_mean)
+            main_loss = AreaWeightedMSELoss(
+                gridded_operations.area_weighted_mean, reduction=reduction
+            )
         elif self.type == "NaN":
             main_loss = NaNLoss()
         elif self.type == "EnsembleLoss":
@@ -499,6 +541,7 @@ class LossConfig:
                 sht=gridded_operations.get_real_sht(),
                 crps_weight=crps_weight,
                 energy_score_weight=energy_score_weight,
+                reduction=reduction,
                 **kwargs,
             )
 

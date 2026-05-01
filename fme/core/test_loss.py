@@ -400,6 +400,85 @@ def test_WeightedMappingLoss_with_target_nans():
     assert set(channel_losses.keys()) == set(out_names)
 
 
+def test_area_weighted_mse_reduction_none():
+    torch.manual_seed(0)
+    n_batch, n_channels, n_lat, n_lon = 4, 3, 8, 8
+    x = torch.rand(n_batch, n_channels, n_lat, n_lon, device=get_device())
+    target = torch.rand(n_batch, n_channels, n_lat, n_lon, device=get_device())
+    area = torch.rand(n_lat, 1, device=get_device()).broadcast_to(size=(n_lat, n_lon))
+    ops = LatLonOperations(area)
+    loss_none = AreaWeightedMSELoss(ops.area_weighted_mean, reduction="none")
+    loss_mean = AreaWeightedMSELoss(ops.area_weighted_mean, reduction="mean")
+    result_none = loss_none(x, target)
+    result_mean = loss_mean(x, target)
+    assert result_none.shape == (n_batch, n_channels)
+    torch.testing.assert_close(result_none.mean(), result_mean)
+
+
+def test_StepLossConfig_area_weighted_per_channel_loss():
+    """AreaWeightedMSE via StepLossConfig gives distinct per-channel losses."""
+    torch.manual_seed(0)
+    n_lat, n_lon = 8, 8
+    out_names = ["var_0", "var_1"]
+    area = torch.ones(n_lat, n_lon, device=get_device())
+    gridded_operations: GriddedOperations = LatLonOperations(area)
+    normalizer = StandardNormalizer(
+        means={name: torch.as_tensor(0.0) for name in out_names},
+        stds={name: torch.as_tensor(1.0) for name in out_names},
+    )
+    config = StepLossConfig(type="AreaWeightedMSE")
+    step_loss = config.build(
+        gridded_operations,
+        out_names=out_names,
+        normalizer=normalizer,
+    )
+    x_mapping = {
+        "var_0": torch.ones(4, n_lat, n_lon, device=get_device()),
+        "var_1": 2.0 * torch.ones(4, n_lat, n_lon, device=get_device()),
+    }
+    y_mapping = {
+        "var_0": 2.0 * torch.ones(4, n_lat, n_lon, device=get_device()),
+        "var_1": 2.0 * torch.ones(4, n_lat, n_lon, device=get_device()),
+    }
+    result = step_loss(x_mapping, y_mapping, step=0)
+    channel_losses = result.get_channel_losses()
+    assert set(channel_losses.keys()) == set(out_names)
+    assert channel_losses["var_0"] > 0.0
+    assert channel_losses["var_1"] == 0.0
+    torch.testing.assert_close(sum(channel_losses.values()), result.total())
+
+
+def test_crps_loss_reduction_none():
+    torch.manual_seed(0)
+    n_batch, n_ensemble, n_channels = 4, 2, 3
+    n_lat, n_lon = 8, 16
+    x = torch.rand(n_batch, n_ensemble, n_channels, n_lat, n_lon, device=get_device())
+    y = torch.rand(n_batch, 1, n_channels, n_lat, n_lon, device=get_device())
+    loss_none = CRPSLoss(alpha=0.95, reduction="none")
+    loss_mean = CRPSLoss(alpha=0.95, reduction="mean")
+    result_none = loss_none(x, y)
+    result_mean = loss_mean(x, y)
+    assert result_none.shape == (n_batch, n_channels)
+    torch.testing.assert_close(result_none.mean(), result_mean)
+
+
+def test_energy_score_loss_reduction_none(very_fast_only: bool):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+    torch.manual_seed(0)
+    n_batch, n_channels, n_lat, n_lon = 4, 3, 16, 32
+    x = torch.rand(n_batch, 2, n_channels, n_lat, n_lon, device=get_device())
+    y = torch.rand(n_batch, 1, n_channels, n_lat, n_lon, device=get_device())
+    ops = LatLonOperations(torch.ones((n_lat, n_lon), device=get_device()))
+    sht = ops.get_real_sht()
+    loss_none = EnergyScoreLoss(sht=sht, reduction="none")
+    loss_mean = EnergyScoreLoss(sht=sht, reduction="mean")
+    result_none = loss_none(x, y)
+    result_mean = loss_mean(x, y)
+    assert result_none.shape == (n_batch, n_channels)
+    torch.testing.assert_close(result_none.mean(), result_mean)
+
+
 def test_reduce_to_per_channel():
     """Unit test for _reduce_to_per_channel covering scalar, 1D, and N-D inputs."""
     n_c = 3
