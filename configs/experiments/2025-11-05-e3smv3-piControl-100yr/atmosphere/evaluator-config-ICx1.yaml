@@ -24,5 +24,15 @@ loader:
 aggregator:
   log_zonal_mean_images: false
 data_writer:
-  save_prediction_files: false
+  save_prediction_files: true
+  names:
+    - TAUX
+    - TAUY
+    - surface_precipitation_rate
+    - surface_upward_longwave_flux
+    - surface_upward_shortwave_flux
+    - FLDS
+    - FSDS
+    - LHFLX
+    - SHFLX
   save_monthly_files: false
