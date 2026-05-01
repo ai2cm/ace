@@ -1,0 +1,195 @@
+# CMIP6 daily pilot: smoke-test training config.
+#
+# Atmosphere-only, core variables only (intersection across all 121
+# standard-plev datasets). Uses SingleModuleStepConfig with
+# NoiseConditionedSFNO and label embeddings for multi-model conditioning.
+#
+# Known limitations of this smoke test (see training.md):
+# - Monthly forcings (ts) use non-causal interpolation (issue 14)
+# - No external forcings (CO2, aerosol, land use) (issue 15)
+# - No below-surface mask handling (issue 13)
+# - No optional variables (radiation, turbulent fluxes, surface wind)
+# - One-hot label embedding instead of learned projection (issue 6)
+
+experiment_dir: ./results/cmip6-daily-smoke-test
+save_checkpoint: true
+validate_using_ema: true
+max_epochs: 10
+seed: 42
+ema:
+  decay: 0.999
+log_train_every_n_batches: 50
+
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+
+train_loader:
+  batch_size: 16
+  num_data_workers: 4
+  prefetch_factor: 4
+  dataset:
+    data_dir: ./scripts/cmip6_data/data/cmip6-daily-pilot/v0
+    experiments: [historical, ssp245, ssp585]
+
+validation_loader:
+  batch_size: 16
+  num_data_workers: 4
+  dataset:
+    data_dir: ./scripts/cmip6_data/data/cmip6-daily-pilot/v0
+    experiments: [historical]
+    realizations: [1]
+
+optimization:
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    weight_decay: 0.01
+
+stepper_training:
+  n_forward_steps: 1
+  loss:
+    type: MSE
+    weights:
+      pr: 0.5
+
+stepper:
+  step:
+    type: single_module
+    config:
+      builder:
+        type: NoiseConditionedSFNO
+        conditional: true
+        config:
+          embed_dim: 256
+          noise_embed_dim: 0
+          filter_type: linear
+          use_mlp: true
+          num_layers: 6
+          operator_type: dhconv
+          separable: false
+          spectral_layers: 3
+          spectral_transform: sht
+      normalization:
+        network:
+          global_means_path: ./scripts/cmip6_data/data/cmip6-daily-pilot/v0/centering.nc
+          global_stds_path: ./scripts/cmip6_data/data/cmip6-daily-pilot/v0/scaling.nc
+        residual:
+          global_means_path: ./scripts/cmip6_data/data/cmip6-daily-pilot/v0/residual_centering.nc
+          global_stds_path: ./scripts/cmip6_data/data/cmip6-daily-pilot/v0/residual_scaling.nc
+      corrector:
+        force_positive_names:
+        - pr
+        - hus1000
+        - hus850
+        - hus700
+        - hus500
+        - hus250
+        - hus100
+        - hus50
+        - hus10
+      residual_prediction: true
+      in_names: &prognostic_and_forcing
+      # --- forcings (input-only) ---
+      - ts
+      # --- core plev: ua ---
+      - ua1000
+      - ua850
+      - ua700
+      - ua500
+      - ua250
+      - ua100
+      - ua50
+      - ua10
+      # --- core plev: va ---
+      - va1000
+      - va850
+      - va700
+      - va500
+      - va250
+      - va100
+      - va50
+      - va10
+      # --- core plev: hus ---
+      - hus1000
+      - hus850
+      - hus700
+      - hus500
+      - hus250
+      - hus100
+      - hus50
+      - hus10
+      # --- core plev: zg ---
+      - zg1000
+      - zg850
+      - zg700
+      - zg500
+      - zg250
+      - zg100
+      - zg50
+      - zg10
+      # --- core surface ---
+      - tas
+      - huss
+      - psl
+      - pr
+      # --- derived layer-mean T ---
+      - ta_derived_layer_1000_850
+      - ta_derived_layer_850_700
+      - ta_derived_layer_700_500
+      - ta_derived_layer_500_250
+      - ta_derived_layer_250_100
+      - ta_derived_layer_100_50
+      - ta_derived_layer_50_10
+      out_names:
+      # --- core plev: ua ---
+      - ua1000
+      - ua850
+      - ua700
+      - ua500
+      - ua250
+      - ua100
+      - ua50
+      - ua10
+      # --- core plev: va ---
+      - va1000
+      - va850
+      - va700
+      - va500
+      - va250
+      - va100
+      - va50
+      - va10
+      # --- core plev: hus ---
+      - hus1000
+      - hus850
+      - hus700
+      - hus500
+      - hus250
+      - hus100
+      - hus50
+      - hus10
+      # --- core plev: zg ---
+      - zg1000
+      - zg850
+      - zg700
+      - zg500
+      - zg250
+      - zg100
+      - zg50
+      - zg10
+      # --- core surface ---
+      - tas
+      - huss
+      - psl
+      - pr
+      # --- derived layer-mean T ---
+      - ta_derived_layer_1000_850
+      - ta_derived_layer_850_700
+      - ta_derived_layer_700_500
+      - ta_derived_layer_500_250
+      - ta_derived_layer_250_100
+      - ta_derived_layer_100_50
+      - ta_derived_layer_50_10
