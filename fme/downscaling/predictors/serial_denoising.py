@@ -222,7 +222,7 @@ class DenoisingMoEPredictor:
         static_inputs: StaticInputs | None,
         n_samples: int = 1,
     ) -> tuple[TensorDict, torch.Tensor, list[torch.Tensor]]:
-        latents, inputs = self._primary.prepare_generation_inputs(
+        inputs, latents = self._primary.prepare_generation_inputs(
             coarse_data, static_inputs, n_samples
         )
         generated_norm, latent_steps = edm_sampler(

@@ -13,6 +13,7 @@ from fme.ace.aggregator.inference.annual import (
     GlobalMeanAnnualAggregator,
     PairedGlobalMeanAnnualAggregator,
 )
+from fme.ace.aggregator.inference.data import InferenceBatchData
 from fme.ace.testing import DimSizes, MonthlyReferenceData
 from fme.core.coordinates import DimSize
 from fme.core.device import get_device
@@ -68,7 +69,15 @@ def test_paired_annual_aggregator(tmpdir):
         ],
         dims=["sample", "time"],
     )
-    agg.record_batch(time, target_data, gen_data)
+    batch = InferenceBatchData(
+        prediction=gen_data,
+        prediction_norm={},
+        target=target_data,
+        target_norm=None,
+        time=time,
+        i_time_start=0,
+    )
+    agg.record_batch(batch)
     logs = agg.get_logs(label="test")
     assert len(logs) > 0
     assert "test/a" in logs
@@ -129,7 +138,15 @@ def test_paired_annual_aggregator_with_nans(tmpdir):
         ],
         dims=["sample", "time"],
     )
-    agg.record_batch(time, target_data, gen_data)
+    batch = InferenceBatchData(
+        prediction=gen_data,
+        prediction_norm={},
+        target=target_data,
+        target_norm=None,
+        time=time,
+        i_time_start=0,
+    )
+    agg.record_batch(batch)
     annual_mean_series = agg.get_dataset()["a"].values
     expected_series = (
         xr.DataArray(
@@ -196,7 +213,15 @@ def test__get_gathered_means(use_mock_distributed):
         ],
         dims=["sample", "time"],
     )
-    agg.record_batch(time, target_data, gen_data)
+    batch = InferenceBatchData(
+        prediction=gen_data,
+        prediction_norm={},
+        target=target_data,
+        target_norm=None,
+        time=time,
+        i_time_start=0,
+    )
+    agg.record_batch(batch)
     if use_mock_distributed:
         world_size = 2
         with mock_distributed(world_size=world_size):
@@ -241,7 +266,15 @@ def test_annual_aggregator():
         ],
         dims=["sample", "time"],
     )
-    agg.record_batch(time, data)
+    batch = InferenceBatchData(
+        prediction=data,
+        prediction_norm={},
+        target=None,
+        target_norm=None,
+        time=time,
+        i_time_start=0,
+    )
+    agg.record_batch(batch)
     logs = agg.get_logs(label="test")
     assert len(logs) > 0
     assert "test/a" in logs
@@ -279,7 +312,15 @@ def test_annual_aggregator_with_nans():
         ],
         dims=["sample", "time"],
     )
-    agg.record_batch(time, data)
+    batch = InferenceBatchData(
+        prediction=data,
+        prediction_norm={},
+        target=None,
+        target_norm=None,
+        time=time,
+        i_time_start=0,
+    )
+    agg.record_batch(batch)
     expected_series = (
         xr.DataArray(
             data["a"].cpu().numpy(),
