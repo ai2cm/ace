@@ -98,7 +98,6 @@ class InlineInferenceConfig:
             total_forward_steps=self.n_forward_steps,
             window_requirements=window_requirements,
             initial_condition=initial_condition,
-            n_ensemble=self.n_ensemble_per_ic,
         )
         if self.n_ensemble_per_ic > 1:
             ic = data.initial_condition.as_batch_data()

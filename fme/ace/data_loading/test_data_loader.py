@@ -506,27 +506,13 @@ def test_loader_n_repeats_but_not_infer_timestep_error(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "num_data_workers, force_forkserver, n_ensemble",
-    [
-        (0, False, 1),
-        (3, False, 1),
-        (3, True, 1),
-        (0, False, 2),
-        (3, False, 2),
-        (3, True, 2),
-    ],
+    "num_data_workers, force_forkserver", [(0, False), (3, False), (3, True)]
 )
 def test_inference_data_loader(
-    n_ensemble,
-    tmp_path,
-    num_data_workers: int,
-    force_forkserver: bool,
-    very_fast_only: bool,
+    tmp_path, num_data_workers: int, force_forkserver: bool, very_fast_only: bool
 ):
-    # PyTorch DataLoader with workers routinely exceeds the 3s --very-fast CI budget
-    # (see test_xarray_loader_scheduled_epoch for the same pattern).
-    if very_fast_only and num_data_workers > 0:
-        pytest.skip("inference dataloader with workers is too slow for --very-fast")
+    if very_fast_only and force_forkserver:
+        pytest.skip("Skipping non-fast tests")
     _create_dataset_on_disk(tmp_path, n_times=14)
     batch_size = 2
     step = 7
@@ -554,14 +540,11 @@ def test_inference_data_loader(
         total_forward_steps=6,
         window_requirements=window_requirements,
         initial_condition=initial_condition_requirements,
-        n_ensemble=n_ensemble,
         _force_forkserver=force_forkserver,
     )
     data_loader = data.loader
     batch_data = next(iter(data_loader))
     assert isinstance(batch_data, BatchData)
-    # Loader yields single-ensemble batches; ensemble expansion happens in the stepper
-    assert batch_data.n_ensemble == 1
     for name in ["foo", "bar"]:
         assert isinstance(batch_data.data[name], torch.Tensor)
         assert batch_data.data[name].shape == (
@@ -580,7 +563,7 @@ def test_inference_data_loader(
     initial_condition = data.initial_condition.as_batch_data()
     assert isinstance(initial_condition, BatchData)
     assert "bar" not in initial_condition.data
-    assert initial_condition.data["foo"].shape == (batch_size * n_ensemble, 1, 16, 32)
+    assert initial_condition.data["foo"].shape == (batch_size, 1, 16, 32)
 
 
 @pytest.fixture(params=["julian", "proleptic_gregorian", "noleap"])

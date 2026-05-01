@@ -159,7 +159,6 @@ def get_inference_data(
     label_override: list[str] | None = None,
     surface_temperature_name: str | None = None,
     ocean_fraction_name: str | None = None,
-    n_ensemble: int | None = None,
     _force_forkserver: bool = False,
 ) -> InferenceGriddedData:
     """
@@ -177,7 +176,6 @@ def get_inference_data(
             set to None if no ocean temperature prescribing is being used.
         ocean_fraction_name: Name of the ocean fraction variable. Can be set to None
             if no ocean temperature prescribing is being used.
-        n_ensemble: Number of ensemble members per initial condition.
         _force_forkserver: Whether to force using forkserver multiprocessing context.
             This is useful for debugging or testing in cases where forkserver is not
             the default, but should generally be unused in production code.
@@ -185,8 +183,6 @@ def get_inference_data(
     Returns:
         A data loader for inference with coordinates and metadata.
     """
-    # Use n_ensemble=1 in the dataset so broadcast never runs in DataLoader workers.
-    # Ensemble expansion is done in the stepper (and for IC in get_initial_condition).
     dataset = InferenceDataset(
         config=config,
         total_forward_steps=total_forward_steps,
@@ -194,7 +190,6 @@ def get_inference_data(
         surface_temperature_name=surface_temperature_name,
         ocean_fraction_name=ocean_fraction_name,
         label_override=label_override,
-        n_ensemble=1,
     )
     properties = dataset.properties
 
@@ -222,12 +217,10 @@ def get_inference_data(
         persistent_workers=persistent_workers,
         worker_init_fn=worker_init_fn,
     )
-    n_ensemble_per_ic = n_ensemble if n_ensemble is not None else 1
     gridded_data = InferenceGriddedData(
         loader=loader,
         initial_condition=initial_condition,
         properties=properties,
-        n_ensemble_per_ic=n_ensemble_per_ic,
     )
 
     return gridded_data

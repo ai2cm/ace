@@ -316,10 +316,10 @@ class InferenceEvaluatorAggregator(
                 )
             )
             if n_ensemble_per_ic > 1:
-                self._ensemble_aggregators[f"ensemble_{name}"] = (
+                self._ensemble_aggregators["ensemble_step_20"] = (
                     get_one_step_ensemble_aggregator(
                         gridded_operations=ops,
-                        target_time=target_time,
+                        target_time=20,
                         log_mean_maps=False,
                         metadata=dataset_info.variable_metadata,
                     )
