@@ -2,7 +2,7 @@ import dataclasses
 import datetime
 import logging
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import torch
@@ -52,6 +52,54 @@ SLIGHTLY_LESS_THAN_FIVE_YEARS = datetime.timedelta(days=1800)
 NINO34_LAT = (-5, 5)
 NINO34_LON = (190, 240)
 
+VALID_METRIC_TYPES = frozenset(
+    {
+        "mean",
+        "step_mean",
+        "power_spectrum",
+        "zonal_mean",
+        "video",
+        "time_mean",
+        "histogram",
+        "seasonal",
+        "annual",
+        "enso_index",
+        "enso_coefficient",
+    }
+)
+
+
+class _VariableFilterAdapter:
+    """Wraps a sub-aggregator to filter InferenceBatchData to specified variables."""
+
+    def __init__(self, inner: Any, variables: Sequence[str]):
+        self._inner = inner
+        self._variables = frozenset(variables)
+
+    def record_batch(self, data: InferenceBatchData) -> None:
+        vs = self._variables
+        filtered = data.replace(
+            prediction={k: v for k, v in data.prediction.items() if k in vs},
+            prediction_norm={k: v for k, v in data.prediction_norm.items() if k in vs},
+            target=(
+                {k: v for k, v in data.target.items() if k in vs}
+                if data.has_target
+                else None
+            ),
+            target_norm=(
+                {k: v for k, v in data.target_norm.items() if k in vs}
+                if data.has_target_norm
+                else None
+            ),
+        )
+        self._inner.record_batch(filtered)
+
+    def get_logs(self, label: str, **kwargs: Any) -> dict[str, Any]:
+        return self._inner.get_logs(label, **kwargs)
+
+    def get_dataset(self) -> xr.Dataset:
+        return self._inner.get_dataset()
+
 
 @dataclasses.dataclass
 class StepMeanEntry:
@@ -82,6 +130,205 @@ class StepMeanEntry:
                 "a custom log_step_means configuration to override the default "
                 "(e.g. log_step_means: [])."
             )
+
+
+@dataclasses.dataclass
+class MetricConfig:
+    """Configuration for a single metric in the explicit metrics list.
+
+    Attributes:
+        type: Metric type. One of: "mean", "step_mean", "power_spectrum",
+            "zonal_mean", "video", "time_mean", "histogram", "seasonal",
+            "annual", "enso_index", "enso_coefficient".
+        variables: Variables to include. None means all available variables.
+        name: Custom metric name. Defaults vary by type (e.g. "mean",
+            "power_spectrum", "mean_step_{step}").
+        target: Whether to use denormalized ("denorm") or normalized ("norm")
+            data. Only applies to "mean", "step_mean", and "time_mean" types.
+        step: Forward step number. Required for "step_mean" type.
+        enable_extended_videos: Whether to log extended statistical videos.
+            Only applies to "video" type.
+        reference_data: Path to reference data. For "time_mean" (reference
+            means) and "annual" (monthly reference).
+        channel_mean_names: Variable names for channel mean computation.
+            Applies to norm-target "step_mean" and "time_mean" types.
+        zonal_mean_max_size: Max time dimension for zonal mean images.
+    """
+
+    type: str
+    variables: list[str] | None = None
+    name: str | None = None
+    target: Literal["denorm", "norm"] = "denorm"
+    step: int | None = None
+    enable_extended_videos: bool = False
+    reference_data: str | None = None
+    channel_mean_names: list[str] | None = None
+    zonal_mean_max_size: int | bool = 4096
+
+    def get_name(self) -> str:
+        if self.name is not None:
+            return self.name
+        if self.type == "step_mean":
+            if self.step is None:
+                raise ValueError("step is required for step_mean metric")
+            base = f"mean_step_{self.step}"
+        elif self.type == "mean":
+            base = "mean"
+        elif self.type == "time_mean":
+            base = "time_mean"
+        else:
+            return self.type
+        if self.target == "norm":
+            return f"{base}_norm"
+        return base
+
+    def __post_init__(self):
+        if self.type not in VALID_METRIC_TYPES:
+            raise ValueError(
+                f"Unknown metric type: {self.type!r}. "
+                f"Valid types: {sorted(VALID_METRIC_TYPES)}"
+            )
+        if self.type == "step_mean" and self.step is None:
+            raise ValueError("step is required for step_mean metric type")
+
+
+def _build_evaluator_metric(
+    metric: MetricConfig,
+    *,
+    ops: Any,
+    horizontal_coordinates: Any,
+    n_timesteps: int,
+    n_ic_steps: int,
+    timestep: datetime.timedelta,
+    variable_metadata: Any,
+    channel_mean_names: Sequence[str] | None,
+    monthly_reference_data: xr.Dataset | None,
+    time_mean_reference_data: xr.Dataset | None,
+    initial_time: xr.DataArray,
+) -> Any:
+    """Build a single evaluator sub-aggregator from a MetricConfig."""
+    t = metric.type
+    target = metric.target
+
+    if t == "mean":
+        return MeanAggregator(
+            ops,
+            target=target,
+            n_timesteps=n_timesteps,
+            variable_metadata=variable_metadata,
+        )
+    elif t == "step_mean":
+        assert metric.step is not None
+        target_time = metric.step + n_ic_steps - 1
+        is_norm = target == "norm"
+        return _OneStepMeanAdapter(
+            OneStepMeanAggregator(
+                ops,
+                target_time=target_time,
+                target=target,
+                log_loss=False,
+                include_bias=not is_norm,
+                include_grad_mag_percent_diff=not is_norm,
+                channel_mean_names=(
+                    (metric.channel_mean_names or channel_mean_names)
+                    if is_norm
+                    else None
+                ),
+            )
+        )
+    elif t == "power_spectrum":
+        return PairedSphericalPowerSpectrumAggregator(
+            gridded_operations=ops,
+            nan_fill_fn=SmoothFloodFill(num_steps=4),
+            report_plot=True,
+            variable_metadata=variable_metadata,
+        )
+    elif t == "zonal_mean":
+        if ops.zonal_mean is None:
+            raise ValueError(
+                "Zonal mean metric requires a grid type that supports zonal means."
+            )
+        return ZonalMeanAggregator(
+            zonal_mean=ops.zonal_mean,
+            n_timesteps=n_timesteps,
+            variable_metadata=variable_metadata,
+            zonal_mean_max_size=metric.zonal_mean_max_size,
+        )
+    elif t == "video":
+        if not isinstance(horizontal_coordinates, LatLonCoordinates):
+            raise ValueError("Video metric requires LatLonCoordinates.")
+        return VideoAggregator(
+            n_timesteps=n_timesteps,
+            enable_extended_videos=metric.enable_extended_videos,
+            variable_metadata=variable_metadata,
+        )
+    elif t == "time_mean":
+        is_norm = target == "norm"
+        if metric.reference_data is not None:
+            ref = xr.open_dataset(metric.reference_data, decode_timedelta=False)
+        elif not is_norm:
+            ref = time_mean_reference_data
+        else:
+            ref = None
+        return TimeMeanEvaluatorAggregator(
+            ops,
+            horizontal_dims=horizontal_coordinates.dims,
+            target=target,
+            variable_metadata=variable_metadata,
+            reference_means=ref,
+            channel_mean_names=(
+                (metric.channel_mean_names or channel_mean_names) if is_norm else None
+            ),
+        )
+    elif t == "histogram":
+        return HistogramAggregator()
+    elif t == "seasonal":
+        return SeasonalAggregator(
+            ops=ops,
+            variable_metadata=variable_metadata,
+        )
+    elif t == "annual":
+        if metric.reference_data is not None:
+            ref = xr.open_dataset(metric.reference_data, decode_timedelta=False)
+        else:
+            ref = monthly_reference_data
+        return PairedGlobalMeanAnnualAggregator(
+            ops=ops,
+            timestep=timestep,
+            variable_metadata=variable_metadata,
+            monthly_reference_data=ref,
+        )
+    elif t == "enso_index":
+        if not isinstance(horizontal_coordinates, LatLonCoordinates):
+            raise ValueError("enso_index metric requires LatLonCoordinates.")
+        if not isinstance(ops, LatLonOperations):
+            raise ValueError("enso_index metric requires LatLonOperations.")
+        nino34_region = LatLonRegion(
+            lat_bounds=NINO34_LAT,
+            lon_bounds=NINO34_LON,
+            lat=horizontal_coordinates.lat,
+            lon=horizontal_coordinates.lon,
+        )
+        return PairedRegionalIndexAggregator(
+            target_aggregator=RegionalIndexAggregator(
+                regional_weights=nino34_region.regional_weights,
+                regional_mean=ops.regional_area_weighted_mean,
+            ),
+            prediction_aggregator=RegionalIndexAggregator(
+                regional_weights=nino34_region.regional_weights,
+                regional_mean=ops.regional_area_weighted_mean,
+            ),
+        )
+    elif t == "enso_coefficient":
+        return EnsoCoefficientEvaluatorAggregator(
+            initial_time,
+            n_timesteps - 1,
+            timestep,
+            gridded_operations=ops,
+            variable_metadata=variable_metadata,
+        )
+    else:
+        raise ValueError(f"Unknown metric type: {t!r}")
 
 
 @dataclasses.dataclass
@@ -121,6 +368,22 @@ class InferenceEvaluatorAggregatorConfig:
     log_step_means: list[StepMeanEntry] = dataclasses.field(
         default_factory=lambda: [StepMeanEntry(step=20)]
     )
+    metrics: list[MetricConfig] | None = None
+
+    def __post_init__(self):
+        if self.metrics is not None:
+            names = [m.get_name() for m in self.metrics]
+            seen: set[str] = set()
+            duplicates: set[str] = set()
+            for n in names:
+                if n in seen:
+                    duplicates.add(n)
+                seen.add(n)
+            if duplicates:
+                raise ValueError(
+                    f"Duplicate metric names: {sorted(duplicates)}. "
+                    "Use the 'name' field to disambiguate."
+                )
 
     def build(
         self,
@@ -158,147 +421,177 @@ class InferenceEvaluatorAggregatorConfig:
         time_series_aggregators: dict[str, TimeSeriesLogs] = {}
         ensemble_aggregators: dict[str, SelectStepEnsembleAggregator] = {}
 
-        if self.log_global_mean_time_series:
-            mean_agg = MeanAggregator(
-                ops,
-                target="denorm",
-                n_timesteps=n_timesteps,
-                variable_metadata=dataset_info.variable_metadata,
-            )
-            aggregators["mean"] = mean_agg
-            time_series_aggregators["mean"] = mean_agg
-        if self.log_global_mean_norm_time_series:
-            mean_norm_agg = MeanAggregator(
-                ops,
-                target="norm",
-                n_timesteps=n_timesteps,
-                variable_metadata=dataset_info.variable_metadata,
-            )
-            aggregators["mean_norm"] = mean_norm_agg
-            time_series_aggregators["mean_norm"] = mean_norm_agg
-        for step_mean_entry in self.log_step_means:
-            step_mean_entry.validate(n_forward_steps)
-            step = step_mean_entry.step
-            name = step_mean_entry.get_name()
-            # -1 because step 0 (after IC) is the first forward step
-            target_time = step + n_ic_steps - 1
-            aggregators[name] = _OneStepMeanAdapter(
-                OneStepMeanAggregator(
-                    ops,
-                    target_time=target_time,
-                    target="denorm",
-                    log_loss=False,
-                )
-            )
-            aggregators[name + "_norm"] = _OneStepMeanAdapter(
-                OneStepMeanAggregator(
-                    ops,
-                    target_time=target_time,
-                    target="norm",
-                    log_loss=False,
-                    include_bias=False,
-                    include_grad_mag_percent_diff=False,
+        if self.metrics is not None:
+            for metric in self.metrics:
+                if (
+                    metric.type == "step_mean"
+                    and metric.step is not None
+                    and metric.step > n_forward_steps
+                ):
+                    raise ValueError(
+                        f"step_mean step {metric.step} exceeds "
+                        f"n_forward_steps={n_forward_steps}"
+                    )
+                name = metric.get_name()
+                agg = _build_evaluator_metric(
+                    metric,
+                    ops=ops,
+                    horizontal_coordinates=horizontal_coordinates,
+                    n_timesteps=n_timesteps,
+                    n_ic_steps=n_ic_steps,
+                    timestep=timestep,
+                    variable_metadata=dataset_info.variable_metadata,
                     channel_mean_names=channel_mean_names,
+                    monthly_reference_data=monthly_reference_data,
+                    time_mean_reference_data=time_mean_reference_data,
+                    initial_time=initial_time,
                 )
-            )
-            if n_ensemble_per_ic > 1:
-                ensemble_aggregators["ensemble_step_20"] = (
-                    get_one_step_ensemble_aggregator(
-                        gridded_operations=ops,
-                        target_time=20,
-                        log_mean_maps=False,
-                        metadata=dataset_info.variable_metadata,
+                if metric.variables is not None:
+                    agg = _VariableFilterAdapter(agg, metric.variables)
+                aggregators[name] = agg
+                if metric.type == "mean":
+                    time_series_aggregators[name] = agg
+        else:
+            if self.log_global_mean_time_series:
+                mean_agg = MeanAggregator(
+                    ops,
+                    target="denorm",
+                    n_timesteps=n_timesteps,
+                    variable_metadata=dataset_info.variable_metadata,
+                )
+                aggregators["mean"] = mean_agg
+                time_series_aggregators["mean"] = mean_agg
+            if self.log_global_mean_norm_time_series:
+                mean_norm_agg = MeanAggregator(
+                    ops,
+                    target="norm",
+                    n_timesteps=n_timesteps,
+                    variable_metadata=dataset_info.variable_metadata,
+                )
+                aggregators["mean_norm"] = mean_norm_agg
+                time_series_aggregators["mean_norm"] = mean_norm_agg
+            for step_mean_entry in self.log_step_means:
+                step_mean_entry.validate(n_forward_steps)
+                step = step_mean_entry.step
+                name = step_mean_entry.get_name()
+                target_time = step + n_ic_steps - 1
+                aggregators[name] = _OneStepMeanAdapter(
+                    OneStepMeanAggregator(
+                        ops,
+                        target_time=target_time,
+                        target="denorm",
+                        log_loss=False,
                     )
                 )
-        try:
-            flood_fill = SmoothFloodFill(num_steps=4)
-            aggregators["power_spectrum"] = PairedSphericalPowerSpectrumAggregator(
-                gridded_operations=ops,
-                nan_fill_fn=flood_fill,
-                report_plot=True,
-                variable_metadata=dataset_info.variable_metadata,
-            )
-        except NotImplementedError:
-            logging.warning(
-                "Power spectrum aggregator not implemented for this grid type, "
-                "omitting."
-            )
-        if self.log_zonal_mean_images:
-            if ops.zonal_mean is None:
+                aggregators[name + "_norm"] = _OneStepMeanAdapter(
+                    OneStepMeanAggregator(
+                        ops,
+                        target_time=target_time,
+                        target="norm",
+                        log_loss=False,
+                        include_bias=False,
+                        include_grad_mag_percent_diff=False,
+                        channel_mean_names=channel_mean_names,
+                    )
+                )
+                if n_ensemble_per_ic > 1:
+                    ensemble_aggregators["ensemble_step_20"] = (
+                        get_one_step_ensemble_aggregator(
+                            gridded_operations=ops,
+                            target_time=20,
+                            log_mean_maps=False,
+                            metadata=dataset_info.variable_metadata,
+                        )
+                    )
+            try:
+                flood_fill = SmoothFloodFill(num_steps=4)
+                aggregators["power_spectrum"] = PairedSphericalPowerSpectrumAggregator(
+                    gridded_operations=ops,
+                    nan_fill_fn=flood_fill,
+                    report_plot=True,
+                    variable_metadata=dataset_info.variable_metadata,
+                )
+            except NotImplementedError:
                 logging.warning(
-                    "Zonal mean aggregator not implemented for this grid type, "
-                    "omitting."
+                    "Power spectrum aggregator not implemented for this grid "
+                    "type, omitting."
                 )
-            else:
-                aggregators["zonal_mean"] = ZonalMeanAggregator(
-                    zonal_mean=ops.zonal_mean,
-                    n_timesteps=n_timesteps,
+            if self.log_zonal_mean_images:
+                if ops.zonal_mean is None:
+                    logging.warning(
+                        "Zonal mean aggregator not implemented for this grid "
+                        "type, omitting."
+                    )
+                else:
+                    aggregators["zonal_mean"] = ZonalMeanAggregator(
+                        zonal_mean=ops.zonal_mean,
+                        n_timesteps=n_timesteps,
+                        variable_metadata=dataset_info.variable_metadata,
+                        zonal_mean_max_size=self.log_zonal_mean_images,
+                    )
+            if isinstance(horizontal_coordinates, LatLonCoordinates):
+                if self.log_video:
+                    aggregators["video"] = VideoAggregator(
+                        n_timesteps=n_timesteps,
+                        enable_extended_videos=self.log_extended_video,
+                        variable_metadata=dataset_info.variable_metadata,
+                    )
+            aggregators["time_mean"] = TimeMeanEvaluatorAggregator(
+                ops,
+                horizontal_dims=horizontal_coordinates.dims,
+                variable_metadata=dataset_info.variable_metadata,
+                reference_means=time_mean_reference_data,
+            )
+            aggregators["time_mean_norm"] = TimeMeanEvaluatorAggregator(
+                ops,
+                horizontal_dims=horizontal_coordinates.dims,
+                target="norm",
+                variable_metadata=dataset_info.variable_metadata,
+                channel_mean_names=channel_mean_names,
+            )
+            if self.log_histograms:
+                aggregators["histogram"] = HistogramAggregator()
+            if self.log_seasonal_means:
+                aggregators["seasonal"] = SeasonalAggregator(
+                    ops=ops,
                     variable_metadata=dataset_info.variable_metadata,
-                    zonal_mean_max_size=self.log_zonal_mean_images,
                 )
-        if isinstance(horizontal_coordinates, LatLonCoordinates):
-            if self.log_video:
-                aggregators["video"] = VideoAggregator(
-                    n_timesteps=n_timesteps,
-                    enable_extended_videos=self.log_extended_video,
+            if n_timesteps * timestep > APPROXIMATELY_TWO_YEARS:
+                aggregators["annual"] = PairedGlobalMeanAnnualAggregator(
+                    ops=ops,
+                    timestep=timestep,
+                    variable_metadata=dataset_info.variable_metadata,
+                    monthly_reference_data=monthly_reference_data,
+                )
+                if (
+                    isinstance(horizontal_coordinates, LatLonCoordinates)
+                    and isinstance(ops, LatLonOperations)
+                    and self.log_nino34_index
+                ):
+                    nino34_region = LatLonRegion(
+                        lat_bounds=NINO34_LAT,
+                        lon_bounds=NINO34_LON,
+                        lat=horizontal_coordinates.lat,
+                        lon=horizontal_coordinates.lon,
+                    )
+                    aggregators["enso_index"] = PairedRegionalIndexAggregator(
+                        target_aggregator=RegionalIndexAggregator(
+                            regional_weights=nino34_region.regional_weights,
+                            regional_mean=ops.regional_area_weighted_mean,
+                        ),
+                        prediction_aggregator=RegionalIndexAggregator(
+                            regional_weights=nino34_region.regional_weights,
+                            regional_mean=ops.regional_area_weighted_mean,
+                        ),
+                    )
+            if n_timesteps * timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS:
+                aggregators["enso_coefficient"] = EnsoCoefficientEvaluatorAggregator(
+                    initial_time,
+                    n_timesteps - 1,
+                    timestep,
+                    gridded_operations=ops,
                     variable_metadata=dataset_info.variable_metadata,
                 )
-        aggregators["time_mean"] = TimeMeanEvaluatorAggregator(
-            ops,
-            horizontal_dims=horizontal_coordinates.dims,
-            variable_metadata=dataset_info.variable_metadata,
-            reference_means=time_mean_reference_data,
-        )
-        aggregators["time_mean_norm"] = TimeMeanEvaluatorAggregator(
-            ops,
-            horizontal_dims=horizontal_coordinates.dims,
-            target="norm",
-            variable_metadata=dataset_info.variable_metadata,
-            channel_mean_names=channel_mean_names,
-        )
-        if self.log_histograms:
-            aggregators["histogram"] = HistogramAggregator()
-        if self.log_seasonal_means:
-            aggregators["seasonal"] = SeasonalAggregator(
-                ops=ops,
-                variable_metadata=dataset_info.variable_metadata,
-            )
-        if n_timesteps * timestep > APPROXIMATELY_TWO_YEARS:
-            aggregators["annual"] = PairedGlobalMeanAnnualAggregator(
-                ops=ops,
-                timestep=timestep,
-                variable_metadata=dataset_info.variable_metadata,
-                monthly_reference_data=monthly_reference_data,
-            )
-            if (
-                isinstance(horizontal_coordinates, LatLonCoordinates)
-                and isinstance(ops, LatLonOperations)
-                and self.log_nino34_index
-            ):
-                nino34_region = LatLonRegion(
-                    lat_bounds=NINO34_LAT,
-                    lon_bounds=NINO34_LON,
-                    lat=horizontal_coordinates.lat,
-                    lon=horizontal_coordinates.lon,
-                )
-                aggregators["enso_index"] = PairedRegionalIndexAggregator(
-                    target_aggregator=RegionalIndexAggregator(
-                        regional_weights=nino34_region.regional_weights,
-                        regional_mean=ops.regional_area_weighted_mean,
-                    ),
-                    prediction_aggregator=RegionalIndexAggregator(
-                        regional_weights=nino34_region.regional_weights,
-                        regional_mean=ops.regional_area_weighted_mean,
-                    ),
-                )
-        if n_timesteps * timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS:
-            aggregators["enso_coefficient"] = EnsoCoefficientEvaluatorAggregator(
-                initial_time,
-                n_timesteps - 1,
-                timestep,
-                gridded_operations=ops,
-                variable_metadata=dataset_info.variable_metadata,
-            )
 
         return InferenceEvaluatorAggregator(
             aggregators=aggregators,
