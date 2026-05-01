@@ -156,6 +156,7 @@ class TrainConfig:
     evaluate_before_training: bool = True
     save_best_inference_epoch_checkpoints: bool = False
     lr_tuning: LRTuningConfig | None = None
+    resume_optimization_ckpt_path: str | None = None
     resume_results: ResumeResultsConfig | None = None
 
     def __post_init__(self):

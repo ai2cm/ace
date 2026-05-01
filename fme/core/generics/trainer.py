@@ -139,6 +139,9 @@ class TrainConfigProtocol(Protocol):
     @property
     def lr_tuning(self) -> LRTuningConfig | None: ...
 
+    @property
+    def resume_optimization_ckpt_path(self) -> str | None: ...
+
     def get_inference_epochs(self) -> list[int]: ...
 
 
@@ -262,6 +265,14 @@ class Trainer:
         if resuming:
             logging.info(f"Resuming training from {self.paths.latest_checkpoint_path}")
             self.restore_checkpoint(self.paths.latest_checkpoint_path)
+        elif config.resume_optimization_ckpt_path is not None:
+            logging.info(
+                "Loading optimizer state for fine-tuning from "
+                f"{config.resume_optimization_ckpt_path}"
+            )
+            _load_finetune_optimization_state(
+                self.optimization, config.resume_optimization_ckpt_path
+            )
 
         wandb = WandB.get_instance()
         wandb.watch(self.stepper.modules)
@@ -785,6 +796,42 @@ def _restore_checkpoint(trainer: Trainer, checkpoint_path):
     trainer._best_validation_loss = checkpoint["best_validation_loss"]
     trainer._best_inference_error = checkpoint["best_inference_error"]
     trainer._ema = EMATracker.from_state(checkpoint["ema"], trainer.stepper.modules)
+
+
+def _tensors_to_device(obj, device: torch.device):
+    """Recursively move all tensors in a nested dict/list to *device*."""
+    if isinstance(obj, torch.Tensor):
+        return obj.to(device)
+    elif isinstance(obj, dict):
+        return {k: _tensors_to_device(v, device) for k, v in obj.items()}
+    elif isinstance(obj, list | tuple):
+        return type(obj)(_tensors_to_device(v, device) for v in obj)
+    return obj
+
+
+def _load_finetune_optimization_state(optimization: Optimization, checkpoint_path: str):
+    """Load optimizer (and optionally grad scaler) state for fine-tuning.
+
+    Only loads the optimizer state dict and grad scaler state from the
+    checkpoint. Scheduler state and training counters are not restored, so
+    the current config's schedule starts from scratch. All freshly-built
+    optimizer per-group hyperparameters (lr, weight_decay, betas, eps, ...)
+    are preserved from the current job's TrainConfig.
+
+    The checkpoint is loaded on CPU so that only the optimization state
+    (not model weights, EMA, etc.) is transferred to the training device.
+    """
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    if "optimization" not in checkpoint:
+        raise ValueError(
+            f"Checkpoint at {checkpoint_path} does not contain optimization "
+            "state. Only checkpoints saved with include_optimization=True "
+            "(i.e. ckpt.tar) support fine-tune optimization loading."
+        )
+    optim_state = checkpoint["optimization"]
+    del checkpoint
+    optim_state = _tensors_to_device(optim_state, fme.get_device())
+    optimization.load_optimizer_state_for_finetuning(optim_state)
 
 
 def count_parameters(modules: torch.nn.ModuleList) -> int:
