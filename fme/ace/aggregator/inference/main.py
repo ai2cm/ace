@@ -294,6 +294,7 @@ class InferenceEvaluatorAggregator(
             step_mean_entry.validate(n_forward_steps)
             step = step_mean_entry.step
             name = step_mean_entry.get_name()
+            # -1 because step 0 (after IC) is the first forward step
             target_time = step + n_ic_steps - 1
             self._aggregators[name] = _OneStepMeanAdapter(
                 OneStepMeanAggregator(
