@@ -1387,6 +1387,18 @@ class CoupledStepperTrainLoss:
         for loss_obj in self._loss_objs.values():
             loss_obj.sample_n_steps()
 
+    def n_required_outer_steps(self, n_inner_steps: int) -> int:
+        """Minimum number of outer (ocean) steps needed so that every
+        component step contributing to the current batch's loss is computed.
+
+        Callers must invoke ``sample_n_steps()`` beforehand for stochastic
+        configs so the value reflects the current batch.
+        """
+        ocean_required = self._loss_objs["ocean"].n_required_forward_steps()
+        atmos_required = self._loss_objs["atmosphere"].n_required_forward_steps()
+        atmos_outer = -(-atmos_required // n_inner_steps)  # ceil division
+        return max(ocean_required, atmos_outer)
+
     def step_is_optimized(
         self,
         realm: Literal["ocean", "atmosphere"],
@@ -1456,6 +1468,14 @@ class CoupledTrainStepperConfig:
                     "or the component training configs' "
                     "ParameterInitializationConfig.weights_path, but not both."
                 )
+        if (
+            self.ocean.loss_contributions.is_null
+            and self.atmosphere.loss_contributions.is_null
+        ):
+            raise ValueError(
+                "At least one of ocean or atmosphere loss_contributions must be "
+                "non-null (non-zero weight and non-zero n_steps)."
+            )
         if self.n_ensemble == -1:
             use_ensemble_loss = "EnsembleLoss" in (
                 self.ocean.loss.type,
@@ -1670,7 +1690,14 @@ class CoupledTrainStepper(
         )
         output_iterator = iter(output_generator)
         output_list: list[ComponentEnsembleStepPrediction] = []
-        n_outer_steps = data.ocean_data.n_timesteps - self.n_ic_timesteps
+        n_outer_steps_data = data.ocean_data.n_timesteps - self.n_ic_timesteps
+        # Clamp to at least 1 outer step so downstream gen_data is non-empty
+        # in the rare case where stochastic samplers yield n_steps=0 for both
+        # realms; that batch contributes zero loss but a valid TrainOutput.
+        n_outer_steps = min(
+            n_outer_steps_data,
+            max(1, self._loss.n_required_outer_steps(self.n_inner_steps)),
+        )
         for i_outer in range(n_outer_steps):
             for i_inner in range(self.n_inner_steps):
                 global_atmos_step = i_outer * self.n_inner_steps + i_inner

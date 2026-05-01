@@ -81,6 +81,9 @@ class _StepLoss(StepLossABC):
     def step_is_optimized(self, step: int, n_total_steps: int | None = None) -> bool:
         return step < 2
 
+    def n_required_forward_steps(self) -> int:
+        return 2
+
     def __call__(
         self, prediction: StepPredictionABC, target_data: TensorMapping
     ) -> torch.Tensor:
@@ -402,6 +405,100 @@ def test_coupled_stepper_train_loss_sample_n_steps_delegates():
     coupled_loss.sample_n_steps()
     ocean_loss.sample_n_steps.assert_called_once()
     atmos_loss.sample_n_steps.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "n_steps, max_n_steps, expected",
+    [
+        (3, 10, 3),
+        (10, 3, 3),
+        (float("inf"), 5, 5),
+        (5.0, 5, 5),
+    ],
+)
+def test_loss_contributions_n_required_forward_steps(n_steps, max_n_steps, expected):
+    config = LossContributionsConfig(n_steps=n_steps)
+    loss = config.build(
+        loss_obj=Mock(spec=StepLoss), time_dim=1, max_n_steps=max_n_steps
+    )
+    assert loss.n_required_forward_steps() == expected
+
+
+@pytest.mark.parametrize(
+    "n_steps, max_n_steps, expected",
+    [
+        (3, 10, 3),
+        (10, 3, 3),
+        (float("inf"), 5, 5),
+    ],
+)
+def test_loss_contributions_n_required_forward_steps_optimize_last_step_only(
+    n_steps, max_n_steps, expected
+):
+    config = LossContributionsConfig(n_steps=n_steps, optimize_last_step_only=True)
+    loss = config.build(
+        loss_obj=Mock(spec=StepLoss), time_dim=1, max_n_steps=max_n_steps
+    )
+    assert loss.n_required_forward_steps() == expected
+
+
+def test_loss_contributions_n_required_forward_steps_after_sampling():
+    sampler = TimeLengthProbabilities(
+        outcomes=[TimeLengthProbability(steps=2, probability=1.0)]
+    )
+    config = LossContributionsConfig(n_steps=sampler)
+    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1, max_n_steps=5)
+    # before sampling, _n_steps == max_n_forward_steps == 2
+    assert loss.n_required_forward_steps() == 2
+    loss.sample_n_steps()
+    assert loss.n_required_forward_steps() == 2
+
+
+@pytest.mark.parametrize("config_kwargs", [{"n_steps": 0}, {"weight": 0.0}])
+def test_null_loss_contributions_n_required_forward_steps(config_kwargs):
+    config = LossContributionsConfig(**config_kwargs)
+    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1, max_n_steps=10)
+    assert loss.n_required_forward_steps() == 0
+
+
+@pytest.mark.parametrize(
+    "ocean_required, atmos_required, n_inner_steps, expected_outer",
+    [
+        (4, 0, 2, 4),
+        (0, 5, 3, 2),
+        (0, 6, 3, 2),
+        (0, 7, 3, 3),
+        (3, 5, 2, 3),
+        (1, 8, 2, 4),
+        (0, 0, 2, 0),
+    ],
+)
+def test_coupled_stepper_train_loss_n_required_outer_steps(
+    ocean_required, atmos_required, n_inner_steps, expected_outer
+):
+    ocean_loss = MagicMock(spec=StepLossABC)
+    atmos_loss = MagicMock(spec=StepLossABC)
+    ocean_loss.n_required_forward_steps.return_value = ocean_required
+    atmos_loss.n_required_forward_steps.return_value = atmos_required
+    coupled_loss = CoupledStepperTrainLoss(
+        ocean_loss=ocean_loss, atmosphere_loss=atmos_loss
+    )
+    assert coupled_loss.n_required_outer_steps(n_inner_steps) == expected_outer
+
+
+@pytest.mark.parametrize(
+    "config_kwargs, expected_is_null",
+    [
+        ({}, False),
+        ({"n_steps": 0}, True),
+        ({"weight": 0.0}, True),
+        ({"n_steps": 5.0}, False),
+        ({"n_steps": 0.0}, True),
+    ],
+)
+def test_loss_contributions_config_is_null(config_kwargs, expected_is_null):
+    config = LossContributionsConfig(**config_kwargs)
+    assert config.is_null is expected_is_null
 
 
 @pytest.mark.parametrize("ocean_config_kwargs", [{"n_steps": 0}, {"weight": 0.0}])

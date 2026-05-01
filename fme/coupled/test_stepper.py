@@ -1589,7 +1589,7 @@ def test_reloaded_stepper_gives_same_prediction():
         n_samples=1,
     )
     train_stepper_config = CoupledTrainStepperConfig(
-        n_coupled_steps=1,
+        n_coupled_steps=2,
         ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
         atmosphere=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
     )
@@ -1669,7 +1669,7 @@ def test_train_on_batch_optimize_last_step_only(optimize_last_step_only: bool):
     n_forward_times_atmosphere = 4
 
     train_stepper_config = CoupledTrainStepperConfig(
-        n_coupled_steps=1,
+        n_coupled_steps=2,
         ocean=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
             loss_contributions=LossContributionsConfig(
@@ -1720,7 +1720,7 @@ def test_train_on_batch_optimize_last_step_only_with_n_steps(
     ocean_n_steps = 1
 
     train_stepper_config = CoupledTrainStepperConfig(
-        n_coupled_steps=1,
+        n_coupled_steps=2,
         ocean=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
             loss_contributions=LossContributionsConfig(

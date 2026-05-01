@@ -40,7 +40,13 @@ def test_stepper_gradient_accumulation_integration():
     atmos_in_names = ["a_prog1", "a_prog2", "a_sfc_temp", "ocean_frac", "o_prog"]
     atmos_out_names = ["a_prog1", "a_prog2", "a_sfc_temp", "a_diag1", "a_diag2"]
 
+    train_stepper_config = CoupledTrainStepperConfig(
+        n_coupled_steps=2,
+        ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
+        atmosphere=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
+    )
     train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(
+        train_stepper_config=train_stepper_config,
         ocean_in_names=ocean_in_names,
         ocean_out_names=ocean_out_names,
         atmosphere_in_names=atmos_in_names,
@@ -248,7 +254,7 @@ class _LearnableTimesTwo(torch.nn.Module):
 
 def _build_train_stepper_and_data(atmos_n_steps):
     train_stepper_config = CoupledTrainStepperConfig(
-        n_coupled_steps=1,
+        n_coupled_steps=2,
         ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
         atmosphere=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
@@ -383,3 +389,141 @@ def test_unoptimized_steps_loss_metrics(atmos_n_steps):
         assert f"loss/atmosphere_step_{i}" not in result.atmosphere.metrics
     assert "loss/ocean_step_0" in result.ocean.metrics
     assert "loss/ocean_step_1" in result.ocean.metrics
+
+
+def test_outer_steps_truncated_to_loss_horizon():
+    """When the loss horizon is shorter than the data window, the outer step
+    loop should terminate early and skip unnecessary forward steps."""
+    # n_coupled_steps=2 → max ocean=2, max atmos=4. Set ocean weight=0 so only
+    # the atmosphere drives the required outer step count.
+    train_stepper_config = CoupledTrainStepperConfig(
+        n_coupled_steps=2,
+        ocean=ComponentTrainingConfig(
+            loss=StepLossConfig(type="MSE"),
+            loss_contributions=LossContributionsConfig(weight=0.0),
+        ),
+        atmosphere=ComponentTrainingConfig(
+            loss=StepLossConfig(type="MSE"),
+            # atmos n_steps=2 → atmos_outer = ceil(2 / 2) = 1
+            loss_contributions=LossContributionsConfig(n_steps=2),
+        ),
+    )
+    train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(
+        train_stepper_config=train_stepper_config,
+        ocean_in_names=["sst", "mask_0"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["surface_temperature", "ocean_fraction"],
+        atmosphere_out_names=["surface_temperature"],
+        n_forward_times_ocean=2,
+        n_forward_times_atmosphere=4,
+        n_samples=1,
+        atmosphere_builder=ModuleSelector(
+            type="prebuilt", config={"module": _LearnableAddOne()}
+        ),
+        ocean_builder=ModuleSelector(
+            type="prebuilt", config={"module": _LearnableTimesTwo()}
+        ),
+    )
+
+    optimization = NullOptimization()
+    optimization.set_mode(train_stepper.modules)
+    atmos_forward_data = train_stepper.atmosphere.get_forward_data(
+        coupled_data.data.atmosphere_data,
+        compute_derived_variables=False,
+    )
+    ocean_forward_data = train_stepper.ocean.get_forward_data(
+        coupled_data.data.ocean_data,
+        compute_derived_variables=False,
+    )
+    metrics = ComponentStepMetrics()
+    with optimization.autocast():
+        output_list = train_stepper._accumulate_loss(
+            coupled_data.data,
+            ocean_forward_data,
+            atmos_forward_data,
+            optimization,
+            metrics,
+        )
+
+    # Truncated to 1 outer step: 2 atmosphere steps + 1 ocean step
+    atmos_steps = sorted(s.step for s in output_list if s.realm == "atmosphere")
+    ocean_steps = sorted(s.step for s in output_list if s.realm == "ocean")
+    assert atmos_steps == [0, 1]
+    assert ocean_steps == [0]
+
+
+def test_coupled_train_stepper_config_rejects_all_null_loss():
+    with pytest.raises(ValueError, match="non-null"):
+        CoupledTrainStepperConfig(
+            n_coupled_steps=1,
+            ocean=ComponentTrainingConfig(
+                loss=StepLossConfig(type="MSE"),
+                loss_contributions=LossContributionsConfig(weight=0.0),
+            ),
+            atmosphere=ComponentTrainingConfig(
+                loss=StepLossConfig(type="MSE"),
+                loss_contributions=LossContributionsConfig(n_steps=0),
+            ),
+        )
+
+
+def test_outer_steps_clamped_to_one_when_both_realms_sample_zero():
+    """If both stochastic samplers yield n_steps=0 for a batch, the outer loop
+    still runs one step so downstream gen_data is non-empty (even though the
+    batch contributes zero loss)."""
+    from fme.ace.stepper.time_length_probabilities import (
+        TimeLengthProbabilities,
+        TimeLengthProbability,
+    )
+
+    zero_only_sampler = TimeLengthProbabilities(
+        outcomes=[TimeLengthProbability(steps=0, probability=1.0)]
+    )
+    train_stepper_config = CoupledTrainStepperConfig(
+        n_coupled_steps=2,
+        ocean=ComponentTrainingConfig(
+            loss=StepLossConfig(type="MSE"),
+            loss_contributions=LossContributionsConfig(n_steps=zero_only_sampler),
+        ),
+        atmosphere=ComponentTrainingConfig(
+            loss=StepLossConfig(type="MSE"),
+            loss_contributions=LossContributionsConfig(n_steps=zero_only_sampler),
+        ),
+    )
+    train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(
+        train_stepper_config=train_stepper_config,
+        ocean_in_names=["sst", "mask_0"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["surface_temperature", "ocean_fraction"],
+        atmosphere_out_names=["surface_temperature"],
+        n_forward_times_ocean=2,
+        n_forward_times_atmosphere=4,
+        n_samples=1,
+        atmosphere_builder=ModuleSelector(
+            type="prebuilt", config={"module": _LearnableAddOne()}
+        ),
+        ocean_builder=ModuleSelector(
+            type="prebuilt", config={"module": _LearnableTimesTwo()}
+        ),
+    )
+
+    result = train_stepper.train_on_batch(
+        data=coupled_data.data,
+        optimization=NullOptimization(),
+    )
+    # Loss is zero because no step is optimized for either realm.
+    torch.testing.assert_close(
+        result.total_metrics["loss"],
+        torch.tensor(0.0, device=result.total_metrics["loss"].device),
+    )
+    # Per-step loss metrics are not present (no step was optimized).
+    for i in range(4):
+        assert f"loss/atmosphere_step_{i}" not in result.atmosphere.metrics
+    for i in range(2):
+        assert f"loss/ocean_step_{i}" not in result.ocean.metrics
+    # gen_data is non-empty: 1 outer step plus prepended IC = 2 ocean,
+    # n_inner_steps + IC = 3 atmosphere timesteps.
+    for tensor in result.ocean.gen_data.values():
+        assert tensor.shape[2] == 2  # [sample, ensemble, time, ...]
+    for tensor in result.atmosphere.gen_data.values():
+        assert tensor.shape[2] == 3
