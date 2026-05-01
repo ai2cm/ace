@@ -128,28 +128,10 @@ class PairedSphericalPowerSpectrumAggregator:
 
     @torch.no_grad()
     def record_batch(self, data: InferenceBatchData):
-        self._gen_aggregator.record_batch(
-            InferenceBatchData(
-                prediction=data.prediction,
-                prediction_norm=data.prediction_norm,
-                target=None,
-                target_norm=None,
-                time=data.time,
-                i_time_start=data.i_time_start,
-            )
-        )
-        if data.target is not None:
+        self._gen_aggregator.record_batch(data.replace(target=None, target_norm=None))
+        if data.has_target:
             self._target_aggregator.record_batch(
-                InferenceBatchData(
-                    prediction=data.target,
-                    prediction_norm=data.target_norm
-                    if data.target_norm is not None
-                    else {},
-                    target=None,
-                    target_norm=None,
-                    time=data.time,
-                    i_time_start=data.i_time_start,
-                )
+                data.replace(prediction=data.target, target=None, target_norm=None)
             )
 
     @torch.no_grad()

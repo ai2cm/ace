@@ -260,11 +260,6 @@ class MeanAggregator:
         else:
             target_data = data.target
             gen_data = data.prediction
-        if target_data is None:
-            raise ValueError(
-                f"Target data is None for target type '{self._target}'. "
-                "MeanAggregator requires target data."
-            )
         for metric in self._variable_metrics.values():
             metric.record(
                 target=target_data,

@@ -57,9 +57,8 @@ class PairedGlobalMeanAnnualAggregator:
         data: InferenceBatchData,
     ):
         """Record a batch of data for computing time variability statistics."""
-        assert data.target is not None
-        target_data = dataclasses.replace(data, prediction=data.target)
-        gen_data = dataclasses.replace(data, prediction=data.prediction)
+        target_data = data.replace(prediction=data.target)
+        gen_data = data.replace(prediction=data.prediction)
         self._target_aggregator.record_batch(target_data)
         self._gen_aggregator.record_batch(gen_data)
 

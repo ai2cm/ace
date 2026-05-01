@@ -1,5 +1,4 @@
 import abc
-import dataclasses
 import logging
 import warnings
 from collections.abc import Callable
@@ -300,9 +299,8 @@ class PairedRegionalIndexAggregator:
         self,
         data: InferenceBatchData,
     ) -> None:
-        assert data.target is not None
-        target_data = dataclasses.replace(data, prediction=data.target)
-        prediction_data = dataclasses.replace(data, prediction=data.prediction)
+        target_data = data.replace(prediction=data.target)
+        prediction_data = data.replace(prediction=data.prediction)
         self._target_aggregator.record_batch(target_data)
         self._prediction_aggregator.record_batch(prediction_data)
 

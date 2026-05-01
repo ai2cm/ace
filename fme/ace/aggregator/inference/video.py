@@ -325,8 +325,6 @@ class VideoAggregator:
         self,
         data: InferenceBatchData,
     ):
-        if data.target is None:
-            raise ValueError("VideoAggregator requires target data.")
         self._mean_data.record_batch(
             target_data=data.target,
             gen_data=data.prediction,

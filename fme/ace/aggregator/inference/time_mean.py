@@ -297,24 +297,10 @@ class TimeMeanEvaluatorAggregator:
         else:
             target_tensor = data.target
             gen_tensor = data.prediction
-        if target_tensor is None:
-            raise ValueError("Target data is required for TimeMeanEvaluatorAggregator.")
-        target_batch = InferenceBatchData(
-            prediction=target_tensor,
-            prediction_norm=target_tensor,
-            target=None,
-            target_norm=None,
-            time=data.time,
-            i_time_start=data.i_time_start,
+        target_batch = data.replace(
+            prediction=target_tensor, prediction_norm=target_tensor
         )
-        gen_batch = InferenceBatchData(
-            prediction=gen_tensor,
-            prediction_norm=gen_tensor,
-            target=None,
-            target_norm=None,
-            time=data.time,
-            i_time_start=data.i_time_start,
-        )
+        gen_batch = data.replace(prediction=gen_tensor, prediction_norm=gen_tensor)
         self._target_agg.record_batch(target_batch)
         self._gen_agg.record_batch(gen_batch)
 

@@ -735,9 +735,6 @@ class InferenceAggregator(
             raise ValueError("data is empty")
         batch = InferenceBatchData(
             prediction=data.prediction,
-            prediction_norm=data.prediction,
-            target=None,
-            target_norm=None,
             time=data.time,
             i_time_start=self._n_timesteps_seen,
         )
@@ -762,9 +759,6 @@ class InferenceAggregator(
         batch_data = initial_condition.as_batch_data()
         batch = InferenceBatchData(
             prediction=batch_data.data,
-            prediction_norm=batch_data.data,
-            target=None,
-            target_norm=None,
             time=batch_data.time,
             i_time_start=0,
         )

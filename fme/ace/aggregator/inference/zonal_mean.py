@@ -147,8 +147,6 @@ class ZonalMeanAggregator:
         self,
         data: InferenceBatchData,
     ):
-        if data.target is None:
-            raise ValueError("ZonalMeanAggregator requires target data.")
         target_data = data.target
         gen_data = data.prediction
         i_time_start = data.i_time_start

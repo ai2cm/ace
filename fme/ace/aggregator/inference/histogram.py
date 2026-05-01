@@ -15,8 +15,6 @@ class HistogramAggregator:
         self,
         data: InferenceBatchData,
     ):
-        if data.target is None:
-            raise ValueError("HistogramAggregator requires target data.")
         self._histograms.record_batch(data.target, data.prediction)
 
     @torch.no_grad()
