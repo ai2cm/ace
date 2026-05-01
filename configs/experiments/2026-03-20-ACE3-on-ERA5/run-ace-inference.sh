@@ -3,10 +3,10 @@
 
 set -e
 
-JOB_NAME_BASE="ace-era5-pt-multi-step-shield-ft-lr1e-4-rs0"
+JOB_NAME_BASE="ace-era5-pt-multi-step-shield-ft-1940-2020-lr1e-4-rs0"
 JOB_GROUP="ace-foundation-model"
 
-EXISTING_RESULTS_DATASET="01KMCBQGB98GSGC79ZBSXKWWYR"
+EXISTING_RESULTS_DATASET="01KQABCK4PPWSQ8X35XBBTQK35"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
