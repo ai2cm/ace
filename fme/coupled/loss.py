@@ -38,6 +38,16 @@ class StepLossABC(abc.ABC):
         pass
 
     @abc.abstractmethod
+    def n_required_forward_steps(self) -> int:
+        """Number of consecutive leading forward steps that must be computed
+        so that every step contributing to the loss is available.
+
+        For stochastic configs, callers must invoke ``sample_n_steps()``
+        beforehand so the value reflects the current batch.
+        """
+        ...
+
+    @abc.abstractmethod
     def step_is_optimized(self, step: int) -> bool:
         """Returns True if the given step should contribute to the loss.
 
@@ -77,6 +87,17 @@ class LossContributionsConfig:
     weight: float = 1.0
     optimize_last_step_only: bool = False
 
+    @property
+    def is_null(self) -> bool:
+        """True when this config produces a ``NullLossContributions`` (i.e.
+        contributes nothing to the loss).
+        """
+        if self.weight == 0.0:
+            return True
+        if isinstance(self.n_steps, int | float) and self.n_steps == 0:
+            return True
+        return False
+
     def build(
         self,
         loss_obj: StepLoss,
@@ -112,6 +133,9 @@ class NullLossContributions(StepLossABC):
     @property
     def effective_loss_scaling(self) -> TensorDict:
         return self._loss.effective_loss_scaling
+
+    def n_required_forward_steps(self) -> int:
+        return 0
 
     def step_is_optimized(self, step: int) -> bool:
         return False
@@ -151,6 +175,11 @@ class LossContributions(StepLossABC):
     @property
     def effective_loss_scaling(self) -> TensorDict:
         return self._loss.effective_loss_scaling
+
+    def n_required_forward_steps(self) -> int:
+        if self._weight == 0.0:
+            return 0
+        return int(min(self._n_steps, self._max_n_steps))
 
     def step_is_optimized(self, step: int) -> bool:
         """Returns True if the step should contribute to the loss.
