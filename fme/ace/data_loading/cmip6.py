@@ -2,6 +2,7 @@ import dataclasses
 import logging
 import os
 from collections.abc import Sequence
+from typing import Literal
 
 import pandas as pd
 
@@ -25,11 +26,13 @@ class Cmip6DataConfig(DatasetConfigABC):
     one XarrayDataConfig entry.
 
     Parameters:
-        data_dir: Path to the directory containing index.csv and zarr stores.
+        data_dir: Path to the directory containing index.csv and data files.
         source_ids: Source model IDs to include. If None, all available.
-        exclude_source_ids: Source model IDs to exclude from training.
         experiments: Experiment IDs to include.
         realizations: Realization numbers (r values) to include. If None, all.
+        engine: Xarray engine for reading data files. "zarr" reads data.zarr
+            stores, "netcdf4" reads data.nc files. Use "netcdf4" with
+            zarr_to_netcdf.py-converted datasets for fork-safe data workers.
     """
 
     data_dir: str
@@ -39,13 +42,20 @@ class Cmip6DataConfig(DatasetConfigABC):
         default_factory=lambda: ["historical", "ssp585"]
     )
     realizations: list[int] | None = None
+    engine: Literal["zarr", "netcdf4"] = "zarr"
 
     def __post_init__(self):
         self._concat_config_cache: ConcatDatasetConfig | None = None
+        if self.engine not in ("zarr", "netcdf4"):
+            raise ValueError(f"engine must be 'zarr' or 'netcdf4', got {self.engine!r}")
+
+    @property
+    def _file_pattern(self) -> str:
+        return "data.zarr" if self.engine == "zarr" else "data.nc"
 
     @property
     def zarr_engine_used(self) -> bool:
-        return True
+        return self.engine == "zarr"
 
     def _get_concat_config(self) -> ConcatDatasetConfig:
         if self._concat_config_cache is None:
@@ -87,8 +97,8 @@ class Cmip6DataConfig(DatasetConfigABC):
             configs.append(
                 XarrayDataConfig(
                     data_path=data_path,
-                    file_pattern="data.zarr",
-                    engine="zarr",
+                    file_pattern=self._file_pattern,
+                    engine=self.engine,
                     labels=[row["label"]],
                 )
             )

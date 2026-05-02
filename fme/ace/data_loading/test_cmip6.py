@@ -212,3 +212,19 @@ def test_build(cmip6_data_dir):
         n_timesteps=IntSchedule.from_constant(2),
     )
     assert len(dataset) > 0
+
+
+def test_netcdf4_engine(cmip6_data_dir):
+    """Test that engine='netcdf4' produces the right file_pattern and engine."""
+    config = Cmip6DataConfig(data_dir=cmip6_data_dir, engine="netcdf4")
+    assert config.zarr_engine_used is False
+    assert config._file_pattern == "data.nc"
+    concat = config._get_concat_config()
+    for xarray_config in concat.concat:
+        assert xarray_config.engine == "netcdf4"
+        assert xarray_config.file_pattern == "data.nc"
+
+
+def test_invalid_engine():
+    with pytest.raises(ValueError, match="engine must be"):
+        Cmip6DataConfig(data_dir="/nonexistent", engine="h5netcdf")  # type: ignore[arg-type]
