@@ -1,20 +1,26 @@
 import dataclasses
 import datetime
 import os
+from collections.abc import Callable, Mapping
+from typing import Any
 
 import torch
 
 from fme.core.cli import ResumeResultsConfig
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.lr_tuning import LRTuningConfig
-from fme.core.generics.trainer import EndOfBatchCallback
+from fme.core.generics.trainer import EndOfBatchCallback, EndOfEpochCallback
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import Optimization, OptimizationConfig
 from fme.core.rand import set_seed
-from fme.core.typing_ import Slice
+from fme.core.typing_ import Slice, TensorDict, TensorMapping
 from fme.core.weight_ops import CopyWeightsConfig
-from fme.coupled.aggregator import InferenceEvaluatorAggregatorConfig
+from fme.coupled.aggregator import (
+    InferenceEvaluatorAggregator,
+    InferenceEvaluatorAggregatorConfig,
+)
 from fme.coupled.data_loading.config import CoupledDataLoaderConfig
 from fme.coupled.data_loading.getters import get_gridded_data, get_inference_data
 from fme.coupled.data_loading.gridded_data import GriddedData, InferenceGriddedData
@@ -71,6 +77,28 @@ class InlineInferenceConfig:
             self.aggregator.log_global_mean_time_series = False
             self.aggregator.log_global_mean_norm_time_series = False
 
+    def get_inference_data(
+        self,
+        window_requirements: CoupledDataRequirements,
+        initial_condition: CoupledPrognosticStateDataRequirements,
+    ) -> InferenceGriddedData:
+        return get_inference_data(
+            config=self.loader,
+            total_coupled_steps=self.n_coupled_steps,
+            window_requirements=window_requirements,
+            initial_condition=initial_condition,
+        )
+
+
+@dataclasses.dataclass
+class AdditionalInferenceConfig:
+    name: str
+    config: InlineInferenceConfig
+
+    def __post_init__(self):
+        if not self.name:
+            raise ValueError("AdditionalInferenceConfig name must be non-empty.")
+
 
 @dataclasses.dataclass
 class TrainConfig:
@@ -90,6 +118,10 @@ class TrainConfig:
             evaluation, and on catching a termination signal.
         experiment_dir: Directory where checkpoints and logs are saved.
         inference: Configuration for inline inference.
+        additional_inference: Configurations for additional inference runs.
+            Each entry has a name (used as wandb log prefix and output
+            subdirectory) and config. Not used to select checkpoints, but used
+            to provide metrics.
         n_coupled_steps: Number of coupled forward steps to take gradient over.
             This is equal to the number of forward steps of the ocean model.
         seed: Random seed for reproducibility. If set, is used for all types of
@@ -145,6 +177,9 @@ class TrainConfig:
         default_factory=lambda: CopyWeightsConfig(exclude=["*"])
     )
     ema: EMAConfig = dataclasses.field(default_factory=lambda: EMAConfig())
+    additional_inference: list[AdditionalInferenceConfig] = dataclasses.field(
+        default_factory=list
+    )
     validate_using_ema: bool = False
     checkpoint_save_epochs: Slice | None = None
     ema_checkpoint_save_epochs: Slice | None = None
@@ -159,6 +194,11 @@ class TrainConfig:
     resume_results: ResumeResultsConfig | None = None
 
     def __post_init__(self):
+        additional_inference_names: set[str] = set()
+        for entry in self.additional_inference:
+            if entry.name in additional_inference_names:
+                raise ValueError(f"Duplicate additional_inference name: {entry.name!r}")
+            additional_inference_names.add(entry.name)
         if self.lr_tuning is not None and self.optimization.has_lr_schedule:
             raise ValueError(
                 "lr_tuning and optimization.scheduler cannot both be specified; "
@@ -241,9 +281,7 @@ class TrainBuilders:
     def get_evaluation_inference_data(
         self,
     ) -> InferenceGriddedData:
-        return get_inference_data(
-            config=self.config.inference.loader,
-            total_coupled_steps=self.config.inference.n_coupled_steps,
+        return self.config.inference.get_inference_data(
             window_requirements=self._get_evaluation_window_data_requirements(),
             initial_condition=self._get_initial_condition_data_requirements(),
         )
@@ -272,3 +310,72 @@ class TrainBuilders:
         self, modules: list[torch.nn.Module]
     ) -> EndOfBatchCallback:
         return lambda: None
+
+    def get_end_of_epoch_callback(
+        self,
+        inference_one_epoch: Callable[
+            [InferenceGriddedData, InferenceEvaluatorAggregator, str, int],
+            Mapping[str, Any],
+        ],
+        ocean_normalize: Callable[[TensorMapping], TensorDict],
+        atmosphere_normalize: Callable[[TensorMapping], TensorDict],
+        output_dir: str,
+        variable_metadata: Mapping[str, VariableMetadata],
+        save_diagnostics: bool,
+        n_ic_timesteps_ocean: int,
+        n_ic_timesteps_atmosphere: int,
+        n_inner_steps: int,
+    ) -> EndOfEpochCallback:
+        entries_data: list[
+            tuple[AdditionalInferenceConfig, InferenceGriddedData, CoupledDatasetInfo]
+        ] = []
+        for entry in self.config.additional_inference:
+            window_requirements = (
+                self.config.stepper.get_evaluation_window_data_requirements(
+                    entry.config.coupled_steps_in_memory
+                )
+            )
+            data = entry.config.get_inference_data(
+                window_requirements=window_requirements,
+                initial_condition=self._get_initial_condition_data_requirements(),
+            )
+            dataset_info = data.dataset_info.update_variable_metadata(
+                dict(variable_metadata)
+            )
+            entries_data.append((entry, data, dataset_info))
+
+        def end_of_epoch_ops(epoch: int) -> Mapping[str, Any]:
+            all_logs: dict[str, Any] = {}
+            for entry, data, dataset_info in entries_data:
+                if entry.config.epochs.contains(epoch):
+                    entry_output_dir = os.path.join(
+                        output_dir, "additional_inference", entry.name
+                    )
+                    n_timesteps_ocean = (
+                        entry.config.n_coupled_steps + n_ic_timesteps_ocean
+                    )
+                    n_timesteps_atmosphere = (
+                        entry.config.n_coupled_steps * n_inner_steps
+                        + n_ic_timesteps_atmosphere
+                    )
+                    aggregator = entry.config.aggregator.build(
+                        dataset_info=dataset_info,
+                        n_timesteps_ocean=n_timesteps_ocean,
+                        n_timesteps_atmosphere=n_timesteps_atmosphere,
+                        initial_time=data.initial_time,
+                        ocean_normalize=ocean_normalize,
+                        atmosphere_normalize=atmosphere_normalize,
+                        save_diagnostics=save_diagnostics,
+                        output_dir=entry_output_dir,
+                    )
+                    all_logs.update(
+                        inference_one_epoch(
+                            data,
+                            aggregator,
+                            entry.name,
+                            epoch,
+                        )
+                    )
+            return all_logs
+
+        return end_of_epoch_ops
