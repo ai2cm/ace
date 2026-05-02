@@ -10,7 +10,6 @@ evaluate_before_training: false
 ema:
   decay: 0.999
 max_epochs: 10
-n_coupled_steps: 4
 inference:
   n_coupled_steps: 876
   coupled_steps_in_memory: 12
@@ -129,6 +128,7 @@ optimization:
   scheduler:
     type: CosineAnnealingLR
 stepper_training:
+  n_coupled_steps: 4
   parameter_init:
     checkpoint_path: /ckpt.tar
   ocean:
