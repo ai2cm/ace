@@ -100,3 +100,5 @@ ft_fto-v1124-train-95yr-gvot5r9r-r4gxuw78||01KKHFZ0P374TZERZNBFKT55XR|done|best_
 ft_fto-v1124-train-95yr-hp5rcl7w-r4gxuw78-ft-AMIP-ft-8fws||01KKHFZAF602C3FR267918VBG8|done|best_inference_ckpt|high|--not-preemptible||||h100
 
 ft_fto-v1124-train-95yr-gvot5r9r-dso4ysdg||01KK0THF96WJJQW0V7GYPPC6EX|run_ICx1-100yr|best_inference_ckpt|high|--not-preemptible||||h100
+
+ft_fto-v1124-train-95yr-gvot5r9r-dso4ysdg-save-best-enso||01KQKETNWGSG4Y35Q7Z97S96SY|training|best_inference_ckpt|normal|--min-runtime 8h
