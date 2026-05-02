@@ -563,6 +563,25 @@ python make_presence.py --config configs/pilot.yaml
   weighting in xesmf as a follow-up. See
   `figures/cesm2_fv2_sftlf_overshoot.png`.
 
+- **KACE-1-0-G sparse NaN at 10 hPa**: All KACE-1-0-G datasets have
+  sparse NaN values (typically 1 grid cell per timestep) in the 10 hPa
+  variables (ua10, va10, hus10, zg10). These propagate through the
+  network as NaN input and produce all-NaN model output.
+  **KACE-1-0-G is excluded from training** via
+  `selection.exclude_source_ids` in `pilot.yaml`.
+
+- **EC-Earth3/historical/r4i1p1f1 missing plev timesteps**: The last
+  13 timesteps (indices 347-359, late December) have all-NaN values
+  for all 3D pressure-level variables (ua, va, hus, zg at all levels),
+  while surface variables (tas, huss, psl, pr) and derived layer-mean
+  temperatures are present. Likely incomplete data upload.
+  Other EC-Earth3 members are unaffected.
+
+- **HadGEM3-GC31-MM/historical/r2i1p1f3 missing plev timesteps**: 22
+  timesteps (indices 40-61, mid-February) have all-NaN values for all
+  3D pressure-level variables, while surface variables are present.
+  Other HadGEM3-GC31-MM members are unaffected.
+
 ### Known ESGF data-quality issues
 
 - **CESM2-WACCM-FV2** publishes files on ESGF with overlapping time

@@ -27,12 +27,14 @@ class Cmip6DataConfig(DatasetConfigABC):
     Parameters:
         data_dir: Path to the directory containing index.csv and zarr stores.
         source_ids: Source model IDs to include. If None, all available.
+        exclude_source_ids: Source model IDs to exclude from training.
         experiments: Experiment IDs to include.
         realizations: Realization numbers (r values) to include. If None, all.
     """
 
     data_dir: str
     source_ids: list[str] | None = None
+    exclude_source_ids: list[str] = dataclasses.field(default_factory=list)
     experiments: list[str] = dataclasses.field(
         default_factory=lambda: ["historical", "ssp585"]
     )
@@ -56,6 +58,8 @@ class Cmip6DataConfig(DatasetConfigABC):
         mask = idx["status"] == "ok"
         if self.source_ids is not None:
             mask &= idx["source_id"].isin(self.source_ids)
+        if self.exclude_source_ids:
+            mask &= ~idx["source_id"].isin(self.exclude_source_ids)
         mask &= idx["experiment"].isin(self.experiments)
         if self.realizations is not None:
             mask &= idx["variant_r"].isin(self.realizations)

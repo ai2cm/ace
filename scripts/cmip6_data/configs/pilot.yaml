@@ -21,6 +21,14 @@ selection:
     # ~60 K (unphysical). See README's "Known model-side data quirks"
     # and figures/inm_cm4_8_zg_top.png.
     - INM-CM4-8
+    # AWI-CM-1-1-MR publishes 3D variables on a non-standard plev grid
+    # (not plev8), so derived layer variable names don't match the
+    # pipeline's plev8 convention.
+    - AWI-CM-1-1-MR
+    # KACE-1-0-G has sparse NaN values at 10 hPa (ua10, va10, hus10,
+    # zg10) — typically 1 grid cell per timestep — which propagate
+    # through the network and produce all-NaN model output.
+    - KACE-1-0-G
   experiments: [historical, ssp245, ssp585]
   # require_i: 1                  # default: i1 only; null = keep all i
   # max_members_per_f: 3          # default: 3 r per (source_id, exp, p, f)

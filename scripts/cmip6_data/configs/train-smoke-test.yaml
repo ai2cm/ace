@@ -26,24 +26,25 @@ logging:
   log_to_file: true
 
 train_loader:
-  batch_size: 16
-  num_data_workers: 4
-  prefetch_factor: 4
+  batch_size: 4
+  num_data_workers: 0
   dataset:
     data_dir: ./scripts/cmip6_data/data/cmip6-daily-pilot/v0
+    exclude_source_ids: [AWI-CM-1-1-MR, KACE-1-0-G]
     experiments: [historical, ssp245, ssp585]
 
 validation_loader:
-  batch_size: 16
-  num_data_workers: 4
+  batch_size: 4
+  num_data_workers: 0
   dataset:
     data_dir: ./scripts/cmip6_data/data/cmip6-daily-pilot/v0
+    exclude_source_ids: [AWI-CM-1-1-MR, KACE-1-0-G]
     experiments: [historical]
     realizations: [1]
 
 optimization:
   enable_automatic_mixed_precision: false
-  lr: 0.0001
+  lr: 0.0005
   optimizer_type: AdamW
   kwargs:
     weight_decay: 0.01
