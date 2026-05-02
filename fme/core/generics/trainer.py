@@ -137,6 +137,12 @@ class TrainConfigProtocol(Protocol):
     def save_best_inference_epoch_checkpoints(self) -> bool: ...
 
     @property
+    def best_enso_checkpoint_metric(self) -> str | None: ...
+
+    @property
+    def best_enso_checkpoint_climate_tolerance(self) -> float: ...
+
+    @property
     def lr_tuning(self) -> LRTuningConfig | None: ...
 
     def get_inference_epochs(self) -> list[int]: ...
@@ -187,6 +193,10 @@ class CheckpointPaths:
 
     def best_inference_epoch_checkpoint_path(self, epoch: int) -> str:
         return os.path.join(self.checkpoint_dir, f"best_inference_ckpt_{epoch:04d}.tar")
+
+    @property
+    def best_enso_checkpoint_path(self) -> str:
+        return os.path.join(self.checkpoint_dir, "best_enso_ckpt.tar")
 
 
 def chain_signal_handler(sig, handler):
@@ -245,6 +255,8 @@ class Trainer:
         self._current_epoch_num_batches_seen = 0
         self._best_validation_loss = torch.inf
         self._best_inference_error = torch.inf
+        self._best_enso_score: float = torch.inf
+        self._best_enso_inference_error: float = torch.inf
 
         self.stepper = stepper
         self.stepper.update_training_history(TrainingJob.from_env())
@@ -404,6 +416,11 @@ class Trainer:
             inference_error = inference_logs.get(
                 "inference/time_mean_norm/rmse/channel_mean", None
             )
+            enso_metric = (
+                inference_logs.get(self.config.best_enso_checkpoint_metric, None)
+                if self.config.best_enso_checkpoint_metric is not None
+                else None
+            )
             # need to get the learning rate before stepping the scheduler
             lr = self.optimization.learning_rate
             self.optimization.step_scheduler(valid_loss=valid_loss, is_iteration=False)
@@ -448,7 +465,7 @@ class Trainer:
 
             if self._should_save_checkpoints():
                 logging.info(f"Saving checkpoints for epoch {self._epochs_trained}")
-                self.save_all_checkpoints(valid_loss, inference_error)
+                self.save_all_checkpoints(valid_loss, inference_error, enso_metric)
 
     def _log_first_batch_metrics(self):
         wandb = WandB.get_instance()
@@ -658,6 +675,8 @@ class Trainer:
                 "epoch": self._epochs_trained,
                 "best_validation_loss": self._best_validation_loss,
                 "best_inference_error": self._best_inference_error,
+                "best_enso_score": self._best_enso_score,
+                "best_enso_inference_error": self._best_enso_inference_error,
                 "stepper": self.stepper.get_state(),
                 "ema": self._ema.get_state(),
             }
@@ -690,7 +709,12 @@ class Trainer:
             epoch, self.config.max_epochs, self.config.ema_checkpoint_save_epochs
         )
 
-    def save_all_checkpoints(self, valid_loss: float, inference_error: float | None):
+    def save_all_checkpoints(
+        self,
+        valid_loss: float,
+        inference_error: float | None,
+        enso_metric: float | None = None,
+    ):
         if self.config.validate_using_ema:
             best_checkpoint_context = self._ema_context
         else:
@@ -733,7 +757,53 @@ class Trainer:
             if save_best_checkpoint:
                 self.save_checkpoint(self.paths.best_checkpoint_path)
 
+            # Save best ENSO checkpoint if configured and metric available
+            if (
+                self.config.best_enso_checkpoint_metric is not None
+                and enso_metric is not None
+                and inference_error is not None
+            ):
+                self._save_best_enso_checkpoint(enso_metric, inference_error)
+
         self._save_restart_checkpoints()
+
+    def _save_best_enso_checkpoint(
+        self, enso_metric: float, inference_error: float
+    ) -> None:
+        """Save checkpoint that optimizes ENSO metric with a climate guard.
+
+        The ENSO score is |1.0 - enso_metric| (distance from perfect std_norm).
+        A checkpoint is saved only when:
+        1. The ENSO score improves (closer to 1.0), AND
+        2. The climate skill (inference_error) is within a configurable
+           relative tolerance of the current best_inference_error.
+        """
+        enso_score = abs(1.0 - enso_metric)
+        tolerance = self.config.best_enso_checkpoint_climate_tolerance
+        climate_threshold = self._best_inference_error * (1.0 + tolerance)
+
+        if enso_score < self._best_enso_score and (
+            inference_error <= climate_threshold
+        ):
+            logging.info(
+                f"ENSO score ({enso_metric:.4f}, distance={enso_score:.4f}) "
+                f"improves on previous best ({1.0 - self._best_enso_score:.4f}), "
+                f"climate error ({inference_error:.4f}) within tolerance "
+                f"({climate_threshold:.4f})."
+            )
+            logging.info(
+                f"Saving best ENSO checkpoint to "
+                f"{self.paths.best_enso_checkpoint_path}"
+            )
+            self._best_enso_score = enso_score
+            self._best_enso_inference_error = inference_error
+            self.save_checkpoint(self.paths.best_enso_checkpoint_path)
+        elif enso_score < self._best_enso_score:
+            logging.info(
+                f"ENSO score ({enso_metric:.4f}) improved but climate error "
+                f"({inference_error:.4f}) exceeds tolerance "
+                f"({climate_threshold:.4f}), skipping."
+            )
 
         if self._ema_epoch_checkpoint_enabled(self._epochs_trained):
             ema_epoch_checkpoint_path = self.paths.ema_epoch_checkpoint_path(
@@ -784,6 +854,10 @@ def _restore_checkpoint(trainer: Trainer, checkpoint_path):
     trainer._epochs_trained = checkpoint["epoch"]
     trainer._best_validation_loss = checkpoint["best_validation_loss"]
     trainer._best_inference_error = checkpoint["best_inference_error"]
+    trainer._best_enso_score = checkpoint.get("best_enso_score", torch.inf)
+    trainer._best_enso_inference_error = checkpoint.get(
+        "best_enso_inference_error", torch.inf
+    )
     trainer._ema = EMATracker.from_state(checkpoint["ema"], trainer.stepper.modules)
 
 
