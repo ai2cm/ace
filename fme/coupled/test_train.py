@@ -71,14 +71,14 @@ stepper_training:
   n_coupled_steps: {n_coupled_steps}
   ocean:
     loss:
-      type: {loss_type}
-      kwargs: {loss_kwargs}
+      type: {ocean_loss_type}
+      kwargs: {ocean_loss_kwargs}
     loss_contributions:
       weight: {loss_ocean_weight}
   atmosphere:
     loss:
-      type: {loss_type}
-      kwargs: {loss_kwargs}
+      type: {atmos_loss_type}
+      kwargs: {atmos_loss_kwargs}
     loss_contributions:
       n_steps: {loss_atmos_n_steps}
 stepper:
@@ -203,15 +203,23 @@ def _write_test_yaml_files(
         set(atmos_out_names).intersection(ocean_in_names)
     )
 
-    # Configure atmosphere network and loss based on crps_training
+    # Configure atmosphere network and loss based on crps_training. The
+    # ocean component uses EnsembleLossWithNanFill so the smooth fill is
+    # applied to NaN-masked land regions before the SHT-based EnergyScore
+    # branch (zero step at the coastline would otherwise distort the
+    # high-wavenumber spectrum).
     if crps_training:
         atmos_network_type = "NoiseConditionedSFNO"
-        loss_type = "EnsembleLoss"
-        loss_kwargs = "{'crps_weight': 1.0, 'energy_score_weight': 0.0}"
+        atmos_loss_type = "EnsembleLoss"
+        atmos_loss_kwargs = "{'crps_weight': 1.0, 'energy_score_weight': 0.0}"
+        ocean_loss_type = "EnsembleLossWithNanFill"
+        ocean_loss_kwargs = "{'crps_weight': 1.0, 'energy_score_weight': 1.0}"
     else:
         atmos_network_type = "SphericalFourierNeuralOperatorNet"
-        loss_type = "MSE"
-        loss_kwargs = "{}"
+        atmos_loss_type = "MSE"
+        atmos_loss_kwargs = "{}"
+        ocean_loss_type = "MSE"
+        ocean_loss_kwargs = "{}"
 
     train_config = _TRAIN_CONFIG_TEMPLATE.format(
         experiment_dir=exper_dir,
@@ -237,8 +245,10 @@ def _write_test_yaml_files(
         loss_atmos_n_steps=loss_atmos_n_steps,
         loss_ocean_weight=loss_ocean_weight,
         atmos_network_type=atmos_network_type,
-        loss_type=loss_type,
-        loss_kwargs=loss_kwargs,
+        atmos_loss_type=atmos_loss_type,
+        atmos_loss_kwargs=atmos_loss_kwargs,
+        ocean_loss_type=ocean_loss_type,
+        ocean_loss_kwargs=ocean_loss_kwargs,
     )
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".yaml") as f_train:
         f_train.write(train_config)
@@ -264,7 +274,10 @@ def _write_test_yaml_files(
     [
         (2, False),
         (0, False),
-        (3, True),  # CRPS training with EnsembleLoss
+        (
+            3,
+            True,
+        ),  # CRPS training: EnsembleLoss for atmos, EnsembleLossWithNanFill for ocean
     ],
 )
 def test_train_and_inference(

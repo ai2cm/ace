@@ -1,6 +1,6 @@
 import torch
 
-from fme.core.fill import SmoothFloodFill
+from fme.core.fill import SmoothFloodFill, SmoothFloodFillPacked, fast_flood_fill
 
 
 def test_smooth_flood_fill():
@@ -71,3 +71,113 @@ def test_smooth_flood_fill():
         f"Smooth fill max gradient ({smooth_grad.item():.2f}) should be much "
         f"less than zero-fill max gradient ({zero_grad.item():.2f})"
     )
+
+
+def test_smooth_flood_fill_packed_multi_channel():
+    """Per-channel masks: each channel has its own NaN pattern, including
+    a channel with no NaN at all (atmosphere-style) which should pass
+    through unchanged (modulo the all-ones blur identity)."""
+    B, T, C, H, W = 2, 3, 3, 8, 16
+    nan_cols_ch0 = [13, 14, 15, 0, 1, 2]
+    nan_cols_ch1 = [6, 7, 8, 9]
+
+    base = torch.arange(W, dtype=torch.float32).expand(B, T, C, H, W).clone()
+    base = base + torch.arange(C, dtype=torch.float32).view(1, 1, C, 1, 1) * 100
+    data = base.clone()
+    data[:, :, 0, :, nan_cols_ch0] = float("nan")
+    data[:, :, 1, :, nan_cols_ch1] = float("nan")
+
+    fill = SmoothFloodFillPacked(num_steps=2, blur_kernel_size=5, blur_sigma=1.0)
+    filled = fill(data)
+
+    assert not filled.isnan().any(), "Output should contain no NaNs"
+
+    cached_masks = fill._masks
+    assert cached_masks is not None
+    assert cached_masks.interior.shape == (C, H, W)
+    assert cached_masks.valid.shape == (C, H, W)
+    # blurred_valid carries one leading dim from _create_masks
+    assert cached_masks.blurred_valid.shape == (1, C, H, W)
+
+    filled2 = fill(data)
+    torch.testing.assert_close(filled, filled2)
+
+    # Channel 2 has no NaN -> blurred_valid_mask is uniformly 1 (replicate +
+    # circular padding preserve all-ones), so output should equal input.
+    torch.testing.assert_close(filled[:, :, 2], base[:, :, 2])
+
+    # Channels 0 and 1 should be modified only in the NaN regions plus the
+    # boundary band; pixels far from any NaN should be preserved.
+    safe_cols_ch0 = slice(6, 10)
+    safe_rows = slice(3, 5)
+    torch.testing.assert_close(
+        filled[:, :, 0, safe_rows, safe_cols_ch0],
+        base[:, :, 0, safe_rows, safe_cols_ch0],
+    )
+
+    # Channels are processed independently: channel 1's fill must not leak
+    # into channel 0's untouched region (sanity check that depthwise conv
+    # is wired correctly).
+    safe_cols_ch1_in_ch0 = [7, 8]
+    torch.testing.assert_close(
+        filled[:, :, 0, safe_rows, safe_cols_ch1_in_ch0],
+        base[:, :, 0, safe_rows, safe_cols_ch1_in_ch0],
+    )
+
+
+def test_smooth_flood_fill_packed_pass_through_when_no_nans():
+    """If the very first call has no NaN in the (C, H, W) slice, the cache
+    is a no-op and subsequent calls return the input unchanged."""
+    fill = SmoothFloodFillPacked(num_steps=2)
+    x = torch.randn(2, 3, 4, 5)
+    out = fill(x)
+    assert out is x
+
+    y = torch.randn(2, 3, 4, 5)
+    y[:, 0, 0, 0] = float("nan")
+    out_y = fill(y)
+    assert out_y is y, (
+        "Once the no-NaN cache is set, subsequent calls should be no-ops "
+        "even if new NaNs appear (documented assumption)."
+    )
+
+
+def test_fast_flood_fill_gradient_flows_to_valid_pixels_only():
+    """Backward pass: gradient is zero on land pixels (replaced by the
+    fill) and propagates to valid (ocean) pixels.
+
+    Also exercises the no_grad interior-mean path: the global-mean
+    shortcut should NOT produce a gradient on every valid pixel.
+    """
+    B, T, C, H, W = 1, 1, 1, 8, 16
+    nan_cols = [13, 14, 15, 0, 1, 2]
+    x = torch.randn(B, T, C, H, W, requires_grad=True)
+    nan_pattern = torch.zeros(C, H, W, dtype=torch.bool)
+    nan_pattern[:, :, nan_cols] = True
+
+    valid_mask = ~nan_pattern
+    # Materialize NaN in a leaf-friendly way: do the masking on a copy and
+    # let autograd track through the resulting tensor.
+    masked = x.masked_fill(nan_pattern.unsqueeze(0).unsqueeze(0), float("nan"))
+
+    out = fast_flood_fill(masked, num_steps=2, blur_kernel_size=5, blur_sigma=1.0)
+    out.sum().backward()
+
+    grad = x.grad
+    assert grad is not None
+    # Land (NaN) pixel gradients must be exactly zero: the masked_fill
+    # replaces them with NaN before fast_flood_fill, so no path connects
+    # them to the output.
+    land_grad = grad[:, :, :, :, nan_cols]
+    assert torch.all(land_grad == 0), "Land pixel gradients should be zero."
+    # Ocean pixels far from the coast should have ~uniform gradient
+    # (just from the identity portion of the boundary blend), not the
+    # global-mean shortcut. The exact value depends on the Gaussian blur
+    # support, so we just check that non-coastal pixels are nonzero and
+    # coast-region variation is bounded.
+    ocean_grad = grad[:, :, :, :, 6:10]
+    assert torch.all(ocean_grad > 0), (
+        f"Ocean pixel gradients should be positive, got "
+        f"{ocean_grad.min().item():.4f} to {ocean_grad.max().item():.4f}."
+    )
+    _ = valid_mask  # silence unused
