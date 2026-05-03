@@ -14,9 +14,10 @@ from matplotlib import pyplot as plt
 
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
-from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.typing_ import TensorDict
 
 from ...plotting import plot_mean_and_samples
+from ..data import InferenceBatchData
 
 SAMPLE_DIM, TIME_DIM, LAT_DIM, LON_DIM = 0, 1, -2, -1
 
@@ -133,9 +134,11 @@ class RegionalIndexAggregator:
         self._calendar: str | None = None
         self._already_logged: list[str] = []
 
-    def record_batch(self, time: xr.DataArray, data: TensorMapping) -> None:
+    def record_batch(self, data: InferenceBatchData) -> None:
+        time = data.time
+        prediction = data.prediction
         for sst_name in self.sea_surface_temperature_names:
-            if sst_name not in data:
+            if sst_name not in prediction:
                 if sst_name not in self._already_logged:
                     logging.info(
                         f"Variable {sst_name} not found in data. "
@@ -144,7 +147,7 @@ class RegionalIndexAggregator:
                     self._already_logged.append(sst_name)
                 continue
             regional_average = self._regional_mean(
-                data[sst_name], self._regional_weights
+                prediction[sst_name], self._regional_weights
             )
             if sst_name not in self._raw_indices:
                 self._raw_indices[sst_name] = regional_average
@@ -294,12 +297,12 @@ class PairedRegionalIndexAggregator:
 
     def record_batch(
         self,
-        time: xr.DataArray,
-        target_data: TensorMapping,
-        gen_data: TensorMapping,
+        data: InferenceBatchData,
     ) -> None:
-        self._target_aggregator.record_batch(time=time, data=target_data)
-        self._prediction_aggregator.record_batch(time=time, data=gen_data)
+        target_data = data.replace(prediction=data.target)
+        prediction_data = data.replace(prediction=data.prediction)
+        self._target_aggregator.record_batch(target_data)
+        self._prediction_aggregator.record_batch(prediction_data)
 
     def get_logs(self, label: str) -> dict[str, Any]:
         target_indices = self._target_aggregator.get_indices()
