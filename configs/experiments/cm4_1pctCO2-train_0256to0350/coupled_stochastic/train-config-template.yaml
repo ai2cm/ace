@@ -132,7 +132,7 @@ optimization:
           total_iters: 3000
       - type: ConstantLR
         step_each_iteration: true
-    milestones: [2000]
+    milestones: [3000]
 stepper_training:
   n_coupled_steps: 4
   n_ensemble: 2
@@ -155,8 +155,8 @@ stepper_training:
     loss:
       type: EnsembleLoss
       kwargs:
-        crps_weight: 0.9
-        energy_score_weight: 0.1
+        crps_weight: 1.0
+        energy_score_weight: 0.0
   atmosphere:
     parameter_init:
       weights_path: /atmos_ckpt.tar
