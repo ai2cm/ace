@@ -153,10 +153,10 @@ stepper_training:
             probability: 0.3
       optimize_last_step_only: false
     loss:
-      type: EnsembleLoss
+      type: EnsembleLossWithNanFill
       kwargs:
-        crps_weight: 1.0
-        energy_score_weight: 0.0
+        crps_weight: 0.9
+        energy_score_weight: 0.1
   atmosphere:
     parameter_init:
       weights_path: /atmos_ckpt.tar
