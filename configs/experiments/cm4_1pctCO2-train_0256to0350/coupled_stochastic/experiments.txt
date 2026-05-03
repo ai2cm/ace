@@ -43,3 +43,5 @@ ft_fta_ft_fto_stoch_ncs4mas40_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQ
 fto_ftaCD5ep4_ft_fto_stoch_ncs4_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQFKA960GPF9BY7CE84A5RRY|training|best_inference_ckpt|normal|--min-runtime 8h
 
 ft_mos4mas41-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQH2KZ9E15BDDSH7CQTB8Q8R|training|best_inference_ckpt|normal|--min-runtime 8h
+
+ft_mos4mas41_oES0-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQP2VJJ5MP0H1Y9EH3KD3J8Y|training|best_inference_ckpt|normal|--min-runtime 8h
