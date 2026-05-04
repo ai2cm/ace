@@ -3,7 +3,7 @@ import dataclasses
 import itertools
 import warnings
 from collections.abc import Callable, Iterable, Mapping
-from typing import Any, Literal
+from typing import Any, Literal, TypeAlias
 
 import numpy as np
 import torch
@@ -352,7 +352,12 @@ class OptimizationConfig:
         return cls(**state)
 
 
-def _tensors_to_device(obj, device: torch.device):
+NestedTensor: TypeAlias = (
+    "torch.Tensor | dict[str, NestedTensor] | list[NestedTensor] | tuple[NestedTensor]"
+)
+
+
+def _tensors_to_device(obj: NestedTensor, device: torch.device):
     """Recursively move all tensors in a nested dict/list to *device*."""
     if isinstance(obj, torch.Tensor):
         return obj.to(device)
