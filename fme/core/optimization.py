@@ -196,9 +196,10 @@ class Optimization(OptimizationABC):
             param_group["lr"] = lr
 
     def load_optimizer_state_for_finetuning(self, state: dict):
-        """Load optimizer and grad scaler state from a checkpoint for fine-tuning.
+        """Load per-parameter optimizer running state and grad scaler state from a
+        checkpoint for fine-tuning.
 
-        Restores per-parameter optimizer state (e.g. Adam momentum buffers) and,
+        Restores per-parameter optimizer state (e.g. Adam moment estimates) and,
         if available, the grad scaler state. The freshly-built optimizer's
         per-group hyperparameters (``lr``, ``weight_decay``, ``betas``, ``eps``,
         ...) from the current finetune config are authoritative; any per-group
@@ -287,6 +288,14 @@ class OptimizationConfig:
             to accumulate gradients differently when this is enabled, such as by
             detaching the computational graph between steps. See the documentation of
             your stepper (e.g. Stepper) for more details.
+        resume_optimizer_ckpt_path: Optional path to a training checkpoint
+            (``ckpt.tar``) whose per-parameter optimizer running state (e.g.
+            Adam moment estimates) and grad scaler state should be loaded into
+            the freshly-built ``Optimization`` for fine-tuning. The current
+            config's per-group hyperparameters (``lr``, ``weight_decay``,
+            ``betas``, ...) and scheduler are kept; only the running state is
+            transferred. Intended for non-resuming jobs; preemption resume in
+            the Trainer overrides this state via ``Optimization.load_state``.
     """
 
     optimizer_type: Literal["Adam", "AdamW", "FusedAdam"] = "Adam"
@@ -300,6 +309,7 @@ class OptimizationConfig:
     checkpoint: CheckpointConfig = dataclasses.field(
         default_factory=lambda: CheckpointConfig()
     )
+    resume_optimizer_ckpt_path: str | None = None
 
     def __post_init__(self):
         if self.optimizer_type == "FusedAdam":
@@ -317,7 +327,7 @@ class OptimizationConfig:
 
     def build(self, modules: torch.nn.ModuleList, max_epochs: int) -> Optimization:
         parameters = itertools.chain(*[module.parameters() for module in modules])
-        return Optimization(
+        optimization = Optimization(
             parameters=parameters,
             optimizer_type=self.optimizer_type,
             lr=self.lr,
@@ -328,6 +338,11 @@ class OptimizationConfig:
             use_gradient_accumulation=self.use_gradient_accumulation,
             get_checkpoint=self.checkpoint.build,
         )
+        if self.resume_optimizer_ckpt_path is not None:
+            _load_finetune_optimization_state(
+                optimization, self.resume_optimizer_ckpt_path
+            )
+        return optimization
 
     def get_state(self) -> Mapping[str, Any]:
         return dataclasses.asdict(self)
@@ -335,6 +350,42 @@ class OptimizationConfig:
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> "OptimizationConfig":
         return cls(**state)
+
+
+def _tensors_to_device(obj, device: torch.device):
+    """Recursively move all tensors in a nested dict/list to *device*."""
+    if isinstance(obj, torch.Tensor):
+        return obj.to(device)
+    elif isinstance(obj, dict):
+        return {k: _tensors_to_device(v, device) for k, v in obj.items()}
+    elif isinstance(obj, list | tuple):
+        return type(obj)(_tensors_to_device(v, device) for v in obj)
+    return obj
+
+
+def _load_finetune_optimization_state(optimization: Optimization, checkpoint_path: str):
+    """Load optimizer (and optionally grad scaler) state for fine-tuning.
+
+    Only loads the optimizer state dict and grad scaler state from the
+    checkpoint. Scheduler state and training counters are not restored, so
+    the current config's schedule starts from scratch. All freshly-built
+    optimizer per-group hyperparameters (lr, weight_decay, betas, eps, ...)
+    are preserved from the current job's TrainConfig.
+
+    The checkpoint is loaded on CPU so that only the optimization state
+    (not model weights, EMA, etc.) is transferred to the training device.
+    """
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    if "optimization" not in checkpoint:
+        raise ValueError(
+            f"Checkpoint at {checkpoint_path} does not contain optimization "
+            "state. Only checkpoints saved with include_optimization=True "
+            "(i.e. ckpt.tar) support fine-tune optimization loading."
+        )
+    optim_state = checkpoint["optimization"]
+    del checkpoint
+    optim_state = _tensors_to_device(optim_state, get_device())
+    optimization.load_optimizer_state_for_finetuning(optim_state)
 
 
 class NullOptimization(OptimizationABC):

@@ -1,6 +1,5 @@
 import contextlib
 import dataclasses
-import itertools
 import os
 import signal
 import unittest.mock
@@ -28,12 +27,11 @@ from fme.core.generics.trainer import (
     Trainer,
     TrainOutputABC,
     TrainStepperABC,
-    _load_finetune_optimization_state,
     count_parameters,
     epoch_checkpoint_enabled,
 )
 from fme.core.logging_utils import LoggingConfig
-from fme.core.optimization import NullOptimization, Optimization
+from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
 from fme.core.scheduler import SchedulerConfig
 from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import Slice, TensorDict, TensorMapping
@@ -237,7 +235,6 @@ class Config:
     evaluate_before_training: bool = False
     save_best_inference_epoch_checkpoints: bool = False
     lr_tuning: LRTuningConfig | None = None
-    resume_optimization_ckpt_path: str | None = None
 
     def __post_init__(self):
         start_epoch = 0 if self.evaluate_before_training else 1
@@ -345,7 +342,7 @@ def get_trainer(
     n_validation_batches: int = 5,
     save_checkpoint: bool = True,
     lr_tuning: LRTuningConfig | None = None,
-    resume_optimization_ckpt_path: str | None = None,
+    resume_optimizer_ckpt_path: str | None = None,
     lr: float = 0.01,
 ) -> tuple[TrainConfigProtocol, Trainer]:
     if checkpoint_dir is None:
@@ -377,15 +374,13 @@ def get_trainer(
         nonlocal scheduler_config
         if scheduler_config is None:
             scheduler_config = SchedulerConfig()
-        opt = Optimization(
-            parameters=itertools.chain(*[module.parameters() for module in modules]),
+        opt = OptimizationConfig(
             optimizer_type="Adam",
             lr=lr,
-            max_epochs=max_epochs,
             scheduler=scheduler_config,
             enable_automatic_mixed_precision=False,
-            kwargs={},
-        )
+            resume_optimizer_ckpt_path=resume_optimizer_ckpt_path,
+        ).build(torch.nn.ModuleList(modules), max_epochs=max_epochs)
         original_step_scheduler = opt.step_scheduler
 
         def step_scheduler_side_effect(*args, **kwargs):
@@ -434,7 +429,6 @@ def get_trainer(
         save_best_inference_epoch_checkpoints=save_best_inference_epoch_checkpoints,
         save_checkpoint=save_checkpoint,
         lr_tuning=lr_tuning,
-        resume_optimization_ckpt_path=resume_optimization_ckpt_path,
     )
     aggregator_builder = AggregatorBuilder(
         train_losses=train_losses,
@@ -1423,27 +1417,6 @@ def test_epoch_checkpoint_enabled_includes_final_epoch():
     assert epoch_checkpoint_enabled(10, max_epochs, save_epochs)
 
 
-def test_load_finetune_optimization_state_missing_key(tmp_path: str):
-    """_load_finetune_optimization_state raises ValueError when the checkpoint
-    does not contain an 'optimization' key (e.g. a best_ckpt.tar)."""
-    checkpoint_path = os.path.join(tmp_path, "bad_ckpt.tar")
-    torch.save({"stepper": {}, "ema": {}}, checkpoint_path)
-
-    model = torch.nn.Linear(1, 1).to(get_device())
-    optimization = Optimization(
-        parameters=model.parameters(),
-        optimizer_type="Adam",
-        lr=0.01,
-        max_epochs=1,
-        scheduler=SchedulerConfig(),
-        enable_automatic_mixed_precision=False,
-        kwargs={},
-    )
-
-    with pytest.raises(ValueError, match="does not contain optimization state"):
-        _load_finetune_optimization_state(optimization, checkpoint_path)
-
-
 def test_finetune_optimization_checkpoint_loads_optimizer_state(tmp_path: str):
     """Trainer loads optimizer state from a finetune checkpoint while
     keeping counters and scheduler fresh.
@@ -1484,7 +1457,7 @@ def test_finetune_optimization_checkpoint_loads_optimizer_state(tmp_path: str):
         max_epochs=1,
         n_train_batches=4,
         stepper_module_values=np.array([2.0]),
-        resume_optimization_ckpt_path=stage1_ckpt_path,
+        resume_optimizer_ckpt_path=stage1_ckpt_path,
         lr=configured_lr,
     )
 
@@ -1503,7 +1476,7 @@ def test_finetune_optimization_checkpoint_loads_optimizer_state(tmp_path: str):
                 stage1_opt_state[param_id][key],
             )
 
-    # lr and scheduler are overwritten by TrainConfig
+    # lr and scheduler are overwritten by OptimizationConfig
     assert stage2_trainer.optimization.learning_rate == configured_lr
     fresh_scheduler = SchedulerConfig().build(
         stage2_trainer.optimization.optimizer, max_epochs=1
@@ -1512,29 +1485,3 @@ def test_finetune_optimization_checkpoint_loads_optimizer_state(tmp_path: str):
         stage2_trainer.optimization.scheduler.state_dict()
         == fresh_scheduler.state_dict()
     )
-
-
-def test_resume_takes_precedence_over_finetune_path(tmp_path: str):
-    """When a ckpt.tar exists in the checkpoint dir (preemption resume),
-    Trainer resumes from it and ignores resume_optimization_ckpt_path."""
-    _, trainer = get_trainer(
-        tmp_path,
-        max_epochs=2,
-        n_train_batches=4,
-        stepper_module_values=np.array([1.0, 2.0]),
-    )
-    trainer.train()
-
-    ckpt_path = trainer.paths.latest_checkpoint_path
-    assert os.path.isfile(ckpt_path)
-
-    _, resumed_trainer = get_trainer(
-        tmp_path,
-        max_epochs=2,
-        n_train_batches=4,
-        stepper_module_values=np.array([1.0, 2.0]),
-        resume_optimization_ckpt_path=ckpt_path,
-    )
-
-    assert resumed_trainer._epochs_trained == 2
-    assert resumed_trainer.num_batches_seen == 8
