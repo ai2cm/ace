@@ -257,7 +257,7 @@ class InferenceEvaluatorAggregatorConfig:
         else:
             log_zonal_mean_images = self.log_zonal_mean_images
 
-        ocean_ace_config = AceInferenceEvaluatorAggregatorConfig(
+        base_ace_config = AceInferenceEvaluatorAggregatorConfig(
             log_histograms=self.log_histograms,
             log_video=self.log_video,
             log_extended_video=self.log_extended_video,
@@ -267,21 +267,16 @@ class InferenceEvaluatorAggregatorConfig:
             log_global_mean_norm_time_series=self.log_global_mean_norm_time_series,
             monthly_reference_data=self.monthly_reference_data,
             time_mean_reference_data=self.time_mean_reference_data,
+        )
+        ocean_ace_config = dataclasses.replace(
+            base_ace_config,
             log_nino34_index=True,
             log_step_means=[StepMeanEntry(step=20, name="mean_step_20")]
             if n_timesteps_ocean >= 20
             else [],
         )
-        atmosphere_ace_config = AceInferenceEvaluatorAggregatorConfig(
-            log_histograms=self.log_histograms,
-            log_video=self.log_video,
-            log_extended_video=self.log_extended_video,
-            log_zonal_mean_images=log_zonal_mean_images,
-            log_seasonal_means=self.log_seasonal_means,
-            log_global_mean_time_series=self.log_global_mean_time_series,
-            log_global_mean_norm_time_series=self.log_global_mean_norm_time_series,
-            monthly_reference_data=self.monthly_reference_data,
-            time_mean_reference_data=self.time_mean_reference_data,
+        atmosphere_ace_config = dataclasses.replace(
+            base_ace_config,
             log_nino34_index=False,
             log_step_means=[StepMeanEntry(step=20, name="mean_step_20")]
             if n_timesteps_atmosphere >= 20

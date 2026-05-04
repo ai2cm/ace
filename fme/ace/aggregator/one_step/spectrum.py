@@ -1,14 +1,15 @@
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import numpy as np
 import torch
 import xarray as xr
 
-from fme.ace.aggregator.inference.data import InferenceBatchData
+from fme.ace.aggregator.inference.data import InferenceBatchData, make_dummy_time
 from fme.ace.aggregator.inference.spectrum import (
     PairedSphericalPowerSpectrumAggregator as _InferencePairedSpectrumAgg,
 )
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorMapping
 
@@ -16,16 +17,27 @@ from fme.core.typing_ import TensorMapping
 class PairedSphericalPowerSpectrumAggregator:
     """Wraps the inference PairedSphericalPowerSpectrumAggregator for one-step use."""
 
-    def __init__(self, **kwargs: Any):
-        self._inner = _InferencePairedSpectrumAgg(**kwargs)
+    def __init__(
+        self,
+        gridded_operations: GriddedOperations,
+        report_plot: bool,
+        nan_fill_fn: Callable[[torch.Tensor, str], torch.Tensor] = lambda x, _: x,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
+    ):
+        self._inner = _InferencePairedSpectrumAgg(
+            gridded_operations=gridded_operations,
+            report_plot=report_plot,
+            nan_fill_fn=nan_fill_fn,
+            variable_metadata=variable_metadata,
+        )
 
     def record_batch(self, target_data: TensorMapping, gen_data: TensorMapping) -> None:
+        first_tensor = next(iter(gen_data.values()))
+        n_sample, n_time = first_tensor.shape[0], first_tensor.shape[1]
         batch = InferenceBatchData(
             prediction=gen_data,
-            prediction_norm=gen_data,
             target=target_data,
-            target_norm=target_data,
-            time=None,
+            time=make_dummy_time(n_sample=n_sample, n_time=n_time),
             i_time_start=0,
         )
         self._inner.record_batch(batch)
