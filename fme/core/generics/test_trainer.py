@@ -1014,6 +1014,52 @@ def test_end_of_epoch_callback_runs_with_evaluate_before_training(tmp_path: str)
         assert logs[marker_key] == float(i)
 
 
+@pytest.mark.parametrize("evaluate_before_training", [True, False])
+def test_end_of_epoch_callback_can_open_validation_context_with_ema(
+    tmp_path: str, evaluate_before_training: bool
+):
+    """The trainer wraps the end-of-epoch callback in ``validation_context``,
+    and helpers like ``inference_one_epoch`` (used by additional_inference and
+    weather_evaluation) open ``validation_context`` themselves. With
+    ``validate_using_ema=True`` this used to raise "Cannot nest EMA contexts";
+    the trainer's EMA context must be reentrant so callbacks can defensively
+    open ``validation_context`` without coordinating with the trainer.
+    """
+    max_epochs = 1
+    n_train_batches = 5
+
+    captured: dict[str, Any] = {}
+
+    def _callback(epoch: int) -> dict[str, Any]:
+        # mimic what inference helpers do inside additional_inference /
+        # weather_evaluation: they open validation_context() themselves
+        with trainer.validation_context():
+            captured.setdefault("epochs", []).append(epoch)
+            captured["weight_in_ema_context"] = (
+                trainer.stepper.modules[0].weight.detach().clone()
+            )
+        return {f"additional/epoch_{epoch}/marker": float(epoch)}
+
+    end_of_epoch_callback = unittest.mock.MagicMock(side_effect=_callback)
+
+    _, trainer = get_trainer(
+        tmp_path,
+        max_epochs=max_epochs,
+        evaluate_before_training=evaluate_before_training,
+        validate_using_ema=True,
+        n_train_batches=n_train_batches,
+        end_of_epoch_callback=end_of_epoch_callback,
+    )
+    # must not raise "Cannot nest EMA contexts"
+    trainer.train()
+
+    expected_epochs = list(range(0 if evaluate_before_training else 1, max_epochs + 1))
+    assert captured["epochs"] == expected_epochs
+    # exiting the inner validation_context must not leave EMA applied
+    assert not trainer._in_ema_context
+    assert not trainer._ema._in_context
+
+
 def test_save_best_inference_epoch_ckpts(tmp_path: str):
     """Test that save_best_inference_epoch_checkpoints saves epoch-specific
     checkpoints."""
