@@ -47,3 +47,5 @@ ft_mos4mas41-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQH2KZ9E15BDDSH7CQTB8Q8R
 ft_mos4mas41_oES0-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQP2VJJ5MP0H1Y9EH3KD3J8Y|training|best_inference_ckpt|normal|--min-runtime 8h
 
 ft_mos4mas41_oEnsLossNanFill-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQQVNE3NSMVHTWQ3MX47YAKC|training|best_inference_ckpt|normal|--min-runtime 8h
+
+ft_mos4mas41_oEnsLossNanFill_LRp00001-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQRR2H5C9DH28GQ9XA1V8PN6|training|best_inference_ckpt|normal|--min-runtime 8h
