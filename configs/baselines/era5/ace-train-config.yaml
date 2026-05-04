@@ -3,7 +3,6 @@ experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
 max_epochs: 120
-n_forward_steps: 2
 ema:
   decay: 0.999
 inference:
@@ -66,6 +65,7 @@ optimization:
     fused: true
     weight_decay: 0.01
 stepper_training:
+  n_forward_steps: 2
   loss:
     type: MSE
     weights:

@@ -221,11 +221,15 @@ class EMATracker:
         Returns:
             The EMA tracker.
         """
+        device = get_device()
         ema = cls(model, float(state["decay"]), state["faster_decay_at_start"])
-        ema.num_updates = state["num_updates"]
+        ema.num_updates = state["num_updates"].to(device, copy=True)
         ema._module_name_to_ema_name = state["module_name_to_ema_name"]
         if "ema_params" in state:
-            ema._ema_params = state["ema_params"]
+            ema._ema_params = {
+                name: param.to(device, copy=True)
+                for name, param in state["ema_params"].items()
+            }
         else:
             logging.warning("EMA params not found in state and will not be restored.")
         return ema

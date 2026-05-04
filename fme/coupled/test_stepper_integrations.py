@@ -7,14 +7,13 @@ import torch
 from fme.ace.stepper.parameter_init import ParameterInitializationConfig
 from fme.core.coordinates import NullVerticalCoordinate
 from fme.core.loss import StepLossConfig
-from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
+from fme.core.optimization import NullOptimization, OptimizationConfig
 from fme.core.registry.module import ModuleSelector
-from fme.core.scheduler import SchedulerConfig
-from fme.coupled.data_loading.batch_data import CoupledPrognosticState
 from fme.coupled.loss import LossContributionsConfig
 
 from .data_loading.data_typing import CoupledVerticalCoordinate
 from .stepper import (
+    ComponentStepMetrics,
     ComponentTrainingConfig,
     CoupledParameterInitConfig,
     CoupledTrainStepperConfig,
@@ -205,6 +204,7 @@ def test_stepper_parameter_init_integration(
         ),
     )
     train_stepper_config = CoupledTrainStepperConfig(
+        n_coupled_steps=1,
         ocean=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
             parameter_init=ParameterInitializationConfig(weights_path=ocean_path),
@@ -246,33 +246,9 @@ class _LearnableTimesTwo(torch.nn.Module):
         return x * self.scale
 
 
-def _build_optimization(parameters, use_gradient_accumulation=False):
-    return Optimization(
-        parameters=list(parameters),
-        optimizer_type="Adam",
-        lr=1e-3,
-        max_epochs=1,
-        scheduler=SchedulerConfig(),
-        enable_automatic_mixed_precision=False,
-        kwargs={},
-        use_gradient_accumulation=use_gradient_accumulation,
-    )
-
-
-def _get_initial_condition(train_stepper, data):
-    stepper = train_stepper._stepper
-    return CoupledPrognosticState(
-        atmosphere_data=data.atmosphere_data.get_start(
-            stepper.atmosphere.prognostic_names, stepper.n_ic_timesteps
-        ),
-        ocean_data=data.ocean_data.get_start(
-            stepper.ocean.prognostic_names, stepper.n_ic_timesteps
-        ),
-    )
-
-
 def _build_train_stepper_and_data(atmos_n_steps):
     train_stepper_config = CoupledTrainStepperConfig(
+        n_coupled_steps=1,
         ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
         atmosphere=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
@@ -305,14 +281,26 @@ def test_unoptimized_steps_detached(atmos_n_steps):
     train_stepper, coupled_data, _, _ = _build_train_stepper_and_data(atmos_n_steps)
     data = coupled_data.data
 
-    ic = _get_initial_condition(train_stepper, data)
-    generator = train_stepper._stepper.get_prediction_generator(
-        ic,
-        data,
-        NullOptimization(),
-        step_is_optimized=train_stepper._loss.step_is_optimized,
+    optimization = NullOptimization()
+    optimization.set_mode(train_stepper.modules)
+    atmos_forward_data = train_stepper.atmosphere.get_forward_data(
+        data.atmosphere_data,
+        compute_derived_variables=False,
     )
-    for step in generator:
+    ocean_forward_data = train_stepper.ocean.get_forward_data(
+        data.ocean_data,
+        compute_derived_variables=False,
+    )
+    metrics = ComponentStepMetrics()
+    with optimization.autocast():
+        output_list = train_stepper._accumulate_loss(
+            data,
+            ocean_forward_data,
+            atmos_forward_data,
+            optimization,
+            metrics,
+        )
+    for step in output_list:
         has_grad = any(v.requires_grad for v in step.data.values())
         if step.realm == "atmosphere":
             if step.step < atmos_n_steps:
@@ -325,43 +313,60 @@ def test_unoptimized_steps_detached(atmos_n_steps):
             assert has_grad, f"ocean step {step.step} should require grad"
 
 
-@pytest.mark.parametrize("atmos_n_steps", [1, 2])
-def test_unoptimized_steps_detached_with_gradient_accumulation(atmos_n_steps):
-    """Optimized steps should require grad even when gradient accumulation
-    detaches tensors between steps."""
-    train_stepper, coupled_data, _, _ = _build_train_stepper_and_data(atmos_n_steps)
-    data = coupled_data.data
-
-    optimization = _build_optimization(
-        train_stepper.modules.parameters(), use_gradient_accumulation=True
+def test_optimize_last_step_only_with_gradient_accumulation():
+    """optimize_last_step_only should work correctly with gradient accumulation:
+    only the last step per realm produces a loss metric and accumulates a loss."""
+    train_stepper_config = CoupledTrainStepperConfig(
+        n_coupled_steps=2,
+        ocean=ComponentTrainingConfig(
+            loss=StepLossConfig(type="MSE"),
+            loss_contributions=LossContributionsConfig(optimize_last_step_only=True),
+        ),
+        atmosphere=ComponentTrainingConfig(
+            loss=StepLossConfig(type="MSE"),
+            loss_contributions=LossContributionsConfig(optimize_last_step_only=True),
+        ),
     )
-    optimization.set_mode(train_stepper.modules)
-
-    ic = _get_initial_condition(train_stepper, data)
-    with optimization.autocast():
-        generator = train_stepper._stepper.get_prediction_generator(
-            ic,
-            data,
-            optimization,
-            step_is_optimized=train_stepper._loss.step_is_optimized,
-        )
-        for step in generator:
-            has_grad = any(v.requires_grad for v in step.data.values())
-            if step.realm == "atmosphere":
-                if step.step < atmos_n_steps:
-                    assert has_grad, (
-                        f"atmosphere step {step.step} should require grad "
-                        "even with gradient accumulation"
-                    )
-                else:
-                    assert (
-                        not has_grad
-                    ), f"atmosphere step {step.step} should not require grad"
-            else:
-                assert has_grad, (
-                    f"ocean step {step.step} should require grad "
-                    "even with gradient accumulation"
-                )
+    n_forward_times_ocean = 2
+    n_forward_times_atmosphere = 4
+    train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(
+        train_stepper_config=train_stepper_config,
+        ocean_in_names=["sst", "mask_0"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["surface_temperature", "ocean_fraction"],
+        atmosphere_out_names=["surface_temperature"],
+        n_forward_times_ocean=n_forward_times_ocean,
+        n_forward_times_atmosphere=n_forward_times_atmosphere,
+        n_samples=1,
+        atmosphere_builder=ModuleSelector(
+            type="prebuilt", config={"module": _LearnableAddOne()}
+        ),
+        ocean_builder=ModuleSelector(
+            type="prebuilt", config={"module": _LearnableTimesTwo()}
+        ),
+    )
+    optim = OptimizationConfig(use_gradient_accumulation=True).build(
+        train_stepper.modules, 1
+    )
+    result = train_stepper.train_on_batch(
+        data=coupled_data.data,
+        optimization=optim,
+    )
+    last_atmos = n_forward_times_atmosphere - 1
+    last_ocean = n_forward_times_ocean - 1
+    # only the last step per realm should have a loss metric
+    for i in range(n_forward_times_atmosphere):
+        key = f"loss/atmosphere_step_{i}"
+        if i == last_atmos:
+            assert key in result.atmosphere.metrics
+        else:
+            assert key not in result.atmosphere.metrics
+    for i in range(n_forward_times_ocean):
+        key = f"loss/ocean_step_{i}"
+        if i == last_ocean:
+            assert key in result.ocean.metrics
+        else:
+            assert key not in result.ocean.metrics
 
 
 @pytest.mark.parametrize("atmos_n_steps", [1, 2])

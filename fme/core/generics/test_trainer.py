@@ -765,13 +765,16 @@ def test_saves_correct_ema_checkpoints(
     trainer.save_all_checkpoints(valid_loss=valid_loss, inference_error=inference_error)
     paths = CheckpointPaths(config.checkpoint_dir)
     assert os.path.exists(paths.latest_checkpoint_path)
-    latest_checkpoint = torch.load(paths.latest_checkpoint_path)
+    latest_checkpoint = torch.load(paths.latest_checkpoint_path, map_location="cpu")
     np.testing.assert_allclose(
         latest_checkpoint["stepper"]["modules"]["0.weight"].cpu().numpy(),
         1.0,
         atol=1e-7,
     )
-    ema_checkpoint = torch.load(paths.latest_checkpoint_path)["ema"]["ema_params"]
+    ema_checkpoint = torch.load(
+        paths.latest_checkpoint_path,
+        map_location="cpu",
+    )["ema"]["ema_params"]
     ema_weight = 1.0 - min(ema_decay, 2.0 / 11.0)
     np.testing.assert_allclose(
         ema_checkpoint["0weight"].cpu().numpy(),
@@ -785,7 +788,7 @@ def test_saves_correct_ema_checkpoints(
     else:
         best_weight = 1.0
     assert os.path.exists(paths.best_checkpoint_path)
-    best_checkpoint = torch.load(paths.best_checkpoint_path)
+    best_checkpoint = torch.load(paths.best_checkpoint_path, map_location="cpu")
     assert best_checkpoint["best_validation_loss"] == valid_loss
     assert best_checkpoint["best_inference_error"] == inference_error
     np.testing.assert_allclose(
@@ -794,7 +797,9 @@ def test_saves_correct_ema_checkpoints(
         atol=1e-7,
     )
     best_inference_checkpoint = torch.load(
-        paths.best_inference_checkpoint_path, weights_only=False
+        paths.best_inference_checkpoint_path,
+        map_location="cpu",
+        weights_only=False,
     )
     assert best_inference_checkpoint["best_validation_loss"] == valid_loss
     assert best_inference_checkpoint["best_inference_error"] == inference_error
@@ -868,7 +873,9 @@ def test_saves_correct_non_ema_epoch_checkpoints(
                 min((i + 1) * segment_epochs_value, config.max_epochs) + 1,
             )
         ]
-        latest_checkpoint = torch.load(paths.latest_checkpoint_path, weights_only=False)
+        latest_checkpoint = torch.load(
+            paths.latest_checkpoint_path, map_location="cpu", weights_only=False
+        )
         assert latest_checkpoint["epoch"] == min(
             max_epochs, (i + 1) * segment_epochs_value
         )
@@ -880,7 +887,9 @@ def test_saves_correct_non_ema_epoch_checkpoints(
     assert os.path.exists(paths.latest_checkpoint_path)
     assert os.path.exists(paths.best_checkpoint_path)
     assert os.path.exists(paths.best_inference_checkpoint_path)
-    best_checkpoint = torch.load(paths.best_checkpoint_path, weights_only=False)
+    best_checkpoint = torch.load(
+        paths.best_checkpoint_path, map_location="cpu", weights_only=False
+    )
     assert best_checkpoint["epoch"] == best_val_epoch
     assert best_checkpoint["best_validation_loss"] == 0.0
     assert best_checkpoint["best_inference_error"] == np.min(
@@ -891,14 +900,16 @@ def test_saves_correct_non_ema_epoch_checkpoints(
         module_values[best_val_epoch - 1],
     )
     best_inference_checkpoint = torch.load(
-        paths.best_inference_checkpoint_path, weights_only=False
+        paths.best_inference_checkpoint_path, map_location="cpu", weights_only=False
     )
     assert best_inference_checkpoint["epoch"] == best_inference_epoch
     assert best_inference_checkpoint["best_validation_loss"] == np.min(
         val_losses[:best_inference_epoch]
     )
     assert best_inference_checkpoint["best_inference_error"] == 0.0
-    latest_checkpoint = torch.load(paths.latest_checkpoint_path, weights_only=False)
+    latest_checkpoint = torch.load(
+        paths.latest_checkpoint_path, map_location="cpu", weights_only=False
+    )
     assert latest_checkpoint["epoch"] == max_epochs
     np.testing.assert_allclose(
         latest_checkpoint["stepper"]["modules"]["0.weight"].cpu().numpy(),
@@ -996,19 +1007,25 @@ def test_save_best_inference_epoch_ckpts(tmp_path: str):
     ), "Should save epoch 3"
 
     epoch1_checkpoint = torch.load(
-        paths.best_inference_epoch_checkpoint_path(1), weights_only=False
+        paths.best_inference_epoch_checkpoint_path(1),
+        map_location="cpu",
+        weights_only=False,
     )
     assert epoch1_checkpoint["epoch"] == 1
     assert epoch1_checkpoint["best_inference_error"] == 0.3
 
     epoch3_checkpoint = torch.load(
-        paths.best_inference_epoch_checkpoint_path(3), weights_only=False
+        paths.best_inference_epoch_checkpoint_path(3),
+        map_location="cpu",
+        weights_only=False,
     )
     assert epoch3_checkpoint["epoch"] == 3
     assert epoch3_checkpoint["best_inference_error"] == 0.2
 
     best_inference_checkpoint = torch.load(
-        paths.best_inference_checkpoint_path, weights_only=False
+        paths.best_inference_checkpoint_path,
+        map_location="cpu",
+        weights_only=False,
     )
     assert best_inference_checkpoint["best_inference_error"] == 0.2
     assert best_inference_checkpoint["epoch"] == 3

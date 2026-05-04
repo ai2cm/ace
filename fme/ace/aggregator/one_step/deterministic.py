@@ -9,6 +9,7 @@ import xarray as xr
 
 from fme.core.dataset_info import DatasetInfo
 from fme.core.diagnostics import get_reduced_diagnostics, write_reduced_diagnostics
+from fme.core.fill import SmoothFloodFill
 from fme.core.generics.aggregator import AggregatorABC
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -91,8 +92,10 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
             ),
         }
         try:
+            flood_fill = SmoothFloodFill(num_steps=4)
             self._aggregators["power_spectrum"] = SpectrumAggregator(
                 dataset_info.gridded_operations,
+                nan_fill_fn=flood_fill,
             )
         except NotImplementedError:
             logging.warning(

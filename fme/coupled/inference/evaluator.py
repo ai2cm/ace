@@ -202,9 +202,7 @@ def load_stepper_config(
         return checkpoint_path.load_stepper_config()
 
     logging.info(f"Loading trained coupled model checkpoint from {checkpoint_path}")
-    checkpoint = torch.load(
-        checkpoint_path, map_location=fme.get_device(), weights_only=False
-    )
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     config = CoupledStepperConfig.from_state(checkpoint["stepper"]["config"])
     apply_coupled_stepper_config_inference_overrides(
         config,
@@ -258,6 +256,11 @@ def load_stepper(
     return stepper
 
 
+def _validate_coupled_steps_config(n_coupled_steps: int, coupled_steps_in_memory: int):
+    if n_coupled_steps % coupled_steps_in_memory:
+        raise ValueError("n_coupled_steps must be divisible by coupled_steps_in_memory")
+
+
 @dataclasses.dataclass
 class InferenceEvaluatorConfig:
     """
@@ -301,6 +304,11 @@ class InferenceEvaluatorConfig:
     prediction_loader: InferenceDataLoaderConfig | None = None
     ocean_stepper_override: StepperOverrideConfig | None = None
     atmosphere_stepper_override: StepperOverrideConfig | None = None
+
+    def __post_init__(self):
+        _validate_coupled_steps_config(
+            self.n_coupled_steps, self.coupled_steps_in_memory
+        )
 
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)

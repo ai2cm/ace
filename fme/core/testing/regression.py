@@ -4,15 +4,13 @@ import pathlib
 import pytest
 import torch
 
-from fme.core.device import get_device
-
 
 def validate_tensor(x: torch.Tensor, filename: str, **assert_close_kwargs):
     if not os.path.exists(filename):
         torch.save(x.cpu(), filename)
         pytest.fail(f"Regression file {filename} did not exist, so it was created")
     else:
-        y = torch.load(filename, map_location=get_device()).to(x.device)
+        y = torch.load(filename, map_location="cpu").to(x.device)
         torch.testing.assert_close(x, y, **assert_close_kwargs)
 
 
@@ -55,5 +53,5 @@ def validate_tensor_dict(
         torch.save(_to_cpu(x), filename)
         pytest.fail(f"Regression file {filename} did not exist, so it was created")
     else:
-        y = torch.load(filename, map_location=get_device())
+        y = torch.load(filename, map_location="cpu")
         _assert_close(x, y, **assert_close_kwargs)

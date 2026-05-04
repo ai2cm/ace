@@ -215,7 +215,6 @@ experiment_dir: {results_dir}
 save_checkpoint: true
 save_per_epoch_diagnostics: {save_per_epoch_diagnostics}
 max_epochs: {max_epochs}
-n_forward_steps: 2
 logging:
   log_to_screen: true
   log_to_wandb: {log_to_wandb}
@@ -245,6 +244,7 @@ optimization:
       kwargs:
         T_max: 1
 stepper_training:
+  n_forward_steps: 2
   loss:
     type: "MSE"
 stepper:
@@ -328,7 +328,7 @@ validation:
       spatial_dimensions: latlon
     batch_size: 2
   stepper_training:
-    train_n_forward_steps: 2
+    n_forward_steps: 2
   aggregator:
     log_snapshots: false
     log_mean_maps: false
@@ -571,9 +571,6 @@ def test_train_and_inference(tmp_path, very_fast_only: bool):
 
     tm_logs = wandb_logs[-1]
     for name, metric in tm_logs.items():
-        if "power_spectrum" in name:
-            # power spectra not well defined for masked data
-            continue
         if isinstance(metric, float):
             assert not np.isnan(metric), f"{name} should not be NaN"
 

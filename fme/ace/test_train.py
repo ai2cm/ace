@@ -56,10 +56,10 @@ from fme.ace.testing import (
 from fme.ace.train.train import build_trainer, prepare_directory
 from fme.ace.train.train import main as train_main
 from fme.ace.train.train_config import (
+    AdditionalInferenceConfig,
     InlineInferenceConfig,
     TrainBuilders,
     TrainConfig,
-    WeatherEvaluationConfig,
 )
 from fme.core.coordinates import (
     HEALPixCoordinates,
@@ -209,7 +209,7 @@ def _get_test_yaml_files(
     )
     if skip_inline_inference:
         inline_inference_config = None
-        weather_evaluation_config = None
+        additional_inference_configs: list[AdditionalInferenceConfig] = []
     else:
         inline_inference_config = InlineInferenceConfig(
             aggregator=InferenceEvaluatorAggregatorConfig(
@@ -236,45 +236,50 @@ def _get_test_yaml_files(
             ),
             n_forward_steps=inference_forward_steps,
             forward_steps_in_memory=2,
+            n_ensemble_per_ic=2,
         )
-        weather_evaluation_config = WeatherEvaluationConfig(
-            aggregator=InferenceEvaluatorAggregatorConfig(
-                monthly_reference_data=(
-                    str(monthly_data_filename)
-                    if monthly_data_filename is not None
-                    else None
+        additional_inference_configs = [
+            AdditionalInferenceConfig(
+                name="weather_eval",
+                config=InlineInferenceConfig(
+                    aggregator=InferenceEvaluatorAggregatorConfig(
+                        monthly_reference_data=(
+                            str(monthly_data_filename)
+                            if monthly_data_filename is not None
+                            else None
+                        ),
+                        log_step_means=[]
+                        if inference_forward_steps < 20
+                        else [StepMeanEntry(step=20)],
+                    ),
+                    loader=InferenceDataLoaderConfig(
+                        dataset=XarrayDataConfig(
+                            data_path=str(valid_data_path),
+                            spatial_dimensions=spatial_dimensions_str,
+                            labels=["era5"] if conditional else None,
+                        ),
+                        start_indices=InferenceInitialConditionIndices(
+                            first=0,
+                            n_initial_conditions=2,
+                            interval=1,
+                        ),
+                    ),
+                    n_forward_steps=inference_forward_steps,
+                    forward_steps_in_memory=2,
+                    n_ensemble_per_ic=2,
                 ),
-                log_step_means=[]
-                if inference_forward_steps < 20
-                else [StepMeanEntry(step=20)],
             ),
-            loader=InferenceDataLoaderConfig(
-                dataset=XarrayDataConfig(
-                    data_path=str(valid_data_path),
-                    spatial_dimensions=spatial_dimensions_str,
-                    labels=["era5"] if conditional else None,
-                ),
-                start_indices=InferenceInitialConditionIndices(
-                    first=0,
-                    n_initial_conditions=2,
-                    interval=1,
-                ),
-            ),
-            n_forward_steps=inference_forward_steps,
-            forward_steps_in_memory=2,
-        )
+        ]
 
     if use_time_length_probabilities:
-        train_n_forward_steps: TimeLength | TimeLengthSchedule = (
-            TimeLengthProbabilities(
-                outcomes=[
-                    TimeLengthProbability(steps=1, probability=0.5),
-                    TimeLengthProbability(steps=n_forward_steps, probability=0.5),
-                ]
-            )
+        n_forward_steps_arg: TimeLength | TimeLengthSchedule = TimeLengthProbabilities(
+            outcomes=[
+                TimeLengthProbability(steps=1, probability=0.5),
+                TimeLengthProbability(steps=n_forward_steps, probability=0.5),
+            ]
         )
     elif use_schedule:
-        train_n_forward_steps = TimeLengthSchedule(
+        n_forward_steps_arg = TimeLengthSchedule(
             start_value=TimeLengthProbabilities(
                 outcomes=[
                     TimeLengthProbability(steps=1, probability=0.5),
@@ -285,7 +290,7 @@ def _get_test_yaml_files(
         )
         max_epochs = 2
     else:
-        train_n_forward_steps = n_forward_steps
+        n_forward_steps_arg = n_forward_steps
 
     if crps_training:
         loss = StepLossConfig(
@@ -373,10 +378,10 @@ def _get_test_yaml_files(
         stepper_training=TrainStepperConfig(
             loss=loss,
             n_ensemble=n_ensemble,
-            train_n_forward_steps=train_n_forward_steps,
+            n_forward_steps=n_forward_steps_arg,
         ),
         inference=inline_inference_config,
-        weather_evaluation=weather_evaluation_config,
+        additional_inference=additional_inference_configs,
         max_epochs=max_epochs,
         segment_epochs=segment_epochs,
         save_checkpoint=True,
@@ -625,6 +630,25 @@ def test_train_and_inference(
         epoch_logs = wandb_logs[-1]
         assert "inference/mean_step_20_norm/weighted_rmse/channel_mean" in epoch_logs
         assert "val/mean_norm/weighted_rmse/channel_mean" in epoch_logs
+        ensemble_step_20_keys = [
+            k for k in epoch_logs if "inference/ensemble_step_20/" in k
+        ]
+        assert ensemble_step_20_keys, (
+            "expected at least one ensemble_step_20 metric in inline inference "
+            "epoch log"
+        )
+        weather_eval_keys = [k for k in epoch_logs if k.startswith("weather_eval/")]
+        assert weather_eval_keys, (
+            "expected at least one weather_eval metric in additional_inference "
+            "epoch log"
+        )
+        weather_eval_ensemble_keys = [
+            k for k in epoch_logs if "weather_eval/ensemble_step_20/" in k
+        ]
+        assert weather_eval_ensemble_keys, (
+            "expected at least one ensemble_step_20 metric in weather_eval "
+            "additional_inference epoch log"
+        )
 
     validation_output_dir = tmp_path / "results" / "output" / "val" / "epoch_0001"
     assert validation_output_dir.exists()
@@ -671,9 +695,9 @@ def test_train_and_inference(
         tmp_path / "results" / "training_checkpoints" / "best_inference_ckpt.tar"
     )
     assert best_checkpoint_path.exists()
-    checkpoint_training_history = torch.load(best_checkpoint_path, weights_only=False)[
-        "stepper"
-    ].get("training_history")
+    checkpoint_training_history = torch.load(
+        best_checkpoint_path, map_location="cpu", weights_only=False
+    )["stepper"].get("training_history")
     assert checkpoint_training_history is not None
     assert len(checkpoint_training_history) == 1
     assert "git_sha" in checkpoint_training_history[0].keys()

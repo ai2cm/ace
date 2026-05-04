@@ -85,3 +85,32 @@ def test_ema_transferred_state_updates_parameters(
         torch.testing.assert_close(
             model.weight.data.clone(), torch.full_like(model.weight.data, target_decay)
         )
+
+
+def test_from_state_places_tensors_on_device():
+    model = ExampleModel()
+    ema = EMATracker(model, decay=0.999)
+    state = ema.get_state()
+    # move state tensors to cpu to simulate loading from checkpoint
+    state["decay"] = state["decay"].cpu()
+    state["num_updates"] = state["num_updates"].cpu()
+    state["ema_params"] = {k: v.cpu() for k, v in state["ema_params"].items()}
+    restored = EMATracker.from_state(state, model)
+    device = get_device()
+    assert restored.num_updates.device == device
+    assert restored.decay.device == device
+    for param in restored._ema_params.values():
+        assert param.device == device
+
+
+def test_from_state_decouples_memory():
+    model = ExampleModel()
+    ema = EMATracker(model, decay=0.999)
+    state = ema.get_state()
+    restored = EMATracker.from_state(state, model)
+    # mutating state should not affect restored object
+    state["num_updates"].fill_(999)
+    assert restored.num_updates.item() != 999
+    for name, param in state["ema_params"].items():
+        param.fill_(float("nan"))
+        assert not torch.isnan(restored._ema_params[name]).any()

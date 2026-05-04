@@ -152,7 +152,7 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
         )
 
 
-def get_initial_condition(
+def _get_initial_condition(
     loader: DataLoader[CoupledBatchData],
     requirements: CoupledPrognosticStateDataRequirements,
 ) -> CoupledPrognosticState:
@@ -173,7 +173,7 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
         self._properties = properties.to_device()
         self._n_initial_conditions: int | None = None
         if isinstance(initial_condition, CoupledPrognosticStateDataRequirements):
-            self._initial_condition: CoupledPrognosticState = get_initial_condition(
+            self._initial_condition: CoupledPrognosticState = _get_initial_condition(
                 loader, initial_condition
             )
         else:

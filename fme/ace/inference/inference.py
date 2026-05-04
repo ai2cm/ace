@@ -95,8 +95,8 @@ class InitialConditionConfig:
 def get_initial_condition(
     ds: xr.Dataset,
     prognostic_names: Sequence[str],
-    labels: list[str] | None,
-    n_ensemble: int,
+    labels: list[str] | None = None,
+    n_ensemble: int = 1,
 ) -> PrognosticState:
     """Given a dataset, extract a mapping of variables to tensors.
     and the time coordinate corresponding to the initial conditions.
