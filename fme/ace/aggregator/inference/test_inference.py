@@ -5,7 +5,7 @@ import pytest
 import torch
 import xarray as xr
 
-from fme.ace.aggregator.inference import InferenceAggregator
+from fme.ace.aggregator.inference import InferenceAggregatorConfig
 from fme.ace.data_loading.batch_data import PairedData
 from fme.core.device import get_device
 
@@ -24,7 +24,7 @@ def test_logs_labels_exist():
     nx = 2
     ny = 2
     ds_info = get_ds_info(nx, ny)
-    agg = InferenceAggregator(ds_info, n_time, save_diagnostics=False)
+    agg = InferenceAggregatorConfig().build(ds_info, n_time, save_diagnostics=False)
     target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
@@ -57,7 +57,7 @@ def test_logs_labels_exist():
     ).difference(expected_summary_keys)
 
 
-def test_logs_labels_exist_with_reference_time_means():
+def test_logs_labels_exist_with_reference_time_means(tmp_path):
     n_sample = 10
     n_time = 22
     nx = 2
@@ -71,10 +71,11 @@ def test_logs_labels_exist_with_reference_time_means():
             )
         }
     )
-    agg = InferenceAggregator(
+    ref_path = str(tmp_path / "reference_time_means.nc")
+    reference_time_means.to_netcdf(ref_path)
+    agg = InferenceAggregatorConfig(time_mean_reference_data=ref_path).build(
         ds_info,
         n_time,
-        time_mean_reference_data=reference_time_means,
         save_diagnostics=False,
     )
     target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
@@ -119,7 +120,7 @@ def test_logs_labels_exist_with_reference_time_means():
 def test_flush_diagnostics(tmpdir):
     nx, ny, n_sample, n_time = 2, 2, 10, 21
     ds_info = get_ds_info(nx, ny)
-    agg = InferenceAggregator(ds_info, n_time, output_dir=tmpdir)
+    agg = InferenceAggregatorConfig().build(ds_info, n_time, output_dir=str(tmpdir))
     target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
@@ -145,7 +146,7 @@ def test_agg_raises_without_output_dir():
     with pytest.raises(
         ValueError, match="Output directory must be set to save diagnostics"
     ):
-        InferenceAggregator(
+        InferenceAggregatorConfig().build(
             ds_info,
             n_timesteps=1,
             save_diagnostics=True,
