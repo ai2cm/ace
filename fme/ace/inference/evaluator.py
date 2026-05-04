@@ -25,7 +25,7 @@ from fme.ace.stepper import (
     Stepper,
     StepperOverrideConfig,
     load_stepper,
-    load_stepper_config,
+    load_stepper_config_with_override,
 )
 from fme.ace.stepper.single_module import (
     StepperConfig,
@@ -261,7 +261,9 @@ class InferenceEvaluatorConfig:
 
     def load_stepper_config(self) -> StepperConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        return load_stepper_config(self.checkpoint_path, self.stepper_override)
+        return load_stepper_config_with_override(
+            self.checkpoint_path, self.stepper_override
+        )
 
     def get_data_writer(
         self,

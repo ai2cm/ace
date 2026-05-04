@@ -22,7 +22,11 @@ from fme.ace.data_loading.gridded_data import (
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.ace.stepper import TrainStepper
-from fme.ace.stepper.single_module import StepperConfig, TrainStepperConfig
+from fme.ace.stepper.single_module import (
+    CheckpointStepperConfig,
+    StepperConfig,
+    TrainStepperConfig,
+)
 from fme.core.cli import ResumeResultsConfig
 from fme.core.cloud import is_local
 from fme.core.dataset.data_typing import VariableMetadata
@@ -187,7 +191,7 @@ class TrainConfig:
 
     train_loader: DataLoaderConfig
     validation_loader: DataLoaderConfig
-    stepper: StepperConfig
+    stepper: StepperConfig | CheckpointStepperConfig
     optimization: OptimizationConfig
     logging: LoggingConfig
     max_epochs: int
@@ -222,10 +226,14 @@ class TrainConfig:
     evaluate_before_training: bool = False
     save_best_inference_epoch_checkpoints: bool = False
     lr_tuning: LRTuningConfig | None = None
-    finetune_optimization_checkpoint_path: str | None = None
     resume_results: ResumeResultsConfig | None = None
+    stepper_config: StepperConfig = dataclasses.field(init=False)
 
     def __post_init__(self):
+        if isinstance(self.stepper, CheckpointStepperConfig):
+            self.stepper_config = self.stepper.to_stepper_config()
+        else:
+            self.stepper_config = self.stepper
         if self.train_loader.using_labels != self.validation_loader.using_labels:
             raise ValueError(
                 "train_loader and validation_loader must both use labels or both not "
@@ -327,7 +335,7 @@ class TrainBuilders:
 
     def _get_train_window_data_requirements(self) -> DataRequirements:
         n_forward_steps = self._get_n_forward_steps()
-        return self.config.stepper.get_evaluation_window_data_requirements(
+        return self.config.stepper_config.get_evaluation_window_data_requirements(
             n_forward_steps
         )
 
@@ -354,13 +362,13 @@ class TrainBuilders:
             return ErrorInferenceData()  # type: ignore
         else:
             window_requirements = (
-                self.config.stepper.get_evaluation_window_data_requirements(
+                self.config.stepper_config.get_evaluation_window_data_requirements(
                     self.config.inference.forward_steps_in_memory
                 )
             )
             return self.config.inference.get_inference_data(
                 window_requirements=window_requirements,
-                initial_condition=self.config.stepper.get_prognostic_state_data_requirements(),
+                initial_condition=self.config.stepper_config.get_prognostic_state_data_requirements(),
             )
 
     def get_optimization(self, modules: torch.nn.ModuleList) -> Optimization:
@@ -379,7 +387,7 @@ class TrainBuilders:
 
         """
         return self.config.stepper_training.get_train_stepper(
-            stepper_config=self.config.stepper,
+            stepper_config=self.config.stepper_config,
             dataset_info=dataset_info,
         )
 
@@ -421,13 +429,13 @@ class TrainBuilders:
         ] = []
         for entry in self.config.additional_inference:
             window_requirements = (
-                self.config.stepper.get_evaluation_window_data_requirements(
+                self.config.stepper_config.get_evaluation_window_data_requirements(
                     entry.config.forward_steps_in_memory
                 )
             )
             data = entry.config.get_inference_data(
                 window_requirements=window_requirements,
-                initial_condition=self.config.stepper.get_prognostic_state_data_requirements(),
+                initial_condition=self.config.stepper_config.get_prognostic_state_data_requirements(),
             )
             dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
             entries_data.append((entry, data, dataset_info))

@@ -1,4 +1,5 @@
 import copy
+import os
 from typing import Literal
 
 import pytest
@@ -14,6 +15,7 @@ from fme.core.optimization import (
     NoCheckpoint,
     NullOptimization,
     Optimization,
+    OptimizationConfig,
 )
 from fme.core.scheduler import SchedulerConfig, SequentialSchedulerConfig
 
@@ -698,6 +700,76 @@ def test_load_optimizer_state_for_finetuning_with_gscaler():
 
     assert optimization2.gscaler is not None
     assert optimization2.gscaler.state_dict() == saved_state["gscaler_state_dict"]
+
+
+def test_optimization_config_build_no_resume_path():
+    """OptimizationConfig.build with resume_optimizer_ckpt_path=None leaves the
+    optimizer state empty (no-op path)."""
+    model = nn.Linear(2, 2).to(fme.get_device())
+    optimization = OptimizationConfig().build(
+        torch.nn.ModuleList([model]), max_epochs=1
+    )
+    assert optimization.optimizer.state_dict()["state"] == {}
+
+
+def test_optimization_config_build_resumes_optimizer_state(tmp_path: str):
+    """OptimizationConfig.build with resume_optimizer_ckpt_path loads
+    per-parameter optimizer state from the checkpoint while preserving the
+    fresh config's per-group hyperparameters."""
+    torch.manual_seed(0)
+    source_model = nn.Linear(2, 2).to(fme.get_device())
+    x = torch.randn(10, 2).to(fme.get_device())
+
+    source = OptimizationConfig(
+        optimizer_type="Adam",
+        lr=0.001,
+        kwargs={"weight_decay": 0.1, "betas": (0.85, 0.995)},
+    ).build(torch.nn.ModuleList([source_model]), max_epochs=10)
+    for _ in range(3):
+        loss = source_model(x).sum()
+        source.accumulate_loss(loss)
+        source.step_weights()
+
+    ckpt_path = os.path.join(tmp_path, "ckpt.tar")
+    torch.save({"optimization": source.get_state()}, ckpt_path)
+
+    new_lr = 0.01
+    new_weight_decay = 0.05
+    new_betas = (0.9, 0.999)
+    target_model = copy.deepcopy(source_model)
+    target = OptimizationConfig(
+        optimizer_type="Adam",
+        lr=new_lr,
+        kwargs={"weight_decay": new_weight_decay, "betas": new_betas},
+        resume_optimizer_ckpt_path=ckpt_path,
+    ).build(torch.nn.ModuleList([target_model]), max_epochs=10)
+
+    src_state = source.optimizer.state_dict()["state"]
+    tgt_state = target.optimizer.state_dict()["state"]
+    assert tgt_state != {}
+    for param_id in src_state:
+        for key in ("exp_avg", "exp_avg_sq"):
+            torch.testing.assert_close(
+                tgt_state[param_id][key], src_state[param_id][key]
+            )
+
+    for group in target.optimizer.param_groups:
+        assert group["lr"] == new_lr
+        assert group["weight_decay"] == new_weight_decay
+        assert group["betas"] == new_betas
+
+
+def test_optimization_config_build_missing_optimization_key(tmp_path: str):
+    """OptimizationConfig.build raises ValueError when the checkpoint at
+    resume_optimizer_ckpt_path does not contain an 'optimization' key (e.g.
+    a best_ckpt.tar that omits optimizer state)."""
+    ckpt_path = os.path.join(tmp_path, "bad_ckpt.tar")
+    torch.save({"stepper": {}, "ema": {}}, ckpt_path)
+
+    model = nn.Linear(1, 1).to(fme.get_device())
+    config = OptimizationConfig(resume_optimizer_ckpt_path=ckpt_path)
+    with pytest.raises(ValueError, match="does not contain optimization state"):
+        config.build(torch.nn.ModuleList([model]), max_epochs=1)
 
 
 def test_scheduler_step_timing():
