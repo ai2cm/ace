@@ -241,6 +241,7 @@ class AggregatorBuilder(
                 save_diagnostics=self.save_per_epoch_diagnostics,
                 output_dir=os.path.join(self.output_dir, "inference"),
                 n_ensemble_per_ic=self.n_ensemble_per_ic,
+                enable_time_series=False,
             )
         else:
             raise ValueError(

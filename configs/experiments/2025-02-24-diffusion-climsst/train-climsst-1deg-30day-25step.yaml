@@ -23,7 +23,6 @@ inference:
       data_path: /climate-default/2023-08-11-vertically-resolved-1deg-fme-ensemble-dataset/ic_0011
     num_data_workers: 16
   aggregator:
-    log_histograms: true
     time_mean_reference_data: /statsdata/time-mean.nc
 logging:
   log_to_screen: true

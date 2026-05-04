@@ -246,8 +246,6 @@ class InferenceEvaluatorConfig:
                         self.forward_steps_in_memory,
                         self.n_forward_steps,
                     )
-        for log_step_mean in self.aggregator.log_step_means:
-            log_step_mean.validate(self.n_forward_steps)
 
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)

@@ -22,8 +22,6 @@ loader:
       engine: zarr
   num_data_workers: 4
 aggregator:
-  log_zonal_mean_images: true
-  log_histograms: true
 data_writer:
   save_prediction_files: false
   save_monthly_files: false

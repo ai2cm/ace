@@ -16,10 +16,7 @@ import torch
 import xarray as xr
 import yaml
 
-from fme.ace.aggregator.inference.main import (
-    InferenceEvaluatorAggregatorConfig,
-    StepMeanEntry,
-)
+from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregatorConfig
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.inference import (
     InferenceDataLoaderConfig,
@@ -335,8 +332,6 @@ def inference_helper(
         prediction_loader=prediction_data,
         aggregator=InferenceEvaluatorAggregatorConfig(
             monthly_reference_data=monthly_reference_filename,
-            log_video=True,
-            log_step_means=[] if n_forward_steps < 20 else [StepMeanEntry(step=20)],
         ),
         data_writer=DataWriterConfig(
             save_prediction_files=False,
@@ -523,9 +518,7 @@ def test_inference_writer_boundaries(
             save_prediction_files=False,
             files=[FileWriterConfig("autoregressive")],
         ),
-        aggregator=InferenceEvaluatorAggregatorConfig(
-            log_step_means=[] if n_forward_steps < 20 else [StepMeanEntry(step=20)],
-        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(),
         forward_steps_in_memory=forward_steps_in_memory,
         allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
     )
@@ -681,9 +674,7 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
             log_to_wandb=False,
         ),
         loader=data.inference_data_loader_config,
-        aggregator=InferenceEvaluatorAggregatorConfig(
-            log_step_means=[],
-        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(),
         data_writer=DataWriterConfig(
             save_monthly_files=False,
             save_prediction_files=False,
@@ -829,9 +820,7 @@ def test_derived_metrics_run_without_errors(
         ),
         loader=data.inference_data_loader_config,
         prediction_loader=None,
-        aggregator=InferenceEvaluatorAggregatorConfig(
-            log_step_means=[],
-        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(),
         data_writer=DataWriterConfig(
             save_prediction_files=False,
             save_monthly_files=False,
@@ -953,9 +942,7 @@ def test_inference_override(tmp_path: pathlib.Path):
             save_prediction_files=False,
             files=[FileWriterConfig("autoregressive")],
         ),
-        aggregator=InferenceEvaluatorAggregatorConfig(
-            log_step_means=[] if n_forward_steps < 20 else [StepMeanEntry(step=20)],
-        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(),
         forward_steps_in_memory=4,
         stepper_override=stepper_override,
         allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
@@ -1216,9 +1203,7 @@ def test_evaluator_with_derived_forcings(
             log_to_file=False,
             log_to_wandb=False,
         ),
-        aggregator=InferenceEvaluatorAggregatorConfig(
-            log_step_means=[],
-        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(),
         loader=data.inference_data_loader_config,
         data_writer=DataWriterConfig(
             save_monthly_files=False,
@@ -1291,9 +1276,7 @@ def test_evaluator_with_non_local_experiment_dir(
             log_to_wandb=False,
         ),
         loader=data.inference_data_loader_config,
-        aggregator=InferenceEvaluatorAggregatorConfig(
-            log_step_means=[],
-        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(),
         data_writer=DataWriterConfig(
             save_monthly_files=False,
             save_prediction_files=False,
@@ -1554,10 +1537,7 @@ def test_inference_with_validation(tmp_path: pathlib.Path, validation_config_kwa
             log_to_wandb=True,
         ),
         loader=data.inference_data_loader_config,
-        aggregator=InferenceEvaluatorAggregatorConfig(
-            log_video=False,
-            log_step_means=[],
-        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(),
         data_writer=DataWriterConfig(
             save_prediction_files=False,
             save_monthly_files=False,

@@ -221,9 +221,6 @@ def test_inference_logs_labels_exist(tmpdir):
     summary_logs = agg.get_summary_logs()
     expected_keys = [
         # ocean-specific keys
-        "annual/ocean_var",
-        "annual/r2/ocean_var_gen",
-        "annual/r2/ocean_var_target",
         "mean_step_20/weighted_rmse/ocean_var",
         "mean_step_20_norm/weighted_rmse/ocean_var",
         "mean_step_20_norm/weighted_rmse/ocean_channel_mean",
@@ -248,9 +245,6 @@ def test_inference_logs_labels_exist(tmpdir):
         "power_spectrum/smallest_scale_norm_bias/ocean_var",
         "video/ocean_var",
         # atmosphere-specific keys
-        "annual/atmos_var",
-        "annual/r2/atmos_var_gen",
-        "annual/r2/atmos_var_target",
         "mean_step_20/weighted_rmse/atmos_var",
         "mean_step_20_norm/weighted_rmse/atmos_var",
         "mean_step_20_norm/weighted_rmse/atmosphere_channel_mean",
@@ -292,7 +286,6 @@ def test_inference_logs_labels_exist(tmpdir):
         "video",
         "time_mean",
         "time_mean_norm",
-        "annual",
     ]
     for file_type in expected_file_types:
         ocean_file = ocean_directory / f"{file_type}_diagnostics.nc"

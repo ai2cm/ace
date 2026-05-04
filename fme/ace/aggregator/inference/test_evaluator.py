@@ -12,9 +12,10 @@ from fme.ace.aggregator.inference import (
     InferenceEvaluatorAggregatorConfig,
     MeanMetricConfig,
     PowerSpectrumMetricConfig,
-    StepMeanEntry,
     StepMeanMetricConfig,
     TimeMeanMetricConfig,
+    VideoMetricConfig,
+    ZonalMeanMetricConfig,
 )
 from fme.ace.data_loading.batch_data import BatchData, PairedData
 from fme.core.coordinates import LatLonCoordinates
@@ -100,11 +101,18 @@ def test_logs_regression():
     initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
 
     agg = InferenceEvaluatorAggregatorConfig(
-        log_step_means=[
-            StepMeanEntry(step=20),
-            StepMeanEntry(step=4, name="one_day_mean"),
+        metrics=[
+            MeanMetricConfig(target="denorm"),
+            MeanMetricConfig(target="norm"),
+            StepMeanMetricConfig(step=20, target="denorm"),
+            StepMeanMetricConfig(step=20, target="norm"),
+            StepMeanMetricConfig(step=4, name="one_day_mean", target="denorm"),
+            StepMeanMetricConfig(step=4, name="one_day_mean_norm", target="norm"),
+            PowerSpectrumMetricConfig(),
+            ZonalMeanMetricConfig(zonal_mean_max_size=LOG_ZONAL_MEAN_IMAGES),
+            TimeMeanMetricConfig(target="denorm"),
+            TimeMeanMetricConfig(target="norm"),
         ],
-        log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
     ).build(
         dataset_info=ds_info,
         n_ic_steps=1,
@@ -196,12 +204,19 @@ def test_inference_logs_labels_exist():
     ds_info = get_ds_info(nx, ny)
     initial_time = (get_zero_time(shape=[n_sample, 0], dims=["sample", "time"]),)
     agg = InferenceEvaluatorAggregatorConfig(
-        log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
-        log_step_means=[
-            StepMeanEntry(step=20),
-            StepMeanEntry(step=4, name="one_day_mean"),
+        metrics=[
+            MeanMetricConfig(target="denorm"),
+            MeanMetricConfig(target="norm"),
+            StepMeanMetricConfig(step=20, target="denorm"),
+            StepMeanMetricConfig(step=20, target="norm"),
+            StepMeanMetricConfig(step=4, name="one_day_mean", target="denorm"),
+            StepMeanMetricConfig(step=4, name="one_day_mean_norm", target="norm"),
+            PowerSpectrumMetricConfig(),
+            ZonalMeanMetricConfig(zonal_mean_max_size=LOG_ZONAL_MEAN_IMAGES),
+            TimeMeanMetricConfig(target="denorm"),
+            TimeMeanMetricConfig(target="norm"),
+            VideoMetricConfig(),
         ],
-        log_video=True,
     ).build(
         dataset_info=ds_info,
         n_ic_steps=1,
@@ -254,9 +269,24 @@ def test_inference_logs_length(window_len: int, n_windows: int):
     ds_info = get_ds_info(nx, ny)
     initial_time = (get_zero_time(shape=[2, 0], dims=["sample", "time"]),)
     n_forward_steps = window_len * n_windows - 1
+    step_mean_metrics = (
+        []
+        if n_forward_steps < 20
+        else [
+            StepMeanMetricConfig(step=20, target="denorm"),
+            StepMeanMetricConfig(step=20, target="norm"),
+        ]
+    )
     agg = InferenceEvaluatorAggregatorConfig(
-        log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
-        log_step_means=[] if n_forward_steps < 20 else [StepMeanEntry(step=20)],
+        metrics=[
+            MeanMetricConfig(target="denorm"),
+            MeanMetricConfig(target="norm"),
+            *step_mean_metrics,
+            PowerSpectrumMetricConfig(),
+            ZonalMeanMetricConfig(zonal_mean_max_size=LOG_ZONAL_MEAN_IMAGES),
+            TimeMeanMetricConfig(target="denorm"),
+            TimeMeanMetricConfig(target="norm"),
+        ],
     ).build(
         dataset_info=ds_info,
         n_ic_steps=1,
@@ -294,10 +324,18 @@ def test_flush_diagnostics(tmpdir):
     ds_info = get_ds_info(nx, ny)
     initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
     agg = InferenceEvaluatorAggregatorConfig(
-        log_step_means=[StepMeanEntry(step=20)],
-        log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
-        log_video=True,
-        log_histograms=True,
+        metrics=[
+            MeanMetricConfig(target="denorm"),
+            MeanMetricConfig(target="norm"),
+            StepMeanMetricConfig(step=20, target="denorm"),
+            StepMeanMetricConfig(step=20, target="norm"),
+            PowerSpectrumMetricConfig(),
+            ZonalMeanMetricConfig(zonal_mean_max_size=LOG_ZONAL_MEAN_IMAGES),
+            TimeMeanMetricConfig(target="denorm"),
+            TimeMeanMetricConfig(target="norm"),
+            VideoMetricConfig(),
+            HistogramMetricConfig(),
+        ],
     ).build(
         dataset_info=ds_info,
         n_ic_steps=1,
@@ -337,8 +375,7 @@ def test_agg_raises_without_output_dir():
         ValueError, match="Output directory must be set to save diagnostics"
     ):
         InferenceEvaluatorAggregatorConfig(
-            log_step_means=[],
-            log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
+            metrics=[TimeMeanMetricConfig()],
         ).build(
             dataset_info=ds_info,
             n_ic_steps=1,

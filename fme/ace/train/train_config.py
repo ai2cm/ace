@@ -9,6 +9,13 @@ from fme.ace.aggregator import (
     InferenceEvaluatorAggregatorConfig,
     OneStepAggregatorConfig,
 )
+from fme.ace.aggregator.inference import (
+    MeanMetricConfig,
+    PowerSpectrumMetricConfig,
+    StepMeanMetricConfig,
+    TimeMeanMetricConfig,
+    ZonalMeanMetricConfig,
+)
 from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregator
 from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.batch_data import PrognosticState
@@ -59,7 +66,14 @@ class InlineInferenceConfig:
     epochs: Slice = dataclasses.field(default_factory=lambda: Slice())
     aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
         default_factory=lambda: InferenceEvaluatorAggregatorConfig(
-            log_global_mean_time_series=False, log_global_mean_norm_time_series=False
+            metrics=[
+                StepMeanMetricConfig(step=20, target="denorm"),
+                StepMeanMetricConfig(step=20, target="norm"),
+                PowerSpectrumMetricConfig(),
+                ZonalMeanMetricConfig(),
+                TimeMeanMetricConfig(target="denorm"),
+                TimeMeanMetricConfig(target="norm"),
+            ]
         )
     )
 
@@ -72,17 +86,12 @@ class InlineInferenceConfig:
                 f"{self.loader.start_indices.n_initial_conditions} and "
                 f"{dist.world_size}."
             )
-        if (
-            self.aggregator.log_global_mean_time_series
-            or self.aggregator.log_global_mean_norm_time_series
-        ):
-            # Both of log_global_mean_time_series and
-            # log_global_mean_norm_time_series must be False for inline inference.
-            self.aggregator.log_global_mean_time_series = False
-            self.aggregator.log_global_mean_norm_time_series = False
-
-        for log_step_mean in self.aggregator.log_step_means:
-            log_step_mean.validate(self.n_forward_steps)
+        if self.aggregator.metrics is not None:
+            self.aggregator.metrics = [
+                m
+                for m in self.aggregator.metrics
+                if not isinstance(m, MeanMetricConfig)
+            ]
 
     @property
     def using_labels(self) -> bool:
@@ -448,6 +457,7 @@ class TrainBuilders:
                         channel_mean_names=channel_mean_names,
                         save_diagnostics=save_diagnostics,
                         n_ensemble_per_ic=entry.config.n_ensemble_per_ic,
+                        enable_time_series=False,
                     )
                     all_logs.update(
                         inference_one_epoch(

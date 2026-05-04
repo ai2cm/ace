@@ -24,7 +24,6 @@ inference:
       data_path: /climate-default/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/netCDFs/ic_0002
     num_data_workers: 8
   aggregator:
-    log_histograms: true
     time_mean_reference_data: /statsdata/time-mean.nc
     monthly_reference_data: /refdata/monthly_mean_data.nc
 logging:

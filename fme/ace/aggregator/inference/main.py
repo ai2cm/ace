@@ -423,47 +423,6 @@ MetricConfig = (
 )
 
 
-# ---------------------------------------------------------------------------
-# Legacy StepMeanEntry (used by default metrics generation from old flags)
-# ---------------------------------------------------------------------------
-
-
-@dataclasses.dataclass
-class StepMeanEntry:
-    """
-    Configuration for logging mean metrics at a particular step.
-
-    Attributes:
-        step: Number of forward steps after which to log mean metrics. For example,
-            step=20 will log mean metrics at the 20th forward step
-            (i.e. time index n_ic_steps + 19).
-        name: Name to use for the logged metrics. If None, will use "mean_step_{step}".
-    """
-
-    step: int
-    name: str | None = None
-
-    def get_name(self):
-        return self.name or f"mean_step_{self.step}"
-
-    def validate(self, n_forward_steps: int):
-        if self.step > n_forward_steps:
-            raise ValueError(
-                f"Step {self.step} is "
-                f"greater than n_forward_steps {n_forward_steps}. "
-                "Please ensure that all steps in log_step_means are less than or "
-                "equal to "
-                "n_forward_steps. If your run is less than 20 steps, you must pass "
-                "a custom log_step_means configuration to override the default "
-                "(e.g. log_step_means: [])."
-            )
-
-
-# ---------------------------------------------------------------------------
-# Evaluator aggregator config
-# ---------------------------------------------------------------------------
-
-
 @dataclasses.dataclass
 class InferenceEvaluatorAggregatorConfig:
     """
@@ -471,44 +430,19 @@ class InferenceEvaluatorAggregatorConfig:
 
     Metrics can be configured explicitly via the ``metrics`` list, where each
     entry is a typed metric configuration (e.g. ``MeanMetricConfig``,
-    ``StepMeanMetricConfig``).  When ``metrics`` is ``None``, the legacy
-    boolean flags are used to build a default metrics list.
+    ``StepMeanMetricConfig``).  When ``metrics`` is ``None``, a default set
+    of metrics is computed at build time based on the grid type and run length.
 
     Parameters:
-        log_histograms: Whether to log histograms of the targets and predictions.
-        log_video: Whether to log videos of the state evolution.
-        log_extended_video: Whether to log wandb videos of the predictions with
-            statistical metrics, only done if log_video is True.
-        log_zonal_mean_images: Whether to log zonal-mean images (hovmollers) with a
-                time dimension. If greater than 0 zonal-mean images will be logged. The
-                value of log_zonal_mean_images is default to 4096 (2**12) and can be set
-                with a maximum of 32768 (2**15) (limited by matplotlib).
-        log_seasonal_means: Whether to log seasonal mean metrics and images.
-        log_global_mean_time_series: Whether to log global mean time series metrics.
-        log_global_mean_norm_time_series: Whether to log the normalized global mean
-            time series metrics.
+        metrics: Explicit list of metric configurations.  When ``None``, a
+            default set is used.
         monthly_reference_data: Path to monthly reference data to compare against.
         time_mean_reference_data: Path to reference time means to compare against.
-        log_step_means: List of StepMeanEntry objects specifying steps at which
-            to log mean metrics.
-        metrics: Explicit list of metric configurations.  When provided, the
-            legacy boolean flags above are ignored.
     """
 
-    log_histograms: bool = False
-    log_video: bool = False
-    log_extended_video: bool = False
-    log_zonal_mean_images: bool | int = 4096
-    log_seasonal_means: bool = False
-    log_global_mean_time_series: bool = True
-    log_global_mean_norm_time_series: bool = True
+    metrics: list[MetricConfig] | None = None
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
-    log_nino34_index: bool = True
-    log_step_means: list[StepMeanEntry] = dataclasses.field(
-        default_factory=lambda: [StepMeanEntry(step=20)]
-    )
-    metrics: list[MetricConfig] | None = None
 
     def __post_init__(self):
         if self.metrics is not None:
@@ -525,77 +459,37 @@ class InferenceEvaluatorAggregatorConfig:
                     "Use the 'name' field to disambiguate."
                 )
 
-    def _build_default_metrics(
-        self,
+    @staticmethod
+    def _default_metrics(
         ctx: _MetricBuildContext,
         n_ensemble_per_ic: int,
     ) -> list[MetricConfig]:
-        """Convert legacy boolean flags into an explicit metrics list."""
-        metrics: list[MetricConfig] = []
+        """Compute default metrics based on runtime information."""
+        metrics: list[MetricConfig] = [
+            MeanMetricConfig(target="denorm"),
+            MeanMetricConfig(target="norm"),
+        ]
 
-        if self.log_global_mean_time_series:
-            metrics.append(MeanMetricConfig(target="denorm"))
-        if self.log_global_mean_norm_time_series:
-            metrics.append(MeanMetricConfig(target="norm"))
+        if ctx.n_forward_steps >= 20:
+            metrics.append(StepMeanMetricConfig(step=20, target="denorm"))
+            metrics.append(StepMeanMetricConfig(step=20, target="norm"))
 
-        for entry in self.log_step_means:
-            entry.validate(ctx.n_forward_steps)
-            metrics.append(
-                StepMeanMetricConfig(
-                    step=entry.step,
-                    name=entry.name,
-                    target="denorm",
-                )
-            )
-            norm_name = f"{entry.name}_norm" if entry.name is not None else None
-            metrics.append(
-                StepMeanMetricConfig(
-                    step=entry.step,
-                    name=norm_name,
-                    target="norm",
-                )
-            )
+        metrics.extend(
+            [
+                PowerSpectrumMetricConfig(),
+                ZonalMeanMetricConfig(),
+                TimeMeanMetricConfig(target="denorm"),
+                TimeMeanMetricConfig(target="norm"),
+            ]
+        )
 
-        if n_ensemble_per_ic > 1 and self.log_step_means:
+        if n_ensemble_per_ic > 1:
             metrics.append(EnsembleMetricConfig(step=20))
-
-        metrics.append(PowerSpectrumMetricConfig())
-
-        if self.log_zonal_mean_images:
-            if ctx.ops.zonal_mean is not None:
-                metrics.append(
-                    ZonalMeanMetricConfig(
-                        zonal_mean_max_size=self.log_zonal_mean_images,
-                    )
-                )
-            else:
-                logging.warning(
-                    "Zonal mean aggregator not implemented for this grid "
-                    "type, omitting."
-                )
-
-        if isinstance(ctx.horizontal_coordinates, LatLonCoordinates) and self.log_video:
-            metrics.append(
-                VideoMetricConfig(
-                    enable_extended_videos=self.log_extended_video,
-                )
-            )
-
-        metrics.append(TimeMeanMetricConfig(target="denorm"))
-        metrics.append(TimeMeanMetricConfig(target="norm"))
-
-        if self.log_histograms:
-            metrics.append(HistogramMetricConfig())
-
-        if self.log_seasonal_means:
-            metrics.append(SeasonalMetricConfig())
 
         if ctx.n_timesteps * ctx.timestep > APPROXIMATELY_TWO_YEARS:
             metrics.append(AnnualMetricConfig())
-            if (
-                isinstance(ctx.horizontal_coordinates, LatLonCoordinates)
-                and isinstance(ctx.ops, LatLonOperations)
-                and self.log_nino34_index
+            if isinstance(ctx.horizontal_coordinates, LatLonCoordinates) and isinstance(
+                ctx.ops, LatLonOperations
             ):
                 metrics.append(EnsoIndexMetricConfig())
 
@@ -615,6 +509,7 @@ class InferenceEvaluatorAggregatorConfig:
         channel_mean_names: Sequence[str] | None = None,
         save_diagnostics: bool = True,
         n_ensemble_per_ic: int = 1,
+        enable_time_series: bool = True,
     ) -> "InferenceEvaluatorAggregator":
         if save_diagnostics and output_dir is None:
             raise ValueError("Output directory must be set to save diagnostics.")
@@ -648,7 +543,10 @@ class InferenceEvaluatorAggregatorConfig:
         if self.metrics is not None:
             metrics = list(self.metrics)
         else:
-            metrics = self._build_default_metrics(ctx, n_ensemble_per_ic)
+            metrics = self._default_metrics(ctx, n_ensemble_per_ic)
+
+        if not enable_time_series:
+            metrics = [m for m in metrics if not isinstance(m, MeanMetricConfig)]
 
         is_explicit = self.metrics is not None
         aggregators: dict[str, SubAggregator] = {}

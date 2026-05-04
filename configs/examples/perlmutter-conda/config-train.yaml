@@ -31,7 +31,6 @@ inference:
       data_path: FME_TRAIN_DIR
     num_data_workers: 1
   aggregator:
-    log_histograms: true
 logging:
   log_to_screen: true
   log_to_wandb: false

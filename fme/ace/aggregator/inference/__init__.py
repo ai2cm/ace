@@ -12,7 +12,6 @@ from .main import (
     MetricConfig,
     PowerSpectrumMetricConfig,
     SeasonalMetricConfig,
-    StepMeanEntry,
     StepMeanMetricConfig,
     TimeMeanMetricConfig,
     VideoMetricConfig,

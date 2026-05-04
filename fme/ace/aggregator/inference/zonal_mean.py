@@ -109,7 +109,7 @@ class ZonalMeanAggregator:
             logging.info(
                 f"Automatic time coarsening is enabled for zonal mean images due to "
                 f"timesteps being greater than {self._max_size}. If you want to "
-                f"override this, set log_zonal_mean_images to a value up to "
+                f"override this, set zonal_mean_max_size to a value up to "
                 f"{self._max_matplotlib_size}."
             )
             self.time_coarsening_factor = np.ceil(n_timesteps / self._max_size).astype(
