@@ -45,7 +45,7 @@ train_loader:
       engine: zarr
       subset:
         start_time: '2016-01-01T00:00:00'
-        stop_time: '2021-01-01T00:00:00' #'2022-12-31T23:59:00'
+        stop_time: '2017-01-01T00:00:00' #'2022-12-31T23:59:00'
     - data_path: /climate-default/
       file_pattern: 2026-02-12-X-SHiELD-AMIP-plus-4K-1deg-8layer-1yr.zarr
       engine: zarr
@@ -104,7 +104,7 @@ stepper_training:
       specific_total_water_0: 0.05
       specific_total_water_1: 0.025
       specific_total_water_2: 0.5
-      PRATEsfc: 0.5
+      PRATEsfc: 1
       h500: 10
       TMP850: 5
       Q2m: 0.5

@@ -6,7 +6,7 @@
 set -e
 
 
-CONFIG_FILENAME="ace-evaluator-control.yaml"
+CONFIG_FILENAME="ace-evaluator-4k.yaml"
 
 SCRIPT_PATH=$(git rev-parse --show-prefix)
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -23,11 +23,11 @@ cd $REPO_ROOT
 #MODEL_CHECKPOINT_DATASETS=("01KQDQTJ6SN7WHCYFKAER9G93F")
 
 # ACE2S ckpt from paper
-MODEL_CHECKPOINT_DATASETS=("01KQDG7X72D4E2JJTGQ0ZF9J9T")
+MODEL_CHECKPOINT_DATASETS=("01KQG2R8RCWH1ZJS0FK3P9Z8C4")
 
 for seed in {0..0}; do
     #job_name="evaluate-4k-ace2som-xshield-continue-tune-1yr-even-split-single-decoder-seed${seed}"
-    job_name="evaluate-ace2s-ckpt-control-xshield"
+    job_name="evaluate-4k-ckpt-tune-1yr-5-1-split-seed${seed}"
     gantry run \
         --name $job_name \
         --description 'Run ACE training' \
@@ -44,7 +44,7 @@ for seed in {0..0}; do
         --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
         --env-secret WANDB_API_KEY=wandb-api-key-annak \
         --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-        --dataset ${MODEL_CHECKPOINT_DATASETS[$seed]}:training_checkpoints/ACE2S.ckpt:/ckpt.tar \
+        --dataset ${MODEL_CHECKPOINT_DATASETS[$seed]}:training_checkpoints/best_ckpt.tar:/ckpt.tar \
         --gpus 1 \
         --shared-memory 400GiB \
         --weka climate-default:/climate-default \
