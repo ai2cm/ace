@@ -43,7 +43,7 @@ from fme.ace.stepper.single_module import (
     get_serialized_stepper_vertical_coordinate,
     load_stepper,
     load_stepper_config,
-    load_stepper_config_from_checkpoint,
+    load_stepper_config_with_override,
 )
 from fme.ace.stepper.time_length_probabilities import (
     TimeLength,
@@ -1552,7 +1552,7 @@ def test_load_stepper_and_load_stepper_config(
 
     # First check that load_stepper_config and load_stepper functions load
     # the unmodified stepper when no StepperOverrideConfig is passed.
-    stepper_config = load_stepper_config(stepper_path)
+    stepper_config = load_stepper_config_with_override(stepper_path)
     validate_stepper_config(
         stepper_config, serialized_ocean_config, serialized_multi_call_config
     )
@@ -1570,7 +1570,7 @@ def test_load_stepper_and_load_stepper_config(
         derived_forcings=overriding_derived_forcings_config,
     )
 
-    stepper_config = load_stepper_config(stepper_path, stepper_override)
+    stepper_config = load_stepper_config_with_override(stepper_path, stepper_override)
     validate_stepper_config(
         stepper_config, expected_ocean_config, expected_multi_call_config
     )
@@ -2367,7 +2367,7 @@ def test_load_stepper_config_from_checkpoint(tmp_path: pathlib.Path):
 
     checkpoint_path = tmp_path / "checkpoint.tar"
     original_config = save_stepper_checkpoint(checkpoint_path)
-    loaded_config = load_stepper_config_from_checkpoint(checkpoint_path)
+    loaded_config = load_stepper_config(checkpoint_path)
     assert isinstance(loaded_config, StepperConfig)
     assert loaded_config.derived_forcings == original_config.derived_forcings
     assert loaded_config.step.type == original_config.step.type

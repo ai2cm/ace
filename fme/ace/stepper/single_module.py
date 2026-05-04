@@ -770,7 +770,7 @@ class CheckpointStepperConfig:
     checkpoint_path: str
 
     def to_stepper_config(self) -> StepperConfig:
-        return load_stepper_config_from_checkpoint(self.checkpoint_path)
+        return load_stepper_config(self.checkpoint_path)
 
 
 class EpochNotProvidedError(ValueError):
@@ -1798,7 +1798,7 @@ class StepperOverrideConfig:
     prescribed_prognostic_names: Literal["keep"] | list[str] = "keep"
 
 
-def load_stepper_config_from_checkpoint(
+def load_stepper_config(
     checkpoint_path: str | pathlib.Path,
 ) -> StepperConfig:
     """Load a stepper configuration from a checkpoint without instantiating
@@ -1814,7 +1814,7 @@ def load_stepper_config_from_checkpoint(
     return StepperConfig.from_stepper_state(checkpoint["stepper"])
 
 
-def load_stepper_config(
+def load_stepper_config_with_override(
     checkpoint_path: str | pathlib.Path,
     override_config: StepperOverrideConfig | None = None,
 ) -> StepperConfig:
@@ -1828,6 +1828,8 @@ def load_stepper_config(
         The configuration of the stepper serialized in the checkpoint, with
         appropriate options overridden.
     """
+    if override_config is None:
+        return load_stepper_config(checkpoint_path)
     stepper = load_stepper(checkpoint_path, override_config)
     return stepper._config
 
