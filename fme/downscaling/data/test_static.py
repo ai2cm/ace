@@ -178,3 +178,41 @@ def test__load_coords_from_ds():
     ds = xr.Dataset(coords={"x": lon, "y": lat})
     with pytest.raises(ValueError):
         _load_coords_from_ds(ds)
+
+
+def test_StaticInputs_roll_shifts_data_and_coords():
+    """StaticInputs.roll produces correctly rolled data and monotonic shifted coords."""
+    from fme.core.coordinates import LatLonCoordinates
+
+    # 1-degree global grid: 0.5, 1.5, ..., 359.5
+    n_lon = 360
+    lon = torch.arange(n_lon, dtype=torch.float32) + 0.5
+    lat = torch.tensor([0.5], dtype=torch.float32)
+    coords = LatLonCoordinates(lat=lat, lon=lon)
+    data = torch.arange(n_lon, dtype=torch.float32).unsqueeze(0)  # values = index
+    static = StaticInputs(fields=[StaticInput(data)], coords=coords)
+
+    # Roll so domain starts at -5.5°: start_360=354.5, roll=(coords<354.5).sum()=354
+    roll_amount = 354
+    lon_start = -5.5
+    rolled = static.roll(roll_amount, lon_start)
+
+    # Data: original index 354 (value=354) should be at index 0 after rolling
+    assert rolled.fields[0].data[0, 0].item() == pytest.approx(354.0)
+    assert rolled.fields[0].data[0, -1].item() == pytest.approx(353.0)
+
+    # Coordinates should be monotonically increasing and start near lon_start
+    assert torch.all(rolled.coords.lon[1:] > rolled.coords.lon[:-1])
+    assert rolled.coords.lon[0].item() == pytest.approx(354.5 - 360)  # = -5.5
+
+
+def test_StaticInputs_roll_zero_returns_self():
+    from fme.core.coordinates import LatLonCoordinates
+
+    coords = LatLonCoordinates(
+        lat=torch.tensor([0.0]),
+        lon=torch.tensor([0.5, 1.5, 2.5]),
+    )
+    data = torch.zeros(1, 3)
+    static = StaticInputs(fields=[StaticInput(data)], coords=coords)
+    assert static.roll(0, 0.0) is static

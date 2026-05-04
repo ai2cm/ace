@@ -16,6 +16,76 @@ def null_generator(num: int):
         yield None
 
 
+def compute_lon_roll(lon_coords: torch.Tensor, lon_start: float) -> int:
+    """
+    Compute the number of positions to roll lon_coords (leftward) so that an
+    interval starting at lon_start becomes contiguous in the rolled array.
+
+    Returns 0 when lon_start is already representable without wrapping (i.e.,
+    lon_start is within one period of the coordinate origin).
+
+    Args:
+        lon_coords: 1-D tensor of monotonically increasing longitudes (e.g. 0–360°).
+        lon_start: Start of the desired longitude interval.
+
+    Returns:
+        Roll amount r such that ``torch.roll(lon_coords, -r)`` places the first
+        coordinate >= (lon_start % 360) at index 0 of the rolled array.
+    """
+    start_360 = lon_start % 360
+    if abs(lon_start - start_360) < 1e-6:
+        return 0
+    return int((lon_coords < start_360).sum().item())
+
+
+def roll_lon_coords(
+    lon_coords: torch.Tensor, roll_amount: int, lon_start: float
+) -> torch.Tensor:
+    """
+    Roll longitude coordinates and adjust values to maintain a monotonically
+    increasing sequence whose first element is consistent with lon_start's
+    sign convention.
+
+    After rolling, coordinates that wrapped around the end of the array have
+    360 added, then a global offset (a multiple of 360) shifts the whole array
+    so that rolled_coords[0] ≈ lon_start.
+
+    Args:
+        lon_coords: 1-D tensor of monotonically increasing longitudes.
+        roll_amount: Value returned by :func:`compute_lon_roll`.
+        lon_start: The lon_start used when computing roll_amount.
+
+    Returns:
+        A new tensor of the same shape with monotonically increasing values.
+    """
+    if roll_amount == 0:
+        return lon_coords
+    n = len(lon_coords)
+    rolled = torch.roll(lon_coords, -roll_amount).clone()
+    rolled[n - roll_amount :] += 360.0
+    offset = lon_start - (lon_start % 360)
+    return rolled + offset
+
+
+def roll_lon_data(
+    tensor: torch.Tensor, roll_amount: int, lon_dim: int = -1
+) -> torch.Tensor:
+    """Roll a data tensor along its longitude dimension by roll_amount positions."""
+    if roll_amount == 0:
+        return tensor
+    return torch.roll(tensor, -roll_amount, dims=lon_dim)
+
+
+def roll_latlon_coords(
+    coords: LatLonCoordinates, roll_amount: int, lon_start: float
+) -> LatLonCoordinates:
+    """Return a new LatLonCoordinates with lon rolled by roll_amount."""
+    return LatLonCoordinates(
+        lat=coords.lat,
+        lon=roll_lon_coords(coords.lon, roll_amount, lon_start),
+    )
+
+
 @dataclasses.dataclass
 class ClosedInterval:
     """
@@ -147,7 +217,14 @@ def adjust_fine_coord_range(
     coarse_min = full_coarse_coord[full_coarse_coord >= coord_range.start][0]
     coarse_max = full_coarse_coord[full_coarse_coord <= coord_range.stop][-1]
 
-    n_fine_below = int((full_fine_coord < coarse_min).sum())
+    # Detect a wrapping longitude domain: coord_range uses a shifted convention
+    # (coarse_min is negative) while the fine coord array is in 0–360°.
+    # Fine points "just before" the wrapped edge live at the high end of the
+    # unshifted fine array (e.g. near 270° when the edge is at -90° / 270°).
+    is_lon_wrap = float(coarse_min) < 0 and float(full_fine_coord.min()) >= 0
+    fine_ref = float(coarse_min) + (360.0 if is_lon_wrap else 0.0)
+
+    n_fine_below = int((full_fine_coord < fine_ref).sum())
     n_fine_above = int((full_fine_coord > coarse_max).sum())
     if n_fine_below < n_half_fine or n_fine_above < n_half_fine:
         raise ValueError(
@@ -159,8 +236,9 @@ def adjust_fine_coord_range(
             f"the domain edges."
         )
 
-    fine_min = full_fine_coord[full_fine_coord < coarse_min][-n_half_fine]
-    fine_max = full_fine_coord[full_fine_coord > coarse_max][n_half_fine - 1]
+    fine_min_ref = float(full_fine_coord[full_fine_coord < fine_ref][-n_half_fine])
+    fine_min = fine_min_ref - (360.0 if is_lon_wrap else 0.0)
+    fine_max = float(full_fine_coord[full_fine_coord > coarse_max][n_half_fine - 1])
 
     return ClosedInterval(start=fine_min, stop=fine_max)
 

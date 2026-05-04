@@ -18,6 +18,10 @@ from .utils import (
     ClosedInterval,
     LatLonCoordinates,
     adjust_fine_coord_range,
+    compute_lon_roll,
     expand_and_fold_tensor,
+    roll_latlon_coords,
+    roll_lon_coords,
+    roll_lon_data,
     scale_tuple,
 )
