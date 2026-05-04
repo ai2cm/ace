@@ -8,9 +8,13 @@ import torch
 import xarray as xr
 
 from fme.ace.aggregator.inference import (
+    HistogramMetricConfig,
     InferenceEvaluatorAggregatorConfig,
-    MetricConfig,
+    MeanMetricConfig,
+    PowerSpectrumMetricConfig,
     StepMeanEntry,
+    StepMeanMetricConfig,
+    TimeMeanMetricConfig,
 )
 from fme.ace.data_loading.batch_data import BatchData, PairedData
 from fme.core.coordinates import LatLonCoordinates
@@ -346,39 +350,31 @@ def test_agg_raises_without_output_dir():
         )
 
 
-def test_metric_config_invalid_type():
-    with pytest.raises(ValueError, match="Unknown metric type"):
-        MetricConfig(type="nonexistent")
-
-
-def test_metric_config_step_mean_requires_step():
-    with pytest.raises(ValueError, match="step is required"):
-        MetricConfig(type="step_mean")
+def test_step_mean_metric_config_requires_step():
+    with pytest.raises(TypeError):
+        StepMeanMetricConfig()  # type: ignore[call-arg]
 
 
 def test_metric_config_duplicate_names():
     with pytest.raises(ValueError, match="Duplicate metric names"):
         InferenceEvaluatorAggregatorConfig(
             metrics=[
-                MetricConfig(type="mean"),
-                MetricConfig(type="mean"),
+                MeanMetricConfig(),
+                MeanMetricConfig(),
             ],
         )
 
 
 def test_metric_config_get_name_defaults():
-    assert MetricConfig(type="mean").get_name() == "mean"
-    assert MetricConfig(type="mean", target="norm").get_name() == "mean_norm"
-    assert MetricConfig(type="step_mean", step=5).get_name() == "mean_step_5"
-    assert (
-        MetricConfig(type="step_mean", step=5, target="norm").get_name()
-        == "mean_step_5_norm"
-    )
-    assert MetricConfig(type="time_mean").get_name() == "time_mean"
-    assert MetricConfig(type="time_mean", target="norm").get_name() == "time_mean_norm"
-    assert MetricConfig(type="power_spectrum").get_name() == "power_spectrum"
-    assert MetricConfig(type="histogram").get_name() == "histogram"
-    assert MetricConfig(type="mean", name="custom").get_name() == "custom"
+    assert MeanMetricConfig().get_name() == "mean"
+    assert MeanMetricConfig(target="norm").get_name() == "mean_norm"
+    assert StepMeanMetricConfig(step=5).get_name() == "mean_step_5"
+    assert StepMeanMetricConfig(step=5, target="norm").get_name() == "mean_step_5_norm"
+    assert TimeMeanMetricConfig().get_name() == "time_mean"
+    assert TimeMeanMetricConfig(target="norm").get_name() == "time_mean_norm"
+    assert PowerSpectrumMetricConfig().get_name() == "power_spectrum"
+    assert HistogramMetricConfig().get_name() == "histogram"
+    assert MeanMetricConfig(name="custom").get_name() == "custom"
 
 
 def test_metrics_list_builds_and_records():
@@ -390,10 +386,10 @@ def test_metrics_list_builds_and_records():
 
     agg = InferenceEvaluatorAggregatorConfig(
         metrics=[
-            MetricConfig(type="mean"),
-            MetricConfig(type="mean", target="norm"),
-            MetricConfig(type="time_mean"),
-            MetricConfig(type="step_mean", step=3),
+            MeanMetricConfig(),
+            MeanMetricConfig(target="norm"),
+            TimeMeanMetricConfig(),
+            StepMeanMetricConfig(step=3),
         ],
     ).build(
         dataset_info=ds_info,
@@ -431,8 +427,8 @@ def test_metrics_list_variable_filter():
 
     agg = InferenceEvaluatorAggregatorConfig(
         metrics=[
-            MetricConfig(type="mean", variables=["a"]),
-            MetricConfig(type="time_mean", variables=["b"]),
+            MeanMetricConfig(variables=["a"]),
+            TimeMeanMetricConfig(variables=["b"]),
         ],
     ).build(
         dataset_info=ds_info,
@@ -465,7 +461,7 @@ def test_metrics_list_step_mean_exceeds_steps():
     ds_info = get_ds_info(nx=4, ny=4)
     with pytest.raises(ValueError, match="step_mean step 100 exceeds"):
         InferenceEvaluatorAggregatorConfig(
-            metrics=[MetricConfig(type="step_mean", step=100)],
+            metrics=[StepMeanMetricConfig(step=100)],
         ).build(
             dataset_info=ds_info,
             n_ic_steps=1,
