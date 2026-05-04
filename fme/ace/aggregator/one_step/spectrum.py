@@ -47,12 +47,9 @@ class SpectrumAggregator:
                 key: value[:, i_time_target : i_time_target + 1, ...]
                 for key, value in gen_data.items()
             }
-            self._wrapped.record_batch(
-                target_data,
-                gen_data,
-                target_data_norm,
-                gen_data_norm,
-                i_time_start,
+            self._wrapped.record_paired_data(
+                prediction=gen_data,
+                target=target_data,
             )
 
     def get_logs(self, label: str):
