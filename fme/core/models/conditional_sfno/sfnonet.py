@@ -85,6 +85,10 @@ class SFNONetConfig:
             0 disables LoRA.
         spectral_lora_alpha: Strength of LoRA adaptations for spectral
             convolutions. Defaults to spectral_lora_rank if None.
+        filter_preserves_global_mean: If True, the spectral filter preserves
+            the l=0 (global mean) spherical harmonic coefficient, so that
+            global mean changes can only result from local operations
+            (norms, MLPs, skip connections).
     """
 
     embed_dim: int = 256
@@ -112,6 +116,7 @@ class SFNONetConfig:
     lora_alpha: float | None = None
     spectral_lora_rank: int = 0
     spectral_lora_alpha: float | None = None
+    filter_preserves_global_mean: bool = False
 
 
 # heuristic for finding theta_cutoff
@@ -155,11 +160,17 @@ class SpectralFilterLayer(nn.Module):
         filter_residual=False,
         lora_rank: int = 0,
         lora_alpha: float | None = None,
+        preserve_global_mean: bool = False,
     ):
         super(SpectralFilterLayer, self).__init__()
 
         if lora_rank != 0 and filter_type != "linear":
             raise NotImplementedError("LoRA is only supported for linear filter type.")
+
+        if preserve_global_mean and filter_type != "linear":
+            raise NotImplementedError(
+                "preserve_global_mean is only supported for linear filter type."
+            )
 
         if filter_type == "non-linear":
             raise NotImplementedError("Non-linear spectral filters are not supported.")
@@ -176,6 +187,7 @@ class SpectralFilterLayer(nn.Module):
                 lora_rank=lora_rank,
                 lora_alpha=lora_alpha,
                 num_groups=num_groups,
+                preserve_global_mean=preserve_global_mean,
             )
         elif filter_type == "makani-linear":
             self.filter = SpectralConv(
@@ -245,6 +257,7 @@ class FourierNeuralOperatorBlock(nn.Module):
         lora_alpha: float | None = None,
         spectral_lora_rank: int = 0,
         spectral_lora_alpha: float | None = None,
+        filter_preserves_global_mean: bool = False,
     ):
         super(FourierNeuralOperatorBlock, self).__init__()
 
@@ -270,6 +283,7 @@ class FourierNeuralOperatorBlock(nn.Module):
             num_groups=filter_num_groups,
             lora_rank=spectral_lora_rank,
             lora_alpha=spectral_lora_alpha,
+            preserve_global_mean=filter_preserves_global_mean,
         )
 
         if inner_skip == "linear":
@@ -518,6 +532,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         self.lora_alpha = params.lora_alpha
         self.spectral_lora_rank = params.spectral_lora_rank
         self.spectral_lora_alpha = params.spectral_lora_alpha
+        self.filter_preserves_global_mean = params.filter_preserves_global_mean
 
         self.trans_down = trans_down
         self.itrans_up = itrans_up
@@ -623,6 +638,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                 lora_alpha=self.lora_alpha,
                 spectral_lora_rank=self.spectral_lora_rank,
                 spectral_lora_alpha=self.spectral_lora_alpha,
+                filter_preserves_global_mean=self.filter_preserves_global_mean,
             )
 
             self.blocks.append(block)
