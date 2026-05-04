@@ -371,10 +371,17 @@ class Trainer:
                 inference_logs = self.inference_one_epoch()
             else:
                 inference_logs = {}
+            with self.validation_context():
+                additional_logs = self._end_of_epoch_callback(self._epochs_trained)
             valid_loss = valid_logs["val/mean/loss"]
             logging.info(f"Validation loss before training: {valid_loss}")
             logging.info("Logging to wandb")
-            all_logs = valid_logs | inference_logs | {"epoch": self._epochs_trained}
+            all_logs = (
+                valid_logs
+                | inference_logs
+                | additional_logs
+                | {"epoch": self._epochs_trained}
+            )
             wandb = WandB.get_instance()
             wandb.log(all_logs, step=self.num_batches_seen)
 

@@ -343,6 +343,7 @@ def get_trainer(
     n_validation_batches: int = 5,
     save_checkpoint: bool = True,
     lr_tuning: LRTuningConfig | None = None,
+    end_of_epoch_callback: unittest.mock.MagicMock | None = None,
 ) -> tuple[TrainConfigProtocol, Trainer]:
     if checkpoint_dir is None:
         checkpoint_dir = os.path.join(tmp_path, "checkpoints")
@@ -425,6 +426,8 @@ def get_trainer(
         validation_losses=validation_losses,
         inference_losses=inference_losses,
     )
+    if end_of_epoch_callback is None:
+        end_of_epoch_callback = unittest.mock.MagicMock(side_effect=lambda epoch: {})
     return config, Trainer(
         train_data=train_data,
         validation_data=validation_data,
@@ -435,7 +438,7 @@ def get_trainer(
         config=config,
         aggregator_builder=aggregator_builder,
         end_of_batch_callback=unittest.mock.MagicMock(),
-        end_of_epoch_callback=unittest.mock.MagicMock(side_effect=lambda epoch: {}),
+        end_of_epoch_callback=end_of_epoch_callback,
         do_gc_collect=False,  # for much faster tests
     )
 
@@ -962,6 +965,53 @@ def test_evaluate_before_training(tmp_path: str):
                 assert train_loss_name not in logs
             else:
                 assert logs[train_loss_name] == train_losses[i - 1]
+
+
+def test_end_of_epoch_callback_runs_with_evaluate_before_training(tmp_path: str):
+    """When evaluate_before_training=True, end_of_epoch_callback (e.g. used to
+    run additional_inference) must fire for epoch 0 with its logs flushed to
+    wandb, so additional inference outputs are produced for the pre-training
+    evaluation in addition to the post-epoch evaluations."""
+    max_epochs = 2
+    n_train_batches = 5
+
+    def _callback(epoch: int) -> dict[str, float]:
+        return {f"additional/epoch_{epoch}/marker": float(epoch)}
+
+    end_of_epoch_callback = unittest.mock.MagicMock(side_effect=_callback)
+
+    with mock_wandb() as wandb:
+        LoggingConfig(log_to_wandb=True)._configure_wandb(
+            experiment_dir=tmp_path, config={}, resumable=True
+        )
+        _, trainer = get_trainer(
+            tmp_path,
+            max_epochs=max_epochs,
+            evaluate_before_training=True,
+            n_train_batches=n_train_batches,
+            end_of_epoch_callback=end_of_epoch_callback,
+        )
+        trainer.train()
+        wandb_logs = wandb.get_logs()
+
+    # callback should have fired once for epoch 0 (pre-training) and once
+    # per trained epoch
+    epochs_called = [
+        call.args[0] if call.args else call.kwargs["epoch"]
+        for call in end_of_epoch_callback.call_args_list
+    ]
+    assert epochs_called == list(range(max_epochs + 1))
+
+    for i in range(max_epochs + 1):
+        # only validate logs at end of each epoch, not per-batch logs
+        logs = wandb_logs[i * n_train_batches]
+        assert logs["epoch"] == i
+        marker_key = f"additional/epoch_{i}/marker"
+        assert marker_key in logs, (
+            f"additional callback log missing for epoch {i}; "
+            f"keys present: {sorted(logs.keys())}"
+        )
+        assert logs[marker_key] == float(i)
 
 
 def test_save_best_inference_epoch_ckpts(tmp_path: str):
