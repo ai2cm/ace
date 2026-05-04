@@ -30,7 +30,9 @@ from fme.core.generics.trainer import (
     TrainStepperABC,
     count_parameters,
     epoch_checkpoint_enabled,
+    inference_one_epoch,
 )
+from fme.core.generics.validation import run_validation
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.scheduler import SchedulerConfig
@@ -239,9 +241,7 @@ class Config:
 
     def __post_init__(self):
         start_epoch = 0 if self.evaluate_before_training else 1
-        self.get_inference_epochs = unittest.mock.MagicMock(
-            return_value=[i for i in range(start_epoch, self.max_epochs + 1)]
-        )
+        self._inference_epochs = [i for i in range(start_epoch, self.max_epochs + 1)]
 
 
 _: TrainConfigProtocol = Config()
@@ -292,7 +292,7 @@ class InferenceAggregator(InferenceAggregatorABC[PSType, SDType]):
         pass
 
 
-class AggregatorBuilder(AggregatorBuilderABC[PSType, TrainOutput, SDType]):
+class AggregatorBuilder(AggregatorBuilderABC[TrainOutput]):
     def __init__(
         self,
         train_losses: np.ndarray,
@@ -407,7 +407,7 @@ def get_trainer(
     def build_ema(modules: torch.nn.ModuleList) -> EMATracker:
         return EMATracker(modules, decay=ema_decay)
 
-    config: TrainConfigProtocol = Config(
+    config = Config(
         experiment_dir=tmp_path,
         checkpoint_dir=checkpoint_dir,
         checkpoint_save_epochs=checkpoint_save_epochs,
@@ -425,10 +425,9 @@ def get_trainer(
         validation_losses=validation_losses,
         inference_losses=inference_losses,
     )
-    return config, Trainer(
+    trainer = Trainer(
         train_data=train_data,
         validation_data=validation_data,
-        inference_data=inference_data,
         stepper=stepper,
         build_optimization=build_optimization,
         build_ema=build_ema,
@@ -438,6 +437,41 @@ def get_trainer(
         end_of_epoch_callback=unittest.mock.MagicMock(side_effect=lambda epoch: {}),
         do_gc_collect=False,  # for much faster tests
     )
+
+    inference_epochs = config._inference_epochs
+
+    def validation_callback(epoch):
+        validation_data.set_epoch(epoch)
+        val_agg = aggregator_builder.get_validation_aggregator()
+        logs = run_validation(
+            train_stepper=stepper,
+            validation_data=validation_data,
+            aggregator=val_agg,
+            diagnostics_subdir=f"epoch_{epoch:04d}",
+            record_logs=lambda logs: None,
+            ema=trainer._ema,
+            validate_using_ema=config.validate_using_ema,
+        )
+        return logs, logs["val/mean/loss"]
+
+    def inference_cb(epoch):
+        if epoch not in inference_epochs:
+            return {}, None
+        logs = inference_one_epoch(
+            stepper=stepper,
+            validation_context=trainer.validation_context,
+            dataset=inference_data,
+            aggregator=aggregator_builder.get_inference_aggregator(),
+            label="inference",
+            epoch=epoch,
+        )
+        error = logs.get("inference/time_mean_norm/rmse/channel_mean")
+        return logs, error
+
+    trainer.set_validation_callback(validation_callback)
+    trainer.set_inference_callback(inference_cb)
+
+    return config, trainer
 
 
 @pytest.mark.parametrize(
@@ -549,7 +583,7 @@ def preempt_after_calls_patch(object, method: str, call_count: int):
 
 @pytest.mark.parametrize(
     "interrupt_method",
-    ["train_one_epoch", "validate_one_epoch", "inference_one_epoch"],
+    ["train_one_epoch", "_validation_callback", "_inference_callback"],
 )
 def test_resume_after_interrupted_training(tmp_path: str, interrupt_method: str):
     max_epochs = 4
@@ -663,7 +697,9 @@ def test_resume_after_interrupted_training_during_epoch(
     )
     with (
         unittest.mock.patch.object(
-            trainer, "validate_one_epoch", return_value={"val/mean/loss": 0.0}
+            trainer,
+            "_validation_callback",
+            return_value=({"val/mean/loss": 0.0}, 0.0),
         ),
     ):  # would throw off count for actual training batches seen
         trainer.train()
@@ -706,7 +742,7 @@ def test_resume_after_preemption_during_validation(
     ):  # would throw off count for actual training batches seen
         with preempt_after_calls_patch(
             trainer,
-            "validate_one_epoch",
+            "_validation_callback",
             1 + int(evaluate_before_training),
         ):
             trainer.train()
@@ -732,7 +768,9 @@ def test_resume_after_preemption_during_validation(
     )
     with (
         unittest.mock.patch.object(
-            trainer, "validate_one_epoch", return_value={"val/mean/loss": 0.0}
+            trainer,
+            "_validation_callback",
+            return_value=({"val/mean/loss": 0.0}, 0.0),
         ) as validate_mock,
     ):
         assert trainer._epochs_trained == 0

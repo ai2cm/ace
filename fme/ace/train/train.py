@@ -68,7 +68,7 @@ from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregatorConfig,
 )
 from fme.ace.aggregator.train import TrainAggregatorConfig
-from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
+from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.stepper import TrainOutput
 from fme.ace.train.train_config import TrainBuilders, TrainConfig
 from fme.core.cli import prepare_config, prepare_directory
@@ -82,6 +82,7 @@ from fme.core.generics.trainer import (
     Trainer,
     inference_one_epoch,
 )
+from fme.core.generics.validation import run_validation
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -138,7 +139,6 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
     trainer = Trainer(
         train_data=train_data,
         validation_data=validation_data,
-        inference_data=inference_data,
         stepper=stepper,
         build_optimization=builder.get_optimization,
         build_ema=builder.get_ema,
@@ -148,7 +148,40 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         do_gc_collect=do_gc_collect,
     )
 
-    def inference(
+    def validation_callback(epoch: int):
+        validation_data.set_epoch(epoch)
+        aggregator = aggregator_builder.get_validation_aggregator()
+        logs = run_validation(
+            train_stepper=stepper,
+            validation_data=validation_data,
+            aggregator=aggregator,
+            diagnostics_subdir=f"epoch_{epoch:04d}",
+            record_logs=lambda logs: None,
+            ema=trainer._ema,
+            validate_using_ema=config.validate_using_ema,
+        )
+        return logs, logs["val/mean/loss"]
+
+    inference_epochs = config.get_inference_epochs()
+
+    def inference_callback(epoch: int):
+        if epoch not in inference_epochs:
+            return {}, None
+        logs = inference_one_epoch(
+            stepper=stepper,
+            validation_context=trainer.validation_context,
+            dataset=inference_data,
+            aggregator=aggregator_builder.get_inference_aggregator(),
+            label="inference",
+            epoch=epoch,
+        )
+        error = logs.get("inference/time_mean_norm/rmse/channel_mean")
+        return logs, error
+
+    trainer.set_validation_callback(validation_callback)
+    trainer.set_inference_callback(inference_callback)
+
+    def _run_inference(
         data: InferenceDataABC[PrognosticState, BatchData],
         aggregator: InferenceEvaluatorAggregator,
         label: str,
@@ -165,7 +198,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         )
 
     end_of_epoch_ops = builder.get_end_of_epoch_callback(
-        inference,
+        _run_inference,
         normalize=stepper.normalizer.normalize,
         channel_mean_names=stepper.loss_names,
         output_dir=config.output_dir,
@@ -178,7 +211,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
 
 
 class AggregatorBuilder(
-    AggregatorBuilderABC[PrognosticState, TrainOutput, PairedData],
+    AggregatorBuilderABC[TrainOutput],
 ):
     def __init__(
         self,

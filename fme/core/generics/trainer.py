@@ -71,7 +71,6 @@ from fme.core.generics.inference import run_inference
 from fme.core.generics.lr_tuning import LRTuningConfig, run_lr_tuning_trial
 from fme.core.generics.metrics_aggregator import MetricsAggregator
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
-from fme.core.generics.validation import run_validation
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.timing import GlobalTimer
 from fme.core.training_history import TrainingJob
@@ -89,6 +88,31 @@ class EndOfEpochCallback(Protocol):
 
 def null_end_of_epoch_callback(epoch: int) -> Mapping[str, Any]:
     return {}
+
+
+class ValidationCallback(Protocol):
+    def __call__(self, epoch: int) -> tuple[Mapping[str, Any], float]:
+        """Run validation for the given epoch.
+
+        Returns:
+            A tuple of (logs, valid_loss).
+        """
+        ...
+
+
+class InferenceCallback(Protocol):
+    def __call__(self, epoch: int) -> tuple[Mapping[str, Any], float | None]:
+        """Run inference for the given epoch.
+
+        Returns:
+            A tuple of (logs, inference_error_or_none). When no inference runs
+            for this epoch, returns ({}, None).
+        """
+        ...
+
+
+def _null_inference_callback(epoch: int) -> tuple[Mapping[str, Any], float | None]:
+    return {}, None
 
 
 class TrainConfigProtocol(Protocol):
@@ -139,8 +163,6 @@ class TrainConfigProtocol(Protocol):
     @property
     def lr_tuning(self) -> LRTuningConfig | None: ...
 
-    def get_inference_epochs(self) -> list[int]: ...
-
 
 PS = TypeVar("PS", contravariant=True)  # prognostic state
 TO = TypeVar("TO", bound="TrainOutputABC")  # train output
@@ -149,17 +171,13 @@ FD = TypeVar("FD")  # forcing data for inference
 SD = TypeVar("SD")  # stepped data from inference
 
 
-class AggregatorBuilderABC(abc.ABC, Generic[PS, TO, SD]):
+class AggregatorBuilderABC(abc.ABC, Generic[TO]):
     @abc.abstractmethod
     def get_train_aggregator(self) -> AggregatorABC[TO]:
         pass
 
     @abc.abstractmethod
     def get_validation_aggregator(self) -> AggregatorABC[TO]:
-        pass
-
-    @abc.abstractmethod
-    def get_inference_aggregator(self) -> InferenceAggregatorABC[PS, SD]:
         pass
 
 
@@ -206,12 +224,11 @@ class Trainer:
         self,
         train_data: GriddedDataABC[BD],
         validation_data: GriddedDataABC[BD],
-        inference_data: InferenceDataABC[PS, FD],
         stepper: TrainStepperABC[PS, BD, FD, SD, TO],
         build_optimization: Callable[[torch.nn.ModuleList], Optimization],
         build_ema: Callable[[torch.nn.ModuleList], EMATracker],
         config: TrainConfigProtocol,
-        aggregator_builder: AggregatorBuilderABC[PS, TO, SD],
+        aggregator_builder: AggregatorBuilderABC[TO],
         end_of_batch_callback: EndOfBatchCallback = lambda: None,
         end_of_epoch_callback: EndOfEpochCallback = null_end_of_epoch_callback,
         do_gc_collect: bool = True,
@@ -269,10 +286,11 @@ class Trainer:
         n_params = count_parameters(self.stepper.modules)
         logging.info(f"Number of trainable model parameters: {n_params}")
 
-        self._inference_data = inference_data
         self._do_gc_collect = do_gc_collect
         self._in_ema_context = False
         self._started_training = False
+        self._validation_callback: ValidationCallback | None = None
+        self._inference_callback: InferenceCallback = _null_inference_callback
 
         def on_terminate(signum, frame):
             dist = Distributed.get_instance()
@@ -298,6 +316,12 @@ class Trainer:
 
     def set_end_of_epoch_callback(self, end_of_epoch_callback: EndOfEpochCallback):
         self._end_of_epoch_callback = end_of_epoch_callback
+
+    def set_validation_callback(self, callback: ValidationCallback):
+        self._validation_callback = callback
+
+    def set_inference_callback(self, callback: InferenceCallback):
+        self._inference_callback = callback
 
     def switch_off_grad(self, model: torch.nn.Module):
         for param in model.parameters():
@@ -351,7 +375,14 @@ class Trainer:
     def train(self):
         logging.info("Starting Training Loop...")
 
-        inference_epochs = self.config.get_inference_epochs()
+        validation_callback = self._validation_callback
+        if validation_callback is None:
+            raise RuntimeError(
+                "Validation callback must be set before training. "
+                "Call set_validation_callback()."
+            )
+        inference_callback = self._inference_callback
+
         if self.config.segment_epochs is None:
             segment_max_epochs = self.config.max_epochs
         else:
@@ -364,17 +395,12 @@ class Trainer:
             and self._epochs_trained == 0
             and self._current_epoch_num_batches_seen == 0
         ):
-            logging.info("Starting validation before training")
-            valid_logs = self.validate_one_epoch()
-            if self._epochs_trained in inference_epochs:
-                logging.info("Starting inline inference before training")
-                inference_logs = self.inference_one_epoch()
-            else:
-                inference_logs = {}
-            valid_loss = valid_logs["val/mean/loss"]
+            logging.info("Starting evaluation before training")
+            valid_logs, valid_loss = validation_callback(self._epochs_trained)
+            inference_logs, _ = inference_callback(self._epochs_trained)
             logging.info(f"Validation loss before training: {valid_loss}")
             logging.info("Logging to wandb")
-            all_logs = valid_logs | inference_logs | {"epoch": self._epochs_trained}
+            all_logs = {**valid_logs, **inference_logs, "epoch": self._epochs_trained}
             wandb = WandB.get_instance()
             wandb.log(all_logs, step=self.num_batches_seen)
 
@@ -390,20 +416,12 @@ class Trainer:
             start_time = time.time()
             train_logs = self.train_one_epoch()
             train_end = time.time()
-            valid_logs = self.validate_one_epoch()
+            valid_logs, valid_loss = validation_callback(self._epochs_trained)
             valid_end = time.time()
-            if self._epochs_trained in inference_epochs:
-                inference_logs = self.inference_one_epoch()
-                inference_end: float | None = time.time()
-            else:
-                inference_logs = {}
-                inference_end = None
+            inference_logs, inference_error = inference_callback(self._epochs_trained)
+            inference_end: float | None = time.time() if inference_logs else None
 
             train_loss = train_logs.get("train/mean/loss")
-            valid_loss = valid_logs["val/mean/loss"]
-            inference_error = inference_logs.get(
-                "inference/time_mean_norm/rmse/channel_mean", None
-            )
             # need to get the learning rate before stepping the scheduler
             lr = self.optimization.learning_rate
             self.optimization.step_scheduler(valid_loss=valid_loss, is_iteration=False)
@@ -596,49 +614,6 @@ class Trainer:
                 yield
         finally:
             self._in_ema_context = False
-
-    def validate_one_epoch(self):
-        if self._current_epoch_num_batches_seen > 0:
-            raise RuntimeError(
-                "Validation should only be called after a full epoch has been trained"
-            )
-        logging.info(
-            f"Starting validation step for model trained for "
-            f"{self._epochs_trained} epochs"
-        )
-        self.valid_data.set_epoch(self._epochs_trained)
-        aggregator = self._aggregator_builder.get_validation_aggregator()
-        logging.info("Starting loop over validation data")
-        return run_validation(
-            train_stepper=self.stepper,
-            validation_data=self.valid_data,
-            aggregator=aggregator,
-            diagnostics_subdir=f"epoch_{self._epochs_trained:04d}",
-            record_logs=lambda logs: None,
-            ema=self._ema,
-            validate_using_ema=self.config.validate_using_ema,
-        )
-
-    def inference_one_epoch(
-        self,
-    ):
-        if self._current_epoch_num_batches_seen > 0:
-            raise RuntimeError(
-                "Inference should only be called after a full epoch has been trained"
-            )
-        logging.info(
-            f"Starting inference step for model trained for "
-            f"{self._epochs_trained} epochs"
-        )
-        logging.info("Starting inline inference run")
-        return inference_one_epoch(
-            stepper=self.stepper,
-            validation_context=self.validation_context,
-            dataset=self._inference_data,
-            aggregator=self._aggregator_builder.get_inference_aggregator(),
-            label="inference",
-            epoch=self._epochs_trained,
-        )
 
     def save_checkpoint(
         self,
