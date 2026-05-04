@@ -7,9 +7,9 @@ validate_using_ema: true
 evaluate_before_training: true
 ema:
   decay: 0.999
-max_epochs: 10
+max_epochs: 1
 inference:
-  n_coupled_steps: 1440
+  n_coupled_steps: 360
   coupled_steps_in_memory: 2
   loader:
     num_data_workers: 4
