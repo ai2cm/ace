@@ -23,16 +23,23 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 
-def convert_one(zarr_path: str, nc_path: str) -> str:
-    """Convert a single zarr store to netCDF. Returns status message."""
-    os.makedirs(os.path.dirname(nc_path), exist_ok=True)
-    if os.path.exists(nc_path):
-        return f"skip (exists): {nc_path}"
+def convert_one(zarr_path: str, nc_dir: str) -> str:
+    """Convert a single zarr store to yearly netCDF files with 1-day chunks."""
+    os.makedirs(nc_dir, exist_ok=True)
     ds = xr.open_zarr(zarr_path)
     ds.load()
-    ds.to_netcdf(nc_path)
+    encoding = {
+        name: {"chunksizes": (1,) + ds[name].shape[1:]}
+        for name in ds.data_vars
+        if "time" in ds[name].dims
+    }
+    for year, yearly_ds in ds.groupby("time.year"):
+        nc_path = os.path.join(nc_dir, f"data.{year}.nc")
+        if os.path.exists(nc_path):
+            continue
+        yearly_ds.to_netcdf(nc_path, encoding=encoding)
     ds.close()
-    return f"ok: {nc_path}"
+    return f"ok: {nc_dir}"
 
 
 def main():
@@ -66,16 +73,16 @@ def main():
     for _, row in idx.iterrows():
         rel = os.path.join(row["source_id"], row["experiment"], row["variant_label"])
         zarr_path = os.path.join(input_dir, rel, "data.zarr")
-        nc_path = os.path.join(output_dir, rel, "data.nc")
+        nc_dir = os.path.join(output_dir, rel)
         if not os.path.isdir(zarr_path):
             logger.warning("Zarr not found, skipping: %s", zarr_path)
             continue
-        tasks.append((zarr_path, nc_path))
+        tasks.append((zarr_path, nc_dir))
 
     logger.info("Converting %d datasets with %d workers", len(tasks), args.workers)
     done = 0
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
-        futures = {pool.submit(convert_one, zp, np_): zp for zp, np_ in tasks}
+        futures = {pool.submit(convert_one, zp, nd): zp for zp, nd in tasks}
         for future in as_completed(futures):
             done += 1
             try:

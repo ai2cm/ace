@@ -218,13 +218,75 @@ def test_netcdf4_engine(cmip6_data_dir):
     """Test that engine='netcdf4' produces the right file_pattern and engine."""
     config = Cmip6DataConfig(data_dir=cmip6_data_dir, engine="netcdf4")
     assert config.zarr_engine_used is False
-    assert config._file_pattern == "data.nc"
+    assert config._file_pattern == "data.*.nc"
     concat = config._get_concat_config()
     for xarray_config in concat.concat:
         assert xarray_config.engine == "netcdf4"
-        assert xarray_config.file_pattern == "data.nc"
+        assert xarray_config.file_pattern == "data.*.nc"
 
 
 def test_invalid_engine():
     with pytest.raises(ValueError, match="engine must be"):
         Cmip6DataConfig(data_dir="/nonexistent", engine="h5netcdf")  # type: ignore[arg-type]
+
+
+def _make_yearly_netcdfs(zarr_path: str, nc_dir: str):
+    """Convert a zarr store to yearly netCDF files with 1-day chunks."""
+    ds = xr.open_zarr(zarr_path)
+    ds.load()
+    os.makedirs(nc_dir, exist_ok=True)
+    encoding = {
+        name: {"chunksizes": (1,) + ds[name].shape[1:]}
+        for name in ds.data_vars
+        if "time" in ds[name].dims
+    }
+    for year, yearly_ds in ds.groupby("time.year"):
+        yearly_ds.to_netcdf(os.path.join(nc_dir, f"data.{year}.nc"), encoding=encoding)
+    ds.close()
+
+
+@pytest.fixture
+def cmip6_netcdf_dir(tmp_path, cmip6_data_dir):
+    """Create a netCDF mirror of the zarr cmip6_data_dir with yearly files."""
+    nc_dir = str(tmp_path / "cmip6-nc")
+    os.makedirs(nc_dir)
+
+    import shutil
+
+    for f in os.listdir(cmip6_data_dir):
+        src = os.path.join(cmip6_data_dir, f)
+        if os.path.isfile(src):
+            shutil.copy2(src, os.path.join(nc_dir, f))
+
+    idx = pd.read_csv(os.path.join(cmip6_data_dir, "index.csv"))
+    for _, row in idx.iterrows():
+        if row["status"] != "ok":
+            continue
+        rel = os.path.join(row["source_id"], row["experiment"], row["variant_label"])
+        zarr_path = os.path.join(cmip6_data_dir, rel, "data.zarr")
+        nc_subdir = os.path.join(nc_dir, rel)
+        _make_yearly_netcdfs(zarr_path, nc_subdir)
+
+    return nc_dir
+
+
+def test_netcdf4_build(cmip6_netcdf_dir):
+    """End-to-end: build a dataset from yearly netCDF files."""
+    from fme.core.dataset.schedule import IntSchedule
+
+    config = Cmip6DataConfig(
+        data_dir=cmip6_netcdf_dir,
+        source_ids=["ModelA"],
+        experiments=["historical"],
+        realizations=[1],
+        engine="netcdf4",
+    )
+    dataset, properties = config.build(
+        names=["tas", "pr"],
+        n_timesteps=IntSchedule.from_constant(2),
+    )
+    assert len(dataset) > 0
+    sample = dataset[0]
+    data, time, labels, epoch = sample
+    assert "tas" in data
+    assert "pr" in data

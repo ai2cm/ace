@@ -51,7 +51,7 @@ class Cmip6DataConfig(DatasetConfigABC):
 
     @property
     def _file_pattern(self) -> str:
-        return "data.zarr" if self.engine == "zarr" else "data.nc"
+        return "data.zarr" if self.engine == "zarr" else "data.*.nc"
 
     @property
     def zarr_engine_used(self) -> bool:
