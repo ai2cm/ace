@@ -217,6 +217,8 @@ stepper_training:
         - frozen:
             include:
               - '*'
+    loss_contributions:
+      n_steps: 0
     loss:
       type: MSE
       weights:
