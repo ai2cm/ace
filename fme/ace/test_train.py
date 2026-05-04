@@ -119,6 +119,7 @@ def _get_test_yaml_files(
     time_buffer=1,
     use_time_length_probabilities=True,
     use_schedule=False,
+    validate_using_ema=False,
     derived_forcings=None,
 ):
     input_time_size = 1
@@ -387,6 +388,7 @@ def _get_test_yaml_files(
         ),
         inference=inline_inference_config,
         additional_inference=additional_inference_configs,
+        validate_using_ema=validate_using_ema,
         max_epochs=max_epochs,
         segment_epochs=segment_epochs,
         save_checkpoint=True,
@@ -472,6 +474,7 @@ def _setup(
     use_time_length_probabilities=True,
     derived_forcings=None,
     use_schedule: bool = False,
+    validate_using_ema: bool = False,
 ):
     if not path.exists():
         path.mkdir()
@@ -571,18 +574,21 @@ def _setup(
         use_time_length_probabilities=use_time_length_probabilities,
         derived_forcings=derived_forcings,
         use_schedule=use_schedule,
+        validate_using_ema=validate_using_ema,
     )
     return train_config_filename, inference_config_filename
 
 
 @pytest.mark.parametrize(
-    "nettype, crps_training, log_validation_maps, use_healpix, use_schedule",
+    "nettype, crps_training, log_validation_maps, \
+        use_healpix, use_schedule, validate_using_ema",
     [
-        ("NoiseConditionedSFNO", True, False, False, True),
-        ("SphericalFourierNeuralOperatorNet", False, True, False, False),
-        ("HEALPixRecUNet", False, False, True, False),
-        ("Samudra", False, False, False, False),
-        ("NoiseConditionedSFNO", False, False, False, False),
+        ("NoiseConditionedSFNO", True, False, False, True, False),
+        ("SphericalFourierNeuralOperatorNet", False, True, False, False, False),
+        ("HEALPixRecUNet", False, False, True, False, False),
+        ("Samudra", False, False, False, False, False),
+        ("NoiseConditionedSFNO", False, False, False, False, False),
+        ("NoiseConditionedSFNO", True, False, False, True, True),
     ],
 )
 def test_train_and_inference(
@@ -592,6 +598,7 @@ def test_train_and_inference(
     log_validation_maps: bool,
     use_healpix: bool,
     use_schedule: bool,
+    validate_using_ema: bool,
     very_fast_only: bool,
 ):
     """Ensure that ACE training and subsequent standalone inference run without errors.
@@ -620,6 +627,7 @@ def test_train_and_inference(
         crps_training=crps_training,
         save_per_epoch_diagnostics=True,
         use_schedule=use_schedule,
+        validate_using_ema=validate_using_ema,
         log_validation_maps=log_validation_maps,
     )
     # using pdb requires calling main functions directly
