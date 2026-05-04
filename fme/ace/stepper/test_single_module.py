@@ -52,7 +52,7 @@ from fme.ace.stepper.time_length_probabilities import (
     TimeLengthProbability,
     TimeLengthSchedule,
 )
-from fme.ace.testing import DimSizes
+from fme.ace.testing import DimSizes, save_stepper_checkpoint
 from fme.core import AtmosphereData
 from fme.core.benchmark.memory import benchmark_memory
 from fme.core.coordinates import (
@@ -2363,8 +2363,6 @@ def test_ocean_derived_variables_integration(
 
 
 def test_load_stepper_config_from_checkpoint(tmp_path: pathlib.Path):
-    from fme.ace.testing import save_stepper_checkpoint
-
     checkpoint_path = tmp_path / "checkpoint.tar"
     original_config = save_stepper_checkpoint(checkpoint_path)
     loaded_config = load_stepper_config(checkpoint_path)
@@ -2374,8 +2372,6 @@ def test_load_stepper_config_from_checkpoint(tmp_path: pathlib.Path):
 
 
 def test_checkpoint_stepper_config_to_stepper_config(tmp_path: pathlib.Path):
-    from fme.ace.testing import save_stepper_checkpoint
-
     checkpoint_path = tmp_path / "checkpoint.tar"
     original_config = save_stepper_checkpoint(checkpoint_path)
     checkpoint_config = CheckpointStepperConfig(

@@ -227,6 +227,7 @@ class TrainConfig:
     save_best_inference_epoch_checkpoints: bool = False
     lr_tuning: LRTuningConfig | None = None
     resume_results: ResumeResultsConfig | None = None
+    stepper_config: StepperConfig = dataclasses.field(init=False)
 
     def __post_init__(self):
         if isinstance(self.stepper, CheckpointStepperConfig):
