@@ -57,9 +57,14 @@ class EMAConfig:
     """
 
     decay: float = 0.9999
+    faster_decay_at_start: bool = True
 
     def build(self, model: HasNamedParameters):
-        return EMATracker(model, decay=self.decay, faster_decay_at_start=True)
+        return EMATracker(
+            model,
+            decay=self.decay,
+            faster_decay_at_start=self.faster_decay_at_start,
+        )
 
 
 class EMATracker:
