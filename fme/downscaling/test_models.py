@@ -25,6 +25,7 @@ from fme.downscaling.models import (
     _build_variable_loss_weight_tensor,
     _repeat_batch_by_samples,
     _separate_interleaved_samples,
+    lon_rolled_model,
 )
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.noise import LogNormalNoiseDistribution
@@ -530,6 +531,66 @@ def test_get_fine_coords_for_batch():
     expected_lon = model.full_fine_coords.lon[8:24]
     assert torch.allclose(result.lat, expected_lat)
     assert torch.allclose(result.lon, expected_lon)
+
+
+def test_lon_rolled_model_no_roll_returns_same():
+    """lon_rolled_model returns the original model when no roll is needed."""
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    static_inputs = make_static_inputs(fine_shape)
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=static_inputs.coords,
+        static_inputs=static_inputs,
+    )
+    # coarse_lon with min >= 0: no roll needed.
+    coarse_lon = _get_monotonic_coordinate(coarse_shape[1], stop=fine_shape[1])
+    result = lon_rolled_model(model, coarse_lon)
+    assert result is model
+
+
+def test_lon_rolled_model_shifts_coords_and_shares_weights():
+    """lon_rolled_model produces a shallow copy with rolled coords but shared module."""
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+
+    # Use a global-covering lon grid so that compute_lon_roll returns a non-trivial
+    # roll amount for negative lon_start (32 cells × 11.25° = 360°).
+    step = 360 / 32
+    global_fine_lon = torch.arange(32) * step + step / 2  # 5.625, 16.875, ..., 354.375
+    global_fine_lat = _get_monotonic_coordinate(fine_shape[0], stop=fine_shape[0])
+    full_fine_coords = LatLonCoordinates(lat=global_fine_lat, lon=global_fine_lon)
+    static_field = torch.arange(
+        fine_shape[0] * fine_shape[1], dtype=torch.float32
+    ).reshape(*fine_shape)
+    static_inputs = StaticInputs(
+        fields=[StaticInput(static_field)], coords=full_fine_coords
+    )
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=full_fine_coords,
+        static_inputs=static_inputs,
+    )
+
+    # coarse_lon with negative min (e.g. -10°) triggers a roll.
+    coarse_lon = torch.tensor([-10.0, -5.0, 0.0, 5.0], dtype=torch.float32)
+    rolled = lon_rolled_model(model, coarse_lon)
+
+    # Shallow copy: module weights are shared
+    assert rolled.module is model.module
+    # Coords changed — lon was rolled
+    assert not torch.equal(rolled.full_fine_coords.lon, model.full_fine_coords.lon)
+    # Rolled fine lon should be monotonically increasing
+    assert torch.all(rolled.full_fine_coords.lon[1:] > rolled.full_fine_coords.lon[:-1])
+    # First rolled fine lon value should be negative (matching the shifted convention)
+    assert rolled.full_fine_coords.lon[0].item() < 0
+    # Static inputs are also rolled
+    assert rolled.static_inputs is not None  # for mypy
+    assert not torch.equal(
+        rolled.static_inputs.fields[0].data, static_inputs.fields[0].data
+    )
 
 
 def test_checkpoint_config_topography_raises():

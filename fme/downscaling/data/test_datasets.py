@@ -244,6 +244,51 @@ def test_horizontal_subset(
     assert dataset.subset_latlon_coordinates.lon.shape == (expected_n_lon,)
 
 
+def test_horizontal_subset_prime_meridian_spanning():
+    """HorizontalSubsetDataset must handle lon intervals that cross 0°/360°."""
+    # 8-point longitude grid in 0–360° convention, 45° spacing
+    lons = torch.tensor([0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0])
+    n_lat, n_lon = 4, 8
+    coords = LatLonCoordinates(
+        lat=torch.linspace(0.0, 1.0, n_lat),
+        lon=lons,
+    )
+    # Data: lon index encodes original position so we can verify the roll
+    data_tensor = torch.arange(n_lon, dtype=torch.float).unsqueeze(0).unsqueeze(0)
+    data_tensor = data_tensor.expand(1, 1, n_lat, n_lon).clone()
+
+    datum: tuple[dict[str, torch.Tensor], xr.DataArray, set[str], int] = (
+        {"x": data_tensor},
+        xr.DataArray([0.0]),
+        set(),
+        0,
+    )
+    base_dataset = MagicMock(spec=torch.utils.data.Dataset)
+    properties = MagicMock(spec=DatasetProperties)
+    properties.horizontal_coordinates = coords
+    properties.all_labels = MagicMock(spec=set)
+    base_dataset.__getitem__.return_value = datum
+
+    # Interval [-90, 45] spans 0° on a 0–360° grid (270°→45° going through 0°)
+    dataset = HorizontalSubsetDataset(
+        dataset=base_dataset,
+        properties=properties,
+        lat_interval=ClosedInterval(float("-inf"), float("inf")),
+        lon_interval=ClosedInterval(-90.0, 45.0),
+    )
+
+    # Expect 4 lon points: 270°→-90°, 315°→-45°, 0°→0°, 45°→45°
+    assert dataset.subset_latlon_coordinates.lon.shape == (4,)
+    expected_lons = torch.tensor([-90.0, -45.0, 0.0, 45.0])
+    assert torch.allclose(dataset.subset_latlon_coordinates.lon, expected_lons)
+
+    subset, _, _, _ = dataset[0]
+    assert subset["x"].shape == (1, 1, n_lat, 4)
+    # Data values should correspond to original lon indices 6, 7, 0, 1
+    expected_vals = torch.tensor([6.0, 7.0, 0.0, 1.0])
+    assert torch.allclose(subset["x"][0, 0, 0], expected_vals)
+
+
 def test_batch_data_from_sequence():
     num_items = 3
     items = get_batch_items(num_items=num_items)

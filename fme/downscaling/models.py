@@ -21,7 +21,9 @@ from fme.downscaling.data import (
     PairedBatchData,
     StaticInputs,
     adjust_fine_coord_range,
+    compute_lon_roll,
     load_coords_from_path,
+    roll_latlon_coords,
 )
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
@@ -719,6 +721,30 @@ class DiffusionModel:
             if self.static_inputs
             else 0,
         )
+
+
+def lon_rolled_model(model: DiffusionModel, coarse_lon: torch.Tensor) -> DiffusionModel:
+    """
+    Return a shallow copy of model with full_fine_coords and static_inputs pre-rolled
+    to match the longitude convention of coarse_lon. Shares all neural network weights.
+    Returns model unchanged when no roll is needed.
+    """
+    import copy
+
+    lon_start = coarse_lon.min().item()
+    roll_amount = compute_lon_roll(model.full_fine_coords.lon, lon_start)
+    if roll_amount == 0:
+        return model
+    rolled_fine = roll_latlon_coords(model.full_fine_coords, roll_amount, lon_start)
+    rolled_static = (
+        model.static_inputs.roll(roll_amount, lon_start)
+        if model.static_inputs is not None
+        else None
+    )
+    result = copy.copy(model)
+    result.full_fine_coords = rolled_fine
+    result.static_inputs = rolled_static
+    return result
 
 
 @dataclasses.dataclass

@@ -24,9 +24,12 @@ from fme.downscaling.data.utils import (
     BatchedLatLonCoordinates,
     ClosedInterval,
     check_leading_dim,
+    compute_lon_roll,
     expand_and_fold_tensor,
     get_offset,
     paired_shuffle,
+    roll_lon_coords,
+    roll_lon_data,
     scale_tuple,
 )
 
@@ -121,28 +124,22 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
 
         self._orig_coords: LatLonCoordinates = properties.horizontal_coordinates
 
-        if (self.lon_interval.stop != float("inf")) and (
-            torch.any(self._orig_coords.lon < self.lon_interval.stop - 360.0)
-        ):
-            lon_max = self._orig_coords.lon.max()
-            raise NotImplementedError(
-                f"lon wraparound not implemented, received lon_max {lon_max} but "
-                f"expected lon_max > {self.lon_interval.stop - 360.0}"
-            )
-        if (self.lon_interval.start != -float("inf")) and (
-            torch.any(self._orig_coords.lon > self.lon_interval.start + 360.0)
-        ):
-            lon_min = self._orig_coords.lon.min()
-            raise NotImplementedError(
-                f"lon wraparound not implemented, received lon_min {lon_min} but "
-                f"expected lon_min < {self.lon_interval.start + 360.0}"
-            )
+        # Detect whether the requested lon interval spans the 0°/360° seam of the
+        # stored coordinates (e.g. start=-5, stop=3 on 0–360° data). When it does,
+        # roll the data along the longitude axis so the interval is contiguous.
+        lon_start = (
+            self.lon_interval.start if self.lon_interval.start != -float("inf") else 0.0
+        )
+        self._lon_roll_amount = compute_lon_roll(self._orig_coords.lon, lon_start)
+        rolled_lon = roll_lon_coords(
+            self._orig_coords.lon, self._lon_roll_amount, lon_start
+        )
 
         self._lats_slice = self.lat_interval.slice_from(self._orig_coords.lat)
-        self._lons_slice = self.lon_interval.slice_from(self._orig_coords.lon)
+        self._lons_slice = self.lon_interval.slice_from(rolled_lon)
         self._latlon_coordinates = LatLonCoordinates(
             lat=self._orig_coords.lat[self._lats_slice],
-            lon=self._orig_coords.lon[self._lons_slice],
+            lon=rolled_lon[self._lons_slice],
         )
         self._area_weights = self._latlon_coordinates.area_weights
 
@@ -168,7 +165,7 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
     def __getitem__(self, key) -> DatasetItem:
         batch, times, _, epoch = self.dataset[key]
         batch = {
-            k: v[
+            k: roll_lon_data(v, self._lon_roll_amount)[
                 ...,
                 self._lats_slice,
                 self._lons_slice,
@@ -210,6 +207,10 @@ class BatchItemDatasetAdapter(torch.utils.data.Dataset):
             )
 
         return BatchItem(fields, time.squeeze(), self._coordinates)
+
+    @property
+    def latlon_coordinates(self) -> LatLonCoordinates:
+        return self._coordinates
 
     @property
     def variable_metadata(self) -> dict[str, VariableMetadata]:

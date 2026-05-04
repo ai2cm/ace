@@ -76,6 +76,16 @@ def roll_lon_data(
     return torch.roll(tensor, -roll_amount, dims=lon_dim)
 
 
+def roll_latlon_coords(
+    coords: LatLonCoordinates, roll_amount: int, lon_start: float
+) -> LatLonCoordinates:
+    """Return a new LatLonCoordinates with lon rolled by roll_amount."""
+    return LatLonCoordinates(
+        lat=coords.lat,
+        lon=roll_lon_coords(coords.lon, roll_amount, lon_start),
+    )
+
+
 @dataclasses.dataclass
 class ClosedInterval:
     """
@@ -207,7 +217,14 @@ def adjust_fine_coord_range(
     coarse_min = full_coarse_coord[full_coarse_coord >= coord_range.start][0]
     coarse_max = full_coarse_coord[full_coarse_coord <= coord_range.stop][-1]
 
-    n_fine_below = int((full_fine_coord < coarse_min).sum())
+    # Detect a wrapping longitude domain: coord_range uses a shifted convention
+    # (coarse_min is negative) while the fine coord array is in 0–360°.
+    # Fine points "just before" the wrapped edge live at the high end of the
+    # unshifted fine array (e.g. near 270° when the edge is at -90° / 270°).
+    is_lon_wrap = float(coarse_min) < 0 and float(full_fine_coord.min()) >= 0
+    fine_ref = float(coarse_min) + (360.0 if is_lon_wrap else 0.0)
+
+    n_fine_below = int((full_fine_coord < fine_ref).sum())
     n_fine_above = int((full_fine_coord > coarse_max).sum())
     if n_fine_below < n_half_fine or n_fine_above < n_half_fine:
         raise ValueError(
@@ -219,8 +236,9 @@ def adjust_fine_coord_range(
             f"the domain edges."
         )
 
-    fine_min = full_fine_coord[full_fine_coord < coarse_min][-n_half_fine]
-    fine_max = full_fine_coord[full_fine_coord > coarse_max][n_half_fine - 1]
+    fine_min_ref = float(full_fine_coord[full_fine_coord < fine_ref][-n_half_fine])
+    fine_min = fine_min_ref - (360.0 if is_lon_wrap else 0.0)
+    fine_max = float(full_fine_coord[full_fine_coord > coarse_max][n_half_fine - 1])
 
     return ClosedInterval(start=fine_min, stop=fine_max)
 

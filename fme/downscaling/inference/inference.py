@@ -12,7 +12,7 @@ from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
 
 from ..data import DataLoaderConfig
-from ..models import CheckpointModelConfig, DiffusionModel
+from ..models import CheckpointModelConfig, DiffusionModel, lon_rolled_model
 from ..predictors import (
     DenoisingMoEConfig,
     DenoisingMoEPredictor,
@@ -107,19 +107,17 @@ class Downscaler:
         """Execute the generation loop for this output."""
         logging.info(f"Generating downscaled outputs for output: {output.name}")
 
-        # initialize writer and model in loop for coord info
-        model = None
+        coarse_coords = output.data.coarse_latlon_coords
+        input_shape = (len(coarse_coords.lat), len(coarse_coords.lon))
+        model = self._get_generation_model(input_shape=input_shape, output=output)
+        if isinstance(model, DiffusionModel):
+            model = lon_rolled_model(model, coarse_coords.lon)
+
         writer = None
         total_batches = len(output.data.loader)
 
         loaded_item: LoadedSliceWorkItem
         for i, loaded_item in enumerate(output.data.get_generator()):
-            input_shape = loaded_item.batch.horizontal_shape
-            if model is None:
-                model = self._get_generation_model(
-                    input_shape=input_shape, output=output
-                )
-
             if writer is None:
                 fine_latlon_coords = model.get_fine_coords_for_batch(loaded_item.batch)
                 writer = output.get_writer(
