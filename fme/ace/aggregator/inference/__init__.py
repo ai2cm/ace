@@ -10,8 +10,6 @@ from .main import (
     InferenceEvaluatorAggregator,
     InferenceEvaluatorAggregatorConfig,
     MetricConfig,
-    StepMeanEntry,
-    TypedMetricInferenceEvaluatorAggregatorConfig,
 )
 from .reduced import MeanMetricConfig
 from .seasonal import SeasonalMetricConfig

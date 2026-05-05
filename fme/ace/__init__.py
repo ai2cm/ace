@@ -1,9 +1,5 @@
 import sys
 
-from fme.ace.aggregator.inference import (
-    StepMeanEntry,
-    TypedMetricInferenceEvaluatorAggregatorConfig,
-)
 from fme.ace.aggregator.one_step import OneStepAggregatorConfig
 from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.augmentation import AugmentationConfig

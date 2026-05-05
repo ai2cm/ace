@@ -10,9 +10,10 @@ import xarray as xr
 from fme.ace.aggregator.inference import (
     InferenceEvaluatorAggregatorConfig,
     MeanMetricConfig,
-    StepMeanEntry,
+    PowerSpectrumMetricConfig,
     StepMeanMetricConfig,
-    TypedMetricInferenceEvaluatorAggregatorConfig,
+    TimeMeanMetricConfig,
+    ZonalMeanMetricConfig,
 )
 from fme.ace.data_loading.batch_data import BatchData, PairedData
 from fme.core.coordinates import LatLonCoordinates
@@ -98,11 +99,18 @@ def test_logs_regression():
     initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
 
     agg = InferenceEvaluatorAggregatorConfig(
-        log_step_means=[
-            StepMeanEntry(step=20),
-            StepMeanEntry(step=4, name="one_day_mean"),
+        metrics=[
+            MeanMetricConfig(target="denorm"),
+            MeanMetricConfig(target="norm"),
+            StepMeanMetricConfig(step=20, target="denorm"),
+            StepMeanMetricConfig(step=20, target="norm"),
+            StepMeanMetricConfig(step=4, name="one_day_mean", target="denorm"),
+            StepMeanMetricConfig(step=4, name="one_day_mean_norm", target="norm"),
+            PowerSpectrumMetricConfig(),
+            ZonalMeanMetricConfig(zonal_mean_max_size=LOG_ZONAL_MEAN_IMAGES),
+            TimeMeanMetricConfig(target="denorm"),
+            TimeMeanMetricConfig(target="norm"),
         ],
-        log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
     ).build(
         dataset_info=ds_info,
         n_ic_steps=1,
@@ -193,14 +201,7 @@ def test_inference_logs_labels_exist():
     ny = 45
     ds_info = get_ds_info(nx, ny)
     initial_time = (get_zero_time(shape=[n_sample, 0], dims=["sample", "time"]),)
-    agg = InferenceEvaluatorAggregatorConfig(
-        log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
-        log_step_means=[
-            StepMeanEntry(step=20),
-            StepMeanEntry(step=4, name="one_day_mean"),
-        ],
-        log_video=True,
-    ).build(
+    agg = InferenceEvaluatorAggregatorConfig().build(
         dataset_info=ds_info,
         n_ic_steps=1,
         n_forward_steps=n_time - 1,
@@ -252,10 +253,7 @@ def test_inference_logs_length(window_len: int, n_windows: int):
     ds_info = get_ds_info(nx, ny)
     initial_time = (get_zero_time(shape=[2, 0], dims=["sample", "time"]),)
     n_forward_steps = window_len * n_windows - 1
-    agg = InferenceEvaluatorAggregatorConfig(
-        log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
-        log_step_means=[] if n_forward_steps < 20 else [StepMeanEntry(step=20)],
-    ).build(
+    agg = InferenceEvaluatorAggregatorConfig().build(
         dataset_info=ds_info,
         n_ic_steps=1,
         n_forward_steps=n_forward_steps,
@@ -291,11 +289,18 @@ def test_flush_diagnostics(tmpdir):
     nx, ny, n_sample, n_time = 2, 2, 10, 21
     ds_info = get_ds_info(nx, ny)
     initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
+    from fme.ace.aggregator.inference import HistogramMetricConfig, VideoMetricConfig
+
     agg = InferenceEvaluatorAggregatorConfig(
-        log_step_means=[StepMeanEntry(step=20)],
-        log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
-        log_video=True,
-        log_histograms=True,
+        metrics=[
+            MeanMetricConfig(target="denorm"),
+            MeanMetricConfig(target="norm"),
+            StepMeanMetricConfig(step=20, target="denorm"),
+            ZonalMeanMetricConfig(zonal_mean_max_size=LOG_ZONAL_MEAN_IMAGES),
+            TimeMeanMetricConfig(target="denorm"),
+            VideoMetricConfig(),
+            HistogramMetricConfig(),
+        ],
     ).build(
         dataset_info=ds_info,
         n_ic_steps=1,
@@ -334,10 +339,7 @@ def test_agg_raises_without_output_dir():
     with pytest.raises(
         ValueError, match="Output directory must be set to save diagnostics"
     ):
-        InferenceEvaluatorAggregatorConfig(
-            log_step_means=[],
-            log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
-        ).build(
+        InferenceEvaluatorAggregatorConfig().build(
             dataset_info=ds_info,
             n_ic_steps=1,
             n_forward_steps=1,
@@ -348,10 +350,10 @@ def test_agg_raises_without_output_dir():
         )
 
 
-class TestTypedMetricInferenceEvaluatorAggregatorConfig:
+class TestAggregatorConfigMetrics:
     def test_duplicate_metric_names_rejected(self):
         with pytest.raises(ValueError, match="Duplicate metric names"):
-            TypedMetricInferenceEvaluatorAggregatorConfig(
+            InferenceEvaluatorAggregatorConfig(
                 metrics=[
                     MeanMetricConfig(target="denorm"),
                     MeanMetricConfig(target="denorm"),
@@ -359,7 +361,7 @@ class TestTypedMetricInferenceEvaluatorAggregatorConfig:
             )
 
     def test_duplicate_names_allowed_with_explicit_name(self):
-        TypedMetricInferenceEvaluatorAggregatorConfig(
+        InferenceEvaluatorAggregatorConfig(
             metrics=[
                 MeanMetricConfig(target="denorm"),
                 MeanMetricConfig(target="norm", name="mean_custom"),
@@ -371,7 +373,7 @@ class TestTypedMetricInferenceEvaluatorAggregatorConfig:
         nx, ny = 90, 45
         ds_info = get_ds_info(nx, ny)
         initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
-        agg = TypedMetricInferenceEvaluatorAggregatorConfig().build(
+        agg = InferenceEvaluatorAggregatorConfig().build(
             dataset_info=ds_info,
             n_ic_steps=1,
             n_forward_steps=n_time - 1,
@@ -401,7 +403,7 @@ class TestTypedMetricInferenceEvaluatorAggregatorConfig:
         nx, ny = 90, 45
         ds_info = get_ds_info(nx, ny)
         initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
-        agg = TypedMetricInferenceEvaluatorAggregatorConfig(
+        agg = InferenceEvaluatorAggregatorConfig(
             metrics=[
                 MeanMetricConfig(target="denorm"),
                 StepMeanMetricConfig(step=20, target="denorm"),
@@ -438,7 +440,7 @@ class TestTypedMetricInferenceEvaluatorAggregatorConfig:
         nx, ny = 4, 4
         ds_info = get_ds_info(nx, ny)
         initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
-        agg = TypedMetricInferenceEvaluatorAggregatorConfig().build(
+        agg = InferenceEvaluatorAggregatorConfig().build(
             dataset_info=ds_info,
             n_ic_steps=1,
             n_forward_steps=n_time - 1,
@@ -469,7 +471,7 @@ class TestTypedMetricInferenceEvaluatorAggregatorConfig:
         with pytest.raises(
             ValueError, match="Output directory must be set to save diagnostics"
         ):
-            TypedMetricInferenceEvaluatorAggregatorConfig().build(
+            InferenceEvaluatorAggregatorConfig().build(
                 dataset_info=ds_info,
                 n_ic_steps=1,
                 n_forward_steps=1,
