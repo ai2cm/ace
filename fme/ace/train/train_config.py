@@ -1,6 +1,6 @@
 import dataclasses
 import os
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
 import torch
@@ -9,7 +9,6 @@ from fme.ace.aggregator import (
     InferenceEvaluatorAggregatorConfig,
     OneStepAggregatorConfig,
 )
-from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregator
 from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.batch_data import PrognosticState
 from fme.ace.data_loading.config import DataLoaderConfig
@@ -35,11 +34,11 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.lr_tuning import LRTuningConfig
-from fme.core.generics.trainer import EndOfBatchCallback, EndOfEpochCallback
+from fme.core.generics.trainer import EndOfBatchCallback
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import Optimization, OptimizationConfig
 from fme.core.rand import set_seed
-from fme.core.typing_ import Slice, TensorDict, TensorMapping
+from fme.core.typing_ import Slice
 from fme.core.weight_ops import CopyWeightsConfig
 
 
@@ -411,19 +410,10 @@ class TrainBuilders:
             return copy_after_batch
         return lambda: None
 
-    def get_end_of_epoch_callback(
+    def get_additional_inference_data(
         self,
-        inference_one_epoch: Callable[
-            [InferenceGriddedData, InferenceEvaluatorAggregator, str, int],
-            Mapping[str, Any],
-        ],
-        normalize: Callable[[TensorMapping], TensorDict],
-        output_dir: str,
         variable_metadata: Mapping[str, VariableMetadata],
-        channel_mean_names: Sequence[str] | None,
-        save_diagnostics: bool,
-        n_ic_timesteps: int,
-    ) -> EndOfEpochCallback:
+    ) -> list[tuple[AdditionalInferenceConfig, InferenceGriddedData, DatasetInfo]]:
         entries_data: list[
             tuple[AdditionalInferenceConfig, InferenceGriddedData, DatasetInfo]
         ] = []
@@ -439,33 +429,4 @@ class TrainBuilders:
             )
             dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
             entries_data.append((entry, data, dataset_info))
-
-        def end_of_epoch_ops(epoch: int) -> Mapping[str, Any]:
-            all_logs: dict[str, Any] = {}
-            for entry, data, dataset_info in entries_data:
-                if entry.config.epochs.contains(epoch):
-                    entry_output_dir = os.path.join(
-                        output_dir, "additional_inference", entry.name
-                    )
-                    aggregator = entry.config.aggregator.build(
-                        dataset_info=dataset_info,
-                        n_ic_steps=n_ic_timesteps,
-                        n_forward_steps=entry.config.n_forward_steps,
-                        initial_time=data.initial_time,
-                        normalize=normalize,
-                        output_dir=entry_output_dir,
-                        channel_mean_names=channel_mean_names,
-                        save_diagnostics=save_diagnostics,
-                        n_ensemble_per_ic=entry.config.n_ensemble_per_ic,
-                    )
-                    all_logs.update(
-                        inference_one_epoch(
-                            data,
-                            aggregator,
-                            entry.name,
-                            epoch,
-                        )
-                    )
-            return all_logs
-
-        return end_of_epoch_ops
+        return entries_data
