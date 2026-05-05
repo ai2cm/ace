@@ -1,5 +1,7 @@
 import abc
+import dataclasses
 from collections.abc import Mapping
+from typing import Literal
 
 import torch
 import xarray as xr
@@ -10,6 +12,8 @@ from fme.core.distributed import Distributed
 from fme.core.ensemble import get_crps
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import EnsembleTensorDict, TensorMapping
+
+from ..inference.build_context import MetricBuildContext
 
 
 def get_gen_shape(gen_data: TensorMapping):
@@ -329,3 +333,26 @@ class SelectStepEnsembleAggregator:
 
     def get_dataset(self) -> xr.Dataset:
         return self._aggregator.get_dataset()
+
+
+@dataclasses.dataclass
+class EnsembleMetricConfig:
+    step: int = 20
+    type: Literal["ensemble"] = "ensemble"
+    name: str | None = None
+    log_mean_maps: bool = False
+
+    def __post_init__(self):
+        if self.name is None:
+            self.name = f"ensemble_step_{self.step}"
+
+    def get_name(self) -> str:
+        return self.name  # type: ignore[return-value]
+
+    def build(self, ctx: MetricBuildContext) -> SelectStepEnsembleAggregator:
+        return get_one_step_ensemble_aggregator(
+            gridded_operations=ctx.ops,
+            target_time=self.step,
+            log_mean_maps=self.log_mean_maps,
+            metadata=ctx.variable_metadata,
+        )

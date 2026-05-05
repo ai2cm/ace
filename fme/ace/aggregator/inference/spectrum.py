@@ -1,6 +1,8 @@
+import dataclasses
 import warnings
 from collections import defaultdict
 from collections.abc import Callable, Mapping
+from typing import Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,11 +11,13 @@ import xarray as xr
 
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
+from fme.core.fill import SmoothFloodFill
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.metrics import spherical_power_spectrum
 from fme.core.typing_ import TensorMapping
 
-from .data import InferenceBatchData
+from .build_context import MetricBuildContext, MetricNotSupportedError, maybe_filter
+from .data import InferenceBatchData, SubAggregator
 
 
 class SphericalPowerSpectrumAggregator:
@@ -243,3 +247,25 @@ def _plot_spectrum_pair(
     ax.legend()
     plt.tight_layout()
     return fig
+
+
+@dataclasses.dataclass
+class PowerSpectrumMetricConfig:
+    type: Literal["power_spectrum"] = "power_spectrum"
+    variables: list[str] | None = None
+    name: str = "power_spectrum"
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: MetricBuildContext) -> SubAggregator:
+        try:
+            agg: SubAggregator = PairedSphericalPowerSpectrumAggregator(
+                gridded_operations=ctx.ops,
+                nan_fill_fn=SmoothFloodFill(num_steps=4),
+                report_plot=True,
+                variable_metadata=ctx.variable_metadata,
+            )
+        except NotImplementedError as e:
+            raise MetricNotSupportedError(str(e)) from e
+        return maybe_filter(agg, self.variables)

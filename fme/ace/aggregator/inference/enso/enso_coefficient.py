@@ -1,3 +1,4 @@
+import dataclasses
 import datetime
 from collections.abc import Mapping
 from typing import Any, Literal
@@ -16,6 +17,7 @@ from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorDict
 from fme.core.wandb import WandB
 
+from ..build_context import MetricBuildContext
 from ..data import InferenceBatchData
 from .historical_index import INDEX_CALENDAR, NINO34_INDEX
 
@@ -454,3 +456,21 @@ def reduce_data(dist: Distributed, rank_tensor_dict: TensorDict) -> TensorDict |
         return gathered_tensor_dict
     else:
         return None
+
+
+@dataclasses.dataclass
+class EnsoCoefficientMetricConfig:
+    type: Literal["enso_coefficient"] = "enso_coefficient"
+    name: str = "enso_coefficient"
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: MetricBuildContext) -> EnsoCoefficientEvaluatorAggregator:
+        return EnsoCoefficientEvaluatorAggregator(
+            ctx.initial_time,
+            ctx.n_timesteps - 1,
+            ctx.timestep,
+            gridded_operations=ctx.ops,
+            variable_metadata=ctx.variable_metadata,
+        )

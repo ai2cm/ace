@@ -1,6 +1,7 @@
 import dataclasses
 import logging
 from collections.abc import Callable, Mapping
+from typing import Literal
 
 import numpy as np
 import torch
@@ -13,7 +14,8 @@ from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Image
 
 from ..plotting import plot_paneled_data
-from .data import InferenceBatchData
+from .build_context import MetricBuildContext, MetricNotSupportedError, maybe_filter
+from .data import InferenceBatchData, SubAggregator
 
 
 @dataclasses.dataclass
@@ -315,3 +317,27 @@ class ZonalMeanAggregator:
             )
             for name, tensor in data.items()
         }
+
+
+@dataclasses.dataclass
+class ZonalMeanMetricConfig:
+    type: Literal["zonal_mean"] = "zonal_mean"
+    variables: list[str] | None = None
+    name: str = "zonal_mean"
+    zonal_mean_max_size: int | bool = 4096
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: MetricBuildContext) -> SubAggregator:
+        if ctx.ops.zonal_mean is None:
+            raise MetricNotSupportedError(
+                "Zonal mean metric requires a grid type that supports zonal means."
+            )
+        agg: SubAggregator = ZonalMeanAggregator(
+            zonal_mean=ctx.ops.zonal_mean,
+            n_timesteps=ctx.n_timesteps,
+            variable_metadata=ctx.variable_metadata,
+            zonal_mean_max_size=self.zonal_mean_max_size,
+        )
+        return maybe_filter(agg, self.variables)

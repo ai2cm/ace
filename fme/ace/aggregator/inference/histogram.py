@@ -1,9 +1,27 @@
+import dataclasses
+from typing import Literal
+
 import torch
 import xarray as xr
 
 from fme.core.histogram import ComparedDynamicHistograms
 
-from .data import InferenceBatchData
+from .build_context import MetricBuildContext, maybe_filter
+from .data import InferenceBatchData, SubAggregator
+
+
+@dataclasses.dataclass
+class HistogramMetricConfig:
+    type: Literal["histogram"] = "histogram"
+    variables: list[str] | None = None
+    name: str = "histogram"
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: MetricBuildContext) -> SubAggregator:
+        agg: SubAggregator = HistogramAggregator()
+        return maybe_filter(agg, self.variables)
 
 
 class HistogramAggregator:

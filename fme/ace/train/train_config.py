@@ -10,11 +10,11 @@ from fme.ace.aggregator import (
     OneStepAggregatorConfig,
     TypedMetricInferenceEvaluatorAggregatorConfig,
 )
+from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregator
 
 AnyAggregatorConfig = (
     InferenceEvaluatorAggregatorConfig | TypedMetricInferenceEvaluatorAggregatorConfig
 )
-from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregator
 from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.batch_data import PrognosticState
 from fme.ace.data_loading.config import DataLoaderConfig
