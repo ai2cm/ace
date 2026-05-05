@@ -398,8 +398,9 @@ class Trainer:
             and self._current_epoch_num_batches_seen == 0
         ):
             logging.info("Starting evaluation before training")
-            valid_logs, valid_loss = validation_callback(self._epochs_trained)
-            inference_logs, _ = inference_callback(self._epochs_trained)
+            with self.validation_context():
+                valid_logs, valid_loss = validation_callback(self._epochs_trained)
+                inference_logs, _ = inference_callback(self._epochs_trained)
             logging.info(f"Validation loss before training: {valid_loss}")
             logging.info("Logging to wandb")
             all_logs = valid_logs | inference_logs | {"epoch": self._epochs_trained}
@@ -418,10 +419,13 @@ class Trainer:
             start_time = time.time()
             train_logs = self.train_one_epoch()
             train_end = time.time()
-            valid_logs, valid_loss = validation_callback(self._epochs_trained)
-            valid_end = time.time()
-            inference_logs, inference_error = inference_callback(self._epochs_trained)
-            inference_end: float | None = time.time() if inference_logs else None
+            with self.validation_context():
+                valid_logs, valid_loss = validation_callback(self._epochs_trained)
+                valid_end = time.time()
+                inference_logs, inference_error = inference_callback(
+                    self._epochs_trained
+                )
+                inference_end: float | None = time.time() if inference_logs else None
 
             train_loss = train_logs.get("train/mean/loss")
             # need to get the learning rate before stepping the scheduler
@@ -609,16 +613,13 @@ class Trainer:
     def _ema_context(self):
         """
         A context where the stepper uses the EMA model.
-
-        Reentrant: if we're already inside an EMA context (e.g. because
-        ``validation_context()`` was opened twice -- once by the trainer to
-        wrap an end-of-epoch callback, and once again by an inference helper
-        called from within that callback), nesting is a no-op so the EMA
-        weights are applied exactly once.
         """
         if self._in_ema_context:
-            yield
-            return
+            raise RuntimeError(
+                "_ema_context is not reentrant. The Trainer wraps all "
+                "callbacks in validation_context(), so callbacks should not "
+                "enter it themselves."
+            )
         self._in_ema_context = True
         try:
             with self._ema.applied_params(self.stepper.modules):

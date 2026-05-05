@@ -48,6 +48,7 @@
 # Karthik Kashinath - NVIDIA Corporation
 # Animashree Anandkumar - California Institute of Technology, NVIDIA Corporation
 
+import contextlib
 import dataclasses
 import logging
 import os
@@ -158,8 +159,6 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
             aggregator=aggregator,
             diagnostics_subdir=f"epoch_{epoch:04d}",
             record_logs=lambda logs: None,
-            ema=trainer._ema,
-            validate_using_ema=config.validate_using_ema,
         )
         return logs, logs["val/mean/loss"]
 
@@ -170,7 +169,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
             return {}, None
         logs = inference_one_epoch(
             stepper=stepper,
-            validation_context=trainer.validation_context,
+            validation_context=contextlib.nullcontext,
             dataset=inference_data,
             aggregator=aggregator_builder.get_inference_aggregator(),
             label="inference",
@@ -191,7 +190,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         logging.info("Starting weather evaluation inference run")
         return inference_one_epoch(
             stepper=stepper,
-            validation_context=trainer.validation_context,
+            validation_context=contextlib.nullcontext,
             dataset=data,
             aggregator=aggregator,
             label=label,

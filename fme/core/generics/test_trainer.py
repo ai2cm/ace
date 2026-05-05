@@ -459,8 +459,6 @@ def get_trainer(
             aggregator=val_agg,
             diagnostics_subdir=f"epoch_{epoch:04d}",
             record_logs=lambda logs: None,
-            ema=trainer._ema,
-            validate_using_ema=config.validate_using_ema,
         )
         return logs, logs["val/mean/loss"]
 
@@ -469,7 +467,7 @@ def get_trainer(
             return {}, None
         logs = inference_one_epoch(
             stepper=stepper,
-            validation_context=trainer.validation_context,
+            validation_context=contextlib.nullcontext,
             dataset=inference_data,
             aggregator=aggregator_builder.get_inference_aggregator(),
             label="inference",
