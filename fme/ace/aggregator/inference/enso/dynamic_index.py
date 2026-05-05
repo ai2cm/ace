@@ -104,6 +104,43 @@ def _compute_sample_mean_std(
     return std_by_sample.mean().item()
 
 
+def _compute_autocorrelation_at_lag(
+    data: np.ndarray,
+    lag_months: int,
+    time_dim: int = TIME_DIM,
+) -> float:
+    """Compute autocorrelation at a specific lag, averaged across samples.
+
+    Args:
+        data: Array with shape (sample, time).
+        lag_months: Lag in months.
+        time_dim: Time dimension index.
+
+    Returns:
+        Mean autocorrelation across samples at the given lag. Returns NaN
+        if the time series is too short for the requested lag.
+    """
+    n_time = data.shape[time_dim]
+    if n_time <= lag_months:
+        return float("nan")
+    acorrs = []
+    for s in range(data.shape[0]):
+        ts = data[s]
+        ts_clean = ts[~np.isnan(ts)]
+        if len(ts_clean) <= lag_months:
+            continue
+        mean = np.mean(ts_clean)
+        var = np.var(ts_clean)
+        if var == 0:
+            continue
+        x = ts_clean[:-lag_months] - mean
+        y = ts_clean[lag_months:] - mean
+        acorrs.append(np.mean(x * y) / var)
+    if len(acorrs) == 0:
+        return float("nan")
+    return float(np.mean(acorrs))
+
+
 class RegionalIndexAggregator:
     """Aggregator for computing a regional index, in this case a monthly- and area-
     weighted average of a variable over a region.
@@ -251,6 +288,11 @@ class RegionalIndexAggregator:
                 logs[f"{sst_name}_nino34_index_std"] = _compute_sample_mean_std(
                     indices[sst_name]
                 )
+                for lag_years, lag_months in [(2, 24), (5, 60)]:
+                    acorr = _compute_autocorrelation_at_lag(
+                        indices[sst_name].values, lag_months
+                    )
+                    logs[f"{sst_name}_nino34_index_autocorr_lag{lag_years}yr"] = acorr
         for sst_name in self.sea_surface_temperature_names:
             if (
                 sst_name in indices
@@ -344,6 +386,19 @@ class PairedRegionalIndexAggregator:
                     prediction_indices[sst_name],
                     target_indices[sst_name],
                 )
+                for lag_years, lag_months in [(2, 24), (5, 60)]:
+                    pred_acorr = _compute_autocorrelation_at_lag(
+                        prediction_indices[sst_name].values, lag_months
+                    )
+                    target_acorr = _compute_autocorrelation_at_lag(
+                        target_indices[sst_name].values, lag_months
+                    )
+                    logs[f"{sst_name}_nino34_index_autocorr_lag{lag_years}yr"] = (
+                        pred_acorr
+                    )
+                    logs[
+                        f"{sst_name}_nino34_index_autocorr_lag{lag_years}yr_target"
+                    ] = target_acorr
         for sst_name in self._prediction_aggregator.sea_surface_temperature_names:
             if (
                 sst_name in prediction_indices
