@@ -159,6 +159,15 @@ class TrainConfig:
             selecting a best-ENSO checkpoint (e.g.
             "inference/enso_index/sst_nino34_index_std_norm"). The checkpoint
             saved minimizes |1.0 - metric_value|. None disables this feature.
+        best_enso_checkpoint_autocorr_metric: If set, the inference log key for
+            prediction autocorrelation (e.g.
+            "inference/enso_index/sst_nino34_index_autocorr_lag5yr"). Added to
+            the ENSO score as weight * |pred_autocorr - target_autocorr|.
+        best_enso_checkpoint_autocorr_target_metric: The inference log key for
+            target autocorrelation (e.g.
+            "inference/enso_index/sst_nino34_index_autocorr_lag5yr_target").
+        best_enso_checkpoint_autocorr_weight: Weight for the autocorrelation
+            term in the composite ENSO score. Default 1.0.
         best_enso_checkpoint_climate_tolerance: Maximum relative increase in
             inference_error (climate mean state) allowed when saving the
             best-ENSO checkpoint. E.g. 0.1 means the inference error may be
@@ -199,6 +208,9 @@ class TrainConfig:
     evaluate_before_training: bool = True
     save_best_inference_epoch_checkpoints: bool = False
     best_enso_checkpoint_metric: str | None = None
+    best_enso_checkpoint_autocorr_metric: str | None = None
+    best_enso_checkpoint_autocorr_target_metric: str | None = None
+    best_enso_checkpoint_autocorr_weight: float = 1.0
     best_enso_checkpoint_climate_tolerance: float = 0.1
     lr_tuning: LRTuningConfig | None = None
     resume_results: ResumeResultsConfig | None = None
