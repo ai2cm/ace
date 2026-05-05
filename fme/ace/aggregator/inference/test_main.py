@@ -7,7 +7,7 @@ import torch
 import xarray as xr
 
 from fme.ace.aggregator.inference.main import (
-    InferenceEvaluatorAggregator,
+    InferenceEvaluatorAggregatorConfig,
     StepMeanEntry,
 )
 from fme.ace.data_loading.batch_data import BatchData, PairedData
@@ -38,12 +38,7 @@ def test_inference_evaluator_aggregator_channel_mean_names(
     ds_info = get_ds_info(nx, ny)
     initial_time = xr.DataArray(np.zeros((batch_size * n_ensemble,)), dims=["sample"])
 
-    agg = InferenceEvaluatorAggregator(
-        dataset_info=ds_info,
-        n_ic_steps=n_ic_steps,
-        n_forward_steps=n_forward_steps,
-        initial_time=initial_time,
-        normalize=lambda x: dict(x),
+    config = InferenceEvaluatorAggregatorConfig(
         log_zonal_mean_images=False,
         log_step_means=[],
         log_video=False,
@@ -51,8 +46,15 @@ def test_inference_evaluator_aggregator_channel_mean_names(
         log_global_mean_time_series=False,
         log_global_mean_norm_time_series=False,
         log_histograms=False,
-        channel_mean_names=channel_mean_names,
         log_nino34_index=False,
+    )
+    agg = config.build(
+        dataset_info=ds_info,
+        n_ic_steps=n_ic_steps,
+        n_forward_steps=n_forward_steps,
+        initial_time=initial_time,
+        normalize=lambda x: dict(x),
+        channel_mean_names=channel_mean_names,
         save_diagnostics=False,
         n_ensemble_per_ic=n_ensemble,
     )
@@ -113,23 +115,25 @@ def test_inference_evaluator_aggregator_ensemble():
     ds_info = get_ds_info(nx, ny)
     initial_time = xr.DataArray(np.zeros((batch_size,)), dims=["sample"])
 
-    agg = InferenceEvaluatorAggregator(
-        dataset_info=ds_info,
-        n_ic_steps=n_ic_steps,
-        n_forward_steps=n_forward_steps,
-        initial_time=initial_time,
-        normalize=lambda x: dict(x),
+    config = InferenceEvaluatorAggregatorConfig(
         log_zonal_mean_images=False,
         log_video=False,
         log_seasonal_means=False,
         log_global_mean_time_series=False,
         log_global_mean_norm_time_series=False,
         log_histograms=False,
-        channel_mean_names=channel_mean_names,
         log_nino34_index=False,
+        log_step_means=[StepMeanEntry(step=20)],
+    )
+    agg = config.build(
+        dataset_info=ds_info,
+        n_ic_steps=n_ic_steps,
+        n_forward_steps=n_forward_steps,
+        initial_time=initial_time,
+        normalize=lambda x: dict(x),
+        channel_mean_names=channel_mean_names,
         save_diagnostics=False,
         n_ensemble_per_ic=n_ensemble,
-        log_step_means=[StepMeanEntry(step=20)],
     )
 
     target_data = BatchData.new_for_testing(

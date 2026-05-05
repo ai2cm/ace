@@ -31,6 +31,7 @@ from fme.ace.stepper.derived_forcings import DerivedForcingsConfig, ForcingDeriv
 from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
 from fme.ace.stepper.single_module import (
     AtmosphereCorrectorConfig,
+    CheckpointStepperConfig,
     EpochNotProvidedError,
     SingleModuleStepperConfig,
     Stepper,
@@ -42,6 +43,7 @@ from fme.ace.stepper.single_module import (
     get_serialized_stepper_vertical_coordinate,
     load_stepper,
     load_stepper_config,
+    load_stepper_config_with_override,
 )
 from fme.ace.stepper.time_length_probabilities import (
     TimeLength,
@@ -50,7 +52,7 @@ from fme.ace.stepper.time_length_probabilities import (
     TimeLengthProbability,
     TimeLengthSchedule,
 )
-from fme.ace.testing import DimSizes
+from fme.ace.testing import DimSizes, save_stepper_checkpoint
 from fme.core import AtmosphereData
 from fme.core.benchmark.memory import benchmark_memory
 from fme.core.coordinates import (
@@ -1550,7 +1552,7 @@ def test_load_stepper_and_load_stepper_config(
 
     # First check that load_stepper_config and load_stepper functions load
     # the unmodified stepper when no StepperOverrideConfig is passed.
-    stepper_config = load_stepper_config(stepper_path)
+    stepper_config = load_stepper_config_with_override(stepper_path)
     validate_stepper_config(
         stepper_config, serialized_ocean_config, serialized_multi_call_config
     )
@@ -1568,7 +1570,7 @@ def test_load_stepper_and_load_stepper_config(
         derived_forcings=overriding_derived_forcings_config,
     )
 
-    stepper_config = load_stepper_config(stepper_path, stepper_override)
+    stepper_config = load_stepper_config_with_override(stepper_path, stepper_override)
     validate_stepper_config(
         stepper_config, expected_ocean_config, expected_multi_call_config
     )
@@ -2358,3 +2360,24 @@ def test_ocean_derived_variables_integration(
         # hfds is diagnostic, so the generated net_energy_flux_into_ocean
         # differs from the reference
         assert not torch.allclose(pred_flux, ref_flux)
+
+
+def test_load_stepper_config_from_checkpoint(tmp_path: pathlib.Path):
+    checkpoint_path = tmp_path / "checkpoint.tar"
+    original_config = save_stepper_checkpoint(checkpoint_path)
+    loaded_config = load_stepper_config(checkpoint_path)
+    assert isinstance(loaded_config, StepperConfig)
+    assert loaded_config.derived_forcings == original_config.derived_forcings
+    assert loaded_config.step.type == original_config.step.type
+
+
+def test_checkpoint_stepper_config_to_stepper_config(tmp_path: pathlib.Path):
+    checkpoint_path = tmp_path / "checkpoint.tar"
+    original_config = save_stepper_checkpoint(checkpoint_path)
+    checkpoint_config = CheckpointStepperConfig(
+        checkpoint_path=str(checkpoint_path),
+    )
+    loaded_config = checkpoint_config.to_stepper_config()
+    assert isinstance(loaded_config, StepperConfig)
+    assert loaded_config.derived_forcings == original_config.derived_forcings
+    assert loaded_config.step.type == original_config.step.type
