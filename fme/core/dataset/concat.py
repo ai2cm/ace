@@ -71,6 +71,12 @@ class XarrayConcat(DatasetABC):
     def validate_inference_length(self, max_start_index: int, max_window_len: int):
         raise ValueError("Concat datasets do not support inference.")
 
+    def enable_shared_memory(self):
+        shared_epoch = torch.tensor(-1).share_memory_()
+        for dataset in self._wrapped_datasets:
+            if hasattr(dataset, "set_global_epoch_tensor"):
+                dataset.set_global_epoch_tensor(shared_epoch)
+
     def set_epoch(self, epoch: int):
         for dataset in self._wrapped_datasets:
             dataset.set_epoch(epoch)
