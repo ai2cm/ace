@@ -49,9 +49,11 @@ class InlineInferenceConfig:
         n_ensemble_per_ic: number of initial condition based ensembles
         epochs: epochs on which to run inference. By default runs inference every epoch.
         aggregator: configuration of inline inference aggregator.
-        name: name used as wandb log prefix. If None, defaults to "inference"
-            when there is a single inference config and "inference_{i}" when
-            there are multiple.
+        name: name used as wandb log prefix and output subdirectory. If None,
+            defaults to "inference" when there is a single inference config
+            and "inference_{i}" when there are multiple. Note: adding a second
+            unnamed config will rename the first from "inference" to
+            "inference_0", changing its wandb keys and output directory.
         weight: weight for this inference's error in the combined checkpoint
             selection metric. Must be non-negative.
     """
