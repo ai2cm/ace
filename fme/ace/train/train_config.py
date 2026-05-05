@@ -294,15 +294,18 @@ class TrainConfig:
         """
         return os.path.join(self.experiment_dir, "output")
 
-    def get_inference_epochs(self) -> list[int]:
+    def get_inference_epoch_sets(self) -> list[set[int]]:
         if not self.inference:
             return []
         start_epoch = 0 if self.evaluate_before_training else 1
         all_epochs = list(range(start_epoch, self.max_epochs + 1))
-        result: set[int] = set()
-        for entry in self.inference:
-            result.update(all_epochs[entry.epochs.slice])
-        return sorted(result)
+        return [set(all_epochs[entry.epochs.slice]) for entry in self.inference]
+
+    def get_inference_epochs(self) -> list[int]:
+        epoch_sets = self.get_inference_epoch_sets()
+        if not epoch_sets:
+            return []
+        return sorted(set().union(*epoch_sets))
 
 
 class TrainBuilders:

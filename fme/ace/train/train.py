@@ -96,6 +96,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         logging.info("Skipping inline inference")
     inference_entries = builder.get_inference_data(variable_metadata)
     inference_epochs = config.get_inference_epochs()
+    inference_epoch_sets = config.get_inference_epoch_sets()
 
     dataset_info = train_data.dataset_info
     logging.info("Starting model initialization")
@@ -127,14 +128,6 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
             record_logs=lambda logs: None,
         )
         return logs, logs["val/mean/loss"]
-
-    # precompute per-config epoch sets for evaluate_before_training support
-    start_epoch = 0 if config.evaluate_before_training else 1
-    all_epochs = list(range(start_epoch, config.max_epochs + 1))
-    inference_epoch_sets = [
-        set(all_epochs[entry_config.epochs.slice])
-        for entry_config, _, _, _ in inference_entries
-    ]
 
     def inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
         if epoch not in inference_epochs:
