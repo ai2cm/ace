@@ -602,9 +602,7 @@ class XarrayDataset(DatasetABC):
         self._labels = set(config.labels) if config.labels is not None else None
         self._infer_timestep = config.infer_timestep
         self._local_epoch: int = -1
-        self._global_epoch = torch.tensor(
-            -1
-        ).share_memory_()  # required for multi-worker parallelism
+        self._global_epoch = torch.tensor(-1)
 
     def _ensure_epoch_synchronized(self):
         """Ensure that the local epoch is synchronized with the global epoch.
@@ -956,6 +954,15 @@ class XarrayDataset(DatasetABC):
 
         return tensors, time, self._labels, self._epoch
 
+    def enable_shared_memory(self):
+        """Move epoch counter to shared memory for multi-worker data loading."""
+        if not self._global_epoch.is_shared():
+            self._global_epoch = self._global_epoch.share_memory_()
+
+    def set_global_epoch_tensor(self, tensor: torch.Tensor):
+        """Share a single epoch tensor across multiple datasets."""
+        self._global_epoch = tensor
+
     def set_epoch(self, epoch: int):
         """
         Set the epoch for the dataset. This will update the number of initial
@@ -1070,6 +1077,12 @@ class XarraySubset(DatasetABC):
     @property
     def properties(self) -> DatasetProperties:
         return self._wrapped_dataset.properties
+
+    def enable_shared_memory(self):
+        self._wrapped_dataset.enable_shared_memory()
+
+    def set_global_epoch_tensor(self, tensor: torch.Tensor):
+        self._wrapped_dataset.set_global_epoch_tensor(tensor)
 
     def set_epoch(self, epoch: int):
         self._wrapped_dataset.set_epoch(epoch)
