@@ -1,5 +1,6 @@
 import cftime
 import numpy as np
+import pytest
 import torch
 import xarray as xr
 from matplotlib import pyplot as plt
@@ -197,7 +198,9 @@ class TestIPORegionalAccumulator:
 
 
 class TestPairedIPOIndexAggregator:
-    def test_get_logs_returns_expected_keys(self):
+    def test_get_logs_returns_expected_keys(self, very_fast_only: bool):
+        if very_fast_only:
+            pytest.skip("Skipping non-fast tests")
         """Test that get_logs returns the expected metric keys for long runs."""
         lat = torch.linspace(-60.0, 60.0, 13)
         lon = torch.linspace(100.0, 300.0, 17)
