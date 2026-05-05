@@ -60,17 +60,6 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
         save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
         output_dir=config.output_dir,
     )
-    trainer = Trainer(
-        train_data=train_data,
-        validation_data=validation_data,
-        stepper=stepper,
-        build_optimization=builder.get_optimization,
-        build_ema=builder.get_ema,
-        config=config,
-        aggregator_builder=aggregator_builder,
-        end_of_batch_callback=end_of_batch_ops,
-    )
-
     inference_epochs = config.get_inference_epochs()
 
     def validation_callback(epoch: int) -> tuple[dict[str, Any], float]:
@@ -99,9 +88,18 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
         error = logs.get("inference/time_mean_norm/rmse/channel_mean")
         return logs, error
 
-    trainer.set_validation_callback(validation_callback)
-    trainer.set_inference_callback(inference_callback)
-    return trainer
+    return Trainer(
+        train_data=train_data,
+        validation_data=validation_data,
+        stepper=stepper,
+        build_optimization=builder.get_optimization,
+        build_ema=builder.get_ema,
+        config=config,
+        aggregator_builder=aggregator_builder,
+        validation_callback=validation_callback,
+        end_of_batch_callback=end_of_batch_ops,
+        inference_callback=inference_callback,
+    )
 
 
 class CoupledAggregatorBuilder(

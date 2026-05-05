@@ -435,19 +435,6 @@ def get_trainer(
         validation_losses=validation_losses,
         inference_losses=inference_losses,
     )
-    trainer = Trainer(
-        train_data=train_data,
-        validation_data=validation_data,
-        stepper=stepper,
-        build_optimization=build_optimization,
-        build_ema=build_ema,
-        config=config,
-        aggregator_builder=aggregator_builder,
-        end_of_batch_callback=unittest.mock.MagicMock(),
-        end_of_epoch_callback=unittest.mock.MagicMock(side_effect=lambda epoch: {}),
-        do_gc_collect=False,  # for much faster tests
-    )
-
     inference_epochs = config._inference_epochs
 
     def validation_callback(epoch: int) -> tuple[dict[str, Any], float]:
@@ -476,8 +463,20 @@ def get_trainer(
         error = logs.get("inference/time_mean_norm/rmse/channel_mean")
         return logs, error
 
-    trainer.set_validation_callback(validation_callback)
-    trainer.set_inference_callback(inference_callback)
+    trainer = Trainer(
+        train_data=train_data,
+        validation_data=validation_data,
+        stepper=stepper,
+        build_optimization=build_optimization,
+        build_ema=build_ema,
+        config=config,
+        aggregator_builder=aggregator_builder,
+        validation_callback=validation_callback,
+        end_of_batch_callback=unittest.mock.MagicMock(),
+        end_of_epoch_callback=unittest.mock.MagicMock(side_effect=lambda epoch: {}),
+        inference_callback=inference_callback,
+        do_gc_collect=False,  # for much faster tests
+    )
 
     return config, trainer
 

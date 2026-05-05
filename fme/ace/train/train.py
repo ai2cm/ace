@@ -136,19 +136,6 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         validation_config=config.validation_aggregator,
         n_ensemble_per_ic=n_ensemble_per_ic,
     )
-    do_gc_collect = fme.get_device() != torch.device("cpu")
-    trainer_config: TrainConfigProtocol = config  # documenting trainer input type
-    trainer = Trainer(
-        train_data=train_data,
-        validation_data=validation_data,
-        stepper=stepper,
-        build_optimization=builder.get_optimization,
-        build_ema=builder.get_ema,
-        config=trainer_config,
-        aggregator_builder=aggregator_builder,
-        end_of_batch_callback=end_of_batch_ops,
-        do_gc_collect=do_gc_collect,
-    )
 
     def validation_callback(epoch: int) -> tuple[dict[str, Any], float]:
         validation_data.set_epoch(epoch)
@@ -178,9 +165,6 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         error = logs.get("inference/time_mean_norm/rmse/channel_mean")
         return logs, error
 
-    trainer.set_validation_callback(validation_callback)
-    trainer.set_inference_callback(inference_callback)
-
     def _run_inference(
         data: InferenceDataABC[PrognosticState, BatchData],
         aggregator: InferenceEvaluatorAggregator,
@@ -206,8 +190,23 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         save_diagnostics=config.save_per_epoch_diagnostics,
         n_ic_timesteps=stepper.n_ic_timesteps,
     )
-    trainer.set_end_of_epoch_callback(end_of_epoch_ops)
-    return trainer
+
+    do_gc_collect = fme.get_device() != torch.device("cpu")
+    trainer_config: TrainConfigProtocol = config  # documenting trainer input type
+    return Trainer(
+        train_data=train_data,
+        validation_data=validation_data,
+        stepper=stepper,
+        build_optimization=builder.get_optimization,
+        build_ema=builder.get_ema,
+        config=trainer_config,
+        aggregator_builder=aggregator_builder,
+        validation_callback=validation_callback,
+        end_of_batch_callback=end_of_batch_ops,
+        end_of_epoch_callback=end_of_epoch_ops,
+        inference_callback=inference_callback,
+        do_gc_collect=do_gc_collect,
+    )
 
 
 class AggregatorBuilder(

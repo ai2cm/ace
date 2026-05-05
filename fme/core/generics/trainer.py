@@ -229,9 +229,9 @@ class Trainer:
         build_ema: Callable[[torch.nn.ModuleList], EMATracker],
         config: TrainConfigProtocol,
         aggregator_builder: AggregatorBuilderABC[TO],
+        validation_callback: ValidationCallback,
         end_of_batch_callback: EndOfBatchCallback = lambda: None,
         end_of_epoch_callback: EndOfEpochCallback = null_end_of_epoch_callback,
-        validation_callback: ValidationCallback | None = None,
         inference_callback: InferenceCallback = _null_inference_callback,
         do_gc_collect: bool = True,
     ):
@@ -291,8 +291,8 @@ class Trainer:
         self._do_gc_collect = do_gc_collect
         self._in_ema_context = False
         self._started_training = False
-        self._validation_callback = validation_callback
-        self._inference_callback = inference_callback
+        self._validation_callback: ValidationCallback = validation_callback
+        self._inference_callback: InferenceCallback = inference_callback
 
         def on_terminate(signum, frame):
             dist = Distributed.get_instance()
@@ -315,15 +315,6 @@ class Trainer:
 
         chain_signal_handler(signal.SIGTERM, on_terminate)
         chain_signal_handler(signal.SIGINT, on_terminate)
-
-    def set_end_of_epoch_callback(self, end_of_epoch_callback: EndOfEpochCallback):
-        self._end_of_epoch_callback = end_of_epoch_callback
-
-    def set_validation_callback(self, callback: ValidationCallback):
-        self._validation_callback = callback
-
-    def set_inference_callback(self, callback: InferenceCallback):
-        self._inference_callback = callback
 
     def switch_off_grad(self, model: torch.nn.Module):
         for param in model.parameters():
@@ -378,11 +369,6 @@ class Trainer:
         logging.info("Starting Training Loop...")
 
         validation_callback = self._validation_callback
-        if validation_callback is None:
-            raise RuntimeError(
-                "Validation callback must be set before training. "
-                "Call set_validation_callback()."
-            )
         inference_callback = self._inference_callback
 
         if self.config.segment_epochs is None:
@@ -397,9 +383,10 @@ class Trainer:
             and self._epochs_trained == 0
             and self._current_epoch_num_batches_seen == 0
         ):
-            logging.info("Starting evaluation before training")
+            logging.info("Starting validation before training")
             with self.validation_context():
                 valid_logs, valid_loss = validation_callback(self._epochs_trained)
+                logging.info("Starting inline inference before training")
                 inference_logs, _ = inference_callback(self._epochs_trained)
             logging.info(f"Validation loss before training: {valid_loss}")
             logging.info("Logging to wandb")
@@ -419,9 +406,17 @@ class Trainer:
             start_time = time.time()
             train_logs = self.train_one_epoch()
             train_end = time.time()
+            logging.info(
+                f"Starting validation step for model trained for "
+                f"{self._epochs_trained} epochs"
+            )
             with self.validation_context():
                 valid_logs, valid_loss = validation_callback(self._epochs_trained)
                 valid_end = time.time()
+                logging.info(
+                    f"Starting inference step for model trained for "
+                    f"{self._epochs_trained} epochs"
+                )
                 inference_logs, inference_error = inference_callback(
                     self._epochs_trained
                 )
