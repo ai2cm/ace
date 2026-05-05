@@ -135,7 +135,7 @@ optimization:
         step_each_iteration: true
     milestones: [3000]
 stepper_training:
-  n_coupled_steps: 4
+  n_coupled_steps: 8
   n_ensemble: 2
   ocean:
     parameter_init:
@@ -145,13 +145,21 @@ stepper_training:
       n_steps:
         outcomes:
           - steps: 0
-            probability: 0.1
+            probability: 0.05
           - steps: 1
-            probability: 0.3
+            probability: 0.25
           - steps: 2
-            probability: 0.3
+            probability: 0.25
           - steps: 4
-            probability: 0.3
+            probability: 0.25
+          - steps: 5
+            probability: 0.05
+          - steps: 6
+            probability: 0.05
+          - steps: 7
+            probability: 0.05
+          - steps: 8
+            probability: 0.05
       optimize_last_step_only: false
     loss:
       type: EnsembleLossWithNanFill
