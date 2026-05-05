@@ -238,7 +238,7 @@ class AggregatorBuilder(
             InferenceEvaluatorAggregatorConfig
             | TypedMetricInferenceEvaluatorAggregatorConfig,
         ):
-            return self.inference_config.build(
+            build_kwargs: dict = dict(
                 dataset_info=self.dataset_info,
                 initial_time=self.initial_inference_time,
                 n_ic_steps=self.n_ic_steps,
@@ -249,6 +249,12 @@ class AggregatorBuilder(
                 output_dir=os.path.join(self.output_dir, "inference"),
                 n_ensemble_per_ic=self.n_ensemble_per_ic,
             )
+            if isinstance(
+                self.inference_config,
+                TypedMetricInferenceEvaluatorAggregatorConfig,
+            ):
+                build_kwargs["enable_time_series"] = False
+            return self.inference_config.build(**build_kwargs)
         else:
             raise ValueError(
                 "Trying to build an inference aggregator, but inference config not set."
