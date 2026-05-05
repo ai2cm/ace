@@ -99,6 +99,8 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
     inference_data = builder.get_evaluation_inference_data()
 
     variable_metadata = get_derived_variable_metadata() | train_data.variable_metadata
+    for data, name in zip((train_data, validation_data), ("train", "valid")):
+        data.log_info(name)
 
     dataset_info = train_data.dataset_info
     logging.info("Starting model initialization")

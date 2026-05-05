@@ -71,7 +71,7 @@ from fme.core.generics.inference import run_inference
 from fme.core.generics.lr_tuning import LRTuningConfig, run_lr_tuning_trial
 from fme.core.generics.metrics_aggregator import MetricsAggregator
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
-from fme.core.generics.validation import run_validation
+from fme.core.generics.validation import run_validation, run_validation_loop
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.timing import GlobalTimer
 from fme.core.training_history import TrainingJob
@@ -237,10 +237,6 @@ class Trainer:
 
         self.train_data = train_data
         self.valid_data = validation_data
-        for gridded_data, name in zip(
-            (self.train_data, self.valid_data), ("train", "valid")
-        ):
-            gridded_data.log_info(name)
 
         self.num_batches_seen = 0
         self._start_epoch = 0
@@ -322,6 +318,18 @@ class Trainer:
         """Create a new EMATracker initialized from the current EMA state."""
         return EMATracker.from_state(self._ema.get_state(), modules)
 
+    def _validate_stepper(self, stepper: TrainStepperABC, ema: EMATracker) -> float:
+        aggregator = self._aggregator_builder.get_validation_aggregator()
+        run_validation_loop(
+            stepper=stepper,
+            valid_data=self.valid_data,
+            aggregator=aggregator,
+            ema=ema,
+            validate_using_ema=self.config.validate_using_ema,
+        )
+        val_logs = aggregator.get_logs(label="val")
+        return val_logs["val/mean/loss"]
+
     def _maybe_tune_lr(self):
         cfg = self.config.lr_tuning
         if cfg is None:
@@ -335,17 +343,13 @@ class Trainer:
         self.train_data.set_epoch(self._epochs_trained + 1)
         new_lr = run_lr_tuning_trial(
             train_data=self.train_data,
-            valid_data=self.valid_data,
             optimization=self.optimization,
             copy_stepper=self._copy_stepper,
             build_optimization=self._build_optimization,
             copy_ema=self._copy_ema,
             config=cfg,
             current_lr=self.optimization.learning_rate,
-            get_validation_aggregator=(
-                self._aggregator_builder.get_validation_aggregator
-            ),
-            validate_using_ema=self.config.validate_using_ema,
+            validate_stepper=self._validate_stepper,
         )
         if new_lr is not None:
             logging.info(f"LR tuning: adopting candidate LR {new_lr}")
