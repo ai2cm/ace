@@ -1,5 +1,3 @@
-from datetime import timedelta
-
 import cftime
 import numpy as np
 import torch
@@ -34,12 +32,11 @@ def _make_time(
     i_start: int = 0,
     calendar: str = "noleap",
 ) -> xr.DataArray:
-    start = cftime.datetime(*start_time, calendar=calendar) + timedelta(
-        hours=6 * i_start
+    base = cftime.datetime(*start_time, calendar=calendar)
+    all_times = xr.date_range(
+        start=base, periods=i_start + n_times, freq=freq, use_cftime=True
     )
-    time_values = xr.date_range(
-        start=start, periods=n_times, freq=freq, use_cftime=True
-    ).values
+    time_values = all_times[i_start:].values
     return xr.concat(
         [xr.DataArray(time_values, dims=("time",)) for _ in range(n_samples)],
         dim="sample",
@@ -202,12 +199,11 @@ class TestIPORegionalAccumulator:
 class TestPairedIPOIndexAggregator:
     def test_get_logs_returns_expected_keys(self):
         """Test that get_logs returns the expected metric keys for long runs."""
-        lat, lon = _make_lat_lon()
+        lat = torch.linspace(-60.0, 60.0, 13)
+        lon = torch.linspace(100.0, 300.0, 17)
         n_lat, n_lon = len(lat), len(lon)
-        n_samples = 2
+        n_samples = 1
         n_months = 40 * 12  # 40 years to exceed filter requirement
-        steps_per_month = 120
-        n_times = n_months * steps_per_month
 
         coords = LatLonCoordinates(lat=lat, lon=lon)
         ops = coords.get_gridded_operations()
@@ -218,25 +214,29 @@ class TestPairedIPOIndexAggregator:
             regional_mean=ops.regional_area_weighted_mean,
         )
 
-        chunk_size = 500
-        for i_start in range(0, n_times, chunk_size):
-            n_chunk = min(chunk_size, n_times - i_start)
-            time = _make_time(n_samples, n_chunk, i_start=i_start)
-            target_sst = torch.full(
-                (n_samples, n_chunk, n_lat, n_lon), 300.0, device=get_device()
-            )
-            pred_sst = torch.full(
-                (n_samples, n_chunk, n_lat, n_lon), 300.5, device=get_device()
-            )
-            # Add seasonal cycle to avoid zero anomalies
+        # Use monthly frequency to keep the test fast
+        chunk_size = 60
+        for i_start in range(0, n_months, chunk_size):
+            n_chunk = min(chunk_size, n_months - i_start)
+            time = _make_time(n_samples, n_chunk, i_start=i_start, freq="MS")
             months = time.isel(sample=0).dt.month.values
             seasonal = torch.tensor(
                 [np.sin(2 * np.pi * m / 12) for m in months],
                 device=get_device(),
                 dtype=torch.float32,
             )[None, :, None, None]
-            target_sst = target_sst + seasonal
-            pred_sst = pred_sst + seasonal * 1.2
+            target_sst = (
+                torch.full(
+                    (n_samples, n_chunk, n_lat, n_lon), 300.0, device=get_device()
+                )
+                + seasonal
+            )
+            pred_sst = (
+                torch.full(
+                    (n_samples, n_chunk, n_lat, n_lon), 300.5, device=get_device()
+                )
+                + seasonal * 1.2
+            )
 
             batch = InferenceBatchData(
                 prediction={"sst": pred_sst},
