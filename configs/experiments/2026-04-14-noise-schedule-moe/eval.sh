@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="eval-global-trained-denoising-moe-tropics"
+JOB_NAME="eval-global-trained-low-tuned-denoising-moe-tropics"
 #JOB_NAME="eval-global-trained-denoising-moe-events"
 
 CONFIG_FILENAME="eval-coarse-prmsl-tropic-pac.yaml"
@@ -35,6 +35,7 @@ gantry run \
     --description 'Run 100km to 3km evaluation on coarsened X-SHiELD' \
     --workspace ai2/climate-titan \
     --priority urgent \
+    --not-preemptible \
     --cluster ai2/jupiter \
     --cluster ai2/titan \
     --beaker-image $IMAGE \
