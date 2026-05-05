@@ -629,6 +629,112 @@ class InferenceEvaluatorAggregatorConfig:
         )
 
 
+@dataclasses.dataclass
+class _LegacyStepMeanEntry:
+    step: int
+    name: str | None = None
+
+    def get_name(self) -> str:
+        return self.name or f"mean_step_{self.step}"
+
+
+@dataclasses.dataclass
+class LegacyFlagInferenceEvaluatorAggregatorConfig:
+    """Backwards-compatible aggregator config that uses the old boolean-flag
+    interface and translates it into the new typed-metric config at build time.
+    """
+
+    type: Literal["legacy"] = "legacy"
+    log_histograms: bool = False
+    log_video: bool = False
+    log_extended_video: bool = False
+    log_zonal_mean_images: bool | int = 4096
+    log_seasonal_means: bool = False
+    log_global_mean_time_series: bool = True
+    log_global_mean_norm_time_series: bool = True
+    monthly_reference_data: str | None = None
+    time_mean_reference_data: str | None = None
+    log_nino34_index: bool = True
+    log_step_means: list[_LegacyStepMeanEntry] = dataclasses.field(
+        default_factory=lambda: [_LegacyStepMeanEntry(step=20)]
+    )
+
+    def _build_metrics(
+        self,
+        n_forward_steps: int,
+    ) -> list[MetricConfig]:
+        metrics: list[MetricConfig] = []
+        if self.log_global_mean_time_series:
+            metrics.append(MeanMetricConfig(target="denorm"))
+        if self.log_global_mean_norm_time_series:
+            metrics.append(MeanMetricConfig(target="norm"))
+        for entry in self.log_step_means:
+            if entry.step <= n_forward_steps:
+                metrics.append(
+                    StepMeanMetricConfig(
+                        step=entry.step, name=entry.get_name(), target="denorm"
+                    )
+                )
+                metrics.append(
+                    StepMeanMetricConfig(
+                        step=entry.step,
+                        name=f"{entry.get_name()}_norm",
+                        target="norm",
+                    )
+                )
+        metrics.append(PowerSpectrumMetricConfig())
+        if self.log_zonal_mean_images:
+            zonal_max = (
+                self.log_zonal_mean_images
+                if isinstance(self.log_zonal_mean_images, int)
+                else 4096
+            )
+            metrics.append(ZonalMeanMetricConfig(zonal_mean_max_size=zonal_max))
+        metrics.append(TimeMeanMetricConfig(target="denorm"))
+        metrics.append(TimeMeanMetricConfig(target="norm"))
+        if self.log_video:
+            metrics.append(
+                VideoMetricConfig(enable_extended_videos=self.log_extended_video)
+            )
+        if self.log_histograms:
+            metrics.append(HistogramMetricConfig())
+        if self.log_seasonal_means:
+            metrics.append(SeasonalMetricConfig())
+        return metrics
+
+    def build(
+        self,
+        dataset_info: DatasetInfo,
+        n_ic_steps: int,
+        n_forward_steps: int,
+        initial_time: xr.DataArray,
+        normalize: Callable[[TensorMapping], TensorDict],
+        output_dir: str | None = None,
+        channel_mean_names: Sequence[str] | None = None,
+        save_diagnostics: bool = True,
+        n_ensemble_per_ic: int = 1,
+        enable_time_series: bool = True,
+    ) -> "InferenceEvaluatorAggregator":
+        metrics = self._build_metrics(n_forward_steps)
+        new_config = InferenceEvaluatorAggregatorConfig(
+            metrics=metrics,
+            monthly_reference_data=self.monthly_reference_data,
+            time_mean_reference_data=self.time_mean_reference_data,
+        )
+        return new_config.build(
+            dataset_info=dataset_info,
+            n_ic_steps=n_ic_steps,
+            n_forward_steps=n_forward_steps,
+            initial_time=initial_time,
+            normalize=normalize,
+            output_dir=output_dir,
+            channel_mean_names=channel_mean_names,
+            save_diagnostics=save_diagnostics,
+            n_ensemble_per_ic=n_ensemble_per_ic,
+            enable_time_series=enable_time_series,
+        )
+
+
 class InferenceEvaluatorAggregator(
     InferenceAggregatorABC[PairedData | PrognosticState, PairedData]
 ):

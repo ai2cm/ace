@@ -10,6 +10,7 @@ import xarray as xr
 from fme.ace.aggregator.inference import (
     HistogramMetricConfig,
     InferenceEvaluatorAggregatorConfig,
+    LegacyFlagInferenceEvaluatorAggregatorConfig,
     MeanMetricConfig,
     PowerSpectrumMetricConfig,
     StepMeanMetricConfig,
@@ -251,6 +252,49 @@ def test_inference_logs_labels_exist():
     assert "mean_norm/series" not in logs[0]
     assert "reduced/series" not in logs[0]
     assert "reduced_norm/series" not in logs[0]
+
+
+def test_legacy_flag_config_produces_same_metrics():
+    """LegacyFlagInferenceEvaluatorAggregatorConfig with defaults should produce
+    the same step-level logs as an equivalent new-style config."""
+    n_sample = 2
+    n_time = 22
+    nx = 90
+    ny = 45
+    ds_info = get_ds_info(nx, ny)
+    initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
+
+    legacy_config = LegacyFlagInferenceEvaluatorAggregatorConfig(
+        log_video=True,
+        log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
+    )
+    agg = legacy_config.build(
+        dataset_info=ds_info,
+        n_ic_steps=1,
+        n_forward_steps=n_time - 1,
+        initial_time=initial_time,
+        normalize=lambda x: dict(x),
+        save_diagnostics=False,
+    )
+    data = PairedData.new_on_device(
+        prediction={"a": torch.randn(n_sample, n_time, ny, nx, device=get_device())},
+        reference={"a": torch.randn(n_sample, n_time, ny, nx, device=get_device())},
+        time=xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"]),
+        labels=None,
+    )
+    logs = agg.record_batch(data=data)
+    assert isinstance(logs, list)
+    assert len(logs) == n_time
+    assert "mean/weighted_bias/a" in logs[0]
+    assert "mean/weighted_rmse/a" in logs[0]
+    assert "mean_norm/weighted_rmse/a" in logs[0]
+
+    summary_logs = agg.get_summary_logs()
+    assert "video/a" in summary_logs
+    assert "zonal_mean/error/a" in summary_logs
+    assert "mean_step_20/weighted_rmse/a" in summary_logs
+    assert "time_mean/rmse/a" in summary_logs
+    assert "power_spectrum/a" in summary_logs
 
 
 @pytest.mark.parametrize(

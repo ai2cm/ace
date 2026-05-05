@@ -12,7 +12,10 @@ import torch
 
 import fme
 from fme.ace.aggregator import OneStepAggregatorConfig
-from fme.ace.aggregator.inference import InferenceEvaluatorAggregatorConfig
+from fme.ace.aggregator.inference import (
+    InferenceEvaluatorAggregatorConfig,
+    LegacyFlagInferenceEvaluatorAggregatorConfig,
+)
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_gridded_data, get_inference_data
@@ -225,9 +228,10 @@ class InferenceEvaluatorConfig:
     data_writer: DataWriterConfig = dataclasses.field(
         default_factory=lambda: DataWriterConfig()
     )
-    aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
-        default_factory=lambda: InferenceEvaluatorAggregatorConfig()
-    )
+    aggregator: (
+        InferenceEvaluatorAggregatorConfig
+        | LegacyFlagInferenceEvaluatorAggregatorConfig
+    ) = dataclasses.field(default_factory=lambda: InferenceEvaluatorAggregatorConfig())
     stepper_override: StepperOverrideConfig | None = None
     allow_incompatible_dataset: bool = False
     validation: ValidationConfig | None = None
@@ -368,7 +372,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
                     f"error. The incompatiblity found was: {str(err)}"
                 ) from err
 
-        aggregator_config: InferenceEvaluatorAggregatorConfig = config.aggregator
+        aggregator_config = config.aggregator
         for batch in data.loader:
             initial_time = batch.time.isel(time=0)
             break

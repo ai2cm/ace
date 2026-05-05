@@ -7,6 +7,7 @@ import torch
 
 from fme.ace.aggregator import (
     InferenceEvaluatorAggregatorConfig,
+    LegacyFlagInferenceEvaluatorAggregatorConfig,
     OneStepAggregatorConfig,
 )
 from fme.ace.aggregator.inference import (
@@ -15,6 +16,10 @@ from fme.ace.aggregator.inference import (
     StepMeanMetricConfig,
     TimeMeanMetricConfig,
     ZonalMeanMetricConfig,
+)
+
+AnyAggregatorConfig = (
+    InferenceEvaluatorAggregatorConfig | LegacyFlagInferenceEvaluatorAggregatorConfig
 )
 from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregator
 from fme.ace.aggregator.train import TrainAggregatorConfig
@@ -68,7 +73,7 @@ class InlineInferenceConfig:
     forward_steps_in_memory: int
     n_ensemble_per_ic: int = 1
     epochs: Slice = dataclasses.field(default_factory=lambda: Slice())
-    aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
+    aggregator: AnyAggregatorConfig = dataclasses.field(
         default_factory=lambda: InferenceEvaluatorAggregatorConfig(
             metrics=[
                 StepMeanMetricConfig(step=20, target="denorm"),
@@ -90,7 +95,10 @@ class InlineInferenceConfig:
                 f"{self.loader.start_indices.n_initial_conditions} and "
                 f"{dist.world_size}."
             )
-        if self.aggregator.metrics is not None:
+        if (
+            isinstance(self.aggregator, InferenceEvaluatorAggregatorConfig)
+            and self.aggregator.metrics is not None
+        ):
             self.aggregator.metrics = [
                 m
                 for m in self.aggregator.metrics
@@ -301,7 +309,7 @@ class TrainConfig:
         return self.inference.n_forward_steps
 
     @property
-    def inference_aggregator(self) -> InferenceEvaluatorAggregatorConfig | None:
+    def inference_aggregator(self) -> AnyAggregatorConfig | None:
         if self.inference is None:
             return None
         return self.inference.aggregator

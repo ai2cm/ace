@@ -8,6 +8,7 @@ from .main import (
     InferenceAggregatorConfig,
     InferenceEvaluatorAggregator,
     InferenceEvaluatorAggregatorConfig,
+    LegacyFlagInferenceEvaluatorAggregatorConfig,
     MeanMetricConfig,
     MetricConfig,
     PowerSpectrumMetricConfig,
