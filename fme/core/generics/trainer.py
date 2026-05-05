@@ -64,7 +64,7 @@ import torch
 
 import fme
 from fme.core.distributed import Distributed
-from fme.core.ema import EMATracker
+from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.aggregator import AggregatorABC, InferenceAggregatorABC
 from fme.core.generics.data import GriddedDataABC, InferenceDataABC
 from fme.core.generics.inference import run_inference
@@ -135,6 +135,9 @@ class TrainConfigProtocol(Protocol):
 
     @property
     def save_best_inference_epoch_checkpoints(self) -> bool: ...
+
+    @property
+    def ema(self) -> EMAConfig: ...
 
     @property
     def lr_tuning(self) -> LRTuningConfig | None: ...
@@ -589,7 +592,16 @@ class Trainer:
     def _ema_context(self):
         """
         A context where the stepper uses the EMA model.
+
+        Reentrant: if we're already inside an EMA context (e.g. because
+        ``validation_context()`` was opened twice -- once by the trainer to
+        wrap an end-of-epoch callback, and once again by an inference helper
+        called from within that callback), nesting is a no-op so the EMA
+        weights are applied exactly once.
         """
+        if self._in_ema_context:
+            yield
+            return
         self._in_ema_context = True
         try:
             with self._ema.applied_params(self.stepper.modules):
