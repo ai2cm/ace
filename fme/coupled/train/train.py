@@ -2,6 +2,7 @@ import dataclasses
 import logging
 import os
 from collections.abc import Callable, Sequence
+from typing import Any
 
 import dacite
 import torch
@@ -71,7 +72,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
 
     inference_epochs = config.get_inference_epochs()
 
-    def validation_callback(epoch: int):
+    def validation_callback(epoch: int) -> tuple[dict[str, Any], float]:
         validation_data.set_epoch(epoch)
         aggregator = aggregator_builder.get_validation_aggregator()
         logs = run_validation(
@@ -85,7 +86,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
         )
         return logs, logs["val/mean/loss"]
 
-    def inference_cb(epoch: int):
+    def inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
         if epoch not in inference_epochs:
             return {}, None
         logs = inference_one_epoch(
@@ -100,7 +101,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
         return logs, error
 
     trainer.set_validation_callback(validation_callback)
-    trainer.set_inference_callback(inference_cb)
+    trainer.set_inference_callback(inference_callback)
     return trainer
 
 

@@ -440,7 +440,7 @@ def get_trainer(
 
     inference_epochs = config._inference_epochs
 
-    def validation_callback(epoch):
+    def validation_callback(epoch: int) -> tuple[dict[str, Any], float]:
         validation_data.set_epoch(epoch)
         val_agg = aggregator_builder.get_validation_aggregator()
         logs = run_validation(
@@ -454,7 +454,7 @@ def get_trainer(
         )
         return logs, logs["val/mean/loss"]
 
-    def inference_cb(epoch):
+    def inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
         if epoch not in inference_epochs:
             return {}, None
         logs = inference_one_epoch(
@@ -469,7 +469,7 @@ def get_trainer(
         return logs, error
 
     trainer.set_validation_callback(validation_callback)
-    trainer.set_inference_callback(inference_cb)
+    trainer.set_inference_callback(inference_callback)
 
     return config, trainer
 

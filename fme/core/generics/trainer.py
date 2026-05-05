@@ -91,7 +91,7 @@ def null_end_of_epoch_callback(epoch: int) -> Mapping[str, Any]:
 
 
 class ValidationCallback(Protocol):
-    def __call__(self, epoch: int) -> tuple[Mapping[str, Any], float]:
+    def __call__(self, epoch: int) -> tuple[dict[str, Any], float]:
         """Run validation for the given epoch.
 
         Returns:
@@ -101,7 +101,7 @@ class ValidationCallback(Protocol):
 
 
 class InferenceCallback(Protocol):
-    def __call__(self, epoch: int) -> tuple[Mapping[str, Any], float | None]:
+    def __call__(self, epoch: int) -> tuple[dict[str, Any], float | None]:
         """Run inference for the given epoch.
 
         Returns:
@@ -111,7 +111,7 @@ class InferenceCallback(Protocol):
         ...
 
 
-def _null_inference_callback(epoch: int) -> tuple[Mapping[str, Any], float | None]:
+def _null_inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
     return {}, None
 
 
@@ -231,6 +231,8 @@ class Trainer:
         aggregator_builder: AggregatorBuilderABC[TO],
         end_of_batch_callback: EndOfBatchCallback = lambda: None,
         end_of_epoch_callback: EndOfEpochCallback = null_end_of_epoch_callback,
+        validation_callback: ValidationCallback | None = None,
+        inference_callback: InferenceCallback = _null_inference_callback,
         do_gc_collect: bool = True,
     ):
         logging.info(f"Current device is {fme.get_device()}")
@@ -289,8 +291,8 @@ class Trainer:
         self._do_gc_collect = do_gc_collect
         self._in_ema_context = False
         self._started_training = False
-        self._validation_callback: ValidationCallback | None = None
-        self._inference_callback: InferenceCallback = _null_inference_callback
+        self._validation_callback = validation_callback
+        self._inference_callback = inference_callback
 
         def on_terminate(signum, frame):
             dist = Distributed.get_instance()
@@ -400,7 +402,7 @@ class Trainer:
             inference_logs, _ = inference_callback(self._epochs_trained)
             logging.info(f"Validation loss before training: {valid_loss}")
             logging.info("Logging to wandb")
-            all_logs = {**valid_logs, **inference_logs, "epoch": self._epochs_trained}
+            all_logs = valid_logs | inference_logs | {"epoch": self._epochs_trained}
             wandb = WandB.get_instance()
             wandb.log(all_logs, step=self.num_batches_seen)
 
