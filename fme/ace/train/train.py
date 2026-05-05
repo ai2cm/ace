@@ -87,13 +87,15 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
     train_data = builder.get_train_data()
     logging.info("Initializing validation data loader")
     validation_data = builder.get_validation_data()
-    if config.inference is None:
-        logging.info("Skipping inline inference")
-    else:
-        logging.info("Initializing inline inference data loader")
-    inference_data = builder.get_evaluation_inference_data()
 
     variable_metadata = get_derived_variable_metadata() | train_data.variable_metadata
+
+    if config.inference:
+        logging.info("Initializing inline inference data loaders")
+    else:
+        logging.info("Skipping inline inference")
+    inference_entries = builder.get_inference_data(variable_metadata)
+    inference_epochs = config.get_inference_epochs()
 
     dataset_info = train_data.dataset_info
     logging.info("Starting model initialization")
@@ -126,71 +128,51 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         )
         return logs, logs["val/mean/loss"]
 
-    inference_epochs = config.get_inference_epochs()
-    additional_inference_data = builder.get_additional_inference_data(variable_metadata)
-
-    def _build_inference_aggregator(
-        inf_config,
-        inf_data,
-        inf_dataset_info,
-        output_subdir,
-    ):
-        return inf_config.aggregator.build(
-            dataset_info=inf_dataset_info,
-            n_ic_steps=stepper.n_ic_timesteps,
-            n_forward_steps=inf_config.n_forward_steps,
-            initial_time=inf_data.initial_time,
-            normalize=stepper.normalizer.normalize,
-            output_dir=os.path.join(config.output_dir, output_subdir),
-            channel_mean_names=stepper.loss_names,
-            save_diagnostics=config.save_per_epoch_diagnostics,
-            n_ensemble_per_ic=inf_config.n_ensemble_per_ic,
-        )
+    # precompute per-config epoch sets for evaluate_before_training support
+    start_epoch = 0 if config.evaluate_before_training else 1
+    all_epochs = list(range(start_epoch, config.max_epochs + 1))
+    inference_epoch_sets = [
+        set(all_epochs[entry_config.epochs.slice])
+        for entry_config, _, _, _ in inference_entries
+    ]
 
     def inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
+        if epoch not in inference_epochs:
+            return {}, None
         all_logs: dict[str, Any] = {}
-        inference_error: float | None = None
-
-        if epoch in inference_epochs:
-            inf_dataset_info = inference_data.dataset_info.update_variable_metadata(
-                variable_metadata
-            )
-            aggregator = _build_inference_aggregator(
-                config.inference,
-                inference_data,
-                inf_dataset_info,
-                "inference",
+        weighted_error = 0.0
+        has_error = False
+        for i, (entry_config, data, entry_dataset_info, name) in enumerate(
+            inference_entries
+        ):
+            if epoch not in inference_epoch_sets[i]:
+                continue
+            aggregator = entry_config.aggregator.build(
+                dataset_info=entry_dataset_info,
+                n_ic_steps=stepper.n_ic_timesteps,
+                n_forward_steps=entry_config.n_forward_steps,
+                initial_time=data.initial_time,
+                normalize=stepper.normalizer.normalize,
+                output_dir=os.path.join(config.output_dir, name),
+                channel_mean_names=stepper.loss_names,
+                save_diagnostics=config.save_per_epoch_diagnostics,
+                n_ensemble_per_ic=entry_config.n_ensemble_per_ic,
             )
             logs = inference_one_epoch(
                 stepper=stepper,
                 validation_context=contextlib.nullcontext,
-                dataset=inference_data,
+                dataset=data,
                 aggregator=aggregator,
-                label="inference",
+                label=name,
                 epoch=epoch,
             )
             all_logs.update(logs)
-            inference_error = logs.get("inference/time_mean_norm/rmse/channel_mean")
+            error = logs.get(f"{name}/time_mean_norm/rmse/channel_mean")
+            if error is not None:
+                weighted_error += entry_config.weight * error
+                has_error = True
 
-        for entry, data, entry_dataset_info in additional_inference_data:
-            if entry.config.epochs.contains(epoch):
-                aggregator = _build_inference_aggregator(
-                    entry.config,
-                    data,
-                    entry_dataset_info,
-                    os.path.join("additional_inference", entry.name),
-                )
-                logs = inference_one_epoch(
-                    stepper=stepper,
-                    validation_context=contextlib.nullcontext,
-                    dataset=data,
-                    aggregator=aggregator,
-                    label=entry.name,
-                    epoch=epoch,
-                )
-                all_logs.update(logs)
-
-        return all_logs, inference_error
+        return all_logs, weighted_error if has_error else None
 
     do_gc_collect = fme.get_device() != torch.device("cpu")
     trainer_config: TrainConfigProtocol = config  # documenting trainer input type
