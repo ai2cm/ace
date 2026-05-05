@@ -36,6 +36,7 @@ from .enso import (
     RegionalIndexAggregator,
 )
 from .histogram import HistogramAggregator
+from .ipo import PairedIPOIndexAggregator
 from .reduced import MeanAggregator, SingleTargetMeanAggregator
 from .seasonal import SeasonalAggregator
 from .spectrum import (
@@ -49,6 +50,7 @@ from .zonal_mean import ZonalMeanAggregator
 wandb = WandB.get_instance()
 APPROXIMATELY_TWO_YEARS = datetime.timedelta(days=730)
 SLIGHTLY_LESS_THAN_FIVE_YEARS = datetime.timedelta(days=1800)
+APPROXIMATELY_THIRTY_YEARS = datetime.timedelta(days=10950)
 NINO34_LAT = (-5, 5)
 NINO34_LON = (190, 240)
 
@@ -118,6 +120,7 @@ class InferenceEvaluatorAggregatorConfig:
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
     log_nino34_index: bool = True
+    log_ipo_index: bool = True
     log_step_means: list[StepMeanEntry] = dataclasses.field(
         default_factory=lambda: [StepMeanEntry(step=20)]
     )
@@ -298,6 +301,17 @@ class InferenceEvaluatorAggregatorConfig:
                 timestep,
                 gridded_operations=ops,
                 variable_metadata=dataset_info.variable_metadata,
+            )
+        if (
+            n_timesteps * timestep > APPROXIMATELY_THIRTY_YEARS
+            and isinstance(horizontal_coordinates, LatLonCoordinates)
+            and isinstance(ops, LatLonOperations)
+            and self.log_ipo_index
+        ):
+            aggregators["ipo_index"] = PairedIPOIndexAggregator(
+                lat=horizontal_coordinates.lat,
+                lon=horizontal_coordinates.lon,
+                regional_mean=ops.regional_area_weighted_mean,
             )
 
         return InferenceEvaluatorAggregator(
