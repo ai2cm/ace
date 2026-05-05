@@ -64,7 +64,7 @@ import torch
 
 import fme
 from fme.core.distributed import Distributed
-from fme.core.ema import EMATracker
+from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.aggregator import AggregatorABC, InferenceAggregatorABC
 from fme.core.generics.data import GriddedDataABC, InferenceDataABC
 from fme.core.generics.inference import run_inference
@@ -135,6 +135,9 @@ class TrainConfigProtocol(Protocol):
 
     @property
     def save_best_inference_epoch_checkpoints(self) -> bool: ...
+
+    @property
+    def ema(self) -> EMAConfig: ...
 
     @property
     def lr_tuning(self) -> LRTuningConfig | None: ...
