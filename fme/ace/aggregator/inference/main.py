@@ -2,14 +2,15 @@ import dataclasses
 import datetime
 import logging
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import torch
 import xarray as xr
 
 from fme.ace.data_loading.batch_data import PairedData, PrognosticState
-from fme.core.coordinates import LatLonCoordinates
+from fme.core.coordinates import HorizontalCoordinates, LatLonCoordinates
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import DatasetInfo
 from fme.core.diagnostics import get_reduced_diagnostics, write_reduced_diagnostics
 from fme.core.fill import SmoothFloodFill
@@ -18,7 +19,7 @@ from fme.core.generics.aggregator import (
     InferenceLog,
     InferenceLogs,
 )
-from fme.core.gridded_ops import LatLonOperations
+from fme.core.gridded_ops import GriddedOperations, LatLonOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Table, WandB
 
@@ -51,6 +52,559 @@ APPROXIMATELY_TWO_YEARS = datetime.timedelta(days=730)
 SLIGHTLY_LESS_THAN_FIVE_YEARS = datetime.timedelta(days=1800)
 NINO34_LAT = (-5, 5)
 NINO34_LON = (190, 240)
+
+
+class _MetricNotSupportedError(Exception):
+    """Raised when a metric cannot be built for the current grid type."""
+
+
+class _VariableFilterAdapter:
+    """Wraps a sub-aggregator to filter InferenceBatchData to specified variables."""
+
+    def __init__(self, inner: SubAggregator, variables: Sequence[str]):
+        self._inner = inner
+        self._variables = frozenset(variables)
+
+    def record_batch(self, data: InferenceBatchData) -> None:
+        vs = self._variables
+        filtered = data.replace(
+            prediction={k: v for k, v in data.prediction.items() if k in vs},
+            prediction_norm={k: v for k, v in data.prediction_norm.items() if k in vs},
+            target=(
+                {k: v for k, v in data.target.items() if k in vs}
+                if data.has_target
+                else None
+            ),
+            target_norm=(
+                {k: v for k, v in data.target_norm.items() if k in vs}
+                if data.has_target_norm
+                else None
+            ),
+        )
+        self._inner.record_batch(filtered)
+
+    def get_logs(self, label: str, **kwargs: Any) -> dict[str, Any]:
+        return self._inner.get_logs(label, **kwargs)
+
+    def get_dataset(self) -> xr.Dataset:
+        return self._inner.get_dataset()
+
+
+@dataclasses.dataclass
+class _MetricBuildContext:
+    """Runtime context passed to each metric's ``build()`` method.
+
+    Groups the dataset and run information that individual metrics need
+    to construct their aggregators, so that each ``build()`` signature
+    stays simple while still having access to grid operations, coordinate
+    metadata, reference data, and time-axis sizing.
+    """
+
+    ops: GriddedOperations
+    horizontal_coordinates: HorizontalCoordinates
+    n_timesteps: int
+    n_ic_steps: int
+    timestep: datetime.timedelta
+    variable_metadata: Mapping[str, VariableMetadata] | None
+    channel_mean_names: Sequence[str] | None
+    monthly_reference_data: xr.Dataset | None
+    time_mean_reference_data: xr.Dataset | None
+    initial_time: xr.DataArray
+
+    @property
+    def n_forward_steps(self) -> int:
+        return self.n_timesteps - self.n_ic_steps
+
+
+# ---------------------------------------------------------------------------
+# Per-metric configuration dataclasses
+# ---------------------------------------------------------------------------
+
+
+def _maybe_filter(agg: SubAggregator, variables: list[str] | None) -> SubAggregator:
+    if variables is not None:
+        return _VariableFilterAdapter(agg, variables)
+    return agg
+
+
+@dataclasses.dataclass
+class MeanMetricConfig:
+    type: Literal["mean"] = "mean"
+    variables: list[str] | None = None
+    name: str | None = None
+    target: Literal["denorm", "norm"] = "denorm"
+
+    def __post_init__(self):
+        if self.name is None:
+            self.name = "mean_norm" if self.target == "norm" else "mean"
+
+    def get_name(self) -> str:
+        return self.name  # type: ignore[return-value]
+
+    def build(self, ctx: _MetricBuildContext) -> SubAggregator:
+        agg: SubAggregator = MeanAggregator(
+            ctx.ops,
+            target=self.target,
+            n_timesteps=ctx.n_timesteps,
+            variable_metadata=ctx.variable_metadata,
+        )
+        return _maybe_filter(agg, self.variables)
+
+
+@dataclasses.dataclass
+class StepMeanMetricConfig:
+    step: int
+    type: Literal["step_mean"] = "step_mean"
+    variables: list[str] | None = None
+    name: str | None = None
+    target: Literal["denorm", "norm"] = "denorm"
+    channel_mean_names: list[str] | None = None
+
+    def __post_init__(self):
+        if self.name is None:
+            base = f"mean_step_{self.step}"
+            self.name = f"{base}_norm" if self.target == "norm" else base
+
+    def get_name(self) -> str:
+        return self.name  # type: ignore[return-value]
+
+    def build(self, ctx: _MetricBuildContext) -> SubAggregator:
+        if self.step > ctx.n_forward_steps:
+            raise ValueError(
+                f"step_mean step {self.step} exceeds "
+                f"n_forward_steps={ctx.n_forward_steps}"
+            )
+        target_time = self.step + ctx.n_ic_steps - 1
+        is_norm = self.target == "norm"
+        agg: SubAggregator = _OneStepMeanAdapter(
+            OneStepMeanAggregator(
+                ctx.ops,
+                target_time=target_time,
+                target=self.target,
+                log_loss=False,
+                include_bias=not is_norm,
+                include_grad_mag_percent_diff=not is_norm,
+                channel_mean_names=(
+                    (self.channel_mean_names or ctx.channel_mean_names)
+                    if is_norm
+                    else None
+                ),
+            )
+        )
+        return _maybe_filter(agg, self.variables)
+
+
+@dataclasses.dataclass
+class PowerSpectrumMetricConfig:
+    type: Literal["power_spectrum"] = "power_spectrum"
+    variables: list[str] | None = None
+    name: str = "power_spectrum"
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: _MetricBuildContext) -> SubAggregator:
+        try:
+            agg: SubAggregator = PairedSphericalPowerSpectrumAggregator(
+                gridded_operations=ctx.ops,
+                nan_fill_fn=SmoothFloodFill(num_steps=4),
+                report_plot=True,
+                variable_metadata=ctx.variable_metadata,
+            )
+        except NotImplementedError as e:
+            raise _MetricNotSupportedError(str(e)) from e
+        return _maybe_filter(agg, self.variables)
+
+
+@dataclasses.dataclass
+class ZonalMeanMetricConfig:
+    type: Literal["zonal_mean"] = "zonal_mean"
+    variables: list[str] | None = None
+    name: str = "zonal_mean"
+    zonal_mean_max_size: int | bool = 4096
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: _MetricBuildContext) -> SubAggregator:
+        if ctx.ops.zonal_mean is None:
+            raise _MetricNotSupportedError(
+                "Zonal mean metric requires a grid type that supports zonal means."
+            )
+        agg: SubAggregator = ZonalMeanAggregator(
+            zonal_mean=ctx.ops.zonal_mean,
+            n_timesteps=ctx.n_timesteps,
+            variable_metadata=ctx.variable_metadata,
+            zonal_mean_max_size=self.zonal_mean_max_size,
+        )
+        return _maybe_filter(agg, self.variables)
+
+
+@dataclasses.dataclass
+class VideoMetricConfig:
+    type: Literal["video"] = "video"
+    variables: list[str] | None = None
+    name: str = "video"
+    enable_extended_videos: bool = False
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: _MetricBuildContext) -> SubAggregator:
+        if not isinstance(ctx.horizontal_coordinates, LatLonCoordinates):
+            raise _MetricNotSupportedError("Video metric requires LatLonCoordinates.")
+        agg: SubAggregator = VideoAggregator(
+            n_timesteps=ctx.n_timesteps,
+            enable_extended_videos=self.enable_extended_videos,
+            variable_metadata=ctx.variable_metadata,
+        )
+        return _maybe_filter(agg, self.variables)
+
+
+@dataclasses.dataclass
+class TimeMeanMetricConfig:
+    type: Literal["time_mean"] = "time_mean"
+    variables: list[str] | None = None
+    name: str | None = None
+    target: Literal["denorm", "norm"] = "denorm"
+    reference_data: str | None = None
+    channel_mean_names: list[str] | None = None
+
+    def __post_init__(self):
+        if self.name is None:
+            self.name = "time_mean_norm" if self.target == "norm" else "time_mean"
+
+    def get_name(self) -> str:
+        return self.name  # type: ignore[return-value]
+
+    def build(self, ctx: _MetricBuildContext) -> SubAggregator:
+        is_norm = self.target == "norm"
+        if self.reference_data is not None:
+            ref = xr.open_dataset(self.reference_data, decode_timedelta=False)
+        elif not is_norm:
+            ref = ctx.time_mean_reference_data
+        else:
+            ref = None
+        agg: SubAggregator = TimeMeanEvaluatorAggregator(
+            ctx.ops,
+            horizontal_dims=ctx.horizontal_coordinates.dims,
+            target=self.target,
+            variable_metadata=ctx.variable_metadata,
+            reference_means=ref,
+            channel_mean_names=(
+                (self.channel_mean_names or ctx.channel_mean_names) if is_norm else None
+            ),
+        )
+        return _maybe_filter(agg, self.variables)
+
+
+@dataclasses.dataclass
+class HistogramMetricConfig:
+    type: Literal["histogram"] = "histogram"
+    variables: list[str] | None = None
+    name: str = "histogram"
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: _MetricBuildContext) -> SubAggregator:
+        agg: SubAggregator = HistogramAggregator()
+        return _maybe_filter(agg, self.variables)
+
+
+@dataclasses.dataclass
+class SeasonalMetricConfig:
+    type: Literal["seasonal"] = "seasonal"
+    variables: list[str] | None = None
+    name: str = "seasonal"
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: _MetricBuildContext) -> SubAggregator:
+        agg: SubAggregator = SeasonalAggregator(
+            ops=ctx.ops,
+            variable_metadata=ctx.variable_metadata,
+        )
+        return _maybe_filter(agg, self.variables)
+
+
+@dataclasses.dataclass
+class AnnualMetricConfig:
+    type: Literal["annual"] = "annual"
+    variables: list[str] | None = None
+    name: str = "annual"
+    reference_data: str | None = None
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: _MetricBuildContext) -> SubAggregator:
+        if self.reference_data is not None:
+            ref = xr.open_dataset(self.reference_data, decode_timedelta=False)
+        else:
+            ref = ctx.monthly_reference_data
+        agg: SubAggregator = PairedGlobalMeanAnnualAggregator(
+            ops=ctx.ops,
+            timestep=ctx.timestep,
+            variable_metadata=ctx.variable_metadata,
+            monthly_reference_data=ref,
+        )
+        return _maybe_filter(agg, self.variables)
+
+
+@dataclasses.dataclass
+class EnsoIndexMetricConfig:
+    type: Literal["enso_index"] = "enso_index"
+    name: str = "enso_index"
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: _MetricBuildContext) -> PairedRegionalIndexAggregator:
+        if not isinstance(ctx.horizontal_coordinates, LatLonCoordinates):
+            raise _MetricNotSupportedError(
+                "enso_index metric requires LatLonCoordinates."
+            )
+        if not isinstance(ctx.ops, LatLonOperations):
+            raise _MetricNotSupportedError(
+                "enso_index metric requires LatLonOperations."
+            )
+        nino34_region = LatLonRegion(
+            lat_bounds=NINO34_LAT,
+            lon_bounds=NINO34_LON,
+            lat=ctx.horizontal_coordinates.lat,
+            lon=ctx.horizontal_coordinates.lon,
+        )
+        return PairedRegionalIndexAggregator(
+            target_aggregator=RegionalIndexAggregator(
+                regional_weights=nino34_region.regional_weights,
+                regional_mean=ctx.ops.regional_area_weighted_mean,
+            ),
+            prediction_aggregator=RegionalIndexAggregator(
+                regional_weights=nino34_region.regional_weights,
+                regional_mean=ctx.ops.regional_area_weighted_mean,
+            ),
+        )
+
+
+@dataclasses.dataclass
+class EnsoCoefficientMetricConfig:
+    type: Literal["enso_coefficient"] = "enso_coefficient"
+    name: str = "enso_coefficient"
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: _MetricBuildContext) -> EnsoCoefficientEvaluatorAggregator:
+        return EnsoCoefficientEvaluatorAggregator(
+            ctx.initial_time,
+            ctx.n_timesteps - 1,
+            ctx.timestep,
+            gridded_operations=ctx.ops,
+            variable_metadata=ctx.variable_metadata,
+        )
+
+
+@dataclasses.dataclass
+class EnsembleMetricConfig:
+    step: int = 20
+    type: Literal["ensemble"] = "ensemble"
+    name: str | None = None
+    log_mean_maps: bool = False
+
+    def __post_init__(self):
+        if self.name is None:
+            self.name = f"ensemble_step_{self.step}"
+
+    def get_name(self) -> str:
+        return self.name  # type: ignore[return-value]
+
+    def build(self, ctx: _MetricBuildContext) -> SelectStepEnsembleAggregator:
+        return get_one_step_ensemble_aggregator(
+            gridded_operations=ctx.ops,
+            target_time=self.step,
+            log_mean_maps=self.log_mean_maps,
+            metadata=ctx.variable_metadata,
+        )
+
+
+MetricConfig = (
+    MeanMetricConfig
+    | StepMeanMetricConfig
+    | PowerSpectrumMetricConfig
+    | ZonalMeanMetricConfig
+    | VideoMetricConfig
+    | TimeMeanMetricConfig
+    | HistogramMetricConfig
+    | SeasonalMetricConfig
+    | AnnualMetricConfig
+    | EnsoIndexMetricConfig
+    | EnsoCoefficientMetricConfig
+    | EnsembleMetricConfig
+)
+
+
+@dataclasses.dataclass
+class TypedMetricInferenceEvaluatorAggregatorConfig:
+    """
+    Configuration for inference evaluator aggregator using typed metric configs.
+
+    Metrics can be configured explicitly via the ``metrics`` list, where each
+    entry is a typed metric configuration (e.g. ``MeanMetricConfig``,
+    ``StepMeanMetricConfig``).  When ``metrics`` is ``None``, a default set
+    of metrics is computed at build time based on the grid type and run length.
+
+    Parameters:
+        metrics: Explicit list of metric configurations.  When ``None``, a
+            default set is used.
+        monthly_reference_data: Path to monthly reference data to compare against.
+        time_mean_reference_data: Path to reference time means to compare against.
+    """
+
+    metrics: list[MetricConfig] | None = None
+    monthly_reference_data: str | None = None
+    time_mean_reference_data: str | None = None
+
+    def __post_init__(self):
+        if self.metrics is not None:
+            names = [m.get_name() for m in self.metrics]
+            seen: set[str] = set()
+            duplicates: set[str] = set()
+            for n in names:
+                if n in seen:
+                    duplicates.add(n)
+                seen.add(n)
+            if duplicates:
+                raise ValueError(
+                    f"Duplicate metric names: {sorted(duplicates)}. "
+                    "Use the 'name' field to disambiguate."
+                )
+
+    @staticmethod
+    def _default_metrics(
+        ctx: _MetricBuildContext,
+        n_ensemble_per_ic: int,
+    ) -> list[MetricConfig]:
+        """Compute default metrics based on runtime information."""
+        metrics: list[MetricConfig] = [
+            MeanMetricConfig(target="denorm"),
+            MeanMetricConfig(target="norm"),
+        ]
+
+        if ctx.n_forward_steps >= 20:
+            metrics.append(StepMeanMetricConfig(step=20, target="denorm"))
+            metrics.append(StepMeanMetricConfig(step=20, target="norm"))
+
+        metrics.extend(
+            [
+                PowerSpectrumMetricConfig(),
+                ZonalMeanMetricConfig(),
+                TimeMeanMetricConfig(target="denorm"),
+                TimeMeanMetricConfig(target="norm"),
+            ]
+        )
+
+        if n_ensemble_per_ic > 1:
+            metrics.append(EnsembleMetricConfig(step=20))
+
+        if ctx.n_timesteps * ctx.timestep > APPROXIMATELY_TWO_YEARS:
+            metrics.append(AnnualMetricConfig())
+            if isinstance(ctx.horizontal_coordinates, LatLonCoordinates) and isinstance(
+                ctx.ops, LatLonOperations
+            ):
+                metrics.append(EnsoIndexMetricConfig())
+
+        if ctx.n_timesteps * ctx.timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS:
+            metrics.append(EnsoCoefficientMetricConfig())
+
+        return metrics
+
+    def build(
+        self,
+        dataset_info: DatasetInfo,
+        n_ic_steps: int,
+        n_forward_steps: int,
+        initial_time: xr.DataArray,
+        normalize: Callable[[TensorMapping], TensorDict],
+        output_dir: str | None = None,
+        channel_mean_names: Sequence[str] | None = None,
+        save_diagnostics: bool = True,
+        n_ensemble_per_ic: int = 1,
+        enable_time_series: bool = True,
+    ) -> "InferenceEvaluatorAggregator":
+        if save_diagnostics and output_dir is None:
+            raise ValueError("Output directory must be set to save diagnostics.")
+        if self.monthly_reference_data is None:
+            monthly_reference_data = None
+        else:
+            monthly_reference_data = xr.open_dataset(
+                self.monthly_reference_data, decode_timedelta=False
+            )
+        if self.time_mean_reference_data is None:
+            time_mean_reference_data = None
+        else:
+            time_mean_reference_data = xr.open_dataset(
+                self.time_mean_reference_data, decode_timedelta=False
+            )
+
+        n_timesteps = n_ic_steps + n_forward_steps
+        ctx = _MetricBuildContext(
+            ops=dataset_info.gridded_operations,
+            horizontal_coordinates=dataset_info.horizontal_coordinates,
+            n_timesteps=n_timesteps,
+            n_ic_steps=n_ic_steps,
+            timestep=dataset_info.timestep,
+            variable_metadata=dataset_info.variable_metadata,
+            channel_mean_names=channel_mean_names,
+            monthly_reference_data=monthly_reference_data,
+            time_mean_reference_data=time_mean_reference_data,
+            initial_time=initial_time,
+        )
+
+        if self.metrics is not None:
+            metrics = list(self.metrics)
+        else:
+            metrics = self._default_metrics(ctx, n_ensemble_per_ic)
+
+        if not enable_time_series:
+            metrics = [m for m in metrics if not isinstance(m, MeanMetricConfig)]
+
+        is_explicit = self.metrics is not None
+        aggregators: dict[str, SubAggregator] = {}
+        time_series_aggregators: dict[str, TimeSeriesLogs] = {}
+        ensemble_aggregators: dict[str, SelectStepEnsembleAggregator] = {}
+
+        for metric in metrics:
+            name = metric.get_name()
+            try:
+                if isinstance(metric, EnsembleMetricConfig):
+                    ensemble_aggregators[name] = metric.build(ctx)
+                    continue
+                agg: SubAggregator = metric.build(ctx)
+            except _MetricNotSupportedError:
+                if is_explicit:
+                    raise
+                logging.warning(
+                    f"{name} metric not supported for this grid type, " "omitting."
+                )
+                continue
+
+            aggregators[name] = agg
+            if isinstance(metric, MeanMetricConfig):
+                time_series_aggregators[name] = agg  # type: ignore[assignment]
+
+        return InferenceEvaluatorAggregator(
+            aggregators=aggregators,
+            time_series_aggregators=time_series_aggregators,
+            coords=dataset_info.horizontal_coordinates.coords,
+            n_ic_steps=n_ic_steps,
+            normalize=normalize,
+            save_diagnostics=save_diagnostics,
+            output_dir=output_dir,
+            n_ensemble_per_ic=n_ensemble_per_ic,
+            ensemble_aggregators=ensemble_aggregators,
+        )
 
 
 @dataclasses.dataclass
