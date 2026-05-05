@@ -10,7 +10,7 @@ import pytest
 import torch
 
 from fme.core.device import get_device
-from fme.core.ema import EMATracker
+from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.aggregator import (
     AggregatorABC,
     InferenceAggregatorABC,
@@ -236,6 +236,7 @@ class Config:
     segment_epochs: int | None = None
     evaluate_before_training: bool = False
     save_best_inference_epoch_checkpoints: bool = False
+    ema: EMAConfig = dataclasses.field(default_factory=EMAConfig)
     lr_tuning: LRTuningConfig | None = None
 
     def __post_init__(self):
@@ -343,6 +344,7 @@ def get_trainer(
     save_checkpoint: bool = True,
     lr_tuning: LRTuningConfig | None = None,
     resume_optimizer_ckpt_path: str | None = None,
+    resume_ema_ckpt_path: str | None = None,
     lr: float = 0.01,
 ) -> tuple[TrainConfigProtocol, Trainer]:
     if checkpoint_dir is None:
@@ -414,8 +416,10 @@ def get_trainer(
         opt.step_weights = unittest.mock.MagicMock(side_effect=step_weights_side_effect)  # type: ignore
         return opt
 
+    ema_config = EMAConfig(decay=ema_decay, resume_ema_ckpt_path=resume_ema_ckpt_path)
+
     def build_ema(modules: torch.nn.ModuleList) -> EMATracker:
-        return EMATracker(modules, decay=ema_decay)
+        return ema_config.build(modules)
 
     config = Config(
         experiment_dir=tmp_path,
@@ -428,6 +432,7 @@ def get_trainer(
         evaluate_before_training=evaluate_before_training,
         save_best_inference_epoch_checkpoints=save_best_inference_epoch_checkpoints,
         save_checkpoint=save_checkpoint,
+        ema=ema_config,
         lr_tuning=lr_tuning,
     )
     aggregator_builder = AggregatorBuilder(
@@ -1523,3 +1528,53 @@ def test_finetune_optimization_checkpoint_loads_optimizer_state(tmp_path: str):
         stage2_trainer.optimization.scheduler.state_dict()
         == fresh_scheduler.state_dict()
     )
+
+
+def test_finetune_ema_checkpoint_loads_ema_state(tmp_path: str):
+    """Trainer loads EMA state from a finetune checkpoint while keeping
+    training counters fresh and preserving the configured decay."""
+    n_train_batches = 4
+    stage1_decay = 0.99
+    stage2_decay = 0.9999
+
+    stage1_dir = os.path.join(tmp_path, "stage1")
+    _, stage1_trainer = get_trainer(
+        stage1_dir,
+        max_epochs=1,
+        n_train_batches=n_train_batches,
+        stepper_module_values=np.array([1.0]),
+        ema_decay=stage1_decay,
+    )
+    stage1_trainer.train()
+
+    stage1_ema_state = stage1_trainer._ema.get_state()
+    assert int(stage1_ema_state["num_updates"]) == n_train_batches
+
+    stage1_trainer._save_restart_checkpoints()
+    stage1_ckpt_path = stage1_trainer.paths.latest_checkpoint_path
+
+    stage2_dir = os.path.join(tmp_path, "stage2")
+    _, stage2_trainer = get_trainer(
+        stage2_dir,
+        max_epochs=1,
+        n_train_batches=n_train_batches,
+        stepper_module_values=np.array([2.0]),
+        ema_decay=stage2_decay,
+        resume_ema_ckpt_path=stage1_ckpt_path,
+    )
+
+    assert stage2_trainer._epochs_trained == 0
+    assert stage2_trainer._start_epoch == 0
+    assert stage2_trainer.num_batches_seen == 0
+
+    # EMA state loaded from stage1 checkpoint
+    stage2_ema_state = stage2_trainer._ema.get_state()
+    assert int(stage2_ema_state["num_updates"]) == n_train_batches
+    for key in stage1_ema_state["ema_params"]:
+        torch.testing.assert_close(
+            stage2_ema_state["ema_params"][key],
+            stage1_ema_state["ema_params"][key],
+        )
+
+    # decay is from stage2 config, not the checkpoint
+    assert float(stage2_ema_state["decay"]) == pytest.approx(stage2_decay)
