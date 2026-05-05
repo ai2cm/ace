@@ -23,11 +23,11 @@ cd $REPO_ROOT
 #MODEL_CHECKPOINT_DATASETS=("01KQDQTJ6SN7WHCYFKAER9G93F")
 
 # ACE2S ckpt from paper
-MODEL_CHECKPOINT_DATASETS=("01KQG2R8RCWH1ZJS0FK3P9Z8C4")
+MODEL_CHECKPOINT_DATASETS=("01KQT3BPKRD6QVQBS91QE8MC7Q")
 
 for seed in {0..0}; do
     #job_name="evaluate-4k-ace2som-xshield-continue-tune-1yr-even-split-single-decoder-seed${seed}"
-    job_name="evaluate-4k-ckpt-tune-1yr-5-1-split-seed${seed}"
+    job_name="evaluate-4k-ckpt-continue-tune-1yr-1-2-split-seed${seed}"
     gantry run \
         --name $job_name \
         --description 'Run ACE training' \
