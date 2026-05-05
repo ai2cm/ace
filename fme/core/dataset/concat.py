@@ -74,8 +74,11 @@ class XarrayConcat(DatasetABC):
     def enable_shared_memory(self):
         shared_epoch = torch.tensor(-1).share_memory_()
         for dataset in self._wrapped_datasets:
-            if hasattr(dataset, "set_global_epoch_tensor"):
-                dataset.set_global_epoch_tensor(shared_epoch)
+            dataset.set_global_epoch_tensor(shared_epoch)
+
+    def set_global_epoch_tensor(self, tensor):
+        for dataset in self._wrapped_datasets:
+            dataset.set_global_epoch_tensor(tensor)
 
     def set_epoch(self, epoch: int):
         for dataset in self._wrapped_datasets:
