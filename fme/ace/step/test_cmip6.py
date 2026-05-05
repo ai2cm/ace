@@ -1,13 +1,19 @@
 import dataclasses
 import datetime
+import pathlib
+import tempfile
 
+import pytest
 import torch
 
 import fme
 from fme.ace.step.cmip6 import Cmip6Step, Cmip6StepConfig
+from fme.ace.testing.fv3gfs_data import get_scalar_dataset
 from fme.core.coordinates import LatLonCoordinates, NullVerticalCoordinate
 from fme.core.dataset_info import DatasetInfo
+from fme.core.labels import BatchLabels
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
+from fme.core.per_source_normalizer import PerSourceNormalizationConfig
 from fme.core.registry import ModuleSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.step import StepSelector
@@ -29,7 +35,7 @@ def _get_normalization(
     )
 
 
-def _get_dataset_info() -> DatasetInfo:
+def _get_dataset_info(all_labels: set[str] | None = None) -> DatasetInfo:
     device = fme.get_device()
     return DatasetInfo(
         horizontal_coordinates=LatLonCoordinates(
@@ -38,6 +44,7 @@ def _get_dataset_info() -> DatasetInfo:
         ),
         vertical_coordinate=NullVerticalCoordinate(),
         timestep=TIMESTEP,
+        all_labels=all_labels,
     )
 
 
@@ -49,15 +56,11 @@ def _tensor_dict(names: list[str]) -> TensorDict:
 def _get_cmip6_config(
     in_names: list[str],
     out_names: list[str],
-    mask_variable_prefix: str = "below_surface_mask",
     residual_prediction: bool = False,
+    per_source_normalization: PerSourceNormalizationConfig | None = None,
 ) -> Cmip6StepConfig:
-    non_mask = [
-        n
-        for n in set(in_names) | set(out_names)
-        if not n.startswith(mask_variable_prefix)
-    ]
-    normalization = _get_normalization(non_mask)
+    all_names = list(set(in_names) | set(out_names))
+    normalization = _get_normalization(all_names)
     return Cmip6StepConfig(
         builder=ModuleSelector(
             type="SphericalFourierNeuralOperatorNet",
@@ -66,57 +69,47 @@ def _get_cmip6_config(
         in_names=in_names,
         out_names=out_names,
         normalization=normalization,
-        mask_variable_prefix=mask_variable_prefix,
+        per_source_normalization=per_source_normalization,
         residual_prediction=residual_prediction,
     )
 
 
-def _build_step(config: Cmip6StepConfig) -> Cmip6Step:
-    return config.get_step(_get_dataset_info(), init_weights=lambda _: None)
-
-
-# ---------------------------------------------------------------------------
-# Config-level tests
-# ---------------------------------------------------------------------------
-
-
-def test_mask_names_discovered():
-    config = _get_cmip6_config(
-        in_names=["ta1000", "below_surface_mask1000"],
-        out_names=["ta1000", "below_surface_mask1000"],
+def _get_cmip6_config_conditional(
+    in_names: list[str],
+    out_names: list[str],
+    all_labels: set[str],
+    residual_prediction: bool = False,
+    per_source_normalization: PerSourceNormalizationConfig | None = None,
+) -> Cmip6StepConfig:
+    all_names = list(set(in_names) | set(out_names))
+    normalization = _get_normalization(all_names)
+    return Cmip6StepConfig(
+        builder=ModuleSelector(
+            type="NoiseConditionedSFNO",
+            config={"embed_dim": 4, "num_layers": 2},
+            conditional=True,
+        ),
+        in_names=in_names,
+        out_names=out_names,
+        normalization=normalization,
+        per_source_normalization=per_source_normalization,
+        residual_prediction=residual_prediction,
     )
-    assert config.mask_in_names == ["below_surface_mask1000"]
-    assert config.mask_out_names == ["below_surface_mask1000"]
 
 
-def test_mask_names_excluded_from_normalize_names():
-    config = _get_cmip6_config(
-        in_names=["ta1000", "below_surface_mask1000"],
-        out_names=["ta1000", "below_surface_mask1000"],
+def _build_step(
+    config: Cmip6StepConfig, all_labels: set[str] | None = None
+) -> Cmip6Step:
+    return config.get_step(
+        _get_dataset_info(all_labels=all_labels), init_weights=lambda _: None
     )
-    assert "below_surface_mask1000" not in config._normalize_names
-    assert "ta1000" in config._normalize_names
-
-
-def test_no_mask_variables():
-    config = _get_cmip6_config(
-        in_names=["ta1000", "ua1000"],
-        out_names=["ta1000", "ua1000"],
-    )
-    assert config.mask_in_names == []
-    assert config.mask_out_names == []
-
-
-# ---------------------------------------------------------------------------
-# Step-level tests
-# ---------------------------------------------------------------------------
 
 
 def test_step_forward():
     """Basic forward pass produces all expected outputs."""
     config = _get_cmip6_config(
-        in_names=["ta1000", "forcing", "below_surface_mask1000"],
-        out_names=["ta1000", "below_surface_mask1000"],
+        in_names=["ta1000", "forcing"],
+        out_names=["ta1000"],
     )
     step = _build_step(config)
     input_data = _tensor_dict(step.input_names)
@@ -125,53 +118,31 @@ def test_step_forward():
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
     )
     assert "ta1000" in output
-    assert "below_surface_mask1000" in output
     assert output["ta1000"].shape == (N_SAMPLES, *IMG_SHAPE)
 
 
-def test_mask_outputs_are_probabilities():
-    """Mask outputs should be in [0, 1] (sigmoid applied)."""
+def test_residual_prediction():
+    """Residual prediction runs without error."""
     config = _get_cmip6_config(
-        in_names=["ta1000", "below_surface_mask1000"],
-        out_names=["ta1000", "below_surface_mask1000"],
-    )
-    step = _build_step(config)
-    input_data = _tensor_dict(step.input_names)
-    next_step = _tensor_dict(step.next_step_input_names)
-    output = step.step(
-        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
-    )
-    mask = output["below_surface_mask1000"]
-    assert mask.min() >= 0.0
-    assert mask.max() <= 1.0
-
-
-def test_residual_prediction_excludes_masks():
-    """Residual prediction should apply to non-mask prognostics only."""
-    config = _get_cmip6_config(
-        in_names=["ta1000", "below_surface_mask1000"],
-        out_names=["ta1000", "below_surface_mask1000"],
+        in_names=["ta1000", "ua1000"],
+        out_names=["ta1000", "ua1000"],
         residual_prediction=True,
     )
     step = _build_step(config)
-    assert "ta1000" in step._non_mask_prognostic_names
-    assert "below_surface_mask1000" not in step._non_mask_prognostic_names
     input_data = _tensor_dict(step.input_names)
     next_step = _tensor_dict(step.next_step_input_names)
     output = step.step(
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
     )
     assert "ta1000" in output
-    mask = output["below_surface_mask1000"]
-    assert mask.min() >= 0.0
-    assert mask.max() <= 1.0
+    assert "ua1000" in output
 
 
 def test_selector_round_trip():
     """Config can be serialized via StepSelector and reconstructed."""
     config = _get_cmip6_config(
-        in_names=["ta1000", "below_surface_mask1000"],
-        out_names=["ta1000", "below_surface_mask1000"],
+        in_names=["ta1000", "ua1000"],
+        out_names=["ta1000", "ua1000"],
     )
     selector = StepSelector(type="cmip6", config=dataclasses.asdict(config))
     step = selector.get_step(_get_dataset_info(), init_weights=lambda _: None)
@@ -181,8 +152,8 @@ def test_selector_round_trip():
 def test_state_round_trip():
     """Step state can be saved and loaded."""
     config = _get_cmip6_config(
-        in_names=["ta1000", "below_surface_mask1000"],
-        out_names=["ta1000", "below_surface_mask1000"],
+        in_names=["ta1000", "ua1000"],
+        out_names=["ta1000", "ua1000"],
     )
     step = _build_step(config)
     state = step.get_state()
@@ -199,47 +170,84 @@ def test_state_round_trip():
         torch.testing.assert_close(out1[name], out2[name])
 
 
-def test_nan_inputs_in_masked_regions_produce_valid_outputs():
-    """NaN values in below-surface input cells should not poison outputs."""
+def test_deprecated_mask_variable_prefix_ignored():
+    """Old configs with mask_variable_prefix can still load."""
     config = _get_cmip6_config(
-        in_names=["ta1000", "ta850", "below_surface_mask1000", "below_surface_mask850"],
-        out_names=[
-            "ta1000",
-            "ta850",
-            "below_surface_mask1000",
-            "below_surface_mask850",
-        ],
+        in_names=["ta1000"],
+        out_names=["ta1000"],
     )
-    step = _build_step(config)
+    state = dataclasses.asdict(config)
+    state["mask_variable_prefix"] = "below_surface_mask"
+    restored = Cmip6StepConfig.from_state(state)
+    assert restored.in_names == ["ta1000"]
+
+
+def test_per_source_normalization_requires_conditional_builder():
+    """per_source_normalization without a conditional builder raises."""
+    per_source = PerSourceNormalizationConfig(
+        sources={
+            "model_a": NormalizationConfig(
+                means={"ta1000": 10.0}, stds={"ta1000": 2.0}
+            ),
+        }
+    )
+    with pytest.raises(ValueError, match="conditional builder"):
+        _get_cmip6_config(
+            in_names=["ta1000"],
+            out_names=["ta1000"],
+            per_source_normalization=per_source,
+        )
+
+
+def test_per_source_normalization_config_in_step():
+    """Step with per-source normalization applies label-specific constants."""
+    device = fme.get_device()
+    per_source = PerSourceNormalizationConfig(
+        sources={
+            "model_a": NormalizationConfig(
+                means={"ta1000": 10.0}, stds={"ta1000": 2.0}
+            ),
+        }
+    )
+    config = _get_cmip6_config_conditional(
+        in_names=["ta1000"],
+        out_names=["ta1000"],
+        per_source_normalization=per_source,
+        all_labels={"model_a"},
+    )
+    step = _build_step(config, all_labels={"model_a"})
     input_data = _tensor_dict(step.input_names)
     next_step = _tensor_dict(step.next_step_input_names)
-
-    # Mark some cells as below-surface (mask=1) and put NaN in data there.
-    mask_1000 = torch.zeros(N_SAMPLES, *IMG_SHAPE, device=fme.get_device())
-    mask_1000[:, :2, :] = 1.0  # first two latitude rows are below surface
-    input_data["below_surface_mask1000"] = mask_1000
-    input_data["ta1000"] = input_data["ta1000"].clone()
-    input_data["ta1000"][:, :2, :] = float("nan")
-
-    mask_850 = torch.zeros(N_SAMPLES, *IMG_SHAPE, device=fme.get_device())
-    input_data["below_surface_mask850"] = mask_850  # nothing masked at 850
-
+    label_tensor = torch.ones(N_SAMPLES, 1, device=device)
+    labels = BatchLabels(tensor=label_tensor, names=["model_a"])
     output = step.step(
-        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
+        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=labels)
     )
-
-    # No output should contain NaN — input NaN must not leak through the
-    # network.  (Output masking is left to the loss / downstream consumer.)
-    for name in output:
-        assert not torch.isnan(output[name]).any(), name
+    assert "ta1000" in output
+    assert output["ta1000"].shape == (N_SAMPLES, *IMG_SHAPE)
 
 
-def test_loss_normalizer_excludes_masks():
-    """get_loss_normalizer should not include mask variables."""
-    config = _get_cmip6_config(
-        in_names=["ta1000", "below_surface_mask1000"],
-        out_names=["ta1000", "below_surface_mask1000"],
+def test_per_source_normalization_from_directory():
+    """PerSourceNormalizationConfig loads from directory and wires into step."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = pathlib.Path(tmp_dir)
+        norm_dir = tmp_path / "per_source_normalization"
+        label_dir = norm_dir / "model_a"
+        label_dir.mkdir(parents=True)
+        get_scalar_dataset(["ta1000"], fill_value=5.0).to_netcdf(
+            label_dir / "centering.nc"
+        )
+        get_scalar_dataset(["ta1000"], fill_value=3.0).to_netcdf(
+            label_dir / "scaling.nc"
+        )
+        per_source = PerSourceNormalizationConfig(data_dir=str(tmp_path))
+        per_source.load()
+
+    config = _get_cmip6_config_conditional(
+        in_names=["ta1000"],
+        out_names=["ta1000"],
+        per_source_normalization=per_source,
+        all_labels={"model_a"},
     )
-    normalizer = config.get_loss_normalizer()
-    assert "below_surface_mask1000" not in normalizer._names
-    assert "ta1000" in normalizer._names
+    step = _build_step(config, all_labels={"model_a"})
+    assert "model_a" in step._per_source_normalizer._normalizers

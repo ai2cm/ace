@@ -17,6 +17,10 @@ from fme.core.normalizer import NetworkAndLossNormalizationConfig, StandardNorma
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
+from fme.core.per_source_normalizer import (
+    PerSourceNormalizationConfig,
+    PerSourceNormalizer,
+)
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.secondary_decoder import (
@@ -28,44 +32,19 @@ from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
-def _build_mask_map(
-    mask_names: list[str],
-    data_names: list[str],
-    all_mask_names: set[str],
-    prefix: str,
-) -> dict[str, list[str]]:
-    """Map each mask variable to the data variables it covers.
-
-    The link is the suffix after ``prefix``: ``below_surface_mask1000``
-    covers every non-mask variable whose name ends with ``1000``.
-    """
-    result: dict[str, list[str]] = {}
-    for mask_name in mask_names:
-        suffix = mask_name[len(prefix) :]
-        result[mask_name] = [
-            n for n in data_names if n.endswith(suffix) and n not in all_mask_names
-        ]
-    return result
-
-
 @StepSelector.register("cmip6")
 @dataclasses.dataclass
 class Cmip6StepConfig(StepConfigABC):
     """
     Configuration for a CMIP6 pressure-level stepper.
 
-    Extends the single-module step pattern with handling for time-varying
-    below-surface masks.  Mask variables (identified by ``mask_variable_prefix``)
-    bypass normalization, have sigmoid applied to their network outputs, and
-    are excluded from residual prediction.
-
     Parameters:
         builder: The module builder.
         in_names: Names of input variables.
         out_names: Names of output variables.
         normalization: The normalization configuration.
-        mask_variable_prefix: Prefix that identifies below-surface mask variables
-            in in_names/out_names (e.g. "below_surface_mask").
+        per_source_normalization: Optional per-source normalization that
+            applies source-specific centering/scaling based on batch labels.
         secondary_decoder: Configuration for the secondary decoder that computes
             additional diagnostic variables from outputs.
         ocean: The ocean configuration.
@@ -80,7 +59,7 @@ class Cmip6StepConfig(StepConfigABC):
     in_names: list[str]
     out_names: list[str]
     normalization: NetworkAndLossNormalizationConfig
-    mask_variable_prefix: str = "below_surface_mask"
+    per_source_normalization: PerSourceNormalizationConfig | None = None
     secondary_decoder: SecondaryDecoderConfig | None = None
     ocean: OceanConfig | None = None
     corrector: AtmosphereCorrectorConfig | CorrectorSelector = dataclasses.field(
@@ -92,12 +71,6 @@ class Cmip6StepConfig(StepConfigABC):
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
-        self.mask_in_names = [
-            n for n in self.in_names if n.startswith(self.mask_variable_prefix)
-        ]
-        self.mask_out_names = [
-            n for n in self.out_names if n.startswith(self.mask_variable_prefix)
-        ]
         for name in self.prescribed_prognostic_names:
             if name not in self.out_names:
                 raise ValueError(
@@ -123,6 +96,11 @@ class Cmip6StepConfig(StepConfigABC):
                     raise ValueError(
                         f"secondary_diagnostic_name is an output variable: '{name}'"
                     )
+        if self.per_source_normalization is not None and not self.builder.conditional:
+            raise ValueError(
+                "per_source_normalization requires a conditional builder "
+                "(labels are needed to select per-source constants)"
+            )
 
     @property
     def n_ic_timesteps(self) -> int:
@@ -154,12 +132,8 @@ class Cmip6StepConfig(StepConfigABC):
 
     @property
     def _normalize_names(self):
-        """Names of variables which require normalization.
-
-        Mask variables are excluded — they bypass the normalizer.
-        """
-        all_mask = set(self.mask_in_names) | set(self.mask_out_names)
-        return list(set(self.in_names).union(self.output_names) - all_mask)
+        """Names of variables which require normalization. I.e. inputs/outputs."""
+        return list(set(self.in_names).union(self.output_names))
 
     @property
     def input_names(self) -> list[str]:
@@ -229,8 +203,9 @@ class Cmip6StepConfig(StepConfigABC):
     @classmethod
     def _remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
         state_copy = state.copy()
-        if "crps_training" in state_copy:
-            del state_copy["crps_training"]
+        for key in ("crps_training", "mask_variable_prefix"):
+            if key in state_copy:
+                del state_copy[key]
         return state_copy
 
     def get_step(
@@ -241,25 +216,30 @@ class Cmip6StepConfig(StepConfigABC):
         logging.info("Initializing stepper from provided config")
         corrector = self.corrector.get_corrector(dataset_info)
         normalizer = self.normalization.get_network_normalizer(self._normalize_names)
+        if self.per_source_normalization is not None:
+            per_source = self.per_source_normalization.build(
+                self._normalize_names, default=normalizer
+            )
+        else:
+            per_source = PerSourceNormalizer(normalizers={}, default=normalizer)
         return Cmip6Step(
             config=self,
             dataset_info=dataset_info,
             corrector=corrector,
-            normalizer=normalizer,
+            per_source_normalizer=per_source,
             init_weights=init_weights,
         )
 
     def load(self):
         self.normalization.load()
+        if self.per_source_normalization is not None:
+            self.per_source_normalization.load()
 
 
 class Cmip6Step(StepABC):
     """
-    Step class for CMIP6 pressure-level data with time-varying below-surface
-    masks.
-
-    Mask variables bypass the normalizer, have sigmoid applied to their
-    network outputs, and are excluded from residual prediction.
+    Step class for CMIP6 pressure-level data with optional per-source
+    normalization.
     """
 
     TIME_DIM = 1
@@ -270,7 +250,7 @@ class Cmip6Step(StepABC):
         config: Cmip6StepConfig,
         dataset_info: DatasetInfo,
         corrector: CorrectorABC,
-        normalizer: StandardNormalizer,
+        per_source_normalizer: PerSourceNormalizer,
         init_weights: Callable[[list[nn.Module]], None],
     ):
         super().__init__()
@@ -278,7 +258,7 @@ class Cmip6Step(StepABC):
         n_out_channels = len(config.out_names)
         self.in_packer = Packer(config.in_names)
         self.out_packer = Packer(config.out_names)
-        self._normalizer = normalizer
+        self._per_source_normalizer = per_source_normalizer
         if config.ocean is not None:
             self.ocean: Ocean | None = config.ocean.build(
                 config.in_names, config.out_names, dataset_info.timestep
@@ -315,16 +295,6 @@ class Cmip6Step(StepABC):
         self._corrector = corrector
         self.in_names = config.in_names
         self.out_names = config.out_names
-        self._mask_in_names = set(config.mask_in_names)
-        self._mask_out_names = set(config.mask_out_names)
-        self._non_mask_prognostic_names = [
-            n for n in self.prognostic_names if n not in self._mask_out_names
-        ]
-        all_mask = self._mask_in_names | self._mask_out_names
-        prefix = config.mask_variable_prefix
-        self._input_mask_map = _build_mask_map(
-            config.mask_in_names, config.in_names, all_mask, prefix
-        )
 
     @property
     def config(self) -> Cmip6StepConfig:
@@ -332,7 +302,7 @@ class Cmip6Step(StepABC):
 
     @property
     def normalizer(self) -> StandardNormalizer:
-        return self._normalizer
+        return self._per_source_normalizer.default
 
     @property
     def surface_temperature_name(self) -> str | None:
@@ -375,24 +345,10 @@ class Cmip6Step(StepABC):
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> TensorDict:
         input_data = args.input
+        normalizer = self._per_source_normalizer
 
-        # Mask variables bypass the normalizer.
-        mask_input = {k: input_data[k] for k in self._mask_in_names if k in input_data}
-        input_norm = self.normalizer.normalize(input_data)
-        input_norm.update(mask_input)
+        input_norm = normalizer.normalize(input_data, labels=args.labels)
 
-        # Zero out below-surface cells in normalized space so NaN doesn't
-        # enter the network.
-        for mask_name, data_names in self._input_mask_map.items():
-            if mask_name in input_norm:
-                mask = input_norm[mask_name] > 0.5
-                for data_name in data_names:
-                    if data_name in input_norm:
-                        input_norm[data_name] = input_norm[data_name].masked_fill(
-                            mask, 0.0
-                        )
-
-        # Network forward pass.
         input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
         output_tensor = self.module.wrap_module(wrapper)(
             input_tensor, labels=args.labels
@@ -403,25 +359,10 @@ class Cmip6Step(StepABC):
         )
         output_norm.update(secondary_output)
 
-        # Sigmoid on mask outputs (network produces logits, we want probabilities).
-        for name in self._mask_out_names:
-            if name in output_norm:
-                output_norm[name] = torch.sigmoid(output_norm[name])
-
-        # Residual prediction — masks are excluded (they are binary, not residuals).
         if self._config.residual_prediction:
-            output_norm = add_names(
-                input_norm, output_norm, self._non_mask_prognostic_names
-            )
+            output_norm = add_names(input_norm, output_norm, self.prognostic_names)
 
-        # Extract mask outputs before denormalization (they bypass it).
-        mask_output = {
-            k: output_norm.pop(k)
-            for k in list(self._mask_out_names)
-            if k in output_norm
-        }
-        output = self.normalizer.denormalize(output_norm)
-        output.update(mask_output)
+        output = normalizer.denormalize(output_norm, labels=args.labels)
 
         if self._corrector is not None:
             output = self._corrector(input_data, output, args.next_step_input_data)
