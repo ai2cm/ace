@@ -9,7 +9,9 @@ from .main import (
     InferenceAggregatorConfig,
     InferenceEvaluatorAggregator,
     InferenceEvaluatorAggregatorConfig,
+    LegacyFlagInferenceEvaluatorAggregatorConfig,
     MetricConfig,
+    StepMeanEntry,
 )
 from .reduced import MeanMetricConfig
 from .seasonal import SeasonalMetricConfig
