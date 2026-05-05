@@ -171,7 +171,6 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         label: str,
         epoch: int,
     ):
-        logging.info("Starting weather evaluation inference run")
         return inference_one_epoch(
             stepper=stepper,
             validation_context=contextlib.nullcontext,
