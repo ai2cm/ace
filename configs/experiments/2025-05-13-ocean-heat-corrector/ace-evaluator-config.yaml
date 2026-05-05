@@ -20,4 +20,3 @@ loader:
 data_writer:
   save_prediction_files: true
   save_monthly_files: true
-aggregator:

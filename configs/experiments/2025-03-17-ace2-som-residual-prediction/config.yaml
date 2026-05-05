@@ -22,7 +22,6 @@ inference:
     dataset:
       data_path: /climate-default/2024-09-06-1deg-c96-shield-som-increasing-co2-double-call-rad-netcdfs
     num_data_workers: 4
-  aggregator:
 logging:
   log_to_screen: true
   log_to_wandb: true

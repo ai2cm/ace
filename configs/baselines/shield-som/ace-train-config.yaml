@@ -23,7 +23,6 @@ inference:
       file_pattern: increasing-CO2.zarr
       engine: zarr
     num_data_workers: 4
-  aggregator:
 logging:
   log_to_screen: true
   log_to_wandb: true

@@ -27,4 +27,3 @@ loader:
 data_writer:
   save_prediction_files: false
   save_monthly_files: false
-aggregator:

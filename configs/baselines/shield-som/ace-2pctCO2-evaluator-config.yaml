@@ -8,7 +8,6 @@ logging:
   log_to_file: true
   project: ace-som
   entity: ai2cm
-aggregator:
 loader:
   start_indices:
     times:

@@ -16,7 +16,6 @@ inference:
     dataset:
       data_path: /climate-default/2023-08-11-vertically-resolved-1deg-fme-ensemble-dataset/ic_0011
     num_data_workers: 8
-  aggregator:
 logging:
   log_to_screen: true
   log_to_wandb: true

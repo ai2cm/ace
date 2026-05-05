@@ -7,6 +7,7 @@ import torch
 import xarray as xr
 
 from fme.ace.aggregator.inference.main import (
+    AnnualMetricConfig,
     EnsoIndexMetricConfig,
     HistogramMetricConfig,
     MeanMetricConfig,
@@ -276,6 +277,7 @@ class InferenceEvaluatorAggregatorConfig:
             metrics.append(HistogramMetricConfig())
         if self.log_seasonal_means:
             metrics.append(SeasonalMetricConfig())
+        metrics.append(AnnualMetricConfig())
         if include_nino34:
             metrics.append(EnsoIndexMetricConfig())
         return metrics

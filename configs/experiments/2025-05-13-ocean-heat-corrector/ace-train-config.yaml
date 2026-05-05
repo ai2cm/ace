@@ -24,7 +24,6 @@ inference:
       file_pattern: 2025-05-14-cm4-piControl-200yr-ocean.zarr
       engine: zarr
     num_data_workers: 8
-  aggregator:
 logging:
   log_to_screen: true
   log_to_wandb: true

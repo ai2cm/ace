@@ -15,7 +15,6 @@ loader:
   dataset:
     data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
   num_data_workers: 16
-aggregator:
 data_writer:
   save_prediction_files: false
   save_monthly_files: false

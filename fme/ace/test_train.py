@@ -17,7 +17,6 @@ import fme
 from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregatorConfig,
     MeanMetricConfig,
-    VideoMetricConfig,
 )
 from fme.ace.aggregator.one_step.main import OneStepAggregatorConfig
 from fme.ace.data_loading.config import DataLoaderConfig
@@ -407,7 +406,7 @@ def _get_test_yaml_files(
             files=[FileWriterConfig("autoregressive")],
         ),
         aggregator=InferenceEvaluatorAggregatorConfig(
-            metrics=[MeanMetricConfig(target="denorm"), VideoMetricConfig()],
+            metrics=[MeanMetricConfig(target="denorm")],
         ),
         logging=logging_config,
         loader=InferenceDataLoaderConfig(
