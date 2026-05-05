@@ -1,6 +1,5 @@
 import contextlib
 import dataclasses
-import itertools
 import os
 import signal
 import unittest.mock
@@ -32,7 +31,7 @@ from fme.core.generics.trainer import (
     epoch_checkpoint_enabled,
 )
 from fme.core.logging_utils import LoggingConfig
-from fme.core.optimization import NullOptimization, Optimization
+from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
 from fme.core.scheduler import SchedulerConfig
 from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import Slice, TensorDict, TensorMapping
@@ -374,6 +373,8 @@ def get_trainer(
     save_checkpoint: bool = True,
     lr_tuning: LRTuningConfig | None = None,
     end_of_epoch_callback: unittest.mock.MagicMock | None = None,
+    resume_optimizer_ckpt_path: str | None = None,
+    lr: float = 0.01,
 ) -> tuple[TrainConfigProtocol, Trainer]:
     if checkpoint_dir is None:
         checkpoint_dir = os.path.join(tmp_path, "checkpoints")
@@ -404,15 +405,13 @@ def get_trainer(
         nonlocal scheduler_config
         if scheduler_config is None:
             scheduler_config = SchedulerConfig()
-        opt = Optimization(
-            parameters=itertools.chain(*[module.parameters() for module in modules]),
+        opt = OptimizationConfig(
             optimizer_type="Adam",
-            lr=0.01,
-            max_epochs=max_epochs,
+            lr=lr,
             scheduler=scheduler_config,
             enable_automatic_mixed_precision=False,
-            kwargs={},
-        )
+            resume_optimizer_ckpt_path=resume_optimizer_ckpt_path,
+        ).build(torch.nn.ModuleList(modules), max_epochs=max_epochs)
         original_step_scheduler = opt.step_scheduler
 
         def step_scheduler_side_effect(*args, **kwargs):
@@ -431,6 +430,17 @@ def get_trainer(
             if stepper_module_values is None:
                 raise ValueError("stepper_module_values is None")
             module.weight.data.fill_(stepper_module_values[i])
+            for param in module.parameters():
+                if param not in opt.optimizer.state:
+                    opt.optimizer.state[param] = {
+                        "step": torch.tensor(0.0, device=param.data.device),
+                        "exp_avg": torch.zeros_like(param.data),
+                        "exp_avg_sq": torch.zeros_like(param.data),
+                    }
+                state = opt.optimizer.state[param]
+                state["step"] += 1
+                state["exp_avg"] += 0.1
+                state["exp_avg_sq"] += 0.01
 
         opt.step_weights = unittest.mock.MagicMock(side_effect=step_weights_side_effect)  # type: ignore
         return opt
@@ -499,7 +509,10 @@ def test_trainer(tmp_path: str, checkpoint_save_epochs: Slice | None):
         save_epochs = []
     for i in range(config.max_epochs):
         if i in save_epochs:
-            assert os.path.exists(paths.epoch_checkpoint_path(i))
+            epoch_path = paths.epoch_checkpoint_path(i)
+            assert os.path.exists(epoch_path)
+            ckpt = torch.load(epoch_path, weights_only=False)
+            assert "optimization" in ckpt
         else:
             assert not os.path.exists(paths.epoch_checkpoint_path(i))
         assert not os.path.exists(paths.ema_epoch_checkpoint_path(i))
@@ -1675,3 +1688,73 @@ def test_epoch_checkpoint_enabled_includes_final_epoch():
     save_epochs = Slice(step=5)
     assert epoch_checkpoint_enabled(5, max_epochs, save_epochs)
     assert epoch_checkpoint_enabled(10, max_epochs, save_epochs)
+
+
+def test_finetune_optimization_checkpoint_loads_optimizer_state(tmp_path: str):
+    """Trainer loads optimizer state from a finetune checkpoint while
+    keeping counters and scheduler fresh.
+
+    Uses a StepLR scheduler on stage 1 so the saved checkpoint contains a
+    decayed LR and advanced scheduler state, then verifies stage 2 starts
+    with the fresh configured LR and a fresh scheduler.
+    """
+    configured_lr = 0.01
+    stage1_scheduler = SchedulerConfig(
+        type="StepLR", kwargs={"step_size": 1, "gamma": 0.5}
+    )
+
+    stage1_dir = os.path.join(tmp_path, "stage1")
+    _, stage1_trainer = get_trainer(
+        stage1_dir,
+        max_epochs=1,
+        n_train_batches=4,
+        stepper_module_values=np.array([1.0]),
+        scheduler_config=stage1_scheduler,
+        lr=configured_lr,
+    )
+    assert stage1_trainer.optimization.optimizer.state_dict()["state"] == {}
+
+    stage1_trainer.train()
+    assert stage1_trainer.optimization.learning_rate < configured_lr
+
+    stage1_trainer._save_restart_checkpoints()
+    stage1_ckpt_path = stage1_trainer.paths.latest_checkpoint_path
+
+    # verify training updated the optimizer state dict
+    stage1_opt_state = stage1_trainer.optimization.optimizer.state_dict()["state"]
+    assert stage1_opt_state != {}, "optimizer state should change during training"
+
+    stage2_dir = os.path.join(tmp_path, "stage2")
+    _, stage2_trainer = get_trainer(
+        stage2_dir,
+        max_epochs=1,
+        n_train_batches=4,
+        stepper_module_values=np.array([2.0]),
+        resume_optimizer_ckpt_path=stage1_ckpt_path,
+        lr=configured_lr,
+    )
+
+    assert stage2_trainer._epochs_trained == 0
+    assert stage2_trainer._start_epoch == 0
+    assert stage2_trainer.num_batches_seen == 0
+
+    # optimizer state loaded from stage1 ckpt
+    stage2_opt_state = stage2_trainer.optimization.optimizer.state_dict()["state"]
+    for param_id in stage1_opt_state:
+        assert param_id in stage2_opt_state
+        for key in ("step", "exp_avg", "exp_avg_sq"):
+            assert key in stage2_opt_state[param_id]
+            torch.testing.assert_close(
+                stage2_opt_state[param_id][key],
+                stage1_opt_state[param_id][key],
+            )
+
+    # lr and scheduler are overwritten by OptimizationConfig
+    assert stage2_trainer.optimization.learning_rate == configured_lr
+    fresh_scheduler = SchedulerConfig().build(
+        stage2_trainer.optimization.optimizer, max_epochs=1
+    )
+    assert (
+        stage2_trainer.optimization.scheduler.state_dict()
+        == fresh_scheduler.state_dict()
+    )

@@ -16,6 +16,7 @@ from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorMapping
 
 from ..plotting import plot_mean_and_samples
+from .data import InferenceBatchData
 
 
 class PairedGlobalMeanAnnualAggregator:
@@ -53,13 +54,13 @@ class PairedGlobalMeanAnnualAggregator:
     @torch.no_grad()
     def record_batch(
         self,
-        time: xr.DataArray,
-        target_data: TensorMapping,
-        gen_data: TensorMapping,
+        data: InferenceBatchData,
     ):
         """Record a batch of data for computing time variability statistics."""
-        self._target_aggregator.record_batch(time, target_data)
-        self._gen_aggregator.record_batch(time, gen_data)
+        target_data = data.replace(prediction=data.target)
+        gen_data = data.replace(prediction=data.prediction)
+        self._target_aggregator.record_batch(target_data)
+        self._gen_aggregator.record_batch(gen_data)
 
     def _get_gathered_means(self) -> tuple[xr.Dataset, xr.Dataset] | None:
         """
@@ -166,11 +167,12 @@ class GlobalMeanAnnualAggregator:
         self._datasets: list[xr.Dataset] | None = None
 
     @torch.no_grad()
-    def record_batch(self, time: xr.DataArray, data: TensorMapping):
+    def record_batch(self, data: InferenceBatchData):
         """Record a batch of data for computing time variability statistics."""
+        time = data.time
         data_area_mean = {
             name: tensor.cpu()
-            for name, tensor in self._area_weighted_mean_dict(data).items()
+            for name, tensor in self._area_weighted_mean_dict(data.prediction).items()
         }
         ds = to_dataset(data_area_mean, time)
 

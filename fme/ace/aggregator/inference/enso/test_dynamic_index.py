@@ -8,6 +8,7 @@ import xarray as xr
 from matplotlib import pyplot as plt
 
 from fme import get_device
+from fme.ace.aggregator.inference.data import InferenceBatchData
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.testing import mock_distributed
 from fme.core.typing_ import TensorMapping
@@ -167,7 +168,15 @@ def test_regional__raw_index():
         regional_mean=gridded_operations.regional_area_weighted_mean,
     )
     first_times = _get_windowed_times(start_date, n_samples, n_times // 2, i_start)
-    agg.record_batch(first_times, first_data)
+    first_batch = InferenceBatchData(
+        prediction=first_data,
+        prediction_norm={},
+        target=None,
+        target_norm=None,
+        time=first_times,
+        i_time_start=i_start,
+    )
+    agg.record_batch(first_batch)
     i_start += n_times // 2
     second_data = _get_windowed_data(
         n_samples,
@@ -177,7 +186,15 @@ def test_regional__raw_index():
         i_start,
     )
     second_times = _get_windowed_times(start_date, n_samples, n_times // 2, i_start)
-    agg.record_batch(second_times, second_data)
+    second_batch = InferenceBatchData(
+        prediction=second_data,
+        prediction_norm={},
+        target=None,
+        target_norm=None,
+        time=second_times,
+        i_time_start=i_start,
+    )
+    agg.record_batch(second_batch)
 
     expected_values = torch.arange(16.0, 16.0 + n_times, 1.0).to(device=get_device())
     raw_indices: torch.Tensor = agg._raw_indices
@@ -334,7 +351,15 @@ def test_regional_index__get_gathered_indices(use_mock_distributed):
         regional_weights=region.regional_weights,
         regional_mean=lat_lon_coordinates.get_gridded_operations().regional_area_weighted_mean,
     )
-    agg.record_batch(sample_times, sample_data)
+    batch = InferenceBatchData(
+        prediction=sample_data,
+        prediction_norm={},
+        target=None,
+        target_norm=None,
+        time=sample_times,
+        i_time_start=0,
+    )
+    agg.record_batch(batch)
     if use_mock_distributed:
         world_size = 2
         with mock_distributed(world_size=world_size):
@@ -379,7 +404,15 @@ def test_regional_index_aggregator(variable_name):
         regional_weights=region.regional_weights,
         regional_mean=lat_lon_coordinates.get_gridded_operations().regional_area_weighted_mean,
     )
-    agg.record_batch(time=time, data=data)
+    batch = InferenceBatchData(
+        prediction=data,
+        prediction_norm={},
+        target=None,
+        target_norm=None,
+        time=time,
+        i_time_start=0,
+    )
+    agg.record_batch(batch)
     logs = agg.get_logs(label="test")
     assert len(logs) > 0
     metric_name = f"test/{variable_name}_nino34_index"
@@ -440,7 +473,15 @@ def test_paired_regional_index_aggregator(variable_name):
             regional_mean=lat_lon_coordinates.get_gridded_operations().regional_area_weighted_mean,
         ),
     )
-    agg.record_batch(time=time, target_data=target_data, gen_data=prediction_data)
+    batch = InferenceBatchData(
+        prediction=prediction_data,
+        prediction_norm={},
+        target=target_data,
+        target_norm=None,
+        time=time,
+        i_time_start=0,
+    )
+    agg.record_batch(batch)
     logs = agg.get_logs(label="test")
     assert len(logs) > 0
     metric_name = f"test/{variable_name}_nino34_index"
