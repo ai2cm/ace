@@ -238,6 +238,9 @@ class Config:
     save_best_inference_epoch_checkpoints: bool = False
     ema: EMAConfig = dataclasses.field(default_factory=EMAConfig)
     best_enso_checkpoint_metric: str | None = None
+    best_enso_checkpoint_autocorr_metric: str | None = None
+    best_enso_checkpoint_autocorr_target_metric: str | None = None
+    best_enso_checkpoint_autocorr_weight: float = 1.0
     best_enso_checkpoint_climate_tolerance: float = 0.1
     lr_tuning: LRTuningConfig | None = None
 
@@ -361,6 +364,9 @@ def get_trainer(
     n_train_batches: int = 100,
     save_best_inference_epoch_checkpoints: bool = False,
     best_enso_checkpoint_metric: str | None = None,
+    best_enso_checkpoint_autocorr_metric: str | None = None,
+    best_enso_checkpoint_autocorr_target_metric: str | None = None,
+    best_enso_checkpoint_autocorr_weight: float = 1.0,
     best_enso_checkpoint_climate_tolerance: float = 0.1,
     inference_extra_metrics: list[dict[str, float]] | None = None,
     scheduler_config: SchedulerConfig | None = None,
@@ -456,6 +462,9 @@ def get_trainer(
         evaluate_before_training=evaluate_before_training,
         save_best_inference_epoch_checkpoints=save_best_inference_epoch_checkpoints,
         best_enso_checkpoint_metric=best_enso_checkpoint_metric,
+        best_enso_checkpoint_autocorr_metric=best_enso_checkpoint_autocorr_metric,
+        best_enso_checkpoint_autocorr_target_metric=best_enso_checkpoint_autocorr_target_metric,
+        best_enso_checkpoint_autocorr_weight=best_enso_checkpoint_autocorr_weight,
         best_enso_checkpoint_climate_tolerance=best_enso_checkpoint_climate_tolerance,
         save_checkpoint=save_checkpoint,
         ema=ema_config,
@@ -1521,6 +1530,55 @@ def test_best_enso_checkpoint_climate_guard(tmp_path: str):
     )
     # Only epoch 1 saved; epochs 2-3 have climate error > 0.3*1.1=0.33
     assert ckpt["epoch"] == 1
+
+
+def test_best_enso_checkpoint_with_autocorr(tmp_path: str):
+    """Test that autocorrelation contributes to composite ENSO score."""
+    max_epochs = 3
+    n_train_batches = 5
+    std_key = "enso_index/sst_nino34_index_std_norm"
+    acorr_key = "enso_index/sst_nino34_index_autocorr_lag5yr"
+    acorr_target_key = "enso_index/sst_nino34_index_autocorr_lag5yr_target"
+
+    inference_losses = np.array([0.3, 0.3, 0.3])
+    # Epoch 1: std_norm=0.95 (dist=0.05), autocorr=0.1, target=0.3 (dist=0.2)
+    #   composite = 0.05 + 1.0*0.2 = 0.25
+    # Epoch 2: std_norm=0.90 (dist=0.10), autocorr=0.28, target=0.3 (dist=0.02)
+    #   composite = 0.10 + 1.0*0.02 = 0.12
+    # Epoch 3: std_norm=0.98 (dist=0.02), autocorr=0.05, target=0.3 (dist=0.25)
+    #   composite = 0.02 + 1.0*0.25 = 0.27
+    # Best composite is epoch 2 (0.12)
+    inference_extra = [
+        {std_key: 0.95, acorr_key: 0.1, acorr_target_key: 0.3},
+        {std_key: 0.90, acorr_key: 0.28, acorr_target_key: 0.3},
+        {std_key: 0.98, acorr_key: 0.05, acorr_target_key: 0.3},
+    ]
+
+    config, trainer = get_trainer(
+        tmp_path,
+        max_epochs=max_epochs,
+        inference_losses=inference_losses,
+        n_train_batches=n_train_batches,
+        validate_using_ema=False,
+        best_enso_checkpoint_metric=f"inference/{std_key}",
+        best_enso_checkpoint_autocorr_metric=f"inference/{acorr_key}",
+        best_enso_checkpoint_autocorr_target_metric=f"inference/{acorr_target_key}",
+        best_enso_checkpoint_autocorr_weight=1.0,
+        best_enso_checkpoint_climate_tolerance=0.5,
+        inference_extra_metrics=inference_extra,
+    )
+    trainer.train()
+
+    paths = CheckpointPaths(config.checkpoint_dir)
+    assert os.path.exists(paths.best_enso_checkpoint_path)
+
+    ckpt = torch.load(
+        paths.best_enso_checkpoint_path, map_location="cpu", weights_only=False
+    )
+    # Without autocorrelation, epoch 3 would win (std_norm closest to 1.0)
+    # With autocorrelation, epoch 2 wins (best composite)
+    assert ckpt["epoch"] == 2
+    assert ckpt["best_enso_score"] == pytest.approx(0.12, abs=1e-6)
 
 
 def test_best_enso_checkpoint_disabled_by_default(tmp_path: str):
