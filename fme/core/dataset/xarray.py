@@ -598,6 +598,7 @@ class XarrayDataset(DatasetABC):
             [self.isel.get(dim, SLICE_NONE) for dim in self._loaded_dims[1:]]
         )
         self._check_isel_dimensions(first_dataset.sizes)
+        first_dataset.close()
         self._apply_sample_n_times(self._n_timesteps_schedule.get_value(0))
         self._labels = set(config.labels) if config.labels is not None else None
         self._infer_timestep = config.infer_timestep
@@ -734,6 +735,7 @@ class XarrayDataset(DatasetABC):
 
         ds = self._open_file(0)
         self._get_variable_metadata(ds)
+        ds.close()
 
     def _group_variable_names_by_time_type(self) -> VariableNames:
         """Returns lists of time-dependent variable names, time-independent
