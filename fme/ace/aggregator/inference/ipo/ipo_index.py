@@ -290,6 +290,10 @@ class PairedIPOIndexAggregator:
                 )
                 logs[f"{sst_name}_ipo_tpi_std_ratio"] = std_ratio
 
+            logs[f"{sst_name}_ipo_tpi_std_norm"] = _compute_sample_mean_std_ratio(
+                pred_da.values, tgt_da.values
+            )
+
             pred_nonan = pred_da.dropna("time")
             tgt_nonan = tgt_da.dropna("time")
             if pred_nonan.sizes["time"] > 1 and tgt_nonan.sizes["time"] > 1:

@@ -250,6 +250,7 @@ class TestPairedIPOIndexAggregator:
         plt.close("all")
 
         assert any("ipo_tpi_std_ratio" in k for k in logs)
+        assert any("ipo_tpi_std_norm" in k for k in logs)
         assert any("ipo_tpi_filtered" in k for k in logs)
         assert any("ipo_tpi_power_spectrum" in k for k in logs)
 
