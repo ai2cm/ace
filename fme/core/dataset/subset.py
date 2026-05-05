@@ -52,6 +52,12 @@ class SubsetDataset(DatasetABC):
     def validate_inference_length(self, max_start_index: int, max_window_len: int):
         raise ValueError("SubsetDataset does not support inference.")
 
+    def enable_shared_memory(self):
+        self._dataset.enable_shared_memory()
+
+    def set_global_epoch_tensor(self, tensor):
+        self._dataset.set_global_epoch_tensor(tensor)
+
     def set_epoch(self, epoch):
         self._dataset.set_epoch(epoch)
 
