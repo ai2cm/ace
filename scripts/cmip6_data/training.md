@@ -296,10 +296,34 @@ dispersion in `d1_std`, which may require per-model or log-space
 normalization. For the smoke test, shared linear normalization is
 sufficient; refine after examining training loss by variable.
 
+**Update (2026-05-05).** Per-label validation confirmed that `hus10`,
+`hus50`, and `hus100` dominate training loss for roughly half the source
+models, accounting for ~95% of those models' excess loss. The root cause
+is that models whose stratospheric humidity values are far from the
+cross-model centering constant arrive as outlier inputs in network-
+normalized space, producing large prediction errors that are further
+amplified by the small `residual_scaling` denominators (~5.6e-8 for
+`hus10`). This is an interaction between the cross-model normalization
+and model-specific stratospheric humidity climatology, not a network
+architecture issue per se. Options to address: per-model normalization
+for upper-stratospheric humidity, log-space normalization, down-weighting
+in the loss, or excluding the uppermost humidity levels.
+
 ### 12. INM-CM4-8 exclusion and other data-quality flags
 
 INM-CM4-8 is already excluded from training via `pilot.yaml`
 (`selection.exclude_source_ids`). The CESM2-FV2 `sftlf` overshoot at the
-south pole and CESM2-WACCM deduplication are handled at ingest. No
-additional training-side filtering is needed. `Cmip6DataConfig`
-(issue 5) filters to `status == "ok"` datasets automatically.
+south pole and CESM2-WACCM deduplication are handled at ingest.
+`Cmip6DataConfig` (issue 5) filters to `status == "ok"` datasets
+automatically.
+
+**Update (2026-05-05).** IITM-ESM excluded from training
+(`exclude_source_ids` in `train-smoke-test.yaml`). Per-label validation
+showed IITM-ESM with a mean loss of 23.3 — 100x worse than well-behaved
+models — with negligible variance, indicating consistently wrong
+predictions rather than occasional spikes. Root cause: IITM-ESM reports
+**negative specific humidity** at 10 and 50 hPa (mean hus10 = −2.8e-6
+vs cross-model centering of +2.4e-6). Negative specific humidity is
+physically impossible and places this model ~19σ from the multi-model
+mean in network-normalized space. This is a data quality issue in the
+source model output, not a pipeline bug.
