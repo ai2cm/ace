@@ -78,3 +78,11 @@ class DatasetABC(GenericDataset[DatasetItem], abc.ABC):
                 start index for inference.
         """
         pass
+
+    @abc.abstractmethod
+    def enable_shared_memory(self):
+        pass
+
+    @abc.abstractmethod
+    def set_global_epoch_tensor(self, tensor):
+        pass
