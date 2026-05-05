@@ -8,11 +8,15 @@ import torch
 import xarray as xr
 
 from fme.ace.aggregator.inference import (
+    HistogramMetricConfig,
     InferenceEvaluatorAggregatorConfig,
+    LegacyFlagInferenceEvaluatorAggregatorConfig,
     MeanMetricConfig,
     PowerSpectrumMetricConfig,
+    StepMeanEntry,
     StepMeanMetricConfig,
     TimeMeanMetricConfig,
+    VideoMetricConfig,
     ZonalMeanMetricConfig,
 )
 from fme.ace.data_loading.batch_data import BatchData, PairedData
@@ -201,7 +205,21 @@ def test_inference_logs_labels_exist():
     ny = 45
     ds_info = get_ds_info(nx, ny)
     initial_time = (get_zero_time(shape=[n_sample, 0], dims=["sample", "time"]),)
-    agg = InferenceEvaluatorAggregatorConfig().build(
+    agg = InferenceEvaluatorAggregatorConfig(
+        metrics=[
+            MeanMetricConfig(target="denorm"),
+            MeanMetricConfig(target="norm"),
+            StepMeanMetricConfig(step=20, target="denorm"),
+            StepMeanMetricConfig(step=20, target="norm"),
+            StepMeanMetricConfig(step=4, name="one_day_mean", target="denorm"),
+            StepMeanMetricConfig(step=4, name="one_day_mean_norm", target="norm"),
+            PowerSpectrumMetricConfig(),
+            ZonalMeanMetricConfig(zonal_mean_max_size=LOG_ZONAL_MEAN_IMAGES),
+            VideoMetricConfig(),
+            TimeMeanMetricConfig(target="denorm"),
+            TimeMeanMetricConfig(target="norm"),
+        ],
+    ).build(
         dataset_info=ds_info,
         n_ic_steps=1,
         n_forward_steps=n_time - 1,
@@ -253,7 +271,25 @@ def test_inference_logs_length(window_len: int, n_windows: int):
     ds_info = get_ds_info(nx, ny)
     initial_time = (get_zero_time(shape=[2, 0], dims=["sample", "time"]),)
     n_forward_steps = window_len * n_windows - 1
-    agg = InferenceEvaluatorAggregatorConfig().build(
+    step_mean_metrics: list = (
+        []
+        if n_forward_steps < 20
+        else [
+            StepMeanMetricConfig(step=20, target="denorm"),
+            StepMeanMetricConfig(step=20, target="norm"),
+        ]
+    )
+    agg = InferenceEvaluatorAggregatorConfig(
+        metrics=[
+            MeanMetricConfig(target="denorm"),
+            MeanMetricConfig(target="norm"),
+            *step_mean_metrics,
+            PowerSpectrumMetricConfig(),
+            ZonalMeanMetricConfig(zonal_mean_max_size=LOG_ZONAL_MEAN_IMAGES),
+            TimeMeanMetricConfig(target="denorm"),
+            TimeMeanMetricConfig(target="norm"),
+        ],
+    ).build(
         dataset_info=ds_info,
         n_ic_steps=1,
         n_forward_steps=n_forward_steps,
@@ -289,8 +325,6 @@ def test_flush_diagnostics(tmpdir):
     nx, ny, n_sample, n_time = 2, 2, 10, 21
     ds_info = get_ds_info(nx, ny)
     initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
-    from fme.ace.aggregator.inference import HistogramMetricConfig, VideoMetricConfig
-
     agg = InferenceEvaluatorAggregatorConfig(
         metrics=[
             MeanMetricConfig(target="denorm"),
@@ -339,7 +373,16 @@ def test_agg_raises_without_output_dir():
     with pytest.raises(
         ValueError, match="Output directory must be set to save diagnostics"
     ):
-        InferenceEvaluatorAggregatorConfig().build(
+        InferenceEvaluatorAggregatorConfig(
+            metrics=[
+                MeanMetricConfig(target="denorm"),
+                MeanMetricConfig(target="norm"),
+                PowerSpectrumMetricConfig(),
+                ZonalMeanMetricConfig(zonal_mean_max_size=LOG_ZONAL_MEAN_IMAGES),
+                TimeMeanMetricConfig(target="denorm"),
+                TimeMeanMetricConfig(target="norm"),
+            ],
+        ).build(
             dataset_info=ds_info,
             n_ic_steps=1,
             n_forward_steps=1,
@@ -479,4 +522,79 @@ class TestAggregatorConfigMetrics:
                 normalize=lambda x: dict(x),
                 save_diagnostics=True,
                 output_dir=None,
+            )
+
+
+def test_legacy_config_matches_typed_config():
+    """Verify LegacyFlagInferenceEvaluatorAggregatorConfig produces the same
+    summary logs as an equivalent InferenceEvaluatorAggregatorConfig built
+    with the same typed metrics."""
+    torch.manual_seed(42)
+    n_sample, n_time, nx, ny = 4, 22, 90, 45
+    ds_info = get_ds_info(nx, ny)
+    initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
+
+    legacy_config = LegacyFlagInferenceEvaluatorAggregatorConfig(
+        log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
+        log_step_means=[
+            StepMeanEntry(step=20),
+            StepMeanEntry(step=4, name="one_day_mean"),
+        ],
+        log_video=True,
+    )
+
+    typed_config = InferenceEvaluatorAggregatorConfig(
+        metrics=[
+            MeanMetricConfig(target="denorm"),
+            MeanMetricConfig(target="norm"),
+            StepMeanMetricConfig(step=20, target="denorm"),
+            StepMeanMetricConfig(step=20, name="mean_step_20_norm", target="norm"),
+            StepMeanMetricConfig(step=4, name="one_day_mean", target="denorm"),
+            StepMeanMetricConfig(step=4, name="one_day_mean_norm", target="norm"),
+            PowerSpectrumMetricConfig(),
+            ZonalMeanMetricConfig(zonal_mean_max_size=LOG_ZONAL_MEAN_IMAGES),
+            VideoMetricConfig(),
+            TimeMeanMetricConfig(target="denorm"),
+            TimeMeanMetricConfig(target="norm"),
+        ],
+    )
+
+    build_kwargs = dict(
+        dataset_info=ds_info,
+        n_ic_steps=1,
+        n_forward_steps=n_time - 1,
+        initial_time=initial_time,
+        normalize=lambda x: dict(x),
+        save_diagnostics=False,
+    )
+    legacy_agg = legacy_config.build(**build_kwargs)
+    typed_agg = typed_config.build(**build_kwargs)
+
+    data = PairedData.new_on_device(
+        prediction={"a": torch.randn(n_sample, n_time, ny, nx, device=get_device())},
+        reference={"a": torch.randn(n_sample, n_time, ny, nx, device=get_device())},
+        time=xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"]),
+        labels=None,
+    )
+    legacy_agg.record_batch(data=data)
+    typed_agg.record_batch(data=data)
+
+    legacy_logs = legacy_agg.get_summary_logs()
+    typed_logs = typed_agg.get_summary_logs()
+
+    assert set(legacy_logs.keys()) == set(typed_logs.keys()), (
+        f"Key mismatch.\n"
+        f"  Only in legacy: {set(legacy_logs) - set(typed_logs)}\n"
+        f"  Only in typed:  {set(typed_logs) - set(legacy_logs)}"
+    )
+    for key in legacy_logs:
+        legacy_val = legacy_logs[key]
+        typed_val = typed_logs[key]
+        if isinstance(legacy_val, int | float):
+            torch.testing.assert_close(
+                torch.tensor(legacy_val),
+                torch.tensor(typed_val),
+                rtol=1e-5,
+                atol=1e-5,
+                msg=f"Mismatch at key {key}",
             )
