@@ -6,8 +6,8 @@ fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KNS
 
 fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KP43V4GDM8A7FNGKPW1R80WH|training|best_inference_ckpt|normal|--not-preemptible
 
-fto-25-75-split-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KP44XC9J47C3BNJ8JMJ203TW|run_140yr|best_inference_ckpt|high|--not-preemptible||||h100
-fto-25-75-split-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KP44XC9J47C3BNJ8JMJ203TW|run_ICx1_piC|best_inference_ckpt|high|--not-preemptible||||h100
+fto-25-75-split-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KP44XC9J47C3BNJ8JMJ203TW|done|best_inference_ckpt|high|--not-preemptible||||h100
+fto-25-75-split-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KP44XC9J47C3BNJ8JMJ203TW|done|best_inference_ckpt|high|--not-preemptible||||h100
 
 ft-fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KP76CVQVGKXD8DNGGBTC7BFE|training|best_inference_ckpt|normal|--not-preemptible
 
@@ -15,8 +15,8 @@ ft-fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0||t
 
 ft-fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KP772N2D01FRDZJ45AK1ZMKD|training|best_inference_ckpt|normal|--not-preemptible
 
-fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KP43V4GDM8A7FNGKPW1R80WH|run_140yr|best_inference_ckpt|high|--not-preemptible||||h100
-fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KP43V4GDM8A7FNGKPW1R80WH|run_ICx1_piC|best_inference_ckpt|high|--not-preemptible||||h100
+fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KP43V4GDM8A7FNGKPW1R80WH|done|best_inference_ckpt|high|--not-preemptible||||h100
+fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7-log-IPO|rs0|01KP43V4GDM8A7FNGKPW1R80WH|run_ICx1_piC|best_inference_ckpt|high|--not-preemptible||||h100
 
 fto-75-25-split-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KQG6NFXXCFCZN07Y9G8EG16C|training|best_inference_ckpt|normal|--min-runtime 8h
 
