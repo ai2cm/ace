@@ -19,6 +19,21 @@ from fme.coupled.typing_ import CoupledOptionalInt
 from .train_config import _validate_loss_n_steps
 
 
+def _make_stepper_mock():
+    stepper = MagicMock()
+    stepper.n_inner_steps = 1
+    return stepper
+
+
+def _make_stepper_training_mock():
+    stepper_training = MagicMock()
+    stepper_training.n_coupled_steps = 1
+    stepper_training.component_n_steps_max = CoupledOptionalInt(
+        ocean=None, atmosphere=None
+    )
+    return stepper_training
+
+
 def _make_inference_config(
     name: str | None = None, weight: float = 1.0, epochs: Slice | None = None
 ) -> InlineInferenceConfig:
@@ -53,8 +68,8 @@ def _make_train_config(
     return TrainConfig(
         train_loader=MagicMock(),
         validation_loader=MagicMock(),
-        stepper=MagicMock(),
-        stepper_training=MagicMock(),
+        stepper=_make_stepper_mock(),
+        stepper_training=_make_stepper_training_mock(),
         optimization=MagicMock(has_lr_schedule=False),
         logging=MagicMock(),
         max_epochs=max_epochs,
