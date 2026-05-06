@@ -19,7 +19,7 @@ from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
-from fme.core.wandb import WandB
+from fme.core.wandb import WANDB_RUN_ID_FILE, WandB
 from fme.downscaling.aggregators import Aggregator, GenerationAggregator
 from fme.downscaling.data import (
     PairedBatchData,
@@ -410,6 +410,7 @@ class TrainerConfig:
     coarse_patch_extent_lat: int | None = None
     coarse_patch_extent_lon: int | None = None
     resume_results_dir: str | None = None
+    resume_clear_wandb_run_id: bool = False
     log_loss_vs_noise: bool = False
 
     def __post_init__(self):
@@ -423,6 +424,10 @@ class TrainerConfig:
             raise ValueError(
                 "Either none or both of coarse_patch_extent_lat and "
                 "coarse_patch_extent_lon must be set."
+            )
+        if self.resume_clear_wandb_run_id and self.resume_results_dir is None:
+            raise ValueError(
+                "resume_clear_wandb_run_id is True but resume_results_dir is unset."
             )
 
     @property
@@ -523,7 +528,12 @@ def _get_channel_mean_scalar_metric(
         return sum(channel_metric) / len(channel_metric)
 
 
-def _resume_from_results_dir_if_not_preempted(experiment_dir, resume_results_dir):
+def _resume_from_results_dir_if_not_preempted(
+    experiment_dir: str,
+    resume_results_dir: str | None,
+    *,
+    clear_wandb_run_id: bool = False,
+) -> None:
     resuming_from_preempt = os.path.isfile(
         os.path.join(experiment_dir, "checkpoints/latest.ckpt")
     )
@@ -535,6 +545,10 @@ def _resume_from_results_dir_if_not_preempted(experiment_dir, resume_results_dir
                 f"Existing results directory {resume_results_dir} does not exist."
             )
         shutil.copytree(resume_results_dir, experiment_dir, dirs_exist_ok=True)
+        if clear_wandb_run_id:
+            wandb_path = os.path.join(experiment_dir, WANDB_RUN_ID_FILE)
+            if os.path.isfile(wandb_path):
+                os.remove(wandb_path)
 
 
 def main(config_path: str):
@@ -551,6 +565,7 @@ def main(config_path: str):
         _resume_from_results_dir_if_not_preempted(
             experiment_dir=train_config.experiment_dir,
             resume_results_dir=train_config.resume_results_dir,
+            clear_wandb_run_id=train_config.resume_clear_wandb_run_id,
         )
     # Calling this after resuming from results dir so that the submitted config is saved
     prepare_directory(train_config.experiment_dir, config)
