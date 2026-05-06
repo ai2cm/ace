@@ -13,7 +13,8 @@ from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Image
 
 from ..plotting import plot_paneled_data
-from .data import InferenceBatchData
+from .build_context import MetricBuildContext, maybe_filter
+from .data import InferenceBatchData, MetricBuildResult, SubAggregator
 
 
 @dataclasses.dataclass
@@ -394,3 +395,40 @@ class TimeMeanEvaluatorAggregator:
                 }
             )
         return xr.Dataset(data)
+
+
+@dataclasses.dataclass
+class TimeMeanMetricConfig:
+    type: Literal["time_mean"] = "time_mean"
+    variables: list[str] | None = None
+    name: str | None = None
+    target: Literal["denorm", "norm"] = "denorm"
+    reference_data: str | None = None
+    channel_mean_names: list[str] | None = None
+
+    def __post_init__(self):
+        if self.name is None:
+            self.name = "time_mean_norm" if self.target == "norm" else "time_mean"
+
+    def get_name(self) -> str:
+        return self.name  # type: ignore[return-value]
+
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        is_norm = self.target == "norm"
+        if self.reference_data is not None:
+            ref = xr.open_dataset(self.reference_data, decode_timedelta=False)
+        elif not is_norm:
+            ref = ctx.time_mean_reference_data
+        else:
+            ref = None
+        agg: SubAggregator = TimeMeanEvaluatorAggregator(
+            ctx.ops,
+            horizontal_dims=ctx.horizontal_coordinates.dims,
+            target=self.target,
+            variable_metadata=ctx.variable_metadata,
+            reference_means=ref,
+            channel_mean_names=(
+                (self.channel_mean_names or ctx.channel_mean_names) if is_norm else None
+            ),
+        )
+        return MetricBuildResult(aggregator=maybe_filter(agg, self.variables))
