@@ -45,7 +45,7 @@ run_eval() {
     --gpus 1 \
     --shared-memory 200GiB \
     --weka climate-default:/climate-default \
-    --budget ai2/climate \
+    --budget ai2/atec-climate \
     --system-python \
     --allow-dirty \
     --install "pip install --no-deps ." \
@@ -55,10 +55,10 @@ run_eval() {
 
 base_name="SamudrACE"
 
-for year in $(seq 300 310); do
+for year in $(seq 244 254); do
     year_str=$(printf "%04d" "$year")
 
-    run_eval "./configs/evaluator-config-1pct-samudrace-yr${year_str}.yaml" \
-             "${base_name}-fta_ft_fto_stoch_mas40_cd5epLRp00001-1pctCO2_0256to0350-gqmfjs2j_cbj61w53-rs0-yr${year_str}" \
+    run_eval "./configs/evaluator-config-1pct-out-of-sample-samudrace-yr${year_str}.yaml" \
+             "${base_name}-fta_ft_fto_stoch_mas40_cd5epLRp00001-1pctCO2_0256to0350-gqmfjs2j_cbj61w53-rs0-out-of-sample-yr${year_str}" \
              "01KQDENWX00MGTPRSEV7RY9Q8P"
 done

@@ -13,8 +13,8 @@ import yaml
 ZARR_PATH = (
     "gs://vcm-ml-intermediate/2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr"
 )
-YEAR_START = 300
-YEAR_END = 310  # inclusive
+YEAR_START = 244
+YEAR_END = 254  # inclusive
 OUTPUT_DIR = "./configs"
 
 # ==============================
@@ -198,7 +198,7 @@ def main():
 
         filename = os.path.join(
             OUTPUT_DIR,
-            f"evaluator-config-1pct-samudrace-yr{year:04d}.yaml",
+            f"evaluator-config-1pct-out-of-sample-samudrace-yr{year:04d}.yaml",
         )
 
         with open(filename, "w") as f:
