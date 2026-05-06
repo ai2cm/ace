@@ -57,6 +57,7 @@ from fme.ace.stepper.parameter_init import (
     ParameterInitializationConfig,
 )
 from fme.ace.stepper.single_module import (
+    CheckpointStepperConfig,
     Stepper,
     StepperConfig,
     StepSelector,
