@@ -15,7 +15,7 @@ from fme.core.wandb import Image
 
 from ..plotting import plot_paneled_data
 from .build_context import MetricBuildContext, MetricNotSupportedError, maybe_filter
-from .data import InferenceBatchData, SubAggregator
+from .data import InferenceBatchData, MetricBuildResult, SubAggregator
 
 
 @dataclasses.dataclass
@@ -324,12 +324,12 @@ class ZonalMeanMetricConfig:
     type: Literal["zonal_mean"] = "zonal_mean"
     variables: list[str] | None = None
     name: str = "zonal_mean"
-    zonal_mean_max_size: int | bool = 4096
+    zonal_mean_max_size: int = 4096
 
     def get_name(self) -> str:
         return self.name
 
-    def build(self, ctx: MetricBuildContext) -> SubAggregator:
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
         if ctx.ops.zonal_mean is None:
             raise MetricNotSupportedError(
                 "Zonal mean metric requires a grid type that supports zonal means."
@@ -340,4 +340,4 @@ class ZonalMeanMetricConfig:
             variable_metadata=ctx.variable_metadata,
             zonal_mean_max_size=self.zonal_mean_max_size,
         )
-        return maybe_filter(agg, self.variables)
+        return MetricBuildResult(aggregator=maybe_filter(agg, self.variables))

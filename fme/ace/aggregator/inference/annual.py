@@ -17,7 +17,7 @@ from fme.core.typing_ import TensorMapping
 
 from ..plotting import plot_mean_and_samples
 from .build_context import MetricBuildContext, maybe_filter
-from .data import InferenceBatchData, SubAggregator
+from .data import InferenceBatchData, MetricBuildResult, SubAggregator
 
 
 class PairedGlobalMeanAnnualAggregator:
@@ -380,7 +380,7 @@ class AnnualMetricConfig:
     def get_name(self) -> str:
         return self.name
 
-    def build(self, ctx: MetricBuildContext) -> SubAggregator:
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
         if self.reference_data is not None:
             ref = xr.open_dataset(self.reference_data, decode_timedelta=False)
         else:
@@ -391,4 +391,4 @@ class AnnualMetricConfig:
             variable_metadata=ctx.variable_metadata,
             monthly_reference_data=ref,
         )
-        return maybe_filter(agg, self.variables)
+        return MetricBuildResult(aggregator=maybe_filter(agg, self.variables))

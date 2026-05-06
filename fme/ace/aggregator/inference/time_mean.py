@@ -14,7 +14,7 @@ from fme.core.wandb import Image
 
 from ..plotting import plot_paneled_data
 from .build_context import MetricBuildContext, maybe_filter
-from .data import InferenceBatchData, SubAggregator
+from .data import InferenceBatchData, MetricBuildResult, SubAggregator
 
 
 @dataclasses.dataclass
@@ -413,7 +413,7 @@ class TimeMeanMetricConfig:
     def get_name(self) -> str:
         return self.name  # type: ignore[return-value]
 
-    def build(self, ctx: MetricBuildContext) -> SubAggregator:
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
         is_norm = self.target == "norm"
         if self.reference_data is not None:
             ref = xr.open_dataset(self.reference_data, decode_timedelta=False)
@@ -431,4 +431,4 @@ class TimeMeanMetricConfig:
                 (self.channel_mean_names or ctx.channel_mean_names) if is_norm else None
             ),
         )
-        return maybe_filter(agg, self.variables)
+        return MetricBuildResult(aggregator=maybe_filter(agg, self.variables))

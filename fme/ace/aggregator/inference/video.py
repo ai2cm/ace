@@ -13,7 +13,7 @@ from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import WandB
 
 from .build_context import MetricBuildContext, MetricNotSupportedError, maybe_filter
-from .data import InferenceBatchData, SubAggregator
+from .data import InferenceBatchData, MetricBuildResult, SubAggregator
 
 wandb = WandB.get_instance()
 
@@ -531,7 +531,7 @@ class VideoMetricConfig:
     def get_name(self) -> str:
         return self.name
 
-    def build(self, ctx: MetricBuildContext) -> SubAggregator:
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
         if not isinstance(ctx.horizontal_coordinates, LatLonCoordinates):
             raise MetricNotSupportedError("Video metric requires LatLonCoordinates.")
         agg: SubAggregator = VideoAggregator(
@@ -539,4 +539,4 @@ class VideoMetricConfig:
             enable_extended_videos=self.enable_extended_videos,
             variable_metadata=ctx.variable_metadata,
         )
-        return maybe_filter(agg, self.variables)
+        return MetricBuildResult(aggregator=maybe_filter(agg, self.variables))

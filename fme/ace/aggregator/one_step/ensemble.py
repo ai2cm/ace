@@ -14,6 +14,7 @@ from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import EnsembleTensorDict, TensorMapping
 
 from ..inference.build_context import MetricBuildContext
+from ..inference.data import MetricBuildResult
 
 
 def get_gen_shape(gen_data: TensorMapping):
@@ -349,10 +350,12 @@ class EnsembleMetricConfig:
     def get_name(self) -> str:
         return self.name  # type: ignore[return-value]
 
-    def build(self, ctx: MetricBuildContext) -> SelectStepEnsembleAggregator:
-        return get_one_step_ensemble_aggregator(
-            gridded_operations=ctx.ops,
-            target_time=self.step,
-            log_mean_maps=self.log_mean_maps,
-            metadata=ctx.variable_metadata,
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        return MetricBuildResult(
+            ensemble=get_one_step_ensemble_aggregator(
+                gridded_operations=ctx.ops,
+                target_time=self.step,
+                log_mean_maps=self.log_mean_maps,
+                metadata=ctx.variable_metadata,
+            )
         )

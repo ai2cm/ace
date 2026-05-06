@@ -12,7 +12,7 @@ from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorMapping
 
 from ..inference.build_context import MetricBuildContext, maybe_filter
-from ..inference.data import InferenceBatchData, SubAggregator
+from ..inference.data import InferenceBatchData, MetricBuildResult, SubAggregator
 from .reduced_metrics import AreaWeightedReducedMetric, ReducedMetric
 
 
@@ -204,7 +204,7 @@ class StepMeanMetricConfig:
     def get_name(self) -> str:
         return self.name  # type: ignore[return-value]
 
-    def build(self, ctx: MetricBuildContext) -> SubAggregator:
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
         if self.step > ctx.n_forward_steps:
             raise ValueError(
                 f"step_mean step {self.step} exceeds "
@@ -227,4 +227,4 @@ class StepMeanMetricConfig:
                 ),
             )
         )
-        return maybe_filter(agg, self.variables)
+        return MetricBuildResult(aggregator=maybe_filter(agg, self.variables))

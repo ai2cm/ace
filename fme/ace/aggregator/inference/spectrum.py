@@ -17,7 +17,7 @@ from fme.core.metrics import spherical_power_spectrum
 from fme.core.typing_ import TensorMapping
 
 from .build_context import MetricBuildContext, MetricNotSupportedError, maybe_filter
-from .data import InferenceBatchData, SubAggregator
+from .data import InferenceBatchData, MetricBuildResult, SubAggregator
 
 
 class SphericalPowerSpectrumAggregator:
@@ -258,7 +258,7 @@ class PowerSpectrumMetricConfig:
     def get_name(self) -> str:
         return self.name
 
-    def build(self, ctx: MetricBuildContext) -> SubAggregator:
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
         try:
             agg: SubAggregator = PairedSphericalPowerSpectrumAggregator(
                 gridded_operations=ctx.ops,
@@ -268,4 +268,4 @@ class PowerSpectrumMetricConfig:
             )
         except NotImplementedError as e:
             raise MetricNotSupportedError(str(e)) from e
-        return maybe_filter(agg, self.variables)
+        return MetricBuildResult(aggregator=maybe_filter(agg, self.variables))

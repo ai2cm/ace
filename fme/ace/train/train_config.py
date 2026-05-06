@@ -11,10 +11,6 @@ from fme.ace.aggregator import (
     TypedMetricInferenceEvaluatorAggregatorConfig,
 )
 from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregator
-
-AnyAggregatorConfig = (
-    InferenceEvaluatorAggregatorConfig | TypedMetricInferenceEvaluatorAggregatorConfig
-)
 from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.batch_data import PrognosticState
 from fme.ace.data_loading.config import DataLoaderConfig
@@ -46,6 +42,10 @@ from fme.core.optimization import Optimization, OptimizationConfig
 from fme.core.rand import set_seed
 from fme.core.typing_ import Slice, TensorDict, TensorMapping
 from fme.core.weight_ops import CopyWeightsConfig
+
+AnyAggregatorConfig = (
+    InferenceEvaluatorAggregatorConfig | TypedMetricInferenceEvaluatorAggregatorConfig
+)
 
 
 @dataclasses.dataclass

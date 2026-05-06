@@ -21,7 +21,7 @@ from fme.core.typing_ import TensorDict
 
 from ...plotting import plot_mean_and_samples
 from ..build_context import MetricBuildContext, MetricNotSupportedError
-from ..data import InferenceBatchData
+from ..data import InferenceBatchData, MetricBuildResult
 
 SAMPLE_DIM, TIME_DIM, LAT_DIM, LON_DIM = 0, 1, -2, -1
 
@@ -550,7 +550,7 @@ class EnsoIndexMetricConfig:
     def get_name(self) -> str:
         return self.name
 
-    def build(self, ctx: MetricBuildContext) -> PairedRegionalIndexAggregator:
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
         if not isinstance(ctx.horizontal_coordinates, LatLonCoordinates):
             raise MetricNotSupportedError(
                 "enso_index metric requires LatLonCoordinates."
@@ -565,13 +565,15 @@ class EnsoIndexMetricConfig:
             lat=ctx.horizontal_coordinates.lat,
             lon=ctx.horizontal_coordinates.lon,
         )
-        return PairedRegionalIndexAggregator(
-            target_aggregator=RegionalIndexAggregator(
-                regional_weights=nino34_region.regional_weights,
-                regional_mean=ctx.ops.regional_area_weighted_mean,
-            ),
-            prediction_aggregator=RegionalIndexAggregator(
-                regional_weights=nino34_region.regional_weights,
-                regional_mean=ctx.ops.regional_area_weighted_mean,
-            ),
+        return MetricBuildResult(
+            aggregator=PairedRegionalIndexAggregator(
+                target_aggregator=RegionalIndexAggregator(
+                    regional_weights=nino34_region.regional_weights,
+                    regional_mean=ctx.ops.regional_area_weighted_mean,
+                ),
+                prediction_aggregator=RegionalIndexAggregator(
+                    regional_weights=nino34_region.regional_weights,
+                    regional_mean=ctx.ops.regional_area_weighted_mean,
+                ),
+            )
         )

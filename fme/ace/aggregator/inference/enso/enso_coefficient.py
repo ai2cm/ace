@@ -18,7 +18,7 @@ from fme.core.typing_ import TensorDict
 from fme.core.wandb import WandB
 
 from ..build_context import MetricBuildContext
-from ..data import InferenceBatchData
+from ..data import InferenceBatchData, MetricBuildResult
 from .historical_index import INDEX_CALENDAR, NINO34_INDEX
 
 OVERLAP_THRESHOLD = 0.9
@@ -466,11 +466,13 @@ class EnsoCoefficientMetricConfig:
     def get_name(self) -> str:
         return self.name
 
-    def build(self, ctx: MetricBuildContext) -> EnsoCoefficientEvaluatorAggregator:
-        return EnsoCoefficientEvaluatorAggregator(
-            ctx.initial_time,
-            ctx.n_timesteps - 1,
-            ctx.timestep,
-            gridded_operations=ctx.ops,
-            variable_metadata=ctx.variable_metadata,
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        return MetricBuildResult(
+            aggregator=EnsoCoefficientEvaluatorAggregator(
+                ctx.initial_time,
+                ctx.n_timesteps - 1,
+                ctx.timestep,
+                gridded_operations=ctx.ops,
+                variable_metadata=ctx.variable_metadata,
+            )
         )

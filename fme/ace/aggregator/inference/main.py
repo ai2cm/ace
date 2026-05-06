@@ -34,7 +34,7 @@ from .annual import (
     PairedGlobalMeanAnnualAggregator,
 )
 from .build_context import MetricBuildContext, MetricNotSupportedError
-from .data import InferenceBatchData, SubAggregator, TimeSeriesLogs
+from .data import InferenceBatchData, MetricBuildResult, SubAggregator, TimeSeriesLogs
 from .enso import (
     EnsoCoefficientEvaluatorAggregator,
     LatLonRegion,
@@ -214,10 +214,7 @@ class TypedMetricInferenceEvaluatorAggregatorConfig:
         for metric in metrics:
             name = metric.get_name()
             try:
-                if isinstance(metric, EnsembleMetricConfig):
-                    ensemble_aggregators[name] = metric.build(ctx)
-                    continue
-                agg: SubAggregator = metric.build(ctx)
+                result: MetricBuildResult = metric.build(ctx)
             except MetricNotSupportedError:
                 if is_explicit:
                     raise
@@ -226,9 +223,12 @@ class TypedMetricInferenceEvaluatorAggregatorConfig:
                 )
                 continue
 
-            aggregators[name] = agg
-            if isinstance(metric, MeanMetricConfig):
-                time_series_aggregators[name] = agg  # type: ignore[assignment]
+            if result.aggregator is not None:
+                aggregators[name] = result.aggregator
+            if result.time_series is not None:
+                time_series_aggregators[name] = result.time_series
+            if result.ensemble is not None:
+                ensemble_aggregators[name] = result.ensemble
 
         return InferenceEvaluatorAggregator(
             aggregators=aggregators,
