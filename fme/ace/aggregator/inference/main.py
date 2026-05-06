@@ -2,7 +2,6 @@ import dataclasses
 import datetime
 import logging
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any
 
 import numpy as np
 import torch
@@ -23,34 +22,225 @@ from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Table, WandB
 
 from ..one_step.ensemble import (
+    EnsembleMetricConfig,
     SelectStepEnsembleAggregator,
     get_one_step_ensemble_aggregator,
 )
 from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
-from .annual import GlobalMeanAnnualAggregator, PairedGlobalMeanAnnualAggregator
-from .data import InferenceBatchData, SubAggregator, TimeSeriesLogs
+from ..one_step.reduced import OneStepMeanAdapter, StepMeanMetricConfig
+from .annual import (
+    AnnualMetricConfig,
+    GlobalMeanAnnualAggregator,
+    PairedGlobalMeanAnnualAggregator,
+)
+from .build_context import MetricBuildContext, MetricNotSupportedError
+from .data import InferenceBatchData, MetricBuildResult, SubAggregator, TimeSeriesLogs
 from .enso import (
     EnsoCoefficientEvaluatorAggregator,
     LatLonRegion,
     PairedRegionalIndexAggregator,
     RegionalIndexAggregator,
 )
-from .histogram import HistogramAggregator
-from .reduced import MeanAggregator, SingleTargetMeanAggregator
-from .seasonal import SeasonalAggregator
+from .enso.dynamic_index import EnsoIndexMetricConfig
+from .enso.enso_coefficient import EnsoCoefficientMetricConfig
+from .histogram import HistogramAggregator, HistogramMetricConfig
+from .reduced import MeanAggregator, MeanMetricConfig, SingleTargetMeanAggregator
+from .seasonal import SeasonalAggregator, SeasonalMetricConfig
 from .spectrum import (
     PairedSphericalPowerSpectrumAggregator,
+    PowerSpectrumMetricConfig,
     SphericalPowerSpectrumAggregator,
 )
-from .time_mean import TimeMeanAggregator, TimeMeanEvaluatorAggregator
-from .video import VideoAggregator
-from .zonal_mean import ZonalMeanAggregator
+from .time_mean import (
+    TimeMeanAggregator,
+    TimeMeanEvaluatorAggregator,
+    TimeMeanMetricConfig,
+)
+from .video import VideoAggregator, VideoMetricConfig
+from .zonal_mean import ZonalMeanAggregator, ZonalMeanMetricConfig
 
 wandb = WandB.get_instance()
 APPROXIMATELY_TWO_YEARS = datetime.timedelta(days=730)
 SLIGHTLY_LESS_THAN_FIVE_YEARS = datetime.timedelta(days=1800)
 NINO34_LAT = (-5, 5)
 NINO34_LON = (190, 240)
+
+MetricConfig = (
+    MeanMetricConfig
+    | StepMeanMetricConfig
+    | PowerSpectrumMetricConfig
+    | ZonalMeanMetricConfig
+    | VideoMetricConfig
+    | TimeMeanMetricConfig
+    | HistogramMetricConfig
+    | SeasonalMetricConfig
+    | AnnualMetricConfig
+    | EnsoIndexMetricConfig
+    | EnsoCoefficientMetricConfig
+    | EnsembleMetricConfig
+)
+
+
+@dataclasses.dataclass
+class TypedMetricInferenceEvaluatorAggregatorConfig:
+    """
+    Configuration for inference evaluator aggregator using typed metric configs.
+
+    Metrics can be configured explicitly via the ``metrics`` list, where each
+    entry is a typed metric configuration (e.g. ``MeanMetricConfig``,
+    ``StepMeanMetricConfig``).  When ``metrics`` is ``None``, a default set
+    of metrics is computed at build time based on the grid type and run length.
+
+    Parameters:
+        metrics: Explicit list of metric configurations.  When ``None``, a
+            default set is used.
+        monthly_reference_data: Path to monthly reference data to compare against.
+        time_mean_reference_data: Path to reference time means to compare against.
+    """
+
+    metrics: list[MetricConfig] | None = None
+    monthly_reference_data: str | None = None
+    time_mean_reference_data: str | None = None
+
+    def __post_init__(self):
+        if self.metrics is not None:
+            names = [m.get_name() for m in self.metrics]
+            seen: set[str] = set()
+            duplicates: set[str] = set()
+            for n in names:
+                if n in seen:
+                    duplicates.add(n)
+                seen.add(n)
+            if duplicates:
+                raise ValueError(
+                    f"Duplicate metric names: {sorted(duplicates)}. "
+                    "Use the 'name' field to disambiguate."
+                )
+
+    @staticmethod
+    def _default_metrics(
+        ctx: MetricBuildContext,
+        n_ensemble_per_ic: int,
+    ) -> list[MetricConfig]:
+        """Compute default metrics based on runtime information."""
+        metrics: list[MetricConfig] = [
+            MeanMetricConfig(target="denorm"),
+            MeanMetricConfig(target="norm"),
+        ]
+
+        if ctx.n_forward_steps >= 20:
+            metrics.append(StepMeanMetricConfig(step=20, target="denorm"))
+            metrics.append(StepMeanMetricConfig(step=20, target="norm"))
+
+        metrics.extend(
+            [
+                PowerSpectrumMetricConfig(),
+                ZonalMeanMetricConfig(),
+                TimeMeanMetricConfig(target="denorm"),
+                TimeMeanMetricConfig(target="norm"),
+            ]
+        )
+
+        if n_ensemble_per_ic > 1:
+            metrics.append(EnsembleMetricConfig(step=20))
+
+        if ctx.n_timesteps * ctx.timestep > APPROXIMATELY_TWO_YEARS:
+            metrics.append(AnnualMetricConfig())
+            if isinstance(ctx.horizontal_coordinates, LatLonCoordinates) and isinstance(
+                ctx.ops, LatLonOperations
+            ):
+                metrics.append(EnsoIndexMetricConfig())
+
+        if ctx.n_timesteps * ctx.timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS:
+            metrics.append(EnsoCoefficientMetricConfig())
+
+        return metrics
+
+    def build(
+        self,
+        dataset_info: DatasetInfo,
+        n_ic_steps: int,
+        n_forward_steps: int,
+        initial_time: xr.DataArray,
+        normalize: Callable[[TensorMapping], TensorDict],
+        output_dir: str | None = None,
+        channel_mean_names: Sequence[str] | None = None,
+        save_diagnostics: bool = True,
+        n_ensemble_per_ic: int = 1,
+        enable_time_series: bool = True,
+    ) -> "InferenceEvaluatorAggregator":
+        if save_diagnostics and output_dir is None:
+            raise ValueError("Output directory must be set to save diagnostics.")
+        if self.monthly_reference_data is None:
+            monthly_reference_data = None
+        else:
+            monthly_reference_data = xr.open_dataset(
+                self.monthly_reference_data, decode_timedelta=False
+            )
+        if self.time_mean_reference_data is None:
+            time_mean_reference_data = None
+        else:
+            time_mean_reference_data = xr.open_dataset(
+                self.time_mean_reference_data, decode_timedelta=False
+            )
+
+        n_timesteps = n_ic_steps + n_forward_steps
+        ctx = MetricBuildContext(
+            ops=dataset_info.gridded_operations,
+            horizontal_coordinates=dataset_info.horizontal_coordinates,
+            n_timesteps=n_timesteps,
+            n_ic_steps=n_ic_steps,
+            timestep=dataset_info.timestep,
+            variable_metadata=dataset_info.variable_metadata,
+            channel_mean_names=channel_mean_names,
+            monthly_reference_data=monthly_reference_data,
+            time_mean_reference_data=time_mean_reference_data,
+            initial_time=initial_time,
+        )
+
+        if self.metrics is not None:
+            metrics = list(self.metrics)
+        else:
+            metrics = self._default_metrics(ctx, n_ensemble_per_ic)
+
+        if not enable_time_series:
+            metrics = [m for m in metrics if not isinstance(m, MeanMetricConfig)]
+
+        is_explicit = self.metrics is not None
+        aggregators: dict[str, SubAggregator] = {}
+        time_series_aggregators: dict[str, TimeSeriesLogs] = {}
+        ensemble_aggregators: dict[str, SelectStepEnsembleAggregator] = {}
+
+        for metric in metrics:
+            name = metric.get_name()
+            try:
+                result: MetricBuildResult = metric.build(ctx)
+            except MetricNotSupportedError:
+                if is_explicit:
+                    raise
+                logging.warning(
+                    f"{name} metric not supported for this grid type, " "omitting."
+                )
+                continue
+
+            if result.aggregator is not None:
+                aggregators[name] = result.aggregator
+            if result.time_series is not None:
+                time_series_aggregators[name] = result.time_series
+            if result.ensemble is not None:
+                ensemble_aggregators[name] = result.ensemble
+
+        return InferenceEvaluatorAggregator(
+            aggregators=aggregators,
+            time_series_aggregators=time_series_aggregators,
+            coords=dataset_info.horizontal_coordinates.coords,
+            n_ic_steps=n_ic_steps,
+            normalize=normalize,
+            save_diagnostics=save_diagnostics,
+            output_dir=output_dir,
+            n_ensemble_per_ic=n_ensemble_per_ic,
+            ensemble_aggregators=ensemble_aggregators,
+        )
 
 
 @dataclasses.dataclass
@@ -182,7 +372,7 @@ class InferenceEvaluatorAggregatorConfig:
             name = step_mean_entry.get_name()
             # -1 because step 0 (after IC) is the first forward step
             target_time = step + n_ic_steps - 1
-            aggregators[name] = _OneStepMeanAdapter(
+            aggregators[name] = OneStepMeanAdapter(
                 OneStepMeanAggregator(
                     ops,
                     target_time=target_time,
@@ -190,7 +380,7 @@ class InferenceEvaluatorAggregatorConfig:
                     log_loss=False,
                 )
             )
-            aggregators[name + "_norm"] = _OneStepMeanAdapter(
+            aggregators[name + "_norm"] = OneStepMeanAdapter(
                 OneStepMeanAggregator(
                     ops,
                     target_time=target_time,
@@ -311,28 +501,6 @@ class InferenceEvaluatorAggregatorConfig:
             n_ensemble_per_ic=n_ensemble_per_ic,
             ensemble_aggregators=ensemble_aggregators,
         )
-
-
-class _OneStepMeanAdapter:
-    """Adapts OneStepMeanAggregator to accept InferenceBatchData."""
-
-    def __init__(self, inner: OneStepMeanAggregator):
-        self._inner = inner
-
-    def record_batch(self, data: InferenceBatchData) -> None:
-        self._inner.record_batch(
-            target_data=data.target,
-            gen_data=data.prediction,
-            target_data_norm=data.target_norm,
-            gen_data_norm=data.prediction_norm,
-            i_time_start=data.i_time_start,
-        )
-
-    def get_logs(self, label: str) -> dict[str, Any]:
-        return self._inner.get_logs(label)
-
-    def get_dataset(self) -> xr.Dataset:
-        return self._inner.get_dataset()
 
 
 class InferenceEvaluatorAggregator(

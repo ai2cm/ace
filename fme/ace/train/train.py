@@ -68,6 +68,7 @@ from fme.ace.aggregator import (
 from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregator,
     InferenceEvaluatorAggregatorConfig,
+    TypedMetricInferenceEvaluatorAggregatorConfig,
 )
 from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
@@ -216,7 +217,9 @@ class AggregatorBuilder(
     def __init__(
         self,
         train_config: TrainAggregatorConfig,
-        inference_config: InferenceEvaluatorAggregatorConfig | None,
+        inference_config: InferenceEvaluatorAggregatorConfig
+        | TypedMetricInferenceEvaluatorAggregatorConfig
+        | None,
         dataset_info: DatasetInfo,
         initial_inference_time: xr.DataArray | None,
         n_ic_steps: int,
@@ -263,8 +266,12 @@ class AggregatorBuilder(
     def get_inference_aggregator(
         self,
     ) -> InferenceEvaluatorAggregator:
-        if isinstance(self.inference_config, InferenceEvaluatorAggregatorConfig):
-            return self.inference_config.build(
+        if isinstance(
+            self.inference_config,
+            InferenceEvaluatorAggregatorConfig
+            | TypedMetricInferenceEvaluatorAggregatorConfig,
+        ):
+            build_kwargs: dict = dict(
                 dataset_info=self.dataset_info,
                 initial_time=self.initial_inference_time,
                 n_ic_steps=self.n_ic_steps,
@@ -275,6 +282,12 @@ class AggregatorBuilder(
                 output_dir=os.path.join(self.output_dir, "inference"),
                 n_ensemble_per_ic=self.n_ensemble_per_ic,
             )
+            if isinstance(
+                self.inference_config,
+                TypedMetricInferenceEvaluatorAggregatorConfig,
+            ):
+                build_kwargs["enable_time_series"] = False
+            return self.inference_config.build(**build_kwargs)
         else:
             raise ValueError(
                 "Trying to build an inference aggregator, but inference config not set."
