@@ -213,7 +213,7 @@ while read TRAIN_EXPER; do
             "${CHECKPOINT_DATASET_ARGS[@]}" \
             --gpus 1 \
             --shared-memory 20GiB \
-            --budget ai2/climate \
+            --budget ai2/atec-climate \
             --system-python \
             --install "pip install --no-deps ." \
             -- python -I -m $FME_MODULE_EVALUATOR "$CONFIG_PATH_REL" --override $OVERRIDE_ARGS

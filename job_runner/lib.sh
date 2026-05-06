@@ -198,7 +198,7 @@ run_gantry_training_job() {
             "${CHECKPOINT_DATASET_ARGS[@]}" \
             --gpus "$N_GPUS" \
             --shared-memory "$SHARED_MEM" \
-            --budget ai2/climate \
+            --budget ai2/atec-climate \
             --system-python \
             --install "pip install --no-deps ." \
             -- torchrun --nproc_per_node "$N_GPUS" -m $FME_MODULE "$CONFIG_PATH" $OVERRIDE |
