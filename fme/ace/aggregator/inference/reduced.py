@@ -15,7 +15,7 @@ from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Table, WandB
 
 from .build_context import MetricBuildContext, maybe_filter
-from .data import InferenceBatchData, MetricBuildResult, SubAggregator
+from .data import InferenceBatchData, MetricBuildResult
 
 
 @dataclasses.dataclass
@@ -526,11 +526,12 @@ class MeanMetricConfig:
         return self.name  # type: ignore[return-value]
 
     def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
-        agg: SubAggregator = MeanAggregator(
+        agg = MeanAggregator(
             ctx.ops,
             target=self.target,
             n_timesteps=ctx.n_timesteps,
             variable_metadata=ctx.variable_metadata,
         )
-        filtered = maybe_filter(agg, self.variables)
-        return MetricBuildResult(aggregator=filtered, time_series=filtered)
+        return MetricBuildResult(
+            aggregator=maybe_filter(agg, self.variables), time_series=agg
+        )
