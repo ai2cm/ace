@@ -1,7 +1,9 @@
+import contextlib
 import dataclasses
 import logging
 import os
 from collections.abc import Callable, Sequence
+from typing import Any
 
 import dacite
 import torch
@@ -12,16 +14,13 @@ from fme.core.cli import prepare_config, prepare_directory
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.distributed import Distributed
 from fme.core.generics.trainer import AggregatorBuilderABC, Trainer, inference_one_epoch
+from fme.core.generics.validation import run_validation
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.coupled.aggregator import (
     InferenceEvaluatorAggregator,
     InferenceEvaluatorAggregatorConfig,
     OneStepAggregator,
     TrainAggregator,
-)
-from fme.coupled.data_loading.batch_data import (
-    CoupledPairedData,
-    CoupledPrognosticState,
 )
 from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.stepper import CoupledTrainOutput
@@ -39,6 +38,8 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
     inference_data = builder.get_evaluation_inference_data()
 
     variable_metadata = get_derived_variable_metadata() | train_data.variable_metadata
+    for data, name in zip((train_data, validation_data), ("train", "valid")):
+        data.log_info(name)
     logging.info("Starting model initialization")
     stepper = builder.get_stepper(dataset_info)
     end_of_batch_ops = builder.get_end_of_batch_ops(stepper.modules)
@@ -62,16 +63,45 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
         save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
         output_dir=config.output_dir,
     )
+    inference_epochs = config.get_inference_epochs()
+
+    def validation_callback(epoch: int) -> tuple[dict[str, Any], float]:
+        validation_data.set_epoch(epoch)
+        aggregator = aggregator_builder.get_validation_aggregator()
+        logs = run_validation(
+            train_stepper=stepper,
+            validation_data=validation_data,
+            aggregator=aggregator,
+            diagnostics_subdir=f"epoch_{epoch:04d}",
+            record_logs=lambda logs: None,
+        )
+        return logs, logs["val/mean/loss"]
+
+    def inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
+        if epoch not in inference_epochs:
+            return {}, None
+        logs = inference_one_epoch(
+            stepper=stepper,
+            validation_context=contextlib.nullcontext,
+            dataset=inference_data,
+            aggregator=aggregator_builder.get_inference_aggregator(),
+            label="inference",
+            epoch=epoch,
+        )
+        error = logs.get("inference/time_mean_norm/rmse/channel_mean")
+        return logs, error
+
     trainer = Trainer(
         train_data=train_data,
         validation_data=validation_data,
-        inference_data=inference_data,
         stepper=stepper,
         build_optimization=builder.get_optimization,
         build_ema=builder.get_ema,
         config=config,
         aggregator_builder=aggregator_builder,
+        validation_callback=validation_callback,
         end_of_batch_callback=end_of_batch_ops,
+        inference_callback=inference_callback,
     )
 
     def inference(
@@ -106,7 +136,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
 
 
 class CoupledAggregatorBuilder(
-    AggregatorBuilderABC[CoupledPrognosticState, CoupledTrainOutput, CoupledPairedData]
+    AggregatorBuilderABC[CoupledTrainOutput],
 ):
     def __init__(
         self,
