@@ -10,12 +10,11 @@ evaluate_before_training: true
 ema:
   decay: 0.999
 max_epochs: 20
-n_coupled_steps: 4
 inference:
   n_coupled_steps: 1440
-  coupled_steps_in_memory: 8
+  coupled_steps_in_memory: 2
   loader:
-    num_data_workers: 1
+    num_data_workers: 4
     dataset:
       ocean:
         merge:
@@ -53,6 +52,7 @@ logging:
   log_to_file: true
   project: ace-samudra-coupled-cm4
   entity: ai2cm
+  metrics_log_dir: /results/metrics
 train_loader:
   batch_size: 16
   num_data_workers: 2
@@ -135,9 +135,13 @@ optimization:
         step_each_iteration: true
     milestones: [2000]
 stepper_training:
+  n_coupled_steps: 4
   ocean:
     parameter_init:
       weights_path: /ocean_ckpt.tar
+    loss_contributions:
+      n_steps: 4
+      weight: 1.0
     loss:
       type: MSE
   atmosphere:
@@ -150,28 +154,7 @@ stepper_training:
     loss_contributions:
       n_steps: 0
     loss:
-      type: MSE
-      weights:
-        air_temperature_0: 0.5
-        air_temperature_1: 0.5
-        eastward_wind_0: 0.5
-        northward_wind_0: 0.5
-        specific_total_water_0: 0.5
-        specific_total_water_1: 0.25
-        specific_total_water_2: 0.5
-        PRATEsfc: 0.5
-        h500: 10
-        TMP850: 5
-        Q2m: 10
-        TMP2m: 10
-        UGRD10m: 2.5
-        VGRD10m: 2.5
-        DLWRFsfc: 2
-        ULWRFsfc: 5
-        USWRFsfc: 2
-        DSWRFsfc: 2
-        USWRFtoa: 2
-        tendency_of_total_water_path_due_to_advection: 0.5
+      type: MSE # not used
 stepper:
   ocean_fraction_prediction:
     land_fraction_name: land_fraction
@@ -475,7 +458,7 @@ stepper:
             type: NoiseConditionedSFNO
             config:
               embed_dim: 384
-              noise_embed_dim: 0
+              noise_embed_dim: 64
               filter_type: linear
               use_mlp: true
               num_layers: 8
@@ -483,6 +466,7 @@ stepper:
               separable: false
               spectral_layers: 3
               spectral_transform: sht
+              noise_type: isotropic
           normalization:
             network:
               global_means_path: /atmos_stats/centering.nc
