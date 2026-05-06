@@ -90,8 +90,8 @@ train_data:
         start_time: '2014-01-01T00:00:00'
         stop_time: '2022-12-31T23:59:00'
   lat_extent:
-    start: -30
-    stop: 30
+    start: -66
+    stop: 70
   strict_ensemble: false
 validation_data:
   batch_size: 16
@@ -138,7 +138,7 @@ validation_data:
   drop_last: true
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
-max_epochs: 400
+max_epochs: 600
 validate_interval: 10
 experiment_dir: /results
 save_checkpoints: false

@@ -2,10 +2,10 @@
 
 set -e
 
-JOB_NAME="eval-global-trained-low-tuned-denoising-moe-tropics"
+JOB_NAME="eval-global-trained-low-tuned-denoising-moe-events"
 #JOB_NAME="eval-global-trained-denoising-moe-events"
 
-CONFIG_FILENAME="eval-coarse-prmsl-tropic-pac.yaml"
+CONFIG_FILENAME="eval-coarse-prmsl-events.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -21,7 +21,7 @@ NGPU=2
 
 IMAGE="$(cat latest_deps_only_image.txt)"
 
-EXISTING_RESULTS_DATASET_HIGH_SIGMA=01KQ8N5Z78FGZRTC0FBGB5A3S9
+EXISTING_RESULTS_DATASET_HIGH_SIGMA=01KQWYVBM0M3E76B1E0Y9PCCV2
 EXISTING_RESULTS_DATASET_LOW_SIGMA=01KQ88Q970VDZYZYFB4S2621TZ
 wandb_group=""
 
@@ -35,7 +35,6 @@ gantry run \
     --description 'Run 100km to 3km evaluation on coarsened X-SHiELD' \
     --workspace ai2/climate-titan \
     --priority urgent \
-    --not-preemptible \
     --cluster ai2/jupiter \
     --cluster ai2/titan \
     --beaker-image $IMAGE \
@@ -51,7 +50,7 @@ gantry run \
     --weka climate-default:/climate-default \
     --gpus $NGPU \
     --shared-memory 400GiB \
-    --budget ai2/climate \
+    --budget ai2/atec-climate \
     --no-conda \
     --install "pip install --no-deps ." \
     --allow-dirty \
