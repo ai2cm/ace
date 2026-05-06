@@ -58,7 +58,7 @@ base_name="SamudrACE"
 for year in $(seq 311 320); do
     year_str=$(printf "%04d" "$year")
 
-    run_eval "./configs/evaluator-config-override-atmosphere-forcing-winds-only-yr${year_str}.yaml" \
-             "${base_name}-arxiv-ckpt-ft-after-fto-override-atmosphere-forcing-winds-only-yr${year_str}" \
-             "01JY7H5WRR475Q5E6V2PA83SYQ"
+    run_eval "./configs/evaluator-config-updated-picontrol-yr${year_str}.yaml" \
+             "${base_name}-fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7-rs0-yr${year_str}" \
+             "01KPHCZVYZDR2S9QAZK5GSBXX4"
 done
