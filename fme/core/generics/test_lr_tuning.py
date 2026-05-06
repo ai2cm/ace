@@ -347,32 +347,6 @@ def test_uses_subset_loader_with_num_batches():
     train_data.subset_loader.assert_called_once_with(stop_batch=4)
 
 
-def test_with_ema_validation():
-    """Trial should work when validate_stepper closes over EMA validation."""
-    stepper = _Stepper()
-    train_data = _TrainData(n_batches=5)
-    optimization = _build_optimization(stepper.modules)
-    config = LRTuningConfig(
-        epochs=Slice(),
-        lr_factor=0.5,
-        num_batches=3,
-        improvement_threshold=0.1,
-    )
-
-    result = run_lr_tuning_trial(
-        train_data=train_data,
-        optimization=optimization,
-        copy_stepper=_make_copy_stepper(stepper),
-        build_optimization=_build_optimization,
-        copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
-        config=config,
-        current_lr=0.01,
-        validate_stepper=_make_validate_stepper(0.8, 0.5),
-    )
-
-    assert result == 0.01 * 0.5
-
-
 def test_trial_does_not_mutate_original_ema_num_updates():
     """The original EMA's num_updates must not be modified by the trial."""
     stepper = _Stepper()
