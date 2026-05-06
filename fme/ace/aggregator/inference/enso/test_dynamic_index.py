@@ -21,6 +21,7 @@ from .dynamic_index import (
     _compute_autocorrelation_at_lag,
     _compute_sample_mean_std,
     anomalies_from_monthly_climo,
+    compute_psd_band_power,
     running_monthly_mean,
 )
 
@@ -432,6 +433,10 @@ def test_regional_index_aggregator(variable_name):
         assert metric_name in logs
         assert isinstance(logs[metric_name], float)
 
+    metric_name = f"test/{variable_name}_nino34_index_psd_2_5yr"
+    assert metric_name in logs
+    assert isinstance(logs[metric_name], float)
+
 
 @pytest.mark.parametrize(
     "variable_name",
@@ -507,6 +512,11 @@ def test_paired_regional_index_aggregator(variable_name):
             assert metric_name in logs
             assert isinstance(logs[metric_name], float)
 
+    for suffix in ["_nino34_index_psd_2_5yr", "_nino34_index_psd_2_5yr_target"]:
+        metric_name = f"test/{variable_name}{suffix}"
+        assert metric_name in logs
+        assert isinstance(logs[metric_name], float)
+
 
 def test__calculate_sample_average_power_spectrum():
     data = [
@@ -519,6 +529,43 @@ def test__calculate_sample_average_power_spectrum():
         )
     assert freq.shape == power_spectrum.shape
     assert freq.shape == (3,)
+
+
+def test_compute_psd_band_power():
+    n_months = 120  # 10 years of monthly data
+    t = np.arange(n_months)
+    period_3yr = 36  # months
+    signal = np.sin(2 * np.pi * t / period_3yr)
+    data = xr.DataArray(signal.reshape(1, -1), dims=("sample", "time"))
+    freq, power = _calculate_sample_average_power_spectrum(data)
+
+    band_power = compute_psd_band_power(freq, power, period_bounds=(2.0, 5.0))
+    assert isinstance(band_power, float)
+    assert not np.isnan(band_power)
+    assert band_power > 0.0
+
+    # Most power should be inside the 2-5yr band for a 3-year period signal
+    total_power = compute_psd_band_power(
+        freq,
+        power,
+        period_bounds=(1.0 / freq.max(), 1.0 / max(freq[freq > 0].min(), 1e-10)),
+    )
+    # Skip ratio check if total_power is nan (when freq range is too narrow)
+    if not np.isnan(total_power) and total_power > 0:
+        assert band_power / total_power > 0.5
+
+    # Band with no frequency bins returns NaN
+    assert np.isnan(compute_psd_band_power(freq, power, period_bounds=(0.01, 0.02)))
+
+
+def test_compute_psd_band_power_known_value():
+    """Verify trapezoidal integration against a hand-calculated value."""
+    freqs = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
+    power = np.array([10.0, 20.0, 30.0, 40.0, 50.0, 60.0])
+    result = compute_psd_band_power(freqs, power, period_bounds=(2.0, 5.0))
+    # period 2-5yr -> freq 0.2-0.5 cycles/yr
+    expected = np.trapezoid([20.0, 30.0, 40.0, 50.0], [0.2, 0.3, 0.4, 0.5])
+    np.testing.assert_almost_equal(result, expected)
 
 
 def test__compute_sample_mean_std():
