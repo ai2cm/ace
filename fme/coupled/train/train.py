@@ -37,6 +37,8 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
     inference_data = builder.get_evaluation_inference_data()
 
     variable_metadata = get_derived_variable_metadata() | train_data.variable_metadata
+    for data, name in zip((train_data, validation_data), ("train", "valid")):
+        data.log_info(name)
     logging.info("Starting model initialization")
     stepper = builder.get_stepper(dataset_info)
     end_of_batch_ops = builder.get_end_of_batch_ops(stepper.modules)
