@@ -194,7 +194,7 @@ def _write_test_yaml_files(
     inference_n_coupled_steps: int = 6,
     coupled_steps_in_memory: int = 2,
     save_per_epoch_diagnostics: bool = True,
-    loss_atmos_n_steps: int = 1000,  # large number ~= inf
+    loss_atmos_n_steps: int = 3,
     loss_ocean_weight: float = 1.0,
     crps_training: bool = False,
 ):
