@@ -53,21 +53,30 @@ class EMAConfig:
     Configuration for exponential moving average of model weights.
 
     Parameters:
-        decay: decay rate for the moving average
+        decay: The decay rate of the moving average.
+        faster_decay_at_start: Whether to use the number of updates to determine
+            the decay rate. If True, the decay rate will be min(decay, (1 +
+            num_updates) / (10 + num_updates)). If False, the decay rate
+            will be decay.
         resume_ema_ckpt_path: Optional path to a training checkpoint
-            (``ckpt.tar``) whose EMA running state (averaged weights and
-            update counter) should be loaded into the freshly-built
-            ``EMATracker`` for fine-tuning. The current config's ``decay``
-            is kept; only the running state is transferred. Intended for
-            non-resuming jobs; preemption resume in the Trainer overrides
-            this state via ``EMATracker.from_state``.
+            (e.g., ``ckpt.tar``) whose EMA running state (averaged weights and
+            update counter) should be loaded into the freshly-built ``EMATracker``
+            for fine-tuning. The current config's ``decay`` and
+            ``faster_decay_at_start`` are kept; only the running state is
+            transferred. Intended for non-resuming jobs; preemption resume in
+            the Trainer overrides this state via ``EMATracker.from_state``.
     """
 
     decay: float = 0.9999
+    faster_decay_at_start: bool = True
     resume_ema_ckpt_path: str | None = None
 
     def build(self, model: HasNamedParameters):
-        ema = EMATracker(model, decay=self.decay, faster_decay_at_start=True)
+        ema = EMATracker(
+            model,
+            decay=self.decay,
+            faster_decay_at_start=self.faster_decay_at_start,
+        )
         if self.resume_ema_ckpt_path is not None:
             _load_finetune_ema_state(ema, self.resume_ema_ckpt_path)
         return ema

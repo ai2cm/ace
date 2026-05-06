@@ -109,6 +109,12 @@ class DummyDataset(DatasetABC):
         time = xr.DataArray(self.all_times[time_slice].values, dims=["time"])
         return (self._dummy_dict, time, self._labels, self._epoch)
 
+    def enable_shared_memory(self):
+        pass
+
+    def set_global_epoch_tensor(self, tensor):
+        pass
+
     def set_epoch(self, epoch: int):
         self._apply_sample_n_times(self._n_timesteps_schedule.get_value(epoch))
         self._epoch = epoch
