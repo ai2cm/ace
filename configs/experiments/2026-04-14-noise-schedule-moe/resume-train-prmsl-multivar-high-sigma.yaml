@@ -24,7 +24,7 @@ model:
     config:
       model_channels: 128
       attn_resolutions: []
-      bottleneck_attention: false
+      #bottleneck_attention:  false
       num_blocks: 1
       channel_mult_emb: 6
       channel_mult:
