@@ -137,9 +137,10 @@ class TrainConfig:
             evaluation, and on catching a termination signal.
         experiment_dir: Directory where checkpoints and logs are saved. For the
             time being, this must be a local directory.
-        inference: Configurations for inline inference runs. The weighted sum
-            of each run's error is used for checkpoint selection. Each entry
-            can specify a name (used as wandb log prefix) and weight.
+        inference: Configuration(s) for inline inference runs. Accepts a single
+            InlineInferenceConfig or a list of them. The weighted sum of each
+            run's error is used for checkpoint selection. Each entry can specify
+            a name (used as wandb log prefix) and weight.
         stepper_training: Training-specific configuration including loss, ensemble
             settings, parameter initialization, and forward step scheduling.
         train_aggregator: Configuration for the train aggregator.
@@ -192,7 +193,9 @@ class TrainConfig:
     max_epochs: int
     save_checkpoint: bool
     experiment_dir: str
-    inference: list[InlineInferenceConfig] = dataclasses.field(default_factory=list)
+    inference: InlineInferenceConfig | list[InlineInferenceConfig] = dataclasses.field(
+        default_factory=list
+    )
     stepper_training: TrainStepperConfig = dataclasses.field(
         default_factory=lambda: TrainStepperConfig()
     )
@@ -234,7 +237,7 @@ class TrainConfig:
         resolved_names = self.inference_names
         if len(resolved_names) != len(set(resolved_names)):
             raise ValueError(f"Duplicate inference names: {resolved_names}")
-        for i, entry in enumerate(self.inference):
+        for i, entry in enumerate(self.inference_list):
             if self.train_loader.using_labels != entry.using_labels:
                 name = resolved_names[i]
                 raise ValueError(
@@ -271,12 +274,19 @@ class TrainConfig:
         return self.train_evaluation_samples // self.train_loader.batch_size
 
     @property
+    def inference_list(self) -> list[InlineInferenceConfig]:
+        if isinstance(self.inference, InlineInferenceConfig):
+            return [self.inference]
+        return self.inference
+
+    @property
     def inference_names(self) -> list[str]:
+        inference = self.inference_list
         names = []
-        for i, entry in enumerate(self.inference):
+        for i, entry in enumerate(inference):
             if entry.name is not None:
                 names.append(entry.name)
-            elif len(self.inference) == 1:
+            elif len(inference) == 1:
                 names.append("inference")
             else:
                 names.append(f"inference_{i}")
@@ -297,11 +307,12 @@ class TrainConfig:
         return os.path.join(self.experiment_dir, "output")
 
     def get_inference_epoch_sets(self) -> list[set[int]]:
-        if not self.inference:
+        inference = self.inference_list
+        if not inference:
             return []
         start_epoch = 0 if self.evaluate_before_training else 1
         all_epochs = list(range(start_epoch, self.max_epochs + 1))
-        return [set(all_epochs[entry.epochs.slice]) for entry in self.inference]
+        return [set(all_epochs[entry.epochs.slice]) for entry in inference]
 
     def get_inference_epochs(self) -> list[int]:
         epoch_sets = self.get_inference_epoch_sets()
@@ -354,7 +365,7 @@ class TrainBuilders:
         entries: list[
             tuple[InlineInferenceConfig, InferenceGriddedData, DatasetInfo, str]
         ] = []
-        for entry, name in zip(self.config.inference, names):
+        for entry, name in zip(self.config.inference_list, names):
             window_requirements = (
                 self.config.stepper_config.get_evaluation_window_data_requirements(
                     entry.forward_steps_in_memory
