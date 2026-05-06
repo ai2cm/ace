@@ -16,19 +16,65 @@ from fme.core.typing_ import Slice
 from fme.core.weight_ops import CopyWeightsConfig
 from fme.coupled.aggregator import InferenceEvaluatorAggregatorConfig
 from fme.coupled.data_loading.config import CoupledDataLoaderConfig
-from fme.coupled.data_loading.getters import get_gridded_data, get_inference_data
+from fme.coupled.data_loading.getters import (
+    get_gridded_data,
+    get_gridded_train_data,
+    get_inference_data,
+)
 from fme.coupled.data_loading.gridded_data import GriddedData, InferenceGriddedData
 from fme.coupled.data_loading.inference import InferenceDataLoaderConfig
 from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.requirements import (
     CoupledDataRequirements,
     CoupledPrognosticStateDataRequirements,
+    CoupledTrainDataRequirements,
 )
 from fme.coupled.stepper import (
     CoupledStepperConfig,
     CoupledTrainStepper,
     CoupledTrainStepperConfig,
 )
+from fme.coupled.typing_ import CoupledOptionalInt
+
+
+def _validate_loss_n_steps(
+    n_coupled_steps: int,
+    n_inner_steps: int,
+    component_n_steps_max: CoupledOptionalInt,
+) -> None:
+    """Ensure each component's ``LossContributionsConfig.n_steps`` upper bound
+    fits within the rollout horizon implied by ``n_coupled_steps`` and the
+    atmosphere/ocean step ratio.
+
+    Raises:
+        ValueError: If either component's ``n_steps_max`` exceeds its limit.
+            The error message lists every misconfigured component.
+    """
+    atmos_limit = n_coupled_steps * n_inner_steps
+    errors: list[str] = []
+    if (
+        component_n_steps_max.ocean is not None
+        and component_n_steps_max.ocean > n_coupled_steps
+    ):
+        errors.append(
+            f"ocean loss_contributions.n_steps max "
+            f"({component_n_steps_max.ocean}) exceeds n_coupled_steps "
+            f"({n_coupled_steps})."
+        )
+    if (
+        component_n_steps_max.atmosphere is not None
+        and component_n_steps_max.atmosphere > atmos_limit
+    ):
+        errors.append(
+            f"atmosphere loss_contributions.n_steps max "
+            f"({component_n_steps_max.atmosphere}) exceeds n_coupled_steps * "
+            f"n_inner_steps ({n_coupled_steps} * {n_inner_steps} = "
+            f"{atmos_limit})."
+        )
+    if errors:
+        raise ValueError(
+            "Incompatible LossContributionsConfig n_steps: " + " ".join(errors)
+        )
 
 
 @dataclasses.dataclass
@@ -164,6 +210,11 @@ class TrainConfig:
                 "lr_tuning and optimization.scheduler cannot both be specified; "
                 "lr_tuning is an alternative form of learning rate scheduling"
             )
+        _validate_loss_n_steps(
+            n_coupled_steps=self.stepper_training.n_coupled_steps,
+            n_inner_steps=self.stepper.n_inner_steps,
+            component_n_steps_max=self.stepper_training.component_n_steps_max,
+        )
 
     @property
     def n_coupled_steps(self) -> int:
@@ -207,7 +258,12 @@ class TrainBuilders:
     def __init__(self, config: TrainConfig):
         self.config = config
 
-    def _get_train_window_data_requirements(self) -> CoupledDataRequirements:
+    def _get_train_window_data_requirements(self) -> CoupledTrainDataRequirements:
+        return self.config.stepper_training.get_train_window_data_requirements(
+            self.config.stepper
+        )
+
+    def _get_valid_window_data_requirements(self) -> CoupledDataRequirements:
         return self.config.stepper.get_evaluation_window_data_requirements(
             self.config.n_coupled_steps
         )
@@ -224,14 +280,13 @@ class TrainBuilders:
 
     def get_train_data(self) -> GriddedData:
         data_requirements = self._get_train_window_data_requirements()
-        return get_gridded_data(
+        return get_gridded_train_data(
             self.config.train_loader,
             requirements=data_requirements,
-            train=True,
         )
 
     def get_validation_data(self) -> GriddedData:
-        data_requirements = self._get_train_window_data_requirements()
+        data_requirements = self._get_valid_window_data_requirements()
         return get_gridded_data(
             self.config.validation_loader,
             requirements=data_requirements,

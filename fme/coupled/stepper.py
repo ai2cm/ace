@@ -57,8 +57,9 @@ from fme.coupled.loss import LossContributionsConfig, StepLossABC, StepPredictio
 from fme.coupled.requirements import (
     CoupledDataRequirements,
     CoupledPrognosticStateDataRequirements,
+    CoupledTrainDataRequirements,
 )
-from fme.coupled.typing_ import CoupledNames, CoupledTensorMapping
+from fme.coupled.typing_ import CoupledNames, CoupledOptionalInt, CoupledTensorMapping
 
 
 @dataclasses.dataclass
@@ -1486,18 +1487,79 @@ class CoupledTrainStepperConfig:
             else:
                 self.n_ensemble = 1
 
+    @property
+    def component_n_steps_max(self) -> CoupledOptionalInt:
+        """Per-component upper bound on optimized loss steps, or ``None`` if
+        unbounded. Used by ``TrainConfig`` to validate compatibility with
+        ``CoupledStepperConfig.n_inner_steps`` and ``self.n_coupled_steps``.
+        """
+        return CoupledOptionalInt(
+            ocean=self.ocean.loss_contributions.n_steps_max,
+            atmosphere=self.atmosphere.loss_contributions.n_steps_max,
+        )
+
+    def get_train_window_data_requirements(
+        self,
+        stepper_config: CoupledStepperConfig,
+    ) -> CoupledTrainDataRequirements:
+        """Data requirements for the coupled training loader.
+
+        Atmosphere target variables are loaded for the loss horizon plus the
+        initial condition timestep; atmosphere forcing variables are loaded
+        for the full rollout. Beyond the target horizon, target variables are
+        NaN-padded by the dataset wrapper. Trailing NaNs are never consumed
+        by the loss (loss is skipped for non-optimized steps) or by the
+        forward pass (forcings come from a disjoint variable set).
+
+        When the atmosphere loss has unbounded ``n_steps`` (``None``), the
+        target horizon collapses to the full rollout length, recovering the
+        previous behavior.
+
+        Args:
+            stepper_config: The coupled stepper config, used for variable
+                names and timesteps.
+
+        """
+        long_atmos_n = self.n_coupled_steps * stepper_config.n_inner_steps + 1
+        atmos_n_steps_max = self.component_n_steps_max.atmosphere
+        if atmos_n_steps_max is None:
+            short_atmos_n = long_atmos_n
+        else:
+            # +1 for n_ic_timesteps (asserted to be 1 in CoupledStepper.__init__)
+            short_atmos_n = atmos_n_steps_max + 1
+        forcing_names = list(stepper_config.atmosphere_forcing_exogenous_names)
+        target_names = list(
+            set(stepper_config.all_names.atmosphere) - set(forcing_names)
+        )
+        return CoupledTrainDataRequirements(
+            ocean_timestep=stepper_config.ocean_timestep,
+            ocean_requirements=DataRequirements(
+                names=stepper_config.all_names.ocean,
+                n_timesteps=self.n_coupled_steps + 1,
+            ),
+            atmosphere_timestep=stepper_config.atmosphere_timestep,
+            atmosphere_target_requirements=DataRequirements(
+                names=target_names, n_timesteps=short_atmos_n
+            ),
+            atmosphere_forcing_requirements=DataRequirements(
+                names=forcing_names, n_timesteps=long_atmos_n
+            ),
+        )
+
     def _build_loss(
         self, stepper: CoupledStepper, n_coupled_steps: int
     ) -> CoupledStepperTrainLoss:
         ocean_step_loss = stepper.ocean.build_loss(self.ocean.loss)
         atmos_step_loss = stepper.atmosphere.build_loss(self.atmosphere.loss)
-        max_n_steps_ocean = n_coupled_steps
-        max_n_steps_atmos = n_coupled_steps * stepper.n_inner_steps
+        n_steps_limit_ocean = n_coupled_steps
+        n_steps_limit_atmos = n_coupled_steps * stepper.n_inner_steps
         ocean_loss = self.ocean.loss_contributions.build(
-            ocean_step_loss, stepper.ocean.TIME_DIM, max_n_steps=max_n_steps_ocean
+            ocean_step_loss, stepper.ocean.TIME_DIM, n_steps_limit=n_steps_limit_ocean
         )
         atmos_loss = self.atmosphere.loss_contributions.build(
-            atmos_step_loss, stepper.atmosphere.TIME_DIM, max_n_steps=max_n_steps_atmos
+            atmos_step_loss,
+            stepper.atmosphere.TIME_DIM,
+            n_steps_limit=n_steps_limit_atmos,
         )
         return CoupledStepperTrainLoss(ocean_loss, atmos_loss)
 
