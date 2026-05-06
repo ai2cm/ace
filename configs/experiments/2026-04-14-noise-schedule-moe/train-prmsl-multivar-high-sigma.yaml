@@ -32,6 +32,7 @@ model:
       - 2
       - 2
       - 2
+      - 2
       use_apex_gn: true
     type: unet_diffusion_song_v2
   normalization:
