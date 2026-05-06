@@ -42,6 +42,7 @@ from fme.core.rand import set_seed
 from fme.core.typing_ import Slice, TensorDict, TensorMapping
 from fme.core.weight_ops import CopyWeightsConfig
 
+
 @dataclasses.dataclass
 class InlineInferenceConfig:
     """

@@ -8,7 +8,7 @@ import torch
 import xarray as xr
 
 from fme.ace.data_loading.batch_data import PairedData, PrognosticState
-from fme.core.coordinates import LatLonCoordinates
+from fme.core.coordinates import HorizontalCoordinates, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.diagnostics import get_reduced_diagnostics, write_reduced_diagnostics
 from fme.core.fill import SmoothFloodFill
@@ -17,47 +17,25 @@ from fme.core.generics.aggregator import (
     InferenceLog,
     InferenceLogs,
 )
-from fme.core.gridded_ops import LatLonOperations
+from fme.core.gridded_ops import GriddedOperations, LatLonOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Table, WandB
 
-from ..one_step.ensemble import (
-    EnsembleMetricConfig,
-    SelectStepEnsembleAggregator,
-    get_one_step_ensemble_aggregator,
-)
-from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
-from ..one_step.reduced import OneStepMeanAdapter, StepMeanMetricConfig
-from .annual import (
-    AnnualMetricConfig,
-    GlobalMeanAnnualAggregator,
-    PairedGlobalMeanAnnualAggregator,
-)
+from ..one_step.ensemble import EnsembleMetricConfig, SelectStepEnsembleAggregator
+from ..one_step.reduced import StepMeanMetricConfig
+from .annual import AnnualMetricConfig, GlobalMeanAnnualAggregator
 from .build_context import MetricBuildContext, MetricNotSupportedError
 from .data import InferenceBatchData, MetricBuildResult, SubAggregator, TimeSeriesLogs
-from .enso import (
-    EnsoCoefficientEvaluatorAggregator,
-    LatLonRegion,
-    PairedRegionalIndexAggregator,
-    RegionalIndexAggregator,
-)
+from .enso import LatLonRegion, RegionalIndexAggregator
 from .enso.dynamic_index import EnsoIndexMetricConfig
 from .enso.enso_coefficient import EnsoCoefficientMetricConfig
-from .histogram import HistogramAggregator, HistogramMetricConfig
-from .reduced import MeanAggregator, MeanMetricConfig, SingleTargetMeanAggregator
-from .seasonal import SeasonalAggregator, SeasonalMetricConfig
-from .spectrum import (
-    PairedSphericalPowerSpectrumAggregator,
-    PowerSpectrumMetricConfig,
-    SphericalPowerSpectrumAggregator,
-)
-from .time_mean import (
-    TimeMeanAggregator,
-    TimeMeanEvaluatorAggregator,
-    TimeMeanMetricConfig,
-)
-from .video import VideoAggregator, VideoMetricConfig
-from .zonal_mean import ZonalMeanAggregator, ZonalMeanMetricConfig
+from .histogram import HistogramMetricConfig
+from .reduced import MeanMetricConfig, SingleTargetMeanAggregator
+from .seasonal import SeasonalMetricConfig
+from .spectrum import PowerSpectrumMetricConfig, SphericalPowerSpectrumAggregator
+from .time_mean import TimeMeanAggregator, TimeMeanMetricConfig
+from .video import VideoMetricConfig
+from .zonal_mean import ZonalMeanMetricConfig
 
 wandb = WandB.get_instance()
 APPROXIMATELY_TWO_YEARS = datetime.timedelta(days=730)
@@ -241,7 +219,6 @@ class InferenceEvaluatorAggregatorConfig:
             n_ensemble_per_ic=n_ensemble_per_ic,
             ensemble_aggregators=ensemble_aggregators,
         )
-
 
 
 @dataclasses.dataclass
