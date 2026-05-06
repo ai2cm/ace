@@ -1,6 +1,5 @@
 import logging
 import warnings
-from collections.abc import Callable
 from typing import Any
 
 import cftime
@@ -26,13 +25,32 @@ from ..enso.dynamic_index import (
 
 SAMPLE_DIM, TIME_DIM = 0, 1
 
-SEA_SURFACE_TEMPERATURE_NAMES = ["sst", "surface_temperature", "TS"]
+DEFAULT_SST_NAMES = ["sst"]
 
 TPI_REGIONS = {
     "T1": {"lat_bounds": (25.0, 45.0), "lon_bounds": (140.0, 215.0)},
     "T2": {"lat_bounds": (-10.0, 10.0), "lon_bounds": (170.0, 270.0)},
     "T3": {"lat_bounds": (-50.0, -15.0), "lon_bounds": (150.0, 200.0)},
 }
+
+
+def _nan_aware_regional_mean(data: torch.Tensor, weights: torch.Tensor) -> torch.Tensor:
+    """Compute area-weighted regional mean, excluding NaN points.
+
+    Args:
+        data: Tensor of shape (sample, time, lat, lon), may contain NaN.
+        weights: Tensor of shape (lat, lon) with regional area weights.
+
+    Returns:
+        Tensor of shape (sample, time) with the NaN-excluded weighted mean.
+    """
+    valid_mask = ~torch.isnan(data)
+    data_filled = torch.where(valid_mask, data, torch.zeros_like(data))
+    # weights broadcast: (lat, lon) -> (1, 1, lat, lon)
+    w = weights.unsqueeze(0).unsqueeze(0)
+    weighted_sum = (data_filled * w * valid_mask).sum(dim=(-2, -1))
+    weight_total = (w * valid_mask).sum(dim=(-2, -1))
+    return weighted_sum / weight_total
 
 
 def low_pass_filter(
@@ -85,6 +103,31 @@ def _compute_sample_mean_std_ratio(
     return float(np.nanmean(ratios))
 
 
+def _smooth_spectrum(
+    freqs: np.ndarray, power: np.ndarray, n_bins: int = 40
+) -> tuple[np.ndarray, np.ndarray]:
+    """Smooth a power spectrum using logarithmically-spaced frequency bins.
+
+    Preserves resolution at low frequencies (where IPO signal lives)
+    while averaging out noise at high frequencies.
+    """
+    positive_mask = freqs > 0
+    if not positive_mask.any():
+        return freqs, power
+    pos_freqs = freqs[positive_mask]
+    pos_power = power[positive_mask]
+
+    log_bins = np.logspace(np.log10(pos_freqs[0]), np.log10(pos_freqs[-1]), n_bins + 1)
+    bin_centers = []
+    bin_powers = []
+    for i in range(len(log_bins) - 1):
+        mask = (pos_freqs >= log_bins[i]) & (pos_freqs < log_bins[i + 1])
+        if mask.any():
+            bin_centers.append(np.sqrt(log_bins[i] * log_bins[i + 1]))
+            bin_powers.append(pos_power[mask].mean())
+    return np.array(bin_centers), np.array(bin_powers)
+
+
 def _calculate_sample_average_power_spectrum(
     timeseries: xr.DataArray,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -112,15 +155,19 @@ def _calculate_sample_average_power_spectrum(
 
 
 class _IPORegionalAccumulator:
-    """Accumulates area-weighted regional means for the three TPI regions."""
+    """Accumulates area-weighted regional means for the three TPI regions.
+
+    Uses NaN-aware weighted mean so that ocean-only SST fields (with NaN
+    over land) are handled correctly.
+    """
 
     def __init__(
         self,
         regions: dict[str, LatLonRegion],
-        regional_mean: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
+        sst_names: list[str] | None = None,
     ):
         self._regions = regions
-        self._regional_mean = regional_mean
+        self._sst_names = sst_names if sst_names is not None else DEFAULT_SST_NAMES
         self._raw_means: dict[str, TensorDict] = {region: {} for region in regions}
         self._raw_times: xr.DataArray | None = None
         self._calendar: str | None = None
@@ -129,7 +176,7 @@ class _IPORegionalAccumulator:
     def record_batch(self, data: InferenceBatchData) -> None:
         time = data.time
         prediction = data.prediction
-        for sst_name in SEA_SURFACE_TEMPERATURE_NAMES:
+        for sst_name in self._sst_names:
             if sst_name not in prediction:
                 if sst_name not in self._already_logged:
                     logging.info(
@@ -139,7 +186,7 @@ class _IPORegionalAccumulator:
                     self._already_logged.append(sst_name)
                 continue
             for region_name, region in self._regions.items():
-                regional_avg = self._regional_mean(
+                regional_avg = _nan_aware_regional_mean(
                     prediction[sst_name], region.regional_weights
                 )
                 if sst_name not in self._raw_means[region_name]:
@@ -162,7 +209,7 @@ class _IPORegionalAccumulator:
         Returns monthly TPI (not low-pass filtered).
         """
         indices = {}
-        for sst_name in SEA_SURFACE_TEMPERATURE_NAMES:
+        for sst_name in self._sst_names:
             if not all(sst_name in self._raw_means[r] for r in self._regions):
                 continue
 
@@ -243,8 +290,8 @@ class PairedIPOIndexAggregator:
         self,
         lat: torch.Tensor,
         lon: torch.Tensor,
-        regional_mean: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
         cutoff_period_yrs: float = 13.0,
+        sst_names: list[str] | None = None,
     ):
         regions = {
             name: LatLonRegion(
@@ -255,8 +302,13 @@ class PairedIPOIndexAggregator:
             )
             for name, spec in TPI_REGIONS.items()
         }
-        self._target_accumulator = _IPORegionalAccumulator(regions, regional_mean)
-        self._prediction_accumulator = _IPORegionalAccumulator(regions, regional_mean)
+        self._sst_names = sst_names if sst_names is not None else DEFAULT_SST_NAMES
+        self._target_accumulator = _IPORegionalAccumulator(
+            regions, sst_names=self._sst_names
+        )
+        self._prediction_accumulator = _IPORegionalAccumulator(
+            regions, sst_names=self._sst_names
+        )
         self._cutoff_period_yrs = cutoff_period_yrs
 
     def record_batch(self, data: InferenceBatchData) -> None:
@@ -270,7 +322,7 @@ class PairedIPOIndexAggregator:
         prediction_tpi = self._prediction_accumulator.get_tpi_indices()
         logs: dict[str, Any] = {}
 
-        for sst_name in SEA_SURFACE_TEMPERATURE_NAMES:
+        for sst_name in self._sst_names:
             if sst_name not in prediction_tpi or sst_name not in target_tpi:
                 continue
             pred_da = prediction_tpi[sst_name]
@@ -318,8 +370,13 @@ class PairedIPOIndexAggregator:
         )
 
     def _apply_filter_to_samples(self, tpi_da: xr.DataArray) -> xr.DataArray | None:
-        """Apply low-pass filter to each sample, returning None if too short."""
-        min_length = int(2 * self._cutoff_period_yrs * 12)
+        """Apply low-pass filter to each sample, trimming edge transients.
+
+        Trims one cutoff period from each end to remove filtfilt edge artifacts.
+        Returns None if the series is too short after trimming.
+        """
+        trim = int(self._cutoff_period_yrs * 12)
+        min_length = 3 * trim  # need at least one cutoff period after trimming
         filtered_samples = []
         for sample in range(tpi_da.sizes["sample"]):
             sample_data = tpi_da.isel(sample=sample).dropna("time")
@@ -328,13 +385,12 @@ class PairedIPOIndexAggregator:
             filtered_values = low_pass_filter(
                 sample_data.values, cutoff_period_yrs=self._cutoff_period_yrs
             )
-            filtered_samples.append(
-                xr.DataArray(
-                    filtered_values,
-                    coords=sample_data.coords,
-                    dims=sample_data.dims,
-                )
+            trimmed = xr.DataArray(
+                filtered_values[trim:-trim],
+                coords={"time": sample_data.time[trim:-trim]},
+                dims=sample_data.dims,
             )
+            filtered_samples.append(trimmed)
         return xr.concat(filtered_samples, dim="sample")
 
     def _plot_filtered_tpi(
@@ -375,9 +431,11 @@ class PairedIPOIndexAggregator:
     ) -> plt.Figure:
         pred_freq, pred_power = _calculate_sample_average_power_spectrum(prediction_tpi)
         tgt_freq, tgt_power = _calculate_sample_average_power_spectrum(target_tpi)
+        pred_freq_s, pred_power_s = _smooth_spectrum(pred_freq, pred_power)
+        tgt_freq_s, tgt_power_s = _smooth_spectrum(tgt_freq, tgt_power)
         fig, ax = plt.subplots(1, 1)
-        ax.plot(pred_freq, pred_power, label="predicted ensemble mean")
-        ax.plot(tgt_freq, tgt_power, label="target", color="orange")
+        ax.plot(pred_freq_s, pred_power_s, label="predicted ensemble mean")
+        ax.plot(tgt_freq_s, tgt_power_s, label="target", color="orange")
         ax.set_title("Power Spectrum of IPO TPI (unfiltered)")
         ax.set_xlabel("Frequency [cycles/year]")
         ax.set_ylabel("Power [K**2]")

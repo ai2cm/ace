@@ -311,7 +311,6 @@ class InferenceEvaluatorAggregatorConfig:
             aggregators["ipo_index"] = PairedIPOIndexAggregator(
                 lat=horizontal_coordinates.lat,
                 lon=horizontal_coordinates.lon,
-                regional_mean=ops.regional_area_weighted_mean,
             )
 
         return InferenceEvaluatorAggregator(

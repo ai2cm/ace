@@ -7,7 +7,6 @@ from matplotlib import pyplot as plt
 
 from fme import get_device
 from fme.ace.aggregator.inference.data import InferenceBatchData
-from fme.core.coordinates import LatLonCoordinates
 
 from ..enso.dynamic_index import LatLonRegion
 from .ipo_index import (
@@ -127,13 +126,10 @@ class TestIPORegionalAccumulator:
             ]
         }
 
-        coords = LatLonCoordinates(lat=lat, lon=lon)
-        ops = coords.get_gridded_operations()
-
-        accumulator = _IPORegionalAccumulator(regions, ops.regional_area_weighted_mean)
+        accumulator = _IPORegionalAccumulator(regions)
 
         time1 = _make_time(n_samples, n_times // 2)
-        data1 = _make_sst_data(n_samples, n_times // 2, n_lat, n_lon)
+        data1 = _make_sst_data(n_samples, n_times // 2, n_lat, n_lon, sst_name="sst")
         batch1 = InferenceBatchData(
             prediction=data1,
             time=time1,
@@ -142,7 +138,7 @@ class TestIPORegionalAccumulator:
         accumulator.record_batch(batch1)
 
         time2 = _make_time(n_samples, n_times // 2, i_start=n_times // 2)
-        data2 = _make_sst_data(n_samples, n_times // 2, n_lat, n_lon)
+        data2 = _make_sst_data(n_samples, n_times // 2, n_lat, n_lon, sst_name="sst")
         batch2 = InferenceBatchData(
             prediction=data2,
             time=time2,
@@ -179,13 +175,12 @@ class TestIPORegionalAccumulator:
             ]
         }
 
-        coords = LatLonCoordinates(lat=lat, lon=lon)
-        ops = coords.get_gridded_operations()
-
-        accumulator = _IPORegionalAccumulator(regions, ops.regional_area_weighted_mean)
+        accumulator = _IPORegionalAccumulator(regions)
 
         time = _make_time(n_samples, n_times)
-        data = _make_sst_data(n_samples, n_times, n_lat, n_lon, constant_value=300.0)
+        data = _make_sst_data(
+            n_samples, n_times, n_lat, n_lon, sst_name="sst", constant_value=300.0
+        )
         batch = InferenceBatchData(prediction=data, time=time, i_time_start=0)
         accumulator.record_batch(batch)
 
@@ -208,14 +203,7 @@ class TestPairedIPOIndexAggregator:
         n_samples = 1
         n_months = 40 * 12  # 40 years to exceed filter requirement
 
-        coords = LatLonCoordinates(lat=lat, lon=lon)
-        ops = coords.get_gridded_operations()
-
-        agg = PairedIPOIndexAggregator(
-            lat=lat,
-            lon=lon,
-            regional_mean=ops.regional_area_weighted_mean,
-        )
+        agg = PairedIPOIndexAggregator(lat=lat, lon=lon)
 
         # Use monthly frequency to keep the test fast
         chunk_size = 60
@@ -266,14 +254,7 @@ class TestPairedIPOIndexAggregator:
         steps_per_month = 120
         n_times = n_months * steps_per_month
 
-        coords = LatLonCoordinates(lat=lat, lon=lon)
-        ops = coords.get_gridded_operations()
-
-        agg = PairedIPOIndexAggregator(
-            lat=lat,
-            lon=lon,
-            regional_mean=ops.regional_area_weighted_mean,
-        )
+        agg = PairedIPOIndexAggregator(lat=lat, lon=lon)
 
         time = _make_time(n_samples, n_times)
         sst = torch.randn(n_samples, n_times, n_lat, n_lon, device=get_device()) + 300.0
