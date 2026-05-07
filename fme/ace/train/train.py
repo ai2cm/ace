@@ -48,10 +48,12 @@
 # Karthik Kashinath - NVIDIA Corporation
 # Animashree Anandkumar - California Institute of Technology, NVIDIA Corporation
 
+import contextlib
 import dataclasses
 import logging
 import os
 from collections.abc import Callable, Sequence
+from typing import Any
 
 import dacite
 import torch
@@ -66,9 +68,10 @@ from fme.ace.aggregator import (
 from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregator,
     InferenceEvaluatorAggregatorConfig,
+    TypedMetricInferenceEvaluatorAggregatorConfig,
 )
 from fme.ace.aggregator.train import TrainAggregatorConfig
-from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
+from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.stepper import TrainOutput
 from fme.ace.train.train_config import TrainBuilders, TrainConfig
 from fme.core.cli import prepare_config, prepare_directory
@@ -82,6 +85,7 @@ from fme.core.generics.trainer import (
     Trainer,
     inference_one_epoch,
 )
+from fme.core.generics.validation import run_validation
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -99,6 +103,8 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
     inference_data = builder.get_evaluation_inference_data()
 
     variable_metadata = get_derived_variable_metadata() | train_data.variable_metadata
+    for data, name in zip((train_data, validation_data), ("train", "valid")):
+        data.log_info(name)
 
     dataset_info = train_data.dataset_info
     logging.info("Starting model initialization")
@@ -115,6 +121,9 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         initial_inference_times = inference_data.initial_time
     inference_n_forward_steps = config.inference_n_forward_steps
 
+    n_ensemble_per_ic = (
+        config.inference.n_ensemble_per_ic if config.inference is not None else 1
+    )
     aggregator_builder = AggregatorBuilder(
         train_config=config.train_aggregator,
         inference_config=config.inference_aggregator,
@@ -128,32 +137,46 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         normalize=stepper.normalizer.normalize,
         save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
         validation_config=config.validation_aggregator,
-    )
-    do_gc_collect = fme.get_device() != torch.device("cpu")
-    trainer_config: TrainConfigProtocol = config  # documenting trainer input type
-    trainer = Trainer(
-        train_data=train_data,
-        validation_data=validation_data,
-        inference_data=inference_data,
-        stepper=stepper,
-        build_optimization=builder.get_optimization,
-        build_ema=builder.get_ema,
-        config=trainer_config,
-        aggregator_builder=aggregator_builder,
-        end_of_batch_callback=end_of_batch_ops,
-        do_gc_collect=do_gc_collect,
+        n_ensemble_per_ic=n_ensemble_per_ic,
     )
 
-    def inference(
+    def validation_callback(epoch: int) -> tuple[dict[str, Any], float]:
+        validation_data.set_epoch(epoch)
+        aggregator = aggregator_builder.get_validation_aggregator()
+        logs = run_validation(
+            train_stepper=stepper,
+            validation_data=validation_data,
+            aggregator=aggregator,
+            diagnostics_subdir=f"epoch_{epoch:04d}",
+            record_logs=lambda logs: None,
+        )
+        return logs, logs["val/mean/loss"]
+
+    inference_epochs = config.get_inference_epochs()
+
+    def inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
+        if epoch not in inference_epochs:
+            return {}, None
+        logs = inference_one_epoch(
+            stepper=stepper,
+            validation_context=contextlib.nullcontext,
+            dataset=inference_data,
+            aggregator=aggregator_builder.get_inference_aggregator(),
+            label="inference",
+            epoch=epoch,
+        )
+        error = logs.get("inference/time_mean_norm/rmse/channel_mean")
+        return logs, error
+
+    def _run_inference(
         data: InferenceDataABC[PrognosticState, BatchData],
         aggregator: InferenceEvaluatorAggregator,
         label: str,
         epoch: int,
     ):
-        logging.info("Starting weather evaluation inference run")
         return inference_one_epoch(
             stepper=stepper,
-            validation_context=trainer.validation_context,
+            validation_context=contextlib.nullcontext,
             dataset=data,
             aggregator=aggregator,
             label=label,
@@ -161,7 +184,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         )
 
     end_of_epoch_ops = builder.get_end_of_epoch_callback(
-        inference,
+        _run_inference,
         normalize=stepper.normalizer.normalize,
         channel_mean_names=stepper.loss_names,
         output_dir=config.output_dir,
@@ -169,17 +192,34 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         save_diagnostics=config.save_per_epoch_diagnostics,
         n_ic_timesteps=stepper.n_ic_timesteps,
     )
-    trainer.set_end_of_epoch_callback(end_of_epoch_ops)
-    return trainer
+
+    do_gc_collect = fme.get_device() != torch.device("cpu")
+    trainer_config: TrainConfigProtocol = config  # documenting trainer input type
+    return Trainer(
+        train_data=train_data,
+        validation_data=validation_data,
+        stepper=stepper,
+        build_optimization=builder.get_optimization,
+        build_ema=builder.get_ema,
+        config=trainer_config,
+        aggregator_builder=aggregator_builder,
+        validation_callback=validation_callback,
+        end_of_batch_callback=end_of_batch_ops,
+        end_of_epoch_callback=end_of_epoch_ops,
+        inference_callback=inference_callback,
+        do_gc_collect=do_gc_collect,
+    )
 
 
 class AggregatorBuilder(
-    AggregatorBuilderABC[PrognosticState, TrainOutput, PairedData],
+    AggregatorBuilderABC[TrainOutput],
 ):
     def __init__(
         self,
         train_config: TrainAggregatorConfig,
-        inference_config: InferenceEvaluatorAggregatorConfig | None,
+        inference_config: InferenceEvaluatorAggregatorConfig
+        | TypedMetricInferenceEvaluatorAggregatorConfig
+        | None,
         dataset_info: DatasetInfo,
         initial_inference_time: xr.DataArray | None,
         n_ic_steps: int,
@@ -192,6 +232,7 @@ class AggregatorBuilder(
         validation_config: OneStepAggregatorConfig = dataclasses.field(
             default_factory=lambda: OneStepAggregatorConfig(),
         ),
+        n_ensemble_per_ic: int = 1,
     ):
         self.train_config = train_config
         self.inference_config = inference_config
@@ -205,6 +246,7 @@ class AggregatorBuilder(
         self.output_dir = output_dir
         self.save_per_epoch_diagnostics = save_per_epoch_diagnostics
         self.validation_config = validation_config
+        self.n_ensemble_per_ic = n_ensemble_per_ic
 
     def get_train_aggregator(self) -> TrainAggregator:
         return TrainAggregator(
@@ -224,8 +266,12 @@ class AggregatorBuilder(
     def get_inference_aggregator(
         self,
     ) -> InferenceEvaluatorAggregator:
-        if isinstance(self.inference_config, InferenceEvaluatorAggregatorConfig):
-            return self.inference_config.build(
+        if isinstance(
+            self.inference_config,
+            InferenceEvaluatorAggregatorConfig
+            | TypedMetricInferenceEvaluatorAggregatorConfig,
+        ):
+            build_kwargs: dict = dict(
                 dataset_info=self.dataset_info,
                 initial_time=self.initial_inference_time,
                 n_ic_steps=self.n_ic_steps,
@@ -234,7 +280,14 @@ class AggregatorBuilder(
                 normalize=self.normalize,
                 save_diagnostics=self.save_per_epoch_diagnostics,
                 output_dir=os.path.join(self.output_dir, "inference"),
+                n_ensemble_per_ic=self.n_ensemble_per_ic,
             )
+            if isinstance(
+                self.inference_config,
+                TypedMetricInferenceEvaluatorAggregatorConfig,
+            ):
+                build_kwargs["enable_time_series"] = False
+            return self.inference_config.build(**build_kwargs)
         else:
             raise ValueError(
                 "Trying to build an inference aggregator, but inference config not set."

@@ -1,6 +1,5 @@
 import contextlib
 import dataclasses
-import itertools
 import os
 import signal
 import unittest.mock
@@ -11,7 +10,7 @@ import pytest
 import torch
 
 from fme.core.device import get_device
-from fme.core.ema import EMATracker
+from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.aggregator import (
     AggregatorABC,
     InferenceAggregatorABC,
@@ -30,9 +29,11 @@ from fme.core.generics.trainer import (
     TrainStepperABC,
     count_parameters,
     epoch_checkpoint_enabled,
+    inference_one_epoch,
 )
+from fme.core.generics.validation import run_validation
 from fme.core.logging_utils import LoggingConfig
-from fme.core.optimization import NullOptimization, Optimization
+from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
 from fme.core.scheduler import SchedulerConfig
 from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import Slice, TensorDict, TensorMapping
@@ -235,13 +236,17 @@ class Config:
     segment_epochs: int | None = None
     evaluate_before_training: bool = False
     save_best_inference_epoch_checkpoints: bool = False
+    best_enso_checkpoint_metric: str | None = None
+    best_enso_checkpoint_autocorr_metric: str | None = None
+    best_enso_checkpoint_autocorr_target_metric: str | None = None
+    best_enso_checkpoint_autocorr_weight: float = 1.0
+    best_enso_checkpoint_climate_tolerance: float = 0.1
+    ema: EMAConfig = dataclasses.field(default_factory=EMAConfig)
     lr_tuning: LRTuningConfig | None = None
 
     def __post_init__(self):
         start_epoch = 0 if self.evaluate_before_training else 1
-        self.get_inference_epochs = unittest.mock.MagicMock(
-            return_value=[i for i in range(start_epoch, self.max_epochs + 1)]
-        )
+        self._inference_epochs = [i for i in range(start_epoch, self.max_epochs + 1)]
 
 
 _: TrainConfigProtocol = Config()
@@ -276,8 +281,13 @@ class ValidationAggregator(AggregatorABC[TrainOutput]):
 
 
 class InferenceAggregator(InferenceAggregatorABC[PSType, SDType]):
-    def __init__(self, inference_loss: float):
+    def __init__(
+        self,
+        inference_loss: float,
+        extra_metrics: dict[str, float] | None = None,
+    ):
         self.inference_loss = inference_loss
+        self.extra_metrics = extra_metrics or {}
 
     def record_batch(self, data: SDType) -> InferenceLogs:
         return [{}]
@@ -286,22 +296,28 @@ class InferenceAggregator(InferenceAggregatorABC[PSType, SDType]):
         return [{}]
 
     def get_summary_logs(self) -> InferenceLog:
-        return {"time_mean_norm/rmse/channel_mean": self.inference_loss}
+        logs: dict[str, Any] = {
+            "time_mean_norm/rmse/channel_mean": self.inference_loss,
+        }
+        logs.update(self.extra_metrics)
+        return logs
 
     def flush_diagnostics(self, subdir: str | None) -> None:
         pass
 
 
-class AggregatorBuilder(AggregatorBuilderABC[PSType, TrainOutput, SDType]):
+class AggregatorBuilder(AggregatorBuilderABC[TrainOutput]):
     def __init__(
         self,
         train_losses: np.ndarray,
         validation_losses: np.ndarray,
         inference_losses: np.ndarray,
+        inference_extra_metrics: list[dict[str, float]] | None = None,
     ):
         self.train_losses = train_losses
         self.validation_losses = validation_losses
         self.inference_losses = inference_losses
+        self.inference_extra_metrics = inference_extra_metrics
         self._train_calls = 0
         self._validation_calls = 0
         self._inference_calls = 0
@@ -317,7 +333,15 @@ class AggregatorBuilder(AggregatorBuilderABC[PSType, TrainOutput, SDType]):
         return ret
 
     def get_inference_aggregator(self) -> InferenceAggregatorABC[PSType, SDType]:
-        ret = InferenceAggregator(self.inference_losses[self._inference_calls])
+        extra = (
+            self.inference_extra_metrics[self._inference_calls]
+            if self.inference_extra_metrics is not None
+            else None
+        )
+        ret = InferenceAggregator(
+            self.inference_losses[self._inference_calls],
+            extra_metrics=extra,
+        )
         self._inference_calls += 1
         return ret
 
@@ -339,10 +363,20 @@ def get_trainer(
     checkpoint_every_n_batches: int = 0,
     n_train_batches: int = 100,
     save_best_inference_epoch_checkpoints: bool = False,
+    best_enso_checkpoint_metric: str | None = None,
+    best_enso_checkpoint_autocorr_metric: str | None = None,
+    best_enso_checkpoint_autocorr_target_metric: str | None = None,
+    best_enso_checkpoint_autocorr_weight: float = 1.0,
+    best_enso_checkpoint_climate_tolerance: float = 0.1,
+    inference_extra_metrics: list[dict[str, float]] | None = None,
     scheduler_config: SchedulerConfig | None = None,
     n_validation_batches: int = 5,
     save_checkpoint: bool = True,
     lr_tuning: LRTuningConfig | None = None,
+    end_of_epoch_callback: unittest.mock.MagicMock | None = None,
+    resume_optimizer_ckpt_path: str | None = None,
+    resume_ema_ckpt_path: str | None = None,
+    lr: float = 0.01,
 ) -> tuple[TrainConfigProtocol, Trainer]:
     if checkpoint_dir is None:
         checkpoint_dir = os.path.join(tmp_path, "checkpoints")
@@ -373,15 +407,13 @@ def get_trainer(
         nonlocal scheduler_config
         if scheduler_config is None:
             scheduler_config = SchedulerConfig()
-        opt = Optimization(
-            parameters=itertools.chain(*[module.parameters() for module in modules]),
+        opt = OptimizationConfig(
             optimizer_type="Adam",
-            lr=0.01,
-            max_epochs=max_epochs,
+            lr=lr,
             scheduler=scheduler_config,
             enable_automatic_mixed_precision=False,
-            kwargs={},
-        )
+            resume_optimizer_ckpt_path=resume_optimizer_ckpt_path,
+        ).build(torch.nn.ModuleList(modules), max_epochs=max_epochs)
         original_step_scheduler = opt.step_scheduler
 
         def step_scheduler_side_effect(*args, **kwargs):
@@ -400,14 +432,27 @@ def get_trainer(
             if stepper_module_values is None:
                 raise ValueError("stepper_module_values is None")
             module.weight.data.fill_(stepper_module_values[i])
+            for param in module.parameters():
+                if param not in opt.optimizer.state:
+                    opt.optimizer.state[param] = {
+                        "step": torch.tensor(0.0, device=param.data.device),
+                        "exp_avg": torch.zeros_like(param.data),
+                        "exp_avg_sq": torch.zeros_like(param.data),
+                    }
+                state = opt.optimizer.state[param]
+                state["step"] += 1
+                state["exp_avg"] += 0.1
+                state["exp_avg_sq"] += 0.01
 
         opt.step_weights = unittest.mock.MagicMock(side_effect=step_weights_side_effect)  # type: ignore
         return opt
 
-    def build_ema(modules: torch.nn.ModuleList) -> EMATracker:
-        return EMATracker(modules, decay=ema_decay)
+    ema_config = EMAConfig(decay=ema_decay, resume_ema_ckpt_path=resume_ema_ckpt_path)
 
-    config: TrainConfigProtocol = Config(
+    def build_ema(modules: torch.nn.ModuleList) -> EMATracker:
+        return ema_config.build(modules)
+
+    config = Config(
         experiment_dir=tmp_path,
         checkpoint_dir=checkpoint_dir,
         checkpoint_save_epochs=checkpoint_save_epochs,
@@ -417,25 +462,64 @@ def get_trainer(
         validate_using_ema=validate_using_ema,
         evaluate_before_training=evaluate_before_training,
         save_best_inference_epoch_checkpoints=save_best_inference_epoch_checkpoints,
+        best_enso_checkpoint_metric=best_enso_checkpoint_metric,
+        best_enso_checkpoint_autocorr_metric=best_enso_checkpoint_autocorr_metric,
+        best_enso_checkpoint_autocorr_target_metric=best_enso_checkpoint_autocorr_target_metric,
+        best_enso_checkpoint_autocorr_weight=best_enso_checkpoint_autocorr_weight,
+        best_enso_checkpoint_climate_tolerance=best_enso_checkpoint_climate_tolerance,
         save_checkpoint=save_checkpoint,
+        ema=ema_config,
         lr_tuning=lr_tuning,
     )
     aggregator_builder = AggregatorBuilder(
         train_losses=train_losses,
         validation_losses=validation_losses,
         inference_losses=inference_losses,
+        inference_extra_metrics=inference_extra_metrics,
     )
+    if end_of_epoch_callback is None:
+        end_of_epoch_callback = unittest.mock.MagicMock(side_effect=lambda epoch: {})
+
+    inference_epochs = config._inference_epochs
+
+    def validation_callback(epoch: int) -> tuple[dict[str, Any], float]:
+        validation_data.set_epoch(epoch)
+        val_agg = aggregator_builder.get_validation_aggregator()
+        logs = run_validation(
+            train_stepper=stepper,
+            validation_data=validation_data,
+            aggregator=val_agg,
+            diagnostics_subdir=f"epoch_{epoch:04d}",
+            record_logs=lambda logs: None,
+        )
+        return logs, logs["val/mean/loss"]
+
+    def inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
+        if epoch not in inference_epochs:
+            return {}, None
+        logs = inference_one_epoch(
+            stepper=stepper,
+            validation_context=contextlib.nullcontext,
+            dataset=inference_data,
+            aggregator=aggregator_builder.get_inference_aggregator(),
+            label="inference",
+            epoch=epoch,
+        )
+        error = logs.get("inference/time_mean_norm/rmse/channel_mean")
+        return logs, error
+
     return config, Trainer(
         train_data=train_data,
         validation_data=validation_data,
-        inference_data=inference_data,
         stepper=stepper,
         build_optimization=build_optimization,
         build_ema=build_ema,
         config=config,
         aggregator_builder=aggregator_builder,
+        validation_callback=validation_callback,
         end_of_batch_callback=unittest.mock.MagicMock(),
-        end_of_epoch_callback=unittest.mock.MagicMock(side_effect=lambda epoch: {}),
+        end_of_epoch_callback=end_of_epoch_callback,
+        inference_callback=inference_callback,
         do_gc_collect=False,  # for much faster tests
     )
 
@@ -460,7 +544,10 @@ def test_trainer(tmp_path: str, checkpoint_save_epochs: Slice | None):
         save_epochs = []
     for i in range(config.max_epochs):
         if i in save_epochs:
-            assert os.path.exists(paths.epoch_checkpoint_path(i))
+            epoch_path = paths.epoch_checkpoint_path(i)
+            assert os.path.exists(epoch_path)
+            ckpt = torch.load(epoch_path, weights_only=False)
+            assert "optimization" in ckpt
         else:
             assert not os.path.exists(paths.epoch_checkpoint_path(i))
         assert not os.path.exists(paths.ema_epoch_checkpoint_path(i))
@@ -470,8 +557,6 @@ def test_trainer(tmp_path: str, checkpoint_save_epochs: Slice | None):
         unittest.mock.call(i) for i in range(1, config.max_epochs + 1)
     ]
     assert valid_data.set_epoch_mock.mock_calls == train_data.set_epoch_mock.mock_calls
-    assert train_data.log_info_mock.called
-    assert valid_data.log_info_mock.called
     assert trainer._end_of_epoch_callback.mock_calls == [  # type: ignore
         unittest.mock.call(i) for i in range(1, config.max_epochs + 1)
     ]
@@ -549,7 +634,7 @@ def preempt_after_calls_patch(object, method: str, call_count: int):
 
 @pytest.mark.parametrize(
     "interrupt_method",
-    ["train_one_epoch", "validate_one_epoch", "inference_one_epoch"],
+    ["train_one_epoch", "_validation_callback", "_inference_callback"],
 )
 def test_resume_after_interrupted_training(tmp_path: str, interrupt_method: str):
     max_epochs = 4
@@ -663,7 +748,9 @@ def test_resume_after_interrupted_training_during_epoch(
     )
     with (
         unittest.mock.patch.object(
-            trainer, "validate_one_epoch", return_value={"val/mean/loss": 0.0}
+            trainer,
+            "_validation_callback",
+            return_value=({"val/mean/loss": 0.0}, 0.0),
         ),
     ):  # would throw off count for actual training batches seen
         trainer.train()
@@ -706,7 +793,7 @@ def test_resume_after_preemption_during_validation(
     ):  # would throw off count for actual training batches seen
         with preempt_after_calls_patch(
             trainer,
-            "validate_one_epoch",
+            "_validation_callback",
             1 + int(evaluate_before_training),
         ):
             trainer.train()
@@ -732,7 +819,9 @@ def test_resume_after_preemption_during_validation(
     )
     with (
         unittest.mock.patch.object(
-            trainer, "validate_one_epoch", return_value={"val/mean/loss": 0.0}
+            trainer,
+            "_validation_callback",
+            return_value=({"val/mean/loss": 0.0}, 0.0),
         ) as validate_mock,
     ):
         assert trainer._epochs_trained == 0
@@ -765,13 +854,16 @@ def test_saves_correct_ema_checkpoints(
     trainer.save_all_checkpoints(valid_loss=valid_loss, inference_error=inference_error)
     paths = CheckpointPaths(config.checkpoint_dir)
     assert os.path.exists(paths.latest_checkpoint_path)
-    latest_checkpoint = torch.load(paths.latest_checkpoint_path)
+    latest_checkpoint = torch.load(paths.latest_checkpoint_path, map_location="cpu")
     np.testing.assert_allclose(
         latest_checkpoint["stepper"]["modules"]["0.weight"].cpu().numpy(),
         1.0,
         atol=1e-7,
     )
-    ema_checkpoint = torch.load(paths.latest_checkpoint_path)["ema"]["ema_params"]
+    ema_checkpoint = torch.load(
+        paths.latest_checkpoint_path,
+        map_location="cpu",
+    )["ema"]["ema_params"]
     ema_weight = 1.0 - min(ema_decay, 2.0 / 11.0)
     np.testing.assert_allclose(
         ema_checkpoint["0weight"].cpu().numpy(),
@@ -785,7 +877,7 @@ def test_saves_correct_ema_checkpoints(
     else:
         best_weight = 1.0
     assert os.path.exists(paths.best_checkpoint_path)
-    best_checkpoint = torch.load(paths.best_checkpoint_path)
+    best_checkpoint = torch.load(paths.best_checkpoint_path, map_location="cpu")
     assert best_checkpoint["best_validation_loss"] == valid_loss
     assert best_checkpoint["best_inference_error"] == inference_error
     np.testing.assert_allclose(
@@ -794,7 +886,9 @@ def test_saves_correct_ema_checkpoints(
         atol=1e-7,
     )
     best_inference_checkpoint = torch.load(
-        paths.best_inference_checkpoint_path, weights_only=False
+        paths.best_inference_checkpoint_path,
+        map_location="cpu",
+        weights_only=False,
     )
     assert best_inference_checkpoint["best_validation_loss"] == valid_loss
     assert best_inference_checkpoint["best_inference_error"] == inference_error
@@ -868,7 +962,9 @@ def test_saves_correct_non_ema_epoch_checkpoints(
                 min((i + 1) * segment_epochs_value, config.max_epochs) + 1,
             )
         ]
-        latest_checkpoint = torch.load(paths.latest_checkpoint_path, weights_only=False)
+        latest_checkpoint = torch.load(
+            paths.latest_checkpoint_path, map_location="cpu", weights_only=False
+        )
         assert latest_checkpoint["epoch"] == min(
             max_epochs, (i + 1) * segment_epochs_value
         )
@@ -880,7 +976,9 @@ def test_saves_correct_non_ema_epoch_checkpoints(
     assert os.path.exists(paths.latest_checkpoint_path)
     assert os.path.exists(paths.best_checkpoint_path)
     assert os.path.exists(paths.best_inference_checkpoint_path)
-    best_checkpoint = torch.load(paths.best_checkpoint_path, weights_only=False)
+    best_checkpoint = torch.load(
+        paths.best_checkpoint_path, map_location="cpu", weights_only=False
+    )
     assert best_checkpoint["epoch"] == best_val_epoch
     assert best_checkpoint["best_validation_loss"] == 0.0
     assert best_checkpoint["best_inference_error"] == np.min(
@@ -891,14 +989,16 @@ def test_saves_correct_non_ema_epoch_checkpoints(
         module_values[best_val_epoch - 1],
     )
     best_inference_checkpoint = torch.load(
-        paths.best_inference_checkpoint_path, weights_only=False
+        paths.best_inference_checkpoint_path, map_location="cpu", weights_only=False
     )
     assert best_inference_checkpoint["epoch"] == best_inference_epoch
     assert best_inference_checkpoint["best_validation_loss"] == np.min(
         val_losses[:best_inference_epoch]
     )
     assert best_inference_checkpoint["best_inference_error"] == 0.0
-    latest_checkpoint = torch.load(paths.latest_checkpoint_path, weights_only=False)
+    latest_checkpoint = torch.load(
+        paths.latest_checkpoint_path, map_location="cpu", weights_only=False
+    )
     assert latest_checkpoint["epoch"] == max_epochs
     np.testing.assert_allclose(
         latest_checkpoint["stepper"]["modules"]["0.weight"].cpu().numpy(),
@@ -953,6 +1053,99 @@ def test_evaluate_before_training(tmp_path: str):
                 assert logs[train_loss_name] == train_losses[i - 1]
 
 
+def test_end_of_epoch_callback_runs_with_evaluate_before_training(tmp_path: str):
+    """When evaluate_before_training=True, end_of_epoch_callback (e.g. used to
+    run additional_inference) must fire for epoch 0 with its logs flushed to
+    wandb, so additional inference outputs are produced for the pre-training
+    evaluation in addition to the post-epoch evaluations."""
+    max_epochs = 2
+    n_train_batches = 5
+
+    def _callback(epoch: int) -> dict[str, float]:
+        return {f"additional/epoch_{epoch}/marker": float(epoch)}
+
+    end_of_epoch_callback = unittest.mock.MagicMock(side_effect=_callback)
+
+    with mock_wandb() as wandb:
+        LoggingConfig(log_to_wandb=True)._configure_wandb(
+            experiment_dir=tmp_path, config={}, resumable=True
+        )
+        _, trainer = get_trainer(
+            tmp_path,
+            max_epochs=max_epochs,
+            evaluate_before_training=True,
+            n_train_batches=n_train_batches,
+            end_of_epoch_callback=end_of_epoch_callback,
+        )
+        trainer.train()
+        wandb_logs = wandb.get_logs()
+
+    # callback should have fired once for epoch 0 (pre-training) and once
+    # per trained epoch
+    epochs_called = [
+        call.args[0] if call.args else call.kwargs["epoch"]
+        for call in end_of_epoch_callback.call_args_list
+    ]
+    assert epochs_called == list(range(max_epochs + 1))
+
+    for i in range(max_epochs + 1):
+        # only validate logs at end of each epoch, not per-batch logs
+        logs = wandb_logs[i * n_train_batches]
+        assert logs["epoch"] == i
+        marker_key = f"additional/epoch_{i}/marker"
+        assert marker_key in logs, (
+            f"additional callback log missing for epoch {i}; "
+            f"keys present: {sorted(logs.keys())}"
+        )
+        assert logs[marker_key] == float(i)
+
+
+@pytest.mark.parametrize("evaluate_before_training", [True, False])
+def test_end_of_epoch_callback_can_open_validation_context_with_ema(
+    tmp_path: str, evaluate_before_training: bool
+):
+    """The trainer wraps the end-of-epoch callback in ``validation_context``,
+    and helpers like ``inference_one_epoch`` (used by additional_inference and
+    weather_evaluation) open ``validation_context`` themselves. With
+    ``validate_using_ema=True`` this used to raise "Cannot nest EMA contexts";
+    the trainer's EMA context must be reentrant so callbacks can defensively
+    open ``validation_context`` without coordinating with the trainer.
+    """
+    max_epochs = 1
+    n_train_batches = 5
+
+    captured: dict[str, Any] = {}
+
+    def _callback(epoch: int) -> dict[str, Any]:
+        # mimic what inference helpers do inside additional_inference /
+        # weather_evaluation: they open validation_context() themselves
+        with trainer.validation_context():
+            captured.setdefault("epochs", []).append(epoch)
+            captured["weight_in_ema_context"] = (
+                trainer.stepper.modules[0].weight.detach().clone()
+            )
+        return {f"additional/epoch_{epoch}/marker": float(epoch)}
+
+    end_of_epoch_callback = unittest.mock.MagicMock(side_effect=_callback)
+
+    _, trainer = get_trainer(
+        tmp_path,
+        max_epochs=max_epochs,
+        evaluate_before_training=evaluate_before_training,
+        validate_using_ema=True,
+        n_train_batches=n_train_batches,
+        end_of_epoch_callback=end_of_epoch_callback,
+    )
+    # must not raise "Cannot nest EMA contexts"
+    trainer.train()
+
+    expected_epochs = list(range(0 if evaluate_before_training else 1, max_epochs + 1))
+    assert captured["epochs"] == expected_epochs
+    # exiting the inner validation_context must not leave EMA applied
+    assert not trainer._in_ema_context
+    assert not trainer._ema._in_context
+
+
 def test_save_best_inference_epoch_ckpts(tmp_path: str):
     """Test that save_best_inference_epoch_checkpoints saves epoch-specific
     checkpoints."""
@@ -996,19 +1189,25 @@ def test_save_best_inference_epoch_ckpts(tmp_path: str):
     ), "Should save epoch 3"
 
     epoch1_checkpoint = torch.load(
-        paths.best_inference_epoch_checkpoint_path(1), weights_only=False
+        paths.best_inference_epoch_checkpoint_path(1),
+        map_location="cpu",
+        weights_only=False,
     )
     assert epoch1_checkpoint["epoch"] == 1
     assert epoch1_checkpoint["best_inference_error"] == 0.3
 
     epoch3_checkpoint = torch.load(
-        paths.best_inference_epoch_checkpoint_path(3), weights_only=False
+        paths.best_inference_epoch_checkpoint_path(3),
+        map_location="cpu",
+        weights_only=False,
     )
     assert epoch3_checkpoint["epoch"] == 3
     assert epoch3_checkpoint["best_inference_error"] == 0.2
 
     best_inference_checkpoint = torch.load(
-        paths.best_inference_checkpoint_path, weights_only=False
+        paths.best_inference_checkpoint_path,
+        map_location="cpu",
+        weights_only=False,
     )
     assert best_inference_checkpoint["best_inference_error"] == 0.2
     assert best_inference_checkpoint["epoch"] == 3
@@ -1353,6 +1552,144 @@ def test_lr_tuning_with_evaluate_before_training(tmp_path: str):
         assert trainer.optimization.learning_rate == initial_lr * 0.5
 
 
+def test_best_enso_checkpoint_saved(tmp_path: str):
+    """Test that best_enso_ckpt is saved
+    when ENSO improves and climate is in tolerance."""
+    max_epochs = 3
+    n_train_batches = 5
+    enso_metric_key = "enso_index/sst_nino34_index_std_norm"
+
+    inference_losses = np.array([0.5, 0.4, 0.3])
+    # ENSO std_norm: epoch1=0.8 (dist=0.2),
+    # epoch2=0.7 (dist=0.3), epoch3=0.95 (dist=0.05)
+    inference_extra = [
+        {enso_metric_key: 0.8},
+        {enso_metric_key: 0.7},
+        {enso_metric_key: 0.95},
+    ]
+
+    config, trainer = get_trainer(
+        tmp_path,
+        max_epochs=max_epochs,
+        inference_losses=inference_losses,
+        n_train_batches=n_train_batches,
+        validate_using_ema=False,
+        best_enso_checkpoint_metric=f"inference/{enso_metric_key}",
+        best_enso_checkpoint_climate_tolerance=0.5,
+        inference_extra_metrics=inference_extra,
+    )
+    trainer.train()
+
+    paths = CheckpointPaths(config.checkpoint_dir)
+    assert os.path.exists(paths.best_enso_checkpoint_path)
+
+    ckpt = torch.load(
+        paths.best_enso_checkpoint_path, map_location="cpu", weights_only=False
+    )
+    assert ckpt["epoch"] == 3
+    assert ckpt["best_enso_score"] == pytest.approx(0.05)
+
+
+def test_best_enso_checkpoint_climate_guard(tmp_path: str):
+    """Test that ENSO checkpoint is NOT saved when climate exceeds tolerance."""
+    max_epochs = 3
+    n_train_batches = 5
+    enso_metric_key = "enso_index/sst_nino34_index_std_norm"
+
+    # Inference errors: epoch1=0.3 (best), epoch2=0.5 (worse), epoch3=0.4 (worse)
+    inference_losses = np.array([0.3, 0.5, 0.4])
+    # ENSO: epoch1=0.7, epoch2=0.95 (best but climate too bad), epoch3=0.8
+    inference_extra = [
+        {enso_metric_key: 0.7},
+        {enso_metric_key: 0.95},
+        {enso_metric_key: 0.8},
+    ]
+
+    config, trainer = get_trainer(
+        tmp_path,
+        max_epochs=max_epochs,
+        inference_losses=inference_losses,
+        n_train_batches=n_train_batches,
+        validate_using_ema=False,
+        best_enso_checkpoint_metric=f"inference/{enso_metric_key}",
+        best_enso_checkpoint_climate_tolerance=0.1,
+        inference_extra_metrics=inference_extra,
+    )
+    trainer.train()
+
+    paths = CheckpointPaths(config.checkpoint_dir)
+    assert os.path.exists(paths.best_enso_checkpoint_path)
+
+    ckpt = torch.load(
+        paths.best_enso_checkpoint_path, map_location="cpu", weights_only=False
+    )
+    # Only epoch 1 saved; epochs 2-3 have climate error > 0.3*1.1=0.33
+    assert ckpt["epoch"] == 1
+
+
+def test_best_enso_checkpoint_with_autocorr(tmp_path: str):
+    """Test that autocorrelation contributes to composite ENSO score."""
+    max_epochs = 3
+    n_train_batches = 5
+    std_key = "enso_index/sst_nino34_index_std_norm"
+    acorr_key = "enso_index/sst_nino34_index_autocorr_lag5yr"
+    acorr_target_key = "enso_index/sst_nino34_index_autocorr_lag5yr_target"
+
+    inference_losses = np.array([0.3, 0.3, 0.3])
+    # Epoch 1: std_norm=0.95 (dist=0.05), autocorr=0.1, target=0.3 (dist=0.2)
+    #   composite = 0.05 + 1.0*0.2 = 0.25
+    # Epoch 2: std_norm=0.90 (dist=0.10), autocorr=0.28, target=0.3 (dist=0.02)
+    #   composite = 0.10 + 1.0*0.02 = 0.12
+    # Epoch 3: std_norm=0.98 (dist=0.02), autocorr=0.05, target=0.3 (dist=0.25)
+    #   composite = 0.02 + 1.0*0.25 = 0.27
+    # Best composite is epoch 2 (0.12)
+    inference_extra = [
+        {std_key: 0.95, acorr_key: 0.1, acorr_target_key: 0.3},
+        {std_key: 0.90, acorr_key: 0.28, acorr_target_key: 0.3},
+        {std_key: 0.98, acorr_key: 0.05, acorr_target_key: 0.3},
+    ]
+
+    config, trainer = get_trainer(
+        tmp_path,
+        max_epochs=max_epochs,
+        inference_losses=inference_losses,
+        n_train_batches=n_train_batches,
+        validate_using_ema=False,
+        best_enso_checkpoint_metric=f"inference/{std_key}",
+        best_enso_checkpoint_autocorr_metric=f"inference/{acorr_key}",
+        best_enso_checkpoint_autocorr_target_metric=f"inference/{acorr_target_key}",
+        best_enso_checkpoint_autocorr_weight=1.0,
+        best_enso_checkpoint_climate_tolerance=0.5,
+        inference_extra_metrics=inference_extra,
+    )
+    trainer.train()
+
+    paths = CheckpointPaths(config.checkpoint_dir)
+    assert os.path.exists(paths.best_enso_checkpoint_path)
+
+    ckpt = torch.load(
+        paths.best_enso_checkpoint_path, map_location="cpu", weights_only=False
+    )
+    # Without autocorrelation, epoch 3 would win (std_norm closest to 1.0)
+    # With autocorrelation, epoch 2 wins (best composite)
+    assert ckpt["epoch"] == 2
+    assert ckpt["best_enso_score"] == pytest.approx(0.12, abs=1e-6)
+
+
+def test_best_enso_checkpoint_disabled_by_default(tmp_path: str):
+    """Test that no ENSO checkpoint is saved when metric is None."""
+    max_epochs = 2
+    config, trainer = get_trainer(
+        tmp_path,
+        max_epochs=max_epochs,
+        validate_using_ema=False,
+    )
+    trainer.train()
+
+    paths = CheckpointPaths(config.checkpoint_dir)
+    assert not os.path.exists(paths.best_enso_checkpoint_path)
+
+
 @pytest.mark.parametrize(
     "module_list,expected_num_parameters",
     [
@@ -1388,3 +1725,123 @@ def test_epoch_checkpoint_enabled_includes_final_epoch():
     save_epochs = Slice(step=5)
     assert epoch_checkpoint_enabled(5, max_epochs, save_epochs)
     assert epoch_checkpoint_enabled(10, max_epochs, save_epochs)
+
+
+def test_finetune_optimization_checkpoint_loads_optimizer_state(tmp_path: str):
+    """Trainer loads optimizer state from a finetune checkpoint while
+    keeping counters and scheduler fresh.
+
+    Uses a StepLR scheduler on stage 1 so the saved checkpoint contains a
+    decayed LR and advanced scheduler state, then verifies stage 2 starts
+    with the fresh configured LR and a fresh scheduler.
+    """
+    configured_lr = 0.01
+    stage1_scheduler = SchedulerConfig(
+        type="StepLR", kwargs={"step_size": 1, "gamma": 0.5}
+    )
+
+    stage1_dir = os.path.join(tmp_path, "stage1")
+    _, stage1_trainer = get_trainer(
+        stage1_dir,
+        max_epochs=1,
+        n_train_batches=4,
+        stepper_module_values=np.array([1.0]),
+        scheduler_config=stage1_scheduler,
+        lr=configured_lr,
+    )
+    assert stage1_trainer.optimization.optimizer.state_dict()["state"] == {}
+
+    stage1_trainer.train()
+    assert stage1_trainer.optimization.learning_rate < configured_lr
+
+    stage1_trainer._save_restart_checkpoints()
+    stage1_ckpt_path = stage1_trainer.paths.latest_checkpoint_path
+
+    # verify training updated the optimizer state dict
+    stage1_opt_state = stage1_trainer.optimization.optimizer.state_dict()["state"]
+    assert stage1_opt_state != {}, "optimizer state should change during training"
+
+    stage2_dir = os.path.join(tmp_path, "stage2")
+    _, stage2_trainer = get_trainer(
+        stage2_dir,
+        max_epochs=1,
+        n_train_batches=4,
+        stepper_module_values=np.array([2.0]),
+        resume_optimizer_ckpt_path=stage1_ckpt_path,
+        lr=configured_lr,
+    )
+
+    assert stage2_trainer._epochs_trained == 0
+    assert stage2_trainer._start_epoch == 0
+    assert stage2_trainer.num_batches_seen == 0
+
+    # optimizer state loaded from stage1 ckpt
+    stage2_opt_state = stage2_trainer.optimization.optimizer.state_dict()["state"]
+    for param_id in stage1_opt_state:
+        assert param_id in stage2_opt_state
+        for key in ("step", "exp_avg", "exp_avg_sq"):
+            assert key in stage2_opt_state[param_id]
+            torch.testing.assert_close(
+                stage2_opt_state[param_id][key],
+                stage1_opt_state[param_id][key],
+            )
+
+    # lr and scheduler are overwritten by OptimizationConfig
+    assert stage2_trainer.optimization.learning_rate == configured_lr
+    fresh_scheduler = SchedulerConfig().build(
+        stage2_trainer.optimization.optimizer, max_epochs=1
+    )
+    assert (
+        stage2_trainer.optimization.scheduler.state_dict()
+        == fresh_scheduler.state_dict()
+    )
+
+
+def test_finetune_ema_checkpoint_loads_ema_state(tmp_path: str):
+    """Trainer loads EMA state from a finetune checkpoint while keeping
+    training counters fresh and preserving the configured decay."""
+    n_train_batches = 4
+    stage1_decay = 0.99
+    stage2_decay = 0.9999
+
+    stage1_dir = os.path.join(tmp_path, "stage1")
+    _, stage1_trainer = get_trainer(
+        stage1_dir,
+        max_epochs=1,
+        n_train_batches=n_train_batches,
+        stepper_module_values=np.array([1.0]),
+        ema_decay=stage1_decay,
+    )
+    stage1_trainer.train()
+
+    stage1_ema_state = stage1_trainer._ema.get_state()
+    assert int(stage1_ema_state["num_updates"]) == n_train_batches
+
+    stage1_trainer._save_restart_checkpoints()
+    stage1_ckpt_path = stage1_trainer.paths.latest_checkpoint_path
+
+    stage2_dir = os.path.join(tmp_path, "stage2")
+    _, stage2_trainer = get_trainer(
+        stage2_dir,
+        max_epochs=1,
+        n_train_batches=n_train_batches,
+        stepper_module_values=np.array([2.0]),
+        ema_decay=stage2_decay,
+        resume_ema_ckpt_path=stage1_ckpt_path,
+    )
+
+    assert stage2_trainer._epochs_trained == 0
+    assert stage2_trainer._start_epoch == 0
+    assert stage2_trainer.num_batches_seen == 0
+
+    # EMA state loaded from stage1 checkpoint
+    stage2_ema_state = stage2_trainer._ema.get_state()
+    assert int(stage2_ema_state["num_updates"]) == n_train_batches
+    for key in stage1_ema_state["ema_params"]:
+        torch.testing.assert_close(
+            stage2_ema_state["ema_params"][key],
+            stage1_ema_state["ema_params"][key],
+        )
+
+    # decay is from stage2 config, not the checkpoint
+    assert float(stage2_ema_state["decay"]) == pytest.approx(stage2_decay)

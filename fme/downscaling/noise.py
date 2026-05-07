@@ -60,6 +60,7 @@ def condition_with_noise_for_training(
     targets_norm: torch.Tensor,
     noise_distribution: NoiseDistribution,
     sigma_data: float,
+    loss_weight_exponent: float = 1.0,
 ) -> ConditionedTarget:
     """
     Condition the targets with noise for training.
@@ -69,12 +70,18 @@ def condition_with_noise_for_training(
         noise_distribution: The noise distribution to use for conditioning.
         sigma_data: The standard deviation of the data,
             used to determine loss weighting.
+        loss_weight_exponent: Exponent applied to the base EDM loss weight
+            ``(sigma^2 + sigma_data^2) / (sigma * sigma_data)^2``. The default
+            of 1.0 gives the standard EDM weighting (~1/sigma^2 for small
+            sigma). Use 0.5 for ~1/sigma weighting (square root of EDM weight).
 
     Returns:
         The conditioned targets and the loss weighting.
     """
     sigma = noise_distribution.sample(targets_norm.shape[0], targets_norm.device)
-    weight = (sigma**2 + sigma_data**2) / (sigma * sigma_data) ** 2
+    weight = (
+        (sigma**2 + sigma_data**2) / (sigma * sigma_data) ** 2
+    ) ** loss_weight_exponent
     noise = randn_like(targets_norm) * sigma
     latents = targets_norm + noise
     return ConditionedTarget(latents=latents, sigma=sigma, weight=weight)

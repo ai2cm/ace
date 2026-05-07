@@ -8,6 +8,7 @@ import xarray as xr
 from matplotlib import pyplot as plt
 
 from fme import get_device
+from fme.ace.aggregator.inference.data import InferenceBatchData
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.testing import mock_distributed
 from fme.core.typing_ import TensorMapping
@@ -17,8 +18,10 @@ from .dynamic_index import (
     PairedRegionalIndexAggregator,
     RegionalIndexAggregator,
     _calculate_sample_average_power_spectrum,
+    _compute_autocorrelation_at_lag,
     _compute_sample_mean_std,
     anomalies_from_monthly_climo,
+    compute_psd_band_power,
     running_monthly_mean,
 )
 
@@ -166,7 +169,15 @@ def test_regional__raw_index():
         regional_mean=gridded_operations.regional_area_weighted_mean,
     )
     first_times = _get_windowed_times(start_date, n_samples, n_times // 2, i_start)
-    agg.record_batch(first_times, first_data)
+    first_batch = InferenceBatchData(
+        prediction=first_data,
+        prediction_norm={},
+        target=None,
+        target_norm=None,
+        time=first_times,
+        i_time_start=i_start,
+    )
+    agg.record_batch(first_batch)
     i_start += n_times // 2
     second_data = _get_windowed_data(
         n_samples,
@@ -176,7 +187,15 @@ def test_regional__raw_index():
         i_start,
     )
     second_times = _get_windowed_times(start_date, n_samples, n_times // 2, i_start)
-    agg.record_batch(second_times, second_data)
+    second_batch = InferenceBatchData(
+        prediction=second_data,
+        prediction_norm={},
+        target=None,
+        target_norm=None,
+        time=second_times,
+        i_time_start=i_start,
+    )
+    agg.record_batch(second_batch)
 
     expected_values = torch.arange(16.0, 16.0 + n_times, 1.0).to(device=get_device())
     raw_indices: torch.Tensor = agg._raw_indices
@@ -333,7 +352,15 @@ def test_regional_index__get_gathered_indices(use_mock_distributed):
         regional_weights=region.regional_weights,
         regional_mean=lat_lon_coordinates.get_gridded_operations().regional_area_weighted_mean,
     )
-    agg.record_batch(sample_times, sample_data)
+    batch = InferenceBatchData(
+        prediction=sample_data,
+        prediction_norm={},
+        target=None,
+        target_norm=None,
+        time=sample_times,
+        i_time_start=0,
+    )
+    agg.record_batch(batch)
     if use_mock_distributed:
         world_size = 2
         with mock_distributed(world_size=world_size):
@@ -378,7 +405,15 @@ def test_regional_index_aggregator(variable_name):
         regional_weights=region.regional_weights,
         regional_mean=lat_lon_coordinates.get_gridded_operations().regional_area_weighted_mean,
     )
-    agg.record_batch(time=time, data=data)
+    batch = InferenceBatchData(
+        prediction=data,
+        prediction_norm={},
+        target=None,
+        target_norm=None,
+        time=time,
+        i_time_start=0,
+    )
+    agg.record_batch(batch)
     logs = agg.get_logs(label="test")
     assert len(logs) > 0
     metric_name = f"test/{variable_name}_nino34_index"
@@ -390,6 +425,15 @@ def test_regional_index_aggregator(variable_name):
     assert isinstance(logs[metric_name], plt.Figure)
 
     metric_name = f"test/{variable_name}_nino34_index_std"
+    assert metric_name in logs
+    assert isinstance(logs[metric_name], float)
+
+    for lag_years in [2, 5]:
+        metric_name = f"test/{variable_name}_nino34_index_autocorr_lag{lag_years}yr"
+        assert metric_name in logs
+        assert isinstance(logs[metric_name], float)
+
+    metric_name = f"test/{variable_name}_nino34_index_psd_2_5yr"
     assert metric_name in logs
     assert isinstance(logs[metric_name], float)
 
@@ -434,7 +478,15 @@ def test_paired_regional_index_aggregator(variable_name):
             regional_mean=lat_lon_coordinates.get_gridded_operations().regional_area_weighted_mean,
         ),
     )
-    agg.record_batch(time=time, target_data=target_data, gen_data=prediction_data)
+    batch = InferenceBatchData(
+        prediction=prediction_data,
+        prediction_norm={},
+        target=target_data,
+        target_norm=None,
+        time=time,
+        i_time_start=0,
+    )
+    agg.record_batch(batch)
     logs = agg.get_logs(label="test")
     assert len(logs) > 0
     metric_name = f"test/{variable_name}_nino34_index"
@@ -451,6 +503,20 @@ def test_paired_regional_index_aggregator(variable_name):
         assert metric_name in logs
         assert isinstance(logs[metric_name], float)
 
+    for lag_years in [2, 5]:
+        for suffix in [
+            f"_nino34_index_autocorr_lag{lag_years}yr",
+            f"_nino34_index_autocorr_lag{lag_years}yr_target",
+        ]:
+            metric_name = f"test/{variable_name}{suffix}"
+            assert metric_name in logs
+            assert isinstance(logs[metric_name], float)
+
+    for suffix in ["_nino34_index_psd_2_5yr", "_nino34_index_psd_2_5yr_target"]:
+        metric_name = f"test/{variable_name}{suffix}"
+        assert metric_name in logs
+        assert isinstance(logs[metric_name], float)
+
 
 def test__calculate_sample_average_power_spectrum():
     data = [
@@ -463,6 +529,43 @@ def test__calculate_sample_average_power_spectrum():
         )
     assert freq.shape == power_spectrum.shape
     assert freq.shape == (3,)
+
+
+def test_compute_psd_band_power():
+    n_months = 120  # 10 years of monthly data
+    t = np.arange(n_months)
+    period_3yr = 36  # months
+    signal = np.sin(2 * np.pi * t / period_3yr)
+    data = xr.DataArray(signal.reshape(1, -1), dims=("sample", "time"))
+    freq, power = _calculate_sample_average_power_spectrum(data)
+
+    band_power = compute_psd_band_power(freq, power, period_bounds=(2.0, 5.0))
+    assert isinstance(band_power, float)
+    assert not np.isnan(band_power)
+    assert band_power > 0.0
+
+    # Most power should be inside the 2-5yr band for a 3-year period signal
+    total_power = compute_psd_band_power(
+        freq,
+        power,
+        period_bounds=(1.0 / freq.max(), 1.0 / max(freq[freq > 0].min(), 1e-10)),
+    )
+    # Skip ratio check if total_power is nan (when freq range is too narrow)
+    if not np.isnan(total_power) and total_power > 0:
+        assert band_power / total_power > 0.5
+
+    # Band with no frequency bins returns NaN
+    assert np.isnan(compute_psd_band_power(freq, power, period_bounds=(0.01, 0.02)))
+
+
+def test_compute_psd_band_power_known_value():
+    """Verify trapezoidal integration against a hand-calculated value."""
+    freqs = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
+    power = np.array([10.0, 20.0, 30.0, 40.0, 50.0, 60.0])
+    result = compute_psd_band_power(freqs, power, period_bounds=(2.0, 5.0))
+    # period 2-5yr -> freq 0.2-0.5 cycles/yr
+    expected = np.trapezoid([20.0, 30.0, 40.0, 50.0], [0.2, 0.3, 0.4, 0.5])
+    np.testing.assert_almost_equal(result, expected)
 
 
 def test__compute_sample_mean_std():
@@ -508,3 +611,35 @@ def test__compute_sample_mean_std():
         (np.std(data1) / np.std(target_data1) + np.std(data2) / np.std(target_data2))
         / 2,
     )
+
+
+def test__compute_autocorrelation_at_lag():
+    # Perfect autocorrelation: constant signal
+    constant = np.array([[5.0] * 100])
+    assert np.isnan(_compute_autocorrelation_at_lag(constant, lag_months=10))
+
+    # AR(1) process: known autocorrelation structure
+    rng = np.random.RandomState(42)
+    phi = 0.9
+    n = 10000
+    x = np.zeros(n)
+    for i in range(1, n):
+        x[i] = phi * x[i - 1] + rng.randn()
+    data = x.reshape(1, -1)  # (1, n)
+
+    # Lag-1 autocorrelation should be close to phi
+    acorr_1 = _compute_autocorrelation_at_lag(data, lag_months=1)
+    np.testing.assert_almost_equal(acorr_1, phi, decimal=1)
+
+    # Lag-k autocorrelation of AR(1) is phi^k
+    acorr_5 = _compute_autocorrelation_at_lag(data, lag_months=5)
+    np.testing.assert_almost_equal(acorr_5, phi**5, decimal=1)
+
+    # Too-short series returns NaN
+    short = np.array([[1.0, 2.0, 3.0]])
+    assert np.isnan(_compute_autocorrelation_at_lag(short, lag_months=5))
+
+    # Multi-sample: averages across samples
+    data_2sample = np.vstack([data, data])  # identical samples
+    acorr_multi = _compute_autocorrelation_at_lag(data_2sample, lag_months=1)
+    np.testing.assert_almost_equal(acorr_multi, acorr_1)

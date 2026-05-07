@@ -1,16 +1,23 @@
 import os
 import tempfile
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 import torch
 import xarray as xr
 
+from fme.core.rand import set_seed
 from fme.core.testing.wandb import mock_wandb
 
 from .data_loading.test_data_loader import create_coupled_data_on_disk
 from .inference.evaluator import main as inference_evaluator_main
 from .train.train import main as train_main
+from .train.train_config import (
+    AdditionalInferenceConfig,
+    InlineInferenceConfig,
+    TrainConfig,
+)
 
 _TRAIN_CONFIG_TEMPLATE = """
 experiment_dir: {experiment_dir}
@@ -18,7 +25,6 @@ seed: 0
 save_checkpoint: true
 save_per_epoch_diagnostics: {save_per_epoch_diagnostics}
 max_epochs: {max_epochs}
-n_coupled_steps: {n_coupled_steps}
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -63,19 +69,38 @@ inference:
   n_coupled_steps: {inference_n_coupled_steps}
   aggregator:
     log_zonal_mean_images: True
+additional_inference:
+  - name: weather_eval
+    config:
+      loader:
+        dataset:
+          ocean:
+            data_path: {ocean_data_path}
+          atmosphere:
+            data_path: {atmosphere_data_path}
+        start_indices:
+          times:
+            - '1970-01-01T00:00:00'
+            - '1970-01-03T00:00:00'
+      n_coupled_steps: {inference_n_coupled_steps}
+      aggregator:
+        log_zonal_mean_images: True
 optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001
   optimizer_type: Adam
 stepper_training:
+  n_coupled_steps: {n_coupled_steps}
   ocean:
     loss:
-      type: MSE
+      type: {loss_type}
+      kwargs: {loss_kwargs}
     loss_contributions:
       weight: {loss_ocean_weight}
   atmosphere:
     loss:
-      type: MSE
+      type: {loss_type}
+      kwargs: {loss_kwargs}
     loss_contributions:
       n_steps: {loss_atmos_n_steps}
 stepper:
@@ -122,7 +147,7 @@ stepper:
         type: single_module
         config:
           builder:
-            type: SphericalFourierNeuralOperatorNet
+            type: {atmos_network_type}
             config:
               num_layers: 2
               embed_dim: 12
@@ -193,11 +218,23 @@ def _write_test_yaml_files(
     save_per_epoch_diagnostics: bool = True,
     loss_atmos_n_steps: int = 1000,  # large number ~= inf
     loss_ocean_weight: float = 1.0,
+    crps_training: bool = False,
 ):
     exper_dir = tmp_path / "results"
     ocean_next_step_forcing_names = list(
         set(atmos_out_names).intersection(ocean_in_names)
     )
+
+    # Configure atmosphere network and loss based on crps_training
+    if crps_training:
+        atmos_network_type = "NoiseConditionedSFNO"
+        loss_type = "EnsembleLoss"
+        loss_kwargs = "{'crps_weight': 1.0, 'energy_score_weight': 0.0}"
+    else:
+        atmos_network_type = "SphericalFourierNeuralOperatorNet"
+        loss_type = "MSE"
+        loss_kwargs = "{}"
+
     train_config = _TRAIN_CONFIG_TEMPLATE.format(
         experiment_dir=exper_dir,
         max_epochs=max_epochs,
@@ -221,6 +258,9 @@ def _write_test_yaml_files(
         save_per_epoch_diagnostics=str(save_per_epoch_diagnostics).lower(),
         loss_atmos_n_steps=loss_atmos_n_steps,
         loss_ocean_weight=loss_ocean_weight,
+        atmos_network_type=atmos_network_type,
+        loss_type=loss_type,
+        loss_kwargs=loss_kwargs,
     )
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".yaml") as f_train:
         f_train.write(train_config)
@@ -242,13 +282,21 @@ def _write_test_yaml_files(
 
 
 @pytest.mark.parametrize(
-    "loss_atmos_n_steps",
-    [3, 0],
+    "loss_atmos_n_steps, crps_training",
+    [
+        (2, False),
+        (0, False),
+        (3, True),  # CRPS training with EnsembleLoss
+    ],
 )
-def test_train_and_inference(tmp_path, loss_atmos_n_steps, very_fast_only: bool):
+def test_train_and_inference(
+    tmp_path, loss_atmos_n_steps, crps_training: bool, very_fast_only: bool
+):
     """Ensure that coupled training and standalone inference run without errors."""
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
+
+    set_seed(42 + loss_atmos_n_steps)
 
     data_dir = tmp_path / "coupled_data"
     data_dir.mkdir()
@@ -351,6 +399,7 @@ def test_train_and_inference(tmp_path, loss_atmos_n_steps, very_fast_only: bool)
         inference_n_coupled_steps=6,
         coupled_steps_in_memory=2,
         loss_atmos_n_steps=loss_atmos_n_steps,
+        crps_training=crps_training,
     )
 
     with mock_wandb() as wandb:
@@ -480,6 +529,53 @@ def test_train_and_inference(tmp_path, loss_atmos_n_steps, very_fast_only: bool)
             ds = xr.open_dataset(diagnostic_output, decode_timedelta=False)
             assert len(ds) > 0
 
+    weather_eval_keys = [k for k in epoch_logs if k.startswith("weather_eval/")]
+    assert (
+        weather_eval_keys
+    ), "expected at least one weather_eval metric in additional_inference epoch log"
+    assert "weather_eval/time_mean_norm/rmse/channel_mean" in epoch_logs
+
+    # additional_inference must also run for the pre-training evaluation
+    # (epoch 0) when evaluate_before_training is True (the coupled default).
+    # The pre-training evaluation log is merged into train_logs[0] via wandb's
+    # step-based merging.
+    pretrain_logs = train_logs[0]
+    assert pretrain_logs.get("epoch") == 0
+    pretrain_weather_eval_keys = [
+        k for k in pretrain_logs if k.startswith("weather_eval/")
+    ]
+    assert pretrain_weather_eval_keys, (
+        "expected weather_eval metrics in pre-training (epoch 0) log when "
+        "evaluate_before_training is True"
+    )
+    assert "weather_eval/time_mean_norm/rmse/channel_mean" in pretrain_logs
+
+    for domain in ("ocean", "atmosphere"):
+        for epoch_subdir in ("epoch_0000", "epoch_0001"):
+            weather_eval_output_dir = (
+                tmp_path
+                / "results"
+                / "output"
+                / "additional_inference"
+                / "weather_eval"
+                / domain
+                / epoch_subdir
+            )
+            assert weather_eval_output_dir.exists(), (
+                f"expected additional_inference output dir at "
+                f"{weather_eval_output_dir}"
+            )
+            for diagnostic in (
+                "time_mean",
+                "time_mean_norm",
+            ):
+                diagnostic_output = (
+                    weather_eval_output_dir / f"{diagnostic}_diagnostics.nc"
+                )
+                assert diagnostic_output.exists()
+                ds = xr.open_dataset(diagnostic_output, decode_timedelta=False)
+                assert len(ds) > 0
+
     best_checkpoint_path = (
         tmp_path / "results" / "training_checkpoints" / "best_ckpt.tar"
     )
@@ -570,4 +666,34 @@ def test_train_and_inference(tmp_path, loss_atmos_n_steps, very_fast_only: bool)
             wm_gen,
             inference_logs[1][f"inference/mean/weighted_mean_gen/{name}"],
             atol=1e-4,
+        )
+
+
+def test_additional_inference_empty_name():
+    """AdditionalInferenceConfig should reject an empty name."""
+    inline_inference_config = MagicMock(spec=InlineInferenceConfig)
+    with pytest.raises(ValueError, match="must be non-empty"):
+        AdditionalInferenceConfig(name="", config=inline_inference_config)
+
+
+def test_train_config_duplicate_additional_inference_names():
+    """TrainConfig should reject additional_inference entries with duplicate names."""
+    inline_inference_config = MagicMock(spec=InlineInferenceConfig)
+    duplicate_entries = [
+        AdditionalInferenceConfig(name="dup", config=inline_inference_config),
+        AdditionalInferenceConfig(name="dup", config=inline_inference_config),
+    ]
+    with pytest.raises(ValueError, match="Duplicate additional_inference name"):
+        TrainConfig(
+            train_loader=MagicMock(),
+            validation_loader=MagicMock(),
+            stepper=MagicMock(),
+            stepper_training=MagicMock(),
+            optimization=MagicMock(),
+            logging=MagicMock(),
+            max_epochs=1,
+            save_checkpoint=False,
+            experiment_dir="/tmp/whatever",
+            inference=inline_inference_config,
+            additional_inference=duplicate_entries,
         )

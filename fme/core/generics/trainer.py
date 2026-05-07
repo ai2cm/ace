@@ -52,6 +52,7 @@ import abc
 import contextlib
 import gc
 import logging
+import math
 import os
 import signal
 import sys
@@ -64,14 +65,14 @@ import torch
 
 import fme
 from fme.core.distributed import Distributed
-from fme.core.ema import EMATracker
+from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.aggregator import AggregatorABC, InferenceAggregatorABC
 from fme.core.generics.data import GriddedDataABC, InferenceDataABC
 from fme.core.generics.inference import run_inference
 from fme.core.generics.lr_tuning import LRTuningConfig, run_lr_tuning_trial
 from fme.core.generics.metrics_aggregator import MetricsAggregator
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
-from fme.core.generics.validation import run_validation
+from fme.core.generics.validation import run_validation_loop
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.timing import GlobalTimer
 from fme.core.training_history import TrainingJob
@@ -89,6 +90,31 @@ class EndOfEpochCallback(Protocol):
 
 def null_end_of_epoch_callback(epoch: int) -> Mapping[str, Any]:
     return {}
+
+
+class ValidationCallback(Protocol):
+    def __call__(self, epoch: int) -> tuple[dict[str, Any], float]:
+        """Run validation for the given epoch.
+
+        Returns:
+            A tuple of (logs, valid_loss).
+        """
+        ...
+
+
+class InferenceCallback(Protocol):
+    def __call__(self, epoch: int) -> tuple[dict[str, Any], float | None]:
+        """Run inference for the given epoch.
+
+        Returns:
+            A tuple of (logs, inference_error_or_none). When no inference runs
+            for this epoch, returns ({}, None).
+        """
+        ...
+
+
+def _null_inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
+    return {}, None
 
 
 class TrainConfigProtocol(Protocol):
@@ -137,9 +163,25 @@ class TrainConfigProtocol(Protocol):
     def save_best_inference_epoch_checkpoints(self) -> bool: ...
 
     @property
-    def lr_tuning(self) -> LRTuningConfig | None: ...
+    def best_enso_checkpoint_metric(self) -> str | None: ...
 
-    def get_inference_epochs(self) -> list[int]: ...
+    @property
+    def best_enso_checkpoint_autocorr_metric(self) -> str | None: ...
+
+    @property
+    def best_enso_checkpoint_autocorr_target_metric(self) -> str | None: ...
+
+    @property
+    def best_enso_checkpoint_autocorr_weight(self) -> float: ...
+
+    @property
+    def best_enso_checkpoint_climate_tolerance(self) -> float: ...
+
+    @property
+    def ema(self) -> EMAConfig: ...
+
+    @property
+    def lr_tuning(self) -> LRTuningConfig | None: ...
 
 
 PS = TypeVar("PS", contravariant=True)  # prognostic state
@@ -149,17 +191,13 @@ FD = TypeVar("FD")  # forcing data for inference
 SD = TypeVar("SD")  # stepped data from inference
 
 
-class AggregatorBuilderABC(abc.ABC, Generic[PS, TO, SD]):
+class AggregatorBuilderABC(abc.ABC, Generic[TO]):
     @abc.abstractmethod
     def get_train_aggregator(self) -> AggregatorABC[TO]:
         pass
 
     @abc.abstractmethod
     def get_validation_aggregator(self) -> AggregatorABC[TO]:
-        pass
-
-    @abc.abstractmethod
-    def get_inference_aggregator(self) -> InferenceAggregatorABC[PS, SD]:
         pass
 
 
@@ -188,6 +226,10 @@ class CheckpointPaths:
     def best_inference_epoch_checkpoint_path(self, epoch: int) -> str:
         return os.path.join(self.checkpoint_dir, f"best_inference_ckpt_{epoch:04d}.tar")
 
+    @property
+    def best_enso_checkpoint_path(self) -> str:
+        return os.path.join(self.checkpoint_dir, "best_enso_ckpt.tar")
+
 
 def chain_signal_handler(sig, handler):
     prev_handler = signal.getsignal(sig)
@@ -196,7 +238,7 @@ def chain_signal_handler(sig, handler):
         handler(signum, frame)
         if callable(prev_handler):
             prev_handler(signum, frame)
-        sys.exit(0)
+        sys.exit(1)
 
     signal.signal(sig, on_sig)
 
@@ -206,14 +248,15 @@ class Trainer:
         self,
         train_data: GriddedDataABC[BD],
         validation_data: GriddedDataABC[BD],
-        inference_data: InferenceDataABC[PS, FD],
         stepper: TrainStepperABC[PS, BD, FD, SD, TO],
         build_optimization: Callable[[torch.nn.ModuleList], Optimization],
         build_ema: Callable[[torch.nn.ModuleList], EMATracker],
         config: TrainConfigProtocol,
-        aggregator_builder: AggregatorBuilderABC[PS, TO, SD],
+        aggregator_builder: AggregatorBuilderABC[TO],
+        validation_callback: ValidationCallback,
         end_of_batch_callback: EndOfBatchCallback = lambda: None,
         end_of_epoch_callback: EndOfEpochCallback = null_end_of_epoch_callback,
+        inference_callback: InferenceCallback = _null_inference_callback,
         do_gc_collect: bool = True,
     ):
         logging.info(f"Current device is {fme.get_device()}")
@@ -234,10 +277,6 @@ class Trainer:
 
         self.train_data = train_data
         self.valid_data = validation_data
-        for gridded_data, name in zip(
-            (self.train_data, self.valid_data), ("train", "valid")
-        ):
-            gridded_data.log_info(name)
 
         self.num_batches_seen = 0
         self._start_epoch = 0
@@ -245,6 +284,8 @@ class Trainer:
         self._current_epoch_num_batches_seen = 0
         self._best_validation_loss = torch.inf
         self._best_inference_error = torch.inf
+        self._best_enso_score: float = torch.inf
+        self._best_enso_inference_error: float = torch.inf
 
         self.stepper = stepper
         self.stepper.update_training_history(TrainingJob.from_env())
@@ -269,10 +310,11 @@ class Trainer:
         n_params = count_parameters(self.stepper.modules)
         logging.info(f"Number of trainable model parameters: {n_params}")
 
-        self._inference_data = inference_data
         self._do_gc_collect = do_gc_collect
         self._in_ema_context = False
         self._started_training = False
+        self._validation_callback: ValidationCallback = validation_callback
+        self._inference_callback: InferenceCallback = inference_callback
 
         def on_terminate(signum, frame):
             dist = Distributed.get_instance()
@@ -296,8 +338,8 @@ class Trainer:
         chain_signal_handler(signal.SIGTERM, on_terminate)
         chain_signal_handler(signal.SIGINT, on_terminate)
 
-    def set_end_of_epoch_callback(self, end_of_epoch_callback: EndOfEpochCallback):
-        self._end_of_epoch_callback = end_of_epoch_callback
+    def set_end_of_epoch_callback(self, callback: EndOfEpochCallback) -> None:
+        self._end_of_epoch_callback = callback
 
     def switch_off_grad(self, model: torch.nn.Module):
         for param in model.parameters():
@@ -319,6 +361,18 @@ class Trainer:
         """Create a new EMATracker initialized from the current EMA state."""
         return EMATracker.from_state(self._ema.get_state(), modules)
 
+    def _validate_stepper(self, stepper: TrainStepperABC, ema: EMATracker) -> float:
+        aggregator = self._aggregator_builder.get_validation_aggregator()
+        run_validation_loop(
+            stepper=stepper,
+            valid_data=self.valid_data,
+            aggregator=aggregator,
+            ema=ema,
+            validate_using_ema=self.config.validate_using_ema,
+        )
+        val_logs = aggregator.get_logs(label="val")
+        return val_logs["val/mean/loss"]
+
     def _maybe_tune_lr(self):
         cfg = self.config.lr_tuning
         if cfg is None:
@@ -332,17 +386,13 @@ class Trainer:
         self.train_data.set_epoch(self._epochs_trained + 1)
         new_lr = run_lr_tuning_trial(
             train_data=self.train_data,
-            valid_data=self.valid_data,
             optimization=self.optimization,
             copy_stepper=self._copy_stepper,
             build_optimization=self._build_optimization,
             copy_ema=self._copy_ema,
             config=cfg,
             current_lr=self.optimization.learning_rate,
-            get_validation_aggregator=(
-                self._aggregator_builder.get_validation_aggregator
-            ),
-            validate_using_ema=self.config.validate_using_ema,
+            validate_stepper=self._validate_stepper,
         )
         if new_lr is not None:
             logging.info(f"LR tuning: adopting candidate LR {new_lr}")
@@ -351,7 +401,9 @@ class Trainer:
     def train(self):
         logging.info("Starting Training Loop...")
 
-        inference_epochs = self.config.get_inference_epochs()
+        validation_callback = self._validation_callback
+        inference_callback = self._inference_callback
+
         if self.config.segment_epochs is None:
             segment_max_epochs = self.config.max_epochs
         else:
@@ -365,16 +417,20 @@ class Trainer:
             and self._current_epoch_num_batches_seen == 0
         ):
             logging.info("Starting validation before training")
-            valid_logs = self.validate_one_epoch()
-            if self._epochs_trained in inference_epochs:
+            with self.validation_context():
+                valid_logs, valid_loss = validation_callback(self._epochs_trained)
                 logging.info("Starting inline inference before training")
-                inference_logs = self.inference_one_epoch()
-            else:
-                inference_logs = {}
-            valid_loss = valid_logs["val/mean/loss"]
+                inference_logs, _ = inference_callback(self._epochs_trained)
+            with self.validation_context():
+                additional_logs = self._end_of_epoch_callback(self._epochs_trained)
             logging.info(f"Validation loss before training: {valid_loss}")
             logging.info("Logging to wandb")
-            all_logs = valid_logs | inference_logs | {"epoch": self._epochs_trained}
+            all_logs = (
+                valid_logs
+                | inference_logs
+                | dict(additional_logs)
+                | {"epoch": self._epochs_trained}
+            )
             wandb = WandB.get_instance()
             wandb.log(all_logs, step=self.num_batches_seen)
 
@@ -390,19 +446,45 @@ class Trainer:
             start_time = time.time()
             train_logs = self.train_one_epoch()
             train_end = time.time()
-            valid_logs = self.validate_one_epoch()
-            valid_end = time.time()
-            if self._epochs_trained in inference_epochs:
-                inference_logs = self.inference_one_epoch()
-                inference_end: float | None = time.time()
-            else:
-                inference_logs = {}
-                inference_end = None
+            logging.info(
+                f"Starting validation step for model trained for "
+                f"{self._epochs_trained} epochs"
+            )
+            with self.validation_context():
+                valid_logs, valid_loss = validation_callback(self._epochs_trained)
+                valid_end = time.time()
+                logging.info(
+                    f"Starting inference step for model trained for "
+                    f"{self._epochs_trained} epochs"
+                )
+                inference_logs, inference_error = inference_callback(
+                    self._epochs_trained
+                )
+                inference_end: float | None = time.time() if inference_logs else None
 
             train_loss = train_logs.get("train/mean/loss")
             valid_loss = valid_logs["val/mean/loss"]
             inference_error = inference_logs.get(
                 "inference/time_mean_norm/rmse/channel_mean", None
+            )
+            enso_metric = (
+                inference_logs.get(self.config.best_enso_checkpoint_metric, None)
+                if self.config.best_enso_checkpoint_metric is not None
+                else None
+            )
+            enso_autocorr = (
+                inference_logs.get(
+                    self.config.best_enso_checkpoint_autocorr_metric, None
+                )
+                if self.config.best_enso_checkpoint_autocorr_metric is not None
+                else None
+            )
+            enso_autocorr_target = (
+                inference_logs.get(
+                    self.config.best_enso_checkpoint_autocorr_target_metric, None
+                )
+                if self.config.best_enso_checkpoint_autocorr_target_metric is not None
+                else None
             )
             # need to get the learning rate before stepping the scheduler
             lr = self.optimization.learning_rate
@@ -448,7 +530,13 @@ class Trainer:
 
             if self._should_save_checkpoints():
                 logging.info(f"Saving checkpoints for epoch {self._epochs_trained}")
-                self.save_all_checkpoints(valid_loss, inference_error)
+                self.save_all_checkpoints(
+                    valid_loss,
+                    inference_error,
+                    enso_metric,
+                    enso_autocorr,
+                    enso_autocorr_target,
+                )
 
     def _log_first_batch_metrics(self):
         wandb = WandB.get_instance()
@@ -589,56 +677,22 @@ class Trainer:
     def _ema_context(self):
         """
         A context where the stepper uses the EMA model.
+
+        Reentrant: if we're already inside an EMA context (e.g. because
+        ``validation_context()`` was opened twice -- once by the trainer to
+        wrap an end-of-epoch callback, and once again by an inference helper
+        called from within that callback), nesting is a no-op so the EMA
+        weights are applied exactly once.
         """
+        if self._in_ema_context:
+            yield
+            return
         self._in_ema_context = True
         try:
             with self._ema.applied_params(self.stepper.modules):
                 yield
         finally:
             self._in_ema_context = False
-
-    def validate_one_epoch(self):
-        if self._current_epoch_num_batches_seen > 0:
-            raise RuntimeError(
-                "Validation should only be called after a full epoch has been trained"
-            )
-        logging.info(
-            f"Starting validation step for model trained for "
-            f"{self._epochs_trained} epochs"
-        )
-        self.valid_data.set_epoch(self._epochs_trained)
-        aggregator = self._aggregator_builder.get_validation_aggregator()
-        logging.info("Starting loop over validation data")
-        return run_validation(
-            train_stepper=self.stepper,
-            validation_data=self.valid_data,
-            aggregator=aggregator,
-            diagnostics_subdir=f"epoch_{self._epochs_trained:04d}",
-            record_logs=lambda logs: None,
-            ema=self._ema,
-            validate_using_ema=self.config.validate_using_ema,
-        )
-
-    def inference_one_epoch(
-        self,
-    ):
-        if self._current_epoch_num_batches_seen > 0:
-            raise RuntimeError(
-                "Inference should only be called after a full epoch has been trained"
-            )
-        logging.info(
-            f"Starting inference step for model trained for "
-            f"{self._epochs_trained} epochs"
-        )
-        logging.info("Starting inline inference run")
-        return inference_one_epoch(
-            stepper=self.stepper,
-            validation_context=self.validation_context,
-            dataset=self._inference_data,
-            aggregator=self._aggregator_builder.get_inference_aggregator(),
-            label="inference",
-            epoch=self._epochs_trained,
-        )
 
     def save_checkpoint(
         self,
@@ -658,6 +712,8 @@ class Trainer:
                 "epoch": self._epochs_trained,
                 "best_validation_loss": self._best_validation_loss,
                 "best_inference_error": self._best_inference_error,
+                "best_enso_score": self._best_enso_score,
+                "best_enso_inference_error": self._best_enso_inference_error,
                 "stepper": self.stepper.get_state(),
                 "ema": self._ema.get_state(),
             }
@@ -690,7 +746,14 @@ class Trainer:
             epoch, self.config.max_epochs, self.config.ema_checkpoint_save_epochs
         )
 
-    def save_all_checkpoints(self, valid_loss: float, inference_error: float | None):
+    def save_all_checkpoints(
+        self,
+        valid_loss: float,
+        inference_error: float | None,
+        enso_metric: float | None = None,
+        enso_autocorr: float | None = None,
+        enso_autocorr_target: float | None = None,
+    ):
         if self.config.validate_using_ema:
             best_checkpoint_context = self._ema_context
         else:
@@ -733,7 +796,74 @@ class Trainer:
             if save_best_checkpoint:
                 self.save_checkpoint(self.paths.best_checkpoint_path)
 
+            # Save best ENSO checkpoint if configured and metric available
+            if (
+                self.config.best_enso_checkpoint_metric is not None
+                and enso_metric is not None
+                and inference_error is not None
+            ):
+                self._save_best_enso_checkpoint(
+                    enso_metric,
+                    inference_error,
+                    enso_autocorr,
+                    enso_autocorr_target,
+                )
+
         self._save_restart_checkpoints()
+
+    def _save_best_enso_checkpoint(
+        self,
+        enso_metric: float,
+        inference_error: float,
+        enso_autocorr: float | None = None,
+        enso_autocorr_target: float | None = None,
+    ) -> None:
+        """Save checkpoint that optimizes ENSO metric with a climate guard.
+
+        The ENSO score is a weighted composite:
+            |1.0 - std_norm| + weight * |autocorr_pred - autocorr_target|
+
+        A checkpoint is saved only when:
+        1. The composite ENSO score improves, AND
+        2. The climate skill (inference_error) is within a configurable
+           relative tolerance of the current best_inference_error.
+        """
+        enso_score = abs(1.0 - enso_metric)
+        if (
+            enso_autocorr is not None
+            and enso_autocorr_target is not None
+            and not math.isnan(enso_autocorr)
+            and not math.isnan(enso_autocorr_target)
+        ):
+            autocorr_weight = self.config.best_enso_checkpoint_autocorr_weight
+            autocorr_dist = abs(enso_autocorr - enso_autocorr_target)
+            enso_score += autocorr_weight * autocorr_dist
+
+        tolerance = self.config.best_enso_checkpoint_climate_tolerance
+        climate_threshold = self._best_inference_error * (1.0 + tolerance)
+
+        if enso_score < self._best_enso_score and (
+            inference_error <= climate_threshold
+        ):
+            logging.info(
+                f"ENSO composite score ({enso_score:.4f}) "
+                f"improves on previous best ({self._best_enso_score:.4f}), "
+                f"climate error ({inference_error:.4f}) within tolerance "
+                f"({climate_threshold:.4f})."
+            )
+            logging.info(
+                f"Saving best ENSO checkpoint to "
+                f"{self.paths.best_enso_checkpoint_path}"
+            )
+            self._best_enso_score = enso_score
+            self._best_enso_inference_error = inference_error
+            self.save_checkpoint(self.paths.best_enso_checkpoint_path)
+        elif enso_score < self._best_enso_score:
+            logging.info(
+                f"ENSO composite score ({enso_score:.4f}) improved but climate "
+                f"error ({inference_error:.4f}) exceeds tolerance "
+                f"({climate_threshold:.4f}), skipping."
+            )
 
         if self._ema_epoch_checkpoint_enabled(self._epochs_trained):
             ema_epoch_checkpoint_path = self.paths.ema_epoch_checkpoint_path(
@@ -747,7 +877,7 @@ class Trainer:
                 self._epochs_trained
             )
             logging.info(f"Saving epoch checkpoint to {epoch_checkpoint_path}")
-            self.save_checkpoint(epoch_checkpoint_path)
+            self.save_checkpoint(epoch_checkpoint_path, include_optimization=True)
 
 
 def inference_one_epoch(
@@ -773,9 +903,7 @@ def inference_one_epoch(
 
 
 def _restore_checkpoint(trainer: Trainer, checkpoint_path):
-    checkpoint = torch.load(
-        checkpoint_path, map_location=fme.get_device(), weights_only=False
-    )
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     trainer.stepper.load_state(checkpoint["stepper"])
     trainer.optimization.load_state(checkpoint["optimization"])
     trainer.num_batches_seen = checkpoint["num_batches_seen"]
@@ -786,6 +914,10 @@ def _restore_checkpoint(trainer: Trainer, checkpoint_path):
     trainer._epochs_trained = checkpoint["epoch"]
     trainer._best_validation_loss = checkpoint["best_validation_loss"]
     trainer._best_inference_error = checkpoint["best_inference_error"]
+    trainer._best_enso_score = checkpoint.get("best_enso_score", torch.inf)
+    trainer._best_enso_inference_error = checkpoint.get(
+        "best_enso_inference_error", torch.inf
+    )
     trainer._ema = EMATracker.from_state(checkpoint["ema"], trainer.stepper.modules)
 
 

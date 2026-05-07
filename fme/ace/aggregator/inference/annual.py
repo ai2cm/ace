@@ -2,7 +2,7 @@ import dataclasses
 import datetime
 from collections.abc import Callable, Mapping
 from functools import partial
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 import numpy as np
 import torch
@@ -16,6 +16,8 @@ from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorMapping
 
 from ..plotting import plot_mean_and_samples
+from .build_context import MetricBuildContext, maybe_filter
+from .data import InferenceBatchData, MetricBuildResult, SubAggregator
 
 
 class PairedGlobalMeanAnnualAggregator:
@@ -53,13 +55,13 @@ class PairedGlobalMeanAnnualAggregator:
     @torch.no_grad()
     def record_batch(
         self,
-        time: xr.DataArray,
-        target_data: TensorMapping,
-        gen_data: TensorMapping,
+        data: InferenceBatchData,
     ):
         """Record a batch of data for computing time variability statistics."""
-        self._target_aggregator.record_batch(time, target_data)
-        self._gen_aggregator.record_batch(time, gen_data)
+        target_data = data.replace(prediction=data.target)
+        gen_data = data.replace(prediction=data.prediction)
+        self._target_aggregator.record_batch(target_data)
+        self._gen_aggregator.record_batch(gen_data)
 
     def _get_gathered_means(self) -> tuple[xr.Dataset, xr.Dataset] | None:
         """
@@ -166,11 +168,12 @@ class GlobalMeanAnnualAggregator:
         self._datasets: list[xr.Dataset] | None = None
 
     @torch.no_grad()
-    def record_batch(self, time: xr.DataArray, data: TensorMapping):
+    def record_batch(self, data: InferenceBatchData):
         """Record a batch of data for computing time variability statistics."""
+        time = data.time
         data_area_mean = {
             name: tensor.cpu()
-            for name, tensor in self._area_weighted_mean_dict(data).items()
+            for name, tensor in self._area_weighted_mean_dict(data.prediction).items()
         }
         ds = to_dataset(data_area_mean, time)
 
@@ -365,3 +368,27 @@ def to_dataset(data: TensorMapping, time: xr.DataArray) -> xr.Dataset:
 def _get_min_samples(timestep: datetime.timedelta) -> int:
     steps_per_day = datetime.timedelta(days=1) // timestep
     return 362 * steps_per_day
+
+
+@dataclasses.dataclass
+class AnnualMetricConfig:
+    type: Literal["annual"] = "annual"
+    variables: list[str] | None = None
+    name: str = "annual"
+    reference_data: str | None = None
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        if self.reference_data is not None:
+            ref = xr.open_dataset(self.reference_data, decode_timedelta=False)
+        else:
+            ref = ctx.monthly_reference_data
+        agg: SubAggregator = PairedGlobalMeanAnnualAggregator(
+            ops=ctx.ops,
+            timestep=ctx.timestep,
+            variable_metadata=ctx.variable_metadata,
+            monthly_reference_data=ref,
+        )
+        return MetricBuildResult(aggregator=maybe_filter(agg, self.variables))

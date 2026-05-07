@@ -56,6 +56,7 @@ class UNetDiffusionSong:
     encoder_type: str = "standard"
     decoder_type: str = "standard"
     resample_filter: list[int] = dataclasses.field(default_factory=lambda: [1, 1])
+    bottleneck_attention: bool = True
 
     def build(
         self,
@@ -85,6 +86,7 @@ class UNetDiffusionSong:
             encoder_type=self.encoder_type,
             decoder_type=self.decoder_type,
             resample_filter=self.resample_filter,
+            bottleneck_attention=self.bottleneck_attention,
         )
         return UNetDiffusionModule(
             EDMPrecond(
@@ -113,6 +115,7 @@ class UNetDiffusionSongv2:
     resample_filter: list[int] = dataclasses.field(default_factory=lambda: [1, 1])
     act: str = "silu"
     use_apex_gn: bool = True
+    bottleneck_attention: bool = True
 
     def build(
         self,
@@ -149,6 +152,7 @@ class UNetDiffusionSongv2:
             act=self.act,
             use_apex_gn=self.use_apex_gn,
             amp_mode=use_amp_bf16,
+            bottleneck_attention=self.bottleneck_attention,
         )
         module = UNetDiffusionModule(
             EDMPrecond(

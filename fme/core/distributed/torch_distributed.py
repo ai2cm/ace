@@ -13,6 +13,7 @@ from torch.nn.parallel import DistributedDataParallel
 
 from fme.core import metrics
 from fme.core.device import get_device, using_gpu, using_srun
+from fme.core.disco import DiscreteContinuousConvS2
 
 from .base import DistributedBackend
 from .non_distributed import DummyWrapper
@@ -32,11 +33,13 @@ class TorchDistributed(DistributedBackend):
                     torch.distributed.init_process_group(
                         backend="nccl",
                         init_method="env://",
-                        timeout=timedelta(minutes=60),
+                        timeout=timedelta(minutes=30),
                     )
                 else:
                     torch.distributed.init_process_group(
-                        backend="gloo", init_method="env://"
+                        backend="gloo",
+                        init_method="env://",
+                        timeout=timedelta(minutes=30),
                     )
             self.world_size = torch.distributed.get_world_size()
             local_rank = int(os.environ["LOCAL_RANK"])
@@ -54,6 +57,7 @@ class TorchDistributed(DistributedBackend):
                 init_method=f"file://{shared_dist_file}",
                 rank=self.rank,
                 world_size=self.world_size,
+                timeout=timedelta(minutes=30),
             )
             if using_gpu():
                 # this assumes one GPU per process in the SLURM setting
@@ -207,7 +211,7 @@ class TorchDistributed(DistributedBackend):
         return th.InverseRealSHT(nlat, nlon, lmax=lmax, mmax=mmax, grid=grid).float()
 
     def get_disco_conv_s2(self, *args, **kwargs) -> nn.Module:
-        return th.DiscreteContinuousConvS2(*args, **kwargs).float()
+        return DiscreteContinuousConvS2(*args, **kwargs).float()
 
     def spatial_reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
         return tensor

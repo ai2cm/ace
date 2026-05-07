@@ -1,10 +1,11 @@
 import abc
+import dataclasses
 import logging
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 import cftime
 import numpy as np
@@ -12,11 +13,15 @@ import torch
 import xarray as xr
 from matplotlib import pyplot as plt
 
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
-from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.gridded_ops import LatLonOperations
+from fme.core.typing_ import TensorDict
 
 from ...plotting import plot_mean_and_samples
+from ..build_context import MetricBuildContext, MetricNotSupportedError
+from ..data import InferenceBatchData, MetricBuildResult
 
 SAMPLE_DIM, TIME_DIM, LAT_DIM, LON_DIM = 0, 1, -2, -1
 
@@ -104,6 +109,69 @@ def _compute_sample_mean_std(
     return std_by_sample.mean().item()
 
 
+def compute_psd_band_power(
+    freqs_per_year: np.ndarray,
+    power: np.ndarray,
+    period_bounds: tuple[float, float] = (2.0, 5.0),
+) -> float:
+    """Integrate the power spectrum over a frequency band defined by period bounds.
+
+    Args:
+        freqs_per_year: Frequency array in cycles per year.
+        power: Power spectrum array (same length as freqs_per_year).
+        period_bounds: (min_period, max_period) in years. Frequencies are
+            selected as 1/max_period <= f <= 1/min_period.
+
+    Returns:
+        Trapezoidal-rule integral of power over the selected frequency band.
+        Returns NaN if fewer than two frequency bins fall in the band.
+    """
+    min_period, max_period = period_bounds
+    freq_lo = 1.0 / max_period
+    freq_hi = 1.0 / min_period
+    mask = (freqs_per_year >= freq_lo) & (freqs_per_year <= freq_hi)
+    if mask.sum() < 2:
+        return float("nan")
+    return float(np.trapezoid(power[mask], freqs_per_year[mask]))
+
+
+def _compute_autocorrelation_at_lag(
+    data: np.ndarray,
+    lag_months: int,
+    time_dim: int = TIME_DIM,
+) -> float:
+    """Compute autocorrelation at a specific lag, averaged across samples.
+
+    Args:
+        data: Array with shape (sample, time).
+        lag_months: Lag in months.
+        time_dim: Time dimension index.
+
+    Returns:
+        Mean autocorrelation across samples at the given lag. Returns NaN
+        if the time series is too short for the requested lag.
+    """
+    n_time = data.shape[time_dim]
+    if n_time <= lag_months:
+        return float("nan")
+    acorrs = []
+    for s in range(data.shape[0]):
+        ts = data[s]
+        ts_clean = ts[~np.isnan(ts)]
+        if len(ts_clean) <= lag_months:
+            continue
+        mean = np.mean(ts_clean)
+        var = np.var(ts_clean)
+        if var == 0:
+            continue
+        x = ts_clean[:-lag_months] - mean
+        y = ts_clean[lag_months:] - mean
+        acorrs.append(np.mean(x * y) / var)
+    if len(acorrs) == 0:
+        return float("nan")
+    return float(np.mean(acorrs))
+
+
 class RegionalIndexAggregator:
     """Aggregator for computing a regional index, in this case a monthly- and area-
     weighted average of a variable over a region.
@@ -133,9 +201,11 @@ class RegionalIndexAggregator:
         self._calendar: str | None = None
         self._already_logged: list[str] = []
 
-    def record_batch(self, time: xr.DataArray, data: TensorMapping) -> None:
+    def record_batch(self, data: InferenceBatchData) -> None:
+        time = data.time
+        prediction = data.prediction
         for sst_name in self.sea_surface_temperature_names:
-            if sst_name not in data:
+            if sst_name not in prediction:
                 if sst_name not in self._already_logged:
                     logging.info(
                         f"Variable {sst_name} not found in data. "
@@ -144,7 +214,7 @@ class RegionalIndexAggregator:
                     self._already_logged.append(sst_name)
                 continue
             regional_average = self._regional_mean(
-                data[sst_name], self._regional_weights
+                prediction[sst_name], self._regional_weights
             )
             if sst_name not in self._raw_indices:
                 self._raw_indices[sst_name] = regional_average
@@ -251,6 +321,11 @@ class RegionalIndexAggregator:
                 logs[f"{sst_name}_nino34_index_std"] = _compute_sample_mean_std(
                     indices[sst_name]
                 )
+                for lag_years, lag_months in [(2, 24), (5, 60)]:
+                    acorr = _compute_autocorrelation_at_lag(
+                        indices[sst_name].values, lag_months
+                    )
+                    logs[f"{sst_name}_nino34_index_autocorr_lag{lag_years}yr"] = acorr
         for sst_name in self.sea_surface_temperature_names:
             if (
                 sst_name in indices
@@ -268,6 +343,9 @@ class RegionalIndexAggregator:
                 ax.legend()
                 fig.tight_layout()
                 logs[f"{sst_name}_nino34_index_power_spectrum"] = fig
+                logs[f"{sst_name}_nino34_index_psd_2_5yr"] = compute_psd_band_power(
+                    freq, power_spectrum
+                )
 
         if len(label) > 0:
             label = label + "/"
@@ -294,12 +372,12 @@ class PairedRegionalIndexAggregator:
 
     def record_batch(
         self,
-        time: xr.DataArray,
-        target_data: TensorMapping,
-        gen_data: TensorMapping,
+        data: InferenceBatchData,
     ) -> None:
-        self._target_aggregator.record_batch(time=time, data=target_data)
-        self._prediction_aggregator.record_batch(time=time, data=gen_data)
+        target_data = data.replace(prediction=data.target)
+        prediction_data = data.replace(prediction=data.prediction)
+        self._target_aggregator.record_batch(target_data)
+        self._prediction_aggregator.record_batch(prediction_data)
 
     def get_logs(self, label: str) -> dict[str, Any]:
         target_indices = self._target_aggregator.get_indices()
@@ -344,6 +422,19 @@ class PairedRegionalIndexAggregator:
                     prediction_indices[sst_name],
                     target_indices[sst_name],
                 )
+                for lag_years, lag_months in [(2, 24), (5, 60)]:
+                    pred_acorr = _compute_autocorrelation_at_lag(
+                        prediction_indices[sst_name].values, lag_months
+                    )
+                    target_acorr = _compute_autocorrelation_at_lag(
+                        target_indices[sst_name].values, lag_months
+                    )
+                    logs[f"{sst_name}_nino34_index_autocorr_lag{lag_years}yr"] = (
+                        pred_acorr
+                    )
+                    logs[
+                        f"{sst_name}_nino34_index_autocorr_lag{lag_years}yr_target"
+                    ] = target_acorr
         for sst_name in self._prediction_aggregator.sea_surface_temperature_names:
             if (
                 sst_name in prediction_indices
@@ -372,6 +463,12 @@ class PairedRegionalIndexAggregator:
                 ax.legend()
                 fig.tight_layout()
                 logs[f"{sst_name}_nino34_index_power_spectrum"] = fig
+                logs[f"{sst_name}_nino34_index_psd_2_5yr"] = compute_psd_band_power(
+                    pred_freq, prediction_power_spectrum
+                )
+                logs[f"{sst_name}_nino34_index_psd_2_5yr_target"] = (
+                    compute_psd_band_power(target_freq, target_power_spectrum)
+                )
         if len(label) > 0:
             label = label + "/"
 
@@ -529,3 +626,44 @@ def convert_cftime_to_datetime_coord(time_coord: xr.DataArray) -> xr.DataArray:
         ],
         dims=time_coord.dims,
     )
+
+
+NINO34_LAT = (-5, 5)
+NINO34_LON = (190, 240)
+
+
+@dataclasses.dataclass
+class EnsoIndexMetricConfig:
+    type: Literal["enso_index"] = "enso_index"
+    name: str = "enso_index"
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        if not isinstance(ctx.horizontal_coordinates, LatLonCoordinates):
+            raise MetricNotSupportedError(
+                "enso_index metric requires LatLonCoordinates."
+            )
+        if not isinstance(ctx.ops, LatLonOperations):
+            raise MetricNotSupportedError(
+                "enso_index metric requires LatLonOperations."
+            )
+        nino34_region = LatLonRegion(
+            lat_bounds=NINO34_LAT,
+            lon_bounds=NINO34_LON,
+            lat=ctx.horizontal_coordinates.lat,
+            lon=ctx.horizontal_coordinates.lon,
+        )
+        return MetricBuildResult(
+            aggregator=PairedRegionalIndexAggregator(
+                target_aggregator=RegionalIndexAggregator(
+                    regional_weights=nino34_region.regional_weights,
+                    regional_mean=ctx.ops.regional_area_weighted_mean,
+                ),
+                prediction_aggregator=RegionalIndexAggregator(
+                    regional_weights=nino34_region.regional_weights,
+                    regional_mean=ctx.ops.regional_area_weighted_mean,
+                ),
+            )
+        )

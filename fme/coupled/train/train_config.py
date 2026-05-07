@@ -1,20 +1,26 @@
 import dataclasses
 import datetime
 import os
+from collections.abc import Callable, Mapping
+from typing import Any
 
 import torch
 
 from fme.core.cli import ResumeResultsConfig
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.lr_tuning import LRTuningConfig
-from fme.core.generics.trainer import EndOfBatchCallback
+from fme.core.generics.trainer import EndOfBatchCallback, EndOfEpochCallback
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import Optimization, OptimizationConfig
 from fme.core.rand import set_seed
-from fme.core.typing_ import Slice
+from fme.core.typing_ import Slice, TensorDict, TensorMapping
 from fme.core.weight_ops import CopyWeightsConfig
-from fme.coupled.aggregator import InferenceEvaluatorAggregatorConfig
+from fme.coupled.aggregator import (
+    InferenceEvaluatorAggregator,
+    InferenceEvaluatorAggregatorConfig,
+)
 from fme.coupled.data_loading.config import CoupledDataLoaderConfig
 from fme.coupled.data_loading.getters import get_gridded_data, get_inference_data
 from fme.coupled.data_loading.gridded_data import GriddedData, InferenceGriddedData
@@ -71,6 +77,28 @@ class InlineInferenceConfig:
             self.aggregator.log_global_mean_time_series = False
             self.aggregator.log_global_mean_norm_time_series = False
 
+    def get_inference_data(
+        self,
+        window_requirements: CoupledDataRequirements,
+        initial_condition: CoupledPrognosticStateDataRequirements,
+    ) -> InferenceGriddedData:
+        return get_inference_data(
+            config=self.loader,
+            total_coupled_steps=self.n_coupled_steps,
+            window_requirements=window_requirements,
+            initial_condition=initial_condition,
+        )
+
+
+@dataclasses.dataclass
+class AdditionalInferenceConfig:
+    name: str
+    config: InlineInferenceConfig
+
+    def __post_init__(self):
+        if not self.name:
+            raise ValueError("AdditionalInferenceConfig name must be non-empty.")
+
 
 @dataclasses.dataclass
 class TrainConfig:
@@ -90,6 +118,10 @@ class TrainConfig:
             evaluation, and on catching a termination signal.
         experiment_dir: Directory where checkpoints and logs are saved.
         inference: Configuration for inline inference.
+        additional_inference: Configurations for additional inference runs.
+            Each entry has a name (used as wandb log prefix and output
+            subdirectory) and config. Not used to select checkpoints, but used
+            to provide metrics.
         n_coupled_steps: Number of coupled forward steps to take gradient over.
             This is equal to the number of forward steps of the ocean model.
         seed: Random seed for reproducibility. If set, is used for all types of
@@ -123,6 +155,23 @@ class TrainConfig:
         save_best_inference_epoch_checkpoints: Whether to save a separate checkpoint
             for each epoch where best_inference_error achieves a new minimum.
             Checkpoints are saved as best_inference_ckpt_XXXX.tar.
+        best_enso_checkpoint_metric: If set, the inference log key to use for
+            selecting a best-ENSO checkpoint (e.g.
+            "inference/enso_index/sst_nino34_index_std_norm"). The checkpoint
+            saved minimizes |1.0 - metric_value|. None disables this feature.
+        best_enso_checkpoint_autocorr_metric: If set, the inference log key for
+            prediction autocorrelation (e.g.
+            "inference/enso_index/sst_nino34_index_autocorr_lag5yr"). Added to
+            the ENSO score as weight * |pred_autocorr - target_autocorr|.
+        best_enso_checkpoint_autocorr_target_metric: The inference log key for
+            target autocorrelation (e.g.
+            "inference/enso_index/sst_nino34_index_autocorr_lag5yr_target").
+        best_enso_checkpoint_autocorr_weight: Weight for the autocorrelation
+            term in the composite ENSO score. Default 1.0.
+        best_enso_checkpoint_climate_tolerance: Maximum relative increase in
+            inference_error (climate mean state) allowed when saving the
+            best-ENSO checkpoint. E.g. 0.1 means the inference error may be
+            at most 10% worse than the current best_inference_error.
         resume_results: Configuration for resuming a previously stopped or finished
             training job. When provided and experiment_dir has no training_checkpoints
             subdirectory, then it is assumed that this is a new run to resume a
@@ -140,12 +189,14 @@ class TrainConfig:
     save_checkpoint: bool
     experiment_dir: str
     inference: InlineInferenceConfig
-    n_coupled_steps: int
     seed: int | None = None
     copy_weights_after_batch: CopyWeightsConfig = dataclasses.field(
         default_factory=lambda: CopyWeightsConfig(exclude=["*"])
     )
     ema: EMAConfig = dataclasses.field(default_factory=lambda: EMAConfig())
+    additional_inference: list[AdditionalInferenceConfig] = dataclasses.field(
+        default_factory=list
+    )
     validate_using_ema: bool = False
     checkpoint_save_epochs: Slice | None = None
     ema_checkpoint_save_epochs: Slice | None = None
@@ -156,15 +207,29 @@ class TrainConfig:
     save_per_epoch_diagnostics: bool = False
     evaluate_before_training: bool = True
     save_best_inference_epoch_checkpoints: bool = False
+    best_enso_checkpoint_metric: str | None = None
+    best_enso_checkpoint_autocorr_metric: str | None = None
+    best_enso_checkpoint_autocorr_target_metric: str | None = None
+    best_enso_checkpoint_autocorr_weight: float = 1.0
+    best_enso_checkpoint_climate_tolerance: float = 0.1
     lr_tuning: LRTuningConfig | None = None
     resume_results: ResumeResultsConfig | None = None
 
     def __post_init__(self):
+        additional_inference_names: set[str] = set()
+        for entry in self.additional_inference:
+            if entry.name in additional_inference_names:
+                raise ValueError(f"Duplicate additional_inference name: {entry.name!r}")
+            additional_inference_names.add(entry.name)
         if self.lr_tuning is not None and self.optimization.has_lr_schedule:
             raise ValueError(
                 "lr_tuning and optimization.scheduler cannot both be specified; "
                 "lr_tuning is an alternative form of learning rate scheduling"
             )
+
+    @property
+    def n_coupled_steps(self) -> int:
+        return self.stepper_training.n_coupled_steps
 
     @property
     def n_forward_steps(self) -> int:
@@ -238,9 +303,7 @@ class TrainBuilders:
     def get_evaluation_inference_data(
         self,
     ) -> InferenceGriddedData:
-        return get_inference_data(
-            config=self.config.inference.loader,
-            total_coupled_steps=self.config.inference.n_coupled_steps,
+        return self.config.inference.get_inference_data(
             window_requirements=self._get_evaluation_window_data_requirements(),
             initial_condition=self._get_initial_condition_data_requirements(),
         )
@@ -269,3 +332,72 @@ class TrainBuilders:
         self, modules: list[torch.nn.Module]
     ) -> EndOfBatchCallback:
         return lambda: None
+
+    def get_end_of_epoch_callback(
+        self,
+        inference_one_epoch: Callable[
+            [InferenceGriddedData, InferenceEvaluatorAggregator, str, int],
+            Mapping[str, Any],
+        ],
+        ocean_normalize: Callable[[TensorMapping], TensorDict],
+        atmosphere_normalize: Callable[[TensorMapping], TensorDict],
+        output_dir: str,
+        variable_metadata: Mapping[str, VariableMetadata],
+        save_diagnostics: bool,
+        n_ic_timesteps_ocean: int,
+        n_ic_timesteps_atmosphere: int,
+        n_inner_steps: int,
+    ) -> EndOfEpochCallback:
+        entries_data: list[
+            tuple[AdditionalInferenceConfig, InferenceGriddedData, CoupledDatasetInfo]
+        ] = []
+        for entry in self.config.additional_inference:
+            window_requirements = (
+                self.config.stepper.get_evaluation_window_data_requirements(
+                    entry.config.coupled_steps_in_memory
+                )
+            )
+            data = entry.config.get_inference_data(
+                window_requirements=window_requirements,
+                initial_condition=self._get_initial_condition_data_requirements(),
+            )
+            dataset_info = data.dataset_info.update_variable_metadata(
+                dict(variable_metadata)
+            )
+            entries_data.append((entry, data, dataset_info))
+
+        def end_of_epoch_ops(epoch: int) -> Mapping[str, Any]:
+            all_logs: dict[str, Any] = {}
+            for entry, data, dataset_info in entries_data:
+                if entry.config.epochs.contains(epoch):
+                    entry_output_dir = os.path.join(
+                        output_dir, "additional_inference", entry.name
+                    )
+                    n_timesteps_ocean = (
+                        entry.config.n_coupled_steps + n_ic_timesteps_ocean
+                    )
+                    n_timesteps_atmosphere = (
+                        entry.config.n_coupled_steps * n_inner_steps
+                        + n_ic_timesteps_atmosphere
+                    )
+                    aggregator = entry.config.aggregator.build(
+                        dataset_info=dataset_info,
+                        n_timesteps_ocean=n_timesteps_ocean,
+                        n_timesteps_atmosphere=n_timesteps_atmosphere,
+                        initial_time=data.initial_time,
+                        ocean_normalize=ocean_normalize,
+                        atmosphere_normalize=atmosphere_normalize,
+                        save_diagnostics=save_diagnostics,
+                        output_dir=entry_output_dir,
+                    )
+                    all_logs.update(
+                        inference_one_epoch(
+                            data,
+                            aggregator,
+                            entry.name,
+                            epoch,
+                        )
+                    )
+            return all_logs
+
+        return end_of_epoch_ops

@@ -4,6 +4,10 @@ import dacite
 import yaml
 
 import fme
+from fme.coupled.inference.evaluator import (
+    InferenceEvaluatorConfig as CoupledInferenceEvaluatorConfig,
+)
+from fme.coupled.train.train_config import TrainConfig as CoupledTrainConfig
 from fme.downscaling.evaluator import EvaluatorConfig
 from fme.downscaling.train import TrainerConfig as DownscalingTrainConfig
 
@@ -14,7 +18,10 @@ def get_yaml_files(pattern, exclude=None):
     """Get all files matching the pattern in the directory and subdirectories."""
     paths = list(EXAMPLES_DIRECTORY.rglob(pattern))
     if exclude is not None:
-        paths = [p for p in paths if exclude not in str(p)]
+        if isinstance(exclude, str):
+            exclude = [exclude]
+        for exc in exclude:
+            paths = [p for p in paths if exc not in str(p)]
     paths = [p for p in paths if "experiments/" not in str(p)]
     return paths
 
@@ -32,7 +39,14 @@ def validate_config(file_path, config_class):
 
 
 def test_train_configs_are_valid():
-    train_files = get_yaml_files("*train*.yaml", exclude="baselines/downscaling")
+    train_files = get_yaml_files(
+        "*train*.yaml",
+        exclude=[
+            "baselines/downscaling",
+            "cm4-piControl/train-config",
+            "cm4-piControl/finetune-config",
+        ],
+    )
     assert len(train_files) > 0, "No train files found"
     for file in train_files:
         validate_config(file, fme.ace.TrainConfig)
@@ -40,11 +54,30 @@ def test_train_configs_are_valid():
 
 def test_evaluator_configs_are_valid():
     evaluator_files = get_yaml_files(
-        "*evaluator*.yaml", exclude="baselines/downscaling"
+        "*evaluator*.yaml",
+        exclude=["baselines/downscaling", "cm4-piControl/evaluator-config"],
     )
     assert len(evaluator_files) > 0, "No evaluator files found"
     for file in evaluator_files:
         validate_config(file, fme.ace.InferenceEvaluatorConfig)
+
+
+def test_coupled_train_configs_are_valid():
+    train_files = get_yaml_files(
+        "**/cm4-piControl/train-config.yaml",
+    ) + get_yaml_files(
+        "**/cm4-piControl/finetune-config.yaml",
+    )
+    assert len(train_files) > 0, "No coupled train files found"
+    for file in train_files:
+        validate_config(file, CoupledTrainConfig)
+
+
+def test_coupled_evaluator_configs_are_valid():
+    evaluator_files = get_yaml_files("**/cm4-piControl/*evaluator*.yaml")
+    assert len(evaluator_files) > 0, "No coupled evaluator files found"
+    for file in evaluator_files:
+        validate_config(file, CoupledInferenceEvaluatorConfig)
 
 
 def test_downscaling_train_configs_are_valid():

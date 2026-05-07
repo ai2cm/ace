@@ -7,6 +7,10 @@ from fme.coupled.inference.inference import (
     CoupledInitialConditionConfig,
     InferenceConfig,
 )
+from fme.coupled.train.train_config import (
+    AdditionalInferenceConfig,
+    InlineInferenceConfig,
+)
 
 # Get all the names defined in the current module
 module = sys.modules[__name__]

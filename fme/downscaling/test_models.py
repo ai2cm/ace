@@ -22,6 +22,7 @@ from fme.downscaling.models import (
     DiffusionModel,
     DiffusionModelConfig,
     PairedNormalizationConfig,
+    _build_variable_loss_weight_tensor,
     _repeat_batch_by_samples,
     _separate_interleaved_samples,
 )
@@ -171,7 +172,7 @@ def test_module_serialization(tmp_path):
 
     torch.save(model.get_state(), tmp_path / "test.ckpt")
     model_from_disk = DiffusionModel.from_state(
-        torch.load(tmp_path / "test.ckpt", weights_only=False),
+        torch.load(tmp_path / "test.ckpt", map_location="cpu", weights_only=False),
     )
     assert all(
         torch.equal(p1, p2)
@@ -322,7 +323,7 @@ def test_normalizer_serialization(tmp_path):
     os.remove(tmp_path / "stds.nc")
 
     model_from_disk = DiffusionModel.from_state(
-        torch.load(tmp_path / "test.ckpt", weights_only=False),
+        torch.load(tmp_path / "test.ckpt", map_location="cpu", weights_only=False),
     )
 
     assert model_from_disk.normalizer.fine.means == {"x": 0}
@@ -667,3 +668,58 @@ def test_from_state_raises_for_unresolvable_old_checkpoint(tmp_path):
 
     with pytest.raises(ValueError, match="full_fine_coords"):
         DiffusionModel.from_state(state)
+
+
+def test_DiffusionModel_from_state_places_coords_on_device():
+    """from_state should place coordinate tensors on get_device()."""
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    fine_coords = make_fine_coords(fine_shape)
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=fine_coords,
+        use_fine_topography=False,
+        static_inputs=StaticInputs(fields=[], coords=fine_coords),
+    )
+    state = model.get_state()
+    # force CPU tensors in state to test device transfer
+    state["full_fine_coords"] = {
+        k: v.cpu() for k, v in state["full_fine_coords"].items()
+    }
+    restored = DiffusionModel.from_state(state)
+    device = get_device()
+    assert restored.full_fine_coords.lat.device == device
+    assert restored.full_fine_coords.lon.device == device
+
+
+def test_DiffusionModel_from_state_decouples_coord_memory():
+    """from_state should not share memory with the input state dict."""
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    fine_coords = make_fine_coords(fine_shape)
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=fine_coords,
+        use_fine_topography=False,
+        static_inputs=StaticInputs(fields=[], coords=fine_coords),
+    )
+    state = model.get_state()
+    original_lat = state["full_fine_coords"]["lat"]
+    restored = DiffusionModel.from_state(state)
+    original_lat.fill_(999.0)
+    assert restored.full_fine_coords.lat.max().item() < 999.0
+
+
+def test__build_variable_loss_weight_tensor():
+    weights = {"x": 0.5, "z": 2.0}
+    out_names = ["x", "y", "z"]
+    n_out_channels = len(out_names)
+    result = _build_variable_loss_weight_tensor(weights, out_names)
+    assert result.shape == (1, n_out_channels, 1, 1)
+    loss = torch.rand(2, n_out_channels, 2, 2, device=get_device())
+    weighted_loss = loss * result
+    assert torch.allclose(weighted_loss[:, 0], loss[:, 0] * 0.5)
+    assert torch.allclose(weighted_loss[:, 1], loss[:, 1])
+    assert torch.allclose(weighted_loss[:, 2], loss[:, 2] * 2.0)
