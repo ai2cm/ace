@@ -156,12 +156,12 @@ def test_get_inference_epoch_sets_single_default(tmp_path):
     assert config.get_inference_epochs() == [1, 2, 3]
 
 
-def test_get_inference_epoch_sets_per_config(tmp_path):
+def test_get_inference_epoch_sets_per_config_zero_weight(tmp_path):
     config = _make_train_config(
         tmp_path,
         [
-            _make_inference_config(epochs=Slice(step=2)),
-            _make_inference_config(epochs=Slice(step=3)),
+            _make_inference_config(epochs=Slice(step=2), weight=1.0),
+            _make_inference_config(epochs=Slice(step=3), weight=0.0),
         ],
         max_epochs=6,
     )
@@ -169,3 +169,29 @@ def test_get_inference_epoch_sets_per_config(tmp_path):
     assert epoch_sets[0] == {1, 3, 5}
     assert epoch_sets[1] == {1, 4}
     assert config.get_inference_epochs() == [1, 3, 4, 5]
+
+
+def test_get_inference_epoch_sets_same_weighted_epochs(tmp_path):
+    config = _make_train_config(
+        tmp_path,
+        [
+            _make_inference_config(epochs=Slice(step=2), weight=1.0),
+            _make_inference_config(epochs=Slice(step=2), weight=2.0),
+        ],
+        max_epochs=6,
+    )
+    epoch_sets = config.get_inference_epoch_sets()
+    assert epoch_sets[0] == {1, 3, 5}
+    assert epoch_sets[1] == {1, 3, 5}
+
+
+def test_get_inference_epoch_sets_different_weighted_epochs_raises(tmp_path):
+    with pytest.raises(ValueError, match="weight > 0 must share the same epoch"):
+        _make_train_config(
+            tmp_path,
+            [
+                _make_inference_config(epochs=Slice(step=2), weight=1.0),
+                _make_inference_config(epochs=Slice(step=3), weight=1.0),
+            ],
+            max_epochs=6,
+        )

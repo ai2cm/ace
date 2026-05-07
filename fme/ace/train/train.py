@@ -135,8 +135,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         if epoch not in inference_epochs:
             return {}, None
         all_logs: dict[str, Any] = {}
-        weighted_error = 0.0
-        has_error = False
+        weighted_error: float | None = None
         for i, (entry_config, data, entry_dataset_info, name) in enumerate(
             inference_entries
         ):
@@ -162,12 +161,21 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
                 epoch=epoch,
             )
             all_logs.update(logs)
-            error = logs.get(f"{name}/time_mean_norm/rmse/channel_mean")
-            if error is not None:
+            if entry_config.weight > 0:
+                metric_key = f"{name}/time_mean_norm/rmse/channel_mean"
+                error = logs.get(metric_key)
+                if error is None:
+                    raise RuntimeError(
+                        f"Inference entry {name!r} with weight={entry_config.weight} "
+                        f"did not produce expected metric key {metric_key!r}. "
+                        f"Entries contributing to checkpoint selection must produce "
+                        f"this metric."
+                    )
+                if weighted_error is None:
+                    weighted_error = 0.0
                 weighted_error += entry_config.weight * error
-                has_error = True
 
-        return all_logs, weighted_error if has_error else None
+        return all_logs, weighted_error
 
     do_gc_collect = fme.get_device() != torch.device("cpu")
     trainer_config: TrainConfigProtocol = config  # documenting trainer input type

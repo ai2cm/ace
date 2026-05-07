@@ -251,6 +251,7 @@ class TrainConfig:
                 f"During training, experiment_dir must currently be a local "
                 f"directory, got {self.experiment_dir!r}."
             )
+        self._validate_weighted_inference_epochs()
         if self.stepper_training.n_forward_steps is None:
             raise ValueError(
                 "n_forward_steps must be specified in stepper_training "
@@ -261,6 +262,21 @@ class TrainConfig:
                 "expected n_forward_steps_schedule to be defined when "
                 "n_forward_steps is not None, is there a bug?"
             )
+
+    def _validate_weighted_inference_epochs(self):
+        epoch_sets = self.get_inference_epoch_sets()
+        weighted_epoch_set: set[int] | None = None
+        for entry, epoch_set in zip(self.inference, epoch_sets):
+            if entry.weight > 0:
+                if weighted_epoch_set is None:
+                    weighted_epoch_set = epoch_set
+                elif epoch_set != weighted_epoch_set:
+                    raise ValueError(
+                        "All inference entries with weight > 0 must share the same "
+                        "epoch schedule, so that the weighted checkpoint selection "
+                        "metric is comparable across epochs. Use weight=0 for "
+                        "supplementary entries that run on different epochs."
+                    )
 
     def set_random_seed(self):
         if self.seed is not None:
