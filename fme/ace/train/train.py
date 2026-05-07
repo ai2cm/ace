@@ -68,6 +68,7 @@ from fme.ace.aggregator import (
 from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregator,
     InferenceEvaluatorAggregatorConfig,
+    LegacyFlagInferenceEvaluatorAggregatorConfig,
 )
 from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
@@ -216,7 +217,11 @@ class AggregatorBuilder(
     def __init__(
         self,
         train_config: TrainAggregatorConfig,
-        inference_config: InferenceEvaluatorAggregatorConfig | None,
+        inference_config: (
+            InferenceEvaluatorAggregatorConfig
+            | LegacyFlagInferenceEvaluatorAggregatorConfig
+            | None
+        ),
         dataset_info: DatasetInfo,
         initial_inference_time: xr.DataArray | None,
         n_ic_steps: int,
@@ -265,7 +270,8 @@ class AggregatorBuilder(
     ) -> InferenceEvaluatorAggregator:
         if isinstance(
             self.inference_config,
-            InferenceEvaluatorAggregatorConfig,
+            InferenceEvaluatorAggregatorConfig
+            | LegacyFlagInferenceEvaluatorAggregatorConfig,
         ):
             return self.inference_config.build(
                 dataset_info=self.dataset_info,

@@ -7,6 +7,7 @@ import torch
 
 from fme.ace.aggregator import (
     InferenceEvaluatorAggregatorConfig,
+    LegacyFlagInferenceEvaluatorAggregatorConfig,
     OneStepAggregatorConfig,
 )
 from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregator
@@ -61,9 +62,10 @@ class InlineInferenceConfig:
     forward_steps_in_memory: int
     n_ensemble_per_ic: int = 1
     epochs: Slice = dataclasses.field(default_factory=lambda: Slice())
-    aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
-        default_factory=lambda: InferenceEvaluatorAggregatorConfig()
-    )
+    aggregator: (
+        InferenceEvaluatorAggregatorConfig
+        | LegacyFlagInferenceEvaluatorAggregatorConfig
+    ) = dataclasses.field(default_factory=lambda: InferenceEvaluatorAggregatorConfig())
 
     def __post_init__(self):
         dist = Distributed.get_instance()
@@ -279,7 +281,13 @@ class TrainConfig:
         return self.inference.n_forward_steps
 
     @property
-    def inference_aggregator(self) -> InferenceEvaluatorAggregatorConfig | None:
+    def inference_aggregator(
+        self,
+    ) -> (
+        InferenceEvaluatorAggregatorConfig
+        | LegacyFlagInferenceEvaluatorAggregatorConfig
+        | None
+    ):
         if self.inference is None:
             return None
         return self.inference.aggregator
