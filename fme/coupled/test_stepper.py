@@ -642,43 +642,6 @@ def test_config_parameter_init_error():
         )
 
 
-def test_component_n_steps_max_default_is_unbounded():
-    config = CoupledTrainStepperConfig(
-        n_coupled_steps=1,
-        ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
-        atmosphere=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
-    )
-    assert config.component_n_steps_max.ocean is None
-    assert config.component_n_steps_max.atmosphere is None
-
-
-def test_component_n_steps_max_with_explicit_int_and_sampler():
-    from fme.ace.stepper.time_length_probabilities import (
-        TimeLengthProbabilities,
-        TimeLengthProbability,
-    )
-
-    sampler = TimeLengthProbabilities(
-        outcomes=[
-            TimeLengthProbability(steps=2, probability=0.5),
-            TimeLengthProbability(steps=4, probability=0.5),
-        ]
-    )
-    config = CoupledTrainStepperConfig(
-        n_coupled_steps=4,
-        ocean=ComponentTrainingConfig(
-            loss=StepLossConfig(type="MSE"),
-            loss_contributions=LossContributionsConfig(n_steps=3),
-        ),
-        atmosphere=ComponentTrainingConfig(
-            loss=StepLossConfig(type="MSE"),
-            loss_contributions=LossContributionsConfig(n_steps=sampler),
-        ),
-    )
-    assert config.component_n_steps_max.ocean == 3
-    assert config.component_n_steps_max.atmosphere == 4
-
-
 OCN_FRAC = CoupledOceanFractionConfig(
     sea_ice_fraction_name="sea_ice_fraction",
     land_fraction_name="land_fraction",

@@ -13,9 +13,3 @@ class CoupledNames:
 class CoupledTensorMapping:
     ocean: TensorMapping
     atmosphere: TensorMapping
-
-
-@dataclasses.dataclass
-class CoupledOptionalInt:
-    ocean: int | None
-    atmosphere: int | None
