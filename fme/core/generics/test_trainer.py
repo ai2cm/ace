@@ -239,7 +239,6 @@ class Config:
     ema: EMAConfig = dataclasses.field(default_factory=EMAConfig)
     best_enso_checkpoint_metric: str | None = None
     best_enso_checkpoint_autocorr_metric: str | None = None
-    best_enso_checkpoint_autocorr_target_metric: str | None = None
     best_enso_checkpoint_autocorr_weight: float = 1.0
     best_enso_checkpoint_climate_tolerance: float = 0.1
     lr_tuning: LRTuningConfig | None = None
@@ -365,7 +364,6 @@ def get_trainer(
     save_best_inference_epoch_checkpoints: bool = False,
     best_enso_checkpoint_metric: str | None = None,
     best_enso_checkpoint_autocorr_metric: str | None = None,
-    best_enso_checkpoint_autocorr_target_metric: str | None = None,
     best_enso_checkpoint_autocorr_weight: float = 1.0,
     best_enso_checkpoint_climate_tolerance: float = 0.1,
     inference_extra_metrics: list[dict[str, float]] | None = None,
@@ -463,7 +461,6 @@ def get_trainer(
         save_best_inference_epoch_checkpoints=save_best_inference_epoch_checkpoints,
         best_enso_checkpoint_metric=best_enso_checkpoint_metric,
         best_enso_checkpoint_autocorr_metric=best_enso_checkpoint_autocorr_metric,
-        best_enso_checkpoint_autocorr_target_metric=best_enso_checkpoint_autocorr_target_metric,
         best_enso_checkpoint_autocorr_weight=best_enso_checkpoint_autocorr_weight,
         best_enso_checkpoint_climate_tolerance=best_enso_checkpoint_climate_tolerance,
         save_checkpoint=save_checkpoint,
@@ -1537,21 +1534,20 @@ def test_best_enso_checkpoint_with_autocorr(tmp_path: str):
     max_epochs = 3
     n_train_batches = 5
     std_key = "enso_index/sst_nino34_index_std_norm"
-    acorr_key = "enso_index/sst_nino34_index_autocorr_lag5yr"
-    acorr_target_key = "enso_index/sst_nino34_index_autocorr_lag5yr_target"
+    acorr_norm_key = "enso_index/sst_nino34_index_autocorr_lag5yr_norm"
 
     inference_losses = np.array([0.3, 0.3, 0.3])
-    # Epoch 1: std_norm=0.95 (dist=0.05), autocorr=0.1, target=0.3 (dist=0.2)
+    # Epoch 1: std_norm=0.95 (dist=0.05), autocorr_norm=0.8 (dist=0.2)
     #   composite = 0.05 + 1.0*0.2 = 0.25
-    # Epoch 2: std_norm=0.90 (dist=0.10), autocorr=0.28, target=0.3 (dist=0.02)
+    # Epoch 2: std_norm=0.90 (dist=0.10), autocorr_norm=0.98 (dist=0.02)
     #   composite = 0.10 + 1.0*0.02 = 0.12
-    # Epoch 3: std_norm=0.98 (dist=0.02), autocorr=0.05, target=0.3 (dist=0.25)
+    # Epoch 3: std_norm=0.98 (dist=0.02), autocorr_norm=0.75 (dist=0.25)
     #   composite = 0.02 + 1.0*0.25 = 0.27
     # Best composite is epoch 2 (0.12)
     inference_extra = [
-        {std_key: 0.95, acorr_key: 0.1, acorr_target_key: 0.3},
-        {std_key: 0.90, acorr_key: 0.28, acorr_target_key: 0.3},
-        {std_key: 0.98, acorr_key: 0.05, acorr_target_key: 0.3},
+        {std_key: 0.95, acorr_norm_key: 0.8},
+        {std_key: 0.90, acorr_norm_key: 0.98},
+        {std_key: 0.98, acorr_norm_key: 0.75},
     ]
 
     config, trainer = get_trainer(
@@ -1561,8 +1557,7 @@ def test_best_enso_checkpoint_with_autocorr(tmp_path: str):
         n_train_batches=n_train_batches,
         validate_using_ema=False,
         best_enso_checkpoint_metric=f"inference/{std_key}",
-        best_enso_checkpoint_autocorr_metric=f"inference/{acorr_key}",
-        best_enso_checkpoint_autocorr_target_metric=f"inference/{acorr_target_key}",
+        best_enso_checkpoint_autocorr_metric=f"inference/{acorr_norm_key}",
         best_enso_checkpoint_autocorr_weight=1.0,
         best_enso_checkpoint_climate_tolerance=0.5,
         inference_extra_metrics=inference_extra,
