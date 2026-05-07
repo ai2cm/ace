@@ -11,7 +11,8 @@ best_enso_checkpoint_autocorr_target_metric: inference/enso_index/sst_nino34_ind
 best_enso_checkpoint_autocorr_weight: 3.0
 best_enso_checkpoint_climate_tolerance: 0.1
 ema:
-  decay: 0.999
+  decay: 0.9995
+  faster_decay_at_start: false
 max_epochs: 10
 inference:
   n_coupled_steps: 1440
@@ -51,7 +52,7 @@ inference:
 additional_inference:
   - name: piControl_eval
     config:
-      n_coupled_steps: 364
+      n_coupled_steps: 366
       coupled_steps_in_memory: 2
       aggregator:
         log_zonal_mean_images: false
@@ -84,7 +85,7 @@ additional_inference:
             - '0330-12-29T12:00:00'
             - '0335-12-29T12:00:00'
             - '0340-12-29T12:00:00'
-            - '0345-12-24T12:00:00'
+            - '0345-12-19T12:00:00'
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -130,13 +131,13 @@ train_loader:
               engine: zarr
               subset:
                 start_time: '0151-01-03T12:00:00' # earlier times nan
-                stop_time: '0305-12-29T12:00:00'
+                stop_time: '0245-12-29T12:00:00'
             - data_path: /climate-default
               file_pattern: 2025-10-15-cm4-piControl-200yr-ocean-no-smoothing.zarr
               engine: zarr
               subset:
                 start_time: '0151-01-03T12:00:00' # earlier times nan
-                stop_time: '0305-12-29T12:00:00'
+                stop_time: '0245-12-29T12:00:00'
         atmosphere:
           merge:
             - data_path: /climate-default
@@ -144,13 +145,13 @@ train_loader:
               engine: zarr
               subset:
                 start_time: '0151-01-03T12:00:00' # earlier times nan
-                stop_time: '0305-12-29T12:00:00'
+                stop_time: '0245-12-29T12:00:00'
             - data_path: /climate-default
               file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
               engine: zarr
               subset:
                 start_time: '0151-01-03T12:00:00' # earlier times nan
-                stop_time: '0305-12-29T12:00:00'
+                stop_time: '0245-12-29T12:00:00'
 validation_loader:
   batch_size: 16
   num_data_workers: 2
@@ -187,7 +188,7 @@ validation_loader:
 optimization:
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
-  lr: 0.0001
+  lr: 0.00001
   optimizer_type: AdamW
   kwargs:
     fused: true
@@ -199,33 +200,61 @@ optimization:
         kwargs:
           start_factor: 0.01
           end_factor: 1
-          total_iters: 2000
+          total_iters: 3000
       - type: ConstantLR
         step_each_iteration: true
-    milestones: [2000]
+    milestones: [3000]
 stepper_training:
   n_coupled_steps: 4
+  n_ensemble: 2
   parameter_init:
     checkpoint_path: /ckpt.tar
   ocean:
     parameter_init:
       weights_path: null # required
     loss_contributions:
-      n_steps: 4
       weight: 1.0
+      n_steps:
+        outcomes:
+          - steps: 0
+            probability: 0.1
+          - steps: 1
+            probability: 0.3
+          - steps: 2
+            probability: 0.3
+          - steps: 4
+            probability: 0.3
+      optimize_last_step_only: false
     loss:
-      type: MSE
+      type: EnsembleLoss
+      kwargs:
+        crps_weight: 0.9
+        energy_score_weight: 0.1
   atmosphere:
     parameter_init:
-      weights_path: null
-      parameters:
-        - frozen:
-            include:
-              - '*'
+      weights_path: null # required
     loss_contributions:
-      n_steps: 0
+      weight: 1.0
+      n_steps:
+        outcomes:
+          - steps: 0
+            probability: 0.025
+          - steps: 1
+            probability: 0.29
+          - steps: 2
+            probability: 0.29
+          - steps: 4
+            probability: 0.29
+          - steps: 21
+            probability: 0.1
+          - steps: 41
+            probability: 0.05
+      optimize_last_step_only: true
     loss:
-      type: MSE
+      type: EnsembleLoss
+      kwargs:
+        crps_weight: 0.9
+        energy_score_weight: 0.1
       weights:
         air_temperature_0: 0.5
         air_temperature_1: 0.5
@@ -237,7 +266,7 @@ stepper_training:
         PRATEsfc: 0.5
         h500: 10
         TMP850: 5
-        Q2m: 10
+        Q2m: 0.5
         TMP2m: 10
         UGRD10m: 2.5
         VGRD10m: 2.5
@@ -247,6 +276,7 @@ stepper_training:
         DSWRFsfc: 2
         USWRFtoa: 2
         tendency_of_total_water_path_due_to_advection: 0.5
+        PRESsfc: 3
 stepper:
   ocean_fraction_prediction:
     land_fraction_name: land_fraction
@@ -550,7 +580,7 @@ stepper:
             type: NoiseConditionedSFNO
             config:
               embed_dim: 384
-              noise_embed_dim: 0
+              noise_embed_dim: 64
               filter_type: linear
               use_mlp: true
               num_layers: 8
@@ -558,6 +588,7 @@ stepper:
               separable: false
               spectral_layers: 3
               spectral_transform: sht
+              noise_type: isotropic
           normalization:
             network:
               global_means_path: /atmos_stats/centering.nc
