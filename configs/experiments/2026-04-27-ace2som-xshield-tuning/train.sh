@@ -60,7 +60,7 @@ for seed in {0..0}; do
         --gpus $N_GPUS \
         --shared-memory 400GiB \
         --weka climate-default:/climate-default \
-        --budget ai2/climate \
+        --budget ai2/atec-climate \
         --no-python \
         --install "pip install --no-deps ." \
         --allow-dirty \

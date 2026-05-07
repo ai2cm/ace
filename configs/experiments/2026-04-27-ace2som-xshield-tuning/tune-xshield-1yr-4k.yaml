@@ -23,7 +23,7 @@ inference:
       data_path: /climate-default/
       file_pattern: 2026-02-12-X-SHiELD-AMIP-plus-4K-1deg-8layer-1yr.zarr
       engine: zarr
-    num_data_workers: 8
+    num_data_workers: 4
   aggregator:
     log_histograms: true
 logging:
