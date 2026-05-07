@@ -463,6 +463,10 @@ class Trainer:
                 inference_end: float | None = time.time() if inference_logs else None
 
             train_loss = train_logs.get("train/mean/loss")
+            valid_loss = valid_logs["val/mean/loss"]
+            inference_error = inference_logs.get(
+                "inference/time_mean_norm/rmse/channel_mean", None
+            )
             enso_metric = (
                 inference_logs.get(self.config.best_enso_checkpoint_metric, None)
                 if self.config.best_enso_checkpoint_metric is not None
