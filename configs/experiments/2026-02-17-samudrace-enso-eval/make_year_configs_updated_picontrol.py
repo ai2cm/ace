@@ -74,19 +74,6 @@ def make_config(year, times):
         "coupled_steps_in_memory": 1,
         "checkpoint_path": "/ckpt.tar",
         "aggregator": {"log_histograms": True},
-        "atmosphere_stepper_override": {
-            "prescribed_prognostic_names": [
-                "DLWRFsfc",
-                "DSWRFsfc",
-                "ULWRFsfc",
-                "USWRFsfc",
-                "LHTFLsfc",
-                "SHTFLsfc",
-                "PRATEsfc",
-                "eastward_surface_wind_stress",
-                "northward_surface_wind_stress",
-            ],
-        },
         "data_writer": {
             "ocean": {
                 "save_prediction_files": False,
