@@ -237,9 +237,7 @@ class Config:
     evaluate_before_training: bool = False
     save_best_inference_epoch_checkpoints: bool = False
     ema: EMAConfig = dataclasses.field(default_factory=EMAConfig)
-    best_enso_checkpoint_metric: str | None = None
-    best_enso_checkpoint_autocorr_metric: str | None = None
-    best_enso_checkpoint_autocorr_weight: float = 1.0
+    save_best_enso_checkpoint: bool = False
     best_enso_checkpoint_climate_tolerance: float = 0.1
     lr_tuning: LRTuningConfig | None = None
 
@@ -362,9 +360,7 @@ def get_trainer(
     checkpoint_every_n_batches: int = 0,
     n_train_batches: int = 100,
     save_best_inference_epoch_checkpoints: bool = False,
-    best_enso_checkpoint_metric: str | None = None,
-    best_enso_checkpoint_autocorr_metric: str | None = None,
-    best_enso_checkpoint_autocorr_weight: float = 1.0,
+    save_best_enso_checkpoint: bool = False,
     best_enso_checkpoint_climate_tolerance: float = 0.1,
     inference_extra_metrics: list[dict[str, float]] | None = None,
     scheduler_config: SchedulerConfig | None = None,
@@ -459,9 +455,7 @@ def get_trainer(
         validate_using_ema=validate_using_ema,
         evaluate_before_training=evaluate_before_training,
         save_best_inference_epoch_checkpoints=save_best_inference_epoch_checkpoints,
-        best_enso_checkpoint_metric=best_enso_checkpoint_metric,
-        best_enso_checkpoint_autocorr_metric=best_enso_checkpoint_autocorr_metric,
-        best_enso_checkpoint_autocorr_weight=best_enso_checkpoint_autocorr_weight,
+        save_best_enso_checkpoint=save_best_enso_checkpoint,
         best_enso_checkpoint_climate_tolerance=best_enso_checkpoint_climate_tolerance,
         save_checkpoint=save_checkpoint,
         ema=ema_config,
@@ -1459,15 +1453,19 @@ def test_best_enso_checkpoint_saved(tmp_path: str):
     when ENSO improves and climate is in tolerance."""
     max_epochs = 3
     n_train_batches = 5
-    enso_metric_key = "enso_index/sst_nino34_index_std_norm"
+    std_key = "enso_index/sst_nino34_index_std_norm"
+    acorr_key = "enso_index/sst_nino34_index_autocorr_lag5yr_norm"
+    psd_key = "enso_index/sst_nino34_index_psd_2_5yr_norm"
 
     inference_losses = np.array([0.5, 0.4, 0.3])
-    # ENSO std_norm: epoch1=0.8 (dist=0.2),
-    # epoch2=0.7 (dist=0.3), epoch3=0.95 (dist=0.05)
+    # Epoch 1: mean(|1-0.8|, |1-0.9|, |1-0.85|) = mean(0.2, 0.1, 0.15) = 0.15
+    # Epoch 2: mean(|1-0.7|, |1-0.7|, |1-0.7|)  = 0.3
+    # Epoch 3: mean(|1-0.95|, |1-0.98|, |1-0.97|) = mean(0.05, 0.02, 0.03) = 0.0333
+    # Best is epoch 3
     inference_extra = [
-        {enso_metric_key: 0.8},
-        {enso_metric_key: 0.7},
-        {enso_metric_key: 0.95},
+        {std_key: 0.8, acorr_key: 0.9, psd_key: 0.85},
+        {std_key: 0.7, acorr_key: 0.7, psd_key: 0.7},
+        {std_key: 0.95, acorr_key: 0.98, psd_key: 0.97},
     ]
 
     config, trainer = get_trainer(
@@ -1476,7 +1474,7 @@ def test_best_enso_checkpoint_saved(tmp_path: str):
         inference_losses=inference_losses,
         n_train_batches=n_train_batches,
         validate_using_ema=False,
-        best_enso_checkpoint_metric=f"inference/{enso_metric_key}",
+        save_best_enso_checkpoint=True,
         best_enso_checkpoint_climate_tolerance=0.5,
         inference_extra_metrics=inference_extra,
     )
@@ -1489,22 +1487,26 @@ def test_best_enso_checkpoint_saved(tmp_path: str):
         paths.best_enso_checkpoint_path, map_location="cpu", weights_only=False
     )
     assert ckpt["epoch"] == 3
-    assert ckpt["best_enso_score"] == pytest.approx(0.05)
+    assert ckpt["best_enso_score"] == pytest.approx(1 / 30, abs=1e-6)
 
 
 def test_best_enso_checkpoint_climate_guard(tmp_path: str):
     """Test that ENSO checkpoint is NOT saved when climate exceeds tolerance."""
     max_epochs = 3
     n_train_batches = 5
-    enso_metric_key = "enso_index/sst_nino34_index_std_norm"
+    std_key = "enso_index/sst_nino34_index_std_norm"
+    acorr_key = "enso_index/sst_nino34_index_autocorr_lag5yr_norm"
+    psd_key = "enso_index/sst_nino34_index_psd_2_5yr_norm"
 
     # Inference errors: epoch1=0.3 (best), epoch2=0.5 (worse), epoch3=0.4 (worse)
     inference_losses = np.array([0.3, 0.5, 0.4])
-    # ENSO: epoch1=0.7, epoch2=0.95 (best but climate too bad), epoch3=0.8
+    # Epoch 1: score = mean(0.3, 0.3, 0.3) = 0.3
+    # Epoch 2: score = mean(0.05, 0.05, 0.05) = 0.05 (best but climate too bad)
+    # Epoch 3: score = mean(0.2, 0.2, 0.2) = 0.2 (climate too bad)
     inference_extra = [
-        {enso_metric_key: 0.7},
-        {enso_metric_key: 0.95},
-        {enso_metric_key: 0.8},
+        {std_key: 0.7, acorr_key: 0.7, psd_key: 0.7},
+        {std_key: 0.95, acorr_key: 0.95, psd_key: 0.95},
+        {std_key: 0.8, acorr_key: 0.8, psd_key: 0.8},
     ]
 
     config, trainer = get_trainer(
@@ -1513,7 +1515,7 @@ def test_best_enso_checkpoint_climate_guard(tmp_path: str):
         inference_losses=inference_losses,
         n_train_batches=n_train_batches,
         validate_using_ema=False,
-        best_enso_checkpoint_metric=f"inference/{enso_metric_key}",
+        save_best_enso_checkpoint=True,
         best_enso_checkpoint_climate_tolerance=0.1,
         inference_extra_metrics=inference_extra,
     )
@@ -1529,25 +1531,23 @@ def test_best_enso_checkpoint_climate_guard(tmp_path: str):
     assert ckpt["epoch"] == 1
 
 
-def test_best_enso_checkpoint_with_autocorr(tmp_path: str):
-    """Test that autocorrelation contributes to composite ENSO score."""
+def test_best_enso_checkpoint_equal_weighting(tmp_path: str):
+    """Test that all three ENSO metrics contribute equally to score."""
     max_epochs = 3
     n_train_batches = 5
     std_key = "enso_index/sst_nino34_index_std_norm"
-    acorr_norm_key = "enso_index/sst_nino34_index_autocorr_lag5yr_norm"
+    acorr_key = "enso_index/sst_nino34_index_autocorr_lag5yr_norm"
+    psd_key = "enso_index/sst_nino34_index_psd_2_5yr_norm"
 
     inference_losses = np.array([0.3, 0.3, 0.3])
-    # Epoch 1: std_norm=0.95 (dist=0.05), autocorr_norm=0.8 (dist=0.2)
-    #   composite = 0.05 + 1.0*0.2 = 0.25
-    # Epoch 2: std_norm=0.90 (dist=0.10), autocorr_norm=0.98 (dist=0.02)
-    #   composite = 0.10 + 1.0*0.02 = 0.12
-    # Epoch 3: std_norm=0.98 (dist=0.02), autocorr_norm=0.75 (dist=0.25)
-    #   composite = 0.02 + 1.0*0.25 = 0.27
-    # Best composite is epoch 2 (0.12)
+    # Epoch 1: std great, acorr+psd bad → mean(0.05, 0.2, 0.2) = 0.15
+    # Epoch 2: all decent              → mean(0.10, 0.02, 0.02) = 0.0467
+    # Epoch 3: std perfect, acorr+psd terrible → mean(0.02, 0.25, 0.25) = 0.1733
+    # Best composite is epoch 2
     inference_extra = [
-        {std_key: 0.95, acorr_norm_key: 0.8},
-        {std_key: 0.90, acorr_norm_key: 0.98},
-        {std_key: 0.98, acorr_norm_key: 0.75},
+        {std_key: 0.95, acorr_key: 0.8, psd_key: 0.8},
+        {std_key: 0.90, acorr_key: 0.98, psd_key: 0.98},
+        {std_key: 0.98, acorr_key: 0.75, psd_key: 0.75},
     ]
 
     config, trainer = get_trainer(
@@ -1556,9 +1556,7 @@ def test_best_enso_checkpoint_with_autocorr(tmp_path: str):
         inference_losses=inference_losses,
         n_train_batches=n_train_batches,
         validate_using_ema=False,
-        best_enso_checkpoint_metric=f"inference/{std_key}",
-        best_enso_checkpoint_autocorr_metric=f"inference/{acorr_norm_key}",
-        best_enso_checkpoint_autocorr_weight=1.0,
+        save_best_enso_checkpoint=True,
         best_enso_checkpoint_climate_tolerance=0.5,
         inference_extra_metrics=inference_extra,
     )
@@ -1570,14 +1568,15 @@ def test_best_enso_checkpoint_with_autocorr(tmp_path: str):
     ckpt = torch.load(
         paths.best_enso_checkpoint_path, map_location="cpu", weights_only=False
     )
-    # Without autocorrelation, epoch 3 would win (std_norm closest to 1.0)
-    # With autocorrelation, epoch 2 wins (best composite)
+    # Without acorr+psd, epoch 3 would win (std_norm closest to 1.0)
+    # With equal weighting, epoch 2 wins
     assert ckpt["epoch"] == 2
-    assert ckpt["best_enso_score"] == pytest.approx(0.12, abs=1e-6)
+    expected_score = (0.10 + 0.02 + 0.02) / 3
+    assert ckpt["best_enso_score"] == pytest.approx(expected_score, abs=1e-6)
 
 
 def test_best_enso_checkpoint_disabled_by_default(tmp_path: str):
-    """Test that no ENSO checkpoint is saved when metric is None."""
+    """Test that no ENSO checkpoint is saved when disabled."""
     max_epochs = 2
     config, trainer = get_trainer(
         tmp_path,
