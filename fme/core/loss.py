@@ -442,7 +442,7 @@ class EnsembleLoss(torch.nn.Module):
         sht: Callable[[torch.Tensor], torch.Tensor],
         finite_difference_crps_weight: float = 0.0,
         finite_difference_crps_levels: int = 1,
-        almost_fair_crps_alpha: float = 0.95,
+        almost_fair_crps_alpha: float = 1.0,
     ):
         super().__init__()
         if crps_weight < 0 or energy_score_weight < 0:
