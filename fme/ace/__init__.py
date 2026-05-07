@@ -1,6 +1,9 @@
 import sys
 
-from fme.ace.aggregator.inference import StepMeanEntry
+from fme.ace.aggregator.inference import (
+    StepMeanEntry,
+    TypedMetricInferenceEvaluatorAggregatorConfig,
+)
 from fme.ace.aggregator.one_step import OneStepAggregatorConfig
 from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.augmentation import AugmentationConfig
@@ -84,6 +87,7 @@ from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import CheckpointConfig
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
+from fme.core.residual_loss import ResidualPair, SnapshotResidualLossConfig
 from fme.core.scheduler import SchedulerConfig, SequentialSchedulerConfig
 from fme.core.step import (
     MultiCallStepConfig,

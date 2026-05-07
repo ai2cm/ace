@@ -1,5 +1,6 @@
+import dataclasses
 from collections.abc import Sequence
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 import torch
@@ -10,6 +11,8 @@ from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorMapping
 
+from ..inference.build_context import MetricBuildContext, maybe_filter
+from ..inference.data import InferenceBatchData, MetricBuildResult, SubAggregator
 from .reduced_metrics import AreaWeightedReducedMetric, ReducedMetric
 
 
@@ -160,3 +163,68 @@ class MeanAggregator:
         for key, value in data.items():
             data_vars[key] = xr.DataArray(value)
         return xr.Dataset(data_vars=data_vars)
+
+
+class OneStepMeanAdapter:
+    """Adapts OneStepMeanAggregator to accept InferenceBatchData."""
+
+    def __init__(self, inner: MeanAggregator):
+        self._inner = inner
+
+    def record_batch(self, data: InferenceBatchData) -> None:
+        self._inner.record_batch(
+            target_data=data.target,
+            gen_data=data.prediction,
+            target_data_norm=data.target_norm,
+            gen_data_norm=data.prediction_norm,
+            i_time_start=data.i_time_start,
+        )
+
+    def get_logs(self, label: str) -> dict[str, Any]:
+        return self._inner.get_logs(label)
+
+    def get_dataset(self) -> xr.Dataset:
+        return self._inner.get_dataset()
+
+
+@dataclasses.dataclass
+class StepMeanMetricConfig:
+    step: int
+    type: Literal["step_mean"] = "step_mean"
+    variables: list[str] | None = None
+    name: str | None = None
+    target: Literal["denorm", "norm"] = "denorm"
+    channel_mean_names: list[str] | None = None
+
+    def __post_init__(self):
+        if self.name is None:
+            base = f"mean_step_{self.step}"
+            self.name = f"{base}_norm" if self.target == "norm" else base
+
+    def get_name(self) -> str:
+        return self.name  # type: ignore[return-value]
+
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        if self.step > ctx.n_forward_steps:
+            raise ValueError(
+                f"step_mean step {self.step} exceeds "
+                f"n_forward_steps={ctx.n_forward_steps}"
+            )
+        target_time = self.step + ctx.n_ic_steps - 1
+        is_norm = self.target == "norm"
+        agg: SubAggregator = OneStepMeanAdapter(
+            MeanAggregator(
+                ctx.ops,
+                target_time=target_time,
+                target=self.target,
+                log_loss=False,
+                include_bias=not is_norm,
+                include_grad_mag_percent_diff=not is_norm,
+                channel_mean_names=(
+                    (self.channel_mean_names or ctx.channel_mean_names)
+                    if is_norm
+                    else None
+                ),
+            )
+        )
+        return MetricBuildResult(aggregator=maybe_filter(agg, self.variables))
