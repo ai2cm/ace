@@ -120,7 +120,7 @@ class InferenceEvaluatorAggregatorConfig:
             ]
         )
 
-        if n_ensemble_per_ic > 1:
+        if n_ensemble_per_ic > 1 and ctx.n_forward_steps >= 20:
             metrics.append(EnsembleMetricConfig(step=20))
 
         if ctx.n_timesteps * ctx.timestep > APPROXIMATELY_TWO_YEARS:
