@@ -415,7 +415,10 @@ class TrainerConfig:
         coarse_patch_extent_lon: See ``coarse_patch_extent_lat``.
         tropical_oversampling: Optional config to oversample patches
             whose center latitude is within +/-lat_threshold of the
-            equator during training. Only applied to the training
+            equator during training. The total number of patches per
+            batch is unchanged; patches are drawn with replacement
+            from a weighted distribution where tropical patches have
+            higher relative weight. Only applied to the training
             generator (validation patches are unchanged so metrics
             stay comparable). Requires ``coarse_patch_extent_lat`` and
             ``coarse_patch_extent_lon`` to be set.

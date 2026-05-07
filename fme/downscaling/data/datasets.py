@@ -650,8 +650,10 @@ class TropicalOversamplingConfig:
     Oversample training patches whose center latitude is within
     +/-lat_threshold degrees of the equator.
 
-    Each tropical patch is yielded ``multiplier`` times per underlying
-    batch; extratropical patches are yielded once. Validation generators
+    The total number of patches yielded per batch is unchanged.
+    Patches are drawn with replacement from a weighted distribution
+    where tropical patches have relative weight ``multiplier`` and
+    extratropical patches have weight 1. Validation generators
     should not pass this config so that validation metrics remain
     comparable across runs.
 
@@ -660,9 +662,9 @@ class TropicalOversamplingConfig:
             Patches whose center latitude has absolute value <= this
             threshold are considered tropical. Must satisfy
             0 < lat_threshold < 90.
-        multiplier: Integer number of times each tropical patch is
-            yielded per underlying batch. Must be >= 1. A value of 1
-            disables oversampling.
+        multiplier: Relative sampling weight for tropical patches.
+            Must be >= 1. A value of 1 gives uniform sampling
+            (no oversampling).
     """
 
     lat_threshold: float = 30.0
@@ -678,26 +680,31 @@ class TropicalOversamplingConfig:
             )
 
 
-def _expand_indices_with_tropical_oversampling(
+def _sample_indices_with_tropical_oversampling(
     coarse_patches: list[Patch],
     coarse_lats: torch.Tensor,
     config: TropicalOversamplingConfig,
 ) -> list[int]:
     """
-    Return a list of patch indices in which tropical patches are
-    duplicated ``config.multiplier`` times. ``coarse_lats`` is a 1-D
-    tensor of the underlying coarse latitude coordinates that the
-    ``input_slice`` of each patch indexes into.
+    Return a list of ``len(coarse_patches)`` patch indices sampled with
+    replacement from a weighted distribution.  Tropical patches (center
+    latitude within +/-``config.lat_threshold``) receive weight
+    ``config.multiplier``; extratropical patches receive weight 1.
+
+    ``coarse_lats`` is a 1-D tensor of the coarse latitude coordinates
+    that each patch's ``input_slice`` indexes into.
     """
-    indices: list[int] = []
-    for i, patch in enumerate(coarse_patches):
+    weights: list[float] = []
+    for patch in coarse_patches:
         patch_lats = coarse_lats[patch.input_slice.y]
         center_lat = float(patch_lats.mean().item())
         if abs(center_lat) <= config.lat_threshold:
-            indices.extend([i] * config.multiplier)
+            weights.append(float(config.multiplier))
         else:
-            indices.append(i)
-    return indices
+            weights.append(1.0)
+    return random.choices(
+        range(len(coarse_patches)), weights=weights, k=len(coarse_patches)
+    )
 
 
 # downscale_factor=None means fine patches not needed here, but reusing
@@ -779,27 +786,21 @@ def patched_batch_gen_from_paired_loader(
     tropical_oversampling: TropicalOversamplingConfig | None = None,
 ) -> Iterator[PairedBatchData]:
     for batch in loader:
-        # When tropical oversampling is enabled, defer shuffling until after
-        # the patch list is expanded so duplicated entries are interleaved
-        # in the random order rather than appearing back-to-back.
-        base_shuffle = shuffle and tropical_oversampling is None
         coarse_patches, fine_patches = _get_paired_patches(
             coarse_yx_extent=coarse_yx_extent,
             coarse_yx_patch_extent=coarse_yx_patch_extent,
             coarse_overlap=coarse_overlap,
             downscale_factor=downscale_factor,
             random_offset=random_offset,
-            shuffle=base_shuffle,
+            shuffle=shuffle,
             drop_partial_patches=drop_partial_patches,
         )
         if tropical_oversampling is not None:
             assert fine_patches is not None  # downscale_factor was provided
             coarse_lats = batch.coarse.latlon_coordinates.lat[0]
-            indices = _expand_indices_with_tropical_oversampling(
+            indices = _sample_indices_with_tropical_oversampling(
                 coarse_patches, coarse_lats, tropical_oversampling
             )
-            if shuffle:
-                random.shuffle(indices)
             coarse_patches = [coarse_patches[i] for i in indices]
             fine_patches = [fine_patches[i] for i in indices]
         yield from batch.generate_from_patches(coarse_patches, fine_patches)
