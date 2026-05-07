@@ -25,7 +25,8 @@ This is a Python machine learning project for atmospheric modeling (ACE - AI2 Cl
 - Run pre-commit hooks: `pre-commit run --all-files`
 
 When running tests in a conda environment, use `python -m pytest` (not `pytest`) to ensure the correct interpreter is used.
-Pre-commit hooks run ruff, ruff-format, and mypy. If ruff-format modifies files, re-stage and create a new commit (do not amend).
+Pre-commit hooks run ruff, ruff-format, and mypy.
+Use pre-commit instead of `ruff` or `ruff-format` directly.
 
 ### Parallel / Spatial Parallel Testing
 
@@ -47,15 +48,36 @@ not validate cross-backend correctness.
 
 ## Code Guidelines for Agents
 
+### Commit/PR process
+
+Changes that will go to main should be made in branches so that PRs can be made for review.
+Before starting, plan out how the changes will be made in one or more atomic commits.
+Commits should leave the codebase in a consistent state, and should not add unused features that can't be reviewed in isolation.
+They should also include tests for any new functionality, and should not break existing tests.
+
+When making new branches, use the naming convention:
+`<type>/<short-description>`, where `<type>` is one of:
+- feature: Any new functionality (most common branch type).
+- refactor: No changes to features or configs, just code restructuring.
+- fix: Bug fixes.
+- exp: Branch used for running experiments, likely will not be merged to main.
+- config: Changes to configurations under config/.
+- scripts: Changes isolated to a single directory under scripts/.
+- docs: Documentation changes only.
+
 ### Naming
 
 - Config classes loaded from user-specified yaml: append `Config` to the built type (`TrainStepperConfig`).
 - Private functions get a `_` prefix.
 
+### Code style
+
+- isinstance checks and type: ignore statements are a sign that types should be refactored, when adding them you must justify the decision.
+
 ### Config design
 
 - Validate in `__post_init__`, not at runtime.
-- Config loading backwards compatibility for inference is critical, but can be broken for training; use deprecation warnings for config removal. Ask user if unsure.
+- Trained checkpoint loading backwards compatibility for inference is critical, but can be broken for training; use deprecation warnings for config removal. Ask user if unsure.
 
 ### Testing
 
