@@ -8,11 +8,14 @@ import torch
 import xarray as xr
 
 from fme.ace.aggregator.inference import (
+    AnnualMetricConfig,
+    EnsoIndexMetricConfig,
     HistogramMetricConfig,
     InferenceEvaluatorAggregatorConfig,
     LegacyFlagInferenceEvaluatorAggregatorConfig,
     MeanMetricConfig,
     PowerSpectrumMetricConfig,
+    SeasonalMetricConfig,
     StepMeanEntry,
     StepMeanMetricConfig,
     TimeMeanMetricConfig,
@@ -605,3 +608,80 @@ def test_legacy_config_matches_typed_config():
                 atol=1e-5,
                 msg=f"Mismatch at key {key}",
             )
+
+
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
+def test_legacy_config_long_run_includes_annual_and_enso():
+    """Verify that a long-run legacy config produces annual and ENSO metrics."""
+    torch.manual_seed(42)
+    n_sample = 2
+    nx, ny = 72, 36
+    timestep = datetime.timedelta(days=10)
+    n_time = 80
+    ds_info = DatasetInfo(
+        horizontal_coordinates=LatLonCoordinates(
+            lon=torch.linspace(0, 355, nx),
+            lat=torch.linspace(-87.5, 87.5, ny),
+        ),
+        timestep=timestep,
+    )
+    time_1d = xr.cftime_range(start="2000-01-01", periods=n_time, freq="10D")
+    time_values = np.array([time_1d.values] * n_sample)
+    time = xr.DataArray(time_values, dims=["sample", "time"])
+    initial_time = time.isel(time=0)
+
+    legacy_config = LegacyFlagInferenceEvaluatorAggregatorConfig(
+        log_video=True,
+        log_seasonal_means=True,
+    )
+
+    typed_config = InferenceEvaluatorAggregatorConfig(
+        metrics=[
+            MeanMetricConfig(target="denorm"),
+            MeanMetricConfig(target="norm"),
+            StepMeanMetricConfig(step=20, target="denorm"),
+            StepMeanMetricConfig(step=20, name="mean_step_20_norm", target="norm"),
+            PowerSpectrumMetricConfig(),
+            ZonalMeanMetricConfig(),
+            VideoMetricConfig(),
+            TimeMeanMetricConfig(target="denorm"),
+            TimeMeanMetricConfig(target="norm"),
+            SeasonalMetricConfig(),
+            AnnualMetricConfig(),
+            EnsoIndexMetricConfig(),
+        ],
+    )
+
+    build_kwargs = dict(
+        dataset_info=ds_info,
+        n_ic_steps=1,
+        n_forward_steps=n_time - 1,
+        initial_time=initial_time,
+        normalize=lambda x: dict(x),
+        save_diagnostics=False,
+    )
+    legacy_agg = legacy_config.build(**build_kwargs)
+    typed_agg = typed_config.build(**build_kwargs)
+
+    data = PairedData.new_on_device(
+        prediction={"a": torch.randn(n_sample, n_time, ny, nx, device=get_device())},
+        reference={"a": torch.randn(n_sample, n_time, ny, nx, device=get_device())},
+        time=time,
+        labels=None,
+    )
+    legacy_agg.record_batch(data=data)
+    typed_agg.record_batch(data=data)
+
+    legacy_logs = legacy_agg.get_summary_logs()
+    typed_logs = typed_agg.get_summary_logs()
+
+    assert set(legacy_logs.keys()) == set(typed_logs.keys()), (
+        f"Key mismatch.\n"
+        f"  Only in legacy: {set(legacy_logs) - set(typed_logs)}\n"
+        f"  Only in typed:  {set(typed_logs) - set(legacy_logs)}"
+    )
+    annual_keys = [k for k in legacy_logs if "annual" in k]
+    assert len(annual_keys) > 0, "Expected annual metric keys in long-run config"
+    assert (
+        "enso_index" in legacy_agg._aggregators
+    ), "Expected enso_index aggregator in long-run config"
