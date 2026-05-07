@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="eval-global-trained-low-tuned-denoising-moe-events"
+JOB_NAME="eval-global-trained-tropics-tuned-denoising-moe-events"
 #JOB_NAME="eval-global-trained-denoising-moe-events"
 
 CONFIG_FILENAME="eval-coarse-prmsl-events.yaml"
@@ -22,7 +22,7 @@ NGPU=2
 IMAGE="$(cat latest_deps_only_image.txt)"
 
 EXISTING_RESULTS_DATASET_HIGH_SIGMA=01KQWYVBM0M3E76B1E0Y9PCCV2
-EXISTING_RESULTS_DATASET_LOW_SIGMA=01KQ88Q970VDZYZYFB4S2621TZ
+EXISTING_RESULTS_DATASET_LOW_SIGMA=01KQKF1BK081QKFJWD02H570Q6
 wandb_group=""
 
 #--not-preemptible \
