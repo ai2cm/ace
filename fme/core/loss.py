@@ -7,6 +7,7 @@ import torch.linalg
 
 from fme.core.device import get_device
 from fme.core.ensemble import get_crps, get_energy_score
+from fme.core.fill import SmoothFloodFillPacked
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.normalizer import StandardNormalizer
 from fme.core.packer import Packer
@@ -98,6 +99,7 @@ class WeightedMappingLoss:
         out_names: list[str],
         normalizer: StandardNormalizer,
         channel_dim: int = -3,
+        loss_handles_nan: bool = False,
     ):
         """
         Args:
@@ -107,6 +109,10 @@ class WeightedMappingLoss:
             out_names: The names of the output variables.
             normalizer: The normalizer to use.
             channel_dim: The channel dimension of the input tensors.
+            loss_handles_nan: If True, NaNs in the predict/target tensors
+                are passed through to ``loss`` rather than being zeroed
+                here. Use for losses that smooth-fill NaN regions
+                internally (e.g. ``EnsembleLossWithNanFill``).
         """
         self._weight_tensor = _construct_weight_tensor(
             weights, out_names, channel_dim=channel_dim
@@ -123,6 +129,7 @@ class WeightedMappingLoss:
         self.packer = Packer(out_names)
         self.channel_dim = channel_dim
         self.normalizer = normalizer
+        self._loss_handles_nan = loss_handles_nan
 
     def __call__(
         self,
@@ -143,10 +150,11 @@ class WeightedMappingLoss:
         target_tensors = self.packer.pack(
             self.normalizer.normalize(target_dict), axis=self.channel_dim
         )
-        nan_mask = target_tensors.isnan()
-        if nan_mask.any():
-            predict_tensors = torch.where(nan_mask, 0.0, predict_tensors)
-            target_tensors = torch.where(nan_mask, 0.0, target_tensors)
+        if not self._loss_handles_nan:
+            nan_mask = target_tensors.isnan()
+            if nan_mask.any():
+                predict_tensors = torch.where(nan_mask, 0.0, predict_tensors)
+                target_tensors = torch.where(nan_mask, 0.0, target_tensors)
 
         result = self.loss(predict_tensors, target_tensors)
         cdim = _channel_dim_positive(predict_tensors.ndim, self.channel_dim)
@@ -425,6 +433,84 @@ class EnsembleLoss(torch.nn.Module):
         return crps + energy_score_loss
 
 
+class EnsembleLossWithNanFill(torch.nn.Module):
+    """``EnsembleLoss`` variant that handles NaN-masked predictions/targets.
+
+    For the CRPS component, NaN regions are zero-filled in both inputs
+    (matching the standard pre-loss treatment in
+    :class:`WeightedMappingLoss`). For the EnergyScore component, both
+    ``gen_norm`` and ``target_norm`` are passed through
+    :class:`SmoothFloodFillPacked` so the SHT operates on a smoothly
+    filled field instead of one with a hard zero step at the coastline,
+    which would otherwise distort the high-wavenumber spectrum.
+
+    Static-mask assumption (NOT validated at runtime, for efficiency):
+      * The NaN pattern of ``target_norm`` is constant across calls.
+      * ``gen_norm`` shares the same NaN pattern as ``target_norm`` --
+        the stepper's ``StaticMasking`` enforces this for masked outputs.
+        If the network produces NaNs elsewhere, the loss surfaces a NaN
+        value, which is the desired diagnostic.
+
+    Used in coupled training for the ocean component of the loss; the
+    atmosphere component continues to use plain :class:`EnsembleLoss`.
+    """
+
+    def __init__(
+        self,
+        crps_weight: float,
+        energy_score_weight: float,
+        sht: Callable[[torch.Tensor], torch.Tensor],
+        num_steps: int = 4,
+        blur_kernel_size: int = 5,
+        blur_sigma: float = 1.0,
+    ):
+        super().__init__()
+        if crps_weight < 0 or energy_score_weight < 0:
+            raise ValueError(
+                "crps_weight and energy_score_weight must be non-negative, "
+                f"got {crps_weight} and {energy_score_weight}"
+            )
+        if crps_weight + energy_score_weight == 0:
+            raise ValueError(
+                "crps_weight and energy_score_weight must sum to a positive value, "
+                f"got {crps_weight} and {energy_score_weight}"
+            )
+        self.crps_loss = CRPSLoss(alpha=0.95)
+        self.energy_score_loss = EnergyScoreLoss(sht=sht)
+        self.crps_weight = crps_weight
+        self.energy_score_weight = energy_score_weight
+        self._fill = SmoothFloodFillPacked(
+            num_steps=num_steps,
+            blur_kernel_size=blur_kernel_size,
+            blur_sigma=blur_sigma,
+        )
+
+    def forward(
+        self,
+        gen_norm: torch.Tensor,
+        target_norm: torch.Tensor,
+    ):
+        if self.crps_weight > 0:
+            nan_mask = target_norm.isnan()
+            gen_for_crps = torch.where(nan_mask, 0.0, gen_norm)
+            target_for_crps = torch.where(nan_mask, 0.0, target_norm)
+            crps = self.crps_weight * self.crps_loss(gen_for_crps, target_for_crps)
+        else:
+            crps = torch.tensor(0.0)
+        if self.energy_score_weight > 0:
+            # Seed the cached masks from the target's static NaN pattern,
+            # then apply the same fill to the prediction for symmetric
+            # treatment under the SHT.
+            target_filled = self._fill(target_norm)
+            gen_filled = self._fill(gen_norm)
+            energy_score_loss = self.energy_score_weight * self.energy_score_loss(
+                gen_filled, target_filled
+            )
+        else:
+            energy_score_loss = torch.tensor(0.0)
+        return crps + energy_score_loss
+
+
 @dataclasses.dataclass
 class LossConfig:
     """
@@ -442,9 +528,15 @@ class LossConfig:
             relative to the main loss
     """
 
-    type: Literal["LpLoss", "L1", "MSE", "AreaWeightedMSE", "NaN", "EnsembleLoss"] = (
-        "MSE"
-    )
+    type: Literal[
+        "LpLoss",
+        "L1",
+        "MSE",
+        "AreaWeightedMSE",
+        "NaN",
+        "EnsembleLoss",
+        "EnsembleLossWithNanFill",
+    ] = "MSE"
     kwargs: Mapping[str, Any] = dataclasses.field(default_factory=lambda: {})
     global_mean_type: Literal["LpLoss"] | None = None
     global_mean_kwargs: Mapping[str, Any] = dataclasses.field(
@@ -460,6 +552,7 @@ class LossConfig:
             "AreaWeightedMSE",
             "NaN",
             "EnsembleLoss",
+            "EnsembleLossWithNanFill",
         ):
             raise NotImplementedError(self.type)
         if self.global_mean_type is not None and self.global_mean_type != "LpLoss":
@@ -496,6 +589,20 @@ class LossConfig:
             crps_weight = kwargs.pop("crps_weight", 1.0)
             energy_score_weight = kwargs.pop("energy_score_weight", 0.0)
             main_loss = EnsembleLoss(
+                sht=gridded_operations.get_real_sht(),
+                crps_weight=crps_weight,
+                energy_score_weight=energy_score_weight,
+                **kwargs,
+            )
+        elif self.type == "EnsembleLossWithNanFill":
+            if gridded_operations is None:
+                raise ValueError(
+                    "gridded_operations is required for EnsembleLossWithNanFill"
+                )
+            kwargs = dict(self.kwargs)
+            crps_weight = kwargs.pop("crps_weight", 1.0)
+            energy_score_weight = kwargs.pop("energy_score_weight", 0.0)
+            main_loss = EnsembleLossWithNanFill(
                 sht=gridded_operations.get_real_sht(),
                 crps_weight=crps_weight,
                 energy_score_weight=energy_score_weight,
@@ -586,7 +693,13 @@ class StepLossConfig:
             weights to apply to their normalized losses
     """
 
-    type: Literal["LpLoss", "MSE", "AreaWeightedMSE", "EnsembleLoss"] = "MSE"
+    type: Literal[
+        "LpLoss",
+        "MSE",
+        "AreaWeightedMSE",
+        "EnsembleLoss",
+        "EnsembleLossWithNanFill",
+    ] = "MSE"
     kwargs: Mapping[str, Any] = dataclasses.field(default_factory=lambda: {})
     global_mean_type: Literal["LpLoss"] | None = None
     global_mean_kwargs: Mapping[str, Any] = dataclasses.field(
@@ -623,6 +736,7 @@ class StepLossConfig:
                 out_names=out_names,
                 channel_dim=channel_dim,
                 normalizer=normalizer,
+                loss_handles_nan=(self.type == "EnsembleLossWithNanFill"),
             ),
             sqrt_loss_decay_constant=self.sqrt_loss_step_decay_constant,
         )

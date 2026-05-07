@@ -8,9 +8,12 @@ from fme.core.loss import (
     AreaWeightedMSELoss,
     CRPSLoss,
     EnergyScoreLoss,
+    EnsembleLoss,
+    EnsembleLossWithNanFill,
     GlobalMeanLoss,
     LossConfig,
     LossOutput,
+    StepLoss,
     StepLossConfig,
     VariableWeightingLoss,
     WeightedMappingLoss,
@@ -398,6 +401,164 @@ def test_WeightedMappingLoss_with_target_nans():
     torch.testing.assert_close(result.total(), expected)
     channel_losses = result.get_channel_losses()
     assert set(channel_losses.keys()) == set(out_names)
+
+
+def test_WeightedMappingLoss_loss_handles_nan_passes_nans_through():
+    """When loss_handles_nan=True, the wrapper must NOT zero NaN regions
+    in either predict or target before calling the inner loss."""
+
+    class _ProbeLoss(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.last_predict: torch.Tensor | None = None
+            self.last_target: torch.Tensor | None = None
+
+        def forward(self, predict, target):
+            self.last_predict = predict
+            self.last_target = target
+            return torch.tensor(0.0, device=predict.device)
+
+    n_channels = 2
+    out_names = [f"var_{i}" for i in range(n_channels)]
+    normalizer = StandardNormalizer(
+        means={name: torch.as_tensor(0.0) for name in out_names},
+        stds={name: torch.as_tensor(1.0) for name in out_names},
+    )
+    probe = _ProbeLoss()
+    mapping_loss = WeightedMappingLoss(
+        probe,
+        weights={},
+        out_names=out_names,
+        normalizer=normalizer,
+        loss_handles_nan=True,
+    )
+    x = torch.randn(4, n_channels, 5, 5).to(get_device())
+    y = torch.randn(4, n_channels, 5, 5).to(get_device())
+    y[:, 0, 0, 0] = float("nan")
+    x_mapping = {name: x[:, i].clone() for i, name in enumerate(out_names)}
+    y_mapping = {name: y[:, i].clone() for i, name in enumerate(out_names)}
+    mapping_loss(x_mapping, y_mapping)
+
+    assert probe.last_target is not None
+    assert probe.last_predict is not None
+    # The variable-weighting wrapper multiplies by weights (default 1.0),
+    # so NaN locations propagate through unchanged.
+    assert torch.isnan(
+        probe.last_target
+    ).any(), "Expected NaN in target to be passed through to the inner loss."
+    # Predict tensor at the NaN location should retain its original
+    # (finite) value scaled by weight=1, NOT be zeroed out.
+    assert not torch.isnan(probe.last_predict[..., 0, 0, 0]).any()
+
+
+def _ensemble_loss_inputs(B=2, n_ensemble=2, n_channels=2, H=8, W=16):
+    """Build (gen_norm, target_norm) with a static NaN pattern in last 3 dims.
+
+    Mirrors what WeightedMappingLoss produces after packing in the per-step
+    ensemble training loop: gen has shape (B, n_ensemble, C, H, W) and
+    target has shape (B, 1, C, H, W).
+    """
+    torch.manual_seed(0)
+    gen = torch.randn(B, n_ensemble, n_channels, H, W).to(get_device())
+    target = torch.randn(B, 1, n_channels, H, W).to(get_device())
+    nan_cols = [13, 14, 15, 0, 1]
+    nan_idx = (slice(None), slice(None), 0, slice(None), nan_cols)
+    gen[nan_idx] = float("nan")
+    target[nan_idx] = float("nan")
+    return gen, target
+
+
+def test_EnsembleLossWithNanFill_returns_finite_and_differentiable():
+    n_lat, n_lon = 8, 16
+    gen, target = _ensemble_loss_inputs(H=n_lat, W=n_lon)
+    gen.requires_grad_(True)
+
+    sht = LatLonOperations(torch.ones((n_lat, n_lon), device=gen.device)).get_real_sht()
+    loss = EnsembleLossWithNanFill(crps_weight=1.0, energy_score_weight=1.0, sht=sht)
+
+    value = loss(gen, target)
+
+    assert torch.isfinite(value), f"Loss should be finite, got {value}"
+    value.backward()
+
+    grad = gen.grad
+    assert grad is not None
+    assert torch.isfinite(grad).all(), (
+        "Loss gradient should be finite everywhere; NaNs in the loss path "
+        "indicate the smooth fill or zero fill did not handle the masked "
+        "region symmetrically."
+    )
+
+
+def test_EnsembleLossWithNanFill_smooth_fill_changes_energy_spectrum():
+    """The EnergyScore branch should see a SMOOTHLY filled field, not the
+    zero-stepped one. Compare against vanilla EnsembleLoss (zero-fill via
+    nan_to_num) and assert the values differ."""
+    n_lat, n_lon = 8, 16
+    gen, target = _ensemble_loss_inputs(H=n_lat, W=n_lon)
+
+    sht = LatLonOperations(torch.ones((n_lat, n_lon), device=gen.device)).get_real_sht()
+    nan_fill_loss = EnsembleLossWithNanFill(
+        crps_weight=0.0, energy_score_weight=1.0, sht=sht
+    )
+    plain_loss = EnsembleLoss(crps_weight=0.0, energy_score_weight=1.0, sht=sht)
+
+    # Plain EnsembleLoss can't handle NaN inputs, so emulate the existing
+    # WeightedMappingLoss zero-fill path manually.
+    nan_mask = target.isnan()
+    gen_zero = torch.where(nan_mask, 0.0, gen)
+    target_zero = torch.where(nan_mask, 0.0, target)
+    zero_filled_value = plain_loss(gen_zero, target_zero)
+    smooth_filled_value = nan_fill_loss(gen, target)
+
+    assert torch.isfinite(smooth_filled_value)
+    assert torch.isfinite(zero_filled_value)
+    assert not torch.isclose(smooth_filled_value, zero_filled_value), (
+        "Smooth fill should produce a different EnergyScore than zero fill; "
+        "if these are equal, the smooth fill is not affecting the SHT."
+    )
+
+
+def test_LossConfig_builds_EnsembleLossWithNanFill():
+    n_lat, n_lon = 8, 16
+    area = torch.ones(n_lat, n_lon, device=get_device())
+    config = LossConfig(
+        type="EnsembleLossWithNanFill",
+        kwargs={"crps_weight": 1.0, "energy_score_weight": 1.0},
+    )
+    loss = config.build(reduction="mean", gridded_operations=LatLonOperations(area))
+    assert isinstance(loss, EnsembleLossWithNanFill)
+
+
+def test_StepLossConfig_sets_loss_handles_nan_for_EnsembleLossWithNanFill():
+    n_lat, n_lon = 8, 16
+    area = torch.ones(n_lat, n_lon, device=get_device())
+    out_names = [f"var_{i}" for i in range(2)]
+    normalizer = StandardNormalizer(
+        means={name: torch.as_tensor(0.0) for name in out_names},
+        stds={name: torch.as_tensor(1.0) for name in out_names},
+    )
+
+    nan_step = StepLossConfig(
+        type="EnsembleLossWithNanFill",
+        kwargs={"crps_weight": 1.0, "energy_score_weight": 1.0},
+    ).build(
+        gridded_ops=LatLonOperations(area),
+        out_names=out_names,
+        normalizer=normalizer,
+    )
+    assert isinstance(nan_step, StepLoss)
+    assert nan_step.loss._loss_handles_nan is True
+
+    plain_step = StepLossConfig(
+        type="EnsembleLoss",
+        kwargs={"crps_weight": 1.0, "energy_score_weight": 1.0},
+    ).build(
+        gridded_ops=LatLonOperations(area),
+        out_names=out_names,
+        normalizer=normalizer,
+    )
+    assert plain_step.loss._loss_handles_nan is False
 
 
 def test_reduce_to_per_channel():
