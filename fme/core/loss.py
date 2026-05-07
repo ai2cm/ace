@@ -441,6 +441,7 @@ class EnsembleLoss(torch.nn.Module):
         sht: Callable[[torch.Tensor], torch.Tensor],
         finite_difference_crps_weight: float = 0.0,
         finite_difference_crps_levels: int = 1,
+        almost_fair_crps_alpha: float = 1.0,
     ):
         super().__init__()
         if crps_weight < 0 or energy_score_weight < 0:
@@ -458,11 +459,12 @@ class EnsembleLoss(torch.nn.Module):
                 "crps_weight and energy_score_weight must sum to a positive value, "
                 f"got {crps_weight} and {energy_score_weight}"
             )
-        self.crps_loss = CRPSLoss(alpha=0.95)
+        self.crps_loss = CRPSLoss(alpha=almost_fair_crps_alpha)
         if finite_difference_crps_weight > 0:
             self.diff_crps_loss: FiniteDifferenceCRPSLoss | None = (
                 FiniteDifferenceCRPSLoss(
-                    alpha=1.0, levels=finite_difference_crps_levels
+                    alpha=almost_fair_crps_alpha,
+                    levels=finite_difference_crps_levels,
                 )
             )
         else:
