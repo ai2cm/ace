@@ -25,6 +25,7 @@ from fme.downscaling.data import (
     PairedBatchData,
     PairedDataLoaderConfig,
     PairedGriddedData,
+    TropicalOversamplingConfig,
     load_static_inputs,
 )
 from fme.downscaling.models import DiffusionModel, DiffusionModelConfig
@@ -145,7 +146,11 @@ class Trainer:
         )
 
     def _get_batch_generator(
-        self, data: PairedGriddedData, random_offset: bool, shuffle: bool
+        self,
+        data: PairedGriddedData,
+        random_offset: bool,
+        shuffle: bool,
+        tropical_oversampling: TropicalOversamplingConfig | None = None,
     ):
         if self.patch_data:
             batch_generator = data.get_patched_generator(
@@ -154,6 +159,7 @@ class Trainer:
                 drop_partial_patches=True,
                 random_offset=random_offset,
                 shuffle=shuffle,
+                tropical_oversampling=tropical_oversampling,
             )
         else:
             batch_generator = data.get_generator()
@@ -172,7 +178,10 @@ class Trainer:
         batch: PairedBatchData
         wandb = WandB.get_instance()
         train_batch_generator = self._get_batch_generator(
-            self.train_data, random_offset=True, shuffle=True
+            self.train_data,
+            random_offset=True,
+            shuffle=True,
+            tropical_oversampling=self.config.tropical_oversampling,
         )
         outputs = None
         for i, batch in enumerate(train_batch_generator):
@@ -393,6 +402,25 @@ class Trainer:
 
 @dataclasses.dataclass
 class TrainerConfig:
+    """
+    Configuration for the downscaling Trainer.
+
+    Most fields are self-explanatory; the following deserve note:
+
+    Parameters:
+        coarse_patch_extent_lat: If set together with
+            ``coarse_patch_extent_lon``, training and validation iterate
+            over patches of the given coarse extent rather than the full
+            domain.
+        coarse_patch_extent_lon: See ``coarse_patch_extent_lat``.
+        tropical_oversampling: Optional config to oversample patches
+            whose center latitude is within +/-lat_threshold of the
+            equator during training. Only applied to the training
+            generator (validation patches are unchanged so metrics
+            stay comparable). Requires ``coarse_patch_extent_lat`` and
+            ``coarse_patch_extent_lon`` to be set.
+    """
+
     model: DiffusionModelConfig
     optimization: OptimizationConfig
     train_data: PairedDataLoaderConfig
@@ -412,6 +440,7 @@ class TrainerConfig:
     resume_results_dir: str | None = None
     resume_clear_wandb_run_id: bool = False
     log_loss_vs_noise: bool = False
+    tropical_oversampling: TropicalOversamplingConfig | None = None
 
     def __post_init__(self):
         if (
@@ -424,6 +453,13 @@ class TrainerConfig:
             raise ValueError(
                 "Either none or both of coarse_patch_extent_lat and "
                 "coarse_patch_extent_lon must be set."
+            )
+        if self.tropical_oversampling is not None and (
+            self.coarse_patch_extent_lat is None or self.coarse_patch_extent_lon is None
+        ):
+            raise ValueError(
+                "tropical_oversampling requires both coarse_patch_extent_lat "
+                "and coarse_patch_extent_lon to be set."
             )
         if self.resume_clear_wandb_run_id and self.resume_results_dir is None:
             raise ValueError(

@@ -13,7 +13,11 @@ from fme.downscaling.data.datasets import (
     FineCoarsePairedDataset,
     HorizontalSubsetDataset,
     LatLonCoordinates,
+    PairedBatchData,
     PairedBatchItem,
+    TropicalOversamplingConfig,
+    _expand_indices_with_tropical_oversampling,
+    patched_batch_gen_from_paired_loader,
 )
 from fme.downscaling.data.patching import Patch, _HorizontalSlice
 from fme.downscaling.data.utils import BatchedLatLonCoordinates, ClosedInterval
@@ -462,3 +466,190 @@ def test_batch_data_apply_patch_already_patched_raises():
     (patched,) = list(batch.generate_from_patches([patch]))
     with pytest.raises(ValueError, match="previously patched"):
         list(patched.generate_from_patches([patch]))
+
+
+@pytest.mark.parametrize(
+    "lat_threshold, multiplier, match",
+    [
+        pytest.param(30.0, 0, "multiplier", id="multiplier_zero"),
+        pytest.param(30.0, -1, "multiplier", id="multiplier_negative"),
+        pytest.param(0.0, 3, "lat_threshold", id="lat_threshold_zero"),
+        pytest.param(-1.0, 3, "lat_threshold", id="lat_threshold_negative"),
+        pytest.param(90.0, 3, "lat_threshold", id="lat_threshold_90"),
+        pytest.param(120.0, 3, "lat_threshold", id="lat_threshold_too_large"),
+    ],
+)
+def test_tropical_oversampling_config_validation(lat_threshold, multiplier, match):
+    with pytest.raises(ValueError, match=match):
+        TropicalOversamplingConfig(lat_threshold=lat_threshold, multiplier=multiplier)
+
+
+def _make_lat_patches(slices_y: list[slice]) -> list[Patch]:
+    full = slice(None)
+    return [
+        Patch(
+            input_slice=_HorizontalSlice(y=s, x=full),
+            output_slice=_HorizontalSlice(y=full, x=full),
+        )
+        for s in slices_y
+    ]
+
+
+def test_expand_indices_with_tropical_oversampling_basic():
+    # 12 latitudes evenly spaced from -66 to 70
+    coarse_lats = torch.linspace(-66, 70, 12)
+    patches = _make_lat_patches([slice(0, 4), slice(4, 8), slice(8, 12)])
+    config = TropicalOversamplingConfig(lat_threshold=30.0, multiplier=3)
+
+    indices = _expand_indices_with_tropical_oversampling(patches, coarse_lats, config)
+    # patch 0 center ~ -47.5 (extratropical), patch 1 center ~ 2.0 (tropical),
+    # patch 2 center ~ 51.5 (extratropical)
+    assert indices == [0, 1, 1, 1, 2]
+
+
+def test_expand_indices_multiplier_one_is_identity():
+    coarse_lats = torch.linspace(-66, 70, 12)
+    patches = _make_lat_patches([slice(0, 4), slice(4, 8), slice(8, 12)])
+    config = TropicalOversamplingConfig(lat_threshold=30.0, multiplier=1)
+
+    indices = _expand_indices_with_tropical_oversampling(patches, coarse_lats, config)
+    assert indices == [0, 1, 2]
+
+
+def test_expand_indices_with_tropical_oversampling_all_outside():
+    # All patches are extratropical -> no duplication
+    coarse_lats = torch.linspace(40.0, 80.0, 8)
+    patches = _make_lat_patches([slice(0, 4), slice(4, 8)])
+    config = TropicalOversamplingConfig(lat_threshold=30.0, multiplier=5)
+
+    indices = _expand_indices_with_tropical_oversampling(patches, coarse_lats, config)
+    assert indices == [0, 1]
+
+
+def _make_paired_batch_for_tropical(
+    n_lat=12, n_lon=8, batch_size=2, downscale_factor=1
+) -> PairedBatchData:
+    lat_coarse = torch.linspace(-66.0, 70.0, n_lat)
+    lon_coarse = torch.linspace(0.0, 360.0, n_lon)
+    coarse = BatchData(
+        data={"x": torch.zeros(batch_size, n_lat, n_lon)},
+        time=xr.DataArray(list(range(batch_size)), dims=["batch"]),
+        latlon_coordinates=BatchedLatLonCoordinates(
+            lat=lat_coarse.unsqueeze(0).expand(batch_size, -1).clone(),
+            lon=lon_coarse.unsqueeze(0).expand(batch_size, -1).clone(),
+        ),
+    )
+    n_lat_fine = n_lat * downscale_factor
+    n_lon_fine = n_lon * downscale_factor
+    lat_fine = torch.linspace(-66.0, 70.0, n_lat_fine)
+    lon_fine = torch.linspace(0.0, 360.0, n_lon_fine)
+    fine = BatchData(
+        data={"x": torch.zeros(batch_size, n_lat_fine, n_lon_fine)},
+        time=xr.DataArray(list(range(batch_size)), dims=["batch"]),
+        latlon_coordinates=BatchedLatLonCoordinates(
+            lat=lat_fine.unsqueeze(0).expand(batch_size, -1).clone(),
+            lon=lon_fine.unsqueeze(0).expand(batch_size, -1).clone(),
+        ),
+    )
+    return PairedBatchData(fine=fine, coarse=coarse)
+
+
+def test_patched_batch_gen_from_paired_loader_no_oversampling():
+    n_lat, n_lon = 12, 8
+    batch = _make_paired_batch_for_tropical(n_lat=n_lat, n_lon=n_lon)
+
+    yielded = list(
+        patched_batch_gen_from_paired_loader(
+            loader=[batch],
+            coarse_yx_extent=(n_lat, n_lon),
+            coarse_yx_patch_extent=(4, n_lon),
+            downscale_factor=1,
+            random_offset=False,
+            shuffle=False,
+            drop_partial_patches=True,
+        )
+    )
+    # 3 lat slices x 1 lon slice = 3 patches
+    assert len(yielded) == 3
+
+
+def test_patched_batch_gen_from_paired_loader_with_oversampling():
+    n_lat, n_lon = 12, 8
+    batch = _make_paired_batch_for_tropical(n_lat=n_lat, n_lon=n_lon)
+    config = TropicalOversamplingConfig(lat_threshold=30.0, multiplier=3)
+
+    yielded = list(
+        patched_batch_gen_from_paired_loader(
+            loader=[batch],
+            coarse_yx_extent=(n_lat, n_lon),
+            coarse_yx_patch_extent=(4, n_lon),
+            downscale_factor=1,
+            random_offset=False,
+            shuffle=False,
+            drop_partial_patches=True,
+            tropical_oversampling=config,
+        )
+    )
+    # 1 tropical patch duplicated 3x + 2 extratropical patches = 5
+    assert len(yielded) == 5
+
+    # Without shuffle, expected order is patch0, patch1, patch1, patch1, patch2
+    tropical_patch_lat_min = yielded[1].coarse.latlon_coordinates.lat[0].min().item()
+    tropical_patch_lat_max = yielded[1].coarse.latlon_coordinates.lat[0].max().item()
+    tropical_center = (tropical_patch_lat_min + tropical_patch_lat_max) / 2.0
+    assert abs(tropical_center) <= 30.0
+    # patches 1, 2, 3 are duplicates of the tropical patch
+    for i in (2, 3):
+        assert torch.equal(
+            yielded[i].coarse.latlon_coordinates.lat,
+            yielded[1].coarse.latlon_coordinates.lat,
+        )
+
+    # Count tropical-band patches in the full yielded sequence
+    n_tropical = sum(
+        1
+        for b in yielded
+        if abs(
+            (
+                b.coarse.latlon_coordinates.lat[0].min().item()
+                + b.coarse.latlon_coordinates.lat[0].max().item()
+            )
+            / 2.0
+        )
+        <= 30.0
+    )
+    assert n_tropical == 3
+
+
+def test_patched_batch_gen_from_paired_loader_shuffle_with_oversampling():
+    n_lat, n_lon = 12, 8
+    batch = _make_paired_batch_for_tropical(n_lat=n_lat, n_lon=n_lon)
+    config = TropicalOversamplingConfig(lat_threshold=30.0, multiplier=3)
+
+    yielded = list(
+        patched_batch_gen_from_paired_loader(
+            loader=[batch],
+            coarse_yx_extent=(n_lat, n_lon),
+            coarse_yx_patch_extent=(4, n_lon),
+            downscale_factor=1,
+            random_offset=False,
+            shuffle=True,
+            drop_partial_patches=True,
+            tropical_oversampling=config,
+        )
+    )
+    # Shuffling does not change the count of yielded patches.
+    assert len(yielded) == 5
+    n_tropical = sum(
+        1
+        for b in yielded
+        if abs(
+            (
+                b.coarse.latlon_coordinates.lat[0].min().item()
+                + b.coarse.latlon_coordinates.lat[0].max().item()
+            )
+            / 2.0
+        )
+        <= 30.0
+    )
+    assert n_tropical == 3
