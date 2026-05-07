@@ -1,4 +1,5 @@
 import dataclasses
+import datetime
 import os
 import warnings
 from collections.abc import Callable, Mapping, Sequence
@@ -7,7 +8,10 @@ import torch
 import xarray as xr
 
 from fme.ace.aggregator.inference.main import (
+    APPROXIMATELY_TWO_YEARS,
+    SLIGHTLY_LESS_THAN_FIVE_YEARS,
     AnnualMetricConfig,
+    EnsoCoefficientMetricConfig,
     EnsoIndexMetricConfig,
     HistogramMetricConfig,
     MeanMetricConfig,
@@ -248,6 +252,7 @@ class InferenceEvaluatorAggregatorConfig:
         *,
         include_nino34: bool,
         n_timesteps: int,
+        timestep: datetime.timedelta,
         log_zonal_mean_images: bool | int,
     ) -> list[AceMetricConfig]:
         metrics: list[AceMetricConfig] = []
@@ -277,9 +282,12 @@ class InferenceEvaluatorAggregatorConfig:
             metrics.append(HistogramMetricConfig())
         if self.log_seasonal_means:
             metrics.append(SeasonalMetricConfig())
-        metrics.append(AnnualMetricConfig())
-        if include_nino34:
-            metrics.append(EnsoIndexMetricConfig())
+        if n_timesteps * timestep > APPROXIMATELY_TWO_YEARS:
+            metrics.append(AnnualMetricConfig())
+            if include_nino34:
+                metrics.append(EnsoIndexMetricConfig())
+        if n_timesteps * timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS:
+            metrics.append(EnsoCoefficientMetricConfig())
         return metrics
 
     def build(
@@ -311,11 +319,13 @@ class InferenceEvaluatorAggregatorConfig:
         ocean_metrics = self._build_metrics(
             include_nino34=True,
             n_timesteps=n_timesteps_ocean,
+            timestep=dataset_info.ocean.timestep,
             log_zonal_mean_images=log_zonal_mean_images,
         )
         atmosphere_metrics = self._build_metrics(
             include_nino34=False,
             n_timesteps=n_timesteps_atmosphere,
+            timestep=dataset_info.atmosphere.timestep,
             log_zonal_mean_images=log_zonal_mean_images,
         )
         ocean_ace_config = AceInferenceEvaluatorAggregatorConfig(

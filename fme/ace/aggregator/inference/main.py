@@ -1,6 +1,7 @@
 import dataclasses
 import datetime
 import logging
+import warnings
 from collections.abc import Callable, Mapping, Sequence
 
 import numpy as np
@@ -260,6 +261,14 @@ class LegacyFlagInferenceEvaluatorAggregatorConfig:
     Deprecated: Use InferenceEvaluatorAggregatorConfig with typed metrics instead.
     """
 
+    def __post_init__(self):
+        warnings.warn(
+            "LegacyFlagInferenceEvaluatorAggregatorConfig is deprecated. "
+            "Use InferenceEvaluatorAggregatorConfig with typed metrics instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
     log_histograms: bool = False
     log_video: bool = False
     log_extended_video: bool = False
@@ -276,10 +285,10 @@ class LegacyFlagInferenceEvaluatorAggregatorConfig:
 
     def _to_typed_config(
         self,
-        n_timesteps: int | None = None,
-        timestep: datetime.timedelta | None = None,
-        horizontal_coordinates: HorizontalCoordinates | None = None,
-        ops: GriddedOperations | None = None,
+        n_timesteps: int,
+        timestep: datetime.timedelta,
+        horizontal_coordinates: HorizontalCoordinates,
+        ops: GriddedOperations,
         n_ensemble_per_ic: int = 1,
     ) -> InferenceEvaluatorAggregatorConfig:
         metrics: list[MetricConfig] = []
@@ -314,11 +323,7 @@ class LegacyFlagInferenceEvaluatorAggregatorConfig:
             metrics.append(HistogramMetricConfig())
         if self.log_seasonal_means:
             metrics.append(SeasonalMetricConfig())
-        if (
-            n_timesteps is not None
-            and timestep is not None
-            and n_timesteps * timestep > APPROXIMATELY_TWO_YEARS
-        ):
+        if n_timesteps * timestep > APPROXIMATELY_TWO_YEARS:
             metrics.append(AnnualMetricConfig())
             if (
                 self.log_nino34_index
@@ -326,11 +331,7 @@ class LegacyFlagInferenceEvaluatorAggregatorConfig:
                 and isinstance(ops, LatLonOperations)
             ):
                 metrics.append(EnsoIndexMetricConfig())
-        if (
-            n_timesteps is not None
-            and timestep is not None
-            and n_timesteps * timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS
-        ):
+        if n_timesteps * timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS:
             metrics.append(EnsoCoefficientMetricConfig())
         return InferenceEvaluatorAggregatorConfig(
             metrics=metrics,
@@ -349,6 +350,7 @@ class LegacyFlagInferenceEvaluatorAggregatorConfig:
         channel_mean_names: Sequence[str] | None = None,
         save_diagnostics: bool = True,
         n_ensemble_per_ic: int = 1,
+        enable_time_series: bool = True,
     ) -> "InferenceEvaluatorAggregator":
         n_timesteps = n_ic_steps + n_forward_steps
         typed_config = self._to_typed_config(
@@ -368,6 +370,7 @@ class LegacyFlagInferenceEvaluatorAggregatorConfig:
             channel_mean_names=channel_mean_names,
             save_diagnostics=save_diagnostics,
             n_ensemble_per_ic=n_ensemble_per_ic,
+            enable_time_series=enable_time_series,
         )
 
 

@@ -330,8 +330,11 @@ def test_flush_diagnostics(tmpdir):
             MeanMetricConfig(target="denorm"),
             MeanMetricConfig(target="norm"),
             StepMeanMetricConfig(step=20, target="denorm"),
+            StepMeanMetricConfig(step=20, name="mean_step_20_norm", target="norm"),
+            PowerSpectrumMetricConfig(),
             ZonalMeanMetricConfig(zonal_mean_max_size=LOG_ZONAL_MEAN_IMAGES),
             TimeMeanMetricConfig(target="denorm"),
+            TimeMeanMetricConfig(target="norm"),
             VideoMetricConfig(),
             HistogramMetricConfig(),
         ],
@@ -359,8 +362,11 @@ def test_flush_diagnostics(tmpdir):
         "mean",
         "mean_norm",
         "mean_step_20",
+        "mean_step_20_norm",
+        "power_spectrum",
         "zonal_mean",
         "time_mean",
+        "time_mean_norm",
         "histogram",
         "video",
     ]
@@ -525,6 +531,7 @@ class TestAggregatorConfigMetrics:
             )
 
 
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
 def test_legacy_config_matches_typed_config():
     """Verify LegacyFlagInferenceEvaluatorAggregatorConfig produces the same
     summary logs as an equivalent InferenceEvaluatorAggregatorConfig built
