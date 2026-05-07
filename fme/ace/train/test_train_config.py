@@ -69,7 +69,9 @@ def _make_stepper_config() -> StepperConfig:
 
 
 def _make_train_config(
-    tmp_path, inference: list[InlineInferenceConfig], max_epochs: int = 5
+    tmp_path,
+    inference: InlineInferenceConfig | list[InlineInferenceConfig],
+    max_epochs: int = 5,
 ) -> TrainConfig:
     dummy_loader = DataLoaderConfig(
         dataset=XarrayDataConfig(data_path=""), batch_size=1
@@ -86,6 +88,14 @@ def _make_train_config(
         save_checkpoint=False,
         inference=inference,
     )
+
+
+def test_inference_single_config_gives_list(tmp_path):
+    config = _make_train_config(tmp_path, _make_inference_config())
+    assert isinstance(config.inference, InlineInferenceConfig)
+    assert isinstance(config.inference_list, list)
+    assert len(config.inference_list) == 1
+    assert config.inference_names == ["inference"]
 
 
 def test_inference_names_single_unnamed(tmp_path):

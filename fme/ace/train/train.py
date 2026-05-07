@@ -92,7 +92,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
     for data, name in zip((train_data, validation_data), ("train", "valid")):
         data.log_info(name)
 
-    if config.inference:
+    if config.inference_list:
         logging.info("Initializing inline inference data loaders")
     else:
         logging.info("Skipping inline inference")
