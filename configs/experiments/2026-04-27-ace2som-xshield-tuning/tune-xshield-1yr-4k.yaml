@@ -91,7 +91,7 @@ stepper_training:
       specific_total_water_0: 0.05
       specific_total_water_1: 0.025
       specific_total_water_2: 0.5
-      PRATEsfc: 0.5
+      PRATEsfc: 10
       h500: 10
       TMP850: 5
       Q2m: 0.5
@@ -102,7 +102,7 @@ stepper_training:
       USWRFtoa: 2
       tendency_of_total_water_path_due_to_advection: 0.5
       PRESsfc: 3
-      PRMSL: 10
+      #PRMSL: 10
     kwargs:
       crps_weight: 0.9
       energy_score_weight: 0.1
@@ -257,4 +257,4 @@ stepper:
         - TMP850
         - h500
         - total_frozen_precipitation_rate
-        - PRMSL
+        #- PRMSL

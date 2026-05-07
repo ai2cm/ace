@@ -35,7 +35,7 @@ PRE_TRAINED_WEIGHTS_DATASETS_5_1=("01KQG2R8RCWH1ZJS0FK3P9Z8C4" "01KQG2RE1A9BC3G0
 #        --dataset ${PRE_TRAINED_WEIGHTS_DATASETS[$seed]}:/pre-trained-weights \
 for seed in {0..0}; do
     #job_name="ace2som-xshield-tune-1yr-even-split-single-decoder-seed${seed}"
-    job_name="ace2som-xshield-continue-tune-1yr-1-2-split-single-decoder-seed${seed}"
+    job_name="ace2som-xshield-tune-1yr-4k-seed${seed}"
     fine_tune_seed=$((seed + SEED_OFFSET))
     override="seed=${fine_tune_seed}"
     python -m fme.ace.validate_config --config_type train $CONFIG_PATH --override $override
