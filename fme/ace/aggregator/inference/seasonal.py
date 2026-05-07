@@ -1,6 +1,7 @@
+import dataclasses
 import logging
 from collections.abc import Mapping
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import numpy as np
 import torch
@@ -14,7 +15,8 @@ from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorMapping
 from fme.core.wandb import Image
 
-from .data import InferenceBatchData
+from .build_context import MetricBuildContext, maybe_filter
+from .data import InferenceBatchData, MetricBuildResult, SubAggregator
 
 
 class SeasonalAggregator:
@@ -243,3 +245,20 @@ def _to_dataset(data: TensorMapping, time: xr.DataArray) -> xr.Dataset:
         data_vars[name] = (["sample", "time", "lat", "lon"], tensor)
     data_vars["counts"] = (["sample", "time"], np.ones(shape=time.shape))
     return xr.Dataset(data_vars, coords={"valid_time": time})
+
+
+@dataclasses.dataclass
+class SeasonalMetricConfig:
+    type: Literal["seasonal"] = "seasonal"
+    variables: list[str] | None = None
+    name: str = "seasonal"
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        agg: SubAggregator = SeasonalAggregator(
+            ops=ctx.ops,
+            variable_metadata=ctx.variable_metadata,
+        )
+        return MetricBuildResult(aggregator=maybe_filter(agg, self.variables))
