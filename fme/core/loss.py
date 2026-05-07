@@ -419,8 +419,9 @@ def _get_finite_difference_crps_loss(
         # avg_pool2d expects 4D [N, C, H, W]; reshape to merge leading dims
         x_flat = x.reshape(-1, 1, x.shape[-2], x.shape[-1])
         y_flat = y.reshape(-1, 1, y.shape[-2], y.shape[-1])
-        x_pooled = F.avg_pool2d(x_flat, kernel_size=2, stride=2)
-        y_pooled = F.avg_pool2d(y_flat, kernel_size=2, stride=2)
+        # ceil_mode includes partial edge windows when dims are odd
+        x_pooled = F.avg_pool2d(x_flat, kernel_size=2, stride=2, ceil_mode=True)
+        y_pooled = F.avg_pool2d(y_flat, kernel_size=2, stride=2, ceil_mode=True)
         x_coarse = x_pooled.reshape(
             *x.shape[:-2], x_pooled.shape[-2], x_pooled.shape[-1]
         )
