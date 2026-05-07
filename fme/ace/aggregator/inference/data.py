@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import datetime
 from collections.abc import Sequence
 from typing import Any, Protocol
@@ -158,3 +159,16 @@ class SubAggregator(Protocol):
 
 class TimeSeriesLogs(Protocol):
     def get_logs(self, label: str, step_slice: slice = ...) -> dict[str, Any]: ...
+
+
+@dataclasses.dataclass
+class MetricBuildResult:
+    """Result of building a metric config into concrete aggregators.
+
+    Each metric config populates the appropriate slot(s) so the build loop
+    can dispatch without isinstance checks on the config type.
+    """
+
+    aggregator: SubAggregator | None = None
+    time_series: TimeSeriesLogs | None = None
+    ensemble: Any = None

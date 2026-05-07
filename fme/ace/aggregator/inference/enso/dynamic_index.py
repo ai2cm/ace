@@ -1,10 +1,11 @@
 import abc
+import dataclasses
 import logging
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 import cftime
 import numpy as np
@@ -12,12 +13,15 @@ import torch
 import xarray as xr
 from matplotlib import pyplot as plt
 
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
+from fme.core.gridded_ops import LatLonOperations
 from fme.core.typing_ import TensorDict
 
 from ...plotting import plot_mean_and_samples
-from ..data import InferenceBatchData
+from ..build_context import MetricBuildContext, MetricNotSupportedError
+from ..data import InferenceBatchData, MetricBuildResult
 
 SAMPLE_DIM, TIME_DIM, LAT_DIM, LON_DIM = 0, 1, -2, -1
 
@@ -532,3 +536,44 @@ def convert_cftime_to_datetime_coord(time_coord: xr.DataArray) -> xr.DataArray:
         ],
         dims=time_coord.dims,
     )
+
+
+NINO34_LAT = (-5, 5)
+NINO34_LON = (190, 240)
+
+
+@dataclasses.dataclass
+class EnsoIndexMetricConfig:
+    type: Literal["enso_index"] = "enso_index"
+    name: str = "enso_index"
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        if not isinstance(ctx.horizontal_coordinates, LatLonCoordinates):
+            raise MetricNotSupportedError(
+                "enso_index metric requires LatLonCoordinates."
+            )
+        if not isinstance(ctx.ops, LatLonOperations):
+            raise MetricNotSupportedError(
+                "enso_index metric requires LatLonOperations."
+            )
+        nino34_region = LatLonRegion(
+            lat_bounds=NINO34_LAT,
+            lon_bounds=NINO34_LON,
+            lat=ctx.horizontal_coordinates.lat,
+            lon=ctx.horizontal_coordinates.lon,
+        )
+        return MetricBuildResult(
+            aggregator=PairedRegionalIndexAggregator(
+                target_aggregator=RegionalIndexAggregator(
+                    regional_weights=nino34_region.regional_weights,
+                    regional_mean=ctx.ops.regional_area_weighted_mean,
+                ),
+                prediction_aggregator=RegionalIndexAggregator(
+                    regional_weights=nino34_region.regional_weights,
+                    regional_mean=ctx.ops.regional_area_weighted_mean,
+                ),
+            )
+        )

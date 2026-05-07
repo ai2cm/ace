@@ -1,16 +1,19 @@
 import dataclasses
 from collections.abc import Mapping
+from typing import Literal
 
 import numpy as np
 import torch
 import xarray as xr
 
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import WandB
 
-from .data import InferenceBatchData
+from .build_context import MetricBuildContext, MetricNotSupportedError, maybe_filter
+from .data import InferenceBatchData, MetricBuildResult, SubAggregator
 
 wandb = WandB.get_instance()
 
@@ -516,3 +519,24 @@ def _make_video(
         fps=4,
         format="gif",
     )
+
+
+@dataclasses.dataclass
+class VideoMetricConfig:
+    type: Literal["video"] = "video"
+    variables: list[str] | None = None
+    name: str = "video"
+    enable_extended_videos: bool = False
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        if not isinstance(ctx.horizontal_coordinates, LatLonCoordinates):
+            raise MetricNotSupportedError("Video metric requires LatLonCoordinates.")
+        agg: SubAggregator = VideoAggregator(
+            n_timesteps=ctx.n_timesteps,
+            enable_extended_videos=self.enable_extended_videos,
+            variable_metadata=ctx.variable_metadata,
+        )
+        return MetricBuildResult(aggregator=maybe_filter(agg, self.variables))
