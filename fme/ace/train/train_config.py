@@ -275,7 +275,7 @@ class TrainConfig:
     def _validate_weighted_inference_epochs(self):
         epoch_sets = self.get_inference_epoch_sets()
         weighted_epoch_set: set[int] | None = None
-        for entry, epoch_set in zip(self.inference, epoch_sets):
+        for entry, epoch_set in zip(self.inference_list, epoch_sets):
             if entry.weight > 0:
                 if weighted_epoch_set is None:
                     weighted_epoch_set = epoch_set
