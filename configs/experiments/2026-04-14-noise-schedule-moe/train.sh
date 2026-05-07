@@ -39,7 +39,7 @@ gantry run \
     --weka climate-default:/climate-default \
     --gpus $N_GPUS \
     --shared-memory 400GiB \
-    --budget ai2/climate \
+    --budget ai2/atec-climate \
     --no-conda \
     --install "pip install --no-deps ." \
     --allow-dirty \
