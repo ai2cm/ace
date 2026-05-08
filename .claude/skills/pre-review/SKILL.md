@@ -23,4 +23,4 @@ Communicate with the user about whether:
  - The PR structure is acceptable, but there are specific issues that should be fixed before review.
  - The PR is in good shape, perhaps you have some comments to make on the PR or updates to its title/description but the code is ready for the reviewer.
 
-When leaving comments on a PR, always start your comment with "Claude: ".
+When leaving comments on a PR, always start your comment with "Pre-review agent: ".
