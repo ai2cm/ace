@@ -1,6 +1,6 @@
 ---
 name: pre-review
-description: Prepare a PR for review by a team member. Use when the user wants to get a PR ready for review, make a PR easier to review, do a pre-review pass, or clean up a PR before requesting review. Also use when the user mentions preparing changes for a teammate to look at, or wants help making their branch review-ready.
+description: Prepare a PR for review by a team member. Use when the user asks you to perform a pre-review.
 ---
 
 A PR (corresponding to the current checked-out branch, or one the user has told you) is ready for review.
