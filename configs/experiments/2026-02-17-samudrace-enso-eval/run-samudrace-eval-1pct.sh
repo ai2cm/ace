@@ -59,6 +59,6 @@ for year in $(seq 244 254); do
     year_str=$(printf "%04d" "$year")
 
     run_eval "./configs/evaluator-config-1pct-out-of-sample-samudrace-yr${year_str}.yaml" \
-             "${base_name}-fto_stochastic-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_cbj61w53-rs0-out-of-sample-yr${year_str}" \
-             "01KN804ZNJX9SEAMZEPF0T50NB"
+             "${base_name}-fto-1pctCO2_0256to0350-OHCBudget-condSFNO_w_EC-d0zgdwek_mb4prsz7-rs0-out-of-sample-yr${year_str}" \
+             "01KG2T2DR3R98570HJPSKRF8T3"
 done
