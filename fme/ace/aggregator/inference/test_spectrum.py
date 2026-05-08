@@ -6,6 +6,7 @@ import torch_harmonics
 import xarray as xr
 
 import fme
+from fme.ace.aggregator.inference.data import InferenceBatchData, make_dummy_time
 from fme.ace.aggregator.inference.spectrum import (
     PairedSphericalPowerSpectrumAggregator,
     SphericalPowerSpectrumAggregator,
@@ -32,8 +33,26 @@ def test_spherical_power_spectrum_aggregator(report_plot: bool):
     agg = SphericalPowerSpectrumAggregator(gridded_operations, report_plot=report_plot)
     data = {"a": torch.randn(2, 2, nlat, nlon, device=fme.get_device())}
     data2 = {"a": torch.randn(2, 3, nlat, nlon, device=fme.get_device())}
-    agg.record_batch(data)
-    agg.record_batch(data2)
+    agg.record_batch(
+        InferenceBatchData(
+            prediction=data,
+            prediction_norm={},
+            target=None,
+            target_norm=None,
+            time=make_dummy_time(2, 2),
+            i_time_start=0,
+        )
+    )
+    agg.record_batch(
+        InferenceBatchData(
+            prediction=data2,
+            prediction_norm={},
+            target=None,
+            target_norm=None,
+            time=make_dummy_time(2, 3),
+            i_time_start=0,
+        )
+    )
     result = agg.get_mean()
     assert "a" in result
     assert result["a"].shape == (nlat,)
@@ -59,7 +78,16 @@ def test_spherical_power_spectrum_aggregator_get_dataset():
         gridded_operations, report_plot=False, variable_metadata=metadata
     )
     data = {"a": torch.randn(2, 3, nlat, nlon, device=DEVICE)}
-    agg.record_batch(data)
+    agg.record_batch(
+        InferenceBatchData(
+            prediction=data,
+            prediction_norm={},
+            target=None,
+            target_norm=None,
+            time=make_dummy_time(2, 3),
+            i_time_start=0,
+        )
+    )
     result = agg.get_dataset()
     sht = torch_harmonics.RealSHT(nlat, nlon, grid=grid).to(DEVICE)
     expected_values = torch.mean(spherical_power_spectrum(data["a"], sht), dim=(0, 1))
@@ -85,7 +113,16 @@ def test_paired_spherical_power_spectrum_aggregator_get_dataset():
     agg = PairedSphericalPowerSpectrumAggregator(gridded_operations, report_plot=False)
     gen_data = {"a": torch.randn(2, 3, nlat, nlon, device=DEVICE)}
     target_data = {"a": torch.randn(2, 3, nlat, nlon, device=DEVICE)}
-    agg.record_batch(target_data=target_data, gen_data=gen_data)
+    agg.record_batch(
+        InferenceBatchData(
+            prediction=gen_data,
+            prediction_norm={},
+            target=target_data,
+            target_norm={},
+            time=make_dummy_time(2, 3),
+            i_time_start=0,
+        )
+    )
     result = agg.get_dataset()
     sht = torch_harmonics.RealSHT(nlat, nlon, grid=grid).to(DEVICE)
     expected_gen = torch.mean(spherical_power_spectrum(gen_data["a"], sht), dim=(0, 1))
@@ -128,7 +165,16 @@ def test_paired_spherical_power_spectrum_aggregator(report_plot: bool):
         gridded_operations, report_plot=report_plot
     )
     data = {"a": torch.randn(2, 3, nlat, nlon, device=fme.get_device())}
-    agg.record_batch(data, data, None, None)
+    agg.record_batch(
+        InferenceBatchData(
+            prediction=data,
+            prediction_norm={},
+            target=data,
+            target_norm={},
+            time=make_dummy_time(2, 3),
+            i_time_start=0,
+        )
+    )
     result = agg.get_logs("spectrum")
     if report_plot:
         assert isinstance(result["spectrum/a"], plt.Figure)

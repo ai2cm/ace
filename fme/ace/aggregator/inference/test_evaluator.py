@@ -7,7 +7,13 @@ import pytest
 import torch
 import xarray as xr
 
-from fme.ace.aggregator.inference import InferenceEvaluatorAggregator, StepMeanEntry
+from fme.ace.aggregator.inference import (
+    InferenceEvaluatorAggregatorConfig,
+    MeanMetricConfig,
+    StepMeanEntry,
+    StepMeanMetricConfig,
+    TypedMetricInferenceEvaluatorAggregatorConfig,
+)
 from fme.ace.data_loading.batch_data import BatchData, PairedData
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
@@ -91,16 +97,17 @@ def test_logs_regression():
     ds_info = get_ds_info(nx, ny)
     initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
 
-    agg = InferenceEvaluatorAggregator(
-        dataset_info=ds_info,
-        n_ic_steps=1,
-        n_forward_steps=n_time - 1,
-        initial_time=initial_time,
+    agg = InferenceEvaluatorAggregatorConfig(
         log_step_means=[
             StepMeanEntry(step=20),
             StepMeanEntry(step=4, name="one_day_mean"),
         ],
         log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
+    ).build(
+        dataset_info=ds_info,
+        n_ic_steps=1,
+        n_forward_steps=n_time - 1,
+        initial_time=initial_time,
         normalize=lambda x: dict(x),
         save_diagnostics=False,
     )
@@ -186,17 +193,18 @@ def test_inference_logs_labels_exist():
     ny = 45
     ds_info = get_ds_info(nx, ny)
     initial_time = (get_zero_time(shape=[n_sample, 0], dims=["sample", "time"]),)
-    agg = InferenceEvaluatorAggregator(
-        dataset_info=ds_info,
-        n_ic_steps=1,
-        n_forward_steps=n_time - 1,
-        initial_time=initial_time,
+    agg = InferenceEvaluatorAggregatorConfig(
         log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
         log_step_means=[
             StepMeanEntry(step=20),
             StepMeanEntry(step=4, name="one_day_mean"),
         ],
         log_video=True,
+    ).build(
+        dataset_info=ds_info,
+        n_ic_steps=1,
+        n_forward_steps=n_time - 1,
+        initial_time=initial_time,
         normalize=lambda x: dict(x),
         save_diagnostics=False,
     )
@@ -244,12 +252,13 @@ def test_inference_logs_length(window_len: int, n_windows: int):
     ds_info = get_ds_info(nx, ny)
     initial_time = (get_zero_time(shape=[2, 0], dims=["sample", "time"]),)
     n_forward_steps = window_len * n_windows - 1
-    agg = InferenceEvaluatorAggregator(
-        dataset_info=ds_info,
+    agg = InferenceEvaluatorAggregatorConfig(
         log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
+        log_step_means=[] if n_forward_steps < 20 else [StepMeanEntry(step=20)],
+    ).build(
+        dataset_info=ds_info,
         n_ic_steps=1,
         n_forward_steps=n_forward_steps,
-        log_step_means=[] if n_forward_steps < 20 else [StepMeanEntry(step=20)],
         initial_time=initial_time,
         normalize=lambda x: dict(x),
         save_diagnostics=False,
@@ -282,17 +291,18 @@ def test_flush_diagnostics(tmpdir):
     nx, ny, n_sample, n_time = 2, 2, 10, 21
     ds_info = get_ds_info(nx, ny)
     initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
-    agg = InferenceEvaluatorAggregator(
+    agg = InferenceEvaluatorAggregatorConfig(
+        log_step_means=[StepMeanEntry(step=20)],
+        log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
+        log_video=True,
+        log_histograms=True,
+    ).build(
         dataset_info=ds_info,
         n_ic_steps=1,
         n_forward_steps=n_time - 1,
         initial_time=initial_time,
         normalize=lambda x: dict(x),
         output_dir=tmpdir,
-        log_step_means=[StepMeanEntry(step=20)],
-        log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
-        log_video=True,
-        log_histograms=True,
     )
     target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
@@ -324,14 +334,147 @@ def test_agg_raises_without_output_dir():
     with pytest.raises(
         ValueError, match="Output directory must be set to save diagnostics"
     ):
-        InferenceEvaluatorAggregator(
-            dataset_info=ds_info,
+        InferenceEvaluatorAggregatorConfig(
             log_step_means=[],
+            log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
+        ).build(
+            dataset_info=ds_info,
             n_ic_steps=1,
             n_forward_steps=1,
             initial_time=get_zero_time(shape=[1, 0], dims=["sample", "time"]),
             normalize=lambda x: dict(x),
-            log_zonal_mean_images=LOG_ZONAL_MEAN_IMAGES,
             save_diagnostics=True,
             output_dir=None,
         )
+
+
+class TestTypedMetricInferenceEvaluatorAggregatorConfig:
+    def test_duplicate_metric_names_rejected(self):
+        with pytest.raises(ValueError, match="Duplicate metric names"):
+            TypedMetricInferenceEvaluatorAggregatorConfig(
+                metrics=[
+                    MeanMetricConfig(target="denorm"),
+                    MeanMetricConfig(target="denorm"),
+                ]
+            )
+
+    def test_duplicate_names_allowed_with_explicit_name(self):
+        TypedMetricInferenceEvaluatorAggregatorConfig(
+            metrics=[
+                MeanMetricConfig(target="denorm"),
+                MeanMetricConfig(target="norm", name="mean_custom"),
+            ]
+        )
+
+    def test_default_metrics_build(self):
+        n_sample, n_time = 10, 22
+        nx, ny = 90, 45
+        ds_info = get_ds_info(nx, ny)
+        initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
+        agg = TypedMetricInferenceEvaluatorAggregatorConfig().build(
+            dataset_info=ds_info,
+            n_ic_steps=1,
+            n_forward_steps=n_time - 1,
+            initial_time=initial_time,
+            normalize=lambda x: dict(x),
+            save_diagnostics=False,
+        )
+        logs = agg.record_batch(
+            data=PairedData.new_on_device(
+                prediction={
+                    "a": torch.randn(n_sample, n_time, ny, nx, device=get_device())
+                },
+                reference={
+                    "a": torch.randn(n_sample, n_time, ny, nx, device=get_device())
+                },
+                time=xr.DataArray(
+                    np.zeros((n_sample, n_time)), dims=["sample", "time"]
+                ),
+                labels=None,
+            ),
+        )
+        assert len(logs) == n_time
+        assert "mean/weighted_rmse/a" in logs[0]
+
+    def test_explicit_metrics_build(self):
+        n_sample, n_time = 10, 22
+        nx, ny = 90, 45
+        ds_info = get_ds_info(nx, ny)
+        initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
+        agg = TypedMetricInferenceEvaluatorAggregatorConfig(
+            metrics=[
+                MeanMetricConfig(target="denorm"),
+                StepMeanMetricConfig(step=20, target="denorm"),
+            ]
+        ).build(
+            dataset_info=ds_info,
+            n_ic_steps=1,
+            n_forward_steps=n_time - 1,
+            initial_time=initial_time,
+            normalize=lambda x: dict(x),
+            save_diagnostics=False,
+        )
+        logs = agg.record_batch(
+            data=PairedData.new_on_device(
+                prediction={
+                    "a": torch.randn(n_sample, n_time, ny, nx, device=get_device())
+                },
+                reference={
+                    "a": torch.randn(n_sample, n_time, ny, nx, device=get_device())
+                },
+                time=xr.DataArray(
+                    np.zeros((n_sample, n_time)), dims=["sample", "time"]
+                ),
+                labels=None,
+            ),
+        )
+        assert len(logs) == n_time
+        assert "mean/weighted_rmse/a" in logs[0]
+        summary = agg.get_summary_logs()
+        assert "mean_step_20/weighted_rmse/a" in summary
+
+    def test_enable_time_series_false(self):
+        n_sample, n_time = 10, 22
+        nx, ny = 4, 4
+        ds_info = get_ds_info(nx, ny)
+        initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
+        agg = TypedMetricInferenceEvaluatorAggregatorConfig().build(
+            dataset_info=ds_info,
+            n_ic_steps=1,
+            n_forward_steps=n_time - 1,
+            initial_time=initial_time,
+            normalize=lambda x: dict(x),
+            save_diagnostics=False,
+            enable_time_series=False,
+        )
+        logs = agg.record_batch(
+            data=PairedData.new_on_device(
+                prediction={
+                    "a": torch.randn(n_sample, n_time, ny, nx, device=get_device())
+                },
+                reference={
+                    "a": torch.randn(n_sample, n_time, ny, nx, device=get_device())
+                },
+                time=xr.DataArray(
+                    np.zeros((n_sample, n_time)), dims=["sample", "time"]
+                ),
+                labels=None,
+            ),
+        )
+        for log in logs:
+            assert "mean/weighted_rmse/a" not in log
+
+    def test_raises_without_output_dir(self):
+        ds_info = get_ds_info(nx=2, ny=2)
+        with pytest.raises(
+            ValueError, match="Output directory must be set to save diagnostics"
+        ):
+            TypedMetricInferenceEvaluatorAggregatorConfig().build(
+                dataset_info=ds_info,
+                n_ic_steps=1,
+                n_forward_steps=1,
+                initial_time=get_zero_time(shape=[1, 0], dims=["sample", "time"]),
+                normalize=lambda x: dict(x),
+                save_diagnostics=True,
+                output_dir=None,
+            )
