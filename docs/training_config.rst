@@ -61,7 +61,7 @@ In that example dataset, the  ``.nc`` files would correspond to files like ``tra
    assert config.train_loader.dataset.concat[1].data_path == "traindata/ic_0002"
    assert config.train_loader.dataset.concat[9].data_path == "traindata/ic_0010"
    assert len(config.train_loader.dataset.concat) == 10
-   assert config.inference.loader.dataset.data_path == "validation"
+   assert config.inference[0].loader.dataset.data_path == "validation"
    print("Loaded successfully")
 
 .. testoutput::

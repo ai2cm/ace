@@ -14,7 +14,8 @@ from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Table, WandB
 
-from .data import InferenceBatchData
+from .build_context import MetricBuildContext, maybe_filter
+from .data import InferenceBatchData, MetricBuildResult
 
 
 @dataclasses.dataclass
@@ -508,3 +509,29 @@ class SingleTargetMeanAggregator:
         n_forecast_steps = len(next(iter(data_vars.values())))
         coords = {"forecast_step": np.arange(n_forecast_steps)}
         return xr.Dataset(data_vars=data_vars, coords=coords)
+
+
+@dataclasses.dataclass
+class MeanMetricConfig:
+    type: Literal["mean"] = "mean"
+    variables: list[str] | None = None
+    name: str | None = None
+    target: Literal["denorm", "norm"] = "denorm"
+
+    def __post_init__(self):
+        if self.name is None:
+            self.name = "mean_norm" if self.target == "norm" else "mean"
+
+    def get_name(self) -> str:
+        return self.name  # type: ignore[return-value]
+
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        agg = MeanAggregator(
+            ctx.ops,
+            target=self.target,
+            n_timesteps=ctx.n_timesteps,
+            variable_metadata=ctx.variable_metadata,
+        )
+        return MetricBuildResult(
+            aggregator=maybe_filter(agg, self.variables), time_series=agg
+        )
