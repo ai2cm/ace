@@ -433,8 +433,8 @@ def test_coupled_stepper_train_loss_sample_n_steps_delegates():
         ({}, False),
         ({"n_steps": 0}, True),
         ({"weight": 0.0}, True),
-        ({"n_steps": 5.0}, False),
-        ({"n_steps": 0.0}, True),
+        ({"n_steps": 5}, False),
+        ({"n_steps": 0}, True),
     ],
 )
 def test_loss_contributions_config_is_null(config_kwargs, expected_is_null):
