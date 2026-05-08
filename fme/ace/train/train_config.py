@@ -1,4 +1,5 @@
 import dataclasses
+import functools
 import os
 from collections.abc import Mapping
 from typing import Any
@@ -211,13 +212,14 @@ class TrainConfig:
     save_best_inference_epoch_checkpoints: bool = False
     lr_tuning: LRTuningConfig | None = None
     resume_results: ResumeResultsConfig | None = None
-    stepper_config: StepperConfig = dataclasses.field(init=False)
+
+    @functools.cached_property
+    def stepper_config(self) -> StepperConfig:
+        if isinstance(self.stepper, CheckpointStepperConfig):
+            return self.stepper.to_stepper_config()
+        return self.stepper
 
     def __post_init__(self):
-        if isinstance(self.stepper, CheckpointStepperConfig):
-            self.stepper_config = self.stepper.to_stepper_config()
-        else:
-            self.stepper_config = self.stepper
         if self.train_loader.using_labels != self.validation_loader.using_labels:
             raise ValueError(
                 "train_loader and validation_loader must both use labels or both not "

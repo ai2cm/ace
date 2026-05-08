@@ -14,6 +14,7 @@ from fme.core.models.conditional_sfno.sfnonet import (
     SFNONetConfig,
     get_lat_lon_sfnonet,
 )
+from fme.core.rand import randn
 
 
 def isotropic_noise(
@@ -25,8 +26,8 @@ def isotropic_noise(
 ) -> torch.Tensor:
     # --- draw independent N(0,1) parts --------------------------------------
     coeff_shape = (*leading_shape, lmax, mmax)
-    real = torch.randn(coeff_shape, dtype=torch.float32, device=device)
-    imag = torch.randn(coeff_shape, dtype=torch.float32, device=device)
+    real = randn(coeff_shape, dtype=torch.float32, device=device)
+    imag = randn(coeff_shape, dtype=torch.float32, device=device)
     imag[..., :, 0] = 0.0  # m = 0 ⇒ purely real
 
     # m > 0: make Re and Im each N(0,½)  → |a_{ℓ m}|² has variance 1
@@ -119,8 +120,8 @@ class NoiseConditionedModel(torch.nn.Module):
                 device=x.device,
             )
         else:
-            noise = torch.randn(
-                [x.shape[0], self.embed_dim, *x.shape[-2:]],
+            noise = randn(
+                torch.Size([x.shape[0], self.embed_dim, *x.shape[-2:]]),
                 device=x.device,
                 dtype=x.dtype,
             )
