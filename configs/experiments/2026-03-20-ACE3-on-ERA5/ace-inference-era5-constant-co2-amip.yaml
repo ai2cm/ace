@@ -19,7 +19,7 @@ forcing_loader:
     engine: zarr
     overwrite:
       constant:
-        global_mean_co2: 336.5
+        global_mean_co2: 0.0003365
   num_data_workers: 8
 logging:
   project: ace
