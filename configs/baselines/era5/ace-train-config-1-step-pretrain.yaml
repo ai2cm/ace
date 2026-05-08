@@ -243,5 +243,5 @@ stepper:
       - h500
       - total_frozen_precipitation_rate
       - PRMSL
-      - eastward_surface_wind_stress
-      - northward_surface_wind_stress
+      - eastward_surface_stress
+      - northward_surface_stress
