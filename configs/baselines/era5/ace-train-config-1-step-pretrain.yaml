@@ -24,7 +24,7 @@ inference:
       data_path: /climate-default/
       file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
       engine: zarr
-    num_data_workers: 16
+    num_data_workers: 8
   aggregator:
     log_histograms: true
     time_mean_reference_data: /statsdata/time-mean.nc
@@ -35,9 +35,9 @@ logging:
   project: ace
   entity: ai2cm
 train_loader:
-  batch_size: 16
-  num_data_workers: 16
-  prefetch_factor: 4
+  batch_size: 8
+  num_data_workers: 8
+  prefetch_factor: 2
   dataset:
     concat:
     - data_path: /climate-default/
@@ -57,9 +57,9 @@ train_loader:
       subset:
         start_time: '2021-01-01'
 validation_loader:
-  batch_size: 128
-  num_data_workers: 16
-  prefetch_factor: 4
+  batch_size: 64
+  num_data_workers: 8
+  prefetch_factor: 2
   dataset:
     data_path: /climate-default/
     file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
@@ -88,7 +88,7 @@ stepper_training:
       specific_total_water_0: 0.5
       specific_total_water_1: 0.25
       specific_total_water_2: 0.5
-      PRATEsfc: 0.5
+      PRATEsfc: 2.0
       h500: 10
       TMP850: 5
       Q2m: 0.5
@@ -158,10 +158,6 @@ stepper:
       - global_mean_co2
       - PRESsfc
       - surface_temperature
-      - TMP2m
-      - Q2m
-      - UGRD10m
-      - VGRD10m
       - air_temperature_0
       - air_temperature_1
       - air_temperature_2
@@ -197,10 +193,6 @@ stepper:
       out_names:
       - PRESsfc
       - surface_temperature
-      - TMP2m
-      - Q2m
-      - UGRD10m
-      - VGRD10m
       - air_temperature_0
       - air_temperature_1
       - air_temperature_2
@@ -233,6 +225,10 @@ stepper:
       - northward_wind_5
       - northward_wind_6
       - northward_wind_7
+      - TMP2m
+      - Q2m
+      - UGRD10m
+      - VGRD10m
       - LHTFLsfc
       - SHTFLsfc
       - PRATEsfc
@@ -247,3 +243,5 @@ stepper:
       - h500
       - total_frozen_precipitation_rate
       - PRMSL
+      - eastward_surface_wind_stress
+      - northward_surface_wind_stress
