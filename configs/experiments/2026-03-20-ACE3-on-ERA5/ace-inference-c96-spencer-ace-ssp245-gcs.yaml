@@ -1,0 +1,22 @@
+checkpoint_path: /ckpt.tar
+allow_incompatible_dataset: true
+data_writer:
+  save_monthly_files: true
+  save_prediction_files: false
+experiment_dir: /results
+forward_steps_in_memory: 40
+n_forward_steps: 121200 #2099 - 2016
+initial_condition:
+  path: /climate-default/2026-01-28-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/ic_0001.zarr
+  engine: zarr
+  start_indices:
+    times:
+      - '2016-01-01T00:00:00'
+forcing_loader:
+  dataset:
+    data_path: /climate-default
+    file_pattern: 2026-04-07-cm4-ssp245-ACE-forcing-dataset.zarr
+    engine: zarr
+  num_data_workers: 8
+logging:
+  project: ace

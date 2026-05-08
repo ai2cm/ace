@@ -1,0 +1,27 @@
+checkpoint_path: /ckpt.tar
+allow_incompatible_dataset: true
+data_writer:
+  save_monthly_files: false
+  save_prediction_files: false
+experiment_dir: /results
+forward_steps_in_memory: 40
+n_forward_steps: 1460
+initial_condition:
+  path: /climate-default/2026-03-19-era5-1deg-8layer-1940-2025.zarr
+  engine: zarr
+  start_indices:
+    times:
+      - '1979-01-01T00:00:00'
+forcing_loader:
+  dataset:
+    data_path: /climate-default/
+    file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+    engine: zarr
+  num_data_workers: 8
+  perturbations:
+    sst:
+      - type: constant
+        config:
+          amplitude: 0.0
+logging:
+  project: ace
