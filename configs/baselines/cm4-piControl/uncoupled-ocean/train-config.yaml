@@ -5,33 +5,33 @@ ema:
   decay: 0.999
 max_epochs: 150
 inference:
-  n_forward_steps: 1440
-  forward_steps_in_memory: 40
-  loader:
-    start_indices:
-      times:
-      - '0151-01-06T00:00:00'
-      - '0171-01-06T00:00:00'
-      - '0191-01-06T00:00:00'
-      - '0211-01-06T00:00:00'
-      - '0231-01-06T00:00:00'
-      - '0251-01-06T00:00:00'
-      - '0271-01-06T00:00:00'
-      - '0291-01-06T00:00:00'
-    dataset:
-      merge:
-      - data_path: /climate-default
-        file_pattern: 2025-06-03-cm4-piControl-200yr-coupled-ocean.zarr
-        engine: zarr
-      - data_path: /climate-default
-        file_pattern: 2025-04-16-cm4-piControl-ocean-200yr-dataset.zarr
-        engine: zarr
-      - data_path: /climate-default
-        file_pattern: 2025-01-27-cm4-piControl-atmosphere-5daily-sfc-only/zarr_v3/data.zarr
-        engine: zarr
-    num_data_workers: 8
-  aggregator:
-    log_histograms: false
+  - n_forward_steps: 1440
+    forward_steps_in_memory: 40
+    loader:
+      start_indices:
+        times:
+        - '0151-01-06T00:00:00'
+        - '0171-01-06T00:00:00'
+        - '0191-01-06T00:00:00'
+        - '0211-01-06T00:00:00'
+        - '0231-01-06T00:00:00'
+        - '0251-01-06T00:00:00'
+        - '0271-01-06T00:00:00'
+        - '0291-01-06T00:00:00'
+      dataset:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2025-06-03-cm4-piControl-200yr-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2025-04-16-cm4-piControl-ocean-200yr-dataset.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2025-01-27-cm4-piControl-atmosphere-5daily-sfc-only/zarr_v3/data.zarr
+          engine: zarr
+      num_data_workers: 8
+    aggregator:
+      log_histograms: false
 logging:
   log_to_screen: true
   log_to_wandb: true
