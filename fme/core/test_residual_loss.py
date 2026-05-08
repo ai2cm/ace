@@ -237,3 +237,90 @@ def test_loss_propagates_gradients():
     grad = pred1["a"].grad
     assert grad is not None
     assert torch.all(grad != 0)
+
+
+def test_loss_detaches_earlier_endpoint():
+    """Earlier endpoint never receives a gradient, even with requires_grad=True.
+
+    The residual term constrains the later state's deviation from the earlier
+    endpoint treated as a fixed reference, so backward should propagate
+    gradients only into the larger-step prediction.
+    """
+    out_names = ["a"]
+    loss = _build_loss(out_names, pairs=[ResidualPair(step_a=1, step_b=0)])
+    n_sample, h, w = 2, 3, 3
+    ic = {"a": torch.zeros(n_sample, 1, h, w, device=get_device(), requires_grad=True)}
+    pred1 = {
+        "a": torch.ones(n_sample, 1, h, w, device=get_device(), requires_grad=True)
+    }
+    target1 = {"a": 2 * torch.ones(n_sample, 1, h, w, device=get_device())}
+
+    total, _ = loss({0: ic, 1: pred1}, {0: ic, 1: target1})
+    total.backward()
+    assert pred1["a"].grad is not None
+    assert torch.all(pred1["a"].grad != 0)
+    assert ic["a"].grad is None
+
+
+def test_loss_detaches_earlier_endpoint_when_step_a_lt_step_b():
+    """When step_a < step_b, step_a is the earlier endpoint and is detached."""
+    out_names = ["a"]
+    loss = _build_loss(out_names, pairs=[ResidualPair(step_a=0, step_b=1)])
+    n_sample, h, w = 2, 3, 3
+    pred0 = {
+        "a": torch.zeros(n_sample, 1, h, w, device=get_device(), requires_grad=True)
+    }
+    pred1 = {
+        "a": torch.ones(n_sample, 1, h, w, device=get_device(), requires_grad=True)
+    }
+    tgt0 = {"a": torch.zeros(n_sample, 1, h, w, device=get_device())}
+    tgt1 = {"a": 2 * torch.ones(n_sample, 1, h, w, device=get_device())}
+
+    total, _ = loss({0: pred0, 1: pred1}, {0: tgt0, 1: tgt1})
+    total.backward()
+    assert pred1["a"].grad is not None
+    assert torch.all(pred1["a"].grad != 0)
+    assert pred0["a"].grad is None
+
+
+def test_pairs_completing_at_filters_by_max_step():
+    out_names = ["a"]
+    loss = _build_loss(
+        out_names,
+        pairs=[ResidualPair(1, 0), ResidualPair(3, 1), ResidualPair(0, 3)],
+    )
+    assert [p.label for p in loss.pairs_completing_at(1)] == ["step_1_minus_0"]
+    assert {p.label for p in loss.pairs_completing_at(3)} == {
+        "step_3_minus_1",
+        "step_0_minus_3",
+    }
+    assert loss.pairs_completing_at(2) == []
+
+
+def test_pairs_completing_at_respects_active_filtering():
+    """Pairs filtered out by update_max_n_forward_steps must not appear."""
+    out_names = ["a"]
+    loss = _build_loss(
+        out_names,
+        pairs=[ResidualPair(1, 0), ResidualPair(3, 1)],
+    )
+    loss.update_max_n_forward_steps(1)
+    assert [p.label for p in loss.pairs_completing_at(1)] == ["step_1_minus_0"]
+    assert loss.pairs_completing_at(3) == []
+
+
+def test_compute_pair_loss_matches_call_for_single_pair():
+    """compute_pair_loss is the per-pair primitive used inside __call__."""
+    torch.manual_seed(0)
+    out_names = ["a"]
+    pair = ResidualPair(step_a=1, step_b=0)
+    loss = _build_loss(out_names, pairs=[pair])
+
+    n_sample, h, w = 2, 3, 3
+    ic = {"a": torch.randn(n_sample, 1, h, w, device=get_device())}
+    pred1 = {"a": torch.randn(n_sample, 1, h, w, device=get_device())}
+    target1 = {"a": torch.randn(n_sample, 1, h, w, device=get_device())}
+
+    via_call, _ = loss({0: ic, 1: pred1}, {0: ic, 1: target1})
+    via_pair = loss.compute_pair_loss(pair, {0: ic, 1: pred1}, {0: ic, 1: target1})
+    torch.testing.assert_close(via_call, via_pair)

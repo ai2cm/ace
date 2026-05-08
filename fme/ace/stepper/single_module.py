@@ -1754,12 +1754,25 @@ class TrainStepper(
         # step=0 reserved for the IC), while the loop variable below is
         # 0-indexed. ``residual_step_index = step + 1`` translates between
         # them.
+        #
+        # Each active pair's residual contribution is folded into the loss
+        # passed to ``optimization.accumulate_loss`` at the step where the
+        # pair becomes computable (``residual_step_index == pair.max_step``).
+        # Combined with the earlier-endpoint detach inside
+        # :class:`SnapshotResidualLoss`, this keeps the residual backward
+        # confined to the still-live graph at ``max_step`` and is therefore
+        # safe to use under ``use_gradient_accumulation=True``.
         needed_for_residual: set[int] = set()
         predictions_for_residual: dict[int, TensorMapping] = {}
         targets_for_residual: dict[int, TensorMapping] = {}
+        remaining_uses: dict[int, int] = {}
+        residual_total_detached: torch.Tensor | None = None
         if self._residual_loss_obj is not None:
             self._residual_loss_obj.update_max_n_forward_steps(n_forward_steps)
             needed_for_residual = self._residual_loss_obj.needed_steps()
+            for pair in self._residual_loss_obj.active_pairs:
+                for s in (pair.step_a, pair.step_b):
+                    remaining_uses[s] = remaining_uses.get(s, 0) + 1
             if 0 in needed_for_residual:
                 ic_data = input_data.as_batch_data().data
                 ic_dict = add_ensemble_dim(
@@ -1806,22 +1819,53 @@ class TrainStepper(
                 if retain_for_residual:
                     predictions_for_residual[residual_step_index] = gen_step
                     targets_for_residual[residual_step_index] = target_step
-            if optimize_step:
-                optimization.accumulate_loss(step_total_loss)
 
-        if (
-            self._residual_loss_obj is not None
-            and len(self._residual_loss_obj.active_pairs) > 0
-        ):
-            residual_total, per_pair = self._residual_loss_obj(
-                predictions_for_residual,
-                targets_for_residual,
-            )
-            weighted = self._residual_loss_obj.weight * residual_total
-            optimization.accumulate_loss(weighted)
-            metrics["loss_residual_total"] = weighted.detach()
-            for key, value in per_pair.items():
-                metrics[key] = value.detach()
+            weighted_residual: torch.Tensor | None = None
+            if self._residual_loss_obj is not None:
+                completing = self._residual_loss_obj.pairs_completing_at(
+                    residual_step_index
+                )
+                for pair in completing:
+                    pair_loss = self._residual_loss_obj.compute_pair_loss(
+                        pair, predictions_for_residual, targets_for_residual
+                    )
+                    weighted_pair = self._residual_loss_obj.weight * pair_loss
+                    metrics[f"residual_loss_{pair.label}"] = weighted_pair.detach()
+                    residual_total_detached = (
+                        weighted_pair.detach()
+                        if residual_total_detached is None
+                        else residual_total_detached + weighted_pair.detach()
+                    )
+                    weighted_residual = (
+                        weighted_pair
+                        if weighted_residual is None
+                        else weighted_residual + weighted_pair
+                    )
+                # Drop stored predictions/targets that are no longer needed
+                # by any future pair, to keep the autograd graph footprint
+                # close to the gradient-accumulation ideal of one step at a
+                # time.
+                for pair in completing:
+                    for s in (pair.step_a, pair.step_b):
+                        remaining_uses[s] -= 1
+                        if remaining_uses[s] == 0:
+                            predictions_for_residual.pop(s, None)
+                            targets_for_residual.pop(s, None)
+
+            if optimize_step and weighted_residual is not None:
+                optimization.accumulate_loss(step_total_loss + weighted_residual)
+            elif optimize_step:
+                optimization.accumulate_loss(step_total_loss)
+            elif weighted_residual is not None:
+                # ``optimize_last_step_only=True`` and a pair completes at an
+                # intermediate step: still backward the residual contribution
+                # at this step. The earlier endpoint of every pair is already
+                # detached inside SnapshotResidualLoss, so this backward is
+                # safe and bounded to ``max_step``'s subgraph.
+                optimization.accumulate_loss(weighted_residual)
+
+        if residual_total_detached is not None:
+            metrics["loss_residual_total"] = residual_total_detached
         return output_list, per_channel_sum
 
     def update_training_history(self, training_job: TrainingJob) -> None:

@@ -200,6 +200,50 @@ class SnapshotResidualLoss:
             steps.add(pair.step_b)
         return steps
 
+    def pairs_completing_at(self, step: int) -> list[ResidualPair]:
+        """Active pairs whose ``max_step`` equals ``step``.
+
+        Used by callers that fold each pair's residual contribution into
+        the loss at the step where the pair becomes computable.
+        """
+        return [pair for pair in self._active_pairs if pair.max_step == step]
+
+    def compute_pair_loss(
+        self,
+        pair: ResidualPair,
+        predictions: Mapping[int, TensorMapping],
+        targets: Mapping[int, TensorMapping],
+    ) -> torch.Tensor:
+        """Compute a single pair's residual loss as a scalar tensor.
+
+        The earlier endpoint (the one with the smaller step index) is
+        ``.detach()``-ed on both the prediction and target sides before
+        forming the residual difference. This means the residual term
+        only propagates gradients through the later endpoint -- the
+        earlier endpoint is treated as a fixed reference. This semantic
+        is shared regardless of whether the caller uses gradient
+        accumulation; see :class:`SnapshotResidualLossConfig` for
+        background.
+
+        Args:
+            pair: The pair to evaluate. Must be an active pair.
+            predictions: Mapping from step index to a dict of predicted
+                tensors. Must contain ``pair.step_a`` and ``pair.step_b``.
+                Tensors should be denormalized; the inner
+                :class:`WeightedMappingLoss` applies normalization.
+            targets: Mapping from step index to a dict of target tensors.
+                Same key requirements as ``predictions``.
+
+        Returns:
+            The (unweighted) residual loss for this pair as a scalar
+            tensor; callers apply the configured :attr:`weight`.
+        """
+        self._validate_pair_inputs(pair, predictions, targets)
+        gen_residual = self._build_residual_dict(predictions, pair)
+        target_residual = self._build_residual_dict(targets, pair)
+        loss_output: LossOutput = self._loss(gen_residual, target_residual)
+        return loss_output.total()
+
     def __call__(
         self,
         predictions: Mapping[int, TensorMapping],
@@ -226,15 +270,14 @@ class SnapshotResidualLoss:
             If ``active_pairs`` is empty, ``total`` is a zero scalar tensor
             and ``per_pair`` is empty. The returned ``total`` does not
             include the configured ``weight`` multiplier; callers apply it.
+
+            The earlier endpoint of each pair is detached -- see
+            :meth:`compute_pair_loss` for the rationale.
         """
         per_pair: dict[str, torch.Tensor] = {}
         running_total: torch.Tensor | None = None
         for pair in self._active_pairs:
-            self._validate_pair_inputs(pair, predictions, targets)
-            gen_residual = self._build_residual_dict(predictions, pair)
-            target_residual = self._build_residual_dict(targets, pair)
-            loss_output: LossOutput = self._loss(gen_residual, target_residual)
-            scalar = loss_output.total()
+            scalar = self.compute_pair_loss(pair, predictions, targets)
             per_pair[f"residual_loss_{pair.label}"] = scalar
             running_total = scalar if running_total is None else running_total + scalar
         if running_total is None:
@@ -246,9 +289,24 @@ class SnapshotResidualLoss:
         step_to_data: Mapping[int, TensorMapping],
         pair: ResidualPair,
     ) -> dict[str, torch.Tensor]:
-        a = step_to_data[pair.step_a]
-        b = step_to_data[pair.step_b]
-        return {name: a[name] - b[name] for name in self._out_names}
+        if pair.step_a >= pair.step_b:
+            later, earlier = pair.step_a, pair.step_b
+        else:
+            later, earlier = pair.step_b, pair.step_a
+        late = step_to_data[later]
+        early = step_to_data[earlier]
+        # The earlier endpoint is detached so this residual term only
+        # propagates gradient through the later prediction. With gradient
+        # accumulation, the earlier endpoint's autograd graph has typically
+        # already been freed by its own per-step backward when this is
+        # invoked from the stepper; without gradient accumulation, the
+        # detach makes the residual a one-sided constraint by design.
+        if pair.step_a >= pair.step_b:
+            # Preserve the original sign convention: gen[step_a] - gen[step_b].
+            return {name: late[name] - early[name].detach() for name in self._out_names}
+        else:
+            # step_a is the earlier (detached) endpoint.
+            return {name: early[name].detach() - late[name] for name in self._out_names}
 
     def _validate_pair_inputs(
         self,

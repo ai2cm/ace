@@ -2469,9 +2469,10 @@ def test_train_on_batch_residual_loss_disabled_matches_baseline():
     assert "loss_residual_total" not in explicit_none.metrics
 
 
-def test_train_on_batch_residual_loss_emits_metrics_and_accumulates_one_extra_call():
-    """With residual_loss configured, residual metrics appear and one extra
-    accumulate_loss call is made per batch."""
+def test_train_on_batch_residual_loss_emits_metrics():
+    """With residual_loss configured, residual metrics appear; per-pair
+    contributions are folded into the per-step accumulate_loss call at
+    each pair's max_step rather than emitted in a separate call."""
     torch.manual_seed(0)
     n_steps = 3
     data: BatchData = get_data(["a", "b"], n_samples=4, n_time=n_steps + 1).data
@@ -2491,8 +2492,80 @@ def test_train_on_batch_residual_loss_emits_metrics_and_accumulates_one_extra_ca
     assert "loss_residual_total" in stepped.metrics
     assert "residual_loss_step_1_minus_0" in stepped.metrics
     assert "residual_loss_step_2_minus_1" in stepped.metrics
-    # n_steps per-step accumulate_loss calls + 1 residual accumulate_loss call
-    assert len(optimization.accumulate_loss.call_args_list) == n_steps + 1
+    # Residual contributions are folded in: one accumulate_loss call per step.
+    assert len(optimization.accumulate_loss.call_args_list) == n_steps
+
+
+def test_train_on_batch_residual_loss_runs_with_gradient_accumulation():
+    """Regression: residual loss must not double-backward through a
+    per-step graph that has already been freed by gradient accumulation.
+
+    This reproduces the failure mode where ``use_gradient_accumulation=True``
+    plus a configured residual pair raised
+    ``RuntimeError: Trying to backward through the graph a second time``
+    at the post-loop residual ``accumulate_loss`` call.
+    """
+    torch.manual_seed(0)
+    n_steps = 4
+
+    # Module with parameters whose forward retains saved tensors so that
+    # backward must traverse them; if a per-step backward freed those
+    # tensors and a later backward (residual) tried to traverse the same
+    # subgraph, autograd would raise. We use an elementwise scale + bias
+    # so the forward shape is unchanged.
+    class ScaleBias(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.scale = torch.nn.Parameter(torch.ones(()))
+            self.bias = torch.nn.Parameter(torch.zeros(()))
+
+        def forward(self, x):
+            return self.scale * x + self.bias
+
+    data: BatchData = get_data(["a", "b"], n_samples=2, n_time=n_steps + 1).data
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": ScaleBias()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means=get_scalar_data(["a", "b"], 0.0),
+                            stds=get_scalar_data(["a", "b"], 1.0),
+                        ),
+                    ),
+                )
+            ),
+        ),
+    )
+    stepper = _get_train_stepper(
+        config,
+        n_forward_steps=n_steps,
+        loss=StepLossConfig(type="MSE"),
+        residual_loss=SnapshotResidualLossConfig(
+            pairs=[ResidualPair(step_a=1, step_b=0)],
+            loss=StepLossConfig(type="MSE"),
+            weight=1.0,
+        ),
+    )
+    optimization = OptimizationConfig(
+        optimizer_type="Adam",
+        lr=1e-4,
+        use_gradient_accumulation=True,
+    ).build(stepper.modules, max_epochs=1)
+    # Two consecutive batches: the second exercises the optimizer state
+    # (post-step_weights) and confirms no double-backward occurs across
+    # batches when gradient accumulation re-runs.
+    stepped = stepper.train_on_batch(data=data, optimization=optimization)
+    stepper.train_on_batch(data=data, optimization=optimization)
+    assert "residual_loss_step_1_minus_0" in stepped.metrics
+    assert "loss_residual_total" in stepped.metrics
+    assert stepped.metrics["loss_residual_total"] > 0
 
 
 def test_train_on_batch_residual_loss_filters_pairs_at_runtime():
