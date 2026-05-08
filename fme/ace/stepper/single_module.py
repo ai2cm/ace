@@ -53,6 +53,7 @@ from fme.core.ocean import OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.residual_loss import SnapshotResidualLoss, SnapshotResidualLossConfig
+from fme.core.residual_loss import step_label as residual_loss_step_label
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import (
     MultiCallConfig,
@@ -1518,13 +1519,13 @@ class TrainStepperConfig:
             # update_max_n_forward_steps.
             return
         max_steps = schedule.max_n_forward_steps.max_value
-        max_pair_step = self.residual_loss.max_pair_step
-        if max_pair_step > max_steps:
+        max_residual_step = self.residual_loss.max_step
+        if max_residual_step > max_steps:
             raise ValueError(
-                "SnapshotResidualLossConfig has a pair endpoint "
-                f"({max_pair_step}) greater than the maximum forward steps "
-                f"in n_forward_steps ({max_steps}). Pairs with larger "
-                "endpoints are unreachable; reduce the pair step or "
+                "SnapshotResidualLossConfig has a step "
+                f"({max_residual_step}) greater than the maximum forward steps "
+                f"in n_forward_steps ({max_steps}). Steps exceeding "
+                "the rollout length are unreachable; reduce the step or "
                 "increase n_forward_steps."
             )
 
@@ -1748,20 +1749,18 @@ class TrainStepper(
                 )
             n_forward_steps = stochastic_n_forward_steps
         # Setup for the optional snapshot residual loss term: filter the
-        # configured pairs against this batch's sampled rollout length, and
-        # collect references to the predictions/targets at the steps the
-        # active pairs need. The user-facing step index is 1-indexed (with
-        # step=0 reserved for the IC), while the loop variable below is
-        # 0-indexed. ``residual_step_index = step + 1`` translates between
-        # them.
+        # configured steps against this batch's sampled rollout length, and
+        # collect references to the predictions/targets at the steps needed.
+        # The user-facing step index is 1-indexed (with step=0 reserved for
+        # the IC), while the loop variable below is 0-indexed.
+        # ``residual_step_index = step + 1`` translates between them.
         #
-        # Each active pair's residual contribution is folded into the loss
-        # passed to ``optimization.accumulate_loss`` at the step where the
-        # pair becomes computable (``residual_step_index == pair.max_step``).
-        # Combined with the earlier-endpoint detach inside
-        # :class:`SnapshotResidualLoss`, this keeps the residual backward
-        # confined to the still-live graph at ``max_step`` and is therefore
-        # safe to use under ``use_gradient_accumulation=True``.
+        # Each active residual step's contribution is folded into the loss
+        # passed to ``optimization.accumulate_loss`` at the loop iteration
+        # where it becomes computable. Combined with the reference-endpoint
+        # detach inside :class:`SnapshotResidualLoss`, this keeps each
+        # residual backward confined to the still-live graph and is therefore
+        # safe under ``use_gradient_accumulation=True``.
         needed_for_residual: set[int] = set()
         predictions_for_residual: dict[int, TensorMapping] = {}
         targets_for_residual: dict[int, TensorMapping] = {}
@@ -1770,9 +1769,10 @@ class TrainStepper(
         if self._residual_loss_obj is not None:
             self._residual_loss_obj.update_max_n_forward_steps(n_forward_steps)
             needed_for_residual = self._residual_loss_obj.needed_steps()
-            for pair in self._residual_loss_obj.active_pairs:
-                for s in (pair.step_a, pair.step_b):
-                    remaining_uses[s] = remaining_uses.get(s, 0) + 1
+            for s in self._residual_loss_obj.active_steps:
+                remaining_uses[s] = remaining_uses.get(s, 0) + 1
+                ref = s - 1
+                remaining_uses[ref] = remaining_uses.get(ref, 0) + 1
             if 0 in needed_for_residual:
                 ic_data = input_data.as_batch_data().data
                 ic_dict = add_ensemble_dim(
@@ -1799,8 +1799,6 @@ class TrainStepper(
                 gen_step = next(output_iterator)
                 gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
                 output_list.append(gen_step)
-                # Note: here we examine the loss for a single timestep,
-                # not a single model call (which may contain multiple timesteps).
                 target_step = add_ensemble_dim(
                     {
                         k: v.select(self.TIME_DIM, step)
@@ -1822,31 +1820,29 @@ class TrainStepper(
 
             weighted_residual: torch.Tensor | None = None
             if self._residual_loss_obj is not None:
-                completing = self._residual_loss_obj.pairs_completing_at(
+                completing = self._residual_loss_obj.steps_completing_at(
                     residual_step_index
                 )
-                for pair in completing:
-                    pair_loss = self._residual_loss_obj.compute_pair_loss(
-                        pair, predictions_for_residual, targets_for_residual
+                for res_step in completing:
+                    loss_val = self._residual_loss_obj.compute_step_loss(
+                        res_step, predictions_for_residual, targets_for_residual
                     )
-                    weighted_pair = self._residual_loss_obj.weight * pair_loss
-                    metrics[f"residual_loss_{pair.label}"] = weighted_pair.detach()
+                    weighted_val = self._residual_loss_obj.weight * loss_val
+                    label = residual_loss_step_label(res_step)
+                    metrics[f"residual_loss_{label}"] = weighted_val.detach()
                     residual_total_detached = (
-                        weighted_pair.detach()
+                        weighted_val.detach()
                         if residual_total_detached is None
-                        else residual_total_detached + weighted_pair.detach()
+                        else residual_total_detached + weighted_val.detach()
                     )
                     weighted_residual = (
-                        weighted_pair
+                        weighted_val
                         if weighted_residual is None
-                        else weighted_residual + weighted_pair
+                        else weighted_residual + weighted_val
                     )
-                # Drop stored predictions/targets that are no longer needed
-                # by any future pair, to keep the autograd graph footprint
-                # close to the gradient-accumulation ideal of one step at a
-                # time.
-                for pair in completing:
-                    for s in (pair.step_a, pair.step_b):
+                # Drop stored predictions/targets once no longer needed.
+                for res_step in completing:
+                    for s in (res_step, res_step - 1):
                         remaining_uses[s] -= 1
                         if remaining_uses[s] == 0:
                             predictions_for_residual.pop(s, None)
@@ -1857,11 +1853,6 @@ class TrainStepper(
             elif optimize_step:
                 optimization.accumulate_loss(step_total_loss)
             elif weighted_residual is not None:
-                # ``optimize_last_step_only=True`` and a pair completes at an
-                # intermediate step: still backward the residual contribution
-                # at this step. The earlier endpoint of every pair is already
-                # detached inside SnapshotResidualLoss, so this backward is
-                # safe and bounded to ``max_step``'s subgraph.
                 optimization.accumulate_loss(weighted_residual)
 
         if residual_total_detached is not None:
