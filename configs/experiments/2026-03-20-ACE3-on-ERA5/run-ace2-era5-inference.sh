@@ -3,10 +3,10 @@
 
 set -e
 
-JOB_NAME_BASE="ace2-era5"
+JOB_NAME_BASE="ace2s-hybrid-localnet-era5"
 JOB_GROUP="ace-foundation-model"
 
-EXISTING_RESULTS_DATASET="01J4MT10JPQ8MFA41F2AXGFYJ9"
+EXISTING_RESULTS_DATASET="01KP90CKX2CRHG13DE95C6G6YJ"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
