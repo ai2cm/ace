@@ -31,7 +31,7 @@ run_training() {
     --description 'Run ACE2S-ERA5 training' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
-    --priority normal \
+    --priority high \
     --preemptible \
     --cluster ai2/titan \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
@@ -53,7 +53,7 @@ run_training() {
 
 base_name="ace2s"
 
-run_training "ace-train-config-1-step-pretrain.yaml" "$base_name-era5-1-step-pre-training-rs0"
+run_training "ace-train-config-1-step-pretrain.yaml" "$base_name-era5-1-step-pre-training-no-channel-weightings-rs0"
 
 # For the finetuning stage take beaker dataset id from the above job and add it to
 # ace-train-config-multi-step-finetuning.yaml then uncomment next line
