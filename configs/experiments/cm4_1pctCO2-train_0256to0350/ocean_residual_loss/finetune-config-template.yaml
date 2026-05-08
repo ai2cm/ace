@@ -4,6 +4,7 @@ validate_using_ema: true
 evaluate_before_training: true
 ema:
   decay: 0.999
+  faster_decay_at_start: false
 max_epochs: 150
 inference:
   n_forward_steps: 1440 # just under 20 years
@@ -84,3 +85,10 @@ stepper_training:
     weights_path: /ckpt.tar
   loss:
     type: MSE
+  residual_loss:
+    pairs:
+      - step_a: 1
+        step_b: 0
+    loss:
+      type: MSE
+    weight: 1.0
