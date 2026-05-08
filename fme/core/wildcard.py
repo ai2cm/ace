@@ -113,3 +113,14 @@ def apply_by_exclude(
         f"Skipped parameters: {set(model.state_dict().keys()) - applied_names}"
     )
     return model
+
+
+def parse_3d_varname(name: str) -> tuple[str, int] | None:
+    """Return (name, level_num) from a 3D variable name, or None if not 3D."""
+    regex_pattern = re.compile(r"_(\d+)$")
+    match = regex_pattern.search(name)
+    if match is None:
+        return None
+    name_without_level = name[: match.start()]
+    level = int(match.group(1))
+    return name_without_level, level
