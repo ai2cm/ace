@@ -78,7 +78,7 @@ from fme.core.optimization import (
 )
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
-from fme.core.residual_loss import ResidualPair, SnapshotResidualLossConfig
+from fme.core.residual_loss import SnapshotResidualLossConfig
 from fme.core.step import SingleModuleStepConfig, StepSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallConfig
@@ -2417,7 +2417,7 @@ def test_train_on_batch_residual_loss_emits_metrics():
         config,
         loss=StepLossConfig(type="MSE"),
         residual_loss=SnapshotResidualLossConfig(
-            pairs=[ResidualPair(step_a=1, step_b=0), ResidualPair(step_a=2, step_b=1)],
+            steps=[1, 2],
             loss=StepLossConfig(type="MSE"),
             weight=2.0,
         ),
@@ -2484,7 +2484,7 @@ def test_train_on_batch_residual_loss_runs_with_gradient_accumulation():
         n_forward_steps=n_steps,
         loss=StepLossConfig(type="MSE"),
         residual_loss=SnapshotResidualLossConfig(
-            pairs=[ResidualPair(step_a=1, step_b=0)],
+            steps=[1],
             loss=StepLossConfig(type="MSE"),
             weight=1.0,
         ),
@@ -2533,32 +2533,32 @@ def test_train_on_batch_residual_loss_filters_pairs_at_runtime():
         n_forward_steps=schedule,
         loss=StepLossConfig(type="MSE"),
         residual_loss=SnapshotResidualLossConfig(
-            pairs=[ResidualPair(step_a=2, step_b=1)],
+            steps=[2],
             loss=StepLossConfig(type="MSE"),
         ),
     )
     stepped = stepper.train_on_batch(data=data, optimization=NullOptimization())
-    # the only configured pair has max_step=2 > sampled n_forward_steps=1,
+    # the only configured step has max_step=2 > sampled n_forward_steps=1,
     # so the residual loss term is silently skipped this batch
     assert "loss_residual_total" not in stepped.metrics
     assert "residual_loss_step_2_minus_1" not in stepped.metrics
 
 
 def test_train_stepper_config_residual_loss_validates_against_schedule_max():
-    """Building TrainStepperConfig with an unreachable pair raises."""
+    """Building TrainStepperConfig with an unreachable step raises."""
     with pytest.raises(ValueError, match="greater than the maximum forward steps"):
         TrainStepperConfig(
             loss=StepLossConfig(type="MSE"),
             n_forward_steps=2,
             residual_loss=SnapshotResidualLossConfig(
-                pairs=[ResidualPair(step_a=5, step_b=0)],
+                steps=[5],
                 loss=StepLossConfig(type="MSE"),
             ),
         )
 
 
 def test_train_stepper_config_residual_loss_validates_against_schedule_max_milestones():
-    """Schedule max is computed across milestones; pair must fit overall max."""
+    """Schedule max is computed across milestones; step must fit overall max."""
     with pytest.raises(ValueError, match="greater than the maximum forward steps"):
         TrainStepperConfig(
             loss=StepLossConfig(type="MSE"),
@@ -2567,11 +2567,11 @@ def test_train_stepper_config_residual_loss_validates_against_schedule_max_miles
                 milestones=[TimeLengthMilestone(epoch=1, value=4)],
             ),
             residual_loss=SnapshotResidualLossConfig(
-                pairs=[ResidualPair(step_a=5, step_b=0)],
+                steps=[5],
                 loss=StepLossConfig(type="MSE"),
             ),
         )
-    # but a pair within max should succeed
+    # but a step within max should succeed
     TrainStepperConfig(
         loss=StepLossConfig(type="MSE"),
         n_forward_steps=TimeLengthSchedule(
@@ -2579,7 +2579,7 @@ def test_train_stepper_config_residual_loss_validates_against_schedule_max_miles
             milestones=[TimeLengthMilestone(epoch=1, value=4)],
         ),
         residual_loss=SnapshotResidualLossConfig(
-            pairs=[ResidualPair(step_a=4, step_b=0)],
+            steps=[4],
             loss=StepLossConfig(type="MSE"),
         ),
     )
@@ -2617,16 +2617,16 @@ def test_train_on_batch_residual_loss_optimize_last_step_only_keeps_grad():
             ),
         ),
     )
-    # pair (1, 0): step 1 (loop var step=0) is not the last step, so without
-    # the residual loss it would normally run under no_grad with
-    # optimize_last_step_only=True. With residual loss configured, step 0
-    # of the loop must run with grad enabled so the pair contributes.
+    # step 1 (loop var step=0) is not the last step, so without the residual
+    # loss it would normally run under no_grad with optimize_last_step_only=True.
+    # With residual loss configured, step 0 of the loop must run with grad
+    # enabled so the residual contributes.
     stepper = _get_train_stepper(
         config,
         optimize_last_step_only=True,
         loss=StepLossConfig(type="MSE"),
         residual_loss=SnapshotResidualLossConfig(
-            pairs=[ResidualPair(step_a=1, step_b=0)],
+            steps=[1],
             loss=StepLossConfig(type="MSE"),
         ),
     )
@@ -2643,7 +2643,7 @@ def test_stepper_build_residual_loss_no_prognostic_loss_names():
     with pytest.raises(ValueError, match="intersection"):
         stepper.build_residual_loss(
             SnapshotResidualLossConfig(
-                pairs=[ResidualPair(step_a=1, step_b=0)],
+                steps=[1],
                 loss=StepLossConfig(type="MSE"),
             )
         )

@@ -87,7 +87,7 @@ from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import CheckpointConfig
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
-from fme.core.residual_loss import ResidualPair, SnapshotResidualLossConfig
+from fme.core.residual_loss import SnapshotResidualLossConfig
 from fme.core.scheduler import SchedulerConfig, SequentialSchedulerConfig
 from fme.core.step import (
     MultiCallStepConfig,
