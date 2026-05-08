@@ -1,6 +1,6 @@
 import dataclasses
 from collections.abc import Callable, Mapping
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 import torch
 import torch.linalg
@@ -247,10 +247,14 @@ class LpLoss(torch.nn.Module):
         return self.rel(x, y)
 
 
+class _AreaWeightedMeanFn(Protocol):
+    def __call__(self, data: torch.Tensor, keepdim: bool = False) -> torch.Tensor: ...
+
+
 class AreaWeightedMSELoss(torch.nn.Module):
     def __init__(
         self,
-        area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
+        area_weighted_mean: _AreaWeightedMeanFn,
         reduction: Literal["mean", "none"] = "mean",
     ):
         super().__init__()
@@ -258,10 +262,10 @@ class AreaWeightedMSELoss(torch.nn.Module):
         self._reduction = reduction
 
     def __call__(self, x, y):
-        result = self._area_weighted_mean((x - y) ** 2)
+        sq_err = (x - y) ** 2
         if self._reduction == "mean":
-            return torch.mean(result)
-        return result
+            return torch.mean(self._area_weighted_mean(sq_err))
+        return self._area_weighted_mean(sq_err, keepdim=True)
 
 
 class WeightedSum(torch.nn.Module):
@@ -420,7 +424,7 @@ class CRPSLoss(torch.nn.Module):
         crps = get_crps(x, y, alpha=self.alpha)
         if self._reduction == "mean":
             return crps.mean()
-        return crps.mean(dim=(-2, -1))
+        return crps
 
 
 class EnsembleLoss(torch.nn.Module):
@@ -458,9 +462,11 @@ class EnsembleLoss(torch.nn.Module):
         else:
             crps = torch.tensor(0.0)
         if self.energy_score_weight > 0:
-            energy_score_loss = self.energy_score_weight * self.energy_score_loss(
-                gen_norm, target_norm
-            )
+            es = self.energy_score_loss(gen_norm, target_norm)
+            if crps.ndim > es.ndim:
+                n_extra = crps.ndim - es.ndim
+                es = es.reshape(es.shape + (1,) * n_extra)
+            energy_score_loss = self.energy_score_weight * es
         else:
             energy_score_loss = torch.tensor(0.0)
         return crps + energy_score_loss

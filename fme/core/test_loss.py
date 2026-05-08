@@ -411,7 +411,7 @@ def test_area_weighted_mse_reduction_none():
     loss_mean = AreaWeightedMSELoss(ops.area_weighted_mean, reduction="mean")
     result_none = loss_none(x, target)
     result_mean = loss_mean(x, target)
-    assert result_none.shape == (n_batch, n_channels)
+    assert result_none.shape == (n_batch, n_channels, 1, 1)
     torch.testing.assert_close(result_none.mean(), result_mean)
 
 
@@ -458,7 +458,7 @@ def test_crps_loss_reduction_none():
     loss_mean = CRPSLoss(alpha=0.95, reduction="mean")
     result_none = loss_none(x, y)
     result_mean = loss_mean(x, y)
-    assert result_none.shape == (n_batch, n_channels)
+    assert result_none.shape == (n_batch, n_channels, n_lat, n_lon)
     torch.testing.assert_close(result_none.mean(), result_mean)
 
 
