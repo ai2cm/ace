@@ -16,7 +16,7 @@ ft-fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0||t
 ft-fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KP772N2D01FRDZJ45AK1ZMKD|training|best_inference_ckpt|normal|--not-preemptible
 
 fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KP43V4GDM8A7FNGKPW1R80WH|done|best_inference_ckpt|high|--not-preemptible||||h100
-fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7-log-IPO|rs0|01KP43V4GDM8A7FNGKPW1R80WH|run_ICx1_piC-140yr|best_inference_ckpt|high|||||h100
+fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7-log-IPO|rs0|01KP43V4GDM8A7FNGKPW1R80WH|done|best_inference_ckpt|high|||||h100
 
 fto-75-25-split-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KQG6NFXXCFCZN07Y9G8EG16C|training|best_inference_ckpt|normal|--min-runtime 8h
 
@@ -30,4 +30,5 @@ additional-inf-fto-75-25-split-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-
 
 fto-75-25-split-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7-save_best_enso_ckpt|rs0|01KQV766P7M83GZADMT9E8Z45N|training|best_inference_ckpt|normal|--min-runtime 8h
 
-ft-50-50-piControl-fto_stochastic-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_cbj61w53|rs0|01KR08ZX46KYWBS176FFACRW0C|training|best_inference_ckpt|normal|--min-runtime 8h
+ft-50-50-piControl-fto_stochastic-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_cbj61w53|rs0|01KR08ZX46KYWBS176FFACRW0C|run_ICx1_piC-140yr|best_ckpt|high|--min-runtime 8h
+ft-50-50-piControl-fto_stochastic-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_cbj61w53|rs0|01KR08ZX46KYWBS176FFACRW0C|run_ICx1_140yr|best_ckpt|high|--min-runtime 8h
