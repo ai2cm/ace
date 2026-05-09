@@ -30,5 +30,5 @@ additional-inf-fto-75-25-split-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-
 
 fto-75-25-split-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7-save_best_enso_ckpt|rs0|01KQV766P7M83GZADMT9E8Z45N|training|best_inference_ckpt|normal|--min-runtime 8h
 
-ft-50-50-piControl-fto_stochastic-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_cbj61w53|rs0|01KR08ZX46KYWBS176FFACRW0C|run_ICx1_piC-140yr|best_ckpt|high|--min-runtime 8h
+ft-50-50-piControl-fto_stochastic-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_cbj61w53|rs0|01KR08ZX46KYWBS176FFACRW0C|run_ICx1_piC-140yr|best_ckpt|high|--min-runtime 8h||||h100
 ft-50-50-piControl-fto_stochastic-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_cbj61w53|rs0|01KR08ZX46KYWBS176FFACRW0C|run_ICx1_140yr|best_ckpt|high|--min-runtime 8h||||h100
