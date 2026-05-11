@@ -342,54 +342,6 @@ class DealiasBlurConv2d(nn.Module):
         )
 
 
-class SmoothedInterpolate(nn.Module):
-    """Interpolate then apply four-point smoother (zonally uniform signals)."""
-
-    def __init__(
-        self,
-        in_channels: int = 3,
-        scale_factor: int = 2,
-        mode: str = "nearest",
-        trim_size: int = 0,
-    ):
-        super().__init__()
-
-        self.in_channels = in_channels
-        self.scale_factor = scale_factor
-        self.mode = mode
-        self.trim_size = trim_size
-        self.interp = th.nn.functional.interpolate
-
-        self.smoother_kernel = th.tensor(
-            [[0.0, 1.0, 0.0], [1.0, 0.0, 1.0], [0.0, 1.0, 0.0]]
-        )
-        self.smoother_kernel = self.smoother_kernel.unsqueeze(0).unsqueeze(0)
-        self.smoother_kernel = self.smoother_kernel.repeat((in_channels, 1, 1, 1))
-
-    def forward(self, x: th.Tensor) -> th.Tensor:
-        self.smoother_kernel = self.smoother_kernel.to(
-            device=x.device, dtype=x.dtype
-        )
-
-        x = self.interp(x, scale_factor=self.scale_factor, mode=self.mode)
-
-        x = th.nn.functional.conv2d(
-            x,
-            self.smoother_kernel,
-            padding=0,
-            groups=self.in_channels,
-        ) / 4
-
-        if self.trim_size > 0:
-            x = x[
-                ...,
-                self.trim_size : -self.trim_size,
-                self.trim_size : -self.trim_size,
-            ]
-
-        return x
-
-
 class DealiasedDownsample(nn.Module):
     """De-aliased downsampling via fixed depthwise blur stages (stride power of 2)."""
 
@@ -503,6 +455,54 @@ class TransposedConvUpsample(nn.Module):
             th.Tensor: The upsampled values.
         """
         return self.upsampler(x)
+
+
+class SmoothedInterpolate(nn.Module):
+    """Interpolate then apply four-point smoother (zonally uniform signals)."""
+
+    def __init__(
+        self,
+        in_channels: int = 3,
+        scale_factor: int = 2,
+        mode: str = "nearest",
+        trim_size: int = 0,
+    ):
+        super().__init__()
+
+        self.in_channels = in_channels
+        self.scale_factor = scale_factor
+        self.mode = mode
+        self.trim_size = trim_size
+        self.interp = th.nn.functional.interpolate
+
+        self.smoother_kernel = th.tensor(
+            [[0.0, 1.0, 0.0], [1.0, 0.0, 1.0], [0.0, 1.0, 0.0]]
+        )
+        self.smoother_kernel = self.smoother_kernel.unsqueeze(0).unsqueeze(0)
+        self.smoother_kernel = self.smoother_kernel.repeat((in_channels, 1, 1, 1))
+
+    def forward(self, x: th.Tensor) -> th.Tensor:
+        self.smoother_kernel = self.smoother_kernel.to(
+            device=x.device, dtype=x.dtype
+        )
+
+        x = self.interp(x, scale_factor=self.scale_factor, mode=self.mode)
+
+        x = th.nn.functional.conv2d(
+            x,
+            self.smoother_kernel,
+            padding=0,
+            groups=self.in_channels,
+        ) / 4
+
+        if self.trim_size > 0:
+            x = x[
+                ...,
+                self.trim_size : -self.trim_size,
+                self.trim_size : -self.trim_size,
+            ]
+
+        return x
 
 
 class SmoothedInterpolateConv(nn.Module):
