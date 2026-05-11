@@ -3,9 +3,9 @@ save_checkpoint: true
 validate_using_ema: true
 evaluate_before_training: true
 ema:
-  decay: 0.999
+  decay: 0.9995
+  faster_decay_at_start: false
 max_epochs: 150
-n_forward_steps: 4
 inference:
   n_forward_steps: 1440 # just under 20 years
   forward_steps_in_memory: 40
@@ -38,6 +38,7 @@ logging:
   log_to_file: true
   project: ace-samudra-cm4
   entity: ai2cm
+  metrics_log_dir: /results/metrics
 train_loader:
   batch_size: 16
   num_data_workers: 8
@@ -78,7 +79,19 @@ optimization:
   kwargs:
     fused: true
     weight_decay: 0.01
+  scheduler:
+    schedulers:
+      - type: LinearLR
+        step_each_iteration: true
+        kwargs:
+          start_factor: 0.01
+          end_factor: 1
+          total_iters: 2000
+      - type: ConstantLR
+        step_each_iteration: true
+    milestones: [2000]
 stepper_training:
+  n_forward_steps: 4
   parameter_init:
     weights_path: /ckpt.tar
   loss:
@@ -160,8 +173,6 @@ stepper:
               - VI
           surface_energy_flux_correction:
             method: prescribed
-          ocean_heat_content_correction:
-            method: scaled_temperature
       next_step_forcing_names:
         - DLWRFsfc
         - DSWRFsfc
