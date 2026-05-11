@@ -237,8 +237,6 @@ class Config:
     evaluate_before_training: bool = False
     save_best_inference_epoch_checkpoints: bool = False
     ema: EMAConfig = dataclasses.field(default_factory=EMAConfig)
-    save_best_enso_checkpoint: bool = False
-    best_enso_checkpoint_climate_tolerance: float = 0.1
     lr_tuning: LRTuningConfig | None = None
 
     def __post_init__(self):
@@ -278,13 +276,8 @@ class ValidationAggregator(AggregatorABC[TrainOutput]):
 
 
 class InferenceAggregator(InferenceAggregatorABC[PSType, SDType]):
-    def __init__(
-        self,
-        inference_loss: float,
-        extra_metrics: dict[str, float] | None = None,
-    ):
+    def __init__(self, inference_loss: float):
         self.inference_loss = inference_loss
-        self.extra_metrics = extra_metrics or {}
 
     def record_batch(self, data: SDType) -> InferenceLogs:
         return [{}]
@@ -293,11 +286,7 @@ class InferenceAggregator(InferenceAggregatorABC[PSType, SDType]):
         return [{}]
 
     def get_summary_logs(self) -> InferenceLog:
-        logs: dict[str, Any] = {
-            "time_mean_norm/rmse/channel_mean": self.inference_loss,
-        }
-        logs.update(self.extra_metrics)
-        return logs
+        return {"time_mean_norm/rmse/channel_mean": self.inference_loss}
 
     def flush_diagnostics(self, subdir: str | None) -> None:
         pass
@@ -309,12 +298,10 @@ class AggregatorBuilder(AggregatorBuilderABC[TrainOutput]):
         train_losses: np.ndarray,
         validation_losses: np.ndarray,
         inference_losses: np.ndarray,
-        inference_extra_metrics: list[dict[str, float]] | None = None,
     ):
         self.train_losses = train_losses
         self.validation_losses = validation_losses
         self.inference_losses = inference_losses
-        self.inference_extra_metrics = inference_extra_metrics
         self._train_calls = 0
         self._validation_calls = 0
         self._inference_calls = 0
@@ -330,15 +317,7 @@ class AggregatorBuilder(AggregatorBuilderABC[TrainOutput]):
         return ret
 
     def get_inference_aggregator(self) -> InferenceAggregatorABC[PSType, SDType]:
-        extra = (
-            self.inference_extra_metrics[self._inference_calls]
-            if self.inference_extra_metrics is not None
-            else None
-        )
-        ret = InferenceAggregator(
-            self.inference_losses[self._inference_calls],
-            extra_metrics=extra,
-        )
+        ret = InferenceAggregator(self.inference_losses[self._inference_calls])
         self._inference_calls += 1
         return ret
 
@@ -360,9 +339,6 @@ def get_trainer(
     checkpoint_every_n_batches: int = 0,
     n_train_batches: int = 100,
     save_best_inference_epoch_checkpoints: bool = False,
-    save_best_enso_checkpoint: bool = False,
-    best_enso_checkpoint_climate_tolerance: float = 0.1,
-    inference_extra_metrics: list[dict[str, float]] | None = None,
     scheduler_config: SchedulerConfig | None = None,
     n_validation_batches: int = 5,
     save_checkpoint: bool = True,
@@ -455,8 +431,6 @@ def get_trainer(
         validate_using_ema=validate_using_ema,
         evaluate_before_training=evaluate_before_training,
         save_best_inference_epoch_checkpoints=save_best_inference_epoch_checkpoints,
-        save_best_enso_checkpoint=save_best_enso_checkpoint,
-        best_enso_checkpoint_climate_tolerance=best_enso_checkpoint_climate_tolerance,
         save_checkpoint=save_checkpoint,
         ema=ema_config,
         lr_tuning=lr_tuning,
@@ -465,7 +439,6 @@ def get_trainer(
         train_losses=train_losses,
         validation_losses=validation_losses,
         inference_losses=inference_losses,
-        inference_extra_metrics=inference_extra_metrics,
     )
     inference_epochs = config._inference_epochs
 
@@ -1446,147 +1419,6 @@ def test_lr_tuning_with_evaluate_before_training(tmp_path: str):
         trainer.train()
         # Only epoch 0 candidate won
         assert trainer.optimization.learning_rate == initial_lr * 0.5
-
-
-def test_best_enso_checkpoint_saved(tmp_path: str):
-    """Test that best_enso_ckpt is saved
-    when ENSO improves and climate is in tolerance."""
-    max_epochs = 3
-    n_train_batches = 5
-    std_key = "enso_index/sst_nino34_index_std_norm"
-    acorr_key = "enso_index/sst_nino34_index_autocorr_lag5yr_norm"
-    psd_key = "enso_index/sst_nino34_index_psd_2_5yr_norm"
-
-    inference_losses = np.array([0.5, 0.4, 0.3])
-    # Epoch 1: mean(|1-0.8|, |1-0.9|, |1-0.85|) = mean(0.2, 0.1, 0.15) = 0.15
-    # Epoch 2: mean(|1-0.7|, |1-0.7|, |1-0.7|)  = 0.3
-    # Epoch 3: mean(|1-0.95|, |1-0.98|, |1-0.97|) = mean(0.05, 0.02, 0.03) = 0.0333
-    # Best is epoch 3
-    inference_extra = [
-        {std_key: 0.8, acorr_key: 0.9, psd_key: 0.85},
-        {std_key: 0.7, acorr_key: 0.7, psd_key: 0.7},
-        {std_key: 0.95, acorr_key: 0.98, psd_key: 0.97},
-    ]
-
-    config, trainer = get_trainer(
-        tmp_path,
-        max_epochs=max_epochs,
-        inference_losses=inference_losses,
-        n_train_batches=n_train_batches,
-        validate_using_ema=False,
-        save_best_enso_checkpoint=True,
-        best_enso_checkpoint_climate_tolerance=0.5,
-        inference_extra_metrics=inference_extra,
-    )
-    trainer.train()
-
-    paths = CheckpointPaths(config.checkpoint_dir)
-    assert os.path.exists(paths.best_enso_checkpoint_path)
-
-    ckpt = torch.load(
-        paths.best_enso_checkpoint_path, map_location="cpu", weights_only=False
-    )
-    assert ckpt["epoch"] == 3
-    assert ckpt["best_enso_score"] == pytest.approx(1 / 30, abs=1e-6)
-
-
-def test_best_enso_checkpoint_climate_guard(tmp_path: str):
-    """Test that ENSO checkpoint is NOT saved when climate exceeds tolerance."""
-    max_epochs = 3
-    n_train_batches = 5
-    std_key = "enso_index/sst_nino34_index_std_norm"
-    acorr_key = "enso_index/sst_nino34_index_autocorr_lag5yr_norm"
-    psd_key = "enso_index/sst_nino34_index_psd_2_5yr_norm"
-
-    # Inference errors: epoch1=0.3 (best), epoch2=0.5 (worse), epoch3=0.4 (worse)
-    inference_losses = np.array([0.3, 0.5, 0.4])
-    # Epoch 1: score = mean(0.3, 0.3, 0.3) = 0.3
-    # Epoch 2: score = mean(0.05, 0.05, 0.05) = 0.05 (best but climate too bad)
-    # Epoch 3: score = mean(0.2, 0.2, 0.2) = 0.2 (climate too bad)
-    inference_extra = [
-        {std_key: 0.7, acorr_key: 0.7, psd_key: 0.7},
-        {std_key: 0.95, acorr_key: 0.95, psd_key: 0.95},
-        {std_key: 0.8, acorr_key: 0.8, psd_key: 0.8},
-    ]
-
-    config, trainer = get_trainer(
-        tmp_path,
-        max_epochs=max_epochs,
-        inference_losses=inference_losses,
-        n_train_batches=n_train_batches,
-        validate_using_ema=False,
-        save_best_enso_checkpoint=True,
-        best_enso_checkpoint_climate_tolerance=0.1,
-        inference_extra_metrics=inference_extra,
-    )
-    trainer.train()
-
-    paths = CheckpointPaths(config.checkpoint_dir)
-    assert os.path.exists(paths.best_enso_checkpoint_path)
-
-    ckpt = torch.load(
-        paths.best_enso_checkpoint_path, map_location="cpu", weights_only=False
-    )
-    # Only epoch 1 saved; epochs 2-3 have climate error > 0.3*1.1=0.33
-    assert ckpt["epoch"] == 1
-
-
-def test_best_enso_checkpoint_equal_weighting(tmp_path: str):
-    """Test that all three ENSO metrics contribute equally to score."""
-    max_epochs = 3
-    n_train_batches = 5
-    std_key = "enso_index/sst_nino34_index_std_norm"
-    acorr_key = "enso_index/sst_nino34_index_autocorr_lag5yr_norm"
-    psd_key = "enso_index/sst_nino34_index_psd_2_5yr_norm"
-
-    inference_losses = np.array([0.3, 0.3, 0.3])
-    # Epoch 1: std great, acorr+psd bad → mean(0.05, 0.2, 0.2) = 0.15
-    # Epoch 2: all decent              → mean(0.10, 0.02, 0.02) = 0.0467
-    # Epoch 3: std perfect, acorr+psd terrible → mean(0.02, 0.25, 0.25) = 0.1733
-    # Best composite is epoch 2
-    inference_extra = [
-        {std_key: 0.95, acorr_key: 0.8, psd_key: 0.8},
-        {std_key: 0.90, acorr_key: 0.98, psd_key: 0.98},
-        {std_key: 0.98, acorr_key: 0.75, psd_key: 0.75},
-    ]
-
-    config, trainer = get_trainer(
-        tmp_path,
-        max_epochs=max_epochs,
-        inference_losses=inference_losses,
-        n_train_batches=n_train_batches,
-        validate_using_ema=False,
-        save_best_enso_checkpoint=True,
-        best_enso_checkpoint_climate_tolerance=0.5,
-        inference_extra_metrics=inference_extra,
-    )
-    trainer.train()
-
-    paths = CheckpointPaths(config.checkpoint_dir)
-    assert os.path.exists(paths.best_enso_checkpoint_path)
-
-    ckpt = torch.load(
-        paths.best_enso_checkpoint_path, map_location="cpu", weights_only=False
-    )
-    # Without acorr+psd, epoch 3 would win (std_norm closest to 1.0)
-    # With equal weighting, epoch 2 wins
-    assert ckpt["epoch"] == 2
-    expected_score = (0.10 + 0.02 + 0.02) / 3
-    assert ckpt["best_enso_score"] == pytest.approx(expected_score, abs=1e-6)
-
-
-def test_best_enso_checkpoint_disabled_by_default(tmp_path: str):
-    """Test that no ENSO checkpoint is saved when disabled."""
-    max_epochs = 2
-    config, trainer = get_trainer(
-        tmp_path,
-        max_epochs=max_epochs,
-        validate_using_ema=False,
-    )
-    trainer.train()
-
-    paths = CheckpointPaths(config.checkpoint_dir)
-    assert not os.path.exists(paths.best_enso_checkpoint_path)
 
 
 @pytest.mark.parametrize(
