@@ -1,4 +1,4 @@
-from collections.abc import Callable, Generator
+from collections.abc import Generator
 from unittest.mock import MagicMock, Mock
 
 import pytest
@@ -8,21 +8,30 @@ from fme.ace.stepper.time_length_probabilities import (
     TimeLengthProbabilities,
     TimeLengthProbability,
 )
-from fme.core.loss import LossOutput
+from fme.core.loss import LossOutput, StepLoss
 from fme.core.typing_ import EnsembleTensorDict, TensorMapping
 
-from .loss import StepLossABC, StepPredictionABC
+from .loss import ComponentLossSchedule
 from .stepper import (
     ComponentEnsembleStepPrediction,
     ComponentTrainingConfig,
     CoupledStepperTrainLoss,
-    _ComponentLossSchedule,
 )
 
 
 def _wrap_as_loss_output(value: torch.Tensor) -> LossOutput:
     """Wrap a scalar tensor as a LossOutput for mocking StepLoss."""
     return LossOutput(loss=value, channel_dim=0, channel_names=["mock"])
+
+
+def _mock_step_loss(fn):
+    """Create a Mock(spec=StepLoss) whose forward returns LossOutput."""
+    mock = Mock(spec=StepLoss)
+    mock.side_effect = lambda data, target, step: _wrap_as_loss_output(
+        fn(data, target, step)
+    )
+    mock.effective_loss_scaling = {}
+    return mock
 
 
 def step_and_target_gen(
@@ -70,25 +79,6 @@ def steps_thru_atmos_7() -> list[tuple[ComponentEnsembleStepPrediction, TensorMa
     return out
 
 
-class _StepLoss(StepLossABC):
-    def __init__(
-        self,
-        loss_obj: Callable[[TensorMapping, TensorMapping, int], torch.Tensor],
-        time_dim: int = 1,
-    ):
-        self._loss_obj = loss_obj
-        self._time_dim = time_dim
-
-    @property
-    def effective_loss_scaling(self):
-        raise NotImplementedError()
-
-    def __call__(
-        self, prediction: StepPredictionABC, target_data: TensorMapping
-    ) -> torch.Tensor:
-        return self._loss_obj(prediction.data, target_data, prediction.step)
-
-
 def assert_tensor_dicts_close(
     x: dict[str, torch.Tensor | None], y: dict[str, torch.Tensor | None]
 ):
@@ -100,8 +90,8 @@ def assert_tensor_dicts_close(
 
 
 def _build_coupled_loss(
-    ocean_loss: StepLossABC,
-    atmosphere_loss: StepLossABC,
+    ocean_loss: StepLoss,
+    atmosphere_loss: StepLoss,
     ocean_n_steps=None,
     atmos_n_steps=None,
     ocean_weight=1.0,
@@ -111,13 +101,13 @@ def _build_coupled_loss(
     ocean_n_steps_limit=10,
     atmos_n_steps_limit=10,
 ) -> CoupledStepperTrainLoss:
-    ocean_schedule = _ComponentLossSchedule(
+    ocean_schedule = ComponentLossSchedule(
         n_steps=ocean_n_steps,
         optimize_last_step_only=ocean_optimize_last_step_only,
         loss_weight=ocean_weight,
         n_steps_limit=ocean_n_steps_limit,
     )
-    atmos_schedule = _ComponentLossSchedule(
+    atmos_schedule = ComponentLossSchedule(
         n_steps=atmos_n_steps,
         optimize_last_step_only=atmos_optimize_last_step_only,
         loss_weight=atmos_weight,
@@ -132,8 +122,8 @@ def _build_coupled_loss(
 
 
 def test_coupled_stepper_train_loss(steps_thru_atmos_7):
-    ocean_loss_obj = _StepLoss(loss_obj=lambda *_, **__: torch.tensor(2.0))
-    atmos_loss_obj = _StepLoss(loss_obj=lambda *_, **__: torch.tensor(1.0))
+    ocean_loss_obj = _mock_step_loss(lambda *_, **__: torch.tensor(2.0))
+    atmos_loss_obj = _mock_step_loss(lambda *_, **__: torch.tensor(1.0))
     loss_obj = _build_coupled_loss(
         ocean_loss=ocean_loss_obj,
         atmosphere_loss=atmos_loss_obj,
@@ -168,8 +158,8 @@ def test_loss_contributions(steps_thru_atmos_7):
             loss += (gen[key] - target[key]).abs().mean() / (step + 1)
         return loss
 
-    atmos_loss_obj = _StepLoss(loss_obj=mae_loss)
-    ocean_loss_obj = _StepLoss(loss_obj=mae_loss)
+    atmos_loss_obj = _mock_step_loss(mae_loss)
+    ocean_loss_obj = _mock_step_loss(mae_loss)
     loss_obj = _build_coupled_loss(
         ocean_loss=ocean_loss_obj,
         atmosphere_loss=atmos_loss_obj,
@@ -208,8 +198,8 @@ def test_loss_contributions_optimize_last_step_only(steps_thru_atmos_7):
 
     n_total_atmos = 8
     n_total_ocean = 4
-    atmos_loss_obj = _StepLoss(loss_obj=mae_loss)
-    ocean_loss_obj = _StepLoss(loss_obj=mae_loss)
+    atmos_loss_obj = _mock_step_loss(mae_loss)
+    ocean_loss_obj = _mock_step_loss(mae_loss)
     loss_obj = _build_coupled_loss(
         ocean_loss=ocean_loss_obj,
         atmosphere_loss=atmos_loss_obj,
@@ -258,7 +248,7 @@ def test_loss_contributions_optimize_last_step_only(steps_thru_atmos_7):
 def test_step_is_optimized_last_step_only(
     n_steps, n_total_steps, expected_optimized_step
 ):
-    schedule = _ComponentLossSchedule(
+    schedule = ComponentLossSchedule(
         n_steps=n_steps,
         optimize_last_step_only=True,
         loss_weight=1.0,
@@ -273,7 +263,7 @@ def test_step_is_optimized_last_step_only(
 
 
 def test_step_is_optimized_last_step_only_weight_zero():
-    schedule = _ComponentLossSchedule(
+    schedule = ComponentLossSchedule(
         n_steps=None,
         optimize_last_step_only=True,
         loss_weight=0.0,
@@ -288,7 +278,7 @@ def test_stochastic_n_steps_sample_changes_step_is_optimized():
             TimeLengthProbability(steps=2, probability=1.0),
         ]
     )
-    schedule = _ComponentLossSchedule(
+    schedule = ComponentLossSchedule(
         n_steps=sampler,
         optimize_last_step_only=False,
         loss_weight=1.0,
@@ -312,7 +302,7 @@ def test_stochastic_n_steps_deterministic_outcome():
             TimeLengthProbability(steps=3, probability=1.0),
         ]
     )
-    schedule = _ComponentLossSchedule(
+    schedule = ComponentLossSchedule(
         n_steps=sampler,
         optimize_last_step_only=False,
         loss_weight=1.0,
@@ -334,7 +324,7 @@ def test_stochastic_n_steps_samples_vary():
             TimeLengthProbability(steps=4, probability=0.5),
         ]
     )
-    schedule = _ComponentLossSchedule(
+    schedule = ComponentLossSchedule(
         n_steps=sampler,
         optimize_last_step_only=False,
         loss_weight=1.0,
@@ -356,7 +346,7 @@ def test_stochastic_n_steps_samples_vary():
 
 class TestOptimizeLastStepOnlyStochastic:
     def _build(self, sampler, n_steps_limit=6):
-        return _ComponentLossSchedule(
+        return ComponentLossSchedule(
             n_steps=sampler,
             optimize_last_step_only=True,
             loss_weight=1.0,
@@ -417,7 +407,7 @@ class TestOptimizeLastStepOnlyStochastic:
 
 
 def test_sample_n_steps_noop_for_int_config():
-    schedule = _ComponentLossSchedule(
+    schedule = ComponentLossSchedule(
         n_steps=5,
         optimize_last_step_only=False,
         loss_weight=1.0,
@@ -429,7 +419,7 @@ def test_sample_n_steps_noop_for_int_config():
 
 
 def test_sample_n_steps_noop_for_none_config():
-    schedule = _ComponentLossSchedule(
+    schedule = ComponentLossSchedule(
         n_steps=None,
         optimize_last_step_only=False,
         loss_weight=1.0,
@@ -477,13 +467,13 @@ def test_n_steps_max_property():
 
 
 def test_coupled_stepper_train_loss_sample_n_steps_delegates():
-    ocean_schedule = MagicMock(spec=_ComponentLossSchedule)
+    ocean_schedule = MagicMock(spec=ComponentLossSchedule)
     ocean_schedule.loss_weight = 1.0
-    atmos_schedule = MagicMock(spec=_ComponentLossSchedule)
+    atmos_schedule = MagicMock(spec=ComponentLossSchedule)
     atmos_schedule.loss_weight = 1.0
     coupled_loss = CoupledStepperTrainLoss(
-        ocean_loss=MagicMock(spec=StepLossABC),
-        atmosphere_loss=MagicMock(spec=StepLossABC),
+        ocean_loss=Mock(spec=StepLoss),
+        atmosphere_loss=Mock(spec=StepLoss),
         ocean_schedule=ocean_schedule,
         atmosphere_schedule=atmos_schedule,
     )
@@ -502,7 +492,7 @@ def test_coupled_stepper_train_loss_sample_n_steps_delegates():
     ],
 )
 def test_schedule_n_required_forward_steps(n_steps, n_steps_limit, expected):
-    schedule = _ComponentLossSchedule(
+    schedule = ComponentLossSchedule(
         n_steps=n_steps,
         optimize_last_step_only=False,
         loss_weight=1.0,
@@ -522,7 +512,7 @@ def test_schedule_n_required_forward_steps(n_steps, n_steps_limit, expected):
 def test_schedule_n_required_forward_steps_optimize_last_step_only(
     n_steps, n_steps_limit, expected
 ):
-    schedule = _ComponentLossSchedule(
+    schedule = ComponentLossSchedule(
         n_steps=n_steps,
         optimize_last_step_only=True,
         loss_weight=1.0,
@@ -535,7 +525,7 @@ def test_schedule_n_required_forward_steps_after_sampling():
     sampler = TimeLengthProbabilities(
         outcomes=[TimeLengthProbability(steps=2, probability=1.0)]
     )
-    schedule = _ComponentLossSchedule(
+    schedule = ComponentLossSchedule(
         n_steps=sampler,
         optimize_last_step_only=False,
         loss_weight=1.0,
@@ -555,7 +545,7 @@ def test_schedule_n_required_forward_steps_after_sampling():
     ],
 )
 def test_null_schedule_n_required_forward_steps(kwargs):
-    schedule = _ComponentLossSchedule(
+    schedule = ComponentLossSchedule(
         optimize_last_step_only=False,
         n_steps_limit=10,
         **kwargs,
@@ -578,15 +568,15 @@ def test_null_schedule_n_required_forward_steps(kwargs):
 def test_coupled_stepper_train_loss_n_required_outer_steps(
     ocean_required, atmos_required, n_inner_steps, expected_outer
 ):
-    ocean_schedule = MagicMock(spec=_ComponentLossSchedule)
+    ocean_schedule = MagicMock(spec=ComponentLossSchedule)
     ocean_schedule.loss_weight = 1.0
-    atmos_schedule = MagicMock(spec=_ComponentLossSchedule)
+    atmos_schedule = MagicMock(spec=ComponentLossSchedule)
     atmos_schedule.loss_weight = 1.0
     ocean_schedule.n_required_forward_steps.return_value = ocean_required
     atmos_schedule.n_required_forward_steps.return_value = atmos_required
     coupled_loss = CoupledStepperTrainLoss(
-        ocean_loss=MagicMock(spec=StepLossABC),
-        atmosphere_loss=MagicMock(spec=StepLossABC),
+        ocean_loss=Mock(spec=StepLoss),
+        atmosphere_loss=Mock(spec=StepLoss),
         ocean_schedule=ocean_schedule,
         atmosphere_schedule=atmos_schedule,
     )
@@ -616,8 +606,8 @@ def test_component_training_config_loss_is_null(config_kwargs, expected_is_null)
     ],
 )
 def test_null_loss_contributions(steps_thru_atmos_7, ocean_kwargs):
-    atmos_loss_obj = _StepLoss(loss_obj=lambda *_, **__: torch.tensor(5.25))
-    ocean_loss_obj = _StepLoss(loss_obj=lambda *_, **__: torch.tensor(42.0))
+    atmos_loss_obj = _mock_step_loss(lambda *_, **__: torch.tensor(5.25))
+    ocean_loss_obj = _mock_step_loss(lambda *_, **__: torch.tensor(42.0))
     loss_obj = _build_coupled_loss(
         ocean_loss=ocean_loss_obj,
         atmosphere_loss=atmos_loss_obj,
