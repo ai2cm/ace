@@ -1,7 +1,7 @@
 log_loss_vs_noise: true
 tropical_oversampling:
   lat_threshold: 30.0
-  multiplier: 3
+  multiplier: 8
 static_inputs:
   HGTsfc: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
   land_fraction: /climate-default/2025-11-19-X-SHiELD-AMIP-downscaling-land-fraction/3km/land_fraction.zarr
@@ -142,8 +142,8 @@ validation_data:
   drop_last: true
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
-max_epochs: 100
-validate_interval: 10
+max_epochs: 200
+validate_interval: 20
 experiment_dir: /results
 save_checkpoints: false
 logging:
