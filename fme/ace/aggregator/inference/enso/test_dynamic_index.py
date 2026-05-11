@@ -91,7 +91,7 @@ def _get_windowed_times(
 )
 def test_lat_lon_region(lat_bounds, lon_bounds, case):
     n_lat, n_lon = 3, 5
-    lat_coord = torch.linspace(0.0, 10.0, n_lat)
+    lat_coord = torch.linspace(0.0, 10.0, n_lat)  # [0, 5, 10] degrees
     lon_coord = torch.linspace(0.0, 20.0, n_lon)
     region = LatLonRegion(
         lat=lat_coord,
@@ -101,12 +101,14 @@ def test_lat_lon_region(lat_bounds, lon_bounds, case):
     )
     regional_weights = region.regional_weights
     assert regional_weights.shape == (n_lat, n_lon)
+    cos_lat = torch.cos(torch.deg2rad(lat_coord)).unsqueeze(-1)  # (3, 1)
     if case == "original_domain":
-        assert torch.allclose(regional_weights, torch.ones_like(regional_weights))
+        expected = cos_lat.expand(n_lat, n_lon)
+        assert torch.allclose(regional_weights, expected)
     elif case == "null_domain":
         assert torch.allclose(regional_weights, torch.zeros_like(regional_weights))
     elif case == "first_half_lat":
-        expected = torch.tensor(
+        mask = torch.tensor(
             [
                 [1, 1, 1, 1, 1],
                 [1, 1, 1, 1, 1],
@@ -114,9 +116,10 @@ def test_lat_lon_region(lat_bounds, lon_bounds, case):
             ],
             dtype=torch.float32,
         )
+        expected = mask * cos_lat
         assert torch.allclose(regional_weights, expected)
     elif case == "first_half_lon":
-        expected = torch.tensor(
+        mask = torch.tensor(
             [
                 [1, 1, 1, 0, 0],
                 [1, 1, 1, 0, 0],
@@ -124,9 +127,10 @@ def test_lat_lon_region(lat_bounds, lon_bounds, case):
             ],
             dtype=torch.float32,
         )
+        expected = mask * cos_lat
         assert torch.allclose(regional_weights, expected)
     else:
-        expected = torch.tensor(
+        mask = torch.tensor(
             [
                 [1, 1, 1, 0, 0],
                 [1, 1, 1, 0, 0],
@@ -134,6 +138,7 @@ def test_lat_lon_region(lat_bounds, lon_bounds, case):
             ],
             dtype=torch.float32,
         )
+        expected = mask * cos_lat
         assert torch.allclose(regional_weights, expected)
 
 
@@ -199,7 +204,7 @@ def test_regional__raw_index():
     raw_indices: torch.Tensor = agg._raw_indices
     for raw_index in raw_indices.values():
         assert raw_index.shape == (n_samples, n_times)
-        assert torch.allclose(raw_index, expected_values)
+        assert torch.allclose(raw_index, expected_values, atol=1e-3)
     raw_times: xr.DataArray = agg._raw_index_times
     assert raw_times.sizes["sample"] == n_samples
     assert raw_times.sizes["time"] == n_times

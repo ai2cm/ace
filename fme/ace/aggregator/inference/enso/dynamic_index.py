@@ -45,9 +45,9 @@ class LatLonRegion(Region):
         lon_mask = (
             (self.lon >= self.lon_bounds[0]) & (self.lon <= self.lon_bounds[1])
         ).unsqueeze(self.horizontal_dims[0])
-        self._regional_weights = torch.where(
-            torch.logical_and(lat_mask, lon_mask), 1.0, 0.0
-        )
+        region_mask = torch.logical_and(lat_mask, lon_mask).float()
+        cos_lat = torch.cos(torch.deg2rad(self.lat)).unsqueeze(self.horizontal_dims[1])
+        self._regional_weights = region_mask * cos_lat
 
     @property
     def regional_weights(self) -> torch.Tensor:

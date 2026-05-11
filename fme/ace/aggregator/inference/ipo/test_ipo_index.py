@@ -11,7 +11,6 @@ from fme.ace.aggregator.inference.data import InferenceBatchData
 from ..enso.dynamic_index import LatLonRegion
 from .ipo_index import (
     PairedIPOIndexAggregator,
-    _compute_sample_mean_std_ratio,
     _IPORegionalAccumulator,
     low_pass_filter,
 )
@@ -86,25 +85,6 @@ class TestLowPassFilter:
         filtered = low_pass_filter(low_freq, cutoff_period_yrs=13.0)
         correlation = np.corrcoef(filtered, low_freq)[0, 1]
         assert correlation > 0.95
-
-
-class TestComputeSampleMeanStdRatio:
-    def test_identical_gives_one(self):
-        data = np.random.randn(3, 100)
-        ratio = _compute_sample_mean_std_ratio(data, data)
-        assert abs(ratio - 1.0) < 1e-6
-
-    def test_double_amplitude_gives_two(self):
-        target = np.random.randn(3, 100)
-        prediction = target * 2.0
-        ratio = _compute_sample_mean_std_ratio(prediction, target)
-        assert abs(ratio - 2.0) < 1e-6
-
-    def test_half_amplitude(self):
-        target = np.random.randn(3, 100)
-        prediction = target * 0.5
-        ratio = _compute_sample_mean_std_ratio(prediction, target)
-        assert abs(ratio - 0.5) < 1e-6
 
 
 class TestIPORegionalAccumulator:
@@ -201,11 +181,10 @@ class TestPairedIPOIndexAggregator:
         lon = torch.linspace(100.0, 300.0, 17)
         n_lat, n_lon = len(lat), len(lon)
         n_samples = 1
-        n_months = 40 * 12  # 40 years to exceed filter requirement
+        n_months = 85 * 12  # 85 years to exceed 80-year threshold
 
         agg = PairedIPOIndexAggregator(lat=lat, lon=lon)
 
-        # Use monthly frequency to keep the test fast
         chunk_size = 60
         for i_start in range(0, n_months, chunk_size):
             n_chunk = min(chunk_size, n_months - i_start)
@@ -240,10 +219,53 @@ class TestPairedIPOIndexAggregator:
         logs = agg.get_logs("test")
         plt.close("all")
 
-        assert any("ipo_tpi_std_ratio" in k for k in logs)
         assert any("ipo_tpi_std_norm" in k for k in logs)
+        assert any("ipo_tpi_std" in k for k in logs)
         assert any("ipo_tpi_filtered" in k for k in logs)
         assert any("ipo_tpi_power_spectrum" in k for k in logs)
+        assert not any("ipo_tpi_std_ratio" in k for k in logs)
+
+    def test_get_logs_empty_for_short_rollout(self):
+        """Rollouts shorter than 80 years should not report IPO metrics."""
+        lat = torch.linspace(-60.0, 60.0, 13)
+        lon = torch.linspace(100.0, 300.0, 17)
+        n_lat, n_lon = len(lat), len(lon)
+        n_samples = 1
+        n_months = 40 * 12  # 40 years, below 80-year threshold
+
+        agg = PairedIPOIndexAggregator(lat=lat, lon=lon)
+
+        chunk_size = 60
+        for i_start in range(0, n_months, chunk_size):
+            n_chunk = min(chunk_size, n_months - i_start)
+            time = _make_time(n_samples, n_chunk, i_start=i_start, freq="MS")
+            months = time.isel(sample=0).dt.month.values
+            seasonal = torch.tensor(
+                [np.sin(2 * np.pi * m / 12) for m in months],
+                device=get_device(),
+                dtype=torch.float32,
+            )[None, :, None, None]
+            sst = (
+                torch.full(
+                    (n_samples, n_chunk, n_lat, n_lon), 300.0, device=get_device()
+                )
+                + seasonal
+            )
+            batch = InferenceBatchData(
+                prediction={"sst": sst},
+                target={"sst": sst},
+                time=time,
+                i_time_start=i_start,
+            )
+            agg.record_batch(batch)
+
+        logs = agg.get_logs("test")
+        plt.close("all")
+
+        assert not any("ipo_tpi_std_norm" in k for k in logs)
+        assert not any("ipo_tpi_std" in k for k in logs)
+        assert not any("ipo_tpi_filtered" in k for k in logs)
+        assert not any("ipo_tpi_power_spectrum" in k for k in logs)
 
     def test_get_dataset_has_sources(self):
         """Test that get_dataset returns target and prediction sources."""
