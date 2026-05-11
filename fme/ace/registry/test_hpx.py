@@ -7,15 +7,13 @@ import pytest
 import torch as th
 import torch.nn as nn
 
-from fme.ace.models.healpix.healpix_activations import (
-    CappedGELUConfig,
-    DownsamplingBlockConfig,
-)
+from fme.ace.models.healpix.healpix_activations import CappedGELUConfig
 from fme.ace.models.healpix.healpix_blocks import (
     ConvBlockConfig,
     DealiasedDownsample,
-    RecurrentBlockConfig,
+    DownsamplingBlockConfig,
     SmoothedInterpolateConv,
+    UpsamplingBlockConfig,
 )
 from fme.ace.models.healpix.healpix_decoder import UNetDecoder
 from fme.ace.models.healpix.healpix_encoder import UNetEncoder
@@ -26,10 +24,7 @@ from fme.ace.models.healpix.healpix_layers import (
     HEALPixPaddingv2,
     have_earth2grid,
 )
-from fme.ace.models.healpix.healpix_paddings import (
-    make_hpx_padding_layer,
-    warn_deprecated_enable_healpixpad,
-)
+from fme.ace.models.healpix.healpix_paddings import make_hpx_padding_layer
 from fme.ace.models.healpix.healpix_unet import HEALPixUNet
 from fme.ace.registry.hpx import UNetDecoderConfig, UNetEncoderConfig
 from fme.ace.stepper import StepperConfig
@@ -83,14 +78,13 @@ def encoder_config(
 
 def up_sampling_block_config(in_channels=3, out_channels=1):
     activation_block_config = CappedGELUConfig(cap_value=10)
-    transposed_conv_upsample_block_config = ConvBlockConfig(
+    return UpsamplingBlockConfig(
+        block_type="TransposedConvUpsample",
         in_channels=in_channels,
         out_channels=out_channels,
         activation=activation_block_config,
         stride=2,
-        block_type="TransposedConvUpsample",
     )
-    return transposed_conv_upsample_block_config
 
 
 def output_layer_config(in_channels=3, out_channels=2):
@@ -105,26 +99,15 @@ def output_layer_config(in_channels=3, out_channels=2):
     return conv_block_config
 
 
-def recurrent_block_config(in_channels=3):
-    recurrent_block_config = RecurrentBlockConfig(
-        in_channels=in_channels,
-        kernel_size=1,
-        block_type="ConvGRUBlock",
-    )
-    return recurrent_block_config
-
-
 def decoder_config(
     conv_next_block_config,
     up_sampling_block_config,
     output_layer_config,
-    recurrent_block_config,
     n_channels=[34, 68, 136],
 ):
     decoder_config = UNetDecoderConfig(
         conv_block=conv_next_block_config,
         up_sampling_block=up_sampling_block_config,
-        recurrent_block=recurrent_block_config,
         output_layer=output_layer_config,
         n_channels=n_channels,
         dilations=[4, 2, 1],
@@ -174,7 +157,7 @@ def _hpx_unet_configs(
     )
     dec = UNetDecoderConfig(
         conv_block=dec_conv,
-        up_sampling_block=ConvBlockConfig(
+        up_sampling_block=UpsamplingBlockConfig(
             block_type="TransposedConvUpsample",
             stride=2,
             hpx_padding_mode=padding_mode,
@@ -188,7 +171,6 @@ def _hpx_unet_configs(
             hpx_padding_mode=padding_mode,
             nside=img,
         ),
-        recurrent_block=None,
         n_channels=decoder_n_channels,
         n_layers=[1] * len(decoder_n_channels),
         output_channels=output_channels,
@@ -239,9 +221,7 @@ def test_hpx_init(shape):
     encoder = encoder_config(conv_next_block, down_sampling_block)
     up_sampling_block = up_sampling_block_config()
     output_layer = output_layer_config()
-    decoder = decoder_config(
-        conv_next_block, up_sampling_block, output_layer, None,
-    )
+    decoder = decoder_config(conv_next_block, up_sampling_block, output_layer)
 
     hpx_config_data = {
         "encoder": dataclasses.asdict(encoder),
@@ -347,41 +327,12 @@ def test_UNetEncoder_forward():
     invar = th.rand(tensor_size).to(device)
     outvar = encoder(invar)
 
-    # doesn't do anything
-    encoder.reset()
-
     # outvar is a module list
     for idx, out_tensor in enumerate(outvar):
         # verify the channels and h dim are correct
         assert out_tensor.shape[1] == n_channels[idx]
         # default behaviour is to half the h/w size after first
         assert out_tensor.shape[2] == tensor_size[2] // (2**idx)
-
-
-def test_UNetEncoder_reset():
-    channels = 2
-    n_channels = (16, 32, 64)
-    device = get_device()
-
-    # Dicts for block configs used by encoder
-    conv_block_config = ConvBlockConfig(
-        in_channels=channels,
-        block_type="ConvNeXtBlock",
-    )
-    down_sampling_block_config = DownsamplingBlockConfig(
-        pooling=2,
-        block_type="MaxPool",
-    )
-    encoder = UNetEncoder(
-        conv_block=conv_block_config,
-        down_sampling_block=down_sampling_block_config,
-        n_channels=n_channels,
-        input_channels=channels,
-    ).to(device)
-
-    # doesn't do anything
-    encoder.reset()
-    assert isinstance(encoder, UNetEncoder)
 
 
 def test_UNetDecoder_initilization():
@@ -394,11 +345,11 @@ def test_UNetDecoder_initilization():
     conv_block_config = ConvBlockConfig(
         in_channels=in_channels, out_channels=out_channels, block_type="ConvNeXtBlock"
     )
-    up_sampling_block_config = ConvBlockConfig(
+    up_sampling_block_config = UpsamplingBlockConfig(
+        block_type="TransposedConvUpsample",
         in_channels=in_channels,
         out_channels=out_channels,
         stride=2,
-        block_type="TransposedConvUpsample",
     )
 
     output_layer_config = ConvBlockConfig(
@@ -410,28 +361,19 @@ def test_UNetDecoder_initilization():
         block_type="ConvNeXtBlock",
     )
 
-    recurrent_block_config = RecurrentBlockConfig(
-        in_channels=2,
-        kernel_size=1,
-        block_type="ConvGRUBlock",
-    )
-
     decoder = UNetDecoder(
         conv_block=conv_block_config,
         up_sampling_block=up_sampling_block_config,
         output_layer=output_layer_config,
-        recurrent_block=recurrent_block_config,
         n_channels=n_channels,
     ).to(device)
 
     assert isinstance(decoder, UNetDecoder)
 
-    # without the recurrent block and with dilations
     decoder = UNetDecoder(
         conv_block=conv_block_config,
         up_sampling_block=up_sampling_block_config,
         output_layer=output_layer_config,
-        recurrent_block=None,
         n_channels=n_channels,
         dilations=[1, 1, 1],
     ).to(device)
@@ -450,11 +392,11 @@ def test_UNetDecoder_forward():
     conv_block_config = ConvBlockConfig(
         in_channels=in_channels, out_channels=out_channels, block_type="ConvNeXtBlock"
     )
-    up_sampling_block_config = ConvBlockConfig(
+    up_sampling_block_config = UpsamplingBlockConfig(
+        block_type="TransposedConvUpsample",
         in_channels=in_channels,
         out_channels=out_channels,
         stride=2,
-        block_type="TransposedConvUpsample",
     )
     output_layer_config = ConvBlockConfig(
         in_channels=in_channels,
@@ -464,17 +406,10 @@ def test_UNetDecoder_forward():
         n_layers=1,
         block_type="BasicConvBlock",
     )
-    recurrent_block_config = RecurrentBlockConfig(
-        in_channels=2,
-        kernel_size=1,
-        block_type="ConvGRUBlock",
-    )
-
     decoder = UNetDecoder(
         conv_block=conv_block_config,
         up_sampling_block=up_sampling_block_config,
         output_layer=output_layer_config,
-        recurrent_block=recurrent_block_config,
         n_channels=n_channels,
     ).to(device)
 
@@ -491,98 +426,19 @@ def test_UNetDecoder_forward():
     outvar = decoder(invars)
     assert outvar.shape == output_2_size
 
-    # make sure history is taken into account with ConvGRU
-    outvar_hist = decoder(invars)
-    assert not compare_output(outvar, outvar_hist)
+    outvar_repeat = decoder(invars)
+    assert compare_output(outvar, outvar_repeat)
 
-    # check with no recurrent
     decoder = UNetDecoder(
         conv_block=conv_block_config,
         up_sampling_block=up_sampling_block_config,
         output_layer=output_layer_config,
-        recurrent_block=None,
         n_channels=n_channels,
         dilations=[1, 1, 1],
     ).to(device)
 
     outvar = decoder(invars)
     assert outvar.shape == output_2_size
-
-
-def test_UNetDecoder_reset():
-    in_channels = 2
-    out_channels = 1
-    hw_size = 32
-    b_size = 12
-    n_channels = (64, 32, 16)
-    device = get_device()
-
-    # Dicts for block configs used by decoder
-    conv_block = ConvBlockConfig(in_channels=in_channels, block_type="ConvNeXtBlock")
-    up_sampling_block = ConvBlockConfig(
-        in_channels=in_channels,
-        out_channels=out_channels,
-        block_type="TransposedConvUpsample",
-    )
-    output_layer = ConvBlockConfig(
-        in_channels=in_channels,
-        out_channels=out_channels,
-        kernel_size=1,
-        dilation=1,
-        n_layers=1,
-        block_type="BasicConvBlock",
-    )
-
-    recurrent_block = RecurrentBlockConfig(
-        in_channels=2, kernel_size=1, block_type="ConvLSTMBlock"
-    )
-
-    decoder = UNetDecoder(
-        conv_block=conv_block,
-        up_sampling_block=up_sampling_block,
-        output_layer=output_layer,
-        recurrent_block=recurrent_block,
-        n_channels=n_channels,
-    ).to(device)
-
-    # build the list of tensors for the decoder
-    invars = []
-    # decoder has an algorithm that goes back to front
-    for idx in range(len(n_channels) - 1, -1, -1):
-        tensor_size = [b_size, n_channels[idx], hw_size, hw_size]
-        invars.append(th.rand(tensor_size).to(device))
-        hw_size = hw_size // 2
-
-    outvar = decoder(invars)
-
-    # make sure history is taken into account with ConvGRU
-    outvar_hist = decoder(invars)
-    assert not compare_output(outvar, outvar_hist)
-
-    # make sure after reset we get the same result
-    decoder.reset()
-    outvar_reset = decoder(invars)
-    assert compare_output(outvar, outvar_reset)
-
-    # test reset without recurrent block
-    decoder = UNetDecoder(
-        conv_block=conv_block,
-        up_sampling_block=up_sampling_block,
-        output_layer=output_layer,
-        recurrent_block=None,
-        n_channels=n_channels,
-    ).to(device)
-
-    outvar = decoder(invars)
-
-    # without the recurrent block should be the same
-    outvar_hist = decoder(invars)
-    assert compare_output(outvar, outvar_hist)
-
-    # make sure after reset we get the same result
-    decoder.reset()
-    outvar_reset = decoder(invars)
-    assert compare_output(outvar, outvar_reset)
 
 
 def compare_output(
@@ -888,50 +744,6 @@ def test_healpix_layer_uses_mode_selected_padding_class():
         assert isinstance(e_layer.layers[0], HEALPixPaddingv2)
 
 
-def test_isolatitude_compile_padding_close():
-    """Compiled vs eager isolatitude padding must match (same module weights)."""
-    h = 16
-    x = _folded_padding_dealias(h=h)
-    pad_eager = make_hpx_padding_layer(1, "isolatitude", enable_nhwc=False, nside=h)
-    pad_compiled = th.compile(
-        make_hpx_padding_layer(1, "isolatitude", enable_nhwc=False, nside=h)
-    )
-    y0 = pad_eager(x)
-    y1 = pad_compiled(x)
-    assert y0.shape == y1.shape
-    assert th.isfinite(y1).all()
-    assert th.allclose(y0, y1, atol=1e-5, rtol=1e-4)
-
-
-def test_warn_deprecated_enable_healpixpad_behavior(caplog):
-    """Explicit hpx_padding_mode must win without deprecation noise; legacy bool warns."""
-    caplog.set_level(logging.WARNING)
-
-    caplog.clear()
-    assert warn_deprecated_enable_healpixpad(False, "isolatitude") == "isolatitude"
-    assert not caplog.records
-
-    caplog.clear()
-    assert warn_deprecated_enable_healpixpad(True, "karlbauer") == "karlbauer"
-    assert not caplog.records
-
-    caplog.clear()
-    assert warn_deprecated_enable_healpixpad(None, None) == "earth2grid"
-    assert not caplog.records
-
-    caplog.clear()
-    assert warn_deprecated_enable_healpixpad(False, None) == "karlbauer"
-    assert any(
-        "enable_healpixpad is deprecated" in r.getMessage() for r in caplog.records
-    )
-
-    caplog.clear()
-    assert warn_deprecated_enable_healpixpad(True, None) == "earth2grid"
-    assert any(
-        "enable_healpixpad is deprecated" in r.getMessage() for r in caplog.records
-    )
-
-
 @pytest.mark.parametrize("mode", ["karlbauer", "isolatitude"])
 def test_dealiased_downsample_forward(mode):
     h = 16
@@ -968,12 +780,13 @@ def test_smoothed_interpolate_conv_forward(mode):
     assert y.shape[1] == 5
 
 
-def test_dealiased_downsample_config_accepts_stride_alias():
+def test_dealiased_downsample_config_uses_stride():
     cfg = DownsamplingBlockConfig(
         block_type="DealiasedDownsample",
         in_channels=3,
         stride=4,
         resample_filter=(1.0, 2.0, 1.0),
+        hpx_padding_mode="karlbauer",
     )
     assert cfg.downsample_spatial_factor() == 4
     module = cfg.build()
@@ -986,19 +799,21 @@ def test_dealiased_downsample_config_accepts_list_filter():
         in_channels=3,
         stride=2,
         resample_filter=[1.0, 2.0, 1.0],
+        hpx_padding_mode="karlbauer",
     )
     module = cfg.build()
     assert isinstance(module, DealiasedDownsample)
 
 
-def test_smoothed_interpolate_conv_config_accepts_modulus_aliases():
-    cfg = ConvBlockConfig(
+def test_smoothed_interpolate_conv_config_builds():
+    cfg = UpsamplingBlockConfig(
         block_type="SmoothedInterpolateConv",
         in_channels=3,
         out_channels=5,
         kernel_size=3,
-        scale_factor=2,
-        mode="nearest",
+        stride=2,
+        upsample_mode="nearest",
+        hpx_padding_mode="karlbauer",
     )
     module = cfg.build()
     assert isinstance(module, SmoothedInterpolateConv)
@@ -1014,7 +829,7 @@ def test_healpix_unet_dealias_smoothed():
     )
     down = DownsamplingBlockConfig(
         block_type="DealiasedDownsample",
-        dealias_stride=2,
+        stride=2,
         hpx_padding_mode="karlbauer",
         nside=img,
     )
@@ -1027,7 +842,7 @@ def test_healpix_unet_dealias_smoothed():
         nside=img,
         hpx_padding_mode="karlbauer",
     )
-    up = ConvBlockConfig(
+    up = UpsamplingBlockConfig(
         block_type="SmoothedInterpolateConv",
         stride=2,
         upsample_mode="nearest",
@@ -1045,7 +860,6 @@ def test_healpix_unet_dealias_smoothed():
             hpx_padding_mode="karlbauer",
             nside=img,
         ),
-        recurrent_block=None,
         n_channels=[16, 8],
         n_layers=[1, 1],
         output_channels=4,
@@ -1060,7 +874,6 @@ def test_healpix_unet_dealias_smoothed():
         decoder=dec,
         input_channels=in_ch,
         output_channels=4,
-        enable_healpixpad=False,
         hpx_padding_mode="karlbauer",
         nside=img,
     ).to(device)
@@ -1094,7 +907,7 @@ def test_multi_symmetric_convnext_block_forward():
     assert th.isfinite(y).all()
 
 
-def test_multi_symmetric_isolatitude_compile_padding_forward():
+def test_multi_symmetric_isolatitude_forward():
     img = 16
     conv = ConvBlockConfig(
         block_type="Multi_SymmetricConvNeXtBlock",
@@ -1104,7 +917,6 @@ def test_multi_symmetric_isolatitude_compile_padding_forward():
         n_layers=2,
         hpx_padding_mode="isolatitude",
         nside=img,
-        compile_padding=True,
         activation=CappedGELUConfig(cap_value=10),
     ).build()
     x = _folded_padding_dealias(channels=3, h=img)
@@ -1113,10 +925,10 @@ def test_multi_symmetric_isolatitude_compile_padding_forward():
     assert th.isfinite(y).all()
 
 
-def test_smoothed_interpolate_isolatitude_compile_padding_forward():
+def test_smoothed_interpolate_isolatitude_forward():
     img = 16
     x = _folded_padding_dealias(channels=3, h=img)
-    up = ConvBlockConfig(
+    up = UpsamplingBlockConfig(
         block_type="SmoothedInterpolateConv",
         in_channels=3,
         out_channels=3,
@@ -1125,14 +937,13 @@ def test_smoothed_interpolate_isolatitude_compile_padding_forward():
         activation=CappedGELUConfig(cap_value=10),
         hpx_padding_mode="isolatitude",
         nside=img,
-        compile_padding=True,
     ).build()
     y_up = up(x)
     assert y_up.shape[-2:] == (img * 2, img * 2)
     assert th.isfinite(y_up).all()
 
 
-def test_healpix_unet_isolatitude_compile_padding_nside_sequence():
+def test_healpix_unet_isolatitude_nside_sequence():
     conv_cfg = ConvBlockConfig(
         block_type="ConvNeXtBlock",
         in_channels=3,
@@ -1160,7 +971,7 @@ def test_healpix_unet_isolatitude_compile_padding_nside_sequence():
             dilation=1,
             activation=CappedGELUConfig(cap_value=10),
         ),
-        up_sampling_block=ConvBlockConfig(
+        up_sampling_block=UpsamplingBlockConfig(
             block_type="TransposedConvUpsample",
             in_channels=3,
             out_channels=3,
@@ -1174,7 +985,6 @@ def test_healpix_unet_isolatitude_compile_padding_nside_sequence():
             kernel_size=1,
             n_layers=1,
         ),
-        recurrent_block=None,
         n_channels=[8, 8, 8],
         n_layers=[1, 1, 1],
         output_channels=4,
@@ -1186,7 +996,6 @@ def test_healpix_unet_isolatitude_compile_padding_nside_sequence():
         input_channels=5,
         output_channels=4,
         hpx_padding_mode="isolatitude",
-        compile_padding=True,
         nside=[64, 32, 16],
     )
     x = th.randn(1, 12, 5, 64, 64)
@@ -1214,29 +1023,8 @@ def test_HEALPixUNet_initialize():
         nside=img,
     ).to(device)
     assert isinstance(model, HEALPixUNet)
-    # confirm decoder has no recurrent submodules
     for layer in model.decoder.decoder:
-        assert layer["recurrent"] is None
-
-
-def test_HEALPixUNet_rejects_recurrent_decoder():
-    img = 16
-    enc, dec = _hpx_unet_configs(img=img)
-    dec.recurrent_block = RecurrentBlockConfig(
-        block_type="ConvGRUBlock",
-        kernel_size=1,
-        hpx_padding_mode="karlbauer",
-        nside=img // 2,
-    )
-    with pytest.raises(ValueError, match="non-recurrent"):
-        HEALPixUNet(
-            encoder=enc,
-            decoder=dec,
-            input_channels=3,
-            output_channels=4,
-            hpx_padding_mode="karlbauer",
-            nside=img,
-        )
+        assert set(layer.keys()) == {"upsamp", "conv"}
 
 
 def test_HEALPixUNet_forward_shape():
@@ -1330,7 +1118,6 @@ def test_HEALPixUNet_in_stepper():
     decoder = UNetDecoderConfig(
         conv_block=conv_next_block_config(),
         up_sampling_block=up_sampling_block_config(),
-        recurrent_block=None,
         output_layer=output_layer_config(),
         n_channels=[64, 32, 16],
         dilations=[4, 2, 1],

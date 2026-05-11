@@ -51,65 +51,6 @@ except ImportError:
     logger.warning("Could not import pad from earth2grid.healpix.")
     have_earth2grid = False
 
-_ENABLE_HEALPIXPAD_DEPRECATION_MSG = (
-    "enable_healpixpad is deprecated; use hpx_padding_mode instead "
-    "(e.g. hpx_padding_mode='earth2grid' for earth2grid CUDA padding, "
-    "hpx_padding_mode='karlbauer' for the pure PyTorch HEALPixPadding implementation). "
-    "To reproduce the same behavior as the legacy enable_healpixpad=True, "
-    "set hpx_padding_mode='earth2grid' in the model config."
-)
-
-
-def warn_deprecated_enable_healpixpad(
-    enable_healpixpad: bool | None, hpx_padding_mode: str | None = None
-) -> str:
-    """
-    Resolve ``hpx_padding_mode`` for module construction, accounting for deprecated
-    ``enable_healpixpad``.
-
-    If ``hpx_padding_mode`` is not ``None``, it fully determines the backend: the
-    legacy flag is ignored and **no** deprecation warning is emitted.
-
-    If ``hpx_padding_mode`` is omitted (``None``) and ``enable_healpixpad`` is also
-    omitted (``None``), the default backend is ``earth2grid``.
-
-    If ``hpx_padding_mode`` is omitted but ``enable_healpixpad`` is explicitly
-    ``True`` or ``False``, a deprecation warning is logged and legacy mapping applies:
-    ``True`` → ``earth2grid``, ``False`` → ``karlbauer``.
-
-    Parameters
-    ----------
-    enable_healpixpad : bool or None
-        Deprecated flag from config or kwargs; ``None`` means not set / do not forward
-        deprecated flag into ``HEALPixLayer``.
-    hpx_padding_mode : str or None
-        Requested padding backend, or ``None`` when omitted.
-
-    Returns
-    -------
-    str
-        Resolved padding mode to store and pass to child modules.
-    """
-    if hpx_padding_mode is not None:
-        return hpx_padding_mode
-
-    if enable_healpixpad is None:
-        return "earth2grid"
-
-    msg = _ENABLE_HEALPIXPAD_DEPRECATION_MSG
-    msg = f"{msg} Current hpx_padding_mode={hpx_padding_mode!r}, enable_healpixpad={enable_healpixpad!r}."
-    logger.warning(f"WARNING: {msg}")
-    if enable_healpixpad:
-        return "earth2grid"
-    return "karlbauer"
-
-
-def pop_deprecated_enable_healpixpad_from_kwargs(kwargs: dict) -> bool | None:
-    """Remove ``enable_healpixpad`` from ``kwargs`` if present; return its value for legacy resolution."""
-    if "enable_healpixpad" in kwargs:
-        return bool(kwargs.pop("enable_healpixpad"))
-    return None
-
 
 def make_hpx_padding_layer(
     padding: int,
@@ -255,8 +196,6 @@ class HEALPixPaddingv2(th.nn.Module):
     - The last four indices in the faces dimension [8, 9, 10, 11] are the faces on the southern hemisphere
 
     Orientation and arrangement of the HEALPix faces are outlined above.
-
-    TODO: Missing library to use this class. Need to see if we can get it, if not needs to be removed
     """
 
     def __init__(self, padding: int, enable_nhwc: bool = False):  # pragma: no cover

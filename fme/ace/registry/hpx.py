@@ -14,31 +14,24 @@ from fme.core.dataset_info import DatasetInfo
 @dataclasses.dataclass
 class HEALPixUNetBuilder(ModuleConfig):
     """
-    Configuration for the HEALPix UNet (non-recurrent encoder–decoder stack).
+    Configuration for the HEALPix UNet (feed-forward encoder–decoder stack).
 
-    Time stepping, multi-step inputs, residual prediction, and any recurrent
-    state live in the stepper, not in this module.
+    Time stepping, multi-step inputs, residual prediction, and rollout live in
+    the stepper, not in this module.
 
     Parameters:
         encoder: UNet encoder configuration.
-        decoder: UNet decoder configuration. ``recurrent_block`` must be
-            ``None``.
+        decoder: UNet decoder configuration.
         enable_nhwc: Use NHWC tensor layout for child modules.
-        enable_healpixpad: Deprecated legacy padding toggle. Prefer
-            ``hpx_padding_mode``.
         hpx_padding_mode: HEALPix padding backend (``"earth2grid"``,
-            ``"karlbauer"``, ``"isolatitude"``).
-        compile_padding: If ``True``, apply ``torch.compile`` to isolatitude
-            padding modules.
+            ``"karlbauer"``, ``"isolatitude"``). Default ``"earth2grid"``.
         nside: Face size(s) per UNet level (shallowest to deepest).
     """
 
     encoder: UNetEncoderConfig
     decoder: UNetDecoderConfig
     enable_nhwc: bool = False
-    enable_healpixpad: Optional[bool] = None
-    hpx_padding_mode: Optional[str] = None
-    compile_padding: bool = False
+    hpx_padding_mode: str = "earth2grid"
     nside: Optional[Sequence[int] | int] = None
 
     def build(
@@ -66,8 +59,6 @@ class HEALPixUNetBuilder(ModuleConfig):
             input_channels=n_in_channels,
             output_channels=n_out_channels,
             enable_nhwc=self.enable_nhwc,
-            enable_healpixpad=self.enable_healpixpad,
             hpx_padding_mode=self.hpx_padding_mode,
-            compile_padding=self.compile_padding,
             nside=self.nside,
         )

@@ -35,11 +35,12 @@ from fme.ace.inference.inference import (
     InitialConditionConfig,
     run_inference_from_config,
 )
-from fme.ace.models.healpix.healpix_activations import (
-    CappedGELUConfig,
+from fme.ace.models.healpix.healpix_activations import CappedGELUConfig
+from fme.ace.models.healpix.healpix_blocks import (
+    ConvBlockConfig,
     DownsamplingBlockConfig,
+    UpsamplingBlockConfig,
 )
-from fme.ace.models.healpix.healpix_blocks import ConvBlockConfig, RecurrentBlockConfig
 from fme.ace.registry.hpx import (
     HEALPixUNetBuilder,
     UNetDecoderConfig,

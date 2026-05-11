@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """
-Non-recurrent HEALPix UNet model.
+HEALPix UNet: single forward-pass encoder–decoder stack.
 
 Adapted from the modulus-uw ``physicsnemo.models.dlwp_healpix.HEALPixUNet`` to the
 ace codebase. Unlike the modulus-uw implementation, this version is a pure neural
@@ -24,7 +24,7 @@ prognostic/diagnostic splitting, and residual prediction are delegated to the
 ace stepper.
 """
 
-from typing import Optional, Sequence
+from typing import Sequence
 
 import torch as th
 import torch.nn as nn
@@ -32,11 +32,10 @@ import torch.nn as nn
 from .healpix_decoder import UNetDecoderConfig
 from .healpix_encoder import UNetEncoderConfig
 from .healpix_layers import HEALPixFoldFaces, HEALPixUnfoldFaces
-from .healpix_paddings import warn_deprecated_enable_healpixpad
 
 
 class HEALPixUNet(nn.Module):
-    """Non-recurrent UNet on the HEALPix mesh.
+    """Feed-forward UNet on the HEALPix mesh.
 
     The model operates on tensors with shape ``[B, F, C, H, W]`` where ``F=12``
     is the number of HEALPix faces and ``C`` is the channel count. Faces are
@@ -59,9 +58,7 @@ class HEALPixUNet(nn.Module):
         input_channels: int,
         output_channels: int,
         enable_nhwc: bool = False,
-        enable_healpixpad: Optional[bool] = None,
-        hpx_padding_mode: Optional[str] = None,
-        compile_padding: bool = False,
+        hpx_padding_mode: str = "earth2grid",
         nside: Sequence[int] | int | None = (64, 32, 16),
     ):
         """
@@ -69,43 +66,25 @@ class HEALPixUNet(nn.Module):
 
         Args:
             encoder: Configuration for the U-net encoder.
-            decoder: Configuration for the U-net decoder. ``recurrent_block``
-                must be ``None``; recurrence belongs in the stepper, not the
-                UNet decoder here.
+            decoder: Configuration for the U-net decoder.
             input_channels: Number of channels in the input tensor (i.e. the
                 size of the channel dimension of the tensor passed to
                 ``forward``).
             output_channels: Number of channels in the output tensor.
             enable_nhwc: Use NHWC tensor layout for child modules.
-            enable_healpixpad: Deprecated. When ``hpx_padding_mode`` is omitted,
-                ``True`` maps to ``"earth2grid"`` and ``False`` to
-                ``"karlbauer"`` with a deprecation warning. Prefer setting
-                ``hpx_padding_mode`` directly.
             hpx_padding_mode: HEALPix padding backend. One of ``"earth2grid"``,
-                ``"karlbauer"``, or ``"isolatitude"``. Defaults to
-                ``"earth2grid"`` when both ``hpx_padding_mode`` and
-                ``enable_healpixpad`` are omitted.
-            compile_padding: If ``True``, apply ``torch.compile`` to
-                isolatitude padding modules.
+                ``"karlbauer"``, or ``"isolatitude"``. Default ``"earth2grid"``.
             nside: Face size(s) per UNet level (shallowest to deepest). May be
                 a sequence with ``len(encoder.n_channels)`` entries, an int
                 (treated as the shallowest level with halving per level), or
                 ``None`` (defaults to ``64`` halving per level).
         """
         super().__init__()
-        if decoder.recurrent_block is not None:
-            raise ValueError(
-                "HEALPixUNet is non-recurrent; set decoder.recurrent_block "
-                "to None and handle time/recurrence in the stepper."
-            )
 
         self.input_channels = input_channels
         self.output_channels = output_channels
         self.enable_nhwc = enable_nhwc
-        self.compile_padding = compile_padding
-        self.hpx_padding_mode = warn_deprecated_enable_healpixpad(
-            enable_healpixpad, hpx_padding_mode
-        )
+        self.hpx_padding_mode = hpx_padding_mode
 
         levels = len(encoder.n_channels)
         if isinstance(nside, int):
@@ -131,17 +110,13 @@ class HEALPixUNet(nn.Module):
 
         encoder.input_channels = input_channels
         encoder.enable_nhwc = enable_nhwc
-        encoder.enable_healpixpad = None
         encoder.hpx_padding_mode = self.hpx_padding_mode
-        encoder.compile_padding = compile_padding
         encoder.nside = self.nside[0]
         self.encoder = encoder.build()
 
         decoder.output_channels = output_channels
         decoder.enable_nhwc = enable_nhwc
-        decoder.enable_healpixpad = None
         decoder.hpx_padding_mode = self.hpx_padding_mode
-        decoder.compile_padding = compile_padding
         decoder.nside = self.nside[-1]
         self.decoder = decoder.build()
 

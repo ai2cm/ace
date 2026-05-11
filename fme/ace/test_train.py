@@ -134,7 +134,6 @@ def _get_test_yaml_files(
             conv_next_block,
             up_sampling_block,
             output_layer,
-            None,
             n_channels=[4, 8, 16],
         )
         net_config = dict(

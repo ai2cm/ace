@@ -41,8 +41,6 @@ from .healpix_paddings import (
     have_earth2grid,
     isolatitude_pad_folded,
     make_hpx_padding_layer,
-    pop_deprecated_enable_healpixpad_from_kwargs,
-    warn_deprecated_enable_healpixpad,
 )
 
 
@@ -57,9 +55,8 @@ class HEALPixLayer(th.nn.Module):
     def __init__(
         self,
         layer,
-        hpx_padding_mode=None,
+        hpx_padding_mode: str = "earth2grid",
         nside: int | None = None,
-        compile_padding: bool = False,
         **kwargs,
     ):
         """
@@ -69,34 +66,25 @@ class HEALPixLayer(th.nn.Module):
             Layer class (e.g. ``torch.nn.Conv2d``) or module; must match the
             detection logic for convolution vs interpolation vs other.
         hpx_padding_mode : str, optional
-            Which padding implementation to use (``None`` means omitted; default ``earth2grid``):
+            Which padding implementation to use (default ``"earth2grid"``):
             - ``"earth2grid"`` — ``earth2grid.healpix.pad`` (default).
             - ``"karlbauer"`` — Karlbauer et al. (2024) face stitching, same result as earth2grid but slower.
             - ``"isolatitude"`` — alternate padding scheme which preserves isolatitude signals.
         nside : int or None, optional
             Native resolution of each HEALPix face (height = width). Required when
             ``hpx_padding_mode=="isolatitude"``.
-        compile_padding : bool, optional
-            Whether to wrap isolatitude padding in ``_CompilePaddingWrapper``. Only
-            supported when ``hpx_padding_mode="isolatitude"``.
         **kwargs
-            Forwarded to ``layer`` after removing ``enable_nhwc`` and deprecated
-            ``enable_healpixpad`` (e.g. ``in_channels``, ``out_channels``, ``kernel_size``,
-            ``dilation``, ``enable_nhwc``). If ``nside`` or ``compile_padding`` appears
-            here (e.g. Hydra), it is consumed and overrides the corresponding argument.
+            Forwarded to ``layer`` after removing ``enable_nhwc`` (e.g. ``in_channels``,
+            ``out_channels``, ``kernel_size``, ``dilation``, ``enable_nhwc``). If ``nside``
+            appears here (e.g. Hydra), it is consumed and overrides the corresponding
+            argument.
         """
         super().__init__()
         layers = []
 
-        legacy_enable_healpixpad = pop_deprecated_enable_healpixpad_from_kwargs(kwargs)
-        hpx_padding_mode = warn_deprecated_enable_healpixpad(
-            legacy_enable_healpixpad, hpx_padding_mode
-        )
         if "nside" in kwargs:
             _ns = kwargs.pop("nside")
             nside = int(_ns) if _ns is not None else None
-        if "compile_padding" in kwargs:
-            compile_padding = bool(kwargs.pop("compile_padding"))
 
         if "enable_nhwc" in kwargs:
             enable_nhwc = kwargs["enable_nhwc"]
@@ -119,8 +107,6 @@ class HEALPixLayer(th.nn.Module):
                 enable_nhwc=enable_nhwc,
                 nside=nside,
             )
-            if compile_padding:
-                padding_layer = th.compile(padding_layer)
             layers.append(padding_layer)
 
         layers.append(layer(**kwargs))
@@ -157,6 +143,4 @@ __all__ = [
     "have_earth2grid",
     "isolatitude_pad_folded",
     "make_hpx_padding_layer",
-    "pop_deprecated_enable_healpixpad_from_kwargs",
-    "warn_deprecated_enable_healpixpad",
 ]
