@@ -8,8 +8,8 @@ import torch
 
 from fme.ace.aggregator import (
     InferenceEvaluatorAggregatorConfig,
+    LegacyFlagInferenceEvaluatorAggregatorConfig,
     OneStepAggregatorConfig,
-    TypedMetricInferenceEvaluatorAggregatorConfig,
 )
 from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.batch_data import PrognosticState
@@ -39,10 +39,6 @@ from fme.core.rand import set_seed
 from fme.core.typing_ import Slice
 from fme.core.weight_ops import CopyWeightsConfig
 
-AnyAggregatorConfig = (
-    InferenceEvaluatorAggregatorConfig | TypedMetricInferenceEvaluatorAggregatorConfig
-)
-
 
 @dataclasses.dataclass
 class InlineInferenceConfig:
@@ -69,11 +65,10 @@ class InlineInferenceConfig:
     forward_steps_in_memory: int
     n_ensemble_per_ic: int = 1
     epochs: Slice = dataclasses.field(default_factory=lambda: Slice())
-    aggregator: AnyAggregatorConfig = dataclasses.field(
-        default_factory=lambda: InferenceEvaluatorAggregatorConfig(
-            log_global_mean_time_series=False, log_global_mean_norm_time_series=False
-        )
-    )
+    aggregator: (
+        InferenceEvaluatorAggregatorConfig
+        | LegacyFlagInferenceEvaluatorAggregatorConfig
+    ) = dataclasses.field(default_factory=lambda: InferenceEvaluatorAggregatorConfig())
     name: str | None = None
     weight: float = 1.0
 
@@ -90,18 +85,6 @@ class InlineInferenceConfig:
                 f"{self.loader.start_indices.n_initial_conditions} and "
                 f"{dist.world_size}."
             )
-        if isinstance(self.aggregator, InferenceEvaluatorAggregatorConfig) and (
-            self.aggregator.log_global_mean_time_series
-            or self.aggregator.log_global_mean_norm_time_series
-        ):
-            # Both of log_global_mean_time_series and
-            # log_global_mean_norm_time_series must be False for inline inference.
-            self.aggregator.log_global_mean_time_series = False
-            self.aggregator.log_global_mean_norm_time_series = False
-
-        if isinstance(self.aggregator, InferenceEvaluatorAggregatorConfig):
-            for log_step_mean in self.aggregator.log_step_means:
-                log_step_mean.validate(self.n_forward_steps)
 
     @property
     def using_labels(self) -> bool:
