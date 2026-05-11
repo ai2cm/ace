@@ -1366,56 +1366,6 @@ def _process_ensemble_output_list(
     return ocean_gen_data, atmos_gen_data
 
 
-@dataclasses.dataclass
-class ComponentTrainingConfig:
-    """Configuration for one component's training behavior within a coupled
-    stepper.
-
-    Parameters:
-        loss: The step loss function configuration (e.g. MSE, EnsembleLoss).
-        n_steps: Number of consecutive steps contributing to the loss, starting
-            from the first. Can be an int, ``None`` (the default, meaning all
-            available steps), or a ``TimeLengthProbabilities`` for stochastic
-            per-batch sampling.
-        optimize_last_step_only: If True, only the last step within the
-            training horizon defined by ``n_steps`` is optimized (i.e.
-            contributes to the loss and has gradients enabled).
-        loss_weight: Weight applied to the loss for this component.
-        parameter_init: Component-level parameter initialization.
-    """
-
-    loss: StepLossConfig
-    n_steps: TimeLengthProbabilities | int | None = None
-    optimize_last_step_only: bool = False
-    loss_weight: float = 1.0
-    parameter_init: ParameterInitializationConfig = dataclasses.field(
-        default_factory=lambda: ParameterInitializationConfig()
-    )
-
-    @property
-    def n_steps_max(self) -> int | None:
-        """Upper bound on the number of consecutive steps that can contribute
-        to the loss, or ``None`` if unbounded (``n_steps=None``).
-
-        For ``TimeLengthProbabilities`` this is the largest value the sampler
-        can produce.
-        """
-        if self.n_steps is None:
-            return None
-        if isinstance(self.n_steps, TimeLengthProbabilities):
-            return self.n_steps.max_n_forward_steps
-        return self.n_steps
-
-    @property
-    def loss_is_null(self) -> bool:
-        """True when this component contributes nothing to the total loss."""
-        if self.loss_weight == 0.0:
-            return True
-        if isinstance(self.n_steps_max, int) and self.n_steps_max == 0:
-            return True
-        return False
-
-
 class CoupledStepperTrainLoss:
     """Owns per-component loss computation *and* the rollout schedule
     (which steps are optimized, how many outer steps are required).
@@ -1483,6 +1433,56 @@ class CoupledStepperTrainLoss:
             prediction.data, target_data, prediction.step
         )
         return self._weights[realm] * loss_output.total()
+
+
+@dataclasses.dataclass
+class ComponentTrainingConfig:
+    """Configuration for one component's training behavior within a coupled
+    stepper.
+
+    Parameters:
+        loss: The step loss function configuration (e.g. MSE, EnsembleLoss).
+        n_steps: Number of consecutive steps contributing to the loss, starting
+            from the first. Can be an int, ``None`` (the default, meaning all
+            available steps), or a ``TimeLengthProbabilities`` for stochastic
+            per-batch sampling.
+        optimize_last_step_only: If True, only the last step within the
+            training horizon defined by ``n_steps`` is optimized (i.e.
+            contributes to the loss and has gradients enabled).
+        loss_weight: Weight applied to the loss for this component.
+        parameter_init: Component-level parameter initialization.
+    """
+
+    loss: StepLossConfig
+    n_steps: TimeLengthProbabilities | int | None = None
+    optimize_last_step_only: bool = False
+    loss_weight: float = 1.0
+    parameter_init: ParameterInitializationConfig = dataclasses.field(
+        default_factory=lambda: ParameterInitializationConfig()
+    )
+
+    @property
+    def n_steps_max(self) -> int | None:
+        """Upper bound on the number of consecutive steps that can contribute
+        to the loss, or ``None`` if unbounded (``n_steps=None``).
+
+        For ``TimeLengthProbabilities`` this is the largest value the sampler
+        can produce.
+        """
+        if self.n_steps is None:
+            return None
+        if isinstance(self.n_steps, TimeLengthProbabilities):
+            return self.n_steps.max_n_forward_steps
+        return self.n_steps
+
+    @property
+    def loss_is_null(self) -> bool:
+        """True when this component contributes nothing to the total loss."""
+        if self.loss_weight == 0.0:
+            return True
+        if isinstance(self.n_steps_max, int) and self.n_steps_max == 0:
+            return True
+        return False
 
 
 @dataclasses.dataclass
