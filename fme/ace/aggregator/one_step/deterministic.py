@@ -1,22 +1,15 @@
 import dataclasses
 import logging
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from typing import Protocol
 
 import numpy as np
 import torch
 import xarray as xr
 
-from fme.core.dataset_info import DatasetInfo
 from fme.core.diagnostics import get_reduced_diagnostics, write_reduced_diagnostics
-from fme.core.fill import SmoothFloodFill
 from fme.core.generics.aggregator import AggregatorABC
 from fme.core.typing_ import TensorDict, TensorMapping
-
-from .map import MapAggregator
-from .reduced import MeanAggregator
-from .snapshot import SnapshotAggregator
-from .spectrum import SpectrumAggregator
 
 
 class _Aggregator(Protocol):
@@ -54,62 +47,18 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
 
     def __init__(
         self,
-        dataset_info: DatasetInfo,
+        aggregators: Mapping[str, _Aggregator],
+        coords: Mapping[str, np.ndarray],
         save_diagnostics: bool = True,
         output_dir: str | None = None,
         loss_scaling: TensorMapping | None = None,
-        log_snapshots: bool = True,
-        log_mean_maps: bool = True,
-        channel_mean_names: Sequence[str] | None = None,
     ):
-        """
-        Args:
-            dataset_info: Dataset coordinates and metadata.
-            save_diagnostics: Whether to save diagnostics.
-            output_dir: Directory to write diagnostics to.
-            variable_metadata: Metadata for each variable.
-            loss_scaling: Dictionary of variables and their scaling factors
-                used in loss computation.
-            log_snapshots: Whether to include snapshots in diagnostics.
-            log_mean_maps: Whether to include mean maps in diagnostics.
-            channel_mean_names: Names of variables whose RMSE will be averaged. If
-                not provided, all available variables will be used.
-        """
         if save_diagnostics and output_dir is None:
             raise ValueError("Output directory must be set to save diagnostics.")
         self._output_dir = output_dir
         self._save_diagnostics = save_diagnostics
-        horizontal_coordinates = dataset_info.horizontal_coordinates
-        self._coords = horizontal_coordinates.coords
-        self._aggregators: dict[str, _Aggregator] = {
-            "mean": MeanAggregator(dataset_info.gridded_operations),
-            "mean_norm": MeanAggregator(
-                dataset_info.gridded_operations,
-                target="norm",
-                channel_mean_names=channel_mean_names,
-                include_bias=False,
-                include_grad_mag_percent_diff=False,
-            ),
-        }
-        try:
-            flood_fill = SmoothFloodFill(num_steps=4)
-            self._aggregators["power_spectrum"] = SpectrumAggregator(
-                dataset_info.gridded_operations,
-                nan_fill_fn=flood_fill,
-            )
-        except NotImplementedError:
-            logging.warning(
-                "Spectrum aggregator not implemented for this grid type, omitting."
-            )
-        if log_snapshots:
-            self._aggregators["snapshot"] = SnapshotAggregator(
-                horizontal_coordinates.dims, dataset_info.variable_metadata
-            )
-        if log_mean_maps:
-            self._aggregators["mean_map"] = MapAggregator(
-                horizontal_coordinates.dims, dataset_info.variable_metadata
-            )
-
+        self._coords = coords
+        self._aggregators = aggregators
         self._loss_scaling = loss_scaling or {}
 
     @torch.no_grad()

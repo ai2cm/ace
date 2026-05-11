@@ -3,7 +3,7 @@ import pytest
 import torch
 import xarray as xr
 
-from fme.ace.aggregator.one_step import OneStepAggregator
+from fme.ace.aggregator.one_step import OneStepAggregatorConfig
 from fme.ace.stepper import TrainOutput
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
@@ -23,7 +23,7 @@ def test_labels_exist():
     nx, ny = 2, 2
     loss = 1.0
     ds_info = get_ds_info(nx, ny)
-    agg = OneStepAggregator(ds_info, save_diagnostics=False)
+    agg = OneStepAggregatorConfig().build(ds_info, save_diagnostics=False)
     target_data = EnsembleTensorDict(
         {"a": torch.randn(batch_size, 1, n_time, nx, ny, device=get_device())},
     )
@@ -72,7 +72,7 @@ def test_aggregator_raises_on_no_data():
     with multiple batches and no distributed training.
     """
     ds_info = get_ds_info(2, 2)
-    agg = OneStepAggregator(ds_info, save_diagnostics=False)
+    agg = OneStepAggregatorConfig().build(ds_info, save_diagnostics=False)
     with pytest.raises(ValueError) as excinfo:
         agg.record_batch(
             batch=TrainOutput(
@@ -93,7 +93,7 @@ def test_aggregator_raises_on_no_data():
 def test_flush_diagnostics(tmpdir, epoch):
     nx, ny, batch_size, n_ensemble, n_time = 3, 3, 10, 2, 3
     ds_info = get_ds_info(nx, ny)
-    agg = OneStepAggregator(ds_info, output_dir=(tmpdir / "val"))
+    agg = OneStepAggregatorConfig().build(ds_info, output_dir=str(tmpdir / "val"))
     target_data = EnsembleTensorDict(
         {"a": torch.randn(batch_size, 1, n_time, nx, ny, device=get_device())}
     )
@@ -130,4 +130,4 @@ def test_agg_raises_without_output_dir():
     with pytest.raises(
         ValueError, match="Output directory must be set to save diagnostics"
     ):
-        OneStepAggregator(ds_info, save_diagnostics=True, output_dir=None)
+        OneStepAggregatorConfig().build(ds_info, save_diagnostics=True, output_dir=None)

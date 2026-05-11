@@ -1,4 +1,5 @@
 import dataclasses
+import logging
 from collections.abc import Sequence
 
 import torch
@@ -6,13 +7,23 @@ import torch
 from fme.ace.aggregator.one_step.deterministic import (
     DeterministicTrainOutput,
     OneStepDeterministicAggregator,
+    _Aggregator,
 )
-from fme.ace.aggregator.one_step.ensemble import get_one_step_ensemble_aggregator
+from fme.ace.aggregator.one_step.ensemble import (
+    SelectStepEnsembleAggregator,
+    get_one_step_ensemble_aggregator,
+)
 from fme.ace.stepper import TrainOutput
 from fme.core.dataset_info import DatasetInfo
+from fme.core.fill import SmoothFloodFill
 from fme.core.generics.aggregator import AggregatorABC
 from fme.core.tensors import fold_ensemble_dim, fold_sized_ensemble_dim
 from fme.core.typing_ import TensorMapping
+
+from .map import MapAggregator
+from .reduced import MeanAggregator
+from .snapshot import SnapshotAggregator
+from .spectrum import SpectrumAggregator
 
 
 class OneStepAggregator(AggregatorABC[TrainOutput]):
@@ -25,40 +36,11 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
 
     def __init__(
         self,
-        dataset_info: DatasetInfo,
-        save_diagnostics: bool = True,
-        output_dir: str | None = None,
-        loss_scaling: TensorMapping | None = None,
-        log_snapshots: bool = True,
-        log_mean_maps: bool = True,
-        channel_mean_names: Sequence[str] | None = None,
+        deterministic_aggregator: OneStepDeterministicAggregator,
+        ensemble_aggregator: SelectStepEnsembleAggregator,
     ):
-        """
-        Args:
-            dataset_info: Dataset coordinates and metadata.
-            save_diagnostics: Whether to save diagnostics.
-            output_dir: Directory to write diagnostics to.
-            loss_scaling: Dictionary of variables and their scaling factors
-                used in loss computation.
-            log_snapshots: Whether to include snapshots in diagnostics.
-            log_mean_maps: Whether to include mean maps in diagnostics.
-            channel_mean_names: Names to include in channel-mean metrics.
-        """
-        self._deterministic_aggregator = OneStepDeterministicAggregator(
-            dataset_info=dataset_info,
-            save_diagnostics=save_diagnostics,
-            output_dir=output_dir,
-            loss_scaling=loss_scaling,
-            log_snapshots=log_snapshots,
-            log_mean_maps=log_mean_maps,
-            channel_mean_names=channel_mean_names,
-        )
-        self._ensemble_aggregator = get_one_step_ensemble_aggregator(
-            gridded_operations=dataset_info.gridded_operations,
-            log_mean_maps=log_mean_maps,
-            target_time=1,
-            metadata=dataset_info.variable_metadata,
-        )
+        self._deterministic_aggregator = deterministic_aggregator
+        self._ensemble_aggregator = ensemble_aggregator
         self._ensemble_recorded = False
 
     @torch.no_grad()
@@ -110,6 +92,44 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
         self._deterministic_aggregator.flush_diagnostics(subdir)
 
 
+def _build_default_deterministic_aggregators(
+    dataset_info: DatasetInfo,
+    log_snapshots: bool,
+    log_mean_maps: bool,
+    channel_mean_names: Sequence[str] | None,
+) -> dict[str, _Aggregator]:
+    aggregators: dict[str, _Aggregator] = {
+        "mean": MeanAggregator(dataset_info.gridded_operations),
+        "mean_norm": MeanAggregator(
+            dataset_info.gridded_operations,
+            target="norm",
+            channel_mean_names=channel_mean_names,
+            include_bias=False,
+            include_grad_mag_percent_diff=False,
+        ),
+    }
+    try:
+        flood_fill = SmoothFloodFill(num_steps=4)
+        aggregators["power_spectrum"] = SpectrumAggregator(
+            dataset_info.gridded_operations,
+            nan_fill_fn=flood_fill,
+        )
+    except NotImplementedError:
+        logging.warning(
+            "Spectrum aggregator not implemented for this grid type, omitting."
+        )
+    horizontal_coordinates = dataset_info.horizontal_coordinates
+    if log_snapshots:
+        aggregators["snapshot"] = SnapshotAggregator(
+            horizontal_coordinates.dims, dataset_info.variable_metadata
+        )
+    if log_mean_maps:
+        aggregators["mean_map"] = MapAggregator(
+            horizontal_coordinates.dims, dataset_info.variable_metadata
+        )
+    return aggregators
+
+
 @dataclasses.dataclass
 class OneStepAggregatorConfig:
     """
@@ -131,12 +151,26 @@ class OneStepAggregatorConfig:
         loss_scaling: TensorMapping | None = None,
         channel_mean_names: Sequence[str] | None = None,
     ):
-        return OneStepAggregator(
+        aggregators = _build_default_deterministic_aggregators(
             dataset_info=dataset_info,
-            save_diagnostics=save_diagnostics,
-            output_dir=output_dir,
-            loss_scaling=loss_scaling,
             log_snapshots=self.log_snapshots,
             log_mean_maps=self.log_mean_maps,
             channel_mean_names=channel_mean_names,
+        )
+        deterministic_aggregator = OneStepDeterministicAggregator(
+            aggregators=aggregators,
+            coords=dataset_info.horizontal_coordinates.coords,
+            save_diagnostics=save_diagnostics,
+            output_dir=output_dir,
+            loss_scaling=loss_scaling,
+        )
+        ensemble_aggregator = get_one_step_ensemble_aggregator(
+            gridded_operations=dataset_info.gridded_operations,
+            log_mean_maps=self.log_mean_maps,
+            target_time=1,
+            metadata=dataset_info.variable_metadata,
+        )
+        return OneStepAggregator(
+            deterministic_aggregator=deterministic_aggregator,
+            ensemble_aggregator=ensemble_aggregator,
         )

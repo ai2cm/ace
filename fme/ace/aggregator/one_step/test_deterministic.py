@@ -1,6 +1,7 @@
 import torch
 
 from fme.ace.aggregator.one_step.deterministic import OneStepDeterministicAggregator
+from fme.ace.aggregator.one_step.reduced import MeanAggregator
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 
@@ -12,11 +13,14 @@ def test__get_loss_scaled_mse_components():
     }
     nx, ny = 10, 10
     lat_lon_coordinates = LatLonCoordinates(torch.arange(nx), torch.arange(ny))
-    # keep area weights ones for simplicity
     lat_lon_coordinates._area_weights = torch.ones(nx, ny)
     ds_info = DatasetInfo(horizontal_coordinates=lat_lon_coordinates)
+    aggregators = {
+        "mean": MeanAggregator(ds_info.gridded_operations),
+    }
     agg = OneStepDeterministicAggregator(
-        ds_info,
+        aggregators=aggregators,
+        coords=lat_lon_coordinates.coords,
         loss_scaling=loss_scaling,
         save_diagnostics=False,
     )
