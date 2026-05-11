@@ -467,10 +467,10 @@ def test_coupled_train_stepper_config_rejects_all_null_loss():
         )
 
 
-def test_outer_steps_clamped_to_one_when_both_realms_sample_zero():
-    """If both stochastic samplers yield n_steps=0 for a batch, the outer loop
-    still runs one step so downstream gen_data is non-empty (even though the
-    batch contributes zero loss)."""
+def test_coupled_train_stepper_config_rejects_all_null_stochastic_loss():
+    """When both realms use a TimeLengthProbabilities sampler whose only
+    outcome is steps=0, both loss_contributions are null and the config
+    should raise a ValueError."""
     from fme.ace.stepper.time_length_probabilities import (
         TimeLengthProbabilities,
         TimeLengthProbability,
@@ -479,15 +479,46 @@ def test_outer_steps_clamped_to_one_when_both_realms_sample_zero():
     zero_only_sampler = TimeLengthProbabilities(
         outcomes=[TimeLengthProbability(steps=0, probability=1.0)]
     )
+    with pytest.raises(ValueError, match="non-null"):
+        CoupledTrainStepperConfig(
+            n_coupled_steps=2,
+            ocean=ComponentTrainingConfig(
+                loss=StepLossConfig(type="MSE"),
+                loss_contributions=LossContributionsConfig(n_steps=zero_only_sampler),
+            ),
+            atmosphere=ComponentTrainingConfig(
+                loss=StepLossConfig(type="MSE"),
+                loss_contributions=LossContributionsConfig(n_steps=zero_only_sampler),
+            ),
+        )
+
+
+def test_outer_steps_clamped_to_one_when_both_realms_sample_zero():
+    """If both stochastic samplers yield n_steps=0 for a batch, the outer loop
+    still runs one step so downstream gen_data is non-empty (even though the
+    batch contributes zero loss)."""
+    from unittest.mock import patch
+
+    from fme.ace.stepper.time_length_probabilities import (
+        TimeLengthProbabilities,
+        TimeLengthProbability,
+    )
+
+    sampler = TimeLengthProbabilities(
+        outcomes=[
+            TimeLengthProbability(steps=0, probability=0.5),
+            TimeLengthProbability(steps=1, probability=0.5),
+        ]
+    )
     train_stepper_config = CoupledTrainStepperConfig(
         n_coupled_steps=2,
         ocean=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
-            loss_contributions=LossContributionsConfig(n_steps=zero_only_sampler),
+            loss_contributions=LossContributionsConfig(n_steps=sampler),
         ),
         atmosphere=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
-            loss_contributions=LossContributionsConfig(n_steps=zero_only_sampler),
+            loss_contributions=LossContributionsConfig(n_steps=sampler),
         ),
     )
     train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(
@@ -507,10 +538,11 @@ def test_outer_steps_clamped_to_one_when_both_realms_sample_zero():
         ),
     )
 
-    result = train_stepper.train_on_batch(
-        data=coupled_data.data,
-        optimization=NullOptimization(),
-    )
+    with patch.object(TimeLengthProbabilities, "sample", return_value=0):
+        result = train_stepper.train_on_batch(
+            data=coupled_data.data,
+            optimization=NullOptimization(),
+        )
     # Loss is zero because no step is optimized for either realm.
     torch.testing.assert_close(
         result.total_metrics["loss"],

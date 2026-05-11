@@ -10,7 +10,7 @@ from fme.ace.stepper.time_length_probabilities import (
     TimeLengthProbabilities,
     TimeLengthProbability,
 )
-from fme.core.rand import set_seed
+from fme.core.rand import set_seed, use_cpu_randn
 from fme.core.testing.wandb import mock_wandb
 
 from .data_loading.test_data_loader import create_coupled_data_on_disk
@@ -466,7 +466,7 @@ def test_train_and_inference(
         crps_training=crps_training,
     )
 
-    with mock_wandb() as wandb:
+    with use_cpu_randn(), mock_wandb() as wandb:
         train_main(yaml_config=train_config_fname)
         train_logs = wandb.get_logs()
 
@@ -602,7 +602,7 @@ def test_train_and_inference(
     assert best_checkpoint_path.exists()
     assert best_inference_checkpoint_path.exists()
 
-    with mock_wandb() as wandb:
+    with use_cpu_randn(), mock_wandb() as wandb:
         inference_evaluator_main(yaml_config=inference_config_fname)
         inference_logs = wandb.get_logs()
 

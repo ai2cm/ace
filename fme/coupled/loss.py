@@ -79,7 +79,7 @@ class LossContributionsConfig:
         optimize_last_step_only: If True, only the last step within the training
             horizon defined by ``n_steps`` is optimized (i.e. contributes to the
             loss and has gradients enabled). The optimized step index is
-            ``min(n_steps, n_total_steps) - 1``.
+            ``min(n_steps, n_steps_limit) - 1``.
 
     """
 
@@ -94,7 +94,9 @@ class LossContributionsConfig:
         """
         if self.weight == 0.0:
             return True
-        return self.n_steps == 0
+        if isinstance(self.n_steps_max, int) and self.n_steps_max == 0:
+            return True
+        return False
 
     @property
     def n_steps_max(self) -> int | None:
@@ -211,7 +213,7 @@ class LossContributions(StepLossABC):
 
         When ``optimize_last_step_only`` is False (default), returns True for
         steps ``0`` through ``n_steps - 1``. When True, returns True only for
-        the step at index ``min(n_steps, n_total_steps) - 1``.
+        the step at index ``min(n_steps, n_steps_limit) - 1``.
         """
         if self._weight == 0.0:
             return False
