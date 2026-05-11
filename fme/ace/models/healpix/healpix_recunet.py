@@ -15,7 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Sequence
+from typing import Optional, Sequence
 
 import pandas as pd
 import torch as th
@@ -44,7 +44,10 @@ class HEALPixRecUNet(nn.Module):
         reset_cycle: str = "24h",
         presteps: int = 1,
         enable_nhwc: bool = False,
-        enable_healpixpad: bool = False,
+        enable_healpixpad: Optional[bool] = None,
+        hpx_padding_mode: Optional[str] = None,
+        compile_padding: bool = False,
+        nside: Sequence[int] | int | None = (64, 32, 16),
         couplings: list = [],
     ):
         """
@@ -79,8 +82,17 @@ class HEALPixRecUNet(nn.Module):
                 Number of model steps to initialize recurrent states.
             enable_nhwc: bool, optional
                 Model with [N, H, W, C] instead of [N, C, H, W].
-            enable_healpixpad: bool, optional
-                Enable CUDA HEALPixPadding if installed.
+            enable_healpixpad: bool or None, optional
+                Deprecated legacy padding toggle. ``None`` means unset; ignored when
+                ``hpx_padding_mode`` is set. If omitted together with ``hpx_padding_mode``,
+                defaults to ``earth2grid``.
+            hpx_padding_mode: str or None, optional
+                HEALPix padding backend (``earth2grid``, ``karlbauer``, ``isolatitude``).
+                Overrides ``enable_healpixpad`` when set.
+            compile_padding: bool, optional
+                If True, applies ``torch.compile`` to isolatitude padding modules.
+            nside: Sequence[int] | int | None, optional
+                Face size(s) from shallowest to deepest UNet level.
             couplings: list, optional
                 Sequence of dictionaries that describe coupling mechanisms. Currently unused in our production model;
                 but we want to keep this in the module definition, in case we bring our SST module
@@ -123,7 +135,34 @@ class HEALPixRecUNet(nn.Module):
         self.reset_cycle = int(pd.Timedelta(reset_cycle).total_seconds() // 3600)
         self.presteps = presteps
         self.enable_nhwc = enable_nhwc
-        self.enable_healpixpad = enable_healpixpad
+        if hpx_padding_mode is not None:
+            self.hpx_padding_mode = hpx_padding_mode
+        elif enable_healpixpad is None:
+            self.hpx_padding_mode = "earth2grid"
+        else:
+            self.hpx_padding_mode = (
+                "earth2grid" if enable_healpixpad else "karlbauer"
+            )
+        self.compile_padding = compile_padding
+
+        levels = len(encoder.n_channels)
+        if isinstance(nside, int):
+            nside_levels = tuple(
+                max(1, nside // (2**i)) for i in range(levels)
+            )
+        elif nside is None:
+            nside_levels = tuple(max(1, 64 // (2**i)) for i in range(levels))
+        else:
+            nside_levels = tuple(int(v) for v in nside)
+        if len(nside_levels) != levels:
+            raise ValueError(
+                f"nside length must match UNet levels; got {len(nside_levels)} vs {levels}"
+            )
+        if len(decoder.n_channels) != levels:
+            raise ValueError(
+                "encoder and decoder must have same number of levels for nside mapping"
+            )
+        self.nside = nside_levels
 
         # Number of passes through the model, or a diagnostic model with only one output time
         self.is_diagnostic = self.output_time_size == 1 and self.input_time_size > 1
@@ -140,13 +179,19 @@ class HEALPixRecUNet(nn.Module):
         self.unfold = HEALPixUnfoldFaces(num_faces=12)
         encoder.input_channels = self._compute_input_channels()
         encoder.enable_nhwc = self.enable_nhwc
-        encoder.enable_healpixpad = self.enable_healpixpad
+        encoder.enable_healpixpad = enable_healpixpad
+        encoder.hpx_padding_mode = self.hpx_padding_mode
+        encoder.compile_padding = self.compile_padding
+        encoder.nside = self.nside[0]
         self.encoder = encoder.build()
 
         self.encoder_depth = len(self.encoder.n_channels)
         decoder.output_channels = self._compute_output_channels()
         decoder.enable_nhwc = self.enable_nhwc
-        decoder.enable_healpixpad = self.enable_healpixpad
+        decoder.enable_healpixpad = enable_healpixpad
+        decoder.hpx_padding_mode = self.hpx_padding_mode
+        decoder.compile_padding = self.compile_padding
+        decoder.nside = self.nside[-1]
         self.decoder = decoder.build()
 
     @property

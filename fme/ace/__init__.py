@@ -42,6 +42,7 @@ from fme.ace.models.healpix.healpix_activations import (
 from fme.ace.models.healpix.healpix_blocks import ConvBlockConfig, RecurrentBlockConfig
 from fme.ace.registry.hpx import (
     HEALPixRecUNetBuilder,
+    HEALPixUNetBuilder,
     UNetDecoderConfig,
     UNetEncoderConfig,
 )

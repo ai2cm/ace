@@ -16,7 +16,7 @@
 # limitations under the License.
 
 import dataclasses
-from typing import Literal
+from typing import Literal, Optional, Sequence
 
 import torch as th
 import torch.nn as nn
@@ -37,20 +37,33 @@ class MaxPool(nn.Module):
         self,
         pooling: int = 2,
         enable_nhwc: bool = False,
-        enable_healpixpad: bool = False,
+        enable_healpixpad: Optional[bool] = None,
+        hpx_padding_mode: Optional[str] = "earth2grid",
+        nside: Optional[int] = None,
+        compile_padding: bool = False,
     ):
         """
         Args:
             pooling (int, optional): Pooling kernel size passed to geometry layer.
             enable_nhwc (bool, optional): Enable nhwc format, passed to wrapper.
             enable_healpixpad (bool, optional): If HEALPixPadding should be enabled, passed to wrapper.
+            hpx_padding_mode (Optional[str], optional): HEALPix padding backend. Default
+                ``"earth2grid"``; also supports ``"karlbauer"`` and ``"isolatitude"``.
         """
         super().__init__()
+        hpk: dict = {"enable_nhwc": enable_nhwc}
+        if hpx_padding_mode is not None:
+            hpk["hpx_padding_mode"] = hpx_padding_mode
+        if enable_healpixpad is not None:
+            hpk["enable_healpixpad"] = enable_healpixpad
+        if nside is not None:
+            hpk["nside"] = nside
+        if compile_padding:
+            hpk["compile_padding"] = compile_padding
         self.maxpool = HEALPixLayer(
             layer=nn.MaxPool2d,
             kernel_size=pooling,
-            enable_nhwc=enable_nhwc,
-            enable_healpixpad=enable_healpixpad,
+            **hpk,
         )
 
     def forward(self, x: th.Tensor) -> th.Tensor:
@@ -76,20 +89,33 @@ class AvgPool(nn.Module):
         self,
         pooling: int = 2,
         enable_nhwc: bool = False,
-        enable_healpixpad: bool = False,
+        enable_healpixpad: Optional[bool] = None,
+        hpx_padding_mode: Optional[str] = "earth2grid",
+        nside: Optional[int] = None,
+        compile_padding: bool = False,
     ):
         """
         Args:
             pooling (int, optional): Pooling kernel size passed to geometry layer.
             enable_nhwc (bool, optional): Enable nhwc format, passed to wrapper.
             enable_healpixpad (bool, optional): If HEALPixPadding should be enabled, passed to wrapper.
+            hpx_padding_mode (Optional[str], optional): HEALPix padding backend. Default
+                ``"earth2grid"``; also supports ``"karlbauer"`` and ``"isolatitude"``.
         """
         super().__init__()
+        hpk: dict = {"enable_nhwc": enable_nhwc}
+        if hpx_padding_mode is not None:
+            hpk["hpx_padding_mode"] = hpx_padding_mode
+        if enable_healpixpad is not None:
+            hpk["enable_healpixpad"] = enable_healpixpad
+        if nside is not None:
+            hpk["nside"] = nside
+        if compile_padding:
+            hpk["compile_padding"] = compile_padding
         self.avgpool = HEALPixLayer(
             layer=nn.AvgPool2d,
             kernel_size=pooling,
-            enable_nhwc=enable_nhwc,
-            enable_healpixpad=enable_healpixpad,
+            **hpk,
         )
 
     def forward(self, x: th.Tensor) -> th.Tensor:
@@ -115,13 +141,33 @@ class DownsamplingBlockConfig:
         pooling: Pooling size
         enable_nhwc: Flag to enable NHWC data format, default is False.
         enable_healpixpad: Flag to enable HEALPix padding, default is False.
+        hpx_padding_mode: HEALPix padding backend, default is "earth2grid".
 
     """
 
-    block_type: Literal["MaxPool", "AvgPool"]
+    block_type: Literal["MaxPool", "AvgPool", "DealiasedDownsample"]
     pooling: int = 2
     enable_nhwc: bool = False
-    enable_healpixpad: bool = False
+    enable_healpixpad: Optional[bool] = None
+    hpx_padding_mode: Optional[str] = "earth2grid"
+    nside: Optional[int] = None
+    compile_padding: bool = False
+    in_channels: Optional[int] = None
+    resample_filter: Sequence[float] = (1.0, 2.0, 1.0)
+    dealias_stride: int = 2
+    stride: Optional[int] = None
+
+    def __post_init__(self):
+        # Accept Modulus-style config key `stride` as alias for legacy `dealias_stride`.
+        if self.stride is not None:
+            self.dealias_stride = self.stride
+
+    def downsample_spatial_factor(self) -> int:
+        if self.block_type in ("MaxPool", "AvgPool"):
+            return self.pooling
+        if self.block_type == "DealiasedDownsample":
+            return self.stride if self.stride is not None else self.dealias_stride
+        raise ValueError(f"Unsupported block type: {self.block_type}")
 
     def build(self) -> nn.Module:
         """
@@ -135,6 +181,9 @@ class DownsamplingBlockConfig:
                 pooling=self.pooling,
                 enable_nhwc=self.enable_nhwc,
                 enable_healpixpad=self.enable_healpixpad,
+                hpx_padding_mode=self.hpx_padding_mode,
+                nside=self.nside,
+                compile_padding=self.compile_padding,
             )
 
         elif self.block_type == "AvgPool":
@@ -142,6 +191,29 @@ class DownsamplingBlockConfig:
                 pooling=self.pooling,
                 enable_nhwc=self.enable_nhwc,
                 enable_healpixpad=self.enable_healpixpad,
+                hpx_padding_mode=self.hpx_padding_mode,
+                nside=self.nside,
+                compile_padding=self.compile_padding,
+            )
+        elif self.block_type == "DealiasedDownsample":
+            from .healpix_blocks import DealiasedDownsample
+
+            if self.in_channels is None:
+                raise ValueError(
+                    "DealiasedDownsample requires in_channels (set by UNetEncoder before build)"
+                )
+            downsample_stride = (
+                self.stride if self.stride is not None else self.dealias_stride
+            )
+            return DealiasedDownsample(
+                in_channels=self.in_channels,
+                resample_filter=self.resample_filter,
+                stride=downsample_stride,
+                enable_nhwc=self.enable_nhwc,
+                enable_healpixpad=self.enable_healpixpad,
+                hpx_padding_mode=self.hpx_padding_mode,
+                nside=self.nside,
+                compile_padding=self.compile_padding,
             )
         else:
             raise ValueError(f"Unsupported block type: {self.block_type}")
@@ -200,7 +272,7 @@ class CappedGELUConfig:
 
     cap_value: int = 10
     enable_nhwc: bool = False
-    enable_healpixpad: bool = False
+    enable_healpixpad: Optional[bool] = None
 
     def build(self) -> nn.Module:
         """

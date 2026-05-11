@@ -39,7 +39,8 @@ class UNetDecoderConfig:
         output_channels: Number of output channels, by default 1.
         dilations: List of dilation rates for the layers, by default None.
         enable_nhwc: Flag to enable NHWC data format, by default False.
-        enable_healpixpad: Flag to enable HEALPix padding, by default False.
+        enable_healpixpad: Deprecated legacy toggle; omitted (``None``) unless migrating
+            old configs without ``hpx_padding_mode``.
     """
 
     conv_block: ConvBlockConfig
@@ -51,7 +52,10 @@ class UNetDecoderConfig:
     output_channels: int = 1
     dilations: Optional[list] = None
     enable_nhwc: bool = False
-    enable_healpixpad: bool = False
+    enable_healpixpad: Optional[bool] = None
+    hpx_padding_mode: Optional[str] = None
+    nside: Optional[int] = None
+    compile_padding: bool = False
 
     def build(self) -> nn.Module:
         """
@@ -71,6 +75,9 @@ class UNetDecoderConfig:
             dilations=self.dilations,
             enable_nhwc=self.enable_nhwc,
             enable_healpixpad=self.enable_healpixpad,
+            hpx_padding_mode=self.hpx_padding_mode,
+            nside=self.nside,
+            compile_padding=self.compile_padding,
         )
 
 
@@ -88,7 +95,10 @@ class UNetDecoder(nn.Module):
         output_channels: int = 1,
         dilations: Optional[list] = None,
         enable_nhwc: bool = False,
-        enable_healpixpad: bool = False,
+        enable_healpixpad: Optional[bool] = None,
+        hpx_padding_mode: Optional[str] = None,
+        nside: Optional[int] = None,
+        compile_padding: bool = False,
     ):
         """
         Initialize the UNetDecoder.
@@ -104,14 +114,18 @@ class UNetDecoder(nn.Module):
             dilations: List of dilations to use for the convolutional blocks.
             enable_nhwc: If True, use channel last format.
             enable_healpixpad: If True, use the healpixpad library if installed.
+            hpx_padding_mode: HEALPix padding backend. Default ``"earth2grid"``;
+                also supports ``"karlbauer"`` and ``"isolatitude"``.
         """
         super().__init__()
         self.channel_dim = 1
+        face_nside = nside
 
         if dilations is None:
             dilations = [1 for _ in range(len(n_channels))]
 
         self.decoder = []
+        n_levels = len(n_channels)
         for n, curr_channel in enumerate(n_channels):
             up_sample_module = None
             if n != 0:
@@ -119,7 +133,12 @@ class UNetDecoder(nn.Module):
                 up_sampling_block.out_channels = curr_channel
                 up_sampling_block.enable_nhwc = enable_nhwc
                 up_sampling_block.enable_healpixpad = enable_healpixpad
+                up_sampling_block.hpx_padding_mode = hpx_padding_mode
+                up_sampling_block.compile_padding = compile_padding
+                up_sampling_block.nside = face_nside
                 up_sample_module = up_sampling_block.build()
+                if face_nside is not None:
+                    face_nside = face_nside * 2
 
             next_channel = (
                 n_channels[n + 1] if n < len(n_channels) - 1 else n_channels[-1]
@@ -132,12 +151,18 @@ class UNetDecoder(nn.Module):
             conv_block.n_layers = n_layers[n]
             conv_block.enable_nhwc = enable_nhwc
             conv_block.enable_healpixpad = enable_healpixpad
+            conv_block.hpx_padding_mode = hpx_padding_mode
+            conv_block.compile_padding = compile_padding
+            conv_block.nside = face_nside
             conv_module = conv_block.build()
 
             rec_module = None
             if recurrent_block is not None:
                 recurrent_block.in_channels = next_channel
                 recurrent_block.enable_healpixpad = enable_healpixpad
+                recurrent_block.hpx_padding_mode = hpx_padding_mode
+                recurrent_block.compile_padding = compile_padding
+                recurrent_block.nside = face_nside
                 rec_module = recurrent_block.build()
 
             self.decoder.append(
@@ -157,6 +182,9 @@ class UNetDecoder(nn.Module):
         output_layer.dilation = dilations[-1]
         output_layer.enable_nhwc = enable_nhwc
         output_layer.enable_healpixpad = enable_healpixpad
+        output_layer.hpx_padding_mode = hpx_padding_mode
+        output_layer.compile_padding = compile_padding
+        output_layer.nside = face_nside
 
         self.output_layer = output_layer.build()
 
