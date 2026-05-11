@@ -131,6 +131,24 @@ def _setup(
     return config, mock_data, atmos_steps_per_ocean_step
 
 
+def test_inference_n_coupled_steps_divisible_by_coupled_steps_in_memory():
+    from unittest.mock import MagicMock
+
+    with pytest.raises(
+        ValueError,
+        match="n_coupled_steps must be divisible by coupled_steps_in_memory",
+    ):
+        InferenceConfig(
+            experiment_dir="test",
+            n_coupled_steps=3,
+            checkpoint_path="test.pt",
+            logging=MagicMock(),
+            initial_condition=MagicMock(),
+            forcing_loader=MagicMock(),
+            coupled_steps_in_memory=2,
+        )
+
+
 @pytest.mark.parametrize(
     ("n_coupled_steps,coupled_steps_in_memory,n_initial_conditions"),
     [

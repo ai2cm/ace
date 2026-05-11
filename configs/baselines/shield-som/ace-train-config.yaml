@@ -4,28 +4,27 @@ validate_using_ema: true
 ema:
   decay: 0.999
 max_epochs: 50
-n_forward_steps: 2
 inference:
-  n_forward_steps: 10220
-  forward_steps_in_memory: 40
-  loader:
-    start_indices:
-      times:
-        - "2031-01-01T06:00:00"
-        - "2038-01-01T06:00:00"
-        - "2045-01-01T06:00:00"
-        - "2052-01-01T06:00:00"
-        - "2073-01-01T06:00:00"
-        - "2080-01-01T06:00:00"
-        - "2087-01-01T06:00:00"
-        - "2094-01-01T06:00:00"
-    dataset:
-      data_path: /climate-default/2025-03-22-vertically-resolved-1deg-c96-shield-som-3d-radiative-heating-rates-increasing-co2-fme-dataset
-      file_pattern: increasing-CO2.zarr
-      engine: zarr
-    num_data_workers: 4
-  aggregator:
-    log_histograms: true
+  - n_forward_steps: 10220
+    forward_steps_in_memory: 40
+    loader:
+      start_indices:
+        times:
+          - "2031-01-01T06:00:00"
+          - "2038-01-01T06:00:00"
+          - "2045-01-01T06:00:00"
+          - "2052-01-01T06:00:00"
+          - "2073-01-01T06:00:00"
+          - "2080-01-01T06:00:00"
+          - "2087-01-01T06:00:00"
+          - "2094-01-01T06:00:00"
+      dataset:
+        data_path: /climate-default/2025-03-22-vertically-resolved-1deg-c96-shield-som-3d-radiative-heating-rates-increasing-co2-fme-dataset
+        file_pattern: increasing-CO2.zarr
+        engine: zarr
+      num_data_workers: 4
+    aggregator:
+      log_histograms: true
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -77,6 +76,7 @@ optimization:
     fused: true
     weight_decay: 0.01
 stepper_training:
+  n_forward_steps: 2
   loss:
     type: MSE
     weights:

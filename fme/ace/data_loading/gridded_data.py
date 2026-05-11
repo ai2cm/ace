@@ -137,7 +137,7 @@ class GriddedData(GriddedDataABC[BatchData]):
         self._loader.alternate_shuffle()
 
 
-def get_initial_condition(
+def _get_initial_condition(
     loader: DataLoader[BatchData],
     requirements: PrognosticStateDataRequirements,
 ) -> PrognosticState:
@@ -183,7 +183,7 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
         self._properties = self._global_properties.localize()
         self._n_initial_conditions: int | None = None
         if isinstance(initial_condition, PrognosticStateDataRequirements):
-            self._initial_condition: PrognosticState = get_initial_condition(
+            self._initial_condition: PrognosticState = _get_initial_condition(
                 self.loader, initial_condition
             )
         else:
@@ -250,35 +250,3 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
     @property
     def initial_time(self) -> xr.DataArray:
         return self.initial_condition.as_batch_data().time.isel(time=0)
-
-
-class PSType:
-    pass
-
-
-class FDType:
-    pass
-
-
-class ErrorInferenceData(InferenceDataABC[PSType, FDType]):
-    """
-    A inference data class that raises an error when accessed.
-
-    Necessary because in some contexts inference is not run,
-    and no data is configured (but also we don't need data).
-    """
-
-    def __init__(self):
-        pass
-
-    @property
-    def initial_condition(self) -> PSType:
-        raise ValueError("No inference data available")
-
-    @property
-    def loader(self) -> DataLoader[FDType]:
-        raise ValueError("No inference data available")
-
-    @property
-    def initial_inference_times(self) -> xr.DataArray:
-        raise ValueError("No inference data available")

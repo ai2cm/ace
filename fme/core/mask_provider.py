@@ -6,6 +6,7 @@ from typing import Any, TypeVar
 
 import torch
 
+from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.masking import NullMasking, StaticMasking
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -88,8 +89,11 @@ class MaskProvider(MaskProviderABC):
 
     """
 
-    def __init__(self, masks: TensorDict | None = None):
-        self._masks = {} if masks is None else masks
+    def __init__(self, masks: TensorMapping | None = None):
+        if masks is None:
+            self._masks = {}
+        else:
+            self._masks = dict(masks)
         for key in self._masks:
             if not key.startswith("mask_"):
                 raise ValueError(
@@ -130,7 +134,7 @@ class MaskProvider(MaskProviderABC):
 
     def to(self, device: str) -> "MaskProvider":
         return MaskProvider(
-            {name: tensor.to(device) for name, tensor in self.masks.items()}
+            {name: tensor.to(device) for name, tensor in self.masks.items()},
         )
 
     def localize(self) -> "MaskProvider":
@@ -140,7 +144,7 @@ class MaskProvider(MaskProviderABC):
             {
                 k: v[Distributed.get_instance().get_local_slices(v.shape)].contiguous()
                 for k, v in self._masks.items()
-            }
+            },
         )
 
     def update(self, other: "MaskProvider") -> None:
@@ -199,4 +203,6 @@ class MaskProvider(MaskProviderABC):
 
     @classmethod
     def from_state(cls, state: dict[str, Any]) -> "MaskProvider":
-        return cls(masks=state["masks"])
+        device = get_device()
+        masks = {k: v.to(device, copy=True) for k, v in state["masks"].items()}
+        return cls(masks=masks)

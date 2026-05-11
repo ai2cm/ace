@@ -115,6 +115,7 @@ def get_gridded_data(
         # reading zarr with async from weka also requires forkserver
         mp_context = "forkserver"
         persistent_workers = True
+        dataset.enable_shared_memory()
     else:
         mp_context = None
         persistent_workers = False

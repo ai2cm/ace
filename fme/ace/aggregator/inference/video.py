@@ -1,14 +1,19 @@
 import dataclasses
 from collections.abc import Mapping
+from typing import Literal
 
 import numpy as np
 import torch
 import xarray as xr
 
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import WandB
+
+from .build_context import MetricBuildContext, MetricNotSupportedError, maybe_filter
+from .data import InferenceBatchData, MetricBuildResult, SubAggregator
 
 wandb = WandB.get_instance()
 
@@ -321,29 +326,24 @@ class VideoAggregator:
     @torch.no_grad()
     def record_batch(
         self,
-        target_data: TensorMapping,
-        gen_data: TensorMapping,
-        target_data_norm: TensorMapping | None = None,
-        gen_data_norm: TensorMapping | None = None,
-        i_time_start: int = 0,
+        data: InferenceBatchData,
     ):
-        del target_data_norm, gen_data_norm  # intentionally unused
         self._mean_data.record_batch(
-            target_data=target_data,
-            gen_data=gen_data,
-            i_time_start=i_time_start,
+            target_data=data.target,
+            gen_data=data.prediction,
+            i_time_start=data.i_time_start,
         )
         if self._error_data is not None:
             self._error_data.record_batch(
-                target_data=target_data,
-                gen_data=gen_data,
-                i_time_start=i_time_start,
+                target_data=data.target,
+                gen_data=data.prediction,
+                i_time_start=data.i_time_start,
             )
         if self._variance_data is not None:
             self._variance_data.record_batch(
-                target_data=target_data,
-                gen_data=gen_data,
-                i_time_start=i_time_start,
+                target_data=data.target,
+                gen_data=data.prediction,
+                i_time_start=data.i_time_start,
             )
 
     @torch.no_grad()
@@ -519,3 +519,24 @@ def _make_video(
         fps=4,
         format="gif",
     )
+
+
+@dataclasses.dataclass
+class VideoMetricConfig:
+    type: Literal["video"] = "video"
+    variables: list[str] | None = None
+    name: str = "video"
+    enable_extended_videos: bool = False
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        if not isinstance(ctx.horizontal_coordinates, LatLonCoordinates):
+            raise MetricNotSupportedError("Video metric requires LatLonCoordinates.")
+        agg: SubAggregator = VideoAggregator(
+            n_timesteps=ctx.n_timesteps,
+            enable_extended_videos=self.enable_extended_videos,
+            variable_metadata=ctx.variable_metadata,
+        )
+        return MetricBuildResult(aggregator=maybe_filter(agg, self.variables))

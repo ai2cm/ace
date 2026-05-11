@@ -8,6 +8,9 @@ coupled_datasets:
   coupled_sea_surface:
     sst_threshold: 291.75
     ocean_extra_masked_names: ["HI", "sea_ice_volume", "UI", "VI", "sfdsi"]
+    ocean_extra_fill_values:
+      UI: 0.0
+      VI: 0.0
     surface_flux_window_avg:
       window_timedelta: 120h
       first_timestamp: "0151-01-03T12:00:00"

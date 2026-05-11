@@ -1,3 +1,4 @@
+import dataclasses
 import datetime
 from collections.abc import Mapping
 from typing import Any, Literal
@@ -13,9 +14,11 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations
-from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.typing_ import TensorDict
 from fme.core.wandb import WandB
 
+from ..build_context import MetricBuildContext
+from ..data import InferenceBatchData, MetricBuildResult
 from .historical_index import INDEX_CALENDAR, NINO34_INDEX
 
 OVERLAP_THRESHOLD = 0.9
@@ -114,9 +117,7 @@ class EnsoCoefficientEvaluatorAggregator:
     @torch.no_grad()
     def record_batch(
         self,
-        time: xr.DataArray,
-        target_data: TensorMapping,
-        gen_data: TensorMapping,
+        data: InferenceBatchData,
     ):
         """Record running sums of the enso index variance, and of the
         covariance of the target and generated data with the ENSO index (sum
@@ -125,6 +126,9 @@ class EnsoCoefficientEvaluatorAggregator:
         We need to track sums for each sample since the index will be different
         for each time period.
         """
+        time = data.time
+        target_data = data.target
+        gen_data = data.prediction
         assert time.sizes["sample"] == len(
             self._sample_index_series
         ), "number of index series must match number of samples"
@@ -139,27 +143,27 @@ class EnsoCoefficientEvaluatorAggregator:
                     dtype=torch.float32,
                 )
                 self._index_variance[i_sample] += (sample_index_series_window**2).sum()
-                for name, data in target_data.items():
+                for name, tensor in target_data.items():
                     if name not in self._target_covariances[i_sample]:
                         self._target_covariances[i_sample][name] = (
                             data_index_covariance(
-                                data[i_sample, :], sample_index_series_window
+                                tensor[i_sample, :], sample_index_series_window
                             )
                         )
                     else:
                         self._target_covariances[i_sample][name] += (
                             data_index_covariance(
-                                data[i_sample, :], sample_index_series_window
+                                tensor[i_sample, :], sample_index_series_window
                             )
                         )
-                for name, data in gen_data.items():
+                for name, tensor in gen_data.items():
                     if name not in self._gen_covariances[i_sample]:
                         self._gen_covariances[i_sample][name] = data_index_covariance(
-                            data[i_sample, :], sample_index_series_window
+                            tensor[i_sample, :], sample_index_series_window
                         )
                     else:
                         self._gen_covariances[i_sample][name] += data_index_covariance(
-                            data[i_sample, :], sample_index_series_window
+                            tensor[i_sample, :], sample_index_series_window
                         )
 
     def _compute_coefficients(
@@ -452,3 +456,23 @@ def reduce_data(dist: Distributed, rank_tensor_dict: TensorDict) -> TensorDict |
         return gathered_tensor_dict
     else:
         return None
+
+
+@dataclasses.dataclass
+class EnsoCoefficientMetricConfig:
+    type: Literal["enso_coefficient"] = "enso_coefficient"
+    name: str = "enso_coefficient"
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        return MetricBuildResult(
+            aggregator=EnsoCoefficientEvaluatorAggregator(
+                ctx.initial_time,
+                ctx.n_timesteps - 1,
+                ctx.timestep,
+                gridded_operations=ctx.ops,
+                variable_metadata=ctx.variable_metadata,
+            )
+        )

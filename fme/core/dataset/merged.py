@@ -109,6 +109,14 @@ class MergedXarrayDataset(DatasetABC):
             raise ValueError("No dataset available to determine properties")
         return data_properties
 
+    def enable_shared_memory(self):
+        for dataset in self.datasets:
+            dataset.enable_shared_memory()
+
+    def set_global_epoch_tensor(self, tensor):
+        for dataset in self.datasets:
+            dataset.set_global_epoch_tensor(tensor)
+
     def set_epoch(self, epoch: int):
         for dataset in self.datasets:
             dataset.set_epoch(epoch)

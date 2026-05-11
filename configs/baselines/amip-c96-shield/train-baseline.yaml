@@ -4,30 +4,29 @@ experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
 max_epochs: 120
-n_forward_steps: 2
 ema:
   decay: 0.999
 inference:
-  n_forward_steps: 7300
-  forward_steps_in_memory: 40
-  loader:
-    start_indices:
-      times:
-        - '1986-01-01T00:00:00'
-        - '1987-04-01T00:00:00'
-        - '1988-07-01T00:00:00'
-        - '1989-10-01T00:00:00'
-        - '1991-01-01T00:00:00'
-        - '1992-04-01T00:00:00'
-        - '1993-07-01T00:00:00'
-        - '1994-10-01T00:00:00'
-    dataset:
-      data_path: /climate-default/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/netCDFs/ic_0002
-    num_data_workers: 8
-  aggregator:
-    log_histograms: true
-    time_mean_reference_data: /statsdata/time-mean.nc
-    monthly_reference_data: /refdata/monthly_mean_data.nc
+  - n_forward_steps: 7300
+    forward_steps_in_memory: 40
+    loader:
+      start_indices:
+        times:
+          - '1986-01-01T00:00:00'
+          - '1987-04-01T00:00:00'
+          - '1988-07-01T00:00:00'
+          - '1989-10-01T00:00:00'
+          - '1991-01-01T00:00:00'
+          - '1992-04-01T00:00:00'
+          - '1993-07-01T00:00:00'
+          - '1994-10-01T00:00:00'
+      dataset:
+        data_path: /climate-default/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/netCDFs/ic_0002
+      num_data_workers: 8
+    aggregator:
+      log_histograms: true
+      time_mean_reference_data: /statsdata/time-mean.nc
+      monthly_reference_data: /refdata/monthly_mean_data.nc
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -65,6 +64,7 @@ optimization:
     fused: true
     weight_decay: 0.01
 stepper_training:
+  n_forward_steps: 2
   loss:
     type: MSE
     weights:

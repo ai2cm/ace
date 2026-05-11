@@ -1,5 +1,7 @@
 import abc
+import dataclasses
 from collections.abc import Mapping
+from typing import Literal
 
 import torch
 import xarray as xr
@@ -10,6 +12,9 @@ from fme.core.distributed import Distributed
 from fme.core.ensemble import get_crps
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import EnsembleTensorDict, TensorMapping
+
+from ..inference.build_context import MetricBuildContext
+from ..inference.data import MetricBuildResult
 
 
 def get_gen_shape(gen_data: TensorMapping):
@@ -134,8 +139,14 @@ class SSRBiasMetric(ReducedMetric):
         if self._total_unbiased_mse is None or self._total_variance is None:
             raise ValueError("No batches have been recorded.")
         spread = self._total_variance.sqrt()
-        skill = self._total_unbiased_mse.sqrt()
-        return spread / skill - 1
+        # Clamp to avoid NaN from sqrt of negative values. The unbiased MSE
+        # correction (mse - variance/n_ensemble) can overshoot with small
+        # ensembles or few batches, producing negative values at some grid
+        # cells that do not indicate spread truly exceeding skill.
+        skill = torch.clamp(self._total_unbiased_mse, min=0.0).sqrt()
+        # When skill is zero (clamped or genuinely perfect), SSR is undefined.
+        # Use -1 as the convention (equivalent to zero spread).
+        return torch.where(skill > 0, spread / skill - 1, torch.tensor(-1.0))
 
 
 class _EnsembleAggregator:
@@ -227,7 +238,7 @@ class _EnsembleAggregator:
                 if self._log_mean_maps:
                     data[f"{metric}/mean_map/{key}"] = plot_paneled_data(
                         [[metric_value.cpu().numpy()]],
-                        diverging=key in self._diverging_metrics,
+                        diverging=metric in self._diverging_metrics,
                         caption=self._get_caption(key),
                     )
         return data
@@ -323,3 +334,28 @@ class SelectStepEnsembleAggregator:
 
     def get_dataset(self) -> xr.Dataset:
         return self._aggregator.get_dataset()
+
+
+@dataclasses.dataclass
+class EnsembleMetricConfig:
+    step: int = 20
+    type: Literal["ensemble"] = "ensemble"
+    name: str | None = None
+    log_mean_maps: bool = False
+
+    def __post_init__(self):
+        if self.name is None:
+            self.name = f"ensemble_step_{self.step}"
+
+    def get_name(self) -> str:
+        return self.name  # type: ignore[return-value]
+
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        return MetricBuildResult(
+            ensemble=get_one_step_ensemble_aggregator(
+                gridded_operations=ctx.ops,
+                target_time=self.step,
+                log_mean_maps=self.log_mean_maps,
+                metadata=ctx.variable_metadata,
+            )
+        )

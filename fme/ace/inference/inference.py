@@ -30,7 +30,7 @@ from fme.ace.stepper import (
     Stepper,
     StepperOverrideConfig,
     load_stepper,
-    load_stepper_config,
+    load_stepper_config_with_override,
 )
 from fme.ace.stepper.single_module import StepperConfig
 from fme.core.cli import prepare_config, prepare_directory
@@ -95,8 +95,8 @@ class InitialConditionConfig:
 def get_initial_condition(
     ds: xr.Dataset,
     prognostic_names: Sequence[str],
-    labels: list[str] | None,
-    n_ensemble: int,
+    labels: list[str] | None = None,
+    n_ensemble: int = 1,
 ) -> PrognosticState:
     """Given a dataset, extract a mapping of variables to tensors.
     and the time coordinate corresponding to the initial conditions.
@@ -246,7 +246,9 @@ class InferenceConfig:
 
     def load_stepper_config(self) -> StepperConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        return load_stepper_config(self.checkpoint_path, self.stepper_override)
+        return load_stepper_config_with_override(
+            self.checkpoint_path, self.stepper_override
+        )
 
     def get_data_writer(
         self,

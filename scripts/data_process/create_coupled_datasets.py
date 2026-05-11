@@ -74,7 +74,6 @@ def _get_stats(
     else:
         logging.info(f"Computing statistics")
         logging.info(f"  Output directory: {stats_dir}")
-        out_dir = stats_dir + "/" + run_name
         get_stats(
             config=StatsConfig(
                 output_directory=os.path.dirname(input_zarr_path),
@@ -83,7 +82,7 @@ def _get_stats(
                 end_date=end_date,
             ),
             input_zarr=input_zarr_path,
-            out_dir=out_dir,
+            out_dir=stats_dir,
             debug=False,
         )
     return stats_dir

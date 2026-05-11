@@ -14,6 +14,7 @@ from fme.core.models.conditional_sfno.sfnonet import (
     SFNONetConfig,
     get_lat_lon_sfnonet,
 )
+from fme.core.rand import randn
 
 
 def isotropic_noise(
@@ -25,8 +26,8 @@ def isotropic_noise(
 ) -> torch.Tensor:
     # --- draw independent N(0,1) parts --------------------------------------
     coeff_shape = (*leading_shape, lmax, mmax)
-    real = torch.randn(coeff_shape, dtype=torch.float32, device=device)
-    imag = torch.randn(coeff_shape, dtype=torch.float32, device=device)
+    real = randn(coeff_shape, dtype=torch.float32, device=device)
+    imag = randn(coeff_shape, dtype=torch.float32, device=device)
     imag[..., :, 0] = 0.0  # m = 0 ⇒ purely real
 
     # m > 0: make Re and Im each N(0,½)  → |a_{ℓ m}|² has variance 1
@@ -119,8 +120,8 @@ class NoiseConditionedModel(torch.nn.Module):
                 device=x.device,
             )
         else:
-            noise = torch.randn(
-                [x.shape[0], self.embed_dim, *x.shape[-2:]],
+            noise = randn(
+                torch.Size([x.shape[0], self.embed_dim, *x.shape[-2:]]),
                 device=x.device,
                 dtype=x.dtype,
             )
@@ -217,6 +218,10 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             0 (default) disables LoRA.
         spectral_lora_alpha: Strength of the LoRA adaptations for spectral convolutions.
             Defaults to spectral_lora_rank.
+        filter_preserves_global_mean: If True, the spectral filter preserves
+            the l=0 (global mean) spherical harmonic coefficient, so that
+            global mean changes can only result from local operations
+            (norms, MLPs, skip connections).
     """
 
     spectral_transform: Literal["sht"] = "sht"
@@ -254,6 +259,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     lora_alpha: float | None = None
     spectral_lora_rank: int = 0
     spectral_lora_alpha: float | None = None
+    filter_preserves_global_mean: bool = False
 
     def __post_init__(self):
         if self.context_pos_embed_dim > 0 and self.pos_embed:
@@ -298,6 +304,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             lora_alpha=self.lora_alpha,
             spectral_lora_rank=self.spectral_lora_rank,
             spectral_lora_alpha=self.spectral_lora_alpha,
+            filter_preserves_global_mean=self.filter_preserves_global_mean,
         )
         sfno_net = get_lat_lon_sfnonet(
             params=sfno_config,
