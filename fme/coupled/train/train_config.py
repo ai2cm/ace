@@ -123,13 +123,6 @@ class TrainConfig:
         save_best_inference_epoch_checkpoints: Whether to save a separate checkpoint
             for each epoch where best_inference_error achieves a new minimum.
             Checkpoints are saved as best_inference_ckpt_XXXX.tar.
-        save_best_enso_checkpoint: Whether to save a best-ENSO checkpoint.
-            The ENSO score is the mean of |1.0 - m| for each available
-            normalized metric (std_norm, autocorr_lag5yr_norm, psd_2_5yr_norm).
-        best_enso_checkpoint_climate_tolerance: Maximum relative increase in
-            inference_error (climate mean state) allowed when saving the
-            best-ENSO checkpoint. E.g. 0.1 means the inference error may be
-            at most 10% worse than the current best_inference_error.
         resume_results: Configuration for resuming a previously stopped or finished
             training job. When provided and experiment_dir has no training_checkpoints
             subdirectory, then it is assumed that this is a new run to resume a
@@ -162,8 +155,6 @@ class TrainConfig:
     save_per_epoch_diagnostics: bool = False
     evaluate_before_training: bool = True
     save_best_inference_epoch_checkpoints: bool = False
-    save_best_enso_checkpoint: bool = False
-    best_enso_checkpoint_climate_tolerance: float = 0.1
     lr_tuning: LRTuningConfig | None = None
     resume_results: ResumeResultsConfig | None = None
 

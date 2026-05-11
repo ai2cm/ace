@@ -18,7 +18,6 @@ from .dynamic_index import (
     PairedRegionalIndexAggregator,
     RegionalIndexAggregator,
     _calculate_sample_average_power_spectrum,
-    _compute_autocorrelation_at_lag,
     _compute_sample_mean_std,
     anomalies_from_monthly_climo,
     compute_psd_band_power,
@@ -428,12 +427,11 @@ def test_regional_index_aggregator(variable_name):
     assert metric_name in logs
     assert isinstance(logs[metric_name], float)
 
-    for lag_years in [2, 5]:
-        metric_name = f"test/{variable_name}_nino34_index_autocorr_lag{lag_years}yr"
-        assert metric_name in logs
-        assert isinstance(logs[metric_name], float)
+    metric_name = f"test/{variable_name}_nino34_index_power_2_5yr"
+    assert metric_name in logs
+    assert isinstance(logs[metric_name], float)
 
-    metric_name = f"test/{variable_name}_nino34_index_psd_2_5yr"
+    metric_name = f"test/{variable_name}_nino34_index_power_1_16yr"
     assert metric_name in logs
     assert isinstance(logs[metric_name], float)
 
@@ -503,12 +501,11 @@ def test_paired_regional_index_aggregator(variable_name):
         assert metric_name in logs
         assert isinstance(logs[metric_name], float)
 
-    for lag_years in [2, 5]:
-        metric_name = f"test/{variable_name}_nino34_index_autocorr_lag{lag_years}yr"
-        assert metric_name in logs
-        assert isinstance(logs[metric_name], float)
+    metric_name = f"test/{variable_name}_nino34_index_power_2_5yr"
+    assert metric_name in logs
+    assert isinstance(logs[metric_name], float)
 
-    metric_name = f"test/{variable_name}_nino34_index_psd_2_5yr"
+    metric_name = f"test/{variable_name}_nino34_index_power_1_16yr"
     assert metric_name in logs
     assert isinstance(logs[metric_name], float)
 
@@ -553,16 +550,15 @@ def test_paired_norm_metrics_with_sufficient_data():
     logs = agg.get_logs(label="test")
 
     variable_name = "surface_temperature"
-    for lag_years in [2, 5]:
-        norm_key = f"test/{variable_name}_nino34_index_autocorr_lag{lag_years}yr_norm"
-        assert norm_key in logs, f"{norm_key} not in logs"
-        assert isinstance(logs[norm_key], float)
-        assert not np.isnan(logs[norm_key])
+    power_2_5yr_norm_key = f"test/{variable_name}_nino34_index_power_2_5yr_norm"
+    assert power_2_5yr_norm_key in logs, f"{power_2_5yr_norm_key} not in logs"
+    assert isinstance(logs[power_2_5yr_norm_key], float)
+    assert not np.isnan(logs[power_2_5yr_norm_key])
 
-    psd_norm_key = f"test/{variable_name}_nino34_index_psd_2_5yr_norm"
-    assert psd_norm_key in logs, f"{psd_norm_key} not in logs"
-    assert isinstance(logs[psd_norm_key], float)
-    assert not np.isnan(logs[psd_norm_key])
+    power_1_16yr_norm_key = f"test/{variable_name}_nino34_index_power_1_16yr_norm"
+    assert power_1_16yr_norm_key in logs, f"{power_1_16yr_norm_key} not in logs"
+    assert isinstance(logs[power_1_16yr_norm_key], float)
+    assert not np.isnan(logs[power_1_16yr_norm_key])
 
 
 def test__calculate_sample_average_power_spectrum():
@@ -658,35 +654,3 @@ def test__compute_sample_mean_std():
         (np.std(data1) / np.std(target_data1) + np.std(data2) / np.std(target_data2))
         / 2,
     )
-
-
-def test__compute_autocorrelation_at_lag():
-    # Perfect autocorrelation: constant signal
-    constant = np.array([[5.0] * 100])
-    assert np.isnan(_compute_autocorrelation_at_lag(constant, lag_months=10))
-
-    # AR(1) process: known autocorrelation structure
-    rng = np.random.RandomState(42)
-    phi = 0.9
-    n = 10000
-    x = np.zeros(n)
-    for i in range(1, n):
-        x[i] = phi * x[i - 1] + rng.randn()
-    data = x.reshape(1, -1)  # (1, n)
-
-    # Lag-1 autocorrelation should be close to phi
-    acorr_1 = _compute_autocorrelation_at_lag(data, lag_months=1)
-    np.testing.assert_almost_equal(acorr_1, phi, decimal=1)
-
-    # Lag-k autocorrelation of AR(1) is phi^k
-    acorr_5 = _compute_autocorrelation_at_lag(data, lag_months=5)
-    np.testing.assert_almost_equal(acorr_5, phi**5, decimal=1)
-
-    # Too-short series returns NaN
-    short = np.array([[1.0, 2.0, 3.0]])
-    assert np.isnan(_compute_autocorrelation_at_lag(short, lag_months=5))
-
-    # Multi-sample: averages across samples
-    data_2sample = np.vstack([data, data])  # identical samples
-    acorr_multi = _compute_autocorrelation_at_lag(data_2sample, lag_months=1)
-    np.testing.assert_almost_equal(acorr_multi, acorr_1)

@@ -135,43 +135,6 @@ def compute_psd_band_power(
     return float(np.trapezoid(power[mask], freqs_per_year[mask]))
 
 
-def _compute_autocorrelation_at_lag(
-    data: np.ndarray,
-    lag_months: int,
-    time_dim: int = TIME_DIM,
-) -> float:
-    """Compute autocorrelation at a specific lag, averaged across samples.
-
-    Args:
-        data: Array with shape (sample, time).
-        lag_months: Lag in months.
-        time_dim: Time dimension index.
-
-    Returns:
-        Mean autocorrelation across samples at the given lag. Returns NaN
-        if the time series is too short for the requested lag.
-    """
-    n_time = data.shape[time_dim]
-    if n_time <= lag_months:
-        return float("nan")
-    acorrs = []
-    for s in range(data.shape[0]):
-        ts = data[s]
-        ts_clean = ts[~np.isnan(ts)]
-        if len(ts_clean) <= lag_months:
-            continue
-        mean = np.mean(ts_clean)
-        var = np.var(ts_clean)
-        if var == 0:
-            continue
-        x = ts_clean[:-lag_months] - mean
-        y = ts_clean[lag_months:] - mean
-        acorrs.append(np.mean(x * y) / var)
-    if len(acorrs) == 0:
-        return float("nan")
-    return float(np.mean(acorrs))
-
-
 class RegionalIndexAggregator:
     """Aggregator for computing a regional index, in this case a monthly- and area-
     weighted average of a variable over a region.
@@ -321,11 +284,6 @@ class RegionalIndexAggregator:
                 logs[f"{sst_name}_nino34_index_std"] = _compute_sample_mean_std(
                     indices[sst_name]
                 )
-                for lag_years, lag_months in [(2, 24), (5, 60)]:
-                    acorr = _compute_autocorrelation_at_lag(
-                        indices[sst_name].values, lag_months
-                    )
-                    logs[f"{sst_name}_nino34_index_autocorr_lag{lag_years}yr"] = acorr
         for sst_name in self.sea_surface_temperature_names:
             if (
                 sst_name in indices
@@ -343,8 +301,11 @@ class RegionalIndexAggregator:
                 ax.legend()
                 fig.tight_layout()
                 logs[f"{sst_name}_nino34_index_power_spectrum"] = fig
-                logs[f"{sst_name}_nino34_index_psd_2_5yr"] = compute_psd_band_power(
+                logs[f"{sst_name}_nino34_index_power_2_5yr"] = compute_psd_band_power(
                     freq, power_spectrum
+                )
+                logs[f"{sst_name}_nino34_index_power_1_16yr"] = compute_psd_band_power(
+                    freq, power_spectrum, period_bounds=(1.0, 16.0)
                 )
 
         if len(label) > 0:
@@ -422,20 +383,6 @@ class PairedRegionalIndexAggregator:
                     prediction_indices[sst_name],
                     target_indices[sst_name],
                 )
-                for lag_years, lag_months in [(2, 24), (5, 60)]:
-                    pred_acorr = _compute_autocorrelation_at_lag(
-                        prediction_indices[sst_name].values, lag_months
-                    )
-                    target_acorr = _compute_autocorrelation_at_lag(
-                        target_indices[sst_name].values, lag_months
-                    )
-                    logs[f"{sst_name}_nino34_index_autocorr_lag{lag_years}yr"] = (
-                        pred_acorr
-                    )
-                    if target_acorr != 0 and not np.isnan(target_acorr):
-                        logs[
-                            f"{sst_name}_nino34_index_autocorr_lag{lag_years}yr_norm"
-                        ] = pred_acorr / target_acorr
         for sst_name in self._prediction_aggregator.sea_surface_temperature_names:
             if (
                 sst_name in prediction_indices
@@ -464,12 +411,27 @@ class PairedRegionalIndexAggregator:
                 ax.legend()
                 fig.tight_layout()
                 logs[f"{sst_name}_nino34_index_power_spectrum"] = fig
-                pred_psd = compute_psd_band_power(pred_freq, prediction_power_spectrum)
-                target_psd = compute_psd_band_power(target_freq, target_power_spectrum)
-                logs[f"{sst_name}_nino34_index_psd_2_5yr"] = pred_psd
-                if target_psd != 0 and not np.isnan(target_psd):
-                    logs[f"{sst_name}_nino34_index_psd_2_5yr_norm"] = (
-                        pred_psd / target_psd
+                pred_power_2_5 = compute_psd_band_power(
+                    pred_freq, prediction_power_spectrum
+                )
+                target_power_2_5 = compute_psd_band_power(
+                    target_freq, target_power_spectrum
+                )
+                logs[f"{sst_name}_nino34_index_power_2_5yr"] = pred_power_2_5
+                if target_power_2_5 != 0 and not np.isnan(target_power_2_5):
+                    logs[f"{sst_name}_nino34_index_power_2_5yr_norm"] = (
+                        pred_power_2_5 / target_power_2_5
+                    )
+                pred_power_1_16 = compute_psd_band_power(
+                    pred_freq, prediction_power_spectrum, period_bounds=(1.0, 16.0)
+                )
+                target_power_1_16 = compute_psd_band_power(
+                    target_freq, target_power_spectrum, period_bounds=(1.0, 16.0)
+                )
+                logs[f"{sst_name}_nino34_index_power_1_16yr"] = pred_power_1_16
+                if target_power_1_16 != 0 and not np.isnan(target_power_1_16):
+                    logs[f"{sst_name}_nino34_index_power_1_16yr_norm"] = (
+                        pred_power_1_16 / target_power_1_16
                     )
         if len(label) > 0:
             label = label + "/"
