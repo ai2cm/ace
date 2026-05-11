@@ -35,6 +35,47 @@ from fme.coupled.stepper import (
     CoupledTrainStepper,
     CoupledTrainStepperConfig,
 )
+from fme.coupled.typing_ import CoupledOptionalInt
+
+
+def _validate_loss_n_steps(
+    n_coupled_steps: int,
+    n_inner_steps: int,
+    component_n_steps_max: CoupledOptionalInt,
+) -> None:
+    """Ensure each component's ``LossContributionsConfig.n_steps`` upper bound
+    fits within the rollout horizon implied by ``n_coupled_steps`` and the
+    atmosphere/ocean step ratio.
+
+    Raises:
+        ValueError: If either component's ``n_steps_max`` exceeds its limit.
+            The error message lists every misconfigured component.
+    """
+    atmos_limit = n_coupled_steps * n_inner_steps
+    errors: list[str] = []
+    if (
+        component_n_steps_max.ocean is not None
+        and component_n_steps_max.ocean > n_coupled_steps
+    ):
+        errors.append(
+            f"ocean loss_contributions.n_steps max "
+            f"({component_n_steps_max.ocean}) exceeds n_coupled_steps "
+            f"({n_coupled_steps})."
+        )
+    if (
+        component_n_steps_max.atmosphere is not None
+        and component_n_steps_max.atmosphere > atmos_limit
+    ):
+        errors.append(
+            f"atmosphere loss_contributions.n_steps max "
+            f"({component_n_steps_max.atmosphere}) exceeds n_coupled_steps * "
+            f"n_inner_steps ({n_coupled_steps} * {n_inner_steps} = "
+            f"{atmos_limit})."
+        )
+    if errors:
+        raise ValueError(
+            "Incompatible LossContributionsConfig n_steps: " + " ".join(errors)
+        )
 
 
 @dataclasses.dataclass
@@ -226,6 +267,11 @@ class TrainConfig:
                 "lr_tuning and optimization.scheduler cannot both be specified; "
                 "lr_tuning is an alternative form of learning rate scheduling"
             )
+        _validate_loss_n_steps(
+            n_coupled_steps=self.stepper_training.n_coupled_steps,
+            n_inner_steps=self.stepper.n_inner_steps,
+            component_n_steps_max=self.stepper_training.component_n_steps_max,
+        )
 
     @property
     def n_coupled_steps(self) -> int:

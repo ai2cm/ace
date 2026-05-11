@@ -81,6 +81,9 @@ class _StepLoss(StepLossABC):
     def step_is_optimized(self, step: int, n_total_steps: int | None = None) -> bool:
         return step < 2
 
+    def n_required_forward_steps(self) -> int:
+        return 2
+
     def __call__(
         self, prediction: StepPredictionABC, target_data: TensorMapping
     ) -> torch.Tensor:
@@ -142,7 +145,7 @@ def test_loss_contributions(steps_thru_atmos_7):
     atmosphere_loss = atmos_loss_config.build(
         loss_obj=mock_step_loss,
         time_dim=1,
-        max_n_steps=20,
+        n_steps_limit=20,
     )
     ocean_loss = _StepLoss(loss_obj=mae_loss)
     loss_obj = CoupledStepperTrainLoss(
@@ -192,7 +195,7 @@ def test_loss_contributions_optimize_last_step_only(steps_thru_atmos_7):
     atmosphere_loss = atmos_loss_config.build(
         loss_obj=mock_step_loss,
         time_dim=1,
-        max_n_steps=n_total_atmos,
+        n_steps_limit=n_total_atmos,
     )
     ocean_loss_config = LossContributionsConfig(
         n_steps=3,
@@ -201,7 +204,7 @@ def test_loss_contributions_optimize_last_step_only(steps_thru_atmos_7):
     ocean_loss = ocean_loss_config.build(
         loss_obj=Mock(spec=StepLoss, side_effect=mae_loss_as_output),
         time_dim=1,
-        max_n_steps=n_total_ocean,
+        n_steps_limit=n_total_ocean,
     )
     loss_obj = CoupledStepperTrainLoss(
         ocean_loss=ocean_loss,
@@ -248,7 +251,7 @@ def test_step_is_optimized_last_step_only(
     loss = config.build(
         loss_obj=Mock(spec=StepLoss),
         time_dim=1,
-        max_n_steps=n_total_steps,
+        n_steps_limit=n_total_steps,
     )
     for step in range(n_total_steps):
         result = loss.step_is_optimized(step)
@@ -263,7 +266,7 @@ def test_step_is_optimized_last_step_only_weight_zero():
     loss = config.build(
         loss_obj=Mock(spec=StepLoss),
         time_dim=1,
-        max_n_steps=5,
+        n_steps_limit=5,
     )
     # weight=0 → NullLossContributions, always returns False
     assert not loss.step_is_optimized(0)
@@ -276,7 +279,7 @@ def test_stochastic_n_steps_sample_changes_step_is_optimized():
         ]
     )
     config = LossContributionsConfig(n_steps=sampler)
-    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1, max_n_steps=4)
+    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1, n_steps_limit=4)
     # before sampling, _n_steps is max_n_forward_steps = 2
     assert loss.step_is_optimized(0)
     assert loss.step_is_optimized(1)
@@ -296,7 +299,7 @@ def test_stochastic_n_steps_deterministic_outcome():
         ]
     )
     config = LossContributionsConfig(n_steps=sampler)
-    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1, max_n_steps=4)
+    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1, n_steps_limit=4)
     loss.sample_n_steps()
     assert loss.step_is_optimized(0)
     assert loss.step_is_optimized(1)
@@ -314,7 +317,7 @@ def test_stochastic_n_steps_samples_vary():
         ]
     )
     config = LossContributionsConfig(n_steps=sampler)
-    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1, max_n_steps=5)
+    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1, n_steps_limit=5)
     seen_optimized_step_3 = False
     seen_not_optimized_step_1 = False
     for _ in range(20):  # about 1 in a million prob of test failure
@@ -330,10 +333,10 @@ def test_stochastic_n_steps_samples_vary():
 
 
 class TestOptimizeLastStepOnlyStochastic:
-    def _build(self, sampler, max_n_steps=6):
+    def _build(self, sampler, n_steps_limit=6):
         config = LossContributionsConfig(n_steps=sampler, optimize_last_step_only=True)
         return config.build(
-            loss_obj=Mock(spec=StepLoss), time_dim=1, max_n_steps=max_n_steps
+            loss_obj=Mock(spec=StepLoss), time_dim=1, n_steps_limit=n_steps_limit
         )
 
     def _sampler(self, outcomes):
@@ -345,7 +348,7 @@ class TestOptimizeLastStepOnlyStochastic:
 
     def test_before_sampling(self):
         sampler = self._sampler([(2, 0.5), (5, 0.5)])
-        loss = self._build(sampler, max_n_steps=6)
+        loss = self._build(sampler, n_steps_limit=6)
         # _n_steps = max_n_forward_steps = 5; last optimized = min(5,6)-1 = 4
         for step in range(6):
             if step == 4:
@@ -357,7 +360,7 @@ class TestOptimizeLastStepOnlyStochastic:
 
     def test_deterministic_sample(self):
         sampler = self._sampler([(3, 1.0)])
-        loss = self._build(sampler, max_n_steps=6)
+        loss = self._build(sampler, n_steps_limit=6)
         loss.sample_n_steps()
         # _n_steps = 3; last optimized = min(3,6)-1 = 2
         for step in range(6):
@@ -370,7 +373,7 @@ class TestOptimizeLastStepOnlyStochastic:
 
     def test_varying_samples(self):
         sampler = self._sampler([(2, 0.5), (5, 0.5)])
-        loss = self._build(sampler, max_n_steps=6)
+        loss = self._build(sampler, n_steps_limit=6)
         seen_step_1 = False  # min(2,6)-1 = 1
         seen_step_4 = False  # min(5,6)-1 = 4
         for _ in range(20):  # about 1 in a million prob of test failure
@@ -385,12 +388,35 @@ class TestOptimizeLastStepOnlyStochastic:
         assert seen_step_4, "should sometimes optimize only step 4 (n_steps=5)"
 
 
-def test_sample_n_steps_noop_for_float_config():
-    config = LossContributionsConfig(n_steps=5.0)
-    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1, max_n_steps=5)
+def test_sample_n_steps_noop_for_int_config():
+    config = LossContributionsConfig(n_steps=5)
+    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1, n_steps_limit=5)
     loss.sample_n_steps()
     assert loss.step_is_optimized(4)
     assert not loss.step_is_optimized(5)
+
+
+def test_sample_n_steps_noop_for_none_config():
+    config = LossContributionsConfig(n_steps=None)
+    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1, n_steps_limit=5)
+    loss.sample_n_steps()
+    # n_steps=None is unbounded (treated internally as inf), so every step
+    # is optimized; the rollout-imposed n_steps_limit is the only cap.
+    assert loss.step_is_optimized(4)
+    assert loss.step_is_optimized(100)
+
+
+def test_n_steps_max_property():
+    assert LossContributionsConfig().n_steps_max is None
+    assert LossContributionsConfig(n_steps=None).n_steps_max is None
+    assert LossContributionsConfig(n_steps=5).n_steps_max == 5
+    sampler = TimeLengthProbabilities(
+        outcomes=[
+            TimeLengthProbability(steps=2, probability=0.5),
+            TimeLengthProbability(steps=4, probability=0.5),
+        ]
+    )
+    assert LossContributionsConfig(n_steps=sampler).n_steps_max == 4
 
 
 def test_coupled_stepper_train_loss_sample_n_steps_delegates():
@@ -404,6 +430,100 @@ def test_coupled_stepper_train_loss_sample_n_steps_delegates():
     atmos_loss.sample_n_steps.assert_called_once()
 
 
+@pytest.mark.parametrize(
+    "n_steps, n_steps_limit, expected",
+    [
+        (3, 10, 3),
+        (10, 3, 3),
+        (float("inf"), 5, 5),
+        (5.0, 5, 5),
+    ],
+)
+def test_loss_contributions_n_required_forward_steps(n_steps, n_steps_limit, expected):
+    config = LossContributionsConfig(n_steps=n_steps)
+    loss = config.build(
+        loss_obj=Mock(spec=StepLoss), time_dim=1, n_steps_limit=n_steps_limit
+    )
+    assert loss.n_required_forward_steps() == expected
+
+
+@pytest.mark.parametrize(
+    "n_steps, n_steps_limit, expected",
+    [
+        (3, 10, 3),
+        (10, 3, 3),
+        (float("inf"), 5, 5),
+    ],
+)
+def test_loss_contributions_n_required_forward_steps_optimize_last_step_only(
+    n_steps, n_steps_limit, expected
+):
+    config = LossContributionsConfig(n_steps=n_steps, optimize_last_step_only=True)
+    loss = config.build(
+        loss_obj=Mock(spec=StepLoss), time_dim=1, n_steps_limit=n_steps_limit
+    )
+    assert loss.n_required_forward_steps() == expected
+
+
+def test_loss_contributions_n_required_forward_steps_after_sampling():
+    sampler = TimeLengthProbabilities(
+        outcomes=[TimeLengthProbability(steps=2, probability=1.0)]
+    )
+    config = LossContributionsConfig(n_steps=sampler)
+    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1, n_steps_limit=5)
+    # before sampling, _n_steps == max_n_forward_steps == 2
+    assert loss.n_required_forward_steps() == 2
+    loss.sample_n_steps()
+    assert loss.n_required_forward_steps() == 2
+
+
+@pytest.mark.parametrize("config_kwargs", [{"n_steps": 0}, {"weight": 0.0}])
+def test_null_loss_contributions_n_required_forward_steps(config_kwargs):
+    config = LossContributionsConfig(**config_kwargs)
+    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1, n_steps_limit=10)
+    assert loss.n_required_forward_steps() == 0
+
+
+@pytest.mark.parametrize(
+    "ocean_required, atmos_required, n_inner_steps, expected_outer",
+    [
+        (4, 0, 2, 4),
+        (0, 5, 3, 2),
+        (0, 6, 3, 2),
+        (0, 7, 3, 3),
+        (3, 5, 2, 3),
+        (1, 8, 2, 4),
+        (0, 0, 2, 0),
+    ],
+)
+def test_coupled_stepper_train_loss_n_required_outer_steps(
+    ocean_required, atmos_required, n_inner_steps, expected_outer
+):
+    ocean_loss = MagicMock(spec=StepLossABC)
+    atmos_loss = MagicMock(spec=StepLossABC)
+    ocean_loss.n_required_forward_steps.return_value = ocean_required
+    atmos_loss.n_required_forward_steps.return_value = atmos_required
+    coupled_loss = CoupledStepperTrainLoss(
+        ocean_loss=ocean_loss, atmosphere_loss=atmos_loss
+    )
+    assert coupled_loss.n_required_outer_steps(n_inner_steps) == expected_outer
+
+
+@pytest.mark.parametrize(
+    "config_kwargs, expected_is_null",
+    [
+        ({}, False),
+        ({"n_steps": 0}, True),
+        ({"weight": 0.0}, True),
+        ({"n_steps": 5}, False),
+        ({"n_steps": 0}, True),
+    ],
+)
+def test_loss_contributions_config_is_null(config_kwargs, expected_is_null):
+    config = LossContributionsConfig(**config_kwargs)
+    assert config.is_null is expected_is_null
+
+
 @pytest.mark.parametrize("ocean_config_kwargs", [{"n_steps": 0}, {"weight": 0.0}])
 def test_null_loss_contributions(steps_thru_atmos_7, ocean_config_kwargs):
     atmos_loss_config = LossContributionsConfig()
@@ -413,7 +533,7 @@ def test_null_loss_contributions(steps_thru_atmos_7, ocean_config_kwargs):
             return_value=_wrap_as_loss_output(torch.tensor(5.25)),
         ),
         time_dim=1,
-        max_n_steps=10,
+        n_steps_limit=10,
     )
     ocean_loss_config = LossContributionsConfig(**ocean_config_kwargs)
     ocean_loss = ocean_loss_config.build(
@@ -422,7 +542,7 @@ def test_null_loss_contributions(steps_thru_atmos_7, ocean_config_kwargs):
             return_value=_wrap_as_loss_output(torch.tensor(42.0)),
         ),
         time_dim=1,
-        max_n_steps=10,
+        n_steps_limit=10,
     )
     loss_obj = CoupledStepperTrainLoss(
         ocean_loss=ocean_loss,
