@@ -34,7 +34,6 @@ from fme.ace.registry.test_hpx import (
     down_sampling_block_config,
     encoder_config,
     output_layer_config,
-    recurrent_block_config,
     up_sampling_block_config,
 )
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
@@ -121,23 +120,11 @@ def _get_test_yaml_files(
     output_time_size = 1
     if derived_forcings is None:
         derived_forcings = DerivedForcingsConfig()
-    if nettype == "HEALPixRecUNet":
+    if nettype == "HEALPixUNet":
         in_channels = len(in_variable_names)
         out_channels = len(out_variable_names)
-        prognostic_variables = min(
-            out_channels, in_channels
-        )  # how many variables in/out share.
-        # in practice, we will need to compare variable names, since there
-        # are some input-only and some output-only channels.
-        # TODO: https://github.com/ai2cm/full-model/issues/1046
-        n_constants = 0
-        decoder_input_channels = 0  # was 1, to indicate insolation - now 0
-        input_time_size = 1  # TODO: change to 2 (issue #1177)
-        output_time_size = 1  # TODO: change to 4 (issue #1177)
-
         conv_next_block = conv_next_block_config(in_channels=in_channels)
         down_sampling_block = down_sampling_block_config()
-        recurrent_block = recurrent_block_config()
         encoder = encoder_config(
             conv_next_block, down_sampling_block, n_channels=[16, 8, 4]
         )
@@ -147,17 +134,12 @@ def _get_test_yaml_files(
             conv_next_block,
             up_sampling_block,
             output_layer,
-            recurrent_block,
+            None,
             n_channels=[4, 8, 16],
         )
         net_config = dict(
             encoder=encoder,
             decoder=decoder,
-            prognostic_variables=prognostic_variables,
-            n_constants=n_constants,
-            decoder_input_channels=decoder_input_channels,
-            input_time_size=input_time_size,
-            output_time_size=output_time_size,
         )
         spatial_dimensions_str: Literal["healpix", "latlon"] = "healpix"
     elif nettype == "Samudra":
@@ -419,12 +401,12 @@ def _get_test_yaml_files(
     )
 
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".yaml") as f_train:
-        f_train.write(yaml.dump(dataclasses.asdict(train_config)))
+        f_train.write(yaml.safe_dump(dataclasses.asdict(train_config)))
 
     with tempfile.NamedTemporaryFile(
         mode="w", delete=False, suffix=".yaml"
     ) as f_inference:
-        f_inference.write(yaml.dump(dataclasses.asdict(inference_config)))
+        f_inference.write(yaml.safe_dump(dataclasses.asdict(inference_config)))
 
     return f_train.name, f_inference.name
 
@@ -573,7 +555,7 @@ def _setup(
     [
         ("NoiseConditionedSFNO", True, False, False, True, False),
         ("SphericalFourierNeuralOperatorNet", False, True, False, False, False),
-        ("HEALPixRecUNet", False, False, True, False, False),
+        ("HEALPixUNet", False, False, True, False, False),
         ("Samudra", False, False, False, False, False),
         ("NoiseConditionedSFNO", False, False, False, False, False),
         ("NoiseConditionedSFNO", True, False, False, True, True),
@@ -952,7 +934,7 @@ def _create_copy_weights_after_batch_config(
         with tempfile.NamedTemporaryFile(
             mode="w", delete=False, suffix=".yaml"
         ) as new_config_file:
-            new_config_file.write(yaml.dump(config_data))
+            new_config_file.write(yaml.safe_dump(config_data))
 
     return new_config_file.name
 
@@ -992,7 +974,7 @@ def test_train_without_inline_inference(tmp_path, very_fast_only: bool):
         timestep_days=20,
         n_time=int(366 * 3 / 20 + 1),
         inference_forward_steps=int(366 * 3 / 20 / 2 - 1) * 2,  # must be even
-        use_healpix=(nettype == "HEALPixRecUNet"),
+        use_healpix=False,
         crps_training=crps_training,
         save_per_epoch_diagnostics=True,
         log_validation_maps=log_validation_maps,

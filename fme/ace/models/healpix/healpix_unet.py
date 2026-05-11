@@ -70,8 +70,8 @@ class HEALPixUNet(nn.Module):
         Args:
             encoder: Configuration for the U-net encoder.
             decoder: Configuration for the U-net decoder. ``recurrent_block``
-                must be ``None``; pass ``HEALPixRecUNet`` instead if a
-                recurrent decoder is required.
+                must be ``None``; recurrence belongs in the stepper, not the
+                UNet decoder here.
             input_channels: Number of channels in the input tensor (i.e. the
                 size of the channel dimension of the tensor passed to
                 ``forward``).
@@ -95,8 +95,8 @@ class HEALPixUNet(nn.Module):
         super().__init__()
         if decoder.recurrent_block is not None:
             raise ValueError(
-                "HEALPixUNet is non-recurrent; decoder.recurrent_block must "
-                "be None. Use HEALPixRecUNet for recurrent decoders."
+                "HEALPixUNet is non-recurrent; set decoder.recurrent_block "
+                "to None and handle time/recurrence in the stepper."
             )
 
         self.input_channels = input_channels
@@ -131,7 +131,7 @@ class HEALPixUNet(nn.Module):
 
         encoder.input_channels = input_channels
         encoder.enable_nhwc = enable_nhwc
-        encoder.enable_healpixpad = enable_healpixpad
+        encoder.enable_healpixpad = None
         encoder.hpx_padding_mode = self.hpx_padding_mode
         encoder.compile_padding = compile_padding
         encoder.nside = self.nside[0]
@@ -139,7 +139,7 @@ class HEALPixUNet(nn.Module):
 
         decoder.output_channels = output_channels
         decoder.enable_nhwc = enable_nhwc
-        decoder.enable_healpixpad = enable_healpixpad
+        decoder.enable_healpixpad = None
         decoder.hpx_padding_mode = self.hpx_padding_mode
         decoder.compile_padding = compile_padding
         decoder.nside = self.nside[-1]
