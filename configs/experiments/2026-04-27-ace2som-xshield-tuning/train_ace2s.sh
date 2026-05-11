@@ -29,7 +29,7 @@ ACE2S_CKPT=("01KQDG7X72D4E2JJTGQ0ZF9J9T")
 #        --dataset ${PRE_TRAINED_WEIGHTS_DATASETS[$seed]}:/pre-trained-weights \
 for seed in {0..0}; do
     #job_name="ace2som-xshield-tune-1yr-even-split-single-decoder-seed${seed}"
-    job_name="ace2som-xshield-tune-1yr-4k-seed${seed}"
+    job_name="ace2s-v1-xshield-tune-1yr-4k-seed${seed}"
     fine_tune_seed=$((seed + SEED_OFFSET))
     override="seed=${fine_tune_seed}"
     python -m fme.ace.validate_config --config_type train $CONFIG_PATH --override $override
@@ -42,6 +42,7 @@ for seed in {0..0}; do
         --priority urgent \
         --preemptible \
         --cluster ai2/titan \
+        --cluster ai2/jupiter \
         --env WANDB_NAME=$job_name \
         --env WANDB_USERNAME=$WANDB_USERNAME \
         --env WANDB_JOB_TYPE=training \
