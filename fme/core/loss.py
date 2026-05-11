@@ -515,7 +515,7 @@ class EnsembleLoss(torch.nn.Module):
             )
         else:
             self.diff_crps_loss = None
-        self.energy_score_loss = EnergyScoreLoss(sht=sht)
+        self.energy_score_loss = EnergyScoreLoss(sht=sht, reduction=reduction)
 
         self.crps_weight = crps_weight
         self.diff_crps_weight = finite_difference_crps_weight
@@ -526,25 +526,21 @@ class EnsembleLoss(torch.nn.Module):
         gen_norm: torch.Tensor,
         target_norm: torch.Tensor,
     ):
+        result: torch.Tensor | float = 0.0
         if self.crps_weight > 0:
-            crps = self.crps_weight * self.crps_loss(gen_norm, target_norm)
-        else:
-            crps = torch.tensor(0.0)
+            result = self.crps_weight * self.crps_loss(gen_norm, target_norm)
         if self.energy_score_weight > 0:
             es = self.energy_score_loss(gen_norm, target_norm)
-            if crps.ndim > es.ndim:
-                n_extra = crps.ndim - es.ndim
+            if isinstance(result, torch.Tensor) and result.ndim > es.ndim:
+                n_extra = result.ndim - es.ndim
                 es = es.reshape(es.shape + (1,) * n_extra)
-            energy_score_loss = self.energy_score_weight * es
-        else:
-            energy_score_loss = torch.tensor(0.0)
+            result = result + self.energy_score_weight * es
         if self.diff_crps_loss is not None:
-            diff_crps = self.diff_crps_weight * self.diff_crps_loss(
+            result = result + self.diff_crps_weight * self.diff_crps_loss(
                 gen_norm, target_norm
             )
-        else:
-            diff_crps = torch.tensor(0.0)
-        return crps + energy_score_loss + diff_crps
+        assert isinstance(result, torch.Tensor)
+        return result
 
 
 @dataclasses.dataclass
