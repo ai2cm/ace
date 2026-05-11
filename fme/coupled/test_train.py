@@ -73,14 +73,12 @@ stepper_training:
     loss:
       type: {loss_type}
       kwargs: {loss_kwargs}
-    loss_contributions:
-      weight: {loss_ocean_weight}
+    loss_weight: {loss_ocean_weight}
   atmosphere:
     loss:
       type: {loss_type}
       kwargs: {loss_kwargs}
-    loss_contributions:
-      n_steps: {loss_atmos_n_steps}
+    n_steps: {loss_atmos_n_steps}
 stepper:
   sst_name: {ocean_sfc_temp_name}
   ocean_fraction_prediction:
