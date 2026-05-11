@@ -163,16 +163,7 @@ class TrainConfigProtocol(Protocol):
     def save_best_inference_epoch_checkpoints(self) -> bool: ...
 
     @property
-    def best_enso_checkpoint_metric(self) -> str | None: ...
-
-    @property
-    def best_enso_checkpoint_autocorr_metric(self) -> str | None: ...
-
-    @property
-    def best_enso_checkpoint_autocorr_target_metric(self) -> str | None: ...
-
-    @property
-    def best_enso_checkpoint_autocorr_weight(self) -> float: ...
+    def save_best_enso_checkpoint(self) -> bool: ...
 
     @property
     def best_enso_checkpoint_climate_tolerance(self) -> float: ...
@@ -467,25 +458,6 @@ class Trainer:
             inference_error = inference_logs.get(
                 "inference/time_mean_norm/rmse/channel_mean", None
             )
-            enso_metric = (
-                inference_logs.get(self.config.best_enso_checkpoint_metric, None)
-                if self.config.best_enso_checkpoint_metric is not None
-                else None
-            )
-            enso_autocorr = (
-                inference_logs.get(
-                    self.config.best_enso_checkpoint_autocorr_metric, None
-                )
-                if self.config.best_enso_checkpoint_autocorr_metric is not None
-                else None
-            )
-            enso_autocorr_target = (
-                inference_logs.get(
-                    self.config.best_enso_checkpoint_autocorr_target_metric, None
-                )
-                if self.config.best_enso_checkpoint_autocorr_target_metric is not None
-                else None
-            )
             # need to get the learning rate before stepping the scheduler
             lr = self.optimization.learning_rate
             self.optimization.step_scheduler(valid_loss=valid_loss, is_iteration=False)
@@ -533,9 +505,7 @@ class Trainer:
                 self.save_all_checkpoints(
                     valid_loss,
                     inference_error,
-                    enso_metric,
-                    enso_autocorr,
-                    enso_autocorr_target,
+                    inference_logs,
                 )
 
     def _log_first_batch_metrics(self):
@@ -746,13 +716,17 @@ class Trainer:
             epoch, self.config.max_epochs, self.config.ema_checkpoint_save_epochs
         )
 
+    _ENSO_METRIC_SUFFIXES = (
+        "_nino34_index_std_norm",
+        "_nino34_index_autocorr_lag5yr_norm",
+        "_nino34_index_psd_2_5yr_norm",
+    )
+
     def save_all_checkpoints(
         self,
         valid_loss: float,
         inference_error: float | None,
-        enso_metric: float | None = None,
-        enso_autocorr: float | None = None,
-        enso_autocorr_target: float | None = None,
+        inference_logs: dict[str, Any] | None = None,
     ):
         if self.config.validate_using_ema:
             best_checkpoint_context = self._ema_context
@@ -796,48 +770,54 @@ class Trainer:
             if save_best_checkpoint:
                 self.save_checkpoint(self.paths.best_checkpoint_path)
 
-            # Save best ENSO checkpoint if configured and metric available
             if (
-                self.config.best_enso_checkpoint_metric is not None
-                and enso_metric is not None
+                self.config.save_best_enso_checkpoint
                 and inference_error is not None
+                and inference_logs is not None
             ):
-                self._save_best_enso_checkpoint(
-                    enso_metric,
-                    inference_error,
-                    enso_autocorr,
-                    enso_autocorr_target,
-                )
+                self._save_best_enso_checkpoint(inference_logs, inference_error)
 
         self._save_restart_checkpoints()
 
+        if self._ema_epoch_checkpoint_enabled(self._epochs_trained):
+            ema_epoch_checkpoint_path = self.paths.ema_epoch_checkpoint_path(
+                self._epochs_trained
+            )
+            logging.info(f"Saving EMA epoch checkpoint to {ema_epoch_checkpoint_path}")
+            with self._ema_context():
+                self.save_checkpoint(ema_epoch_checkpoint_path)
+        if self._epoch_checkpoint_enabled(self._epochs_trained):
+            epoch_checkpoint_path = self.paths.epoch_checkpoint_path(
+                self._epochs_trained
+            )
+            logging.info(f"Saving epoch checkpoint to {epoch_checkpoint_path}")
+            self.save_checkpoint(epoch_checkpoint_path, include_optimization=True)
+
     def _save_best_enso_checkpoint(
         self,
-        enso_metric: float,
+        inference_logs: dict[str, Any],
         inference_error: float,
-        enso_autocorr: float | None = None,
-        enso_autocorr_target: float | None = None,
     ) -> None:
         """Save checkpoint that optimizes ENSO metric with a climate guard.
 
-        The ENSO score is a weighted composite:
-            |1.0 - std_norm| + weight * |autocorr_pred - autocorr_target|
+        The ENSO score is the mean of |1.0 - m| for each available normalized
+        ENSO metric (std_norm, autocorr_lag5yr_norm, psd_2_5yr_norm).
 
         A checkpoint is saved only when:
         1. The composite ENSO score improves, AND
         2. The climate skill (inference_error) is within a configurable
            relative tolerance of the current best_inference_error.
         """
-        enso_score = abs(1.0 - enso_metric)
-        if (
-            enso_autocorr is not None
-            and enso_autocorr_target is not None
-            and not math.isnan(enso_autocorr)
-            and not math.isnan(enso_autocorr_target)
-        ):
-            autocorr_weight = self.config.best_enso_checkpoint_autocorr_weight
-            autocorr_dist = abs(enso_autocorr - enso_autocorr_target)
-            enso_score += autocorr_weight * autocorr_dist
+        terms: list[float] = []
+        for suffix in self._ENSO_METRIC_SUFFIXES:
+            for key, value in inference_logs.items():
+                if key.endswith(suffix) and isinstance(value, int | float):
+                    if not math.isnan(value):
+                        terms.append(abs(1.0 - value))
+                    break
+        if not terms:
+            return
+        enso_score = sum(terms) / len(terms)
 
         tolerance = self.config.best_enso_checkpoint_climate_tolerance
         climate_threshold = self._best_inference_error * (1.0 + tolerance)
@@ -864,20 +844,6 @@ class Trainer:
                 f"error ({inference_error:.4f}) exceeds tolerance "
                 f"({climate_threshold:.4f}), skipping."
             )
-
-        if self._ema_epoch_checkpoint_enabled(self._epochs_trained):
-            ema_epoch_checkpoint_path = self.paths.ema_epoch_checkpoint_path(
-                self._epochs_trained
-            )
-            logging.info(f"Saving EMA epoch checkpoint to {ema_epoch_checkpoint_path}")
-            with self._ema_context():
-                self.save_checkpoint(ema_epoch_checkpoint_path)
-        if self._epoch_checkpoint_enabled(self._epochs_trained):
-            epoch_checkpoint_path = self.paths.epoch_checkpoint_path(
-                self._epochs_trained
-            )
-            logging.info(f"Saving epoch checkpoint to {epoch_checkpoint_path}")
-            self.save_checkpoint(epoch_checkpoint_path, include_optimization=True)
 
 
 def inference_one_epoch(

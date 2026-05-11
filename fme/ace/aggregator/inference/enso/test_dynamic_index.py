@@ -504,18 +504,65 @@ def test_paired_regional_index_aggregator(variable_name):
         assert isinstance(logs[metric_name], float)
 
     for lag_years in [2, 5]:
-        for suffix in [
-            f"_nino34_index_autocorr_lag{lag_years}yr",
-            f"_nino34_index_autocorr_lag{lag_years}yr_target",
-        ]:
-            metric_name = f"test/{variable_name}{suffix}"
-            assert metric_name in logs
-            assert isinstance(logs[metric_name], float)
-
-    for suffix in ["_nino34_index_psd_2_5yr", "_nino34_index_psd_2_5yr_target"]:
-        metric_name = f"test/{variable_name}{suffix}"
+        metric_name = f"test/{variable_name}_nino34_index_autocorr_lag{lag_years}yr"
         assert metric_name in logs
         assert isinstance(logs[metric_name], float)
+
+    metric_name = f"test/{variable_name}_nino34_index_psd_2_5yr"
+    assert metric_name in logs
+    assert isinstance(logs[metric_name], float)
+
+
+def test_paired_norm_metrics_with_sufficient_data():
+    """Verify that _norm keys are produced when target values are valid."""
+    n_lat = 10
+    n_lon = 20
+    n_sample = 2
+    n_times = 240  # 20 years of monthly data
+    target_data = _get_windowed_data(n_sample, n_times, n_lat, n_lon)
+    prediction_data = _get_windowed_data(n_sample, n_times, n_lat, n_lon, i_start=1)
+    time = _get_windowed_times((2000, 1, 1, 0, 0, 0), n_sample, n_times, freq="MS")
+    lat_lon_coordinates = LatLonCoordinates(
+        lat=target_data["lat"], lon=target_data["lon"]
+    )
+    region = LatLonRegion(
+        lat=lat_lon_coordinates.lat,
+        lon=lat_lon_coordinates.lon,
+        lat_bounds=(4.5, 6.5),
+        lon_bounds=(9.5, 11.5),
+    )
+    agg = PairedRegionalIndexAggregator(
+        target_aggregator=RegionalIndexAggregator(
+            regional_weights=region.regional_weights,
+            regional_mean=lat_lon_coordinates.get_gridded_operations().regional_area_weighted_mean,
+        ),
+        prediction_aggregator=RegionalIndexAggregator(
+            regional_weights=region.regional_weights,
+            regional_mean=lat_lon_coordinates.get_gridded_operations().regional_area_weighted_mean,
+        ),
+    )
+    batch = InferenceBatchData(
+        prediction=prediction_data,
+        prediction_norm={},
+        target=target_data,
+        target_norm=None,
+        time=time,
+        i_time_start=0,
+    )
+    agg.record_batch(batch)
+    logs = agg.get_logs(label="test")
+
+    variable_name = "surface_temperature"
+    for lag_years in [2, 5]:
+        norm_key = f"test/{variable_name}_nino34_index_autocorr_lag{lag_years}yr_norm"
+        assert norm_key in logs, f"{norm_key} not in logs"
+        assert isinstance(logs[norm_key], float)
+        assert not np.isnan(logs[norm_key])
+
+    psd_norm_key = f"test/{variable_name}_nino34_index_psd_2_5yr_norm"
+    assert psd_norm_key in logs, f"{psd_norm_key} not in logs"
+    assert isinstance(logs[psd_norm_key], float)
+    assert not np.isnan(logs[psd_norm_key])
 
 
 def test__calculate_sample_average_power_spectrum():

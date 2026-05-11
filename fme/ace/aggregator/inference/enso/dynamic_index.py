@@ -432,9 +432,10 @@ class PairedRegionalIndexAggregator:
                     logs[f"{sst_name}_nino34_index_autocorr_lag{lag_years}yr"] = (
                         pred_acorr
                     )
-                    logs[
-                        f"{sst_name}_nino34_index_autocorr_lag{lag_years}yr_target"
-                    ] = target_acorr
+                    if target_acorr != 0 and not np.isnan(target_acorr):
+                        logs[
+                            f"{sst_name}_nino34_index_autocorr_lag{lag_years}yr_norm"
+                        ] = pred_acorr / target_acorr
         for sst_name in self._prediction_aggregator.sea_surface_temperature_names:
             if (
                 sst_name in prediction_indices
@@ -463,12 +464,13 @@ class PairedRegionalIndexAggregator:
                 ax.legend()
                 fig.tight_layout()
                 logs[f"{sst_name}_nino34_index_power_spectrum"] = fig
-                logs[f"{sst_name}_nino34_index_psd_2_5yr"] = compute_psd_band_power(
-                    pred_freq, prediction_power_spectrum
-                )
-                logs[f"{sst_name}_nino34_index_psd_2_5yr_target"] = (
-                    compute_psd_band_power(target_freq, target_power_spectrum)
-                )
+                pred_psd = compute_psd_band_power(pred_freq, prediction_power_spectrum)
+                target_psd = compute_psd_band_power(target_freq, target_power_spectrum)
+                logs[f"{sst_name}_nino34_index_psd_2_5yr"] = pred_psd
+                if target_psd != 0 and not np.isnan(target_psd):
+                    logs[f"{sst_name}_nino34_index_psd_2_5yr_norm"] = (
+                        pred_psd / target_psd
+                    )
         if len(label) > 0:
             label = label + "/"
 
