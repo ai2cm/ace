@@ -36,11 +36,7 @@ def _make_inference_config(
         ),
         n_forward_steps=1,
         forward_steps_in_memory=1,
-        aggregator=InferenceEvaluatorAggregatorConfig(
-            log_global_mean_time_series=False,
-            log_global_mean_norm_time_series=False,
-            log_step_means=[],
-        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(),
         epochs=epochs if epochs is not None else Slice(),
         name=name,
         weight=weight,
