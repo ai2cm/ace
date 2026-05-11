@@ -248,12 +248,6 @@ class SlidingWindowDataLoader(DataLoaderABC):
     def n_samples(self) -> int:
         return self._loader.n_samples
 
-    def _n_samples_per_dataset_item(self) -> int:
-        """
-        Number of samples per dataset outer item, i.e., in a window.
-        """
-        return self._n_new_batches
-
     def log_info(self, name: str):
         logging.info(
             f"{name} data: {len(self) * self.batch_size} samples, {len(self)} batches"
