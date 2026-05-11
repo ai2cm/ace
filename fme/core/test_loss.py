@@ -8,6 +8,7 @@ from fme.core.loss import (
     AreaWeightedMSELoss,
     CRPSLoss,
     EnergyScoreLoss,
+    EnsembleLoss,
     GlobalMeanLoss,
     LossConfig,
     LossOutput,
@@ -476,6 +477,42 @@ def test_energy_score_loss_reduction_none(very_fast_only: bool):
     result_none = loss_none(x, y)
     result_mean = loss_mean(x, y)
     assert result_none.shape == (n_batch, n_channels)
+    torch.testing.assert_close(result_none.mean(), result_mean)
+
+
+@pytest.mark.parametrize(
+    "crps_weight,energy_score_weight",
+    [(1.0, 0.0), (0.0, 1.0), (0.5, 0.5)],
+)
+def test_ensemble_loss_reduction_none(
+    very_fast_only: bool, crps_weight: float, energy_score_weight: float
+):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+    torch.manual_seed(0)
+    n_batch, n_ensemble, n_channels, n_lat, n_lon = 4, 2, 3, 16, 32
+    x = torch.rand(n_batch, n_ensemble, n_channels, n_lat, n_lon, device=get_device())
+    y = torch.rand(n_batch, 1, n_channels, n_lat, n_lon, device=get_device())
+    ops = LatLonOperations(torch.ones((n_lat, n_lon), device=get_device()))
+    sht = ops.get_real_sht()
+    loss_none = EnsembleLoss(
+        crps_weight=crps_weight,
+        energy_score_weight=energy_score_weight,
+        sht=sht,
+        reduction="none",
+    )
+    loss_mean = EnsembleLoss(
+        crps_weight=crps_weight,
+        energy_score_weight=energy_score_weight,
+        sht=sht,
+        reduction="mean",
+    )
+    result_none = loss_none(x, y)
+    result_mean = loss_mean(x, y)
+    if crps_weight > 0:
+        assert result_none.shape == (n_batch, n_channels, n_lat, n_lon)
+    else:
+        assert result_none.shape == (n_batch, n_channels)
     torch.testing.assert_close(result_none.mean(), result_mean)
 
 
