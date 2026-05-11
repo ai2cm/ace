@@ -93,6 +93,55 @@ The sub-configurations are:
    :show-inheritance:
    :noindex:
 
+.. autoclass:: fme.ace.HierarchicalInferenceEvaluatorAggregatorConfig
+   :show-inheritance:
+   :noindex:
+
+Metric configurations
+^^^^^^^^^^^^^^^^^^^^^
+
+The ``metrics`` list on :class:`~fme.ace.InferenceEvaluatorAggregatorConfig`
+and the named fields on
+:class:`~fme.ace.HierarchicalInferenceEvaluatorAggregatorConfig`
+accept the following typed entries.  Each entry has an ``enabled`` field
+(default ``true``) that can be set to ``false`` to disable a metric.
+
+.. autoclass:: fme.ace.MeanMetricConfig
+   :noindex:
+
+.. autoclass:: fme.ace.StepMeanMetricConfig
+   :noindex:
+
+.. autoclass:: fme.ace.PowerSpectrumMetricConfig
+   :noindex:
+
+.. autoclass:: fme.ace.ZonalMeanMetricConfig
+   :noindex:
+
+.. autoclass:: fme.ace.TimeMeanMetricConfig
+   :noindex:
+
+.. autoclass:: fme.ace.HistogramMetricConfig
+   :noindex:
+
+.. autoclass:: fme.ace.VideoMetricConfig
+   :noindex:
+
+.. autoclass:: fme.ace.SeasonalMetricConfig
+   :noindex:
+
+.. autoclass:: fme.ace.AnnualMetricConfig
+   :noindex:
+
+.. autoclass:: fme.ace.EnsoIndexMetricConfig
+   :noindex:
+
+.. autoclass:: fme.ace.EnsoCoefficientMetricConfig
+   :noindex:
+
+.. autoclass:: fme.ace.EnsembleMetricConfig
+   :noindex:
+
 .. autoclass:: fme.ace.StepperOverrideConfig
    :show-inheritance:
    :noindex:

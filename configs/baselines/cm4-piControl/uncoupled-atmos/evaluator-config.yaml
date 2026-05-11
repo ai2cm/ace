@@ -22,27 +22,8 @@ loader:
       engine: zarr
   num_data_workers: 4
 aggregator:
-  metrics:
-    - type: mean
-      target: denorm
-    - type: mean
-      target: norm
-    - type: step_mean
-      step: 20
-      target: denorm
-    - type: step_mean
-      step: 20
-      target: norm
-    - type: power_spectrum
-    - type: zonal_mean
-    - type: time_mean
-      target: denorm
-    - type: time_mean
-      target: norm
-    - type: histogram
-    - type: annual
-    - type: enso_index
-    - type: enso_coefficient
+  histogram:
+    enabled: true
 data_writer:
   save_prediction_files: false
   save_monthly_files: false

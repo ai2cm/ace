@@ -254,6 +254,7 @@ class PowerSpectrumMetricConfig:
     type: Literal["power_spectrum"] = "power_spectrum"
     variables: list[str] | None = None
     name: str = "power_spectrum"
+    enabled: bool = True
 
     def get_name(self) -> str:
         return self.name

@@ -1,10 +1,25 @@
 import sys
 
+from fme.ace.aggregator.inference.annual import AnnualMetricConfig
+from fme.ace.aggregator.inference.enso.dynamic_index import EnsoIndexMetricConfig
+from fme.ace.aggregator.inference.enso.enso_coefficient import (
+    EnsoCoefficientMetricConfig,
+)
+from fme.ace.aggregator.inference.histogram import HistogramMetricConfig
 from fme.ace.aggregator.inference.main import (
+    HierarchicalInferenceEvaluatorAggregatorConfig,
     LegacyFlagInferenceEvaluatorAggregatorConfig,
     StepMeanEntry,
 )
+from fme.ace.aggregator.inference.reduced import MeanMetricConfig
+from fme.ace.aggregator.inference.seasonal import SeasonalMetricConfig
+from fme.ace.aggregator.inference.spectrum import PowerSpectrumMetricConfig
+from fme.ace.aggregator.inference.time_mean import TimeMeanMetricConfig
+from fme.ace.aggregator.inference.video import VideoMetricConfig
+from fme.ace.aggregator.inference.zonal_mean import ZonalMeanMetricConfig
 from fme.ace.aggregator.one_step import OneStepAggregatorConfig
+from fme.ace.aggregator.one_step.ensemble import EnsembleMetricConfig
+from fme.ace.aggregator.one_step.reduced import StepMeanMetricConfig
 from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.augmentation import AugmentationConfig
 from fme.ace.data_loading.getters import get_forcing_data

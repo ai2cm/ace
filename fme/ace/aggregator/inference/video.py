@@ -527,6 +527,7 @@ class VideoMetricConfig:
     variables: list[str] | None = None
     name: str = "video"
     enable_extended_videos: bool = False
+    enabled: bool = True
 
     def get_name(self) -> str:
         return self.name

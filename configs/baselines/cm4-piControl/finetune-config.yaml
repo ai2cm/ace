@@ -37,8 +37,8 @@ inference:
         - '0271-01-06T00:00:00'
         - '0291-01-06T00:00:00'
   aggregator:
-    log_zonal_mean_images: false
-    log_histograms: false
+    zonal_mean:
+      enabled: false
 logging:
   log_to_screen: true
   log_to_wandb: true

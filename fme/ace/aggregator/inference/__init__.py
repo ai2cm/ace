@@ -5,6 +5,7 @@ from .enso.dynamic_index import EnsoIndexMetricConfig
 from .enso.enso_coefficient import EnsoCoefficientMetricConfig
 from .histogram import HistogramMetricConfig
 from .main import (
+    HierarchicalInferenceEvaluatorAggregatorConfig,
     InferenceAggregator,
     InferenceAggregatorConfig,
     InferenceEvaluatorAggregator,

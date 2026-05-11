@@ -405,6 +405,7 @@ class TimeMeanMetricConfig:
     target: Literal["denorm", "norm"] = "denorm"
     reference_data: str | None = None
     channel_mean_names: list[str] | None = None
+    enabled: bool = True
 
     def __post_init__(self):
         if self.name is None:

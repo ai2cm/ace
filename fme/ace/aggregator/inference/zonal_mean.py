@@ -325,6 +325,7 @@ class ZonalMeanMetricConfig:
     variables: list[str] | None = None
     name: str = "zonal_mean"
     zonal_mean_max_size: int = 4096
+    enabled: bool = True
 
     def get_name(self) -> str:
         return self.name

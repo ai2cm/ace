@@ -376,6 +376,7 @@ class AnnualMetricConfig:
     variables: list[str] | None = None
     name: str = "annual"
     reference_data: str | None = None
+    enabled: bool = True
 
     def get_name(self) -> str:
         return self.name

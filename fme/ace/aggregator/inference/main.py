@@ -147,6 +147,7 @@ class InferenceEvaluatorAggregatorConfig:
         save_diagnostics: bool = True,
         n_ensemble_per_ic: int = 1,
         enable_time_series: bool = True,
+        _raise_on_unsupported: bool | None = None,
     ) -> "InferenceEvaluatorAggregator":
         if save_diagnostics and output_dir is None:
             raise ValueError("Output directory must be set to save diagnostics.")
@@ -185,7 +186,10 @@ class InferenceEvaluatorAggregatorConfig:
         if not enable_time_series:
             metrics = [m for m in metrics if not isinstance(m, MeanMetricConfig)]
 
-        is_explicit = self.metrics is not None
+        if _raise_on_unsupported is not None:
+            raise_on_unsupported = _raise_on_unsupported
+        else:
+            raise_on_unsupported = self.metrics is not None
         aggregators: dict[str, SubAggregator] = {}
         time_series_aggregators: dict[str, TimeSeriesLogs] = {}
         ensemble_aggregators: dict[str, SelectStepEnsembleAggregator] = {}
@@ -195,7 +199,7 @@ class InferenceEvaluatorAggregatorConfig:
             try:
                 result: MetricBuildResult = metric.build(ctx)
             except MetricNotSupportedError:
-                if is_explicit:
+                if raise_on_unsupported:
                     raise
                 logging.warning(
                     f"{name} metric not supported for this grid type, " "omitting."
@@ -219,6 +223,138 @@ class InferenceEvaluatorAggregatorConfig:
             output_dir=output_dir,
             n_ensemble_per_ic=n_ensemble_per_ic,
             ensemble_aggregators=ensemble_aggregators,
+        )
+
+
+@dataclasses.dataclass
+class HierarchicalInferenceEvaluatorAggregatorConfig:
+    """
+    Hierarchical configuration for inference evaluator aggregator.
+
+    Each metric is a named field with its own typed configuration and an
+    ``enabled`` flag.  Defaults match the standard metric set: metrics that
+    are always desired are enabled, while optional ones (``histogram``,
+    ``video``, ``seasonal``) are disabled.
+
+    Metrics whose runtime requirements are not met (e.g. ``enso_index``
+    on a non-lat/lon grid) are silently skipped even when enabled.
+
+    Parameters:
+        mean_denorm: Global-mean time-series metrics on denormalized data.
+        mean_norm: Global-mean time-series metrics on normalized data.
+        step_means: Per-step snapshot metrics.
+            Defaults to step-20 denorm and norm.
+        ensembles: Ensemble spread metrics.
+            Defaults to step-20.  Silently skipped when ``n_ensemble <= 1``.
+        power_spectrum: Spherical power spectrum metrics.
+        zonal_mean: Zonal-mean image metrics.
+        time_mean_denorm: Time-mean metrics on denormalized data.
+        time_mean_norm: Time-mean metrics on normalized data.
+        video: Video (animated map) metrics.  Disabled by default.
+        histogram: Distribution histogram metrics.  Disabled by default.
+        seasonal: Seasonal-mean metrics.  Disabled by default.
+        annual: Annual-mean metrics.
+        enso_index: ENSO index metrics.
+        enso_coefficient: ENSO regression coefficient metrics.
+        monthly_reference_data: Path to monthly reference data to compare against.
+        time_mean_reference_data: Path to reference time means to compare against.
+    """
+
+    mean_denorm: MeanMetricConfig = dataclasses.field(
+        default_factory=lambda: MeanMetricConfig(target="denorm")
+    )
+    mean_norm: MeanMetricConfig = dataclasses.field(
+        default_factory=lambda: MeanMetricConfig(target="norm")
+    )
+    step_means: list[StepMeanMetricConfig] = dataclasses.field(
+        default_factory=lambda: [
+            StepMeanMetricConfig(step=20, target="denorm"),
+            StepMeanMetricConfig(step=20, target="norm"),
+        ]
+    )
+    ensembles: list[EnsembleMetricConfig] = dataclasses.field(
+        default_factory=lambda: [EnsembleMetricConfig(step=20)]
+    )
+    power_spectrum: PowerSpectrumMetricConfig = dataclasses.field(
+        default_factory=PowerSpectrumMetricConfig
+    )
+    zonal_mean: ZonalMeanMetricConfig = dataclasses.field(
+        default_factory=ZonalMeanMetricConfig
+    )
+    time_mean_denorm: TimeMeanMetricConfig = dataclasses.field(
+        default_factory=lambda: TimeMeanMetricConfig(target="denorm")
+    )
+    time_mean_norm: TimeMeanMetricConfig = dataclasses.field(
+        default_factory=lambda: TimeMeanMetricConfig(target="norm")
+    )
+    video: VideoMetricConfig = dataclasses.field(
+        default_factory=lambda: VideoMetricConfig(enabled=False)
+    )
+    histogram: HistogramMetricConfig = dataclasses.field(
+        default_factory=lambda: HistogramMetricConfig(enabled=False)
+    )
+    seasonal: SeasonalMetricConfig = dataclasses.field(
+        default_factory=lambda: SeasonalMetricConfig(enabled=False)
+    )
+    annual: AnnualMetricConfig = dataclasses.field(default_factory=AnnualMetricConfig)
+    enso_index: EnsoIndexMetricConfig = dataclasses.field(
+        default_factory=EnsoIndexMetricConfig
+    )
+    enso_coefficient: EnsoCoefficientMetricConfig = dataclasses.field(
+        default_factory=EnsoCoefficientMetricConfig
+    )
+    monthly_reference_data: str | None = None
+    time_mean_reference_data: str | None = None
+
+    def _to_typed_config(self) -> InferenceEvaluatorAggregatorConfig:
+        all_metrics: list[MetricConfig] = [
+            self.mean_denorm,
+            self.mean_norm,
+            *self.step_means,
+            *self.ensembles,
+            self.power_spectrum,
+            self.zonal_mean,
+            self.time_mean_denorm,
+            self.time_mean_norm,
+            self.video,
+            self.histogram,
+            self.seasonal,
+            self.annual,
+            self.enso_index,
+            self.enso_coefficient,
+        ]
+        metrics = [m for m in all_metrics if m.enabled]
+        return InferenceEvaluatorAggregatorConfig(
+            metrics=metrics,
+            monthly_reference_data=self.monthly_reference_data,
+            time_mean_reference_data=self.time_mean_reference_data,
+        )
+
+    def build(
+        self,
+        dataset_info: DatasetInfo,
+        n_ic_steps: int,
+        n_forward_steps: int,
+        initial_time: xr.DataArray,
+        normalize: Callable[[TensorMapping], TensorDict],
+        output_dir: str | None = None,
+        channel_mean_names: Sequence[str] | None = None,
+        save_diagnostics: bool = True,
+        n_ensemble_per_ic: int = 1,
+        enable_time_series: bool = True,
+    ) -> "InferenceEvaluatorAggregator":
+        return self._to_typed_config().build(
+            dataset_info=dataset_info,
+            n_ic_steps=n_ic_steps,
+            n_forward_steps=n_forward_steps,
+            initial_time=initial_time,
+            normalize=normalize,
+            output_dir=output_dir,
+            channel_mean_names=channel_mean_names,
+            save_diagnostics=save_diagnostics,
+            n_ensemble_per_ic=n_ensemble_per_ic,
+            enable_time_series=enable_time_series,
+            _raise_on_unsupported=False,
         )
 
 

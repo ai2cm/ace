@@ -546,6 +546,7 @@ NINO34_LON = (190, 240)
 class EnsoIndexMetricConfig:
     type: Literal["enso_index"] = "enso_index"
     name: str = "enso_index"
+    enabled: bool = True
 
     def get_name(self) -> str:
         return self.name

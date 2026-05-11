@@ -1,4 +1,5 @@
 from .inference import (
+    HierarchicalInferenceEvaluatorAggregatorConfig,
     InferenceEvaluatorAggregator,
     InferenceEvaluatorAggregatorConfig,
     LegacyFlagInferenceEvaluatorAggregatorConfig,

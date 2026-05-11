@@ -1,5 +1,6 @@
 import datetime
 import pathlib
+import typing
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,7 +10,9 @@ import xarray as xr
 
 from fme.ace.aggregator.inference import (
     AnnualMetricConfig,
+    EnsoCoefficientMetricConfig,
     EnsoIndexMetricConfig,
+    HierarchicalInferenceEvaluatorAggregatorConfig,
     HistogramMetricConfig,
     InferenceEvaluatorAggregatorConfig,
     LegacyFlagInferenceEvaluatorAggregatorConfig,
@@ -685,3 +688,93 @@ def test_legacy_config_long_run_includes_annual_and_enso():
     assert (
         "enso_index" in legacy_agg._aggregators
     ), "Expected enso_index aggregator in long-run config"
+
+
+def test_hierarchical_defaults_build():
+    """Hierarchical config with all defaults builds and includes core metrics."""
+    n_sample = 2
+    n_time = 24
+    nx = 90
+    ny = 45
+    ds_info = get_ds_info(nx, ny)
+    initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
+
+    agg = HierarchicalInferenceEvaluatorAggregatorConfig(
+        enso_coefficient=EnsoCoefficientMetricConfig(enabled=False),
+    ).build(
+        dataset_info=ds_info,
+        n_ic_steps=1,
+        n_forward_steps=n_time - 1,
+        initial_time=initial_time,
+        normalize=lambda x: dict(x),
+        save_diagnostics=False,
+    )
+    for expected in ["mean", "mean_norm", "power_spectrum", "zonal_mean", "time_mean"]:
+        assert expected in agg._aggregators, f"Expected {expected} in aggregators"
+
+
+def test_hierarchical_enable_histogram():
+    """Enabling histogram in hierarchical config adds it to the aggregators."""
+    n_sample = 2
+    n_time = 24
+    nx = 90
+    ny = 45
+    ds_info = get_ds_info(nx, ny)
+    initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
+
+    agg = HierarchicalInferenceEvaluatorAggregatorConfig(
+        histogram=HistogramMetricConfig(enabled=True),
+        enso_coefficient=EnsoCoefficientMetricConfig(enabled=False),
+    ).build(
+        dataset_info=ds_info,
+        n_ic_steps=1,
+        n_forward_steps=n_time - 1,
+        initial_time=initial_time,
+        normalize=lambda x: dict(x),
+        save_diagnostics=False,
+    )
+    assert "histogram" in agg._aggregators
+    assert "mean" in agg._aggregators
+
+
+def test_hierarchical_disable_default():
+    """Disabling a default metric in hierarchical config removes it."""
+    n_sample = 2
+    n_time = 24
+    nx = 90
+    ny = 45
+    ds_info = get_ds_info(nx, ny)
+    initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
+
+    agg = HierarchicalInferenceEvaluatorAggregatorConfig(
+        zonal_mean=ZonalMeanMetricConfig(enabled=False),
+        enso_coefficient=EnsoCoefficientMetricConfig(enabled=False),
+    ).build(
+        dataset_info=ds_info,
+        n_ic_steps=1,
+        n_forward_steps=n_time - 1,
+        initial_time=initial_time,
+        normalize=lambda x: dict(x),
+        save_diagnostics=False,
+    )
+    assert "zonal_mean" not in agg._aggregators
+    assert "mean" in agg._aggregators
+
+
+def test_all_metric_configs_documented():
+    """Every type in the MetricConfig union must appear in evaluator_config.rst."""
+    import fme.ace
+    from fme.ace.aggregator.inference.main import MetricConfig
+
+    docs_path = pathlib.Path(__file__).parents[4] / "docs" / "evaluator_config.rst"
+    docs_content = docs_path.read_text()
+
+    for cls in typing.get_args(MetricConfig):
+        name = cls.__name__
+        assert hasattr(
+            fme.ace, name
+        ), f"{name} is in MetricConfig union but not exported from fme.ace"
+        assert f"fme.ace.{name}" in docs_content, (
+            f"{name} is in MetricConfig union but not documented in "
+            f"docs/evaluator_config.rst"
+        )

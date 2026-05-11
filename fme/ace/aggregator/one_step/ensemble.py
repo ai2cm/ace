@@ -342,6 +342,7 @@ class EnsembleMetricConfig:
     type: Literal["ensemble"] = "ensemble"
     name: str | None = None
     log_mean_maps: bool = False
+    enabled: bool = True
 
     def __post_init__(self):
         if self.name is None:

@@ -13,6 +13,7 @@ import torch
 import fme
 from fme.ace.aggregator import OneStepAggregatorConfig
 from fme.ace.aggregator.inference import (
+    HierarchicalInferenceEvaluatorAggregatorConfig,
     InferenceEvaluatorAggregatorConfig,
     LegacyFlagInferenceEvaluatorAggregatorConfig,
 )
@@ -230,6 +231,7 @@ class InferenceEvaluatorConfig:
     )
     aggregator: (
         InferenceEvaluatorAggregatorConfig
+        | HierarchicalInferenceEvaluatorAggregatorConfig
         | LegacyFlagInferenceEvaluatorAggregatorConfig
     ) = dataclasses.field(default_factory=lambda: InferenceEvaluatorAggregatorConfig())
     stepper_override: StepperOverrideConfig | None = None
