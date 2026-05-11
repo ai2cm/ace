@@ -80,6 +80,7 @@ find = {}
 
 [tool.setuptools.package-data]
 "fme.core.cuhpx" = ["data/*.npy", "data/*.fits"]
+"fme.core.hpx" = ["data/*.npy"]
 
 [tool.uv]
 cache-keys = [
