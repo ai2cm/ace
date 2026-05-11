@@ -25,7 +25,7 @@ def _validate_atmosphere_n_timesteps(
     ocean_timestep: datetime.timedelta,
     ocean_requirements: DataRequirements,
     atmosphere_n_timesteps: int,
-) -> int:
+) -> None:
     """Validate that the initial value of the atmosphere data requirements
     n_timesteps_schedule matches the value derived from the ocean requirements
     and the timesteps.
@@ -47,7 +47,6 @@ def _validate_atmosphere_n_timesteps(
             f"atmosphere dataset was configured to return "
             f"{atmosphere_n_timesteps} steps."
         )
-    return atmosphere_n_timesteps
 
 
 @dataclasses.dataclass

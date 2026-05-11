@@ -1,6 +1,7 @@
 import datetime
 import logging
 import warnings
+from collections.abc import Callable
 
 import torch
 import torch.utils.data
@@ -98,15 +99,22 @@ def get_dataset(
     return dataset, properties
 
 
-def get_datasets(
+def _combine_datasets(
     configs: CoupledConcatDatasetConfig | CoupledDatasetConfig,
-    requirements: CoupledDataRequirements,
+    build_one: Callable[
+        [CoupledDatasetConfig], tuple[CoupledDataset, CoupledDatasetProperties]
+    ],
     strict: bool = True,
 ) -> tuple[ConcatDataset, CoupledDatasetProperties]:
+    """Build and combine multiple coupled datasets.
+
+    ``build_one`` is called for each ``CoupledDatasetConfig`` in *configs* and
+    should return a single ``(CoupledDataset, CoupledDatasetProperties)`` pair.
+    """
     datasets = []
     properties: CoupledDatasetProperties | None = None
     for coupled_data_config in configs.coupled_configs:
-        ds, prop = get_dataset(coupled_data_config, requirements)
+        ds, prop = build_one(coupled_data_config)
         datasets.append(ds)
         if properties is None:
             properties = prop
@@ -123,6 +131,18 @@ def get_datasets(
         raise ValueError("At least one dataset must be provided.")
     dataset = ConcatDataset(datasets)
     return dataset, properties
+
+
+def get_datasets(
+    configs: CoupledConcatDatasetConfig | CoupledDatasetConfig,
+    requirements: CoupledDataRequirements,
+    strict: bool = True,
+) -> tuple[ConcatDataset, CoupledDatasetProperties]:
+    return _combine_datasets(
+        configs,
+        build_one=lambda cfg: get_dataset(cfg, requirements),
+        strict=strict,
+    )
 
 
 def _build_gridded_data(
@@ -264,26 +284,11 @@ def get_train_datasets(
     requirements: CoupledTrainDataRequirements,
     strict: bool = True,
 ) -> tuple[ConcatDataset, CoupledDatasetProperties]:
-    datasets = []
-    properties: CoupledDatasetProperties | None = None
-    for coupled_data_config in configs.coupled_configs:
-        ds, prop = get_train_dataset(coupled_data_config, requirements)
-        datasets.append(ds)
-        if properties is None:
-            properties = prop
-        elif not strict:
-            try:
-                properties.update(prop)
-            except ValueError as e:
-                warnings.warn(
-                    f"Metadata for each ensemble member are not the same: {e}"
-                )
-        else:
-            properties.update(prop)
-    if properties is None:
-        raise ValueError("At least one dataset must be provided.")
-    dataset = ConcatDataset(datasets)
-    return dataset, properties
+    return _combine_datasets(
+        configs,
+        build_one=lambda cfg: get_train_dataset(cfg, requirements),
+        strict=strict,
+    )
 
 
 def get_gridded_train_data(
