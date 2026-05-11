@@ -13,15 +13,14 @@ from fme.core.coordinates import LatLonCoordinates
 from fme.core.testing import mock_distributed
 from fme.core.typing_ import TensorMapping
 
-from .dynamic_index import (
+from ..utils import (
     LatLonRegion,
-    PairedRegionalIndexAggregator,
-    RegionalIndexAggregator,
     _calculate_sample_average_power_spectrum,
     _compute_sample_mean_std,
     anomalies_from_monthly_climo,
     running_monthly_mean,
 )
+from .dynamic_index import PairedRegionalIndexAggregator, RegionalIndexAggregator
 
 
 def _get_windowed_data(

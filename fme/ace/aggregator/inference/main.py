@@ -31,7 +31,6 @@ from .annual import GlobalMeanAnnualAggregator, PairedGlobalMeanAnnualAggregator
 from .data import InferenceBatchData, SubAggregator, TimeSeriesLogs
 from .enso import (
     EnsoCoefficientEvaluatorAggregator,
-    LatLonRegion,
     PairedRegionalIndexAggregator,
     RegionalIndexAggregator,
 )
@@ -44,6 +43,7 @@ from .spectrum import (
     SphericalPowerSpectrumAggregator,
 )
 from .time_mean import TimeMeanAggregator, TimeMeanEvaluatorAggregator
+from .utils import LatLonRegion
 from .video import VideoAggregator
 from .zonal_mean import ZonalMeanAggregator
 

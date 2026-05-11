@@ -8,7 +8,7 @@ from matplotlib import pyplot as plt
 from fme import get_device
 from fme.ace.aggregator.inference.data import InferenceBatchData
 
-from ..enso.dynamic_index import LatLonRegion
+from ..utils import LatLonRegion
 from .ipo_index import (
     PairedIPOIndexAggregator,
     _IPORegionalAccumulator,

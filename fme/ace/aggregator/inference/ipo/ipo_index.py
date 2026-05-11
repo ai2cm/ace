@@ -13,7 +13,7 @@ from fme.core.typing_ import TensorDict
 
 from ...plotting import plot_mean_and_samples
 from ..data import InferenceBatchData
-from ..enso.dynamic_index import (
+from ..utils import (
     LatLonRegion,
     UniqueMonths,
     _calculate_sample_average_power_spectrum,
