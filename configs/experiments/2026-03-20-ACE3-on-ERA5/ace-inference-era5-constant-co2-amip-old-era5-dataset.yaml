@@ -7,7 +7,7 @@ experiment_dir: /results
 forward_steps_in_memory: 40
 n_forward_steps: 59870 # 1979 -- 2020
 initial_condition:
-  path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
+  path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs/1979010100.nc
   start_indices:
     times:
       - '1979-01-01T00:00:00'
