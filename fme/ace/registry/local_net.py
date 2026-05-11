@@ -199,11 +199,11 @@ class LocalNetBuilder(ModuleConfig):
             lora_rank=self.lora_rank,
             lora_alpha=self.lora_alpha,
         )
-        embed_dim_labels = len(dataset_info.all_labels)
+        n_labels = len(dataset_info.all_labels)
         context_config = ContextConfig(
             embed_dim_scalar=0,
             embed_dim_noise=self.noise_embed_dim,
-            embed_dim_labels=embed_dim_labels,
+            embed_dim_labels=n_labels,
             embed_dim_pos=self.context_pos_embed_dim,
         )
         net = get_lat_lon_localnet(
@@ -229,7 +229,7 @@ class LocalNetBuilder(ModuleConfig):
             img_shape=img_shape,
             embed_dim_noise=self.noise_embed_dim,
             embed_dim_pos=self.context_pos_embed_dim,
-            embed_dim_labels=embed_dim_labels,
+            n_labels=n_labels,
             inverse_sht=inverse_sht,
             lmax=lmax,
             mmax=mmax,
