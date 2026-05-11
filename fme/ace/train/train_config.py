@@ -236,6 +236,8 @@ class TrainConfig:
             return self.stepper.to_stepper_config()
         return self.stepper
 
+    _RESERVED_NAMES = {"train", "val"}
+
     def __post_init__(self):
         if self.train_loader.using_labels != self.validation_loader.using_labels:
             raise ValueError(
@@ -245,6 +247,12 @@ class TrainConfig:
         resolved_names = self.inference_names
         if len(resolved_names) != len(set(resolved_names)):
             raise ValueError(f"Duplicate inference names: {resolved_names}")
+        reserved_overlap = set(resolved_names) & self._RESERVED_NAMES
+        if reserved_overlap:
+            raise ValueError(
+                f"Inference names {sorted(reserved_overlap)} collide with "
+                f"reserved names {sorted(self._RESERVED_NAMES)}"
+            )
         for i, entry in enumerate(self.inference_list):
             if self.train_loader.using_labels != entry.using_labels:
                 name = resolved_names[i]

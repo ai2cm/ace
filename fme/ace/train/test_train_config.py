@@ -139,6 +139,12 @@ def test_duplicate_inference_names_raises(tmp_path):
         )
 
 
+@pytest.mark.parametrize("reserved_name", ["train", "val"])
+def test_reserved_inference_name_raises(tmp_path, reserved_name):
+    with pytest.raises(ValueError, match="collide with reserved names"):
+        _make_train_config(tmp_path, [_make_inference_config(name=reserved_name)])
+
+
 def test_negative_weight_raises():
     with pytest.raises(ValueError, match="non-negative"):
         _make_inference_config(weight=-1.0)

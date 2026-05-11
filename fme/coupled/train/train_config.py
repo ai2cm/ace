@@ -214,10 +214,18 @@ class TrainConfig:
     lr_tuning: LRTuningConfig | None = None
     resume_results: ResumeResultsConfig | None = None
 
+    _RESERVED_NAMES = {"train", "val"}
+
     def __post_init__(self):
         resolved_names = self.inference_names
         if len(resolved_names) != len(set(resolved_names)):
             raise ValueError(f"Duplicate inference names: {resolved_names}")
+        reserved_overlap = set(resolved_names) & self._RESERVED_NAMES
+        if reserved_overlap:
+            raise ValueError(
+                f"Inference names {sorted(reserved_overlap)} collide with "
+                f"reserved names {sorted(self._RESERVED_NAMES)}"
+            )
         if self.lr_tuning is not None and self.optimization.has_lr_schedule:
             raise ValueError(
                 "lr_tuning and optimization.scheduler cannot both be specified; "
