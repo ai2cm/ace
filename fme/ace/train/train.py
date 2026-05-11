@@ -151,6 +151,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
                 channel_mean_names=stepper.loss_names,
                 save_diagnostics=config.save_per_epoch_diagnostics,
                 n_ensemble_per_ic=entry_config.n_ensemble_per_ic,
+                enable_time_series=False,
             )
             logs = inference_one_epoch(
                 stepper=stepper,
