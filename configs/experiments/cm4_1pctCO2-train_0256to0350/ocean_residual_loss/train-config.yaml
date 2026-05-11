@@ -82,9 +82,7 @@ stepper_training:
   loss:
     type: MSE
   residual_loss:
-    pairs:
-      - step_a: 1
-        step_b: 0
+    steps: [1, 2, 3, 4]
     loss:
       type: MSE
     weight: 1.0
