@@ -21,13 +21,7 @@ from fme.ace.aggregator.inference.zonal_mean import ZonalMeanMetricConfig
 from fme.ace.aggregator.one_step import (
     LegacyFlagOneStepAggregatorConfig,
     OneStepAggregatorConfig,
-    build_one_step_aggregator,
 )
-from fme.ace.aggregator.one_step.ensemble import OneStepEnsembleMetricConfig
-from fme.ace.aggregator.one_step.map import OneStepMapMetricConfig
-from fme.ace.aggregator.one_step.reduced import OneStepMeanMetricConfig
-from fme.ace.aggregator.one_step.snapshot import OneStepSnapshotMetricConfig
-from fme.ace.aggregator.one_step.spectrum import OneStepSpectrumMetricConfig
 from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.augmentation import AugmentationConfig
 from fme.ace.data_loading.getters import get_forcing_data
