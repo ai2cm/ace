@@ -1,27 +1,7 @@
-# SPDX-FileCopyrightText: Copyright (c) 2023 - 2024 NVIDIA CORPORATION & AFFILIATES.
-# All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 """
 HEALPix UNet: single forward-pass encoder–decoder stack.
 
-Adapted from the modulus-uw ``physicsnemo.models.dlwp_healpix.HEALPixUNet`` to the
-ace codebase. Unlike the modulus-uw implementation, this version is a pure neural
-network module that takes a single tensor in the canonical ace HEALPix layout and
-returns a single tensor in the same layout. All data reshaping, time stepping,
-prognostic/diagnostic splitting, and residual prediction are delegated to the
-ace stepper.
+Adapted from the modulus-uw ``physicsnemo.models.dlwp_healpix.HEALPixUNet``.
 """
 
 from typing import Sequence
@@ -42,11 +22,6 @@ class HEALPixUNet(nn.Module):
     folded into the batch dimension before the encoder/decoder and unfolded
     after the decoder, so the encoder/decoder operate on plain 4D tensors of
     shape ``[B*F, C, H, W]``.
-
-    This module is intended to be a drop-in replacement for other ace
-    architectures (e.g. ``SphericalFourierNeuralOperatorNet``) when the input
-    grid is HEALPix. It does not handle multi-step rolling or residual
-    prediction; both are handled by the stepper.
     """
 
     CHANNEL_DIM = 2  # [B, F, C, H, W]
