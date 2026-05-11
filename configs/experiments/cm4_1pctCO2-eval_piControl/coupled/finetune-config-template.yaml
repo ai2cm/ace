@@ -5,10 +5,7 @@ checkpoint_every_n_batches: 100
 log_train_every_n_batches: 10
 validate_using_ema: true
 evaluate_before_training: true
-best_enso_checkpoint_metric: inference/enso_index/sst_nino34_index_std_norm
-best_enso_checkpoint_autocorr_metric: inference/enso_index/sst_nino34_index_autocorr_lag5yr
-best_enso_checkpoint_autocorr_target_metric: inference/enso_index/sst_nino34_index_autocorr_lag5yr_target
-best_enso_checkpoint_autocorr_weight: 3.0
+save_best_enso_checkpoint: true
 best_enso_checkpoint_climate_tolerance: 0.1
 ema:
   decay: 0.9995
