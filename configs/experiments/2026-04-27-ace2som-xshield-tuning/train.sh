@@ -21,9 +21,6 @@ cd $REPO_ROOT
 # two different ACE2SOM seeds
 PRE_TRAINED_WEIGHTS_DATASETS=("01KHJ5F1M6YKVZESPZAAVVD6G8" "01KHCEF1SBYCZCGDM78N1CJC3H")
 
-# ACE2S ckpt used in paper
-ACE2S_CKPT=("01KQDG7X72D4E2JJTGQ0ZF9J9T")
-
 # tuned on XSHiELD, 1-1, seed 0
 TUNED_DATASET=01KQD8NF9HQD1QY2X0S132YH72
 
@@ -37,7 +34,7 @@ PRE_TRAINED_WEIGHTS_DATASETS_5_1=("01KQG2R8RCWH1ZJS0FK3P9Z8C4" "01KQG2RE1A9BC3G0
 #        --dataset ${PRE_TRAINED_WEIGHTS_DATASETS[$seed]}:/pre-trained-weights \
 for seed in {0..0}; do
     #job_name="ace2som-xshield-tune-1yr-even-split-single-decoder-seed${seed}"
-    job_name="ace2som-xshield-tune-1yr-4k-seed${seed}"
+    job_name="ace2som-xshield-tune-1yr-4k-upweight-pressfc-seed${seed}"
     fine_tune_seed=$((seed + SEED_OFFSET))
     override="seed=${fine_tune_seed}"
     python -m fme.ace.validate_config --config_type train $CONFIG_PATH --override $override
@@ -50,6 +47,7 @@ for seed in {0..0}; do
         --priority urgent \
         --preemptible \
         --cluster ai2/titan \
+        --cluster ai2/jupiter \
         --env WANDB_NAME=$job_name \
         --env WANDB_USERNAME=$WANDB_USERNAME \
         --env WANDB_JOB_TYPE=training \
@@ -57,8 +55,8 @@ for seed in {0..0}; do
         --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
         --env-secret WANDB_API_KEY=wandb-api-key-annak \
         --dataset-secret google-credentials:/tmp/google_application_credentials.json \
+        --dataset ${PRE_TRAINED_WEIGHTS_DATASETS[$seed]}:training_checkpoints/best_ckpt.tar:/ckpt.tar \
         --dataset $STATS_DATASET:/statsdata \
-        --dataset ${ACE2S_CKPT[$seed]}:training_checkpoints/ACE2S.ckpt:/ckpt.tar \
         --gpus $N_GPUS \
         --shared-memory 400GiB \
         --weka climate-default:/climate-default \
