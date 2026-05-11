@@ -16,7 +16,7 @@ import yaml
 import fme
 from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregatorConfig,
-    StepMeanEntry,
+    MeanMetricConfig,
 )
 from fme.ace.aggregator.one_step.main import OneStepAggregatorConfig
 from fme.ace.data_loading.config import DataLoaderConfig
@@ -219,9 +219,6 @@ def _get_test_yaml_files(
                         if monthly_data_filename is not None
                         else None
                     ),
-                    log_step_means=[]
-                    if inference_forward_steps < 20
-                    else [StepMeanEntry(step=20)],
                 ),
                 loader=InferenceDataLoaderConfig(
                     dataset=XarrayDataConfig(
@@ -247,9 +244,6 @@ def _get_test_yaml_files(
                         if monthly_data_filename is not None
                         else None
                     ),
-                    log_step_means=[]
-                    if inference_forward_steps < 20
-                    else [StepMeanEntry(step=20)],
                 ),
                 loader=InferenceDataLoaderConfig(
                     dataset=XarrayDataConfig(
@@ -293,7 +287,11 @@ def _get_test_yaml_files(
     if crps_training:
         loss = StepLossConfig(
             type="EnsembleLoss",
-            kwargs={"crps_weight": 1.0, "energy_score_weight": 0.0},
+            kwargs={
+                "crps_weight": 1.0,
+                "energy_score_weight": 0.0,
+                "finite_difference_crps_weight": 0.05,
+            },
         )
         n_ensemble: int = 2
     else:
@@ -403,8 +401,7 @@ def _get_test_yaml_files(
             files=[FileWriterConfig("autoregressive")],
         ),
         aggregator=InferenceEvaluatorAggregatorConfig(
-            log_video=True,
-            log_step_means=[],
+            metrics=[MeanMetricConfig(target="denorm")],
         ),
         logging=logging_config,
         loader=InferenceDataLoaderConfig(

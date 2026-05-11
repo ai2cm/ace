@@ -642,6 +642,43 @@ def test_config_parameter_init_error():
         )
 
 
+def test_component_n_steps_max_default_is_unbounded():
+    config = CoupledTrainStepperConfig(
+        n_coupled_steps=1,
+        ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
+        atmosphere=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
+    )
+    assert config.component_n_steps_max.ocean is None
+    assert config.component_n_steps_max.atmosphere is None
+
+
+def test_component_n_steps_max_with_explicit_int_and_sampler():
+    from fme.ace.stepper.time_length_probabilities import (
+        TimeLengthProbabilities,
+        TimeLengthProbability,
+    )
+
+    sampler = TimeLengthProbabilities(
+        outcomes=[
+            TimeLengthProbability(steps=2, probability=0.5),
+            TimeLengthProbability(steps=4, probability=0.5),
+        ]
+    )
+    config = CoupledTrainStepperConfig(
+        n_coupled_steps=4,
+        ocean=ComponentTrainingConfig(
+            loss=StepLossConfig(type="MSE"),
+            loss_contributions=LossContributionsConfig(n_steps=3),
+        ),
+        atmosphere=ComponentTrainingConfig(
+            loss=StepLossConfig(type="MSE"),
+            loss_contributions=LossContributionsConfig(n_steps=sampler),
+        ),
+    )
+    assert config.component_n_steps_max.ocean == 3
+    assert config.component_n_steps_max.atmosphere == 4
+
+
 OCN_FRAC = CoupledOceanFractionConfig(
     sea_ice_fraction_name="sea_ice_fraction",
     land_fraction_name="land_fraction",
@@ -1589,7 +1626,7 @@ def test_reloaded_stepper_gives_same_prediction():
         n_samples=1,
     )
     train_stepper_config = CoupledTrainStepperConfig(
-        n_coupled_steps=1,
+        n_coupled_steps=2,
         ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
         atmosphere=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
     )
@@ -1669,7 +1706,7 @@ def test_train_on_batch_optimize_last_step_only(optimize_last_step_only: bool):
     n_forward_times_atmosphere = 4
 
     train_stepper_config = CoupledTrainStepperConfig(
-        n_coupled_steps=1,
+        n_coupled_steps=2,
         ocean=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
             loss_contributions=LossContributionsConfig(
@@ -1720,7 +1757,7 @@ def test_train_on_batch_optimize_last_step_only_with_n_steps(
     ocean_n_steps = 1
 
     train_stepper_config = CoupledTrainStepperConfig(
-        n_coupled_steps=1,
+        n_coupled_steps=2,
         ocean=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
             loss_contributions=LossContributionsConfig(
