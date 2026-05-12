@@ -2,12 +2,11 @@ import contextlib
 import dataclasses
 import logging
 import os
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from typing import Any
 
 import dacite
 import torch
-import xarray as xr
 
 import fme
 from fme.core.cli import prepare_config, prepare_directory
@@ -15,12 +14,7 @@ from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.distributed import Distributed
 from fme.core.generics.trainer import AggregatorBuilderABC, Trainer, inference_one_epoch
 from fme.core.generics.validation import run_validation
-from fme.core.typing_ import TensorDict, TensorMapping
-from fme.coupled.aggregator import (
-    InferenceEvaluatorAggregatorConfig,
-    OneStepAggregator,
-    TrainAggregator,
-)
+from fme.coupled.aggregator import OneStepAggregator, TrainAggregator
 from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.stepper import CoupledTrainOutput
 from fme.coupled.train.train_config import TrainBuilders, TrainConfig
@@ -32,35 +26,30 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
     train_data = builder.get_train_data()
     logging.info("Initializing validation data loader")
     validation_data = builder.get_validation_data()
-    logging.info("Initializing inline inference data loader")
-    dataset_info = train_data.dataset_info
-    inference_data = builder.get_evaluation_inference_data()
 
     variable_metadata = get_derived_variable_metadata() | train_data.variable_metadata
+    dataset_info = train_data.dataset_info.update_variable_metadata(variable_metadata)
+    for data, name in zip((train_data, validation_data), ("train", "valid")):
+        data.log_info(name)
+
+    if config.inference_list:
+        logging.info("Initializing inline inference data loaders")
+    else:
+        logging.info("Skipping inline inference")
+    inference_entries = builder.get_inference_data()
+    inference_epochs = config.get_inference_epochs()
+    inference_epoch_sets = config.get_inference_epoch_sets()
+
     logging.info("Starting model initialization")
-    stepper = builder.get_stepper(dataset_info)
+    stepper = builder.get_stepper(train_data.dataset_info)
     end_of_batch_ops = builder.get_end_of_batch_ops(stepper.modules)
 
-    batch = next(iter(inference_data.loader))
-    initial_inference_times = batch.ocean_data.time.isel(time=0)
-    n_timesteps_ocean = config.inference_n_coupled_steps + stepper.ocean.n_ic_timesteps
-    n_timesteps_atmosphere = (
-        config.inference_n_coupled_steps * stepper.n_inner_steps
-        + stepper.atmosphere.n_ic_timesteps
-    )
     aggregator_builder = CoupledAggregatorBuilder(
-        inference_config=config.inference_aggregator,
-        dataset_info=dataset_info.update_variable_metadata(variable_metadata),
-        initial_inference_times=initial_inference_times,
-        n_timesteps_ocean=n_timesteps_ocean,
-        n_timesteps_atmosphere=n_timesteps_atmosphere,
-        ocean_normalize=stepper.ocean.normalizer.normalize,
-        atmosphere_normalize=stepper.atmosphere.normalizer.normalize,
+        dataset_info=dataset_info,
         loss_scaling=stepper.effective_loss_scaling,
         save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
         output_dir=config.output_dir,
     )
-    inference_epochs = config.get_inference_epochs()
 
     def validation_callback(epoch: int) -> tuple[dict[str, Any], float]:
         validation_data.set_epoch(epoch)
@@ -77,16 +66,46 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
     def inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
         if epoch not in inference_epochs:
             return {}, None
-        logs = inference_one_epoch(
-            stepper=stepper,
-            validation_context=contextlib.nullcontext,
-            dataset=inference_data,
-            aggregator=aggregator_builder.get_inference_aggregator(),
-            label="inference",
-            epoch=epoch,
-        )
-        error = logs.get("inference/time_mean_norm/rmse/channel_mean")
-        return logs, error
+        all_logs: dict[str, Any] = {}
+        weighted_error = 0.0
+        has_error = False
+        for i, (entry_config, data, name) in enumerate(inference_entries):
+            if epoch not in inference_epoch_sets[i]:
+                continue
+            batch = next(iter(data.loader))
+            initial_times = batch.ocean_data.time.isel(time=0)
+            n_timesteps_ocean = (
+                entry_config.n_coupled_steps + stepper.ocean.n_ic_timesteps
+            )
+            n_timesteps_atmosphere = (
+                entry_config.n_coupled_steps * stepper.n_inner_steps
+                + stepper.atmosphere.n_ic_timesteps
+            )
+            aggregator = entry_config.aggregator.build(
+                dataset_info=dataset_info,
+                n_timesteps_ocean=n_timesteps_ocean,
+                n_timesteps_atmosphere=n_timesteps_atmosphere,
+                initial_time=initial_times,
+                ocean_normalize=stepper.ocean.normalizer.normalize,
+                atmosphere_normalize=stepper.atmosphere.normalizer.normalize,
+                save_diagnostics=config.save_per_epoch_diagnostics,
+                output_dir=os.path.join(config.output_dir, name),
+            )
+            logs = inference_one_epoch(
+                stepper=stepper,
+                validation_context=contextlib.nullcontext,
+                dataset=data,
+                aggregator=aggregator,
+                label=name,
+                epoch=epoch,
+            )
+            all_logs.update(logs)
+            error = logs.get(f"{name}/time_mean_norm/rmse/channel_mean")
+            if error is not None:
+                weighted_error += entry_config.weight * error
+                has_error = True
+
+        return all_logs, weighted_error if has_error else None
 
     return Trainer(
         train_data=train_data,
@@ -107,30 +126,14 @@ class CoupledAggregatorBuilder(
 ):
     def __init__(
         self,
-        inference_config: InferenceEvaluatorAggregatorConfig,
         dataset_info: CoupledDatasetInfo,
-        initial_inference_times: xr.DataArray,
-        n_timesteps_ocean: int,
-        n_timesteps_atmosphere: int,
         output_dir: str,
-        ocean_normalize: Callable[[TensorMapping], TensorDict],
-        atmosphere_normalize: Callable[[TensorMapping], TensorDict],
         loss_scaling: CoupledTensorMapping,
-        ocean_channel_mean_names: Sequence[str] | None = None,
-        atmosphere_channel_mean_names: Sequence[str] | None = None,
         save_per_epoch_diagnostics: bool = False,
     ):
-        self.inference_config = inference_config
         self.dataset_info = dataset_info
-        self.initial_inference_times = initial_inference_times
-        self.n_timesteps_ocean = n_timesteps_ocean
-        self.n_timesteps_atmosphere = n_timesteps_atmosphere
         self.output_dir = output_dir
-        self.ocean_normalize = ocean_normalize
-        self.atmosphere_normalize = atmosphere_normalize
         self.loss_scaling = loss_scaling
-        self.ocean_channel_mean_names = ocean_channel_mean_names
-        self.atmosphere_channel_mean_names = atmosphere_channel_mean_names
         self.save_per_epoch_diagnostics = save_per_epoch_diagnostics
 
     def get_train_aggregator(self) -> TrainAggregator:
@@ -142,22 +145,6 @@ class CoupledAggregatorBuilder(
             save_diagnostics=self.save_per_epoch_diagnostics,
             output_dir=os.path.join(self.output_dir, "val"),
             loss_scaling=self.loss_scaling,
-            ocean_channel_mean_names=self.ocean_channel_mean_names,
-            atmosphere_channel_mean_names=self.atmosphere_channel_mean_names,
-        )
-
-    def get_inference_aggregator(self):
-        return self.inference_config.build(
-            dataset_info=self.dataset_info,
-            n_timesteps_ocean=self.n_timesteps_ocean,
-            n_timesteps_atmosphere=self.n_timesteps_atmosphere,
-            initial_time=self.initial_inference_times,
-            ocean_normalize=self.ocean_normalize,
-            atmosphere_normalize=self.atmosphere_normalize,
-            save_diagnostics=self.save_per_epoch_diagnostics,
-            output_dir=os.path.join(self.output_dir, "inference"),
-            ocean_channel_mean_names=self.ocean_channel_mean_names,
-            atmosphere_channel_mean_names=self.atmosphere_channel_mean_names,
         )
 
 
