@@ -120,5 +120,11 @@ class MockDataset(DatasetABC):
         if max_start_index + max_window_len > len(self):
             raise ValueError("Inference length exceeds dataset length.")
 
+    def enable_shared_memory(self):
+        pass
+
+    def set_global_epoch_tensor(self, tensor):
+        pass
+
     def set_epoch(self, epoch: int):
         self.epoch = epoch

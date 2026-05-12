@@ -233,3 +233,29 @@ def convert_cftime_to_datetime_coord(time_coord: xr.DataArray) -> xr.DataArray:
         ],
         dims=time_coord.dims,
     )
+
+
+def compute_psd_band_power(
+    freqs_per_year: np.ndarray,
+    power: np.ndarray,
+    period_bounds: tuple[float, float] = (2.0, 5.0),
+) -> float:
+    """Integrate the power spectrum over a frequency band defined by period bounds.
+
+    Args:
+        freqs_per_year: Frequency array in cycles per year.
+        power: Power spectrum array (same length as freqs_per_year).
+        period_bounds: (min_period, max_period) in years. Frequencies are
+            selected as 1/max_period <= f <= 1/min_period.
+
+    Returns:
+        Trapezoidal-rule integral of power over the selected frequency band.
+        Returns NaN if fewer than two frequency bins fall in the band.
+    """
+    min_period, max_period = period_bounds
+    freq_lo = 1.0 / max_period
+    freq_hi = 1.0 / min_period
+    mask = (freqs_per_year >= freq_lo) & (freqs_per_year <= freq_hi)
+    if mask.sum() < 2:
+        return float("nan")
+    return float(np.trapezoid(power[mask], freqs_per_year[mask]))

@@ -1,23 +1,30 @@
+import dataclasses
 import logging
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 import cftime
+import numpy as np
 import torch
 import xarray as xr
 from matplotlib import pyplot as plt
 
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.distributed import Distributed
+from fme.core.gridded_ops import LatLonOperations
 from fme.core.typing_ import TensorDict
 
 from ...plotting import plot_mean_and_samples
-from ..data import InferenceBatchData
+from ..build_context import MetricBuildContext, MetricNotSupportedError
+from ..data import InferenceBatchData, MetricBuildResult
 from ..utils import (
     SAMPLE_DIM,
     TIME_DIM,
+    LatLonRegion,
     _calculate_sample_average_power_spectrum,
     _compute_sample_mean_std,
     anomalies_from_monthly_climo,
+    compute_psd_band_power,
     convert_cftime_to_datetime_coord,
     running_monthly_mean,
 )
@@ -191,6 +198,12 @@ class RegionalIndexAggregator:
                 ax.legend()
                 fig.tight_layout()
                 logs[f"{sst_name}_nino34_index_power_spectrum"] = fig
+                logs[f"{sst_name}_nino34_index_power_2_5yr"] = compute_psd_band_power(
+                    freq, power_spectrum
+                )
+                logs[f"{sst_name}_nino34_index_power_1_16yr"] = compute_psd_band_power(
+                    freq, power_spectrum, period_bounds=(1.0, 16.0)
+                )
 
         if len(label) > 0:
             label = label + "/"
@@ -295,6 +308,28 @@ class PairedRegionalIndexAggregator:
                 ax.legend()
                 fig.tight_layout()
                 logs[f"{sst_name}_nino34_index_power_spectrum"] = fig
+                pred_power_2_5 = compute_psd_band_power(
+                    pred_freq, prediction_power_spectrum
+                )
+                target_power_2_5 = compute_psd_band_power(
+                    target_freq, target_power_spectrum
+                )
+                logs[f"{sst_name}_nino34_index_power_2_5yr"] = pred_power_2_5
+                if target_power_2_5 != 0 and not np.isnan(target_power_2_5):
+                    logs[f"{sst_name}_nino34_index_power_2_5yr_norm"] = (
+                        pred_power_2_5 / target_power_2_5
+                    )
+                pred_power_1_16 = compute_psd_band_power(
+                    pred_freq, prediction_power_spectrum, period_bounds=(1.0, 16.0)
+                )
+                target_power_1_16 = compute_psd_band_power(
+                    target_freq, target_power_spectrum, period_bounds=(1.0, 16.0)
+                )
+                logs[f"{sst_name}_nino34_index_power_1_16yr"] = pred_power_1_16
+                if target_power_1_16 != 0 and not np.isnan(target_power_1_16):
+                    logs[f"{sst_name}_nino34_index_power_1_16yr_norm"] = (
+                        pred_power_1_16 / target_power_1_16
+                    )
         if len(label) > 0:
             label = label + "/"
 
@@ -313,3 +348,44 @@ class PairedRegionalIndexAggregator:
                 ],
                 dim="source",
             )
+
+
+NINO34_LAT = (-5, 5)
+NINO34_LON = (190, 240)
+
+
+@dataclasses.dataclass
+class EnsoIndexMetricConfig:
+    type: Literal["enso_index"] = "enso_index"
+    name: str = "enso_index"
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        if not isinstance(ctx.horizontal_coordinates, LatLonCoordinates):
+            raise MetricNotSupportedError(
+                "enso_index metric requires LatLonCoordinates."
+            )
+        if not isinstance(ctx.ops, LatLonOperations):
+            raise MetricNotSupportedError(
+                "enso_index metric requires LatLonOperations."
+            )
+        nino34_region = LatLonRegion(
+            lat_bounds=NINO34_LAT,
+            lon_bounds=NINO34_LON,
+            lat=ctx.horizontal_coordinates.lat,
+            lon=ctx.horizontal_coordinates.lon,
+        )
+        return MetricBuildResult(
+            aggregator=PairedRegionalIndexAggregator(
+                target_aggregator=RegionalIndexAggregator(
+                    regional_weights=nino34_region.regional_weights,
+                    regional_mean=ctx.ops.regional_area_weighted_mean,
+                ),
+                prediction_aggregator=RegionalIndexAggregator(
+                    regional_weights=nino34_region.regional_weights,
+                    regional_mean=ctx.ops.regional_area_weighted_mean,
+                ),
+            )
+        )

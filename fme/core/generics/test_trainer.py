@@ -10,7 +10,7 @@ import pytest
 import torch
 
 from fme.core.device import get_device
-from fme.core.ema import EMATracker
+from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.aggregator import (
     AggregatorABC,
     InferenceAggregatorABC,
@@ -29,7 +29,9 @@ from fme.core.generics.trainer import (
     TrainStepperABC,
     count_parameters,
     epoch_checkpoint_enabled,
+    inference_one_epoch,
 )
+from fme.core.generics.validation import run_validation
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
 from fme.core.scheduler import SchedulerConfig
@@ -234,13 +236,12 @@ class Config:
     segment_epochs: int | None = None
     evaluate_before_training: bool = False
     save_best_inference_epoch_checkpoints: bool = False
+    ema: EMAConfig = dataclasses.field(default_factory=EMAConfig)
     lr_tuning: LRTuningConfig | None = None
 
     def __post_init__(self):
         start_epoch = 0 if self.evaluate_before_training else 1
-        self.get_inference_epochs = unittest.mock.MagicMock(
-            return_value=[i for i in range(start_epoch, self.max_epochs + 1)]
-        )
+        self._inference_epochs = [i for i in range(start_epoch, self.max_epochs + 1)]
 
 
 _: TrainConfigProtocol = Config()
@@ -291,7 +292,7 @@ class InferenceAggregator(InferenceAggregatorABC[PSType, SDType]):
         pass
 
 
-class AggregatorBuilder(AggregatorBuilderABC[PSType, TrainOutput, SDType]):
+class AggregatorBuilder(AggregatorBuilderABC[TrainOutput]):
     def __init__(
         self,
         train_losses: np.ndarray,
@@ -343,6 +344,7 @@ def get_trainer(
     save_checkpoint: bool = True,
     lr_tuning: LRTuningConfig | None = None,
     resume_optimizer_ckpt_path: str | None = None,
+    resume_ema_ckpt_path: str | None = None,
     lr: float = 0.01,
 ) -> tuple[TrainConfigProtocol, Trainer]:
     if checkpoint_dir is None:
@@ -414,10 +416,12 @@ def get_trainer(
         opt.step_weights = unittest.mock.MagicMock(side_effect=step_weights_side_effect)  # type: ignore
         return opt
 
-    def build_ema(modules: torch.nn.ModuleList) -> EMATracker:
-        return EMATracker(modules, decay=ema_decay)
+    ema_config = EMAConfig(decay=ema_decay, resume_ema_ckpt_path=resume_ema_ckpt_path)
 
-    config: TrainConfigProtocol = Config(
+    def build_ema(modules: torch.nn.ModuleList) -> EMATracker:
+        return ema_config.build(modules)
+
+    config = Config(
         experiment_dir=tmp_path,
         checkpoint_dir=checkpoint_dir,
         checkpoint_save_epochs=checkpoint_save_epochs,
@@ -428,6 +432,7 @@ def get_trainer(
         evaluate_before_training=evaluate_before_training,
         save_best_inference_epoch_checkpoints=save_best_inference_epoch_checkpoints,
         save_checkpoint=save_checkpoint,
+        ema=ema_config,
         lr_tuning=lr_tuning,
     )
     aggregator_builder = AggregatorBuilder(
@@ -435,19 +440,50 @@ def get_trainer(
         validation_losses=validation_losses,
         inference_losses=inference_losses,
     )
-    return config, Trainer(
+    inference_epochs = config._inference_epochs
+
+    def validation_callback(epoch: int) -> tuple[dict[str, Any], float]:
+        validation_data.set_epoch(epoch)
+        val_agg = aggregator_builder.get_validation_aggregator()
+        logs = run_validation(
+            train_stepper=stepper,
+            validation_data=validation_data,
+            aggregator=val_agg,
+            diagnostics_subdir=f"epoch_{epoch:04d}",
+            record_logs=lambda logs: None,
+        )
+        return logs, logs["val/mean/loss"]
+
+    def inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
+        if epoch not in inference_epochs:
+            return {}, None
+        logs = inference_one_epoch(
+            stepper=stepper,
+            validation_context=contextlib.nullcontext,
+            dataset=inference_data,
+            aggregator=aggregator_builder.get_inference_aggregator(),
+            label="inference",
+            epoch=epoch,
+        )
+        error = logs.get("inference/time_mean_norm/rmse/channel_mean")
+        return logs, error
+
+    trainer = Trainer(
         train_data=train_data,
         validation_data=validation_data,
-        inference_data=inference_data,
         stepper=stepper,
         build_optimization=build_optimization,
         build_ema=build_ema,
         config=config,
         aggregator_builder=aggregator_builder,
+        validation_callback=validation_callback,
         end_of_batch_callback=unittest.mock.MagicMock(),
         end_of_epoch_callback=unittest.mock.MagicMock(side_effect=lambda epoch: {}),
+        inference_callback=inference_callback,
         do_gc_collect=False,  # for much faster tests
     )
+
+    return config, trainer
 
 
 @pytest.mark.parametrize(
@@ -483,8 +519,6 @@ def test_trainer(tmp_path: str, checkpoint_save_epochs: Slice | None):
         unittest.mock.call(i) for i in range(1, config.max_epochs + 1)
     ]
     assert valid_data.set_epoch_mock.mock_calls == train_data.set_epoch_mock.mock_calls
-    assert train_data.log_info_mock.called
-    assert valid_data.log_info_mock.called
     assert trainer._end_of_epoch_callback.mock_calls == [  # type: ignore
         unittest.mock.call(i) for i in range(1, config.max_epochs + 1)
     ]
@@ -562,7 +596,7 @@ def preempt_after_calls_patch(object, method: str, call_count: int):
 
 @pytest.mark.parametrize(
     "interrupt_method",
-    ["train_one_epoch", "validate_one_epoch", "inference_one_epoch"],
+    ["train_one_epoch", "_validation_callback", "_inference_callback"],
 )
 def test_resume_after_interrupted_training(tmp_path: str, interrupt_method: str):
     max_epochs = 4
@@ -676,7 +710,9 @@ def test_resume_after_interrupted_training_during_epoch(
     )
     with (
         unittest.mock.patch.object(
-            trainer, "validate_one_epoch", return_value={"val/mean/loss": 0.0}
+            trainer,
+            "_validation_callback",
+            return_value=({"val/mean/loss": 0.0}, 0.0),
         ),
     ):  # would throw off count for actual training batches seen
         trainer.train()
@@ -719,7 +755,7 @@ def test_resume_after_preemption_during_validation(
     ):  # would throw off count for actual training batches seen
         with preempt_after_calls_patch(
             trainer,
-            "validate_one_epoch",
+            "_validation_callback",
             1 + int(evaluate_before_training),
         ):
             trainer.train()
@@ -745,7 +781,9 @@ def test_resume_after_preemption_during_validation(
     )
     with (
         unittest.mock.patch.object(
-            trainer, "validate_one_epoch", return_value={"val/mean/loss": 0.0}
+            trainer,
+            "_validation_callback",
+            return_value=({"val/mean/loss": 0.0}, 0.0),
         ) as validate_mock,
     ):
         assert trainer._epochs_trained == 0
@@ -1488,3 +1526,53 @@ def test_finetune_optimization_checkpoint_loads_optimizer_state(tmp_path: str):
         stage2_trainer.optimization.scheduler.state_dict()
         == fresh_scheduler.state_dict()
     )
+
+
+def test_finetune_ema_checkpoint_loads_ema_state(tmp_path: str):
+    """Trainer loads EMA state from a finetune checkpoint while keeping
+    training counters fresh and preserving the configured decay."""
+    n_train_batches = 4
+    stage1_decay = 0.99
+    stage2_decay = 0.9999
+
+    stage1_dir = os.path.join(tmp_path, "stage1")
+    _, stage1_trainer = get_trainer(
+        stage1_dir,
+        max_epochs=1,
+        n_train_batches=n_train_batches,
+        stepper_module_values=np.array([1.0]),
+        ema_decay=stage1_decay,
+    )
+    stage1_trainer.train()
+
+    stage1_ema_state = stage1_trainer._ema.get_state()
+    assert int(stage1_ema_state["num_updates"]) == n_train_batches
+
+    stage1_trainer._save_restart_checkpoints()
+    stage1_ckpt_path = stage1_trainer.paths.latest_checkpoint_path
+
+    stage2_dir = os.path.join(tmp_path, "stage2")
+    _, stage2_trainer = get_trainer(
+        stage2_dir,
+        max_epochs=1,
+        n_train_batches=n_train_batches,
+        stepper_module_values=np.array([2.0]),
+        ema_decay=stage2_decay,
+        resume_ema_ckpt_path=stage1_ckpt_path,
+    )
+
+    assert stage2_trainer._epochs_trained == 0
+    assert stage2_trainer._start_epoch == 0
+    assert stage2_trainer.num_batches_seen == 0
+
+    # EMA state loaded from stage1 checkpoint
+    stage2_ema_state = stage2_trainer._ema.get_state()
+    assert int(stage2_ema_state["num_updates"]) == n_train_batches
+    for key in stage1_ema_state["ema_params"]:
+        torch.testing.assert_close(
+            stage2_ema_state["ema_params"][key],
+            stage1_ema_state["ema_params"][key],
+        )
+
+    # decay is from stage2 config, not the checkpoint
+    assert float(stage2_ema_state["decay"]) == pytest.approx(stage2_decay)
