@@ -10,6 +10,7 @@ from fme.core.loss import (
     EnergyScoreLoss,
     EnsembleLoss,
     EnsembleLossWithNanFill,
+    FiniteDifferenceCRPSLoss,
     GlobalMeanLoss,
     LossConfig,
     LossOutput,
@@ -112,7 +113,12 @@ def test_loss_of_zeros_is_one_plus_global_mean_weight(global_mean_weight: float)
         LossConfig(type="AreaWeightedMSE"),
         LossConfig(global_mean_type="LpLoss"),
         LossConfig(
-            type="EnsembleLoss", kwargs={"energy_score_weight": 1.0, "crps_weight": 0.0}
+            type="EnsembleLoss",
+            kwargs={
+                "energy_score_weight": 1.0,
+                "crps_weight": 0.0,
+                "finite_difference_crps_weight": 0.05,
+            },
         ),
     ],
 )
@@ -580,3 +586,42 @@ def test_reduce_to_per_channel():
     result_1d = _reduce_to_per_channel(one_d, 0, n_c)
     assert result_1d.shape == (n_c,)
     torch.testing.assert_close(result_1d.sum(), one_d.sum() / n_c)
+
+
+def test_finite_difference_crps_zero_for_spatially_constant():
+    """Data varying by channel but constant spatially should give zero loss.
+
+    Catches bugs where finite differences are taken along the channel dim
+    instead of spatial dims.
+    """
+    torch.manual_seed(0)
+    gen = torch.randn(4, 2, 3, 1, 1).expand(4, 2, 3, 8, 16).clone()
+    target = torch.randn(4, 1, 3, 1, 1).expand(4, 1, 3, 8, 16).clone()
+    loss = FiniteDifferenceCRPSLoss(alpha=1.0, levels=1)
+    result = loss(gen, target)
+    torch.testing.assert_close(result, torch.tensor(0.0), atol=1e-6, rtol=0.0)
+
+
+def test_finite_difference_crps_positive_for_different_inputs():
+    torch.manual_seed(0)
+    gen = torch.randn(4, 2, 3, 8, 16)
+    target = torch.randn(4, 1, 3, 8, 16)
+    loss = FiniteDifferenceCRPSLoss(alpha=1.0, levels=1)
+    result = loss(gen, target)
+    assert result > 0
+
+
+@pytest.mark.parametrize("levels", [1, 2, 3])
+def test_finite_difference_crps_multi_level(levels: int):
+    torch.manual_seed(0)
+    gen = torch.randn(4, 2, 3, 16, 32)
+    target = torch.randn(4, 1, 3, 16, 32)
+    loss = FiniteDifferenceCRPSLoss(alpha=1.0, levels=levels)
+    result = loss(gen, target)
+    assert result.shape == ()
+    assert result > 0
+
+
+def test_finite_difference_crps_rejects_zero_levels():
+    with pytest.raises(ValueError, match="levels must be at least 1"):
+        FiniteDifferenceCRPSLoss(alpha=1.0, levels=0)

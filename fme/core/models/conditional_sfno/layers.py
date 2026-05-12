@@ -52,7 +52,9 @@ class Context:
             last dimension is the channel dimension.
         embedding_pos: The positional embedding to condition on. The last
             three dimensions are (channels, height, width).
-        labels: The labels to condition on, of shape (batch_size, n_labels).
+        labels: The label conditioning tensor, of shape
+            (batch_size, embed_dim_labels). May be one-hot encoded labels
+            or learned label embeddings depending on model configuration.
         noise: The 2D noise embedding to condition on. The last
             three dimensions are (channels, height, width).
     """
