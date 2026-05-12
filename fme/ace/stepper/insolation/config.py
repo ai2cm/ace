@@ -126,7 +126,11 @@ class InsolationConfig:
             if isinstance(self.solar_constant, NameConfig):
                 if self.solar_constant.name not in names:
                     names.append(self.solar_constant.name)
-        return DataRequirements(names=names, n_timesteps=requirements.n_timesteps)
+        return DataRequirements(
+            names=names,
+            n_timesteps=requirements.n_timesteps,
+            allow_variable_masking=requirements.allow_variable_masking,
+        )
 
 
 class Insolation:

@@ -25,10 +25,14 @@ class DataRequirements:
     Parameters:
         names: Names of the variables to load.
         n_timesteps: Number of timesteps to load in each batch window.
+        allow_variable_masking: If True, the data loader may omit some
+            required variables and provide a data_mask instead. If False,
+            missing variables cause an error.
     """
 
     names: list[str]
     n_timesteps: int | IntSchedule
+    allow_variable_masking: bool = False
 
     @property
     def n_timesteps_schedule(self) -> IntSchedule:

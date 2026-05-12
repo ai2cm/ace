@@ -172,6 +172,10 @@ class SingleModuleStepConfig(StepConfigABC):
     def loss_names(self) -> list[str]:
         return self.output_names
 
+    @property
+    def allow_variable_masking(self) -> bool:
+        return self.builder.allow_variable_masking
+
     def replace_ocean(self, ocean: OceanConfig | None):
         """
         Replace the ocean model with a new one.
