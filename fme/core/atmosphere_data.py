@@ -21,7 +21,8 @@ ATMOSPHERE_FIELD_NAME_PREFIXES = {
     "surface_height": ["HGTsfc"],
     "surface_geopotential": ["PHIS"],
     "tendency_of_total_water_path_due_to_advection": [
-        "tendency_of_total_water_path_due_to_advection", "DTENDTTW"
+        "tendency_of_total_water_path_due_to_advection",
+        "DTENDTTW",
     ],
     "latent_heat_flux": ["LHTFLsfc", "LHFLX"],
     "sensible_heat_flux": ["SHTFLsfc", "SHFLX"],
@@ -31,7 +32,11 @@ ATMOSPHERE_FIELD_NAME_PREFIXES = {
     "sfc_down_lw_radiative_flux": ["DLWRFsfc", "FLDS"],
     "sfc_up_lw_radiative_flux": ["ULWRFsfc", "surface_upward_longwave_flux", "FLUS"],
     "toa_up_lw_radiative_flux": ["ULWRFtoa", "FLUT"],
-    "toa_up_sw_radiative_flux": ["USWRFtoa", "top_of_atmos_upward_shortwave_flux", "FSUTOA"],
+    "toa_up_sw_radiative_flux": [
+        "USWRFtoa",
+        "top_of_atmos_upward_shortwave_flux",
+        "FSUTOA",
+    ],
     "toa_down_sw_radiative_flux": ["DSWRFtoa", "SOLIN"],
     "air_temperature": ["air_temperature_", "T_"],
     "frozen_precipitation_rate": ["total_frozen_precipitation_rate"],
