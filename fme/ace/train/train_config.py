@@ -70,7 +70,9 @@ class InlineInferenceConfig:
         InferenceEvaluatorAggregatorConfig
         | HierarchicalInferenceEvaluatorAggregatorConfig
         | LegacyFlagInferenceEvaluatorAggregatorConfig
-    ) = dataclasses.field(default_factory=lambda: InferenceEvaluatorAggregatorConfig())
+    ) = dataclasses.field(
+        default_factory=lambda: HierarchicalInferenceEvaluatorAggregatorConfig()
+    )
     name: str | None = None
     weight: float = 1.0
 

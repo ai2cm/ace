@@ -233,7 +233,9 @@ class InferenceEvaluatorConfig:
         InferenceEvaluatorAggregatorConfig
         | HierarchicalInferenceEvaluatorAggregatorConfig
         | LegacyFlagInferenceEvaluatorAggregatorConfig
-    ) = dataclasses.field(default_factory=lambda: InferenceEvaluatorAggregatorConfig())
+    ) = dataclasses.field(
+        default_factory=lambda: HierarchicalInferenceEvaluatorAggregatorConfig()
+    )
     stepper_override: StepperOverrideConfig | None = None
     allow_incompatible_dataset: bool = False
     validation: ValidationConfig | None = None
