@@ -5,7 +5,7 @@ import pytest
 import torch
 import xarray as xr
 
-from fme.ace.data_loading.batch_data import BatchData, PairedData
+from fme.ace.data_loading.batch_data import BatchData, PairedData, _collate_with_masking
 from fme.core.device import get_device
 from fme.core.labels import BatchLabels
 from fme.core.typing_ import TensorDict
@@ -767,3 +767,49 @@ def test_data_mask_validation():
             time=base.time,
             data_mask={"foo": torch.ones(3, dtype=torch.bool)},
         )
+
+
+def test_collate_with_masking_heterogeneous_variables():
+    sample_a: TensorDict = {"x": torch.ones(2, 3), "y": torch.ones(2, 3) * 2}
+    sample_b: TensorDict = {"x": torch.ones(2, 3) * 3}
+    batch_data, data_mask = _collate_with_masking([sample_a, sample_b])
+    assert set(batch_data.keys()) == {"x", "y"}
+    assert batch_data["x"].shape == (2, 2, 3)
+    torch.testing.assert_close(batch_data["x"][0], torch.ones(2, 3))
+    torch.testing.assert_close(batch_data["x"][1], torch.ones(2, 3) * 3)
+    torch.testing.assert_close(batch_data["y"][0], torch.ones(2, 3) * 2)
+    torch.testing.assert_close(batch_data["y"][1], torch.zeros(2, 3))
+    assert data_mask is not None
+    torch.testing.assert_close(data_mask["x"], torch.tensor([True, True]))
+    torch.testing.assert_close(data_mask["y"], torch.tensor([True, False]))
+
+
+def test_collate_with_masking_all_present_returns_none_mask():
+    sample_a: TensorDict = {"x": torch.ones(2, 3), "y": torch.ones(2, 3)}
+    sample_b: TensorDict = {"x": torch.ones(2, 3), "y": torch.ones(2, 3)}
+    batch_data, data_mask = _collate_with_masking([sample_a, sample_b])
+    assert data_mask is None
+    assert batch_data["x"].shape == (2, 2, 3)
+
+
+def test_from_sample_tuples_with_variable_masking():
+    sample1 = (
+        {"a": torch.ones(2, 3), "b": torch.ones(2, 3) * 2},
+        xr.DataArray([0, 1]),
+        None,
+        0,
+    )
+    sample2 = (
+        {"a": torch.ones(2, 3) * 3},
+        xr.DataArray([0, 1]),
+        None,
+        0,
+    )
+    batch = BatchData.from_sample_tuples(
+        [sample1, sample2], allow_variable_masking=True
+    )
+    assert "a" in batch.data
+    assert "b" in batch.data
+    assert batch.data_mask is not None
+    torch.testing.assert_close(batch.data_mask["b"], torch.tensor([True, False]))
+    torch.testing.assert_close(batch.data["b"][1], torch.zeros(2, 3))

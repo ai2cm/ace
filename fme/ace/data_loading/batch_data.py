@@ -26,6 +26,55 @@ def _check_device(data: TensorMapping, device: torch.device):
             raise ValueError(f"data must be on {device}")
 
 
+def _collate_with_masking(
+    sample_data: Sequence[TensorDict],
+) -> tuple[TensorDict, TensorDict | None]:
+    """Collate samples with potentially different variable sets.
+
+    Takes the union of all variable names. For variables missing from a sample,
+    fills with zeros and marks as False in the returned mask.
+
+    Returns:
+        A tuple of (batch_data, data_mask) where batch_data has all variables
+        stacked along dim 0 and data_mask has per-variable boolean tensors of
+        shape [n_samples] indicating presence, or None if all variables are
+        present in all samples.
+    """
+    all_names: list[str] = []
+    seen: set[str] = set()
+    for sample in sample_data:
+        for name in sample:
+            if name not in seen:
+                all_names.append(name)
+                seen.add(name)
+
+    batch_data: TensorDict = {}
+    data_mask: TensorDict = {}
+    any_masked = False
+
+    for name in all_names:
+        present = [name in sample for sample in sample_data]
+        first_present_idx = next(i for i, p in enumerate(present) if p)
+        shape = sample_data[first_present_idx][name].shape
+        dtype = sample_data[first_present_idx][name].dtype
+
+        tensors = []
+        for sample in sample_data:
+            if name in sample:
+                tensors.append(sample[name])
+            else:
+                tensors.append(torch.zeros(shape, dtype=dtype))
+        batch_data[name] = torch.stack(tensors)
+        mask_tensor = torch.tensor(present)
+        data_mask[name] = mask_tensor
+        if not mask_tensor.all():
+            any_masked = True
+
+    if not any_masked:
+        return batch_data, None
+    return batch_data, data_mask
+
+
 class PrognosticState:
     """
     Thin typing wrapper around BatchData to indicate that the data is a prognostic
@@ -323,11 +372,16 @@ class BatchData:
         sample_dim_name: str = "sample",
         horizontal_dims: list[str] | None = None,
         label_encoding: LabelEncoding | None = None,
+        allow_variable_masking: bool = False,
     ) -> "BatchData":
         sample_data, sample_times, sample_labels, sample_epochs = zip(*samples)
         if not all(epoch == sample_epochs[0] for epoch in sample_epochs):
             raise ValueError("All samples must have the same epoch.")
-        batch_data = default_collate(sample_data)
+        if allow_variable_masking:
+            batch_data, data_mask = _collate_with_masking(sample_data)
+        else:
+            batch_data = default_collate(sample_data)
+            data_mask = None
         batch_time = xr.concat(sample_times, dim=sample_dim_name)
         if label_encoding is None:
             if sample_labels[0] is not None:
@@ -341,6 +395,7 @@ class BatchData:
             labels=labels,
             horizontal_dims=horizontal_dims,
             epoch=sample_epochs[0],
+            data_mask=data_mask,
         )
 
     def compute_derived_variables(

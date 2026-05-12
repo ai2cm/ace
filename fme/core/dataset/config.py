@@ -13,5 +13,6 @@ class DatasetConfigABC(abc.ABC):
         self,
         names: Sequence[str],
         n_timesteps: IntSchedule,
+        allow_variable_masking: bool = False,
     ) -> tuple[torch.utils.data.Dataset, DatasetProperties]:
         pass

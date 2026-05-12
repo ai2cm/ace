@@ -66,8 +66,11 @@ class DataLoaderConfig:
         self,
         names: Sequence[str],
         n_timesteps: IntSchedule,
+        allow_variable_masking: bool = False,
     ) -> tuple[DatasetABC, DatasetProperties]:
-        return self.dataset.build(names, n_timesteps)
+        return self.dataset.build(
+            names, n_timesteps, allow_variable_masking=allow_variable_masking
+        )
 
     @property
     def available_labels(self) -> set[str] | None:

@@ -1230,3 +1230,34 @@ def test_dataset_properties_update_masks(mock_monthly_netcdfs):
     existing_mask = MaskProvider(masks={"mask_0": torch.ones(4, 8)})
     data_properties.update_mask_provider(existing_mask)
     assert "mask_0" in dataset.properties.mask_provider.masks
+
+
+def test_allow_variable_masking_skips_missing_variables(mock_monthly_netcdfs):
+    mock_data: MockData = mock_monthly_netcdfs
+    config = XarrayDataConfig(data_path=mock_data.tmpdir)
+    existing_names = list(mock_data.var_names.time_dependent_names)
+    names_with_missing = existing_names + ["nonexistent_var"]
+    dataset = XarrayDataset(
+        config,
+        names_with_missing,
+        IntSchedule.from_constant(2),
+        allow_variable_masking=True,
+    )
+    sample_data, _, _, _ = dataset[0]
+    assert "nonexistent_var" not in sample_data
+    for name in existing_names:
+        assert name in sample_data
+
+
+def test_allow_variable_masking_false_raises_on_missing(mock_monthly_netcdfs):
+    mock_data: MockData = mock_monthly_netcdfs
+    config = XarrayDataConfig(data_path=mock_data.tmpdir)
+    existing_names = list(mock_data.var_names.time_dependent_names)
+    names_with_missing = existing_names + ["nonexistent_var"]
+    with pytest.raises(ValueError, match="Required variable not found"):
+        XarrayDataset(
+            config,
+            names_with_missing,
+            IntSchedule.from_constant(2),
+            allow_variable_masking=False,
+        )

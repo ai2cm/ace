@@ -519,11 +519,13 @@ class XarrayDataConfig(DatasetConfigABC):
         self,
         names: Sequence[str],
         n_timesteps: IntSchedule,
+        allow_variable_masking: bool = False,
     ) -> tuple["XarraySubset", DatasetProperties]:
         return get_xarray_dataset(
             self,
             list(names),
             n_timesteps,
+            allow_variable_masking=allow_variable_masking,
         )
 
 
@@ -538,10 +540,15 @@ class XarrayDataset(DatasetABC):
     """
 
     def __init__(
-        self, config: XarrayDataConfig, names: Sequence[str], n_timesteps: IntSchedule
+        self,
+        config: XarrayDataConfig,
+        names: Sequence[str],
+        n_timesteps: IntSchedule,
+        allow_variable_masking: bool = False,
     ):
         self._horizontal_coordinates: HorizontalCoordinates
         self._names = names
+        self._allow_variable_masking = allow_variable_masking
         self.path = config.data_path
         self.file_pattern = config.file_pattern
         self.engine = config.engine
@@ -579,6 +586,12 @@ class XarrayDataset(DatasetABC):
             self._time_invariant_names,
             self._static_derived_names,
         ) = self._group_variable_names_by_time_type()
+        if self._allow_variable_masking:
+            self._names = (
+                list(self._time_dependent_names)
+                + list(self._time_invariant_names)
+                + list(self._static_derived_names)
+            )
 
         self._vertical_coordinate = _get_vertical_coordinate(first_dataset, self.dtype)
         self.overwrite = config.overwrite
@@ -698,6 +711,8 @@ class XarrayDataset(DatasetABC):
         for name in self._names:
             if name in StaticDerivedData.names:
                 result[name] = StaticDerivedData.metadata[name]
+            elif name not in ds:
+                continue
             elif hasattr(ds[name], "units") and hasattr(ds[name], "long_name"):
                 result[name] = VariableMetadata(
                     units=ds[name].units,
@@ -754,22 +769,21 @@ class XarrayDataset(DatasetABC):
             for name in self._names:
                 if name in StaticDerivedData.names:
                     static_derived_names.append(name)
-                else:
-                    try:
-                        da = ds[name]
-                    except KeyError:
-                        raise ValueError(
-                            f"Required variable not found in dataset: {name}."
-                        )
+                elif name in ds:
+                    dims = ds[name].dims
+                    if "time" in dims:
+                        time_dependent_names.append(name)
                     else:
-                        dims = da.dims
-                        if "time" in dims:
-                            time_dependent_names.append(name)
-                        else:
-                            time_invariant_names.append(name)
-            logging.info(
-                f"The required variables have been found in the dataset: {self._names}."
-            )
+                        time_invariant_names.append(name)
+                elif self._allow_variable_masking:
+                    logging.info(
+                        f"Variable '{name}' not found in dataset, "
+                        "skipping due to allow_variable_masking=True."
+                    )
+                else:
+                    raise ValueError(f"Required variable not found in dataset: {name}.")
+        found = time_dependent_names + time_invariant_names + static_derived_names
+        logging.info(f"The required variables have been found in the dataset: {found}.")
 
         return VariableNames(
             time_dependent_names,
@@ -1091,9 +1105,14 @@ class XarraySubset(DatasetABC):
 
 
 def get_xarray_dataset(
-    config: XarrayDataConfig, names: Sequence[str], n_timesteps: IntSchedule
+    config: XarrayDataConfig,
+    names: Sequence[str],
+    n_timesteps: IntSchedule,
+    allow_variable_masking: bool = False,
 ) -> tuple["XarraySubset", DatasetProperties]:
-    dataset = XarrayDataset(config, names, n_timesteps)
+    dataset = XarrayDataset(
+        config, names, n_timesteps, allow_variable_masking=allow_variable_masking
+    )
     properties = dataset.properties
     index_slice = _as_index_selection(config.subset, dataset)
     return XarraySubset(dataset, index_slice), properties
@@ -1104,11 +1123,14 @@ def get_xarray_datasets(
     names: Sequence[str],
     n_timesteps: IntSchedule,
     strict: bool = True,
+    allow_variable_masking: bool = False,
 ) -> tuple[list[XarraySubset], DatasetProperties]:
     datasets = []
     properties: DatasetProperties | None = None
     for config in dataset_configs:
-        dataset, new_properties = get_xarray_dataset(config, names, n_timesteps)
+        dataset, new_properties = get_xarray_dataset(
+            config, names, n_timesteps, allow_variable_masking=allow_variable_masking
+        )
         datasets.append(dataset)
         if properties is None:
             properties = new_properties

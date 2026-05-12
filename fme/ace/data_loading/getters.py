@@ -29,16 +29,21 @@ logger = logging.getLogger(__name__)
 
 class CollateFn:
     def __init__(
-        self, horizontal_dims: list[str], label_encoding: LabelEncoding | None = None
+        self,
+        horizontal_dims: list[str],
+        label_encoding: LabelEncoding | None = None,
+        allow_variable_masking: bool = False,
     ):
         self.horizontal_dims = horizontal_dims
         self.label_encoding = label_encoding
+        self.allow_variable_masking = allow_variable_masking
 
     def __call__(self, samples: Sequence[DatasetItem]) -> BatchData:
         return BatchData.from_sample_tuples(
             samples,
             horizontal_dims=self.horizontal_dims,
             label_encoding=self.label_encoding,
+            allow_variable_masking=self.allow_variable_masking,
         )
 
 
@@ -84,7 +89,11 @@ def get_gridded_data(
             the default, but should generally be unused in production code.
     """
     n_timesteps_preloaded = requirements.n_timesteps_schedule.add(config.time_buffer)
-    dataset, properties = config.get_dataset(requirements.names, n_timesteps_preloaded)
+    dataset, properties = config.get_dataset(
+        requirements.names,
+        n_timesteps_preloaded,
+        allow_variable_masking=requirements.allow_variable_masking,
+    )
 
     if config.time_buffer > 0:
         # include requirements.n_timesteps - 1 steps of overlap so that no samples are
@@ -128,6 +137,7 @@ def get_gridded_data(
         collate_fn=CollateFn(
             list(properties.horizontal_coordinates.dims),
             label_encoding,
+            allow_variable_masking=requirements.allow_variable_masking,
         ),
         multiprocessing_context=mp_context,
         persistent_workers=persistent_workers,

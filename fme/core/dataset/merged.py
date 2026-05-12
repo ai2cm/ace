@@ -147,11 +147,13 @@ class MergeDatasetConfig(DatasetConfigABC):
         self,
         names: Sequence[str],
         n_timesteps: IntSchedule,
+        allow_variable_masking: bool = False,
     ):
         return get_merged_datasets(
             self,
             names,
             n_timesteps,
+            allow_variable_masking=allow_variable_masking,
         )
 
     @property
@@ -190,11 +192,13 @@ class MergeNoConcatDatasetConfig(DatasetConfigABC):
         self,
         names: Sequence[str],
         n_timesteps: IntSchedule,
+        allow_variable_masking: bool = False,
     ) -> tuple[MergedXarrayDataset, DatasetProperties]:
         return get_merged_datasets(
             MergeDatasetConfig(merge=self.merge),
             names,
             n_timesteps,
+            allow_variable_masking=allow_variable_masking,
         )
 
     @property
@@ -216,6 +220,7 @@ def get_merged_datasets(
     merged_config: MergeDatasetConfig | MergeNoConcatDatasetConfig,
     names: Sequence[str],
     n_timesteps: IntSchedule,
+    allow_variable_masking: bool = False,
 ) -> tuple[MergedXarrayDataset, DatasetProperties]:
     merged_xarray_datasets = []
     merged_properties: DatasetProperties | None = None
@@ -228,6 +233,7 @@ def get_merged_datasets(
         ) = config.build(
             per_dataset_names[config_counter],
             n_timesteps,
+            allow_variable_masking=allow_variable_masking,
         )
         merged_xarray_datasets.append(current_source_xarray_dataset)
 
