@@ -16,6 +16,7 @@ def assert_metadata_equal(
     b: BatchData,
     check_labels: bool = True,
     check_n_ensemble: bool = True,
+    check_data_mask: bool = True,
 ):
     assert a.horizontal_dims == b.horizontal_dims
     assert a.epoch == b.epoch
@@ -23,6 +24,20 @@ def assert_metadata_equal(
         assert a.n_ensemble == b.n_ensemble
     if check_labels:
         assert a.labels == b.labels
+    if check_data_mask:
+        _assert_tensor_mapping_equal_up_to_device(
+            dict(a.data_mask) if a.data_mask is not None else None,
+            dict(b.data_mask) if b.data_mask is not None else None,
+        )
+
+
+def _assert_tensor_mapping_equal_up_to_device(va: dict | None, vb: dict | None) -> None:
+    if va is None or vb is None:
+        assert va is None and vb is None
+    else:
+        assert set(va) == set(vb)
+        for k in va:
+            torch.testing.assert_close(va[k].detach().cpu(), vb[k].detach().cpu())
 
 
 def assert_batchdata_equal_up_to_device(a: BatchData, b: BatchData) -> None:
@@ -53,6 +68,8 @@ def assert_batchdata_equal_up_to_device(a: BatchData, b: BatchData) -> None:
                     va.tensor.cpu(),
                     vb.tensor.cpu(),
                 )
+        elif field.name == "data_mask":
+            _assert_tensor_mapping_equal_up_to_device(va, vb)
         else:
             assert va == vb
 
@@ -80,6 +97,8 @@ def assert_paired_data_equal_up_to_device(a: PairedData, b: PairedData) -> None:
                     va.tensor.cpu(),
                     vb.tensor.cpu(),
                 )
+        elif field.name == "data_mask":
+            _assert_tensor_mapping_equal_up_to_device(va, vb)
         else:
             assert va == vb
 
@@ -626,3 +645,125 @@ def test_paired_data_as_ensemble_tensor_dicts_shape():
         assert u_ref[name].shape[:2] == (n_s, n_ensemble)
     for name in p.prediction:
         assert u_pred[name].shape[:2] == (n_s, n_ensemble)
+
+
+def _make_data_mask(
+    names: list[str], n_samples: int, device=None
+) -> dict[str, torch.Tensor]:
+    if device is None:
+        device = get_device()
+    return {
+        name: torch.ones(n_samples, dtype=torch.bool, device=device) for name in names
+    }
+
+
+def test_data_mask_preserved_across_batchdata_transforms():
+    names = ["foo", "bar", "qux"]
+    n_samples, n_times = 2, 5
+    data_mask = _make_data_mask(names, n_samples)
+    data_mask["bar"] = torch.zeros(n_samples, dtype=torch.bool, device=get_device())
+    base = get_batch_data(
+        names=names,
+        n_samples=n_samples,
+        n_times=n_times,
+        horizontal_dims=["lat", "lon"],
+    )
+    base = BatchData(
+        data=base.data,
+        time=base.time,
+        horizontal_dims=base.horizontal_dims,
+        epoch=base.epoch,
+        labels=base.labels,
+        data_mask=data_mask,
+    )
+
+    removed = base.remove_initial_condition(1)
+    assert set(removed.data_mask) == set(names)
+    torch.testing.assert_close(removed.data_mask["bar"], data_mask["bar"])
+
+    sliced = base.select_time_slice(slice(0, 2))
+    assert set(sliced.data_mask) == set(names)
+    torch.testing.assert_close(sliced.data_mask["bar"], data_mask["bar"])
+
+    subset = base.subset_names(["foo", "qux"])
+    assert set(subset.data_mask) == {"foo", "qux"}
+    assert "bar" not in subset.data_mask
+
+    ic = base.get_start(["foo", "bar"], 2)
+    assert set(ic.as_batch_data().data_mask) == {"foo", "bar"}
+
+    prepended = base.prepend(ic)
+    assert set(prepended.data_mask) == set(names)
+    torch.testing.assert_close(prepended.data_mask["bar"], data_mask["bar"])
+
+    derived = base.compute_derived_variables(lambda a, f: TensorDict({}), base)
+    assert set(derived.data_mask) == set(names)
+
+    cpu = base.to_cpu()
+    assert set(cpu.data_mask) == set(names)
+    for k in names:
+        assert cpu.data_mask[k].device.type == "cpu"
+
+    device = base.to_device()
+    assert set(device.data_mask) == set(names)
+    for k in names:
+        assert device.data_mask[k].device == get_device()
+
+
+def test_data_mask_broadcast_ensemble():
+    names = ["foo", "bar"]
+    n_samples = 2
+    n_ensemble = 3
+    data_mask = _make_data_mask(names, n_samples)
+    data_mask["bar"][1] = False
+    base = get_batch_data(
+        names=names,
+        n_samples=n_samples,
+        n_times=5,
+        horizontal_dims=["lat", "lon"],
+    )
+    base = BatchData(
+        data=base.data,
+        time=base.time,
+        horizontal_dims=base.horizontal_dims,
+        epoch=base.epoch,
+        data_mask=data_mask,
+    )
+    broadcasted = base.broadcast_ensemble(n_ensemble)
+    assert set(broadcasted.data_mask) == set(names)
+    assert broadcasted.data_mask["bar"].shape == (n_samples * n_ensemble,)
+    # sample 0 was True, sample 1 was False; repeat_interleave keeps order
+    for i in range(n_ensemble):
+        assert broadcasted.data_mask["bar"][0 * n_ensemble + i].item() is True
+        assert broadcasted.data_mask["bar"][1 * n_ensemble + i].item() is False
+
+
+def test_data_mask_none_preserved():
+    base = get_batch_data(
+        names=["foo"],
+        n_samples=2,
+        n_times=3,
+        horizontal_dims=["lat", "lon"],
+    )
+    assert base.data_mask is None
+    assert base.to_device().data_mask is None
+    assert base.to_cpu().data_mask is None
+    assert base.remove_initial_condition(1).data_mask is None
+    assert base.select_time_slice(slice(0, 1)).data_mask is None
+    assert base.subset_names(["foo"]).data_mask is None
+    assert base.broadcast_ensemble(2).data_mask is None
+
+
+def test_data_mask_validation():
+    base = get_batch_data(
+        names=["foo"],
+        n_samples=2,
+        n_times=3,
+        horizontal_dims=["lat", "lon"],
+    )
+    with pytest.raises(ValueError, match="data_mask for variable foo"):
+        BatchData(
+            data=base.data,
+            time=base.time,
+            data_mask={"foo": torch.ones(3, dtype=torch.bool)},
+        )

@@ -77,6 +77,7 @@ class BatchData:
     )
     epoch: int | None = None
     n_ensemble: int = 1
+    data_mask: TensorMapping | None = None
 
     @classmethod
     def new_for_testing(
@@ -93,6 +94,7 @@ class BatchData:
         epoch: int | None = 0,
         labels: BatchLabels | None = None,
         device: torch.device | None = None,
+        data_mask: TensorMapping | None = None,
     ) -> "BatchData":
         """
         Create a new batch data object for testing.
@@ -112,6 +114,7 @@ class BatchData:
             labels: The labels of the data.
             device: The device to create the data on. By default, the device is
                 determined by the global device specified by get_device().
+            data_mask: Per-variable, per-sample masks indicating variable presence.
         """
         if device is None:
             device = get_device()
@@ -141,6 +144,7 @@ class BatchData:
             labels=labels,
             horizontal_dims=horizontal_dims,
             epoch=epoch,
+            data_mask=data_mask,
         )
 
     @property
@@ -170,6 +174,11 @@ class BatchData:
             epoch=self.epoch,
             labels=self.labels.to(device) if self.labels is not None else None,
             n_ensemble=self.n_ensemble,
+            data_mask=(
+                {k: v.to(device) for k, v in self.data_mask.items()}
+                if self.data_mask is not None
+                else None
+            ),
         )
 
     def scatter_spatial(self, global_img_shape: tuple[int, int]) -> "BatchData":
@@ -182,6 +191,7 @@ class BatchData:
             epoch=self.epoch,
             labels=self.labels,
             n_ensemble=self.n_ensemble,
+            data_mask=self.data_mask,
         )
 
     def to_cpu(self) -> "BatchData":
@@ -192,6 +202,11 @@ class BatchData:
             epoch=self.epoch,
             labels=self.labels,
             n_ensemble=self.n_ensemble,
+            data_mask=(
+                {k: v.cpu() for k, v in self.data_mask.items()}
+                if self.data_mask is not None
+                else None
+            ),
         )
 
     @classmethod
@@ -211,6 +226,7 @@ class BatchData:
         labels: BatchLabels | None = None,
         horizontal_dims: list[str] | None = None,
         n_ensemble: int = 1,
+        data_mask: TensorMapping | None = None,
     ) -> "BatchData":
         _check_device(data, torch.device("cpu"))
         if labels is not None:
@@ -231,6 +247,7 @@ class BatchData:
             labels=labels,
             epoch=epoch,
             n_ensemble=n_ensemble,
+            data_mask=data_mask,
             **kwargs,
         )
 
@@ -243,6 +260,7 @@ class BatchData:
         labels: BatchLabels | None = None,
         horizontal_dims: list[str] | None = None,
         n_ensemble: int = 1,
+        data_mask: TensorMapping | None = None,
     ) -> "BatchData":
         """
         Move the data to the current global device specified by get_device().
@@ -263,6 +281,7 @@ class BatchData:
             epoch=epoch,
             labels=labels,
             n_ensemble=n_ensemble,
+            data_mask=data_mask,
             **kwargs,
         )
 
@@ -288,6 +307,14 @@ class BatchData:
                 f"time. Got labels shape {self.labels.tensor.shape} and time shape "
                 f"{self.time.shape}."
             )
+        if self.data_mask is not None:
+            n_samples = self.time.shape[0]
+            for k, v in self.data_mask.items():
+                if v.shape != (n_samples,):
+                    raise ValueError(
+                        f"data_mask for variable {k} has shape {v.shape}, "
+                        f"expected ({n_samples},)."
+                    )
 
     @classmethod
     def from_sample_tuples(
@@ -343,6 +370,7 @@ class BatchData:
             epoch=self.epoch,
             labels=self.labels,
             n_ensemble=self.n_ensemble,
+            data_mask=self.data_mask,
         )
 
     def remove_initial_condition(self: SelfType, n_ic_timesteps: int) -> SelfType:
@@ -358,12 +386,17 @@ class BatchData:
             epoch=self.epoch,
             labels=self.labels,
             n_ensemble=self.n_ensemble,
+            data_mask=self.data_mask,
         )
 
     def subset_names(self: SelfType, names: Collection[str]) -> SelfType:
         """
         Subset the data to only include the given names.
         """
+        if self.data_mask is not None:
+            data_mask = {k: v for k, v in self.data_mask.items() if k in names}
+        else:
+            data_mask = None
         return self.__class__(
             {k: v for k, v in self.data.items() if k in names},
             time=self.time,
@@ -371,6 +404,7 @@ class BatchData:
             epoch=self.epoch,
             labels=self.labels,
             n_ensemble=self.n_ensemble,
+            data_mask=data_mask,
         )
 
     def get_start(
@@ -408,6 +442,7 @@ class BatchData:
             epoch=self.epoch,
             labels=self.labels,
             n_ensemble=self.n_ensemble,
+            data_mask=self.data_mask,
         )
 
     def prepend(self: SelfType, initial_condition: PrognosticState) -> SelfType:
@@ -431,6 +466,7 @@ class BatchData:
             epoch=self.epoch,
             labels=self.labels,
             n_ensemble=self.n_ensemble,
+            data_mask=self.data_mask,
         )
 
     def broadcast_ensemble(self: SelfType, n_ensemble: int) -> SelfType:
@@ -452,6 +488,13 @@ class BatchData:
                 torch.repeat_interleave(self.labels.tensor, n_ensemble, dim=0),
                 self.labels.names,
             )
+        if self.data_mask is None:
+            data_mask = None
+        else:
+            data_mask = {
+                k: torch.repeat_interleave(v, n_ensemble, dim=0)
+                for k, v in self.data_mask.items()
+            }
         # Keep tensors on the same device as input. Do not move to get_device() here:
         # from a DataLoader worker (e.g. InferenceDataset with n_ensemble > 1), data
         # must stay on CPU so the loader can pin_memory() and transfer to GPU later.
@@ -462,6 +505,7 @@ class BatchData:
             labels=labels,
             epoch=self.epoch,
             n_ensemble=n_ensemble,
+            data_mask=data_mask,
         )
 
     def pin_memory(self: SelfType) -> SelfType:
@@ -472,6 +516,10 @@ class BatchData:
 
         """
         self.data = {name: tensor.pin_memory() for name, tensor in self.data.items()}
+        if self.data_mask is not None:
+            self.data_mask = {
+                name: tensor.pin_memory() for name, tensor in self.data_mask.items()
+            }
         return self
 
 
