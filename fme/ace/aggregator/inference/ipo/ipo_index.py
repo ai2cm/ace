@@ -51,8 +51,7 @@ def _nan_aware_regional_mean(data: torch.Tensor, weights: torch.Tensor) -> torch
     """
     valid_mask = ~torch.isnan(data)
     data_filled = torch.where(valid_mask, data, torch.zeros_like(data))
-    # weights broadcast: (lat, lon) -> (1, 1, lat, lon)
-    w = weights.unsqueeze(0).unsqueeze(0)
+    w = weights.to(data.device).unsqueeze(0).unsqueeze(0)
     weighted_sum = (data_filled * w * valid_mask).sum(dim=(-2, -1))
     weight_total = (w * valid_mask).sum(dim=(-2, -1))
     return weighted_sum / weight_total
