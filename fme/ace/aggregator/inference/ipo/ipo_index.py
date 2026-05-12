@@ -1,5 +1,6 @@
+import dataclasses
 import logging
-from typing import Any
+from typing import Any, Literal
 
 import cftime
 import numpy as np
@@ -8,11 +9,13 @@ import xarray as xr
 from matplotlib import pyplot as plt
 from scipy import signal
 
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.distributed import Distributed
 from fme.core.typing_ import TensorDict
 
 from ...plotting import plot_mean_and_samples
-from ..data import InferenceBatchData
+from ..build_context import MetricBuildContext, MetricNotSupportedError
+from ..data import InferenceBatchData, MetricBuildResult
 from ..utils import (
     LatLonRegion,
     UniqueMonths,
@@ -26,6 +29,8 @@ from ..utils import (
 SAMPLE_DIM, TIME_DIM = 0, 1
 
 DEFAULT_SST_NAMES = ["sst"]
+
+MIN_YEARS_FOR_FILTERED_TPI = 80
 
 TPI_REGIONS = {
     "T1": {"lat_bounds": (25.0, 45.0), "lon_bounds": (140.0, 215.0)},
@@ -296,10 +301,10 @@ class PairedIPOIndexAggregator:
         """Apply low-pass filter to each sample, trimming edge transients.
 
         Trims one cutoff period from each end to remove filtfilt edge artifacts.
-        Returns None if the series is too short (< 80 years).
+        Returns None if the series is too short.
         """
         trim = int(self._cutoff_period_yrs * 12)
-        min_length = 80 * 12
+        min_length = MIN_YEARS_FOR_FILTERED_TPI * 12
         filtered_samples = []
         for sample in range(tpi_da.sizes["sample"]):
             sample_data = tpi_da.isel(sample=sample).dropna("time")
@@ -364,3 +369,24 @@ class PairedIPOIndexAggregator:
         ax.legend()
         fig.tight_layout()
         return fig
+
+
+@dataclasses.dataclass
+class IpoIndexMetricConfig:
+    type: Literal["ipo_index"] = "ipo_index"
+    name: str = "ipo_index"
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        if not isinstance(ctx.horizontal_coordinates, LatLonCoordinates):
+            raise MetricNotSupportedError(
+                "ipo_index metric requires LatLonCoordinates."
+            )
+        return MetricBuildResult(
+            aggregator=PairedIPOIndexAggregator(
+                lat=ctx.horizontal_coordinates.lat,
+                lon=ctx.horizontal_coordinates.lon,
+            )
+        )

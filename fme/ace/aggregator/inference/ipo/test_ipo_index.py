@@ -10,6 +10,7 @@ from fme.ace.aggregator.inference.data import InferenceBatchData
 
 from ..utils import LatLonRegion
 from .ipo_index import (
+    MIN_YEARS_FOR_FILTERED_TPI,
     PairedIPOIndexAggregator,
     _IPORegionalAccumulator,
     low_pass_filter,
@@ -181,7 +182,7 @@ class TestPairedIPOIndexAggregator:
         lon = torch.linspace(100.0, 300.0, 17)
         n_lat, n_lon = len(lat), len(lon)
         n_samples = 1
-        n_months = 85 * 12  # 85 years to exceed 80-year threshold
+        n_months = (MIN_YEARS_FOR_FILTERED_TPI + 5) * 12
 
         agg = PairedIPOIndexAggregator(lat=lat, lon=lon)
 
@@ -228,12 +229,12 @@ class TestPairedIPOIndexAggregator:
     def test_get_logs_empty_for_short_rollout(self, very_fast_only: bool):
         if very_fast_only:
             pytest.skip("Skipping non-fast tests")
-        """Rollouts shorter than 80 years should not report IPO metrics."""
+        """Rollouts shorter than the minimum should not report IPO metrics."""
         lat = torch.linspace(-60.0, 60.0, 13)
         lon = torch.linspace(100.0, 300.0, 17)
         n_lat, n_lon = len(lat), len(lon)
         n_samples = 1
-        n_months = 40 * 12  # 40 years, below 80-year threshold
+        n_months = (MIN_YEARS_FOR_FILTERED_TPI // 2) * 12
 
         agg = PairedIPOIndexAggregator(lat=lat, lon=lon)
 
