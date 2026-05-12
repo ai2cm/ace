@@ -475,3 +475,107 @@ def test_finite_difference_crps_multi_level(levels: int):
 def test_finite_difference_crps_rejects_zero_levels():
     with pytest.raises(ValueError, match="levels must be at least 1"):
         FiniteDifferenceCRPSLoss(alpha=1.0, levels=0)
+
+
+def test_per_channel_losses_are_distinct_area_weighted_mse():
+    """Per-channel losses should differ when inputs differ per channel.
+
+    This is the bug that PR #1111 identified: losses were being
+    reduced to a scalar internally, so all channels reported the same value.
+    """
+    torch.manual_seed(0)
+    area = torch.ones(8, 16, device=get_device())
+    out_names = ["var_a", "var_b"]
+    normalizer = StandardNormalizer(
+        means={n: torch.as_tensor(0.0) for n in out_names},
+        stds={n: torch.as_tensor(1.0) for n in out_names},
+    )
+    config = StepLossConfig(type="AreaWeightedMSE")
+    loss = config.build(
+        LatLonOperations(area),
+        out_names=out_names,
+        normalizer=normalizer,
+    )
+    x = {"var_a": torch.zeros(4, 8, 16, device=get_device())}
+    x["var_b"] = torch.ones(4, 8, 16, device=get_device()) * 10.0
+    y = {n: torch.zeros(4, 8, 16, device=get_device()) for n in out_names}
+    output = loss(x, y, step=0)
+    channel_losses = output.get_channel_losses()
+    assert channel_losses["var_a"] != channel_losses["var_b"]
+    assert channel_losses["var_a"] < channel_losses["var_b"]
+
+
+def test_per_channel_losses_sum_to_total():
+    """sum(get_channel_losses().values()) must equal total()."""
+    torch.manual_seed(0)
+    area = torch.ones(8, 16, device=get_device())
+    out_names = ["a", "b", "c"]
+    normalizer = StandardNormalizer(
+        means={n: torch.as_tensor(0.0) for n in out_names},
+        stds={n: torch.as_tensor(1.0) for n in out_names},
+    )
+    config = StepLossConfig(type="AreaWeightedMSE")
+    loss = config.build(
+        LatLonOperations(area),
+        out_names=out_names,
+        normalizer=normalizer,
+    )
+    x = {n: torch.randn(4, 8, 16, device=get_device()) for n in out_names}
+    y = {n: torch.randn(4, 8, 16, device=get_device()) for n in out_names}
+    output = loss(x, y, step=0)
+    total = output.total()
+    channel_sum = sum(output.get_channel_losses().values())
+    torch.testing.assert_close(channel_sum, total)
+
+
+def test_per_channel_losses_are_distinct_mse():
+    """Same distinct-channel test but with standard MSE loss."""
+    torch.manual_seed(0)
+    area = torch.ones(8, 16, device=get_device())
+    out_names = ["var_a", "var_b"]
+    normalizer = StandardNormalizer(
+        means={n: torch.as_tensor(0.0) for n in out_names},
+        stds={n: torch.as_tensor(1.0) for n in out_names},
+    )
+    config = StepLossConfig(type="MSE")
+    loss = config.build(
+        LatLonOperations(area),
+        out_names=out_names,
+        normalizer=normalizer,
+    )
+    x = {"var_a": torch.zeros(4, 8, 16, device=get_device())}
+    x["var_b"] = torch.ones(4, 8, 16, device=get_device()) * 10.0
+    y = {n: torch.zeros(4, 8, 16, device=get_device()) for n in out_names}
+    output = loss(x, y, step=0)
+    channel_losses = output.get_channel_losses()
+    assert channel_losses["var_a"] != channel_losses["var_b"]
+    assert channel_losses["var_a"] < channel_losses["var_b"]
+
+
+def test_energy_score_preweighting_preserves_total(very_fast_only: bool):
+    """Verify the pre-weighted spectral tensor's mean matches the old scalar."""
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+    torch.manual_seed(42)
+    DEVICE = get_device()
+    n_lat, n_lon = 16, 32
+    n_batch = 8
+    pred = torch.randn(n_batch, 2, 3, n_lat, n_lon, device=DEVICE)
+    target = torch.randn(n_batch, 1, 3, n_lat, n_lon, device=DEVICE)
+    sht = LatLonOperations(torch.ones((n_lat, n_lon), device=DEVICE)).get_real_sht()
+    loss = EnergyScoreLoss(sht=sht)
+    components = loss(pred, target)
+    total = _components_total(components)
+    assert total.shape == ()
+    assert total > 0
+
+
+def test_ensemble_component_loss_reduce_to_channel():
+    """EnsembleComponentLoss reduces over non-batch, non-channel dims."""
+    from fme.core.loss import EnsembleComponentLoss
+
+    tensor = torch.randn(4, 3, 5, 8, 8, device=get_device())
+    result = EnsembleComponentLoss(tensor).reduce_to_channel()
+    assert result.shape == (4, 5)
+    expected = tensor.mean(dim=(1, 3, 4))
+    torch.testing.assert_close(result, expected)
