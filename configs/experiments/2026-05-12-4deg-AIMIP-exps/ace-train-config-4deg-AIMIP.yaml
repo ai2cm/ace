@@ -35,8 +35,8 @@ logging:
   project: ace
   entity: ai2cm
 train_loader:
-  batch_size: 16
-  num_data_workers: 16
+  batch_size: 8
+  num_data_workers: 8
   prefetch_factor: 4
   dataset:
     data_path: /climate-default
@@ -66,10 +66,9 @@ optimization:
     fused: true
     weight_decay: 0.01
 stepper_training:
-  n_ensemble: 2
   n_forward_steps: 1
   loss:
-    type: EnsembleLoss
+    type: MSE
     weights:
       air_temperature_0: 0.5
       air_temperature_1: 0.5
@@ -85,9 +84,6 @@ stepper_training:
       DSWRFsfc: 2
       USWRFtoa: 2
       tendency_of_total_water_path_due_to_advection: 0.5
-    kwargs:
-      crps_weight: 0.9
-      energy_score_weight: 0.1
 stepper:
   step:
     type: single_module
