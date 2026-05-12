@@ -35,8 +35,8 @@ ATMOSPHERE_FIELD_NAME_PREFIXES = {
     "toa_down_sw_radiative_flux": ["DSWRFtoa", "SOLIN"],
     "air_temperature": ["air_temperature_", "T_"],
     "frozen_precipitation_rate": ["total_frozen_precipitation_rate"],
-    "eastward_wind_at_10m": ["UGRD10m", "U_at_z10"],
-    "northward_wind_at_10m": ["VGRD10m", "V_at_z10"],
+    "eastward_wind_at_10m": ["UGRD10m", "Uat10m"],
+    "northward_wind_at_10m": ["VGRD10m", "Vat10m"],
 }
 
 
