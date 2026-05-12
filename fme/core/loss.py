@@ -1,3 +1,4 @@
+import abc
 import dataclasses
 from collections.abc import Callable, Mapping
 from typing import Any, Literal
@@ -14,73 +15,86 @@ from fme.core.packer import Packer
 from fme.core.typing_ import TensorMapping
 
 
-def _channel_dim_positive(ndim: int, channel_dim: int) -> int:
-    return channel_dim if channel_dim >= 0 else ndim + channel_dim
+class LossComponent(abc.ABC):
+    """A pre-weighted loss tensor that knows how to reduce itself to ``(B, C)``.
 
-
-def _uniform_broadcast_per_channel(
-    total: torch.Tensor, n_channels: int
-) -> torch.Tensor:
-    """Evenly split a scalar across ``n_channels`` so ``.sum() == total``."""
-    return (total / n_channels).expand(n_channels)
-
-
-def _reduce_to_per_channel(
-    loss_value: torch.Tensor,
-    channel_dim: int,
-    n_channels: int,
-) -> torch.Tensor:
-    """Reduce any loss tensor to shape ``(n_channels,)``.
-
-    Handles element-wise tensors, partially-reduced tensors
-    (e.g. after area-weighted mean removes spatial dims), and
-    scalars (uniformly broadcast).
-
-    ``channel_dim`` must be a **non-negative** index, computed from
-    the *input* tensor (before the loss potentially removes dims).
-
-    The result satisfies ``tensor.sum() == loss_value.mean()``
-    for element-wise losses.
+    All loss tensors are pre-weighted so that ``.mean()`` over trailing
+    (non-batch, non-channel) dimensions gives the correct per-sample,
+    per-channel loss.  Subclasses encode the tensor layout (where the
+    channel dimension lives) and implement :meth:`reduce_to_channel`.
     """
-    if loss_value.ndim == 0:
-        return _uniform_broadcast_per_channel(loss_value, n_channels)
-    dims = tuple(i for i in range(loss_value.ndim) if i != channel_dim)
-    if not dims:
-        return loss_value / n_channels
-    return loss_value.mean(dim=dims) / n_channels
+
+    def __init__(self, loss: torch.Tensor):
+        self.loss = loss
+
+    @abc.abstractmethod
+    def reduce_to_channel(self) -> torch.Tensor:
+        """Reduce to ``(B, C)`` by meaning over non-batch, non-channel dims."""
+
+
+class StandardLoss(LossComponent):
+    """Standard ``(B, C, ...)`` layout with channel at dim 1."""
+
+    def reduce_to_channel(self) -> torch.Tensor:
+        if self.loss.ndim <= 2:
+            return self.loss
+        return self.loss.mean(dim=tuple(range(2, self.loss.ndim)))
+
+
+class EnsembleComponentLoss(LossComponent):
+    """Ensemble ``(B, E, C, ...)`` layout with channel at dim 2."""
+
+    def reduce_to_channel(self) -> torch.Tensor:
+        dims = tuple(i for i in range(self.loss.ndim) if i not in (0, 2))
+        return self.loss.mean(dim=dims) if dims else self.loss
 
 
 class LossOutput:
     """Container for loss values returned by WeightedMappingLoss/StepLoss.
 
-    Wraps the raw unreduced loss tensor and provides convenience methods
-    for obtaining the scalar total or per-channel breakdowns. This
-    isolates reduction logic so callers and aggregators don't need to
-    know the internal tensor layout.
+    Holds one or more :class:`LossComponent` instances and provides
+    convenience methods for the scalar total and per-channel breakdowns.
+
+    Reduction is computed once and cached: ``total()`` derives from
+    the cached per-channel values so they are always consistent.
     """
 
     def __init__(
         self,
-        loss: torch.Tensor,
-        channel_dim: int,
+        losses: list[LossComponent],
         channel_names: list[str],
     ):
-        self._loss = loss
-        self._channel_dim = channel_dim
+        self._losses = losses
         self._channel_names = channel_names
+        self._per_channel: torch.Tensor | None = None
+
+    def _get_per_channel(self) -> torch.Tensor:
+        """Return a ``(C,)`` tensor of batch-mean losses, computed once."""
+        if self._per_channel is None:
+            bc = sum(c.reduce_to_channel() for c in self._losses)
+            assert isinstance(bc, torch.Tensor)
+            if bc.ndim == 0:
+                self._per_channel = bc.expand(len(self._channel_names))
+            else:
+                self._per_channel = bc.mean(dim=0)
+        return self._per_channel
 
     def total(self) -> torch.Tensor:
-        """Scalar mean over all dimensions -- the optimization target."""
-        if self._loss.ndim > 0:
-            return self._loss.mean()
-        return self._loss
+        """Scalar loss — the optimisation target."""
+        return self._get_per_channel().mean()
 
     def get_channel_losses(self) -> dict[str, torch.Tensor]:
-        """Per-channel scalar losses keyed by variable name."""
-        reduced = _reduce_to_per_channel(
-            self._loss, self._channel_dim, len(self._channel_names)
+        """Per-channel scalar losses that sum to ``total()``."""
+        pc = self._get_per_channel()
+        n = len(self._channel_names)
+        return dict(zip(self._channel_names, (pc / n).unbind(0)))
+
+    def scale(self, weight: float) -> "LossOutput":
+        """Return a new ``LossOutput`` with every component scaled."""
+        return LossOutput(
+            [type(c)(c.loss * weight) for c in self._losses],
+            self._channel_names,
         )
-        return dict(zip(self._channel_names, reduced.unbind(0)))
 
 
 class NaNLoss(torch.nn.Module):
@@ -136,7 +150,7 @@ class WeightedMappingLoss:
             target_dict: The target data.
 
         Returns:
-            A ``LossOutput`` wrapping the raw unreduced loss tensor.
+            A ``LossOutput`` wrapping pre-weighted loss component tensors.
         """
         predict_tensors = self.packer.pack(
             self.normalizer.normalize(predict_dict), axis=self.channel_dim
@@ -150,10 +164,18 @@ class WeightedMappingLoss:
             target_tensors = torch.where(nan_mask, 0.0, target_tensors)
 
         result = self.loss(predict_tensors, target_tensors)
-        cdim = _channel_dim_positive(predict_tensors.ndim, self.channel_dim)
+        if isinstance(result, list):
+            losses = result
+        else:
+            cdim = (
+                predict_tensors.ndim + self.channel_dim
+                if self.channel_dim < 0
+                else self.channel_dim
+            )
+            component_cls = StandardLoss if cdim <= 1 else EnsembleComponentLoss
+            losses = [component_cls(result)]
         return LossOutput(
-            loss=result,
-            channel_dim=cdim,
+            losses=losses,
             channel_names=list(self.packer.names),
         )
 
@@ -626,12 +648,7 @@ class StepLoss(torch.nn.Module):
             A ``LossOutput`` wrapping the step-weighted loss tensor.
         """
         step_weight = (1.0 + self.sqrt_loss_decay_constant * step) ** (-0.5)
-        output = self.loss(predict_dict, target_dict)
-        return LossOutput(
-            loss=output._loss * step_weight,
-            channel_dim=output._channel_dim,
-            channel_names=output._channel_names,
-        )
+        return self.loss(predict_dict, target_dict).scale(step_weight)
 
 
 @dataclasses.dataclass

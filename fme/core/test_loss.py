@@ -12,11 +12,11 @@ from fme.core.loss import (
     GlobalMeanLoss,
     LossConfig,
     LossOutput,
+    StandardLoss,
     StepLossConfig,
     VariableWeightingLoss,
     WeightedMappingLoss,
     _construct_weight_tensor,
-    _reduce_to_per_channel,
 )
 from fme.core.normalizer import StandardNormalizer
 from fme.core.packer import Packer
@@ -406,25 +406,23 @@ def test_WeightedMappingLoss_with_target_nans():
     assert set(channel_losses.keys()) == set(out_names)
 
 
-def test_reduce_to_per_channel():
-    """Unit test for _reduce_to_per_channel covering scalar, 1D, and N-D inputs."""
+def test_standard_loss_reduce_to_channel():
     n_c = 3
-    channel_dim = 1
 
-    elementwise = torch.randn(4, n_c, 8, 8, device=get_device())
-    result = _reduce_to_per_channel(elementwise, channel_dim, n_c)
-    assert result.shape == (n_c,)
-    torch.testing.assert_close(result.sum(), elementwise.mean())
+    four_d = torch.randn(4, n_c, 8, 8, device=get_device())
+    result = StandardLoss(four_d).reduce_to_channel()
+    assert result.shape == (4, n_c)
+    torch.testing.assert_close(result, four_d.mean(dim=(2, 3)))
 
-    scalar = torch.tensor(6.0, device=get_device())
-    result_scalar = _reduce_to_per_channel(scalar, channel_dim, n_c)
-    assert result_scalar.shape == (n_c,)
-    torch.testing.assert_close(result_scalar.sum(), scalar)
+    two_d = torch.randn(4, n_c, device=get_device())
+    result_2d = StandardLoss(two_d).reduce_to_channel()
+    assert result_2d.shape == (4, n_c)
+    torch.testing.assert_close(result_2d, two_d)
 
-    one_d = torch.randn(n_c, device=get_device())
-    result_1d = _reduce_to_per_channel(one_d, 0, n_c)
-    assert result_1d.shape == (n_c,)
-    torch.testing.assert_close(result_1d.sum(), one_d.sum() / n_c)
+    five_d = torch.randn(4, n_c, 6, 8, 8, device=get_device())
+    result_5d = StandardLoss(five_d).reduce_to_channel()
+    assert result_5d.shape == (4, n_c)
+    torch.testing.assert_close(result_5d, five_d.mean(dim=(2, 3, 4)))
 
 
 def test_finite_difference_crps_zero_for_spatially_constant():
