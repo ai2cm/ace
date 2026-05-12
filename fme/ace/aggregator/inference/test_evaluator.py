@@ -761,6 +761,36 @@ def test_hierarchical_disable_default():
     assert "mean" in agg._aggregators
 
 
+@pytest.mark.parametrize(
+    "kwargs,match",
+    [
+        pytest.param(
+            dict(mean_denorm=MeanMetricConfig(target="norm")),
+            "mean_denorm.target must be 'denorm'",
+            id="mean_denorm_wrong_target",
+        ),
+        pytest.param(
+            dict(mean_norm=MeanMetricConfig(target="denorm")),
+            "mean_norm.target must be 'norm'",
+            id="mean_norm_wrong_target",
+        ),
+        pytest.param(
+            dict(time_mean_denorm=TimeMeanMetricConfig(target="norm")),
+            "time_mean_denorm.target must be 'denorm'",
+            id="time_mean_denorm_wrong_target",
+        ),
+        pytest.param(
+            dict(time_mean_norm=TimeMeanMetricConfig(target="denorm")),
+            "time_mean_norm.target must be 'norm'",
+            id="time_mean_norm_wrong_target",
+        ),
+    ],
+)
+def test_hierarchical_rejects_mismatched_target(kwargs, match):
+    with pytest.raises(ValueError, match=match):
+        HierarchicalInferenceEvaluatorAggregatorConfig(**kwargs)
+
+
 def test_all_metric_configs_documented():
     """Every type in the MetricConfig union must appear in evaluator_config.rst."""
     import fme.ace

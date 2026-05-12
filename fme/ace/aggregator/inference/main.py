@@ -306,6 +306,26 @@ class HierarchicalInferenceEvaluatorAggregatorConfig:
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
 
+    def __post_init__(self):
+        if self.mean_denorm.target != "denorm":
+            raise ValueError(
+                f"mean_denorm.target must be 'denorm', got '{self.mean_denorm.target}'"
+            )
+        if self.mean_norm.target != "norm":
+            raise ValueError(
+                f"mean_norm.target must be 'norm', got '{self.mean_norm.target}'"
+            )
+        if self.time_mean_denorm.target != "denorm":
+            raise ValueError(
+                "time_mean_denorm.target must be 'denorm', "
+                f"got '{self.time_mean_denorm.target}'"
+            )
+        if self.time_mean_norm.target != "norm":
+            raise ValueError(
+                f"time_mean_norm.target must be 'norm', "
+                f"got '{self.time_mean_norm.target}'"
+            )
+
     def _to_typed_config(self) -> InferenceEvaluatorAggregatorConfig:
         all_metrics: list[MetricConfig] = [
             self.mean_denorm,
