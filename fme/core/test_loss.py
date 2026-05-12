@@ -41,10 +41,8 @@ def test_loss_builds_and_runs(global_mean_type):
     x = torch.randn(10, 10, 10, 10, 10, device=get_device())
     y = torch.randn(10, 10, 10, 10, 10, device=get_device())
     result = loss(x, y)
-    if isinstance(result, list):
-        assert all(isinstance(c, LossComponent) for c in result)
-    else:
-        assert isinstance(result, torch.Tensor)
+    assert isinstance(result, list)
+    assert all(isinstance(c, LossComponent) for c in result)
 
 
 def test_spectral_energy_score(very_fast_only: bool):
@@ -80,14 +78,14 @@ def test_loss_of_zeros_is_variance():
     x = torch.zeros(10, 10, 10, 10, 10, device=get_device())
     y = torch.randn(10, 10, 10, 10, 10, device=get_device())
     result = loss(x, y)
-    assert isinstance(result, torch.Tensor)
+    assert isinstance(result, list)
     if str(get_device()).startswith("cuda"):
         tol = {"rtol": 1e-4, "atol": 1e-4}
     elif str(get_device()).startswith("mps"):
         tol = {"rtol": 1e-3, "atol": 1e-3}
     else:
         tol = {}
-    torch.testing.assert_close(result.mean(), y.var(), **tol)
+    torch.testing.assert_close(_components_total(result), y.var(), **tol)
 
 
 @pytest.mark.parametrize("global_mean_weight", [0.0, 1.0, 5.0])
@@ -266,7 +264,7 @@ def test_StepLossConfig_no_weights():
     x = packer.pack(x_mapping, axis=channel_dim)
     y = packer.pack(y_mapping, axis=channel_dim)
 
-    expected = loss(x, y).mean()
+    expected = _components_total(loss(x, y))
     result_step0 = mapping_loss(x_mapping, y_mapping, step=0)
     result_step1 = mapping_loss(x_mapping, y_mapping, step=1)
     assert isinstance(result_step0, LossOutput)

@@ -123,8 +123,8 @@ class NaNLoss(torch.nn.Module):
     def __init__(self):
         super().__init__()
 
-    def forward(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        return torch.tensor(torch.nan)
+    def forward(self, input: torch.Tensor, target: torch.Tensor) -> list[LossComponent]:
+        return [StandardLoss(torch.tensor(torch.nan))]
 
 
 class WeightedMappingLoss:
@@ -297,12 +297,8 @@ class WeightedSum(torch.nn.Module):
     def forward(self, x: torch.Tensor, y: torch.Tensor) -> list[LossComponent]:
         components: list[LossComponent] = []
         for w, module in zip(self._weights, self._wrapped):
-            result = module(x, y)
-            if isinstance(result, list):
-                for c in result:
-                    components.append(type(c)(c.loss * w))
-            else:
-                components.append(StandardLoss(result * w))
+            for c in module(x, y):
+                components.append(type(c)(c.loss * w))
         return components
 
 
@@ -415,6 +411,9 @@ class EnergyScoreLoss(torch.nn.Module):
             self.mode_weights[..., 0] = 1
         assert self.n_spectral is not None
         es = get_energy_score(x_hat, y_hat) * self.mode_weights
+        # Old path: .sum(dim=(-2,-1)).mean() / scaling
+        # New path: StandardLoss does .mean(dim=(-2,-1)) i.e. sum/(L*M)
+        # Multiply by L*M/scaling so mean gives the same result as sum/scaling.
         pre_weighted = es * (self.n_spectral / self.scaling)
         return [StandardLoss(pre_weighted)]
 
@@ -604,9 +603,9 @@ class LossConfig:
         if self.type == "LpLoss":
             main_loss = LpLoss(**self.kwargs)
         elif self.type == "L1":
-            main_loss = torch.nn.L1Loss(reduction="none")
+            main_loss = _L1Loss()
         elif self.type == "MSE":
-            main_loss = torch.nn.MSELoss(reduction="none")
+            main_loss = _MSELoss()
         elif self.type == "AreaWeightedMSE":
             if gridded_operations is None:
                 raise ValueError("gridded_operations is required for AreaWeightedMSE")
