@@ -74,6 +74,37 @@ DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
 
 
+def _apply_output_mask(
+    gen: EnsembleTensorDict,
+    target: EnsembleTensorDict,
+    data_mask: TensorMapping,
+) -> tuple[EnsembleTensorDict, EnsembleTensorDict]:
+    """Zero out masked output variables so they don't contribute to loss.
+
+    For each output variable in data_mask with False entries, sets both
+    the prediction and target to 0 for those batch members. This makes
+    the loss contribution zero, consistent with NaN masking in
+    WeightedMappingLoss.
+
+    Args:
+        gen: Predicted data with ensemble dim, shape [batch, ensemble, ...].
+        target: Target data with ensemble dim, shape [batch, ensemble, ...].
+        data_mask: Per-variable masks, shape [batch * ensemble] bool tensors.
+
+    Returns:
+        Masked copies of gen and target.
+    """
+    gen_masked: TensorDict = dict(gen)
+    target_masked: TensorDict = dict(target)
+    for name, mask in data_mask.items():
+        for d in (gen_masked, target_masked):
+            if name in d:
+                tensor = d[name]
+                broadcast_mask = mask.view(mask.shape[0], *([1] * (tensor.ndim - 1)))
+                d[name] = torch.where(broadcast_mask, tensor, 0.0)
+    return EnsembleTensorDict(gen_masked), EnsembleTensorDict(target_masked)
+
+
 def load_weights_and_history(path: str | None) -> StepperWeightsAndHistory:
     if path is None:
         return null_weights_and_history()
@@ -1667,6 +1698,12 @@ class TrainStepper(
                         for k, v in target_data.data.items()
                     }
                 )
+                if input_ensemble_data.data_mask is not None:
+                    gen_step, target_step = _apply_output_mask(
+                        gen_step,
+                        target_step,
+                        input_ensemble_data.data_mask,
+                    )
                 step_loss = self._loss_obj(gen_step, target_step, step=step)
                 step_total_loss = step_loss.total()
                 metrics[f"loss_step_{step}"] = step_total_loss.detach()

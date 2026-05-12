@@ -354,6 +354,8 @@ class SingleModuleStep(StepABC):
         """
 
         def network_call(input_norm: TensorDict) -> TensorDict:
+            if args.data_mask is not None:
+                input_norm = _apply_input_mask(input_norm, args.data_mask)
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
             output_tensor = self.module.wrap_module(wrapper)(
                 input_tensor,
@@ -406,6 +408,22 @@ class SingleModuleStep(StepABC):
         self.module.load_state(module)
         if "secondary_decoder" in state:
             self.secondary_decoder.load_module_state(state["secondary_decoder"])
+
+
+def _apply_input_mask(input_norm: TensorDict, data_mask: TensorMapping) -> TensorDict:
+    """Zero out masked input variables in normalized space.
+
+    For each variable in data_mask with False entries, sets those batch
+    members' values to 0 in the normalized input. This is equivalent to
+    replacing with the climatological mean in physical space.
+    """
+    result = dict(input_norm)
+    for name, mask in data_mask.items():
+        if name in result:
+            # mask shape: [batch], data shape: [batch, ...spatial...]
+            broadcast_mask = mask.view(mask.shape[0], *([1] * (result[name].ndim - 1)))
+            result[name] = torch.where(broadcast_mask, result[name], 0.0)
+    return result
 
 
 def step_with_adjustments(
