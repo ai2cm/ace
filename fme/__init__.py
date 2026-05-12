@@ -1,4 +1,4 @@
-__version__ = "2026.4.0"
+__version__ = "2026.5.1"
 
 
 from . import ace, coupled
