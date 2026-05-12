@@ -94,6 +94,7 @@ class LossContributionsConfig:
         """
         if self.weight == 0.0:
             return True
+
         if isinstance(self.n_steps_max, int) and self.n_steps_max == 0:
             return True
         return False
