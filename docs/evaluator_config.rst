@@ -89,10 +89,6 @@ The sub-configurations are:
    :show-inheritance:
    :noindex:
 
-.. autoclass:: fme.ace.InferenceEvaluatorAggregatorConfig
-   :show-inheritance:
-   :noindex:
-
 .. autoclass:: fme.ace.HierarchicalInferenceEvaluatorAggregatorConfig
    :show-inheritance:
    :noindex:

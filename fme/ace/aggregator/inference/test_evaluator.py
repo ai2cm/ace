@@ -14,9 +14,9 @@ from fme.ace.aggregator.inference import (
     EnsoIndexMetricConfig,
     HierarchicalInferenceEvaluatorAggregatorConfig,
     HistogramMetricConfig,
-    InferenceEvaluatorAggregatorConfig,
     LegacyFlagInferenceEvaluatorAggregatorConfig,
     MeanMetricConfig,
+    MetricConfig,
     PowerSpectrumMetricConfig,
     SeasonalMetricConfig,
     StepMeanEntry,
@@ -24,6 +24,7 @@ from fme.ace.aggregator.inference import (
     TimeMeanMetricConfig,
     VideoMetricConfig,
     ZonalMeanMetricConfig,
+    build_inference_evaluator_aggregator,
 )
 from fme.ace.data_loading.batch_data import BatchData, PairedData
 from fme.core.coordinates import LatLonCoordinates
@@ -108,7 +109,7 @@ def test_logs_regression():
     ds_info = get_ds_info(nx, ny)
     initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
 
-    agg = InferenceEvaluatorAggregatorConfig(
+    agg = build_inference_evaluator_aggregator(
         metrics=[
             MeanMetricConfig(target="denorm"),
             MeanMetricConfig(target="norm"),
@@ -121,7 +122,6 @@ def test_logs_regression():
             TimeMeanMetricConfig(target="denorm"),
             TimeMeanMetricConfig(target="norm"),
         ],
-    ).build(
         dataset_info=ds_info,
         n_ic_steps=1,
         n_forward_steps=n_time - 1,
@@ -211,7 +211,7 @@ def test_inference_logs_labels_exist():
     ny = 45
     ds_info = get_ds_info(nx, ny)
     initial_time = (get_zero_time(shape=[n_sample, 0], dims=["sample", "time"]),)
-    agg = InferenceEvaluatorAggregatorConfig(
+    agg = build_inference_evaluator_aggregator(
         metrics=[
             MeanMetricConfig(target="denorm"),
             MeanMetricConfig(target="norm"),
@@ -225,7 +225,6 @@ def test_inference_logs_labels_exist():
             TimeMeanMetricConfig(target="denorm"),
             TimeMeanMetricConfig(target="norm"),
         ],
-    ).build(
         dataset_info=ds_info,
         n_ic_steps=1,
         n_forward_steps=n_time - 1,
@@ -285,7 +284,7 @@ def test_inference_logs_length(window_len: int, n_windows: int):
             StepMeanMetricConfig(step=20, target="norm"),
         ]
     )
-    agg = InferenceEvaluatorAggregatorConfig(
+    agg = build_inference_evaluator_aggregator(
         metrics=[
             MeanMetricConfig(target="denorm"),
             MeanMetricConfig(target="norm"),
@@ -295,7 +294,6 @@ def test_inference_logs_length(window_len: int, n_windows: int):
             TimeMeanMetricConfig(target="denorm"),
             TimeMeanMetricConfig(target="norm"),
         ],
-    ).build(
         dataset_info=ds_info,
         n_ic_steps=1,
         n_forward_steps=n_forward_steps,
@@ -331,7 +329,7 @@ def test_flush_diagnostics(tmpdir):
     nx, ny, n_sample, n_time = 2, 2, 10, 21
     ds_info = get_ds_info(nx, ny)
     initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
-    agg = InferenceEvaluatorAggregatorConfig(
+    agg = build_inference_evaluator_aggregator(
         metrics=[
             MeanMetricConfig(target="denorm"),
             MeanMetricConfig(target="norm"),
@@ -344,7 +342,6 @@ def test_flush_diagnostics(tmpdir):
             VideoMetricConfig(),
             HistogramMetricConfig(),
         ],
-    ).build(
         dataset_info=ds_info,
         n_ic_steps=1,
         n_forward_steps=n_time - 1,
@@ -385,7 +382,7 @@ def test_agg_raises_without_output_dir():
     with pytest.raises(
         ValueError, match="Output directory must be set to save diagnostics"
     ):
-        InferenceEvaluatorAggregatorConfig(
+        build_inference_evaluator_aggregator(
             metrics=[
                 MeanMetricConfig(target="denorm"),
                 MeanMetricConfig(target="norm"),
@@ -394,7 +391,6 @@ def test_agg_raises_without_output_dir():
                 TimeMeanMetricConfig(target="denorm"),
                 TimeMeanMetricConfig(target="norm"),
             ],
-        ).build(
             dataset_info=ds_info,
             n_ic_steps=1,
             n_forward_steps=1,
@@ -407,28 +403,46 @@ def test_agg_raises_without_output_dir():
 
 class TestAggregatorConfigMetrics:
     def test_duplicate_metric_names_rejected(self):
+        ds_info = get_ds_info(nx=2, ny=2)
         with pytest.raises(ValueError, match="Duplicate metric names"):
-            InferenceEvaluatorAggregatorConfig(
+            build_inference_evaluator_aggregator(
                 metrics=[
                     MeanMetricConfig(target="denorm"),
                     MeanMetricConfig(target="denorm"),
-                ]
+                ],
+                dataset_info=ds_info,
+                n_ic_steps=1,
+                n_forward_steps=1,
+                initial_time=get_zero_time(shape=[1, 0], dims=["sample", "time"]),
+                normalize=lambda x: dict(x),
+                save_diagnostics=False,
             )
 
     def test_duplicate_names_allowed_with_explicit_name(self):
-        InferenceEvaluatorAggregatorConfig(
+        ds_info = get_ds_info(nx=2, ny=2)
+        build_inference_evaluator_aggregator(
             metrics=[
                 MeanMetricConfig(target="denorm"),
                 MeanMetricConfig(target="norm", name="mean_custom"),
-            ]
+            ],
+            dataset_info=ds_info,
+            n_ic_steps=1,
+            n_forward_steps=1,
+            initial_time=get_zero_time(shape=[1, 0], dims=["sample", "time"]),
+            normalize=lambda x: dict(x),
+            save_diagnostics=False,
         )
 
-    def test_default_metrics_build(self):
+    def test_default_hierarchical_build(self):
         n_sample, n_time = 10, 22
         nx, ny = 90, 45
         ds_info = get_ds_info(nx, ny)
         initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
-        agg = InferenceEvaluatorAggregatorConfig().build(
+        agg = HierarchicalInferenceEvaluatorAggregatorConfig(
+            annual=AnnualMetricConfig(enabled=False),
+            enso_index=EnsoIndexMetricConfig(enabled=False),
+            enso_coefficient=EnsoCoefficientMetricConfig(enabled=False),
+        ).build(
             dataset_info=ds_info,
             n_ic_steps=1,
             n_forward_steps=n_time - 1,
@@ -458,12 +472,11 @@ class TestAggregatorConfigMetrics:
         nx, ny = 90, 45
         ds_info = get_ds_info(nx, ny)
         initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
-        agg = InferenceEvaluatorAggregatorConfig(
+        agg = build_inference_evaluator_aggregator(
             metrics=[
                 MeanMetricConfig(target="denorm"),
                 StepMeanMetricConfig(step=20, target="denorm"),
-            ]
-        ).build(
+            ],
             dataset_info=ds_info,
             n_ic_steps=1,
             n_forward_steps=n_time - 1,
@@ -495,7 +508,11 @@ class TestAggregatorConfigMetrics:
         nx, ny = 4, 4
         ds_info = get_ds_info(nx, ny)
         initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
-        agg = InferenceEvaluatorAggregatorConfig().build(
+        agg = HierarchicalInferenceEvaluatorAggregatorConfig(
+            annual=AnnualMetricConfig(enabled=False),
+            enso_index=EnsoIndexMetricConfig(enabled=False),
+            enso_coefficient=EnsoCoefficientMetricConfig(enabled=False),
+        ).build(
             dataset_info=ds_info,
             n_ic_steps=1,
             n_forward_steps=n_time - 1,
@@ -526,7 +543,8 @@ class TestAggregatorConfigMetrics:
         with pytest.raises(
             ValueError, match="Output directory must be set to save diagnostics"
         ):
-            InferenceEvaluatorAggregatorConfig().build(
+            build_inference_evaluator_aggregator(
+                metrics=[MeanMetricConfig(target="denorm")],
                 dataset_info=ds_info,
                 n_ic_steps=1,
                 n_forward_steps=1,
@@ -540,8 +558,7 @@ class TestAggregatorConfigMetrics:
 @pytest.mark.filterwarnings("ignore::DeprecationWarning")
 def test_legacy_config_matches_typed_config():
     """Verify LegacyFlagInferenceEvaluatorAggregatorConfig produces the same
-    summary logs as an equivalent InferenceEvaluatorAggregatorConfig built
-    with the same typed metrics."""
+    summary logs as an equivalent builder call with the same typed metrics."""
     torch.manual_seed(42)
     n_sample, n_time, nx, ny = 4, 22, 90, 45
     ds_info = get_ds_info(nx, ny)
@@ -556,21 +573,19 @@ def test_legacy_config_matches_typed_config():
         log_video=True,
     )
 
-    typed_config = InferenceEvaluatorAggregatorConfig(
-        metrics=[
-            MeanMetricConfig(target="denorm"),
-            MeanMetricConfig(target="norm"),
-            StepMeanMetricConfig(step=20, target="denorm"),
-            StepMeanMetricConfig(step=20, name="mean_step_20_norm", target="norm"),
-            StepMeanMetricConfig(step=4, name="one_day_mean", target="denorm"),
-            StepMeanMetricConfig(step=4, name="one_day_mean_norm", target="norm"),
-            PowerSpectrumMetricConfig(),
-            ZonalMeanMetricConfig(zonal_mean_max_size=LOG_ZONAL_MEAN_IMAGES),
-            VideoMetricConfig(),
-            TimeMeanMetricConfig(target="denorm"),
-            TimeMeanMetricConfig(target="norm"),
-        ],
-    )
+    typed_metrics: list[MetricConfig] = [
+        MeanMetricConfig(target="denorm"),
+        MeanMetricConfig(target="norm"),
+        StepMeanMetricConfig(step=20, target="denorm"),
+        StepMeanMetricConfig(step=20, name="mean_step_20_norm", target="norm"),
+        StepMeanMetricConfig(step=4, name="one_day_mean", target="denorm"),
+        StepMeanMetricConfig(step=4, name="one_day_mean_norm", target="norm"),
+        PowerSpectrumMetricConfig(),
+        ZonalMeanMetricConfig(zonal_mean_max_size=LOG_ZONAL_MEAN_IMAGES),
+        VideoMetricConfig(),
+        TimeMeanMetricConfig(target="denorm"),
+        TimeMeanMetricConfig(target="norm"),
+    ]
 
     build_kwargs = dict(
         dataset_info=ds_info,
@@ -581,7 +596,9 @@ def test_legacy_config_matches_typed_config():
         save_diagnostics=False,
     )
     legacy_agg = legacy_config.build(**build_kwargs)
-    typed_agg = typed_config.build(**build_kwargs)
+    typed_agg = build_inference_evaluator_aggregator(
+        metrics=typed_metrics, **build_kwargs
+    )
 
     data = PairedData.new_on_device(
         prediction={"a": torch.randn(n_sample, n_time, ny, nx, device=get_device())},
@@ -638,22 +655,20 @@ def test_legacy_config_long_run_includes_annual_and_enso():
         log_seasonal_means=True,
     )
 
-    typed_config = InferenceEvaluatorAggregatorConfig(
-        metrics=[
-            MeanMetricConfig(target="denorm"),
-            MeanMetricConfig(target="norm"),
-            StepMeanMetricConfig(step=20, target="denorm"),
-            StepMeanMetricConfig(step=20, name="mean_step_20_norm", target="norm"),
-            PowerSpectrumMetricConfig(),
-            ZonalMeanMetricConfig(),
-            VideoMetricConfig(),
-            TimeMeanMetricConfig(target="denorm"),
-            TimeMeanMetricConfig(target="norm"),
-            SeasonalMetricConfig(),
-            AnnualMetricConfig(),
-            EnsoIndexMetricConfig(),
-        ],
-    )
+    typed_metrics: list[MetricConfig] = [
+        MeanMetricConfig(target="denorm"),
+        MeanMetricConfig(target="norm"),
+        StepMeanMetricConfig(step=20, target="denorm"),
+        StepMeanMetricConfig(step=20, name="mean_step_20_norm", target="norm"),
+        PowerSpectrumMetricConfig(),
+        ZonalMeanMetricConfig(),
+        VideoMetricConfig(),
+        TimeMeanMetricConfig(target="denorm"),
+        TimeMeanMetricConfig(target="norm"),
+        SeasonalMetricConfig(),
+        AnnualMetricConfig(),
+        EnsoIndexMetricConfig(),
+    ]
 
     build_kwargs = dict(
         dataset_info=ds_info,
@@ -664,7 +679,9 @@ def test_legacy_config_long_run_includes_annual_and_enso():
         save_diagnostics=False,
     )
     legacy_agg = legacy_config.build(**build_kwargs)
-    typed_agg = typed_config.build(**build_kwargs)
+    typed_agg = build_inference_evaluator_aggregator(
+        metrics=typed_metrics, **build_kwargs
+    )
 
     data = PairedData.new_on_device(
         prediction={"a": torch.randn(n_sample, n_time, ny, nx, device=get_device())},

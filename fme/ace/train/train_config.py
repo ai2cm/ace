@@ -8,7 +8,6 @@ import torch
 
 from fme.ace.aggregator import (
     HierarchicalInferenceEvaluatorAggregatorConfig,
-    InferenceEvaluatorAggregatorConfig,
     LegacyFlagInferenceEvaluatorAggregatorConfig,
     OneStepAggregatorConfig,
 )
@@ -67,8 +66,7 @@ class InlineInferenceConfig:
     n_ensemble_per_ic: int = 1
     epochs: Slice = dataclasses.field(default_factory=lambda: Slice())
     aggregator: (
-        InferenceEvaluatorAggregatorConfig
-        | HierarchicalInferenceEvaluatorAggregatorConfig
+        HierarchicalInferenceEvaluatorAggregatorConfig
         | LegacyFlagInferenceEvaluatorAggregatorConfig
     ) = dataclasses.field(
         default_factory=lambda: HierarchicalInferenceEvaluatorAggregatorConfig()

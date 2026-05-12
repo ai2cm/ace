@@ -15,8 +15,7 @@ import yaml
 
 import fme
 from fme.ace.aggregator.inference.main import (
-    InferenceEvaluatorAggregatorConfig,
-    MeanMetricConfig,
+    HierarchicalInferenceEvaluatorAggregatorConfig,
 )
 from fme.ace.aggregator.one_step.main import OneStepAggregatorConfig
 from fme.ace.data_loading.config import DataLoaderConfig
@@ -213,7 +212,7 @@ def _get_test_yaml_files(
     else:
         inference_configs = [
             InlineInferenceConfig(
-                aggregator=InferenceEvaluatorAggregatorConfig(
+                aggregator=HierarchicalInferenceEvaluatorAggregatorConfig(
                     monthly_reference_data=(
                         str(monthly_data_filename)
                         if monthly_data_filename is not None
@@ -238,7 +237,7 @@ def _get_test_yaml_files(
             ),
             InlineInferenceConfig(
                 name="weather_eval",
-                aggregator=InferenceEvaluatorAggregatorConfig(
+                aggregator=HierarchicalInferenceEvaluatorAggregatorConfig(
                     monthly_reference_data=(
                         str(monthly_data_filename)
                         if monthly_data_filename is not None
@@ -400,9 +399,7 @@ def _get_test_yaml_files(
             save_prediction_files=False,
             files=[FileWriterConfig("autoregressive")],
         ),
-        aggregator=InferenceEvaluatorAggregatorConfig(
-            metrics=[MeanMetricConfig(target="denorm")],
-        ),
+        aggregator=HierarchicalInferenceEvaluatorAggregatorConfig(),
         logging=logging_config,
         loader=InferenceDataLoaderConfig(
             dataset=XarrayDataConfig(

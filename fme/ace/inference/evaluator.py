@@ -14,7 +14,6 @@ import fme
 from fme.ace.aggregator import OneStepAggregatorConfig
 from fme.ace.aggregator.inference import (
     HierarchicalInferenceEvaluatorAggregatorConfig,
-    InferenceEvaluatorAggregatorConfig,
     LegacyFlagInferenceEvaluatorAggregatorConfig,
 )
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
@@ -230,8 +229,7 @@ class InferenceEvaluatorConfig:
         default_factory=lambda: DataWriterConfig()
     )
     aggregator: (
-        InferenceEvaluatorAggregatorConfig
-        | HierarchicalInferenceEvaluatorAggregatorConfig
+        HierarchicalInferenceEvaluatorAggregatorConfig
         | LegacyFlagInferenceEvaluatorAggregatorConfig
     ) = dataclasses.field(
         default_factory=lambda: HierarchicalInferenceEvaluatorAggregatorConfig()

@@ -52,7 +52,10 @@ def test_inference_evaluator_config_nested_dataclass_symbols_are_imported():
         populate_missing_symbols(InferenceEvaluatorConfig)
         assert len(MISSING_SYMBOLS) == 0, f"Missing symbols: {MISSING_SYMBOLS}"
         assert ace.InferenceDataLoaderConfig.__name__ in CHECKED_SYMBOLS
-        assert ace.InferenceEvaluatorAggregatorConfig.__name__ in CHECKED_SYMBOLS
+        assert (
+            ace.HierarchicalInferenceEvaluatorAggregatorConfig.__name__
+            in CHECKED_SYMBOLS
+        )
     finally:
         CHECKED_SYMBOLS.clear()
         MISSING_SYMBOLS.clear()

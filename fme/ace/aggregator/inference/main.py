@@ -60,170 +60,103 @@ MetricConfig = (
 )
 
 
-@dataclasses.dataclass
-class InferenceEvaluatorAggregatorConfig:
-    """
-    Configuration for inference evaluator aggregator using typed metric configs.
-
-    Metrics can be configured explicitly via the ``metrics`` list, where each
-    entry is a typed metric configuration (e.g. ``MeanMetricConfig``,
-    ``StepMeanMetricConfig``).  When ``metrics`` is ``None``, a default set
-    of metrics is computed at build time based on the grid type and run length.
-
-    Parameters:
-        metrics: Explicit list of metric configurations.  When ``None``, a
-            default set is used.
-        monthly_reference_data: Path to monthly reference data to compare against.
-        time_mean_reference_data: Path to reference time means to compare against.
-    """
-
-    metrics: list[MetricConfig] | None = None
-    monthly_reference_data: str | None = None
-    time_mean_reference_data: str | None = None
-
-    def __post_init__(self):
-        if self.metrics is not None:
-            names = [m.get_name() for m in self.metrics]
-            seen: set[str] = set()
-            duplicates: set[str] = set()
-            for n in names:
-                if n in seen:
-                    duplicates.add(n)
-                seen.add(n)
-            if duplicates:
-                raise ValueError(
-                    f"Duplicate metric names: {sorted(duplicates)}. "
-                    "Use the 'name' field to disambiguate."
-                )
-
-    @staticmethod
-    def _default_metrics(
-        ctx: MetricBuildContext,
-        n_ensemble_per_ic: int,
-    ) -> list[MetricConfig]:
-        """Compute default metrics based on runtime information."""
-        metrics: list[MetricConfig] = [
-            MeanMetricConfig(target="denorm"),
-            MeanMetricConfig(target="norm"),
-        ]
-
-        if ctx.n_forward_steps >= 20:
-            metrics.append(StepMeanMetricConfig(step=20, target="denorm"))
-            metrics.append(StepMeanMetricConfig(step=20, target="norm"))
-
-        metrics.extend(
-            [
-                PowerSpectrumMetricConfig(),
-                ZonalMeanMetricConfig(),
-                TimeMeanMetricConfig(target="denorm"),
-                TimeMeanMetricConfig(target="norm"),
-            ]
+def _validate_no_duplicate_names(metrics: list[MetricConfig]) -> None:
+    names = [m.get_name() for m in metrics]
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for n in names:
+        if n in seen:
+            duplicates.add(n)
+        seen.add(n)
+    if duplicates:
+        raise ValueError(
+            f"Duplicate metric names: {sorted(duplicates)}. "
+            "Use the 'name' field to disambiguate."
         )
 
-        if n_ensemble_per_ic > 1 and ctx.n_forward_steps >= 20:
-            metrics.append(EnsembleMetricConfig(step=20))
 
-        if ctx.n_timesteps * ctx.timestep > APPROXIMATELY_TWO_YEARS:
-            metrics.append(AnnualMetricConfig())
-            if isinstance(ctx.horizontal_coordinates, LatLonCoordinates) and isinstance(
-                ctx.ops, LatLonOperations
-            ):
-                metrics.append(EnsoIndexMetricConfig())
+def build_inference_evaluator_aggregator(
+    metrics: list[MetricConfig],
+    dataset_info: DatasetInfo,
+    n_ic_steps: int,
+    n_forward_steps: int,
+    initial_time: xr.DataArray,
+    normalize: Callable[[TensorMapping], TensorDict],
+    monthly_reference_data: str | None = None,
+    time_mean_reference_data: str | None = None,
+    output_dir: str | None = None,
+    channel_mean_names: Sequence[str] | None = None,
+    save_diagnostics: bool = True,
+    n_ensemble_per_ic: int = 1,
+    enable_time_series: bool = True,
+    raise_on_unsupported: bool = True,
+) -> "InferenceEvaluatorAggregator":
+    _validate_no_duplicate_names(metrics)
+    if save_diagnostics and output_dir is None:
+        raise ValueError("Output directory must be set to save diagnostics.")
+    if monthly_reference_data is None:
+        monthly_ref = None
+    else:
+        monthly_ref = xr.open_dataset(monthly_reference_data, decode_timedelta=False)
+    if time_mean_reference_data is None:
+        time_mean_ref = None
+    else:
+        time_mean_ref = xr.open_dataset(
+            time_mean_reference_data, decode_timedelta=False
+        )
 
-        if ctx.n_timesteps * ctx.timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS:
-            metrics.append(EnsoCoefficientMetricConfig())
+    n_timesteps = n_ic_steps + n_forward_steps
+    ctx = MetricBuildContext(
+        ops=dataset_info.gridded_operations,
+        horizontal_coordinates=dataset_info.horizontal_coordinates,
+        n_timesteps=n_timesteps,
+        n_ic_steps=n_ic_steps,
+        timestep=dataset_info.timestep,
+        variable_metadata=dataset_info.variable_metadata,
+        channel_mean_names=channel_mean_names,
+        monthly_reference_data=monthly_ref,
+        time_mean_reference_data=time_mean_ref,
+        initial_time=initial_time,
+    )
 
-        return metrics
+    metrics = list(metrics)
+    if not enable_time_series:
+        metrics = [m for m in metrics if not isinstance(m, MeanMetricConfig)]
 
-    def build(
-        self,
-        dataset_info: DatasetInfo,
-        n_ic_steps: int,
-        n_forward_steps: int,
-        initial_time: xr.DataArray,
-        normalize: Callable[[TensorMapping], TensorDict],
-        output_dir: str | None = None,
-        channel_mean_names: Sequence[str] | None = None,
-        save_diagnostics: bool = True,
-        n_ensemble_per_ic: int = 1,
-        enable_time_series: bool = True,
-        _raise_on_unsupported: bool | None = None,
-    ) -> "InferenceEvaluatorAggregator":
-        if save_diagnostics and output_dir is None:
-            raise ValueError("Output directory must be set to save diagnostics.")
-        if self.monthly_reference_data is None:
-            monthly_reference_data = None
-        else:
-            monthly_reference_data = xr.open_dataset(
-                self.monthly_reference_data, decode_timedelta=False
+    aggregators: dict[str, SubAggregator] = {}
+    time_series_aggregators: dict[str, TimeSeriesLogs] = {}
+    ensemble_aggregators: dict[str, SelectStepEnsembleAggregator] = {}
+
+    for metric in metrics:
+        name = metric.get_name()
+        try:
+            result: MetricBuildResult = metric.build(ctx)
+        except MetricNotSupportedError:
+            if raise_on_unsupported:
+                raise
+            logging.warning(
+                f"{name} metric not supported for this grid type, " "omitting."
             )
-        if self.time_mean_reference_data is None:
-            time_mean_reference_data = None
-        else:
-            time_mean_reference_data = xr.open_dataset(
-                self.time_mean_reference_data, decode_timedelta=False
-            )
+            continue
 
-        n_timesteps = n_ic_steps + n_forward_steps
-        ctx = MetricBuildContext(
-            ops=dataset_info.gridded_operations,
-            horizontal_coordinates=dataset_info.horizontal_coordinates,
-            n_timesteps=n_timesteps,
-            n_ic_steps=n_ic_steps,
-            timestep=dataset_info.timestep,
-            variable_metadata=dataset_info.variable_metadata,
-            channel_mean_names=channel_mean_names,
-            monthly_reference_data=monthly_reference_data,
-            time_mean_reference_data=time_mean_reference_data,
-            initial_time=initial_time,
-        )
+        if result.aggregator is not None:
+            aggregators[name] = result.aggregator
+        if result.time_series is not None:
+            time_series_aggregators[name] = result.time_series
+        if result.ensemble is not None:
+            ensemble_aggregators[name] = result.ensemble
 
-        if self.metrics is not None:
-            metrics = list(self.metrics)
-        else:
-            metrics = self._default_metrics(ctx, n_ensemble_per_ic)
-
-        if not enable_time_series:
-            metrics = [m for m in metrics if not isinstance(m, MeanMetricConfig)]
-
-        if _raise_on_unsupported is not None:
-            raise_on_unsupported = _raise_on_unsupported
-        else:
-            raise_on_unsupported = self.metrics is not None
-        aggregators: dict[str, SubAggregator] = {}
-        time_series_aggregators: dict[str, TimeSeriesLogs] = {}
-        ensemble_aggregators: dict[str, SelectStepEnsembleAggregator] = {}
-
-        for metric in metrics:
-            name = metric.get_name()
-            try:
-                result: MetricBuildResult = metric.build(ctx)
-            except MetricNotSupportedError:
-                if raise_on_unsupported:
-                    raise
-                logging.warning(
-                    f"{name} metric not supported for this grid type, " "omitting."
-                )
-                continue
-
-            if result.aggregator is not None:
-                aggregators[name] = result.aggregator
-            if result.time_series is not None:
-                time_series_aggregators[name] = result.time_series
-            if result.ensemble is not None:
-                ensemble_aggregators[name] = result.ensemble
-
-        return InferenceEvaluatorAggregator(
-            aggregators=aggregators,
-            time_series_aggregators=time_series_aggregators,
-            coords=dataset_info.horizontal_coordinates.coords,
-            n_ic_steps=n_ic_steps,
-            normalize=normalize,
-            save_diagnostics=save_diagnostics,
-            output_dir=output_dir,
-            n_ensemble_per_ic=n_ensemble_per_ic,
-            ensemble_aggregators=ensemble_aggregators,
-        )
+    return InferenceEvaluatorAggregator(
+        aggregators=aggregators,
+        time_series_aggregators=time_series_aggregators,
+        coords=dataset_info.horizontal_coordinates.coords,
+        n_ic_steps=n_ic_steps,
+        normalize=normalize,
+        save_diagnostics=save_diagnostics,
+        output_dir=output_dir,
+        n_ensemble_per_ic=n_ensemble_per_ic,
+        ensemble_aggregators=ensemble_aggregators,
+    )
 
 
 @dataclasses.dataclass
@@ -326,7 +259,7 @@ class HierarchicalInferenceEvaluatorAggregatorConfig:
                 f"got '{self.time_mean_norm.target}'"
             )
 
-    def _to_typed_config(self) -> InferenceEvaluatorAggregatorConfig:
+    def _get_metrics(self) -> list[MetricConfig]:
         all_metrics: list[MetricConfig] = [
             self.mean_denorm,
             self.mean_norm,
@@ -343,12 +276,7 @@ class HierarchicalInferenceEvaluatorAggregatorConfig:
             self.enso_index,
             self.enso_coefficient,
         ]
-        metrics = [m for m in all_metrics if m.enabled]
-        return InferenceEvaluatorAggregatorConfig(
-            metrics=metrics,
-            monthly_reference_data=self.monthly_reference_data,
-            time_mean_reference_data=self.time_mean_reference_data,
-        )
+        return [m for m in all_metrics if m.enabled]
 
     def build(
         self,
@@ -363,18 +291,21 @@ class HierarchicalInferenceEvaluatorAggregatorConfig:
         n_ensemble_per_ic: int = 1,
         enable_time_series: bool = True,
     ) -> "InferenceEvaluatorAggregator":
-        return self._to_typed_config().build(
+        return build_inference_evaluator_aggregator(
+            metrics=self._get_metrics(),
             dataset_info=dataset_info,
             n_ic_steps=n_ic_steps,
             n_forward_steps=n_forward_steps,
             initial_time=initial_time,
             normalize=normalize,
+            monthly_reference_data=self.monthly_reference_data,
+            time_mean_reference_data=self.time_mean_reference_data,
             output_dir=output_dir,
             channel_mean_names=channel_mean_names,
             save_diagnostics=save_diagnostics,
             n_ensemble_per_ic=n_ensemble_per_ic,
             enable_time_series=enable_time_series,
-            _raise_on_unsupported=False,
+            raise_on_unsupported=False,
         )
 
 
@@ -414,13 +345,13 @@ class LegacyFlagInferenceEvaluatorAggregatorConfig:
     """
     Legacy configuration for inference evaluator aggregator using boolean flags.
 
-    Deprecated: Use InferenceEvaluatorAggregatorConfig with typed metrics instead.
+    Deprecated: Use HierarchicalInferenceEvaluatorAggregatorConfig instead.
     """
 
     def __post_init__(self):
         warnings.warn(
             "LegacyFlagInferenceEvaluatorAggregatorConfig is deprecated. "
-            "Use InferenceEvaluatorAggregatorConfig with typed metrics instead.",
+            "Use HierarchicalInferenceEvaluatorAggregatorConfig instead.",
             DeprecationWarning,
             stacklevel=2,
         )
@@ -439,14 +370,14 @@ class LegacyFlagInferenceEvaluatorAggregatorConfig:
         default_factory=lambda: [StepMeanEntry(step=20)]
     )
 
-    def _to_typed_config(
+    def _get_metrics(
         self,
         n_timesteps: int,
         timestep: datetime.timedelta,
         horizontal_coordinates: HorizontalCoordinates,
         ops: GriddedOperations,
         n_ensemble_per_ic: int = 1,
-    ) -> InferenceEvaluatorAggregatorConfig:
+    ) -> list[MetricConfig]:
         metrics: list[MetricConfig] = []
         if self.log_global_mean_time_series:
             metrics.append(MeanMetricConfig(target="denorm"))
@@ -489,11 +420,7 @@ class LegacyFlagInferenceEvaluatorAggregatorConfig:
                 metrics.append(EnsoIndexMetricConfig())
         if n_timesteps * timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS:
             metrics.append(EnsoCoefficientMetricConfig())
-        return InferenceEvaluatorAggregatorConfig(
-            metrics=metrics,
-            monthly_reference_data=self.monthly_reference_data,
-            time_mean_reference_data=self.time_mean_reference_data,
-        )
+        return metrics
 
     def build(
         self,
@@ -509,19 +436,22 @@ class LegacyFlagInferenceEvaluatorAggregatorConfig:
         enable_time_series: bool = True,
     ) -> "InferenceEvaluatorAggregator":
         n_timesteps = n_ic_steps + n_forward_steps
-        typed_config = self._to_typed_config(
+        metrics = self._get_metrics(
             n_timesteps=n_timesteps,
             timestep=dataset_info.timestep,
             horizontal_coordinates=dataset_info.horizontal_coordinates,
             ops=dataset_info.gridded_operations,
             n_ensemble_per_ic=n_ensemble_per_ic,
         )
-        return typed_config.build(
+        return build_inference_evaluator_aggregator(
+            metrics=metrics,
             dataset_info=dataset_info,
             n_ic_steps=n_ic_steps,
             n_forward_steps=n_forward_steps,
             initial_time=initial_time,
             normalize=normalize,
+            monthly_reference_data=self.monthly_reference_data,
+            time_mean_reference_data=self.time_mean_reference_data,
             output_dir=output_dir,
             channel_mean_names=channel_mean_names,
             save_diagnostics=save_diagnostics,

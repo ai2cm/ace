@@ -16,7 +16,9 @@ import torch
 import xarray as xr
 import yaml
 
-from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregatorConfig
+from fme.ace.aggregator.inference.main import (
+    HierarchicalInferenceEvaluatorAggregatorConfig,
+)
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.inference import (
     InferenceDataLoaderConfig,
@@ -278,7 +280,7 @@ def test_inference_plus_one_model(
 
 @pytest.mark.parametrize("n_forward_steps", [2, int(30 / 20 * 36)])
 def test_typed_metric_config_inference(tmp_path: pathlib.Path, n_forward_steps: int):
-    """Validates InferenceEvaluatorAggregatorConfig with default metrics end-to-end."""
+    """Validates default aggregator config with default metrics end-to-end."""
     in_names = ["var"]
     out_names = ["var"]
     stepper_path = tmp_path / "stepper"
@@ -318,7 +320,7 @@ def test_typed_metric_config_inference(tmp_path: pathlib.Path, n_forward_steps: 
             log_to_wandb=True,
         ),
         loader=data.inference_data_loader_config,
-        aggregator=InferenceEvaluatorAggregatorConfig(),
+        aggregator=HierarchicalInferenceEvaluatorAggregatorConfig(),
         data_writer=DataWriterConfig(
             save_prediction_files=False,
             save_monthly_files=False,
@@ -402,7 +404,7 @@ def inference_helper(
         ),
         loader=data.inference_data_loader_config,
         prediction_loader=prediction_data,
-        aggregator=InferenceEvaluatorAggregatorConfig(
+        aggregator=HierarchicalInferenceEvaluatorAggregatorConfig(
             monthly_reference_data=monthly_reference_filename,
         ),
         data_writer=DataWriterConfig(
@@ -590,7 +592,7 @@ def test_inference_writer_boundaries(
             save_prediction_files=False,
             files=[FileWriterConfig("autoregressive")],
         ),
-        aggregator=InferenceEvaluatorAggregatorConfig(),
+        aggregator=HierarchicalInferenceEvaluatorAggregatorConfig(),
         forward_steps_in_memory=forward_steps_in_memory,
         allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
     )
@@ -746,7 +748,7 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
             log_to_wandb=False,
         ),
         loader=data.inference_data_loader_config,
-        aggregator=InferenceEvaluatorAggregatorConfig(),
+        aggregator=HierarchicalInferenceEvaluatorAggregatorConfig(),
         data_writer=DataWriterConfig(
             save_monthly_files=False,
             save_prediction_files=False,
@@ -892,7 +894,7 @@ def test_derived_metrics_run_without_errors(
         ),
         loader=data.inference_data_loader_config,
         prediction_loader=None,
-        aggregator=InferenceEvaluatorAggregatorConfig(),
+        aggregator=HierarchicalInferenceEvaluatorAggregatorConfig(),
         data_writer=DataWriterConfig(
             save_prediction_files=False,
             save_monthly_files=False,
@@ -1014,7 +1016,7 @@ def test_inference_override(tmp_path: pathlib.Path):
             save_prediction_files=False,
             files=[FileWriterConfig("autoregressive")],
         ),
-        aggregator=InferenceEvaluatorAggregatorConfig(),
+        aggregator=HierarchicalInferenceEvaluatorAggregatorConfig(),
         forward_steps_in_memory=4,
         stepper_override=stepper_override,
         allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
@@ -1275,7 +1277,7 @@ def test_evaluator_with_derived_forcings(
             log_to_file=False,
             log_to_wandb=False,
         ),
-        aggregator=InferenceEvaluatorAggregatorConfig(),
+        aggregator=HierarchicalInferenceEvaluatorAggregatorConfig(),
         loader=data.inference_data_loader_config,
         data_writer=DataWriterConfig(
             save_monthly_files=False,
@@ -1348,7 +1350,7 @@ def test_evaluator_with_non_local_experiment_dir(
             log_to_wandb=False,
         ),
         loader=data.inference_data_loader_config,
-        aggregator=InferenceEvaluatorAggregatorConfig(),
+        aggregator=HierarchicalInferenceEvaluatorAggregatorConfig(),
         data_writer=DataWriterConfig(
             save_monthly_files=False,
             save_prediction_files=False,
@@ -1609,7 +1611,7 @@ def test_inference_with_validation(tmp_path: pathlib.Path, validation_config_kwa
             log_to_wandb=True,
         ),
         loader=data.inference_data_loader_config,
-        aggregator=InferenceEvaluatorAggregatorConfig(),
+        aggregator=HierarchicalInferenceEvaluatorAggregatorConfig(),
         data_writer=DataWriterConfig(
             save_prediction_files=False,
             save_monthly_files=False,

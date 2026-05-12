@@ -38,7 +38,6 @@ from fme.ace.inference.data_writer import DataWriterConfig, FileWriterConfig
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.ace.inference.evaluator import (
     InferenceDataLoaderConfig,
-    InferenceEvaluatorAggregatorConfig,
     InferenceEvaluatorConfig,
     ValidationConfig,
     run_evaluator_from_config,
