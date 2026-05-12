@@ -10,8 +10,10 @@ from fme.core.loss import (
     EnergyScoreLoss,
     FiniteDifferenceCRPSLoss,
     GlobalMeanLoss,
+    LossComponent,
     LossConfig,
     LossOutput,
+    LpLoss,
     StandardLoss,
     StepLossConfig,
     VariableWeightingLoss,
@@ -22,18 +24,27 @@ from fme.core.normalizer import StandardNormalizer
 from fme.core.packer import Packer
 
 
+def _components_total(components: list[LossComponent]) -> torch.Tensor:
+    """Compute the scalar total from a list of LossComponent instances."""
+    bc = sum(c.reduce_to_channel() for c in components)
+    assert isinstance(bc, torch.Tensor)
+    return bc.mean()
+
+
 @pytest.mark.parametrize("global_mean_type", [None, "LpLoss"])
 def test_loss_builds_and_runs(global_mean_type):
     config = LossConfig(global_mean_type=global_mean_type)
     area = torch.randn(10, 1, device=get_device()).broadcast_to(size=(10, 10))
     loss = config.build(
-        reduction="mean",
         gridded_operations=LatLonOperations(area),
     )
     x = torch.randn(10, 10, 10, 10, 10, device=get_device())
     y = torch.randn(10, 10, 10, 10, 10, device=get_device())
     result = loss(x, y)
-    assert isinstance(result, torch.Tensor)
+    if isinstance(result, list):
+        assert all(isinstance(c, LossComponent) for c in result)
+    else:
+        assert isinstance(result, torch.Tensor)
 
 
 def test_spectral_energy_score(very_fast_only: bool):
@@ -47,15 +58,15 @@ def test_spectral_energy_score(very_fast_only: bool):
     sht = LatLonOperations(torch.ones((n_lat, n_lon), device=DEVICE)).get_real_sht()
     spectral_energy_score_loss = EnergyScoreLoss(sht=sht)
     crps_loss = CRPSLoss(alpha=0.95)
-    score = spectral_energy_score_loss(pred, target)
-    crps = crps_loss(pred, target)
+    score = _components_total(spectral_energy_score_loss(pred, target))
+    crps = _components_total(crps_loss(pred, target))
 
     n_lat2, n_lon2 = 32, 64
     pred = torch.rand(10000, 2, n_lat2, n_lon2, device=DEVICE)
     target = torch.rand(10000, 2, n_lat2, n_lon2, device=DEVICE)
     sht = LatLonOperations(torch.ones((n_lat2, n_lon2), device=DEVICE)).get_real_sht()
     spectral_energy_score_loss = EnergyScoreLoss(sht=sht)
-    larger_domain_score = spectral_energy_score_loss(pred, target)
+    larger_domain_score = _components_total(spectral_energy_score_loss(pred, target))
     torch.testing.assert_close(larger_domain_score, score, rtol=0.05, atol=0.0)
     torch.testing.assert_close(score, crps, rtol=0.5, atol=0.0)
 
@@ -64,7 +75,6 @@ def test_loss_of_zeros_is_variance():
     torch.manual_seed(0)
     config = LossConfig(global_mean_type=None)
     loss = config.build(
-        reduction="mean",
         gridded_operations=LatLonOperations(torch.ones(10, 10)),
     )
     x = torch.zeros(10, 10, 10, 10, 10, device=get_device())
@@ -88,20 +98,19 @@ def test_loss_of_zeros_is_one_plus_global_mean_weight(global_mean_weight: float)
     )
     area = torch.randn(10, 1, device=get_device()).broadcast_to(size=(10, 10))
     loss = config.build(
-        reduction="mean",
         gridded_operations=LatLonOperations(area),
     )
     x = torch.zeros(10, 10, 10, 10, 10, device=get_device())
     y = torch.randn(10, 10, 10, 10, 10, device=get_device())
     result = loss(x, y)
-    assert isinstance(result, torch.Tensor)
+    assert isinstance(result, list)
     expected = torch.tensor(1.0 + global_mean_weight)
     tol = (
         {"atol": 0.015, "rtol": 0.01}
         if str(get_device()).startswith("cuda")
         else {"atol": 0.01, "rtol": 0.0}
     )
-    torch.testing.assert_close(result.mean().cpu(), expected, **tol)
+    torch.testing.assert_close(_components_total(result).cpu(), expected, **tol)
 
 
 @pytest.mark.parametrize(
@@ -123,27 +132,29 @@ def test_loss_fails_when_gridded_operations_not_provided(
     config: LossConfig,
 ):
     with pytest.raises(ValueError):
-        config.build(reduction="mean", gridded_operations=None)
+        config.build(gridded_operations=None)
 
 
 def test_global_mean_loss():
     torch.manual_seed(0)
     area = torch.randn(10, 1, device=get_device()).broadcast_to(size=(10, 10))
-    loss = GlobalMeanLoss(
-        LatLonOperations(area).area_weighted_mean, loss=torch.nn.MSELoss()
-    )
+    loss = GlobalMeanLoss(LatLonOperations(area).area_weighted_mean, loss=LpLoss(p=2))
     x = torch.zeros(10, 10, 10, 10, 10, device=get_device())
     y = torch.randn(10, 10, 10, 10, 10, device=get_device())
     result = loss(x, y)
-    assert result.shape == ()
-    assert isinstance(result, torch.Tensor)
+    assert isinstance(result, list)
+    total = _components_total(result)
 
     def global_weighted_mean(tensor, area):
         return (tensor * area[None, None, None, :, :]).sum(dim=(-1, -2)) / area.sum()
 
-    mse = torch.nn.MSELoss()
-    expected = mse(global_weighted_mean(x, area), global_weighted_mean(y, area))
-    torch.testing.assert_close(result, expected)
+    gm_x = global_weighted_mean(x, area)
+    gm_y = global_weighted_mean(y, area)
+    B, C = gm_x.shape[0], gm_x.shape[1]
+    diff_norms = torch.linalg.norm((gm_x - gm_y).reshape(B, C, -1), ord=2, dim=2)
+    y_norms = torch.linalg.norm(gm_y.reshape(B, C, -1), ord=2, dim=2)
+    expected = (diff_norms / y_norms).mean()
+    torch.testing.assert_close(total, expected)
 
 
 def test_area_weighted_mse():
@@ -153,10 +164,12 @@ def test_area_weighted_mse():
     area = torch.rand(10, 1, device=get_device()).broadcast_to(size=(10, 10))
     area_weighted_mse = AreaWeightedMSELoss(LatLonOperations(area).area_weighted_mean)
     result = area_weighted_mse(x, target)
+    assert isinstance(result, list)
+    total = _components_total(result)
     expected = metrics.weighted_mean(
         torch.nn.MSELoss(reduction="none")(x, target), weights=area, dim=(-2, -1)
     ).mean()
-    torch.testing.assert_close(result, expected)
+    torch.testing.assert_close(total, expected)
 
 
 def test__construct_weight_tensor():
@@ -235,7 +248,7 @@ def test_StepLossConfig_no_weights():
     area = torch.ones(1, 1)  # area not used by this config
     gridded_operations: GriddedOperations = LatLonOperations(area)
     mapping_loss_config = StepLossConfig(sqrt_loss_step_decay_constant=0.0)
-    loss = loss_config.build(reduction="mean", gridded_operations=gridded_operations)
+    loss = loss_config.build(gridded_operations=gridded_operations)
     normalizer = StandardNormalizer(
         means={name: torch.as_tensor(0.0) for name in out_names},
         stds={name: torch.as_tensor(1.0) for name in out_names},
@@ -253,7 +266,7 @@ def test_StepLossConfig_no_weights():
     x = packer.pack(x_mapping, axis=channel_dim)
     y = packer.pack(y_mapping, axis=channel_dim)
 
-    expected = loss(x, y)
+    expected = loss(x, y).mean()
     result_step0 = mapping_loss(x_mapping, y_mapping, step=0)
     result_step1 = mapping_loss(x_mapping, y_mapping, step=1)
     assert isinstance(result_step0, LossOutput)
@@ -435,7 +448,7 @@ def test_finite_difference_crps_zero_for_spatially_constant():
     gen = torch.randn(4, 2, 3, 1, 1).expand(4, 2, 3, 8, 16).clone()
     target = torch.randn(4, 1, 3, 1, 1).expand(4, 1, 3, 8, 16).clone()
     loss = FiniteDifferenceCRPSLoss(alpha=1.0, levels=1)
-    result = loss(gen, target)
+    result = _components_total(loss(gen, target))
     torch.testing.assert_close(result, torch.tensor(0.0), atol=1e-6, rtol=0.0)
 
 
@@ -444,7 +457,7 @@ def test_finite_difference_crps_positive_for_different_inputs():
     gen = torch.randn(4, 2, 3, 8, 16)
     target = torch.randn(4, 1, 3, 8, 16)
     loss = FiniteDifferenceCRPSLoss(alpha=1.0, levels=1)
-    result = loss(gen, target)
+    result = _components_total(loss(gen, target))
     assert result > 0
 
 
@@ -454,7 +467,7 @@ def test_finite_difference_crps_multi_level(levels: int):
     gen = torch.randn(4, 2, 3, 16, 32)
     target = torch.randn(4, 1, 3, 16, 32)
     loss = FiniteDifferenceCRPSLoss(alpha=1.0, levels=levels)
-    result = loss(gen, target)
+    result = _components_total(loss(gen, target))
     assert result.shape == ()
     assert result > 0
 
