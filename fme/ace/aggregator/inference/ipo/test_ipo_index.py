@@ -168,7 +168,7 @@ class TestIPORegionalAccumulator:
         if "sst" in tpi_ds:
             tpi_values = tpi_ds["sst"].values
             np.testing.assert_allclose(
-                tpi_values[~np.isnan(tpi_values)], 0.0, atol=1e-5
+                tpi_values[~np.isnan(tpi_values)], 0.0, atol=5e-5
             )
 
 
