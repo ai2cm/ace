@@ -233,9 +233,13 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
         self._label_override = (
             set(label_override) if label_override is not None else None
         )
+        self._allow_variable_masking = requirements.allow_variable_masking
         if isinstance(config.dataset, XarrayDataConfig):
             dataset: XarrayDataset | MergedXarrayDataset = XarrayDataset(
-                config.dataset, requirements.names, requirements.n_timesteps_schedule
+                config.dataset,
+                requirements.names,
+                requirements.n_timesteps_schedule,
+                allow_variable_masking=requirements.allow_variable_masking,
             )
             properties = dataset.properties
         elif isinstance(config.dataset, MergeNoConcatDatasetConfig):
@@ -328,6 +332,7 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
             sample_tuples,
             horizontal_dims=list(self.properties.horizontal_coordinates.dims),
             label_encoding=self._label_encoding,
+            allow_variable_masking=self._allow_variable_masking,
         )
 
     def __getitem__(self, index) -> BatchData:
@@ -382,6 +387,7 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
                 config,
                 per_dataset_names[config_counter],
                 requirements.n_timesteps_schedule,
+                allow_variable_masking=requirements.allow_variable_masking,
             )
             merged_xarray_datasets.append(current_dataset)
             config_counter += 1

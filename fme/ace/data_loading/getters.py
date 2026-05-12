@@ -274,6 +274,7 @@ def get_forcing_data(
             config.dataset,
             window_requirements.names,
             window_requirements.n_timesteps_schedule,
+            allow_variable_masking=window_requirements.allow_variable_masking,
         ).all_times
     elif isinstance(config.dataset, MergeNoConcatDatasetConfig):
         # Some forcing variables may not be in the first dataset,
