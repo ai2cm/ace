@@ -109,6 +109,32 @@ def _compute_sample_mean_std(
     return std_by_sample.mean().item()
 
 
+def compute_psd_band_power(
+    freqs_per_year: np.ndarray,
+    power: np.ndarray,
+    period_bounds: tuple[float, float] = (2.0, 5.0),
+) -> float:
+    """Integrate the power spectrum over a frequency band defined by period bounds.
+
+    Args:
+        freqs_per_year: Frequency array in cycles per year.
+        power: Power spectrum array (same length as freqs_per_year).
+        period_bounds: (min_period, max_period) in years. Frequencies are
+            selected as 1/max_period <= f <= 1/min_period.
+
+    Returns:
+        Trapezoidal-rule integral of power over the selected frequency band.
+        Returns NaN if fewer than two frequency bins fall in the band.
+    """
+    min_period, max_period = period_bounds
+    freq_lo = 1.0 / max_period
+    freq_hi = 1.0 / min_period
+    mask = (freqs_per_year >= freq_lo) & (freqs_per_year <= freq_hi)
+    if mask.sum() < 2:
+        return float("nan")
+    return float(np.trapezoid(power[mask], freqs_per_year[mask]))
+
+
 class RegionalIndexAggregator:
     """Aggregator for computing a regional index, in this case a monthly- and area-
     weighted average of a variable over a region.
@@ -275,6 +301,12 @@ class RegionalIndexAggregator:
                 ax.legend()
                 fig.tight_layout()
                 logs[f"{sst_name}_nino34_index_power_spectrum"] = fig
+                logs[f"{sst_name}_nino34_index_power_2_5yr"] = compute_psd_band_power(
+                    freq, power_spectrum
+                )
+                logs[f"{sst_name}_nino34_index_power_1_16yr"] = compute_psd_band_power(
+                    freq, power_spectrum, period_bounds=(1.0, 16.0)
+                )
 
         if len(label) > 0:
             label = label + "/"
@@ -379,6 +411,28 @@ class PairedRegionalIndexAggregator:
                 ax.legend()
                 fig.tight_layout()
                 logs[f"{sst_name}_nino34_index_power_spectrum"] = fig
+                pred_power_2_5 = compute_psd_band_power(
+                    pred_freq, prediction_power_spectrum
+                )
+                target_power_2_5 = compute_psd_band_power(
+                    target_freq, target_power_spectrum
+                )
+                logs[f"{sst_name}_nino34_index_power_2_5yr"] = pred_power_2_5
+                if target_power_2_5 != 0 and not np.isnan(target_power_2_5):
+                    logs[f"{sst_name}_nino34_index_power_2_5yr_norm"] = (
+                        pred_power_2_5 / target_power_2_5
+                    )
+                pred_power_1_16 = compute_psd_band_power(
+                    pred_freq, prediction_power_spectrum, period_bounds=(1.0, 16.0)
+                )
+                target_power_1_16 = compute_psd_band_power(
+                    target_freq, target_power_spectrum, period_bounds=(1.0, 16.0)
+                )
+                logs[f"{sst_name}_nino34_index_power_1_16yr"] = pred_power_1_16
+                if target_power_1_16 != 0 and not np.isnan(target_power_1_16):
+                    logs[f"{sst_name}_nino34_index_power_1_16yr_norm"] = (
+                        pred_power_1_16 / target_power_1_16
+                    )
         if len(label) > 0:
             label = label + "/"
 
