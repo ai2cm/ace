@@ -469,6 +469,7 @@ def _setup(
     if derived_forcings is None:
         derived_forcings = DerivedForcingsConfig()
     seed = 0
+    torch.manual_seed(seed)
     np.random.seed(seed)
     in_variable_names = [
         "PRESsfc",
