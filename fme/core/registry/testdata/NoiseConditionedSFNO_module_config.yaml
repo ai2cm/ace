@@ -15,6 +15,7 @@ filter_preserves_global_mean: false
 filter_residual: false
 filter_type: linear
 global_layer_norm: false
+label_embed_dim: 3
 local_blocks: null
 lora_alpha: null
 lora_rank: 0
