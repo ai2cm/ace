@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="eval-global-trained-tropics-tuned-denoising-moe-tropics"
+JOB_NAME="eval-global-trained-low-oversample8x-tropics-denoising-moe-tropics"
 #JOB_NAME="eval-global-trained-denoising-moe-events"
 
 CONFIG_FILENAME="eval-coarse-prmsl-tropic-pac.yaml"
@@ -22,7 +22,7 @@ NGPU=2
 IMAGE="$(cat latest_deps_only_image.txt)"
 
 EXISTING_RESULTS_DATASET_HIGH_SIGMA=01KQWYVBM0M3E76B1E0Y9PCCV2
-EXISTING_RESULTS_DATASET_LOW_SIGMA=01KQKF1BK081QKFJWD02H570Q6
+EXISTING_RESULTS_DATASET_LOW_SIGMA=01KRBYGNYJ6FD7PGNF3VVHQ5V1
 wandb_group=""
 
 #--not-preemptible \
@@ -35,7 +35,6 @@ gantry run \
     --description 'Run 100km to 3km evaluation on coarsened X-SHiELD' \
     --workspace ai2/climate-titan \
     --priority urgent \
-    --cluster ai2/jupiter \
     --cluster ai2/titan \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
