@@ -2,7 +2,6 @@ import dataclasses
 import warnings
 from collections import defaultdict
 from collections.abc import Callable, Mapping
-from typing import Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -251,7 +250,6 @@ def _plot_spectrum_pair(
 
 @dataclasses.dataclass
 class PowerSpectrumMetricConfig:
-    type: Literal["power_spectrum"] = "power_spectrum"
     variables: list[str] | None = None
     name: str = "power_spectrum"
     enabled: bool = True

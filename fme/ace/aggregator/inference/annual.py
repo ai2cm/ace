@@ -2,7 +2,7 @@ import dataclasses
 import datetime
 from collections.abc import Callable, Mapping
 from functools import partial
-from typing import Any, Literal, Optional
+from typing import Any, Optional
 
 import numpy as np
 import torch
@@ -372,7 +372,6 @@ def _get_min_samples(timestep: datetime.timedelta) -> int:
 
 @dataclasses.dataclass
 class AnnualMetricConfig:
-    type: Literal["annual"] = "annual"
     variables: list[str] | None = None
     name: str = "annual"
     reference_data: str | None = None

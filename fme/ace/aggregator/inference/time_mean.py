@@ -399,7 +399,6 @@ class TimeMeanEvaluatorAggregator:
 
 @dataclasses.dataclass
 class TimeMeanMetricConfig:
-    type: Literal["time_mean"] = "time_mean"
     variables: list[str] | None = None
     name: str | None = None
     target: Literal["denorm", "norm"] = "denorm"

@@ -513,7 +513,6 @@ class SingleTargetMeanAggregator:
 
 @dataclasses.dataclass
 class MeanMetricConfig:
-    type: Literal["mean"] = "mean"
     variables: list[str] | None = None
     name: str | None = None
     target: Literal["denorm", "norm"] = "denorm"

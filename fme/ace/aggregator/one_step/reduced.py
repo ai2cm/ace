@@ -190,7 +190,6 @@ class OneStepMeanAdapter:
 @dataclasses.dataclass
 class StepMeanMetricConfig:
     step: int
-    type: Literal["step_mean"] = "step_mean"
     variables: list[str] | None = None
     name: str | None = None
     target: Literal["denorm", "norm"] = "denorm"

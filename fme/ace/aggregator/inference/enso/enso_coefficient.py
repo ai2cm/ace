@@ -460,7 +460,6 @@ def reduce_data(dist: Distributed, rank_tensor_dict: TensorDict) -> TensorDict |
 
 @dataclasses.dataclass
 class EnsoCoefficientMetricConfig:
-    type: Literal["enso_coefficient"] = "enso_coefficient"
     name: str = "enso_coefficient"
     enabled: bool = True
 

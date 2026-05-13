@@ -1,7 +1,6 @@
 import abc
 import dataclasses
 from collections.abc import Mapping
-from typing import Literal
 
 import torch
 import xarray as xr
@@ -339,7 +338,6 @@ class SelectStepEnsembleAggregator:
 @dataclasses.dataclass
 class EnsembleMetricConfig:
     step: int = 20
-    type: Literal["ensemble"] = "ensemble"
     name: str | None = None
     log_mean_maps: bool = False
     enabled: bool = True

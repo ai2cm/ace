@@ -5,7 +5,7 @@ import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar
 
 import cftime
 import numpy as np
@@ -598,7 +598,6 @@ NINO34_LON = (190, 240)
 
 @dataclasses.dataclass
 class EnsoIndexMetricConfig:
-    type: Literal["enso_index"] = "enso_index"
     name: str = "enso_index"
     enabled: bool = True
 

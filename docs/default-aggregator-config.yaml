@@ -1,26 +1,22 @@
 aggregator:
   mean_denorm:
-    type: mean
     variables: null
     name: mean
     target: denorm
     enabled: true
   mean_norm:
-    type: mean
     variables: null
     name: mean_norm
     target: norm
     enabled: true
   step_means:
   - step: 20
-    type: step_mean
     variables: null
     name: mean_step_20
     target: denorm
     channel_mean_names: null
     enabled: true
   - step: 20
-    type: step_mean
     variables: null
     name: mean_step_20_norm
     target: norm
@@ -28,23 +24,19 @@ aggregator:
     enabled: true
   ensembles:
   - step: 20
-    type: ensemble
     name: ensemble_step_20
     log_mean_maps: false
     enabled: true
   power_spectrum:
-    type: power_spectrum
     variables: null
     name: power_spectrum
     enabled: true
   zonal_mean:
-    type: zonal_mean
     variables: null
     name: zonal_mean
     zonal_mean_max_size: 4096
     enabled: true
   time_mean_denorm:
-    type: time_mean
     variables: null
     name: time_mean
     target: denorm
@@ -52,7 +44,6 @@ aggregator:
     channel_mean_names: null
     enabled: true
   time_mean_norm:
-    type: time_mean
     variables: null
     name: time_mean_norm
     target: norm
@@ -60,33 +51,27 @@ aggregator:
     channel_mean_names: null
     enabled: true
   video:
-    type: video
     variables: null
     name: video
     enable_extended_videos: false
     enabled: false
   histogram:
-    type: histogram
     variables: null
     name: histogram
     enabled: false
   seasonal:
-    type: seasonal
     variables: null
     name: seasonal
     enabled: false
   annual:
-    type: annual
     variables: null
     name: annual
     reference_data: null
     enabled: true
   enso_index:
-    type: enso_index
     name: enso_index
     enabled: true
   enso_coefficient:
-    type: enso_coefficient
     name: enso_coefficient
     enabled: true
   monthly_reference_data: null
