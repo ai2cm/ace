@@ -12,7 +12,7 @@ import dacite
 import torch
 import yaml
 
-from fme.core.cli import prepare_directory
+from fme.core.cli import prepare_directory, remove_stale_tmp_checkpoints
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
@@ -117,6 +117,8 @@ class Trainer:
                 self.config.checkpoint_dir
             ):
                 os.makedirs(self.config.checkpoint_dir)
+            if self.config.checkpoint_dir is not None:
+                remove_stale_tmp_checkpoints(self.config.checkpoint_dir)
 
         self.epoch_checkpoint_path: str | None = None
 
@@ -535,6 +537,7 @@ def _resume_from_results_dir_if_not_preempted(experiment_dir, resume_results_dir
                 f"Existing results directory {resume_results_dir} does not exist."
             )
         shutil.copytree(resume_results_dir, experiment_dir, dirs_exist_ok=True)
+        remove_stale_tmp_checkpoints(os.path.join(experiment_dir, "checkpoints"))
 
 
 def main(config_path: str):
