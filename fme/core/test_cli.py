@@ -42,17 +42,10 @@ def test_remove_stale_tmp_checkpoints_removes_multiple_tmp_files(tmp_path):
     assert not tmp2.exists()
     assert valid_ckpt.exists()
 
-
-def test_remove_stale_tmp_checkpoints_nonexistent_dir(tmp_path):
-    remove_stale_tmp_checkpoints(str(tmp_path / "does_not_exist"))
-
-
-def test_remove_stale_tmp_checkpoints_no_tmp_files(tmp_path):
-    ckpt_dir = tmp_path / "training_checkpoints"
-    ckpt_dir.mkdir()
-    valid_ckpt = ckpt_dir / "ckpt.tar"
-    valid_ckpt.write_bytes(b"valid checkpoint")
-
     remove_stale_tmp_checkpoints(str(ckpt_dir))
 
     assert valid_ckpt.exists()
+
+
+def test_remove_stale_tmp_checkpoints_nonexistent_dir(tmp_path):
+    remove_stale_tmp_checkpoints(str(tmp_path / "does_not_exist"))
