@@ -176,6 +176,7 @@ def _get_test_yaml_files(
         net_config = dict(
             num_layers=2,
             embed_dim=12,
+            label_embed_dim=3,
         )
         if use_healpix:
             net_config["data_grid"] = "healpix"

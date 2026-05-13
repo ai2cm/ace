@@ -74,5 +74,8 @@ aggregator:
   enso_coefficient:
     name: enso_coefficient
     enabled: true
+  ipo_index:
+    name: ipo_index
+    enabled: true
   monthly_reference_data: null
   time_mean_reference_data: null

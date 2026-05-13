@@ -27,20 +27,23 @@ from ..one_step.reduced import StepMeanMetricConfig
 from .annual import AnnualMetricConfig, GlobalMeanAnnualAggregator
 from .build_context import MetricBuildContext, MetricNotSupportedError
 from .data import InferenceBatchData, MetricBuildResult, SubAggregator, TimeSeriesLogs
-from .enso import LatLonRegion, RegionalIndexAggregator
+from .enso import RegionalIndexAggregator
 from .enso.dynamic_index import EnsoIndexMetricConfig
 from .enso.enso_coefficient import EnsoCoefficientMetricConfig
 from .histogram import HistogramMetricConfig
+from .ipo.ipo_index import MIN_YEARS_FOR_FILTERED_TPI, IpoIndexMetricConfig
 from .reduced import MeanMetricConfig, SingleTargetMeanAggregator
 from .seasonal import SeasonalMetricConfig
 from .spectrum import PowerSpectrumMetricConfig, SphericalPowerSpectrumAggregator
 from .time_mean import TimeMeanAggregator, TimeMeanMetricConfig
+from .utils import LatLonRegion
 from .video import VideoMetricConfig
 from .zonal_mean import ZonalMeanMetricConfig
 
 wandb = WandB.get_instance()
 APPROXIMATELY_TWO_YEARS = datetime.timedelta(days=730)
 SLIGHTLY_LESS_THAN_FIVE_YEARS = datetime.timedelta(days=1800)
+APPROXIMATELY_EIGHTY_YEARS = datetime.timedelta(days=MIN_YEARS_FOR_FILTERED_TPI * 365)
 NINO34_LAT = (-5, 5)
 NINO34_LON = (190, 240)
 
@@ -57,6 +60,7 @@ MetricConfig = (
     | EnsoIndexMetricConfig
     | EnsoCoefficientMetricConfig
     | EnsembleMetricConfig
+    | IpoIndexMetricConfig
 )
 
 
@@ -189,6 +193,7 @@ class HierarchicalInferenceEvaluatorAggregatorConfig:
         annual: Annual-mean metrics.
         enso_index: ENSO index metrics.
         enso_coefficient: ENSO regression coefficient metrics.
+        ipo_index: Interdecadal Pacific Oscillation index metrics.
         monthly_reference_data: Path to monthly reference data to compare against.
         time_mean_reference_data: Path to reference time means to compare against.
     """
@@ -236,6 +241,9 @@ class HierarchicalInferenceEvaluatorAggregatorConfig:
     enso_coefficient: EnsoCoefficientMetricConfig = dataclasses.field(
         default_factory=EnsoCoefficientMetricConfig
     )
+    ipo_index: IpoIndexMetricConfig = dataclasses.field(
+        default_factory=IpoIndexMetricConfig
+    )
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
 
@@ -275,6 +283,7 @@ class HierarchicalInferenceEvaluatorAggregatorConfig:
             self.annual,
             self.enso_index,
             self.enso_coefficient,
+            self.ipo_index,
         ]
         return [m for m in all_metrics if m.enabled]
 
@@ -366,6 +375,7 @@ class LegacyFlagInferenceEvaluatorAggregatorConfig:
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
     log_nino34_index: bool = True
+    log_ipo_index: bool = True
     log_step_means: list[StepMeanEntry] = dataclasses.field(
         default_factory=lambda: [StepMeanEntry(step=20)]
     )
@@ -420,6 +430,12 @@ class LegacyFlagInferenceEvaluatorAggregatorConfig:
                 metrics.append(EnsoIndexMetricConfig())
         if n_timesteps * timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS:
             metrics.append(EnsoCoefficientMetricConfig())
+        if (
+            self.log_ipo_index
+            and n_timesteps * timestep > APPROXIMATELY_EIGHTY_YEARS
+            and isinstance(horizontal_coordinates, LatLonCoordinates)
+        ):
+            metrics.append(IpoIndexMetricConfig())
         return metrics
 
     def build(

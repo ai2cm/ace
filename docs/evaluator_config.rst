@@ -145,6 +145,9 @@ accept the following typed entries.  Each entry has an ``enabled`` field
 .. autoclass:: fme.ace.EnsoCoefficientMetricConfig
    :noindex:
 
+.. autoclass:: fme.ace.IpoIndexMetricConfig
+   :noindex:
+
 .. autoclass:: fme.ace.EnsembleMetricConfig
    :noindex:
 

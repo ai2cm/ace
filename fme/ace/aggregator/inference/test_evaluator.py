@@ -14,6 +14,7 @@ from fme.ace.aggregator.inference import (
     EnsoIndexMetricConfig,
     HierarchicalInferenceEvaluatorAggregatorConfig,
     HistogramMetricConfig,
+    IpoIndexMetricConfig,
     LegacyFlagInferenceEvaluatorAggregatorConfig,
     MeanMetricConfig,
     MetricConfig,
@@ -442,6 +443,7 @@ class TestAggregatorConfigMetrics:
             annual=AnnualMetricConfig(enabled=False),
             enso_index=EnsoIndexMetricConfig(enabled=False),
             enso_coefficient=EnsoCoefficientMetricConfig(enabled=False),
+            ipo_index=IpoIndexMetricConfig(enabled=False),
         ).build(
             dataset_info=ds_info,
             n_ic_steps=1,
@@ -512,6 +514,7 @@ class TestAggregatorConfigMetrics:
             annual=AnnualMetricConfig(enabled=False),
             enso_index=EnsoIndexMetricConfig(enabled=False),
             enso_coefficient=EnsoCoefficientMetricConfig(enabled=False),
+            ipo_index=IpoIndexMetricConfig(enabled=False),
         ).build(
             dataset_info=ds_info,
             n_ic_steps=1,

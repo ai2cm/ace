@@ -6,6 +6,7 @@ from fme.ace.aggregator.inference.enso.enso_coefficient import (
     EnsoCoefficientMetricConfig,
 )
 from fme.ace.aggregator.inference.histogram import HistogramMetricConfig
+from fme.ace.aggregator.inference.ipo.ipo_index import IpoIndexMetricConfig
 from fme.ace.aggregator.inference.main import (
     HierarchicalInferenceEvaluatorAggregatorConfig,
     LegacyFlagInferenceEvaluatorAggregatorConfig,

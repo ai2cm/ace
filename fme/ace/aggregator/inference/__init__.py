@@ -4,6 +4,7 @@ from .annual import AnnualMetricConfig
 from .enso.dynamic_index import EnsoIndexMetricConfig
 from .enso.enso_coefficient import EnsoCoefficientMetricConfig
 from .histogram import HistogramMetricConfig
+from .ipo.ipo_index import IpoIndexMetricConfig
 from .main import (
     HierarchicalInferenceEvaluatorAggregatorConfig,
     InferenceAggregator,
