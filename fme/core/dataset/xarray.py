@@ -146,13 +146,19 @@ def _get_vertical_coordinate(
     return coordinate
 
 
-def _get_raw_times_single_file(path: str, engine: str | None = None) -> np.array:
-    with _open_xr_dataset(path, engine=engine) as ds:
+def _get_raw_times_single_file(
+    path: str, engine: str | None = None, mask_and_scale: bool = False
+) -> np.array:
+    with _open_xr_dataset(path, engine=engine, mask_and_scale=mask_and_scale) as ds:
         return ds.time.values
 
 
-def _get_raw_times(paths: list[str], engine: str) -> list[np.ndarray]:
-    function = functools.partial(_get_raw_times_single_file, engine=engine)
+def _get_raw_times(
+    paths: list[str], engine: str, mask_and_scale: bool = False
+) -> list[np.ndarray]:
+    function = functools.partial(
+        _get_raw_times_single_file, engine=engine, mask_and_scale=mask_and_scale
+    )
 
     # Only parallelize if we are loading from a reasonable number of files; this
     # helps speed up data loading tests, which otherwise would be slowed by the
@@ -295,12 +301,13 @@ def _open_xr_dataset(path: str, *args, **kwargs):
     if protocol_kw:
         kwargs.update({"storage_options": protocol_kw})
 
+    mask_and_scale = kwargs.pop("mask_and_scale", False)
     return xr.open_dataset(
         path,
         *args,
         decode_times=CFDatetimeCoder(use_cftime=True),
         decode_timedelta=False,
-        mask_and_scale=False,
+        mask_and_scale=mask_and_scale,
         cache=False,
         chunks=None,
         **kwargs,
@@ -407,6 +414,9 @@ class XarrayDataConfig(DatasetConfigABC):
             to the user to ensure that the input dataset to repeat results in
             data that is reasonably continuous across repetitions.
         engine: Backend used in xarray.open_dataset call.
+        mask_and_scale: If True, xarray will lazily scale (using the
+            scale_factor and add_offset attributes) and mask (using _FillValue)
+            data when it is read. Defaults to False.
         spatial_dimensions: Specifies the spatial dimensions for the grid, default
             is lat/lon. If 'latlon', it is assumed that the last two dimensions are
             latitude and longitude, respectively. If 'healpix', it is assumed that the
@@ -454,6 +464,7 @@ class XarrayDataConfig(DatasetConfigABC):
     file_pattern: str = "*.nc"
     n_repeats: int = 1
     engine: Literal["netcdf4", "h5netcdf", "zarr"] = "netcdf4"
+    mask_and_scale: bool = False
     spatial_dimensions: Literal["healpix", "latlon"] = "latlon"
     subset: Slice | TimeSlice | RepeatedInterval = dataclasses.field(
         default_factory=Slice
@@ -545,6 +556,7 @@ class XarrayDataset(DatasetABC):
         self.path = config.data_path
         self.file_pattern = config.file_pattern
         self.engine = config.engine
+        self.mask_and_scale = config.mask_and_scale
         self.dtype = config.torch_dtype
         self.spatial_dimensions = config.spatial_dimensions
         self.fill_nans = config.fill_nans
@@ -709,7 +721,9 @@ class XarrayDataset(DatasetABC):
         self, n_repeats: int, infer_timestep: bool, max_sample_n_times: int
     ):
         logging.info(f"Opening data at {os.path.join(self.path, self.file_pattern)}")
-        raw_times = _get_raw_times(self._raw_paths, engine=self.engine)
+        raw_times = _get_raw_times(
+            self._raw_paths, engine=self.engine, mask_and_scale=self.mask_and_scale
+        )
 
         self._timestep: datetime.timedelta | None
         if infer_timestep:
@@ -750,7 +764,9 @@ class XarrayDataset(DatasetABC):
         # Don't use open_mfdataset here, because it will give time-invariant
         # fields a time dimension. We assume that all fields are present in the
         # netcdf file corresponding to the first chunk of time.
-        with _open_xr_dataset(self.full_paths[0], engine=self.engine) as ds:
+        with _open_xr_dataset(
+            self.full_paths[0], engine=self.engine, mask_and_scale=self.mask_and_scale
+        ) as ds:
             for name in self._names:
                 if name in StaticDerivedData.names:
                     static_derived_names.append(name)
@@ -815,7 +831,9 @@ class XarrayDataset(DatasetABC):
 
     def _open_file(self, idx):
         logger.debug(f"Opening file {self.full_paths[idx]}")
-        return _open_file_fh_cached(self.full_paths[idx], engine=self.engine)
+        return _open_file_fh_cached(
+            self.full_paths[idx], engine=self.engine, mask_and_scale=self.mask_and_scale
+        )
 
     @property
     def sample_start_times(self) -> xr.CFTimeIndex:
