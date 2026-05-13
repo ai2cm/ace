@@ -208,6 +208,118 @@ class _IPORegionalAccumulator:
         return xr.concat(index_data_arrays, dim="sample")
 
 
+class IPOIndexAggregator:
+    """Single-data (no target) aggregator for IPO Tripolar Index.
+
+    Computes the TPI (Henley et al. 2017) from model SST output and reports:
+    - Filtered TPI time series plot
+    - Power spectrum of unfiltered monthly TPI
+    - Scalar std of the filtered TPI
+    """
+
+    def __init__(
+        self,
+        lat: torch.Tensor,
+        lon: torch.Tensor,
+        cutoff_period_yrs: float = 13.0,
+        sst_names: list[str] | None = None,
+    ):
+        regions = {
+            name: LatLonRegion(
+                lat=lat,
+                lon=lon,
+                lat_bounds=spec["lat_bounds"],
+                lon_bounds=spec["lon_bounds"],
+            )
+            for name, spec in TPI_REGIONS.items()
+        }
+        self._sst_names = sst_names if sst_names is not None else DEFAULT_SST_NAMES
+        self._accumulator = _IPORegionalAccumulator(regions, sst_names=self._sst_names)
+        self._cutoff_period_yrs = cutoff_period_yrs
+
+    def record_batch(self, data: InferenceBatchData) -> None:
+        self._accumulator.record_batch(data)
+
+    def get_logs(self, label: str) -> dict[str, Any]:
+        tpi_indices = self._accumulator.get_tpi_indices()
+        logs: dict[str, Any] = {}
+
+        for sst_name in self._sst_names:
+            if sst_name not in tpi_indices:
+                continue
+            tpi_da = tpi_indices[sst_name]
+            if tpi_da.sizes["time"] < 2:
+                continue
+
+            filtered = self._apply_filter_to_samples(tpi_da)
+            if filtered is not None:
+                logs[f"{sst_name}_ipo_tpi_filtered"] = self._plot_filtered_tpi(filtered)
+                logs[f"{sst_name}_ipo_tpi_std"] = _compute_sample_mean_std(filtered)
+                logs[f"{sst_name}_ipo_tpi_power_spectrum"] = self._plot_power_spectrum(
+                    tpi_da
+                )
+
+        if len(label) > 0:
+            label = label + "/"
+        return {f"{label}{k}": v for k, v in logs.items()}
+
+    def get_dataset(self) -> xr.Dataset:
+        return self._accumulator.get_tpi_indices()
+
+    def _apply_filter_to_samples(self, tpi_da: xr.DataArray) -> xr.DataArray | None:
+        """Apply low-pass filter to each sample, trimming edge transients.
+
+        Trims one cutoff period from each end to remove filtfilt edge artifacts.
+        Returns None if the series is too short.
+        """
+        trim = int(self._cutoff_period_yrs * 12)
+        min_length = MIN_YEARS_FOR_FILTERED_TPI * 12
+        filtered_samples = []
+        for sample in range(tpi_da.sizes["sample"]):
+            sample_data = tpi_da.isel(sample=sample).dropna("time")
+            if sample_data.sizes["time"] < min_length:
+                return None
+            filtered_values = low_pass_filter(
+                sample_data.values, cutoff_period_yrs=self._cutoff_period_yrs
+            )
+            trimmed = xr.DataArray(
+                filtered_values[trim:-trim],
+                coords={"time": sample_data.time[trim:-trim]},
+                dims=sample_data.dims,
+            )
+            filtered_samples.append(trimmed)
+        return xr.concat(filtered_samples, dim="sample")
+
+    def _plot_filtered_tpi(self, prediction: xr.DataArray) -> plt.Figure:
+        fig, ax = plt.subplots(1, 1)
+        pred_plottable = prediction.assign_coords(
+            {"time": convert_cftime_to_datetime_coord(prediction.time)}
+        )
+        plot_mean_and_samples(
+            ax,
+            pred_plottable,
+            "predicted ensemble mean",
+            time_series_dim="time",
+        )
+        ax.set_title("IPO TPI (13-yr low-pass filtered)")
+        ax.set_ylabel("K")
+        ax.legend()
+        fig.tight_layout()
+        return fig
+
+    def _plot_power_spectrum(self, prediction_tpi: xr.DataArray) -> plt.Figure:
+        pred_freq, pred_power = _calculate_sample_average_power_spectrum(prediction_tpi)
+        fig, ax = plt.subplots(1, 1)
+        ax.plot(pred_freq, pred_power, label="predicted ensemble mean")
+        ax.set_title("Power Spectrum of IPO TPI (unfiltered)")
+        ax.set_xlabel("Frequency [cycles/year]")
+        ax.set_ylabel("Power [K**2]")
+        ax.set(xscale="log", yscale="log")
+        ax.legend()
+        fig.tight_layout()
+        return fig
+
+
 class PairedIPOIndexAggregator:
     """Paired (target, prediction) aggregator for IPO Tripolar Index.
 

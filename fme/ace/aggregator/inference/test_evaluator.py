@@ -22,6 +22,8 @@ from fme.ace.aggregator.inference import (
     VideoMetricConfig,
     ZonalMeanMetricConfig,
 )
+from fme.ace.aggregator.inference.build_context import MetricBuildContext
+from fme.ace.aggregator.inference.ipo.ipo_index import IpoIndexMetricConfig
 from fme.ace.data_loading.batch_data import BatchData, PairedData
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
@@ -419,6 +421,35 @@ class TestAggregatorConfigMetrics:
                 MeanMetricConfig(target="norm", name="mean_custom"),
             ]
         )
+
+    @pytest.mark.parametrize(
+        "n_timesteps, timestep_days, expect_ipo",
+        [
+            (10 * 365, 1, False),  # 10 years, below threshold
+            (90 * 365, 1, True),  # 90 years, above threshold
+        ],
+    )
+    def test_default_metrics_includes_ipo_for_long_runs(
+        self, n_timesteps, timestep_days, expect_ipo
+    ):
+        ds_info = get_ds_info(nx=8, ny=4)
+        ctx = MetricBuildContext(
+            ops=ds_info.gridded_operations,
+            horizontal_coordinates=ds_info.horizontal_coordinates,
+            n_timesteps=n_timesteps,
+            n_ic_steps=1,
+            timestep=datetime.timedelta(days=timestep_days),
+            variable_metadata=None,
+            channel_mean_names=None,
+            monthly_reference_data=None,
+            time_mean_reference_data=None,
+            initial_time=get_zero_time(shape=[1, 0], dims=["sample", "time"]),
+        )
+        metrics = InferenceEvaluatorAggregatorConfig._default_metrics(
+            ctx, n_ensemble_per_ic=1
+        )
+        has_ipo = any(isinstance(m, IpoIndexMetricConfig) for m in metrics)
+        assert has_ipo is expect_ipo
 
     def test_default_metrics_build(self):
         n_sample, n_time = 10, 22
