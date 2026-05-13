@@ -778,7 +778,9 @@ def test_collate_with_masking_heterogeneous_variables():
     torch.testing.assert_close(batch_data["x"][0], torch.ones(2, 3))
     torch.testing.assert_close(batch_data["x"][1], torch.ones(2, 3) * 3)
     torch.testing.assert_close(batch_data["y"][0], torch.ones(2, 3) * 2)
-    torch.testing.assert_close(batch_data["y"][1], torch.zeros(2, 3))
+    torch.testing.assert_close(
+        batch_data["y"][1], torch.full((2, 3), float("nan")), equal_nan=True
+    )
     assert data_mask is not None
     torch.testing.assert_close(data_mask["x"], torch.tensor([True, True]))
     torch.testing.assert_close(data_mask["y"], torch.tensor([True, False]))
@@ -812,4 +814,6 @@ def test_from_sample_tuples_with_variable_masking():
     assert "b" in batch.data
     assert batch.data_mask is not None
     torch.testing.assert_close(batch.data_mask["b"], torch.tensor([True, False]))
-    torch.testing.assert_close(batch.data["b"][1], torch.zeros(2, 3))
+    torch.testing.assert_close(
+        batch.data["b"][1], torch.full((2, 3), float("nan")), equal_nan=True
+    )

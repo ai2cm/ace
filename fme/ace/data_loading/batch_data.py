@@ -32,7 +32,7 @@ def _collate_with_masking(
     """Collate samples with potentially different variable sets.
 
     Takes the union of all variable names. For variables missing from a sample,
-    fills with zeros and marks as False in the returned mask.
+    fills with NaN and marks as False in the returned mask.
 
     Returns:
         A tuple of (batch_data, data_mask) where batch_data has all variables
@@ -63,7 +63,7 @@ def _collate_with_masking(
             if name in sample:
                 tensors.append(sample[name])
             else:
-                tensors.append(torch.zeros(shape, dtype=dtype))
+                tensors.append(torch.full(shape, float("nan"), dtype=dtype))
         batch_data[name] = torch.stack(tensors)
         mask_tensor = torch.tensor(present)
         data_mask[name] = mask_tensor

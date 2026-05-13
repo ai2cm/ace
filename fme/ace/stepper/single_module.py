@@ -1704,7 +1704,12 @@ class TrainStepper(
                         target_step,
                         input_ensemble_data.data_mask,
                     )
-                step_loss = self._loss_obj(gen_step, target_step, step=step)
+                step_loss = self._loss_obj(
+                    gen_step,
+                    target_step,
+                    step=step,
+                    data_mask=input_ensemble_data.data_mask,
+                )
                 step_total_loss = step_loss.total()
                 metrics[f"loss_step_{step}"] = step_total_loss.detach()
                 per_ch = step_loss.get_channel_losses()

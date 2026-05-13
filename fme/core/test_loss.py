@@ -15,6 +15,7 @@ from fme.core.loss import (
     StepLossConfig,
     VariableWeightingLoss,
     WeightedMappingLoss,
+    _build_channel_mask,
     _construct_weight_tensor,
     _reduce_to_per_channel,
 )
@@ -464,3 +465,159 @@ def test_finite_difference_crps_multi_level(levels: int):
 def test_finite_difference_crps_rejects_zero_levels():
     with pytest.raises(ValueError, match="levels must be at least 1"):
         FiniteDifferenceCRPSLoss(alpha=1.0, levels=0)
+
+
+def test_build_channel_mask():
+    data_mask = {
+        "a": torch.tensor([True, True, False]),
+        "b": torch.tensor([True, False, True]),
+    }
+    names = ["a", "b"]
+    mask = _build_channel_mask(
+        data_mask,
+        names,
+        loss_ndim=4,
+        channel_dim=1,
+        device=torch.device("cpu"),
+        batch_size=3,
+    )
+    assert mask.shape == (3, 2, 1, 1)
+    expected = torch.tensor(
+        [
+            [[1.0], [1.0]],
+            [[1.0], [0.0]],
+            [[0.0], [1.0]],
+        ]
+    ).unsqueeze(-1)
+    torch.testing.assert_close(mask, expected)
+
+
+def test_build_channel_mask_missing_name_defaults_to_present():
+    data_mask = {"a": torch.tensor([True, False])}
+    names = ["a", "b"]
+    mask = _build_channel_mask(
+        data_mask,
+        names,
+        loss_ndim=4,
+        channel_dim=1,
+        device=torch.device("cpu"),
+        batch_size=2,
+    )
+    assert mask[0, 0, 0, 0] == 1.0
+    assert mask[1, 0, 0, 0] == 0.0
+    assert mask[0, 1, 0, 0] == 1.0
+    assert mask[1, 1, 0, 0] == 1.0
+
+
+def test_loss_output_total_with_mask():
+    loss = torch.tensor(
+        [
+            [[1.0, 2.0], [3.0, 4.0]],
+            [[5.0, 6.0], [7.0, 8.0]],
+        ]
+    )
+    mask = torch.tensor([[[1.0, 1.0], [1.0, 1.0]], [[1.0, 1.0], [0.0, 0.0]]])
+    output = LossOutput(loss=loss, channel_dim=1, channel_names=["a", "b"], mask=mask)
+    expected = (1 + 2 + 3 + 4 + 5 + 6) / 6.0
+    torch.testing.assert_close(output.total(), torch.tensor(expected))
+
+
+def test_loss_output_total_without_mask_unchanged():
+    loss = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+    output = LossOutput(loss=loss, channel_dim=1, channel_names=["a", "b"])
+    torch.testing.assert_close(output.total(), loss.mean())
+
+
+def test_loss_output_channel_losses_sum_to_total_with_mask():
+    torch.manual_seed(42)
+    loss = torch.randn(4, 3, 5, 5).abs()
+    mask = torch.ones(4, 3, 1, 1)
+    mask[2, 1, 0, 0] = 0.0
+    mask[3, 0, 0, 0] = 0.0
+    output = LossOutput(
+        loss=loss * mask.expand_as(loss),
+        channel_dim=1,
+        channel_names=["a", "b", "c"],
+        mask=mask,
+    )
+    channel_losses = output.get_channel_losses()
+    torch.testing.assert_close(
+        sum(channel_losses.values()), output.total(), atol=1e-5, rtol=1e-5
+    )
+
+
+def test_reduce_to_per_channel_with_mask():
+    n_c = 3
+    channel_dim = 1
+    elementwise = torch.randn(4, n_c, 8, 8)
+    mask = torch.ones(4, n_c, 1, 1)
+    mask[0, 2, 0, 0] = 0.0
+    expanded = mask.expand_as(elementwise)
+    masked_loss = elementwise * expanded
+    result = _reduce_to_per_channel(masked_loss, channel_dim, n_c, mask=mask)
+    assert result.shape == (n_c,)
+    expected_total = masked_loss.sum() / expanded.sum()
+    torch.testing.assert_close(result.sum(), expected_total, atol=1e-5, rtol=1e-5)
+
+
+def test_weighted_mapping_loss_with_data_mask():
+    out_names = ["var_0", "var_1"]
+    normalizer = StandardNormalizer(
+        means={name: torch.as_tensor(0.0) for name in out_names},
+        stds={name: torch.as_tensor(1.0) for name in out_names},
+    )
+    loss = torch.nn.MSELoss(reduction="none")
+    mapping_loss = WeightedMappingLoss(
+        loss,
+        weights={},
+        out_names=out_names,
+        normalizer=normalizer,
+    )
+    x_val = torch.ones(4, 5, 5).to(get_device())
+    y_val = torch.zeros(4, 5, 5).to(get_device())
+    x_mapping = {"var_0": x_val, "var_1": x_val * 2}
+    y_mapping = {"var_0": y_val, "var_1": y_val}
+    result_no_mask = mapping_loss(x_mapping, y_mapping)
+    expected_no_mask = (1.0 + 4.0) / 2.0
+    torch.testing.assert_close(
+        result_no_mask.total(), torch.tensor(expected_no_mask, device=get_device())
+    )
+
+    data_mask = {
+        "var_0": torch.tensor([True, True, True, True]),
+        "var_1": torch.tensor([True, True, False, False]),
+    }
+    result_masked = mapping_loss(x_mapping, y_mapping, data_mask=data_mask)
+    n_unmasked = 4 * 25 + 2 * 25
+    expected_masked = (4 * 25 * 1.0 + 2 * 25 * 4.0) / n_unmasked
+    torch.testing.assert_close(
+        result_masked.total(),
+        torch.tensor(expected_masked, device=get_device()),
+        atol=1e-5,
+        rtol=1e-5,
+    )
+
+
+def test_step_loss_forwards_data_mask():
+    out_names = ["var_0", "var_1"]
+    normalizer = StandardNormalizer(
+        means={name: torch.as_tensor(0.0) for name in out_names},
+        stds={name: torch.as_tensor(1.0) for name in out_names},
+    )
+    area = torch.ones(1, 1)
+    gridded_operations: GriddedOperations = LatLonOperations(area)
+    config = StepLossConfig(type="MSE")
+    step_loss = config.build(
+        gridded_operations,
+        out_names=out_names,
+        channel_dim=-3,
+        normalizer=normalizer,
+    )
+    x_mapping = {name: torch.ones(4, 5, 5).to(get_device()) for name in out_names}
+    y_mapping = {name: torch.zeros(4, 5, 5).to(get_device()) for name in out_names}
+    data_mask = {
+        "var_0": torch.tensor([True, True, True, True]),
+        "var_1": torch.tensor([False, False, False, False]),
+    }
+    result = step_loss(x_mapping, y_mapping, step=0, data_mask=data_mask)
+    torch.testing.assert_close(result.total(), torch.tensor(1.0, device=get_device()))
