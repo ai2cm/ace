@@ -126,6 +126,14 @@ class UpsamplingBlockConfig:
     hpx_padding_mode: str = "earth2grid"
     nside: Optional[int] = None
     align_corners: bool = False
+    scale_factor: Optional[int] = None
+    mode: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if self.scale_factor is not None:
+            self.stride = self.scale_factor
+        if self.mode is not None:
+            self.upsample_mode = self.mode
 
     def build(self) -> nn.Module:
         if self.block_type == "TransposedConvUpsample":
