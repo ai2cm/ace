@@ -1,0 +1,220 @@
+experiment_dir: FME_OUTPUT_DIR
+save_checkpoint: true
+validate_using_ema: true
+ema:
+  decay: 0.999
+max_epochs: 10
+inference:
+  n_forward_steps: 1320
+  forward_steps_in_memory: 20
+  loader:
+    start_indices:
+      times:
+      - '0401-01-01T00:00:00'
+      - '0401-01-02T00:00:00'
+      - '0401-01-03T00:00:00'
+      - '0401-01-04T00:00:00'
+      - '0401-01-05T00:00:00'
+      - '0401-01-06T00:00:00'
+      - '0401-01-07T00:00:00'
+      - '0401-01-08T00:00:00'
+      - '0401-01-09T00:00:00'
+      - '0401-01-10T00:00:00'
+      - '0401-01-11T00:00:00'
+      - '0401-01-12T00:00:00'
+      - '0401-01-13T00:00:00'
+      - '0401-01-14T00:00:00'
+      - '0401-01-15T00:00:00'
+      - '0401-01-16T00:00:00'
+    dataset:
+      data_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-05-12-v3-LR-piControl-aigo-atm
+    num_data_workers: 4
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-eamv3
+  entity: ai2cm
+train_loader:
+  batch_size: 16
+  num_data_workers: 4
+  prefetch_factor: 2
+  dataset:
+    data_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-05-12-v3-LR-piControl-aigo-atm
+validation_loader:
+  batch_size: 32
+  num_data_workers: 4
+  time_buffer: 10
+  prefetch_factor: 2
+  dataset:
+    data_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-05-12-v3-LR-piControl-aigo-atm
+    subset:
+        start_time: '0401-01-01T00:00:00'
+        stop_time: '0401-02-01T00:00:00'
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+stepper_training:
+  n_forward_steps: 2
+  loss:
+    type: MSE
+    weights:
+      T_0: 0.5
+      T_1: 0.5
+      U_0: 0.5
+      V_0: 0.5
+      STW_0: 0.25
+      STW_1: 0.25
+      STW_2: 0.5
+      PRECT: 2
+      FLDS: 2
+      FLUS: 5
+      FSUS: 2
+      FSDS: 2
+      FSUTOA: 2
+      DTENDTTW: 0.5
+stepper:
+  step:
+    type: single_module
+    config:
+      builder:
+        type: NoiseConditionedSFNO
+        config:
+          embed_dim: 384
+          noise_embed_dim: 64
+          noise_type: isotropic
+          filter_type: linear
+          use_mlp: true
+          num_layers: 8
+          operator_type: dhconv
+          separable: false
+          spectral_layers: 3
+          spectral_transform: sht
+      normalization:
+        network:
+          global_means_path: FME_STATS_DIR/centering.nc
+          global_stds_path: FME_STATS_DIR/scaling-full-field.nc
+          fill_nans_on_normalize: false
+        residual:
+          global_means_path: FME_STATS_DIR/centering.nc
+          global_stds_path: FME_STATS_DIR/scaling-residual.nc
+      ocean:
+        surface_temperature_name: TS
+        ocean_fraction_name: OCNFRAC
+        interpolate: true
+      corrector:
+        conserve_dry_air: true
+        moisture_budget_correction: advection_and_precipitation
+        force_positive_names:
+        - STW_0
+        - STW_1
+        - STW_2
+        - STW_3
+        - STW_4
+        - STW_5
+        - STW_6
+        - STW_7
+        - PRECT
+        - FLUS
+        - FLUT
+        - FLDS
+        - FSDS
+        - FSUS
+        - FSUTOA
+      next_step_forcing_names:
+      - SOLIN
+      in_names:
+      - LANDFRAC
+      - OCNFRAC
+      - ICEFRAC
+      - PHIS
+      - SOLIN
+      - PS
+      - TS
+      - T_0
+      - T_1
+      - T_2
+      - T_3
+      - T_4
+      - T_5
+      - T_6
+      - T_7
+      - STW_0
+      - STW_1
+      - STW_2
+      - STW_3
+      - STW_4
+      - STW_5
+      - STW_6
+      - STW_7
+      - U_0
+      - U_1
+      - U_2
+      - U_3
+      - U_4
+      - U_5
+      - U_6
+      - U_7
+      - V_0
+      - V_1
+      - V_2
+      - V_3
+      - V_4
+      - V_5
+      - V_6
+      - V_7
+      out_names:
+      - PS
+      - TS
+      - T_0
+      - T_1
+      - T_2
+      - T_3
+      - T_4
+      - T_5
+      - T_6
+      - T_7
+      - STW_0
+      - STW_1
+      - STW_2
+      - STW_3
+      - STW_4
+      - STW_5
+      - STW_6
+      - STW_7
+      - U_0
+      - U_1
+      - U_2
+      - U_3
+      - U_4
+      - U_5
+      - U_6
+      - U_7
+      - V_0
+      - V_1
+      - V_2
+      - V_3
+      - V_4
+      - V_5
+      - V_6
+      - V_7
+      - LHFLX
+      - SHFLX
+      - PRECT
+      - FLUS
+      - FLUT
+      - FLDS
+      - FSDS
+      - FSUS
+      - FSUTOA
+      - DTENDTTW
+      - TAUX
+      - TAUY
+      - Tat2m
+      - Uat10m
+      - Vat10m

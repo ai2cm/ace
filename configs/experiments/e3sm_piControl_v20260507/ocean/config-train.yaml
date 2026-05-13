@@ -1,0 +1,319 @@
+experiment_dir: FME_OUTPUT_DIR
+save_checkpoint: true
+validate_using_ema: true
+ema:
+  decay: 0.999
+max_epochs: 150
+inference:
+  n_forward_steps: 60
+  forward_steps_in_memory: 10
+  loader:
+    start_indices:
+      times:
+      - '0401-01-02T00:00:00'
+      - '0401-01-03T00:00:00'
+      - '0401-01-04T00:00:00'
+      - '0401-01-05T00:00:00'
+      - '0401-01-06T00:00:00'
+      - '0401-01-07T00:00:00'
+      - '0401-01-08T00:00:00'
+      - '0401-01-09T00:00:00'
+    dataset:
+      merge:
+      - data_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-05-07-v3-LR-piControl-aigo-test4-ocean
+        file_pattern: "v3.LR.piControl.aigo.test4.mpaso.hist.am.fmeDepthCoarsening*nc"
+      - data_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-05-07-v3-LR-piControl-aigo-test4-ocean
+        file_pattern: "v3.LR.piControl.aigo.test4.mpaso.hist.am.fmeDerivedFields*nc"
+      - data_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-05-07-v3-LR-piControl-aigo-test4-ocean
+        file_pattern: "v3.LR.piControl.aigo.test4.mpassi.hist.am.fmeSeaiceDerivedFields*nc"
+    num_data_workers: 1
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ocean-emulator-e3sm
+  entity: ai2cm
+train_loader:
+  batch_size: 16
+  num_data_workers: 4
+  dataset:
+    merge:
+    - data_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-05-07-v3-LR-piControl-aigo-test4-ocean
+      file_pattern: "v3.LR.piControl.aigo.test4.mpaso.hist.am.fmeDepthCoarsening*nc"
+    - data_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-05-07-v3-LR-piControl-aigo-test4-ocean
+      file_pattern: "v3.LR.piControl.aigo.test4.mpaso.hist.am.fmeDerivedFields*nc"
+    - data_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-05-07-v3-LR-piControl-aigo-test4-ocean
+      file_pattern: "v3.LR.piControl.aigo.test4.mpassi.hist.am.fmeSeaiceDerivedFields*nc"
+validation_loader:
+  batch_size: 16
+  num_data_workers: 4
+  dataset:
+    merge:
+    - data_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-05-07-v3-LR-piControl-aigo-test4-ocean
+      file_pattern: "v3.LR.piControl.aigo.test4.mpaso.hist.am.fmeDepthCoarsening*nc"
+      subset:
+        start_time: '0401-01-02T00:00:00'
+        stop_time: '0401-06-01T00:00:00'
+    - data_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-05-07-v3-LR-piControl-aigo-test4-ocean
+      file_pattern: "v3.LR.piControl.aigo.test4.mpaso.hist.am.fmeDerivedFields*nc"
+      subset:
+        start_time: '0401-01-02T00:00:00'
+        stop_time: '0401-06-01T00:00:00'
+    - data_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-05-07-v3-LR-piControl-aigo-test4-ocean
+      file_pattern: "v3.LR.piControl.aigo.test4.mpassi.hist.am.fmeSeaiceDerivedFields*nc"
+      subset:
+        start_time: '0401-01-02T00:00:00'
+        stop_time: '0401-06-01T00:00:00'
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+stepper_training:
+  n_forward_steps: 4
+  loss:
+    type: MSE
+stepper:
+  input_masking:
+    mask_value: 0
+    fill_value: 0
+  step:
+    type: single_module
+    config:
+      builder:
+        type: Samudra
+        config:
+          ch_width:
+          - 280
+          - 380
+          - 480
+          - 520
+          dilation:
+          - 1
+          - 2
+          - 4
+          - 8
+          n_layers:
+          - 1
+          - 1
+          - 1
+          - 1
+          norm: instance
+          upscale_factor: 2
+          checkpoint_strategy: all
+      normalization:
+        network:
+          global_means_path: FME_STATS_DIR/centering.nc
+          global_stds_path: FME_STATS_DIR/scaling-full-field.nc
+      corrector:
+        type: ocean_corrector
+        config:
+          force_positive_names:
+          - salinityCoarsened_0
+          - salinityCoarsened_1
+          - salinityCoarsened_2
+          - salinityCoarsened_3
+          - salinityCoarsened_4
+          - salinityCoarsened_5
+          - salinityCoarsened_6
+          - salinityCoarsened_7
+          - salinityCoarsened_8
+          - salinityCoarsened_9
+          - salinityCoarsened_10
+          - salinityCoarsened_11
+          - salinityCoarsened_12
+          - salinityCoarsened_13
+          - salinityCoarsened_14
+          - salinityCoarsened_15
+          - salinityCoarsened_16
+          - salinityCoarsened_17
+          - salinityCoarsened_18
+          - iceVolumeTotal
+          sea_ice_fraction_correction:
+            sea_ice_fraction_name: iceAreaTotal
+            land_fraction_name: mask_2d
+            remove_negative_ocean_fraction: false
+            sea_ice_thickness_name: iceVolumeTotal
+      next_step_forcing_names:
+      - windStressZonal
+      - windStressMeridional
+      - rainFlux
+      - longWaveHeatFluxUp
+      - longWaveHeatFluxDown
+      - shortWaveHeatFlux
+      - sensibleHeatFlux
+      - latentHeatFlux
+      in_names:
+      - ssh
+      - windStressZonal
+      - windStressMeridional
+      - rainFlux
+      - longWaveHeatFluxUp
+      - longWaveHeatFluxDown
+      - shortWaveHeatFlux
+      - sensibleHeatFlux
+      - latentHeatFlux
+      - mask_2d
+      - iceAreaTotal
+      - iceVolumeTotal
+      - sst
+      - salinityCoarsened_0
+      - salinityCoarsened_1
+      - salinityCoarsened_2
+      - salinityCoarsened_3
+      - salinityCoarsened_4
+      - salinityCoarsened_5
+      - salinityCoarsened_6
+      - salinityCoarsened_7
+      - salinityCoarsened_8
+      - salinityCoarsened_9
+      - salinityCoarsened_10
+      - salinityCoarsened_11
+      - salinityCoarsened_12
+      - salinityCoarsened_13
+      - salinityCoarsened_14
+      - salinityCoarsened_15
+      - salinityCoarsened_16
+      - salinityCoarsened_17
+      - salinityCoarsened_18
+      - temperatureCoarsened_0
+      - temperatureCoarsened_1
+      - temperatureCoarsened_2
+      - temperatureCoarsened_3
+      - temperatureCoarsened_4
+      - temperatureCoarsened_5
+      - temperatureCoarsened_6
+      - temperatureCoarsened_7
+      - temperatureCoarsened_8
+      - temperatureCoarsened_9
+      - temperatureCoarsened_10
+      - temperatureCoarsened_11
+      - temperatureCoarsened_12
+      - temperatureCoarsened_13
+      - temperatureCoarsened_14
+      - temperatureCoarsened_15
+      - temperatureCoarsened_16
+      - temperatureCoarsened_17
+      - temperatureCoarsened_18
+      - velocityZonalCoarsened_0
+      - velocityZonalCoarsened_1
+      - velocityZonalCoarsened_2
+      - velocityZonalCoarsened_3
+      - velocityZonalCoarsened_4
+      - velocityZonalCoarsened_5
+      - velocityZonalCoarsened_6
+      - velocityZonalCoarsened_7
+      - velocityZonalCoarsened_8
+      - velocityZonalCoarsened_9
+      - velocityZonalCoarsened_10
+      - velocityZonalCoarsened_11
+      - velocityZonalCoarsened_12
+      - velocityZonalCoarsened_13
+      - velocityZonalCoarsened_14
+      - velocityZonalCoarsened_15
+      - velocityZonalCoarsened_16
+      - velocityZonalCoarsened_17
+      - velocityZonalCoarsened_18
+      - velocityMeridionalCoarsened_0
+      - velocityMeridionalCoarsened_1
+      - velocityMeridionalCoarsened_2
+      - velocityMeridionalCoarsened_3
+      - velocityMeridionalCoarsened_4
+      - velocityMeridionalCoarsened_5
+      - velocityMeridionalCoarsened_6
+      - velocityMeridionalCoarsened_7
+      - velocityMeridionalCoarsened_8
+      - velocityMeridionalCoarsened_9
+      - velocityMeridionalCoarsened_10
+      - velocityMeridionalCoarsened_11
+      - velocityMeridionalCoarsened_12
+      - velocityMeridionalCoarsened_13
+      - velocityMeridionalCoarsened_14
+      - velocityMeridionalCoarsened_15
+      - velocityMeridionalCoarsened_16
+      - velocityMeridionalCoarsened_17
+      - velocityMeridionalCoarsened_18
+      out_names:
+      - ssh
+      - sst
+      - salinityCoarsened_0
+      - salinityCoarsened_1
+      - salinityCoarsened_2
+      - salinityCoarsened_3
+      - salinityCoarsened_4
+      - salinityCoarsened_5
+      - salinityCoarsened_6
+      - salinityCoarsened_7
+      - salinityCoarsened_8
+      - salinityCoarsened_9
+      - salinityCoarsened_10
+      - salinityCoarsened_11
+      - salinityCoarsened_12
+      - salinityCoarsened_13
+      - salinityCoarsened_14
+      - salinityCoarsened_15
+      - salinityCoarsened_16
+      - salinityCoarsened_17
+      - salinityCoarsened_18
+      - temperatureCoarsened_0
+      - temperatureCoarsened_1
+      - temperatureCoarsened_2
+      - temperatureCoarsened_3
+      - temperatureCoarsened_4
+      - temperatureCoarsened_5
+      - temperatureCoarsened_6
+      - temperatureCoarsened_7
+      - temperatureCoarsened_8
+      - temperatureCoarsened_9
+      - temperatureCoarsened_10
+      - temperatureCoarsened_11
+      - temperatureCoarsened_12
+      - temperatureCoarsened_13
+      - temperatureCoarsened_14
+      - temperatureCoarsened_15
+      - temperatureCoarsened_16
+      - temperatureCoarsened_17
+      - temperatureCoarsened_18
+      - velocityZonalCoarsened_0
+      - velocityZonalCoarsened_1
+      - velocityZonalCoarsened_2
+      - velocityZonalCoarsened_3
+      - velocityZonalCoarsened_4
+      - velocityZonalCoarsened_5
+      - velocityZonalCoarsened_6
+      - velocityZonalCoarsened_7
+      - velocityZonalCoarsened_8
+      - velocityZonalCoarsened_9
+      - velocityZonalCoarsened_10
+      - velocityZonalCoarsened_11
+      - velocityZonalCoarsened_12
+      - velocityZonalCoarsened_13
+      - velocityZonalCoarsened_14
+      - velocityZonalCoarsened_15
+      - velocityZonalCoarsened_16
+      - velocityZonalCoarsened_17
+      - velocityZonalCoarsened_18
+      - velocityMeridionalCoarsened_0
+      - velocityMeridionalCoarsened_1
+      - velocityMeridionalCoarsened_2
+      - velocityMeridionalCoarsened_3
+      - velocityMeridionalCoarsened_4
+      - velocityMeridionalCoarsened_5
+      - velocityMeridionalCoarsened_6
+      - velocityMeridionalCoarsened_7
+      - velocityMeridionalCoarsened_8
+      - velocityMeridionalCoarsened_9
+      - velocityMeridionalCoarsened_10
+      - velocityMeridionalCoarsened_11
+      - velocityMeridionalCoarsened_12
+      - velocityMeridionalCoarsened_13
+      - velocityMeridionalCoarsened_14
+      - velocityMeridionalCoarsened_15
+      - velocityMeridionalCoarsened_16
+      - velocityMeridionalCoarsened_17
+      - velocityMeridionalCoarsened_18
+      - iceAreaTotal
+      - iceVolumeTotal
