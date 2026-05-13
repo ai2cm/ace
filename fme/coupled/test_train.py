@@ -1,6 +1,5 @@
 import os
 import tempfile
-from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -13,11 +12,6 @@ from fme.core.testing.wandb import mock_wandb
 from .data_loading.test_data_loader import create_coupled_data_on_disk
 from .inference.evaluator import main as inference_evaluator_main
 from .train.train import main as train_main
-from .train.train_config import (
-    AdditionalInferenceConfig,
-    InlineInferenceConfig,
-    TrainConfig,
-)
 
 _TRAIN_CONFIG_TEMPLATE = """
 experiment_dir: {experiment_dir}
@@ -69,25 +63,9 @@ inference:
   n_coupled_steps: {inference_n_coupled_steps}
   aggregator:
     log_zonal_mean_images: True
-additional_inference:
-  - name: weather_eval
-    config:
-      loader:
-        dataset:
-          ocean:
-            data_path: {ocean_data_path}
-          atmosphere:
-            data_path: {atmosphere_data_path}
-        start_indices:
-          times:
-            - '1970-01-01T00:00:00'
-            - '1970-01-03T00:00:00'
-      n_coupled_steps: {inference_n_coupled_steps}
-      aggregator:
-        log_zonal_mean_images: True
 optimization:
   enable_automatic_mixed_precision: false
-  lr: 0.0001
+  lr: 0.00001
   optimizer_type: Adam
 stepper_training:
   n_coupled_steps: {n_coupled_steps}
@@ -529,53 +507,6 @@ def test_train_and_inference(
             ds = xr.open_dataset(diagnostic_output, decode_timedelta=False)
             assert len(ds) > 0
 
-    weather_eval_keys = [k for k in epoch_logs if k.startswith("weather_eval/")]
-    assert (
-        weather_eval_keys
-    ), "expected at least one weather_eval metric in additional_inference epoch log"
-    assert "weather_eval/time_mean_norm/rmse/channel_mean" in epoch_logs
-
-    # additional_inference must also run for the pre-training evaluation
-    # (epoch 0) when evaluate_before_training is True (the coupled default).
-    # The pre-training evaluation log is merged into train_logs[0] via wandb's
-    # step-based merging.
-    pretrain_logs = train_logs[0]
-    assert pretrain_logs.get("epoch") == 0
-    pretrain_weather_eval_keys = [
-        k for k in pretrain_logs if k.startswith("weather_eval/")
-    ]
-    assert pretrain_weather_eval_keys, (
-        "expected weather_eval metrics in pre-training (epoch 0) log when "
-        "evaluate_before_training is True"
-    )
-    assert "weather_eval/time_mean_norm/rmse/channel_mean" in pretrain_logs
-
-    for domain in ("ocean", "atmosphere"):
-        for epoch_subdir in ("epoch_0000", "epoch_0001"):
-            weather_eval_output_dir = (
-                tmp_path
-                / "results"
-                / "output"
-                / "additional_inference"
-                / "weather_eval"
-                / domain
-                / epoch_subdir
-            )
-            assert weather_eval_output_dir.exists(), (
-                f"expected additional_inference output dir at "
-                f"{weather_eval_output_dir}"
-            )
-            for diagnostic in (
-                "time_mean",
-                "time_mean_norm",
-            ):
-                diagnostic_output = (
-                    weather_eval_output_dir / f"{diagnostic}_diagnostics.nc"
-                )
-                assert diagnostic_output.exists()
-                ds = xr.open_dataset(diagnostic_output, decode_timedelta=False)
-                assert len(ds) > 0
-
     best_checkpoint_path = (
         tmp_path / "results" / "training_checkpoints" / "best_ckpt.tar"
     )
@@ -666,34 +597,4 @@ def test_train_and_inference(
             wm_gen,
             inference_logs[1][f"inference/mean/weighted_mean_gen/{name}"],
             atol=1e-4,
-        )
-
-
-def test_additional_inference_empty_name():
-    """AdditionalInferenceConfig should reject an empty name."""
-    inline_inference_config = MagicMock(spec=InlineInferenceConfig)
-    with pytest.raises(ValueError, match="must be non-empty"):
-        AdditionalInferenceConfig(name="", config=inline_inference_config)
-
-
-def test_train_config_duplicate_additional_inference_names():
-    """TrainConfig should reject additional_inference entries with duplicate names."""
-    inline_inference_config = MagicMock(spec=InlineInferenceConfig)
-    duplicate_entries = [
-        AdditionalInferenceConfig(name="dup", config=inline_inference_config),
-        AdditionalInferenceConfig(name="dup", config=inline_inference_config),
-    ]
-    with pytest.raises(ValueError, match="Duplicate additional_inference name"):
-        TrainConfig(
-            train_loader=MagicMock(),
-            validation_loader=MagicMock(),
-            stepper=MagicMock(),
-            stepper_training=MagicMock(),
-            optimization=MagicMock(),
-            logging=MagicMock(),
-            max_epochs=1,
-            save_checkpoint=False,
-            experiment_dir="/tmp/whatever",
-            inference=inline_inference_config,
-            additional_inference=duplicate_entries,
         )

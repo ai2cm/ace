@@ -52,7 +52,6 @@ import abc
 import contextlib
 import gc
 import logging
-import math
 import os
 import signal
 import sys
@@ -163,12 +162,6 @@ class TrainConfigProtocol(Protocol):
     def save_best_inference_epoch_checkpoints(self) -> bool: ...
 
     @property
-    def save_best_enso_checkpoint(self) -> bool: ...
-
-    @property
-    def best_enso_checkpoint_climate_tolerance(self) -> float: ...
-
-    @property
     def ema(self) -> EMAConfig: ...
 
     @property
@@ -216,10 +209,6 @@ class CheckpointPaths:
 
     def best_inference_epoch_checkpoint_path(self, epoch: int) -> str:
         return os.path.join(self.checkpoint_dir, f"best_inference_ckpt_{epoch:04d}.tar")
-
-    @property
-    def best_enso_checkpoint_path(self) -> str:
-        return os.path.join(self.checkpoint_dir, "best_enso_ckpt.tar")
 
 
 def chain_signal_handler(sig, handler):
@@ -275,8 +264,6 @@ class Trainer:
         self._current_epoch_num_batches_seen = 0
         self._best_validation_loss = torch.inf
         self._best_inference_error = torch.inf
-        self._best_enso_score: float = torch.inf
-        self._best_enso_inference_error: float = torch.inf
 
         self.stepper = stepper
         self.stepper.update_training_history(TrainingJob.from_env())
@@ -328,9 +315,6 @@ class Trainer:
 
         chain_signal_handler(signal.SIGTERM, on_terminate)
         chain_signal_handler(signal.SIGINT, on_terminate)
-
-    def set_end_of_epoch_callback(self, callback: EndOfEpochCallback) -> None:
-        self._end_of_epoch_callback = callback
 
     def switch_off_grad(self, model: torch.nn.Module):
         for param in model.parameters():
@@ -412,16 +396,9 @@ class Trainer:
                 valid_logs, valid_loss = validation_callback(self._epochs_trained)
                 logging.info("Starting inline inference before training")
                 inference_logs, _ = inference_callback(self._epochs_trained)
-            with self.validation_context():
-                additional_logs = self._end_of_epoch_callback(self._epochs_trained)
             logging.info(f"Validation loss before training: {valid_loss}")
             logging.info("Logging to wandb")
-            all_logs = (
-                valid_logs
-                | inference_logs
-                | dict(additional_logs)
-                | {"epoch": self._epochs_trained}
-            )
+            all_logs = valid_logs | inference_logs | {"epoch": self._epochs_trained}
             wandb = WandB.get_instance()
             wandb.log(all_logs, step=self.num_batches_seen)
 
@@ -454,10 +431,6 @@ class Trainer:
                 inference_end: float | None = time.time() if inference_logs else None
 
             train_loss = train_logs.get("train/mean/loss")
-            valid_loss = valid_logs["val/mean/loss"]
-            inference_error = inference_logs.get(
-                "inference/time_mean_norm/rmse/channel_mean", None
-            )
             # need to get the learning rate before stepping the scheduler
             lr = self.optimization.learning_rate
             self.optimization.step_scheduler(valid_loss=valid_loss, is_iteration=False)
@@ -502,11 +475,7 @@ class Trainer:
 
             if self._should_save_checkpoints():
                 logging.info(f"Saving checkpoints for epoch {self._epochs_trained}")
-                self.save_all_checkpoints(
-                    valid_loss,
-                    inference_error,
-                    inference_logs,
-                )
+                self.save_all_checkpoints(valid_loss, inference_error)
 
     def _log_first_batch_metrics(self):
         wandb = WandB.get_instance()
@@ -647,16 +616,13 @@ class Trainer:
     def _ema_context(self):
         """
         A context where the stepper uses the EMA model.
-
-        Reentrant: if we're already inside an EMA context (e.g. because
-        ``validation_context()`` was opened twice -- once by the trainer to
-        wrap an end-of-epoch callback, and once again by an inference helper
-        called from within that callback), nesting is a no-op so the EMA
-        weights are applied exactly once.
         """
         if self._in_ema_context:
-            yield
-            return
+            raise RuntimeError(
+                "_ema_context is not reentrant. The Trainer wraps all "
+                "callbacks in validation_context(), so callbacks should not "
+                "enter it themselves."
+            )
         self._in_ema_context = True
         try:
             with self._ema.applied_params(self.stepper.modules):
@@ -682,8 +648,6 @@ class Trainer:
                 "epoch": self._epochs_trained,
                 "best_validation_loss": self._best_validation_loss,
                 "best_inference_error": self._best_inference_error,
-                "best_enso_score": self._best_enso_score,
-                "best_enso_inference_error": self._best_enso_inference_error,
                 "stepper": self.stepper.get_state(),
                 "ema": self._ema.get_state(),
             }
@@ -716,18 +680,7 @@ class Trainer:
             epoch, self.config.max_epochs, self.config.ema_checkpoint_save_epochs
         )
 
-    _ENSO_METRIC_SUFFIXES = (
-        "_nino34_index_std_norm",
-        "_nino34_index_autocorr_lag5yr_norm",
-        "_nino34_index_psd_2_5yr_norm",
-    )
-
-    def save_all_checkpoints(
-        self,
-        valid_loss: float,
-        inference_error: float | None,
-        inference_logs: dict[str, Any] | None = None,
-    ):
+    def save_all_checkpoints(self, valid_loss: float, inference_error: float | None):
         if self.config.validate_using_ema:
             best_checkpoint_context = self._ema_context
         else:
@@ -770,13 +723,6 @@ class Trainer:
             if save_best_checkpoint:
                 self.save_checkpoint(self.paths.best_checkpoint_path)
 
-            if (
-                self.config.save_best_enso_checkpoint
-                and inference_error is not None
-                and inference_logs is not None
-            ):
-                self._save_best_enso_checkpoint(inference_logs, inference_error)
-
         self._save_restart_checkpoints()
 
         if self._ema_epoch_checkpoint_enabled(self._epochs_trained):
@@ -792,58 +738,6 @@ class Trainer:
             )
             logging.info(f"Saving epoch checkpoint to {epoch_checkpoint_path}")
             self.save_checkpoint(epoch_checkpoint_path, include_optimization=True)
-
-    def _save_best_enso_checkpoint(
-        self,
-        inference_logs: dict[str, Any],
-        inference_error: float,
-    ) -> None:
-        """Save checkpoint that optimizes ENSO metric with a climate guard.
-
-        The ENSO score is the mean of |1.0 - m| for each available normalized
-        ENSO metric (std_norm, autocorr_lag5yr_norm, psd_2_5yr_norm).
-
-        A checkpoint is saved only when:
-        1. The composite ENSO score improves, AND
-        2. The climate skill (inference_error) is within a configurable
-           relative tolerance of the current best_inference_error.
-        """
-        terms: list[float] = []
-        for suffix in self._ENSO_METRIC_SUFFIXES:
-            for key, value in inference_logs.items():
-                if key.endswith(suffix) and isinstance(value, int | float):
-                    if not math.isnan(value):
-                        terms.append(abs(1.0 - value))
-                    break
-        if not terms:
-            return
-        enso_score = sum(terms) / len(terms)
-
-        tolerance = self.config.best_enso_checkpoint_climate_tolerance
-        climate_threshold = self._best_inference_error * (1.0 + tolerance)
-
-        if enso_score < self._best_enso_score and (
-            inference_error <= climate_threshold
-        ):
-            logging.info(
-                f"ENSO composite score ({enso_score:.4f}) "
-                f"improves on previous best ({self._best_enso_score:.4f}), "
-                f"climate error ({inference_error:.4f}) within tolerance "
-                f"({climate_threshold:.4f})."
-            )
-            logging.info(
-                f"Saving best ENSO checkpoint to "
-                f"{self.paths.best_enso_checkpoint_path}"
-            )
-            self._best_enso_score = enso_score
-            self._best_enso_inference_error = inference_error
-            self.save_checkpoint(self.paths.best_enso_checkpoint_path)
-        elif enso_score < self._best_enso_score:
-            logging.info(
-                f"ENSO composite score ({enso_score:.4f}) improved but climate "
-                f"error ({inference_error:.4f}) exceeds tolerance "
-                f"({climate_threshold:.4f}), skipping."
-            )
 
 
 def inference_one_epoch(
@@ -880,10 +774,6 @@ def _restore_checkpoint(trainer: Trainer, checkpoint_path):
     trainer._epochs_trained = checkpoint["epoch"]
     trainer._best_validation_loss = checkpoint["best_validation_loss"]
     trainer._best_inference_error = checkpoint["best_inference_error"]
-    trainer._best_enso_score = checkpoint.get("best_enso_score", torch.inf)
-    trainer._best_enso_inference_error = checkpoint.get(
-        "best_enso_inference_error", torch.inf
-    )
     trainer._ema = EMATracker.from_state(checkpoint["ema"], trainer.stepper.modules)
 
 

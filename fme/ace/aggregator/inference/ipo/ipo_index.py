@@ -1,6 +1,6 @@
+import dataclasses
 import logging
-import warnings
-from typing import Any
+from typing import Any, Literal
 
 import cftime
 import numpy as np
@@ -9,16 +9,19 @@ import xarray as xr
 from matplotlib import pyplot as plt
 from scipy import signal
 
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.distributed import Distributed
 from fme.core.typing_ import TensorDict
 
 from ...plotting import plot_mean_and_samples
-from ..data import InferenceBatchData
-from ..enso.dynamic_index import (
+from ..build_context import MetricBuildContext, MetricNotSupportedError
+from ..data import InferenceBatchData, MetricBuildResult
+from ..utils import (
     LatLonRegion,
     UniqueMonths,
+    _calculate_sample_average_power_spectrum,
+    _compute_sample_mean_std,
     anomalies_from_monthly_climo,
-    compute_power_spectrum,
     convert_cftime_to_datetime_coord,
     running_monthly_mean,
 )
@@ -26,6 +29,8 @@ from ..enso.dynamic_index import (
 SAMPLE_DIM, TIME_DIM = 0, 1
 
 DEFAULT_SST_NAMES = ["sst"]
+
+MIN_YEARS_FOR_FILTERED_TPI = 80
 
 TPI_REGIONS = {
     "T1": {"lat_bounds": (25.0, 45.0), "lon_bounds": (140.0, 215.0)},
@@ -46,8 +51,7 @@ def _nan_aware_regional_mean(data: torch.Tensor, weights: torch.Tensor) -> torch
     """
     valid_mask = ~torch.isnan(data)
     data_filled = torch.where(valid_mask, data, torch.zeros_like(data))
-    # weights broadcast: (lat, lon) -> (1, 1, lat, lon)
-    w = weights.unsqueeze(0).unsqueeze(0)
+    w = weights.to(data.device).unsqueeze(0).unsqueeze(0)
     weighted_sum = (data_filled * w * valid_mask).sum(dim=(-2, -1))
     weight_total = (w * valid_mask).sum(dim=(-2, -1))
     return weighted_sum / weight_total
@@ -80,78 +84,6 @@ def low_pass_filter(
         N=filter_order, rp=passband_ripple_db, Wn=wn, btype="low", analog=False
     )
     return signal.filtfilt(b, a, data)
-
-
-def _compute_sample_mean_std_ratio(
-    prediction_data: np.ndarray,
-    target_data: np.ndarray,
-    time_dim: int = TIME_DIM,
-) -> float:
-    """Compute std ratio (prediction / target) averaged over samples.
-
-    Args:
-        prediction_data: Array of shape (sample, time).
-        target_data: Array of shape (sample, time).
-        time_dim: Time dimension index.
-
-    Returns:
-        Mean of per-sample std(prediction) / std(target).
-    """
-    pred_std = np.nanstd(prediction_data, axis=time_dim)
-    target_std = np.nanstd(target_data, axis=time_dim)
-    ratios = pred_std / target_std
-    return float(np.nanmean(ratios))
-
-
-def _smooth_spectrum(
-    freqs: np.ndarray, power: np.ndarray, n_bins: int = 40
-) -> tuple[np.ndarray, np.ndarray]:
-    """Smooth a power spectrum using logarithmically-spaced frequency bins.
-
-    Preserves resolution at low frequencies (where IPO signal lives)
-    while averaging out noise at high frequencies.
-    """
-    positive_mask = freqs > 0
-    if not positive_mask.any():
-        return freqs, power
-    pos_freqs = freqs[positive_mask]
-    pos_power = power[positive_mask]
-
-    log_bins = np.logspace(np.log10(pos_freqs[0]), np.log10(pos_freqs[-1]), n_bins + 1)
-    bin_centers = []
-    bin_powers = []
-    for i in range(len(log_bins) - 1):
-        mask = (pos_freqs >= log_bins[i]) & (pos_freqs < log_bins[i + 1])
-        if mask.any():
-            bin_centers.append(np.sqrt(log_bins[i] * log_bins[i + 1]))
-            bin_powers.append(pos_power[mask].mean())
-    return np.array(bin_centers), np.array(bin_powers)
-
-
-def _calculate_sample_average_power_spectrum(
-    timeseries: xr.DataArray,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Compute power spectrum averaged across samples, handling NaN truncation."""
-    data_arrays = []
-    data_lengths = []
-    for sample in range(timeseries.sizes["sample"]):
-        data_without_nan = timeseries.isel(sample=sample).dropna("time")
-        data_arrays.append(data_without_nan)
-        data_lengths.append(data_without_nan.sizes["time"])
-    min_data_length = min(data_lengths)
-    if max(data_lengths) != min_data_length:
-        warnings.warn(
-            "Samples have different lengths, truncating to shortest length "
-            f"of {min_data_length} steps for IPO TPI power spectrum. The maximum "
-            f"input sample length is {max(data_lengths)} steps."
-        )
-    all_data = np.array(
-        [
-            data_array.isel(time=slice(0, min_data_length)).values
-            for data_array in data_arrays
-        ]
-    )
-    return compute_power_spectrum(all_data)
 
 
 class _IPORegionalAccumulator:
@@ -337,18 +269,13 @@ class PairedIPOIndexAggregator:
                 fig = self._plot_filtered_tpi(pred_filtered, tgt_filtered)
                 logs[f"{sst_name}_ipo_tpi_filtered"] = fig
 
-                std_ratio = _compute_sample_mean_std_ratio(
-                    pred_filtered.values, tgt_filtered.values
+                logs[f"{sst_name}_ipo_tpi_std"] = _compute_sample_mean_std(
+                    pred_filtered
                 )
-                logs[f"{sst_name}_ipo_tpi_std_ratio"] = std_ratio
+                logs[f"{sst_name}_ipo_tpi_std_norm"] = _compute_sample_mean_std(
+                    pred_filtered, tgt_filtered
+                )
 
-            logs[f"{sst_name}_ipo_tpi_std_norm"] = _compute_sample_mean_std_ratio(
-                pred_da.values, tgt_da.values
-            )
-
-            pred_nonan = pred_da.dropna("time")
-            tgt_nonan = tgt_da.dropna("time")
-            if pred_nonan.sizes["time"] > 1 and tgt_nonan.sizes["time"] > 1:
                 fig = self._plot_power_spectrum(pred_da, tgt_da, sst_name)
                 logs[f"{sst_name}_ipo_tpi_power_spectrum"] = fig
 
@@ -373,10 +300,10 @@ class PairedIPOIndexAggregator:
         """Apply low-pass filter to each sample, trimming edge transients.
 
         Trims one cutoff period from each end to remove filtfilt edge artifacts.
-        Returns None if the series is too short after trimming.
+        Returns None if the series is too short.
         """
         trim = int(self._cutoff_period_yrs * 12)
-        min_length = 3 * trim  # need at least one cutoff period after trimming
+        min_length = MIN_YEARS_FOR_FILTERED_TPI * 12
         filtered_samples = []
         for sample in range(tpi_da.sizes["sample"]):
             sample_data = tpi_da.isel(sample=sample).dropna("time")
@@ -431,15 +358,34 @@ class PairedIPOIndexAggregator:
     ) -> plt.Figure:
         pred_freq, pred_power = _calculate_sample_average_power_spectrum(prediction_tpi)
         tgt_freq, tgt_power = _calculate_sample_average_power_spectrum(target_tpi)
-        pred_freq_s, pred_power_s = _smooth_spectrum(pred_freq, pred_power)
-        tgt_freq_s, tgt_power_s = _smooth_spectrum(tgt_freq, tgt_power)
         fig, ax = plt.subplots(1, 1)
-        ax.plot(pred_freq_s, pred_power_s, label="predicted ensemble mean")
-        ax.plot(tgt_freq_s, tgt_power_s, label="target", color="orange")
+        ax.plot(pred_freq, pred_power, label="predicted ensemble mean")
+        ax.plot(tgt_freq, tgt_power, label="target", color="orange")
         ax.set_title("Power Spectrum of IPO TPI (unfiltered)")
         ax.set_xlabel("Frequency [cycles/year]")
         ax.set_ylabel("Power [K**2]")
-        ax.set(yscale="log")
+        ax.set(xscale="log", yscale="log")
         ax.legend()
         fig.tight_layout()
         return fig
+
+
+@dataclasses.dataclass
+class IpoIndexMetricConfig:
+    type: Literal["ipo_index"] = "ipo_index"
+    name: str = "ipo_index"
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        if not isinstance(ctx.horizontal_coordinates, LatLonCoordinates):
+            raise MetricNotSupportedError(
+                "ipo_index metric requires LatLonCoordinates."
+            )
+        return MetricBuildResult(
+            aggregator=PairedIPOIndexAggregator(
+                lat=ctx.horizontal_coordinates.lat,
+                lon=ctx.horizontal_coordinates.lon,
+            )
+        )

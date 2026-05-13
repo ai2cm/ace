@@ -168,13 +168,6 @@ class TrainConfig:
         save_best_inference_epoch_checkpoints: Whether to save a separate checkpoint
             for each epoch where best_inference_error achieves a new minimum.
             Checkpoints are saved as best_inference_ckpt_XXXX.tar.
-        save_best_enso_checkpoint: Whether to save a best-ENSO checkpoint.
-            The ENSO score is the mean of |1.0 - m| for each available
-            normalized metric (std_norm, autocorr_lag5yr_norm, psd_2_5yr_norm).
-        best_enso_checkpoint_climate_tolerance: Maximum relative increase in
-            inference_error (climate mean state) allowed when saving the
-            best-ENSO checkpoint. E.g. 0.1 means the inference error may be
-            at most 10% worse than the current best_inference_error.
         resume_results:  Configuration for resuming a previously stopped or finished
             training job. When provided and experiment_dir has no training_checkpoints
             subdirectory, then it is assumed that this is a new run to resume a
@@ -217,8 +210,6 @@ class TrainConfig:
     )
     evaluate_before_training: bool = False
     save_best_inference_epoch_checkpoints: bool = False
-    save_best_enso_checkpoint: bool = False
-    best_enso_checkpoint_climate_tolerance: float = 0.1
     lr_tuning: LRTuningConfig | None = None
     resume_results: ResumeResultsConfig | None = None
 
@@ -227,6 +218,8 @@ class TrainConfig:
         if isinstance(self.stepper, CheckpointStepperConfig):
             return self.stepper.to_stepper_config()
         return self.stepper
+
+    _RESERVED_NAMES = {"train", "val"}
 
     def __post_init__(self):
         if self.train_loader.using_labels != self.validation_loader.using_labels:
@@ -237,6 +230,12 @@ class TrainConfig:
         resolved_names = self.inference_names
         if len(resolved_names) != len(set(resolved_names)):
             raise ValueError(f"Duplicate inference names: {resolved_names}")
+        reserved_overlap = set(resolved_names) & self._RESERVED_NAMES
+        if reserved_overlap:
+            raise ValueError(
+                f"Inference names {sorted(reserved_overlap)} collide with "
+                f"reserved names {sorted(self._RESERVED_NAMES)}"
+            )
         for i, entry in enumerate(self.inference_list):
             if self.train_loader.using_labels != entry.using_labels:
                 name = resolved_names[i]

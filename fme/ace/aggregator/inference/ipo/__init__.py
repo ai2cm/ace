@@ -1,1 +1,1 @@
-from .ipo_index import PairedIPOIndexAggregator
+from .ipo_index import IpoIndexMetricConfig, PairedIPOIndexAggregator
