@@ -73,7 +73,7 @@ build_cluster_args() {
             WORKSPACE=ai2/climate-titan
         fi
         CLUSTER_ARGS=(
-            --workspace ai2/climate-titan
+            --workspace "$WORKSPACE"
             --cluster titan
         )
     elif [[ -z "$CLUSTER" || "$CLUSTER" == "h100" ]]; then
