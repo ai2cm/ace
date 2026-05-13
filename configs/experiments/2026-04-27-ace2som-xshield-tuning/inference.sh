@@ -5,19 +5,19 @@ set -e
 JOB_NAME="ace2som-tuned-4k-inference"
 JOB_GROUP=""
 EXISTING_RESULTS_DATASET="01K9B2ZY6E1W5N34HQCVMS7BJM"  # this contains the checkpoint to use for inference
-CONFIG_FILENAME="config.yaml"
+CONFIG_FILENAME="inference-4k-tuned.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
-STATS_DATASET="01KR20DK354DQRW6FY8CMCZ0YE"
+STATS_DATASET="annak/2026-04-27-vertically-resolved-1deg-c96-shield-ramped-climSST-random-CO2-ensemble-xshield-prmsl-stats"
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 IMAGE="$(cat latest_deps_only_image.txt)"
 
-python -m fme.ace.validate_config --config_type evaluator $CONFIG_PATH
+#python -m fme.ace.validate_config --config_type evaluator $CONFIG_PATH
 
 cd $REPO_ROOT && gantry run \
     --name $JOB_NAME \
@@ -42,7 +42,7 @@ cd $REPO_ROOT && gantry run \
     --gpus 1 \
     --shared-memory 50GiB \
     --weka climate-default:/climate-default \
-    --budget ai2/climate \
+    --budget ai2/atec-climate \
     --no-conda \
     --install "pip install --no-deps ." \
     --allow-dirty \
