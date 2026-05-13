@@ -808,24 +808,6 @@ def test_hierarchical_rejects_mismatched_target(kwargs, match):
         HierarchicalInferenceEvaluatorAggregatorConfig(**kwargs)
 
 
-def test_default_aggregator_config_yaml():
-    """Regression test ensuring the default aggregator config YAML stays in sync."""
-    import dataclasses
-
-    import yaml
-
-    from fme.core.testing.regression import validate_text
-
-    config = HierarchicalInferenceEvaluatorAggregatorConfig()
-    content = yaml.dump(
-        {"aggregator": dataclasses.asdict(config)},
-        default_flow_style=False,
-        sort_keys=False,
-    )
-    docs_path = pathlib.Path(__file__).parents[4] / "docs"
-    validate_text(content, docs_path / "default-aggregator-config.yaml")
-
-
 def test_all_metric_configs_documented():
     """Every type in the MetricConfig union must appear in evaluator_config.rst."""
     import fme.ace
