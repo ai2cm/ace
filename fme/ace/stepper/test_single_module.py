@@ -2412,6 +2412,18 @@ def test_apply_output_mask_zeros_masked_variables():
     torch.testing.assert_close(target_out["b"][1], torch.zeros(1, 8, 16))
 
 
+def test_apply_output_mask_with_ensemble():
+    n_batch, n_ens = 2, 3
+    gen = EnsembleTensorDict({"a": torch.ones(n_batch, n_ens, 4, 8) * 5.0})
+    target = EnsembleTensorDict({"a": torch.ones(n_batch, n_ens, 4, 8) * 7.0})
+    data_mask = {"a": torch.tensor([True, False])}
+    gen_out, target_out = _apply_output_mask(gen, target, data_mask)
+    torch.testing.assert_close(gen_out["a"][0], torch.ones(n_ens, 4, 8) * 5.0)
+    torch.testing.assert_close(gen_out["a"][1], torch.zeros(n_ens, 4, 8))
+    torch.testing.assert_close(target_out["a"][0], torch.ones(n_ens, 4, 8) * 7.0)
+    torch.testing.assert_close(target_out["a"][1], torch.zeros(n_ens, 4, 8))
+
+
 def test_apply_output_mask_ignores_absent_variables():
     gen = EnsembleTensorDict({"a": torch.ones(2, 1, 4, 8)})
     target = EnsembleTensorDict({"a": torch.ones(2, 1, 4, 8) * 2.0})

@@ -621,3 +621,29 @@ def test_step_loss_forwards_data_mask():
     }
     result = step_loss(x_mapping, y_mapping, step=0, data_mask=data_mask)
     torch.testing.assert_close(result.total(), torch.tensor(1.0, device=get_device()))
+
+
+def test_weighted_mapping_loss_with_ensemble_and_data_mask():
+    out_names = ["a", "b"]
+    normalizer = StandardNormalizer(
+        means={name: torch.as_tensor(0.0) for name in out_names},
+        stds={name: torch.as_tensor(1.0) for name in out_names},
+    )
+    loss = torch.nn.MSELoss(reduction="none")
+    mapping_loss = WeightedMappingLoss(
+        loss, weights={}, out_names=out_names, normalizer=normalizer
+    )
+    n_batch, n_ens, h, w = 3, 2, 4, 4
+    x = {
+        "a": torch.ones(n_batch, n_ens, h, w).to(get_device()),
+        "b": torch.ones(n_batch, n_ens, h, w).to(get_device()) * 2,
+    }
+    y = {name: torch.zeros(n_batch, n_ens, h, w).to(get_device()) for name in out_names}
+    data_mask = {
+        "a": torch.tensor([True, True, False]),
+        "b": torch.tensor([True, False, False]),
+    }
+    result = mapping_loss(x, y, data_mask=data_mask)
+    assert result._mask is not None
+    assert result._mask.shape[0] == n_batch
+    result.total()

@@ -89,7 +89,7 @@ def _apply_output_mask(
     Args:
         gen: Predicted data with ensemble dim, shape [batch, ensemble, ...].
         target: Target data with ensemble dim, shape [batch, ensemble, ...].
-        data_mask: Per-variable masks, shape [batch * ensemble] bool tensors.
+        data_mask: Per-variable boolean masks of shape ``[batch]``.
 
     Returns:
         Masked copies of gen and target.
@@ -1698,17 +1698,19 @@ class TrainStepper(
                         for k, v in target_data.data.items()
                     }
                 )
-                if input_ensemble_data.data_mask is not None:
+                # Use per-sample mask (not ensemble-broadcast) because
+                # gen_step/target_step have been unfolded to [batch, ensemble, ...].
+                if input_batch_data.data_mask is not None:
                     gen_step, target_step = _apply_output_mask(
                         gen_step,
                         target_step,
-                        input_ensemble_data.data_mask,
+                        input_batch_data.data_mask,
                     )
                 step_loss = self._loss_obj(
                     gen_step,
                     target_step,
                     step=step,
-                    data_mask=input_ensemble_data.data_mask,
+                    data_mask=input_batch_data.data_mask,
                 )
                 step_total_loss = step_loss.total()
                 metrics[f"loss_step_{step}"] = step_total_loss.detach()
