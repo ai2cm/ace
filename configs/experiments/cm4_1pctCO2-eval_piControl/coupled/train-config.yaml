@@ -5,84 +5,81 @@ checkpoint_every_n_batches: 100
 log_train_every_n_batches: 10
 validate_using_ema: true
 evaluate_before_training: true
-save_best_enso_checkpoint: true
-best_enso_checkpoint_climate_tolerance: 0.1
 ema:
   decay: 0.9995
   faster_decay_at_start: false
 max_epochs: 20
 inference:
-  n_coupled_steps: 1440
-  coupled_steps_in_memory: 2
-  loader:
-    num_data_workers: 4
-    dataset:
-      ocean:
-        merge:
-          - data_path: /climate-default
-            file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-ocean.zarr
-            engine: zarr
-          - data_path: /climate-default
-            file_pattern: 2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr
-            engine: zarr
-      atmosphere:
-        merge:
-          - data_path: /climate-default
-            file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-interpolate_sst-atmosphere.zarr
-            engine: zarr
-          - data_path: /climate-default
-            file_pattern: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
-            engine: zarr
-    start_indices:
-      times:
-        - '0251-01-03T12:00:00'
-        - '0262-06-22T12:00:00'
-        - '0273-12-09T12:00:00'
-        - '0285-05-28T12:00:00'
-        - '0296-11-14T12:00:00'
-        - '0308-05-03T12:00:00'
-        - '0319-10-20T12:00:00'
-        - '0331-04-08T12:00:00'
-  aggregator:
-    log_zonal_mean_images: false
-    log_histograms: false
-additional_inference:
+  - name: inference
+    n_coupled_steps: 1440
+    coupled_steps_in_memory: 2
+    loader:
+      num_data_workers: 4
+      dataset:
+        ocean:
+          merge:
+            - data_path: /climate-default
+              file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-ocean.zarr
+              engine: zarr
+            - data_path: /climate-default
+              file_pattern: 2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr
+              engine: zarr
+        atmosphere:
+          merge:
+            - data_path: /climate-default
+              file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-interpolate_sst-atmosphere.zarr
+              engine: zarr
+            - data_path: /climate-default
+              file_pattern: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+              engine: zarr
+      start_indices:
+        times:
+          - '0251-01-03T12:00:00'
+          - '0262-06-22T12:00:00'
+          - '0273-12-09T12:00:00'
+          - '0285-05-28T12:00:00'
+          - '0296-11-14T12:00:00'
+          - '0308-05-03T12:00:00'
+          - '0319-10-20T12:00:00'
+          - '0331-04-08T12:00:00'
+    aggregator:
+      log_zonal_mean_images: false
+      log_histograms: false
   - name: piControl_eval
-    config:
-      n_coupled_steps: 366
-      coupled_steps_in_memory: 2
-      aggregator:
-        log_zonal_mean_images: false
-        log_histograms: false
-      loader:
-        num_data_workers: 4
-        dataset:
-          ocean:
-            merge:
-              - data_path: /climate-default
-                file_pattern: 2025-10-20-cm4-piControl-200yr-no-smoothing-coupled-ocean.zarr
-                engine: zarr
-              - data_path: /climate-default
-                file_pattern: 2025-10-15-cm4-piControl-200yr-ocean-no-smoothing.zarr
-                engine: zarr
-          atmosphere:
-            merge:
-              - data_path: /climate-default
-                file_pattern: 2025-10-20-cm4-piControl-200yr-no-smoothing-coupled-interpolate_sst-atmosphere.zarr
-                engine: zarr
-              - data_path: /climate-default
-                file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
-                engine: zarr
-        start_indices:
-          times:
-            - '0310-12-29T12:00:00'
-            - '0315-12-29T12:00:00'
-            - '0320-12-29T12:00:00'
-            - '0325-12-29T12:00:00'
-            - '0330-12-29T12:00:00'
-            - '0335-12-29T12:00:00'
-            - '0340-12-29T12:00:00'
-            - '0345-12-19T12:00:00'
+    n_coupled_steps: 366
+    coupled_steps_in_memory: 2
+    aggregator:
+      log_zonal_mean_images: false
+      log_histograms: false
+    loader:
+      num_data_workers: 4
+      dataset:
+        ocean:
+          merge:
+            - data_path: /climate-default
+              file_pattern: 2025-10-20-cm4-piControl-200yr-no-smoothing-coupled-ocean.zarr
+              engine: zarr
+            - data_path: /climate-default
+              file_pattern: 2025-10-15-cm4-piControl-200yr-ocean-no-smoothing.zarr
+              engine: zarr
+        atmosphere:
+          merge:
+            - data_path: /climate-default
+              file_pattern: 2025-10-20-cm4-piControl-200yr-no-smoothing-coupled-interpolate_sst-atmosphere.zarr
+              engine: zarr
+            - data_path: /climate-default
+              file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+              engine: zarr
+      start_indices:
+        times:
+          - '0310-12-29T12:00:00'
+          - '0315-12-29T12:00:00'
+          - '0320-12-29T12:00:00'
+          - '0325-12-29T12:00:00'
+          - '0330-12-29T12:00:00'
+          - '0335-12-29T12:00:00'
+          - '0340-12-29T12:00:00'
+          - '0345-12-19T12:00:00'
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -258,7 +255,7 @@ stepper_training:
         specific_total_water_0: 0.5
         specific_total_water_1: 0.25
         specific_total_water_2: 0.5
-        PRATEsfc: 0.5
+        PRATEsfc: 2
         h500: 10
         TMP850: 5
         Q2m: 0.5
@@ -272,6 +269,10 @@ stepper_training:
         USWRFtoa: 2
         tendency_of_total_water_path_due_to_advection: 0.5
         PRESsfc: 3
+        LHTFLsfc: 2
+        SHTFLsfc: 2
+        eastward_surface_wind_stress: 2
+        northward_surface_wind_stress: 2
 stepper:
   ocean_fraction_prediction:
     land_fraction_name: land_fraction
