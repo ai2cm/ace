@@ -15,3 +15,10 @@ class CoupledTensorMapping:
     ocean: TensorMapping
     atmosphere: TensorMapping
     ice: TensorMapping
+
+
+@dataclasses.dataclass
+class CoupledOptionalInt:
+    ocean: int | None
+    atmosphere: int | None
+    ice: int | None

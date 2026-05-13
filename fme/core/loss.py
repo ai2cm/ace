@@ -4,6 +4,7 @@ from typing import Any, Literal
 
 import torch
 import torch.linalg
+import torch.nn.functional as F
 
 from fme.core.device import get_device
 from fme.core.ensemble import get_crps, get_energy_score
@@ -11,6 +12,75 @@ from fme.core.gridded_ops import GriddedOperations
 from fme.core.normalizer import StandardNormalizer
 from fme.core.packer import Packer
 from fme.core.typing_ import TensorMapping
+
+
+def _channel_dim_positive(ndim: int, channel_dim: int) -> int:
+    return channel_dim if channel_dim >= 0 else ndim + channel_dim
+
+
+def _uniform_broadcast_per_channel(
+    total: torch.Tensor, n_channels: int
+) -> torch.Tensor:
+    """Evenly split a scalar across ``n_channels`` so ``.sum() == total``."""
+    return (total / n_channels).expand(n_channels)
+
+
+def _reduce_to_per_channel(
+    loss_value: torch.Tensor,
+    channel_dim: int,
+    n_channels: int,
+) -> torch.Tensor:
+    """Reduce any loss tensor to shape ``(n_channels,)``.
+
+    Handles element-wise tensors, partially-reduced tensors
+    (e.g. after area-weighted mean removes spatial dims), and
+    scalars (uniformly broadcast).
+
+    ``channel_dim`` must be a **non-negative** index, computed from
+    the *input* tensor (before the loss potentially removes dims).
+
+    The result satisfies ``tensor.sum() == loss_value.mean()``
+    for element-wise losses.
+    """
+    if loss_value.ndim == 0:
+        return _uniform_broadcast_per_channel(loss_value, n_channels)
+    dims = tuple(i for i in range(loss_value.ndim) if i != channel_dim)
+    if not dims:
+        return loss_value / n_channels
+    return loss_value.mean(dim=dims) / n_channels
+
+
+class LossOutput:
+    """Container for loss values returned by WeightedMappingLoss/StepLoss.
+
+    Wraps the raw unreduced loss tensor and provides convenience methods
+    for obtaining the scalar total or per-channel breakdowns. This
+    isolates reduction logic so callers and aggregators don't need to
+    know the internal tensor layout.
+    """
+
+    def __init__(
+        self,
+        loss: torch.Tensor,
+        channel_dim: int,
+        channel_names: list[str],
+    ):
+        self._loss = loss
+        self._channel_dim = channel_dim
+        self._channel_names = channel_names
+
+    def total(self) -> torch.Tensor:
+        """Scalar mean over all dimensions -- the optimization target."""
+        if self._loss.ndim > 0:
+            return self._loss.mean()
+        return self._loss
+
+    def get_channel_losses(self) -> dict[str, torch.Tensor]:
+        """Per-channel scalar losses keyed by variable name."""
+        reduced = _reduce_to_per_channel(
+            self._loss, self._channel_dim, len(self._channel_names)
+        )
+        return dict(zip(self._channel_names, reduced.unbind(0)))
 
 
 class NaNLoss(torch.nn.Module):
@@ -59,8 +129,15 @@ class WeightedMappingLoss:
         self,
         predict_dict: TensorMapping,
         target_dict: TensorMapping,
-    ):
+    ) -> LossOutput:
+        """
+        Args:
+            predict_dict: The predicted data.
+            target_dict: The target data.
 
+        Returns:
+            A ``LossOutput`` wrapping the raw unreduced loss tensor.
+        """
         predict_tensors = self.packer.pack(
             self.normalizer.normalize(predict_dict), axis=self.channel_dim
         )
@@ -76,7 +153,13 @@ class WeightedMappingLoss:
             predict_tensors = torch.where(combined_nan_mask, 0.0, predict_tensors)
             target_tensors = torch.where(combined_nan_mask, 0.0, target_tensors)
 
-        return self.loss(predict_tensors, target_tensors)
+        result = self.loss(predict_tensors, target_tensors)
+        cdim = _channel_dim_positive(predict_tensors.ndim, self.channel_dim)
+        return LossOutput(
+            loss=result,
+            channel_dim=cdim,
+            channel_names=list(self.packer.names),
+        )
 
     def get_normalizer_state(self) -> dict[str, float]:
         return self.normalizer.get_state()
@@ -305,12 +388,65 @@ class CRPSLoss(torch.nn.Module):
         return get_crps(x, y, alpha=self.alpha).mean()
 
 
+class FiniteDifferenceCRPSLoss(torch.nn.Module):
+    """
+    Computes the CRPS of the x and y finite differences of the input tensors,
+    which helps with representations of horizontal stochastic structures.
+    """
+
+    def __init__(self, alpha: float, levels: int = 1):
+        super().__init__()
+        if levels < 1:
+            raise ValueError(f"levels must be at least 1, got {levels}")
+        self.alpha = alpha
+        self.levels = levels
+
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        return (
+            _get_finite_difference_crps_loss(x, y, self.alpha, levels=self.levels)
+            / self.levels
+        )
+
+
+def _get_finite_difference_crps_loss(
+    x: torch.Tensor, y: torch.Tensor, alpha: float, levels: int
+) -> torch.Tensor:
+    x_diff_lat = x[..., 1:, :] - x[..., :-1, :]
+    y_diff_lat = y[..., 1:, :] - y[..., :-1, :]
+    crps_lat = get_crps(x_diff_lat, y_diff_lat, alpha=alpha).mean()
+    # roll on lon because the axis is circular
+    x_diff_lon = torch.roll(x, shifts=-1, dims=-1) - x
+    y_diff_lon = torch.roll(y, shifts=-1, dims=-1) - y
+    crps_lon = get_crps(x_diff_lon, y_diff_lon, alpha=alpha).mean()
+    level_crps = 0.5 * (crps_lat + crps_lon)
+    if levels > 1:
+        # avg_pool2d expects 4D [N, C, H, W]; reshape to merge leading dims
+        x_flat = x.reshape(-1, 1, x.shape[-2], x.shape[-1])
+        y_flat = y.reshape(-1, 1, y.shape[-2], y.shape[-1])
+        # ceil_mode includes partial edge windows when dims are odd
+        x_pooled = F.avg_pool2d(x_flat, kernel_size=2, stride=2, ceil_mode=True)
+        y_pooled = F.avg_pool2d(y_flat, kernel_size=2, stride=2, ceil_mode=True)
+        x_coarse = x_pooled.reshape(
+            *x.shape[:-2], x_pooled.shape[-2], x_pooled.shape[-1]
+        )
+        y_coarse = y_pooled.reshape(
+            *y.shape[:-2], y_pooled.shape[-2], y_pooled.shape[-1]
+        )
+        return level_crps + _get_finite_difference_crps_loss(
+            x_coarse, y_coarse, alpha=alpha, levels=levels - 1
+        )
+    return level_crps
+
+
 class EnsembleLoss(torch.nn.Module):
     def __init__(
         self,
         crps_weight: float,
         energy_score_weight: float,
         sht: Callable[[torch.Tensor], torch.Tensor],
+        finite_difference_crps_weight: float = 0.0,
+        finite_difference_crps_levels: int = 1,
+        almost_fair_crps_alpha: float = 0.95,
     ):
         super().__init__()
         if crps_weight < 0 or energy_score_weight < 0:
@@ -318,15 +454,30 @@ class EnsembleLoss(torch.nn.Module):
                 "crps_weight and energy_score_weight must be non-negative, "
                 f"got {crps_weight} and {energy_score_weight}"
             )
+        if finite_difference_crps_weight < 0:
+            raise ValueError(
+                "finite_difference_crps_weight must be non-negative, "
+                f"got {finite_difference_crps_weight}"
+            )
         if crps_weight + energy_score_weight == 0:
             raise ValueError(
                 "crps_weight and energy_score_weight must sum to a positive value, "
                 f"got {crps_weight} and {energy_score_weight}"
             )
-        self.crps_loss = CRPSLoss(alpha=0.95)
+        self.crps_loss = CRPSLoss(alpha=almost_fair_crps_alpha)
+        if finite_difference_crps_weight > 0:
+            self.diff_crps_loss: FiniteDifferenceCRPSLoss | None = (
+                FiniteDifferenceCRPSLoss(
+                    alpha=almost_fair_crps_alpha,
+                    levels=finite_difference_crps_levels,
+                )
+            )
+        else:
+            self.diff_crps_loss = None
         self.energy_score_loss = EnergyScoreLoss(sht=sht)
 
         self.crps_weight = crps_weight
+        self.diff_crps_weight = finite_difference_crps_weight
         self.energy_score_weight = energy_score_weight
 
     def forward(
@@ -344,7 +495,13 @@ class EnsembleLoss(torch.nn.Module):
             )
         else:
             energy_score_loss = torch.tensor(0.0)
-        return crps + energy_score_loss
+        if self.diff_crps_loss is not None:
+            diff_crps = self.diff_crps_weight * self.diff_crps_loss(
+                gen_norm, target_norm
+            )
+        else:
+            diff_crps = torch.tensor(0.0)
+        return crps + energy_score_loss + diff_crps
 
 
 @dataclasses.dataclass
@@ -462,7 +619,7 @@ class StepLoss(torch.nn.Module):
         predict_dict: TensorMapping,
         target_dict: TensorMapping,
         step: int,
-    ) -> torch.Tensor:
+    ) -> LossOutput:
         """
         Args:
             predict_dict: The predicted data.
@@ -470,10 +627,15 @@ class StepLoss(torch.nn.Module):
             step: The step number, indexed from 0 for the first step.
 
         Returns:
-            The loss.
+            A ``LossOutput`` wrapping the step-weighted loss tensor.
         """
         step_weight = (1.0 + self.sqrt_loss_decay_constant * step) ** (-0.5)
-        return self.loss(predict_dict, target_dict) * step_weight
+        output = self.loss(predict_dict, target_dict)
+        return LossOutput(
+            loss=output._loss * step_weight,
+            channel_dim=output._channel_dim,
+            channel_names=output._channel_names,
+        )
 
 
 @dataclasses.dataclass
@@ -530,7 +692,7 @@ class StepLossConfig:
         channel_dim: int = -3,
     ) -> StepLoss:
         loss = self.loss_config.build(
-            reduction="mean",
+            reduction="none",
             gridded_operations=gridded_ops,
         )
         return StepLoss(

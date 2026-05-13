@@ -1,16 +1,23 @@
-import logging
+import dataclasses
 import warnings
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from typing import Literal
 
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import xarray as xr
 
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
+from fme.core.fill import SmoothFloodFill
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.metrics import spherical_power_spectrum
 from fme.core.typing_ import TensorMapping
+
+from .build_context import MetricBuildContext, MetricNotSupportedError, maybe_filter
+from .data import InferenceBatchData, MetricBuildResult, SubAggregator
 
 
 class SphericalPowerSpectrumAggregator:
@@ -20,6 +27,8 @@ class SphericalPowerSpectrumAggregator:
         self,
         gridded_operations: GriddedOperations,
         nan_fill_fn: Callable[[torch.Tensor, str], torch.Tensor] = lambda x, _: x,
+        report_plot: bool = True,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
     ):
         Distributed.get_instance().require_no_spatial_parallelism(
             "SphericalPowerSpectrumAggregator does not support spatial parallelism."
@@ -28,13 +37,21 @@ class SphericalPowerSpectrumAggregator:
         self._power_spectrum: dict[str, torch.Tensor] = {}
         self._counts: dict[str, int] = defaultdict(int)
         self._nan_fill_fn = nan_fill_fn
+        self._report_plot = report_plot
+        self._variable_metadata: Mapping[str, VariableMetadata] = (
+            variable_metadata or {}
+        )
 
     @torch.no_grad()
-    def record_batch(self, data: TensorMapping):
-        for name in data:
-            batch_size = data[name].shape[0]
-            time_size = data[name].shape[1]
-            tensor = self._nan_fill_fn(data[name], name)
+    def record_batch(self, data: InferenceBatchData):
+        self.record_data(data.prediction)
+
+    @torch.no_grad()
+    def record_data(self, prediction: TensorMapping):
+        for name in prediction:
+            batch_size = prediction[name].shape[0]
+            time_size = prediction[name].shape[1]
+            tensor = self._nan_fill_fn(prediction[name], name)
             power_spectrum = spherical_power_spectrum(tensor, self._real_sht)
             mean_power_spectrum = torch.mean(power_spectrum, dim=(0, 1))
             new_count = batch_size * time_size
@@ -60,6 +77,38 @@ class SphericalPowerSpectrumAggregator:
             logs[name] = _mean_spectrum
         return logs
 
+    @torch.no_grad()
+    def get_logs(self, label: str) -> dict[str, plt.Figure]:
+        logs: dict[str, plt.Figure] = {}
+        if self._report_plot:
+            for name, spectrum in self.get_mean().items():
+                fig = _plot_spectrum_pair(spectrum.cpu(), target=None)
+                logs[f"{label}/{name}"] = fig
+                plt.close(fig)
+        return logs
+
+    @torch.no_grad()
+    def get_dataset(self) -> xr.Dataset:
+        data_vars = {}
+        for name, spectrum in self.get_mean().items():
+            spectrum_np = spectrum.cpu().numpy()
+            wavenumber = np.arange(len(spectrum_np))
+            metadata = self._variable_metadata.get(name)
+            if metadata is not None:
+                long_name = f"spherical power spectrum of {metadata.long_name}"
+                units = f"({metadata.units})^2"
+            else:
+                long_name = f"spherical power spectrum of {name}"
+                units = "unknown_units"
+            attrs = {"long_name": long_name, "units": units}
+            data_vars[name] = xr.DataArray(
+                spectrum_np,
+                dims=["wavenumber"],
+                coords={"wavenumber": wavenumber},
+                attrs=attrs,
+            )
+        return xr.Dataset(data_vars)
+
 
 class PairedSphericalPowerSpectrumAggregator:
     """Record batches and return plots for paired prediction and target data."""
@@ -69,26 +118,36 @@ class PairedSphericalPowerSpectrumAggregator:
         gridded_operations: GriddedOperations,
         report_plot: bool,
         nan_fill_fn: Callable[[torch.Tensor, str], torch.Tensor] = lambda x, _: x,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
     ):
         self._gen_aggregator = SphericalPowerSpectrumAggregator(
-            gridded_operations, nan_fill_fn
+            gridded_operations,
+            nan_fill_fn,
+            report_plot=False,
+            variable_metadata=variable_metadata,
         )
         self._target_aggregator = SphericalPowerSpectrumAggregator(
-            gridded_operations, nan_fill_fn
+            gridded_operations,
+            nan_fill_fn,
+            report_plot=False,
+            variable_metadata=variable_metadata,
         )
         self._report_plot = report_plot
 
     @torch.no_grad()
-    def record_batch(
+    def record_batch(self, data: InferenceBatchData):
+        target = data.target if data.has_target else None
+        self.record_paired_data(prediction=data.prediction, target=target)
+
+    @torch.no_grad()
+    def record_paired_data(
         self,
-        target_data: TensorMapping,
-        gen_data: TensorMapping,
-        target_data_norm: TensorMapping | None = None,
-        gen_data_norm: TensorMapping | None = None,
-        i_time_start: int = 0,
+        prediction: TensorMapping,
+        target: TensorMapping | None,
     ):
-        self._gen_aggregator.record_batch(gen_data)
-        self._target_aggregator.record_batch(target_data)
+        self._gen_aggregator.record_data(prediction)
+        if target is not None:
+            self._target_aggregator.record_data(target)
 
     @torch.no_grad()
     def get_logs(self, label: str) -> dict[str, plt.Figure | float]:
@@ -113,11 +172,13 @@ class PairedSphericalPowerSpectrumAggregator:
 
     @torch.no_grad()
     def get_dataset(self) -> xr.Dataset:
-        logging.debug(
-            "get_dataset not implemented for PairedSphericalPowerSpectrumAggregator. "
-            "Returning an empty dataset."
-        )
-        return xr.Dataset()
+        gen_ds = self._gen_aggregator.get_dataset()
+        target_ds = self._target_aggregator.get_dataset()
+        if not gen_ds or not target_ds:
+            return xr.Dataset()
+        source = ["prediction", "target"]
+        ds = xr.concat([gen_ds, target_ds], dim="source")
+        return ds.assign_coords(source=source)
 
 
 def _get_spectrum_metrics(
@@ -186,3 +247,25 @@ def _plot_spectrum_pair(
     ax.legend()
     plt.tight_layout()
     return fig
+
+
+@dataclasses.dataclass
+class PowerSpectrumMetricConfig:
+    type: Literal["power_spectrum"] = "power_spectrum"
+    variables: list[str] | None = None
+    name: str = "power_spectrum"
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        try:
+            agg: SubAggregator = PairedSphericalPowerSpectrumAggregator(
+                gridded_operations=ctx.ops,
+                nan_fill_fn=SmoothFloodFill(num_steps=4),
+                report_plot=True,
+                variable_metadata=ctx.variable_metadata,
+            )
+        except NotImplementedError as e:
+            raise MetricNotSupportedError(str(e)) from e
+        return MetricBuildResult(aggregator=maybe_filter(agg, self.variables))

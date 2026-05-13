@@ -1,4 +1,5 @@
 import dataclasses
+import datetime
 import os
 import warnings
 from collections.abc import Callable, Mapping, Sequence
@@ -7,12 +8,33 @@ import torch
 import xarray as xr
 
 from fme.ace.aggregator.inference.main import (
+    APPROXIMATELY_TWO_YEARS,
+    SLIGHTLY_LESS_THAN_FIVE_YEARS,
+    AnnualMetricConfig,
+    EnsoCoefficientMetricConfig,
+    EnsoIndexMetricConfig,
+    HistogramMetricConfig,
+    MeanMetricConfig,
+    PowerSpectrumMetricConfig,
+    SeasonalMetricConfig,
+    StepMeanMetricConfig,
+    TimeMeanMetricConfig,
+    VideoMetricConfig,
+    ZonalMeanMetricConfig,
+)
+from fme.ace.aggregator.inference.main import (
     InferenceAggregator as InferenceAggregator_,
+)
+from fme.ace.aggregator.inference.main import (
+    InferenceAggregatorConfig as AceInferenceAggregatorConfig,
 )
 from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregator as InferenceEvaluatorAggregator_,
 )
-from fme.ace.aggregator.inference.main import StepMeanEntry
+from fme.ace.aggregator.inference.main import (
+    InferenceEvaluatorAggregatorConfig as AceInferenceEvaluatorAggregatorConfig,
+)
+from fme.ace.aggregator.inference.main import MetricConfig as AceMetricConfig
 from fme.ace.aggregator.one_step.main import OneStepAggregator as OneStepAggregator_
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
@@ -361,6 +383,49 @@ class InferenceEvaluatorAggregatorConfig:
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
 
+    def _build_metrics(
+        self,
+        *,
+        include_nino34: bool,
+        n_timesteps: int,
+        timestep: datetime.timedelta,
+        log_zonal_mean_images: bool | int,
+    ) -> list[AceMetricConfig]:
+        metrics: list[AceMetricConfig] = []
+        if self.log_global_mean_time_series:
+            metrics.append(MeanMetricConfig(target="denorm"))
+        if self.log_global_mean_norm_time_series:
+            metrics.append(MeanMetricConfig(target="norm"))
+        if n_timesteps >= 20:
+            metrics.append(
+                StepMeanMetricConfig(step=20, name="mean_step_20", target="denorm")
+            )
+            metrics.append(
+                StepMeanMetricConfig(step=20, name="mean_step_20_norm", target="norm")
+            )
+        metrics.append(PowerSpectrumMetricConfig())
+        if log_zonal_mean_images:
+            metrics.append(
+                ZonalMeanMetricConfig(zonal_mean_max_size=log_zonal_mean_images)
+            )
+        metrics.append(TimeMeanMetricConfig(target="denorm"))
+        metrics.append(TimeMeanMetricConfig(target="norm"))
+        if self.log_video:
+            metrics.append(
+                VideoMetricConfig(enable_extended_videos=self.log_extended_video)
+            )
+        if self.log_histograms:
+            metrics.append(HistogramMetricConfig())
+        if self.log_seasonal_means:
+            metrics.append(SeasonalMetricConfig())
+        if n_timesteps * timestep > APPROXIMATELY_TWO_YEARS:
+            metrics.append(AnnualMetricConfig())
+            if include_nino34:
+                metrics.append(EnsoIndexMetricConfig())
+        if n_timesteps * timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS:
+            metrics.append(EnsoCoefficientMetricConfig())
+        return metrics
+
     def build(
         self,
         dataset_info: CoupledDatasetInfo,
@@ -377,18 +442,7 @@ class InferenceEvaluatorAggregatorConfig:
         ice_channel_mean_names: Sequence[str] | None = None,
         atmosphere_channel_mean_names: Sequence[str] | None = None,
     ) -> "InferenceEvaluatorAggregator":
-        if self.monthly_reference_data is None:
-            monthly_reference_data = None
-        else:
-            monthly_reference_data = xr.open_dataset(
-                self.monthly_reference_data, decode_timedelta=False
-            )
-        if self.time_mean_reference_data is None:
-            time_mean = None
-        else:
-            time_mean = xr.open_dataset(
-                self.time_mean_reference_data, decode_timedelta=False
-            )
+        atmosphere_agg = None
         if n_timesteps_atmosphere is not None:
             if n_timesteps_atmosphere > 2**15 and self.log_zonal_mean_images:
                 # matplotlib raises an error if image size is too large, and we plot
@@ -399,32 +453,90 @@ class InferenceEvaluatorAggregatorConfig:
                     "log_zonal_mean_images=False or "
                     "decrease n_coupled_steps to avoid this warning."
                 )
-                log_zonal_mean_images = False
+                log_zonal_mean_images: bool | int = False
             else:
                 log_zonal_mean_images = self.log_zonal_mean_images
-        else:
-            log_zonal_mean_images = self.log_zonal_mean_images
+
+            atmosphere_metrics = self._build_metrics(
+                include_nino34=False,
+                n_timesteps=n_timesteps_atmosphere,
+                timestep=dataset_info.atmosphere.timestep,
+                log_zonal_mean_images=log_zonal_mean_images,
+            )
+            atmosphere_ace_config = AceInferenceEvaluatorAggregatorConfig(
+                metrics=atmosphere_metrics,
+                monthly_reference_data=self.monthly_reference_data,
+                time_mean_reference_data=self.time_mean_reference_data,
+            )
+            atmosphere_agg = atmosphere_ace_config.build(
+                dataset_info=dataset_info.atmosphere,
+                n_ic_steps=1,
+                n_forward_steps=n_timesteps_atmosphere - 1,
+                initial_time=initial_time,
+                normalize=atmosphere_normalize,
+                output_dir=(
+                    os.path.join(output_dir, "atmosphere")
+                    if output_dir is not None
+                    else None
+                ),
+                channel_mean_names=atmosphere_channel_mean_names,
+                save_diagnostics=save_diagnostics,
+            )
+        ocean_agg = None
+        if n_timesteps_ocean is not None:
+            ocean_metrics = self._build_metrics(
+                include_nino34=True,
+                n_timesteps=n_timesteps_ocean,
+                timestep=dataset_info.ocean.timestep,
+                log_zonal_mean_images=log_zonal_mean_images,
+            )
+            ocean_ace_config = AceInferenceEvaluatorAggregatorConfig(
+                metrics=ocean_metrics,
+                monthly_reference_data=self.monthly_reference_data,
+                time_mean_reference_data=self.time_mean_reference_data,
+            )
+            ocean_agg = ocean_ace_config.build(
+                dataset_info=dataset_info.ocean,
+                n_ic_steps=1,
+                n_forward_steps=n_timesteps_ocean - 1,
+                initial_time=initial_time,
+                normalize=ocean_normalize,
+                output_dir=(
+                    os.path.join(output_dir, "ocean") if output_dir is not None else None
+                ),
+                channel_mean_names=ocean_channel_mean_names,
+                save_diagnostics=save_diagnostics,
+            )
+        ice_agg = None
+        if n_timesteps_ice is not None:
+            ice_metrics = self._build_metrics(
+                include_nino34=False,
+                n_timesteps=n_timesteps_ice,
+                timestep=dataset_info.ice.timestep,
+                log_zonal_mean_images=log_zonal_mean_images,
+            )
+            ice_ace_config = AceInferenceEvaluatorAggregatorConfig(
+                metrics=ice_metrics,
+                monthly_reference_data=self.monthly_reference_data,
+                time_mean_reference_data=self.time_mean_reference_data,
+            )
+            ice_agg = ice_ace_config.build(
+                dataset_info=dataset_info.ice,
+                n_ic_steps=1,
+                n_forward_steps=n_timesteps_ice - 1,
+                initial_time=initial_time,
+                normalize=ice_normalize,
+                output_dir=(
+                    os.path.join(output_dir, "ice") if output_dir is not None else None
+                ),
+                channel_mean_names=ice_channel_mean_names,
+                save_diagnostics=save_diagnostics,
+            )
 
         return InferenceEvaluatorAggregator(
-            dataset_info=dataset_info,
-            n_timesteps_ocean=n_timesteps_ocean,
-            n_timesteps_ice=n_timesteps_ice,
-            n_timesteps_atmosphere=n_timesteps_atmosphere,
-            initial_time=initial_time,
-            save_diagnostics=save_diagnostics,
-            output_dir=output_dir,
-            log_histograms=self.log_histograms,
-            log_video=self.log_video,
-            enable_extended_videos=self.log_extended_video,
-            log_zonal_mean_images=log_zonal_mean_images,
-            log_seasonal_means=self.log_seasonal_means,
-            log_global_mean_time_series=self.log_global_mean_time_series,
-            log_global_mean_norm_time_series=self.log_global_mean_norm_time_series,
-            monthly_reference_data=monthly_reference_data,
-            time_mean_reference_data=time_mean,
-            ocean_normalize=ocean_normalize,
-            ice_normalize=ice_normalize,
-            atmosphere_normalize=atmosphere_normalize,
+            ocean=ocean_agg,
+            ice=ice_agg,
+            atmosphere=atmosphere_agg,
             ocean_channel_mean_names=ocean_channel_mean_names,
             ice_channel_mean_names=ice_channel_mean_names,
             atmosphere_channel_mean_names=atmosphere_channel_mean_names,
@@ -547,122 +659,14 @@ class InferenceEvaluatorAggregator(
 ):
     def __init__(
         self,
-        dataset_info: CoupledDatasetInfo,
-        initial_time: xr.DataArray,
-        n_timesteps_ocean: int | None = None,
-        n_timesteps_ice: int | None = None,
-        n_timesteps_atmosphere: int | None = None,
-        ocean_normalize: Callable[[TensorMapping], TensorDict] | None = None,
-        ice_normalize: Callable[[TensorMapping], TensorDict] | None = None,
-        atmosphere_normalize: Callable[[TensorMapping], TensorDict] | None = None,
-        save_diagnostics: bool = True,
-        output_dir: str | None = None,
-        log_video: bool = False,
-        enable_extended_videos: bool = False,
-        log_zonal_mean_images: bool = False,
-        log_seasonal_means: bool = False,
-        log_global_mean_time_series: bool = True,
-        log_global_mean_norm_time_series: bool = True,
-        monthly_reference_data: xr.Dataset | None = None,
-        log_histograms: bool = False,
-        time_mean_reference_data: xr.Dataset | None = None,
+        ocean: InferenceEvaluatorAggregator_ | None = None,
+        ice: InferenceEvaluatorAggregator_ | None = None,
+        atmosphere: InferenceEvaluatorAggregator_ | None = None,
         ocean_channel_mean_names: Sequence[str] | None = None,
         ice_channel_mean_names: Sequence[str] | None = None,
         atmosphere_channel_mean_names: Sequence[str] | None = None,
     ):
-        self._aggregators = {}
-        if n_timesteps_ocean is not None:
-            self._record_ocean_step_20 = n_timesteps_ocean >= 20
-            self._aggregators["ocean"] = InferenceEvaluatorAggregator_(
-                dataset_info=dataset_info.ocean,
-                n_ic_steps=1,
-                n_forward_steps=n_timesteps_ocean - 1,
-                initial_time=initial_time,
-                log_histograms=log_histograms,
-                log_video=log_video,
-                enable_extended_videos=enable_extended_videos,
-                log_zonal_mean_images=log_zonal_mean_images,
-                log_seasonal_means=log_seasonal_means,
-                log_global_mean_time_series=log_global_mean_time_series,
-                log_global_mean_norm_time_series=log_global_mean_norm_time_series,
-                monthly_reference_data=monthly_reference_data,
-                time_mean_reference_data=time_mean_reference_data,
-                log_step_means=[StepMeanEntry(step=20, name="mean_step_20")]
-                if self._record_ocean_step_20
-                else [],
-                channel_mean_names=ocean_channel_mean_names,
-                normalize=ocean_normalize,
-                save_diagnostics=save_diagnostics,
-                output_dir=(
-                    os.path.join(output_dir, "ocean")
-                    if output_dir is not None
-                    else None
-                ),
-                log_nino34_index=False,
-                log_enso_coeff=False,
-            )
-        if n_timesteps_ice is not None:
-            self._record_ice_step_20 = n_timesteps_ice >= 20
-            self._aggregators["ice"] = InferenceEvaluatorAggregator_(
-                dataset_info=dataset_info.ice,
-                n_ic_steps=1,
-                n_forward_steps=n_timesteps_ice - 1,
-                initial_time=initial_time,
-                log_histograms=log_histograms,
-                log_video=log_video,
-                enable_extended_videos=enable_extended_videos,
-                log_zonal_mean_images=log_zonal_mean_images,
-                log_seasonal_means=log_seasonal_means,
-                log_global_mean_time_series=log_global_mean_time_series,
-                log_global_mean_norm_time_series=log_global_mean_norm_time_series,
-                monthly_reference_data=monthly_reference_data,
-                time_mean_reference_data=time_mean_reference_data,
-                log_step_means=[StepMeanEntry(step=20, name="mean_step_20")]
-                if self._record_ice_step_20
-                else [],
-                channel_mean_names=ice_channel_mean_names,
-                normalize=ice_normalize,
-                save_diagnostics=save_diagnostics,
-                output_dir=(
-                    os.path.join(output_dir, "ice")
-                    if output_dir is not None
-                    else None
-                ),
-                log_nino34_index=False,
-                log_enso_coeff=False,
-            )
-        
-        if n_timesteps_atmosphere is not None:
-            self._record_atmos_step_20 = n_timesteps_atmosphere >= 20
-            self._aggregators["atmosphere"] = InferenceEvaluatorAggregator_(
-                dataset_info=dataset_info.atmosphere,
-                n_ic_steps=1,
-                n_forward_steps=n_timesteps_atmosphere - 1,
-                initial_time=initial_time,
-                log_histograms=log_histograms,
-                log_video=log_video,
-                enable_extended_videos=enable_extended_videos,
-                log_zonal_mean_images=log_zonal_mean_images,
-                log_seasonal_means=log_seasonal_means,
-                log_global_mean_time_series=log_global_mean_time_series,
-                log_global_mean_norm_time_series=log_global_mean_norm_time_series,
-                monthly_reference_data=monthly_reference_data,
-                time_mean_reference_data=time_mean_reference_data,
-                log_step_means=[StepMeanEntry(step=20, name="mean_step_20")]
-                if self._record_atmos_step_20
-                else [],
-                channel_mean_names=atmosphere_channel_mean_names,
-                normalize=atmosphere_normalize,
-                save_diagnostics=save_diagnostics,
-                output_dir=(
-                    os.path.join(output_dir, "atmosphere")
-                    if output_dir is not None
-                    else None
-                ),
-                log_nino34_index=False,
-                log_enso_coeff=False,
-            )
-
+        self._aggregators = {"ocean": ocean, "atmosphere": atmosphere, "ice": ice}
         self._num_channels_ocean: int | None = None
         if ocean_channel_mean_names is not None:
             self._num_channels_ocean = len(ocean_channel_mean_names)
@@ -674,26 +678,16 @@ class InferenceEvaluatorAggregator(
             self._num_channels_atmos = len(atmosphere_channel_mean_names)
 
     @property
-    def ocean(self) -> InferenceEvaluatorAggregator_:
-        if "ocean" in self._aggregators:
-            return self._aggregators["ocean"]
-        else:
-            return None
-    
+    def ocean(self) -> InferenceEvaluatorAggregator_ | None:
+        return self._aggregators["ocean"]
     
     @property
-    def ice(self) -> InferenceEvaluatorAggregator_:
-        if "ice" in self._aggregators:
-            return self._aggregators["ice"]
-        else:
-            return None
+    def ice(self) -> InferenceEvaluatorAggregator_ | None:
+        return self._aggregators["ice"]
 
     @property
-    def atmosphere(self) -> InferenceEvaluatorAggregator_:
-        if "atmosphere" in self._aggregators:
-            return self._aggregators["atmosphere"]
-        else:
-            return None
+    def atmosphere(self) -> InferenceEvaluatorAggregator_ | None:
+        return self._aggregators["atmosphere"]
 
     @torch.no_grad()
     def record_batch(self, data: CoupledPairedData) -> InferenceLogs:
@@ -901,31 +895,46 @@ class InferenceAggregatorConfig:
         n_timesteps_ice: int | None = None,
         n_timesteps_atmosphere: int | None = None,
     ) -> "InferenceAggregator":
-        atmos_time_mean = None
-        ocean_time_mean = None
-        ice_time_mean = None
-        if self.atmosphere_time_mean_reference_data is not None:
-            atmos_time_mean = xr.open_dataset(
-                self.atmosphere_time_mean_reference_data, decode_timedelta=False
+        ocean_agg = None
+        if n_timesteps_ocean is not None:
+            ocean_ace_config = AceInferenceAggregatorConfig(
+                time_mean_reference_data=self.ocean_time_mean_reference_data,
+                log_global_mean_time_series=self.log_global_mean_time_series,
             )
-        if self.ocean_time_mean_reference_data is not None:
-            ocean_time_mean = xr.open_dataset(
-                self.ocean_time_mean_reference_data, decode_timedelta=False
+            ocean_agg = ocean_ace_config.build(
+                dataset_info=dataset_info.ocean,
+                n_timesteps=n_timesteps_ocean,
+                output_dir=os.path.join(output_dir, "ocean"),
+                save_diagnostics=True,
             )
-        if self.ice_time_mean_reference_data is not None:
-            ice_time_mean = xr.open_dataset(
-                self.ice_time_mean_reference_data, decode_timedelta=False
+        atmosphere_agg = None
+        if n_timesteps_atmosphere is not None:
+            atmosphere_ace_config = AceInferenceAggregatorConfig(
+                time_mean_reference_data=self.atmosphere_time_mean_reference_data,
+                log_global_mean_time_series=self.log_global_mean_time_series,
+            )
+            atmosphere_agg = atmosphere_ace_config.build(
+                dataset_info=dataset_info.atmosphere,
+                n_timesteps=n_timesteps_atmosphere,
+                output_dir=os.path.join(output_dir, "atmosphere"),
+                save_diagnostics=True,
+            )
+        ice_agg = None
+        if n_timesteps_ice is not None:
+            ice_ace_config = AceInferenceAggregatorConfig(
+                time_mean_reference_data=self.ice_time_mean_reference_data,
+                log_global_mean_time_series=self.log_global_mean_time_series,
+            )
+            ice_agg = ice_ace_config.build(
+                dataset_info=dataset_info.ice,
+                n_timesteps=n_timesteps_ice,
+                output_dir=os.path.join(output_dir, "ice"),
+                save_diagnostics=True,
             )
         return InferenceAggregator(
-            dataset_info=dataset_info,
-            n_timesteps_ocean=n_timesteps_ocean,
-            n_timesteps_ice=n_timesteps_ice,
-            n_timesteps_atmosphere=n_timesteps_atmosphere,
-            output_dir=output_dir,
-            log_global_mean_time_series=self.log_global_mean_time_series,
-            atmosphere_time_mean_reference_data=atmos_time_mean,
-            ocean_time_mean_reference_data=ocean_time_mean,
-            ice_time_mean_reference_data=ice_time_mean,
+            ocean=ocean_agg,
+            ice=ice_agg,
+            atmosphere=atmosphere_agg,
         )
 
 
@@ -944,100 +953,30 @@ class InferenceAggregator(
 
     def __init__(
         self,
-        dataset_info: CoupledDatasetInfo,
-        n_timesteps_ocean: int | None = None,
-        n_timesteps_ice: int | None = None,
-        n_timesteps_atmosphere: int | None = None,
-        save_diagnostics: bool = True,
-        output_dir: str | None = None,
-        atmosphere_time_mean_reference_data: xr.Dataset | None = None,
-        ocean_time_mean_reference_data: xr.Dataset | None = None,
-        ice_time_mean_reference_data: xr.Dataset | None = None,
-        log_global_mean_time_series: bool = True,
+        ocean: InferenceAggregator_ | None = None,
+        ice: InferenceAggregator_ | None = None,
+        atmosphere: InferenceAggregator_ | None = None,
     ):
-        """
-        Args:
-            dataset_info: The coordinates of the dataset.
-            n_timesteps_ocean: Number of timesteps for ocean.
-            n_timesteps_atmosphere: Number of timesteps for atmosphere.
-            save_diagnostics: Whether to save diagnostics.
-            output_dir: Directory to save diagnostic output.
-            atmosphere_time_mean_reference_data: Reference time means for atmosphere.
-            ocean_time_mean_reference_data: Reference time means for ocean.
-            ice_time_mean_reference_data: Reference time means for ice.
-            log_global_mean_time_series: Whether to log global mean time series metrics.
-        """
-        if save_diagnostics and output_dir is None:
-            raise ValueError("Output directory must be set to save diagnostics")
-        self._log_time_series = log_global_mean_time_series
-        self._save_diagnostics = save_diagnostics
-        self._output_dir = output_dir
-        self._aggregators = {}
-        if n_timesteps_ocean is not None:
-            self._aggregators["ocean"] = InferenceAggregator_(
-                dataset_info=dataset_info.ocean,
-                n_timesteps=n_timesteps_ocean,
-                save_diagnostics=save_diagnostics,
-                output_dir=(
-                    os.path.join(output_dir, "ocean")
-                    if output_dir is not None
-                    else None
-                ),
-                log_global_mean_time_series=log_global_mean_time_series,
-                time_mean_reference_data=ocean_time_mean_reference_data,
-            )
-        if n_timesteps_ice is not None:
-            self._aggregators["ice"] = InferenceAggregator_(
-                dataset_info=dataset_info.ice,
-                n_timesteps=n_timesteps_ice,
-                save_diagnostics=save_diagnostics,
-                output_dir=(
-                    os.path.join(output_dir, "ice")
-                    if output_dir is not None
-                    else None
-                ),
-                log_global_mean_time_series=log_global_mean_time_series,
-                time_mean_reference_data=ocean_time_mean_reference_data,
-            )
-        if n_timesteps_atmosphere is not None:
-            self._aggregators["atmosphere"] = InferenceAggregator_(
-                dataset_info=dataset_info.atmosphere,
-                n_timesteps=n_timesteps_atmosphere,
-                save_diagnostics=save_diagnostics,
-                output_dir=(
-                    os.path.join(output_dir, "atmosphere")
-                    if output_dir is not None
-                    else None
-                ),
-                log_global_mean_time_series=log_global_mean_time_series,
-                time_mean_reference_data=atmosphere_time_mean_reference_data,
-            )
+        self._aggregators = {"ocean": ocean, "atmosphere": atmosphere, "ice": ice}
 
     @property
-    def ocean(self) -> InferenceAggregator_:
-        if "ocean" in self._aggregators:
-            return self._aggregators["ocean"]
-        else:
-            return None
-    
+    def ocean(self) -> InferenceAggregator_ | None:
+        return self._aggregators["ocean"]
     
     @property
-    def ice(self) -> InferenceAggregator_:
-        if "ice" in self._aggregators:
-            return self._aggregators["ice"]
-        else:
-            return None
+    def ice(self) -> InferenceAggregator_ | None:
+        return self._aggregators["ice"]
 
     @property
-    def atmosphere(self) -> InferenceAggregator_:
-        if "atmosphere" in self._aggregators:
-            return self._aggregators["atmosphere"]
-        else:
-            return None
+    def atmosphere(self) -> InferenceAggregator_ | None:
+        return self._aggregators["atmosphere"]
 
     @property
     def log_time_series(self) -> bool:
-        return self._log_time_series
+        if self.ocean is not None:
+            return self.ocean.log_time_series
+        else:
+            return self.ice.log_time_series
 
     @torch.no_grad()
     def record_batch(self, data: CoupledPairedData) -> InferenceLogs:

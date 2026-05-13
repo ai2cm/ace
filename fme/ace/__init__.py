@@ -1,6 +1,9 @@
 import sys
 
-from fme.ace.aggregator.inference import StepMeanEntry
+from fme.ace.aggregator.inference.main import (
+    LegacyFlagInferenceEvaluatorAggregatorConfig,
+    StepMeanEntry,
+)
 from fme.ace.aggregator.one_step import OneStepAggregatorConfig
 from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.augmentation import AugmentationConfig
@@ -54,6 +57,7 @@ from fme.ace.stepper.parameter_init import (
     ParameterInitializationConfig,
 )
 from fme.ace.stepper.single_module import (
+    CheckpointStepperConfig,
     Stepper,
     StepperConfig,
     StepSelector,
@@ -65,7 +69,6 @@ from fme.ace.stepper.time_length_probabilities import (
     TimeLengthProbability,
     TimeLengthSchedule,
 )
-from fme.ace.train.train_config import WeatherEvaluationConfig
 from fme.core.cli import ResumeResultsConfig
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.ice import IceCorrectorConfig

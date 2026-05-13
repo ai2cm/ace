@@ -64,7 +64,7 @@ jobs:
             --dataset ${{ env.BEAKER_CHECKPOINT_TEST_DATASET }}:/test-data \
             --gpus 1 \
             --shared-memory 50GiB \
-            --budget ai2/climate \
+            --budget ai2/atec-climate \
             --system-python \
             --install "pip install --no-deps ." \
             -- python -I -m fme.ace.evaluator ${{ env.CONFIG_PATH }} \

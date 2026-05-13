@@ -1,27 +1,20 @@
+import contextlib
 import dataclasses
 import logging
 import os
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 import dacite
 import torch
-import xarray as xr
 
 import fme
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.distributed import Distributed
-from fme.core.generics.trainer import AggregatorBuilderABC, Trainer
-from fme.core.typing_ import TensorDict, TensorMapping
-from fme.coupled.aggregator import (
-    InferenceEvaluatorAggregatorConfig,
-    OneStepAggregator,
-    TrainAggregator,
-)
-from fme.coupled.data_loading.batch_data import (
-    CoupledPairedData,
-    CoupledPrognosticState,
-)
+from fme.core.generics.trainer import AggregatorBuilderABC, Trainer, inference_one_epoch
+from fme.core.generics.validation import run_validation
+from fme.coupled.aggregator import OneStepAggregator, TrainAggregator
 from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.stepper import CoupledTrainOutput
 from fme.coupled.train.train_config import TrainBuilders, TrainConfig
@@ -33,122 +26,114 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
     train_data = builder.get_train_data()
     logging.info("Initializing validation data loader")
     validation_data = builder.get_validation_data()
-    logging.info("Initializing inline inference data loader")
-    dataset_info = train_data.dataset_info
-    inference_data = builder.get_evaluation_inference_data()
 
     variable_metadata = get_derived_variable_metadata() | train_data.variable_metadata
+    dataset_info = train_data.dataset_info.update_variable_metadata(variable_metadata)
+    for data, name in zip((train_data, validation_data), ("train", "valid")):
+        data.log_info(name)
+
+    if config.inference_list:
+        logging.info("Initializing inline inference data loaders")
+    else:
+        logging.info("Skipping inline inference")
+    inference_entries = builder.get_inference_data()
+    inference_epochs = config.get_inference_epochs()
+    inference_epoch_sets = config.get_inference_epoch_sets()
+
     logging.info("Starting model initialization")
-    stepper = builder.get_stepper(dataset_info)
+    stepper = builder.get_stepper(train_data.dataset_info)
     end_of_batch_ops = builder.get_end_of_batch_ops(stepper.modules)
 
-    batch = next(iter(inference_data.loader))
-    n_timesteps_ocean = None
-    n_timesteps_ice = None
-    n_timesteps_atmosphere = None
-    ocean_normalize = None
-    ice_normalize = None
-    atmosphere_normalize = None
-    if stepper.atmosphere is None:
-        initial_inference_times = batch.ocean_data.time.isel(time=0)
-        n_timesteps_ocean = config.inference_n_coupled_steps + stepper.ocean.n_ic_timesteps
-        n_timesteps_ice = (
-            config.inference_n_coupled_steps * stepper.n_inner_steps
-            + stepper.ice.n_ic_timesteps
-        )
-        ocean_normalize = stepper.ocean.normalizer.normalize
-        ice_normalize = stepper.ice.normalizer.normalize
-    elif stepper.ice is None:
-        initial_inference_times = batch.ocean_data.time.isel(time=0)
-        n_timesteps_ocean = config.inference_n_coupled_steps + stepper.ocean.n_ic_timesteps
-        n_timesteps_atmosphere = (
-            config.inference_n_coupled_steps * stepper.n_inner_steps
-            + stepper.atmosphere.n_ic_timesteps
-        )
-        ocean_normalize = stepper.ocean.normalizer.normalize
-        atmosphere_normalize = stepper.atmosphere.normalizer.normalize
-    elif stepper.ocean is None:
-        initial_inference_times = batch.ice_data.time.isel(time=0)
-        n_timesteps_ice = config.inference_n_coupled_steps
-        n_timesteps_atmosphere = config.inference_n_coupled_steps
-        ice_normalize = stepper.ice.normalizer.normalize
-        atmosphere_normalize = stepper.atmosphere.normalizer.normalize
-    else:
-        initial_inference_times = batch.ocean_data.time.isel(time=0)
-        n_timesteps_ocean = config.inference_n_coupled_steps + stepper.ocean.n_ic_timesteps
-        n_timesteps_ice = (
-            config.inference_n_coupled_steps * stepper.n_inner_steps
-            + stepper.ice.n_ic_timesteps
-        )
-        n_timesteps_atmosphere = (
-            config.inference_n_coupled_steps * stepper.n_inner_steps
-            + stepper.atmosphere.n_ic_timesteps
-        )
-        ocean_normalize = stepper.ocean.normalizer.normalize
-        ice_normalize = stepper.ice.normalizer.normalize
-        atmosphere_normalize = stepper.atmosphere.normalizer.normalize
     aggregator_builder = CoupledAggregatorBuilder(
-        inference_config=config.inference_aggregator,
-        dataset_info=dataset_info.update_variable_metadata(variable_metadata),
-        initial_inference_times=initial_inference_times,
-        n_timesteps_ocean=n_timesteps_ocean,
-        n_timesteps_atmosphere=n_timesteps_atmosphere,
-        n_timesteps_ice=n_timesteps_ice,
-        ocean_normalize=ocean_normalize,
-        ice_normalize=ice_normalize,
-        atmosphere_normalize=atmosphere_normalize,
+        dataset_info=dataset_info,
         loss_scaling=stepper.effective_loss_scaling,
         save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
         output_dir=config.output_dir,
     )
+
+    def validation_callback(epoch: int) -> tuple[dict[str, Any], float]:
+        validation_data.set_epoch(epoch)
+        aggregator = aggregator_builder.get_validation_aggregator()
+        logs = run_validation(
+            train_stepper=stepper,
+            validation_data=validation_data,
+            aggregator=aggregator,
+            diagnostics_subdir=f"epoch_{epoch:04d}",
+            record_logs=lambda logs: None,
+        )
+        return logs, logs["val/mean/loss"]
+
+    def inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
+        if epoch not in inference_epochs:
+            return {}, None
+        all_logs: dict[str, Any] = {}
+        weighted_error = 0.0
+        has_error = False
+        for i, (entry_config, data, name) in enumerate(inference_entries):
+            if epoch not in inference_epoch_sets[i]:
+                continue
+            batch = next(iter(data.loader))
+            initial_times = batch.ocean_data.time.isel(time=0)
+            n_timesteps_ocean = (
+                entry_config.n_coupled_steps + stepper.ocean.n_ic_timesteps
+            )
+            n_timesteps_atmosphere = (
+                entry_config.n_coupled_steps * stepper.n_inner_steps
+                + stepper.atmosphere.n_ic_timesteps
+            )
+            aggregator = entry_config.aggregator.build(
+                dataset_info=dataset_info,
+                n_timesteps_ocean=n_timesteps_ocean,
+                n_timesteps_atmosphere=n_timesteps_atmosphere,
+                initial_time=initial_times,
+                ocean_normalize=stepper.ocean.normalizer.normalize,
+                atmosphere_normalize=stepper.atmosphere.normalizer.normalize,
+                save_diagnostics=config.save_per_epoch_diagnostics,
+                output_dir=os.path.join(config.output_dir, name),
+            )
+            logs = inference_one_epoch(
+                stepper=stepper,
+                validation_context=contextlib.nullcontext,
+                dataset=data,
+                aggregator=aggregator,
+                label=name,
+                epoch=epoch,
+            )
+            all_logs.update(logs)
+            error = logs.get(f"{name}/time_mean_norm/rmse/channel_mean")
+            if error is not None:
+                weighted_error += entry_config.weight * error
+                has_error = True
+
+        return all_logs, weighted_error if has_error else None
+
     return Trainer(
         train_data=train_data,
         validation_data=validation_data,
-        inference_data=inference_data,
         stepper=stepper,
         build_optimization=builder.get_optimization,
         build_ema=builder.get_ema,
         config=config,
         aggregator_builder=aggregator_builder,
+        validation_callback=validation_callback,
         end_of_batch_callback=end_of_batch_ops,
+        inference_callback=inference_callback,
     )
 
 
 class CoupledAggregatorBuilder(
-    AggregatorBuilderABC[CoupledPrognosticState, CoupledTrainOutput, CoupledPairedData]
+    AggregatorBuilderABC[CoupledTrainOutput],
 ):
     def __init__(
         self,
-        inference_config: InferenceEvaluatorAggregatorConfig,
         dataset_info: CoupledDatasetInfo,
-        initial_inference_times: xr.DataArray,
         output_dir: str,
         loss_scaling: CoupledTensorMapping,
-        n_timesteps_ocean: int | None = None,
-        n_timesteps_ice: int | None = None,
-        n_timesteps_atmosphere: int | None = None,
-        ocean_normalize: Callable[[TensorMapping], TensorDict] | None = None,
-        ice_normalize: Callable[[TensorMapping], TensorDict] | None = None,
-        atmosphere_normalize: Callable[[TensorMapping], TensorDict] | None = None,
-        ocean_channel_mean_names: Sequence[str] | None = None,
-        ice_channel_mean_names: Sequence[str] | None = None,
-        atmosphere_channel_mean_names: Sequence[str] | None = None,
         save_per_epoch_diagnostics: bool = False,
     ):
-        self.inference_config = inference_config
         self.dataset_info = dataset_info
-        self.initial_inference_times = initial_inference_times
-        self.n_timesteps_ocean = n_timesteps_ocean
-        self.n_timesteps_ice = n_timesteps_ice
-        self.n_timesteps_atmosphere = n_timesteps_atmosphere
         self.output_dir = output_dir
-        self.ocean_normalize = ocean_normalize
-        self.ice_normalize = ice_normalize
-        self.atmosphere_normalize = atmosphere_normalize
         self.loss_scaling = loss_scaling
-        self.ocean_channel_mean_names = ocean_channel_mean_names
-        self.ice_channel_mean_names = ice_channel_mean_names
-        self.atmosphere_channel_mean_names = atmosphere_channel_mean_names
         self.save_per_epoch_diagnostics = save_per_epoch_diagnostics
 
     def get_train_aggregator(self) -> TrainAggregator:
@@ -160,26 +145,6 @@ class CoupledAggregatorBuilder(
             save_diagnostics=self.save_per_epoch_diagnostics,
             output_dir=os.path.join(self.output_dir, "val"),
             loss_scaling=self.loss_scaling,
-            ocean_channel_mean_names=self.ocean_channel_mean_names,
-            ice_channel_mean_names=self.ice_channel_mean_names,
-            atmosphere_channel_mean_names=self.atmosphere_channel_mean_names,
-        )
-
-    def get_inference_aggregator(self):
-        return self.inference_config.build(
-            dataset_info=self.dataset_info,
-            n_timesteps_ocean=self.n_timesteps_ocean,
-            n_timesteps_ice=self.n_timesteps_ice,
-            n_timesteps_atmosphere=self.n_timesteps_atmosphere,
-            initial_time=self.initial_inference_times,
-            ocean_normalize=self.ocean_normalize,
-            ice_normalize=self.ice_normalize,
-            atmosphere_normalize=self.atmosphere_normalize,
-            save_diagnostics=self.save_per_epoch_diagnostics,
-            output_dir=os.path.join(self.output_dir, "inference"),
-            ocean_channel_mean_names=self.ocean_channel_mean_names,
-            ice_channel_mean_names=self.ice_channel_mean_names,
-            atmosphere_channel_mean_names=self.atmosphere_channel_mean_names,
         )
 
 

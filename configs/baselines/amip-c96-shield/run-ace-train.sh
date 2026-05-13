@@ -42,7 +42,7 @@ run_training() {
     --gpus "$N_GPUS" \
     --shared-memory 400GiB \
     --weka climate-default:/climate-default \
-    --budget ai2/climate \
+    --budget ai2/atec-climate \
     --no-conda \
     --install "pip install --no-deps ." \
     "${extra_args[@]}" \
