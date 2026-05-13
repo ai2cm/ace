@@ -37,6 +37,10 @@ class StepLossABC(abc.ABC):
         """
         pass
 
+    def seed_rng(self, seed: int) -> None:
+        """Seed the stochastic n_steps sampler for deterministic evaluation."""
+        pass
+
     @abc.abstractmethod
     def n_required_forward_steps(self) -> int:
         """Number of consecutive leading forward steps that must be computed
@@ -199,6 +203,10 @@ class LossContributions(StepLossABC):
     def sample_n_steps(self) -> None:
         if self._n_steps_sampler is not None:
             self._n_steps = float(self._n_steps_sampler.sample())
+
+    def seed_rng(self, seed: int) -> None:
+        if self._n_steps_sampler is not None:
+            self._n_steps_sampler.seed_rng(seed)
 
     @property
     def effective_loss_scaling(self) -> TensorDict:

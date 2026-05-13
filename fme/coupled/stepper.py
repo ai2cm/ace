@@ -1387,6 +1387,10 @@ class CoupledStepperTrainLoss:
         for loss_obj in self._loss_objs.values():
             loss_obj.sample_n_steps()
 
+    def seed_step_sampler(self, seed: int) -> None:
+        for loss_obj in self._loss_objs.values():
+            loss_obj.seed_rng(seed)
+
     def n_required_outer_steps(self, n_inner_steps: int) -> int:
         """Minimum number of outer (ocean) steps needed so that every
         component step contributing to the current batch's loss is computed.
@@ -1628,6 +1632,9 @@ class CoupledTrainStepper(
         return self._stepper.predict_paired(
             initial_condition, forcing, compute_derived_variables
         )
+
+    def seed_step_sampler(self, seed: int) -> None:
+        self._loss.seed_step_sampler(seed)
 
     def set_train(self):
         self._stepper.set_train()
