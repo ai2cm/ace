@@ -63,7 +63,8 @@ def _collate_with_masking(
             if name in sample:
                 tensors.append(sample[name])
             else:
-                tensors.append(torch.full(shape, float("nan"), dtype=dtype))
+                fill_dtype = torch.float32 if not dtype.is_floating_point else dtype
+                tensors.append(torch.full(shape, float("nan"), dtype=fill_dtype))
         batch_data[name] = torch.stack(tensors)
         mask_tensor = torch.tensor(present)
         data_mask[name] = mask_tensor

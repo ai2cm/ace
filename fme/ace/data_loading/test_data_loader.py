@@ -1379,12 +1379,15 @@ def test_gridded_data_with_variable_masking_concat(tmp_path):
     dir_a = tmp_path / "a"
     dir_a.mkdir()
     _create_dataset_on_disk(
-        dir_a, in_variable_names=["foo", "bar"], out_variable_names=["foo", "bar"]
+        dir_a,
+        n_times=2,
+        in_variable_names=["foo", "bar"],
+        out_variable_names=["foo", "bar"],
     )
     dir_b = tmp_path / "b"
     dir_b.mkdir()
     _create_dataset_on_disk(
-        dir_b, in_variable_names=["foo"], out_variable_names=["foo"]
+        dir_b, n_times=2, in_variable_names=["foo"], out_variable_names=["foo"]
     )
     config = DataLoaderConfig(
         dataset=ConcatDatasetConfig(
@@ -1406,6 +1409,11 @@ def test_gridded_data_with_variable_masking_concat(tmp_path):
     assert isinstance(batch, BatchData)
     assert "foo" in batch.data
     assert "bar" in batch.data
+    assert batch.data_mask is not None
+    assert "bar" in batch.data_mask
+    assert batch.data_mask["bar"].shape == (2,)
+    assert batch.data_mask["bar"].any()
+    assert not batch.data_mask["bar"].all()
 
 
 def test_inference_data_loader_with_variable_masking(tmp_path):
@@ -1435,3 +1443,5 @@ def test_inference_data_loader_with_variable_masking(tmp_path):
     assert isinstance(batch_data, BatchData)
     assert "foo" in batch_data.data
     assert batch_data.data["foo"].shape == (2, 4, N_LAT, N_LON)
+    assert "nonexistent_var" not in batch_data.data
+    assert batch_data.data_mask is None

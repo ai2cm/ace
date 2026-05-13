@@ -817,3 +817,13 @@ def test_from_sample_tuples_with_variable_masking():
     torch.testing.assert_close(
         batch.data["b"][1], torch.full((2, 3), float("nan")), equal_nan=True
     )
+
+
+def test_collate_with_masking_integer_dtype():
+    sample_a: TensorDict = {"x": torch.ones(2, 3, dtype=torch.long)}
+    sample_b: TensorDict = {}
+    batch_data, data_mask = _collate_with_masking([sample_a, sample_b])
+    assert data_mask is not None
+    assert not data_mask["x"][1]
+    assert batch_data["x"].dtype == torch.float32
+    assert batch_data["x"][1].isnan().all()
