@@ -26,7 +26,7 @@ fto_ftaCD5ep4_ft_fto_stoch_ncs4_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01
 
 fto-1pctCO2_0256to0350-OHCBudget-condSFNO_w_EC-d0zgdwek_mb4prsz7|rs0|01KFSZKJNT070YB64J4HY70Q7D|trained|best_inference_ckpt|high|--min-runtime 5h
 
-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KKQWTQTEZAAKXGZRW6Q0V5Q8|run_ICx9_40yr|best_inference_ckpt|high|--min-runtime 8h
+fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KKQWTQTEZAAKXGZRW6Q0V5Q8|run_ic0251_100yr|best_inference_ckpt|high|--min-runtime 8h
 
 
 # -- automatically added by coupled_train.sh --
