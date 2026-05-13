@@ -8,7 +8,7 @@ evaluate_before_training: true
 ema:
   decay: 0.9995
   faster_decay_at_start: false
-max_epochs: 20
+max_epochs: 15
 inference:
   - name: inference
     n_coupled_steps: 1440
@@ -195,8 +195,11 @@ optimization:
           start_factor: 0.01
           end_factor: 1
           total_iters: 3000
-      - type: ConstantLR
+      - type: CosineAnnealingLR
         step_each_iteration: true
+        kwargs:
+          T_max: 10005
+          eta_min: 0.000001
     milestones: [3000]
 stepper_training:
   n_coupled_steps: 4
@@ -255,7 +258,7 @@ stepper_training:
         specific_total_water_0: 0.5
         specific_total_water_1: 0.25
         specific_total_water_2: 0.5
-        PRATEsfc: 2
+        PRATEsfc: 0.5
         h500: 10
         TMP850: 5
         Q2m: 0.5
@@ -269,10 +272,6 @@ stepper_training:
         USWRFtoa: 2
         tendency_of_total_water_path_due_to_advection: 0.5
         PRESsfc: 3
-        LHTFLsfc: 2
-        SHTFLsfc: 2
-        eastward_surface_wind_stress: 2
-        northward_surface_wind_stress: 2
 stepper:
   ocean_fraction_prediction:
     land_fraction_name: land_fraction
