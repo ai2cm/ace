@@ -38,3 +38,5 @@ ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRC8081HFK82XE2MRW
 ft-50-50-piControl-fto_stochastic-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_cbj61w53|rs0|01KRC9D7HCCN6B4SZQ18C41R72|training|best_inference_ckpt|normal|--min-runtime 8h
 
 sfc-loss-2x-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRHHSFY3W160RFM7PKN32DGC|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cosLR-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRHM99V2NTX13H34C81TBQ3E|training|best_inference_ckpt|normal|--min-runtime 8h
