@@ -85,3 +85,25 @@ def test_time_length_schedule_sorts_milestones():
     assert schedule.get_value(0) == 1
     assert schedule.get_value(2) == 2
     assert schedule.get_value(5) == 3
+
+
+def test_seed_rng_produces_deterministic_sequence():
+    sampler = TimeLengthProbabilities(
+        [TimeLengthProbability(10, 0.5), TimeLengthProbability(20, 0.5)]
+    )
+    sampler.seed_rng(42)
+    first_run = [sampler.sample() for _ in range(10)]
+    sampler.seed_rng(42)
+    second_run = [sampler.sample() for _ in range(10)]
+    assert first_run == second_run
+
+
+def test_seed_rng_different_seeds_differ():
+    sampler = TimeLengthProbabilities(
+        [TimeLengthProbability(10, 0.5), TimeLengthProbability(20, 0.5)]
+    )
+    sampler.seed_rng(0)
+    first_run = [sampler.sample() for _ in range(20)]
+    sampler.seed_rng(1)
+    second_run = [sampler.sample() for _ in range(20)]
+    assert first_run != second_run
