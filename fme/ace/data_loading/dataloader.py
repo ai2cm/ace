@@ -189,8 +189,7 @@ class SlidingWindowDataLoader(DataLoaderABC):
         self._subset_start = _subset_start
         self._subset_stop = _subset_stop
 
-        self._update_n_timesteps_for_epoch(0)
-        self.set_epoch(0)
+        self._init_epoch_state(0)
 
     def _update_n_timesteps_for_epoch(self, epoch: int):
         self._input_n_timesteps = self._input_n_timesteps_schedule.get_value(epoch)
@@ -283,15 +282,18 @@ class SlidingWindowDataLoader(DataLoaderABC):
             _subset_start=new_start,
             _subset_stop=new_stop,
         )
-        loader.set_epoch(self._epoch)
+        loader._init_epoch_state(self._epoch)
         return loader
 
-    def set_epoch(self, epoch: int):
+    def _init_epoch_state(self, epoch: int):
         self._epoch = epoch
         dist = Distributed.get_instance()
         self._seed = self._epoch + dist.get_seed()
-        self._loader.set_epoch(epoch)
         self._update_n_timesteps_for_epoch(epoch)
+
+    def set_epoch(self, epoch: int):
+        self._init_epoch_state(epoch)
+        self._loader.set_epoch(epoch)
 
     def alternate_shuffle(self):
         self._loader.alternate_shuffle()

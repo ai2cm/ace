@@ -61,13 +61,27 @@ def make_pooled(
 # --- build_pool_schedule tests ---
 
 
-def test_build_pool_schedule_covers_all_samples():
-    schedule = build_pool_schedule(
-        n_input_batches=5, n_sub_batches=3, pool_size=2, shuffle=False, seed=0
-    )
-    assert schedule.shape == (15, 2)
-    pairs = set(map(tuple, schedule.tolist()))
-    expected = {(i, j) for i in range(5) for j in range(3)}
+@pytest.mark.parametrize(
+    "n_input,n_sub,pool_size",
+    [
+        (4, 3, 1),
+        (4, 3, 2),
+        (4, 3, 4),
+        (5, 3, 2),
+        (8, 5, 3),
+        (10, 2, 4),
+        (3, 6, 2),
+        (1, 5, 1),
+        (6, 1, 3),
+    ],
+)
+@pytest.mark.parametrize("shuffle", [True, False])
+def test_build_pool_schedule_covers_all_samples(n_input, n_sub, pool_size, shuffle):
+    """Every (input_idx, offset) pair appears exactly once."""
+    schedule = build_pool_schedule(n_input, n_sub, pool_size, shuffle=shuffle, seed=7)
+    assert schedule.shape == (n_input * n_sub, 2)
+    pairs = sorted(map(tuple, schedule.tolist()))
+    expected = sorted((i, j) for i in range(n_input) for j in range(n_sub))
     assert pairs == expected
 
 
@@ -137,8 +151,9 @@ def test_repeated_iteration():
 
 
 @pytest.mark.parametrize("pool_size", [1, 2, 3])
-def test_cache_eviction(pool_size):
-    pooled = make_pooled(n_items=6, n_sub=3, pool_size=pool_size, shuffle=False)
+@pytest.mark.parametrize("shuffle", [True, False])
+def test_cache_eviction(pool_size, shuffle):
+    pooled = make_pooled(n_items=6, n_sub=3, pool_size=pool_size, shuffle=shuffle)
     iter(pooled)
     max_pool_size = 0
     for _ in pooled:
@@ -219,6 +234,20 @@ def test_subset_empty():
     sub = pooled.subset(start=5, stop=5)
     assert len(sub) == 0
     assert list(sub) == []
+
+
+@pytest.mark.parametrize("pool_size", [2, 3])
+@pytest.mark.parametrize("shuffle", [True, False])
+@pytest.mark.parametrize("start", [0, 3, 5, 7])
+def test_subset_pool_invariant(pool_size, shuffle, start):
+    """Pool occupancy must never exceed pool_size when iterating a subset."""
+    pooled = make_pooled(6, 3, pool_size, shuffle=shuffle, seed=0)
+    sub = pooled.subset(start=start)
+    iter(sub)
+    max_pool = 0
+    for _ in sub:
+        max_pool = max(max_pool, len(sub._pool))
+    assert max_pool <= pool_size
 
 
 def test_subset_none_returns_self():
