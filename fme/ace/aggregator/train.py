@@ -76,6 +76,8 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
     def __init__(self, config: TrainAggregatorConfig, operations: GriddedOperations):
         self._n_loss_batches = 0
         self._loss = torch.tensor(0.0, device=get_device())
+        self._per_step_loss_sums: dict[str, torch.Tensor] = {}
+        self._per_step_loss_counts: dict[str, int] = {}
         self._per_channel_loss: dict[str, torch.Tensor] = {}
         self._per_channel_loss_enabled = config.per_channel_loss
         self._paired_aggregators: dict[str, Aggregator] = {}
@@ -105,6 +107,16 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
     def record_batch(self, batch: TrainOutput):
         self._loss += batch.metrics["loss"]
         self._n_loss_batches += 1
+        for key, value in batch.metrics.items():
+            if key.startswith("loss_step_"):
+                if key not in self._per_step_loss_sums:
+                    self._per_step_loss_sums[key] = value.detach().clone()
+                    self._per_step_loss_counts[key] = 1
+                else:
+                    self._per_step_loss_sums[key] = (
+                        self._per_step_loss_sums[key] + value.detach()
+                    )
+                    self._per_step_loss_counts[key] += 1
         if self._per_channel_loss_enabled and batch.per_channel_losses is not None:
             for var_name, value in batch.per_channel_losses.items():
                 acc = self._per_channel_loss.get(
@@ -139,6 +151,11 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
         logs[f"{label}/mean/loss"] = float(
             dist.reduce_mean(self._loss / self._n_loss_batches).cpu().numpy()
         )
+        for key in sorted(self._per_step_loss_sums.keys()):
+            count = self._per_step_loss_counts[key]
+            logs[f"{label}/mean/{key}"] = float(
+                dist.reduce_mean(self._per_step_loss_sums[key] / count).cpu().numpy()
+            )
         if self._n_loss_batches > 0 and self._per_channel_loss_enabled:
             for var_name, acc in self._per_channel_loss.items():
                 logs[f"{label}/mean/loss/{var_name}"] = float(

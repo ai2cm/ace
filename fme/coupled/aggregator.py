@@ -59,18 +59,38 @@ class TrainAggregator(AggregatorABC[CoupledTrainOutput]):
     def __init__(self):
         self._n_batches = 0
         self._loss = torch.tensor(0.0, device=get_device())
+        self._per_step_loss_sums: dict[str, torch.Tensor] = {}
+        self._per_step_loss_counts: dict[str, int] = {}
 
     @torch.no_grad()
     def record_batch(self, batch: CoupledTrainOutput):
         self._loss += batch.total_metrics["loss"]
         self._n_batches += 1
+        for component in (batch.ocean, batch.atmosphere):
+            for key, value in component.metrics.items():
+                if key.startswith("loss/"):
+                    if key not in self._per_step_loss_sums:
+                        self._per_step_loss_sums[key] = torch.tensor(
+                            0.0, device=get_device()
+                        )
+                        self._per_step_loss_counts[key] = 0
+                    self._per_step_loss_sums[key] = (
+                        self._per_step_loss_sums[key] + value.detach()
+                    )
+                    self._per_step_loss_counts[key] += 1
 
     @torch.no_grad()
     def get_logs(self, label: str) -> dict[str, torch.Tensor]:
         logs = {f"{label}/mean/loss": self._loss / self._n_batches}
         dist = Distributed.get_instance()
+        for key in sorted(self._per_step_loss_sums.keys()):
+            count = self._per_step_loss_counts[key]
+            logs[f"{label}/mean/{key}"] = float(
+                dist.reduce_mean(self._per_step_loss_sums[key] / count).cpu().numpy()
+            )
         for key in sorted(logs.keys()):
-            logs[key] = float(dist.reduce_mean(logs[key].detach()).cpu().numpy())
+            if isinstance(logs[key], torch.Tensor):
+                logs[key] = float(dist.reduce_mean(logs[key].detach()).cpu().numpy())
         return logs
 
     @torch.no_grad()
