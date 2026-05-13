@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=OM4_FloeNet-SamudraI_coupled_seed711_4GPU
-#SBATCH --output=/scratch/cimes/wg4031/fme/train/OM4_FloeNet-SamudraI_coupled_seed711_4GPU/logs/slurm-%j.out
-#SBATCH --error=/scratch/cimes/wg4031/fme/train/OM4_FloeNet-SamudraI_coupled_seed711_4GPU/logs/slurm-%j.err
-#SBATCH --mem=400G
+#SBATCH --job-name=OM4_FloeNet_6h_5docn_nexStep_noSWUP_seed711_4GPU
+#SBATCH --output=/scratch/cimes/wg4031/fme/train/OM4_FloeNet_6h_5docn_nexStep_noSWUP_seed711_4GPU/logs/slurm-%j.out
+#SBATCH --error=/scratch/cimes/wg4031/fme/train/OM4_FloeNet_6h_5docn_nexStep_noSWUP_seed711_4GPU/logs/slurm-%j.err
+#SBATCH --mem=250G
 #SBATCH --mail-user=wg4031@princeton.edu
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=4
@@ -19,7 +19,7 @@ conda activate fme
 # Set master node information
 export PYTHONPATH=/home/wg4031/ace/:$PYTHONPATH
 export MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
-export MASTER_PORT=28000
+export MASTER_PORT=29000
 
 export FME_TRAIN_DIR=/scratch/cimes/wg4031/fme/train
 export FME_VALID_DIR=/scratch/cimes/wg4031/fme/valid
@@ -41,4 +41,4 @@ echo "SLURM_NNODES: $SLURM_NNODES"
 #Run the training script
 torchrun --nnodes=$SLURM_NNODES --nproc_per_node=$SLURM_NTASKS_PER_NODE \
     --master_addr=$MASTER_ADDR --master_port=$MASTER_PORT \
-    -m fme.coupled.train /home/wg4031/ace/configs/wg_testing/train/FloeNet_Samudra_coupled_train_seed711.yaml
+    -m fme.ace.train /home/wg4031/ace/configs/wg_testing/train/FloeNet_6h_5docn_nexStep_noSWUP_seed711.yaml

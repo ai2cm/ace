@@ -7,7 +7,7 @@ checkpoint_path:
     path: /scratch/cimes/wg4031/fme/train/OM4_SamudraI_big_IceForce_5dsnaps_seed711_2GPU/training_checkpoints/best_inference_ckpt.tar
   ice:
     timedelta: 6h
-    path: /scratch/cimes/wg4031/fme/train/OM4_FloeNet_6h_5docn_nexStep_seed711_4GPU/training_checkpoints/best_inference_ckpt.tar
+    path: /scratch/cimes/wg4031/fme/train/OM4_FloeNet_6h_5docn_nexStep_ALBCorr_seed711_4GPU/training_checkpoints/best_inference_ckpt.tar
 data_writer:
   ocean:
     save_prediction_files: false

@@ -3190,10 +3190,19 @@ class CoupledTrainStepperConfig:
         alongside component-level weights_path values.
         """
         if self.parameter_init.checkpoint_path is not None:
+            atmos_weights = None
+            ocn_weights = None
+            ice_weights = None
+            if self.atmosphere is not None:
+                atmos_weights = self.atmosphere.parameter_init.weights_path
+            if self.ocean is not None:
+                ocn_weights = self.ocean.parameter_init.weights_path
+            if self.ice is not None:
+                ice_weights = self.ice.parameter_init.weights_path
             if (
-                self.atmosphere.parameter_init.weights_path is not None
-                or self.ocean.parameter_init.weights_path is not None
-                or self.ice.parameter_init.weights_path is not None
+                atmos_weights is not None
+                or ocn_weights is not None
+                or ice_weights is not None
             ):
                 raise ValueError(
                     "Please specify CoupledParameterInitConfig.checkpoint_path "

@@ -1,4 +1,4 @@
-experiment_dir: /scratch/cimes/wg4031/fme/train/OM4_FloeNet_6h_5docn_nexStep_ALBCorr_seed711_4GPU
+experiment_dir: /scratch/cimes/wg4031/fme/train/OM4_FloeNet_6h_5docn_nexStep_noSWUP_seed711_4GPU
 save_checkpoint: true
 seed: 711
 validate_using_ema: true
@@ -85,7 +85,6 @@ stepper_training:
       XPRTs: 1
       BMELT: 1
       TMELT: 1
-      SWUP: 1
 stepper:
   input_masking:
     mask_value: 0
@@ -129,9 +128,6 @@ stepper:
               - LSRCs
               - LSNKs
               - XPRTs
-          albedo_correction:
-            upward_shortwave_name: SWUP
-            downward_shortwave_name: SWDN
       next_step_forcing_names:
       - SWDN
       - LWDN
@@ -172,7 +168,6 @@ stepper:
       - simass
       - sisnmass
       - TS
-      - SWUP
       - SALTF
       - LSRCi
       - LSNKi

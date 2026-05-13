@@ -1,4 +1,4 @@
-experiment_dir: /scratch/cimes/wg4031/fme/train/OM4_FloeNet-SamudraI_coupled_seed711_4GPU
+experiment_dir: /scratch/cimes/wg4031/fme/train/OM4_FloeNet-SamudraI_coupled2_seed711_4GPU
 save_checkpoint: true
 save_best_inference_epoch_checkpoints: false
 checkpoint_every_n_batches: 100
@@ -105,20 +105,16 @@ optimization:
   use_gradient_accumulation: true
 stepper_training:
   n_coupled_steps: 4
+  parameter_init:
+    checkpoint_path: /scratch/cimes/wg4031/fme/train/OM4_FloeNet-SamudraI_coupled_seed711_4GPU/training_checkpoints/best_inference_ckpt.tar
   ocean:
     parameter_init:
-      weights_path: /scratch/cimes/wg4031/fme/train/OM4_SamudraI_small_IceForce_NOcorr_5dsnaps_seed711_2GPU/training_checkpoints/best_inference_ckpt.tar
+      weights_path: null
     loss:
       type: MSE
   ice:
     parameter_init:
-      weights_path: /scratch/cimes/wg4031/fme/train/OM4_FloeNet_6h_5docn_nexStep_ALBCorr_seed711_4GPU/training_checkpoints/best_inference_ckpt.tar
-      parameters:
-        - frozen:
-            include:
-              - '*'
-    loss_contributions:
-      n_steps: 0
+      weights_path: null
     loss:
       type: MSE
       weights:
