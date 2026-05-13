@@ -162,7 +162,7 @@ stepper_training:
             probability: 0.05
       optimize_last_step_only: false
     loss:
-      type: EnsembleLossWithNanFill
+      type: EnsembleLoss
       kwargs:
         crps_weight: 0.9
         energy_score_weight: 0.1
