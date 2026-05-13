@@ -1,4 +1,7 @@
 group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|min_runtime
 
-# max ocean steps 8, max atmos steps 41 (mos8mas41), ocean loss = EnsembleLoss
-ft_mos8mas41_LRp00001_slowEMA-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|ace-samudra-cm4|gqmfjs2j|best_inference_ckpt|ace2-cm4-atmos-noLSM|cbj61w53|best_inference_ckpt|train|high|b200|8|800GiB|3|ai2/climate-titan|seed=0 max_epochs=40
+# max ocean steps 8, max atmos steps 41 (mos8mas41), ocean loss = EnsembleLoss with finite difference CRPS w/ levels=2 (fdCRPSlevs2o)
+ft_mos8mas41_fdCRPSlevs2o-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|ace-samudra-cm4|gqmfjs2j|best_inference_ckpt|ace2-cm4-atmos-noLSM|cbj61w53|best_inference_ckpt|train|high|b200|8|800GiB|3|ai2/climate-titan|seed=0 max_epochs=40 stepper_training.ocean.loss.kwargs.finite_difference_crps_levels=2
+
+# max ocean steps 8, max atmos steps 41 (mos8mas41), ocean loss = EnsembleLoss with finite difference CRPS w/ levels=1 (fdCRPSlevs1o)
+ft_mos8mas41_fdCRPSlevs1o-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|ace-samudra-cm4|gqmfjs2j|best_inference_ckpt|ace2-cm4-atmos-noLSM|cbj61w53|best_inference_ckpt|train|low|b200|8|800GiB|3|ai2/ace|seed=0 max_epochs=40|2.5h

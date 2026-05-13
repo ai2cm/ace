@@ -164,8 +164,10 @@ stepper_training:
     loss:
       type: EnsembleLoss
       kwargs:
-        crps_weight: 0.9
+        crps_weight: 0.7
         energy_score_weight: 0.1
+        finite_difference_crps_weight: 0.2
+        finite_difference_crps_levels: 1
   atmosphere:
     parameter_init:
       weights_path: /atmos_ckpt.tar
