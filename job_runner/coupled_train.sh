@@ -150,6 +150,7 @@ while read PRETRAINING; do
         echo " - Ocean checkpoint type: ${OCEAN_CKPT}"
         echo " - Priority: ${PRIORITY}"
         echo " - Cluster: ${CLUSTER} (${RETRIES} retries)"
+        echo " - Workspace: ${WORKSPACE}"
         echo " - GPUs: ${N_GPUS}"
         echo " - Shared memory: ${SHARED_MEM}"
         echo " - Override: ${OVERRIDE_ARGS}"
