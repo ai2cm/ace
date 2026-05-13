@@ -3,13 +3,12 @@
 set -x
 
 # wandb config
-export WANDB_NAME=PM-v0507-Samudra-E3SMv3-piControl-1yr-train-rs1
-export WANDB_RUN_GROUP=v0507-test
+export WANDB_NAME=PM-v0512-Samudra-E3SMv3-piControl-1yr-train-rs1
+export WANDB_RUN_GROUP=v0512-test
 
 export COMMIT=$(git rev-parse --short HEAD)
 
 export FME_TRAIN_DIR=/pscratch/sd/e/elynnwu/fme-dataset
-export FME_STATS_DIR=/pscratch/sd/e/elynnwu/fme-dataset/2025-11-24-E3SMv3-piControl-100yr-coupled-stats/ocean
 export FME_STATS_DIR=/pscratch/sd/e/elynnwu/fme-dataset/2026-05-07-v3-LR-piControl-aigo-test4-ocean-stats
 # if resuming a failed job, provide its slurm job ID below and uncomment;
 # note that information entered above should be consistent with that of

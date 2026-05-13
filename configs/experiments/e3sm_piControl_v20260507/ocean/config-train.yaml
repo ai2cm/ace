@@ -22,10 +22,13 @@ inference:
       merge:
       - data_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-05-07-v3-LR-piControl-aigo-test4-ocean
         file_pattern: "v3.LR.piControl.aigo.test4.mpaso.hist.am.fmeDepthCoarsening*nc"
+        mask_and_scale: true
       - data_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-05-07-v3-LR-piControl-aigo-test4-ocean
         file_pattern: "v3.LR.piControl.aigo.test4.mpaso.hist.am.fmeDerivedFields*nc"
+        mask_and_scale: true
       - data_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-05-07-v3-LR-piControl-aigo-test4-ocean
         file_pattern: "v3.LR.piControl.aigo.test4.mpassi.hist.am.fmeSeaiceDerivedFields*nc"
+        mask_and_scale: true
     num_data_workers: 1
 logging:
   log_to_screen: true
@@ -40,10 +43,13 @@ train_loader:
     merge:
     - data_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-05-07-v3-LR-piControl-aigo-test4-ocean
       file_pattern: "v3.LR.piControl.aigo.test4.mpaso.hist.am.fmeDepthCoarsening*nc"
+      mask_and_scale: true
     - data_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-05-07-v3-LR-piControl-aigo-test4-ocean
       file_pattern: "v3.LR.piControl.aigo.test4.mpaso.hist.am.fmeDerivedFields*nc"
+      mask_and_scale: true
     - data_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-05-07-v3-LR-piControl-aigo-test4-ocean
       file_pattern: "v3.LR.piControl.aigo.test4.mpassi.hist.am.fmeSeaiceDerivedFields*nc"
+      mask_and_scale: true
 validation_loader:
   batch_size: 16
   num_data_workers: 4
@@ -51,16 +57,19 @@ validation_loader:
     merge:
     - data_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-05-07-v3-LR-piControl-aigo-test4-ocean
       file_pattern: "v3.LR.piControl.aigo.test4.mpaso.hist.am.fmeDepthCoarsening*nc"
+      mask_and_scale: true
       subset:
         start_time: '0401-01-02T00:00:00'
         stop_time: '0401-06-01T00:00:00'
     - data_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-05-07-v3-LR-piControl-aigo-test4-ocean
       file_pattern: "v3.LR.piControl.aigo.test4.mpaso.hist.am.fmeDerivedFields*nc"
+      mask_and_scale: true
       subset:
         start_time: '0401-01-02T00:00:00'
         stop_time: '0401-06-01T00:00:00'
     - data_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-05-07-v3-LR-piControl-aigo-test4-ocean
       file_pattern: "v3.LR.piControl.aigo.test4.mpassi.hist.am.fmeSeaiceDerivedFields*nc"
+      mask_and_scale: true
       subset:
         start_time: '0401-01-02T00:00:00'
         stop_time: '0401-06-01T00:00:00'
