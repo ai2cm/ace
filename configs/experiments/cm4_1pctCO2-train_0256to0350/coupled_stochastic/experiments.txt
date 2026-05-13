@@ -1,5 +1,36 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
 
+
+# -- single-stage ft runs --
+
+## note change of run name from 'ft_mos8mas41_oEnsLossNanFill_...' to 'ft_mos8mas41_oELNF_...' to stay under beaker run name length limit
+ft_mos8mas41_oELNF_LRp00001_slowEMA-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KR0DFPE92EPHSAEXVRSKGAXY|trained|best_inference_ckpt_0035|high|--min-runtime 5h
+
+
+# -- fine-tuning sequence --
+
+## stage 1
+fto_stochastic-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_cbj61w53|rs0|01KN804ZEXN589C78JN0WGJMDD|trained|best_inference_ckpt|high|--min-runtime 5h
+
+## stage 2
+ft_fto_stochastic_ncs4mas40_wu4k_LRp0001-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQ5X9Y23THMTTXNER4QXF29X|trained|best_inference_ckpt|high|--min-runtime 5h
+
+## stage 3
+fta_ft_fto_stoch_mas40_cd5epLRp00001-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQDENWQ2HFQP7MH1HCQDR2JA|trained|best_inference_ckpt|high|--min-runtime 5h
+
+## stage 4
+fto_ftaCD5ep4_ft_fto_stoch_ncs4_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQFKA960GPF9BY7CE84A5RRY|trained|best_inference_ckpt|high|--min-runtime 5h
+
+
+# -- deterministic runs (from cm4_1pctCO2-train_0256to0350/coupled/experiments.txt) --
+
+fto-1pctCO2_0256to0350-OHCBudget-condSFNO_w_EC-d0zgdwek_mb4prsz7|rs0|01KFSZKJNT070YB64J4HY70Q7D|trained|best_inference_ckpt|high|--min-runtime 5h
+
+fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KKQWTQTEZAAKXGZRW6Q0V5Q8|run_ICx9_40yr|best_inference_ckpt|high|--min-runtime 8h
+
+
+# -- automatically added by coupled_train.sh --
+
 fto_stochastic-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_cbj61w53|rs0|01KN804ZEXN589C78JN0WGJMDD|trained|best_inference_ckpt|high|--not-preemptible
 
 ft_stochastic_ncs2-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_cbj61w53|rs0|01KNAE3N028WHAYWG581V4ETZ2|trained|best_inference_ckpt|normal|--not-preemptible
@@ -54,27 +85,11 @@ ft_mos4mas41_oEnsLossNanFill_LRp0001_slowEMA-1pctCO2_0256to0350-gqmfjs2j_cbj61w5
 
 ft_mos8mas41_oEnsLossNanFill_LRp0001_slowEMA-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQWPS5JX8632M12GYSD8AKDN|training|best_inference_ckpt|normal|--min-runtime 8h
 
-ft_mos8mas41_oEnsLossNanFill_LRp00001_slowEMA-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0||training|best_inference_ckpt|normal|--min-runtime 8h
-
 ft_mos8mas41_oEnsLossNanFill_LRp00001_slowEMA-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQXT1D4X1X3EABGS8PD1TK3J|training|best_inference_ckpt|normal|--min-runtime 8h
 
 ft_mos8mas41_oEnsLossNanFill_LRp00001_slowEMA-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KR0BPRC7Y52M46QKQ13817VS|training|best_inference_ckpt|normal|--min-runtime 8h
 
-ft_mos8mas41_oEnsLossNanFill_LRp00001_slowEMA-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0||training|best_inference_ckpt|high|--min-runtime 8h
-
-ft_mos8mas41_oELNF_LRp00001_slowEMA-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KR0DFPE92EPHSAEXVRSKGAXY|run_ic0251_100yr|best_inference_ckpt_0035|high|--min-runtime 5h
-
 ft_mos8mas41_oEnsLossNanFill_LRp00001_slowEMA-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRC1TV2A6MPNP9Q5FWPQT69C|training|best_inference_ckpt|high|--min-runtime 5h
-
-fto_stochastic-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_cbj61w53|rs0|01KN804ZEXN589C78JN0WGJMDD|run_ic0251_100yr|best_inference_ckpt|high|--min-runtime 5h
-
-fto-1pctCO2_0256to0350-OHCBudget-condSFNO_w_EC-d0zgdwek_mb4prsz7|rs0|01KFSZKJNT070YB64J4HY70Q7D|run_ic0251_100yr|best_inference_ckpt|high|--min-runtime 5h
-
-ft_fto_stochastic_ncs4mas40_wu4k_LRp0001-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQ5X9Y23THMTTXNER4QXF29X|run_ic0251_100yr|best_inference_ckpt|high|--min-runtime 5h
-
-fta_ft_fto_stoch_mas40_cd5epLRp00001-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQDENWQ2HFQP7MH1HCQDR2JA|run_ic0251_100yr|best_inference_ckpt|high|--min-runtime 5h
-
-fto_ftaCD5ep4_ft_fto_stoch_ncs4_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQFKA960GPF9BY7CE84A5RRY|run_ic0251_100yr|best_inference_ckpt|high|--min-runtime 5h
 
 ft_mos8mas41_LRp00001_slowEMA-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRFPHF3PCR1K7E6HXBHJ6KP5|training|best_inference_ckpt|normal|--min-runtime 8h
 
