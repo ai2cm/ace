@@ -2,10 +2,10 @@
 
 set -e
 
-JOB_NAME="eval-global-trained-low-oversample8x-tropics-denoising-moe-tropics"
+JOB_NAME="eval-global-trained-low-oversample8x-tropics-denoising-moe-events"
 #JOB_NAME="eval-global-trained-denoising-moe-events"
 
-CONFIG_FILENAME="eval-coarse-prmsl-tropic-pac.yaml"
+CONFIG_FILENAME="eval-coarse-prmsl-events.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
