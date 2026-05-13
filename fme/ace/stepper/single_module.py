@@ -1534,6 +1534,7 @@ class TrainStepper(
         data: BatchData,
         optimization: OptimizationABC,
         compute_derived_variables: bool = False,
+        evaluate_all_steps: bool = False,
     ) -> TrainOutput:
         """
         Train the model on a batch of data with one or more forward steps.
@@ -1550,6 +1551,9 @@ class TrainStepper(
                 Use `NullOptimization` to disable training.
             compute_derived_variables: Whether to compute derived variables for the
                 prediction and target data.
+            evaluate_all_steps: When True, run all available forward steps and
+                compute per-step metrics for each, but only count steps within
+                the stochastically-sampled range toward the accumulated loss.
 
         Returns:
             The loss metrics, the generated data, the normalized generated data,
@@ -1570,6 +1574,7 @@ class TrainStepper(
             target_data,
             optimization,
             metrics,
+            evaluate_all_steps=evaluate_all_steps,
         )
 
         regularizer_loss = self._stepper.get_regularizer_loss()
@@ -1605,6 +1610,7 @@ class TrainStepper(
         target_data: BatchData,
         optimization: OptimizationABC,
         metrics: dict[str, float],
+        evaluate_all_steps: bool = False,
     ) -> tuple[list[EnsembleTensorDict], dict[str, torch.Tensor] | None]:
         input_data = data.get_start(self._prognostic_names, self.n_ic_timesteps)
         # output from self.predict_paired does not include initial condition
@@ -1627,6 +1633,7 @@ class TrainStepper(
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)
+        n_loss_steps = n_forward_steps
         sampler = (
             self._n_forward_steps_sampler
             if self._is_training
@@ -1642,11 +1649,14 @@ class TrainStepper(
                     "This is supposed to be ensured by the StepperConfig when train "
                     "data requirements are retrieved, so this is a bug."
                 )
-            n_forward_steps = stochastic_n_forward_steps
+            n_loss_steps = stochastic_n_forward_steps
+            if not evaluate_all_steps:
+                n_forward_steps = stochastic_n_forward_steps
         per_channel_sum: dict[str, torch.Tensor] | None = None
         for step in range(n_forward_steps):
-            optimize_step = (
-                step == n_forward_steps - 1 or not self._config.optimize_last_step_only
+            counts_toward_loss = step < n_loss_steps
+            optimize_step = counts_toward_loss and (
+                step == n_loss_steps - 1 or not self._config.optimize_last_step_only
             )
             if optimize_step:
                 context = contextlib.nullcontext()
@@ -1667,12 +1677,15 @@ class TrainStepper(
                 step_loss = self._loss_obj(gen_step, target_step, step=step)
                 step_total_loss = step_loss.total()
                 metrics[f"loss_step_{step}"] = step_total_loss.detach()
-                per_ch = step_loss.get_channel_losses()
-                if per_channel_sum is None:
-                    per_channel_sum = {k: v.detach().clone() for k, v in per_ch.items()}
-                else:
-                    for k in per_channel_sum:
-                        per_channel_sum[k] = per_channel_sum[k] + per_ch[k].detach()
+                if counts_toward_loss:
+                    per_ch = step_loss.get_channel_losses()
+                    if per_channel_sum is None:
+                        per_channel_sum = {
+                            k: v.detach().clone() for k, v in per_ch.items()
+                        }
+                    else:
+                        for k in per_channel_sum:
+                            per_channel_sum[k] = per_channel_sum[k] + per_ch[k].detach()
             if optimize_step:
                 optimization.accumulate_loss(step_total_loss)
         return output_list, per_channel_sum

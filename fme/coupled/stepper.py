@@ -1773,6 +1773,7 @@ class CoupledTrainStepper(
         data: CoupledBatchData,
         optimization: OptimizationABC,
         compute_derived_variables: bool = False,
+        evaluate_all_steps: bool = False,
     ) -> CoupledTrainOutput:
         """
         Args:
@@ -1782,6 +1783,9 @@ class CoupledTrainStepper(
                 Use `NullOptimization` to disable training.
             compute_derived_variables: Whether to compute derived variables for the
                 prediction and target atmosphere data.
+            evaluate_all_steps: When True, run all available forward steps and
+                compute per-step metrics for each, but only count steps within
+                the stochastically-sampled range toward the accumulated loss.
 
         """
         atmos_forward_data = self.atmosphere.get_forward_data(
