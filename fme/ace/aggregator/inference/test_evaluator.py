@@ -23,7 +23,7 @@ from fme.ace.aggregator.inference import (
     ZonalMeanMetricConfig,
 )
 from fme.ace.aggregator.inference.build_context import MetricBuildContext
-from fme.ace.aggregator.inference.ipo.ipo_index import IpoIndexMetricConfig
+from fme.ace.aggregator.inference.ipo.ipo_index import IPOIndexMetricConfig
 from fme.ace.data_loading.batch_data import BatchData, PairedData
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
@@ -448,7 +448,7 @@ class TestAggregatorConfigMetrics:
         metrics = InferenceEvaluatorAggregatorConfig._default_metrics(
             ctx, n_ensemble_per_ic=1
         )
-        has_ipo = any(isinstance(m, IpoIndexMetricConfig) for m in metrics)
+        has_ipo = any(isinstance(m, IPOIndexMetricConfig) for m in metrics)
         assert has_ipo is expect_ipo
 
     def test_default_metrics_build(self):

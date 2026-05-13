@@ -1,5 +1,5 @@
 from .ipo_index import (
     IPOIndexAggregator,
-    IpoIndexMetricConfig,
+    IPOIndexMetricConfig,
     PairedIPOIndexAggregator,
 )

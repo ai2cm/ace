@@ -34,7 +34,7 @@ from .histogram import HistogramMetricConfig
 from .ipo.ipo_index import (
     MIN_YEARS_FOR_FILTERED_TPI,
     IPOIndexAggregator,
-    IpoIndexMetricConfig,
+    IPOIndexMetricConfig,
 )
 from .reduced import MeanMetricConfig, SingleTargetMeanAggregator
 from .seasonal import SeasonalMetricConfig
@@ -64,7 +64,7 @@ MetricConfig = (
     | EnsoIndexMetricConfig
     | EnsoCoefficientMetricConfig
     | EnsembleMetricConfig
-    | IpoIndexMetricConfig
+    | IPOIndexMetricConfig
 )
 
 
@@ -144,7 +144,7 @@ class InferenceEvaluatorAggregatorConfig:
         if ctx.n_timesteps * ctx.timestep > APPROXIMATELY_EIGHTY_YEARS and isinstance(
             ctx.horizontal_coordinates, LatLonCoordinates
         ):
-            metrics.append(IpoIndexMetricConfig())
+            metrics.append(IPOIndexMetricConfig())
 
         return metrics
 
@@ -352,7 +352,7 @@ class LegacyFlagInferenceEvaluatorAggregatorConfig:
             and n_timesteps * timestep > APPROXIMATELY_EIGHTY_YEARS
             and isinstance(horizontal_coordinates, LatLonCoordinates)
         ):
-            metrics.append(IpoIndexMetricConfig())
+            metrics.append(IPOIndexMetricConfig())
         return InferenceEvaluatorAggregatorConfig(
             metrics=metrics,
             monthly_reference_data=self.monthly_reference_data,

@@ -483,7 +483,7 @@ class PairedIPOIndexAggregator:
 
 
 @dataclasses.dataclass
-class IpoIndexMetricConfig:
+class IPOIndexMetricConfig:
     type: Literal["ipo_index"] = "ipo_index"
     name: str = "ipo_index"
 

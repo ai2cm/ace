@@ -15,7 +15,7 @@ from fme.ace.aggregator.inference.main import (
     EnsoCoefficientMetricConfig,
     EnsoIndexMetricConfig,
     HistogramMetricConfig,
-    IpoIndexMetricConfig,
+    IPOIndexMetricConfig,
     MeanMetricConfig,
     PowerSpectrumMetricConfig,
     SeasonalMetricConfig,
@@ -291,7 +291,7 @@ class InferenceEvaluatorAggregatorConfig:
         if n_timesteps * timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS:
             metrics.append(EnsoCoefficientMetricConfig())
         if include_nino34 and n_timesteps * timestep > APPROXIMATELY_EIGHTY_YEARS:
-            metrics.append(IpoIndexMetricConfig())
+            metrics.append(IPOIndexMetricConfig())
         return metrics
 
     def build(
