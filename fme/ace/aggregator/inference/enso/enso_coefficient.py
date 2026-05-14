@@ -10,6 +10,7 @@ import torch
 import xarray as xr
 
 from fme.ace.aggregator.plotting import get_cmap_limits, plot_imshow, plot_paneled_data
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
@@ -467,10 +468,6 @@ class EnsoCoefficientMetricConfig:
         return self.name
 
     def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
-        import datetime
-
-        from fme.core.coordinates import LatLonCoordinates
-
         if not isinstance(ctx.horizontal_coordinates, LatLonCoordinates):
             raise MetricNotSupportedError(
                 "enso_coefficient metric requires LatLonCoordinates."
