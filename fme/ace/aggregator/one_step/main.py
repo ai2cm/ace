@@ -3,6 +3,7 @@ from collections.abc import Sequence
 
 import torch
 
+from fme.ace.aggregator.loss_metrics import PerStepLossAggregator
 from fme.ace.aggregator.one_step.deterministic import (
     DeterministicTrainOutput,
     OneStepDeterministicAggregator,
@@ -10,8 +11,6 @@ from fme.ace.aggregator.one_step.deterministic import (
 from fme.ace.aggregator.one_step.ensemble import get_one_step_ensemble_aggregator
 from fme.ace.stepper import TrainOutput
 from fme.core.dataset_info import DatasetInfo
-from fme.core.device import get_device
-from fme.core.distributed import Distributed
 from fme.core.generics.aggregator import AggregatorABC
 from fme.core.tensors import fold_ensemble_dim, fold_sized_ensemble_dim
 from fme.core.typing_ import TensorMapping
@@ -62,25 +61,19 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
             metadata=dataset_info.variable_metadata,
         )
         self._ensemble_recorded = False
-        self._per_step_loss_sums: dict[str, torch.Tensor] = {}
-        self._per_step_loss_counts: dict[str, int] = {}
+        self._per_step_losses = PerStepLossAggregator()
 
     @torch.no_grad()
     def record_batch(
         self,
         batch: TrainOutput,
     ):
-        for key, value in batch.metrics.items():
-            if key.startswith("loss_step_") or key.startswith("loss/"):
-                if key not in self._per_step_loss_sums:
-                    self._per_step_loss_sums[key] = torch.tensor(
-                        0.0, device=get_device()
-                    )
-                    self._per_step_loss_counts[key] = 0
-                self._per_step_loss_sums[key] = (
-                    self._per_step_loss_sums[key] + value.detach()
-                )
-                self._per_step_loss_counts[key] += 1
+        step_metrics = {
+            k: v
+            for k, v in batch.metrics.items()
+            if k.startswith("loss_step_") or k.startswith("loss/")
+        }
+        self._per_step_losses.record(step_metrics)
         folded_gen_data, n_ensemble = fold_ensemble_dim(batch.gen_data)
         folded_target_data = fold_sized_ensemble_dim(batch.target_data, n_ensemble)
         self._deterministic_aggregator.record_batch(
@@ -108,12 +101,7 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
             label: Label to prepend to all log keys.
         """
         deterministic_logs = self._deterministic_aggregator.get_logs(label)
-        dist = Distributed.get_instance()
-        for key in sorted(self._per_step_loss_sums.keys()):
-            count = self._per_step_loss_counts[key]
-            deterministic_logs[f"{label}/mean/{key}"] = float(
-                dist.reduce_mean(self._per_step_loss_sums[key] / count).cpu().numpy()
-            )
+        deterministic_logs.update(self._per_step_losses.get_logs(label))
         if self._ensemble_recorded:
             stochastic_logs = self._ensemble_aggregator.get_logs(label)
             if len(set(deterministic_logs.keys()) & set(stochastic_logs.keys())) > 0:
