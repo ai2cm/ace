@@ -19,9 +19,7 @@ forcing_loader:
     file_pattern: 2026-02-12-X-SHiELD-AMIP-plus-4K-1deg-8layer-1yr.zarr
     engine: zarr
   num_data_workers: 16
-aggregator:
-  log_zonal_mean_images: 0
-  log_histograms: true
+aggregator: {}
 data_writer:
   files:
   - format:
