@@ -4,13 +4,16 @@ forward_steps_in_memory: 20
 checkpoint_path: /weights/training_checkpoints/best_inference_ckpt.tar
 logging:
   project: ace2som-xshield-tuning
-loader:
+initial_condition:
+  path: /climate-default/2026-02-12-X-SHiELD-AMIP-plus-4K-1deg-8layer-1yr.zarr
+  engine: zarr
   start_indices:
     times:
       - '2020-01-01T00:00:00'
       #- '2020-01-02T00:00:00'
       - '2020-01-03T00:00:00'
       #- '2020-01-04T00:00:00'
+forcing_loader:
   dataset:
     data_path: /climate-default
     file_pattern: 2026-02-12-X-SHiELD-AMIP-plus-4K-1deg-8layer-1yr.zarr
