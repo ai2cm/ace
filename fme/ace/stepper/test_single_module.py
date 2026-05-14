@@ -40,7 +40,6 @@ from fme.ace.stepper.single_module import (
     TrainOutput,
     TrainStepper,
     TrainStepperConfig,
-    _apply_output_mask,
     get_serialized_stepper_vertical_coordinate,
     load_stepper,
     load_stepper_config,
@@ -2382,52 +2381,3 @@ def test_checkpoint_stepper_config_to_stepper_config(tmp_path: pathlib.Path):
     assert isinstance(loaded_config, StepperConfig)
     assert loaded_config.derived_forcings == original_config.derived_forcings
     assert loaded_config.step.type == original_config.step.type
-
-
-def test_apply_output_mask_zeros_masked_variables():
-    gen = EnsembleTensorDict(
-        {
-            "a": torch.ones(4, 1, 8, 16),
-            "b": torch.ones(4, 1, 8, 16) * 3.0,
-        }
-    )
-    target = EnsembleTensorDict(
-        {
-            "a": torch.ones(4, 1, 8, 16) * 2.0,
-            "b": torch.ones(4, 1, 8, 16) * 4.0,
-        }
-    )
-    data_mask = {
-        "a": torch.tensor([True, True, False, False]),
-        "b": torch.tensor([True, False, True, False]),
-    }
-    gen_out, target_out = _apply_output_mask(gen, target, data_mask)
-    torch.testing.assert_close(gen_out["a"][:2], torch.ones(2, 1, 8, 16))
-    torch.testing.assert_close(gen_out["a"][2:], torch.zeros(2, 1, 8, 16))
-    torch.testing.assert_close(target_out["a"][:2], torch.ones(2, 1, 8, 16) * 2.0)
-    torch.testing.assert_close(target_out["a"][2:], torch.zeros(2, 1, 8, 16))
-    torch.testing.assert_close(gen_out["b"][0], torch.ones(1, 8, 16) * 3.0)
-    torch.testing.assert_close(gen_out["b"][1], torch.zeros(1, 8, 16))
-    torch.testing.assert_close(target_out["b"][0], torch.ones(1, 8, 16) * 4.0)
-    torch.testing.assert_close(target_out["b"][1], torch.zeros(1, 8, 16))
-
-
-def test_apply_output_mask_with_ensemble():
-    n_batch, n_ens = 2, 3
-    gen = EnsembleTensorDict({"a": torch.ones(n_batch, n_ens, 4, 8) * 5.0})
-    target = EnsembleTensorDict({"a": torch.ones(n_batch, n_ens, 4, 8) * 7.0})
-    data_mask = {"a": torch.tensor([True, False])}
-    gen_out, target_out = _apply_output_mask(gen, target, data_mask)
-    torch.testing.assert_close(gen_out["a"][0], torch.ones(n_ens, 4, 8) * 5.0)
-    torch.testing.assert_close(gen_out["a"][1], torch.zeros(n_ens, 4, 8))
-    torch.testing.assert_close(target_out["a"][0], torch.ones(n_ens, 4, 8) * 7.0)
-    torch.testing.assert_close(target_out["a"][1], torch.zeros(n_ens, 4, 8))
-
-
-def test_apply_output_mask_ignores_absent_variables():
-    gen = EnsembleTensorDict({"a": torch.ones(2, 1, 4, 8)})
-    target = EnsembleTensorDict({"a": torch.ones(2, 1, 4, 8) * 2.0})
-    data_mask = {"not_present": torch.tensor([False, False])}
-    gen_out, target_out = _apply_output_mask(gen, target, data_mask)
-    torch.testing.assert_close(gen_out["a"], gen["a"])
-    torch.testing.assert_close(target_out["a"], target["a"])

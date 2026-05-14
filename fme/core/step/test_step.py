@@ -1041,6 +1041,7 @@ def test_apply_input_mask_does_not_mutate_original():
 
 
 def test_step_with_data_mask():
+    torch.manual_seed(0)
     normalization = get_network_and_loss_normalization_config(
         names=["forcing_shared", "forcing_rad", "diagnostic_main", "diagnostic_rad"],
     )
@@ -1074,7 +1075,15 @@ def test_step_with_data_mask():
             [True, True, False, False], device=fme.get_device()
         ),
     }
-    output = step.step(
+    output_no_mask = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+            data_mask=None,
+        ),
+    )
+    output_with_mask = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
@@ -1082,8 +1091,15 @@ def test_step_with_data_mask():
             data_mask=data_mask,
         ),
     )
-    assert output["diagnostic_main"].shape == (n_samples, *img_shape)
-    assert output["diagnostic_rad"].shape == (n_samples, *img_shape)
+    for name in ["diagnostic_main", "diagnostic_rad"]:
+        # Unmasked samples (True) see the same input, so output must be identical.
+        torch.testing.assert_close(
+            output_with_mask[name][[0, 1]], output_no_mask[name][[0, 1]]
+        )
+        # Masked samples (False) have forcing_shared zeroed, so output must differ.
+        assert not torch.allclose(
+            output_with_mask[name][[2, 3]], output_no_mask[name][[2, 3]]
+        )
 
 
 def test_build_channel_mask_inputs_with_data_mask():
@@ -1133,6 +1149,7 @@ def test_build_channel_mask_inputs_partial_mask():
 
 
 def test_step_with_include_channel_mask_inputs():
+    torch.manual_seed(0)
     normalization = get_network_and_loss_normalization_config(
         names=["forcing_shared", "forcing_rad", "diagnostic_main", "diagnostic_rad"],
     )
@@ -1167,7 +1184,15 @@ def test_step_with_include_channel_mask_inputs():
             [True, True, False, False], device=fme.get_device()
         ),
     }
-    output = step.step(
+    output_no_mask = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+            data_mask=None,
+        ),
+    )
+    output_with_mask = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
@@ -1175,11 +1200,21 @@ def test_step_with_include_channel_mask_inputs():
             data_mask=data_mask,
         ),
     )
-    assert output["diagnostic_main"].shape == (n_samples, *img_shape)
-    assert output["diagnostic_rad"].shape == (n_samples, *img_shape)
+    for name in ["diagnostic_main", "diagnostic_rad"]:
+        # Unmasked samples (True) see the same input and channel-mask indicators,
+        # so output must be identical.
+        torch.testing.assert_close(
+            output_with_mask[name][[0, 1]], output_no_mask[name][[0, 1]]
+        )
+        # Masked samples (False) have forcing_shared zeroed and a 0-indicator
+        # channel, so output must differ.
+        assert not torch.allclose(
+            output_with_mask[name][[2, 3]], output_no_mask[name][[2, 3]]
+        )
 
 
 def test_step_with_include_channel_mask_inputs_no_data_mask():
+    torch.manual_seed(0)
     normalization = get_network_and_loss_normalization_config(
         names=["forcing_shared", "forcing_rad", "diagnostic_main", "diagnostic_rad"],
     )
@@ -1209,7 +1244,7 @@ def test_step_with_include_channel_mask_inputs_no_data_mask():
     next_step_input_data = get_tensor_dict(
         step.next_step_input_names, img_shape, n_samples
     )
-    output = step.step(
+    output_no_mask = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
@@ -1217,5 +1252,17 @@ def test_step_with_include_channel_mask_inputs_no_data_mask():
             data_mask=None,
         ),
     )
-    assert output["diagnostic_main"].shape == (n_samples, *img_shape)
-    assert output["diagnostic_rad"].shape == (n_samples, *img_shape)
+    all_unmasked = {
+        name: torch.ones(n_samples, dtype=torch.bool, device=fme.get_device())
+        for name in step.input_names
+    }
+    output_all_unmasked = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+            data_mask=all_unmasked,
+        ),
+    )
+    for name in ["diagnostic_main", "diagnostic_rad"]:
+        torch.testing.assert_close(output_no_mask[name], output_all_unmasked[name])
