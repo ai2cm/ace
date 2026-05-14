@@ -1,5 +1,5 @@
 experiment_dir: /climate-default/home/annak/2026-05-13-ace2som-4ktuned-outputs
-n_forward_steps: 14600
+n_forward_steps: 1460
 forward_steps_in_memory: 20
 checkpoint_path: /weights/training_checkpoints/best_inference_ckpt.tar
 logging:
