@@ -58,7 +58,7 @@ def test_step_label():
 
 
 def test_loss_matches_manual_mse():
-    """Residual MSE on standardized residuals matches manual computation."""
+    """Residual MSE on standardized absolute residuals matches manual computation."""
     torch.manual_seed(0)
     out_names = ["a", "b"]
     std_a, std_b = 2.0, 0.5
@@ -84,10 +84,10 @@ def test_loss_matches_manual_mse():
 
     total, per_step = loss({0: ic, 1: pred1}, {0: ic, 1: target1})
 
-    gen_residual_a = (pred1["a"] - ic["a"]) / std_a
-    gen_residual_b = (pred1["b"] - ic["b"]) / std_b
-    target_residual_a = (target1["a"] - ic["a"]) / std_a
-    target_residual_b = (target1["b"] - ic["b"]) / std_b
+    gen_residual_a = (pred1["a"] - ic["a"]).abs() / std_a
+    gen_residual_b = (pred1["b"] - ic["b"]).abs() / std_b
+    target_residual_a = (target1["a"] - ic["a"]).abs() / std_a
+    target_residual_b = (target1["b"] - ic["b"]).abs() / std_b
     expected = 0.5 * (
         ((gen_residual_a - target_residual_a) ** 2).mean()
         + ((gen_residual_b - target_residual_b) ** 2).mean()
@@ -98,7 +98,7 @@ def test_loss_matches_manual_mse():
 
 
 def test_loss_consecutive_steps():
-    """Step 2 computes gen[2]-gen[1] vs target[2]-target[1]."""
+    """Step 2 computes |gen[2]-gen[1]| vs |target[2]-target[1]|."""
     torch.manual_seed(0)
     out_names = ["a"]
     loss = _build_loss(out_names, steps=[2])
@@ -112,7 +112,9 @@ def test_loss_consecutive_steps():
     target2 = {"a": torch.randn(*target_shape, device=get_device())}
 
     total, _ = loss({1: pred1, 2: pred2}, {1: target1, 2: target2})
-    expected = (((pred2["a"] - pred1["a"]) - (target2["a"] - target1["a"])) ** 2).mean()
+    gen_abs = (pred2["a"] - pred1["a"]).abs()
+    tgt_abs = (target2["a"] - target1["a"]).abs()
+    expected = ((gen_abs - tgt_abs) ** 2).mean()
     torch.testing.assert_close(total, expected)
 
 
