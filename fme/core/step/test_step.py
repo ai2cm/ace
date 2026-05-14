@@ -27,7 +27,11 @@ from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallConfig, MultiCallStepConfig
 from fme.core.step.secondary_decoder import SecondaryDecoderConfig
 from fme.core.step.secondary_module import SecondaryModuleStepConfig
-from fme.core.step.single_module import SingleModuleStepConfig, _apply_input_mask
+from fme.core.step.single_module import (
+    SingleModuleStepConfig,
+    _apply_input_mask,
+    _build_channel_mask_inputs,
+)
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.typing_ import TensorDict
 
@@ -1078,6 +1082,128 @@ def test_step_with_data_mask():
             next_step_input_data=next_step_input_data,
             labels=None,
             data_mask=data_mask,
+        ),
+    )
+    assert output["diagnostic_main"].shape == (n_samples, *img_shape)
+    assert output["diagnostic_rad"].shape == (n_samples, *img_shape)
+
+
+def test_build_channel_mask_inputs_with_data_mask():
+    in_names = ["a", "b"]
+    packed = torch.zeros(3, 2, 8, 16)
+    data_mask = {
+        "a": torch.tensor([True, False, True]),
+        "b": torch.tensor([False, True, True]),
+    }
+    result = _build_channel_mask_inputs(in_names, data_mask, packed)
+    assert result.shape == (3, 2, 8, 16)
+    assert result[0, 0, 0, 0] == 1.0
+    assert result[1, 0, 0, 0] == 0.0
+    assert result[0, 1, 0, 0] == 0.0
+    assert result[1, 1, 0, 0] == 1.0
+    assert (result[2] == 1.0).all()
+
+
+def test_build_channel_mask_inputs_no_data_mask():
+    packed = torch.zeros(2, 3, 4, 8)
+    result = _build_channel_mask_inputs(["x", "y", "z"], None, packed)
+    assert result.shape == (2, 3, 4, 8)
+    assert (result == 1.0).all()
+
+
+def test_build_channel_mask_inputs_partial_mask():
+    packed = torch.zeros(2, 2, 4, 8)
+    data_mask = {"a": torch.tensor([True, False])}
+    result = _build_channel_mask_inputs(["a", "b"], data_mask, packed)
+    assert result.shape == (2, 2, 4, 8)
+    assert result[0, 0, 0, 0] == 1.0
+    assert result[1, 0, 0, 0] == 0.0
+    assert (result[:, 1] == 1.0).all()
+
+
+def test_step_with_include_channel_mask_inputs():
+    normalization = get_network_and_loss_normalization_config(
+        names=["forcing_shared", "forcing_rad", "diagnostic_main", "diagnostic_rad"],
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={
+                        "scale_factor": 1,
+                        "embed_dim": 4,
+                        "num_layers": 2,
+                    },
+                ),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main", "diagnostic_rad"],
+                normalization=normalization,
+                include_channel_mask_inputs=True,
+            ),
+        ),
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    n_samples = 4
+    step = get_step(config, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples
+    )
+    data_mask = {
+        "forcing_shared": torch.tensor(
+            [True, True, False, False], device=fme.get_device()
+        ),
+    }
+    output = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+            data_mask=data_mask,
+        ),
+    )
+    assert output["diagnostic_main"].shape == (n_samples, *img_shape)
+    assert output["diagnostic_rad"].shape == (n_samples, *img_shape)
+
+
+def test_step_with_include_channel_mask_inputs_no_data_mask():
+    normalization = get_network_and_loss_normalization_config(
+        names=["forcing_shared", "forcing_rad", "diagnostic_main", "diagnostic_rad"],
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={
+                        "scale_factor": 1,
+                        "embed_dim": 4,
+                        "num_layers": 2,
+                    },
+                ),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main", "diagnostic_rad"],
+                normalization=normalization,
+                include_channel_mask_inputs=True,
+            ),
+        ),
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    n_samples = 2
+    step = get_step(config, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples
+    )
+    output = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+            data_mask=None,
         ),
     )
     assert output["diagnostic_main"].shape == (n_samples, *img_shape)

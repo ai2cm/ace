@@ -53,6 +53,11 @@ class SingleModuleStepConfig(StepConfigABC):
         prescribed_prognostic_names: Prognostic variable names to overwrite from
             forcing data at each step (e.g. for inference with observed values).
         residual_prediction: Whether to use residual prediction.
+        include_channel_mask_inputs: Whether to append per-variable mask indicator
+            channels to the network input. When True, the network receives
+            ``len(in_names)`` additional float channels (1.0 = present, 0.0 =
+            masked) after the regular input channels, doubling the total input
+            channel count.
     """
 
     builder: ModuleSelector
@@ -67,6 +72,7 @@ class SingleModuleStepConfig(StepConfigABC):
     next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
     prescribed_prognostic_names: list[str] = dataclasses.field(default_factory=list)
     residual_prediction: bool = False
+    include_channel_mask_inputs: bool = False
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
@@ -252,6 +258,8 @@ class SingleModuleStep(StepABC):
         """
         super().__init__()
         n_in_channels = len(config.in_names)
+        if config.include_channel_mask_inputs:
+            n_in_channels *= 2
         n_out_channels = len(config.out_names)
         self.in_packer = Packer(config.in_names)
         self.out_packer = Packer(config.out_names)
@@ -357,6 +365,13 @@ class SingleModuleStep(StepABC):
             if args.data_mask is not None:
                 input_norm = _apply_input_mask(input_norm, args.data_mask)
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
+            if self._config.include_channel_mask_inputs:
+                mask_tensor = _build_channel_mask_inputs(
+                    self.in_names, args.data_mask, input_tensor
+                )
+                input_tensor = torch.cat(
+                    [input_tensor, mask_tensor], dim=self.CHANNEL_DIM
+                )
             output_tensor = self.module.wrap_module(wrapper)(
                 input_tensor,
                 labels=args.labels,
@@ -424,6 +439,35 @@ def _apply_input_mask(input_norm: TensorDict, data_mask: TensorMapping) -> Tenso
             broadcast_mask = mask.view(mask.shape[0], *([1] * (result[name].ndim - 1)))
             result[name] = torch.where(broadcast_mask, result[name], 0.0)
     return result
+
+
+def _build_channel_mask_inputs(
+    in_names: list[str],
+    data_mask: TensorMapping | None,
+    packed_input: torch.Tensor,
+) -> torch.Tensor:
+    """Build per-variable mask indicator channels aligned with packed input.
+
+    Returns a tensor of shape matching ``packed_input`` along all dimensions
+    except the channel dim, which has ``len(in_names)`` channels. Each channel
+    is 1.0 where the variable is present and 0.0 where masked.
+
+    Args:
+        in_names: Input variable names in packing order.
+        data_mask: Per-variable boolean masks of shape ``[batch]``, or None.
+        packed_input: The packed input tensor, used to infer shape and device.
+    """
+    batch = packed_input.shape[0]
+    spatial = packed_input.shape[-2:]
+    device = packed_input.device
+    channels = []
+    for name in in_names:
+        if data_mask is not None and name in data_mask:
+            mask_1d = data_mask[name].to(device=device, dtype=torch.float)
+            channels.append(mask_1d.view(batch, 1, 1).expand(batch, *spatial))
+        else:
+            channels.append(torch.ones(batch, *spatial, device=device))
+    return torch.stack(channels, dim=-3)
 
 
 def step_with_adjustments(
