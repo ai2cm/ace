@@ -23,11 +23,11 @@ cd $REPO_ROOT
 #MODEL_CHECKPOINT_DATASETS=("01KQDQTJ6SN7WHCYFKAER9G93F")
 
 # ACE2S ckpt from paper
-MODEL_CHECKPOINT_DATASETS=("01KQT3BPKRD6QVQBS91QE8MC7Q")
+MODEL_CHECKPOINT_DATASETS=("01KR20DK354DQRW6FY8CMCZ0YE")
 
 for seed in {0..0}; do
     #job_name="evaluate-4k-ace2som-xshield-continue-tune-1yr-even-split-single-decoder-seed${seed}"
-    job_name="evaluate-4k-ckpt-continue-tune-1yr-1-2-split-seed${seed}"
+    job_name="evaluate-4k-tuned-ace2som-ckpt-seed${seed}"
     gantry run \
         --name $job_name \
         --description 'Run ACE training' \
@@ -48,7 +48,7 @@ for seed in {0..0}; do
         --gpus 1 \
         --shared-memory 400GiB \
         --weka climate-default:/climate-default \
-        --budget ai2/climate \
+        --budget ai2/atec-climate \
         --no-python \
         --install "pip install --no-deps ." \
         --allow-dirty \

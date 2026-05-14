@@ -4,7 +4,7 @@ set -e
 
 JOB_NAME="ace2som-tuned-4k-inference"
 JOB_GROUP=""
-EXISTING_RESULTS_DATASET="01K9B2ZY6E1W5N34HQCVMS7BJM"  # this contains the checkpoint to use for inference
+EXISTING_RESULTS_DATASET="01KR20DK354DQRW6FY8CMCZ0YE"  # this contains the checkpoint to use for inference
 CONFIG_FILENAME="inference-4k-tuned.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME

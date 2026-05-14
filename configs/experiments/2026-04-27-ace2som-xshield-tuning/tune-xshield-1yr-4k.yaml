@@ -4,7 +4,7 @@ validate_using_ema: true
 evaluate_before_training: true
 ema:
   decay: 0.999
-max_epochs: 50
+max_epochs: 30
 inference:
   n_forward_steps: 1460 #2019-2024
   forward_steps_in_memory: 73
@@ -102,7 +102,7 @@ stepper_training:
       DSWRFsfc: 2
       USWRFtoa: 2
       tendency_of_total_water_path_due_to_advection: 0.5
-      PRESsfc: 10
+      PRESsfc: 3
       #PRMSL: 10
     kwargs:
       crps_weight: 0.9
