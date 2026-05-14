@@ -229,6 +229,7 @@ _OCEAN_DROP = [
     "LW",
     "LwLatSens",
     "SW",
+    "depth",
     "evap",
     "fprec",
     "ho",
@@ -335,10 +336,11 @@ def _regrid_dataset(
 
     import xesmf as xe
 
-    cache_key = regrid_cfg.output_grid
+    if source_grid is None:
+        source_grid = _make_source_grid(ds)
+    src_shape = (len(source_grid["lat"]), len(source_grid["lon"]))
+    cache_key = f"{regrid_cfg.output_grid}_{src_shape}"
     if cache_key not in _REGRIDDER_CACHE:
-        if source_grid is None:
-            source_grid = _make_source_grid(ds)
         dst = _make_target_grid(regrid_cfg.output_grid)
         _REGRIDDER_CACHE[cache_key] = xe.Regridder(
             source_grid, dst, regrid_cfg.method, periodic=True
@@ -352,14 +354,30 @@ def _regrid_dataset(
     return regridded
 
 
-def _build_landsea_mask(ds_ocean: xr.Dataset) -> xr.Dataset:
-    """Derive a land-sea mask from the ``landsea_mask`` variable.
+def _build_landsea_mask(ds_ocean: xr.Dataset, vdim: str) -> xr.Dataset:
+    """Derive a 3-D land-sea mask.
 
-    MOM6 provides ``landsea_mask`` with dims ``(z_l, lat, lon)`` where
-    1 = sea and 0 = land.  We use the surface level as the 2-D mask.
+    Tries ``landsea_mask`` first (available in the 1-degree zarr).
+    Falls back to deriving the mask from NaNs in ``temp``/``thetao`` at t=0
+    (the 0.25-degree zarr has no explicit mask variable).
     """
-    mask_3d = ds_ocean["landsea_mask"]  # (z_l, lat, lon), int32
-    mask_2d = mask_3d.isel(z_l=0).astype(np.float32)
+    if "landsea_mask" in ds_ocean:
+        mask_3d = ds_ocean["landsea_mask"].astype(np.float32)
+    else:
+        for candidate in ("temp", "thetao", "so"):
+            if candidate in ds_ocean and vdim in ds_ocean[candidate].dims:
+                ref = ds_ocean[candidate].isel(time=0).compute()
+                mask_3d = (~np.isnan(ref)).astype(np.float32)
+                mask_3d.attrs = {"long_name": "ocean mask derived from NaN pattern"}
+                print(f"  Derived 3-D mask from NaN pattern in '{candidate}'")
+                break
+        else:
+            raise ValueError(
+                "Cannot build land-sea mask: no 'landsea_mask' variable and "
+                "no 3-D ocean variable with NaNs found."
+            )
+
+    mask_2d = mask_3d.isel({vdim: 0}).astype(np.float32)
     mask_2d.attrs = {"long_name": "ocean mask", "units": "0 if land, 1 if ocean"}
     land_fraction = (1.0 - mask_2d).astype(np.float32)
     land_fraction.attrs = {"long_name": "land fraction", "units": "fraction"}
@@ -370,7 +388,7 @@ def _build_landsea_mask(ds_ocean: xr.Dataset) -> xr.Dataset:
     }
     return xr.Dataset(
         {
-            "mask_3d": mask_3d.astype(np.float32),
+            "mask_3d": mask_3d,
             "mask_2d": mask_2d,
             "land_fraction": land_fraction,
             "sea_surface_fraction": sea_surface_fraction,
@@ -400,18 +418,22 @@ def _split_3d_to_levels(
     new_vars: dict[str, xr.DataArray] = {}
     depths = ds[vdim].values
 
+    keep_coords = {"time", "lat", "lon"}
+
     for var in vars_3d:
         if var not in ds:
             continue
         for i in range(n_levels):
             new_name = f"{var}_{i}"
             da = ds[var].isel({vdim: i}, drop=True)
+            da = da.drop_vars([c for c in da.coords if c not in keep_coords])
             long_name = ds[var].attrs.get("long_name", var)
             da.attrs["long_name"] = f"{long_name} level-{i}"
             new_vars[new_name] = da
 
     for i in range(n_levels):
         mask_i = mask_3d.isel({vdim: i}, drop=True).astype(np.float32)
+        mask_i = mask_i.drop_vars([c for c in mask_i.coords if c not in keep_coords])
         mask_i.attrs = {"long_name": f"ocean mask level-{i}"}
         new_vars[f"mask_{i}"] = mask_i
 
@@ -448,14 +470,27 @@ def _subsample_atmo_to_ocean_times(
     return ds_atmo.sel(time=common_times)
 
 
-def compute_lazy_dataset(config: UFSReplayDatasetConfig) -> xr.Dataset:
-    """Build the full lazy dataset ready for writing."""
+def compute_lazy_dataset(
+    config: UFSReplayDatasetConfig,
+    n_subsample: int | None = None,
+) -> xr.Dataset:
+    """Build the full lazy dataset ready for writing.
+
+    Args:
+        config: Preprocessing configuration.
+        n_subsample: If set, only use the first *n_subsample* ocean timesteps.
+            Applied early (before regridding) to keep local runs tractable.
+    """
     xr.set_options(keep_attrs=True)
 
     # ── 1. Load ocean ─────────────────────────────────────────────────────
     print("Opening ocean zarr...")
     ds_ocean = _open_zarr(config.ocean_zarr, chunks={})
     print(f"  Ocean dims: {dict(ds_ocean.dims)}")
+
+    if n_subsample is not None:
+        ds_ocean = ds_ocean.isel(time=slice(None, n_subsample))
+        print(f"  Subsampled ocean to {ds_ocean.sizes['time']} timesteps")
 
     # The MOM6 zarr has two vertical coordinate variables that represent the
     # same axis: ``zl`` (nominal layer index) and ``z_l`` (actual depth in m).
@@ -467,7 +502,7 @@ def compute_lazy_dataset(config: UFSReplayDatasetConfig) -> xr.Dataset:
     if vdim not in ds_ocean.dims:
         vdim = vdim_candidates[0]
 
-    masks = _build_landsea_mask(ds_ocean)
+    masks = _build_landsea_mask(ds_ocean, vdim)
 
     # Drop variables we don't need
     ds_ocean = ds_ocean.drop_vars(
@@ -496,22 +531,22 @@ def compute_lazy_dataset(config: UFSReplayDatasetConfig) -> xr.Dataset:
         # Regrid 3-D mask separately (it has no time dim)
         masks_to_regrid = masks[["mask_3d"]].astype(np.float32)
         masks_to_regrid = _regrid_dataset(masks_to_regrid, config.regrid, source_grid)
-        # Threshold regridded mask back to binary
-        masks["mask_3d"] = (masks_to_regrid["mask_3d"] > 0.5).astype(np.float32)
-        # Rebuild 2-D masks from regridded 3-D mask
-        mask_2d = masks["mask_3d"].isel({vdim: 0}).astype(np.float32)
+        # Threshold regridded mask back to binary and rebuild all masks
+        mask_3d = (masks_to_regrid["mask_3d"] > 0.5).astype(np.float32)
+        mask_2d = mask_3d.isel({vdim: 0}).astype(np.float32)
         mask_2d.attrs = {"long_name": "ocean mask", "units": "0 if land, 1 if ocean"}
-        masks["mask_2d"] = mask_2d
-        masks["land_fraction"] = (1.0 - mask_2d).astype(np.float32)
-        masks["land_fraction"].attrs = {
-            "long_name": "land fraction",
-            "units": "fraction",
-        }
-        masks["sea_surface_fraction"] = mask_2d.copy()
-        masks["sea_surface_fraction"].attrs = {
-            "long_name": "sea surface fraction",
-            "units": "fraction",
-        }
+        land_frac = (1.0 - mask_2d).astype(np.float32)
+        land_frac.attrs = {"long_name": "land fraction", "units": "fraction"}
+        ssf = mask_2d.copy()
+        ssf.attrs = {"long_name": "sea surface fraction", "units": "fraction"}
+        masks = xr.Dataset(
+            {
+                "mask_3d": mask_3d,
+                "mask_2d": mask_2d,
+                "land_fraction": land_frac,
+                "sea_surface_fraction": ssf,
+            }
+        )
         print(f"  Regridded ocean to {dict(ds_ocean.sizes)}")
 
     # ── 3. Vertical sub-selection ──────────────────────────────────────────
@@ -562,21 +597,28 @@ def compute_lazy_dataset(config: UFSReplayDatasetConfig) -> xr.Dataset:
     if atmo_h_rename:
         ds_atmo = ds_atmo.rename(atmo_h_rename)
 
+    # Only select the variables we need before regridding (much cheaper)
+    needed_atmo_vars = (
+        list(config.atmo_forcing_vars.keys())
+        + list(config.ice_vars.keys())
+        + (["lfrac"] if "lfrac" in ds_atmo else [])
+    )
+    ds_atmo = ds_atmo[[v for v in needed_atmo_vars if v in ds_atmo]]
+
+    # Sub-sample atmo to ocean times *before* regridding to avoid processing
+    # all 87k atmo timesteps when only a fraction overlap with the ocean data.
+    ds_atmo = _subsample_atmo_to_ocean_times(ds_atmo, ds_ocean.time)
+
     # Regrid atmosphere to match ocean target grid
     if config.regrid.output_grid:
-        # Only select the variables we need before regridding (much cheaper)
-        needed_atmo_vars = (
-            list(config.atmo_forcing_vars.keys())
-            + list(config.ice_vars.keys())
-            + (["lfrac"] if "lfrac" in ds_atmo else [])
-        )
-        ds_atmo = ds_atmo[[v for v in needed_atmo_vars if v in ds_atmo]]
         print(f"  Regridding atmosphere to {config.regrid.output_grid}...")
         ds_atmo = _regrid_dataset(ds_atmo, config.regrid)
+        # Assign exact lat/lon from the ocean grid so merge doesn't fail
+        # on floating-point differences.
+        ds_atmo = ds_atmo.assign_coords(
+            lat=ds_ocean.lat.values, lon=ds_ocean.lon.values
+        )
         print(f"  Regridded atmo to {dict(ds_atmo.sizes)}")
-
-    # Sub-sample atmo to ocean times
-    ds_atmo = _subsample_atmo_to_ocean_times(ds_atmo, ds_ocean.time)
 
     # Restrict ocean data to the common time range
     common_times = ds_atmo.time.values
@@ -617,17 +659,23 @@ def compute_lazy_dataset(config: UFSReplayDatasetConfig) -> xr.Dataset:
 
     # ── 7. Merge everything ───────────────────────────────────────────────
     print("Merging datasets...")
-    ds = xr.merge(
-        [
-            ds_ocean_2d,
-            ds_levels,
-            ds_forcing,
-            ds_ice,
-            masks[["mask_2d", "sea_surface_fraction"]],
-            ds_land if len(ds_land) > 0 else xr.Dataset(),
-        ],
-        join="inner",
-    )
+    # Drop stray coordinates (e.g. 'cftime' from zarr encoding) that cause
+    # MergeError when combining datasets from different sources.
+    keep_coords = {"time", "lat", "lon"}
+    to_merge = [
+        ds_ocean_2d,
+        ds_levels,
+        ds_forcing,
+        ds_ice,
+        masks[["mask_2d", "sea_surface_fraction"]],
+    ]
+    if len(ds_land) > 0:
+        to_merge.append(ds_land)
+    cleaned = []
+    for d in to_merge:
+        stray = [c for c in d.coords if c not in keep_coords and c not in d.dims]
+        cleaned.append(d.drop_vars(stray) if stray else d)
+    ds = xr.merge(cleaned, join="inner")
 
     # If land_fraction wasn't in atmo, derive from mask
     if "land_fraction" not in ds:
@@ -730,10 +778,7 @@ def main(config, output_store, debug, subsample):
         print(client)
         print(client.dashboard_link)
 
-    ds = compute_lazy_dataset(cfg)
-
-    if subsample:
-        ds = ds.isel(time=slice(None, 73))
+    ds = compute_lazy_dataset(cfg, n_subsample=73 if subsample else None)
 
     ds = clear_compressors_encoding(ds)
     print(f"Final output size: {ds.nbytes / 1e9:.1f} GB")
