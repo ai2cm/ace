@@ -68,8 +68,6 @@ def assert_batchdata_equal_up_to_device(a: BatchData, b: BatchData) -> None:
                     va.tensor.cpu(),
                     vb.tensor.cpu(),
                 )
-        elif field.name == "data_mask":
-            _assert_tensor_mapping_equal_up_to_device(va, vb)
         else:
             assert va == vb
 
@@ -97,8 +95,6 @@ def assert_paired_data_equal_up_to_device(a: PairedData, b: PairedData) -> None:
                     va.tensor.cpu(),
                     vb.tensor.cpu(),
                 )
-        elif field.name == "data_mask":
-            _assert_tensor_mapping_equal_up_to_device(va, vb)
         else:
             assert va == vb
 
@@ -709,6 +705,12 @@ def test_data_mask_preserved_across_batchdata_transforms():
     for k in names:
         assert device.data_mask[k].device == get_device()
 
+    n_lat, n_lon = 8, 16
+    scattered = base.scatter_spatial((n_lat, n_lon))
+    assert set(scattered.data_mask) == set(names)
+    for k in names:
+        torch.testing.assert_close(scattered.data_mask[k], data_mask[k])
+
 
 def test_data_mask_broadcast_ensemble():
     names = ["foo", "bar"]
@@ -734,8 +736,8 @@ def test_data_mask_broadcast_ensemble():
     assert broadcasted.data_mask["bar"].shape == (n_samples * n_ensemble,)
     # sample 0 was True, sample 1 was False; repeat_interleave keeps order
     for i in range(n_ensemble):
-        assert broadcasted.data_mask["bar"][0 * n_ensemble + i].item() is True
-        assert broadcasted.data_mask["bar"][1 * n_ensemble + i].item() is False
+        assert broadcasted.data_mask["bar"][i].item() is True
+        assert broadcasted.data_mask["bar"][n_ensemble + i].item() is False
 
 
 def test_data_mask_none_preserved():
@@ -752,9 +754,17 @@ def test_data_mask_none_preserved():
     assert base.select_time_slice(slice(0, 1)).data_mask is None
     assert base.subset_names(["foo"]).data_mask is None
     assert base.broadcast_ensemble(2).data_mask is None
+    ic = base.get_start(["foo"], 1)
+    assert ic.as_batch_data().data_mask is None
+    assert base.prepend(ic).data_mask is None
+    assert (
+        base.compute_derived_variables(lambda a, f: TensorDict({}), base).data_mask
+        is None
+    )
+    assert base.scatter_spatial((8, 16)).data_mask is None
 
 
-def test_data_mask_validation():
+def test_data_mask_raises_if_length_does_not_match_n_samples():
     base = get_batch_data(
         names=["foo"],
         n_samples=2,
