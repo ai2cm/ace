@@ -14,11 +14,13 @@ model:
   - northward_wind_at_ten_meters
   - PRMSL
   - PRATEsfc
+  - air_temperature_at_two_meters
   in_names:
   - PRATEsfc
   - eastward_wind_at_ten_meters
   - northward_wind_at_ten_meters
   - PRMSL
+  - air_temperature_at_two_meters
   loss:
     type: MSE
   module:
@@ -39,11 +41,11 @@ model:
     type: unet_diffusion_song_v2
   normalization:
     coarse:
-      global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/100km/centering-20260407.nc
-      global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/100km/scaling-full-field-20260407.nc
+      global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/100km/centering-20260514.nc
+      global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/100km/scaling-full-field-20260514.nc
     fine:
-      global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/3km/centering-20260206.nc
-      global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/3km/scaling-full-field-20260206.nc
+      global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/3km/centering-20260514.nc
+      global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/3km/scaling-full-field-20260514.nc
   num_diffusion_generation_steps: 18
   churn: 0.0
   training_noise_distribution:
