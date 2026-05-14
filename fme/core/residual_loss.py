@@ -11,19 +11,61 @@ regardless of sign.
 """
 
 import dataclasses
+import pathlib
 from collections.abc import Mapping
 
+import fsspec
 import torch
+import xarray as xr
 
+from fme.core.device import get_device
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.loss import LossOutput, StepLossConfig, WeightedMappingLoss
 from fme.core.normalizer import StandardNormalizer
-from fme.core.typing_ import TensorMapping
+from fme.core.typing_ import TensorDict, TensorMapping
 
 
 def step_label(step: int) -> str:
     """Stable suffix used in metric keys, e.g. ``"step_1_minus_0"``."""
     return f"step_{step}_minus_{step - 1}"
+
+
+def load_variance_maps(
+    path: str | pathlib.Path,
+    names: list[str],
+) -> TensorDict:
+    """Load per-variable spatial variance maps from a netCDF file.
+
+    Each variable in the file should be a 2D ``(lat, lon)`` DataArray
+    representing the climatological variance of temporal residuals at each
+    grid cell.
+
+    Args:
+        path: Path to the netCDF file.
+        names: Variable names to load.
+
+    Returns:
+        Dictionary mapping variable names to tensors of shape ``(1, 1, lat, lon)``
+        (broadcastable to ``(batch, channel, lat, lon)``).
+    """
+    with fsspec.open(path, "rb") as f:
+        ds = xr.load_dataset(f, mask_and_scale=False)
+    result: TensorDict = {}
+    for name in names:
+        if name not in ds:
+            raise ValueError(
+                f"Variable {name!r} not found in variance file {path}. "
+                f"Available: {sorted(ds.data_vars)}"
+            )
+        arr = ds[name].values
+        if arr.ndim != 2:
+            raise ValueError(
+                f"Expected 2D (lat, lon) array for {name!r}, got shape {arr.shape}."
+            )
+        tensor = torch.as_tensor(arr, dtype=torch.float).unsqueeze(0).unsqueeze(0)
+        result[name] = tensor.to(get_device())
+    ds.close()
+    return result
 
 
 @dataclasses.dataclass
@@ -41,11 +83,17 @@ class SnapshotResidualLossConfig:
         loss: Inner loss configuration.
         weight: Multiplier applied to the aggregated residual loss term
             before adding it to the total loss.
+        variance_path: Path to a netCDF file containing the climatological
+            variance of true temporal residuals at each grid cell, with one
+            2D ``(lat, lon)`` variable per output name. When provided, residuals
+            are divided by ``sqrt(variance)`` at each grid cell before the
+            inner loss, implementing local variance normalization.
     """
 
     steps: list[int]
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
     weight: float = 1.0
+    variance_path: str | pathlib.Path | None = None
 
     def __post_init__(self):
         if len(self.steps) == 0:
@@ -95,11 +143,15 @@ class SnapshotResidualLossConfig:
             channel_dim=channel_dim,
             normalizer=normalizer,
         )
+        variance_maps: TensorDict | None = None
+        if self.variance_path is not None:
+            variance_maps = load_variance_maps(self.variance_path, out_names)
         return SnapshotResidualLoss(
             steps=list(self.steps),
             loss=weighted_mapping_loss,
             out_names=list(out_names),
             weight=self.weight,
+            variance_maps=variance_maps,
         )
 
 
@@ -120,12 +172,14 @@ class SnapshotResidualLoss:
         loss: WeightedMappingLoss,
         out_names: list[str],
         weight: float,
+        variance_maps: TensorDict | None = None,
     ):
         self._all_steps: list[int] = sorted(steps)
         self._active_steps: list[int] = list(self._all_steps)
         self._loss = loss
         self._out_names = list(out_names)
         self._weight = weight
+        self._variance_maps = variance_maps
 
     @property
     def weight(self) -> float:
@@ -204,6 +258,15 @@ class SnapshotResidualLoss:
             name: (targets[step][name] - targets[ref][name].detach()).abs()
             for name in self._out_names
         }
+        if self._variance_maps is not None:
+            gen_residual = {
+                name: gen_residual[name] / torch.sqrt(self._variance_maps[name])
+                for name in self._out_names
+            }
+            target_residual = {
+                name: target_residual[name] / torch.sqrt(self._variance_maps[name])
+                for name in self._out_names
+            }
         return gen_residual, target_residual
 
     def compute_step_loss(
