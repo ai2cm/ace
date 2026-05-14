@@ -13,10 +13,34 @@ from fme.core.fill import SmoothFloodFill
 from fme.core.generics.aggregator import AggregatorABC
 from fme.core.typing_ import TensorDict, TensorMapping
 
+from ..tendency_variance import TendencyVarianceAccumulator
 from .map import MapAggregator
 from .reduced import MeanAggregator
 from .snapshot import SnapshotAggregator
 from .spectrum import SpectrumAggregator
+
+
+class _OneStepTendencyVarianceAdapter:
+    """Adapts TendencyVarianceAccumulator for the one-step _Aggregator protocol."""
+
+    def __init__(self):
+        self._inner = TendencyVarianceAccumulator()
+
+    def record_batch(
+        self,
+        loss: float,
+        target_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data_norm: TensorMapping,
+        gen_data_norm: TensorMapping,
+    ) -> None:
+        self._inner.record(gen_data, target_data)
+
+    def get_logs(self, label: str) -> dict[str, float]:
+        return self._inner.get_logs(label)
+
+    def get_dataset(self) -> xr.Dataset:
+        return self._inner.get_dataset()
 
 
 class _Aggregator(Protocol):
@@ -109,6 +133,7 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
             self._aggregators["mean_map"] = MapAggregator(
                 horizontal_coordinates.dims, dataset_info.variable_metadata
             )
+        self._aggregators["tendency_variance"] = _OneStepTendencyVarianceAdapter()
 
         self._loss_scaling = loss_scaling or {}
 
