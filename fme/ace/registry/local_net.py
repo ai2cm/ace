@@ -127,6 +127,10 @@ class LocalNetBuilder(ModuleConfig):
             transform.
         context_pos_embed_dim: Dimension of the learned positional embedding
             used for conditioning. 0 disables.
+        label_embed_dim: Dimension of the learned label embedding space.
+            When > 0, a shared linear layer maps one-hot labels to this
+            embedding dimension before downstream conditioning layers.
+            When 0 (default), one-hot labels are used directly.
         block_types: List of filter types for each block ('disco', 'conv1x1').
             The length determines the number of blocks.
         global_layer_norm: Whether to reduce along the spatial domain when
@@ -152,6 +156,7 @@ class LocalNetBuilder(ModuleConfig):
     noise_embed_dim: int = 256
     noise_type: Literal["gaussian", "isotropic"] = "gaussian"
     context_pos_embed_dim: int = 0
+    label_embed_dim: int = 0
     block_types: list[BlockType] = dataclasses.field(
         default_factory=lambda: [
             "disco",
@@ -199,11 +204,15 @@ class LocalNetBuilder(ModuleConfig):
             lora_rank=self.lora_rank,
             lora_alpha=self.lora_alpha,
         )
-        embed_dim_labels = len(dataset_info.all_labels)
+        n_labels = len(dataset_info.all_labels)
+        if self.label_embed_dim > 0:
+            effective_label_dim = self.label_embed_dim
+        else:
+            effective_label_dim = n_labels
         context_config = ContextConfig(
             embed_dim_scalar=0,
             embed_dim_noise=self.noise_embed_dim,
-            embed_dim_labels=embed_dim_labels,
+            embed_dim_labels=effective_label_dim,
             embed_dim_pos=self.context_pos_embed_dim,
         )
         net = get_lat_lon_localnet(
@@ -229,7 +238,8 @@ class LocalNetBuilder(ModuleConfig):
             img_shape=img_shape,
             embed_dim_noise=self.noise_embed_dim,
             embed_dim_pos=self.context_pos_embed_dim,
-            embed_dim_labels=embed_dim_labels,
+            n_labels=n_labels,
+            label_embed_dim=self.label_embed_dim,
             inverse_sht=inverse_sht,
             lmax=lmax,
             mmax=mmax,

@@ -16,7 +16,7 @@ import yaml
 import fme
 from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregatorConfig,
-    StepMeanEntry,
+    MeanMetricConfig,
 )
 from fme.ace.aggregator.one_step.main import OneStepAggregatorConfig
 from fme.ace.data_loading.config import DataLoaderConfig
@@ -60,12 +60,7 @@ from fme.ace.testing import (
 )
 from fme.ace.train.train import build_trainer, prepare_directory
 from fme.ace.train.train import main as train_main
-from fme.ace.train.train_config import (
-    AdditionalInferenceConfig,
-    InlineInferenceConfig,
-    TrainBuilders,
-    TrainConfig,
-)
+from fme.ace.train.train_config import InlineInferenceConfig, TrainBuilders, TrainConfig
 from fme.core.coordinates import (
     HEALPixCoordinates,
     HorizontalCoordinates,
@@ -182,6 +177,7 @@ def _get_test_yaml_files(
         net_config = dict(
             num_layers=2,
             embed_dim=12,
+            label_embed_dim=3,
         )
         if use_healpix:
             net_config["data_grid"] = "healpix"
@@ -214,66 +210,57 @@ def _get_test_yaml_files(
         entity="ai2cm",
     )
     if skip_inline_inference:
-        inline_inference_config = None
-        additional_inference_configs: list[AdditionalInferenceConfig] = []
+        inference_configs: list[InlineInferenceConfig] = []
     else:
-        inline_inference_config = InlineInferenceConfig(
-            aggregator=InferenceEvaluatorAggregatorConfig(
-                monthly_reference_data=(
-                    str(monthly_data_filename)
-                    if monthly_data_filename is not None
-                    else None
+        inference_configs = [
+            InlineInferenceConfig(
+                aggregator=InferenceEvaluatorAggregatorConfig(
+                    monthly_reference_data=(
+                        str(monthly_data_filename)
+                        if monthly_data_filename is not None
+                        else None
+                    ),
                 ),
-                log_step_means=[]
-                if inference_forward_steps < 20
-                else [StepMeanEntry(step=20)],
+                loader=InferenceDataLoaderConfig(
+                    dataset=XarrayDataConfig(
+                        data_path=str(valid_data_path),
+                        spatial_dimensions=spatial_dimensions_str,
+                        labels=[] if conditional else None,
+                    ),
+                    start_indices=InferenceInitialConditionIndices(
+                        first=0,
+                        n_initial_conditions=2,
+                        interval=1,
+                    ),
+                ),
+                n_forward_steps=inference_forward_steps,
+                forward_steps_in_memory=2,
+                n_ensemble_per_ic=2,
             ),
-            loader=InferenceDataLoaderConfig(
-                dataset=XarrayDataConfig(
-                    data_path=str(valid_data_path),
-                    spatial_dimensions=spatial_dimensions_str,
-                    labels=[] if conditional else None,
-                ),
-                start_indices=InferenceInitialConditionIndices(
-                    first=0,
-                    n_initial_conditions=2,
-                    interval=1,
-                ),
-            ),
-            n_forward_steps=inference_forward_steps,
-            forward_steps_in_memory=2,
-            n_ensemble_per_ic=2,
-        )
-        additional_inference_configs = [
-            AdditionalInferenceConfig(
+            InlineInferenceConfig(
                 name="weather_eval",
-                config=InlineInferenceConfig(
-                    aggregator=InferenceEvaluatorAggregatorConfig(
-                        monthly_reference_data=(
-                            str(monthly_data_filename)
-                            if monthly_data_filename is not None
-                            else None
-                        ),
-                        log_step_means=[]
-                        if inference_forward_steps < 20
-                        else [StepMeanEntry(step=20)],
+                aggregator=InferenceEvaluatorAggregatorConfig(
+                    monthly_reference_data=(
+                        str(monthly_data_filename)
+                        if monthly_data_filename is not None
+                        else None
                     ),
-                    loader=InferenceDataLoaderConfig(
-                        dataset=XarrayDataConfig(
-                            data_path=str(valid_data_path),
-                            spatial_dimensions=spatial_dimensions_str,
-                            labels=["era5"] if conditional else None,
-                        ),
-                        start_indices=InferenceInitialConditionIndices(
-                            first=0,
-                            n_initial_conditions=2,
-                            interval=1,
-                        ),
-                    ),
-                    n_forward_steps=inference_forward_steps,
-                    forward_steps_in_memory=2,
-                    n_ensemble_per_ic=2,
                 ),
+                loader=InferenceDataLoaderConfig(
+                    dataset=XarrayDataConfig(
+                        data_path=str(valid_data_path),
+                        spatial_dimensions=spatial_dimensions_str,
+                        labels=["era5"] if conditional else None,
+                    ),
+                    start_indices=InferenceInitialConditionIndices(
+                        first=0,
+                        n_initial_conditions=2,
+                        interval=1,
+                    ),
+                ),
+                n_forward_steps=inference_forward_steps,
+                forward_steps_in_memory=2,
+                n_ensemble_per_ic=2,
             ),
         ]
 
@@ -301,7 +288,11 @@ def _get_test_yaml_files(
     if crps_training:
         loss = StepLossConfig(
             type="EnsembleLoss",
-            kwargs={"crps_weight": 1.0, "energy_score_weight": 0.0},
+            kwargs={
+                "crps_weight": 1.0,
+                "energy_score_weight": 0.0,
+                "finite_difference_crps_weight": 0.05,
+            },
         )
         n_ensemble: int = 2
     else:
@@ -386,8 +377,7 @@ def _get_test_yaml_files(
             n_ensemble=n_ensemble,
             n_forward_steps=n_forward_steps_arg,
         ),
-        inference=inline_inference_config,
-        additional_inference=additional_inference_configs,
+        inference=inference_configs,
         validate_using_ema=validate_using_ema,
         max_epochs=max_epochs,
         segment_epochs=segment_epochs,
@@ -412,8 +402,7 @@ def _get_test_yaml_files(
             files=[FileWriterConfig("autoregressive")],
         ),
         aggregator=InferenceEvaluatorAggregatorConfig(
-            log_video=True,
-            log_step_means=[],
+            metrics=[MeanMetricConfig(target="denorm")],
         ),
         logging=logging_config,
         loader=InferenceDataLoaderConfig(
@@ -475,13 +464,14 @@ def _setup(
     derived_forcings=None,
     use_schedule: bool = False,
     validate_using_ema: bool = False,
+    stats_std_fill_value: float | None = None,
 ):
     if not path.exists():
         path.mkdir()
     if derived_forcings is None:
         derived_forcings = DerivedForcingsConfig()
     seed = 0
-    np.random.seed(seed)
+    set_seed(seed)
     in_variable_names = [
         "PRESsfc",
         "specific_total_water_0",
@@ -533,6 +523,7 @@ def _setup(
     save_scalar_netcdf(
         stats_dir / "stats-stddev.nc",
         variable_names=all_variable_names,
+        fill_value=stats_std_fill_value,
     )
 
     monthly_dim_sizes: DimSizes
@@ -638,29 +629,28 @@ def test_train_and_inference(
         wandb_logs = wandb.get_logs()
         for log in wandb_logs:
             # ensure inference time series is not logged
-            assert "inference/mean/forecast_step" not in log
+            assert "inference_0/mean/forecast_step" not in log
 
         epoch_logs = wandb_logs[-1]
-        assert "inference/mean_step_20_norm/weighted_rmse/channel_mean" in epoch_logs
+        assert "inference_0/mean_step_20_norm/weighted_rmse/channel_mean" in epoch_logs
         assert "val/mean_norm/weighted_rmse/channel_mean" in epoch_logs
         ensemble_step_20_keys = [
-            k for k in epoch_logs if "inference/ensemble_step_20/" in k
+            k for k in epoch_logs if "inference_0/ensemble_step_20/" in k
         ]
         assert ensemble_step_20_keys, (
             "expected at least one ensemble_step_20 metric in inline inference "
             "epoch log"
         )
         weather_eval_keys = [k for k in epoch_logs if k.startswith("weather_eval/")]
-        assert weather_eval_keys, (
-            "expected at least one weather_eval metric in additional_inference "
-            "epoch log"
-        )
+        assert (
+            weather_eval_keys
+        ), "expected at least one weather_eval metric in inference epoch log"
         weather_eval_ensemble_keys = [
             k for k in epoch_logs if "weather_eval/ensemble_step_20/" in k
         ]
         assert weather_eval_ensemble_keys, (
             "expected at least one ensemble_step_20 metric in weather_eval "
-            "additional_inference epoch log"
+            "inference epoch log"
         )
 
     validation_output_dir = tmp_path / "results" / "output" / "val" / "epoch_0001"
@@ -677,7 +667,7 @@ def test_train_and_inference(
             assert len(ds) > 0
 
     inline_inference_output_dir = (
-        tmp_path / "results" / "output" / "inference" / "epoch_0001"
+        tmp_path / "results" / "output" / "inference_0" / "epoch_0001"
     )
     assert inline_inference_output_dir.exists()
     for diagnostic in (
@@ -1055,8 +1045,8 @@ def test_train_and_inference_with_derived_forcings(
         crps_training=crps_training,
         log_validation_maps=log_validation_maps,
         derived_forcings=derived_forcings,
+        stats_std_fill_value=1.0,
     )
-    # using pdb requires calling main functions directly
     with mock_wandb() as wandb:
         train_main(
             yaml_config=train_config,
@@ -1108,7 +1098,7 @@ def test_train_with_non_local_experiment_dir_error():
             logging=LoggingConfig(),
             max_epochs=1,
             save_checkpoint=False,
-            inference=None,
+            inference=[],
         )
 
 
@@ -1129,7 +1119,7 @@ def test_train_config_with_checkpoint_stepper(tmp_path: pathlib.Path):
         logging=LoggingConfig(),
         max_epochs=1,
         save_checkpoint=False,
-        inference=None,
+        inference=[],
     )
     assert isinstance(train_config.stepper_config, StepperConfig)
     assert (
@@ -1172,6 +1162,6 @@ def test_train_config_with_stepper_config_sets_stepper_config(tmp_path: pathlib.
         logging=LoggingConfig(),
         max_epochs=1,
         save_checkpoint=False,
-        inference=None,
+        inference=[],
     )
     assert train_config.stepper_config is stepper
