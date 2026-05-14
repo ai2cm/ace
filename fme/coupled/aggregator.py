@@ -8,12 +8,14 @@ import torch
 import xarray as xr
 
 from fme.ace.aggregator.inference.main import (
+    APPROXIMATELY_EIGHTY_YEARS,
     APPROXIMATELY_TWO_YEARS,
     SLIGHTLY_LESS_THAN_FIVE_YEARS,
     AnnualMetricConfig,
     EnsoCoefficientMetricConfig,
     EnsoIndexMetricConfig,
     HistogramMetricConfig,
+    IpoIndexMetricConfig,
     MeanMetricConfig,
     PowerSpectrumMetricConfig,
     SeasonalMetricConfig,
@@ -286,6 +288,8 @@ class InferenceEvaluatorAggregatorConfig:
                 metrics.append(EnsoIndexMetricConfig())
         if n_timesteps * timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS:
             metrics.append(EnsoCoefficientMetricConfig())
+        if include_nino34 and n_timesteps * timestep > APPROXIMATELY_EIGHTY_YEARS:
+            metrics.append(IpoIndexMetricConfig())
         return metrics
 
     def build(
