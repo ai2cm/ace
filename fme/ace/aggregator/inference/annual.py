@@ -16,7 +16,7 @@ from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorMapping
 
 from ..plotting import plot_mean_and_samples
-from .build_context import MetricBuildContext, maybe_filter
+from .build_context import MetricBuildContext, MetricNotSupportedError, maybe_filter
 from .data import InferenceBatchData, MetricBuildResult, SubAggregator
 
 
@@ -381,6 +381,12 @@ class AnnualMetricConfig:
         return self.name
 
     def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        total_duration = ctx.n_timesteps * ctx.timestep
+        if total_duration <= datetime.timedelta(days=730):
+            raise MetricNotSupportedError(
+                f"annual metric requires > ~2 years of data, "
+                f"got {total_duration.days} days"
+            )
         if self.reference_data is not None:
             ref = xr.open_dataset(self.reference_data, decode_timedelta=False)
         else:

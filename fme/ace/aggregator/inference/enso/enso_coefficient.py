@@ -467,11 +467,19 @@ class EnsoCoefficientMetricConfig:
         return self.name
 
     def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        import datetime
+
         from fme.core.coordinates import LatLonCoordinates
 
         if not isinstance(ctx.horizontal_coordinates, LatLonCoordinates):
             raise MetricNotSupportedError(
                 "enso_coefficient metric requires LatLonCoordinates."
+            )
+        total_duration = ctx.n_timesteps * ctx.timestep
+        if total_duration <= datetime.timedelta(days=1800):
+            raise MetricNotSupportedError(
+                f"enso_coefficient metric requires > ~5 years of data, "
+                f"got {total_duration.days} days"
             )
         return MetricBuildResult(
             aggregator=EnsoCoefficientEvaluatorAggregator(

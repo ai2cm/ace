@@ -10,6 +10,7 @@ import xarray as xr
 
 from fme.ace.aggregator.inference import (
     AnnualMetricConfig,
+    EnsembleMetricConfig,
     EnsoCoefficientMetricConfig,
     EnsoIndexMetricConfig,
     HierarchicalInferenceEvaluatorAggregatorConfig,
@@ -27,8 +28,12 @@ from fme.ace.aggregator.inference import (
     ZonalMeanMetricConfig,
     build_inference_evaluator_aggregator,
 )
+from fme.ace.aggregator.inference.build_context import (
+    MetricBuildContext,
+    MetricNotSupportedError,
+)
 from fme.ace.data_loading.batch_data import BatchData, PairedData
-from fme.core.coordinates import LatLonCoordinates
+from fme.core.coordinates import HEALPixCoordinates, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.wandb import Image
@@ -828,3 +833,179 @@ def test_all_metric_configs_documented():
             f"{name} is in MetricConfig union but not documented in "
             f"docs/evaluator_config.rst"
         )
+
+
+def _make_healpix_ds_info() -> DatasetInfo:
+    return DatasetInfo(
+        horizontal_coordinates=HEALPixCoordinates(
+            face=torch.arange(12),
+            height=torch.arange(16),
+            width=torch.arange(16),
+        ),
+        timestep=TIMESTEP,
+    )
+
+
+def _make_build_context(
+    ds_info: DatasetInfo,
+    n_forward_steps: int = 23,
+    n_ic_steps: int = 1,
+) -> MetricBuildContext:
+    n_timesteps = n_ic_steps + n_forward_steps
+    return MetricBuildContext(
+        ops=ds_info.gridded_operations,
+        horizontal_coordinates=ds_info.horizontal_coordinates,
+        n_timesteps=n_timesteps,
+        n_ic_steps=n_ic_steps,
+        timestep=ds_info.timestep,
+        variable_metadata=ds_info.variable_metadata,
+        channel_mean_names=None,
+        monthly_reference_data=None,
+        time_mean_reference_data=None,
+        initial_time=get_zero_time(shape=[2, 0], dims=["sample", "time"]),
+    )
+
+
+class TestMetricNotSupportedError:
+    def test_step_mean_exceeding_n_forward_steps(self):
+        ctx = _make_build_context(get_ds_info(4, 4), n_forward_steps=5)
+        config = StepMeanMetricConfig(step=20, target="denorm")
+        with pytest.raises(MetricNotSupportedError, match="step_mean step 20 exceeds"):
+            config.build(ctx)
+
+    def test_step_mean_within_n_forward_steps(self):
+        ctx = _make_build_context(get_ds_info(4, 4), n_forward_steps=25)
+        config = StepMeanMetricConfig(step=20, target="denorm")
+        result = config.build(ctx)
+        assert result.aggregator is not None
+
+    def test_ensemble_step_exceeding_n_forward_steps(self):
+        ctx = _make_build_context(get_ds_info(4, 4), n_forward_steps=5)
+        config = EnsembleMetricConfig(step=20)
+        with pytest.raises(MetricNotSupportedError, match="ensemble step 20 exceeds"):
+            config.build(ctx)
+
+    def test_enso_index_non_latlon_grid(self):
+        ctx = _make_build_context(_make_healpix_ds_info())
+        config = EnsoIndexMetricConfig()
+        with pytest.raises(MetricNotSupportedError, match="requires LatLonCoordinates"):
+            config.build(ctx)
+
+    def test_enso_coefficient_non_latlon_grid(self):
+        long_timestep = datetime.timedelta(days=10)
+        ds_info = DatasetInfo(
+            horizontal_coordinates=HEALPixCoordinates(
+                face=torch.arange(12),
+                height=torch.arange(16),
+                width=torch.arange(16),
+            ),
+            timestep=long_timestep,
+        )
+        ctx = _make_build_context(ds_info, n_forward_steps=999)
+        config = EnsoCoefficientMetricConfig()
+        with pytest.raises(MetricNotSupportedError, match="requires LatLonCoordinates"):
+            config.build(ctx)
+
+    def test_enso_coefficient_short_run(self):
+        ctx = _make_build_context(get_ds_info(90, 45), n_forward_steps=23)
+        config = EnsoCoefficientMetricConfig()
+        with pytest.raises(MetricNotSupportedError, match="requires > ~5 years"):
+            config.build(ctx)
+
+    def test_annual_short_run(self):
+        ctx = _make_build_context(get_ds_info(4, 4), n_forward_steps=23)
+        config = AnnualMetricConfig()
+        with pytest.raises(MetricNotSupportedError, match="requires > ~2 years"):
+            config.build(ctx)
+
+    def test_annual_long_run(self):
+        long_timestep = datetime.timedelta(days=10)
+        ds_info = DatasetInfo(
+            horizontal_coordinates=LatLonCoordinates(
+                lon=torch.arange(4), lat=torch.arange(4)
+            ),
+            timestep=long_timestep,
+        )
+        ctx = _make_build_context(ds_info, n_forward_steps=200)
+        config = AnnualMetricConfig()
+        result = config.build(ctx)
+        assert result.aggregator is not None
+
+    def test_ipo_index_non_latlon_grid(self):
+        ctx = _make_build_context(_make_healpix_ds_info())
+        config = IpoIndexMetricConfig()
+        with pytest.raises(MetricNotSupportedError, match="requires LatLonCoordinates"):
+            config.build(ctx)
+
+
+class TestRaiseOnUnsupported:
+    def test_explicit_metrics_raise_on_unsupported_by_default(self):
+        ds_info = get_ds_info(4, 4)
+        initial_time = get_zero_time(shape=[2, 0], dims=["sample", "time"])
+        with pytest.raises(MetricNotSupportedError):
+            build_inference_evaluator_aggregator(
+                metrics=[
+                    MeanMetricConfig(target="denorm"),
+                    StepMeanMetricConfig(step=20, target="denorm"),
+                ],
+                dataset_info=ds_info,
+                n_ic_steps=1,
+                n_forward_steps=5,
+                initial_time=initial_time,
+                normalize=lambda x: dict(x),
+                save_diagnostics=False,
+            )
+
+    def test_raise_on_unsupported_false_skips_silently(self):
+        ds_info = get_ds_info(4, 4)
+        initial_time = get_zero_time(shape=[2, 0], dims=["sample", "time"])
+        agg = build_inference_evaluator_aggregator(
+            metrics=[
+                MeanMetricConfig(target="denorm"),
+                StepMeanMetricConfig(step=20, target="denorm"),
+            ],
+            dataset_info=ds_info,
+            n_ic_steps=1,
+            n_forward_steps=5,
+            initial_time=initial_time,
+            normalize=lambda x: dict(x),
+            save_diagnostics=False,
+            raise_on_unsupported=False,
+        )
+        assert "mean" in agg._aggregators
+        assert "mean_step_20" not in agg._aggregators
+
+    def test_hierarchical_config_skips_unsupported_on_short_run(self):
+        ds_info = get_ds_info(4, 4)
+        n_time = 6
+        initial_time = get_zero_time(shape=[2, 0], dims=["sample", "time"])
+        agg = HierarchicalInferenceEvaluatorAggregatorConfig().build(
+            dataset_info=ds_info,
+            n_ic_steps=1,
+            n_forward_steps=n_time - 1,
+            initial_time=initial_time,
+            normalize=lambda x: dict(x),
+            save_diagnostics=False,
+        )
+        assert "mean" in agg._aggregators
+        assert "mean_step_20" not in agg._aggregators
+        assert "annual" not in agg._aggregators
+        assert "enso_coefficient" not in agg._aggregators
+
+    def test_hierarchical_config_skips_unsupported_on_healpix(self):
+        ds_info = _make_healpix_ds_info()
+        n_time = 24
+        initial_time = get_zero_time(shape=[2, 0], dims=["sample", "time"])
+        agg = HierarchicalInferenceEvaluatorAggregatorConfig(
+            annual=AnnualMetricConfig(enabled=False),
+        ).build(
+            dataset_info=ds_info,
+            n_ic_steps=1,
+            n_forward_steps=n_time - 1,
+            initial_time=initial_time,
+            normalize=lambda x: dict(x),
+            save_diagnostics=False,
+        )
+        assert "enso_index" not in agg._aggregators
+        assert "enso_coefficient" not in agg._aggregators
+        assert "ipo_index" not in agg._aggregators
