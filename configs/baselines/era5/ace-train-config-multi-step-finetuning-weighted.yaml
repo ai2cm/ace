@@ -1,5 +1,5 @@
 # arg: --dataset andrep/2026-03-19-era5-1deg-8layer-stats-1990-2019:/statsdata
-# arg: --dataset 01KREK7J858VGWYC2RRN030YFJ:/weights
+# arg: --dataset 01KREWFWE8TCD3MYXW4T8VFKQ9:/weights
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
@@ -93,5 +93,23 @@ stepper_training:
   optimize_last_step_only: true
   loss:
     type: EnsembleLoss
+    weights:
+      air_temperature_0: 0.5
+      air_temperature_1: 0.5
+      eastward_wind_0: 0.5
+      northward_wind_0: 0.5
+      specific_total_water_0: 0.5
+      specific_total_water_1: 0.25
+      specific_total_water_2: 0.5
+      PRATEsfc: 2.0
+      h500: 10
+      TMP850: 5
+      Q2m: 0.5
+      DLWRFsfc: 2
+      ULWRFsfc: 5
+      USWRFsfc: 2
+      DSWRFsfc: 2
+      USWRFtoa: 2
+      tendency_of_total_water_path_due_to_advection: 0.5
 stepper:
-  checkpoint_path: /weights/training_checkpoints/best_ckpt.tar
+  checkpoint_path: /ckpt.tar
