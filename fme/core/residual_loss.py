@@ -1,11 +1,13 @@
 """
-Snapshot residual loss: optimize a loss on the one-step difference between
-predicted states versus the corresponding target difference.
+Snapshot residual loss: optimize a loss on the absolute one-step difference
+between predicted states versus the corresponding target difference.
 
 For each configured step ``k``, the loss compares
-``gen[k] - gen[k-1]`` to ``target[k] - target[k-1]``, where ``step=0``
+``|gen[k] - gen[k-1]|`` to ``|target[k] - target[k-1]|``, where ``step=0``
 denotes the initial condition (IC). The reference endpoint ``k-1`` is
 always detached so gradients flow only through the later prediction.
+Using absolute residuals penalizes the magnitude of temporal change
+regardless of sign.
 """
 
 import dataclasses
@@ -28,8 +30,8 @@ def step_label(step: int) -> str:
 class SnapshotResidualLossConfig:
     """Configuration for the snapshot residual loss term.
 
-    Each entry ``k`` in :attr:`steps` means: penalize the difference
-    ``gen[k] - gen[k-1]`` relative to ``target[k] - target[k-1]``.
+    Each entry ``k`` in :attr:`steps` means: penalize the absolute difference
+    ``|gen[k] - gen[k-1]|`` relative to ``|target[k] - target[k-1]|``.
     The reference endpoint ``k-1`` is always detached so the residual
     term constrains only the later prediction.
 
@@ -105,7 +107,7 @@ class SnapshotResidualLoss:
     """Computes a residual loss across configured rollout steps.
 
     For each active step ``k``, the loss is
-    ``inner_loss(gen[k] - gen[k-1].detach(), target[k] - target[k-1].detach())``.
+    ``inner_loss(|gen[k] - gen[k-1].detach()|, |target[k] - target[k-1].detach()|)``.
 
     The active set of steps is intersected with the per-batch sampled rollout
     length via :meth:`update_max_n_forward_steps`. Steps exceeding the sampled
@@ -179,7 +181,8 @@ class SnapshotResidualLoss:
     ) -> torch.Tensor:
         """Compute one step's residual loss as a scalar tensor.
 
-        Builds the residual ``predictions[step] - predictions[step-1].detach()``
+        Builds the absolute residual
+        ``|predictions[step] - predictions[step-1].detach()|``
         and analogous target residual, then passes both to the inner loss.
         The reference endpoint ``step - 1`` is always detached so gradients
         flow only through the later prediction at ``step``.
@@ -195,11 +198,11 @@ class SnapshotResidualLoss:
         ref = step - 1
         self._validate_step_inputs(step, predictions, targets)
         gen_residual = {
-            name: predictions[step][name] - predictions[ref][name].detach()
+            name: (predictions[step][name] - predictions[ref][name].detach()).abs()
             for name in self._out_names
         }
         target_residual = {
-            name: targets[step][name] - targets[ref][name].detach()
+            name: (targets[step][name] - targets[ref][name].detach()).abs()
             for name in self._out_names
         }
         loss_output: LossOutput = self._loss(gen_residual, target_residual)
