@@ -107,3 +107,16 @@ def test_seed_rng_different_seeds_differ():
     sampler.seed_rng(1)
     second_run = [sampler.sample() for _ in range(20)]
     assert first_run != second_run
+
+
+def test_separate_instances_have_independent_rngs():
+    outcomes = [TimeLengthProbability(10, 0.5), TimeLengthProbability(20, 0.5)]
+    train_sampler = TimeLengthProbabilities(outcomes)
+    eval_sampler = TimeLengthProbabilities(list(outcomes))
+    train_sampler.seed_rng(42)
+    train_before = [train_sampler.sample() for _ in range(10)]
+    eval_sampler.seed_rng(0)
+    [eval_sampler.sample() for _ in range(5)]
+    train_sampler.seed_rng(42)
+    train_after = [train_sampler.sample() for _ in range(10)]
+    assert train_before == train_after

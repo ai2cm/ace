@@ -1391,6 +1391,14 @@ class CoupledStepperTrainLoss:
         for i, loss_obj in enumerate(self._loss_objs.values()):
             loss_obj.seed_rng(seed + i)
 
+    def set_train(self) -> None:
+        for loss_obj in self._loss_objs.values():
+            loss_obj.set_train()
+
+    def set_eval(self) -> None:
+        for loss_obj in self._loss_objs.values():
+            loss_obj.set_eval()
+
     def n_required_outer_steps(self, n_inner_steps: int) -> int:
         """Minimum number of outer (ocean) steps needed so that every
         component step contributing to the current batch's loss is computed.
@@ -1638,9 +1646,11 @@ class CoupledTrainStepper(
 
     def set_train(self):
         self._stepper.set_train()
+        self._loss.set_train()
 
     def set_eval(self):
         self._stepper.set_eval()
+        self._loss.set_eval()
 
     def get_state(self) -> dict[str, Any]:
         return self._stepper.get_state()

@@ -68,6 +68,6 @@ class TrainStepperABC(abc.ABC, Generic[PS, BD, FD, SD, TO]):
     def update_training_history(self, training_job: TrainingJob) -> None:
         pass
 
+    @abc.abstractmethod
     def seed_eval(self, seed: int) -> None:
-        """Seed the stochastic forward-step sampler for deterministic evaluation."""
         pass
