@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=OM4_FloeNet_6h_5docn_nexStep_ALBCorr_seed711_4GPU
-#SBATCH --output=/scratch/cimes/wg4031/fme/train/OM4_FloeNet_6h_5docn_nexStep_ALBCorr_seed711_4GPU/logs/slurm-%j.out
-#SBATCH --error=/scratch/cimes/wg4031/fme/train/OM4_FloeNet_6h_5docn_nexStep_ALBCorr_seed711_4GPU/logs/slurm-%j.err
+#SBATCH --job-name=OM4_FloeNet_6h_5docn_nexStep_seed711_4GPU
+#SBATCH --output=/scratch/cimes/wg4031/fme/train/OM4_FloeNet_6h_5docn_nexStep_seed711_4GPU/logs/slurm-%j.out
+#SBATCH --error=/scratch/cimes/wg4031/fme/train/OM4_FloeNet_6h_5docn_nexStep_seed711_4GPU/logs/slurm-%j.err
 #SBATCH --mem=250G
 #SBATCH --mail-user=wg4031@princeton.edu
 #SBATCH --nodes=1
@@ -41,4 +41,4 @@ echo "SLURM_NNODES: $SLURM_NNODES"
 #Run the training script
 torchrun --nnodes=$SLURM_NNODES --nproc_per_node=$SLURM_NTASKS_PER_NODE \
     --master_addr=$MASTER_ADDR --master_port=$MASTER_PORT \
-    -m fme.ace.train /home/wg4031/ace/configs/wg_testing/train/FloeNet_6h_5docn_nexStep_ALBCorr_seed711.yaml
+    -m fme.ace.train /home/wg4031/ace/configs/wg_testing/train/FloeNet_6h_5docn_nexStep_seed711.yaml

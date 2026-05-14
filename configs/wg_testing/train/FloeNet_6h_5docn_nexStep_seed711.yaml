@@ -1,4 +1,4 @@
-experiment_dir: /scratch/cimes/wg4031/fme/train/OM4_FloeNet_6h_5docn_nexStep_noSWUP_seed711_4GPU
+experiment_dir: /scratch/cimes/wg4031/fme/train/OM4_FloeNet_6h_5docn_nexStep_seed711_4GPU
 save_checkpoint: true
 seed: 711
 validate_using_ema: true
@@ -18,7 +18,7 @@ inference:
       - '2013-07-01T00:00:00'
     dataset:
       data_path: /scratch/cimes/wg4031/Emulator_data/Ice/
-      file_pattern: 1958-2022.OM41deg_FloeNet_6hourly_NoLeap_trimvars.zarr
+      file_pattern: 1958-2022.OM41deg_FloeNet_6hourly_Julian.zarr
       engine: zarr
     num_data_workers: 2
   aggregator:
@@ -37,7 +37,7 @@ train_loader:
   time_buffer: 20
   dataset:
     data_path: /scratch/cimes/wg4031/Emulator_data/Ice/
-    file_pattern: 1958-2022.OM41deg_FloeNet_6hourly_NoLeap_trimvars.zarr
+    file_pattern: 1958-2022.OM41deg_FloeNet_6hourly_Julian.zarr
     engine: zarr
     subset:
       start_time: '1969-01-01'
@@ -49,7 +49,7 @@ validation_loader:
   time_buffer: 20
   dataset:
     data_path: /scratch/cimes/wg4031/Emulator_data/Ice/
-    file_pattern: 1958-2022.OM41deg_FloeNet_6hourly_NoLeap_trimvars.zarr
+    file_pattern: 1958-2022.OM41deg_FloeNet_6hourly_Julian.zarr
     engine: zarr
     subset:
       start_time: '2016-01-01'
@@ -130,7 +130,7 @@ stepper:
               - XPRTs
       next_step_forcing_names:
       - SWDN
-      - LWDN
+      - LWDNjra
       - LH
       - SH
       - SNOWFL
@@ -151,8 +151,10 @@ stepper:
       - LSRCs
       - LSNKs
       - XPRTs
+      - BMELT
+      - TMELT
       - SWDN
-      - LWDN
+      - LWDNjra
       - LH
       - SH
       - SNOWFL
@@ -161,8 +163,8 @@ stepper:
       - tauuo
       - tauvo
       - tos
-      - BMELT
-      - TMELT
+      - sos
+      - zos
       out_names:
       - siconc
       - simass
