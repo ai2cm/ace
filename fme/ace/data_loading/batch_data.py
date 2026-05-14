@@ -40,13 +40,8 @@ def _collate_with_masking(
         shape [n_samples] indicating presence, or None if all variables are
         present in all samples.
     """
-    all_names: list[str] = []
-    seen: set[str] = set()
-    for sample in sample_data:
-        for name in sample:
-            if name not in seen:
-                all_names.append(name)
-                seen.add(name)
+    # unique variable names in all samples in order of appearance
+    all_names = list(dict.fromkeys(name for sample in sample_data for name in sample))
 
     batch_data: TensorDict = {}
     data_mask: TensorDict = {}
@@ -165,6 +160,8 @@ class BatchData:
             device: The device to create the data on. By default, the device is
                 determined by the global device specified by get_device().
             data_mask: Per-variable, per-sample masks indicating variable presence.
+                List of boolean tensors of shape [n_samples] indicating presence,
+                or None if all variables are present in all samples.
         """
         if device is None:
             device = get_device()
