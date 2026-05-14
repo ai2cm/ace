@@ -74,20 +74,38 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
                 continue
             batch = next(iter(data.loader))
             initial_times = batch.ocean_data.time.isel(time=0)
-            n_timesteps_ocean = (
-                entry_config.n_coupled_steps + stepper.ocean.n_ic_timesteps
-            )
-            n_timesteps_atmosphere = (
-                entry_config.n_coupled_steps * stepper.n_inner_steps
-                + stepper.atmosphere.n_ic_timesteps
-            )
+            n_timesteps_ocean = None
+            ocean_norm = None
+            if stepper.ocean is not None:
+                n_timesteps_ocean = (
+                    entry_config.n_coupled_steps + stepper.ocean.n_ic_timesteps
+                )
+                ocean_norm = stepper.ocean.normalizer.normalize
+            n_timesteps_atmosphere = None
+            atmosphere_norm = None
+            if stepper.atmosphere is not None:
+                n_timesteps_atmosphere = (
+                    entry_config.n_coupled_steps * stepper.n_inner_steps
+                    + stepper.atmosphere.n_ic_timesteps
+                )
+                atmosphere_norm = stepper.atmosphere.normalizer.normalize
+            n_timesteps_ice = None
+            ice_norm = None
+            if stepper.ice is not None:
+                n_timesteps_ice = (
+                    entry_config.n_coupled_steps * stepper.n_inner_steps
+                    + stepper.ice.n_ic_timesteps
+                )
+                ice_norm = stepper.ice.normalizer.normalize
             aggregator = entry_config.aggregator.build(
                 dataset_info=dataset_info,
                 n_timesteps_ocean=n_timesteps_ocean,
                 n_timesteps_atmosphere=n_timesteps_atmosphere,
+                n_timesteps_ice=n_timesteps_ice,
                 initial_time=initial_times,
-                ocean_normalize=stepper.ocean.normalizer.normalize,
-                atmosphere_normalize=stepper.atmosphere.normalizer.normalize,
+                ocean_normalize=ocean_norm,
+                atmosphere_normalize=atmosphere_norm,
+                ice_normalize=ice_norm,
                 save_diagnostics=config.save_per_epoch_diagnostics,
                 output_dir=os.path.join(config.output_dir, name),
             )

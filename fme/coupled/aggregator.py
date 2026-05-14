@@ -348,7 +348,8 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
         ice, and atmosphere.
         """
         for aggregator in self._aggregators.values():
-            aggregator.flush_diagnostics(subdir)
+            if aggregator is not None:
+                aggregator.flush_diagnostics(subdir)
 
 
 @dataclasses.dataclass
@@ -488,7 +489,7 @@ class InferenceEvaluatorAggregatorConfig:
                 include_nino34=True,
                 n_timesteps=n_timesteps_ocean,
                 timestep=dataset_info.ocean.timestep,
-                log_zonal_mean_images=log_zonal_mean_images,
+                log_zonal_mean_images=self.log_zonal_mean_images,
             )
             ocean_ace_config = AceInferenceEvaluatorAggregatorConfig(
                 metrics=ocean_metrics,
@@ -513,7 +514,7 @@ class InferenceEvaluatorAggregatorConfig:
                 include_nino34=False,
                 n_timesteps=n_timesteps_ice,
                 timestep=dataset_info.ice.timestep,
-                log_zonal_mean_images=log_zonal_mean_images,
+                log_zonal_mean_images=self.log_zonal_mean_images,
             )
             ice_ace_config = AceInferenceEvaluatorAggregatorConfig(
                 metrics=ice_metrics,
@@ -867,7 +868,8 @@ class InferenceEvaluatorAggregator(
         and atmosphere.
         """
         for aggregator in self._aggregators.values():
-            aggregator.flush_diagnostics(subdir)
+            if aggregator is not None:
+                aggregator.flush_diagnostics(subdir)
 
 
 @dataclasses.dataclass
@@ -1059,4 +1061,5 @@ class InferenceAggregator(
         ice, and atmosphere.
         """
         for aggregator in self._aggregators.values():
-            aggregator.flush_diagnostics(subdir)
+            if aggregator is not None:
+                aggregator.flush_diagnostics(subdir)

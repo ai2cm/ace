@@ -2138,6 +2138,7 @@ class CoupledStepper:
                 time=forcing_data.atmosphere_data.time[:, self.atmosphere.n_ic_timesteps :],
                 horizontal_dims=forcing_data.atmosphere_data.horizontal_dims,
                 labels=forcing_data.atmosphere_data.labels,
+                n_ensemble=forcing_data.atmosphere_data.n_ensemble,
             )
         
         # Process ocean data if present  
@@ -2148,6 +2149,7 @@ class CoupledStepper:
                 time=forcing_data.ocean_data.time[:, self.ocean.n_ic_timesteps :],
                 horizontal_dims=forcing_data.ocean_data.horizontal_dims,
                 labels=forcing_data.ocean_data.labels,
+                n_ensemble=forcing_data.ocean_data.n_ensemble,
             )
         
         # Process ice data if present
@@ -2158,6 +2160,7 @@ class CoupledStepper:
                 time=forcing_data.ice_data.time[:, self.ice.n_ic_timesteps :],
                 horizontal_dims=forcing_data.ice_data.horizontal_dims,
                 labels=forcing_data.ice_data.labels,
+                n_ensemble=forcing_data.ice_data.n_ensemble,
             )
                 
         return CoupledBatchData(ocean_data=ocean_data,
