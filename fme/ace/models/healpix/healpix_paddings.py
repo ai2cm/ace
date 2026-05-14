@@ -706,22 +706,30 @@ class HEALPixPaddingIsolatitude(th.nn.Module):
         #   out = g0                   (where valid1==0)
         #   out = 0.5 * (g0 + g1)      (where valid1==1)
         # and valid1==1 positions are extremely sparse.
-        i0 = self._index0.view(1, 1, -1).expand(B, C, -1)
-        g0 = flat.gather(dim=2, index=i0.to(device=data.device))
+        idx0 = (
+            self._index0.reshape(-1)
+            .to(device=data.device, dtype=th.long, non_blocking=True)
+            .clone()
+        )
+        g0 = th.index_select(flat, 2, idx0)
 
         pos_v1 = self._pos_v1
         if pos_v1.numel() > 0:
-            Nv1 = int(pos_v1.numel())
-            g0_sub = g0.index_select(dim=2, index=pos_v1.to(device=data.device))
+            p = pos_v1.to(device=data.device, dtype=th.long, non_blocking=True)
+            pos_g0 = p.clone()
+            pos_out = p.clone()
+            g0_sub = g0.index_select(dim=2, index=pos_g0)
 
-            i1_sub = self._index1_pos_v1.view(1, 1, Nv1).expand(B, C, Nv1)
-            g1_sub = flat.gather(dim=2, index=i1_sub.to(device=data.device))
+            idx1 = (
+                self._index1_pos_v1.reshape(-1)
+                .to(device=data.device, dtype=th.long, non_blocking=True)
+                .clone()
+            )
+            g1_sub = th.index_select(flat, 2, idx1)
 
-            # out[pos_v1] = 0.5 * (g0_sub + g1_sub)
-            #             = g0_sub + 0.5 * (g1_sub - g0_sub)
+            # out[pos] = g0 + 0.5 * (g1 - g0_sub) at sparse positions
             delta = (g1_sub - g0_sub) * 0.5
-            out_flat = g0.clone()
-            out_flat.index_add_(dim=2, index=pos_v1.to(device=data.device), source=delta)
+            out_flat = th.index_add(g0, 2, pos_out, delta)
         else:
             out_flat = g0
 

@@ -24,7 +24,10 @@ from fme.ace.models.healpix.healpix_layers import (
     HEALPixPaddingv2,
     have_earth2grid,
 )
-from fme.ace.models.healpix.healpix_paddings import make_hpx_padding_layer
+from fme.ace.models.healpix.healpix_paddings import (
+    isolatitude_pad_folded,
+    make_hpx_padding_layer,
+)
 from fme.ace.models.healpix.healpix_unet import HEALPixUNet
 from fme.ace.registry.hpx import UNetDecoderConfig, UNetEncoderConfig
 from fme.ace.stepper import StepperConfig
@@ -655,6 +658,168 @@ def test_healpix_padding_forward(healpix_padding, mock_data):
 
 
 # --- HEALPix padding modes + dealias / smoothed blocks ---
+
+
+def test_HEALPixPaddingIsolatitude_initialization():
+    pad = HEALPixPaddingIsolatitude(padding=2, nside=16)
+    assert isinstance(pad, HEALPixPaddingIsolatitude)
+
+    with pytest.raises(ValueError, match="invalid value for 'padding'"):
+        HEALPixPaddingIsolatitude(padding=0, nside=16)
+    with pytest.raises(ValueError, match="nside must be a positive int"):
+        HEALPixPaddingIsolatitude(padding=1, nside=0)
+
+
+@pytest.mark.parametrize("padding", [1, 2, 3, 4, 5])
+def test_HEALPixPaddingIsolatitude_forward_shape_cpu(padding: int):
+    """Folded layout [B*12, C, H, H] -> [B*12, C, H+2p, H+2p]."""
+    num_faces = 12
+    batch_size = 2
+    hw = 16
+    c = 4
+    if 2 * padding > hw:
+        pytest.skip("face size too small for padding (isolatitude corner synthesis)")
+
+    pad_mod = HEALPixPaddingIsolatitude(padding=padding, nside=hw)
+    invar = th.rand(batch_size * num_faces, c, hw, hw)
+    outvar = pad_mod(invar)
+    hw_p = hw + 2 * padding
+    assert outvar.shape == (batch_size * num_faces, c, hw_p, hw_p)
+
+
+@pytest.mark.skipif(not th.cuda.is_available(), reason="CUDA not available")
+@pytest.mark.parametrize("padding", [1, 2, 3])
+def test_HEALPixPaddingIsolatitude_forward_shape_cuda(padding: int):
+    num_faces = 12
+    batch_size = 1
+    hw = 16
+    c = 2
+    if 2 * padding > hw:
+        pytest.skip("face size too small for padding")
+    th.cuda.empty_cache()
+    pad_mod = HEALPixPaddingIsolatitude(padding=padding, nside=hw).cuda()
+    invar = th.rand(batch_size * num_faces, c, hw, hw, device="cuda")
+    outvar = pad_mod(invar)
+    hw_p = hw + 2 * padding
+    assert outvar.shape == (batch_size * num_faces, c, hw_p, hw_p)
+
+
+@pytest.mark.parametrize("padding", [1, 2, 3, 4, 5])
+@pytest.mark.parametrize("hw", [16, 32, 64])
+@pytest.mark.parametrize("enable_nhwc", [False, True])
+def test_healpix_padding_isolatitude_matches_folded_reference(
+    padding: int, hw: int, enable_nhwc: bool
+):
+    """Gather-based HEALPixPaddingIsolatitude must match isolatitude_pad_folded."""
+    if 2 * padding > hw:
+        pytest.skip("face size too small for padding (isolatitude corner synthesis)")
+
+    th.manual_seed(0)
+    batch_size = 2
+    num_faces = 12
+    c = 3
+    x = th.randn(batch_size * num_faces, c, hw, hw)
+
+    ref = isolatitude_pad_folded(x, padding, enable_nhwc)
+    y = HEALPixPaddingIsolatitude(
+        padding=padding, nside=hw, enable_nhwc=enable_nhwc
+    )(x)
+
+    # Gather path uses 0.5 * (g0 + g1) in a form that can differ by ~1 ULP from the
+    # reference on some output cells.
+    th.testing.assert_close(y, ref, rtol=1.0e-5, atol=1.0e-6)
+
+
+@pytest.mark.parametrize("padding", [1, 2])
+@pytest.mark.parametrize("hw", [8, 16])
+@pytest.mark.parametrize("enable_nhwc", [False, True])
+def test_healpix_padding_isolatitude_gradcheck_cpu(
+    padding: int, hw: int, enable_nhwc: bool
+):
+    """Analytic backward matches finite differences (double precision)."""
+    if 2 * padding > hw:
+        pytest.skip("face size too small for padding")
+
+    pad = HEALPixPaddingIsolatitude(
+        padding=padding, nside=hw, enable_nhwc=enable_nhwc
+    ).double()
+
+    batch_size = 1
+    c = 2
+    x = th.randn(
+        batch_size * 12,
+        c,
+        hw,
+        hw,
+        dtype=th.double,
+        requires_grad=True,
+    )
+
+    def fn(t: th.Tensor) -> th.Tensor:
+        return pad(t).sum()
+
+    assert th.autograd.gradcheck(
+        fn,
+        (x,),
+        eps=1e-6,
+        atol=1e-4,
+        rtol=1e-3,
+    )
+
+
+@pytest.mark.skipif(not th.cuda.is_available(), reason="CUDA not available")
+@pytest.mark.parametrize("padding", [1, 2])
+@pytest.mark.parametrize("hw", [8, 16])
+def test_healpix_padding_isolatitude_gradcheck_cuda(padding: int, hw: int):
+    if 2 * padding > hw:
+        pytest.skip("face size too small for padding")
+    th.cuda.empty_cache()
+    pad = HEALPixPaddingIsolatitude(padding=padding, nside=hw).double().cuda()
+    x = th.randn(
+        1 * 12,
+        2,
+        hw,
+        hw,
+        dtype=th.double,
+        device="cuda",
+        requires_grad=True,
+    )
+
+    def fn(t: th.Tensor) -> th.Tensor:
+        return pad(t).sum()
+
+    assert th.autograd.gradcheck(
+        fn,
+        (x,),
+        eps=1e-5,
+        atol=1e-3,
+        rtol=1e-2,
+    )
+
+
+def test_healpix_padding_isolatitude_backward_grad_matches_finite_diff():
+    """Spot-check gradient vs central difference on a few entries (float32, CPU)."""
+    padding, hw = 1, 16
+    th.manual_seed(42)
+    pad = HEALPixPaddingIsolatitude(padding=padding, nside=hw)
+    x0 = th.randn(12, 2, hw, hw)
+    x = x0.clone().requires_grad_(True)
+    (g_analytic,) = th.autograd.grad(pad(x).sum(), x)
+
+    eps = 1e-3
+    indices = [(0, 0, 0, 0), (3, 1, 7, 7), (11, 0, 15, 15), (5, 1, 8, 8)]
+    for b, c, h, w in indices:
+        xp = x0.clone()
+        xp[b, c, h, w] += eps
+        xm = x0.clone()
+        xm[b, c, h, w] -= eps
+        g_fd_ij = (pad(xp).sum() - pad(xm).sum()) / (2 * eps)
+        th.testing.assert_close(
+            g_analytic[b, c, h, w],
+            g_fd_ij,
+            rtol=0.02,
+            atol=0.02,
+        )
 
 
 def _folded_padding_dealias(
