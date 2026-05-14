@@ -198,7 +198,7 @@ optimization:
       - type: CosineAnnealingLR
         step_each_iteration: true
         kwargs:
-          T_max: 10005
+          T_max: 5000
           eta_min: 0.000001
     milestones: [3000]
 stepper_training:
