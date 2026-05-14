@@ -1745,7 +1745,7 @@ class TrainStepper(
             self._n_forward_steps_sampler = None
         self._epoch = epoch
 
-    def seed_step_sampler(self, seed: int) -> None:
+    def seed_eval(self, seed: int) -> None:
         if self._n_forward_steps_sampler is not None:
             self._n_forward_steps_sampler.seed_rng(seed)
 

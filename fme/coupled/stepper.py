@@ -1633,7 +1633,7 @@ class CoupledTrainStepper(
             initial_condition, forcing, compute_derived_variables
         )
 
-    def seed_step_sampler(self, seed: int) -> None:
+    def seed_eval(self, seed: int) -> None:
         self._loss.seed_step_sampler(seed)
 
     def set_train(self):
