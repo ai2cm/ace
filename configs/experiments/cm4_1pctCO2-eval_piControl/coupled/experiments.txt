@@ -43,3 +43,5 @@ cosLR-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRHM99V2NTX1
 
 ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRC8081HFK82XE2MRWK5TPZ3|run_ICx1_piC-140yr|best_inference_ckpt|high|--min-runtime 8h||01KRC8087J2XWQGKPZZ8AZ0BBX||h100
 ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRC8081HFK82XE2MRWK5TPZ3|run_ICx1_140yr|best_inference_ckpt|high|--min-runtime 8h||01KRC8087J2XWQGKPZZ8AZ0BBX||h100
+
+cosLR-fast-decay-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRM4T57FXYM6RW2C9B94HPD9|training|best_inference_ckpt|normal|--min-runtime 8h
