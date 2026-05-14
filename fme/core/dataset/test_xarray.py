@@ -1249,6 +1249,21 @@ def test_allow_variable_masking_skips_missing_variables(mock_monthly_netcdfs):
         assert name in sample_data
 
 
+def test_requested_names_and_names_differ_when_variable_masked(mock_monthly_netcdfs):
+    mock_data: MockData = mock_monthly_netcdfs
+    config = XarrayDataConfig(data_path=mock_data.tmpdir)
+    existing_names = list(mock_data.var_names.time_dependent_names)
+    names_with_missing = existing_names + ["nonexistent_var"]
+    dataset = XarrayDataset(
+        config,
+        names_with_missing,
+        IntSchedule.from_constant(2),
+        allow_variable_masking=True,
+    )
+    assert "nonexistent_var" in dataset._requested_names
+    assert "nonexistent_var" not in dataset._names
+
+
 def test_allow_variable_masking_false_raises_on_missing(mock_monthly_netcdfs):
     mock_data: MockData = mock_monthly_netcdfs
     config = XarrayDataConfig(data_path=mock_data.tmpdir)
