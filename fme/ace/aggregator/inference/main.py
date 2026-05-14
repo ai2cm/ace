@@ -33,6 +33,7 @@ from .enso.enso_coefficient import EnsoCoefficientMetricConfig
 from .histogram import HistogramMetricConfig
 from .ipo.ipo_index import MIN_YEARS_FOR_FILTERED_TPI, IpoIndexMetricConfig
 from .reduced import MeanMetricConfig, SingleTargetMeanAggregator
+from .residual_spectrum import ResidualSpectrumMetricConfig
 from .seasonal import SeasonalMetricConfig
 from .spectrum import PowerSpectrumMetricConfig, SphericalPowerSpectrumAggregator
 from .time_mean import TimeMeanAggregator, TimeMeanMetricConfig
@@ -51,6 +52,7 @@ MetricConfig = (
     MeanMetricConfig
     | StepMeanMetricConfig
     | PowerSpectrumMetricConfig
+    | ResidualSpectrumMetricConfig
     | ZonalMeanMetricConfig
     | VideoMetricConfig
     | TimeMeanMetricConfig
@@ -118,6 +120,7 @@ class InferenceEvaluatorAggregatorConfig:
         metrics.extend(
             [
                 PowerSpectrumMetricConfig(),
+                ResidualSpectrumMetricConfig(),
                 ZonalMeanMetricConfig(),
                 TimeMeanMetricConfig(target="denorm"),
                 TimeMeanMetricConfig(target="norm"),

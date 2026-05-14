@@ -7,6 +7,7 @@ import torch
 from fme.ace.aggregator.inference.data import InferenceBatchData, make_dummy_time
 from fme.ace.aggregator.inference.spectrum import PairedSphericalPowerSpectrumAggregator
 from fme.ace.aggregator.one_step.reduced import MeanAggregator
+from fme.ace.aggregator.residual_spectrum import temporal_diffs
 from fme.ace.stepper import TrainOutput
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
@@ -27,11 +28,14 @@ class TrainAggregatorConfig:
         weighted_rmse: Whether to compute the weighted RMSE.
         per_channel_loss: Whether to accumulate and report per-variable (per-channel)
             loss in get_logs (e.g. train/mean/loss/<var_name>).
+        residual_power_spectrum: Whether to compute the power spectrum of
+            temporal tendency fields (consecutive-timestep differences).
     """
 
     spherical_power_spectrum: bool = True
     weighted_rmse: bool = True
     per_channel_loss: bool = True
+    residual_power_spectrum: bool = True
 
 
 class Aggregator(Protocol):
@@ -40,6 +44,24 @@ class Aggregator(Protocol):
 
     def get_logs(self, label: str) -> dict[str, torch.Tensor]:
         pass
+
+
+class _TrainResidualSpectrumAdapter:
+    """Computes temporal diffs from gen/target data, then feeds them to a
+    PairedSphericalPowerSpectrumAggregator for spectral analysis.
+    """
+
+    def __init__(self, inner: PairedSphericalPowerSpectrumAggregator):
+        self._inner = inner
+
+    def record_batch(self, target_data: TensorMapping, gen_data: TensorMapping):
+        gen_diffs = temporal_diffs(gen_data)
+        tgt_diffs = temporal_diffs(target_data)
+        if gen_diffs:
+            self._inner.record_paired_data(prediction=gen_diffs, target=tgt_diffs)
+
+    def get_logs(self, label: str) -> dict[str, torch.Tensor]:
+        return self._inner.get_logs(label)
 
 
 class _TrainSpectrumAdapter:
@@ -92,6 +114,23 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
             except NotImplementedError:
                 logging.warning(
                     "Power spectrum aggregator not implemented "
+                    "for this grid type, omitting."
+                )
+        if config.residual_power_spectrum:
+            try:
+                flood_fill = SmoothFloodFill(num_steps=4)
+                self._paired_aggregators["residual_spectrum"] = (
+                    _TrainResidualSpectrumAdapter(
+                        PairedSphericalPowerSpectrumAggregator(
+                            gridded_operations=operations,
+                            report_plot=False,
+                            nan_fill_fn=flood_fill,
+                        )
+                    )
+                )
+            except NotImplementedError:
+                logging.warning(
+                    "Residual spectrum aggregator not implemented "
                     "for this grid type, omitting."
                 )
         if config.weighted_rmse:
