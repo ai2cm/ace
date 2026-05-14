@@ -11,3 +11,5 @@ group|tag|exper_id|status|ckpt_type|priority|min_runtime|override|results_datase
 1pct_nosmooth_0256to0350-ft_residual_loss-slowEMA-wu3kLRp00001|rs0|01KR44R8JWRPYV04H29W9HXGD0|training|best_inference_ckpt|normal|--min-runtime 8h
 
 1pct_nosmooth_0256to0350-residual_loss_4steps|rs0|01KRCE0TXEZVNV3GGKM8B4K6CC|training|best_inference_ckpt|normal|--min-runtime 8h
+
+1pct_nosmooth_0256to0350-abs_residual_loss_4steps|rs0|01KRJ7A4AD5Y6R3W1WFFJ4P7AB|training|best_inference_ckpt|normal|--min-runtime 8h
