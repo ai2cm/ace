@@ -493,8 +493,8 @@ def test_build_channel_mask():
 
 
 def test_build_channel_mask_missing_name_defaults_to_present():
-    data_mask = {"a": torch.tensor([True, False])}
-    names = ["a", "b"]
+    data_mask = {"a": torch.tensor([True, False]), "c": torch.tensor([False, True])}
+    names = ["a", "b", "c"]
     mask = _build_channel_mask(
         data_mask,
         names,
@@ -503,10 +503,13 @@ def test_build_channel_mask_missing_name_defaults_to_present():
         device=torch.device("cpu"),
         batch_size=2,
     )
-    assert mask[0, 0, 0, 0] == 1.0
-    assert mask[1, 0, 0, 0] == 0.0
-    assert mask[0, 1, 0, 0] == 1.0
-    assert mask[1, 1, 0, 0] == 1.0
+    expected = torch.tensor(
+        [
+            [[1.0], [1.0], [0.0]],
+            [[0.0], [1.0], [1.0]],
+        ]
+    ).unsqueeze(-1)
+    torch.testing.assert_close(mask, expected)
 
 
 def test_loss_output_total_with_mask():
@@ -516,7 +519,12 @@ def test_loss_output_total_with_mask():
             [[5.0, 6.0], [7.0, 8.0]],
         ]
     )
-    mask = torch.tensor([[[1.0, 1.0], [1.0, 1.0]], [[1.0, 1.0], [0.0, 0.0]]])
+    mask = torch.tensor(
+        [
+            [[1.0, 1.0], [1.0, 1.0]],
+            [[1.0, 1.0], [0.0, 0.0]],
+        ]
+    )
     output = LossOutput(loss=loss, channel_dim=1, channel_names=["a", "b"], mask=mask)
     expected = (1 + 2 + 3 + 4 + 5 + 6) / 6.0
     torch.testing.assert_close(output.total(), torch.tensor(expected))
@@ -558,6 +566,20 @@ def test_reduce_to_per_channel_with_mask():
     assert result.shape == (n_c,)
     expected_total = masked_loss.sum() / expanded.sum()
     torch.testing.assert_close(result.sum(), expected_total, atol=1e-5, rtol=1e-5)
+
+
+def test_reduce_to_per_channel_with_mask_1d():
+    # Covers the masked branch when loss is 1D (only channel dim, no dims to reduce).
+    n_c = 3
+    channel_dim = 0
+    loss = torch.tensor([2.0, 4.0, 6.0], device=get_device())
+    mask = torch.tensor([1.0, 1.0, 0.0], device=get_device())
+    result = _reduce_to_per_channel(loss, channel_dim, n_c, mask=mask)
+    assert result.shape == (n_c,)
+    expected_total = (2.0 + 4.0) / 2.0
+    torch.testing.assert_close(
+        result.sum(), torch.tensor(expected_total, device=get_device())
+    )
 
 
 def test_weighted_mapping_loss_with_data_mask():
@@ -613,14 +635,21 @@ def test_step_loss_forwards_data_mask():
         channel_dim=-3,
         normalizer=normalizer,
     )
-    x_mapping = {name: torch.ones(4, 5, 5).to(get_device()) for name in out_names}
+    x_mapping = {
+        "var_0": torch.ones(4, 5, 5).to(get_device()),
+        "var_1": torch.ones(4, 5, 5).to(get_device()) * 2,
+    }
     y_mapping = {name: torch.zeros(4, 5, 5).to(get_device()) for name in out_names}
     data_mask = {
         "var_0": torch.tensor([True, True, True, True]),
-        "var_1": torch.tensor([False, False, False, False]),
+        "var_1": torch.tensor([True, True, False, False]),
     }
     result = step_loss(x_mapping, y_mapping, step=0, data_mask=data_mask)
-    torch.testing.assert_close(result.total(), torch.tensor(1.0, device=get_device()))
+    n_unmasked = 4 * 25 + 2 * 25
+    expected = (4 * 25 * 1.0 + 2 * 25 * 4.0) / n_unmasked
+    torch.testing.assert_close(
+        result.total(), torch.tensor(expected, device=get_device())
+    )
 
 
 def test_weighted_mapping_loss_with_ensemble_and_data_mask():
@@ -646,4 +675,9 @@ def test_weighted_mapping_loss_with_ensemble_and_data_mask():
     result = mapping_loss(x, y, data_mask=data_mask)
     assert result._mask is not None
     assert result._mask.shape[0] == n_batch
-    result.total()
+    n_unmasked_a = 2 * n_ens * h * w
+    n_unmasked_b = 1 * n_ens * h * w
+    expected = (n_unmasked_a * 1.0 + n_unmasked_b * 4.0) / (n_unmasked_a + n_unmasked_b)
+    torch.testing.assert_close(
+        result.total(), torch.tensor(expected, device=get_device())
+    )

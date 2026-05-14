@@ -44,12 +44,18 @@ def _reduce_to_per_channel(
     for element-wise losses (or the masked mean when ``mask`` is given).
 
     Args:
-        loss_value: The loss tensor to reduce.
+        loss_value: The loss tensor to reduce.  Three shapes are handled:
+            a scalar (``ndim == 0``); an element-wise tensor matching the
+            model output shape, e.g. ``(batch, channel, lat, lon)``;
+            or a partially-reduced tensor where some dims have already
+            been collapsed, e.g. ``(batch, channel)``.
         channel_dim: Non-negative index of the channel dimension.
         n_channels: Number of channels (used as denominator when no mask).
-        mask: Optional mask broadcastable to ``loss_value``.  When provided,
-            the per-channel values are normalised by the total mask count
-            so that ``result.sum() == masked_mean(loss_value)``.
+        mask: Optional mask broadcastable to ``loss_value``.  Has the same
+            ndim as ``loss_value``, with ``batch_size`` at dim 0,
+            ``n_channels`` at ``channel_dim``, and 1 everywhere else.
+            When provided, per-channel values are normalised by the total
+            mask count so that ``result.sum() == masked_mean(loss_value)``.
     """
     if loss_value.ndim == 0:
         return _uniform_broadcast_per_channel(loss_value, n_channels)

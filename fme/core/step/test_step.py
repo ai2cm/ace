@@ -1018,12 +1018,10 @@ def test_apply_input_mask_zeros_masked_variables():
         "b": torch.tensor([True, False, True, False]),
     }
     result = _apply_input_mask(input_norm, mask)
-    torch.testing.assert_close(result["a"][:2], torch.ones(2, 8, 16))
-    torch.testing.assert_close(result["a"][2:], torch.zeros(2, 8, 16))
-    torch.testing.assert_close(result["b"][0], torch.ones(8, 16) * 2.0)
-    torch.testing.assert_close(result["b"][1], torch.zeros(8, 16))
-    torch.testing.assert_close(result["b"][2], torch.ones(8, 16) * 2.0)
-    torch.testing.assert_close(result["b"][3], torch.zeros(8, 16))
+    expected_a = torch.tensor([1.0, 1.0, 0.0, 0.0]).view(4, 1, 1).expand(4, 8, 16)
+    expected_b = torch.tensor([2.0, 0.0, 2.0, 0.0]).view(4, 1, 1).expand(4, 8, 16)
+    torch.testing.assert_close(result["a"], expected_a)
+    torch.testing.assert_close(result["b"], expected_b)
 
 
 def test_apply_input_mask_ignores_unknown_names():
@@ -1096,12 +1094,18 @@ def test_build_channel_mask_inputs_with_data_mask():
         "b": torch.tensor([False, True, True]),
     }
     result = _build_channel_mask_inputs(in_names, data_mask, packed)
-    assert result.shape == (3, 2, 8, 16)
-    assert result[0, 0, 0, 0] == 1.0
-    assert result[1, 0, 0, 0] == 0.0
-    assert result[0, 1, 0, 0] == 0.0
-    assert result[1, 1, 0, 0] == 1.0
-    assert (result[2] == 1.0).all()
+    expected_per_sample_channel = (
+        torch.tensor(
+            [
+                [1.0, 0.0],
+                [0.0, 1.0],
+                [1.0, 1.0],
+            ]
+        )
+        .view(3, 2, 1, 1)
+        .expand(3, 2, 8, 16)
+    )
+    torch.testing.assert_close(result, expected_per_sample_channel)
 
 
 def test_build_channel_mask_inputs_no_data_mask():
@@ -1115,10 +1119,17 @@ def test_build_channel_mask_inputs_partial_mask():
     packed = torch.zeros(2, 2, 4, 8)
     data_mask = {"a": torch.tensor([True, False])}
     result = _build_channel_mask_inputs(["a", "b"], data_mask, packed)
-    assert result.shape == (2, 2, 4, 8)
-    assert result[0, 0, 0, 0] == 1.0
-    assert result[1, 0, 0, 0] == 0.0
-    assert (result[:, 1] == 1.0).all()
+    expected_per_sample_channel = (
+        torch.tensor(
+            [
+                [1.0, 1.0],
+                [0.0, 1.0],
+            ]
+        )
+        .view(2, 2, 1, 1)
+        .expand(2, 2, 4, 8)
+    )
+    torch.testing.assert_close(result, expected_per_sample_channel)
 
 
 def test_step_with_include_channel_mask_inputs():
