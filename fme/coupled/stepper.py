@@ -1388,8 +1388,8 @@ class CoupledStepperTrainLoss:
             loss_obj.sample_n_steps()
 
     def seed_step_sampler(self, seed: int) -> None:
-        for loss_obj in self._loss_objs.values():
-            loss_obj.seed_rng(seed)
+        for i, loss_obj in enumerate(self._loss_objs.values()):
+            loss_obj.seed_rng(seed + i)
 
     def n_required_outer_steps(self, n_inner_steps: int) -> int:
         """Minimum number of outer (ocean) steps needed so that every
