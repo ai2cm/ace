@@ -35,6 +35,7 @@ from .ipo.ipo_index import MIN_YEARS_FOR_FILTERED_TPI, IpoIndexMetricConfig
 from .reduced import MeanMetricConfig, SingleTargetMeanAggregator
 from .seasonal import SeasonalMetricConfig
 from .spectrum import PowerSpectrumMetricConfig, SphericalPowerSpectrumAggregator
+from .tendency_variance import TendencyVarianceRatioMetricConfig
 from .time_mean import TimeMeanAggregator, TimeMeanMetricConfig
 from .utils import LatLonRegion
 from .video import VideoMetricConfig
@@ -61,6 +62,7 @@ MetricConfig = (
     | EnsoCoefficientMetricConfig
     | EnsembleMetricConfig
     | IpoIndexMetricConfig
+    | TendencyVarianceRatioMetricConfig
 )
 
 
@@ -118,6 +120,7 @@ class InferenceEvaluatorAggregatorConfig:
         metrics.extend(
             [
                 PowerSpectrumMetricConfig(),
+                TendencyVarianceRatioMetricConfig(),
                 ZonalMeanMetricConfig(),
                 TimeMeanMetricConfig(target="denorm"),
                 TimeMeanMetricConfig(target="norm"),
