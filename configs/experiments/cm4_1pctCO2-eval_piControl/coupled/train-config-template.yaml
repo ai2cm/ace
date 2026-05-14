@@ -225,6 +225,8 @@ stepper_training:
       kwargs:
         crps_weight: 0.9
         energy_score_weight: 0.1
+      weights:
+        sst: 3
   atmosphere:
     parameter_init:
       weights_path: /atmos_ckpt.tar
@@ -258,7 +260,7 @@ stepper_training:
         specific_total_water_0: 0.5
         specific_total_water_1: 0.25
         specific_total_water_2: 0.5
-        PRATEsfc: 0.5
+        PRATEsfc: 2
         h500: 10
         TMP850: 5
         Q2m: 0.5
@@ -272,6 +274,10 @@ stepper_training:
         USWRFtoa: 2
         tendency_of_total_water_path_due_to_advection: 0.5
         PRESsfc: 3
+        LHTFLsfc: 2
+        SHTFLsfc: 2
+        eastward_surface_wind_stress: 2
+        northward_surface_wind_stress: 2
 stepper:
   ocean_fraction_prediction:
     land_fraction_name: land_fraction
