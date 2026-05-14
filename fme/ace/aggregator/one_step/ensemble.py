@@ -12,7 +12,7 @@ from fme.core.ensemble import get_crps
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import EnsembleTensorDict, TensorMapping
 
-from ..inference.build_context import MetricBuildContext
+from ..inference.build_context import MetricBuildContext, MetricNotSupportedError
 from ..inference.data import MetricBuildResult
 
 
@@ -350,6 +350,11 @@ class EnsembleMetricConfig:
         return self.name  # type: ignore[return-value]
 
     def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        if self.step > ctx.n_forward_steps:
+            raise MetricNotSupportedError(
+                f"ensemble step {self.step} exceeds "
+                f"n_forward_steps={ctx.n_forward_steps}"
+            )
         return MetricBuildResult(
             ensemble=get_one_step_ensemble_aggregator(
                 gridded_operations=ctx.ops,

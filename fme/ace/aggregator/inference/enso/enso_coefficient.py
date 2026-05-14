@@ -17,7 +17,7 @@ from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorDict
 from fme.core.wandb import WandB
 
-from ..build_context import MetricBuildContext
+from ..build_context import MetricBuildContext, MetricNotSupportedError
 from ..data import InferenceBatchData, MetricBuildResult
 from .historical_index import INDEX_CALENDAR, NINO34_INDEX
 
@@ -467,6 +467,12 @@ class EnsoCoefficientMetricConfig:
         return self.name
 
     def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        from fme.core.coordinates import LatLonCoordinates
+
+        if not isinstance(ctx.horizontal_coordinates, LatLonCoordinates):
+            raise MetricNotSupportedError(
+                "enso_coefficient metric requires LatLonCoordinates."
+            )
         return MetricBuildResult(
             aggregator=EnsoCoefficientEvaluatorAggregator(
                 ctx.initial_time,
