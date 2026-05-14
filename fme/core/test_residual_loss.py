@@ -295,3 +295,62 @@ def test_compute_step_loss_matches_call():
     via_call, _ = loss({0: ic, 1: pred1}, {0: ic, 1: target1})
     via_step = loss.compute_step_loss(1, {0: ic, 1: pred1}, {0: ic, 1: target1})
     torch.testing.assert_close(via_call, via_step)
+
+
+def test_compute_residuals_returns_abs_diffs():
+    """compute_residuals returns absolute temporal differences."""
+    out_names = ["a", "b"]
+    loss = _build_loss(out_names, steps=[1])
+
+    n_sample, h, w = 2, 3, 3
+    ic = {
+        "a": torch.ones(n_sample, 1, h, w, device=get_device()),
+        "b": 3 * torch.ones(n_sample, 1, h, w, device=get_device()),
+    }
+    pred1 = {
+        "a": torch.zeros(n_sample, 1, h, w, device=get_device()),
+        "b": torch.ones(n_sample, 1, h, w, device=get_device()),
+    }
+    target1 = {
+        "a": 2 * torch.ones(n_sample, 1, h, w, device=get_device()),
+        "b": torch.zeros(n_sample, 1, h, w, device=get_device()),
+    }
+
+    gen_res, tgt_res = loss.compute_residuals(1, {0: ic, 1: pred1}, {0: ic, 1: target1})
+
+    assert set(gen_res.keys()) == {"a", "b"}
+    assert set(tgt_res.keys()) == {"a", "b"}
+    # pred - ic for "a": 0 - 1 = -1, abs -> 1
+    torch.testing.assert_close(
+        gen_res["a"], torch.ones(n_sample, 1, h, w, device=get_device())
+    )
+    # pred - ic for "b": 1 - 3 = -2, abs -> 2
+    torch.testing.assert_close(
+        gen_res["b"], 2 * torch.ones(n_sample, 1, h, w, device=get_device())
+    )
+    # target - ic for "a": 2 - 1 = 1, abs -> 1
+    torch.testing.assert_close(
+        tgt_res["a"], torch.ones(n_sample, 1, h, w, device=get_device())
+    )
+    # target - ic for "b": 0 - 3 = -3, abs -> 3
+    torch.testing.assert_close(
+        tgt_res["b"], 3 * torch.ones(n_sample, 1, h, w, device=get_device())
+    )
+
+
+def test_compute_residuals_detaches_reference():
+    """compute_residuals detaches the reference endpoint."""
+    out_names = ["a"]
+    loss = _build_loss(out_names, steps=[1])
+
+    n_sample, h, w = 2, 3, 3
+    ic = {"a": torch.zeros(n_sample, 1, h, w, device=get_device(), requires_grad=True)}
+    pred1 = {
+        "a": torch.ones(n_sample, 1, h, w, device=get_device(), requires_grad=True)
+    }
+    target1 = {"a": 2 * torch.ones(n_sample, 1, h, w, device=get_device())}
+
+    gen_res, _ = loss.compute_residuals(1, {0: ic, 1: pred1}, {0: ic, 1: target1})
+    gen_res["a"].sum().backward()
+    assert pred1["a"].grad is not None
+    assert ic["a"].grad is None

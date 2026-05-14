@@ -173,6 +173,39 @@ class SnapshotResidualLoss:
         """
         return [s for s in self._active_steps if s == step]
 
+    def compute_residuals(
+        self,
+        step: int,
+        predictions: Mapping[int, TensorMapping],
+        targets: Mapping[int, TensorMapping],
+    ) -> tuple[TensorMapping, TensorMapping]:
+        """Return the absolute residuals for a single step.
+
+        Computes ``|predictions[step] - predictions[step-1].detach()|`` and
+        the analogous target residual. The reference endpoint ``step - 1`` is
+        always detached so gradients flow only through the later prediction.
+
+        Args:
+            step: The step index (>= 1).
+            predictions: Must contain keys ``step`` and ``step - 1``.
+            targets: Must contain keys ``step`` and ``step - 1``.
+
+        Returns:
+            ``(gen_residual, target_residual)`` where each is a
+            ``TensorMapping`` keyed by variable name.
+        """
+        ref = step - 1
+        self._validate_step_inputs(step, predictions, targets)
+        gen_residual: TensorMapping = {
+            name: (predictions[step][name] - predictions[ref][name].detach()).abs()
+            for name in self._out_names
+        }
+        target_residual: TensorMapping = {
+            name: (targets[step][name] - targets[ref][name].detach()).abs()
+            for name in self._out_names
+        }
+        return gen_residual, target_residual
+
     def compute_step_loss(
         self,
         step: int,
@@ -181,11 +214,8 @@ class SnapshotResidualLoss:
     ) -> torch.Tensor:
         """Compute one step's residual loss as a scalar tensor.
 
-        Builds the absolute residual
-        ``|predictions[step] - predictions[step-1].detach()|``
-        and analogous target residual, then passes both to the inner loss.
-        The reference endpoint ``step - 1`` is always detached so gradients
-        flow only through the later prediction at ``step``.
+        Builds the absolute residuals via :meth:`compute_residuals` and
+        passes them to the inner loss.
 
         Args:
             step: The step index (>= 1).
@@ -195,16 +225,9 @@ class SnapshotResidualLoss:
         Returns:
             Unweighted residual loss scalar; callers apply :attr:`weight`.
         """
-        ref = step - 1
-        self._validate_step_inputs(step, predictions, targets)
-        gen_residual = {
-            name: (predictions[step][name] - predictions[ref][name].detach()).abs()
-            for name in self._out_names
-        }
-        target_residual = {
-            name: (targets[step][name] - targets[ref][name].detach()).abs()
-            for name in self._out_names
-        }
+        gen_residual, target_residual = self.compute_residuals(
+            step, predictions, targets
+        )
         loss_output: LossOutput = self._loss(gen_residual, target_residual)
         return loss_output.total()
 
