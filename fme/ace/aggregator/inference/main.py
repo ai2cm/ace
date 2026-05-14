@@ -139,7 +139,7 @@ def build_inference_evaluator_aggregator(
             if raise_on_unsupported:
                 raise
             logging.warning(
-                f"{name} metric not supported for this grid type, " "omitting."
+                f"{name} metric not supported for this configuration, " "omitting."
             )
             continue
 
