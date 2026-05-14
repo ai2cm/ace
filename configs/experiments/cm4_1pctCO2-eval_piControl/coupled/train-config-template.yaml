@@ -182,7 +182,7 @@ validation_loader:
 optimization:
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
-  lr: 0.00001
+  lr: 0.000008
   optimizer_type: AdamW
   kwargs:
     fused: true
@@ -195,11 +195,10 @@ optimization:
           start_factor: 0.01
           end_factor: 1
           total_iters: 3000
-      - type: CosineAnnealingLR
+      - type: ConstantLR
         step_each_iteration: true
         kwargs:
-          T_max: 5000
-          eta_min: 0.000001
+          factor: 1.0
     milestones: [3000]
 stepper_training:
   n_coupled_steps: 4
@@ -225,8 +224,6 @@ stepper_training:
       kwargs:
         crps_weight: 0.9
         energy_score_weight: 0.1
-      weights:
-        sst: 3
   atmosphere:
     parameter_init:
       weights_path: /atmos_ckpt.tar
@@ -260,7 +257,7 @@ stepper_training:
         specific_total_water_0: 0.5
         specific_total_water_1: 0.25
         specific_total_water_2: 0.5
-        PRATEsfc: 2
+        PRATEsfc: 0.5
         h500: 10
         TMP850: 5
         Q2m: 0.5
@@ -274,10 +271,6 @@ stepper_training:
         USWRFtoa: 2
         tendency_of_total_water_path_due_to_advection: 0.5
         PRESsfc: 3
-        LHTFLsfc: 2
-        SHTFLsfc: 2
-        eastward_surface_wind_stress: 2
-        northward_surface_wind_stress: 2
 stepper:
   ocean_fraction_prediction:
     land_fraction_name: land_fraction
