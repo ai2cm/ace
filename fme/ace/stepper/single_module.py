@@ -1653,11 +1653,13 @@ class TrainStepper(
             if not evaluate_all_steps:
                 n_forward_steps = stochastic_n_forward_steps
         per_channel_sum: dict[str, torch.Tensor] | None = None
+        last_optimization_window_step = n_loss_steps - 1
         for step in range(n_forward_steps):
-            counts_toward_loss = step < n_loss_steps
-            optimize_step = counts_toward_loss and (
-                step == n_loss_steps - 1 or not self._config.optimize_last_step_only
-            )
+            within_optimization_window = step < n_loss_steps
+            if self._config.optimize_last_step_only:
+                optimize_step = step == last_optimization_window_step
+            else:
+                optimize_step = within_optimization_window
             if optimize_step:
                 context = contextlib.nullcontext()
             else:
@@ -1666,8 +1668,6 @@ class TrainStepper(
                 gen_step = next(output_iterator)
                 gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
                 output_list.append(gen_step)
-                # Note: here we examine the loss for a single timestep,
-                # not a single model call (which may contain multiple timesteps).
                 target_step = add_ensemble_dim(
                     {
                         k: v.select(self.TIME_DIM, step)
@@ -1677,7 +1677,7 @@ class TrainStepper(
                 step_loss = self._loss_obj(gen_step, target_step, step=step)
                 step_total_loss = step_loss.total()
                 metrics[f"loss_step_{step}"] = step_total_loss.detach()
-                if counts_toward_loss:
+                if optimize_step:
                     per_ch = step_loss.get_channel_losses()
                     if per_channel_sum is None:
                         per_channel_sum = {
