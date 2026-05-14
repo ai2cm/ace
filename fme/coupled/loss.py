@@ -47,15 +47,15 @@ class StepLossABC(abc.ABC):
     def set_eval(self) -> None:
         pass
 
+    @abc.abstractmethod
     def compute_loss(
         self, prediction: StepPredictionABC, target_data: TensorMapping
     ) -> torch.Tensor:
         """Compute the loss for a step unconditionally (ignoring step_is_optimized).
 
         Used during evaluation to produce per-step metrics for all steps.
-        Returns zero for null/zero-weight losses.
         """
-        return torch.tensor(0.0, device=get_device())
+        ...
 
     @abc.abstractmethod
     def n_required_forward_steps(self) -> int:
@@ -184,6 +184,11 @@ class NullLossContributions(StepLossABC):
 
     def step_is_optimized(self, step: int) -> bool:
         return False
+
+    def compute_loss(
+        self, prediction: StepPredictionABC, target_data: TensorMapping
+    ) -> torch.Tensor:
+        return torch.tensor(0.0, device=get_device())
 
     def __call__(
         self, prediction: StepPredictionABC, target_data: TensorMapping
