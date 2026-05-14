@@ -17,6 +17,7 @@ from fme.core.typing_ import EnsembleTensorDict
             TrainAggregatorConfig(
                 spherical_power_spectrum=False,
                 weighted_rmse=False,
+                residual_power_spectrum=False,
                 tendency_variance_ratio=False,
             ),
             ["test/mean/loss"],
@@ -28,6 +29,10 @@ from fme.core.typing_ import EnsembleTensorDict
                 "test/power_spectrum/negative_norm_bias/a",
                 "test/power_spectrum/mean_abs_norm_bias/a",
                 "test/power_spectrum/smallest_scale_norm_bias/a",
+                "test/residual_spectrum/positive_norm_bias/a",
+                "test/residual_spectrum/negative_norm_bias/a",
+                "test/residual_spectrum/mean_abs_norm_bias/a",
+                "test/residual_spectrum/smallest_scale_norm_bias/a",
                 "test/mean/weighted_rmse/a",
                 "test/mean/loss",
                 "test/tendency_variance/tendency_variance_ratio/a",
@@ -72,6 +77,7 @@ def test_labels_exist(config: TrainAggregatorConfig, expected_keys: list[str]):
         TrainAggregatorConfig(
             spherical_power_spectrum=False,
             weighted_rmse=False,
+            residual_power_spectrum=False,
             tendency_variance_ratio=False,
         ),
         TrainAggregatorConfig(),

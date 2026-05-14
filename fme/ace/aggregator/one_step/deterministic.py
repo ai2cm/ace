@@ -13,6 +13,10 @@ from fme.core.fill import SmoothFloodFill
 from fme.core.generics.aggregator import AggregatorABC
 from fme.core.typing_ import TensorDict, TensorMapping
 
+from ..inference.spectrum import (
+    PairedSphericalPowerSpectrumAggregator as _InferencePairedSpectrumAgg,
+)
+from ..residual_spectrum import temporal_diffs
 from ..tendency_variance import TendencyVarianceAccumulator
 from .map import MapAggregator
 from .reduced import MeanAggregator
@@ -35,6 +39,32 @@ class _OneStepTendencyVarianceAdapter:
         gen_data_norm: TensorMapping,
     ) -> None:
         self._inner.record(gen_data, target_data)
+
+    def get_logs(self, label: str) -> dict[str, float]:
+        return self._inner.get_logs(label)
+
+    def get_dataset(self) -> xr.Dataset:
+        return self._inner.get_dataset()
+
+
+class _OneStepResidualSpectrumAdapter:
+    """Computes temporal diffs and feeds them to a paired spectrum aggregator."""
+
+    def __init__(self, inner: _InferencePairedSpectrumAgg):
+        self._inner = inner
+
+    def record_batch(
+        self,
+        loss: float,
+        target_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data_norm: TensorMapping,
+        gen_data_norm: TensorMapping,
+    ) -> None:
+        gen_diffs = temporal_diffs(gen_data)
+        tgt_diffs = temporal_diffs(target_data)
+        if gen_diffs:
+            self._inner.record_paired_data(prediction=gen_diffs, target=tgt_diffs)
 
     def get_logs(self, label: str) -> dict[str, float]:
         return self._inner.get_logs(label)
@@ -120,6 +150,13 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
             self._aggregators["power_spectrum"] = SpectrumAggregator(
                 dataset_info.gridded_operations,
                 nan_fill_fn=flood_fill,
+            )
+            self._aggregators["residual_spectrum"] = _OneStepResidualSpectrumAdapter(
+                _InferencePairedSpectrumAgg(
+                    gridded_operations=dataset_info.gridded_operations,
+                    report_plot=False,
+                    nan_fill_fn=flood_fill,
+                )
             )
         except NotImplementedError:
             logging.warning(
