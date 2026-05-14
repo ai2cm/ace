@@ -2,4 +2,5 @@ group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb
 
 ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|ace-samudra-cm4|gqmfjs2j|best_inference_ckpt|ace2-cm4-atmos-noLSM|cbj61w53|best_inference_ckpt|skip|urgent|b200|8|800GiB|3|ai2/climate-titan|seed=0
 sfc-loss-2x-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|ace-samudra-cm4|gqmfjs2j|best_inference_ckpt|ace2-cm4-atmos-noLSM|cbj61w53|best_inference_ckpt|skip|urgent|b200|8|800GiB|3|ai2/climate-titan|seed=0
-cosLR-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|ace-samudra-cm4|gqmfjs2j|best_inference_ckpt|ace2-cm4-atmos-noLSM|cbj61w53|best_inference_ckpt|train|urgent|b200|8|800GiB|3|ai2/climate-titan|seed=0
+cosLR-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|ace-samudra-cm4|gqmfjs2j|best_inference_ckpt|ace2-cm4-atmos-noLSM|cbj61w53|best_inference_ckpt|skip|urgent|b200|8|800GiB|3|ai2/climate-titan|seed=0
+cosLR-fast-decay-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|ace-samudra-cm4|gqmfjs2j|best_inference_ckpt|ace2-cm4-atmos-noLSM|cbj61w53|best_inference_ckpt|train|urgent|b200|8|800GiB|3|ai2/climate-titan|seed=0
