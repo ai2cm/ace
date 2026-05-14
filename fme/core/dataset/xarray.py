@@ -547,7 +547,7 @@ class XarrayDataset(DatasetABC):
         allow_variable_masking: bool = False,
     ):
         self._horizontal_coordinates: HorizontalCoordinates
-        self._names = names
+        self._requested_names = names
         self._allow_variable_masking = allow_variable_masking
         self.path = config.data_path
         self.file_pattern = config.file_pattern
@@ -586,13 +586,7 @@ class XarrayDataset(DatasetABC):
             self._time_invariant_names,
             self._static_derived_names,
         ) = self._group_variable_names_by_time_type()
-        if self._allow_variable_masking:
-            self._names = (
-                list(self._time_dependent_names)
-                + list(self._time_invariant_names)
-                + list(self._static_derived_names)
-            )
-
+        self._get_variable_metadata(first_dataset)
         self._vertical_coordinate = _get_vertical_coordinate(first_dataset, self.dtype)
         self.overwrite = config.overwrite
 
@@ -706,15 +700,19 @@ class XarrayDataset(DatasetABC):
             return False
         return True
 
+    @property
+    def _names(self) -> list[str]:
+        return (
+            list(self._time_dependent_names)
+            + list(self._time_invariant_names)
+            + list(self._static_derived_names)
+        )
+
     def _get_variable_metadata(self, ds):
         result = {}
         for name in self._names:
             if name in StaticDerivedData.names:
                 result[name] = StaticDerivedData.metadata[name]
-            elif name not in ds and self._allow_variable_masking:
-                continue
-            elif name not in ds:
-                raise ValueError(f"Required variable not found in dataset: {name}.")
             elif hasattr(ds[name], "units") and hasattr(ds[name], "long_name"):
                 result[name] = VariableMetadata(
                     units=ds[name].units,
@@ -750,10 +748,6 @@ class XarrayDataset(DatasetABC):
 
         del cum_num_timesteps
 
-        ds = self._open_file(0)
-        self._get_variable_metadata(ds)
-        ds.close()
-
     def _group_variable_names_by_time_type(self) -> VariableNames:
         """Returns lists of time-dependent variable names, time-independent
         variable names, and variables which are only present as an initial
@@ -768,7 +762,7 @@ class XarrayDataset(DatasetABC):
         # fields a time dimension. We assume that all fields are present in the
         # netcdf file corresponding to the first chunk of time.
         with _open_xr_dataset(self.full_paths[0], engine=self.engine) as ds:
-            for name in self._names:
+            for name in self._requested_names:
                 if name in StaticDerivedData.names:
                     static_derived_names.append(name)
                 elif name in ds:
