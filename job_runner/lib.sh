@@ -22,6 +22,10 @@ parse_stats_args() {
                 COUPLED_STATS_DATA="$2"
                 shift 2
                 ;;
+            --extra_stats)
+                EXTRA_STATS_DATA="$2"
+                shift 2
+                ;;
             *)
                 # Unknown option - let the caller handle it
                 shift
@@ -118,6 +122,9 @@ build_stats_dataset_args() {
         if [[ -n $OCEAN_STATS_DATA ]]; then
             STATS_DATASET_ARGS+=(--dataset "$OCEAN_STATS_DATA:/ocean_stats")
         fi
+    fi
+    if [[ -n "${EXTRA_STATS_DATA:-}" ]]; then
+        STATS_DATASET_ARGS+=(--dataset "$EXTRA_STATS_DATA:/extra_stats")
     fi
 }
 
@@ -229,6 +236,9 @@ print_stats_config() {
         echo "Using the following stats:"
         echo " - Atmosphere: ${ATMOS_STATS_DATA}"
         echo " - Ocean: ${OCEAN_STATS_DATA}"
+    fi
+    if [[ -n "${EXTRA_STATS_DATA:-}" ]]; then
+        echo " - Extra stats: ${EXTRA_STATS_DATA}"
     fi
 }
 

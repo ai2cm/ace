@@ -1,6 +1,6 @@
 #!/bin/bash
 # Wrapper script for coupled training jobs
-# Usage: coupled_train.sh <experiment_dir> <config_subdirectory> [--atmos_stats <path>] [--ocean_stats <path>] [--coupled_stats <path>]
+# Usage: coupled_train.sh <experiment_dir> <config_subdirectory> [--atmos_stats <path>] [--ocean_stats <path>] [--coupled_stats <path>] [--extra_stats <path>]
 
 set -e
 
@@ -11,12 +11,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 if [[ "$#" -lt 2 ]]; then
-  echo "Usage: $0 <experiment_dir> <config_subdirectory> [--atmos_stats <path>] [--ocean_stats <path>] [--coupled_stats <path>] [--dry-run]"
+  echo "Usage: $0 <experiment_dir> <config_subdirectory> [--atmos_stats <path>] [--ocean_stats <path>] [--coupled_stats <path>] [--extra_stats <path>] [--dry-run]"
   echo "  - <experiment_dir>: Path to experiment directory (e.g., experiments/2025-08-08-jamesd/coupled)"
   echo "  - <config_subdirectory>: Subdirectory containing the 'train-config.yaml' to use."
   echo "  - --atmos_stats: Override atmosphere stats data path (optional)"
   echo "  - --ocean_stats: Override ocean stats data path (optional)"
   echo "  - --coupled_stats: Override with coupled stats dataset containing coupled_atmosphere and uncoupled_ocean subdirs (optional, mutually exclusive with --atmos_stats/--ocean_stats)"
+  echo "  - --extra_stats: Additional stats dataset mounted at /extra_stats (optional)"
   echo "  - --dry-run: Preview actions without launching jobs or committing changes"
   exit 1
 fi
