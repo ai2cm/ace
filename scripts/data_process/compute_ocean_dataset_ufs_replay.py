@@ -528,11 +528,32 @@ def compute_lazy_dataset(
         print(f"  Regridding ocean to Gaussian grid {config.regrid.output_grid}...")
         source_grid = _make_source_grid(ds_ocean)
         ds_ocean = _regrid_dataset(ds_ocean, config.regrid, source_grid)
-        # Regrid 3-D mask separately (it has no time dim)
-        masks_to_regrid = masks[["mask_3d"]].astype(np.float32)
-        masks_to_regrid = _regrid_dataset(masks_to_regrid, config.regrid, source_grid)
-        # Threshold regridded mask back to binary and rebuild all masks
-        mask_3d = (masks_to_regrid["mask_3d"] > 0.5).astype(np.float32)
+        print(f"  Regridded ocean to {dict(ds_ocean.sizes)}")
+
+        # Rebuild masks from the regridded data's NaN pattern. Conservative
+        # regridding propagates NaN for cells fully below the seafloor,
+        # preserving depth-dependent bathymetry that would be lost by
+        # regridding the binary mask and thresholding.
+        ref_var = next(
+            (
+                v
+                for v in ("thetao", "temp", "so")
+                if v in ds_ocean and vdim in ds_ocean[v].dims
+            ),
+            None,
+        )
+        if ref_var is not None:
+            ref_slice = ds_ocean[ref_var].isel(time=0).compute()
+            mask_3d = (~np.isnan(ref_slice)).astype(np.float32)
+            mask_3d.attrs = {"long_name": "ocean mask from regridded NaN pattern"}
+            print(f"  Rebuilt 3-D mask from regridded '{ref_var}' NaN pattern")
+        else:
+            masks_to_regrid = masks[["mask_3d"]].astype(np.float32)
+            masks_to_regrid = _regrid_dataset(
+                masks_to_regrid, config.regrid, source_grid
+            )
+            mask_3d = (masks_to_regrid["mask_3d"] > 0.5).astype(np.float32)
+
         mask_2d = mask_3d.isel({vdim: 0}).astype(np.float32)
         mask_2d.attrs = {"long_name": "ocean mask", "units": "0 if land, 1 if ocean"}
         land_frac = (1.0 - mask_2d).astype(np.float32)
@@ -547,7 +568,6 @@ def compute_lazy_dataset(
                 "sea_surface_fraction": ssf,
             }
         )
-        print(f"  Regridded ocean to {dict(ds_ocean.sizes)}")
 
     # ── 3. Vertical sub-selection ──────────────────────────────────────────
     target_indices = config.vertical_coarsen.target_indices
