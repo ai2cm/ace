@@ -8,7 +8,7 @@ from fme.ace.stepper.time_length_probabilities import (
     TimeLengthProbabilities,
     TimeLengthProbability,
 )
-from fme.core.loss import LossOutput, StepLoss
+from fme.core.loss import LossOutput, StandardLoss, StepLoss
 from fme.core.typing_ import EnsembleTensorDict, TensorMapping
 
 from .loss import ComponentLossSchedule
@@ -21,7 +21,10 @@ from .stepper import (
 
 def _wrap_as_loss_output(value: torch.Tensor) -> LossOutput:
     """Wrap a scalar tensor as a LossOutput for mocking StepLoss."""
-    return LossOutput(loss=value, channel_dim=0, channel_names=["mock"])
+    return LossOutput(
+        losses=[StandardLoss(value.unsqueeze(0).unsqueeze(0))],
+        channel_names=["mock"],
+    )
 
 
 def _mock_step_loss(fn):
