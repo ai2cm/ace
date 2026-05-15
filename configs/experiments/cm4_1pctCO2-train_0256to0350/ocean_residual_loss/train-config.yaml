@@ -86,6 +86,8 @@ stepper_training:
     loss:
       type: MSE
     weight: 1.0
+    residual_stds_path: /ocean_stats/scaling-residual.nc
+    std_maps_path: /extra_stats/residual_std_train.nc
 stepper:
   input_masking:
     mask_value: 0
