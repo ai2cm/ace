@@ -49,3 +49,5 @@ cosLR-fast-decay-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01K
 sfc-loss-2x-cosLR-fast-decay-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRM62HKK10B9WT9HGPTMHQWW|training|best_inference_ckpt|normal|--min-runtime 8h
 
 lr-8e-6-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRM6W87Z5JHR8Z6HBRGP54XX|training|best_inference_ckpt|normal|--min-runtime 8h
+
+lr-5e-6-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRPNCHS6148RF7MDV356AKWA|training|best_inference_ckpt|normal|--min-runtime 8h
