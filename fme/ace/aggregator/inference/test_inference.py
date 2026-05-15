@@ -6,7 +6,10 @@ import torch
 import xarray as xr
 
 from fme.ace.aggregator.inference import InferenceAggregatorConfig
+from fme.ace.aggregator.inference.ipo.ipo_index import IPOIndexAggregator
 from fme.ace.data_loading.batch_data import PairedData
+from fme.core.coordinates import LatLonCoordinates
+from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 
 from .test_evaluator import get_ds_info
@@ -139,6 +142,29 @@ def test_flush_diagnostics(tmpdir):
     ]
     for file in expected_files:
         assert (tmpdir / f"{file}_diagnostics.nc").exists()
+
+
+@pytest.mark.parametrize(
+    "n_timesteps, timestep_days, expect_ipo",
+    [
+        (10 * 12, 30, False),  # 10 years, below threshold
+        (90 * 12, 30, True),  # 90 years, above threshold
+    ],
+)
+def test_ipo_aggregator_registered_for_long_runs(
+    n_timesteps, timestep_days, expect_ipo
+):
+    ds_info = DatasetInfo(
+        horizontal_coordinates=LatLonCoordinates(
+            lon=torch.arange(8), lat=torch.arange(4)
+        ),
+        timestep=datetime.timedelta(days=timestep_days),
+    )
+    agg = InferenceAggregatorConfig().build(
+        ds_info, n_timesteps, save_diagnostics=False
+    )
+    has_ipo = any(isinstance(a, IPOIndexAggregator) for a in agg._aggregators.values())
+    assert has_ipo is expect_ipo
 
 
 def test_agg_raises_without_output_dir():

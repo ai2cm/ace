@@ -31,7 +31,11 @@ from .enso import RegionalIndexAggregator
 from .enso.dynamic_index import EnsoIndexMetricConfig
 from .enso.enso_coefficient import EnsoCoefficientMetricConfig
 from .histogram import HistogramMetricConfig
-from .ipo.ipo_index import MIN_YEARS_FOR_FILTERED_TPI, IpoIndexMetricConfig
+from .ipo.ipo_index import (
+    MIN_YEARS_FOR_FILTERED_TPI,
+    IPOIndexAggregator,
+    IPOIndexMetricConfig,
+)
 from .reduced import MeanMetricConfig, SingleTargetMeanAggregator
 from .seasonal import SeasonalMetricConfig
 from .spectrum import PowerSpectrumMetricConfig, SphericalPowerSpectrumAggregator
@@ -60,7 +64,7 @@ MetricConfig = (
     | EnsoIndexMetricConfig
     | EnsoCoefficientMetricConfig
     | EnsembleMetricConfig
-    | IpoIndexMetricConfig
+    | IPOIndexMetricConfig
 )
 
 
@@ -136,6 +140,11 @@ class InferenceEvaluatorAggregatorConfig:
 
         if ctx.n_timesteps * ctx.timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS:
             metrics.append(EnsoCoefficientMetricConfig())
+
+        if ctx.n_timesteps * ctx.timestep > APPROXIMATELY_EIGHTY_YEARS and isinstance(
+            ctx.horizontal_coordinates, LatLonCoordinates
+        ):
+            metrics.append(IPOIndexMetricConfig())
 
         return metrics
 
@@ -343,7 +352,7 @@ class LegacyFlagInferenceEvaluatorAggregatorConfig:
             and n_timesteps * timestep > APPROXIMATELY_EIGHTY_YEARS
             and isinstance(horizontal_coordinates, LatLonCoordinates)
         ):
-            metrics.append(IpoIndexMetricConfig())
+            metrics.append(IPOIndexMetricConfig())
         return InferenceEvaluatorAggregatorConfig(
             metrics=metrics,
             monthly_reference_data=self.monthly_reference_data,
@@ -670,6 +679,14 @@ class InferenceAggregatorConfig:
             aggregators["enso_index"] = RegionalIndexAggregator(
                 regional_weights=nino34_region.regional_weights,
                 regional_mean=gridded_operations.regional_area_weighted_mean,
+            )
+        if (
+            isinstance(horizontal_coordinates, LatLonCoordinates)
+            and n_timesteps * dataset_info.timestep > APPROXIMATELY_EIGHTY_YEARS
+        ):
+            aggregators["ipo_index"] = IPOIndexAggregator(
+                lat=horizontal_coordinates.lat,
+                lon=horizontal_coordinates.lon,
             )
 
         return InferenceAggregator(
