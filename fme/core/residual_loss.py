@@ -11,19 +11,61 @@ regardless of sign.
 """
 
 import dataclasses
+import pathlib
 from collections.abc import Mapping
 
+import fsspec
 import torch
+import xarray as xr
 
+from fme.core.device import get_device
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.loss import LossOutput, StepLossConfig, WeightedMappingLoss
-from fme.core.normalizer import StandardNormalizer
-from fme.core.typing_ import TensorMapping
+from fme.core.normalizer import StandardNormalizer, load_dict_from_netcdf
+from fme.core.typing_ import TensorDict, TensorMapping
 
 
 def step_label(step: int) -> str:
     """Stable suffix used in metric keys, e.g. ``"step_1_minus_0"``."""
     return f"step_{step}_minus_{step - 1}"
+
+
+def load_std_maps(
+    path: str | pathlib.Path,
+    names: list[str],
+) -> TensorDict:
+    """Load per-variable spatial standard-deviation maps from a netCDF file.
+
+    Each variable in the file should be a 2D ``(lat, lon)`` DataArray
+    representing the climatological standard deviation of temporal residuals
+    at each grid cell.
+
+    Args:
+        path: Path to the netCDF file.
+        names: Variable names to load.
+
+    Returns:
+        Dictionary mapping variable names to tensors of shape ``(1, 1, lat, lon)``
+        (broadcastable to ``(batch, channel, lat, lon)``).
+    """
+    with fsspec.open(path, "rb") as f:
+        ds = xr.load_dataset(f, mask_and_scale=False)
+    result: TensorDict = {}
+    for name in names:
+        if name not in ds:
+            raise ValueError(
+                f"Variable {name!r} not found in std maps file {path}. "
+                f"Available: {sorted(ds.data_vars)}"
+            )
+        arr = ds[name].values
+        if arr.ndim != 2:
+            raise ValueError(
+                f"Expected 2D (lat, lon) array for {name!r}, got shape {arr.shape}."
+            )
+        tensor = torch.as_tensor(arr, dtype=torch.float).unsqueeze(0).unsqueeze(0)
+        result[name] = tensor.to(get_device())
+    ds.close()
+    return result
 
 
 @dataclasses.dataclass
@@ -38,14 +80,26 @@ class SnapshotResidualLossConfig:
     Parameters:
         steps: List of step indices (each >= 1). For step ``k``, the
             loss is computed on the residual ``gen[k] - gen[k-1]``.
+        residual_stds_path: Path to a netCDF file containing scalar
+            per-variable standard deviations of temporal residuals
+            (the "global" std ``sigma_g``).
         loss: Inner loss configuration.
         weight: Multiplier applied to the aggregated residual loss term
             before adding it to the total loss.
+        std_maps_path: Path to a netCDF file containing the climatological
+            standard deviation of temporal residuals at each grid cell,
+            with one 2D ``(lat, lon)`` variable per output name. When
+            provided, normalized residuals are divided by
+            ``sigma_l + eps * sigma_g`` at each grid cell before the
+            inner loss, where ``sigma_l`` is the local std and
+            ``sigma_g`` is the scalar std from ``residual_stds_path``.
     """
 
     steps: list[int]
+    residual_stds_path: str | pathlib.Path
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
     weight: float = 1.0
+    std_maps_path: str | pathlib.Path | None = None
 
     def __post_init__(self):
         if len(self.steps) == 0:
@@ -68,7 +122,6 @@ class SnapshotResidualLossConfig:
         self,
         gridded_ops: GriddedOperations | None,
         out_names: list[str],
-        normalizer: StandardNormalizer,
         channel_dim: int = -3,
     ) -> "SnapshotResidualLoss":
         """Construct a :class:`SnapshotResidualLoss`.
@@ -79,11 +132,17 @@ class SnapshotResidualLossConfig:
             out_names: Variable names the residual loss applies to. Typically
                 the intersection of the stepper's ``loss_names`` and
                 ``prognostic_names``.
-            normalizer: Loss normalizer to use. Means cancel under
-                subtraction, so the per-variable stds are what determines the
-                scale of normalized residuals.
             channel_dim: Channel dimension of the input tensors.
         """
+        residual_stds = load_dict_from_netcdf(
+            self.residual_stds_path,
+            names=out_names,
+            defaults={name: 1.0 for name in out_names},
+        )
+        identity_normalizer = StandardNormalizer(
+            means={name: torch.zeros(()) for name in out_names},
+            stds={name: torch.ones(()) for name in out_names},
+        )
         inner_loss = self.loss.loss_config.build(
             reduction="none",
             gridded_operations=gridded_ops,
@@ -93,13 +152,18 @@ class SnapshotResidualLossConfig:
             weights=self.loss.weights,
             out_names=out_names,
             channel_dim=channel_dim,
-            normalizer=normalizer,
+            normalizer=identity_normalizer,
         )
+        residual_std_maps: TensorDict | None = None
+        if self.std_maps_path is not None:
+            residual_std_maps = load_std_maps(self.std_maps_path, out_names)
         return SnapshotResidualLoss(
             steps=list(self.steps),
             loss=weighted_mapping_loss,
+            residual_stds=residual_stds,
             out_names=list(out_names),
             weight=self.weight,
+            residual_std_maps=residual_std_maps,
         )
 
 
@@ -108,6 +172,12 @@ class SnapshotResidualLoss:
 
     For each active step ``k``, the loss is
     ``inner_loss(|gen[k] - gen[k-1].detach()|, |target[k] - target[k-1].detach()|)``.
+
+    When ``residual_std_maps`` are provided, the normalization formula is
+    ``|r| / (sigma_l + eps * sigma_g)`` where ``r`` is the raw snapshot
+    residual, ``sigma_l`` is the local (spatial) std, and ``sigma_g`` is
+    the corresponding scalar std. Without std maps, residuals are simply
+    divided by ``sigma_g``.
 
     The active set of steps is intersected with the per-batch sampled rollout
     length via :meth:`update_max_n_forward_steps`. Steps exceeding the sampled
@@ -118,14 +188,20 @@ class SnapshotResidualLoss:
         self,
         steps: list[int],
         loss: WeightedMappingLoss,
+        residual_stds: dict[str, float],
         out_names: list[str],
         weight: float,
+        residual_std_maps: TensorDict | None = None,
+        eps: float = 1e-2,
     ):
         self._all_steps: list[int] = sorted(steps)
         self._active_steps: list[int] = list(self._all_steps)
         self._loss = loss
+        self._residual_stds = residual_stds
         self._out_names = list(out_names)
         self._weight = weight
+        self._residual_std_maps = residual_std_maps
+        self._eps = eps
 
     @property
     def weight(self) -> float:
@@ -145,7 +221,10 @@ class SnapshotResidualLoss:
 
     @property
     def effective_loss_scaling(self) -> dict[str, float]:
-        return self._loss.effective_loss_scaling
+        weights = dict(
+            zip(self._loss.packer.names, self._loss._weight_tensor.flatten())
+        )
+        return {k: self._residual_stds[k] / weights[k] for k in self._out_names}
 
     def max_step(self) -> int:
         return max(self._all_steps)
@@ -173,6 +252,70 @@ class SnapshotResidualLoss:
         """
         return [s for s in self._active_steps if s == step]
 
+    def compute_residuals(
+        self,
+        step: int,
+        predictions: Mapping[int, TensorMapping],
+        targets: Mapping[int, TensorMapping],
+    ) -> tuple[TensorMapping, TensorMapping]:
+        """Return the normalized absolute residuals for a single step.
+
+        Operation order:
+        1. Raw signed residual: ``pred[k] - pred[k-1].detach()``
+        2. Take absolute value
+        3. Divide by ``sigma_l + eps * sigma_g`` if std maps are provided,
+           otherwise divide by ``sigma_g``
+
+        The reference endpoint ``step - 1`` is always detached so gradients
+        flow only through the later prediction.
+
+        Args:
+            step: The step index (>= 1).
+            predictions: Must contain keys ``step`` and ``step - 1``.
+            targets: Must contain keys ``step`` and ``step - 1``.
+
+        Returns:
+            ``(gen_residual, target_residual)`` where each is a
+            ``TensorMapping`` keyed by variable name.
+        """
+        ref = step - 1
+        self._validate_step_inputs(step, predictions, targets)
+        gen_residual: TensorMapping = {
+            name: (predictions[step][name] - predictions[ref][name].detach()).abs()
+            for name in self._out_names
+        }
+        target_residual: TensorMapping = {
+            name: (targets[step][name] - targets[ref][name].detach()).abs()
+            for name in self._out_names
+        }
+        if self._residual_std_maps is not None:
+            gen_residual = {
+                name: gen_residual[name]
+                / (
+                    self._residual_std_maps[name]
+                    + self._eps * self._residual_stds[name]
+                )
+                for name in self._out_names
+            }
+            target_residual = {
+                name: target_residual[name]
+                / (
+                    self._residual_std_maps[name]
+                    + self._eps * self._residual_stds[name]
+                )
+                for name in self._out_names
+            }
+        else:
+            gen_residual = {
+                name: gen_residual[name] / self._residual_stds[name]
+                for name in self._out_names
+            }
+            target_residual = {
+                name: target_residual[name] / self._residual_stds[name]
+                for name in self._out_names
+            }
+        return gen_residual, target_residual
+
     def compute_step_loss(
         self,
         step: int,
@@ -181,11 +324,8 @@ class SnapshotResidualLoss:
     ) -> torch.Tensor:
         """Compute one step's residual loss as a scalar tensor.
 
-        Builds the absolute residual
-        ``|predictions[step] - predictions[step-1].detach()|``
-        and analogous target residual, then passes both to the inner loss.
-        The reference endpoint ``step - 1`` is always detached so gradients
-        flow only through the later prediction at ``step``.
+        Builds the absolute residuals via :meth:`compute_residuals` and
+        passes them to the inner loss.
 
         Args:
             step: The step index (>= 1).
@@ -195,16 +335,9 @@ class SnapshotResidualLoss:
         Returns:
             Unweighted residual loss scalar; callers apply :attr:`weight`.
         """
-        ref = step - 1
-        self._validate_step_inputs(step, predictions, targets)
-        gen_residual = {
-            name: (predictions[step][name] - predictions[ref][name].detach()).abs()
-            for name in self._out_names
-        }
-        target_residual = {
-            name: (targets[step][name] - targets[ref][name].detach()).abs()
-            for name in self._out_names
-        }
+        gen_residual, target_residual = self.compute_residuals(
+            step, predictions, targets
+        )
         loss_output: LossOutput = self._loss(gen_residual, target_residual)
         return loss_output.total()
 
