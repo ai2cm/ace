@@ -112,4 +112,4 @@ stepper_training:
       USWRFtoa: 2
       tendency_of_total_water_path_due_to_advection: 0.5
 stepper:
-  checkpoint_path: /ckpt.tar
+  checkpoint_path: /weights/training_checkpoints/best_ckpt.tar
