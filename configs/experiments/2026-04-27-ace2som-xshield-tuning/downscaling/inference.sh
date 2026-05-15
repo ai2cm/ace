@@ -5,7 +5,7 @@ set -e
 JOB_NAME="inference-4k-tuned-ace2shield-tropics"
 #JOB_NAME="eval-global-trained-denoising-moe-events"
 
-CONFIG_FILENAME="config.yaml"
+CONFIG_FILENAME="inference-config.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME

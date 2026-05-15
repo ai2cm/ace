@@ -1,0 +1,67 @@
+experiment_dir: /climate-default/home/annak/2026-05-15-ace2som-4ktuned-outputs-downscaled
+patch:
+  divide_generation: true
+  composite_prediction: true
+  coarse_horizontal_overlap: 1
+model:
+  checkpoint_path: /checkpoints/best.ckpt
+data:
+  coarse:
+    - data_path: /climate-default/home/annak/2026-05-13-ace2som-4ktuned-outputs
+      file_pattern: output_6hourly_predictions_ic0000.zarr
+      engine: zarr
+  batch_size: 6
+  num_data_workers: 2
+  strict_ensemble: false
+outputs:
+- name: "tropics"
+  save_vars:
+    - PRATEsfc
+  n_ens: 2
+  max_samples_per_gpu: 32
+  time_range:
+    start_time: '2020-01-01T00:00:00'
+    stop_time: '2021-01-01T00:00:00'
+    step: 5
+  lat_extent:
+    start: 0  #-66.0
+    stop: 35 #70.0
+  lon_extent:
+    start: 75 #230.0
+    stop:  195 #246.0
+- name: "maritime_continent"
+  save_vars:
+    - PRATEsfc
+  n_ens: 2
+  max_samples_per_gpu: 32
+  time_range:
+    start_time: '2020-01-01T00:00:00'
+    stop_time: '2021-01-01T00:00:00'
+    step: 5
+  lat_extent:
+    start: -14.0
+    stop: 14.0
+  lon_extent:
+    start: 85.0
+    stop: 157.0
+- name: "conus"
+  save_vars:
+    - PRATEsfc
+  n_ens: 2
+  max_samples_per_gpu: 32
+  time_range:
+    start_time: '2020-01-01T00:00:00'
+    stop_time: '2021-01-01T00:00:00'
+    step: 5
+  lat_extent:
+    start: 22.0
+    stop: 50.0
+  lon_extent:
+    start: 230.0
+    stop: 295.0
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: andrep-downscaling
+  entity: ai2cm
