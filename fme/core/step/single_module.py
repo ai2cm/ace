@@ -179,8 +179,8 @@ class SingleModuleStepConfig(StepConfigABC):
         return self.output_names
 
     @property
-    def allow_variable_masking(self) -> bool:
-        return self.builder.allow_variable_masking
+    def allow_missing_variables(self) -> bool:
+        return self.builder.allow_missing_variables
 
     def replace_ocean(self, ocean: OceanConfig | None):
         """

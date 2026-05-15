@@ -134,7 +134,7 @@ class ModuleSelector:
         type: the type of the ModuleConfig
         config: data for a ModuleConfig instance of the indicated type
         conditional: whether to condition the predictions on batch labels.
-        allow_variable_masking: whether the data pipeline is allowed to
+        allow_missing_variables: whether the data pipeline is allowed to
             produce variable masks (for incomplete datasets). When False
             (default), missing required variables cause an error.
     """
@@ -142,7 +142,7 @@ class ModuleSelector:
     type: str
     config: Mapping[str, Any]
     conditional: bool = False
-    allow_variable_masking: bool = False
+    allow_missing_variables: bool = False
     registry: ClassVar[Registry[ModuleConfig]] = Registry[ModuleConfig]()
 
     def __post_init__(self):

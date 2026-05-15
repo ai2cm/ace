@@ -1402,7 +1402,7 @@ def test_gridded_data_with_variable_masking_concat(tmp_path):
     requirements = DataRequirements(
         names=["foo", "bar"],
         n_timesteps=2,
-        allow_variable_masking=True,
+        allow_missing_variables=True,
     )
     data = get_gridded_data(config, train=False, requirements=requirements)
     batch = next(iter(data.loader))
@@ -1430,7 +1430,7 @@ def test_inference_data_loader_excludes_variable_absent_from_all_samples(tmp_pat
     window_requirements = DataRequirements(
         names=["foo", "nonexistent_var"],
         n_timesteps=4,
-        allow_variable_masking=True,
+        allow_missing_variables=True,
     )
     initial_condition = PrognosticStateDataRequirements(names=["foo"], n_timesteps=1)
     data = get_inference_data(

@@ -374,16 +374,16 @@ class BatchData:
         sample_dim_name: str = "sample",
         horizontal_dims: list[str] | None = None,
         label_encoding: LabelEncoding | None = None,
-        allow_variable_masking: bool = False,
+        allow_missing_variables: bool = False,
         all_names: Sequence[str] | None = None,
     ) -> "BatchData":
         sample_data, sample_times, sample_labels, sample_epochs = zip(*samples)
         if not all(epoch == sample_epochs[0] for epoch in sample_epochs):
             raise ValueError("All samples must have the same epoch.")
-        if allow_variable_masking:
+        if allow_missing_variables:
             if all_names is None:
                 raise ValueError(
-                    "all_names must be provided when allow_variable_masking=True"
+                    "all_names must be provided when allow_missing_variables=True"
                 )
             batch_data, data_mask = _collate_with_masking(sample_data, all_names)
         else:

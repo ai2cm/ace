@@ -519,13 +519,13 @@ class XarrayDataConfig(DatasetConfigABC):
         self,
         names: Sequence[str],
         n_timesteps: IntSchedule,
-        allow_variable_masking: bool = False,
+        allow_missing_variables: bool = False,
     ) -> tuple["XarraySubset", DatasetProperties]:
         return get_xarray_dataset(
             self,
             list(names),
             n_timesteps,
-            allow_variable_masking=allow_variable_masking,
+            allow_missing_variables=allow_missing_variables,
         )
 
 
@@ -544,11 +544,11 @@ class XarrayDataset(DatasetABC):
         config: XarrayDataConfig,
         names: Sequence[str],
         n_timesteps: IntSchedule,
-        allow_variable_masking: bool = False,
+        allow_missing_variables: bool = False,
     ):
         self._horizontal_coordinates: HorizontalCoordinates
         self._names = names
-        self._allow_variable_masking = allow_variable_masking
+        self._allow_missing_variables = allow_missing_variables
         self.path = config.data_path
         self.file_pattern = config.file_pattern
         self.engine = config.engine
@@ -586,7 +586,7 @@ class XarrayDataset(DatasetABC):
             self._time_invariant_names,
             self._static_derived_names,
         ) = self._group_variable_names_by_time_type()
-        if self._allow_variable_masking:
+        if self._allow_missing_variables:
             self._names = (
                 list(self._time_dependent_names)
                 + list(self._time_invariant_names)
@@ -711,7 +711,7 @@ class XarrayDataset(DatasetABC):
         for name in self._names:
             if name in StaticDerivedData.names:
                 result[name] = StaticDerivedData.metadata[name]
-            elif name not in ds and self._allow_variable_masking:
+            elif name not in ds and self._allow_missing_variables:
                 continue
             elif name not in ds:
                 raise ValueError(f"Required variable not found in dataset: {name}.")
@@ -777,10 +777,10 @@ class XarrayDataset(DatasetABC):
                         time_dependent_names.append(name)
                     else:
                         time_invariant_names.append(name)
-                elif self._allow_variable_masking:
+                elif self._allow_missing_variables:
                     logging.info(
                         f"Variable '{name}' not found in dataset, "
-                        "skipping due to allow_variable_masking=True."
+                        "skipping due to allow_missing_variables=True."
                     )
                 else:
                     raise ValueError(f"Required variable not found in dataset: {name}.")
@@ -1110,10 +1110,10 @@ def get_xarray_dataset(
     config: XarrayDataConfig,
     names: Sequence[str],
     n_timesteps: IntSchedule,
-    allow_variable_masking: bool = False,
+    allow_missing_variables: bool = False,
 ) -> tuple["XarraySubset", DatasetProperties]:
     dataset = XarrayDataset(
-        config, names, n_timesteps, allow_variable_masking=allow_variable_masking
+        config, names, n_timesteps, allow_missing_variables=allow_missing_variables
     )
     properties = dataset.properties
     index_slice = _as_index_selection(config.subset, dataset)
@@ -1125,13 +1125,13 @@ def get_xarray_datasets(
     names: Sequence[str],
     n_timesteps: IntSchedule,
     strict: bool = True,
-    allow_variable_masking: bool = False,
+    allow_missing_variables: bool = False,
 ) -> tuple[list[XarraySubset], DatasetProperties]:
     datasets = []
     properties: DatasetProperties | None = None
     for config in dataset_configs:
         dataset, new_properties = get_xarray_dataset(
-            config, names, n_timesteps, allow_variable_masking=allow_variable_masking
+            config, names, n_timesteps, allow_missing_variables=allow_missing_variables
         )
         datasets.append(dataset)
         if properties is None:

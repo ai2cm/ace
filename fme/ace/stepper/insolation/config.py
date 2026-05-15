@@ -129,7 +129,7 @@ class InsolationConfig:
         return DataRequirements(
             names=names,
             n_timesteps=requirements.n_timesteps,
-            allow_variable_masking=requirements.allow_variable_masking,
+            allow_missing_variables=requirements.allow_missing_variables,
         )
 
 

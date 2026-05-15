@@ -526,7 +526,7 @@ class StepperConfig:
         requirements = DataRequirements(
             names=self.all_names,
             n_timesteps=self._window_steps_required(n_forward_steps),
-            allow_variable_masking=self.step.allow_variable_masking,
+            allow_missing_variables=self.step.allow_missing_variables,
         )
         return self.derived_forcings.update_requirements(requirements)
 
@@ -548,7 +548,7 @@ class StepperConfig:
                 set(self.input_only_names).union(self.step.next_step_input_names)
             ),
             n_timesteps=self._window_steps_required(n_forward_steps),
-            allow_variable_masking=self.step.allow_variable_masking,
+            allow_missing_variables=self.step.allow_missing_variables,
         )
         return self.derived_forcings.update_requirements(requirements)
 

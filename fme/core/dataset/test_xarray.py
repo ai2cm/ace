@@ -1232,7 +1232,7 @@ def test_dataset_properties_update_masks(mock_monthly_netcdfs):
     assert "mask_0" in dataset.properties.mask_provider.masks
 
 
-def test_allow_variable_masking_skips_missing_variables(mock_monthly_netcdfs):
+def test_allow_missing_variables_skips_missing_variables(mock_monthly_netcdfs):
     mock_data: MockData = mock_monthly_netcdfs
     config = XarrayDataConfig(data_path=mock_data.tmpdir)
     existing_names = list(mock_data.var_names.time_dependent_names)
@@ -1241,7 +1241,7 @@ def test_allow_variable_masking_skips_missing_variables(mock_monthly_netcdfs):
         config,
         names_with_missing,
         IntSchedule.from_constant(2),
-        allow_variable_masking=True,
+        allow_missing_variables=True,
     )
     sample_data, _, _, _ = dataset[0]
     assert "nonexistent_var" not in sample_data
@@ -1249,7 +1249,7 @@ def test_allow_variable_masking_skips_missing_variables(mock_monthly_netcdfs):
         assert name in sample_data
 
 
-def test_allow_variable_masking_false_raises_on_missing(mock_monthly_netcdfs):
+def test_allow_missing_variables_false_raises_on_missing(mock_monthly_netcdfs):
     mock_data: MockData = mock_monthly_netcdfs
     config = XarrayDataConfig(data_path=mock_data.tmpdir)
     existing_names = list(mock_data.var_names.time_dependent_names)
@@ -1259,5 +1259,5 @@ def test_allow_variable_masking_false_raises_on_missing(mock_monthly_netcdfs):
             config,
             names_with_missing,
             IntSchedule.from_constant(2),
-            allow_variable_masking=False,
+            allow_missing_variables=False,
         )

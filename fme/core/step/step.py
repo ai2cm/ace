@@ -111,7 +111,7 @@ class StepConfigABC(abc.ABC):
         pass
 
     @property
-    def allow_variable_masking(self) -> bool:
+    def allow_missing_variables(self) -> bool:
         return False
 
     @abc.abstractmethod
@@ -217,8 +217,8 @@ class StepSelector(StepConfigABC):
         self.config = dataclasses.asdict(self._step_config_instance)
 
     @property
-    def allow_variable_masking(self) -> bool:
-        return self._step_config_instance.allow_variable_masking
+    def allow_missing_variables(self) -> bool:
+        return self._step_config_instance.allow_missing_variables
 
     def load(self):
         self._step_config_instance.load()

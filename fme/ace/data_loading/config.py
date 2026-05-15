@@ -75,10 +75,10 @@ class DataLoaderConfig:
         self,
         names: Sequence[str],
         n_timesteps: IntSchedule,
-        allow_variable_masking: bool = False,
+        allow_missing_variables: bool = False,
     ) -> tuple[DatasetABC, DatasetProperties]:
         return self.dataset.build(
-            names, n_timesteps, allow_variable_masking=allow_variable_masking
+            names, n_timesteps, allow_missing_variables=allow_missing_variables
         )
 
     @property

@@ -751,7 +751,7 @@ def test_from_sample_tuples_with_variable_masking():
         0,
     )
     batch = BatchData.from_sample_tuples(
-        [sample1, sample2], allow_variable_masking=True, all_names=["a", "b"]
+        [sample1, sample2], allow_missing_variables=True, all_names=["a", "b"]
     )
     assert "a" in batch.data
     assert "b" in batch.data

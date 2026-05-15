@@ -32,12 +32,12 @@ class CollateFn:
         self,
         horizontal_dims: list[str],
         label_encoding: LabelEncoding | None = None,
-        allow_variable_masking: bool = False,
+        allow_missing_variables: bool = False,
         all_names: Sequence[str] | None = None,
     ):
         self.horizontal_dims = horizontal_dims
         self.label_encoding = label_encoding
-        self.allow_variable_masking = allow_variable_masking
+        self.allow_missing_variables = allow_missing_variables
         self.all_names = all_names
 
     def __call__(self, samples: Sequence[DatasetItem]) -> BatchData:
@@ -45,7 +45,7 @@ class CollateFn:
             samples,
             horizontal_dims=self.horizontal_dims,
             label_encoding=self.label_encoding,
-            allow_variable_masking=self.allow_variable_masking,
+            allow_missing_variables=self.allow_missing_variables,
             all_names=self.all_names,
         )
 
@@ -95,7 +95,7 @@ def get_gridded_data(
     dataset, properties = config.get_dataset(
         requirements.names,
         n_timesteps_preloaded,
-        allow_variable_masking=requirements.allow_variable_masking,
+        allow_missing_variables=requirements.allow_missing_variables,
     )
 
     if config.time_buffer > 0:
@@ -141,7 +141,7 @@ def get_gridded_data(
         collate_fn=CollateFn(
             list(properties.horizontal_coordinates.dims),
             label_encoding,
-            allow_variable_masking=requirements.allow_variable_masking,
+            allow_missing_variables=requirements.allow_missing_variables,
             all_names=requirements.names,
         ),
         multiprocessing_context=mp_context,
@@ -279,7 +279,7 @@ def get_forcing_data(
             config.dataset,
             window_requirements.names,
             window_requirements.n_timesteps_schedule,
-            allow_variable_masking=window_requirements.allow_variable_masking,
+            allow_missing_variables=window_requirements.allow_missing_variables,
         ).all_times
     elif isinstance(config.dataset, MergeNoConcatDatasetConfig):
         # Some forcing variables may not be in the first dataset,
