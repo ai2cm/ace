@@ -689,7 +689,10 @@ def test_data_mask_broadcast_ensemble():
     assert set(broadcasted.data_mask) == set(names)
     assert broadcasted.data_mask["bar"].shape == (n_samples * n_ensemble,)
     # sample 0 was True, sample 1 was False; repeat_interleave keeps order
-    expected = torch.tensor([True, True, True, False, False, False])
+    expected = torch.tensor(
+        [True, True, True, False, False, False],
+        device=broadcasted.data_mask["bar"].device,
+    )
     torch.testing.assert_close(broadcasted.data_mask["bar"], expected)
 
 

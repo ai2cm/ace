@@ -1410,10 +1410,14 @@ def test_gridded_data_with_variable_masking_concat(tmp_path):
     assert "foo" in batch.data
     assert "bar" in batch.data
     assert batch.data_mask is not None
-    assert "foo" in batch.data_mask
-    torch.testing.assert_close(batch.data_mask["foo"], torch.tensor([True, True]))
+    device = batch.data_mask["foo"].device
+    torch.testing.assert_close(
+        batch.data_mask["foo"], torch.tensor([True, True], device=device)
+    )
     assert "bar" in batch.data_mask
-    torch.testing.assert_close(batch.data_mask["bar"], torch.tensor([True, False]))
+    torch.testing.assert_close(
+        batch.data_mask["bar"], torch.tensor([True, False], device=device)
+    )
 
 
 def test_inference_data_loader_excludes_variable_absent_from_all_samples(tmp_path):
