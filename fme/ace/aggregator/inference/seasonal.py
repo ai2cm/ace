@@ -252,6 +252,7 @@ class SeasonalMetricConfig:
     variables: list[str] | None = None
     name: str = "seasonal"
     enabled: bool = True
+    strict: bool = True
 
     def get_name(self) -> str:
         return self.name

@@ -463,6 +463,7 @@ def reduce_data(dist: Distributed, rank_tensor_dict: TensorDict) -> TensorDict |
 class EnsoCoefficientMetricConfig:
     name: str = "enso_coefficient"
     enabled: bool = True
+    strict: bool = False
 
     def get_name(self) -> str:
         return self.name

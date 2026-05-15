@@ -253,6 +253,7 @@ class PowerSpectrumMetricConfig:
     variables: list[str] | None = None
     name: str = "power_spectrum"
     enabled: bool = True
+    strict: bool = False
 
     def get_name(self) -> str:
         return self.name

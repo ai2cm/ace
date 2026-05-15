@@ -1,4 +1,5 @@
 import dataclasses
+import datetime
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -358,6 +359,7 @@ NINO34_LON = (190, 240)
 class EnsoIndexMetricConfig:
     name: str = "enso_index"
     enabled: bool = True
+    strict: bool = False
 
     def get_name(self) -> str:
         return self.name
@@ -370,6 +372,12 @@ class EnsoIndexMetricConfig:
         if not isinstance(ctx.ops, LatLonOperations):
             raise MetricNotSupportedError(
                 "enso_index metric requires LatLonOperations."
+            )
+        total_duration = ctx.n_timesteps * ctx.timestep
+        if total_duration <= datetime.timedelta(days=730):
+            raise MetricNotSupportedError(
+                f"enso_index metric requires > ~2 years of data, "
+                f"got {total_duration.days} days"
             )
         nino34_region = LatLonRegion(
             lat_bounds=NINO34_LAT,

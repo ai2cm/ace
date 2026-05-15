@@ -135,11 +135,11 @@ def build_inference_evaluator_aggregator(
         name = metric.get_name()
         try:
             result: MetricBuildResult = metric.build(ctx)
-        except MetricNotSupportedError:
-            if raise_on_unsupported:
+        except MetricNotSupportedError as e:
+            if raise_on_unsupported or metric.strict:
                 raise
             logging.warning(
-                f"{name} metric not supported for this configuration, " "omitting."
+                f"{name} metric not supported for this configuration, omitting: {e}"
             )
             continue
 
@@ -164,9 +164,9 @@ def build_inference_evaluator_aggregator(
 
 
 @dataclasses.dataclass
-class HierarchicalInferenceEvaluatorAggregatorConfig:
+class InferenceEvaluatorAggregatorConfig:
     """
-    Hierarchical configuration for inference evaluator aggregator.
+    Configuration for inference evaluator aggregator.
 
     Each metric is a named field with its own typed configuration and an
     ``enabled`` flag.  Defaults match the standard metric set: metrics that
@@ -174,7 +174,10 @@ class HierarchicalInferenceEvaluatorAggregatorConfig:
     ``video``, ``seasonal``) are disabled.
 
     Metrics whose runtime requirements are not met (e.g. ``enso_index``
-    on a non-lat/lon grid) are silently skipped even when enabled.
+    on a non-lat/lon grid) are skipped with a warning when ``strict``
+    is ``False`` (the default for built-in metrics), or raise an error
+    when ``strict`` is ``True`` (the default for user-enabled metrics
+    like ``histogram``, ``video``, ``seasonal``).
 
     Parameters:
         mean_denorm: Global-mean time-series metrics on denormalized data.
@@ -354,13 +357,13 @@ class LegacyFlagInferenceEvaluatorAggregatorConfig:
     """
     Legacy configuration for inference evaluator aggregator using boolean flags.
 
-    Deprecated: Use HierarchicalInferenceEvaluatorAggregatorConfig instead.
+    Deprecated: Use InferenceEvaluatorAggregatorConfig instead.
     """
 
     def __post_init__(self):
         warnings.warn(
             "LegacyFlagInferenceEvaluatorAggregatorConfig is deprecated. "
-            "Use HierarchicalInferenceEvaluatorAggregatorConfig instead.",
+            "Use InferenceEvaluatorAggregatorConfig instead.",
             DeprecationWarning,
             stacklevel=2,
         )

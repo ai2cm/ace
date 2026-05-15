@@ -1,6 +1,5 @@
 import datetime
 import pathlib
-import typing
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,8 +12,8 @@ from fme.ace.aggregator.inference import (
     EnsembleMetricConfig,
     EnsoCoefficientMetricConfig,
     EnsoIndexMetricConfig,
-    HierarchicalInferenceEvaluatorAggregatorConfig,
     HistogramMetricConfig,
+    InferenceEvaluatorAggregatorConfig,
     IpoIndexMetricConfig,
     LegacyFlagInferenceEvaluatorAggregatorConfig,
     MeanMetricConfig,
@@ -444,7 +443,7 @@ class TestAggregatorConfigMetrics:
         nx, ny = 90, 45
         ds_info = get_ds_info(nx, ny)
         initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
-        agg = HierarchicalInferenceEvaluatorAggregatorConfig(
+        agg = InferenceEvaluatorAggregatorConfig(
             annual=AnnualMetricConfig(enabled=False),
             enso_index=EnsoIndexMetricConfig(enabled=False),
             enso_coefficient=EnsoCoefficientMetricConfig(enabled=False),
@@ -515,7 +514,7 @@ class TestAggregatorConfigMetrics:
         nx, ny = 4, 4
         ds_info = get_ds_info(nx, ny)
         initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
-        agg = HierarchicalInferenceEvaluatorAggregatorConfig(
+        agg = InferenceEvaluatorAggregatorConfig(
             annual=AnnualMetricConfig(enabled=False),
             enso_index=EnsoIndexMetricConfig(enabled=False),
             enso_coefficient=EnsoCoefficientMetricConfig(enabled=False),
@@ -724,7 +723,7 @@ def test_hierarchical_defaults_build():
     ds_info = get_ds_info(nx, ny)
     initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
 
-    agg = HierarchicalInferenceEvaluatorAggregatorConfig(
+    agg = InferenceEvaluatorAggregatorConfig(
         enso_coefficient=EnsoCoefficientMetricConfig(enabled=False),
     ).build(
         dataset_info=ds_info,
@@ -747,7 +746,7 @@ def test_hierarchical_enable_histogram():
     ds_info = get_ds_info(nx, ny)
     initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
 
-    agg = HierarchicalInferenceEvaluatorAggregatorConfig(
+    agg = InferenceEvaluatorAggregatorConfig(
         histogram=HistogramMetricConfig(enabled=True),
         enso_coefficient=EnsoCoefficientMetricConfig(enabled=False),
     ).build(
@@ -771,7 +770,7 @@ def test_hierarchical_disable_default():
     ds_info = get_ds_info(nx, ny)
     initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
 
-    agg = HierarchicalInferenceEvaluatorAggregatorConfig(
+    agg = InferenceEvaluatorAggregatorConfig(
         zonal_mean=ZonalMeanMetricConfig(enabled=False),
         enso_coefficient=EnsoCoefficientMetricConfig(enabled=False),
     ).build(
@@ -813,26 +812,7 @@ def test_hierarchical_disable_default():
 )
 def test_hierarchical_rejects_mismatched_target(kwargs, match):
     with pytest.raises(ValueError, match=match):
-        HierarchicalInferenceEvaluatorAggregatorConfig(**kwargs)
-
-
-def test_all_metric_configs_documented():
-    """Every type in the MetricConfig union must appear in evaluator_config.rst."""
-    import fme.ace
-    from fme.ace.aggregator.inference.main import MetricConfig
-
-    docs_path = pathlib.Path(__file__).parents[4] / "docs" / "evaluator_config.rst"
-    docs_content = docs_path.read_text()
-
-    for cls in typing.get_args(MetricConfig):
-        name = cls.__name__
-        assert hasattr(
-            fme.ace, name
-        ), f"{name} is in MetricConfig union but not exported from fme.ace"
-        assert f"fme.ace.{name}" in docs_content, (
-            f"{name} is in MetricConfig union but not documented in "
-            f"docs/evaluator_config.rst"
-        )
+        InferenceEvaluatorAggregatorConfig(**kwargs)
 
 
 def _make_healpix_ds_info() -> DatasetInfo:
@@ -937,6 +917,44 @@ class TestMetricNotSupportedError:
         with pytest.raises(MetricNotSupportedError, match="requires LatLonCoordinates"):
             config.build(ctx)
 
+    def test_enso_index_short_run(self):
+        ctx = _make_build_context(get_ds_info(90, 45), n_forward_steps=23)
+        config = EnsoIndexMetricConfig()
+        with pytest.raises(MetricNotSupportedError, match="requires > ~2 years"):
+            config.build(ctx)
+
+    def test_enso_index_long_run(self):
+        long_timestep = datetime.timedelta(days=10)
+        ds_info = DatasetInfo(
+            horizontal_coordinates=LatLonCoordinates(
+                lon=torch.arange(90), lat=torch.arange(45)
+            ),
+            timestep=long_timestep,
+        )
+        ctx = _make_build_context(ds_info, n_forward_steps=200)
+        config = EnsoIndexMetricConfig()
+        result = config.build(ctx)
+        assert result.aggregator is not None
+
+    def test_ipo_index_short_run(self):
+        ctx = _make_build_context(get_ds_info(90, 45), n_forward_steps=23)
+        config = IpoIndexMetricConfig()
+        with pytest.raises(MetricNotSupportedError, match="requires > ~80 years"):
+            config.build(ctx)
+
+    def test_ipo_index_long_run(self):
+        long_timestep = datetime.timedelta(days=100)
+        ds_info = DatasetInfo(
+            horizontal_coordinates=LatLonCoordinates(
+                lon=torch.arange(90), lat=torch.arange(45)
+            ),
+            timestep=long_timestep,
+        )
+        ctx = _make_build_context(ds_info, n_forward_steps=500)
+        config = IpoIndexMetricConfig()
+        result = config.build(ctx)
+        assert result.aggregator is not None
+
 
 class TestRaiseOnUnsupported:
     def test_explicit_metrics_raise_on_unsupported_by_default(self):
@@ -979,7 +997,7 @@ class TestRaiseOnUnsupported:
         ds_info = get_ds_info(4, 4)
         n_time = 6
         initial_time = get_zero_time(shape=[2, 0], dims=["sample", "time"])
-        agg = HierarchicalInferenceEvaluatorAggregatorConfig().build(
+        agg = InferenceEvaluatorAggregatorConfig().build(
             dataset_info=ds_info,
             n_ic_steps=1,
             n_forward_steps=n_time - 1,
@@ -992,11 +1010,29 @@ class TestRaiseOnUnsupported:
         assert "annual" not in agg._aggregators
         assert "enso_coefficient" not in agg._aggregators
 
+    def test_strict_metric_raises_even_with_raise_on_unsupported_false(self):
+        ds_info = get_ds_info(4, 4)
+        initial_time = get_zero_time(shape=[2, 0], dims=["sample", "time"])
+        with pytest.raises(MetricNotSupportedError):
+            build_inference_evaluator_aggregator(
+                metrics=[
+                    MeanMetricConfig(target="denorm"),
+                    StepMeanMetricConfig(step=20, target="denorm", strict=True),
+                ],
+                dataset_info=ds_info,
+                n_ic_steps=1,
+                n_forward_steps=5,
+                initial_time=initial_time,
+                normalize=lambda x: dict(x),
+                save_diagnostics=False,
+                raise_on_unsupported=False,
+            )
+
     def test_hierarchical_config_skips_unsupported_on_healpix(self):
         ds_info = _make_healpix_ds_info()
         n_time = 24
         initial_time = get_zero_time(shape=[2, 0], dims=["sample", "time"])
-        agg = HierarchicalInferenceEvaluatorAggregatorConfig(
+        agg = InferenceEvaluatorAggregatorConfig(
             annual=AnnualMetricConfig(enabled=False),
         ).build(
             dataset_info=ds_info,

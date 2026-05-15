@@ -89,14 +89,14 @@ The sub-configurations are:
    :show-inheritance:
    :noindex:
 
-.. autoclass:: fme.ace.HierarchicalInferenceEvaluatorAggregatorConfig
+.. autoclass:: fme.ace.InferenceEvaluatorAggregatorConfig
    :show-inheritance:
    :noindex:
 
 Default aggregator configuration
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The default aggregator configuration (``HierarchicalInferenceEvaluatorAggregatorConfig``
+The default aggregator configuration (``InferenceEvaluatorAggregatorConfig``
 with no arguments) produces the following YAML. You only need to include fields
 you want to override.
 
@@ -108,9 +108,12 @@ Metric configurations
 ^^^^^^^^^^^^^^^^^^^^^
 
 The named fields on
-:class:`~fme.ace.HierarchicalInferenceEvaluatorAggregatorConfig`
+:class:`~fme.ace.InferenceEvaluatorAggregatorConfig`
 accept the following typed entries.  Each entry has an ``enabled`` field
-(default ``true``) that can be set to ``false`` to disable a metric.
+that can be set to ``true`` or ``false`` to enable or disable a metric.
+Most metrics default to ``enabled: true``; however, ``video``,
+``histogram``, and ``seasonal`` default to ``enabled: false`` as shown
+in the default aggregator configuration above.
 
 .. autoclass:: fme.ace.MeanMetricConfig
    :noindex:

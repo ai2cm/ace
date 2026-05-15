@@ -6,10 +6,10 @@ from .enso.enso_coefficient import EnsoCoefficientMetricConfig
 from .histogram import HistogramMetricConfig
 from .ipo.ipo_index import IpoIndexMetricConfig
 from .main import (
-    HierarchicalInferenceEvaluatorAggregatorConfig,
     InferenceAggregator,
     InferenceAggregatorConfig,
     InferenceEvaluatorAggregator,
+    InferenceEvaluatorAggregatorConfig,
     LegacyFlagInferenceEvaluatorAggregatorConfig,
     MetricConfig,
     StepMeanEntry,

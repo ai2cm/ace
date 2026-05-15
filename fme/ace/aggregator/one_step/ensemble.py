@@ -341,6 +341,7 @@ class EnsembleMetricConfig:
     name: str | None = None
     log_mean_maps: bool = False
     enabled: bool = True
+    strict: bool = False
 
     def __post_init__(self):
         if self.name is None:

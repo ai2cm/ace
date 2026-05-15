@@ -13,7 +13,7 @@ import torch
 import fme
 from fme.ace.aggregator import OneStepAggregatorConfig
 from fme.ace.aggregator.inference import (
-    HierarchicalInferenceEvaluatorAggregatorConfig,
+    InferenceEvaluatorAggregatorConfig,
     LegacyFlagInferenceEvaluatorAggregatorConfig,
 )
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
@@ -229,11 +229,9 @@ class InferenceEvaluatorConfig:
         default_factory=lambda: DataWriterConfig()
     )
     aggregator: (
-        HierarchicalInferenceEvaluatorAggregatorConfig
+        InferenceEvaluatorAggregatorConfig
         | LegacyFlagInferenceEvaluatorAggregatorConfig
-    ) = dataclasses.field(
-        default_factory=lambda: HierarchicalInferenceEvaluatorAggregatorConfig()
-    )
+    ) = dataclasses.field(default_factory=lambda: InferenceEvaluatorAggregatorConfig())
     stepper_override: StepperOverrideConfig | None = None
     allow_incompatible_dataset: bool = False
     validation: ValidationConfig | None = None

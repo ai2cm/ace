@@ -14,6 +14,7 @@ class HistogramMetricConfig:
     variables: list[str] | None = None
     name: str = "histogram"
     enabled: bool = True
+    strict: bool = True
 
     def get_name(self) -> str:
         return self.name

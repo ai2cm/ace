@@ -2,9 +2,7 @@ import dataclasses
 
 import pytest
 
-from fme.ace.aggregator.inference.main import (
-    HierarchicalInferenceEvaluatorAggregatorConfig,
-)
+from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregatorConfig
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.inference import (
     InferenceDataLoaderConfig,
@@ -38,7 +36,7 @@ def _make_inference_config(
         ),
         n_forward_steps=1,
         forward_steps_in_memory=1,
-        aggregator=HierarchicalInferenceEvaluatorAggregatorConfig(),
+        aggregator=InferenceEvaluatorAggregatorConfig(),
         epochs=epochs if epochs is not None else Slice(),
         name=name,
         weight=weight,

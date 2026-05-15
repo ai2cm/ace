@@ -1,6 +1,6 @@
 from .inference import (
-    HierarchicalInferenceEvaluatorAggregatorConfig,
     InferenceEvaluatorAggregator,
+    InferenceEvaluatorAggregatorConfig,
     LegacyFlagInferenceEvaluatorAggregatorConfig,
     build_inference_evaluator_aggregator,
 )

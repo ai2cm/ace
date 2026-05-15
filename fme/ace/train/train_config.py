@@ -7,7 +7,7 @@ from typing import Any
 import torch
 
 from fme.ace.aggregator import (
-    HierarchicalInferenceEvaluatorAggregatorConfig,
+    InferenceEvaluatorAggregatorConfig,
     LegacyFlagInferenceEvaluatorAggregatorConfig,
     OneStepAggregatorConfig,
 )
@@ -66,11 +66,9 @@ class InlineInferenceConfig:
     n_ensemble_per_ic: int = 1
     epochs: Slice = dataclasses.field(default_factory=lambda: Slice())
     aggregator: (
-        HierarchicalInferenceEvaluatorAggregatorConfig
+        InferenceEvaluatorAggregatorConfig
         | LegacyFlagInferenceEvaluatorAggregatorConfig
-    ) = dataclasses.field(
-        default_factory=lambda: HierarchicalInferenceEvaluatorAggregatorConfig()
-    )
+    ) = dataclasses.field(default_factory=lambda: InferenceEvaluatorAggregatorConfig())
     name: str | None = None
     weight: float = 1.0
 
