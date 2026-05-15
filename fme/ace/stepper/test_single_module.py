@@ -155,6 +155,15 @@ def get_scalar_data(names, value):
     return {n: float(value) for n in names}
 
 
+def _identity_residual_stds_path(names=("a", "b")) -> str:
+    import tempfile
+
+    ds = xr.Dataset({name: xr.DataArray(1.0) for name in names})
+    path = tempfile.NamedTemporaryFile(suffix=".nc", delete=False).name
+    ds.to_netcdf(path)
+    return path
+
+
 def test_stepper_no_train_step_specified():
     stepper = _init_train_stepper(loss=StepLossConfig(type="MSE"))
     stepper._init_for_epoch(0)
@@ -2418,6 +2427,7 @@ def test_train_on_batch_residual_loss_emits_metrics():
         loss=StepLossConfig(type="MSE"),
         residual_loss=SnapshotResidualLossConfig(
             steps=[1, 2],
+            residual_stds_path=_identity_residual_stds_path(),
             loss=StepLossConfig(type="MSE"),
             weight=2.0,
         ),
@@ -2485,6 +2495,7 @@ def test_train_on_batch_residual_loss_runs_with_gradient_accumulation():
         loss=StepLossConfig(type="MSE"),
         residual_loss=SnapshotResidualLossConfig(
             steps=[1],
+            residual_stds_path=_identity_residual_stds_path(),
             loss=StepLossConfig(type="MSE"),
             weight=1.0,
         ),
@@ -2534,6 +2545,7 @@ def test_train_on_batch_residual_loss_filters_pairs_at_runtime():
         loss=StepLossConfig(type="MSE"),
         residual_loss=SnapshotResidualLossConfig(
             steps=[2],
+            residual_stds_path=_identity_residual_stds_path(),
             loss=StepLossConfig(type="MSE"),
         ),
     )
@@ -2552,6 +2564,7 @@ def test_train_stepper_config_residual_loss_validates_against_schedule_max():
             n_forward_steps=2,
             residual_loss=SnapshotResidualLossConfig(
                 steps=[5],
+                residual_stds_path=_identity_residual_stds_path(),
                 loss=StepLossConfig(type="MSE"),
             ),
         )
@@ -2568,6 +2581,7 @@ def test_train_stepper_config_residual_loss_validates_against_schedule_max_miles
             ),
             residual_loss=SnapshotResidualLossConfig(
                 steps=[5],
+                residual_stds_path=_identity_residual_stds_path(),
                 loss=StepLossConfig(type="MSE"),
             ),
         )
@@ -2580,6 +2594,7 @@ def test_train_stepper_config_residual_loss_validates_against_schedule_max_miles
         ),
         residual_loss=SnapshotResidualLossConfig(
             steps=[4],
+            residual_stds_path=_identity_residual_stds_path(),
             loss=StepLossConfig(type="MSE"),
         ),
     )
@@ -2627,6 +2642,7 @@ def test_train_on_batch_residual_loss_optimize_last_step_only_keeps_grad():
         loss=StepLossConfig(type="MSE"),
         residual_loss=SnapshotResidualLossConfig(
             steps=[1],
+            residual_stds_path=_identity_residual_stds_path(),
             loss=StepLossConfig(type="MSE"),
         ),
     )
@@ -2644,6 +2660,7 @@ def test_stepper_build_residual_loss_no_prognostic_loss_names():
         stepper.build_residual_loss(
             SnapshotResidualLossConfig(
                 steps=[1],
+                residual_stds_path=_identity_residual_stds_path(),
                 loss=StepLossConfig(type="MSE"),
             )
         )

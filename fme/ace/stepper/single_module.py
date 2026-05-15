@@ -881,17 +881,17 @@ class Stepper:
 
         The residual loss applies to the intersection of ``loss_names`` and
         ``prognostic_names`` since the IC (``step=0``) carries only
-        prognostic variables. The stepper's existing loss normalizer is
-        reused; means cancel under subtraction, and the per-variable stds
-        determine the scale of normalized residuals.
+        prognostic variables. The residual loss loads its own scalar stds
+        from ``residual_stds_path``, independent of the stepper's loss
+        normalizer.
 
         Args:
             residual_loss_config: The residual loss configuration.
 
         Returns:
-            A SnapshotResidualLoss built using the stepper's loss
-            normalizer, gridded operations, the residual-loss variable set,
-            and channel dimension.
+            A SnapshotResidualLoss built using the config's own
+            residual stds, the stepper's gridded operations, the
+            residual-loss variable set, and channel dimension.
         """
         residual_out_names = [
             name for name in self.loss_names if name in self.prognostic_names
@@ -901,12 +901,10 @@ class Stepper:
                 "No variables available for the snapshot residual loss: the "
                 "intersection of loss_names and prognostic_names is empty."
             )
-        loss_normalizer = self._step_obj.get_loss_normalizer()
         return residual_loss_config.build(
             self._dataset_info.gridded_operations,
             out_names=residual_out_names,
             channel_dim=self.CHANNEL_DIM,
-            normalizer=loss_normalizer,
         )
 
     @property
