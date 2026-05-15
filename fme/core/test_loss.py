@@ -8,6 +8,7 @@ from fme.core.loss import (
     AreaWeightedMSELoss,
     CRPSLoss,
     EnergyScoreLoss,
+    EnsembleComponentLoss,
     FiniteDifferenceCRPSLoss,
     GlobalMeanLoss,
     LossComponent,
@@ -570,10 +571,70 @@ def test_energy_score_preweighting_preserves_total(very_fast_only: bool):
 
 def test_ensemble_component_loss_reduce_to_channel():
     """EnsembleComponentLoss reduces over non-batch, non-channel dims."""
-    from fme.core.loss import EnsembleComponentLoss
-
     tensor = torch.randn(4, 3, 5, 8, 8, device=get_device())
     result = EnsembleComponentLoss(tensor).reduce_to_channel()
     assert result.shape == (4, 5)
     expected = tensor.mean(dim=(1, 3, 4))
     torch.testing.assert_close(result, expected)
+
+
+class TestLossOutputScale:
+    def test_total_scales(self):
+        loss = LossOutput(
+            losses=[StandardLoss(torch.tensor([[1.0, 2.0], [3.0, 4.0]]))],
+            channel_names=["a", "b"],
+        )
+        scaled = loss.scale(0.5)
+        torch.testing.assert_close(scaled.total(), loss.total() * 0.5)
+
+    def test_per_channel_losses_scale(self):
+        loss = LossOutput(
+            losses=[StandardLoss(torch.tensor([[1.0, 2.0], [3.0, 4.0]]))],
+            channel_names=["a", "b"],
+        )
+        original_channels = loss.get_channel_losses()
+        scaled_channels = loss.scale(3.0).get_channel_losses()
+        for name in original_channels:
+            torch.testing.assert_close(
+                scaled_channels[name], original_channels[name] * 3.0
+            )
+
+    def test_channel_names_preserved(self):
+        names = ["x", "y", "z"]
+        loss = LossOutput(
+            losses=[StandardLoss(torch.randn(2, 3))],
+            channel_names=names,
+        )
+        scaled = loss.scale(2.0)
+        assert list(scaled.get_channel_losses().keys()) == names
+
+    def test_preserves_component_subclass_types(self):
+        components = [
+            StandardLoss(torch.randn(2, 3, 4, 4)),
+            EnsembleComponentLoss(torch.randn(2, 5, 3, 4, 4)),
+        ]
+        loss = LossOutput(losses=components, channel_names=["a", "b", "c"])
+        scaled = loss.scale(2.0)
+        for orig, new in zip(components, scaled._losses):
+            assert type(new) is type(orig)
+
+    def test_multiple_components(self):
+        c1 = StandardLoss(torch.tensor([[1.0, 0.0]]))
+        c2 = StandardLoss(torch.tensor([[0.0, 2.0]]))
+        loss = LossOutput(losses=[c1, c2], channel_names=["a", "b"])
+        scaled = loss.scale(0.5)
+        torch.testing.assert_close(scaled.total(), loss.total() * 0.5)
+        original_channels = loss.get_channel_losses()
+        scaled_channels = scaled.get_channel_losses()
+        for name in original_channels:
+            torch.testing.assert_close(
+                scaled_channels[name], original_channels[name] * 0.5
+            )
+
+    def test_scale_by_zero(self):
+        loss = LossOutput(
+            losses=[StandardLoss(torch.tensor([[5.0, 3.0]]))],
+            channel_names=["a", "b"],
+        )
+        scaled = loss.scale(0.0)
+        torch.testing.assert_close(scaled.total(), torch.tensor(0.0))
