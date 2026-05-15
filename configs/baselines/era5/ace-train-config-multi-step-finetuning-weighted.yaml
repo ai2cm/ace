@@ -79,7 +79,7 @@ optimization:
 stepper_training:
   n_ensemble: 2
   parameter_init:
-    weight_path: /weights/training_checkpoints/best_ckpt.tar
+    weights_path: /weights/training_checkpoints/best_ckpt.tar
   n_forward_steps:
     outcomes:
       - steps: 1
