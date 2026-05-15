@@ -6,6 +6,9 @@ patch:
 model:
   checkpoint_path: /checkpoints/best.ckpt
   fine_coordinates_path: /climate-default/2025-11-19-X-SHiELD-AMIP-downscaling-land-fraction/3km/land_fraction.zarr
+  rename:
+    eastward_wind_at_ten_meters: UGRD10m
+    northward_wind_at_ten_meters: VGRD10m
 data:
   coarse:
     - data_path: /climate-default/home/annak/2026-05-13-ace2som-4ktuned-outputs

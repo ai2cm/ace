@@ -60,8 +60,9 @@ def _load_coords_from_ds(ds: xr.Dataset) -> LatLonCoordinates:
         lat=torch.tensor(
             ds[lat_name].values,
             dtype=torch.float32,
+            device=get_device(),
         ),
-        lon=torch.tensor(ds[lon_name].values, dtype=torch.float32),
+        lon=torch.tensor(ds[lon_name].values, dtype=torch.float32, device=get_device()),
     )
 
 
