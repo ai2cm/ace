@@ -163,7 +163,9 @@ class BatchData:
             labels: The labels of the data.
             device: The device to create the data on. By default, the device is
                 determined by the global device specified by get_device().
-            data_mask: Per-variable, per-sample masks indicating variable presence.
+            data_mask: Boolean tensors of shape ``[n_samples]`` keyed by
+                variable name, where True means the variable is present
+                for that sample.  None when all variables are present.
         """
         if device is None:
             device = get_device()

@@ -1414,9 +1414,11 @@ def test_gridded_data_with_variable_masking_concat(tmp_path):
     assert batch.data_mask["bar"].shape == (2,)
     assert batch.data_mask["bar"].any()
     assert not batch.data_mask["bar"].all()
+    assert "foo" in batch.data_mask
+    assert batch.data_mask["foo"].all()
 
 
-def test_inference_data_loader_with_variable_masking(tmp_path):
+def test_inference_data_loader_variable_missing_from_all_samples(tmp_path):
     _create_dataset_on_disk(
         tmp_path, n_times=14, in_variable_names=["foo"], out_variable_names=["foo"]
     )

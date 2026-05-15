@@ -1076,7 +1076,15 @@ def test_step_with_data_mask():
             [True, True, False, False], device=fme.get_device()
         ),
     }
-    output = step.step(
+    output_no_mask = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+            data_mask=None,
+        ),
+    )
+    output_with_mask = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
@@ -1084,8 +1092,10 @@ def test_step_with_data_mask():
             data_mask=data_mask,
         ),
     )
-    assert output["diagnostic_main"].shape == (n_samples, *img_shape)
-    assert output["diagnostic_rad"].shape == (n_samples, *img_shape)
+    for name in ["diagnostic_main", "diagnostic_rad"]:
+        assert output_with_mask[name].shape == (n_samples, *img_shape)
+        torch.testing.assert_close(output_with_mask[name][:2], output_no_mask[name][:2])
+        assert not torch.allclose(output_with_mask[name][2:], output_no_mask[name][2:])
 
 
 def test_build_channel_mask_inputs_with_data_mask():
@@ -1156,7 +1166,15 @@ def test_step_with_include_channel_mask_inputs():
             [True, True, False, False], device=fme.get_device()
         ),
     }
-    output = step.step(
+    output_no_mask = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+            data_mask=None,
+        ),
+    )
+    output_with_mask = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
@@ -1164,8 +1182,10 @@ def test_step_with_include_channel_mask_inputs():
             data_mask=data_mask,
         ),
     )
-    assert output["diagnostic_main"].shape == (n_samples, *img_shape)
-    assert output["diagnostic_rad"].shape == (n_samples, *img_shape)
+    for name in ["diagnostic_main", "diagnostic_rad"]:
+        assert output_with_mask[name].shape == (n_samples, *img_shape)
+        torch.testing.assert_close(output_with_mask[name][:2], output_no_mask[name][:2])
+        assert not torch.allclose(output_with_mask[name][2:], output_no_mask[name][2:])
 
 
 def test_step_with_include_channel_mask_inputs_no_data_mask():
@@ -1198,7 +1218,7 @@ def test_step_with_include_channel_mask_inputs_no_data_mask():
     next_step_input_data = get_tensor_dict(
         step.next_step_input_names, img_shape, n_samples
     )
-    output = step.step(
+    output_no_mask = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
@@ -1206,5 +1226,18 @@ def test_step_with_include_channel_mask_inputs_no_data_mask():
             data_mask=None,
         ),
     )
-    assert output["diagnostic_main"].shape == (n_samples, *img_shape)
-    assert output["diagnostic_rad"].shape == (n_samples, *img_shape)
+    all_unmasked = {
+        name: torch.ones(n_samples, dtype=torch.bool, device=fme.get_device())
+        for name in step.input_names
+    }
+    output_all_unmasked = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+            data_mask=all_unmasked,
+        ),
+    )
+    for name in ["diagnostic_main", "diagnostic_rad"]:
+        assert output_no_mask[name].shape == (n_samples, *img_shape)
+        torch.testing.assert_close(output_no_mask[name], output_all_unmasked[name])

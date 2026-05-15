@@ -501,18 +501,24 @@ def test_build_channel_mask():
 
 
 def test_build_channel_mask_missing_name_defaults_to_present():
-    data_mask = {"a": torch.tensor([True, False])}
-    names = ["a", "b"]
+    data_mask = {
+        "a": torch.tensor([True, False]),
+        "c": torch.tensor([False, True]),
+    }
+    names = ["a", "b", "c"]
     mask = _build_channel_mask(
         data_mask,
         names,
         device=torch.device("cpu"),
         batch_size=2,
     )
-    assert mask[0, 0] == 1.0
-    assert mask[1, 0] == 0.0
-    assert mask[0, 1] == 1.0
-    assert mask[1, 1] == 1.0
+    expected = torch.tensor(
+        [
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 1.0],
+        ]
+    )
+    torch.testing.assert_close(mask, expected)
 
 
 def test_loss_output_total_with_mask():
