@@ -121,6 +121,10 @@ def get_batch_data(
             torch.zeros(n_samples, n_labels, device=device),
             [f"label_{i}" for i in range(n_labels)],
         )
+    data_mask = {
+        name: torch.ones(n_samples, dtype=torch.bool, device=device) for name in names
+    }
+    data_mask[names[-1]] = torch.zeros(n_samples, dtype=torch.bool, device=device)
     return BatchData(
         data={
             name: torch.randn(n_samples, n_times, n_lat, n_lon, device=device)
@@ -130,6 +134,7 @@ def get_batch_data(
         horizontal_dims=horizontal_dims,
         labels=labels,
         n_ensemble=n_ensemble,
+        data_mask=data_mask,
     )
 
 
@@ -235,7 +240,7 @@ def test_get_start(names: list[str], prognostic_names: list[str], n_ic_timesteps
         n_lon=n_lon,
     )
     start = batch_data.get_start(prognostic_names, n_ic_timesteps).as_batch_data()
-    assert_metadata_equal(start, batch_data)
+    assert_metadata_equal(start, batch_data, check_data_mask=False)
     assert start.time.equals(batch_data.time.isel(time=slice(0, n_ic_timesteps)))
     assert set(start.data.keys()) == set(prognostic_names)
     for name in prognostic_names:
@@ -303,7 +308,7 @@ def test_get_end(names: list[str], prognostic_names: list[str], n_ic_timesteps: 
         n_lon=n_lon,
     )
     end = batch_data.get_end(prognostic_names, n_ic_timesteps).as_batch_data()
-    assert_metadata_equal(end, batch_data)
+    assert_metadata_equal(end, batch_data, check_data_mask=False)
     assert end.time.equals(batch_data.time.isel(time=slice(-n_ic_timesteps, None)))
     assert set(end.data.keys()) == set(prognostic_names)
     for name in prognostic_names:
@@ -464,8 +469,12 @@ def test_broadcast_ensemble(n_ensemble):
         )
 
     assert_metadata_equal(
-        ensemble_gen_data, gen_data, check_labels=False, check_n_ensemble=False
-    )  # n_ensemble and labels intentionally differ; labels checked above
+        ensemble_gen_data,
+        gen_data,
+        check_labels=False,
+        check_n_ensemble=False,
+        check_data_mask=False,
+    )
 
 
 @pytest.mark.parametrize("n_ensemble", [1, 2, 3])
