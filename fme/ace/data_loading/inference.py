@@ -234,6 +234,7 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
             set(label_override) if label_override is not None else None
         )
         self._allow_variable_masking = requirements.allow_variable_masking
+        self._all_names = requirements.names
         if isinstance(config.dataset, XarrayDataConfig):
             dataset: XarrayDataset | MergedXarrayDataset = XarrayDataset(
                 config.dataset,
@@ -333,6 +334,7 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
             horizontal_dims=list(self.properties.horizontal_coordinates.dims),
             label_encoding=self._label_encoding,
             allow_variable_masking=self._allow_variable_masking,
+            all_names=self._all_names,
         )
 
     def __getitem__(self, index) -> BatchData:

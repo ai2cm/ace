@@ -772,7 +772,9 @@ def test_data_mask_validation():
 def test_collate_with_masking_heterogeneous_variables():
     sample_a: TensorDict = {"x": torch.ones(2, 3), "y": torch.ones(2, 3) * 2}
     sample_b: TensorDict = {"x": torch.ones(2, 3) * 3}
-    batch_data, data_mask = _collate_with_masking([sample_a, sample_b])
+    batch_data, data_mask = _collate_with_masking(
+        [sample_a, sample_b], all_names=["x", "y"]
+    )
     assert set(batch_data.keys()) == {"x", "y"}
     assert batch_data["x"].shape == (2, 2, 3)
     torch.testing.assert_close(batch_data["x"][0], torch.ones(2, 3))
@@ -789,7 +791,9 @@ def test_collate_with_masking_heterogeneous_variables():
 def test_collate_with_masking_all_present_returns_none_mask():
     sample_a: TensorDict = {"x": torch.ones(2, 3), "y": torch.ones(2, 3)}
     sample_b: TensorDict = {"x": torch.ones(2, 3), "y": torch.ones(2, 3)}
-    batch_data, data_mask = _collate_with_masking([sample_a, sample_b])
+    batch_data, data_mask = _collate_with_masking(
+        [sample_a, sample_b], all_names=["x", "y"]
+    )
     assert data_mask is None
     assert batch_data["x"].shape == (2, 2, 3)
 
@@ -808,7 +812,7 @@ def test_from_sample_tuples_with_variable_masking():
         0,
     )
     batch = BatchData.from_sample_tuples(
-        [sample1, sample2], allow_variable_masking=True
+        [sample1, sample2], allow_variable_masking=True, all_names=["a", "b"]
     )
     assert "a" in batch.data
     assert "b" in batch.data
@@ -822,7 +826,7 @@ def test_from_sample_tuples_with_variable_masking():
 def test_collate_with_masking_integer_dtype():
     sample_a: TensorDict = {"x": torch.ones(2, 3, dtype=torch.long)}
     sample_b: TensorDict = {}
-    batch_data, data_mask = _collate_with_masking([sample_a, sample_b])
+    batch_data, data_mask = _collate_with_masking([sample_a, sample_b], all_names=["x"])
     assert data_mask is not None
     assert not data_mask["x"][1]
     assert batch_data["x"].dtype == torch.float32

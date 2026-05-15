@@ -28,11 +28,16 @@ def _check_device(data: TensorMapping, device: torch.device):
 
 def _collate_with_masking(
     sample_data: Sequence[TensorDict],
+    all_names: Sequence[str],
 ) -> tuple[TensorDict, TensorDict | None]:
     """Collate samples with potentially different variable sets.
 
-    Takes the union of all variable names. For variables missing from a sample,
-    fills with NaN and marks as False in the returned mask.
+    Variables not present in any sample are skipped. For variables missing
+    from some samples, fills with NaN and marks as False in the returned mask.
+
+    Args:
+        sample_data: Per-sample dictionaries of tensors.
+        all_names: Authoritative list of variable names from data requirements.
 
     Returns:
         A tuple of (batch_data, data_mask) where batch_data has all variables
@@ -40,20 +45,14 @@ def _collate_with_masking(
         shape [n_samples] indicating presence, or None if all variables are
         present in all samples.
     """
-    all_names: list[str] = []
-    seen: set[str] = set()
-    for sample in sample_data:
-        for name in sample:
-            if name not in seen:
-                all_names.append(name)
-                seen.add(name)
-
     batch_data: TensorDict = {}
     data_mask: TensorDict = {}
     any_masked = False
 
     for name in all_names:
         present = [name in sample for sample in sample_data]
+        if not any(present):
+            continue
         first_present_idx = next(i for i, p in enumerate(present) if p)
         shape = sample_data[first_present_idx][name].shape
         dtype = sample_data[first_present_idx][name].dtype
@@ -374,12 +373,17 @@ class BatchData:
         horizontal_dims: list[str] | None = None,
         label_encoding: LabelEncoding | None = None,
         allow_variable_masking: bool = False,
+        all_names: Sequence[str] | None = None,
     ) -> "BatchData":
         sample_data, sample_times, sample_labels, sample_epochs = zip(*samples)
         if not all(epoch == sample_epochs[0] for epoch in sample_epochs):
             raise ValueError("All samples must have the same epoch.")
         if allow_variable_masking:
-            batch_data, data_mask = _collate_with_masking(sample_data)
+            if all_names is None:
+                raise ValueError(
+                    "all_names must be provided when allow_variable_masking=True"
+                )
+            batch_data, data_mask = _collate_with_masking(sample_data, all_names)
         else:
             batch_data = default_collate(sample_data)
             data_mask = None
