@@ -15,7 +15,7 @@ import yaml
 
 import fme
 from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregatorConfig
-from fme.ace.aggregator.one_step.main import OneStepAggregatorConfig
+from fme.ace.aggregator.one_step.main import LegacyFlagOneStepAggregatorConfig
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.inference import (
     InferenceDataLoaderConfig,
@@ -382,7 +382,7 @@ def _get_test_yaml_files(
         logging=logging_config,
         experiment_dir=str(results_dir),
         save_per_epoch_diagnostics=save_per_epoch_diagnostics,
-        validation_aggregator=OneStepAggregatorConfig(
+        validation_aggregator=LegacyFlagOneStepAggregatorConfig(
             log_snapshots=log_validation_maps,
             log_mean_maps=log_validation_maps,
         ),

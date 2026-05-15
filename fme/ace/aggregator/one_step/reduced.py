@@ -17,6 +17,7 @@ from ..inference.build_context import (
     maybe_filter,
 )
 from ..inference.data import InferenceBatchData, MetricBuildResult, SubAggregator
+from .build_context import OneStepBuildContext, OneStepMetricBuildResult
 from .reduced_metrics import AreaWeightedReducedMetric, ReducedMetric
 
 
@@ -233,3 +234,43 @@ class StepMeanMetricConfig:
             )
         )
         return MetricBuildResult(aggregator=maybe_filter(agg, self.variables))
+
+
+@dataclasses.dataclass
+class OneStepMeanMetricConfig:
+    name: str | None = None
+    target: Literal["denorm", "norm"] = "denorm"
+    include_bias: bool = True
+    include_grad_mag_percent_diff: bool = True
+    channel_mean_names: list[str] | None = None
+    enabled: bool = True
+    strict: bool = False
+
+    def __post_init__(self):
+        if self.name is None:
+            self.name = "mean" if self.target == "denorm" else "mean_norm"
+        if self.target == "norm":
+            if self.include_bias:
+                raise ValueError("include_bias is not supported when target='norm'.")
+            if self.include_grad_mag_percent_diff:
+                raise ValueError(
+                    "include_grad_mag_percent_diff is not supported "
+                    "when target='norm'."
+                )
+
+    def get_name(self) -> str:
+        return self.name  # type: ignore[return-value]
+
+    def build(self, ctx: OneStepBuildContext) -> OneStepMetricBuildResult:
+        agg = MeanAggregator(
+            ctx.ops,
+            target=self.target,
+            include_bias=self.include_bias,
+            include_grad_mag_percent_diff=self.include_grad_mag_percent_diff,
+            channel_mean_names=(
+                (self.channel_mean_names or ctx.channel_mean_names)
+                if self.target == "norm"
+                else None
+            ),
+        )
+        return OneStepMetricBuildResult(deterministic=agg)

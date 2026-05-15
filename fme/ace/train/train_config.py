@@ -9,6 +9,7 @@ import torch
 from fme.ace.aggregator import (
     InferenceEvaluatorAggregatorConfig,
     LegacyFlagInferenceEvaluatorAggregatorConfig,
+    LegacyFlagOneStepAggregatorConfig,
     OneStepAggregatorConfig,
 )
 from fme.ace.aggregator.train import TrainAggregatorConfig
@@ -205,9 +206,9 @@ class TrainConfig:
     checkpoint_every_n_batches: int = 1000
     segment_epochs: int | None = None
     save_per_epoch_diagnostics: bool = False
-    validation_aggregator: OneStepAggregatorConfig = dataclasses.field(
-        default_factory=lambda: OneStepAggregatorConfig()
-    )
+    validation_aggregator: (
+        OneStepAggregatorConfig | LegacyFlagOneStepAggregatorConfig
+    ) = dataclasses.field(default_factory=lambda: OneStepAggregatorConfig())
     evaluate_before_training: bool = False
     save_best_inference_epoch_checkpoints: bool = False
     lr_tuning: LRTuningConfig | None = None

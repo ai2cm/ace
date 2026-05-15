@@ -1,3 +1,4 @@
+import dataclasses
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -10,8 +11,15 @@ from fme.ace.aggregator.inference.spectrum import (
     PairedSphericalPowerSpectrumAggregator as _InferencePairedSpectrumAgg,
 )
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.fill import SmoothFloodFill
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorMapping
+
+from .build_context import (
+    MetricNotSupportedError,
+    OneStepBuildContext,
+    OneStepMetricBuildResult,
+)
 
 
 class PairedSphericalPowerSpectrumAggregator:
@@ -103,3 +111,21 @@ class SpectrumAggregator:
 
     def get_dataset(self) -> xr.Dataset:
         return self._wrapped.get_dataset()
+
+
+@dataclasses.dataclass
+class OneStepSpectrumMetricConfig:
+    name: str = "power_spectrum"
+    enabled: bool = True
+    strict: bool = False
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: OneStepBuildContext) -> OneStepMetricBuildResult:
+        try:
+            flood_fill = SmoothFloodFill(num_steps=4)
+            agg = SpectrumAggregator(ctx.ops, nan_fill_fn=flood_fill)
+        except NotImplementedError as e:
+            raise MetricNotSupportedError(str(e)) from e
+        return OneStepMetricBuildResult(deterministic=agg)

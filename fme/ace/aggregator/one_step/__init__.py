@@ -1,1 +1,6 @@
-from .main import OneStepAggregator, OneStepAggregatorConfig  # noqa: F401
+from .main import (  # noqa: F401
+    LegacyFlagOneStepAggregatorConfig,
+    OneStepAggregator,
+    OneStepAggregatorConfig,
+    build_one_step_aggregator,
+)

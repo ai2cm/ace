@@ -17,6 +17,12 @@ def test__get_loss_scaled_mse_components():
     ds_info = DatasetInfo(horizontal_coordinates=lat_lon_coordinates)
     aggregators = {
         "mean": MeanAggregator(ds_info.gridded_operations),
+        "mean_norm": MeanAggregator(
+            ds_info.gridded_operations,
+            target="norm",
+            include_bias=False,
+            include_grad_mag_percent_diff=False,
+        ),
     }
     agg = OneStepDeterministicAggregator(
         aggregators=aggregators,

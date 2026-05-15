@@ -1,30 +1,15 @@
 import dataclasses
 import logging
 from collections.abc import Callable, Mapping
-from typing import Protocol
 
 import numpy as np
 import torch
-import xarray as xr
 
 from fme.core.diagnostics import get_reduced_diagnostics, write_reduced_diagnostics
 from fme.core.generics.aggregator import AggregatorABC
 from fme.core.typing_ import TensorDict, TensorMapping
 
-
-class _Aggregator(Protocol):
-    def get_logs(self, label: str) -> TensorMapping: ...
-
-    def record_batch(
-        self,
-        loss: float,
-        target_data: TensorMapping,
-        gen_data: TensorMapping,
-        target_data_norm: TensorMapping,
-        gen_data_norm: TensorMapping,
-    ) -> None: ...
-
-    def get_dataset(self) -> xr.Dataset: ...
+from .build_context import _Aggregator
 
 
 @dataclasses.dataclass
@@ -55,6 +40,12 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
     ):
         if save_diagnostics and output_dir is None:
             raise ValueError("Output directory must be set to save diagnostics.")
+        if "mean_norm" not in aggregators:
+            raise ValueError(
+                "An aggregator named 'mean_norm' is required. "
+                "Include a OneStepMeanMetricConfig with target='norm' "
+                "in your metrics list."
+            )
         self._output_dir = output_dir
         self._save_diagnostics = save_diagnostics
         self._coords = coords
@@ -95,7 +86,7 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
             logging.info(f"Getting logs for {agg_label} aggregator")
             for k, v in self._aggregators[agg_label].get_logs(label=agg_label).items():
                 logs[f"{label}/{k}"] = v
-        logs.pop(f"{label}/mean_norm/loss")  # remove duplicate of mean/loss
+        logs.pop(f"{label}/mean_norm/loss", None)  # remove duplicate of mean/loss
         logging.info(f"Inserting loss-scaled MSE componenets into logs")
         logs.update(
             self._get_loss_scaled_mse_components(

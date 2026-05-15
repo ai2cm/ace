@@ -60,6 +60,7 @@ import torch
 
 import fme
 from fme.ace.aggregator import (
+    LegacyFlagOneStepAggregatorConfig,
     OneStepAggregator,
     OneStepAggregatorConfig,
     TrainAggregator,
@@ -206,7 +207,9 @@ class AggregatorBuilder(
         loss_scaling: dict[str, torch.Tensor] | None = None,
         channel_mean_names: Sequence[str] | None = None,
         save_per_epoch_diagnostics: bool = False,
-        validation_config: OneStepAggregatorConfig = dataclasses.field(
+        validation_config: (
+            OneStepAggregatorConfig | LegacyFlagOneStepAggregatorConfig
+        ) = dataclasses.field(
             default_factory=lambda: OneStepAggregatorConfig(),
         ),
     ):
