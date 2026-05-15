@@ -53,8 +53,8 @@ vertical_coarsen:
   - 71
   - 74
 
-# No temporal coarsening: keep native 6-hourly resolution
-time_coarsen_factor: 1
+# Temporal coarsening: get daily data
+time_coarsen_factor: 4
 
 # Renaming: MOM6 zarr names → SamudrACE standard names
 ocean_rename:
