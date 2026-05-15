@@ -25,6 +25,12 @@ class LossComponent(abc.ABC):
     """
 
     def __init__(self, loss: torch.Tensor):
+        """
+        Args:
+            loss: The loss tensor.  Can be a scalar (``ndim == 0``),
+                a partially-reduced tensor like ``(B, C)``, or a
+                full element-wise tensor like ``(B, C, lat, lon)``.
+        """
         self.loss = loss
 
     @abc.abstractmethod

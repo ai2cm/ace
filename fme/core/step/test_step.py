@@ -1018,12 +1018,10 @@ def test_apply_input_mask_zeros_masked_variables():
         "b": torch.tensor([True, False, True, False]),
     }
     result = _apply_input_mask(input_norm, mask)
-    torch.testing.assert_close(result["a"][:2], torch.ones(2, 8, 16))
-    torch.testing.assert_close(result["a"][2:], torch.zeros(2, 8, 16))
-    torch.testing.assert_close(result["b"][0], torch.ones(8, 16) * 2.0)
-    torch.testing.assert_close(result["b"][1], torch.zeros(8, 16))
-    torch.testing.assert_close(result["b"][2], torch.ones(8, 16) * 2.0)
-    torch.testing.assert_close(result["b"][3], torch.zeros(8, 16))
+    expected_a = torch.tensor([1.0, 1.0, 0.0, 0.0]).view(4, 1, 1).expand(4, 8, 16)
+    expected_b = torch.tensor([2.0, 0.0, 2.0, 0.0]).view(4, 1, 1).expand(4, 8, 16)
+    torch.testing.assert_close(result["a"], expected_a)
+    torch.testing.assert_close(result["b"], expected_b)
 
 
 def test_apply_input_mask_ignores_unknown_names():

@@ -653,7 +653,12 @@ def test_weighted_mapping_loss_with_ensemble_and_data_mask():
     result = mapping_loss(x, y, data_mask=data_mask)
     assert result._mask is not None
     assert result._mask.shape == (n_batch, len(out_names))
-    result.total()
+    # a: MSE=1.0 for 2 unmasked samples, per-channel mean=1.0
+    # b: MSE=4.0 for 1 unmasked sample, per-channel mean=4.0
+    # total: mean(1.0, 4.0) = 2.5
+    torch.testing.assert_close(
+        result.total(), torch.tensor(2.5, device=get_device()), atol=1e-5, rtol=1e-5
+    )
 
 
 def test_per_channel_losses_are_distinct_area_weighted_mse():
@@ -756,6 +761,12 @@ def test_ensemble_component_loss_reduce_to_channel():
     assert result.shape == (4, 5)
     expected = tensor.mean(dim=(1, 3, 4))
     torch.testing.assert_close(result, expected)
+
+
+def test_ensemble_component_loss_reduce_to_channel_scalar():
+    tensor = torch.tensor(5.0, device=get_device())
+    result = EnsembleComponentLoss(tensor).reduce_to_channel()
+    torch.testing.assert_close(result, tensor)
 
 
 class TestLossOutputScale:
