@@ -114,9 +114,10 @@ def test_separate_instances_have_independent_rngs():
     train_sampler = TimeLengthProbabilities(outcomes)
     eval_sampler = TimeLengthProbabilities(list(outcomes))
     train_sampler.seed_rng(42)
-    train_before = [train_sampler.sample() for _ in range(10)]
-    eval_sampler.seed_rng(0)
-    [eval_sampler.sample() for _ in range(5)]
-    train_sampler.seed_rng(42)
-    train_after = [train_sampler.sample() for _ in range(10)]
-    assert train_before == train_after
+    eval_sampler.seed_rng(42)
+    first_5 = [train_sampler.sample() for _ in range(5)]
+    [eval_sampler.sample() for _ in range(10)]  # interleaved eval draws
+    next_5 = [train_sampler.sample() for _ in range(5)]
+    eval_sampler.seed_rng(42)
+    expected_10 = [eval_sampler.sample() for _ in range(10)]
+    assert first_5 + next_5 == expected_10

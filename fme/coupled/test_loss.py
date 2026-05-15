@@ -455,21 +455,25 @@ def test_seed_rng_does_not_corrupt_training_sampler():
     assert loss._n_steps_sampler is not None
     loss._n_steps_sampler.seed_rng(42)
     loss.set_train()
-    train_samples_before = []
+    train_first_20 = []
     for _ in range(20):
         loss.sample_n_steps()
-        train_samples_before.append(loss._n_steps)
+        train_first_20.append(loss._n_steps)
     loss.set_eval()
     loss.seed_rng(0)
     for _ in range(10):
         loss.sample_n_steps()
     loss.set_train()
-    loss._n_steps_sampler.seed_rng(42)
-    train_samples_after = []
+    train_next_20 = []
     for _ in range(20):
         loss.sample_n_steps()
-        train_samples_after.append(loss._n_steps)
-    assert train_samples_before == train_samples_after
+        train_next_20.append(loss._n_steps)
+    loss._n_steps_sampler.seed_rng(42)
+    reference_40 = []
+    for _ in range(40):
+        loss.sample_n_steps()
+        reference_40.append(loss._n_steps)
+    assert train_first_20 + train_next_20 == reference_40
 
 
 def test_coupled_stepper_train_loss_set_train_eval_delegates():
