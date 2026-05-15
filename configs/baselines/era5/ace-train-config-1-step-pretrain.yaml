@@ -26,7 +26,8 @@ inference:
         engine: zarr
       num_data_workers: 8
     aggregator:
-      log_histograms: true
+      histogram:
+        enabled: true
       time_mean_reference_data: /statsdata/time-mean.nc
 logging:
   log_to_screen: true

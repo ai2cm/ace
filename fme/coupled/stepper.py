@@ -58,7 +58,7 @@ from fme.coupled.requirements import (
     CoupledDataRequirements,
     CoupledPrognosticStateDataRequirements,
 )
-from fme.coupled.typing_ import CoupledNames, CoupledTensorMapping
+from fme.coupled.typing_ import CoupledNames, CoupledOptionalInt, CoupledTensorMapping
 
 
 @dataclasses.dataclass
@@ -1387,6 +1387,30 @@ class CoupledStepperTrainLoss:
         for loss_obj in self._loss_objs.values():
             loss_obj.sample_n_steps()
 
+    def seed_step_sampler(self, seed: int) -> None:
+        for i, loss_obj in enumerate(self._loss_objs.values()):
+            loss_obj.seed_rng(seed + i)
+
+    def set_train(self) -> None:
+        for loss_obj in self._loss_objs.values():
+            loss_obj.set_train()
+
+    def set_eval(self) -> None:
+        for loss_obj in self._loss_objs.values():
+            loss_obj.set_eval()
+
+    def n_required_outer_steps(self, n_inner_steps: int) -> int:
+        """Minimum number of outer (ocean) steps needed so that every
+        component step contributing to the current batch's loss is computed.
+
+        Callers must invoke ``sample_n_steps()`` beforehand for stochastic
+        configs so the value reflects the current batch.
+        """
+        ocean_required = self._loss_objs["ocean"].n_required_forward_steps()
+        atmos_required = self._loss_objs["atmosphere"].n_required_forward_steps()
+        atmos_outer = -(-atmos_required // n_inner_steps)  # ceil division
+        return max(ocean_required, atmos_outer)
+
     def step_is_optimized(
         self,
         realm: Literal["ocean", "atmosphere"],
@@ -1456,6 +1480,14 @@ class CoupledTrainStepperConfig:
                     "or the component training configs' "
                     "ParameterInitializationConfig.weights_path, but not both."
                 )
+        if (
+            self.ocean.loss_contributions.is_null
+            and self.atmosphere.loss_contributions.is_null
+        ):
+            raise ValueError(
+                "At least one of ocean or atmosphere loss_contributions must be "
+                "non-null (non-zero weight and non-zero n_steps)."
+            )
         if self.n_ensemble == -1:
             use_ensemble_loss = "EnsembleLoss" in (
                 self.ocean.loss.type,
@@ -1466,18 +1498,31 @@ class CoupledTrainStepperConfig:
             else:
                 self.n_ensemble = 1
 
+    @property
+    def component_n_steps_max(self) -> CoupledOptionalInt:
+        """Per-component upper bound on optimized loss steps, or ``None`` if
+        unbounded. Used by ``TrainConfig`` to validate compatibility with
+        ``CoupledStepperConfig.n_inner_steps`` and ``self.n_coupled_steps``.
+        """
+        return CoupledOptionalInt(
+            ocean=self.ocean.loss_contributions.n_steps_max,
+            atmosphere=self.atmosphere.loss_contributions.n_steps_max,
+        )
+
     def _build_loss(
         self, stepper: CoupledStepper, n_coupled_steps: int
     ) -> CoupledStepperTrainLoss:
         ocean_step_loss = stepper.ocean.build_loss(self.ocean.loss)
         atmos_step_loss = stepper.atmosphere.build_loss(self.atmosphere.loss)
-        max_n_steps_ocean = n_coupled_steps
-        max_n_steps_atmos = n_coupled_steps * stepper.n_inner_steps
+        n_steps_limit_ocean = n_coupled_steps
+        n_steps_limit_atmos = n_coupled_steps * stepper.n_inner_steps
         ocean_loss = self.ocean.loss_contributions.build(
-            ocean_step_loss, stepper.ocean.TIME_DIM, max_n_steps=max_n_steps_ocean
+            ocean_step_loss, stepper.ocean.TIME_DIM, n_steps_limit=n_steps_limit_ocean
         )
         atmos_loss = self.atmosphere.loss_contributions.build(
-            atmos_step_loss, stepper.atmosphere.TIME_DIM, max_n_steps=max_n_steps_atmos
+            atmos_step_loss,
+            stepper.atmosphere.TIME_DIM,
+            n_steps_limit=n_steps_limit_atmos,
         )
         return CoupledStepperTrainLoss(ocean_loss, atmos_loss)
 
@@ -1596,11 +1641,16 @@ class CoupledTrainStepper(
             initial_condition, forcing, compute_derived_variables
         )
 
+    def seed_eval(self, seed: int) -> None:
+        self._loss.seed_step_sampler(seed)
+
     def set_train(self):
         self._stepper.set_train()
+        self._loss.set_train()
 
     def set_eval(self):
         self._stepper.set_eval()
+        self._loss.set_eval()
 
     def get_state(self) -> dict[str, Any]:
         return self._stepper.get_state()
@@ -1670,7 +1720,14 @@ class CoupledTrainStepper(
         )
         output_iterator = iter(output_generator)
         output_list: list[ComponentEnsembleStepPrediction] = []
-        n_outer_steps = data.ocean_data.n_timesteps - self.n_ic_timesteps
+        n_outer_steps_data = data.ocean_data.n_timesteps - self.n_ic_timesteps
+        # Clamp to at least 1 outer step so downstream gen_data is non-empty
+        # in the rare case where stochastic samplers yield n_steps=0 for both
+        # realms; that batch contributes zero loss but a valid TrainOutput.
+        n_outer_steps = min(
+            n_outer_steps_data,
+            max(1, self._loss.n_required_outer_steps(self.n_inner_steps)),
+        )
         for i_outer in range(n_outer_steps):
             for i_inner in range(self.n_inner_steps):
                 global_atmos_step = i_outer * self.n_inner_steps + i_inner

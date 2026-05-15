@@ -14,7 +14,7 @@ import fme
 from fme.ace.aggregator import OneStepAggregatorConfig
 from fme.ace.aggregator.inference import (
     InferenceEvaluatorAggregatorConfig,
-    TypedMetricInferenceEvaluatorAggregatorConfig,
+    LegacyFlagInferenceEvaluatorAggregatorConfig,
 )
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.data_loading.config import DataLoaderConfig
@@ -230,7 +230,7 @@ class InferenceEvaluatorConfig:
     )
     aggregator: (
         InferenceEvaluatorAggregatorConfig
-        | TypedMetricInferenceEvaluatorAggregatorConfig
+        | LegacyFlagInferenceEvaluatorAggregatorConfig
     ) = dataclasses.field(default_factory=lambda: InferenceEvaluatorAggregatorConfig())
     stepper_override: StepperOverrideConfig | None = None
     allow_incompatible_dataset: bool = False
@@ -250,9 +250,6 @@ class InferenceEvaluatorConfig:
                         self.forward_steps_in_memory,
                         self.n_forward_steps,
                     )
-        if isinstance(self.aggregator, InferenceEvaluatorAggregatorConfig):
-            for log_step_mean in self.aggregator.log_step_means:
-                log_step_mean.validate(self.n_forward_steps)
 
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)
@@ -375,13 +372,17 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
                     f"error. The incompatiblity found was: {str(err)}"
                 ) from err
 
-        aggregator_config: (
-            InferenceEvaluatorAggregatorConfig
-            | TypedMetricInferenceEvaluatorAggregatorConfig
-        ) = config.aggregator
+        aggregator_config = config.aggregator
         for batch in data.loader:
             initial_time = batch.time.isel(time=0)
             break
+        if config.n_ensemble_per_ic > 1:
+            initial_time = initial_time.isel(
+                sample=np.repeat(
+                    np.arange(initial_time.sizes["sample"]),
+                    config.n_ensemble_per_ic,
+                )
+            )
         variable_metadata = resolve_variable_metadata(
             dataset_metadata=data.variable_metadata,
             stepper_metadata=stepper.training_variable_metadata,

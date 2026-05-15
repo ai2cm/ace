@@ -65,7 +65,7 @@ inference:
     log_zonal_mean_images: True
 optimization:
   enable_automatic_mixed_precision: false
-  lr: 0.0001
+  lr: 0.00001
   optimizer_type: Adam
 stepper_training:
   n_coupled_steps: {n_coupled_steps}
@@ -194,7 +194,7 @@ def _write_test_yaml_files(
     inference_n_coupled_steps: int = 6,
     coupled_steps_in_memory: int = 2,
     save_per_epoch_diagnostics: bool = True,
-    loss_atmos_n_steps: int = 1000,  # large number ~= inf
+    loss_atmos_n_steps: int = 3,
     loss_ocean_weight: float = 1.0,
     crps_training: bool = False,
 ):
