@@ -130,7 +130,9 @@ class NaNLoss(torch.nn.Module):
 class WeightedMappingLoss:
     def __init__(
         self,
-        loss: Callable[[torch.Tensor, torch.Tensor], Any],
+        loss: Callable[
+            [torch.Tensor, torch.Tensor], list[LossComponent] | torch.Tensor
+        ],
         weights: dict[str, float],
         out_names: list[str],
         normalizer: StandardNormalizer,
