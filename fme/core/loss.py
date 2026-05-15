@@ -234,7 +234,7 @@ class WeightedMappingLoss:
             target_dict: The target data.
             data_mask: Optional per-variable boolean masks of shape
                 ``[batch]`` indicating which samples have each variable
-                present.  Used to exclude masked channels from the loss
+                present. Used to exclude masked channels from the loss
                 average.
 
         Returns:
