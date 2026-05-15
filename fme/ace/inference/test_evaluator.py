@@ -278,7 +278,7 @@ def test_inference_plus_one_model(
 
 @pytest.mark.parametrize("n_forward_steps", [2, int(30 / 20 * 36)])
 def test_typed_metric_config_inference(tmp_path: pathlib.Path, n_forward_steps: int):
-    """Validates InferenceEvaluatorAggregatorConfig with default metrics end-to-end."""
+    """Validates default aggregator config with default metrics end-to-end."""
     in_names = ["var"]
     out_names = ["var"]
     stepper_path = tmp_path / "stepper"
