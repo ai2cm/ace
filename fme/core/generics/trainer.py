@@ -569,6 +569,7 @@ class Trainer:
         self.train_data.alternate_shuffle()
         aggregator = self._aggregator_builder.get_train_aggregator()
         self.stepper.set_eval()
+        self.stepper.seed_eval(seed=0)
         with torch.no_grad(), self.validation_context():
             for batch in self.train_data.subset_loader(
                 stop_batch=self.config.train_evaluation_batches
