@@ -99,7 +99,7 @@ class MockDataset(DatasetABC):
     def get_sample_by_time_slice(self, time_slice: slice) -> DatasetItem:
         data = {k: v[time_slice] for k, v in self.data.items()}
         time = xr.DataArray(self.time[time_slice], dims=["time"])
-        return data, time, self.labels, self.epoch
+        return data, time, self.labels, self.epoch, None
 
     @property
     def properties(self) -> DatasetProperties:

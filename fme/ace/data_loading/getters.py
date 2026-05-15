@@ -33,12 +33,10 @@ class CollateFn:
         horizontal_dims: list[str],
         label_encoding: LabelEncoding | None = None,
         allow_missing_variables: bool = False,
-        all_names: Sequence[str] | None = None,
     ):
         self.horizontal_dims = horizontal_dims
         self.label_encoding = label_encoding
         self.allow_missing_variables = allow_missing_variables
-        self.all_names = all_names
 
     def __call__(self, samples: Sequence[DatasetItem]) -> BatchData:
         return BatchData.from_sample_tuples(
@@ -46,7 +44,6 @@ class CollateFn:
             horizontal_dims=self.horizontal_dims,
             label_encoding=self.label_encoding,
             allow_missing_variables=self.allow_missing_variables,
-            all_names=self.all_names,
         )
 
 
@@ -142,7 +139,6 @@ def get_gridded_data(
             list(properties.horizontal_coordinates.dims),
             label_encoding,
             allow_missing_variables=requirements.allow_missing_variables,
-            all_names=requirements.names,
         ),
         multiprocessing_context=mp_context,
         persistent_workers=persistent_workers,

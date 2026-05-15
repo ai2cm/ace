@@ -587,10 +587,14 @@ class XarrayDataset(DatasetABC):
             self._static_derived_names,
         ) = self._group_variable_names_by_time_type()
         if self._allow_missing_variables:
+            self._all_requested_names = list(names)
             self._names = (
                 list(self._time_dependent_names)
                 + list(self._time_invariant_names)
                 + list(self._static_derived_names)
+            )
+            self._missing_names = frozenset(
+                set(self._all_requested_names) - set(self._names)
             )
 
         self._vertical_coordinate = _get_vertical_coordinate(first_dataset, self.dtype)
@@ -966,11 +970,20 @@ class XarrayDataset(DatasetABC):
         # Apply field overwrites
         tensors = self.overwrite.apply(tensors)
 
+        # Fill NaN for missing variables so all samples share the same keys
+        missing_names: frozenset[str] | None = None
+        if self._allow_missing_variables and self._missing_names:
+            fill_shape = [total_steps] + self._shape_excluding_time_after_selection
+            fill_dtype = self.dtype if self.dtype is not None else torch.float32
+            for name in self._missing_names:
+                tensors[name] = torch.full(fill_shape, float("nan"), dtype=fill_dtype)
+            missing_names = self._missing_names
+
         # Create a DataArray of times to return corresponding to the slice that
         # is valid even when n_repeats > 1.
         time = xr.DataArray(self.all_times[time_slice].values, dims=["time"])
 
-        return tensors, time, self._labels, self._epoch
+        return tensors, time, self._labels, self._epoch, missing_names
 
     def enable_shared_memory(self):
         """Move epoch counter to shared memory for multi-worker data loading."""

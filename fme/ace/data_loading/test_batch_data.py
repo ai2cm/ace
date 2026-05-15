@@ -209,8 +209,8 @@ def test_to_cpu():
     ],
 )
 def test_from_sample_tuples_raises_on_mismatched_epochs(epoch_1: int, epoch_2: int):
-    sample1 = ({"x": torch.zeros(2, 3)}, xr.DataArray([0]), None, epoch_1)
-    sample2 = ({"x": torch.zeros(2, 3)}, xr.DataArray([0]), None, epoch_2)
+    sample1 = ({"x": torch.zeros(2, 3)}, xr.DataArray([0]), None, epoch_1, None)
+    sample2 = ({"x": torch.zeros(2, 3)}, xr.DataArray([0]), None, epoch_2, None)
 
     with pytest.raises(ValueError, match="same epoch"):
         BatchData.from_sample_tuples([sample1, sample2])
@@ -709,10 +709,17 @@ def test_data_mask_raises_if_length_does_not_match_n_samples():
 
 
 def test_collate_with_masking_heterogeneous_variables():
-    sample_a: TensorDict = {"x": torch.ones(2, 3), "y": torch.ones(2, 3) * 2}
-    sample_b: TensorDict = {"x": torch.ones(2, 3) * 3}
+    sample_a: TensorDict = {
+        "x": torch.ones(2, 3),
+        "y": torch.ones(2, 3) * 2,
+    }
+    sample_b: TensorDict = {
+        "x": torch.ones(2, 3) * 3,
+        "y": torch.full((2, 3), float("nan")),
+    }
     batch_data, data_mask = _collate_with_masking(
-        [sample_a, sample_b], all_names=["x", "y"]
+        [sample_a, sample_b],
+        sample_missing_names=[None, frozenset({"y"})],
     )
     assert set(batch_data.keys()) == {"x", "y"}
     assert batch_data["x"].shape == (2, 2, 3)
@@ -731,7 +738,7 @@ def test_collate_with_masking_all_present_returns_none_mask():
     sample_a: TensorDict = {"x": torch.ones(2, 3), "y": torch.ones(2, 3)}
     sample_b: TensorDict = {"x": torch.ones(2, 3), "y": torch.ones(2, 3)}
     batch_data, data_mask = _collate_with_masking(
-        [sample_a, sample_b], all_names=["x", "y"]
+        [sample_a, sample_b], sample_missing_names=[None, None]
     )
     assert data_mask is None
     assert batch_data["x"].shape == (2, 2, 3)
@@ -743,15 +750,17 @@ def test_from_sample_tuples_with_variable_masking():
         xr.DataArray([0, 1]),
         None,
         0,
+        None,
     )
     sample2 = (
-        {"a": torch.ones(2, 3) * 3},
+        {"a": torch.ones(2, 3) * 3, "b": torch.full((2, 3), float("nan"))},
         xr.DataArray([0, 1]),
         None,
         0,
+        frozenset({"b"}),
     )
     batch = BatchData.from_sample_tuples(
-        [sample1, sample2], allow_missing_variables=True, all_names=["a", "b"]
+        [sample1, sample2], allow_missing_variables=True
     )
     assert "a" in batch.data
     assert "b" in batch.data
@@ -762,11 +771,19 @@ def test_from_sample_tuples_with_variable_masking():
     )
 
 
-def test_collate_with_masking_integer_dtype():
-    sample_a: TensorDict = {"x": torch.ones(2, 3, dtype=torch.long)}
-    sample_b: TensorDict = {}
-    batch_data, data_mask = _collate_with_masking([sample_a, sample_b], all_names=["x"])
-    assert data_mask is not None
-    assert not data_mask["x"][1]
-    assert batch_data["x"].dtype == torch.float32
-    assert batch_data["x"][1].isnan().all()
+def test_collate_with_masking_variable_missing_from_all_samples():
+    sample_a: TensorDict = {
+        "x": torch.ones(2, 3),
+        "y": torch.full((2, 3), float("nan")),
+    }
+    sample_b: TensorDict = {
+        "x": torch.ones(2, 3),
+        "y": torch.full((2, 3), float("nan")),
+    }
+    batch_data, data_mask = _collate_with_masking(
+        [sample_a, sample_b],
+        sample_missing_names=[frozenset({"y"}), frozenset({"y"})],
+    )
+    assert "x" in batch_data
+    assert "y" not in batch_data
+    assert data_mask is None

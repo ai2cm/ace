@@ -28,16 +28,20 @@ def _check_device(data: TensorMapping, device: torch.device):
 
 def _collate_with_masking(
     sample_data: Sequence[TensorDict],
-    all_names: Sequence[str],
+    sample_missing_names: Sequence[frozenset[str] | None],
 ) -> tuple[TensorDict, TensorDict | None]:
-    """Collate samples with potentially different variable sets.
+    """Collate samples that all share the same keys, building a mask from
+    per-sample missing-variable metadata.
 
-    Variables not present in any sample are skipped. For variables missing
-    from some samples, fills with NaN and marks as False in the returned mask.
+    Each sample dict is expected to contain all variables (NaN-filled for
+    missing ones), so ``default_collate`` can stack them without Python
+    loops over variables and samples.  Variables missing from *every*
+    sample are removed from the result.
 
     Args:
-        sample_data: Per-sample dictionaries of tensors.
-        all_names: Authoritative list of variable names from data requirements.
+        sample_data: Per-sample dictionaries of tensors (all with the same keys).
+        sample_missing_names: Per-sample frozensets naming which variables are
+            NaN-filled placeholders, or None if all variables are present.
 
     Returns:
         A tuple of (batch_data, data_mask) where batch_data has all variables
@@ -45,30 +49,29 @@ def _collate_with_masking(
         shape [n_samples] indicating presence, or None if all variables are
         present in all samples.
     """
-    batch_data: TensorDict = {}
+    batch_data: TensorDict = default_collate(sample_data)
+
+    has_any_missing = any(m is not None and len(m) > 0 for m in sample_missing_names)
+    if not has_any_missing:
+        return batch_data, None
+
     data_mask: TensorDict = {}
     any_masked = False
+    names_to_remove: list[str] = []
 
-    for name in all_names:
-        present = [name in sample for sample in sample_data]
-        if not any(present):
-            continue
-        first_present_idx = next(i for i, p in enumerate(present) if p)
-        shape = sample_data[first_present_idx][name].shape
-        dtype = sample_data[first_present_idx][name].dtype
+    for name in batch_data:
+        present = torch.tensor(
+            [name not in (m or frozenset()) for m in sample_missing_names]
+        )
+        if not present.any():
+            names_to_remove.append(name)
+        else:
+            data_mask[name] = present
+            if not present.all():
+                any_masked = True
 
-        tensors = []
-        for sample in sample_data:
-            if name in sample:
-                tensors.append(sample[name])
-            else:
-                fill_dtype = torch.float32 if not dtype.is_floating_point else dtype
-                tensors.append(torch.full(shape, float("nan"), dtype=fill_dtype))
-        batch_data[name] = torch.stack(tensors)
-        mask_tensor = torch.tensor(present)
-        data_mask[name] = mask_tensor
-        if not mask_tensor.all():
-            any_masked = True
+    for name in names_to_remove:
+        del batch_data[name]
 
     if not any_masked:
         return batch_data, None
@@ -375,17 +378,20 @@ class BatchData:
         horizontal_dims: list[str] | None = None,
         label_encoding: LabelEncoding | None = None,
         allow_missing_variables: bool = False,
-        all_names: Sequence[str] | None = None,
     ) -> "BatchData":
-        sample_data, sample_times, sample_labels, sample_epochs = zip(*samples)
+        (
+            sample_data,
+            sample_times,
+            sample_labels,
+            sample_epochs,
+            sample_missing_names,
+        ) = zip(*samples)
         if not all(epoch == sample_epochs[0] for epoch in sample_epochs):
             raise ValueError("All samples must have the same epoch.")
         if allow_missing_variables:
-            if all_names is None:
-                raise ValueError(
-                    "all_names must be provided when allow_missing_variables=True"
-                )
-            batch_data, data_mask = _collate_with_masking(sample_data, all_names)
+            batch_data, data_mask = _collate_with_masking(
+                sample_data, sample_missing_names
+            )
         else:
             batch_data = default_collate(sample_data)
             data_mask = None

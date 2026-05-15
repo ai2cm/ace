@@ -4,6 +4,7 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.core.dataset.dataset import DatasetItem
 from fme.core.dataset.properties import DatasetProperties
 from fme.downscaling.data.datasets import (
     BatchData,
@@ -214,11 +215,12 @@ def test_horizontal_subset(
         lat=torch.linspace(0.0, 1.0, n_lat), lon=torch.linspace(0.0, 1.0, n_lon)
     )
 
-    datum: tuple[dict[str, torch.Tensor], xr.DataArray, set[str], int] = (
+    datum: DatasetItem = (
         {"x": torch.zeros(batch_size, n_timesteps, n_lat, n_lon)},
         xr.DataArray([0.0]),
         set(),
         0,
+        None,
     )
     base_dataset = MagicMock(spec=torch.utils.data.Dataset)
     properties = MagicMock(spec=DatasetProperties)
@@ -232,7 +234,7 @@ def test_horizontal_subset(
         lon_interval=ClosedInterval(float(lon_interval[0]), float(lon_interval[1])),
     )
 
-    subset, _, labels, _ = dataset[0]
+    subset, _, labels, _, _ = dataset[0]
     assert labels is properties.all_labels
     assert subset["x"].shape == (
         batch_size,
@@ -281,7 +283,7 @@ def test_batch_data_expand_and_fold():
 
 
 def get_mock_dataset(field_leading_dim=1):
-    # Mock dataset that returns (data, time) tuples
+    # Mock dataset that returns DatasetItem tuples
     dataset = MagicMock()
     dataset.__len__ = MagicMock(return_value=2)
     dataset.__getitem__ = MagicMock(
@@ -290,6 +292,7 @@ def get_mock_dataset(field_leading_dim=1):
             data_array([0]),
             set(),
             0,
+            None,
         )
     )
     return dataset

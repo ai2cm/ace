@@ -306,8 +306,8 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
                     self._total_forward_steps + self._start_indices[i_member] + 1
                 )
             window_time_slice = slice(i_window_start, i_window_end)
-            tensors, time, labels, epoch = self._dataset.get_sample_by_time_slice(
-                window_time_slice
+            tensors, time, labels, epoch, missing_names = (
+                self._dataset.get_sample_by_time_slice(window_time_slice)
             )
             if self._label_override is not None:
                 labels = self._label_override
@@ -328,13 +328,12 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
                         self._lons,
                         tensors[self._ocean_fraction_name],
                     )
-            sample_tuples.append((tensors, time, labels, epoch))
+            sample_tuples.append((tensors, time, labels, epoch, missing_names))
         return BatchData.from_sample_tuples(
             sample_tuples,
             horizontal_dims=list(self.properties.horizontal_coordinates.dims),
             label_encoding=self._label_encoding,
             allow_missing_variables=self._allow_missing_variables,
-            all_names=self._all_names,
         )
 
     def __getitem__(self, index) -> BatchData:
