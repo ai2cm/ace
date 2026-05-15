@@ -23,3 +23,5 @@ group|tag|exper_id|status|ckpt_type|priority|min_runtime|override|results_datase
 1pct_nosmooth_0256to0350-ft_srml_4step|rs0||training|best_inference_ckpt|normal|--min-runtime 8h
 
 1pct_nosmooth_0256to0350-ft_srml_4step|rs0|01KRN14TX4PBE5ABTSB4F7DBJC|training|best_inference_ckpt|normal|--min-runtime 8h
+
+1pct_nosmooth_0256to0350-srml_4steps|rs0|01KRN3J7B8JM0G7MJFAXGF8RZZ|training|best_inference_ckpt|normal|--min-runtime 8h
