@@ -399,12 +399,13 @@ class TimeMeanEvaluatorAggregator:
 
 @dataclasses.dataclass
 class TimeMeanMetricConfig:
-    type: Literal["time_mean"] = "time_mean"
     variables: list[str] | None = None
     name: str | None = None
     target: Literal["denorm", "norm"] = "denorm"
     reference_data: str | None = None
     channel_mean_names: list[str] | None = None
+    enabled: bool = True
+    strict: bool = False
 
     def __post_init__(self):
         if self.name is None:
