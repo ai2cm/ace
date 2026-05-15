@@ -57,7 +57,10 @@ def _load_coords_from_ds(ds: xr.Dataset) -> LatLonCoordinates:
             f"Expected one of {_LAT_NAMES} for lat and {_LON_NAMES} for lon."
         )
     return LatLonCoordinates(
-        lat=torch.tensor(ds[lat_name].values, dtype=torch.float32),
+        lat=torch.tensor(
+            ds[lat_name].values,
+            dtype=torch.float32,
+        ),
         lon=torch.tensor(ds[lon_name].values, dtype=torch.float32),
     )
 
@@ -244,4 +247,4 @@ def load_static_inputs(
     if coords_to_use is None:
         raise ValueError("load_static_inputs requires at least one field.")
 
-    return StaticInputs(fields=fields, coords=coords_to_use)
+    return StaticInputs(fields=fields, coords=coords_to_use).to_device()
