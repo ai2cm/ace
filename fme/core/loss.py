@@ -361,7 +361,7 @@ class VariableWeightingLoss(torch.nn.Module):
         self.loss = loss
         self.weights = weights
 
-    def forward(self, x: torch.Tensor, y: torch.Tensor) -> Any:
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> list[LossComponent]:
         return self.loss(self.weights * x, self.weights * y)
 
 
