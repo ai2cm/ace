@@ -2,7 +2,7 @@
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
-max_epochs: 120
+max_epochs: 540
 seed: 0
 ema:
   decay: 0.999
@@ -12,14 +12,14 @@ inference:
   loader:
     start_indices:
       times:
-        - '2009-01-01T06:00:00'
-        - '2009-02-15T06:00:00'
-        - '2009-04-01T06:00:00'
-        - '2009-05-15T06:00:00'
-        - '2009-07-01T06:00:00'
-        - '2009-08-15T06:00:00'
-        - '2009-10-01T06:00:00'
-        - '2009-11-15T06:00:00'
+      - '2009-01-01T06:00:00'
+      - '2009-02-15T06:00:00'
+      - '2009-04-01T06:00:00'
+      - '2009-05-15T06:00:00'
+      - '2009-07-01T06:00:00'
+      - '2009-08-15T06:00:00'
+      - '2009-10-01T06:00:00'
+      - '2009-11-15T06:00:00'
     dataset:
       data_path: /climate-default
       file_pattern: 2026-03-19-era5-4deg-8layer-daily-1940-2025.zarr
@@ -29,7 +29,7 @@ inference:
     log_histograms: true
     time_mean_reference_data: /statsdata/time-mean.nc
     log_step_means:
-      - step: 5
+    - step: 5
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -62,23 +62,32 @@ validation_loader:
 optimization:
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
-  lr: 0.0001
+  lr: 0.0006
   optimizer_type: AdamW
   kwargs:
     fused: true
     weight_decay: 0.01
   scheduler:
     schedulers:
-      - type: LinearLR
-        kwargs: {start_factor: 0.01, end_factor: 1.0, total_iters: 6}
-        step_each_iteration: false
-      - type: ConstantLR
-        kwargs: {factor: 1.0, total_iters: 108}
-        step_each_iteration: false
-      - type: PolynomialLR
-        kwargs: {power: 0.5, total_iters: 6}
-        step_each_iteration: false
-    milestones: [5, 105]
+    - type: LinearLR
+      kwargs:
+        start_factor: 0.01
+        end_factor: 1.0
+        total_iters: 27
+      step_each_iteration: false
+    - type: ConstantLR
+      kwargs:
+        factor: 1.0
+        total_iters: 486
+      step_each_iteration: false
+    - type: PolynomialLR
+      kwargs:
+        power: 0.5
+        total_iters: 27
+      step_each_iteration: false
+    milestones:
+    - 27
+    - 513
 stepper_training:
   n_forward_steps: 1
   loss:
@@ -105,7 +114,7 @@ stepper:
       builder:
         type: NoiseConditionedSFNO
         config:
-          embed_dim: 384
+          embed_dim: 64
           noise_embed_dim: 0
           filter_type: linear
           use_mlp: true
