@@ -2,6 +2,7 @@
 
 import dataclasses
 import math
+import random
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Literal, Self, cast
 
@@ -356,6 +357,7 @@ class PairedGriddedData:
         drop_partial_patches: bool = True,
         random_offset: bool = False,
         shuffle: bool = False,
+        tropical_oversampling: "TropicalOversamplingConfig | None" = None,
     ) -> Iterator["PairedBatchData"]:
         patched_generator = patched_batch_gen_from_paired_loader(
             self.loader,
@@ -366,6 +368,7 @@ class PairedGriddedData:
             drop_partial_patches=drop_partial_patches,
             random_offset=random_offset,
             shuffle=shuffle,
+            tropical_oversampling=tropical_oversampling,
         )
         return cast(
             Iterator[PairedBatchData],
@@ -641,6 +644,69 @@ class ContiguousDistributedSampler(DistributedSampler):
         return iter(indices[start:end])
 
 
+@dataclasses.dataclass
+class TropicalOversamplingConfig:
+    """
+    Oversample training patches whose center latitude is within
+    +/-lat_threshold degrees of the equator.
+
+    The total number of patches yielded per batch is unchanged.
+    Patches are drawn with replacement from a weighted distribution
+    where tropical patches have relative weight ``multiplier`` and
+    extratropical patches have weight 1. Validation generators
+    should not pass this config so that validation metrics remain
+    comparable across runs.
+
+    Parameters:
+        lat_threshold: Half-width of the tropical band in degrees.
+            Patches whose center latitude has absolute value <= this
+            threshold are considered tropical. Must satisfy
+            0 < lat_threshold < 90.
+        multiplier: Relative sampling weight for tropical patches.
+            Must be >= 1. A value of 1 gives uniform sampling
+            (no oversampling).
+    """
+
+    lat_threshold: float = 30.0
+    multiplier: int = 3
+
+    def __post_init__(self):
+        if self.multiplier < 1:
+            raise ValueError(f"multiplier must be >= 1, got {self.multiplier}.")
+        if not (0.0 < self.lat_threshold < 90.0):
+            raise ValueError(
+                "lat_threshold must satisfy 0 < lat_threshold < 90, "
+                f"got {self.lat_threshold}."
+            )
+
+
+def _sample_indices_with_tropical_oversampling(
+    coarse_patches: list[Patch],
+    coarse_lats: torch.Tensor,
+    config: TropicalOversamplingConfig,
+) -> list[int]:
+    """
+    Return a list of ``len(coarse_patches)`` patch indices sampled with
+    replacement from a weighted distribution.  Tropical patches (center
+    latitude within +/-``config.lat_threshold``) receive weight
+    ``config.multiplier``; extratropical patches receive weight 1.
+
+    ``coarse_lats`` is a 1-D tensor of the coarse latitude coordinates
+    that each patch's ``input_slice`` indexes into.
+    """
+    weights: list[float] = []
+    for patch in coarse_patches:
+        patch_lats = coarse_lats[patch.input_slice.y]
+        center_lat = float(patch_lats.mean().item())
+        if abs(center_lat) <= config.lat_threshold:
+            weights.append(float(config.multiplier))
+        else:
+            weights.append(1.0)
+    return random.choices(
+        range(len(coarse_patches)), weights=weights, k=len(coarse_patches)
+    )
+
+
 # downscale_factor=None means fine patches not needed here, but reusing
 # _get_paired_patches in both paired and no-target cases to share the
 # coincident offset logic.
@@ -717,6 +783,7 @@ def patched_batch_gen_from_paired_loader(
     drop_partial_patches: bool = True,
     random_offset: bool = False,
     shuffle: bool = False,
+    tropical_oversampling: TropicalOversamplingConfig | None = None,
 ) -> Iterator[PairedBatchData]:
     for batch in loader:
         coarse_patches, fine_patches = _get_paired_patches(
@@ -728,4 +795,12 @@ def patched_batch_gen_from_paired_loader(
             shuffle=shuffle,
             drop_partial_patches=drop_partial_patches,
         )
+        if tropical_oversampling is not None:
+            assert fine_patches is not None  # downscale_factor was provided
+            coarse_lats = batch.coarse.latlon_coordinates.lat[0]
+            indices = _sample_indices_with_tropical_oversampling(
+                coarse_patches, coarse_lats, tropical_oversampling
+            )
+            coarse_patches = [coarse_patches[i] for i in indices]
+            fine_patches = [fine_patches[i] for i in indices]
         yield from batch.generate_from_patches(coarse_patches, fine_patches)
