@@ -529,6 +529,95 @@ def test_std_maps_with_nontrivial_scalar_stds():
     )
 
 
+def test_residual_scale_scales_loss(tmp_path):
+    """full_state_stds_path scales per-variable loss by sigma_r / sigma_f."""
+    torch.manual_seed(0)
+    out_names = ["a", "b"]
+    residual_stds = {"a": 2.0, "b": 0.5}
+    full_state_stds = {"a": 4.0, "b": 1.0}
+
+    residual_stds_path = _write_scalar_stds(tmp_path, out_names, residual_stds)
+    full_state_ds = xr.Dataset(
+        {name: xr.DataArray(full_state_stds[name]) for name in out_names}
+    )
+    full_state_path = tmp_path / "full_state_stds.nc"
+    full_state_ds.to_netcdf(full_state_path)
+
+    config_with = SnapshotResidualLossConfig(
+        steps=[1],
+        residual_stds_path=residual_stds_path,
+        full_state_stds_path=str(full_state_path),
+    )
+    config_without = SnapshotResidualLossConfig(
+        steps=[1],
+        residual_stds_path=residual_stds_path,
+    )
+    gridded_ops = LatLonOperations(torch.ones(1, 1))
+    loss_with = config_with.build(gridded_ops=gridded_ops, out_names=out_names)
+    loss_without = config_without.build(gridded_ops=gridded_ops, out_names=out_names)
+
+    n_sample, h, w = 2, 3, 3
+    ic = {
+        "a": torch.zeros(n_sample, 1, h, w, device=get_device()),
+        "b": torch.zeros(n_sample, 1, h, w, device=get_device()),
+    }
+    pred1 = {
+        "a": torch.randn(n_sample, 1, h, w, device=get_device()),
+        "b": torch.randn(n_sample, 1, h, w, device=get_device()),
+    }
+    target1 = {
+        "a": torch.randn(n_sample, 1, h, w, device=get_device()),
+        "b": torch.randn(n_sample, 1, h, w, device=get_device()),
+    }
+
+    gen_with, tgt_with = loss_with.compute_residuals(
+        1, {0: ic, 1: pred1}, {0: ic, 1: target1}
+    )
+    gen_without, tgt_without = loss_without.compute_residuals(
+        1, {0: ic, 1: pred1}, {0: ic, 1: target1}
+    )
+
+    import math
+
+    for name in out_names:
+        scale = math.sqrt(residual_stds[name] / full_state_stds[name])
+        torch.testing.assert_close(gen_with[name], gen_without[name] * scale)
+        torch.testing.assert_close(tgt_with[name], tgt_without[name] * scale)
+
+
+def test_residual_scale_single_variable_loss_value(tmp_path):
+    """Verify that the MSE loss is scaled by sigma_r / sigma_f."""
+    out_names = ["a"]
+    sigma_r = 2.0
+    sigma_f = 8.0
+
+    residual_stds_path = _write_scalar_stds(tmp_path, out_names, {"a": sigma_r})
+    full_state_ds = xr.Dataset({"a": xr.DataArray(sigma_f)})
+    full_state_path = tmp_path / "full_state_stds.nc"
+    full_state_ds.to_netcdf(full_state_path)
+
+    config = SnapshotResidualLossConfig(
+        steps=[1],
+        residual_stds_path=residual_stds_path,
+        full_state_stds_path=str(full_state_path),
+    )
+    gridded_ops = LatLonOperations(torch.ones(1, 1))
+    loss = config.build(gridded_ops=gridded_ops, out_names=out_names)
+
+    n_sample, h, w = 2, 3, 3
+    ic = {"a": torch.zeros(n_sample, 1, h, w, device=get_device())}
+    pred1 = {"a": torch.ones(n_sample, 1, h, w, device=get_device())}
+    target1 = {"a": 2 * torch.ones(n_sample, 1, h, w, device=get_device())}
+
+    total, _ = loss({0: ic, 1: pred1}, {0: ic, 1: target1})
+    # Without scaling: MSE((1/sigma_r), (2/sigma_r)) = (1/sigma_r)^2 = 0.25
+    # With scaling: 0.25 * (sigma_r / sigma_f) = 0.25 * 0.25 = 0.0625
+    expected = torch.tensor(
+        (1.0 / sigma_r) ** 2 * (sigma_r / sigma_f), device=get_device()
+    )
+    torch.testing.assert_close(total, expected)
+
+
 def test_load_std_maps(tmp_path):
     """load_std_maps reads 2D variables from a netCDF file."""
     h, w = 4, 8

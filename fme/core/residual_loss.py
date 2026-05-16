@@ -11,6 +11,7 @@ regardless of sign.
 """
 
 import dataclasses
+import math
 import pathlib
 from collections.abc import Mapping
 
@@ -93,6 +94,12 @@ class SnapshotResidualLossConfig:
             ``sigma_l + eps * sigma_g`` at each grid cell before the
             inner loss, where ``sigma_l`` is the local std and
             ``sigma_g`` is the scalar std from ``residual_stds_path``.
+        full_state_stds_path: Path to a netCDF file containing scalar
+            per-variable standard deviations of the full state. When
+            provided, the per-variable loss is scaled by
+            ``sigma_residual / sigma_full`` (applied as ``sqrt`` on both
+            residual inputs to exploit MSE's quadratic nature). This
+            brings the residual loss to the same scale as the MSE loss.
     """
 
     steps: list[int]
@@ -100,6 +107,7 @@ class SnapshotResidualLossConfig:
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
     weight: float = 1.0
     std_maps_path: str | pathlib.Path | None = None
+    full_state_stds_path: str | pathlib.Path | None = None
 
     def __post_init__(self):
         if len(self.steps) == 0:
@@ -157,6 +165,17 @@ class SnapshotResidualLossConfig:
         residual_std_maps: TensorDict | None = None
         if self.std_maps_path is not None:
             residual_std_maps = load_std_maps(self.std_maps_path, out_names)
+        residual_scale: dict[str, float] | None = None
+        if self.full_state_stds_path is not None:
+            full_state_stds = load_dict_from_netcdf(
+                self.full_state_stds_path,
+                names=out_names,
+                defaults={},
+            )
+            residual_scale = {
+                name: math.sqrt(residual_stds[name] / full_state_stds[name])
+                for name in out_names
+            }
         return SnapshotResidualLoss(
             steps=list(self.steps),
             loss=weighted_mapping_loss,
@@ -164,6 +183,7 @@ class SnapshotResidualLossConfig:
             out_names=list(out_names),
             weight=self.weight,
             residual_std_maps=residual_std_maps,
+            residual_scale=residual_scale,
         )
 
 
@@ -179,6 +199,11 @@ class SnapshotResidualLoss:
     the corresponding scalar std. Without std maps, residuals are simply
     divided by ``sigma_g``.
 
+    When ``residual_scale`` is provided, normalized residuals are further
+    multiplied by ``sqrt(sigma_residual / sigma_full)`` per variable so
+    that the MSE loss is scaled by ``sigma_residual / sigma_full``,
+    bringing it to the same magnitude as the full-state MSE loss.
+
     The active set of steps is intersected with the per-batch sampled rollout
     length via :meth:`update_max_n_forward_steps`. Steps exceeding the sampled
     length are silently skipped for that batch.
@@ -193,6 +218,7 @@ class SnapshotResidualLoss:
         weight: float,
         residual_std_maps: TensorDict | None = None,
         eps: float = 1e-2,
+        residual_scale: dict[str, float] | None = None,
     ):
         self._all_steps: list[int] = sorted(steps)
         self._active_steps: list[int] = list(self._all_steps)
@@ -202,6 +228,7 @@ class SnapshotResidualLoss:
         self._weight = weight
         self._residual_std_maps = residual_std_maps
         self._eps = eps
+        self._residual_scale = residual_scale
 
     @property
     def weight(self) -> float:
@@ -312,6 +339,15 @@ class SnapshotResidualLoss:
             }
             target_residual = {
                 name: target_residual[name] / self._residual_stds[name]
+                for name in self._out_names
+            }
+        if self._residual_scale is not None:
+            gen_residual = {
+                name: gen_residual[name] * self._residual_scale[name]
+                for name in self._out_names
+            }
+            target_residual = {
+                name: target_residual[name] * self._residual_scale[name]
                 for name in self._out_names
             }
         return gen_residual, target_residual
