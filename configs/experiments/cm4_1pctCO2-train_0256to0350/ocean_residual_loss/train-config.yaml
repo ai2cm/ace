@@ -85,7 +85,7 @@ stepper_training:
     steps: [1, 2, 3, 4]
     loss:
       type: MSE
-    weight: 1.0
+    weight: 0.1
     residual_stds_path: /ocean_stats/scaling-residual.nc
     full_state_stds_path: /ocean_stats/scaling-full-field.nc
     std_maps_path: /extra_stats/residual_std_train.nc
