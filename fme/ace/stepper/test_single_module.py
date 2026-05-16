@@ -168,6 +168,7 @@ def test_stepper_no_train_step_specified():
     stepper = _init_train_stepper(loss=StepLossConfig(type="MSE"))
     stepper._init_for_epoch(0)
     assert stepper._n_forward_steps_sampler is None
+    assert stepper._eval_n_forward_steps_sampler is None
 
 
 def test_stepper_step_int():
@@ -175,6 +176,7 @@ def test_stepper_step_int():
     assert stepper._n_forward_steps_schedule is not None
     stepper._init_for_epoch(0)
     assert stepper._n_forward_steps_sampler is not None
+    assert stepper._eval_n_forward_steps_sampler is not None
 
 
 def test_stepper_step_probabilities():
@@ -190,6 +192,7 @@ def test_stepper_step_probabilities():
     assert stepper._n_forward_steps_schedule is not None
     stepper._init_for_epoch(0)
     assert stepper._n_forward_steps_sampler is not None
+    assert stepper._eval_n_forward_steps_sampler is not None
 
 
 def test_stepper_step_schedule():
@@ -213,6 +216,32 @@ def test_stepper_step_schedule():
     assert stepper._n_forward_steps_schedule is not None
     stepper._init_for_epoch(0)
     assert stepper._n_forward_steps_sampler is not None
+
+
+def test_seed_eval_does_not_corrupt_training_sampler():
+    stepper = _init_train_stepper(
+        n_forward_steps=TimeLengthProbabilities(
+            outcomes=[
+                TimeLengthProbability(steps=5, probability=0.5),
+                TimeLengthProbability(steps=10, probability=0.5),
+            ]
+        ),
+        loss=StepLossConfig(type="MSE"),
+    )
+    stepper._init_for_epoch(0)
+    assert stepper._n_forward_steps_sampler is not None
+    assert stepper._eval_n_forward_steps_sampler is not None
+    stepper._n_forward_steps_sampler.seed_rng(42)
+    train_samples_before = [
+        stepper._n_forward_steps_sampler.sample() for _ in range(20)
+    ]
+    stepper.set_eval()
+    stepper.seed_eval(seed=0)
+    [stepper._eval_n_forward_steps_sampler.sample() for _ in range(10)]
+    stepper.set_train()
+    stepper._n_forward_steps_sampler.seed_rng(42)
+    train_samples_after = [stepper._n_forward_steps_sampler.sample() for _ in range(20)]
+    assert train_samples_before == train_samples_after
 
 
 def test_train_on_batch_normalizer_changes_only_norm_data():
