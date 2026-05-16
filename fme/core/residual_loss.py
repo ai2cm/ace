@@ -358,10 +358,10 @@ class SnapshotResidualLoss:
         predictions: Mapping[int, TensorMapping],
         targets: Mapping[int, TensorMapping],
     ) -> torch.Tensor:
-        """Compute one step's residual loss as a scalar tensor.
+        """Compute one step's residual loss as a weighted scalar tensor.
 
         Builds the absolute residuals via :meth:`compute_residuals` and
-        passes them to the inner loss.
+        passes them to the inner loss, then applies :attr:`weight`.
 
         Args:
             step: The step index (>= 1).
@@ -369,37 +369,13 @@ class SnapshotResidualLoss:
             targets: Must contain keys ``step`` and ``step - 1``.
 
         Returns:
-            Unweighted residual loss scalar; callers apply :attr:`weight`.
+            Weighted residual loss scalar.
         """
         gen_residual, target_residual = self.compute_residuals(
             step, predictions, targets
         )
         loss_output: LossOutput = self._loss(gen_residual, target_residual)
-        return loss_output.total()
-
-    def __call__(
-        self,
-        predictions: Mapping[int, TensorMapping],
-        targets: Mapping[int, TensorMapping],
-    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-        """Compute the aggregated residual loss and per-step scalars.
-
-        Returns:
-            ``(total, per_step)`` where ``total`` is the sum over active
-            steps, and ``per_step`` maps a label (e.g.
-            ``"residual_loss_step_1_minus_0"``) to that step's scalar
-            contribution. The returned ``total`` does not include the
-            configured ``weight`` multiplier; callers apply it.
-        """
-        per_step: dict[str, torch.Tensor] = {}
-        running_total: torch.Tensor | None = None
-        for s in self._active_steps:
-            scalar = self.compute_step_loss(s, predictions, targets)
-            per_step[f"residual_loss_{step_label(s)}"] = scalar
-            running_total = scalar if running_total is None else running_total + scalar
-        if running_total is None:
-            running_total = torch.zeros((), device=self._zero_device())
-        return running_total, per_step
+        return self._weight * loss_output.total()
 
     def _validate_step_inputs(
         self,
@@ -430,8 +406,3 @@ class SnapshotResidualLoss:
                         f"Missing variable {name!r} in target at step "
                         f"{s} required by residual step {step}."
                     )
-
-    def _zero_device(self) -> torch.device:
-        for std in self._loss.normalizer.stds.values():
-            return std.device
-        return torch.device("cpu")

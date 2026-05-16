@@ -1781,10 +1781,9 @@ class TrainStepper(
                     residual_step_index
                 )
                 for res_step in completing:
-                    loss_val = self._residual_loss_obj.compute_step_loss(
+                    weighted_val = self._residual_loss_obj.compute_step_loss(
                         res_step, predictions_for_residual, targets_for_residual
                     )
-                    weighted_val = self._residual_loss_obj.weight * loss_val
                     label = residual_loss_step_label(res_step)
                     metrics[f"residual_loss_{label}"] = weighted_val.detach()
                     residual_total_detached = (

@@ -94,7 +94,7 @@ def test_loss_matches_manual_mse(tmp_path):
         "b": torch.randn(n_sample, 1, h, w, device=get_device()),
     }
 
-    total, per_step = loss({0: ic, 1: pred1}, {0: ic, 1: target1})
+    total = loss.compute_step_loss(1, {0: ic, 1: pred1}, {0: ic, 1: target1})
 
     gen_residual_a = (pred1["a"] - ic["a"]).abs() / std_a
     gen_residual_b = (pred1["b"] - ic["b"]).abs() / std_b
@@ -105,8 +105,6 @@ def test_loss_matches_manual_mse(tmp_path):
         + ((gen_residual_b - target_residual_b) ** 2).mean()
     )
     torch.testing.assert_close(total, expected)
-    assert set(per_step.keys()) == {"residual_loss_step_1_minus_0"}
-    torch.testing.assert_close(per_step["residual_loss_step_1_minus_0"], expected)
 
 
 def test_loss_consecutive_steps(tmp_path):
@@ -123,7 +121,7 @@ def test_loss_consecutive_steps(tmp_path):
     target1 = {"a": torch.randn(*target_shape, device=get_device())}
     target2 = {"a": torch.randn(*target_shape, device=get_device())}
 
-    total, _ = loss({1: pred1, 2: pred2}, {1: target1, 2: target2})
+    total = loss.compute_step_loss(2, {1: pred1, 2: pred2}, {1: target1, 2: target2})
     gen_abs = (pred2["a"] - pred1["a"]).abs()
     tgt_abs = (target2["a"] - target1["a"]).abs()
     expected = ((gen_abs - tgt_abs) ** 2).mean()
@@ -149,7 +147,7 @@ def test_variable_weights_applied(tmp_path):
         "b": 2.5 * torch.ones(n_sample, 1, h, w, device=get_device()),
     }
 
-    total, _ = loss({0: ic, 1: pred1}, {0: ic, 1: target1})
+    total = loss.compute_step_loss(1, {0: ic, 1: pred1}, {0: ic, 1: target1})
     # |a|^2 weight=4 -> 16; |b|^2 weight=1 -> 0.25
     expected = torch.tensor((16.0 + 0.25) / 2.0, device=get_device())
     torch.testing.assert_close(total, expected)
@@ -172,30 +170,19 @@ def test_update_max_n_forward_steps_filters_steps(tmp_path):
     assert set(loss.active_steps) == {1, 3, 40}
 
 
-def test_call_with_no_active_steps_returns_zero(tmp_path):
-    out_names = ["a"]
-    loss = _build_loss(out_names, steps=[5], tmp_path=tmp_path)
-    loss.update_max_n_forward_steps(1)
-    assert loss.active_steps == []
-
-    total, per_step = loss({}, {})
-    assert per_step == {}
-    torch.testing.assert_close(total, torch.zeros((), device=total.device))
-
-
-def test_call_missing_step_raises(tmp_path):
+def test_compute_step_loss_missing_step_raises(tmp_path):
     out_names = ["a"]
     loss = _build_loss(out_names, steps=[1], tmp_path=tmp_path)
     n_sample, h, w = 2, 3, 3
     ic = {"a": torch.zeros(n_sample, 1, h, w, device=get_device())}
     with pytest.raises(KeyError, match="prediction"):
-        loss({0: ic}, {0: ic, 1: ic})
+        loss.compute_step_loss(1, {0: ic}, {0: ic, 1: ic})
     with pytest.raises(KeyError, match="target"):
-        loss({0: ic, 1: ic}, {0: ic})
+        loss.compute_step_loss(1, {0: ic, 1: ic}, {0: ic})
 
 
-def test_total_sums_over_active_steps(tmp_path):
-    """Total returned is the unweighted sum over active steps."""
+def test_step_losses_sum_correctly(tmp_path):
+    """Per-step losses from compute_step_loss are individually correct."""
     torch.manual_seed(0)
     out_names = ["a"]
     loss = _build_loss(out_names, steps=[1, 2], tmp_path=tmp_path)
@@ -207,17 +194,14 @@ def test_total_sums_over_active_steps(tmp_path):
     tgt1 = {"a": 0.5 * torch.ones(n_sample, 1, h, w, device=get_device())}
     tgt2 = {"a": torch.ones(n_sample, 1, h, w, device=get_device())}
 
-    total, per_step = loss(
-        {0: ic, 1: pred1, 2: pred2},
-        {0: ic, 1: tgt1, 2: tgt2},
-    )
+    preds = {0: ic, 1: pred1, 2: pred2}
+    tgts = {0: ic, 1: tgt1, 2: tgt2}
+    loss1 = loss.compute_step_loss(1, preds, tgts)
+    loss2 = loss.compute_step_loss(2, preds, tgts)
     # step 1: (1 - 0.5)^2 = 0.25  (gen[1]-gen[0] vs tgt[1]-tgt[0])
     # step 2: ((2-1) - (1-0.5))^2 = 0.25  (gen[2]-gen[1] vs tgt[2]-tgt[1])
-    expected = 0.25 + 0.25
-    torch.testing.assert_close(
-        total, torch.tensor(float(expected), device=total.device)
-    )
-    assert sum(per_step.values()).item() == pytest.approx(total.item())
+    torch.testing.assert_close(loss1, torch.tensor(0.25, device=loss1.device))
+    torch.testing.assert_close(loss2, torch.tensor(0.25, device=loss2.device))
 
 
 def test_loss_propagates_gradients(tmp_path):
@@ -230,7 +214,7 @@ def test_loss_propagates_gradients(tmp_path):
     }
     target1 = {"a": 2 * torch.ones(n_sample, 1, h, w, device=get_device())}
 
-    total, _ = loss({0: ic, 1: pred1}, {0: ic, 1: target1})
+    total = loss.compute_step_loss(1, {0: ic, 1: pred1}, {0: ic, 1: target1})
     total.backward()
     grad = pred1["a"].grad
     assert grad is not None
@@ -248,7 +232,7 @@ def test_loss_detaches_reference_endpoint(tmp_path):
     }
     target1 = {"a": 2 * torch.ones(n_sample, 1, h, w, device=get_device())}
 
-    total, _ = loss({0: ic, 1: pred1}, {0: ic, 1: target1})
+    total = loss.compute_step_loss(1, {0: ic, 1: pred1}, {0: ic, 1: target1})
     total.backward()
     assert pred1["a"].grad is not None
     assert torch.all(pred1["a"].grad != 0)
@@ -269,7 +253,7 @@ def test_loss_detaches_reference_step2(tmp_path):
     tgt1 = {"a": torch.zeros(n_sample, 1, h, w, device=get_device())}
     tgt2 = {"a": 2 * torch.ones(n_sample, 1, h, w, device=get_device())}
 
-    total, _ = loss({1: pred1, 2: pred2}, {1: tgt1, 2: tgt2})
+    total = loss.compute_step_loss(2, {1: pred1, 2: pred2}, {1: tgt1, 2: tgt2})
     total.backward()
     assert pred2["a"].grad is not None
     assert torch.all(pred2["a"].grad != 0)
@@ -291,22 +275,6 @@ def test_steps_completing_at_respects_active_filtering(tmp_path):
     loss.update_max_n_forward_steps(1)
     assert loss.steps_completing_at(1) == [1]
     assert loss.steps_completing_at(3) == []
-
-
-def test_compute_step_loss_matches_call(tmp_path):
-    """compute_step_loss is the per-step primitive used inside __call__."""
-    torch.manual_seed(0)
-    out_names = ["a"]
-    loss = _build_loss(out_names, steps=[1], tmp_path=tmp_path)
-
-    n_sample, h, w = 2, 3, 3
-    ic = {"a": torch.randn(n_sample, 1, h, w, device=get_device())}
-    pred1 = {"a": torch.randn(n_sample, 1, h, w, device=get_device())}
-    target1 = {"a": torch.randn(n_sample, 1, h, w, device=get_device())}
-
-    via_call, _ = loss({0: ic, 1: pred1}, {0: ic, 1: target1})
-    via_step = loss.compute_step_loss(1, {0: ic, 1: pred1}, {0: ic, 1: target1})
-    torch.testing.assert_close(via_call, via_step)
 
 
 def test_compute_residuals_returns_abs_diffs(tmp_path):
@@ -467,13 +435,17 @@ def test_std_maps_normalization_affects_loss(tmp_path):
     target1 = {"a": 2 * torch.ones(n_sample, 1, h, w, device=get_device())}
 
     loss_no_maps = _build_loss(["a"], steps=[1], tmp_path=tmp_path)
-    total_no_maps, _ = loss_no_maps({0: ic, 1: pred1}, {0: ic, 1: target1})
+    total_no_maps = loss_no_maps.compute_step_loss(
+        1, {0: ic, 1: pred1}, {0: ic, 1: target1}
+    )
 
     residual_std_maps = {"a": 4.0 * torch.ones(1, 1, h, w, device=get_device())}
     loss_with_maps = _build_loss_with_std_maps(
         ["a"], steps=[1], residual_std_maps=residual_std_maps
     )
-    total_with_maps, _ = loss_with_maps({0: ic, 1: pred1}, {0: ic, 1: target1})
+    total_with_maps = loss_with_maps.compute_step_loss(
+        1, {0: ic, 1: pred1}, {0: ic, 1: target1}
+    )
 
     assert not torch.allclose(total_no_maps, total_with_maps)
 
@@ -493,7 +465,7 @@ def test_std_maps_normalization_gradient_flow():
     }
     target1 = {"a": 2 * torch.ones(n_sample, 1, h, w, device=get_device())}
 
-    total, _ = loss({0: ic, 1: pred1}, {0: ic, 1: target1})
+    total = loss.compute_step_loss(1, {0: ic, 1: pred1}, {0: ic, 1: target1})
     total.backward()
     assert pred1["a"].grad is not None
     assert torch.all(pred1["a"].grad != 0)
@@ -609,7 +581,7 @@ def test_residual_scale_single_variable_loss_value(tmp_path):
     pred1 = {"a": torch.ones(n_sample, 1, h, w, device=get_device())}
     target1 = {"a": 2 * torch.ones(n_sample, 1, h, w, device=get_device())}
 
-    total, _ = loss({0: ic, 1: pred1}, {0: ic, 1: target1})
+    total = loss.compute_step_loss(1, {0: ic, 1: pred1}, {0: ic, 1: target1})
     # Without scaling: MSE((1/sigma_r), (2/sigma_r)) = (1/sigma_r)^2 = 0.25
     # With scaling: 0.25 * (sigma_r / sigma_f) = 0.25 * 0.25 = 0.0625
     expected = torch.tensor(
