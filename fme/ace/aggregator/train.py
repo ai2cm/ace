@@ -7,7 +7,6 @@ import torch
 from fme.ace.aggregator.inference.data import InferenceBatchData, make_dummy_time
 from fme.ace.aggregator.inference.spectrum import PairedSphericalPowerSpectrumAggregator
 from fme.ace.aggregator.one_step.reduced import MeanAggregator
-from fme.ace.aggregator.tendency_variance import TendencyVarianceAccumulator
 from fme.ace.stepper import TrainOutput
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
@@ -28,13 +27,11 @@ class TrainAggregatorConfig:
         weighted_rmse: Whether to compute the weighted RMSE.
         per_channel_loss: Whether to accumulate and report per-variable (per-channel)
             loss in get_logs (e.g. train/mean/loss/<var_name>).
-        tendency_variance_ratio: Whether to compute the tendency variance ratio.
     """
 
     spherical_power_spectrum: bool = True
     weighted_rmse: bool = True
     per_channel_loss: bool = True
-    tendency_variance_ratio: bool = True
 
 
 class Aggregator(Protocol):
@@ -43,19 +40,6 @@ class Aggregator(Protocol):
 
     def get_logs(self, label: str) -> dict[str, torch.Tensor]:
         pass
-
-
-class _TrainTendencyVarianceAdapter:
-    """Adapts TendencyVarianceAccumulator for the training Aggregator protocol."""
-
-    def __init__(self):
-        self._inner = TendencyVarianceAccumulator()
-
-    def record_batch(self, target_data: TensorMapping, gen_data: TensorMapping):
-        self._inner.record(gen_data, target_data)
-
-    def get_logs(self, label: str) -> dict[str, float]:
-        return self._inner.get_logs(label)
 
 
 class _TrainSpectrumAdapter:
@@ -115,10 +99,6 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
                 gridded_operations=operations,
                 include_bias=False,
                 include_grad_mag_percent_diff=False,
-            )
-        if config.tendency_variance_ratio:
-            self._paired_aggregators["tendency_variance"] = (
-                _TrainTendencyVarianceAdapter()
             )
 
     @torch.no_grad()

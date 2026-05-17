@@ -14,11 +14,7 @@ from fme.core.typing_ import EnsembleTensorDict
     "config, expected_keys",
     [
         (
-            TrainAggregatorConfig(
-                spherical_power_spectrum=False,
-                weighted_rmse=False,
-                tendency_variance_ratio=False,
-            ),
+            TrainAggregatorConfig(spherical_power_spectrum=False, weighted_rmse=False),
             ["test/mean/loss"],
         ),
         (
@@ -30,7 +26,6 @@ from fme.core.typing_ import EnsembleTensorDict
                 "test/power_spectrum/smallest_scale_norm_bias/a",
                 "test/mean/weighted_rmse/a",
                 "test/mean/loss",
-                "test/tendency_variance/tendency_variance_ratio/a",
             ],
         ),
     ],
@@ -69,11 +64,7 @@ def test_labels_exist(config: TrainAggregatorConfig, expected_keys: list[str]):
 @pytest.mark.parametrize(
     "config",
     [
-        TrainAggregatorConfig(
-            spherical_power_spectrum=False,
-            weighted_rmse=False,
-            tendency_variance_ratio=False,
-        ),
+        TrainAggregatorConfig(spherical_power_spectrum=False, weighted_rmse=False),
         TrainAggregatorConfig(),
     ],
 )
