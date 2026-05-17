@@ -28,7 +28,6 @@ def _write_scalar_stds(
 
 def _build_loss(
     out_names: list[str],
-    steps: list[int],
     tmp_path,
     weights: dict[str, float] | None = None,
     stds: dict[str, float] | None = None,
@@ -36,7 +35,6 @@ def _build_loss(
 ) -> SnapshotResidualLoss:
     stds_path = _write_scalar_stds(tmp_path, out_names, stds)
     config = SnapshotResidualLossConfig(
-        steps=steps,
         residual_stds_path=stds_path,
         loss=StepLossConfig(type="MSE", weights={} if weights is None else weights),
         weight=weight,
@@ -45,22 +43,29 @@ def _build_loss(
     return config.build(gridded_ops=gridded_ops, out_names=out_names)
 
 
-def test_config_requires_steps(tmp_path):
-    stds_path = _write_scalar_stds(tmp_path, ["a"])
-    with pytest.raises(ValueError, match="at least one"):
-        SnapshotResidualLossConfig(steps=[], residual_stds_path=stds_path)
+def test_initial_active_steps_empty(tmp_path):
+    loss = _build_loss(["a"], tmp_path=tmp_path)
+    assert loss.active_steps == []
 
 
-def test_config_rejects_step_below_one(tmp_path):
-    stds_path = _write_scalar_stds(tmp_path, ["a"])
+def test_set_active_steps_rejects_below_one(tmp_path):
+    loss = _build_loss(["a"], tmp_path=tmp_path)
     with pytest.raises(ValueError, match="must be >= 1"):
-        SnapshotResidualLossConfig(steps=[0], residual_stds_path=stds_path)
+        loss.set_active_steps([0])
 
 
-def test_config_max_step(tmp_path):
-    stds_path = _write_scalar_stds(tmp_path, ["a"])
-    config = SnapshotResidualLossConfig(steps=[1, 3, 2], residual_stds_path=stds_path)
-    assert config.max_step == 3
+def test_set_active_steps_sorts(tmp_path):
+    loss = _build_loss(["a"], tmp_path=tmp_path)
+    loss.set_active_steps([3, 1, 2])
+    assert loss.active_steps == [1, 2, 3]
+
+
+def test_set_active_steps_replaces_previous(tmp_path):
+    loss = _build_loss(["a"], tmp_path=tmp_path)
+    loss.set_active_steps([1, 2, 3])
+    assert loss.active_steps == [1, 2, 3]
+    loss.set_active_steps([5])
+    assert loss.active_steps == [5]
 
 
 def test_step_label():
@@ -75,10 +80,10 @@ def test_loss_matches_manual_mse(tmp_path):
     std_a, std_b = 2.0, 0.5
     loss = _build_loss(
         out_names,
-        steps=[1],
         tmp_path=tmp_path,
         stds={"a": std_a, "b": std_b},
     )
+    loss.set_active_steps([1])
 
     n_sample, n_ensemble, h, w = 3, 2, 4, 5
     pred1 = {
@@ -111,7 +116,8 @@ def test_loss_consecutive_steps(tmp_path):
     """Step 2 computes |gen[2]-gen[1]| vs |target[2]-target[1]|."""
     torch.manual_seed(0)
     out_names = ["a"]
-    loss = _build_loss(out_names, steps=[2], tmp_path=tmp_path)
+    loss = _build_loss(out_names, tmp_path=tmp_path)
+    loss.set_active_steps([2])
 
     n_sample, n_ensemble, h, w = 2, 4, 3, 3
     pred_shape = (n_sample, n_ensemble, h, w)
@@ -131,7 +137,8 @@ def test_loss_consecutive_steps(tmp_path):
 def test_variable_weights_applied(tmp_path):
     out_names = ["a", "b"]
     weights = {"a": 4.0, "b": 1.0}
-    loss = _build_loss(out_names, steps=[1], tmp_path=tmp_path, weights=weights)
+    loss = _build_loss(out_names, tmp_path=tmp_path, weights=weights)
+    loss.set_active_steps([1])
 
     n_sample, h, w = 2, 3, 3
     ic = {
@@ -153,26 +160,10 @@ def test_variable_weights_applied(tmp_path):
     torch.testing.assert_close(total, expected)
 
 
-def test_update_max_n_forward_steps_filters_steps(tmp_path):
-    out_names = ["a"]
-    loss = _build_loss(out_names, steps=[1, 3, 40], tmp_path=tmp_path)
-    assert set(loss.active_steps) == {1, 3, 40}
-
-    loss.update_max_n_forward_steps(2)
-    assert loss.active_steps == [1]
-    assert loss.needed_steps() == {0, 1}
-
-    loss.update_max_n_forward_steps(0)
-    assert loss.active_steps == []
-    assert loss.needed_steps() == set()
-
-    loss.update_max_n_forward_steps(40)
-    assert set(loss.active_steps) == {1, 3, 40}
-
-
 def test_compute_step_loss_missing_step_raises(tmp_path):
     out_names = ["a"]
-    loss = _build_loss(out_names, steps=[1], tmp_path=tmp_path)
+    loss = _build_loss(out_names, tmp_path=tmp_path)
+    loss.set_active_steps([1])
     n_sample, h, w = 2, 3, 3
     ic = {"a": torch.zeros(n_sample, 1, h, w, device=get_device())}
     with pytest.raises(KeyError, match="prediction"):
@@ -185,7 +176,8 @@ def test_step_losses_sum_correctly(tmp_path):
     """Per-step losses from compute_step_loss are individually correct."""
     torch.manual_seed(0)
     out_names = ["a"]
-    loss = _build_loss(out_names, steps=[1, 2], tmp_path=tmp_path)
+    loss = _build_loss(out_names, tmp_path=tmp_path)
+    loss.set_active_steps([1, 2])
 
     n_sample, h, w = 2, 3, 3
     ic = {"a": torch.zeros(n_sample, 1, h, w, device=get_device())}
@@ -206,7 +198,8 @@ def test_step_losses_sum_correctly(tmp_path):
 
 def test_loss_propagates_gradients(tmp_path):
     out_names = ["a"]
-    loss = _build_loss(out_names, steps=[1], tmp_path=tmp_path)
+    loss = _build_loss(out_names, tmp_path=tmp_path)
+    loss.set_active_steps([1])
     n_sample, h, w = 2, 3, 3
     ic = {"a": torch.zeros(n_sample, 1, h, w, device=get_device())}
     pred1 = {
@@ -224,7 +217,8 @@ def test_loss_propagates_gradients(tmp_path):
 def test_loss_detaches_reference_endpoint(tmp_path):
     """Reference endpoint (step-1) never receives a gradient."""
     out_names = ["a"]
-    loss = _build_loss(out_names, steps=[1], tmp_path=tmp_path)
+    loss = _build_loss(out_names, tmp_path=tmp_path)
+    loss.set_active_steps([1])
     n_sample, h, w = 2, 3, 3
     ic = {"a": torch.zeros(n_sample, 1, h, w, device=get_device(), requires_grad=True)}
     pred1 = {
@@ -242,7 +236,8 @@ def test_loss_detaches_reference_endpoint(tmp_path):
 def test_loss_detaches_reference_step2(tmp_path):
     """For step=2, gen[1] is the detached reference."""
     out_names = ["a"]
-    loss = _build_loss(out_names, steps=[2], tmp_path=tmp_path)
+    loss = _build_loss(out_names, tmp_path=tmp_path)
+    loss.set_active_steps([2])
     n_sample, h, w = 2, 3, 3
     pred1 = {
         "a": torch.zeros(n_sample, 1, h, w, device=get_device(), requires_grad=True)
@@ -262,7 +257,8 @@ def test_loss_detaches_reference_step2(tmp_path):
 
 def test_steps_completing_at(tmp_path):
     out_names = ["a"]
-    loss = _build_loss(out_names, steps=[1, 2, 3], tmp_path=tmp_path)
+    loss = _build_loss(out_names, tmp_path=tmp_path)
+    loss.set_active_steps([1, 2, 3])
     assert loss.steps_completing_at(1) == [1]
     assert loss.steps_completing_at(2) == [2]
     assert loss.steps_completing_at(3) == [3]
@@ -271,8 +267,8 @@ def test_steps_completing_at(tmp_path):
 
 def test_steps_completing_at_respects_active_filtering(tmp_path):
     out_names = ["a"]
-    loss = _build_loss(out_names, steps=[1, 3], tmp_path=tmp_path)
-    loss.update_max_n_forward_steps(1)
+    loss = _build_loss(out_names, tmp_path=tmp_path)
+    loss.set_active_steps([1])
     assert loss.steps_completing_at(1) == [1]
     assert loss.steps_completing_at(3) == []
 
@@ -280,7 +276,8 @@ def test_steps_completing_at_respects_active_filtering(tmp_path):
 def test_compute_residuals_returns_abs_diffs(tmp_path):
     """compute_residuals returns absolute temporal differences."""
     out_names = ["a", "b"]
-    loss = _build_loss(out_names, steps=[1], tmp_path=tmp_path)
+    loss = _build_loss(out_names, tmp_path=tmp_path)
+    loss.set_active_steps([1])
 
     n_sample, h, w = 2, 3, 3
     ic = {
@@ -321,7 +318,8 @@ def test_compute_residuals_returns_abs_diffs(tmp_path):
 def test_compute_residuals_detaches_reference(tmp_path):
     """compute_residuals detaches the reference endpoint."""
     out_names = ["a"]
-    loss = _build_loss(out_names, steps=[1], tmp_path=tmp_path)
+    loss = _build_loss(out_names, tmp_path=tmp_path)
+    loss.set_active_steps([1])
 
     n_sample, h, w = 2, 3, 3
     ic = {"a": torch.zeros(n_sample, 1, h, w, device=get_device(), requires_grad=True)}
@@ -338,7 +336,6 @@ def test_compute_residuals_detaches_reference(tmp_path):
 
 def _build_loss_with_std_maps(
     out_names: list[str],
-    steps: list[int],
     residual_std_maps: dict[str, torch.Tensor],
     stds: dict[str, float] | None = None,
     weight: float = 1.0,
@@ -359,7 +356,6 @@ def _build_loss_with_std_maps(
         normalizer=identity_normalizer,
     )
     return SnapshotResidualLoss(
-        steps=steps,
         loss=weighted_mapping_loss,
         residual_stds=stds,
         out_names=out_names,
@@ -379,11 +375,11 @@ def test_std_maps_normalization_scales_residuals():
     residual_std_maps = {"a": sigma_l}
     loss = _build_loss_with_std_maps(
         ["a"],
-        steps=[1],
         residual_std_maps=residual_std_maps,
         stds={"a": sigma_g},
         eps=eps,
     )
+    loss.set_active_steps([1])
 
     ic = {"a": torch.zeros(n_sample, 1, h, w, device=get_device())}
     pred1 = {"a": torch.ones(n_sample, 1, h, w, device=get_device())}
@@ -411,11 +407,11 @@ def test_std_maps_normalization_spatially_varying():
     eps = 1e-2
     loss = _build_loss_with_std_maps(
         ["a"],
-        steps=[1],
         residual_std_maps=residual_std_maps,
         stds={"a": sigma_g},
         eps=eps,
     )
+    loss.set_active_steps([1])
 
     ic = {"a": torch.zeros(n_sample, 1, h, w, device=get_device())}
     pred1 = {"a": torch.ones(n_sample, 1, h, w, device=get_device())}
@@ -434,15 +430,17 @@ def test_std_maps_normalization_affects_loss(tmp_path):
     pred1 = {"a": torch.ones(n_sample, 1, h, w, device=get_device())}
     target1 = {"a": 2 * torch.ones(n_sample, 1, h, w, device=get_device())}
 
-    loss_no_maps = _build_loss(["a"], steps=[1], tmp_path=tmp_path)
+    loss_no_maps = _build_loss(["a"], tmp_path=tmp_path)
+    loss_no_maps.set_active_steps([1])
     total_no_maps = loss_no_maps.compute_step_loss(
         1, {0: ic, 1: pred1}, {0: ic, 1: target1}
     )
 
     residual_std_maps = {"a": 4.0 * torch.ones(1, 1, h, w, device=get_device())}
     loss_with_maps = _build_loss_with_std_maps(
-        ["a"], steps=[1], residual_std_maps=residual_std_maps
+        ["a"], residual_std_maps=residual_std_maps
     )
+    loss_with_maps.set_active_steps([1])
     total_with_maps = loss_with_maps.compute_step_loss(
         1, {0: ic, 1: pred1}, {0: ic, 1: target1}
     )
@@ -455,9 +453,8 @@ def test_std_maps_normalization_gradient_flow():
     h, w = 3, 3
     n_sample = 2
     residual_std_maps = {"a": 4.0 * torch.ones(1, 1, h, w, device=get_device())}
-    loss = _build_loss_with_std_maps(
-        ["a"], steps=[1], residual_std_maps=residual_std_maps
-    )
+    loss = _build_loss_with_std_maps(["a"], residual_std_maps=residual_std_maps)
+    loss.set_active_steps([1])
 
     ic = {"a": torch.zeros(n_sample, 1, h, w, device=get_device())}
     pred1 = {
@@ -482,11 +479,11 @@ def test_std_maps_with_nontrivial_scalar_stds():
     residual_std_maps = {"a": sigma_l}
     loss = _build_loss_with_std_maps(
         ["a"],
-        steps=[1],
         residual_std_maps=residual_std_maps,
         stds={"a": sigma_g},
         eps=eps,
     )
+    loss.set_active_steps([1])
 
     ic = {"a": torch.zeros(n_sample, 1, h, w, device=get_device())}
     pred1 = {"a": 6.0 * torch.ones(n_sample, 1, h, w, device=get_device())}
@@ -516,17 +513,17 @@ def test_residual_scale_scales_loss(tmp_path):
     full_state_ds.to_netcdf(full_state_path)
 
     config_with = SnapshotResidualLossConfig(
-        steps=[1],
         residual_stds_path=residual_stds_path,
         full_state_stds_path=str(full_state_path),
     )
     config_without = SnapshotResidualLossConfig(
-        steps=[1],
         residual_stds_path=residual_stds_path,
     )
     gridded_ops = LatLonOperations(torch.ones(1, 1))
     loss_with = config_with.build(gridded_ops=gridded_ops, out_names=out_names)
+    loss_with.set_active_steps([1])
     loss_without = config_without.build(gridded_ops=gridded_ops, out_names=out_names)
+    loss_without.set_active_steps([1])
 
     n_sample, h, w = 2, 3, 3
     ic = {
@@ -569,12 +566,12 @@ def test_residual_scale_single_variable_loss_value(tmp_path):
     full_state_ds.to_netcdf(full_state_path)
 
     config = SnapshotResidualLossConfig(
-        steps=[1],
         residual_stds_path=residual_stds_path,
         full_state_stds_path=str(full_state_path),
     )
     gridded_ops = LatLonOperations(torch.ones(1, 1))
     loss = config.build(gridded_ops=gridded_ops, out_names=out_names)
+    loss.set_active_steps([1])
 
     n_sample, h, w = 2, 3, 3
     ic = {"a": torch.zeros(n_sample, 1, h, w, device=get_device())}
@@ -650,10 +647,11 @@ def test_config_build_with_std_maps_path(tmp_path):
 
     stds_path = _write_scalar_stds(tmp_path, ["a"], stds={"a": 1.0})
     config = SnapshotResidualLossConfig(
-        steps=[1], residual_stds_path=stds_path, std_maps_path=str(maps_path)
+        residual_stds_path=stds_path, std_maps_path=str(maps_path)
     )
     gridded_ops = LatLonOperations(torch.ones(1, 1))
     loss = config.build(gridded_ops=gridded_ops, out_names=["a"])
+    loss.set_active_steps([1])
 
     n_sample = 2
     ic = {"a": torch.zeros(n_sample, 1, h, w, device=get_device())}
@@ -680,7 +678,6 @@ def test_config_build_missing_residual_std_raises(tmp_path):
     ds.to_netcdf(stds_path)
 
     config = SnapshotResidualLossConfig(
-        steps=[1],
         residual_stds_path=str(stds_path),
         loss=StepLossConfig(type="MSE"),
     )

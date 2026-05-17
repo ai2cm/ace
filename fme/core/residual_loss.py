@@ -73,14 +73,16 @@ def load_std_maps(
 class SnapshotResidualLossConfig:
     """Configuration for the snapshot residual loss term.
 
-    Each entry ``k`` in :attr:`steps` means: penalize the absolute difference
+    The residual loss penalizes the absolute difference
     ``|gen[k] - gen[k-1]|`` relative to ``|target[k] - target[k-1]|``.
     The reference endpoint ``k-1`` is always detached so the residual
     term constrains only the later prediction.
 
+    Which steps receive the residual loss is determined at runtime by the
+    training stepper based on ``n_forward_steps`` and
+    ``optimize_last_step_only``.
+
     Parameters:
-        steps: List of step indices (each >= 1). For step ``k``, the
-            loss is computed on the residual ``gen[k] - gen[k-1]``.
         residual_stds_path: Path to a netCDF file containing scalar
             per-variable standard deviations of temporal residuals
             (the "global" std ``sigma_g``).
@@ -102,29 +104,11 @@ class SnapshotResidualLossConfig:
             brings the residual loss to the same scale as the MSE loss.
     """
 
-    steps: list[int]
     residual_stds_path: str | pathlib.Path
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
     weight: float = 1.0
     std_maps_path: str | pathlib.Path | None = None
     full_state_stds_path: str | pathlib.Path | None = None
-
-    def __post_init__(self):
-        if len(self.steps) == 0:
-            raise ValueError(
-                "SnapshotResidualLossConfig.steps must contain at least one entry."
-            )
-        for step in self.steps:
-            if step < 1:
-                raise ValueError(
-                    f"Each step must be >= 1, got {step}. The reference is "
-                    f"implicitly step - 1."
-                )
-
-    @property
-    def max_step(self) -> int:
-        """Largest step over all configured entries."""
-        return max(self.steps)
 
     def build(
         self,
@@ -176,7 +160,6 @@ class SnapshotResidualLossConfig:
                 for name in out_names
             }
         return SnapshotResidualLoss(
-            steps=list(self.steps),
             loss=weighted_mapping_loss,
             residual_stds=residual_stds,
             out_names=list(out_names),
@@ -203,14 +186,11 @@ class SnapshotResidualLoss:
     that the MSE loss is scaled by ``sigma_residual / sigma_full``,
     bringing it to the same magnitude as the full-state MSE loss.
 
-    The active set of steps is intersected with the per-batch sampled rollout
-    length via :meth:`update_max_n_forward_steps`. Steps exceeding the sampled
-    length are silently skipped for that batch.
+    Active steps are set each batch via :meth:`set_active_steps`.
     """
 
     def __init__(
         self,
-        steps: list[int],
         loss: WeightedMappingLoss,
         residual_stds: dict[str, float],
         out_names: list[str],
@@ -219,8 +199,7 @@ class SnapshotResidualLoss:
         eps: float = 1e-2,
         residual_scale: dict[str, float] | None = None,
     ):
-        self._all_steps: list[int] = sorted(steps)
-        self._active_steps: list[int] = list(self._all_steps)
+        self._active_steps: list[int] = []
         self._loss = loss
         self._residual_stds = residual_stds
         self._out_names = list(out_names)
@@ -238,10 +217,6 @@ class SnapshotResidualLoss:
         return list(self._out_names)
 
     @property
-    def all_steps(self) -> list[int]:
-        return list(self._all_steps)
-
-    @property
     def active_steps(self) -> list[int]:
         return list(self._active_steps)
 
@@ -252,15 +227,18 @@ class SnapshotResidualLoss:
         )
         return {k: self._residual_stds[k] / weights[k] for k in self._out_names}
 
-    def max_step(self) -> int:
-        return max(self._all_steps)
+    def set_active_steps(self, steps: list[int]) -> None:
+        """Set the active steps for this batch.
 
-    def update_max_n_forward_steps(self, n_forward_steps: int) -> None:
-        """Filter to steps reachable in this batch.
-
-        A step ``k`` is reachable if ``k <= n_forward_steps``.
+        Args:
+            steps: 1-indexed step indices where residual loss will be
+                computed. Each step ``k`` computes the residual
+                ``gen[k] - gen[k-1]``.
         """
-        self._active_steps = [s for s in self._all_steps if s <= n_forward_steps]
+        for s in steps:
+            if s < 1:
+                raise ValueError(f"Each residual step must be >= 1, got {s}.")
+        self._active_steps = sorted(steps)
 
     def needed_steps(self) -> set[int]:
         """Set of step indices required as inputs for any active step."""

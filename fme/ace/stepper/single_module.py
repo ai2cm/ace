@@ -1463,28 +1463,6 @@ class TrainStepperConfig:
                 self.n_ensemble = 2
             else:
                 self.n_ensemble = 1
-        self._validate_residual_loss()
-
-    def _validate_residual_loss(self) -> None:
-        if self.residual_loss is None:
-            return
-        schedule = self.n_forward_steps_schedule
-        if schedule is None:
-            # No schedule means the stepper trains on whatever number of
-            # forward steps are present in the data; we cannot validate
-            # against an upper bound here, so defer runtime filtering to
-            # update_max_n_forward_steps.
-            return
-        max_steps = schedule.max_n_forward_steps.max_value
-        max_residual_step = self.residual_loss.max_step
-        if max_residual_step > max_steps:
-            raise ValueError(
-                "SnapshotResidualLossConfig has a step "
-                f"({max_residual_step}) greater than the maximum forward steps "
-                f"in n_forward_steps ({max_steps}). Steps exceeding "
-                "the rollout length are unreachable; reduce the step or "
-                "increase n_forward_steps."
-            )
 
     @property
     def n_forward_steps_schedule(self) -> TimeLengthSchedule | None:
@@ -1731,7 +1709,11 @@ class TrainStepper(
         remaining_uses: dict[int, int] = {}
         residual_total_detached: torch.Tensor | None = None
         if self._residual_loss_obj is not None:
-            self._residual_loss_obj.update_max_n_forward_steps(n_forward_steps)
+            if self._config.optimize_last_step_only:
+                active_residual_steps = [n_forward_steps]
+            else:
+                active_residual_steps = list(range(1, n_forward_steps + 1))
+            self._residual_loss_obj.set_active_steps(active_residual_steps)
             needed_for_residual = self._residual_loss_obj.needed_steps()
             for s in self._residual_loss_obj.active_steps:
                 remaining_uses[s] = remaining_uses.get(s, 0) + 1
@@ -1754,8 +1736,8 @@ class TrainStepper(
                 step == n_forward_steps - 1 or not self._config.optimize_last_step_only
             )
             residual_step_index = step + 1
-            retain_for_residual = residual_step_index in needed_for_residual
-            if optimize_step or retain_for_residual:
+            cache_for_residual = residual_step_index in needed_for_residual
+            if optimize_step:
                 context = contextlib.nullcontext()
             else:
                 context = torch.no_grad()
@@ -1778,7 +1760,7 @@ class TrainStepper(
                 else:
                     for k in per_channel_sum:
                         per_channel_sum[k] = per_channel_sum[k] + per_ch[k].detach()
-                if retain_for_residual:
+                if cache_for_residual:
                     predictions_for_residual[residual_step_index] = gen_step
                     targets_for_residual[residual_step_index] = target_step
 
@@ -1811,12 +1793,11 @@ class TrainStepper(
                             predictions_for_residual.pop(s, None)
                             targets_for_residual.pop(s, None)
 
-            if optimize_step and weighted_residual is not None:
-                optimization.accumulate_loss(step_total_loss + weighted_residual)
-            elif optimize_step:
-                optimization.accumulate_loss(step_total_loss)
-            elif weighted_residual is not None:
-                optimization.accumulate_loss(weighted_residual)
+            if optimize_step:
+                total = step_total_loss
+                if weighted_residual is not None:
+                    total = total + weighted_residual
+                optimization.accumulate_loss(total)
 
         if residual_total_detached is not None:
             metrics["loss_residual_total"] = residual_total_detached
