@@ -78,6 +78,7 @@ from fme.core.optimization import (
 )
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
+from fme.core.residual_loss import SnapshotResidualLossConfig
 from fme.core.step import SingleModuleStepConfig, StepSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallConfig
@@ -152,6 +153,15 @@ def get_dataset_info(
 
 def get_scalar_data(names, value):
     return {n: float(value) for n in names}
+
+
+def _identity_residual_stds_path(names=("a", "b")) -> str:
+    import tempfile
+
+    ds = xr.Dataset({name: xr.DataArray(1.0) for name in names})
+    path = tempfile.NamedTemporaryFile(suffix=".nc", delete=False).name
+    ds.to_netcdf(path)
+    return path
 
 
 def test_stepper_no_train_step_specified():
@@ -2410,3 +2420,225 @@ def test_checkpoint_stepper_config_to_stepper_config(tmp_path: pathlib.Path):
     assert isinstance(loaded_config, StepperConfig)
     assert loaded_config.derived_forcings == original_config.derived_forcings
     assert loaded_config.step.type == original_config.step.type
+
+
+def test_train_on_batch_residual_loss_disabled_matches_baseline():
+    """With residual_loss=None, training output should be identical to baseline."""
+    torch.manual_seed(0)
+    n_steps = 3
+    data: BatchData = get_data(["a", "b"], n_samples=4, n_time=n_steps + 1).data
+    config = _get_stepper_config(["a", "b"], ["a", "b"])
+    stepper = _get_train_stepper(config, loss=StepLossConfig(type="MSE"))
+    baseline = stepper.train_on_batch(data=data, optimization=NullOptimization())
+
+    torch.manual_seed(0)
+    config = _get_stepper_config(["a", "b"], ["a", "b"])
+    stepper = _get_train_stepper(
+        config, loss=StepLossConfig(type="MSE"), residual_loss=None
+    )
+    explicit_none = stepper.train_on_batch(data=data, optimization=NullOptimization())
+
+    torch.testing.assert_close(baseline.metrics["loss"], explicit_none.metrics["loss"])
+    assert "loss_residual_total" not in baseline.metrics
+    assert "loss_residual_total" not in explicit_none.metrics
+
+
+def test_train_on_batch_residual_loss_emits_metrics():
+    """With residual_loss configured, residual metrics appear; per-pair
+    contributions are folded into the per-step accumulate_loss call at
+    each pair's max_step rather than emitted in a separate call."""
+    torch.manual_seed(0)
+    n_steps = 3
+    data: BatchData = get_data(["a", "b"], n_samples=4, n_time=n_steps + 1).data
+    config = _get_stepper_config(["a", "b"], ["a", "b"])
+    stepper = _get_train_stepper(
+        config,
+        loss=StepLossConfig(type="MSE"),
+        residual_loss=SnapshotResidualLossConfig(
+            residual_stds_path=_identity_residual_stds_path(),
+            loss=StepLossConfig(type="MSE"),
+            weight=2.0,
+        ),
+    )
+    optimization = unittest.mock.Mock(wraps=NullOptimization())
+    stepped = stepper.train_on_batch(data=data, optimization=optimization)
+
+    assert "loss_residual_total" in stepped.metrics
+    assert "residual_loss_step_1_minus_0" in stepped.metrics
+    assert "residual_loss_step_2_minus_1" in stepped.metrics
+    assert "residual_loss_step_3_minus_2" in stepped.metrics
+    # Residual contributions are folded in: one accumulate_loss call per step.
+    assert len(optimization.accumulate_loss.call_args_list) == n_steps
+
+
+def test_train_on_batch_residual_loss_runs_with_gradient_accumulation():
+    """Regression: residual loss must not double-backward through a
+    per-step graph that has already been freed by gradient accumulation.
+
+    This reproduces the failure mode where ``use_gradient_accumulation=True``
+    plus a configured residual pair raised
+    ``RuntimeError: Trying to backward through the graph a second time``
+    at the post-loop residual ``accumulate_loss`` call.
+    """
+    torch.manual_seed(0)
+    n_steps = 4
+
+    # Module with parameters whose forward retains saved tensors so that
+    # backward must traverse them; if a per-step backward freed those
+    # tensors and a later backward (residual) tried to traverse the same
+    # subgraph, autograd would raise. We use an elementwise scale + bias
+    # so the forward shape is unchanged.
+    class ScaleBias(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.scale = torch.nn.Parameter(torch.ones(()))
+            self.bias = torch.nn.Parameter(torch.zeros(()))
+
+        def forward(self, x):
+            return self.scale * x + self.bias
+
+    data: BatchData = get_data(["a", "b"], n_samples=2, n_time=n_steps + 1).data
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": ScaleBias()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means=get_scalar_data(["a", "b"], 0.0),
+                            stds=get_scalar_data(["a", "b"], 1.0),
+                        ),
+                    ),
+                )
+            ),
+        ),
+    )
+    stepper = _get_train_stepper(
+        config,
+        n_forward_steps=n_steps,
+        loss=StepLossConfig(type="MSE"),
+        residual_loss=SnapshotResidualLossConfig(
+            residual_stds_path=_identity_residual_stds_path(),
+            loss=StepLossConfig(type="MSE"),
+            weight=1.0,
+        ),
+    )
+    optimization = OptimizationConfig(
+        optimizer_type="Adam",
+        lr=1e-4,
+        use_gradient_accumulation=True,
+    ).build(stepper.modules, max_epochs=1)
+    # Two consecutive batches: the second exercises the optimizer state
+    # (post-step_weights) and confirms no double-backward occurs across
+    # batches when gradient accumulation re-runs.
+    stepped = stepper.train_on_batch(data=data, optimization=optimization)
+    stepper.train_on_batch(data=data, optimization=optimization)
+    for i in range(1, n_steps + 1):
+        assert f"residual_loss_step_{i}_minus_{i - 1}" in stepped.metrics
+    assert "loss_residual_total" in stepped.metrics
+    assert stepped.metrics["loss_residual_total"] > 0
+
+
+def test_train_on_batch_residual_loss_filters_pairs_at_runtime():
+    """When schedule samples fewer steps, residual loss applies only to those."""
+    torch.manual_seed(0)
+    n_steps = 2
+    data: BatchData = get_data(
+        ["a", "b"], n_samples=4, n_time=n_steps + 1, epoch=0
+    ).data
+    config = _get_stepper_config(["a", "b"], ["a", "b"])
+    # At epoch 0 the sampler always returns 1, so only step 1 is executed.
+    schedule = TimeLengthSchedule(
+        start_value=TimeLengthProbabilities(
+            outcomes=[TimeLengthProbability(steps=1, probability=1.0)]
+        ),
+        milestones=[
+            TimeLengthMilestone(
+                epoch=1,
+                value=TimeLengthProbabilities(
+                    outcomes=[TimeLengthProbability(steps=2, probability=1.0)]
+                ),
+            ),
+        ],
+    )
+    stepper = _get_train_stepper(
+        config,
+        n_forward_steps=schedule,
+        loss=StepLossConfig(type="MSE"),
+        residual_loss=SnapshotResidualLossConfig(
+            residual_stds_path=_identity_residual_stds_path(),
+            loss=StepLossConfig(type="MSE"),
+        ),
+    )
+    stepped = stepper.train_on_batch(data=data, optimization=NullOptimization())
+    # Only step 1 is executed, so residual loss applies at step 1 only.
+    assert "loss_residual_total" in stepped.metrics
+    assert "residual_loss_step_1_minus_0" in stepped.metrics
+    assert "residual_loss_step_2_minus_1" not in stepped.metrics
+
+
+def test_train_on_batch_residual_loss_optimize_last_step_only():
+    """With optimize_last_step_only=True, only the last step gets residual loss."""
+    torch.manual_seed(0)
+    forward_calls_grad_enabled = []
+
+    class AddOne(torch.nn.Module):
+        def forward(self, x):
+            forward_calls_grad_enabled.append(torch.is_grad_enabled())
+            return x + 1
+
+    n_steps = 4
+    data_with_ic: BatchData = get_data(["a", "b"], n_samples=3, n_time=n_steps + 1).data
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": AddOne()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means=get_scalar_data(["a", "b"], 0.0),
+                            stds=get_scalar_data(["a", "b"], 1.0),
+                        ),
+                    ),
+                )
+            ),
+        ),
+    )
+    stepper = _get_train_stepper(
+        config,
+        optimize_last_step_only=True,
+        loss=StepLossConfig(type="MSE"),
+        residual_loss=SnapshotResidualLossConfig(
+            residual_stds_path=_identity_residual_stds_path(),
+            loss=StepLossConfig(type="MSE"),
+        ),
+    )
+    optimization = unittest.mock.Mock(wraps=NullOptimization())
+    stepped = stepper.train_on_batch(data=data_with_ic, optimization=optimization)
+    assert forward_calls_grad_enabled[0] is False  # non-optimized, no grad
+    assert forward_calls_grad_enabled[-1] is True  # last step optimized
+    assert f"residual_loss_step_{n_steps}_minus_{n_steps - 1}" in stepped.metrics
+    assert "residual_loss_step_1_minus_0" not in stepped.metrics
+
+
+def test_stepper_build_residual_loss_no_prognostic_loss_names():
+    """Stepper.build_residual_loss raises when intersection is empty."""
+    # in_names disjoint from out_names => no prognostic variables
+    stepper = _get_stepper(["a"], ["c"])
+    with pytest.raises(ValueError, match="intersection"):
+        stepper.build_residual_loss(
+            SnapshotResidualLossConfig(
+                residual_stds_path=_identity_residual_stds_path(),
+                loss=StepLossConfig(type="MSE"),
+            )
+        )
