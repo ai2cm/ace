@@ -47,3 +47,5 @@ group|tag|exper_id|status|ckpt_type|priority|min_runtime|override|results_datase
 1pct_nosmooth_0256to0350-ft_srml0p001_rand4step|rs0|01KRT4X9EKPA63FTYTG0FPV6AQ|training|best_inference_ckpt|normal|--min-runtime 8h
 
 1pct_nosmooth_0256to0350-srml0p001_rand4steps|rs0|01KRV8R4NF2C9180TM9XHQ1Z7Q|training|best_inference_ckpt|normal|--min-runtime 8h
+
+1pct_nosmooth_0256to0350-srml0p001_rand4steps|rs0|01KRVS6MVG35NRMM8WAA2HGM3G|training|best_inference_ckpt|normal|--min-runtime 8h
