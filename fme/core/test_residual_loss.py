@@ -671,3 +671,19 @@ def test_config_build_with_std_maps_path(tmp_path):
         tgt_res["a"],
         (6.0 / denom) * torch.ones(n_sample, 1, h, w, device=get_device()),
     )
+
+
+def test_config_build_missing_residual_std_raises(tmp_path):
+    """Building with a stds file missing a required variable must raise."""
+    ds = xr.Dataset({"a": xr.DataArray(2.0)})
+    stds_path = tmp_path / "partial_stds.nc"
+    ds.to_netcdf(stds_path)
+
+    config = SnapshotResidualLossConfig(
+        steps=[1],
+        residual_stds_path=str(stds_path),
+        loss=StepLossConfig(type="MSE"),
+    )
+    gridded_ops = LatLonOperations(torch.ones(1, 1))
+    with pytest.raises(ValueError, match="not found"):
+        config.build(gridded_ops=gridded_ops, out_names=["a", "b"])

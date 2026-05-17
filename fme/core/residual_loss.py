@@ -145,14 +145,13 @@ class SnapshotResidualLossConfig:
         residual_stds = load_dict_from_netcdf(
             self.residual_stds_path,
             names=out_names,
-            defaults={name: 1.0 for name in out_names},
+            defaults={},
         )
         identity_normalizer = StandardNormalizer(
             means={name: torch.zeros(()) for name in out_names},
             stds={name: torch.ones(()) for name in out_names},
         )
         inner_loss = self.loss.loss_config.build(
-            reduction="none",
             gridded_operations=gridded_ops,
         )
         weighted_mapping_loss = WeightedMappingLoss(
