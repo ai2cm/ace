@@ -78,7 +78,17 @@ optimization:
     fused: true
     weight_decay: 0.01
 stepper_training:
-  n_forward_steps: 4
+  n_forward_steps:
+    outcomes:
+      - steps: 1
+        probability: 0.25
+      - steps: 2
+        probability: 0.25
+      - steps: 3
+        probability: 0.25
+      - steps: 4
+        probability: 0.25
+  optimize_last_step_only: true
   loss:
     type: MSE
   residual_loss:
