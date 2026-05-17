@@ -1,3 +1,3 @@
 group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
 
-1pct_nosmooth_0256to0350-srml0p001_rand4step|rs0|ace-samudra-cm4|c1fbf00v|best_ckpt|train|high|a100+h100|4|500GiB|0|ai2/ace|seed=0 stepper_training.residual_loss.weight=0.001||30m
+1pct_nosmooth_0256to0350-ft_srml0p001_rand4step|rs0|ace-samudra-cm4|c1fbf00v|best_ckpt|train|high|a100+h100|4|500GiB|0|ai2/ace|seed=0 stepper_training.residual_loss.weight=0.001||30m
