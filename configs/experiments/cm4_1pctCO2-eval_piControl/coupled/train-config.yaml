@@ -8,7 +8,7 @@ evaluate_before_training: true
 ema:
   decay: 0.9995
   faster_decay_at_start: false
-max_epochs: 15
+max_epochs: 40
 inference:
   - name: inference
     n_coupled_steps: 1440
@@ -182,7 +182,7 @@ validation_loader:
 optimization:
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
-  lr: 0.000005
+  lr: 0.000008
   optimizer_type: AdamW
   kwargs:
     fused: true
@@ -195,10 +195,11 @@ optimization:
           start_factor: 0.01
           end_factor: 1
           total_iters: 3000
-      - type: ConstantLR
+      - type: CosineAnnealingLR
         step_each_iteration: true
         kwargs:
-          factor: 1.0
+          T_max: 31680
+          eta_min: 0
     milestones: [3000]
 stepper_training:
   n_coupled_steps: 4
