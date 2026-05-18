@@ -1230,3 +1230,12 @@ def test_dataset_properties_update_masks(mock_monthly_netcdfs):
     existing_mask = MaskProvider(masks={"mask_0": torch.ones(4, 8)})
     data_properties.update_mask_provider(existing_mask)
     assert "mask_0" in dataset.properties.mask_provider.masks
+
+
+def test_variable_metadata_includes_all_names(mock_monthly_netcdfs):
+    mock_data: MockData = mock_monthly_netcdfs
+    config = XarrayDataConfig(data_path=mock_data.tmpdir)
+    names = mock_data.var_names.all_names
+    dataset = xarray_dataset_constructor(config, names, 2)
+    metadata_keys = set(dataset.properties.variable_metadata.keys())
+    assert metadata_keys == set(names)
