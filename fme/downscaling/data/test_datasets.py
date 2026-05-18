@@ -553,7 +553,7 @@ def test_sample_indices_lat_and_lon_selection():
     assert counts[0] / total > 0.99
 
 
-def _make_paired_batch_for_tropical(
+def _make_paired_batch(
     n_lat=12, n_lon=8, batch_size=2, downscale_factor=1
 ) -> PairedBatchData:
     lat_coarse = torch.linspace(-66.0, 70.0, n_lat)
@@ -583,7 +583,7 @@ def _make_paired_batch_for_tropical(
 
 def test_patched_batch_gen_from_paired_loader_no_oversampling():
     n_lat, n_lon = 12, 8
-    batch = _make_paired_batch_for_tropical(n_lat=n_lat, n_lon=n_lon)
+    batch = _make_paired_batch(n_lat=n_lat, n_lon=n_lon)
 
     yielded = list(
         patched_batch_gen_from_paired_loader(
@@ -602,7 +602,7 @@ def test_patched_batch_gen_from_paired_loader_no_oversampling():
 
 def test_patched_batch_gen_from_paired_loader_with_oversampling_preserves_count():
     n_lat, n_lon = 12, 8
-    batch = _make_paired_batch_for_tropical(n_lat=n_lat, n_lon=n_lon)
+    batch = _make_paired_batch(n_lat=n_lat, n_lon=n_lon)
     config = RegionSamplingConfig(lat_interval=ClosedInterval(-30.0, 30.0), weight=3)
 
     yielded = list(

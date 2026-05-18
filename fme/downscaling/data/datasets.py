@@ -794,10 +794,10 @@ def patched_batch_gen_from_paired_loader(
             drop_partial_patches=drop_partial_patches,
         )
         if region_sampling is not None:
-            assert fine_patches is not None  # downscale_factor was provided
+            assert fine_patches is not None  # for type checking
             coarse_lats = batch.coarse.latlon_coordinates.lat[
                 0
-            ]  # dims are [batch, lat, lon]
+            ]  # dims are [batch, lat/lon]
             coarse_lons = batch.coarse.latlon_coordinates.lon[0]
             indices = _sample_indices_with_region_sampling(
                 coarse_patches, coarse_lats, coarse_lons, region_sampling
