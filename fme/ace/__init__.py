@@ -22,6 +22,8 @@ from fme.ace.aggregator.one_step import (
     LegacyFlagOneStepAggregatorConfig,
     OneStepAggregatorConfig,
 )
+from fme.ace.aggregator.one_step.ensemble import EnsembleMetricConfig
+from fme.ace.aggregator.one_step.reduced import StepMeanMetricConfig
 from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.augmentation import AugmentationConfig
 from fme.ace.data_loading.getters import get_forcing_data
