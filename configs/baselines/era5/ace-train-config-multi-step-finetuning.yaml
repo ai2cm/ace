@@ -1,5 +1,5 @@
 # arg: --dataset andrep/2026-03-19-era5-1deg-8layer-stats-1990-2019:/statsdata
-# arg: --dataset 01KREK7J858VGWYC2RRN030YFJ:/weights
+# arg: --dataset 01KRKX71P57WW1ME72H5990HDK:/weights
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
