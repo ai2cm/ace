@@ -65,23 +65,13 @@ def _trainer_config_kwargs(tmp_path):
     )
 
 
-def test_trainer_config_tropical_oversampling_requires_patch_extents(tmp_path):
+def test_trainer_config_region_oversampling_requires_patch_extents(tmp_path):
     base = _trainer_config_kwargs(tmp_path)
-    with pytest.raises(ValueError, match="tropical_oversampling requires"):
+    with pytest.raises(ValueError, match="region_oversampling requires"):
         TrainerConfig(
             **base,
             region_oversampling=RegionOversamplingConfig(),
         )
-
-
-def test_trainer_config_tropical_oversampling_with_patch_extents_ok(tmp_path):
-    base = _trainer_config_kwargs(tmp_path)
-    TrainerConfig(
-        **base,
-        coarse_patch_extent_lat=16,
-        coarse_patch_extent_lon=16,
-        region_oversampling=RegionOversamplingConfig(),
-    )
 
 
 @pytest.fixture

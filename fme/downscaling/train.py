@@ -152,7 +152,7 @@ class Trainer:
         data: PairedGriddedData,
         random_offset: bool,
         shuffle: bool,
-        tropical_oversampling: RegionOversamplingConfig | None = None,
+        region_oversampling: RegionOversamplingConfig | None = None,
     ):
         if self.patch_data:
             batch_generator = data.get_patched_generator(
@@ -161,7 +161,7 @@ class Trainer:
                 drop_partial_patches=True,
                 random_offset=random_offset,
                 shuffle=shuffle,
-                tropical_oversampling=tropical_oversampling,
+                region_oversampling=region_oversampling,
             )
         else:
             batch_generator = data.get_generator()
@@ -183,7 +183,7 @@ class Trainer:
             self.train_data,
             random_offset=True,
             shuffle=True,
-            tropical_oversampling=self.config.region_oversampling,
+            region_oversampling=self.config.region_oversampling,
         )
         outputs = None
         for i, batch in enumerate(train_batch_generator):
@@ -415,7 +415,7 @@ class TrainerConfig:
             over patches of the given coarse extent rather than the full
             domain.
         coarse_patch_extent_lon: See ``coarse_patch_extent_lat``.
-        tropical_oversampling: Optional config to oversample patches
+        region_oversampling: Optional config to oversample patches
             whose center falls within a specified lat/lon region
             during training. The total number of patches per batch is
             unchanged; patches are drawn with replacement from a
@@ -462,7 +462,7 @@ class TrainerConfig:
             self.coarse_patch_extent_lat is None or self.coarse_patch_extent_lon is None
         ):
             raise ValueError(
-                "tropical_oversampling requires both coarse_patch_extent_lat "
+                "region_oversampling requires both coarse_patch_extent_lat "
                 "and coarse_patch_extent_lon to be set."
             )
 

@@ -357,7 +357,7 @@ class PairedGriddedData:
         drop_partial_patches: bool = True,
         random_offset: bool = False,
         shuffle: bool = False,
-        tropical_oversampling: "RegionOversamplingConfig | None" = None,
+        region_oversampling: "RegionOversamplingConfig | None" = None,
     ) -> Iterator["PairedBatchData"]:
         patched_generator = patched_batch_gen_from_paired_loader(
             self.loader,
@@ -368,7 +368,7 @@ class PairedGriddedData:
             drop_partial_patches=drop_partial_patches,
             random_offset=random_offset,
             shuffle=shuffle,
-            tropical_oversampling=tropical_oversampling,
+            region_oversampling=region_oversampling,
         )
         return cast(
             Iterator[PairedBatchData],
@@ -663,7 +663,7 @@ class RegionOversamplingConfig:
         lon_interval: Longitude range [start, stop] in degrees defining
             the oversampled region. If None, all longitudes match.
         multiplier: Relative sampling weight for patches inside the
-            region. Must be >= 1. A value of 1 gives uniform sampling
+            region. Must be > 0. A value of 1 gives uniform sampling
             (no oversampling).
     """
 
@@ -672,8 +672,8 @@ class RegionOversamplingConfig:
     multiplier: float = 1.0
 
     def __post_init__(self):
-        if self.multiplier < 0:
-            raise ValueError(f"multiplier must be >= 0, got {self.multiplier}.")
+        if self.multiplier <= 0:
+            raise ValueError(f"multiplier must be > 0, got {self.multiplier}.")
 
     def get_weight(self, lat: float, lon: float) -> float:
         lat_match = self.lat_interval is None or lat in self.lat_interval
@@ -783,7 +783,7 @@ def patched_batch_gen_from_paired_loader(
     drop_partial_patches: bool = True,
     random_offset: bool = False,
     shuffle: bool = False,
-    tropical_oversampling: RegionOversamplingConfig | None = None,
+    region_oversampling: RegionOversamplingConfig | None = None,
 ) -> Iterator[PairedBatchData]:
     for batch in loader:
         coarse_patches, fine_patches = _get_paired_patches(
@@ -795,12 +795,12 @@ def patched_batch_gen_from_paired_loader(
             shuffle=shuffle,
             drop_partial_patches=drop_partial_patches,
         )
-        if tropical_oversampling is not None:
+        if region_oversampling is not None:
             assert fine_patches is not None  # downscale_factor was provided
             coarse_lats = batch.coarse.latlon_coordinates.lat[0]
             coarse_lons = batch.coarse.latlon_coordinates.lon[0]
             indices = _sample_indices_with_region_oversampling(
-                coarse_patches, coarse_lats, coarse_lons, tropical_oversampling
+                coarse_patches, coarse_lats, coarse_lons, region_oversampling
             )
             coarse_patches = [coarse_patches[i] for i in indices]
             fine_patches = [fine_patches[i] for i in indices]

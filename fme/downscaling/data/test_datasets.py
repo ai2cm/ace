@@ -618,7 +618,7 @@ def test_patched_batch_gen_from_paired_loader_with_oversampling_preserves_count(
             random_offset=False,
             shuffle=False,
             drop_partial_patches=True,
-            tropical_oversampling=config,
+            region_oversampling=config,
         )
     )
     # Same number of patches as without oversampling (3)
