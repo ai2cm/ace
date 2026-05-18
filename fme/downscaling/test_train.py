@@ -13,7 +13,7 @@ import yaml
 
 from fme.core.testing.model import compare_restored_parameters
 from fme.core.testing.wandb import mock_wandb
-from fme.downscaling.data import RegionOversamplingConfig
+from fme.downscaling.data import RegionSamplingConfig
 from fme.downscaling.test_utils import create_test_data_on_disk, data_paths_helper
 from fme.downscaling.train import (
     Trainer,
@@ -65,12 +65,12 @@ def _trainer_config_kwargs(tmp_path):
     )
 
 
-def test_trainer_config_region_oversampling_requires_patch_extents(tmp_path):
+def test_trainer_config_region_sampling_requires_patch_extents(tmp_path):
     base = _trainer_config_kwargs(tmp_path)
-    with pytest.raises(ValueError, match="region_oversampling requires"):
+    with pytest.raises(ValueError, match="region_sampling requires"):
         TrainerConfig(
             **base,
-            region_oversampling=RegionOversamplingConfig(),
+            region_sampling=RegionSamplingConfig(),
         )
 
 

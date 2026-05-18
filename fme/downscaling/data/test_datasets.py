@@ -15,8 +15,8 @@ from fme.downscaling.data.datasets import (
     LatLonCoordinates,
     PairedBatchData,
     PairedBatchItem,
-    RegionOversamplingConfig,
-    _sample_indices_with_region_oversampling,
+    RegionSamplingConfig,
+    _sample_indices_with_region_sampling,
     patched_batch_gen_from_paired_loader,
 )
 from fme.downscaling.data.patching import Patch, _HorizontalSlice
@@ -468,9 +468,9 @@ def test_batch_data_apply_patch_already_patched_raises():
         list(patched.generate_from_patches([patch]))
 
 
-def test_region_oversampling_config_error_on_negative():
-    with pytest.raises(ValueError, match="multiplier must be > 0"):
-        RegionOversamplingConfig(multiplier=-1.0)
+def test_region_sampling_config_error_on_negative():
+    with pytest.raises(ValueError, match="weight must be > 0"):
+        RegionSamplingConfig(weight=-1.0)
 
 
 def _make_patches(
@@ -493,10 +493,8 @@ def test_sample_indices_preserves_length():
     patches = _make_patches(
         slices_y=[slice(0, 4), slice(4, 8), slice(8, 12)], slices_x=None
     )
-    config = RegionOversamplingConfig(
-        lat_interval=ClosedInterval(-30.0, 30.0), multiplier=3
-    )
-    indices = _sample_indices_with_region_oversampling(
+    config = RegionSamplingConfig(lat_interval=ClosedInterval(-30.0, 30.0), weight=3)
+    indices = _sample_indices_with_region_sampling(
         patches, coarse_lats, coarse_lons, config
     )
     assert len(indices) == len(patches)
@@ -508,13 +506,13 @@ def test_sample_indices_region_overrepresented():
     patches = _make_patches(
         slices_y=[slice(0, 4), slice(4, 8), slice(8, 12)], slices_x=None
     )
-    config = RegionOversamplingConfig(
-        lat_interval=ClosedInterval(-30.0, 30.0), multiplier=1000.0
+    config = RegionSamplingConfig(
+        lat_interval=ClosedInterval(-30.0, 30.0), weight=1000.0
     )
     counts = [0, 0, 0]
     n_draws = 300
     for _ in range(n_draws):
-        indices = _sample_indices_with_region_oversampling(
+        indices = _sample_indices_with_region_sampling(
             patches, coarse_lats, coarse_lons, config
         )
         for idx in indices:
@@ -537,15 +535,15 @@ def test_sample_indices_lat_and_lon_selection():
     #   1: lat ~ 30,  lon ~ 38.6
     #   2: lat ~ -30, lon ~ 141.4
     #   3: lat ~ 30,  lon ~ 141.4
-    config = RegionOversamplingConfig(
+    config = RegionSamplingConfig(
         lat_interval=ClosedInterval(-35.0, -25.0),
         lon_interval=ClosedInterval(30.0, 50.0),
-        multiplier=1000,
+        weight=1000,
     )
     counts = [0, 0, 0, 0]
     n_draws = 300
     for _ in range(n_draws):
-        indices = _sample_indices_with_region_oversampling(
+        indices = _sample_indices_with_region_sampling(
             patches, coarse_lats, coarse_lons, config
         )
         for idx in indices:
@@ -605,9 +603,7 @@ def test_patched_batch_gen_from_paired_loader_no_oversampling():
 def test_patched_batch_gen_from_paired_loader_with_oversampling_preserves_count():
     n_lat, n_lon = 12, 8
     batch = _make_paired_batch_for_tropical(n_lat=n_lat, n_lon=n_lon)
-    config = RegionOversamplingConfig(
-        lat_interval=ClosedInterval(-30.0, 30.0), multiplier=3
-    )
+    config = RegionSamplingConfig(lat_interval=ClosedInterval(-30.0, 30.0), weight=3)
 
     yielded = list(
         patched_batch_gen_from_paired_loader(
@@ -618,7 +614,7 @@ def test_patched_batch_gen_from_paired_loader_with_oversampling_preserves_count(
             random_offset=False,
             shuffle=False,
             drop_partial_patches=True,
-            region_oversampling=config,
+            region_sampling=config,
         )
     )
     # Same number of patches as without oversampling (3)

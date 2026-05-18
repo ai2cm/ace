@@ -11,7 +11,7 @@ from .datasets import (
     PairedBatchData,
     PairedBatchItem,
     PairedGriddedData,
-    RegionOversamplingConfig,
+    RegionSamplingConfig,
 )
 from .static import StaticInput, StaticInputs, load_coords_from_path, load_static_inputs
 from .utils import (

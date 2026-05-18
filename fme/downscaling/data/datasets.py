@@ -357,7 +357,7 @@ class PairedGriddedData:
         drop_partial_patches: bool = True,
         random_offset: bool = False,
         shuffle: bool = False,
-        region_oversampling: "RegionOversamplingConfig | None" = None,
+        region_sampling: "RegionSamplingConfig | None" = None,
     ) -> Iterator["PairedBatchData"]:
         patched_generator = patched_batch_gen_from_paired_loader(
             self.loader,
@@ -368,7 +368,7 @@ class PairedGriddedData:
             drop_partial_patches=drop_partial_patches,
             random_offset=random_offset,
             shuffle=shuffle,
-            region_oversampling=region_oversampling,
+            region_sampling=region_sampling,
         )
         return cast(
             Iterator[PairedBatchData],
@@ -645,53 +645,51 @@ class ContiguousDistributedSampler(DistributedSampler):
 
 
 @dataclasses.dataclass
-class RegionOversamplingConfig:
+class RegionSamplingConfig:
     """
-    Oversample training patches whose center falls within a specified
-    lat/lon region.
+    Configures weighted sampling of training patches whose center falls
+    within the specified lat/lon region.
 
-    The total number of patches yielded per batch is unchanged.
-    Patches are drawn with replacement from a weighted distribution
-    where patches inside the region have relative weight ``multiplier``
-    and patches outside have weight 1. Validation generators should not
-    pass this config so that validation metrics remain comparable across
-    runs.
+    The total number of patches yielded per batch remains the same as
+    without sampling a region. Patches are drawn with replacement from
+    a weighted distribution where patches inside the region have relative
+    weight ``weight`` and patches outside have weight 1.
 
     Parameters:
         lat_interval: Latitude range [start, stop] in degrees defining
             the oversampled region. If None, all latitudes match.
         lon_interval: Longitude range [start, stop] in degrees defining
             the oversampled region. If None, all longitudes match.
-        multiplier: Relative sampling weight for patches inside the
+        weight: Relative sampling weight for patches inside the
             region. Must be > 0. A value of 1 gives uniform sampling
             (no oversampling).
     """
 
     lat_interval: ClosedInterval | None = None
     lon_interval: ClosedInterval | None = None
-    multiplier: float = 1.0
+    weight: float = 1.0
 
     def __post_init__(self):
-        if self.multiplier <= 0:
-            raise ValueError(f"multiplier must be > 0, got {self.multiplier}.")
+        if self.weight <= 0:
+            raise ValueError(f"weight must be > 0, got {self.weight}.")
 
     def get_weight(self, lat: float, lon: float) -> float:
         lat_match = self.lat_interval is None or lat in self.lat_interval
         lon_match = self.lon_interval is None or lon in self.lon_interval
-        return self.multiplier if lat_match and lon_match else 1.0
+        return self.weight if lat_match and lon_match else 1.0
 
 
-def _sample_indices_with_region_oversampling(
+def _sample_indices_with_region_sampling(
     coarse_patches: list[Patch],
     coarse_lats: torch.Tensor,
     coarse_lons: torch.Tensor,
-    config: RegionOversamplingConfig,
+    config: RegionSamplingConfig,
 ) -> list[int]:
     """
     Return a list of ``len(coarse_patches)`` patch indices sampled with
     replacement from a weighted distribution.  Patches whose center
     falls within the configured region receive weight
-    ``config.multiplier``; other patches receive weight 1.
+    ``config.weight``; other patches receive weight 1.
 
     ``coarse_lats`` and ``coarse_lons`` are 1-D tensors of the coarse
     latitude and longitude coordinates that each patch's
@@ -783,7 +781,7 @@ def patched_batch_gen_from_paired_loader(
     drop_partial_patches: bool = True,
     random_offset: bool = False,
     shuffle: bool = False,
-    region_oversampling: RegionOversamplingConfig | None = None,
+    region_sampling: RegionSamplingConfig | None = None,
 ) -> Iterator[PairedBatchData]:
     for batch in loader:
         coarse_patches, fine_patches = _get_paired_patches(
@@ -795,12 +793,12 @@ def patched_batch_gen_from_paired_loader(
             shuffle=shuffle,
             drop_partial_patches=drop_partial_patches,
         )
-        if region_oversampling is not None:
+        if region_sampling is not None:
             assert fine_patches is not None  # downscale_factor was provided
             coarse_lats = batch.coarse.latlon_coordinates.lat[0]
             coarse_lons = batch.coarse.latlon_coordinates.lon[0]
-            indices = _sample_indices_with_region_oversampling(
-                coarse_patches, coarse_lats, coarse_lons, region_oversampling
+            indices = _sample_indices_with_region_sampling(
+                coarse_patches, coarse_lats, coarse_lons, region_sampling
             )
             coarse_patches = [coarse_patches[i] for i in indices]
             fine_patches = [fine_patches[i] for i in indices]
