@@ -107,6 +107,16 @@ def stochastic_sampler(
     compute_dtype = torch.float32 if latents.device.type == "mps" else torch.float64
 
     # Time step discretization.
+    # num_steps=1 is a special case: a single forward pass at sigma_max directly
+    # predicts x0.  The general formula divides by (num_steps - 1) which is 0
+    # for num_steps=1, producing NaN.
+    if num_steps == 1:
+        x = latents.to(compute_dtype) * sigma_max
+        t = torch.full((1,), sigma_max, dtype=compute_dtype, device=latents.device)
+        denoised = net(x.to(latents.device), img_lr, t).to(compute_dtype)
+        result = denoised.to(latents.dtype)
+        return result, [result]
+
     step_indices = torch.arange(num_steps, dtype=compute_dtype, device=latents.device)
     t_steps = (
         sigma_max ** (1 / rho)
