@@ -238,13 +238,12 @@ class StepMeanMetricConfig:
 
 @dataclasses.dataclass
 class OneStepMeanMetricConfig:
+    type: Literal["one_step_mean"] = "one_step_mean"
     name: str | None = None
     target: Literal["denorm", "norm"] = "denorm"
     include_bias: bool = True
     include_grad_mag_percent_diff: bool = True
     channel_mean_names: list[str] | None = None
-    enabled: bool = True
-    strict: bool = False
 
     def __post_init__(self):
         if self.name is None:
