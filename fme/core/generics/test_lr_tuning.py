@@ -107,6 +107,9 @@ class _Stepper(TrainStepperABC["None", "_BatchData", "None", "None", "_TrainOutp
     def set_train(self) -> None:
         pass
 
+    def seed_eval(self, seed: int) -> None:
+        pass
+
     def update_training_history(self, training_job: TrainingJob) -> None:
         pass
 

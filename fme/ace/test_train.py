@@ -14,10 +14,7 @@ import xarray as xr
 import yaml
 
 import fme
-from fme.ace.aggregator.inference.main import (
-    InferenceEvaluatorAggregatorConfig,
-    MeanMetricConfig,
-)
+from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregatorConfig
 from fme.ace.aggregator.one_step.main import OneStepAggregatorConfig
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.inference import (
@@ -177,6 +174,7 @@ def _get_test_yaml_files(
         net_config = dict(
             num_layers=2,
             embed_dim=12,
+            label_embed_dim=3,
         )
         if use_healpix:
             net_config["data_grid"] = "healpix"
@@ -400,9 +398,7 @@ def _get_test_yaml_files(
             save_prediction_files=False,
             files=[FileWriterConfig("autoregressive")],
         ),
-        aggregator=InferenceEvaluatorAggregatorConfig(
-            metrics=[MeanMetricConfig(target="denorm")],
-        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(),
         logging=logging_config,
         loader=InferenceDataLoaderConfig(
             dataset=XarrayDataConfig(
@@ -463,13 +459,14 @@ def _setup(
     derived_forcings=None,
     use_schedule: bool = False,
     validate_using_ema: bool = False,
+    stats_std_fill_value: float | None = None,
 ):
     if not path.exists():
         path.mkdir()
     if derived_forcings is None:
         derived_forcings = DerivedForcingsConfig()
     seed = 0
-    np.random.seed(seed)
+    set_seed(seed)
     in_variable_names = [
         "PRESsfc",
         "specific_total_water_0",
@@ -521,6 +518,7 @@ def _setup(
     save_scalar_netcdf(
         stats_dir / "stats-stddev.nc",
         variable_names=all_variable_names,
+        fill_value=stats_std_fill_value,
     )
 
     monthly_dim_sizes: DimSizes
@@ -1042,8 +1040,8 @@ def test_train_and_inference_with_derived_forcings(
         crps_training=crps_training,
         log_validation_maps=log_validation_maps,
         derived_forcings=derived_forcings,
+        stats_std_fill_value=1.0,
     )
-    # using pdb requires calling main functions directly
     with mock_wandb() as wandb:
         train_main(
             yaml_config=train_config,

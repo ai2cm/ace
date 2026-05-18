@@ -72,7 +72,7 @@ inference:
     log_zonal_mean_images: True
 optimization:
   enable_automatic_mixed_precision: false
-  lr: 0.0001
+  lr: 0.00001
   optimizer_type: Adam
 stepper_training:
   n_coupled_steps: {n_coupled_steps}

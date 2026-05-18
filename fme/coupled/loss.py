@@ -37,6 +37,16 @@ class StepLossABC(abc.ABC):
         """
         pass
 
+    def seed_rng(self, seed: int) -> None:
+        """Seed the eval-mode n_steps sampler for deterministic evaluation."""
+        pass
+
+    def set_train(self) -> None:
+        pass
+
+    def set_eval(self) -> None:
+        pass
+
     @abc.abstractmethod
     def n_required_forward_steps(self) -> int:
         """Number of consecutive leading forward steps that must be computed
@@ -184,21 +194,36 @@ class LossContributions(StepLossABC):
         self._loss = loss_obj
         if isinstance(n_steps, TimeLengthProbabilities):
             self._n_steps_sampler: TimeLengthProbabilities | None = n_steps
+            self._eval_n_steps_sampler: TimeLengthProbabilities | None = (
+                TimeLengthProbabilities(outcomes=list(n_steps.outcomes))
+            )
             self._n_steps: float = float(n_steps.max_n_forward_steps)
         else:
-            # Coalesce ``None`` to ``inf`` so downstream arithmetic
-            # (``min(...)``, ``step < self._n_steps``) handles the unbounded
-            # case without explicit branches.
             self._n_steps_sampler = None
+            self._eval_n_steps_sampler = None
             self._n_steps = float("inf") if n_steps is None else float(n_steps)
+        self._is_training: bool = True
         self._weight = weight
         self._optimize_last_step_only = optimize_last_step_only
         self._time_dim = time_dim
         self._n_steps_limit = n_steps_limit
 
     def sample_n_steps(self) -> None:
-        if self._n_steps_sampler is not None:
-            self._n_steps = float(self._n_steps_sampler.sample())
+        sampler = (
+            self._n_steps_sampler if self._is_training else self._eval_n_steps_sampler
+        )
+        if sampler is not None:
+            self._n_steps = float(sampler.sample())
+
+    def seed_rng(self, seed: int) -> None:
+        if self._eval_n_steps_sampler is not None:
+            self._eval_n_steps_sampler.seed_rng(seed)
+
+    def set_train(self) -> None:
+        self._is_training = True
+
+    def set_eval(self) -> None:
+        self._is_training = False
 
     @property
     def effective_loss_scaling(self) -> TensorDict:
