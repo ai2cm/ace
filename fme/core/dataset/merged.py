@@ -20,9 +20,7 @@ class MergedXarrayDataset(DatasetABC):
         self.datasets = datasets
 
         combined_names = [
-            name
-            for dataset in self.datasets
-            for name in dataset.properties.variable_metadata.keys()
+            item for dataset in self.datasets for item in dataset[0][0].keys()
         ]
         if len(combined_names) != len(set(combined_names)):
             duplicates = list(
@@ -151,9 +149,7 @@ class TimePaddedMergedDataset(DatasetABC):
         self.datasets = datasets
 
         combined_names = [
-            name
-            for dataset in self.datasets
-            for name in dataset.properties.variable_metadata.keys()
+            item for dataset in self.datasets for item in dataset[0][0].keys()
         ]
         if len(combined_names) != len(set(combined_names)):
             duplicates = list(
