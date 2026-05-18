@@ -322,18 +322,12 @@ def _make_source_grid(ds: xr.Dataset) -> xr.Dataset:
 _REGRIDDER_CACHE: dict[str, Any] = {}
 
 
-def _regrid_dataset(
+def _get_regridder(
     ds: xr.Dataset,
     regrid_cfg: RegridConfig,
     source_grid: xr.Dataset | None = None,
-) -> xr.Dataset:
-    """Regrid a dataset to a Gaussian grid using xESMF.
-
-    Skips regridding if ``regrid_cfg.output_grid`` is empty/None.
-    """
-    if not regrid_cfg.output_grid:
-        return ds
-
+):
+    """Return a cached xESMF regridder for the given source grid and config."""
     import xesmf as xe
 
     if source_grid is None:
@@ -345,12 +339,34 @@ def _regrid_dataset(
         _REGRIDDER_CACHE[cache_key] = xe.Regridder(
             source_grid, dst, regrid_cfg.method, periodic=True
         )
-    regridder = _REGRIDDER_CACHE[cache_key]
+    return _REGRIDDER_CACHE[cache_key]
+
+
+def _regrid_dataset(
+    ds: xr.Dataset,
+    regrid_cfg: RegridConfig,
+    source_grid: xr.Dataset | None = None,
+) -> xr.Dataset:
+    """Regrid a dataset to a Gaussian grid using xESMF.
+
+    Regrids each variable individually to keep memory usage bounded when
+    the dataset contains many large 3-D fields.
+
+    Skips regridding if ``regrid_cfg.output_grid`` is empty/None.
+    """
+    if not regrid_cfg.output_grid:
+        return ds
+
+    regridder = _get_regridder(ds, regrid_cfg, source_grid)
 
     if ds["lat"].values[0] > ds["lat"].values[-1]:
         ds = ds.sortby("lat")
 
-    regridded = regridder(ds, keep_attrs=True)
+    regridded_vars: dict[str, xr.DataArray] = {}
+    for name in ds.data_vars:
+        regridded_vars[name] = regridder(ds[name], keep_attrs=True)
+
+    regridded = xr.Dataset(regridded_vars, attrs=ds.attrs)
     return regridded
 
 
@@ -571,19 +587,18 @@ def compute_lazy_dataset(
 
     # ── 3. Vertical sub-selection ──────────────────────────────────────────
     target_indices = config.vertical_coarsen.target_indices
+    mask_3d_for_split = masks["mask_3d"]
     if target_indices:
         print(f"  Selecting {len(target_indices)} of {ds_ocean.sizes[vdim]} levels")
         ds_ocean = _select_vertical_levels(ds_ocean, vdim, target_indices)
-        masks["mask_3d"] = _select_vertical_levels(
-            masks[["mask_3d"]], vdim, target_indices
-        )["mask_3d"]
+        mask_3d_for_split = mask_3d_for_split.isel({vdim: list(target_indices)})
     n_levels = ds_ocean.sizes.get(vdim, 0)
     print(f"  Working with {n_levels} vertical levels")
 
     # ── 4. Split 3-D → per-level 2-D ─────────────────────────────────────
     print("Splitting 3-D fields to per-level 2-D...")
     vars_3d_present = [v for v in VARS_3D if v in ds_ocean]
-    ds_levels = _split_3d_to_levels(ds_ocean, vars_3d_present, vdim, masks["mask_3d"])
+    ds_levels = _split_3d_to_levels(ds_ocean, vars_3d_present, vdim, mask_3d_for_split)
 
     # Collect 2-D ocean variables
     ocean_2d_names = [
@@ -728,6 +743,61 @@ def compute_lazy_dataset(
         ds["HI"] = ds["HI"].where(mask_2d > 0, np.nan)
         if "ocean_sea_ice_fraction" in ds:
             ds["HI"] = ds["HI"].where(ds["ocean_sea_ice_fraction"] > 0, 0.0)
+
+    # ── 8b. Nearest-neighbour fill for residual NaN in ocean cells ────────
+    # After conservative regridding, a small number of coastal ocean cells
+    # (~1% at the surface) can be NaN in variables whose native-resolution
+    # land mask differs slightly from ``thetao`` (e.g. ``taux``/``tauy``).
+    # Fill those with the nearest valid neighbour so the training data has
+    # no unexpected NaN inside the ocean mask.
+    from scipy.ndimage import distance_transform_edt
+
+    for name in ds.data_vars:
+        if name.startswith("mask_") or name.startswith("idepth_"):
+            continue
+        if name in ("land_fraction", "sea_surface_fraction"):
+            continue
+        v = ds[name]
+        if "time" not in v.dims:
+            continue
+        level_match = name.rsplit("_", 1)
+        if len(level_match) == 2 and level_match[1].isdigit():
+            level_idx = int(level_match[1])
+            mask_key = f"mask_{level_idx}"
+            mask_arr = ds[mask_key].values if mask_key in ds else mask_2d.values
+        else:
+            mask_arr = mask_2d.values
+        ocean = mask_arr > 0
+        sample = v.isel(time=0).values
+        if not np.any(np.isnan(sample) & ocean):
+            continue
+        print(f"  Nearest-neighbour filling NaN in ocean cells for '{name}'")
+
+        def _nn_fill_2d(arr, ocean_mask):
+            """Fill NaN inside *ocean_mask* with nearest valid value."""
+            need_fill = np.isnan(arr) & ocean_mask
+            if not need_fill.any():
+                return arr
+            valid = ~np.isnan(arr)
+            if not valid.any():
+                return arr
+            _, indices = distance_transform_edt(
+                ~valid, return_distances=True, return_indices=True
+            )
+            filled = arr.copy()
+            filled[need_fill] = arr[tuple(indices[:, need_fill])]
+            return filled
+
+        filled_slices = []
+        for t in range(ds.sizes["time"]):
+            arr = v.isel(time=t).values
+            filled_slices.append(_nn_fill_2d(arr, ocean))
+        ds[name] = xr.DataArray(
+            np.stack(filled_slices),
+            dims=v.dims,
+            coords=v.coords,
+            attrs=v.attrs,
+        )
 
     # ── 9. Clean up dims / coords ─────────────────────────────────────────
     # Drop any remaining non-spatial dims that slipped through
