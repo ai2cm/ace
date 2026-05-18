@@ -5,7 +5,7 @@ import pytest
 import torch
 import xarray as xr
 
-from fme.ace.data_loading.batch_data import BatchData, PairedData
+from fme.ace.data_loading.batch_data import BatchData, PairedData, _collate_with_masking
 from fme.core.device import get_device
 from fme.core.labels import BatchLabels
 from fme.core.typing_ import TensorDict
@@ -16,6 +16,7 @@ def assert_metadata_equal(
     b: BatchData,
     check_labels: bool = True,
     check_n_ensemble: bool = True,
+    check_data_mask: bool = True,
 ):
     assert a.horizontal_dims == b.horizontal_dims
     assert a.epoch == b.epoch
@@ -23,6 +24,20 @@ def assert_metadata_equal(
         assert a.n_ensemble == b.n_ensemble
     if check_labels:
         assert a.labels == b.labels
+    if check_data_mask:
+        _assert_tensor_mapping_equal_up_to_device(
+            dict(a.data_mask) if a.data_mask is not None else None,
+            dict(b.data_mask) if b.data_mask is not None else None,
+        )
+
+
+def _assert_tensor_mapping_equal_up_to_device(va: dict | None, vb: dict | None) -> None:
+    if va is None or vb is None:
+        assert va is None and vb is None
+    else:
+        assert set(va) == set(vb)
+        for k in va:
+            torch.testing.assert_close(va[k].detach().cpu(), vb[k].detach().cpu())
 
 
 def assert_batchdata_equal_up_to_device(a: BatchData, b: BatchData) -> None:
@@ -53,6 +68,8 @@ def assert_batchdata_equal_up_to_device(a: BatchData, b: BatchData) -> None:
                     va.tensor.cpu(),
                     vb.tensor.cpu(),
                 )
+        elif field.name == "data_mask":
+            _assert_tensor_mapping_equal_up_to_device(va, vb)
         else:
             assert va == vb
 
@@ -80,6 +97,8 @@ def assert_paired_data_equal_up_to_device(a: PairedData, b: PairedData) -> None:
                     va.tensor.cpu(),
                     vb.tensor.cpu(),
                 )
+        elif field.name == "data_mask":
+            _assert_tensor_mapping_equal_up_to_device(va, vb)
         else:
             assert va == vb
 
@@ -102,6 +121,10 @@ def get_batch_data(
             torch.zeros(n_samples, n_labels, device=device),
             [f"label_{i}" for i in range(n_labels)],
         )
+    data_mask = {
+        name: torch.ones(n_samples, dtype=torch.bool, device=device) for name in names
+    }
+    data_mask[names[-1]] = torch.zeros(n_samples, dtype=torch.bool, device=device)
     return BatchData(
         data={
             name: torch.randn(n_samples, n_times, n_lat, n_lon, device=device)
@@ -111,6 +134,7 @@ def get_batch_data(
         horizontal_dims=horizontal_dims,
         labels=labels,
         n_ensemble=n_ensemble,
+        data_mask=data_mask,
     )
 
 
@@ -185,8 +209,8 @@ def test_to_cpu():
     ],
 )
 def test_from_sample_tuples_raises_on_mismatched_epochs(epoch_1: int, epoch_2: int):
-    sample1 = ({"x": torch.zeros(2, 3)}, xr.DataArray([0]), None, epoch_1)
-    sample2 = ({"x": torch.zeros(2, 3)}, xr.DataArray([0]), None, epoch_2)
+    sample1 = ({"x": torch.zeros(2, 3)}, xr.DataArray([0]), None, epoch_1, None)
+    sample2 = ({"x": torch.zeros(2, 3)}, xr.DataArray([0]), None, epoch_2, None)
 
     with pytest.raises(ValueError, match="same epoch"):
         BatchData.from_sample_tuples([sample1, sample2])
@@ -216,7 +240,7 @@ def test_get_start(names: list[str], prognostic_names: list[str], n_ic_timesteps
         n_lon=n_lon,
     )
     start = batch_data.get_start(prognostic_names, n_ic_timesteps).as_batch_data()
-    assert_metadata_equal(start, batch_data)
+    assert_metadata_equal(start, batch_data, check_data_mask=False)
     assert start.time.equals(batch_data.time.isel(time=slice(0, n_ic_timesteps)))
     assert set(start.data.keys()) == set(prognostic_names)
     for name in prognostic_names:
@@ -284,7 +308,7 @@ def test_get_end(names: list[str], prognostic_names: list[str], n_ic_timesteps: 
         n_lon=n_lon,
     )
     end = batch_data.get_end(prognostic_names, n_ic_timesteps).as_batch_data()
-    assert_metadata_equal(end, batch_data)
+    assert_metadata_equal(end, batch_data, check_data_mask=False)
     assert end.time.equals(batch_data.time.isel(time=slice(-n_ic_timesteps, None)))
     assert set(end.data.keys()) == set(prognostic_names)
     for name in prognostic_names:
@@ -445,8 +469,12 @@ def test_broadcast_ensemble(n_ensemble):
         )
 
     assert_metadata_equal(
-        ensemble_gen_data, gen_data, check_labels=False, check_n_ensemble=False
-    )  # n_ensemble and labels intentionally differ; labels checked above
+        ensemble_gen_data,
+        gen_data,
+        check_labels=False,
+        check_n_ensemble=False,
+        check_data_mask=False,
+    )
 
 
 @pytest.mark.parametrize("n_ensemble", [1, 2, 3])
@@ -626,3 +654,139 @@ def test_paired_data_as_ensemble_tensor_dicts_shape():
         assert u_ref[name].shape[:2] == (n_s, n_ensemble)
     for name in p.prediction:
         assert u_pred[name].shape[:2] == (n_s, n_ensemble)
+
+
+def _make_data_mask(
+    names: list[str], n_samples: int, device=None
+) -> dict[str, torch.Tensor]:
+    if device is None:
+        device = get_device()
+    return {
+        name: torch.ones(n_samples, dtype=torch.bool, device=device) for name in names
+    }
+
+
+def test_data_mask_broadcast_ensemble():
+    names = ["foo", "bar"]
+    n_samples = 2
+    n_ensemble = 3
+    data_mask = _make_data_mask(names, n_samples)
+    data_mask["bar"][1] = False
+    base = get_batch_data(
+        names=names,
+        n_samples=n_samples,
+        n_times=5,
+        horizontal_dims=["lat", "lon"],
+    )
+    base = BatchData(
+        data=base.data,
+        time=base.time,
+        horizontal_dims=base.horizontal_dims,
+        epoch=base.epoch,
+        data_mask=data_mask,
+    )
+    broadcasted = base.broadcast_ensemble(n_ensemble)
+    assert set(broadcasted.data_mask) == set(names)
+    assert broadcasted.data_mask["bar"].shape == (n_samples * n_ensemble,)
+    # sample 0 was True, sample 1 was False; repeat_interleave keeps order
+    expected = torch.tensor(
+        [True, True, True, False, False, False],
+        device=broadcasted.data_mask["bar"].device,
+    )
+    torch.testing.assert_close(broadcasted.data_mask["bar"], expected)
+
+
+def test_data_mask_raises_if_length_does_not_match_n_samples():
+    base = get_batch_data(
+        names=["foo"],
+        n_samples=2,
+        n_times=3,
+        horizontal_dims=["lat", "lon"],
+    )
+    with pytest.raises(ValueError, match="data_mask for variable foo"):
+        BatchData(
+            data=base.data,
+            time=base.time,
+            data_mask={"foo": torch.ones(3, dtype=torch.bool)},
+        )
+
+
+def test_collate_with_masking_heterogeneous_variables():
+    sample_a: TensorDict = {
+        "x": torch.ones(2, 3),
+        "y": torch.ones(2, 3) * 2,
+    }
+    sample_b: TensorDict = {
+        "x": torch.ones(2, 3) * 3,
+        "y": torch.full((2, 3), float("nan")),
+    }
+    batch_data, data_mask = _collate_with_masking(
+        [sample_a, sample_b],
+        sample_missing_names=[None, frozenset({"y"})],
+    )
+    assert set(batch_data.keys()) == {"x", "y"}
+    assert batch_data["x"].shape == (2, 2, 3)
+    torch.testing.assert_close(batch_data["x"][0], torch.ones(2, 3))
+    torch.testing.assert_close(batch_data["x"][1], torch.ones(2, 3) * 3)
+    torch.testing.assert_close(batch_data["y"][0], torch.ones(2, 3) * 2)
+    torch.testing.assert_close(
+        batch_data["y"][1], torch.full((2, 3), float("nan")), equal_nan=True
+    )
+    assert data_mask is not None
+    torch.testing.assert_close(data_mask["x"], torch.tensor([True, True]))
+    torch.testing.assert_close(data_mask["y"], torch.tensor([True, False]))
+
+
+def test_collate_with_masking_all_present_returns_none_mask():
+    sample_a: TensorDict = {"x": torch.ones(2, 3), "y": torch.ones(2, 3)}
+    sample_b: TensorDict = {"x": torch.ones(2, 3), "y": torch.ones(2, 3)}
+    batch_data, data_mask = _collate_with_masking(
+        [sample_a, sample_b], sample_missing_names=[None, None]
+    )
+    assert data_mask is None
+    assert batch_data["x"].shape == (2, 2, 3)
+
+
+def test_from_sample_tuples_with_variable_masking():
+    sample1 = (
+        {"a": torch.ones(2, 3), "b": torch.ones(2, 3) * 2},
+        xr.DataArray([0, 1]),
+        None,
+        0,
+        None,
+    )
+    sample2 = (
+        {"a": torch.ones(2, 3) * 3, "b": torch.full((2, 3), float("nan"))},
+        xr.DataArray([0, 1]),
+        None,
+        0,
+        frozenset({"b"}),
+    )
+    batch = BatchData.from_sample_tuples(
+        [sample1, sample2], allow_missing_variables=True
+    )
+    assert "a" in batch.data
+    assert "b" in batch.data
+    assert batch.data_mask is not None
+    torch.testing.assert_close(batch.data_mask["b"], torch.tensor([True, False]))
+    torch.testing.assert_close(
+        batch.data["b"][1], torch.full((2, 3), float("nan")), equal_nan=True
+    )
+
+
+def test_collate_with_masking_variable_missing_from_all_samples():
+    sample_a: TensorDict = {
+        "x": torch.ones(2, 3),
+        "y": torch.full((2, 3), float("nan")),
+    }
+    sample_b: TensorDict = {
+        "x": torch.ones(2, 3),
+        "y": torch.full((2, 3), float("nan")),
+    }
+    batch_data, data_mask = _collate_with_masking(
+        [sample_a, sample_b],
+        sample_missing_names=[frozenset({"y"}), frozenset({"y"})],
+    )
+    assert "x" in batch_data
+    assert "y" not in batch_data
+    assert data_mask is None

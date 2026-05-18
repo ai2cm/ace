@@ -25,6 +25,12 @@ class LossComponent(abc.ABC):
     """
 
     def __init__(self, loss: torch.Tensor):
+        """
+        Args:
+            loss: The loss tensor.  Can be a scalar (``ndim == 0``),
+                a partially-reduced tensor like ``(B, C)``, or a
+                full element-wise tensor like ``(B, C, lat, lon)``.
+        """
         self.loss = loss
 
     @abc.abstractmethod
@@ -63,30 +69,51 @@ class LossOutput:
         self,
         losses: list[LossComponent],
         channel_names: list[str],
+        mask: torch.Tensor | None = None,
     ):
         self._losses = losses
         self._channel_names = channel_names
+        self._mask = mask
         self._per_channel: torch.Tensor | None = None
 
     def _get_per_channel(self) -> torch.Tensor:
-        """Return a ``(C,)`` tensor of batch-mean losses, computed once."""
+        """Return a ``(C,)`` tensor of per-channel losses, computed once.
+
+        When a mask is present (shape ``(B, C)``), each channel's loss
+        is averaged only over the batch samples where that channel is
+        present, so masked-out variables never dilute the result.
+        """
         if self._per_channel is None:
             bc = sum(c.reduce_to_channel() for c in self._losses)
             assert isinstance(bc, torch.Tensor)
             if bc.ndim == 0:
                 self._per_channel = bc.expand(len(self._channel_names))
+            elif self._mask is not None:
+                masked_sum = (bc * self._mask).sum(dim=0)
+                counts = self._mask.sum(dim=0).clamp(min=1)
+                self._per_channel = masked_sum / counts
             else:
                 self._per_channel = bc.mean(dim=0)
         return self._per_channel
 
+    def _n_active_channels(self) -> int:
+        if self._mask is not None:
+            return int((self._mask.sum(dim=0) > 0).sum().item())
+        return len(self._channel_names)
+
     def total(self) -> torch.Tensor:
         """Scalar loss — the optimisation target."""
-        return self._get_per_channel().mean()
+        pc = self._get_per_channel()
+        if self._mask is not None:
+            active = self._mask.sum(dim=0) > 0
+            if active.any():
+                return pc[active].mean()
+        return pc.mean()
 
     def get_channel_losses(self) -> dict[str, torch.Tensor]:
         """Per-channel scalar losses that sum to ``total()``."""
         pc = self._get_per_channel()
-        n = len(self._channel_names)
+        n = self._n_active_channels()
         return dict(zip(self._channel_names, (pc / n).unbind(0)))
 
     def scale(self, weight: float) -> "LossOutput":
@@ -94,6 +121,7 @@ class LossOutput:
         return LossOutput(
             [type(c)(c.loss * weight) for c in self._losses],
             self._channel_names,
+            mask=self._mask,
         )
 
 
@@ -125,6 +153,33 @@ class NaNLoss(torch.nn.Module):
 
     def forward(self, input: torch.Tensor, target: torch.Tensor) -> list[LossComponent]:
         return [StandardLoss(torch.tensor(torch.nan))]
+
+
+def _build_channel_mask(
+    data_mask: TensorMapping,
+    names: list[str],
+    device: torch.device,
+    batch_size: int,
+) -> torch.Tensor:
+    """Build a ``(B, C)`` float mask from per-variable boolean masks.
+
+    Args:
+        data_mask: Per-variable boolean masks of shape ``[batch]``.
+        names: Channel names in packing order.
+        device: Device for the output tensor.
+        batch_size: Size of the batch dimension.
+
+    Returns:
+        Float tensor of shape ``(batch_size, len(names))`` with 1.0
+        for present entries and 0.0 for absent ones.
+    """
+    masks = []
+    for name in names:
+        if name in data_mask:
+            masks.append(data_mask[name].to(device=device, dtype=torch.float))
+        else:
+            masks.append(torch.ones(batch_size, device=device, dtype=torch.float))
+    return torch.stack(masks, dim=1)
 
 
 class WeightedMappingLoss:
@@ -171,11 +226,16 @@ class WeightedMappingLoss:
         self,
         predict_dict: TensorMapping,
         target_dict: TensorMapping,
+        data_mask: TensorMapping | None = None,
     ) -> LossOutput:
         """
         Args:
             predict_dict: The predicted data.
             target_dict: The target data.
+            data_mask: Optional per-variable boolean masks of shape
+                ``[batch]`` indicating which samples have each variable
+                present. Used to exclude masked channels from the loss
+                average.
 
         Returns:
             A ``LossOutput`` wrapping pre-weighted loss component tensors.
@@ -202,9 +262,20 @@ class WeightedMappingLoss:
             )
             component_cls = StandardLoss if cdim <= 1 else EnsembleComponentLoss
             losses = [component_cls(result)]
+
+        mask = None
+        if data_mask is not None:
+            mask = _build_channel_mask(
+                data_mask,
+                list(self.packer.names),
+                predict_tensors.device,
+                predict_tensors.shape[0],
+            )
+
         return LossOutput(
             losses=losses,
             channel_names=list(self.packer.names),
+            mask=mask,
         )
 
     def get_normalizer_state(self) -> dict[str, float]:
@@ -665,18 +736,24 @@ class StepLoss(torch.nn.Module):
         predict_dict: TensorMapping,
         target_dict: TensorMapping,
         step: int,
+        data_mask: TensorMapping | None = None,
     ) -> LossOutput:
         """
         Args:
             predict_dict: The predicted data.
             target_dict: The target data.
             step: The step number, indexed from 0 for the first step.
+            data_mask: Optional per-variable boolean masks forwarded to the
+                underlying ``WeightedMappingLoss`` for correct masked
+                averaging.
 
         Returns:
             A ``LossOutput`` wrapping the step-weighted loss tensor.
         """
         step_weight = (1.0 + self.sqrt_loss_decay_constant * step) ** (-0.5)
-        return self.loss(predict_dict, target_dict).scale(step_weight)
+        return self.loss(predict_dict, target_dict, data_mask=data_mask).scale(
+            step_weight
+        )
 
 
 @dataclasses.dataclass

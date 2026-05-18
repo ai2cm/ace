@@ -47,8 +47,9 @@ class MergedXarrayDataset(DatasetABC):
         tensors: TensorDict = {}
         labels = None
         epochs = []
+        missing: frozenset[str] | None = None
         for dataset in self.datasets:
-            ds_tensors, time, ds_labels, ds_epoch = dataset[idx]
+            ds_tensors, time, ds_labels, ds_epoch, ds_missing = dataset[idx]
             if labels is None:
                 labels = ds_labels
             else:
@@ -56,20 +57,25 @@ class MergedXarrayDataset(DatasetABC):
                     labels = labels.union(ds_labels)
             tensors.update(ds_tensors)
             epochs.append(ds_epoch)
+            if ds_missing is not None:
+                missing = (missing or frozenset()).union(ds_missing)
         if not all(epoch == epochs[0] for epoch in epochs):
             raise ValueError(
                 "All datasets in a merged dataset must have the same epoch."
             )
-        return tensors, time, labels, epochs[0]
+        return tensors, time, labels, epochs[0], missing
 
     def get_sample_by_time_slice(self, time_slice: slice) -> DatasetItem:
         tensors: TensorDict = {}
+        missing: frozenset[str] | None = None
         for dataset in self.datasets:
-            ds_tensors, time, labels, epoch = dataset.get_sample_by_time_slice(
-                time_slice
+            ds_tensors, time, labels, epoch, ds_missing = (
+                dataset.get_sample_by_time_slice(time_slice)
             )
             tensors.update(ds_tensors)
-        return tensors, time, labels, epoch
+            if ds_missing is not None:
+                missing = (missing or frozenset()).union(ds_missing)
+        return tensors, time, labels, epoch, missing
 
     @property
     def all_times(self) -> xr.CFTimeIndex:
@@ -147,11 +153,13 @@ class MergeDatasetConfig(DatasetConfigABC):
         self,
         names: Sequence[str],
         n_timesteps: IntSchedule,
+        allow_missing_variables: bool = False,
     ):
         return get_merged_datasets(
             self,
             names,
             n_timesteps,
+            allow_missing_variables=allow_missing_variables,
         )
 
     @property
@@ -190,11 +198,13 @@ class MergeNoConcatDatasetConfig(DatasetConfigABC):
         self,
         names: Sequence[str],
         n_timesteps: IntSchedule,
+        allow_missing_variables: bool = False,
     ) -> tuple[MergedXarrayDataset, DatasetProperties]:
         return get_merged_datasets(
             MergeDatasetConfig(merge=self.merge),
             names,
             n_timesteps,
+            allow_missing_variables=allow_missing_variables,
         )
 
     @property
@@ -216,6 +226,7 @@ def get_merged_datasets(
     merged_config: MergeDatasetConfig | MergeNoConcatDatasetConfig,
     names: Sequence[str],
     n_timesteps: IntSchedule,
+    allow_missing_variables: bool = False,
 ) -> tuple[MergedXarrayDataset, DatasetProperties]:
     merged_xarray_datasets = []
     merged_properties: DatasetProperties | None = None
@@ -228,6 +239,7 @@ def get_merged_datasets(
         ) = config.build(
             per_dataset_names[config_counter],
             n_timesteps,
+            allow_missing_variables=allow_missing_variables,
         )
         merged_xarray_datasets.append(current_source_xarray_dataset)
 
