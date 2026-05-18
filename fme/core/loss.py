@@ -15,6 +15,14 @@ from fme.core.packer import Packer
 from fme.core.typing_ import TensorMapping
 
 
+@dataclasses.dataclass
+class ChannelLossInfo:
+    """Per-channel loss value and the number of batch samples that contributed."""
+
+    loss: torch.Tensor
+    count: int
+
+
 class LossComponent(abc.ABC):
     """A pre-weighted loss tensor that knows how to reduce itself to ``(B, C)``.
 
@@ -75,6 +83,7 @@ class LossOutput:
         self._channel_names = channel_names
         self._mask = mask
         self._per_channel: torch.Tensor | None = None
+        self._counts: list[int] | None = None
 
     def _get_per_channel(self) -> torch.Tensor:
         """Return a ``(C,)`` tensor of per-channel losses, computed once.
@@ -82,24 +91,25 @@ class LossOutput:
         When a mask is present (shape ``(B, C)``), each channel's loss
         is averaged only over the batch samples where that channel is
         present, so masked-out variables never dilute the result.
+
+        Also caches ``_counts`` — the number of active batch samples
+        per channel — for use in :meth:`get_channel_losses`.
         """
         if self._per_channel is None:
             bc = sum(c.reduce_to_channel() for c in self._losses)
             assert isinstance(bc, torch.Tensor)
             if bc.ndim == 0:
                 self._per_channel = bc.expand(len(self._channel_names))
+                self._counts = [1] * len(self._channel_names)
             elif self._mask is not None:
                 masked_sum = (bc * self._mask).sum(dim=0)
-                counts = self._mask.sum(dim=0).clamp(min=1)
-                self._per_channel = masked_sum / counts
+                raw_counts = self._mask.sum(dim=0)
+                self._per_channel = masked_sum / raw_counts.clamp(min=1)
+                self._counts = [int(c.item()) for c in raw_counts]
             else:
                 self._per_channel = bc.mean(dim=0)
+                self._counts = [bc.shape[0]] * len(self._channel_names)
         return self._per_channel
-
-    def _n_active_channels(self) -> int:
-        if self._mask is not None:
-            return int((self._mask.sum(dim=0) > 0).sum().item())
-        return len(self._channel_names)
 
     def total(self) -> torch.Tensor:
         """Scalar loss — the optimisation target."""
@@ -110,11 +120,27 @@ class LossOutput:
                 return pc[active].mean()
         return pc.mean()
 
-    def get_channel_losses(self) -> dict[str, torch.Tensor]:
-        """Per-channel scalar losses that sum to ``total()``."""
+    def get_channel_losses(self) -> dict[str, ChannelLossInfo]:
+        """Per-channel mean losses with active-sample counts.
+
+        Each :class:`ChannelLossInfo` carries the mean loss for that
+        channel (averaged over active samples only) and the number of
+        batch samples that contributed.  Downstream aggregators should
+        use the counts to compute properly weighted means across
+        batches.
+        """
         pc = self._get_per_channel()
-        n = self._n_active_channels()
-        return dict(zip(self._channel_names, (pc / n).unbind(0)))
+        assert self._counts is not None
+        if pc.ndim == 0:
+            return {
+                name: ChannelLossInfo(loss=pc, count=self._counts[i])
+                for i, name in enumerate(self._channel_names)
+            }
+        n = min(pc.shape[0], len(self._channel_names))
+        return {
+            self._channel_names[i]: ChannelLossInfo(loss=pc[i], count=self._counts[i])
+            for i in range(n)
+        }
 
     def scale(self, weight: float) -> "LossOutput":
         """Return a new ``LossOutput`` with every component scaled."""
@@ -123,33 +149,6 @@ class LossOutput:
             self._channel_names,
             mask=self._mask,
         )
-
-
-def _build_channel_mask(
-    data_mask: TensorMapping,
-    names: list[str],
-    device: torch.device,
-    batch_size: int,
-) -> torch.Tensor:
-    """Build a ``(B, C)`` float mask from per-variable boolean masks.
-
-    Args:
-        data_mask: Per-variable boolean masks of shape ``[batch]``.
-        names: Channel names in packing order.
-        device: Device for the output tensor.
-        batch_size: Size of the batch dimension.
-
-    Returns:
-        Float tensor of shape ``(batch_size, len(names))`` with 1.0
-        for present entries and 0.0 for absent ones.
-    """
-    masks = []
-    for name in names:
-        if name in data_mask:
-            masks.append(data_mask[name].to(device=device, dtype=torch.float))
-        else:
-            masks.append(torch.ones(batch_size, device=device, dtype=torch.float))
-    return torch.stack(masks, dim=1)
 
 
 class _MSELoss(torch.nn.Module):
@@ -265,12 +264,17 @@ class WeightedMappingLoss:
 
         mask = None
         if data_mask is not None:
-            mask = _build_channel_mask(
-                data_mask,
-                list(self.packer.names),
-                predict_tensors.device,
-                predict_tensors.shape[0],
-            )
+            batch_size = predict_tensors.shape[0]
+            device = predict_tensors.device
+            filled: dict[str, torch.Tensor] = {}
+            for name in self.packer.names:
+                if name in data_mask:
+                    filled[name] = data_mask[name].to(device=device, dtype=torch.float)
+                else:
+                    filled[name] = torch.ones(
+                        batch_size, device=device, dtype=torch.float
+                    )
+            mask = self.packer.pack(filled, axis=1)
 
         return LossOutput(
             losses=losses,

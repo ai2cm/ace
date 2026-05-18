@@ -42,7 +42,7 @@ from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.labels import BatchLabels
-from fme.core.loss import StepLoss, StepLossConfig
+from fme.core.loss import ChannelLossInfo, StepLoss, StepLossConfig
 from fme.core.masking import NullMasking, StaticMaskingConfig
 from fme.core.normalizer import (
     NetworkAndLossNormalizationConfig,
@@ -345,7 +345,7 @@ class TrainOutput(TrainOutputABC):
     derive_func: Callable[[TensorMapping, TensorMapping], TensorDict] = lambda x, _: (
         dict(x)
     )
-    per_channel_losses: dict[str, torch.Tensor] | None = None
+    per_channel_losses: dict[str, ChannelLossInfo] | None = None
 
     def __post_init__(self):
         for v in self.target_data.values():
@@ -1605,7 +1605,7 @@ class TrainStepper(
         target_data: BatchData,
         optimization: OptimizationABC,
         metrics: dict[str, float],
-    ) -> tuple[list[EnsembleTensorDict], dict[str, torch.Tensor] | None]:
+    ) -> tuple[list[EnsembleTensorDict], dict[str, ChannelLossInfo] | None]:
         input_data = data.get_start(self._prognostic_names, self.n_ic_timesteps)
         # output from self.predict_paired does not include initial condition
         n_forward_steps = data.time.shape[1] - self.n_ic_timesteps
@@ -1643,7 +1643,8 @@ class TrainStepper(
                     "data requirements are retrieved, so this is a bug."
                 )
             n_forward_steps = stochastic_n_forward_steps
-        per_channel_sum: dict[str, torch.Tensor] | None = None
+        weighted_sums: dict[str, torch.Tensor] | None = None
+        total_counts: dict[str, int] | None = None
         for step in range(n_forward_steps):
             optimize_step = (
                 step == n_forward_steps - 1 or not self._config.optimize_last_step_only
@@ -1668,14 +1669,28 @@ class TrainStepper(
                 step_total_loss = step_loss.total()
                 metrics[f"loss_step_{step}"] = step_total_loss.detach()
                 per_ch = step_loss.get_channel_losses()
-                if per_channel_sum is None:
-                    per_channel_sum = {k: v.detach().clone() for k, v in per_ch.items()}
+                if weighted_sums is None:
+                    weighted_sums = {
+                        k: v.loss.detach() * v.count for k, v in per_ch.items()
+                    }
+                    total_counts = {k: v.count for k, v in per_ch.items()}
                 else:
-                    for k in per_channel_sum:
-                        per_channel_sum[k] = per_channel_sum[k] + per_ch[k].detach()
+                    assert total_counts is not None
+                    for k, v in per_ch.items():
+                        weighted_sums[k] = weighted_sums[k] + v.loss.detach() * v.count
+                        total_counts[k] = total_counts[k] + v.count
             if optimize_step:
                 optimization.accumulate_loss(step_total_loss)
-        return output_list, per_channel_sum
+        per_channel_losses: dict[str, ChannelLossInfo] | None = None
+        if weighted_sums is not None and total_counts is not None:
+            per_channel_losses = {
+                k: ChannelLossInfo(
+                    loss=weighted_sums[k] / max(total_counts[k], 1),
+                    count=total_counts[k],
+                )
+                for k in weighted_sums
+            }
+        return output_list, per_channel_losses
 
     def update_training_history(self, training_job: TrainingJob) -> None:
         """
