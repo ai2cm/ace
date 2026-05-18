@@ -9,7 +9,6 @@ import torch
 
 from fme.core.device import get_device
 from fme.core.ema import EMATracker
-from fme.core.generics.aggregator import AggregatorABC
 from fme.core.generics.data import DataLoader, GriddedDataABC
 from fme.core.generics.lr_tuning import LRTuningConfig, run_lr_tuning_trial
 from fme.core.generics.optimization import OptimizationABC
@@ -81,7 +80,6 @@ class _Stepper(TrainStepperABC["None", "_BatchData", "None", "None", "_TrainOutp
         optimization: OptimizationABC,
         compute_derived_variables: bool = False,
     ) -> _TrainOutput:
-        # Produce a loss with a grad_fn so Optimization.step_weights can backward
         x = torch.ones(1, 1, device=get_device())
         loss = self._modules[0](x).sum()
         optimization.accumulate_loss(loss)
@@ -109,21 +107,10 @@ class _Stepper(TrainStepperABC["None", "_BatchData", "None", "None", "_TrainOutp
     def set_train(self) -> None:
         pass
 
+    def seed_eval(self, seed: int) -> None:
+        pass
+
     def update_training_history(self, training_job: TrainingJob) -> None:
-        pass
-
-
-class _ValidationAggregator(AggregatorABC["_TrainOutput"]):
-    def __init__(self, loss: float):
-        self._loss = loss
-
-    def record_batch(self, batch: "_TrainOutput") -> None:
-        pass
-
-    def get_logs(self, label: str) -> dict[str, float]:
-        return {f"{label}/mean/loss": self._loss}
-
-    def flush_diagnostics(self, subdir: str | None) -> None:
         pass
 
 
@@ -140,9 +127,6 @@ def _build_optimization(modules: torch.nn.ModuleList) -> Optimization:
 
 
 def _make_copy_ema(ema: EMATracker):
-    """Return a callable that creates a copy of the EMA via state APIs,
-    matching the real Trainer._copy_ema pattern."""
-
     def copy_ema(modules: torch.nn.ModuleList) -> EMATracker:
         return EMATracker.from_state(ema.get_state(), modules)
 
@@ -150,9 +134,6 @@ def _make_copy_ema(ema: EMATracker):
 
 
 def _make_copy_stepper(stepper: _Stepper):
-    """Return a callable that creates a copy of the stepper via state APIs,
-    matching the real Trainer._copy_stepper pattern (deepcopy + load_state)."""
-
     def copy_stepper() -> _Stepper:
         new = copy.deepcopy(stepper)
         new.load_state(copy.deepcopy(stepper.get_state()))
@@ -161,21 +142,20 @@ def _make_copy_stepper(stepper: _Stepper):
     return copy_stepper
 
 
-def _make_aggregator_factory(*losses: float):
-    """Return a get_validation_aggregator callable that yields the given losses."""
+def _make_validate_stepper(*losses: float):
+    """Return a ValidateStepper callback that returns the given losses in order."""
     it = iter(losses)
 
-    def factory():
-        return _ValidationAggregator(next(it))
+    def validate_stepper(stepper, ema):
+        return next(it)
 
-    return factory
+    return validate_stepper
 
 
 def test_candidate_wins():
     """Candidate wins when its loss is below baseline - threshold * baseline."""
     stepper = _Stepper()
     train_data = _TrainData(n_batches=5)
-    valid_data = _TrainData(n_batches=3)
     optimization = _build_optimization(stepper.modules)
     config = LRTuningConfig(
         epochs=Slice(),
@@ -188,15 +168,13 @@ def test_candidate_wins():
     # threshold = 0.8 - 0.1*0.8 = 0.72; candidate 0.5 < 0.72 → candidate wins
     result = run_lr_tuning_trial(
         train_data=train_data,
-        valid_data=valid_data,
         optimization=optimization,
         copy_stepper=_make_copy_stepper(stepper),
         build_optimization=_build_optimization,
         copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
-        get_validation_aggregator=_make_aggregator_factory(0.8, 0.5),
-        validate_using_ema=False,
+        validate_stepper=_make_validate_stepper(0.8, 0.5),
     )
 
     assert result == 0.01 * 0.5
@@ -206,7 +184,6 @@ def test_candidate_below_threshold():
     """Candidate improves but not enough to beat the threshold."""
     stepper = _Stepper()
     train_data = _TrainData(n_batches=5)
-    valid_data = _TrainData(n_batches=3)
     optimization = _build_optimization(stepper.modules)
     config = LRTuningConfig(
         epochs=Slice(),
@@ -219,15 +196,13 @@ def test_candidate_below_threshold():
     # threshold = 0.8 - 0.5*0.8 = 0.4; candidate 0.75 > 0.4 → baseline wins
     result = run_lr_tuning_trial(
         train_data=train_data,
-        valid_data=valid_data,
         optimization=optimization,
         copy_stepper=_make_copy_stepper(stepper),
         build_optimization=_build_optimization,
         copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
-        get_validation_aggregator=_make_aggregator_factory(0.8, 0.75),
-        validate_using_ema=False,
+        validate_stepper=_make_validate_stepper(0.8, 0.75),
     )
 
     assert result is None
@@ -237,7 +212,6 @@ def test_candidate_worsens():
     """Candidate worsens validation loss -> baseline wins."""
     stepper = _Stepper()
     train_data = _TrainData(n_batches=5)
-    valid_data = _TrainData(n_batches=3)
     optimization = _build_optimization(stepper.modules)
     config = LRTuningConfig(
         epochs=Slice(),
@@ -250,15 +224,13 @@ def test_candidate_worsens():
     # threshold = 0.9 - 0.1*0.9 = 0.81; candidate 1.1 > 0.81 → baseline wins
     result = run_lr_tuning_trial(
         train_data=train_data,
-        valid_data=valid_data,
         optimization=optimization,
         copy_stepper=_make_copy_stepper(stepper),
         build_optimization=_build_optimization,
         copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
-        get_validation_aggregator=_make_aggregator_factory(0.9, 1.1),
-        validate_using_ema=False,
+        validate_stepper=_make_validate_stepper(0.9, 1.1),
     )
 
     assert result is None
@@ -268,7 +240,6 @@ def test_both_worsen():
     """Both worsen -> baseline wins."""
     stepper = _Stepper()
     train_data = _TrainData(n_batches=5)
-    valid_data = _TrainData(n_batches=3)
     optimization = _build_optimization(stepper.modules)
     config = LRTuningConfig(
         epochs=Slice(),
@@ -281,15 +252,13 @@ def test_both_worsen():
     # threshold = 1.2 - 0.1*1.2 = 1.08; candidate 1.3 > 1.08 → baseline wins
     result = run_lr_tuning_trial(
         train_data=train_data,
-        valid_data=valid_data,
         optimization=optimization,
         copy_stepper=_make_copy_stepper(stepper),
         build_optimization=_build_optimization,
         copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
-        get_validation_aggregator=_make_aggregator_factory(1.2, 1.3),
-        validate_using_ema=False,
+        validate_stepper=_make_validate_stepper(1.2, 1.3),
     )
 
     assert result is None
@@ -299,7 +268,6 @@ def test_baseline_worsens_candidate_improves():
     """Baseline worsens but candidate improves enough -> candidate wins."""
     stepper = _Stepper()
     train_data = _TrainData(n_batches=5)
-    valid_data = _TrainData(n_batches=3)
     optimization = _build_optimization(stepper.modules)
     config = LRTuningConfig(
         epochs=Slice(),
@@ -312,15 +280,13 @@ def test_baseline_worsens_candidate_improves():
     # threshold = 1.1 - 0.1*1.1 = 0.99; candidate 0.5 < 0.99 → candidate wins
     result = run_lr_tuning_trial(
         train_data=train_data,
-        valid_data=valid_data,
         optimization=optimization,
         copy_stepper=_make_copy_stepper(stepper),
         build_optimization=_build_optimization,
         copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
-        get_validation_aggregator=_make_aggregator_factory(1.1, 0.5),
-        validate_using_ema=False,
+        validate_stepper=_make_validate_stepper(1.1, 0.5),
     )
 
     assert result == 0.01 * 0.5
@@ -333,7 +299,6 @@ def test_does_not_mutate_original_stepper():
     original_weight = stepper.modules[0].weight.data.clone()
 
     train_data = _TrainData(n_batches=5)
-    valid_data = _TrainData(n_batches=3)
     optimization = _build_optimization(stepper.modules)
     config = LRTuningConfig(
         epochs=Slice(),
@@ -344,15 +309,13 @@ def test_does_not_mutate_original_stepper():
 
     run_lr_tuning_trial(
         train_data=train_data,
-        valid_data=valid_data,
         optimization=optimization,
         copy_stepper=_make_copy_stepper(stepper),
         build_optimization=_build_optimization,
         copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
-        get_validation_aggregator=_make_aggregator_factory(0.8, 0.5),
-        validate_using_ema=False,
+        validate_stepper=_make_validate_stepper(0.8, 0.5),
     )
 
     assert torch.allclose(stepper.modules[0].weight.data, original_weight)
@@ -365,7 +328,6 @@ def test_uses_subset_loader_with_num_batches():
     train_data.subset_loader = unittest.mock.MagicMock(  # type: ignore
         wraps=train_data.subset_loader
     )
-    valid_data = _TrainData(n_batches=3)
     optimization = _build_optimization(stepper.modules)
     config = LRTuningConfig(
         epochs=Slice(),
@@ -376,61 +338,27 @@ def test_uses_subset_loader_with_num_batches():
 
     run_lr_tuning_trial(
         train_data=train_data,
-        valid_data=valid_data,
         optimization=optimization,
         copy_stepper=_make_copy_stepper(stepper),
         build_optimization=_build_optimization,
         copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
-        get_validation_aggregator=_make_aggregator_factory(0.9, 0.8),
-        validate_using_ema=False,
+        validate_stepper=_make_validate_stepper(0.9, 0.8),
     )
 
     train_data.subset_loader.assert_called_once_with(stop_batch=4)
-
-
-def test_with_ema_validation():
-    """Trial should pass validate_using_ema through to run_validation."""
-    stepper = _Stepper()
-    train_data = _TrainData(n_batches=5)
-    valid_data = _TrainData(n_batches=3)
-    optimization = _build_optimization(stepper.modules)
-    config = LRTuningConfig(
-        epochs=Slice(),
-        lr_factor=0.5,
-        num_batches=3,
-        improvement_threshold=0.1,
-    )
-
-    # This should not raise even with validate_using_ema=True
-    result = run_lr_tuning_trial(
-        train_data=train_data,
-        valid_data=valid_data,
-        optimization=optimization,
-        copy_stepper=_make_copy_stepper(stepper),
-        build_optimization=_build_optimization,
-        copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
-        config=config,
-        current_lr=0.01,
-        get_validation_aggregator=_make_aggregator_factory(0.8, 0.5),
-        validate_using_ema=True,
-    )
-
-    assert result == 0.01 * 0.5
 
 
 def test_trial_does_not_mutate_original_ema_num_updates():
     """The original EMA's num_updates must not be modified by the trial."""
     stepper = _Stepper()
     ema = EMATracker(stepper.modules, decay=0.9999)
-    # Simulate some prior training updates
     for _ in range(5):
         ema(stepper.modules)
     original_num_updates = ema.num_updates.clone()
 
     train_data = _TrainData(n_batches=5)
-    valid_data = _TrainData(n_batches=3)
     optimization = _build_optimization(stepper.modules)
     config = LRTuningConfig(
         epochs=Slice(),
@@ -441,15 +369,13 @@ def test_trial_does_not_mutate_original_ema_num_updates():
 
     run_lr_tuning_trial(
         train_data=train_data,
-        valid_data=valid_data,
         optimization=optimization,
         copy_stepper=_make_copy_stepper(stepper),
         build_optimization=_build_optimization,
         copy_ema=_make_copy_ema(ema),
         config=config,
         current_lr=0.01,
-        get_validation_aggregator=_make_aggregator_factory(0.8, 0.5),
-        validate_using_ema=False,
+        validate_stepper=_make_validate_stepper(0.8, 0.5),
     )
 
     assert torch.equal(ema.num_updates, original_num_updates)
@@ -466,7 +392,6 @@ def test_trial_does_not_mutate_original_ema_params():
     }
 
     train_data = _TrainData(n_batches=5)
-    valid_data = _TrainData(n_batches=3)
     optimization = _build_optimization(stepper.modules)
     config = LRTuningConfig(
         epochs=Slice(),
@@ -477,15 +402,13 @@ def test_trial_does_not_mutate_original_ema_params():
 
     run_lr_tuning_trial(
         train_data=train_data,
-        valid_data=valid_data,
         optimization=optimization,
         copy_stepper=_make_copy_stepper(stepper),
         build_optimization=_build_optimization,
         copy_ema=_make_copy_ema(ema),
         config=config,
         current_lr=0.01,
-        get_validation_aggregator=_make_aggregator_factory(0.8, 0.5),
-        validate_using_ema=False,
+        validate_stepper=_make_validate_stepper(0.8, 0.5),
     )
 
     for name in original_ema_params:
@@ -540,7 +463,6 @@ def test_trial_does_not_mutate_original_optimizer_state():
 
     original_state = copy.deepcopy(optimization.get_state())
 
-    valid_data = _TrainData(n_batches=3)
     config = LRTuningConfig(
         epochs=Slice(),
         lr_factor=0.5,
@@ -550,15 +472,13 @@ def test_trial_does_not_mutate_original_optimizer_state():
 
     run_lr_tuning_trial(
         train_data=train_data,
-        valid_data=valid_data,
         optimization=optimization,
         copy_stepper=_make_copy_stepper(stepper),
         build_optimization=_build_optimization,
         copy_ema=_make_copy_ema(ema),
         config=config,
         current_lr=0.01,
-        get_validation_aggregator=_make_aggregator_factory(0.8, 0.5),
-        validate_using_ema=False,
+        validate_stepper=_make_validate_stepper(0.8, 0.5),
     )
 
     current_state = optimization.get_state()

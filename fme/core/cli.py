@@ -1,5 +1,7 @@
 import argparse
 import dataclasses
+import glob
+import logging
 import os
 import shutil
 from collections.abc import Sequence
@@ -12,6 +14,15 @@ from fme.core.distributed import Distributed
 from fme.core.wandb import WANDB_RUN_ID_FILE, WandB
 
 from .config import update_dict_with_dotlist
+
+
+def remove_stale_tmp_checkpoints(directory: str) -> None:
+    """Remove leftover .tmp checkpoint files from a prior interrupted save."""
+    if not os.path.isdir(directory):
+        return
+    for tmp_file in glob.glob(os.path.join(directory, ".*.tmp")):
+        logging.warning(f"Removing stale temporary checkpoint file: {tmp_file}")
+        os.remove(tmp_file)
 
 
 @dataclasses.dataclass
@@ -49,6 +60,8 @@ class ResumeResultsConfig:
         if dist.is_root():
             # recursively copy all files in existing_dir to experiment_dir
             shutil.copytree(self.existing_dir, experiment_dir, dirs_exist_ok=True)
+            for subdir in ("training_checkpoints", "checkpoints"):
+                remove_stale_tmp_checkpoints(os.path.join(experiment_dir, subdir))
             wandb_run_id_path = os.path.join(experiment_dir, WANDB_RUN_ID_FILE)
             if not self.resume_wandb and os.path.exists(wandb_run_id_path):
                 os.remove(wandb_run_id_path)

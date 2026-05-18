@@ -102,6 +102,7 @@ def get_gridded_data(
         # reading zarr with async from weka also requires forkserver
         mp_context = "forkserver"
         persistent_workers = True
+        dataset.enable_shared_memory()
     else:
         mp_context = None
         persistent_workers = False
@@ -119,6 +120,7 @@ def get_gridded_data(
         batch_size=batch_size,
         n_window_timesteps=requirements.n_timesteps_schedule,
         time_buffer=config.time_buffer,
+        time_buffer_pool_size=config.time_buffer_pool_size,
         num_workers=config.num_data_workers,
         sampler=sampler,
         shuffled=train,

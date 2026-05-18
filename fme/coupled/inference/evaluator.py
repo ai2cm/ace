@@ -8,7 +8,9 @@ import torch
 
 import fme
 from fme.ace.stepper import load_stepper as load_single_stepper
-from fme.ace.stepper import load_stepper_config as load_single_stepper_config
+from fme.ace.stepper import (
+    load_stepper_config_with_override as load_single_stepper_config,
+)
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.cloud import makedirs
 from fme.core.derived_variables import get_derived_variable_metadata
@@ -123,9 +125,7 @@ def load_stepper_config(
         return checkpoint_path.load_stepper_config()
 
     logging.info(f"Loading trained coupled model checkpoint from {checkpoint_path}")
-    checkpoint = torch.load(
-        checkpoint_path, map_location=fme.get_device(), weights_only=False
-    )
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     config = CoupledStepperConfig.from_state(checkpoint["stepper"]["config"])
 
     return config

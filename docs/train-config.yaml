@@ -2,18 +2,17 @@ experiment_dir: train_output
 save_checkpoint: true
 validate_using_ema: true
 max_epochs: 80
-n_forward_steps: 1
 inference:
-  n_forward_steps: 7300  # 5 years
-  forward_steps_in_memory: 50
-  loader:
-    start_indices:
-      first: 0
-      n_initial_conditions: 4
-      interval: 1460  # 1 year
-    dataset:
-      data_path: validation
-    num_data_workers: 4
+  - n_forward_steps: 7300  # 5 years
+    forward_steps_in_memory: 50
+    loader:
+      start_indices:
+        first: 0
+        n_initial_conditions: 4
+        interval: 1460  # 1 year
+      dataset:
+        data_path: validation
+      num_data_workers: 4
 logging:
   log_to_screen: true
   log_to_wandb: false
@@ -50,6 +49,7 @@ optimization:
   optimizer_type: AdamW
   # can also set kwargs: fused: true for performance if using GPU
 stepper_training:
+  n_forward_steps: 1
   loss:
     type: MSE
 stepper:
