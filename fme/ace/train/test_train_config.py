@@ -15,13 +15,27 @@ from fme.ace.stepper.single_module import (
     StepperConfig,
     TrainStepperConfig,
 )
-from fme.ace.train.train_config import InlineInferenceConfig, TrainConfig
+from fme.ace.train.train_config import (
+    InlineInferenceConfig,
+    InlineValidationConfig,
+    TrainConfig,
+)
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import OptimizationConfig
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
 from fme.core.typing_ import Slice
+
+
+def _make_validation_config(
+    name: str | None = None, weight: float = 1.0
+) -> InlineValidationConfig:
+    return InlineValidationConfig(
+        loader=DataLoaderConfig(dataset=XarrayDataConfig(data_path=""), batch_size=1),
+        name=name,
+        weight=weight,
+    )
 
 
 def _make_inference_config(
@@ -68,16 +82,18 @@ def _make_train_config(
     tmp_path,
     inference: InlineInferenceConfig | list[InlineInferenceConfig],
     max_epochs: int = 5,
+    validation: InlineValidationConfig | list[InlineValidationConfig] | None = None,
 ) -> TrainConfig:
-    dummy_loader = DataLoaderConfig(
-        dataset=XarrayDataConfig(data_path=""), batch_size=1
-    )
+    if validation is None:
+        validation = _make_validation_config()
     return TrainConfig(
         experiment_dir=str(tmp_path),
         stepper=_make_stepper_config(),
         stepper_training=TrainStepperConfig(n_forward_steps=1),
-        train_loader=dummy_loader,
-        validation_loader=dummy_loader,
+        train_loader=DataLoaderConfig(
+            dataset=XarrayDataConfig(data_path=""), batch_size=1
+        ),
+        validation=validation,
         optimization=OptimizationConfig(),
         logging=LoggingConfig(),
         max_epochs=max_epochs,
@@ -206,4 +222,74 @@ def test_get_inference_epoch_sets_different_weighted_epochs_raises(tmp_path):
                 _make_inference_config(epochs=Slice(step=3), weight=1.0),
             ],
             max_epochs=6,
+        )
+
+
+def test_validation_negative_weight_raises():
+    with pytest.raises(ValueError, match="non-negative"):
+        _make_validation_config(weight=-1.0)
+
+
+def test_validation_zero_weight_accepted():
+    config = _make_validation_config(weight=0.0)
+    assert config.weight == 0.0
+
+
+def test_validation_default_weight_is_one():
+    config = _make_validation_config()
+    assert config.weight == 1.0
+
+
+def test_validation_single_config_gives_list(tmp_path):
+    config = _make_train_config(tmp_path, [], validation=_make_validation_config())
+    assert isinstance(config.validation, InlineValidationConfig)
+    assert isinstance(config.validation_list, list)
+    assert len(config.validation_list) == 1
+    assert config.validation_names == ["val"]
+
+
+def test_validation_names_single_unnamed(tmp_path):
+    config = _make_train_config(tmp_path, [], validation=[_make_validation_config()])
+    assert config.validation_names == ["val"]
+
+
+def test_validation_names_multiple_unnamed(tmp_path):
+    config = _make_train_config(
+        tmp_path,
+        [],
+        validation=[_make_validation_config(), _make_validation_config()],
+    )
+    assert config.validation_names == ["val_0", "val_1"]
+
+
+def test_validation_names_explicit(tmp_path):
+    config = _make_train_config(
+        tmp_path,
+        [],
+        validation=[
+            _make_validation_config(name="era5"),
+            _make_validation_config(name="obs"),
+        ],
+    )
+    assert config.validation_names == ["era5", "obs"]
+
+
+def test_validation_names_mixed(tmp_path):
+    config = _make_train_config(
+        tmp_path,
+        [],
+        validation=[_make_validation_config(name="era5"), _make_validation_config()],
+    )
+    assert config.validation_names == ["era5", "val_1"]
+
+
+def test_duplicate_validation_names_raises(tmp_path):
+    with pytest.raises(ValueError, match="Duplicate validation names"):
+        _make_train_config(
+            tmp_path,
+            [],
+            validation=[
+                _make_validation_config(name="same"),
+                _make_validation_config(name="same"),
+            ],
         )

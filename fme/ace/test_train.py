@@ -57,7 +57,12 @@ from fme.ace.testing import (
 )
 from fme.ace.train.train import build_trainer, prepare_directory
 from fme.ace.train.train import main as train_main
-from fme.ace.train.train_config import InlineInferenceConfig, TrainBuilders, TrainConfig
+from fme.ace.train.train_config import (
+    InlineInferenceConfig,
+    InlineValidationConfig,
+    TrainBuilders,
+    TrainConfig,
+)
 from fme.core.coordinates import (
     HEALPixCoordinates,
     HorizontalCoordinates,
@@ -317,14 +322,20 @@ def _get_test_yaml_files(
             time_buffer=time_buffer,
             sample_with_replacement=10,
         ),
-        validation_loader=DataLoaderConfig(
-            dataset=XarrayDataConfig(
-                data_path=str(valid_data_path),
-                spatial_dimensions=spatial_dimensions_str,
-                labels=["era5"] if conditional else None,
+        validation=InlineValidationConfig(
+            loader=DataLoaderConfig(
+                dataset=XarrayDataConfig(
+                    data_path=str(valid_data_path),
+                    spatial_dimensions=spatial_dimensions_str,
+                    labels=["era5"] if conditional else None,
+                ),
+                batch_size=2,
+                num_data_workers=0,
             ),
-            batch_size=2,
-            num_data_workers=0,
+            aggregator=OneStepAggregatorConfig(
+                log_snapshots=log_validation_maps,
+                log_mean_maps=log_validation_maps,
+            ),
         ),
         optimization=OptimizationConfig(
             use_gradient_accumulation=True,
@@ -382,10 +393,6 @@ def _get_test_yaml_files(
         logging=logging_config,
         experiment_dir=str(results_dir),
         save_per_epoch_diagnostics=save_per_epoch_diagnostics,
-        validation_aggregator=OneStepAggregatorConfig(
-            log_snapshots=log_validation_maps,
-            log_mean_maps=log_validation_maps,
-        ),
     )
 
     inference_config = InferenceEvaluatorConfig(
@@ -1088,7 +1095,7 @@ def test_train_with_non_local_experiment_dir_error():
             experiment_dir=non_local_experiment_dir,
             stepper=stepper,
             train_loader=dummy_data_loader,
-            validation_loader=dummy_data_loader,
+            validation=InlineValidationConfig(loader=dummy_data_loader),
             optimization=OptimizationConfig(),
             logging=LoggingConfig(),
             max_epochs=1,
@@ -1109,7 +1116,7 @@ def test_train_config_with_checkpoint_stepper(tmp_path: pathlib.Path):
         stepper=CheckpointStepperConfig(checkpoint_path=str(checkpoint_path)),
         stepper_training=TrainStepperConfig(n_forward_steps=2),
         train_loader=dummy_data_loader,
-        validation_loader=dummy_data_loader,
+        validation=InlineValidationConfig(loader=dummy_data_loader),
         optimization=OptimizationConfig(),
         logging=LoggingConfig(),
         max_epochs=1,
@@ -1152,7 +1159,7 @@ def test_train_config_with_stepper_config_sets_stepper_config(tmp_path: pathlib.
         stepper=stepper,
         stepper_training=TrainStepperConfig(n_forward_steps=2),
         train_loader=dummy_data_loader,
-        validation_loader=dummy_data_loader,
+        validation=InlineValidationConfig(loader=dummy_data_loader),
         optimization=OptimizationConfig(),
         logging=LoggingConfig(),
         max_epochs=1,

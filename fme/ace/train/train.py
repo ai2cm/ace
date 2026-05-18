@@ -85,11 +85,19 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
     # trainer, you can build it however you like. This is here for convenience.
     logging.info("Initializing training data loader")
     train_data = builder.get_train_data()
-    logging.info("Initializing validation data loader")
-    validation_data = builder.get_validation_data()
 
     variable_metadata = get_derived_variable_metadata() | train_data.variable_metadata
-    for data, name in zip((train_data, validation_data), ("train", "valid")):
+
+    if config.validation_list:
+        logging.info("Initializing validation data loaders")
+    else:
+        logging.info("Skipping validation")
+    validation_entries = builder.get_validation_data()
+
+    for data, name in zip(
+        [train_data] + [data for _, data, _ in validation_entries],
+        ["train"] + [name for _, _, name in validation_entries],
+    ):
         data.log_info(name)
 
     if config.inference_list:
@@ -109,6 +117,9 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         modules=stepper.modules, base_weights=stepper.get_base_weights()
     )
 
+    primary_validation_config = (
+        config.validation_list[0].aggregator if config.validation_list else None
+    )
     aggregator_builder = AggregatorBuilder(
         train_config=config.train_aggregator,
         dataset_info=dataset_info.update_variable_metadata(variable_metadata),
@@ -116,20 +127,41 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         loss_scaling=stepper.effective_loss_scaling,
         channel_mean_names=stepper.loss_names,
         save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
-        validation_config=config.validation_aggregator,
+        validation_config=primary_validation_config,
     )
 
     def validation_callback(epoch: int) -> tuple[dict[str, Any], float]:
-        validation_data.set_epoch(epoch)
-        aggregator = aggregator_builder.get_validation_aggregator()
-        logs = run_validation(
-            train_stepper=stepper,
-            validation_data=validation_data,
-            aggregator=aggregator,
-            diagnostics_subdir=f"epoch_{epoch:04d}",
-            record_logs=lambda logs: None,
-        )
-        return logs, logs["val/mean/loss"]
+        all_logs: dict[str, Any] = {}
+        weighted_loss = 0.0
+        for entry_config, data, name in validation_entries:
+            data.set_epoch(epoch)
+            aggregator = entry_config.aggregator.build(
+                dataset_info=dataset_info.update_variable_metadata(variable_metadata),
+                loss_scaling=stepper.effective_loss_scaling,
+                save_diagnostics=config.save_per_epoch_diagnostics,
+                output_dir=os.path.join(config.output_dir, name),
+                channel_mean_names=stepper.loss_names,
+            )
+            logs = run_validation(
+                train_stepper=stepper,
+                validation_data=data,
+                aggregator=aggregator,
+                label=name,
+                diagnostics_subdir=f"epoch_{epoch:04d}",
+                record_logs=lambda logs: None,
+            )
+            all_logs.update(logs)
+            if entry_config.weight > 0:
+                metric_key = f"{name}/mean/loss"
+                loss = logs.get(metric_key)
+                if loss is None:
+                    raise RuntimeError(
+                        f"Validation entry {name!r} with "
+                        f"weight={entry_config.weight} did not produce "
+                        f"expected metric key {metric_key!r}."
+                    )
+                weighted_loss += entry_config.weight * loss
+        return all_logs, weighted_loss
 
     def inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
         if epoch not in inference_epochs:
@@ -178,11 +210,12 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
 
         return all_logs, weighted_error
 
+    primary_validation_data = validation_entries[0][1]
     do_gc_collect = fme.get_device() != torch.device("cpu")
     trainer_config: TrainConfigProtocol = config  # documenting trainer input type
     return Trainer(
         train_data=train_data,
-        validation_data=validation_data,
+        validation_data=primary_validation_data,
         stepper=stepper,
         build_optimization=builder.get_optimization,
         build_ema=builder.get_ema,
@@ -206,9 +239,7 @@ class AggregatorBuilder(
         loss_scaling: dict[str, torch.Tensor] | None = None,
         channel_mean_names: Sequence[str] | None = None,
         save_per_epoch_diagnostics: bool = False,
-        validation_config: OneStepAggregatorConfig = dataclasses.field(
-            default_factory=lambda: OneStepAggregatorConfig(),
-        ),
+        validation_config: OneStepAggregatorConfig | None = None,
     ):
         self.train_config = train_config
         self.dataset_info = dataset_info
@@ -216,7 +247,7 @@ class AggregatorBuilder(
         self.channel_mean_names = channel_mean_names
         self.output_dir = output_dir
         self.save_per_epoch_diagnostics = save_per_epoch_diagnostics
-        self.validation_config = validation_config
+        self.validation_config = validation_config or OneStepAggregatorConfig()
 
     def get_train_aggregator(self) -> TrainAggregator:
         return TrainAggregator(

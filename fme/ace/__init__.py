@@ -119,6 +119,7 @@ from .train.train_config import (
     DataLoaderConfig,
     EMAConfig,
     InlineInferenceConfig,
+    InlineValidationConfig,
     LoggingConfig,
     OptimizationConfig,
     TrainConfig,
