@@ -210,3 +210,106 @@ events:
     stop: 131
   save_generated_samples: true
   n_samples: 16
+# --- precipitation over mountainous regions ---
+- name: W_US_PrecipMtn_BlueMtns_20230105
+  date: 2023-01-05T12:00
+  lat_extent:
+    start: 38
+    stop: 54
+  lon_extent:
+    start: 233    # 16x16 deg centered on (45.66N, 119.35W)
+    stop: 249
+  save_generated_samples: true
+  n_samples: 16
+- name: W_US_PrecipMtn_NRockies_20230205
+  date: 2023-02-05T12:00
+  lat_extent:
+    start: 39
+    stop: 55
+  lon_extent:
+    start: 233    # 16x16 deg centered on (47.22N, 118.63W)
+    stop: 249
+  save_generated_samples: true
+  n_samples: 16
+- name: W_US_PrecipMtn_Wasatch_20230410
+  date: 2023-04-10T18:00
+  lat_extent:
+    start: 30
+    stop: 46
+  lon_extent:
+    start: 240    # 16x16 deg centered on (38.40N, 111.59W)
+    stop: 256
+  save_generated_samples: true
+  n_samples: 16
+- name: W_US_PrecipMtn_FourCorners_20231027
+  date: 2023-10-27T06:00
+  lat_extent:
+    start: 29
+    stop: 45
+  lon_extent:
+    start: 243    # 16x16 deg centered on (36.77N, 108.93W)
+    stop: 259
+  save_generated_samples: true
+  n_samples: 16
+- name: W_US_PrecipMtn_UTRockies_20231208
+  date: 2023-12-08T18:00
+  lat_extent:
+    start: 30
+    stop: 46
+  lon_extent:
+    start: 242    # 16x16 deg centered on (38.19N, 110.42W)
+    stop: 258
+  save_generated_samples: true
+  n_samples: 16
+# --- heat waves ---
+- name: W_US_HeatWave_LowerCO_20230625
+  date: 2023-06-25T00:00
+  lat_extent:
+    start: 28
+    stop: 44
+  lon_extent:
+    start: 239    # 16x16 deg centered on (36.26N, 113.04W)
+    stop: 255
+  save_generated_samples: true
+  n_samples: 16
+- name: W_US_HeatWave_WY_20230725
+  date: 2023-07-25T00:00
+  lat_extent:
+    start: 35
+    stop: 51
+  lon_extent:
+    start: 243    # 16x16 deg centered on (42.93N, 109.45W)
+    stop: 259
+  save_generated_samples: true
+  n_samples: 16
+- name: W_US_HeatWave_GreatBasin_20230730
+  date: 2023-07-30T00:00
+  lat_extent:
+    start: 31
+    stop: 47
+  lon_extent:
+    start: 239    # 16x16 deg centered on (39.31N, 112.69W)
+    stop: 255
+  save_generated_samples: true
+  n_samples: 16
+- name: W_US_HeatWave_WYID_20230802
+  date: 2023-08-02T00:00
+  lat_extent:
+    start: 34
+    stop: 50
+  lon_extent:
+    start: 242    # 16x16 deg centered on (42.14N, 110.14W)
+    stop: 258
+  save_generated_samples: true
+  n_samples: 16
+- name: W_US_HeatWave_LowerCO_20230820
+  date: 2023-08-20T00:00
+  lat_extent:
+    start: 28
+    stop: 44
+  lon_extent:
+    start: 238    # 16x16 deg centered on (36.02N, 113.70W)
+    stop: 254
+  save_generated_samples: true
+  n_samples: 16
+
