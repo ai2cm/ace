@@ -162,8 +162,6 @@ class SnapshotAggregator:
 @dataclasses.dataclass
 class OneStepSnapshotMetricConfig:
     name: str = "snapshot"
-    enabled: bool = True
-    strict: bool = False
 
     def get_name(self) -> str:
         return self.name

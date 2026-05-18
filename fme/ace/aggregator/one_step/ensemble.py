@@ -371,8 +371,6 @@ class EnsembleMetricConfig:
 class OneStepEnsembleMetricConfig:
     name: str = "ensemble"
     log_mean_maps: bool = True
-    enabled: bool = True
-    strict: bool = False
 
     def get_name(self) -> str:
         return self.name

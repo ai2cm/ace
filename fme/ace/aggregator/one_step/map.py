@@ -160,8 +160,6 @@ class MapAggregator:
 @dataclasses.dataclass
 class OneStepMapMetricConfig:
     name: str = "mean_map"
-    enabled: bool = True
-    strict: bool = False
 
     def get_name(self) -> str:
         return self.name
