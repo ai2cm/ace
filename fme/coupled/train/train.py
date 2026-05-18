@@ -24,12 +24,20 @@ from fme.coupled.typing_ import CoupledTensorMapping
 def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
     logging.info("Initializing training data loader")
     train_data = builder.get_train_data()
-    logging.info("Initializing validation data loader")
-    validation_data = builder.get_validation_data()
 
     variable_metadata = get_derived_variable_metadata() | train_data.variable_metadata
     dataset_info = train_data.dataset_info.update_variable_metadata(variable_metadata)
-    for data, name in zip((train_data, validation_data), ("train", "valid")):
+
+    if config.validation_list:
+        logging.info("Initializing validation data loaders")
+    else:
+        logging.info("Skipping validation")
+    validation_entries = builder.get_validation_data()
+
+    for data, name in zip(
+        [train_data] + [data for _, data, _ in validation_entries],
+        ["train"] + [name for _, _, name in validation_entries],
+    ):
         data.log_info(name)
 
     if config.inference_list:
@@ -52,16 +60,36 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
     )
 
     def validation_callback(epoch: int) -> tuple[dict[str, Any], float]:
-        validation_data.set_epoch(epoch)
-        aggregator = aggregator_builder.get_validation_aggregator()
-        logs = run_validation(
-            train_stepper=stepper,
-            validation_data=validation_data,
-            aggregator=aggregator,
-            diagnostics_subdir=f"epoch_{epoch:04d}",
-            record_logs=lambda logs: None,
-        )
-        return logs, logs["val/mean/loss"]
+        all_logs: dict[str, Any] = {}
+        weighted_loss = 0.0
+        for entry_config, data, name in validation_entries:
+            data.set_epoch(epoch)
+            aggregator = OneStepAggregator(
+                dataset_info=dataset_info,
+                save_diagnostics=config.save_per_epoch_diagnostics,
+                output_dir=os.path.join(config.output_dir, name),
+                loss_scaling=stepper.effective_loss_scaling,
+            )
+            logs = run_validation(
+                train_stepper=stepper,
+                validation_data=data,
+                aggregator=aggregator,
+                label=name,
+                diagnostics_subdir=f"epoch_{epoch:04d}",
+                record_logs=lambda logs: None,
+            )
+            all_logs.update(logs)
+            if entry_config.weight > 0:
+                metric_key = f"{name}/mean/loss"
+                loss = logs.get(metric_key)
+                if loss is None:
+                    raise RuntimeError(
+                        f"Validation entry {name!r} with "
+                        f"weight={entry_config.weight} did not produce "
+                        f"expected metric key {metric_key!r}."
+                    )
+                weighted_loss += entry_config.weight * loss
+        return all_logs, weighted_loss
 
     def inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
         if epoch not in inference_epochs:
@@ -107,9 +135,10 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
 
         return all_logs, weighted_error if has_error else None
 
+    primary_validation_data = validation_entries[0][1]
     return Trainer(
         train_data=train_data,
-        validation_data=validation_data,
+        validation_data=primary_validation_data,
         stepper=stepper,
         build_optimization=builder.get_optimization,
         build_ema=builder.get_ema,
