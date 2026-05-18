@@ -36,7 +36,7 @@ gantry run \
     --weka climate-default:/climate-default \
     --gpus 1 \
     --shared-memory 10GiB \
-    --budget atec-climate \
+    --budget ai2/atec-climate \
     --system-python \
     --install "pip install --no-deps ." \
     -- python $SCRIPT_PATH/convert.py
