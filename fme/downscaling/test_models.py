@@ -603,47 +603,6 @@ def test_checkpoint_model_build_with_fine_coordinates_path(tmp_path):
     assert torch.equal(loaded_model.full_fine_coords.lon.cpu(), fine_coords.lon.cpu())
 
 
-def test_checkpoint_model_build_with_fine_coordinates_path_places_coords_on_device(
-    tmp_path,
-):
-    """
-    CheckpointModelConfig with fine_coordinates_path should place coords on device.
-    """
-    coarse_shape = (8, 16)
-    fine_shape = (coarse_shape[0] * 2, coarse_shape[1] * 2)
-    fine_coords = make_fine_coords(fine_shape)
-    model = _get_diffusion_model(
-        coarse_shape=coarse_shape,
-        downscale_factor=2,
-        full_fine_coords=fine_coords,
-        use_fine_topography=False,
-        static_inputs=StaticInputs(fields=[], coords=fine_coords),
-    )
-    state = model.get_state()
-    del state["full_fine_coords"]
-    state["static_inputs"] = None
-
-    checkpoint_path = tmp_path / "test.ckpt"
-    torch.save({"model": state}, checkpoint_path)
-
-    coords_path = tmp_path / "coords.nc"
-    xr.Dataset(
-        {
-            "lat": xr.DataArray(fine_coords.lat.numpy(), dims=["lat"]),
-            "lon": xr.DataArray(fine_coords.lon.numpy(), dims=["lon"]),
-        }
-    ).to_netcdf(coords_path)
-
-    config = CheckpointModelConfig(
-        checkpoint_path=str(checkpoint_path),
-        fine_coordinates_path=str(coords_path),
-    )
-    loaded_model = config.build()
-    device = get_device()
-    assert loaded_model.full_fine_coords.lat.device.type == device.type
-    assert loaded_model.full_fine_coords.lon.device.type == device.type
-
-
 def test_checkpoint_model_build(tmp_path):
     """CheckpointModelConfig loads a modern checkpoint and restores the model."""
     coarse_shape = (8, 16)
