@@ -469,7 +469,7 @@ def test_batch_data_apply_patch_already_patched_raises():
 
 
 def test_region_oversampling_config_error_on_negative():
-    with pytest.raises(ValueError, match="multiplier must be >= 0"):
+    with pytest.raises(ValueError, match="multiplier must be > 0"):
         RegionOversamplingConfig(multiplier=-1.0)
 
 
