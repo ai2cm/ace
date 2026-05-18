@@ -51,4 +51,7 @@ run_training() {
 }
 
 # run_training "train-1-step.yaml" "era5-1-step-rs0"
-run_training "train-1-step-4deg-daily.yaml" "era5-1-step-4deg-daily-rs0"
+# run_training "train-1-step-4deg-daily.yaml" "era5-1-step-4deg-daily-rs0"
+run_training "train-1-step-4deg-daily-t8p1.yaml" "era5-1-step-4deg-daily-t8p1-rs0"
+run_training "train-1-step-4deg-daily-t8p16.yaml" "era5-1-step-4deg-daily-t8p16-rs0"
+run_training "train-1-step-4deg-daily-t8p32.yaml" "era5-1-step-4deg-daily-t8p32-rs0"
