@@ -13,7 +13,7 @@ import yaml
 
 from fme.core.testing.model import compare_restored_parameters
 from fme.core.testing.wandb import mock_wandb
-from fme.downscaling.data import TropicalOversamplingConfig
+from fme.downscaling.data import RegionOversamplingConfig
 from fme.downscaling.test_utils import create_test_data_on_disk, data_paths_helper
 from fme.downscaling.train import (
     Trainer,
@@ -70,7 +70,7 @@ def test_trainer_config_tropical_oversampling_requires_patch_extents(tmp_path):
     with pytest.raises(ValueError, match="tropical_oversampling requires"):
         TrainerConfig(
             **base,
-            tropical_oversampling=TropicalOversamplingConfig(),
+            region_oversampling=RegionOversamplingConfig(),
         )
 
 
@@ -80,7 +80,7 @@ def test_trainer_config_tropical_oversampling_with_patch_extents_ok(tmp_path):
         **base,
         coarse_patch_extent_lat=16,
         coarse_patch_extent_lon=16,
-        tropical_oversampling=TropicalOversamplingConfig(),
+        region_oversampling=RegionOversamplingConfig(),
     )
 
 

@@ -15,8 +15,8 @@ from fme.downscaling.data.datasets import (
     LatLonCoordinates,
     PairedBatchData,
     PairedBatchItem,
-    TropicalOversamplingConfig,
-    _sample_indices_with_tropical_oversampling,
+    RegionOversamplingConfig,
+    _sample_indices_with_region_oversampling,
     patched_batch_gen_from_paired_loader,
 )
 from fme.downscaling.data.patching import Patch, _HorizontalSlice
@@ -468,90 +468,91 @@ def test_batch_data_apply_patch_already_patched_raises():
         list(patched.generate_from_patches([patch]))
 
 
-@pytest.mark.parametrize(
-    "lat_threshold, multiplier, match",
-    [
-        pytest.param(30.0, 0, "multiplier", id="multiplier_zero"),
-        pytest.param(30.0, -1, "multiplier", id="multiplier_negative"),
-        pytest.param(0.0, 3, "lat_threshold", id="lat_threshold_zero"),
-        pytest.param(-1.0, 3, "lat_threshold", id="lat_threshold_negative"),
-        pytest.param(90.0, 3, "lat_threshold", id="lat_threshold_90"),
-        pytest.param(120.0, 3, "lat_threshold", id="lat_threshold_too_large"),
-    ],
-)
-def test_tropical_oversampling_config_validation(lat_threshold, multiplier, match):
-    with pytest.raises(ValueError, match=match):
-        TropicalOversamplingConfig(lat_threshold=lat_threshold, multiplier=multiplier)
+def test_region_oversampling_config_error_on_negative():
+    with pytest.raises(ValueError, match="multiplier must be >= 0"):
+        RegionOversamplingConfig(multiplier=-1.0)
 
 
-def _make_lat_patches(slices_y: list[slice]) -> list[Patch]:
-    full = slice(None)
+def _make_patches(
+    slices_y: list[slice], slices_x: list[slice] | None = None
+) -> list[Patch]:
+    if slices_x is None:
+        slices_x = [slice(None)] * len(slices_y)
     return [
         Patch(
-            input_slice=_HorizontalSlice(y=s, x=full),
-            output_slice=_HorizontalSlice(y=full, x=full),
+            input_slice=_HorizontalSlice(y=sy, x=sx),
+            output_slice=_HorizontalSlice(y=slice(None), x=slice(None)),
         )
-        for s in slices_y
+        for sy, sx in zip(slices_y, slices_x)
     ]
 
 
 def test_sample_indices_preserves_length():
     coarse_lats = torch.linspace(-66, 70, 12)
-    patches = _make_lat_patches([slice(0, 4), slice(4, 8), slice(8, 12)])
-    config = TropicalOversamplingConfig(lat_threshold=30.0, multiplier=3)
-
-    indices = _sample_indices_with_tropical_oversampling(patches, coarse_lats, config)
+    coarse_lons = torch.linspace(0, 360, 8)
+    patches = _make_patches(
+        slices_y=[slice(0, 4), slice(4, 8), slice(8, 12)], slices_x=None
+    )
+    config = RegionOversamplingConfig(
+        lat_interval=ClosedInterval(-30.0, 30.0), multiplier=3
+    )
+    indices = _sample_indices_with_region_oversampling(
+        patches, coarse_lats, coarse_lons, config
+    )
     assert len(indices) == len(patches)
 
 
-def test_sample_indices_multiplier_one_is_uniform():
-    coarse_lats = torch.linspace(-66, 70, 12)
-    patches = _make_lat_patches([slice(0, 4), slice(4, 8), slice(8, 12)])
-    config = TropicalOversamplingConfig(lat_threshold=30.0, multiplier=1)
-
-    # All weights equal, so over many draws every patch should appear
+def test_sample_indices_region_overrepresented():
+    coarse_lats = torch.linspace(-90, 90, 12)
+    coarse_lons = torch.linspace(0, 360, 8)
+    patches = _make_patches(
+        slices_y=[slice(0, 4), slice(4, 8), slice(8, 12)], slices_x=None
+    )
+    config = RegionOversamplingConfig(
+        lat_interval=ClosedInterval(-30.0, 30.0), multiplier=1000.0
+    )
     counts = [0, 0, 0]
-    n_draws = 3000
+    n_draws = 300
     for _ in range(n_draws):
-        indices = _sample_indices_with_tropical_oversampling(
-            patches, coarse_lats, config
+        indices = _sample_indices_with_region_oversampling(
+            patches, coarse_lats, coarse_lons, config
         )
         for idx in indices:
             counts[idx] += 1
     total = sum(counts)
-    for c in counts:
-        assert abs(c / total - 1 / 3) < 0.05
+    assert counts[1] / total > 0.99
 
 
-def test_sample_indices_tropical_overrepresented():
-    # patch 0 center ~ -47.5 (extratropical), patch 1 center ~ 2.0 (tropical),
-    # patch 2 center ~ 51.5 (extratropical)
-    coarse_lats = torch.linspace(-66, 70, 12)
-    patches = _make_lat_patches([slice(0, 4), slice(4, 8), slice(8, 12)])
-    config = TropicalOversamplingConfig(lat_threshold=30.0, multiplier=5)
-
-    counts = [0, 0, 0]
-    n_draws = 3000
+def test_sample_indices_lat_and_lon_selection():
+    # 2x2 grid of patches; only the patch at (lat_center ~ 0, lon_center ~ 45)
+    # falls inside both intervals.
+    coarse_lats = torch.linspace(-60, 60, 8)  # 4-point patches span ~60 deg
+    coarse_lons = torch.linspace(0, 180, 8)
+    patches = _make_patches(
+        slices_y=[slice(0, 4), slice(4, 8), slice(0, 4), slice(4, 8)],
+        slices_x=[slice(0, 4), slice(0, 4), slice(4, 8), slice(4, 8)],
+    )
+    # patch centers:
+    #   0: lat ~ -30, lon ~ 38.6
+    #   1: lat ~ 30,  lon ~ 38.6
+    #   2: lat ~ -30, lon ~ 141.4
+    #   3: lat ~ 30,  lon ~ 141.4
+    config = RegionOversamplingConfig(
+        lat_interval=ClosedInterval(-35.0, -25.0),
+        lon_interval=ClosedInterval(30.0, 50.0),
+        multiplier=1000,
+    )
+    counts = [0, 0, 0, 0]
+    n_draws = 300
     for _ in range(n_draws):
-        indices = _sample_indices_with_tropical_oversampling(
-            patches, coarse_lats, config
+        indices = _sample_indices_with_region_oversampling(
+            patches, coarse_lats, coarse_lons, config
         )
         for idx in indices:
             counts[idx] += 1
-    # Expected weights: [1, 5, 1] -> fractions [1/7, 5/7, 1/7]
     total = sum(counts)
-    assert counts[1] / total > 0.6  # ~5/7 ≈ 0.714
-
-
-def test_sample_indices_all_extratropical():
-    coarse_lats = torch.linspace(40.0, 80.0, 8)
-    patches = _make_lat_patches([slice(0, 4), slice(4, 8)])
-    config = TropicalOversamplingConfig(lat_threshold=30.0, multiplier=5)
-
-    indices = _sample_indices_with_tropical_oversampling(patches, coarse_lats, config)
-    # Length preserved; all weights equal so it's uniform sampling
-    assert len(indices) == 2
-    assert all(i in (0, 1) for i in indices)
+    # Only patch 0 (lat ~ -30, lon ~ 38.6) is inside both intervals
+    assert counts[0] / total > 0.99
 
 
 def _make_paired_batch_for_tropical(
@@ -604,7 +605,9 @@ def test_patched_batch_gen_from_paired_loader_no_oversampling():
 def test_patched_batch_gen_from_paired_loader_with_oversampling_preserves_count():
     n_lat, n_lon = 12, 8
     batch = _make_paired_batch_for_tropical(n_lat=n_lat, n_lon=n_lon)
-    config = TropicalOversamplingConfig(lat_threshold=30.0, multiplier=3)
+    config = RegionOversamplingConfig(
+        lat_interval=ClosedInterval(-30.0, 30.0), multiplier=3
+    )
 
     yielded = list(
         patched_batch_gen_from_paired_loader(

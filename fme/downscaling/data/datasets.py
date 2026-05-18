@@ -357,7 +357,7 @@ class PairedGriddedData:
         drop_partial_patches: bool = True,
         random_offset: bool = False,
         shuffle: bool = False,
-        tropical_oversampling: "TropicalOversamplingConfig | None" = None,
+        tropical_oversampling: "RegionOversamplingConfig | None" = None,
     ) -> Iterator["PairedBatchData"]:
         patched_generator = patched_batch_gen_from_paired_loader(
             self.loader,
@@ -645,63 +645,63 @@ class ContiguousDistributedSampler(DistributedSampler):
 
 
 @dataclasses.dataclass
-class TropicalOversamplingConfig:
+class RegionOversamplingConfig:
     """
-    Oversample training patches whose center latitude is within
-    +/-lat_threshold degrees of the equator.
+    Oversample training patches whose center falls within a specified
+    lat/lon region.
 
     The total number of patches yielded per batch is unchanged.
     Patches are drawn with replacement from a weighted distribution
-    where tropical patches have relative weight ``multiplier`` and
-    extratropical patches have weight 1. Validation generators
-    should not pass this config so that validation metrics remain
-    comparable across runs.
+    where patches inside the region have relative weight ``multiplier``
+    and patches outside have weight 1. Validation generators should not
+    pass this config so that validation metrics remain comparable across
+    runs.
 
     Parameters:
-        lat_threshold: Half-width of the tropical band in degrees.
-            Patches whose center latitude has absolute value <= this
-            threshold are considered tropical. Must satisfy
-            0 < lat_threshold < 90.
-        multiplier: Relative sampling weight for tropical patches.
-            Must be >= 1. A value of 1 gives uniform sampling
+        lat_interval: Latitude range [start, stop] in degrees defining
+            the oversampled region. If None, all latitudes match.
+        lon_interval: Longitude range [start, stop] in degrees defining
+            the oversampled region. If None, all longitudes match.
+        multiplier: Relative sampling weight for patches inside the
+            region. Must be >= 1. A value of 1 gives uniform sampling
             (no oversampling).
     """
 
-    lat_threshold: float = 30.0
-    multiplier: int = 3
+    lat_interval: ClosedInterval | None = None
+    lon_interval: ClosedInterval | None = None
+    multiplier: float = 1.0
 
     def __post_init__(self):
-        if self.multiplier < 1:
-            raise ValueError(f"multiplier must be >= 1, got {self.multiplier}.")
-        if not (0.0 < self.lat_threshold < 90.0):
-            raise ValueError(
-                "lat_threshold must satisfy 0 < lat_threshold < 90, "
-                f"got {self.lat_threshold}."
-            )
+        if self.multiplier < 0:
+            raise ValueError(f"multiplier must be >= 0, got {self.multiplier}.")
+
+    def get_weight(self, lat: float, lon: float) -> float:
+        lat_match = self.lat_interval is None or lat in self.lat_interval
+        lon_match = self.lon_interval is None or lon in self.lon_interval
+        return self.multiplier if lat_match and lon_match else 1.0
 
 
-def _sample_indices_with_tropical_oversampling(
+def _sample_indices_with_region_oversampling(
     coarse_patches: list[Patch],
     coarse_lats: torch.Tensor,
-    config: TropicalOversamplingConfig,
+    coarse_lons: torch.Tensor,
+    config: RegionOversamplingConfig,
 ) -> list[int]:
     """
     Return a list of ``len(coarse_patches)`` patch indices sampled with
-    replacement from a weighted distribution.  Tropical patches (center
-    latitude within +/-``config.lat_threshold``) receive weight
-    ``config.multiplier``; extratropical patches receive weight 1.
+    replacement from a weighted distribution.  Patches whose center
+    falls within the configured region receive weight
+    ``config.multiplier``; other patches receive weight 1.
 
-    ``coarse_lats`` is a 1-D tensor of the coarse latitude coordinates
-    that each patch's ``input_slice`` indexes into.
+    ``coarse_lats`` and ``coarse_lons`` are 1-D tensors of the coarse
+    latitude and longitude coordinates that each patch's
+    ``input_slice`` indexes into.
     """
     weights: list[float] = []
     for patch in coarse_patches:
-        patch_lats = coarse_lats[patch.input_slice.y]
-        center_lat = float(patch_lats.mean().item())
-        if abs(center_lat) <= config.lat_threshold:
-            weights.append(float(config.multiplier))
-        else:
-            weights.append(1.0)
+        center_lat = float(coarse_lats[patch.input_slice.y].mean().item())
+        center_lon = float(coarse_lons[patch.input_slice.x].mean().item())
+        weights.append(config.get_weight(center_lat, center_lon))
     return random.choices(
         range(len(coarse_patches)), weights=weights, k=len(coarse_patches)
     )
@@ -783,7 +783,7 @@ def patched_batch_gen_from_paired_loader(
     drop_partial_patches: bool = True,
     random_offset: bool = False,
     shuffle: bool = False,
-    tropical_oversampling: TropicalOversamplingConfig | None = None,
+    tropical_oversampling: RegionOversamplingConfig | None = None,
 ) -> Iterator[PairedBatchData]:
     for batch in loader:
         coarse_patches, fine_patches = _get_paired_patches(
@@ -798,8 +798,9 @@ def patched_batch_gen_from_paired_loader(
         if tropical_oversampling is not None:
             assert fine_patches is not None  # downscale_factor was provided
             coarse_lats = batch.coarse.latlon_coordinates.lat[0]
-            indices = _sample_indices_with_tropical_oversampling(
-                coarse_patches, coarse_lats, tropical_oversampling
+            coarse_lons = batch.coarse.latlon_coordinates.lon[0]
+            indices = _sample_indices_with_region_oversampling(
+                coarse_patches, coarse_lats, coarse_lons, tropical_oversampling
             )
             coarse_patches = [coarse_patches[i] for i in indices]
             fine_patches = [fine_patches[i] for i in indices]

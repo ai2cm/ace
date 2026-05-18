@@ -25,7 +25,7 @@ from fme.downscaling.data import (
     PairedBatchData,
     PairedDataLoaderConfig,
     PairedGriddedData,
-    TropicalOversamplingConfig,
+    RegionOversamplingConfig,
     load_static_inputs,
 )
 from fme.downscaling.models import DiffusionModel, DiffusionModelConfig
@@ -152,7 +152,7 @@ class Trainer:
         data: PairedGriddedData,
         random_offset: bool,
         shuffle: bool,
-        tropical_oversampling: TropicalOversamplingConfig | None = None,
+        tropical_oversampling: RegionOversamplingConfig | None = None,
     ):
         if self.patch_data:
             batch_generator = data.get_patched_generator(
@@ -183,7 +183,7 @@ class Trainer:
             self.train_data,
             random_offset=True,
             shuffle=True,
-            tropical_oversampling=self.config.tropical_oversampling,
+            tropical_oversampling=self.config.region_oversampling,
         )
         outputs = None
         for i, batch in enumerate(train_batch_generator):
@@ -416,12 +416,12 @@ class TrainerConfig:
             domain.
         coarse_patch_extent_lon: See ``coarse_patch_extent_lat``.
         tropical_oversampling: Optional config to oversample patches
-            whose center latitude is within +/-lat_threshold of the
-            equator during training. The total number of patches per
-            batch is unchanged; patches are drawn with replacement
-            from a weighted distribution where tropical patches have
-            higher relative weight. Only applied to the training
-            generator (validation patches are unchanged so metrics
+            whose center falls within a specified lat/lon region
+            during training. The total number of patches per batch is
+            unchanged; patches are drawn with replacement from a
+            weighted distribution where region patches have higher
+            relative weight. Only applied to the training generator
+            (validation patches are unchanged so metrics
             stay comparable). Requires ``coarse_patch_extent_lat`` and
             ``coarse_patch_extent_lon`` to be set.
     """
@@ -444,7 +444,7 @@ class TrainerConfig:
     coarse_patch_extent_lon: int | None = None
     resume_results_dir: str | None = None
     log_loss_vs_noise: bool = False
-    tropical_oversampling: TropicalOversamplingConfig | None = None
+    region_oversampling: RegionOversamplingConfig | None = None
 
     def __post_init__(self):
         if (
@@ -458,7 +458,7 @@ class TrainerConfig:
                 "Either none or both of coarse_patch_extent_lat and "
                 "coarse_patch_extent_lon must be set."
             )
-        if self.tropical_oversampling is not None and (
+        if self.region_oversampling is not None and (
             self.coarse_patch_extent_lat is None or self.coarse_patch_extent_lon is None
         ):
             raise ValueError(
