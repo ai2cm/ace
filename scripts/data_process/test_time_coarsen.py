@@ -2,11 +2,7 @@ import json
 
 import numpy as np
 import xarray as xr
-<<<<<<< HEAD
-from time_coarsen import TimeCoarsenConfig, coarsen, process_path_pair
-=======
 from time_coarsen import TimeCoarsenConfig, TimeSlice, coarsen, process_path_pair
->>>>>>> main
 from zarr.codecs import BloscCodec
 
 from fme.ace.testing import DimSize, DimSizes, get_nd_dataset
