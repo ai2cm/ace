@@ -15,7 +15,7 @@ run_training() {
   local config_filename="$1"
   local job_name="$2"
   local job_group="$3"
-  local CONFIG_PATH="$SCRIPT_PATH/$config_filename"
+  local CONFIG_PATH="$SCRIPT_PATH$config_filename"
 
   python -m fme.ace.validate_config --config_type train "$CONFIG_PATH"
 
@@ -33,7 +33,7 @@ run_training() {
     --workspace ai2/ace \
     --priority high \
     --preemptible \
-    --cluster ai2/saturn \
+    --cluster ai2/titan \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \

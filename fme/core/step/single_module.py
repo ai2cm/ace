@@ -362,12 +362,15 @@ class SingleModuleStep(StepABC):
         """
 
         def network_call(input_norm: TensorDict) -> TensorDict:
-            if args.data_mask is not None:
-                input_norm = _apply_input_mask(input_norm, args.data_mask)
+            effective_mask = (
+                args.channel_mask if args.channel_mask is not None else args.data_mask
+            )
+            if effective_mask is not None:
+                input_norm = _apply_input_mask(input_norm, effective_mask)
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
             if self._config.include_channel_mask_inputs:
                 mask_tensor = _build_channel_mask_inputs(
-                    self.in_names, args.data_mask, input_tensor
+                    self.in_names, effective_mask, input_tensor
                 )
                 input_tensor = torch.cat(
                     [input_tensor, mask_tensor], dim=self.CHANNEL_DIM

@@ -40,6 +40,7 @@ from fme.ace.stepper.single_module import (
     TrainOutput,
     TrainStepper,
     TrainStepperConfig,
+    _build_ic_channel_mask,
     get_serialized_stepper_vertical_coordinate,
     load_stepper,
     load_stepper_config,
@@ -2410,3 +2411,104 @@ def test_checkpoint_stepper_config_to_stepper_config(tmp_path: pathlib.Path):
     assert isinstance(loaded_config, StepperConfig)
     assert loaded_config.derived_forcings == original_config.derived_forcings
     assert loaded_config.step.type == original_config.step.type
+
+
+# ── _build_ic_channel_mask tests ─────────────────────────────────────────────
+
+
+def test_build_ic_channel_mask_detects_nan():
+    ic_data = {
+        "T": torch.tensor(
+            [[float("nan")], [1.0]]  # sample 0 masked, sample 1 present
+        )
+        .unsqueeze(-1)
+        .unsqueeze(-1),  # [2, 1, 1, 1]
+        "q": torch.ones(2, 1, 1, 1),
+    }
+    result = _build_ic_channel_mask(ic_data, data_mask=None)
+    assert result is not None
+    assert not result["T"][0].item()  # sample 0 is NaN-masked
+    assert result["T"][1].item()  # sample 1 is present
+    assert "q" not in result  # q has no NaN → not included
+
+
+def test_build_ic_channel_mask_merges_data_mask():
+    ic_data = {"T": torch.ones(2, 1, 1, 1)}
+    data_mask = {"T": torch.tensor([True, False])}
+    result = _build_ic_channel_mask(ic_data, data_mask=data_mask)
+    assert result is not None
+    assert result["T"][0].item()  # sample 0: real data present
+    assert not result["T"][1].item()  # sample 1: genuinely missing
+
+
+def test_build_ic_channel_mask_nan_and_data_mask_combined():
+    # sample 0: real missing; sample 1: augmentation NaN; sample 2: fully present
+    ic_data = {
+        "T": torch.tensor([1.0, float("nan"), 1.0]).view(3, 1, 1, 1),
+    }
+    data_mask = {"T": torch.tensor([False, True, True])}
+    result = _build_ic_channel_mask(ic_data, data_mask=data_mask)
+    assert result is not None
+    assert not result["T"][0].item()  # real missing
+    assert not result["T"][1].item()  # NaN-masked
+    assert result["T"][2].item()  # present
+
+
+def test_build_ic_channel_mask_returns_none_when_all_present():
+    ic_data = {"T": torch.ones(2, 1, 1, 1), "q": torch.ones(2, 1, 1, 1)}
+    result = _build_ic_channel_mask(ic_data, data_mask=None)
+    assert result is None
+
+
+def test_train_on_batch_ic_nan_zeroed_by_channel_mask():
+    """IC augmentation NaN must be zeroed before the model forward pass.
+
+    ReturnZerosModule asserts no NaN in its input — if channel_mask does not
+    drive _apply_input_mask to zero the NaN-filled IC, that assert fires.
+    Loss must also be finite (no NaN propagated through the computation graph).
+    """
+    torch.manual_seed(0)
+    in_names = ["a", "b"]
+    out_names = ["a"]
+    n_samples, n_timesteps = 4, 2  # 1 IC + 1 target
+
+    data_dict = {
+        "a": torch.rand(n_samples, n_timesteps, 5, 5, device=DEVICE),
+        "b": torch.rand(n_samples, n_timesteps, 5, 5, device=DEVICE),
+    }
+    # Simulate IC augmentation: IC (t=0) of "a" is NaN for every sample.
+    data_dict["a"][:, 0] = float("nan")
+
+    data = BatchData.new_on_device(
+        data=data_dict,
+        time=xr.DataArray(np.zeros((n_samples, n_timesteps)), dims=["sample", "time"]),
+        labels=None,
+        epoch=0,
+    )
+
+    # include_channel_mask_inputs doubles the input channel count.
+    module = ReturnZerosModule(
+        n_in_channels=len(in_names) * 2, n_out_channels=len(out_names)
+    )
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(type="prebuilt", config={"module": module}),
+                    in_names=in_names,
+                    out_names=out_names,
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means=get_scalar_data(set(in_names + out_names), 0.0),
+                            stds=get_scalar_data(set(in_names + out_names), 1.0),
+                        ),
+                    ),
+                    include_channel_mask_inputs=True,
+                )
+            ),
+        ),
+    )
+    stepper = _get_train_stepper(config, loss=StepLossConfig(type="MSE"))
+    stepped = stepper.train_on_batch(data, optimization=NullOptimization())
+    assert torch.isfinite(stepped.metrics["loss"]).item()
