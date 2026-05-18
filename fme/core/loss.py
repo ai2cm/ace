@@ -85,8 +85,8 @@ class LossOutput:
         self._per_channel: torch.Tensor | None = None
         self._counts: list[int] | None = None
 
-    def _get_per_channel(self) -> torch.Tensor:
-        """Return a ``(C,)`` tensor of per-channel losses, computed once.
+    def _reduce(self) -> tuple[torch.Tensor, list[int]]:
+        """Return ``(per_channel, counts)`` tensors, computed once.
 
         When a mask is present (shape ``(B, C)``), each channel's loss
         is averaged only over the batch samples where that channel is
@@ -97,32 +97,20 @@ class LossOutput:
             assert isinstance(bc, torch.Tensor)
             if bc.ndim == 0:
                 self._per_channel = bc.expand(len(self._channel_names))
+                self._counts = [1] * len(self._channel_names)
             elif self._mask is not None:
                 masked_sum = (bc * self._mask).sum(dim=0)
                 self._per_channel = masked_sum / self._mask.sum(dim=0).clamp(min=1)
-            else:
-                self._per_channel = bc.mean(dim=0)
-        return self._per_channel
-
-    def _get_counts(self) -> list[int]:
-        """Return per-channel active-sample counts, computed once.
-
-        With a mask, counts may include 0 for channels masked out in
-        every sample.  Without a mask every sample is active.
-        """
-        if self._counts is None:
-            if self._mask is not None:
                 self._counts = [int(c.item()) for c in self._mask.sum(dim=0)]
             else:
-                bc = sum(c.reduce_to_channel() for c in self._losses)
-                assert isinstance(bc, torch.Tensor)
-                batch_size = 1 if bc.ndim == 0 else bc.shape[0]
-                self._counts = [batch_size] * len(self._channel_names)
-        return self._counts
+                self._per_channel = bc.mean(dim=0)
+                self._counts = [bc.shape[0]] * len(self._channel_names)
+        assert self._per_channel is not None and self._counts is not None
+        return self._per_channel, self._counts
 
     def total(self) -> torch.Tensor:
         """Scalar loss — the optimisation target."""
-        pc = self._get_per_channel()
+        pc, _ = self._reduce()
         if self._mask is not None:
             active = self._mask.sum(dim=0) > 0
             if active.any():
@@ -138,17 +126,16 @@ class LossOutput:
         use the counts to compute properly weighted means across
         batches.
         """
-        pc = self._get_per_channel()
-        counts = self._get_counts()
-        if pc.ndim == 0:
-            return {
-                name: ChannelLossInfo(loss=pc, count=counts[i])
-                for i, name in enumerate(self._channel_names)
-            }
-        n = min(pc.shape[0], len(self._channel_names))
+        pc, counts = self._reduce()
+        n_channels = len(self._channel_names)
+        if pc.ndim > 0 and pc.shape[0] != n_channels:
+            raise RuntimeError(
+                f"Per-channel loss has {pc.shape[0]} elements but "
+                f"{n_channels} channel names were provided."
+            )
         return {
-            self._channel_names[i]: ChannelLossInfo(loss=pc[i], count=counts[i])
-            for i in range(n)
+            name: ChannelLossInfo(loss=pc[i], count=counts[i])
+            for i, name in enumerate(self._channel_names)
         }
 
     def scale(self, weight: float) -> "LossOutput":
