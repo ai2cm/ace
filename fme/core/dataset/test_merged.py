@@ -177,6 +177,41 @@ def test_time_padded_merged_set_epoch_propagates():
     assert long_ds.epoch == 3
 
 
+def test_time_padded_merged_set_epoch_recomputes_canonical():
+    # both datasets share the same long time axis so that changing
+    # sample_n_times always yields compatible sample_start_times
+    n_times = 20
+    ds_a = MockDataset.new(
+        n_times=n_times,
+        varnames=["a"],
+        sample_n_times=5,
+        initial_epoch=None,
+    )
+    ds_b = MockDataset.new(
+        n_times=n_times,
+        varnames=["b"],
+        sample_n_times=3,
+        initial_epoch=None,
+    )
+    ds_a.data = {k: v.float() for k, v in ds_a.data.items()}
+    ds_b.data = {k: v.float() for k, v in ds_b.data.items()}
+    merged = TimePaddedMergedDataset([ds_a, ds_b])
+    assert merged.sample_n_times == 5
+    assert merged._canonical_idx == 0
+
+    # simulate a schedule milestone shrinking ds_a below ds_b
+    ds_a._sample_n_times = 2
+    merged.set_epoch(1)
+    assert merged.sample_n_times == 3
+    assert merged._canonical_idx == 1
+
+    # simulate ds_a growing back to be longest
+    ds_a._sample_n_times = 7
+    merged.set_epoch(2)
+    assert merged.sample_n_times == 7
+    assert merged._canonical_idx == 0
+
+
 def test_time_padded_merged_validate_inference_length_propagates():
     short_ds, long_ds = _make_aligned_pair(short_n=3, long_n=5, n_starts=4)
     merged = TimePaddedMergedDataset([short_ds, long_ds])

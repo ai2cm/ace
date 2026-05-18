@@ -164,17 +164,14 @@ class TimePaddedMergedDataset(DatasetABC):
                 f"Duplicates found: {duplicates}"
             )
 
+        self._recompute_canonical()
+
+    def _recompute_canonical(self):
         self._sample_n_times = max(d.sample_n_times for d in self.datasets)
         self._canonical_idx = max(
             range(len(self.datasets)),
             key=lambda i: self.datasets[i].sample_n_times,
         )
-        # The canonical (longest) dataset has the fewest valid start positions,
-        # since each start position must accommodate the full sample length.
-        # Sub-datasets with shorter sample_n_times necessarily have more valid
-        # start positions; the canonical's sample_start_times must be a prefix
-        # of each shorter dataset's sample_start_times so that indices are
-        # consistent across all sub-datasets.
         self._sample_start_times = self.datasets[self._canonical_idx].sample_start_times
         n_canonical = len(self._sample_start_times)
         for dataset in self.datasets:
@@ -278,6 +275,7 @@ class TimePaddedMergedDataset(DatasetABC):
     def set_epoch(self, epoch: int):
         for dataset in self.datasets:
             dataset.set_epoch(epoch)
+        self._recompute_canonical()
 
 
 @dataclasses.dataclass
