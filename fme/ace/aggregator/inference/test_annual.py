@@ -113,9 +113,11 @@ def test_paired_annual_aggregator_with_nans(tmpdir):
     mask = np.ones((n_lat, n_lon))
     mask[1, 1] = 0
     monthly_ds["a"] = monthly_ds["a"].where(mask > 0)
-    mask_provider = SpatialMaskProvider({"mask_a": torch.tensor(mask)}).to(get_device())
+    spatial_mask_provider = SpatialMaskProvider({"mask_a": torch.tensor(mask)}).to(
+        get_device()
+    )
     agg = PairedGlobalMeanAnnualAggregator(
-        ops=LatLonOperations(area_weights, mask_provider),
+        ops=LatLonOperations(area_weights, spatial_mask_provider),
         timestep=TIMESTEP,
         monthly_reference_data=monthly_ds,
     )
@@ -294,10 +296,10 @@ def test_annual_aggregator_with_nans():
     data["a"][:, :, 1, 1] = float("nan")
     masks = {"mask_a": torch.ones_like(data["a"][0, 0])}
     masks["mask_a"][1, 1] = 0
-    mask_provider = SpatialMaskProvider(masks).to(get_device())
+    spatial_mask_provider = SpatialMaskProvider(masks).to(get_device())
 
     agg = GlobalMeanAnnualAggregator(
-        ops=LatLonOperations(area_weights, mask_provider), timestep=TIMESTEP
+        ops=LatLonOperations(area_weights, spatial_mask_provider), timestep=TIMESTEP
     )
     time = xr.DataArray(
         [

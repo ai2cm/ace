@@ -70,9 +70,9 @@ def test_seasonal_aggregator_with_nans():
     area_weights = torch.ones(n_lat, n_lon).to(fme.get_device())
     mask = torch.ones((n_lat, n_lon))
     mask[1, 1] = 0
-    mask_provider = SpatialMaskProvider({"mask_a": mask}).to(get_device())
+    spatial_mask_provider = SpatialMaskProvider({"mask_a": mask}).to(get_device())
     agg = SeasonalAggregator(
-        LatLonOperations(area_weights, mask_provider),
+        LatLonOperations(area_weights, spatial_mask_provider),
     )
     target_data = {
         "a": torch.randn(n_sample, n_time, n_lat, n_lon, device=get_device())

@@ -356,9 +356,9 @@ def _get_spatial_mask_provider(
     for name in masks:
         if "time" in ds[name].dims:
             raise ValueError("Masks must be time-independent.")
-    mask_provider = SpatialMaskProvider(masks)
-    logging.info(f"Initialized {mask_provider}.")
-    return mask_provider
+    spatial_mask_provider = SpatialMaskProvider(masks)
+    logging.info(f"Initialized {spatial_mask_provider}.")
+    return spatial_mask_provider
 
 
 @dataclasses.dataclass
@@ -570,7 +570,9 @@ class XarrayDataset(DatasetABC):
             engine=self.engine,
             chunks=None,
         )
-        self._mask_provider = _get_spatial_mask_provider(first_dataset, self.dtype)
+        self._spatial_mask_provider = _get_spatial_mask_provider(
+            first_dataset, self.dtype
+        )
         (
             self._horizontal_coordinates,
             self._static_derived_data,
@@ -682,7 +684,7 @@ class XarrayDataset(DatasetABC):
             self._variable_metadata,
             self._vertical_coordinate,
             self._horizontal_coordinates,
-            self._mask_provider,
+            self._spatial_mask_provider,
             self.timestep,
             self._is_remote,
             self._labels,

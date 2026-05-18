@@ -173,7 +173,7 @@ def test_dataset_info_round_trip(dataset_info: DatasetInfo):
                     masks={"mask_0": torch.ones(10, 10)}
                 )
             ),
-            id="mask_provider_equal",
+            id="spatial_mask_provider_equal",
         ),
         pytest.param(
             DatasetInfo(
@@ -189,17 +189,17 @@ def test_dataset_info_round_trip(dataset_info: DatasetInfo):
                     }
                 )
             ),
-            id="mask_provider_subset",
+            id="spatial_mask_provider_subset",
         ),
         pytest.param(
             DatasetInfo(spatial_mask_provider=SpatialMaskProvider()),
             DatasetInfo(),
-            id="mask_provider_missing_from_second",
+            id="spatial_mask_provider_missing_from_second",
         ),
         pytest.param(
             DatasetInfo(),
             DatasetInfo(spatial_mask_provider=SpatialMaskProvider()),
-            id="mask_provider_missing_from_first",
+            id="spatial_mask_provider_missing_from_first",
         ),
         pytest.param(
             DatasetInfo(),
@@ -269,7 +269,7 @@ def test_assert_compatible_with_compatible_dataset_info(a: DatasetInfo, b: Datas
                 )
             ),
             ["spatial_mask_provider"],
-            id="mask_provider_masks_differ",
+            id="spatial_mask_provider_masks_differ",
         ),
         pytest.param(
             DatasetInfo(
@@ -286,7 +286,7 @@ def test_assert_compatible_with_compatible_dataset_info(a: DatasetInfo, b: Datas
                 )
             ),
             ["spatial_mask_provider"],
-            id="mask_provider_not_subset",
+            id="spatial_mask_provider_not_subset",
         ),
         pytest.param(
             DatasetInfo(timestep=datetime.timedelta(hours=1)),
@@ -416,16 +416,16 @@ def test_masked_gridded_ops():
     lon = torch.arange(4)
     lat = torch.arange(2)
     coords = LatLonCoordinates(lat=lat, lon=lon)
-    mask_provider = SpatialMaskProvider(masks={"mask_0": torch.ones(10, 10)})
+    spatial_mask_provider = SpatialMaskProvider(masks={"mask_0": torch.ones(10, 10)})
     dataset_info = DatasetInfo(
         horizontal_coordinates=coords,
-        spatial_mask_provider=mask_provider,
+        spatial_mask_provider=spatial_mask_provider,
     )
     assert dataset_info.horizontal_coordinates == coords
-    assert dataset_info.spatial_mask_provider == mask_provider
+    assert dataset_info.spatial_mask_provider == spatial_mask_provider
     expected_gridded_ops = LatLonOperations(
         area_weights=spherical_area_weights(lat, len(lon)),
-        spatial_mask_provider=mask_provider,
+        spatial_mask_provider=spatial_mask_provider,
     )
     assert dataset_info.gridded_operations == expected_gridded_ops
 

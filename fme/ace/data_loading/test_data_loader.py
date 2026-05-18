@@ -1214,7 +1214,7 @@ def test_localize_properties():
     mask_tensor = torch.arange(n_lat * n_lon, dtype=torch.float32).reshape(
         1, n_lat, n_lon
     )
-    mask_provider = SpatialMaskProvider(masks={"mask_test": mask_tensor})
+    spatial_mask_provider = SpatialMaskProvider(masks={"mask_test": mask_tensor})
     timestep = datetime.timedelta(hours=6)
     metadata = {"temp": VariableMetadata(units="K", long_name="Temperature")}
     vertical = NullVerticalCoordinate()
@@ -1222,7 +1222,7 @@ def test_localize_properties():
         variable_metadata=metadata,
         vertical_coordinate=vertical,
         horizontal_coordinates=coords,
-        spatial_mask_provider=mask_provider,
+        spatial_mask_provider=spatial_mask_provider,
         timestep=timestep,
         is_remote=False,
         all_labels=None,
@@ -1279,12 +1279,12 @@ def _global_properties():
     metadata = {"temp": VariableMetadata(units="K", long_name="Temperature")}
     vertical = NullVerticalCoordinate()
     mask = torch.ones(n_lat, n_lon)
-    mask_provider = SpatialMaskProvider(masks={"mask_land": mask})
+    spatial_mask_provider = SpatialMaskProvider(masks={"mask_land": mask})
     return DatasetProperties(
         variable_metadata=metadata,
         vertical_coordinate=vertical,
         horizontal_coordinates=coords,
-        spatial_mask_provider=mask_provider,
+        spatial_mask_provider=spatial_mask_provider,
         timestep=timestep,
         is_remote=False,
         all_labels=None,
@@ -1305,7 +1305,7 @@ def _assert_dataset_info_uses_global_properties(dataset_info, props):
     # vertical_coordinate type must match
     assert type(dataset_info.vertical_coordinate) is type(props.vertical_coordinate)
 
-    # mask_provider must have the same keys as the global (non-localized) one
+    # spatial_mask_provider must have the same keys as the global (non-localized) one
     info_masks = dataset_info.spatial_mask_provider.masks
     prop_masks = props.spatial_mask_provider.masks
     assert set(info_masks.keys()) == set(prop_masks.keys())

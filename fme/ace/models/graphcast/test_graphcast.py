@@ -30,14 +30,14 @@ def dummy_datasetinfo(height: int, width: int) -> DatasetInfo:
     mock_horizontal_coords.coords = {"lat": lat, "lon": lon}
     mock_horizontal_coords.meshgrid = (latT, lonT)
 
-    mask_provider = SpatialMaskProvider(
+    spatial_mask_provider = SpatialMaskProvider(
         masks={"mask_2d": torch.ones(height, width, dtype=torch.bool)}
     )
 
     # Create DatasetInfo with mocked components
     dataset_info = DatasetInfo(
         horizontal_coordinates=mock_horizontal_coords,
-        spatial_mask_provider=mask_provider,
+        spatial_mask_provider=spatial_mask_provider,
     )
 
     return dataset_info

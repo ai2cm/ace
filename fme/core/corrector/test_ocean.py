@@ -325,8 +325,8 @@ def test_ocean_heat_content_correction(hfds_type):
         "mask_1": mask[:, :, :, 1],
         "mask_2d": mask[:, :, :, 0],
     }
-    mask_provider = SpatialMaskProvider(masks)
-    ops = LatLonOperations(torch.ones(size=[3, 3]), mask_provider)
+    spatial_mask_provider = SpatialMaskProvider(masks)
+    ops = LatLonOperations(torch.ones(size=[3, 3]), spatial_mask_provider)
 
     idepth = torch.tensor([2.5, 10, 20])
     depth_coordinate = DepthCoordinate(idepth, mask)

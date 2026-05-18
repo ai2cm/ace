@@ -2017,7 +2017,7 @@ def _get_stepper_with_input_masking(
 
 def test_get_stepper_with_input_masking():
     # check that no error is raised when building a stepper with input_masking
-    # configured when the vertical coordinate is a mask_provider
+    # configured when the vertical coordinate is a spatial_mask_provider
 
     # no error raised
     _ = _get_stepper_with_input_masking(dataset_info_has_spatial_mask_provider=True)
