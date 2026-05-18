@@ -703,6 +703,8 @@ class XarrayDataset(DatasetABC):
                     units=ds[name].units,
                     long_name=ds[name].long_name,
                 )
+            else:
+                result[name] = VariableMetadata(units="", long_name="")
         self._variable_metadata = result
 
     def _get_files_stats(
