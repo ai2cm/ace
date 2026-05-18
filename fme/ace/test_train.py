@@ -464,13 +464,14 @@ def _setup(
     derived_forcings=None,
     use_schedule: bool = False,
     validate_using_ema: bool = False,
+    stats_std_fill_value: float | None = None,
 ):
     if not path.exists():
         path.mkdir()
     if derived_forcings is None:
         derived_forcings = DerivedForcingsConfig()
     seed = 0
-    np.random.seed(seed)
+    set_seed(seed)
     in_variable_names = [
         "PRESsfc",
         "specific_total_water_0",
@@ -522,6 +523,7 @@ def _setup(
     save_scalar_netcdf(
         stats_dir / "stats-stddev.nc",
         variable_names=all_variable_names,
+        fill_value=stats_std_fill_value,
     )
 
     monthly_dim_sizes: DimSizes
@@ -1043,8 +1045,8 @@ def test_train_and_inference_with_derived_forcings(
         crps_training=crps_training,
         log_validation_maps=log_validation_maps,
         derived_forcings=derived_forcings,
+        stats_std_fill_value=1.0,
     )
-    # using pdb requires calling main functions directly
     with mock_wandb() as wandb:
         train_main(
             yaml_config=train_config,

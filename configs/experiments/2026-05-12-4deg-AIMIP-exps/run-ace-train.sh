@@ -30,10 +30,10 @@ run_training() {
     --task-name "$job_name" \
     --description 'Run ACE2-ERA5 training' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-    --workspace ai2/climate-titan \
-    --priority urgent \
+    --workspace ai2/ace \
+    --priority high \
     --preemptible \
-    --cluster ai2/titan \
+    --cluster ai2/saturn \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
@@ -51,4 +51,4 @@ run_training() {
     -- torchrun --nproc_per_node $N_GPUS -m fme.ace.train $CONFIG_PATH
 }
 
-run_training "ace-train-config-4deg-AIMIP.yaml" "ace2-era5-train-4deg-daily-AIMIP-bs16" "ace2-era5"
+run_training "${1:-ace-train-config-4deg-AIMIP.yaml}" "${2:-ace2-era5-train-4deg-daily-AIMIP-bs16}" "${3:-ace2-era5}"
