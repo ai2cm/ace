@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime AS base
+FROM pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime AS base
 
 ENV FME_DIR=/full-model
 ENV DGLBACKEND=pytorch
@@ -18,6 +18,8 @@ RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.c
   apt-key --keyring /usr/share/keyrings/cloud.google.gpg  add - && apt-get update -y && apt-get install google-cloud-cli -y
 
 ENV FORCE_CUDA_EXTENSION=1
+# Remove PEP 668 marker so pip/uv can install into the system Python
+RUN rm -f /usr/lib/python*/EXTERNALLY-MANAGED
 # install python deps
 RUN pip install uv
 COPY pyproject.toml /tmp/pyproject.toml
