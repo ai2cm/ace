@@ -10,6 +10,7 @@ Outputs:
     /results/fdistill_student.ckpt
 """
 
+from fme.core.distributed import Distributed
 from fme.downscaling.distillation.student_checkpoint import save_student_checkpoint
 from fme.downscaling.models import FastgenStudentConfig
 
@@ -22,31 +23,32 @@ FINE_COORDS = (
 MODELS = [
     (
         "dmd2",
-        "/dmd2/fastgen/ace-downscaling-distillation-dmd2/checkpoints/0022620.pth",
+        "/dmd2/0022620.pth",
         1,  # DMD2 is a single-step method
     ),
     (
         "fdistill",
-        "/fdistill/fastgen/ace-downscaling-distillation-fdistill/checkpoints/0024440.pth",
+        "/fdistill/0024440.pth",
         4,  # f-distill trained with 4-step Karras schedule
     ),
 ]
 
-for name, pth_path, num_steps in MODELS:
-    print(f"Converting {name} ({pth_path}, {num_steps} step(s)) ...")
-    cfg = FastgenStudentConfig(
-        fastgen_checkpoint_path=pth_path,
-        teacher_checkpoint_path=TEACHER_CKPT,
-        fine_coordinates_path=FINE_COORDS,
-    )
-    model = cfg.build()
-    output_path = f"/results/{name}_student.ckpt"
-    save_student_checkpoint(
-        student_module=model.module,
-        teacher=model,
-        path=output_path,
-        num_sampling_steps=num_steps,
-    )
-    print(f"  Saved {output_path}")
+with Distributed.context():
+    for name, pth_path, num_steps in MODELS:
+        print(f"Converting {name} ({pth_path}, {num_steps} step(s)) ...")
+        cfg = FastgenStudentConfig(
+            fastgen_checkpoint_path=pth_path,
+            teacher_checkpoint_path=TEACHER_CKPT,
+            fine_coordinates_path=FINE_COORDS,
+        )
+        model = cfg.build()
+        output_path = f"/results/{name}_student.ckpt"
+        save_student_checkpoint(
+            student_module=model.module,
+            teacher=model,
+            path=output_path,
+            num_sampling_steps=num_steps,
+        )
+        print(f"  Saved {output_path}")
 
 print("Done.")

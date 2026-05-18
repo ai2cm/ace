@@ -2,9 +2,16 @@
 # Convert FastGen distillation checkpoints to ACE format and save as a
 # Beaker dataset.  Outputs land in /results and are automatically captured.
 #
+# Only the specific .pth files needed are mounted (not entire training datasets)
+# to avoid downloading all 20 checkpoints (~25 GB) at job start.
+#
 # Outputs (in resulting Beaker dataset):
-#   dmd2_student.ckpt    — DMD2 student, 4-step inference
+#   dmd2_student.ckpt     — DMD2 student, 1-step inference
 #   fdistill_student.ckpt — f-distill (forward-KL) student, 4-step inference
+#
+# Source checkpoints:
+#   DMD2:     01KQAY19MH9G9XJDTWYRAV6Z3R  iter 0022620
+#   fdistill: 01KQAQSCPS35HT30G5C2GNHP2S  iter 0024440
 
 set -e
 
@@ -31,8 +38,8 @@ gantry run \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --dataset $TEACHER_DATASET:checkpoints:/checkpoints \
-    --dataset $DMD2_DATASET:/dmd2 \
-    --dataset $FDISTILL_DATASET:/fdistill \
+    --dataset $DMD2_DATASET:fastgen/ace-downscaling-distillation-dmd2/checkpoints/0022620.pth:/dmd2/0022620.pth \
+    --dataset $FDISTILL_DATASET:fastgen/ace-downscaling-distillation-fdistill/checkpoints/0024440.pth:/fdistill/0024440.pth \
     --weka climate-default:/climate-default \
     --gpus 1 \
     --shared-memory 10GiB \
