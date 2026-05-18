@@ -5,10 +5,12 @@ from typing import Any
 
 import dacite
 import torch
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
+from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.optimization import NullOptimization, Optimization
@@ -855,11 +857,13 @@ class FastgenStudentConfig:
         return student_weights
 
     def build(self) -> DiffusionModel:
-        from torch.nn.parallel import DistributedDataParallel as DDP
-
         model = self._teacher_config.build()
         student_weights = self._extract_student_weights()
-        raw = model.module.module if isinstance(model.module, DDP) else model.module
+        raw = (
+            model.module.module
+            if isinstance(model.module, DDP | DummyWrapper)
+            else model.module
+        )
         raw.load_state_dict(student_weights, strict=True)
         return model
 
