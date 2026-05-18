@@ -245,6 +245,8 @@ class TrainConfig:
     _RESERVED_NAMES = {"train", "val"}
 
     def __post_init__(self):
+        if not self.validation_list:
+            raise ValueError("At least one validation entry is required.")
         resolved_val_names = self.validation_names
         if len(resolved_val_names) != len(set(resolved_val_names)):
             raise ValueError(f"Duplicate validation names: {resolved_val_names}")

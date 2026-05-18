@@ -91,6 +91,47 @@ JOB_SUBMISSION_SCRIPT_PATH = (
 )
 
 
+def _make_validation_entries(
+    *,
+    valid_data_path,
+    spatial_dimensions_str,
+    conditional,
+    log_validation_maps,
+    multi_validation=False,
+) -> InlineValidationConfig | list[InlineValidationConfig]:
+    primary = InlineValidationConfig(
+        loader=DataLoaderConfig(
+            dataset=XarrayDataConfig(
+                data_path=str(valid_data_path),
+                spatial_dimensions=spatial_dimensions_str,
+                labels=["era5"] if conditional else None,
+            ),
+            batch_size=2,
+            num_data_workers=0,
+        ),
+        aggregator=OneStepAggregatorConfig(
+            log_snapshots=log_validation_maps,
+            log_mean_maps=log_validation_maps,
+        ),
+    )
+    if not multi_validation:
+        return primary
+    secondary = InlineValidationConfig(
+        loader=DataLoaderConfig(
+            dataset=XarrayDataConfig(
+                data_path=str(valid_data_path),
+                spatial_dimensions=spatial_dimensions_str,
+                labels=["era5"] if conditional else None,
+            ),
+            batch_size=2,
+            num_data_workers=0,
+        ),
+        name="val_extra",
+        weight=0.0,
+    )
+    return [primary, secondary]
+
+
 def _get_test_yaml_files(
     *,
     train_data_path,
@@ -118,6 +159,7 @@ def _get_test_yaml_files(
     use_schedule=False,
     validate_using_ema=False,
     derived_forcings=None,
+    multi_validation=False,
 ):
     input_time_size = 1
     output_time_size = 1
@@ -322,20 +364,12 @@ def _get_test_yaml_files(
             time_buffer=time_buffer,
             sample_with_replacement=10,
         ),
-        validation=InlineValidationConfig(
-            loader=DataLoaderConfig(
-                dataset=XarrayDataConfig(
-                    data_path=str(valid_data_path),
-                    spatial_dimensions=spatial_dimensions_str,
-                    labels=["era5"] if conditional else None,
-                ),
-                batch_size=2,
-                num_data_workers=0,
-            ),
-            aggregator=OneStepAggregatorConfig(
-                log_snapshots=log_validation_maps,
-                log_mean_maps=log_validation_maps,
-            ),
+        validation=_make_validation_entries(
+            valid_data_path=valid_data_path,
+            spatial_dimensions_str=spatial_dimensions_str,
+            conditional=conditional,
+            log_validation_maps=log_validation_maps,
+            multi_validation=multi_validation,
         ),
         optimization=OptimizationConfig(
             use_gradient_accumulation=True,
@@ -467,6 +501,7 @@ def _setup(
     use_schedule: bool = False,
     validate_using_ema: bool = False,
     stats_std_fill_value: float | None = None,
+    multi_validation: bool = False,
 ):
     if not path.exists():
         path.mkdir()
@@ -568,6 +603,7 @@ def _setup(
         derived_forcings=derived_forcings,
         use_schedule=use_schedule,
         validate_using_ema=validate_using_ema,
+        multi_validation=multi_validation,
     )
     return train_config_filename, inference_config_filename
 
@@ -1003,6 +1039,7 @@ def test_train_without_inline_inference(tmp_path, very_fast_only: bool):
         log_validation_maps=log_validation_maps,
         skip_inline_inference=True,
         time_buffer=2,
+        multi_validation=True,
     )
     with mock_wandb() as wandb:
         train_main(
@@ -1011,6 +1048,11 @@ def test_train_without_inline_inference(tmp_path, very_fast_only: bool):
         wandb_logs = wandb.get_logs()
     assert np.isinf(wandb_logs[-1]["best_inference_error"])
     assert not any("inference/" in key for key in wandb_logs[-1])
+    epoch_logs = wandb_logs[-1]
+    assert "val_0/mean/loss" in epoch_logs
+    assert "val_extra/mean/loss" in epoch_logs
+    val_extra_output = tmp_path / "results" / "output" / "val_extra" / "epoch_0001"
+    assert val_extra_output.exists()
 
 
 @pytest.mark.parametrize(

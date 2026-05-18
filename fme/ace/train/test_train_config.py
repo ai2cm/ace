@@ -1,4 +1,5 @@
 import dataclasses
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -293,3 +294,75 @@ def test_duplicate_validation_names_raises(tmp_path):
                 _make_validation_config(name="same"),
             ],
         )
+
+
+def test_empty_validation_raises(tmp_path):
+    with pytest.raises(ValueError, match="At least one validation entry"):
+        _make_train_config(tmp_path, [], validation=[])
+
+
+class TestGetValidationCallback:
+    @staticmethod
+    def _make_entry(name, weight=1.0):
+        config = _make_validation_config(name=name, weight=weight)
+        data = MagicMock()
+        return (config, data, name)
+
+    @staticmethod
+    def _call(entries, run_validation_side_effect):
+        from fme.ace.train.train import get_validation_callback
+
+        stepper = MagicMock()
+        with patch(
+            "fme.ace.train.train.run_validation",
+            side_effect=run_validation_side_effect,
+        ):
+            callback = get_validation_callback(
+                validation_entries=entries,
+                stepper=stepper,
+                dataset_info=MagicMock(),
+                loss_scaling=None,
+                loss_names=None,
+                save_per_epoch_diagnostics=False,
+                output_dir="/tmp/out",
+            )
+            return callback(epoch=1)
+
+    def test_single_entry(self):
+        entries = [self._make_entry("val")]
+        logs, loss = self._call(
+            entries,
+            [{"val/mean/loss": 0.5, "val/other": 1.0}],
+        )
+        assert loss == 0.5
+        assert logs == {"val/mean/loss": 0.5, "val/other": 1.0}
+
+    def test_zero_weight_excluded_from_loss(self):
+        entries = [
+            self._make_entry("val_0", weight=1.0),
+            self._make_entry("val_extra", weight=0.0),
+        ]
+        logs, loss = self._call(
+            entries,
+            [
+                {"val_0/mean/loss": 0.5},
+                {"val_extra/mean/loss": 999.0},
+            ],
+        )
+        assert loss == 0.5
+        assert "val_0/mean/loss" in logs
+        assert "val_extra/mean/loss" in logs
+
+    def test_multiple_weighted_entries(self):
+        entries = [
+            self._make_entry("a", weight=2.0),
+            self._make_entry("b", weight=3.0),
+        ]
+        logs, loss = self._call(
+            entries,
+            [
+                {"a/mean/loss": 0.1},
+                {"b/mean/loss": 0.2},
+            ],
+        )
+        assert loss == pytest.approx(2.0 * 0.1 + 3.0 * 0.2)

@@ -13,14 +13,102 @@ from fme.core.cli import prepare_config, prepare_directory
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.distributed import Distributed
 from fme.core.ema import EMATracker
+from fme.core.generics.data import GriddedDataABC
+from fme.core.generics.lr_tuning import ValidateStepper
 from fme.core.generics.train_stepper import TrainStepperABC
 from fme.core.generics.trainer import AggregatorBuilderABC, Trainer, inference_one_epoch
-from fme.core.generics.validation import run_validation
+from fme.core.generics.validation import run_validation, run_validation_loop
 from fme.coupled.aggregator import OneStepAggregator, TrainAggregator
 from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.stepper import CoupledTrainOutput
-from fme.coupled.train.train_config import TrainBuilders, TrainConfig
+from fme.coupled.train.train_config import (
+    InlineValidationConfig,
+    TrainBuilders,
+    TrainConfig,
+)
 from fme.coupled.typing_ import CoupledTensorMapping
+
+
+def get_validation_callback(
+    validation_entries: Sequence[tuple[InlineValidationConfig, GriddedDataABC, str]],
+    stepper: TrainStepperABC,
+    dataset_info: CoupledDatasetInfo,
+    loss_scaling: CoupledTensorMapping,
+    save_per_epoch_diagnostics: bool,
+    output_dir: str,
+):
+    def validation_callback(epoch: int) -> tuple[dict[str, Any], float]:
+        all_logs: dict[str, Any] = {}
+        weighted_loss = 0.0
+        for entry_config, data, name in validation_entries:
+            data.set_epoch(epoch)
+            aggregator = OneStepAggregator(
+                dataset_info=dataset_info,
+                save_diagnostics=save_per_epoch_diagnostics,
+                output_dir=os.path.join(output_dir, name),
+                loss_scaling=loss_scaling,
+            )
+            logs = run_validation(
+                train_stepper=stepper,
+                validation_data=data,
+                aggregator=aggregator,
+                label=name,
+                diagnostics_subdir=f"epoch_{epoch:04d}",
+                record_logs=lambda logs: None,
+            )
+            overlap = all_logs.keys() & logs.keys()
+            if overlap:
+                raise RuntimeError(
+                    f"Validation entry {name!r} produced log keys that "
+                    f"overlap with earlier entries: {sorted(overlap)}"
+                )
+            all_logs.update(logs)
+            if entry_config.weight > 0:
+                metric_key = f"{name}/mean/loss"
+                loss = logs.get(metric_key)
+                if loss is None:
+                    raise RuntimeError(
+                        f"Validation entry {name!r} with "
+                        f"weight={entry_config.weight} did not produce "
+                        f"expected metric key {metric_key!r}."
+                    )
+                weighted_loss += entry_config.weight * loss
+        return all_logs, weighted_loss
+
+    return validation_callback
+
+
+def get_validate_stepper_callback(
+    validation_entries: Sequence[tuple[InlineValidationConfig, GriddedDataABC, str]],
+    dataset_info: CoupledDatasetInfo,
+    loss_scaling: CoupledTensorMapping,
+    validate_using_ema: bool,
+) -> ValidateStepper:
+    def validate_stepper(stepper: TrainStepperABC, ema: EMATracker) -> float:
+        weighted_loss = 0.0
+        for entry_config, data, name in validation_entries:
+            aggregator = OneStepAggregator(
+                dataset_info=dataset_info,
+                save_diagnostics=False,
+                output_dir="",
+                loss_scaling=loss_scaling,
+            )
+            run_validation_loop(
+                stepper=stepper,
+                valid_data=data,
+                aggregator=aggregator,
+                ema=ema,
+                validate_using_ema=validate_using_ema,
+            )
+            logs = aggregator.get_logs(label=name)
+            if entry_config.weight > 0:
+                metric_key = f"{name}/mean/loss"
+                loss = logs.get(metric_key)
+                if loss is not None:
+                    weighted_loss += entry_config.weight * loss
+        return weighted_loss
+
+    return validate_stepper
 
 
 def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
@@ -30,10 +118,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
     variable_metadata = get_derived_variable_metadata() | train_data.variable_metadata
     dataset_info = train_data.dataset_info.update_variable_metadata(variable_metadata)
 
-    if config.validation_list:
-        logging.info("Initializing validation data loaders")
-    else:
-        logging.info("Skipping validation")
+    logging.info("Initializing validation data loaders")
     validation_entries = builder.get_validation_data()
 
     for data, name in zip(
@@ -62,43 +147,23 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
         output_dir=config.output_dir,
     )
 
-    def validation_callback(
-        epoch: int,
-        stepper: TrainStepperABC,
-        ema: EMATracker,
-    ) -> tuple[dict[str, Any], float]:
-        all_logs: dict[str, Any] = {}
-        weighted_loss = 0.0
-        for entry_config, data, name in validation_entries:
-            data.set_epoch(epoch)
-            aggregator = OneStepAggregator(
-                dataset_info=dataset_info,
-                save_diagnostics=config.save_per_epoch_diagnostics,
-                output_dir=os.path.join(config.output_dir, name),
-                loss_scaling=loss_scaling,
-            )
-            logs = run_validation(
-                train_stepper=stepper,
-                validation_data=data,
-                aggregator=aggregator,
-                label=name,
-                diagnostics_subdir=f"epoch_{epoch:04d}",
-                record_logs=lambda logs: None,
-                ema=ema,
-                validate_using_ema=config.validate_using_ema,
-            )
-            all_logs.update(logs)
-            if entry_config.weight > 0:
-                metric_key = f"{name}/mean/loss"
-                loss = logs.get(metric_key)
-                if loss is None:
-                    raise RuntimeError(
-                        f"Validation entry {name!r} with "
-                        f"weight={entry_config.weight} did not produce "
-                        f"expected metric key {metric_key!r}."
-                    )
-                weighted_loss += entry_config.weight * loss
-        return all_logs, weighted_loss
+    validation_callback = get_validation_callback(
+        validation_entries=validation_entries,
+        stepper=stepper,
+        dataset_info=dataset_info,
+        loss_scaling=loss_scaling,
+        save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
+        output_dir=config.output_dir,
+    )
+
+    validate_stepper: ValidateStepper | None = None
+    if config.lr_tuning is not None:
+        validate_stepper = get_validate_stepper_callback(
+            validation_entries=validation_entries,
+            dataset_info=dataset_info,
+            loss_scaling=loss_scaling,
+            validate_using_ema=config.validate_using_ema,
+        )
 
     def inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
         if epoch not in inference_epochs:
@@ -154,6 +219,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
         validation_callback=validation_callback,
         end_of_batch_callback=end_of_batch_ops,
         inference_callback=inference_callback,
+        validate_stepper=validate_stepper,
     )
 
 

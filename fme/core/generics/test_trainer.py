@@ -18,7 +18,7 @@ from fme.core.generics.aggregator import (
     InferenceLogs,
 )
 from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
-from fme.core.generics.lr_tuning import LRTuningConfig
+from fme.core.generics.lr_tuning import LRTuningConfig, ValidateStepper
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.trainer import (
     AggregatorBuilderABC,
@@ -31,7 +31,7 @@ from fme.core.generics.trainer import (
     epoch_checkpoint_enabled,
     inference_one_epoch,
 )
-from fme.core.generics.validation import run_validation
+from fme.core.generics.validation import run_validation, run_validation_loop
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
 from fme.core.scheduler import SchedulerConfig
@@ -440,11 +440,7 @@ def get_trainer(
     )
     inference_epochs = config._inference_epochs
 
-    def validation_callback(
-        epoch: int,
-        stepper: TrainStepperABC,
-        ema: EMATracker,
-    ) -> tuple[dict[str, Any], float]:
+    def validation_callback(epoch: int) -> tuple[dict[str, Any], float]:
         validation_data.set_epoch(epoch)
         val_agg = ValidationAggregator(
             aggregator_builder.validation_losses[aggregator_builder._validation_calls]
@@ -456,8 +452,6 @@ def get_trainer(
             aggregator=val_agg,
             diagnostics_subdir=f"epoch_{epoch:04d}",
             record_logs=lambda logs: None,
-            ema=ema,
-            validate_using_ema=config.validate_using_ema,
         )
         return logs, logs["val/mean/loss"]
 
@@ -475,6 +469,28 @@ def get_trainer(
         error = logs.get("inference/time_mean_norm/rmse/channel_mean")
         return logs, error
 
+    validate_stepper_callback: ValidateStepper | None = None
+    if lr_tuning is not None:
+
+        def _vs(trial_stepper, trial_ema):
+            val_agg = ValidationAggregator(
+                aggregator_builder.validation_losses[
+                    aggregator_builder._validation_calls
+                ]
+            )
+            aggregator_builder._validation_calls += 1
+            run_validation_loop(
+                stepper=trial_stepper,
+                valid_data=validation_data,
+                aggregator=val_agg,
+                ema=trial_ema,
+                validate_using_ema=config.validate_using_ema,
+            )
+            logs = val_agg.get_logs(label="val")
+            return logs["val/mean/loss"]
+
+        validate_stepper_callback = _vs
+
     trainer = Trainer(
         train_data=train_data,
         stepper=stepper,
@@ -486,6 +502,7 @@ def get_trainer(
         end_of_batch_callback=unittest.mock.MagicMock(),
         end_of_epoch_callback=unittest.mock.MagicMock(side_effect=lambda epoch: {}),
         inference_callback=inference_callback,
+        validate_stepper=validate_stepper_callback,
         do_gc_collect=False,  # for much faster tests
     )
 

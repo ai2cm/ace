@@ -341,9 +341,9 @@ def test_validation_names_mixed(tmp_path):
     assert config.validation_names == ["era5", "val_1"]
 
 
-def test_validation_names_empty(tmp_path):
-    config = _make_train_config_for_validation(tmp_path, [])
-    assert config.validation_names == []
+def test_empty_validation_raises(tmp_path):
+    with pytest.raises(ValueError, match="At least one validation entry"):
+        _make_train_config_for_validation(tmp_path, [])
 
 
 def test_duplicate_validation_names_raises(tmp_path):
