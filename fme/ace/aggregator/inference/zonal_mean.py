@@ -1,7 +1,6 @@
 import dataclasses
 import logging
 from collections.abc import Callable, Mapping
-from typing import Literal
 
 import numpy as np
 import torch
@@ -321,10 +320,11 @@ class ZonalMeanAggregator:
 
 @dataclasses.dataclass
 class ZonalMeanMetricConfig:
-    type: Literal["zonal_mean"] = "zonal_mean"
     variables: list[str] | None = None
     name: str = "zonal_mean"
     zonal_mean_max_size: int = 4096
+    enabled: bool = True
+    strict: bool = False
 
     def get_name(self) -> str:
         return self.name
