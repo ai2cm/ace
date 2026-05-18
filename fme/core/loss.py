@@ -91,25 +91,34 @@ class LossOutput:
         When a mask is present (shape ``(B, C)``), each channel's loss
         is averaged only over the batch samples where that channel is
         present, so masked-out variables never dilute the result.
-
-        Also caches ``_counts`` — the number of active batch samples
-        per channel — for use in :meth:`get_channel_losses`.
         """
         if self._per_channel is None:
             bc = sum(c.reduce_to_channel() for c in self._losses)
             assert isinstance(bc, torch.Tensor)
             if bc.ndim == 0:
                 self._per_channel = bc.expand(len(self._channel_names))
-                self._counts = [1] * len(self._channel_names)
             elif self._mask is not None:
                 masked_sum = (bc * self._mask).sum(dim=0)
-                raw_counts = self._mask.sum(dim=0)
-                self._per_channel = masked_sum / raw_counts.clamp(min=1)
-                self._counts = [int(c.item()) for c in raw_counts]
+                self._per_channel = masked_sum / self._mask.sum(dim=0).clamp(min=1)
             else:
                 self._per_channel = bc.mean(dim=0)
-                self._counts = [bc.shape[0]] * len(self._channel_names)
         return self._per_channel
+
+    def _get_counts(self) -> list[int]:
+        """Return per-channel active-sample counts, computed once.
+
+        With a mask, counts may include 0 for channels masked out in
+        every sample.  Without a mask every sample is active.
+        """
+        if self._counts is None:
+            if self._mask is not None:
+                self._counts = [int(c.item()) for c in self._mask.sum(dim=0)]
+            else:
+                bc = sum(c.reduce_to_channel() for c in self._losses)
+                assert isinstance(bc, torch.Tensor)
+                batch_size = 1 if bc.ndim == 0 else bc.shape[0]
+                self._counts = [batch_size] * len(self._channel_names)
+        return self._counts
 
     def total(self) -> torch.Tensor:
         """Scalar loss — the optimisation target."""
@@ -130,15 +139,15 @@ class LossOutput:
         batches.
         """
         pc = self._get_per_channel()
-        assert self._counts is not None
+        counts = self._get_counts()
         if pc.ndim == 0:
             return {
-                name: ChannelLossInfo(loss=pc, count=self._counts[i])
+                name: ChannelLossInfo(loss=pc, count=counts[i])
                 for i, name in enumerate(self._channel_names)
             }
         n = min(pc.shape[0], len(self._channel_names))
         return {
-            self._channel_names[i]: ChannelLossInfo(loss=pc[i], count=self._counts[i])
+            self._channel_names[i]: ChannelLossInfo(loss=pc[i], count=counts[i])
             for i in range(n)
         }
 
