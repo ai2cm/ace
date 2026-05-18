@@ -14,8 +14,12 @@ from fme.core.coordinates import (
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.utils import decode_timestep, encode_timestep
 from fme.core.gridded_ops import GriddedOperations
-from fme.core.mask_provider import MaskProvider, MaskProviderABC, NullMaskProvider
 from fme.core.ocean_data import HasOceanDepthIntegral
+from fme.core.spatial_mask_provider import (
+    NullSpatialMaskProvider,
+    SpatialMaskProvider,
+    SpatialMaskProviderABC,
+)
 
 
 class MissingDatasetInfo(ValueError):
@@ -46,7 +50,7 @@ class DatasetInfo:
         self,
         horizontal_coordinates: HorizontalCoordinates | None = None,
         vertical_coordinate: VerticalCoordinate | None = None,
-        mask_provider: MaskProvider | None = None,
+        spatial_mask_provider: SpatialMaskProvider | None = None,
         timestep: datetime.timedelta | None = None,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
         gridded_operations: GriddedOperations | None = None,
@@ -55,7 +59,7 @@ class DatasetInfo:
     ):
         self._horizontal_coordinates = horizontal_coordinates
         self._vertical_coordinate = vertical_coordinate
-        self._mask_provider = mask_provider
+        self._mask_provider = spatial_mask_provider
         self._timestep = timestep
         self._variable_metadata = variable_metadata
         if all_labels is None:
@@ -93,7 +97,7 @@ class DatasetInfo:
             f"horizontal_coordinates={self._horizontal_coordinates}, "
             f"vertical_coordinate={self._vertical_coordinate}, "
             f"timestep={self._timestep}), "
-            f"mask_provider={self._mask_provider}, "
+            f"spatial_mask_provider={self._mask_provider}, "
             f"variable_metadata={self._variable_metadata}, "
             f"all_labels={self._all_labels})"
         )
@@ -125,7 +129,7 @@ class DatasetInfo:
             try:
                 self._mask_provider.assert_compatible_with(other._mask_provider)
             except AssertionError as e:
-                issues.append(f"mask_provider is not compatible: {e}")
+                issues.append(f"spatial_mask_provider is not compatible: {e}")
         if self._timestep is not None:
             if self._timestep != other._timestep:
                 issues.append(
@@ -166,10 +170,12 @@ class DatasetInfo:
         if self._horizontal_coordinates is None:
             raise MissingDatasetInfo("horizontal_coordinates")
         if self._mask_provider is None:
-            mp: MaskProviderABC = NullMaskProvider
+            mp: SpatialMaskProviderABC = NullSpatialMaskProvider
         else:
             mp = self._mask_provider
-        return self._horizontal_coordinates.get_gridded_operations(mask_provider=mp)
+        return self._horizontal_coordinates.get_gridded_operations(
+            spatial_mask_provider=mp
+        )
 
     @property
     def horizontal_coordinates(self) -> HorizontalCoordinates:
@@ -206,9 +212,9 @@ class DatasetInfo:
         )
 
     @property
-    def mask_provider(self) -> MaskProvider:
+    def spatial_mask_provider(self) -> SpatialMaskProvider:
         if self._mask_provider is None:
-            raise MissingDatasetInfo("mask_provider")
+            raise MissingDatasetInfo("spatial_mask_provider")
         return self._mask_provider
 
     @property
@@ -232,7 +238,7 @@ class DatasetInfo:
         return DatasetInfo(
             horizontal_coordinates=self._horizontal_coordinates,
             vertical_coordinate=self._vertical_coordinate,
-            mask_provider=self._mask_provider,
+            spatial_mask_provider=self._mask_provider,
             timestep=self._timestep,
             variable_metadata=new_metadata,
             gridded_operations=self._gridded_operations,
@@ -311,7 +317,7 @@ class DatasetInfo:
         else:
             vertical_coordinate = None
         if state.get("mask_provider") is not None:
-            mask_provider = MaskProvider.from_state(state["mask_provider"])
+            mask_provider = SpatialMaskProvider.from_state(state["mask_provider"])
         else:
             mask_provider = None
         if state.get("timestep") is not None:
@@ -322,7 +328,7 @@ class DatasetInfo:
         return cls(
             horizontal_coordinates=horizontal_coordinates,
             vertical_coordinate=vertical_coordinate,
-            mask_provider=mask_provider,
+            spatial_mask_provider=mask_provider,
             timestep=timestep,
             variable_metadata=variable_metadata,
             gridded_operations=gridded_ops,

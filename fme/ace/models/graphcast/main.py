@@ -135,7 +135,7 @@ class GraphCast(torch.nn.Module):
     def get_coordinates_and_mask(self):
         if any(x is None for x in (self.lat, self.lon, self.mask)):
             if self.is_ocean:
-                mask_provider = self.dataset_info.mask_provider
+                mask_provider = self.dataset_info.spatial_mask_provider
                 mask = mask_provider.get_mask_tensor_for("mask_2d")
                 if mask is not None:
                     self.mask = mask.cpu().numpy().astype(bool)

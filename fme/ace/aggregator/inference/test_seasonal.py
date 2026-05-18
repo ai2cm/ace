@@ -10,7 +10,7 @@ from fme.ace.aggregator.inference.data import InferenceBatchData
 from fme.ace.aggregator.inference.seasonal import SeasonalAggregator
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
-from fme.core.mask_provider import MaskProvider
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 
 
 def get_zero_time(shape, dims):
@@ -70,7 +70,7 @@ def test_seasonal_aggregator_with_nans():
     area_weights = torch.ones(n_lat, n_lon).to(fme.get_device())
     mask = torch.ones((n_lat, n_lon))
     mask[1, 1] = 0
-    mask_provider = MaskProvider({"mask_a": mask}).to(get_device())
+    mask_provider = SpatialMaskProvider({"mask_a": mask}).to(get_device())
     agg = SeasonalAggregator(
         LatLonOperations(area_weights, mask_provider),
     )

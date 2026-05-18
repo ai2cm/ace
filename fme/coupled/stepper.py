@@ -783,7 +783,7 @@ class CoupledStepper:
         self.atmosphere = atmosphere
         self._config = config
         self._dataset_info = dataset_info
-        self._ocean_mask_provider = dataset_info.ocean_mask_provider
+        self._ocean_spatial_mask_provider = dataset_info.ocean_spatial_mask_provider
 
         _: PredictFunction[  # for type checking
             CoupledPrognosticState,
@@ -920,7 +920,7 @@ class CoupledStepper:
             )
         for name, tensor in forcings_from_ocean.items():
             # set ocean invalid points to 0 based on the ocean masking
-            mask = self._ocean_mask_provider.get_mask_tensor_for(name)
+            mask = self._ocean_spatial_mask_provider.get_mask_tensor_for(name)
             if mask is not None:
                 mask = mask.expand(tensor.shape)
                 forcings_from_ocean[name] = tensor.where(mask != 0, 0)
