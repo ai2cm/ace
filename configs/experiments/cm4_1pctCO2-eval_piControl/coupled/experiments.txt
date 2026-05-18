@@ -41,8 +41,8 @@ sfc-loss-2x-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRHHSF
 
 cosLR-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRHM99V2NTX13H34C81TBQ3E|training|best_inference_ckpt|normal|--min-runtime 8h
 
-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRC8081HFK82XE2MRWK5TPZ3|run_ICx1_piC-140yr|best_inference_ckpt|high|--min-runtime 8h||01KRC8087J2XWQGKPZZ8AZ0BBX||h100
-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRC8081HFK82XE2MRWK5TPZ3|run_ICx1_140yr|best_inference_ckpt|high|--min-runtime 8h||01KRC8087J2XWQGKPZZ8AZ0BBX||h100
+ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRC8081HFK82XE2MRWK5TPZ3|done|best_inference_ckpt|high|--min-runtime 8h||01KRC8087J2XWQGKPZZ8AZ0BBX||h100
+ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRC8081HFK82XE2MRWK5TPZ3|done|best_inference_ckpt|high|--min-runtime 8h||01KRC8087J2XWQGKPZZ8AZ0BBX||h100
 
 cosLR-fast-decay-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRM4T57FXYM6RW2C9B94HPD9|training|best_inference_ckpt|normal|--min-runtime 8h
 
@@ -53,3 +53,6 @@ lr-8e-6-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRM6W87Z5J
 lr-5e-6-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRPNCHS6148RF7MDV356AKWA|training|best_inference_ckpt|normal|--min-runtime 8h
 
 lr-8e-6-cosLR-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRYK62XXX6R477JC1KSYKQNX|training|best_inference_ckpt|normal|--min-runtime 8h
+
+epoch-20-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRC8081HFK82XE2MRWK5TPZ3|run_ICx1_piC-140yr|best_inference_ckpt|high|--min-runtime 8h||01KRSFEKAW4RQZXSQ08K3FEPFV||h100
+epoch-20-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRC8081HFK82XE2MRWK5TPZ3|run_ICx1_140yr|best_inference_ckpt|high|--min-runtime 8h||01KRSFEKAW4RQZXSQ08K3FEPFV||h100
