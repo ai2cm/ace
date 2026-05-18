@@ -59,11 +59,7 @@ import dacite
 import torch
 
 import fme
-from fme.ace.aggregator import (
-    OneStepAggregator,
-    OneStepAggregatorConfig,
-    TrainAggregator,
-)
+from fme.ace.aggregator import TrainAggregator
 from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.stepper import TrainOutput
 from fme.ace.train.train_config import TrainBuilders, TrainConfig
@@ -71,6 +67,8 @@ from fme.core.cli import prepare_config, prepare_directory
 from fme.core.dataset_info import DatasetInfo
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.distributed import Distributed
+from fme.core.ema import EMATracker
+from fme.core.generics.train_stepper import TrainStepperABC
 from fme.core.generics.trainer import (
     AggregatorBuilderABC,
     TrainConfigProtocol,
@@ -117,30 +115,32 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         modules=stepper.modules, base_weights=stepper.get_base_weights()
     )
 
-    primary_validation_config = (
-        config.validation_list[0].aggregator if config.validation_list else None
-    )
+    loss_scaling = stepper.effective_loss_scaling
+    loss_names = stepper.loss_names
     aggregator_builder = AggregatorBuilder(
         train_config=config.train_aggregator,
         dataset_info=dataset_info.update_variable_metadata(variable_metadata),
         output_dir=config.output_dir,
-        loss_scaling=stepper.effective_loss_scaling,
-        channel_mean_names=stepper.loss_names,
+        loss_scaling=loss_scaling,
+        channel_mean_names=loss_names,
         save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
-        validation_config=primary_validation_config,
     )
 
-    def validation_callback(epoch: int) -> tuple[dict[str, Any], float]:
+    def validation_callback(
+        epoch: int,
+        stepper: TrainStepperABC,
+        ema: EMATracker,
+    ) -> tuple[dict[str, Any], float]:
         all_logs: dict[str, Any] = {}
         weighted_loss = 0.0
         for entry_config, data, name in validation_entries:
             data.set_epoch(epoch)
             aggregator = entry_config.aggregator.build(
                 dataset_info=dataset_info.update_variable_metadata(variable_metadata),
-                loss_scaling=stepper.effective_loss_scaling,
+                loss_scaling=loss_scaling,
                 save_diagnostics=config.save_per_epoch_diagnostics,
                 output_dir=os.path.join(config.output_dir, name),
-                channel_mean_names=stepper.loss_names,
+                channel_mean_names=loss_names,
             )
             logs = run_validation(
                 train_stepper=stepper,
@@ -149,6 +149,8 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
                 label=name,
                 diagnostics_subdir=f"epoch_{epoch:04d}",
                 record_logs=lambda logs: None,
+                ema=ema,
+                validate_using_ema=config.validate_using_ema,
             )
             all_logs.update(logs)
             if entry_config.weight > 0:
@@ -210,12 +212,10 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
 
         return all_logs, weighted_error
 
-    primary_validation_data = validation_entries[0][1]
     do_gc_collect = fme.get_device() != torch.device("cpu")
     trainer_config: TrainConfigProtocol = config  # documenting trainer input type
     return Trainer(
         train_data=train_data,
-        validation_data=primary_validation_data,
         stepper=stepper,
         build_optimization=builder.get_optimization,
         build_ema=builder.get_ema,
@@ -239,7 +239,6 @@ class AggregatorBuilder(
         loss_scaling: dict[str, torch.Tensor] | None = None,
         channel_mean_names: Sequence[str] | None = None,
         save_per_epoch_diagnostics: bool = False,
-        validation_config: OneStepAggregatorConfig | None = None,
     ):
         self.train_config = train_config
         self.dataset_info = dataset_info
@@ -247,21 +246,11 @@ class AggregatorBuilder(
         self.channel_mean_names = channel_mean_names
         self.output_dir = output_dir
         self.save_per_epoch_diagnostics = save_per_epoch_diagnostics
-        self.validation_config = validation_config or OneStepAggregatorConfig()
 
     def get_train_aggregator(self) -> TrainAggregator:
         return TrainAggregator(
             config=self.train_config,
             operations=self.dataset_info.gridded_operations,
-        )
-
-    def get_validation_aggregator(self) -> OneStepAggregator:
-        return self.validation_config.build(
-            dataset_info=self.dataset_info,
-            loss_scaling=self.loss_scaling,
-            save_diagnostics=self.save_per_epoch_diagnostics,
-            output_dir=os.path.join(self.output_dir, "val"),
-            channel_mean_names=self.channel_mean_names,
         )
 
 

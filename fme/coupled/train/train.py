@@ -12,6 +12,8 @@ import fme
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.distributed import Distributed
+from fme.core.ema import EMATracker
+from fme.core.generics.train_stepper import TrainStepperABC
 from fme.core.generics.trainer import AggregatorBuilderABC, Trainer, inference_one_epoch
 from fme.core.generics.validation import run_validation
 from fme.coupled.aggregator import OneStepAggregator, TrainAggregator
@@ -52,14 +54,19 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
     stepper = builder.get_stepper(train_data.dataset_info)
     end_of_batch_ops = builder.get_end_of_batch_ops(stepper.modules)
 
+    loss_scaling = stepper.effective_loss_scaling
     aggregator_builder = CoupledAggregatorBuilder(
         dataset_info=dataset_info,
-        loss_scaling=stepper.effective_loss_scaling,
+        loss_scaling=loss_scaling,
         save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
         output_dir=config.output_dir,
     )
 
-    def validation_callback(epoch: int) -> tuple[dict[str, Any], float]:
+    def validation_callback(
+        epoch: int,
+        stepper: TrainStepperABC,
+        ema: EMATracker,
+    ) -> tuple[dict[str, Any], float]:
         all_logs: dict[str, Any] = {}
         weighted_loss = 0.0
         for entry_config, data, name in validation_entries:
@@ -68,7 +75,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
                 dataset_info=dataset_info,
                 save_diagnostics=config.save_per_epoch_diagnostics,
                 output_dir=os.path.join(config.output_dir, name),
-                loss_scaling=stepper.effective_loss_scaling,
+                loss_scaling=loss_scaling,
             )
             logs = run_validation(
                 train_stepper=stepper,
@@ -77,6 +84,8 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
                 label=name,
                 diagnostics_subdir=f"epoch_{epoch:04d}",
                 record_logs=lambda logs: None,
+                ema=ema,
+                validate_using_ema=config.validate_using_ema,
             )
             all_logs.update(logs)
             if entry_config.weight > 0:
@@ -135,10 +144,8 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
 
         return all_logs, weighted_error if has_error else None
 
-    primary_validation_data = validation_entries[0][1]
     return Trainer(
         train_data=train_data,
-        validation_data=primary_validation_data,
         stepper=stepper,
         build_optimization=builder.get_optimization,
         build_ema=builder.get_ema,

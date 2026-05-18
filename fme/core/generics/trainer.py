@@ -72,7 +72,6 @@ from fme.core.generics.inference import run_inference
 from fme.core.generics.lr_tuning import LRTuningConfig, run_lr_tuning_trial
 from fme.core.generics.metrics_aggregator import MetricsAggregator
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
-from fme.core.generics.validation import run_validation_loop
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.timing import GlobalTimer
 from fme.core.training_history import TrainingJob
@@ -93,8 +92,18 @@ def null_end_of_epoch_callback(epoch: int) -> Mapping[str, Any]:
 
 
 class ValidationCallback(Protocol):
-    def __call__(self, epoch: int) -> tuple[dict[str, Any], float]:
+    def __call__(
+        self,
+        epoch: int,
+        stepper: TrainStepperABC,
+        ema: EMATracker,
+    ) -> tuple[dict[str, Any], float]:
         """Run validation for the given epoch.
+
+        Args:
+            epoch: The current epoch number.
+            stepper: The train stepper to evaluate.
+            ema: The EMA tracker for the stepper's modules.
 
         Returns:
             A tuple of (logs, valid_loss).
@@ -181,10 +190,6 @@ class AggregatorBuilderABC(abc.ABC, Generic[TO]):
     def get_train_aggregator(self) -> AggregatorABC[TO]:
         pass
 
-    @abc.abstractmethod
-    def get_validation_aggregator(self) -> AggregatorABC[TO]:
-        pass
-
 
 class CheckpointPaths:
     def __init__(self, checkpoint_dir: str):
@@ -228,7 +233,6 @@ class Trainer:
     def __init__(
         self,
         train_data: GriddedDataABC[BD],
-        validation_data: GriddedDataABC[BD],
         stepper: TrainStepperABC[PS, BD, FD, SD, TO],
         build_optimization: Callable[[torch.nn.ModuleList], Optimization],
         build_ema: Callable[[torch.nn.ModuleList], EMATracker],
@@ -259,7 +263,6 @@ class Trainer:
             )
 
         self.train_data = train_data
-        self.valid_data = validation_data
 
         self.num_batches_seen = 0
         self._start_epoch = 0
@@ -340,16 +343,8 @@ class Trainer:
         return EMATracker.from_state(self._ema.get_state(), modules)
 
     def _validate_stepper(self, stepper: TrainStepperABC, ema: EMATracker) -> float:
-        aggregator = self._aggregator_builder.get_validation_aggregator()
-        run_validation_loop(
-            stepper=stepper,
-            valid_data=self.valid_data,
-            aggregator=aggregator,
-            ema=ema,
-            validate_using_ema=self.config.validate_using_ema,
-        )
-        val_logs = aggregator.get_logs(label="val")
-        return val_logs["val/mean/loss"]
+        _, valid_loss = self._validation_callback(self._epochs_trained, stepper, ema)
+        return valid_loss
 
     def _maybe_tune_lr(self):
         cfg = self.config.lr_tuning
@@ -395,9 +390,11 @@ class Trainer:
             and self._current_epoch_num_batches_seen == 0
         ):
             logging.info("Starting validation before training")
+            valid_logs, valid_loss = validation_callback(
+                self._epochs_trained, self.stepper, self._ema
+            )
+            logging.info("Starting inline inference before training")
             with self.validation_context():
-                valid_logs, valid_loss = validation_callback(self._epochs_trained)
-                logging.info("Starting inline inference before training")
                 inference_logs, _ = inference_callback(self._epochs_trained)
             logging.info(f"Validation loss before training: {valid_loss}")
             logging.info("Logging to wandb")
@@ -421,13 +418,15 @@ class Trainer:
                 f"Starting validation step for model trained for "
                 f"{self._epochs_trained} epochs"
             )
+            valid_logs, valid_loss = validation_callback(
+                self._epochs_trained, self.stepper, self._ema
+            )
+            valid_end = time.time()
+            logging.info(
+                f"Starting inference step for model trained for "
+                f"{self._epochs_trained} epochs"
+            )
             with self.validation_context():
-                valid_logs, valid_loss = validation_callback(self._epochs_trained)
-                valid_end = time.time()
-                logging.info(
-                    f"Starting inference step for model trained for "
-                    f"{self._epochs_trained} epochs"
-                )
                 inference_logs, inference_error = inference_callback(
                     self._epochs_trained
                 )

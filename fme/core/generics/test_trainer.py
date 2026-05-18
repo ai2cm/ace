@@ -314,11 +314,6 @@ class AggregatorBuilder(AggregatorBuilderABC[TrainOutput]):
         self._train_calls += 1
         return ret
 
-    def get_validation_aggregator(self) -> AggregatorABC[TrainOutput]:
-        ret = ValidationAggregator(self.validation_losses[self._validation_calls])
-        self._validation_calls += 1
-        return ret
-
     def get_inference_aggregator(self) -> InferenceAggregatorABC[PSType, SDType]:
         ret = InferenceAggregator(self.inference_losses[self._inference_calls])
         self._inference_calls += 1
@@ -445,15 +440,24 @@ def get_trainer(
     )
     inference_epochs = config._inference_epochs
 
-    def validation_callback(epoch: int) -> tuple[dict[str, Any], float]:
+    def validation_callback(
+        epoch: int,
+        stepper: TrainStepperABC,
+        ema: EMATracker,
+    ) -> tuple[dict[str, Any], float]:
         validation_data.set_epoch(epoch)
-        val_agg = aggregator_builder.get_validation_aggregator()
+        val_agg = ValidationAggregator(
+            aggregator_builder.validation_losses[aggregator_builder._validation_calls]
+        )
+        aggregator_builder._validation_calls += 1
         logs = run_validation(
             train_stepper=stepper,
             validation_data=validation_data,
             aggregator=val_agg,
             diagnostics_subdir=f"epoch_{epoch:04d}",
             record_logs=lambda logs: None,
+            ema=ema,
+            validate_using_ema=config.validate_using_ema,
         )
         return logs, logs["val/mean/loss"]
 
@@ -473,7 +477,6 @@ def get_trainer(
 
     trainer = Trainer(
         train_data=train_data,
-        validation_data=validation_data,
         stepper=stepper,
         build_optimization=build_optimization,
         build_ema=build_ema,
@@ -517,11 +520,9 @@ def test_trainer(tmp_path: str, checkpoint_save_epochs: Slice | None):
             assert not os.path.exists(paths.epoch_checkpoint_path(i))
         assert not os.path.exists(paths.ema_epoch_checkpoint_path(i))
     train_data = cast(TrainData, trainer.train_data)
-    valid_data = cast(TrainData, trainer.valid_data)
     assert train_data.set_epoch_mock.mock_calls == [
         unittest.mock.call(i) for i in range(1, config.max_epochs + 1)
     ]
-    assert valid_data.set_epoch_mock.mock_calls == train_data.set_epoch_mock.mock_calls
     assert trainer._end_of_epoch_callback.mock_calls == [  # type: ignore
         unittest.mock.call(i) for i in range(1, config.max_epochs + 1)
     ]
