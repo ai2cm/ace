@@ -1,6 +1,7 @@
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
+checkpoint_every_n_batches: 5000
 validate_using_ema: true
 max_epochs: 120
 ema:
@@ -58,6 +59,7 @@ validation_loader:
   batch_size: 32
   num_data_workers: 8
   prefetch_factor: 2
+  time_buffer: 16
   dataset:
     data_path: /climate-default
     file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
