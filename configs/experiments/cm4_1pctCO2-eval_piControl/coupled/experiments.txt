@@ -34,3 +34,5 @@ ft-50-50-piControl-fto_stochastic-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_cb
 ft-50-50-piControl-fto_stochastic-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_cbj61w53|rs0|01KR08ZX46KYWBS176FFACRW0C|run_ICx1_140yr|best_ckpt|high|--min-runtime 8h||||h100
 
 ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0||training|best_inference_ckpt|normal|--min-runtime 8h
+
+ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRXZNTWTTGSFD84F63XNMRWT|training|best_inference_ckpt|normal|--min-runtime 8h
