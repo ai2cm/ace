@@ -102,11 +102,11 @@ class DatasetProperties:
 
     def copy(self) -> "DatasetProperties":
         return DatasetProperties(
-            self.variable_metadata,
+            dict(self.variable_metadata),
             self.vertical_coordinate,
             self.horizontal_coordinates,
             self.mask_provider,
             self.timestep,
             self.is_remote,
-            self.all_labels,
+            set(self.all_labels) if self.all_labels is not None else None,
         )

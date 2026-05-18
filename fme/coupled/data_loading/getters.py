@@ -267,7 +267,7 @@ def get_train_dataset(
     # canonical = the long (forcing) horizon, since it provides the time
     # coordinate that downstream code uses
     atmosphere = TimePaddedMergedDataset([atmos_forcing, atmos_target])
-    atmosphere_properties = atmos_forcing_properties
+    atmosphere_properties = atmos_forcing_properties.copy()
     atmosphere_properties.update_merged_dataset(atmos_target_properties)
     properties = CoupledDatasetProperties(ocean_properties, atmosphere_properties)
     dataset = CoupledDataset(
