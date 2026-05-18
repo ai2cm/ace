@@ -59,4 +59,4 @@ base_name="ace2s"
 # ace-train-config-multi-step-finetuning.yaml then uncomment next line
 
 run_training "ace-train-config-multi-step-finetuning.yaml" "$base_name-era5-multi-step-fine-tuning-no-var-weighting-rs0"
-run_training "ace-train-config-multi-step-finetuning-weighted.yaml" "$base_name-era5-multi-step-fine-tuning-ace2-channel-weightings-rs0"
+# run_training "ace-train-config-multi-step-finetuning-weighted.yaml" "$base_name-era5-multi-step-fine-tuning-ace2-channel-weightings-rs0"
