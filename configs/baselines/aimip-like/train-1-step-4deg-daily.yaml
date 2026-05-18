@@ -9,7 +9,7 @@ inference:
   - epochs:
       start: 0
     n_forward_steps: 1825
-    forward_steps_in_memory: 40
+    forward_steps_in_memory: 73
     loader:
       start_indices:
         times:
@@ -23,7 +23,7 @@ inference:
           - '2009-11-15T00:00:00'
       dataset:
         data_path: /climate-default
-        file_pattern: 2026-03-19-era5-4deg-8layer-daily-1940-2025.zarr
+        file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
         engine: zarr
       num_data_workers: 8
     aggregator:
@@ -36,7 +36,7 @@ inference:
         - step: 5
       histogram:
         enabled: true
-      time_mean_reference_data: /climate-default/2026-03-19-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/time-mean.nc
+      time_mean_reference_data: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/time-mean.nc
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -49,7 +49,7 @@ train_loader:
   prefetch_factor: 4
   dataset:
     data_path: /climate-default
-    file_pattern: 2026-03-19-era5-4deg-8layer-daily-1940-2025.zarr
+    file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
     engine: zarr
     subset:
       start_time: '1979-01-01'
@@ -60,7 +60,7 @@ validation_loader:
   prefetch_factor: 2
   dataset:
     data_path: /climate-default
-    file_pattern: 2026-03-19-era5-4deg-8layer-daily-1940-2025.zarr
+    file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
     engine: zarr
     subset:
       start_time: '2009-01-01'
@@ -121,11 +121,11 @@ stepper:
           spectral_transform: sht
       normalization:
         network:
-          global_means_path: /climate-default/2026-03-19-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/centering.nc
-          global_stds_path: /climate-default/2026-03-19-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/scaling-full-field.nc
+          global_means_path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/centering.nc
+          global_stds_path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/scaling-full-field.nc
         residual:
-          global_means_path: /climate-default/2026-03-19-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/centering.nc
-          global_stds_path: /climate-default/2026-03-19-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/scaling-residual.nc
+          global_means_path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/centering.nc
+          global_stds_path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/scaling-residual.nc
       ocean:
         surface_temperature_name: surface_temperature
         ocean_fraction_name: ocean_fraction
