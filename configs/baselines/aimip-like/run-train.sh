@@ -51,11 +51,4 @@ run_training() {
 }
 
 # run_training "train-1-step.yaml" "era5-1-step-rs0"
-# run_training "train-1-step-4deg-daily.yaml" "era5-1-step-4deg-daily-rs0"
-# run_training "train-1-step-4deg-daily-t8p1.yaml" "era5-1-step-4deg-daily-t8p1-rs0"
-# run_training "train-1-step-4deg-daily-t8p16.yaml" "era5-1-step-4deg-daily-t8p16-rs0"
-# run_training "train-1-step-4deg-daily-t8p32.yaml" "era5-1-step-4deg-daily-t8p32-rs0"
-run_training "train-1-step-4deg-daily-t1p32.yaml" "era5-1-step-4deg-daily-t1p32-rs0"
-run_training "train-1-step-4deg-daily-t2p32.yaml" "era5-1-step-4deg-daily-t2p32-rs0"
-# run_training "train-1-step-4deg-daily-t4p32.yaml" "era5-1-step-4deg-daily-t4p32-rs0"
-# run_training "train-1-step-4deg-daily-t16p16.yaml" "era5-1-step-4deg-daily-t16p16-rs0"
+run_training "train-1-step-4deg-daily.yaml" "era5-1-step-4deg-daily-rs0"
