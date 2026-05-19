@@ -51,6 +51,7 @@ from fme.ace.stepper.time_length_probabilities import (
 from fme.ace.testing import (
     DimSizes,
     MonthlyReferenceData,
+    patch_cm4_solar_constant,
     save_nd_netcdf,
     save_scalar_netcdf,
     save_stepper_checkpoint,
@@ -375,7 +376,7 @@ def _get_test_yaml_files(
             use_gradient_accumulation=True,
             enable_automatic_mixed_precision=True,
             optimizer_type="Adam",
-            lr=0.001,
+            lr=0.0001,
             kwargs=dict(weight_decay=0.01),
             scheduler=SchedulerConfig(
                 type="CosineAnnealingLR",
@@ -1098,13 +1099,14 @@ def test_train_and_inference_with_derived_forcings(
         derived_forcings=derived_forcings,
         stats_std_fill_value=1.0,
     )
-    with mock_wandb() as wandb:
-        train_main(
-            yaml_config=train_config,
-        )
-    with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
-        inference_evaluator_main(yaml_config=inference_config)
+    with patch_cm4_solar_constant(1.0):
+        with mock_wandb() as wandb:
+            train_main(
+                yaml_config=train_config,
+            )
+        with mock_wandb() as wandb:
+            wandb.configure(log_to_wandb=True)
+            inference_evaluator_main(yaml_config=inference_config)
 
 
 def test_train_with_non_local_experiment_dir_error():
