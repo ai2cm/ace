@@ -3,7 +3,6 @@ FROM pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime AS base
 ENV FME_DIR=/full-model
 ENV DGLBACKEND=pytorch
 ENV TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=1
-ENV CUDA_HOME=/usr/local/cuda
 
 RUN apt-get update -y && apt-get install -y \
   build-essential \
@@ -19,8 +18,25 @@ RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.c
   apt-key --keyring /usr/share/keyrings/cloud.google.gpg  add - && apt-get update -y && apt-get install google-cloud-cli -y
 
 ENV FORCE_CUDA_EXTENSION=1
+ENV CUDA_HOME=/usr/local/cuda
+ENV TORCH_CUDA_ARCH_LIST="7.5 8.0 8.9 9.0 10.0+PTX"
 # Remove PEP 668 marker so pip/uv can install into the system Python
 RUN rm -f /usr/lib/python*/EXTERNALLY-MANAGED
+# Install nvcc + CUDA dev headers needed for compiling extensions
+RUN wget -qO /tmp/cuda-keyring.deb \
+    https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb \
+    && dpkg -i /tmp/cuda-keyring.deb && rm /tmp/cuda-keyring.deb \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        cuda-nvcc-12-8 \
+        cuda-cudart-dev-12-8 \
+        cuda-crt-12-8 \
+        libcusparse-dev-12-8 \
+        libcublas-dev-12-8 \
+        libcusolver-dev-12-8 \
+        libcurand-dev-12-8 \
+        libcufft-dev-12-8 \
+    && rm -rf /var/lib/apt/lists/*
 # install python deps
 RUN pip install uv
 COPY pyproject.toml /tmp/pyproject.toml
