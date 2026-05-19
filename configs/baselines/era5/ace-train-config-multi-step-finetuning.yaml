@@ -110,5 +110,8 @@ stepper_training:
       DSWRFsfc: 2
       USWRFtoa: 2
       tendency_of_total_water_path_due_to_advection: 0.5
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
 stepper:
   checkpoint_path: /ckpt.tar
