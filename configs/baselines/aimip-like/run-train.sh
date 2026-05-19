@@ -53,3 +53,4 @@ run_training() {
 # run_training "train-1-step.yaml" "era5-1-step-rs0"
 run_training "train-4deg-daily.yaml" "train-4deg-daily-rs0"
 run_training "train-4deg-daily-era5-only.yaml" "train-4deg-daily-era5-only-rs0"
+run_training "train-4deg-daily-conditional.yaml" "train-4deg-daily-conditional-rs0"

@@ -30,6 +30,8 @@ inference:
         data_path: /climate-default
         file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
         engine: zarr
+        labels:
+          - era5
       num_data_workers: 8
     aggregator:
       step_means:
@@ -108,6 +110,8 @@ inference:
         data_path: /climate-default
         file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
         engine: zarr
+        labels:
+          - era5
       num_data_workers: 8
     aggregator:
       step_means:
@@ -166,6 +170,8 @@ inference:
         data_path: /climate-default
         file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
         engine: zarr
+        labels:
+          - era5
       num_data_workers: 8
     aggregator:
       step_means:
@@ -227,6 +233,8 @@ inference:
         data_path: /climate-default
         file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
         engine: zarr
+        labels:
+          - era5
       num_data_workers: 8
     aggregator:
       step_means: []
@@ -269,12 +277,46 @@ train_loader:
       - data_path: /climate-default
         file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
         engine: zarr
+        labels:
+          - era5
         subset:
           start_time: '1979-01-01'
           stop_time: '1993-12-31'
       - data_path: /climate-default
         file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
         engine: zarr
+        labels:
+          - era5
+        subset:
+          start_time: '1995-01-01'
+          stop_time: '2013-12-31'
+      - data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+        file_pattern: ic_0001.zarr
+        engine: zarr
+        labels:
+          - c96-shield
+        subset:
+          stop_time: '1993-12-31'
+      - data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+        file_pattern: ic_0001.zarr
+        engine: zarr
+        labels:
+          - c96-shield
+        subset:
+          start_time: '1995-01-01'
+          stop_time: '2013-12-31'
+      - data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+        file_pattern: ic_0002.zarr
+        engine: zarr
+        labels:
+          - c96-shield
+        subset:
+          stop_time: '1993-12-31'
+      - data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+        file_pattern: ic_0002.zarr
+        engine: zarr
+        labels:
+          - c96-shield
         subset:
           start_time: '1995-01-01'
           stop_time: '2013-12-31'
@@ -289,12 +331,32 @@ validation_loader:
       - data_path: /climate-default
         file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
         engine: zarr
+        labels:
+          - era5
         subset:
           start_time: '1994-01-01'
           stop_time: '1994-12-31'
       - data_path: /climate-default
         file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
         engine: zarr
+        labels:
+          - era5
+        subset:
+          start_time: '2014-01-01'
+          stop_time: '2014-12-31'
+      - data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+        file_pattern: ic_0002.zarr
+        engine: zarr
+        labels:
+          - c96-shield
+        subset:
+          start_time: '1994-01-01'
+          stop_time: '1994-12-31'
+      - data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+        file_pattern: ic_0002.zarr
+        engine: zarr
+        labels:
+          - c96-shield
         subset:
           start_time: '2014-01-01'
           stop_time: '2014-12-31'
@@ -347,9 +409,11 @@ stepper:
       residual_prediction: false
       builder:
         type: NoiseConditionedSFNO
+        conditional: true
         config:
           embed_dim: 512
           noise_embed_dim: 32
+          label_embed_dim: 2
           noise_type: isotropic
           filter_type: linear
           affine_norms: true
