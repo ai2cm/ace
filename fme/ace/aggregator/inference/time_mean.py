@@ -13,7 +13,7 @@ from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Image
 
 from ..plotting import plot_paneled_data
-from .build_context import MetricBuildContext, maybe_filter
+from .build_context import MetricBuildContext
 from .data import InferenceBatchData, MetricBuildResult, SubAggregator
 
 
@@ -71,6 +71,7 @@ class TimeMeanAggregator:
         target: Literal["norm", "denorm"] = "denorm",
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
         reference_means: xr.Dataset | None = None,
+        log_variables: frozenset[str] | None = None,
     ):
         """
         Args:
@@ -81,6 +82,9 @@ class TimeMeanAggregator:
                 used in generating logged image captions.
             reference_means: Dataset containing reference time-mean values
                 for bias computation.
+            log_variables: If provided, only include per-variable entries in
+                get_logs and get_dataset for these variables. All variables
+                are still recorded and available via get_data.
         """
         self._ops = gridded_operations
         self._target = target
@@ -94,6 +98,7 @@ class TimeMeanAggregator:
         self._n_samples: int | None = None
         self._reference_means = reference_means
         self._reference_validated = False
+        self._log_variables = log_variables
 
     @staticmethod
     def _add_or_initialize_time_mean(
@@ -164,6 +169,8 @@ class TimeMeanAggregator:
         data = self.get_data()
         gen_map_key = "gen_map"
         for name, pred in data.items():
+            if self._log_variables is not None and name not in self._log_variables:
+                continue
             if target_maps is not None and name in target_maps:
                 gen_map_caption_key = "gen_target_map"
                 data_panels = [[pred.cpu().numpy()], [target_maps[name].cpu().numpy()]]
@@ -215,6 +222,8 @@ class TimeMeanAggregator:
         dims = ("lat", "lon")
         data = {}
         for name, pred in self.get_data().items():
+            if self._log_variables is not None and name not in self._log_variables:
+                continue
             if name in self._variable_metadata:
                 long_name = self._variable_metadata[name].long_name
                 units = self._variable_metadata[name].units
@@ -253,6 +262,7 @@ class TimeMeanEvaluatorAggregator:
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
         reference_means: xr.Dataset | None = None,
         channel_mean_names: Sequence[str] | None = None,
+        log_variables: frozenset[str] | None = None,
     ):
         """
         Args:
@@ -266,6 +276,9 @@ class TimeMeanEvaluatorAggregator:
                 for bias computation.
             channel_mean_names: Names of variables whose RMSE will be averaged. If
                 not provided, all available variables will be used.
+            log_variables: If provided, only include per-variable entries in
+                get_logs and get_dataset for these variables. All variables
+                are still recorded so that channel_mean is computed correctly.
         """
         self._ops = ops
         self._horizontal_dims = horizontal_dims
@@ -275,6 +288,7 @@ class TimeMeanEvaluatorAggregator:
             self._variable_metadata: Mapping[str, VariableMetadata] = {}
         else:
             self._variable_metadata = variable_metadata
+        self._log_variables = log_variables
         # Dictionaries of tensors of shape [n_lat, n_lon] represnting time means
         self._target_agg = TimeMeanAggregator(
             gridded_operations=ops, target=target, variable_metadata=variable_metadata
@@ -284,6 +298,7 @@ class TimeMeanEvaluatorAggregator:
             target=target,
             variable_metadata=variable_metadata,
             reference_means=reference_means,
+            log_variables=log_variables,
         )
         self._channel_mean_names = channel_mean_names
 
@@ -328,21 +343,23 @@ class TimeMeanEvaluatorAggregator:
         bias_map_key = "bias_map"
         rmse_all_channels = {}
         for pred in preds:
-            bias_image = plot_paneled_data(
-                [[pred.bias().cpu().numpy()]],
-                diverging=True,
-                caption=self._get_caption(bias_map_key, pred.name),
-            )
-            plt.close("all")
             rmse_all_channels[pred.name] = pred.rmse()
-            logs.update({f"rmse/{pred.name}": rmse_all_channels[pred.name]})
-            if self._target == "denorm":
-                logs.update(
-                    {
-                        f"{bias_map_key}/{pred.name}": bias_image,
-                        f"bias/{pred.name}": pred.weighted_mean_bias(),
-                    }
+            should_log = self._log_variables is None or pred.name in self._log_variables
+            if should_log:
+                bias_image = plot_paneled_data(
+                    [[pred.bias().cpu().numpy()]],
+                    diverging=True,
+                    caption=self._get_caption(bias_map_key, pred.name),
                 )
+                plt.close("all")
+                logs.update({f"rmse/{pred.name}": rmse_all_channels[pred.name]})
+                if self._target == "denorm":
+                    logs.update(
+                        {
+                            f"{bias_map_key}/{pred.name}": bias_image,
+                            f"bias/{pred.name}": pred.weighted_mean_bias(),
+                        }
+                    )
         if self._target == "norm":
             metric_name = "rmse/channel_mean"
             if self._channel_mean_names is None:
@@ -370,6 +387,8 @@ class TimeMeanEvaluatorAggregator:
         data = {}
         preds = self._get_target_gen_pairs()
         for pred in preds:
+            if self._log_variables is not None and pred.name not in self._log_variables:
+                continue
             if pred.name in self._variable_metadata:
                 long_name = self._variable_metadata[pred.name].long_name
                 units = self._variable_metadata[pred.name].units
@@ -431,5 +450,8 @@ class TimeMeanMetricConfig:
             channel_mean_names=(
                 (self.channel_mean_names or ctx.channel_mean_names) if is_norm else None
             ),
+            log_variables=(
+                frozenset(self.variables) if self.variables is not None else None
+            ),
         )
-        return MetricBuildResult(aggregator=maybe_filter(agg, self.variables))
+        return MetricBuildResult(aggregator=agg)
