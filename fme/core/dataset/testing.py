@@ -5,6 +5,7 @@ import torch
 import xarray as xr
 
 from fme.core.coordinates import LatLonCoordinates, NullVerticalCoordinate
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.dataset import DatasetABC, DatasetItem
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.spatial_mask_provider import SpatialMaskProvider
@@ -40,7 +41,10 @@ class MockDataset(DatasetABC):
             self._properties = properties
         else:
             self._properties = DatasetProperties(
-                variable_metadata={},
+                variable_metadata={
+                    name: VariableMetadata(units="", long_name="")
+                    for name in data.keys()
+                },
                 vertical_coordinate=NullVerticalCoordinate(),
                 horizontal_coordinates=LatLonCoordinates(
                     lon=torch.arange(0, 1), lat=torch.arange(0, 1)
