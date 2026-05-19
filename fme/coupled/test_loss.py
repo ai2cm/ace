@@ -8,16 +8,24 @@ from fme.ace.stepper.time_length_probabilities import (
     TimeLengthProbabilities,
     TimeLengthProbability,
 )
-from fme.core.loss import LossOutput, StepLoss
+from fme.core.loss import LossOutput, StandardLoss, StepLoss
 from fme.core.typing_ import EnsembleTensorDict, TensorMapping
 
-from .loss import LossContributionsConfig, StepLossABC, StepPredictionABC
+from .loss import (
+    LossContributions,
+    LossContributionsConfig,
+    StepLossABC,
+    StepPredictionABC,
+)
 from .stepper import ComponentEnsembleStepPrediction, CoupledStepperTrainLoss
 
 
 def _wrap_as_loss_output(value: torch.Tensor) -> LossOutput:
     """Wrap a scalar tensor as a LossOutput for mocking StepLoss."""
-    return LossOutput(loss=value, channel_dim=0, channel_names=["mock"])
+    return LossOutput(
+        losses=[StandardLoss(value.unsqueeze(0).unsqueeze(0))],
+        channel_names=["mock"],
+    )
 
 
 def step_and_target_gen(
@@ -428,6 +436,61 @@ def test_coupled_stepper_train_loss_sample_n_steps_delegates():
     coupled_loss.sample_n_steps()
     ocean_loss.sample_n_steps.assert_called_once()
     atmos_loss.sample_n_steps.assert_called_once()
+
+
+def test_seed_rng_does_not_corrupt_training_sampler():
+    """seed_rng must only affect the eval sampler, leaving the training
+    sampler's RNG untouched across eval/train cycles."""
+    sampler = TimeLengthProbabilities(
+        outcomes=[
+            TimeLengthProbability(steps=1, probability=0.5),
+            TimeLengthProbability(steps=4, probability=0.5),
+        ]
+    )
+    loss = LossContributions(
+        n_steps=sampler,
+        weight=1.0,
+        optimize_last_step_only=False,
+        loss_obj=Mock(spec=StepLoss),
+        time_dim=1,
+        n_steps_limit=5,
+    )
+    assert loss._n_steps_sampler is not None
+    loss._n_steps_sampler.seed_rng(42)
+    loss.set_train()
+    train_first_20 = []
+    for _ in range(20):
+        loss.sample_n_steps()
+        train_first_20.append(loss._n_steps)
+    loss.set_eval()
+    loss.seed_rng(0)
+    for _ in range(10):
+        loss.sample_n_steps()
+    loss.set_train()
+    train_next_20 = []
+    for _ in range(20):
+        loss.sample_n_steps()
+        train_next_20.append(loss._n_steps)
+    loss._n_steps_sampler.seed_rng(42)
+    reference_40 = []
+    for _ in range(40):
+        loss.sample_n_steps()
+        reference_40.append(loss._n_steps)
+    assert train_first_20 + train_next_20 == reference_40
+
+
+def test_coupled_stepper_train_loss_set_train_eval_delegates():
+    ocean_loss = MagicMock(spec=StepLossABC)
+    atmos_loss = MagicMock(spec=StepLossABC)
+    coupled_loss = CoupledStepperTrainLoss(
+        ocean_loss=ocean_loss, atmosphere_loss=atmos_loss
+    )
+    coupled_loss.set_eval()
+    ocean_loss.set_eval.assert_called_once()
+    atmos_loss.set_eval.assert_called_once()
+    coupled_loss.set_train()
+    ocean_loss.set_train.assert_called_once()
+    atmos_loss.set_train.assert_called_once()
 
 
 @pytest.mark.parametrize(

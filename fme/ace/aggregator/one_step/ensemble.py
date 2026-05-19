@@ -1,7 +1,6 @@
 import abc
 import dataclasses
 from collections.abc import Mapping
-from typing import Literal
 
 import torch
 import xarray as xr
@@ -13,7 +12,7 @@ from fme.core.ensemble import get_crps
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import EnsembleTensorDict, TensorMapping
 
-from ..inference.build_context import MetricBuildContext
+from ..inference.build_context import MetricBuildContext, MetricNotSupportedError
 from ..inference.data import MetricBuildResult
 
 
@@ -339,9 +338,10 @@ class SelectStepEnsembleAggregator:
 @dataclasses.dataclass
 class EnsembleMetricConfig:
     step: int = 20
-    type: Literal["ensemble"] = "ensemble"
     name: str | None = None
     log_mean_maps: bool = False
+    enabled: bool = True
+    strict: bool = False
 
     def __post_init__(self):
         if self.name is None:
@@ -351,6 +351,11 @@ class EnsembleMetricConfig:
         return self.name  # type: ignore[return-value]
 
     def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        if self.step > ctx.n_forward_steps:
+            raise MetricNotSupportedError(
+                f"ensemble step {self.step} exceeds "
+                f"n_forward_steps={ctx.n_forward_steps}"
+            )
         return MetricBuildResult(
             ensemble=get_one_step_ensemble_aggregator(
                 gridded_operations=ctx.ops,

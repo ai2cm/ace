@@ -93,6 +93,67 @@ The sub-configurations are:
    :show-inheritance:
    :noindex:
 
+Default aggregator configuration
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The default aggregator configuration (``InferenceEvaluatorAggregatorConfig``
+with no arguments) produces the following YAML. You only need to include fields
+you want to override.
+
+.. literalinclude:: default-aggregator-config.yaml
+   :language: yaml
+   :caption: Default Aggregator Configuration
+
+Metric configurations
+^^^^^^^^^^^^^^^^^^^^^
+
+The named fields on
+:class:`~fme.ace.InferenceEvaluatorAggregatorConfig`
+accept the following typed entries.  Each entry has an ``enabled`` field
+that can be set to ``true`` or ``false`` to enable or disable a metric.
+Most metrics default to ``enabled: true``; however, ``video``,
+``histogram``, and ``seasonal`` default to ``enabled: false`` as shown
+in the default aggregator configuration above.
+
+.. autoclass:: fme.ace.MeanMetricConfig
+   :noindex:
+
+.. autoclass:: fme.ace.StepMeanMetricConfig
+   :noindex:
+
+.. autoclass:: fme.ace.PowerSpectrumMetricConfig
+   :noindex:
+
+.. autoclass:: fme.ace.ZonalMeanMetricConfig
+   :noindex:
+
+.. autoclass:: fme.ace.TimeMeanMetricConfig
+   :noindex:
+
+.. autoclass:: fme.ace.HistogramMetricConfig
+   :noindex:
+
+.. autoclass:: fme.ace.VideoMetricConfig
+   :noindex:
+
+.. autoclass:: fme.ace.SeasonalMetricConfig
+   :noindex:
+
+.. autoclass:: fme.ace.AnnualMetricConfig
+   :noindex:
+
+.. autoclass:: fme.ace.EnsoIndexMetricConfig
+   :noindex:
+
+.. autoclass:: fme.ace.EnsoCoefficientMetricConfig
+   :noindex:
+
+.. autoclass:: fme.ace.IpoIndexMetricConfig
+   :noindex:
+
+.. autoclass:: fme.ace.EnsembleMetricConfig
+   :noindex:
+
 .. autoclass:: fme.ace.StepperOverrideConfig
    :show-inheritance:
    :noindex:

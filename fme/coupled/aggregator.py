@@ -8,12 +8,14 @@ import torch
 import xarray as xr
 
 from fme.ace.aggregator.inference.main import (
+    APPROXIMATELY_EIGHTY_YEARS,
     APPROXIMATELY_TWO_YEARS,
     SLIGHTLY_LESS_THAN_FIVE_YEARS,
     AnnualMetricConfig,
     EnsoCoefficientMetricConfig,
     EnsoIndexMetricConfig,
     HistogramMetricConfig,
+    IpoIndexMetricConfig,
     MeanMetricConfig,
     PowerSpectrumMetricConfig,
     SeasonalMetricConfig,
@@ -21,6 +23,7 @@ from fme.ace.aggregator.inference.main import (
     TimeMeanMetricConfig,
     VideoMetricConfig,
     ZonalMeanMetricConfig,
+    build_inference_evaluator_aggregator,
 )
 from fme.ace.aggregator.inference.main import (
     InferenceAggregator as InferenceAggregator_,
@@ -30,9 +33,6 @@ from fme.ace.aggregator.inference.main import (
 )
 from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregator as InferenceEvaluatorAggregator_,
-)
-from fme.ace.aggregator.inference.main import (
-    InferenceEvaluatorAggregatorConfig as AceInferenceEvaluatorAggregatorConfig,
 )
 from fme.ace.aggregator.inference.main import MetricConfig as AceMetricConfig
 from fme.ace.aggregator.one_step.main import OneStepAggregator as OneStepAggregator_
@@ -288,6 +288,8 @@ class InferenceEvaluatorAggregatorConfig:
                 metrics.append(EnsoIndexMetricConfig())
         if n_timesteps * timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS:
             metrics.append(EnsoCoefficientMetricConfig())
+        if include_nino34 and n_timesteps * timestep > APPROXIMATELY_EIGHTY_YEARS:
+            metrics.append(IpoIndexMetricConfig())
         return metrics
 
     def build(
@@ -328,35 +330,30 @@ class InferenceEvaluatorAggregatorConfig:
             timestep=dataset_info.atmosphere.timestep,
             log_zonal_mean_images=log_zonal_mean_images,
         )
-        ocean_ace_config = AceInferenceEvaluatorAggregatorConfig(
+        ocean_agg = build_inference_evaluator_aggregator(
             metrics=ocean_metrics,
-            monthly_reference_data=self.monthly_reference_data,
-            time_mean_reference_data=self.time_mean_reference_data,
-        )
-        atmosphere_ace_config = AceInferenceEvaluatorAggregatorConfig(
-            metrics=atmosphere_metrics,
-            monthly_reference_data=self.monthly_reference_data,
-            time_mean_reference_data=self.time_mean_reference_data,
-        )
-
-        ocean_agg = ocean_ace_config.build(
             dataset_info=dataset_info.ocean,
             n_ic_steps=1,
             n_forward_steps=n_timesteps_ocean - 1,
             initial_time=initial_time,
             normalize=ocean_normalize,
+            monthly_reference_data=self.monthly_reference_data,
+            time_mean_reference_data=self.time_mean_reference_data,
             output_dir=(
                 os.path.join(output_dir, "ocean") if output_dir is not None else None
             ),
             channel_mean_names=ocean_channel_mean_names,
             save_diagnostics=save_diagnostics,
         )
-        atmosphere_agg = atmosphere_ace_config.build(
+        atmosphere_agg = build_inference_evaluator_aggregator(
+            metrics=atmosphere_metrics,
             dataset_info=dataset_info.atmosphere,
             n_ic_steps=1,
             n_forward_steps=n_timesteps_atmosphere - 1,
             initial_time=initial_time,
             normalize=atmosphere_normalize,
+            monthly_reference_data=self.monthly_reference_data,
+            time_mean_reference_data=self.time_mean_reference_data,
             output_dir=(
                 os.path.join(output_dir, "atmosphere")
                 if output_dir is not None
