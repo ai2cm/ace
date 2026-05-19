@@ -92,6 +92,11 @@ class _StepLoss(StepLossABC):
     def n_required_forward_steps(self) -> int:
         return 2
 
+    def compute_loss(
+        self, prediction: StepPredictionABC, target_data: TensorMapping
+    ) -> torch.Tensor:
+        return self._loss_obj(prediction.data, target_data, prediction.step)
+
     def __call__(
         self, prediction: StepPredictionABC, target_data: TensorMapping
     ) -> torch.Tensor:
