@@ -209,6 +209,7 @@ def get_label_conditioned_selector(
                             noise_type="isotropic",
                             num_layers=2,
                             local_blocks=[0],
+                            label_embed_dim=3,
                         )
                     ),
                 ),

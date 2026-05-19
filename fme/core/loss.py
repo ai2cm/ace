@@ -1,9 +1,11 @@
+import abc
 import dataclasses
 from collections.abc import Callable, Mapping
 from typing import Any, Literal
 
 import torch
 import torch.linalg
+import torch.nn.functional as F
 
 from fme.core.device import get_device
 from fme.core.ensemble import get_crps, get_energy_score
@@ -13,87 +15,124 @@ from fme.core.packer import Packer
 from fme.core.typing_ import TensorMapping
 
 
-def _channel_dim_positive(ndim: int, channel_dim: int) -> int:
-    return channel_dim if channel_dim >= 0 else ndim + channel_dim
+class LossComponent(abc.ABC):
+    """A pre-weighted loss tensor that knows how to reduce itself to ``(B, C)``.
 
-
-def _uniform_broadcast_per_channel(
-    total: torch.Tensor, n_channels: int
-) -> torch.Tensor:
-    """Evenly split a scalar across ``n_channels`` so ``.sum() == total``."""
-    return (total / n_channels).expand(n_channels)
-
-
-def _reduce_to_per_channel(
-    loss_value: torch.Tensor,
-    channel_dim: int,
-    n_channels: int,
-) -> torch.Tensor:
-    """Reduce any loss tensor to shape ``(n_channels,)``.
-
-    Handles element-wise tensors, partially-reduced tensors
-    (e.g. after area-weighted mean removes spatial dims), and
-    scalars (uniformly broadcast).
-
-    ``channel_dim`` must be a **non-negative** index, computed from
-    the *input* tensor (before the loss potentially removes dims).
-
-    The result satisfies ``tensor.sum() == loss_value.mean()``
-    for element-wise losses.
+    All loss tensors are pre-weighted so that ``.mean()`` over trailing
+    (non-batch, non-channel) dimensions gives the correct per-sample,
+    per-channel loss.  Subclasses encode the tensor layout (where the
+    channel dimension lives) and implement :meth:`reduce_to_channel`.
     """
-    if loss_value.ndim == 0:
-        return _uniform_broadcast_per_channel(loss_value, n_channels)
-    dims = tuple(i for i in range(loss_value.ndim) if i != channel_dim)
-    if not dims:
-        return loss_value / n_channels
-    return loss_value.mean(dim=dims) / n_channels
+
+    def __init__(self, loss: torch.Tensor):
+        self.loss = loss
+
+    @abc.abstractmethod
+    def reduce_to_channel(self) -> torch.Tensor:
+        """Reduce to ``(B, C)`` by meaning over non-batch, non-channel dims."""
+
+
+class StandardLoss(LossComponent):
+    """Standard ``(B, C, ...)`` layout with channel at dim 1."""
+
+    def reduce_to_channel(self) -> torch.Tensor:
+        if self.loss.ndim <= 2:
+            return self.loss
+        return self.loss.mean(dim=tuple(range(2, self.loss.ndim)))
+
+
+class EnsembleComponentLoss(LossComponent):
+    """Ensemble ``(B, E, C, ...)`` layout with channel at dim 2."""
+
+    def reduce_to_channel(self) -> torch.Tensor:
+        dims = tuple(i for i in range(self.loss.ndim) if i not in (0, 2))
+        return self.loss.mean(dim=dims) if dims else self.loss
 
 
 class LossOutput:
     """Container for loss values returned by WeightedMappingLoss/StepLoss.
 
-    Wraps the raw unreduced loss tensor and provides convenience methods
-    for obtaining the scalar total or per-channel breakdowns. This
-    isolates reduction logic so callers and aggregators don't need to
-    know the internal tensor layout.
+    Holds one or more :class:`LossComponent` instances and provides
+    convenience methods for the scalar total and per-channel breakdowns.
+
+    Reduction is computed once and cached: ``total()`` derives from
+    the cached per-channel values so they are always consistent.
     """
 
     def __init__(
         self,
-        loss: torch.Tensor,
-        channel_dim: int,
+        losses: list[LossComponent],
         channel_names: list[str],
     ):
-        self._loss = loss
-        self._channel_dim = channel_dim
+        self._losses = losses
         self._channel_names = channel_names
+        self._per_channel: torch.Tensor | None = None
+
+    def _get_per_channel(self) -> torch.Tensor:
+        """Return a ``(C,)`` tensor of batch-mean losses, computed once."""
+        if self._per_channel is None:
+            bc = sum(c.reduce_to_channel() for c in self._losses)
+            assert isinstance(bc, torch.Tensor)
+            if bc.ndim == 0:
+                self._per_channel = bc.expand(len(self._channel_names))
+            else:
+                self._per_channel = bc.mean(dim=0)
+        return self._per_channel
 
     def total(self) -> torch.Tensor:
-        """Scalar mean over all dimensions -- the optimization target."""
-        if self._loss.ndim > 0:
-            return self._loss.mean()
-        return self._loss
+        """Scalar loss — the optimisation target."""
+        return self._get_per_channel().mean()
 
     def get_channel_losses(self) -> dict[str, torch.Tensor]:
-        """Per-channel scalar losses keyed by variable name."""
-        reduced = _reduce_to_per_channel(
-            self._loss, self._channel_dim, len(self._channel_names)
+        """Per-channel scalar losses that sum to ``total()``."""
+        pc = self._get_per_channel()
+        n = len(self._channel_names)
+        return dict(zip(self._channel_names, (pc / n).unbind(0)))
+
+    def scale(self, weight: float) -> "LossOutput":
+        """Return a new ``LossOutput`` with every component scaled."""
+        return LossOutput(
+            [type(c)(c.loss * weight) for c in self._losses],
+            self._channel_names,
         )
-        return dict(zip(self._channel_names, reduced.unbind(0)))
+
+
+class _MSELoss(torch.nn.Module):
+    """MSE with ``reduction="none"`` that returns ``list[LossComponent]``."""
+
+    def __init__(self):
+        super().__init__()
+        self._loss = torch.nn.MSELoss(reduction="none")
+
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> list[LossComponent]:
+        return [StandardLoss(self._loss(x, y))]
+
+
+class _L1Loss(torch.nn.Module):
+    """L1 with ``reduction="none"`` that returns ``list[LossComponent]``."""
+
+    def __init__(self):
+        super().__init__()
+        self._loss = torch.nn.L1Loss(reduction="none")
+
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> list[LossComponent]:
+        return [StandardLoss(self._loss(x, y))]
 
 
 class NaNLoss(torch.nn.Module):
     def __init__(self):
         super().__init__()
 
-    def forward(self, input, target):
-        return torch.tensor(torch.nan)
+    def forward(self, input: torch.Tensor, target: torch.Tensor) -> list[LossComponent]:
+        return [StandardLoss(torch.tensor(torch.nan))]
 
 
 class WeightedMappingLoss:
     def __init__(
         self,
-        loss: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
+        loss: Callable[
+            [torch.Tensor, torch.Tensor], list[LossComponent] | torch.Tensor
+        ],
         weights: dict[str, float],
         out_names: list[str],
         normalizer: StandardNormalizer,
@@ -101,7 +140,11 @@ class WeightedMappingLoss:
     ):
         """
         Args:
-            loss: The loss function to apply.
+            loss: The loss function to apply. Should return a
+                ``list[LossComponent]``. Element-wise losses (e.g.
+                ``torch.nn.MSELoss``) that return a raw tensor are also
+                accepted and will be wrapped automatically based on
+                *channel_dim*.
             weights: A dictionary of variable names with individual
                 weights to apply to their normalized losses
             out_names: The names of the output variables.
@@ -135,7 +178,7 @@ class WeightedMappingLoss:
             target_dict: The target data.
 
         Returns:
-            A ``LossOutput`` wrapping the raw unreduced loss tensor.
+            A ``LossOutput`` wrapping pre-weighted loss component tensors.
         """
         predict_tensors = self.packer.pack(
             self.normalizer.normalize(predict_dict), axis=self.channel_dim
@@ -149,10 +192,18 @@ class WeightedMappingLoss:
             target_tensors = torch.where(nan_mask, 0.0, target_tensors)
 
         result = self.loss(predict_tensors, target_tensors)
-        cdim = _channel_dim_positive(predict_tensors.ndim, self.channel_dim)
+        if isinstance(result, list):
+            losses = result
+        else:
+            cdim = (
+                predict_tensors.ndim + self.channel_dim
+                if self.channel_dim < 0
+                else self.channel_dim
+            )
+            component_cls = StandardLoss if cdim <= 1 else EnsembleComponentLoss
+            losses = [component_cls(result)]
         return LossOutput(
-            loss=result,
-            channel_dim=cdim,
+            losses=losses,
             channel_names=list(self.packer.names),
         )
 
@@ -208,18 +259,13 @@ class LpLoss(torch.nn.Module):
 
         self.p = p
 
-    def rel(self, x, y):
-        num_examples = x.size()[0]
-
-        diff_norms = torch.linalg.norm(
-            x.reshape(num_examples, -1) - y.reshape(num_examples, -1), ord=self.p, dim=1
-        )
-        y_norms = torch.linalg.norm(y.reshape(num_examples, -1), ord=self.p, dim=1)
-
-        return torch.mean(diff_norms / y_norms)
-
-    def __call__(self, x, y):
-        return self.rel(x, y)
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> list[LossComponent]:
+        B, C = x.shape[0], x.shape[1]
+        x_flat = x.reshape(B, C, -1)
+        y_flat = y.reshape(B, C, -1)
+        diff_norms = torch.linalg.norm(x_flat - y_flat, ord=self.p, dim=2)
+        y_norms = torch.linalg.norm(y_flat, ord=self.p, dim=2)
+        return [StandardLoss(diff_norms / y_norms)]
 
 
 class AreaWeightedMSELoss(torch.nn.Module):
@@ -227,22 +273,21 @@ class AreaWeightedMSELoss(torch.nn.Module):
         super().__init__()
         self._area_weighted_mean = area_weighted_mean
 
-    def __call__(self, x, y):
-        return torch.mean(self._area_weighted_mean((x - y) ** 2))
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> list[LossComponent]:
+        return [StandardLoss(self._area_weighted_mean((x - y) ** 2))]
 
 
 class WeightedSum(torch.nn.Module):
     """
     A module which applies multiple loss-function modules (taking two inputs)
-    to the same input and returns a tensor equal to the weighted sum of the
-    outputs of the modules.
+    and returns their weighted components as a flat list.
     """
 
     def __init__(self, modules: list[torch.nn.Module], weights: list[float]):
         """
         Args:
             modules: A list of modules, each of which takes two tensors and
-                returns a scalar tensor.
+                returns a ``list[LossComponent]``.
             weights: A list of weights to apply to the outputs of the modules.
         """
         super().__init__()
@@ -251,8 +296,12 @@ class WeightedSum(torch.nn.Module):
         self._wrapped = modules
         self._weights = weights
 
-    def __call__(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        return sum(w * module(x, y) for w, module in zip(self._weights, self._wrapped))
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> list[LossComponent]:
+        components: list[LossComponent] = []
+        for w, module in zip(self._weights, self._wrapped):
+            for c in module(x, y):
+                components.append(type(c)(c.loss * w))
+        return components
 
 
 class GlobalMeanLoss(torch.nn.Module):
@@ -270,14 +319,14 @@ class GlobalMeanLoss(torch.nn.Module):
             area_weighted_mean: Computes an area-weighted mean, removing the
                 horizontal dimensions.
             loss: A loss function which takes two tensors of shape
-                (n_samples, n_timesteps, n_channels) and returns a scalar
-                tensor.
+                (n_samples, n_channels) and returns a
+                ``list[LossComponent]``.
         """
         super().__init__()
         self.global_mean = GlobalMean(area_weighted_mean)
         self.loss = loss
 
-    def __call__(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> list[LossComponent]:
         x = self.global_mean(x)
         y = self.global_mean(y)
         return self.loss(x, y)
@@ -314,7 +363,7 @@ class VariableWeightingLoss(torch.nn.Module):
         self.loss = loss
         self.weights = weights
 
-    def __call__(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> list[LossComponent]:
         return self.loss(self.weights * x, self.weights * y)
 
 
@@ -336,34 +385,39 @@ class EnergyScoreLoss(torch.nn.Module):
     line with the real-valued CRPS loss, and to prevent its value depending on domain
     size for Gaussian distributed random data where n_lon = 2 * n_lat.
 
+    Returns a pre-weighted ``(B, C, L, M)`` tensor where ``.mean(dim=(-2, -1))``
+    reproduces the old scalar value per ``(B, C)`` pair.
+
     .. [1] https://sites.stat.washington.edu/people/raftery/Research/PDF/Gneiting2007jasa.pdf
     """
 
     def __init__(self, sht: Callable[[torch.Tensor], torch.Tensor]):
         super().__init__()
         self.sht = sht
-        self.scaling: torch.Tensor | None = None
+        self.scaling: float | None = None
+        self.n_spectral: int | None = None
         self.mode_weights: torch.Tensor | None = None
 
-    def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> list[LossComponent]:
         x_hat = self.sht(x)
         y_hat = self.sht(y)
+        n_l, n_m = x_hat.shape[-2], x_hat.shape[-1]
         if self.scaling is None:
-            self.scaling = 2 * (x_hat.shape[-2] * x_hat.shape[-1]) ** 0.5
+            self.scaling = 2 * (n_l * n_m) ** 0.5
+            self.n_spectral = n_l * n_m
         if self.mode_weights is None:
-            # we need to weight the modes properly,
-            # with each m mode contributing twice for m!=0:
-            H, W = x_hat.shape[-2:]
             self.mode_weights = 2 * torch.ones(
-                (*([1] * (x_hat.ndim - 1)), H, W),
+                (*([1] * (x_hat.ndim - 1)), n_l, n_m),
                 device=x_hat.device,
             )
             self.mode_weights[..., 0] = 1
-        return (
-            (get_energy_score(x_hat, y_hat) * self.mode_weights)
-            .sum(dim=(-2, -1))
-            .mean()
-        ) / self.scaling
+        assert self.n_spectral is not None
+        es = get_energy_score(x_hat, y_hat) * self.mode_weights
+        # Old path: .sum(dim=(-2,-1)).mean() / scaling
+        # New path: StandardLoss does .mean(dim=(-2,-1)) i.e. sum/(L*M)
+        # Multiply by L*M/scaling so mean gives the same result as sum/scaling.
+        pre_weighted = es * (self.n_spectral / self.scaling)
+        return [StandardLoss(pre_weighted)]
 
 
 class CRPSLoss(torch.nn.Module):
@@ -379,8 +433,64 @@ class CRPSLoss(torch.nn.Module):
         super().__init__()
         self.alpha = alpha
 
-    def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        return get_crps(x, y, alpha=self.alpha).mean()
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> list[LossComponent]:
+        return [StandardLoss(get_crps(x, y, alpha=self.alpha))]
+
+
+class FiniteDifferenceCRPSLoss(torch.nn.Module):
+    """
+    Computes the CRPS of the x and y finite differences of the input tensors,
+    which helps with representations of horizontal stochastic structures.
+
+    Returns a ``(B, C)`` tensor (spatial dims reduced internally because
+    lat and lon diffs have incompatible shapes).
+    """
+
+    def __init__(self, alpha: float, levels: int = 1):
+        super().__init__()
+        if levels < 1:
+            raise ValueError(f"levels must be at least 1, got {levels}")
+        self.alpha = alpha
+        self.levels = levels
+
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> list[LossComponent]:
+        result = _get_finite_difference_crps_loss(x, y, self.alpha, levels=self.levels)
+        return [StandardLoss(result / self.levels)]
+
+
+def _reduce_spatial(t: torch.Tensor) -> torch.Tensor:
+    """Reduce trailing (non-batch, non-channel) dims of a ``(B, C, ...)`` tensor."""
+    if t.ndim <= 2:
+        return t
+    return t.mean(dim=tuple(range(2, t.ndim)))
+
+
+def _get_finite_difference_crps_loss(
+    x: torch.Tensor, y: torch.Tensor, alpha: float, levels: int
+) -> torch.Tensor:
+    """Returns a ``(B, C)`` tensor summing contributions from each level."""
+    x_diff_lat = x[..., 1:, :] - x[..., :-1, :]
+    y_diff_lat = y[..., 1:, :] - y[..., :-1, :]
+    crps_lat = _reduce_spatial(get_crps(x_diff_lat, y_diff_lat, alpha=alpha))
+    x_diff_lon = torch.roll(x, shifts=-1, dims=-1) - x
+    y_diff_lon = torch.roll(y, shifts=-1, dims=-1) - y
+    crps_lon = _reduce_spatial(get_crps(x_diff_lon, y_diff_lon, alpha=alpha))
+    level_crps = 0.5 * (crps_lat + crps_lon)
+    if levels > 1:
+        x_flat = x.reshape(-1, 1, x.shape[-2], x.shape[-1])
+        y_flat = y.reshape(-1, 1, y.shape[-2], y.shape[-1])
+        x_pooled = F.avg_pool2d(x_flat, kernel_size=2, stride=2, ceil_mode=True)
+        y_pooled = F.avg_pool2d(y_flat, kernel_size=2, stride=2, ceil_mode=True)
+        x_coarse = x_pooled.reshape(
+            *x.shape[:-2], x_pooled.shape[-2], x_pooled.shape[-1]
+        )
+        y_coarse = y_pooled.reshape(
+            *y.shape[:-2], y_pooled.shape[-2], y_pooled.shape[-1]
+        )
+        return level_crps + _get_finite_difference_crps_loss(
+            x_coarse, y_coarse, alpha=alpha, levels=levels - 1
+        )
+    return level_crps
 
 
 class EnsembleLoss(torch.nn.Module):
@@ -389,6 +499,9 @@ class EnsembleLoss(torch.nn.Module):
         crps_weight: float,
         energy_score_weight: float,
         sht: Callable[[torch.Tensor], torch.Tensor],
+        finite_difference_crps_weight: float = 0.0,
+        finite_difference_crps_levels: int = 1,
+        almost_fair_crps_alpha: float = 0.95,
     ):
         super().__init__()
         if crps_weight < 0 or energy_score_weight < 0:
@@ -396,33 +509,48 @@ class EnsembleLoss(torch.nn.Module):
                 "crps_weight and energy_score_weight must be non-negative, "
                 f"got {crps_weight} and {energy_score_weight}"
             )
+        if finite_difference_crps_weight < 0:
+            raise ValueError(
+                "finite_difference_crps_weight must be non-negative, "
+                f"got {finite_difference_crps_weight}"
+            )
         if crps_weight + energy_score_weight == 0:
             raise ValueError(
                 "crps_weight and energy_score_weight must sum to a positive value, "
                 f"got {crps_weight} and {energy_score_weight}"
             )
-        self.crps_loss = CRPSLoss(alpha=0.95)
+        self.crps_loss = CRPSLoss(alpha=almost_fair_crps_alpha)
+        if finite_difference_crps_weight > 0:
+            self.diff_crps_loss: FiniteDifferenceCRPSLoss | None = (
+                FiniteDifferenceCRPSLoss(
+                    alpha=almost_fair_crps_alpha,
+                    levels=finite_difference_crps_levels,
+                )
+            )
+        else:
+            self.diff_crps_loss = None
         self.energy_score_loss = EnergyScoreLoss(sht=sht)
 
         self.crps_weight = crps_weight
+        self.diff_crps_weight = finite_difference_crps_weight
         self.energy_score_weight = energy_score_weight
 
     def forward(
         self,
         gen_norm: torch.Tensor,
         target_norm: torch.Tensor,
-    ):
+    ) -> list[LossComponent]:
+        components: list[LossComponent] = []
         if self.crps_weight > 0:
-            crps = self.crps_weight * self.crps_loss(gen_norm, target_norm)
-        else:
-            crps = torch.tensor(0.0)
+            for c in self.crps_loss(gen_norm, target_norm):
+                components.append(type(c)(c.loss * self.crps_weight))
         if self.energy_score_weight > 0:
-            energy_score_loss = self.energy_score_weight * self.energy_score_loss(
-                gen_norm, target_norm
-            )
-        else:
-            energy_score_loss = torch.tensor(0.0)
-        return crps + energy_score_loss
+            for c in self.energy_score_loss(gen_norm, target_norm):
+                components.append(type(c)(c.loss * self.energy_score_weight))
+        if self.diff_crps_loss is not None:
+            for c in self.diff_crps_loss(gen_norm, target_norm):
+                components.append(type(c)(c.loss * self.diff_crps_weight))
+        return components
 
 
 @dataclasses.dataclass
@@ -467,22 +595,19 @@ class LossConfig:
 
     def build(
         self,
-        reduction: Literal["mean", "none"],
         gridded_operations: GriddedOperations | None,
     ) -> Any:
         """
         Args:
-            reduction: The reduction to apply to the loss, either "mean" or "none".
-                Only used if the loss function is L1, MSE, or LpLoss.
             gridded_operations: The gridded operations to use in the case that
                 the loss function requires use of the horizontal dimensions.
         """
         if self.type == "LpLoss":
             main_loss = LpLoss(**self.kwargs)
         elif self.type == "L1":
-            main_loss = torch.nn.L1Loss(reduction=reduction)
+            main_loss = _L1Loss()
         elif self.type == "MSE":
-            main_loss = torch.nn.MSELoss(reduction=reduction)
+            main_loss = _MSELoss()
         elif self.type == "AreaWeightedMSE":
             if gridded_operations is None:
                 raise ValueError("gridded_operations is required for AreaWeightedMSE")
@@ -551,12 +676,7 @@ class StepLoss(torch.nn.Module):
             A ``LossOutput`` wrapping the step-weighted loss tensor.
         """
         step_weight = (1.0 + self.sqrt_loss_decay_constant * step) ** (-0.5)
-        output = self.loss(predict_dict, target_dict)
-        return LossOutput(
-            loss=output._loss * step_weight,
-            channel_dim=output._channel_dim,
-            channel_names=output._channel_names,
-        )
+        return self.loss(predict_dict, target_dict).scale(step_weight)
 
 
 @dataclasses.dataclass
@@ -613,7 +733,6 @@ class StepLossConfig:
         channel_dim: int = -3,
     ) -> StepLoss:
         loss = self.loss_config.build(
-            reduction="none",
             gridded_operations=gridded_ops,
         )
         return StepLoss(

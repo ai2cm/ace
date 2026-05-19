@@ -1,4 +1,5 @@
 import dataclasses
+import datetime
 import os
 import warnings
 from collections.abc import Callable, Mapping, Sequence
@@ -6,6 +7,24 @@ from collections.abc import Callable, Mapping, Sequence
 import torch
 import xarray as xr
 
+from fme.ace.aggregator.inference.main import (
+    APPROXIMATELY_EIGHTY_YEARS,
+    APPROXIMATELY_TWO_YEARS,
+    SLIGHTLY_LESS_THAN_FIVE_YEARS,
+    AnnualMetricConfig,
+    EnsoCoefficientMetricConfig,
+    EnsoIndexMetricConfig,
+    HistogramMetricConfig,
+    IpoIndexMetricConfig,
+    MeanMetricConfig,
+    PowerSpectrumMetricConfig,
+    SeasonalMetricConfig,
+    StepMeanMetricConfig,
+    TimeMeanMetricConfig,
+    VideoMetricConfig,
+    ZonalMeanMetricConfig,
+    build_inference_evaluator_aggregator,
+)
 from fme.ace.aggregator.inference.main import (
     InferenceAggregator as InferenceAggregator_,
 )
@@ -15,10 +34,8 @@ from fme.ace.aggregator.inference.main import (
 from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregator as InferenceEvaluatorAggregator_,
 )
-from fme.ace.aggregator.inference.main import (
-    InferenceEvaluatorAggregatorConfig as AceInferenceEvaluatorAggregatorConfig,
-)
-from fme.ace.aggregator.inference.main import StepMeanEntry
+from fme.ace.aggregator.inference.main import MetricConfig as AceMetricConfig
+from fme.ace.aggregator.loss_metrics import PerStepLossAggregator
 from fme.ace.aggregator.one_step.main import OneStepAggregator as OneStepAggregator_
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
@@ -43,18 +60,26 @@ class TrainAggregator(AggregatorABC[CoupledTrainOutput]):
     def __init__(self):
         self._n_batches = 0
         self._loss = torch.tensor(0.0, device=get_device())
+        self._per_step_losses = PerStepLossAggregator()
 
     @torch.no_grad()
     def record_batch(self, batch: CoupledTrainOutput):
         self._loss += batch.total_metrics["loss"]
         self._n_batches += 1
+        for component in (batch.ocean, batch.atmosphere):
+            step_metrics = {
+                k: v for k, v in component.metrics.items() if k.startswith("loss/")
+            }
+            self._per_step_losses.record(step_metrics)
 
     @torch.no_grad()
     def get_logs(self, label: str) -> dict[str, torch.Tensor]:
-        logs = {f"{label}/mean/loss": self._loss / self._n_batches}
         dist = Distributed.get_instance()
-        for key in sorted(logs.keys()):
-            logs[key] = float(dist.reduce_mean(logs[key].detach()).cpu().numpy())
+        logs: dict[str, float] = {}
+        logs[f"{label}/mean/loss"] = float(
+            dist.reduce_mean(self._loss / self._n_batches).cpu().numpy()
+        )
+        logs.update(self._per_step_losses.get_logs(label))
         return logs
 
     @torch.no_grad()
@@ -231,6 +256,51 @@ class InferenceEvaluatorAggregatorConfig:
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
 
+    def _build_metrics(
+        self,
+        *,
+        include_nino34: bool,
+        n_timesteps: int,
+        timestep: datetime.timedelta,
+        log_zonal_mean_images: bool | int,
+    ) -> list[AceMetricConfig]:
+        metrics: list[AceMetricConfig] = []
+        if self.log_global_mean_time_series:
+            metrics.append(MeanMetricConfig(target="denorm"))
+        if self.log_global_mean_norm_time_series:
+            metrics.append(MeanMetricConfig(target="norm"))
+        if n_timesteps >= 20:
+            metrics.append(
+                StepMeanMetricConfig(step=20, name="mean_step_20", target="denorm")
+            )
+            metrics.append(
+                StepMeanMetricConfig(step=20, name="mean_step_20_norm", target="norm")
+            )
+        metrics.append(PowerSpectrumMetricConfig())
+        if log_zonal_mean_images:
+            metrics.append(
+                ZonalMeanMetricConfig(zonal_mean_max_size=log_zonal_mean_images)
+            )
+        metrics.append(TimeMeanMetricConfig(target="denorm"))
+        metrics.append(TimeMeanMetricConfig(target="norm"))
+        if self.log_video:
+            metrics.append(
+                VideoMetricConfig(enable_extended_videos=self.log_extended_video)
+            )
+        if self.log_histograms:
+            metrics.append(HistogramMetricConfig())
+        if self.log_seasonal_means:
+            metrics.append(SeasonalMetricConfig())
+        if n_timesteps * timestep > APPROXIMATELY_TWO_YEARS:
+            metrics.append(AnnualMetricConfig())
+            if include_nino34:
+                metrics.append(EnsoIndexMetricConfig())
+        if n_timesteps * timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS:
+            metrics.append(EnsoCoefficientMetricConfig())
+        if include_nino34 and n_timesteps * timestep > APPROXIMATELY_EIGHTY_YEARS:
+            metrics.append(IpoIndexMetricConfig())
+        return metrics
+
     def build(
         self,
         dataset_info: CoupledDatasetInfo,
@@ -257,50 +327,42 @@ class InferenceEvaluatorAggregatorConfig:
         else:
             log_zonal_mean_images = self.log_zonal_mean_images
 
-        base_ace_config = AceInferenceEvaluatorAggregatorConfig(
-            log_histograms=self.log_histograms,
-            log_video=self.log_video,
-            log_extended_video=self.log_extended_video,
+        ocean_metrics = self._build_metrics(
+            include_nino34=True,
+            n_timesteps=n_timesteps_ocean,
+            timestep=dataset_info.ocean.timestep,
             log_zonal_mean_images=log_zonal_mean_images,
-            log_seasonal_means=self.log_seasonal_means,
-            log_global_mean_time_series=self.log_global_mean_time_series,
-            log_global_mean_norm_time_series=self.log_global_mean_norm_time_series,
-            monthly_reference_data=self.monthly_reference_data,
-            time_mean_reference_data=self.time_mean_reference_data,
         )
-        ocean_ace_config = dataclasses.replace(
-            base_ace_config,
-            log_nino34_index=True,
-            log_step_means=[StepMeanEntry(step=20, name="mean_step_20")]
-            if n_timesteps_ocean >= 20
-            else [],
+        atmosphere_metrics = self._build_metrics(
+            include_nino34=False,
+            n_timesteps=n_timesteps_atmosphere,
+            timestep=dataset_info.atmosphere.timestep,
+            log_zonal_mean_images=log_zonal_mean_images,
         )
-        atmosphere_ace_config = dataclasses.replace(
-            base_ace_config,
-            log_nino34_index=False,
-            log_step_means=[StepMeanEntry(step=20, name="mean_step_20")]
-            if n_timesteps_atmosphere >= 20
-            else [],
-        )
-
-        ocean_agg = ocean_ace_config.build(
+        ocean_agg = build_inference_evaluator_aggregator(
+            metrics=ocean_metrics,
             dataset_info=dataset_info.ocean,
             n_ic_steps=1,
             n_forward_steps=n_timesteps_ocean - 1,
             initial_time=initial_time,
             normalize=ocean_normalize,
+            monthly_reference_data=self.monthly_reference_data,
+            time_mean_reference_data=self.time_mean_reference_data,
             output_dir=(
                 os.path.join(output_dir, "ocean") if output_dir is not None else None
             ),
             channel_mean_names=ocean_channel_mean_names,
             save_diagnostics=save_diagnostics,
         )
-        atmosphere_agg = atmosphere_ace_config.build(
+        atmosphere_agg = build_inference_evaluator_aggregator(
+            metrics=atmosphere_metrics,
             dataset_info=dataset_info.atmosphere,
             n_ic_steps=1,
             n_forward_steps=n_timesteps_atmosphere - 1,
             initial_time=initial_time,
             normalize=atmosphere_normalize,
+            monthly_reference_data=self.monthly_reference_data,
+            time_mean_reference_data=self.time_mean_reference_data,
             output_dir=(
                 os.path.join(output_dir, "atmosphere")
                 if output_dir is not None

@@ -1,5 +1,4 @@
 import dataclasses
-from typing import Literal
 
 import torch
 import xarray as xr
@@ -12,9 +11,10 @@ from .data import InferenceBatchData, MetricBuildResult, SubAggregator
 
 @dataclasses.dataclass
 class HistogramMetricConfig:
-    type: Literal["histogram"] = "histogram"
     variables: list[str] | None = None
     name: str = "histogram"
+    enabled: bool = True
+    strict: bool = True
 
     def get_name(self) -> str:
         return self.name

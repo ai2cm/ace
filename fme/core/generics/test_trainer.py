@@ -200,6 +200,7 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
         batch: BDType,
         optimization: OptimizationABC,
         compute_derived_variables: bool = False,
+        evaluate_all_steps: bool = False,
     ) -> TrainOutput:
         optimization.accumulate_loss(torch.tensor(float("inf")))
         optimization.step_weights()
@@ -213,6 +214,9 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
         pass
 
     def set_eval(self) -> None:
+        pass
+
+    def seed_eval(self, seed: int) -> None:
         pass
 
     def update_training_history(self, *args: Any, **kwargs: Any) -> None:

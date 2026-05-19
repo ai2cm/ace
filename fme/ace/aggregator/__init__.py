@@ -1,7 +1,8 @@
 from .inference import (
     InferenceEvaluatorAggregator,
     InferenceEvaluatorAggregatorConfig,
-    TypedMetricInferenceEvaluatorAggregatorConfig,
+    LegacyFlagInferenceEvaluatorAggregatorConfig,
+    build_inference_evaluator_aggregator,
 )
 from .null import NullAggregator
 from .one_step import OneStepAggregator

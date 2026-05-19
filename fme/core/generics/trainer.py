@@ -63,6 +63,7 @@ from typing import Any, ClassVar, Generic, Protocol, TypeVar
 import torch
 
 import fme
+from fme.core.cli import remove_stale_tmp_checkpoints
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.aggregator import AggregatorABC, InferenceAggregatorABC
@@ -248,6 +249,8 @@ class Trainer:
                 os.makedirs(config.checkpoint_dir)
         self.config = config
         self.paths = CheckpointPaths(config.checkpoint_dir)
+        if dist.is_root():
+            remove_stale_tmp_checkpoints(self.paths.checkpoint_dir)
 
         if dist.is_root() and not self.config.save_checkpoint:
             logging.warning(
@@ -566,12 +569,15 @@ class Trainer:
         self.train_data.alternate_shuffle()
         aggregator = self._aggregator_builder.get_train_aggregator()
         self.stepper.set_eval()
+        self.stepper.seed_eval(seed=0)
         with torch.no_grad(), self.validation_context():
             for batch in self.train_data.subset_loader(
                 stop_batch=self.config.train_evaluation_batches
             ):
                 with GlobalTimer():
-                    stepped = self.stepper.train_on_batch(batch, self._no_optimization)
+                    stepped = self.stepper.train_on_batch(
+                        batch, self._no_optimization, evaluate_all_steps=True
+                    )
                 aggregator.record_batch(stepped)
         if (
             self._should_save_checkpoints()

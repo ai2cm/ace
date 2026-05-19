@@ -30,8 +30,7 @@ inference:
           file_pattern: 2025-01-27-cm4-piControl-atmosphere-5daily-sfc-only/zarr_v3/data.zarr
           engine: zarr
       num_data_workers: 8
-    aggregator:
-      log_histograms: false
+    aggregator: {}
 logging:
   log_to_screen: true
   log_to_wandb: true
