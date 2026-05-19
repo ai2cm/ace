@@ -2,6 +2,7 @@ import torch
 
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
+from fme.core.loss import ChannelLossInfo
 
 
 class PerStepLossAggregator:
@@ -32,27 +33,33 @@ class PerStepLossAggregator:
 
 
 class PerChannelLossAggregator:
-    """Accumulates per-channel (per-variable) loss values across batches."""
+    """Accumulates per-channel (per-variable) loss values across batches.
+
+    Each recorded value carries the number of active samples that
+    contributed to that channel's mean, so masked-out samples never
+    dilute the aggregated mean across batches.
+    """
 
     def __init__(self):
-        self._sums: dict[str, torch.Tensor] = {}
-        self._n_batches = 0
+        self._weighted_sums: dict[str, torch.Tensor] = {}
+        self._counts: dict[str, int] = {}
 
-    def record(self, per_channel_losses: dict[str, torch.Tensor]) -> None:
-        self._n_batches += 1
-        for var_name, value in per_channel_losses.items():
-            acc = self._sums.get(
+    def record(self, per_channel_losses: dict[str, ChannelLossInfo]) -> None:
+        for var_name, info in per_channel_losses.items():
+            ws = self._weighted_sums.get(
                 var_name,
-                torch.tensor(0.0, device=get_device(), dtype=value.dtype),
+                torch.tensor(0.0, device=get_device(), dtype=info.loss.dtype),
             )
-            self._sums[var_name] = acc + value
+            self._weighted_sums[var_name] = ws + info.loss * info.count
+            self._counts[var_name] = self._counts.get(var_name, 0) + info.count
 
     def get_logs(self, label: str) -> dict[str, float]:
         dist = Distributed.get_instance()
         logs: dict[str, float] = {}
-        if self._n_batches > 0:
-            for var_name, acc in self._sums.items():
-                logs[f"{label}/mean/loss/{var_name}"] = float(
-                    dist.reduce_mean(acc / self._n_batches).cpu().numpy()
-                )
+        for var_name, ws in self._weighted_sums.items():
+            count = self._counts[var_name]
+            mean = ws / count if count > 0 else ws
+            logs[f"{label}/mean/loss/{var_name}"] = float(
+                dist.reduce_mean(mean).cpu().numpy()
+            )
         return logs

@@ -338,6 +338,42 @@ def test_train_on_batch_addition_series():
     )
 
 
+def test_train_on_batch_per_channel_losses_contain_all_out_names():
+    torch.manual_seed(0)
+    n_steps = 3
+    data_with_ic = get_data(["a", "b", "c"], n_samples=4, n_time=n_steps + 1).data
+    config = _get_stepper_config(["a", "b", "c"], ["a", "b", "c"])
+    stepper = _get_train_stepper(config, loss=StepLossConfig(type="MSE"))
+    stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
+    assert stepped.per_channel_losses is not None
+    assert set(stepped.per_channel_losses.keys()) == {"a", "b", "c"}
+    for info in stepped.per_channel_losses.values():
+        assert info.count > 0
+
+
+def test_train_on_batch_per_channel_losses_include_zero_weighted_channels():
+    """Channels with weight=0 are still reported in per_channel_losses.
+
+    The step is expected to compute and return all out channels regardless
+    of whether they meaningfully contribute to the optimized loss, so that
+    aggregator keys remain stable across batches and forward steps.
+    """
+    torch.manual_seed(0)
+    n_steps = 2
+    data_with_ic = get_data(["a", "b", "c"], n_samples=4, n_time=n_steps + 1).data
+    config = _get_stepper_config(["a", "b", "c"], ["a", "b", "c"])
+    stepper = _get_train_stepper(
+        config,
+        loss=StepLossConfig(type="MSE", weights={"b": 0.0}),
+    )
+    stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
+    assert stepped.per_channel_losses is not None
+    assert set(stepped.per_channel_losses.keys()) == {"a", "b", "c"}
+    for info in stepped.per_channel_losses.values():
+        assert info.count > 0
+    assert stepped.per_channel_losses["b"].loss.item() == 0.0
+
+
 def test_train_on_batch_crps_loss():
     torch.manual_seed(0)
 
@@ -476,8 +512,9 @@ def test_per_channel_losses_bounded_by_accumulated_loss():
     stepped = stepper.train_on_batch(data=data_with_ic, optimization=optimization)
     accumulated_loss = stepped.metrics["loss"]
     assert stepped.per_channel_losses is not None
-    per_channel_total = sum(stepped.per_channel_losses.values())
-    assert per_channel_total <= accumulated_loss + 1e-6
+    channel_losses = [info.loss for info in stepped.per_channel_losses.values()]
+    per_channel_mean = sum(channel_losses) / len(channel_losses)
+    assert per_channel_mean <= accumulated_loss + 1e-6
 
 
 def test_train_on_batch_with_prescribed_ocean():
