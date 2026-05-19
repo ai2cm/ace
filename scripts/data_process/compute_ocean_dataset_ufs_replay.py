@@ -354,6 +354,9 @@ def _regrid_dataset(
     ds: xr.Dataset,
     regrid_cfg: RegridConfig,
     source_grid: xr.Dataset | None = None,
+    *,
+    skipna: bool = True,
+    na_thres: float = 1.0,
 ) -> xr.Dataset:
     """Regrid a dataset to a Gaussian grid using xESMF.
 
@@ -361,6 +364,14 @@ def _regrid_dataset(
     the dataset contains many large 3-D fields.
 
     Skips regridding if ``regrid_cfg.output_grid`` is empty/None.
+
+    Args:
+        skipna: If True, NaN source cells are ignored and the weights are
+            renormalized over valid cells only.  This prevents land NaN from
+            bleeding into coastal ocean cells during conservative regridding.
+        na_thres: Fraction of missing source cells above which the output
+            is set to NaN.  ``1.0`` means the output is NaN only when *all*
+            contributing source cells are NaN.
     """
     if not regrid_cfg.output_grid:
         return ds
@@ -372,7 +383,9 @@ def _regrid_dataset(
 
     regridded_vars: dict[str, xr.DataArray] = {}
     for name in ds.data_vars:
-        regridded_vars[name] = regridder(ds[name], keep_attrs=True)
+        regridded_vars[name] = regridder(
+            ds[name], keep_attrs=True, skipna=skipna, na_thres=na_thres
+        )
 
     regridded = xr.Dataset(regridded_vars, attrs=ds.attrs)
     return regridded
@@ -490,9 +503,20 @@ def _compute_ocean_vertical_coarsening(
             coarsened_da.attrs["long_name"] = f"{long_name} level-{i}"
             coarsened_arrays[f"{name}_{i}"] = coarsened_da
 
-        # Per-level mask: ocean where total thickness > 0
-        ho_total = ho_slice.sum(vdim, skipna=False)
-        mask_i = (ho_total.isel(time=0) > 0).astype(np.float32)
+        # Per-level mask: ocean where the coarsened data is valid.
+        # Use the first available coarsened 3-D variable (thetao preferred)
+        # to determine where the weighted average produced valid values.
+        ref_coarsened = None
+        for vn in vars_3d:
+            key = f"{vn}_{i}"
+            if key in coarsened_arrays:
+                ref_coarsened = coarsened_arrays[key]
+                break
+        if ref_coarsened is not None:
+            mask_i = ref_coarsened.isel(time=0).notnull().astype(np.float32)
+        else:
+            ho_total = ho_slice.sum(vdim, skipna=True)
+            mask_i = (ho_total.isel(time=0) > 0).astype(np.float32)
         mask_i.attrs = {"long_name": f"ocean mask level-{i}"}
         coarsened_arrays[f"mask_{i}"] = mask_i
 
@@ -718,10 +742,11 @@ def compute_lazy_dataset(
             )
             print(f"  Regridded ho to {dict(ho_ds.sizes)}")
 
-        # Rebuild masks from the regridded data's NaN pattern. Conservative
-        # regridding propagates NaN for cells fully below the seafloor,
-        # preserving depth-dependent bathymetry that would be lost by
-        # regridding the binary mask and thresholding.
+        # Rebuild masks from the regridded data's NaN pattern. With
+        # skipna=True the regridder ignores NaN source cells, so a target
+        # cell is NaN only when *all* contributing source cells are NaN.
+        # This gives a generous ocean mask similar to CM4 (ocean wherever
+        # any source cell has data), with depth-dependent bathymetry.
         ref_var = next(
             (
                 v

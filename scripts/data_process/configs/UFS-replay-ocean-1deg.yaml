@@ -32,28 +32,29 @@ regrid:
 # levels matching CM4 target depths.  Each [start, end) pair defines a
 # contiguous group of native levels combined via ho-weighted mean, following
 # the same pattern as compute_dataset.compute_vertical_coarsening.
-# Groups are centred on the previous best-match indices for CM4 depths.
+# Group boundaries are placed at the midpoint between adjacent CM4 depths,
+# derived in 2026-05-18-ufs-vertical-level-selection.ipynb.
 vertical_coarsen:
   vertical_coarsening_indices:
-  - [0, 2]
-  - [2, 7]
-  - [7, 12]
-  - [12, 16]
-  - [16, 19]
-  - [19, 24]
-  - [24, 28]
-  - [28, 32]
-  - [32, 36]
-  - [36, 40]
-  - [40, 43]
-  - [43, 46]
-  - [46, 49]
-  - [49, 53]
-  - [53, 56]
-  - [56, 60]
-  - [60, 65]
-  - [65, 70]
-  - [70, 75]
+  - [0, 3]
+  - [3, 8]
+  - [8, 13]
+  - [13, 17]
+  - [17, 20]
+  - [20, 25]
+  - [25, 29]
+  - [29, 33]
+  - [33, 37]
+  - [37, 41]
+  - [41, 44]
+  - [44, 47]
+  - [47, 50]
+  - [50, 53]
+  - [53, 57]
+  - [57, 61]
+  - [61, 66]
+  - [66, 71]
+  - [71, 75]
 
 # Temporal coarsening: get daily data
 time_coarsen_factor: 4
