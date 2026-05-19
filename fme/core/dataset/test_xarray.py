@@ -39,7 +39,7 @@ from fme.core.dataset.xarray import (
     _repeat_and_increment_time,
     get_xarray_dataset,
 )
-from fme.core.mask_provider import MaskProvider
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.typing_ import Slice
 
 from .utils import as_broadcasted_tensor
@@ -1226,7 +1226,7 @@ def test_dataset_properties_update_masks(mock_monthly_netcdfs):
     config = XarrayDataConfig(data_path=mock_data.tmpdir)
     dataset = xarray_dataset_constructor(config, mock_data.var_names.all_names, 2)
     data_properties = dataset.properties
-    assert not data_properties.mask_provider.masks
-    existing_mask = MaskProvider(masks={"mask_0": torch.ones(4, 8)})
-    data_properties.update_mask_provider(existing_mask)
-    assert "mask_0" in dataset.properties.mask_provider.masks
+    assert not data_properties.spatial_mask_provider.masks
+    existing_mask = SpatialMaskProvider(masks={"mask_0": torch.ones(4, 8)})
+    data_properties.update_spatial_mask_provider(existing_mask)
+    assert "mask_0" in dataset.properties.spatial_mask_provider.masks
