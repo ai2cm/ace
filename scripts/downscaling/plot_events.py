@@ -126,19 +126,20 @@ def get_coarse_data(path: str | None, time_sel: slice | None = TIME_SEL) -> xr.D
     if path is not None:
         return xr.open_zarr(path)
     else:
-        gcs_root = "gs://vcm-ml-raw-flexible-retention/2025-07-25-X-SHiELD-AMIP-FME/regridded-zarrs/gaussian_grid_180_by_360/control"
-        winds = xr.open_zarr(f"{gcs_root}/instantaneous_physics_fields.zarr").sel(
-            time=time_sel
-        )[["eastward_wind_at_ten_meters", "northward_wind_at_ten_meters"]]
-        prate = xr.open_zarr(f"{gcs_root}/fluxes_2d.zarr").sel(time=time_sel)[
-            "PRATEsfc"
-        ]
-        pres = xr.open_zarr(f"{gcs_root}/column_integrated_dynamical_fields.zarr").sel(
-            time=time_sel
-        )["PRESsfc"]
-        # in training, PRESsfc is used as input for outputting PRMSL
-        prmsl = pres.rename("PRMSL")
-        return xr.merge([winds, prate, pres, prmsl])
+        coarse_data = xr.open_zarr(
+            "gs://vcm-ml-intermediate/2025-09-11-X-SHiELD-AMIP-1deg-8layer-11yr.zarr"
+        )
+        vars = ["TMP2m", "PRMSL", "PRESsfc", "PRATEsfc", "UGRD10m", "VGRD10m"]
+        coarse_data = coarse_data.sel(time=time_sel)[vars]
+        coarse_data = coarse_data.rename(
+            {
+                "TMP2m": "air_temperature_at_two_meters",
+                "UGRD10m": "eastward_wind_at_ten_meters",
+                "VGRD10m": "northward_wind_at_ten_meters",
+            }
+        )
+
+        return coarse_data
 
 
 def bbox(lat, lon, width=2.0):
