@@ -256,30 +256,30 @@ class TrainConfig:
     def __post_init__(self):
         if not self.validation_list:
             raise ValueError("At least one validation entry is required.")
-        resolved_val_names = self.validation_names
-        if len(resolved_val_names) != len(set(resolved_val_names)):
-            raise ValueError(f"Duplicate validation names: {resolved_val_names}")
+        resolved_validation_names = self.validation_names
+        if len(resolved_validation_names) != len(set(resolved_validation_names)):
+            raise ValueError(f"Duplicate validation names: {resolved_validation_names}")
         for i, entry in enumerate(self.validation_list):
             if self.train_loader.using_labels != entry.using_labels:
-                name = resolved_val_names[i]
+                name = resolved_validation_names[i]
                 raise ValueError(
                     f"train_loader and validation {name!r} loader "
                     "must both use labels or both not use labels"
                 )
-        resolved_inf_names = self.inference_names
-        if len(resolved_inf_names) != len(set(resolved_inf_names)):
-            raise ValueError(f"Duplicate inference names: {resolved_inf_names}")
-        reserved_overlap = set(resolved_inf_names) & self._RESERVED_NAMES
+        resolved_inference_names = self.inference_names
+        if len(resolved_inference_names) != len(set(resolved_inference_names)):
+            raise ValueError(f"Duplicate inference names: {resolved_inference_names}")
+        reserved_overlap = set(resolved_inference_names) & self._RESERVED_NAMES
         if reserved_overlap:
             raise ValueError(
                 f"Inference names {sorted(reserved_overlap)} collide with "
                 f"reserved names {sorted(self._RESERVED_NAMES)}"
             )
-        for i, inf_entry in enumerate(self.inference_list):
-            if self.train_loader.using_labels != inf_entry.using_labels:
-                inf_name = resolved_inf_names[i]
+        for i, inference_entry in enumerate(self.inference_list):
+            if self.train_loader.using_labels != inference_entry.using_labels:
+                inference_name = resolved_inference_names[i]
                 raise ValueError(
-                    f"train_loader and inference {inf_name!r} loader "
+                    f"train_loader and inference {inference_name!r} loader "
                     "must both use labels or both not use labels"
                 )
         if self.lr_tuning is not None and self.optimization.has_lr_schedule:

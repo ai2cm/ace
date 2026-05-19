@@ -61,8 +61,10 @@ import torch
 import fme
 from fme.ace.aggregator import TrainAggregator
 from fme.ace.aggregator.train import TrainAggregatorConfig
-from fme.ace.stepper import TrainOutput
+from fme.ace.data_loading.gridded_data import InferenceGriddedData
+from fme.ace.stepper import TrainOutput, TrainStepper
 from fme.ace.train.train_config import (
+    InlineInferenceConfig,
     InlineValidationConfig,
     TrainBuilders,
     TrainConfig,
@@ -77,6 +79,7 @@ from fme.core.generics.lr_tuning import ValidateStepper
 from fme.core.generics.train_stepper import TrainStepperABC
 from fme.core.generics.trainer import (
     AggregatorBuilderABC,
+    InferenceCallback,
     TrainConfigProtocol,
     Trainer,
     ValidationCallback,
@@ -143,6 +146,9 @@ def get_validate_stepper_callback(
     loss_names: Sequence[str] | None,
     validate_using_ema: bool,
 ) -> ValidateStepper:
+    # LR tuning passes trial stepper/EMA instances distinct from the Trainer's
+    # own stepper, so this callback manages its own EMA via run_validation_loop
+    # rather than relying on the Trainer's validation_context().
     def validate_stepper(stepper: TrainStepperABC, ema: EMATracker) -> float:
         weighted_loss = 0.0
         for entry_config, data, name in validation_entries:
@@ -169,6 +175,65 @@ def get_validate_stepper_callback(
         return weighted_loss
 
     return validate_stepper
+
+
+def get_inference_callback(
+    inference_entries: Sequence[
+        tuple[InlineInferenceConfig, InferenceGriddedData, DatasetInfo, str]
+    ],
+    inference_epochs: Sequence[int],
+    inference_epoch_sets: Sequence[set[int]],
+    stepper: TrainStepper,
+    output_dir: str,
+    save_per_epoch_diagnostics: bool,
+) -> InferenceCallback:
+    def inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
+        if epoch not in inference_epochs:
+            return {}, None
+        all_logs: dict[str, Any] = {}
+        weighted_error: float | None = None
+        for i, (entry_config, data, entry_dataset_info, name) in enumerate(
+            inference_entries
+        ):
+            if epoch not in inference_epoch_sets[i]:
+                continue
+            aggregator = entry_config.aggregator.build(
+                dataset_info=entry_dataset_info,
+                n_ic_steps=stepper.n_ic_timesteps,
+                n_forward_steps=entry_config.n_forward_steps,
+                initial_time=data.initial_time,
+                normalize=stepper.normalizer.normalize,
+                output_dir=os.path.join(output_dir, name),
+                channel_mean_names=stepper.loss_names,
+                save_diagnostics=save_per_epoch_diagnostics,
+                n_ensemble_per_ic=entry_config.n_ensemble_per_ic,
+                enable_time_series=False,
+            )
+            logs = inference_one_epoch(
+                stepper=stepper,
+                validation_context=contextlib.nullcontext,
+                dataset=data,
+                aggregator=aggregator,
+                label=name,
+                epoch=epoch,
+            )
+            all_logs.update(logs)
+            if entry_config.weight > 0:
+                metric_key = f"{name}/time_mean_norm/rmse/channel_mean"
+                error = logs.get(metric_key)
+                if error is None:
+                    raise RuntimeError(
+                        f"Inference entry {name!r} with weight={entry_config.weight} "
+                        f"did not produce expected metric key {metric_key!r}. "
+                        f"Entries contributing to checkpoint selection must produce "
+                        f"this metric."
+                    )
+                if weighted_error is None:
+                    weighted_error = 0.0
+                weighted_error += entry_config.weight * error
+        return all_logs, weighted_error
+
+    return inference_callback
 
 
 def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
@@ -236,52 +301,14 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
             validate_using_ema=config.validate_using_ema,
         )
 
-    def inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
-        if epoch not in inference_epochs:
-            return {}, None
-        all_logs: dict[str, Any] = {}
-        weighted_error: float | None = None
-        for i, (entry_config, data, entry_dataset_info, name) in enumerate(
-            inference_entries
-        ):
-            if epoch not in inference_epoch_sets[i]:
-                continue
-            aggregator = entry_config.aggregator.build(
-                dataset_info=entry_dataset_info,
-                n_ic_steps=stepper.n_ic_timesteps,
-                n_forward_steps=entry_config.n_forward_steps,
-                initial_time=data.initial_time,
-                normalize=stepper.normalizer.normalize,
-                output_dir=os.path.join(config.output_dir, name),
-                channel_mean_names=stepper.loss_names,
-                save_diagnostics=config.save_per_epoch_diagnostics,
-                n_ensemble_per_ic=entry_config.n_ensemble_per_ic,
-                enable_time_series=False,
-            )
-            logs = inference_one_epoch(
-                stepper=stepper,
-                validation_context=contextlib.nullcontext,
-                dataset=data,
-                aggregator=aggregator,
-                label=name,
-                epoch=epoch,
-            )
-            all_logs.update(logs)
-            if entry_config.weight > 0:
-                metric_key = f"{name}/time_mean_norm/rmse/channel_mean"
-                error = logs.get(metric_key)
-                if error is None:
-                    raise RuntimeError(
-                        f"Inference entry {name!r} with weight={entry_config.weight} "
-                        f"did not produce expected metric key {metric_key!r}. "
-                        f"Entries contributing to checkpoint selection must produce "
-                        f"this metric."
-                    )
-                if weighted_error is None:
-                    weighted_error = 0.0
-                weighted_error += entry_config.weight * error
-
-        return all_logs, weighted_error
+    inference_callback = get_inference_callback(
+        inference_entries=inference_entries,
+        inference_epochs=inference_epochs,
+        inference_epoch_sets=inference_epoch_sets,
+        stepper=stepper,
+        output_dir=config.output_dir,
+        save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
+    )
 
     do_gc_collect = fme.get_device() != torch.device("cpu")
     trainer_config: TrainConfigProtocol = config  # documenting trainer input type

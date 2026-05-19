@@ -610,14 +610,14 @@ def _setup(
 
 @pytest.mark.parametrize(
     "nettype, crps_training, log_validation_maps, \
-        use_healpix, use_schedule, validate_using_ema",
+        use_healpix, use_schedule, validate_using_ema, multi_validation",
     [
-        ("NoiseConditionedSFNO", True, False, False, True, False),
-        ("SphericalFourierNeuralOperatorNet", False, True, False, False, False),
-        ("HEALPixRecUNet", False, False, True, False, False),
-        ("Samudra", False, False, False, False, False),
-        ("NoiseConditionedSFNO", False, False, False, False, False),
-        ("NoiseConditionedSFNO", True, False, False, True, True),
+        ("NoiseConditionedSFNO", True, False, False, True, False, False),
+        ("SphericalFourierNeuralOperatorNet", False, True, False, False, False, True),
+        ("HEALPixRecUNet", False, False, True, False, False, False),
+        ("Samudra", False, False, False, False, False, False),
+        ("NoiseConditionedSFNO", False, False, False, False, False, False),
+        ("NoiseConditionedSFNO", True, False, False, True, True, False),
     ],
 )
 def test_train_and_inference(
@@ -628,6 +628,7 @@ def test_train_and_inference(
     use_healpix: bool,
     use_schedule: bool,
     validate_using_ema: bool,
+    multi_validation: bool,
     very_fast_only: bool,
 ):
     """Ensure that ACE training and subsequent standalone inference run without errors.
@@ -658,6 +659,7 @@ def test_train_and_inference(
         use_schedule=use_schedule,
         validate_using_ema=validate_using_ema,
         log_validation_maps=log_validation_maps,
+        multi_validation=multi_validation,
     )
     # using pdb requires calling main functions directly
     with mock_wandb() as wandb:
@@ -671,7 +673,10 @@ def test_train_and_inference(
 
         epoch_logs = wandb_logs[-1]
         assert "inference_0/mean_step_20_norm/weighted_rmse/channel_mean" in epoch_logs
-        assert "val/mean_norm/weighted_rmse/channel_mean" in epoch_logs
+        primary_val_name = "val_0" if multi_validation else "val"
+        assert f"{primary_val_name}/mean_norm/weighted_rmse/channel_mean" in epoch_logs
+        if multi_validation:
+            assert "val_extra/mean/loss" in epoch_logs
         ensemble_step_20_keys = [
             k for k in epoch_logs if "inference_0/ensemble_step_20/" in k
         ]
@@ -691,7 +696,9 @@ def test_train_and_inference(
             "inference epoch log"
         )
 
-    validation_output_dir = tmp_path / "results" / "output" / "val" / "epoch_0001"
+    validation_output_dir = (
+        tmp_path / "results" / "output" / primary_val_name / "epoch_0001"
+    )
     assert validation_output_dir.exists()
     validation_diags = ["mean"]
     validation_map_diags = ["snapshot", "mean_map"]

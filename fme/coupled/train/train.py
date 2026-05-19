@@ -16,12 +16,19 @@ from fme.core.ema import EMATracker
 from fme.core.generics.data import GriddedDataABC
 from fme.core.generics.lr_tuning import ValidateStepper
 from fme.core.generics.train_stepper import TrainStepperABC
-from fme.core.generics.trainer import AggregatorBuilderABC, Trainer, inference_one_epoch
+from fme.core.generics.trainer import (
+    AggregatorBuilderABC,
+    InferenceCallback,
+    Trainer,
+    inference_one_epoch,
+)
 from fme.core.generics.validation import run_validation, run_validation_loop
 from fme.coupled.aggregator import OneStepAggregator, TrainAggregator
+from fme.coupled.data_loading.gridded_data import InferenceGriddedData
 from fme.coupled.dataset_info import CoupledDatasetInfo
-from fme.coupled.stepper import CoupledTrainOutput
+from fme.coupled.stepper import CoupledTrainOutput, CoupledTrainStepper
 from fme.coupled.train.train_config import (
+    InlineInferenceConfig,
     InlineValidationConfig,
     TrainBuilders,
     TrainConfig,
@@ -84,6 +91,9 @@ def get_validate_stepper_callback(
     loss_scaling: CoupledTensorMapping,
     validate_using_ema: bool,
 ) -> ValidateStepper:
+    # LR tuning passes trial stepper/EMA instances distinct from the Trainer's
+    # own stepper, so this callback manages its own EMA via run_validation_loop
+    # rather than relying on the Trainer's validation_context().
     def validate_stepper(stepper: TrainStepperABC, ema: EMATracker) -> float:
         weighted_loss = 0.0
         for entry_config, data, name in validation_entries:
@@ -109,6 +119,63 @@ def get_validate_stepper_callback(
         return weighted_loss
 
     return validate_stepper
+
+
+def get_inference_callback(
+    inference_entries: Sequence[
+        tuple[InlineInferenceConfig, InferenceGriddedData, str]
+    ],
+    inference_epochs: Sequence[int],
+    inference_epoch_sets: Sequence[set[int]],
+    stepper: CoupledTrainStepper,
+    dataset_info: CoupledDatasetInfo,
+    output_dir: str,
+    save_per_epoch_diagnostics: bool,
+) -> InferenceCallback:
+    def inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
+        if epoch not in inference_epochs:
+            return {}, None
+        all_logs: dict[str, Any] = {}
+        weighted_error = 0.0
+        has_error = False
+        for i, (entry_config, data, name) in enumerate(inference_entries):
+            if epoch not in inference_epoch_sets[i]:
+                continue
+            batch = next(iter(data.loader))
+            initial_times = batch.ocean_data.time.isel(time=0)
+            n_timesteps_ocean = (
+                entry_config.n_coupled_steps + stepper.ocean.n_ic_timesteps
+            )
+            n_timesteps_atmosphere = (
+                entry_config.n_coupled_steps * stepper.n_inner_steps
+                + stepper.atmosphere.n_ic_timesteps
+            )
+            aggregator = entry_config.aggregator.build(
+                dataset_info=dataset_info,
+                n_timesteps_ocean=n_timesteps_ocean,
+                n_timesteps_atmosphere=n_timesteps_atmosphere,
+                initial_time=initial_times,
+                ocean_normalize=stepper.ocean.normalizer.normalize,
+                atmosphere_normalize=stepper.atmosphere.normalizer.normalize,
+                save_diagnostics=save_per_epoch_diagnostics,
+                output_dir=os.path.join(output_dir, name),
+            )
+            logs = inference_one_epoch(
+                stepper=stepper,
+                validation_context=contextlib.nullcontext,
+                dataset=data,
+                aggregator=aggregator,
+                label=name,
+                epoch=epoch,
+            )
+            all_logs.update(logs)
+            error = logs.get(f"{name}/time_mean_norm/rmse/channel_mean")
+            if error is not None:
+                weighted_error += entry_config.weight * error
+                has_error = True
+        return all_logs, weighted_error if has_error else None
+
+    return inference_callback
 
 
 def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
@@ -165,49 +232,15 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
             validate_using_ema=config.validate_using_ema,
         )
 
-    def inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
-        if epoch not in inference_epochs:
-            return {}, None
-        all_logs: dict[str, Any] = {}
-        weighted_error = 0.0
-        has_error = False
-        for i, (entry_config, data, name) in enumerate(inference_entries):
-            if epoch not in inference_epoch_sets[i]:
-                continue
-            batch = next(iter(data.loader))
-            initial_times = batch.ocean_data.time.isel(time=0)
-            n_timesteps_ocean = (
-                entry_config.n_coupled_steps + stepper.ocean.n_ic_timesteps
-            )
-            n_timesteps_atmosphere = (
-                entry_config.n_coupled_steps * stepper.n_inner_steps
-                + stepper.atmosphere.n_ic_timesteps
-            )
-            aggregator = entry_config.aggregator.build(
-                dataset_info=dataset_info,
-                n_timesteps_ocean=n_timesteps_ocean,
-                n_timesteps_atmosphere=n_timesteps_atmosphere,
-                initial_time=initial_times,
-                ocean_normalize=stepper.ocean.normalizer.normalize,
-                atmosphere_normalize=stepper.atmosphere.normalizer.normalize,
-                save_diagnostics=config.save_per_epoch_diagnostics,
-                output_dir=os.path.join(config.output_dir, name),
-            )
-            logs = inference_one_epoch(
-                stepper=stepper,
-                validation_context=contextlib.nullcontext,
-                dataset=data,
-                aggregator=aggregator,
-                label=name,
-                epoch=epoch,
-            )
-            all_logs.update(logs)
-            error = logs.get(f"{name}/time_mean_norm/rmse/channel_mean")
-            if error is not None:
-                weighted_error += entry_config.weight * error
-                has_error = True
-
-        return all_logs, weighted_error if has_error else None
+    inference_callback = get_inference_callback(
+        inference_entries=inference_entries,
+        inference_epochs=inference_epochs,
+        inference_epoch_sets=inference_epoch_sets,
+        stepper=stepper,
+        dataset_info=dataset_info,
+        output_dir=config.output_dir,
+        save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
+    )
 
     return Trainer(
         train_data=train_data,
@@ -240,14 +273,6 @@ class CoupledAggregatorBuilder(
 
     def get_train_aggregator(self) -> TrainAggregator:
         return TrainAggregator()
-
-    def get_validation_aggregator(self) -> OneStepAggregator:
-        return OneStepAggregator(
-            dataset_info=self.dataset_info,
-            save_diagnostics=self.save_per_epoch_diagnostics,
-            output_dir=os.path.join(self.output_dir, "val"),
-            loss_scaling=self.loss_scaling,
-        )
 
 
 def run_train(builders: TrainBuilders, config: TrainConfig):

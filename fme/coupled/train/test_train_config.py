@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -355,3 +355,168 @@ def test_duplicate_validation_names_raises(tmp_path):
                 _make_validation_config(name="same"),
             ],
         )
+
+
+class TestGetValidationCallback:
+    @staticmethod
+    def _make_entry(name, weight=1.0):
+        config = _make_validation_config(name=name, weight=weight)
+        data = MagicMock()
+        return (config, data, name)
+
+    @staticmethod
+    def _call(entries, run_validation_side_effect):
+        from fme.coupled.train.train import get_validation_callback
+
+        stepper = MagicMock()
+        with patch(
+            "fme.coupled.train.train.run_validation",
+            side_effect=run_validation_side_effect,
+        ):
+            callback = get_validation_callback(
+                validation_entries=entries,
+                stepper=stepper,
+                dataset_info=MagicMock(),
+                loss_scaling=MagicMock(),
+                save_per_epoch_diagnostics=False,
+                output_dir="/tmp/out",
+            )
+            return callback(epoch=1)
+
+    def test_single_entry(self):
+        entries = [self._make_entry("val")]
+        logs, loss = self._call(
+            entries,
+            [{"val/mean/loss": 0.5, "val/other": 1.0}],
+        )
+        assert loss == 0.5
+        assert logs == {"val/mean/loss": 0.5, "val/other": 1.0}
+
+    def test_zero_weight_excluded_from_loss(self):
+        entries = [
+            self._make_entry("val_0", weight=1.0),
+            self._make_entry("val_extra", weight=0.0),
+        ]
+        logs, loss = self._call(
+            entries,
+            [
+                {"val_0/mean/loss": 0.5},
+                {"val_extra/mean/loss": 999.0},
+            ],
+        )
+        assert loss == 0.5
+        assert "val_0/mean/loss" in logs
+        assert "val_extra/mean/loss" in logs
+
+    def test_multiple_weighted_entries(self):
+        entries = [
+            self._make_entry("a", weight=2.0),
+            self._make_entry("b", weight=3.0),
+        ]
+        logs, loss = self._call(
+            entries,
+            [
+                {"a/mean/loss": 0.1},
+                {"b/mean/loss": 0.2},
+            ],
+        )
+        assert loss == pytest.approx(2.0 * 0.1 + 3.0 * 0.2)
+
+
+class TestGetInferenceCallback:
+    @staticmethod
+    def _make_entry(name, weight=1.0, n_coupled_steps=1):
+        config = MagicMock()
+        config.weight = weight
+        config.n_coupled_steps = n_coupled_steps
+        data = MagicMock()
+        # data.loader is iterated once to get a batch for initial_times
+        data.loader = iter([MagicMock()])
+        return (config, data, name)
+
+    @staticmethod
+    def _call(
+        entries,
+        inference_one_epoch_side_effect,
+        epoch=1,
+        inference_epochs=(1,),
+        inference_epoch_sets=None,
+    ):
+        from fme.coupled.train.train import get_inference_callback
+
+        if inference_epoch_sets is None:
+            inference_epoch_sets = [{1} for _ in entries]
+        stepper = MagicMock()
+        with patch(
+            "fme.coupled.train.train.inference_one_epoch",
+            side_effect=inference_one_epoch_side_effect,
+        ):
+            callback = get_inference_callback(
+                inference_entries=entries,
+                inference_epochs=list(inference_epochs),
+                inference_epoch_sets=list(inference_epoch_sets),
+                stepper=stepper,
+                dataset_info=MagicMock(),
+                output_dir="/tmp/out",
+                save_per_epoch_diagnostics=False,
+            )
+            return callback(epoch=epoch)
+
+    def test_epoch_not_in_inference_epochs_returns_empty(self):
+        entries = [self._make_entry("inference")]
+        logs, error = self._call(
+            entries,
+            inference_one_epoch_side_effect=[],
+            epoch=2,
+            inference_epochs=(1,),
+        )
+        assert logs == {}
+        assert error is None
+
+    def test_single_entry_weighted_error(self):
+        entries = [self._make_entry("inference", weight=2.0)]
+        logs, error = self._call(
+            entries,
+            [{"inference/time_mean_norm/rmse/channel_mean": 0.4}],
+        )
+        assert error == pytest.approx(2.0 * 0.4)
+        assert "inference/time_mean_norm/rmse/channel_mean" in logs
+
+    def test_missing_metric_returns_none_error(self):
+        entries = [self._make_entry("a", weight=1.0)]
+        logs, error = self._call(
+            entries,
+            [{"a/other_metric": 1.0}],
+        )
+        assert error is None
+        assert "a/other_metric" in logs
+
+    def test_multiple_weighted_entries(self):
+        entries = [
+            self._make_entry("a", weight=2.0),
+            self._make_entry("b", weight=3.0),
+        ]
+        logs, error = self._call(
+            entries,
+            [
+                {"a/time_mean_norm/rmse/channel_mean": 0.1},
+                {"b/time_mean_norm/rmse/channel_mean": 0.2},
+            ],
+        )
+        assert error == pytest.approx(2.0 * 0.1 + 3.0 * 0.2)
+
+    def test_entry_skipped_when_not_in_epoch_set(self):
+        entries = [
+            self._make_entry("a", weight=1.0),
+            self._make_entry("b", weight=1.0),
+        ]
+        logs, error = self._call(
+            entries,
+            [{"a/time_mean_norm/rmse/channel_mean": 0.5}],
+            epoch=1,
+            inference_epochs=(1,),
+            inference_epoch_sets=[{1}, {2}],
+        )
+        assert error == pytest.approx(0.5)
+        assert "a/time_mean_norm/rmse/channel_mean" in logs
+        assert "b/time_mean_norm/rmse/channel_mean" not in logs

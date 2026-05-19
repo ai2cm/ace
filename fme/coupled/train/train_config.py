@@ -247,13 +247,13 @@ class TrainConfig:
     def __post_init__(self):
         if not self.validation_list:
             raise ValueError("At least one validation entry is required.")
-        resolved_val_names = self.validation_names
-        if len(resolved_val_names) != len(set(resolved_val_names)):
-            raise ValueError(f"Duplicate validation names: {resolved_val_names}")
-        resolved_inf_names = self.inference_names
-        if len(resolved_inf_names) != len(set(resolved_inf_names)):
-            raise ValueError(f"Duplicate inference names: {resolved_inf_names}")
-        reserved_overlap = set(resolved_inf_names) & self._RESERVED_NAMES
+        resolved_validation_names = self.validation_names
+        if len(resolved_validation_names) != len(set(resolved_validation_names)):
+            raise ValueError(f"Duplicate validation names: {resolved_validation_names}")
+        resolved_inference_names = self.inference_names
+        if len(resolved_inference_names) != len(set(resolved_inference_names)):
+            raise ValueError(f"Duplicate inference names: {resolved_inference_names}")
+        reserved_overlap = set(resolved_inference_names) & self._RESERVED_NAMES
         if reserved_overlap:
             raise ValueError(
                 f"Inference names {sorted(reserved_overlap)} collide with "

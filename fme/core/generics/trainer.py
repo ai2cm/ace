@@ -239,6 +239,36 @@ class Trainer:
         validate_stepper: ValidateStepper | None = None,
         do_gc_collect: bool = True,
     ):
+        """
+        Args:
+            train_data: Training data loader.
+            stepper: Training stepper.
+            build_optimization: Factory that builds the Optimization from the
+                stepper's modules.
+            build_ema: Factory that builds the EMATracker from the stepper's
+                modules.
+            config: Training configuration.
+            aggregator_builder: Builder for per-epoch aggregators.
+            validation_callback: Called once per epoch to run epoch-end
+                validation against ``self.stepper``. The Trainer wraps the
+                call in ``validation_context()`` so that EMA params are
+                applied exactly once for the entire validation+inference
+                block when ``validate_using_ema`` is True; the callback must
+                therefore not enter ``validation_context()`` itself.
+            end_of_batch_callback: Called after each training batch.
+            end_of_epoch_callback: Called after validation/inference each
+                epoch; may return additional logs.
+            inference_callback: Called once per epoch to run inline
+                inference. Like ``validation_callback``, runs inside
+                ``validation_context()`` and must not re-enter it.
+            validate_stepper: Optional callback used only by LR tuning. It
+                receives a *trial* stepper and a *trial* EMATracker (separate
+                from ``self.stepper`` / ``self._ema``) and is responsible for
+                managing EMA state on those trial instances itself, since the
+                Trainer's ``validation_context`` only applies EMA to the main
+                stepper. Required when ``config.lr_tuning`` is configured.
+            do_gc_collect: Whether to run a Python GC pass between epochs.
+        """
         logging.info(f"Current device is {fme.get_device()}")
         dist = Distributed.get_instance()
         if dist.is_root():
