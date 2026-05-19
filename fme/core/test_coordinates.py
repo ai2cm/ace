@@ -13,7 +13,7 @@ from fme.core.coordinates import (
     dz_from_idepth,
 )
 from fme.core.device import get_device
-from fme.core.mask_provider import MaskProvider
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 
 try:
     from earth2grid import healpix as e2ghpx
@@ -216,8 +216,10 @@ def test_masked_lat_lon_ops_from_coords():
     lon = torch.tensor([0.0])
     mask = torch.tensor([[1], [0], [1]])
     coords = LatLonCoordinates(lat=lat, lon=lon)
-    mask_provider = MaskProvider(masks={"mask_0": mask})
-    gridded_ops = coords.get_gridded_operations(mask_provider=mask_provider)
+    spatial_mask_provider = SpatialMaskProvider(masks={"mask_0": mask})
+    gridded_ops = coords.get_gridded_operations(
+        spatial_mask_provider=spatial_mask_provider
+    )
     input_ = torch.tensor([[1.0], [-10.0], [3.0]])
     result = gridded_ops.area_weighted_mean(input_, name="T_0")
     torch.testing.assert_close(result, torch.tensor(2.0))
@@ -228,11 +230,15 @@ def test_healpix_ops_raises_value_error_with_mask():
     height = torch.arange(16)
     width = torch.arange(16)
     healpix_coords = HEALPixCoordinates(face=face, height=height, width=width)
-    mask_provider = MaskProvider(masks={"mask_0": torch.tensor([1, 0, 1])})
+    spatial_mask_provider = SpatialMaskProvider(
+        masks={"mask_0": torch.tensor([1, 0, 1])}
+    )
 
     expected_msg = "HEALPixCoordinates does not support a mask"
     with pytest.raises(NotImplementedError, match=expected_msg):
-        healpix_coords.get_gridded_operations(mask_provider=mask_provider)
+        healpix_coords.get_gridded_operations(
+            spatial_mask_provider=spatial_mask_provider
+        )
 
 
 @pytest.mark.parametrize(
