@@ -63,15 +63,19 @@ from typing import Any, ClassVar, Generic, Protocol, TypeVar
 import torch
 
 import fme
+from fme.core.cli import remove_stale_tmp_checkpoints
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.aggregator import AggregatorABC, InferenceAggregatorABC
 from fme.core.generics.data import GriddedDataABC, InferenceDataABC
 from fme.core.generics.inference import run_inference
-from fme.core.generics.lr_tuning import LRTuningConfig, run_lr_tuning_trial
+from fme.core.generics.lr_tuning import (
+    LRTuningConfig,
+    ValidateStepper,
+    run_lr_tuning_trial,
+)
 from fme.core.generics.metrics_aggregator import MetricsAggregator
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
-from fme.core.generics.validation import run_validation_loop
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.timing import GlobalTimer
 from fme.core.training_history import TrainingJob
@@ -180,10 +184,6 @@ class AggregatorBuilderABC(abc.ABC, Generic[TO]):
     def get_train_aggregator(self) -> AggregatorABC[TO]:
         pass
 
-    @abc.abstractmethod
-    def get_validation_aggregator(self) -> AggregatorABC[TO]:
-        pass
-
 
 class CheckpointPaths:
     def __init__(self, checkpoint_dir: str):
@@ -227,7 +227,6 @@ class Trainer:
     def __init__(
         self,
         train_data: GriddedDataABC[BD],
-        validation_data: GriddedDataABC[BD],
         stepper: TrainStepperABC[PS, BD, FD, SD, TO],
         build_optimization: Callable[[torch.nn.ModuleList], Optimization],
         build_ema: Callable[[torch.nn.ModuleList], EMATracker],
@@ -237,8 +236,39 @@ class Trainer:
         end_of_batch_callback: EndOfBatchCallback = lambda: None,
         end_of_epoch_callback: EndOfEpochCallback = null_end_of_epoch_callback,
         inference_callback: InferenceCallback = _null_inference_callback,
+        validate_stepper: ValidateStepper | None = None,
         do_gc_collect: bool = True,
     ):
+        """
+        Args:
+            train_data: Training data loader.
+            stepper: Training stepper.
+            build_optimization: Factory that builds the Optimization from the
+                stepper's modules.
+            build_ema: Factory that builds the EMATracker from the stepper's
+                modules.
+            config: Training configuration.
+            aggregator_builder: Builder for per-epoch aggregators.
+            validation_callback: Called once per epoch to run epoch-end
+                validation against ``self.stepper``. The Trainer wraps the
+                call in ``validation_context()`` so that EMA params are
+                applied exactly once for the entire validation+inference
+                block when ``validate_using_ema`` is True; the callback must
+                therefore not enter ``validation_context()`` itself.
+            end_of_batch_callback: Called after each training batch.
+            end_of_epoch_callback: Called after validation/inference each
+                epoch; may return additional logs.
+            inference_callback: Called once per epoch to run inline
+                inference. Like ``validation_callback``, runs inside
+                ``validation_context()`` and must not re-enter it.
+            validate_stepper: Optional callback used only by LR tuning. It
+                receives a *trial* stepper and a *trial* EMATracker (separate
+                from ``self.stepper`` / ``self._ema``) and is responsible for
+                managing EMA state on those trial instances itself, since the
+                Trainer's ``validation_context`` only applies EMA to the main
+                stepper. Required when ``config.lr_tuning`` is configured.
+            do_gc_collect: Whether to run a Python GC pass between epochs.
+        """
         logging.info(f"Current device is {fme.get_device()}")
         dist = Distributed.get_instance()
         if dist.is_root():
@@ -248,6 +278,8 @@ class Trainer:
                 os.makedirs(config.checkpoint_dir)
         self.config = config
         self.paths = CheckpointPaths(config.checkpoint_dir)
+        if dist.is_root():
+            remove_stale_tmp_checkpoints(self.paths.checkpoint_dir)
 
         if dist.is_root() and not self.config.save_checkpoint:
             logging.warning(
@@ -256,7 +288,6 @@ class Trainer:
             )
 
         self.train_data = train_data
-        self.valid_data = validation_data
 
         self.num_batches_seen = 0
         self._start_epoch = 0
@@ -293,6 +324,7 @@ class Trainer:
         self._started_training = False
         self._validation_callback: ValidationCallback = validation_callback
         self._inference_callback: InferenceCallback = inference_callback
+        self._validate_stepper_callback: ValidateStepper | None = validate_stepper
 
         def on_terminate(signum, frame):
             dist = Distributed.get_instance()
@@ -337,16 +369,11 @@ class Trainer:
         return EMATracker.from_state(self._ema.get_state(), modules)
 
     def _validate_stepper(self, stepper: TrainStepperABC, ema: EMATracker) -> float:
-        aggregator = self._aggregator_builder.get_validation_aggregator()
-        run_validation_loop(
-            stepper=stepper,
-            valid_data=self.valid_data,
-            aggregator=aggregator,
-            ema=ema,
-            validate_using_ema=self.config.validate_using_ema,
-        )
-        val_logs = aggregator.get_logs(label="val")
-        return val_logs["val/mean/loss"]
+        if self._validate_stepper_callback is None:
+            raise RuntimeError(
+                "validate_stepper callback is required when lr_tuning is configured"
+            )
+        return self._validate_stepper_callback(stepper, ema)
 
     def _maybe_tune_lr(self):
         cfg = self.config.lr_tuning
@@ -566,12 +593,15 @@ class Trainer:
         self.train_data.alternate_shuffle()
         aggregator = self._aggregator_builder.get_train_aggregator()
         self.stepper.set_eval()
+        self.stepper.seed_eval(seed=0)
         with torch.no_grad(), self.validation_context():
             for batch in self.train_data.subset_loader(
                 stop_batch=self.config.train_evaluation_batches
             ):
                 with GlobalTimer():
-                    stepped = self.stepper.train_on_batch(batch, self._no_optimization)
+                    stepped = self.stepper.train_on_batch(
+                        batch, self._no_optimization, evaluate_all_steps=True
+                    )
                 aggregator.record_batch(stepped)
         if (
             self._should_save_checkpoints()

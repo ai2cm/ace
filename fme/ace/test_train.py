@@ -14,10 +14,7 @@ import xarray as xr
 import yaml
 
 import fme
-from fme.ace.aggregator.inference.main import (
-    InferenceEvaluatorAggregatorConfig,
-    MeanMetricConfig,
-)
+from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregatorConfig
 from fme.ace.aggregator.one_step.main import OneStepAggregatorConfig
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.inference import (
@@ -54,13 +51,19 @@ from fme.ace.stepper.time_length_probabilities import (
 from fme.ace.testing import (
     DimSizes,
     MonthlyReferenceData,
+    patch_cm4_solar_constant,
     save_nd_netcdf,
     save_scalar_netcdf,
     save_stepper_checkpoint,
 )
 from fme.ace.train.train import build_trainer, prepare_directory
 from fme.ace.train.train import main as train_main
-from fme.ace.train.train_config import InlineInferenceConfig, TrainBuilders, TrainConfig
+from fme.ace.train.train_config import (
+    InlineInferenceConfig,
+    InlineValidationConfig,
+    TrainBuilders,
+    TrainConfig,
+)
 from fme.core.coordinates import (
     HEALPixCoordinates,
     HorizontalCoordinates,
@@ -87,6 +90,47 @@ from fme.core.testing.wandb import mock_wandb
 JOB_SUBMISSION_SCRIPT_PATH = (
     pathlib.PurePath(__file__).parent / "run-train-and-inference.sh"
 )
+
+
+def _make_validation_entries(
+    *,
+    valid_data_path,
+    spatial_dimensions_str,
+    conditional,
+    log_validation_maps,
+    multi_validation=False,
+) -> InlineValidationConfig | list[InlineValidationConfig]:
+    primary = InlineValidationConfig(
+        loader=DataLoaderConfig(
+            dataset=XarrayDataConfig(
+                data_path=str(valid_data_path),
+                spatial_dimensions=spatial_dimensions_str,
+                labels=["era5"] if conditional else None,
+            ),
+            batch_size=2,
+            num_data_workers=0,
+        ),
+        aggregator=OneStepAggregatorConfig(
+            log_snapshots=log_validation_maps,
+            log_mean_maps=log_validation_maps,
+        ),
+    )
+    if not multi_validation:
+        return primary
+    secondary = InlineValidationConfig(
+        loader=DataLoaderConfig(
+            dataset=XarrayDataConfig(
+                data_path=str(valid_data_path),
+                spatial_dimensions=spatial_dimensions_str,
+                labels=["era5"] if conditional else None,
+            ),
+            batch_size=2,
+            num_data_workers=0,
+        ),
+        name="val_extra",
+        weight=0.0,
+    )
+    return [primary, secondary]
 
 
 def _get_test_yaml_files(
@@ -116,6 +160,7 @@ def _get_test_yaml_files(
     use_schedule=False,
     validate_using_ema=False,
     derived_forcings=None,
+    multi_validation=False,
 ):
     input_time_size = 1
     output_time_size = 1
@@ -320,20 +365,18 @@ def _get_test_yaml_files(
             time_buffer=time_buffer,
             sample_with_replacement=10,
         ),
-        validation_loader=DataLoaderConfig(
-            dataset=XarrayDataConfig(
-                data_path=str(valid_data_path),
-                spatial_dimensions=spatial_dimensions_str,
-                labels=["era5"] if conditional else None,
-            ),
-            batch_size=2,
-            num_data_workers=0,
+        validation=_make_validation_entries(
+            valid_data_path=valid_data_path,
+            spatial_dimensions_str=spatial_dimensions_str,
+            conditional=conditional,
+            log_validation_maps=log_validation_maps,
+            multi_validation=multi_validation,
         ),
         optimization=OptimizationConfig(
             use_gradient_accumulation=True,
             enable_automatic_mixed_precision=True,
             optimizer_type="Adam",
-            lr=0.001,
+            lr=0.0001,
             kwargs=dict(weight_decay=0.01),
             scheduler=SchedulerConfig(
                 type="CosineAnnealingLR",
@@ -385,10 +428,6 @@ def _get_test_yaml_files(
         logging=logging_config,
         experiment_dir=str(results_dir),
         save_per_epoch_diagnostics=save_per_epoch_diagnostics,
-        validation_aggregator=OneStepAggregatorConfig(
-            log_snapshots=log_validation_maps,
-            log_mean_maps=log_validation_maps,
-        ),
     )
 
     inference_config = InferenceEvaluatorConfig(
@@ -401,9 +440,7 @@ def _get_test_yaml_files(
             save_prediction_files=False,
             files=[FileWriterConfig("autoregressive")],
         ),
-        aggregator=InferenceEvaluatorAggregatorConfig(
-            metrics=[MeanMetricConfig(target="denorm")],
-        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(),
         logging=logging_config,
         loader=InferenceDataLoaderConfig(
             dataset=XarrayDataConfig(
@@ -464,13 +501,15 @@ def _setup(
     derived_forcings=None,
     use_schedule: bool = False,
     validate_using_ema: bool = False,
+    stats_std_fill_value: float | None = None,
+    multi_validation: bool = False,
 ):
     if not path.exists():
         path.mkdir()
     if derived_forcings is None:
         derived_forcings = DerivedForcingsConfig()
     seed = 0
-    np.random.seed(seed)
+    set_seed(seed)
     in_variable_names = [
         "PRESsfc",
         "specific_total_water_0",
@@ -522,6 +561,7 @@ def _setup(
     save_scalar_netcdf(
         stats_dir / "stats-stddev.nc",
         variable_names=all_variable_names,
+        fill_value=stats_std_fill_value,
     )
 
     monthly_dim_sizes: DimSizes
@@ -564,20 +604,21 @@ def _setup(
         derived_forcings=derived_forcings,
         use_schedule=use_schedule,
         validate_using_ema=validate_using_ema,
+        multi_validation=multi_validation,
     )
     return train_config_filename, inference_config_filename
 
 
 @pytest.mark.parametrize(
     "nettype, crps_training, log_validation_maps, \
-        use_healpix, use_schedule, validate_using_ema",
+        use_healpix, use_schedule, validate_using_ema, multi_validation",
     [
-        ("NoiseConditionedSFNO", True, False, False, True, False),
-        ("SphericalFourierNeuralOperatorNet", False, True, False, False, False),
-        ("HEALPixRecUNet", False, False, True, False, False),
-        ("Samudra", False, False, False, False, False),
-        ("NoiseConditionedSFNO", False, False, False, False, False),
-        ("NoiseConditionedSFNO", True, False, False, True, True),
+        ("NoiseConditionedSFNO", True, False, False, True, False, False),
+        ("SphericalFourierNeuralOperatorNet", False, True, False, False, False, True),
+        ("HEALPixRecUNet", False, False, True, False, False, False),
+        ("Samudra", False, False, False, False, False, False),
+        ("NoiseConditionedSFNO", False, False, False, False, False, False),
+        ("NoiseConditionedSFNO", True, False, False, True, True, False),
     ],
 )
 def test_train_and_inference(
@@ -588,6 +629,7 @@ def test_train_and_inference(
     use_healpix: bool,
     use_schedule: bool,
     validate_using_ema: bool,
+    multi_validation: bool,
     very_fast_only: bool,
 ):
     """Ensure that ACE training and subsequent standalone inference run without errors.
@@ -618,6 +660,7 @@ def test_train_and_inference(
         use_schedule=use_schedule,
         validate_using_ema=validate_using_ema,
         log_validation_maps=log_validation_maps,
+        multi_validation=multi_validation,
     )
     # using pdb requires calling main functions directly
     with mock_wandb() as wandb:
@@ -631,7 +674,10 @@ def test_train_and_inference(
 
         epoch_logs = wandb_logs[-1]
         assert "inference_0/mean_step_20_norm/weighted_rmse/channel_mean" in epoch_logs
-        assert "val/mean_norm/weighted_rmse/channel_mean" in epoch_logs
+        primary_val_name = "val_0" if multi_validation else "val"
+        assert f"{primary_val_name}/mean_norm/weighted_rmse/channel_mean" in epoch_logs
+        if multi_validation:
+            assert "val_extra/mean/loss" in epoch_logs
         ensemble_step_20_keys = [
             k for k in epoch_logs if "inference_0/ensemble_step_20/" in k
         ]
@@ -651,7 +697,9 @@ def test_train_and_inference(
             "inference epoch log"
         )
 
-    validation_output_dir = tmp_path / "results" / "output" / "val" / "epoch_0001"
+    validation_output_dir = (
+        tmp_path / "results" / "output" / primary_val_name / "epoch_0001"
+    )
     assert validation_output_dir.exists()
     validation_diags = ["mean"]
     validation_map_diags = ["snapshot", "mean_map"]
@@ -999,6 +1047,7 @@ def test_train_without_inline_inference(tmp_path, very_fast_only: bool):
         log_validation_maps=log_validation_maps,
         skip_inline_inference=True,
         time_buffer=2,
+        multi_validation=True,
     )
     with mock_wandb() as wandb:
         train_main(
@@ -1007,6 +1056,11 @@ def test_train_without_inline_inference(tmp_path, very_fast_only: bool):
         wandb_logs = wandb.get_logs()
     assert np.isinf(wandb_logs[-1]["best_inference_error"])
     assert not any("inference/" in key for key in wandb_logs[-1])
+    epoch_logs = wandb_logs[-1]
+    assert "val_0/mean/loss" in epoch_logs
+    assert "val_extra/mean/loss" in epoch_logs
+    val_extra_output = tmp_path / "results" / "output" / "val_extra" / "epoch_0001"
+    assert val_extra_output.exists()
 
 
 @pytest.mark.parametrize(
@@ -1043,15 +1097,16 @@ def test_train_and_inference_with_derived_forcings(
         crps_training=crps_training,
         log_validation_maps=log_validation_maps,
         derived_forcings=derived_forcings,
+        stats_std_fill_value=1.0,
     )
-    # using pdb requires calling main functions directly
-    with mock_wandb() as wandb:
-        train_main(
-            yaml_config=train_config,
-        )
-    with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
-        inference_evaluator_main(yaml_config=inference_config)
+    with patch_cm4_solar_constant(1.0):
+        with mock_wandb() as wandb:
+            train_main(
+                yaml_config=train_config,
+            )
+        with mock_wandb() as wandb:
+            wandb.configure(log_to_wandb=True)
+            inference_evaluator_main(yaml_config=inference_config)
 
 
 def test_train_with_non_local_experiment_dir_error():
@@ -1091,7 +1146,7 @@ def test_train_with_non_local_experiment_dir_error():
             experiment_dir=non_local_experiment_dir,
             stepper=stepper,
             train_loader=dummy_data_loader,
-            validation_loader=dummy_data_loader,
+            validation=InlineValidationConfig(loader=dummy_data_loader),
             optimization=OptimizationConfig(),
             logging=LoggingConfig(),
             max_epochs=1,
@@ -1112,7 +1167,7 @@ def test_train_config_with_checkpoint_stepper(tmp_path: pathlib.Path):
         stepper=CheckpointStepperConfig(checkpoint_path=str(checkpoint_path)),
         stepper_training=TrainStepperConfig(n_forward_steps=2),
         train_loader=dummy_data_loader,
-        validation_loader=dummy_data_loader,
+        validation=InlineValidationConfig(loader=dummy_data_loader),
         optimization=OptimizationConfig(),
         logging=LoggingConfig(),
         max_epochs=1,
@@ -1155,7 +1210,7 @@ def test_train_config_with_stepper_config_sets_stepper_config(tmp_path: pathlib.
         stepper=stepper,
         stepper_training=TrainStepperConfig(n_forward_steps=2),
         train_loader=dummy_data_loader,
-        validation_loader=dummy_data_loader,
+        validation=InlineValidationConfig(loader=dummy_data_loader),
         optimization=OptimizationConfig(),
         logging=LoggingConfig(),
         max_epochs=1,
