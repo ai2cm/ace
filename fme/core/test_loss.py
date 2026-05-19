@@ -500,7 +500,7 @@ def test_packer_mask_missing_name_defaults_to_present():
     packer = Packer(["a", "b", "c"])
     filled = {
         "a": torch.tensor([1.0, 0.0]),
-        "b": torch.ones(2),
+        "b": torch.tensor([1.0, 1.0]),
         "c": torch.tensor([0.0, 1.0]),
     }
     mask = packer.pack(filled, axis=1)
@@ -616,13 +616,18 @@ def test_step_loss_forwards_data_mask():
         channel_dim=-3,
         normalizer=normalizer,
     )
-    x_mapping = {name: torch.ones(4, 5, 5).to(get_device()) for name in out_names}
+    x_mapping = {
+        "var_0": torch.ones(4, 5, 5).to(get_device()),
+        "var_1": torch.full((4, 5, 5), 2.0).to(get_device()),
+    }
     y_mapping = {name: torch.zeros(4, 5, 5).to(get_device()) for name in out_names}
     data_mask = {
         "var_0": torch.tensor([True, True, True, True]),
         "var_1": torch.tensor([False, False, False, False]),
     }
     result = step_loss(x_mapping, y_mapping, step=0, data_mask=data_mask)
+    # var_0: MSE=1.0 (4 samples). var_1: MSE=4.0 but all masked out → no contribution.
+    # Without the mask the total would be mean(1.0, 4.0) = 2.5.
     torch.testing.assert_close(result.total(), torch.tensor(1.0, device=get_device()))
 
 
