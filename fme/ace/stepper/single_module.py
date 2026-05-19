@@ -43,7 +43,6 @@ from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.labels import BatchLabels
 from fme.core.loss import StepLoss, StepLossConfig
-from fme.core.masking import NullMasking, StaticMaskingConfig
 from fme.core.normalizer import (
     NetworkAndLossNormalizationConfig,
     NormalizationConfig,
@@ -52,6 +51,7 @@ from fme.core.normalizer import (
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.registry import CorrectorSelector, ModuleSelector
+from fme.core.spatial_masking import NullSpatialMasking, StaticSpatialMaskingConfig
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import (
     MultiCallConfig,
@@ -511,7 +511,7 @@ class StepperConfig:
     """
 
     step: StepSelector
-    input_masking: StaticMaskingConfig | None = None
+    input_masking: StaticSpatialMaskingConfig | None = None
     derived_forcings: DerivedForcingsConfig = dataclasses.field(
         default_factory=lambda: DerivedForcingsConfig()
     )
@@ -591,14 +591,16 @@ class StepperConfig:
                 dataset_info.timestep
             )
         if self.input_masking is None:
-            input_masking = NullMasking()
+            input_masking = NullSpatialMasking()
         else:
             input_masking = self.input_masking.build(
-                mask=dataset_info.mask_provider,
+                mask=dataset_info.spatial_mask_provider,
                 means=step.normalizer.means,
             )
         try:
-            output_process_func = dataset_info.mask_provider.build_output_masker()
+            output_process_func = (
+                dataset_info.spatial_mask_provider.build_output_spatial_masker()
+            )
         except MissingDatasetInfo:
             output_process_func = NullPostProcessFn()
         return Stepper(
