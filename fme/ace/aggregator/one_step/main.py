@@ -3,6 +3,7 @@ from collections.abc import Sequence
 
 import torch
 
+from fme.ace.aggregator.loss_metrics import PerStepLossAggregator
 from fme.ace.aggregator.one_step.deterministic import (
     DeterministicTrainOutput,
     OneStepDeterministicAggregator,
@@ -60,12 +61,19 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
             metadata=dataset_info.variable_metadata,
         )
         self._ensemble_recorded = False
+        self._per_step_losses = PerStepLossAggregator()
 
     @torch.no_grad()
     def record_batch(
         self,
         batch: TrainOutput,
     ):
+        step_metrics = {
+            k: v
+            for k, v in batch.metrics.items()
+            if k.startswith("loss_step_") or k.startswith("loss/")
+        }
+        self._per_step_losses.record(step_metrics)
         folded_gen_data, n_ensemble = fold_ensemble_dim(batch.gen_data)
         folded_target_data = fold_sized_ensemble_dim(batch.target_data, n_ensemble)
         self._deterministic_aggregator.record_batch(
@@ -93,6 +101,7 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
             label: Label to prepend to all log keys.
         """
         deterministic_logs = self._deterministic_aggregator.get_logs(label)
+        deterministic_logs.update(self._per_step_losses.get_logs(label))
         if self._ensemble_recorded:
             stochastic_logs = self._ensemble_aggregator.get_logs(label)
             if len(set(deterministic_logs.keys()) & set(stochastic_logs.keys())) > 0:
