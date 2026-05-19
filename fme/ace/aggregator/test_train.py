@@ -7,6 +7,7 @@ from fme.ace.aggregator.train import TrainAggregator, TrainAggregatorConfig
 from fme.ace.stepper.single_module import TrainOutput
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
+from fme.core.loss import ChannelLossInfo
 from fme.core.typing_ import EnsembleTensorDict
 
 
@@ -109,7 +110,9 @@ def test_aggregator_logs_per_channel_loss():
             gen_data=gen_data,
             time=xr.DataArray(np.zeros((batch_size, n_time)), dims=["sample", "time"]),
             normalize=lambda x: x,
-            per_channel_losses={"a": torch.tensor(0.5, device=device)},
+            per_channel_losses={
+                "a": ChannelLossInfo(loss=torch.tensor(0.5, device=device), count=4)
+            },
         ),
     )
     agg.record_batch(
@@ -119,12 +122,65 @@ def test_aggregator_logs_per_channel_loss():
             gen_data=gen_data,
             time=xr.DataArray(np.zeros((batch_size, n_time)), dims=["sample", "time"]),
             normalize=lambda x: x,
-            per_channel_losses={"a": torch.tensor(1.0, device=device)},
+            per_channel_losses={
+                "a": ChannelLossInfo(loss=torch.tensor(1.0, device=device), count=4)
+            },
         ),
     )
     logs = agg.get_logs(label="train")
     assert logs["train/mean/loss"] == 1.5
     assert logs["train/mean/loss/a"] == 0.75
+
+
+def test_aggregator_per_channel_loss_weighted_by_count():
+    """When batches have different counts, the mean is weighted correctly."""
+    batch_size = 4
+    n_ensemble = 1
+    n_time = 2
+    nx, ny = 2, 2
+    device = get_device()
+    gridded_operations = LatLonOperations(
+        area_weights=torch.ones(nx, ny, device=device)
+    )
+    config = TrainAggregatorConfig(
+        spherical_power_spectrum=False, weighted_rmse=False, per_channel_loss=True
+    )
+    agg = TrainAggregator(config=config, operations=gridded_operations)
+    target_data = EnsembleTensorDict(
+        {"a": torch.randn(batch_size, 1, n_time, nx, ny, device=device)},
+    )
+    gen_data = EnsembleTensorDict(
+        {"a": torch.randn(batch_size, n_ensemble, n_time, nx, ny, device=device)},
+    )
+    # Batch 1: loss=1.0 from 2 active samples
+    agg.record_batch(
+        batch=TrainOutput(
+            metrics={"loss": torch.tensor(1.0, device=device)},
+            target_data=target_data,
+            gen_data=gen_data,
+            time=xr.DataArray(np.zeros((batch_size, n_time)), dims=["sample", "time"]),
+            normalize=lambda x: x,
+            per_channel_losses={
+                "a": ChannelLossInfo(loss=torch.tensor(1.0, device=device), count=2),
+            },
+        ),
+    )
+    # Batch 2: loss=3.0 from 6 active samples
+    agg.record_batch(
+        batch=TrainOutput(
+            metrics={"loss": torch.tensor(3.0, device=device)},
+            target_data=target_data,
+            gen_data=gen_data,
+            time=xr.DataArray(np.zeros((batch_size, n_time)), dims=["sample", "time"]),
+            normalize=lambda x: x,
+            per_channel_losses={
+                "a": ChannelLossInfo(loss=torch.tensor(3.0, device=device), count=6),
+            },
+        ),
+    )
+    logs = agg.get_logs(label="train")
+    # weighted mean: (1.0*2 + 3.0*6) / (2+6) = 20/8 = 2.5
+    assert logs["train/mean/loss/a"] == pytest.approx(2.5)
 
 
 def test_aggregator_per_channel_loss_disabled():
@@ -156,7 +212,9 @@ def test_aggregator_per_channel_loss_disabled():
             gen_data=gen_data,
             time=xr.DataArray(np.zeros((batch_size, n_time)), dims=["sample", "time"]),
             normalize=lambda x: x,
-            per_channel_losses={"a": torch.tensor(0.5, device=device)},
+            per_channel_losses={
+                "a": ChannelLossInfo(loss=torch.tensor(0.5, device=device), count=4)
+            },
         ),
     )
     logs = agg.get_logs(label="train")
