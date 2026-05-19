@@ -247,16 +247,24 @@ class WeightedMappingLoss:
             target_tensors = torch.where(nan_mask, 0.0, target_tensors)
 
         result = self.loss(predict_tensors, target_tensors)
+        input_ndim = predict_tensors.ndim
+        cdim = (
+            input_ndim + self.channel_dim if self.channel_dim < 0 else self.channel_dim
+        )
+        elementwise_cls = StandardLoss if cdim <= 1 else EnsembleComponentLoss
         if isinstance(result, list):
-            losses = result
+            # Inner losses that return raw element-wise tensors (e.g. MSE,
+            # L1) wrap themselves in StandardLoss but don't know the input
+            # channel layout.  When the input is ensemble-shaped, re-wrap
+            # so the component reduces around the channel dim correctly.
+            losses = [
+                elementwise_cls(c.loss)
+                if c.loss.ndim == input_ndim and type(c) is StandardLoss
+                else c
+                for c in result
+            ]
         else:
-            cdim = (
-                predict_tensors.ndim + self.channel_dim
-                if self.channel_dim < 0
-                else self.channel_dim
-            )
-            component_cls = StandardLoss if cdim <= 1 else EnsembleComponentLoss
-            losses = [component_cls(result)]
+            losses = [elementwise_cls(result)]
 
         mask = None
         if data_mask is not None:
