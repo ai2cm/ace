@@ -6,6 +6,10 @@ import torch
 
 from fme.ace.aggregator.inference.data import InferenceBatchData, make_dummy_time
 from fme.ace.aggregator.inference.spectrum import PairedSphericalPowerSpectrumAggregator
+from fme.ace.aggregator.loss_metrics import (
+    PerChannelLossAggregator,
+    PerStepLossAggregator,
+)
 from fme.ace.aggregator.one_step.reduced import MeanAggregator
 from fme.ace.stepper import TrainOutput
 from fme.core.device import get_device
@@ -76,9 +80,10 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
     def __init__(self, config: TrainAggregatorConfig, operations: GriddedOperations):
         self._n_loss_batches = 0
         self._loss = torch.tensor(0.0, device=get_device())
-        self._per_channel_weighted_sum: dict[str, torch.Tensor] = {}
-        self._per_channel_count: dict[str, int] = {}
-        self._per_channel_loss_enabled = config.per_channel_loss
+        self._per_step_losses = PerStepLossAggregator()
+        self._per_channel_losses: PerChannelLossAggregator | None = (
+            PerChannelLossAggregator() if config.per_channel_loss else None
+        )
         self._paired_aggregators: dict[str, Aggregator] = {}
         if config.spherical_power_spectrum:
             try:
@@ -106,16 +111,15 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
     def record_batch(self, batch: TrainOutput):
         self._loss += batch.metrics["loss"]
         self._n_loss_batches += 1
-        if self._per_channel_loss_enabled and batch.per_channel_losses is not None:
-            for var_name, info in batch.per_channel_losses.items():
-                ws = self._per_channel_weighted_sum.get(
-                    var_name,
-                    torch.tensor(0.0, device=get_device(), dtype=info.loss.dtype),
-                )
-                self._per_channel_weighted_sum[var_name] = ws + info.loss * info.count
-                self._per_channel_count[var_name] = (
-                    self._per_channel_count.get(var_name, 0) + info.count
-                )
+        step_metrics = {
+            k: v for k, v in batch.metrics.items() if k.startswith("loss_step_")
+        }
+        self._per_step_losses.record(step_metrics)
+        if (
+            self._per_channel_losses is not None
+            and batch.per_channel_losses is not None
+        ):
+            self._per_channel_losses.record(batch.per_channel_losses)
 
         folded_gen_data, n_ensemble = fold_ensemble_dim(batch.gen_data)
         folded_target_data = fold_sized_ensemble_dim(batch.target_data, n_ensemble)
@@ -143,16 +147,9 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
         logs[f"{label}/mean/loss"] = float(
             dist.reduce_mean(self._loss / self._n_loss_batches).cpu().numpy()
         )
-        if self._n_loss_batches > 0 and self._per_channel_loss_enabled:
-            for var_name in self._per_channel_weighted_sum:
-                count = self._per_channel_count[var_name]
-                if count > 0:
-                    mean = self._per_channel_weighted_sum[var_name] / count
-                else:
-                    mean = self._per_channel_weighted_sum[var_name]
-                logs[f"{label}/mean/loss/{var_name}"] = float(
-                    dist.reduce_mean(mean).cpu().numpy()
-                )
+        logs.update(self._per_step_losses.get_logs(label))
+        if self._per_channel_losses is not None:
+            logs.update(self._per_channel_losses.get_logs(label))
         return logs
 
     @torch.no_grad()
