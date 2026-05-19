@@ -160,7 +160,14 @@ class TimePaddedMergedDataset(DatasetABC):
                 f"Duplicates found: {duplicates}"
             )
 
+        self._local_epoch: int = -1
+        self._global_epoch = torch.tensor(-1)
         self._recompute_canonical()
+
+    def _ensure_epoch_synchronized(self):
+        if self._local_epoch != self._global_epoch.item():
+            self._local_epoch = int(self._global_epoch.item())
+            self._recompute_canonical()
 
     def _recompute_canonical(self):
         self._sample_n_times = max(d.sample_n_times for d in self.datasets)
@@ -195,6 +202,7 @@ class TimePaddedMergedDataset(DatasetABC):
         return padded
 
     def __getitem__(self, idx: int) -> DatasetItem:
+        self._ensure_epoch_synchronized()
         tensors: TensorDict = {}
         epochs: list[int | None] = []
         canonical_time: xr.DataArray | None = None
@@ -216,6 +224,7 @@ class TimePaddedMergedDataset(DatasetABC):
         return tensors, canonical_time, canonical_labels, canonical_epoch
 
     def get_sample_by_time_slice(self, time_slice: slice) -> DatasetItem:
+        self._ensure_epoch_synchronized()
         tensors: TensorDict = {}
         canonical_time: xr.DataArray | None = None
         canonical_labels: set[str] | None = None
@@ -234,14 +243,17 @@ class TimePaddedMergedDataset(DatasetABC):
 
     @property
     def all_times(self) -> xr.CFTimeIndex:
+        self._ensure_epoch_synchronized()
         return self.datasets[self._canonical_idx].all_times
 
     @property
     def sample_start_times(self) -> xr.CFTimeIndex:
+        self._ensure_epoch_synchronized()
         return self._sample_start_times
 
     @property
     def sample_n_times(self) -> int:
+        self._ensure_epoch_synchronized()
         return self._sample_n_times
 
     def validate_inference_length(self, max_start_index: int, max_window_len: int):
@@ -261,17 +273,21 @@ class TimePaddedMergedDataset(DatasetABC):
         return data_properties
 
     def enable_shared_memory(self):
+        if not self._global_epoch.is_shared():
+            self._global_epoch = self._global_epoch.share_memory_()
         for dataset in self.datasets:
             dataset.enable_shared_memory()
 
     def set_global_epoch_tensor(self, tensor):
+        self._global_epoch = tensor
         for dataset in self.datasets:
             dataset.set_global_epoch_tensor(tensor)
 
     def set_epoch(self, epoch: int):
         for dataset in self.datasets:
             dataset.set_epoch(epoch)
-        self._recompute_canonical()
+        self._global_epoch.fill_(epoch)
+        self._ensure_epoch_synchronized()
 
 
 @dataclasses.dataclass
