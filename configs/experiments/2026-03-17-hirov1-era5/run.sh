@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="predict-HiROv1-on-era5-100km-to-3km-conus-v2"
+JOB_NAME="predict-HiROv1-on-c96-amip-100km-to-3km-conus"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH="$SCRIPT_PATH/pp-config.yaml"
@@ -11,7 +11,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-NGPU=8
+NGPU=4
 IMAGE="$(cat $REPO_ROOT/latest_deps_only_image.txt)"
 
 EXISTING_RESULTS_DATASET=01K8RWE83W8BEEAT2KRS94FVCD # best hist checkpoint from job using global validation
@@ -20,7 +20,7 @@ wandb_group=""
 
 gantry run \
     --name $JOB_NAME \
-    --description 'Run 100km to 3km predict on 1deg ERA5' \
+    --description 'Run 100km to 3km predict on 1deg c96 AMIP' \
     --workspace ai2/climate-titan \
     --priority urgent \
     --preemptible \
@@ -37,7 +37,7 @@ gantry run \
     --weka climate-default:/climate-default \
     --gpus $NGPU \
     --shared-memory 400GiB \
-    --budget ai2/climate \
+    --budget ai2/atec-climate \
     --system-python \
     --install "pip install --no-deps ." \
     -- torchrun --nproc_per_node $NGPU -m fme.downscaling.predict $CONFIG_PATH
