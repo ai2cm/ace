@@ -41,7 +41,7 @@ ft_fto_stochastic_ncs3_10ep-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KNRCQCF5V
 
 ft_fto_stochastic_ncs3_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KNW432G50TY9WKN7C9HMVS1E|training|best_inference_ckpt|normal|--not-preemptible
 
-ft_fto_stochastic_ncs4_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KNZHD7DGXC8YCVMVS00QZQNX|trained|best_inference_ckpt|high|--not-preemptible
+ft_fto_stochastic_ncs4_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KNZHD7DGXC8YCVMVS00QZQNX|run_ic0251_100yr|best_inference_ckpt|high|--min-runtime 5h
 
 ft_fto_stochastic_ncs4_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KPS7D8XNEC2R8GGSBZTYQPE4|training|best_inference_ckpt|normal|--not-preemptible
 
@@ -93,6 +93,6 @@ ft_mos8mas41_oEnsLossNanFill_LRp00001_slowEMA-1pctCO2_0256to0350-gqmfjs2j_cbj61w
 
 ft_mos8mas41_LRp00001_slowEMA-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRFPHF3PCR1K7E6HXBHJ6KP5|training|best_inference_ckpt|normal|--min-runtime 8h
 
-ft_mos8mas41_fdCRPSlevs2o-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRFQ7SJQW90BCTJNBA7T6G2N|run_140yr|best_inference_ckpt|high|--min-runtime 8h
+ft_mos8mas41_fdCRPSlevs2o-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRFQ7SJQW90BCTJNBA7T6G2N|trained|best_inference_ckpt|high|--min-runtime 8h
 
 ft_mos8mas41_fdCRPSlevs1o-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRFRST726WS286KADG9J94PG|training|best_inference_ckpt|normal|--min-runtime 8h
