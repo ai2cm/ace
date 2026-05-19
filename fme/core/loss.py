@@ -109,7 +109,13 @@ class LossOutput:
         return self._per_channel, self._counts
 
     def total(self) -> torch.Tensor:
-        """Scalar loss — the optimisation target."""
+        """Scalar loss used as the optimization target.
+
+        This is the mean of the per-channel losses across channels (over
+        active channels only when a mask is present), not a sum. Adding
+        or removing channels therefore does not change the scale of the
+        returned value.
+        """
         pc, _ = self._reduce()
         if self._mask is not None:
             active = self._mask.sum(dim=0) > 0
