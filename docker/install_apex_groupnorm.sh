@@ -31,7 +31,7 @@ sed -i '1a #include <tuple>' apex/contrib/csrc/group_norm_v2/gn_cuda_host_templa
 # Step 2: Build and install
 echo ""
 echo "[2/2] Building Apex with GroupNorm extension only..."
-CPLUS_INCLUDE_PATH=/opt/conda/targets/x86_64-linux/include:$CPLUS_INCLUDE_PATH \
+CPLUS_INCLUDE_PATH=/usr/local/cuda/include:$CPLUS_INCLUDE_PATH \
     APEX_GROUP_NORM=1 \
     pip install -v --no-build-isolation --no-cache-dir ./
 
