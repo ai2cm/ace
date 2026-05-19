@@ -15,13 +15,6 @@ SEED_OFFSET=10
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this
 
-declare -A PRE_TRAINED_WEIGHTS_DATASETS=( \
-    [0]="01KHCDS59F7RBJ1D42WD9HP3XC" \
-    [1]="01KHCEF1SBYCZCGDM78N1CJC3H" \
-    [2]="01KHCGKK162WFVSBPBCQ20QKEW" \
-    [3]="01KHD7Y5WMQR2JED1XKMQXVXZR" \
-)
-
 for seed in 0
 do
     job_name="ace-shield-profiling-384-multi-step-fine-tune-energy-conserving-full-rs${seed}"
@@ -32,7 +25,6 @@ do
     override="\
         max_epochs=2 \
         seed=${fine_tune_seed} \
-        stepper.parameter_init.weights_path=${PRE_TRAINED_WEIGHTS_PATH} \
         stepper.step.config.corrector.total_energy_budget_correction.method=constant_temperature \
         stepper.step.config.corrector.total_energy_budget_correction.constant_unaccounted_heating=1.13 \
         stepper.step.config.builder.config.embed_dim=384 \
