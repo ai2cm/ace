@@ -78,17 +78,7 @@ optimization:
     fused: true
     weight_decay: 0.01
 stepper_training:
-  n_forward_steps:
-    outcomes:
-      - steps: 1
-        probability: 0.25
-      - steps: 2
-        probability: 0.25
-      - steps: 3
-        probability: 0.25
-      - steps: 4
-        probability: 0.25
-  optimize_last_step_only: true
+  n_forward_steps: 4
   loss:
     type: MSE
   residual_loss:
@@ -164,16 +154,6 @@ stepper:
           - so_16
           - so_17
           - so_18
-          - sea_ice_volume
-          sea_ice_fraction_correction:
-            sea_ice_fraction_name: ocean_sea_ice_fraction
-            land_fraction_name: land_fraction
-            remove_negative_ocean_fraction: false
-            zero_where_ice_free_names:
-            - sea_ice_volume
-            - sfdsi
-            - UI
-            - VI
           surface_energy_flux_correction:
             method: prescribed
       next_step_forcing_names:
