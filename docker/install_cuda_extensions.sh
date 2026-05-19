@@ -10,12 +10,19 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 echo "=== Installing CUDA extensions ==="
 
-# Step 1: Install CUDA toolkit via apt
+# Step 1: Install CUDA toolkit (nvcc) via apt
 echo ""
 echo "[1/3] Installing CUDA toolkit (nvcc) via apt..."
-apt-get update && apt-get install -y --no-install-recommends \
-    cuda-nvcc-12-8 cuda-cudart-dev-12-8 cuda-crt-12-8
+# Add NVIDIA CUDA apt repository
+wget -qO /tmp/cuda-keyring.deb \
+    https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
+dpkg -i /tmp/cuda-keyring.deb
+rm /tmp/cuda-keyring.deb
+apt-get update
+apt-get install -y --no-install-recommends cuda-nvcc-12-8 cuda-cudart-dev-12-8 cuda-crt-12-8
 rm -rf /var/lib/apt/lists/*
+
+export CUDA_HOME=/usr/local/cuda
 
 # Step 2: Build CUDA extensions
 echo ""

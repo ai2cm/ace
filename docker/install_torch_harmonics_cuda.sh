@@ -13,7 +13,8 @@ echo "=== Reinstalling torch-harmonics with CUDA extensions ==="
 
 echo ""
 echo "Building torch-harmonics with CUDA extensions..."
-FORCE_CUDA_EXTENSION=1 \
+CUDA_HOME=/usr/local/cuda \
+    FORCE_CUDA_EXTENSION=1 \
     TORCH_CUDA_ARCH_LIST="7.5 8.0 8.9 9.0 10.0+PTX" \
     CPLUS_INCLUDE_PATH=/usr/local/cuda/include:$CPLUS_INCLUDE_PATH \
     pip install --no-build-isolation --no-cache-dir --no-deps --force-reinstall torch-harmonics==0.8.0

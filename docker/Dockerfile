@@ -3,6 +3,7 @@ FROM pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime AS base
 ENV FME_DIR=/full-model
 ENV DGLBACKEND=pytorch
 ENV TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=1
+ENV CUDA_HOME=/usr/local/cuda
 
 RUN apt-get update -y && apt-get install -y \
   build-essential \
