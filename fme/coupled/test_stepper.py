@@ -23,12 +23,12 @@ from fme.core.coordinates import (
 )
 from fme.core.dataset_info import DatasetInfo
 from fme.core.loss import StepLossConfig
-from fme.core.mask_provider import MaskProvider
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
 from fme.coupled.dataset_info import CoupledDatasetInfo
@@ -119,11 +119,11 @@ class CoupledDatasetInfoBuilder:
     hcoord: CoupledHorizontalCoordinates | None = None
     ocean_timestep: datetime.timedelta = OCEAN_TIMESTEP
     atmos_timestep: datetime.timedelta = ATMOS_TIMESTEP
-    ocean_mask_provider: MaskProvider = dataclasses.field(
-        default_factory=lambda: MaskProvider()
+    ocean_spatial_mask_provider: SpatialMaskProvider = dataclasses.field(
+        default_factory=lambda: SpatialMaskProvider()
     )
-    atmos_mask_provider: MaskProvider = dataclasses.field(
-        default_factory=lambda: MaskProvider()
+    atmos_spatial_mask_provider: SpatialMaskProvider = dataclasses.field(
+        default_factory=lambda: SpatialMaskProvider()
     )
 
     def __post_init__(self):
@@ -142,13 +142,13 @@ class CoupledDatasetInfoBuilder:
             ocean=DatasetInfo(
                 horizontal_coordinates=self.hcoord.ocean,
                 vertical_coordinate=self.vcoord.ocean,
-                mask_provider=self.ocean_mask_provider,
+                spatial_mask_provider=self.ocean_spatial_mask_provider,
                 timestep=self.ocean_timestep,
             ),
             atmosphere=DatasetInfo(
                 horizontal_coordinates=self.hcoord.atmosphere,
                 vertical_coordinate=self.vcoord.atmosphere,
-                mask_provider=self.atmos_mask_provider,
+                spatial_mask_provider=self.atmos_spatial_mask_provider,
                 timestep=self.atmos_timestep,
             ),
         )
@@ -1434,7 +1434,7 @@ def test__get_atmosphere_forcings(
     sst_mask[0, 0] = 0
     dataset_info = CoupledDatasetInfoBuilder(
         vcoord=vertical_coord,
-        ocean_mask_provider=MaskProvider({"mask_2d": sst_mask}),
+        ocean_spatial_mask_provider=SpatialMaskProvider({"mask_2d": sst_mask}),
     ).dataset_info
     coupler = config.get_stepper(dataset_info)
     shape_ocean = (1, 1, N_LAT, N_LON)
