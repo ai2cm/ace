@@ -14,7 +14,7 @@ Pipeline steps:
      fields needed for uncoupled ocean training.
   3. Apply xESMF conservative horizontal regridding to a Gaussian target grid
      (default F90 = 180×360 ≈ 1-degree, same as ERA5 pipeline).
-  4. Optionally coarsen the 75 vertical levels to a smaller set.
+  4. Optionally apply thickness-weighted vertical coarsening.
   5. Split 3-D fields into per-level 2-D variables (``thetao_0 … thetao_N``).
   6. Create land/ocean masks, insert NaNs on land, add SST in Kelvin.
   7. Merge sea-ice variables from FV3 (``icec``, ``icetk``).
@@ -109,14 +109,23 @@ class RegridConfig:
 
 @dataclasses.dataclass
 class VerticalCoarsenConfig:
-    """Select or coarsen from 75 MOM6 levels to a smaller set.
+    """Thickness-weighted vertical coarsening from 75 MOM6 levels.
+
+    Uses the same ``(start, end)`` index-range approach as the atmosphere
+    vertical coarsening in ``compute_dataset.py``, with MOM6 layer thickness
+    (``ho``) as the weight instead of pressure thickness.
 
     Attributes:
-        target_indices: Indices (0-based) of the 75 native levels to keep.
-            If empty, all levels are kept.
+        vertical_coarsening_indices: List of ``[start, end]`` pairs (half-open)
+            defining which contiguous native levels to average into each coarse
+            output level.  For example ``[[0, 5], [5, 10]]`` produces 2 coarse
+            levels from native levels 0-4 and 5-9.
+            If empty, all levels are kept without coarsening.
     """
 
-    target_indices: list[int] = dataclasses.field(default_factory=list)
+    vertical_coarsening_indices: list[list[int]] = dataclasses.field(
+        default_factory=list
+    )
 
 
 @dataclasses.dataclass
@@ -159,7 +168,7 @@ class UFSReplayDatasetConfig:
         ocean_zarr: Full ``gs://`` path to the MOM6 zarr store.
         atmo_zarr: Full ``gs://`` path to the FV3 zarr store.
         output_directory: Where to write the output zarr.
-        vertical_coarsen: Optional vertical level sub-selection.
+        vertical_coarsen: Thickness-weighted vertical coarsening config.
         time_coarsen_factor: Factor by which to coarsen in time (e.g. 4 to go
             from 6-hourly to daily). 1 means no coarsening.
         ocean_rename: Additional variable renaming for the ocean store.
@@ -232,7 +241,6 @@ _OCEAN_DROP = [
     "depth",
     "evap",
     "fprec",
-    "ho",
     "latent",
     "lprec",
     "lrunoff",
@@ -412,15 +420,118 @@ def _build_landsea_mask(ds_ocean: xr.Dataset, vdim: str) -> xr.Dataset:
     )
 
 
-def _select_vertical_levels(
+def _ocean_weighted_mean(
+    da: xr.DataArray, weights: xr.DataArray, dims: str
+) -> xr.DataArray:
+    """Thickness-weighted mean for ocean variables.
+
+    Unlike ``compute_dataset.weighted_mean`` (which uses ``skipna=False``
+    for the atmosphere), this version masks out NaN contributions so that
+    native levels below the seafloor within a coarse group do not poison
+    the average.  Where *all* levels are NaN the result is NaN.
+    """
+    weights = weights.drop_attrs()
+    valid = da.notnull()
+    masked_weights = weights.where(valid, 0.0)
+    numerator = (da.fillna(0.0) * masked_weights).sum(dims)
+    denominator = masked_weights.sum(dims)
+    return numerator / denominator.where(denominator > 0)
+
+
+def _compute_ocean_vertical_coarsening(
     ds: xr.Dataset,
+    vars_3d: Sequence[str],
+    interface_indices: Sequence[Sequence[int]],
     vdim: str,
-    indices: Sequence[int],
+    thickness_name: str = "ho",
 ) -> xr.Dataset:
-    """Sub-select vertical levels by index."""
-    if len(indices) == 0:
-        return ds
-    return ds.isel({vdim: list(indices)})
+    """Thickness-weighted vertical coarsening of 3-D ocean variables.
+
+    Follows the same pattern as ``compute_vertical_coarsening`` in
+    ``compute_dataset.py`` but uses MOM6 layer thickness (``ho``) as the
+    weight instead of pressure thickness.
+
+    For each coarse level *i* defined by ``interface_indices[i] = (start,
+    end)``, the output is::
+
+        coarsened_var_i = sum(var * ho, dim) / sum(ho, dim)
+
+    over native levels ``[start, end)``.
+
+    Args:
+        ds: Dataset containing 3-D ocean variables and ``ho``.
+        vars_3d: Names of 3-D variables to coarsen.
+        interface_indices: List of ``[start, end)`` pairs defining contiguous
+            groups of native levels for each coarse output level.
+        vdim: Name of the vertical dimension.
+        thickness_name: Name of the layer thickness variable in *ds*.
+
+    Returns:
+        Dataset with coarsened 3-D variables as per-level 2-D fields
+        (``{name}_{i}``), per-level masks (``mask_{i}``), per-level depth
+        scalars (``idepth_{i}``), and all 2-D variables passed through.
+    """
+    n_coarse = len(interface_indices)
+    n_native = ds.sizes[vdim]
+    depths = ds[vdim].values
+    print(f"  Thickness-weighted coarsening: {n_native} → {n_coarse} levels")
+
+    coarsened_arrays: dict[str, xr.DataArray] = {}
+
+    for i, (start, end) in enumerate(interface_indices):
+        ho_slice = ds[thickness_name].isel({vdim: slice(start, end)})
+
+        for name in vars_3d:
+            if name not in ds:
+                continue
+            array_slice = ds[name].isel({vdim: slice(start, end)})
+            coarsened_da = _ocean_weighted_mean(array_slice, ho_slice, vdim)
+            long_name = ds[name].attrs.get("long_name", name)
+            coarsened_da.attrs["long_name"] = f"{long_name} level-{i}"
+            coarsened_arrays[f"{name}_{i}"] = coarsened_da
+
+        # Per-level mask: ocean where total thickness > 0
+        ho_total = ho_slice.sum(vdim, skipna=False)
+        mask_i = (ho_total.isel(time=0) > 0).astype(np.float32)
+        mask_i.attrs = {"long_name": f"ocean mask level-{i}"}
+        coarsened_arrays[f"mask_{i}"] = mask_i
+
+        # Per-level depth: thickness-weighted mean of the native depths
+        level_depths = depths[start:end]
+        coarsened_arrays[f"idepth_{i}"] = xr.DataArray(
+            float(np.mean(level_depths)),
+            attrs={
+                "units": "meters",
+                "long_name": f"Depth at level-{i}",
+            },
+        )
+
+    # Collect 2-D variables
+    for name in ds.data_vars:
+        if name in vars_3d or name == thickness_name:
+            continue
+        if vdim not in ds[name].dims:
+            coarsened_arrays[name] = ds[name]
+
+    # Surface mask and related fields
+    mask_2d = coarsened_arrays["mask_0"].copy()
+    mask_2d.attrs = {"long_name": "ocean mask", "units": "0 if land, 1 if ocean"}
+    coarsened_arrays["mask_2d"] = mask_2d
+    land_frac = (1.0 - mask_2d).astype(np.float32)
+    land_frac.attrs = {"long_name": "land fraction", "units": "fraction"}
+    coarsened_arrays["land_fraction"] = land_frac
+    ssf = mask_2d.copy()
+    ssf.attrs = {"long_name": "sea surface fraction", "units": "fraction"}
+    coarsened_arrays["sea_surface_fraction"] = ssf
+
+    # Drop stray coordinates (e.g. 'cftime') that can cause MergeError
+    keep_coords = {"time", "lat", "lon"}
+    cleaned: dict[str, xr.DataArray] = {}
+    for name, da in coarsened_arrays.items():
+        stray = [c for c in da.coords if c not in keep_coords and c not in da.dims]
+        cleaned[name] = da.drop_vars(stray) if stray else da
+
+    return xr.Dataset(cleaned)
 
 
 def _split_3d_to_levels(
@@ -463,27 +574,60 @@ def _split_3d_to_levels(
     return result
 
 
-def _subsample_atmo_to_ocean_times(
+def _average_atmo_to_ocean_cadence(
     ds_atmo: xr.Dataset,
     ocean_times: xr.DataArray,
 ) -> xr.Dataset:
-    """Select atmosphere timesteps that align with ocean timesteps.
+    """Average 3-hourly atmosphere data to the 6-hourly ocean cadence.
 
-    FV3 is 3-hourly; MOM6 is 6-hourly. We select only exact matches to
-    avoid duplicate-index issues from ``method='nearest'``.
+    FV3 is 3-hourly; MOM6 is 6-hourly.  Instead of sub-sampling (which
+    discards half the atmosphere snapshots), we average pairs of atmosphere
+    timesteps that fall within each 6-hour ocean window.
+
+    The ocean timestamps mark the *end* of each 6-hour window, so we use
+    ``resample(time="6h", closed="right", label="right")`` to group the
+    atmosphere data accordingly.  After resampling, we keep only the times
+    that appear in the ocean dataset.
     """
-    common_times = np.intersect1d(ds_atmo.time.values, ocean_times.values)
+    import pandas as pd
+
+    atmo_start = ds_atmo.time.values[0]
+    atmo_end = ds_atmo.time.values[-1]
+    ocean_start = ocean_times.values[0]
+    ocean_end = ocean_times.values[-1]
+
+    # Restrict atmosphere to the temporal range covered by ocean data
+    # with a small buffer for the averaging window
+    ds_atmo = ds_atmo.sel(
+        time=slice(
+            pd.Timestamp(ocean_start) - pd.Timedelta("6h"),
+            pd.Timestamp(ocean_end) + pd.Timedelta("3h"),
+        )
+    )
+
+    n_atmo_before = len(ds_atmo.time)
+
+    # Resample to 6-hourly by averaging within each window.
+    # Using closed="right", label="right" so each window's timestamp aligns
+    # with the ocean output time (end of the averaging window).
+    ds_atmo_6h = ds_atmo.resample(time="6h", closed="right", label="right").mean()
+
+    # Keep only times present in the ocean data
+    common_times = np.intersect1d(ds_atmo_6h.time.values, ocean_times.values)
     if len(common_times) == 0:
         raise ValueError(
-            "No overlapping timesteps between atmosphere and ocean data. "
-            f"Atmo range: {ds_atmo.time.values[0]} – {ds_atmo.time.values[-1]}, "
-            f"Ocean range: {ocean_times.values[0]} – {ocean_times.values[-1]}"
+            "No overlapping timesteps between averaged atmosphere and ocean data. "
+            f"Atmo range: {atmo_start} – {atmo_end}, "
+            f"Ocean range: {ocean_start} – {ocean_end}"
         )
+
+    ds_atmo_6h = ds_atmo_6h.sel(time=common_times)
     print(
-        f"  {len(common_times)} / {len(ocean_times)} ocean times "
-        f"have exact matches in atmo data"
+        f"  Averaged {n_atmo_before} atmo timesteps → "
+        f"{len(ds_atmo_6h.time)} 6-hourly means "
+        f"({len(common_times)} / {len(ocean_times)} ocean times matched)"
     )
-    return ds_atmo.sel(time=common_times)
+    return ds_atmo_6h
 
 
 def compute_lazy_dataset(
@@ -508,6 +652,13 @@ def compute_lazy_dataset(
         ds_ocean = ds_ocean.isel(time=slice(None, n_subsample))
         print(f"  Subsampled ocean to {ds_ocean.sizes['time']} timesteps")
 
+    # Log ocean field metadata (cell_methods) to document whether fields
+    # are instantaneous snapshots or time-averaged.
+    for _check_var in ("temp", "SSH", "ho"):
+        if _check_var in ds_ocean:
+            _cm = ds_ocean[_check_var].attrs.get("cell_methods", "not specified")
+            print(f"  {_check_var} cell_methods: {_cm}")
+
     # The MOM6 zarr has two vertical coordinate variables that represent the
     # same axis: ``zl`` (nominal layer index) and ``z_l`` (actual depth in m).
     # We work with ``z_l`` as the primary vertical coordinate. Ensure we know
@@ -527,8 +678,14 @@ def compute_lazy_dataset(
     )
     # Drop the landsea_mask itself (we extracted what we need)
     ds_ocean = ds_ocean.drop_vars("landsea_mask", errors="ignore")
-    # Drop the duplicate vertical dim (zl) if both exist
+    # Drop the duplicate vertical dim (zl) if both exist.
+    # ho may live on zl; reassign it to z_l before dropping zl.
     if "zl" in ds_ocean.dims and vdim != "zl":
+        if "ho" in ds_ocean and "zl" in ds_ocean["ho"].dims:
+            ho_on_vdim = ds_ocean["ho"].rename({"zl": vdim})
+            ho_on_vdim = ho_on_vdim.assign_coords({vdim: ds_ocean[vdim].values})
+            ds_ocean = ds_ocean.drop_vars("ho")
+            ds_ocean["ho"] = ho_on_vdim
         ds_ocean = ds_ocean.drop_dims("zl", errors="ignore")
 
     # Rename ocean variables
@@ -540,11 +697,26 @@ def compute_lazy_dataset(
     ds_ocean = ds_ocean.rename(stress_map)
 
     # ── 2. Horizontal regridding ──────────────────────────────────────────
+    # Separate ho before regridding to reduce peak data volume; it is
+    # regridded independently and re-attached for the coarsening step.
+    ho_ds = None
+    if "ho" in ds_ocean and config.vertical_coarsen.vertical_coarsening_indices:
+        ho_ds = ds_ocean[["ho"]]
+        ds_ocean = ds_ocean.drop_vars("ho")
+
     if config.regrid.output_grid:
         print(f"  Regridding ocean to Gaussian grid {config.regrid.output_grid}...")
         source_grid = _make_source_grid(ds_ocean)
         ds_ocean = _regrid_dataset(ds_ocean, config.regrid, source_grid)
         print(f"  Regridded ocean to {dict(ds_ocean.sizes)}")
+
+        if ho_ds is not None:
+            print("  Regridding layer thickness (ho)...")
+            ho_ds = _regrid_dataset(ho_ds, config.regrid, source_grid)
+            ho_ds = ho_ds.assign_coords(
+                lat=ds_ocean.lat.values, lon=ds_ocean.lon.values
+            )
+            print(f"  Regridded ho to {dict(ho_ds.sizes)}")
 
         # Rebuild masks from the regridded data's NaN pattern. Conservative
         # regridding propagates NaN for cells fully below the seafloor,
@@ -585,36 +757,52 @@ def compute_lazy_dataset(
             }
         )
 
-    # ── 3. Vertical sub-selection ──────────────────────────────────────────
-    target_indices = config.vertical_coarsen.target_indices
-    mask_3d_for_split = masks["mask_3d"]
-    if target_indices:
-        print(f"  Selecting {len(target_indices)} of {ds_ocean.sizes[vdim]} levels")
-        ds_ocean = _select_vertical_levels(ds_ocean, vdim, target_indices)
-        mask_3d_for_split = mask_3d_for_split.isel({vdim: list(target_indices)})
-    n_levels = ds_ocean.sizes.get(vdim, 0)
-    print(f"  Working with {n_levels} vertical levels")
-
-    # ── 4. Split 3-D → per-level 2-D ─────────────────────────────────────
-    print("Splitting 3-D fields to per-level 2-D...")
+    # ── 3. Thickness-weighted vertical coarsening + split ──────────────────
+    coarsen_indices = config.vertical_coarsen.vertical_coarsening_indices
     vars_3d_present = [v for v in VARS_3D if v in ds_ocean]
-    ds_levels = _split_3d_to_levels(ds_ocean, vars_3d_present, vdim, mask_3d_for_split)
 
-    # Collect 2-D ocean variables
+    if coarsen_indices:
+        if ho_ds is None or "ho" not in ho_ds:
+            raise ValueError(
+                "Layer thickness variable 'ho' is required for thickness-"
+                "weighted vertical coarsening but was not found in the ocean "
+                "dataset.  Make sure 'ho' is not listed in _OCEAN_DROP."
+            )
+        # Merge ho back into the ocean dataset for coarsening
+        ds_ocean["ho"] = ho_ds["ho"]
+        indices_as_tuples = [tuple(pair) for pair in coarsen_indices]
+        ds_levels = _compute_ocean_vertical_coarsening(
+            ds_ocean,
+            vars_3d_present,
+            indices_as_tuples,
+            vdim,
+        )
+        # masks are produced inside _compute_ocean_vertical_coarsening
+        masks = ds_levels[["mask_2d", "land_fraction", "sea_surface_fraction"]]
+    else:
+        # No coarsening — split 3-D fields into per-level 2-D as before
+        mask_3d_for_split = masks["mask_3d"]
+        ds_ocean = ds_ocean.drop_vars("ho", errors="ignore")
+        n_levels = ds_ocean.sizes.get(vdim, 0)
+        print(f"  Working with {n_levels} vertical levels (no coarsening)")
+        print("Splitting 3-D fields to per-level 2-D...")
+        ds_levels = _split_3d_to_levels(
+            ds_ocean, vars_3d_present, vdim, mask_3d_for_split
+        )
+
+    # Collect 2-D ocean variables (not 3-D, not ho)
     ocean_2d_names = [
         n
         for n in ds_ocean.data_vars
-        if vdim not in ds_ocean[n].dims and n not in vars_3d_present
+        if vdim not in ds_ocean[n].dims and n not in vars_3d_present and n != "ho"
     ]
     ds_ocean_2d = ds_ocean[ocean_2d_names]
 
-    # ── 5. SST in Kelvin ─────────────────────────────────────────────────
-    # ``thetao`` after rename is potential temperature in degC
+    # ── 4. SST in Kelvin ──────────────────────────────────────────────────
     if "thetao_0" in ds_levels:
         sst_K = ds_levels["thetao_0"].copy() + 273.15
         sst_K.attrs = {"long_name": "Sea surface temperature", "units": "K"}
         ds_levels["sst"] = sst_K
-    # Also rename ``zos`` from ocean_2d if present
     if "zos" in ds_ocean_2d:
         ds_ocean_2d["zos"].attrs.setdefault("long_name", "Sea Surface Height")
 
@@ -640,9 +828,9 @@ def compute_lazy_dataset(
     )
     ds_atmo = ds_atmo[[v for v in needed_atmo_vars if v in ds_atmo]]
 
-    # Sub-sample atmo to ocean times *before* regridding to avoid processing
-    # all 87k atmo timesteps when only a fraction overlap with the ocean data.
-    ds_atmo = _subsample_atmo_to_ocean_times(ds_atmo, ds_ocean.time)
+    # Average 3-hourly atmosphere to 6-hourly ocean cadence *before*
+    # regridding to keep memory bounded.
+    ds_atmo = _average_atmo_to_ocean_cadence(ds_atmo, ds_ocean.time)
 
     # Regrid atmosphere to match ocean target grid
     if config.regrid.output_grid:
@@ -683,27 +871,24 @@ def compute_lazy_dataset(
         {k: config.ice_vars[k] for k in ice_source_names}
     )
 
-    # Extract land fraction from FV3 if available
+    # Extract land fraction from FV3 if available (only when coarsening
+    # did not already produce ocean-derived land_fraction)
     ds_land = xr.Dataset()
-    if "lfrac" in ds_atmo:
+    if not coarsen_indices and "lfrac" in ds_atmo:
         ds_land["land_fraction"] = ds_atmo["lfrac"].isel(time=0, drop=True)
         ds_land["land_fraction"].attrs = {
             "long_name": "land fraction",
             "units": "fraction",
         }
 
-    # ── 7. Merge everything ───────────────────────────────────────────────
+    # ── 6. Merge everything ─────────────────────────────────────────────
     print("Merging datasets...")
-    # Drop stray coordinates (e.g. 'cftime' from zarr encoding) that cause
-    # MergeError when combining datasets from different sources.
     keep_coords = {"time", "lat", "lon"}
-    to_merge = [
-        ds_ocean_2d,
-        ds_levels,
-        ds_forcing,
-        ds_ice,
-        masks[["mask_2d", "sea_surface_fraction"]],
-    ]
+    to_merge = [ds_ocean_2d, ds_levels, ds_forcing, ds_ice]
+    # When vertical coarsening is used, masks are already in ds_levels;
+    # otherwise add them from the masks dataset.
+    if not coarsen_indices:
+        to_merge.append(masks[["mask_2d", "sea_surface_fraction"]])
     if len(ds_land) > 0:
         to_merge.append(ds_land)
     cleaned = []
@@ -712,7 +897,7 @@ def compute_lazy_dataset(
         cleaned.append(d.drop_vars(stray) if stray else d)
     ds = xr.merge(cleaned, join="inner")
 
-    # If land_fraction wasn't in atmo, derive from mask
+    # If land_fraction wasn't in coarsening output or atmo, derive from mask
     if "land_fraction" not in ds:
         ds["land_fraction"] = masks["land_fraction"]
 
@@ -744,60 +929,55 @@ def compute_lazy_dataset(
         if "ocean_sea_ice_fraction" in ds:
             ds["HI"] = ds["HI"].where(ds["ocean_sea_ice_fraction"] > 0, 0.0)
 
-    # ── 8b. Nearest-neighbour fill for residual NaN in ocean cells ────────
+    # ── 8b. Nearest-neighbour fill for residual NaN in 2-D ocean vars ─────
     # After conservative regridding, a small number of coastal ocean cells
-    # (~1% at the surface) can be NaN in variables whose native-resolution
+    # (~1% at the surface) can be NaN in 2-D variables whose native-resolution
     # land mask differs slightly from ``thetao`` (e.g. ``taux``/``tauy``).
     # Fill those with the nearest valid neighbour so the training data has
     # no unexpected NaN inside the ocean mask.
+    #
+    # Per-level 3-D variables (e.g. thetao_0, so_3) are NOT filled here;
+    # any NaN mismatch is handled by the per-level mask.
+    #
+    # The NaN pattern is time-invariant, so the NN index map is computed
+    # once from the first timestep and applied to all timesteps.
     from scipy.ndimage import distance_transform_edt
+
+    # Names that are per-level 3-D splits — skip NN fill for these
+    _level_var_prefixes = tuple(f"{v}_" for v in VARS_3D)
 
     for name in ds.data_vars:
         if name.startswith("mask_") or name.startswith("idepth_"):
             continue
         if name in ("land_fraction", "sea_surface_fraction"):
             continue
+        if any(name.startswith(p) for p in _level_var_prefixes):
+            continue
         v = ds[name]
         if "time" not in v.dims:
             continue
-        level_match = name.rsplit("_", 1)
-        if len(level_match) == 2 and level_match[1].isdigit():
-            level_idx = int(level_match[1])
-            mask_key = f"mask_{level_idx}"
-            mask_arr = ds[mask_key].values if mask_key in ds else mask_2d.values
-        else:
-            mask_arr = mask_2d.values
-        ocean = mask_arr > 0
+
+        ocean = mask_2d.values > 0
         sample = v.isel(time=0).values
-        if not np.any(np.isnan(sample) & ocean):
+        need_fill = np.isnan(sample) & ocean
+        if not need_fill.any():
             continue
-        print(f"  Nearest-neighbour filling NaN in ocean cells for '{name}'")
 
-        def _nn_fill_2d(arr, ocean_mask):
-            """Fill NaN inside *ocean_mask* with nearest valid value."""
-            need_fill = np.isnan(arr) & ocean_mask
-            if not need_fill.any():
-                return arr
-            valid = ~np.isnan(arr)
-            if not valid.any():
-                return arr
-            _, indices = distance_transform_edt(
-                ~valid, return_distances=True, return_indices=True
-            )
-            filled = arr.copy()
-            filled[need_fill] = arr[tuple(indices[:, need_fill])]
-            return filled
+        n_fill = int(need_fill.sum())
+        print(f"  NN-filling {n_fill} ocean cells for '{name}'")
 
-        filled_slices = []
-        for t in range(ds.sizes["time"]):
-            arr = v.isel(time=t).values
-            filled_slices.append(_nn_fill_2d(arr, ocean))
-        ds[name] = xr.DataArray(
-            np.stack(filled_slices),
-            dims=v.dims,
-            coords=v.coords,
-            attrs=v.attrs,
+        # Compute NN index map once from the first timestep
+        valid = ~np.isnan(sample)
+        _, nn_indices = distance_transform_edt(
+            ~valid, return_distances=True, return_indices=True
         )
+        src_rows = nn_indices[0][need_fill]
+        src_cols = nn_indices[1][need_fill]
+
+        # Apply to all timesteps at once via numpy indexing
+        data = v.values.copy()  # (time, lat, lon)
+        data[:, need_fill] = data[:, src_rows, src_cols]
+        ds[name] = xr.DataArray(data, dims=v.dims, coords=v.coords, attrs=v.attrs)
 
     # ── 9. Clean up dims / coords ─────────────────────────────────────────
     # Drop any remaining non-spatial dims that slipped through

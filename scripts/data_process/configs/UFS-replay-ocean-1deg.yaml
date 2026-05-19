@@ -28,33 +28,32 @@ regrid:
   output_grid: F90
   method: conservative
 
-# Vertical level sub-selection: pick 19 of 75 native MOM6 levels.
-# Indices chosen to best-match the 19 CM4 target depths (for fine-tuning
-# a CM4-trained SamudrACE checkpoint). Max depth error ~77 m, mean ~13 m.
-# Depths (m): 0.5, 5.2, 14.1, 31.0, 47.4, 77.8, 133.4, 200.3, 301.7,
-#             458.9, 629.7, 858.5, 1153.9, 1654.3, 2102.4, 2777.0,
-#             3514.0, 4488.5, 5494.7
+# Thickness-weighted vertical coarsening: 75 native MOM6 levels → 19 coarse
+# levels matching CM4 target depths.  Each [start, end) pair defines a
+# contiguous group of native levels combined via ho-weighted mean, following
+# the same pattern as compute_dataset.compute_vertical_coarsening.
+# Groups are centred on the previous best-match indices for CM4 depths.
 vertical_coarsen:
-  target_indices:
-  - 0
-  - 4
-  - 9
-  - 14
-  - 17
-  - 21
-  - 26
-  - 30
-  - 34
-  - 38
-  - 41
-  - 44
-  - 47
-  - 51
-  - 54
-  - 58
-  - 62
-  - 67
-  - 72
+  vertical_coarsening_indices:
+  - [0, 2]
+  - [2, 7]
+  - [7, 12]
+  - [12, 16]
+  - [16, 19]
+  - [19, 24]
+  - [24, 28]
+  - [28, 32]
+  - [32, 36]
+  - [36, 40]
+  - [40, 43]
+  - [43, 46]
+  - [46, 49]
+  - [49, 53]
+  - [53, 56]
+  - [56, 60]
+  - [60, 65]
+  - [65, 70]
+  - [70, 75]
 
 # Temporal coarsening: get daily data
 time_coarsen_factor: 4
