@@ -3,6 +3,7 @@ import dataclasses
 import pytest
 
 from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregatorConfig
+from fme.ace.aggregator.inference.time_mean import TimeMeanMetricConfig
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.inference import (
     InferenceDataLoaderConfig,
@@ -25,7 +26,10 @@ from fme.core.typing_ import Slice
 
 
 def _make_inference_config(
-    name: str | None = None, weight: float = 1.0, epochs: Slice | None = None
+    name: str | None = None,
+    weight: float = 1.0,
+    epochs: Slice | None = None,
+    aggregator: InferenceEvaluatorAggregatorConfig | None = None,
 ) -> InlineInferenceConfig:
     return InlineInferenceConfig(
         loader=InferenceDataLoaderConfig(
@@ -36,7 +40,7 @@ def _make_inference_config(
         ),
         n_forward_steps=1,
         forward_steps_in_memory=1,
-        aggregator=InferenceEvaluatorAggregatorConfig(),
+        aggregator=aggregator or InferenceEvaluatorAggregatorConfig(),
         epochs=epochs if epochs is not None else Slice(),
         name=name,
         weight=weight,
@@ -154,6 +158,22 @@ def test_zero_weight_accepted():
 def test_default_weight_is_one():
     config = _make_inference_config()
     assert config.weight == 1.0
+
+
+def test_disabled_time_mean_norm_with_positive_weight_raises():
+    agg = InferenceEvaluatorAggregatorConfig(
+        time_mean_norm=TimeMeanMetricConfig(target="norm", enabled=False),
+    )
+    with pytest.raises(ValueError, match="time_mean_norm must be enabled"):
+        _make_inference_config(weight=1.0, aggregator=agg)
+
+
+def test_disabled_time_mean_norm_with_zero_weight_accepted():
+    agg = InferenceEvaluatorAggregatorConfig(
+        time_mean_norm=TimeMeanMetricConfig(target="norm", enabled=False),
+    )
+    config = _make_inference_config(weight=0.0, aggregator=agg)
+    assert config.weight == 0.0
 
 
 def test_get_inference_epoch_sets_empty(tmp_path):

@@ -441,6 +441,45 @@ def test_train_on_batch_optimize_last_step_only(optimize_last_step_only: bool):
         assert all(forward_calls_grad_enabled)
 
 
+def test_per_channel_losses_bounded_by_accumulated_loss():
+    """Per-channel loss total must not exceed optimization accumulated loss."""
+    torch.manual_seed(0)
+
+    n_steps = 4
+    data_with_ic: BatchData = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
+
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": torch.nn.Identity()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means=get_scalar_data(["a", "b"], 0.0),
+                            stds=get_scalar_data(["a", "b"], 1.0),
+                        ),
+                    ),
+                )
+            ),
+        ),
+    )
+    stepper = _get_train_stepper(
+        config,
+        optimize_last_step_only=True,
+    )
+    optimization = NullOptimization()
+    stepped = stepper.train_on_batch(data=data_with_ic, optimization=optimization)
+    accumulated_loss = stepped.metrics["loss"]
+    assert stepped.per_channel_losses is not None
+    per_channel_total = sum(stepped.per_channel_losses.values())
+    assert per_channel_total <= accumulated_loss + 1e-6
+
+
 def test_train_on_batch_with_prescribed_ocean():
     torch.manual_seed(0)
 

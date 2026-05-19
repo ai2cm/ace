@@ -77,6 +77,16 @@ class InlineInferenceConfig:
             raise ValueError(
                 f"InlineInferenceConfig weight must be non-negative, got {self.weight}"
             )
+        if (
+            self.weight > 0
+            and isinstance(self.aggregator, InferenceEvaluatorAggregatorConfig)
+            and not self.aggregator.time_mean_norm.enabled
+        ):
+            raise ValueError(
+                "time_mean_norm must be enabled when weight > 0, because "
+                "checkpoint selection requires the time_mean_norm/rmse/channel_mean "
+                "metric."
+            )
         dist = Distributed.get_instance()
         if self.loader.start_indices.n_initial_conditions % dist.world_size != 0:
             raise ValueError(
