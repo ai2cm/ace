@@ -515,10 +515,20 @@ def step_with_adjustments(
     if residual_prediction:
         output_norm = add_names(input_norm, output_norm, prognostic_names)
     output = normalizer.denormalize(output_norm)
+    # Build a NaN-free view of input for the corrector and ocean model.
+    # When variable masking augmentation fills IC channels with NaN, those NaNs
+    # survive normalization's fill (which only applies to input_norm) and would
+    # propagate through area-weighted means in physics corrections, producing NaN
+    # outputs and zero gradients.  Replacing with the normalizer's denormalized
+    # estimate (climatological mean for masked variables) keeps corrections valid.
+    corrector_input: TensorMapping = {
+        **dict(input),
+        **normalizer.denormalize(input_norm),
+    }
     if corrector is not None:
-        output = corrector(input, output, next_step_input_data)
+        output = corrector(corrector_input, output, next_step_input_data)
     if ocean is not None:
-        output = ocean(input, output, next_step_input_data)
+        output = ocean(corrector_input, output, next_step_input_data)
     for name in prescribed_prognostic_names:
         if name in next_step_input_data:
             output = {**output, name: next_step_input_data[name]}

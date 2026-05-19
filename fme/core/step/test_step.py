@@ -1239,3 +1239,111 @@ def test_step_with_include_channel_mask_inputs_no_data_mask():
     for name in ["diagnostic_main", "diagnostic_rad"]:
         assert output_no_mask[name].shape == (n_samples, *img_shape)
         torch.testing.assert_close(output_no_mask[name], output_all_unmasked[name])
+
+
+def test_step_nan_input_does_not_produce_nan_output_with_corrector():
+    """NaN-masked IC variables must not propagate through the atmosphere corrector.
+
+    When variable-masking augmentation fills IC channels with NaN, the corrector
+    (dry-air conservation, moisture budget) reads `input_data` to compute a
+    correction.  Without the fix, NaN surface-pressure or water values make
+    `area_weighted_mean` return NaN, corrupting all outputs for the affected
+    samples and zeroing out gradients.
+
+    The fix requires fill_nans_on_normalize=True in the network normalizer so
+    that input_norm carries zeros for masked channels; denormalizing those zeros
+    gives climatological means that the corrector can use without NaN.
+    """
+    # Re-create the corrector config with fill_nans_on_normalize=True so that
+    # the normalizer converts NaN → 0 before the corrector sees the input.
+    in_names = [
+        "DSWRFtoa",
+        "HGTsfc",
+        "air_temperature_0",
+        "air_temperature_1",
+        "air_temperature_2",
+        "air_temperature_3",
+        "air_temperature_4",
+        "air_temperature_5",
+        "specific_total_water_0",
+        "specific_total_water_1",
+        "specific_total_water_2",
+        "specific_total_water_3",
+        "specific_total_water_4",
+        "specific_total_water_5",
+        "PRESsfc",
+        "PRATEsfc",
+    ]
+    out_names = [
+        "air_temperature_0",
+        "air_temperature_1",
+        "air_temperature_2",
+        "air_temperature_3",
+        "air_temperature_4",
+        "air_temperature_5",
+        "specific_total_water_0",
+        "specific_total_water_1",
+        "specific_total_water_2",
+        "specific_total_water_3",
+        "specific_total_water_4",
+        "specific_total_water_5",
+        "PRESsfc",
+        "PRATEsfc",
+        "LHTFLsfc",
+        "SHTFLsfc",
+        "ULWRFsfc",
+        "ULWRFtoa",
+        "DLWRFsfc",
+        "DSWRFsfc",
+        "USWRFtoa",
+        "USWRFsfc",
+        "tendency_of_total_water_path_due_to_advection",
+    ]
+    all_names = list(set(in_names).union(out_names))
+    normalization = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means={name: 1.0 for name in all_names},
+            stds={name: 1.0 for name in all_names},
+            fill_nans_on_normalize=True,
+        ),
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+                ),
+                in_names=in_names,
+                out_names=out_names,
+                normalization=normalization,
+                corrector=AtmosphereCorrectorConfig(
+                    conserve_dry_air=True,
+                    moisture_budget_correction="advection_and_precipitation",
+                    force_positive_names=["PRATEsfc"],
+                ),
+            )
+        ),
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    n_samples = 4
+    step = get_step(config, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples
+    )
+    # Simulate augmentation masking: set PRESsfc to NaN for half the samples.
+    input_data["PRESsfc"] = input_data["PRESsfc"].clone()
+    input_data["PRESsfc"][:2] = float("nan")
+
+    output = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+        ),
+    )
+    for name in step.output_names:
+        assert (
+            not output[name].isnan().any()
+        ), f"NaN found in output '{name}' — masked IC inputs leaked through corrector"
