@@ -30,7 +30,6 @@ run_training() {
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/climate-titan \
     --priority urgent \
-    --preemptible \
     --cluster ai2/titan \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
@@ -50,7 +49,6 @@ run_training() {
     -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train "$CONFIG_PATH"
 }
 
-# run_training "train-1-step.yaml" "era5-1-step-rs0"
 run_training "train-4deg-daily.yaml" "train-4deg-daily-rs0"
 run_training "train-4deg-daily-era5-only.yaml" "train-4deg-daily-era5-only-rs0"
 run_training "train-4deg-daily-conditional.yaml" "train-4deg-daily-conditional-rs0"
