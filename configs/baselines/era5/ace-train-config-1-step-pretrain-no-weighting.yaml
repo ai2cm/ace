@@ -81,24 +81,6 @@ stepper_training:
   n_forward_steps: 1
   loss:
     type: EnsembleLoss
-    weights:
-      air_temperature_0: 0.5
-      air_temperature_1: 0.5
-      eastward_wind_0: 0.5
-      northward_wind_0: 0.5
-      specific_total_water_0: 0.5
-      specific_total_water_1: 0.25
-      specific_total_water_2: 0.5
-      PRATEsfc: 0.5
-      h500: 10
-      TMP850: 5
-      Q2m: 0.5
-      DLWRFsfc: 2
-      ULWRFsfc: 5
-      USWRFsfc: 2
-      DSWRFsfc: 2
-      USWRFtoa: 2
-      tendency_of_total_water_path_due_to_advection: 0.5
     kwargs:
       crps_weight: 0.9
       energy_score_weight: 0.1

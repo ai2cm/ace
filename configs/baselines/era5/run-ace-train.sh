@@ -53,10 +53,12 @@ run_training() {
 
 base_name="ace2s"
 
-# run_training "ace-train-config-1-step-pretrain.yaml" "$base_name-era5-1-step-pre-training-no-channel-weightings-rs0"
+run_training "ace-train-config-1-step-pretrain.yaml" "$base_name-era5-1-step-pre-training-ace2-weighting-rs0"
+run_training "ace-train-config-1-step-pretrain-no-weighting.yaml" "$base_name-era5-1-step-pre-training-no-channel-weightings-rs0"
+run_training "ace-train-config-1-step-pretrain-ace2-weighting-inverse.yaml" "$base_name-era5-1-step-pre-training-inverse-ace2-weighting-rs0"
 
 # For the finetuning stage take beaker dataset id from the above job and add it to
 # ace-train-config-multi-step-finetuning.yaml then uncomment next line
 
-run_training "ace-train-config-multi-step-finetuning.yaml" "$base_name-era5-multi-step-fine-tuning-no-var-weighting-rs0"
+# run_training "ace-train-config-multi-step-finetuning.yaml" "$base_name-era5-multi-step-fine-tuning-no-var-weighting-rs0"
 # run_training "ace-train-config-multi-step-finetuning-weighted.yaml" "$base_name-era5-multi-step-fine-tuning-ace2-channel-weightings-rs0"

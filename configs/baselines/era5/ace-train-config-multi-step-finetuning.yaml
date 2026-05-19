@@ -95,5 +95,8 @@ stepper_training:
   optimize_last_step_only: true
   loss:
     type: EnsembleLoss
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
 stepper:
   checkpoint_path: /weights/training_checkpoints/best_ckpt.tar

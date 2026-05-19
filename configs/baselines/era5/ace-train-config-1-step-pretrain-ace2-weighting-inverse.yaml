@@ -82,17 +82,18 @@ stepper_training:
   loss:
     type: EnsembleLoss
     weights:
-      air_temperature_0: 0.5
-      air_temperature_1: 0.5
-      eastward_wind_0: 0.5
-      northward_wind_0: 0.5
-      specific_total_water_0: 0.5
-      specific_total_water_1: 0.25
-      specific_total_water_2: 0.5
-      PRATEsfc: 0.5
+      air_temperature_0: 2.0
+      air_temperature_1: 2.0
+      eastward_wind_0: 2.0
+      northward_wind_0: 2.0
+      specific_total_water_0: 2.0
+      specific_total_water_1: 4.0
+      specific_total_water_2: 4.0
+      specific_total_water_2: 2.0
+      PRATEsfc: 2.0
       h500: 10
       TMP850: 5
-      Q2m: 0.5
+      Q2m: 1.0
       DLWRFsfc: 2
       ULWRFsfc: 5
       USWRFsfc: 2
