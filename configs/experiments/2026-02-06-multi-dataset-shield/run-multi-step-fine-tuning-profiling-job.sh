@@ -46,7 +46,6 @@ do
         --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
         --dataset-secret google-credentials:/tmp/google_application_credentials.json \
         --dataset $STATS_DATASET:/statsdata \
-        --dataset ${PRE_TRAINED_WEIGHTS_DATASETS[${seed}]}:/pre-trained-weights \
         --gpus $N_GPUS \
         --shared-memory 400GiB \
         --weka climate-default:/climate-default \
