@@ -3,6 +3,7 @@ import inspect
 import os
 import pathlib
 import shutil
+from typing import cast
 
 import pytest
 import torch
@@ -10,8 +11,11 @@ import xarray as xr
 import yaml
 
 from fme.ace.inference.data_writer.main import DataWriterConfig
+from fme.ace.stepper import Stepper, StepperOverrideConfig
+from fme.core.corrector.atmosphere import EnergyBudgetConfig
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.logging_utils import LoggingConfig
+from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.testing import mock_wandb
 from fme.coupled.data_loading.config import CoupledDatasetWithOptionalOceanConfig
 from fme.coupled.data_loading.inference import (
@@ -28,6 +32,7 @@ from fme.coupled.inference.evaluator import (
     InferenceEvaluatorConfig,
     StandaloneComponentCheckpointsConfig,
     StandaloneComponentConfig,
+    load_stepper,
     main,
 )
 from fme.coupled.stepper import CoupledStepperConfig
@@ -52,6 +57,82 @@ def test_standalone_checkpoints_config_init_args():
     )
 
 
+def _get_corrector_total_energy_budget_correction_from_stepper(stepper: Stepper):
+    from fme.core.step.multi_call import MultiCallStep
+
+    if isinstance(stepper._step_obj, MultiCallStep):
+        config = stepper._step_obj._wrapped_step.config
+    else:
+        config = stepper._step_obj.config
+    config = cast(SingleModuleStepConfig, config)
+    corrector = config.corrector
+    if hasattr(corrector, "total_energy_budget_correction"):
+        return corrector.total_energy_budget_correction
+    return corrector.config.get("total_energy_budget_correction")
+
+
+def test_stepper_override_total_energy_budget_correction_to_none(
+    tmp_path: pathlib.Path, very_fast_only: bool
+):
+    """StepperOverrideConfig correctly overrides total_energy_budget_correction from
+    EnergyBudgetConfig to None (no energy corrector) for the atmosphere component."""
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+    ocean_in_names = ["o_prog", "sst", "mask_0", "a_diag"]
+    ocean_out_names = ["o_prog", "sst", "o_diag"]
+    atmos_in_names = ["a_prog", "surface_temperature", "ocean_fraction"]
+    atmos_out_names = ["a_prog", "surface_temperature", "a_diag"]
+    n_coupled_steps = 2
+    n_initial_conditions = 1
+
+    stepper_data_dir = tmp_path / "stepper_data"
+    dataset_info, _ = _create_dataset_info_for_stepper(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmos_in_names=atmos_in_names,
+        atmos_out_names=atmos_out_names,
+        n_coupled_steps=n_coupled_steps,
+        n_initial_conditions=n_initial_conditions,
+        data_dir=stepper_data_dir,
+    )
+    # Save coupled stepper with atmosphere total_energy_budget_correction set
+    default_energy_config = EnergyBudgetConfig("constant_temperature", 0.0)
+    checkpoint_path = save_coupled_stepper(
+        tmp_path,
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmos_in_names=atmos_in_names,
+        atmos_out_names=atmos_out_names,
+        dataset_info=dataset_info,
+        atmosphere_total_energy_budget_correction=default_energy_config,
+    )
+    assert isinstance(checkpoint_path, str)
+
+    # Load without override: atmosphere should still have the energy corrector
+    stepper_no_override = load_stepper(checkpoint_path)
+    assert (
+        _get_corrector_total_energy_budget_correction_from_stepper(
+            stepper_no_override.atmosphere
+        )
+        is not None
+    )
+
+    # Load with override: atmosphere should have total_energy_budget_correction=None
+    stepper_with_override = load_stepper(
+        checkpoint_path,
+        stepper_override_ocean=None,
+        stepper_override_atmosphere=StepperOverrideConfig(
+            total_energy_budget_correction=None
+        ),
+    )
+    assert (
+        _get_corrector_total_energy_budget_correction_from_stepper(
+            stepper_with_override.atmosphere
+        )
+        is None
+    )
+
+
 def save_coupled_stepper(
     base_dir: pathlib.Path,
     ocean_in_names: list[str],
@@ -65,6 +146,7 @@ def save_coupled_stepper(
     save_standalone_component_checkpoints: bool = False,
     ocean_timedelta: str = "2D",
     atmosphere_timedelta: str = "1D",
+    atmosphere_total_energy_budget_correction: EnergyBudgetConfig | None = None,
 ) -> str | StandaloneComponentCheckpointsConfig:
     config = get_stepper_config(
         ocean_in_names=ocean_in_names,
@@ -76,6 +158,7 @@ def save_coupled_stepper(
         ocean_fraction_name=ocean_fraction_name,
         ocean_timedelta=ocean_timedelta,
         atmosphere_timedelta=atmosphere_timedelta,
+        atmosphere_total_energy_budget_correction=atmosphere_total_energy_budget_correction,
     )
     if save_standalone_component_checkpoints:
         ocean_stepper = config.ocean.stepper.get_stepper(dataset_info.ocean)

@@ -6,6 +6,8 @@ from .single_module import (
     TrainOutput,
     TrainStepper,
     TrainStepperConfig,
+    apply_stepper_override,
+    apply_stepper_override_to_config,
     load_stepper,
     load_stepper_config,
     load_stepper_config_with_override,

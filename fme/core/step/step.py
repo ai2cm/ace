@@ -7,6 +7,7 @@ import dacite
 import torch
 from torch import nn
 
+from fme.core.corrector.atmosphere import EnergyBudgetConfig
 from fme.core.dataset_info import DatasetInfo
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
@@ -110,6 +111,12 @@ class StepConfigABC(abc.ABC):
         """Replace prescribed prognostic names (e.g. when loading from checkpoint)."""
         pass
 
+    def replace_total_energy_budget_correction(
+        self, value: EnergyBudgetConfig | None
+    ) -> None:
+        """Replace total energy budget correction (e.g. turn off during evaluation)."""
+        pass
+
     @abc.abstractmethod
     def load(self):
         """
@@ -210,6 +217,12 @@ class StepSelector(StepConfigABC):
 
     def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
         self._step_config_instance.replace_prescribed_prognostic_names(names)
+        self.config = dataclasses.asdict(self._step_config_instance)
+
+    def replace_total_energy_budget_correction(
+        self, value: EnergyBudgetConfig | None
+    ) -> None:
+        self._step_config_instance.replace_total_energy_budget_correction(value)
         self.config = dataclasses.asdict(self._step_config_instance)
 
     def load(self):
