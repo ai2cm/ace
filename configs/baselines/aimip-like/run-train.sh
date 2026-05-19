@@ -53,5 +53,6 @@ run_training() {
 # run_training "train-4deg-daily-era5-only.yaml" "train-4deg-daily-era5-only-rs0"
 # run_training "train-4deg-daily-era5-only-g1.yaml" "train-4deg-daily-era5-only-g1-rs0"
 # run_training "train-4deg-daily-era5-only-oldnorm.yaml" "train-4deg-daily-era5-only-oldnorm-rs0"
-run_training "train-4deg-daily-era5-only-1step.yaml" "train-4deg-daily-era5-only-1step-rs0"
+# run_training "train-4deg-daily-era5-only-1step.yaml" "train-4deg-daily-era5-only-1step-rs0"
 # run_training "train-4deg-daily-labels.yaml" "train-4deg-daily-labels-rs0"
+run_training "train-4deg-daily-labels-1step-g1.yaml" "train-4deg-daily-labels-1step-g1-rs0"
