@@ -353,14 +353,7 @@ optimization:
     weight_decay: 0.01
 stepper_training:
   n_ensemble: 2
-  n_forward_steps:
-    outcomes:
-      - steps: 1
-        probability: 0.8
-      - steps: 2
-        probability: 0.15
-      - steps: 3
-        probability: 0.05
+  n_forward_steps: 1
   optimize_last_step_only: true
   loss:
     type: EnsembleLoss
@@ -402,7 +395,7 @@ stepper:
           filter_type: linear
           affine_norms: true
           normalize_big_skip: true
-          filter_num_groups: 4
+          filter_num_groups: 1
           use_mlp: true
           num_layers: 8
           operator_type: dhconv

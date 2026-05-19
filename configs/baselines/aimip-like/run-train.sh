@@ -7,13 +7,13 @@ SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the reposi
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=2
 
 cd "$REPO_ROOT"
 
 run_training() {
   local config_filename="$1"
   local job_name="$2"
+  local N_GPUS="$3"
   local CONFIG_PATH="$SCRIPT_PATH/$config_filename"
 
   python -m fme.ace.validate_config --config_type train "$CONFIG_PATH"
@@ -49,10 +49,8 @@ run_training() {
     -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train "$CONFIG_PATH"
 }
 
-# run_training "train-4deg-daily.yaml" "train-4deg-daily-rs0"
-# run_training "train-4deg-daily-era5-only.yaml" "train-4deg-daily-era5-only-rs0"
-# run_training "train-4deg-daily-era5-only-g1.yaml" "train-4deg-daily-era5-only-g1-rs0"
-# run_training "train-4deg-daily-era5-only-oldnorm.yaml" "train-4deg-daily-era5-only-oldnorm-rs0"
-# run_training "train-4deg-daily-era5-only-1step.yaml" "train-4deg-daily-era5-only-1step-rs0"
-# run_training "train-4deg-daily-labels.yaml" "train-4deg-daily-labels-rs0"
-run_training "train-4deg-daily-labels-1step-g1.yaml" "train-4deg-daily-labels-1step-g1-rs0"
+run_training "train-4deg-daily-era5-only.yaml" "train-4deg-daily-era5-only-rs0" 1
+run_training "train-4deg-daily-labels.yaml" "train-4deg-daily-labels-rs0" 1
+run_training "train-4deg-6hourly-era5-only.yaml" "train-4deg-6hourly-era5-only-rs0" 1
+run_training "train-1deg-6hourly-era5-only.yaml" "train-1deg-6hourly-era5-only-rs0" 4
+run_training "train-1deg-daily-era5-only.yaml" "train-1deg-daily-era5-only-rs0" 4

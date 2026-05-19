@@ -13,7 +13,7 @@ inference:
       start: 0
       step: 2
     n_forward_steps: 3652
-    forward_steps_in_memory: 73
+    forward_steps_in_memory: 22
     n_ensemble_per_ic: 1
     loader:
       start_indices:
@@ -28,7 +28,7 @@ inference:
           - '2015-01-08T00:00:00'
       dataset:
         data_path: /climate-default
-        file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+        file_pattern: 2026-03-19-era5-1deg-8layer-daily-1940-2025.zarr
         engine: zarr
       num_data_workers: 8
     aggregator:
@@ -106,7 +106,7 @@ inference:
           - '2024-06-08T00:00:00'
       dataset:
         data_path: /climate-default
-        file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+        file_pattern: 2026-03-19-era5-1deg-8layer-daily-1940-2025.zarr
         engine: zarr
       num_data_workers: 8
     aggregator:
@@ -164,7 +164,7 @@ inference:
           - '1994-06-08T00:00:00'
       dataset:
         data_path: /climate-default
-        file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+        file_pattern: 2026-03-19-era5-1deg-8layer-daily-1940-2025.zarr
         engine: zarr
       num_data_workers: 8
     aggregator:
@@ -210,7 +210,7 @@ inference:
       start: 0
       step: 5
     n_forward_steps: 16794
-    forward_steps_in_memory: 73
+    forward_steps_in_memory: 27
     n_ensemble_per_ic: 1
     loader:
       start_indices:
@@ -225,7 +225,7 @@ inference:
           - '1979-01-08T00:00:00'
       dataset:
         data_path: /climate-default
-        file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+        file_pattern: 2026-03-19-era5-1deg-8layer-daily-1940-2025.zarr
         engine: zarr
       num_data_workers: 8
     aggregator:
@@ -261,41 +261,18 @@ train_loader:
   batch_size: 8
   num_data_workers: 4
   prefetch_factor: 4
-  time_buffer: 8
-  time_buffer_pool_size: 32
+  time_buffer: 1
   dataset:
     strict: false
     concat:
       - data_path: /climate-default
-        file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+        file_pattern: 2026-03-19-era5-1deg-8layer-daily-1940-2025.zarr
         engine: zarr
         subset:
           start_time: '1979-01-01'
           stop_time: '1993-12-31'
       - data_path: /climate-default
-        file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
-        engine: zarr
-        subset:
-          start_time: '1995-01-01'
-          stop_time: '2013-12-31'
-      - data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
-        file_pattern: ic_0001.zarr
-        engine: zarr
-        subset:
-          stop_time: '1993-12-31'
-      - data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
-        file_pattern: ic_0001.zarr
-        engine: zarr
-        subset:
-          start_time: '1995-01-01'
-          stop_time: '2013-12-31'
-      - data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
-        file_pattern: ic_0002.zarr
-        engine: zarr
-        subset:
-          stop_time: '1993-12-31'
-      - data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
-        file_pattern: ic_0002.zarr
+        file_pattern: 2026-03-19-era5-1deg-8layer-daily-1940-2025.zarr
         engine: zarr
         subset:
           start_time: '1995-01-01'
@@ -304,18 +281,18 @@ validation_loader:
   batch_size: 32
   num_data_workers: 8
   prefetch_factor: 2
-  time_buffer: 16
+  time_buffer: 3
   dataset:
     strict: false
     concat:
       - data_path: /climate-default
-        file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+        file_pattern: 2026-03-19-era5-1deg-8layer-daily-1940-2025.zarr
         engine: zarr
         subset:
           start_time: '1994-01-01'
           stop_time: '1994-12-31'
       - data_path: /climate-default
-        file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+        file_pattern: 2026-03-19-era5-1deg-8layer-daily-1940-2025.zarr
         engine: zarr
         subset:
           start_time: '2014-01-01'
@@ -329,14 +306,7 @@ optimization:
     weight_decay: 0.01
 stepper_training:
   n_ensemble: 2
-  n_forward_steps:
-    outcomes:
-      - steps: 1
-        probability: 0.8
-      - steps: 2
-        probability: 0.15
-      - steps: 3
-        probability: 0.05
+  n_forward_steps: 1
   optimize_last_step_only: true
   loss:
     type: EnsembleLoss
@@ -376,17 +346,17 @@ stepper:
           filter_type: linear
           affine_norms: true
           normalize_big_skip: true
-          filter_num_groups: 4
+          filter_num_groups: 1
           use_mlp: true
           num_layers: 8
           operator_type: dhconv
       normalization:
         network:
-          global_means_path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/centering.nc
-          global_stds_path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/scaling-full-field.nc
+          global_means_path: /climate-default/2026-03-19-era5-1deg-8layer-daily-stats-1990-2019/2026-03-19-era5-1deg-8layer-1940-2025/centering.nc
+          global_stds_path: /climate-default/2026-03-19-era5-1deg-8layer-daily-stats-1990-2019/2026-03-19-era5-1deg-8layer-1940-2025/scaling-full-field.nc
         residual:
-          global_means_path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/centering.nc
-          global_stds_path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/scaling-residual.nc
+          global_means_path: /climate-default/2026-03-19-era5-1deg-8layer-daily-stats-1990-2019/2026-03-19-era5-1deg-8layer-1940-2025/centering.nc
+          global_stds_path: /climate-default/2026-03-19-era5-1deg-8layer-daily-stats-1990-2019/2026-03-19-era5-1deg-8layer-1940-2025/scaling-residual.nc
       ocean:
         surface_temperature_name: surface_temperature
         ocean_fraction_name: ocean_fraction
