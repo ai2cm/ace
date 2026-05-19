@@ -108,7 +108,8 @@ def test_metadata(tmp_path, variable_metadata, n_ensemble_members):
     data = get_gridded_data(config=config, train=True, requirements=requirements)
     target_metadata = {
         name: variable_metadata[name]
-        for name in variable_metadata
         if variable_metadata[name] is not None
+        else VariableMetadata(units="", long_name="")
+        for name in variable_metadata
     }
     assert data.variable_metadata == target_metadata  # type: ignore
