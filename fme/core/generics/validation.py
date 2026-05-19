@@ -62,6 +62,7 @@ def run_validation_loop(
                 batch,
                 optimization=no_opt,
                 compute_derived_variables=compute_derived_variables,
+                evaluate_all_steps=True,
             )
             with timer.context("aggregator"):
                 aggregator.record_batch(batch=stepped)
