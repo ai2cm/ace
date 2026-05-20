@@ -23,6 +23,7 @@ from fme.ace.aggregator.inference.main import (
     TimeMeanMetricConfig,
     VideoMetricConfig,
     ZonalMeanMetricConfig,
+    build_inference_evaluator_aggregator,
 )
 from fme.ace.aggregator.inference.main import (
     InferenceAggregator as InferenceAggregator_,
@@ -33,10 +34,8 @@ from fme.ace.aggregator.inference.main import (
 from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregator as InferenceEvaluatorAggregator_,
 )
-from fme.ace.aggregator.inference.main import (
-    InferenceEvaluatorAggregatorConfig as AceInferenceEvaluatorAggregatorConfig,
-)
 from fme.ace.aggregator.inference.main import MetricConfig as AceMetricConfig
+from fme.ace.aggregator.loss_metrics import PerStepLossAggregator
 from fme.ace.aggregator.one_step.main import OneStepAggregator as OneStepAggregator_
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
@@ -61,18 +60,26 @@ class TrainAggregator(AggregatorABC[CoupledTrainOutput]):
     def __init__(self):
         self._n_batches = 0
         self._loss = torch.tensor(0.0, device=get_device())
+        self._per_step_losses = PerStepLossAggregator()
 
     @torch.no_grad()
     def record_batch(self, batch: CoupledTrainOutput):
         self._loss += batch.total_metrics["loss"]
         self._n_batches += 1
+        for component in (batch.ocean, batch.atmosphere):
+            step_metrics = {
+                k: v for k, v in component.metrics.items() if k.startswith("loss/")
+            }
+            self._per_step_losses.record(step_metrics)
 
     @torch.no_grad()
     def get_logs(self, label: str) -> dict[str, torch.Tensor]:
-        logs = {f"{label}/mean/loss": self._loss / self._n_batches}
         dist = Distributed.get_instance()
-        for key in sorted(logs.keys()):
-            logs[key] = float(dist.reduce_mean(logs[key].detach()).cpu().numpy())
+        logs: dict[str, float] = {}
+        logs[f"{label}/mean/loss"] = float(
+            dist.reduce_mean(self._loss / self._n_batches).cpu().numpy()
+        )
+        logs.update(self._per_step_losses.get_logs(label))
         return logs
 
     @torch.no_grad()
@@ -332,35 +339,30 @@ class InferenceEvaluatorAggregatorConfig:
             timestep=dataset_info.atmosphere.timestep,
             log_zonal_mean_images=log_zonal_mean_images,
         )
-        ocean_ace_config = AceInferenceEvaluatorAggregatorConfig(
+        ocean_agg = build_inference_evaluator_aggregator(
             metrics=ocean_metrics,
-            monthly_reference_data=self.monthly_reference_data,
-            time_mean_reference_data=self.time_mean_reference_data,
-        )
-        atmosphere_ace_config = AceInferenceEvaluatorAggregatorConfig(
-            metrics=atmosphere_metrics,
-            monthly_reference_data=self.monthly_reference_data,
-            time_mean_reference_data=self.time_mean_reference_data,
-        )
-
-        ocean_agg = ocean_ace_config.build(
             dataset_info=dataset_info.ocean,
             n_ic_steps=1,
             n_forward_steps=n_timesteps_ocean - 1,
             initial_time=initial_time,
             normalize=ocean_normalize,
+            monthly_reference_data=self.monthly_reference_data,
+            time_mean_reference_data=self.time_mean_reference_data,
             output_dir=(
                 os.path.join(output_dir, "ocean") if output_dir is not None else None
             ),
             channel_mean_names=ocean_channel_mean_names,
             save_diagnostics=save_diagnostics,
         )
-        atmosphere_agg = atmosphere_ace_config.build(
+        atmosphere_agg = build_inference_evaluator_aggregator(
+            metrics=atmosphere_metrics,
             dataset_info=dataset_info.atmosphere,
             n_ic_steps=1,
             n_forward_steps=n_timesteps_atmosphere - 1,
             initial_time=initial_time,
             normalize=atmosphere_normalize,
+            monthly_reference_data=self.monthly_reference_data,
+            time_mean_reference_data=self.time_mean_reference_data,
             output_dir=(
                 os.path.join(output_dir, "atmosphere")
                 if output_dir is not None

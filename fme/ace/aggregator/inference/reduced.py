@@ -513,10 +513,11 @@ class SingleTargetMeanAggregator:
 
 @dataclasses.dataclass
 class MeanMetricConfig:
-    type: Literal["mean"] = "mean"
     variables: list[str] | None = None
     name: str | None = None
     target: Literal["denorm", "norm"] = "denorm"
+    enabled: bool = True
+    strict: bool = False
 
     def __post_init__(self):
         if self.name is None:

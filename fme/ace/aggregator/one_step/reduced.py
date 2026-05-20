@@ -11,7 +11,11 @@ from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorMapping
 
-from ..inference.build_context import MetricBuildContext, maybe_filter
+from ..inference.build_context import (
+    MetricBuildContext,
+    MetricNotSupportedError,
+    maybe_filter,
+)
 from ..inference.data import InferenceBatchData, MetricBuildResult, SubAggregator
 from .reduced_metrics import AreaWeightedReducedMetric, ReducedMetric
 
@@ -190,11 +194,12 @@ class OneStepMeanAdapter:
 @dataclasses.dataclass
 class StepMeanMetricConfig:
     step: int
-    type: Literal["step_mean"] = "step_mean"
     variables: list[str] | None = None
     name: str | None = None
     target: Literal["denorm", "norm"] = "denorm"
     channel_mean_names: list[str] | None = None
+    enabled: bool = True
+    strict: bool = False
 
     def __post_init__(self):
         if self.name is None:
@@ -206,7 +211,7 @@ class StepMeanMetricConfig:
 
     def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
         if self.step > ctx.n_forward_steps:
-            raise ValueError(
+            raise MetricNotSupportedError(
                 f"step_mean step {self.step} exceeds "
                 f"n_forward_steps={ctx.n_forward_steps}"
             )

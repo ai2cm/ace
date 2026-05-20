@@ -1,6 +1,7 @@
 import dataclasses
+import datetime
 import logging
-from typing import Any, Literal
+from typing import Any
 
 import cftime
 import numpy as np
@@ -372,8 +373,9 @@ class PairedIPOIndexAggregator:
 
 @dataclasses.dataclass
 class IpoIndexMetricConfig:
-    type: Literal["ipo_index"] = "ipo_index"
     name: str = "ipo_index"
+    enabled: bool = True
+    strict: bool = False
 
     def get_name(self) -> str:
         return self.name
@@ -382,6 +384,13 @@ class IpoIndexMetricConfig:
         if not isinstance(ctx.horizontal_coordinates, LatLonCoordinates):
             raise MetricNotSupportedError(
                 "ipo_index metric requires LatLonCoordinates."
+            )
+        total_duration = ctx.n_timesteps * ctx.timestep
+        min_days = MIN_YEARS_FOR_FILTERED_TPI * 365
+        if total_duration <= datetime.timedelta(days=min_days):
+            raise MetricNotSupportedError(
+                f"ipo_index metric requires > ~{MIN_YEARS_FOR_FILTERED_TPI} years "
+                f"of data, got {total_duration.days} days"
             )
         return MetricBuildResult(
             aggregator=PairedIPOIndexAggregator(
