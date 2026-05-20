@@ -5,7 +5,7 @@ set -e
 JOB_NAME="predict-HiROv1-on-c96-amip-100km-to-3km-conus"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
-CONFIG_PATH="$SCRIPT_PATH/pp-config.yaml"
+CONFIG_PATH="$SCRIPT_PATH/c96-shield-config.yaml"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
