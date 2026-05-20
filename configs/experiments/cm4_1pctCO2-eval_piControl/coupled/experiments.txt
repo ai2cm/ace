@@ -16,7 +16,7 @@ ft-fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0||t
 ft-fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KP772N2D01FRDZJ45AK1ZMKD|training|best_inference_ckpt|normal|--not-preemptible
 
 fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KP43V4GDM8A7FNGKPW1R80WH|done|best_inference_ckpt|high|--not-preemptible||||h100
-fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7-log-IPO|rs0|01KP43V4GDM8A7FNGKPW1R80WH|done|best_inference_ckpt|high|||||h100
+fto-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KP43V4GDM8A7FNGKPW1R80WH|run_ICx9_40yr|best_inference_ckpt|high|||||h100
 
 fto-75-25-split-piControl-fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KQG6NFXXCFCZN07Y9G8EG16C|training|best_inference_ckpt|normal|--min-runtime 8h
 
@@ -54,6 +54,6 @@ lr-5e-6-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRPNCHS614
 
 lr-8e-6-cosLR-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRYK62XXX6R477JC1KSYKQNX|training|best_inference_ckpt|normal|--min-runtime 8h
 
-epoch-26-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRXZNTWTTGSFD84F63XNMRWT|run_ICx1_piC-140yr|best_inference_ckpt|high|--min-runtime 8h||01KS0FCMBJSV81V8ENZNBDR5RH||h100
-epoch-26-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRXZNTWTTGSFD84F63XNMRWT|run_ICx1_140yr|best_inference_ckpt|high|--min-runtime 8h||01KS0FCMBJSV81V8ENZNBDR5RH||h100
-epoch-26-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRXZNTWTTGSFD84F63XNMRWT|run_ICx1_piC|best_inference_ckpt|high|--min-runtime 8h||01KS0FCMBJSV81V8ENZNBDR5RH||h100
+epoch-26-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRXZNTWTTGSFD84F63XNMRWT|done|best_inference_ckpt|high|--min-runtime 8h||01KS0FCMBJSV81V8ENZNBDR5RH||h100
+epoch-26-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRXZNTWTTGSFD84F63XNMRWT|done|best_inference_ckpt|high|--min-runtime 8h||01KS0FCMBJSV81V8ENZNBDR5RH||h100
+epoch-26-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRXZNTWTTGSFD84F63XNMRWT|run_ICx9_40yr|best_inference_ckpt|high|--min-runtime 8h||01KS0FCMBJSV81V8ENZNBDR5RH||h100
