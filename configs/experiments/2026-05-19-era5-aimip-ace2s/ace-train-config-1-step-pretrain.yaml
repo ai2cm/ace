@@ -7,19 +7,12 @@ max_epochs: 120
 ema:
   decay: 0.999
 inference:
-  - n_forward_steps: 7300
-    forward_steps_in_memory: 40
+  - n_forward_steps: 52960
+    forward_steps_in_memory: 100
     loader:
       start_indices:
         times:
-          - '2009-01-01T00:00:00'
-          - '2009-02-15T00:00:00'
-          - '2009-04-01T00:00:00'
-          - '2009-05-15T00:00:00'
-          - '2009-07-01T00:00:00'
-          - '2009-08-15T00:00:00'
-          - '2009-10-01T00:00:00'
-          - '2009-11-15T00:00:00'
+          - '1978-10-01T00:00:00'
       dataset:
         data_path: /climate-default/
         file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
@@ -29,8 +22,6 @@ inference:
       histogram:
         enabled: true
       time_mean_reference_data: /statsdata/time-mean.nc
-    name: val_rollout
-    weight: 1.0
 logging:
   log_to_screen: true
   log_to_wandb: true
