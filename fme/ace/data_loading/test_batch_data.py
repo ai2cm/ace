@@ -212,6 +212,35 @@ def test_to_cpu():
         )
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="pin_memory requires CUDA")
+def test_pin_memory():
+    names = ["foo", "bar"]
+    n_samples = 2
+    n_times = 5
+    n_lat = 8
+    n_lon = 16
+    horizontal_dims = ["lat", "lon"]
+    batch_data = get_batch_data(
+        names=names,
+        n_samples=n_samples,
+        n_times=n_times,
+        horizontal_dims=horizontal_dims,
+        n_lat=n_lat,
+        n_lon=n_lon,
+        n_labels=2,
+    )
+    cpu_data = batch_data.to_cpu()
+    pinned = cpu_data.pin_memory()
+    assert_metadata_equal(pinned, cpu_data)
+    for name in names:
+        assert pinned.data[name].is_pinned()
+    assert pinned.labels is not None
+    assert pinned.labels.tensor.is_pinned()
+    assert pinned.data_mask is not None
+    for name in names:
+        assert pinned.data_mask[name].is_pinned()
+
+
 @pytest.mark.parametrize(
     "epoch_1, epoch_2",
     [
@@ -807,5 +836,7 @@ def test_collate_with_masking_variable_missing_from_all_samples():
         sample_missing_names=[frozenset({"y"}), frozenset({"y"})],
     )
     assert "x" in batch_data
-    assert "y" not in batch_data
-    assert data_mask is None
+    assert "y" in batch_data
+    assert data_mask is not None
+    assert data_mask["x"].all()
+    assert not data_mask["y"].any()
