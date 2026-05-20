@@ -533,6 +533,7 @@ def main() -> None:
                 coarse_val_data=coarse_val_data,
                 teacher_model=teacher_model,
                 best_checkpoint_path=best_student_path,
+                coarse_patch_yx=coarse_patch_yx,
             )
         )
         logger.info(

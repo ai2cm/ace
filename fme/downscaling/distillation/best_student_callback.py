@@ -89,6 +89,12 @@ class BestStudentCheckpointCallback:
             its weights are never modified.
         best_checkpoint_path: Destination ``.ckpt`` path for the best student
             checkpoint (ACE format, loadable by ``CheckpointModelConfig``).
+        coarse_patch_yx: Coarse-resolution spatial patch size ``(H, W)`` to
+            use when iterating over the validation domain.  Should match the
+            patch size used during training so that each batch fed to
+            ``student.sample()`` has the expected spatial dimensions.  When
+            ``None`` the full validation domain is used in a single batch
+            (only valid when the domain already fits the model's input shape).
         n_student_samples: Number of student ensemble members to draw per
             time step.  More members give a better CRPS estimate; 4 is a
             reasonable default.
@@ -100,12 +106,14 @@ class BestStudentCheckpointCallback:
         coarse_val_data: GriddedData,
         teacher_model: DiffusionModel,
         best_checkpoint_path: str,
+        coarse_patch_yx: tuple[int, int] | None = None,
         n_student_samples: int = 4,
     ) -> None:
         self._val_dataset_path = val_dataset_path
         self._coarse_val_data = coarse_val_data
         self._teacher_model = teacher_model
         self._best_checkpoint_path = best_checkpoint_path
+        self._coarse_patch_yx = coarse_patch_yx
         self._n_student_samples = n_student_samples
         self._best_crps = float("inf")
         self._teacher_ds: xr.Dataset | None = None
@@ -170,10 +178,17 @@ class BestStudentCheckpointCallback:
         teacher_model = self._teacher_model
         n = self._n_student_samples
 
+        if self._coarse_patch_yx is not None:
+            batch_iter = self._coarse_val_data.get_patched_generator(
+                self._coarse_patch_yx, drop_partial_patches=True
+            )
+        else:
+            batch_iter = self._coarse_val_data.get_generator()
+
         crps_sum: dict[str, float] = {}
         count: dict[str, int] = {}
 
-        for batch in self._coarse_val_data.get_generator():
+        for batch in batch_iter:
             # Build condition tensor from coarse inputs (same path as training).
             static_inputs = teacher_model._subset_static_if_available(batch)
             condition = teacher_model._get_input_from_coarse(batch.data, static_inputs)
@@ -198,13 +213,22 @@ class BestStudentCheckpointCallback:
             )
 
             times = batch.time.values  # (B,) numpy time stamps
+            # Fine-resolution lat/lon for this (possibly patched) batch.
+            fine_coords = teacher_model.get_fine_coords_for_batch(batch)
+            fine_lats = fine_coords.lat.cpu().numpy()
+            fine_lons = fine_coords.lon.cpu().numpy()
 
             for var, student_tensor in output.items():
                 if var not in teacher_ds:
                     continue
 
-                # teacher_batch: (B, n_teacher, H, W)
-                teacher_np = teacher_ds[var].sel(time=times).values
+                # teacher_batch: (B, n_teacher, H_patch, W_patch)
+                teacher_np = (
+                    teacher_ds[var]
+                    .sel(time=times)
+                    .sel(latitude=fine_lats, longitude=fine_lons, method="nearest")
+                    .values
+                )
                 teacher_batch = torch.from_numpy(teacher_np).to(
                     student_tensor.device, dtype=torch.float32
                 )
