@@ -26,6 +26,7 @@ run_training() {
   done < "$CONFIG_PATH"
 
   gantry run \
+    --allow-dirty \
     --name "$job_name" \
     --task-name "$job_name" \
     --description 'Run ACE2S-ERA5 training' \
@@ -53,7 +54,7 @@ run_training() {
 
 base_name="ace2s"
 
-run_training "ace-train-config-1-step-pretrain.yaml" "$base_name-era5-1-step-pre-training-rs0"
+run_training "ace-train-config-1-step-pretrain.yaml" "$base_name-era5-1-step-pre-training-rs0-test"
 
 # For the finetuning stage take beaker dataset id from the above job and add it to
 # ace-train-config-multi-step-finetuning.yaml then uncomment next line
