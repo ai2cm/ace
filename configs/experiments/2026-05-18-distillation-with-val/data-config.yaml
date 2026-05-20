@@ -1,0 +1,14 @@
+train_data:
+  coarse:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 100km.zarr
+      engine: zarr
+      subset:
+        start_time: '2014-01-01T00:00:00'
+        stop_time: '2022-12-31T23:59:00'
+  batch_size: 4
+  num_data_workers: 2
+  strict_ensemble: false
+  lat_extent:
+    start: -66.0
+    stop: 70.0
