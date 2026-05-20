@@ -31,23 +31,6 @@ inference:
       time_mean_reference_data: /statsdata/time-mean.nc
     name: val_rollout
     weight: 1.0
-  - n_forward_steps: 52960
-    forward_steps_in_memory: 100
-    loader:
-      start_indices:
-        times:
-          - '1978-10-01T00:00:00'
-      dataset:
-        data_path: /climate-default/
-        file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
-        engine: zarr
-      num_data_workers: 8
-    aggregator:
-      histogram:
-        enabled: true
-      time_mean_reference_data: /statsdata/time-mean.nc
-    name: in_sample_rollout
-    weight: 0.0
 logging:
   log_to_screen: true
   log_to_wandb: true
