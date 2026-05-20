@@ -119,6 +119,9 @@ class BatchData:
             This is a suggestion for the purpose of computing ensemble metrics.
             For example, an ensemble is something you would want to compute CRPS
             or ensemble mean RMSE over.
+        data_mask: Per-variable boolean tensors of shape ``[n_samples]`` where
+            True means the variable is present for that sample. None when all
+            variables are present in all samples.
     """
 
     data: TensorMapping
