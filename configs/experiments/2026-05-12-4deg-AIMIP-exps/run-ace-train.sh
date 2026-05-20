@@ -51,4 +51,4 @@ run_training() {
     -- torchrun --nproc_per_node $N_GPUS -m fme.ace.train $CONFIG_PATH
 }
 
-run_training "${1:-ace-train-config-4deg-AIMIP.yaml}" "${2:-ace2-era5-train-4deg-daily-AIMIP-bs16}" "${3:-ace2-era5}"
+run_training "${1:-ace-train-config-4deg-AIMIP.yaml}" "${2:-ace2-era5-train-4deg}" "${3:-ace2-era5}"
