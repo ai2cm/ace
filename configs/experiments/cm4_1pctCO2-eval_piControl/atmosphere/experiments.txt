@@ -1,0 +1,4 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
+
+aceS-cm4_1pctCO2_0256to0350-condSFNO|rs0|01KHZG19J8SFKZ3PDYCCEZNH1X|run_ICx1_40yr|best_inference_ckpt|urgent|||||b200|||100GiB
+ace-ft_5ep_w_EC-cm4_1pctCO2-train_0256to0350-condSFNO|rs1|01KBZP41XMBZ8WB8QWM3FQZQ9C|run_ICx1_40yr|best_inference_ckpt|urgent|||||b200|||100GiB
