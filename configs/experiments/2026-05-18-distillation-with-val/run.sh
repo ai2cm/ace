@@ -34,7 +34,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 
 cd $REPO_ROOT
 
-NGPU=4
+NGPU=8
 IMAGE="$(cat $REPO_ROOT/latest_distillation_image.txt)"
 
 TEACHER_DATASET=01KNM6H3JB1ZNS76HX17AAZRF7
@@ -45,7 +45,7 @@ gantry run \
     --name $JOB_NAME \
     --description "$DESCRIPTION" \
     --workspace ai2/climate-titan \
-    --priority urgent \
+    --priority high \
     --preemptible \
     --cluster ai2/titan \
     --beaker-image $IMAGE \
