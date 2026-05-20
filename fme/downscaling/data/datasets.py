@@ -167,7 +167,10 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
         return len(self.dataset)
 
     def __getitem__(self, key) -> DatasetItem:
-        batch, times, _, epoch, _ = self.dataset[key]
+        batch, times, _, epoch, missing_names = self.dataset[key]
+        assert (
+            missing_names is None
+        ), "Variable masking is not supported in downscaling."
         batch = {
             k: v[
                 ...,
@@ -198,7 +201,10 @@ class BatchItemDatasetAdapter(torch.utils.data.Dataset):
         return len(self._dataset)
 
     def __getitem__(self, idx) -> BatchItem:
-        fields, time, _, epoch, _ = self._dataset[idx]
+        fields, time, _, epoch, missing_names = self._dataset[idx]
+        assert (
+            missing_names is None
+        ), "Variable masking is not supported in downscaling."
         fields = {k: v.squeeze() for k, v in fields.items()}
         field_example = next(iter(fields.values()))
 

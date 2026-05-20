@@ -243,6 +243,12 @@ def test_get_start(names: list[str], prognostic_names: list[str], n_ic_timesteps
     assert_metadata_equal(start, batch_data, check_data_mask=False)
     assert start.time.equals(batch_data.time.isel(time=slice(0, n_ic_timesteps)))
     assert set(start.data.keys()) == set(prognostic_names)
+    if batch_data.data_mask is not None:
+        assert start.data_mask is not None
+        for name in prognostic_names:
+            torch.testing.assert_close(
+                start.data_mask[name].cpu(), batch_data.data_mask[name].cpu()
+            )
     for name in prognostic_names:
         assert start.data[name].shape == (n_samples, n_ic_timesteps, n_lat, n_lon)
         np.testing.assert_allclose(
@@ -311,6 +317,12 @@ def test_get_end(names: list[str], prognostic_names: list[str], n_ic_timesteps: 
     assert_metadata_equal(end, batch_data, check_data_mask=False)
     assert end.time.equals(batch_data.time.isel(time=slice(-n_ic_timesteps, None)))
     assert set(end.data.keys()) == set(prognostic_names)
+    if batch_data.data_mask is not None:
+        assert end.data_mask is not None
+        for name in prognostic_names:
+            torch.testing.assert_close(
+                end.data_mask[name].cpu(), batch_data.data_mask[name].cpu()
+            )
     for name in prognostic_names:
         assert end.data[name].shape == (n_samples, n_ic_timesteps, n_lat, n_lon)
         np.testing.assert_allclose(
@@ -475,6 +487,16 @@ def test_broadcast_ensemble(n_ensemble):
         check_n_ensemble=False,
         check_data_mask=False,
     )
+
+    assert ensemble_gen_data.data_mask is not None
+    assert ensemble_gen_data.data_mask["bar"].shape == (n_ensemble * n_samples,)
+    for i in range(n_samples):
+        original_val = gen_data.data_mask["bar"][i].item()
+        for e in range(n_ensemble):
+            assert (
+                ensemble_gen_data.data_mask["bar"][i * n_ensemble + e].item()
+                == original_val
+            )
 
 
 @pytest.mark.parametrize("n_ensemble", [1, 2, 3])
@@ -654,46 +676,6 @@ def test_paired_data_as_ensemble_tensor_dicts_shape():
         assert u_ref[name].shape[:2] == (n_s, n_ensemble)
     for name in p.prediction:
         assert u_pred[name].shape[:2] == (n_s, n_ensemble)
-
-
-def _make_data_mask(
-    names: list[str], n_samples: int, device=None
-) -> dict[str, torch.Tensor]:
-    if device is None:
-        device = get_device()
-    return {
-        name: torch.ones(n_samples, dtype=torch.bool, device=device) for name in names
-    }
-
-
-def test_data_mask_broadcast_ensemble():
-    names = ["foo", "bar"]
-    n_samples = 2
-    n_ensemble = 3
-    data_mask = _make_data_mask(names, n_samples)
-    data_mask["bar"][1] = False
-    base = get_batch_data(
-        names=names,
-        n_samples=n_samples,
-        n_times=5,
-        horizontal_dims=["lat", "lon"],
-    )
-    base = BatchData(
-        data=base.data,
-        time=base.time,
-        horizontal_dims=base.horizontal_dims,
-        epoch=base.epoch,
-        data_mask=data_mask,
-    )
-    broadcasted = base.broadcast_ensemble(n_ensemble)
-    assert set(broadcasted.data_mask) == set(names)
-    assert broadcasted.data_mask["bar"].shape == (n_samples * n_ensemble,)
-    # sample 0 was True, sample 1 was False; repeat_interleave keeps order
-    expected = torch.tensor(
-        [True, True, True, False, False, False],
-        device=broadcasted.data_mask["bar"].device,
-    )
-    torch.testing.assert_close(broadcasted.data_mask["bar"], expected)
 
 
 def test_data_mask_raises_if_length_does_not_match_n_samples():

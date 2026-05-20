@@ -234,7 +234,6 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
             set(label_override) if label_override is not None else None
         )
         self._allow_missing_variables = requirements.allow_missing_variables
-        self._all_names = requirements.names
         if isinstance(config.dataset, XarrayDataConfig):
             dataset: XarrayDataset | MergedXarrayDataset = XarrayDataset(
                 config.dataset,

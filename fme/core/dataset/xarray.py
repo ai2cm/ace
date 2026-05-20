@@ -590,16 +590,13 @@ class XarrayDataset(DatasetABC):
             self._time_invariant_names,
             self._static_derived_names,
         ) = self._group_variable_names_by_time_type()
-        if self._allow_missing_variables:
-            self._all_requested_names = list(names)
-            self._names = (
-                list(self._time_dependent_names)
-                + list(self._time_invariant_names)
-                + list(self._static_derived_names)
-            )
-            self._missing_names = frozenset(
-                set(self._all_requested_names) - set(self._names)
-            )
+        self._names = (
+            list(self._time_dependent_names)
+            + list(self._time_invariant_names)
+            + list(self._static_derived_names)
+        )
+        self._missing_names = frozenset(set(names) - set(self._names))
+        self._get_variable_metadata(first_dataset)
 
         self._vertical_coordinate = _get_vertical_coordinate(first_dataset, self.dtype)
         self.overwrite = config.overwrite
@@ -719,10 +716,6 @@ class XarrayDataset(DatasetABC):
         for name in self._names:
             if name in StaticDerivedData.names:
                 result[name] = StaticDerivedData.metadata[name]
-            elif name not in ds and self._allow_missing_variables:
-                continue
-            elif name not in ds:
-                raise ValueError(f"Required variable not found in dataset: {name}.")
             elif hasattr(ds[name], "units") and hasattr(ds[name], "long_name"):
                 result[name] = VariableMetadata(
                     units=ds[name].units,
@@ -757,10 +750,6 @@ class XarrayDataset(DatasetABC):
         self._all_times = xr.CFTimeIndex(np.concatenate(time_coord))
 
         del cum_num_timesteps
-
-        ds = self._open_file(0)
-        self._get_variable_metadata(ds)
-        ds.close()
 
     def _group_variable_names_by_time_type(self) -> VariableNames:
         """Returns lists of time-dependent variable names, time-independent

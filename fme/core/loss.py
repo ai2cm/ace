@@ -28,14 +28,14 @@ class LossComponent(abc.ABC):
 
     All loss tensors are pre-weighted so that ``.mean()`` over trailing
     (non-batch, non-channel) dimensions gives the correct per-sample,
-    per-channel loss.  Subclasses encode the tensor layout (where the
+    per-channel loss. Subclasses encode the tensor layout (where the
     channel dimension lives) and implement :meth:`reduce_to_channel`.
     """
 
     def __init__(self, loss: torch.Tensor):
         """
         Args:
-            loss: The loss tensor.  Can be a scalar (``ndim == 0``),
+            loss: The loss tensor. Can be a scalar (``ndim == 0``),
                 a partially-reduced tensor like ``(B, C)``, or a
                 full element-wise tensor like ``(B, C, lat, lon)``.
         """
@@ -128,7 +128,7 @@ class LossOutput:
 
         Each :class:`ChannelLossInfo` carries the mean loss for that
         channel (averaged over active samples only) and the number of
-        batch samples that contributed.  Downstream aggregators should
+        batch samples that contributed. Downstream aggregators should
         use the counts to compute properly weighted means across
         batches.
         """
@@ -261,7 +261,7 @@ class WeightedMappingLoss:
         def _wrap_elementwise(t: torch.Tensor) -> StandardLoss:
             # Element-wise loss tensors have the same shape as the input;
             # the channel position depends on the data layout (ensemble,
-            # tile, etc.).  Reduce non-(batch, channel) dims here so the
+            # tile, etc.). Reduce non-(batch, channel) dims here so the
             # downstream component carries a canonical ``(B, C)`` tensor.
             dims = tuple(i for i in range(t.ndim) if i not in (0, cdim))
             reduced = t.mean(dim=dims) if dims else t
