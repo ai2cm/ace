@@ -249,7 +249,7 @@ class BatchData:
             time=self.time,
             horizontal_dims=self.horizontal_dims,
             epoch=self.epoch,
-            labels=self.labels,
+            labels=self.labels.to("cpu") if self.labels is not None else None,
             n_ensemble=self.n_ensemble,
             data_mask=(
                 {k: v.cpu() for k, v in self.data_mask.items()}

@@ -1444,5 +1444,9 @@ def test_inference_data_loader_excludes_variable_absent_from_all_samples(tmp_pat
     assert isinstance(batch_data, BatchData)
     assert "foo" in batch_data.data
     assert batch_data.data["foo"].shape == (2, 4, N_LAT, N_LON)
-    assert "nonexistent_var" not in batch_data.data
-    assert batch_data.data_mask is None
+    assert "nonexistent_var" in batch_data.data
+    assert batch_data.data["nonexistent_var"].shape == (2, 4, N_LAT, N_LON)
+    assert torch.isnan(batch_data.data["nonexistent_var"]).all()
+    assert batch_data.data_mask is not None
+    assert batch_data.data_mask["foo"].all()
+    assert not batch_data.data_mask["nonexistent_var"].any()
