@@ -11,6 +11,9 @@ from fme.core.distributed import Distributed
 from fme.core.labels import BatchLabels
 from fme.core.typing_ import TensorDict
 
+_METADATA_FIELDS = {"horizontal_dims", "epoch", "n_ensemble", "labels", "data_mask"}
+_NON_METADATA_FIELDS = {"data", "time"}
+
 
 def assert_metadata_equal(
     a: BatchData,
@@ -19,6 +22,13 @@ def assert_metadata_equal(
     check_n_ensemble: bool = True,
     check_data_mask: bool = True,
 ):
+    actual_fields = {f.name for f in dataclasses.fields(BatchData)}
+    unexpected = actual_fields - _METADATA_FIELDS - _NON_METADATA_FIELDS
+    if unexpected:
+        raise AssertionError(
+            f"BatchData has new fields {unexpected} not covered by "
+            f"assert_metadata_equal. Update this helper to check them."
+        )
     assert a.horizontal_dims == b.horizontal_dims
     assert a.epoch == b.epoch
     if check_n_ensemble:
