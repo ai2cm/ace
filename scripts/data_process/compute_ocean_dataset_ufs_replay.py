@@ -149,8 +149,18 @@ class DaskConfig:
             self._cluster = gateway.new_cluster(options)
             self._cluster.scale(self.n_workers)
         else:
+            import dask
+
+            dask.config.set(
+                {
+                    "distributed.worker.memory.spill": False,
+                    "distributed.worker.memory.target": False,
+                }
+            )
             self._cluster = LocalCluster(
-                n_workers=self.n_workers, **self.cluster_options
+                n_workers=self.n_workers,
+                threads_per_worker=1,
+                **self.cluster_options,
             )
         return self._cluster.get_client()
 
@@ -662,13 +672,8 @@ def compute_lazy_dataset(
     xr.set_options(keep_attrs=True)
 
     # ── 1. Load ocean ─────────────────────────────────────────────────────
-    # Use time chunks matching the sharding size to keep the Dask graph
-    # small.  The zarr source is chunked per-timestep; consolidating into
-    # larger time chunks dramatically reduces graph size and avoids the
-    # "sending large graph" warnings.
-    _time_chunk = config.sharding.time_dim if config.sharding else 360
     print("Opening ocean zarr...")
-    ds_ocean = _open_zarr(config.ocean_zarr, chunks={"time": _time_chunk})
+    ds_ocean = _open_zarr(config.ocean_zarr, chunks={})
     print(f"  Ocean dims: {dict(ds_ocean.dims)}")
 
     if n_subsample is not None:
@@ -912,7 +917,7 @@ def compute_lazy_dataset(
 
     # ── 5. Atmosphere forcing and sea-ice ─────────────────────────────────
     print("Opening atmosphere zarr...")
-    ds_atmo = _open_zarr(config.atmo_zarr, chunks={"time": _time_chunk})
+    ds_atmo = _open_zarr(config.atmo_zarr, chunks={})
     print(f"  Atmo dims: {dict(ds_atmo.dims)}")
 
     # Rename horizontal dims to match ocean (lat, lon)
