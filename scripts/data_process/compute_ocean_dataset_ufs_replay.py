@@ -229,23 +229,17 @@ class UFSReplayDatasetConfig:
 # 3-D ocean variables (after renaming) that get split per level
 VARS_3D = ("thetao", "so", "uo", "vo")
 
-# MOM6 surface variables to retain (original names before renaming)
+# MOM6 surface variables to retain (original names before renaming).
+# Additional flux variables (SW, LW, etc.) are kept for deriving hfds and wfo
+# but dropped after derivation.
 _OCEAN_SURFACE_VARS = ["SSH", "taux", "tauy"]
 
-# MOM6 variables that are dropped (not needed for training)
+# MOM6 variables that are dropped (not needed for training).
+# Variables used for derived fields (depth, evap, fprec, lprec, lrunoff,
+# SW, LW, latent, sensible, Heat_PmE) are kept and consumed later.
 _OCEAN_DROP = [
-    "Heat_PmE",
-    "LW",
     "LwLatSens",
-    "SW",
-    "depth",
-    "evap",
-    "fprec",
-    "latent",
-    "lprec",
-    "lrunoff",
     "pbo",
-    "sensible",
 ]
 
 
@@ -732,11 +726,16 @@ def compute_lazy_dataset(
         print(f"  Regridding ocean to Gaussian grid {config.regrid.output_grid}...")
         source_grid = _make_source_grid(ds_ocean)
         ds_ocean = _regrid_dataset(ds_ocean, config.regrid, source_grid)
+        # Persist regridded ocean to cluster memory to avoid recomputing
+        # the regridding graph on every downstream operation.
+        print(f"  Persisting regridded ocean ({dict(ds_ocean.sizes)})...")
+        ds_ocean = ds_ocean.persist()
         print(f"  Regridded ocean to {dict(ds_ocean.sizes)}")
 
         if ho_ds is not None:
             print("  Regridding layer thickness (ho)...")
             ho_ds = _regrid_dataset(ho_ds, config.regrid, source_grid)
+            ho_ds = ho_ds.persist()
             ho_ds = ho_ds.assign_coords(
                 lat=ds_ocean.lat.values, lon=ds_ocean.lon.values
             )
@@ -831,7 +830,87 @@ def compute_lazy_dataset(
     if "zos" in ds_ocean_2d:
         ds_ocean_2d["zos"].attrs.setdefault("long_name", "Sea Surface Height")
 
-    # ── 6. Atmosphere forcing and sea-ice ─────────────────────────────────
+    # ── 4b. Surface velocity aliases ──────────────────────────────────────
+    if "uo_0" in ds_levels:
+        ds_levels["ssu"] = ds_levels["uo_0"].copy()
+        ds_levels["ssu"].attrs = {"long_name": "Sea surface x-velocity", "units": "m/s"}
+    if "vo_0" in ds_levels:
+        ds_levels["ssv"] = ds_levels["vo_0"].copy()
+        ds_levels["ssv"].attrs = {"long_name": "Sea surface y-velocity", "units": "m/s"}
+
+    # ── 4c. Static ocean fields ───────────────────────────────────────────
+    # deptho: ocean depth (time-invariant, from MOM6 "depth")
+    if "depth" in ds_ocean_2d:
+        ds_ocean_2d["deptho"] = ds_ocean_2d["depth"]
+        ds_ocean_2d["deptho"].attrs = {
+            "long_name": "Sea Floor Depth Below Geoid",
+            "units": "m",
+        }
+        ds_ocean_2d = ds_ocean_2d.drop_vars("depth")
+    elif "depth" in ds_ocean:
+        deptho = ds_ocean["depth"]
+        if "time" in deptho.dims:
+            deptho = deptho.isel(time=0, drop=True)
+        ds_ocean_2d["deptho"] = deptho
+        ds_ocean_2d["deptho"].attrs = {
+            "long_name": "Sea Floor Depth Below Geoid",
+            "units": "m",
+        }
+
+    # ── 4d. Stress diagnostic aliases ─────────────────────────────────────
+    if "eastward_surface_wind_stress" in ds_ocean_2d:
+        ds_ocean_2d["tauuo"] = ds_ocean_2d["eastward_surface_wind_stress"].copy()
+        ds_ocean_2d["tauuo"].attrs = {
+            "long_name": "Surface Downward X Stress",
+            "units": "N/m2",
+        }
+    if "northward_surface_wind_stress" in ds_ocean_2d:
+        ds_ocean_2d["tauvo"] = ds_ocean_2d["northward_surface_wind_stress"].copy()
+        ds_ocean_2d["tauvo"].attrs = {
+            "long_name": "Surface Downward Y Stress",
+            "units": "N/m2",
+        }
+
+    # ── 4e. Derived ocean fluxes ──────────────────────────────────────────
+    # wfo: water flux into ocean = evap + lprec + fprec + lrunoff
+    _wfo_components = ["evap", "lprec", "fprec", "lrunoff"]
+    if all(v in ds_ocean_2d for v in _wfo_components):
+        wfo: xr.DataArray = ds_ocean_2d[_wfo_components[0]].copy()
+        for _c in _wfo_components[1:]:
+            wfo = wfo + ds_ocean_2d[_c]
+        wfo.attrs = {
+            "long_name": "Water Flux Into Sea Water",
+            "units": "kg/(m2 s)",
+        }
+        ds_ocean_2d["wfo"] = wfo
+        print(f"  Derived wfo from {_wfo_components}")
+    else:
+        missing_wfo = [v for v in _wfo_components if v not in ds_ocean_2d]
+        print(f"  WARNING: cannot derive wfo, missing: {missing_wfo}")
+
+    # hfds: net surface heat flux = SW + LW + latent + sensible + Heat_PmE
+    _hfds_components = ["SW", "LW", "latent", "sensible", "Heat_PmE"]
+    if all(v in ds_ocean_2d for v in _hfds_components):
+        hfds: xr.DataArray = ds_ocean_2d[_hfds_components[0]].copy()
+        for _c in _hfds_components[1:]:
+            hfds = hfds + ds_ocean_2d[_c]
+        hfds.attrs = {
+            "long_name": "Downward Heat Flux at Sea Water Surface",
+            "units": "W/m2",
+        }
+        ds_ocean_2d["hfds"] = hfds
+        print(f"  Derived hfds from {_hfds_components}")
+    else:
+        missing_hfds = [v for v in _hfds_components if v not in ds_ocean_2d]
+        print(f"  WARNING: cannot derive hfds, missing: {missing_hfds}")
+
+    # Drop the raw MOM6 flux components now that we've used them
+    _raw_flux_vars = _wfo_components + _hfds_components
+    ds_ocean_2d = ds_ocean_2d.drop_vars(
+        [v for v in _raw_flux_vars if v in ds_ocean_2d], errors="ignore"
+    )
+
+    # ── 5. Atmosphere forcing and sea-ice ─────────────────────────────────
     print("Opening atmosphere zarr...")
     ds_atmo = _open_zarr(config.atmo_zarr, chunks={})
     print(f"  Atmo dims: {dict(ds_atmo.dims)}")
@@ -866,6 +945,8 @@ def compute_lazy_dataset(
         ds_atmo = ds_atmo.assign_coords(
             lat=ds_ocean.lat.values, lon=ds_ocean.lon.values
         )
+        print(f"  Persisting regridded atmo ({dict(ds_atmo.sizes)})...")
+        ds_atmo = ds_atmo.persist()
         print(f"  Regridded atmo to {dict(ds_atmo.sizes)}")
 
     # Restrict ocean data to the common time range
@@ -928,13 +1009,16 @@ def compute_lazy_dataset(
 
     # ── 8. Insert NaNs on land ────────────────────────────────────────────
     mask_2d = ds["mask_2d"]
+    _skip_mask = {"land_fraction", "sea_surface_fraction"}
     for name in ds.data_vars:
         if name.startswith("mask_") or name.startswith("idepth_"):
             continue
-        if name in ("land_fraction", "sea_surface_fraction"):
+        if name in _skip_mask:
             continue
         v = ds[name]
-        if "time" in v.dims and "lat" in v.dims and "lon" in v.dims:
+        if "lat" not in v.dims or "lon" not in v.dims:
+            continue
+        if "time" in v.dims:
             level_match = name.rsplit("_", 1)
             if len(level_match) == 2 and level_match[1].isdigit():
                 level_idx = int(level_match[1])
@@ -942,7 +1026,7 @@ def compute_lazy_dataset(
                 if mask_name in ds:
                     ds[name] = v.where(ds[mask_name] > 0)
                     continue
-            ds[name] = v.where(mask_2d > 0)
+        ds[name] = v.where(mask_2d > 0)
 
     # Fill sea ice on land with NaN, then fill NaN ice fraction with 0
     if "ocean_sea_ice_fraction" in ds:
@@ -953,6 +1037,22 @@ def compute_lazy_dataset(
         ds["HI"] = ds["HI"].where(mask_2d > 0, np.nan)
         if "ocean_sea_ice_fraction" in ds:
             ds["HI"] = ds["HI"].where(ds["ocean_sea_ice_fraction"] > 0, 0.0)
+
+    # sea_ice_volume = HI (ice thickness, already = volume per area)
+    if "HI" in ds:
+        ds["sea_ice_volume"] = ds["HI"].copy()
+        ds["sea_ice_volume"].attrs = {
+            "long_name": "Sea Ice Volume Per Area",
+            "units": "m",
+        }
+
+    # hfds_total_area = hfds * sea_surface_fraction
+    if "hfds" in ds and "sea_surface_fraction" in ds:
+        ds["hfds_total_area"] = ds["hfds"] * ds["sea_surface_fraction"]
+        ds["hfds_total_area"].attrs = {
+            "long_name": "heat flux into sea water scaled by sea surface fraction",
+            "units": "W/m2",
+        }
 
     # ── 8b. Nearest-neighbour fill for residual NaN in 2-D ocean vars ─────
     # After conservative regridding, a small number of coastal ocean cells
@@ -1062,9 +1162,15 @@ def compute_lazy_dataset(
 @click.option(
     "--subsample",
     is_flag=True,
-    help="Only process the first 73 timesteps.",
+    help="Only process the first 73 timesteps (for quick debugging).",
 )
-def main(config, output_store, debug, subsample):
+@click.option(
+    "--n-subsample",
+    type=int,
+    default=None,
+    help="Process the first N ocean timesteps. Overrides --subsample.",
+)
+def main(config, output_store, debug, subsample, n_subsample):
     cfg = UFSReplayDatasetConfig.from_file(config)
 
     if not debug and cfg.dask is not None:
@@ -1073,7 +1179,10 @@ def main(config, output_store, debug, subsample):
         print(client)
         print(client.dashboard_link)
 
-    ds = compute_lazy_dataset(cfg, n_subsample=73 if subsample else None)
+    if n_subsample is None and subsample:
+        n_subsample = 73
+
+    ds = compute_lazy_dataset(cfg, n_subsample=n_subsample)
 
     ds = clear_compressors_encoding(ds)
     print(f"Final output size: {ds.nbytes / 1e9:.1f} GB")

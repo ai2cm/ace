@@ -78,6 +78,7 @@ atmo_forcing_vars:
   lhtfl_ave: LHTFLsfc
   shtfl_ave: SHTFLsfc
   prate_ave: PRATEsfc
+  frozr: total_frozen_precipitation_rate
 
 # Sea-ice variables from FV3
 ice_vars:
@@ -94,7 +95,7 @@ chunking:
 sharding:
   time_dim: 360
 
-n_split: 100
+n_split: 10
 
 dask:
   n_workers: 32
