@@ -361,7 +361,6 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             )
         stepper = config.load_stepper()
         stepper.set_eval()
-        stepper.backfill_deptho(data.dataset_info.vertical_coordinate)
 
         if not config.allow_incompatible_dataset:
             try:
@@ -377,6 +376,13 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         for batch in data.loader:
             initial_time = batch.time.isel(time=0)
             break
+        if config.n_ensemble_per_ic > 1:
+            initial_time = initial_time.isel(
+                sample=np.repeat(
+                    np.arange(initial_time.sizes["sample"]),
+                    config.n_ensemble_per_ic,
+                )
+            )
         variable_metadata = resolve_variable_metadata(
             dataset_metadata=data.variable_metadata,
             stepper_metadata=stepper.training_variable_metadata,

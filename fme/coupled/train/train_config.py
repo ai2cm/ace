@@ -16,18 +16,11 @@ from fme.core.typing_ import Slice
 from fme.core.weight_ops import CopyWeightsConfig
 from fme.coupled.aggregator import InferenceEvaluatorAggregatorConfig
 from fme.coupled.data_loading.config import CoupledDataLoaderConfig
-from fme.coupled.data_loading.getters import (
-    get_gridded_data,
-    get_gridded_train_data,
-    get_inference_data,
-)
+from fme.coupled.data_loading.getters import get_gridded_data, get_inference_data
 from fme.coupled.data_loading.gridded_data import GriddedData, InferenceGriddedData
 from fme.coupled.data_loading.inference import InferenceDataLoaderConfig
 from fme.coupled.dataset_info import CoupledDatasetInfo
-from fme.coupled.requirements import (
-    CoupledDataRequirements,
-    CoupledTrainDataRequirements,
-)
+from fme.coupled.requirements import CoupledDataRequirements
 from fme.coupled.stepper import (
     CoupledStepperConfig,
     CoupledTrainStepper,
@@ -306,25 +299,21 @@ class TrainBuilders:
     def __init__(self, config: TrainConfig):
         self.config = config
 
-    def _get_train_window_data_requirements(self) -> CoupledTrainDataRequirements:
-        return self.config.stepper_training.get_train_window_data_requirements(
-            self.config.stepper
-        )
-
-    def _get_valid_window_data_requirements(self) -> CoupledDataRequirements:
+    def _get_train_window_data_requirements(self) -> CoupledDataRequirements:
         return self.config.stepper.get_evaluation_window_data_requirements(
             self.config.n_coupled_steps
         )
 
     def get_train_data(self) -> GriddedData:
         data_requirements = self._get_train_window_data_requirements()
-        return get_gridded_train_data(
+        return get_gridded_data(
             self.config.train_loader,
             requirements=data_requirements,
+            train=True,
         )
 
     def get_validation_data(self) -> GriddedData:
-        data_requirements = self._get_valid_window_data_requirements()
+        data_requirements = self._get_train_window_data_requirements()
         return get_gridded_data(
             self.config.validation_loader,
             requirements=data_requirements,

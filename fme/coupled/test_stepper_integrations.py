@@ -5,10 +5,6 @@ import pytest
 import torch
 
 from fme.ace.stepper.parameter_init import ParameterInitializationConfig
-from fme.ace.stepper.time_length_probabilities import (
-    TimeLengthProbabilities,
-    TimeLengthProbability,
-)
 from fme.core.coordinates import NullVerticalCoordinate
 from fme.core.loss import StepLossConfig
 from fme.core.optimization import NullOptimization, OptimizationConfig
@@ -475,6 +471,10 @@ def test_coupled_train_stepper_config_rejects_all_null_stochastic_loss():
     """When both realms use a TimeLengthProbabilities sampler whose only
     outcome is steps=0, both loss_contributions are null and the config
     should raise a ValueError."""
+    from fme.ace.stepper.time_length_probabilities import (
+        TimeLengthProbabilities,
+        TimeLengthProbability,
+    )
 
     zero_only_sampler = TimeLengthProbabilities(
         outcomes=[TimeLengthProbability(steps=0, probability=1.0)]
@@ -498,6 +498,11 @@ def test_outer_steps_clamped_to_one_when_both_realms_sample_zero():
     still runs one step so downstream gen_data is non-empty (even though the
     batch contributes zero loss)."""
     from unittest.mock import patch
+
+    from fme.ace.stepper.time_length_probabilities import (
+        TimeLengthProbabilities,
+        TimeLengthProbability,
+    )
 
     sampler = TimeLengthProbabilities(
         outcomes=[

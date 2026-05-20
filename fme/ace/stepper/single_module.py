@@ -1558,10 +1558,12 @@ class TrainStepper(
         self._config = config
 
         self._n_forward_steps_sampler: TimeLengthProbabilities | None = None
+        self._eval_n_forward_steps_sampler: TimeLengthProbabilities | None = None
         self._n_forward_steps_schedule: TimeLengthSchedule | None = None
         if config.n_forward_steps_schedule is not None:
             self._n_forward_steps_schedule = config.n_forward_steps_schedule
 
+        self._is_training: bool = True
         self._epoch: int | None = None  # to keep track of cached values
 
         self._prognostic_names = self._stepper.prognostic_names
@@ -1666,8 +1668,13 @@ class TrainStepper(
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)
-        if self._n_forward_steps_sampler is not None:
-            stochastic_n_forward_steps = self._n_forward_steps_sampler.sample()
+        sampler = (
+            self._n_forward_steps_sampler
+            if self._is_training
+            else self._eval_n_forward_steps_sampler
+        )
+        if sampler is not None:
+            stochastic_n_forward_steps = sampler.sample()
             if stochastic_n_forward_steps > n_forward_steps:
                 raise RuntimeError(
                     "The number of forward steps to train on "
@@ -1690,6 +1697,8 @@ class TrainStepper(
                 gen_step = next(output_iterator)
                 gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
                 output_list.append(gen_step)
+                # Note: here we examine the loss for a single timestep,
+                # not a single model call (which may contain multiple timesteps).
                 target_step = add_ensemble_dim(
                     {
                         k: v.select(self.TIME_DIM, step)
@@ -1780,14 +1789,24 @@ class TrainStepper(
             self._n_forward_steps_sampler = probabilities_from_time_length(
                 self._n_forward_steps_schedule.get_value(epoch)
             )
+            self._eval_n_forward_steps_sampler = TimeLengthProbabilities(
+                outcomes=list(self._n_forward_steps_sampler.outcomes)
+            )
         else:
             self._n_forward_steps_sampler = None
+            self._eval_n_forward_steps_sampler = None
         self._epoch = epoch
 
+    def seed_eval(self, seed: int) -> None:
+        if self._eval_n_forward_steps_sampler is not None:
+            self._eval_n_forward_steps_sampler.seed_rng(seed)
+
     def set_eval(self) -> None:
+        self._is_training = False
         self._stepper.set_eval()
 
     def set_train(self) -> None:
+        self._is_training = True
         self._stepper.set_train()
 
 

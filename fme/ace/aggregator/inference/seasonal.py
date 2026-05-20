@@ -1,7 +1,7 @@
 import dataclasses
 import logging
 from collections.abc import Mapping
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -249,9 +249,10 @@ def _to_dataset(data: TensorMapping, time: xr.DataArray) -> xr.Dataset:
 
 @dataclasses.dataclass
 class SeasonalMetricConfig:
-    type: Literal["seasonal"] = "seasonal"
     variables: list[str] | None = None
     name: str = "seasonal"
+    enabled: bool = True
+    strict: bool = True
 
     def get_name(self) -> str:
         return self.name
