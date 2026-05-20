@@ -4,7 +4,7 @@ import pytest
 import torch
 
 from fme.core.dataset.merged import MergedXarrayDataset, TimePaddedMergedDataset
-from fme.core.dataset.testing import MockDataset
+from fme.core.dataset.testing import MockDataset, assert_dataset_item_length
 
 
 def test_merged_contains_all_data():
@@ -17,10 +17,34 @@ def test_merged_contains_all_data():
     merged_dataset = MergedXarrayDataset(datasets)
     assert len(merged_dataset) == len(datasets[0])
     item = merged_dataset[0]
+    assert_dataset_item_length(item)
     for i in range(3):
         for var in datasets[i].data.keys():
             assert var in item[0]
             assert torch.equal(item[0][var], datasets[i].data[var][0:3])
+
+
+def test_merged_propagates_metadata():
+    datasets = [
+        MockDataset.new(
+            n_times=10,
+            varnames=[f"var_{i}"],
+            sample_n_times=3,
+            labels={"label_a"} if i == 0 else {"label_b"},
+            initial_epoch=5,
+            missing_names=frozenset({f"missing_{i}"}),
+        )
+        for i in range(2)
+    ]
+    merged_dataset = MergedXarrayDataset(datasets)
+    item = merged_dataset[0]
+    assert_dataset_item_length(item)
+    data, time, labels, epoch, missing_names = item
+    assert set(data.keys()) == {"var_0", "var_1"}
+    assert time.shape == (3,)
+    assert labels == {"label_a", "label_b"}
+    assert epoch == 5
+    assert missing_names == frozenset({"missing_0", "missing_1"})
 
 
 def test_merged_set_epoch():
@@ -55,10 +79,10 @@ def test_merged_raises_on_different_epochs():
 def test_merged_raises_on_different_epochs_with_none():
     datasets = [
         MockDataset.new(
-            n_times=10, varnames=[f"var_none"], sample_n_times=3, initial_epoch=None
+            n_times=10, varnames=["var_none"], sample_n_times=3, initial_epoch=None
         ),
         MockDataset.new(
-            n_times=10, varnames=[f"var_0"], sample_n_times=3, initial_epoch=0
+            n_times=10, varnames=["var_0"], sample_n_times=3, initial_epoch=0
         ),
     ]
     merged_dataset = MergedXarrayDataset(datasets)
@@ -96,6 +120,7 @@ def test_time_padded_merged_pads_shorter_with_nan():
     merged = TimePaddedMergedDataset([short_ds, long_ds])
     assert merged.sample_n_times == 5
     item = merged[0]
+    assert_dataset_item_length(item)
     tensors = item[0]
     assert set(tensors.keys()) == {"short_var", "long_var"}
     assert tensors["long_var"].shape[0] == 5
@@ -109,18 +134,22 @@ def test_time_padded_merged_pads_shorter_with_nan():
     assert torch.equal(tensors["long_var"], long_ds.data["long_var"][:5])
 
 
-def test_time_padded_merged_canonical_time_and_labels():
+def test_time_padded_merged_propagates_metadata():
     short_ds, long_ds = _make_aligned_pair(short_n=3, long_n=5)
     short_ds.labels = {"short"}
     long_ds.labels = {"long"}
     short_ds.epoch = 7
     long_ds.epoch = 7
+    short_ds.missing_names = frozenset({"x"})
+    long_ds.missing_names = frozenset({"y"})
     merged = TimePaddedMergedDataset([short_ds, long_ds])
-    _, time, labels, epoch, _ = merged[0]
-    # canonical = the longer dataset, here long_ds
+    item = merged[0]
+    assert_dataset_item_length(item)
+    data, time, labels, epoch, missing_names = item
     assert time.shape == (5,)
     assert labels == {"long"}
     assert epoch == 7
+    assert missing_names == frozenset({"x", "y"})
 
 
 def test_time_padded_merged_canonical_picks_longest_when_first_is_short():
