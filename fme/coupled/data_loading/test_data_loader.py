@@ -25,11 +25,11 @@ from fme.core.coordinates import (
 from fme.core.dataset.merged import MergeNoConcatDatasetConfig
 from fme.core.dataset.xarray import (
     XarrayDataConfig,
-    _get_mask_provider,
+    _get_spatial_mask_provider,
     _get_vertical_coordinate,
     get_horizontal_coordinates,
 )
-from fme.core.mask_provider import MaskProvider
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.typing_ import Slice
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
 from fme.coupled.data_loading.config import CoupledDatasetWithOptionalOceanConfig
@@ -144,8 +144,8 @@ class MockComponentData:
         return pd.Timedelta(self.timedelta).to_pytimedelta()
 
     @property
-    def mask_provider(self) -> MaskProvider:
-        return _get_mask_provider(self.ds, dtype=None)
+    def spatial_mask_provider(self) -> SpatialMaskProvider:
+        return _get_spatial_mask_provider(self.ds, dtype=None)
 
     @property
     def vcoord(self) -> VerticalCoordinate:

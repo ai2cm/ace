@@ -14,8 +14,8 @@ from fme.core.corrector.ocean import (
     _compute_ocean_net_surface_energy_flux,
 )
 from fme.core.gridded_ops import LatLonOperations
-from fme.core.mask_provider import MaskProvider
 from fme.core.ocean_data import OceanData
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.typing_ import TensorMapping
 
 DEVICE = get_device()
@@ -325,8 +325,8 @@ def test_ocean_heat_content_correction(hfds_type):
         "mask_1": mask[:, :, 1],
         "mask_2d": mask[:, :, 0],
     }
-    mask_provider = MaskProvider(masks)
-    ops = LatLonOperations(torch.ones(size=[3, 3]), mask_provider)
+    spatial_mask_provider = SpatialMaskProvider(masks)
+    ops = LatLonOperations(torch.ones(size=[3, 3]), spatial_mask_provider)
 
     idepth = torch.tensor([2.5, 10, 20])
     depth_coordinate = DepthCoordinate(idepth, mask)

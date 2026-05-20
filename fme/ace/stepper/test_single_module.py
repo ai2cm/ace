@@ -66,8 +66,6 @@ from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.loss import StepLossConfig
-from fme.core.mask_provider import MaskProvider
-from fme.core.masking import StaticMaskingConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import (
@@ -78,6 +76,8 @@ from fme.core.optimization import (
 )
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
+from fme.core.spatial_mask_provider import SpatialMaskProvider
+from fme.core.spatial_masking import StaticSpatialMaskingConfig
 from fme.core.step import SingleModuleStepConfig, StepSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallConfig
@@ -129,7 +129,7 @@ def get_data(names: Iterable[str], n_samples, n_time, epoch: int = 0) -> Spheric
 
 def get_dataset_info(
     img_shape=(5, 5),
-    mask_provider=None,
+    spatial_mask_provider=None,
     vertical_coordinate=None,
     horizontal_coordinate=None,
 ) -> DatasetInfo:
@@ -146,7 +146,7 @@ def get_dataset_info(
         horizontal_coordinates=horizontal_coordinate,
         vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
-        mask_provider=mask_provider,
+        spatial_mask_provider=spatial_mask_provider,
     )
 
 
@@ -338,6 +338,42 @@ def test_train_on_batch_addition_series():
     )
 
 
+def test_train_on_batch_per_channel_losses_contain_all_out_names():
+    torch.manual_seed(0)
+    n_steps = 3
+    data_with_ic = get_data(["a", "b", "c"], n_samples=4, n_time=n_steps + 1).data
+    config = _get_stepper_config(["a", "b", "c"], ["a", "b", "c"])
+    stepper = _get_train_stepper(config, loss=StepLossConfig(type="MSE"))
+    stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
+    assert stepped.per_channel_losses is not None
+    assert set(stepped.per_channel_losses.keys()) == {"a", "b", "c"}
+    for info in stepped.per_channel_losses.values():
+        assert info.count > 0
+
+
+def test_train_on_batch_per_channel_losses_include_zero_weighted_channels():
+    """Channels with weight=0 are still reported in per_channel_losses.
+
+    The step is expected to compute and return all out channels regardless
+    of whether they meaningfully contribute to the optimized loss, so that
+    aggregator keys remain stable across batches and forward steps.
+    """
+    torch.manual_seed(0)
+    n_steps = 2
+    data_with_ic = get_data(["a", "b", "c"], n_samples=4, n_time=n_steps + 1).data
+    config = _get_stepper_config(["a", "b", "c"], ["a", "b", "c"])
+    stepper = _get_train_stepper(
+        config,
+        loss=StepLossConfig(type="MSE", weights={"b": 0.0}),
+    )
+    stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
+    assert stepped.per_channel_losses is not None
+    assert set(stepped.per_channel_losses.keys()) == {"a", "b", "c"}
+    for info in stepped.per_channel_losses.values():
+        assert info.count > 0
+    assert stepped.per_channel_losses["b"].loss.item() == 0.0
+
+
 def test_train_on_batch_crps_loss():
     torch.manual_seed(0)
 
@@ -439,6 +475,46 @@ def test_train_on_batch_optimize_last_step_only(optimize_last_step_only: bool):
     else:
         assert len(optimization.accumulate_loss.call_args_list) == n_steps
         assert all(forward_calls_grad_enabled)
+
+
+def test_per_channel_losses_bounded_by_accumulated_loss():
+    """Per-channel loss total must not exceed optimization accumulated loss."""
+    torch.manual_seed(0)
+
+    n_steps = 4
+    data_with_ic: BatchData = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
+
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": torch.nn.Identity()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means=get_scalar_data(["a", "b"], 0.0),
+                            stds=get_scalar_data(["a", "b"], 1.0),
+                        ),
+                    ),
+                )
+            ),
+        ),
+    )
+    stepper = _get_train_stepper(
+        config,
+        optimize_last_step_only=True,
+    )
+    optimization = NullOptimization()
+    stepped = stepper.train_on_batch(data=data_with_ic, optimization=optimization)
+    accumulated_loss = stepped.metrics["loss"]
+    assert stepped.per_channel_losses is not None
+    channel_losses = [info.loss for info in stepped.per_channel_losses.values()]
+    per_channel_mean = sum(channel_losses) / len(channel_losses)
+    assert per_channel_mean <= accumulated_loss + 1e-6
 
 
 def test_train_on_batch_with_prescribed_ocean():
@@ -2046,7 +2122,9 @@ class TestBackfillDeptho:
         assert stepper.training_dataset_info.vertical_coordinate == original_vc
 
 
-def _get_stepper_with_input_masking(dataset_info_has_mask_provider: bool = True):
+def _get_stepper_with_input_masking(
+    dataset_info_has_spatial_mask_provider: bool = True,
+):
     # basic StepperConfig with input_masking configured
     config = StepperConfig(
         step=StepSelector(
@@ -2067,27 +2145,31 @@ def _get_stepper_with_input_masking(dataset_info_has_mask_provider: bool = True)
                 )
             ),
         ),
-        input_masking=StaticMaskingConfig(mask_value=0, fill_value=0.0),
+        input_masking=StaticSpatialMaskingConfig(mask_value=0, fill_value=0.0),
     )
-    mask_provider: MaskProvider | None = None
-    if dataset_info_has_mask_provider:
-        mask_provider = MaskProvider()
-    return config.get_stepper(get_dataset_info(mask_provider=mask_provider))
+    spatial_mask_provider: SpatialMaskProvider | None = None
+    if dataset_info_has_spatial_mask_provider:
+        spatial_mask_provider = SpatialMaskProvider()
+    return config.get_stepper(
+        get_dataset_info(spatial_mask_provider=spatial_mask_provider)
+    )
 
 
 def test_get_stepper_with_input_masking():
     # check that no error is raised when building a stepper with input_masking
-    # configured when the vertical coordinate is a mask_provider
+    # configured when the vertical coordinate is a spatial_mask_provider
 
     # no error raised
-    _ = _get_stepper_with_input_masking(dataset_info_has_mask_provider=True)
+    _ = _get_stepper_with_input_masking(dataset_info_has_spatial_mask_provider=True)
 
 
 def test_get_stepper_with_input_masking_raises():
     # no get_mask_tensor_for method on vertical coordinate raises error when
     # input_masking provided in config
-    with pytest.raises(MissingDatasetInfo, match="mask_provider"):
-        _ = _get_stepper_with_input_masking(dataset_info_has_mask_provider=False)
+    with pytest.raises(MissingDatasetInfo, match="spatial_mask_provider"):
+        _ = _get_stepper_with_input_masking(
+            dataset_info_has_spatial_mask_provider=False
+        )
 
 
 @pytest.mark.parametrize("n_ensemble", [1, 3])
