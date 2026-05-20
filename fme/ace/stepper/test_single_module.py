@@ -2492,3 +2492,37 @@ def test_checkpoint_stepper_config_to_stepper_config(tmp_path: pathlib.Path):
     assert isinstance(loaded_config, StepperConfig)
     assert loaded_config.derived_forcings == original_config.derived_forcings
     assert loaded_config.step.type == original_config.step.type
+
+
+def test_train_on_batch_masked_variable_has_zero_loss_count():
+    """Masked output variable contributes 0 samples to per-channel loss count."""
+    torch.manual_seed(0)
+    n_steps = 1
+    n_samples = 4
+    data_with_ic: BatchData = get_data(
+        ["a", "b"], n_samples=n_samples, n_time=n_steps + 1
+    ).data
+    data_with_ic.data_mask = {
+        "a": torch.ones(n_samples, dtype=torch.bool, device=DEVICE),
+        "b": torch.zeros(n_samples, dtype=torch.bool, device=DEVICE),
+    }
+    config = _get_stepper_config(["a", "b"], ["a", "b"])
+    stepper = _get_train_stepper(config, loss=StepLossConfig(type="MSE"))
+    stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
+    assert stepped.per_channel_losses is not None
+    assert stepped.per_channel_losses["b"].count == 0
+    assert stepped.per_channel_losses["a"].count == n_samples
+
+
+def test_predict_with_data_mask_zeros_masked_forcing():
+    """Masked forcing variable is zeroed in normalized space before the forward pass."""
+    n_steps = 1
+    stepper = _get_stepper(["a", "b"], ["a"], module_name="ChannelSum")
+    input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=["b"])
+    n_samples = forcing_data.data["b"].shape[0]
+    forcing_data.data_mask = {
+        "b": torch.zeros(n_samples, dtype=torch.bool, device=DEVICE),
+    }
+    output, _ = stepper.predict(input_data, forcing_data)
+    ic_a = input_data.as_batch_data().data["a"][:, 0]
+    torch.testing.assert_close(output.data["a"][:, 0], ic_a)
