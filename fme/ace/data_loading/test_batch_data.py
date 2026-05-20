@@ -7,6 +7,7 @@ import xarray as xr
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, _collate_with_masking
 from fme.core.device import get_device
+from fme.core.distributed import Distributed
 from fme.core.labels import BatchLabels
 from fme.core.typing_ import TensorDict
 
@@ -497,6 +498,32 @@ def test_broadcast_ensemble(n_ensemble):
                 ensemble_gen_data.data_mask["bar"][i * n_ensemble + e].item()
                 == original_val
             )
+
+
+@pytest.mark.parallel
+def test_scatter_spatial():
+    names = ["foo", "bar"]
+    n_samples = 2
+    n_times = 5
+    n_lat = 8
+    n_lon = 16
+    horizontal_dims = ["lat", "lon"]
+    batch_data = get_batch_data(
+        names=names,
+        n_samples=n_samples,
+        n_times=n_times,
+        horizontal_dims=horizontal_dims,
+        n_lat=n_lat,
+        n_lon=n_lon,
+    )
+    global_img_shape = (n_lat, n_lon)
+    scattered = batch_data.scatter_spatial(global_img_shape)
+    dist = Distributed.get_instance()
+    local_slices = dist.get_local_slices(global_img_shape)
+    assert_metadata_equal(scattered, batch_data)
+    for name in names:
+        expected = batch_data.data[name][(..., *local_slices)].contiguous()
+        torch.testing.assert_close(scattered.data[name], expected)
 
 
 @pytest.mark.parametrize("n_ensemble", [1, 2, 3])
