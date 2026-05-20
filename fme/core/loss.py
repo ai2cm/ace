@@ -15,6 +15,14 @@ from fme.core.packer import Packer
 from fme.core.typing_ import TensorMapping
 
 
+@dataclasses.dataclass
+class ChannelLossInfo:
+    """Per-channel loss value and the number of batch samples that contributed."""
+
+    loss: torch.Tensor
+    count: int
+
+
 class LossComponent(abc.ABC):
     """A pre-weighted loss tensor that knows how to reduce itself to ``(B, C)``.
 
@@ -75,9 +83,10 @@ class LossOutput:
         self._channel_names = channel_names
         self._mask = mask
         self._per_channel: torch.Tensor | None = None
+        self._counts: list[int] | None = None
 
-    def _get_per_channel(self) -> torch.Tensor:
-        """Return a ``(C,)`` tensor of per-channel losses, computed once.
+    def _reduce(self) -> tuple[torch.Tensor, list[int]]:
+        """Return ``(per_channel, counts)`` tensors, computed once.
 
         When a mask is present (shape ``(B, C)``), each channel's loss
         is averaged only over the batch samples where that channel is
@@ -88,33 +97,52 @@ class LossOutput:
             assert isinstance(bc, torch.Tensor)
             if bc.ndim == 0:
                 self._per_channel = bc.expand(len(self._channel_names))
+                self._counts = [1] * len(self._channel_names)
             elif self._mask is not None:
                 masked_sum = (bc * self._mask).sum(dim=0)
-                counts = self._mask.sum(dim=0).clamp(min=1)
-                self._per_channel = masked_sum / counts
+                self._per_channel = masked_sum / self._mask.sum(dim=0).clamp(min=1)
+                self._counts = [int(c.item()) for c in self._mask.sum(dim=0)]
             else:
                 self._per_channel = bc.mean(dim=0)
-        return self._per_channel
-
-    def _n_active_channels(self) -> int:
-        if self._mask is not None:
-            return int((self._mask.sum(dim=0) > 0).sum().item())
-        return len(self._channel_names)
+                self._counts = [bc.shape[0]] * len(self._channel_names)
+        assert self._per_channel is not None and self._counts is not None
+        return self._per_channel, self._counts
 
     def total(self) -> torch.Tensor:
-        """Scalar loss — the optimisation target."""
-        pc = self._get_per_channel()
+        """Scalar loss used as the optimization target.
+
+        This is the mean of the per-channel losses across channels (over
+        active channels only when a mask is present), not a sum. Adding
+        or removing channels therefore does not change the scale of the
+        returned value.
+        """
+        pc, _ = self._reduce()
         if self._mask is not None:
             active = self._mask.sum(dim=0) > 0
             if active.any():
                 return pc[active].mean()
         return pc.mean()
 
-    def get_channel_losses(self) -> dict[str, torch.Tensor]:
-        """Per-channel scalar losses that sum to ``total()``."""
-        pc = self._get_per_channel()
-        n = self._n_active_channels()
-        return dict(zip(self._channel_names, (pc / n).unbind(0)))
+    def get_channel_losses(self) -> dict[str, ChannelLossInfo]:
+        """Per-channel mean losses with active-sample counts.
+
+        Each :class:`ChannelLossInfo` carries the mean loss for that
+        channel (averaged over active samples only) and the number of
+        batch samples that contributed.  Downstream aggregators should
+        use the counts to compute properly weighted means across
+        batches.
+        """
+        pc, counts = self._reduce()
+        n_channels = len(self._channel_names)
+        if pc.ndim > 0 and pc.shape[0] != n_channels:
+            raise RuntimeError(
+                f"Per-channel loss has {pc.shape[0]} elements but "
+                f"{n_channels} channel names were provided."
+            )
+        return {
+            name: ChannelLossInfo(loss=pc[i], count=counts[i])
+            for i, name in enumerate(self._channel_names)
+        }
 
     def scale(self, weight: float) -> "LossOutput":
         """Return a new ``LossOutput`` with every component scaled."""
@@ -153,33 +181,6 @@ class NaNLoss(torch.nn.Module):
 
     def forward(self, input: torch.Tensor, target: torch.Tensor) -> list[LossComponent]:
         return [StandardLoss(torch.tensor(torch.nan))]
-
-
-def _build_channel_mask(
-    data_mask: TensorMapping,
-    names: list[str],
-    device: torch.device,
-    batch_size: int,
-) -> torch.Tensor:
-    """Build a ``(B, C)`` float mask from per-variable boolean masks.
-
-    Args:
-        data_mask: Per-variable boolean masks of shape ``[batch]``.
-        names: Channel names in packing order.
-        device: Device for the output tensor.
-        batch_size: Size of the batch dimension.
-
-    Returns:
-        Float tensor of shape ``(batch_size, len(names))`` with 1.0
-        for present entries and 0.0 for absent ones.
-    """
-    masks = []
-    for name in names:
-        if name in data_mask:
-            masks.append(data_mask[name].to(device=device, dtype=torch.float))
-        else:
-            masks.append(torch.ones(batch_size, device=device, dtype=torch.float))
-    return torch.stack(masks, dim=1)
 
 
 class WeightedMappingLoss:
@@ -252,25 +253,46 @@ class WeightedMappingLoss:
             target_tensors = torch.where(nan_mask, 0.0, target_tensors)
 
         result = self.loss(predict_tensors, target_tensors)
+        input_ndim = predict_tensors.ndim
+        cdim = (
+            input_ndim + self.channel_dim if self.channel_dim < 0 else self.channel_dim
+        )
+
+        def _wrap_elementwise(t: torch.Tensor) -> StandardLoss:
+            # Element-wise loss tensors have the same shape as the input;
+            # the channel position depends on the data layout (ensemble,
+            # tile, etc.).  Reduce non-(batch, channel) dims here so the
+            # downstream component carries a canonical ``(B, C)`` tensor.
+            dims = tuple(i for i in range(t.ndim) if i not in (0, cdim))
+            reduced = t.mean(dim=dims) if dims else t
+            return StandardLoss(reduced)
+
         if isinstance(result, list):
-            losses = result
+            # Inner losses that return raw element-wise tensors (e.g. MSE,
+            # L1) wrap themselves in StandardLoss but don't know the input
+            # channel layout, so reduce around the actual channel dim here.
+            losses = [
+                _wrap_elementwise(c.loss)
+                if c.loss.ndim == input_ndim and type(c) is StandardLoss
+                else c
+                for c in result
+            ]
         else:
-            cdim = (
-                predict_tensors.ndim + self.channel_dim
-                if self.channel_dim < 0
-                else self.channel_dim
-            )
-            component_cls = StandardLoss if cdim <= 1 else EnsembleComponentLoss
-            losses = [component_cls(result)]
+            losses = [_wrap_elementwise(result)]
 
         mask = None
         if data_mask is not None:
-            mask = _build_channel_mask(
-                data_mask,
-                list(self.packer.names),
-                predict_tensors.device,
-                predict_tensors.shape[0],
-            )
+            batch_size = predict_tensors.shape[0]
+            device = predict_tensors.device
+            filled: dict[str, torch.Tensor] = {}
+            for name in self.packer.names:
+                if name in data_mask:
+                    filled[name] = data_mask[name].to(device=device, dtype=torch.float)
+                else:
+                    filled[name] = torch.ones(
+                        batch_size, device=device, dtype=torch.float
+                    )
+            mask = self.packer.pack(filled, axis=1)
 
         return LossOutput(
             losses=losses,
@@ -743,9 +765,8 @@ class StepLoss(torch.nn.Module):
             predict_dict: The predicted data.
             target_dict: The target data.
             step: The step number, indexed from 0 for the first step.
-            data_mask: Optional per-variable boolean masks forwarded to the
-                underlying ``WeightedMappingLoss`` for correct masked
-                averaging.
+            data_mask: Optional per-variable boolean masks forwarded to
+                the underlying :class:`WeightedMappingLoss`.
 
         Returns:
             A ``LossOutput`` wrapping the step-weighted loss tensor.

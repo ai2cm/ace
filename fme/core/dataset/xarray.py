@@ -31,7 +31,7 @@ from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.time import RepeatedInterval, TimeSlice
 from fme.core.dataset.utils import FillNaNsConfig
-from fme.core.mask_provider import MaskProvider
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.stacker import Stacker
 from fme.core.typing_ import Slice, TensorDict
 
@@ -333,12 +333,14 @@ def get_raw_paths(path, file_pattern):
     return raw_paths
 
 
-def _get_mask_provider(ds: xr.Dataset, dtype: torch.dtype | None) -> MaskProvider:
+def _get_spatial_mask_provider(
+    ds: xr.Dataset, dtype: torch.dtype | None
+) -> SpatialMaskProvider:
     """Get mask provider from a dataset.
 
     If the dataset contains time-invariant variables that start with the string
-    "mask_" then these variables will be used to instantiate a MaskProvider
-    object. Otherwise, an empty MaskProvider is returned.
+    "mask_" then these variables will be used to instantiate a SpatialMaskProvider
+    object. Otherwise, an empty SpatialMaskProvider is returned.
 
     Args:
         ds: Dataset to get vertical coordinates from.
@@ -354,9 +356,9 @@ def _get_mask_provider(ds: xr.Dataset, dtype: torch.dtype | None) -> MaskProvide
     for name in masks:
         if "time" in ds[name].dims:
             raise ValueError("Masks must be time-independent.")
-    mask_provider = MaskProvider(masks)
-    logging.info(f"Initialized {mask_provider}.")
-    return mask_provider
+    spatial_mask_provider = SpatialMaskProvider(masks)
+    logging.info(f"Initialized {spatial_mask_provider}.")
+    return spatial_mask_provider
 
 
 @dataclasses.dataclass
@@ -575,7 +577,9 @@ class XarrayDataset(DatasetABC):
             engine=self.engine,
             chunks=None,
         )
-        self._mask_provider = _get_mask_provider(first_dataset, self.dtype)
+        self._spatial_mask_provider = _get_spatial_mask_provider(
+            first_dataset, self.dtype
+        )
         (
             self._horizontal_coordinates,
             self._static_derived_data,
@@ -697,7 +701,7 @@ class XarrayDataset(DatasetABC):
             self._variable_metadata,
             self._vertical_coordinate,
             self._horizontal_coordinates,
-            self._mask_provider,
+            self._spatial_mask_provider,
             self.timestep,
             self._is_remote,
             self._labels,
