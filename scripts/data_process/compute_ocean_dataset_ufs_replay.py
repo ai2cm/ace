@@ -662,8 +662,13 @@ def compute_lazy_dataset(
     xr.set_options(keep_attrs=True)
 
     # ── 1. Load ocean ─────────────────────────────────────────────────────
+    # Use time chunks matching the sharding size to keep the Dask graph
+    # small.  The zarr source is chunked per-timestep; consolidating into
+    # larger time chunks dramatically reduces graph size and avoids the
+    # "sending large graph" warnings.
+    _time_chunk = config.sharding.time_dim if config.sharding else 360
     print("Opening ocean zarr...")
-    ds_ocean = _open_zarr(config.ocean_zarr, chunks={})
+    ds_ocean = _open_zarr(config.ocean_zarr, chunks={"time": _time_chunk})
     print(f"  Ocean dims: {dict(ds_ocean.dims)}")
 
     if n_subsample is not None:
@@ -726,16 +731,11 @@ def compute_lazy_dataset(
         print(f"  Regridding ocean to Gaussian grid {config.regrid.output_grid}...")
         source_grid = _make_source_grid(ds_ocean)
         ds_ocean = _regrid_dataset(ds_ocean, config.regrid, source_grid)
-        # Persist regridded ocean to cluster memory to avoid recomputing
-        # the regridding graph on every downstream operation.
-        print(f"  Persisting regridded ocean ({dict(ds_ocean.sizes)})...")
-        ds_ocean = ds_ocean.persist()
         print(f"  Regridded ocean to {dict(ds_ocean.sizes)}")
 
         if ho_ds is not None:
             print("  Regridding layer thickness (ho)...")
             ho_ds = _regrid_dataset(ho_ds, config.regrid, source_grid)
-            ho_ds = ho_ds.persist()
             ho_ds = ho_ds.assign_coords(
                 lat=ds_ocean.lat.values, lon=ds_ocean.lon.values
             )
@@ -912,7 +912,7 @@ def compute_lazy_dataset(
 
     # ── 5. Atmosphere forcing and sea-ice ─────────────────────────────────
     print("Opening atmosphere zarr...")
-    ds_atmo = _open_zarr(config.atmo_zarr, chunks={})
+    ds_atmo = _open_zarr(config.atmo_zarr, chunks={"time": _time_chunk})
     print(f"  Atmo dims: {dict(ds_atmo.dims)}")
 
     # Rename horizontal dims to match ocean (lat, lon)
@@ -945,8 +945,6 @@ def compute_lazy_dataset(
         ds_atmo = ds_atmo.assign_coords(
             lat=ds_ocean.lat.values, lon=ds_ocean.lon.values
         )
-        print(f"  Persisting regridded atmo ({dict(ds_atmo.sizes)})...")
-        ds_atmo = ds_atmo.persist()
         print(f"  Regridded atmo to {dict(ds_atmo.sizes)}")
 
     # Restrict ocean data to the common time range
@@ -1065,10 +1063,9 @@ def compute_lazy_dataset(
     # any NaN mismatch is handled by the per-level mask.
     #
     # The NaN pattern is time-invariant, so the NN index map is computed
-    # once from the first timestep and applied to all timesteps.
+    # once from the first timestep and applied lazily to all timesteps.
     from scipy.ndimage import distance_transform_edt
 
-    # Names that are per-level 3-D splits — skip NN fill for these
     _level_var_prefixes = tuple(f"{v}_" for v in VARS_3D)
 
     for name in ds.data_vars:
@@ -1091,7 +1088,6 @@ def compute_lazy_dataset(
         n_fill = int(need_fill.sum())
         print(f"  NN-filling {n_fill} ocean cells for '{name}'")
 
-        # Compute NN index map once from the first timestep
         valid = ~np.isnan(sample)
         _, nn_indices = distance_transform_edt(
             ~valid, return_distances=True, return_indices=True
@@ -1099,10 +1095,24 @@ def compute_lazy_dataset(
         src_rows = nn_indices[0][need_fill]
         src_cols = nn_indices[1][need_fill]
 
-        # Apply to all timesteps at once via numpy indexing
-        data = v.values.copy()  # (time, lat, lon)
-        data[:, need_fill] = data[:, src_rows, src_cols]
-        ds[name] = xr.DataArray(data, dims=v.dims, coords=v.coords, attrs=v.attrs)
+        # Apply lazily so we don't load all timesteps into memory.
+        # Use flat indexing for reliable element-wise NN filling.
+        _nlat, _nlon = ds.sizes["lat"], ds.sizes["lon"]
+        _fill_flat = np.ravel_multi_index(np.where(need_fill), (_nlat, _nlon))
+        _src_flat = np.ravel_multi_index((src_rows, src_cols), (_nlat, _nlon))
+
+        def _apply_nn_fill(block, _ff=_fill_flat, _sf=_src_flat, _n=_nlat * _nlon):
+            shape = block.shape
+            out = block.reshape(shape[:-2] + (_n,)).copy()
+            out[..., _ff] = out[..., _sf]
+            return out.reshape(shape)
+
+        ds[name] = xr.apply_ufunc(
+            _apply_nn_fill,
+            v,
+            dask="parallelized",
+            output_dtypes=[v.dtype],
+        )
 
     # ── 9. Clean up dims / coords ─────────────────────────────────────────
     # Drop any remaining non-spatial dims that slipped through
