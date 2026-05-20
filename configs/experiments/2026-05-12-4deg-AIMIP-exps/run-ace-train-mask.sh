@@ -6,7 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TRAIN_SCRIPT="$SCRIPT_DIR/run-ace-train.sh"
 
 TAGS=(
-    variable-masking-0.80
+    variable-masking-0.20-300e
+    variable-masking-0.80-300e
 )
 
 for tag in "${TAGS[@]}"; do
