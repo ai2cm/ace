@@ -52,8 +52,6 @@ from fme.core.normalizer import (
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.registry import CorrectorSelector, ModuleSelector
-from fme.core.residual_loss import SnapshotResidualLoss, SnapshotResidualLossConfig
-from fme.core.residual_loss import step_label as residual_loss_step_label
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import (
     MultiCallConfig,
@@ -874,39 +872,6 @@ class Stepper:
             normalizer=loss_normalizer,
         )
 
-    def build_residual_loss(
-        self, residual_loss_config: SnapshotResidualLossConfig
-    ) -> SnapshotResidualLoss:
-        """Build a SnapshotResidualLoss for this stepper.
-
-        The residual loss applies to the intersection of ``loss_names`` and
-        ``prognostic_names`` since the IC (``step=0``) carries only
-        prognostic variables. The residual loss loads its own scalar stds
-        from ``residual_stds_path``, independent of the stepper's loss
-        normalizer.
-
-        Args:
-            residual_loss_config: The residual loss configuration.
-
-        Returns:
-            A SnapshotResidualLoss built using the config's own
-            residual stds, the stepper's gridded operations, the
-            residual-loss variable set, and channel dimension.
-        """
-        residual_out_names = [
-            name for name in self.loss_names if name in self.prognostic_names
-        ]
-        if not residual_out_names:
-            raise ValueError(
-                "No variables available for the snapshot residual loss: the "
-                "intersection of loss_names and prognostic_names is empty."
-            )
-        return residual_loss_config.build(
-            self._dataset_info.gridded_operations,
-            out_names=residual_out_names,
-            channel_dim=self.CHANNEL_DIM,
-        )
-
     @property
     def config(self) -> StepperConfig:
         return self._config
@@ -1481,12 +1446,6 @@ class TrainStepperConfig:
             be less than or equal to the number of timesteps present
             in the training dataset samples.
         parameter_init: The parameter initialization configuration for fine-tuning.
-        residual_loss: Optional snapshot residual loss term applied between
-            configured pairs of rollout timesteps. ``step=0`` denotes the
-            initial condition. The residual loss is added to the per-step
-            loss when accumulating gradients. Pairs whose maximum endpoint
-            exceeds the maximum forward steps in ``n_forward_steps`` are
-            rejected at config init.
     """
 
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
@@ -1496,7 +1455,6 @@ class TrainStepperConfig:
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
-    residual_loss: SnapshotResidualLossConfig | None = None
 
     def __post_init__(self):
         if self.n_ensemble == -1:
@@ -1504,28 +1462,6 @@ class TrainStepperConfig:
                 self.n_ensemble = 2
             else:
                 self.n_ensemble = 1
-        self._validate_residual_loss()
-
-    def _validate_residual_loss(self) -> None:
-        if self.residual_loss is None:
-            return
-        schedule = self.n_forward_steps_schedule
-        if schedule is None:
-            # No schedule means the stepper trains on whatever number of
-            # forward steps are present in the data; we cannot validate
-            # against an upper bound here, so defer runtime filtering to
-            # update_max_n_forward_steps.
-            return
-        max_steps = schedule.max_n_forward_steps.max_value
-        max_residual_step = self.residual_loss.max_step
-        if max_residual_step > max_steps:
-            raise ValueError(
-                "SnapshotResidualLossConfig has a step "
-                f"({max_residual_step}) greater than the maximum forward steps "
-                f"in n_forward_steps ({max_steps}). Steps exceeding "
-                "the rollout length are unreachable; reduce the step or "
-                "increase n_forward_steps."
-            )
 
     @property
     def n_forward_steps_schedule(self) -> TimeLengthSchedule | None:
@@ -1631,11 +1567,6 @@ class TrainStepper(
         self._prognostic_names = self._stepper.prognostic_names
         self._derive_func = self._stepper.derive_func
         self._loss_obj = self._stepper.build_loss(config.loss)
-        self._residual_loss_obj: SnapshotResidualLoss | None = (
-            None
-            if config.residual_loss is None
-            else self._stepper.build_residual_loss(config.residual_loss)
-        )
 
     def train_on_batch(
         self,
@@ -1746,50 +1677,12 @@ class TrainStepper(
                     "data requirements are retrieved, so this is a bug."
                 )
             n_forward_steps = stochastic_n_forward_steps
-        # Setup for the optional snapshot residual loss term: filter the
-        # configured steps against this batch's sampled rollout length, and
-        # collect references to the predictions/targets at the steps needed.
-        # The user-facing step index is 1-indexed (with step=0 reserved for
-        # the IC), while the loop variable below is 0-indexed.
-        # ``residual_step_index = step + 1`` translates between them.
-        #
-        # Each active residual step's contribution is folded into the loss
-        # passed to ``optimization.accumulate_loss`` at the loop iteration
-        # where it becomes computable. Combined with the reference-endpoint
-        # detach inside :class:`SnapshotResidualLoss`, this keeps each
-        # residual backward confined to the still-live graph and is therefore
-        # safe under ``use_gradient_accumulation=True``.
-        needed_for_residual: set[int] = set()
-        predictions_for_residual: dict[int, TensorMapping] = {}
-        targets_for_residual: dict[int, TensorMapping] = {}
-        remaining_uses: dict[int, int] = {}
-        residual_total_detached: torch.Tensor | None = None
-        if self._residual_loss_obj is not None:
-            self._residual_loss_obj.update_max_n_forward_steps(n_forward_steps)
-            needed_for_residual = self._residual_loss_obj.needed_steps()
-            for s in self._residual_loss_obj.active_steps:
-                remaining_uses[s] = remaining_uses.get(s, 0) + 1
-                ref = s - 1
-                remaining_uses[ref] = remaining_uses.get(ref, 0) + 1
-            if 0 in needed_for_residual:
-                ic_data = input_data.as_batch_data().data
-                ic_dict = add_ensemble_dim(
-                    {
-                        k: ic_data[k].select(self.TIME_DIM, -1)
-                        for k in self._residual_loss_obj.out_names
-                    }
-                )
-                predictions_for_residual[0] = ic_dict
-                targets_for_residual[0] = ic_dict
-
         per_channel_sum: dict[str, torch.Tensor] | None = None
         for step in range(n_forward_steps):
             optimize_step = (
                 step == n_forward_steps - 1 or not self._config.optimize_last_step_only
             )
-            residual_step_index = step + 1
-            retain_for_residual = residual_step_index in needed_for_residual
-            if optimize_step or retain_for_residual:
+            if optimize_step:
                 context = contextlib.nullcontext()
             else:
                 context = torch.no_grad()
@@ -1812,49 +1705,8 @@ class TrainStepper(
                 else:
                     for k in per_channel_sum:
                         per_channel_sum[k] = per_channel_sum[k] + per_ch[k].detach()
-                if retain_for_residual:
-                    predictions_for_residual[residual_step_index] = gen_step
-                    targets_for_residual[residual_step_index] = target_step
-
-            weighted_residual: torch.Tensor | None = None
-            if self._residual_loss_obj is not None:
-                completing = self._residual_loss_obj.steps_completing_at(
-                    residual_step_index
-                )
-                for res_step in completing:
-                    loss_val = self._residual_loss_obj.compute_step_loss(
-                        res_step, predictions_for_residual, targets_for_residual
-                    )
-                    weighted_val = self._residual_loss_obj.weight * loss_val
-                    label = residual_loss_step_label(res_step)
-                    metrics[f"residual_loss_{label}"] = weighted_val.detach()
-                    residual_total_detached = (
-                        weighted_val.detach()
-                        if residual_total_detached is None
-                        else residual_total_detached + weighted_val.detach()
-                    )
-                    weighted_residual = (
-                        weighted_val
-                        if weighted_residual is None
-                        else weighted_residual + weighted_val
-                    )
-                # Drop stored predictions/targets once no longer needed.
-                for res_step in completing:
-                    for s in (res_step, res_step - 1):
-                        remaining_uses[s] -= 1
-                        if remaining_uses[s] == 0:
-                            predictions_for_residual.pop(s, None)
-                            targets_for_residual.pop(s, None)
-
-            if optimize_step and weighted_residual is not None:
-                optimization.accumulate_loss(step_total_loss + weighted_residual)
-            elif optimize_step:
+            if optimize_step:
                 optimization.accumulate_loss(step_total_loss)
-            elif weighted_residual is not None:
-                optimization.accumulate_loss(weighted_residual)
-
-        if residual_total_detached is not None:
-            metrics["loss_residual_total"] = residual_total_detached
         return output_list, per_channel_sum
 
     def update_training_history(self, training_job: TrainingJob) -> None:
