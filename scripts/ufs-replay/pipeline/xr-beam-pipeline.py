@@ -1170,12 +1170,20 @@ def main():
     # --- Open source datasets ---
     logging.info("Opening datasets")
 
-    # Determine which ocean variables to load
-    ocean_3d_vars = list(VARS_3D)
+    # Determine which ocean variables to load (use source names, not
+    # post-rename names — the MOM6 store has "temp" not "thetao")
+    ocean_source_3d = list(OCEAN_RENAME.keys()) + [
+        v for v in VARS_3D if v not in OCEAN_RENAME.values()
+    ]
     ocean_surface = list(OCEAN_SURFACE_VARS)
+    ocean_stress = list(STRESS_RENAME.keys())
     ocean_flux_vars = WFO_COMPONENTS + HFDS_COMPONENTS
     ocean_load_vars = (
-        ocean_3d_vars + ["so", "ho", "depth"] + ocean_surface + ocean_flux_vars
+        ocean_source_3d
+        + ["ho", "depth"]
+        + ocean_surface
+        + ocean_stress
+        + ocean_flux_vars
     )
     # Deduplicate
     ocean_load_vars = list(dict.fromkeys(ocean_load_vars))
