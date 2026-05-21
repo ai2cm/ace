@@ -188,11 +188,62 @@ class BestStudentCheckpointCallback:
         crps_sum: dict[str, float] = {}
         count: dict[str, int] = {}
 
+        teacher_time_index = teacher_ds.indexes["time"]
+        try:
+            import fastgen.utils.logging_utils as logger
+
+            _log = logger.info
+        except ImportError:
+            import logging
+
+            _log = logging.getLogger(__name__).info
+
+        _log(
+            f"[BestStudentCallback] teacher_ds time index: "
+            f"n={len(teacher_time_index)}, dtype={type(teacher_time_index).__name__}, "
+            f"first={teacher_time_index[0]!r}, last={teacher_time_index[-1]!r}"
+        )
+
+        batch_idx = 0
+        n_skipped_batches = 0
+        n_skipped_times = 0
         for batch in batch_iter:
+            times = batch.time.values  # (B,) numpy time stamps
+
+            # Filter to times present in the teacher zarr; skip the batch if
+            # none overlap. Avoids wasted student sampling on unmatched times.
+            keep_mask = np.array([t in teacher_time_index for t in times])
+            if batch_idx == 0:
+                _log(
+                    f"[BestStudentCallback] batch 0 times: "
+                    f"dtype={times.dtype}, sample={list(times[:4])!r}, "
+                    f"keep_mask={keep_mask.tolist()}"
+                )
+            if not keep_mask.all():
+                missing = [t for t, keep in zip(times, keep_mask) if not keep]
+                _log(
+                    f"[BestStudentCallback] batch {batch_idx}: "
+                    f"{(~keep_mask).sum()}/{len(times)} times not in teacher zarr "
+                    f"(e.g. {missing[:3]!r})"
+                )
+                n_skipped_times += int((~keep_mask).sum())
+            if not keep_mask.any():
+                n_skipped_batches += 1
+                batch_idx += 1
+                continue
+            batch_idx += 1
+
             # Build condition tensor from coarse inputs (same path as training).
             static_inputs = teacher_model._subset_static_if_available(batch)
             condition = teacher_model._get_input_from_coarse(batch.data, static_inputs)
             # condition: (B, C_cond, H_fine, W_fine)
+
+            if not keep_mask.all():
+                keep_idx = torch.from_numpy(np.flatnonzero(keep_mask)).to(
+                    condition.device
+                )
+                condition = condition.index_select(0, keep_idx)
+                times = times[keep_mask]
 
             B, _, H, W = condition.shape
             C_out = len(teacher_model.out_packer.names)
@@ -211,8 +262,6 @@ class BestStudentCheckpointCallback:
             output = teacher_model.normalizer.fine.denormalize(
                 teacher_model.out_packer.unpack(output_norm, axis=-3)
             )
-
-            times = batch.time.values  # (B,) numpy time stamps
             # Fine-resolution lat/lon for this (possibly patched) batch.
             fine_coords = teacher_model.get_fine_coords_for_batch(batch)
             fine_lats = fine_coords.lat.cpu().numpy()
@@ -238,6 +287,12 @@ class BestStudentCheckpointCallback:
                     crps_map = _crps_ensemble(student_tensor[i], teacher_batch[i])
                     crps_sum[var] = crps_sum.get(var, 0.0) + float(crps_map.sum())
                     count[var] = count.get(var, 0) + crps_map.numel()
+
+        _log(
+            f"[BestStudentCallback] validation summary: "
+            f"batches_processed={batch_idx}, batches_skipped={n_skipped_batches}, "
+            f"unmatched_times={n_skipped_times}"
+        )
 
         if not crps_sum:
             return float("inf")
