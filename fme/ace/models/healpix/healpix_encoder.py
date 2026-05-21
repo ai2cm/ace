@@ -18,6 +18,7 @@
 import dataclasses
 from typing import List, Literal, Optional, Sequence
 
+import torch as th
 import torch.nn as nn
 
 from .healpix_blocks import ConvBlockConfig, DownsamplingBlockConfig
@@ -159,7 +160,7 @@ class UNetEncoder(nn.Module):
 
         self.encoder = nn.ModuleList(self.encoder)
 
-    def forward(self, inputs):
+    def forward(self, inputs: th.Tensor) -> Sequence[th.Tensor]:
         """
         Forward pass of the HEALPix Unet encoder
 

@@ -196,12 +196,12 @@ class UNetDecoder(nn.Module):
         )
         self.output_layer = out_cfg.build()
 
-    def forward(self, inputs):
+    def forward(self, inputs: Sequence[th.Tensor]) -> th.Tensor:
         """
         Forward pass of the UNetDecoder.
 
         Args:
-            inputs: The inputs to the forward pass.
+            inputs: Sequence of tensors, one for each decoder level.
 
         Returns:
             The decoded values.
