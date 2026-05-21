@@ -1,0 +1,10 @@
+name: ufs-replay-ingest
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - esmf
+  - xesmf
+  - pip
+  - pip:
+    - -r dataflow-requirements.txt
