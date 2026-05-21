@@ -38,6 +38,16 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
         output_dir: str | None = None,
         loss_scaling: TensorMapping | None = None,
     ):
+        """
+        Args:
+            aggregators: Named sub-aggregators keyed by metric name. Must
+                include a ``"mean_norm"`` entry.
+            coords: Coordinate arrays for writing diagnostics.
+            save_diagnostics: Whether to save diagnostics.
+            output_dir: Directory to write diagnostics to.
+            loss_scaling: Dictionary of variables and their scaling factors
+                used in loss computation.
+        """
         if save_diagnostics and output_dir is None:
             raise ValueError("Output directory must be set to save diagnostics.")
         if "mean_norm" not in aggregators:
