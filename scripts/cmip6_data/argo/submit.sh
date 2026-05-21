@@ -18,6 +18,11 @@
 #   --process                  Run the dataset processing step.
 #   --stats                    Run per-dataset stats + presence table.
 #   --normalization            Run pooled normalization.
+#   --stage-externals          Run external_forcings.py once to stage
+#                              CO2/SO2/BC/forest into
+#                              <output>/external_forcings/. Heavy one-time
+#                              step (~30 GB source download); re-running
+#                              skips already-staged scenarios.
 #
 # Prerequisites:
 #   - argo CLI
@@ -35,6 +40,7 @@ CMIP6_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 RUN_PROCESS=false
 RUN_STATS=false
 RUN_NORMALIZATION=false
+RUN_STAGE_EXTERNALS=false
 INVENTORY_CONFIG=""
 
 while [[ "$#" -gt 0 ]]
@@ -46,6 +52,7 @@ do case $1 in
     --process) RUN_PROCESS=true;;
     --stats) RUN_STATS=true;;
     --normalization) RUN_NORMALIZATION=true;;
+    --stage-externals) RUN_STAGE_EXTERNALS=true;;
     *) echo "Unknown parameter passed: $1"
     exit 1;;
 esac
@@ -57,8 +64,8 @@ if [[ -z "${CONFIG}" ]]; then
     exit 1
 fi
 
-if [[ "${RUN_PROCESS}" = false && "${RUN_STATS}" = false && "${RUN_NORMALIZATION}" = false ]]; then
-    echo "At least one of --process, --stats, or --normalization must be specified"
+if [[ "${RUN_PROCESS}" = false && "${RUN_STATS}" = false && "${RUN_NORMALIZATION}" = false && "${RUN_STAGE_EXTERNALS}" = false ]]; then
+    echo "At least one of --process, --stats, --normalization, or --stage-externals must be specified"
     exit 1
 fi
 
@@ -77,25 +84,27 @@ if [[ -n "${INVENTORY_CONFIG}" ]]; then
     fi
 fi
 
-# Enumerate datasets via process.py --dry-run.  This reads the
-# inventory (which may be on GCS) and applies the config's selection
-# rules to produce the full task list.
-echo "Enumerating datasets from config..."
-dataset_lines=$(cd "${CMIP6_DIR}" && python process.py --config "${ABS_CONFIG}" --dry-run)
+# Enumerate datasets via process.py --dry-run when --process is requested.
+# (Skip when only running --stage-externals / --stats / --normalization, which
+# don't need the per-dataset task list and may not have a GCS inventory yet.)
 dataset_keys=()
-while IFS=$'\t' read -r source_id experiment variant_label; do
-    dataset_keys+=("${source_id}/${experiment}/${variant_label}")
-done <<< "${dataset_lines}"
+if [[ "${RUN_PROCESS}" = true ]]; then
+    echo "Enumerating datasets from config..."
+    dataset_lines=$(cd "${CMIP6_DIR}" && python process.py --config "${ABS_CONFIG}" --dry-run)
+    while IFS=$'\t' read -r source_id experiment variant_label; do
+        dataset_keys+=("${source_id}/${experiment}/${variant_label}")
+    done <<< "${dataset_lines}"
+    echo "Found ${#dataset_keys[@]} datasets."
+fi
 
 datasets_count=${#dataset_keys[@]}
 datasets_count_minus_one=$((datasets_count - 1))
-
-echo "Found ${datasets_count} datasets."
 
 output=$(argo submit "${SCRIPT_DIR}/workflow.yaml" \
     -p run_process="${RUN_PROCESS}" \
     -p run_stats="${RUN_STATS}" \
     -p run_normalization="${RUN_NORMALIZATION}" \
+    -p run_stage_externals="${RUN_STAGE_EXTERNALS}" \
     -p config="$(< "${ABS_CONFIG}")" \
     -p dataset_keys="${dataset_keys[*]}" \
     -p datasets_count_minus_one="${datasets_count_minus_one}")
