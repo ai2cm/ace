@@ -12,9 +12,10 @@ n_forward_steps: 1460968  # 1000 years
 experiment_dir: /results
 forcing_loader:
   dataset:
+    # All forcing variables but the CO2 are identical in all climates.
     data_path: /climate-default/2026-05-21-ace2-som-hugging-face/ACE2-SOM/forcing_data/1xCO2
+    n_repeats: 251  # Ensure we have at least 1000 years worth of forcing data.
   num_data_workers: 8
-  n_repeats: 251  # Ensure we have at least 1000 years worth of forcing data.
 initial_condition:
   path: PLACEHOLDER
   start_indices:
