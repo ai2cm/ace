@@ -7,8 +7,12 @@ import xarray as xr
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, _collate_with_masking
 from fme.core.device import get_device
+from fme.core.distributed import Distributed
 from fme.core.labels import BatchLabels
 from fme.core.typing_ import TensorDict
+
+_METADATA_FIELDS = {"horizontal_dims", "epoch", "n_ensemble", "labels", "data_mask"}
+_NON_METADATA_FIELDS = {"data", "time"}
 
 
 def assert_metadata_equal(
@@ -18,6 +22,13 @@ def assert_metadata_equal(
     check_n_ensemble: bool = True,
     check_data_mask: bool = True,
 ):
+    actual_fields = {f.name for f in dataclasses.fields(BatchData)}
+    unexpected = actual_fields - _METADATA_FIELDS - _NON_METADATA_FIELDS
+    if unexpected:
+        raise AssertionError(
+            f"BatchData has new fields {unexpected} not covered by "
+            f"assert_metadata_equal. Update this helper to check them."
+        )
     assert a.horizontal_dims == b.horizontal_dims
     assert a.epoch == b.epoch
     if check_n_ensemble:
@@ -201,6 +212,35 @@ def test_to_cpu():
         )
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="pin_memory requires CUDA")
+def test_pin_memory():
+    names = ["foo", "bar"]
+    n_samples = 2
+    n_times = 5
+    n_lat = 8
+    n_lon = 16
+    horizontal_dims = ["lat", "lon"]
+    batch_data = get_batch_data(
+        names=names,
+        n_samples=n_samples,
+        n_times=n_times,
+        horizontal_dims=horizontal_dims,
+        n_lat=n_lat,
+        n_lon=n_lon,
+        n_labels=2,
+    )
+    cpu_data = batch_data.to_cpu()
+    pinned = cpu_data.pin_memory()
+    assert_metadata_equal(pinned, cpu_data)
+    for name in names:
+        assert pinned.data[name].is_pinned()
+    assert pinned.labels is not None
+    assert pinned.labels.tensor.is_pinned()
+    assert pinned.data_mask is not None
+    for name in names:
+        assert pinned.data_mask[name].is_pinned()
+
+
 @pytest.mark.parametrize(
     "epoch_1, epoch_2",
     [
@@ -243,6 +283,12 @@ def test_get_start(names: list[str], prognostic_names: list[str], n_ic_timesteps
     assert_metadata_equal(start, batch_data, check_data_mask=False)
     assert start.time.equals(batch_data.time.isel(time=slice(0, n_ic_timesteps)))
     assert set(start.data.keys()) == set(prognostic_names)
+    if batch_data.data_mask is not None:
+        assert start.data_mask is not None
+        for name in prognostic_names:
+            torch.testing.assert_close(
+                start.data_mask[name].cpu(), batch_data.data_mask[name].cpu()
+            )
     for name in prognostic_names:
         assert start.data[name].shape == (n_samples, n_ic_timesteps, n_lat, n_lon)
         np.testing.assert_allclose(
@@ -311,6 +357,12 @@ def test_get_end(names: list[str], prognostic_names: list[str], n_ic_timesteps: 
     assert_metadata_equal(end, batch_data, check_data_mask=False)
     assert end.time.equals(batch_data.time.isel(time=slice(-n_ic_timesteps, None)))
     assert set(end.data.keys()) == set(prognostic_names)
+    if batch_data.data_mask is not None:
+        assert end.data_mask is not None
+        for name in prognostic_names:
+            torch.testing.assert_close(
+                end.data_mask[name].cpu(), batch_data.data_mask[name].cpu()
+            )
     for name in prognostic_names:
         assert end.data[name].shape == (n_samples, n_ic_timesteps, n_lat, n_lon)
         np.testing.assert_allclose(
@@ -475,6 +527,42 @@ def test_broadcast_ensemble(n_ensemble):
         check_n_ensemble=False,
         check_data_mask=False,
     )
+
+    assert ensemble_gen_data.data_mask is not None
+    assert ensemble_gen_data.data_mask["bar"].shape == (n_ensemble * n_samples,)
+    for i in range(n_samples):
+        original_val = gen_data.data_mask["bar"][i].item()
+        for e in range(n_ensemble):
+            assert (
+                ensemble_gen_data.data_mask["bar"][i * n_ensemble + e].item()
+                == original_val
+            )
+
+
+@pytest.mark.parallel
+def test_scatter_spatial():
+    names = ["foo", "bar"]
+    n_samples = 2
+    n_times = 5
+    n_lat = 8
+    n_lon = 16
+    horizontal_dims = ["lat", "lon"]
+    batch_data = get_batch_data(
+        names=names,
+        n_samples=n_samples,
+        n_times=n_times,
+        horizontal_dims=horizontal_dims,
+        n_lat=n_lat,
+        n_lon=n_lon,
+    )
+    global_img_shape = (n_lat, n_lon)
+    scattered = batch_data.scatter_spatial(global_img_shape)
+    dist = Distributed.get_instance()
+    local_slices = dist.get_local_slices(global_img_shape)
+    assert_metadata_equal(scattered, batch_data)
+    for name in names:
+        expected = batch_data.data[name][(..., *local_slices)].contiguous()
+        torch.testing.assert_close(scattered.data[name], expected)
 
 
 @pytest.mark.parametrize("n_ensemble", [1, 2, 3])
@@ -656,46 +744,6 @@ def test_paired_data_as_ensemble_tensor_dicts_shape():
         assert u_pred[name].shape[:2] == (n_s, n_ensemble)
 
 
-def _make_data_mask(
-    names: list[str], n_samples: int, device=None
-) -> dict[str, torch.Tensor]:
-    if device is None:
-        device = get_device()
-    return {
-        name: torch.ones(n_samples, dtype=torch.bool, device=device) for name in names
-    }
-
-
-def test_data_mask_broadcast_ensemble():
-    names = ["foo", "bar"]
-    n_samples = 2
-    n_ensemble = 3
-    data_mask = _make_data_mask(names, n_samples)
-    data_mask["bar"][1] = False
-    base = get_batch_data(
-        names=names,
-        n_samples=n_samples,
-        n_times=5,
-        horizontal_dims=["lat", "lon"],
-    )
-    base = BatchData(
-        data=base.data,
-        time=base.time,
-        horizontal_dims=base.horizontal_dims,
-        epoch=base.epoch,
-        data_mask=data_mask,
-    )
-    broadcasted = base.broadcast_ensemble(n_ensemble)
-    assert set(broadcasted.data_mask) == set(names)
-    assert broadcasted.data_mask["bar"].shape == (n_samples * n_ensemble,)
-    # sample 0 was True, sample 1 was False; repeat_interleave keeps order
-    expected = torch.tensor(
-        [True, True, True, False, False, False],
-        device=broadcasted.data_mask["bar"].device,
-    )
-    torch.testing.assert_close(broadcasted.data_mask["bar"], expected)
-
-
 def test_data_mask_raises_if_length_does_not_match_n_samples():
     base = get_batch_data(
         names=["foo"],
@@ -788,5 +836,7 @@ def test_collate_with_masking_variable_missing_from_all_samples():
         sample_missing_names=[frozenset({"y"}), frozenset({"y"})],
     )
     assert "x" in batch_data
-    assert "y" not in batch_data
-    assert data_mask is None
+    assert "y" in batch_data
+    assert data_mask is not None
+    assert data_mask["x"].all()
+    assert not data_mask["y"].any()

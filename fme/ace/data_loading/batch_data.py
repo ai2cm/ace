@@ -35,8 +35,7 @@ def _collate_with_masking(
 
     Each sample dict is expected to contain all variables (NaN-filled for
     missing ones), so ``default_collate`` can stack them without Python
-    loops over variables and samples.  Variables missing from *every*
-    sample are removed from the result.
+    loops over variables and samples.
 
     Args:
         sample_data: Per-sample dictionaries of tensors (all with the same keys).
@@ -57,21 +56,14 @@ def _collate_with_masking(
 
     data_mask: TensorDict = {}
     any_masked = False
-    names_to_remove: list[str] = []
 
     for name in batch_data:
         present = torch.tensor(
             [name not in (m or frozenset()) for m in sample_missing_names]
         )
-        if not present.any():
-            names_to_remove.append(name)
-        else:
-            data_mask[name] = present
-            if not present.all():
-                any_masked = True
-
-    for name in names_to_remove:
-        del batch_data[name]
+        data_mask[name] = present
+        if not present.all():
+            any_masked = True
 
     if not any_masked:
         return batch_data, None
@@ -119,6 +111,9 @@ class BatchData:
             This is a suggestion for the purpose of computing ensemble metrics.
             For example, an ensemble is something you would want to compute CRPS
             or ensemble mean RMSE over.
+        data_mask: Per-variable boolean tensors of shape ``[n_samples]`` where
+            True means the variable is present for that sample. None when all
+            variables are present in all samples.
     """
 
     data: TensorMapping
@@ -254,7 +249,7 @@ class BatchData:
             time=self.time,
             horizontal_dims=self.horizontal_dims,
             epoch=self.epoch,
-            labels=self.labels,
+            labels=self.labels.to("cpu") if self.labels is not None else None,
             n_ensemble=self.n_ensemble,
             data_mask=(
                 {k: v.cpu() for k, v in self.data_mask.items()}
@@ -584,6 +579,8 @@ class BatchData:
 
         """
         self.data = {name: tensor.pin_memory() for name, tensor in self.data.items()}
+        if self.labels is not None:
+            self.labels = self.labels.pin_memory()
         if self.data_mask is not None:
             self.data_mask = {
                 name: tensor.pin_memory() for name, tensor in self.data_mask.items()

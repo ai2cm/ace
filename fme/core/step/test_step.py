@@ -30,7 +30,7 @@ from fme.core.step.secondary_module import SecondaryModuleStepConfig
 from fme.core.step.single_module import (
     SingleModuleStepConfig,
     _apply_input_mask,
-    _build_channel_mask_inputs,
+    _build_channel_mask_dict,
 )
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.typing_ import TensorDict
@@ -1096,37 +1096,41 @@ def test_step_with_data_mask():
         assert not torch.allclose(output_with_mask[name][2:], output_no_mask[name][2:])
 
 
-def test_build_channel_mask_inputs_with_data_mask():
+def test_build_channel_mask_dict_with_data_mask():
     in_names = ["a", "b"]
     packed = torch.zeros(3, 2, 8, 16)
     data_mask = {
         "a": torch.tensor([True, False, True]),
         "b": torch.tensor([False, True, True]),
     }
-    result = _build_channel_mask_inputs(in_names, data_mask, packed)
-    assert result.shape == (3, 2, 8, 16)
-    assert result[0, 0, 0, 0] == 1.0
-    assert result[1, 0, 0, 0] == 0.0
-    assert result[0, 1, 0, 0] == 0.0
-    assert result[1, 1, 0, 0] == 1.0
-    assert (result[2] == 1.0).all()
+    result = _build_channel_mask_dict(in_names, data_mask, packed)
+    assert set(result) == {"a", "b"}
+    assert result["a"].shape == (3, 8, 16)
+    assert result["a"][0, 0, 0] == 1.0
+    assert result["a"][1, 0, 0] == 0.0
+    assert result["a"][2, 0, 0] == 1.0
+    assert result["b"][0, 0, 0] == 0.0
+    assert result["b"][1, 0, 0] == 1.0
+    assert (result["b"][2] == 1.0).all()
 
 
-def test_build_channel_mask_inputs_no_data_mask():
+def test_build_channel_mask_dict_no_data_mask():
     packed = torch.zeros(2, 3, 4, 8)
-    result = _build_channel_mask_inputs(["x", "y", "z"], None, packed)
-    assert result.shape == (2, 3, 4, 8)
-    assert (result == 1.0).all()
+    result = _build_channel_mask_dict(["x", "y", "z"], None, packed)
+    assert set(result) == {"x", "y", "z"}
+    for name in result:
+        assert result[name].shape == (2, 4, 8)
+        assert (result[name] == 1.0).all()
 
 
-def test_build_channel_mask_inputs_partial_mask():
+def test_build_channel_mask_dict_partial_mask():
     packed = torch.zeros(2, 2, 4, 8)
     data_mask = {"a": torch.tensor([True, False])}
-    result = _build_channel_mask_inputs(["a", "b"], data_mask, packed)
-    assert result.shape == (2, 2, 4, 8)
-    assert result[0, 0, 0, 0] == 1.0
-    assert result[1, 0, 0, 0] == 0.0
-    assert (result[:, 1] == 1.0).all()
+    result = _build_channel_mask_dict(["a", "b"], data_mask, packed)
+    assert set(result) == {"a", "b"}
+    assert result["a"][0, 0, 0] == 1.0
+    assert result["a"][1, 0, 0] == 0.0
+    assert (result["b"] == 1.0).all()
 
 
 def test_step_with_include_channel_mask_inputs():

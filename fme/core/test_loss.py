@@ -19,7 +19,6 @@ from fme.core.loss import (
     StepLossConfig,
     VariableWeightingLoss,
     WeightedMappingLoss,
-    _build_channel_mask,
     _construct_weight_tensor,
 )
 from fme.core.normalizer import StandardNormalizer
@@ -220,7 +219,8 @@ def test_WeightedMappingLoss(mean, scale):
     torch.testing.assert_close(result.total(), expected_scalar)
     channel_losses = result.get_channel_losses()
     assert set(channel_losses.keys()) == set(out_names)
-    torch.testing.assert_close(sum(channel_losses.values()), expected_scalar)
+    channel_mean = torch.stack([v.loss for v in channel_losses.values()]).mean()
+    torch.testing.assert_close(channel_mean, expected_scalar)
 
 
 def test_VariableWeightingLoss():
@@ -309,7 +309,8 @@ def test_StepLossConfig_weights():
     torch.testing.assert_close(result.total(), expected)
     channel_losses = result.get_channel_losses()
     assert set(channel_losses.keys()) == set(out_names)
-    torch.testing.assert_close(sum(channel_losses.values()), expected)
+    channel_mean = torch.stack([v.loss for v in channel_losses.values()]).mean()
+    torch.testing.assert_close(channel_mean, expected)
 
 
 @pytest.mark.parametrize("sqrt_loss_step_decay_constant", [0.0, 0.1, 1.0])
@@ -477,18 +478,13 @@ def test_finite_difference_crps_rejects_zero_levels():
         FiniteDifferenceCRPSLoss(alpha=1.0, levels=0)
 
 
-def test_build_channel_mask():
+def test_packer_builds_channel_mask():
     data_mask = {
-        "a": torch.tensor([True, True, False]),
-        "b": torch.tensor([True, False, True]),
+        "a": torch.tensor([1.0, 1.0, 0.0]),
+        "b": torch.tensor([1.0, 0.0, 1.0]),
     }
-    names = ["a", "b"]
-    mask = _build_channel_mask(
-        data_mask,
-        names,
-        device=torch.device("cpu"),
-        batch_size=3,
-    )
+    packer = Packer(["a", "b"])
+    mask = packer.pack(data_mask, axis=1)
     assert mask.shape == (3, 2)
     expected = torch.tensor(
         [
@@ -500,18 +496,14 @@ def test_build_channel_mask():
     torch.testing.assert_close(mask, expected)
 
 
-def test_build_channel_mask_missing_name_defaults_to_present():
-    data_mask = {
-        "a": torch.tensor([True, False]),
-        "c": torch.tensor([False, True]),
+def test_packer_mask_missing_name_defaults_to_present():
+    packer = Packer(["a", "b", "c"])
+    filled = {
+        "a": torch.tensor([1.0, 0.0]),
+        "b": torch.tensor([1.0, 1.0]),
+        "c": torch.tensor([0.0, 1.0]),
     }
-    names = ["a", "b", "c"]
-    mask = _build_channel_mask(
-        data_mask,
-        names,
-        device=torch.device("cpu"),
-        batch_size=2,
-    )
+    mask = packer.pack(filled, axis=1)
     expected = torch.tensor(
         [
             [1.0, 1.0, 0.0],
@@ -544,7 +536,7 @@ def test_loss_output_total_without_mask_unchanged():
     torch.testing.assert_close(output.total(), torch.tensor(2.5))
 
 
-def test_loss_output_channel_losses_sum_to_total_with_mask():
+def test_loss_output_channel_losses_with_mask():
     torch.manual_seed(42)
     loss = torch.randn(4, 3, 5, 5).abs()
     mask = torch.tensor(
@@ -561,9 +553,13 @@ def test_loss_output_channel_losses_sum_to_total_with_mask():
         mask=mask,
     )
     channel_losses = output.get_channel_losses()
+    active_losses = [v.loss for v in channel_losses.values() if v.count > 0]
     torch.testing.assert_close(
-        sum(channel_losses.values()), output.total(), atol=1e-5, rtol=1e-5
+        torch.stack(active_losses).mean(), output.total(), atol=1e-5, rtol=1e-5
     )
+    assert channel_losses["a"].count == 3
+    assert channel_losses["b"].count == 3
+    assert channel_losses["c"].count == 4
 
 
 def test_weighted_mapping_loss_with_data_mask():
@@ -620,13 +616,18 @@ def test_step_loss_forwards_data_mask():
         channel_dim=-3,
         normalizer=normalizer,
     )
-    x_mapping = {name: torch.ones(4, 5, 5).to(get_device()) for name in out_names}
+    x_mapping = {
+        "var_0": torch.ones(4, 5, 5).to(get_device()),
+        "var_1": torch.full((4, 5, 5), 2.0).to(get_device()),
+    }
     y_mapping = {name: torch.zeros(4, 5, 5).to(get_device()) for name in out_names}
     data_mask = {
         "var_0": torch.tensor([True, True, True, True]),
         "var_1": torch.tensor([False, False, False, False]),
     }
     result = step_loss(x_mapping, y_mapping, step=0, data_mask=data_mask)
+    # var_0: MSE=1.0 (4 samples). var_1: MSE=4.0 but all masked out → no contribution.
+    # Without the mask the total would be mean(1.0, 4.0) = 2.5.
     torch.testing.assert_close(result.total(), torch.tensor(1.0, device=get_device()))
 
 
@@ -685,12 +686,12 @@ def test_per_channel_losses_are_distinct_area_weighted_mse():
     y = {n: torch.zeros(4, 8, 16, device=get_device()) for n in out_names}
     output = loss(x, y, step=0)
     channel_losses = output.get_channel_losses()
-    assert channel_losses["var_a"] != channel_losses["var_b"]
-    assert channel_losses["var_a"] < channel_losses["var_b"]
+    assert channel_losses["var_a"].loss != channel_losses["var_b"].loss
+    assert channel_losses["var_a"].loss < channel_losses["var_b"].loss
 
 
-def test_per_channel_losses_sum_to_total():
-    """sum(get_channel_losses().values()) must equal total()."""
+def test_per_channel_losses_average_to_total():
+    """mean(info.loss for all channels) must equal total() when no mask."""
     torch.manual_seed(0)
     area = torch.ones(8, 16, device=get_device())
     out_names = ["a", "b", "c"]
@@ -708,8 +709,10 @@ def test_per_channel_losses_sum_to_total():
     y = {n: torch.randn(4, 8, 16, device=get_device()) for n in out_names}
     output = loss(x, y, step=0)
     total = output.total()
-    channel_sum = sum(output.get_channel_losses().values())
-    torch.testing.assert_close(channel_sum, total)
+    channel_mean = torch.stack(
+        [info.loss for info in output.get_channel_losses().values()]
+    ).mean()
+    torch.testing.assert_close(channel_mean, total)
 
 
 def test_per_channel_losses_are_distinct_mse():
@@ -732,8 +735,8 @@ def test_per_channel_losses_are_distinct_mse():
     y = {n: torch.zeros(4, 8, 16, device=get_device()) for n in out_names}
     output = loss(x, y, step=0)
     channel_losses = output.get_channel_losses()
-    assert channel_losses["var_a"] != channel_losses["var_b"]
-    assert channel_losses["var_a"] < channel_losses["var_b"]
+    assert channel_losses["var_a"].loss != channel_losses["var_b"].loss
+    assert channel_losses["var_a"].loss < channel_losses["var_b"].loss
 
 
 def test_energy_score_preweighting_preserves_total(very_fast_only: bool):
@@ -787,8 +790,9 @@ class TestLossOutputScale:
         scaled_channels = loss.scale(3.0).get_channel_losses()
         for name in original_channels:
             torch.testing.assert_close(
-                scaled_channels[name], original_channels[name] * 3.0
+                scaled_channels[name].loss, original_channels[name].loss * 3.0
             )
+            assert scaled_channels[name].count == original_channels[name].count
 
     def test_channel_names_preserved(self):
         names = ["x", "y", "z"]
@@ -798,6 +802,18 @@ class TestLossOutputScale:
         )
         scaled = loss.scale(2.0)
         assert list(scaled.get_channel_losses().keys()) == names
+
+    def test_scale_preserves_counts(self):
+        mask = torch.tensor([[1.0, 1.0], [1.0, 0.0], [0.0, 1.0]])
+        loss = LossOutput(
+            losses=[StandardLoss(torch.randn(3, 2, 4, 4).abs())],
+            channel_names=["a", "b"],
+            mask=mask,
+        )
+        original = loss.get_channel_losses()
+        scaled = loss.scale(2.0).get_channel_losses()
+        assert original["a"].count == scaled["a"].count == 2
+        assert original["b"].count == scaled["b"].count == 2
 
     def test_preserves_component_subclass_types(self):
         components = [
@@ -819,7 +835,7 @@ class TestLossOutputScale:
         scaled_channels = scaled.get_channel_losses()
         for name in original_channels:
             torch.testing.assert_close(
-                scaled_channels[name], original_channels[name] * 0.5
+                scaled_channels[name].loss, original_channels[name].loss * 0.5
             )
 
     def test_scale_by_zero(self):

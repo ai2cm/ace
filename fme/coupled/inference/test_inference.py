@@ -67,8 +67,8 @@ def _setup(
         hcoord=mock_data.hcoord,
         ocean_timestep=mock_data.ocean.timestep,
         atmos_timestep=mock_data.atmosphere.timestep,
-        ocean_mask_provider=mock_data.ocean.mask_provider,
-        atmos_mask_provider=mock_data.atmosphere.mask_provider,
+        ocean_spatial_mask_provider=mock_data.ocean.spatial_mask_provider,
+        atmos_spatial_mask_provider=mock_data.atmosphere.spatial_mask_provider,
     ).dataset_info
     checkpoint_path = save_coupled_stepper(
         tmp_path,

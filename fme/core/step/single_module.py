@@ -369,9 +369,10 @@ class SingleModuleStep(StepABC):
                 input_norm = _apply_input_mask(input_norm, effective_mask)
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
             if self._config.include_channel_mask_inputs:
-                mask_tensor = _build_channel_mask_inputs(
+                mask_dict = _build_channel_mask_dict(
                     self.in_names, effective_mask, input_tensor
                 )
+                mask_tensor = self.in_packer.pack(mask_dict, axis=self.CHANNEL_DIM)
                 input_tensor = torch.cat(
                     [input_tensor, mask_tensor], dim=self.CHANNEL_DIM
                 )
@@ -444,33 +445,34 @@ def _apply_input_mask(input_norm: TensorDict, data_mask: TensorMapping) -> Tenso
     return result
 
 
-def _build_channel_mask_inputs(
+def _build_channel_mask_dict(
     in_names: list[str],
     data_mask: TensorMapping | None,
     packed_input: torch.Tensor,
-) -> torch.Tensor:
-    """Build per-variable mask indicator channels aligned with packed input.
+) -> TensorDict:
+    """Build a dict of per-variable spatial mask tensors.
 
-    Returns a tensor of shape matching ``packed_input`` along all dimensions
-    except the channel dim, which has ``len(in_names)`` channels. Each channel
-    is 1.0 where the variable is present and 0.0 where masked.
+    Returns a ``TensorDict`` keyed by variable name, with each value a
+    ``(batch, *spatial)`` float tensor (1.0 = present, 0.0 = masked).
+    The caller is responsible for packing this dict into the correct
+    channel order.
 
     Args:
-        in_names: Input variable names in packing order.
+        in_names: Input variable names.
         data_mask: Per-variable boolean masks of shape ``[batch]``, or None.
         packed_input: The packed input tensor, used to infer shape and device.
     """
     batch = packed_input.shape[0]
     spatial = packed_input.shape[-2:]
     device = packed_input.device
-    channels = []
+    result: TensorDict = {}
     for name in in_names:
         if data_mask is not None and name in data_mask:
             mask_1d = data_mask[name].to(device=device, dtype=torch.float)
-            channels.append(mask_1d.view(batch, 1, 1).expand(batch, *spatial))
+            result[name] = mask_1d.view(batch, 1, 1).expand(batch, *spatial)
         else:
-            channels.append(torch.ones(batch, *spatial, device=device))
-    return torch.stack(channels, dim=-3)
+            result[name] = torch.ones(batch, *spatial, device=device)
+    return result
 
 
 def step_with_adjustments(
