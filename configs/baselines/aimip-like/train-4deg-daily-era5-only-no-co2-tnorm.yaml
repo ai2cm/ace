@@ -355,7 +355,7 @@ stepper:
         network:
           global_means_path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/centering.nc
           global_stds_path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/scaling-full-field.nc
-          experimental_use_shared_temperature_offset: true
+          remove_global_mean_surface_temperature: true
         residual:
           global_means_path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/centering.nc
           global_stds_path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/scaling-residual.nc

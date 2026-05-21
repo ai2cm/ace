@@ -11,11 +11,11 @@ import xarray as xr
 from fme.core.device import move_tensordict_to_device
 from fme.core.typing_ import TensorDict, TensorMapping
 
-# Experimental: when NormalizationConfig.experimental_use_shared_temperature_offset
-# is True, every field named here gets a per-sample additive offset applied
-# before normalization (and removed after denormalization). The offset for a
-# sample is the difference between the surface_temperature normalization mean
-# and the sample's cell-wise mean surface_temperature. Hard-coded for now.
+# When NormalizationConfig.remove_global_mean_surface_temperature is True,
+# every field named here gets a per-sample additive offset applied before
+# normalization (and removed after denormalization). The offset for a sample
+# is the difference between the surface_temperature normalization mean and
+# the sample's cell-wise mean surface_temperature. Hard-coded for now.
 _TEMPERATURE_FIELD_NAMES = frozenset(
     [
         "surface_temperature",
@@ -31,7 +31,7 @@ _TEMPERATURE_FIELD_NAMES = frozenset(
         "air_temperature_7",
     ]
 )
-_SHARED_TEMPERATURE_OFFSET_REFERENCE = "surface_temperature"
+_GLOBAL_MEAN_SURFACE_TEMPERATURE_REFERENCE = "surface_temperature"
 
 
 @dataclasses.dataclass
@@ -53,15 +53,15 @@ class NormalizationConfig:
         fill_nans_on_denormalize: Whether to fill NaNs during denormalization. If
             true, on denormalization NaNs in the normalized input become global means in
             the denormalized output.
-        experimental_use_shared_temperature_offset: If true, the built
-            normalizer computes a per-sample offset from the input
-            surface_temperature (surface_temperature normalization mean minus
-            the sample's cell-wise mean) and adds it to every temperature
-            field on normalize / subtracts it on denormalize. Intended for the
-            network (full-field) normalizer only -- the loss normalizer skips
-            this even if the flag is set, since offsets are unnecessary there.
+        remove_global_mean_surface_temperature: If true, the built normalizer
+            computes a per-sample offset from the input surface_temperature
+            (surface_temperature normalization mean minus the sample's
+            cell-wise mean) and adds it to every temperature field on
+            normalize / subtracts it on denormalize. Intended for the network
+            (full-field) normalizer only -- the loss normalizer skips this
+            even if the flag is set, since offsets are unnecessary there.
             surface_temperature must be in the means. Temperature field names
-            are hard-coded; experimental knob, not a stable feature.
+            are hard-coded.
     """
 
     global_means_path: str | pathlib.Path | None = None
@@ -70,7 +70,7 @@ class NormalizationConfig:
     stds: Mapping[str, float] = dataclasses.field(default_factory=dict)
     fill_nans_on_normalize: bool = False
     fill_nans_on_denormalize: bool = False
-    experimental_use_shared_temperature_offset: bool = False
+    remove_global_mean_surface_temperature: bool = False
 
     def __post_init__(self):
         using_path = (
@@ -123,8 +123,8 @@ class NormalizationConfig:
                 names=names,
                 fill_nans_on_normalize=self.fill_nans_on_normalize,
                 fill_nans_on_denormalize=self.fill_nans_on_denormalize,
-                use_shared_temperature_offset=(
-                    self.experimental_use_shared_temperature_offset
+                remove_global_mean_surface_temperature=(
+                    self.remove_global_mean_surface_temperature
                 ),
             )
         else:
@@ -135,8 +135,8 @@ class NormalizationConfig:
                 stds=stds,
                 fill_nans_on_normalize=self.fill_nans_on_normalize,
                 fill_nans_on_denormalize=self.fill_nans_on_denormalize,
-                use_shared_temperature_offset=(
-                    self.experimental_use_shared_temperature_offset
+                remove_global_mean_surface_temperature=(
+                    self.remove_global_mean_surface_temperature
                 ),
             )
 
@@ -152,23 +152,25 @@ class StandardNormalizer:
         stds: TensorDict,
         fill_nans_on_normalize: bool = False,
         fill_nans_on_denormalize: bool = False,
-        use_shared_temperature_offset: bool = False,
+        remove_global_mean_surface_temperature: bool = False,
     ):
         self.means = move_tensordict_to_device(means)
         self.stds = move_tensordict_to_device(stds)
         self._names = set(means).intersection(stds)
         self._fill_nans_on_normalize = fill_nans_on_normalize
         self._fill_nans_on_denormalize = fill_nans_on_denormalize
-        self._use_shared_temperature_offset = use_shared_temperature_offset
+        self._remove_global_mean_surface_temperature = (
+            remove_global_mean_surface_temperature
+        )
         # Per-sample offset cached by the last normalize() call so the matching
         # denormalize() can invert it. None until the first normalize() call.
         self._cached_temperature_offset: torch.Tensor | None = None
-        if use_shared_temperature_offset and (
-            _SHARED_TEMPERATURE_OFFSET_REFERENCE not in self.means
+        if remove_global_mean_surface_temperature and (
+            _GLOBAL_MEAN_SURFACE_TEMPERATURE_REFERENCE not in self.means
         ):
             raise ValueError(
-                "use_shared_temperature_offset is set but "
-                f"{_SHARED_TEMPERATURE_OFFSET_REFERENCE!r} is not present in "
+                "remove_global_mean_surface_temperature is set but "
+                f"{_GLOBAL_MEAN_SURFACE_TEMPERATURE_REFERENCE!r} is not present in "
                 "the normalization means."
             )
 
@@ -181,12 +183,12 @@ class StandardNormalizer:
         return self._fill_nans_on_denormalize
 
     @property
-    def use_shared_temperature_offset(self) -> bool:
-        return self._use_shared_temperature_offset
+    def remove_global_mean_surface_temperature(self) -> bool:
+        return self._remove_global_mean_surface_temperature
 
     def normalize(self, tensors: TensorMapping) -> TensorDict:
         filtered_tensors = {k: v for k, v in tensors.items() if k in self._names}
-        if self._use_shared_temperature_offset:
+        if self._remove_global_mean_surface_temperature:
             offset = self._compute_temperature_offset(tensors)
             self._cached_temperature_offset = offset
             filtered_tensors = _shift_temperature_fields(
@@ -207,11 +209,11 @@ class StandardNormalizer:
             stds=self.stds,
             fill_nans=self._fill_nans_on_denormalize,
         )
-        if self._use_shared_temperature_offset:
+        if self._remove_global_mean_surface_temperature:
             if self._cached_temperature_offset is None:
                 raise RuntimeError(
                     "denormalize() was called before normalize() on a "
-                    "StandardNormalizer with use_shared_temperature_offset "
+                    "StandardNormalizer with remove_global_mean_surface_temperature "
                     "enabled; the offset is computed during normalize()."
                 )
             denormalized = _shift_temperature_fields(
@@ -220,10 +222,10 @@ class StandardNormalizer:
         return denormalized
 
     def _compute_temperature_offset(self, tensors: TensorMapping) -> torch.Tensor:
-        ref_name = _SHARED_TEMPERATURE_OFFSET_REFERENCE
+        ref_name = _GLOBAL_MEAN_SURFACE_TEMPERATURE_REFERENCE
         if ref_name not in tensors:
             raise ValueError(
-                "use_shared_temperature_offset is set but "
+                "remove_global_mean_surface_temperature is set but "
                 f"{ref_name!r} is not in the input tensors to normalize()."
             )
         ref = tensors[ref_name]
@@ -245,7 +247,9 @@ class StandardNormalizer:
             "stds": {k: float(v.cpu().numpy().item()) for k, v in self.stds.items()},
             "fill_nans_on_normalize": self._fill_nans_on_normalize,
             "fill_nans_on_denormalize": self._fill_nans_on_denormalize,
-            "use_shared_temperature_offset": self._use_shared_temperature_offset,
+            "remove_global_mean_surface_temperature": (
+                self._remove_global_mean_surface_temperature
+            ),
         }
 
     @classmethod
@@ -262,8 +266,9 @@ class StandardNormalizer:
             stds=stds,
             fill_nans_on_normalize=state.get("fill_nans_on_normalize", False),
             fill_nans_on_denormalize=state.get("fill_nans_on_denormalize", False),
-            use_shared_temperature_offset=state.get(
-                "use_shared_temperature_offset", False
+            remove_global_mean_surface_temperature=state.get(
+                "remove_global_mean_surface_temperature",
+                state.get("use_shared_temperature_offset", False),
             ),
         )
 
@@ -273,8 +278,8 @@ class StandardNormalizer:
             stds={k: float(v.cpu().numpy().item()) for k, v in self.stds.items()},
             fill_nans_on_normalize=self.fill_nans_on_normalize,
             fill_nans_on_denormalize=self.fill_nans_on_denormalize,
-            experimental_use_shared_temperature_offset=(
-                self._use_shared_temperature_offset
+            remove_global_mean_surface_temperature=(
+                self._remove_global_mean_surface_temperature
             ),
         )
 
@@ -378,20 +383,20 @@ def _shift_temperature_fields(
     return result
 
 
-def _disable_shared_temperature_offset(
+def _disable_global_mean_surface_temperature_removal(
     normalizer: StandardNormalizer,
 ) -> StandardNormalizer:
-    """Return a copy of ``normalizer`` with the shared-temperature-offset
-    behavior turned off, or ``normalizer`` itself if it's already off.
+    """Return a copy of ``normalizer`` with the global-mean-surface-temperature
+    removal turned off, or ``normalizer`` itself if it's already off.
     """
-    if not normalizer.use_shared_temperature_offset:
+    if not normalizer.remove_global_mean_surface_temperature:
         return normalizer
     return StandardNormalizer(
         means=normalizer.means,
         stds=normalizer.stds,
         fill_nans_on_normalize=normalizer.fill_nans_on_normalize,
         fill_nans_on_denormalize=normalizer.fill_nans_on_denormalize,
-        use_shared_temperature_offset=False,
+        remove_global_mean_surface_temperature=False,
     )
 
 
@@ -458,12 +463,12 @@ class NetworkAndLossNormalizationConfig:
             )
         else:
             built = self.network.build(names=names)
-        # The shared-temperature-offset flag is only meaningful for the
-        # network normalizer (paired normalize/denormalize). Strip it from
-        # the loss normalizer: there's no denormalize on the loss path, and
-        # offsets computed independently from target vs prediction inputs
+        # The remove_global_mean_surface_temperature flag is only meaningful
+        # for the network normalizer (paired normalize/denormalize). Strip it
+        # from the loss normalizer: there's no denormalize on the loss path,
+        # and offsets computed independently from target vs prediction inputs
         # would not cancel cleanly.
-        return _disable_shared_temperature_offset(built)
+        return _disable_global_mean_surface_temperature_removal(built)
 
     def load(self):
         self.network.load()
