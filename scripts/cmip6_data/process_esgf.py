@@ -54,6 +54,7 @@ from esgf import (  # noqa: E402
     query_files,
     scratch_dir_for_dataset,
 )
+from external_forcings import attach_external_forcings  # noqa: E402
 from grid import make_target_grid  # noqa: E402
 from index import DatasetIndexRow, write_index, write_sidecar  # noqa: E402
 from processing import (  # noqa: E402
@@ -591,6 +592,17 @@ def process_one_esgf(
         if static_ds is not None:
             for v in static_ds.data_vars:
                 day_regridded[v] = static_ds[v]
+
+        # 9b. External forcings (input4MIPs / LUH2). See the matching
+        # block in process.py — staging is done once globally by
+        # ``external_forcings.py`` and the per-scenario zarr is
+        # opportunistically attached here.
+        attach_external_forcings(
+            day_regridded,
+            row,
+            config.output_directory,
+            task.experiment,
+        )
 
         # 10. NaN count.
         nan_total = 0

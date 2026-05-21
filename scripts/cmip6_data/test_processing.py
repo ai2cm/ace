@@ -658,6 +658,47 @@ def _make_monthly(values: list[float], calendar: str = "noleap"):
     return xr.DataArray(np.array(values), dims=("time",), coords={"time": times})
 
 
+def _make_annual(values: list[float]):
+    import cftime
+
+    times = [cftime.DatetimeNoLeap(2008 + i, 7, 1, 12) for i in range(len(values))]
+    return xr.DataArray(np.array(values), dims=("time",), coords={"time": times})
+
+
+def test_causal_annual_to_daily_uses_previous_year():
+    from processing import causal_annual_to_daily
+
+    annual = _make_annual([100.0, 200.0, 300.0, 400.0])  # 2008, 2009, 2010, 2011
+    daily_times = xr.date_range(
+        "2010-06-01", "2010-06-05", freq="D", use_cftime=True, calendar="noleap"
+    )
+    daily = xr.DataArray(daily_times, dims=("time",))
+    out = causal_annual_to_daily(annual, daily)
+    # 2010 days take 2009's value = 200.0
+    assert float(out.min()) == 200.0
+    assert float(out.max()) == 200.0
+
+
+def test_causal_annual_to_daily_falls_back_at_start():
+    # Annual data starts at 2015; daily query starts at 2010 → no prior
+    # year available, fall back to first annual value.
+    import cftime
+    from processing import causal_annual_to_daily
+
+    times = [cftime.DatetimeNoLeap(2015 + i, 7, 1, 12) for i in range(3)]
+    annual = xr.DataArray(
+        np.array([500.0, 600.0, 700.0]),
+        dims=("time",),
+        coords={"time": times},
+    )
+    daily_times = xr.date_range(
+        "2010-01-01", "2010-01-05", freq="D", use_cftime=True, calendar="noleap"
+    )
+    daily = xr.DataArray(daily_times, dims=("time",))
+    out = causal_annual_to_daily(annual, daily)
+    assert float(out.isel(time=0)) == 500.0  # first-annual fallback
+
+
 def test_causal_monthly_to_daily_uses_previous_month():
     monthly = _make_monthly([100.0, 200.0, 300.0, 400.0])  # Jan, Feb, Mar, Apr
     daily_times = xr.date_range(

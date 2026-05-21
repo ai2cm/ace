@@ -123,40 +123,64 @@ remaining models fall back to the causal monthly path. See
 `process_esgf.py` and the surface-T discussion in `training.md` for
 details.
 
-### External forcings (planned — not yet in pipeline)
+### External forcings
 
-Prescribed input4MIPs forcing fields, shared across all models within
-a scenario. These are the boundary conditions that distinguish
-historical from ssp245 from ssp585. Stored per experiment (one copy
-per scenario's time window).
+Prescribed input4MIPs / LUH2 forcing fields, shared across all models
+within a scenario. These are the boundary conditions that distinguish
+historical from ssp245 from ssp585.
 
-- **CO2 concentration** (global scalar, annual) — dominant greenhouse
-  gas forcing. Captures ~80% of the radiative forcing difference
-  between scenarios.
-- **SO2 emissions** (gridded monthly) — anthropogenic sulfate aerosol
-  precursor. Drives spatially heterogeneous aerosol cooling that
-  differs dramatically between SSPs. Weather-scale effects on cloud
-  microphysics and precipitation.
-- **BC emissions** (gridded monthly) — black carbon. Absorbing aerosol
-  with regional warming effects and impacts on atmospheric stability.
-- **Total forest fraction** (gridded annual, from LUH2) — land use
-  change proxy. Affects surface albedo, roughness, and
-  evapotranspiration with immediate weather-scale signatures.
+**Implemented:**
 
-These four fields were chosen as a compact set that captures the main
-independent axes of forcing variation between scenarios: greenhouse
-warming (CO2), aerosol cooling (SO2, BC), and land surface change
-(forest fraction). With only 3 scenarios (historical, ssp245, ssp585)
-the forcings are collinear in the climate mean, but their spatial
-patterns provide weather-scale inductive bias — the model can learn
-local forcing→response relationships (e.g. high SO2 → brighter clouds)
-that generalize across grid cells.
+- **`input4mips_co2`** — global-mean annual CO2 concentration (ppm),
+  broadcast to `(time, lat, lon)`. Captures the dominant greenhouse
+  forcing — ~80% of the radiative-forcing difference between scenarios.
+
+  - Historical (≥1959): NOAA Mauna Loa annual mean record. Differs
+    from the CMIP6-prescribed Meinshausen et al. values by <1 ppm at
+    any year, functionally equivalent for emulator training.
+  - Pre-1959: constant-extrapolation fallback to the 1959 NOAA value
+    (315.97 ppm). For pre-1959 scientific exactness, point the time
+    subset to ≥1959 — the published Meinshausen historical file
+    isn't currently indexed on ESGF.
+  - SSP245 / SSP585: UoM input4MIPs annual files (Meinshausen et al.
+    2017, 2015–2500). For 2015 onwards the SSP file values supersede
+    NOAA.
+  - Mapped onto each model's daily axis via **causal previous-year**:
+    every day in calendar year `Y` reads year `Y-1`'s value.
+
+**Deferred to a follow-up commit:**
+
+- **`input4mips_so2`** (gridded monthly) — anthropogenic sulfate
+  aerosol precursor.
+- **`input4mips_bc`** (gridded monthly) — black carbon.
+- **`luh2_forest`** (gridded annual) — total forest fraction from LUH2.
+
+These three add the aerosol-cooling and land-surface-change axes the
+embedding will need beyond pure GHG forcing. CO2 alone captures most
+of the inter-scenario signal, so it's a useful first step.
 
 Other input4MIPs forcings (CH4, N2O, CFC equivalents, ozone, volcanic
 aerosol, solar irradiance, biomass burning) are deferred. Most are
 either strongly correlated with CO2 across scenarios (CH4, N2O),
 identical across all scenarios (solar, volcanic), or of secondary
-importance. They can be added later as more scenarios are included.
+importance.
+
+### External forcings staging
+
+`external_forcings.py` writes a small per-scenario zarr at
+`<output_directory>/external_forcings/<experiment>.zarr` containing an
+annual `co2(time)` time series. `process.py` and `process_esgf.py`
+opportunistically attach those forcings to each per-model dataset at
+processing time — if the per-scenario zarr is absent they record a
+warning and the per-model output simply lacks the `input4mips_*`
+variables (training handles the missingness via the existing
+`allow_variable_masking` machinery).
+
+```
+python external_forcings.py --output-directory ./data/cmip6-daily-pilot/v0
+python external_forcings.py --output-directory ... --experiments historical ssp585
+python external_forcings.py --output-directory ... --force  # rebuild
+```
 
 ### Ocean fill
 

@@ -47,6 +47,7 @@ import xarray as xr
 
 sys.path.insert(0, str(Path(__file__).parent))
 from config import SURFACE_AND_OCEAN_VARIABLES, ProcessConfig, make_label  # noqa: E402
+from external_forcings import attach_external_forcings  # noqa: E402
 from grid import make_target_grid  # noqa: E402
 from index import DatasetIndexRow, write_index, write_sidecar  # noqa: E402
 from processing import (  # noqa: E402
@@ -602,6 +603,19 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
         if static_ds is not None:
             for v in static_ds.data_vars:
                 day_regridded[v] = static_ds[v]
+
+        # 14b. External forcings (input4MIPs / LUH2). Currently CO2 only.
+        # The per-scenario zarr is staged once by ``external_forcings.py``
+        # at ``<output_directory>/external_forcings/<experiment>.zarr``;
+        # if it isn't present we skip silently with a warning, so a run
+        # without staged externals still produces datasets (just missing
+        # the input4mips_* variables).
+        attach_external_forcings(
+            day_regridded,
+            row,
+            config.output_directory,
+            task.experiment,
+        )
 
         # 15. Sanity count of NaN cells in the filled 3D state. Should
         # be zero; any non-zero is a sign the fill logic missed

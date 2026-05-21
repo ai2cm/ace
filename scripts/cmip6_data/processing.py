@@ -476,6 +476,30 @@ def fill_derived_layer_T(ds: xr.Dataset, mask: xr.DataArray) -> xr.Dataset:
 # ---------------------------------------------------------------------------
 
 
+def causal_annual_to_daily(
+    annual: xr.DataArray,
+    daily_time: xr.DataArray,
+) -> xr.DataArray:
+    """Map annual values onto a daily time axis using the previous
+    calendar year's value — strictly causal, no future leakage.
+    Piecewise constant: every day in calendar year ``Y`` takes the
+    same value, year ``Y-1``'s mean.
+
+    Same start-of-series fallback as :func:`causal_monthly_to_daily`:
+    when the previous year isn't in the annual series, the first
+    available annual value is used as a constant-extrapolation.
+    """
+    annual_years = np.array([int(t.year) for t in annual["time"].values])
+    daily_years = np.array([int(t.year) for t in daily_time.values])
+    target_years = daily_years - 1
+
+    year_to_idx: dict[int, int] = {int(y): i for i, y in enumerate(annual_years)}
+    first_idx = 0
+    day_idx = np.array([year_to_idx.get(int(y), first_idx) for y in target_years])
+    out = annual.isel(time=day_idx)
+    return out.assign_coords(time=daily_time.values)
+
+
 def causal_monthly_to_daily(
     monthly: xr.DataArray,
     daily_time: xr.DataArray,
@@ -945,6 +969,7 @@ __all__ = [
     "fill_horizontal_diffuse",
     "compute_derived_layer_T",
     "fill_derived_layer_T",
+    "causal_annual_to_daily",
     "causal_monthly_to_daily",
     "emit_mask_and_fill",
     "finalize_surface_and_ocean_variable",
