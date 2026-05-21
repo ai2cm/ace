@@ -232,6 +232,172 @@ def test_combined_normalization_cannot_set_both_loss_and_residual():
         )
 
 
+def _make_shared_offset_normalizer(means, stds):
+    return NormalizationConfig(
+        means=means,
+        stds=stds,
+        experimental_use_shared_temperature_offset=True,
+    ).build(list(means))
+
+
+def test_shared_temperature_offset_matches_users_worked_example():
+    # Worked example from the user: surface_temperature norm mean = 280K and
+    # the sample's mean surface_temperature = 285K -> offset = -5K. For
+    # air_temperature_4 with norm mean 250K and sample mean 245K, after adding
+    # the offset and subtracting the air_temperature_4 mean the sample's
+    # normalized values are -10 / std (= -2.5 with std=4).
+    means = {"surface_temperature": 280.0, "air_temperature_4": 250.0}
+    stds = {"surface_temperature": 2.0, "air_temperature_4": 4.0}
+    normalizer = _make_shared_offset_normalizer(means, stds)
+    tensors = move_tensordict_to_device(
+        {
+            "surface_temperature": torch.full((1, 4, 4), 285.0),
+            "air_temperature_4": torch.full((1, 4, 4), 245.0),
+        }
+    )
+    normalized = normalizer.normalize(tensors)
+    # surface_temperature: (285 + (-5) - 280) / 2 = 0
+    torch.testing.assert_close(
+        normalized["surface_temperature"],
+        torch.zeros_like(normalized["surface_temperature"]),
+    )
+    # air_temperature_4: (245 + (-5) - 250) / 4 = -2.5
+    torch.testing.assert_close(
+        normalized["air_temperature_4"],
+        torch.full_like(normalized["air_temperature_4"], -2.5),
+    )
+
+
+def test_shared_temperature_offset_round_trips_through_denormalize():
+    torch.manual_seed(0)
+    means = {
+        "surface_temperature": 288.0,
+        "air_temperature_0": 220.0,
+        "TMP850": 250.0,
+    }
+    stds = {"surface_temperature": 5.0, "air_temperature_0": 3.0, "TMP850": 4.0}
+    normalizer = _make_shared_offset_normalizer(means, stds)
+    tensors = move_tensordict_to_device(
+        {k: torch.randn(2, 4, 4) + means[k] for k in means}
+    )
+    round_tripped = normalizer.denormalize(normalizer.normalize(tensors))
+    for k in means:
+        torch.testing.assert_close(round_tripped[k], tensors[k])
+
+
+def test_shared_temperature_offset_preserves_horizontal_gradients():
+    # The offset is spatially constant per sample, so within-field gradients
+    # are unchanged (apart from the std rescaling that standard normalization
+    # would have done anyway). With std=1 the gradient is exactly preserved.
+    means = {"surface_temperature": 280.0}
+    stds = {"surface_temperature": 1.0}
+    normalizer = _make_shared_offset_normalizer(means, stds)
+    tensors = move_tensordict_to_device(
+        {"surface_temperature": torch.tensor([[285.0, 290.0, 275.0]])}
+    )
+    normalized = normalizer.normalize(tensors)
+    raw_gradient = (
+        tensors["surface_temperature"][0, 1] - tensors["surface_temperature"][0, 0]
+    )
+    normalized_gradient = (
+        normalized["surface_temperature"][0, 1]
+        - normalized["surface_temperature"][0, 0]
+    )
+    torch.testing.assert_close(normalized_gradient, raw_gradient)
+
+
+def test_shared_temperature_offset_is_per_sample():
+    # Different batch elements get different offsets, applied independently.
+    means = {"surface_temperature": 280.0, "air_temperature_0": 220.0}
+    stds = {"surface_temperature": 1.0, "air_temperature_0": 1.0}
+    normalizer = _make_shared_offset_normalizer(means, stds)
+    surface_t = torch.tensor([[[285.0]], [[270.0]]])  # two samples
+    air_t_0 = torch.tensor([[[230.0]], [[230.0]]])
+    tensors = move_tensordict_to_device(
+        {"surface_temperature": surface_t, "air_temperature_0": air_t_0}
+    )
+    normalized = normalizer.normalize(tensors)
+    # Sample 0: offset = 280 - 285 = -5; sample 1: offset = 280 - 270 = +10.
+    # air_temperature_0 normalized = (raw + offset - 220) / 1
+    expected = torch.tensor([[[230.0 + (-5.0) - 220.0]], [[230.0 + 10.0 - 220.0]]])
+    torch.testing.assert_close(normalized["air_temperature_0"].cpu(), expected)
+
+
+def test_shared_temperature_offset_raises_at_build_when_surface_temperature_missing():
+    normalization = NormalizationConfig(
+        means={"air_temperature_0": 220.0},
+        stds={"air_temperature_0": 1.0},
+        experimental_use_shared_temperature_offset=True,
+    )
+    with pytest.raises(ValueError, match="surface_temperature"):
+        normalization.build(["air_temperature_0"])
+
+
+def test_shared_temperature_offset_raises_at_normalize_when_input_missing():
+    means = {"surface_temperature": 280.0, "air_temperature_0": 220.0}
+    stds = {"surface_temperature": 1.0, "air_temperature_0": 1.0}
+    normalizer = _make_shared_offset_normalizer(means, stds)
+    tensors = move_tensordict_to_device({"air_temperature_0": torch.zeros(1, 4, 4)})
+    with pytest.raises(ValueError, match="surface_temperature"):
+        normalizer.normalize(tensors)
+
+
+def test_shared_temperature_offset_raises_when_denormalize_called_first():
+    means = {"surface_temperature": 280.0, "air_temperature_0": 220.0}
+    stds = {"surface_temperature": 1.0, "air_temperature_0": 1.0}
+    normalizer = _make_shared_offset_normalizer(means, stds)
+    with pytest.raises(RuntimeError, match="normalize"):
+        normalizer.denormalize(
+            move_tensordict_to_device({"air_temperature_0": torch.zeros(1, 4, 4)})
+        )
+
+
+def test_network_normalizer_has_shared_offset_but_loss_normalizer_does_not():
+    # When the flag is set on the network NormalizationConfig, only the
+    # network normalizer carries the offset behavior. The loss normalizer
+    # built from the combined config never has it -- offsets are unnecessary
+    # for the loss and would not cancel cleanly across separate normalize()
+    # calls on target vs. prediction.
+    combined = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means={"surface_temperature": 280.0, "air_temperature_0": 220.0},
+            stds={"surface_temperature": 2.0, "air_temperature_0": 4.0},
+            experimental_use_shared_temperature_offset=True,
+        ),
+        residual=NormalizationConfig(
+            means={"air_temperature_0": 219.0},
+            stds={"air_temperature_0": 5.0},
+        ),
+    )
+    network_normalizer = combined.get_network_normalizer(
+        ["surface_temperature", "air_temperature_0"]
+    )
+    loss_normalizer = combined.get_loss_normalizer(
+        names=["surface_temperature", "air_temperature_0"],
+        residual_scaled_names=["air_temperature_0"],
+    )
+    assert network_normalizer.use_shared_temperature_offset
+    assert not loss_normalizer.use_shared_temperature_offset
+
+
+def test_loss_normalizer_strips_shared_offset_in_fallback_case():
+    # Even with no residual and no loss config -- where get_loss_normalizer
+    # falls back to building the network normalizer -- the loss normalizer
+    # must not carry the offset behavior.
+    combined = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means={"surface_temperature": 280.0, "air_temperature_0": 220.0},
+            stds={"surface_temperature": 2.0, "air_temperature_0": 4.0},
+            experimental_use_shared_temperature_offset=True,
+        ),
+    )
+    loss_normalizer = combined.get_loss_normalizer(
+        names=["surface_temperature", "air_temperature_0"],
+        residual_scaled_names=[],
+    )
+    assert not loss_normalizer.use_shared_temperature_offset
+
+
 def test_normalization_config_with_means_and_stds_round_trip():
     config = NormalizationConfig(
         means={"a": 1.0, "b": 2.0},
