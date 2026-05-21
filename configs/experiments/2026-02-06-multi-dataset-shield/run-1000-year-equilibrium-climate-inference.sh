@@ -18,11 +18,13 @@ INITIAL_CONDITION_DATASETS=( \
     # ["3xCO2"]="${INITIAL_CONDITION_ROOT}/3xCO2-ic_0002.zarr" \
     # ["4xCO2"]="${INITIAL_CONDITION_ROOT}/4xCO2-ic_0005.zarr" \
 )
+
+declare -A CO2_CONCENTRATIONS
 CO2_CONCENTRATIONS=( \
-    ["1xCO2"]="0.00036343" \
-    ["2xCO2"]="0.00072686" \
-    ["3xCO2"]="0.00109029" \
-    ["4xCO2"]="0.00145372" \
+    ["1xCO2"]=0.00036343 \
+    ["2xCO2"]=0.00072686 \
+    ["3xCO2"]=0.00109029 \
+    ["4xCO2"]=0.00145372 \
 )
 
 declare -A MODELS=( \
