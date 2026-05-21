@@ -220,13 +220,16 @@ class BestStudentCheckpointCallback:
                     f"keep_mask={keep_mask.tolist()}"
                 )
             if not keep_mask.all():
-                missing = [t for t, keep in zip(times, keep_mask) if not keep]
-                _log(
-                    f"[BestStudentCallback] batch {batch_idx}: "
-                    f"{(~keep_mask).sum()}/{len(times)} times not in teacher zarr "
-                    f"(e.g. {missing[:3]!r})"
-                )
                 n_skipped_times += int((~keep_mask).sum())
+                # Only log a few examples so we don't spam thousands of lines
+                # when the entire validation range is misaligned.
+                if n_skipped_batches + (not keep_mask.any()) <= 5:
+                    missing = [t for t, keep in zip(times, keep_mask) if not keep]
+                    _log(
+                        f"[BestStudentCallback] batch {batch_idx}: "
+                        f"{(~keep_mask).sum()}/{len(times)} times not in teacher zarr "
+                        f"(e.g. {missing[:3]!r})"
+                    )
             if not keep_mask.any():
                 n_skipped_batches += 1
                 batch_idx += 1

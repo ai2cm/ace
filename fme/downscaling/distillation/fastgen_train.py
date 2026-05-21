@@ -184,10 +184,13 @@ def _load_data_config(yaml_path: str) -> DataLoaderConfig:
     with open(yaml_path) as f:
         raw = yaml.safe_load(f)
     data_dict = raw.get("train_data", raw)
+    # strict=True is required so that XarrayDataConfig.subset resolves to
+    # TimeSlice instead of silently falling back to an empty Slice (which
+    # would load the entire underlying zarr regardless of start_time/stop_time).
     return dacite.from_dict(
         data_class=DataLoaderConfig,
         data=data_dict,
-        config=dacite.Config(strict=False),
+        config=dacite.Config(strict=True),
     )
 
 
@@ -299,8 +302,6 @@ def main() -> None:
     # Patch FastGen's to_wandb to handle non-RGB tensors (ACE outputs C != 3).
     # WandbCallback.to_wandb asserts C == 3; we replicate the first channel to
     # RGB so sample logging works regardless of the number of output channels.
-    from omegaconf import DictConfig
-
     import fastgen.callbacks.wandb as _wandb_mod
     import fastgen.utils.distributed.ddp as _fastgen_ddp
     import fastgen.utils.logging_utils as logger
@@ -311,6 +312,7 @@ def main() -> None:
     from fastgen.utils.distributed import clean_up, is_rank0, synchronize, world_size
     from fastgen.utils.io_utils import set_env_vars
     from fastgen.utils.scripts import set_cuda_backend
+    from omegaconf import DictConfig
 
     _orig_to_wandb = _wandb_mod.to_wandb
 
