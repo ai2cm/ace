@@ -22,7 +22,7 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent))
-from config import InventoryConfig
+from config import InventoryConfig, SurfaceAndOceanVariable
 
 PANGEO_CATALOG_URL = "https://storage.googleapis.com/cmip6/pangeo-cmip6.csv.gz"
 
@@ -149,7 +149,7 @@ def write_inventory(df: pd.DataFrame, path: str) -> None:
 def summarize(
     df: pd.DataFrame,
     core_variables: list[str],
-    forcing_variables: list[str],
+    surface_and_ocean_variables: list[SurfaceAndOceanVariable],
     static_variables: list[str],
 ) -> str:
     lines = [f"Total rows: {len(df)}"]
@@ -196,24 +196,26 @@ def summarize(
         f"{full_core[full_core].reset_index().source_id.nunique()} models"
     )
 
-    # Forcing coverage
+    # Coverage of surface-and-ocean variables, intersected with the set of
+    # models that have a day-table publication (a necessary condition for
+    # them to be eligible as an ingest target).
     models_day = set(day["source_id"].unique())
     models_by_table_var: dict[tuple[str, str], set[str]] = {}
     for (tab, var), sub in df.groupby(["table_id", "variable_id"]):
         models_by_table_var[(tab, var)] = set(sub["source_id"].unique())
 
     lines.append("")
-    lines.append("Forcing-variable coverage (intersected with day-table models):")
-    # ts is in Amon, siconc in SImon, sftlf/orog in fx
-    for var in forcing_variables:
-        hits = set()
-        for tab in ("Amon", "SImon"):
-            hits |= models_by_table_var.get((tab, var), set())
-        hits &= models_day
-        lines.append(f"  {var:<10} {len(hits)} / {len(models_day)} day-table models")
+    lines.append("Surface-and-ocean coverage (intersected with day-table models):")
+    for h in surface_and_ocean_variables:
+        hits = models_by_table_var.get((h.table_id, h.var_id), set()) & models_day
+        lines.append(
+            f"  {h.output_name:<18} {len(hits)} / {len(models_day)} day-table models"
+        )
+    lines.append("")
+    lines.append("Static-field coverage (intersected with day-table models):")
     for var in static_variables:
         hits = models_by_table_var.get(("fx", var), set()) & models_day
-        lines.append(f"  {var:<10} {len(hits)} / {len(models_day)} day-table models")
+        lines.append(f"  {var:<18} {len(hits)} / {len(models_day)} day-table models")
 
     # Per-variable global coverage (any experiment, any member)
     lines.append("")
@@ -244,10 +246,14 @@ def main() -> None:
     df = build_inventory(config, enrich_stores=args.enrich_stores)
     write_inventory(df, config.output_path)
 
-    from config import CORE_VARIABLES, FORCING_VARIABLES, STATIC_VARIABLES
+    from config import CORE_VARIABLES, STATIC_VARIABLES, SURFACE_AND_OCEAN_VARIABLES
 
     print()
-    print(summarize(df, CORE_VARIABLES, FORCING_VARIABLES, STATIC_VARIABLES))
+    print(
+        summarize(
+            df, CORE_VARIABLES, list(SURFACE_AND_OCEAN_VARIABLES), STATIC_VARIABLES
+        )
+    )
 
 
 if __name__ == "__main__":

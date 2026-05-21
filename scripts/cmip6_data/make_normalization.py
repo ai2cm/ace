@@ -35,11 +35,21 @@ import xarray as xr
 
 sys.path.insert(0, str(Path(__file__).parent))
 from compute_stats import area_weights_2d  # noqa: E402
-from config import ProcessConfig  # noqa: E402
+from config import SURFACE_AND_OCEAN_VARIABLES, ProcessConfig  # noqa: E402
 
+# Mask variables produced by the pipeline — excluded from normalization
+# stats, since their semantics (0/1 valid-cell) shouldn't be standardised.
+# Includes the per-plev below-surface masks plus one ``{name}_mask`` per
+# ocean/sea-ice surface-and-ocean variable (atmos_surface variables emit
+# no mask channel — see ``finalize_surface_and_ocean_variable``).
 _SKIP_VARS = frozenset(
-    ("below_surface_mask", "siconc_mask")
+    ("below_surface_mask",)
     + tuple(f"below_surface_mask{p}" for p in (1000, 850, 700, 500, 250, 100, 50, 10))
+    + tuple(
+        f"{h.output_name}_mask"
+        for h in SURFACE_AND_OCEAN_VARIABLES
+        if h.kind in ("ocean_surface", "seaice_surface")
+    )
 )
 
 

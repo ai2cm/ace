@@ -628,11 +628,14 @@ def apply_time_subset(ds: xr.Dataset, cfg: ResolvedDatasetConfig) -> xr.Dataset:
         date_type = type(times[0])
         sy, sm, sd = (int(x) for x in start.split("-"))
         ey, em, ed = (int(x) for x in end.split("-"))
+        # ``end`` is inclusive at day granularity — extend to 23:59:59 so
+        # daily timestamps stored at noon (the CMIP6 convention) on the
+        # end date are included rather than dropped.
         start_dt = date_type(sy, sm, sd)
-        end_dt = date_type(ey, em, ed)
+        end_dt = date_type(ey, em, ed, 23, 59, 59)
     else:
         start_dt = np.datetime64(start)
-        end_dt = np.datetime64(end)
+        end_dt = np.datetime64(end) + np.timedelta64(1, "D") - np.timedelta64(1, "s")
     mask = (times >= start_dt) & (times <= end_dt)
     return ds.isel(time=np.where(mask)[0])
 
@@ -698,6 +701,7 @@ def write_zarr(ds: xr.Dataset, path: str, cfg: ResolvedDatasetConfig) -> None:
 _EPS = 0.01
 
 _SANITY_RANGES: dict[str, tuple[float, float]] = {
+    # Atmospheric daily core / optional / static — bare CMIP6 names.
     "ua": (-200.0, 200.0),
     "va": (-200.0, 200.0),
     "uas": (-100.0, 100.0),
@@ -705,11 +709,9 @@ _SANITY_RANGES: dict[str, tuple[float, float]] = {
     "sfcWind": (-_EPS, 100.0),
     "hus": (-_EPS, 0.05),
     "huss": (-_EPS, 0.05),
-    "ts": (180.0, 340.0),
     "tas": (180.0, 340.0),
     "psl": (8.0e4, 1.1e5),
     "pr": (-_EPS, 0.01),
-    "siconc": (-_EPS, 100.0 + _EPS),
     "rsdt": (-_EPS, 600.0),
     "rsut": (-_EPS, 600.0),
     "rlut": (-_EPS, 400.0),
@@ -721,6 +723,31 @@ _SANITY_RANGES: dict[str, tuple[float, float]] = {
     "hfls": (-500.0, 1200.0),
     "sftlf": (-_EPS, 100.0 + _EPS),
     "orog": (-500.0, 9000.0),
+    # Surface-and-ocean variables — source-prefixed output names.
+    # Atmospheric surface T (always K).
+    "amon_ts": (180.0, 340.0),
+    "eday_ts": (180.0, 340.0),
+    # Sea-ice fractions (0–100%).
+    "simon_siconc": (-_EPS, 100.0 + _EPS),
+    "siday_siconc": (-_EPS, 100.0 + _EPS),
+    # Sea-ice thickness in metres — Antarctic multi-year ice rarely
+    # exceeds 20 m; allow some headroom for ridge models.
+    "siday_sithick": (-_EPS, 30.0),
+    # Sea-surface salinity (PSU); pure freshwater 0, Dead-Sea-like
+    # ocean cells can reach ~40, allow headroom.
+    "oday_sos": (-_EPS, 50.0),
+    # Sea surface height anomaly (m). Order metres.
+    "omon_zos": (-10.0, 10.0),
+    # Net downward surface heat flux into ocean (W/m²).
+    "omon_hfds": (-1500.0, 1500.0),
+    # Mixed layer depth (m). Deep convection regions can exceed 2000 m.
+    "omon_mlotst": (-_EPS, 5000.0),
+    "oday_omldamax": (-_EPS, 5000.0),
+    # NOTE: ``oday_tos``, ``omon_tob``, ``simon_sitemptop``,
+    # ``siday_sitemptop`` are temperatures whose CMIP6 unit attribute
+    # varies (K vs °C across models) — sanity-ranging them requires
+    # unit harmonisation at ingest. ``oday_tossq`` is the square,
+    # ditto. Left out of the range checks until ingest enforces units.
 }
 
 _DERIVED_T_RANGE = (150.0, 350.0)

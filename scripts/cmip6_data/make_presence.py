@@ -16,9 +16,9 @@ that fed the run, and emits three views into
 
 - ``presence.png`` — heatmap version of the same matrix, with rows
   sorted by ``(source_id, experiment, variant_label)`` and columns
-  grouped by category (core → derived → forcing → static →
-  optional). Datasets' status (ok / skipped / failed) is shown as a
-  side stripe.
+  grouped by category (core → derived → surface_T → sea_ice → ocean
+  → static → optional). Datasets' status (ok / skipped / failed) is
+  shown as a side stripe.
 
 - ``presence.md`` — per-model rollup with a one-line summary for
   every dataset and a compact category-level coverage table.
@@ -41,18 +41,18 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent))
 from config import (  # noqa: E402
     CORE_VARIABLES,
-    FORCING_VARIABLES,
     OPTIONAL_VARIABLES,
     STATIC_VARIABLES,
+    SURFACE_AND_OCEAN_VARIABLES,
     ProcessConfig,
 )
 
 # Variables that aren't in any of the user-facing lists but appear in
-# the produced zarr — derived T layers and the masks/static fields.
+# the produced zarr — derived T layers and the below-surface mask.
 # These are conceptual names for the presence table columns; the zarr
 # stores pressure-named variants (ua1000, ta_derived_layer_1000_850, etc.).
 DERIVED_VARIABLES = ["ta_derived_layer"]
-EXTRA_VARIABLES = ["below_surface_mask", "siconc_mask"]
+EXTRA_VARIABLES = ["below_surface_mask"]
 
 _PLEV8_HPA = [1000, 850, 700, 500, 250, 100, 50, 10]
 _3D_CORE = {"ua", "va", "hus", "zg"}
@@ -64,20 +64,38 @@ def _flattened_forms(var: str) -> list[str]:
         return [f"{var}{p}" for p in _PLEV8_HPA]
     if var == "ta_derived_layer":
         return [
-            f"ta_derived_layer_{_PLEV8_HPA[i]}_{_PLEV8_HPA[i+1]}"
+            f"ta_derived_layer_{_PLEV8_HPA[i]}_{_PLEV8_HPA[i + 1]}"
             for i in range(len(_PLEV8_HPA) - 1)
         ]
     return [var]
+
+
+def _surface_and_ocean_by_kind() -> dict[str, list[str]]:
+    """Group surface-and-ocean output names by kind, for the heatmap
+    category split: atmos_surface (surface T), seaice_surface (sea-ice
+    family), ocean_surface (ocean variables).
+    """
+    kinds: dict[str, list[str]] = {
+        "atmos_surface": [],
+        "seaice_surface": [],
+        "ocean_surface": [],
+    }
+    for v in SURFACE_AND_OCEAN_VARIABLES:
+        kinds[v.kind].append(v.output_name)
+    return kinds
 
 
 def _categorised_variables() -> dict[str, list[str]]:
     """Variable display order grouped by category. Used both for the
     heatmap column ordering and the markdown rollup.
     """
+    so = _surface_and_ocean_by_kind()
     return {
         "core": list(CORE_VARIABLES),
         "derived": list(DERIVED_VARIABLES),
-        "forcing": list(FORCING_VARIABLES),
+        "surface_T": so["atmos_surface"],
+        "sea_ice": so["seaice_surface"],
+        "ocean": so["ocean_surface"],
         "static": list(STATIC_VARIABLES),
         "extra": list(EXTRA_VARIABLES),
         "optional": list(OPTIONAL_VARIABLES),
@@ -100,14 +118,28 @@ def _available_from_inventory(
     inv: pd.DataFrame,
 ) -> dict[tuple[str, str, str], set[str]]:
     """For each ``(source_id, experiment, member_id)`` in the inventory,
-    the set of CMIP6 variable_ids the publisher had — combined across
-    the day, Amon, SImon, and fx tables. Static fields (fx) aren't
-    keyed by member, so we fold them in per source_id.
+    the set of *output names* the publisher would yield — including
+    source-prefixed surface-and-ocean variables (e.g. ``amon_ts``,
+    ``oday_tos``). Day-table and fx variables keep their bare CMIP6
+    names. Static fields (fx) aren't keyed by member, so we fold them
+    in per source_id.
     """
+    # Map (table_id, var_id) -> output_name for surface-and-ocean vars.
+    table_var_to_output = {
+        (h.table_id, h.var_id): h.output_name for h in SURFACE_AND_OCEAN_VARIABLES
+    }
+
     out: dict[tuple[str, str, str], set[str]] = {}
-    rel = inv[inv["table_id"].isin(("day", "Amon", "SImon"))]
+    rel = inv[inv["table_id"] != "fx"]
     for (s, e, m), g in rel.groupby(["source_id", "experiment_id", "member_id"]):
-        out[(s, e, m)] = set(g["variable_id"].unique())
+        names: set[str] = set()
+        for _, row in g.iterrows():
+            key = (row["table_id"], row["variable_id"])
+            if key in table_var_to_output:
+                names.add(table_var_to_output[key])
+            elif row["table_id"] == "day":
+                names.add(row["variable_id"])
+        out[(s, e, m)] = names
     fx = inv[inv["table_id"] == "fx"]
     fx_by_src = fx.groupby("source_id")["variable_id"].agg(set).to_dict()
     keys_by_src: dict[str, list[tuple[str, str, str]]] = {}
@@ -144,8 +176,6 @@ def _expected_extras(available: set[str]) -> set[str]:
         extras |= set(DERIVED_VARIABLES)
     if _BELOW_MASK_INPUTS & available:
         extras.add("below_surface_mask")
-    if "siconc" in available:
-        extras.add("siconc_mask")
     return extras
 
 
