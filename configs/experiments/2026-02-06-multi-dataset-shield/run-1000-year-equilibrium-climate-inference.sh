@@ -52,7 +52,6 @@ for model in "${!MODELS[@]}"; do
             forcing_loader.dataset.overwrite.constant.global_mean_co2=$co2_concentration \
             initial_condition.path=$initial_condition_path \
             initial_condition.start_indices.times=[$INITIAL_CONDITION_TIME] \
-            n_forward_steps=$MAIN_N_FORWARD_STEPS \
         "
         python -m fme.ace.validate_config --config_type inference $CONFIG_PATH --override $override
 
