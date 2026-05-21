@@ -1,7 +1,7 @@
 import dataclasses
 import warnings
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 import dacite
 import torch
@@ -33,6 +33,7 @@ from fme.downscaling.noise import (
     condition_with_noise_for_training,
 )
 from fme.downscaling.requirements import DataRequirements
+from fme.downscaling.samplers import fastgen_sampler
 from fme.downscaling.samplers import stochastic_sampler as edm_sampler
 from fme.downscaling.typing_ import FineResCoarseResPair
 
@@ -145,6 +146,12 @@ class DiffusionModelConfig:
         use_fine_topography: Whether to use fine topography in the model.
         use_amp_bf16: Whether to use automatic mixed precision (bfloat16) in the
             UNetDiffusionModule.
+        sampler_type: Which sampler to use for generation. ``"heun"`` (the
+            default) runs the EDM Heun predict-corrector sampler used by ACE
+            teacher models. ``"fastgen"`` runs the predict-x0-then-renoise
+            sampler that matches the trajectory FastGen-distilled students were
+            trained against; FastGen-distilled student checkpoints should bake
+            this in via ``save_student_checkpoint``.
         loss_weights: Weighting configuration for the training loss, including
             per-variable channel weights and the noise-level weight exponent.
         training_noise_distribution: Noise distribution to use during training.
@@ -168,6 +175,7 @@ class DiffusionModelConfig:
     predict_residual: bool
     use_fine_topography: bool = False
     use_amp_bf16: bool = False
+    sampler_type: Literal["heun", "fastgen"] = "heun"
     loss_weights: LossWeightsConfig = dataclasses.field(
         default_factory=LossWeightsConfig
     )
@@ -533,15 +541,25 @@ class DiffusionModel:
         )
         latents = torch.randn(outputs_shape).to(device=get_device())
 
-        generated_norm, latent_steps = edm_sampler(
-            self.module,
-            latents,
-            inputs_,
-            S_churn=self.config.churn,
-            sigma_min=self.config.sigma_min,
-            sigma_max=self.config.sigma_max,
-            num_steps=self.config.num_diffusion_generation_steps,
-        )
+        if self.config.sampler_type == "fastgen":
+            generated_norm, latent_steps = fastgen_sampler(
+                self.module,
+                latents,
+                inputs_,
+                num_steps=self.config.num_diffusion_generation_steps,
+                sigma_min=self.config.sigma_min,
+                sigma_max=self.config.sigma_max,
+            )
+        else:
+            generated_norm, latent_steps = edm_sampler(
+                self.module,
+                latents,
+                inputs_,
+                S_churn=self.config.churn,
+                sigma_min=self.config.sigma_min,
+                sigma_max=self.config.sigma_max,
+                num_steps=self.config.num_diffusion_generation_steps,
+            )
 
         if self.config.predict_residual:
             base_prediction = interpolate(

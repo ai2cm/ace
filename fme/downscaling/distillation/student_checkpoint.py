@@ -51,6 +51,7 @@ def save_student_checkpoint(
     teacher: DiffusionModel,
     path: str | pathlib.Path,
     num_sampling_steps: int | None = None,
+    sampler_type: str = "fastgen",
 ) -> None:
     """Save a distilled student in ACE checkpoint format.
 
@@ -67,13 +68,20 @@ def save_student_checkpoint(
             ``torch.save``).
         num_sampling_steps: If provided, overrides
             ``num_diffusion_generation_steps`` in the saved config so that
-            ACE's ``stochastic_sampler`` uses the student's reduced step count
-            (e.g. 2 or 4) when called through the existing inference pipeline.
+            ACE's sampler uses the student's reduced step count (e.g. 2 or 4)
+            when called through the existing inference pipeline.
+        sampler_type: Sampler to bake into the saved config (``"fastgen"`` by
+            default). FastGen-distilled students were trained against the
+            predict-x0-then-renoise trajectory, so the ``"fastgen"`` sampler
+            matches their training distribution.  Pass ``"heun"`` only if the
+            student was trained to match the Heun trajectory.
     """
     state: dict[str, Any] = dict(teacher.get_state())
 
     # Overwrite network weights with the distilled student.
     state["module"] = student_module.state_dict()
+
+    state["config"]["sampler_type"] = sampler_type
 
     # Optionally reduce sampler steps in the saved config.
     if num_sampling_steps is not None:

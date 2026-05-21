@@ -1,3 +1,4 @@
+import dataclasses
 import os
 from unittest.mock import MagicMock
 
@@ -5,6 +6,7 @@ import pytest
 import torch
 import xarray as xr
 
+import fme.downscaling.models
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
 from fme.core.loss import LossConfig
@@ -668,6 +670,65 @@ def test_from_state_raises_for_unresolvable_old_checkpoint(tmp_path):
 
     with pytest.raises(ValueError, match="full_fine_coords"):
         DiffusionModel.from_state(state)
+
+
+def test_diffusion_model_config_backwards_compatible_no_sampler_type():
+    """Old checkpoints saved without ``sampler_type`` must load with the
+    Heun default so existing teacher checkpoints keep working unchanged."""
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    fine_coords = make_fine_coords(fine_shape)
+    static_inputs = make_static_inputs(fine_shape)
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=fine_coords,
+        use_fine_topography=True,
+        static_inputs=static_inputs,
+    )
+    state = model.get_state()
+    assert state["config"]["sampler_type"] == "heun"
+    del state["config"]["sampler_type"]
+
+    model_from_state = DiffusionModel.from_state(state)
+    assert model_from_state.config.sampler_type == "heun"
+
+
+def test_diffusion_model_generate_dispatches_to_fastgen_sampler(monkeypatch):
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    fine_coords = make_fine_coords(fine_shape)
+    static_inputs = make_static_inputs(fine_shape)
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=fine_coords,
+        use_fine_topography=True,
+        static_inputs=static_inputs,
+    )
+    model.config = dataclasses.replace(model.config, sampler_type="fastgen")
+    batch = make_paired_batch_data(coarse_shape, fine_shape, batch_size=2)
+
+    fastgen_calls = {"count": 0}
+    edm_calls = {"count": 0}
+    original_fastgen = fme.downscaling.models.fastgen_sampler
+    original_edm = fme.downscaling.models.edm_sampler
+
+    def fake_fastgen(*args, **kwargs):
+        fastgen_calls["count"] += 1
+        return original_fastgen(*args, **kwargs)
+
+    def fake_edm(*args, **kwargs):
+        edm_calls["count"] += 1
+        return original_edm(*args, **kwargs)
+
+    monkeypatch.setattr(fme.downscaling.models, "fastgen_sampler", fake_fastgen)
+    monkeypatch.setattr(fme.downscaling.models, "edm_sampler", fake_edm)
+
+    model.generate_on_batch(batch)
+
+    assert fastgen_calls["count"] == 1
+    assert edm_calls["count"] == 0
 
 
 def test__build_variable_loss_weight_tensor():

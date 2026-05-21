@@ -172,3 +172,92 @@ def stochastic_sampler(
             x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
         latent_steps.append(x_next.to(latents.dtype))
     return x_next.to(latents.dtype), latent_steps
+
+
+def fastgen_sampler(
+    net: torch.nn.Module,
+    latents: Tensor,
+    img_lr: Tensor,
+    randn_like: Callable[[Tensor], Tensor] = torch.randn_like,
+    num_steps: int = 4,
+    sigma_min: float = 0.002,
+    sigma_max: float = 80.0,
+    rho: float = 7.0,
+    sde: bool = True,
+    schedule_num_steps: int = 1000,
+    min_step_percent: float = 0.002,
+    max_step_percent: float = 0.998,
+) -> tuple[Tensor, list[Tensor]]:
+    """Predict-x0-then-renoise sampler for FastGen-distilled students.
+
+    Mirrors ``fastgen.methods.model.FastGenModel._student_sample_loop``: at
+    each step the student predicts x0 at the current sigma and the next
+    iterate is obtained by re-noising that x0 to the next sigma along an
+    EDM discrete schedule.  This is the trajectory the student was
+    distilled against, so it avoids the ``(x - x0) / sigma`` derivative
+    blow-up that the Heun sampler exhibits at small sigmas when the student
+    is queried at sigmas it never saw.
+
+    The discrete sigma list replicates ``EDMNoiseSchedule.get_t_list``
+    defaults from FastGen: a precomputed rho-spaced sigma array of length
+    ``schedule_num_steps`` is sampled at ``num_steps + 1`` indices linearly
+    spanning ``[max_step_percent, min_step_percent] * schedule_num_steps``,
+    with the final timestep clamped to 0.
+
+    Parameters
+    ----------
+    net : torch.nn.Module
+        Same denoiser signature as ``stochastic_sampler``: ``net(x, x_lr, t)``
+        returning an x0 estimate of shape ``(B, C_out, H, W)``.
+    latents : Tensor
+        Initial zero-mean unit-variance Gaussian noise. Shape
+        ``(B, C_out, H, W)``.
+    img_lr : Tensor
+        Conditioning tensor of shape ``(B, C_cond, H, W)``.
+    num_steps : int
+        Number of student denoising steps. The sigma list has length
+        ``num_steps + 1`` (the final entry is exactly 0).
+    sde : bool
+        If True (default), re-noise with a fresh Gaussian draw at each step
+        (matches FastGen training, which uses SDE re-noising). If False,
+        re-noise with the implied epsilon ``(x - x_pred) / sigma`` (ODE).
+    """
+    if img_lr.shape[0] != latents.shape[0]:
+        raise ValueError(
+            f"img_lr and latents must have the same batch size, but found "
+            f"{img_lr.shape[0]} vs {latents.shape[0]}."
+        )
+
+    compute_dtype = torch.float32 if latents.device.type == "mps" else torch.float64
+    device = latents.device
+
+    ramp = torch.linspace(0.0, 1.0, schedule_num_steps, dtype=compute_dtype, device=device)
+    min_inv_rho = sigma_min ** (1.0 / rho)
+    max_inv_rho = sigma_max ** (1.0 / rho)
+    sigmas = torch.flip(
+        (max_inv_rho + ramp * (min_inv_rho - max_inv_rho)) ** rho, dims=[0]
+    )
+    min_step = int(min_step_percent * schedule_num_steps)
+    max_step = int(max_step_percent * schedule_num_steps)
+    indices = torch.linspace(max_step, min_step, num_steps + 1, device=device).long()
+    t_list = sigmas[indices].clone()
+    t_list[-1] = 0.0
+
+    x = latents.to(compute_dtype) * t_list[0]
+    latent_steps = [x.to(latents.dtype)]
+    x_pred = x
+
+    for t_cur, t_next in zip(t_list[:-1], t_list[1:]):
+        x_pred = net(x.to(latents.dtype), img_lr, t_cur).to(compute_dtype)
+
+        if t_next > 0:
+            if sde:
+                eps_infer = randn_like(x_pred).to(compute_dtype)
+            else:
+                eps_infer = (x - x_pred) / t_cur
+            x = x_pred + t_next * eps_infer
+            latent_steps.append(x.to(latents.dtype))
+        else:
+            latent_steps.append(x_pred.to(latents.dtype))
+
+    return x_pred.to(latents.dtype), latent_steps

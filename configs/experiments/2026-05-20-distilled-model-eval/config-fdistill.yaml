@@ -7,7 +7,8 @@ patch:
 model:
   checkpoint_path: /checkpoints/fdistill_student.ckpt
   model_updates:
-    num_diffusion_generation_steps: 4
+      num_diffusion_generation_steps: 4
+      sampler_type: fastgen
 data:
   coarse:
   - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
