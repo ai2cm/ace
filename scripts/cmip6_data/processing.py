@@ -772,6 +772,14 @@ _SANITY_RANGES: dict[str, tuple[float, float]] = {
     # varies (K vs °C across models) — sanity-ranging them requires
     # unit harmonisation at ingest. ``oday_tossq`` is the square,
     # ditto. Left out of the range checks until ingest enforces units.
+    # External forcings (input4MIPs / LUH2).
+    # CO2 in ppm: pre-industrial ≈ 280, ssp585 endpoint ≈ 2200.
+    "input4mips_co2": (250.0, 2500.0),
+    # Anthropogenic SO2/BC emission flux (kg m-2 s-1). Industrial-era
+    # peaks ~1.5e-9 (SO2) and ~6e-11 (BC); SSP trajectories lower. Allow
+    # headroom for cell-level hotspots after sector summation.
+    "input4mips_so2": (-_EPS * 1e-12, 5.0e-9),
+    "input4mips_bc": (-_EPS * 1e-12, 5.0e-10),
 }
 
 _DERIVED_T_RANGE = (150.0, 350.0)
