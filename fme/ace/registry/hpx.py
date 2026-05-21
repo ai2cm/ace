@@ -25,14 +25,15 @@ class HEALPixUNetBuilder(ModuleConfig):
         enable_nhwc: Use NHWC tensor layout for child modules.
         hpx_padding_mode: HEALPix padding backend (``"earth2grid"``,
             ``"karlbauer"``, ``"isolatitude"``). Default ``"earth2grid"``.
-        nside: Face size(s) per UNet level (shallowest to deepest).
+        nside: Face height/width per UNet level (shallowest to deepest). Required for
+            ``isolatitude`` padding.
     """
 
     encoder: UNetEncoderConfig
     decoder: UNetDecoderConfig
     enable_nhwc: bool = False
     hpx_padding_mode: str = "earth2grid"
-    nside: Optional[Sequence[int] | int] = None
+    nside: Optional[Sequence[int]] = None
 
     def build(
         self,

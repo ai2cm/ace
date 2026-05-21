@@ -39,7 +39,8 @@ class UNetDecoderConfig:
         enable_nhwc: Flag to enable NHWC data format, by default False.
         hpx_padding_mode: HEALPix padding backend (``"earth2grid"``, ``"karlbauer"``,
             or ``"isolatitude"``), by default ``"earth2grid"``.
-        nside: Native face height/width for the deepest decoder level, or ``None``.
+        nside: Face height/width per decoder level (shallowest to deepest), or
+            ``None`` to omit per-level padding resolution.
     """
 
     conv_block: ConvBlockConfig
@@ -51,7 +52,7 @@ class UNetDecoderConfig:
     dilations: Optional[list] = None
     enable_nhwc: bool = False
     hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid"
-    nside: Optional[int] = None
+    nside: Optional[Sequence[int]] = None
 
     def build(self) -> nn.Module:
         """
@@ -88,7 +89,7 @@ class UNetDecoder(nn.Module):
         dilations: Optional[list] = None,
         enable_nhwc: bool = False,
         hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
-        nside: Optional[int] = None,
+        nside: Optional[Sequence[int]] = None,
     ):
         """
         Initialize the UNetDecoder.
@@ -104,34 +105,56 @@ class UNetDecoder(nn.Module):
             enable_nhwc: If True, use channel last format.
             hpx_padding_mode: HEALPix padding backend. Default ``"earth2grid"``;
                 also supports ``"karlbauer"`` and ``"isolatitude"``.
-            nside: Native face height/width for the deepest decoder level; doubled
-                after each upsample when set.
+            nside: Face height/width per level (shallowest to deepest). Length must
+                match ``len(n_channels)`` when set. Decoder stage ``n`` (deepest first)
+                uses ``nside[-(n + 1)]``.
         """
         super().__init__()
         self.channel_dim = 1
-        face_nside = nside
 
         if dilations is None:
             dilations = [1 for _ in range(len(n_channels))]
 
+        nside_levels: Optional[tuple[int, ...]] = None
+        if nside is not None:
+            nside_levels = tuple(int(v) for v in nside)
+            if len(nside_levels) != len(n_channels):
+                raise ValueError(
+                    f"nside length must match decoder levels; got {len(nside_levels)} "
+                    f"vs {len(n_channels)}"
+                )
+
         conv_tpl = dataclasses.replace(conv_block)
         up_tpl = dataclasses.replace(up_sampling_block)
+        up_factor = up_tpl.stride
+        n_levels = len(n_channels)
 
         self.decoder = []
         for n, curr_channel in enumerate(n_channels):
             up_sample_module = None
+            level_nside = (
+                None if nside_levels is None else nside_levels[n_levels - 1 - n]
+            )
             if n != 0:
+                if nside_levels is not None:
+                    before = nside_levels[n_levels - n]
+                    after = level_nside
+                    if before * up_factor != after:
+                        raise ValueError(
+                            f"decoder nside upsample: nside[{n_levels - 1 - n}]={after} "
+                            f"must equal nside[{n_levels - n}] * upsample factor "
+                            f"({up_factor}), but nside[{n_levels - n}]={before}"
+                        )
                 up_cfg = dataclasses.replace(
                     up_tpl,
                     in_channels=curr_channel,
                     out_channels=curr_channel,
                     enable_nhwc=enable_nhwc,
                     hpx_padding_mode=hpx_padding_mode,
-                    nside=face_nside,
+                    nside=None if nside_levels is None else nside_levels[n_levels - n],
+                    nside_after=level_nside,
                 )
                 up_sample_module = up_cfg.build()
-                if face_nside is not None:
-                    face_nside = face_nside * 2
 
             next_channel = (
                 n_channels[n + 1] if n < len(n_channels) - 1 else n_channels[-1]
@@ -146,7 +169,7 @@ class UNetDecoder(nn.Module):
                 n_layers=n_layers[n],
                 enable_nhwc=enable_nhwc,
                 hpx_padding_mode=hpx_padding_mode,
-                nside=face_nside,
+                nside=level_nside,
             )
             conv_module = conv_cfg.build()
 
@@ -161,6 +184,7 @@ class UNetDecoder(nn.Module):
 
         self.decoder = nn.ModuleList(self.decoder)
 
+        out_nside = None if nside_levels is None else nside_levels[0]
         out_cfg = dataclasses.replace(
             output_layer,
             in_channels=curr_channel,
@@ -168,7 +192,7 @@ class UNetDecoder(nn.Module):
             dilation=dilations[-1],
             enable_nhwc=enable_nhwc,
             hpx_padding_mode=hpx_padding_mode,
-            nside=face_nside,
+            nside=out_nside,
         )
         self.output_layer = out_cfg.build()
 

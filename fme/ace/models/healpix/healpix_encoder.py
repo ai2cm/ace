@@ -36,7 +36,8 @@ class UNetEncoderConfig:
         enable_nhwc: Flag to enable NHWC data format, by default False.
         hpx_padding_mode: HEALPix padding backend (``"earth2grid"``, ``"karlbauer"``,
             or ``"isolatitude"``), by default ``"earth2grid"``.
-        nside: Native face height/width per encoder level, or ``None`` to omit.
+        nside: Face height/width per encoder level (shallowest to deepest), or
+            ``None`` to omit per-level padding resolution.
     """
 
     conv_block: ConvBlockConfig
@@ -47,7 +48,7 @@ class UNetEncoderConfig:
     dilations: Optional[list] = None
     enable_nhwc: bool = False
     hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid"
-    nside: Optional[int] = None
+    nside: Optional[Sequence[int]] = None
 
     def build(self) -> nn.Module:
         """
@@ -82,7 +83,7 @@ class UNetEncoder(nn.Module):
         dilations: Optional[list] = None,
         enable_nhwc: bool = False,
         hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
-        nside: Optional[int] = None,
+        nside: Optional[Sequence[int]] = None,
     ):
         """
         Args:
@@ -95,8 +96,8 @@ class UNetEncoder(nn.Module):
             enable_nhwc: if channel last format should be used
             hpx_padding_mode: HEALPix padding backend. Default ``"earth2grid"``;
                 also supports ``"karlbauer"`` and ``"isolatitude"``.
-            nside: Native face height/width for the shallowest encoder level; halved
-                after each downsample when set.
+            nside: Face height/width per encoder level (shallowest to deepest). Length
+                must match ``len(n_channels)`` when set.
         """
         super().__init__()
         self.n_channels = n_channels
@@ -105,25 +106,40 @@ class UNetEncoder(nn.Module):
         if dilations is None:
             dilations = [1 for _ in range(len(n_channels))]
 
+        nside_levels: Optional[tuple[int, ...]] = None
+        if nside is not None:
+            nside_levels = tuple(int(v) for v in nside)
+            if len(nside_levels) != len(n_channels):
+                raise ValueError(
+                    f"nside length must match encoder levels; got {len(nside_levels)} "
+                    f"vs {len(n_channels)}"
+                )
+
         conv_tpl = dataclasses.replace(conv_block)
         down_tpl = dataclasses.replace(down_sampling_block)
+        down_factor = down_tpl.downsample_spatial_factor()
 
         old_channels = input_channels
         self.encoder = []
-        face_nside = nside
         for n, curr_channel in enumerate(n_channels):
             modules: List[nn.Module] = []
             if n > 0:
+                if nside_levels is not None:
+                    coarse, fine = nside_levels[n - 1], nside_levels[n]
+                    if coarse != fine * down_factor:
+                        raise ValueError(
+                            f"encoder nside[{n - 1}]={coarse} must equal "
+                            f"nside[{n}] * downsample factor ({down_factor}), "
+                            f"but nside[{n}]={fine}"
+                        )
                 down_cfg = dataclasses.replace(
                     down_tpl,
                     enable_nhwc=enable_nhwc,
                     hpx_padding_mode=hpx_padding_mode,
-                    nside=face_nside,
+                    nside=None if nside_levels is None else nside_levels[n - 1],
                     in_channels=old_channels,
                 )
                 modules.append(down_cfg.build())
-                if face_nside is not None:
-                    face_nside = max(1, face_nside // 2)
 
             conv_cfg = dataclasses.replace(
                 conv_tpl,
@@ -134,7 +150,7 @@ class UNetEncoder(nn.Module):
                 n_layers=n_layers[n],
                 enable_nhwc=enable_nhwc,
                 hpx_padding_mode=hpx_padding_mode,
-                nside=face_nside,
+                nside=None if nside_levels is None else nside_levels[n],
             )
             modules.append(conv_cfg.build())
             old_channels = curr_channel

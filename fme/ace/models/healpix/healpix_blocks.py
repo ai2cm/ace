@@ -132,7 +132,8 @@ class UpsamplingBlockConfig:
         activation: Optional ``CappedGELUConfig`` for transpose-conv upsampling.
         enable_nhwc: Use channels-last memory format.
         hpx_padding_mode: HEALPix padding backend passed to child modules.
-        nside: Native face height/width for HEALPix padding.
+        nside: Native face height/width for HEALPix padding at upsample input.
+        nside_after: Face height/width after upsampling (``SmoothedInterpolateConv`` only).
         align_corners: Passed to ``nn.Upsample`` when ``block_type`` is ``"Interpolate"``.
         scale_factor: Alias for ``stride`` when set in config.
         mode: Alias for ``upsample_mode`` when set in config.
@@ -153,6 +154,7 @@ class UpsamplingBlockConfig:
     enable_nhwc: bool = False
     hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid"
     nside: Optional[int] = None
+    nside_after: Optional[int] = None
     align_corners: bool = False
     scale_factor: Optional[int] = None
     mode: Optional[str] = None
@@ -186,6 +188,7 @@ class UpsamplingBlockConfig:
                 enable_nhwc=self.enable_nhwc,
                 hpx_padding_mode=self.hpx_padding_mode,
                 nside=self.nside,
+                nside_after=self.nside_after,
             )
         if self.block_type == "Interpolate":
             if self.align_corners is False:
@@ -645,6 +648,7 @@ class SmoothedInterpolateConv(nn.Module):
         enable_nhwc: bool = False,
         hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
         nside: Optional[int] = None,
+        nside_after: Optional[int] = None,
     ):
         """
         Args:
@@ -657,12 +661,30 @@ class SmoothedInterpolateConv(nn.Module):
             activation: Optional activation module appended after the conv.
             enable_nhwc: Use channels-last memory format.
             hpx_padding_mode: HEALPix padding backend passed to ``HEALPixLayer``.
-            nside: Native face height/width before upsampling; doubled internally for the conv step.
+            nside: Face height/width before upsampling (isolatitude gather indices).
+            nside_after: Face height/width after upsampling for the conv step; required
+                when ``nside`` is set and ``hpx_padding_mode`` is ``"isolatitude"``.
         """
         super().__init__()
         if dilation > 1:
             raise ValueError(
                 f"dilation > 1 is not supported for HEALPix resize convolutions, got {dilation}"
+            )
+        if nside is not None and nside_after is None:
+            if hpx_padding_mode == "isolatitude":
+                raise ValueError(
+                    "SmoothedInterpolateConv requires nside_after when nside is set "
+                    'and hpx_padding_mode="isolatitude"'
+                )
+            nside_after = nside
+        if (
+            nside is not None
+            and nside_after is not None
+            and nside_after != nside * scale_factor
+        ):
+            raise ValueError(
+                f"nside_after ({nside_after}) must equal nside ({nside}) * "
+                f"scale_factor ({scale_factor})"
             )
 
         trim_size = 1
@@ -674,7 +696,7 @@ class SmoothedInterpolateConv(nn.Module):
         hpk_after = _healpix_layer_kwargs(
             enable_nhwc,
             hpx_padding_mode,
-            nside * scale_factor if nside is not None else None,
+            nside_after,
         )
 
         block = [

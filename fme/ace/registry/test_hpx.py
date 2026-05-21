@@ -118,6 +118,11 @@ def decoder_config(
     return decoder_config
 
 
+def _nside_levels(shallow: int, n_levels: int) -> list[int]:
+    """Face height/width per UNet level, shallowest to deepest."""
+    return [max(1, shallow // (2**i)) for i in range(n_levels)]
+
+
 def _hpx_unet_configs(
     img: int = 16,
     encoder_n_channels: list[int] | None = None,
@@ -130,6 +135,8 @@ def _hpx_unet_configs(
         encoder_n_channels = [8, 16]
     if decoder_n_channels is None:
         decoder_n_channels = list(reversed(encoder_n_channels))
+    n_levels = len(encoder_n_channels)
+    levels = _nside_levels(img, n_levels)
 
     enc_conv = ConvBlockConfig(
         block_type="ConvNeXtBlock",
@@ -149,7 +156,7 @@ def _hpx_unet_configs(
         input_channels=3,
         n_channels=encoder_n_channels,
         n_layers=[1] * len(encoder_n_channels),
-        nside=img,
+        nside=levels,
         hpx_padding_mode=padding_mode,
     )
     dec_conv = ConvBlockConfig(
@@ -178,7 +185,7 @@ def _hpx_unet_configs(
         n_layers=[1] * len(decoder_n_channels),
         output_channels=output_channels,
         hpx_padding_mode=padding_mode,
-        nside=img,
+        nside=levels,
     )
     return enc, dec
 
@@ -939,6 +946,7 @@ def test_smoothed_interpolate_conv_forward(mode):
     )
     if mode == "isolatitude":
         kwargs["nside"] = h
+        kwargs["nside_after"] = h * 2
     m = SmoothedInterpolateConv(**kwargs)
     y = m(x)
     assert y.shape[-2:] == (h * 2, h * 2)
@@ -998,13 +1006,14 @@ def test_healpix_unet_dealias_smoothed():
         hpx_padding_mode="karlbauer",
         nside=img,
     )
+    levels = _nside_levels(img, 2)
     enc = UNetEncoderConfig(
         conv_block=conv,
         down_sampling_block=down,
         input_channels=3,
         n_channels=[8, 16],
         n_layers=[1, 1],
-        nside=img,
+        nside=levels,
         hpx_padding_mode="karlbauer",
     )
     up = UpsamplingBlockConfig(
@@ -1012,7 +1021,8 @@ def test_healpix_unet_dealias_smoothed():
         stride=2,
         upsample_mode="nearest",
         hpx_padding_mode="karlbauer",
-        nside=img // 2,
+        nside=levels[1],
+        nside_after=levels[0],
     )
     dec = UNetDecoderConfig(
         conv_block=conv,
@@ -1029,7 +1039,7 @@ def test_healpix_unet_dealias_smoothed():
         n_layers=[1, 1],
         output_channels=4,
         hpx_padding_mode="karlbauer",
-        nside=img,
+        nside=levels,
     )
     device = th.device("cuda" if th.cuda.is_available() else "cpu")
     # Channel count matches prior stacked layout: 2*(3+1) prognostic+decoder + 1 constant
@@ -1040,7 +1050,7 @@ def test_healpix_unet_dealias_smoothed():
         input_channels=in_ch,
         output_channels=4,
         hpx_padding_mode="karlbauer",
-        nside=img,
+        nside=_nside_levels(img, len(enc.n_channels)),
     ).to(device)
     b = 2
     x = th.randn(b, 12, 2 * 3, img, img, device=device)
@@ -1102,6 +1112,7 @@ def test_smoothed_interpolate_isolatitude_forward():
         activation=CappedGELUConfig(cap_value=10),
         hpx_padding_mode="isolatitude",
         nside=img,
+        nside_after=img * 2,
     ).build()
     y_up = up(x)
     assert y_up.shape[-2:] == (img * 2, img * 2)
@@ -1185,7 +1196,7 @@ def test_HEALPixUNet_initialize():
         input_channels=in_channels,
         output_channels=out_channels,
         hpx_padding_mode="karlbauer",
-        nside=img,
+        nside=_nside_levels(img, len(enc.n_channels)),
     ).to(device)
     assert isinstance(model, HEALPixUNet)
     for layer in model.decoder.decoder:
@@ -1206,7 +1217,7 @@ def test_HEALPixUNet_forward_shape():
         input_channels=in_channels,
         output_channels=out_channels,
         hpx_padding_mode="karlbauer",
-        nside=img,
+        nside=_nside_levels(img, len(enc.n_channels)),
     ).to(device)
 
     x = th.randn(batch, 12, in_channels, img, img, device=device)
@@ -1228,7 +1239,7 @@ def test_HEALPixUNet_input_channel_validation():
         input_channels=in_channels,
         output_channels=out_channels,
         hpx_padding_mode="karlbauer",
-        nside=img,
+        nside=_nside_levels(img, len(enc.n_channels)),
     ).to(device)
 
     bad_input = th.randn(1, 12, in_channels + 1, img, img, device=device)
@@ -1249,10 +1260,6 @@ def test_HEALPixUNet_forward_padding_mode(mode):
     enc, dec = _hpx_unet_configs(
         img=img, output_channels=out_channels, padding_mode=mode
     )
-    if mode == "isolatitude":
-        # decoder modules at the deeper level need the smaller nside
-        dec.up_sampling_block.nside = img // 2
-        dec.conv_block.nside = img // 2
 
     device = th.device("cuda" if th.cuda.is_available() else "cpu")
     model = HEALPixUNet(
@@ -1261,7 +1268,7 @@ def test_HEALPixUNet_forward_padding_mode(mode):
         input_channels=in_channels,
         output_channels=out_channels,
         hpx_padding_mode=mode,
-        nside=img,
+        nside=_nside_levels(img, len(enc.n_channels)),
     ).to(device)
 
     x = th.randn(batch, 12, in_channels, img, img, device=device)
@@ -1291,7 +1298,7 @@ def test_HEALPixUNet_in_stepper():
     hpx_unet_config_data = {
         "encoder": dataclasses.asdict(encoder),
         "decoder": dataclasses.asdict(decoder),
-        "nside": img,
+        "nside": _nside_levels(img, len(encoder.n_channels)),
     }
 
     horizontal_coordinates = HEALPixCoordinates(
