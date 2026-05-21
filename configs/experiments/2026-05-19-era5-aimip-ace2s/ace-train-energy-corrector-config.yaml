@@ -158,9 +158,9 @@ stepper:
         - DSWRFsfc
         - USWRFsfc
         - USWRFtoa
-      total_energy_budget_correction:
-        method: constant_temperature
-        constant_unaccounted_heating: 0.0
+        total_energy_budget_correction:
+          method: constant_temperature
+          constant_unaccounted_heating: 0.0
       next_step_forcing_names:
       - DSWRFtoa
       in_names:
