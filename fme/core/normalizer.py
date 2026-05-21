@@ -11,6 +11,28 @@ import xarray as xr
 from fme.core.device import move_tensordict_to_device
 from fme.core.typing_ import TensorDict, TensorMapping
 
+# Experimental: when NormalizationConfig.experimental_use_shared_temperature_offset
+# is True, every field named here gets a per-sample additive offset applied
+# before normalization (and removed after denormalization). The offset for a
+# sample is the difference between the surface_temperature normalization mean
+# and the sample's cell-wise mean surface_temperature. Hard-coded for now.
+_TEMPERATURE_FIELD_NAMES = frozenset(
+    [
+        "surface_temperature",
+        "TMP2m",
+        "TMP850",
+        "air_temperature_0",
+        "air_temperature_1",
+        "air_temperature_2",
+        "air_temperature_3",
+        "air_temperature_4",
+        "air_temperature_5",
+        "air_temperature_6",
+        "air_temperature_7",
+    ]
+)
+_SHARED_TEMPERATURE_OFFSET_REFERENCE = "surface_temperature"
+
 
 @dataclasses.dataclass
 class NormalizationConfig:
@@ -31,6 +53,15 @@ class NormalizationConfig:
         fill_nans_on_denormalize: Whether to fill NaNs during denormalization. If
             true, on denormalization NaNs in the normalized input become global means in
             the denormalized output.
+        experimental_use_shared_temperature_offset: If true, the built
+            normalizer computes a per-sample offset from the input
+            surface_temperature (surface_temperature normalization mean minus
+            the sample's cell-wise mean) and adds it to every temperature
+            field on normalize / subtracts it on denormalize. Intended for the
+            network (full-field) normalizer only -- the loss normalizer skips
+            this even if the flag is set, since offsets are unnecessary there.
+            surface_temperature must be in the means. Temperature field names
+            are hard-coded; experimental knob, not a stable feature.
     """
 
     global_means_path: str | pathlib.Path | None = None
@@ -39,6 +70,7 @@ class NormalizationConfig:
     stds: Mapping[str, float] = dataclasses.field(default_factory=dict)
     fill_nans_on_normalize: bool = False
     fill_nans_on_denormalize: bool = False
+    experimental_use_shared_temperature_offset: bool = False
 
     def __post_init__(self):
         using_path = (
@@ -91,6 +123,9 @@ class NormalizationConfig:
                 names=names,
                 fill_nans_on_normalize=self.fill_nans_on_normalize,
                 fill_nans_on_denormalize=self.fill_nans_on_denormalize,
+                use_shared_temperature_offset=(
+                    self.experimental_use_shared_temperature_offset
+                ),
             )
         else:
             means = {k: torch.tensor(self.means[k]) for k in names}
@@ -100,6 +135,9 @@ class NormalizationConfig:
                 stds=stds,
                 fill_nans_on_normalize=self.fill_nans_on_normalize,
                 fill_nans_on_denormalize=self.fill_nans_on_denormalize,
+                use_shared_temperature_offset=(
+                    self.experimental_use_shared_temperature_offset
+                ),
             )
 
 
@@ -114,12 +152,25 @@ class StandardNormalizer:
         stds: TensorDict,
         fill_nans_on_normalize: bool = False,
         fill_nans_on_denormalize: bool = False,
+        use_shared_temperature_offset: bool = False,
     ):
         self.means = move_tensordict_to_device(means)
         self.stds = move_tensordict_to_device(stds)
         self._names = set(means).intersection(stds)
         self._fill_nans_on_normalize = fill_nans_on_normalize
         self._fill_nans_on_denormalize = fill_nans_on_denormalize
+        self._use_shared_temperature_offset = use_shared_temperature_offset
+        # Per-sample offset cached by the last normalize() call so the matching
+        # denormalize() can invert it. None until the first normalize() call.
+        self._cached_temperature_offset: torch.Tensor | None = None
+        if use_shared_temperature_offset and (
+            _SHARED_TEMPERATURE_OFFSET_REFERENCE not in self.means
+        ):
+            raise ValueError(
+                "use_shared_temperature_offset is set but "
+                f"{_SHARED_TEMPERATURE_OFFSET_REFERENCE!r} is not present in "
+                "the normalization means."
+            )
 
     @property
     def fill_nans_on_normalize(self):
@@ -129,8 +180,18 @@ class StandardNormalizer:
     def fill_nans_on_denormalize(self):
         return self._fill_nans_on_denormalize
 
+    @property
+    def use_shared_temperature_offset(self) -> bool:
+        return self._use_shared_temperature_offset
+
     def normalize(self, tensors: TensorMapping) -> TensorDict:
         filtered_tensors = {k: v for k, v in tensors.items() if k in self._names}
+        if self._use_shared_temperature_offset:
+            offset = self._compute_temperature_offset(tensors)
+            self._cached_temperature_offset = offset
+            filtered_tensors = _shift_temperature_fields(
+                filtered_tensors, offset, add=True
+            )
         return _normalize(
             filtered_tensors,
             means=self.means,
@@ -140,12 +201,40 @@ class StandardNormalizer:
 
     def denormalize(self, tensors: TensorMapping) -> TensorDict:
         filtered_tensors = {k: v for k, v in tensors.items() if k in self._names}
-        return _denormalize(
+        denormalized = _denormalize(
             filtered_tensors,
             means=self.means,
             stds=self.stds,
             fill_nans=self._fill_nans_on_denormalize,
         )
+        if self._use_shared_temperature_offset:
+            if self._cached_temperature_offset is None:
+                raise RuntimeError(
+                    "denormalize() was called before normalize() on a "
+                    "StandardNormalizer with use_shared_temperature_offset "
+                    "enabled; the offset is computed during normalize()."
+                )
+            denormalized = _shift_temperature_fields(
+                denormalized, self._cached_temperature_offset, add=False
+            )
+        return denormalized
+
+    def _compute_temperature_offset(self, tensors: TensorMapping) -> torch.Tensor:
+        ref_name = _SHARED_TEMPERATURE_OFFSET_REFERENCE
+        if ref_name not in tensors:
+            raise ValueError(
+                "use_shared_temperature_offset is set but "
+                f"{ref_name!r} is not in the input tensors to normalize()."
+            )
+        ref = tensors[ref_name]
+        if ref.ndim < 2:
+            raise ValueError(
+                f"{ref_name!r} must have a sample dim and at least one "
+                f"non-sample dim to compute a per-sample offset; got shape "
+                f"{tuple(ref.shape)}."
+            )
+        sample_mean = ref.mean(dim=tuple(range(1, ref.ndim)))
+        return self.means[ref_name] - sample_mean
 
     def get_state(self):
         """
@@ -156,6 +245,7 @@ class StandardNormalizer:
             "stds": {k: float(v.cpu().numpy().item()) for k, v in self.stds.items()},
             "fill_nans_on_normalize": self._fill_nans_on_normalize,
             "fill_nans_on_denormalize": self._fill_nans_on_denormalize,
+            "use_shared_temperature_offset": self._use_shared_temperature_offset,
         }
 
     @classmethod
@@ -172,6 +262,9 @@ class StandardNormalizer:
             stds=stds,
             fill_nans_on_normalize=state.get("fill_nans_on_normalize", False),
             fill_nans_on_denormalize=state.get("fill_nans_on_denormalize", False),
+            use_shared_temperature_offset=state.get(
+                "use_shared_temperature_offset", False
+            ),
         )
 
     def get_normalization_config(self) -> NormalizationConfig:
@@ -180,6 +273,9 @@ class StandardNormalizer:
             stds={k: float(v.cpu().numpy().item()) for k, v in self.stds.items()},
             fill_nans_on_normalize=self.fill_nans_on_normalize,
             fill_nans_on_denormalize=self.fill_nans_on_denormalize,
+            experimental_use_shared_temperature_offset=(
+                self._use_shared_temperature_offset
+            ),
         )
 
 
@@ -262,6 +358,43 @@ def load_dict_from_netcdf(
     return result
 
 
+def _shift_temperature_fields(
+    tensors: TensorDict,
+    offset: torch.Tensor,
+    add: bool,
+) -> TensorDict:
+    """Add (or subtract) a per-sample offset to every temperature field.
+
+    ``offset`` has shape ``[batch]``; it is broadcast over the non-sample
+    dimensions of each temperature tensor.
+    """
+    result = dict(tensors)
+    for name in _TEMPERATURE_FIELD_NAMES:
+        if name not in result:
+            continue
+        t = result[name]
+        broadcast = offset.view(offset.shape[0], *(1,) * (t.ndim - 1))
+        result[name] = t + broadcast if add else t - broadcast
+    return result
+
+
+def _disable_shared_temperature_offset(
+    normalizer: StandardNormalizer,
+) -> StandardNormalizer:
+    """Return a copy of ``normalizer`` with the shared-temperature-offset
+    behavior turned off, or ``normalizer`` itself if it's already off.
+    """
+    if not normalizer.use_shared_temperature_offset:
+        return normalizer
+    return StandardNormalizer(
+        means=normalizer.means,
+        stds=normalizer.stds,
+        fill_nans_on_normalize=normalizer.fill_nans_on_normalize,
+        fill_nans_on_denormalize=normalizer.fill_nans_on_denormalize,
+        use_shared_temperature_offset=False,
+    )
+
+
 def _combine_normalizers(
     base_normalizer: StandardNormalizer,
     override_normalizer: StandardNormalizer,
@@ -317,14 +450,20 @@ class NetworkAndLossNormalizationConfig:
         residual_scaled_names: list[str],
     ) -> StandardNormalizer:
         if self.loss is not None:
-            return self.loss.build(names=names)
+            built = self.loss.build(names=names)
         elif self.residual is not None:
-            return _combine_normalizers(
+            built = _combine_normalizers(
                 base_normalizer=self.network.build(names=names),
                 override_normalizer=self.residual.build(names=residual_scaled_names),
             )
         else:
-            return self.network.build(names=names)
+            built = self.network.build(names=names)
+        # The shared-temperature-offset flag is only meaningful for the
+        # network normalizer (paired normalize/denormalize). Strip it from
+        # the loss normalizer: there's no denormalize on the loss path, and
+        # offsets computed independently from target vs prediction inputs
+        # would not cancel cleanly.
+        return _disable_shared_temperature_offset(built)
 
     def load(self):
         self.network.load()
