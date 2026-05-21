@@ -1,0 +1,4 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
+
+ace-forced-1pct_nosmooth_0256to0350-hfds_prescribed-ft_correctOHC|rs1|01KKDHDK6TDS01C8X4VBVDT94C|run_ICx1_ace|best_inference_ckpt|urgent||||ai2/climate-titan|b200|||100GiB
+aceS-forced-1pct_nosmooth_0256to0350-hfds_prescribed-ft_correctOHC|rs1|01KKDHDK6TDS01C8X4VBVDT94C|run_ICx1_aceS|best_inference_ckpt|urgent||||ai2/climate-titan|b200|||100GiB
