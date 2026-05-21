@@ -8,14 +8,14 @@ import torch
 
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
-from fme.core.masking import NullMasking, StaticMasking
+from fme.core.spatial_masking import NullSpatialMasking, StaticSpatialMasking
 from fme.core.typing_ import TensorDict, TensorMapping
 
 LEVEL_PATTERN = re.compile(r"_(\d+)$")
 
 
-class MaskProviderABC(abc.ABC):
-    SelfType = TypeVar("SelfType", bound="MaskProviderABC")
+class SpatialMaskProviderABC(abc.ABC):
+    SelfType = TypeVar("SelfType", bound="SpatialMaskProviderABC")
 
     @abc.abstractmethod
     def get_mask_tensor_for(self, name: str) -> torch.Tensor | None: ...
@@ -27,7 +27,7 @@ class MaskProviderABC(abc.ABC):
     def update(self: SelfType, other: SelfType) -> None: ...
 
     @abc.abstractmethod
-    def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]: ...
+    def build_output_spatial_masker(self) -> Callable[[TensorMapping], TensorDict]: ...
 
     @abc.abstractmethod
     def localize(self: SelfType) -> SelfType:
@@ -38,49 +38,49 @@ class MaskProviderABC(abc.ABC):
     def get_state(self) -> dict[str, Any]: ...
 
 
-class _NullMaskProvider(MaskProviderABC):
+class _NullSpatialMaskProvider(SpatialMaskProviderABC):
     def get_mask_tensor_for(self, name: str) -> torch.Tensor | None:
         return None
 
-    def to(self, device: str) -> "_NullMaskProvider":
+    def to(self, device: str) -> "_NullSpatialMaskProvider":
         return self
 
-    def localize(self) -> "_NullMaskProvider":
+    def localize(self) -> "_NullSpatialMaskProvider":
         return self
 
-    def update(self, other: MaskProviderABC) -> None:
-        if not isinstance(other, _NullMaskProvider):
+    def update(self, other: SpatialMaskProviderABC) -> None:
+        if not isinstance(other, _NullSpatialMaskProvider):
             raise ValueError(
-                f"Attempted to update NullMaskProvider with non-null {other}"
+                f"Attempted to update NullSpatialMaskProvider with non-null {other}"
             )
 
-    def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]:
-        return NullMasking()
+    def build_output_spatial_masker(self) -> Callable[[TensorMapping], TensorDict]:
+        return NullSpatialMasking()
 
     def get_state(self) -> dict[str, Any]:
         return {"masks": {}}
 
 
-NullMaskProvider = _NullMaskProvider()
+NullSpatialMaskProvider = _NullSpatialMaskProvider()
 
 
-class MaskProvider(MaskProviderABC):
+class SpatialMaskProvider(SpatialMaskProviderABC):
     """
     Stores and returns 2D mask tensors.
 
     Masks are special time-invariant data variables with names that start with
-    the string "mask_". There are three types of masks that MaskProvider knows
-    how to use, in order from highest to lowest priority:
+    the string "mask_". There are three types of masks that SpatialMaskProvider
+    knows how to use, in order from highest to lowest priority:
 
     1. Variable-specific masks, e.g. "mask_sst" and "mask_thetao_1".
     2. Level-specific masks, e.g. "mask_0" and "mask_1".
     3. A catch-all 2D mask named "mask_2d".
 
-    For example, when matching the variable "theta_1", MaskProvider will first
+    For example, when matching the variable "theta_1", SpatialMaskProvider will first
     check if it has a mask called "mask_theta_1". If not, then it will check for
     a mask called "mask_1", returning None if this is also not found.
 
-    Another example: when matching the variable "sst", MaskProvider checks for
+    Another example: when matching the variable "sst", SpatialMaskProvider checks for
     "mask_sst" and then "mask_2d", returning None if neither are found.
 
     Args:
@@ -97,18 +97,18 @@ class MaskProvider(MaskProviderABC):
         for key in self._masks:
             if not key.startswith("mask_"):
                 raise ValueError(
-                    "The 'mask' TensorDict passed to MaskProvider init has "
+                    "The 'mask' TensorDict passed to SpatialMaskProvider init has "
                     f"non-mask tensors, including {key}. Expected all keys "
                     "to start with the string 'mask_'."
                 )
 
-    def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]:
+    def build_output_spatial_masker(self) -> Callable[[TensorMapping], TensorDict]:
         """
-        Returns a StaticMasking object that fills in NaNs outside of mask
+        Returns a StaticSpatialMasking object that fills in NaNs outside of mask
         valid points, i.e. where the mask value is 0.
 
         """
-        return StaticMasking(
+        return StaticSpatialMasking(
             mask_value=0,
             fill_value=float("nan"),
             mask=self,
@@ -132,26 +132,26 @@ class MaskProvider(MaskProviderABC):
         # 2D mask or None
         return self.masks.get("mask_2d", None)
 
-    def to(self, device: str) -> "MaskProvider":
-        return MaskProvider(
+    def to(self, device: str) -> "SpatialMaskProvider":
+        return SpatialMaskProvider(
             {name: tensor.to(device) for name, tensor in self.masks.items()},
         )
 
-    def localize(self) -> "MaskProvider":
+    def localize(self) -> "SpatialMaskProvider":
         if not self._masks:
             return self
-        return MaskProvider(
+        return SpatialMaskProvider(
             {
                 k: v[Distributed.get_instance().get_local_slices(v.shape)].contiguous()
                 for k, v in self._masks.items()
             },
         )
 
-    def update(self, other: "MaskProvider") -> None:
-        """Update the MaskProvider's masks with masks from another MaskProvider.
+    def update(self, other: "SpatialMaskProvider") -> None:
+        """Update masks with masks from another SpatialMaskProvider.
 
         Raises a ValueError if there are overlapping mask names between the two
-        MaskProviders.
+        SpatialMaskProviders.
         """
         self_keys = set(self.masks.keys())
         other_keys = set(other.masks.keys())
@@ -168,7 +168,7 @@ class MaskProvider(MaskProviderABC):
             self._masks.update(other.masks)
 
     def __eq__(self, other) -> bool:
-        if not isinstance(other, MaskProvider):
+        if not isinstance(other, SpatialMaskProvider):
             return False
         if not self.masks.keys() == other.masks.keys():
             return False
@@ -181,14 +181,16 @@ class MaskProvider(MaskProviderABC):
 
     def __repr__(self) -> str:
         return (
-            "MaskProvider(\n    masks=[\n        "
+            "SpatialMaskProvider(\n    masks=[\n        "
             + ",\n        ".join(sorted(list(self.masks.keys())))
             + ",\n    ]\n)"
         )
 
     def assert_compatible_with(self, other) -> None:
-        if not isinstance(other, MaskProvider):
-            raise AssertionError(f"expected MaskProvider, got {type(other).__name__}")
+        if not isinstance(other, SpatialMaskProvider):
+            raise AssertionError(
+                f"expected SpatialMaskProvider, got {type(other).__name__}"
+            )
         missing_keys = self.masks.keys() - other.masks.keys()
         if missing_keys:
             raise AssertionError(f"mask keys {missing_keys} not found in other")
@@ -202,7 +204,7 @@ class MaskProvider(MaskProviderABC):
         return {"masks": self.masks}
 
     @classmethod
-    def from_state(cls, state: dict[str, Any]) -> "MaskProvider":
+    def from_state(cls, state: dict[str, Any]) -> "SpatialMaskProvider":
         device = get_device()
         masks = {k: v.to(device, copy=True) for k, v in state["masks"].items()}
         return cls(masks=masks)
