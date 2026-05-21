@@ -18,6 +18,7 @@ forcing_loader:
   num_data_workers: 8
 initial_condition:
   path: PLACEHOLDER
+  engine: zarr
   start_indices:
     times: []
 # It should be safe to use the same stepper override even when using the
