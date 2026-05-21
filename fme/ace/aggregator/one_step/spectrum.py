@@ -2,7 +2,6 @@ import dataclasses
 from collections.abc import Callable, Mapping
 from typing import Any
 
-import numpy as np
 import torch
 import xarray as xr
 
@@ -78,7 +77,7 @@ class SpectrumAggregator:
         gen_data: TensorMapping,
         target_data_norm: TensorMapping,
         gen_data_norm: TensorMapping,
-        loss: torch.Tensor = torch.tensor(np.nan),
+        loss: float = float("nan"),
         i_time_start: int = 0,
     ):
         n_timesteps = next(iter(target_data.values())).shape[1]

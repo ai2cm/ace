@@ -2,7 +2,6 @@ import dataclasses
 from collections.abc import Sequence
 from typing import Any, Literal
 
-import numpy as np
 import torch
 import xarray as xr
 
@@ -97,7 +96,7 @@ class MeanAggregator:
         gen_data: TensorMapping,
         target_data_norm: TensorMapping | None = None,
         gen_data_norm: TensorMapping | None = None,
-        loss: torch.Tensor = torch.tensor(np.nan),
+        loss: float = float("nan"),
         i_time_start: int = 0,
     ):
         self._loss += loss

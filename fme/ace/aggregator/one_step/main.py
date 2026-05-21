@@ -52,7 +52,7 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
     def __init__(
         self,
         deterministic_aggregator: OneStepDeterministicAggregator,
-        ensemble_aggregator: EnsembleAggregator,
+        ensemble_aggregator: EnsembleAggregator | None = None,
     ):
         self._deterministic_aggregator = deterministic_aggregator
         self._ensemble_aggregator = ensemble_aggregator
@@ -80,7 +80,7 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
                 normalize=batch.normalize,
             )
         )
-        if n_ensemble > 1:
+        if n_ensemble > 1 and self._ensemble_aggregator is not None:
             self._ensemble_aggregator.record_batch(
                 target_data=batch.target_data,
                 gen_data=batch.gen_data,
@@ -98,7 +98,7 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
         """
         deterministic_logs = self._deterministic_aggregator.get_logs(label)
         deterministic_logs.update(self._per_step_losses.get_logs(label))
-        if self._ensemble_recorded:
+        if self._ensemble_recorded and self._ensemble_aggregator is not None:
             stochastic_logs = self._ensemble_aggregator.get_logs(label)
             if len(set(deterministic_logs.keys()) & set(stochastic_logs.keys())) > 0:
                 raise ValueError(
@@ -138,6 +138,7 @@ def build_one_step_aggregator(
     loss_scaling: TensorMapping | None = None,
     channel_mean_names: Sequence[str] | None = None,
     raise_on_unsupported: bool = True,
+    include_default_ensemble: bool = True,
 ) -> OneStepAggregator:
     _validate_no_duplicate_names(metrics)
     ctx = OneStepBuildContext(
@@ -169,7 +170,7 @@ def build_one_step_aggregator(
                 raise ValueError("Multiple ensemble metrics are not supported.")
             ensemble_aggregator = result.ensemble
 
-    if ensemble_aggregator is None:
+    if ensemble_aggregator is None and include_default_ensemble:
         ensemble_aggregator = get_one_step_ensemble_aggregator(
             gridded_operations=ctx.ops,
             target_time=1,
@@ -234,6 +235,10 @@ class OneStepAggregatorConfig:
     )
 
     def __post_init__(self):
+        if not self.mean_denorm.enabled:
+            raise ValueError("mean_denorm cannot be disabled.")
+        if not self.mean_norm.enabled:
+            raise ValueError("mean_norm cannot be disabled.")
         if self.mean_denorm.target != "denorm":
             raise ValueError(
                 f"mean_denorm.target must be 'denorm', "
@@ -271,6 +276,7 @@ class OneStepAggregatorConfig:
             loss_scaling=loss_scaling,
             channel_mean_names=channel_mean_names,
             raise_on_unsupported=False,
+            include_default_ensemble=self.ensemble.enabled,
         )
 
 
@@ -329,4 +335,5 @@ class LegacyFlagOneStepAggregatorConfig:
             output_dir=output_dir,
             loss_scaling=loss_scaling,
             channel_mean_names=channel_mean_names,
+            raise_on_unsupported=False,
         )
