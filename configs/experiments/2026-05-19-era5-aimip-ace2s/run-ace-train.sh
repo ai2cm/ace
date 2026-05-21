@@ -5,7 +5,7 @@ set -e
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username by default
-WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
+WANDB_USERNAME=bhenn1983
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=4
 
@@ -53,7 +53,7 @@ run_training() {
 
 base_name="ace2s-aimip"
 
-run_training "ace-train-config-1-step-pretrain.yaml" "$base_name-era5-1-step-pre-training-2rollouts-rs0"
+run_training "ace-train-config-1-step-pretrain.yaml" "$base_name-era5-1-step-pre-training-rs0"
 
 # For the finetuning stage take beaker dataset id from the above job and add it to
 # ace-train-config-multi-step-finetuning.yaml then uncomment next line
