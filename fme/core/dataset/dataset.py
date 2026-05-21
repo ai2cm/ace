@@ -7,7 +7,9 @@ from fme.core.dataset.properties import DatasetProperties
 from fme.core.generics.dataset import GenericDataset
 from fme.core.typing_ import TensorDict
 
-DatasetItem = tuple[TensorDict, xr.DataArray, set[str] | None, int | None]
+DatasetItem = tuple[
+    TensorDict, xr.DataArray, set[str] | None, int | None, frozenset[str] | None
+]
 
 
 class DatasetABC(GenericDataset[DatasetItem], abc.ABC):
@@ -77,4 +79,12 @@ class DatasetABC(GenericDataset[DatasetItem], abc.ABC):
             max_window_len: The maximum window length including the
                 start index for inference.
         """
+        pass
+
+    @abc.abstractmethod
+    def enable_shared_memory(self):
+        pass
+
+    @abc.abstractmethod
+    def set_global_epoch_tensor(self, tensor):
         pass

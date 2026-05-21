@@ -278,6 +278,7 @@ class Cmip6Step(StepABC):
             self.secondary_decoder: SecondaryDecoder | NoSecondaryDecoder = (
                 config.secondary_decoder.build(
                     n_in_channels=n_out_channels,
+                    dataset_info=dataset_info,
                 ).to(get_device())
             )
         else:

@@ -1,8 +1,27 @@
+import dataclasses
+
 import torch
 import xarray as xr
 
 from fme.core.histogram import ComparedDynamicHistograms
-from fme.core.typing_ import TensorMapping
+
+from .build_context import MetricBuildContext, maybe_filter
+from .data import InferenceBatchData, MetricBuildResult, SubAggregator
+
+
+@dataclasses.dataclass
+class HistogramMetricConfig:
+    variables: list[str] | None = None
+    name: str = "histogram"
+    enabled: bool = True
+    strict: bool = True
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        agg: SubAggregator = HistogramAggregator()
+        return MetricBuildResult(aggregator=maybe_filter(agg, self.variables))
 
 
 class HistogramAggregator:
@@ -12,13 +31,9 @@ class HistogramAggregator:
     @torch.no_grad()
     def record_batch(
         self,
-        target_data: TensorMapping,
-        gen_data: TensorMapping,
-        target_data_norm: TensorMapping,
-        gen_data_norm: TensorMapping,
-        i_time_start: int = 0,
+        data: InferenceBatchData,
     ):
-        self._histograms.record_batch(target_data, gen_data)
+        self._histograms.record_batch(data.target, data.prediction)
 
     @torch.no_grad()
     def get_logs(self, label: str):

@@ -35,16 +35,18 @@ def test_noise_conditioned_sfno_conditioning():
     n_noise = 16
     n_pos = 8
     n_labels = 4
+    label_embed_dim = 3
     model = NoiseConditionedSFNO(
         conditional_model=mock_sfno,
         img_shape=img_shape,
         embed_dim_noise=n_noise,
         embed_dim_pos=n_pos,
-        embed_dim_labels=n_labels,
+        n_labels=n_labels,
+        label_embed_dim=label_embed_dim,
     )
     batch_size = 2
     x = torch.randn(batch_size, 3, img_shape[0], img_shape[1])
-    labels = torch.randn(batch_size, 4)
+    labels = torch.randn(batch_size, n_labels)
     _ = model(x, labels=labels)
     mock_sfno.assert_called()
     args, _ = mock_sfno.call_args
@@ -62,5 +64,27 @@ def test_noise_conditioned_sfno_conditioning():
         img_shape[0],
         img_shape[1],
     )
-    assert context.labels.shape == (batch_size, n_labels)
+    assert context.labels.shape == (batch_size, label_embed_dim)
     assert context.noise.shape == (batch_size, n_noise, img_shape[0], img_shape[1])
+
+
+def test_noise_conditioned_sfno_onehot_labels():
+    """When label_embed_dim=0, one-hot labels pass through directly."""
+    mock_sfno = unittest.mock.MagicMock()
+    img_shape = (32, 64)
+    n_labels = 4
+    model = NoiseConditionedSFNO(
+        conditional_model=mock_sfno,
+        img_shape=img_shape,
+        embed_dim_noise=8,
+        embed_dim_pos=4,
+        n_labels=n_labels,
+        label_embed_dim=0,
+    )
+    batch_size = 2
+    x = torch.randn(batch_size, 3, img_shape[0], img_shape[1])
+    labels = torch.randn(batch_size, n_labels)
+    _ = model(x, labels=labels)
+    args, _ = mock_sfno.call_args
+    context = args[1]
+    assert context.labels.shape == (batch_size, n_labels)

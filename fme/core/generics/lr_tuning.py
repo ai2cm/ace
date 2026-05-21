@@ -2,16 +2,25 @@ import copy
 import dataclasses
 import logging
 from collections.abc import Callable
+from typing import Protocol
 
 import torch
 
 from fme.core.ema import EMATracker
-from fme.core.generics.aggregator import AggregatorABC
 from fme.core.generics.data import GriddedDataABC
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainStepperABC
-from fme.core.generics.validation import run_validation_loop
 from fme.core.typing_ import Slice
+
+
+class ValidateStepper(Protocol):
+    def __call__(
+        self,
+        stepper: TrainStepperABC,
+        ema: EMATracker,
+    ) -> float:
+        """Validate a stepper and return the validation loss."""
+        ...
 
 
 @dataclasses.dataclass
@@ -47,15 +56,13 @@ class LRTuningConfig:
 
 def run_lr_tuning_trial(
     train_data: GriddedDataABC,
-    valid_data: GriddedDataABC,
     optimization: OptimizationABC,
     copy_stepper: Callable[[], TrainStepperABC],
     build_optimization: Callable[[torch.nn.ModuleList], OptimizationABC],
     copy_ema: Callable[[torch.nn.ModuleList], EMATracker],
     config: LRTuningConfig,
     current_lr: float,
-    get_validation_aggregator: Callable[[], AggregatorABC],
-    validate_using_ema: bool,
+    validate_stepper: ValidateStepper,
 ) -> float | None:
     """
     Run an isolated LR tuning trial comparing the current LR against a candidate.
@@ -67,7 +74,6 @@ def run_lr_tuning_trial(
     Args:
         train_data: Training data; ``subset_loader`` is used for the first N
             batches. The caller must have already called ``set_epoch``.
-        valid_data: Validation data.
         optimization: The current optimization (used to copy momentum state
             into the forks).
         copy_stepper: Factory that returns a new stepper initialized from the
@@ -80,8 +86,8 @@ def run_lr_tuning_trial(
             current EMA state but tracking the given modules. Called twice.
         config: The LR tuning configuration.
         current_lr: The current learning rate.
-        get_validation_aggregator: Factory for validation aggregators.
-        validate_using_ema: Whether to use EMA parameters during validation.
+        validate_stepper: Callback that validates a stepper and returns the
+            validation loss. Called twice (baseline and candidate).
 
     Returns:
         The candidate learning rate if the candidate wins, otherwise None.
@@ -103,7 +109,6 @@ def run_lr_tuning_trial(
     baseline_ema = copy_ema(baseline_stepper.modules)
     candidate_ema = copy_ema(candidate_stepper.modules)
 
-    # Train both forks
     baseline_stepper.set_train()
     candidate_stepper.set_train()
     for batch in train_data.subset_loader(stop_batch=config.num_batches):
@@ -113,29 +118,8 @@ def run_lr_tuning_trial(
         candidate_stepper.train_on_batch(batch, candidate_opt)
         candidate_ema(candidate_stepper.modules)
 
-    # Validate both forks
-    baseline_agg = get_validation_aggregator()
-    run_validation_loop(
-        stepper=baseline_stepper,
-        valid_data=valid_data,
-        aggregator=baseline_agg,
-        ema=baseline_ema,
-        validate_using_ema=validate_using_ema,
-    )
-    baseline_val_logs = baseline_agg.get_logs(label="val")
-
-    candidate_agg = get_validation_aggregator()
-    run_validation_loop(
-        stepper=candidate_stepper,
-        valid_data=valid_data,
-        aggregator=candidate_agg,
-        ema=candidate_ema,
-        validate_using_ema=validate_using_ema,
-    )
-    candidate_val_logs = candidate_agg.get_logs(label="val")
-
-    baseline_val_loss = baseline_val_logs["val/mean/loss"]
-    candidate_val_loss = candidate_val_logs["val/mean/loss"]
+    baseline_val_loss = validate_stepper(baseline_stepper, baseline_ema)
+    candidate_val_loss = validate_stepper(candidate_stepper, candidate_ema)
 
     threshold = baseline_val_loss - config.improvement_threshold * baseline_val_loss
 

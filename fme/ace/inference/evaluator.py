@@ -12,7 +12,10 @@ import torch
 
 import fme
 from fme.ace.aggregator import OneStepAggregatorConfig
-from fme.ace.aggregator.inference import InferenceEvaluatorAggregatorConfig
+from fme.ace.aggregator.inference import (
+    InferenceEvaluatorAggregatorConfig,
+    LegacyFlagInferenceEvaluatorAggregatorConfig,
+)
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_gridded_data, get_inference_data
@@ -25,7 +28,7 @@ from fme.ace.stepper import (
     Stepper,
     StepperOverrideConfig,
     load_stepper,
-    load_stepper_config,
+    load_stepper_config_with_override,
 )
 from fme.ace.stepper.single_module import (
     StepperConfig,
@@ -225,9 +228,10 @@ class InferenceEvaluatorConfig:
     data_writer: DataWriterConfig = dataclasses.field(
         default_factory=lambda: DataWriterConfig()
     )
-    aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
-        default_factory=lambda: InferenceEvaluatorAggregatorConfig()
-    )
+    aggregator: (
+        InferenceEvaluatorAggregatorConfig
+        | LegacyFlagInferenceEvaluatorAggregatorConfig
+    ) = dataclasses.field(default_factory=lambda: InferenceEvaluatorAggregatorConfig())
     stepper_override: StepperOverrideConfig | None = None
     allow_incompatible_dataset: bool = False
     validation: ValidationConfig | None = None
@@ -246,8 +250,6 @@ class InferenceEvaluatorConfig:
                         self.forward_steps_in_memory,
                         self.n_forward_steps,
                     )
-        for log_step_mean in self.aggregator.log_step_means:
-            log_step_mean.validate(self.n_forward_steps)
 
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)
@@ -261,7 +263,9 @@ class InferenceEvaluatorConfig:
 
     def load_stepper_config(self) -> StepperConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        return load_stepper_config(self.checkpoint_path, self.stepper_override)
+        return load_stepper_config_with_override(
+            self.checkpoint_path, self.stepper_override
+        )
 
     def get_data_writer(
         self,
@@ -368,10 +372,17 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
                     f"error. The incompatiblity found was: {str(err)}"
                 ) from err
 
-        aggregator_config: InferenceEvaluatorAggregatorConfig = config.aggregator
+        aggregator_config = config.aggregator
         for batch in data.loader:
             initial_time = batch.time.isel(time=0)
             break
+        if config.n_ensemble_per_ic > 1:
+            initial_time = initial_time.isel(
+                sample=np.repeat(
+                    np.arange(initial_time.sizes["sample"]),
+                    config.n_ensemble_per_ic,
+                )
+            )
         variable_metadata = resolve_variable_metadata(
             dataset_metadata=data.variable_metadata,
             stepper_metadata=stepper.training_variable_metadata,

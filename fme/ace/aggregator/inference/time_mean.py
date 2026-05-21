@@ -13,6 +13,8 @@ from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Image
 
 from ..plotting import plot_paneled_data
+from .build_context import MetricBuildContext
+from .data import InferenceBatchData, MetricBuildResult, SubAggregator
 
 
 @dataclasses.dataclass
@@ -69,6 +71,7 @@ class TimeMeanAggregator:
         target: Literal["norm", "denorm"] = "denorm",
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
         reference_means: xr.Dataset | None = None,
+        log_variables: frozenset[str] | None = None,
     ):
         """
         Args:
@@ -79,6 +82,9 @@ class TimeMeanAggregator:
                 used in generating logged image captions.
             reference_means: Dataset containing reference time-mean values
                 for bias computation.
+            log_variables: If provided, only include per-variable entries in
+                get_logs and get_dataset for these variables. All variables
+                are still recorded and available via get_data.
         """
         self._ops = gridded_operations
         self._target = target
@@ -92,6 +98,7 @@ class TimeMeanAggregator:
         self._n_samples: int | None = None
         self._reference_means = reference_means
         self._reference_validated = False
+        self._log_variables = log_variables
 
     @staticmethod
     def _add_or_initialize_time_mean(
@@ -119,17 +126,23 @@ class TimeMeanAggregator:
     @torch.no_grad()
     def record_batch(
         self,
-        data: TensorMapping,
-        i_time_start: int = 0,
+        data: InferenceBatchData,
     ):
-        ignore_initial = i_time_start == 0
-        self._data = self._add_or_initialize_time_mean(self._data, data, ignore_initial)
-        if self._n_samples is None:
-            self._n_samples = data[list(data)[0]].size(0)
-        if ignore_initial:
-            self._n_timesteps = data[list(data)[0]].size(1) - 1
+        if self._target == "denorm":
+            tensor_data = data.prediction
         else:
-            self._n_timesteps += data[list(data)[0]].size(1)
+            tensor_data = data.prediction_norm
+        i_time_start = data.i_time_start
+        ignore_initial = i_time_start == 0
+        self._data = self._add_or_initialize_time_mean(
+            self._data, tensor_data, ignore_initial
+        )
+        if self._n_samples is None:
+            self._n_samples = tensor_data[list(tensor_data)[0]].size(0)
+        if ignore_initial:
+            self._n_timesteps = tensor_data[list(tensor_data)[0]].size(1) - 1
+        else:
+            self._n_timesteps += tensor_data[list(tensor_data)[0]].size(1)
         if not self._reference_validated:
             if self._reference_means is not None:
                 self.get_logs(label="")
@@ -156,6 +169,8 @@ class TimeMeanAggregator:
         data = self.get_data()
         gen_map_key = "gen_map"
         for name, pred in data.items():
+            if self._log_variables is not None and name not in self._log_variables:
+                continue
             if target_maps is not None and name in target_maps:
                 gen_map_caption_key = "gen_target_map"
                 data_panels = [[pred.cpu().numpy()], [target_maps[name].cpu().numpy()]]
@@ -207,6 +222,8 @@ class TimeMeanAggregator:
         dims = ("lat", "lon")
         data = {}
         for name, pred in self.get_data().items():
+            if self._log_variables is not None and name not in self._log_variables:
+                continue
             if name in self._variable_metadata:
                 long_name = self._variable_metadata[name].long_name
                 units = self._variable_metadata[name].units
@@ -245,6 +262,7 @@ class TimeMeanEvaluatorAggregator:
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
         reference_means: xr.Dataset | None = None,
         channel_mean_names: Sequence[str] | None = None,
+        log_variables: frozenset[str] | None = None,
     ):
         """
         Args:
@@ -258,6 +276,9 @@ class TimeMeanEvaluatorAggregator:
                 for bias computation.
             channel_mean_names: Names of variables whose RMSE will be averaged. If
                 not provided, all available variables will be used.
+            log_variables: If provided, only include per-variable entries in
+                get_logs and get_dataset for these variables. All variables
+                are still recorded so that channel_mean is computed correctly.
         """
         self._ops = ops
         self._horizontal_dims = horizontal_dims
@@ -267,6 +288,7 @@ class TimeMeanEvaluatorAggregator:
             self._variable_metadata: Mapping[str, VariableMetadata] = {}
         else:
             self._variable_metadata = variable_metadata
+        self._log_variables = log_variables
         # Dictionaries of tensors of shape [n_lat, n_lon] represnting time means
         self._target_agg = TimeMeanAggregator(
             gridded_operations=ops, target=target, variable_metadata=variable_metadata
@@ -276,23 +298,27 @@ class TimeMeanEvaluatorAggregator:
             target=target,
             variable_metadata=variable_metadata,
             reference_means=reference_means,
+            log_variables=log_variables,
         )
         self._channel_mean_names = channel_mean_names
 
     @torch.no_grad()
     def record_batch(
         self,
-        target_data: TensorMapping,
-        gen_data: TensorMapping,
-        target_data_norm: TensorMapping,
-        gen_data_norm: TensorMapping,
-        i_time_start: int = 0,
+        data: InferenceBatchData,
     ):
         if self._target == "norm":
-            target_data = target_data_norm
-            gen_data = gen_data_norm
-        self._target_agg.record_batch(target_data, i_time_start)
-        self._gen_agg.record_batch(gen_data, i_time_start)
+            target_tensor = data.target_norm
+            gen_tensor = data.prediction_norm
+        else:
+            target_tensor = data.target
+            gen_tensor = data.prediction
+        target_batch = data.replace(
+            prediction=target_tensor, prediction_norm=target_tensor
+        )
+        gen_batch = data.replace(prediction=gen_tensor, prediction_norm=gen_tensor)
+        self._target_agg.record_batch(target_batch)
+        self._gen_agg.record_batch(gen_batch)
 
     def _get_target_gen_pairs(self) -> list[_TargetGenPair]:
         target_data = self._target_agg.get_data()
@@ -317,21 +343,23 @@ class TimeMeanEvaluatorAggregator:
         bias_map_key = "bias_map"
         rmse_all_channels = {}
         for pred in preds:
-            bias_image = plot_paneled_data(
-                [[pred.bias().cpu().numpy()]],
-                diverging=True,
-                caption=self._get_caption(bias_map_key, pred.name),
-            )
-            plt.close("all")
             rmse_all_channels[pred.name] = pred.rmse()
-            logs.update({f"rmse/{pred.name}": rmse_all_channels[pred.name]})
-            if self._target == "denorm":
-                logs.update(
-                    {
-                        f"{bias_map_key}/{pred.name}": bias_image,
-                        f"bias/{pred.name}": pred.weighted_mean_bias(),
-                    }
+            should_log = self._log_variables is None or pred.name in self._log_variables
+            if should_log:
+                bias_image = plot_paneled_data(
+                    [[pred.bias().cpu().numpy()]],
+                    diverging=True,
+                    caption=self._get_caption(bias_map_key, pred.name),
                 )
+                plt.close("all")
+                logs.update({f"rmse/{pred.name}": rmse_all_channels[pred.name]})
+                if self._target == "denorm":
+                    logs.update(
+                        {
+                            f"{bias_map_key}/{pred.name}": bias_image,
+                            f"bias/{pred.name}": pred.weighted_mean_bias(),
+                        }
+                    )
         if self._target == "norm":
             metric_name = "rmse/channel_mean"
             if self._channel_mean_names is None:
@@ -359,6 +387,8 @@ class TimeMeanEvaluatorAggregator:
         data = {}
         preds = self._get_target_gen_pairs()
         for pred in preds:
+            if self._log_variables is not None and pred.name not in self._log_variables:
+                continue
             if pred.name in self._variable_metadata:
                 long_name = self._variable_metadata[pred.name].long_name
                 units = self._variable_metadata[pred.name].units
@@ -384,3 +414,44 @@ class TimeMeanEvaluatorAggregator:
                 }
             )
         return xr.Dataset(data)
+
+
+@dataclasses.dataclass
+class TimeMeanMetricConfig:
+    variables: list[str] | None = None
+    name: str | None = None
+    target: Literal["denorm", "norm"] = "denorm"
+    reference_data: str | None = None
+    channel_mean_names: list[str] | None = None
+    enabled: bool = True
+    strict: bool = False
+
+    def __post_init__(self):
+        if self.name is None:
+            self.name = "time_mean_norm" if self.target == "norm" else "time_mean"
+
+    def get_name(self) -> str:
+        return self.name  # type: ignore[return-value]
+
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        is_norm = self.target == "norm"
+        if self.reference_data is not None:
+            ref = xr.open_dataset(self.reference_data, decode_timedelta=False)
+        elif not is_norm:
+            ref = ctx.time_mean_reference_data
+        else:
+            ref = None
+        agg: SubAggregator = TimeMeanEvaluatorAggregator(
+            ctx.ops,
+            horizontal_dims=ctx.horizontal_coordinates.dims,
+            target=self.target,
+            variable_metadata=ctx.variable_metadata,
+            reference_means=ref,
+            channel_mean_names=(
+                (self.channel_mean_names or ctx.channel_mean_names) if is_norm else None
+            ),
+            log_variables=(
+                frozenset(self.variables) if self.variables is not None else None
+            ),
+        )
+        return MetricBuildResult(aggregator=agg)

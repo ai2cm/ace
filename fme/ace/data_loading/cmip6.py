@@ -117,5 +117,8 @@ class Cmip6DataConfig(DatasetConfigABC):
         self,
         names: Sequence[str],
         n_timesteps: IntSchedule,
+        allow_missing_variables: bool = False,
     ) -> tuple[DatasetABC, DatasetProperties]:
-        return self._get_concat_config().build(names, n_timesteps)
+        return self._get_concat_config().build(
+            names, n_timesteps, allow_missing_variables=allow_missing_variables
+        )
