@@ -219,10 +219,10 @@ class HEALPixPaddingv2(th.nn.Module):
         Pad each face consistently with its according neighbors in the HEALPix (see ordering and neighborhoods above).
         Assumes the Tensor is folded
 
-        Parmaters
-        ---------
-        data: torch.Tensor
-            The input tensor of shape [..., F, H, W] where each face is to be padded in its HPX context
+        Parameters
+        ----------
+        x : torch.Tensor
+            Folded input ``[N * 12, C, H, W]``; internally unfolded to 12 faces per batch.
 
         Returns
         -------
@@ -790,6 +790,15 @@ def _pn_isolat(
 
     Applies along-edge rolls to ``t`` and ``lft`` after rotation so isolatitude lines
     align across face boundaries, then concatenates border strips like ``HEALPixPadding.pn``.
+
+    Parameters
+    ----------
+    p : int
+        Pad width per edge.
+    d : tuple[int, int]
+        Spatial dimensions used for ``rot90``.
+    c, t, tl, lft, bl, b, br, rgt, tr : torch.Tensor
+        Central face and neighbor face tensors (same semantics as ``HEALPixPadding.pn``).
     """
     t = t.rot90(1, dims=d)[..., -p:, :]
     for i in range(p):
@@ -819,7 +828,16 @@ def _pe_isolat(
     rgt: th.Tensor,
     tr: th.Tensor,
 ) -> th.Tensor:
-    """Isolatitude padding for an **equatorial** face (no extra rolls on top/bottom strips)."""
+    """
+    Isolatitude padding for an **equatorial** face (no extra rolls on top/bottom strips).
+
+    Parameters
+    ----------
+    p : int
+        Pad width per edge.
+    c, t, tl, lft, bl, b, br, rgt, tr : torch.Tensor
+        Central face and neighbor face tensors (same semantics as ``HEALPixPadding.pe``).
+    """
     c = th.cat((t[..., -p:, :], c, b[..., :p, :]), dim=-2)
     left = th.cat((tl[..., -p:, -p:], lft[..., -p:], bl[..., :p, -p:]), dim=-2)
     right = th.cat((tr[..., -p:, :p], rgt[..., :p], br[..., :p, :p]), dim=-2)
@@ -844,6 +862,15 @@ def _ps_isolat(
 
     Rolls ``b`` and ``rgt`` after rotation so bottom and right strips match isolatitude
     connectivity, analogous to ``HEALPixPadding.ps``.
+
+    Parameters
+    ----------
+    p : int
+        Pad width per edge.
+    d : tuple[int, int]
+        Spatial dimensions used for ``rot90``.
+    c, t, tl, lft, bl, b, br, rgt, tr : torch.Tensor
+        Central face and neighbor face tensors (same semantics as ``HEALPixPadding.ps``).
     """
     b = b.rot90(1, d)[..., :p, :]
     for i in range(p):
@@ -867,6 +894,17 @@ def _tl_isolat(p: int, d: tuple[int, int], top: th.Tensor, lft: th.Tensor) -> th
 
     Fills a ``p x p`` block by averaging samples along diagonals from ``top`` and ``lft``,
     then rotates to match the edge orientation expected by ``_pe_isolat``.
+
+    Parameters
+    ----------
+    p : int
+        Pad width (corner block is ``p x p``).
+    d : tuple[int, int]
+        Spatial dimensions used for ``rot90``.
+    top : torch.Tensor
+        Face above the equatorial center face.
+    lft : torch.Tensor
+        Face left of the equatorial center face.
     """
     ret = th.zeros_like(top)[..., :p, :p]
     n = 2 * p - 1
@@ -888,6 +926,17 @@ def _br_isolat(p: int, d: tuple[int, int], b: th.Tensor, r: th.Tensor) -> th.Ten
     Synthesize the missing **bottom-right** equatorial corner under isolatitude rules.
 
     Same diagonal-averaging pattern as ``_tl_isolat``, mirrored for the bottom/right faces.
+
+    Parameters
+    ----------
+    p : int
+        Pad width (corner block is ``p x p``).
+    d : tuple[int, int]
+        Spatial dimensions used for ``rot90``.
+    b : torch.Tensor
+        Face below the equatorial center face.
+    r : torch.Tensor
+        Face right of the equatorial center face.
     """
     ret = th.zeros_like(b)[..., :p, :p]
     n = 2 * p - 1
@@ -1012,8 +1061,10 @@ def decode_two_channel_identity_to_linear_indices(
 
     Parameters
     ----------
-    y0, y1 : torch.Tensor
-        Same shape, floating-point recovered values from the padded probe.
+    y0 : torch.Tensor
+        First recovered channel; same shape as ``y1``.
+    y1 : torch.Tensor
+        Second recovered channel; same shape as ``y0``.
 
     Returns
     -------

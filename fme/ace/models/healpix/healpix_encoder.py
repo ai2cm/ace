@@ -34,6 +34,9 @@ class UNetEncoderConfig:
         n_layers: Number of layers in each block, by default (2, 2, 1).
         dilations: List of dilation rates for the layers, by default None.
         enable_nhwc: Flag to enable NHWC data format, by default False.
+        hpx_padding_mode: HEALPix padding backend (``"earth2grid"``, ``"karlbauer"``,
+            or ``"isolatitude"``), by default ``"earth2grid"``.
+        nside: Native face height/width per encoder level, or ``None`` to omit.
     """
 
     conv_block: ConvBlockConfig
@@ -92,6 +95,8 @@ class UNetEncoder(nn.Module):
             enable_nhwc: if channel last format should be used
             hpx_padding_mode: HEALPix padding backend. Default ``"earth2grid"``;
                 also supports ``"karlbauer"`` and ``"isolatitude"``.
+            nside: Native face height/width for the shallowest encoder level; halved
+                after each downsample when set.
         """
         super().__init__()
         self.n_channels = n_channels

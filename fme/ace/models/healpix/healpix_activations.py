@@ -73,6 +73,13 @@ class CappedGELU(nn.Module):
         self.register_buffer("cap", th.tensor(cap_value, dtype=th.float32))
 
     def forward(self, inputs):
+        """
+        Args:
+            inputs: Input tensor passed through capped GELU.
+
+        Returns:
+            Tensor with GELU applied and values clamped to ``cap_value``.
+        """
         x = self.gelu(inputs)
         # Convert cap to a scalar value for clamping (ignores grad)
         cap_value = self.cap.item()

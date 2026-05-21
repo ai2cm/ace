@@ -31,7 +31,14 @@ def _healpix_layer_kwargs(
     hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
     nside: Optional[int] = None,
 ) -> dict:
-    """Build keyword arguments passed to ``HEALPixLayer``."""
+    """
+    Build keyword arguments passed to ``HEALPixLayer``.
+
+    Args:
+        enable_nhwc: Use channels-last memory format.
+        hpx_padding_mode: HEALPix padding backend.
+        nside: Native face height/width; included in the dict only when not ``None``.
+    """
     out: dict = {"enable_nhwc": enable_nhwc, "hpx_padding_mode": hpx_padding_mode}
     if nside is not None:
         out["nside"] = nside
@@ -50,6 +57,11 @@ class DownsamplingBlockConfig:
         block_type: One of ``"MaxPool"``, ``"AvgPool"``, or ``"DealiasedDownsample"``.
         pooling: Pooling size for pool blocks.
         stride: Spatial stride for ``DealiasedDownsample`` (power of two).
+        enable_nhwc: Use channels-last memory format.
+        hpx_padding_mode: HEALPix padding backend passed to child modules.
+        nside: Native face height/width for HEALPix padding.
+        in_channels: Input channels for ``DealiasedDownsample`` (set by encoder before build).
+        resample_filter: 1D filter weights for dealiased blur stages.
     """
 
     block_type: Literal["MaxPool", "AvgPool", "DealiasedDownsample"]
@@ -108,6 +120,22 @@ class UpsamplingBlockConfig:
 
     ``block_type`` ``"Interpolate"`` uses ``stride`` as ``nn.Upsample`` ``scale_factor``
     and ``upsample_mode`` as the interpolation mode.
+
+    Parameters:
+        block_type: Upsampling implementation to build.
+        in_channels: Input channel count for conv-based upsamplers.
+        out_channels: Output channel count for conv-based upsamplers.
+        stride: Upsampling scale factor (also used as ``nn.Upsample`` scale when applicable).
+        kernel_size: Convolution kernel size for ``SmoothedInterpolateConv``.
+        dilation: Convolution dilation for ``SmoothedInterpolateConv``.
+        upsample_mode: Interpolation mode for smoothed / pure interpolate paths.
+        activation: Optional ``CappedGELUConfig`` for transpose-conv upsampling.
+        enable_nhwc: Use channels-last memory format.
+        hpx_padding_mode: HEALPix padding backend passed to child modules.
+        nside: Native face height/width for HEALPix padding.
+        align_corners: Passed to ``nn.Upsample`` when ``block_type`` is ``"Interpolate"``.
+        scale_factor: Alias for ``stride`` when set in config.
+        mode: Alias for ``upsample_mode`` when set in config.
     """
 
     block_type: Literal[
@@ -175,7 +203,23 @@ class UpsamplingBlockConfig:
 
 @dataclasses.dataclass
 class ConvBlockConfig:
-    """Configuration for convolutional residual / ConvNeXt style blocks (no spatial resample)."""
+    """
+    Configuration for convolutional residual / ConvNeXt style blocks (no spatial resample).
+
+    Parameters:
+        in_channels: Number of input channels.
+        out_channels: Number of output channels.
+        kernel_size: Convolution kernel size.
+        dilation: Convolution dilation.
+        n_layers: Number of repeated layers (for multi-block types).
+        upscale_factor: Channel upscale factor inside ConvNeXt blocks.
+        latent_channels: Latent channel width; defaults to ``max(in_channels, out_channels)``.
+        activation: Optional ``CappedGELUConfig`` between layers.
+        enable_nhwc: Use channels-last memory format.
+        hpx_padding_mode: HEALPix padding backend passed to child modules.
+        nside: Native face height/width for HEALPix padding.
+        block_type: Which block implementation to build.
+    """
 
     in_channels: int = 3
     out_channels: int = 1
@@ -271,6 +315,13 @@ class MaxPool(nn.Module):
         hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
         nside: Optional[int] = None,
     ):
+        """
+        Args:
+            pooling: ``MaxPool2d`` kernel size (and stride).
+            enable_nhwc: Use channels-last memory format.
+            hpx_padding_mode: HEALPix padding backend passed to ``HEALPixLayer``.
+            nside: Native face height/width for HEALPix padding.
+        """
         super().__init__()
         self.maxpool = HEALPixLayer(
             layer=nn.MaxPool2d,
@@ -279,6 +330,13 @@ class MaxPool(nn.Module):
         )
 
     def forward(self, x: th.Tensor) -> th.Tensor:
+        """
+        Args:
+            x: Input tensor ``[N * 12, C, H, W]``.
+
+        Returns:
+            Pooled tensor with halved spatial size per pooling factor.
+        """
         return self.maxpool(x)
 
 
@@ -292,6 +350,13 @@ class AvgPool(nn.Module):
         hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
         nside: Optional[int] = None,
     ):
+        """
+        Args:
+            pooling: ``AvgPool2d`` kernel size (and stride).
+            enable_nhwc: Use channels-last memory format.
+            hpx_padding_mode: HEALPix padding backend passed to ``HEALPixLayer``.
+            nside: Native face height/width for HEALPix padding.
+        """
         super().__init__()
         self.avgpool = HEALPixLayer(
             layer=nn.AvgPool2d,
@@ -300,6 +365,13 @@ class AvgPool(nn.Module):
         )
 
     def forward(self, x: th.Tensor) -> th.Tensor:
+        """
+        Args:
+            x: Input tensor ``[N * 12, C, H, W]``.
+
+        Returns:
+            Pooled tensor with halved spatial size per pooling factor.
+        """
         return self.avgpool(x)
 
 
@@ -325,6 +397,13 @@ class DealiasBlurConv2d(nn.Module):
         resample_filter: Sequence[float] = (1.0, 2.0, 1.0),
         **kwargs,
     ):
+        """
+        Args:
+            in_channels: Number of input channels (depthwise groups).
+            stride: Stride of the depthwise blur convolution.
+            resample_filter: 1D separable filter weights used to build the 2D kernel.
+            **kwargs: Accepted for API compatibility; not used.
+        """
         super().__init__()
         filt = tuple(float(x) for x in resample_filter)
         if len(filt) < 1:
@@ -340,6 +419,13 @@ class DealiasBlurConv2d(nn.Module):
         )
 
     def forward(self, x: th.Tensor) -> th.Tensor:
+        """
+        Args:
+            x: Input tensor ``[N, C, H, W]``.
+
+        Returns:
+            Depthwise-blurred tensor with optional strided downsampling.
+        """
         return th.nn.functional.conv2d(
             x,
             self.weight.to(device=x.device, dtype=x.dtype),
@@ -362,6 +448,15 @@ class DealiasedDownsample(nn.Module):
         hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
         nside: Optional[int] = None,
     ):
+        """
+        Args:
+            in_channels: Number of input channels.
+            resample_filter: 1D filter weights for each blur stage.
+            stride: Total downsampling factor (must be a power of two).
+            enable_nhwc: Use channels-last memory format.
+            hpx_padding_mode: HEALPix padding backend passed to ``HEALPixLayer``.
+            nside: Native face height/width for HEALPix padding.
+        """
         super().__init__()
         filt = tuple(float(x) for x in resample_filter)
         m = len(filt)
@@ -399,6 +494,13 @@ class DealiasedDownsample(nn.Module):
         self.pool = nn.Sequential(*pool_layers)
 
     def forward(self, x: th.Tensor) -> th.Tensor:
+        """
+        Args:
+            x: Input tensor ``[N * 12, C, H, W]``.
+
+        Returns:
+            Dealiased downsampled tensor.
+        """
         return self.pool(x)
 
 
@@ -430,6 +532,7 @@ class TransposedConvUpsample(nn.Module):
             activation: ModuleConfig for the activation function used in upsampling.
             enable_nhwc: Enable nhwc format, passed to wrapper.
             hpx_padding_mode: HEALPix padding backend passed to wrapper.
+            nside: Native face height/width for HEALPix padding.
         """
         super().__init__()
         upsampler = []
@@ -475,6 +578,13 @@ class SmoothedInterpolate(nn.Module):
         mode: str = "nearest",
         trim_size: int = 0,
     ):
+        """
+        Args:
+            in_channels: Number of channels for the depthwise smoother.
+            scale_factor: Interpolation scale factor.
+            mode: Interpolation mode passed to ``F.interpolate``.
+            trim_size: Border pixels to crop after smoothing (removes edge artifacts).
+        """
         super().__init__()
 
         self.in_channels = in_channels
@@ -490,6 +600,13 @@ class SmoothedInterpolate(nn.Module):
         self.smoother_kernel = self.smoother_kernel.repeat((in_channels, 1, 1, 1))
 
     def forward(self, x: th.Tensor) -> th.Tensor:
+        """
+        Args:
+            x: Input tensor ``[N, C, H, W]``.
+
+        Returns:
+            Upsampled and smoothed tensor, optionally trimmed.
+        """
         self.smoother_kernel = self.smoother_kernel.to(
             device=x.device, dtype=x.dtype
         )
@@ -529,6 +646,19 @@ class SmoothedInterpolateConv(nn.Module):
         hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
         nside: Optional[int] = None,
     ):
+        """
+        Args:
+            in_channels: Number of input channels.
+            out_channels: Number of output channels.
+            kernel_size: Convolution kernel size after interpolation.
+            dilation: Convolution dilation (must be 1 for HEALPix resize).
+            scale_factor: Interpolation scale factor.
+            mode: Interpolation mode for the smoothed upsample step.
+            activation: Optional activation module appended after the conv.
+            enable_nhwc: Use channels-last memory format.
+            hpx_padding_mode: HEALPix padding backend passed to ``HEALPixLayer``.
+            nside: Native face height/width before upsampling; doubled internally for the conv step.
+        """
         super().__init__()
         if dilation > 1:
             raise ValueError(
@@ -571,6 +701,13 @@ class SmoothedInterpolateConv(nn.Module):
         self.block = nn.Sequential(*block)
 
     def forward(self, x: th.Tensor) -> th.Tensor:
+        """
+        Args:
+            x: Input tensor ``[N * 12, C, H, W]``.
+
+        Returns:
+            Upsampled convolved tensor.
+        """
         return self.block(x)
 
 
@@ -604,6 +741,7 @@ class BasicConvBlock(nn.Module):
             activation: ModuleConfig for activation function to use.
             enable_nhwc: Enable nhwc format, passed to wrapper.
             hpx_padding_mode: HEALPix padding backend passed to wrapper.
+            nside: Native face height/width for HEALPix padding.
         """
         super().__init__()
         if latent_channels is None:
@@ -678,6 +816,7 @@ class ConvNeXtBlock(nn.Module):
             activation: Configuration for the activation function used between layers.
             enable_nhwc: Whether to enable NHWC format.
             hpx_padding_mode: HEALPix padding backend passed to wrapper.
+            nside: Native face height/width for HEALPix padding.
         """
         super().__init__()
         hpk = _healpix_layer_kwargs(
@@ -785,6 +924,7 @@ class DoubleConvNeXtBlock(nn.Module):
             activation: Configuration for the activation function used between layers (default is None).
             enable_nhwc: Whether to enable NHWC format (default is False).
             hpx_padding_mode: HEALPix padding backend passed to wrapper.
+            nside: Native face height/width for HEALPix padding.
         """
         super().__init__()
         hpk = _healpix_layer_kwargs(
@@ -953,6 +1093,7 @@ class SymmetricConvNeXtBlock(nn.Module):
             activation: Configuration for the activation function used between layers (default is None).
             enable_nhwc: Whether to enable NHWC format (default is False).
             hpx_padding_mode: HEALPix padding backend passed to wrapper.
+            nside: Native face height/width for HEALPix padding.
         """
         super().__init__()
         hpk = _healpix_layer_kwargs(
@@ -1055,6 +1196,20 @@ class Multi_SymmetricConvNeXtBlock(nn.Module):
         hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
         nside: Optional[int] = None,
     ):
+        """
+        Args:
+            in_channels: Number of input channels (first block only).
+            latent_channels: Latent channel width inside each symmetric block.
+            out_channels: Number of output channels for every block.
+            kernel_size: Convolution kernel size.
+            dilation: Convolution dilation.
+            upscale_factor: Channel upscale factor inside each block.
+            n_layers: Number of stacked ``SymmetricConvNeXtBlock`` modules.
+            activation: Optional ``CappedGELUConfig`` between layers.
+            enable_nhwc: Use channels-last memory format.
+            hpx_padding_mode: HEALPix padding backend passed to child blocks.
+            nside: Native face height/width for HEALPix padding.
+        """
         super().__init__()
         self.blocks = nn.ModuleList()
         for i in range(n_layers):
@@ -1075,6 +1230,13 @@ class Multi_SymmetricConvNeXtBlock(nn.Module):
             )
 
     def forward(self, x):
+        """
+        Args:
+            x: Input tensor.
+
+        Returns:
+            Output after ``n_layers`` symmetric ConvNeXt blocks.
+        """
         out = x
         for block in self.blocks:
             out = block(out)
@@ -1095,7 +1257,7 @@ class Interpolate(nn.Module):
         """
         Args:
             scale_factor: Multiplier for spatial size, passed to `nn.functional.interpolate`.
-            mode, : Interpolation mode used for upsampling, passed to `nn.functional.interpolate`.
+            mode: Interpolation mode used for upsampling, passed to `nn.functional.interpolate`.
         """
         super().__init__()
         self.interp = nn.functional.interpolate
