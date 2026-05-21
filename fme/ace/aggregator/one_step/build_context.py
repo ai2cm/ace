@@ -39,7 +39,7 @@ class _EnsembleAggregator(Protocol):
 
 
 class MetricNotSupportedError(Exception):
-    """Raised when a metric cannot be built for the current grid type."""
+    """Raised when a metric cannot be built for the current configuration."""
 
 
 @dataclasses.dataclass

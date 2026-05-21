@@ -9,5 +9,6 @@ from .one_step import (
     LegacyFlagOneStepAggregatorConfig,
     OneStepAggregator,
     OneStepAggregatorConfig,
+    build_one_step_aggregator,
 )
 from .train import TrainAggregator

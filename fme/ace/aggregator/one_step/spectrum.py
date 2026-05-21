@@ -116,6 +116,8 @@ class SpectrumAggregator:
 @dataclasses.dataclass
 class OneStepSpectrumMetricConfig:
     name: str = "power_spectrum"
+    enabled: bool = True
+    strict: bool = False
 
     def get_name(self) -> str:
         return self.name

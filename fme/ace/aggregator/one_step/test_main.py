@@ -1,5 +1,3 @@
-import dataclasses
-
 import numpy as np
 import pytest
 import torch
@@ -8,29 +6,18 @@ import xarray as xr
 from fme.ace.aggregator.one_step import (
     LegacyFlagOneStepAggregatorConfig,
     OneStepAggregatorConfig,
+    build_one_step_aggregator,
 )
-from fme.ace.aggregator.one_step.build_context import (
-    MetricNotSupportedError,
-    OneStepBuildContext,
-    OneStepMetricBuildResult,
+from fme.ace.aggregator.one_step.main import (
+    OneStepMeanMetricConfig,
+    OneStepSnapshotMetricConfig,
+    OneStepSpectrumMetricConfig,
 )
-from fme.ace.aggregator.one_step.main import OneStepMeanMetricConfig
 from fme.ace.stepper import TrainOutput
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.typing_ import EnsembleTensorDict
-
-
-@dataclasses.dataclass
-class _UnsupportedMetricConfig:
-    name: str = "unsupported"
-
-    def get_name(self) -> str:
-        return self.name
-
-    def build(self, ctx: OneStepBuildContext) -> OneStepMetricBuildResult:
-        raise MetricNotSupportedError("not supported")
 
 
 def get_ds_info(nx: int, ny: int) -> DatasetInfo:
@@ -157,7 +144,7 @@ def test_agg_raises_without_output_dir():
 
 def test_explicit_metrics_build():
     ds_info = get_ds_info(nx=2, ny=2)
-    config = OneStepAggregatorConfig(
+    agg = build_one_step_aggregator(
         metrics=[
             OneStepMeanMetricConfig(target="denorm"),
             OneStepMeanMetricConfig(
@@ -165,9 +152,10 @@ def test_explicit_metrics_build():
                 include_bias=False,
                 include_grad_mag_percent_diff=False,
             ),
-        ]
+        ],
+        dataset_info=ds_info,
+        save_diagnostics=False,
     )
-    agg = config.build(ds_info, save_diagnostics=False)
     target_data = EnsembleTensorDict(
         {"a": torch.randn(2, 1, 3, 2, 2, device=get_device())},
     )
@@ -189,12 +177,15 @@ def test_explicit_metrics_build():
 
 
 def test_duplicate_metric_names_rejected():
+    ds_info = get_ds_info(nx=2, ny=2)
     with pytest.raises(ValueError, match="Duplicate metric names"):
-        OneStepAggregatorConfig(
+        build_one_step_aggregator(
             metrics=[
                 OneStepMeanMetricConfig(target="denorm"),
                 OneStepMeanMetricConfig(target="denorm"),
-            ]
+            ],
+            dataset_info=ds_info,
+            save_diagnostics=False,
         )
 
 
@@ -240,95 +231,163 @@ def test_legacy_config_builds_same_log_keys():
     assert set(typed_logs.keys()) == set(legacy_logs.keys())
 
 
-def test_explicit_unsupported_metric_raises():
-    ds_info = get_ds_info(nx=2, ny=2)
-    config = OneStepAggregatorConfig(
-        metrics=[
-            OneStepMeanMetricConfig(target="denorm"),
-            OneStepMeanMetricConfig(
-                target="norm",
-                include_bias=False,
-                include_grad_mag_percent_diff=False,
-            ),
-            _UnsupportedMetricConfig(),  # type: ignore[list-item]
-        ]
-    )
-    with pytest.raises(MetricNotSupportedError):
-        config.build(ds_info, save_diagnostics=False)
-
-
-def test_default_unsupported_metric_skipped_with_warning():
+def test_hierarchical_defaults_build():
+    """Hierarchical config with all defaults builds and includes core metrics."""
     nx, ny = 2, 2
     ds_info = get_ds_info(nx, ny)
-    config_with_unsupported = OneStepAggregatorConfig(metrics=None)
-    import fme.ace.aggregator.one_step.main as main_mod
-
-    original_default = main_mod._default_metrics
-
-    def _patched_defaults():
-        return [*original_default(), _UnsupportedMetricConfig()]
-
-    main_mod._default_metrics = _patched_defaults
-    try:
-        agg = config_with_unsupported.build(ds_info, save_diagnostics=False)
-        batch_size, n_ensemble, n_time = 2, 2, 3
-        agg.record_batch(
-            batch=TrainOutput(
-                metrics={"loss": 1.0},
-                target_data=EnsembleTensorDict(
-                    {
-                        "a": torch.randn(
-                            batch_size, 1, n_time, nx, ny, device=get_device()
-                        )
-                    },
-                ),
-                gen_data=EnsembleTensorDict(
-                    {
-                        "a": torch.randn(
-                            batch_size, n_ensemble, n_time, nx, ny, device=get_device()
-                        )
-                    },
-                ),
-                time=xr.DataArray(
-                    np.zeros((batch_size, n_time)), dims=["sample", "time"]
-                ),
-                normalize=lambda x: x,
-            ),
-        )
-        logs = agg.get_logs(label="test")
-        assert "test/unsupported" not in str(logs.keys())
-    finally:
-        main_mod._default_metrics = original_default
-
-
-def test_fallback_ensemble_aggregator_with_explicit_metrics():
-    ds_info = get_ds_info(nx=2, ny=2)
-    config = OneStepAggregatorConfig(
-        metrics=[
-            OneStepMeanMetricConfig(target="denorm"),
-            OneStepMeanMetricConfig(
-                target="norm",
-                include_bias=False,
-                include_grad_mag_percent_diff=False,
-            ),
-        ]
-    )
-    agg = config.build(ds_info, save_diagnostics=False)
-    batch_size, n_ensemble, n_time, nx, ny = 2, 2, 3, 2, 2
+    agg = OneStepAggregatorConfig().build(ds_info, save_diagnostics=False)
     target_data = EnsembleTensorDict(
-        {"a": torch.randn(batch_size, 1, n_time, nx, ny, device=get_device())},
+        {"a": torch.randn(2, 1, 3, nx, ny, device=get_device())},
     )
     gen_data = EnsembleTensorDict(
-        {"a": torch.randn(batch_size, n_ensemble, n_time, nx, ny, device=get_device())},
+        {"a": torch.randn(2, 1, 3, nx, ny, device=get_device())},
     )
     agg.record_batch(
         batch=TrainOutput(
             metrics={"loss": 1.0},
             target_data=target_data,
             gen_data=gen_data,
-            time=xr.DataArray(np.zeros((batch_size, n_time)), dims=["sample", "time"]),
+            time=xr.DataArray(np.zeros((2, 3)), dims=["sample", "time"]),
             normalize=lambda x: x,
         ),
     )
     logs = agg.get_logs(label="test")
-    assert "test/crps/a" in logs
+    for expected in ["mean", "mean_norm", "power_spectrum", "snapshot", "mean_map"]:
+        assert any(expected in k for k in logs), f"Expected {expected} in log keys"
+
+
+def test_hierarchical_enable_disable():
+    """Disabling a default metric removes it; other metrics still present."""
+    nx, ny = 2, 2
+    ds_info = get_ds_info(nx, ny)
+    agg = OneStepAggregatorConfig(
+        snapshot=OneStepSnapshotMetricConfig(enabled=False),
+    ).build(ds_info, save_diagnostics=False)
+    target_data = EnsembleTensorDict(
+        {"a": torch.randn(2, 1, 3, nx, ny, device=get_device())},
+    )
+    gen_data = EnsembleTensorDict(
+        {"a": torch.randn(2, 1, 3, nx, ny, device=get_device())},
+    )
+    agg.record_batch(
+        batch=TrainOutput(
+            metrics={"loss": 1.0},
+            target_data=target_data,
+            gen_data=gen_data,
+            time=xr.DataArray(np.zeros((2, 3)), dims=["sample", "time"]),
+            normalize=lambda x: x,
+        ),
+    )
+    logs = agg.get_logs(label="test")
+    assert not any("snapshot" in k for k in logs)
+    assert any("mean" in k for k in logs)
+
+
+@pytest.mark.parametrize(
+    "kwargs,match",
+    [
+        pytest.param(
+            dict(
+                mean_denorm=OneStepMeanMetricConfig(
+                    target="norm",
+                    include_bias=False,
+                    include_grad_mag_percent_diff=False,
+                )
+            ),
+            "mean_denorm.target must be 'denorm'",
+            id="mean_denorm_wrong_target",
+        ),
+        pytest.param(
+            dict(mean_norm=OneStepMeanMetricConfig(target="denorm")),
+            "mean_norm.target must be 'norm'",
+            id="mean_norm_wrong_target",
+        ),
+    ],
+)
+def test_hierarchical_rejects_mismatched_target(kwargs, match):
+    with pytest.raises(ValueError, match=match):
+        OneStepAggregatorConfig(**kwargs)
+
+
+def test_raise_on_unsupported_true_raises(monkeypatch):
+    """Explicit build with raise_on_unsupported=True raises for unsupported metrics."""
+    from fme.ace.aggregator.one_step import spectrum
+    from fme.ace.aggregator.one_step.build_context import MetricNotSupportedError
+
+    def failing_build(self, ctx):
+        raise MetricNotSupportedError("test: spectrum unsupported")
+
+    monkeypatch.setattr(spectrum.OneStepSpectrumMetricConfig, "build", failing_build)
+
+    ds_info = get_ds_info(nx=2, ny=2)
+    with pytest.raises(MetricNotSupportedError):
+        build_one_step_aggregator(
+            metrics=[OneStepSpectrumMetricConfig()],
+            dataset_info=ds_info,
+            save_diagnostics=False,
+        )
+
+
+def test_raise_on_unsupported_false_skips(monkeypatch):
+    """Explicit build with raise_on_unsupported=False skips unsupported metrics."""
+    from fme.ace.aggregator.one_step import spectrum
+    from fme.ace.aggregator.one_step.build_context import MetricNotSupportedError
+
+    def failing_build(self, ctx):
+        raise MetricNotSupportedError("test: spectrum unsupported")
+
+    monkeypatch.setattr(spectrum.OneStepSpectrumMetricConfig, "build", failing_build)
+
+    ds_info = get_ds_info(nx=2, ny=2)
+    agg = build_one_step_aggregator(
+        metrics=[
+            OneStepMeanMetricConfig(target="denorm"),
+            OneStepMeanMetricConfig(
+                target="norm",
+                include_bias=False,
+                include_grad_mag_percent_diff=False,
+            ),
+            OneStepSpectrumMetricConfig(),
+        ],
+        dataset_info=ds_info,
+        save_diagnostics=False,
+        raise_on_unsupported=False,
+    )
+    target_data = EnsembleTensorDict(
+        {"a": torch.randn(2, 1, 3, 2, 2, device=get_device())},
+    )
+    gen_data = EnsembleTensorDict(
+        {"a": torch.randn(2, 1, 3, 2, 2, device=get_device())},
+    )
+    agg.record_batch(
+        batch=TrainOutput(
+            metrics={"loss": 1.0},
+            target_data=target_data,
+            gen_data=gen_data,
+            time=xr.DataArray(np.zeros((2, 3)), dims=["sample", "time"]),
+            normalize=lambda x: x,
+        ),
+    )
+    logs = agg.get_logs(label="test")
+    assert any("mean" in k for k in logs)
+    assert not any("power_spectrum" in k for k in logs)
+
+
+def test_strict_metric_raises_even_when_not_raise_on_unsupported(monkeypatch):
+    """A metric with strict=True raises even when raise_on_unsupported=False."""
+    from fme.ace.aggregator.one_step import spectrum
+    from fme.ace.aggregator.one_step.build_context import MetricNotSupportedError
+
+    def failing_build(self, ctx):
+        raise MetricNotSupportedError("test: spectrum unsupported")
+
+    monkeypatch.setattr(spectrum.OneStepSpectrumMetricConfig, "build", failing_build)
+
+    ds_info = get_ds_info(nx=2, ny=2)
+    with pytest.raises(MetricNotSupportedError):
+        build_one_step_aggregator(
+            metrics=[OneStepSpectrumMetricConfig(strict=True)],
+            dataset_info=ds_info,
+            save_diagnostics=False,
+            raise_on_unsupported=False,
+        )

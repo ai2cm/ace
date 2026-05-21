@@ -228,14 +228,12 @@ class InferenceEvaluatorAggregatorConfig:
     time_mean_norm: TimeMeanMetricConfig = dataclasses.field(
         default_factory=lambda: TimeMeanMetricConfig(target="norm")
     )
-    video: VideoMetricConfig = dataclasses.field(
-        default_factory=lambda: VideoMetricConfig(enabled=False)
-    )
+    video: VideoMetricConfig = dataclasses.field(default_factory=VideoMetricConfig)
     histogram: HistogramMetricConfig = dataclasses.field(
-        default_factory=lambda: HistogramMetricConfig(enabled=False)
+        default_factory=HistogramMetricConfig
     )
     seasonal: SeasonalMetricConfig = dataclasses.field(
-        default_factory=lambda: SeasonalMetricConfig(enabled=False)
+        default_factory=SeasonalMetricConfig
     )
     annual: AnnualMetricConfig = dataclasses.field(default_factory=AnnualMetricConfig)
     enso_index: EnsoIndexMetricConfig = dataclasses.field(
