@@ -4,7 +4,7 @@ RUN apt-get update && \
     apt-get install -y apt-transport-https ca-certificates gnupg curl
 
 RUN conda create -y -n env python=3.11 \
-    && conda install -y -c conda-forge -n env esmf xesmf
+    && conda install -y -c conda-forge -n env esmpy "xesmf>=0.8"
 
 COPY dataflow-requirements.txt /tmp/requirements.txt
 RUN pip install uv \

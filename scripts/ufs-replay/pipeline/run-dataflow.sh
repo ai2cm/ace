@@ -36,7 +36,7 @@ DATAFLOW_ARGS=(
     --temp_location gs://vcm-ml-scratch/ufs-replay-pipeline/temp/
     --experiments use_runner_v2
     --sdk_location container
-    --sdk_container_image us-central1-docker.pkg.dev/vcm-ml/full-model/ufs-replay-ingest-dataflow:latest
+    --sdk_container_image us-central1-docker.pkg.dev/vcm-ml/full-model/ufs-replay-ingest-dataflow:2026-05-21
     --num_workers 1
     --disk_size_gb 100
     --max_num_workers 200
