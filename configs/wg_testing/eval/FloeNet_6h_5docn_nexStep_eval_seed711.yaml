@@ -1,7 +1,8 @@
-experiment_dir: /scratch/cimes/wg4031/fme/valid/OM4_FloeNet_6h_5docn_nexStep_ALBCorr_seed711_1969-2022
+experiment_dir: /scratch/cimes/wg4031/fme/valid/OM4_FloeNet_6h_5docn_nexStep_seed711_1969-2022
 n_forward_steps: 78839
 forward_steps_in_memory: 40
-checkpoint_path: /scratch/cimes/wg4031/fme/train/OM4_FloeNet_6h_5docn_nexStep_ALBCorr_seed711_4GPU/training_checkpoints/best_inference_ckpt.tar
+checkpoint_path: /scratch/cimes/wg4031/fme/train/OM4_FloeNet_6h_5docn_nexStep_seed711_4GPU/training_checkpoints/best_inference_ckpt.tar
+allow_incompatible_dataset: true
 logging:
   log_to_screen: true
   log_to_wandb: false
@@ -14,7 +15,7 @@ loader:
     - '1969-01-01T00:00:00'
   dataset:
     data_path: /scratch/cimes/wg4031/Emulator_data/Ice/
-    file_pattern: 1958-2022.OM41deg_FloeNet_6hourly_NoLeap_trimvars.zarr
+    file_pattern: 1958-2022.OM41deg_FloeNet_6hourly_NoLeap.zarr
     engine: zarr
   num_data_workers: 1
 data_writer:

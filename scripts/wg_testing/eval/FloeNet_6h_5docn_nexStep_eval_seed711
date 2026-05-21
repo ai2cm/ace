@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=FloeNet-Samudra_coupling_seed711
-#SBATCH --output=/scratch/cimes/wg4031/fme/valid/FloeNet-Samudra_coupling_seed711/logs/slurm-%j.out
-#SBATCH --error=/scratch/cimes/wg4031/fme/valid/FloeNet-Samudra_coupling_seed711/logs/slurm-%j.err
+#SBATCH --job-name=OM4_FloeNet_6h_5docn_nexStep_seed711_1969-2022
+#SBATCH --output=/scratch/cimes/wg4031/fme/valid/OM4_FloeNet_6h_5docn_nexStep_seed711_1969-2022/logs/slurm-%j.out
+#SBATCH --error=/scratch/cimes/wg4031/fme/valid/OM4_FloeNet_6h_5docn_nexStep_seed711_1969-2022/logs/slurm-%j.err
 #SBATCH --mem=100G
 #SBATCH --mail-user=wg4031@princeton.edu
 #SBATCH --nodes=1
@@ -27,4 +27,4 @@ export FME_IMAGE=/scratch/cimes/wg4031/fme/image
 
 
 #Run the training script
-srun python -m fme.coupled.evaluator /home/wg4031/ace/configs/wg_testing/eval/FloeNet-Samudra_coupling_seed711.yaml
+srun python -m fme.ace.evaluator /home/wg4031/ace/configs/wg_testing/eval/FloeNet_6h_5docn_nexStep_eval_seed711.yaml

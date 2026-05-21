@@ -1,4 +1,4 @@
-experiment_dir: /scratch/cimes/wg4031/fme/train/OM4_FloeNet-SamudraI_coupled_seed711_4GPU
+experiment_dir: /scratch/cimes/wg4031/fme/train/OM4_FloeNet-SamudraI_coupled_finetune_phase2_seed711_4GPU
 save_checkpoint: true
 save_best_inference_epoch_checkpoints: false
 checkpoint_every_n_batches: 100
@@ -9,7 +9,7 @@ validate_using_ema: true
 evaluate_before_training: true
 ema:
   decay: 0.999
-max_epochs: 30
+max_epochs: 20
 inference:
   n_coupled_steps: 183
   coupled_steps_in_memory: 40
@@ -17,14 +17,14 @@ inference:
     dataset:
       ocean:
         data_path: /scratch/cimes/wg4031/Emulator_data/Ocean/
-        file_pattern: 1958-2022.OM41deg_Samudra_5daily_snapshots_NoLeap_shifttime.zarr
+        file_pattern: 1958-2022.OM41deg_Samudra_5daily_means_NoLeap.zarr
         engine: zarr
         fill_nans:
           method: "constant"
           value: 0.0
       ice:
         data_path: /scratch/cimes/wg4031/Emulator_data/Ice/
-        file_pattern: 1958-2022.OM41deg_FloeNet_6hourly_NoLeap_trimvars.zarr
+        file_pattern: 1958-2022.OM41deg_FloeNet_6hourly_NoLeap.zarr
         engine: zarr
         fill_nans:
           method: "constant"
@@ -52,7 +52,7 @@ train_loader:
   dataset:
     ocean:
       data_path: /scratch/cimes/wg4031/Emulator_data/Ocean/
-      file_pattern: 1958-2022.OM41deg_Samudra_5daily_snapshots_NoLeap_shifttime.zarr
+      file_pattern: 1958-2022.OM41deg_Samudra_5daily_means_NoLeap.zarr
       engine: zarr
       subset:
         start_time: '1969-01-03T12:00:00'
@@ -62,7 +62,7 @@ train_loader:
         value: 0.0
     ice:
       data_path: /scratch/cimes/wg4031/Emulator_data/Ice/
-      file_pattern: 1958-2022.OM41deg_FloeNet_6hourly_NoLeap_trimvars.zarr
+      file_pattern: 1958-2022.OM41deg_FloeNet_6hourly_NoLeap.zarr
       engine: zarr
       subset:
         start_time: '1969-01-03T12:00:00'
@@ -77,7 +77,7 @@ validation_loader:
   dataset:
     ocean:
       data_path: /scratch/cimes/wg4031/Emulator_data/Ocean/
-      file_pattern: 1958-2022.OM41deg_Samudra_5daily_snapshots_NoLeap_shifttime.zarr
+      file_pattern: 1958-2022.OM41deg_Samudra_5daily_means_NoLeap.zarr
       engine: zarr
       subset:
         start_time: '2016-01-03T12:00:00'
@@ -87,7 +87,7 @@ validation_loader:
         value: 0.0
     ice:
       data_path: /scratch/cimes/wg4031/Emulator_data/Ice/
-      file_pattern: 1958-2022.OM41deg_FloeNet_6hourly_NoLeap_trimvars.zarr
+      file_pattern: 1958-2022.OM41deg_FloeNet_6hourly_NoLeap.zarr
       engine: zarr
       subset:
         start_time: '2016-01-03T12:00:00'
@@ -105,20 +105,16 @@ optimization:
   use_gradient_accumulation: true
 stepper_training:
   n_coupled_steps: 4
+  parameter_init:
+    checkpoint_path: /scratch/cimes/wg4031/fme/train/OM4_FloeNet-SamudraI_coupled_finetune_phase1_seed711_4GPU/training_checkpoints/best_inference_ckpt.tar
   ocean:
     parameter_init:
-      weights_path: /scratch/cimes/wg4031/fme/train/OM4_SamudraI_small_IceForce_NOcorr_5dsnaps_seed711_2GPU/training_checkpoints/best_inference_ckpt.tar
+      weights_path: null
     loss:
       type: MSE
   ice:
     parameter_init:
-      weights_path: /scratch/cimes/wg4031/fme/train/OM4_FloeNet_6h_5docn_nexStep_ALBCorr_seed711_4GPU/training_checkpoints/best_inference_ckpt.tar
-      parameters:
-        - frozen:
-            include:
-              - '*'
-    loss_contributions:
-      n_steps: 0
+      weights_path: null
     loss:
       type: MSE
       weights:
@@ -138,7 +134,6 @@ stepper_training:
         XPRTs: 1
         BMELT: 1
         TMELT: 1
-        SWUP: 1
 stepper:
   sst_name: tos
   ocean:
@@ -171,8 +166,8 @@ stepper:
               norm: instance
           normalization:
             network:
-              global_means_path: /scratch/cimes/wg4031/Emulator_data/Ocean/1969-2005.SamudraI_5daily_snapshots_mu.nc
-              global_stds_path: /scratch/cimes/wg4031/Emulator_data/Ocean/1969-2005.SamudraI_5daily_snapshots_sigma.nc
+              global_means_path: /scratch/cimes/wg4031/Emulator_data/Ocean/1969-2005.SamudraI_5daily_means_mu.nc
+              global_stds_path: /scratch/cimes/wg4031/Emulator_data/Ocean/1969-2005.SamudraI_5daily_means_sigma.nc
           corrector:
             type: ocean_corrector
             config:
@@ -199,8 +194,6 @@ stepper:
               - so_16
               - so_17
               - so_18
-              #surface_energy_flux_correction:
-              #  method: prescribed
           next_step_forcing_names:
           - LWDN
           - LWUP
@@ -451,12 +444,9 @@ stepper:
                   - LSRCs
                   - LSNKs
                   - XPRTs
-              albedo_correction:
-                upward_shortwave_name: SWUP
-                downward_shortwave_name: SWDN
           next_step_forcing_names:
           - SWDN
-          - LWDN
+          - LWDNjra
           - LH
           - SH
           - SNOWFL
@@ -477,8 +467,10 @@ stepper:
           - LSRCs
           - LSNKs
           - XPRTs
+          - BMELT
+          - TMELT
           - SWDN
-          - LWDN
+          - LWDNjra
           - LH
           - SH
           - SNOWFL
@@ -486,17 +478,14 @@ stepper:
           - wind_stress_y
           - tauuo
           - tauvo
-          - sos
           - tos
+          - sos
           - zos
-          - BMELT
-          - TMELT
           out_names:
           - siconc
           - simass
           - sisnmass
           - TS
-          - SWUP
           - SALTF
           - LSRCi
           - LSNKi

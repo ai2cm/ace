@@ -1,4 +1,4 @@
-experiment_dir: /scratch/cimes/wg4031/fme/train/OM4_SamudraI_baseline_seed711_2GPU
+experiment_dir: /scratch/cimes/wg4031/fme/train/OM4_Samudra_IceForce_seed711_2GPU
 save_checkpoint: true
 seed: 711
 validate_using_ema: true
@@ -123,13 +123,6 @@ stepper:
           - so_16
           - so_17
           - so_18
-          - simass
-          sea_ice_fraction_correction:
-            sea_ice_fraction_name: siconc
-            land_fraction_name: land_fraction
-            remove_negative_ocean_fraction: false
-            zero_where_ice_free_names: 
-            - simass
       next_step_forcing_names:
       - LWDN
       - LWUP
@@ -141,6 +134,13 @@ stepper:
       - SNOWFL
       - wind_stress_x
       - wind_stress_y
+      - siconc
+      - simass
+      - SALTF
+      - LSRCi
+      - LSNKi
+      - XPRTi
+      - BMELT
       in_names:
       #forcing
       - land_fraction
@@ -156,7 +156,6 @@ stepper:
       - SNOWFL
       - wind_stress_x
       - wind_stress_y
-      #prognostic
       - siconc
       - simass
       - SALTF
@@ -164,6 +163,7 @@ stepper:
       - LSNKi
       - XPRTi
       - BMELT
+      #prognostic
       - tos
       - sos
       - zos
@@ -246,13 +246,6 @@ stepper:
       - tauuo
       - tauvo
       out_names:
-      - siconc
-      - simass
-      - SALTF
-      - LSRCi
-      - LSNKi
-      - XPRTi
-      - BMELT
       - tos
       - sos
       - zos

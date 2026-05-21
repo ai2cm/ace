@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=OM4_FloeNet-SamudraI_coupled2_seed711_4GPU
-#SBATCH --output=/scratch/cimes/wg4031/fme/train/OM4_FloeNet-SamudraI_coupled2_seed711_4GPU/logs/slurm-%j.out
-#SBATCH --error=/scratch/cimes/wg4031/fme/train/OM4_FloeNet-SamudraI_coupled2_seed711_4GPU/logs/slurm-%j.err
-#SBATCH --mem=400G
+#SBATCH --job-name=OM4_SamudraI_baseline_seed711_2GPU
+#SBATCH --output=/scratch/cimes/wg4031/fme/train/OM4_SamudraI_baseline_seed711_2GPU/logs/slurm-%j.out
+#SBATCH --error=/scratch/cimes/wg4031/fme/train/OM4_SamudraI_baseline_seed711_2GPU/logs/slurm-%j.err
+#SBATCH --mem=250G
 #SBATCH --mail-user=wg4031@princeton.edu
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=4
-#SBATCH --gres=gpu:4
+#SBATCH --ntasks-per-node=2
+#SBATCH --gres=gpu:2
 #SBATCH --partition=cimes
 #SBATCH --time=48:00:00
 #SBATCH -C h200
@@ -41,4 +41,4 @@ echo "SLURM_NNODES: $SLURM_NNODES"
 #Run the training script
 torchrun --nnodes=$SLURM_NNODES --nproc_per_node=$SLURM_NTASKS_PER_NODE \
     --master_addr=$MASTER_ADDR --master_port=$MASTER_PORT \
-    -m fme.coupled.train /home/wg4031/ace/configs/wg_testing/train/FloeNet_Samudra_coupled_train2_seed711.yaml
+    -m fme.ace.train /home/wg4031/ace/configs/wg_testing/train/SamudraI_baseline_seed711.yaml

@@ -1,13 +1,7 @@
-experiment_dir: /scratch/cimes/wg4031/fme/valid/FloeNet-Samudra_coupling_seed711/
+experiment_dir: /scratch/cimes/wg4031/fme/valid/OM4_FloeNet-Samudra_coupled_finetune_phase2_seed711_1969-2022
 n_coupled_steps: 3942
 coupled_steps_in_memory: 18
-checkpoint_path:
-  ocean:
-    timedelta: 5D
-    path: /scratch/cimes/wg4031/fme/train/OM4_SamudraI_big_IceForce_5dsnaps_seed711_2GPU/training_checkpoints/best_inference_ckpt.tar
-  ice:
-    timedelta: 6h
-    path: /scratch/cimes/wg4031/fme/train/OM4_FloeNet_6h_5docn_nexStep_ALBCorr_seed711_4GPU/training_checkpoints/best_inference_ckpt.tar
+checkpoint_path: /scratch/cimes/wg4031/fme/train/OM4_FloeNet-SamudraI_coupled_finetune_phase2_seed711_4GPU/training_checkpoints/best_inference_ckpt.tar
 data_writer:
   ocean:
     save_prediction_files: false
@@ -26,11 +20,11 @@ loader:
   dataset:
     ocean:
       data_path: /scratch/cimes/wg4031/Emulator_data/Ocean/
-      file_pattern: 1958-2022.OM41deg_Samudra_5daily_snapshots_NoLeap_shifttime.zarr
+      file_pattern: 1958-2022.OM41deg_Samudra_5daily_means_NoLeap.zarr
       engine: zarr
     ice:
       data_path: /scratch/cimes/wg4031/Emulator_data/Ice/
-      file_pattern: 1958-2022.OM41deg_FloeNet_6hourly_NoLeap_trimvars.zarr
+      file_pattern: 1958-2022.OM41deg_FloeNet_6hourly_NoLeap.zarr
       engine: zarr
   start_indices:
     times:
