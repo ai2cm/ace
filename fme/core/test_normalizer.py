@@ -7,6 +7,7 @@ import pytest
 import torch
 
 from fme.ace.testing.fv3gfs_data import get_scalar_dataset
+from fme.core.co2_temperature_offset import CO2TemperatureProfileConfig
 from fme.core.device import move_tensordict_to_device
 from fme.core.normalizer import (
     NetworkAndLossNormalizationConfig,
@@ -378,6 +379,202 @@ def test_network_normalizer_has_shared_offset_but_loss_normalizer_does_not():
     )
     assert network_normalizer.use_shared_temperature_offset
     assert not loss_normalizer.use_shared_temperature_offset
+
+
+def _make_co2_offset_normalizer(means, stds, profile=None):
+    if profile is None:
+        profile = CO2TemperatureProfileConfig(co2_reference_vmr=280e-6)
+    return NormalizationConfig(
+        means=means,
+        stds=stds,
+        experimental_co2_temperature_offset=profile,
+    ).build(list(means))
+
+
+def test_co2_temperature_offset_zero_at_reference_co2():
+    # When CO2 equals the reference, log2(ratio) = 0 and the offset
+    # should be exactly zero, leaving standard normalization untouched.
+    profile = CO2TemperatureProfileConfig(co2_reference_vmr=280e-6)
+    means = {"air_temperature_4": 250.0, "global_mean_co2": 0.0}
+    stds = {"air_temperature_4": 5.0, "global_mean_co2": 1.0}
+    normalizer = _make_co2_offset_normalizer(means, stds, profile=profile)
+    tensors = move_tensordict_to_device(
+        {
+            "air_temperature_4": torch.full((1, 4, 4), 260.0),
+            "global_mean_co2": torch.full((1, 4, 4), 280e-6),
+        }
+    )
+    normalized = normalizer.normalize(tensors)
+    # (260 - 0 - 250) / 5 = 2.0
+    torch.testing.assert_close(
+        normalized["air_temperature_4"],
+        torch.full_like(normalized["air_temperature_4"], 2.0),
+    )
+
+
+def test_co2_temperature_offset_applies_per_doubling_response_per_field():
+    # With CO2 doubled, surface_temperature should be detrended by
+    # delta_t_surface_per_doubling before standard normalization. Verifies
+    # both the value and the per-field pressure mapping.
+    profile = CO2TemperatureProfileConfig(
+        co2_reference_vmr=280e-6,
+        delta_t_surface_per_doubling=3.0,
+        delta_t_stratosphere_per_doubling=-10.0,
+        tropopause_pressure_pa=2.0e4,
+        stratosphere_top_pressure_pa=1.0e2,
+    )
+    means = {"surface_temperature": 290.0, "global_mean_co2": 0.0}
+    stds = {"surface_temperature": 1.0, "global_mean_co2": 1.0}
+    normalizer = _make_co2_offset_normalizer(means, stds, profile=profile)
+    tensors = move_tensordict_to_device(
+        {
+            "surface_temperature": torch.full((1, 4, 4), 293.0),  # warmed by +3K
+            "global_mean_co2": torch.full((1, 4, 4), 560e-6),  # 2x reference
+        }
+    )
+    normalized = normalizer.normalize(tensors)
+    # ΔT_CO2 at surface = +3K per doubling × log2(2) = +3K. Subtracted before
+    # standard normalize: (293 - 3 - 290) / 1 = 0.
+    torch.testing.assert_close(
+        normalized["surface_temperature"],
+        torch.zeros_like(normalized["surface_temperature"]),
+    )
+
+
+def test_co2_temperature_offset_round_trips_through_denormalize():
+    torch.manual_seed(0)
+    means = {
+        "surface_temperature": 290.0,
+        "air_temperature_0": 220.0,  # upper stratosphere
+        "air_temperature_4": 250.0,
+        "global_mean_co2": 0.0,
+    }
+    stds = {k: 1.0 + 2.0 * i for i, k in enumerate(means)}
+    profile = CO2TemperatureProfileConfig(co2_reference_vmr=280e-6)
+    normalizer = _make_co2_offset_normalizer(means, stds, profile=profile)
+    tensors = move_tensordict_to_device(
+        {
+            "surface_temperature": 290.0 + torch.randn(2, 4, 4),
+            "air_temperature_0": 220.0 + torch.randn(2, 4, 4),
+            "air_temperature_4": 250.0 + torch.randn(2, 4, 4),
+            "global_mean_co2": torch.full((2, 4, 4), 420e-6),  # 1.5x reference
+        }
+    )
+    round_tripped = normalizer.denormalize(normalizer.normalize(tensors))
+    for k in ("surface_temperature", "air_temperature_0", "air_temperature_4"):
+        torch.testing.assert_close(round_tripped[k], tensors[k])
+
+
+def test_co2_temperature_offset_uses_per_sample_co2():
+    # Different batch elements have different CO2 values -> different
+    # per-sample offsets applied.
+    profile = CO2TemperatureProfileConfig(
+        co2_reference_vmr=280e-6,
+        delta_t_surface_per_doubling=3.0,
+    )
+    means = {"surface_temperature": 290.0, "global_mean_co2": 0.0}
+    stds = {"surface_temperature": 1.0, "global_mean_co2": 1.0}
+    normalizer = _make_co2_offset_normalizer(means, stds, profile=profile)
+    surface_t = torch.tensor([[[293.0]], [[290.0]]])  # both warmer / at norm
+    co2 = torch.tensor([[[560e-6]], [[280e-6]]])  # 2x and 1x reference
+    tensors = move_tensordict_to_device(
+        {"surface_temperature": surface_t, "global_mean_co2": co2}
+    )
+    normalized = normalizer.normalize(tensors)
+    # Sample 0: ΔT_CO2 = +3K, normalize = (293 - 3 - 290)/1 = 0
+    # Sample 1: ΔT_CO2 = 0K, normalize = (290 - 0 - 290)/1 = 0
+    expected = torch.zeros((2, 1, 1))
+    torch.testing.assert_close(normalized["surface_temperature"].cpu(), expected)
+
+
+def test_co2_temperature_offset_raises_when_global_mean_co2_missing():
+    profile = CO2TemperatureProfileConfig(co2_reference_vmr=280e-6)
+    means = {"surface_temperature": 290.0, "global_mean_co2": 0.0}
+    stds = {"surface_temperature": 1.0, "global_mean_co2": 1.0}
+    normalizer = _make_co2_offset_normalizer(means, stds, profile=profile)
+    tensors = move_tensordict_to_device(
+        {"surface_temperature": torch.full((1, 4, 4), 290.0)}
+    )
+    with pytest.raises(ValueError, match="global_mean_co2"):
+        normalizer.normalize(tensors)
+
+
+def test_co2_temperature_offset_raises_when_denormalize_called_first():
+    profile = CO2TemperatureProfileConfig(co2_reference_vmr=280e-6)
+    means = {"surface_temperature": 290.0, "global_mean_co2": 0.0}
+    stds = {"surface_temperature": 1.0, "global_mean_co2": 1.0}
+    normalizer = _make_co2_offset_normalizer(means, stds, profile=profile)
+    with pytest.raises(RuntimeError, match="normalize"):
+        normalizer.denormalize(
+            move_tensordict_to_device({"surface_temperature": torch.zeros(1, 4, 4)})
+        )
+
+
+def test_loss_normalizer_strips_co2_temperature_offset():
+    # When the CO2 offset is set on the network config, the loss normalizer
+    # returned by NetworkAndLossNormalizationConfig must not carry it.
+    combined = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means={"surface_temperature": 290.0, "global_mean_co2": 0.0},
+            stds={"surface_temperature": 1.0, "global_mean_co2": 1.0},
+            experimental_co2_temperature_offset=CO2TemperatureProfileConfig(),
+        ),
+    )
+    loss_normalizer = combined.get_loss_normalizer(
+        names=["surface_temperature", "global_mean_co2"],
+        residual_scaled_names=[],
+    )
+    assert loss_normalizer.co2_temperature_offset is None
+
+
+def test_required_forcing_names_lists_global_mean_co2_when_enabled():
+    no_co2 = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(means={"a": 1.0}, stds={"a": 1.0}),
+    )
+    assert no_co2.required_forcing_names == []
+    with_co2 = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means={"surface_temperature": 290.0, "global_mean_co2": 0.0},
+            stds={"surface_temperature": 1.0, "global_mean_co2": 1.0},
+            experimental_co2_temperature_offset=CO2TemperatureProfileConfig(),
+        ),
+    )
+    assert with_co2.required_forcing_names == ["global_mean_co2"]
+
+
+def test_co2_and_shared_temperature_offset_combine_correctly():
+    # When both are enabled, CO2 is subtracted first, then the shared
+    # offset is computed from the CO2-detrended surface_temperature.
+    # End-to-end the round-trip through normalize/denormalize must be exact.
+    torch.manual_seed(0)
+    means = {
+        "surface_temperature": 290.0,
+        "air_temperature_4": 250.0,
+        "global_mean_co2": 0.0,
+    }
+    stds = {
+        "surface_temperature": 1.5,
+        "air_temperature_4": 3.0,
+        "global_mean_co2": 1.0,
+    }
+    normalizer = NormalizationConfig(
+        means=means,
+        stds=stds,
+        experimental_use_shared_temperature_offset=True,
+        experimental_co2_temperature_offset=CO2TemperatureProfileConfig(
+            co2_reference_vmr=280e-6
+        ),
+    ).build(list(means))
+    tensors = move_tensordict_to_device(
+        {
+            "surface_temperature": 292.0 + torch.randn(2, 3, 3),
+            "air_temperature_4": 251.0 + torch.randn(2, 3, 3),
+            "global_mean_co2": torch.full((2, 3, 3), 420e-6),
+        }
+    )
+    round_tripped = normalizer.denormalize(normalizer.normalize(tensors))
+    for k in ("surface_temperature", "air_temperature_4"):
+        torch.testing.assert_close(round_tripped[k], tensors[k])
 
 
 def test_loss_normalizer_strips_shared_offset_in_fallback_case():
