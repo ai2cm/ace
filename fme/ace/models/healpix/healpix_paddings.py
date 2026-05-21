@@ -37,6 +37,7 @@ Details on the HEALPix can be found at https://iopscience.iop.org/article/10.108
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
 import torch as th
 
@@ -54,7 +55,7 @@ except ImportError:
 
 def make_hpx_padding_layer(
     padding: int,
-    hpx_padding_mode: str,
+    hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"],
     enable_nhwc: bool,
     nside: int | None = None,
 ) -> th.nn.Module:
@@ -65,8 +66,8 @@ def make_hpx_padding_layer(
     ----------
     padding : int
         Symmetric pad width on each face edge (``p >= 1``).
-    hpx_padding_mode : str
-        One of ``"earth2grid"``, ``"karlbauer"``, or ``"isolatitude"``.
+    hpx_padding_mode : Literal["earth2grid", "karlbauer", "isolatitude"]
+        Padding strategy to use for the HEALPix padding layer.
     enable_nhwc : bool
         Passed to padding modules that support channels-last output.
     nside : int or None, optional

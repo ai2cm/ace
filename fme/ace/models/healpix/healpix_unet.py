@@ -4,7 +4,7 @@ HEALPix UNet: single forward-pass encoder–decoder stack.
 Adapted from the modulus-uw ``physicsnemo.models.dlwp_healpix.HEALPixUNet``.
 """
 
-from typing import Sequence
+from typing import Literal, Sequence
 
 import torch as th
 import torch.nn as nn
@@ -12,8 +12,6 @@ import torch.nn as nn
 from .healpix_decoder import UNetDecoderConfig
 from .healpix_encoder import UNetEncoderConfig
 from .healpix_layers import HEALPixFoldFaces, HEALPixUnfoldFaces
-
-
 class HEALPixUNet(nn.Module):
     """Feed-forward UNet on the HEALPix mesh.
 
@@ -33,7 +31,7 @@ class HEALPixUNet(nn.Module):
         input_channels: int,
         output_channels: int,
         enable_nhwc: bool = False,
-        hpx_padding_mode: str = "earth2grid",
+        hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
         nside: Sequence[int] | int | None = (64, 32, 16),
     ):
         """

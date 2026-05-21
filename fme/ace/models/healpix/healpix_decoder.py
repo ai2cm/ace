@@ -16,14 +16,12 @@
 # limitations under the License.
 
 import dataclasses
-from typing import List, Optional, Sequence
+from typing import List, Literal, Optional, Sequence
 
 import torch as th
 import torch.nn as nn
 
 from .healpix_blocks import ConvBlockConfig, UpsamplingBlockConfig
-
-
 @dataclasses.dataclass
 class UNetDecoderConfig:
     """
@@ -49,7 +47,7 @@ class UNetDecoderConfig:
     output_channels: int = 1
     dilations: Optional[list] = None
     enable_nhwc: bool = False
-    hpx_padding_mode: str = "earth2grid"
+    hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid"
     nside: Optional[int] = None
 
     def build(self) -> nn.Module:
@@ -86,7 +84,7 @@ class UNetDecoder(nn.Module):
         output_channels: int = 1,
         dilations: Optional[list] = None,
         enable_nhwc: bool = False,
-        hpx_padding_mode: str = "earth2grid",
+        hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
         nside: Optional[int] = None,
     ):
         """

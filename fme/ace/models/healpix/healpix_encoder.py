@@ -16,13 +16,11 @@
 # limitations under the License.
 
 import dataclasses
-from typing import List, Optional, Sequence
+from typing import List, Literal, Optional, Sequence
 
 import torch.nn as nn
 
 from .healpix_blocks import ConvBlockConfig, DownsamplingBlockConfig
-
-
 @dataclasses.dataclass
 class UNetEncoderConfig:
     """
@@ -45,7 +43,7 @@ class UNetEncoderConfig:
     n_layers: List[int] = dataclasses.field(default_factory=lambda: [2, 2, 1])
     dilations: Optional[list] = None
     enable_nhwc: bool = False
-    hpx_padding_mode: str = "earth2grid"
+    hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid"
     nside: Optional[int] = None
 
     def build(self) -> nn.Module:
@@ -80,7 +78,7 @@ class UNetEncoder(nn.Module):
         n_layers: Sequence = (2, 2, 1),
         dilations: Optional[list] = None,
         enable_nhwc: bool = False,
-        hpx_padding_mode: str = "earth2grid",
+        hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
         nside: Optional[int] = None,
     ):
         """

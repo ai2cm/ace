@@ -28,7 +28,7 @@ from .healpix_layers import HEALPixLayer
 
 def _healpix_layer_kwargs(
     enable_nhwc: bool,
-    hpx_padding_mode: str = "earth2grid",
+    hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
     nside: Optional[int] = None,
 ) -> dict:
     """Build keyword arguments passed to ``HEALPixLayer``."""
@@ -55,7 +55,7 @@ class DownsamplingBlockConfig:
     block_type: Literal["MaxPool", "AvgPool", "DealiasedDownsample"]
     pooling: int = 2
     enable_nhwc: bool = False
-    hpx_padding_mode: str = "earth2grid"
+    hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid"
     nside: Optional[int] = None
     in_channels: Optional[int] = None
     resample_filter: Sequence[float] = (1.0, 2.0, 1.0)
@@ -123,7 +123,7 @@ class UpsamplingBlockConfig:
     upsample_mode: str = "nearest"
     activation: Optional[CappedGELUConfig] = None
     enable_nhwc: bool = False
-    hpx_padding_mode: str = "earth2grid"
+    hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid"
     nside: Optional[int] = None
     align_corners: bool = False
     scale_factor: Optional[int] = None
@@ -186,7 +186,7 @@ class ConvBlockConfig:
     latent_channels: Optional[int] = None
     activation: Optional[CappedGELUConfig] = None
     enable_nhwc: bool = False
-    hpx_padding_mode: str = "earth2grid"
+    hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid"
     nside: Optional[int] = None
     block_type: Literal[
         "BasicConvBlock",
@@ -268,7 +268,7 @@ class MaxPool(nn.Module):
         self,
         pooling: int = 2,
         enable_nhwc: bool = False,
-        hpx_padding_mode: str = "earth2grid",
+        hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
         nside: Optional[int] = None,
     ):
         super().__init__()
@@ -289,7 +289,7 @@ class AvgPool(nn.Module):
         self,
         pooling: int = 2,
         enable_nhwc: bool = False,
-        hpx_padding_mode: str = "earth2grid",
+        hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
         nside: Optional[int] = None,
     ):
         super().__init__()
@@ -359,7 +359,7 @@ class DealiasedDownsample(nn.Module):
         resample_filter: Sequence[float] = (1.0, 2.0, 1.0),
         stride: int = 2,
         enable_nhwc: bool = False,
-        hpx_padding_mode: str = "earth2grid",
+        hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
         nside: Optional[int] = None,
     ):
         super().__init__()
@@ -419,7 +419,7 @@ class TransposedConvUpsample(nn.Module):
         upsampling: int = 2,
         activation: Optional[CappedGELUConfig] = None,
         enable_nhwc: bool = False,
-        hpx_padding_mode: str = "earth2grid",
+        hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
         nside: Optional[int] = None,
     ):
         """
@@ -526,7 +526,7 @@ class SmoothedInterpolateConv(nn.Module):
         mode: str = "nearest",
         activation: Optional[nn.Module] = None,
         enable_nhwc: bool = False,
-        hpx_padding_mode: str = "earth2grid",
+        hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
         nside: Optional[int] = None,
     ):
         super().__init__()
@@ -662,7 +662,7 @@ class ConvNeXtBlock(nn.Module):
         upscale_factor: int = 4,
         activation: Optional[CappedGELUConfig] = None,
         enable_nhwc: bool = False,
-        hpx_padding_mode: str = "earth2grid",
+        hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
         nside: Optional[int] = None,
     ):
         """
@@ -769,7 +769,7 @@ class DoubleConvNeXtBlock(nn.Module):
         latent_channels: int = 1,
         activation: Optional[CappedGELUConfig] = None,
         enable_nhwc: bool = False,
-        hpx_padding_mode: str = "earth2grid",
+        hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
         nside: Optional[int] = None,
     ):
         """
@@ -937,7 +937,7 @@ class SymmetricConvNeXtBlock(nn.Module):
         upscale_factor: int = 4,
         activation: Optional[CappedGELUConfig] = None,
         enable_nhwc: bool = False,
-        hpx_padding_mode: str = "earth2grid",
+        hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
         nside: Optional[int] = None,
     ):
         """
@@ -1052,7 +1052,7 @@ class Multi_SymmetricConvNeXtBlock(nn.Module):
         n_layers: int = 1,
         activation: Optional[CappedGELUConfig] = None,
         enable_nhwc: bool = False,
-        hpx_padding_mode: str = "earth2grid",
+        hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
         nside: Optional[int] = None,
     ):
         super().__init__()

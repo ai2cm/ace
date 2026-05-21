@@ -26,6 +26,7 @@ then the user-supplied base layer (e.g. ``Conv2d``). Inputs are face tensors wit
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
 import torch as th
 
@@ -55,7 +56,7 @@ class HEALPixLayer(th.nn.Module):
     def __init__(
         self,
         layer,
-        hpx_padding_mode: str = "earth2grid",
+        hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
         nside: int | None = None,
         **kwargs,
     ):
@@ -65,7 +66,7 @@ class HEALPixLayer(th.nn.Module):
         layer : type or torch.nn.Module
             Layer class (e.g. ``torch.nn.Conv2d``) or module; must match the
             detection logic for convolution vs interpolation vs other.
-        hpx_padding_mode : str, optional
+        hpx_padding_mode : Literal["earth2grid", "karlbauer", "isolatitude"], optional
             Which padding implementation to use (default ``"earth2grid"``):
             - ``"earth2grid"`` — ``earth2grid.healpix.pad`` (default).
             - ``"karlbauer"`` — Karlbauer et al. (2024) face stitching, same result as earth2grid but slower.
