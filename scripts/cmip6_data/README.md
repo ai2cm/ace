@@ -148,22 +148,58 @@ historical from ssp245 from ssp585.
   - Mapped onto each model's daily axis via **causal previous-year**:
     every day in calendar year `Y` reads year `Y-1`'s value.
 
+- **`input4mips_so2`** — anthropogenic SO2 emission flux
+  (kg m⁻² s⁻¹), summed across emission sectors and regridded
+  conservatively to F22.5. Drives aerosol cooling with regional
+  spatial signatures that differentiate SSPs.
+
+  - Historical: **CMIP7-vintage** CEDS-CMIP-2025-04-18 (gn grid,
+    1750-2023). The original CMIP6-vintage CEDS-2017-05-18 dataset
+    that the CMIP6 model output was actually forced with has been
+    retracted from every ESGF node we tried (LLNL, DKRZ, CEDA,
+    ORNL) and isn't readily archived elsewhere. The CMIP7 update is
+    a re-run of the same CEDS methodology on the same calendar
+    years — values agree with the CMIP6-era version to within a
+    few percent at the magnitudes the network sees. Recorded as
+    such in `external_forcings.py` so the source vintage is auditable.
+  - SSP245 / SSP585: CMIP6-vintage IAMC files (2015-2100, native
+    0.5° gridded monthly).
+  - Mapped onto each model's daily axis via causal previous-month.
+
+- **`input4mips_bc`** — anthropogenic black carbon emission flux,
+  same vintage / source / mapping as SO2.
+
 **Deferred to a follow-up commit:**
 
-- **`input4mips_so2`** (gridded monthly) — anthropogenic sulfate
-  aerosol precursor.
-- **`input4mips_bc`** (gridded monthly) — black carbon.
 - **`luh2_forest`** (gridded annual) — total forest fraction from LUH2.
 
-These three add the aerosol-cooling and land-surface-change axes the
-embedding will need beyond pure GHG forcing. CO2 alone captures most
-of the inter-scenario signal, so it's a useful first step.
+This adds the land-surface-change axis the embedding will need beyond
+pure GHG + aerosol forcing.
 
 Other input4MIPs forcings (CH4, N2O, CFC equivalents, ozone, volcanic
 aerosol, solar irradiance, biomass burning) are deferred. Most are
 either strongly correlated with CO2 across scenarios (CH4, N2O),
 identical across all scenarios (solar, volcanic), or of secondary
 importance.
+
+#### Source-vintage note
+
+The pilot uses CMIP6 model output as training data, so wherever possible
+we use the CMIP6-vintage input4MIPs forcings that those models were
+actually forced with. Two exceptions where the original CMIP6-vintage
+file isn't available:
+
+| Variable | Period | Used | Reason |
+|---|---|---|---|
+| `input4mips_co2` | Historical 1959–2014 | NOAA Mauna Loa annual | UoM-CMIP-1-2-0 not indexed on ESGF; NOAA values within <1 ppm at any year |
+| `input4mips_co2` | Historical pre-1959 | constant-extrapolation to 1959 | same — no usable archived source |
+| `input4mips_so2` / `_bc` | Historical 1750–2023 | CMIP7-vintage CEDS-CMIP-2025-04-18 | CMIP6-vintage CEDS-2017-05-18 retracted from ESGF |
+
+In all three cases the substitute source's values are close enough to
+the CMIP6-vintage prescribed values (<1 ppm CO2, <few % SO2/BC at the
+scales relevant to a daily emulator) that the substitution is
+acceptable for training. The CMIP6-vintage SSP files (UoM, IAMC) are
+still on ESGF and used as-is.
 
 ### External forcings staging
 
