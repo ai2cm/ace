@@ -9,7 +9,7 @@ from fme.core.diagnostics import get_reduced_diagnostics, write_reduced_diagnost
 from fme.core.generics.aggregator import AggregatorABC
 from fme.core.typing_ import TensorDict, TensorMapping
 
-from .build_context import _Aggregator
+from .build_context import Aggregator
 
 
 @dataclasses.dataclass
@@ -32,7 +32,7 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
 
     def __init__(
         self,
-        aggregators: Mapping[str, _Aggregator],
+        aggregators: Mapping[str, Aggregator],
         coords: Mapping[str, np.ndarray],
         save_diagnostics: bool = True,
         output_dir: str | None = None,

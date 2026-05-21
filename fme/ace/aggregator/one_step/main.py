@@ -21,11 +21,11 @@ from fme.core.tensors import fold_ensemble_dim, fold_sized_ensemble_dim
 from fme.core.typing_ import TensorMapping
 
 from .build_context import (
+    Aggregator,
+    EnsembleAggregator,
     MetricNotSupportedError,
     OneStepBuildContext,
     OneStepMetricBuildResult,
-    _Aggregator,
-    _EnsembleAggregator,
 )
 from .map import OneStepMapMetricConfig
 from .reduced import OneStepMeanMetricConfig
@@ -52,7 +52,7 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
     def __init__(
         self,
         deterministic_aggregator: OneStepDeterministicAggregator,
-        ensemble_aggregator: _EnsembleAggregator,
+        ensemble_aggregator: EnsembleAggregator,
     ):
         self._deterministic_aggregator = deterministic_aggregator
         self._ensemble_aggregator = ensemble_aggregator
@@ -147,8 +147,8 @@ def build_one_step_aggregator(
         channel_mean_names=channel_mean_names,
     )
 
-    deterministic_aggregators: dict[str, _Aggregator] = {}
-    ensemble_aggregator: _EnsembleAggregator | None = None
+    deterministic_aggregators: dict[str, Aggregator] = {}
+    ensemble_aggregator: EnsembleAggregator | None = None
 
     for metric in metrics:
         name = metric.get_name()

@@ -12,7 +12,7 @@ from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import EnsembleTensorDict, TensorMapping
 
 
-class _Aggregator(Protocol):
+class Aggregator(Protocol):
     def get_logs(self, label: str) -> TensorMapping: ...
 
     def record_batch(
@@ -27,7 +27,7 @@ class _Aggregator(Protocol):
     def get_dataset(self) -> xr.Dataset: ...
 
 
-class _EnsembleAggregator(Protocol):
+class EnsembleAggregator(Protocol):
     def record_batch(
         self,
         target_data: EnsembleTensorDict,
@@ -52,5 +52,5 @@ class OneStepBuildContext:
 
 @dataclasses.dataclass
 class OneStepMetricBuildResult:
-    deterministic: _Aggregator | None = None
-    ensemble: _EnsembleAggregator | None = None
+    deterministic: Aggregator | None = None
+    ensemble: EnsembleAggregator | None = None
