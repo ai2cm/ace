@@ -135,14 +135,10 @@ class SingleModuleStepConfig(StepConfigABC):
         Names of variables required as inputs to `step`,
         either in `input` or `next_step_input_data`.
         """
-        names = set(self.in_names)
-        if self.ocean is not None:
-            names.update(self.ocean.forcing_names)
-        # Forcings required by experimental normalization features (e.g.
-        # global_mean_co2 for the CO2 temperature offset) need to be loaded
-        # even when they are not channels for the network itself.
-        names.update(self.normalization.required_forcing_names)
-        return list(names)
+        if self.ocean is None:
+            return self.in_names
+        else:
+            return list(set(self.in_names).union(self.ocean.forcing_names))
 
     def get_next_step_forcing_names(self) -> list[str]:
         """Names of input-only variables which come from the output timestep."""

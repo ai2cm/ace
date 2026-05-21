@@ -8,7 +8,6 @@ import numpy as np
 import torch
 import xarray as xr
 
-from fme.core.co2_temperature_offset import CO2TemperatureProfileConfig
 from fme.core.device import move_tensordict_to_device
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -33,28 +32,6 @@ _TEMPERATURE_FIELD_NAMES = frozenset(
     ]
 )
 _SHARED_TEMPERATURE_OFFSET_REFERENCE = "surface_temperature"
-
-# Experimental: name of the CO2 forcing input read by the CO2 temperature
-# offset feature. Must match the data variable name.
-_CO2_INPUT_NAME = "global_mean_co2"
-
-# Idealized layer mid-pressures (Pa) for the dataset's 8-layer hybrid-sigma
-# grid, evaluated at p_surface = 1e5 Pa. Derived from the ak/bk interface
-# values in the era5-8layer zarr (layer 0 = upper stratosphere ~25 hPa,
-# layer 7 = near surface ~952 hPa). Used only by the CO2 temperature offset.
-_TEMPERATURE_FIELD_PRESSURES_PA: dict[str, float] = {
-    "surface_temperature": 1.00e5,
-    "TMP2m": 1.00e5,
-    "TMP850": 8.50e4,
-    "air_temperature_0": 2.5605e3,
-    "air_temperature_1": 9.7696e3,
-    "air_temperature_2": 1.98678e4,
-    "air_temperature_3": 3.28763e4,
-    "air_temperature_4": 4.99361e4,
-    "air_temperature_5": 6.81903e4,
-    "air_temperature_6": 8.36975e4,
-    "air_temperature_7": 9.52251e4,
-}
 
 
 @dataclasses.dataclass
@@ -85,12 +62,6 @@ class NormalizationConfig:
             this even if the flag is set, since offsets are unnecessary there.
             surface_temperature must be in the means. Temperature field names
             are hard-coded; experimental knob, not a stable feature.
-        experimental_co2_temperature_offset: If set, the built normalizer
-            subtracts a physically-motivated ΔT(p, CO2) profile from every
-            temperature field on normalize and adds it back on denormalize.
-            The CO2 input is read from ``global_mean_co2`` in the input
-            tensors (which must be provided even if not in ``in_names``).
-            Network-normalizer only; loss normalizer always strips it.
     """
 
     global_means_path: str | pathlib.Path | None = None
@@ -100,7 +71,6 @@ class NormalizationConfig:
     fill_nans_on_normalize: bool = False
     fill_nans_on_denormalize: bool = False
     experimental_use_shared_temperature_offset: bool = False
-    experimental_co2_temperature_offset: CO2TemperatureProfileConfig | None = None
 
     def __post_init__(self):
         using_path = (
@@ -156,7 +126,6 @@ class NormalizationConfig:
                 use_shared_temperature_offset=(
                     self.experimental_use_shared_temperature_offset
                 ),
-                co2_temperature_offset=self.experimental_co2_temperature_offset,
             )
         else:
             means = {k: torch.tensor(self.means[k]) for k in names}
@@ -169,7 +138,6 @@ class NormalizationConfig:
                 use_shared_temperature_offset=(
                     self.experimental_use_shared_temperature_offset
                 ),
-                co2_temperature_offset=self.experimental_co2_temperature_offset,
             )
 
 
@@ -185,7 +153,6 @@ class StandardNormalizer:
         fill_nans_on_normalize: bool = False,
         fill_nans_on_denormalize: bool = False,
         use_shared_temperature_offset: bool = False,
-        co2_temperature_offset: CO2TemperatureProfileConfig | None = None,
     ):
         self.means = move_tensordict_to_device(means)
         self.stds = move_tensordict_to_device(stds)
@@ -193,11 +160,9 @@ class StandardNormalizer:
         self._fill_nans_on_normalize = fill_nans_on_normalize
         self._fill_nans_on_denormalize = fill_nans_on_denormalize
         self._use_shared_temperature_offset = use_shared_temperature_offset
-        self._co2_temperature_offset = co2_temperature_offset
-        # Per-sample offsets cached by the last normalize() call so the
-        # matching denormalize() can invert them. None until first call.
+        # Per-sample offset cached by the last normalize() call so the matching
+        # denormalize() can invert it. None until the first normalize() call.
         self._cached_temperature_offset: torch.Tensor | None = None
-        self._cached_co2_offsets: dict[str, torch.Tensor] | None = None
         if use_shared_temperature_offset and (
             _SHARED_TEMPERATURE_OFFSET_REFERENCE not in self.means
         ):
@@ -219,25 +184,10 @@ class StandardNormalizer:
     def use_shared_temperature_offset(self) -> bool:
         return self._use_shared_temperature_offset
 
-    @property
-    def co2_temperature_offset(self) -> CO2TemperatureProfileConfig | None:
-        return self._co2_temperature_offset
-
     def normalize(self, tensors: TensorMapping) -> TensorDict:
         filtered_tensors = {k: v for k, v in tensors.items() if k in self._names}
-        # Order matters: subtract the secular CO2 forcing first so that the
-        # shared-temperature offset (which depends on surface_temperature's
-        # spatial mean) sees CO2-detrended surface_temperature.
-        if self._co2_temperature_offset is not None:
-            co2_offsets = _compute_co2_temperature_offsets(
-                tensors, self._co2_temperature_offset
-            )
-            self._cached_co2_offsets = co2_offsets
-            filtered_tensors = _shift_temperature_fields_per_field(
-                filtered_tensors, co2_offsets, add=False
-            )
         if self._use_shared_temperature_offset:
-            offset = self._compute_temperature_offset(filtered_tensors)
+            offset = self._compute_temperature_offset(tensors)
             self._cached_temperature_offset = offset
             filtered_tensors = _shift_temperature_fields(
                 filtered_tensors, offset, add=True
@@ -266,16 +216,6 @@ class StandardNormalizer:
                 )
             denormalized = _shift_temperature_fields(
                 denormalized, self._cached_temperature_offset, add=False
-            )
-        if self._co2_temperature_offset is not None:
-            if self._cached_co2_offsets is None:
-                raise RuntimeError(
-                    "denormalize() was called before normalize() on a "
-                    "StandardNormalizer with co2_temperature_offset enabled; "
-                    "the per-field offsets are computed during normalize()."
-                )
-            denormalized = _shift_temperature_fields_per_field(
-                denormalized, self._cached_co2_offsets, add=True
             )
         return denormalized
 
@@ -306,11 +246,6 @@ class StandardNormalizer:
             "fill_nans_on_normalize": self._fill_nans_on_normalize,
             "fill_nans_on_denormalize": self._fill_nans_on_denormalize,
             "use_shared_temperature_offset": self._use_shared_temperature_offset,
-            "co2_temperature_offset": (
-                dataclasses.asdict(self._co2_temperature_offset)
-                if self._co2_temperature_offset is not None
-                else None
-            ),
         }
 
     @classmethod
@@ -322,10 +257,6 @@ class StandardNormalizer:
             k: torch.tensor(v, dtype=torch.float) for k, v in state["means"].items()
         }
         stds = {k: torch.tensor(v, dtype=torch.float) for k, v in state["stds"].items()}
-        co2_state = state.get("co2_temperature_offset")
-        co2_offset = (
-            CO2TemperatureProfileConfig(**co2_state) if co2_state is not None else None
-        )
         return cls(
             means=means,
             stds=stds,
@@ -334,7 +265,6 @@ class StandardNormalizer:
             use_shared_temperature_offset=state.get(
                 "use_shared_temperature_offset", False
             ),
-            co2_temperature_offset=co2_offset,
         )
 
     def get_normalization_config(self) -> NormalizationConfig:
@@ -346,7 +276,6 @@ class StandardNormalizer:
             experimental_use_shared_temperature_offset=(
                 self._use_shared_temperature_offset
             ),
-            experimental_co2_temperature_offset=self._co2_temperature_offset,
         )
 
 
@@ -449,60 +378,13 @@ def _shift_temperature_fields(
     return result
 
 
-def _shift_temperature_fields_per_field(
-    tensors: TensorDict,
-    per_field_offsets: dict[str, torch.Tensor],
-    add: bool,
-) -> TensorDict:
-    """Add (or subtract) a per-field, per-sample offset to temperature fields.
-
-    Each entry of ``per_field_offsets`` is a tensor of shape ``[batch]`` that
-    is broadcast over the non-sample dimensions of its corresponding field.
-    """
-    result = dict(tensors)
-    for name, offset in per_field_offsets.items():
-        if name not in result:
-            continue
-        t = result[name]
-        broadcast = offset.view(offset.shape[0], *(1,) * (t.ndim - 1))
-        result[name] = t + broadcast if add else t - broadcast
-    return result
-
-
-def _compute_co2_temperature_offsets(
-    tensors: TensorMapping,
-    profile: CO2TemperatureProfileConfig,
-) -> dict[str, torch.Tensor]:
-    """Compute per-sample ΔT for each known temperature field given CO2 input."""
-    if _CO2_INPUT_NAME not in tensors:
-        raise ValueError(
-            "co2_temperature_offset is set but "
-            f"{_CO2_INPUT_NAME!r} is not in the input tensors to normalize()."
-        )
-    co2 = tensors[_CO2_INPUT_NAME]
-    if co2.ndim < 2:
-        # Already per-sample scalar; broadcasting will handle the rest.
-        sample_co2 = co2
-    else:
-        sample_co2 = co2.mean(dim=tuple(range(1, co2.ndim)))
-    return {
-        name: profile.delta_t(sample_co2, pressure_pa=p)
-        for name, p in _TEMPERATURE_FIELD_PRESSURES_PA.items()
-    }
-
-
-def _disable_experimental_offsets_for_loss(
+def _disable_shared_temperature_offset(
     normalizer: StandardNormalizer,
 ) -> StandardNormalizer:
-    """Return a copy of ``normalizer`` with the experimental
-    network-only offsets (shared-temperature and CO2) turned off, since
-    they are only meaningful for the paired-normalize/denormalize cycle
-    of the network normalizer.
+    """Return a copy of ``normalizer`` with the shared-temperature-offset
+    behavior turned off, or ``normalizer`` itself if it's already off.
     """
-    if (
-        not normalizer.use_shared_temperature_offset
-        and normalizer.co2_temperature_offset is None
-    ):
+    if not normalizer.use_shared_temperature_offset:
         return normalizer
     return StandardNormalizer(
         means=normalizer.means,
@@ -510,7 +392,6 @@ def _disable_experimental_offsets_for_loss(
         fill_nans_on_normalize=normalizer.fill_nans_on_normalize,
         fill_nans_on_denormalize=normalizer.fill_nans_on_denormalize,
         use_shared_temperature_offset=False,
-        co2_temperature_offset=None,
     )
 
 
@@ -577,22 +458,12 @@ class NetworkAndLossNormalizationConfig:
             )
         else:
             built = self.network.build(names=names)
-        # Experimental network-only offsets (shared-temperature, CO2) don't
-        # belong on the loss normalizer: there's no denormalize on the loss
-        # path, and the offsets would either cancel anyway (CO2) or fail to
-        # cancel cleanly across target vs prediction (shared-temperature).
-        return _disable_experimental_offsets_for_loss(built)
-
-    @property
-    def required_forcing_names(self) -> list[str]:
-        """Variables that must be present in the input batch for normalize()
-        to function, but are not necessarily inputs to the network itself.
-        Used by the stepper to extend ``input_names`` for the data loader.
-        """
-        names: list[str] = []
-        if self.network.experimental_co2_temperature_offset is not None:
-            names.append(_CO2_INPUT_NAME)
-        return names
+        # The shared-temperature-offset flag is only meaningful for the
+        # network normalizer (paired normalize/denormalize). Strip it from
+        # the loss normalizer: there's no denormalize on the loss path, and
+        # offsets computed independently from target vs prediction inputs
+        # would not cancel cleanly.
+        return _disable_shared_temperature_offset(built)
 
     def load(self):
         self.network.load()
