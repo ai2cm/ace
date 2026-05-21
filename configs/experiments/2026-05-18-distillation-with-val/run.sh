@@ -45,7 +45,7 @@ gantry run \
     --name $JOB_NAME \
     --description "$DESCRIPTION" \
     --workspace ai2/climate-titan \
-    --priority high \
+    --priority urgent \
     --preemptible \
     --cluster ai2/titan \
     --beaker-image $IMAGE \
