@@ -33,9 +33,13 @@ Currently implements:
     on the native ~0.5° grid.
   - All files regridded conservatively to F22.5.
 
-Planned (deferred to a follow-up commit):
+- ``luh2_forest`` (annual gridded total forest fraction, ``primf + secdf``)
 
-- ``luh2_forest`` (annual forest fraction)
+  - **Historical (850-2015)**: UofMD-landState-2-1-h (Hurtt et al. 2017).
+  - **SSP245 / SSP585 (2015-2100)**: UofMD-landState-MESSAGE-ssp245-2-1-f
+    and UofMD-landState-MAGPIE-ssp585-2-1-f.
+  - All on 0.25° native grid, NaN over ocean. We extract ``primf +
+    secdf``, replace ocean NaN with 0, and bilinear-regrid to F22.5.
 
 Storage layout::
 
@@ -49,11 +53,18 @@ Storage layout::
         so2(time_monthly, lat, lon)  # kg m-2 s-1, IAMC MESSAGE-GLOBIOM
         bc(time_monthly, lat, lon)   # kg m-2 s-1, IAMC MESSAGE-GLOBIOM
       ssp585.zarr/                   # similar, IAMC REMIND-MAGPIE
+        forest(time_annual_grid, lat, lon)  # LUH2 forest fraction
 
 Each forcing has its own cadence and lives on its own time dimension
-(``time_annual`` / ``time_monthly``) inside the per-scenario zarr.
-``attach_external_forcings`` renames the dim to ``time`` before calling
-the relevant causal helper.
+(``time_annual`` for CO2 scalar, ``time_monthly`` for SO2/BC,
+``time_annual_grid`` for forest gridded) inside the per-scenario
+zarr. ``attach_external_forcings`` renames the dim to ``time`` before
+calling the relevant causal helper.
+
+The ``output_directory`` argument may be a local path or an fsspec
+URL (e.g. ``gs://bucket/path``); zarr writes go through fsspec so
+the same code runs from local dev and from the argo workflow's
+GCS-backed pods (see ``argo/workflow.yaml`` ``stage-externals``).
 
 Usage::
 
@@ -69,6 +80,7 @@ import urllib.request
 from pathlib import Path
 from typing import Optional
 
+import fsspec
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -172,6 +184,39 @@ IAMC_SSP_EMISSION_URLS: dict[tuple[str, str], str] = {
     )
     for exp, src in _IAMC_SSP_SOURCES.items()
     for var_id in ("SO2_em_anthro", "BC_em_anthro")
+}
+
+
+# LUH2 (Hurtt et al. 2017) land-use state files. CMIP6 vintage. The
+# ``multiple-states`` file packs ~12 land-use state variables at 0.25°
+# annual resolution; we extract ``primf`` (primary forested land) and
+# ``secdf`` (secondary forested land) and sum them to get total forest
+# fraction. NaN over ocean — replaced with 0 before regrid since
+# forest fraction over ocean is zero by construction.
+LUH2_URLS: dict[str, str] = {
+    "historical": (
+        "http://esgf-node.ornl.gov/thredds/fileServer/user_pub_work/"
+        "input4MIPs/CMIP6/CMIP/UofMD/UofMD-landState-2-1-h/land/yr/"
+        "multiple/gn/v20170126/"
+        "multiple-states_input4MIPs_landState_CMIP_"
+        "UofMD-landState-2-1-h_gn_0850-2015.nc"
+    ),
+    "ssp245": (
+        "http://esgf-node.ornl.gov/thredds/fileServer/user_pub_work/"
+        "input4MIPs/CMIP6/ScenarioMIP/UofMD/"
+        "UofMD-landState-MESSAGE-ssp245-2-1-f/land/yr/multiple-states/"
+        "gn/v20180119/"
+        "multiple-states_input4MIPs_landState_ScenarioMIP_"
+        "UofMD-MESSAGE-ssp245-2-1-f_gn_2015-2100.nc"
+    ),
+    "ssp585": (
+        "http://esgf-node.ornl.gov/thredds/fileServer/user_pub_work/"
+        "input4MIPs/CMIP6/ScenarioMIP/UofMD/"
+        "UofMD-landState-MAGPIE-ssp585-2-1-f/land/yr/multiple-states/"
+        "gn/v20171005/"
+        "multiple-states_input4MIPs_landState_ScenarioMIP_"
+        "UofMD-MAGPIE-ssp585-2-1-f_gn_2015-2100.nc"
+    ),
 }
 
 
@@ -360,6 +405,72 @@ def fetch_anthro_emissions(
     return out
 
 
+def fetch_luh2_forest(
+    experiment: str,
+    cache_dir: Path,
+    target: xr.Dataset,
+) -> xr.DataArray:
+    """Download the LUH2 ``multiple-states`` file for ``experiment``,
+    extract ``primf`` + ``secdf`` (primary + secondary forest fraction),
+    sum, replace ocean NaN with 0, regrid conservatively to ``target``,
+    and return a ``(time_annual, lat, lon)`` DataArray with annual
+    timestamps as cftime ``DatetimeNoLeap``.
+    """
+    if experiment not in LUH2_URLS:
+        raise ValueError(
+            f"No LUH2 URL configured for {experiment!r}; "
+            f"available: {sorted(LUH2_URLS)}"
+        )
+    url = LUH2_URLS[experiment]
+    nc = cache_dir / Path(url).name
+    if not nc.exists():
+        _download(url, nc)
+    ds = xr.open_dataset(nc, decode_times=False, chunks={"time": 12})
+
+    # Build a cftime time axis from LUH2's ``years since YYYY-01-01``.
+    import re
+
+    import cftime
+
+    units = ds["time"].attrs.get("units", "")
+    m = re.match(r"years since (\d{1,4})-", units)
+    if not m:
+        raise ValueError(f"Unexpected LUH2 time units: {units!r}")
+    base_year = int(m.group(1))
+    time_values = [
+        cftime.DatetimeNoLeap(base_year + int(t), 7, 1, 12) for t in ds["time"].values
+    ]
+
+    # Forest fraction = primf + secdf, fill ocean (NaN) with 0.
+    forest = ds["primf"] + ds["secdf"]
+    forest = forest.fillna(0.0)
+
+    # Conservative regrid to F22.5. Re-attach lat/lon bounds the way
+    # _regrid_emissions_to_target expects them.
+    forest_ds = forest.to_dataset(name="forest")
+    for b in ("lat_bnds", "lon_bnds"):
+        if b in ds.variables:
+            bnds = ds[b]
+            if "time" in bnds.dims:
+                bnds = bnds.isel(time=0, drop=True)
+            forest_ds[b] = bnds
+
+    from processing import make_regridder
+
+    regridder, method = make_regridder(forest_ds, target, "conservative")
+    logging.info("  LUH2 forest regrid method=%s", method)
+    regridded = regridder(forest_ds[["forest"]], keep_attrs=True)
+    out = regridded["forest"].assign_coords(time=time_values).compute()
+    out.attrs.update(
+        {
+            "units": "1",
+            "long_name": "total forest fraction (primf + secdf)",
+            "source": f"LUH2 v2.1.{('h' if experiment == 'historical' else 'f')}",
+        }
+    )
+    return out
+
+
 def co2_series_to_dataset(df: pd.DataFrame, experiment: str) -> xr.Dataset:
     """Wrap a (year, co2_ppm) DataFrame as an xarray Dataset with a cftime
     annual time axis (midyear timestamps) and a ``co2`` variable in ppm.
@@ -387,9 +498,11 @@ def co2_series_to_dataset(df: pd.DataFrame, experiment: str) -> xr.Dataset:
     return ds
 
 
-def external_forcings_zarr_path(output_directory: str, experiment: str) -> Path:
-    """Path to the per-scenario external-forcings zarr."""
-    return Path(output_directory) / "external_forcings" / f"{experiment}.zarr"
+def external_forcings_zarr_path(output_directory: str, experiment: str) -> str:
+    """URL of the per-scenario external-forcings zarr. Local or fsspec
+    (``gs://...``) — same convention as ``ProcessConfig.output_directory``.
+    """
+    return f"{output_directory.rstrip('/')}/external_forcings/{experiment}.zarr"
 
 
 def attach_external_forcings(
@@ -418,13 +531,14 @@ def attach_external_forcings(
     from processing import causal_annual_to_daily
 
     path = external_forcings_zarr_path(output_directory, experiment)
-    if not path.exists():
+    fs, rel = fsspec.core.url_to_fs(path)
+    if not fs.exists(rel):
         row.warnings.append(
             f"no external forcings staged at {path} for {experiment}; "
             "input4mips_* variables omitted"
         )
         return
-    ef = xr.open_zarr(path, consolidated=True)
+    ef = xr.open_zarr(fsspec.get_mapper(path), consolidated=True)
     daily_time = day_dataset["time"]
 
     if "co2" in ef.data_vars:
@@ -494,6 +608,21 @@ def attach_external_forcings(
             daily.rename(out_name).astype(np.float32).assign_attrs(**attrs)
         )
 
+    # LUH2 forest fraction: annual gridded → daily via causal annual.
+    # Stored under ``luh2_forest`` (different prefix than input4mips_*
+    # since LUH2 is its own institution / source).
+    if "forest" in ef.data_vars:
+        annual = ef["forest"].rename({"time_annual_grid": "time"})
+        daily = causal_annual_to_daily(annual, daily_time)
+        day_dataset["luh2_forest"] = (
+            daily.rename("luh2_forest")
+            .astype(np.float32)
+            .assign_attrs(
+                units="1",
+                long_name="total forest fraction (primf + secdf)",
+            )
+        )
+
     ef.close()
 
 
@@ -503,25 +632,32 @@ def stage_for_experiment(
     cache_dir: Optional[Path] = None,
     force: bool = False,
     variables: Optional[tuple[str, ...]] = None,
-) -> Path:
+) -> str:
     """Build the per-scenario external-forcings zarr at
     ``<output_directory>/external_forcings/<experiment>.zarr``,
     containing every forcing variable in ``variables`` (default: all
     implemented). Skips work if the target zarr already exists and
     ``force=False``.
 
-    Available variables: ``co2``, ``so2``, ``bc``.
+    Available variables: ``co2``, ``so2``, ``bc``, ``forest``.
+
+    ``output_directory`` may be a local path or a fsspec URL (e.g. a
+    ``gs://`` bucket); zarr writes go via fsspec so the same code runs
+    from local dev and from the argo workflow's GCS-backed pods.
     """
     if variables is None:
-        variables = ("co2", "so2", "bc")
-    out_dir = Path(output_directory) / "external_forcings"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    target = out_dir / f"{experiment}.zarr"
-    if target.exists() and not force:
-        logging.info("  [%s] up to date at %s", experiment, target)
-        return target
+        variables = ("co2", "so2", "bc", "forest")
+    out_dir_url = output_directory.rstrip("/") + "/external_forcings"
+    target_url = f"{out_dir_url}/{experiment}.zarr"
+    fs, target_rel = fsspec.core.url_to_fs(target_url)
+    fs.makedirs(fs._strip_protocol(out_dir_url), exist_ok=True)
+    if fs.exists(target_rel) and not force:
+        logging.info("  [%s] up to date at %s", experiment, target_url)
+        return target_url
     if cache_dir is None:
-        cache_dir = out_dir / ".cache"
+        # Cache lives locally regardless of output_directory — argo
+        # mounts ephemeral storage at /tmp.
+        cache_dir = Path("/tmp/external_forcings_cache")
 
     # Target grid for emission regridding — same Gauss-Legendre F22.5
     # the rest of the pipeline uses.
@@ -559,14 +695,29 @@ def stage_for_experiment(
             da.attrs.get("units", "?"),
         )
         pieces.append(da.rename(short).rename({"time": "time_monthly"}).to_dataset())
+    if "forest" in variables:
+        forest = fetch_luh2_forest(experiment, cache_dir, target_grid)
+        logging.info(
+            "  [%s] LUH2 forest fraction years=%d, range=(%g, %g)",
+            experiment,
+            forest.sizes["time"],
+            float(forest.min()),
+            float(forest.max()),
+        )
+        # LUH2 forest is annual gridded ((time, lat, lon)) — distinct
+        # time-dim from CO2 (which is annual scalar). Use a different
+        # dim name to avoid the merge unifying their differing time
+        # coverages.
+        pieces.append(
+            forest.rename("forest").rename({"time": "time_annual_grid"}).to_dataset()
+        )
 
     ds = xr.merge(pieces, compat="override")
-    if target.exists():
-        import shutil
-
-        shutil.rmtree(target)
-    ds.to_zarr(target, consolidated=True)
-    return target
+    if fs.exists(target_rel):
+        fs.rm(target_rel, recursive=True)
+    mapper = fsspec.get_mapper(target_url)
+    ds.to_zarr(mapper, consolidated=True)
+    return target_url
 
 
 def stage_co2_for_experiment(
@@ -574,7 +725,7 @@ def stage_co2_for_experiment(
     output_directory: str,
     cache_dir: Optional[Path] = None,
     force: bool = False,
-) -> Path:
+) -> str:
     """Backwards-compatible wrapper that stages only CO2."""
     return stage_for_experiment(
         experiment, output_directory, cache_dir, force, variables=("co2",)
@@ -607,7 +758,7 @@ def main() -> None:
         "--variables",
         nargs="+",
         default=None,
-        choices=["co2", "so2", "bc"],
+        choices=["co2", "so2", "bc", "forest"],
         help="Subset of variables to stage (default: all)",
     )
     parser.add_argument(

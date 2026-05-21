@@ -780,6 +780,8 @@ _SANITY_RANGES: dict[str, tuple[float, float]] = {
     # headroom for cell-level hotspots after sector summation.
     "input4mips_so2": (-_EPS * 1e-12, 5.0e-9),
     "input4mips_bc": (-_EPS * 1e-12, 5.0e-10),
+    # LUH2 forest fraction is on [0, 1] by construction.
+    "luh2_forest": (-_EPS, 1.0 + _EPS),
 }
 
 _DERIVED_T_RANGE = (150.0, 350.0)

@@ -23,12 +23,22 @@ spec:
       value: "false"
     - name: run_normalization
       value: "false"
+    - name: run_stage_externals
+      value: "false"
+    - name: experiments
+      # Space-separated list of experiments to stage external forcings
+      # for; matches the ``--experiments`` flag of external_forcings.py.
+      # Defaults to the same three the pilot ingests.
+      value: "historical ssp245 ssp585"
   templates:
     # ------------------------------------------------------------------
     # Entry point: sequential stages, each with a conditional gate.
     # ------------------------------------------------------------------
     - name: cmip6-daily-pilot
       steps:
+      - - name: stage-externals
+          when: "{{workflow.parameters.run_stage_externals}} == true"
+          template: stage-externals
       - - name: process-dataset
           when: "{{workflow.parameters.run_process}} == true"
           template: process-dataset
@@ -51,6 +61,58 @@ spec:
       - - name: make-presence
           when: "{{workflow.parameters.run_stats}} == true"
           template: make-presence
+
+    # ------------------------------------------------------------------
+    # stage-externals: run external_forcings.py once to download the
+    # input4MIPs/LUH2 forcing files, regrid to F22.5, and write the
+    # per-scenario zarrs under <output_directory>/external_forcings/.
+    # Subsequent process-dataset pods read those zarrs via
+    # attach_external_forcings.  Total source download is ~30-35 GB
+    # (mostly LUH2 + CMIP7 CEDS historical); the staged zarrs are tiny
+    # (~few MB per scenario). Run with run_stage_externals=true once
+    # per pilot version; results are persisted to GCS so subsequent
+    # runs can skip.
+    # ------------------------------------------------------------------
+    - name: stage-externals
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: med-sim-pool
+      container:
+        image: us-central1-docker.pkg.dev/vcm-ml/full-model/cmip6-processing:latest
+        resources:
+          limits:
+            cpu: "4000m"
+            memory: "16Gi"
+            ephemeral-storage: "60Gi"
+          requests:
+            cpu: "4000m"
+            memory: "16Gi"
+            ephemeral-storage: "60Gi"
+        command: ["bash", "-c", "-e"]
+        args:
+          - |
+            cat << 'CONFIGEOF' > config.yaml
+            {{workflow.parameters.config}}
+            CONFIGEOF
+
+            # Pull output_directory out of the config so we hand it
+            # directly to external_forcings.py.
+            output_directory=$(python -c \
+              "import yaml; print(yaml.safe_load(open('config.yaml'))['output_directory'])")
+            echo "Staging externals into ${output_directory}/external_forcings"
+
+            python external_forcings.py \
+              --output-directory "${output_directory}" \
+              --experiments {{workflow.parameters.experiments}}
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret
 
     # ------------------------------------------------------------------
     # process-dataset: run process.py for one (source_id, exp, member).

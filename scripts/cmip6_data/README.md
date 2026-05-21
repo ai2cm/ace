@@ -169,12 +169,22 @@ historical from ssp245 from ssp585.
 - **`input4mips_bc`** — anthropogenic black carbon emission flux,
   same vintage / source / mapping as SO2.
 
-**Deferred to a follow-up commit:**
+- **`luh2_forest`** — total forest fraction (sum of primary forested
+  land ``primf`` and potentially-forested secondary land ``secdf``)
+  from the LUH2 v2 land-state dataset. Gridded annual, fraction in
+  [0, 1]. Captures the land-surface-change axis of inter-scenario
+  forcing variation.
 
-- **`luh2_forest`** (gridded annual) — total forest fraction from LUH2.
-
-This adds the land-surface-change axis the embedding will need beyond
-pure GHG + aerosol forcing.
+  - Historical (850-2015): UofMD-landState-2-1-h (Hurtt et al. 2017).
+  - SSP245 / SSP585 (2015-2100): UofMD-landState-MESSAGE-ssp245-2-1-f
+    and UofMD-landState-MAGPIE-ssp585-2-1-f.
+  - LUH2 publishes one ``multiple-states`` netCDF per scenario at
+    0.25° resolution with ~12 land-use classes; we extract
+    ``primf`` + ``secdf``, sum, replace ocean NaN with 0 (forest
+    fraction over ocean is zero by construction), then bilinear-
+    regrid to F22.5 (LUH2 lat/lon bounds aren't xesmf-conservative-
+    compatible). Mapped onto each model's daily axis via causal
+    previous-year.
 
 Other input4MIPs forcings (CH4, N2O, CFC equivalents, ozone, volcanic
 aerosol, solar irradiance, biomass burning) are deferred. Most are
@@ -194,6 +204,7 @@ file isn't available:
 | `input4mips_co2` | Historical 1959–2014 | NOAA Mauna Loa annual | UoM-CMIP-1-2-0 not indexed on ESGF; NOAA values within <1 ppm at any year |
 | `input4mips_co2` | Historical pre-1959 | constant-extrapolation to 1959 | same — no usable archived source |
 | `input4mips_so2` / `_bc` | Historical 1750–2023 | CMIP7-vintage CEDS-CMIP-2025-04-18 | CMIP6-vintage CEDS-2017-05-18 retracted from ESGF |
+| `luh2_forest` | All years | bilinear regrid | LUH2 native files don't expose xesmf-compatible lat/lon bounds; bilinear of a fraction field has bounded undershoot/overshoot near sharp land/ocean transitions |
 
 In all three cases the substitute source's values are close enough to
 the CMIP6-vintage prescribed values (<1 ppm CO2, <few % SO2/BC at the
@@ -204,19 +215,39 @@ still on ESGF and used as-is.
 ### External forcings staging
 
 `external_forcings.py` writes a small per-scenario zarr at
-`<output_directory>/external_forcings/<experiment>.zarr` containing an
-annual `co2(time)` time series. `process.py` and `process_esgf.py`
-opportunistically attach those forcings to each per-model dataset at
-processing time — if the per-scenario zarr is absent they record a
-warning and the per-model output simply lacks the `input4mips_*`
-variables (training handles the missingness via the existing
-`allow_variable_masking` machinery).
+`<output_directory>/external_forcings/<experiment>.zarr` containing
+`co2`, `so2`, `bc`, and `forest` on their native cadence dims
+(`time_annual`, `time_monthly`, `time_annual_grid`). `process.py` and
+`process_esgf.py` opportunistically attach those forcings to each
+per-model dataset at processing time — if the per-scenario zarr is
+absent they record a warning and the per-model output simply lacks
+the `input4mips_*` / `luh2_*` variables (training handles the
+missingness via the existing `allow_variable_masking` machinery).
+
+The script accepts both local paths and `gs://` URLs (fsspec-backed),
+so the same code runs locally and from the argo workflow's stage-
+externals template.
+
+Local subset for testing (avoid the 5.8 GB historical LUH2 file):
+
+```
+# Minimal end-to-end exercise (~1 GB total download):
+python external_forcings.py --output-directory ... --experiments ssp245
+# Skip LUH2 entirely (just CO2/SO2/BC):
+python external_forcings.py --output-directory ... --variables co2 so2 bc
+```
+
+Full staging (one-time ~30 GB download):
 
 ```
 python external_forcings.py --output-directory ./data/cmip6-daily-pilot/v0
-python external_forcings.py --output-directory ... --experiments historical ssp585
 python external_forcings.py --output-directory ... --force  # rebuild
 ```
+
+Production: the argo workflow's `stage-externals` template runs the
+full version once per pilot version with `run_stage_externals: true`;
+the resulting zarrs persist in GCS so subsequent process-dataset runs
+read them directly without re-staging.
 
 ### Ocean fill
 
