@@ -1,7 +1,7 @@
 FROM continuumio/miniconda3:24.1.2-0
 
 RUN apt-get update && \
-    apt-get install -y apt-transport-https ca-certificates gnupg curl
+    apt-get install -y apt-transport-https ca-certificates gnupg curl libgomp1
 
 RUN conda create -y -n env python=3.11 \
     && conda install -y -c conda-forge -n env esmpy "xesmf>=0.8"
@@ -14,4 +14,5 @@ COPY --from=apache/beam_python3.11_sdk:2.71.0 /opt/apache/beam /opt/apache/beam
 ENTRYPOINT [ "/opt/apache/beam/boot" ]
 
 ENV PATH /opt/conda/envs/env/bin:${PATH}
+ENV LD_LIBRARY_PATH /opt/conda/envs/env/lib:${LD_LIBRARY_PATH}
 ENV ESMFMKFILE /opt/conda/envs/env/lib/esmf.mk
