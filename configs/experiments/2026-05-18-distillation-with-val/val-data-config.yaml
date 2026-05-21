@@ -5,6 +5,7 @@ coarse:
     subset:
       start_time: '2023-01-01T00:00:00'
       stop_time: '2023-12-31T23:59:59'
+      step: 2
 batch_size: 4
 num_data_workers: 2
 strict_ensemble: false

@@ -71,7 +71,11 @@ class BestStudentCheckpointCallback:
 
     Injected directly into ``Trainer.callbacks._callbacks`` (same pattern as
     ``_CheckpointPruner``) so no FastGen ``_target_`` DictConfig entry is
-    needed.  Only rank-0 performs IO; other ranks skip silently.
+    needed.  Validation is sharded across all ranks (each rank consumes
+    ``1/world_size`` of the batches and the per-variable sums are
+    ``all_reduce``-d before averaging), so all ranks must enter this hook in
+    lockstep — otherwise the next training step's NCCL collective deadlocks
+    while rank-0 is busy validating.  Only rank-0 writes the checkpoint.
 
     At each checkpoint event the student network (``model.net``) is called
     directly to generate samples from the coarse validation conditions.
@@ -98,6 +102,11 @@ class BestStudentCheckpointCallback:
         n_student_samples: Number of student ensemble members to draw per
             time step.  More members give a better CRPS estimate; 4 is a
             reasonable default.
+
+    To run validation on less data, thin at the data-config level via
+    ``subset.step`` in the val YAML (see ``fme.core.dataset.time.TimeSlice``).
+    That trims time indices before the patched generator expands them, which
+    gives a cleaner sub-sample than thinning after patching.
     """
 
     def __init__(
@@ -125,17 +134,21 @@ class BestStudentCheckpointCallback:
     def on_save_checkpoint_success(
         self, model=None, iteration: int = 0, path: str = ""
     ) -> None:
+        if model is None:
+            return
         try:
             from fastgen.utils.distributed import is_rank0
         except ImportError:
-            return
-        if not is_rank0() or model is None:
             return
 
         import fastgen.utils.logging_utils as logger
 
         student: AceDiffusionTeacher = model.net
+        # Validation runs on ALL ranks (sharded) — see class docstring.
         crps = self._compute_validation_crps(student)
+
+        if not is_rank0():
+            return
 
         if crps < self._best_crps:
             self._best_crps = crps
@@ -174,9 +187,18 @@ class BestStudentCheckpointCallback:
 
     @torch.no_grad()
     def _compute_validation_crps(self, student: AceDiffusionTeacher) -> float:
+        import torch.distributed as dist
+
         teacher_ds = self._load_teacher_ds()
         teacher_model = self._teacher_model
         n = self._n_student_samples
+
+        if dist.is_available() and dist.is_initialized():
+            rank = dist.get_rank()
+            world_size = dist.get_world_size()
+        else:
+            rank = 0
+            world_size = 1
 
         if self._coarse_patch_yx is not None:
             batch_iter = self._coarse_val_data.get_patched_generator(
@@ -198,43 +220,47 @@ class BestStudentCheckpointCallback:
 
             _log = logging.getLogger(__name__).info
 
-        _log(
-            f"[BestStudentCallback] teacher_ds time index: "
-            f"n={len(teacher_time_index)}, dtype={type(teacher_time_index).__name__}, "
-            f"first={teacher_time_index[0]!r}, last={teacher_time_index[-1]!r}"
-        )
+        if rank == 0:
+            _log(
+                f"[BestStudentCallback] teacher_ds time index: "
+                f"n={len(teacher_time_index)}, "
+                f"dtype={type(teacher_time_index).__name__}, "
+                f"first={teacher_time_index[0]!r}, last={teacher_time_index[-1]!r}"
+            )
+            _log(f"[BestStudentCallback] sharding: rank={rank}/{world_size}")
 
-        batch_idx = 0
+        global_batch_idx = -1
+        n_processed = 0
         n_skipped_batches = 0
         n_skipped_times = 0
+        first_batch_logged = False
         for batch in batch_iter:
+            global_batch_idx += 1
+
+            # Shard batches across ranks so every rank consumes a disjoint
+            # subset of the iterator.
+            if global_batch_idx % world_size != rank:
+                continue
+
             times = batch.time.values  # (B,) numpy time stamps
 
             # Filter to times present in the teacher zarr; skip the batch if
             # none overlap. Avoids wasted student sampling on unmatched times.
             keep_mask = np.array([t in teacher_time_index for t in times])
-            if batch_idx == 0:
+            if not first_batch_logged:
+                first_batch_logged = True
                 _log(
-                    f"[BestStudentCallback] batch 0 times: "
+                    f"[BestStudentCallback] rank={rank} first batch "
+                    f"(global_idx={global_batch_idx}) times: "
                     f"dtype={times.dtype}, sample={list(times[:4])!r}, "
                     f"keep_mask={keep_mask.tolist()}"
                 )
             if not keep_mask.all():
                 n_skipped_times += int((~keep_mask).sum())
-                # Only log a few examples so we don't spam thousands of lines
-                # when the entire validation range is misaligned.
-                if n_skipped_batches + (not keep_mask.any()) <= 5:
-                    missing = [t for t, keep in zip(times, keep_mask) if not keep]
-                    _log(
-                        f"[BestStudentCallback] batch {batch_idx}: "
-                        f"{(~keep_mask).sum()}/{len(times)} times not in teacher zarr "
-                        f"(e.g. {missing[:3]!r})"
-                    )
             if not keep_mask.any():
                 n_skipped_batches += 1
-                batch_idx += 1
                 continue
-            batch_idx += 1
+            n_processed += 1
 
             # Build condition tensor from coarse inputs (same path as training).
             static_inputs = teacher_model._subset_static_if_available(batch)
@@ -291,13 +317,57 @@ class BestStudentCheckpointCallback:
                     crps_sum[var] = crps_sum.get(var, 0.0) + float(crps_map.sum())
                     count[var] = count.get(var, 0) + crps_map.numel()
 
-        _log(
-            f"[BestStudentCallback] validation summary: "
-            f"batches_processed={batch_idx}, batches_skipped={n_skipped_batches}, "
-            f"unmatched_times={n_skipped_times}"
+        # Reduce per-variable sums/counts across ranks. The variable order is
+        # taken from the teacher's out_packer ∩ teacher_ds so it's identical on
+        # every rank, even if a given rank's shard processed no batches.
+        global_keys = [
+            name
+            for name in teacher_model.out_packer.names
+            if name in teacher_ds.data_vars
+        ]
+        device = (
+            torch.device(f"cuda:{torch.cuda.current_device()}")
+            if torch.cuda.is_available()
+            else torch.device("cpu")
         )
+        sums = torch.tensor(
+            [crps_sum.get(k, 0.0) for k in global_keys],
+            device=device,
+            dtype=torch.float64,
+        )
+        counts = torch.tensor(
+            [count.get(k, 0) for k in global_keys],
+            device=device,
+            dtype=torch.float64,
+        )
+        local_stats = torch.tensor(
+            [n_processed, n_skipped_batches, n_skipped_times],
+            device=device,
+            dtype=torch.float64,
+        )
+        if world_size > 1:
+            dist.all_reduce(sums, op=dist.ReduceOp.SUM)
+            dist.all_reduce(counts, op=dist.ReduceOp.SUM)
+            dist.all_reduce(local_stats, op=dist.ReduceOp.SUM)
 
-        if not crps_sum:
+        if rank == 0:
+            total_processed, total_skipped_batches, total_skipped_times = (
+                int(local_stats[0].item()),
+                int(local_stats[1].item()),
+                int(local_stats[2].item()),
+            )
+            _log(
+                f"[BestStudentCallback] validation summary: "
+                f"batches_processed={total_processed} (across {world_size} ranks), "
+                f"batches_skipped={total_skipped_batches}, "
+                f"unmatched_times={total_skipped_times}"
+            )
+
+        per_var = []
+        for i, _var in enumerate(global_keys):
+            c = float(counts[i].item())
+            if c > 0:
+                per_var.append(float(sums[i].item()) / c)
+        if not per_var:
             return float("inf")
-
-        return float(np.mean([crps_sum[v] / count[v] for v in crps_sum]))
+        return float(np.mean(per_var))
