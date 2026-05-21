@@ -41,7 +41,11 @@ import pandas as pd
 import xarray as xr
 
 sys.path.insert(0, str(Path(__file__).parent))
-from config import ESGFProcessConfig, make_label  # noqa: E402
+from config import (  # noqa: E402
+    SURFACE_AND_OCEAN_VARIABLES,
+    ESGFProcessConfig,
+    make_label,
+)
 from esgf import (  # noqa: E402
     cleanup_scratch_dir,
     cleanup_variable_files,
@@ -57,11 +61,12 @@ from processing import (  # noqa: E402
     DuplicateTimestampsError,
     SimulationBoundaryError,
     apply_time_subset,
+    clamp_static_fractions,
     compute_below_surface_mask,
     compute_derived_layer_T,
     fill_derived_layer_T,
+    finalize_surface_and_ocean_variable,
     flatten_plev_variables,
-    interp_monthly_to_daily,
     nearest_above_fill,
     normalize_plev,
     regrid_variables,
@@ -89,8 +94,10 @@ class ESGFDatasetTask:
     variant_f: int
     grid_label: str = ""
     available_day_variables: list[str] = field(default_factory=list)
-    has_ts: bool = False
-    has_siconc: bool = False
+    # Output names of surface-and-ocean variables this dataset's source
+    # tables actually publish (e.g. ``["amon_ts", "eday_ts",
+    # "simon_siconc"]``).
+    available_surface_and_ocean_variables: list[str] = field(default_factory=list)
     has_orog: bool = False
     has_sftlf: bool = False
 
@@ -154,8 +161,11 @@ def select_esgf_datasets(
         ]
         day = day.merge(kept, on=["source_id", "experiment_id", "member_id"])
 
-    # Core variables gate
+    # Core variables gate. Missing variables are tolerated up to
+    # ``config.defaults.max_core_missing``; remaining ones are absent
+    # from output (training handles via per-sample masking).
     core = set(config.defaults.core_variables)
+    max_missing = config.defaults.max_core_missing
 
     tasks: list[ESGFDatasetTask] = []
     keys = day.drop_duplicates(["source_id", "experiment_id", "member_id"])
@@ -171,30 +181,27 @@ def select_esgf_datasets(
             & (day["member_id"] == member)
         ]
         available_vars = set(day_slice["variable_id"].unique())
-        if not core.issubset(available_vars):
+        if len(core - available_vars) > max_missing:
             continue
 
         grid_labels = day_slice["grid_label"].unique()
         grid_label = grid_labels[0] if len(grid_labels) else ""
 
-        # Check forcings / statics
+        # Check surface-and-ocean source tables and statics.
         model_inv = inventory[inventory["source_id"] == source_id]
         exp_inv = model_inv[model_inv["experiment_id"] == experiment]
-        has_ts = bool(
-            len(
-                exp_inv[
-                    (exp_inv["table_id"] == "Amon") & (exp_inv["variable_id"] == "ts")
-                ]
+        available_surface_and_ocean: list[str] = []
+        for h in SURFACE_AND_OCEAN_VARIABLES:
+            published = bool(
+                len(
+                    exp_inv[
+                        (exp_inv["table_id"] == h.table_id)
+                        & (exp_inv["variable_id"] == h.var_id)
+                    ]
+                )
             )
-        )
-        has_siconc = bool(
-            len(
-                exp_inv[
-                    (exp_inv["table_id"] == "SImon")
-                    & (exp_inv["variable_id"] == "siconc")
-                ]
-            )
-        )
+            if published:
+                available_surface_and_ocean.append(h.output_name)
         has_orog = bool(
             len(
                 model_inv[
@@ -223,8 +230,7 @@ def select_esgf_datasets(
                 variant_f=int(row["variant_f"]),
                 grid_label=grid_label,
                 available_day_variables=sorted(available_vars),
-                has_ts=has_ts,
-                has_siconc=has_siconc,
+                available_surface_and_ocean_variables=available_surface_and_ocean,
                 has_orog=has_orog,
                 has_sftlf=has_sftlf,
             )
@@ -410,7 +416,9 @@ def process_one_esgf(
         label=label,
         target_grid=cfg.target_grid.name,
         native_grid_label=task.grid_label,
-        forcing_interpolation=cfg.forcing_interpolation,
+        # surface_and_ocean_zstores is left empty for ESGF — provenance is captured
+        # implicitly by ``available_surface_and_ocean_variables`` and the file-level
+        # ESGF queries resolved at download time.
         output_zarr=zarr_path,
         status="pending",
     )
@@ -425,10 +433,12 @@ def process_one_esgf(
     try:
         target = make_target_grid(cfg.target_grid.name)
 
-        # 1. Process all daily variables one at a time.
-        all_day_vars = cfg.core_variables + [
-            v for v in cfg.optional_variables if v in task.available_day_variables
-        ]
+        # 1. Process all daily variables one at a time. Missing core
+        # variables (up to ``cfg.max_core_missing``) are tolerated and
+        # tracked as warnings.
+        all_day_vars = [
+            v for v in cfg.core_variables if v in task.available_day_variables
+        ] + [v for v in cfg.optional_variables if v in task.available_day_variables]
 
         regridded_vars: dict[str, xr.Dataset] = {}
         for v in all_day_vars:
@@ -447,11 +457,16 @@ def process_one_esgf(
                 return row
 
         missing_core = [v for v in cfg.core_variables if v not in regridded_vars]
-        if missing_core:
+        if len(missing_core) > cfg.max_core_missing:
             row.status = "skipped"
-            row.skip_reason = f"missing core variables after processing: {missing_core}"
+            row.skip_reason = (
+                f"missing {len(missing_core)} > {cfg.max_core_missing} core "
+                f"variables after processing: {missing_core}"
+            )
             cleanup_scratch_dir(scratch)
             return row
+        if missing_core:
+            row.warnings.append(f"core variables absent (tolerated): {missing_core}")
 
         # 2. Merge all regridded daily variables.
         day_regridded = xr.merge(
@@ -495,6 +510,9 @@ def process_one_esgf(
                     static_ds = result
                 else:
                     static_ds = xr.merge([static_ds, result], compat="override")
+        if static_ds is not None:
+            static_ds, clip_warnings = clamp_static_fractions(static_ds)
+            row.warnings.extend(clip_warnings)
 
         # 5. Below-surface mask.
         orog: Optional[xr.DataArray] = None
@@ -502,8 +520,11 @@ def process_one_esgf(
             orog = static_ds["orog"]
         mask, row.mask_source = compute_below_surface_mask(day_regridded, orog)
 
-        # 6. Derived layer-mean T from un-filled zg + hus.
-        day_regridded = compute_derived_layer_T(day_regridded)
+        # 6. Derived layer-mean T from un-filled zg + hus (only when
+        # both are present).
+        have_derived_T = "zg" in day_regridded and "hus" in day_regridded
+        if have_derived_T:
+            day_regridded = compute_derived_layer_T(day_regridded)
 
         # 7. Nearest-above fill.
         if mask is not None:
@@ -511,44 +532,60 @@ def process_one_esgf(
                 if v in day_regridded:
                     day_regridded[v] = nearest_above_fill(day_regridded[v], mask)
             day_regridded = day_regridded.assign(below_surface_mask=mask)
-            day_regridded = fill_derived_layer_T(day_regridded, mask)
+            if have_derived_T:
+                day_regridded = fill_derived_layer_T(day_regridded, mask)
 
-        # 8. Monthly forcings.
-        for table, var in (("Amon", "ts"), ("SImon", "siconc")):
-            if var not in cfg.forcing_variables:
+        # 8. Surface-and-ocean variables (surface T, sea-ice, ocean) — see
+        # the matching block in process.py for the design. ESGF picks
+        # the source by table/var pair and downloads via
+        # ``_download_and_regrid_variable``; the post-regrid logic is
+        # shared with the Pangeo pipeline via
+        # ``finalize_surface_and_ocean_variable``.
+        daily_time = day_regridded["time"]
+        for h in SURFACE_AND_OCEAN_VARIABLES:
+            if h.output_name not in cfg.surface_and_ocean_variables:
                 continue
-            has_it = (var == "ts" and task.has_ts) or (
-                var == "siconc" and task.has_siconc
-            )
-            if not has_it:
-                row.warnings.append(f"missing forcing {var} from {table}")
+            if h.output_name not in task.available_surface_and_ocean_variables:
                 continue
             try:
-                logging.info("  [%s] processing %s/%s ...", task.source_id, table, var)
+                logging.info(
+                    "  [%s] processing %s/%s -> %s ...",
+                    task.source_id,
+                    h.table_id,
+                    h.var_id,
+                    h.output_name,
+                )
                 result, methods = _download_and_regrid_variable(
-                    task, var, table, target, config, scratch
+                    task, h.var_id, h.table_id, target, config, scratch
                 )
-                row.regrid_methods.update(methods)
-                if result is not None:
-                    interp = interp_monthly_to_daily(
-                        result[var],
-                        day_regridded["time"],
-                        cfg.forcing_interpolation,
-                    )
-                    day_regridded[var] = interp
+                # Map regrid method to output name.
+                for sv, meth in methods.items():
+                    if sv == h.var_id:
+                        row.regrid_methods[h.output_name] = meth
+                    else:
+                        row.regrid_methods[sv] = meth
+                if result is None:
+                    continue
+                outputs = finalize_surface_and_ocean_variable(
+                    result[h.var_id],
+                    h,
+                    daily_time,
+                    fill_iterations=cfg.fill.ocean_fill_iterations,
+                )
+                for name, da in outputs.items():
+                    day_regridded[name] = da
             except Exception as e:  # noqa: BLE001
-                logging.warning("  forcing %s failed: %s", var, e)
-                row.warnings.append(
-                    f"forcing {var} from {table} failed: {type(e).__name__}: {e}"
+                logging.warning(
+                    "  surface-and-ocean %s (%s.%s) failed: %s",
+                    h.output_name,
+                    h.table_id,
+                    h.var_id,
+                    e,
                 )
-
-        # 8b. siconc mask + NaN fill.
-        if "siconc" in day_regridded:
-            valid = (~day_regridded["siconc"].isel(time=0).isnull()).astype("uint8")
-            day_regridded = day_regridded.assign(
-                siconc_mask=valid.rename("siconc_mask")
-            )
-            day_regridded["siconc"] = day_regridded["siconc"].fillna(0.0)
+                row.warnings.append(
+                    f"{h.output_name} from {h.table_id}.{h.var_id} failed: "
+                    f"{type(e).__name__}: {e}"
+                )
 
         # 9. Attach static fields.
         if static_ds is not None:
@@ -678,10 +715,11 @@ def main() -> None:
     if args.dry_run:
         for t in tasks:
             day_vars = ",".join(t.available_day_variables)
+            so = ",".join(t.available_surface_and_ocean_variables)
             print(
                 f"{t.source_id}\t{t.experiment}\t{t.variant_label}\t"
-                f"ts={t.has_ts}\tsiconc={t.has_siconc}\t"
-                f"orog={t.has_orog}\tsftlf={t.has_sftlf}\t{day_vars}"
+                f"orog={t.has_orog}\tsftlf={t.has_sftlf}\t"
+                f"day=[{day_vars}]\tsurface_and_ocean=[{so}]"
             )
         return
 

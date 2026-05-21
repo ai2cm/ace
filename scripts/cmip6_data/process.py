@@ -46,19 +46,20 @@ import pandas as pd
 import xarray as xr
 
 sys.path.insert(0, str(Path(__file__).parent))
-from config import ProcessConfig, make_label  # noqa: E402
+from config import SURFACE_AND_OCEAN_VARIABLES, ProcessConfig, make_label  # noqa: E402
 from grid import make_target_grid  # noqa: E402
 from index import DatasetIndexRow, write_index, write_sidecar  # noqa: E402
 from processing import (  # noqa: E402
     DuplicateTimestampsError,
     SimulationBoundaryError,
     apply_time_subset,
+    clamp_static_fractions,
     compute_below_surface_mask,
     compute_derived_layer_T,
     fill_derived_layer_T,
+    finalize_surface_and_ocean_variable,
     flatten_plev_variables,
     grid_fingerprint,
-    interp_monthly_to_daily,
     nearest_above_fill,
     normalize_plev,
     regrid_variables,
@@ -179,9 +180,13 @@ def select_datasets(
         for _, r in day_slice.iterrows():
             zstores["day"][r["variable_id"]] = r["zstore"]
 
-        # Forcings (Amon, SImon) — require matching variant_label when
-        # possible; fall back to r1i1p<p>f<f> otherwise; else drop.
-        for table in ("Amon", "SImon"):
+        # Surface-and-ocean source tables (Amon, Eday, SImon, SIday, Oday,
+        # Omon) — require matching variant_label when possible; fall
+        # back to any matching member otherwise; else drop.
+        surface_and_ocean_tables = sorted(
+            {h.table_id for h in SURFACE_AND_OCEAN_VARIABLES}
+        )
+        for table in surface_and_ocean_tables:
             zstores[table] = {}
             cands = inventory[
                 (inventory["table_id"] == table)
@@ -338,6 +343,17 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
     label = make_label(task.source_id, task.variant_p)
     zarr_path = output_zarr_path(config.output_directory, task)
 
+    # Build surface_and_ocean_zstores: output_name -> source zstore URL for every
+    # surface-and-ocean variable whose source table is published for this
+    # task. Variables whose source isn't published are silently absent.
+    surface_and_ocean_zstores: dict[str, str] = {}
+    for h in SURFACE_AND_OCEAN_VARIABLES:
+        if h.output_name not in cfg.surface_and_ocean_variables:
+            continue
+        zs = task.zstores.get(h.table_id, {}).get(h.var_id)
+        if zs:
+            surface_and_ocean_zstores[h.output_name] = zs
+
     row = DatasetIndexRow(
         source_id=task.source_id,
         experiment=task.experiment,
@@ -349,14 +365,10 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
         label=label,
         target_grid=cfg.target_grid.name,
         native_grid_label=task.native_grid_label,
-        forcing_interpolation=cfg.forcing_interpolation,
         core_zstores=[
             task.zstores.get("day", {}).get(v, "") for v in cfg.core_variables
         ],
-        forcing_zstores=[
-            task.zstores.get("Amon", {}).get("ts", ""),
-            task.zstores.get("SImon", {}).get("siconc", ""),
-        ],
+        surface_and_ocean_zstores=surface_and_ocean_zstores,
         static_zstores=[
             task.zstores.get("fx", {}).get(v, "") for v in cfg.static_variables
         ],
@@ -365,13 +377,21 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
     )
 
     try:
-        # 1. Gate on required core variables.
+        # 1. Gate on required core variables. Missing variables are
+        # tolerated up to ``cfg.max_core_missing``; the remaining ones
+        # are simply absent from the output (training handles via
+        # per-sample variable masking).
         day_zs = task.zstores.get("day", {})
         missing_core = [v for v in cfg.core_variables if v not in day_zs]
-        if missing_core:
+        if len(missing_core) > cfg.max_core_missing:
             row.status = "skipped"
-            row.skip_reason = f"missing core variables: {missing_core}"
+            row.skip_reason = (
+                f"missing {len(missing_core)} > {cfg.max_core_missing} core "
+                f"variables: {missing_core}"
+            )
             return row
+        if missing_core:
+            row.warnings.append(f"core variables absent (tolerated): {missing_core}")
 
         # 2. Open + group-by-grid regrid. Naively merging before
         #    regridding breaks on models that publish different
@@ -388,7 +408,7 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
         #    day variables, so this stays at 2-4 Regridder builds per
         #    dataset (one per (grid, method)) while still handling
         #    staggered grids correctly.
-        all_day_vars = cfg.core_variables + [
+        all_day_vars = [v for v in cfg.core_variables if v in day_zs] + [
             v for v in cfg.optional_variables if v in day_zs
         ]
         target = make_target_grid(cfg.target_grid.name)
@@ -480,6 +500,8 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
             ]
             fx_merged = xr.merge(fx_pieces, compat="override")
             static_regridded, static_methods = regrid_variables(fx_merged, target, cfg)
+            static_regridded, clip_warnings = clamp_static_fractions(static_regridded)
+            row.warnings.extend(clip_warnings)
             static_ds = static_regridded
             row.regrid_methods.update(static_methods)
 
@@ -493,7 +515,9 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
         # this on filled zg would force dz = 0 in below-surface columns
         # (nearest-above fill copies zg[i+1] down, so zg[i] == zg[i+1])
         # and collapse the derived T to zero. Do it first, then fill.
-        day_regridded = compute_derived_layer_T(day_regridded)
+        have_derived_T = "zg" in day_regridded and "hus" in day_regridded
+        if have_derived_T:
+            day_regridded = compute_derived_layer_T(day_regridded)
 
         # 11. Nearest-above fill for the level-valued 3D state.
         # When no mask is available (no orog, no NaN pattern), skip
@@ -506,19 +530,27 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
 
             # 12. Cascading fill for the derived layer T — layer i is
             # invalid where either bounding level is below surface.
-            day_regridded = fill_derived_layer_T(day_regridded, mask)
+            if have_derived_T:
+                day_regridded = fill_derived_layer_T(day_regridded, mask)
 
-        # 13. Monthly forcings -> daily. Curvilinear ocean grids (e.g.
-        # SImon siconc on a tripolar grid) occasionally trip xesmf's
-        # regridder with ``ESMC_FieldRegridStore failed`` or similar.
-        # Catch per-forcing so the rest of the dataset still gets
-        # written; the model just loses that one forcing variable.
-        for table, var in (("Amon", "ts"), ("SImon", "siconc")):
-            if var not in cfg.forcing_variables:
+        # 13. Surface-and-ocean variables (surface T, sea-ice, ocean). Each
+        # variable is opened from its source table, regridded, mapped to
+        # the daily axis according to its cadence (drop-in for ``daily``,
+        # causal previous-month-mean for ``monthly_causal``), and
+        # filled+masked for ocean/sea-ice kinds. Variables whose source
+        # table is not published for this dataset are silently absent.
+        #
+        # Catch per-variable so one failure (e.g., a tripolar grid that
+        # trips xesmf with ``ESMC_FieldRegridStore failed``) doesn't
+        # block the rest of the dataset.
+        daily_time = day_regridded["time"]
+        for h in SURFACE_AND_OCEAN_VARIABLES:
+            if h.output_name not in cfg.surface_and_ocean_variables:
                 continue
-            z = task.zstores.get(table, {}).get(var)
+            z = task.zstores.get(h.table_id, {}).get(h.var_id)
             if not z:
-                row.warnings.append(f"missing forcing {var} from {table}")
+                # This dataset's model simply doesn't publish this
+                # source. No warning — the variable is just absent.
                 continue
             try:
                 # Keep the full dataset (not ``[[var]]``) so cell-bounds
@@ -526,48 +558,45 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
                 # which carry an extra ``d2`` / ``vertices`` dim the
                 # variable itself doesn't have — survive the open and
                 # are available to xesmf's conservative regridder.
-                monthly = _open_zstore(z)
-                monthly, dup_msg = resolve_time_duplicates(
-                    monthly, var, allow_dedupe=cfg.allow_dedupe
+                src = _open_zstore(z)
+                src, dup_msg = resolve_time_duplicates(
+                    src, h.var_id, allow_dedupe=cfg.allow_dedupe
                 )
                 if dup_msg:
                     row.warnings.append(dup_msg)
-                monthly = apply_time_subset(monthly, cfg)
-                # Keep only ``var`` as a data_var; everything else can
-                # live as coords or be dropped by the regridder.
-                drop = [v for v in monthly.data_vars if v != var]
-                monthly = monthly.drop_vars(drop, errors="ignore")
-                monthly_r, methods_used = regrid_variables(monthly, target, cfg)
-                row.regrid_methods.update(methods_used)
-                interp = interp_monthly_to_daily(
-                    monthly_r[var], day_regridded["time"], cfg.forcing_interpolation
+                src = apply_time_subset(src, cfg)
+                drop = [v for v in src.data_vars if v != h.var_id]
+                src = src.drop_vars(drop, errors="ignore")
+                regridded, methods_used = regrid_variables(src, target, cfg)
+                # Record regrid method under the output name so
+                # downstream tooling can match without knowing the
+                # source-table rename.
+                for sv, meth in methods_used.items():
+                    if sv == h.var_id:
+                        row.regrid_methods[h.output_name] = meth
+                    else:
+                        row.regrid_methods[sv] = meth
+                outputs = finalize_surface_and_ocean_variable(
+                    regridded[h.var_id],
+                    h,
+                    daily_time,
+                    fill_iterations=cfg.fill.ocean_fill_iterations,
                 )
             except Exception as e:  # noqa: BLE001
-                logging.warning("  forcing %s from %s failed: %s", var, table, e)
+                logging.warning(
+                    "  surface-and-ocean %s (%s.%s) failed: %s",
+                    h.output_name,
+                    h.table_id,
+                    h.var_id,
+                    e,
+                )
                 row.warnings.append(
-                    f"forcing {var} from {table} failed: {type(e).__name__}: {e}"
+                    f"{h.output_name} from {h.table_id}.{h.var_id} failed: "
+                    f"{type(e).__name__}: {e}"
                 )
                 continue
-            day_regridded[var] = interp
-
-        # 13b. Sea-ice fraction is only defined over ocean cells — emit
-        # a time-invariant ``siconc_mask`` from the regridded ocean-grid
-        # coverage, then replace the residual land NaN with 0 so the
-        # stored data is NaN-free. The mask is a 2D (lat, lon) uint8
-        # (1 = valid / ocean, 0 = land or missing source coverage); we
-        # take it from the first timestep, since the valid-cell pattern
-        # is time-invariant for sea-ice fraction. We deliberately do
-        # *not* clip the ocean values to [0, 100] — conservative
-        # regridding's output preserves the area-weighted integral and
-        # clipping would break that. Rounding can leave sub-epsilon
-        # values outside the nominal range; the sanity checks tolerate
-        # that.
-        if "siconc" in day_regridded:
-            valid = (~day_regridded["siconc"].isel(time=0).isnull()).astype("uint8")
-            day_regridded = day_regridded.assign(
-                siconc_mask=valid.rename("siconc_mask")
-            )
-            day_regridded["siconc"] = day_regridded["siconc"].fillna(0.0)
+            for name, da in outputs.items():
+                day_regridded[name] = da
 
         # 14. Attach static fields (broadcast along time implicitly at read).
         if static_ds is not None:

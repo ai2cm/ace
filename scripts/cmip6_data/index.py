@@ -34,7 +34,9 @@ class DatasetIndexRow:
 
     # Provenance (inputs)
     core_zstores: list[str] = field(default_factory=list)
-    forcing_zstores: list[str] = field(default_factory=list)
+    # Map of surface-and-ocean output_name -> source zstore URL (one entry per
+    # surface-and-ocean variable actually opened for this dataset).
+    surface_and_ocean_zstores: dict[str, str] = field(default_factory=dict)
     static_zstores: list[str] = field(default_factory=list)
 
     # Processing
@@ -43,7 +45,6 @@ class DatasetIndexRow:
     native_calendar: str = ""
     regrid_methods: dict[str, str] = field(default_factory=dict)
     mask_source: str = ""
-    forcing_interpolation: str = ""
 
     # Output
     output_zarr: str = ""
@@ -65,7 +66,7 @@ class DatasetIndexRow:
 # keeps them as native JSON types.
 _JSON_ENCODED_FIELDS = (
     "core_zstores",
-    "forcing_zstores",
+    "surface_and_ocean_zstores",
     "static_zstores",
     "regrid_methods",
     "variables_present",

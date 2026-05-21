@@ -215,18 +215,42 @@ def test_select_model_with_all_core_vars():
     assert tasks[0].source_id == "ModelA"
 
 
-def test_select_skips_model_missing_core_var():
+def test_select_skips_model_missing_core_var_with_strict_gate():
     partial = [v for v in _CORE_VARS if v[1] != "zg"]
     inv = _make_inventory([{"source_id": "ModelA", "variables": partial}])
     cfg = _minimal_config()
+    cfg.defaults.max_core_missing = 0
     tasks = select_esgf_datasets(inv, cfg)
     assert len(tasks) == 0
 
 
-def test_select_detects_forcings_and_statics():
+def test_select_tolerates_one_missing_core_var_with_default_gate():
+    """Default ``max_core_missing=3`` lets a model with just ``zg``
+    missing through; the variable is simply absent from the output.
+    """
+    partial = [v for v in _CORE_VARS if v[1] != "zg"]
+    inv = _make_inventory([{"source_id": "ModelA", "variables": partial}])
+    cfg = _minimal_config()
+    tasks = select_esgf_datasets(inv, cfg)
+    assert len(tasks) == 1
+
+
+def test_select_skips_model_missing_too_many_core_vars():
+    """A model missing more than ``max_core_missing`` is dropped."""
+    partial = [v for v in _CORE_VARS if v[1] not in ("ua", "va", "hus", "zg")]
+    inv = _make_inventory([{"source_id": "ModelA", "variables": partial}])
+    cfg = _minimal_config()
+    cfg.defaults.max_core_missing = 3  # default; 4 missing > 3
+    tasks = select_esgf_datasets(inv, cfg)
+    assert len(tasks) == 0
+
+
+def test_select_detects_surface_and_ocean_and_statics():
     full_vars = _CORE_VARS + [
         ("Amon", "ts"),
         ("SImon", "siconc"),
+        ("Eday", "ts"),
+        ("Oday", "tos"),
         ("fx", "orog"),
         ("fx", "sftlf"),
     ]
@@ -235,19 +259,20 @@ def test_select_detects_forcings_and_statics():
     tasks = select_esgf_datasets(inv, cfg)
     assert len(tasks) == 1
     t = tasks[0]
-    assert t.has_ts is True
-    assert t.has_siconc is True
+    assert "amon_ts" in t.available_surface_and_ocean_variables
+    assert "simon_siconc" in t.available_surface_and_ocean_variables
+    assert "eday_ts" in t.available_surface_and_ocean_variables
+    assert "oday_tos" in t.available_surface_and_ocean_variables
     assert t.has_orog is True
     assert t.has_sftlf is True
 
 
-def test_select_forcings_false_when_absent():
+def test_select_surface_and_ocean_absent_when_only_core():
     inv = _make_inventory([{"source_id": "ModelA", "variables": _CORE_VARS}])
     cfg = _minimal_config()
     tasks = select_esgf_datasets(inv, cfg)
     t = tasks[0]
-    assert t.has_ts is False
-    assert t.has_siconc is False
+    assert t.available_surface_and_ocean_variables == []
     assert t.has_orog is False
     assert t.has_sftlf is False
 

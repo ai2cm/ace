@@ -59,24 +59,69 @@ See **Derived variables** below for details.
 - Surface turbulent fluxes: `hfss`, `hfls`
 - Surface wind: `sfcWind`, `uas`, `vas`
 
-### Forcings (atmosphere-only lower boundary)
+### Surface and ocean variables
 
-Pulled from monthly tables. For each day, the model receives the
-**previous month's mean** — strictly causal, no future leakage. (The
-current interpolation approach of placing monthly means at month
-midpoints and linearly interpolating is non-causal: values on day 20
-of month N already contain information from month N+1. The
-previous-month scheme eliminates this at the cost of ~15–45 day
-staleness, which is acceptable for slowly-varying boundary conditions.)
+Variables whose CMIP6 source table varies across datasets (e.g. some
+models publish daily `Eday.ts`, others only monthly `Amon.ts`) get
+**source-prefixed output names** so multiple cadences/tables can
+coexist in a single dataset. The training-side variable-masking
+machinery handles which ones are actually populated per model.
 
-Daily data from `Oday`/`Eday` tables will replace the monthly forcing
-for models that have it (see **Ocean variables** below); the
-previous-month scheme is the fallback for models without daily data.
+The naming convention is `{table}_{var}` lowercased — e.g.
+`amon_ts`, `eday_ts`, `simon_siconc`, `siday_siconc`, `oday_tos`,
+`omon_zos`. The bare atmospheric daily variables (`ua1000`, `tas`,
+`pr`, …) come from one canonical table (`day`) for every model and
+keep their unprefixed names.
 
-- `ts` from `Amon` — surface temperature (SST over ocean, ice-top temp
-  over sea ice, skin temp over land). 64 models publish it.
-- `siconc` from `SImon` — sea-ice fraction on the ocean grid;
-  regridded to the F22.5 target. 57 models.
+**Monthly tables (causal previous-month transform applied).**
+Each day receives the *previous calendar month's* mean — strictly
+causal, no future leakage. The transform is applied at ingest, so
+the stored data is already daily-aligned. ~15–45 day staleness is
+inherent at this cadence.
+
+- `amon_ts` from `Amon.ts` — surface temperature (SST over ocean,
+  ice-top over sea ice, skin over land). Universal fallback — ~64
+  models publish it.
+- `simon_siconc` from `SImon.siconc` — sea-ice fraction.
+- `simon_sitemptop` from `SImon.sitemptop` — sea-ice top T.
+- `omon_zos` from `Omon.zos` — sea surface height (integrates
+  full-column ocean density; broad coverage).
+- `omon_hfds` from `Omon.hfds` — net downward heat flux at ocean surface.
+- `omon_mlotst` from `Omon.mlotst` — mixed layer depth.
+- `omon_tob` from `Omon.tob` — ocean bottom temperature.
+
+**Daily tables (drop-in when published).** Source axis already
+matches the daily target; we reindex nearest-neighbor.
+
+- `eday_ts` from `Eday.ts` — same definition as `amon_ts` but
+  daily (~21/37 eligible ESGF models, ~1/30 on Pangeo).
+- `oday_tos` from `Oday.tos` — daily SST (~29/37 ESGF).
+- `oday_tossq`, `oday_omldamax`, `oday_sos` — daily SST², daily-max
+  MLD, daily SSS (sparser).
+- `siday_siconc`, `siday_sitemptop`, `siday_sithick` — daily
+  sea-ice fraction / top T / thickness (~22–25 / 37 ESGF).
+
+**Per-variable masks.** Ocean and sea-ice variables have NaN over
+land (and, for sea-ice variables, over ice-free cells). For each
+such variable the pipeline writes a companion `{output_name}_mask`
+channel (uint8: 1 = valid, 0 = invalid), and **fills the NaN
+regions via iterative horizontal diffusion** so the stored value
+field is NaN-free. The mask is 2D `(lat, lon)` when the valid
+pattern is time-invariant (e.g. ocean-only variables on the static
+land mask) and 3D `(time, lat, lon)` when it varies in time (sea-
+ice variables). See **Ocean fill** below for the fill scheme.
+
+**Atmospheric surface temperature** variables (`amon_ts`, `eday_ts`)
+are full-surface global fields (model's own area-weighted composite)
+and do **not** get a per-cell mask. Heterogeneity across datasets is
+handled at the training level (`allow_variable_masking`).
+
+Coverage on ESGF tiers cleanly: 21/37 eligible models publish
+`eday_ts` (Tier A drop-in for amon_ts); 10 more publish `oday_tos`
++ `siday_siconc` for a daily SST + ice-mask composite (Tier B);
+remaining models fall back to the causal monthly path. See
+`process_esgf.py` and the surface-T discussion in `training.md` for
+details.
 
 ### External forcings (planned — not yet in pipeline)
 
@@ -113,36 +158,27 @@ either strongly correlated with CO2 across scenarios (CH4, N2O),
 identical across all scenarios (solar, volcanic), or of secondary
 importance. They can be added later as more scenarios are included.
 
-### Ocean variables (planned — not yet in pipeline)
+### Ocean fill
 
-Daily ocean surface fields from `Oday` (include when available, do not
-drop models that lack them):
+Ocean and sea-ice variables come back from regridding with **large
+2D NaN regions** (continents for ocean variables; continents + ice-
+free ocean for sea-ice variables). Unlike the column-wise
+`nearest_above_fill` used for below-surface plev cells, ocean fill
+runs in the horizontal: iterative 4-connected neighbor-mean
+diffusion that propagates valid-cell values into the NaN region.
+Periodic in longitude, clamped in latitude. After ~50 iterations
+the entire grid is filled smoothly; any disconnected island of NaN
+falls back to the global mean of originally-finite cells.
 
-- `tos` — sea surface temperature (~42 models on ESGF, 29 on Pangeo).
-  Better than the monthly `ts` forcing for SST since it's daily and
-  ocean-specific. Ocean-grid only (NaN over land).
-- `sos` — sea surface salinity (~34 models).
-- `tossq`, `sossq` — squared SST/SSS for sub-daily variance (~25–27 models).
-- `omldamax` — daily max mixed layer depth (~28 models).
+The mask channel preserves the valid extent so the network can
+distinguish "actual ocean cell" from "extrapolated value." See
+`fill_horizontal_diffuse` and `emit_mask_and_fill` in
+`processing.py`.
 
-Monthly 2D ocean diagnostics from `Omon` (interpolated to daily, as
-with `ts`/`siconc`) to provide deep-ocean memory without 3D data
-volume:
-
-- `zos` — sea surface height. Integrates full-column density, so it
-  encodes deep heat/salt content in a single 2D field (~56 models).
-- `hfds` — net downward heat flux at ocean surface (~51 models).
-- `mlotst` — mixed layer depth (~34 models).
-- `tob` — ocean bottom temperature (~29 models).
-
-All ocean variables live on curvilinear/tripolar ocean grids and
-require regridding to F22.5 (bilinear; conservative generally fails
-for ocean grids lacking usable vertex bounds — same issue as `siconc`).
-
-**Not included:** 3D ocean fields (`thetao`, `so`, `uo`, `vo`) due to
-data volume at 50–75 depth levels. Surface chlorophyll (`chlos`) may be
-added as an optional diagnostic if cheap, but is not a priority for
-physical climate.
+**Not included:** 3D ocean fields (`thetao`, `so`, `uo`, `vo`) due
+to data volume at 50–75 depth levels. Surface chlorophyll
+(`chlos`) may be added as an optional diagnostic if cheap, but is
+not a priority for physical climate.
 
 ### Static per-model fields
 
@@ -557,10 +593,11 @@ python make_presence.py --config configs/pilot.yaml
   The defect is purely the row of polar cells, so it's a regridder
   pole-handling effect against CESM2-FV2's specific source grid
   layout — same family of issue as the CESM2 SImon siconc rc=506
-  failure. Doesn't break the data; the land-mask numerics are off
-  in that one row of cells. Worth either masking out the
-  southernmost row at training time or fixing the pole-cell
-  weighting in xesmf as a follow-up. See
+  failure. Handled by `clamp_static_fractions` in `processing.py`,
+  which clips `sftlf` to [0, 100] after regridding and records the
+  pre-clip overshoot in `index.warnings` so the regridder defect
+  remains visible. Since `sftlf` is a fraction with no compensating
+  variable in the pipeline, clipping doesn't break any budget. See
   `figures/cesm2_fv2_sftlf_overshoot.png`.
 
 - **KACE-1-0-G sparse NaN at 10 hPa**: All KACE-1-0-G datasets have
@@ -627,13 +664,6 @@ python make_presence.py --config configs/pilot.yaml
 
 ## Deferred / Future Issues
 
-- **Ocean variable ingestion.** Daily `Oday` variables (`tos`, `sos`,
-  `tossq`, `sossq`, `omldamax`) and monthly `Omon` variables (`zos`,
-  `hfds`, `mlotst`, `tob`) are planned but not yet in the pipeline.
-  Requires adding ocean table queries to inventory, handling
-  curvilinear ocean grids (bilinear fallback), and deciding whether
-  `tos` replaces or supplements `ts` as the SST forcing. See
-  **Ocean variables** section above for availability counts.
 - **Radiative forcing for coupled runs.** Model-diagnosed CO2/CH4
   (`AERmon`) is available for only ~3 models. For coupled
   ocean-atmosphere runs, options are: (1) use input4MIPs prescribed
@@ -641,18 +671,17 @@ python make_presence.py --config configs/pilot.yaml
   scenario+time and let the model learn the forcing trajectory, or
   (3) use TOA incoming solar (`rsdt`) as a proxy for radiative
   forcing and time encoding for the rest.
-- **Heterogeneous variables at train time.** Core code change in
-  `fme/core/dataset/` and the stepper to allow per-dataset variable
-  subsets. Tracked separately from this pilot. Once this is supported,
-  revisit the "core variable" gate in `process.py` — currently any
-  model missing any core variable is dropped entirely, but with
-  heterogeneous-variable training we should allow a certain number of
-  core variables to be missing. This would recover a significant
-  number of models: e.g. 8 models have `hus` on pressure levels but
-  not `huss` (near-surface specific humidity), and 17 models lack
-  `zg` (geopotential height). Some of these could also be addressed
-  by deriving missing variables from available ones (e.g. approximating
-  `huss` from the 1000 hPa level of `hus`).
+- **Core variable gate relaxation.** Now that heterogeneous-variable
+  training is supported, `defaults.max_core_missing` controls how
+  many core variables may be absent without skipping the dataset.
+  The most common single missing core var is `zg` (20/62 models),
+  followed by `va`/`hus`/`ua` (~10 each, mostly E3SM family) and
+  `huss` (9 models). Default is **3** — generous because dataset
+  generation is expensive and we'd rather have the data on disk and
+  filter at training time. Coverage by threshold (37 at 0): +10 at
+  1, +13 at 2, +15 at 3, +17 at 4. Note: when `zg` or `hus` is
+  missing, the derived layer-T variables are not emitted for that
+  dataset.
 - **Calendar heterogeneity across datasets.** Each dataset records its
   native calendar now; cross-dataset handling (does `ConcatDatasetConfig`
   tolerate mixed calendars?) is a later concern.

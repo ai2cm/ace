@@ -5,6 +5,12 @@ Two top-level configs:
 - ProcessConfig: input to ``process.py`` — what to process and how.
 
 Both load from YAML via :meth:`from_file` using dacite.
+
+Variable naming convention. Variables whose CMIP6 source table is dataset-
+dependent (i.e., the same physical quantity is published at different
+cadences or from different tables by different models) get a
+``{table}_{var}`` output name; variables with a single canonical source
+keep the bare CMIP6 name. See ``SURFACE_AND_OCEAN_VARIABLES`` for the prefixed set.
 """
 
 from dataclasses import dataclass, field
@@ -56,16 +62,126 @@ OPTIONAL_VARIABLES: list[str] = [
 # derived / proxy fields.
 DIAGNOSTIC_VARIABLES: list[str] = ["ta", "ps"]
 
-# Monthly-cadence forcings, interpolated to daily during processing.
-# ``ts`` = surface temperature (SST over ocean, ice top temp over sea ice,
-# land skin temp over land) — correct atmosphere-only lower boundary.
-# ``siconc`` = sea-ice fraction (ocean-model grid; regridded to target).
-FORCING_VARIABLES: list[str] = ["ts", "siconc"]
-
 # Static per-model fields pulled from the CMIP6 ``fx`` table.
 # ``sftlf`` = land fraction (land-sea mask).
 # ``orog``  = surface altitude (orography).
 STATIC_VARIABLES: list[str] = ["sftlf", "orog"]
+
+
+# Variable "kinds" used to drive per-variable processing:
+# - ``atmos_surface``: global field, no per-cell mask (e.g. Amon.ts, Eday.ts).
+# - ``ocean_surface``: NaN over land — requires per-cell mask + horizontal
+#   fill (e.g. Oday.tos, Omon.zos).
+# - ``seaice_surface``: NaN over land and where the source publishes no ice
+#   — requires per-cell mask + horizontal fill (e.g. SIday.siconc).
+_SURFACE_AND_OCEAN_KINDS = ("atmos_surface", "ocean_surface", "seaice_surface")
+_SURFACE_AND_OCEAN_CADENCES = ("daily", "monthly_causal")
+
+
+@dataclass(frozen=True)
+class SurfaceAndOceanVariable:
+    """One source-prefixed surface-and-ocean variable.
+
+    Variables whose CMIP6 source table varies across datasets (e.g. some
+    models publish daily ``Eday.ts``, others only monthly ``Amon.ts``) get
+    a source-prefixed output name so multiple cadences/tables can coexist
+    in a single dataset. The training-side mask handles which ones are
+    actually populated for a given model.
+
+    Attributes:
+        table_id: CMIP6 table the variable comes from (e.g. ``Eday``).
+        var_id: CMIP6 variable name (e.g. ``ts``).
+        output_name: Name in the output zarr (e.g. ``eday_ts``).
+        cadence: ``daily`` (source matches the daily target axis) or
+            ``monthly_causal`` (monthly source, mapped to daily via
+            previous-month-mean — strictly causal, no future leakage).
+        kind: ``atmos_surface``, ``ocean_surface``, or ``seaice_surface``.
+            Drives mask emission and fill scheme; see ``_SURFACE_AND_OCEAN_KINDS``.
+    """
+
+    table_id: str
+    var_id: str
+    output_name: str
+    cadence: str
+    kind: str
+
+    def __post_init__(self) -> None:
+        if self.kind not in _SURFACE_AND_OCEAN_KINDS:
+            raise ValueError(f"kind={self.kind!r} not in {_SURFACE_AND_OCEAN_KINDS}")
+        if self.cadence not in _SURFACE_AND_OCEAN_CADENCES:
+            raise ValueError(
+                f"cadence={self.cadence!r} not in {_SURFACE_AND_OCEAN_CADENCES}"
+            )
+
+
+# Surface-and-ocean variables — full set. Pipelines pull the
+# subset that the source catalog actually publishes for each dataset; any
+# variable missing from a dataset is simply absent in the output zarr
+# (training handles via per-sample masking).
+SURFACE_AND_OCEAN_VARIABLES: tuple[SurfaceAndOceanVariable, ...] = (
+    # Surface temperature.
+    # ``Amon.ts`` is the universal monthly fallback (model's own correct
+    # SST + ice-top + skin composite). ``Eday.ts`` is the same quantity
+    # daily — drop-in upgrade where published.
+    SurfaceAndOceanVariable("Amon", "ts", "amon_ts", "monthly_causal", "atmos_surface"),
+    SurfaceAndOceanVariable("Eday", "ts", "eday_ts", "daily", "atmos_surface"),
+    # Sea-ice fraction & top temperature (monthly + daily). Both NaN over
+    # land; daily is broadly published on ESGF (~25/37).
+    SurfaceAndOceanVariable(
+        "SImon", "siconc", "simon_siconc", "monthly_causal", "seaice_surface"
+    ),
+    SurfaceAndOceanVariable(
+        "SImon", "sitemptop", "simon_sitemptop", "monthly_causal", "seaice_surface"
+    ),
+    SurfaceAndOceanVariable(
+        "SIday", "siconc", "siday_siconc", "daily", "seaice_surface"
+    ),
+    SurfaceAndOceanVariable(
+        "SIday", "sitemptop", "siday_sitemptop", "daily", "seaice_surface"
+    ),
+    SurfaceAndOceanVariable(
+        "SIday", "sithick", "siday_sithick", "daily", "seaice_surface"
+    ),
+    # Daily ocean surface (Oday). NaN over land.
+    SurfaceAndOceanVariable("Oday", "tos", "oday_tos", "daily", "ocean_surface"),
+    SurfaceAndOceanVariable("Oday", "tossq", "oday_tossq", "daily", "ocean_surface"),
+    SurfaceAndOceanVariable(
+        "Oday", "omldamax", "oday_omldamax", "daily", "ocean_surface"
+    ),
+    SurfaceAndOceanVariable("Oday", "sos", "oday_sos", "daily", "ocean_surface"),
+    # Monthly ocean diagnostics (Omon) — causal previous-month transform.
+    # ``zos`` integrates full-column density; the others capture surface
+    # forcing / mixed-layer / deep-ocean memory.
+    SurfaceAndOceanVariable(
+        "Omon", "zos", "omon_zos", "monthly_causal", "ocean_surface"
+    ),
+    SurfaceAndOceanVariable(
+        "Omon", "hfds", "omon_hfds", "monthly_causal", "ocean_surface"
+    ),
+    SurfaceAndOceanVariable(
+        "Omon", "mlotst", "omon_mlotst", "monthly_causal", "ocean_surface"
+    ),
+    SurfaceAndOceanVariable(
+        "Omon", "tob", "omon_tob", "monthly_causal", "ocean_surface"
+    ),
+)
+
+
+def _surface_and_ocean_by_output() -> dict[str, SurfaceAndOceanVariable]:
+    return {h.output_name: h for h in SURFACE_AND_OCEAN_VARIABLES}
+
+
+SURFACE_AND_OCEAN_BY_OUTPUT: dict[str, SurfaceAndOceanVariable] = (
+    _surface_and_ocean_by_output()
+)
+
+
+# Output names of all surface-and-ocean variables — used as the default list
+# of variables to attempt to ingest. Per-dataset, the pipeline opens only
+# those whose source table is actually published.
+SURFACE_AND_OCEAN_VARIABLE_NAMES: list[str] = [
+    h.output_name for h in SURFACE_AND_OCEAN_VARIABLES
+]
 
 
 def make_label(source_id: str, physics_index: int) -> str:
@@ -83,7 +199,10 @@ def make_label(source_id: str, physics_index: int) -> str:
 # Variables regridded conservatively; everything else is bilinear by
 # default. Fractions (siconc, sftlf, sftof) count as conservative too —
 # we want the area-weighted mean across the coarser target cell, and
-# bilinear of a {0, 1}-ish field tends to drift.
+# bilinear of a {0, 1}-ish field tends to drift. Ocean-grid variables
+# often fall back to bilinear in practice (see README's "Known
+# regridding / data-pipeline limitations" — CESM2 SImon siconc rc=506),
+# but the request encodes intent.
 FLUX_LIKE_VARIABLES: frozenset[str] = frozenset(
     {
         # Radiative + turbulent fluxes
@@ -97,6 +216,8 @@ FLUX_LIKE_VARIABLES: frozenset[str] = frozenset(
         "rlus",
         "hfss",
         "hfls",
+        # Surface ocean heat flux
+        "hfds",
         # Fractions
         "siconc",
         "sftlf",
@@ -141,6 +262,11 @@ class FillConfig:
     # level's value. (Not time persistence; just column-wise NN in plev.)
     strategy: str = "nearest_above"
     emit_mask: bool = True
+    # Number of diffusion iterations for the horizontal ocean fill,
+    # used to extrapolate ocean/sea-ice variables into land cells so the
+    # stored data is NaN-free. The mask channel preserves the valid
+    # extent; the fill keeps the boundary smooth for the network.
+    ocean_fill_iterations: int = 50
 
 
 @dataclass
@@ -160,12 +286,24 @@ class DefaultsConfig:
     optional_variables: list[str] = field(
         default_factory=lambda: list(OPTIONAL_VARIABLES)
     )
-    forcing_variables: list[str] = field(
-        default_factory=lambda: list(FORCING_VARIABLES)
+    # Source-prefixed surface-and-ocean variables (surface T, sea-ice, ocean).
+    # The pipeline opens only the subset whose source table is actually
+    # published for each dataset. See ``SURFACE_AND_OCEAN_VARIABLES``.
+    surface_and_ocean_variables: list[str] = field(
+        default_factory=lambda: list(SURFACE_AND_OCEAN_VARIABLE_NAMES)
     )
     static_variables: list[str] = field(default_factory=lambda: list(STATIC_VARIABLES))
-    # Temporal interpolation for monthly forcings onto the daily time axis.
-    forcing_interpolation: str = "linear"
+    # Maximum number of ``core_variables`` permitted to be missing from
+    # the source ``day`` table without skipping the dataset. Missing
+    # variables are simply absent from the output; training handles
+    # missingness via ``allow_variable_masking`` on the training side
+    # (per-sample masking). Defaults to 3 because dataset
+    # generation is expensive and we don't want to re-run to relax this
+    # later — coverage by threshold (37 eligible models at ``0``):
+    # +10 at ``1``, +13 at ``2``, +15 at ``3``, +17 at ``4``. ``3``
+    # captures everything except the E3SM family (which loses 5+ vars).
+    # Set lower per-config to enforce stricter requirements.
+    max_core_missing: int = 3
     time_subset: dict[str, TimeWindow] = field(default_factory=dict)
     target_grid: TargetGrid = field(default_factory=TargetGrid)
     regrid: RegridConfig = field(default_factory=RegridConfig)
@@ -207,7 +345,9 @@ class Override:
     match: Match
     time_subset: Optional[dict[str, TimeWindow]] = None
     allow_dedupe: Optional[bool] = None
-    skip_forcing_variables: Optional[list[str]] = None
+    # Surface-and-ocean variables to skip for this dataset (e.g. ``simon_siconc``
+    # for AWI-ESM-1-1-LR whose unstructured ocean grid OOMs xesmf).
+    skip_surface_and_ocean_variables: Optional[list[str]] = None
 
 
 @dataclass
@@ -248,36 +388,8 @@ class ProcessConfig:
         self, source_id: str, experiment: str, variant_label: str
     ) -> "ResolvedDatasetConfig":
         """Apply overrides on top of defaults for one dataset."""
-        time_subset = dict(self.defaults.time_subset)
-        allow_dedupe = self.defaults.allow_dedupe
-        forcing_variables = list(self.defaults.forcing_variables)
-        for override in self.overrides:
-            if override.match.matches(source_id, experiment, variant_label):
-                if override.time_subset is not None:
-                    time_subset = dict(override.time_subset)
-                if override.allow_dedupe is not None:
-                    allow_dedupe = override.allow_dedupe
-                if override.skip_forcing_variables is not None:
-                    forcing_variables = [
-                        v
-                        for v in forcing_variables
-                        if v not in override.skip_forcing_variables
-                    ]
-        return ResolvedDatasetConfig(
-            source_id=source_id,
-            experiment=experiment,
-            variant_label=variant_label,
-            core_variables=list(self.defaults.core_variables),
-            optional_variables=list(self.defaults.optional_variables),
-            forcing_variables=forcing_variables,
-            static_variables=list(self.defaults.static_variables),
-            forcing_interpolation=self.defaults.forcing_interpolation,
-            time_subset=time_subset,
-            target_grid=self.defaults.target_grid,
-            regrid=self.defaults.regrid,
-            fill=self.defaults.fill,
-            chunking=self.defaults.chunking,
-            allow_dedupe=allow_dedupe,
+        return _resolve(
+            self.defaults, self.overrides, source_id, experiment, variant_label
         )
 
 
@@ -292,9 +404,9 @@ class ResolvedDatasetConfig:
     variant_label: str
     core_variables: list[str]
     optional_variables: list[str]
-    forcing_variables: list[str]
+    surface_and_ocean_variables: list[str]
     static_variables: list[str]
-    forcing_interpolation: str
+    max_core_missing: int
     time_subset: dict[str, TimeWindow]
     target_grid: TargetGrid
     regrid: RegridConfig
@@ -316,6 +428,12 @@ class CatalogQuery:
 
 
 def _default_inventory_queries() -> list[CatalogQuery]:
+    # Group SURFACE_AND_OCEAN_VARIABLES by source table_id so we issue one catalog
+    # query per table. Preserve the order in SURFACE_AND_OCEAN_VARIABLES so the
+    # inventory CSV is deterministic.
+    surface_and_ocean_by_table: dict[str, list[str]] = {}
+    for h in SURFACE_AND_OCEAN_VARIABLES:
+        surface_and_ocean_by_table.setdefault(h.table_id, []).append(h.var_id)
     return [
         CatalogQuery(
             table_id="day",
@@ -325,8 +443,10 @@ def _default_inventory_queries() -> list[CatalogQuery]:
                 + list(DIAGNOSTIC_VARIABLES)
             ),
         ),
-        CatalogQuery(table_id="Amon", variables=["ts"]),
-        CatalogQuery(table_id="SImon", variables=["siconc"]),
+        *[
+            CatalogQuery(table_id=tab, variables=variables)
+            for tab, variables in surface_and_ocean_by_table.items()
+        ],
         CatalogQuery(
             table_id="fx",
             variables=list(STATIC_VARIABLES),
@@ -382,37 +502,52 @@ class ESGFProcessConfig:
         self, source_id: str, experiment: str, variant_label: str
     ) -> "ResolvedDatasetConfig":
         """Apply overrides on top of defaults for one dataset."""
-        time_subset = dict(self.defaults.time_subset)
-        allow_dedupe = self.defaults.allow_dedupe
-        forcing_variables = list(self.defaults.forcing_variables)
-        for override in self.overrides:
-            if override.match.matches(source_id, experiment, variant_label):
-                if override.time_subset is not None:
-                    time_subset = dict(override.time_subset)
-                if override.allow_dedupe is not None:
-                    allow_dedupe = override.allow_dedupe
-                if override.skip_forcing_variables is not None:
-                    forcing_variables = [
-                        v
-                        for v in forcing_variables
-                        if v not in override.skip_forcing_variables
-                    ]
-        return ResolvedDatasetConfig(
-            source_id=source_id,
-            experiment=experiment,
-            variant_label=variant_label,
-            core_variables=list(self.defaults.core_variables),
-            optional_variables=list(self.defaults.optional_variables),
-            forcing_variables=forcing_variables,
-            static_variables=list(self.defaults.static_variables),
-            forcing_interpolation=self.defaults.forcing_interpolation,
-            time_subset=time_subset,
-            target_grid=self.defaults.target_grid,
-            regrid=self.defaults.regrid,
-            fill=self.defaults.fill,
-            chunking=self.defaults.chunking,
-            allow_dedupe=allow_dedupe,
+        return _resolve(
+            self.defaults, self.overrides, source_id, experiment, variant_label
         )
+
+
+def _resolve(
+    defaults: DefaultsConfig,
+    overrides: list[Override],
+    source_id: str,
+    experiment: str,
+    variant_label: str,
+) -> "ResolvedDatasetConfig":
+    """Apply overrides on top of defaults for one dataset. Shared between
+    ``ProcessConfig`` and ``ESGFProcessConfig``.
+    """
+    time_subset = dict(defaults.time_subset)
+    allow_dedupe = defaults.allow_dedupe
+    surface_and_ocean_variables = list(defaults.surface_and_ocean_variables)
+    for override in overrides:
+        if override.match.matches(source_id, experiment, variant_label):
+            if override.time_subset is not None:
+                time_subset = dict(override.time_subset)
+            if override.allow_dedupe is not None:
+                allow_dedupe = override.allow_dedupe
+            if override.skip_surface_and_ocean_variables is not None:
+                surface_and_ocean_variables = [
+                    v
+                    for v in surface_and_ocean_variables
+                    if v not in override.skip_surface_and_ocean_variables
+                ]
+    return ResolvedDatasetConfig(
+        source_id=source_id,
+        experiment=experiment,
+        variant_label=variant_label,
+        core_variables=list(defaults.core_variables),
+        optional_variables=list(defaults.optional_variables),
+        surface_and_ocean_variables=surface_and_ocean_variables,
+        static_variables=list(defaults.static_variables),
+        max_core_missing=defaults.max_core_missing,
+        time_subset=time_subset,
+        target_grid=defaults.target_grid,
+        regrid=defaults.regrid,
+        fill=defaults.fill,
+        chunking=defaults.chunking,
+        allow_dedupe=allow_dedupe,
+    )
 
 
 @dataclass
@@ -443,9 +578,12 @@ __all__ = [
     "CORE_VARIABLES",
     "OPTIONAL_VARIABLES",
     "DIAGNOSTIC_VARIABLES",
-    "FORCING_VARIABLES",
     "STATIC_VARIABLES",
     "FLUX_LIKE_VARIABLES",
+    "SURFACE_AND_OCEAN_VARIABLES",
+    "SURFACE_AND_OCEAN_VARIABLE_NAMES",
+    "SURFACE_AND_OCEAN_BY_OUTPUT",
+    "SurfaceAndOceanVariable",
     "ESGF_DEFAULT_NODE",
     "make_label",
     "TimeWindow",

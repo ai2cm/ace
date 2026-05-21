@@ -13,12 +13,16 @@ from processing import (
     SimulationBoundaryError,
     _has_bounds,
     apply_time_subset,
+    causal_monthly_to_daily,
+    clamp_static_fractions,
     clip_date_for_calendar,
     compute_below_surface_mask,
     compute_derived_layer_T,
+    emit_mask_and_fill,
     fill_derived_layer_T,
+    fill_horizontal_diffuse,
+    finalize_surface_and_ocean_variable,
     flatten_plev_variables,
-    interp_monthly_to_daily,
     make_regridder,
     nearest_above_fill,
     normalize_plev,
@@ -35,19 +39,21 @@ from processing import (
 
 
 def _make_cfg(**overrides) -> ResolvedDatasetConfig:
+    from config import FillConfig
+
     defaults = dict(
         source_id="TEST",
         experiment="historical",
         variant_label="r1i1p1f1",
         core_variables=["ua", "va", "hus", "zg"],
         optional_variables=["tas"],
-        forcing_variables=["ts"],
+        surface_and_ocean_variables=["amon_ts"],
         static_variables=["orog"],
-        forcing_interpolation="linear",
+        max_core_missing=0,
         time_subset={"historical": TimeWindow("2010-01-01", "2010-12-31")},
         target_grid=type("TG", (), {"name": "F22.5"})(),
         regrid=RegridConfig(),
-        fill=type("FC", (), {"method": "nearest_above"})(),
+        fill=FillConfig(),
         chunking=type("CC", (), {"time": 365, "use_sharding": False})(),
     )
     defaults.update(overrides)
@@ -362,6 +368,37 @@ def test_sanity_checks_flag_out_of_range():
 
 
 # ---------------------------------------------------------------------------
+# clamp_static_fractions
+# ---------------------------------------------------------------------------
+
+
+def test_clamp_static_fractions_clips_overshoot():
+    ds = xr.Dataset(
+        {"sftlf": (("lat", "lon"), np.array([[0.0, 50.0], [100.0, 114.0]]))},
+    )
+    clamped, warnings = clamp_static_fractions(ds)
+    assert float(clamped["sftlf"].max()) == 100.0
+    assert float(clamped["sftlf"].min()) == 0.0
+    assert any("sftlf" in w and "114" in w for w in warnings)
+
+
+def test_clamp_static_fractions_silent_when_in_range():
+    ds = xr.Dataset(
+        {"sftlf": (("lat", "lon"), np.array([[0.0, 50.0], [99.9, 100.0]]))},
+    )
+    clamped, warnings = clamp_static_fractions(ds)
+    assert warnings == []
+    np.testing.assert_array_equal(clamped["sftlf"].values, ds["sftlf"].values)
+
+
+def test_clamp_static_fractions_noop_without_sftlf():
+    ds = xr.Dataset({"orog": (("lat", "lon"), np.zeros((2, 2)))})
+    clamped, warnings = clamp_static_fractions(ds)
+    assert warnings == []
+    assert "sftlf" not in clamped.data_vars
+
+
+# ---------------------------------------------------------------------------
 # compute_below_surface_mask
 # ---------------------------------------------------------------------------
 
@@ -517,43 +554,6 @@ def test_fill_derived_layer_T_fills_bottom_layers():
 
 
 # ---------------------------------------------------------------------------
-# interp_monthly_to_daily
-# ---------------------------------------------------------------------------
-
-
-def test_interp_monthly_to_daily_linear():
-    monthly_time = xr.date_range("2010-01-15", periods=12, freq="MS", calendar="noleap")
-    monthly = xr.DataArray(
-        np.linspace(280, 300, 12).astype(np.float32),
-        dims=["time"],
-        coords={"time": monthly_time},
-    )
-    daily_time = xr.DataArray(
-        xr.date_range("2010-01-01", periods=365, freq="D", calendar="noleap"),
-        dims=["time"],
-    )
-    result = interp_monthly_to_daily(monthly, daily_time, "linear")
-    assert result.sizes["time"] == 365
-    assert not np.isnan(result.values).any()
-
-
-def test_interp_monthly_to_daily_extrapolates_edges():
-    monthly_time = xr.date_range("2010-02-15", periods=2, freq="MS", calendar="noleap")
-    monthly = xr.DataArray(
-        np.array([280.0, 290.0], dtype=np.float32),
-        dims=["time"],
-        coords={"time": monthly_time},
-    )
-    daily_time = xr.DataArray(
-        xr.date_range("2010-01-01", periods=120, freq="D", calendar="noleap"),
-        dims=["time"],
-    )
-    result = interp_monthly_to_daily(monthly, daily_time, "linear")
-    assert not np.isnan(result.values).any()
-    assert float(result.isel(time=0)) == 280.0
-
-
-# ---------------------------------------------------------------------------
 # clip_date_for_calendar
 # ---------------------------------------------------------------------------
 
@@ -592,6 +592,220 @@ def test_apply_time_subset_noop_when_no_window():
     cfg = _make_cfg(experiment="historical", time_subset={})
     result = apply_time_subset(ds, cfg)
     assert result.sizes["time"] == 10
+
+
+# ---------------------------------------------------------------------------
+# fill_horizontal_diffuse
+# ---------------------------------------------------------------------------
+
+
+def test_fill_horizontal_diffuse_fills_continent():
+    ny, nx = 45, 90
+    field = np.full((ny, nx), 280.0)
+    field[10:20, 30:60] = np.nan  # big continent
+    da = xr.DataArray(field, dims=("lat", "lon"))
+    filled = fill_horizontal_diffuse(da, max_iterations=100)
+    assert int(np.isnan(filled.values).sum()) == 0
+    # Originally-valid cells are unchanged.
+    assert float(filled.values[0, 0]) == 280.0
+
+
+def test_fill_horizontal_diffuse_preserves_originally_valid():
+    ny, nx = 20, 40
+    field = np.linspace(0, 1, ny * nx).reshape(ny, nx) * 100
+    valid_mask = np.ones_like(field, dtype=bool)
+    field2 = field.copy()
+    field2[5:15, 10:30] = np.nan
+    valid_mask[5:15, 10:30] = False
+    da = xr.DataArray(field2, dims=("lat", "lon"))
+    filled = fill_horizontal_diffuse(da, max_iterations=200)
+    np.testing.assert_array_equal(filled.values[valid_mask], field[valid_mask])
+
+
+def test_fill_horizontal_diffuse_3d_per_timestep():
+    nt, ny, nx = 3, 10, 20
+    arr = np.full((nt, ny, nx), 250.0)
+    arr[0, :, 5:15] = np.nan
+    arr[1, :5, :] = np.nan
+    arr[2, 5:, :] = np.nan
+    da = xr.DataArray(arr, dims=("time", "lat", "lon"))
+    filled = fill_horizontal_diffuse(da, max_iterations=50)
+    assert int(np.isnan(filled.values).sum()) == 0
+
+
+def test_fill_horizontal_diffuse_all_nan_falls_back_to_zero():
+    da = xr.DataArray(np.full((10, 10), np.nan), dims=("lat", "lon"))
+    filled = fill_horizontal_diffuse(da)
+    assert int(np.isnan(filled.values).sum()) == 0
+    assert float(filled.max()) == 0.0
+    assert float(filled.min()) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# causal_monthly_to_daily
+# ---------------------------------------------------------------------------
+
+
+def _make_monthly(values: list[float], calendar: str = "noleap"):
+    import cftime
+
+    if calendar == "noleap":
+        times = [cftime.DatetimeNoLeap(2010, m, 15) for m in range(1, len(values) + 1)]
+    else:
+        times = [
+            cftime.DatetimeGregorian(2010, m, 15) for m in range(1, len(values) + 1)
+        ]
+    return xr.DataArray(np.array(values), dims=("time",), coords={"time": times})
+
+
+def test_causal_monthly_to_daily_uses_previous_month():
+    monthly = _make_monthly([100.0, 200.0, 300.0, 400.0])  # Jan, Feb, Mar, Apr
+    daily_times = xr.date_range(
+        "2010-03-01", "2010-03-31", freq="D", use_cftime=True, calendar="noleap"
+    )
+    daily = xr.DataArray(daily_times, dims=("time",))
+    out = causal_monthly_to_daily(monthly, daily)
+    # All of March → Feb mean = 200
+    assert float(out.min()) == 200.0
+    assert float(out.max()) == 200.0
+
+
+def test_causal_monthly_to_daily_falls_back_at_start():
+    # Daily window starts in January, but monthly data starts in February
+    # → no December available, fall back to the first monthly value.
+    import cftime
+
+    times = [cftime.DatetimeNoLeap(2010, m, 15) for m in range(2, 5)]
+    monthly = xr.DataArray(
+        np.array([200.0, 300.0, 400.0]), dims=("time",), coords={"time": times}
+    )
+    daily_times = xr.date_range(
+        "2010-01-01", "2010-01-31", freq="D", use_cftime=True, calendar="noleap"
+    )
+    daily = xr.DataArray(daily_times, dims=("time",))
+    out = causal_monthly_to_daily(monthly, daily)
+    assert float(out.isel(time=0)) == 200.0  # first monthly fallback
+
+
+def test_causal_monthly_to_daily_spans_year_boundary():
+    import cftime
+
+    # Monthly data: Dec 2009, Jan 2010
+    times = [
+        cftime.DatetimeNoLeap(2009, 12, 15),
+        cftime.DatetimeNoLeap(2010, 1, 15),
+    ]
+    monthly = xr.DataArray(
+        np.array([500.0, 600.0]), dims=("time",), coords={"time": times}
+    )
+    daily_times = xr.date_range(
+        "2010-01-01", "2010-01-31", freq="D", use_cftime=True, calendar="noleap"
+    )
+    daily = xr.DataArray(daily_times, dims=("time",))
+    out = causal_monthly_to_daily(monthly, daily)
+    # All January days take December's mean.
+    assert float(out.min()) == 500.0
+    assert float(out.max()) == 500.0
+
+
+# ---------------------------------------------------------------------------
+# emit_mask_and_fill
+# ---------------------------------------------------------------------------
+
+
+def test_emit_mask_and_fill_static_pattern_collapses():
+    """Time-invariant NaN pattern → 2D mask."""
+    nt, ny, nx = 3, 10, 20
+    arr = np.full((nt, ny, nx), 280.0)
+    arr[:, 5:, :] = np.nan  # static land mask
+    da = xr.DataArray(arr, dims=("time", "lat", "lon"))
+    filled, mask = emit_mask_and_fill(da, fill_iterations=20)
+    assert mask.dims == ("lat", "lon")
+    assert mask.shape == (ny, nx)
+    assert int(np.isnan(filled.values).sum()) == 0
+
+
+def test_emit_mask_and_fill_time_varying_pattern_kept_3d():
+    """Time-varying NaN pattern → 3D mask."""
+    nt, ny, nx = 3, 10, 20
+    arr = np.full((nt, ny, nx), 250.0)
+    for t in range(nt):
+        arr[t, : (t + 1) * 2, :] = np.nan
+    da = xr.DataArray(arr, dims=("time", "lat", "lon"))
+    filled, mask = emit_mask_and_fill(da)
+    assert mask.dims == ("time", "lat", "lon")
+    assert int(np.isnan(filled.values).sum()) == 0
+
+
+def test_emit_mask_and_fill_no_nan_returns_all_valid_mask():
+    da = xr.DataArray(np.ones((3, 5, 10)) * 300.0, dims=("time", "lat", "lon"))
+    filled, mask = emit_mask_and_fill(da)
+    assert int(mask.sum()) == 5 * 10
+    assert float(filled.min()) == 300.0
+
+
+# ---------------------------------------------------------------------------
+# finalize_surface_and_ocean_variable
+# ---------------------------------------------------------------------------
+
+
+def test_finalize_surface_and_ocean_atmos_surface_no_mask():
+    """atmos_surface kind should NOT emit a _mask companion."""
+    from config import SURFACE_AND_OCEAN_BY_OUTPUT
+
+    h = SURFACE_AND_OCEAN_BY_OUTPUT["eday_ts"]
+    daily_times = xr.date_range(
+        "2010-01-01", "2010-01-05", freq="D", use_cftime=True, calendar="noleap"
+    )
+    da = xr.DataArray(
+        np.full((5, 4, 8), 280.0),
+        dims=("time", "lat", "lon"),
+        coords={"time": daily_times},
+    )
+    outputs = finalize_surface_and_ocean_variable(
+        da, h, xr.DataArray(daily_times, dims=("time",))
+    )
+    assert set(outputs.keys()) == {"eday_ts"}
+
+
+def test_finalize_surface_and_ocean_ocean_emits_mask():
+    """ocean_surface kind emits {name}_mask companion."""
+    from config import SURFACE_AND_OCEAN_BY_OUTPUT
+
+    h = SURFACE_AND_OCEAN_BY_OUTPUT["oday_tos"]
+    daily_times = xr.date_range(
+        "2010-01-01", "2010-01-05", freq="D", use_cftime=True, calendar="noleap"
+    )
+    arr = np.full((5, 6, 12), 290.0)
+    arr[:, 3:, :] = np.nan  # land
+    da = xr.DataArray(arr, dims=("time", "lat", "lon"), coords={"time": daily_times})
+    outputs = finalize_surface_and_ocean_variable(
+        da, h, xr.DataArray(daily_times, dims=("time",))
+    )
+    assert set(outputs.keys()) == {"oday_tos", "oday_tos_mask"}
+    assert int(np.isnan(outputs["oday_tos"].values).sum()) == 0
+
+
+def test_finalize_surface_and_ocean_monthly_causal_maps_correctly():
+    """monthly_causal cadence applies previous-month mapping."""
+    import cftime
+    from config import SURFACE_AND_OCEAN_BY_OUTPUT
+
+    h = SURFACE_AND_OCEAN_BY_OUTPUT["amon_ts"]
+    monthly_times = [cftime.DatetimeNoLeap(2010, m, 15) for m in range(1, 4)]
+    monthly = xr.DataArray(
+        np.stack([np.full((4, 8), v) for v in [100.0, 200.0, 300.0]]),
+        dims=("time", "lat", "lon"),
+        coords={"time": monthly_times},
+    )
+    daily_times = xr.date_range(
+        "2010-03-01", "2010-03-05", freq="D", use_cftime=True, calendar="noleap"
+    )
+    outputs = finalize_surface_and_ocean_variable(
+        monthly, h, xr.DataArray(daily_times, dims=("time",))
+    )
+    # March days get February's mean = 200.
+    assert float(outputs["amon_ts"].mean()) == 200.0
 
 
 if __name__ == "__main__":

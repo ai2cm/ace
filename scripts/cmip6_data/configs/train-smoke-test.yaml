@@ -5,11 +5,12 @@
 # NoiseConditionedSFNO and label embeddings for multi-model conditioning.
 #
 # Known limitations of this smoke test (see training.md):
-# - Monthly forcings (ts) use non-causal interpolation (issue 14)
+# - Only the universal monthly amon_ts forcing is used (no eday_ts,
+#   no sea-ice or ocean variables, no causal previous-month for now;
+#   set allow_variable_masking + extend in_names to enable).
 # - No external forcings (CO2, aerosol, land use) (issue 15)
 # - No below-surface mask handling (issue 13)
 # - No optional variables (radiation, turbulent fluxes, surface wind)
-# - One-hot label embedding instead of learned projection (issue 6)
 
 experiment_dir: ./results/cmip6-daily-smoke-test
 save_checkpoint: true
@@ -94,7 +95,12 @@ stepper:
       residual_prediction: true
       in_names: &prognostic_and_forcing
       # --- forcings (input-only) ---
-      - ts
+      # amon_ts is the universal monthly fallback surface temperature;
+      # eday_ts is the daily drop-in when published. Heterogeneous
+      # variable masking handles the per-dataset presence — datasets
+      # without eday_ts contribute zeroed-out values in normalized
+      # space (equivalent to climatological mean) for that input.
+      - amon_ts
       # --- core plev: ua ---
       - ua1000
       - ua850

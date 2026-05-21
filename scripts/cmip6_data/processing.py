@@ -7,7 +7,7 @@ Data-source-agnostic helpers used by both the Pangeo pipeline
 - below-surface mask computation + nearest-above fill
 - derived layer-mean T from the hypsometric equation
 - xESMF regridding (with CF-bounds normalisation)
-- monthly-to-daily interpolation
+- causal monthly-to-daily mapping for surface-and-ocean variables
 - time subsetting + duplicate-timestamp handling
 - plev flattening into per-level 2D variables
 - sanity checks
@@ -20,7 +20,7 @@ from typing import Hashable, Optional
 
 import numpy as np
 import xarray as xr
-from config import ResolvedDatasetConfig
+from config import ResolvedDatasetConfig, SurfaceAndOceanVariable
 
 # Physics constants for hypsometric layer-mean T derivation.
 R_D = 287.05  # J / (kg K), dry-air gas constant
@@ -326,6 +326,79 @@ def nearest_above_fill(da: xr.DataArray, mask: xr.DataArray) -> xr.DataArray:
     return filled
 
 
+def fill_horizontal_diffuse(
+    da: xr.DataArray,
+    max_iterations: int = 50,
+) -> xr.DataArray:
+    """Fill NaN cells in a 2D (lat, lon) or 3D (time, lat, lon) array via
+    iterative nearest-neighbor diffusion.
+
+    At each iteration, every NaN cell that has at least one finite
+    neighbor (4-connected: N, S, E, W with longitude wraparound) takes
+    the mean of those finite neighbors. After ``max_iterations``, any
+    cell still NaN (entire array NaN at that timestep) is filled with
+    the timestep's mean of originally-finite cells, or 0 if no finite
+    cells remained.
+
+    Unlike ``nearest_above_fill`` (column-wise, per plev), this works
+    for arbitrary 2D NaN shapes — e.g., continental land masses for
+    ocean variables, or land + ice-free ocean for sea-ice variables.
+    Boundary in latitude clamps at the poles (no wrap); longitude
+    wraps periodically.
+
+    Returns a new DataArray; the input is not modified.
+    """
+    from scipy.ndimage import convolve
+
+    arr = np.asarray(da.values, dtype=np.float64)
+    if arr.ndim == 2:
+        out = _diffuse_one_plane(arr, max_iterations, convolve)
+        return da.copy(data=out.astype(da.dtype))
+    if arr.ndim != 3:
+        raise ValueError(
+            f"fill_horizontal_diffuse expects 2D or 3D array, got {arr.ndim}D"
+        )
+    out = np.empty_like(arr)
+    for t in range(arr.shape[0]):
+        out[t] = _diffuse_one_plane(arr[t], max_iterations, convolve)
+    return da.copy(data=out.astype(da.dtype))
+
+
+def _diffuse_one_plane(plane: np.ndarray, max_iterations: int, convolve) -> np.ndarray:
+    """One (lat, lon) timestep of the diffusion fill. ``plane`` may
+    contain NaN; returns a fully-finite array.
+    """
+    valid = np.isfinite(plane)
+    if not valid.any():
+        return np.zeros_like(plane)
+    values = np.where(valid, plane, 0.0)
+    # 4-connected kernel — no diagonals, keeps the diffusion isotropic
+    # along lat/lon axes.
+    kernel = np.array([[0.0, 1.0, 0.0], [1.0, 0.0, 1.0], [0.0, 1.0, 0.0]])
+    for _ in range(max_iterations):
+        if valid.all():
+            break
+        # Periodic in lon (wrap), clamp in lat (nearest). scipy.ndimage
+        # uses a single mode per call; we manually wrap longitude by
+        # padding and convolving with mode='constant'.
+        values_pad = np.concatenate([values[:, -1:], values, values[:, :1]], axis=1)
+        valid_pad = np.concatenate([valid[:, -1:], valid, valid[:, :1]], axis=1)
+        sum_n = convolve(values_pad, kernel, mode="nearest")[:, 1:-1]
+        cnt_n = convolve(valid_pad.astype(np.float64), kernel, mode="nearest")[:, 1:-1]
+        with np.errstate(invalid="ignore", divide="ignore"):
+            new_v = np.where(cnt_n > 0, sum_n / np.maximum(cnt_n, 1e-30), 0.0)
+        newly = (~valid) & (cnt_n > 0)
+        values = np.where(newly, new_v, values)
+        valid = valid | newly
+    if not valid.all():
+        # Any remaining NaN island (disconnected from valid cells) gets
+        # the plane mean of originally-finite cells.
+        original_valid = np.isfinite(plane)
+        fallback = float(plane[original_valid].mean()) if original_valid.any() else 0.0
+        values = np.where(valid, values, fallback)
+    return values
+
+
 # ---------------------------------------------------------------------------
 # Derived layer-mean T
 # ---------------------------------------------------------------------------
@@ -403,18 +476,111 @@ def fill_derived_layer_T(ds: xr.Dataset, mask: xr.DataArray) -> xr.Dataset:
 # ---------------------------------------------------------------------------
 
 
-def interp_monthly_to_daily(
+def causal_monthly_to_daily(
     monthly: xr.DataArray,
     daily_time: xr.DataArray,
-    method: str,
 ) -> xr.DataArray:
-    """Interpolate monthly values onto the daily axis; constant-value
-    extrapolation at the start and end of the series (daily stamps
-    outside the first / last monthly bracket take the nearest monthly
-    value).
+    """Map monthly values onto a daily time axis using the previous
+    calendar month's value — strictly causal, no future leakage.
+    Piecewise constant: every day in calendar month ``M`` takes the
+    same value, month ``M-1``'s mean.
+
+    For each daily timestamp at calendar month ``M``, the returned
+    value is the monthly mean for month ``M-1``. At the start of the
+    series, when the previous month is not available, the first
+    monthly value is used as a constant-extrapolation fallback.
+
+    Works for any calendar (standard, noleap, 360_day, etc.) by keying
+    on the ``(year, month)`` tuple of each timestamp.
     """
-    interp = monthly.interp(time=daily_time, method=method)
-    return interp.bfill("time").ffill("time")
+    monthly_ym = np.array([(int(t.year), int(t.month)) for t in monthly["time"].values])
+    daily_ym = np.array([(int(t.year), int(t.month)) for t in daily_time.values])
+
+    target_ym = daily_ym.copy()
+    target_ym[:, 1] -= 1
+    wrap = target_ym[:, 1] == 0
+    target_ym[wrap, 0] -= 1
+    target_ym[wrap, 1] = 12
+
+    month_to_idx: dict[tuple[int, int], int] = {
+        (int(y), int(m)): i for i, (y, m) in enumerate(monthly_ym)
+    }
+    # Constant-extrapolation fallback: any target month before the
+    # earliest monthly entry maps to the first entry.
+    first_idx = 0
+    day_idx = np.array(
+        [month_to_idx.get((int(y), int(m)), first_idx) for y, m in target_ym]
+    )
+
+    out = monthly.isel(time=day_idx)
+    return out.assign_coords(time=daily_time.values).rename({"time": "time"})
+
+
+def finalize_surface_and_ocean_variable(
+    regridded: xr.DataArray,
+    var: SurfaceAndOceanVariable,
+    daily_time: xr.DataArray,
+    fill_iterations: int = 50,
+) -> dict[str, xr.DataArray]:
+    """Given a regridded source variable, produce the named output(s)
+    for the dataset: filled values under ``var.output_name``, plus a
+    ``{output_name}_mask`` channel for ocean / sea-ice kinds.
+
+    Applies cadence-specific time mapping:
+    - ``daily`` cadence: reindex source to ``daily_time`` via
+      nearest-neighbor (source timestamps may differ from the daily
+      axis by a few hours, e.g. day-center vs day-start).
+    - ``monthly_causal`` cadence: map each day to the previous calendar
+      month's value via :func:`causal_monthly_to_daily`.
+
+    Returns a dict ``{output_name: DataArray}`` ready to assign into
+    the output dataset.
+    """
+    if var.cadence == "monthly_causal":
+        on_daily = causal_monthly_to_daily(regridded, daily_time)
+    elif var.cadence == "daily":
+        on_daily = regridded.reindex(time=daily_time.values, method="nearest")
+    else:
+        raise ValueError(f"unsupported cadence: {var.cadence}")
+
+    output: dict[str, xr.DataArray] = {}
+    if var.kind in ("ocean_surface", "seaice_surface"):
+        filled, mask = emit_mask_and_fill(on_daily, fill_iterations=fill_iterations)
+        output[var.output_name] = filled.rename(var.output_name)
+        output[f"{var.output_name}_mask"] = mask.rename(f"{var.output_name}_mask")
+    else:  # atmos_surface (Amon.ts, Eday.ts) — no per-cell mask needed.
+        output[var.output_name] = on_daily.rename(var.output_name)
+    return output
+
+
+def emit_mask_and_fill(
+    da: xr.DataArray, fill_iterations: int = 50
+) -> tuple[xr.DataArray, xr.DataArray]:
+    """For an ocean/ice variable with NaN over land (or ice-free
+    cells), return ``(filled, mask)`` where ``mask`` is uint8 with the
+    valid-cell pattern (per-timestep when ``da`` has a time dim, 2D
+    otherwise) and ``filled`` has the NaN regions extrapolated via
+    horizontal diffusion so the stored values are NaN-free.
+
+    For time-invariant valid-cell patterns (e.g. ocean-only variables
+    where the land mask is static), the mask is collapsed to a single
+    2D field to save space; per-timestep masks are used when the
+    valid-cell pattern varies in time (e.g. sea-ice extent).
+    """
+    nan_pattern = da.isnull()
+    if "time" in da.dims and nan_pattern.any():
+        # Check whether the NaN pattern varies with time.
+        first = nan_pattern.isel(time=0)
+        time_invariant = bool((nan_pattern == first).all())
+    else:
+        time_invariant = True
+
+    valid = (~nan_pattern).astype("uint8")
+    if time_invariant and "time" in valid.dims:
+        valid = valid.isel(time=0).drop_vars("time", errors="ignore")
+
+    filled = fill_horizontal_diffuse(da, max_iterations=fill_iterations)
+    return filled, valid
 
 
 # ---------------------------------------------------------------------------
@@ -553,7 +719,7 @@ _SANITY_RANGES: dict[str, tuple[float, float]] = {
     "rlus": (-_EPS, 700.0),
     "hfss": (-1000.0, 1000.0),
     "hfls": (-500.0, 1200.0),
-    "sftlf": (-_EPS, 105.0),
+    "sftlf": (-_EPS, 100.0 + _EPS),
     "orog": (-500.0, 9000.0),
 }
 
@@ -604,6 +770,32 @@ def _time_continuity_messages(ds: xr.Dataset) -> list[str]:
                 "simulation discontinuity"
             )
     return out
+
+
+def clamp_static_fractions(ds: xr.Dataset) -> tuple[xr.Dataset, list[str]]:
+    """Clip ``sftlf`` to [0, 100] %.
+
+    Conservative regridding can leave ``sftlf`` slightly above 100% in
+    polar rows for some source grids (e.g. CESM2-FV2 up to ~114% in the
+    southernmost row). The overshoot is a regridder pole-handling
+    artifact, not physical; ``sftlf`` is a fraction with no compensating
+    variable in the pipeline, so clipping doesn't break any budget.
+
+    Returns the dataset and a list of warnings naming the worst
+    pre-clip overshoot so the regridder defect remains visible.
+    """
+    warnings: list[str] = []
+    if "sftlf" not in ds.data_vars:
+        return ds, warnings
+    arr = ds["sftlf"]
+    vmin = float(arr.min())
+    vmax = float(arr.max())
+    if vmax > 100.0 + _EPS or vmin < -_EPS:
+        warnings.append(
+            f"sftlf clipped to [0, 100]: pre-clip range " f"[{vmin:.3g}, {vmax:.3g}]"
+        )
+    ds = ds.assign(sftlf=arr.clip(0.0, 100.0))
+    return ds, warnings
 
 
 def run_sanity_checks(ds: xr.Dataset) -> list[str]:
@@ -723,13 +915,17 @@ __all__ = [
     "normalize_plev",
     "compute_below_surface_mask",
     "nearest_above_fill",
+    "fill_horizontal_diffuse",
     "compute_derived_layer_T",
     "fill_derived_layer_T",
-    "interp_monthly_to_daily",
+    "causal_monthly_to_daily",
+    "emit_mask_and_fill",
+    "finalize_surface_and_ocean_variable",
     "clip_date_for_calendar",
     "apply_time_subset",
     "clear_stale_encoding",
     "write_zarr",
+    "clamp_static_fractions",
     "run_sanity_checks",
     "plev_hpa_label",
     "flatten_plev_variables",
