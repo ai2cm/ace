@@ -251,7 +251,7 @@ def _to_dataset(data: TensorMapping, time: xr.DataArray) -> xr.Dataset:
 class SeasonalMetricConfig:
     variables: list[str] | None = None
     name: str = "seasonal"
-    enabled: bool = True
+    enabled: bool = False
     strict: bool = True
 
     def get_name(self) -> str:
