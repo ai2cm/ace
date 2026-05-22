@@ -19,6 +19,8 @@ spec:
     - name: datasets_count_minus_one
     - name: run_process
       value: "false"
+    - name: run_process_esgf
+      value: "false"
     - name: run_stats
       value: "false"
     - name: run_normalization
@@ -28,8 +30,18 @@ spec:
     - name: experiments
       # Space-separated list of experiments to stage external forcings
       # for; matches the ``--experiments`` flag of external_forcings.py.
-      # Defaults to the same three the pilot ingests.
-      value: "historical ssp245 ssp585"
+      value: "historical ssp126 ssp245 ssp370 ssp585"
+    # ESGF-side parameters (used by run_process_esgf only). The ESGF
+    # processing pipeline reuses the same ``output_directory`` from
+    # ``config`` so its per-model zarrs land alongside Pangeo's.
+    - name: esgf_config
+      value: ""
+    - name: esgf_inventory_path
+      value: ""
+    - name: esgf_dataset_keys
+      value: ""
+    - name: esgf_datasets_count_minus_one
+      value: "-1"
   templates:
     # ------------------------------------------------------------------
     # Entry point: sequential stages, each with a conditional gate.
@@ -49,6 +61,16 @@ spec:
           withSequence:
             start: "0"
             end: "{{workflow.parameters.datasets_count_minus_one}}"
+      - - name: process-esgf-dataset
+          when: "{{workflow.parameters.run_process_esgf}} == true"
+          template: process-esgf-dataset
+          arguments:
+            parameters:
+            - name: dataset_index
+              value: "{{item}}"
+          withSequence:
+            start: "0"
+            end: "{{workflow.parameters.esgf_datasets_count_minus_one}}"
       - - name: rebuild-index
           when: "{{workflow.parameters.run_process}} == true"
           template: rebuild-index
@@ -154,6 +176,67 @@ spec:
             echo "Processing ${source_id} ${experiment} ${variant}"
             python process.py \
               --config config.yaml \
+              --skip-index \
+              --source-ids "${source_id}" \
+              --experiments "${experiment}" \
+              --variant-labels "${variant}" \
+              --max-datasets 1
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret
+
+    # ------------------------------------------------------------------
+    # process-esgf-dataset: run process_esgf.py for one (source_id,
+    # exp, member). Each pod downloads native NetCDFs from an ESGF
+    # node into a local scratch dir, regrids variable-by-variable to
+    # bound disk usage, then writes the per-dataset zarr to the same
+    # ``output_directory`` as the Pangeo pipeline. Needs more
+    # ephemeral storage than process-dataset because of the local
+    # NetCDF cache.
+    # ------------------------------------------------------------------
+    - name: process-esgf-dataset
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: highmem-sim-pool
+      inputs:
+        parameters:
+          - name: dataset_index
+      container:
+        image: us-central1-docker.pkg.dev/vcm-ml/full-model/cmip6-processing:latest
+        resources:
+          limits:
+            cpu: "8000m"
+            memory: "32Gi"
+            ephemeral-storage: "100Gi"
+          requests:
+            cpu: "8000m"
+            memory: "32Gi"
+            ephemeral-storage: "100Gi"
+        command: ["bash", "-c", "-e"]
+        args:
+          - |
+            cat << 'CONFIGEOF' > esgf_config.yaml
+            {{workflow.parameters.esgf_config}}
+            CONFIGEOF
+
+            idx={{inputs.parameters.dataset_index}}
+            keys=({{workflow.parameters.esgf_dataset_keys}})
+            key="${keys[${idx}]}"
+
+            source_id=$(echo "${key}" | cut -d/ -f1)
+            experiment=$(echo "${key}" | cut -d/ -f2)
+            variant=$(echo "${key}" | cut -d/ -f3)
+
+            echo "Processing ESGF ${source_id} ${experiment} ${variant}"
+            python process_esgf.py \
+              --config esgf_config.yaml \
+              --inventory "{{workflow.parameters.esgf_inventory_path}}" \
               --skip-index \
               --source-ids "${source_id}" \
               --experiments "${experiment}" \

@@ -140,15 +140,17 @@ UOM_CO2_SSP_URLS: dict[str, str] = {
 # ESGF node we tried. The CMIP7 update is a re-run of the same
 # methodology on the same calendar years — values agree to within a
 # few percent. See README's source-vintage note. We use the ``gn``
-# (native) grid; pre-1950 chunks exist but are deferred since the
-# pilot's time-subset is post-1979.
+# (native) grid in 50-year chunks.
 _CEDS_BASE = (
     "https://esgf-node.ornl.gov/thredds/fileServer/user_pub_work/"
     "input4MIPs/CMIP7/CMIP/PNNL-JGCRI/CEDS-CMIP-2025-04-18/atmos/mon/"
     "{var_id}/gn/v20250421/"
     "{var_dash}_input4MIPs_emissions_CMIP_CEDS-CMIP-2025-04-18_gn_{years}.nc"
 )
-CEDS_HISTORICAL_CHUNKS = ("195001-199912", "200001-202312")
+# Cover the historical window the pilot uses (1940-01-01 onwards).
+# Including the 1900-1949 chunk fills the 1940-1949 gap. Earlier chunks
+# (1750-1899) exist on ESGF if we ever want pre-industrial historical.
+CEDS_HISTORICAL_CHUNKS = ("190001-194912", "195001-199912", "200001-202312")
 
 CEDS_HISTORICAL_URLS: dict[str, list[str]] = {
     var_id: [
