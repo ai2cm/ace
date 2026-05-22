@@ -48,3 +48,6 @@ overrides:
       - oday_omldamax
       - oday_sos
       - omon_zos
+      - omon_hfds
+      - omon_mlotst
+      - omon_tob

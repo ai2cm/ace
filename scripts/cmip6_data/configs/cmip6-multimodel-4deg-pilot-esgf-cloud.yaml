@@ -42,6 +42,9 @@ overrides:
       - oday_omldamax
       - oday_sos
       - omon_zos
+      - omon_hfds
+      - omon_mlotst
+      - omon_tob
   - match:
       source_id: CESM2-WACCM-FV2
     allow_dedupe: true

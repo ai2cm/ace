@@ -41,6 +41,9 @@ overrides:
       - oday_omldamax
       - oday_sos
       - omon_zos
+      - omon_hfds
+      - omon_mlotst
+      - omon_tob
   # CESM2-WACCM-FV2 publishes files on ESGF with overlapping time
   # ranges that produce data-identical duplicate timestamps after
   # concatenation. Handled via allow_dedupe; the duplicates are
