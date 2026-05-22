@@ -118,14 +118,19 @@ spec:
             {{workflow.parameters.config}}
             CONFIGEOF
 
-            # Pull output_directory out of the config so we hand it
-            # directly to external_forcings.py.
-            output_directory=$(python -c \
-              "import yaml; print(yaml.safe_load(open('config.yaml'))['output_directory'])")
-            echo "Staging externals into ${output_directory}/external_forcings"
+            # Resolve the externals destination — prefer the explicit
+            # ``external_forcings_directory`` (shared cross-version
+            # cache) and fall back to ``<output_directory>/external_forcings``.
+            external_forcings_directory=$(python -c "
+            import yaml
+            cfg = yaml.safe_load(open('config.yaml'))
+            efd = cfg.get('external_forcings_directory')
+            print(efd or f\"{cfg['output_directory'].rstrip('/')}/external_forcings\")
+            ")
+            echo "Staging externals into ${external_forcings_directory}"
 
             python external_forcings.py \
-              --output-directory "${output_directory}" \
+              --external-forcings-directory "${external_forcings_directory}" \
               --experiments {{workflow.parameters.experiments}}
         env:
           - name: GOOGLE_APPLICATION_CREDENTIALS

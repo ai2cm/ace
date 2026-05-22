@@ -432,6 +432,14 @@ class ProcessConfig:
     # index.csv (+ index.parquet when an engine is available) are written
     # at ``<output_directory>/index.*`` by process.py.
     output_directory: str
+    # Optional shared location for the per-scenario external-forcings
+    # zarrs (CO2, SO2, BC, LUH2 forest). When unset, defaults to
+    # ``<output_directory>/external_forcings/``. Pointing several
+    # output-directory versions at the same ``external_forcings_directory``
+    # lets them reuse one staged copy of the forcings — the inputs are
+    # version-independent until ``external_forcings.py`` changes, so
+    # re-staging per version is wasteful.
+    external_forcings_directory: Optional[str] = None
     defaults: DefaultsConfig = field(default_factory=DefaultsConfig)
     selection: Selection = field(default_factory=Selection)
     overrides: list[Override] = field(default_factory=list)
@@ -447,6 +455,17 @@ class ProcessConfig:
         return _resolve(
             self.defaults, self.overrides, source_id, experiment, variant_label
         )
+
+    @property
+    def resolved_external_forcings_directory(self) -> str:
+        """``external_forcings_directory`` if set, otherwise the legacy
+        ``<output_directory>/external_forcings`` default. Always ends
+        without a trailing slash.
+        """
+        return (
+            self.external_forcings_directory
+            or f"{self.output_directory.rstrip('/')}/external_forcings"
+        ).rstrip("/")
 
 
 @dataclass
@@ -545,6 +564,7 @@ class ESGFProcessConfig:
     """
 
     output_directory: str
+    external_forcings_directory: Optional[str] = None  # see ProcessConfig.
     esgf: ESGFConfig = field(default_factory=ESGFConfig)
     defaults: DefaultsConfig = field(default_factory=DefaultsConfig)
     selection: Selection = field(default_factory=Selection)
@@ -561,6 +581,13 @@ class ESGFProcessConfig:
         return _resolve(
             self.defaults, self.overrides, source_id, experiment, variant_label
         )
+
+    @property
+    def resolved_external_forcings_directory(self) -> str:
+        return (
+            self.external_forcings_directory
+            or f"{self.output_directory.rstrip('/')}/external_forcings"
+        ).rstrip("/")
 
 
 def _resolve(

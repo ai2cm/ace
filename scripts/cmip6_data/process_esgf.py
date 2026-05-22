@@ -645,7 +645,7 @@ def process_one_esgf(
         attach_external_forcings(
             day_regridded,
             row,
-            config.output_directory,
+            config.resolved_external_forcings_directory,
             task.experiment,
         )
 

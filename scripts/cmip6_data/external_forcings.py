@@ -566,22 +566,25 @@ def co2_series_to_dataset(df: pd.DataFrame, experiment: str) -> xr.Dataset:
     return ds
 
 
-def external_forcings_zarr_path(output_directory: str, experiment: str) -> str:
+def external_forcings_zarr_path(
+    external_forcings_directory: str, experiment: str
+) -> str:
     """URL of the per-scenario external-forcings zarr. Local or fsspec
-    (``gs://...``) — same convention as ``ProcessConfig.output_directory``.
+    (``gs://...``).
     """
-    return f"{output_directory.rstrip('/')}/external_forcings/{experiment}.zarr"
+    return f"{external_forcings_directory.rstrip('/')}/{experiment}.zarr"
 
 
 def attach_external_forcings(
     day_dataset: xr.Dataset,
     row,
-    output_directory: str,
+    external_forcings_directory: str,
     experiment: str,
 ) -> None:
     """Open the per-scenario external-forcings zarr for ``experiment``
-    and add its variables to ``day_dataset`` in-place, mapped onto the
-    daily time axis via the appropriate causal transform.
+    from ``external_forcings_directory`` and add its variables to
+    ``day_dataset`` in-place, mapped onto the daily time axis via the
+    appropriate causal transform.
 
     Currently handles:
     - ``co2``: annual scalar → broadcast to ``(time, lat, lon)`` via
@@ -598,7 +601,7 @@ def attach_external_forcings(
     # writes which is also imported by processing.py).
     from processing import causal_annual_to_daily
 
-    path = external_forcings_zarr_path(output_directory, experiment)
+    path = external_forcings_zarr_path(external_forcings_directory, experiment)
     sidecar_url = f"{path}/metadata.json"
     sidecar_fs, sidecar_rel = fsspec.core.url_to_fs(sidecar_url)
     if not sidecar_fs.exists(sidecar_rel):
@@ -698,26 +701,26 @@ def attach_external_forcings(
 
 def stage_for_experiment(
     experiment: str,
-    output_directory: str,
+    external_forcings_directory: str,
     cache_dir: Optional[Path] = None,
     force: bool = False,
     variables: Optional[tuple[str, ...]] = None,
 ) -> str:
     """Build the per-scenario external-forcings zarr at
-    ``<output_directory>/external_forcings/<experiment>.zarr``,
-    containing every forcing variable in ``variables`` (default: all
-    implemented). Skips work if the target zarr already exists and
-    ``force=False``.
+    ``<external_forcings_directory>/<experiment>.zarr``, containing
+    every forcing variable in ``variables`` (default: all implemented).
+    Skips work if the target zarr already exists and ``force=False``.
 
     Available variables: ``co2``, ``so2``, ``bc``, ``forest``.
 
-    ``output_directory`` may be a local path or a fsspec URL (e.g. a
-    ``gs://`` bucket); zarr writes go via fsspec so the same code runs
-    from local dev and from the argo workflow's GCS-backed pods.
+    ``external_forcings_directory`` may be a local path or a fsspec
+    URL (e.g. a ``gs://`` bucket); zarr writes go via fsspec so the
+    same code runs from local dev and from the argo workflow's
+    GCS-backed pods.
     """
     if variables is None:
         variables = ("co2", "so2", "bc", "forest")
-    out_dir_url = output_directory.rstrip("/") + "/external_forcings"
+    out_dir_url = external_forcings_directory.rstrip("/")
     target_url = f"{out_dir_url}/{experiment}.zarr"
     sidecar_url = f"{target_url}/metadata.json"
     fs, target_rel = fsspec.core.url_to_fs(target_url)
@@ -837,13 +840,17 @@ def stage_for_experiment(
 
 def stage_co2_for_experiment(
     experiment: str,
-    output_directory: str,
+    external_forcings_directory: str,
     cache_dir: Optional[Path] = None,
     force: bool = False,
 ) -> str:
     """Backwards-compatible wrapper that stages only CO2."""
     return stage_for_experiment(
-        experiment, output_directory, cache_dir, force, variables=("co2",)
+        experiment,
+        external_forcings_directory,
+        cache_dir,
+        force,
+        variables=("co2",),
     )
 
 
@@ -854,11 +861,17 @@ def stage_co2_for_experiment(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
+    target_group = parser.add_mutually_exclusive_group(required=True)
+    target_group.add_argument(
+        "--external-forcings-directory",
+        help="Destination for the staged per-scenario zarrs. Prefer this "
+        "for shared cross-version caches.",
+    )
+    target_group.add_argument(
         "--output-directory",
-        required=True,
-        help="Same as the ProcessConfig's output_directory; the staging "
-        "zarrs land at <output_directory>/external_forcings/",
+        help="Legacy alias: zarrs land at "
+        "``<output_directory>/external_forcings/``. Prefer "
+        "``--external-forcings-directory``.",
     )
     parser.add_argument(
         "--experiments",
@@ -895,13 +908,21 @@ def main() -> None:
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
+    # Resolve the final destination: prefer the explicit
+    # ``--external-forcings-directory``; otherwise fall back to the
+    # legacy ``<output_directory>/external_forcings``.
+    if args.external_forcings_directory:
+        external_dir = args.external_forcings_directory.rstrip("/")
+    else:
+        external_dir = args.output_directory.rstrip("/") + "/external_forcings"
+
     cache = Path(args.cache_dir) if args.cache_dir else None
     all_ok = True
     for exp in args.experiments:
         try:
             stage_for_experiment(
                 exp,
-                args.output_directory,
+                external_dir,
                 cache_dir=cache,
                 force=args.force,
                 variables=tuple(args.variables) if args.variables else None,
@@ -916,18 +937,11 @@ def main() -> None:
     # next attempt.
     if all_ok and not args.keep_cache:
         cache_target = cache or Path("/tmp/external_forcings_cache")
-        # Also remove the in-output_directory ``.cache`` location if
-        # we used it (when output_directory is local and cache_dir
-        # wasn't overridden, ``stage_for_experiment`` defaults to that
-        # path — but right now the default is always /tmp; legacy
-        # behavior leaves a .cache dir alongside the zarrs).
-        alt = Path(args.output_directory) / "external_forcings" / ".cache"
-        for candidate in (cache_target, alt):
-            if candidate.exists() and candidate.is_dir():
-                import shutil
+        if cache_target.exists() and cache_target.is_dir():
+            import shutil
 
-                logging.info("Removing source cache at %s", candidate)
-                shutil.rmtree(candidate)
+            logging.info("Removing source cache at %s", cache_target)
+            shutil.rmtree(cache_target)
 
 
 if __name__ == "__main__":

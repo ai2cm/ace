@@ -676,7 +676,7 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
         attach_external_forcings(
             day_regridded,
             row,
-            config.output_directory,
+            config.resolved_external_forcings_directory,
             task.experiment,
         )
 
