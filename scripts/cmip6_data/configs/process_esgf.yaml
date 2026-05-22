@@ -1,3 +1,6 @@
+# Local ESGF smoke-test scope. One year per scenario for pipeline
+# validation. Production cloud config is
+# ``cmip6-multimodel-4deg-1940-2100-esgf-cloud.yaml``.
 output_directory: ./data/cmip6-daily-pilot/v0
 
 esgf:
@@ -6,11 +9,11 @@ esgf:
 
 defaults:
   time_subset:
-    historical: {start: "1940-01-01", end: "2014-12-31"}
-    ssp126: {start: "2015-01-01", end: "2100-12-31"}
-    ssp245: {start: "2015-01-01", end: "2100-12-31"}
-    ssp370: {start: "2015-01-01", end: "2100-12-31"}
-    ssp585: {start: "2015-01-01", end: "2100-12-31"}
+    historical: {start: "2010-01-01", end: "2010-12-31"}
+    ssp126: {start: "2015-01-01", end: "2015-12-31"}
+    ssp245: {start: "2015-01-01", end: "2015-12-31"}
+    ssp370: {start: "2015-01-01", end: "2015-12-31"}
+    ssp585: {start: "2015-01-01", end: "2015-12-31"}
 
 selection:
   exclude_source_ids:

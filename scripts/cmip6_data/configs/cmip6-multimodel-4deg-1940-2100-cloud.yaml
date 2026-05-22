@@ -1,0 +1,57 @@
+# CMIP6 multi-model daily dataset — Pangeo source, cloud bucket.
+#
+# Production config (not pilot). Used by ``process.py`` to ingest the
+# Pangeo CMIP6 mirror into the cloud bucket. The matching ESGF-side
+# config is ``cmip6-multimodel-4deg-1940-2100-esgf-cloud.yaml`` and the
+# inventory builder is
+# ``cmip6-multimodel-4deg-1940-2100-inventory.yaml``.
+#
+# Scope: 5 experiments × historical 1940-2014 + 4 SSPs 2015-2100,
+# ~415 (model, experiment, member) datasets, ~11.5 TB on disk.
+
+inventory_path: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/inventory.csv
+output_directory: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v0
+
+defaults:
+  time_subset:
+    historical: {start: "1940-01-01", end: "2014-12-31"}
+    ssp126: {start: "2015-01-01", end: "2100-12-31"}
+    ssp245: {start: "2015-01-01", end: "2100-12-31"}
+    ssp370: {start: "2015-01-01", end: "2100-12-31"}
+    ssp585: {start: "2015-01-01", end: "2100-12-31"}
+
+selection:
+  exclude_source_ids:
+    # INM-CM4-8 publishes anomalously low ``zg`` at 10 hPa for a
+    # subset of grid cells, which collapses the derived layer-6 T
+    # to ~60 K (unphysical). See README's "Known model-side data
+    # quirks" and figures/inm_cm4_8_zg_top.png.
+    - INM-CM4-8
+    # AWI-CM-1-1-MR publishes 3D variables on a non-standard plev
+    # grid (not plev8), so derived layer variable names don't match
+    # the pipeline's plev8 convention.
+    - AWI-CM-1-1-MR
+    # KACE-1-0-G has sparse NaN values at 10 hPa (ua10, va10,
+    # hus10, zg10) — typically 1 grid cell per timestep — which
+    # propagate through the network and produce all-NaN model output.
+    - KACE-1-0-G
+  experiments: [historical, ssp126, ssp245, ssp370, ssp585]
+
+overrides:
+  # CESM2-WACCM historical r2i1p1f1 has its psl variable concatenated
+  # twice end-to-end on Pangeo (mirror-side ingest error; see README's
+  # "Known Pangeo data-quality issues"). The two halves are
+  # bit-identical, so dedupe is safe — but we want this to be opt-in,
+  # not silent.
+  - match:
+      source_id: CESM2-WACCM
+      experiment: historical
+      variant_label: r2i1p1f1
+    allow_dedupe: true
+  # AWI-ESM-1-1-LR's unstructured ocean grid (~127k cells) causes
+  # xesmf to build a 127k×127k weight matrix for siconc regridding,
+  # which either OOMs or hangs indefinitely depending on available
+  # memory.
+  - match:
+      source_id: AWI-ESM-1-1-LR
+    skip_surface_and_ocean_variables: [simon_siconc, simon_sitemptop, siday_siconc, siday_sitemptop, siday_sithick]

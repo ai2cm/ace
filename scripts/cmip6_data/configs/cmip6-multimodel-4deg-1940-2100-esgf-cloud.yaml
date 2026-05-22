@@ -1,0 +1,40 @@
+# CMIP6 multi-model daily dataset — ESGF source, cloud bucket.
+#
+# Production config (not pilot). Used by ``process_esgf.py`` to
+# backfill the bucket with datasets that aren't on Pangeo, plus
+# ssp126 / ssp370 (which Pangeo lacks daily 3D state for entirely).
+# Pairs with the Pangeo-side ``cmip6-multimodel-4deg-1940-2100-cloud.yaml``
+# and writes into the same ``output_directory``.
+
+output_directory: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v0
+
+esgf:
+  search_node: https://esgf-data.dkrz.de/esg-search/search
+  scratch_dir: /scratch
+
+defaults:
+  time_subset:
+    historical: {start: "1940-01-01", end: "2014-12-31"}
+    ssp126: {start: "2015-01-01", end: "2100-12-31"}
+    ssp245: {start: "2015-01-01", end: "2100-12-31"}
+    ssp370: {start: "2015-01-01", end: "2100-12-31"}
+    ssp585: {start: "2015-01-01", end: "2100-12-31"}
+
+selection:
+  exclude_source_ids:
+    - INM-CM4-8
+  experiments: [historical, ssp126, ssp245, ssp370, ssp585]
+
+overrides:
+  # AWI-ESM-1-1-LR ocean grid is unmanageable for xesmf — see the
+  # Pangeo config's comment.
+  - match:
+      source_id: AWI-ESM-1-1-LR
+    skip_surface_and_ocean_variables: [simon_siconc, simon_sitemptop, siday_siconc, siday_sitemptop, siday_sithick]
+  # CESM2-WACCM-FV2 publishes files on ESGF with overlapping time
+  # ranges that produce data-identical duplicate timestamps after
+  # concatenation. Handled via allow_dedupe; the duplicates are
+  # verified to be data-identical before deduplication.
+  - match:
+      source_id: CESM2-WACCM-FV2
+    allow_dedupe: true

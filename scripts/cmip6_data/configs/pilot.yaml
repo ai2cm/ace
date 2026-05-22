@@ -2,18 +2,18 @@ inventory_path: ./inventory.csv
 output_directory: ./data/cmip6-daily-pilot/v0
 # index_path is derived at process.py runtime: <output_directory>/index.{csv,parquet}
 
-# Time-subset window for the main training run.
-# Historical starts 1940-01-01 to align with our existing ERA5 / SHiELD
-# AMIP datasets (also 1940 onwards) and with the reanalysis era. SSPs
-# cover their full CMIP6-protocol window 2015-2100 across all four
-# scenarios in scope.
+# Small smoke-test scope. One year per scenario — just enough to
+# validate the pipeline end-to-end on a developer workstation without
+# committing to the full ~11.5 TB production run. The production
+# config lives at
+# ``configs/cmip6-multimodel-4deg-1940-2100-cloud.yaml``.
 defaults:
   time_subset:
-    historical: {start: "1940-01-01", end: "2014-12-31"}
-    ssp126: {start: "2015-01-01", end: "2100-12-31"}
-    ssp245: {start: "2015-01-01", end: "2100-12-31"}
-    ssp370: {start: "2015-01-01", end: "2100-12-31"}
-    ssp585: {start: "2015-01-01", end: "2100-12-31"}
+    historical: {start: "2010-01-01", end: "2010-12-31"}
+    ssp126: {start: "2015-01-01", end: "2015-12-31"}
+    ssp245: {start: "2015-01-01", end: "2015-12-31"}
+    ssp370: {start: "2015-01-01", end: "2015-12-31"}
+    ssp585: {start: "2015-01-01", end: "2015-12-31"}
 
 # target_grid, regrid, fill, chunking, and variable lists all take
 # dataclass defaults — only set them here to deviate from the default.

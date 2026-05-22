@@ -547,11 +547,13 @@ def attach_external_forcings(
     from processing import causal_annual_to_daily
 
     path = external_forcings_zarr_path(output_directory, experiment)
-    fs, rel = fsspec.core.url_to_fs(path)
-    if not fs.exists(rel):
+    sidecar_url = f"{path}/metadata.json"
+    sidecar_fs, sidecar_rel = fsspec.core.url_to_fs(sidecar_url)
+    if not sidecar_fs.exists(sidecar_rel):
         row.warnings.append(
-            f"no external forcings staged at {path} for {experiment}; "
-            "input4mips_* variables omitted"
+            f"no external forcings staged at {path} for {experiment} "
+            "(metadata.json sidecar missing); input4mips_* / luh2_* "
+            "variables omitted"
         )
         return
     ef = xr.open_zarr(fsspec.get_mapper(path), consolidated=True)
@@ -665,10 +667,18 @@ def stage_for_experiment(
         variables = ("co2", "so2", "bc", "forest")
     out_dir_url = output_directory.rstrip("/") + "/external_forcings"
     target_url = f"{out_dir_url}/{experiment}.zarr"
+    sidecar_url = f"{target_url}/metadata.json"
     fs, target_rel = fsspec.core.url_to_fs(target_url)
     fs.makedirs(fs._strip_protocol(out_dir_url), exist_ok=True)
-    if fs.exists(target_rel) and not force:
-        logging.info("  [%s] up to date at %s", experiment, target_url)
+    # Skip-if-complete uses the metadata.json sidecar (written only
+    # after a successful write) rather than mere zarr-directory
+    # existence, so a partial / interrupted previous run doesn't get
+    # mistaken for a finished one.
+    sidecar_fs, sidecar_rel = fsspec.core.url_to_fs(sidecar_url)
+    if sidecar_fs.exists(sidecar_rel) and not force:
+        logging.info(
+            "  [%s] up to date at %s (sidecar present)", experiment, target_url
+        )
         return target_url
     if cache_dir is None:
         # Cache lives locally regardless of output_directory — argo
@@ -729,10 +739,47 @@ def stage_for_experiment(
         )
 
     ds = xr.merge(pieces, compat="override")
+    # Pass the URL/path directly to ``to_zarr`` rather than via
+    # ``fsspec.get_mapper`` — the mapper detour combined with zarr v3's
+    # internal rm-then-write sequence fails on local paths because the
+    # parent directory disappears between rm and the root ``zarr.json``
+    # write. Direct paths route through zarr's LocalStore, which
+    # handles overwrite correctly.
     if fs.exists(target_rel):
+        # Clean up any partial directory left from a previous failed
+        # run before the new write.
         fs.rm(target_rel, recursive=True)
-    mapper = fsspec.get_mapper(target_url)
-    ds.to_zarr(mapper, consolidated=True)
+    ds.to_zarr(target_url, consolidated=True)
+
+    # Write completion sidecar AFTER the zarr is fully written. The
+    # presence of this file is what the skip-if-complete check at the
+    # top of stage_for_experiment looks for on the next run.
+    import json
+    from datetime import datetime, timezone
+
+    sidecar = {
+        "experiment": experiment,
+        "variables": list(variables),
+        "co2_source": (
+            "NOAA Mauna Loa annual + UoM input4MIPs SSP"
+            if experiment not in _HISTORICAL_EXPERIMENTS
+            else "NOAA Mauna Loa annual"
+        ),
+        "so2_bc_source": (
+            "CMIP7 CEDS-CMIP-2025-04-18"
+            if experiment in _HISTORICAL_EXPERIMENTS
+            else "CMIP6 IAMC ScenarioMIP"
+        ),
+        "forest_source": (
+            "LUH2 v2 multiple-states (UofMD-landState-*)"
+            if "forest" in variables
+            else "n/a"
+        ),
+        "target_grid": "F22.5 (45x90 Gauss-Legendre)",
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+    }
+    with fsspec.open(sidecar_url, "w") as sf:
+        json.dump(sidecar, sf, indent=2, sort_keys=True)
     return target_url
 
 
