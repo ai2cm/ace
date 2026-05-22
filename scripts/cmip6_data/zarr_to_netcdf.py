@@ -3,11 +3,19 @@
 NetCDF datasets can use fork-based data workers (no forkserver overhead),
 which significantly improves training throughput on local storage.
 
+``input_dir`` can be a local path or a ``gs://`` URL. With a GCS source
+the zarr stores stream straight into the per-dataset converter — no
+intermediate local copy of the zarr tree is required, only the netCDF
+output. Auxiliary top-level files (``index.csv``, ``stats.csv``,
+``stats.parquet``, ``presence.*``, etc.) are downloaded next to the
+netCDF tree so the local layout matches what training code expects.
+
 Usage:
     python zarr_to_netcdf.py <input_dir> <output_dir> [--workers N]
 
 Example:
     python zarr_to_netcdf.py ./data/cmip6-daily-pilot/v0 ./data/cmip6-daily-pilot/v0-nc
+    python zarr_to_netcdf.py gs://bucket/proj/v0 /climate-default/proj/v0
 """
 
 import argparse
@@ -16,6 +24,7 @@ import os
 import shutil
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
+import fsspec
 import pandas as pd
 import xarray as xr
 
@@ -53,28 +62,39 @@ def main():
     )
     args = parser.parse_args()
 
-    input_dir = args.input_dir
-    output_dir = args.output_dir
+    input_dir = args.input_dir.rstrip("/")
+    output_dir = args.output_dir.rstrip("/")
     os.makedirs(output_dir, exist_ok=True)
 
-    index_path = os.path.join(input_dir, "index.csv")
-    if not os.path.exists(index_path):
-        raise FileNotFoundError(f"No index.csv found at {index_path}")
-    idx = pd.read_csv(index_path)
+    fs, in_root = fsspec.core.url_to_fs(input_dir)
 
-    for f in os.listdir(input_dir):
-        src = os.path.join(input_dir, f)
-        dst = os.path.join(output_dir, f)
-        if os.path.isfile(src) and not os.path.exists(dst):
-            logger.info("Copying %s -> %s", f, dst)
-            shutil.copy2(src, dst)
+    index_url = f"{input_dir}/index.csv"
+    if not fs.exists(f"{in_root}/index.csv"):
+        raise FileNotFoundError(f"No index.csv found at {index_url}")
+    idx = pd.read_csv(index_url)
+
+    # Auxiliary top-level files (index.csv, stats.csv, stats.parquet,
+    # presence.*, etc.). ``fs.ls(detail=True)`` lets us skip the dataset
+    # sub-directories without a second probe.
+    for entry in fs.ls(in_root, detail=True):
+        if entry.get("type") != "file":
+            continue
+        name = os.path.basename(entry["name"])
+        dst = os.path.join(output_dir, name)
+        if os.path.exists(dst):
+            continue
+        logger.info("Copying %s -> %s", name, dst)
+        if input_dir.startswith(("gs://", "s3://", "http://", "https://")):
+            fs.get(entry["name"], dst)
+        else:
+            shutil.copy2(entry["name"], dst)
 
     tasks = []
     for _, row in idx.iterrows():
         rel = os.path.join(row["source_id"], row["experiment"], row["variant_label"])
-        zarr_path = os.path.join(input_dir, rel, "data.zarr")
+        zarr_path = f"{input_dir}/{rel}/data.zarr"
         nc_dir = os.path.join(output_dir, rel)
-        if not os.path.isdir(zarr_path):
+        if not fs.exists(f"{in_root}/{rel}/data.zarr"):
             logger.warning("Zarr not found, skipping: %s", zarr_path)
             continue
         tasks.append((zarr_path, nc_dir))
