@@ -118,102 +118,52 @@ dataset:
 These need workarounds or tracking; not strictly blocking a smoke test with
 reduced scope, but should be addressed soon.
 
-### 6. Model embedding architecture
+### ~~6. Model embedding architecture~~ (resolved)
 
-**Problem.** The current embedding sets `embed_dim_labels = len(all_labels)`
-(`fme/ace/registry/stochastic_sfno.py:312`). Each label gets its own
-dimension in the one-hot vector, which is passed directly to
-`ConditionalLayerNorm` and the positional `label_pos_embed` interaction. With
-~20 models (and ~57 physics-distinct labels at full scale), this means
-57 independent parameters per conditioning site — the embedding dimension
-grows linearly with the number of models and there is no shared structure.
+Resolved on main by PR #1148 ("Add configurable label embedding
+dimension to NoiseConditionedSFNO"). `NoiseConditionedSFNOBuilder`
+now takes a `label_embed_dim` parameter; when `> 0` a learned
+`nn.Linear(n_labels, label_embed_dim)` projects the one-hot labels
+into a fixed-width embedding before downstream conditioning, so
+embedding capacity is independent of the number of model labels.
 
-**Desired change.** Replace the one-hot scheme with a fixed-width `n`-dim
-embedding:
+### ~~7. Different variables available per model~~ (resolved)
 
-1. Keep the one-hot encoding in `LabelEncoding` (it already handles
-   dynamic label sets well).
-2. Add a learned `nn.Linear(n_labels, embed_dim)` projection inside
-   `NoiseConditionedModel` and `ConditionalLayerNorm` that maps from
-   one-hot space to a compact embedding space.
-3. `embed_dim_labels` in the `ContextConfig` becomes the embedding
-   dimension (e.g. 8 or 16), independent of the number of models.
-4. The `label_pos_embed` parameter in `NoiseConditionedModel` changes shape
-   from `(n_labels, embed_dim_pos, H, W)` to
-   `(embed_dim_labels, embed_dim_pos, H, W)`, with the one-hot-to-embedding
-   projection applied before the einsum.
+Resolved on main by PR #1160 ("Add per-sample variable masking for
+heterogeneous data sources"). `ModuleSelector.allow_variable_masking`
+threads a `data_mask` through `BatchData` / `StepArgs` / the loss
+chain; missing input variables are zeroed in normalized space and
+missing output variables are excluded from loss computation.
+`Cmip6DataConfig` and the surface-and-ocean variable schema both
+rely on this for per-dataset variable presence.
 
-This decouples model capacity from model count and allows the embedding
-space to learn shared structure across similar models.
+### 13. Mask-aware training for cells with valid/invalid extents (deferred)
 
-**Smoke-test workaround.** The current one-hot embedding works as-is for
-~20 labels. It's suboptimal but not blocking.
+**Current state.** The pipeline already emits per-variable mask
+channels for the surface-and-ocean variables that have spatial NaN
+extents (e.g. `siday_siconc_mask`, `oday_tos_mask` — 2D when static,
+3D when time-varying), and the `below_surface_mask{hPa}` channels for
+the plev variables. The 3D plev variables themselves are filled with
+nearest-above-in-column values; the surface-and-ocean variables are
+filled via horizontal diffusion. Both fill schemes give the network
+a well-behaved field while the corresponding mask channel preserves
+the valid extent.
 
-### 7. Different variables available per model
+For the current pilot we **predict** the filled fields directly with
+a standard regression loss (no BCE on masks, no NaN in targets).
+This is intentional — the smoothing fills are physically reasonable
+and the model can learn the filled-region values without a separate
+mask loss.
 
-**Problem.** Optional variables (TOA/surface radiation, turbulent fluxes,
-surface wind) and forcings (`ts`, `siconc`) are not available for every model.
-The `DatasetProperties.update()` method
-(`fme/core/dataset/properties.py:55–73`) enforces that concatenated datasets
-have consistent metadata, including variable sets. Training on the union of
-all variables would fail for models missing some.
-
-**Smoke-test workaround.** Train only on the intersection of variables
-available across all (non-excluded) models — the core variables (e.g.
-`ua1000`–`ua10`, `va1000`–`va10`, `hus1000`–`hus10`, `zg1000`–`zg10`,
-`tas`, `huss`, `psl`, `pr`) plus derived layers
-(`ta_derived_layer_1000_850`–`ta_derived_layer_50_10`). Do not include
-optional variables.
-
-**Future.** Support heterogeneous variable sets across datasets in the
-concat loader. One approach: fill missing optional variables with a
-configurable default (e.g. zero or NaN + mask) so that all datasets
-present the same variable interface to the model. Another: per-variable
-presence flags in the batch so the model and loss can handle missingness.
-
-### 13. Mask-aware training for below-surface cells
-
-**Problem.** The CMIP6 data has a time-varying below-surface mask that
-changes over time (surface pressure changes move the boundary). After
-flattening (issue 1), this becomes per-level variables like
-`below_surface_mask1000(time, lat, lon)`. The smoke test sidesteps
-this by training on nearest-above filled data (issue 2), but
-production training should handle masks properly.
-
-This has three sub-problems:
-
-1. **Input/output masking in normalized space.** `Cmip6Step`
-   (`fme/ace/step/cmip6.py`) already handles this: mask variables
-   bypass normalization, input below-surface cells are zeroed in
-   normalized space before the network, sigmoid is applied to mask
-   outputs, and masks are excluded from residual prediction. The step
-   does *not* mask outputs — that is left to the loss and to the
-   next-step input masking during inference.
-
-2. **NaN in below-surface target data.** The data pipeline (`process.py`)
-   currently fills below-surface cells with nearest-above values.
-   For mask-aware training, the pipeline should instead write NaN in
-   below-surface cells. `make_normalization.py` already handles NaN
-   correctly (skips mask variables, uses `np.isfinite` filtering).
-   The existing `WeightedMappingLoss` zeros loss for NaN target cells,
-   so the regression loss is automatically excluded for below-surface
-   cells once the data has NaN there.
-
-3. **Cross-entropy mask loss.** The mask is a binary classification
-   target, not a regression target. A loss wrapper or composite loss
-   is needed that applies cross-entropy to mask channels and standard
-   regression to non-mask channels. The existing `StepLossConfig`
-   does not support mixed loss types per channel.
-
-**Approach.** When ready to move beyond the smoke test:
-- Update `process.py` to write NaN in below-surface cells instead of
-  nearest-above fill.
-- Recompute normalization statistics (which will now exclude
-  below-surface cells).
-- Add a composite loss that combines BCE on mask channels with
-  regression on non-mask channels.
-- Use `Cmip6StepConfig` (type `"cmip6"`) instead of
-  `SingleModuleStepConfig` in the training YAML.
+**Deferred generalization.** Add per-variable mask channels for *all*
+variables that have NaN regions, not just the surface ones — most
+notably the plev `ua` / `va` / `hus` / `zg` would get their own
+`{var}{hPa}_mask` per pressure level instead of relying on the
+shared `below_surface_mask{hPa}` (whose mask source comes from a
+fallback chain — `nan_union` across the 3D vars first, then `zg <
+orog`). Storing one mask per variable gives downstream training the
+option of a masked regression loss or a BCE mask-loss later without
+re-ingesting. Not blocking the production training run.
 
 ### 8. No surface pressure variable
 
@@ -235,51 +185,44 @@ be applied.
 **Smoke-test impact.** Not blocking. The corrector features that need `ps`
 are already disabled (issue 3). `psl` is included as a prognostic variable.
 
-### 14. Causal forcing for monthly boundary conditions
+### ~~14. Causal forcing for monthly boundary conditions~~ (resolved)
 
-**Problem.** The current pipeline interpolates monthly `ts` and `siconc`
-to daily by placing monthly means at month midpoints and linearly
-interpolating. This is non-causal: on day 20 of month N, the
-interpolated value already contains information from month N+1's mean.
-For an autoregressive emulator, this is future leakage. **Results
-produced with the current interpolation are not scientifically valid.**
+Resolved in the pipeline rather than in the loader. ``processing.py``
+now provides ``causal_monthly_to_daily`` (each day reads its
+calendar-previous-month mean, piecewise constant) and
+``causal_annual_to_daily`` (each day reads its calendar-previous-year
+value). The surface-and-ocean variable handler (`Amon`/`SImon`/`Omon`
+monthly source variables) and the external-forcings handler
+(`amon_ts` / `simon_siconc` etc. + annual CO2 + LUH2 forest) both
+route through these. The legacy linear ``interp_monthly_to_daily``
+function was deleted; no code path can produce the non-causal
+interpolation anymore. Where daily-cadence sources exist (`Eday`,
+`Oday`, `SIday`) those are used directly via nearest-neighbour time
+alignment.
 
-**Decision.** Use the **previous month's mean** for each day — strictly
-causal, with ~15–45 day staleness that is acceptable for slowly-varying
-boundary conditions. Longer-term, replace with daily data from
-`Oday`/`Eday` where available. The previous-month scheme becomes the
-fallback for models without daily data.
+### ~~15. External forcings (CO2, aerosol emissions, land use)~~ (resolved)
 
-**Implementation.** This is a data-loading transform, not a pipeline
-change — the stored monthly data stays the same. The data loader
-supplies the previous month's mean for each daily timestep.
+All four planned external forcings are now staged and joined into
+every per-model dataset:
 
-**Smoke-test impact.** The smoke test can proceed with the current
-non-causal interpolation to validate the training pipeline end-to-end,
-but this **must be fixed before any scientific use** of the results.
+- ``input4mips_co2`` — annual global-mean CO2 (ppm). NOAA Mauna Loa
+  annual mean (≥1959) for historical; UoM input4MIPs (Meinshausen et
+  al. 2017) for SSPs 2015 onwards.
+- ``input4mips_so2`` / ``input4mips_bc`` — gridded monthly anthropogenic
+  emission flux (kg m⁻² s⁻¹). CMIP7-vintage CEDS-CMIP-2025-04-18 for
+  historical (the CMIP6-vintage CEDS-2017-05-18 was retracted from
+  ESGF); CMIP6 IAMC scenario files for SSPs.
+- ``luh2_forest`` — annual gridded total forest fraction (primf +
+  secdf, [0, 1]). LUH2 v2 multiple-states files: UofMD-landState-2-1-h
+  for historical, UofMD-landState-{IMAGE,MESSAGE,AIM,MAGPIE}-* for
+  ssp126/245/370/585.
 
-### 15. External forcings (CO2, aerosol emissions, land use)
-
-**Problem.** The model needs external forcing information to distinguish
-between scenarios (historical vs ssp245 vs ssp585). Without it, the
-model cannot generalize to different forcing pathways.
-
-**Decision.** Include four input4MIPs forcing fields as a compact
-representation of the forcing state:
-- **CO2 concentration** — global scalar (annual), dominant GHG forcing
-- **SO2 emissions** — gridded (monthly), aerosol cooling with strong
-  regional/weather-scale signatures
-- **BC emissions** — gridded (monthly), absorbing aerosol
-- **Total forest fraction** — gridded (annual, from LUH2), land use
-  change proxy
-
-These are prescribed forcings shared across all models within a
-scenario. Stored per experiment (one copy per scenario time window).
-The spatial patterns provide weather-scale inductive bias beyond what a
-scalar scenario label would offer.
-
-**Smoke-test impact.** Not blocking. The smoke test proceeds without
-external forcings. Time and scenario encoding can stand in temporarily.
+Staging script: ``external_forcings.py``. Pipeline integration:
+``attach_external_forcings`` opens the per-scenario zarr at
+``<output>/external_forcings/<experiment>.zarr`` and projects each
+forcing onto the daily time axis via the appropriate causal helper.
+Argo workflow ships a ``stage-externals`` template that runs the
+staging once at the start of a production run.
 
 ---
 
