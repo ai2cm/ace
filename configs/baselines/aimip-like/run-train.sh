@@ -49,14 +49,16 @@ run_training() {
     -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train "$CONFIG_PATH"
 }
 
+# run_training "train-4deg-daily-era5-only-co2.yaml" "train-4deg-daily-era5-only-co2-rs0" 1
+# run_training "train-4deg-daily-era5-only-fpgm.yaml" "train-4deg-daily-era5-only-rs0-fpgm" 1
 # run_training "train-4deg-daily-era5-only.yaml" "train-4deg-daily-era5-only-rs0" 1
-# run_training "train-4deg-daily-era5-only-no-co2.yaml" "train-4deg-daily-era5-only-no-co2-rs0" 1
-# run_training "train-4deg-daily-era5-only-no-co2-tnorm.yaml" "train-4deg-daily-era5-only-no-co2-rs0-tnorm" 1
+# run_training "train-4deg-daily-era5-only-tnorm.yaml" "train-4deg-daily-era5-only-rs0-tnorm" 1
 run_training "train-4deg-daily-era5-only-local-mlp.yaml" "train-4deg-daily-era5-only-local-mlp" 1
 run_training "train-4deg-daily-era5-only-local-mlp-diagnostics.yaml" "train-4deg-daily-era5-only-local-mlp-diagnostics" 1
 run_training "train-4deg-daily-era5-only-ankur-local-mlp-diagnostics.yaml" "train-4deg-daily-era5-only-ankur-local-mlp-diagnostics" 1
 # run_training "train-4deg-daily-era5-only-local-mlp.yaml" "train-4deg-daily-era5-only-local-mlp-rs0" 1
-# run_training "train-4deg-daily-labels.yaml" "train-4deg-daily-labels-rs0" 1
-# run_training "train-4deg-6hourly-era5-only.yaml" "train-4deg-6hourly-era5-only-rs0" 1
-# run_training "train-1deg-6hourly-era5-only.yaml" "train-1deg-6hourly-era5-only-rs0" 4
-# run_training "train-1deg-daily-era5-only.yaml" "train-1deg-daily-era5-only-rs0" 4
+# run_training "train-4deg-daily-labels-co2.yaml" "train-4deg-daily-labels-co2-rs0" 1
+# run_training "train-4deg-6hourly-era5-only-co2.yaml" "train-4deg-6hourly-era5-only-co2-rs0" 1
+# run_training "train-1deg-6hourly-era5-only-co2.yaml" "train-1deg-6hourly-era5-only-co2-rs0" 4
+# run_training "train-1deg-daily-era5-only-co2.yaml" "train-1deg-daily-era5-only-co2-rs0" 4
+# run_training "train-1deg-daily-era5-only-tnorm.yaml" "train-1deg-daily-era5-only-rs0-tnorm" 4

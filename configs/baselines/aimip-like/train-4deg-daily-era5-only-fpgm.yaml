@@ -351,6 +351,7 @@ stepper:
           use_mlp: true
           num_layers: 8
           operator_type: dhconv
+          filter_preserves_global_mean: true
       normalization:
         network:
           global_means_path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/centering.nc
