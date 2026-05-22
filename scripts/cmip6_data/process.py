@@ -283,9 +283,18 @@ def _scan_all_sidecars(output_directory: str) -> list[DatasetIndexRow]:
     paths = fs.glob(pattern)
     rows: list[DatasetIndexRow] = []
     allowed = {f.name for f in dataclasses.fields(DatasetIndexRow)}
+    required = {
+        f.name
+        for f in dataclasses.fields(DatasetIndexRow)
+        if f.default is dataclasses.MISSING and f.default_factory is dataclasses.MISSING  # type: ignore[misc]
+    }
     for p in paths:
         with fs.open(p, "r") as f:
             data = json.load(f)
+        if not required.issubset(data):
+            # Non-dataset sidecar (e.g. external_forcings/<exp>/metadata.json);
+            # skip rather than fail.
+            continue
         filtered = {k: v for k, v in data.items() if k in allowed}
         rows.append(DatasetIndexRow(**filtered))
     return rows
