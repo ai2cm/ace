@@ -13,6 +13,7 @@ from processing import (
     DuplicateTimestampsError,
     SimulationBoundaryError,
     _has_bounds,
+    apply_output_renames,
     apply_target_land_mask,
     apply_time_subset,
     causal_monthly_to_daily,
@@ -20,6 +21,7 @@ from processing import (
     clip_date_for_calendar,
     compute_below_surface_mask,
     compute_derived_layer_T,
+    compute_ocean_fraction,
     emit_mask_and_fill,
     fill_derived_layer_T,
     fill_horizontal_diffuse,
@@ -375,13 +377,17 @@ def test_sanity_checks_flag_out_of_range():
 # ---------------------------------------------------------------------------
 
 
-def test_clamp_static_fractions_clips_overshoot():
+def test_clamp_static_fractions_clips_overshoot_and_renames():
     ds = xr.Dataset(
         {"sftlf": (("lat", "lon"), np.array([[0.0, 50.0], [100.0, 114.0]]))},
     )
     clamped, warnings = clamp_static_fractions(ds)
-    assert float(clamped["sftlf"].max()) == 100.0
-    assert float(clamped["sftlf"].min()) == 0.0
+    # sftlf is renamed to land_fraction and rescaled to [0, 1].
+    assert "sftlf" not in clamped.data_vars
+    assert "land_fraction" in clamped.data_vars
+    assert float(clamped["land_fraction"].max()) == 1.0
+    assert float(clamped["land_fraction"].min()) == 0.0
+    assert clamped["land_fraction"].attrs["original_name"] == "sftlf"
     assert any("sftlf" in w and "114" in w for w in warnings)
 
 
@@ -391,7 +397,9 @@ def test_clamp_static_fractions_silent_when_in_range():
     )
     clamped, warnings = clamp_static_fractions(ds)
     assert warnings == []
-    np.testing.assert_array_equal(clamped["sftlf"].values, ds["sftlf"].values)
+    np.testing.assert_allclose(
+        clamped["land_fraction"].values, ds["sftlf"].values / 100.0
+    )
 
 
 def test_clamp_static_fractions_noop_without_sftlf():
@@ -399,6 +407,7 @@ def test_clamp_static_fractions_noop_without_sftlf():
     clamped, warnings = clamp_static_fractions(ds)
     assert warnings == []
     assert "sftlf" not in clamped.data_vars
+    assert "land_fraction" not in clamped.data_vars
 
 
 # ---------------------------------------------------------------------------
@@ -939,23 +948,137 @@ def test_regrid_unstructured_streams_through_dask():
 
 def test_apply_target_land_mask_nans_above_threshold():
     da = xr.DataArray(np.full((3, 4, 5), 290.0), dims=("time", "lat", "lon"))
-    sftlf = xr.DataArray(
-        np.where(np.arange(20).reshape(4, 5) >= 10, 100.0, 0.0),
+    # Land fraction in [0, 1]; > 0.5 → land.
+    land_fraction = xr.DataArray(
+        np.where(np.arange(20).reshape(4, 5) >= 10, 1.0, 0.0),
         dims=("lat", "lon"),
     )
-    masked = apply_target_land_mask(da, sftlf, threshold=50.0)
+    masked = apply_target_land_mask(da, land_fraction)
     assert masked.shape == da.shape
-    # Bottom half NaN, top half kept.
     assert int(np.isnan(masked.isel(time=0).values).sum()) == 10
     assert float(masked.isel(time=0, lat=0, lon=0)) == 290.0
 
 
 def test_apply_target_land_mask_threshold_respected():
     da = xr.DataArray(np.ones((2, 3)) * 5.0, dims=("lat", "lon"))
-    sftlf = xr.DataArray([[10.0, 60.0, 90.0], [40.0, 49.0, 100.0]], dims=("lat", "lon"))
-    masked = apply_target_land_mask(da, sftlf, threshold=50.0)
+    land_fraction = xr.DataArray(
+        [[0.10, 0.60, 0.90], [0.40, 0.49, 1.00]], dims=("lat", "lon")
+    )
+    masked = apply_target_land_mask(da, land_fraction)
     expected_nan = np.array([[False, True, True], [False, False, True]])
     np.testing.assert_array_equal(np.isnan(masked.values), expected_nan)
+
+
+# ---------------------------------------------------------------------------
+# apply_output_renames
+# ---------------------------------------------------------------------------
+
+
+def test_apply_output_renames_renames_and_tags():
+    ds = xr.Dataset(
+        {
+            "rlds": (("lat", "lon"), np.full((2, 3), 250.0)),
+            "rsds": (("lat", "lon"), np.full((2, 3), 200.0)),
+            "tas": (("lat", "lon"), np.full((2, 3), 280.0)),
+        }
+    )
+    out = apply_output_renames(ds, {"rlds": "DLWRFsfc", "rsds": "DSWRFsfc"})
+    assert set(out.data_vars) == {"DLWRFsfc", "DSWRFsfc", "tas"}
+    assert out["DLWRFsfc"].attrs["original_name"] == "rlds"
+    assert out["DSWRFsfc"].attrs["original_name"] == "rsds"
+    assert "original_name" not in out["tas"].attrs
+
+
+def test_apply_output_renames_skips_absent_keys():
+    ds = xr.Dataset({"pr": (("lat", "lon"), np.zeros((2, 3)))})
+    out = apply_output_renames(ds, {"rlds": "DLWRFsfc", "pr": "PRATEsfc"})
+    assert "PRATEsfc" in out.data_vars
+    assert "DLWRFsfc" not in out.data_vars
+
+
+# ---------------------------------------------------------------------------
+# compute_ocean_fraction
+# ---------------------------------------------------------------------------
+
+
+def test_compute_ocean_fraction_basic():
+    land = xr.DataArray(np.array([[0.0, 0.5, 1.0]]), dims=("lat", "lon"))
+    ice = xr.DataArray(np.array([[0.2, 0.1, 0.0]]), dims=("lat", "lon"))
+    ocean = compute_ocean_fraction(land, ice, "simon_ocean_fraction")
+    np.testing.assert_allclose(ocean.values, [[0.8, 0.4, 0.0]])
+    assert ocean.name == "simon_ocean_fraction"
+    assert ocean.attrs["original_name"] == "derived"
+
+
+def test_compute_ocean_fraction_clips_to_unit_interval():
+    # land + ice > 1 (coastal sliver case) → ocean clipped to 0
+    land = xr.DataArray(np.array([0.7]), dims=("lat",))
+    ice = xr.DataArray(np.array([0.6]), dims=("lat",))
+    ocean = compute_ocean_fraction(land, ice, "x")
+    np.testing.assert_array_equal(ocean.values, [0.0])
+
+
+def test_compute_ocean_fraction_broadcasts_time():
+    """Static land + time-varying sea-ice should give time-varying ocean."""
+    land = xr.DataArray(np.array([[0.0, 0.0]]), dims=("lat", "lon"))
+    ice = xr.DataArray(
+        np.array([[[0.3, 0.5]], [[0.6, 0.4]]]),
+        dims=("time", "lat", "lon"),
+    )
+    ocean = compute_ocean_fraction(land, ice, "siday_ocean_fraction")
+    assert ocean.dims == ("time", "lat", "lon")
+    np.testing.assert_allclose(ocean.isel(time=0).values, [[0.7, 0.5]])
+    np.testing.assert_allclose(ocean.isel(time=1).values, [[0.4, 0.6]])
+
+
+# ---------------------------------------------------------------------------
+# finalize_surface_and_ocean_variable — unit_scale + original_name attr
+# ---------------------------------------------------------------------------
+
+
+def test_finalize_surface_and_ocean_applies_unit_scale():
+    """``simon_sea_ice_fraction`` should be scaled by 0.01 (%-→fraction)."""
+    import cftime
+    from config import SURFACE_AND_OCEAN_BY_OUTPUT
+
+    h = SURFACE_AND_OCEAN_BY_OUTPUT["simon_sea_ice_fraction"]
+    assert h.unit_scale == 0.01
+    monthly_times = [cftime.DatetimeNoLeap(2010, m, 15) for m in range(1, 4)]
+    # CMIP6 siconc is in [0, 100]; 75% over the ocean cells, NaN over land.
+    arr = np.full((3, 4, 8), 75.0)
+    arr[:, :2, :] = np.nan  # land cells
+    monthly = xr.DataArray(
+        arr, dims=("time", "lat", "lon"), coords={"time": monthly_times}
+    )
+    daily_times = xr.date_range(
+        "2010-03-01", "2010-03-05", freq="D", use_cftime=True, calendar="noleap"
+    )
+    outputs = finalize_surface_and_ocean_variable(
+        monthly, h, xr.DataArray(daily_times, dims=("time",))
+    )
+    # Output should be the previous-month value (Feb = 75) scaled to 0.75.
+    da = outputs["simon_sea_ice_fraction"]
+    assert float(da.where(~np.isnan(da)).max()) <= 1.0 + 1e-6
+    np.testing.assert_allclose(float(da.where(~np.isnan(da)).mean()), 0.75)
+    assert da.attrs["original_name"] == "siconc"
+
+
+def test_finalize_surface_and_ocean_atmos_kind_carries_original_name():
+    from config import SURFACE_AND_OCEAN_BY_OUTPUT
+
+    h = SURFACE_AND_OCEAN_BY_OUTPUT["eday_ts"]
+    daily_times = xr.date_range(
+        "2010-01-01", "2010-01-05", freq="D", use_cftime=True, calendar="noleap"
+    )
+    da = xr.DataArray(
+        np.full((5, 4, 8), 280.0),
+        dims=("time", "lat", "lon"),
+        coords={"time": daily_times},
+    )
+    outputs = finalize_surface_and_ocean_variable(
+        da, h, xr.DataArray(daily_times, dims=("time",))
+    )
+    assert outputs["eday_ts"].attrs["original_name"] == "ts"
 
 
 if __name__ == "__main__":

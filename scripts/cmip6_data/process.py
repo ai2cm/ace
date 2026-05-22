@@ -46,7 +46,12 @@ import pandas as pd
 import xarray as xr
 
 sys.path.insert(0, str(Path(__file__).parent))
-from config import SURFACE_AND_OCEAN_VARIABLES, ProcessConfig, make_label  # noqa: E402
+from config import (  # noqa: E402
+    CMIP_TO_OUTPUT_RENAMES,
+    SURFACE_AND_OCEAN_VARIABLES,
+    ProcessConfig,
+    make_label,
+)
 from external_forcings import attach_external_forcings  # noqa: E402
 from grid import make_target_grid  # noqa: E402
 from index import DatasetIndexRow, write_index, write_sidecar  # noqa: E402
@@ -54,11 +59,13 @@ from processing import (  # noqa: E402
     UNSTRUCTURED_METHOD,
     DuplicateTimestampsError,
     SimulationBoundaryError,
+    apply_output_renames,
     apply_target_land_mask,
     apply_time_subset,
     clamp_static_fractions,
     compute_below_surface_mask,
     compute_derived_layer_T,
+    compute_ocean_fraction,
     fill_derived_layer_T,
     finalize_surface_and_ocean_variable,
     flatten_plev_variables,
@@ -598,22 +605,23 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
                 # Unstructured ocean sources (FESOM) have no land cells,
                 # so xesmf's locstream nearest fills every target cell
                 # with the nearest ocean value. Restore the NaN-over-land
-                # pattern from the target-grid sftlf so emit_mask_and_fill
-                # produces a correct mask. Without sftlf we skip masking
-                # and warn — the variable is still valid over ocean.
+                # pattern from the target-grid land_fraction so
+                # emit_mask_and_fill produces a correct mask. Without
+                # land_fraction we skip masking and warn — the variable
+                # is still valid over ocean.
                 if methods_used.get(h.var_id) == UNSTRUCTURED_METHOD and h.kind in (
                     "ocean_surface",
                     "seaice_surface",
                 ):
-                    if static_ds is not None and "sftlf" in static_ds:
+                    if static_ds is not None and "land_fraction" in static_ds:
                         regridded_var = apply_target_land_mask(
-                            regridded_var, static_ds["sftlf"]
+                            regridded_var, static_ds["land_fraction"]
                         )
                     else:
                         row.warnings.append(
                             f"{h.output_name}: unstructured source regridded "
-                            "via nearest_s2d but no target sftlf available; "
-                            "mask channel will be all-ones"
+                            "via nearest_s2d but no target land_fraction "
+                            "available; mask channel will be all-ones"
                         )
                 outputs = finalize_surface_and_ocean_variable(
                     regridded_var,
@@ -638,9 +646,25 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
                 day_regridded[name] = da
 
         # 14. Attach static fields (broadcast along time implicitly at read).
+        # After clamp_static_fractions, the static set holds ``land_fraction``
+        # (rescaled to [0, 1]) instead of CMIP's ``sftlf``.
         if static_ds is not None:
             for v in static_ds.data_vars:
                 day_regridded[v] = static_ds[v]
+
+        # 14a. Derive ``{simon,siday}_ocean_fraction`` from
+        # ``land_fraction`` and the corresponding sea-ice fraction so
+        # the (land, ocean, sea-ice) triple is in the output. Skipped
+        # silently if either input isn't published for this dataset.
+        if "land_fraction" in day_regridded:
+            for sif, ofv in (
+                ("simon_sea_ice_fraction", "simon_ocean_fraction"),
+                ("siday_sea_ice_fraction", "siday_ocean_fraction"),
+            ):
+                if sif in day_regridded:
+                    day_regridded[ofv] = compute_ocean_fraction(
+                        day_regridded["land_fraction"], day_regridded[sif], ofv
+                    )
 
         # 14b. External forcings (input4MIPs / LUH2). Currently CO2 only.
         # The per-scenario zarr is staged once by ``external_forcings.py``
@@ -690,6 +714,13 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
 
         # 19. Flatten plev dimensions into pressure-named 2D variables.
         day_regridded = flatten_plev_variables(day_regridded)
+
+        # 19a. Rename radiative-flux variables to the upstream-baseline
+        # convention (``rsds`` → ``DSWRFsfc`` etc.) so downstream training
+        # can share variable names with SHIELD/ERA5 datasets. Each renamed
+        # variable carries ``original_name`` pointing back to the CMIP6
+        # source name.
+        day_regridded = apply_output_renames(day_regridded, CMIP_TO_OUTPUT_RENAMES)
 
         # 20. Write zarr + record variables.
         day_regridded.attrs["label"] = label

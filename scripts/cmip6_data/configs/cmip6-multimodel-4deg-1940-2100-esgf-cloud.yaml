@@ -31,9 +31,9 @@ overrides:
   - match:
       source_id: AWI-ESM-1-1-LR
     skip_surface_and_ocean_variables:
-      - simon_siconc
+      - simon_sea_ice_fraction
       - simon_sitemptop
-      - siday_siconc
+      - siday_sea_ice_fraction
       - siday_sitemptop
       - siday_sithick
       - oday_tos

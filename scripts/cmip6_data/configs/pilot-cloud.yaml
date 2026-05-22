@@ -29,4 +29,4 @@ overrides:
   # either OOMs or hangs indefinitely in the Argo pod's memory limit.
   - match:
       source_id: AWI-ESM-1-1-LR
-    skip_surface_and_ocean_variables: [simon_siconc, simon_sitemptop, siday_siconc, siday_sitemptop, siday_sithick]
+    skip_surface_and_ocean_variables: [simon_sea_ice_fraction, simon_sitemptop, siday_sea_ice_fraction, siday_sitemptop, siday_sithick]

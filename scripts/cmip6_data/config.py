@@ -56,6 +56,28 @@ OPTIONAL_VARIABLES: list[str] = [
     "vas",
 ]
 
+# Renames applied to the final output variables so that radiative-flux
+# names match the convention used by upstream baseline datasets
+# (SHIELD AMIP, ERA5, etc.). Pipelines that consume both should be able
+# to point at the same name and find the same physical quantity. The
+# rename is applied just before write; each renamed variable carries
+# an ``original_name`` attribute with the bare CMIP6 source name so
+# the provenance back to CMIP6 is preserved. Surface-and-ocean
+# variables keep their source-prefixed names (``eday_ts``,
+# ``simon_sea_ice_fraction``, etc.) because the prefix encodes useful
+# cadence/source information that the baseline convention drops.
+CMIP_TO_OUTPUT_RENAMES: dict[str, str] = {
+    # Surface radiation: down/upward longwave/shortwave at the surface.
+    "rlds": "DLWRFsfc",
+    "rlus": "ULWRFsfc",
+    "rsds": "DSWRFsfc",
+    "rsus": "USWRFsfc",
+    # TOA radiation: down/upward shortwave + upward longwave (OLR).
+    "rsdt": "DSWRFtoa",
+    "rsut": "USWRFtoa",
+    "rlut": "ULWRFtoa",
+}
+
 # Variables tracked by the inventory for visibility, but not required or
 # used in processing. ``ta`` and ``ps`` are here so inventory summaries
 # show their (sparse) coverage even though we substitute them with
@@ -104,6 +126,11 @@ class SurfaceAndOceanVariable:
     output_name: str
     cadence: str
     kind: str
+    # Multiplicative scale applied to the source values before writing.
+    # Set to 0.01 for sea-ice fractions (CMIP6 ``siconc`` is a percent;
+    # we emit fractions on [0, 1] for consistency with land/ocean
+    # fraction). Default 1.0 = no rescaling.
+    unit_scale: float = 1.0
 
     def __post_init__(self) -> None:
         if self.kind not in _SURFACE_AND_OCEAN_KINDS:
@@ -128,13 +155,23 @@ SURFACE_AND_OCEAN_VARIABLES: tuple[SurfaceAndOceanVariable, ...] = (
     # Sea-ice fraction & top temperature (monthly + daily). Both NaN over
     # land; daily is broadly published on ESGF (~25/37).
     SurfaceAndOceanVariable(
-        "SImon", "siconc", "simon_siconc", "monthly_causal", "seaice_surface"
+        "SImon",
+        "siconc",
+        "simon_sea_ice_fraction",
+        "monthly_causal",
+        "seaice_surface",
+        unit_scale=0.01,  # CMIP6 ``siconc`` is %; emit [0, 1] fraction.
     ),
     SurfaceAndOceanVariable(
         "SImon", "sitemptop", "simon_sitemptop", "monthly_causal", "seaice_surface"
     ),
     SurfaceAndOceanVariable(
-        "SIday", "siconc", "siday_siconc", "daily", "seaice_surface"
+        "SIday",
+        "siconc",
+        "siday_sea_ice_fraction",
+        "daily",
+        "seaice_surface",
+        unit_scale=0.01,
     ),
     SurfaceAndOceanVariable(
         "SIday", "sitemptop", "siday_sitemptop", "daily", "seaice_surface"

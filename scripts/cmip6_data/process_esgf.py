@@ -42,6 +42,7 @@ import xarray as xr
 
 sys.path.insert(0, str(Path(__file__).parent))
 from config import (  # noqa: E402
+    CMIP_TO_OUTPUT_RENAMES,
     SURFACE_AND_OCEAN_VARIABLES,
     ESGFProcessConfig,
     make_label,
@@ -62,11 +63,13 @@ from processing import (  # noqa: E402
     UNSTRUCTURED_METHOD,
     DuplicateTimestampsError,
     SimulationBoundaryError,
+    apply_output_renames,
     apply_target_land_mask,
     apply_time_subset,
     clamp_static_fractions,
     compute_below_surface_mask,
     compute_derived_layer_T,
+    compute_ocean_fraction,
     fill_derived_layer_T,
     finalize_surface_and_ocean_variable,
     flatten_plev_variables,
@@ -585,15 +588,15 @@ def process_one_esgf(
                     "ocean_surface",
                     "seaice_surface",
                 ):
-                    if static_ds is not None and "sftlf" in static_ds:
+                    if static_ds is not None and "land_fraction" in static_ds:
                         regridded_var = apply_target_land_mask(
-                            regridded_var, static_ds["sftlf"]
+                            regridded_var, static_ds["land_fraction"]
                         )
                     else:
                         row.warnings.append(
                             f"{h.output_name}: unstructured source regridded "
-                            "via nearest_s2d but no target sftlf available; "
-                            "mask channel will be all-ones"
+                            "via nearest_s2d but no target land_fraction "
+                            "available; mask channel will be all-ones"
                         )
                 outputs = finalize_surface_and_ocean_variable(
                     regridded_var,
@@ -620,6 +623,19 @@ def process_one_esgf(
         if static_ds is not None:
             for v in static_ds.data_vars:
                 day_regridded[v] = static_ds[v]
+
+        # 9a. Derive {simon,siday}_ocean_fraction from land_fraction and
+        # the corresponding sea-ice fraction (see matching block in
+        # process.py).
+        if "land_fraction" in day_regridded:
+            for sif, ofv in (
+                ("simon_sea_ice_fraction", "simon_ocean_fraction"),
+                ("siday_sea_ice_fraction", "siday_ocean_fraction"),
+            ):
+                if sif in day_regridded:
+                    day_regridded[ofv] = compute_ocean_fraction(
+                        day_regridded["land_fraction"], day_regridded[sif], ofv
+                    )
 
         # 9b. External forcings (input4MIPs / LUH2). See the matching
         # block in process.py — staging is done once globally by
@@ -658,6 +674,10 @@ def process_one_esgf(
 
         # 14. Flatten plev.
         day_regridded = flatten_plev_variables(day_regridded)
+
+        # 14a. Rename radiative-flux variables to the baseline
+        # convention (see process.py for rationale).
+        day_regridded = apply_output_renames(day_regridded, CMIP_TO_OUTPUT_RENAMES)
 
         # 15. Write zarr.
         day_regridded.attrs["label"] = label

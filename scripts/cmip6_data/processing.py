@@ -571,10 +571,65 @@ def causal_monthly_to_daily(
     return out.assign_coords(time=daily_time.values).rename({"time": "time"})
 
 
-def apply_target_land_mask(
-    da: xr.DataArray, sftlf: xr.DataArray, threshold: float = 50.0
+def apply_output_renames(ds: xr.Dataset, rename_map: dict[str, str]) -> xr.Dataset:
+    """Rename variables according to ``rename_map`` and tag each renamed
+    variable with an ``original_name`` attribute pointing to its bare
+    CMIP6 source name.
+
+    Variables not in ``rename_map`` are left alone. Variables in
+    ``rename_map`` that aren't in ``ds`` are silently skipped (the
+    map covers all radiative-flux renames; many models don't publish
+    every variable).
+    """
+    applicable = {src: dst for src, dst in rename_map.items() if src in ds.data_vars}
+    if not applicable:
+        return ds
+    out = ds.rename(applicable)
+    for src, dst in applicable.items():
+        out[dst].attrs["original_name"] = src
+    return out
+
+
+def compute_ocean_fraction(
+    land_fraction: xr.DataArray,
+    sea_ice_fraction: xr.DataArray,
+    name: str,
 ) -> xr.DataArray:
-    """NaN-fill cells where ``sftlf > threshold`` (i.e. mostly land).
+    """Derive ``ocean_fraction = 1 - land_fraction - sea_ice_fraction``
+    on the target grid, clipped to ``[0, 1]``.
+
+    ``land_fraction`` is static (``(lat, lon)``) and
+    ``sea_ice_fraction`` is time-varying (``(time, lat, lon)``); xarray
+    broadcasts the static land mask across time automatically.
+
+    Clipping handles two cases without producing negative or >1 values:
+    coastal cells where the regridder's residual sliver of "land" and
+    full sea-ice add to slightly over 1, and the (rare) cells where
+    a model publishes ice fraction over a cell its own ``sftlf`` calls
+    100% land.
+    """
+    ocean = (1.0 - land_fraction - sea_ice_fraction).clip(0.0, 1.0)
+    # Preserve the sea-ice operand's dim ordering — that's the one with
+    # the time axis (when present), and downstream zarr writers expect
+    # ``(time, lat, lon)`` rather than xarray's broadcast default.
+    ocean = ocean.transpose(*sea_ice_fraction.dims)
+    out = ocean.rename(name)
+    out.attrs["original_name"] = "derived"
+    out.attrs["long_name"] = (
+        "ocean fraction = 1 - land_fraction - sea_ice_fraction (clipped to [0,1])"
+    )
+    out.attrs["units"] = "1"
+    return out
+
+
+def apply_target_land_mask(
+    da: xr.DataArray, land_fraction: xr.DataArray, threshold: float = 0.5
+) -> xr.DataArray:
+    """NaN-fill cells where ``land_fraction > threshold`` (mostly land).
+
+    ``land_fraction`` is on [0, 1] (post ``clamp_static_fractions``
+    rescale + rename of ``sftlf``); the default ``threshold=0.5``
+    matches the pre-rescale ``sftlf > 50`` convention.
 
     For ocean/sea-ice variables whose source grid has no land cells
     (FESOM and other unstructured ocean grids), the regridded output
@@ -583,7 +638,7 @@ def apply_target_land_mask(
     mask restores the NaN-over-land pattern downstream consumers
     expect, including ``emit_mask_and_fill``.
     """
-    return da.where(sftlf <= threshold)
+    return da.where(land_fraction <= threshold)
 
 
 def finalize_surface_and_ocean_variable(
@@ -613,13 +668,20 @@ def finalize_surface_and_ocean_variable(
     else:
         raise ValueError(f"unsupported cadence: {var.cadence}")
 
+    if var.unit_scale != 1.0:
+        on_daily = on_daily * var.unit_scale
+
     output: dict[str, xr.DataArray] = {}
     if var.kind in ("ocean_surface", "seaice_surface"):
         filled, mask = emit_mask_and_fill(on_daily, fill_iterations=fill_iterations)
-        output[var.output_name] = filled.rename(var.output_name)
+        renamed = filled.rename(var.output_name)
+        renamed.attrs["original_name"] = var.var_id
+        output[var.output_name] = renamed
         output[f"{var.output_name}_mask"] = mask.rename(f"{var.output_name}_mask")
     else:  # atmos_surface (Amon.ts, Eday.ts) — no per-cell mask needed.
-        output[var.output_name] = on_daily.rename(var.output_name)
+        renamed = on_daily.rename(var.output_name)
+        renamed.attrs["original_name"] = var.var_id
+        output[var.output_name] = renamed
     return output
 
 
@@ -782,24 +844,29 @@ _SANITY_RANGES: dict[str, tuple[float, float]] = {
     "tas": (180.0, 340.0),
     "psl": (8.0e4, 1.1e5),
     "pr": (-_EPS, 0.01),
-    "rsdt": (-_EPS, 600.0),
-    "rsut": (-_EPS, 600.0),
-    "rlut": (-_EPS, 400.0),
-    "rsds": (-_EPS, 600.0),
-    "rsus": (-_EPS, 600.0),
-    "rlds": (-_EPS, 600.0),
-    "rlus": (-_EPS, 700.0),
+    # Radiative fluxes (post-rename — see ``CMIP_TO_OUTPUT_RENAMES``).
+    "DSWRFtoa": (-_EPS, 600.0),
+    "USWRFtoa": (-_EPS, 600.0),
+    "ULWRFtoa": (-_EPS, 400.0),
+    "DSWRFsfc": (-_EPS, 600.0),
+    "USWRFsfc": (-_EPS, 600.0),
+    "DLWRFsfc": (-_EPS, 600.0),
+    "ULWRFsfc": (-_EPS, 700.0),
     "hfss": (-1000.0, 1000.0),
     "hfls": (-500.0, 1200.0),
-    "sftlf": (-_EPS, 100.0 + _EPS),
+    # Land fraction is rescaled to [0, 1] and renamed from ``sftlf``.
+    "land_fraction": (-_EPS, 1.0 + _EPS),
     "orog": (-500.0, 9000.0),
     # Surface-and-ocean variables — source-prefixed output names.
     # Atmospheric surface T (always K).
     "amon_ts": (180.0, 340.0),
     "eday_ts": (180.0, 340.0),
-    # Sea-ice fractions (0–100%).
-    "simon_siconc": (-_EPS, 100.0 + _EPS),
-    "siday_siconc": (-_EPS, 100.0 + _EPS),
+    # Sea-ice fractions (rescaled to [0, 1] from CMIP6 % at ingest).
+    "simon_sea_ice_fraction": (-_EPS, 1.0 + _EPS),
+    "siday_sea_ice_fraction": (-_EPS, 1.0 + _EPS),
+    # Derived ocean fraction: 1 - land - sea_ice (clipped).
+    "simon_ocean_fraction": (-_EPS, 1.0 + _EPS),
+    "siday_ocean_fraction": (-_EPS, 1.0 + _EPS),
     # Sea-ice thickness in metres — Antarctic multi-year ice rarely
     # exceeds 20 m; allow some headroom for ridge models.
     "siday_sithick": (-_EPS, 30.0),
@@ -880,13 +947,20 @@ def _time_continuity_messages(ds: xr.Dataset) -> list[str]:
 
 
 def clamp_static_fractions(ds: xr.Dataset) -> tuple[xr.Dataset, list[str]]:
-    """Clip ``sftlf`` to [0, 100] %.
+    """Clip ``sftlf`` to [0, 100] %, rescale to [0, 1], and rename to
+    ``land_fraction``.
 
     Conservative regridding can leave ``sftlf`` slightly above 100% in
     polar rows for some source grids (e.g. CESM2-FV2 up to ~114% in the
     southernmost row). The overshoot is a regridder pole-handling
     artifact, not physical; ``sftlf`` is a fraction with no compensating
     variable in the pipeline, so clipping doesn't break any budget.
+
+    Output is rescaled to [0, 1] and renamed to ``land_fraction`` so the
+    convention matches upstream baseline datasets (SHIELD/ERA5 already
+    use 0–1 ``land_fraction`` / ``ocean_fraction`` / ``sea_ice_fraction``).
+    The original CMIP6 name is preserved in the ``original_name``
+    attribute so the provenance back to the source is clear.
 
     Returns the dataset and a list of warnings naming the worst
     pre-clip overshoot so the regridder defect remains visible.
@@ -901,7 +975,11 @@ def clamp_static_fractions(ds: xr.Dataset) -> tuple[xr.Dataset, list[str]]:
         warnings.append(
             f"sftlf clipped to [0, 100]: pre-clip range " f"[{vmin:.3g}, {vmax:.3g}]"
         )
-    ds = ds.assign(sftlf=arr.clip(0.0, 100.0))
+    land_fraction = (arr.clip(0.0, 100.0) / 100.0).rename("land_fraction")
+    land_fraction.attrs = dict(arr.attrs)
+    land_fraction.attrs["original_name"] = "sftlf"
+    land_fraction.attrs["units"] = "1"
+    ds = ds.drop_vars("sftlf").assign(land_fraction=land_fraction)
     return ds, warnings
 
 
@@ -1020,6 +1098,8 @@ __all__ = [
     "is_unstructured_source",
     "UNSTRUCTURED_METHOD",
     "apply_target_land_mask",
+    "apply_output_renames",
+    "compute_ocean_fraction",
     "regrid_variables",
     "PLEV8_DEFAULT_HPA",
     "normalize_plev",
