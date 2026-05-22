@@ -415,7 +415,13 @@ def main() -> None:
                 n_error += 1
             rows.extend(job_rows)
     else:
-        with ProcessPoolExecutor(max_workers=workers) as pool:
+        # ``spawn`` (not the Linux default ``fork``) — gcsfs holds gRPC
+        # threads that abort with "Check failed: next_worker->state ==
+        # KICKED" when copied across fork().
+        import multiprocessing as mp
+
+        ctx = mp.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as pool:
             futures = {pool.submit(_process_one, *job): job for job in jobs}
             for i, fut in enumerate(as_completed(futures)):
                 status, job_rows, msg = fut.result()
