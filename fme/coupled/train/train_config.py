@@ -286,6 +286,10 @@ class TrainConfig:
         return self.n_coupled_steps
 
     @property
+    def pre_cooldown_checkpoint_epoch(self) -> int | None:
+        return None
+
+    @property
     def checkpoint_dir(self) -> str:
         return os.path.join(self.experiment_dir, "training_checkpoints")
 

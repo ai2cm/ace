@@ -171,6 +171,9 @@ class TrainConfigProtocol(Protocol):
     @property
     def lr_tuning(self) -> LRTuningConfig | None: ...
 
+    @property
+    def pre_cooldown_checkpoint_epoch(self) -> int | None: ...
+
 
 PS = TypeVar("PS", contravariant=True)  # prognostic state
 TO = TypeVar("TO", bound="TrainOutputABC")  # train output
@@ -200,6 +203,10 @@ class CheckpointPaths:
     @property
     def best_inference_checkpoint_path(self) -> str:
         return os.path.join(self.checkpoint_dir, "best_inference_ckpt.tar")
+
+    @property
+    def pre_cooldown_checkpoint_path(self) -> str:
+        return os.path.join(self.checkpoint_dir, "pre_cooldown_ckpt.tar")
 
     def epoch_checkpoint_path(self, epoch: int) -> str:
         return os.path.join(self.checkpoint_dir, f"ckpt_{epoch:04d}.tar")
@@ -768,6 +775,15 @@ class Trainer:
             )
             logging.info(f"Saving epoch checkpoint to {epoch_checkpoint_path}")
             self.save_checkpoint(epoch_checkpoint_path, include_optimization=True)
+        if (
+            self.config.pre_cooldown_checkpoint_epoch is not None
+            and self._epochs_trained == self.config.pre_cooldown_checkpoint_epoch
+        ):
+            logging.info(
+                "Saving pre-cooldown checkpoint to "
+                f"{self.paths.pre_cooldown_checkpoint_path}"
+            )
+            self.save_checkpoint(self.paths.pre_cooldown_checkpoint_path)
 
 
 def inference_one_epoch(

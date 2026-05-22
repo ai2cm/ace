@@ -21,6 +21,10 @@ class StepArgs:
         data_mask: Per-variable, per-sample masks indicating variable
             presence. Keys are variable names, values are [n_batch] bool
             tensors where True means present and False means masked.
+        channel_mask: Like data_mask but also includes augmentation-induced
+            masking (e.g. NaN-filled IC variables). Used only to build
+            channel-mask indicator inputs; does not affect loss weighting.
+            Falls back to data_mask when None.
     """
 
     def __init__(
@@ -29,11 +33,13 @@ class StepArgs:
         next_step_input_data: TensorMapping,
         labels: BatchLabels | None = None,
         data_mask: TensorMapping | None = None,
+        channel_mask: TensorMapping | None = None,
     ):
         self.input = input
         self.next_step_input_data = next_step_input_data
         self.labels = labels
         self.data_mask = data_mask
+        self.channel_mask = channel_mask
 
     def apply_input_process_func(
         self, func: Callable[[TensorMapping], TensorMapping]
@@ -45,4 +51,5 @@ class StepArgs:
             next_step_input_data=next_step_input_data,
             labels=self.labels,
             data_mask=self.data_mask,
+            channel_mask=self.channel_mask,
         )

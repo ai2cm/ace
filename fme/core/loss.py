@@ -108,6 +108,11 @@ class LossOutput:
         assert self._per_channel is not None and self._counts is not None
         return self._per_channel, self._counts
 
+    def _n_active_channels(self) -> int:
+        if self._mask is not None:
+            return int((self._mask.sum(dim=0) > 0).sum().item())
+        return len(self._channel_names)
+
     def total(self) -> torch.Tensor:
         """Scalar loss used as the optimization target.
 
@@ -181,6 +186,33 @@ class NaNLoss(torch.nn.Module):
 
     def forward(self, input: torch.Tensor, target: torch.Tensor) -> list[LossComponent]:
         return [StandardLoss(torch.tensor(torch.nan))]
+
+
+def _build_channel_mask(
+    data_mask: TensorMapping,
+    names: list[str],
+    device: torch.device,
+    batch_size: int,
+) -> torch.Tensor:
+    """Build a ``(B, C)`` float mask from per-variable boolean masks.
+
+    Args:
+        data_mask: Per-variable boolean masks of shape ``[batch]``.
+        names: Channel names in packing order.
+        device: Device for the output tensor.
+        batch_size: Size of the batch dimension.
+
+    Returns:
+        Float tensor of shape ``(batch_size, len(names))`` with 1.0
+        for present entries and 0.0 for absent ones.
+    """
+    masks = []
+    for name in names:
+        if name in data_mask:
+            masks.append(data_mask[name].to(device=device, dtype=torch.float))
+        else:
+            masks.append(torch.ones(batch_size, device=device, dtype=torch.float))
+    return torch.stack(masks, dim=1)
 
 
 class WeightedMappingLoss:

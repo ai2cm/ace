@@ -716,6 +716,10 @@ class XarrayDataset(DatasetABC):
         for name in self._names:
             if name in StaticDerivedData.names:
                 result[name] = StaticDerivedData.metadata[name]
+            elif name not in ds and self._allow_missing_variables:
+                continue
+            elif name not in ds:
+                raise ValueError(f"Required variable not found in dataset: {name}.")
             elif hasattr(ds[name], "units") and hasattr(ds[name], "long_name"):
                 result[name] = VariableMetadata(
                     units=ds[name].units,

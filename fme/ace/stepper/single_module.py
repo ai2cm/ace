@@ -460,6 +460,32 @@ class TrainOutput(TrainOutputABC):
         return self.metrics
 
 
+def _build_ic_channel_mask(
+    ic_data: TensorMapping,
+    data_mask: TensorMapping | None,
+) -> TensorMapping | None:
+    """Build a per-sample, per-variable presence mask for channel mask inputs.
+
+    Combines real missing-data entries from ``data_mask`` with NaN-detected
+    augmentation masking in ``ic_data``.  True = present, False = absent.
+    Returns None when no variable is absent for any sample.
+    """
+    result: dict[str, torch.Tensor] = {}
+    if data_mask is not None:
+        result.update(data_mask)
+    for name, tensor in ic_data.items():
+        # Any NaN across IC timesteps / spatial dims → sample is masked.
+        has_nan = tensor.isnan().flatten(start_dim=1).any(dim=1)
+        if not has_nan.any():
+            continue
+        present = ~has_nan
+        if name in result:
+            result[name] = result[name] & present
+        else:
+            result[name] = present
+    return result if result else None
+
+
 def stack_list_of_tensor_dicts(
     dict_list: list[TensorDict],
     time_dim: int,
@@ -527,6 +553,7 @@ class StepperConfig:
             names=self.all_names,
             n_timesteps=self._window_steps_required(n_forward_steps),
             allow_missing_variables=self.step.allow_missing_variables,
+            n_ic_timesteps=self.n_ic_timesteps,
         )
         return self.derived_forcings.update_requirements(requirements)
 
@@ -1102,6 +1129,7 @@ class Stepper:
         optimizer: OptimizationABC,
         labels: BatchLabels | None,
         data_mask: TensorMapping | None = None,
+        channel_mask: TensorMapping | None = None,
     ) -> Generator[TensorDict, None, None]:
         state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
         for step in range(n_forward_steps):
@@ -1122,6 +1150,11 @@ class Stepper:
             def checkpoint(module):
                 return optimizer.checkpoint(module, step=step)
 
+            # channel_mask applies only to the IC step (step 0): augmentation
+            # masking is in the IC; subsequent inputs are model predictions
+            # (non-NaN).  Real missing-data variables stay absent every step.
+            step_channel_mask = channel_mask if step == 0 else data_mask
+
             with optimizer.autocast():
                 state = self.step(
                     StepArgs(
@@ -1129,6 +1162,7 @@ class Stepper:
                         next_step_input_data=next_step_input_dict,
                         labels=labels,
                         data_mask=data_mask,
+                        channel_mask=step_channel_mask,
                     ),
                     wrapper=checkpoint,
                 )
@@ -1635,6 +1669,13 @@ class TrainStepper(
             )
         input_ensemble_data = input_data.as_batch_data().broadcast_ensemble(n_ensemble)
         forcing_ensemble_data = data.broadcast_ensemble(n_ensemble)
+        # Build channel mask from IC slice of ALL input variables (prognostic +
+        # forcing): augmentation NaN can appear in any in_name variable.
+        n_ic = self.n_ic_timesteps
+        all_ic_data = {k: v[:, :n_ic] for k, v in forcing_ensemble_data.data.items()}
+        channel_mask = _build_ic_channel_mask(
+            all_ic_data, forcing_ensemble_data.data_mask
+        )
         output_generator = self._stepper.predict_generator(
             input_ensemble_data.data,
             forcing_ensemble_data.data,
@@ -1642,6 +1683,7 @@ class TrainStepper(
             optimization,
             labels=input_ensemble_data.labels,
             data_mask=input_ensemble_data.data_mask,
+            channel_mask=channel_mask,
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)
