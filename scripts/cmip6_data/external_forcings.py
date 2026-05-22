@@ -10,17 +10,19 @@ Currently implements:
 
 - ``input4mips_co2`` (annual global-mean CO2 concentration, ppm)
 
-  - **Historical (≥1959)**: NOAA Mauna Loa annual mean CSV. Differs from
-    the CMIP6-prescribed Meinshausen et al. historical CO2 by <1 ppm at
-    any year; functionally equivalent for emulator training.
-  - **Pre-1959 historical**: not available from NOAA. Datasets covering
-    this window get the earliest NOAA value (1959, 315.97 ppm) as a
-    constant-extrapolation fallback. CMIP6 prescribed values drift down
-    to ~278 ppm at 1850 — not a great match. Use the time-subset config
-    to start ≥1959 if scientific exactness pre-1959 matters.
-  - **SSP245 / SSP585 (2015-2500)**: UoM input4MIPs annual files from
-    ESGF (Meinshausen et al. 2017). For 2015 onwards the SSP file's
-    values supersede the NOAA observations.
+  - **1940-1958 historical**: NASA GISS' Fig1A.ext composite (Etheridge
+    et al. Law Dome ice core + Scripps Mauna Loa), 19 values
+    transcribed as a constant table. Substitutes for the retracted
+    CMIP6-vintage UoM-CMIP-1-2-0 historical file; agrees with the
+    CMIP6 prescribed record to well within 1 ppm.
+  - **1959+ historical**: NOAA Mauna Loa annual mean CSV. Differs
+    from CMIP6's UoM record by <1 ppm.
+  - **Pre-1940 historical**: dataset isn't currently configured to go
+    that far back — the time-subset window starts 1940. Datasets
+    that do would fall back to the 1940 value as constant-extrapolation.
+  - **SSPs (2015-2500)**: UoM input4MIPs annual files from ESGF
+    (Meinshausen et al. 2017). For 2015+ the SSP file's values
+    supersede observations.
 
 - ``input4mips_so2`` and ``input4mips_bc`` (gridded monthly aerosol
   emission flux, kg m⁻² s⁻¹) — summed across all sectors before regrid
@@ -93,6 +95,39 @@ sys.path.insert(0, str(Path(__file__).parent))
 # ---------------------------------------------------------------------------
 
 NOAA_MLO_ANNUAL_URL = "https://gml.noaa.gov/webdata/ccgg/trends/co2/co2_annmean_mlo.csv"
+
+
+# Pre-Mauna-Loa annual global mean CO2 mole fraction (ppm) for
+# 1940-1958, transcribed from NASA GISS' Fig1A.ext.txt composite (ice-
+# core record merged with the Scripps Mauna Loa record starting Mar
+# 1958). Values match the published Etheridge et al. (1996) Law Dome
+# ice core composite re-calibrated by GISS. Used to backfill the
+# 1940-1958 gap left by ``co2_annmean_mlo.csv``, which only starts
+# 1959. Note the small dip 1940-1944 corresponding to the temporary
+# slowdown in CO2 growth during WWII. Substitutes for the (retracted)
+# CMIP6-vintage UoM-CMIP-1-2-0 historical file; values agree with the
+# CMIP6 prescribed historical record to well within 1 ppm.
+_GISS_PRE_MAUNA_LOA_CO2: dict[int, float] = {
+    1940: 311.3,
+    1941: 311.0,
+    1942: 310.7,
+    1943: 310.5,
+    1944: 310.2,
+    1945: 310.3,
+    1946: 310.3,
+    1947: 310.4,
+    1948: 310.5,
+    1949: 310.9,
+    1950: 311.3,
+    1951: 311.8,
+    1952: 312.2,
+    1953: 312.6,
+    1954: 313.2,
+    1955: 313.7,
+    1956: 314.3,
+    1957: 314.8,
+    1958: 315.34,
+}
 
 # UoM input4MIPs CO2 file URLs (ESGF mirror at ORNL). Each SSP file is
 # ~42 KB and covers 2015-2500 with (time, sector) where sector 0 = global.
@@ -262,19 +297,34 @@ def _download(url: str, dest: Path) -> Path:
 
 
 def fetch_noaa_mlo_annual(cache_dir: Path) -> pd.DataFrame:
-    """Return a DataFrame with columns ``year, co2_ppm`` from NOAA's
-    Mauna Loa annual mean CO2 record (1959 onwards).
+    """Return a DataFrame with columns ``year, co2_ppm`` covering
+    1940-onwards. Years 1940-1958 are filled from
+    ``_GISS_PRE_MAUNA_LOA_CO2`` (NASA GISS ice-core + Scripps
+    composite); 1959 onwards is the NOAA Mauna Loa annual mean
+    record.
     """
     csv = cache_dir / "co2_annmean_mlo.csv"
     if not csv.exists():
         _download(NOAA_MLO_ANNUAL_URL, csv)
     # The NOAA CSV has comment lines starting with '#'; the header row is
     # ``year,mean,unc``.
-    df = pd.read_csv(csv, comment="#")
-    df = df.rename(columns={"mean": "co2_ppm"})[["year", "co2_ppm"]]
-    df["year"] = df["year"].astype(int)
-    df["co2_ppm"] = df["co2_ppm"].astype(float)
-    return df
+    noaa = pd.read_csv(csv, comment="#")
+    noaa = noaa.rename(columns={"mean": "co2_ppm"})[["year", "co2_ppm"]]
+    noaa["year"] = noaa["year"].astype(int)
+    noaa["co2_ppm"] = noaa["co2_ppm"].astype(float)
+
+    pre = pd.DataFrame(
+        {
+            "year": list(_GISS_PRE_MAUNA_LOA_CO2),
+            "co2_ppm": list(_GISS_PRE_MAUNA_LOA_CO2.values()),
+        }
+    )
+    # NOAA starts in 1959; the table covers 1940-1958. Concat then
+    # de-dupe defensively in case NOAA ever extends back.
+    combined = pd.concat([pre, noaa], ignore_index=True)
+    combined = combined.drop_duplicates(subset="year", keep="last")
+    combined = combined.sort_values("year").reset_index(drop=True)
+    return combined
 
 
 def fetch_uom_ssp_co2(scenario: str, cache_dir: Path) -> pd.DataFrame:
