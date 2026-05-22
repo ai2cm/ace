@@ -288,22 +288,24 @@ spec:
 
     # ------------------------------------------------------------------
     # compute-stats: per-dataset statistics (all datasets, single pod).
-    # The grid is small (45x90) so this runs sequentially.
+    # Parallelized within the pod with ProcessPoolExecutor — one zarr
+    # read is ~minutes against GCS, and the per-dataset work is
+    # embarrassingly parallel.
     # ------------------------------------------------------------------
     - name: compute-stats
       tolerations:
         - effect: NoSchedule
           key: dedicated
-          value: med-sim-pool
+          value: highmem-sim-pool
       container:
         image: us-central1-docker.pkg.dev/vcm-ml/full-model/cmip6-processing:latest
         resources:
           limits:
-            cpu: "4000m"
-            memory: "16Gi"
+            cpu: "8000m"
+            memory: "32Gi"
           requests:
-            cpu: "4000m"
-            memory: "16Gi"
+            cpu: "8000m"
+            memory: "32Gi"
         command: ["bash", "-c", "-e"]
         args:
           - |
@@ -311,7 +313,7 @@ spec:
             {{workflow.parameters.config}}
             CONFIGEOF
 
-            python compute_stats.py --config config.yaml
+            python compute_stats.py --config config.yaml --workers 8
         env:
           - name: GOOGLE_APPLICATION_CREDENTIALS
             value: /secret/gcp-credentials/key.json

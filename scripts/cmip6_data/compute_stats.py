@@ -26,7 +26,11 @@ Usage:
 
 import argparse
 import logging
+import os
 import sys
+import tempfile
+import traceback
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import fsspec
@@ -284,6 +288,56 @@ def compute_dataset_stats(
 # ---------------------------------------------------------------------------
 
 
+def _process_one(
+    zarr_path: str,
+    stats_path: str,
+    identity: dict,
+    grid_name: str,
+    force: bool,
+) -> tuple[str, list[dict], str]:
+    """Compute or reuse stats for a single dataset.
+
+    Runs in a worker process; logs via the root logger (configured in
+    each subprocess on import). Returns ``(status, rows, message)`` so
+    the parent can aggregate without sharing state.
+    """
+    fs, rel = fsspec.core.url_to_fs(stats_path)
+    if fs.exists(rel) and not force:
+        with tempfile.NamedTemporaryFile(suffix=".nc") as tmp:
+            with fs.open(rel, "rb") as fobj:
+                tmp.write(fobj.read())
+                tmp.flush()
+            stats_ds = xr.open_dataset(tmp.name)
+            rows = _rows_from_stats_ds(stats_ds, identity)
+            stats_ds.close()
+        return "reused", rows, stats_path
+
+    try:
+        ds = xr.open_zarr(zarr_path, consolidated=True)
+    except Exception as e:  # noqa: BLE001
+        return "error", [], f"could not open {zarr_path}: {e}"
+
+    try:
+        n_lon = ds.sizes.get("lon", 90)
+        w2d = area_weights_2d(grid_name, n_lon)
+        stats_ds, dataset_rows = compute_dataset_stats(ds, w2d)
+        for k, val in identity.items():
+            stats_ds.attrs[k] = val
+        with tempfile.NamedTemporaryFile(suffix=".nc") as tmp:
+            stats_ds.to_netcdf(tmp.name)
+            with fs.open(rel, "wb") as fobj:
+                fobj.write(open(tmp.name, "rb").read())
+        for row in dataset_rows:
+            row.update(identity)
+    except Exception as e:  # noqa: BLE001
+        tb = traceback.format_exc()
+        return ("error", [], f"compute failed for {zarr_path}: {e}\n{tb}")
+    finally:
+        ds.close()
+
+    return "computed", dataset_rows, zarr_path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True, help="Process YAML")
@@ -297,6 +351,16 @@ def main() -> None:
         nargs="+",
         default=None,
         help="Optional subset of source_ids to compute stats for.",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help=(
+            "Number of parallel worker processes. Defaults to the pod's "
+            "CPU count (``os.cpu_count()``). Use 1 to disable pooling "
+            "(easier debugging)."
+        ),
     )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -315,11 +379,12 @@ def main() -> None:
     logging.info("Found %d ok datasets in the index.", len(ok))
 
     grid_name = cfg.defaults.target_grid.name
-    rows: list[dict] = []
-    n_done = 0
-    n_reused = 0
+    workers = args.workers if args.workers is not None else (os.cpu_count() or 1)
+    workers = max(1, min(workers, len(ok))) if len(ok) else 1
+    logging.info("Computing stats with %d worker(s).", workers)
 
-    for i, r in ok.iterrows():
+    jobs = []
+    for _, r in ok.iterrows():
         zarr_path = r.output_zarr
         stats_path = zarr_path.rstrip("/").rsplit("/", 1)[0] + "/stats.nc"
         identity = {
@@ -328,48 +393,42 @@ def main() -> None:
             "variant_label": r.variant_label,
             "label": r.get("label", ""),
         }
+        jobs.append((zarr_path, stats_path, identity, grid_name, args.force))
 
-        fs, rel = fsspec.core.url_to_fs(stats_path)
-        if fs.exists(rel) and not args.force:
-            logging.info("[%d/%d] reuse %s", i + 1, len(ok), stats_path)
-            import tempfile
+    rows: list[dict] = []
+    n_done = 0
+    n_reused = 0
+    n_error = 0
 
-            with tempfile.NamedTemporaryFile(suffix=".nc") as tmp:
-                with fs.open(rel, "rb") as fobj:
-                    tmp.write(fobj.read())
-                    tmp.flush()
-                stats_ds = xr.open_dataset(tmp.name)
-                rows.extend(_rows_from_stats_ds(stats_ds, identity))
-                stats_ds.close()
-            n_reused += 1
-            continue
-
-        try:
-            ds = xr.open_zarr(zarr_path, consolidated=True)
-        except Exception as e:  # noqa: BLE001
-            logging.warning("could not open %s: %s", zarr_path, e)
-            continue
-        n_lon = ds.sizes.get("lon", 90)
-        w2d = area_weights_2d(grid_name, n_lon)
-
-        logging.info("[%d/%d] computing %s", i + 1, len(ok), zarr_path)
-        stats_ds, dataset_rows = compute_dataset_stats(ds, w2d)
-        for k, val in identity.items():
-            stats_ds.attrs[k] = val
-        import tempfile
-
-        # Write to a local tempfile first: scipy's netCDF backend calls
-        # seek() on flush, which fsspec's GCS write streams don't support.
-        with tempfile.NamedTemporaryFile(suffix=".nc") as tmp:
-            stats_ds.to_netcdf(tmp.name)
-            with fs.open(rel, "wb") as fobj:
-                fobj.write(open(tmp.name, "rb").read())
-        ds.close()
-
-        for row in dataset_rows:
-            row.update(identity)
-        rows.extend(dataset_rows)
-        n_done += 1
+    if workers == 1:
+        # Single-process path for easier local debugging.
+        for i, job in enumerate(jobs):
+            status, job_rows, msg = _process_one(*job)
+            if status == "reused":
+                logging.info("[%d/%d] reuse %s", i + 1, len(jobs), msg)
+                n_reused += 1
+            elif status == "computed":
+                logging.info("[%d/%d] computed %s", i + 1, len(jobs), msg)
+                n_done += 1
+            else:
+                logging.warning("[%d/%d] %s", i + 1, len(jobs), msg)
+                n_error += 1
+            rows.extend(job_rows)
+    else:
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(_process_one, *job): job for job in jobs}
+            for i, fut in enumerate(as_completed(futures)):
+                status, job_rows, msg = fut.result()
+                if status == "reused":
+                    logging.info("[%d/%d] reuse %s", i + 1, len(jobs), msg)
+                    n_reused += 1
+                elif status == "computed":
+                    logging.info("[%d/%d] computed %s", i + 1, len(jobs), msg)
+                    n_done += 1
+                else:
+                    logging.warning("[%d/%d] %s", i + 1, len(jobs), msg)
+                    n_error += 1
+                rows.extend(job_rows)
 
     if not rows:
         logging.warning("no stats produced")
@@ -402,16 +461,16 @@ def main() -> None:
         logging.warning("parquet engine missing; skipped %s", parquet_path)
 
     logging.info(
-        "Done. New stats.nc: %d. Reused existing: %d. Total rows in aggregate: %d.",
+        "Done. New stats.nc: %d. Reused existing: %d. Errors: %d. "
+        "Total rows in aggregate: %d.",
         n_done,
         n_reused,
+        n_error,
         len(df),
     )
 
 
-def _rows_from_stats_ds(
-    stats_ds: xr.Dataset, identity: dict[str, str]
-) -> list[dict[str, float]]:
+def _rows_from_stats_ds(stats_ds: xr.Dataset, identity: dict) -> list[dict[str, float]]:
     """Reconstruct tidy aggregate rows from an existing stats.nc."""
     var_set: dict[str, list[str]] = {}
     for name in stats_ds.data_vars:
