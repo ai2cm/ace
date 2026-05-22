@@ -16,6 +16,8 @@ import yaml
 import fme
 from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregatorConfig
 from fme.ace.aggregator.one_step.main import OneStepAggregatorConfig
+from fme.ace.aggregator.one_step.map import OneStepMapMetricConfig
+from fme.ace.aggregator.one_step.snapshot import OneStepSnapshotMetricConfig
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.inference import (
     InferenceDataLoaderConfig,
@@ -111,8 +113,8 @@ def _make_validation_entries(
             num_data_workers=0,
         ),
         aggregator=OneStepAggregatorConfig(
-            log_snapshots=log_validation_maps,
-            log_mean_maps=log_validation_maps,
+            snapshot=OneStepSnapshotMetricConfig(enabled=log_validation_maps),
+            mean_map=OneStepMapMetricConfig(enabled=log_validation_maps),
         ),
     )
     if not multi_validation:
