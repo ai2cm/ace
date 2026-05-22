@@ -2,13 +2,18 @@ inventory_path: ./inventory.csv
 output_directory: ./data/cmip6-daily-pilot/v0
 # index_path is derived at process.py runtime: <output_directory>/index.{csv,parquet}
 
-# Drastically subset the pilot run. Remove this section (or null it out)
-# to produce the full-range dataset without code changes.
+# Time-subset window for the main training run.
+# Historical starts 1940-01-01 to align with our existing ERA5 / SHiELD
+# AMIP datasets (also 1940 onwards) and with the reanalysis era. SSPs
+# cover their full CMIP6-protocol window 2015-2100 across all four
+# scenarios in scope.
 defaults:
   time_subset:
-    historical: {start: "2010-01-01", end: "2010-12-31"}
-    ssp245: {start: "2015-01-01", end: "2015-12-31"}
-    ssp585: {start: "2015-01-01", end: "2015-12-31"}
+    historical: {start: "1940-01-01", end: "2014-12-31"}
+    ssp126: {start: "2015-01-01", end: "2100-12-31"}
+    ssp245: {start: "2015-01-01", end: "2100-12-31"}
+    ssp370: {start: "2015-01-01", end: "2100-12-31"}
+    ssp585: {start: "2015-01-01", end: "2100-12-31"}
 
 # target_grid, regrid, fill, chunking, and variable lists all take
 # dataclass defaults — only set them here to deviate from the default.
@@ -29,7 +34,7 @@ selection:
     # zg10) — typically 1 grid cell per timestep — which propagate
     # through the network and produce all-NaN model output.
     - KACE-1-0-G
-  experiments: [historical, ssp245, ssp585]
+  experiments: [historical, ssp126, ssp245, ssp370, ssp585]
   # require_i: 1                  # default: i1 only; null = keep all i
   # max_members_per_f: 3          # default: 3 r per (source_id, exp, p, f)
                                   # null = no cap

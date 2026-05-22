@@ -201,6 +201,14 @@ LUH2_URLS: dict[str, str] = {
         "multiple-states_input4MIPs_landState_CMIP_"
         "UofMD-landState-2-1-h_gn_0850-2015.nc"
     ),
+    "ssp126": (
+        "http://esgf-node.ornl.gov/thredds/fileServer/user_pub_work/"
+        "input4MIPs/CMIP6/ScenarioMIP/UofMD/"
+        "UofMD-landState-IMAGE-ssp126-2-1-f/land/yr/multiple-states/"
+        "gn/v20171005/"
+        "multiple-states_input4MIPs_landState_ScenarioMIP_"
+        "UofMD-IMAGE-ssp126-2-1-f_gn_2015-2100.nc"
+    ),
     "ssp245": (
         "http://esgf-node.ornl.gov/thredds/fileServer/user_pub_work/"
         "input4MIPs/CMIP6/ScenarioMIP/UofMD/"
@@ -208,6 +216,14 @@ LUH2_URLS: dict[str, str] = {
         "gn/v20180119/"
         "multiple-states_input4MIPs_landState_ScenarioMIP_"
         "UofMD-MESSAGE-ssp245-2-1-f_gn_2015-2100.nc"
+    ),
+    "ssp370": (
+        "http://esgf-node.ornl.gov/thredds/fileServer/user_pub_work/"
+        "input4MIPs/CMIP6/ScenarioMIP/UofMD/"
+        "UofMD-landState-AIM-ssp370-2-1-f/land/yr/multiple-states/"
+        "gn/v20171005/"
+        "multiple-states_input4MIPs_landState_ScenarioMIP_"
+        "UofMD-AIM-ssp370-2-1-f_gn_2015-2100.nc"
     ),
     "ssp585": (
         "http://esgf-node.ornl.gov/thredds/fileServer/user_pub_work/"
