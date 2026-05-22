@@ -27,6 +27,7 @@ from processing import (
     fill_horizontal_diffuse,
     finalize_surface_and_ocean_variable,
     flatten_plev_variables,
+    harmonize_temperature_to_kelvin,
     is_unstructured_source,
     make_regridder,
     nearest_above_fill,
@@ -359,17 +360,19 @@ def test_flatten_plev_preserves_2d_variables():
 
 
 def test_sanity_checks_pass_for_reasonable_data():
-    ds = _rectilinear_ds(ntime=3, variables=["tas"])
-    ds["tas"].values[:] = 280.0
+    # ``run_sanity_checks`` runs after ``apply_output_renames``, so it
+    # keys off baseline names like ``TMP2m``, not the bare CMIP ``tas``.
+    ds = _rectilinear_ds(ntime=3, variables=["TMP2m"])
+    ds["TMP2m"].values[:] = 280.0
     warnings = run_sanity_checks(ds)
-    assert not any("tas" in w for w in warnings)
+    assert not any("TMP2m" in w for w in warnings)
 
 
 def test_sanity_checks_flag_out_of_range():
-    ds = _rectilinear_ds(ntime=3, variables=["tas"])
-    ds["tas"].values[:] = -1000.0
+    ds = _rectilinear_ds(ntime=3, variables=["TMP2m"])
+    ds["TMP2m"].values[:] = -1000.0
     warnings = run_sanity_checks(ds)
-    assert any("tas" in w for w in warnings)
+    assert any("TMP2m" in w for w in warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -1079,6 +1082,61 @@ def test_finalize_surface_and_ocean_atmos_kind_carries_original_name():
         da, h, xr.DataArray(daily_times, dims=("time",))
     )
     assert outputs["eday_ts"].attrs["original_name"] == "ts"
+
+
+# ---------------------------------------------------------------------------
+# harmonize_temperature_to_kelvin
+# ---------------------------------------------------------------------------
+
+
+def test_harmonize_temperature_converts_degc():
+    da = xr.DataArray(np.full((2, 3), 15.0), dims=("lat", "lon"))
+    da.attrs["units"] = "degC"
+    da.attrs["long_name"] = "ocean surface temperature"
+    out, msg = harmonize_temperature_to_kelvin(da, var_id="tos")
+    np.testing.assert_allclose(out.values, np.full((2, 3), 288.15))
+    assert out.attrs["units"] == "K"
+    assert out.attrs["long_name"] == "ocean surface temperature"
+    assert "converted" in msg
+
+
+def test_harmonize_temperature_already_kelvin_noop():
+    da = xr.DataArray(np.full((2, 3), 285.0), dims=("lat", "lon"))
+    da.attrs["units"] = "K"
+    out, msg = harmonize_temperature_to_kelvin(da, var_id="tas")
+    assert msg == ""
+    np.testing.assert_array_equal(out.values, da.values)
+    assert out.attrs["units"] == "K"
+
+
+def test_harmonize_temperature_no_units_falls_back_to_spec_default():
+    # tos defaults to °C per CMIP6 CMOR; tas defaults to K.
+    tos_da = xr.DataArray(np.full((2, 3), 10.0), dims=("lat", "lon"))
+    out, msg = harmonize_temperature_to_kelvin(tos_da, var_id="tos")
+    np.testing.assert_allclose(out.values, np.full((2, 3), 283.15))
+    assert "converted" in msg
+
+    tas_da = xr.DataArray(np.full((2, 3), 280.0), dims=("lat", "lon"))
+    out2, msg2 = harmonize_temperature_to_kelvin(tas_da, var_id="tas")
+    assert msg2 == ""
+    np.testing.assert_array_equal(out2.values, tas_da.values)
+
+
+def test_harmonize_temperature_unrecognized_units_warns():
+    da = xr.DataArray(np.full((2, 3), 100.0), dims=("lat", "lon"))
+    da.attrs["units"] = "weird"
+    out, msg = harmonize_temperature_to_kelvin(da, var_id="tos")
+    # Data unchanged, but a warning is emitted.
+    np.testing.assert_array_equal(out.values, da.values)
+    assert "unrecognized" in msg
+
+
+def test_harmonize_temperature_handles_unicode_degc():
+    da = xr.DataArray(np.full((2, 3), 20.0), dims=("lat", "lon"))
+    da.attrs["units"] = "°C"
+    out, msg = harmonize_temperature_to_kelvin(da, var_id="tos")
+    np.testing.assert_allclose(out.values, np.full((2, 3), 293.15))
+    assert "converted" in msg
 
 
 if __name__ == "__main__":

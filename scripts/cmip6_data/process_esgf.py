@@ -73,6 +73,7 @@ from processing import (  # noqa: E402
     fill_derived_layer_T,
     finalize_surface_and_ocean_variable,
     flatten_plev_variables,
+    harmonize_temperature_to_kelvin,
     nearest_above_fill,
     normalize_plev,
     regrid_variables,
@@ -665,19 +666,30 @@ def process_one_esgf(
         logging.info("  materializing dataset in memory before write...")
         day_regridded = day_regridded.load()
 
-        # 13. Sanity checks.
+        # 13. Flatten plev.
+        day_regridded = flatten_plev_variables(day_regridded)
+
+        # 14. Harmonize temperatures to K (some CMIP6 publishers emit
+        # ``tos``/``tob``/``sitemptop`` in °C). See process.py.
+        for v in list(day_regridded.data_vars):
+            da, msg = harmonize_temperature_to_kelvin(day_regridded[v], var_id=v)
+            if msg:
+                row.warnings.append(msg)
+                if "converted" in msg:
+                    day_regridded[v] = da
+
+        # 15. Rename CMIP6 variables to the baseline convention (see
+        # process.py for rationale).
+        day_regridded = apply_output_renames(day_regridded, CMIP_TO_OUTPUT_RENAMES)
+
+        # 16. Sanity checks — advisory only. Run *after* renames and
+        # K-harmonization so ``_SANITY_RANGES`` can key off the final
+        # variable names and unit conventions.
         sanity = run_sanity_checks(day_regridded)
         if sanity:
             row.warnings.extend(sanity)
             for msg in sanity:
                 logging.warning("  sanity: %s", msg)
-
-        # 14. Flatten plev.
-        day_regridded = flatten_plev_variables(day_regridded)
-
-        # 14a. Rename radiative-flux variables to the baseline
-        # convention (see process.py for rationale).
-        day_regridded = apply_output_renames(day_regridded, CMIP_TO_OUTPUT_RENAMES)
 
         # 15. Write zarr.
         day_regridded.attrs["label"] = label

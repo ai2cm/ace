@@ -76,6 +76,25 @@ CMIP_TO_OUTPUT_RENAMES: dict[str, str] = {
     "rsdt": "DSWRFtoa",
     "rsut": "USWRFtoa",
     "rlut": "ULWRFtoa",
+    # Turbulent fluxes (CMIP6 ``hfls``/``hfss`` are positive upward,
+    # which matches the SHIELD/ERA5 convention after the ERA5 build
+    # pipeline negates the ECMWF-native sign — see
+    # ``scripts/era5/pipeline/xr-beam-pipeline.py``).
+    "hfls": "LHTFLsfc",
+    "hfss": "SHTFLsfc",
+    # Surface precipitation rate (kg m-2 s-1 in both conventions).
+    "pr": "PRATEsfc",
+    # Near-surface atmosphere — CMIP6 CMOR fixes these at 2 m / 10 m,
+    # matching the baseline naming.
+    "tas": "TMP2m",
+    "huss": "Q2m",
+    "uas": "UGRD10m",
+    "vas": "VGRD10m",
+    # Geopotential height at 500 hPa. Other plev levels keep the
+    # ``zg{level}`` form (the baseline ERA5 dataset publishes
+    # ``h{level}`` for several levels; widen this later if we want
+    # the rest aligned too).
+    "zg500": "h500",
 }
 
 # Variables tracked by the inventory for visibility, but not required or

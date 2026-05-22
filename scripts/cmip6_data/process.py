@@ -70,6 +70,7 @@ from processing import (  # noqa: E402
     finalize_surface_and_ocean_variable,
     flatten_plev_variables,
     grid_fingerprint,
+    harmonize_temperature_to_kelvin,
     nearest_above_fill,
     normalize_plev,
     regrid_variables,
@@ -705,22 +706,36 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
         logging.info("  materializing dataset in memory before write...")
         day_regridded = day_regridded.load()
 
-        # 18. Sanity checks — advisory only. Failures go to warnings.
+        # 18. Flatten plev dimensions into pressure-named 2D variables.
+        day_regridded = flatten_plev_variables(day_regridded)
+
+        # 19. Harmonize all temperature variables to K. CMIP6 spec
+        # publishes ``tos``/``tob``/``sitemptop`` in °C and the rest
+        # (``tas``, ``ts``, ...) in K, but publishers occasionally
+        # deviate; walking the assembled dataset catches the variants
+        # via their ``units`` attribute. Idempotent on already-K vars.
+        for v in list(day_regridded.data_vars):
+            da, msg = harmonize_temperature_to_kelvin(day_regridded[v], var_id=v)
+            if msg:
+                row.warnings.append(msg)
+                if "converted" in msg:
+                    day_regridded[v] = da
+
+        # 20. Rename CMIP6 variables to the upstream-baseline convention
+        # (``rsds`` → ``DSWRFsfc``, ``tas`` → ``TMP2m`` etc.) so downstream
+        # training can share variable names with SHIELD/ERA5 datasets.
+        # Each renamed variable carries ``original_name`` pointing back
+        # to the CMIP6 source name.
+        day_regridded = apply_output_renames(day_regridded, CMIP_TO_OUTPUT_RENAMES)
+
+        # 21. Sanity checks — advisory only. Run *after* renames and
+        # K-harmonization so ``_SANITY_RANGES`` can key off the final
+        # variable names and unit conventions.
         sanity = run_sanity_checks(day_regridded)
         if sanity:
             row.warnings.extend(sanity)
             for msg in sanity:
                 logging.warning("  sanity: %s", msg)
-
-        # 19. Flatten plev dimensions into pressure-named 2D variables.
-        day_regridded = flatten_plev_variables(day_regridded)
-
-        # 19a. Rename radiative-flux variables to the upstream-baseline
-        # convention (``rsds`` → ``DSWRFsfc`` etc.) so downstream training
-        # can share variable names with SHIELD/ERA5 datasets. Each renamed
-        # variable carries ``original_name`` pointing back to the CMIP6
-        # source name.
-        day_regridded = apply_output_renames(day_regridded, CMIP_TO_OUTPUT_RENAMES)
 
         # 20. Write zarr + record variables.
         day_regridded.attrs["label"] = label

@@ -571,6 +571,73 @@ def causal_monthly_to_daily(
     return out.assign_coords(time=daily_time.values).rename({"time": "time"})
 
 
+# CMIP6 publishes some temperature variables in °C (``tos``, ``tob``,
+# ``sitemptop``) and others in K (``ts``, ``tas``, ``ta``), but
+# publishers occasionally deviate from the CMOR default. Force K
+# everywhere by inspecting the units attribute and converting when
+# it indicates Celsius. ``tossq`` is the square of SST — units are
+# variance and a linear offset doesn't apply; left alone with a
+# warning when detected.
+_CELSIUS_UNIT_TOKENS: frozenset[str] = frozenset(
+    {
+        "degc",
+        "degrees_c",
+        "degreesc",
+        "degrees c",
+        "deg_c",
+        "deg c",
+        "celsius",
+        "degcelsius",
+        "deg celsius",
+        "°c",
+        "c",
+    }
+)
+_KELVIN_UNIT_TOKENS: frozenset[str] = frozenset({"k", "kelvin", "deg_k", "degk"})
+_TEMPERATURE_VARS_SPEC_CELSIUS: frozenset[str] = frozenset({"tos", "tob", "sitemptop"})
+_TEMPERATURE_VARS_SPEC_KELVIN: frozenset[str] = frozenset({"tas", "ts", "ta"})
+
+
+def harmonize_temperature_to_kelvin(
+    da: xr.DataArray, var_id: str = ""
+) -> tuple[xr.DataArray, str]:
+    """Return ``(da_in_kelvin, message)`` for a temperature variable.
+
+    If ``da.attrs["units"]`` reads as Celsius (any of the common
+    spellings), add 273.15 and set ``units = "K"``. If the units
+    attribute is missing, fall back to the CMIP6 CMOR spec default
+    for the given ``var_id``. Already-K variables are returned
+    unchanged. ``message`` is non-empty when a conversion happened or
+    a suspect attribute was detected.
+
+    Preserves all other attrs across the unit conversion.
+    """
+    raw_units = str(da.attrs.get("units", "")).strip()
+    units_token = raw_units.lower().replace("**", "").replace("^", "")
+    if not units_token:
+        if var_id in _TEMPERATURE_VARS_SPEC_CELSIUS:
+            units_token = "degc"
+        elif var_id in _TEMPERATURE_VARS_SPEC_KELVIN:
+            units_token = "k"
+    if units_token in _CELSIUS_UNIT_TOKENS:
+        attrs = dict(da.attrs)
+        converted = da + 273.15
+        converted.attrs = attrs
+        converted.attrs["units"] = "K"
+        return converted, (
+            f"{var_id or da.name}: converted °C → K"
+            f" (source attr units={raw_units!r})"
+        )
+    if units_token in _KELVIN_UNIT_TOKENS or not units_token:
+        # Already K (or missing both attr and a spec default).
+        return da, ""
+    # Unrecognized units — surface as a warning but leave unchanged.
+    return da, (
+        f"{var_id or da.name}: unrecognized temperature units "
+        f"{raw_units!r}, left unconverted"
+    )
+
+
 def apply_output_renames(ds: xr.Dataset, rename_map: dict[str, str]) -> xr.Dataset:
     """Rename variables according to ``rename_map`` and tag each renamed
     variable with an ``original_name`` attribute pointing to its bare
@@ -669,7 +736,13 @@ def finalize_surface_and_ocean_variable(
         raise ValueError(f"unsupported cadence: {var.cadence}")
 
     if var.unit_scale != 1.0:
+        # Preserve attrs across the multiplication so downstream
+        # temperature-unit harmonization can still see the original
+        # ``units`` attribute. Mark the rescaled output as dimensionless.
+        attrs = dict(on_daily.attrs)
         on_daily = on_daily * var.unit_scale
+        on_daily.attrs = attrs
+        on_daily.attrs["units"] = "1"
 
     output: dict[str, xr.DataArray] = {}
     if var.kind in ("ocean_surface", "seaice_surface"):
@@ -833,18 +906,24 @@ def write_zarr(ds: xr.Dataset, path: str, cfg: ResolvedDatasetConfig) -> None:
 _EPS = 0.01
 
 _SANITY_RANGES: dict[str, tuple[float, float]] = {
-    # Atmospheric daily core / optional / static — bare CMIP6 names.
+    # Atmospheric daily core — bare CMIP6 names retained for the 3D
+    # plev variables (flattened to ``ua1000``..``ua10`` etc.).
     "ua": (-200.0, 200.0),
     "va": (-200.0, 200.0),
-    "uas": (-100.0, 100.0),
-    "vas": (-100.0, 100.0),
-    "sfcWind": (-_EPS, 100.0),
     "hus": (-_EPS, 0.05),
-    "huss": (-_EPS, 0.05),
-    "tas": (180.0, 340.0),
+    # Mean sea level pressure (Pa) — kept as ``psl`` since the
+    # baseline ``PRESsfc`` (surface pressure) is a distinct quantity.
     "psl": (8.0e4, 1.1e5),
-    "pr": (-_EPS, 0.01),
-    # Radiative fluxes (post-rename — see ``CMIP_TO_OUTPUT_RENAMES``).
+    # Non-rename'd optional vars.
+    "sfcWind": (-_EPS, 100.0),
+    # Surface variables under the baseline naming — see
+    # ``CMIP_TO_OUTPUT_RENAMES``.
+    "TMP2m": (180.0, 340.0),
+    "Q2m": (-_EPS, 0.05),
+    "UGRD10m": (-100.0, 100.0),
+    "VGRD10m": (-100.0, 100.0),
+    "PRATEsfc": (-_EPS, 0.01),
+    # Radiative fluxes.
     "DSWRFtoa": (-_EPS, 600.0),
     "USWRFtoa": (-_EPS, 600.0),
     "ULWRFtoa": (-_EPS, 400.0),
@@ -852,15 +931,23 @@ _SANITY_RANGES: dict[str, tuple[float, float]] = {
     "USWRFsfc": (-_EPS, 600.0),
     "DLWRFsfc": (-_EPS, 600.0),
     "ULWRFsfc": (-_EPS, 700.0),
-    "hfss": (-1000.0, 1000.0),
-    "hfls": (-500.0, 1200.0),
+    # Turbulent fluxes.
+    "SHTFLsfc": (-1000.0, 1000.0),
+    "LHTFLsfc": (-500.0, 1200.0),
     # Land fraction is rescaled to [0, 1] and renamed from ``sftlf``.
     "land_fraction": (-_EPS, 1.0 + _EPS),
     "orog": (-500.0, 9000.0),
+    # Geopotential height @ 500 hPa — renamed from ``zg500``.
+    "h500": (4900.0, 6100.0),
     # Surface-and-ocean variables — source-prefixed output names.
-    # Atmospheric surface T (always K).
+    # Atmospheric surface T (always K post-harmonization).
     "amon_ts": (180.0, 340.0),
     "eday_ts": (180.0, 340.0),
+    # Ocean / sea-ice temperatures (now harmonized to K at ingest).
+    "oday_tos": (270.0, 320.0),
+    "omon_tob": (250.0, 320.0),
+    "simon_sitemptop": (200.0, 280.0),
+    "siday_sitemptop": (200.0, 280.0),
     # Sea-ice fractions (rescaled to [0, 1] from CMIP6 % at ingest).
     "simon_sea_ice_fraction": (-_EPS, 1.0 + _EPS),
     "siday_sea_ice_fraction": (-_EPS, 1.0 + _EPS),
@@ -880,11 +967,9 @@ _SANITY_RANGES: dict[str, tuple[float, float]] = {
     # Mixed layer depth (m). Deep convection regions can exceed 2000 m.
     "omon_mlotst": (-_EPS, 5000.0),
     "oday_omldamax": (-_EPS, 5000.0),
-    # NOTE: ``oday_tos``, ``omon_tob``, ``simon_sitemptop``,
-    # ``siday_sitemptop`` are temperatures whose CMIP6 unit attribute
-    # varies (K vs °C across models) — sanity-ranging them requires
-    # unit harmonisation at ingest. ``oday_tossq`` is the square,
-    # ditto. Left out of the range checks until ingest enforces units.
+    # NOTE: ``oday_tossq`` is the time-mean SST^2 — units are temperature
+    # squared, no simple K conversion (variance), so left out of the
+    # range checks.
     # External forcings (input4MIPs / LUH2).
     # CO2 in ppm: pre-industrial ≈ 280, ssp585 endpoint ≈ 2200.
     "input4mips_co2": (250.0, 2500.0),
@@ -901,7 +986,7 @@ _DERIVED_T_RANGE = (150.0, 350.0)
 
 _DAY_SECONDS = 86400.0
 _GLOBAL_MEAN_JUMP_TOL: dict[str, float] = {
-    "tas": 2.0,
+    "TMP2m": 2.0,
     "psl": 500.0,
 }
 
@@ -1002,25 +1087,31 @@ def run_sanity_checks(ds: xr.Dataset) -> list[str]:
                 f"min={vmin:.3g}, max={vmax:.3g}"
             )
 
-    if "ta_derived_layer" in ds.data_vars:
-        lo, hi = _DERIVED_T_RANGE
-        arr = ds["ta_derived_layer"]
+    # Derived layer-mean T comes out of ``flatten_plev_variables`` as
+    # ``ta_derived_layer_{lo}_{hi}`` (one per between-plev layer); range
+    # check covers any present.
+    lo, hi = _DERIVED_T_RANGE
+    layer_vars = sorted(v for v in ds.data_vars if v.startswith("ta_derived_layer_"))
+    for v in layer_vars:
+        arr = ds[v]
         vmin = float(arr.min())
         vmax = float(arr.max())
         if vmin < lo or vmax > hi:
             messages.append(
-                f"ta_derived_layer out of range [{lo}, {hi}] K: "
-                f"min={vmin:.2f}, max={vmax:.2f}"
+                f"{v} out of range [{lo}, {hi}] K: " f"min={vmin:.2f}, max={vmax:.2f}"
             )
 
-    if "tas" in ds.data_vars and "ta_derived_layer" in ds.data_vars:
-        tas_mean = float(ds["tas"].mean())
-        layer0_mean = float(ds["ta_derived_layer"].isel(plev_layer=0).mean())
+    # Lapse-rate sanity: post-rename 2 m T should be within a few K of
+    # the bottom-most derived layer (1000-850 hPa mean).
+    bottom_layer = "ta_derived_layer_1000_850"
+    if "TMP2m" in ds.data_vars and bottom_layer in ds.data_vars:
+        tas_mean = float(ds["TMP2m"].mean())
+        layer0_mean = float(ds[bottom_layer].mean())
         diff = tas_mean - layer0_mean
         if abs(diff) > 15.0:
             messages.append(
-                f"global mean tas={tas_mean:.2f} K vs ta_derived_layer "
-                f"lowest layer={layer0_mean:.2f} K differ by {diff:+.2f} K "
+                f"global mean TMP2m={tas_mean:.2f} K vs {bottom_layer} "
+                f"mean={layer0_mean:.2f} K differ by {diff:+.2f} K "
                 "(lapse-rate sanity expects a few K)"
             )
 
