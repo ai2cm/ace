@@ -25,13 +25,13 @@ defaults:
 
 selection:
   exclude_source_ids:
-    - AWI-ESM-1-1-LR  # OOMs on 32GB highmem pod for unstructured-grid regrid; needs prod memory bump
     - INM-CM4-8
-    - IPSL-CM6A-LR    # OOMs opening 15.5 GB ua file from ESGF; needs prod memory bump or chunked open
-    - MIROC-ES2L      # OOMs in ESGF open/concat; needs prod memory bump
   experiments: [historical, ssp126, ssp245, ssp370, ssp585]
 
 overrides:
+  - match:
+      source_id: AWI-ESM-1-1-LR
+    skip_surface_and_ocean_variables: [simon_siconc, simon_sitemptop, siday_siconc, siday_sitemptop, siday_sithick]
   - match:
       source_id: CESM2-WACCM-FV2
     allow_dedupe: true

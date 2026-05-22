@@ -26,7 +26,6 @@ selection:
   exclude_source_ids:
     - INM-CM4-8
     - AWI-CM-1-1-MR
-    - AWI-ESM-1-1-LR  # OOMs on 32GB highmem pod for unstructured-grid regrid; needs prod memory bump
     - KACE-1-0-G
   experiments: [historical, ssp126, ssp245, ssp370, ssp585]
 
