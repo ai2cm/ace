@@ -4,6 +4,6 @@
 # Submit with:
 #   ./zarr_to_netcdf_beaker.sh --config configs/zarr-to-netcdf-pilot.yaml
 
-gcs_source: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v0-pilot
-weka_destination: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v0-pilot
+gcs_source: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v0-pilot-v2
+weka_destination: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v0-pilot-v2
 workers: 8

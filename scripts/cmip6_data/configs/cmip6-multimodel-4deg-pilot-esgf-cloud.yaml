@@ -3,13 +3,13 @@
 # Same ESGF data source and override set as the production config
 # ``cmip6-multimodel-4deg-1940-2100-esgf-cloud.yaml``, but only 1
 # year per scenario (2010 historical, 2015 SSPs). Output lands in
-# the same ``v0-pilot/`` prefix as ``cmip6-multimodel-4deg-pilot-cloud.yaml``
+# the same ``v0-pilot-v2/`` prefix as ``cmip6-multimodel-4deg-pilot-cloud.yaml``
 # so the two pipelines' outputs sit alongside each other.
 #
 # ESGF inventory path is passed via ``--inventory`` on the command
 # line; the pilot can reuse the production-bucket inventory.
 
-output_directory: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v0-pilot
+output_directory: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v0-pilot-v2
 
 esgf:
   search_node: https://esgf-data.dkrz.de/esg-search/search
