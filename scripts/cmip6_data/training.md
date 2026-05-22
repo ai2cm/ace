@@ -7,19 +7,36 @@ for ESGF).
 
 ## Current status
 
-**Data preparation**: 37 models eligible, 120+ datasets processed (Pangeo
-complete, ESGF backfill in progress). Normalization statistics computed.
-`Cmip6DataConfig` data loader implemented and tested.
+**Data preparation**: scope expanded to ~415 eligible
+(model, experiment, member) datasets across historical 1940-2014 and
+all four SSPs (126, 245, 370, 585) 2015-2100. Estimated total
+on-disk size ~11.5 TB. Production ingest runs through the argo
+workflow's `process-dataset` step against the same code that's been
+validated end-to-end locally on CanESM5 historical r1i1p1f1.
 
-**Next step**: smoke-test training run on the atmosphere-only core
-variables using the existing data. The following are planned but deferred
-until after the smoke test works end-to-end:
-- Ocean variables (`Oday`/`Omon`)
-- External forcings (CO2, SO2 emissions, BC emissions, forest fraction
-  from input4MIPs/LUH2)
-- Causal forcing fix (switch monthly interpolation to previous-month
-  scheme)
-- Daily forcing data where available (`Oday` tos, `Eday` ts)
+Previously deferred items, now implemented:
+- ✅ Ocean variables (`Oday` daily SST and others, `Omon` zos/hfds/
+  mlotst/tob causal-monthly, `SIday`/`SImon` sea-ice). All routed
+  through the surface-and-ocean source-prefixed naming convention
+  (`oday_tos`, `omon_zos`, `simon_siconc`, `siday_siconc`, …) with
+  per-variable masks and horizontal-diffusion fill.
+- ✅ External forcings: `input4mips_co2` (NOAA Mauna Loa + UoM SSP),
+  `input4mips_so2`/`input4mips_bc` (CMIP7-vintage CEDS historical +
+  CMIP6 IAMC SSPs), `luh2_forest` (UofMD LUH2 v2 multiple-states).
+  Staged once per scenario by `external_forcings.py`; argo
+  `stage-externals` template runs this in production.
+- ✅ Causal forcing: monthly→daily mapping replaced by strictly
+  causal previous-month assignment; annual→daily via causal
+  previous-year. Piecewise constant on the daily axis.
+- ✅ Daily SST: `oday_tos` joined in alongside `eday_ts` where
+  published.
+
+Remaining work for the actual training run:
+- ESGF inventory build + production ingest (argo workflow).
+- Normalization stats recomputation with the new variable set.
+- Decide on heterogeneous-variable training config: which variables
+  the smoke-test stepper sees and predicts, and which are mask-only
+  inputs.
 
 ---
 

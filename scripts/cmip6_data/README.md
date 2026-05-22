@@ -2,21 +2,57 @@
 
 Pilot project to download and stage a multi-model CMIP6 daily-mean dataset
 for an ACE-style emulator with a per-model label embedding. Scope is
-deliberately narrow: daily cadence only, CMIP6 only, drastically time-subset
-at first with config knobs to scale up to the full roster later.
+daily cadence only, CMIP6 only, with both Pangeo and ESGF as data sources.
+
+## Data plan (current target)
+
+The production ingest targets **~415 (model, experiment, member)
+datasets** totalling **~11.5 TB** on disk:
+
+| Window | Coverage | Datasets | Storage |
+|---|---|---|---|
+| `historical` 1940-01-01 to 2014-12-31 | 75 years | ~120 | ~3.0 TB |
+| `ssp126` 2015-01-01 to 2100-12-31 | 86 years | ~70 | ~2.0 TB |
+| `ssp245` 2015-01-01 to 2100-12-31 | 86 years | ~80 | ~2.3 TB |
+| `ssp370` 2015-01-01 to 2100-12-31 | 86 years | ~70 | ~2.0 TB |
+| `ssp585` 2015-01-01 to 2100-12-31 | 86 years | ~75 | ~2.2 TB |
+
+Each dataset is one zarr per `(source_id, experiment, variant_label)`
+at the F22.5 Gauss-Legendre 45×90 grid, containing ~80 channels:
+8 plev × 4 core 3D vars + 7 derived layer-mean T + 4 surface +
+8 below-surface masks + 2 statics + surface-and-ocean variables with
+masks + 4 external forcings (`input4mips_co2`, `input4mips_so2`,
+`input4mips_bc`, `luh2_forest`). Configured in
+`configs/pilot.yaml` (`defaults.time_subset`) and
+`configs/process_esgf.yaml`.
+
+Source split:
+- **Pangeo** provides the bulk of historical, ssp245, ssp585 (233
+  datasets after the multi-member cap).
+- **ESGF** is the sole source for ssp126 and ssp370 (Pangeo lacks
+  daily 3D state for those scenarios) and backfills ~50-60 additional
+  datasets across the others.
+- 1940 was chosen for the historical start to match our existing ERA5
+  and SHiELD AMIP datasets (both 1940 onwards) and the modern
+  reanalysis era.
+
+See **Expected model coverage** and **External forcings** below for
+the detailed breakdown.
 
 ## Goals
 
-- **Maximize data availability.** Default: pull every available member for
-  every included model for both `historical` and `ssp585`. Holdout and
-  per-model member caps are future concerns, not ingest-time decisions.
+- **Maximize data availability.** Default: pull every available member
+  for every included model across historical + all 4 SSPs (126, 245,
+  370, 585). Holdout and per-model member caps are future concerns,
+  not ingest-time decisions.
 - Support ~30–50 CMIP6 models to train a robust source-model label
-  embedding that can be fine-tuned on unseen models. Current count:
-  37 models (32 from Pangeo, 5 ESGF-only) with 146 eligible
-  model/experiment/member combinations.
-- Heterogeneous variable sets across models are expected; ingest records
-  what each model has. Downstream training support for heterogeneous
-  variables is a separate future code change.
+  embedding that can be fine-tuned on unseen models. With
+  `max_core_missing=3` (the new default after heterogeneous-variable
+  training landed) and Pangeo + ESGF combined, ~415 eligible
+  (model, experiment, member) datasets across the five experiments.
+- Heterogeneous variable sets across models are expected and supported
+  end-to-end: ingest emits per-dataset variable lists and training
+  reads them via the `allow_variable_masking` flag (see PR #1160).
 - Configurable via YAML loaded into a dataclass with `dacite`; defaults
   cover most datasets, per-dataset overrides handle exceptions.
 
@@ -24,7 +60,13 @@ at first with config knobs to scale up to the full roster later.
 
 ### Experiments & members
 
-- `historical` (1850–2014), `ssp245` (2015–2100), and `ssp585` (2015–2100).
+- `historical` (1850–2014), `ssp126` / `ssp245` / `ssp370` / `ssp585`
+  (each 2015–2100).
+- Main training window is `historical` from 1940 (matches our ERA5 /
+  SHiELD AMIP datasets and the modern reanalysis era) plus the full
+  CMIP6 SSP window 2015–2100 for all four SSPs. Pre-1940 historical
+  is on disk via Pangeo/ESGF but not in the current pilot.yaml
+  time-subset.
 - **All available members** by default. Whether a per-model cap is applied
   is a future decision.
 - Experiment is recorded as metadata and may be used in experiments, but
@@ -280,13 +322,29 @@ From the CMIP6 `fx` table; broadcast along time by the data loader.
 
 ### Expected model coverage
 
-**37 models** satisfy all core variable requirements across both the
-Pangeo catalog and ESGF, yielding **146 eligible tasks**
-(model/experiment/member combinations): 60 historical, 48 ssp245,
-38 ssp585. 32 models are sourced from Pangeo GCS mirrors; 5 are
-ESGF-only (ACCESS-ESM1-5, AWI-ESM-1-REcoM, CESM2-WACCM-FV2,
-FGOALS-f3-L, IPSL-CM6A-LR). The multi-member cap (Issue 3) retains
-up to 3 realizations per `(source_id, experiment, p, f)` label.
+With the current defaults (`max_core_missing=3`, `max_members_per_f=3`)
+and Pangeo + ESGF combined, the pilot covers **~415 eligible
+(model, experiment, member) datasets** across the five experiments:
+
+| Scenario | Datasets (estimate) | Source mix |
+|---|---|---|
+| historical | ~120 | Pangeo-dominated (103), ESGF adds ~17 |
+| ssp126 | ~70 | **ESGF-only** — Pangeo lacks daily 3D state for ssp126 |
+| ssp245 | ~80 | Pangeo (69) + ESGF backfill (~11) |
+| ssp370 | ~70 | **ESGF-only** — Pangeo lacks daily 3D state for ssp370 |
+| ssp585 | ~75 | Pangeo (60) + ESGF backfill (~15) |
+| **Total** | **~415** | — |
+
+The multi-member cap retains up to 3 realizations per
+`(source_id, experiment, p, f)` label. ESGF-only models (publish daily
+3D state on ESGF but not Pangeo) include ACCESS-ESM1-5,
+AWI-ESM-1-REcoM, CESM2-WACCM-FV2, FGOALS-f3-L, IPSL-CM6A-LR and
+others; the full ssp126 / ssp370 coverage depends entirely on ESGF.
+
+Storage at 338 MB / dataset-year:
+- Historical 1940-2014 (75 y): ~3.0 TB
+- 4 SSPs 2015-2100 (86 y each): ~8.5 TB
+- **Total: ~11.5 TB**
 
 ### Derived variables
 
@@ -562,12 +620,17 @@ python make_presence.py --config configs/pilot.yaml
 - **Issue 3 — Member caps.** `require_i = 1` and `max_members_per_f = 3`
   at ingest, applied per `(source_id, experiment, p, f)` label.
   Deterministic selection by `(variant_f, variant_r)`.
-- **Issue 4 — Time subset.** Pilot: `historical` 2010, `ssp585` 2015
-  (one full year each). Set `defaults.time_subset: null` for full range.
+- **Issue 4 — Time subset.** Main training window: `historical`
+  1940-01-01 to 2014-12-31 (75 years, aligned with our ERA5 / SHiELD
+  AMIP datasets) and all four SSPs 2015-01-01 to 2100-12-31 (86 years
+  each, full CMIP6 protocol window). Set `defaults.time_subset: null`
+  to expand historical back to its 1850 start.
 - **Issue 5 — Pangeo-only vs ESGF.** Both Pangeo and ESGF are used.
-  Pangeo provides the bulk of the data (32 models); ESGF adds 5 new
-  models and ~30 backfill tasks via `process_esgf.py`. `ta` replaced
-  by derived layer-T; `ps` replaced by `psl` + topography mask.
+  Pangeo provides the bulk of historical and ssp245/ssp585; ESGF is
+  the **sole source** for ssp126 / ssp370 (Pangeo lacks daily 3D state
+  for those scenarios) and backfills additional models / members for
+  the others. `ta` replaced by derived layer-T; `ps` replaced by
+  `psl` + topography mask.
 - **Issue 8 — Regridding.** `xesmf` targeting Gauss-Legendre F22.5
   (45 x 90). Conservative for fluxes/precip, bilinear for state.
   Weights cached per source grid.
