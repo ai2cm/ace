@@ -59,8 +59,10 @@ from grid import make_target_grid  # noqa: E402
 from index import DatasetIndexRow, write_index, write_sidecar  # noqa: E402
 from processing import (  # noqa: E402
     BOUNDS_NAMES,
+    UNSTRUCTURED_METHOD,
     DuplicateTimestampsError,
     SimulationBoundaryError,
+    apply_target_land_mask,
     apply_time_subset,
     clamp_static_fractions,
     compute_below_surface_mask,
@@ -578,8 +580,23 @@ def process_one_esgf(
                         row.regrid_methods[sv] = meth
                 if result is None:
                     continue
+                regridded_var = result[h.var_id]
+                if methods.get(h.var_id) == UNSTRUCTURED_METHOD and h.kind in (
+                    "ocean_surface",
+                    "seaice_surface",
+                ):
+                    if static_ds is not None and "sftlf" in static_ds:
+                        regridded_var = apply_target_land_mask(
+                            regridded_var, static_ds["sftlf"]
+                        )
+                    else:
+                        row.warnings.append(
+                            f"{h.output_name}: unstructured source regridded "
+                            "via nearest_s2d but no target sftlf available; "
+                            "mask channel will be all-ones"
+                        )
                 outputs = finalize_surface_and_ocean_variable(
-                    result[h.var_id],
+                    regridded_var,
                     h,
                     daily_time,
                     fill_iterations=cfg.fill.ocean_fill_iterations,

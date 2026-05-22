@@ -51,8 +51,10 @@ from external_forcings import attach_external_forcings  # noqa: E402
 from grid import make_target_grid  # noqa: E402
 from index import DatasetIndexRow, write_index, write_sidecar  # noqa: E402
 from processing import (  # noqa: E402
+    UNSTRUCTURED_METHOD,
     DuplicateTimestampsError,
     SimulationBoundaryError,
+    apply_target_land_mask,
     apply_time_subset,
     clamp_static_fractions,
     compute_below_surface_mask,
@@ -592,8 +594,29 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
                         row.regrid_methods[h.output_name] = meth
                     else:
                         row.regrid_methods[sv] = meth
+                regridded_var = regridded[h.var_id]
+                # Unstructured ocean sources (FESOM) have no land cells,
+                # so xesmf's locstream nearest fills every target cell
+                # with the nearest ocean value. Restore the NaN-over-land
+                # pattern from the target-grid sftlf so emit_mask_and_fill
+                # produces a correct mask. Without sftlf we skip masking
+                # and warn — the variable is still valid over ocean.
+                if methods_used.get(h.var_id) == UNSTRUCTURED_METHOD and h.kind in (
+                    "ocean_surface",
+                    "seaice_surface",
+                ):
+                    if static_ds is not None and "sftlf" in static_ds:
+                        regridded_var = apply_target_land_mask(
+                            regridded_var, static_ds["sftlf"]
+                        )
+                    else:
+                        row.warnings.append(
+                            f"{h.output_name}: unstructured source regridded "
+                            "via nearest_s2d but no target sftlf available; "
+                            "mask channel will be all-ones"
+                        )
                 outputs = finalize_surface_and_ocean_variable(
-                    regridded[h.var_id],
+                    regridded_var,
                     h,
                     daily_time,
                     fill_iterations=cfg.fill.ocean_fill_iterations,

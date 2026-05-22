@@ -212,17 +212,48 @@ def _has_bounds(ds: xr.Dataset) -> bool:
     return "lon_b" in ds.variables and "lat_b" in ds.variables
 
 
+def is_unstructured_source(ds: xr.Dataset) -> bool:
+    """A source is unstructured when ``lat`` and ``lon`` are both 1D and
+    share a non-canonical dim (e.g. ``ncells`` on AWI's FESOM ocean
+    grid).
+    """
+    if "lat" not in ds.variables or "lon" not in ds.variables:
+        return False
+    lat = ds["lat"]
+    lon = ds["lon"]
+    if lat.ndim != 1 or lon.ndim != 1 or lat.dims != lon.dims:
+        return False
+    return lat.dims[0] not in ("lat", "lon")
+
+
+# Sentinel method string returned by ``make_regridder`` for unstructured
+# sources. Distinct from plain ``nearest_s2d`` so callers can detect the
+# unstructured path and apply a target-grid land mask (xesmf with
+# ``locstream_in=True`` has no land cells in the source and produces
+# valid values everywhere, including over land).
+UNSTRUCTURED_METHOD = "nearest_s2d_locstream"
+
+
 def make_regridder(source_ds: xr.Dataset, target: xr.Dataset, method: str) -> tuple:
     """Build an xESMF regridder, importing lazily so this module can be
     loaded in envs without xESMF (e.g. unit tests on the selection logic).
 
     Returns ``(regridder, actual_method)`` — the method may differ from the
     request if conservative was requested but no grid bounds are available
-    (common for ocean-grid variables like siconc).
+    (common for ocean-grid variables like siconc), or if the source is
+    unstructured (AWI FESOM), in which case xesmf only supports
+    ``nearest_s2d`` via ``locstream_in=True``.
     """
     import xesmf
 
     source_ds = normalize_regrid_source(source_ds)
+
+    if is_unstructured_source(source_ds):
+        return (
+            xesmf.Regridder(source_ds, target, "nearest_s2d", locstream_in=True),
+            UNSTRUCTURED_METHOD,
+        )
+
     actual_method = method
     if method == "conservative" and not _has_bounds(source_ds):
         logging.warning(
@@ -538,6 +569,21 @@ def causal_monthly_to_daily(
 
     out = monthly.isel(time=day_idx)
     return out.assign_coords(time=daily_time.values).rename({"time": "time"})
+
+
+def apply_target_land_mask(
+    da: xr.DataArray, sftlf: xr.DataArray, threshold: float = 50.0
+) -> xr.DataArray:
+    """NaN-fill cells where ``sftlf > threshold`` (i.e. mostly land).
+
+    For ocean/sea-ice variables whose source grid has no land cells
+    (FESOM and other unstructured ocean grids), the regridded output
+    holds a valid value in every target cell — the nearest source
+    point is always an ocean point. Applying the target-grid land
+    mask restores the NaN-over-land pattern downstream consumers
+    expect, including ``emit_mask_and_fill``.
+    """
+    return da.where(sftlf <= threshold)
 
 
 def finalize_surface_and_ocean_variable(
@@ -971,6 +1017,9 @@ __all__ = [
     "grid_fingerprint",
     "normalize_regrid_source",
     "make_regridder",
+    "is_unstructured_source",
+    "UNSTRUCTURED_METHOD",
+    "apply_target_land_mask",
     "regrid_variables",
     "PLEV8_DEFAULT_HPA",
     "normalize_plev",
