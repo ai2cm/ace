@@ -33,7 +33,7 @@ run_training() {
     --workspace ai2/ace \
     --priority high \
     --preemptible \
-    --cluster ai2/titan \
+    --cluster ai2/prometheus \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
