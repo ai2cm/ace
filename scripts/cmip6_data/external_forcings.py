@@ -830,20 +830,54 @@ def main() -> None:
         "--cache-dir",
         default=None,
         help="Where to cache downloaded source files (default: "
-        "<output_directory>/external_forcings/.cache)",
+        "/tmp/external_forcings_cache, or <output_directory>/"
+        "external_forcings/.cache for local output)",
+    )
+    parser.add_argument(
+        "--keep-cache",
+        action="store_true",
+        help="Keep the downloaded source NetCDFs in --cache-dir after "
+        "staging. By default the cache is deleted on successful "
+        "completion since the staged zarrs are tiny (<25 MB per "
+        "scenario) and the raw source files are large (~3 GB SO2/BC "
+        "+ ~6 GB LUH2 historical + ~3 GB SSP files).",
     )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
     cache = Path(args.cache_dir) if args.cache_dir else None
+    all_ok = True
     for exp in args.experiments:
-        stage_for_experiment(
-            exp,
-            args.output_directory,
-            cache_dir=cache,
-            force=args.force,
-            variables=tuple(args.variables) if args.variables else None,
-        )
+        try:
+            stage_for_experiment(
+                exp,
+                args.output_directory,
+                cache_dir=cache,
+                force=args.force,
+                variables=tuple(args.variables) if args.variables else None,
+            )
+        except Exception:
+            all_ok = False
+            raise
+
+    # Clean up cached source NetCDFs after a successful run. We only
+    # delete the cache if every requested experiment finished without
+    # error, so an interrupted run preserves the downloads for the
+    # next attempt.
+    if all_ok and not args.keep_cache:
+        cache_target = cache or Path("/tmp/external_forcings_cache")
+        # Also remove the in-output_directory ``.cache`` location if
+        # we used it (when output_directory is local and cache_dir
+        # wasn't overridden, ``stage_for_experiment`` defaults to that
+        # path — but right now the default is always /tmp; legacy
+        # behavior leaves a .cache dir alongside the zarrs).
+        alt = Path(args.output_directory) / "external_forcings" / ".cache"
+        for candidate in (cache_target, alt):
+            if candidate.exists() and candidate.is_dir():
+                import shutil
+
+                logging.info("Removing source cache at %s", candidate)
+                shutil.rmtree(candidate)
 
 
 if __name__ == "__main__":
