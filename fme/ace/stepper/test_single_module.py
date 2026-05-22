@@ -17,7 +17,7 @@ import torch
 import xarray as xr
 
 import fme
-from fme.ace.aggregator import OneStepAggregator
+from fme.ace.aggregator import OneStepAggregatorConfig
 from fme.ace.aggregator.plotting import plot_paneled_data
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.inference.test_evaluator import (
@@ -825,7 +825,7 @@ def test_train_on_batch_one_step_aggregator(n_forward_steps):
     # keep area weights ones for simplicity
     lat_lon_coordinates._area_weights = torch.ones(nx, ny)
     ds_info = DatasetInfo(horizontal_coordinates=lat_lon_coordinates)
-    aggregator = OneStepAggregator(ds_info, save_diagnostics=False)
+    aggregator = OneStepAggregatorConfig().build(ds_info, save_diagnostics=False)
 
     train_stepper = _get_train_stepper(config)
     stepped = train_stepper.train_on_batch(data, optimization=NullOptimization())
