@@ -35,19 +35,3 @@ overrides:
       experiment: historical
       variant_label: r2i1p1f1
     allow_dedupe: true
-  - match:
-      source_id: AWI-ESM-1-1-LR
-    skip_surface_and_ocean_variables:
-      - simon_siconc
-      - simon_sitemptop
-      - siday_siconc
-      - siday_sitemptop
-      - siday_sithick
-      - oday_tos
-      - oday_tossq
-      - oday_omldamax
-      - oday_sos
-      - omon_zos
-      - omon_hfds
-      - omon_mlotst
-      - omon_tob
