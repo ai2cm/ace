@@ -9,9 +9,11 @@ import xarray as xr
 from config import RegridConfig, ResolvedDatasetConfig, TimeWindow
 from processing import (
     BOUNDS_NAMES,
+    UNSTRUCTURED_METHOD,
     DuplicateTimestampsError,
     SimulationBoundaryError,
     _has_bounds,
+    apply_target_land_mask,
     apply_time_subset,
     causal_monthly_to_daily,
     clamp_static_fractions,
@@ -23,6 +25,7 @@ from processing import (
     fill_horizontal_diffuse,
     finalize_surface_and_ocean_variable,
     flatten_plev_variables,
+    is_unstructured_source,
     make_regridder,
     nearest_above_fill,
     normalize_plev,
@@ -847,6 +850,112 @@ def test_finalize_surface_and_ocean_monthly_causal_maps_correctly():
     )
     # March days get February's mean = 200.
     assert float(outputs["amon_ts"].mean()) == 200.0
+
+
+# ---------------------------------------------------------------------------
+# Unstructured-source detection and regridding
+# ---------------------------------------------------------------------------
+
+
+def _unstructured_ds(ncells: int = 64, ntime: int = 3) -> xr.Dataset:
+    """Synthetic FESOM-shaped dataset: 1D ``ncells`` with 1D lat/lon."""
+    rng = np.random.default_rng(0)
+    lat = np.degrees(np.arcsin(rng.uniform(-1, 1, ncells)))
+    lon = rng.uniform(0, 360, ncells)
+    time = xr.date_range("2010-01-01", periods=ntime, freq="D", calendar="noleap")
+    data = rng.standard_normal((ntime, ncells)).astype(np.float32)
+    return xr.Dataset(
+        {"tos": (("time", "ncells"), data)},
+        coords={
+            "lat": ("ncells", lat),
+            "lon": ("ncells", lon),
+            "time": time,
+        },
+    )
+
+
+def test_is_unstructured_source_detects_ncells():
+    ds = _unstructured_ds()
+    assert is_unstructured_source(ds)
+
+
+def test_is_unstructured_source_rejects_rectilinear():
+    ds = _rectilinear_ds(nlat=8, nlon=16, ntime=2, with_bounds=False)
+    assert not is_unstructured_source(ds)
+
+
+def test_is_unstructured_source_rejects_no_latlon():
+    ds = xr.Dataset({"x": (("a",), np.zeros(3))})
+    assert not is_unstructured_source(ds)
+
+
+def test_is_unstructured_source_rejects_2d_curvilinear():
+    """Curvilinear grids (lat/lon are 2D, like ORCA tripolar) are
+    NOT what locstream_in handles — they should go through the
+    standard structured path with bounds."""
+    ds = xr.Dataset(
+        {"tos": (("time", "y", "x"), np.zeros((2, 4, 5)))},
+        coords={
+            "lat": (("y", "x"), np.zeros((4, 5))),
+            "lon": (("y", "x"), np.zeros((4, 5))),
+        },
+    )
+    assert not is_unstructured_source(ds)
+
+
+def test_make_regridder_unstructured_uses_locstream():
+    from grid import make_target_grid
+
+    ds = _unstructured_ds(ncells=200, ntime=2)
+    target = make_target_grid("F22.5")
+    regridder, method = make_regridder(ds, target, "bilinear")
+    # The method is reported with the locstream-aware sentinel so the
+    # caller can detect and apply the target land mask.
+    assert method == UNSTRUCTURED_METHOD
+
+
+def test_regrid_unstructured_streams_through_dask():
+    """End-to-end: regrid a chunked unstructured variable and
+    confirm output has the F22.5 shape and finite values everywhere
+    (xesmf nearest_s2d fills every target cell from the nearest
+    source point — masking is applied downstream)."""
+    from grid import make_target_grid
+
+    ds = _unstructured_ds(ncells=500, ntime=4).chunk({"time": 2})
+    target = make_target_grid("F22.5")
+    regridder, method = make_regridder(ds, target, "bilinear")
+    out = regridder(ds["tos"])
+    # Streams as dask so the regrid graph composes without realizing.
+    assert hasattr(out.data, "dask")
+    arr = out.compute()
+    assert arr.shape == (4, 45, 90)
+    assert np.isfinite(arr.values).all()
+
+
+# ---------------------------------------------------------------------------
+# apply_target_land_mask
+# ---------------------------------------------------------------------------
+
+
+def test_apply_target_land_mask_nans_above_threshold():
+    da = xr.DataArray(np.full((3, 4, 5), 290.0), dims=("time", "lat", "lon"))
+    sftlf = xr.DataArray(
+        np.where(np.arange(20).reshape(4, 5) >= 10, 100.0, 0.0),
+        dims=("lat", "lon"),
+    )
+    masked = apply_target_land_mask(da, sftlf, threshold=50.0)
+    assert masked.shape == da.shape
+    # Bottom half NaN, top half kept.
+    assert int(np.isnan(masked.isel(time=0).values).sum()) == 10
+    assert float(masked.isel(time=0, lat=0, lon=0)) == 290.0
+
+
+def test_apply_target_land_mask_threshold_respected():
+    da = xr.DataArray(np.ones((2, 3)) * 5.0, dims=("lat", "lon"))
+    sftlf = xr.DataArray([[10.0, 60.0, 90.0], [40.0, 49.0, 100.0]], dims=("lat", "lon"))
+    masked = apply_target_land_mask(da, sftlf, threshold=50.0)
+    expected_nan = np.array([[False, True, True], [False, False, True]])
+    np.testing.assert_array_equal(np.isnan(masked.values), expected_nan)
 
 
 if __name__ == "__main__":
