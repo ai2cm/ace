@@ -73,9 +73,15 @@ class SingleModuleStepConfig(StepConfigABC):
     prescribed_prognostic_names: list[str] = dataclasses.field(default_factory=list)
     residual_prediction: bool = False
     include_channel_mask_inputs: bool = False
+    n_ic_timesteps: int = 1
+    next_step_prognostic_input_names: list[str] = dataclasses.field(
+        default_factory=list
+    )
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
+        if self.n_ic_timesteps < 1:
+            raise ValueError(f"n_ic_timesteps must be >= 1, got {self.n_ic_timesteps}")
         for name in self.prescribed_prognostic_names:
             if name not in self.out_names:
                 raise ValueError(
@@ -91,6 +97,12 @@ class SingleModuleStepConfig(StepConfigABC):
                 raise ValueError(
                     f"next_step_forcing_name is an output variable: '{name}'"
                 )
+        for name in self.next_step_prognostic_input_names:
+            if name not in self.out_names:
+                raise ValueError(
+                    f"next_step_prognostic_input_name '{name}' must be in out_names: "
+                    f"{self.out_names}"
+                )
         if self.secondary_decoder is not None:
             for name in self.secondary_decoder.secondary_diagnostic_names:
                 if name in self.in_names:
@@ -101,10 +113,6 @@ class SingleModuleStepConfig(StepConfigABC):
                     raise ValueError(
                         f"secondary_diagnostic_name is an output variable: '{name}'"
                     )
-
-    @property
-    def n_ic_timesteps(self) -> int:
-        return 1
 
     def get_state(self):
         return dataclasses.asdict(self)
@@ -257,12 +265,24 @@ class SingleModuleStep(StepABC):
             init_weights: Function to initialize the weights of the module.
         """
         super().__init__()
-        n_in_channels = len(config.in_names)
+        out_names_set = set(config.out_names)
+        ic_var_names = [n for n in config.in_names if n in out_names_set]
+        forcing_names = [n for n in config.in_names if n not in out_names_set]
+        expanded_ic = [
+            f"{n}__t{i}" for n in ic_var_names for i in range(config.n_ic_timesteps)
+        ]
+        next_step_channels = [
+            f"{n}__next" for n in config.next_step_prognostic_input_names
+        ]
+        packer_names = expanded_ic + forcing_names + next_step_channels
+        n_in_channels = len(packer_names)
         if config.include_channel_mask_inputs:
             n_in_channels *= 2
         n_out_channels = len(config.out_names)
-        self.in_packer = Packer(config.in_names)
+        self.in_packer = Packer(packer_names)
         self.out_packer = Packer(config.out_names)
+        self._ic_var_names = ic_var_names
+        self._forcing_names = forcing_names
         self._normalizer = normalizer
         if config.ocean is not None:
             self.ocean: Ocean | None = config.ocean.build(
@@ -360,6 +380,10 @@ class SingleModuleStep(StepABC):
         Returns:
             The denormalized output data at the next time step.
         """
+        ic_var_names = self._ic_var_names
+        forcing_names = self._forcing_names
+        next_step_names = self._config.next_step_prognostic_input_names
+        n_ic = self._config.n_ic_timesteps
 
         def network_call(input_norm: TensorDict) -> TensorDict:
             effective_mask = (
@@ -367,10 +391,46 @@ class SingleModuleStep(StepABC):
             )
             if effective_mask is not None:
                 input_norm = _apply_input_mask(input_norm, effective_mask)
-            input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
+            # Flatten IC variables: {name: [batch, n_ic, *spatial]} →
+            # {name__t{i}: [batch, *spatial]}
+            # When n_ic at dim 1 matches config (from predict_generator), index it;
+            # otherwise the input is flat (e.g. direct step() call) — use as-is.
+            flat_input: TensorDict = {}
+            for name in ic_var_names:
+                if name in input_norm:
+                    var = input_norm[name]
+                    has_ic_dim = var.ndim >= 2 and var.shape[1] == n_ic
+                    for i in range(n_ic):
+                        flat_input[f"{name}__t{i}"] = var[:, i] if has_ic_dim else var
+            for name in forcing_names:
+                if name in input_norm:
+                    flat_input[name] = input_norm[name]
+            # Add next-step observation channels (absent → zeros)
+            has_next_step_obs = args.next_step_prognostic_obs is not None
+            if next_step_names:
+                ref = next(iter(flat_input.values()))
+                for name in next_step_names:
+                    key = f"{name}__next"
+                    if (
+                        has_next_step_obs
+                        and args.next_step_prognostic_obs is not None
+                        and name in args.next_step_prognostic_obs
+                    ):
+                        obs = args.next_step_prognostic_obs[name]
+                        obs_norm = self._normalizer.normalize({name: obs})[name]
+                        flat_input[key] = obs_norm
+                    else:
+                        flat_input[key] = torch.zeros_like(ref)
+            input_tensor = self.in_packer.pack(flat_input, axis=self.CHANNEL_DIM)
             if self._config.include_channel_mask_inputs:
                 mask_dict = _build_channel_mask_dict(
-                    self.in_names, effective_mask, input_tensor
+                    ic_var_names,
+                    n_ic,
+                    forcing_names,
+                    next_step_names,
+                    has_next_step_obs,
+                    effective_mask,
+                    input_tensor,
                 )
                 mask_tensor = self.in_packer.pack(mask_dict, axis=self.CHANNEL_DIM)
                 input_tensor = torch.cat(
@@ -397,6 +457,7 @@ class SingleModuleStep(StepABC):
             residual_prediction=self._config.residual_prediction,
             prognostic_names=self.prognostic_names,
             prescribed_prognostic_names=self._config.prescribed_prognostic_names,
+            n_ic_timesteps=self._config.n_ic_timesteps,
         )
 
     def get_regularizer_loss(self):
@@ -435,43 +496,79 @@ def _apply_input_mask(input_norm: TensorDict, data_mask: TensorMapping) -> Tenso
     For each variable in data_mask with False entries, sets those batch
     members' values to 0 in the normalized input. This is equivalent to
     replacing with the climatological mean in physical space.
+
+    Mask shape may be [batch] or [batch, n_ic]; data shape may be
+    [batch, ...spatial...] or [batch, n_ic, ...spatial...].
     """
     result = dict(input_norm)
     for name, mask in data_mask.items():
         if name in result:
-            # mask shape: [batch], data shape: [batch, ...spatial...]
-            broadcast_mask = mask.view(mask.shape[0], *([1] * (result[name].ndim - 1)))
+            extra_dims = result[name].ndim - mask.ndim
+            broadcast_mask = mask.to(device=result[name].device).view(
+                *mask.shape, *([1] * extra_dims)
+            )
             result[name] = torch.where(broadcast_mask, result[name], 0.0)
     return result
 
 
 def _build_channel_mask_dict(
-    in_names: list[str],
+    ic_var_names: list[str],
+    n_ic: int,
+    forcing_names: list[str],
+    next_step_names: list[str],
+    has_next_step_obs: bool,
     data_mask: TensorMapping | None,
     packed_input: torch.Tensor,
 ) -> TensorDict:
-    """Build a dict of per-variable spatial mask tensors.
+    """Build channel indicator tensors for all expanded input channels.
 
-    Returns a ``TensorDict`` keyed by variable name, with each value a
-    ``(batch, *spatial)`` float tensor (1.0 = present, 0.0 = masked).
-    The caller is responsible for packing this dict into the correct
-    channel order.
+    Returns a TensorDict keyed by expanded channel name (e.g. ``temp__t0``,
+    ``solar``, ``sst__next``), each value a ``(batch, *spatial)`` float
+    tensor (1.0 = present, 0.0 = masked).
 
     Args:
-        in_names: Input variable names.
-        data_mask: Per-variable boolean masks of shape ``[batch]``, or None.
-        packed_input: The packed input tensor, used to infer shape and device.
+        ic_var_names: Original prognostic (IC) variable names.
+        n_ic: Number of IC timesteps.
+        forcing_names: Forcing-only variable names (no time suffix).
+        next_step_names: Next-step prognostic input names.
+        has_next_step_obs: Whether next-step observations are present.
+        data_mask: Per-variable masks of shape ``[batch]`` or
+            ``[batch, n_ic]``, or None.
+        packed_input: Packed input tensor, used to infer batch/spatial/device.
     """
     batch = packed_input.shape[0]
-    spatial = packed_input.shape[-2:]
+    # packed_input is [batch, channels, *spatial]; drop first two dims to get spatial
+    spatial = tuple(packed_input.shape[2:])
+    n_spatial = len(spatial)
     device = packed_input.device
     result: TensorDict = {}
-    for name in in_names:
+    for name in ic_var_names:
+        for i in range(n_ic):
+            key = f"{name}__t{i}"
+            if data_mask is not None and name in data_mask:
+                mask = data_mask[name].to(device=device, dtype=torch.float)
+                if mask.ndim == 2:  # [batch, n_ic]
+                    result[key] = (
+                        mask[:, i]
+                        .view(batch, *([1] * n_spatial))
+                        .expand(batch, *spatial)
+                    )
+                else:  # [batch]
+                    result[key] = mask.view(batch, *([1] * n_spatial)).expand(
+                        batch, *spatial
+                    )
+            else:
+                result[key] = torch.ones(batch, *spatial, device=device)
+    for name in forcing_names:
         if data_mask is not None and name in data_mask:
-            mask_1d = data_mask[name].to(device=device, dtype=torch.float)
-            result[name] = mask_1d.view(batch, 1, 1).expand(batch, *spatial)
+            mask = data_mask[name].to(device=device, dtype=torch.float)
+            result[name] = mask.view(batch, *([1] * n_spatial)).expand(batch, *spatial)
         else:
             result[name] = torch.ones(batch, *spatial, device=device)
+    for name in next_step_names:
+        key = f"{name}__next"
+        val = 1.0 if has_next_step_obs else 0.0
+        result[key] = torch.full((batch, *spatial), val, device=device)
     return result
 
 
@@ -485,18 +582,19 @@ def step_with_adjustments(
     residual_prediction: bool,
     prognostic_names: list[str],
     prescribed_prognostic_names: list[str] | None = None,
+    n_ic_timesteps: int = 1,
 ) -> TensorDict:
     """
     Step the model forward one timestep given input data.
 
     Args:
-        input: Mapping from variable name to tensor of shape
-            [n_batch, n_lat, n_lon] containing denormalized data from the
-            initial timestep. In practice this contains the ML inputs.
+        input: Mapping from variable name to tensor. Prognostic variables have
+            shape [n_batch, n_ic_timesteps, *spatial]; forcing variables have
+            shape [n_batch, *spatial].
         next_step_input_data: Mapping from variable name to tensor of shape
-            [n_batch, n_lat, n_lon] containing denormalized data from
-            the output timestep. In practice this contains the necessary data
-            at the output timestep for the ocean model and corrector.
+            [n_batch, *spatial] containing denormalized data from the output
+            timestep. In practice this contains the necessary data at the
+            output timestep for the ocean model and corrector.
         network_calls: Callable[[TensorMapping], TensorDict] that takes a
             normalized input and returns a normalized output.
         normalizer: The normalizer to use.
@@ -506,27 +604,30 @@ def step_with_adjustments(
         prognostic_names: Names of prognostic variables.
         prescribed_prognostic_names: Prognostic names to overwrite from
             next_step_input_data after the ocean step (e.g. for inference).
+        n_ic_timesteps: Number of IC timesteps. Prognostic variables are assumed
+            to have a time dimension at dim 1 when their tensor has more dims
+            than expected for a flat [batch, *spatial] tensor.
 
     Returns:
         The denormalized output data at the next time step.
     """
     if prescribed_prognostic_names is None:
         prescribed_prognostic_names = []
+    prognostic_set = set(prognostic_names)
+
+    def _get_current(k: str, v: torch.Tensor) -> torch.Tensor:
+        """Extract last-timestep slice for IC vars that carry a time dimension."""
+        if k in prognostic_set and v.ndim >= 2 and v.shape[1] == n_ic_timesteps:
+            return v[:, -1]
+        return v
+
     input_norm = normalizer.normalize(input)
     output_norm = network_calls(input_norm)
     if residual_prediction:
-        output_norm = add_names(input_norm, output_norm, prognostic_names)
+        input_norm_current = {k: _get_current(k, v) for k, v in input_norm.items()}
+        output_norm = add_names(input_norm_current, output_norm, prognostic_names)
     output = normalizer.denormalize(output_norm)
-    # Build a NaN-free view of input for the corrector and ocean model.
-    # When variable masking augmentation fills IC channels with NaN, those NaNs
-    # survive normalization's fill (which only applies to input_norm) and would
-    # propagate through area-weighted means in physics corrections, producing NaN
-    # outputs and zero gradients.  Replacing with the normalizer's denormalized
-    # estimate (climatological mean for masked variables) keeps corrections valid.
-    corrector_input: TensorMapping = {
-        **dict(input),
-        **normalizer.denormalize(input_norm),
-    }
+    corrector_input: TensorMapping = {k: _get_current(k, v) for k, v in input.items()}
     if corrector is not None:
         output = corrector(corrector_input, output, next_step_input_data)
     if ocean is not None:

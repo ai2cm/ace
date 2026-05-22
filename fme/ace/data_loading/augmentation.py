@@ -58,13 +58,10 @@ class AugmentationConfig:
         additional_directional_names: Names of variables whose sign is flipped when
             the poles are reversed. By default this includes known directional
             names as stored in RotateModifier.FLIP_NAMES.
-        variable_masking: Optional configuration for randomly masking variables
-            per sample to train robustness to missing inputs.
     """
 
     rotate_probability: float = 0.0
     additional_directional_names: list[str] = dataclasses.field(default_factory=list)
-    variable_masking: VariableMaskingConfig | None = None
 
     def __post_init__(self):
         if not 0.0 <= self.rotate_probability <= 1.0:
@@ -73,21 +70,12 @@ class AugmentationConfig:
                 f"got {self.rotate_probability}"
             )
 
-    def build_modifier(self, n_ic_timesteps: int = 1) -> "BatchModifierABC":
-        modifiers: list[BatchModifierABC] = []
+    def build_modifier(self) -> "BatchModifierABC":
         if self.rotate_probability > 0.0:
-            modifiers.append(
-                RotateModifier(
-                    self.rotate_probability, self.additional_directional_names
-                )
+            return RotateModifier(
+                self.rotate_probability, self.additional_directional_names
             )
-        if self.variable_masking is not None:
-            modifiers.append(self.variable_masking.build_modifier(n_ic_timesteps))
-        if not modifiers:
-            return NullModifier()
-        if len(modifiers) == 1:
-            return modifiers[0]
-        return ComposedModifier(modifiers)
+        return NullModifier()
 
 
 class BatchModifierABC(abc.ABC):
@@ -214,6 +202,28 @@ class VariableMaskingModifier(BatchModifierABC):
         if m and m.group(1) in self._config.rates:
             return m.group(1)
         return name
+
+    def sample_masks(
+        self,
+        variable_names: list[str],
+        batch_size: int,
+        device: torch.device | None = None,
+    ) -> dict[str, torch.Tensor]:
+        """Sample per-sample presence masks (True = present, False = masked)."""
+        groups: dict[str, list[str]] = {}
+        for name in variable_names:
+            if self._rate_for(name) > 0.0:
+                groups.setdefault(self._group_key(name), []).append(name)
+        result: dict[str, torch.Tensor] = {}
+        for group_vars in groups.values():
+            rate = self._rate_for(group_vars[0])
+            masked = torch.rand(batch_size) < rate
+            if device is not None:
+                masked = masked.to(device)
+            present = ~masked
+            for name in group_vars:
+                result[name] = present
+        return result
 
     def __call__(self, batch: BatchData) -> BatchData:
         variable_names = list(batch.data.keys())

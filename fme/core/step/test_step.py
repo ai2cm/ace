@@ -1097,26 +1097,28 @@ def test_step_with_data_mask():
 
 
 def test_build_channel_mask_dict_with_data_mask():
-    in_names = ["a", "b"]
+    # "a" and "b" are IC variables (n_ic=1); keys become a__t0, b__t0.
+    ic_var_names = ["a", "b"]
     packed = torch.zeros(3, 2, 8, 16)
     data_mask = {
         "a": torch.tensor([True, False, True]),
         "b": torch.tensor([False, True, True]),
     }
-    result = _build_channel_mask_dict(in_names, data_mask, packed)
-    assert set(result) == {"a", "b"}
-    assert result["a"].shape == (3, 8, 16)
-    assert result["a"][0, 0, 0] == 1.0
-    assert result["a"][1, 0, 0] == 0.0
-    assert result["a"][2, 0, 0] == 1.0
-    assert result["b"][0, 0, 0] == 0.0
-    assert result["b"][1, 0, 0] == 1.0
-    assert (result["b"][2] == 1.0).all()
+    result = _build_channel_mask_dict(ic_var_names, 1, [], [], False, data_mask, packed)
+    assert set(result) == {"a__t0", "b__t0"}
+    assert result["a__t0"].shape == (3, 8, 16)
+    assert result["a__t0"][0, 0, 0] == 1.0
+    assert result["a__t0"][1, 0, 0] == 0.0
+    assert result["a__t0"][2, 0, 0] == 1.0
+    assert result["b__t0"][0, 0, 0] == 0.0
+    assert result["b__t0"][1, 0, 0] == 1.0
+    assert (result["b__t0"][2] == 1.0).all()
 
 
 def test_build_channel_mask_dict_no_data_mask():
+    # All as forcing variables (no IC suffix, no time dimension).
     packed = torch.zeros(2, 3, 4, 8)
-    result = _build_channel_mask_dict(["x", "y", "z"], None, packed)
+    result = _build_channel_mask_dict([], 1, ["x", "y", "z"], [], False, None, packed)
     assert set(result) == {"x", "y", "z"}
     for name in result:
         assert result[name].shape == (2, 4, 8)
@@ -1124,12 +1126,13 @@ def test_build_channel_mask_dict_no_data_mask():
 
 
 def test_build_channel_mask_dict_partial_mask():
+    # Mix of IC var "a" (gets __t0 suffix) and forcing "b" (no suffix).
     packed = torch.zeros(2, 2, 4, 8)
     data_mask = {"a": torch.tensor([True, False])}
-    result = _build_channel_mask_dict(["a", "b"], data_mask, packed)
-    assert set(result) == {"a", "b"}
-    assert result["a"][0, 0, 0] == 1.0
-    assert result["a"][1, 0, 0] == 0.0
+    result = _build_channel_mask_dict(["a"], 1, ["b"], [], False, data_mask, packed)
+    assert set(result) == {"a__t0", "b"}
+    assert result["a__t0"][0, 0, 0] == 1.0
+    assert result["a__t0"][1, 0, 0] == 0.0
     assert (result["b"] == 1.0).all()
 
 
@@ -1246,20 +1249,15 @@ def test_step_with_include_channel_mask_inputs_no_data_mask():
 
 
 def test_step_nan_input_does_not_produce_nan_output_with_corrector():
-    """NaN-masked IC variables must not propagate through the atmosphere corrector.
+    """Masked IC variables must not propagate NaN through the atmosphere corrector.
 
-    When variable-masking augmentation fills IC channels with NaN, the corrector
-    (dry-air conservation, moisture budget) reads `input_data` to compute a
-    correction.  Without the fix, NaN surface-pressure or water values make
-    `area_weighted_mean` return NaN, corrupting all outputs for the affected
-    samples and zeroing out gradients.
-
-    The fix requires fill_nans_on_normalize=True in the network normalizer so
-    that input_norm carries zeros for masked channels; denormalizing those zeros
-    gives climatological means that the corrector can use without NaN.
+    Masking is now done via channel_mask (explicit bool masks per sample) rather
+    than NaN injection.  The masked variable is zeroed in normalized space before
+    the network forward pass; the corrector sees the original (non-NaN) input
+    for unmasked samples and the mean value (denorm of 0) for masked samples
+    through the normalizer round-trip.  This test verifies that the output
+    has no NaN for any sample regardless of which samples have masked PRESsfc.
     """
-    # Re-create the corrector config with fill_nans_on_normalize=True so that
-    # the normalizer converts NaN → 0 before the corrector sees the input.
     in_names = [
         "DSWRFtoa",
         "HGTsfc",
@@ -1330,24 +1328,158 @@ def test_step_nan_input_does_not_produce_nan_output_with_corrector():
             )
         ),
     )
-    img_shape = DEFAULT_IMG_SHAPE
+    img_shape = (9, 18)
     n_samples = 4
     step = get_step(config, img_shape)
     input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
     next_step_input_data = get_tensor_dict(
         step.next_step_input_names, img_shape, n_samples
     )
-    # Simulate augmentation masking: set PRESsfc to NaN for half the samples.
-    input_data["PRESsfc"] = input_data["PRESsfc"].clone()
-    input_data["PRESsfc"][:2] = float("nan")
+    # Use explicit channel_mask to mask PRESsfc for half the samples.
+    channel_mask = {
+        "PRESsfc": torch.tensor([False, False, True, True], device=fme.get_device()),
+    }
 
     output = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
+            channel_mask=channel_mask,
         ),
     )
     for name in step.output_names:
         assert (
             not output[name].isnan().any()
         ), f"NaN found in output '{name}' — masked IC inputs leaked through corrector"
+
+
+def test_n_ic_timesteps_expands_packer_channel_count():
+    """n_ic_timesteps=2 with 1 prognostic + 1 forcing gives 3 packer channel names."""
+    from fme.core.step.single_module import SingleModuleStep
+
+    normalization = get_network_and_loss_normalization_config(names=["a", "b"])
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(type="MLP", config={}),
+                in_names=["a", "b"],
+                out_names=["a"],
+                normalization=normalization,
+                n_ic_timesteps=2,
+            )
+        ),
+    )
+    step = get_step(config, DEFAULT_IMG_SHAPE)
+    assert isinstance(step, SingleModuleStep)
+    # "a" is prognostic (in + out) → a__t0, a__t1; "b" is forcing (in only) → b
+    assert step.in_packer.names == ["a__t0", "a__t1", "b"]
+
+
+def test_step_n_ic_timesteps_multi_dim_channel_mask_zeroes_correct_ic_slot():
+    """A [batch, n_ic] channel mask independently zeroes the right IC timestep."""
+    n_ic = 2
+    n_samples = 2
+    img_shape = DEFAULT_IMG_SHAPE
+
+    class RecordInput(nn.Module):
+        last_input: torch.Tensor | None = None
+
+        def forward(self, x, **kwargs):
+            RecordInput.last_input = x.detach().clone()
+            return torch.zeros(x.shape[0], 1, *x.shape[2:])
+
+    module = RecordInput()
+    normalization = get_network_and_loss_normalization_config(names=["a"])
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(type="prebuilt", config={"module": module}),
+                in_names=["a"],
+                out_names=["a"],
+                normalization=normalization,
+                n_ic_timesteps=n_ic,
+            )
+        ),
+    )
+    step = get_step(config, img_shape)
+    # IC "a" with shape [batch, n_ic, lat, lon]; t1 slot is non-zero
+    input_data = {
+        "a": torch.stack(
+            [
+                torch.zeros(n_samples, *img_shape),  # t0 = 0
+                torch.ones(n_samples, *img_shape),  # t1 = 1
+            ],
+            dim=1,
+        )
+    }
+    # sample 0: both IC steps present; sample 1: t1 step masked
+    channel_mask = {"a": torch.tensor([[True, True], [True, False]])}
+    step.step(
+        StepArgs(input=input_data, next_step_input_data={}, channel_mask=channel_mask)
+    )
+    assert RecordInput.last_input is not None
+    packed = RecordInput.last_input  # [batch, n_ic, lat, lon]
+    # packer order: a__t0 = ch0, a__t1 = ch1
+    assert not packed[0, 1].eq(0.0).all(), "sample 0 t1 slot should not be zeroed"
+    assert packed[1, 1].eq(0.0).all(), "sample 1 t1 slot should be zeroed by mask"
+
+
+def test_step_next_step_prognostic_obs_absent_gives_zero_data_and_zero_mask():
+    """When next_step_prognostic_obs is absent, data and mask indicator are both 0."""
+    n_samples = 2
+    img_shape = DEFAULT_IMG_SHAPE
+
+    class RecordInput(nn.Module):
+        last_input: torch.Tensor | None = None
+
+        def forward(self, x, **kwargs):
+            RecordInput.last_input = x.detach().clone()
+            return torch.zeros(x.shape[0], 1, *x.shape[2:])
+
+    module = RecordInput()
+    normalization = get_network_and_loss_normalization_config(names=["a"])
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(type="prebuilt", config={"module": module}),
+                in_names=["a"],
+                out_names=["a"],
+                normalization=normalization,
+                next_step_prognostic_input_names=["a"],
+                include_channel_mask_inputs=True,
+            )
+        ),
+    )
+    step = get_step(config, img_shape)
+    # packer_names = ["a__t0", "a__next"]; with mask inputs: 4 channels total
+    # ch 0: a__t0 data, ch 1: a__next data, ch 2: a__t0 mask, ch 3: a__next mask
+    input_data = {"a": torch.rand(n_samples, *img_shape)}
+
+    step.step(StepArgs(input=input_data, next_step_input_data={}, labels=None))
+    assert RecordInput.last_input is not None
+    packed_absent = RecordInput.last_input.clone()
+    assert packed_absent[:, 1].eq(0.0).all(), "a__next data should be zero when absent"
+    assert (
+        packed_absent[:, 3].eq(0.0).all()
+    ), "a__next mask indicator should be 0 when absent"
+
+    # Now provide next_step_prognostic_obs and verify data and indicator become non-zero
+    next_obs = {"a": torch.ones(n_samples, *img_shape)}
+    step.step(
+        StepArgs(
+            input=input_data,
+            next_step_input_data={},
+            labels=None,
+            next_step_prognostic_obs=next_obs,
+        )
+    )
+    packed_present = RecordInput.last_input
+    assert (
+        not packed_present[:, 1].eq(0.0).all()
+    ), "a__next data should be non-zero when present"
+    assert (
+        packed_present[:, 3].eq(1.0).all()
+    ), "a__next mask indicator should be 1 when present"

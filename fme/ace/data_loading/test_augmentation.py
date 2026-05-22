@@ -234,22 +234,12 @@ def test_variable_masking_only_ic_timesteps_masked():
             assert result.data["T"][sample_idx, :2].isnan().all()
 
 
-def test_augmentation_config_builds_composed_modifier():
-    """Both rotate and variable_masking configured → ComposedModifier applied."""
-    from fme.ace.data_loading.augmentation import ComposedModifier
-
-    config = AugmentationConfig(
-        rotate_probability=1.0,
-        variable_masking=VariableMaskingConfig(rates={"T": 1.0}),
-    )
+def test_augmentation_config_rotate_modifier():
+    """rotate_probability > 0 → RotateModifier applied."""
+    config = AugmentationConfig(rotate_probability=1.0)
     modifier = config.build_modifier()
-    assert isinstance(modifier, ComposedModifier)
-    batch = _masking_batch(["T", "UGRD", "VGRD"], n_samples=2)
+    batch = _masking_batch(["UGRD", "VGRD"], n_samples=2)
     result = modifier(batch)
-    # Variable masking: only IC (first) timestep of T should be NaN
-    assert result.data["T"][:, 0].isnan().all()
-    assert not result.data["T"][:, 1:].isnan().any()
-    # RotateModifier should have flipped spatial dims (all samples at rate=1)
     assert torch.allclose(
         torch.flip(result.data["UGRD"], dims=[-2, -1]), -1 * batch.data["UGRD"]
     )

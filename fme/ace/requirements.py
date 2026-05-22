@@ -28,14 +28,11 @@ class DataRequirements:
         allow_missing_variables: If True, the data loader may omit some
             required variables and provide a data_mask instead. If False,
             missing variables cause an error.
-        n_ic_timesteps: Number of leading timesteps used as initial condition.
-            Used by data augmentation to know which timesteps can be masked.
     """
 
     names: list[str]
     n_timesteps: int | IntSchedule
     allow_missing_variables: bool = False
-    n_ic_timesteps: int = 1
 
     @property
     def n_timesteps_schedule(self) -> IntSchedule:

@@ -12,6 +12,10 @@ import torch
 import xarray as xr
 from torch import nn
 
+from fme.ace.data_loading.augmentation import (
+    VariableMaskingConfig,
+    VariableMaskingModifier,
+)
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
@@ -460,30 +464,15 @@ class TrainOutput(TrainOutputABC):
         return self.metrics
 
 
-def _build_ic_channel_mask(
-    ic_data: TensorMapping,
-    data_mask: TensorMapping | None,
-) -> TensorMapping | None:
-    """Build a per-sample, per-variable presence mask for channel mask inputs.
-
-    Combines real missing-data entries from ``data_mask`` with NaN-detected
-    augmentation masking in ``ic_data``.  True = present, False = absent.
-    Returns None when no variable is absent for any sample.
-    """
-    result: dict[str, torch.Tensor] = {}
-    if data_mask is not None:
-        result.update(data_mask)
-    for name, tensor in ic_data.items():
-        # Any NaN across IC timesteps / spatial dims → sample is masked.
-        has_nan = tensor.isnan().flatten(start_dim=1).any(dim=1)
-        if not has_nan.any():
-            continue
-        present = ~has_nan
-        if name in result:
-            result[name] = result[name] & present
-        else:
-            result[name] = present
-    return result if result else None
+def _sample_variable_masks(
+    variable_names: list[str],
+    config: VariableMaskingConfig,
+    batch_size: int,
+    device: torch.device | None = None,
+) -> dict[str, torch.Tensor]:
+    """Sample per-sample variable presence masks (True = present, False = masked)."""
+    modifier = VariableMaskingModifier(config)
+    return modifier.sample_masks(variable_names, batch_size, device)
 
 
 def stack_list_of_tensor_dicts(
@@ -553,7 +542,6 @@ class StepperConfig:
             names=self.all_names,
             n_timesteps=self._window_steps_required(n_forward_steps),
             allow_missing_variables=self.step.allow_missing_variables,
-            n_ic_timesteps=self.n_ic_timesteps,
         )
         return self.derived_forcings.update_requirements(requirements)
 
@@ -1130,8 +1118,16 @@ class Stepper:
         labels: BatchLabels | None,
         data_mask: TensorMapping | None = None,
         channel_mask: TensorMapping | None = None,
+        next_step_obs: TensorMapping | None = None,
+        next_step_mask_config: VariableMaskingConfig | None = None,
+        mask_all_rollout_steps: bool = False,
     ) -> Generator[TensorDict, None, None]:
-        state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
+        n_ic = self._step_obj.n_ic_timesteps
+        next_step_names = getattr(
+            self._step_obj.config, "next_step_prognostic_input_names", []
+        )
+        # ic_dict[k] has shape [batch, n_ic, lat, lon]
+        ic_buffer: dict[str, torch.Tensor] = {k: ic_dict[k] for k in ic_dict}  # type: ignore[assignment]
         for step in range(n_forward_steps):
             input_forcing = {
                 k: (
@@ -1145,29 +1141,69 @@ class Stepper:
                 k: forcing_dict[k][:, step + 1]
                 for k in self._step_obj.next_step_input_names
             }
-            input_data = {**state, **input_forcing}
+            input_data = {**ic_buffer, **input_forcing}
 
             def checkpoint(module):
                 return optimizer.checkpoint(module, step=step)
 
-            # channel_mask applies only to the IC step (step 0): augmentation
-            # masking is in the IC; subsequent inputs are model predictions
-            # (non-NaN).  Real missing-data variables stay absent every step.
-            step_channel_mask = channel_mask if step == 0 else data_mask
+            # channel_mask (explicit IC masking) applies at step 0 by default.
+            # When mask_all_rollout_steps is True, apply at every step.
+            # Real missing-data variables stay absent every step via data_mask.
+            step_channel_mask = (
+                channel_mask if (mask_all_rollout_steps or step == 0) else data_mask
+            )
+
+            # Build next-step observations slice for this rollout step.
+            step_next_step_obs: TensorMapping | None = None
+            if next_step_obs is not None and next_step_names:
+                raw_obs = {
+                    k: next_step_obs[k][:, n_ic + step]
+                    for k in next_step_names
+                    if k in next_step_obs
+                }
+                if raw_obs:
+                    if next_step_mask_config is not None:
+                        ref_tensor = next(iter(raw_obs.values()))
+                        obs_mask = _sample_variable_masks(
+                            list(raw_obs.keys()),
+                            next_step_mask_config,
+                            ref_tensor.shape[0],
+                            ref_tensor.device,
+                        )
+                        # Zero out masked observations in physical space so that
+                        # network_call normalizes them to 0 (climatological mean).
+                        raw_obs = {
+                            k: v * obs_mask[k].view(-1, *([1] * (v.ndim - 1))).float()
+                            if k in obs_mask
+                            else v
+                            for k, v in raw_obs.items()
+                        }
+                    step_next_step_obs = raw_obs
 
             with optimizer.autocast():
-                state = self.step(
+                new_state = self.step(
                     StepArgs(
                         input=input_data,
                         next_step_input_data=next_step_input_dict,
                         labels=labels,
                         data_mask=data_mask,
                         channel_mask=step_channel_mask,
+                        next_step_prognostic_obs=step_next_step_obs,
                     ),
                     wrapper=checkpoint,
                 )
-            yield state
-            state = optimizer.detach_if_using_gradient_accumulation(state)
+            yield new_state
+            new_state = optimizer.detach_if_using_gradient_accumulation(new_state)
+            # Roll IC buffer forward by one timestep.
+            new_state_4d = {
+                k: new_state[k].unsqueeze(1) for k in new_state if k in ic_buffer
+            }
+            ic_buffer = {
+                k: torch.cat([ic_buffer[k][:, 1:], new_state_4d[k]], dim=1)
+                if k in new_state_4d
+                else ic_buffer[k]
+                for k in ic_buffer
+            }
 
     def predict(
         self,
@@ -1450,6 +1486,13 @@ class TrainStepperConfig:
             be less than or equal to the number of timesteps present
             in the training dataset samples.
         parameter_init: The parameter initialization configuration for fine-tuning.
+        ic_masking: Optional config for randomly masking IC variables per sample.
+            Masking is applied explicitly in the training loop; no NaN injection
+            into the data.
+        next_step_masking: Optional config for randomly masking next-step
+            prognostic observations passed to the model during training.
+        mask_all_rollout_steps: When True, apply ic_masking at every rollout step
+            rather than only the initial IC step.
     """
 
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
@@ -1459,6 +1502,9 @@ class TrainStepperConfig:
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
+    ic_masking: VariableMaskingConfig | None = None
+    next_step_masking: VariableMaskingConfig | None = None
+    mask_all_rollout_steps: bool = False
 
     def __post_init__(self):
         if self.n_ensemble == -1:
@@ -1669,13 +1715,28 @@ class TrainStepper(
             )
         input_ensemble_data = input_data.as_batch_data().broadcast_ensemble(n_ensemble)
         forcing_ensemble_data = data.broadcast_ensemble(n_ensemble)
-        # Build channel mask from IC slice of ALL input variables (prognostic +
-        # forcing): augmentation NaN can appear in any in_name variable.
-        n_ic = self.n_ic_timesteps
-        all_ic_data = {k: v[:, :n_ic] for k, v in forcing_ensemble_data.data.items()}
-        channel_mask = _build_ic_channel_mask(
-            all_ic_data, forcing_ensemble_data.data_mask
-        )
+        # Build explicit IC channel mask from masking config (no NaN injection).
+        ic_mask: dict[str, torch.Tensor] | None = None
+        if self._config.ic_masking is not None:
+            ref = next(iter(forcing_ensemble_data.data.values()))
+            ic_mask = _sample_variable_masks(
+                self._prognostic_names,
+                self._config.ic_masking,
+                ref.shape[0],
+                ref.device,
+            )
+        # Merge with real missing-data mask so both are reflected in channel_mask.
+        channel_mask: dict[str, torch.Tensor] | None = None
+        if ic_mask is not None or forcing_ensemble_data.data_mask is not None:
+            channel_mask = {}
+            if forcing_ensemble_data.data_mask is not None:
+                channel_mask.update(forcing_ensemble_data.data_mask)
+            if ic_mask is not None:
+                for k, v in ic_mask.items():
+                    if k in channel_mask:
+                        channel_mask[k] = channel_mask[k] & v
+                    else:
+                        channel_mask[k] = v
         output_generator = self._stepper.predict_generator(
             input_ensemble_data.data,
             forcing_ensemble_data.data,
@@ -1684,6 +1745,11 @@ class TrainStepper(
             labels=input_ensemble_data.labels,
             data_mask=input_ensemble_data.data_mask,
             channel_mask=channel_mask,
+            next_step_obs=forcing_ensemble_data.data
+            if self._config.next_step_masking is not None
+            else None,
+            next_step_mask_config=self._config.next_step_masking,
+            mask_all_rollout_steps=self._config.mask_all_rollout_steps,
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)

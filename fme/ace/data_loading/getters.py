@@ -148,7 +148,7 @@ def get_gridded_data(
     return GriddedData(
         loader=dataloader,
         properties=properties,
-        modifier=config.augmentation.build_modifier(requirements.n_ic_timesteps),
+        modifier=config.augmentation.build_modifier(),
     )
 
 

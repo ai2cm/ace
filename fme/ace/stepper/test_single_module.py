@@ -40,7 +40,6 @@ from fme.ace.stepper.single_module import (
     TrainOutput,
     TrainStepper,
     TrainStepperConfig,
-    _build_ic_channel_mask,
     get_serialized_stepper_vertical_coordinate,
     load_stepper,
     load_stepper_config,
@@ -2495,58 +2494,16 @@ def test_checkpoint_stepper_config_to_stepper_config(tmp_path: pathlib.Path):
     assert loaded_config.step.type == original_config.step.type
 
 
-def test_build_ic_channel_mask_detects_nan():
-    ic_data = {
-        "T": torch.tensor(
-            [[float("nan")], [1.0]]  # sample 0 masked, sample 1 present
-        )
-        .unsqueeze(-1)
-        .unsqueeze(-1),  # [2, 1, 1, 1]
-        "q": torch.ones(2, 1, 1, 1),
-    }
-    result = _build_ic_channel_mask(ic_data, data_mask=None)
-    assert result is not None
-    assert not result["T"][0].item()  # sample 0 is NaN-masked
-    assert result["T"][1].item()  # sample 1 is present
-    assert "q" not in result  # q has no NaN → not included
+def test_train_on_batch_ic_masking_zeroed_by_channel_mask():
+    """Explicit IC masking via TrainStepperConfig.ic_masking must zero the
+    masked variable in normalized space before the model forward pass.
 
-
-def test_build_ic_channel_mask_merges_data_mask():
-    ic_data = {"T": torch.ones(2, 1, 1, 1)}
-    data_mask = {"T": torch.tensor([True, False])}
-    result = _build_ic_channel_mask(ic_data, data_mask=data_mask)
-    assert result is not None
-    assert result["T"][0].item()  # sample 0: real data present
-    assert not result["T"][1].item()  # sample 1: genuinely missing
-
-
-def test_build_ic_channel_mask_nan_and_data_mask_combined():
-    # sample 0: real missing; sample 1: augmentation NaN; sample 2: fully present
-    ic_data = {
-        "T": torch.tensor([1.0, float("nan"), 1.0]).view(3, 1, 1, 1),
-    }
-    data_mask = {"T": torch.tensor([False, True, True])}
-    result = _build_ic_channel_mask(ic_data, data_mask=data_mask)
-    assert result is not None
-    assert not result["T"][0].item()  # real missing
-    assert not result["T"][1].item()  # NaN-masked
-    assert result["T"][2].item()  # present
-
-
-def test_build_ic_channel_mask_returns_none_when_all_present():
-    ic_data = {"T": torch.ones(2, 1, 1, 1), "q": torch.ones(2, 1, 1, 1)}
-    result = _build_ic_channel_mask(ic_data, data_mask=None)
-    assert result is None
-
-
-def test_train_on_batch_ic_nan_zeroed_by_channel_mask():
-    """IC augmentation NaN must be zeroed before the model forward pass.
-
-    ReturnZerosModule asserts no NaN in its input — if channel_mask does not
-    drive _apply_input_mask to zero the NaN-filled IC, that assert fires.
-    Loss must also be finite (no NaN propagated through the computation graph).
+    ReturnZerosModule asserts no NaN in its input and also checks that
+    masked channels are zero. Loss must be finite.
     """
     torch.manual_seed(0)
+    from fme.ace.data_loading.augmentation import VariableMaskingConfig
+
     in_names = ["a", "b"]
     out_names = ["a"]
     n_samples, n_timesteps = 4, 2  # 1 IC + 1 target
@@ -2555,9 +2512,6 @@ def test_train_on_batch_ic_nan_zeroed_by_channel_mask():
         "a": torch.rand(n_samples, n_timesteps, 5, 5, device=DEVICE),
         "b": torch.rand(n_samples, n_timesteps, 5, 5, device=DEVICE),
     }
-    # Simulate IC augmentation: IC (t=0) of "a" is NaN for every sample.
-    data_dict["a"][:, 0] = float("nan")
-
     data = BatchData.new_on_device(
         data=data_dict,
         time=xr.DataArray(np.zeros((n_samples, n_timesteps)), dims=["sample", "time"]),
@@ -2588,7 +2542,11 @@ def test_train_on_batch_ic_nan_zeroed_by_channel_mask():
             ),
         ),
     )
-    stepper = _get_train_stepper(config, loss=StepLossConfig(type="MSE"))
+    train_config = TrainStepperConfig(
+        loss=StepLossConfig(type="MSE"),
+        ic_masking=VariableMaskingConfig(rates={"a": 1.0}),
+    )
+    stepper = train_config.get_train_stepper(config, get_dataset_info())
     stepped = stepper.train_on_batch(data, optimization=NullOptimization())
     assert torch.isfinite(stepped.metrics["loss"]).item()
 
@@ -2625,3 +2583,122 @@ def test_predict_with_data_mask_zeros_masked_forcing():
     output, _ = stepper.predict(input_data, forcing_data)
     ic_a = input_data.as_batch_data().data["a"][:, 0]
     torch.testing.assert_close(output.data["a"][:, 0], ic_a)
+
+
+def test_predict_generator_rolling_buffer_n_ic_2():
+    """Rolling IC buffer with n_ic_timesteps=2 uses the right slots at each step.
+
+    A module that returns its first input channel (a__t0 = oldest IC slot) lets us
+    verify that after each step the buffer is shifted: output[k] == original_ic[:, k].
+    """
+
+    class ReturnFirstChannel(torch.nn.Module):
+        def forward(self, x, **kwargs):
+            return x[:, :1]  # first channel (a__t0) as output
+
+    n_ic = 2
+    n_steps = 2
+    n_samples = 2
+    img_shape = (5, 5)
+    all_names = ["a"]
+
+    module = ReturnFirstChannel()
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(type="prebuilt", config={"module": module}),
+                    in_names=all_names,
+                    out_names=all_names,
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means=get_scalar_data(all_names, 0.0),
+                            stds=get_scalar_data(all_names, 1.0),
+                        ),
+                    ),
+                    n_ic_timesteps=n_ic,
+                )
+            ),
+        )
+    )
+    stepper = config.get_stepper(get_dataset_info())
+
+    # IC: slot 0 = 0.0, slot 1 = 1.0 (distinct per-slot values)
+    ic_values = [0.0, 1.0]
+    ic_data = {
+        "a": torch.stack(
+            [torch.full((n_samples, *img_shape), v, device=DEVICE) for v in ic_values],
+            dim=1,
+        )  # shape [n_samples, n_ic, h, w]
+    }
+    ic_time = xr.DataArray(np.zeros((n_samples, n_ic)), dims=["sample", "time"])
+    ic_batch = BatchData.new_on_device(data=ic_data, time=ic_time, labels=None)
+    initial_condition = ic_batch.get_start(
+        prognostic_names=all_names, n_ic_timesteps=n_ic
+    )
+
+    forcing_time = xr.DataArray(
+        np.zeros((n_samples, n_ic + n_steps)), dims=["sample", "time"]
+    )
+    forcing_data = BatchData.new_on_device(data={}, time=forcing_time, labels=None)
+
+    output_list = list(
+        stepper.get_prediction_generator(
+            initial_condition, forcing_data, n_steps, NullOptimization()
+        )
+    )
+
+    # Step 0: module returns a__t0 = ic[:, 0] = 0.0
+    torch.testing.assert_close(output_list[0]["a"], ic_data["a"][:, 0])
+    # Step 1: buffer shifted to [ic[:, 1], output_step0];
+    # module returns a__t0 = ic[:, 1] = 1.0
+    torch.testing.assert_close(output_list[1]["a"], ic_data["a"][:, 1])
+
+
+def test_train_on_batch_next_step_masking_finite_loss():
+    """next_step_masking config is accepted; train_on_batch produces a finite loss."""
+    from fme.ace.data_loading.augmentation import VariableMaskingConfig
+
+    in_names = ["a", "b"]
+    out_names = ["a"]
+    n_samples, n_timesteps = 4, 2
+
+    data_dict = {
+        k: torch.rand(n_samples, n_timesteps, 5, 5, device=DEVICE) for k in in_names
+    }
+    data = BatchData.new_on_device(
+        data=data_dict,
+        time=xr.DataArray(np.zeros((n_samples, n_timesteps)), dims=["sample", "time"]),
+        labels=None,
+        epoch=0,
+    )
+
+    # packer_names: a__t0, b, a__next → 3 in channels, 1 out channel
+    module = ReturnZerosModule(n_in_channels=3, n_out_channels=len(out_names))
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(type="prebuilt", config={"module": module}),
+                    in_names=in_names,
+                    out_names=out_names,
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means=get_scalar_data(set(in_names + out_names), 0.0),
+                            stds=get_scalar_data(set(in_names + out_names), 1.0),
+                        ),
+                    ),
+                    next_step_prognostic_input_names=["a"],
+                )
+            ),
+        ),
+    )
+    train_config = TrainStepperConfig(
+        loss=StepLossConfig(type="MSE"),
+        next_step_masking=VariableMaskingConfig(rates={"a": 0.5}),
+    )
+    stepper = train_config.get_train_stepper(config, get_dataset_info())
+    stepped = stepper.train_on_batch(data, optimization=NullOptimization())
+    assert torch.isfinite(stepped.metrics["loss"]).item()
