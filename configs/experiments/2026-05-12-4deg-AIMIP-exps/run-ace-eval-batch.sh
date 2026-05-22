@@ -5,13 +5,15 @@ set -e
 SCRIPT_DIR=$(dirname "$0")
 
 EXISTING_RESULTS_DATASETS=(
-    "01KS0YYM4RVW8Q9F26XW7K97SZ"
-    "01KS0SGJNRYDYAVJMVZS27TNXA"
+    "01KS3R14YEQRRGGTPST0213AGJ"
+    "01KS3R0YARDEGB6XVAX86R1CJE"
+    "01KS3X8VJW4VP580XVDMXKPMHC"
 )
 
 DATASET_NAMES=(
-    "var-masking"
-    "dataset-masking"
+    "var-masking-0.80-300e"
+    "var-masking-0.20-300e"
+    "var-masking-0.80"
 )
 
 for i in "${!EXISTING_RESULTS_DATASETS[@]}"; do
