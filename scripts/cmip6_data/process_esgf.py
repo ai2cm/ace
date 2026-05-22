@@ -316,10 +316,21 @@ def _merge_rows_for_index(
 
 
 def _open_netcdf_files(paths: list[Path], variable: str) -> xr.Dataset:
-    """Open and concatenate a list of NetCDF files along time."""
+    """Open and concatenate a list of NetCDF files along time.
+
+    ``chunks={"time": 365}`` forces dask-backed lazy arrays; without
+    explicit chunks ``xr.open_dataset`` returns numpy-backed lazy
+    arrays whose fancy-index reads (``apply_time_subset`` uses
+    ``isel(time=np.where(mask)[0])``) materialize the entire variable
+    in RAM, OOM-ing models with large files (IPSL 15.5 GB ua, etc.).
+    """
     datasets = []
     for p in sorted(paths):
-        ds = xr.open_dataset(p, decode_times=xr.coders.CFDatetimeCoder(use_cftime=True))
+        ds = xr.open_dataset(
+            p,
+            decode_times=xr.coders.CFDatetimeCoder(use_cftime=True),
+            chunks={"time": 365},
+        )
         if variable in ds.data_vars:
             keep = [variable] + [v for v in ds.data_vars if v in BOUNDS_NAMES]
             datasets.append(ds[keep])

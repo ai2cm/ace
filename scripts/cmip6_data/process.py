@@ -342,7 +342,13 @@ def _open_zstore(url: str) -> xr.Dataset:
     that.
     """
     mapper = fsspec.get_mapper(url)
-    return xr.open_zarr(mapper, consolidated=True, use_cftime=True)
+    # ``chunks={"time": 365}`` forces dask-backed lazy arrays — without
+    # explicit chunks, xesmf's regridder can materialize the entire
+    # variable into RAM during the call, OOM'ing models with large
+    # native grids (AWI-ESM, etc.).
+    return xr.open_zarr(
+        mapper, consolidated=True, use_cftime=True, chunks={"time": 365}
+    )
 
 
 def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
