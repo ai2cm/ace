@@ -18,22 +18,38 @@ Previously deferred items, now implemented:
 - ✅ Ocean variables (`Oday` daily SST and others, `Omon` zos/hfds/
   mlotst/tob causal-monthly, `SIday`/`SImon` sea-ice). All routed
   through the surface-and-ocean source-prefixed naming convention
-  (`oday_tos`, `omon_zos`, `simon_siconc`, `siday_siconc`, …) with
-  per-variable masks and horizontal-diffusion fill.
+  (`oday_tos`, `omon_zos`, `simon_sea_ice_fraction`,
+  `siday_sea_ice_fraction`, …) with per-variable masks and
+  horizontal-diffusion fill. Sea-ice fractions are emitted on [0, 1]
+  (`siconc` rescaled from CMIP6's %).
 - ✅ External forcings: `input4mips_co2` (NOAA Mauna Loa + UoM SSP),
   `input4mips_so2`/`input4mips_bc` (CMIP7-vintage CEDS historical +
   CMIP6 IAMC SSPs), `luh2_forest` (UofMD LUH2 v2 multiple-states).
   Staged once per scenario by `external_forcings.py`; argo
-  `stage-externals` template runs this in production.
+  `stage-externals` template runs this in production. Cross-version
+  sharing via the optional `external_forcings_directory` config field
+  on `ProcessConfig` / `ESGFProcessConfig`.
 - ✅ Causal forcing: monthly→daily mapping replaced by strictly
   causal previous-month assignment; annual→daily via causal
   previous-year. Piecewise constant on the daily axis.
 - ✅ Daily SST: `oday_tos` joined in alongside `eday_ts` where
   published.
+- ✅ Baseline-aligned output names: radiative fluxes, near-surface
+  state, and `zg500` are renamed at ingest to the SHIELD/ERA5
+  convention (`DSWRFsfc`, `TMP2m`, `Q2m`, `h500`, …) so training
+  configs can share variable names across data sources. Each renamed
+  variable preserves the CMIP6 source name in an `original_name`
+  attribute.
+- ✅ Per-dataset multi-period stats: each pod writes its own
+  `stats.nc` next to `data.zarr` covering the configured
+  `StatsPeriod`s (default: `full`, `1940-2014`, `1979-2015`). The
+  standalone `compute_stats.py` aggregates / gap-fills these into the
+  cross-dataset `stats.csv`.
 
 Remaining work for the actual training run:
 - ESGF inventory build + production ingest (argo workflow).
-- Normalization stats recomputation with the new variable set.
+- `make_normalization.py` rerun against the v0 zarrs to produce the
+  centering/scaling .nc files for the renamed variable set.
 - Decide on heterogeneous-variable training config: which variables
   the smoke-test stepper sees and predicts, and which are mask-only
   inputs.
@@ -141,9 +157,10 @@ rely on this for per-dataset variable presence.
 
 **Current state.** The pipeline already emits per-variable mask
 channels for the surface-and-ocean variables that have spatial NaN
-extents (e.g. `siday_siconc_mask`, `oday_tos_mask` — 2D when static,
-3D when time-varying), and the `below_surface_mask{hPa}` channels for
-the plev variables. The 3D plev variables themselves are filled with
+extents (e.g. `siday_sea_ice_fraction_mask`, `oday_tos_mask` — 2D
+when static, 3D when time-varying), and the `below_surface_mask{hPa}`
+channels for the plev variables. The 3D plev variables themselves are
+filled with
 nearest-above-in-column values; the surface-and-ocean variables are
 filled via horizontal diffusion. Both fill schemes give the network
 a well-behaved field while the corresponding mask channel preserves
@@ -193,7 +210,7 @@ calendar-previous-month mean, piecewise constant) and
 ``causal_annual_to_daily`` (each day reads its calendar-previous-year
 value). The surface-and-ocean variable handler (`Amon`/`SImon`/`Omon`
 monthly source variables) and the external-forcings handler
-(`amon_ts` / `simon_siconc` etc. + annual CO2 + LUH2 forest) both
+(`amon_ts` / `simon_sea_ice_fraction` etc. + annual CO2 + LUH2 forest) both
 route through these. The legacy linear ``interp_monthly_to_daily``
 function was deleted; no code path can produce the non-causal
 interpolation anymore. Where daily-cadence sources exist (`Eday`,
@@ -219,10 +236,13 @@ every per-model dataset:
 
 Staging script: ``external_forcings.py``. Pipeline integration:
 ``attach_external_forcings`` opens the per-scenario zarr at
-``<output>/external_forcings/<experiment>.zarr`` and projects each
+``<external_forcings_directory>/<experiment>.zarr`` and projects each
 forcing onto the daily time axis via the appropriate causal helper.
-Argo workflow ships a ``stage-externals`` template that runs the
-staging once at the start of a production run.
+``external_forcings_directory`` defaults to
+``<output_directory>/external_forcings/`` (legacy behavior) but can be
+set explicitly so several versioned output directories share one
+staged copy. Argo workflow ships a ``stage-externals`` template that
+runs the staging once at the start of a production run.
 
 ---
 

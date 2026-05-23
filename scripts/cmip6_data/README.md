@@ -72,13 +72,40 @@ the detailed breakdown.
 - Experiment is recorded as metadata and may be used in experiments, but
   **not** encoded in the label.
 
-### Variables (CMIP6 `day` table, CF names kept as-is)
+### Variables (CMIP6 `day` + `CFday` tables, renamed to the SHIELD/ERA5 baseline convention on write)
 
-**Core state (required — any model missing any of these is dropped):**
+**Output naming.** CMIP6 variables that have a baseline-dataset equivalent
+(ERA5, SHIELD AMIP) are renamed at write time so the zarr columns line
+up across data sources. The map is in ``CMIP_TO_OUTPUT_RENAMES`` in
+``config.py``; each renamed variable carries an ``original_name``
+attribute pointing back to the bare CMIP6 source name. Variables with no
+baseline equivalent (e.g. ``psl``, ``wap500``, ``clwvi``, ``clivi``,
+``sfcWind``) keep their CMIP6 names.
+
+| CMIP6 source | Output name | CMIP6 source | Output name |
+|---|---|---|---|
+| `rlds` | `DLWRFsfc` | `rsdt` | `DSWRFtoa` |
+| `rlus` | `ULWRFsfc` | `rsut` | `USWRFtoa` |
+| `rsds` | `DSWRFsfc` | `rlut` | `ULWRFtoa` |
+| `rsus` | `USWRFsfc` | `rsutcs` | `UCSWRFtoa` |
+| `rldscs` | `DCLWRFsfc` | `rlutcs` | `UCLWRFtoa` |
+| `rsdscs` | `DCSWRFsfc` | `rsuscs` | `UCSWRFsfc` |
+| `hfls` | `LHTFLsfc` | `hfss` | `SHTFLsfc` |
+| `pr` | `PRATEsfc` | `ps` | `PRESsfc` |
+| `tas` | `TMP2m` | `huss` | `Q2m` |
+| `uas` | `UGRD10m` | `vas` | `VGRD10m` |
+| `zg500` | `h500` | `ta700` | `TMP700` |
+
+Note that `psl` (mean sea-level pressure, ``day`` table) is **not**
+renamed — it's kept distinct from `PRESsfc` (real surface pressure
+from ``CFday.ps``).
+
+**Core state (required — any model missing more than `max_core_missing`
+of these is dropped):**
 
 On `plev8` (flattened to pressure-named 2D variables in the zarr
 output — see **Plev flattening** below): `ua`, `va`, `hus`, `zg`
-2D: `tas`, `huss`, `psl`, `pr`
+2D: `tas` (→`TMP2m`), `huss` (→`Q2m`), `psl`, `pr` (→`PRATEsfc`)
 
 Notably **absent from core**:
 
@@ -88,18 +115,43 @@ Notably **absent from core**:
   `ta_derived_layer_{lo}_{hi}` (e.g. `ta_derived_layer_1000_850`). This
   is a proxy, not a true temperature; it's treated as derived throughout
   and labelled as such in the zarr.
-- `ps` (surface pressure) — not published at daily cadence by any CMIP6
-  model. `psl` (mean sea-level pressure) + a topography/`zg`-derived
-  surface mask stand in for surface pressure when needed.
+- `ps` (surface pressure) — not published on the standard `day` table by
+  any CMIP6 model. It *is* available on `CFday` for ~5,600 models and is
+  ingested when present (output `PRESsfc`). For models that publish
+  neither, `psl` (mean sea-level pressure) + a topography/`zg`-derived
+  surface mask stand in.
 
 See **Derived variables** below for details.
 
 **Optional (include per-model when published):**
 
-- TOA radiation: `rsdt`, `rsut`, `rlut`
-- Surface radiation: `rsds`, `rsus`, `rlds`, `rlus`
-- Surface turbulent fluxes: `hfss`, `hfls`
-- Surface wind: `sfcWind`, `uas`, `vas`
+Standard `day` table:
+
+- Surface radiation: `rsds`, `rsus`, `rlds`, `rlus` (→ `DSWRFsfc`,
+  `USWRFsfc`, `DLWRFsfc`, `ULWRFsfc`)
+- TOA outgoing longwave: `rlut` (→ `ULWRFtoa`)
+- Surface turbulent fluxes: `hfss`, `hfls` (→ `SHTFLsfc`, `LHTFLsfc`)
+- Surface wind: `sfcWind`, `uas`, `vas` (last two → `UGRD10m`, `VGRD10m`)
+
+`CFday` table (TOA shortwave, clear-sky pairs, and assorted single-
+level diagnostics — see ``CFDAY_VARIABLES`` in ``config.py``):
+
+- TOA shortwave: `rsdt`, `rsut` (→ `DSWRFtoa`, `USWRFtoa`). Neither is
+  published on the standard `day` table by any CMIP6 model; both live
+  on `CFday`.
+- Clear-sky radiation (for cloud radiative effect): `rsutcs`,
+  `rlutcs`, `rsdscs`, `rsuscs`, `rldscs` (→ `UCSWRFtoa`, `UCLWRFtoa`,
+  `DCSWRFsfc`, `UCSWRFsfc`, `DCLWRFsfc`). No `rluscs` — clear-sky and
+  all-sky surface upward LW are identical and CMIP6 doesn't publish a
+  separate version.
+- Real surface pressure: `ps` (→ `PRESsfc`).
+- Single-level diagnostics: `ta700` (→ `TMP700`), `wap500` (kept as-is).
+- Cloud water-path diagnostics: `clwvi` (total condensed), `clivi`
+  (ice-only). Liquid path = `clwvi - clivi` when both are present.
+
+The inventory + task-building code folds the `CFday` queries into the
+day-cadence variable set automatically. ``cmip6_source_table(var_id)``
+in ``config.py`` returns the table a variable lives on.
 
 ### Surface and ocean variables
 
@@ -110,10 +162,15 @@ coexist in a single dataset. The training-side variable-masking
 machinery handles which ones are actually populated per model.
 
 The naming convention is `{table}_{var}` lowercased — e.g.
-`amon_ts`, `eday_ts`, `simon_siconc`, `siday_siconc`, `oday_tos`,
-`omon_zos`. The bare atmospheric daily variables (`ua1000`, `tas`,
-`pr`, …) come from one canonical table (`day`) for every model and
-keep their unprefixed names.
+`amon_ts`, `eday_ts`, `oday_tos`, `omon_zos`. Sea-ice and water-vapor
+variables additionally get a SHIELD/ERA5-flavoured output name:
+``SImon.siconc`` → ``simon_sea_ice_fraction``, ``SIday.siconc`` →
+``siday_sea_ice_fraction`` (both rescaled from % to fraction on
+[0, 1]), and ``Eday.prw`` → ``water_vapor_path``. ``original_name``
+is preserved on each. The bare atmospheric daily variables (`ua1000`,
+`TMP2m`, `PRATEsfc`, …) come from one canonical table (`day` or
+`CFday`) for every model and keep their unprefixed (and where
+applicable, renamed) names.
 
 **Monthly tables (causal previous-month transform applied).**
 Each day receives the *previous calendar month's* mean — strictly
@@ -124,7 +181,8 @@ inherent at this cadence.
 - `amon_ts` from `Amon.ts` — surface temperature (SST over ocean,
   ice-top over sea ice, skin over land). Universal fallback — ~64
   models publish it.
-- `simon_siconc` from `SImon.siconc` — sea-ice fraction.
+- `simon_sea_ice_fraction` from `SImon.siconc` — sea-ice fraction,
+  rescaled from % to [0, 1].
 - `simon_sitemptop` from `SImon.sitemptop` — sea-ice top T.
 - `omon_zos` from `Omon.zos` — sea surface height (integrates
   full-column ocean density; broad coverage).
@@ -137,11 +195,16 @@ matches the daily target; we reindex nearest-neighbor.
 
 - `eday_ts` from `Eday.ts` — same definition as `amon_ts` but
   daily (~21/37 eligible ESGF models, ~1/30 on Pangeo).
+- `water_vapor_path` from `Eday.prw` — column-integrated water vapor
+  (kg m⁻²). When `clwvi` (CFday) is also present, the pipeline emits
+  a derived `total_water_path = water_vapor_path + clwvi` matching the
+  CM4/SHIELD baseline.
 - `oday_tos` from `Oday.tos` — daily SST (~29/37 ESGF).
 - `oday_tossq`, `oday_omldamax`, `oday_sos` — daily SST², daily-max
   MLD, daily SSS (sparser).
-- `siday_siconc`, `siday_sitemptop`, `siday_sithick` — daily
-  sea-ice fraction / top T / thickness (~22–25 / 37 ESGF).
+- `siday_sea_ice_fraction` (from `SIday.siconc`, rescaled to [0, 1]),
+  `siday_sitemptop`, `siday_sithick` — daily sea-ice fraction / top T /
+  thickness (~22–25 / 37 ESGF).
 
 **Per-variable masks.** Ocean and sea-ice variables have NaN over
 land (and, for sea-ice variables, over ice-free cells). For each
@@ -160,8 +223,8 @@ handled at the training level (`allow_variable_masking`).
 
 Coverage on ESGF tiers cleanly: 21/37 eligible models publish
 `eday_ts` (Tier A drop-in for amon_ts); 10 more publish `oday_tos`
-+ `siday_siconc` for a daily SST + ice-mask composite (Tier B);
-remaining models fall back to the causal monthly path. See
++ `siday_sea_ice_fraction` for a daily SST + ice-mask composite
+(Tier B); remaining models fall back to the causal monthly path. See
 `process_esgf.py` and the surface-T discussion in `training.md` for
 details.
 
@@ -257,7 +320,7 @@ still on ESGF and used as-is.
 ### External forcings staging
 
 `external_forcings.py` writes a small per-scenario zarr at
-`<output_directory>/external_forcings/<experiment>.zarr` containing
+`<external_forcings_directory>/<experiment>.zarr` containing
 `co2`, `so2`, `bc`, and `forest` on their native cadence dims
 (`time_annual`, `time_monthly`, `time_annual_grid`). `process.py` and
 `process_esgf.py` opportunistically attach those forcings to each
@@ -265,6 +328,15 @@ per-model dataset at processing time — if the per-scenario zarr is
 absent they record a warning and the per-model output simply lacks
 the `input4mips_*` / `luh2_*` variables (training handles the
 missingness via the existing `allow_variable_masking` machinery).
+
+`external_forcings_directory` is an optional top-level field on both
+`ProcessConfig` and `ESGFProcessConfig`. When unset, it defaults to
+`<output_directory>/external_forcings/` (the legacy layout). Pointing
+several versioned output directories (`v0`, `v0-pilot`, `v1`, …) at
+the same `external_forcings_directory` lets them share one staged
+copy of the forcings — the inputs are version-independent until
+`external_forcings.py` itself changes, so re-staging per version is
+wasteful.
 
 The script accepts both local paths and `gs://` URLs (fsspec-backed),
 so the same code runs locally and from the argo workflow's stage-
@@ -317,8 +389,38 @@ not a priority for physical climate.
 
 From the CMIP6 `fx` table; broadcast along time by the data loader.
 
-- `sftlf` — land fraction (land-sea mask). 51 models.
+- `land_fraction` (from `sftlf`, rescaled from % to [0, 1] and renamed;
+  ``original_name`` = `sftlf`). 51 models. Conservative regridding plus
+  the `clamp_static_fractions` step gives a clean fraction field.
 - `orog` — surface altitude (orography). 47 models.
+
+### Land / ocean / sea-ice fractions
+
+The pipeline emits a (land, ocean, sea-ice) fraction triple that sums
+to 1 exactly in every cell:
+
+- `land_fraction` — static, from `sftlf`, on [0, 1].
+- `simon_sea_ice_fraction` / `siday_sea_ice_fraction` — time-varying,
+  from `SImon.siconc` / `SIday.siconc` (rescaled from % to [0, 1]).
+- `simon_ocean_fraction` / `siday_ocean_fraction` — derived as
+  ``1 − land_fraction − sea_ice_fraction``. Coastal cells where
+  ``land + ice > 1`` (typically from the horizontal-diffusion fill
+  spilling sea-ice over the land mask) get the excess **pushed back
+  into `sea_ice_fraction`** and `ocean_fraction` clipped to zero, so
+  the identity ``land + ice + ocean = 1`` holds exactly. See
+  `derive_ocean_and_correct_sea_ice` in `processing.py`. This matches
+  the convention used by the ERA5 build pipeline.
+
+### Temperature unit harmonization
+
+CMIP6 publishes `tos` / `tob` / `sitemptop` in °C by spec and the rest
+(`tas`, `ts`, `ta`) in K, but publishers occasionally deviate. After
+all variables are assembled and renamed, `harmonize_temperature_to_kelvin`
+walks every temperature variable in the dataset and converts °C → K
+based on the source ``units`` attribute (falling back to the CMOR spec
+default when ``units`` is missing). Already-K variables pass through
+unchanged. Any conversion or unrecognized unit is recorded in
+``index.warnings``.
 
 ### Expected model coverage
 
@@ -433,18 +535,27 @@ filled cells should apply the layer mask recipe above.
   variable is recorded in the `regrid_methods` field of the dataset
   index row and the per-dataset `metadata.json` sidecar.
 
-  | Variable | Category | Requested | Actual (typical) | Notes |
-  |----------|----------|-----------|------------------|-------|
+  Method is selected on the CMIP6 source name (`pr`, `rsdt`, ...);
+  the rename to baseline output names happens at write time, well
+  after regrid. The table below lists source-name → output-name where
+  relevant.
+
+  | Source variable | Category | Requested | Actual (typical) | Notes |
+  |-----------------|----------|-----------|------------------|-------|
   | `ua`, `va`, `hus`, `zg` | core (plev) | bilinear | bilinear | |
-  | `tas`, `huss`, `psl` | core (2D) | bilinear | bilinear | |
-  | `pr` | core (2D flux) | conservative | conservative | atmos grid has bounds |
-  | `rsdt`, `rsut`, `rlut` | optional (TOA) | conservative | conservative | atmos grid has bounds |
-  | `rsds`, `rsus`, `rlds`, `rlus` | optional (sfc rad) | conservative | conservative | atmos grid has bounds |
-  | `hfss`, `hfls` | optional (sfc turb) | conservative | conservative | atmos grid has bounds |
-  | `sfcWind`, `uas`, `vas` | optional (wind) | bilinear | bilinear | |
-  | `ts` | forcing (Amon) | bilinear | bilinear | |
-  | `siconc` | forcing (SImon) | conservative | **bilinear** | ocean grid; see below |
-  | `sftlf` | static (fx) | conservative | conservative | atmos grid has bounds |
+  | `tas`, `huss`, `psl` | core (2D) | bilinear | bilinear | renamed `tas`→`TMP2m`, `huss`→`Q2m` |
+  | `pr` | core (2D flux) | conservative | conservative | atmos grid has bounds; renamed `pr`→`PRATEsfc` |
+  | `rsdt`, `rsut`, `rlut` | optional (TOA, `CFday`/`day`) | conservative | conservative | atmos grid has bounds; renamed to `DSWRFtoa`/`USWRFtoa`/`ULWRFtoa` |
+  | `rsutcs`, `rlutcs`, `rsdscs`, `rsuscs`, `rldscs` | optional (clear-sky, `CFday`) | conservative | conservative | renamed `UCSWRFtoa`, `UCLWRFtoa`, `DCSWRFsfc`, `UCSWRFsfc`, `DCLWRFsfc` |
+  | `rsds`, `rsus`, `rlds`, `rlus` | optional (sfc rad) | conservative | conservative | atmos grid has bounds; renamed `DSWRFsfc`, `USWRFsfc`, `DLWRFsfc`, `ULWRFsfc` |
+  | `hfss`, `hfls` | optional (sfc turb) | conservative | conservative | renamed `SHTFLsfc`, `LHTFLsfc` |
+  | `ps` | optional (CFday) | bilinear | bilinear | renamed `PRESsfc` |
+  | `ta700`, `wap500`, `clwvi`, `clivi` | optional (CFday diag) | bilinear | bilinear | `ta700`→`TMP700`, others unrenamed |
+  | `sfcWind`, `uas`, `vas` | optional (wind) | bilinear | bilinear | `uas`→`UGRD10m`, `vas`→`VGRD10m` |
+  | `prw` (Eday) | surface (atmos) | bilinear | bilinear | →`water_vapor_path` |
+  | `ts` | surface (Amon/Eday) | bilinear | bilinear | |
+  | `siconc` | surface (SImon/SIday) | conservative | **bilinear** | ocean grid; see below. Rescaled %→[0, 1] and renamed `{simon,siday}_sea_ice_fraction` |
+  | `sftlf` | static (fx) | conservative | conservative | atmos grid has bounds; rescaled to [0, 1] and renamed `land_fraction` |
   | `orog` | static (fx) | bilinear | bilinear | |
 
   **`siconc` fallback.** Sea-ice concentration is published on the
@@ -458,6 +569,18 @@ filled cells should apply the layer mask recipe above.
   ice edges; the sanity checks tolerate this. A model whose ocean
   grid *does* carry usable rectilinear bounds would get conservative
   as requested — the actual method is always recorded per-variable.
+
+  **Unstructured ocean grids (FESOM, etc.).** AWI-ESM's FESOM ocean
+  grid is published as a 1D `ncells` axis with paired 1D `lat`/`lon`
+  coords — there is no rectangular structure for xESMF's
+  conservative or bilinear regridders to consume. ``is_unstructured_source``
+  in `processing.py` detects this and routes the variable through
+  ``nearest_s2d`` with ``locstream_in=True`` (recorded under the
+  sentinel method name ``nearest_s2d_locstream``). Because the FESOM
+  ocean grid has no land cells, the locstream nearest fills every
+  target cell with a valid ocean value; ``apply_target_land_mask``
+  then re-applies the target-grid `land_fraction` so the
+  NaN-over-land pattern is restored before `emit_mask_and_fill`.
 
 ### Plev flattening
 
@@ -501,16 +624,52 @@ pressure values are readable directly from the variable name.
 <output_directory>/                     # e.g. ./data/cmip6-daily-pilot/v0
   <source_id>/<experiment>/<variant_label>/
     data.zarr/                          # one per (src, exp, member)
-      metadata.json                     # sidecar; also serves as the
+    metadata.json                       # sidecar; also serves as the
                                         # "done marker" for resumable
                                         # re-runs
+    stats.nc                            # per-dataset multi-period stats
+                                        # (written inline by process.py)
   index.csv                             # one row per dataset attempted
   index.parquet                         # ditto, when pyarrow available
-  stats/<source_id>/{mean,std}.nc       # later, per-model
+  stats.csv                             # cross-dataset tidy aggregate
+  stats.parquet                         # ditto, when pyarrow available
+
+<external_forcings_directory>/          # default <output_directory>/external_forcings
+  <experiment>.zarr                     # one per scenario
 ```
 
 One zarr per `(source_id, experiment, variant_label)`. Chunk/shard per
-Issue 6 (inner `time=1`, outer `time=365`).
+Issue 6 (inner `time=1`, outer `time=365`). One `stats.nc` written
+alongside each `data.zarr` containing per-dataset stats over each of
+the configured `StatsPeriod`s (see **Multi-period inline stats**).
+
+### Multi-period inline stats
+
+Per-dataset summary statistics are computed **inline** in
+`process.py` / `process_esgf.py` right after `write_zarr` — each
+per-dataset pod writes its own `stats.nc` next to `data.zarr` while
+the dataset is still in memory from the materialize-before-write
+step. Stats are computed over one or more named time windows
+configured via `defaults.stats_periods` (a tuple of `StatsPeriod`
+records in `config.py`). The default set is three periods:
+
+- `full` — the dataset's full time range (always populated).
+- `1940-2014` — historical training window (populated on historical
+  datasets, all-NaN on pure SSP datasets).
+- `1979-2015` — modern reanalysis window aligned with ERA5's
+  well-observed era.
+
+Each per-dataset `stats.nc` carries a `period` dim; stat variables
+take the form `{var}__{stat}` with shape `(period,)` or
+`(period, plev)`. Periods with no overlap on a given dataset emit
+NaN-filled stats.
+
+The standalone `compute_stats.py` is now an **aggregator +
+gap-filler**: it scans existing `stats.nc` files, only recomputes
+missing ones (or all of them with `--force`), and produces the
+cross-dataset tidy aggregate at `<output_directory>/stats.csv` (and
+`stats.parquet` when pyarrow is available) with one row per
+`(dataset, variable, plev, period)`.
 
 ## Dependencies
 
@@ -542,22 +701,43 @@ per model. Used both to measure Pangeo coverage and as input to
 Driven by the YAML config + the inventory. For each selected
 `(source_id, experiment, variant_label)`:
 
-1. Drop if any core variable missing.
-2. Open each variable's zarr (state, forcings from `Amon`/`SImon`,
-   static from `fx`).
+1. Drop if more than `max_core_missing` core variables missing.
+2. Open each variable's zarr (state from `day`/`CFday`,
+   surface-and-ocean from `Amon`/`Eday`/`SImon`/`SIday`/`Omon`/`Oday`,
+   static from `fx`). All opens use `chunks={"time": 365}` so the
+   subsequent time-subset stays dask-lazy — a correctness fix; without
+   chunks, fancy-index time selection can materialise the full
+   variable in RAM (~30 GB for ESGF files) and OOM the pod.
 3. Validate `cell_methods`.
 4. Regrid to F22.5 (Gauss-Legendre 45 x 90) via `xesmf` (bilinear for
-   state, conservative for fluxes).
+   state, conservative for fluxes; streaming `nearest_s2d` for
+   unstructured ocean grids like AWI's FESOM).
 5. Below-surface nearest-above fill + emit time-varying
    `below_surface_mask(time, plev, lat, lon)` (uint8).
 6. Derived `ta_derived_layer_{0..6}` from `zg` + `hus`.
-7. Linear-interpolate monthly forcings onto the daily axis; attach
-   static fields.
+7. Causal-previous-month / -previous-year forcings onto the daily
+   axis; attach static fields (`sftlf` → `land_fraction` rescaled to
+   [0, 1]).
 8. Time-subset per config.
-9. Flatten `plev` dimension into pressure-named 2D variables (see
-   **Plev flattening**).
-10. Write zarr with zarr v3 chunks+shards; drop sidecar metadata.json.
-11. Append a row to the central `index.{csv,parquet}`.
+9. Derive `total_water_path` (if `Eday.prw` + `clwvi` both present)
+   and `{simon,siday}_ocean_fraction` (with the land+ice>1 excess
+   pushed back into sea-ice so the triple sums to 1 exactly).
+10. Attach external forcings (`input4mips_*`, `luh2_forest`) from the
+    per-scenario zarr under `external_forcings_directory`.
+11. Materialize the dataset (xesmf isn't thread-safe; load once
+    sequentially).
+12. Flatten `plev` dimension into pressure-named 2D variables (see
+    **Plev flattening**).
+13. Harmonize all temperature variables to K via
+    `harmonize_temperature_to_kelvin` (CMIP6 `tos`/`tob`/`sitemptop`
+    are spec'd Celsius; converted based on `units` attribute).
+14. Apply output renames (`CMIP_TO_OUTPUT_RENAMES`) so `tas`→`TMP2m`,
+    radiative fluxes get baseline names, etc.
+15. Run sanity checks (advisory; recorded in `warnings`).
+16. Write zarr with zarr v3 chunks+shards; drop sidecar `metadata.json`.
+17. Compute multi-period stats inline and write `stats.nc` next to
+    the zarr.
+18. Append a row to the central `index.{csv,parquet}`.
 
 ### `process_esgf.py` — ESGF per-dataset processing
 
@@ -583,8 +763,11 @@ debug aids.
 Per-dataset jobs are embarrassingly parallel. Pilot runs locally
 (single-process; dask + argo wrapping comes later if needed).
 
-Normalization stats (per-model, NaN-aware) are a separate later step
-over the produced zarrs.
+Per-dataset summary stats are computed inline by `process.py` /
+`process_esgf.py` (see **Multi-period inline stats**). The standalone
+`compute_stats.py` aggregates them into the cross-dataset
+`stats.csv` / `stats.parquet` and gap-fills any datasets missing an
+inline write.
 
 ### `make_presence.py` — variable-presence views
 
@@ -635,8 +818,9 @@ python make_presence.py --config configs/pilot.yaml
   (45 x 90). Conservative for fluxes/precip, bilinear for state.
   Weights cached per source grid.
 - **Forcings wiring.** Monthly `ts` (`Amon`) + `siconc` (`SImon`)
-  interpolated to daily; static `sftlf` + `orog` (`fx`) broadcast.
-  ~21 source_ids have full core + forcing + static coverage in Pangeo.
+  causal-previous-month mapped to daily; static `sftlf` (→
+  `land_fraction`) + `orog` (`fx`) broadcast. ~21 source_ids have
+  full core + forcing + static coverage in Pangeo.
 - **Issue 7 — Below-surface masking.** Per-level time-varying
   `below_surface_mask{hPa}(time, lat, lon)` (uint8) per dataset
   (flattened from a single `(time, plev, lat, lon)` array; see
@@ -808,8 +992,6 @@ python make_presence.py --config configs/pilot.yaml
   carries `variables_present` per dataset as a JSON list; a readable
   cross-model pivot (rows = dataset, columns = variable, values = 1/0)
   would make it easy to eyeball coverage at a glance. Easy follow-up.
-- **Normalization stats**. Per-model mean/std over the produced
-  zarrs. Separate later step; not yet written.
 - **Proper `siconc` regridding for CESM2 (and any similarly affected
   models)**. Investigate pole/tripolar cell trimming or bypass.
 - **Sanity-check upper bounds for `hfss`/`hfls`** were tuned to the
