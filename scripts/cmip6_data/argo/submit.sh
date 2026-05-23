@@ -42,6 +42,11 @@
 #                              <output>/external_forcings/. Heavy one-time
 #                              step (~30 GB source download); re-running
 #                              skips already-staged scenarios.
+#   --force-inventory          Rebuild ``inventory.csv`` /
+#                              ``inventory_esgf.csv`` even when they
+#                              already exist on GCS. Use when the
+#                              inventory queries in config.py have
+#                              changed (e.g. new table_ids added).
 #
 # Prerequisites:
 #   - argo CLI
@@ -61,6 +66,7 @@ RUN_PROCESS_ESGF=false
 RUN_STATS=false
 RUN_NORMALIZATION=false
 RUN_STAGE_EXTERNALS=false
+FORCE_INVENTORY=false
 CONFIG=""
 ESGF_CONFIG=""
 INVENTORY_CONFIG=""
@@ -81,6 +87,7 @@ do case $1 in
     --stats) RUN_STATS=true;;
     --normalization) RUN_NORMALIZATION=true;;
     --stage-externals) RUN_STAGE_EXTERNALS=true;;
+    --force-inventory) FORCE_INVENTORY=true;;
     *) echo "Unknown parameter passed: $1"
     exit 1;;
 esac
@@ -116,17 +123,28 @@ if [[ -n "${ESGF_CONFIG}" ]]; then
 fi
 
 # Helper: build an inventory CSV on GCS by running the given script
-# with the given config if the inventory doesn't already exist there.
+# with the given config. Skips the build if the file already exists,
+# unless --force-inventory was passed.
 build_inventory_if_missing() {
     local inv_config="$1"
     local builder_script="$2"
     local abs_inv_config="$(cd "$(dirname "${inv_config}")" && pwd)/$(basename "${inv_config}")"
     local inv_path
     inv_path=$(yq -r '.output_path' "${abs_inv_config}")
+    local exists
     if python -c "import fsspec; fs, p = fsspec.core.url_to_fs('${inv_path}'); exit(0 if fs.exists(p) else 1)" 2>/dev/null; then
+        exists=true
+    else
+        exists=false
+    fi
+    if [[ "${exists}" = true && "${FORCE_INVENTORY}" != true ]]; then
         echo "Inventory already exists at ${inv_path}, skipping generation."
     else
-        echo "Building inventory at ${inv_path} via ${builder_script}..."
+        if [[ "${exists}" = true ]]; then
+            echo "--force-inventory set; rebuilding ${inv_path} via ${builder_script}..."
+        else
+            echo "Building inventory at ${inv_path} via ${builder_script}..."
+        fi
         (cd "${CMIP6_DIR}" && python "${builder_script}" --config "${abs_inv_config}")
     fi
     # Echo the path so the caller can capture it.
