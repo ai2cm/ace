@@ -22,6 +22,7 @@ from processing import (
     compute_below_surface_mask,
     compute_derived_layer_T,
     compute_ocean_fraction,
+    derive_ocean_and_correct_sea_ice,
     emit_mask_and_fill,
     fill_derived_layer_T,
     fill_horizontal_diffuse,
@@ -1019,6 +1020,37 @@ def test_compute_ocean_fraction_clips_to_unit_interval():
     ice = xr.DataArray(np.array([0.6]), dims=("lat",))
     ocean = compute_ocean_fraction(land, ice, "x")
     np.testing.assert_array_equal(ocean.values, [0.0])
+
+
+def test_derive_ocean_and_correct_sea_ice_closes_budget():
+    """Where land+ice > 1, the corrected (land, ice, ocean) triple
+    sums to exactly 1 (excess pushed from ice into ocean=0 cell)."""
+    # Static (lat,) land; time-varying (time, lat) ice.
+    land = xr.DataArray(np.array([0.0, 0.3, 0.7, 1.0, 1.0]), dims=("lat",))
+    ice = xr.DataArray(
+        np.array([[0.5, 0.4, 0.5, 0.3, 0.2], [0.6, 0.1, 0.4, 0.0, 0.1]]),
+        dims=("time", "lat"),
+    )
+    corrected_ice, ocean = derive_ocean_and_correct_sea_ice(
+        land, ice, "simon_ocean_fraction"
+    )
+    total = land + corrected_ice + ocean
+    np.testing.assert_allclose(total.values, 1.0, atol=1e-7)
+    assert float(corrected_ice.min()) >= 0.0
+    assert float(corrected_ice.max()) <= 1.0
+    assert float(ocean.min()) >= 0.0
+    assert float(ocean.max()) <= 1.0
+
+
+def test_derive_ocean_and_correct_sea_ice_preserves_clean_cells():
+    """Cells where land+ice <= 1 are unchanged."""
+    land = xr.DataArray(np.array([0.0, 0.0, 0.3]), dims=("lat",))
+    ice = xr.DataArray(np.array([[0.0, 0.5, 0.4]]), dims=("time", "lat"))
+    corrected_ice, ocean = derive_ocean_and_correct_sea_ice(
+        land, ice, "siday_ocean_fraction"
+    )
+    np.testing.assert_allclose(corrected_ice.values, ice.values)
+    np.testing.assert_allclose(ocean.values, [[1.0, 0.5, 0.3]])
 
 
 def test_compute_ocean_fraction_broadcasts_time():

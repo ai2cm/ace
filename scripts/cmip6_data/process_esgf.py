@@ -69,7 +69,7 @@ from processing import (  # noqa: E402
     clamp_static_fractions,
     compute_below_surface_mask,
     compute_derived_layer_T,
-    compute_ocean_fraction,
+    derive_ocean_and_correct_sea_ice,
     fill_derived_layer_T,
     finalize_surface_and_ocean_variable,
     flatten_plev_variables,
@@ -625,8 +625,8 @@ def process_one_esgf(
             for v in static_ds.data_vars:
                 day_regridded[v] = static_ds[v]
 
-        # 9a. Derive {simon,siday}_ocean_fraction from land_fraction and
-        # the corresponding sea-ice fraction (see matching block in
+        # 9a. Derive {simon,siday}_ocean_fraction + budget-correct
+        # sea-ice fraction so land+ice+ocean=1 (see matching block in
         # process.py).
         if "land_fraction" in day_regridded:
             for sif, ofv in (
@@ -634,9 +634,13 @@ def process_one_esgf(
                 ("siday_sea_ice_fraction", "siday_ocean_fraction"),
             ):
                 if sif in day_regridded:
-                    day_regridded[ofv] = compute_ocean_fraction(
-                        day_regridded["land_fraction"], day_regridded[sif], ofv
+                    corrected_ice, ocean = derive_ocean_and_correct_sea_ice(
+                        day_regridded["land_fraction"],
+                        day_regridded[sif],
+                        ofv,
                     )
+                    day_regridded[sif] = corrected_ice
+                    day_regridded[ofv] = ocean
 
         # 9b. External forcings (input4MIPs / LUH2). See the matching
         # block in process.py — staging is done once globally by

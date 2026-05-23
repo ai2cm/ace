@@ -65,7 +65,7 @@ from processing import (  # noqa: E402
     clamp_static_fractions,
     compute_below_surface_mask,
     compute_derived_layer_T,
-    compute_ocean_fraction,
+    derive_ocean_and_correct_sea_ice,
     fill_derived_layer_T,
     finalize_surface_and_ocean_variable,
     flatten_plev_variables,
@@ -655,17 +655,24 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
 
         # 14a. Derive ``{simon,siday}_ocean_fraction`` from
         # ``land_fraction`` and the corresponding sea-ice fraction so
-        # the (land, ocean, sea-ice) triple is in the output. Skipped
-        # silently if either input isn't published for this dataset.
+        # the (land, ocean, sea-ice) triple is in the output. Coastal
+        # cells where land+ice exceeds 1 (typically from the
+        # emit_mask_and_fill diffusion over land) get their excess
+        # moved back into sea_ice_fraction so the identity
+        # land+ice+ocean=1 holds exactly.
         if "land_fraction" in day_regridded:
             for sif, ofv in (
                 ("simon_sea_ice_fraction", "simon_ocean_fraction"),
                 ("siday_sea_ice_fraction", "siday_ocean_fraction"),
             ):
                 if sif in day_regridded:
-                    day_regridded[ofv] = compute_ocean_fraction(
-                        day_regridded["land_fraction"], day_regridded[sif], ofv
+                    corrected_ice, ocean = derive_ocean_and_correct_sea_ice(
+                        day_regridded["land_fraction"],
+                        day_regridded[sif],
+                        ofv,
                     )
+                    day_regridded[sif] = corrected_ice
+                    day_regridded[ofv] = ocean
 
         # 14b. External forcings (input4MIPs / LUH2). Currently CO2 only.
         # The per-scenario zarr is staged once by ``external_forcings.py``

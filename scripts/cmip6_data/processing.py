@@ -657,36 +657,57 @@ def apply_output_renames(ds: xr.Dataset, rename_map: dict[str, str]) -> xr.Datas
     return out
 
 
+def derive_ocean_and_correct_sea_ice(
+    land_fraction: xr.DataArray,
+    sea_ice_fraction: xr.DataArray,
+    ocean_name: str,
+) -> tuple[xr.DataArray, xr.DataArray]:
+    """Derive ``ocean_fraction`` and correct ``sea_ice_fraction`` so the
+    identity ``land + ice + ocean = 1`` holds exactly in every cell.
+
+    Where ``land + ice > 1`` (typically coastal cells, or cells where
+    sea-ice was diffused over the land mask by ``emit_mask_and_fill``),
+    the excess is moved back into ``sea_ice_fraction`` — matching the
+    convention used by the ERA5 build pipeline. Returns the corrected
+    sea-ice and the derived ocean, both with ``(time, lat, lon)`` dim
+    order to match what the zarr writer expects.
+
+    ``land_fraction`` is static; ``sea_ice_fraction`` is time-varying.
+    xarray's broadcasting handles the shape; we explicitly transpose
+    the outputs so the time axis comes first.
+    """
+    raw_ocean = 1.0 - land_fraction - sea_ice_fraction
+    # Negative ocean means land+ice > 1 in that cell — push the excess
+    # back into ``sea_ice_fraction`` and clip ocean to zero there.
+    negative_ocean = raw_ocean.where(raw_ocean < 0, 0.0)
+    ocean = (raw_ocean - negative_ocean).clip(0.0, 1.0)
+    corrected_ice = (sea_ice_fraction + negative_ocean).clip(0.0, 1.0)
+
+    ocean = ocean.transpose(*sea_ice_fraction.dims).rename(ocean_name)
+    ocean.attrs["original_name"] = "derived"
+    ocean.attrs["long_name"] = (
+        "ocean fraction = 1 - land_fraction - sea_ice_fraction "
+        "(budget-corrected so land+ice+ocean=1)"
+    )
+    ocean.attrs["units"] = "1"
+
+    corrected_ice = corrected_ice.transpose(*sea_ice_fraction.dims).rename(
+        sea_ice_fraction.name
+    )
+    corrected_ice.attrs = dict(sea_ice_fraction.attrs)
+    return corrected_ice, ocean
+
+
+# Backwards-compatible wrapper used by tests written against the
+# original single-return signature. Prefer the corrected pair via
+# ``derive_ocean_and_correct_sea_ice`` from new call sites.
 def compute_ocean_fraction(
     land_fraction: xr.DataArray,
     sea_ice_fraction: xr.DataArray,
     name: str,
 ) -> xr.DataArray:
-    """Derive ``ocean_fraction = 1 - land_fraction - sea_ice_fraction``
-    on the target grid, clipped to ``[0, 1]``.
-
-    ``land_fraction`` is static (``(lat, lon)``) and
-    ``sea_ice_fraction`` is time-varying (``(time, lat, lon)``); xarray
-    broadcasts the static land mask across time automatically.
-
-    Clipping handles two cases without producing negative or >1 values:
-    coastal cells where the regridder's residual sliver of "land" and
-    full sea-ice add to slightly over 1, and the (rare) cells where
-    a model publishes ice fraction over a cell its own ``sftlf`` calls
-    100% land.
-    """
-    ocean = (1.0 - land_fraction - sea_ice_fraction).clip(0.0, 1.0)
-    # Preserve the sea-ice operand's dim ordering — that's the one with
-    # the time axis (when present), and downstream zarr writers expect
-    # ``(time, lat, lon)`` rather than xarray's broadcast default.
-    ocean = ocean.transpose(*sea_ice_fraction.dims)
-    out = ocean.rename(name)
-    out.attrs["original_name"] = "derived"
-    out.attrs["long_name"] = (
-        "ocean fraction = 1 - land_fraction - sea_ice_fraction (clipped to [0,1])"
-    )
-    out.attrs["units"] = "1"
-    return out
+    _, ocean = derive_ocean_and_correct_sea_ice(land_fraction, sea_ice_fraction, name)
+    return ocean
 
 
 def apply_target_land_mask(
@@ -1191,6 +1212,7 @@ __all__ = [
     "apply_target_land_mask",
     "apply_output_renames",
     "compute_ocean_fraction",
+    "derive_ocean_and_correct_sea_ice",
     "regrid_variables",
     "PLEV8_DEFAULT_HPA",
     "normalize_plev",
