@@ -32,6 +32,7 @@ import tempfile
 import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
+from typing import Optional
 
 import fsspec
 import numpy as np
@@ -216,63 +217,161 @@ def _stats_for_static_field(arr: np.ndarray, w2d: np.ndarray) -> dict[str, float
 # ---------------------------------------------------------------------------
 
 
+def _slice_ds_to_period(ds: xr.Dataset, period) -> Optional[xr.Dataset]:
+    """Restrict ``ds`` to a ``StatsPeriod``'s time window. Returns the
+    sliced dataset, or ``None`` when no timesteps fall in the period.
+    ``ds`` without a ``time`` dim is returned unchanged (statics).
+    """
+    if "time" not in ds.dims:
+        return ds
+    if period.start is None and period.end is None:
+        return ds
+    times = ds["time"].values
+    if not len(times):
+        return None
+    if len(times) and hasattr(times[0], "calendar"):
+        date_type = type(times[0])
+
+        def to_dt(s, *, end: bool):
+            y, m, d = (int(x) for x in s.split("-"))
+            return date_type(y, m, d, 23, 59, 59) if end else date_type(y, m, d)
+    else:
+
+        def to_dt(s, *, end: bool):
+            return (
+                np.datetime64(s) + np.timedelta64(1, "D") - np.timedelta64(1, "s")
+                if end
+                else np.datetime64(s)
+            )
+
+    mask = np.ones(len(times), dtype=bool)
+    if period.start is not None:
+        mask &= times >= to_dt(period.start, end=False)
+    if period.end is not None:
+        mask &= times <= to_dt(period.end, end=True)
+    if not mask.any():
+        return None
+    return ds.isel(time=np.where(mask)[0])
+
+
+def _nan_stats() -> dict[str, float]:
+    return _nan_dict()
+
+
 def compute_dataset_stats(
     ds: xr.Dataset,
     w2d: np.ndarray,
-) -> tuple[xr.Dataset, list[dict[str, float]]]:
-    """Compute stats for every data variable in ``ds``.
+    periods=None,
+) -> tuple[xr.Dataset, list[dict]]:
+    """Compute stats for every data variable in ``ds`` over one or more
+    named time periods.
 
-    Returns:
+    ``periods`` is a sequence of ``StatsPeriod`` objects (defaults to
+    ``DEFAULT_STATS_PERIODS``). Each period produces a row in a new
+    ``period`` dim of the returned dataset; periods with no overlap on
+    a given variable get NaN stats. Static (no-``time``) variables get
+    the same values across all periods.
 
-    * ``stats_ds`` — an ``xarray.Dataset`` with one variable per
-      ``<varname>__<stat>`` pair. 3D variables get a ``plev`` dim.
-      Suitable for writing to netCDF as the per-dataset stats file.
-    * ``rows`` — a list of dicts (one per ``(variable, plev)``) for
-      the cross-dataset aggregate.
+    Returns ``(stats_ds, rows)``:
+    * ``stats_ds``: ``{var}__{stat}`` variables, each with shape
+      ``(period,)``, ``(period, plev)`` for 3D-source variables. Coord
+      ``period`` is a string label; ``plev`` carried through when
+      present.
+    * ``rows``: tidy aggregate, one dict per ``(variable, plev, period)``.
     """
-    nc_vars: dict[str, tuple[tuple[str, ...], np.ndarray | float]] = {}
-    rows: list[dict[str, float]] = []
-    for v in ds.data_vars:
-        if v in _SKIP_VARS:
-            continue
+    from config import DEFAULT_STATS_PERIODS
+
+    if periods is None:
+        periods = DEFAULT_STATS_PERIODS
+    periods = list(periods)
+    period_names = [p.name for p in periods]
+
+    vars_to_process = [v for v in ds.data_vars if v not in _SKIP_VARS]
+    plev_size = int(ds.sizes.get("plev", 0))
+
+    nc_vars: dict[str, tuple[tuple[str, ...], np.ndarray]] = {}
+    rows: list[dict] = []
+
+    # Per-variable stats accumulator: stats_by_var[v][period_index]
+    # = either a list of per-plev dicts (3D) or a single dict.
+    # Pre-allocate so empty periods (no overlap) emit NaN cleanly.
+    for v in vars_to_process:
         da = ds[v]
-        if "time" in da.dims and "plev" in da.dims:
-            n_plev = da.sizes["plev"]
-            per_plev = []
-            for k in range(n_plev):
-                arr = da.isel(plev=k).values
-                per_plev.append(_stats_for_time_field(arr, w2d))
-            for stat in _SCALAR_NAMES:
-                vals = np.array(
-                    [s.get(stat, float("nan")) for s in per_plev], dtype=float
+        is_3d = "time" in da.dims and "plev" in da.dims
+        is_static = "time" not in da.dims
+
+        # Build a (n_periods, [plev]) array per stat.
+        per_period: list = []
+        for p in periods:
+            if is_static:
+                # Static: identical across periods; only compute once.
+                if per_period:
+                    per_period.append(per_period[0])
+                else:
+                    per_period.append(_stats_for_static_field(da.values, w2d))
+                continue
+            sub = _slice_ds_to_period(ds, p)
+            if sub is None:
+                # No data in this period — emit NaN stats.
+                if is_3d:
+                    per_period.append([_nan_stats() for _ in range(plev_size)])
+                else:
+                    per_period.append(_nan_stats())
+                continue
+            sub_da = sub[v]
+            if is_3d:
+                per_period.append(
+                    [
+                        _stats_for_time_field(sub_da.isel(plev=k).values, w2d)
+                        for k in range(sub_da.sizes["plev"])
+                    ]
                 )
-                nc_vars[f"{v}__{stat}"] = (("plev",), vals)
-            for k, s in enumerate(per_plev):
+            else:
+                per_period.append(_stats_for_time_field(sub_da.values, w2d))
+
+        # Materialize per-stat arrays. 3D shape: (period, plev). 2D / static
+        # shape: (period,).
+        for stat in _SCALAR_NAMES:
+            if is_3d:
+                arr = np.array(
+                    [
+                        [d.get(stat, float("nan")) for d in per_p]
+                        for per_p in per_period
+                    ],
+                    dtype=float,
+                )
+                nc_vars[f"{v}__{stat}"] = (("period", "plev"), arr)
+            else:
+                arr = np.array(
+                    [d.get(stat, float("nan")) for d in per_period], dtype=float
+                )
+                nc_vars[f"{v}__{stat}"] = (("period",), arr)
+
+        # Tidy rows for the aggregate, one per (variable, plev, period).
+        for pi, period_name in enumerate(period_names):
+            if is_3d:
+                for k in range(plev_size):
+                    row = {
+                        "variable": v,
+                        "plev_index": float(k),
+                        "plev_pa": float(ds["plev"].values[k]),
+                        "period": period_name,
+                    }
+                    row.update(per_period[pi][k])
+                    rows.append(row)
+            else:
                 row = {
                     "variable": v,
-                    "plev_index": float(k),
-                    "plev_pa": float(da.plev.values[k]),
+                    "plev_index": float("nan"),
+                    "plev_pa": float("nan"),
+                    "period": period_name,
                 }
-                row.update(s)
+                row.update(per_period[pi])
                 rows.append(row)
-        elif "time" in da.dims:
-            arr = da.values
-            stats = _stats_for_time_field(arr, w2d)
-            for stat in _SCALAR_NAMES:
-                nc_vars[f"{v}__{stat}"] = ((), float(stats[stat]))
-            row = {"variable": v, "plev_index": float("nan"), "plev_pa": float("nan")}
-            row.update(stats)
-            rows.append(row)
-        else:
-            arr = da.values
-            stats = _stats_for_static_field(arr, w2d)
-            for stat in _SCALAR_NAMES:
-                nc_vars[f"{v}__{stat}"] = ((), float(stats[stat]))
-            row = {"variable": v, "plev_index": float("nan"), "plev_pa": float("nan")}
-            row.update(stats)
-            rows.append(row)
 
-    coords: dict[str, xr.DataArray] = {}
+    coords: dict[str, xr.DataArray] = {
+        "period": xr.DataArray(np.array(period_names, dtype=object), dims=("period",)),
+    }
     if "plev" in ds.coords:
         coords["plev"] = ds.plev
     data = {
@@ -280,6 +379,14 @@ def compute_dataset_stats(
         for name, (dims, payload) in nc_vars.items()
     }
     stats_ds = xr.Dataset(data, coords=coords)
+    # Persist the period start/end for downstream consumers — useful
+    # when reading stats without having the config handy.
+    stats_ds["period_start"] = xr.DataArray(
+        np.array([p.start or "" for p in periods], dtype=object), dims=("period",)
+    )
+    stats_ds["period_end"] = xr.DataArray(
+        np.array([p.end or "" for p in periods], dtype=object), dims=("period",)
+    )
     return stats_ds, rows
 
 
@@ -294,6 +401,7 @@ def _process_one(
     identity: dict,
     grid_name: str,
     force: bool,
+    periods: Optional[tuple] = None,
 ) -> tuple[str, list[dict], str]:
     """Compute or reuse stats for a single dataset.
 
@@ -318,17 +426,9 @@ def _process_one(
         return "error", [], f"could not open {zarr_path}: {e}"
 
     try:
-        n_lon = ds.sizes.get("lon", 90)
-        w2d = area_weights_2d(grid_name, n_lon)
-        stats_ds, dataset_rows = compute_dataset_stats(ds, w2d)
-        for k, val in identity.items():
-            stats_ds.attrs[k] = val
-        with tempfile.NamedTemporaryFile(suffix=".nc") as tmp:
-            stats_ds.to_netcdf(tmp.name)
-            with fs.open(rel, "wb") as fobj:
-                fobj.write(open(tmp.name, "rb").read())
-        for row in dataset_rows:
-            row.update(identity)
+        dataset_rows = compute_and_write_stats(
+            ds, stats_path, identity, grid_name, periods=periods
+        )
     except Exception as e:  # noqa: BLE001
         tb = traceback.format_exc()
         return ("error", [], f"compute failed for {zarr_path}: {e}\n{tb}")
@@ -379,6 +479,12 @@ def main() -> None:
     logging.info("Found %d ok datasets in the index.", len(ok))
 
     grid_name = cfg.defaults.target_grid.name
+    periods = tuple(cfg.defaults.stats_periods)
+    logging.info(
+        "Using %d stats period(s): %s",
+        len(periods),
+        ", ".join(p.name for p in periods),
+    )
     workers = args.workers if args.workers is not None else (os.cpu_count() or 1)
     workers = max(1, min(workers, len(ok))) if len(ok) else 1
     logging.info("Computing stats with %d worker(s).", workers)
@@ -393,7 +499,7 @@ def main() -> None:
             "variant_label": r.variant_label,
             "label": r.get("label", ""),
         }
-        jobs.append((zarr_path, stats_path, identity, grid_name, args.force))
+        jobs.append((zarr_path, stats_path, identity, grid_name, args.force, periods))
 
     rows: list[dict] = []
     n_done = 0
@@ -449,11 +555,12 @@ def main() -> None:
         "variable",
         "plev_index",
         "plev_pa",
+        "period",
     ]
     stat_cols = [c for c in df.columns if c not in id_cols]
     df = df[id_cols + stat_cols]
     df = df.sort_values(
-        ["source_id", "experiment", "variant_label", "variable", "plev_index"]
+        ["source_id", "experiment", "variant_label", "variable", "plev_index", "period"]
     )
 
     csv_path = f"{out_dir}/stats.csv"
@@ -476,47 +583,96 @@ def main() -> None:
     )
 
 
-def _rows_from_stats_ds(stats_ds: xr.Dataset, identity: dict) -> list[dict[str, float]]:
-    """Reconstruct tidy aggregate rows from an existing stats.nc."""
+def _rows_from_stats_ds(stats_ds: xr.Dataset, identity: dict) -> list[dict]:
+    """Reconstruct tidy aggregate rows from an existing stats.nc.
+
+    Expects the new schema with a ``period`` coord; returns one row
+    per ``(variable, plev, period)`` triple.
+    """
+    if "period" not in stats_ds.coords:
+        # Legacy single-period stats.nc — read with implicit period=full.
+        period_labels = ["full"]
+    else:
+        period_labels = [str(p) for p in stats_ds["period"].values]
+
     var_set: dict[str, list[str]] = {}
     for name in stats_ds.data_vars:
         if "__" not in name:
             continue
         var, stat = name.rsplit("__", 1)
+        if stat not in _SCALAR_NAMES:
+            continue
         var_set.setdefault(var, []).append(stat)
-    rows: list[dict[str, float]] = []
-    for var, stats in var_set.items():
-        sample = stats_ds[f"{var}__{stats[0]}"]
-        if sample.dims == ():
-            row = {"variable": var, "plev_index": float("nan"), "plev_pa": float("nan")}
-            for stat in _SCALAR_NAMES:
-                key = f"{var}__{stat}"
-                row[stat] = (
-                    float(stats_ds[key].values) if key in stats_ds else float("nan")
-                )
-            row.update(identity)
-            rows.append(row)
-        else:
-            n_plev = sample.sizes["plev"]
-            plev_pa = (
-                stats_ds["plev"].values
-                if "plev" in stats_ds.coords
-                else np.full(n_plev, np.nan)
-            )
-            for k in range(n_plev):
-                row = {
+
+    rows: list[dict] = []
+    for var in var_set:
+        sample = stats_ds[f"{var}__mean"] if f"{var}__mean" in stats_ds else None
+        if sample is None:
+            continue
+        has_plev = "plev" in sample.dims
+        has_period = "period" in sample.dims
+        n_plev = int(sample.sizes["plev"]) if has_plev else 0
+        plev_pa = (
+            stats_ds["plev"].values
+            if has_plev and "plev" in stats_ds.coords
+            else np.full(max(n_plev, 1), np.nan)
+        )
+        for pi, period_name in enumerate(period_labels):
+            iter_plev = range(n_plev) if has_plev else (None,)
+            for k in iter_plev:
+                row: dict = {
                     "variable": var,
-                    "plev_index": float(k),
-                    "plev_pa": float(plev_pa[k]),
+                    "plev_index": float(k) if k is not None else float("nan"),
+                    "plev_pa": float(plev_pa[k]) if k is not None else float("nan"),
+                    "period": period_name,
                 }
                 for stat in _SCALAR_NAMES:
                     key = f"{var}__{stat}"
-                    if key in stats_ds:
-                        row[stat] = float(stats_ds[key].isel(plev=k).values)
-                    else:
+                    if key not in stats_ds:
                         row[stat] = float("nan")
+                        continue
+                    da = stats_ds[key]
+                    sel = {}
+                    if has_period:
+                        sel["period"] = pi
+                    if has_plev and k is not None:
+                        sel["plev"] = k
+                    row[stat] = (
+                        float(da.isel(**sel).values) if sel else float(da.values)
+                    )
                 row.update(identity)
                 rows.append(row)
+    return rows
+
+
+def compute_and_write_stats(
+    ds: xr.Dataset,
+    stats_path: str,
+    identity: dict,
+    grid_name: str,
+    periods=None,
+) -> list[dict]:
+    """Compute multi-period stats for ``ds`` and write a netCDF at
+    ``stats_path``. Returns the tidy aggregate rows so callers can
+    append to a per-pod log / index without re-reading.
+
+    Used by ``process.py`` / ``process_esgf.py`` to compute stats
+    inline as part of dataset processing (one stats.nc per pod, fully
+    parallel via the orchestrator); the standalone ``compute_stats.py``
+    main aggregates these into the cross-dataset ``stats.csv``.
+    """
+    n_lon = int(ds.sizes.get("lon", 90))
+    w2d = area_weights_2d(grid_name, n_lon)
+    stats_ds, rows = compute_dataset_stats(ds, w2d, periods=periods)
+    for k, v in identity.items():
+        stats_ds.attrs[k] = v
+    fs, rel = fsspec.core.url_to_fs(stats_path)
+    with tempfile.NamedTemporaryFile(suffix=".nc") as tmp:
+        stats_ds.to_netcdf(tmp.name)
+        with fs.open(rel, "wb") as fobj:
+            fobj.write(open(tmp.name, "rb").read())
+    for row in rows:
+        row.update(identity)
     return rows
 
 

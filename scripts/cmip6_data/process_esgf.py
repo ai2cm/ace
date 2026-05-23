@@ -41,6 +41,7 @@ import pandas as pd
 import xarray as xr
 
 sys.path.insert(0, str(Path(__file__).parent))
+from compute_stats import compute_and_write_stats  # noqa: E402
 from config import (  # noqa: E402
     CMIP_TO_OUTPUT_RENAMES,
     SURFACE_AND_OCEAN_VARIABLES,
@@ -727,6 +728,26 @@ def process_one_esgf(
         day_regridded.attrs["data_source"] = "esgf"
         write_zarr(day_regridded, zarr_path, cfg)
         row.variables_present = sorted(day_regridded.data_vars)
+
+        # Inline per-dataset stats; see process.py for rationale.
+        stats_path = zarr_path.rstrip("/").rsplit("/", 1)[0] + "/stats.nc"
+        try:
+            compute_and_write_stats(
+                day_regridded,
+                stats_path,
+                identity={
+                    "source_id": task.source_id,
+                    "experiment": task.experiment,
+                    "variant_label": task.variant_label,
+                    "label": label,
+                },
+                grid_name=cfg.target_grid.name,
+                periods=tuple(cfg.stats_periods),
+            )
+        except Exception as e:  # noqa: BLE001
+            row.warnings.append(f"inline stats failed: {type(e).__name__}: {e}")
+            logging.warning("  inline stats failed for %s: %s", zarr_path, e)
+
         row.status = "ok"
 
     except Exception as e:  # noqa: BLE001

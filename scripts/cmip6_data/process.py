@@ -46,6 +46,7 @@ import pandas as pd
 import xarray as xr
 
 sys.path.insert(0, str(Path(__file__).parent))
+from compute_stats import compute_and_write_stats  # noqa: E402
 from config import (  # noqa: E402
     CMIP_TO_OUTPUT_RENAMES,
     SURFACE_AND_OCEAN_VARIABLES,
@@ -773,6 +774,31 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
         day_regridded.attrs["variant_label"] = task.variant_label
         write_zarr(day_regridded, zarr_path, cfg)
         row.variables_present = sorted(day_regridded.data_vars)
+
+        # Compute per-dataset stats inline. The dataset is still in
+        # memory from the materialize-before-write step, so this just
+        # walks data_vars and writes a single ``stats.nc`` next to
+        # ``data.zarr``. The standalone ``compute_stats.py`` aggregator
+        # picks these up to build the cross-dataset ``stats.csv`` and
+        # gap-fills any datasets missing an inline write.
+        stats_path = zarr_path.rstrip("/").rsplit("/", 1)[0] + "/stats.nc"
+        try:
+            compute_and_write_stats(
+                day_regridded,
+                stats_path,
+                identity={
+                    "source_id": task.source_id,
+                    "experiment": task.experiment,
+                    "variant_label": task.variant_label,
+                    "label": label,
+                },
+                grid_name=cfg.target_grid.name,
+                periods=tuple(cfg.stats_periods),
+            )
+        except Exception as e:  # noqa: BLE001
+            row.warnings.append(f"inline stats failed: {type(e).__name__}: {e}")
+            logging.warning("  inline stats failed for %s: %s", zarr_path, e)
+
         row.status = "ok"
         return row
 

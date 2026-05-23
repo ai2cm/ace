@@ -427,6 +427,36 @@ class ChunkingConfig:
 
 
 @dataclass
+class StatsPeriod:
+    """One named time window over which per-dataset statistics are
+    computed. ``start`` and ``end`` are inclusive ``YYYY-MM-DD``
+    strings; either can be ``None`` to denote "no bound" (so a period
+    of ``(None, None)`` is the dataset's full time range). Periods with
+    no overlap on a given dataset produce NaN-filled stats for that
+    period — downstream code keys on ``period`` to pick the right
+    normalization at training time.
+    """
+
+    name: str
+    start: Optional[str] = None
+    end: Optional[str] = None
+
+
+# Default stats periods:
+# - ``full``: the dataset's whole time range (always populated).
+# - ``1940-2014``: the historical experiment window — populated on
+#   historical datasets, all-NaN on pure SSP datasets.
+# - ``1979-2015``: the modern reanalysis era that aligns with ERA5's
+#   well-observed window; the cleanest stats target for training
+#   downstream ERA5-comparable models.
+DEFAULT_STATS_PERIODS: tuple[StatsPeriod, ...] = (
+    StatsPeriod("full", None, None),
+    StatsPeriod("1940-2014", "1940-01-01", "2014-12-31"),
+    StatsPeriod("1979-2015", "1979-01-01", "2015-12-31"),
+)
+
+
+@dataclass
 class DefaultsConfig:
     core_variables: list[str] = field(default_factory=lambda: list(CORE_VARIABLES))
     optional_variables: list[str] = field(
@@ -455,6 +485,11 @@ class DefaultsConfig:
     regrid: RegridConfig = field(default_factory=RegridConfig)
     fill: FillConfig = field(default_factory=FillConfig)
     chunking: ChunkingConfig = field(default_factory=ChunkingConfig)
+    # Named time windows over which per-dataset stats are computed. See
+    # ``StatsPeriod`` / ``DEFAULT_STATS_PERIODS``.
+    stats_periods: tuple[StatsPeriod, ...] = field(
+        default_factory=lambda: tuple(DEFAULT_STATS_PERIODS)
+    )
     # If False (default), duplicate timestamps in a source variable
     # cause the dataset to be skipped with a descriptive reason.
     # Enable per-dataset via an override after manually verifying that
@@ -577,6 +612,9 @@ class ResolvedDatasetConfig:
     regrid: RegridConfig
     fill: FillConfig
     chunking: ChunkingConfig
+    stats_periods: tuple[StatsPeriod, ...] = field(
+        default_factory=lambda: tuple(DEFAULT_STATS_PERIODS)
+    )
     allow_dedupe: bool = False
 
 
@@ -724,6 +762,7 @@ def _resolve(
         regrid=defaults.regrid,
         fill=defaults.fill,
         chunking=defaults.chunking,
+        stats_periods=tuple(defaults.stats_periods),
         allow_dedupe=allow_dedupe,
     )
 
