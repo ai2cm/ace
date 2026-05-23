@@ -640,7 +640,21 @@ def harmonize_temperature_to_kelvin(
     if units_token in _KELVIN_UNIT_TOKENS or not units_token:
         # Already K (or missing both attr and a spec default).
         return da, ""
-    # Unrecognized units — surface as a warning but leave unchanged.
+    # Units don't look like temperature at all (e.g. ``W m-2``, ``Pa``,
+    # ``kg m-2 s-1``). Process-side this helper is called once per
+    # variable in the output dataset, so silently ignore non-temperature
+    # variables. Only warn when we have a strong prior that ``var_id``
+    # should be a temperature (its bare CMIP6 name is in the spec
+    # lists, or the rename map points it at a known temperature output
+    # name) but the units don't match.
+    looks_temperature = (
+        var_id in _TEMPERATURE_VARS_SPEC_CELSIUS
+        or var_id in _TEMPERATURE_VARS_SPEC_KELVIN
+        or var_id.startswith("TMP")
+        or var_id.endswith(("_ts", "_tos", "_tob", "_sitemptop"))
+    )
+    if not looks_temperature:
+        return da, ""
     return da, (
         f"{var_id or da.name}: unrecognized temperature units "
         f"{raw_units!r}, left unconverted"
@@ -975,7 +989,7 @@ _SANITY_RANGES: dict[str, tuple[float, float]] = {
     "Q2m": (-_EPS, 0.05),
     "UGRD10m": (-100.0, 100.0),
     "VGRD10m": (-100.0, 100.0),
-    "PRATEsfc": (-_EPS, 0.01),
+    "PRATEsfc": (-_EPS, 0.02),  # 1 mm/min cap; tropical convection peaks
     # Radiative fluxes.
     "DSWRFtoa": (-_EPS, 600.0),
     "USWRFtoa": (-_EPS, 600.0),
@@ -997,7 +1011,7 @@ _SANITY_RANGES: dict[str, tuple[float, float]] = {
     "land_fraction": (-_EPS, 1.0 + _EPS),
     "orog": (-500.0, 9000.0),
     # Geopotential height @ 500 hPa — renamed from ``zg500``.
-    "h500": (4900.0, 6100.0),
+    "h500": (4500.0, 6100.0),  # Antarctic winter can drop ~4540 m
     # CFday single-pressure-level + 2D diagnostics.
     "TMP700": (220.0, 320.0),
     "PRESsfc": (5.0e4, 1.1e5),

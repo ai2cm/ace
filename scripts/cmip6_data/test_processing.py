@@ -1154,13 +1154,38 @@ def test_harmonize_temperature_no_units_falls_back_to_spec_default():
     np.testing.assert_array_equal(out2.values, tas_da.values)
 
 
-def test_harmonize_temperature_unrecognized_units_warns():
+def test_harmonize_temperature_unrecognized_units_warns_when_var_is_temperature():
+    """When var_id is a known temperature, weird units do warn."""
     da = xr.DataArray(np.full((2, 3), 100.0), dims=("lat", "lon"))
     da.attrs["units"] = "weird"
     out, msg = harmonize_temperature_to_kelvin(da, var_id="tos")
-    # Data unchanged, but a warning is emitted.
     np.testing.assert_array_equal(out.values, da.values)
     assert "unrecognized" in msg
+
+
+def test_harmonize_temperature_silent_for_non_temperature_units():
+    """Non-temperature variables (W m-2, Pa, kg m-2 s-1, ...) must
+    silently return — the helper is called once per data var in the
+    output dataset, so noisy warnings on every flux/pressure would
+    flood the row's warnings list."""
+    for units in ("W m-2", "Pa", "kg m-2 s-1", "m s-1", "1", "kg/kg"):
+        da = xr.DataArray(np.full((2, 3), 1.0), dims=("lat", "lon"))
+        da.attrs["units"] = units
+        out, msg = harmonize_temperature_to_kelvin(da, var_id="some_flux")
+        assert (
+            msg == ""
+        ), f"unexpected warning for non-temperature units {units!r}: {msg}"
+
+
+def test_harmonize_temperature_warns_on_prefixed_temperature_var():
+    """Source-prefixed temperature outputs (e.g. ``oday_tos``,
+    ``simon_sitemptop``) and the baseline-renamed ``TMP2m``/``TMP700``
+    do trigger the warning when units look wrong."""
+    for var_id in ("oday_tos", "simon_sitemptop", "TMP2m", "TMP700"):
+        da = xr.DataArray(np.full((2, 3), 100.0), dims=("lat", "lon"))
+        da.attrs["units"] = "weird"
+        out, msg = harmonize_temperature_to_kelvin(da, var_id=var_id)
+        assert "unrecognized" in msg, f"expected warning for {var_id} got {msg!r}"
 
 
 def test_harmonize_temperature_handles_unicode_degc():
@@ -1169,6 +1194,43 @@ def test_harmonize_temperature_handles_unicode_degc():
     out, msg = harmonize_temperature_to_kelvin(da, var_id="tos")
     np.testing.assert_allclose(out.values, np.full((2, 3), 293.15))
     assert "converted" in msg
+
+
+# ---------------------------------------------------------------------------
+# Stats period slicing (360-day calendar regression)
+# ---------------------------------------------------------------------------
+
+
+def test_compute_dataset_stats_handles_360_day_calendar():
+    """HadGEM3-MM (and other 360-day-calendar models) crashed because
+    ``StatsPeriod`` end dates like ``2014-12-31`` don't exist in 360-day
+    (where every month has 30 days). The fix clips the day via
+    ``clip_date_for_calendar`` before constructing the cftime end-of-day.
+    """
+    import cftime
+    from compute_stats import area_weights_2d, compute_dataset_stats
+    from config import StatsPeriod
+
+    times = [
+        cftime.Datetime360Day(y, m, 15) for y in range(2010, 2017) for m in range(1, 13)
+    ]
+    da = xr.DataArray(
+        np.full((len(times), 45, 8), 280.0, dtype=np.float32),
+        dims=("time", "lat", "lon"),
+        coords={"time": times},
+    )
+    ds = xr.Dataset({"TMP2m": da})
+    w2d = area_weights_2d("F22.5", 8)
+    # End dates ``...-12-31`` are invalid in 360-day — the helper must
+    # clip to 30.
+    periods = [
+        StatsPeriod("full", None, None),
+        StatsPeriod("1940-2014", "1940-01-01", "2014-12-31"),
+        StatsPeriod("1979-2015", "1979-01-01", "2015-12-31"),
+    ]
+    stats_ds, _ = compute_dataset_stats(ds, w2d, periods=periods)
+    assert list(stats_ds["period"].values) == ["full", "1940-2014", "1979-2015"]
+    np.testing.assert_allclose(stats_ds["TMP2m__mean"].values, 280.0, atol=0.01)
 
 
 if __name__ == "__main__":

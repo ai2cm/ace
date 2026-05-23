@@ -230,10 +230,17 @@ def _slice_ds_to_period(ds: xr.Dataset, period) -> Optional[xr.Dataset]:
     if not len(times):
         return None
     if len(times) and hasattr(times[0], "calendar"):
+        # Use the calendar-aware date clipper from ``processing.py`` so
+        # 360-day calendars (where Dec 31 doesn't exist) don't crash on
+        # the end-of-day construction below.
+        from processing import clip_date_for_calendar
+
         date_type = type(times[0])
+        calendar = str(times[0].calendar)
 
         def to_dt(s, *, end: bool):
-            y, m, d = (int(x) for x in s.split("-"))
+            clipped = clip_date_for_calendar(s, calendar)
+            y, m, d = (int(x) for x in clipped.split("-"))
             return date_type(y, m, d, 23, 59, 59) if end else date_type(y, m, d)
     else:
 
