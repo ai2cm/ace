@@ -52,25 +52,3 @@ overrides:
       experiment: historical
       variant_label: r2i1p1f1
     allow_dedupe: true
-  # AWI-ESM-1-1-LR ocean is on the FESOM unstructured mesh (~127k
-  # cells). All ocean/sea-ice variables (Oday, Omon, SIday, SImon)
-  # store on that grid — a single variable across 1850-2100 daily
-  # is ~30 GB and OOMs the 32 GB pod at open time. Until we wire
-  # in a streaming/dask-aware regrid for unstructured sources, skip
-  # AWI-ESM ocean variables; atmosphere (T63 Gaussian) is fine.
-  - match:
-      source_id: AWI-ESM-1-1-LR
-    skip_surface_and_ocean_variables:
-      - simon_sea_ice_fraction
-      - simon_sitemptop
-      - siday_sea_ice_fraction
-      - siday_sitemptop
-      - siday_sithick
-      - oday_tos
-      - oday_tossq
-      - oday_omldamax
-      - oday_sos
-      - omon_zos
-      - omon_hfds
-      - omon_mlotst
-      - omon_tob
