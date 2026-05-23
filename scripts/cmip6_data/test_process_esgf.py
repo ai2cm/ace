@@ -260,7 +260,7 @@ def test_select_detects_surface_and_ocean_and_statics():
     assert len(tasks) == 1
     t = tasks[0]
     assert "amon_ts" in t.available_surface_and_ocean_variables
-    assert "simon_siconc" in t.available_surface_and_ocean_variables
+    assert "simon_sea_ice_fraction" in t.available_surface_and_ocean_variables
     assert "eday_ts" in t.available_surface_and_ocean_variables
     assert "oday_tos" in t.available_surface_and_ocean_variables
     assert t.has_orog is True

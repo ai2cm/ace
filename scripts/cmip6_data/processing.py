@@ -952,6 +952,12 @@ _SANITY_RANGES: dict[str, tuple[float, float]] = {
     "USWRFsfc": (-_EPS, 600.0),
     "DLWRFsfc": (-_EPS, 600.0),
     "ULWRFsfc": (-_EPS, 700.0),
+    # Clear-sky radiation (same physical ranges as all-sky).
+    "UCSWRFtoa": (-_EPS, 600.0),
+    "UCLWRFtoa": (-_EPS, 400.0),
+    "DCSWRFsfc": (-_EPS, 600.0),
+    "UCSWRFsfc": (-_EPS, 600.0),
+    "DCLWRFsfc": (-_EPS, 600.0),
     # Turbulent fluxes.
     "SHTFLsfc": (-1000.0, 1000.0),
     "LHTFLsfc": (-500.0, 1200.0),

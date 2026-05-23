@@ -190,6 +190,19 @@ def select_datasets(
         zstores: dict[str, dict[str, str]] = {"day": {}}
         for _, r in day_slice.iterrows():
             zstores["day"][r["variable_id"]] = r["zstore"]
+        # Fold any CFday-sourced day-cadence variables (rsdt/rsut) into
+        # the same ``day`` zstore dict so downstream code can look them
+        # up by name without knowing the underlying table. Prefer day
+        # over CFday on the rare chance both publish; in practice no
+        # model publishes rsdt/rsut on the standard day table.
+        cfday_slice = inventory[
+            (inventory["table_id"] == "CFday")
+            & (inventory["source_id"] == source_id)
+            & (inventory["experiment_id"] == experiment)
+            & (inventory["member_id"] == variant_label)
+        ]
+        for _, r in cfday_slice.iterrows():
+            zstores["day"].setdefault(r["variable_id"], r["zstore"])
 
         # Surface-and-ocean source tables (Amon, Eday, SImon, SIday, Oday,
         # Omon) — require matching variant_label when possible; fall

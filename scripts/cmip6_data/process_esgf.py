@@ -45,6 +45,7 @@ from config import (  # noqa: E402
     CMIP_TO_OUTPUT_RENAMES,
     SURFACE_AND_OCEAN_VARIABLES,
     ESGFProcessConfig,
+    cmip6_source_table,
     make_label,
 )
 from esgf import (  # noqa: E402
@@ -188,6 +189,18 @@ def select_esgf_datasets(
             & (day["member_id"] == member)
         ]
         available_vars = set(day_slice["variable_id"].unique())
+        # CFday-sourced day-cadence variables (rsdt/rsut). Fold the
+        # variables published on CFday for this (model, experiment,
+        # member) into ``available_vars`` so the all_day_vars loop
+        # picks them up; ``cmip6_source_table`` resolves the table
+        # at download time.
+        cfday_slice = inventory[
+            (inventory["table_id"] == "CFday")
+            & (inventory["source_id"] == source_id)
+            & (inventory["experiment_id"] == experiment)
+            & (inventory["member_id"] == member)
+        ]
+        available_vars |= set(cfday_slice["variable_id"].unique())
         if len(core - available_vars) > max_missing:
             continue
 
@@ -461,9 +474,12 @@ def process_one_esgf(
         regridded_vars: dict[str, xr.Dataset] = {}
         for v in all_day_vars:
             try:
-                logging.info("  [%s] processing day/%s ...", task.source_id, v)
+                source_table = cmip6_source_table(v)
+                logging.info(
+                    "  [%s] processing %s/%s ...", task.source_id, source_table, v
+                )
                 result, methods = _download_and_regrid_variable(
-                    task, v, "day", target, config, scratch
+                    task, v, source_table, target, config, scratch
                 )
                 row.regrid_methods.update(methods)
                 if result is not None:

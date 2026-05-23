@@ -38,15 +38,24 @@ CORE_VARIABLES: list[str] = [
 ]
 
 OPTIONAL_VARIABLES: list[str] = [
-    # TOA radiation
+    # TOA radiation. ``rsdt``/``rsut`` (and their clear-sky pair
+    # ``rsutcs``, plus ``rlutcs``) aren't published on the standard
+    # ``day`` table by *any* CMIP6 model — they live on ``CFday`` (see
+    # ``CFDAY_VARIABLES``) and are folded into the day-cadence variable
+    # list by the inventory + task-building code.
     "rsdt",
     "rsut",
     "rlut",
-    # Surface radiation
+    "rsutcs",
+    "rlutcs",
+    # Surface radiation (all-sky + clear-sky; clear-sky are on CFday).
     "rsds",
     "rsus",
     "rlds",
     "rlus",
+    "rsdscs",
+    "rsuscs",
+    "rldscs",
     # Surface turbulent fluxes
     "hfss",
     "hfls",
@@ -55,6 +64,38 @@ OPTIONAL_VARIABLES: list[str] = [
     "uas",
     "vas",
 ]
+
+# Day-cadence variables that CMIP6 publishes on the ``CFday`` table
+# rather than ``day``. We treat them as ordinary day-cadence variables
+# (no causal mapping needed — they're already daily means); the table
+# distinction only matters at inventory + open time. ``rsdt`` is
+# astronomically derivable but ``rsut`` is not (depends on cloud /
+# surface albedo), so we ingest both from CFday rather than computing.
+# Clear-sky pairs (``*cs``) are on CFday too — they enable cloud
+# radiative-effect calculations downstream. No ``rluscs`` — surface
+# upward LW is determined by surface T + emissivity, so all-sky and
+# clear-sky values are identical and CMIP6 doesn't publish a separate
+# clear-sky version.
+CFDAY_VARIABLES: list[str] = [
+    "rsdt",
+    "rsut",
+    "rsutcs",
+    "rlutcs",
+    "rsdscs",
+    "rsuscs",
+    "rldscs",
+]
+
+
+def cmip6_source_table(variable_id: str) -> str:
+    """Return the CMIP6 table on which ``variable_id`` lives in our
+    pipeline. Defaults to ``day``; overrides for the CFday-sourced
+    radiation variables.
+    """
+    if variable_id in CFDAY_VARIABLES:
+        return "CFday"
+    return "day"
+
 
 # Renames applied to the final output variables so that radiative-flux
 # names match the convention used by upstream baseline datasets
@@ -76,6 +117,15 @@ CMIP_TO_OUTPUT_RENAMES: dict[str, str] = {
     "rsdt": "DSWRFtoa",
     "rsut": "USWRFtoa",
     "rlut": "ULWRFtoa",
+    # Clear-sky radiation (TOA + surface). Naming convention inserts
+    # ``C`` after the direction letter — matches the ERA5 build
+    # pipeline. ``rsdt`` has no clear-sky variant because TOA incident
+    # SW is purely astronomical.
+    "rsutcs": "UCSWRFtoa",
+    "rlutcs": "UCLWRFtoa",
+    "rsdscs": "DCSWRFsfc",
+    "rsuscs": "UCSWRFsfc",
+    "rldscs": "DCLWRFsfc",
     # Turbulent fluxes (CMIP6 ``hfls``/``hfss`` are positive upward,
     # which matches the SHIELD/ERA5 convention after the ERA5 build
     # pipeline negates the ECMWF-native sign — see
@@ -509,15 +559,20 @@ def _default_inventory_queries() -> list[CatalogQuery]:
     surface_and_ocean_by_table: dict[str, list[str]] = {}
     for h in SURFACE_AND_OCEAN_VARIABLES:
         surface_and_ocean_by_table.setdefault(h.table_id, []).append(h.var_id)
+    # Day-cadence variables that don't live on the standard ``day``
+    # table — currently TOA shortwave (``rsdt``, ``rsut``) on
+    # ``CFday``. The pipeline folds these into the day-cadence
+    # variable set; the inventory just needs them in its catalog.
     return [
         CatalogQuery(
             table_id="day",
             variables=(
                 list(CORE_VARIABLES)
-                + list(OPTIONAL_VARIABLES)
+                + [v for v in OPTIONAL_VARIABLES if v not in CFDAY_VARIABLES]
                 + list(DIAGNOSTIC_VARIABLES)
             ),
         ),
+        CatalogQuery(table_id="CFday", variables=list(CFDAY_VARIABLES)),
         *[
             CatalogQuery(table_id=tab, variables=variables)
             for tab, variables in surface_and_ocean_by_table.items()
