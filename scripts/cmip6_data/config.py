@@ -254,6 +254,13 @@ SURFACE_AND_OCEAN_VARIABLES: tuple[SurfaceAndOceanVariable, ...] = (
     # daily — drop-in upgrade where published.
     SurfaceAndOceanVariable("Amon", "ts", "amon_ts", "monthly_causal", "atmos_surface"),
     SurfaceAndOceanVariable("Eday", "ts", "eday_ts", "daily", "atmos_surface"),
+    # Water-vapor path (CMIP6 ``Eday.prw`` — vapor only). Output
+    # name aligns with the CM4/SHIELD baseline convention. A
+    # separate derived ``total_water_path = water_vapor_path + clwvi``
+    # is emitted by the pipeline when both are present.
+    SurfaceAndOceanVariable(
+        "Eday", "prw", "water_vapor_path", "daily", "atmos_surface"
+    ),
     # Sea-ice fraction & top temperature (monthly + daily). Both NaN over
     # land; daily is broadly published on ESGF (~25/37).
     SurfaceAndOceanVariable(

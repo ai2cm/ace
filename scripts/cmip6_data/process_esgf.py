@@ -70,6 +70,7 @@ from processing import (  # noqa: E402
     clamp_static_fractions,
     compute_below_surface_mask,
     compute_derived_layer_T,
+    compute_total_water_path,
     derive_ocean_and_correct_sea_ice,
     fill_derived_layer_T,
     finalize_surface_and_ocean_variable,
@@ -640,6 +641,13 @@ def process_one_esgf(
         if static_ds is not None:
             for v in static_ds.data_vars:
                 day_regridded[v] = static_ds[v]
+
+        # 9_pre. Derived total_water_path = water_vapor_path + clwvi
+        # when both are present (CM4/SHIELD-style total-water field).
+        if "water_vapor_path" in day_regridded and "clwvi" in day_regridded:
+            day_regridded["total_water_path"] = compute_total_water_path(
+                day_regridded["water_vapor_path"], day_regridded["clwvi"]
+            )
 
         # 9a. Derive {simon,siday}_ocean_fraction + budget-correct
         # sea-ice fraction so land+ice+ocean=1 (see matching block in

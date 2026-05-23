@@ -657,6 +657,29 @@ def apply_output_renames(ds: xr.Dataset, rename_map: dict[str, str]) -> xr.Datas
     return out
 
 
+def compute_total_water_path(
+    water_vapor_path: xr.DataArray,
+    cloud_condensed_water_path: xr.DataArray,
+) -> xr.DataArray:
+    """Total atmospheric water column = vapor + condensed cloud
+    (liquid + ice). Units kg m⁻².
+
+    The CM4/SHIELD baseline emits a single ``total_water_path`` field
+    that includes both vapor and cloud water. CMIP6 splits these into
+    ``prw`` (vapor) and ``clwvi`` (condensed water path). We emit both
+    inputs *and* the derived sum, so consumers can pick whichever
+    representation matches what their training data uses.
+    """
+    total = water_vapor_path + cloud_condensed_water_path
+    out = total.rename("total_water_path")
+    out.attrs["original_name"] = "derived"
+    out.attrs["long_name"] = (
+        "total water path (vapor + cloud condensate) " "= water_vapor_path + clwvi"
+    )
+    out.attrs["units"] = "kg m-2"
+    return out
+
+
 def derive_ocean_and_correct_sea_ice(
     land_fraction: xr.DataArray,
     sea_ice_fraction: xr.DataArray,
@@ -980,6 +1003,13 @@ _SANITY_RANGES: dict[str, tuple[float, float]] = {
     # Atmospheric surface T (always K post-harmonization).
     "amon_ts": (180.0, 340.0),
     "eday_ts": (180.0, 340.0),
+    # Total column water-vapor path (kg/m²). Polar dry-air → ~0,
+    # tropical column → ~70; allow some headroom.
+    "water_vapor_path": (-_EPS, 100.0),
+    # Total water path = vapor + cloud condensate; same shape +
+    # roughly the same range (cloud condensate adds <1 kg/m² in the
+    # mean, occasional spikes during deep convection).
+    "total_water_path": (-_EPS, 110.0),
     # Ocean / sea-ice temperatures (now harmonized to K at ingest).
     "oday_tos": (270.0, 320.0),
     "omon_tob": (250.0, 320.0),
@@ -1228,6 +1258,7 @@ __all__ = [
     "apply_target_land_mask",
     "apply_output_renames",
     "compute_ocean_fraction",
+    "compute_total_water_path",
     "derive_ocean_and_correct_sea_ice",
     "regrid_variables",
     "PLEV8_DEFAULT_HPA",
