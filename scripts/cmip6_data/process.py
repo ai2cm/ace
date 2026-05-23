@@ -81,6 +81,7 @@ from processing import (  # noqa: E402
     validate_cell_methods,
     write_zarr,
 )
+from schema_version import SCHEMA_VERSION  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Task selection
@@ -799,6 +800,7 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
             row.warnings.append(f"inline stats failed: {type(e).__name__}: {e}")
             logging.warning("  inline stats failed for %s: %s", zarr_path, e)
 
+        row.schema_version = SCHEMA_VERSION
         row.status = "ok"
         return row
 

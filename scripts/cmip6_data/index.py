@@ -59,6 +59,12 @@ class DatasetIndexRow:
     cell_methods_mismatch: list[str] = field(default_factory=list)
     n_nan_input_cells: int = 0
     warnings: list[str] = field(default_factory=list)
+    # Schema-version stamp recording which on-disk format the dataset
+    # was written under. ``migrate.py`` reads this and applies the
+    # registered migration chain to bring older datasets up to the
+    # current ``SCHEMA_VERSION``. Sidecars written before this field
+    # existed default to ``"0.0.0"`` in migrate.py.
+    schema_version: str = ""
 
 
 # Columns that hold list/dict values. For the flat tabular outputs
