@@ -286,7 +286,16 @@ def regrid_variables(
     for method, vars_ in by_method.items():
         sub = ds[vars_ + bounds_vars]
         regridder, actual_method = make_regridder(sub, target_grid, method)
-        pieces.append(regridder(ds[vars_], keep_attrs=True))
+        # Apply per-variable instead of as a batched ``regridder(ds[vars_])``
+        # — the compute cost is identical (the sparse matmul is per-array
+        # inside xesmf either way) but per-variable lets dask release each
+        # variable's source-resolution chunk before allocating the next.
+        # Peak memory drops from Σ(vars in bucket) × per-chunk to
+        # max(vars in bucket) × per-chunk, which matters a lot for
+        # high-resolution sources like HadGEM3-GC31-MM (~6.5 GB per 3D
+        # plev variable per chunk).
+        for v in vars_:
+            pieces.append(regridder(ds[[v]], keep_attrs=True))
         used.update({v: actual_method for v in vars_})
 
     regridded = xr.merge(pieces)
