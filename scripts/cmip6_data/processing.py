@@ -966,6 +966,16 @@ _SANITY_RANGES: dict[str, tuple[float, float]] = {
     "orog": (-500.0, 9000.0),
     # Geopotential height @ 500 hPa — renamed from ``zg500``.
     "h500": (4900.0, 6100.0),
+    # CFday single-pressure-level + 2D diagnostics.
+    "TMP700": (220.0, 320.0),
+    "PRESsfc": (5.0e4, 1.1e5),
+    # ω = Lagrangian air-pressure tendency (Pa/s). Daily means
+    # rarely exceed a few Pa/s; allow headroom for storm cells.
+    "wap500": (-20.0, 20.0),
+    # Cloud water/ice path (kg/m^2). Tropical convection can spike
+    # liquid path to a few kg/m^2.
+    "clwvi": (-_EPS, 10.0),
+    "clivi": (-_EPS, 5.0),
     # Surface-and-ocean variables — source-prefixed output names.
     # Atmospheric surface T (always K post-harmonization).
     "amon_ts": (180.0, 340.0),

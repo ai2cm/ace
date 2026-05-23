@@ -63,6 +63,22 @@ OPTIONAL_VARIABLES: list[str] = [
     "sfcWind",
     "uas",
     "vas",
+    # Real surface pressure (CFday). Distinct from ``psl`` (mean sea
+    # level pressure on ``day``). Both are emitted with different
+    # output names so consumers pick the right one.
+    "ps",
+    # 700 hPa air temperature on CFday — the derived layer-mean
+    # ``ta_derived_layer_1000_850`` etc. captures a different
+    # quantity, so ``ta700`` is genuinely additional information.
+    "ta700",
+    # Vertical pressure velocity at 500 hPa (CFday) — useful
+    # circulation diagnostic, not in any baseline.
+    "wap500",
+    # Cloud water/ice path (CFday). ``clwvi`` is the total
+    # condensed-water path (liquid + ice); ``clivi`` is ice-only.
+    # Liquid path = clwvi - clivi when both are present.
+    "clwvi",
+    "clivi",
 ]
 
 # Day-cadence variables that CMIP6 publishes on the ``CFday`` table
@@ -84,6 +100,17 @@ CFDAY_VARIABLES: list[str] = [
     "rsdscs",
     "rsuscs",
     "rldscs",
+    # Surface pressure — the standard ``day`` table doesn't include
+    # ``ps`` at all, but CFday publishes it for ~5,600 models.
+    "ps",
+    # Single-level temperature and vertical motion at canonical
+    # pressure levels — additive over our derived layer-mean T and
+    # plev-flattened wind variables.
+    "ta700",
+    "wap500",
+    # Cloud water path diagnostics.
+    "clwvi",
+    "clivi",
 ]
 
 
@@ -145,6 +172,12 @@ CMIP_TO_OUTPUT_RENAMES: dict[str, str] = {
     # ``h{level}`` for several levels; widen this later if we want
     # the rest aligned too).
     "zg500": "h500",
+    # CFday single-pressure-level diagnostics. ``ta700`` is named
+    # to match the baseline ``TMP{level}`` convention. ``ps`` →
+    # ``PRESsfc`` (real surface pressure, distinct from ``psl``).
+    # ``wap500``, ``clwvi``, ``clivi`` stay as-is (no baseline name).
+    "ta700": "TMP700",
+    "ps": "PRESsfc",
 }
 
 # Variables tracked by the inventory for visibility, but not required or
