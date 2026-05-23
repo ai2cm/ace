@@ -178,6 +178,13 @@ CMIP_TO_OUTPUT_RENAMES: dict[str, str] = {
     # ``wap500``, ``clwvi``, ``clivi`` stay as-is (no baseline name).
     "ta700": "TMP700",
     "ps": "PRESsfc",
+    # Match the SHIELD/ERA5 baselines exactly on the two remaining
+    # name disagreements: the daily surface-T composite and the
+    # static surface altitude. ``amon_ts`` (monthly causal fallback)
+    # stays as-is — it's a different cadence and the prefix carries
+    # useful traceability information.
+    "eday_ts": "surface_temperature",
+    "orog": "HGTsfc",
 }
 
 # Variables tracked by the inventory for visibility, but not required or

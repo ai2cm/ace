@@ -1009,7 +1009,7 @@ _SANITY_RANGES: dict[str, tuple[float, float]] = {
     "LHTFLsfc": (-500.0, 1200.0),
     # Land fraction is rescaled to [0, 1] and renamed from ``sftlf``.
     "land_fraction": (-_EPS, 1.0 + _EPS),
-    "orog": (-500.0, 9000.0),
+    "HGTsfc": (-500.0, 9000.0),  # renamed from ``orog``
     # Geopotential height @ 500 hPa — renamed from ``zg500``.
     "h500": (4500.0, 6100.0),  # Antarctic winter can drop ~4540 m
     # CFday single-pressure-level + 2D diagnostics.
@@ -1025,7 +1025,7 @@ _SANITY_RANGES: dict[str, tuple[float, float]] = {
     # Surface-and-ocean variables — source-prefixed output names.
     # Atmospheric surface T (always K post-harmonization).
     "amon_ts": (180.0, 340.0),
-    "eday_ts": (180.0, 340.0),
+    "surface_temperature": (180.0, 340.0),  # renamed from ``eday_ts``
     # Total column water-vapor path (kg/m²). Polar dry-air → ~0,
     # tropical column → ~70; allow some headroom.
     "water_vapor_path": (-_EPS, 100.0),
