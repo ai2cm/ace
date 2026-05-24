@@ -711,81 +711,84 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
             task.experiment,
         )
 
-        # 15. Sanity count of NaN cells in the filled 3D state. Should
-        # be zero; any non-zero is a sign the fill logic missed
-        # something. Uses eager .compute() because dask arrays don't
-        # support .item().
-        nan_total = 0
-        for v in ("ua", "va", "hus", "zg"):
-            if v in day_regridded:
-                nan_total += int(day_regridded[v].isnull().sum().compute())
-        row.n_nan_input_cells = nan_total
+        # All the steps from here through write_zarr trigger dask
+        # compute eventually (via ``.compute()`` on reductions or
+        # ``.to_zarr()`` streaming). xesmf's Regridder wraps the ESMF C
+        # library and is *not* thread-safe — concurrent regridder calls
+        # produce NaN chunks silently. We previously dodged this by
+        # full-``.load()``-ing the dataset up front, but that doesn't
+        # fit at prod scale (75–86 years × all variables ≫ 32 GB).
+        # The synchronous dask scheduler forces serial chunk evaluation,
+        # which is safe for xesmf and streams memory through one chunk
+        # at a time instead of materialising everything.
+        import dask
 
-        # 16. Populate time metadata.
-        row.n_timesteps = int(day_regridded.sizes.get("time", 0))
-        if row.n_timesteps:
-            row.time_start = str(day_regridded["time"].values[0])
-            row.time_end = str(day_regridded["time"].values[-1])
+        with dask.config.set(scheduler="synchronous"):
+            # 15. Sanity count of NaN cells in the filled 3D state.
+            nan_total = 0
+            for v in ("ua", "va", "hus", "zg"):
+                if v in day_regridded:
+                    nan_total += int(day_regridded[v].isnull().sum().compute())
+            row.n_nan_input_cells = nan_total
 
-        # 17. Materialize the whole dataset before writing. xesmf's
-        # Regridder wraps the ESMF C library, which is not thread-safe;
-        # leaving the regrid lazy in the dask graph lets dask parallelise
-        # per-chunk, and the resulting concurrent Regridder calls can
-        # silently produce NaN chunks. Loading up front runs the regrid
-        # once, sequentially, and gives deterministic output. It also
-        # lets the sanity checks run on materialised data cheaply.
-        logging.info("  materializing dataset in memory before write...")
-        day_regridded = day_regridded.load()
+            # 16. Populate time metadata.
+            row.n_timesteps = int(day_regridded.sizes.get("time", 0))
+            if row.n_timesteps:
+                row.time_start = str(day_regridded["time"].values[0])
+                row.time_end = str(day_regridded["time"].values[-1])
 
-        # 18. Flatten plev dimensions into pressure-named 2D variables.
-        day_regridded = flatten_plev_variables(day_regridded)
+            # 17. Flatten plev dimensions into pressure-named 2D variables.
+            day_regridded = flatten_plev_variables(day_regridded)
 
-        # 19. Harmonize all temperature variables to K. CMIP6 spec
-        # publishes ``tos``/``tob``/``sitemptop`` in °C and the rest
-        # (``tas``, ``ts``, ...) in K, but publishers occasionally
-        # deviate; walking the assembled dataset catches the variants
-        # via their ``units`` attribute. Idempotent on already-K vars.
-        for v in list(day_regridded.data_vars):
-            da, msg = harmonize_temperature_to_kelvin(day_regridded[v], var_id=v)
-            if msg:
-                row.warnings.append(msg)
-                if "converted" in msg:
-                    day_regridded[v] = da
+            # 18. Harmonize all temperature variables to K. CMIP6 spec
+            # publishes ``tos``/``tob``/``sitemptop`` in °C and the
+            # rest (``tas``, ``ts``, ...) in K, but publishers
+            # occasionally deviate; walking the assembled dataset
+            # catches the variants via their ``units`` attribute.
+            # Idempotent on already-K vars.
+            for v in list(day_regridded.data_vars):
+                da, msg = harmonize_temperature_to_kelvin(day_regridded[v], var_id=v)
+                if msg:
+                    row.warnings.append(msg)
+                    if "converted" in msg:
+                        day_regridded[v] = da
 
-        # 20. Rename CMIP6 variables to the upstream-baseline convention
-        # (``rsds`` → ``DSWRFsfc``, ``tas`` → ``TMP2m`` etc.) so downstream
-        # training can share variable names with SHIELD/ERA5 datasets.
-        # Each renamed variable carries ``original_name`` pointing back
-        # to the CMIP6 source name.
-        day_regridded = apply_output_renames(day_regridded, CMIP_TO_OUTPUT_RENAMES)
+            # 19. Rename CMIP6 variables to the upstream-baseline
+            # convention so downstream training can share variable
+            # names with SHIELD/ERA5 datasets.
+            day_regridded = apply_output_renames(day_regridded, CMIP_TO_OUTPUT_RENAMES)
 
-        # 21. Sanity checks — advisory only. Run *after* renames and
-        # K-harmonization so ``_SANITY_RANGES`` can key off the final
-        # variable names and unit conventions.
-        sanity = run_sanity_checks(day_regridded)
-        if sanity:
-            row.warnings.extend(sanity)
-            for msg in sanity:
-                logging.warning("  sanity: %s", msg)
+            # 20. Sanity checks — advisory only. Run *after* renames
+            # and K-harmonization so ``_SANITY_RANGES`` keys off the
+            # final variable names and unit conventions.
+            sanity = run_sanity_checks(day_regridded)
+            if sanity:
+                row.warnings.extend(sanity)
+                for msg in sanity:
+                    logging.warning("  sanity: %s", msg)
 
-        # 20. Write zarr + record variables.
-        day_regridded.attrs["label"] = label
-        day_regridded.attrs["source_id"] = task.source_id
-        day_regridded.attrs["experiment"] = task.experiment
-        day_regridded.attrs["variant_label"] = task.variant_label
-        write_zarr(day_regridded, zarr_path, cfg)
-        row.variables_present = sorted(day_regridded.data_vars)
+            # 21. Stream-write the dataset to zarr. With the dask
+            # ``synchronous`` scheduler set above, each chunk is
+            # evaluated and persisted in turn — peak memory stays at a
+            # single chunk × N variables instead of the full dataset.
+            day_regridded.attrs["label"] = label
+            day_regridded.attrs["source_id"] = task.source_id
+            day_regridded.attrs["experiment"] = task.experiment
+            day_regridded.attrs["variant_label"] = task.variant_label
+            logging.info("  streaming zarr write...")
+            write_zarr(day_regridded, zarr_path, cfg)
+            row.variables_present = sorted(day_regridded.data_vars)
 
-        # Compute per-dataset stats inline. The dataset is still in
-        # memory from the materialize-before-write step, so this just
-        # walks data_vars and writes a single ``stats.nc`` next to
-        # ``data.zarr``. The standalone ``compute_stats.py`` aggregator
-        # picks these up to build the cross-dataset ``stats.csv`` and
-        # gap-fills any datasets missing an inline write.
+        # 22. Compute per-dataset stats inline. We *re-open* the
+        # just-written zarr rather than reusing the in-memory dataset
+        # — the on-disk version is at target resolution (small) with
+        # no upstream dask graph attached, so the stats pass scans it
+        # cheaply without re-triggering any regrid work.
         stats_path = zarr_path.rstrip("/").rsplit("/", 1)[0] + "/stats.nc"
         try:
+            written = xr.open_zarr(zarr_path, consolidated=True)
             compute_and_write_stats(
-                day_regridded,
+                written,
                 stats_path,
                 identity={
                     "source_id": task.source_id,
@@ -796,6 +799,7 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
                 grid_name=cfg.target_grid.name,
                 periods=tuple(cfg.stats_periods),
             )
+            written.close()
         except Exception as e:  # noqa: BLE001
             row.warnings.append(f"inline stats failed: {type(e).__name__}: {e}")
             logging.warning("  inline stats failed for %s: %s", zarr_path, e)
