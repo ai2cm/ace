@@ -536,11 +536,13 @@ def main() -> None:
                 teacher_model=teacher_model,
                 best_checkpoint_path=best_student_path,
                 coarse_patch_yx=coarse_patch_yx,
+                student_sample_steps=config.model.student_sample_steps,
             )
         )
         logger.info(
             f"BestStudentCheckpointCallback active: val={args.val_dataset}, "
-            f"best_ckpt={best_student_path}"
+            f"best_ckpt={best_student_path}, "
+            f"student_sample_steps={config.model.student_sample_steps}"
         )
 
     synchronize()

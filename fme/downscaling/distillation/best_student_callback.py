@@ -102,6 +102,10 @@ class BestStudentCheckpointCallback:
         n_student_samples: Number of student ensemble members to draw per
             time step.  More members give a better CRPS estimate; 4 is a
             reasonable default.
+        student_sample_steps: Number of student denoising steps used when
+            sampling for validation.  Should match the distillation
+            ``student_sample_steps`` so validation reflects the trajectory
+            the student was actually trained on.  Defaults to 4.
 
     To run validation on less data, thin at the data-config level via
     ``subset.step`` in the val YAML (see ``fme.core.dataset.time.TimeSlice``).
@@ -117,6 +121,7 @@ class BestStudentCheckpointCallback:
         best_checkpoint_path: str,
         coarse_patch_yx: tuple[int, int] | None = None,
         n_student_samples: int = 4,
+        student_sample_steps: int = 4,
     ) -> None:
         self._val_dataset_path = val_dataset_path
         self._coarse_val_data = coarse_val_data
@@ -124,6 +129,7 @@ class BestStudentCheckpointCallback:
         self._best_checkpoint_path = best_checkpoint_path
         self._coarse_patch_yx = coarse_patch_yx
         self._n_student_samples = n_student_samples
+        self._student_sample_steps = student_sample_steps
         self._best_crps = float("inf")
         self._teacher_ds: xr.Dataset | None = None
 
@@ -145,7 +151,8 @@ class BestStudentCheckpointCallback:
 
         student: AceDiffusionTeacher = model.net
         # Validation runs on ALL ranks (sharded) — see class docstring.
-        crps = self._compute_validation_crps(student)
+        crps_by_var = self._compute_validation_crps(student)
+        crps = crps_by_var["mean"]
 
         if not is_rank0():
             return
@@ -171,6 +178,25 @@ class BestStudentCheckpointCallback:
                 f"(best={self._best_crps:.6f}, no improvement)"
             )
 
+        # Log after the best-checkpoint update so val/crps_best includes
+        # this iteration's result.
+        self._log_crps_to_wandb(crps_by_var, iteration)
+
+    def _log_crps_to_wandb(self, crps_by_var: dict[str, float], iteration: int) -> None:
+        """Log per-variable + mean CRPS scalars to wandb at this iteration."""
+        if not np.isfinite(crps_by_var.get("mean", float("inf"))):
+            return
+        try:
+            import wandb
+        except ImportError:
+            return
+        if wandb.run is None:
+            return
+        payload = {f"val/crps_{k}": v for k, v in crps_by_var.items()}
+        if np.isfinite(self._best_crps):
+            payload["val/crps_best"] = self._best_crps
+        wandb.log(payload, step=iteration)
+
     def __getattr__(self, name: str):
         return lambda *args, **kwargs: None
 
@@ -186,8 +212,19 @@ class BestStudentCheckpointCallback:
         return self._teacher_ds
 
     @torch.no_grad()
-    def _compute_validation_crps(self, student: AceDiffusionTeacher) -> float:
+    def _compute_validation_crps(
+        self, student: AceDiffusionTeacher
+    ) -> dict[str, float]:
+        """Return ``{"<var>": crps, "mean": <var-averaged>}``.
+
+        Sampling uses the FastGen "predict x0 → renoise" loop (via
+        ``fastgen_sampler``) instead of ACE's Heun sampler so validation
+        reflects the trajectory the student was distilled against.  Empty
+        result (no overlapping variables) returns ``{"mean": inf}``.
+        """
         import torch.distributed as dist
+
+        from fme.downscaling.samplers import fastgen_sampler
 
         teacher_ds = self._load_teacher_ds()
         teacher_model = self._teacher_model
@@ -281,8 +318,21 @@ class BestStudentCheckpointCallback:
             condition_rep = condition.repeat_interleave(n, dim=0)  # (B*n, C_cond, H, W)
             noise = torch.randn(B * n, C_out, H, W, device=condition.device)
 
-            # sample() returns normalized outputs: (B*n, C_out, H, W)
-            output_norm = student.sample(noise, condition_rep)
+            # Sample with the FastGen predict-x0-then-renoise loop so the
+            # validation trajectory matches distillation training.
+            # _ace_module is UNetDiffusionModule wrapping EDMPrecond; its
+            # forward signature is (x, condition, sigma) — same as expected
+            # by fastgen_sampler.
+            device_type = noise.device.type
+            with torch.amp.autocast(device_type, dtype=torch.bfloat16):
+                output_norm, _ = fastgen_sampler(
+                    student._ace_module,
+                    noise,
+                    condition_rep,
+                    num_steps=self._student_sample_steps,
+                    sigma_min=student._sigma_min,
+                    sigma_max=student._sigma_max,
+                )
             output_norm = output_norm.reshape(B, n, C_out, H, W)
 
             # Unpack channel dim (axis=-3) then denormalize → physical units.
@@ -363,11 +413,12 @@ class BestStudentCheckpointCallback:
                 f"unmatched_times={total_skipped_times}"
             )
 
-        per_var = []
-        for i, _var in enumerate(global_keys):
+        result: dict[str, float] = {}
+        for i, var in enumerate(global_keys):
             c = float(counts[i].item())
             if c > 0:
-                per_var.append(float(sums[i].item()) / c)
-        if not per_var:
-            return float("inf")
-        return float(np.mean(per_var))
+                result[var] = float(sums[i].item()) / c
+        if not result:
+            return {"mean": float("inf")}
+        result["mean"] = float(np.mean(list(result.values())))
+        return result

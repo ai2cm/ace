@@ -26,7 +26,7 @@ C_OUT = int(os.environ.get("ACE_C_OUT", "1"))
 H_FINE = int(os.environ.get("ACE_H_FINE", "512"))
 W_FINE = int(os.environ.get("ACE_W_FINE", "512"))
 
-STUDENT_STEPS = int(os.environ.get("ACE_STUDENT_STEPS", "4"))
+STUDENT_STEPS = int(os.environ.get("ACE_STUDENT_STEPS", "1"))
 
 
 def create_config():
