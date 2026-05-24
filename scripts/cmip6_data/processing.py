@@ -938,32 +938,77 @@ def clear_stale_encoding(ds: xr.Dataset) -> xr.Dataset:
 
 def write_zarr(ds: xr.Dataset, path: str, cfg: ResolvedDatasetConfig) -> None:
     """Write ``ds`` to ``path`` with zarr v3 chunks + shards per the
-    config. time dim uses (chunk_time, shard_time); other dims are
-    single chunk / single shard (full extent).
+    config. time dim uses ``(chunk_time, shard_time)``; other dims
+    are single chunk / single shard (full extent).
+
+    When ``cfg.chunking.variable_batch_size`` is set, data_vars are
+    written in batches: first batch ``mode="w"`` creates the store
+    (along with the shared coords), subsequent batches ``mode="a"``
+    append new data_vars. Each batch is an independent ``to_zarr``
+    call, so dask's task graph for one batch is released before the
+    next one builds — peak memory stays at
+    ``variable_batch_size × per-chunk`` rather than scaling with the
+    total number of data_vars in ``ds``. The final consolidated
+    metadata pass runs once after all batches are written.
     """
     ds = clear_stale_encoding(ds)
 
     chunk_time = cfg.chunking.chunk_time
     shard_time = cfg.chunking.shard_time
 
-    encoding: dict[str, dict] = {}
-    for v in list(ds.data_vars) + list(ds.coords):
-        var = ds[v]
-        chunks = []
-        shards: list[int] = []
-        for dim, size in zip(var.dims, var.shape):
-            if dim == "time":
-                chunks.append(min(chunk_time, size))
-                shards.append(min(shard_time or size, size))
-            else:
-                chunks.append(size)
-                shards.append(size)
-        enc: dict = {"chunks": tuple(chunks)}
-        if shard_time is not None and "time" in var.dims:
-            enc["shards"] = tuple(shards)
-        encoding[v] = enc
+    def _encoding_for(var_names: list) -> dict[str, dict]:
+        encoding: dict[str, dict] = {}
+        for v in var_names:
+            var = ds[v]
+            chunks = []
+            shards: list[int] = []
+            for dim, size in zip(var.dims, var.shape):
+                if dim == "time":
+                    chunks.append(min(chunk_time, size))
+                    shards.append(min(shard_time or size, size))
+                else:
+                    chunks.append(size)
+                    shards.append(size)
+            enc: dict = {"chunks": tuple(chunks)}
+            if shard_time is not None and "time" in var.dims:
+                enc["shards"] = tuple(shards)
+            encoding[v] = enc
+        return encoding
 
-    ds.to_zarr(path, mode="w", encoding=encoding, consolidated=True, zarr_format=3)
+    data_vars = list(ds.data_vars)
+    batch_size = getattr(cfg.chunking, "variable_batch_size", None)
+
+    if batch_size is None or batch_size >= len(data_vars):
+        # Single-pass write — original behaviour.
+        encoding = _encoding_for(data_vars + list(ds.coords))
+        ds.to_zarr(path, mode="w", encoding=encoding, consolidated=True, zarr_format=3)
+        return
+
+    batches = [
+        data_vars[i : i + batch_size] for i in range(0, len(data_vars), batch_size)
+    ]
+    for i, batch_vars in enumerate(batches):
+        sub = ds[batch_vars]
+        if i == 0:
+            sub.to_zarr(
+                path,
+                mode="w",
+                encoding=_encoding_for(batch_vars + list(sub.coords)),
+                consolidated=False,
+                zarr_format=3,
+            )
+        else:
+            sub.to_zarr(
+                path,
+                mode="a",
+                encoding=_encoding_for(batch_vars),
+                consolidated=False,
+                zarr_format=3,
+            )
+    # Single consolidated metadata pass after every batch has landed.
+    import zarr
+
+    zarr.consolidate_metadata(path)
 
 
 # ---------------------------------------------------------------------------

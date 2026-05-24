@@ -431,6 +431,17 @@ class ChunkingConfig:
     # Outer shard size along time. Groups inner chunks into a single GCS
     # object. None = unsharded (debug only). 365 = ~one shard per year.
     shard_time: Optional[int] = 365
+    # Bounds the peak memory of the streaming zarr write: data_vars are
+    # written to the output store in batches of this many variables, with
+    # ``mode="w"`` on the first batch and ``mode="a"`` thereafter. dask
+    # doesn't aggressively GC completed task results across independent
+    # variables in a single ``to_zarr`` call, so batching gives an
+    # explicit memory ceiling of ``variable_batch_size × per-chunk``
+    # rather than ``num_vars × per-chunk``. ``None`` falls back to the
+    # single-pass write. 8 keeps a 32 GB pod comfortable on the
+    # highest-resolution CMIP6 models (HadGEM3-GC31-MM, CNRM-CM6-1-HR,
+    # CESM2-WACCM, ...) at prod-scale time ranges.
+    variable_batch_size: Optional[int] = 8
 
 
 @dataclass
