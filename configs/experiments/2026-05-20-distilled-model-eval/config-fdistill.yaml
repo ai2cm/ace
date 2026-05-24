@@ -7,7 +7,7 @@ patch:
 model:
   checkpoint_path: /checkpoints/fdistill_student.ckpt
   model_updates:
-      num_diffusion_generation_steps: 4
+      num_diffusion_generation_steps: 1
       sampler_type: fastgen
 data:
   coarse:
