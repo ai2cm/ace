@@ -547,6 +547,28 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
             static_ds = static_regridded
             row.regrid_methods.update(static_methods)
 
+        # All the steps from here through write_zarr trigger dask
+        # compute eventually (via ``.compute()`` on reductions or
+        # ``.to_zarr()`` streaming). xesmf's Regridder wraps the ESMF C
+        # library and is *not* thread-safe — concurrent regridder calls
+        # produce NaN chunks silently. We previously dodged this by
+        # full-``.load()``-ing the dataset up front, but that doesn't
+        # fit at prod scale (75–86 years × all variables ≫ 32 GB).
+        # The synchronous dask scheduler forces serial chunk evaluation,
+        # which is safe for xesmf and streams memory through one chunk
+        # at a time instead of materialising everything.
+        #
+        # Apply it here (rather than later, just before write_zarr) so
+        # that compute_below_surface_mask's ``.any()`` reduction — the
+        # first all-data compute after regrid — also runs serially. On
+        # native-resolution high-res sources (EC-Earth3 T255,
+        # GFDL-CM4 C192) the default threaded scheduler eagerly loads
+        # too many regridded 3D chunks in parallel and OOMs the pod
+        # even though the result is a single boolean.
+        import dask
+
+        dask.config.set(scheduler="synchronous")
+
         # 9. Below-surface mask computed from the un-filled 3D fields.
         orog: Optional[xr.DataArray] = None
         if static_ds is not None and "orog" in static_ds:
@@ -711,73 +733,60 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
             task.experiment,
         )
 
-        # All the steps from here through write_zarr trigger dask
-        # compute eventually (via ``.compute()`` on reductions or
-        # ``.to_zarr()`` streaming). xesmf's Regridder wraps the ESMF C
-        # library and is *not* thread-safe — concurrent regridder calls
-        # produce NaN chunks silently. We previously dodged this by
-        # full-``.load()``-ing the dataset up front, but that doesn't
-        # fit at prod scale (75–86 years × all variables ≫ 32 GB).
-        # The synchronous dask scheduler forces serial chunk evaluation,
-        # which is safe for xesmf and streams memory through one chunk
-        # at a time instead of materialising everything.
-        import dask
+        # 15. Sanity count of NaN cells in the filled 3D state.
+        nan_total = 0
+        for v in ("ua", "va", "hus", "zg"):
+            if v in day_regridded:
+                nan_total += int(day_regridded[v].isnull().sum().compute())
+        row.n_nan_input_cells = nan_total
 
-        with dask.config.set(scheduler="synchronous"):
-            # 15. Sanity count of NaN cells in the filled 3D state.
-            nan_total = 0
-            for v in ("ua", "va", "hus", "zg"):
-                if v in day_regridded:
-                    nan_total += int(day_regridded[v].isnull().sum().compute())
-            row.n_nan_input_cells = nan_total
+        # 16. Populate time metadata.
+        row.n_timesteps = int(day_regridded.sizes.get("time", 0))
+        if row.n_timesteps:
+            row.time_start = str(day_regridded["time"].values[0])
+            row.time_end = str(day_regridded["time"].values[-1])
 
-            # 16. Populate time metadata.
-            row.n_timesteps = int(day_regridded.sizes.get("time", 0))
-            if row.n_timesteps:
-                row.time_start = str(day_regridded["time"].values[0])
-                row.time_end = str(day_regridded["time"].values[-1])
+        # 17. Flatten plev dimensions into pressure-named 2D variables.
+        day_regridded = flatten_plev_variables(day_regridded)
 
-            # 17. Flatten plev dimensions into pressure-named 2D variables.
-            day_regridded = flatten_plev_variables(day_regridded)
+        # 18. Harmonize all temperature variables to K. CMIP6 spec
+        # publishes ``tos``/``tob``/``sitemptop`` in °C and the
+        # rest (``tas``, ``ts``, ...) in K, but publishers
+        # occasionally deviate; walking the assembled dataset
+        # catches the variants via their ``units`` attribute.
+        # Idempotent on already-K vars.
+        for v in list(day_regridded.data_vars):
+            da, msg = harmonize_temperature_to_kelvin(day_regridded[v], var_id=v)
+            if msg:
+                row.warnings.append(msg)
+                if "converted" in msg:
+                    day_regridded[v] = da
 
-            # 18. Harmonize all temperature variables to K. CMIP6 spec
-            # publishes ``tos``/``tob``/``sitemptop`` in °C and the
-            # rest (``tas``, ``ts``, ...) in K, but publishers
-            # occasionally deviate; walking the assembled dataset
-            # catches the variants via their ``units`` attribute.
-            # Idempotent on already-K vars.
-            for v in list(day_regridded.data_vars):
-                da, msg = harmonize_temperature_to_kelvin(day_regridded[v], var_id=v)
-                if msg:
-                    row.warnings.append(msg)
-                    if "converted" in msg:
-                        day_regridded[v] = da
+        # 19. Rename CMIP6 variables to the upstream-baseline
+        # convention so downstream training can share variable
+        # names with SHIELD/ERA5 datasets.
+        day_regridded = apply_output_renames(day_regridded, CMIP_TO_OUTPUT_RENAMES)
 
-            # 19. Rename CMIP6 variables to the upstream-baseline
-            # convention so downstream training can share variable
-            # names with SHIELD/ERA5 datasets.
-            day_regridded = apply_output_renames(day_regridded, CMIP_TO_OUTPUT_RENAMES)
+        # 20. Sanity checks — advisory only. Run *after* renames
+        # and K-harmonization so ``_SANITY_RANGES`` keys off the
+        # final variable names and unit conventions.
+        sanity = run_sanity_checks(day_regridded)
+        if sanity:
+            row.warnings.extend(sanity)
+            for msg in sanity:
+                logging.warning("  sanity: %s", msg)
 
-            # 20. Sanity checks — advisory only. Run *after* renames
-            # and K-harmonization so ``_SANITY_RANGES`` keys off the
-            # final variable names and unit conventions.
-            sanity = run_sanity_checks(day_regridded)
-            if sanity:
-                row.warnings.extend(sanity)
-                for msg in sanity:
-                    logging.warning("  sanity: %s", msg)
-
-            # 21. Stream-write the dataset to zarr. With the dask
-            # ``synchronous`` scheduler set above, each chunk is
-            # evaluated and persisted in turn — peak memory stays at a
-            # single chunk × N variables instead of the full dataset.
-            day_regridded.attrs["label"] = label
-            day_regridded.attrs["source_id"] = task.source_id
-            day_regridded.attrs["experiment"] = task.experiment
-            day_regridded.attrs["variant_label"] = task.variant_label
-            logging.info("  streaming zarr write...")
-            write_zarr(day_regridded, zarr_path, cfg)
-            row.variables_present = sorted(day_regridded.data_vars)
+        # 21. Stream-write the dataset to zarr. With the synchronous
+        # dask scheduler set above, each chunk is evaluated and
+        # persisted in turn — peak memory stays at a single chunk × N
+        # variables instead of the full dataset.
+        day_regridded.attrs["label"] = label
+        day_regridded.attrs["source_id"] = task.source_id
+        day_regridded.attrs["experiment"] = task.experiment
+        day_regridded.attrs["variant_label"] = task.variant_label
+        logging.info("  streaming zarr write...")
+        write_zarr(day_regridded, zarr_path, cfg)
+        row.variables_present = sorted(day_regridded.data_vars)
 
         # 22. Compute per-dataset stats inline. We *re-open* the
         # just-written zarr rather than reusing the in-memory dataset

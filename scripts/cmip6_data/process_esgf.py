@@ -551,6 +551,20 @@ def process_one_esgf(
             static_ds, clip_warnings = clamp_static_fractions(static_ds)
             row.warnings.extend(clip_warnings)
 
+        # All the steps from here through write_zarr trigger dask
+        # compute eventually. See process.py for the full rationale —
+        # short version: xesmf is not thread-safe, the full ``.load()``
+        # we used to do up front doesn't fit at prod scale, so the
+        # synchronous dask scheduler streams chunks one at a time
+        # through the regrid + write path.
+        #
+        # Apply it here (rather than just before write_zarr) so that
+        # compute_below_surface_mask's ``.any()`` reduction — the first
+        # all-data compute — also runs serially.
+        import dask
+
+        dask.config.set(scheduler="synchronous")
+
         # 5. Below-surface mask.
         orog: Optional[xr.DataArray] = None
         if static_ds is not None and "orog" in static_ds:
@@ -679,61 +693,52 @@ def process_one_esgf(
             task.experiment,
         )
 
-        # All the steps from here through write_zarr trigger dask
-        # compute eventually. See process.py for the full rationale —
-        # short version: xesmf is not thread-safe, the full ``.load()``
-        # we used to do up front doesn't fit at prod scale, so the
-        # synchronous dask scheduler streams chunks one at a time
-        # through the regrid + write path.
-        import dask
+        # 10. NaN count.
+        nan_total = 0
+        for v in ("ua", "va", "hus", "zg"):
+            if v in day_regridded:
+                nan_total += int(day_regridded[v].isnull().sum().compute())
+        row.n_nan_input_cells = nan_total
 
-        with dask.config.set(scheduler="synchronous"):
-            # 10. NaN count.
-            nan_total = 0
-            for v in ("ua", "va", "hus", "zg"):
-                if v in day_regridded:
-                    nan_total += int(day_regridded[v].isnull().sum().compute())
-            row.n_nan_input_cells = nan_total
+        # 11. Time metadata.
+        row.n_timesteps = int(day_regridded.sizes.get("time", 0))
+        if row.n_timesteps:
+            row.time_start = str(day_regridded["time"].values[0])
+            row.time_end = str(day_regridded["time"].values[-1])
 
-            # 11. Time metadata.
-            row.n_timesteps = int(day_regridded.sizes.get("time", 0))
-            if row.n_timesteps:
-                row.time_start = str(day_regridded["time"].values[0])
-                row.time_end = str(day_regridded["time"].values[-1])
+        # 12. Flatten plev.
+        day_regridded = flatten_plev_variables(day_regridded)
 
-            # 12. Flatten plev.
-            day_regridded = flatten_plev_variables(day_regridded)
+        # 13. Harmonize temperatures to K (some CMIP6 publishers
+        # emit ``tos``/``tob``/``sitemptop`` in °C). See process.py.
+        for v in list(day_regridded.data_vars):
+            da, msg = harmonize_temperature_to_kelvin(day_regridded[v], var_id=v)
+            if msg:
+                row.warnings.append(msg)
+                if "converted" in msg:
+                    day_regridded[v] = da
 
-            # 13. Harmonize temperatures to K (some CMIP6 publishers
-            # emit ``tos``/``tob``/``sitemptop`` in °C). See process.py.
-            for v in list(day_regridded.data_vars):
-                da, msg = harmonize_temperature_to_kelvin(day_regridded[v], var_id=v)
-                if msg:
-                    row.warnings.append(msg)
-                    if "converted" in msg:
-                        day_regridded[v] = da
+        # 14. Rename CMIP6 variables to the baseline convention
+        # (see process.py for rationale).
+        day_regridded = apply_output_renames(day_regridded, CMIP_TO_OUTPUT_RENAMES)
 
-            # 14. Rename CMIP6 variables to the baseline convention
-            # (see process.py for rationale).
-            day_regridded = apply_output_renames(day_regridded, CMIP_TO_OUTPUT_RENAMES)
+        # 15. Sanity checks — advisory only. Run *after* renames
+        # and K-harmonization.
+        sanity = run_sanity_checks(day_regridded)
+        if sanity:
+            row.warnings.extend(sanity)
+            for msg in sanity:
+                logging.warning("  sanity: %s", msg)
 
-            # 15. Sanity checks — advisory only. Run *after* renames
-            # and K-harmonization.
-            sanity = run_sanity_checks(day_regridded)
-            if sanity:
-                row.warnings.extend(sanity)
-                for msg in sanity:
-                    logging.warning("  sanity: %s", msg)
-
-            # 16. Stream-write the dataset to zarr.
-            day_regridded.attrs["label"] = label
-            day_regridded.attrs["source_id"] = task.source_id
-            day_regridded.attrs["experiment"] = task.experiment
-            day_regridded.attrs["variant_label"] = task.variant_label
-            day_regridded.attrs["data_source"] = "esgf"
-            logging.info("  streaming zarr write...")
-            write_zarr(day_regridded, zarr_path, cfg)
-            row.variables_present = sorted(day_regridded.data_vars)
+        # 16. Stream-write the dataset to zarr.
+        day_regridded.attrs["label"] = label
+        day_regridded.attrs["source_id"] = task.source_id
+        day_regridded.attrs["experiment"] = task.experiment
+        day_regridded.attrs["variant_label"] = task.variant_label
+        day_regridded.attrs["data_source"] = "esgf"
+        logging.info("  streaming zarr write...")
+        write_zarr(day_regridded, zarr_path, cfg)
+        row.variables_present = sorted(day_regridded.data_vars)
 
         # 17. Inline per-dataset stats; re-open the just-written zarr
         # so the stats pass scans target-resolution data on disk
