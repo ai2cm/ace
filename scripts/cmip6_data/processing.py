@@ -92,22 +92,25 @@ def resolve_time_duplicates(
             "set ``allow_dedupe: true`` in an override for this dataset"
         )
 
-    arr = ds[var_name].load().values
-    sort_idx = np.argsort(times, kind="stable")
-    times_sorted = times[sort_idx]
-    arr_sorted = arr[sort_idx]
-
-    same = times_sorted[:-1] == times_sorted[1:]
-    for i in np.where(same)[0]:
-        a, b = arr_sorted[i], arr_sorted[i + 1]
-        if not np.allclose(a, b, equal_nan=True, rtol=1e-5, atol=0):
-            raise SimulationBoundaryError(
-                f"duplicate time {times_sorted[i]} in {var_name} has "
-                "materially different data across copies — looks like "
-                "a simulation-boundary stitch. Republish this dataset "
-                "with the two halves in separate stores before "
-                "ingesting."
-            )
+    # Only load the duplicate-timestamp slices, not the whole variable.
+    # On models like CESM2-WACCM, the full 3D variable for the configured
+    # window is ~50+ GB at native resolution; loading it just to compare a
+    # few hundred duplicate pairs OOMs the pod. Per-duplicate-timestamp
+    # load is bounded by (n_copies × per-timestep) which is ~MB-scale.
+    da = ds[var_name]
+    for t_val in dup_times:
+        positions = np.where(times == t_val)[0].tolist()
+        copies = da.isel(time=positions).load().values
+        ref = copies[0]
+        for c in copies[1:]:
+            if not np.allclose(ref, c, equal_nan=True, rtol=1e-5, atol=0):
+                raise SimulationBoundaryError(
+                    f"duplicate time {t_val} in {var_name} has "
+                    "materially different data across copies — looks like "
+                    "a simulation-boundary stitch. Republish this dataset "
+                    "with the two halves in separate stores before "
+                    "ingesting."
+                )
 
     return (
         ds.isel(time=np.unique(times, return_index=True)[1]),
