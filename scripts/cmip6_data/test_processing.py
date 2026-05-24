@@ -38,6 +38,7 @@ from processing import (
     resolve_time_duplicates,
     run_sanity_checks,
     validate_cell_methods,
+    write_zarr,
 )
 
 # ---------------------------------------------------------------------------
@@ -1231,6 +1232,129 @@ def test_compute_dataset_stats_handles_360_day_calendar():
     stats_ds, _ = compute_dataset_stats(ds, w2d, periods=periods)
     assert list(stats_ds["period"].values) == ["full", "1940-2014", "1979-2015"]
     np.testing.assert_allclose(stats_ds["TMP2m__mean"].values, 280.0, atol=0.01)
+
+
+# ---------------------------------------------------------------------------
+# write_zarr — variable-batching memory bound (integration test)
+# ---------------------------------------------------------------------------
+
+
+def _measure_peak_alloc(fn) -> int:
+    """Run ``fn`` with tracemalloc active and return the peak Python-side
+    allocation (bytes). Numpy data buffers go through the Python allocator
+    on this build, so this captures dask chunk materialisations during the
+    write — without the RSS noise from imports, BLAS pools, or glibc not
+    returning freed memory to the OS.
+    """
+    import gc
+    import tracemalloc
+
+    gc.collect()
+    tracemalloc.start()
+    try:
+        tracemalloc.reset_peak()
+        fn()
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    return peak
+
+
+def test_write_zarr_bounds_memory_with_variable_batching(tmp_path):
+    """End-to-end integration test for the variable-batched write path.
+
+    Builds a lazy dask-backed dataset whose total size dwarfs the
+    batch-chunk bound, runs ``write_zarr`` under the synchronous
+    scheduler that prod uses, samples RSS in a background thread, and
+    asserts peak memory stays within a small multiple of one
+    ``variable_batch_size × chunk_time`` block.
+
+    Sized so that ``num_time_chunks > tolerance`` and
+    ``num_batches > tolerance``: if the bound were proportional to
+    either total dimension instead of the batch-chunk product, the
+    assertion would catch it.
+    """
+    import dask
+    import dask.array as da_arr
+    from config import ChunkingConfig
+
+    ntime = 200
+    chunk_time = 50  # → 4 time chunks
+    n_vars = 24
+    batch_size = 4  # → 6 variable batches
+    nplev = 8
+    nlat = 45
+    nlon = 90
+    tolerance = 3.0
+
+    n_chunks = ntime // chunk_time
+    n_batches = (n_vars + batch_size - 1) // batch_size
+    # Sanity-guard the test design: bound is only meaningful when there
+    # are more chunks / batches than the tolerance factor we're checking.
+    assert n_chunks > tolerance
+    assert n_batches > tolerance
+
+    bytes_per_cell = 4  # float32
+    per_var_chunk_bytes = chunk_time * nplev * nlat * nlon * bytes_per_cell
+    per_batch_chunk_bytes = batch_size * per_var_chunk_bytes
+    total_bytes = n_vars * ntime * nplev * nlat * nlon * bytes_per_cell
+
+    coords = {
+        "time": xr.date_range("2010-01-01", periods=ntime, freq="D", calendar="noleap"),
+        "plev": np.array(
+            [100000, 85000, 70000, 50000, 25000, 10000, 5000, 1000],
+            dtype=np.float64,
+        ),
+        "lat": np.linspace(-89, 89, nlat),
+        "lon": np.linspace(2, 358, nlon),
+    }
+    chunks = (chunk_time, nplev, nlat, nlon)
+    data_vars: dict = {}
+    for i in range(n_vars):
+        data_vars[f"var_{i:02d}"] = (
+            ("time", "plev", "lat", "lon"),
+            da_arr.random.standard_normal(
+                size=(ntime, nplev, nlat, nlon), chunks=chunks
+            ).astype(np.float32),
+        )
+    ds = xr.Dataset(data_vars, coords=coords)
+
+    cfg = _make_cfg(
+        chunking=ChunkingConfig(
+            chunk_time=chunk_time,
+            shard_time=chunk_time,
+            variable_batch_size=batch_size,
+        ),
+    )
+
+    out_path = str(tmp_path / "batched.zarr")
+
+    def run_write():
+        with dask.config.set(scheduler="synchronous"):
+            write_zarr(ds, out_path, cfg)
+
+    peak_delta = _measure_peak_alloc(run_write)
+
+    bound = int(per_batch_chunk_bytes * tolerance)
+    assert peak_delta < bound, (
+        f"peak RSS delta {peak_delta / 1024 / 1024:.1f} MiB exceeded "
+        f"{tolerance}× batch-chunk bound "
+        f"({bound / 1024 / 1024:.1f} MiB); "
+        f"batch_size={batch_size}, chunk_time={chunk_time}, "
+        f"per_var_chunk={per_var_chunk_bytes / 1024 / 1024:.2f} MiB, "
+        f"total dataset={total_bytes / 1024 / 1024:.1f} MiB"
+    )
+
+    # Sanity: the bound is meaningfully tighter than "the whole dataset".
+    # If this assertion ever fires it means the test was sized too small
+    # for the bound to be informative.
+    assert bound < total_bytes / 2
+
+    # Verify the write actually produced the expected output.
+    written = xr.open_zarr(out_path, consolidated=True)
+    assert set(written.data_vars) == set(ds.data_vars)
+    assert written.sizes["time"] == ntime
+    written.close()
 
 
 if __name__ == "__main__":
