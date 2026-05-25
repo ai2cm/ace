@@ -62,10 +62,11 @@ selection:
     - {source_id: EC-Earth3, experiment: historical, variant_label: r4i1p1f1}
     # Pangeo mirror has corrupted zarr chunks for this variant: the
     # on-disk chunk payload contains 600 timesteps but the chunk-shape
-    # metadata declares 187. Even a single-element ``isel(time=0).load()``
-    # raises ``ValueError: cannot reshape array of size 133632000 into
-    # shape (187,8,145,192)`` from zarr's v2 codec. Sibling r1/r2/r3
-    # variants of HadGEM3-GC31-LL ssp245 are clean.
+    # metadata declares 187, so even a single-element
+    # ``isel(time=0).load()`` raises ``ValueError: cannot reshape array
+    # of size 133632000 into shape (187,8,145,192)`` from zarr v2's
+    # codec. ESGF still has this variant (all 18 day vars), so the
+    # ESGF backfill picks it up — only Pangeo is excluded here.
     - {source_id: HadGEM3-GC31-LL, experiment: ssp245, variant_label: r4i1p1f3}
   experiments: [historical, ssp126, ssp245, ssp370, ssp585]
 
