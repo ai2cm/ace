@@ -63,12 +63,12 @@ def create_config():
 
     config.model.pretrained_model_path = TEACHER_CKPT_PATH
 
-    # Optimizers.  Bumped from 2e-6 → 1e-5 (5×) — at lr=2e-6 with grad_norm≈0.1
-    # the 55M-param student barely moved across 24k steps; CRPS plateaued near
-    # teacher initialization.
-    config.model.net_optimizer.lr = 1e-5
-    config.model.discriminator_optimizer.lr = 1e-5
-    config.model.fake_score_optimizer.lr = 1e-5
+    # Optimizers.  Tuned to 5e-6 (2.5× the original 2e-6) — 1e-5 found a real
+    # CRPS improvement by step 520 but then drifted past it; lr=5e-6 should
+    # land more gently and stay near the basin.
+    config.model.net_optimizer.lr = 5e-6
+    config.model.discriminator_optimizer.lr = 5e-6
+    config.model.fake_score_optimizer.lr = 5e-6
 
     # GAN loss weight — bumped from 1e-3 → 3e-3 to match DMD2.  Most of the
     # "push" off the teacher fixed point comes from the GAN term; at 1e-3 it
