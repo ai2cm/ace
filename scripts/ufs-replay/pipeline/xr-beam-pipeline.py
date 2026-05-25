@@ -718,6 +718,14 @@ def _process_chunk(
 
     # Time coarsening
     if time_coarsen_factor > 1:
+        n_times = ds_ocean_2d.sizes["time"]
+        if n_times < time_coarsen_factor:
+            raise ValueError(
+                f"Chunk has {n_times} timesteps after time intersection, "
+                f"but time_coarsen_factor={time_coarsen_factor}. "
+                f"Ensure process_time_chunksize is a multiple of "
+                f"time_coarsen_factor and that the time range is aligned."
+            )
         ds_atmo_6h = ds_atmo_6h.coarsen(
             time=time_coarsen_factor, boundary="trim"
         ).mean()
@@ -1163,6 +1171,12 @@ def main():
     )
     assert args.output_time_shardsize % args.output_time_chunksize == 0, msg
 
+    if time_coarsen_factor > 1:
+        assert args.process_time_chunksize % time_coarsen_factor == 0, (
+            f"process_time_chunksize ({args.process_time_chunksize}) must be "
+            f"a multiple of time_coarsen_factor ({time_coarsen_factor})"
+        )
+
     output_chunks = {"time": args.output_time_chunksize}
     output_shards = {"time": args.output_time_shardsize}
     process_chunks = {"time": args.process_time_chunksize}
@@ -1189,6 +1203,20 @@ def main():
     ocean_load_vars = list(dict.fromkeys(ocean_load_vars))
 
     ds_ocean = open_ocean(ocean_load_vars, start_time, end_time)
+    # Truncate to a multiple of process_time_chunksize so every chunk has
+    # exactly the same number of timesteps (avoids coarsen failures).
+    n_ocean = ds_ocean.sizes["time"]
+    n_usable = (n_ocean // args.process_time_chunksize) * args.process_time_chunksize
+    if n_usable < n_ocean:
+        logging.warning(
+            "Trimming ocean time from %d to %d timesteps to be divisible "
+            "by process_time_chunksize=%d (dropping last %d timesteps)",
+            n_ocean,
+            n_usable,
+            args.process_time_chunksize,
+            n_ocean - n_usable,
+        )
+        ds_ocean = ds_ocean.isel(time=slice(0, n_usable))
     logging.info("Ocean dataset: %s", dict(ds_ocean.sizes))
 
     # Atmosphere: need 3-hourly data spanning the full ocean range + buffer
