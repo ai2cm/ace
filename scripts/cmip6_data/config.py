@@ -585,7 +585,7 @@ class Selection:
     # (source_id, experiment, variant_p, variant_f). None = no cap.
     # When a label has multiple f values, the cap is applied per f, so a
     # model with 2 f values keeps up to 2 * max_members_per_f realizations.
-    max_members_per_f: Optional[int] = 3
+    max_members_per_f: Optional[int] = 5
 
 
 @dataclass

@@ -424,9 +424,11 @@ unchanged. Any conversion or unrecognized unit is recorded in
 
 ### Expected model coverage
 
-With the current defaults (`max_core_missing=3`, `max_members_per_f=3`)
+With the current defaults (`max_core_missing=3`, `max_members_per_f=5`)
 and Pangeo + ESGF combined, the pilot covers **~415 eligible
-(model, experiment, member) datasets** across the five experiments:
+(model, experiment, member) datasets** across the five experiments
+(estimate is conservative; the cap-bump from 3 → 5 pulls in more
+multi-member ensembles for models like CanESM5 and HadGEM3-GC31-LL):
 
 | Scenario | Datasets (estimate) | Source mix |
 |---|---|---|
@@ -437,7 +439,7 @@ and Pangeo + ESGF combined, the pilot covers **~415 eligible
 | ssp585 | ~75 | Pangeo (60) + ESGF backfill (~15) |
 | **Total** | **~415** | — |
 
-The multi-member cap retains up to 3 realizations per
+The multi-member cap retains up to 5 realizations per
 `(source_id, experiment, p, f)` label. ESGF-only models (publish daily
 3D state on ESGF but not Pangeo) include ACCESS-ESM1-5,
 AWI-ESM-1-REcoM, CESM2-WACCM-FV2, FGOALS-f3-L, IPSL-CM6A-LR and
@@ -800,7 +802,7 @@ python make_presence.py --config configs/pilot.yaml
   `dacite` into dataclasses in `config.py`. Top-level `defaults:` +
   `selection:` + sparse `overrides:` list. See `ProcessConfig` and
   `InventoryConfig`.
-- **Issue 3 — Member caps.** `require_i = 1` and `max_members_per_f = 3`
+- **Issue 3 — Member caps.** `require_i = 1` and `max_members_per_f = 5`
   at ingest, applied per `(source_id, experiment, p, f)` label.
   Deterministic selection by `(variant_f, variant_r)`.
 - **Issue 4 — Time subset.** Main training window: `historical`
@@ -945,17 +947,29 @@ python make_presence.py --config configs/pilot.yaml
   **KACE-1-0-G is excluded from training** via
   `selection.exclude_source_ids` in `pilot.yaml`.
 
+- **AWI-CM-1-1-MR non-plev8 pressure grid**: publishes 3D variables
+  on a 19-level pressure grid (1, 5, 10, 20, 30, 50, 70, 100, 150,
+  200, 250, 300, 400, 500, 600, 700, 850, 925, 1000 hPa) rather
+  than the plev8 set the pipeline assumes. The pipeline ingests the
+  full 19 levels and produces per-level variables (`ua5`, `ua20`,
+  ...) and derived layers (`ta_derived_layer_5_1`, ...) that
+  don't match the rest of the cohort. **AWI-CM-1-1-MR is excluded
+  from training** via `selection.exclude_source_ids` in both prod
+  configs and the v4+ pilot configs.
+
 - **EC-Earth3/historical/r4i1p1f1 missing plev timesteps**: The last
   13 timesteps (indices 347-359, late December) have all-NaN values
   for all 3D pressure-level variables (ua, va, hus, zg at all levels),
   while surface variables (tas, huss, psl, pr) and derived layer-mean
   temperatures are present. Likely incomplete data upload.
-  Other EC-Earth3 members are unaffected.
+  Other EC-Earth3 members are unaffected. **Excluded** via
+  `selection.exclude_variants` in both prod configs and the v4 pilot.
 
 - **HadGEM3-GC31-MM/historical/r2i1p1f3 missing plev timesteps**: 22
   timesteps (indices 40-61, mid-February) have all-NaN values for all
   3D pressure-level variables, while surface variables are present.
-  Other HadGEM3-GC31-MM members are unaffected.
+  Other HadGEM3-GC31-MM members are unaffected. **Excluded** via
+  `selection.exclude_variants`.
 
 ### Known ESGF data-quality issues
 
