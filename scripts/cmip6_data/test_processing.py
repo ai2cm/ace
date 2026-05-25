@@ -450,6 +450,24 @@ def test_below_surface_mask_fallback_to_orog():
     assert mask is not None
 
 
+def test_below_surface_mask_no_zg_returns_none():
+    """When a model publishes only a subset of the 3D core vars and
+    ``zg`` is absent (e.g. CMCC-CM2-SR5 ships only ``ua``), there's no
+    way to derive the mask: nan_union has nothing to union against and
+    the orog_static fallback can't be computed. Should return
+    ``(None, "none")`` rather than raise ``KeyError`` on ``ds["zg"]``.
+    """
+    ds = _rectilinear_ds(ntime=3, with_plev=True, variables=["ua"])
+    orog = xr.DataArray(
+        np.full((10, 20), 5000.0, dtype=np.float32),
+        dims=("lat", "lon"),
+        coords={"lat": ds["lat"], "lon": ds["lon"]},
+    )
+    mask, source = compute_below_surface_mask(ds, orog)
+    assert source == "none"
+    assert mask is None
+
+
 # ---------------------------------------------------------------------------
 # nearest_above_fill
 # ---------------------------------------------------------------------------

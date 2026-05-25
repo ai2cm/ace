@@ -371,7 +371,12 @@ def compute_below_surface_mask(
         if bool(nan_union.any()):
             return nan_union.astype("uint8").rename("below_surface_mask"), "nan_union"
 
-    if orog is None:
+    # The ``orog_static`` fallback needs ``zg`` to compare against the
+    # static orography. Models that publish only a subset of the 3D
+    # state (e.g. CMCC-CM2-SR5, which ships only ``ua`` of the four
+    # core 3D variables) get here without ``zg``; in that case there's
+    # no information to build a mask from, so return ``"none"``.
+    if orog is None or "zg" not in ds.data_vars:
         return None, "none"
     mask = (ds["zg"] < orog).astype("uint8").rename("below_surface_mask")
     return mask, "orog_static"
