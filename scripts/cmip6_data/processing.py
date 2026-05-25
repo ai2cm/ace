@@ -305,8 +305,21 @@ def regrid_variables(
         # max(vars in bucket) × per-chunk, which matters a lot for
         # high-resolution sources like HadGEM3-GC31-MM (~6.5 GB per 3D
         # plev variable per chunk).
+        #
+        # ``skipna=True`` makes the conservative / bilinear weighted
+        # average skip source NaN cells instead of treating them as 0.
+        # Without it, a target cell that partially covers source NaN
+        # (e.g. sitemptop where ice is only in a small sub-cell patch,
+        # or oday_tos near a coastline that crosses both land=NaN and
+        # ocean) gets a value pulled toward 0 by the NaN cells'
+        # implicit-zero contribution — for sitemptop in the pilot, that
+        # meant cohort means of ~88 K under the ice mask instead of the
+        # physically reasonable ~268 K. xesmf's default ``na_thres=1.0``
+        # still propagates NaN to target cells whose entire source
+        # footprint was NaN, so the post-regrid mask detection in
+        # ``emit_mask_and_fill`` still works.
         for v in vars_:
-            pieces.append(regridder(ds[[v]], keep_attrs=True))
+            pieces.append(regridder(ds[[v]], keep_attrs=True, skipna=True))
         used.update({v: actual_method for v in vars_})
 
     regridded = xr.merge(pieces)
