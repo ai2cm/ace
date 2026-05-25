@@ -1,0 +1,38 @@
+# Cloud-side 2-year pilot — ESGF source.
+#
+# Pair with ``cmip6-multimodel-4deg-pilot-v5-cloud.yaml``. Output
+# lands in the same ``v0-pilot-v5/`` directory.
+
+output_directory: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v0-pilot-v5
+external_forcings_directory: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/external_forcings
+
+esgf:
+  search_node: https://esgf-data.dkrz.de/esg-search/search
+  scratch_dir: /scratch
+
+defaults:
+  time_subset:
+    historical: {start: "2010-01-01", end: "2011-12-31"}
+    ssp126: {start: "2015-01-01", end: "2016-12-31"}
+    ssp245: {start: "2015-01-01", end: "2016-12-31"}
+    ssp370: {start: "2015-01-01", end: "2016-12-31"}
+    ssp585: {start: "2015-01-01", end: "2016-12-31"}
+  chunking:
+    chunk_time: 365
+    shard_time: 365
+    variable_batch_size: 8
+
+selection:
+  exclude_source_ids:
+    - INM-CM4-8
+    - AWI-CM-1-1-MR
+    - KACE-1-0-G
+  exclude_variants:
+    - {source_id: HadGEM3-GC31-MM, experiment: historical, variant_label: r2i1p1f3}
+    - {source_id: EC-Earth3, experiment: historical, variant_label: r4i1p1f1}
+  experiments: [historical, ssp126, ssp245, ssp370, ssp585]
+
+overrides:
+  - match:
+      source_id: CESM2-WACCM-FV2
+    allow_dedupe: true
