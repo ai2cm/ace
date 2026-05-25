@@ -41,6 +41,9 @@ selection:
     # KACE-1-0-G has sparse NaN values at 10 hPa that propagate to
     # all-NaN model output. Mirror the Pangeo exclude.
     - KACE-1-0-G
+  exclude_variants:
+    - {source_id: HadGEM3-GC31-MM, experiment: historical, variant_label: r2i1p1f3}
+    - {source_id: EC-Earth3, experiment: historical, variant_label: r4i1p1f1}
   experiments: [historical, ssp126, ssp245, ssp370, ssp585]
 
 overrides:

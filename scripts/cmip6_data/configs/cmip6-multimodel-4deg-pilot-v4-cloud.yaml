@@ -52,6 +52,14 @@ selection:
     # KACE-1-0-G has sparse NaN values at 10 hPa that propagate
     # through and produce all-NaN model output.
     - KACE-1-0-G
+  exclude_variants:
+    # Both publishers ship full pressure-level slabs of NaN on
+    # these specific realizations (~10⁶ NaN cells in the 3D
+    # state pre-fill). Sibling variants of the same model are
+    # clean — so we exclude the bad variant, not the whole model.
+    # See report/README.md §6c.
+    - {source_id: HadGEM3-GC31-MM, experiment: historical, variant_label: r2i1p1f3}
+    - {source_id: EC-Earth3, experiment: historical, variant_label: r4i1p1f1}
   experiments: [historical, ssp126, ssp245, ssp370, ssp585]
 
 overrides:

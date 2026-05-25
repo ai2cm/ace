@@ -39,6 +39,12 @@ selection:
     # hus10, zg10) — typically 1 grid cell per timestep — which
     # propagate through the network and produce all-NaN model output.
     - KACE-1-0-G
+  exclude_variants:
+    # Specific realizations whose 3D state slabs ship as ~10⁶ NaN
+    # cells from the publisher. Sibling variants of these same
+    # models are clean. See report/README.md §6c.
+    - {source_id: HadGEM3-GC31-MM, experiment: historical, variant_label: r2i1p1f3}
+    - {source_id: EC-Earth3, experiment: historical, variant_label: r4i1p1f1}
   experiments: [historical, ssp126, ssp245, ssp370, ssp585]
 
 overrides:

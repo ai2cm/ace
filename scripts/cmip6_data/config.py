@@ -550,6 +550,19 @@ class Override:
 
 
 @dataclass
+class VariantKey:
+    """Identifier triple for a single (model, experiment, variant) ingest.
+    Used to address specific realizations — e.g. for variant-level
+    exclusion of publisher-side bad files that the model-wide
+    ``exclude_source_ids`` is too blunt to handle.
+    """
+
+    source_id: str
+    experiment: str
+    variant_label: str
+
+
+@dataclass
 class Selection:
     source_ids: Optional[list[str]] = None
     # Source IDs to exclude (applied after the ``source_ids`` filter).
@@ -557,6 +570,12 @@ class Selection:
     # we don't want to ingest, e.g. INM-CM4-8 (anomalous ``zg`` at the
     # top of atmosphere — see README).
     exclude_source_ids: list[str] = field(default_factory=list)
+    # (source_id, experiment, variant_label) triples to exclude after
+    # the source-id filters. Use when a specific publisher file has
+    # known issues but the rest of the model's realizations are fine
+    # — e.g. EC-Earth3 historical r4i1p1f1 has ~10⁶ NaN cells in its
+    # 3D state while every other EC-Earth3 variant is clean.
+    exclude_variants: list[VariantKey] = field(default_factory=list)
     experiments: list[str] = field(
         default_factory=lambda: ["historical", "ssp126", "ssp245", "ssp370", "ssp585"]
     )
@@ -830,6 +849,7 @@ __all__ = [
     "Match",
     "Override",
     "Selection",
+    "VariantKey",
     "ProcessConfig",
     "ResolvedDatasetConfig",
     "CatalogQuery",

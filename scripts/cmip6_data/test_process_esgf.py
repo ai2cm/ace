@@ -291,6 +291,46 @@ def test_select_respects_exclude_source_ids():
     assert tasks[0].source_id == "ModelA"
 
 
+def test_select_respects_exclude_variants():
+    """``exclude_variants`` drops the named (source, exp, variant) triple
+    while leaving sibling variants of the same model alone."""
+    from config import VariantKey
+
+    inv = _make_inventory(
+        [
+            {
+                "source_id": "ModelA",
+                "variables": _CORE_VARS,
+                "member_id": "r1i1p1f1",
+                "variant_r": 1,
+            },
+            {
+                "source_id": "ModelA",
+                "variables": _CORE_VARS,
+                "member_id": "r2i1p1f1",
+                "variant_r": 2,
+            },
+            {
+                "source_id": "ModelA",
+                "variables": _CORE_VARS,
+                "member_id": "r4i1p1f1",
+                "variant_r": 4,
+            },
+        ]
+    )
+    cfg = _minimal_config()
+    cfg.selection.exclude_variants = [
+        VariantKey(
+            source_id="ModelA",
+            experiment="historical",
+            variant_label="r4i1p1f1",
+        )
+    ]
+    tasks = select_esgf_datasets(inv, cfg)
+    kept = sorted(t.variant_label for t in tasks)
+    assert kept == ["r1i1p1f1", "r2i1p1f1"]
+
+
 def test_select_respects_source_ids_filter():
     inv = _make_inventory(
         [

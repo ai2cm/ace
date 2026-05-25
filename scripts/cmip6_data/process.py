@@ -148,6 +148,15 @@ def select_datasets(
         day = day[day["source_id"].isin(sel.source_ids)]
     if sel.exclude_source_ids:
         day = day[~day["source_id"].isin(sel.exclude_source_ids)]
+    if sel.exclude_variants:
+        excluded = {
+            (v.source_id, v.experiment, v.variant_label) for v in sel.exclude_variants
+        }
+        day = day[
+            ~day[["source_id", "experiment_id", "member_id"]]
+            .apply(tuple, axis=1)
+            .isin(excluded)
+        ]
     if sel.require_i is not None:
         day = day[day["variant_i"] == sel.require_i]
 

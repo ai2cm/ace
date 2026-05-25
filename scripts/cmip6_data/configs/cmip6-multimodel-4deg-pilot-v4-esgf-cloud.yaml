@@ -27,6 +27,9 @@ selection:
     - INM-CM4-8
     - AWI-CM-1-1-MR
     - KACE-1-0-G
+  exclude_variants:
+    - {source_id: HadGEM3-GC31-MM, experiment: historical, variant_label: r2i1p1f3}
+    - {source_id: EC-Earth3, experiment: historical, variant_label: r4i1p1f1}
   experiments: [historical, ssp126, ssp245, ssp370, ssp585]
 
 overrides:
