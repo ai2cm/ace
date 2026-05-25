@@ -196,7 +196,15 @@ def normalize_regrid_source(ds: xr.Dataset) -> xr.Dataset:
     for name in ("lon_b", "lat_b"):
         if name not in ds.variables:
             continue
-        da = ds[name]
+        # Load the bounds DataArray before ``bounds_to_vertices`` — that
+        # helper calls ``apply_ufunc`` with the 4-vertex dim as a core
+        # dim and refuses to run when the dim is chunked. CMIP6 ocean
+        # zarrs (Oday.tos, Omon.* on curvilinear grids) ship with
+        # ``vertices`` pre-chunked, which broke ~150 datasets in the
+        # pilot. The bounds array itself is tiny (lat × lon × 4 ×
+        # 8 bytes ≈ a few MB at native resolution), so eagerly loading
+        # it is cheap.
+        da = ds[name].load()
         if da.ndim == 3 and da.shape[-1] == 4:
             bounds_dim = da.dims[-1]
             ds = ds.drop_vars(name).assign_coords(
