@@ -29,8 +29,11 @@ C_OUT = int(os.environ.get("ACE_C_OUT", "1"))
 H_FINE = int(os.environ.get("ACE_H_FINE", "512"))
 W_FINE = int(os.environ.get("ACE_W_FINE", "512"))
 
-# Number of student steps.  Start at 4; if tail coverage holds, try 2.
-STUDENT_STEPS = int(os.environ.get("ACE_STUDENT_STEPS", "4"))
+# Number of student steps.  Default 2; the 4-step run plateaued near teacher
+# initialization because real-data inputs + teacher-init student kept the VSD
+# gradient too small.  Override with ACE_STUDENT_STEPS to revisit 4-step or
+# try 1-step.
+STUDENT_STEPS = int(os.environ.get("ACE_STUDENT_STEPS", "2"))
 
 
 def create_config():
@@ -60,13 +63,17 @@ def create_config():
 
     config.model.pretrained_model_path = TEACHER_CKPT_PATH
 
-    # Optimizers
-    config.model.net_optimizer.lr = 2e-6
-    config.model.discriminator_optimizer.lr = 2e-6
-    config.model.fake_score_optimizer.lr = 2e-6
+    # Optimizers.  Bumped from 2e-6 → 1e-5 (5×) — at lr=2e-6 with grad_norm≈0.1
+    # the 55M-param student barely moved across 24k steps; CRPS plateaued near
+    # teacher initialization.
+    config.model.net_optimizer.lr = 1e-5
+    config.model.discriminator_optimizer.lr = 1e-5
+    config.model.fake_score_optimizer.lr = 1e-5
 
-    # GAN loss weight — start conservative for stable training.
-    config.model.gan_loss_weight_gen = 1e-3
+    # GAN loss weight — bumped from 1e-3 → 3e-3 to match DMD2.  Most of the
+    # "push" off the teacher fixed point comes from the GAN term; at 1e-3 it
+    # was too small to overcome the (real-data input + teacher-init) plateau.
+    config.model.gan_loss_weight_gen = 3e-3
 
     # EMA
     config.model.use_ema = ["ema_9999", "ema_99995"]
