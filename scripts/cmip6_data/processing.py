@@ -982,6 +982,21 @@ def write_zarr(ds: xr.Dataset, path: str, cfg: ResolvedDatasetConfig) -> None:
     """
     ds = clear_stale_encoding(ds)
 
+    # Drop scalar non-dim auxiliary coords. CMIP6 source files carry
+    # CF-style scalar metadata coords like ``type = "sea_ice"`` or
+    # ``height = 2.0`` on individual variables; these survive the
+    # regrid+merge path and end up in ``ds.coords``. The batched-write
+    # path then breaks on them because xarray re-encodes the same
+    # string coord with a different fixed-width dtype between the
+    # ``mode="w"`` first batch and the ``mode="a"`` subsequent batches,
+    # raising ``ValueError: Mismatched dtypes for variable type``.
+    # These coords don't belong in the consolidated output anyway —
+    # they were per-source-variable metadata, not whole-dataset
+    # facts — so dropping them is the right behaviour.
+    scalar_aux_coords = [c for c in ds.coords if c not in ds.dims and ds[c].ndim == 0]
+    if scalar_aux_coords:
+        ds = ds.drop_vars(scalar_aux_coords)
+
     chunk_time = cfg.chunking.chunk_time
     shard_time = cfg.chunking.shard_time
 

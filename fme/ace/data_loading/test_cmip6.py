@@ -287,6 +287,6 @@ def test_netcdf4_build(cmip6_netcdf_dir):
     )
     assert len(dataset) > 0
     sample = dataset[0]
-    data, time, labels, epoch = sample
+    data, time, labels, epoch, _source_ids = sample
     assert "tas" in data
     assert "pr" in data

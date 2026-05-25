@@ -842,6 +842,17 @@ def main() -> None:
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
+    # The per-variable lazy-open path accumulates a NetCDF file handle
+    # per file across the all_day_vars loop — for CMCC-ESM2-like models
+    # with ~30 vars × ~10 historical chunks each, that's ~300 handles
+    # held until the final ``write_zarr`` triggers compute. xarray's
+    # default LRU cache size is 128; once exceeded, cache evictions
+    # mid-read can race with the dask compute and raise ``KeyError``
+    # in ``file_manager._acquire_with_cache_info`` (the obscure
+    # ``KeyError: [<class 'netCDF4._netCDF4.Dataset'>, (...,), ...]``).
+    # Bumping the cap well past the worst-case file count avoids it.
+    xr.set_options(file_cache_maxsize=1024)
+
     config = ESGFProcessConfig.from_file(args.config)
     if args.source_ids is not None:
         config.selection.source_ids = args.source_ids
