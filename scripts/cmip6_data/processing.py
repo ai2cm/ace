@@ -959,6 +959,19 @@ def write_zarr(ds: xr.Dataset, path: str, cfg: ResolvedDatasetConfig) -> None:
     chunk_time = cfg.chunking.chunk_time
     shard_time = cfg.chunking.shard_time
 
+    # Align dask chunks on ``time`` with the zarr chunk size. Without
+    # this, variables produced by ``causal_monthly_to_daily`` /
+    # ``causal_annual_to_daily`` / ``attach_external_forcings`` end up
+    # with per-day dask chunks (size 1 along time), which zarr v3
+    # refuses to write because multiple dask chunks would land in the
+    # same zarr chunk ("would overlap multiple Dask chunks ... could
+    # lead to corrupted data"). Rechunking is cheap — variables that
+    # already have time-chunk ``chunk_time`` are a no-op; the small
+    # broadcast variables (LUH2 forest, monthly SO2/BC) get coalesced
+    # into ~MB-scale chunks per the target chunk size.
+    if "time" in ds.dims:
+        ds = ds.chunk({"time": chunk_time})
+
     def _encoding_for(var_names: list) -> dict[str, dict]:
         encoding: dict[str, dict] = {}
         for v in var_names:

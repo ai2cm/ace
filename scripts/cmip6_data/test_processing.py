@@ -1260,6 +1260,57 @@ def _measure_peak_alloc(fn) -> int:
     return peak
 
 
+def test_write_zarr_aligns_misaligned_dask_chunks(tmp_path):
+    """``write_zarr`` must accept a Dataset whose data_vars have
+    inconsistent dask time chunks — in prod, ``causal_monthly_to_daily``
+    / ``causal_annual_to_daily`` / ``attach_external_forcings`` produce
+    per-day chunks (size 1 along time) for the broadcast variables
+    (``luh2_forest``, ``input4mips_so2``, ...) while the regridded
+    CMIP6 variables keep their ``(chunk_time, ...)`` chunks. Zarr v3
+    refuses to write when a single zarr chunk would be covered by
+    multiple dask chunks, so ``write_zarr`` must rechunk along ``time``
+    before writing.
+    """
+    import dask
+    import dask.array as da_arr
+    from config import ChunkingConfig
+
+    chunk_time = 365
+    ntime = 2 * chunk_time
+    nlat, nlon = 45, 90
+
+    aligned = da_arr.zeros((ntime, nlat, nlon), chunks=(chunk_time, nlat, nlon))
+    misaligned = da_arr.zeros((ntime, nlat, nlon), chunks=(1, nlat, nlon))
+    ds = xr.Dataset(
+        {
+            "aligned": (("time", "lat", "lon"), aligned),
+            "luh2_forest": (("time", "lat", "lon"), misaligned),
+        },
+        coords={
+            "time": xr.date_range(
+                "2010-01-01", periods=ntime, freq="D", calendar="noleap"
+            ),
+            "lat": np.linspace(-89, 89, nlat),
+            "lon": np.linspace(2, 358, nlon),
+        },
+    )
+
+    cfg = _make_cfg(
+        chunking=ChunkingConfig(
+            chunk_time=chunk_time, shard_time=chunk_time, variable_batch_size=None
+        ),
+    )
+
+    out_path = str(tmp_path / "mixed.zarr")
+    with dask.config.set(scheduler="synchronous"):
+        write_zarr(ds, out_path, cfg)
+
+    written = xr.open_zarr(out_path, consolidated=True)
+    assert set(written.data_vars) == {"aligned", "luh2_forest"}
+    assert written["luh2_forest"].shape == (ntime, nlat, nlon)
+    written.close()
+
+
 def test_write_zarr_bounds_memory_with_variable_batching(tmp_path):
     """End-to-end integration test for the variable-batched write path.
 
