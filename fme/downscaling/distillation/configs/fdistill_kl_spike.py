@@ -29,11 +29,11 @@ C_OUT = int(os.environ.get("ACE_C_OUT", "1"))
 H_FINE = int(os.environ.get("ACE_H_FINE", "512"))
 W_FINE = int(os.environ.get("ACE_W_FINE", "512"))
 
-# Number of student steps.  Default 2; the 4-step run plateaued near teacher
-# initialization because real-data inputs + teacher-init student kept the VSD
-# gradient too small.  Override with ACE_STUDENT_STEPS to revisit 4-step or
-# try 1-step.
-STUDENT_STEPS = int(os.environ.get("ACE_STUDENT_STEPS", "2"))
+# Number of student steps.  Set to 1 to put fdistill in DMD2's regime
+# (training input = pure noise * sigma_max, no real-data signal) — exposes
+# whether multi-step training mode is itself the source of fdistill's
+# instability.  Override with ACE_STUDENT_STEPS to try other step counts.
+STUDENT_STEPS = int(os.environ.get("ACE_STUDENT_STEPS", "1"))
 
 
 def create_config():
@@ -63,12 +63,12 @@ def create_config():
 
     config.model.pretrained_model_path = TEACHER_CKPT_PATH
 
-    # Optimizers.  Tuned to 5e-6 (2.5× the original 2e-6) — 1e-5 found a real
-    # CRPS improvement by step 520 but then drifted past it; lr=5e-6 should
-    # land more gently and stay near the basin.
-    config.model.net_optimizer.lr = 5e-6
-    config.model.discriminator_optimizer.lr = 5e-6
-    config.model.fake_score_optimizer.lr = 5e-6
+    # Optimizers at lr=1e-5 — paired with STUDENT_STEPS=1 above this gives
+    # fdistill the same training-input distribution as DMD2 (pure noise *
+    # sigma_max), where the 1e-5 LR has been observed to train stably.
+    config.model.net_optimizer.lr = 1e-5
+    config.model.discriminator_optimizer.lr = 1e-5
+    config.model.fake_score_optimizer.lr = 1e-5
 
     # GAN loss weight — bumped from 1e-3 → 3e-3 to match DMD2.  Most of the
     # "push" off the teacher fixed point comes from the GAN term; at 1e-3 it

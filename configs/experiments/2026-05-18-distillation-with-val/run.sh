@@ -4,12 +4,31 @@
 # Saves best_student.ckpt (ACE format, by validation CRPS) into /results so
 # it is captured as a Beaker dataset artifact alongside the raw .pth files.
 #
-# Usage: ./run.sh <method>
-#   method: dmd2 | fdistill
+# Usage: ./run.sh <method> [--suffix <variant>]
+#   method:  dmd2 | fdistill
+#   suffix:  optional training-variant tag appended to JOB_NAME, e.g.
+#            "1step" → ace-downscaling-distillation-fdistill-with-val-1step.
+#            Useful when running multiple variants in parallel so each gets
+#            a distinct wandb run name.
 
 set -e
 
-METHOD="${1:?Usage: $0 <dmd2|fdistill>}"
+METHOD="${1:?Usage: $0 <dmd2|fdistill> [--suffix <variant>]}"
+shift
+
+SUFFIX=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --suffix)
+            SUFFIX="${2:?--suffix requires a value}"
+            shift 2
+            ;;
+        *)
+            echo "Unknown arg: $1" >&2
+            exit 1
+            ;;
+    esac
+done
 
 case "$METHOD" in
     dmd2)
@@ -26,7 +45,7 @@ case "$METHOD" in
         ;;
 esac
 
-JOB_NAME="ace-downscaling-distillation-${METHOD}-with-val"
+JOB_NAME="ace-downscaling-distillation-${METHOD}-with-val${SUFFIX:+-${SUFFIX}}"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
