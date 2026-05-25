@@ -1,0 +1,62 @@
+# Cloud-side 2-year pilot — Pangeo source.
+#
+# Iteration-friendly pilot used to validate the production pipeline
+# end-to-end on enough time to exercise prod-scale chunking and
+# multi-chunk write paths, without committing to the full 1940-2100
+# horizon. Pair with ``cmip6-multimodel-4deg-pilot-v4-esgf-cloud.yaml``.
+#
+# Key differences from ``cmip6-multimodel-4deg-pilot-cloud.yaml``
+# (the prior 1-year pilot):
+#
+# - 2 years per scenario instead of 1, so the streaming write
+#   crosses chunk boundaries and the cross-year stats reductions
+#   produce non-trivial values.
+# - Explicit ``chunking.chunk_time = 365`` matches what we expect
+#   to use in prod (year-sized inner chunks). The previous pilot
+#   used the dataclass default ``chunk_time = 1`` which happened
+#   to dodge the chunk-misalignment bugs that hit prod.
+# - Output lands in a fresh ``v0-pilot-v4/`` so the prior pilots'
+#   artefacts stay readable for comparison.
+
+inventory_path: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/inventory.csv
+output_directory: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v0-pilot-v4
+external_forcings_directory: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/external_forcings
+
+defaults:
+  time_subset:
+    historical: {start: "2010-01-01", end: "2011-12-31"}
+    ssp126: {start: "2015-01-01", end: "2016-12-31"}
+    ssp245: {start: "2015-01-01", end: "2016-12-31"}
+    ssp370: {start: "2015-01-01", end: "2016-12-31"}
+    ssp585: {start: "2015-01-01", end: "2016-12-31"}
+  chunking:
+    # 365-day inner chunks match the planned prod chunking. With 2
+    # years per dataset there are 2 inner chunks per variable, which
+    # is enough to exercise the multi-chunk write path that hit
+    # alignment bugs in the first prod attempt.
+    chunk_time: 365
+    shard_time: 365
+    variable_batch_size: 8
+
+selection:
+  exclude_source_ids:
+    # INM-CM4-8 publishes anomalously low ``zg`` at 10 hPa for a
+    # subset of grid cells, which collapses the derived layer-6 T
+    # to ~60 K (unphysical).
+    - INM-CM4-8
+    # AWI-CM-1-1-MR publishes 3D variables on a 19-level pressure
+    # grid (1, 5, 10, 20, 30, 50, 70, 100, 150, 200, 250, 300, 400,
+    # 500, 600, 700, 850, 925, 1000 hPa) — not the plev8 set the
+    # pipeline assumes. See report/README.md §2.
+    - AWI-CM-1-1-MR
+    # KACE-1-0-G has sparse NaN values at 10 hPa that propagate
+    # through and produce all-NaN model output.
+    - KACE-1-0-G
+  experiments: [historical, ssp126, ssp245, ssp370, ssp585]
+
+overrides:
+  - match:
+      source_id: CESM2-WACCM
+      experiment: historical
+      variant_label: r2i1p1f1
+    allow_dedupe: true
