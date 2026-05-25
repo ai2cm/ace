@@ -25,7 +25,22 @@ defaults:
 
 selection:
   exclude_source_ids:
+    # INM-CM4-8 publishes anomalously low ``zg`` at 10 hPa for a
+    # subset of grid cells, which collapses the derived layer-6 T
+    # to ~60 K (unphysical). See README's "Known model-side data
+    # quirks" and figures/inm_cm4_8_zg_top.png.
     - INM-CM4-8
+    # AWI-CM-1-1-MR publishes 3D variables on a non-standard plev
+    # grid (1, 5, 10, 20, 30, 50, 70, 100, 150, 200, 250, 300, 400,
+    # 500, 600, 700, 850, 925, 1000 hPa — not the plev8 set we
+    # assume), so the flattened per-level variable names
+    # (``ua5``, ``ua20``, ...) and the derived-layer variables
+    # (``ta_derived_layer_5_1``, ...) don't match the rest of the
+    # cohort. Mirror the Pangeo exclude.
+    - AWI-CM-1-1-MR
+    # KACE-1-0-G has sparse NaN values at 10 hPa that propagate to
+    # all-NaN model output. Mirror the Pangeo exclude.
+    - KACE-1-0-G
   experiments: [historical, ssp126, ssp245, ssp370, ssp585]
 
 overrides:
