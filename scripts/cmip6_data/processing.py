@@ -962,13 +962,16 @@ def write_zarr(ds: xr.Dataset, path: str, cfg: ResolvedDatasetConfig) -> None:
     # Align dask chunks on ``time`` with the zarr chunk size. Without
     # this, variables produced by ``causal_monthly_to_daily`` /
     # ``causal_annual_to_daily`` / ``attach_external_forcings`` end up
-    # with per-day dask chunks (size 1 along time), which zarr v3
-    # refuses to write because multiple dask chunks would land in the
-    # same zarr chunk ("would overlap multiple Dask chunks ... could
-    # lead to corrupted data"). Rechunking is cheap — variables that
-    # already have time-chunk ``chunk_time`` are a no-op; the small
-    # broadcast variables (LUH2 forest, monthly SO2/BC) get coalesced
-    # into ~MB-scale chunks per the target chunk size.
+    # with per-day dask chunks (size 1 along time), and others end up
+    # with leap-year boundaries shifting time chunks off ``chunk_time``
+    # multiples — zarr v3 refuses to write either pattern ("would
+    # overlap multiple Dask chunks ... could lead to corrupted data").
+    # ``ds.chunk({"time": chunk_time})`` handles the common cases;
+    # ``align_chunks=True`` on ``to_zarr`` is the safety net that
+    # rechunks anything still misaligned inside zarr itself. Under
+    # the synchronous scheduler, rechunking adjacent chunks holds at
+    # most a few extra chunks in memory at once, which for our
+    # F22.5-resolution variables is sub-MB.
     if "time" in ds.dims:
         ds = ds.chunk({"time": chunk_time})
 
@@ -997,7 +1000,14 @@ def write_zarr(ds: xr.Dataset, path: str, cfg: ResolvedDatasetConfig) -> None:
     if batch_size is None or batch_size >= len(data_vars):
         # Single-pass write — original behaviour.
         encoding = _encoding_for(data_vars + list(ds.coords))
-        ds.to_zarr(path, mode="w", encoding=encoding, consolidated=True, zarr_format=3)
+        ds.to_zarr(
+            path,
+            mode="w",
+            encoding=encoding,
+            consolidated=True,
+            zarr_format=3,
+            align_chunks=True,
+        )
         return
 
     batches = [
@@ -1012,6 +1022,7 @@ def write_zarr(ds: xr.Dataset, path: str, cfg: ResolvedDatasetConfig) -> None:
                 encoding=_encoding_for(batch_vars + list(sub.coords)),
                 consolidated=False,
                 zarr_format=3,
+                align_chunks=True,
             )
         else:
             sub.to_zarr(
@@ -1020,6 +1031,7 @@ def write_zarr(ds: xr.Dataset, path: str, cfg: ResolvedDatasetConfig) -> None:
                 encoding=_encoding_for(batch_vars),
                 consolidated=False,
                 zarr_format=3,
+                align_chunks=True,
             )
     # Single consolidated metadata pass after every batch has landed.
     import zarr
