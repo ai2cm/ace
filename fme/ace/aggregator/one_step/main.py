@@ -18,7 +18,7 @@ from fme.ace.stepper import TrainOutput
 from fme.core.dataset_info import DatasetInfo
 from fme.core.generics.aggregator import AggregatorABC
 from fme.core.tensors import fold_ensemble_dim, fold_sized_ensemble_dim
-from fme.core.typing_ import TensorMapping
+from fme.core.typing_ import EnsembleTensorDict, TensorMapping
 
 from .build_context import (
     Aggregator,
@@ -52,10 +52,12 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
     def __init__(
         self,
         deterministic_aggregator: OneStepDeterministicAggregator,
-        ensemble_aggregator: EnsembleAggregator | None = None,
+        ensemble_aggregators: dict[str, EnsembleAggregator] | None = None,
     ):
         self._deterministic_aggregator = deterministic_aggregator
-        self._ensemble_aggregator = ensemble_aggregator
+        self._ensemble_aggregators: dict[str, EnsembleAggregator] = (
+            ensemble_aggregators or {}
+        )
         self._ensemble_recorded = False
         self._per_step_losses = PerStepLossAggregator()
 
@@ -80,12 +82,17 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
                 normalize=batch.normalize,
             )
         )
-        if n_ensemble > 1 and self._ensemble_aggregator is not None:
-            self._ensemble_aggregator.record_batch(
-                target_data=batch.target_data,
-                gen_data=batch.gen_data,
-                i_time_start=0,
-            )
+        if n_ensemble > 1 and self._ensemble_aggregators:
+            target_data_norm = EnsembleTensorDict(batch.normalize(batch.target_data))
+            gen_data_norm = EnsembleTensorDict(batch.normalize(batch.gen_data))
+            for ensemble_aggregator in self._ensemble_aggregators.values():
+                ensemble_aggregator.record_batch(
+                    target_data=batch.target_data,
+                    gen_data=batch.gen_data,
+                    target_data_norm=target_data_norm,
+                    gen_data_norm=gen_data_norm,
+                    i_time_start=0,
+                )
             self._ensemble_recorded = True
 
     @torch.no_grad()
@@ -98,8 +105,11 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
         """
         deterministic_logs = self._deterministic_aggregator.get_logs(label)
         deterministic_logs.update(self._per_step_losses.get_logs(label))
-        if self._ensemble_recorded and self._ensemble_aggregator is not None:
-            stochastic_logs = self._ensemble_aggregator.get_logs(label)
+        if self._ensemble_recorded and self._ensemble_aggregators:
+            stochastic_logs: dict = {}
+            for agg_name, ensemble_aggregator in self._ensemble_aggregators.items():
+                for k, v in ensemble_aggregator.get_logs(label=agg_name).items():
+                    stochastic_logs[f"{label}/{k}"] = v
             if len(set(deterministic_logs.keys()) & set(stochastic_logs.keys())) > 0:
                 raise ValueError(
                     "Stochastic and deterministic logs have overlapping keys, "
@@ -149,7 +159,7 @@ def build_one_step_aggregator(
     )
 
     deterministic_aggregators: dict[str, Aggregator] = {}
-    ensemble_aggregator: EnsembleAggregator | None = None
+    ensemble_aggregators: dict[str, EnsembleAggregator] = {}
 
     for metric in metrics:
         name = metric.get_name()
@@ -166,12 +176,10 @@ def build_one_step_aggregator(
         if result.deterministic is not None:
             deterministic_aggregators[name] = result.deterministic
         if result.ensemble is not None:
-            if ensemble_aggregator is not None:
-                raise ValueError("Multiple ensemble metrics are not supported.")
-            ensemble_aggregator = result.ensemble
+            ensemble_aggregators[name] = result.ensemble
 
-    if ensemble_aggregator is None and include_default_ensemble:
-        ensemble_aggregator = get_one_step_ensemble_aggregator(
+    if not ensemble_aggregators and include_default_ensemble:
+        ensemble_aggregators["ensemble"] = get_one_step_ensemble_aggregator(
             gridded_operations=ctx.ops,
             target_time=1,
             metadata=ctx.variable_metadata,
@@ -186,7 +194,7 @@ def build_one_step_aggregator(
     )
     return OneStepAggregator(
         deterministic_aggregator=deterministic,
-        ensemble_aggregator=ensemble_aggregator,
+        ensemble_aggregators=ensemble_aggregators,
     )
 
 
@@ -208,7 +216,8 @@ class OneStepAggregatorConfig:
         power_spectrum: Spherical power spectrum metrics.
         snapshot: Snapshot image metrics.
         mean_map: Mean map image metrics.
-        ensemble: Ensemble spread metrics.
+        ensemble_denorm: Ensemble spread metrics on denormalized data.
+        ensemble_norm: Ensemble spread metrics on normalized data.
     """
 
     mean_denorm: OneStepMeanMetricConfig = dataclasses.field(
@@ -230,8 +239,13 @@ class OneStepAggregatorConfig:
     mean_map: OneStepMapMetricConfig = dataclasses.field(
         default_factory=OneStepMapMetricConfig
     )
-    ensemble: OneStepEnsembleMetricConfig = dataclasses.field(
-        default_factory=OneStepEnsembleMetricConfig
+    ensemble_denorm: OneStepEnsembleMetricConfig = dataclasses.field(
+        default_factory=lambda: OneStepEnsembleMetricConfig(target="denorm")
+    )
+    ensemble_norm: OneStepEnsembleMetricConfig = dataclasses.field(
+        default_factory=lambda: OneStepEnsembleMetricConfig(
+            target="norm", enabled=False
+        )
     )
 
     def __post_init__(self):
@@ -248,6 +262,16 @@ class OneStepAggregatorConfig:
             raise ValueError(
                 f"mean_norm.target must be 'norm', got '{self.mean_norm.target}'"
             )
+        if self.ensemble_denorm.target != "denorm":
+            raise ValueError(
+                f"ensemble_denorm.target must be 'denorm', "
+                f"got '{self.ensemble_denorm.target}'"
+            )
+        if self.ensemble_norm.target != "norm":
+            raise ValueError(
+                f"ensemble_norm.target must be 'norm', "
+                f"got '{self.ensemble_norm.target}'"
+            )
 
     def _get_metrics(self) -> list[OneStepMetricConfig]:
         all_metrics: list[OneStepMetricConfig] = [
@@ -256,7 +280,8 @@ class OneStepAggregatorConfig:
             self.power_spectrum,
             self.snapshot,
             self.mean_map,
-            self.ensemble,
+            self.ensemble_denorm,
+            self.ensemble_norm,
         ]
         return [m for m in all_metrics if m.enabled]
 
@@ -276,7 +301,7 @@ class OneStepAggregatorConfig:
             loss_scaling=loss_scaling,
             channel_mean_names=channel_mean_names,
             raise_on_unsupported=False,
-            include_default_ensemble=self.ensemble.enabled,
+            include_default_ensemble=False,
         )
 
 
