@@ -112,14 +112,20 @@ class BatchedPredictor(Generic[PS_I, FD_I, SD_I]):
         concat_forcing: Callable[[Sequence[FD_I]], FD_I],
         split_output: Callable[[SD_I, Sequence[int]], list[SD_I]],
         split_state: Callable[[PS_I, Sequence[int]], list[PS_I]],
-        sample_size_of: Callable[[FD_I], int],
+        sample_size_of_state: Callable[[PS_I], int],
     ):
+        """``sample_size_of_state`` returns the per-call sample count from the
+        initial condition. Take it from the IC, not the forcing, because some
+        steppers broadcast a small forcing up to a larger IC (e.g. per-IC
+        ensemble members) before stepping, and the split must match the
+        post-broadcast output.
+        """
         self._base_predict = base_predict
         self._concat_ic = concat_ic
         self._concat_forcing = concat_forcing
         self._split_output = split_output
         self._split_state = split_state
-        self._sample_size_of = sample_size_of
+        self._sample_size_of_state = sample_size_of_state
         self._pending_ic: list[PS_I] = []
         self._pending_forcing: list[FD_I] = []
         self._sample_sizes: list[int] = []
@@ -153,7 +159,7 @@ class BatchedPredictor(Generic[PS_I, FD_I, SD_I]):
         slot_id = len(self._pending_ic)
         self._pending_ic.append(initial_condition)
         self._pending_forcing.append(forcing)
-        self._sample_sizes.append(self._sample_size_of(forcing))
+        self._sample_sizes.append(self._sample_size_of_state(initial_condition))
         return PredictionPromise(self, slot_id)
 
     def _ensure_flushed(self) -> None:

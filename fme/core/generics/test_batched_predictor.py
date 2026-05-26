@@ -74,8 +74,8 @@ def _split_ps(item: FakePS, sample_sizes: Sequence[int]) -> list[FakePS]:
     return out
 
 
-def _sample_size_of(fd: FakeFD) -> int:
-    return len(fd.samples)
+def _sample_size_of_state(ps: FakePS) -> int:
+    return len(ps.samples)
 
 
 def _fake_predict(
@@ -100,7 +100,7 @@ def _make_predictor() -> BatchedPredictor[FakePS, FakeFD, FakeSD]:
         concat_forcing=_concat_fd,
         split_output=_split_sd,
         split_state=_split_ps,
-        sample_size_of=_sample_size_of,
+        sample_size_of_state=_sample_size_of_state,
     )
 
 

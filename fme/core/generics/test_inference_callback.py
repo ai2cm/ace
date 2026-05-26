@@ -93,7 +93,7 @@ def _make_predictor(stepper) -> BatchedPredictor:
         concat_forcing=_concat_fd,
         split_output=_split,
         split_state=_split,
-        sample_size_of=lambda fd: len(fd.samples),
+        sample_size_of_state=lambda ps: len(ps.samples),
     )
 
 
