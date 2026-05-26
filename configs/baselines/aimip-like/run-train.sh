@@ -62,6 +62,9 @@ run_training() {
 # run_training "train-1deg-6hourly-era5-only-co2.yaml" "train-1deg-6hourly-era5-only-co2-rs0" 4
 # run_training "train-1deg-daily-era5-only-co2.yaml" "train-1deg-daily-era5-only-co2-rs0" 4
 # run_training "train-1deg-daily-era5-only-tnorm.yaml" "train-1deg-daily-era5-only-rs0-tnorm" 4
-run_training "train-4deg-6hourly-era5-only.yaml" "train-4deg-6hourly-era5-only-rs0" 1
-run_training "train-1deg-6hourly-era5-only.yaml" "train-1deg-6hourly-era5-only-rs0" 4
-run_training "train-1deg-daily-era5-only.yaml" "train-1deg-daily-era5-only-rs0" 4
+# run_training "train-4deg-6hourly-era5-only.yaml" "train-4deg-6hourly-era5-only-rs0" 1
+# run_training "train-1deg-6hourly-era5-only.yaml" "train-1deg-6hourly-era5-only-rs0" 4
+# run_training "train-1deg-daily-era5-only.yaml" "train-1deg-daily-era5-only-rs0" 4
+run_training "train-4deg-daily-era5-only-shared-t.yaml" "train-4deg-daily-era5-only-rs0-shared-t" 1
+run_training "train-4deg-daily-era5-only-shared-t-append.yaml" "train-4deg-daily-era5-only-rs0-shared-t-append" 1
+run_training "train-4deg-daily-era5-only-perchan-append.yaml" "train-4deg-daily-era5-only-rs0-perchan-append" 1
