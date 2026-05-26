@@ -183,9 +183,9 @@ def test_per_channel_removes_correct_means():
     )
     result = transform.forward_transform(tensors, None)
     # a: [12 - 13, 14 - 13] = [-1, 1]
-    torch.testing.assert_close(result["a"], torch.tensor([[[-1.0, 1.0]]]))
+    torch.testing.assert_close(result["a"].cpu(), torch.tensor([[[-1.0, 1.0]]]))
     # b: [22 - 25, 28 - 25] = [-3, 3]
-    torch.testing.assert_close(result["b"], torch.tensor([[[-3.0, 3.0]]]))
+    torch.testing.assert_close(result["b"].cpu(), torch.tensor([[[-3.0, 3.0]]]))
 
 
 def test_per_channel_round_trip():
@@ -212,7 +212,7 @@ def test_per_channel_is_per_sample():
     result = transform.forward_transform(tensors, None)
     # sample 0: mean=15, sample 1: mean=150
     torch.testing.assert_close(
-        result["a"], torch.tensor([[[-5.0, 5.0]], [[-50.0, 50.0]]])
+        result["a"].cpu(), torch.tensor([[[-5.0, 5.0]], [[-50.0, 50.0]]])
     )
 
 
@@ -242,9 +242,9 @@ def test_per_channel_extra_channels():
     assert extra is not None
     assert extra.shape == (1, 2, 4, 4)
     # a: (14 - 10) / 2 = 2.0
-    torch.testing.assert_close(extra[:, 0], torch.full((1, 4, 4), 2.0))
+    torch.testing.assert_close(extra[:, 0].cpu(), torch.full((1, 4, 4), 2.0))
     # b: (25 - 20) / 5 = 1.0
-    torch.testing.assert_close(extra[:, 1], torch.full((1, 4, 4), 1.0))
+    torch.testing.assert_close(extra[:, 1].cpu(), torch.full((1, 4, 4), 1.0))
 
 
 def test_per_channel_with_field_names_subset():
@@ -256,9 +256,9 @@ def test_per_channel_with_field_names_subset():
     )
     result = transform.forward_transform(tensors, None)
     # a was shifted
-    torch.testing.assert_close(result["a"], torch.full((1, 4, 4), 0.0))
+    torch.testing.assert_close(result["a"].cpu(), torch.full((1, 4, 4), 0.0))
     # b was NOT shifted
-    torch.testing.assert_close(result["b"], torch.full((1, 4, 4), 25.0))
+    torch.testing.assert_close(result["b"].cpu(), torch.full((1, 4, 4), 25.0))
 
 
 def test_per_channel_masked_uses_zero():
@@ -271,9 +271,9 @@ def test_per_channel_masked_uses_zero():
     data_mask = {"a": torch.tensor([True, False])}
     result = transform.forward_transform(tensors, data_mask)
     # sample 0 (unmasked): mean=14, shifted to 0
-    torch.testing.assert_close(result["a"][0], torch.zeros(1, 2))
+    torch.testing.assert_close(result["a"][0].cpu(), torch.zeros(1, 2))
     # sample 1 (masked): mean→0, so no shift (14 - 0 = 14)
-    torch.testing.assert_close(result["a"][1], torch.full((1, 2), 14.0))
+    torch.testing.assert_close(result["a"][1].cpu(), torch.full((1, 2), 14.0))
 
     extra = transform.get_extra_channels()
     assert extra is not None
