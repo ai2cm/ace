@@ -1,25 +1,22 @@
 import dataclasses
+import functools
 import os
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
 import torch
 
 from fme.ace.aggregator import (
     InferenceEvaluatorAggregatorConfig,
+    LegacyFlagInferenceEvaluatorAggregatorConfig,
+    LegacyFlagOneStepAggregatorConfig,
     OneStepAggregatorConfig,
-    TypedMetricInferenceEvaluatorAggregatorConfig,
 )
-from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregator
 from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.batch_data import PrognosticState
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_gridded_data, get_inference_data
-from fme.ace.data_loading.gridded_data import (
-    ErrorInferenceData,
-    GriddedData,
-    InferenceGriddedData,
-)
+from fme.ace.data_loading.gridded_data import GriddedData, InferenceGriddedData
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.ace.stepper import TrainStepper
@@ -36,16 +33,45 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.lr_tuning import LRTuningConfig
-from fme.core.generics.trainer import EndOfBatchCallback, EndOfEpochCallback
+from fme.core.generics.trainer import EndOfBatchCallback
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import Optimization, OptimizationConfig
 from fme.core.rand import set_seed
-from fme.core.typing_ import Slice, TensorDict, TensorMapping
+from fme.core.typing_ import Slice
 from fme.core.weight_ops import CopyWeightsConfig
 
-AnyAggregatorConfig = (
-    InferenceEvaluatorAggregatorConfig | TypedMetricInferenceEvaluatorAggregatorConfig
-)
+
+@dataclasses.dataclass
+class InlineValidationConfig:
+    """
+    Parameters:
+        loader: configuration for the data loader used during validation
+        aggregator: configuration of validation aggregator.
+        name: name used as wandb log prefix and output subdirectory. If None,
+            defaults to "val" when there is a single validation config
+            and "val_{i}" when there are multiple. Note: adding a second
+            unnamed config will rename the first from "val" to
+            "val_0", changing its wandb keys and output directory.
+        weight: weight for this validation's loss in the combined checkpoint
+            selection metric. Must be non-negative.
+    """
+
+    loader: DataLoaderConfig
+    aggregator: OneStepAggregatorConfig | LegacyFlagOneStepAggregatorConfig = (
+        dataclasses.field(default_factory=lambda: OneStepAggregatorConfig())
+    )
+    name: str | None = None
+    weight: float = 1.0
+
+    def __post_init__(self):
+        if self.weight < 0:
+            raise ValueError(
+                f"InlineValidationConfig weight must be non-negative, got {self.weight}"
+            )
+
+    @property
+    def using_labels(self) -> bool:
+        return self.loader.using_labels
 
 
 @dataclasses.dataclass
@@ -59,6 +85,13 @@ class InlineInferenceConfig:
         n_ensemble_per_ic: number of initial condition based ensembles
         epochs: epochs on which to run inference. By default runs inference every epoch.
         aggregator: configuration of inline inference aggregator.
+        name: name used as wandb log prefix and output subdirectory. If None,
+            defaults to "inference" when there is a single inference config
+            and "inference_{i}" when there are multiple. Note: adding a second
+            unnamed config will rename the first from "inference" to
+            "inference_0", changing its wandb keys and output directory.
+        weight: weight for this inference's error in the combined checkpoint
+            selection metric. Must be non-negative.
     """
 
     loader: InferenceDataLoaderConfig
@@ -66,13 +99,28 @@ class InlineInferenceConfig:
     forward_steps_in_memory: int
     n_ensemble_per_ic: int = 1
     epochs: Slice = dataclasses.field(default_factory=lambda: Slice())
-    aggregator: AnyAggregatorConfig = dataclasses.field(
-        default_factory=lambda: InferenceEvaluatorAggregatorConfig(
-            log_global_mean_time_series=False, log_global_mean_norm_time_series=False
-        )
-    )
+    aggregator: (
+        InferenceEvaluatorAggregatorConfig
+        | LegacyFlagInferenceEvaluatorAggregatorConfig
+    ) = dataclasses.field(default_factory=lambda: InferenceEvaluatorAggregatorConfig())
+    name: str | None = None
+    weight: float = 1.0
 
     def __post_init__(self):
+        if self.weight < 0:
+            raise ValueError(
+                f"InlineInferenceConfig weight must be non-negative, got {self.weight}"
+            )
+        if (
+            self.weight > 0
+            and isinstance(self.aggregator, InferenceEvaluatorAggregatorConfig)
+            and not self.aggregator.time_mean_norm.enabled
+        ):
+            raise ValueError(
+                "time_mean_norm must be enabled when weight > 0, because "
+                "checkpoint selection requires the time_mean_norm/rmse/channel_mean "
+                "metric."
+            )
         dist = Distributed.get_instance()
         if self.loader.start_indices.n_initial_conditions % dist.world_size != 0:
             raise ValueError(
@@ -81,18 +129,6 @@ class InlineInferenceConfig:
                 f"{self.loader.start_indices.n_initial_conditions} and "
                 f"{dist.world_size}."
             )
-        if isinstance(self.aggregator, InferenceEvaluatorAggregatorConfig) and (
-            self.aggregator.log_global_mean_time_series
-            or self.aggregator.log_global_mean_norm_time_series
-        ):
-            # Both of log_global_mean_time_series and
-            # log_global_mean_norm_time_series must be False for inline inference.
-            self.aggregator.log_global_mean_time_series = False
-            self.aggregator.log_global_mean_norm_time_series = False
-
-        if isinstance(self.aggregator, InferenceEvaluatorAggregatorConfig):
-            for log_step_mean in self.aggregator.log_step_means:
-                log_step_mean.validate(self.n_forward_steps)
 
     @property
     def using_labels(self) -> bool:
@@ -118,23 +154,16 @@ class InlineInferenceConfig:
 
 
 @dataclasses.dataclass
-class AdditionalInferenceConfig:
-    name: str
-    config: InlineInferenceConfig
-
-    def __post_init__(self):
-        if not self.name:
-            raise ValueError("AdditionalInferenceConfig name must be non-empty.")
-
-
-@dataclasses.dataclass
 class TrainConfig:
     """
     Configuration for training a model.
 
     Arguments:
         train_loader: Configuration for the training data loader.
-        validation_loader: Configuration for the validation data loader.
+        validation: Configuration(s) for inline validation runs. Accepts a single
+            InlineValidationConfig or a list of them. The weighted sum of each
+            run's loss is used for checkpoint selection. Each entry can specify
+            a name (used as wandb log prefix) and weight.
         stepper: Configuration for the stepper.
         optimization: Configuration for the optimization.
         logging: Configuration for logging.
@@ -145,12 +174,10 @@ class TrainConfig:
             evaluation, and on catching a termination signal.
         experiment_dir: Directory where checkpoints and logs are saved. For the
             time being, this must be a local directory.
-        inference: Configuration for inline inference.
-            If None, no inline inference is run,
-            and no "best_inline_inference" checkpoint will be saved.
-        additional_inference: Configurations for additional inference runs.
-            Each entry has a name (used as wandb log prefix) and config.
-            Not used to select checkpoints, but used to provide metrics.
+        inference: Configuration(s) for inline inference runs. Accepts a single
+            InlineInferenceConfig or a list of them. The weighted sum of each
+            run's error is used for checkpoint selection. Each entry can specify
+            a name (used as wandb log prefix) and weight.
         stepper_training: Training-specific configuration including loss, ensemble
             settings, parameter initialization, and forward step scheduling.
         train_aggregator: Configuration for the train aggregator.
@@ -182,7 +209,6 @@ class TrainConfig:
             must be run in segments, e.g. due to wall clock limit.
         save_per_epoch_diagnostics: Whether to save per-epoch diagnostics from
             training, validation and inline inference aggregators.
-        validation_aggregator: Configuration for the validation aggregator.
         evaluate_before_training: Whether to run validation and inline inference before
             any training is done.
         save_best_inference_epoch_checkpoints: Whether to save a separate checkpoint
@@ -196,14 +222,16 @@ class TrainConfig:
     """
 
     train_loader: DataLoaderConfig
-    validation_loader: DataLoaderConfig
+    validation: InlineValidationConfig | list[InlineValidationConfig]
     stepper: StepperConfig | CheckpointStepperConfig
     optimization: OptimizationConfig
     logging: LoggingConfig
     max_epochs: int
     save_checkpoint: bool
     experiment_dir: str
-    inference: InlineInferenceConfig | None
+    inference: InlineInferenceConfig | list[InlineInferenceConfig] = dataclasses.field(
+        default_factory=list
+    )
     stepper_training: TrainStepperConfig = dataclasses.field(
         default_factory=lambda: TrainStepperConfig()
     )
@@ -215,9 +243,6 @@ class TrainConfig:
         default_factory=list
     )
     ema: EMAConfig = dataclasses.field(default_factory=lambda: EMAConfig())
-    additional_inference: list[AdditionalInferenceConfig] = dataclasses.field(
-        default_factory=list
-    )
     validate_using_ema: bool = False
     checkpoint_save_epochs: Slice | None = None
     ema_checkpoint_save_epochs: Slice | None = None
@@ -226,40 +251,46 @@ class TrainConfig:
     checkpoint_every_n_batches: int = 1000
     segment_epochs: int | None = None
     save_per_epoch_diagnostics: bool = False
-    validation_aggregator: OneStepAggregatorConfig = dataclasses.field(
-        default_factory=lambda: OneStepAggregatorConfig()
-    )
     evaluate_before_training: bool = False
     save_best_inference_epoch_checkpoints: bool = False
     lr_tuning: LRTuningConfig | None = None
     resume_results: ResumeResultsConfig | None = None
-    stepper_config: StepperConfig = dataclasses.field(init=False)
+
+    @functools.cached_property
+    def stepper_config(self) -> StepperConfig:
+        if isinstance(self.stepper, CheckpointStepperConfig):
+            return self.stepper.to_stepper_config()
+        return self.stepper
+
+    _RESERVED_NAMES = {"train", "val"}
 
     def __post_init__(self):
-        if isinstance(self.stepper, CheckpointStepperConfig):
-            self.stepper_config = self.stepper.to_stepper_config()
-        else:
-            self.stepper_config = self.stepper
-        if self.train_loader.using_labels != self.validation_loader.using_labels:
-            raise ValueError(
-                "train_loader and validation_loader must both use labels or both not "
-                "use labels"
-            )
-        if self.inference is not None and (
-            self.train_loader.using_labels != self.inference.using_labels
-        ):
-            raise ValueError(
-                "train_loader and inference loader must both use labels or both not "
-                "use labels"
-            )
-        additional_inference_names: set[str] = set()
-        for entry in self.additional_inference:
-            if entry.name in additional_inference_names:
-                raise ValueError(f"Duplicate additional_inference name: {entry.name!r}")
-            additional_inference_names.add(entry.name)
-            if self.train_loader.using_labels != entry.config.using_labels:
+        if not self.validation_list:
+            raise ValueError("At least one validation entry is required.")
+        resolved_validation_names = self.validation_names
+        if len(resolved_validation_names) != len(set(resolved_validation_names)):
+            raise ValueError(f"Duplicate validation names: {resolved_validation_names}")
+        for i, entry in enumerate(self.validation_list):
+            if self.train_loader.using_labels != entry.using_labels:
+                name = resolved_validation_names[i]
                 raise ValueError(
-                    f"train_loader and additional_inference {entry.name!r} loader "
+                    f"train_loader and validation {name!r} loader "
+                    "must both use labels or both not use labels"
+                )
+        resolved_inference_names = self.inference_names
+        if len(resolved_inference_names) != len(set(resolved_inference_names)):
+            raise ValueError(f"Duplicate inference names: {resolved_inference_names}")
+        reserved_overlap = set(resolved_inference_names) & self._RESERVED_NAMES
+        if reserved_overlap:
+            raise ValueError(
+                f"Inference names {sorted(reserved_overlap)} collide with "
+                f"reserved names {sorted(self._RESERVED_NAMES)}"
+            )
+        for i, inference_entry in enumerate(self.inference_list):
+            if self.train_loader.using_labels != inference_entry.using_labels:
+                inference_name = resolved_inference_names[i]
+                raise ValueError(
+                    f"train_loader and inference {inference_name!r} loader "
                     "must both use labels or both not use labels"
                 )
         if self.lr_tuning is not None and self.optimization.has_lr_schedule:
@@ -272,6 +303,7 @@ class TrainConfig:
                 f"During training, experiment_dir must currently be a local "
                 f"directory, got {self.experiment_dir!r}."
             )
+        self._validate_weighted_inference_epochs()
         if self.stepper_training.n_forward_steps is None:
             raise ValueError(
                 "n_forward_steps must be specified in stepper_training "
@@ -283,6 +315,21 @@ class TrainConfig:
                 "n_forward_steps is not None, is there a bug?"
             )
 
+    def _validate_weighted_inference_epochs(self):
+        epoch_sets = self.get_inference_epoch_sets()
+        weighted_epoch_set: set[int] | None = None
+        for entry, epoch_set in zip(self.inference_list, epoch_sets):
+            if entry.weight > 0:
+                if weighted_epoch_set is None:
+                    weighted_epoch_set = epoch_set
+                elif epoch_set != weighted_epoch_set:
+                    raise ValueError(
+                        "All inference entries with weight > 0 must share the same "
+                        "epoch schedule, so that the weighted checkpoint selection "
+                        "metric is comparable across epochs. Use weight=0 for "
+                        "supplementary entries that run on different epochs."
+                    )
+
     def set_random_seed(self):
         if self.seed is not None:
             set_seed(self.seed)
@@ -292,16 +339,42 @@ class TrainConfig:
         return self.train_evaluation_samples // self.train_loader.batch_size
 
     @property
-    def inference_n_forward_steps(self) -> int:
-        if self.inference is None:
-            return 0
-        return self.inference.n_forward_steps
+    def validation_list(self) -> list[InlineValidationConfig]:
+        if isinstance(self.validation, InlineValidationConfig):
+            return [self.validation]
+        return self.validation
 
     @property
-    def inference_aggregator(self) -> AnyAggregatorConfig | None:
-        if self.inference is None:
-            return None
-        return self.inference.aggregator
+    def validation_names(self) -> list[str]:
+        validation = self.validation_list
+        names = []
+        for i, entry in enumerate(validation):
+            if entry.name is not None:
+                names.append(entry.name)
+            elif len(validation) == 1:
+                names.append("val")
+            else:
+                names.append(f"val_{i}")
+        return names
+
+    @property
+    def inference_list(self) -> list[InlineInferenceConfig]:
+        if isinstance(self.inference, InlineInferenceConfig):
+            return [self.inference]
+        return self.inference
+
+    @property
+    def inference_names(self) -> list[str]:
+        inference = self.inference_list
+        names = []
+        for i, entry in enumerate(inference):
+            if entry.name is not None:
+                names.append(entry.name)
+            elif len(inference) == 1:
+                names.append("inference")
+            else:
+                names.append(f"inference_{i}")
+        return names
 
     @property
     def checkpoint_dir(self) -> str:
@@ -317,12 +390,19 @@ class TrainConfig:
         """
         return os.path.join(self.experiment_dir, "output")
 
-    def get_inference_epochs(self) -> list[int]:
-        if self.inference is None:
+    def get_inference_epoch_sets(self) -> list[set[int]]:
+        inference = self.inference_list
+        if not inference:
             return []
         start_epoch = 0 if self.evaluate_before_training else 1
         all_epochs = list(range(start_epoch, self.max_epochs + 1))
-        return all_epochs[self.inference.epochs.slice]
+        return [set(all_epochs[entry.epochs.slice]) for entry in inference]
+
+    def get_inference_epochs(self) -> list[int]:
+        epoch_sets = self.get_inference_epoch_sets()
+        if not epoch_sets:
+            return []
+        return sorted(set().union(*epoch_sets))
 
 
 class TrainBuilders:
@@ -353,29 +433,42 @@ class TrainBuilders:
             train=True,
         )
 
-    def get_validation_data(self) -> GriddedData:
-        data_requirements = self._get_train_window_data_requirements()
-        return get_gridded_data(
-            self.config.validation_loader,
-            requirements=data_requirements,
-            train=False,
-        )
-
-    def get_evaluation_inference_data(
+    def get_validation_data(
         self,
-    ) -> InferenceGriddedData:
-        if self.config.inference is None:
-            return ErrorInferenceData()  # type: ignore
-        else:
+    ) -> list[tuple[InlineValidationConfig, GriddedData, str]]:
+        data_requirements = self._get_train_window_data_requirements()
+        names = self.config.validation_names
+        entries: list[tuple[InlineValidationConfig, GriddedData, str]] = []
+        for entry, name in zip(self.config.validation_list, names):
+            data = get_gridded_data(
+                entry.loader,
+                requirements=data_requirements,
+                train=False,
+            )
+            entries.append((entry, data, name))
+        return entries
+
+    def get_inference_data(
+        self,
+        variable_metadata: Mapping[str, VariableMetadata],
+    ) -> list[tuple[InlineInferenceConfig, InferenceGriddedData, DatasetInfo, str]]:
+        names = self.config.inference_names
+        entries: list[
+            tuple[InlineInferenceConfig, InferenceGriddedData, DatasetInfo, str]
+        ] = []
+        for entry, name in zip(self.config.inference_list, names):
             window_requirements = (
                 self.config.stepper_config.get_evaluation_window_data_requirements(
-                    self.config.inference.forward_steps_in_memory
+                    entry.forward_steps_in_memory
                 )
             )
-            return self.config.inference.get_inference_data(
+            data = entry.get_inference_data(
                 window_requirements=window_requirements,
                 initial_condition=self.config.stepper_config.get_prognostic_state_data_requirements(),
             )
+            dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
+            entries.append((entry, data, dataset_info, name))
+        return entries
 
     def get_optimization(self, modules: torch.nn.ModuleList) -> Optimization:
         return self.config.optimization.build(modules, self.config.max_epochs)
@@ -416,62 +509,3 @@ class TrainBuilders:
 
             return copy_after_batch
         return lambda: None
-
-    def get_end_of_epoch_callback(
-        self,
-        inference_one_epoch: Callable[
-            [InferenceGriddedData, InferenceEvaluatorAggregator, str, int],
-            Mapping[str, Any],
-        ],
-        normalize: Callable[[TensorMapping], TensorDict],
-        output_dir: str,
-        variable_metadata: Mapping[str, VariableMetadata],
-        channel_mean_names: Sequence[str] | None,
-        save_diagnostics: bool,
-        n_ic_timesteps: int,
-    ) -> EndOfEpochCallback:
-        entries_data: list[
-            tuple[AdditionalInferenceConfig, InferenceGriddedData, DatasetInfo]
-        ] = []
-        for entry in self.config.additional_inference:
-            window_requirements = (
-                self.config.stepper_config.get_evaluation_window_data_requirements(
-                    entry.config.forward_steps_in_memory
-                )
-            )
-            data = entry.config.get_inference_data(
-                window_requirements=window_requirements,
-                initial_condition=self.config.stepper_config.get_prognostic_state_data_requirements(),
-            )
-            dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
-            entries_data.append((entry, data, dataset_info))
-
-        def end_of_epoch_ops(epoch: int) -> Mapping[str, Any]:
-            all_logs: dict[str, Any] = {}
-            for entry, data, dataset_info in entries_data:
-                if entry.config.epochs.contains(epoch):
-                    entry_output_dir = os.path.join(
-                        output_dir, "additional_inference", entry.name
-                    )
-                    aggregator = entry.config.aggregator.build(
-                        dataset_info=dataset_info,
-                        n_ic_steps=n_ic_timesteps,
-                        n_forward_steps=entry.config.n_forward_steps,
-                        initial_time=data.initial_time,
-                        normalize=normalize,
-                        output_dir=entry_output_dir,
-                        channel_mean_names=channel_mean_names,
-                        save_diagnostics=save_diagnostics,
-                        n_ensemble_per_ic=entry.config.n_ensemble_per_ic,
-                    )
-                    all_logs.update(
-                        inference_one_epoch(
-                            data,
-                            aggregator,
-                            entry.name,
-                            epoch,
-                        )
-                    )
-            return all_logs
-
-        return end_of_epoch_ops

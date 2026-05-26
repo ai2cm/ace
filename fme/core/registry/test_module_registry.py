@@ -156,6 +156,7 @@ def get_noise_conditioned_sfno_module() -> tuple[ModuleSelector, Module]:
             "operator_type": "dhconv",
             "affine_norms": True,
             "spectral_transform": "sht",
+            "label_embed_dim": 3,
         },
     )
     module = selector.build(

@@ -2,7 +2,6 @@ import dataclasses
 from collections.abc import Sequence
 from typing import Any, Literal
 
-import numpy as np
 import torch
 import xarray as xr
 
@@ -11,8 +10,13 @@ from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorMapping
 
-from ..inference.build_context import MetricBuildContext, maybe_filter
+from ..inference.build_context import (
+    MetricBuildContext,
+    MetricNotSupportedError,
+    maybe_filter,
+)
 from ..inference.data import InferenceBatchData, MetricBuildResult, SubAggregator
+from .build_context import OneStepBuildContext, OneStepMetricBuildResult
 from .reduced_metrics import AreaWeightedReducedMetric, ReducedMetric
 
 
@@ -92,7 +96,7 @@ class MeanAggregator:
         gen_data: TensorMapping,
         target_data_norm: TensorMapping | None = None,
         gen_data_norm: TensorMapping | None = None,
-        loss: torch.Tensor = torch.tensor(np.nan),
+        loss: float = float("nan"),
         i_time_start: int = 0,
     ):
         self._loss += loss
@@ -190,11 +194,12 @@ class OneStepMeanAdapter:
 @dataclasses.dataclass
 class StepMeanMetricConfig:
     step: int
-    type: Literal["step_mean"] = "step_mean"
     variables: list[str] | None = None
     name: str | None = None
     target: Literal["denorm", "norm"] = "denorm"
     channel_mean_names: list[str] | None = None
+    enabled: bool = True
+    strict: bool = False
 
     def __post_init__(self):
         if self.name is None:
@@ -206,7 +211,7 @@ class StepMeanMetricConfig:
 
     def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
         if self.step > ctx.n_forward_steps:
-            raise ValueError(
+            raise MetricNotSupportedError(
                 f"step_mean step {self.step} exceeds "
                 f"n_forward_steps={ctx.n_forward_steps}"
             )
@@ -228,3 +233,43 @@ class StepMeanMetricConfig:
             )
         )
         return MetricBuildResult(aggregator=maybe_filter(agg, self.variables))
+
+
+@dataclasses.dataclass
+class OneStepMeanMetricConfig:
+    name: str | None = None
+    target: Literal["denorm", "norm"] = "denorm"
+    include_bias: bool = True
+    include_grad_mag_percent_diff: bool = True
+    channel_mean_names: list[str] | None = None
+    enabled: bool = True
+    strict: bool = False
+
+    def __post_init__(self):
+        if self.name is None:
+            self.name = "mean" if self.target == "denorm" else "mean_norm"
+        if self.target == "norm":
+            if self.include_bias:
+                raise ValueError("include_bias is not supported when target='norm'.")
+            if self.include_grad_mag_percent_diff:
+                raise ValueError(
+                    "include_grad_mag_percent_diff is not supported "
+                    "when target='norm'."
+                )
+
+    def get_name(self) -> str:
+        return self.name  # type: ignore[return-value]
+
+    def build(self, ctx: OneStepBuildContext) -> OneStepMetricBuildResult:
+        agg = MeanAggregator(
+            ctx.ops,
+            target=self.target,
+            include_bias=self.include_bias,
+            include_grad_mag_percent_diff=self.include_grad_mag_percent_diff,
+            channel_mean_names=(
+                (self.channel_mean_names or ctx.channel_mean_names)
+                if self.target == "norm"
+                else None
+            ),
+        )
+        return OneStepMetricBuildResult(deterministic=agg)

@@ -1,3 +1,4 @@
+import typing
 from typing import Self
 
 import cftime
@@ -5,10 +6,28 @@ import torch
 import xarray as xr
 
 from fme.core.coordinates import LatLonCoordinates, NullVerticalCoordinate
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.dataset import DatasetABC, DatasetItem
 from fme.core.dataset.properties import DatasetProperties
-from fme.core.mask_provider import MaskProvider
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.typing_ import TensorMapping
+
+_DATASET_ITEM_FIELDS = ("data", "time", "labels", "epoch", "missing_names")
+
+
+def assert_dataset_item_length(item: DatasetItem):
+    n_type_args = len(typing.get_args(DatasetItem))
+    if len(item) != n_type_args:
+        raise AssertionError(
+            f"DatasetItem has {n_type_args} type args but item has "
+            f"{len(item)} elements."
+        )
+    if len(item) != len(_DATASET_ITEM_FIELDS):
+        raise AssertionError(
+            f"DatasetItem now has {len(item)} elements but "
+            f"_DATASET_ITEM_FIELDS only covers {len(_DATASET_ITEM_FIELDS)}. "
+            f"Update _DATASET_ITEM_FIELDS and the tests that use it."
+        )
 
 
 class MockDataset(DatasetABC):
@@ -31,21 +50,26 @@ class MockDataset(DatasetABC):
         labels: set[str] | None = None,
         properties: DatasetProperties | None = None,
         initial_epoch: int | None = None,
+        missing_names: frozenset[str] | None = None,
     ):
         self.labels = labels
         self.time = time
         self.data = data
         self._sample_n_times = sample_n_times
+        self.missing_names = missing_names
         if properties is not None:
             self._properties = properties
         else:
             self._properties = DatasetProperties(
-                variable_metadata={},
+                variable_metadata={
+                    name: VariableMetadata(units="", long_name="")
+                    for name in data.keys()
+                },
                 vertical_coordinate=NullVerticalCoordinate(),
                 horizontal_coordinates=LatLonCoordinates(
                     lon=torch.arange(0, 1), lat=torch.arange(0, 1)
                 ),
-                mask_provider=MaskProvider(),
+                spatial_mask_provider=SpatialMaskProvider(),
                 timestep=None,
                 is_remote=False,
                 all_labels=self.labels,
@@ -61,6 +85,7 @@ class MockDataset(DatasetABC):
         labels: set[str] | None = None,
         properties: DatasetProperties | None = None,
         initial_epoch: int | None = None,
+        missing_names: frozenset[str] | None = None,
     ) -> Self:
         time = xr.date_range(
             cls.START_DATE,
@@ -77,6 +102,7 @@ class MockDataset(DatasetABC):
             labels=labels,
             properties=properties,
             initial_epoch=initial_epoch,
+            missing_names=missing_names,
         )
 
     def __getitem__(self, index) -> DatasetItem:
@@ -99,7 +125,7 @@ class MockDataset(DatasetABC):
     def get_sample_by_time_slice(self, time_slice: slice) -> DatasetItem:
         data = {k: v[time_slice] for k, v in self.data.items()}
         time = xr.DataArray(self.time[time_slice], dims=["time"])
-        return data, time, self.labels, self.epoch
+        return data, time, self.labels, self.epoch, self.missing_names
 
     @property
     def properties(self) -> DatasetProperties:

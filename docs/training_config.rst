@@ -56,12 +56,12 @@ In that example dataset, the  ``.nc`` files would correspond to files like ``tra
    )
    # these paths are used in the documentation on this page
    # if they change then update the docs!
-   assert config.validation_loader.dataset.data_path == "validation"
+   assert config.validation_list[0].loader.dataset.data_path == "validation"
    assert config.train_loader.dataset.concat[0].data_path == "traindata/ic_0001"
    assert config.train_loader.dataset.concat[1].data_path == "traindata/ic_0002"
    assert config.train_loader.dataset.concat[9].data_path == "traindata/ic_0010"
    assert len(config.train_loader.dataset.concat) == 10
-   assert config.inference.loader.dataset.data_path == "validation"
+   assert config.inference[0].loader.dataset.data_path == "validation"
    print("Loaded successfully")
 
 .. testoutput::
@@ -100,6 +100,10 @@ The top-level sub-configurations are:
    :noindex:
 
 .. autoclass:: fme.ace.LoggingConfig
+   :show-inheritance:
+   :noindex:
+
+.. autoclass:: fme.ace.InlineValidationConfig
    :show-inheritance:
    :noindex:
 

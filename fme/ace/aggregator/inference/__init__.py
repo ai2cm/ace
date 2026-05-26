@@ -4,14 +4,16 @@ from .annual import AnnualMetricConfig
 from .enso.dynamic_index import EnsoIndexMetricConfig
 from .enso.enso_coefficient import EnsoCoefficientMetricConfig
 from .histogram import HistogramMetricConfig
+from .ipo.ipo_index import IpoIndexMetricConfig
 from .main import (
     InferenceAggregator,
     InferenceAggregatorConfig,
     InferenceEvaluatorAggregator,
     InferenceEvaluatorAggregatorConfig,
+    LegacyFlagInferenceEvaluatorAggregatorConfig,
     MetricConfig,
     StepMeanEntry,
-    TypedMetricInferenceEvaluatorAggregatorConfig,
+    build_inference_evaluator_aggregator,
 )
 from .reduced import MeanMetricConfig
 from .seasonal import SeasonalMetricConfig
