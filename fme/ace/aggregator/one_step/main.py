@@ -301,9 +301,7 @@ class OneStepAggregatorConfig:
             loss_scaling=loss_scaling,
             channel_mean_names=channel_mean_names,
             raise_on_unsupported=False,
-            include_default_ensemble=(
-                self.ensemble_denorm.enabled or self.ensemble_norm.enabled
-            ),
+            include_default_ensemble=False,
         )
 
 
