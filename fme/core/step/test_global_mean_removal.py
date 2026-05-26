@@ -268,7 +268,7 @@ def test_per_channel_masked_uses_zero():
     tensors = move_tensordict_to_device(
         {"a": torch.tensor([[[14.0, 14.0]], [[14.0, 14.0]]])}
     )
-    data_mask = {"a": torch.tensor([True, False])}
+    data_mask = move_tensordict_to_device({"a": torch.tensor([True, False])})
     result = transform.forward_transform(tensors, data_mask)
     # sample 0 (unmasked): mean=14, shifted to 0
     torch.testing.assert_close(result["a"][0].cpu(), torch.zeros(1, 2))

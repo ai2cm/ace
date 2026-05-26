@@ -73,6 +73,27 @@ class GlobalMeanRemoval(abc.ABC):
         """
 
 
+class NoGlobalMeanRemoval(GlobalMeanRemoval):
+    """No-op implementation used when global mean removal is disabled."""
+
+    @property
+    def n_extra_input_channels(self) -> int:
+        return 0
+
+    def forward_transform(
+        self,
+        input: TensorMapping,
+        data_mask: TensorMapping | None,
+    ) -> TensorDict:
+        return dict(input)
+
+    def inverse_transform(self, output: TensorDict) -> TensorDict:
+        return output
+
+    def get_extra_channels(self) -> torch.Tensor | None:
+        return None
+
+
 class SharedGlobalMeanRemoval(GlobalMeanRemoval):
     """Remove a single reference field's global mean from a set of fields.
 
