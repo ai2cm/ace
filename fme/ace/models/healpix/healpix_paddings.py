@@ -14,22 +14,45 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
+r"""
 HEALPix padding modules (earth2grid, karlbauer, isolatitude).
 
-         HEALPix                              Face order                 3D array representation
-                                                                            -----------------
---------------------------               //\\  //\\  //\\  //\\             |   |   |   |   |
-|| 0  |  1  |  2  |  3  ||              //  \\//  \\//  \\//  \\            |0  |1  |2  |3  |
-|\\  //\\  //\\  //\\  //|             /\\0 //\\1 //\\2 //\\3 //            -----------------
-| \\//  \\//  \\//  \\// |            // \\//  \\//  \\//  \\//             |   |   |   |   |
-|4//\\5 //\\6 //\\7 //\\4|            \\4//\\5 //\\6 //\\7 //\\             |4  |5  |6  |7  |
-|//  \\//  \\//  \\//  \\|             \\/  \\//  \\//  \\//  \\            -----------------
-|| 8  |  9  |  10 |  11  |              \\8 //\\9 //\\10//\\11//            |   |   |   |   |
---------------------------               \\//  \\//  \\//  \\//             |8  |9  |10 |11 |
-                                                                            -----------------
-                                    "\\" are top and bottom, whereas
-                                    "//" are left and right borders
+         HEALPix
+
+--------------------------
+|| 0  |  1  |  2  |  3  ||
+|\\  //\\  //\\  //\\  //|
+| \\//  \\//  \\//  \\// |
+|4//\\5 //\\6 //\\7 //\\4|
+|//  \\//  \\//  \\//  \\|
+|| 8  |  9  |  10 |  11  |
+--------------------------
+
+          Face order
+
+     //\\  //\\  //\\  //\\
+    //  \\//  \\//  \\//  \\
+   /\\0 //\\1 //\\2 //\\3 //
+  // \\//  \\//  \\//  \\//
+  \\4//\\5 //\\6 //\\7 //\\
+   \\/  \\//  \\//  \\//  \\
+    \\8 //\\9 //\\10//\\11//
+     \\//  \\//  \\//  \\//
+
+"\\" are top and bottom, whereas
+"//" are left and right borders
+
+3D array representation
+   -----------------
+   |   |   |   |   |
+   |0  |1  |2  |3  |
+   -----------------
+   |   |   |   |   |
+   |4  |5  |6  |7  |
+   -----------------
+   |   |   |   |   |
+   |8  |9  |10 |11 |
+   -----------------
 
 Details on the HEALPix can be found at https://iopscience.iop.org/article/10.1086/427976
 """
@@ -74,12 +97,12 @@ def make_hpx_padding_layer(
         Native face height/width. Required when ``hpx_padding_mode=="isolatitude"``;
         ignored otherwise.
 
-    Returns
+    Returns:
     -------
     torch.nn.Module
         ``HEALPixPaddingv2``, ``HEALPixPadding``, or ``HEALPixPaddingIsolatitude``.
 
-    Raises
+    Raises:
     ------
     ValueError
         Unknown mode, isolatitude without ``nside``, or earth2grid when earth2grid
@@ -134,7 +157,7 @@ class HEALPixFoldFaces(th.nn.Module):
         tensor : torch.Tensor
             Five-dimensional tensor with ``F`` HEALPix faces (typically ``F == 12``).
 
-        Returns
+        Returns:
         -------
         torch.Tensor
             Four-dimensional tensor with faces stacked on the batch axis. If
@@ -175,7 +198,7 @@ class HEALPixUnfoldFaces(th.nn.Module):
             Folded layout produced by ``HEALPixFoldFaces`` or equivalent; leading size
             must be divisible by ``num_faces``.
 
-        Returns
+        Returns:
         -------
         torch.Tensor
             Five-dimensional tensor with explicit face dimension ``F``.
@@ -189,12 +212,17 @@ class HEALPixUnfoldFaces(th.nn.Module):
 
 class HEALPixPaddingv2(th.nn.Module):
     """
-    Padding layer for data on a HEALPix sphere. This version uses a faster method to calculate the padding.
+    Padding layer for data on a HEALPix sphere. This version uses a faster method
+    to calculate the padding.
+
     The requirements for using this layer are as follows:
     - The last three dimensions are (face=12, height, width)
-    - The first four indices in the faces dimension [0, 1, 2, 3] are the faces on the northern hemisphere
-    - The second four indices in the faces dimension [4, 5, 6, 7] are the faces on the equator
-    - The last four indices in the faces dimension [8, 9, 10, 11] are the faces on the southern hemisphere
+    - The first four indices in the faces dimension [0, 1, 2, 3] are the faces
+      on the northern hemisphere
+    - The second four indices in the faces dimension [4, 5, 6, 7] are the faces
+      on the equator
+    - The last four indices in the faces dimension [8, 9, 10, 11] are the faces
+      on the southern hemisphere
 
     Orientation and arrangement of the HEALPix faces are outlined above.
     """
@@ -216,20 +244,20 @@ class HEALPixPaddingv2(th.nn.Module):
 
     def forward(self, x):  # pragma: no cover
         """
-        Pad each face consistently with its according neighbors in the HEALPix (see ordering and neighborhoods above).
-        Assumes the Tensor is folded
+        Pad each face consistently with its according neighbors in the HEALPix.
+        See ordering and neighborhoods above. Assumes the tensor is folded.
 
         Parameters
         ----------
         x : torch.Tensor
-            Folded input ``[N * 12, C, H, W]``; internally unfolded to 12 faces per batch.
+            Folded input ``[N * 12, C, H, W]``; internally unfolded to 12 faces
+            per batch.
 
-        Returns
+        Returns:
         -------
         torch.Tensor
             The padded tensor where each face's height and width are increased by 2*p
         """
-
         x = self.unfold(x)
         xp = self.padding(x)
         xp = self.fold(xp)
@@ -246,11 +274,15 @@ class HEALPixPadding(th.nn.Module):
 
     The requirements for using this layer are as follows:
     - The last three dimensions are (face=12, height, width)
-    - The first four indices in the faces dimension [0, 1, 2, 3] are the faces on the northern hemisphere
-    - The second four indices in the faces dimension [4, 5, 6, 7] are the faces on the equator
-    - The last four indices in the faces dimension [8, 9, 10, 11] are the faces on the southern hemisphere
+    - The first four indices in the faces dimension [0, 1, 2, 3] are the faces
+      on the northern hemisphere
+    - The second four indices in the faces dimension [4, 5, 6, 7] are the faces
+      on the equator
+    - The last four indices in the faces dimension [8, 9, 10, 11] are the faces
+      on the southern hemisphere
 
-    Orientation and arrangement of the HEALPix faces are outlined in the module docstring.
+    Orientation and arrangement of the HEALPix faces are outlined in the module
+    docstring.
     """
 
     def __init__(self, padding: int, enable_nhwc: bool = False):
@@ -284,7 +316,7 @@ class HEALPixPadding(th.nn.Module):
             Folded layout ``[N * 12, C, H, W]``. Internally reshaped to 12 faces per
             batch item before stitching.
 
-        Returns
+        Returns:
         -------
         torch.Tensor
             Folded layout ``[N * 12, C, H + 2*p, W + 2*p]`` where ``p`` is ``padding``.
@@ -398,7 +430,7 @@ class HEALPixPadding(th.nn.Module):
     ) -> th.Tensor:
         """
         Applies padding to a northern hemisphere face c under consideration of
-        its given neighbors according to the strategy of Karlbauer et al. (2024)
+        its given neighbors according to the strategy of Karlbauer et al. (2024).
 
         Parameters
         ----------
@@ -421,7 +453,7 @@ class HEALPixPadding(th.nn.Module):
         tr: torch.Tensor
             The top right neighboring face  tensor
 
-        Returns
+        Returns:
         -------
         torch.Tensor
             Padded face tensor ``c`` with border strips from neighbors.
@@ -432,7 +464,8 @@ class HEALPixPadding(th.nn.Module):
         # Vertical extent: top row from ``t`` (rotated), bottom from ``b``
         c = th.cat((t.rot90(1, d)[..., -p:, :], c, b[..., :p, :]), dim=-2)
 
-        # Horizontal strips: corners from ``tl`` / ``bl`` / ``tr`` / ``br``, edges from ``lft`` / ``rgt``
+        # Horizontal strips: corners from ``tl`` / ``bl`` / ``tr`` / ``br``,
+        # edges from ``lft`` / ``rgt``
         left = th.cat(
             (
                 tl.rot90(2, d)[..., -p:, -p:],
@@ -458,7 +491,8 @@ class HEALPixPadding(th.nn.Module):
         tr: th.Tensor,
     ) -> th.Tensor:
         """
-        Applies padding to an equatorial face c under consideration of its given neighbors.
+        Applies padding to an equatorial face c under consideration of its given
+        neighbors.
 
         Parameters
         ----------
@@ -481,7 +515,7 @@ class HEALPixPadding(th.nn.Module):
         tr: torch.Tensor
             The top right neighboring face  tensor
 
-        Returns
+        Returns:
         -------
         torch.Tensor
             Padded equatorial face ``c``.
@@ -531,7 +565,7 @@ class HEALPixPadding(th.nn.Module):
         tr: torch.Tensor
             The top right neighboring face  tensor
 
-        Returns
+        Returns:
         -------
         torch.Tensor
             Padded southern-hemisphere face ``c``.
@@ -561,7 +595,7 @@ class HEALPixPadding(th.nn.Module):
         lft: torch.Tensor
             The face left of the center face
 
-        Returns
+        Returns:
         -------
         torch.Tensor
             ``p x p`` top-left corner block for the equatorial ``tl`` slot.
@@ -598,7 +632,7 @@ class HEALPixPadding(th.nn.Module):
         r: torch.Tensor
             The face right of the center face
 
-        Returns
+        Returns:
         -------
         torch.Tensor
             ``p x p`` bottom-right corner block for the equatorial ``br`` slot.
@@ -620,8 +654,8 @@ class HEALPixPaddingIsolatitude(th.nn.Module):
     """
     Isolatitude HEALPix padding via **precomputed gather** indices.
 
-    Indices are derived once from ``isolatitude_pad_folded``, then each forward is a small
-    number of ``gather`` and average steps.
+    Indices are derived once from ``isolatitude_pad_folded``, then each forward
+    is a small number of ``gather`` and average steps.
     """
 
     def __init__(
@@ -645,28 +679,28 @@ class HEALPixPaddingIsolatitude(th.nn.Module):
         self.p = padding
         self.enable_nhwc = enable_nhwc
         if not isinstance(nside, int) or nside < 1:
-            raise ValueError(
-                f"nside must be a positive int, got {nside!r}"
-            )
+            raise ValueError(f"nside must be a positive int, got {nside!r}")
         self._nside = nside
         if not isinstance(padding, int) or padding < 1:
             raise ValueError(
                 f"invalid value for 'padding', expected int > 0 but got {padding}"
             )
         idx, valid = build_isolatitude_gather_index(padding, nside)
-        self.register_buffer("_index0", idx[0], persistent=False) # always 1
+        self.register_buffer("_index0", idx[0], persistent=False)  # always 1
         self.register_buffer("_index1", idx[1].clamp_min(0), persistent=False)
 
         # Boolean mask for the second gather source
         v1_bool = valid[1]
 
-        # Active positions in the 2nd gather source are extremely sparse, 
+        # Active positions in the 2nd gather source are extremely sparse,
         # get the indices of the active positions
         pos_v1 = th.nonzero(v1_bool, as_tuple=False).squeeze(1).to(dtype=th.long)
         self.register_buffer("_pos_v1", pos_v1, persistent=False)
         self.register_buffer(
             "_index1_pos_v1",
-            self._index1.index_select(0, pos_v1) if pos_v1.numel() > 0 else self._index1[:0],
+            self._index1.index_select(0, pos_v1)
+            if pos_v1.numel() > 0
+            else self._index1[:0],
             persistent=False,
         )
 
@@ -679,13 +713,12 @@ class HEALPixPaddingIsolatitude(th.nn.Module):
         data : torch.Tensor
             ``[N * 12, C, H, W]`` with ``H == W``.
 
-        Returns
+        Returns:
         -------
         torch.Tensor
             ``[N * 12, C, H + 2*p, W + 2*p]``; numerically aligned with the reference
             module for the same ``padding`` and ``H``.
         """
-
         BF, C, H, W = data.shape
         F = 12
         B = BF // F
@@ -695,10 +728,10 @@ class HEALPixPaddingIsolatitude(th.nn.Module):
         if H != self._nside:
             raise ValueError(
                 f"HEALPixPaddingIsolatitude expected face size H={self._nside} "
-                f"(from init), but input has H={H}. Make sure that nside was set correctly "
-                f"in the model config."
+                f"(from init), but input has H={H}. Make sure that nside was set "
+                f"correctly in the model config."
             )
-        
+
         x = data.reshape(B, F, C, H, W)
         flat = x.permute(0, 2, 1, 3, 4).reshape(B, C, F * H * W)
 
@@ -735,8 +768,10 @@ class HEALPixPaddingIsolatitude(th.nn.Module):
             out_flat = g0
 
         Hp, Wp = H + 2 * self.p, W + 2 * self.p
-        out = out_flat.reshape(B, C, F, Hp, Wp).permute(0, 2, 1, 3, 4).reshape(
-            BF, C, Hp, Wp
+        out = (
+            out_flat.reshape(B, C, F, Hp, Wp)
+            .permute(0, 2, 1, 3, 4)
+            .reshape(BF, C, Hp, Wp)
         )
         if self.enable_nhwc:
             out = out.to(memory_format=th.channels_last)
@@ -745,8 +780,9 @@ class HEALPixPaddingIsolatitude(th.nn.Module):
 
 
 # ------------------------------------------------------------
-# Isolatitude padding helper functions 
+# Isolatitude padding helper functions
 # ------------------------------------------------------------
+
 
 def kth_diag_indices(n: int, k: int) -> tuple[th.Tensor, th.Tensor]:
     """
@@ -759,7 +795,7 @@ def kth_diag_indices(n: int, k: int) -> tuple[th.Tensor, th.Tensor]:
     k : int
         Diagonal offset: ``0`` main, ``> 0`` above, ``< 0`` below.
 
-    Returns
+    Returns:
     -------
     tuple of torch.Tensor
         ``(rows, cols)`` such that ``matrix[rows, cols]`` selects that diagonal.
@@ -788,8 +824,9 @@ def _pn_isolat(
     """
     Isolatitude padding assembly for a **northern** hemisphere face (shared helper).
 
-    Applies along-edge rolls to ``t`` and ``lft`` after rotation so isolatitude lines
-    align across face boundaries, then concatenates border strips like ``HEALPixPadding.pn``.
+    Applies along-edge rolls to ``t`` and ``lft`` after rotation so isolatitude
+    lines align across face boundaries, then concatenates border strips like
+    ``HEALPixPadding.pn``.
 
     Parameters
     ----------
@@ -798,7 +835,8 @@ def _pn_isolat(
     d : tuple[int, int]
         Spatial dimensions used for ``rot90``.
     c, t, tl, lft, bl, b, br, rgt, tr : torch.Tensor
-        Central face and neighbor face tensors (same semantics as ``HEALPixPadding.pn``).
+        Central face and neighbor face tensors (same semantics as
+        ``HEALPixPadding.pn``).
     """
     t = t.rot90(1, dims=d)[..., -p:, :]
     for i in range(p):
@@ -829,14 +867,16 @@ def _pe_isolat(
     tr: th.Tensor,
 ) -> th.Tensor:
     """
-    Isolatitude padding for an **equatorial** face (no extra rolls on top/bottom strips).
+    Isolatitude padding for an **equatorial** face (no extra rolls on top/bottom
+    strips).
 
     Parameters
     ----------
     p : int
         Pad width per edge.
     c, t, tl, lft, bl, b, br, rgt, tr : torch.Tensor
-        Central face and neighbor face tensors (same semantics as ``HEALPixPadding.pe``).
+        Central face and neighbor face tensors (same semantics as
+        ``HEALPixPadding.pe``).
     """
     c = th.cat((t[..., -p:, :], c, b[..., :p, :]), dim=-2)
     left = th.cat((tl[..., -p:, -p:], lft[..., -p:], bl[..., :p, -p:]), dim=-2)
@@ -870,7 +910,8 @@ def _ps_isolat(
     d : tuple[int, int]
         Spatial dimensions used for ``rot90``.
     c, t, tl, lft, bl, b, br, rgt, tr : torch.Tensor
-        Central face and neighbor face tensors (same semantics as ``HEALPixPadding.ps``).
+        Central face and neighbor face tensors (same semantics as
+        ``HEALPixPadding.ps``).
     """
     b = b.rot90(1, d)[..., :p, :]
     for i in range(p):
@@ -892,8 +933,8 @@ def _tl_isolat(p: int, d: tuple[int, int], top: th.Tensor, lft: th.Tensor) -> th
     """
     Synthesize the missing **top-left** equatorial corner under isolatitude rules.
 
-    Fills a ``p x p`` block by averaging samples along diagonals from ``top`` and ``lft``,
-    then rotates to match the edge orientation expected by ``_pe_isolat``.
+    Fills a ``p x p`` block by averaging samples along diagonals from ``top`` and
+    ``lft``, then rotates to match the edge orientation expected by ``_pe_isolat``.
 
     Parameters
     ----------
@@ -925,7 +966,8 @@ def _br_isolat(p: int, d: tuple[int, int], b: th.Tensor, r: th.Tensor) -> th.Ten
     """
     Synthesize the missing **bottom-right** equatorial corner under isolatitude rules.
 
-    Same diagonal-averaging pattern as ``_tl_isolat``, mirrored for the bottom/right faces.
+    Same diagonal-averaging pattern as ``_tl_isolat``, mirrored for the bottom/right
+    faces.
 
     Parameters
     ----------
@@ -969,7 +1011,7 @@ def isolatitude_pad_folded(data: th.Tensor, p: int, enable_nhwc: bool) -> th.Ten
     enable_nhwc : bool
         If True, return channels-last memory format.
 
-    Returns
+    Returns:
     -------
     torch.Tensor
         Shape ``[N * 12, C, H + 2*p, W + 2*p]``.
@@ -1049,6 +1091,7 @@ def isolatitude_pad_folded(data: th.Tensor, p: int, enable_nhwc: bool) -> th.Ten
         res = res.to(memory_format=th.channels_last)
     return res
 
+
 def decode_two_channel_identity_to_linear_indices(
     y0: th.Tensor, y1: th.Tensor
 ) -> tuple[th.Tensor, th.Tensor]:
@@ -1066,7 +1109,7 @@ def decode_two_channel_identity_to_linear_indices(
     y1 : torch.Tensor
         Second recovered channel; same shape as ``y0``.
 
-    Returns
+    Returns:
     -------
     tuple of torch.Tensor
         ``(a, b)`` as ``int64``, same shape as ``y0``.
@@ -1081,9 +1124,7 @@ def decode_two_channel_identity_to_linear_indices(
     return a, b
 
 
-def build_isolatitude_gather_index(
-    p: int, H: int
-) -> tuple[th.Tensor, th.Tensor]:
+def build_isolatitude_gather_index(p: int, H: int) -> tuple[th.Tensor, th.Tensor]:
     """
     Precompute gather indices that reproduce ``isolatitude_pad_folded`` on flat data.
 
@@ -1093,11 +1134,12 @@ def build_isolatitude_gather_index(
     Parameters
     ----------
     p : int
-        Padding width (must be ``>= 1`` and compatible with face size; see ``_tl_isolat``).
+        Padding width (must be ``>= 1`` and compatible with face size;
+        see ``_tl_isolat``).
     H : int
         Native face height/width before padding.
 
-    Returns
+    Returns:
     -------
     index : torch.Tensor
         Shape ``[2, 12 * Hpad * Hpad]`` with ``Hpad = H + 2*p``. Row 0: first source
