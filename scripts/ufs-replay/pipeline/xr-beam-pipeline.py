@@ -33,6 +33,7 @@ import logging
 from typing import Sequence
 
 import apache_beam as beam
+import cftime as _cftime
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -418,16 +419,14 @@ def _match_time_type(dt, reference_time):
     inspects the actual time values in the dataset and converts
     accordingly.
     """
-    import cftime
-
-    if isinstance(reference_time, cftime.datetime):
+    if isinstance(reference_time, _cftime.datetime):
         # Match the exact cftime subclass used in the dataset
         cf_cls = type(reference_time)
         if isinstance(dt, cf_cls):
             return dt
         if isinstance(dt, (pd.Timestamp, datetime.datetime)):
             return cf_cls(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
-        if isinstance(dt, cftime.datetime):
+        if isinstance(dt, _cftime.datetime):
             return cf_cls(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
     # numpy datetime64 / pd.Timestamp index — just use pd.Timestamp
     if isinstance(dt, (pd.Timestamp, datetime.datetime)):
@@ -733,6 +732,17 @@ def _process_chunk(
             time=time_coarsen_factor, boundary="trim"
         ).mean()
         ds_levels = ds_levels.coarsen(time=time_coarsen_factor, boundary="trim").mean()
+        # Snap daily-mean time labels to 12Z (the natural midpoint of a day).
+        # coarsen().mean() averages the timestamps, giving 09Z for (00,06,12,18).
+        snapped = []
+        for t in ds_ocean_2d.time.values:
+            if isinstance(t, _cftime.datetime):
+                snapped.append(type(t)(t.year, t.month, t.day, 12, 0, 0))
+            else:
+                snapped.append(t)
+        ds_ocean_2d = ds_ocean_2d.assign_coords(time=snapped)
+        ds_levels = ds_levels.assign_coords(time=snapped)
+        ds_atmo_6h = ds_atmo_6h.assign_coords(time=snapped)
 
     # Extract forcing and ice variables
     forcing_names = [k for k in ATMO_FORCING_VARS if k in ds_atmo_6h]
@@ -1290,21 +1300,18 @@ def main():
     )
 
     # --- Output time coordinate ---
-    # Derive from the actual ocean times after coarsening so the cftime
-    # type and averaged values match what _process_chunk produces.
+    # Snap daily-mean time labels to 12Z to match _process_chunk.
     ocean_times = ds_ocean.time.values
     if time_coarsen_factor > 1:
-        # coarsen().mean() on cftime averages the timestamps, so we
-        # replicate that here to get the exact output times.
         n_out = len(ocean_times) // time_coarsen_factor
         output_time = []
         for i in range(n_out):
             group = ocean_times[i * time_coarsen_factor : (i + 1) * time_coarsen_factor]
-            # Average cftime by converting to seconds offset from first time
             ref = group[0]
-            offsets_s = [(t - ref).total_seconds() for t in group]
-            mean_offset = sum(offsets_s) / len(offsets_s)
-            output_time.append(ref + datetime.timedelta(seconds=mean_offset))
+            if isinstance(ref, _cftime.datetime):
+                output_time.append(type(ref)(ref.year, ref.month, ref.day, 12, 0, 0))
+            else:
+                output_time.append(ref)
     else:
         output_time = list(ocean_times)
 

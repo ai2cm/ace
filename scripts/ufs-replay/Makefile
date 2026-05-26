@@ -6,20 +6,21 @@ LOCAL_ENVIRONMENT ?= ufs-replay-ingest
 # Ocean (MOM6): 1993-12-31 18:00 to 2023-12-31 00:00
 # Atmo  (FV3):  1993-12-31 18:00 to 2023-10-13 03:00
 # Use the overlap: 1994-01-01 to 2023-10-12 (atmo is the binding constraint)
-START_TIME=1994-01-01T06:00:00
+# Start at 00Z so daily groups are (00,06,12,18) → centered at 12Z.
+START_TIME=1994-01-01T00:00:00
 END_TIME=2023-10-12T18:00:00
 OUTPUT_PATH_ONE_DEGREE=gs://vcm-ml-intermediate/ufs-replay-ocean-1deg-19level-1994-2023.zarr
 OUTPUT_GRID_ONE_DEGREE=F90
 
 # Test run parameters (Dataflow)
-START_TIME_TEST_RUN ?= 2023-10-01T06:00:00
+START_TIME_TEST_RUN ?= 2023-10-01T00:00:00
 END_TIME_TEST_RUN ?= 2023-10-12T18:00:00
 OUTPUT_PATH_TEST_RUN ?= gs://vcm-ml-scratch/ufs-replay-test/ocean-1deg.zarr
 OUTPUT_GRID_TEST_RUN ?= F90
 
 # Local debug parameters (just 1 day = 4 ocean timesteps → 1 daily output)
-START_TIME_LOCAL ?= 2023-10-01T06:00:00
-END_TIME_LOCAL ?= 2023-10-02T00:00:00
+START_TIME_LOCAL ?= 2023-10-01T00:00:00
+END_TIME_LOCAL ?= 2023-10-01T18:00:00
 OUTPUT_PATH_LOCAL ?= /tmp/ufs-replay-local-test.zarr
 
 create_environment:
