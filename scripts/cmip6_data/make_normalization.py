@@ -1,25 +1,39 @@
-"""Produce pooled normalization files for the CMIP6 daily pilot.
+"""Produce pooled + per-source normalization files for the CMIP6 daily pilot.
 
 Reads the processed zarrs and computes area-weighted global statistics
-pooled across source models.  For each source_id the **first ensemble
-member** (lowest ``variant_r``) is selected and both experiments
-(historical + ssp585, when available) are concatenated in time before
-computing per-model statistics.  Models are then averaged with equal
-weight.
+both pooled across source models (cross-source) **and** per source.
+For each source_id the **first ensemble member** (lowest ``variant_r``)
+is selected and its available experiments are concatenated in time
+before computing per-model statistics. Models are then averaged with
+equal weight to form the cross-source pooled stats.
+
+The ``--period`` argument selects one of the configured
+``stats_periods`` (default ``full``). The chosen period's time window
+is applied to every dataset's time axis before computing stats — so
+``--period 1940-2014`` produces stats over the historical era only,
+and pure-SSP datasets contribute nothing (no overlap → skipped).
 
 Outputs (into ``<output_directory>``):
 
-- ``centering.nc`` / ``scaling.nc`` — full-field global mean and std
-- ``residual_centering.nc`` / ``residual_scaling.nc`` — one-step-
-  difference global mean and std
-- ``time_mean_map.nc`` — per-variable time-mean spatial field
-  ``(lat, lon)``, averaged across models with equal weight
+- ``normalization_{period}/centering.nc`` / ``scaling.nc`` —
+  cross-source pooled global mean / std.
+- ``normalization_{period}/residual_centering.nc`` /
+  ``residual_scaling.nc`` — cross-source pooled one-step-difference
+  mean / std.
+- ``normalization_{period}/time_mean_map.nc`` — cross-source pooled
+  time-mean spatial field per variable.
+- ``per_source_normalization_{period}/<source_id>/centering.nc`` /
+  ``scaling.nc`` / ``residual_centering.nc`` / ``residual_scaling.nc``
+  — per-source variants, one set per source. Consumed by
+  ``fme.core.per_source_normalizer.PerSourceNormalizationConfig`` at
+  training time via the matching ``subdirectory:`` setting.
 
 All files carry global attributes describing provenance (source
-models, experiments, member selection, etc.).
+models, experiments, member selection, period window).
 
 Usage:
-    python make_normalization.py --config configs/pilot.yaml
+    python make_normalization.py --config configs/pilot.yaml \\
+        [--period full | 1940-2014 | 1979-2014]
 """
 
 import argparse
@@ -35,7 +49,8 @@ import xarray as xr
 
 sys.path.insert(0, str(Path(__file__).parent))
 from compute_stats import area_weights_2d  # noqa: E402
-from config import SURFACE_AND_OCEAN_VARIABLES, ProcessConfig  # noqa: E402
+from config import SURFACE_AND_OCEAN_VARIABLES, ProcessConfig, StatsPeriod  # noqa: E402
+from processing import clip_date_for_calendar  # noqa: E402
 
 # Mask variables produced by the pipeline — excluded from normalization
 # stats, since their semantics (0/1 valid-cell) shouldn't be standardised.
@@ -148,9 +163,50 @@ def _stats_for_var(
     }
 
 
-def _compute_model_stats(zarr_paths: list[str], w2d: np.ndarray) -> dict[str, dict]:
-    """Load zarrs for one model and compute per-variable stats."""
-    datasets = [xr.open_zarr(p, consolidated=True) for p in zarr_paths]
+def _slice_to_period(ds: xr.Dataset, period: StatsPeriod) -> xr.Dataset:
+    """Return ``ds`` restricted to ``period``'s ``[start, end]`` window.
+
+    Unbounded ends (``None``) leave that side open. Calendar-aware: a
+    360-day calendar's invalid ``YYYY-MM-31`` end-of-month strings are
+    clipped to day 30. Returns an empty (zero-time) Dataset when there
+    is no overlap.
+    """
+    if "time" not in ds.dims:
+        return ds
+    if period.start is None and period.end is None:
+        return ds
+    try:
+        calendar = str(ds["time"].dt.calendar)
+    except (AttributeError, TypeError):
+        calendar = "standard"
+    start = clip_date_for_calendar(period.start, calendar) if period.start else None
+    end = clip_date_for_calendar(period.end, calendar) if period.end else None
+    return ds.sel(time=slice(start, end))
+
+
+def _compute_model_stats(
+    zarr_paths: list[str],
+    w2d: np.ndarray,
+    period: StatsPeriod,
+) -> dict[str, dict]:
+    """Load zarrs for one model, slice to ``period``, and compute stats.
+
+    Datasets with no overlap on ``period`` (e.g. an ssp585 zarr when
+    ``period.start, period.end = 1940-01-01, 2014-12-31``) get an empty
+    time axis and are silently dropped from the contributing set.
+    """
+    datasets: list[xr.Dataset] = []
+    for p in zarr_paths:
+        ds = xr.open_zarr(p, consolidated=True)
+        sliced = _slice_to_period(ds, period)
+        if "time" in sliced.dims and sliced.sizes.get("time", 0) == 0:
+            ds.close()
+            continue
+        datasets.append(sliced)
+
+    if not datasets:
+        return {}
+
     all_vars: set[str] = set()
     for ds in datasets:
         all_vars |= set(_data_variables(ds))
@@ -201,14 +257,30 @@ def _pool_across_models(
 def _global_attrs(
     source_ids: list[str],
     members: dict[str, list[tuple[str, str]]],
+    period: StatsPeriod,
+    scope: str,
 ) -> dict[str, str]:
+    if scope == "pooled":
+        desc = (
+            "Cross-source pooled normalization statistics for the CMIP6 "
+            "daily pilot. Per-model stats computed on the first ensemble "
+            "member across available experiments, then averaged across "
+            "models with equal weight."
+        )
+    elif scope == "per_source":
+        desc = (
+            "Per-source normalization statistics for the CMIP6 daily pilot. "
+            "First ensemble member, all available experiments concatenated "
+            "in time, restricted to the configured period window."
+        )
+    else:
+        raise ValueError(f"unexpected scope {scope!r}")
     return {
-        "description": (
-            "Pooled normalization statistics for the CMIP6 daily pilot. "
-            "Per-model stats computed on the first ensemble member across "
-            "all available experiments, then averaged across models with "
-            "equal weight."
-        ),
+        "description": desc,
+        "scope": scope,
+        "period": period.name,
+        "period_start": period.start or "unbounded",
+        "period_end": period.end or "unbounded",
         "source_models": ", ".join(sorted(source_ids)),
         "n_source_models": str(len(source_ids)),
         "member_selection": "; ".join(
@@ -272,16 +344,96 @@ def _write_map_nc(
     logging.info("Wrote %s (%d variables)", path, len(data_vars))
 
 
+def _resolve_period(cfg: ProcessConfig, name: str) -> StatsPeriod:
+    """Look up a configured ``StatsPeriod`` by name."""
+    for p in cfg.defaults.stats_periods:
+        if p.name == name:
+            return p
+    available = [p.name for p in cfg.defaults.stats_periods]
+    raise ValueError(
+        f"unknown period {name!r}; available periods in config: {available}"
+    )
+
+
+def _write_per_source(
+    base_dir: str,
+    source_id: str,
+    stats: dict[str, dict],
+    attrs: dict[str, str],
+) -> None:
+    """Write a single source's stats as the same four scalar nc files
+    used for the cross-source pooled output. The per-source files live
+    at ``<base_dir>/<source_id>/{centering,scaling,residual_*}.nc`` —
+    the directory layout the training-side
+    ``PerSourceNormalizationConfig`` expects.
+
+    No ``time_mean_map.nc`` per source — pooled is the only useful
+    map (per-source map is just that source's time-mean, which
+    consumers can load from the zarr directly).
+    """
+    contributors_one = {var: [source_id] for var in stats}
+    _write_scalar_nc(
+        f"{base_dir}/{source_id}/centering.nc",
+        stats,
+        "mean",
+        contributors_one,
+        attrs,
+    )
+    _write_scalar_nc(
+        f"{base_dir}/{source_id}/scaling.nc",
+        stats,
+        "std",
+        contributors_one,
+        attrs,
+    )
+    _write_scalar_nc(
+        f"{base_dir}/{source_id}/residual_centering.nc",
+        stats,
+        "d1_mean",
+        contributors_one,
+        attrs,
+    )
+    _write_scalar_nc(
+        f"{base_dir}/{source_id}/residual_scaling.nc",
+        stats,
+        "d1_std",
+        contributors_one,
+        attrs,
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--config", required=True, help="Path to the process YAML (pilot.yaml)"
     )
+    parser.add_argument(
+        "--period",
+        default="full",
+        help=(
+            "Name of a ``StatsPeriod`` from ``defaults.stats_periods`` "
+            "in the config (default: ``full``). Output files land in "
+            "``{output_directory}/normalization_{period}/`` (cross-source "
+            "pooled) and ``{output_directory}/per_source_normalization_"
+            "{period}/<source_id>/`` (per-source)."
+        ),
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
     cfg = ProcessConfig.from_file(args.config)
+    period = _resolve_period(cfg, args.period)
+    logging.info(
+        "Computing normalization for period %r [%s, %s]",
+        period.name,
+        period.start or "unbounded",
+        period.end or "unbounded",
+    )
+
     out_dir = cfg.output_directory.rstrip("/")
+    pooled_dir = f"{out_dir}/normalization_{period.name}"
+    per_source_dir = f"{out_dir}/per_source_normalization_{period.name}"
+
     index_path = f"{out_dir}/index.csv"
     fs, rel = fsspec.core.url_to_fs(index_path)
     if not fs.exists(rel):
@@ -315,46 +467,66 @@ def main() -> None:
             .variant_label,
             ", ".join(exp_names),
         )
-        per_model[source_id] = _compute_model_stats(zarr_paths, w2d)
+        stats = _compute_model_stats(zarr_paths, w2d, period)
+        if stats:
+            per_model[source_id] = stats
+        else:
+            logging.info(
+                "    %s: no data in [%s, %s] for period %r; skipping",
+                source_id,
+                period.start or "-inf",
+                period.end or "+inf",
+                period.name,
+            )
 
+    if not per_model:
+        raise RuntimeError(
+            f"No source models contributed any data for period {period.name!r}; "
+            f"check the time_subset overlap with [{period.start}, {period.end}]"
+        )
+
+    # --- Cross-source pooled outputs ---
     pooled, contributors = _pool_across_models(per_model)
-    attrs = _global_attrs(list(members.keys()), members)
-
+    pooled_attrs = _global_attrs(list(per_model.keys()), members, period, "pooled")
     _write_scalar_nc(
-        f"{out_dir}/centering.nc",
-        pooled,
-        "mean",
-        contributors,
-        attrs,
+        f"{pooled_dir}/centering.nc", pooled, "mean", contributors, pooled_attrs
     )
     _write_scalar_nc(
-        f"{out_dir}/scaling.nc",
-        pooled,
-        "std",
-        contributors,
-        attrs,
+        f"{pooled_dir}/scaling.nc", pooled, "std", contributors, pooled_attrs
     )
     _write_scalar_nc(
-        f"{out_dir}/residual_centering.nc",
+        f"{pooled_dir}/residual_centering.nc",
         pooled,
         "d1_mean",
         contributors,
-        attrs,
+        pooled_attrs,
     )
     _write_scalar_nc(
-        f"{out_dir}/residual_scaling.nc",
+        f"{pooled_dir}/residual_scaling.nc",
         pooled,
         "d1_std",
         contributors,
-        attrs,
+        pooled_attrs,
     )
     _write_map_nc(
-        f"{out_dir}/time_mean_map.nc",
+        f"{pooled_dir}/time_mean_map.nc",
         pooled,
         contributors,
         lat,
         lon,
-        attrs,
+        pooled_attrs,
+    )
+
+    # --- Per-source outputs ---
+    for source_id, stats in sorted(per_model.items()):
+        per_src_attrs = _global_attrs(
+            [source_id], {source_id: members[source_id]}, period, "per_source"
+        )
+        _write_per_source(per_source_dir, source_id, stats, per_src_attrs)
+    logging.info(
+        "Wrote per-source stats for %d sources to %s/",
+        len(per_model),
+        per_source_dir,
     )
 
 

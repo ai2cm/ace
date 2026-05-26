@@ -80,6 +80,14 @@ spec:
       - - name: make-normalization
           when: "{{workflow.parameters.run_normalization}} == true"
           template: make-normalization
+          arguments:
+            parameters:
+            - name: period
+              value: "{{item}}"
+          withItems:
+          - full
+          - 1940-2014
+          - 1979-2014
       - - name: make-presence
           when: "{{workflow.parameters.run_stats}} == true"
           template: make-presence
@@ -329,9 +337,14 @@ spec:
             name: gcp-key-secret
 
     # ------------------------------------------------------------------
-    # make-normalization: pooled centering/scaling/time-mean files.
+    # make-normalization: pooled centering/scaling/time-mean + per-source
+    # files for one StatsPeriod (``full`` | ``1940-2014`` | ``1979-2014``).
+    # The entry-point loops over the three periods with ``withItems``.
     # ------------------------------------------------------------------
     - name: make-normalization
+      inputs:
+        parameters:
+        - name: period
       tolerations:
         - effect: NoSchedule
           key: dedicated
@@ -352,7 +365,8 @@ spec:
             {{workflow.parameters.config}}
             CONFIGEOF
 
-            python make_normalization.py --config config.yaml
+            python make_normalization.py --config config.yaml \
+                --period "{{inputs.parameters.period}}"
         env:
           - name: GOOGLE_APPLICATION_CREDENTIALS
             value: /secret/gcp-credentials/key.json
