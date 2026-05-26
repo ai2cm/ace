@@ -2,10 +2,10 @@
 
 set -e
 
-JOB_NAME="eval-global-trained-low-oversample8x-tropics-tmp2m-denoising-moe-events"
+JOB_NAME="eval-global-trained-low-oversample8x-downweight-tmp2m-denoising-moe-tropics"
 #JOB_NAME="eval-global-trained-denoising-moe-events"
 
-CONFIG_FILENAME="eval-coarse-prmsl-events.yaml"
+CONFIG_FILENAME="eval-coarse-prmsl-tropic-pac.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -22,7 +22,7 @@ NGPU=2
 IMAGE="$(cat latest_deps_only_image.txt)"
 
 EXISTING_RESULTS_DATASET_HIGH_SIGMA=01KRPP269PFM7G9EY8BWZ3AW04
-EXISTING_RESULTS_DATASET_LOW_SIGMA=01KRMB40EFK524BZE5HQ4EYWKJ
+EXISTING_RESULTS_DATASET_LOW_SIGMA=01KS3K5FXRNDC8W0JWH7AHG6BX
 wandb_group=""
 
 #--not-preemptible \

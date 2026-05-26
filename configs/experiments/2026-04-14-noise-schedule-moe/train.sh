@@ -6,8 +6,8 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-100km-to-3km-low-sigma-increase-cap-tmp2m"
-CONFIG_FILENAME="train-prmsl-multivar-high-sigma-oversample-increase-cap-tropics.yaml"
+JOB_NAME="xshield-downscaling-100km-to-3km-low-sigma-increase-cap"
+CONFIG_FILENAME="train-prmsl-multivar-low-sigma-oversample-increase-cap-tropics.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -26,7 +26,7 @@ gantry run \
     --name $JOB_NAME \
     --description 'Run downscaling 100km to 3km multivar training' \
     --workspace ai2/climate-titan \
-    --priority urgent \
+    --priority high \
     --cluster ai2/titan \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
