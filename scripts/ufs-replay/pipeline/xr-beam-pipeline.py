@@ -914,6 +914,7 @@ def process_ocean_chunk(
     key,
     ds_ocean_chunk,
     ds_atmo=None,
+    atmo_isel_map=None,
     output_grid=DEFAULT_OUTPUT_GRID,
     vertical_coarsening_indices=None,
     time_coarsen_factor=1,
@@ -923,20 +924,39 @@ def process_ocean_chunk(
     Called by ``beam.MapTuple`` for each time-chunk of ocean data.
     Loads the corresponding atmosphere data for the same time range.
     """
+    if atmo_isel_map is None:
+        atmo_isel_map = {}
     if vertical_coarsening_indices is None:
         vertical_coarsening_indices = DEFAULT_VERTICAL_COARSENING_INDICES
 
     logging.info("Processing ocean chunk at key=%s", key)
 
-    # Load the corresponding atmosphere time range.
-    # Ocean and atmo may use different cftime subclasses, so convert.
-    ocean_start = ds_ocean_chunk.time.values[0]
-    ocean_end = ds_ocean_chunk.time.values[-1]
-    atmo_ref = ds_atmo.time.values[0]
+    # Load the corresponding atmosphere time range using pre-computed
+    # integer index mapping (avoids cftime serialization/matching issues).
+    ocean_time_offset = key.offsets["time"]
+    if ocean_time_offset in atmo_isel_map:
+        atmo_slice = atmo_isel_map[ocean_time_offset]
+        ds_atmo_chunk = ds_atmo.isel(time=atmo_slice).load()
+    else:
+        logging.warning(
+            "No atmo_isel_map entry for ocean offset=%d, falling back to "
+            "time-based selection",
+            ocean_time_offset,
+        )
+        ocean_start = ds_ocean_chunk.time.values[0]
+        ocean_end = ds_ocean_chunk.time.values[-1]
+        atmo_ref = ds_atmo.time.values[0]
+        atmo_start = _match_time_type(ocean_start, atmo_ref) - datetime.timedelta(
+            hours=6
+        )
+        atmo_end = _match_time_type(ocean_end, atmo_ref) + datetime.timedelta(hours=3)
+        ds_atmo_chunk = ds_atmo.sel(time=slice(atmo_start, atmo_end)).load()
 
-    atmo_start = _match_time_type(ocean_start, atmo_ref) - datetime.timedelta(hours=6)
-    atmo_end = _match_time_type(ocean_end, atmo_ref) + datetime.timedelta(hours=3)
-    ds_atmo_chunk = ds_atmo.sel(time=slice(atmo_start, atmo_end)).load()
+    logging.info(
+        "Atmo chunk: %d timesteps for ocean offset=%d",
+        ds_atmo_chunk.sizes["time"],
+        ocean_time_offset,
+    )
 
     # Load ocean chunk
     ds_ocean_chunk = ds_ocean_chunk.load()
@@ -1226,6 +1246,49 @@ def main():
     ds_atmo = open_atmo(atmo_load_vars, atmo_start, atmo_end_padded)
     logging.info("Atmo dataset: %s", dict(ds_atmo.sizes))
 
+    # Pre-compute integer index mapping from ocean chunk offset → atmo
+    # time slice.  This avoids cftime type-matching issues on workers.
+    ocean_times_arr = ds_ocean.time.values
+    atmo_times_arr = ds_atmo.time.values
+    atmo_strs = [str(t) for t in atmo_times_arr]
+    atmo_isel_map = {}  # ocean_time_offset → slice(start, end)
+    pcs = args.process_time_chunksize
+    for chunk_idx in range(len(ocean_times_arr) // pcs):
+        ocean_offset = chunk_idx * pcs
+        ocean_chunk_start = ocean_times_arr[ocean_offset]
+        ocean_chunk_end = ocean_times_arr[ocean_offset + pcs - 1]
+        # Atmo window: 6h before first ocean time to 3h after last
+        a_start = ocean_chunk_start - datetime.timedelta(hours=6)
+        a_end = ocean_chunk_end + datetime.timedelta(hours=3)
+        a_start_str = str(a_start)
+        a_end_str = str(a_end)
+        # Find matching integer indices in atmo
+        idx_start = None
+        idx_end = None
+        for i, s in enumerate(atmo_strs):
+            if s >= a_start_str:
+                if idx_start is None:
+                    idx_start = i
+                if s <= a_end_str:
+                    idx_end = i
+        if idx_start is not None and idx_end is not None:
+            atmo_isel_map[ocean_offset] = slice(idx_start, idx_end + 1)
+        else:
+            logging.warning(
+                "Could not find atmo indices for ocean offset=%d "
+                "(ocean %s to %s, atmo window %s to %s)",
+                ocean_offset,
+                ocean_chunk_start,
+                ocean_chunk_end,
+                a_start,
+                a_end,
+            )
+    logging.info(
+        "Built atmo_isel_map with %d entries for %d ocean chunks",
+        len(atmo_isel_map),
+        len(ocean_times_arr) // pcs,
+    )
+
     # --- Output time coordinate ---
     # Derive from the actual ocean times after coarsening so the cftime
     # type and averaged values match what _process_chunk produces.
@@ -1274,6 +1337,7 @@ def main():
             | beam.MapTuple(
                 process_ocean_chunk,
                 ds_atmo=ds_atmo,
+                atmo_isel_map=atmo_isel_map,
                 output_grid=args.output_grid,
                 vertical_coarsening_indices=vert_indices,
                 time_coarsen_factor=time_coarsen_factor,
