@@ -177,7 +177,7 @@ NoiseConditionedSFNO = NoiseConditionedModel
 
 # this is based on the call signature of SphericalFourierNeuralOperatorNet at
 # https://github.com/NVIDIA/modulus/blob/b8e27c5c4ebc409e53adaba9832138743ede2785/modulus/models/sfno/sfnonet.py#L292  # noqa: E501
-@ModuleSelector.register("NoiseConditionedSFNO")
+@ModuleSelector.register("NoiseConditionedSFNO-v1")
 @dataclasses.dataclass
 class NoiseConditionedSFNOBuilder(ModuleConfig):
     """
@@ -368,4 +368,75 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             inverse_sht=inverse_sht,
             lmax=lmax,
             mmax=mmax,
+        )
+
+
+@ModuleSelector.register("NoiseConditionedSFNO")
+@dataclasses.dataclass
+class NoiseConditionedSFNOV0Builder(ModuleConfig):
+    """Backwards-compatible configuration for NoiseConditionedSFNO.
+
+    New configurations should use NoiseConditionedSFNO-v1 instead.
+    """
+
+    spectral_transform: Literal["sht"] = "sht"
+    filter_type: Literal["linear", "makani-linear"] = "linear"
+    operator_type: Literal["dhconv"] = "dhconv"
+    residual_filter_factor: int = 1
+    embed_dim: int = 256
+    noise_embed_dim: int = 256
+    context_pos_embed_dim: int = 0
+    label_embed_dim: int = 0
+    noise_type: Literal["isotropic", "gaussian"] = "gaussian"
+    global_layer_norm: bool = False
+    num_layers: int = 12
+    use_mlp: bool = True
+    mlp_ratio: float = 2.0
+    activation_function: str = "gelu"
+    encoder_layers: int = 1
+    pos_embed: bool = True
+    big_skip: bool = True
+    rank: float = 1.0
+    factorization: None = None
+    separable: bool = False
+    complex_network: bool = True
+    complex_activation: str = "real"
+    spectral_layers: int = 1
+    checkpointing: int = 0
+    data_grid: Literal["legendre-gauss", "equiangular"] = "legendre-gauss"
+    filter_residual: bool = False
+    filter_output: bool = False
+    local_blocks: list[int] | None = None
+    normalize_big_skip: bool = False
+    affine_norms: bool = False
+    filter_num_groups: int = 1
+    lora_rank: int = 0
+    lora_alpha: float | None = None
+    spectral_lora_rank: int = 0
+    spectral_lora_alpha: float | None = None
+    filter_preserves_global_mean: bool = False
+
+    def __post_init__(self):
+        if self.context_pos_embed_dim > 0 and self.pos_embed:
+            raise ValueError(
+                "context_pos_embed_dim and pos_embed should not both be set"
+            )
+        if self.factorization is not None:
+            raise ValueError("The 'factorization' parameter is no longer supported.")
+        if self.separable:
+            raise ValueError("The 'separable' parameter is no longer supported.")
+        if self.operator_type != "dhconv":
+            raise ValueError(
+                "Only 'dhconv' operator_type is supported for "
+                "NoiseConditionedSFNO models."
+            )
+
+    def build(
+        self,
+        n_in_channels: int,
+        n_out_channels: int,
+        dataset_info: DatasetInfo,
+    ):
+        return NoiseConditionedSFNOBuilder(**dataclasses.asdict(self)).build(
+            n_in_channels, n_out_channels, dataset_info
         )

@@ -21,7 +21,7 @@ import torch
 from torch import nn
 
 import fme
-from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
+from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOV0Builder
 from fme.ace.testing.fv3gfs_data import get_scalar_dataset
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
@@ -82,7 +82,7 @@ def get_single_module_noise_conditioned_selector(
                 builder=ModuleSelector(
                     type="NoiseConditionedSFNO",
                     config=dataclasses.asdict(
-                        NoiseConditionedSFNOBuilder(
+                        NoiseConditionedSFNOV0Builder(
                             embed_dim=4,
                             noise_embed_dim=4,
                             noise_type="isotropic",
@@ -165,7 +165,7 @@ def get_single_module_with_atmosphere_corrector_selector(
                 builder=ModuleSelector(
                     type="NoiseConditionedSFNO",
                     config=dataclasses.asdict(
-                        NoiseConditionedSFNOBuilder(
+                        NoiseConditionedSFNOV0Builder(
                             embed_dim=4,
                             noise_embed_dim=4,
                             noise_type="isotropic",

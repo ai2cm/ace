@@ -213,7 +213,7 @@ def _write_test_yaml_files(
 
     # Configure atmosphere network and loss based on crps_training
     if crps_training:
-        atmos_network_type = "NoiseConditionedSFNO"
+        atmos_network_type = "NoiseConditionedSFNO-v1"
         loss_type = "EnsembleLoss"
         loss_kwargs = "{'crps_weight': 1.0, 'energy_score_weight': 0.0}"
     else:

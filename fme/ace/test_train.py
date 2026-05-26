@@ -223,7 +223,7 @@ def _get_test_yaml_files(
             embed_dim=12,
         )
         spatial_dimensions_str = "latlon"
-    elif nettype == "NoiseConditionedSFNO":
+    elif nettype == "NoiseConditionedSFNO-v1":
         net_config = dict(
             num_layers=2,
             embed_dim=12,
@@ -235,7 +235,7 @@ def _get_test_yaml_files(
         else:
             spatial_dimensions_str = "latlon"
 
-    if nettype == "NoiseConditionedSFNO":
+    if nettype == "NoiseConditionedSFNO-v1":
         conditional = True
     else:
         conditional = False
@@ -646,7 +646,7 @@ class TrainAndInferenceTestSettings:
 _TRAIN_AND_INFERENCE_CASES = [
     pytest.param(
         TrainAndInferenceTestSettings(
-            nettype="NoiseConditionedSFNO",
+            nettype="NoiseConditionedSFNO-v1",
             crps_training=True,
             use_schedule=True,
         ),
@@ -672,7 +672,7 @@ _TRAIN_AND_INFERENCE_CASES = [
     ),
     pytest.param(
         TrainAndInferenceTestSettings(
-            nettype="NoiseConditionedSFNO",
+            nettype="NoiseConditionedSFNO-v1",
             use_variable_masking=True,
         ),
         id="SFNO-masking",
@@ -682,7 +682,7 @@ _TRAIN_AND_INFERENCE_CASES = [
     ),
     pytest.param(
         TrainAndInferenceTestSettings(
-            nettype="NoiseConditionedSFNO",
+            nettype="NoiseConditionedSFNO-v1",
             crps_training=True,
             use_schedule=True,
             validate_using_ema=True,
@@ -870,7 +870,7 @@ def _get_reproducible_trainer(config_dict, seed):
     return build_trainer(builders, config)
 
 
-@pytest.mark.parametrize("nettype", ["NoiseConditionedSFNO"])
+@pytest.mark.parametrize("nettype", ["NoiseConditionedSFNO-v1"])
 def test_set_seed(tmp_path, nettype, very_fast_only: bool):
     """Test that set_seed leads to identical training outcomes."""
     if very_fast_only:
@@ -900,7 +900,7 @@ def test_set_seed(tmp_path, nettype, very_fast_only: bool):
     )
 
 
-@pytest.mark.parametrize("nettype", ["NoiseConditionedSFNO"])
+@pytest.mark.parametrize("nettype", ["NoiseConditionedSFNO-v1"])
 @pytest.mark.parametrize("save_type", ["restart", "all"])
 def test_restore_checkpoint(
     tmp_path,

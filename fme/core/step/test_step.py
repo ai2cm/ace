@@ -159,7 +159,7 @@ def get_single_module_noise_conditioned_selector(
         config=dataclasses.asdict(
             SingleModuleStepConfig(
                 builder=ModuleSelector(
-                    type="NoiseConditionedSFNO",
+                    type="NoiseConditionedSFNO-v1",
                     config=dataclasses.asdict(
                         NoiseConditionedSFNOBuilder(
                             embed_dim=4,
@@ -204,7 +204,7 @@ def get_label_conditioned_selector(
         config=dataclasses.asdict(
             SingleModuleStepConfig(
                 builder=ModuleSelector(
-                    type="NoiseConditionedSFNO",
+                    type="NoiseConditionedSFNO-v1",
                     conditional=True,
                     config=dataclasses.asdict(
                         NoiseConditionedSFNOBuilder(
