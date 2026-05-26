@@ -70,7 +70,9 @@ class DownsamplingBlockConfig:
     hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid"
     nside: Optional[int] = None
     in_channels: Optional[int] = None
-    resample_filter: Sequence[float] = (1.0, 2.0, 1.0)
+    resample_filter: Sequence[float] = dataclasses.field(
+        default_factory=lambda: [1.0, 2.0, 1.0]
+    )
     stride: int = 2
 
     def downsample_spatial_factor(self) -> int:
@@ -315,7 +317,9 @@ class MaxPool(nn.Module):
         self,
         pooling: int = 2,
         enable_nhwc: bool = False,
-        hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
+        hpx_padding_mode: Literal[
+            "earth2grid", "karlbauer", "isolatitude"
+        ] = "earth2grid",
         nside: Optional[int] = None,
     ):
         """
@@ -350,7 +354,9 @@ class AvgPool(nn.Module):
         self,
         pooling: int = 2,
         enable_nhwc: bool = False,
-        hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
+        hpx_padding_mode: Literal[
+            "earth2grid", "karlbauer", "isolatitude"
+        ] = "earth2grid",
         nside: Optional[int] = None,
     ):
         """
@@ -397,7 +403,7 @@ class DealiasBlurConv2d(nn.Module):
         self,
         in_channels: int,
         stride: int = 1,
-        resample_filter: Sequence[float] = (1.0, 2.0, 1.0),
+        resample_filter: Sequence[float] | None = None,
         **kwargs,
     ):
         """
@@ -408,6 +414,8 @@ class DealiasBlurConv2d(nn.Module):
             **kwargs: Accepted for API compatibility; not used.
         """
         super().__init__()
+        if resample_filter is None:
+            resample_filter = [1.0, 2.0, 1.0]
         filt = tuple(float(x) for x in resample_filter)
         if len(filt) < 1:
             raise ValueError("resample_filter must be non-empty")
@@ -445,10 +453,12 @@ class DealiasedDownsample(nn.Module):
     def __init__(
         self,
         in_channels: int = 3,
-        resample_filter: Sequence[float] = (1.0, 2.0, 1.0),
+        resample_filter: Sequence[float] | None = None,
         stride: int = 2,
         enable_nhwc: bool = False,
-        hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
+        hpx_padding_mode: Literal[
+            "earth2grid", "karlbauer", "isolatitude"
+        ] = "earth2grid",
         nside: Optional[int] = None,
     ):
         """
@@ -461,6 +471,8 @@ class DealiasedDownsample(nn.Module):
             nside: Native face height/width for HEALPix padding.
         """
         super().__init__()
+        if resample_filter is None:
+            resample_filter = [1.0, 2.0, 1.0]
         filt = tuple(float(x) for x in resample_filter)
         m = len(filt)
         if m < 1:
@@ -524,7 +536,9 @@ class TransposedConvUpsample(nn.Module):
         upsampling: int = 2,
         activation: Optional[CappedGELUConfig] = None,
         enable_nhwc: bool = False,
-        hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
+        hpx_padding_mode: Literal[
+            "earth2grid", "karlbauer", "isolatitude"
+        ] = "earth2grid",
         nside: Optional[int] = None,
     ):
         """
@@ -610,18 +624,19 @@ class SmoothedInterpolate(nn.Module):
         Returns:
             Upsampled and smoothed tensor, optionally trimmed.
         """
-        self.smoother_kernel = self.smoother_kernel.to(
-            device=x.device, dtype=x.dtype
-        )
+        self.smoother_kernel = self.smoother_kernel.to(device=x.device, dtype=x.dtype)
 
         x = self.interp(x, scale_factor=self.scale_factor, mode=self.mode)
 
-        x = th.nn.functional.conv2d(
-            x,
-            self.smoother_kernel,
-            padding=0,
-            groups=self.in_channels,
-        ) / 4
+        x = (
+            th.nn.functional.conv2d(
+                x,
+                self.smoother_kernel,
+                padding=0,
+                groups=self.in_channels,
+            )
+            / 4
+        )
 
         if self.trim_size > 0:
             x = x[
@@ -646,7 +661,9 @@ class SmoothedInterpolateConv(nn.Module):
         mode: str = "nearest",
         activation: Optional[nn.Module] = None,
         enable_nhwc: bool = False,
-        hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
+        hpx_padding_mode: Literal[
+            "earth2grid", "karlbauer", "isolatitude"
+        ] = "earth2grid",
         nside: Optional[int] = None,
         nside_after: Optional[int] = None,
     ):
@@ -822,7 +839,9 @@ class ConvNeXtBlock(nn.Module):
         upscale_factor: int = 4,
         activation: Optional[CappedGELUConfig] = None,
         enable_nhwc: bool = False,
-        hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
+        hpx_padding_mode: Literal[
+            "earth2grid", "karlbauer", "isolatitude"
+        ] = "earth2grid",
         nside: Optional[int] = None,
     ):
         """
@@ -930,7 +949,9 @@ class DoubleConvNeXtBlock(nn.Module):
         latent_channels: int = 1,
         activation: Optional[CappedGELUConfig] = None,
         enable_nhwc: bool = False,
-        hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
+        hpx_padding_mode: Literal[
+            "earth2grid", "karlbauer", "isolatitude"
+        ] = "earth2grid",
         nside: Optional[int] = None,
     ):
         """
@@ -1099,7 +1120,9 @@ class SymmetricConvNeXtBlock(nn.Module):
         upscale_factor: int = 4,
         activation: Optional[CappedGELUConfig] = None,
         enable_nhwc: bool = False,
-        hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
+        hpx_padding_mode: Literal[
+            "earth2grid", "karlbauer", "isolatitude"
+        ] = "earth2grid",
         nside: Optional[int] = None,
     ):
         """
@@ -1215,7 +1238,9 @@ class Multi_SymmetricConvNeXtBlock(nn.Module):
         n_layers: int = 1,
         activation: Optional[CappedGELUConfig] = None,
         enable_nhwc: bool = False,
-        hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
+        hpx_padding_mode: Literal[
+            "earth2grid", "karlbauer", "isolatitude"
+        ] = "earth2grid",
         nside: Optional[int] = None,
     ):
         """
