@@ -448,7 +448,7 @@ class TestGetInferenceCallback:
             inference_epoch_sets = [{1} for _ in entries]
         stepper = MagicMock()
         with patch(
-            "fme.coupled.train.train.inference_one_epoch",
+            "fme.core.generics.trainer.inference_one_epoch",
             side_effect=inference_one_epoch_side_effect,
         ):
             callback = get_inference_callback(
@@ -482,14 +482,13 @@ class TestGetInferenceCallback:
         assert error == pytest.approx(2.0 * 0.4)
         assert "inference/time_mean_norm/rmse/channel_mean" in logs
 
-    def test_missing_metric_returns_none_error(self):
+    def test_weighted_entry_missing_metric_raises(self):
         entries = [self._make_entry("a", weight=1.0)]
-        logs, error = self._call(
-            entries,
-            [{"a/other_metric": 1.0}],
-        )
-        assert error is None
-        assert "a/other_metric" in logs
+        with pytest.raises(RuntimeError, match="did not produce expected metric key"):
+            self._call(
+                entries,
+                [{"a/other_metric": 1.0}],
+            )
 
     def test_multiple_weighted_entries(self):
         entries = [
