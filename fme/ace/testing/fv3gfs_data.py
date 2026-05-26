@@ -101,8 +101,9 @@ def save_nd_netcdf(
 def save_scalar_netcdf(
     filename,
     variable_names: list[str],
+    fill_value: float | None = None,
 ):
-    ds = get_scalar_dataset(variable_names)
+    ds = get_scalar_dataset(variable_names, fill_value=fill_value)
     ds.to_netcdf(filename, format="NETCDF4_CLASSIC")
 
 

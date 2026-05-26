@@ -1,10 +1,39 @@
 import sys
 
+from fme.ace.aggregator.inference.annual import AnnualMetricConfig
+from fme.ace.aggregator.inference.enso.dynamic_index import EnsoIndexMetricConfig
+from fme.ace.aggregator.inference.enso.enso_coefficient import (
+    EnsoCoefficientMetricConfig,
+)
+from fme.ace.aggregator.inference.histogram import HistogramMetricConfig
+from fme.ace.aggregator.inference.ipo.ipo_index import IpoIndexMetricConfig
 from fme.ace.aggregator.inference.main import (
+    InferenceEvaluatorAggregatorConfig,
     LegacyFlagInferenceEvaluatorAggregatorConfig,
     StepMeanEntry,
 )
-from fme.ace.aggregator.one_step import OneStepAggregatorConfig
+from fme.ace.aggregator.inference.reduced import MeanMetricConfig
+from fme.ace.aggregator.inference.seasonal import SeasonalMetricConfig
+from fme.ace.aggregator.inference.spectrum import PowerSpectrumMetricConfig
+from fme.ace.aggregator.inference.time_mean import TimeMeanMetricConfig
+from fme.ace.aggregator.inference.video import VideoMetricConfig
+from fme.ace.aggregator.inference.zonal_mean import ZonalMeanMetricConfig
+from fme.ace.aggregator.one_step import (
+    LegacyFlagOneStepAggregatorConfig,
+    OneStepAggregatorConfig,
+    build_one_step_aggregator,
+)
+from fme.ace.aggregator.one_step.ensemble import (
+    EnsembleMetricConfig,
+    OneStepEnsembleMetricConfig,
+)
+from fme.ace.aggregator.one_step.map import OneStepMapMetricConfig
+from fme.ace.aggregator.one_step.reduced import (
+    OneStepMeanMetricConfig,
+    StepMeanMetricConfig,
+)
+from fme.ace.aggregator.one_step.snapshot import OneStepSnapshotMetricConfig
+from fme.ace.aggregator.one_step.spectrum import OneStepSpectrumMetricConfig
 from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.augmentation import AugmentationConfig
 from fme.ace.data_loading.getters import get_forcing_data
@@ -23,7 +52,6 @@ from fme.ace.inference.data_writer import DataWriterConfig, FileWriterConfig
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.ace.inference.evaluator import (
     InferenceDataLoaderConfig,
-    InferenceEvaluatorAggregatorConfig,
     InferenceEvaluatorConfig,
     ValidationConfig,
     run_evaluator_from_config,
@@ -82,13 +110,13 @@ from fme.core.dataset.xarray import OverwriteConfig, XarrayDataConfig
 from fme.core.generics.lr_tuning import LRTuningConfig
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.loss import StepLossConfig
-from fme.core.masking import StaticMaskingConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import CheckpointConfig
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
 from fme.core.scheduler import SchedulerConfig, SequentialSchedulerConfig
+from fme.core.spatial_masking import StaticSpatialMaskingConfig
 from fme.core.step import (
     MultiCallStepConfig,
     SeparateRadiationStepConfig,
@@ -105,6 +133,7 @@ from .train.train_config import (
     DataLoaderConfig,
     EMAConfig,
     InlineInferenceConfig,
+    InlineValidationConfig,
     LoggingConfig,
     OptimizationConfig,
     TrainConfig,

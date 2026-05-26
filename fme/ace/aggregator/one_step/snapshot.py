@@ -1,3 +1,4 @@
+import dataclasses
 from collections.abc import Mapping
 
 import torch
@@ -8,6 +9,7 @@ from fme.core.typing_ import TensorMapping
 from fme.core.wandb import Image
 
 from ..plotting import plot_paneled_data
+from .build_context import OneStepBuildContext, OneStepMetricBuildResult
 
 
 class SnapshotAggregator:
@@ -155,3 +157,20 @@ class SnapshotAggregator:
                 attrs=metadata_attrs,
             )
         return ds
+
+
+@dataclasses.dataclass
+class OneStepSnapshotMetricConfig:
+    name: str = "snapshot"
+    enabled: bool = True
+    strict: bool = False
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: OneStepBuildContext) -> OneStepMetricBuildResult:
+        agg = SnapshotAggregator(
+            ctx.horizontal_coordinates.dims,
+            ctx.variable_metadata,
+        )
+        return OneStepMetricBuildResult(deterministic=agg)

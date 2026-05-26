@@ -13,7 +13,7 @@ DIR = os.path.abspath(os.path.dirname(__file__))
 from fme.ace.models.graphcast import GRAPHCAST_AVAIL
 from fme.ace.models.graphcast.main import GraphCast
 from fme.core.dataset_info import DatasetInfo
-from fme.core.mask_provider import MaskProvider
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 
 
 def dummy_datasetinfo(height: int, width: int) -> DatasetInfo:
@@ -30,14 +30,14 @@ def dummy_datasetinfo(height: int, width: int) -> DatasetInfo:
     mock_horizontal_coords.coords = {"lat": lat, "lon": lon}
     mock_horizontal_coords.meshgrid = (latT, lonT)
 
-    mask_provider = MaskProvider(
+    spatial_mask_provider = SpatialMaskProvider(
         masks={"mask_2d": torch.ones(height, width, dtype=torch.bool)}
     )
 
     # Create DatasetInfo with mocked components
     dataset_info = DatasetInfo(
         horizontal_coordinates=mock_horizontal_coords,
-        mask_provider=mask_provider,
+        spatial_mask_provider=spatial_mask_provider,
     )
 
     return dataset_info
