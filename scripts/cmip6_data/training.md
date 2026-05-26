@@ -42,7 +42,7 @@ Previously deferred items, now implemented:
   attribute.
 - ✅ Per-dataset multi-period stats: each pod writes its own
   `stats.nc` next to `data.zarr` covering the configured
-  `StatsPeriod`s (default: `full`, `1940-2014`, `1979-2015`). The
+  `StatsPeriod`s (default: `full`, `1940-2014`, `1979-2014`). The
   standalone `compute_stats.py` aggregates / gap-fills these into the
   cross-dataset `stats.csv`.
 

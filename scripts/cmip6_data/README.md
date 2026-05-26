@@ -658,8 +658,9 @@ records in `config.py`). The default set is three periods:
 - `full` — the dataset's full time range (always populated).
 - `1940-2014` — historical training window (populated on historical
   datasets, all-NaN on pure SSP datasets).
-- `1979-2015` — modern reanalysis window aligned with ERA5's
-  well-observed era.
+- `1979-2014` — modern reanalysis window aligned with ERA5's
+  well-observed era, ending with historical so the stats stay free
+  of SSP-scenario drift.
 
 Each per-dataset `stats.nc` carries a `period` dim; stat variables
 take the form `{var}__{stat}` with shape `(period,)` or

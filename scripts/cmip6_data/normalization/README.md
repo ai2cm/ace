@@ -85,14 +85,16 @@ shape (not just scale) varies wildly across models.
    monthly-interpolated forcings. Their `d1_std` is artificially low
    (smooth interpolation), so normalizing by `d1_std` would inflate
    them. They should probably use `std`, not `d1_std`.
-9. **Static fields.** `sftlf`, `orog` are time-invariant per cell. They
-   need normalization (orog is in meters, sftlf in 0–100%) but `d1_std`
-   is undefined. Per-cell mean/std collapse to the field itself, so
-   pooled (over space) mean/std is the natural choice.
-10. **Masks.** `below_surface_mask` and any `siconc_mask` are 0/1. Should
-    they be standardized at all, or passed through? A 0/1 mask
-    standardized by mean/std gives a bimodal input that's hard for the
-    network — likely better to leave as-is.
+9. **Static fields.** `land_fraction` (post-`clamp_static_fractions`,
+   0–1 dimensionless) and `HGTsfc` (`orog`, metres) are time-invariant
+   per cell. They need normalization but `d1_std` is undefined. Per-cell
+   mean/std collapse to the field itself, so pooled (over space)
+   mean/std is the natural choice.
+10. **Masks.** `below_surface_mask{1000,...,10}` and
+    `{simon,siday}_sea_ice_fraction_mask`, `oday_tos_mask`, etc. are
+    0/1 valid-cell indicators. Should they be standardized at all, or
+    passed through? A 0/1 mask standardized by mean/std gives a bimodal
+    input that's hard for the network — likely better to leave as-is.
 11. **Loss-side vs input-side.** Do we use the same scales for input
     normalization and loss weighting? They serve different purposes:
     inputs want "well-conditioned for the network", loss wants "physical
@@ -191,14 +193,15 @@ tasks.
    capacity here since model physics genuinely differ. Decision
    deferred until we look at how training behaves with shared scales
    first; cheapest baseline is "do nothing special, see if it bites".
-6. **Standardize statics (`sftlf`, `orog`) and forcings (`ts`,
-   `siconc`) using `std` rather than `d1_std`.** Forcings are
-   monthly-interpolated and have artificially low `d1_std`; statics
-   have undefined `d1_std`. (Q8 → resolved.)
-7. **Pass 0/1 masks (`below_surface_mask`, `siconc_mask`) through
-   un-normalized.** Standardizing a 0/1 field gives a bimodal input the
-   network has no easier time with; carrying it as 0/1 keeps semantics
-   for the network to use directly. (Q10 → resolved.)
+6. **Standardize statics (`land_fraction`, `HGTsfc`) and forcings
+   (`amon_ts`, `simon_sea_ice_fraction`) using `std` rather than
+   `d1_std`.** Forcings are monthly-interpolated and have artificially
+   low `d1_std`; statics have undefined `d1_std`. (Q8 → resolved.)
+7. **Pass 0/1 masks (`below_surface_mask{1000,...,10}`, the various
+   `{output_name}_mask` channels) through un-normalized.** Standardizing
+   a 0/1 field gives a bimodal input the network has no easier time
+   with; carrying it as 0/1 keeps semantics for the network to use
+   directly. (Q10 → resolved.)
 
 ## Outputs layout
 
