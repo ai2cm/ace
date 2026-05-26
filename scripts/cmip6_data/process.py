@@ -36,6 +36,7 @@ import dataclasses
 import json
 import logging
 import sys
+import time
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -427,6 +428,20 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
         status="pending",
     )
 
+    process_t0 = time.monotonic()
+
+    def _stage(label: str, t0: float) -> None:
+        """Record a per-stage wall-clock split. Logs the delta and the
+        cumulative since ``process_t0`` so the longest stages are
+        obvious without grep-summing the log."""
+        now = time.monotonic()
+        logging.info(
+            "  [stage %s] +%.1fs (cum %.1fs)",
+            label,
+            now - t0,
+            now - process_t0,
+        )
+
     try:
         # 1. Gate on required core variables. Missing variables are
         # tolerated up to ``cfg.max_core_missing``; the remaining ones
@@ -452,6 +467,7 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
         #    lats is empty). Per-variable regrid is safe but builds
         #    one xesmf ``Regridder`` per variable per method, ~30
         #    ESMF calls per dataset and dramatically slow.
+        stage_t0 = time.monotonic()
         #
         #    Compromise: bucket variables by their native grid
         #    fingerprint and regrid each bucket as one sub-dataset.
@@ -541,6 +557,8 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
             )
             return row
 
+        _stage("regrid_core (lazy graph build)", stage_t0)
+
         # 8. Static fields from fx — regrid once, drop time.
         static_ds: Optional[xr.Dataset] = None
         fx_zs = task.zstores.get("fx", {})
@@ -579,10 +597,12 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
         dask.config.set(scheduler="synchronous")
 
         # 9. Below-surface mask computed from the un-filled 3D fields.
+        stage_t0 = time.monotonic()
         orog: Optional[xr.DataArray] = None
         if static_ds is not None and "orog" in static_ds:
             orog = static_ds["orog"]
         mask, row.mask_source = compute_below_surface_mask(day_regridded, orog)
+        _stage("below_surface_mask", stage_t0)
 
         # 10. Derive layer-mean T from the un-filled zg + hus. Running
         # this on filled zg would force dz = 0 in below-surface columns
@@ -612,6 +632,7 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
         # causal previous-month-mean for ``monthly_causal``), and
         # filled+masked for ocean/sea-ice kinds. Variables whose source
         # table is not published for this dataset are silently absent.
+        stage_t0 = time.monotonic()
         #
         # Catch per-variable so one failure (e.g., a tripolar grid that
         # trips xesmf with ``ESMC_FieldRegridStore failed``) doesn't
@@ -692,6 +713,7 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
                 continue
             for name, da in outputs.items():
                 day_regridded[name] = da
+        _stage("surface_and_ocean_loop", stage_t0)
 
         # 14. Attach static fields (broadcast along time implicitly at read).
         # After clamp_static_fractions, the static set holds ``land_fraction``
@@ -794,6 +816,7 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
         # dask scheduler set above, each chunk is evaluated and
         # persisted in turn — peak memory stays at a single chunk × N
         # variables instead of the full dataset.
+        stage_t0 = time.monotonic()
         day_regridded.attrs["label"] = label
         day_regridded.attrs["source_id"] = task.source_id
         day_regridded.attrs["experiment"] = task.experiment
@@ -801,12 +824,14 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
         logging.info("  streaming zarr write...")
         write_zarr(day_regridded, zarr_path, cfg)
         row.variables_present = sorted(day_regridded.data_vars)
+        _stage("write_zarr", stage_t0)
 
         # 22. Compute per-dataset stats inline. We *re-open* the
         # just-written zarr rather than reusing the in-memory dataset
         # — the on-disk version is at target resolution (small) with
         # no upstream dask graph attached, so the stats pass scans it
         # cheaply without re-triggering any regrid work.
+        stage_t0 = time.monotonic()
         stats_path = zarr_path.rstrip("/").rsplit("/", 1)[0] + "/stats.nc"
         try:
             written = xr.open_zarr(zarr_path, consolidated=True)
@@ -826,9 +851,15 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
         except Exception as e:  # noqa: BLE001
             row.warnings.append(f"inline stats failed: {type(e).__name__}: {e}")
             logging.warning("  inline stats failed for %s: %s", zarr_path, e)
+        _stage("inline_stats", stage_t0)
 
         row.schema_version = SCHEMA_VERSION
         row.status = "ok"
+        logging.info(
+            "Finished %s in %.1fs total",
+            zarr_path,
+            time.monotonic() - process_t0,
+        )
         return row
 
     except Exception as e:  # noqa: BLE001

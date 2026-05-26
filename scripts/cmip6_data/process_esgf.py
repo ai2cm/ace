@@ -31,6 +31,7 @@ import dataclasses
 import json
 import logging
 import sys
+import time
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -473,12 +474,24 @@ def process_one_esgf(
         task.variant_label,
     )
 
+    process_t0 = time.monotonic()
+
+    def _stage(label: str, t0: float) -> None:
+        now = time.monotonic()
+        logging.info(
+            "  [stage %s] +%.1fs (cum %.1fs)",
+            label,
+            now - t0,
+            now - process_t0,
+        )
+
     try:
         target = make_target_grid(cfg.target_grid.name)
 
         # 1. Process all daily variables one at a time. Missing core
         # variables (up to ``cfg.max_core_missing``) are tolerated and
         # tracked as warnings.
+        stage_t0 = time.monotonic()
         all_day_vars = [
             v for v in cfg.core_variables if v in task.available_day_variables
         ] + [v for v in cfg.optional_variables if v in task.available_day_variables]
@@ -524,6 +537,8 @@ def process_one_esgf(
             row.skip_reason = "empty time after merge"
             cleanup_scratch_dir(scratch)
             return row
+
+        _stage("download_and_regrid_day_vars", stage_t0)
 
         # Capture native calendar.
         if "time" in day_regridded.dims:
@@ -575,10 +590,12 @@ def process_one_esgf(
         dask.config.set(scheduler="synchronous")
 
         # 5. Below-surface mask.
+        stage_t0 = time.monotonic()
         orog: Optional[xr.DataArray] = None
         if static_ds is not None and "orog" in static_ds:
             orog = static_ds["orog"]
         mask, row.mask_source = compute_below_surface_mask(day_regridded, orog)
+        _stage("below_surface_mask", stage_t0)
 
         # 6. Derived layer-mean T from un-filled zg + hus (only when
         # both are present).
@@ -601,6 +618,7 @@ def process_one_esgf(
         # ``_download_and_regrid_variable``; the post-regrid logic is
         # shared with the Pangeo pipeline via
         # ``finalize_surface_and_ocean_variable``.
+        stage_t0 = time.monotonic()
         daily_time = day_regridded["time"]
         for h in SURFACE_AND_OCEAN_VARIABLES:
             if h.output_name not in cfg.surface_and_ocean_variables:
@@ -661,6 +679,7 @@ def process_one_esgf(
                     f"{h.output_name} from {h.table_id}.{h.var_id} failed: "
                     f"{type(e).__name__}: {e}"
                 )
+        _stage("surface_and_ocean_loop", stage_t0)
 
         # 9. Attach static fields.
         if static_ds is not None:
@@ -744,6 +763,7 @@ def process_one_esgf(
                 logging.warning("  sanity: %s", msg)
 
         # 16. Stream-write the dataset to zarr.
+        stage_t0 = time.monotonic()
         day_regridded.attrs["label"] = label
         day_regridded.attrs["source_id"] = task.source_id
         day_regridded.attrs["experiment"] = task.experiment
@@ -752,10 +772,12 @@ def process_one_esgf(
         logging.info("  streaming zarr write...")
         write_zarr(day_regridded, zarr_path, cfg)
         row.variables_present = sorted(day_regridded.data_vars)
+        _stage("write_zarr", stage_t0)
 
         # 17. Inline per-dataset stats; re-open the just-written zarr
         # so the stats pass scans target-resolution data on disk
         # rather than triggering any upstream regrid work.
+        stage_t0 = time.monotonic()
         stats_path = zarr_path.rstrip("/").rsplit("/", 1)[0] + "/stats.nc"
         try:
             written = xr.open_zarr(zarr_path, consolidated=True)
@@ -775,9 +797,15 @@ def process_one_esgf(
         except Exception as e:  # noqa: BLE001
             row.warnings.append(f"inline stats failed: {type(e).__name__}: {e}")
             logging.warning("  inline stats failed for %s: %s", zarr_path, e)
+        _stage("inline_stats", stage_t0)
 
         row.schema_version = SCHEMA_VERSION
         row.status = "ok"
+        logging.info(
+            "Finished %s in %.1fs total",
+            zarr_path,
+            time.monotonic() - process_t0,
+        )
 
     except Exception as e:  # noqa: BLE001
         logging.exception("Processing failed for %s", zarr_path)

@@ -10,7 +10,7 @@
 # ~415 (model, experiment, member) datasets, ~11.5 TB on disk.
 
 inventory_path: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/inventory.csv
-output_directory: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v1
+output_directory: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2
 # Externals (CO2/SO2/BC/LUH2) live under a version-independent
 # subdirectory so subsequent v0/v1/... runs all reuse the same
 # staged copy. Bump only when external_forcings.py changes.
@@ -23,6 +23,19 @@ defaults:
     ssp245: {start: "2015-01-01", end: "2100-12-31"}
     ssp370: {start: "2015-01-01", end: "2100-12-31"}
     ssp585: {start: "2015-01-01", end: "2100-12-31"}
+  chunking:
+    # Inner zarr v3 chunk: 360 days (matches 360_day calendars cleanly,
+    # ~1 year of data for noleap/standard too). The dataclass default
+    # of 1 produces millions of sub-shard tasks under the synchronous
+    # dask scheduler — see v5 pilot vs. b4nvt profiling. We will be
+    # converting to netCDF downstream, so read-amplification at
+    # training time isn't a concern here.
+    chunk_time: 360
+    # Outer shard: 7200 days ≈ 20 years. With 86-yr ssp datasets
+    # that's ~5 shards per variable instead of ~86 with shard_time=365.
+    # Larger shards = fewer GCS object writes.
+    shard_time: 7200
+    variable_batch_size: 8
 
 selection:
   exclude_source_ids:

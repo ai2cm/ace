@@ -16,6 +16,7 @@ Data-source-agnostic helpers used by both the Pangeo pipeline
 
 import logging
 import re
+import time
 from typing import Hashable, Optional
 
 import numpy as np
@@ -1048,10 +1049,20 @@ def write_zarr(ds: xr.Dataset, path: str, cfg: ResolvedDatasetConfig) -> None:
 
     data_vars = list(ds.data_vars)
     batch_size = getattr(cfg.chunking, "variable_batch_size", None)
+    n_time = ds.sizes.get("time", 0)
+    logging.info(
+        "  write_zarr: %d data_vars, batch_size=%s, chunk_time=%d, "
+        "shard_time=%s, n_time=%d",
+        len(data_vars),
+        batch_size,
+        chunk_time,
+        shard_time,
+        n_time,
+    )
 
     if batch_size is None or batch_size >= len(data_vars):
-        # Single-pass write — original behaviour.
         encoding = _encoding_for(data_vars + list(ds.coords))
+        t0 = time.monotonic()
         ds.to_zarr(
             path,
             mode="w",
@@ -1060,13 +1071,20 @@ def write_zarr(ds: xr.Dataset, path: str, cfg: ResolvedDatasetConfig) -> None:
             zarr_format=3,
             align_chunks=True,
         )
+        logging.info(
+            "  write_zarr: single-pass write of %d vars in %.1fs",
+            len(data_vars),
+            time.monotonic() - t0,
+        )
         return
 
     batches = [
         data_vars[i : i + batch_size] for i in range(0, len(data_vars), batch_size)
     ]
+    write_t0 = time.monotonic()
     for i, batch_vars in enumerate(batches):
         sub = ds[batch_vars]
+        batch_t0 = time.monotonic()
         if i == 0:
             sub.to_zarr(
                 path,
@@ -1085,10 +1103,25 @@ def write_zarr(ds: xr.Dataset, path: str, cfg: ResolvedDatasetConfig) -> None:
                 zarr_format=3,
                 align_chunks=True,
             )
+        logging.info(
+            "  write_zarr: batch %d/%d (%d vars: %s) in %.1fs",
+            i + 1,
+            len(batches),
+            len(batch_vars),
+            ",".join(batch_vars),
+            time.monotonic() - batch_t0,
+        )
     # Single consolidated metadata pass after every batch has landed.
     import zarr
 
+    consolidate_t0 = time.monotonic()
     zarr.consolidate_metadata(path)
+    logging.info(
+        "  write_zarr: total %d batches in %.1fs (consolidate %.2fs)",
+        len(batches),
+        time.monotonic() - write_t0,
+        time.monotonic() - consolidate_t0,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -6,7 +6,7 @@
 # Pairs with the Pangeo-side ``cmip6-multimodel-4deg-1940-2100-cloud.yaml``
 # and writes into the same ``output_directory``.
 
-output_directory: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v1
+output_directory: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2
 # See the Pangeo prod config for rationale. Shared across versions
 # so externals are staged once.
 external_forcings_directory: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/external_forcings
@@ -22,6 +22,11 @@ defaults:
     ssp245: {start: "2015-01-01", end: "2100-12-31"}
     ssp370: {start: "2015-01-01", end: "2100-12-31"}
     ssp585: {start: "2015-01-01", end: "2100-12-31"}
+  chunking:
+    # See the Pangeo prod config for rationale.
+    chunk_time: 360
+    shard_time: 7200
+    variable_batch_size: 8
 
 selection:
   exclude_source_ids:
