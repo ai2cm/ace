@@ -9,6 +9,7 @@ import torch
 from fme.ace.aggregator import (
     InferenceEvaluatorAggregatorConfig,
     LegacyFlagInferenceEvaluatorAggregatorConfig,
+    LegacyFlagOneStepAggregatorConfig,
     OneStepAggregatorConfig,
 )
 from fme.ace.aggregator.train import TrainAggregatorConfig
@@ -38,6 +39,39 @@ from fme.core.optimization import Optimization, OptimizationConfig
 from fme.core.rand import set_seed
 from fme.core.typing_ import Slice
 from fme.core.weight_ops import CopyWeightsConfig
+
+
+@dataclasses.dataclass
+class InlineValidationConfig:
+    """
+    Parameters:
+        loader: configuration for the data loader used during validation
+        aggregator: configuration of validation aggregator.
+        name: name used as wandb log prefix and output subdirectory. If None,
+            defaults to "val" when there is a single validation config
+            and "val_{i}" when there are multiple. Note: adding a second
+            unnamed config will rename the first from "val" to
+            "val_0", changing its wandb keys and output directory.
+        weight: weight for this validation's loss in the combined checkpoint
+            selection metric. Must be non-negative.
+    """
+
+    loader: DataLoaderConfig
+    aggregator: OneStepAggregatorConfig | LegacyFlagOneStepAggregatorConfig = (
+        dataclasses.field(default_factory=lambda: OneStepAggregatorConfig())
+    )
+    name: str | None = None
+    weight: float = 1.0
+
+    def __post_init__(self):
+        if self.weight < 0:
+            raise ValueError(
+                f"InlineValidationConfig weight must be non-negative, got {self.weight}"
+            )
+
+    @property
+    def using_labels(self) -> bool:
+        return self.loader.using_labels
 
 
 @dataclasses.dataclass
@@ -126,7 +160,10 @@ class TrainConfig:
 
     Arguments:
         train_loader: Configuration for the training data loader.
-        validation_loader: Configuration for the validation data loader.
+        validation: Configuration(s) for inline validation runs. Accepts a single
+            InlineValidationConfig or a list of them. The weighted sum of each
+            run's loss is used for checkpoint selection. Each entry can specify
+            a name (used as wandb log prefix) and weight.
         stepper: Configuration for the stepper.
         optimization: Configuration for the optimization.
         logging: Configuration for logging.
@@ -172,7 +209,6 @@ class TrainConfig:
             must be run in segments, e.g. due to wall clock limit.
         save_per_epoch_diagnostics: Whether to save per-epoch diagnostics from
             training, validation and inline inference aggregators.
-        validation_aggregator: Configuration for the validation aggregator.
         evaluate_before_training: Whether to run validation and inline inference before
             any training is done.
         save_best_inference_epoch_checkpoints: Whether to save a separate checkpoint
@@ -186,7 +222,7 @@ class TrainConfig:
     """
 
     train_loader: DataLoaderConfig
-    validation_loader: DataLoaderConfig
+    validation: InlineValidationConfig | list[InlineValidationConfig]
     stepper: StepperConfig | CheckpointStepperConfig
     optimization: OptimizationConfig
     logging: LoggingConfig
@@ -215,9 +251,6 @@ class TrainConfig:
     checkpoint_every_n_batches: int = 1000
     segment_epochs: int | None = None
     save_per_epoch_diagnostics: bool = False
-    validation_aggregator: OneStepAggregatorConfig = dataclasses.field(
-        default_factory=lambda: OneStepAggregatorConfig()
-    )
     evaluate_before_training: bool = False
     save_best_inference_epoch_checkpoints: bool = False
     lr_tuning: LRTuningConfig | None = None
@@ -232,25 +265,32 @@ class TrainConfig:
     _RESERVED_NAMES = {"train", "val"}
 
     def __post_init__(self):
-        if self.train_loader.using_labels != self.validation_loader.using_labels:
-            raise ValueError(
-                "train_loader and validation_loader must both use labels or both not "
-                "use labels"
-            )
-        resolved_names = self.inference_names
-        if len(resolved_names) != len(set(resolved_names)):
-            raise ValueError(f"Duplicate inference names: {resolved_names}")
-        reserved_overlap = set(resolved_names) & self._RESERVED_NAMES
+        if not self.validation_list:
+            raise ValueError("At least one validation entry is required.")
+        resolved_validation_names = self.validation_names
+        if len(resolved_validation_names) != len(set(resolved_validation_names)):
+            raise ValueError(f"Duplicate validation names: {resolved_validation_names}")
+        for i, entry in enumerate(self.validation_list):
+            if self.train_loader.using_labels != entry.using_labels:
+                name = resolved_validation_names[i]
+                raise ValueError(
+                    f"train_loader and validation {name!r} loader "
+                    "must both use labels or both not use labels"
+                )
+        resolved_inference_names = self.inference_names
+        if len(resolved_inference_names) != len(set(resolved_inference_names)):
+            raise ValueError(f"Duplicate inference names: {resolved_inference_names}")
+        reserved_overlap = set(resolved_inference_names) & self._RESERVED_NAMES
         if reserved_overlap:
             raise ValueError(
                 f"Inference names {sorted(reserved_overlap)} collide with "
                 f"reserved names {sorted(self._RESERVED_NAMES)}"
             )
-        for i, entry in enumerate(self.inference_list):
-            if self.train_loader.using_labels != entry.using_labels:
-                name = resolved_names[i]
+        for i, inference_entry in enumerate(self.inference_list):
+            if self.train_loader.using_labels != inference_entry.using_labels:
+                inference_name = resolved_inference_names[i]
                 raise ValueError(
-                    f"train_loader and inference {name!r} loader "
+                    f"train_loader and inference {inference_name!r} loader "
                     "must both use labels or both not use labels"
                 )
         if self.lr_tuning is not None and self.optimization.has_lr_schedule:
@@ -297,6 +337,25 @@ class TrainConfig:
     @property
     def train_evaluation_batches(self) -> int:
         return self.train_evaluation_samples // self.train_loader.batch_size
+
+    @property
+    def validation_list(self) -> list[InlineValidationConfig]:
+        if isinstance(self.validation, InlineValidationConfig):
+            return [self.validation]
+        return self.validation
+
+    @property
+    def validation_names(self) -> list[str]:
+        validation = self.validation_list
+        names = []
+        for i, entry in enumerate(validation):
+            if entry.name is not None:
+                names.append(entry.name)
+            elif len(validation) == 1:
+                names.append("val")
+            else:
+                names.append(f"val_{i}")
+        return names
 
     @property
     def inference_list(self) -> list[InlineInferenceConfig]:
@@ -374,13 +433,20 @@ class TrainBuilders:
             train=True,
         )
 
-    def get_validation_data(self) -> GriddedData:
+    def get_validation_data(
+        self,
+    ) -> list[tuple[InlineValidationConfig, GriddedData, str]]:
         data_requirements = self._get_train_window_data_requirements()
-        return get_gridded_data(
-            self.config.validation_loader,
-            requirements=data_requirements,
-            train=False,
-        )
+        names = self.config.validation_names
+        entries: list[tuple[InlineValidationConfig, GriddedData, str]] = []
+        for entry, name in zip(self.config.validation_list, names):
+            data = get_gridded_data(
+                entry.loader,
+                requirements=data_requirements,
+                train=False,
+            )
+            entries.append((entry, data, name))
+        return entries
 
     def get_inference_data(
         self,

@@ -9,7 +9,7 @@ from fme.core.dataset.dataset import DatasetABC, DatasetItem
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.xarray import _get_timestep
-from fme.core.mask_provider import MaskProvider
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 
 
 class DummyDataset(DatasetABC):
@@ -86,7 +86,7 @@ class DummyDataset(DatasetABC):
             variable_metadata={},
             vertical_coordinate=NullVerticalCoordinate(),
             horizontal_coordinates=self._horizontal_coordinates,
-            mask_provider=MaskProvider(),
+            spatial_mask_provider=SpatialMaskProvider(),
             timestep=self.timestep,
             is_remote=False,
             all_labels=self._labels,
@@ -107,7 +107,7 @@ class DummyDataset(DatasetABC):
         """
         time_slice = slice(idx, idx + self.sample_n_times)
         time = xr.DataArray(self.all_times[time_slice].values, dims=["time"])
-        return (self._dummy_dict, time, self._labels, self._epoch)
+        return (self._dummy_dict, time, self._labels, self._epoch, None)
 
     def enable_shared_memory(self):
         pass
