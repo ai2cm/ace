@@ -32,7 +32,8 @@ Previously deferred items, now implemented:
 - ✅ Causal forcing: monthly→daily mapping replaced by strictly
   causal previous-month assignment; annual→daily via causal
   previous-year. Piecewise constant on the daily axis.
-- ✅ Daily SST: `oday_tos` joined in alongside `eday_ts` where
+- ✅ Daily SST: `oday_tos` joined in alongside `surface_temperature`
+  (renamed from `Eday.ts`) where
   published.
 - ✅ Baseline-aligned output names: radiative fluxes, near-surface
   state, and `zg500` are renamed at ingest to the SHIELD/ERA5

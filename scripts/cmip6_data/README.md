@@ -162,12 +162,15 @@ coexist in a single dataset. The training-side variable-masking
 machinery handles which ones are actually populated per model.
 
 The naming convention is `{table}_{var}` lowercased — e.g.
-`amon_ts`, `eday_ts`, `oday_tos`, `omon_zos`. Sea-ice and water-vapor
-variables additionally get a SHIELD/ERA5-flavoured output name:
+`amon_ts`, `oday_tos`, `omon_zos`. Several variables additionally get
+a SHIELD/ERA5-flavoured output name (recorded in `CMIP_TO_OUTPUT_RENAMES`):
 ``SImon.siconc`` → ``simon_sea_ice_fraction``, ``SIday.siconc`` →
 ``siday_sea_ice_fraction`` (both rescaled from % to fraction on
-[0, 1]), and ``Eday.prw`` → ``water_vapor_path``. ``original_name``
-is preserved on each. The bare atmospheric daily variables (`ua1000`,
+[0, 1]), ``Eday.prw`` → ``water_vapor_path``, ``Eday.ts`` →
+``surface_temperature`` (matches the SHIELD/ERA5 baseline daily
+surface-T name; `amon_ts` keeps its prefix because it's a different
+cadence). ``original_name`` is preserved as an attribute on each
+renamed variable. The bare atmospheric daily variables (`ua1000`,
 `TMP2m`, `PRATEsfc`, …) come from one canonical table (`day` or
 `CFday`) for every model and keep their unprefixed (and where
 applicable, renamed) names.
@@ -193,7 +196,8 @@ inherent at this cadence.
 **Daily tables (drop-in when published).** Source axis already
 matches the daily target; we reindex nearest-neighbor.
 
-- `eday_ts` from `Eday.ts` — same definition as `amon_ts` but
+- `surface_temperature` from `Eday.ts` (renamed via
+  `CMIP_TO_OUTPUT_RENAMES`) — same definition as `amon_ts` but
   daily (~21/37 eligible ESGF models, ~1/30 on Pangeo).
 - `water_vapor_path` from `Eday.prw` — column-integrated water vapor
   (kg m⁻²). When `clwvi` (CFday) is also present, the pipeline emits
@@ -216,17 +220,18 @@ pattern is time-invariant (e.g. ocean-only variables on the static
 land mask) and 3D `(time, lat, lon)` when it varies in time (sea-
 ice variables). See **Ocean fill** below for the fill scheme.
 
-**Atmospheric surface temperature** variables (`amon_ts`, `eday_ts`)
-are full-surface global fields (model's own area-weighted composite)
-and do **not** get a per-cell mask. Heterogeneity across datasets is
-handled at the training level (`allow_variable_masking`).
+**Atmospheric surface temperature** variables (`amon_ts`,
+`surface_temperature`) are full-surface global fields (model's own
+area-weighted composite) and do **not** get a per-cell mask.
+Heterogeneity across datasets is handled at the training level
+(`allow_variable_masking`).
 
 Coverage on ESGF tiers cleanly: 21/37 eligible models publish
-`eday_ts` (Tier A drop-in for amon_ts); 10 more publish `oday_tos`
-+ `siday_sea_ice_fraction` for a daily SST + ice-mask composite
-(Tier B); remaining models fall back to the causal monthly path. See
-`process_esgf.py` and the surface-T discussion in `training.md` for
-details.
+`surface_temperature` (Tier A drop-in for `amon_ts`); 10 more publish
+`oday_tos` + `siday_sea_ice_fraction` for a daily SST + ice-mask
+composite (Tier B); remaining models fall back to the causal monthly
+path. See `process_esgf.py` and the surface-T discussion in
+`training.md` for details.
 
 ### External forcings
 
