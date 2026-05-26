@@ -1,9 +1,8 @@
 import abc
 import dataclasses
-from collections.abc import Mapping
-from typing import Any, Literal, Self
+import logging
+from typing import Literal
 
-import dacite
 import torch
 
 from fme.core.normalizer import StandardNormalizer
@@ -24,9 +23,21 @@ DEFAULT_TEMPERATURE_FIELD_NAMES: list[str] = [
 ]
 
 
+logger = logging.getLogger(__name__)
+
+
 class GlobalMeanRemoval(abc.ABC):
     """Removes global means from fields before normalization and restores
     them after denormalization.
+
+    ``forward_transform`` shifts input fields toward their climatological
+    means.  ``inverse_transform`` reverses that shift on output fields.
+    Fields listed in ``field_names`` that appear only in the output (e.g.
+    diagnostic temperatures) are not shifted by ``forward_transform``
+    (they are not inputs), but *are* un-shifted by ``inverse_transform``.
+    The network learns to compensate for this through end-to-end training,
+    so all listed fields — whether input, output, or both — share the
+    same global-mean offset.
 
     Call sequence per step: ``forward_transform`` -> ``get_extra_channels``
     -> ``inverse_transform``.
@@ -63,7 +74,13 @@ class GlobalMeanRemoval(abc.ABC):
 
 
 class SharedGlobalMeanRemoval(GlobalMeanRemoval):
-    """Remove a single reference field's global mean from a set of fields."""
+    """Remove a single reference field's global mean from a set of fields.
+
+    All listed fields share the same offset (derived from the reference
+    field), regardless of whether they appear in the input, the output,
+    or both.  See ``GlobalMeanRemoval`` for details on the asymmetric
+    forward/inverse behavior for output-only fields.
+    """
 
     def __init__(
         self,
@@ -225,10 +242,6 @@ class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
 class GlobalMeanRemovalConfig(abc.ABC):
     """Base configuration for global mean removal."""
 
-    @classmethod
-    def from_state(cls, state: Mapping[str, Any]) -> Self:
-        return dacite.from_dict(cls, state, dacite.Config(strict=True))
-
     @abc.abstractmethod
     def build(
         self,
@@ -247,11 +260,18 @@ class GlobalMeanRemovalConfig(abc.ABC):
 class SharedGlobalMeanRemovalConfig(GlobalMeanRemovalConfig):
     """Remove a shared reference field's global mean from specified fields.
 
+    Fields in ``field_names`` that appear only in the output (not the
+    input) are still un-shifted by ``inverse_transform``, so the network
+    learns to produce them in the offset-shifted space.  Fields that
+    appear in neither input nor output are silently ignored (a warning
+    is logged).
+
     Parameters:
         kind: Must be ``"shared"``.
         reference_field: Name of the field whose per-sample spatial mean
             determines the offset applied to all ``field_names``.
         field_names: Names of fields to shift by the shared offset.
+            Fields may be inputs, outputs, or both.
         append_as_input: If true, the removed sample mean (normalized) is
             appended as an extra network input channel.
     """
@@ -272,6 +292,14 @@ class SharedGlobalMeanRemovalConfig(GlobalMeanRemovalConfig):
                 f"reference_field '{self.reference_field}' not in in_names: "
                 f"{in_names}"
             )
+        all_names = set(in_names) | set(out_names)
+        for name in self.field_names:
+            if name not in all_names:
+                logger.warning(
+                    "global_mean_removal field_name '%s' is not in "
+                    "in_names or out_names and will have no effect",
+                    name,
+                )
 
     def build(
         self,
@@ -291,10 +319,14 @@ class SharedGlobalMeanRemovalConfig(GlobalMeanRemovalConfig):
 class PerChannelGlobalMeanRemovalConfig(GlobalMeanRemovalConfig):
     """Remove each field's own per-sample global mean.
 
+    Unlike ``SharedGlobalMeanRemovalConfig``, per-channel removal
+    requires each field to be present in the input so its individual
+    mean can be computed.
+
     Parameters:
         kind: Must be ``"per_channel"``.
         field_names: Names of fields to process. ``None`` means all
-            input fields.
+            input fields.  Explicit names must be input fields.
         append_as_input: If true, each field's removed sample mean
             (normalized) is appended as an extra network input channel.
     """
@@ -311,8 +343,15 @@ class PerChannelGlobalMeanRemovalConfig(GlobalMeanRemovalConfig):
 
     def validate_names(self, in_names: list[str], out_names: list[str]) -> None:
         if self.field_names is not None:
+            all_names = set(in_names) | set(out_names)
             for name in self.field_names:
-                if name not in in_names:
+                if name not in all_names:
+                    logger.warning(
+                        "global_mean_removal field_name '%s' is not in "
+                        "in_names or out_names and will have no effect",
+                        name,
+                    )
+                elif name not in in_names:
                     raise ValueError(f"field_name '{name}' not in in_names: {in_names}")
 
     def build(

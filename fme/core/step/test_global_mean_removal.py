@@ -300,10 +300,24 @@ def test_shared_config_validates_reference_field():
         config.validate_names(["a", "b"], ["a", "b"])
 
 
-def test_per_channel_config_validates_field_names():
+def test_shared_config_warns_on_unknown_field_names(caplog):
+    config = SharedGlobalMeanRemovalConfig(
+        reference_field="a", field_names=["a", "missing"]
+    )
+    config.validate_names(["a", "b"], ["a", "b"])
+    assert "will have no effect" in caplog.text
+
+
+def test_per_channel_config_warns_on_unknown_field_names(caplog):
     config = PerChannelGlobalMeanRemovalConfig(field_names=["missing"])
+    config.validate_names(["a", "b"], ["a", "b"])
+    assert "will have no effect" in caplog.text
+
+
+def test_per_channel_config_raises_on_output_only_field():
+    config = PerChannelGlobalMeanRemovalConfig(field_names=["c"])
     with pytest.raises(ValueError, match="field_name"):
-        config.validate_names(["a", "b"], ["a", "b"])
+        config.validate_names(["a", "b"], ["a", "b", "c"])
 
 
 def test_per_channel_config_none_field_names_means_all():
