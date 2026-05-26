@@ -880,6 +880,17 @@ def emit_mask_and_fill(
     if time_invariant and "time" in valid.dims:
         valid = valid.isel(time=0).drop_vars("time", errors="ignore")
 
+    # Clear inherited attrs on the mask. ``~nan_pattern`` propagates the
+    # source variable's attrs (including ``units = "K"`` once
+    # ``harmonize_temperature_to_kelvin`` has run on the parent). If we
+    # let the mask carry temperature units, the downstream harmonize
+    # loop fires on the mask too and adds 273.15 to the 0/1 values —
+    # the on-disk mask ends up holding 273.15 / 274.15 instead of 0/1.
+    valid.attrs = {
+        "units": "1",
+        "long_name": "valid-cell mask (1 = data present, 0 = absent)",
+    }
+
     filled = fill_horizontal_diffuse(da, max_iterations=fill_iterations)
     return filled, valid
 

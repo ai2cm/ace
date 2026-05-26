@@ -1,0 +1,272 @@
+{
+  "time_monotonicity": [],
+  "total_water_path_consistency": [],
+  "mask_alignment": [
+    {
+      "source_id": "ACCESS-CM2",
+      "experiment": "historical",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "ACCESS-CM2",
+      "experiment": "ssp245",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "ACCESS-ESM1-5",
+      "experiment": "historical",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "AWI-ESM-1-1-LR",
+      "experiment": "historical",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "BCC-CSM2-MR",
+      "experiment": "historical",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "BCC-CSM2-MR",
+      "experiment": "ssp126",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "BCC-CSM2-MR",
+      "experiment": "ssp245",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "BCC-CSM2-MR",
+      "experiment": "ssp370",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "BCC-CSM2-MR",
+      "experiment": "ssp585",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "BCC-ESM1",
+      "experiment": "historical",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "CESM2",
+      "experiment": "historical",
+      "variant_label": "r5i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "CESM2",
+      "experiment": "ssp245",
+      "variant_label": "r10i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "CESM2",
+      "experiment": "ssp585",
+      "variant_label": "r10i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "CESM2-FV2",
+      "experiment": "historical",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "CESM2-WACCM",
+      "experiment": "historical",
+      "variant_label": "r2i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "CESM2-WACCM",
+      "experiment": "ssp245",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "CESM2-WACCM",
+      "experiment": "ssp585",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "CNRM-CM6-1",
+      "experiment": "historical",
+      "variant_label": "r1i1p1f2",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "CanESM5",
+      "experiment": "historical",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "CanESM5",
+      "experiment": "ssp245",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "CanESM5",
+      "experiment": "ssp585",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "GFDL-CM4",
+      "experiment": "historical",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "GFDL-CM4",
+      "experiment": "ssp245",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "GFDL-CM4",
+      "experiment": "ssp585",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "HadGEM3-GC31-LL",
+      "experiment": "historical",
+      "variant_label": "r1i1p1f3",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "HadGEM3-GC31-LL",
+      "experiment": "ssp245",
+      "variant_label": "r1i1p1f3",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "HadGEM3-GC31-LL",
+      "experiment": "ssp585",
+      "variant_label": "r1i1p1f3",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "IPSL-CM5A2-INCA",
+      "experiment": "historical",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "IPSL-CM5A2-INCA",
+      "experiment": "ssp126",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "IPSL-CM5A2-INCA",
+      "experiment": "ssp370",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "MIROC6",
+      "experiment": "historical",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "MIROC6",
+      "experiment": "ssp245",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "MIROC6",
+      "experiment": "ssp585",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "MPI-ESM-1-2-HAM",
+      "experiment": "historical",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "MPI-ESM1-2-LR",
+      "experiment": "historical",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "MPI-ESM1-2-LR",
+      "experiment": "ssp245",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "MPI-ESM1-2-LR",
+      "experiment": "ssp585",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "MRI-ESM2-0",
+      "experiment": "historical",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "MRI-ESM2-0",
+      "experiment": "ssp245",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "MRI-ESM2-0",
+      "experiment": "ssp585",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "SAM0-UNICON",
+      "experiment": "historical",
+      "variant_label": "r1i1p1f1",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "UKESM1-0-LL",
+      "experiment": "historical",
+      "variant_label": "r1i1p1f2",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "UKESM1-0-LL",
+      "experiment": "ssp245",
+      "variant_label": "r1i1p1f2",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    },
+    {
+      "source_id": "UKESM1-0-LL",
+      "experiment": "ssp585",
+      "variant_label": "r1i1p1f2",
+      "issue": "mask values [np.float64(273.15), np.float64(274.15)] (not just 0/1)"
+    }
+  ],
+  "fraction_conservation": [],
+  "spatial_outliers_TMP2m": []
+}

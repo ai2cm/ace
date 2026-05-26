@@ -986,6 +986,14 @@ python make_presence.py --config configs/pilot.yaml
   Other HadGEM3-GC31-MM members are unaffected. **Excluded** via
   `selection.exclude_variants`.
 
+- **CESM2-WACCM/ssp585/r1i1p1f1 missing chunk**: 41 consecutive
+  timesteps starting 2016-02-15 have all-NaN data across every
+  pressure-level variable. Uniform `finite_fraction ≈ 0.944`
+  across all plev levels — distinctive signature of a publisher
+  missing-chunk rather than a below-surface fill artifact.
+  Sibling variants of CESM2-WACCM ssp585 are fine. **Excluded**
+  via `selection.exclude_variants`.
+
 ### Known ESGF data-quality issues
 
 - **CESM2-WACCM-FV2** publishes files on ESGF with overlapping time

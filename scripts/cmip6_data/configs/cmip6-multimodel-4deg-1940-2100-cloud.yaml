@@ -53,6 +53,10 @@ selection:
     # models are clean. See report/README.md §6c.
     - {source_id: HadGEM3-GC31-MM, experiment: historical, variant_label: r2i1p1f3}
     - {source_id: EC-Earth3, experiment: historical, variant_label: r4i1p1f1}
+    # CESM2-WACCM ssp585 r1i1p1f1 has 41 consecutive days of
+    # all-NaN data starting 2016-02-15 (publisher missing chunk).
+    # Sibling variants of CESM2-WACCM ssp585 are fine.
+    - {source_id: CESM2-WACCM, experiment: ssp585, variant_label: r1i1p1f1}
     # Pangeo mirror has corrupted zarr chunks for this variant: the
     # on-disk chunk payload contains 600 timesteps but the chunk-shape
     # metadata declares 187, so even a single-element

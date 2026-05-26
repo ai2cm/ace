@@ -840,6 +840,27 @@ def test_emit_mask_and_fill_no_nan_returns_all_valid_mask():
     assert float(filled.min()) == 300.0
 
 
+def test_emit_mask_and_fill_strips_inherited_attrs():
+    """Mask must not carry the parent variable's temperature attrs —
+    otherwise the downstream ``harmonize_temperature_to_kelvin`` loop
+    sees ``units = "K"`` (or ``"degC"``) on the mask and adds 273.15
+    to its 0/1 values. v0-pilot-v5 had every ocean/seaice mask
+    showing 273.15 / 274.15 because of this.
+    """
+    arr = np.full((3, 5, 10), 280.0)
+    arr[:, 3:, :] = np.nan
+    da = xr.DataArray(
+        arr,
+        dims=("time", "lat", "lon"),
+        attrs={"units": "K", "long_name": "Sea Surface Temperature"},
+    )
+    _filled, mask = emit_mask_and_fill(da)
+    assert mask.attrs.get("units") == "1"
+    assert "Sea Surface Temperature" not in mask.attrs.get("long_name", "")
+    # All values are 0 or 1
+    assert set(np.unique(mask.values)).issubset({0, 1})
+
+
 # ---------------------------------------------------------------------------
 # finalize_surface_and_ocean_variable
 # ---------------------------------------------------------------------------

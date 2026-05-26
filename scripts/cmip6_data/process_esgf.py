@@ -720,7 +720,11 @@ def process_one_esgf(
 
         # 13. Harmonize temperatures to K (some CMIP6 publishers
         # emit ``tos``/``tob``/``sitemptop`` in °C). See process.py.
+        # Skip ``_mask`` channels — they're 0/1 indicators that
+        # used to inherit ``units`` from their parent variable.
         for v in list(day_regridded.data_vars):
+            if v.endswith("_mask"):
+                continue
             da, msg = harmonize_temperature_to_kelvin(day_regridded[v], var_id=v)
             if msg:
                 row.warnings.append(msg)

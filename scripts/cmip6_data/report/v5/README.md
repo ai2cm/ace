@@ -58,7 +58,77 @@ in `processing.py`, which flagged all 5 AWI-ESM v5 datasets in
 `index.warnings`. **Both models added to `exclude_source_ids` in
 all configs.** ~10–15 datasets removed from the prod cohort.
 
-### d) Per-variable stats are now multi-period
+### d) Additional checks (new this round)
+
+I ran five additional sanity checks across the v5 cohort — time
+monotonicity globally, the rest on one variant per (source × experiment).
+Results stored in [`extra_checks.json`](extra_checks.json).
+
+#### d.i) Time-axis monotonicity (380/380 clean)
+
+Every dataset has strictly increasing time coordinates with no
+duplicates and no negative strides.
+
+#### d.ii) Total-water-path budget (1 dataset checked)
+
+Only one dataset in the v5 cohort emits all three of
+``total_water_path``, ``water_vapor_path`` and ``clwvi`` at once
+(most models don't publish ``clwvi`` daily). The single check passed
+with residual < 1e-3 kg/m². Wider coverage of this check waits for
+more publishers.
+
+#### d.iii) Mask alignment — **BUG FOUND**
+
+All 44 datasets with ``oday_tos_mask`` had mask values of
+**273.15 and 274.15** instead of 0 and 1. Same story for any
+``simon_*_mask``, ``siday_*_mask``, ``omon_*_mask`` etc.
+
+Root cause: ``emit_mask_and_fill`` returned ``(~nan_pattern).astype("uint8")``,
+which inherits the source variable's attrs. The source (``oday_tos``,
+``simon_sitemptop``, ...) had ``units = "K"`` (or ``"degC"`` before
+harmonize). The downstream
+``harmonize_temperature_to_kelvin`` loop then iterated over every
+data_var (including ``*_mask``), saw ``units = "degC"`` on the mask, and
+added 273.15. The on-disk masks ended up as 273.15/274.15.
+
+Fixed in this commit: (a) ``emit_mask_and_fill`` now explicitly sets
+``mask.attrs = {"units": "1", "long_name": "valid-cell mask ..."}``,
+stripping the inherited temperature metadata. (b) The harmonize loop
+in both ``process.py`` and ``process_esgf.py`` skips ``*_mask``
+variables defensively. Regression test added in
+``test_emit_mask_and_fill_strips_inherited_attrs``.
+
+**Existing v5 data is corrupted on every ocean/seaice mask.** Easy
+post-fix: ``mask_corrected = (mask >= 273.65).astype("uint8")``.
+Either run a one-off migration script over v5, or delete + reprocess
+on the next pilot.
+
+#### d.iv) Land + sea_ice + ocean fraction conservation (54/54 clean)
+
+Every dataset with all three of ``land_fraction``,
+``simon_sea_ice_fraction``, ``simon_ocean_fraction`` has
+``|L + I + O - 1| < 0.01`` on the sampled timesteps. The
+``derive_ocean_and_correct_sea_ice`` clipping step is doing its job.
+
+#### d.v) Spatial outlier sniff — TMP2m (140/140 clean)
+
+Time-mean ``TMP2m`` across all 140 sampled datasets sits in
+[180, 325] K everywhere — no crazy per-cell values from
+regridding artefacts at the poles or coastlines. Could be
+extended to other variables, but the headline ones look
+reasonable.
+
+#### d.vi) Other things noted
+
+- **EC-Earth3-Veg ssp370 r1i1p1f1** ships only **1 year** (2015) of
+  data instead of the configured 2-year window. Data is valid, just
+  shorter. Training will see half the samples from this realization.
+- **MIROC-ES2L psl/TMP2m std** lower than cohort (similar to MIROC6
+  bias) — model behavior, not a pipeline issue.
+- **BCC-CSM2-MR PRATEsfc std** higher than cohort (z = +3.4) —
+  model behavior (BCC drizzles more than the cohort mean).
+
+### e) Per-variable stats are now multi-period
 
 Stats files (`stats.nc`) now ship 3 periods (`full`, `1940-2014`, `1979-2015`). The aggregator picks `full` for this report. Downstream training that reads stats needs to be explicit about which period it wants — the prior single-period assumption no longer holds.
 

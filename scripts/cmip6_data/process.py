@@ -763,8 +763,13 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
         # rest (``tas``, ``ts``, ...) in K, but publishers
         # occasionally deviate; walking the assembled dataset
         # catches the variants via their ``units`` attribute.
-        # Idempotent on already-K vars.
+        # Idempotent on already-K vars. Skip ``_mask`` channels —
+        # they're 0/1 indicators that inherited their parent's
+        # ``units`` from ``emit_mask_and_fill`` (since fixed at
+        # source) and have no business being temperature-shifted.
         for v in list(day_regridded.data_vars):
+            if v.endswith("_mask"):
+                continue
             da, msg = harmonize_temperature_to_kelvin(day_regridded[v], var_id=v)
             if msg:
                 row.warnings.append(msg)
