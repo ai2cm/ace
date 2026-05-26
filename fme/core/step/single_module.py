@@ -21,6 +21,10 @@ from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.args import StepArgs
+from fme.core.step.global_mean_removal import (
+    GlobalMeanRemoval,
+    GlobalMeanRemovalConfigUnion,
+)
 from fme.core.step.secondary_decoder import (
     NoSecondaryDecoder,
     SecondaryDecoder,
@@ -58,6 +62,10 @@ class SingleModuleStepConfig(StepConfigABC):
             ``len(in_names)`` additional float channels (1.0 = present, 0.0 =
             masked) after the regular input channels, doubling the total input
             channel count.
+        global_mean_removal: Optional configuration for removing global means
+            from fields before normalization and restoring them after
+            denormalization. Supports shared (single reference field) or
+            per-channel removal, with optional extra input channels.
     """
 
     builder: ModuleSelector
@@ -73,9 +81,12 @@ class SingleModuleStepConfig(StepConfigABC):
     prescribed_prognostic_names: list[str] = dataclasses.field(default_factory=list)
     residual_prediction: bool = False
     include_channel_mask_inputs: bool = False
+    global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
+        if self.global_mean_removal is not None:
+            self.global_mean_removal.validate_names(self.in_names, self.out_names)
         for name in self.prescribed_prognostic_names:
             if name not in self.out_names:
                 raise ValueError(
@@ -260,6 +271,15 @@ class SingleModuleStep(StepABC):
         n_in_channels = len(config.in_names)
         if config.include_channel_mask_inputs:
             n_in_channels *= 2
+        if config.global_mean_removal is not None:
+            self._global_mean_removal: GlobalMeanRemoval | None = (
+                config.global_mean_removal.build(
+                    normalizer=normalizer, in_names=config.in_names
+                )
+            )
+            n_in_channels += self._global_mean_removal.n_extra_input_channels
+        else:
+            self._global_mean_removal = None
         n_out_channels = len(config.out_names)
         self.in_packer = Packer(config.in_names)
         self.out_packer = Packer(config.out_names)
@@ -360,6 +380,12 @@ class SingleModuleStep(StepABC):
         Returns:
             The denormalized output data at the next time step.
         """
+        if self._global_mean_removal is not None:
+            step_input: TensorMapping = self._global_mean_removal.forward_transform(
+                args.input, args.data_mask
+            )
+        else:
+            step_input = args.input
 
         def network_call(input_norm: TensorDict) -> TensorDict:
             if args.data_mask is not None:
@@ -373,6 +399,12 @@ class SingleModuleStep(StepABC):
                 input_tensor = torch.cat(
                     [input_tensor, mask_tensor], dim=self.CHANNEL_DIM
                 )
+            if self._global_mean_removal is not None:
+                extra = self._global_mean_removal.get_extra_channels()
+                if extra is not None:
+                    input_tensor = torch.cat(
+                        [input_tensor, extra], dim=self.CHANNEL_DIM
+                    )
             output_tensor = self.module.wrap_module(wrapper)(
                 input_tensor,
                 labels=args.labels,
@@ -384,8 +416,8 @@ class SingleModuleStep(StepABC):
             output_dict.update(secondary_output_dict)
             return output_dict
 
-        return step_with_adjustments(
-            input=args.input,
+        output = step_with_adjustments(
+            input=step_input,
             next_step_input_data=args.next_step_input_data,
             network_calls=network_call,
             normalizer=self.normalizer,
@@ -395,6 +427,11 @@ class SingleModuleStep(StepABC):
             prognostic_names=self.prognostic_names,
             prescribed_prognostic_names=self._config.prescribed_prognostic_names,
         )
+
+        if self._global_mean_removal is not None:
+            output = self._global_mean_removal.inverse_transform(output)
+
+        return output
 
     def get_regularizer_loss(self):
         return torch.tensor(0.0)
