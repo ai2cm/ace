@@ -180,7 +180,15 @@ class SharedGlobalMeanRemoval(GlobalMeanRemoval):
 
 
 class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
-    """Remove each field's own per-sample global mean."""
+    """Shift each field's per-sample spatial mean to its climatology.
+
+    For each field, ``forward_transform`` adds ``clim_mean - sample_mean``
+    so the field's spatial mean is equal to its climatology mean in
+    physical space; after normalization the field's spatial mean is
+    approximately zero.  This mirrors ``SharedGlobalMeanRemoval`` but
+    computes the offset per field rather than from a single reference
+    field.
+    """
 
     def __init__(
         self,
@@ -193,7 +201,7 @@ class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
         self._append_as_input = append_as_input
         self._means = means
         self._stds = stds
-        self._cached_sample_means: dict[str, torch.Tensor] | None = None
+        self._cached_shifts: dict[str, torch.Tensor] | None = None
         self._cached_extra: torch.Tensor | None = None
 
     @property
@@ -206,7 +214,7 @@ class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
         data_mask: TensorMapping | None,
     ) -> TensorDict:
         result = dict(input)
-        sample_means: dict[str, torch.Tensor] = {}
+        shifts: dict[str, torch.Tensor] = {}
         spatial_shape: tuple[int, ...] | None = None
 
         for name in self._field_names:
@@ -215,23 +223,24 @@ class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
             t = result[name]
             if spatial_shape is None:
                 spatial_shape = t.shape[1:]
-            raw_mean = t.mean(dim=tuple(range(1, t.ndim)))
+            sample_mean = t.mean(dim=tuple(range(1, t.ndim)))
+            shift = self._means[name] - sample_mean
             if data_mask is not None and name in data_mask:
                 mask = data_mask[name]
-                raw_mean = torch.where(mask, raw_mean, torch.zeros_like(raw_mean))
-            sample_means[name] = raw_mean
-            broadcast = raw_mean.view(raw_mean.shape[0], *(1,) * (t.ndim - 1))
-            result[name] = t - broadcast
+                shift = torch.where(mask, shift, torch.zeros_like(shift))
+            shifts[name] = shift
+            broadcast = shift.view(shift.shape[0], *(1,) * (t.ndim - 1))
+            result[name] = t + broadcast
 
-        self._cached_sample_means = sample_means
+        self._cached_shifts = shifts
 
         if self._append_as_input and spatial_shape is not None:
             channels: list[torch.Tensor] = []
             for name in self._field_names:
-                if name not in sample_means:
+                if name not in shifts:
                     continue
-                sm = sample_means[name]
-                normalized = (sm - self._means[name]) / self._stds[name]
+                sh = shifts[name]
+                normalized = -sh / self._stds[name]
                 ch = normalized.view(-1, 1, *(1,) * len(spatial_shape)).expand(
                     -1, 1, *spatial_shape
                 )
@@ -243,16 +252,16 @@ class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
         return result
 
     def inverse_transform(self, output: TensorDict) -> TensorDict:
-        if self._cached_sample_means is None:
+        if self._cached_shifts is None:
             raise RuntimeError("inverse_transform() called before forward_transform().")
         result = dict(output)
         for name in self._field_names:
-            if name not in result or name not in self._cached_sample_means:
+            if name not in result or name not in self._cached_shifts:
                 continue
             t = result[name]
-            sm = self._cached_sample_means[name]
-            broadcast = sm.view(sm.shape[0], *(1,) * (t.ndim - 1))
-            result[name] = t + broadcast
+            sh = self._cached_shifts[name]
+            broadcast = sh.view(sh.shape[0], *(1,) * (t.ndim - 1))
+            result[name] = t - broadcast
         return result
 
     def get_extra_channels(self) -> torch.Tensor | None:
@@ -320,18 +329,22 @@ class SharedGlobalMeanRemovalConfig:
 
 @dataclasses.dataclass
 class PerChannelGlobalMeanRemovalConfig:
-    """Remove each field's own per-sample global mean.
+    """Shift each field's per-sample spatial mean to its climatology.
 
-    Unlike ``SharedGlobalMeanRemovalConfig``, per-channel removal
-    requires each field to be present in the input so its individual
-    mean can be computed.
+    For each listed field, ``forward_transform`` adds
+    ``clim_mean - sample_mean`` so that after normalization the field's
+    spatial mean is approximately zero (avoiding large constant biases
+    on the network input).  Unlike ``SharedGlobalMeanRemovalConfig``,
+    per-channel removal requires each field to be present in the input
+    so its individual sample mean can be computed.
 
     Parameters:
         kind: Must be ``"per_channel"``.
         field_names: Names of fields to process. ``None`` means all
             input fields.  Explicit names must be input fields.
-        append_as_input: If true, each field's removed sample mean
-            (normalized) is appended as an extra network input channel.
+        append_as_input: If true, each field's normalized sample-mean
+            anomaly ``(sample_mean - clim_mean) / clim_std`` is appended
+            as an extra network input channel.
     """
 
     kind: Literal["per_channel"] = "per_channel"

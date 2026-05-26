@@ -182,10 +182,10 @@ def test_per_channel_removes_correct_means():
         }
     )
     result = transform.forward_transform(tensors, None)
-    # a: [12 - 13, 14 - 13] = [-1, 1]
-    torch.testing.assert_close(result["a"].cpu(), torch.tensor([[[-1.0, 1.0]]]))
-    # b: [22 - 25, 28 - 25] = [-3, 3]
-    torch.testing.assert_close(result["b"].cpu(), torch.tensor([[[-3.0, 3.0]]]))
+    # a: shift = 10 - 13 = -3; result = [12 - 3, 14 - 3] = [9, 11]
+    torch.testing.assert_close(result["a"].cpu(), torch.tensor([[[9.0, 11.0]]]))
+    # b: shift = 20 - 25 = -5; result = [22 - 5, 28 - 5] = [17, 23]
+    torch.testing.assert_close(result["b"].cpu(), torch.tensor([[[17.0, 23.0]]]))
 
 
 def test_per_channel_round_trip():
@@ -210,7 +210,9 @@ def test_per_channel_is_per_sample():
         {"a": torch.tensor([[[10.0, 20.0]], [[100.0, 200.0]]])}
     )
     result = transform.forward_transform(tensors, None)
-    # sample 0: mean=15, sample 1: mean=150
+    # clim_mean=0, so shift per sample is -sample_mean
+    # sample 0: mean=15 → shift=-15 → [10-15, 20-15] = [-5, 5]
+    # sample 1: mean=150 → shift=-150 → [100-150, 200-150] = [-50, 50]
     torch.testing.assert_close(
         result["a"].cpu(), torch.tensor([[[-5.0, 5.0]], [[-50.0, 50.0]]])
     )
@@ -255,13 +257,13 @@ def test_per_channel_with_field_names_subset():
         {"a": torch.full((1, 4, 4), 14.0), "b": torch.full((1, 4, 4), 25.0)}
     )
     result = transform.forward_transform(tensors, None)
-    # a was shifted
-    torch.testing.assert_close(result["a"].cpu(), torch.full((1, 4, 4), 0.0))
+    # a: shift = 10 - 14 = -4; result = 14 - 4 = 10 (== clim_mean)
+    torch.testing.assert_close(result["a"].cpu(), torch.full((1, 4, 4), 10.0))
     # b was NOT shifted
     torch.testing.assert_close(result["b"].cpu(), torch.full((1, 4, 4), 25.0))
 
 
-def test_per_channel_masked_uses_zero():
+def test_per_channel_masked_no_shift():
     means = {"a": 10.0}
     stds = {"a": 2.0}
     transform = _make_per_channel(means, stds, append_as_input=True)
@@ -270,17 +272,17 @@ def test_per_channel_masked_uses_zero():
     )
     data_mask = move_tensordict_to_device({"a": torch.tensor([True, False])})
     result = transform.forward_transform(tensors, data_mask)
-    # sample 0 (unmasked): mean=14, shifted to 0
-    torch.testing.assert_close(result["a"][0].cpu(), torch.zeros(1, 2))
-    # sample 1 (masked): mean→0, so no shift (14 - 0 = 14)
+    # sample 0 (unmasked): shift = 10 - 14 = -4; result = 14 - 4 = 10
+    torch.testing.assert_close(result["a"][0].cpu(), torch.full((1, 2), 10.0))
+    # sample 1 (masked): no shift, unchanged
     torch.testing.assert_close(result["a"][1].cpu(), torch.full((1, 2), 14.0))
 
     extra = transform.get_extra_channels()
     assert extra is not None
-    # sample 0: (14 - 10) / 2 = 2.0
+    # sample 0: -shift/std = -(-4)/2 = 2.0
     assert extra[0, 0, 0, 0].item() == pytest.approx(2.0)
-    # sample 1 (masked): (0 - 10) / 2 = -5.0
-    assert extra[1, 0, 0, 0].item() == pytest.approx(-5.0)
+    # sample 1 (masked): no shift, extra = 0
+    assert extra[1, 0, 0, 0].item() == pytest.approx(0.0)
 
 
 def test_per_channel_inverse_before_forward_raises():
@@ -289,6 +291,59 @@ def test_per_channel_inverse_before_forward_raises():
     transform = _make_per_channel(means, stds)
     with pytest.raises(RuntimeError, match="forward_transform"):
         transform.inverse_transform({"a": torch.zeros(1, 4, 4)})
+
+
+def test_per_channel_post_normalization_mean_is_near_zero():
+    """Regression: per-channel must shift toward each field's climatology,
+    not to zero in physical space.  After the shift, the normalizer is
+    applied; the post-normalization spatial mean must be ≈ 0 so the
+    network does not see a large constant bias (a previous implementation
+    shifted to zero in physical space, producing a post-normalization
+    bias of ``-clim_mean / clim_std`` ≈ -19 for absolute temperatures).
+    """
+    torch.manual_seed(0)
+    # Realistic climatology: surface temperature ~288 K, std ~15 K.
+    means = {"surface_temperature": 288.0, "air_temperature_0": 220.0}
+    stds = {"surface_temperature": 15.0, "air_temperature_0": 10.0}
+    normalizer = _build_normalizer_for(means, stds)
+    transform = _make_per_channel(means, stds)
+
+    tensors = move_tensordict_to_device(
+        {
+            "surface_temperature": torch.randn(2, 8, 16) * 12.0 + 295.0,
+            "air_temperature_0": torch.randn(2, 8, 16) * 8.0 + 215.0,
+        }
+    )
+    shifted = transform.forward_transform(tensors, None)
+    normalized = normalizer.normalize(shifted)
+    for name in means:
+        sample_means = normalized[name].mean(dim=tuple(range(1, normalized[name].ndim)))
+        torch.testing.assert_close(
+            sample_means.cpu(),
+            torch.zeros_like(sample_means.cpu()),
+            atol=1e-5,
+            rtol=0.0,
+        )
+
+
+def test_per_channel_post_normalization_mean_near_zero_when_masked():
+    """Masked samples are skipped (shift = 0), but unmasked samples must
+    still land near zero in normalized space."""
+    means = {"a": 100.0}
+    stds = {"a": 5.0}
+    normalizer = _build_normalizer_for(means, stds)
+    transform = _make_per_channel(means, stds)
+
+    # Two samples, both with physical mean 110; one is masked.
+    tensors = move_tensordict_to_device({"a": torch.full((2, 4, 4), 110.0)})
+    data_mask = move_tensordict_to_device({"a": torch.tensor([True, False])})
+    shifted = transform.forward_transform(tensors, data_mask)
+    normalized = normalizer.normalize(shifted)
+    # Unmasked sample: spatial mean ≈ 0 in normalized space.
+    assert normalized["a"][0].mean().abs().item() < 1e-5
+    # Masked sample: not shifted, so it retains (110 - 100) / 5 = 2.0
+    # — this is fine because _apply_input_mask zeros the channel later.
+    assert normalized["a"][1].mean().item() == pytest.approx(2.0)
 
 
 # ── Config validation ───────────────────────────────────────────────────
