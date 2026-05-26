@@ -957,6 +957,21 @@ python make_presence.py --config configs/pilot.yaml
   from training** via `selection.exclude_source_ids` in both prod
   configs and the v4+ pilot configs.
 
+- **AWI-ESM-1-1-LR and AWI-ESM-1-REcoM corrupted Jan 1 data**:
+  every Jan 1 in these models' day-table output is anomalous —
+  global-mean psl drops by ~5900 Pa (vs typical 53 Pa day-to-day
+  variability, ~110× outlier), TMP2m spikes by ~1.5 K, sfcWind by
+  0.4 m/s, DSWRFsfc by ~3 W/m². Surrounding days are normal.
+  Pattern is consistent with **each annual file's first day being
+  an instantaneous snapshot rather than a daily mean** (the
+  highest-magnitude anomalies are in the variables with the
+  largest instantaneous-vs-daily-mean gap; precip and humidity are
+  unaffected). A CMIP6 publishing bug at the source. Affects
+  ~0.27% of timesteps (1 day per 365), but the magnitudes are large
+  enough that training samples crossing Jan 1 would see a
+  many-sigma input shift. **Both models excluded** via
+  `selection.exclude_source_ids`.
+
 - **EC-Earth3/historical/r4i1p1f1 missing plev timesteps**: The last
   13 timesteps (indices 347-359, late December) have all-NaN values
   for all 3D pressure-level variables (ua, va, hus, zg at all levels),

@@ -52,6 +52,14 @@ selection:
     # KACE-1-0-G has sparse NaN values at 10 hPa that propagate
     # through and produce all-NaN model output.
     - KACE-1-0-G
+    # AWI-ESM-1-1-LR and AWI-ESM-1-REcoM ship corrupted Jan 1 data
+    # every year — ~5900 Pa psl drop, 1.5 K TMP2m spike, smaller
+    # anomalies in sfcWind/DSWRFsfc — consistent with the year's
+    # first day being an instantaneous snapshot rather than a daily
+    # mean (CMIP6 publishing bug). Other variables (PRATEsfc, Q2m)
+    # unaffected. See report/v5/README.md.
+    - AWI-ESM-1-1-LR
+    - AWI-ESM-1-REcoM
   exclude_variants:
     # Both publishers ship full pressure-level slabs of NaN on
     # these specific realizations (~10⁶ NaN cells in the 3D

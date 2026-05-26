@@ -39,6 +39,14 @@ selection:
     # hus10, zg10) — typically 1 grid cell per timestep — which
     # propagate through the network and produce all-NaN model output.
     - KACE-1-0-G
+    # AWI-ESM-1-1-LR and AWI-ESM-1-REcoM ship corrupted Jan 1 data
+    # every year — ~5900 Pa psl drop, 1.5 K TMP2m spike, smaller
+    # anomalies in sfcWind/DSWRFsfc — consistent with the year's
+    # first day being an instantaneous snapshot rather than a daily
+    # mean (CMIP6 publishing bug). Other variables (PRATEsfc, Q2m)
+    # unaffected. See report/v5/README.md.
+    - AWI-ESM-1-1-LR
+    - AWI-ESM-1-REcoM
   exclude_variants:
     # Specific realizations whose 3D state slabs ship as ~10⁶ NaN
     # cells from the publisher. Sibling variants of these same
