@@ -95,7 +95,7 @@ class SFNONetConfig:
     filter_type: str = "linear"
     scale_factor: int = 1
     global_layer_norm: bool = False
-    num_layers: int = 12
+    num_layers: int = 8
     use_mlp: bool = True
     mlp_ratio: float = 2.0
     activation_function: str = "gelu"
@@ -110,8 +110,8 @@ class SFNONetConfig:
     filter_residual: bool = False
     filter_output: bool = False
     local_blocks: list[int] | None = None
-    normalize_big_skip: bool = False
-    affine_norms: bool = False
+    normalize_big_skip: bool = True
+    affine_norms: bool = True
     lora_rank: int = 0
     lora_alpha: float | None = None
     spectral_lora_rank: int = 0
