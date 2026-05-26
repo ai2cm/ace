@@ -484,7 +484,7 @@ class DealiasedDownsample(nn.Module):
 
         n_layers = int(math.log2(stride))
         pool_layers = []
-        hpk = _healpix_layer_kwargs(
+        healpix_kwargs = _healpix_layer_kwargs(
             enable_nhwc,
             hpx_padding_mode,
             nside,
@@ -502,7 +502,7 @@ class DealiasedDownsample(nn.Module):
                     bias=False,
                     dilation=1,
                     resample_filter=filt,
-                    **hpk,
+                    **healpix_kwargs,
                 )
             )
 
@@ -705,12 +705,12 @@ class SmoothedInterpolateConv(nn.Module):
             )
 
         trim_size = 1
-        hpk = _healpix_layer_kwargs(
+        healpix_kwargs = _healpix_layer_kwargs(
             enable_nhwc,
             hpx_padding_mode,
             nside,
         )
-        hpk_after = _healpix_layer_kwargs(
+        healpix_kwargs_after = _healpix_layer_kwargs(
             enable_nhwc,
             hpx_padding_mode,
             nside_after,
@@ -723,7 +723,7 @@ class SmoothedInterpolateConv(nn.Module):
                 scale_factor=scale_factor,
                 mode=mode,
                 trim_size=trim_size,
-                **hpk,
+                **healpix_kwargs,
             ),
             HEALPixLayer(
                 layer=nn.Conv2d,
@@ -731,7 +731,7 @@ class SmoothedInterpolateConv(nn.Module):
                 out_channels=out_channels,
                 kernel_size=kernel_size,
                 dilation=dilation,
-                **hpk_after,
+                **healpix_kwargs_after,
             ),
         ]
 
@@ -860,7 +860,7 @@ class ConvNeXtBlock(nn.Module):
             nside: Native face height/width for HEALPix padding.
         """
         super().__init__()
-        hpk = _healpix_layer_kwargs(
+        healpix_kwargs = _healpix_layer_kwargs(
             enable_nhwc,
             hpx_padding_mode,
             nside,
@@ -875,7 +875,7 @@ class ConvNeXtBlock(nn.Module):
                 in_channels=in_channels,
                 out_channels=out_channels,
                 kernel_size=1,
-                **hpk,
+                **healpix_kwargs,
             )
         # Convolution block
         convblock = []
@@ -887,7 +887,7 @@ class ConvNeXtBlock(nn.Module):
                 out_channels=int(latent_channels * upscale_factor),
                 kernel_size=kernel_size,
                 dilation=dilation,
-                **hpk,
+                **healpix_kwargs,
             )
         )
         if activation is not None:
@@ -900,7 +900,7 @@ class ConvNeXtBlock(nn.Module):
                 out_channels=int(latent_channels * upscale_factor),
                 kernel_size=kernel_size,
                 dilation=dilation,
-                **hpk,
+                **healpix_kwargs,
             )
         )
         if activation is not None:
@@ -912,7 +912,7 @@ class ConvNeXtBlock(nn.Module):
                 in_channels=int(latent_channels * upscale_factor),
                 out_channels=out_channels,
                 kernel_size=1,
-                **hpk,
+                **healpix_kwargs,
             )
         )
         self.convblock = nn.Sequential(*convblock)
@@ -970,7 +970,7 @@ class DoubleConvNeXtBlock(nn.Module):
             nside: Native face height/width for HEALPix padding.
         """
         super().__init__()
-        hpk = _healpix_layer_kwargs(
+        healpix_kwargs = _healpix_layer_kwargs(
             enable_nhwc,
             hpx_padding_mode,
             nside,
@@ -986,7 +986,7 @@ class DoubleConvNeXtBlock(nn.Module):
                 in_channels=in_channels,
                 out_channels=int(latent_channels),
                 kernel_size=1,
-                **hpk,
+                **healpix_kwargs,
             )
         if out_channels == int(latent_channels):
             self.skip_module2 = (
@@ -998,7 +998,7 @@ class DoubleConvNeXtBlock(nn.Module):
                 in_channels=int(latent_channels),
                 out_channels=out_channels,
                 kernel_size=1,
-                **hpk,
+                **healpix_kwargs,
             )
 
         # 1st ConvNeXt block, the output of this one remains internal
@@ -1011,7 +1011,7 @@ class DoubleConvNeXtBlock(nn.Module):
                 out_channels=int(latent_channels),
                 kernel_size=kernel_size,
                 dilation=dilation,
-                **hpk,
+                **healpix_kwargs,
             )
         )
         if activation is not None:
@@ -1024,7 +1024,7 @@ class DoubleConvNeXtBlock(nn.Module):
                 out_channels=int(latent_channels * upscale_factor),
                 kernel_size=1,
                 dilation=dilation,
-                **hpk,
+                **healpix_kwargs,
             )
         )
         if activation is not None:
@@ -1037,7 +1037,7 @@ class DoubleConvNeXtBlock(nn.Module):
                 out_channels=int(latent_channels),
                 kernel_size=1,
                 dilation=dilation,
-                **hpk,
+                **healpix_kwargs,
             )
         )
         if activation is not None:
@@ -1054,7 +1054,7 @@ class DoubleConvNeXtBlock(nn.Module):
                 out_channels=int(latent_channels),
                 kernel_size=kernel_size,
                 dilation=dilation,
-                **hpk,
+                **healpix_kwargs,
             )
         )
         if activation is not None:
@@ -1067,7 +1067,7 @@ class DoubleConvNeXtBlock(nn.Module):
                 out_channels=int(latent_channels * upscale_factor),
                 kernel_size=1,
                 dilation=dilation,
-                **hpk,
+                **healpix_kwargs,
             )
         )
         if activation is not None:
@@ -1080,7 +1080,7 @@ class DoubleConvNeXtBlock(nn.Module):
                 out_channels=out_channels,
                 kernel_size=1,
                 dilation=dilation,
-                **hpk,
+                **healpix_kwargs,
             )
         )
         if activation is not None:
@@ -1141,7 +1141,7 @@ class SymmetricConvNeXtBlock(nn.Module):
             nside: Native face height/width for HEALPix padding.
         """
         super().__init__()
-        hpk = _healpix_layer_kwargs(
+        healpix_kwargs = _healpix_layer_kwargs(
             enable_nhwc,
             hpx_padding_mode,
             nside,
@@ -1154,7 +1154,7 @@ class SymmetricConvNeXtBlock(nn.Module):
                 in_channels=in_channels,
                 out_channels=out_channels,
                 kernel_size=1,
-                **hpk,
+                **healpix_kwargs,
             )
 
         # 1st ConvNeXt block, the output of this one remains internal
@@ -1167,7 +1167,7 @@ class SymmetricConvNeXtBlock(nn.Module):
                 out_channels=int(latent_channels),
                 kernel_size=kernel_size,
                 dilation=dilation,
-                **hpk,
+                **healpix_kwargs,
             )
         )
         if activation is not None:
@@ -1180,7 +1180,7 @@ class SymmetricConvNeXtBlock(nn.Module):
                 out_channels=int(latent_channels * upscale_factor),
                 kernel_size=1,
                 dilation=dilation,
-                **hpk,
+                **healpix_kwargs,
             )
         )
         if activation is not None:
@@ -1193,7 +1193,7 @@ class SymmetricConvNeXtBlock(nn.Module):
                 out_channels=int(latent_channels),
                 kernel_size=1,
                 dilation=dilation,
-                **hpk,
+                **healpix_kwargs,
             )
         )
         if activation is not None:
@@ -1206,7 +1206,7 @@ class SymmetricConvNeXtBlock(nn.Module):
                 out_channels=out_channels,  # int(latent_channels),
                 kernel_size=kernel_size,
                 dilation=dilation,
-                **hpk,
+                **healpix_kwargs,
             )
         )
         if activation is not None:
