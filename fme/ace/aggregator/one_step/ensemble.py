@@ -14,6 +14,7 @@ from fme.core.typing_ import EnsembleTensorDict, TensorMapping
 
 from ..inference.build_context import MetricBuildContext, MetricNotSupportedError
 from ..inference.data import MetricBuildResult
+from .build_context import OneStepBuildContext, OneStepMetricBuildResult
 
 
 def get_gen_shape(gen_data: TensorMapping):
@@ -361,6 +362,27 @@ class EnsembleMetricConfig:
                 gridded_operations=ctx.ops,
                 target_time=self.step,
                 log_mean_maps=self.log_mean_maps,
+                metadata=ctx.variable_metadata,
+            )
+        )
+
+
+@dataclasses.dataclass
+class OneStepEnsembleMetricConfig:
+    name: str = "ensemble"
+    log_mean_maps: bool = True
+    enabled: bool = True
+    strict: bool = False
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: OneStepBuildContext) -> OneStepMetricBuildResult:
+        return OneStepMetricBuildResult(
+            ensemble=get_one_step_ensemble_aggregator(
+                gridded_operations=ctx.ops,
+                log_mean_maps=self.log_mean_maps,
+                target_time=1,
                 metadata=ctx.variable_metadata,
             )
         )

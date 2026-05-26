@@ -9,6 +9,7 @@ import torch
 from fme.ace.aggregator import (
     InferenceEvaluatorAggregatorConfig,
     LegacyFlagInferenceEvaluatorAggregatorConfig,
+    LegacyFlagOneStepAggregatorConfig,
     OneStepAggregatorConfig,
 )
 from fme.ace.aggregator.train import TrainAggregatorConfig
@@ -56,8 +57,8 @@ class InlineValidationConfig:
     """
 
     loader: DataLoaderConfig
-    aggregator: OneStepAggregatorConfig = dataclasses.field(
-        default_factory=lambda: OneStepAggregatorConfig()
+    aggregator: OneStepAggregatorConfig | LegacyFlagOneStepAggregatorConfig = (
+        dataclasses.field(default_factory=lambda: OneStepAggregatorConfig())
     )
     name: str | None = None
     weight: float = 1.0
