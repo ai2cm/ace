@@ -1260,11 +1260,26 @@ def clamp_static_fractions(ds: xr.Dataset) -> tuple[xr.Dataset, list[str]]:
     arr = ds["sftlf"]
     vmin = float(arr.min())
     vmax = float(arr.max())
-    if vmax > 100.0 + _EPS or vmin < -_EPS:
+    # The CMIP6 CMOR spec puts ``sftlf`` in percent (0–100), but at
+    # least one publisher (FGOALS-f3-L) ships it as a fraction (0–1)
+    # in spite of declaring ``units = %``. Detect the input scale via
+    # the observed max — anything ≤ 1.0 + _EPS is already a fraction
+    # and shouldn't be divided again. Without this check the bad
+    # publishers' fields end up at ~0.003 (100× too small), which
+    # leaks into the cohort statistics as a clear outlier.
+    is_already_fraction = vmax <= 1.0 + _EPS
+    if is_already_fraction:
         warnings.append(
-            f"sftlf clipped to [0, 100]: pre-clip range " f"[{vmin:.3g}, {vmax:.3g}]"
+            f"sftlf already in [0, 1] (max {vmax:.3g}); skipping /100 rescale"
         )
-    land_fraction = (arr.clip(0.0, 100.0) / 100.0).rename("land_fraction")
+        land_fraction = arr.clip(0.0, 1.0).rename("land_fraction")
+    else:
+        if vmax > 100.0 + _EPS or vmin < -_EPS:
+            warnings.append(
+                f"sftlf clipped to [0, 100]: pre-clip range "
+                f"[{vmin:.3g}, {vmax:.3g}]"
+            )
+        land_fraction = (arr.clip(0.0, 100.0) / 100.0).rename("land_fraction")
     land_fraction.attrs = dict(arr.attrs)
     land_fraction.attrs["original_name"] = "sftlf"
     land_fraction.attrs["units"] = "1"

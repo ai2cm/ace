@@ -464,13 +464,14 @@ class StatsPeriod:
 # - ``full``: the dataset's whole time range (always populated).
 # - ``1940-2014``: the historical experiment window — populated on
 #   historical datasets, all-NaN on pure SSP datasets.
-# - ``1979-2015``: the modern reanalysis era that aligns with ERA5's
+# - ``1979-2014``: the modern reanalysis era that aligns with ERA5's
 #   well-observed window; the cleanest stats target for training
-#   downstream ERA5-comparable models.
+#   downstream ERA5-comparable models. Ends with historical so the
+#   stats stay free of SSP-scenario drift.
 DEFAULT_STATS_PERIODS: tuple[StatsPeriod, ...] = (
     StatsPeriod("full", None, None),
     StatsPeriod("1940-2014", "1940-01-01", "2014-12-31"),
-    StatsPeriod("1979-2015", "1979-01-01", "2015-12-31"),
+    StatsPeriod("1979-2014", "1979-01-01", "2014-12-31"),
 )
 
 

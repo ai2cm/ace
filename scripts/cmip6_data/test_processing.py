@@ -415,6 +415,26 @@ def test_clamp_static_fractions_noop_without_sftlf():
     assert "land_fraction" not in clamped.data_vars
 
 
+def test_clamp_static_fractions_handles_already_fraction_input():
+    """Some publishers (FGOALS-f3-L) ship ``sftlf`` already in [0, 1]
+    despite the CMIP6 spec saying %. Detect via the max value and
+    skip the /100 rescale, otherwise the field comes out 100× too
+    small (cohort outlier with mean ~0.003 instead of ~0.29).
+    """
+    ds = xr.Dataset(
+        {"sftlf": (("lat", "lon"), np.array([[0.0, 0.5], [1.0, 0.29]]))},
+    )
+    clamped, warnings = clamp_static_fractions(ds)
+    assert "sftlf" not in clamped.data_vars
+    assert "land_fraction" in clamped.data_vars
+    # Values preserved, NOT divided by 100.
+    np.testing.assert_allclose(
+        clamped["land_fraction"].values,
+        np.array([[0.0, 0.5], [1.0, 0.29]]),
+    )
+    assert any("already in [0, 1]" in w for w in warnings)
+
+
 # ---------------------------------------------------------------------------
 # compute_below_surface_mask
 # ---------------------------------------------------------------------------
