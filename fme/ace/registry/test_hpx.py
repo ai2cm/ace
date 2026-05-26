@@ -223,6 +223,7 @@ def insolation_data():
     return generate_insolation_data
 
 
+@pytest.mark.skipif(not have_earth2grid, reason="earth2grid not installed")
 @pytest.mark.parametrize("shape", [pytest.param((8, 16))])
 def test_hpx_init(shape):
     device = get_device()
@@ -274,9 +275,7 @@ def test_hpx_init(shape):
     assert type(stepper.modules[0].module) is HEALPixUNet
 
 
-# pragma mark - encoder
-
-
+@pytest.mark.skipif(not have_earth2grid, reason="earth2grid not installed")
 def test_UNetEncoder_initialize():
     device = get_device()
     channels = 2
@@ -310,6 +309,7 @@ def test_UNetEncoder_initialize():
     assert isinstance(encoder, UNetEncoder)
 
 
+@pytest.mark.skipif(not have_earth2grid, reason="earth2grid not installed")
 def test_UNetEncoder_forward():
     channels = 2
     hw_size = 16
@@ -344,6 +344,7 @@ def test_UNetEncoder_forward():
         assert out_tensor.shape[2] == tensor_size[2] // (2**idx)
 
 
+@pytest.mark.skipif(not have_earth2grid, reason="earth2grid not installed")
 def test_UNetDecoder_initilization():
     in_channels = 2
     out_channels = 1
@@ -389,6 +390,7 @@ def test_UNetDecoder_initilization():
     assert isinstance(decoder, UNetDecoder)
 
 
+@pytest.mark.skipif(not have_earth2grid, reason="earth2grid not installed")
 def test_UNetDecoder_forward():
     in_channels = 2
     out_channels = 1
@@ -1276,6 +1278,7 @@ def test_HEALPixUNet_forward_padding_mode(mode):
     assert th.isfinite(y).all()
 
 
+@pytest.mark.skipif(not have_earth2grid, reason="earth2grid not installed")
 def test_HEALPixUNet_in_stepper():
     """End-to-end build of a HEALPixUNet through the stepper config."""
     in_channels = 3
