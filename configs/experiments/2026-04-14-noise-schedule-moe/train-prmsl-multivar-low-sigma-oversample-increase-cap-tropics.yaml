@@ -31,7 +31,7 @@ model:
       model_channels: 128
       attn_resolutions: []
       num_blocks: 2
-      channel_mult_emb: 6
+      channel_mult_emb: 12
       channel_mult:
       - 1
       - 2
