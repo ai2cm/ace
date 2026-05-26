@@ -22,6 +22,8 @@ import torch as th
 import torch.nn as nn
 
 from .healpix_blocks import ConvBlockConfig, UpsamplingBlockConfig
+
+
 @dataclasses.dataclass
 class UNetDecoderConfig:
     """
@@ -88,7 +90,9 @@ class UNetDecoder(nn.Module):
         output_channels: int = 1,
         dilations: Optional[list] = None,
         enable_nhwc: bool = False,
-        hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
+        hpx_padding_mode: Literal[
+            "earth2grid", "karlbauer", "isolatitude"
+        ] = "earth2grid",
         nside: Optional[Sequence[int]] = None,
     ):
         """

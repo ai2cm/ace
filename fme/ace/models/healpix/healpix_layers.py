@@ -56,7 +56,9 @@ class HEALPixLayer(th.nn.Module):
     def __init__(
         self,
         layer,
-        hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
+        hpx_padding_mode: Literal[
+            "earth2grid", "karlbauer", "isolatitude"
+        ] = "earth2grid",
         nside: int | None = None,
         **kwargs,
     ):
