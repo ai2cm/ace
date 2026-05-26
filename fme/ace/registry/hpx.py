@@ -1,5 +1,6 @@
 import dataclasses
-from typing import Optional, Sequence
+from collections.abc import Sequence
+from typing import Literal
 
 import torch.nn as nn
 
@@ -32,8 +33,8 @@ class HEALPixUNetBuilder(ModuleConfig):
     encoder: UNetEncoderConfig
     decoder: UNetDecoderConfig
     enable_nhwc: bool = False
-    hpx_padding_mode: str = "earth2grid"
-    nside: Optional[Sequence[int]] = None
+    hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid"
+    nside: Sequence[int] | None = None
 
     def build(
         self,

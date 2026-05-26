@@ -116,13 +116,10 @@ def _get_test_yaml_files(
     validate_using_ema=False,
     derived_forcings=None,
 ):
-    input_time_size = 1
-    output_time_size = 1
     if derived_forcings is None:
         derived_forcings = DerivedForcingsConfig()
     if nettype == "HEALPixUNet":
         in_channels = len(in_variable_names)
-        out_channels = len(out_variable_names)
         conv_next_block = conv_next_block_config(in_channels=in_channels)
         down_sampling_block = down_sampling_block_config()
         encoder = encoder_config(
@@ -400,12 +397,12 @@ def _get_test_yaml_files(
     )
 
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".yaml") as f_train:
-        f_train.write(yaml.safe_dump(dataclasses.asdict(train_config)))
+        f_train.write(yaml.dump(dataclasses.asdict(train_config)))
 
     with tempfile.NamedTemporaryFile(
         mode="w", delete=False, suffix=".yaml"
     ) as f_inference:
-        f_inference.write(yaml.safe_dump(dataclasses.asdict(inference_config)))
+        f_inference.write(yaml.dump(dataclasses.asdict(inference_config)))
 
     return f_train.name, f_inference.name
 
@@ -933,7 +930,7 @@ def _create_copy_weights_after_batch_config(
         with tempfile.NamedTemporaryFile(
             mode="w", delete=False, suffix=".yaml"
         ) as new_config_file:
-            new_config_file.write(yaml.safe_dump(config_data))
+            new_config_file.write(yaml.dump(config_data))
 
     return new_config_file.name
 

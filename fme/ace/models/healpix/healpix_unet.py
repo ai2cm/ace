@@ -4,7 +4,8 @@ HEALPix UNet: single forward-pass encoder–decoder stack.
 Adapted from the modulus-uw ``physicsnemo.models.dlwp_healpix.HEALPixUNet``.
 """
 
-from typing import Literal, Sequence
+from collections.abc import Sequence
+from typing import Literal
 
 import torch as th
 import torch.nn as nn
@@ -12,6 +13,8 @@ import torch.nn as nn
 from .healpix_decoder import UNetDecoderConfig
 from .healpix_encoder import UNetEncoderConfig
 from .healpix_layers import HEALPixFoldFaces, HEALPixUnfoldFaces
+
+
 class HEALPixUNet(nn.Module):
     """Feed-forward UNet on the HEALPix mesh.
 
@@ -31,7 +34,9 @@ class HEALPixUNet(nn.Module):
         input_channels: int,
         output_channels: int,
         enable_nhwc: bool = False,
-        hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid",
+        hpx_padding_mode: Literal[
+            "earth2grid", "karlbauer", "isolatitude"
+        ] = "earth2grid",
         nside: Sequence[int] | None = None,
     ):
         """
@@ -69,6 +74,7 @@ class HEALPixUNet(nn.Module):
             raise ValueError(
                 'hpx_padding_mode="isolatitude" requires nside (one int per UNet level)'
             )
+        nside_resolved: tuple[int, ...] | None
         if nside is not None:
             nside_levels = tuple(int(v) for v in nside)
             if len(nside_levels) != levels:
@@ -78,9 +84,10 @@ class HEALPixUNet(nn.Module):
                 )
             if any(v < 1 for v in nside_levels):
                 raise ValueError(f"nside values must be positive; got {nside_levels}")
-            self.nside = nside_levels
+            nside_resolved = nside_levels
         else:
-            self.nside = None
+            nside_resolved = None
+        self.nside = nside_resolved
 
         self.fold = HEALPixFoldFaces(enable_nhwc=enable_nhwc)
         self.unfold = HEALPixUnfoldFaces(num_faces=12, enable_nhwc=enable_nhwc)

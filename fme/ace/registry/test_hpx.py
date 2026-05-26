@@ -1,6 +1,7 @@
 import dataclasses
 import datetime
 import logging
+from typing import Literal
 
 import numpy as np
 import pytest
@@ -128,7 +129,7 @@ def _hpx_unet_configs(
     encoder_n_channels: list[int] | None = None,
     decoder_n_channels: list[int] | None = None,
     output_channels: int = 4,
-    padding_mode: str = "karlbauer",
+    padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "karlbauer",
 ):
     """Build minimal encoder/decoder configs for HEALPixUNet tests."""
     if encoder_n_channels is None:
@@ -249,9 +250,7 @@ def test_hpx_init(shape):
             type="single_module",
             config=dataclasses.asdict(
                 SingleModuleStepConfig(
-                    builder=ModuleSelector(
-                        type="HEALPixUNet", config=hpx_config_data
-                    ),
+                    builder=ModuleSelector(type="HEALPixUNet", config=hpx_config_data),
                     in_names=["x"],
                     out_names=["x"],
                     normalization=NetworkAndLossNormalizationConfig(
@@ -728,9 +727,7 @@ def test_healpix_padding_isolatitude_matches_folded_reference(
     x = th.randn(batch_size * num_faces, c, hw, hw)
 
     ref = isolatitude_pad_folded(x, padding, enable_nhwc)
-    y = HEALPixPaddingIsolatitude(
-        padding=padding, nside=hw, enable_nhwc=enable_nhwc
-    )(x)
+    y = HEALPixPaddingIsolatitude(padding=padding, nside=hw, enable_nhwc=enable_nhwc)(x)
 
     # Gather path uses 0.5 * (g0 + g1) in a form that can differ by ~1 ULP from the
     # reference on some output cells.
@@ -1042,7 +1039,8 @@ def test_healpix_unet_dealias_smoothed():
         nside=levels,
     )
     device = th.device("cuda" if th.cuda.is_available() else "cpu")
-    # Channel count matches prior stacked layout: 2*(3+1) prognostic+decoder + 1 constant
+    # Channel count matches prior stacked layout:
+    # 2*(3+1) prognostic+decoder + 1 constant
     in_ch = 9
     m = HEALPixUNet(
         encoder=enc,
@@ -1243,7 +1241,9 @@ def test_HEALPixUNet_input_channel_validation():
     ).to(device)
 
     bad_input = th.randn(1, 12, in_channels + 1, img, img, device=device)
-    with pytest.raises(ValueError, match=f"Expected input to have {in_channels} channels"):
+    with pytest.raises(
+        ValueError, match=f"Expected input to have {in_channels} channels"
+    ):
         model(bad_input)
 
     bad_ndim = th.randn(1, 12, in_channels, img, img, img, device=device)
@@ -1280,7 +1280,6 @@ def test_HEALPixUNet_forward_padding_mode(mode):
 def test_HEALPixUNet_in_stepper():
     """End-to-end build of a HEALPixUNet through the stepper config."""
     in_channels = 3
-    out_channels = 3
     img = 8
     encoder = encoder_config(
         conv_next_block_config(),
