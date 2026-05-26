@@ -610,11 +610,10 @@ class SmoothedInterpolate(nn.Module):
         self.trim_size = trim_size
         self.interp = th.nn.functional.interpolate
 
-        self.smoother_kernel = th.tensor(
-            [[0.0, 1.0, 0.0], [1.0, 0.0, 1.0], [0.0, 1.0, 0.0]]
-        )
-        self.smoother_kernel = self.smoother_kernel.unsqueeze(0).unsqueeze(0)
-        self.smoother_kernel = self.smoother_kernel.repeat((in_channels, 1, 1, 1))
+        smoother_kernel = th.tensor([[0.0, 1.0, 0.0], [1.0, 0.0, 1.0], [0.0, 1.0, 0.0]])
+        smoother_kernel = smoother_kernel.unsqueeze(0).unsqueeze(0)
+        smoother_kernel = smoother_kernel.repeat((in_channels, 1, 1, 1))
+        self.register_buffer("smoother_kernel", smoother_kernel)
 
     def forward(self, x: th.Tensor) -> th.Tensor:
         """
@@ -624,8 +623,6 @@ class SmoothedInterpolate(nn.Module):
         Returns:
             Upsampled and smoothed tensor, optionally trimmed.
         """
-        self.smoother_kernel = self.smoother_kernel.to(device=x.device, dtype=x.dtype)
-
         x = self.interp(x, scale_factor=self.scale_factor, mode=self.mode)
 
         x = (
