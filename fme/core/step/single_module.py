@@ -416,20 +416,43 @@ class SingleModuleStep(StepABC):
             output_dict.update(secondary_output_dict)
             return output_dict
 
-        output = step_with_adjustments(
-            input=step_input,
-            next_step_input_data=args.next_step_input_data,
-            network_calls=network_call,
-            normalizer=self.normalizer,
-            corrector=self._corrector,
-            ocean=self.ocean,
-            residual_prediction=self._config.residual_prediction,
-            prognostic_names=self.prognostic_names,
-            prescribed_prognostic_names=self._config.prescribed_prognostic_names,
-        )
-
         if self._global_mean_removal is not None:
+            # Run network only; defer corrector/ocean/prescribed to after
+            # inverse_transform so they operate in physical space.
+            output = step_with_adjustments(
+                input=step_input,
+                next_step_input_data=args.next_step_input_data,
+                network_calls=network_call,
+                normalizer=self.normalizer,
+                corrector=None,
+                ocean=None,
+                residual_prediction=self._config.residual_prediction,
+                prognostic_names=self.prognostic_names,
+            )
             output = self._global_mean_removal.inverse_transform(output)
+            output = self._corrector(args.input, output, args.next_step_input_data)
+            if self.ocean is not None:
+                output = self.ocean(args.input, output, args.next_step_input_data)
+            for name in self._config.prescribed_prognostic_names:
+                if name in args.next_step_input_data:
+                    output = {**output, name: args.next_step_input_data[name]}
+                else:
+                    raise ValueError(
+                        f"prescribed_prognostic_name '{name}' "
+                        "not in next_step_input_data"
+                    )
+        else:
+            output = step_with_adjustments(
+                input=step_input,
+                next_step_input_data=args.next_step_input_data,
+                network_calls=network_call,
+                normalizer=self.normalizer,
+                corrector=self._corrector,
+                ocean=self.ocean,
+                residual_prediction=self._config.residual_prediction,
+                prognostic_names=self.prognostic_names,
+                prescribed_prognostic_names=self._config.prescribed_prognostic_names,
+            )
 
         return output
 
@@ -514,7 +537,7 @@ def step_with_adjustments(
     next_step_input_data: TensorMapping,
     network_calls: Callable[[TensorDict], TensorDict],
     normalizer: StandardNormalizer,
-    corrector: CorrectorABC,
+    corrector: CorrectorABC | None,
     ocean: Ocean | None,
     residual_prediction: bool,
     prognostic_names: list[str],

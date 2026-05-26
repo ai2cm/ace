@@ -239,25 +239,7 @@ class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
 
 
 @dataclasses.dataclass
-class GlobalMeanRemovalConfig(abc.ABC):
-    """Base configuration for global mean removal."""
-
-    @abc.abstractmethod
-    def build(
-        self,
-        normalizer: StandardNormalizer,
-        in_names: list[str],
-    ) -> GlobalMeanRemoval: ...
-
-    @abc.abstractmethod
-    def get_n_extra_input_channels(self, in_names: list[str]) -> int: ...
-
-    @abc.abstractmethod
-    def validate_names(self, in_names: list[str], out_names: list[str]) -> None: ...
-
-
-@dataclasses.dataclass
-class SharedGlobalMeanRemovalConfig(GlobalMeanRemovalConfig):
+class SharedGlobalMeanRemovalConfig:
     """Remove a shared reference field's global mean from specified fields.
 
     Fields in ``field_names`` that appear only in the output (not the
@@ -316,7 +298,7 @@ class SharedGlobalMeanRemovalConfig(GlobalMeanRemovalConfig):
 
 
 @dataclasses.dataclass
-class PerChannelGlobalMeanRemovalConfig(GlobalMeanRemovalConfig):
+class PerChannelGlobalMeanRemovalConfig:
     """Remove each field's own per-sample global mean.
 
     Unlike ``SharedGlobalMeanRemovalConfig``, per-channel removal
