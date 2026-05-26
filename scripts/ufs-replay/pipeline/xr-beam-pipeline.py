@@ -110,9 +110,13 @@ ATMO_FORCING_VARS = {
     "uswrf_ave": "USWRFsfc",
     "lhtfl_ave": "LHTFLsfc",
     "shtfl_ave": "SHTFLsfc",
-    "prate_ave": "PRATEsfc",
-    "frozr": "total_frozen_precipitation_rate",
+    "prateb_ave": "PRATEsfc",
 }
+
+# FV3 accumulated frozen precip variables — converted to a rate in the
+# pipeline by differencing consecutive timesteps.  Not included in
+# ATMO_FORCING_VARS because they need special handling.
+FROZEN_PRECIP_ACCUM_VARS = ["frozr", "tsnowp"]
 
 # Sea-ice variables from FV3
 ICE_VARS = {"icec": "ocean_sea_ice_fraction", "icetk": "HI"}
@@ -752,9 +756,17 @@ def _process_chunk(
     ice_names = [k for k in ICE_VARS if k in ds_atmo_6h]
     ds_ice = ds_atmo_6h[ice_names].rename({k: ICE_VARS[k] for k in ice_names})
 
+    # Derived atmo variables (already have their final names)
+    derived_atmo_names = [
+        v for v in ["total_frozen_precipitation_rate"] if v in ds_atmo_6h
+    ]
+    ds_derived_atmo = ds_atmo_6h[derived_atmo_names] if derived_atmo_names else None
+
     # --- Merge ---
     keep_coords = {"time", "lat", "lon"}
     to_merge = [ds_ocean_2d, ds_levels, ds_forcing, ds_ice]
+    if ds_derived_atmo is not None:
+        to_merge.append(ds_derived_atmo)
     if not vertical_coarsening_indices:
         land_frac = (1.0 - mask_2d).astype(np.float32)
         land_frac.attrs = {"long_name": "land fraction", "units": "fraction"}
@@ -880,6 +892,25 @@ def _average_atmo_chunk(
             "Atmosphere dataset has 0 timesteps — check that the atmo zarr "
             "time range overlaps the ocean range and that calendars match."
         )
+
+    # Derive frozen precipitation rate from accumulated fields before
+    # resampling.  frozr (graupel) and tsnowp (snow) are running totals
+    # in kg/m²; differencing gives the 3h accumulation, dividing by dt
+    # gives a rate in kg/m²/s.
+    accum_vars = [v for v in FROZEN_PRECIP_ACCUM_VARS if v in ds_atmo]
+    if accum_vars:
+        dt_seconds = ATMO_TIME_STEP * 3600.0  # 3h → seconds
+        frozen_accum = sum(ds_atmo[v] for v in accum_vars)
+        frozen_rate = frozen_accum.diff("time") / dt_seconds
+        frozen_rate = frozen_rate.clip(min=0)
+        frozen_rate.attrs = {
+            "long_name": "total frozen precipitation rate",
+            "units": "kg/m**2/s",
+        }
+        ds_atmo = ds_atmo.drop_vars(accum_vars)
+        # diff reduces time by 1; align to the later timestamp
+        ds_atmo = ds_atmo.isel(time=slice(1, None))
+        ds_atmo["total_frozen_precipitation_rate"] = frozen_rate
 
     ds_atmo_6h = ds_atmo.resample(time="6h", closed="right", label="right").mean()
 
@@ -1252,7 +1283,11 @@ def main():
     # Atmosphere: need 3-hourly data spanning the full ocean range + buffer
     atmo_start = start_time - datetime.timedelta(hours=6)
     atmo_end_padded = end_time + datetime.timedelta(hours=3)
-    atmo_load_vars = list(ATMO_FORCING_VARS.keys()) + list(ICE_VARS.keys())
+    atmo_load_vars = (
+        list(ATMO_FORCING_VARS.keys())
+        + list(ICE_VARS.keys())
+        + FROZEN_PRECIP_ACCUM_VARS
+    )
     ds_atmo = open_atmo(atmo_load_vars, atmo_start, atmo_end_padded)
     logging.info("Atmo dataset: %s", dict(ds_atmo.sizes))
 
