@@ -856,11 +856,10 @@ def test_healpix_layer_conv_same_geometry(mode):
     assert th.isfinite(y).all()
 
 
-@pytest.mark.skipif(not th.cuda.is_available(), reason="earth2grid requires CUDA")
 @pytest.mark.skipif(not have_earth2grid, reason="earth2grid not installed")
 def test_healpix_layer_earth2grid():
     h = 16
-    x = _folded_padding_dealias(h=h, device=th.device("cuda"))
+    x = _folded_padding_dealias(h=h)
     layer = HEALPixLayer(
         nn.Conv2d,
         in_channels=3,
@@ -869,7 +868,7 @@ def test_healpix_layer_earth2grid():
         stride=1,
         padding="same",
         hpx_padding_mode="earth2grid",
-    ).cuda()
+    )
     y = layer(x)
     assert y.shape == x.shape
     assert th.isfinite(y).all()
@@ -902,7 +901,7 @@ def test_healpix_layer_uses_mode_selected_padding_class():
     )
     assert isinstance(i_layer.layers[0], HEALPixPaddingIsolatitude)
 
-    if have_earth2grid and th.cuda.is_available():
+    if have_earth2grid:
         e_layer = HEALPixLayer(
             nn.Conv2d,
             in_channels=3,

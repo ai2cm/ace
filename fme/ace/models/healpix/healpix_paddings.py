@@ -106,14 +106,13 @@ def make_hpx_padding_layer(
     ------
     ValueError
         Unknown mode, isolatitude without ``nside``, or earth2grid when earth2grid
-        is unavailable or CUDA is not available.
+        is not installed.
     """
     if hpx_padding_mode == "earth2grid":
-        if not have_earth2grid or not th.cuda.is_available():
+        if not have_earth2grid:
             raise ValueError(
-                "hpx_padding_mode=earth2grid requires earth2grid import and CUDA "
-                f"(have_earth2grid={have_earth2grid}, "
-                f"th.cuda.is_available()={th.cuda.is_available()})."
+                "hpx_padding_mode=earth2grid requires the earth2grid package "
+                f"(have_earth2grid={have_earth2grid})."
             )
         return HEALPixPaddingv2(padding=padding, enable_nhwc=enable_nhwc)
     if hpx_padding_mode == "karlbauer":
