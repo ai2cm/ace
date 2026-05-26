@@ -362,12 +362,15 @@ class SingleModuleStep(StepABC):
         """
 
         def network_call(input_norm: TensorDict) -> TensorDict:
-            if args.data_mask is not None:
-                input_norm = _apply_input_mask(input_norm, args.data_mask)
+            effective_mask = (
+                args.channel_mask if args.channel_mask is not None else args.data_mask
+            )
+            if effective_mask is not None:
+                input_norm = _apply_input_mask(input_norm, effective_mask)
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
             if self._config.include_channel_mask_inputs:
                 mask_dict = _build_channel_mask_dict(
-                    self.in_names, args.data_mask, input_tensor
+                    self.in_names, effective_mask, input_tensor
                 )
                 mask_tensor = self.in_packer.pack(mask_dict, axis=self.CHANNEL_DIM)
                 input_tensor = torch.cat(
@@ -432,12 +435,17 @@ def _apply_input_mask(input_norm: TensorDict, data_mask: TensorMapping) -> Tenso
     For each variable in data_mask with False entries, sets those batch
     members' values to 0 in the normalized input. This is equivalent to
     replacing with the climatological mean in physical space.
+
+    Mask shape may be [batch] or [batch, n_ic]; data shape may be
+    [batch, ...spatial...] or [batch, n_ic, ...spatial...].
     """
     result = dict(input_norm)
     for name, mask in data_mask.items():
         if name in result:
-            # mask shape: [batch], data shape: [batch, ...spatial...]
-            broadcast_mask = mask.view(mask.shape[0], *([1] * (result[name].ndim - 1)))
+            extra_dims = result[name].ndim - mask.ndim
+            broadcast_mask = mask.to(device=result[name].device).view(
+                *mask.shape, *([1] * extra_dims)
+            )
             result[name] = torch.where(broadcast_mask, result[name], 0.0)
     return result
 
@@ -514,10 +522,20 @@ def step_with_adjustments(
     if residual_prediction:
         output_norm = add_names(input_norm, output_norm, prognostic_names)
     output = normalizer.denormalize(output_norm)
+    # Build a NaN-free view of input for the corrector and ocean model.
+    # When variable masking augmentation fills IC channels with NaN, those NaNs
+    # survive normalization's fill (which only applies to input_norm) and would
+    # propagate through area-weighted means in physics corrections, producing NaN
+    # outputs and zero gradients.  Replacing with the normalizer's denormalized
+    # estimate (climatological mean for masked variables) keeps corrections valid.
+    corrector_input: TensorMapping = {
+        **dict(input),
+        **normalizer.denormalize(input_norm),
+    }
     if corrector is not None:
-        output = corrector(input, output, next_step_input_data)
+        output = corrector(corrector_input, output, next_step_input_data)
     if ocean is not None:
-        output = ocean(input, output, next_step_input_data)
+        output = ocean(corrector_input, output, next_step_input_data)
     for name in prescribed_prognostic_names:
         if name in next_step_input_data:
             output = {**output, name: next_step_input_data[name]}

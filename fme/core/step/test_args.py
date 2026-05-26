@@ -13,11 +13,16 @@ def test_apply_input_process_func_propagates_metadata():
         "a": torch.ones(n_batch, dtype=torch.bool),
         "b": torch.zeros(n_batch, dtype=torch.bool),
     }
+    channel_mask = {
+        "a": torch.ones(n_batch, dtype=torch.bool),
+        "b": torch.zeros(n_batch, dtype=torch.bool),
+    }
     args = StepArgs(
         input=input_data,
         next_step_input_data=next_step,
         labels=labels,
         data_mask=data_mask,
+        channel_mask=channel_mask,
     )
 
     def double(tensors):
@@ -35,8 +40,17 @@ def test_apply_input_process_func_propagates_metadata():
     assert result.data_mask is not None
     for name in data_mask:
         torch.testing.assert_close(result.data_mask[name], data_mask[name])
+    assert result.channel_mask is not None
+    for name in channel_mask:
+        torch.testing.assert_close(result.channel_mask[name], channel_mask[name])
 
-    known_attrs = {"input", "next_step_input_data", "labels", "data_mask"}
+    known_attrs = {
+        "input",
+        "next_step_input_data",
+        "labels",
+        "data_mask",
+        "channel_mask",
+    }
     actual_attrs = {
         name
         for name in vars(result)

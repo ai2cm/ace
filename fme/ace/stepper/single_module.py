@@ -12,6 +12,10 @@ import torch
 import xarray as xr
 from torch import nn
 
+from fme.ace.data_loading.augmentation import (
+    VariableMaskingConfig,
+    VariableMaskingModifier,
+)
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
@@ -1102,6 +1106,7 @@ class Stepper:
         optimizer: OptimizationABC,
         labels: BatchLabels | None,
         data_mask: TensorMapping | None = None,
+        channel_mask: TensorMapping | None = None,
     ) -> Generator[TensorDict, None, None]:
         state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
         for step in range(n_forward_steps):
@@ -1122,6 +1127,11 @@ class Stepper:
             def checkpoint(module):
                 return optimizer.checkpoint(module, step=step)
 
+            # channel_mask applies only to the IC step (step 0): explicit
+            # masking is in the IC; subsequent inputs are model predictions.
+            # Real missing-data variables stay absent every step via data_mask.
+            step_channel_mask = channel_mask if step == 0 else data_mask
+
             with optimizer.autocast():
                 state = self.step(
                     StepArgs(
@@ -1129,6 +1139,7 @@ class Stepper:
                         next_step_input_data=next_step_input_dict,
                         labels=labels,
                         data_mask=data_mask,
+                        channel_mask=step_channel_mask,
                     ),
                     wrapper=checkpoint,
                 )
@@ -1416,6 +1427,9 @@ class TrainStepperConfig:
             be less than or equal to the number of timesteps present
             in the training dataset samples.
         parameter_init: The parameter initialization configuration for fine-tuning.
+        ic_masking: Optional config for randomly masking IC variables per sample.
+            Masking is applied explicitly in the training loop; no NaN injection
+            into the data.
     """
 
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
@@ -1425,6 +1439,7 @@ class TrainStepperConfig:
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
+    ic_masking: VariableMaskingConfig | None = None
 
     def __post_init__(self):
         if self.n_ensemble == -1:
@@ -1635,6 +1650,27 @@ class TrainStepper(
             )
         input_ensemble_data = input_data.as_batch_data().broadcast_ensemble(n_ensemble)
         forcing_ensemble_data = data.broadcast_ensemble(n_ensemble)
+        # Build explicit IC channel mask from masking config (no NaN injection).
+        ic_mask: dict[str, torch.Tensor] | None = None
+        if self._config.ic_masking is not None:
+            ref = next(iter(forcing_ensemble_data.data.values()))
+            ic_mask = VariableMaskingModifier(self._config.ic_masking).sample_masks(
+                self._prognostic_names,
+                ref.shape[0],
+                ref.device,
+            )
+        # Merge with real missing-data mask so both are reflected in channel_mask.
+        channel_mask: dict[str, torch.Tensor] | None = None
+        if ic_mask is not None or forcing_ensemble_data.data_mask is not None:
+            channel_mask = {}
+            if forcing_ensemble_data.data_mask is not None:
+                channel_mask.update(forcing_ensemble_data.data_mask)
+            if ic_mask is not None:
+                for k, v in ic_mask.items():
+                    if k in channel_mask:
+                        channel_mask[k] = channel_mask[k] & v
+                    else:
+                        channel_mask[k] = v
         output_generator = self._stepper.predict_generator(
             input_ensemble_data.data,
             forcing_ensemble_data.data,
@@ -1642,6 +1678,7 @@ class TrainStepper(
             optimization,
             labels=input_ensemble_data.labels,
             data_mask=input_ensemble_data.data_mask,
+            channel_mask=channel_mask,
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)
