@@ -248,10 +248,14 @@ historical from ssp245 from ssp585.
   - Historical (≥1959): NOAA Mauna Loa annual mean record. Differs
     from the CMIP6-prescribed Meinshausen et al. values by <1 ppm at
     any year, functionally equivalent for emulator training.
-  - Pre-1959: constant-extrapolation fallback to the 1959 NOAA value
-    (315.97 ppm). For pre-1959 scientific exactness, point the time
-    subset to ≥1959 — the published Meinshausen historical file
-    isn't currently indexed on ESGF.
+  - Pre-1959 (1940–1958): hardcoded NASA GISS pre-Mauna-Loa
+    composite (`_GISS_PRE_MAUNA_LOA_CO2` in `external_forcings.py`)
+    — Etheridge et al. (1996) Law Dome ice-core record merged with
+    the Scripps Mauna Loa series starting March 1958, GISS-recalibrated.
+    Values rise from 311.3 ppm (1940) to 315.34 ppm (1958),
+    capturing the small WWII-era growth slowdown. Agrees with the
+    (retracted) CMIP6-vintage UoM-CMIP-1-2-0 historical file to <1
+    ppm at any year.
   - SSP245 / SSP585: UoM input4MIPs annual files (Meinshausen et al.
     2017, 2015–2500). For 2015 onwards the SSP file values supersede
     NOAA.
@@ -312,7 +316,7 @@ file isn't available:
 | Variable | Period | Used | Reason |
 |---|---|---|---|
 | `input4mips_co2` | Historical 1959–2014 | NOAA Mauna Loa annual | UoM-CMIP-1-2-0 not indexed on ESGF; NOAA values within <1 ppm at any year |
-| `input4mips_co2` | Historical pre-1959 | constant-extrapolation to 1959 | same — no usable archived source |
+| `input4mips_co2` | Historical 1940-1958 | NASA GISS Law-Dome + Scripps composite | UoM-CMIP-1-2-0 not indexed on ESGF; the hardcoded annual values (311.3 → 315.34 ppm) agree with the CMIP6 prescribed record to <1 ppm |
 | `input4mips_so2` / `_bc` | Historical 1750–2023 | CMIP7-vintage CEDS-CMIP-2025-04-18 | CMIP6-vintage CEDS-2017-05-18 retracted from ESGF |
 | `luh2_forest` | All years | bilinear regrid | LUH2 native files don't expose xesmf-compatible lat/lon bounds; bilinear of a fraction field has bounded undershoot/overshoot near sharp land/ocean transitions |
 
