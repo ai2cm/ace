@@ -284,6 +284,72 @@ def test_block_speed():
     )
 
 
+def test_remove_latent_global_mean():
+    torch.manual_seed(0)
+    input_channels = 2
+    output_channels = 3
+    img_shape = (9, 18)
+    n_samples = 4
+    device = get_device()
+    params = SFNONetConfig(
+        embed_dim=16,
+        num_layers=2,
+        remove_latent_global_mean=True,
+    )
+    model = get_lat_lon_sfnonet(
+        params=params,
+        img_shape=img_shape,
+        in_chans=input_channels,
+        out_chans=output_channels,
+    ).to(device)
+    x = torch.randn(n_samples, input_channels, *img_shape, device=device)
+    context = Context(
+        embedding_scalar=torch.zeros(n_samples, 0, device=device),
+        labels=torch.zeros(n_samples, 0, device=device),
+        noise=None,
+        embedding_pos=None,
+    )
+    output = model(x, context)
+    assert output.shape == (n_samples, output_channels, *img_shape)
+    output.sum().backward()
+
+
+def test_remove_latent_global_mean_zeroes_spatial_mean():
+    torch.manual_seed(0)
+    input_channels = 2
+    img_shape = (9, 18)
+    n_samples = 2
+    device = get_device()
+    params = SFNONetConfig(
+        embed_dim=16,
+        num_layers=1,
+        remove_latent_global_mean=True,
+        pos_embed=False,
+        drop_rate=0.0,
+    )
+    model = get_lat_lon_sfnonet(
+        params=params,
+        img_shape=img_shape,
+        in_chans=input_channels,
+        out_chans=input_channels,
+    ).to(device)
+    x = torch.randn(n_samples, input_channels, *img_shape, device=device)
+
+    with torch.no_grad():
+        encoded = model.encoder(x)
+    latent_mean = encoded.mean(dim=(-2, -1))
+    assert not torch.allclose(
+        latent_mean, torch.zeros_like(latent_mean), atol=1e-5
+    ), "encoder output should have non-zero spatial mean for this test to be meaningful"
+
+    with torch.no_grad():
+        encoded_demeaned = encoded - encoded.mean(dim=(-2, -1), keepdim=True)
+    demeaned_mean = encoded_demeaned.mean(dim=(-2, -1))
+    torch.testing.assert_close(
+        demeaned_mean, torch.zeros_like(demeaned_mean), atol=1e-6, rtol=0.0
+    )
+
+
 def _make_spectral_conv(nlat, nlon, embed_dim, preserve_global_mean, bias=False):
     dist = Distributed.get_instance()
     modes_lat = nlat
