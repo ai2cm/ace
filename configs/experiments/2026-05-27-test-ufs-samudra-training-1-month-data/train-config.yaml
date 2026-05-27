@@ -7,21 +7,21 @@ ema:
   faster_decay_at_start: false
 max_epochs: 2
 inference:
-  - n_forward_steps: 10 # just under 20 years
+  - n_forward_steps: 10
     forward_steps_in_memory: 10
     loader:
       start_indices:
         times:
-          # 8 evenly spaced, spanning training and validation sets
           - '2023-10-01T12:00:00'
           - '2023-10-02T12:00:00'
       dataset:
-        - data_path: /climate-default
-          file_pattern: ufs-replay-test.zarr
-          engine: zarr
+        data_path: /climate-default
+        file_pattern: ufs-replay-test.zarr
+        engine: zarr
       num_data_workers: 4
     aggregator:
-      log_histograms: false
+      histogram:
+        enabled: true
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -33,14 +33,15 @@ train_loader:
   batch_size: 16
   num_data_workers: 8
   dataset:
-    - data_path: /climate-default
-      file_pattern: ufs-replay-test.zarr
-      engine: zarr
+    data_path: /climate-default
+    file_pattern: ufs-replay-test.zarr
+    engine: zarr
 validation:
-  batch_size: 2
-  num_data_workers: 2
-  dataset:
-    - data_path: /climate-default
+  loader:
+    batch_size: 2
+    num_data_workers: 2
+    dataset:
+      data_path: /climate-default
       file_pattern: ufs-replay-test.zarr
       engine: zarr
       subset:
