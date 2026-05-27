@@ -1,0 +1,58 @@
+experiment_dir: /climate-default/home/annak/2026-05-27-conus-winter
+patch:
+  divide_generation: true
+  composite_prediction: true
+  coarse_horizontal_overlap: 1
+model:
+  denoising_expert_configs:
+    - checkpoint_config:
+        checkpoint_path: /checkpoints_low_sigma/best.ckpt
+        rename:
+          eastward_wind_at_ten_meters: UGRD10m
+          northward_wind_at_ten_meters: VGRD10m
+          air_temperature_at_two_meters: TMP2m
+      sigma_min: 0.005
+      sigma_max: 200.0
+    - checkpoint_config:
+        checkpoint_path: /checkpoints_high_sigma/best.ckpt
+        rename:
+          eastward_wind_at_ten_meters: UGRD10m
+          northward_wind_at_ten_meters: VGRD10m
+          air_temperature_at_two_meters: TMP2m
+      sigma_min: 200.0
+      sigma_max: 2000.0
+  num_diffusion_generation_steps: 18
+  churn: 0.0
+data:
+  coarse:
+    merge:
+      - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+        file_pattern: 100km.zarr
+        engine: zarr
+      - data_path:  /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+        file_pattern: prmsl_100km.zarr
+        engine: zarr
+  batch_size: 12
+  num_data_workers: 2
+  strict_ensemble: false
+outputs:
+  - name: "CONUS_winter"
+    save_vars: ["PRATEsfc", "TMP2m"]
+    n_ens: 2
+    max_samples_per_gpu: 32
+    time_range:
+      start_time: "2022-09-01T00:00:00"
+      stop_time: "2023-03-31T18:00:00"
+      step: 3
+    lat_extent:
+      start: 22.0
+      stop: 50.0
+    lon_extent:
+      start: 230.0
+      stop: 295.0
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: multivariate-downscaling
+  entity: ai2cm
