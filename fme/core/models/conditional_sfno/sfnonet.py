@@ -89,6 +89,9 @@ class SFNONetConfig:
             the l=0 (global mean) spherical harmonic coefficient, so that
             global mean changes can only result from local operations
             (norms, MLPs, skip connections).
+        remove_latent_global_mean: If True, remove the global mean (across
+            the last two spatial dimensions) from each channel after the
+            encoder and before the FNO blocks.
     """
 
     embed_dim: int = 256
@@ -117,6 +120,7 @@ class SFNONetConfig:
     spectral_lora_rank: int = 0
     spectral_lora_alpha: float | None = None
     filter_preserves_global_mean: bool = False
+    remove_latent_global_mean: bool = False
 
 
 # heuristic for finding theta_cutoff
@@ -533,6 +537,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         self.spectral_lora_rank = params.spectral_lora_rank
         self.spectral_lora_alpha = params.spectral_lora_alpha
         self.filter_preserves_global_mean = params.filter_preserves_global_mean
+        self.remove_latent_global_mean = params.remove_latent_global_mean
 
         self.trans_down = trans_down
         self.itrans_up = itrans_up
@@ -720,6 +725,9 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         # maybe clean the padding just in case
 
         x = self.pos_drop(x)
+
+        if self.remove_latent_global_mean:
+            x = x - x.mean(dim=(-2, -1), keepdim=True)
 
         x = self._forward_features(x, context)
 
