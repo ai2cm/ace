@@ -16,6 +16,12 @@ forcing_loader:
       file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
       engine: zarr
       n_repeats: 6
+  ocean:
+    dataset:
+      data_path: /climate-default
+      file_pattern: 2025-10-20-cm4-piControl-200yr-no-smoothing-coupled-ocean.zarr
+      engine: zarr
+      n_repeats: 6
   num_data_workers: 1
 initial_condition:
   ocean:
