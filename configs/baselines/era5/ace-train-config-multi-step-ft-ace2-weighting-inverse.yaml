@@ -1,5 +1,4 @@
 # arg: --dataset andrep/2026-03-19-era5-1deg-8layer-stats-1990-2019:/statsdata
-# arg: --dataset 01KSJKJKXRHA2Q0QCW91B1P8EG:/weights
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
@@ -27,7 +26,8 @@ inference:
         engine: zarr
       num_data_workers: 8
     aggregator:
-      log_histograms: true
+      histogram:
+        enabled: true
       time_mean_reference_data: /statsdata/time-mean.nc
 logging:
   log_to_screen: true
@@ -78,25 +78,31 @@ optimization:
     weight_decay: 0.01
 stepper_training:
   n_ensemble: 2
-  parameter_init:
-    weights_path: /weights/training_checkpoints/best_ckpt.tar
-  n_forward_steps:
-    outcomes:
-      - steps: 1
-        probability: 0.6
-      - steps: 2
-        probability: 0.2
-      - steps: 4
-        probability: 0.1
-      - steps: 12
-        probability: 0.05
-      - steps: 20
-        probability: 0.05
-  optimize_last_step_only: true
+  n_forward_steps: 1
   loss:
     type: EnsembleLoss
+    weights:
+      air_temperature_0: 2.0
+      air_temperature_1: 2.0
+      eastward_wind_0: 2.0
+      northward_wind_0: 2.0
+      specific_total_water_0: 2.0
+      specific_total_water_1: 4.0
+      specific_total_water_2: 4.0
+      specific_total_water_2: 2.0
+      PRATEsfc: 2.0
+      h500: 10
+      TMP850: 5
+      Q2m: 1.0
+      DLWRFsfc: 2
+      ULWRFsfc: 5
+      USWRFsfc: 2
+      DSWRFsfc: 2
+      USWRFtoa: 2
+      tendency_of_total_water_path_due_to_advection: 0.5
     kwargs:
       crps_weight: 0.9
       energy_score_weight: 0.1
 stepper:
   checkpoint_path: /weights/training_checkpoints/best_ckpt.tar
+
