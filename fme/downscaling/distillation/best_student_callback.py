@@ -136,20 +136,26 @@ class BestStudentCheckpointCallback:
             sampling for validation.  Should match the distillation
             ``student_sample_steps`` so validation reflects the trajectory
             the student was actually trained on.  Defaults to 4.
-        tail_percentile: Upper-tail percentile to track per variable
-            (default 99.99).  Logged as ``val/tail_<pct>_<var>`` =
-            student_pXX / target_pXX (correct direction; values < 1 mean
-            the student under-predicts the tail, > 1 means it over-predicts).
-            CRPS remains the best-student selection criterion; this metric is
-            for monitoring only.
+        tail_percentiles: Upper-tail percentiles to track per variable
+            (default ``[99.99, 99.9999]``).  Each is logged as
+            ``val/tail_<pct>_<var>`` = student_pXX / target_pXX (values < 1
+            mean the student under-predicts the tail, > 1 means it over-
+            predicts).  CRPS remains the ``best_checkpoint_path`` selection
+            criterion; see ``best_tail_checkpoint_path`` for tail-driven
+            selection.
         tail_hist_ranges: Per-variable ``(lo, hi)`` ranges used to bin values
             for percentile estimation.  Variables not in this dict get the
             tail metric skipped (CRPS is still computed).  Defaults to
             ``{"PRATEsfc": (0.0, 0.1)}`` (kg/m²/s); extend for other targets.
         tail_hist_bins: Number of equal-width bins inside each variable's
-            range (default 10000).  Resolution at the 99.99th percentile is
-            ``(hi - lo) / tail_hist_bins`` — for PRATEsfc that's 1e-5
-            kg/m²/s, much finer than the tail value itself.
+            range (default 10000).  Resolution is ``(hi - lo) / tail_hist_bins``
+            — for PRATEsfc that's 1e-5 kg/m²/s.
+        best_tail_checkpoint_path: Optional destination path for a checkpoint
+            selected by the tail metric rather than CRPS.  When provided,
+            saves whenever the highest-percentile mean-across-variables tail
+            ratio is closest to 1.0 (minimises ``|ratio - 1|``).  Useful when
+            CRPS has plateaued but tail under/over-prediction is still
+            evolving.
 
     To run validation on less data, thin at the data-config level via
     ``subset.step`` in the val YAML (see ``fme.core.dataset.time.TimeSlice``).
@@ -166,14 +172,16 @@ class BestStudentCheckpointCallback:
         coarse_patch_yx: tuple[int, int] | None = None,
         n_student_samples: int = 4,
         student_sample_steps: int = 4,
-        tail_percentile: float = 99.99,
+        tail_percentiles: list[float] | None = None,
         tail_hist_ranges: dict[str, tuple[float, float]] | None = None,
         tail_hist_bins: int = 10000,
+        best_tail_checkpoint_path: str | None = None,
     ) -> None:
-        if not 0 < tail_percentile < 100:
-            raise ValueError(
-                f"tail_percentile must be in (0, 100), got {tail_percentile}"
-            )
+        self._tail_percentiles: list[float] = (
+            [99.99, 99.9999] if tail_percentiles is None else list(tail_percentiles)
+        )
+        if not all(0 < p < 100 for p in self._tail_percentiles):
+            raise ValueError("All tail_percentiles must be in (0, 100)")
         self._val_dataset_path = val_dataset_path
         self._coarse_val_data = coarse_val_data
         self._teacher_model = teacher_model
@@ -181,14 +189,17 @@ class BestStudentCheckpointCallback:
         self._coarse_patch_yx = coarse_patch_yx
         self._n_student_samples = n_student_samples
         self._student_sample_steps = student_sample_steps
-        self._tail_percentile = tail_percentile
         self._tail_hist_ranges: dict[str, tuple[float, float]] = (
             dict(tail_hist_ranges)
             if tail_hist_ranges is not None
             else {"PRATEsfc": (0.0, 0.1)}
         )
         self._tail_hist_bins = tail_hist_bins
+        self._best_tail_checkpoint_path = best_tail_checkpoint_path
         self._best_crps = float("inf")
+        # Tracks min |ratio - 1.0| for best_tail_checkpoint_path selection,
+        # using the highest (most extreme) percentile in tail_percentiles.
+        self._best_tail_score = float("inf")
         self._teacher_ds: xr.Dataset | None = None
 
     # ------------------------------------------------------------------
@@ -209,53 +220,71 @@ class BestStudentCheckpointCallback:
 
         student: AceDiffusionTeacher = model.net
         # Validation runs on ALL ranks (sharded) — see class docstring.
-        crps_by_var, tail_by_var = self._compute_validation_crps(student)
+        crps_by_var, tail_by_pct = self._compute_validation_crps(student)
         crps = crps_by_var["mean"]
 
         if not is_rank0():
             return
 
-        # CRPS remains the best-student selection criterion.  The tail metric
-        # is logged for monitoring but does not drive checkpoint saving.
+        from fme.downscaling.distillation.student_checkpoint import (
+            save_student_checkpoint,
+        )
+
+        # CRPS-best checkpoint.
+        tail_summary = self._tail_summary_str(tail_by_pct)
         if crps < self._best_crps:
             self._best_crps = crps
-            from fme.downscaling.distillation.student_checkpoint import (
-                save_student_checkpoint,
-            )
-
             save_student_checkpoint(
                 student_module=student._ace_module,
                 teacher=self._teacher_model,
                 path=self._best_checkpoint_path,
             )
-            tail_str = (
-                f", tail_{self._tail_percentile}={tail_by_var.get('mean'):.4f}"
-                if tail_by_var
-                else ""
-            )
             logger.info(
                 f"[BestStudentCallback] iteration={iteration} CRPS={crps:.6f}"
-                f"{tail_str} (new best) → {self._best_checkpoint_path}"
+                f"{tail_summary} (new best) → {self._best_checkpoint_path}"
             )
         else:
-            tail_str = (
-                f", tail_{self._tail_percentile}={tail_by_var.get('mean'):.4f}"
-                if tail_by_var
-                else ""
-            )
             logger.info(
                 f"[BestStudentCallback] iteration={iteration} CRPS={crps:.6f}"
-                f"{tail_str} (best={self._best_crps:.6f}, no improvement)"
+                f"{tail_summary} (best={self._best_crps:.6f}, no improvement)"
             )
+
+        # Tail-best checkpoint (highest percentile, mean across vars, |ratio-1|).
+        if self._best_tail_checkpoint_path and self._tail_percentiles:
+            top_pct = max(self._tail_percentiles)
+            top_by_var = tail_by_pct.get(top_pct, {})
+            top_mean = top_by_var.get("mean")
+            if top_mean is not None and np.isfinite(top_mean):
+                tail_score = abs(top_mean - 1.0)
+                if tail_score < self._best_tail_score:
+                    self._best_tail_score = tail_score
+                    save_student_checkpoint(
+                        student_module=student._ace_module,
+                        teacher=self._teacher_model,
+                        path=self._best_tail_checkpoint_path,
+                    )
+                    logger.info(
+                        f"[BestStudentCallback] iteration={iteration}"
+                        f" tail_{top_pct}={top_mean:.4f} |ratio-1|={tail_score:.4f}"
+                        f" (new tail best) → {self._best_tail_checkpoint_path}"
+                    )
 
         # Log after the best-checkpoint update so val/crps_best includes
         # this iteration's result.
-        self._log_to_wandb(crps_by_var, tail_by_var, iteration)
+        self._log_to_wandb(crps_by_var, tail_by_pct, iteration)
+
+    def _tail_summary_str(self, tail_by_pct: dict[float, dict[str, float]]) -> str:
+        parts = []
+        for pct in sorted(tail_by_pct):
+            mean = tail_by_pct[pct].get("mean")
+            if mean is not None:
+                parts.append(f"tail_{pct}={mean:.4f}")
+        return (", " + ", ".join(parts)) if parts else ""
 
     def _log_to_wandb(
         self,
         crps_by_var: dict[str, float],
-        tail_by_var: dict[str, float],
+        tail_by_pct: dict[float, dict[str, float]],
         iteration: int,
     ) -> None:
         """Log per-variable + mean CRPS and tail-fraction scalars to wandb."""
@@ -270,9 +299,11 @@ class BestStudentCheckpointCallback:
         payload: dict[str, float] = {f"val/crps_{k}": v for k, v in crps_by_var.items()}
         if np.isfinite(self._best_crps):
             payload["val/crps_best"] = self._best_crps
-        pct = self._tail_percentile
-        for k, v in tail_by_var.items():
-            payload[f"val/tail_{pct}_{k}"] = v
+        for pct, by_var in tail_by_pct.items():
+            for k, v in by_var.items():
+                payload[f"val/tail_{pct}_{k}"] = v
+        if self._best_tail_checkpoint_path and np.isfinite(self._best_tail_score):
+            payload["val/tail_best_score"] = self._best_tail_score
         wandb.log(payload, step=iteration)
 
     def __getattr__(self, name: str):
@@ -292,13 +323,14 @@ class BestStudentCheckpointCallback:
     @torch.no_grad()
     def _compute_validation_crps(
         self, student: AceDiffusionTeacher
-    ) -> tuple[dict[str, float], dict[str, float]]:
-        """Return ``(crps_by_var, tail_by_var)``.
+    ) -> tuple[dict[str, float], dict[float, dict[str, float]]]:
+        """Return ``(crps_by_var, tail_by_pct)``.
 
-        ``crps_by_var`` has shape ``{"<var>": crps, "mean": <var-averaged>}``.
-        ``tail_by_var`` has shape ``{"<var>": student_pXX / target_pXX,
-        "mean": <var-averaged>}`` (XX = ``self._tail_percentile``).  Variables
-        not in ``self._tail_hist_ranges`` are absent from ``tail_by_var``.
+        ``crps_by_var``: ``{"<var>": crps, "mean": <var-averaged>}``.
+        ``tail_by_pct``: ``{percentile: {"<var>": student_pXX / target_pXX,
+        "mean": <var-averaged>}}`` for each entry in ``self._tail_percentiles``.
+        Variables not in ``self._tail_hist_ranges`` are absent from every
+        inner dict.
 
         Sampling uses the FastGen "predict x0 → renoise" loop (via
         ``fastgen_sampler``) instead of ACE's Heun sampler so validation
@@ -547,12 +579,10 @@ class BestStudentCheckpointCallback:
         # formed.  In practice every rank sees the same variable set because
         # the val data is replicated across ranks (force_non_distributed=True)
         # — this is defensive.
-        tail_result: dict[str, float] = {}
         tail_keys = sorted(
             v for v in self._tail_hist_ranges if v in teacher_ds.data_vars
         )
         for var in tail_keys:
-            lo, hi = self._tail_hist_ranges[var]
             if var not in hist_student:
                 hist_student[var] = torch.zeros(
                     self._tail_hist_bins, device=device, dtype=torch.float64
@@ -563,16 +593,23 @@ class BestStudentCheckpointCallback:
             if world_size > 1:
                 dist.all_reduce(hist_student[var], op=dist.ReduceOp.SUM)
                 dist.all_reduce(hist_target[var], op=dist.ReduceOp.SUM)
-            student_p = _quantile_from_histogram(
-                hist_student[var], lo, hi, self._tail_percentile / 100.0
-            )
-            target_p = _quantile_from_histogram(
-                hist_target[var], lo, hi, self._tail_percentile / 100.0
-            )
-            if target_p is None or student_p is None or target_p <= 0:
-                continue
-            tail_result[var] = student_p / target_p
-        if tail_result:
-            tail_result["mean"] = float(np.mean(list(tail_result.values())))
 
-        return crps_result, tail_result
+        tail_by_pct: dict[float, dict[str, float]] = {}
+        for pct in self._tail_percentiles:
+            by_var: dict[str, float] = {}
+            for var in tail_keys:
+                lo, hi = self._tail_hist_ranges[var]
+                student_p = _quantile_from_histogram(
+                    hist_student[var], lo, hi, pct / 100.0
+                )
+                target_p = _quantile_from_histogram(
+                    hist_target[var], lo, hi, pct / 100.0
+                )
+                if target_p is None or student_p is None or target_p <= 0:
+                    continue
+                by_var[var] = student_p / target_p
+            if by_var:
+                by_var["mean"] = float(np.mean(list(by_var.values())))
+                tail_by_pct[pct] = by_var
+
+        return crps_result, tail_by_pct
