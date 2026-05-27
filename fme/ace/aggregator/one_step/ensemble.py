@@ -30,6 +30,7 @@ def get_one_step_ensemble_aggregator(
     metadata: Mapping[str, VariableMetadata] | None = None,
     target: Literal["norm", "denorm"] = "denorm",
     channel_mean_names: Sequence[str] | None = None,
+    report_variables: Sequence[str] | None = None,
 ) -> "SelectStepEnsembleAggregator":
     return SelectStepEnsembleAggregator(
         aggregator=_EnsembleAggregator(
@@ -38,6 +39,7 @@ def get_one_step_ensemble_aggregator(
             metadata=metadata,
             target=target,
             channel_mean_names=channel_mean_names,
+            report_variables=report_variables,
         ),
         i_target_time=target_time,
     )
@@ -166,6 +168,7 @@ class _EnsembleAggregator:
         metadata: Mapping[str, VariableMetadata] | None = None,
         target: Literal["norm", "denorm"] = "denorm",
         channel_mean_names: Sequence[str] | None = None,
+        report_variables: Sequence[str] | None = None,
     ):
         """
         Args:
@@ -182,6 +185,10 @@ class _EnsembleAggregator:
                 computed over all variables present in the data. Names that
                 are not present in the data raise KeyError. Ignored when
                 target is "denorm".
+            report_variables: If set, only per-variable entries for these
+                variables will appear in logs and datasets. Aggregate entries
+                like ``channel_mean`` are always included. All variables are
+                still used for channel-mean computation.
         """
         self._gridded_operations = gridded_operations
         self._n_batches = 0
@@ -192,6 +199,9 @@ class _EnsembleAggregator:
         self._diverging_metrics = {"ssr_bias"}
         self._target = target
         self._channel_mean_names = channel_mean_names
+        self._report_variables = (
+            frozenset(report_variables) if report_variables is not None else None
+        )
 
     def _get_variable_metrics(self, gen_data: TensorMapping):
         if self._variable_metrics is None:
@@ -257,8 +267,10 @@ class _EnsembleAggregator:
         if self._variable_metrics is None or self._n_batches == 0:
             raise ValueError("No batches have been recorded.")
         data: dict[str, torch.Tensor] = {}
+        all_variable_names: set[str] = set()
         for metric in sorted(self._variable_metrics):
             for key in sorted(self._variable_metrics[metric]):
+                all_variable_names.add(key)
                 metric_value = self._dist.reduce_mean(
                     self._variable_metrics[metric][key].get()
                 )
@@ -289,6 +301,13 @@ class _EnsembleAggregator:
                 if names:
                     scalars = [data[f"{metric}/{key}"] for key in names]
                     data[f"{metric}/channel_mean"] = sum(scalars) / len(scalars)
+        if self._report_variables is not None:
+            excluded = all_variable_names - self._report_variables
+            data = {
+                k: v
+                for k, v in data.items()
+                if not any(seg in excluded for seg in k.split("/"))
+            }
         return data
 
     @torch.no_grad()
