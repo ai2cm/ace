@@ -29,11 +29,11 @@ C_OUT = int(os.environ.get("ACE_C_OUT", "1"))
 H_FINE = int(os.environ.get("ACE_H_FINE", "512"))
 W_FINE = int(os.environ.get("ACE_W_FINE", "512"))
 
-# Number of student steps.  Set to 1 to put fdistill in DMD2's regime
-# (training input = pure noise * sigma_max, no real-data signal) — exposes
-# whether multi-step training mode is itself the source of fdistill's
-# instability.  Override with ACE_STUDENT_STEPS to try other step counts.
-STUDENT_STEPS = int(os.environ.get("ACE_STUDENT_STEPS", "1"))
+# Number of student steps.  Default 2 — the "intended fdistill" recipe.
+# Combined with gan_loss_weight_gen=1e-3 (below) and the loosened
+# ratio_upper=100, this lets the forward-KL term actually drive training
+# instead of the GAN.  Override with ACE_STUDENT_STEPS to try 1 or 4.
+STUDENT_STEPS = int(os.environ.get("ACE_STUDENT_STEPS", "2"))
 
 
 def create_config():
@@ -73,10 +73,11 @@ def create_config():
     config.model.discriminator_optimizer.lr = 1e-5
     config.model.fake_score_optimizer.lr = 1e-5
 
-    # GAN loss weight — bumped from 1e-3 → 3e-3 to match DMD2.  Most of the
-    # "push" off the teacher fixed point comes from the GAN term; at 1e-3 it
-    # was too small to overcome the (real-data input + teacher-init) plateau.
-    config.model.gan_loss_weight_gen = 3e-3
+    # GAN loss weight at 1e-3 — back to the conservative original.  With
+    # STUDENT_STEPS=2 and the loosened ratio clip, the forward-KL term should
+    # carry the training signal and we want the GAN to be a stabilizer, not
+    # the dominant gradient (which is what 3e-3 + STUDENT_STEPS=1 made it).
+    config.model.gan_loss_weight_gen = 1e-3
 
     # EMA
     config.model.use_ema = ["ema_9999", "ema_99995"]
