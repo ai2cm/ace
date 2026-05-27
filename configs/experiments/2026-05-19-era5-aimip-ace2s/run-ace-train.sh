@@ -52,15 +52,17 @@ run_training() {
 }
 
 base_name="ace2s-aimip"
-deterministic_base_name="ace2-1-aimip"
 
 run_training "ace-train-config-1-step-pretrain.yaml" "$base_name-era5-1-step-pre-training-rs0"
-
-# deterministic versions
-run_training "ace-train-config.yaml" "$deterministic_base_name-era5-training-rs0"
-run_training "ace-train-energy-corrector-config.yaml" "$deterministic_base_name-era5-energy-corrector-training-rs0"
 
 # For the finetuning stage take beaker dataset id from the above job and add it to
 # ace-train-config-multi-step-finetuning.yaml then uncomment next line
 
 # run_training "ace-train-config-multi-step-finetuning.yaml" "$base_name-era5-multi-step-fine-tuning-rs0"
+
+# deterministic versions
+
+deterministic_base_name="ace2-1-aimip"
+
+run_training "ace-train-config.yaml" "$deterministic_base_name-era5-training-rs0"
+run_training "ace-train-energy-corrector-config.yaml" "$deterministic_base_name-era5-energy-corrector-training-rs0"
