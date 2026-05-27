@@ -56,4 +56,6 @@ lr-8e-6-cosLR-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRYK
 
 epoch-26-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRXZNTWTTGSFD84F63XNMRWT|done|best_inference_ckpt|high|--min-runtime 8h||01KS0FCMBJSV81V8ENZNBDR5RH||h100
 epoch-26-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRXZNTWTTGSFD84F63XNMRWT|done|best_inference_ckpt|high|--min-runtime 8h||01KS0FCMBJSV81V8ENZNBDR5RH||h100
-epoch-26-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRXZNTWTTGSFD84F63XNMRWT|run_ICx9_40yr|best_inference_ckpt|high|--min-runtime 8h||01KS0FCMBJSV81V8ENZNBDR5RH||h100
+epoch-26-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRXZNTWTTGSFD84F63XNMRWT|done|best_inference_ckpt|high|--min-runtime 8h||01KS0FCMBJSV81V8ENZNBDR5RH||h100
+
+ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRC8081HFK82XE2MRWK5TPZ3|run_inf_ICx1_1000yr|best_inference_ckpt|urgent||||ai2/climate-titan|b200
