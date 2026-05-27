@@ -67,5 +67,7 @@ run_training() {
 # run_training "train-1deg-daily-era5-only.yaml" "train-1deg-daily-era5-only-rs0" 4
 # run_training "train-4deg-daily-era5-only-shared-t.yaml" "train-4deg-daily-era5-only-rs0-shared-t" 1
 # run_training "train-4deg-daily-era5-only-shared-t-append.yaml" "train-4deg-daily-era5-only-rs0-shared-t-append" 1
-run_training "train-4deg-daily-era5-only-perchan.yaml" "train-4deg-daily-era5-only-rs0-perchan" 1
-run_training "train-4deg-daily-era5-only-perchan-append.yaml" "train-4deg-daily-era5-only-rs0-perchan-append" 1
+# run_training "train-4deg-daily-era5-only-perchan.yaml" "train-4deg-daily-era5-only-rs0-perchan" 1
+# run_training "train-4deg-daily-era5-only-perchan-append.yaml" "train-4deg-daily-era5-only-rs0-perchan-append" 1
+run_training "train-4deg-daily-era5-only-rlgm.yaml" "train-4deg-daily-era5-only-rs0-rlgm" 1
+run_training "train-4deg-daily-era5-only-shared-t-append-rlgm.yaml" "train-4deg-daily-era5-only-rs0-shared-t-append-rlgm" 1

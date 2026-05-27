@@ -352,10 +352,12 @@ stepper:
           use_mlp: true
           num_layers: 8
           operator_type: dhconv
+          remove_latent_global_mean: true
       normalization:
         network:
           global_means_path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/centering.nc
           global_stds_path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/scaling-full-field.nc
+          remove_global_mean_surface_temperature: false
         residual:
           global_means_path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/centering.nc
           global_stds_path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/scaling-residual.nc
@@ -479,3 +481,6 @@ stepper:
       - tendency_of_total_water_path_due_to_advection
       - TMP850
       - h500
+      global_mean_removal:
+        kind: shared
+        append_as_input: true
