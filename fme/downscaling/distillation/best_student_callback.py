@@ -220,7 +220,7 @@ class BestStudentCheckpointCallback:
 
         student: AceDiffusionTeacher = model.net
         # Validation runs on ALL ranks (sharded) — see class docstring.
-        crps_by_var, tail_by_pct = self._compute_validation_crps(student)
+        crps_by_var, tail_by_pct, spec_by_var = self._compute_validation_crps(student)
         crps = crps_by_var["mean"]
 
         if not is_rank0():
@@ -271,7 +271,7 @@ class BestStudentCheckpointCallback:
 
         # Log after the best-checkpoint update so val/crps_best includes
         # this iteration's result.
-        self._log_to_wandb(crps_by_var, tail_by_pct, iteration)
+        self._log_to_wandb(crps_by_var, tail_by_pct, spec_by_var, iteration)
 
     def _tail_summary_str(self, tail_by_pct: dict[float, dict[str, float]]) -> str:
         parts = []
@@ -285,9 +285,10 @@ class BestStudentCheckpointCallback:
         self,
         crps_by_var: dict[str, float],
         tail_by_pct: dict[float, dict[str, float]],
+        spec_by_var: dict[str, dict[str, float]],
         iteration: int,
     ) -> None:
-        """Log per-variable + mean CRPS and tail-fraction scalars to wandb."""
+        """Log CRPS, tail-fraction, and spectral scalars to wandb."""
         if not np.isfinite(crps_by_var.get("mean", float("inf"))):
             return
         try:
@@ -304,6 +305,13 @@ class BestStudentCheckpointCallback:
                 payload[f"val/tail_{pct}_{k}"] = v
         if self._best_tail_checkpoint_path and np.isfinite(self._best_tail_score):
             payload["val/tail_best_score"] = self._best_tail_score
+        for var, metrics in spec_by_var.items():
+            for band, v in metrics.items():
+                payload[f"val/spec_{band}_{var}"] = v
+        if spec_by_var:
+            payload["val/spec_mae_mean"] = float(
+                np.mean([m["mae"] for m in spec_by_var.values()])
+            )
         wandb.log(payload, step=iteration)
 
     def __getattr__(self, name: str):
@@ -323,23 +331,32 @@ class BestStudentCheckpointCallback:
     @torch.no_grad()
     def _compute_validation_crps(
         self, student: AceDiffusionTeacher
-    ) -> tuple[dict[str, float], dict[float, dict[str, float]]]:
-        """Return ``(crps_by_var, tail_by_pct)``.
+    ) -> tuple[
+        dict[str, float],
+        dict[float, dict[str, float]],
+        dict[str, dict[str, float]],
+    ]:
+        """Return ``(crps_by_var, tail_by_pct, spec_by_var)``.
 
         ``crps_by_var``: ``{"<var>": crps, "mean": <var-averaged>}``.
         ``tail_by_pct``: ``{percentile: {"<var>": student_pXX / target_pXX,
         "mean": <var-averaged>}}`` for each entry in ``self._tail_percentiles``.
         Variables not in ``self._tail_hist_ranges`` are absent from every
         inner dict.
+        ``spec_by_var``: ``{"<var>": {"mae": ..., "mae_lo": ..., "mae_mid": ...,
+        "mae_hi": ...}}`` where each value is the mean absolute log10-ratio of
+        the zonal power spectra (student / teacher), split into lo/mid/hi thirds
+        of the wavenumber axis.
 
         Sampling uses the FastGen "predict x0 → renoise" loop (via
         ``fastgen_sampler``) instead of ACE's Heun sampler so validation
         reflects the trajectory the student was distilled against.  Empty
         CRPS result (no overlapping variables) returns ``{"mean": inf}``;
-        empty tail result returns an empty dict.
+        empty tail/spec results return empty dicts.
         """
         import torch.distributed as dist
 
+        from fme.downscaling.metrics_and_maths import compute_zonal_power_spectrum
         from fme.downscaling.samplers import fastgen_sampler
 
         teacher_ds = self._load_teacher_ds()
@@ -367,6 +384,11 @@ class BestStudentCheckpointCallback:
         # first batch so we know the device without assuming one here.
         hist_student: dict[str, torch.Tensor] = {}
         hist_target: dict[str, torch.Tensor] = {}
+        # Per-variable accumulated PSD sums (shape: nw) for the spectral metric.
+        psd_student_sum: dict[str, torch.Tensor] = {}
+        psd_teacher_sum: dict[str, torch.Tensor] = {}
+        psd_ns: dict[str, int] = {}
+        psd_nt: dict[str, int] = {}
 
         teacher_time_index = teacher_ds.indexes["time"]
         try:
@@ -517,6 +539,30 @@ class BestStudentCheckpointCallback:
                         max=hi,
                     ).to(torch.float64)
 
+                # Zonal power spectrum — PSD-then-mean, averaged over lat.
+                student_flat = student_tensor.float().reshape(-1, H, W)
+                psd_s = (
+                    compute_zonal_power_spectrum(student_flat)
+                    .to(torch.float64)
+                    .sum(dim=0)
+                )
+                teacher_flat = teacher_batch.float().reshape(-1, H, W)
+                psd_t = (
+                    compute_zonal_power_spectrum(teacher_flat)
+                    .to(torch.float64)
+                    .sum(dim=0)
+                )
+                if var not in psd_student_sum:
+                    psd_student_sum[var] = psd_s
+                    psd_teacher_sum[var] = psd_t
+                    psd_ns[var] = student_flat.shape[0]
+                    psd_nt[var] = teacher_flat.shape[0]
+                else:
+                    psd_student_sum[var] += psd_s
+                    psd_teacher_sum[var] += psd_t
+                    psd_ns[var] += student_flat.shape[0]
+                    psd_nt[var] += teacher_flat.shape[0]
+
         # Reduce per-variable sums/counts across ranks. The variable order is
         # taken from the teacher's out_packer ∩ teacher_ds so it's identical on
         # every rank, even if a given rank's shard processed no batches.
@@ -612,4 +658,58 @@ class BestStudentCheckpointCallback:
                 by_var["mean"] = float(np.mean(list(by_var.values())))
                 tail_by_pct[pct] = by_var
 
-        return crps_result, tail_by_pct
+        # Spectral PSD reduction.  First broadcast nw so ranks with no batches
+        # can allocate zeros of the right shape for the collective.
+        psd_nw_local = 0
+        if psd_student_sum:
+            psd_nw_local = next(iter(psd_student_sum.values())).shape[0]
+        nw_tensor = torch.tensor([psd_nw_local], device=device, dtype=torch.int64)
+        if world_size > 1:
+            dist.all_reduce(nw_tensor, op=dist.ReduceOp.MAX)
+        psd_nw = int(nw_tensor.item())
+
+        spec_by_var: dict[str, dict[str, float]] = {}
+        if psd_nw > 0:
+            ns_counts = torch.tensor(
+                [psd_ns.get(k, 0) for k in global_keys],
+                device=device,
+                dtype=torch.float64,
+            )
+            nt_counts = torch.tensor(
+                [psd_nt.get(k, 0) for k in global_keys],
+                device=device,
+                dtype=torch.float64,
+            )
+            zeros = torch.zeros(psd_nw, device=device, dtype=torch.float64)
+            psd_s_mat = torch.stack(
+                [psd_student_sum.get(k, zeros) for k in global_keys]
+            )
+            psd_t_mat = torch.stack(
+                [psd_teacher_sum.get(k, zeros) for k in global_keys]
+            )
+            if world_size > 1:
+                dist.all_reduce(ns_counts, op=dist.ReduceOp.SUM)
+                dist.all_reduce(nt_counts, op=dist.ReduceOp.SUM)
+                dist.all_reduce(psd_s_mat, op=dist.ReduceOp.SUM)
+                dist.all_reduce(psd_t_mat, op=dist.ReduceOp.SUM)
+
+            lo_end = psd_nw // 3
+            hi_start = 2 * psd_nw // 3
+            for i, var in enumerate(global_keys):
+                ns = float(ns_counts[i].item())
+                nt = float(nt_counts[i].item())
+                if ns <= 0 or nt <= 0:
+                    continue
+                mean_s = psd_s_mat[i] / ns
+                mean_t = psd_t_mat[i] / nt
+                log_ratio = torch.log10(
+                    mean_s.clamp(min=1e-30) / mean_t.clamp(min=1e-30)
+                )
+                spec_by_var[var] = {
+                    "mae": float(log_ratio.abs().mean().item()),
+                    "mae_lo": float(log_ratio[:lo_end].abs().mean().item()),
+                    "mae_mid": float(log_ratio[lo_end:hi_start].abs().mean().item()),
+                    "mae_hi": float(log_ratio[hi_start:].abs().mean().item()),
+                }
+
+        return crps_result, tail_by_pct, spec_by_var
