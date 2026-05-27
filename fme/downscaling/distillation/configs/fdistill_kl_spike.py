@@ -50,10 +50,13 @@ def create_config():
     config.model.grad_scaler_enabled = False
 
     # Forward KL (mass-covering) — the critical switch for tail preservation.
+    # ratio_upper bumped 20 → 100 to keep the forward-KL gradient alive on
+    # extreme-tail samples (where p_target / p_student blows up); ratio_ema_rate
+    # bumped 0.5 → 0.9 to keep the EMA stable as the clip loosens.
     config.model.f_distill.f_div = "kl"
-    config.model.f_distill.ratio_ema_rate = 0.5
+    config.model.f_distill.ratio_ema_rate = 0.9
     config.model.f_distill.ratio_lower = 0.1
-    config.model.f_distill.ratio_upper = 20.0
+    config.model.f_distill.ratio_upper = 100.0
     config.model.f_distill.ratio_normalization = True
 
     # Noise distribution matching ACE's training distribution.
