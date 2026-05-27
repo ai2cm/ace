@@ -44,6 +44,36 @@ if TYPE_CHECKING:
     from fme.downscaling.models import DiffusionModel
 
 
+def _quantile_from_histogram(
+    hist: torch.Tensor, lo: float, hi: float, q: float
+) -> float | None:
+    """Estimate the ``q``-quantile of the distribution described by ``hist``.
+
+    ``hist[i]`` is the count of values that fell in the i-th equal-width bin
+    over ``[lo, hi]``.  Returns ``None`` when the histogram is empty.  Uses
+    linear interpolation within the containing bin so the estimate's
+    resolution is finer than the bin width.
+    """
+    total = float(hist.sum().item())
+    if total <= 0:
+        return None
+    cumsum = hist.cumsum(0)
+    threshold = q * total
+    # First bin index where cumsum >= threshold.
+    idx_t = torch.searchsorted(cumsum, torch.tensor(threshold, device=cumsum.device))
+    idx = int(idx_t.item())
+    n_bins = hist.numel()
+    if idx >= n_bins:
+        return hi
+    bin_width = (hi - lo) / n_bins
+    cum_before = float(cumsum[idx - 1].item()) if idx > 0 else 0.0
+    bin_count = float(hist[idx].item())
+    if bin_count <= 0:
+        return lo + idx * bin_width
+    frac = (threshold - cum_before) / bin_count
+    return lo + (idx + frac) * bin_width
+
+
 def _crps_ensemble(
     student: torch.Tensor,
     teacher: torch.Tensor,
@@ -106,6 +136,20 @@ class BestStudentCheckpointCallback:
             sampling for validation.  Should match the distillation
             ``student_sample_steps`` so validation reflects the trajectory
             the student was actually trained on.  Defaults to 4.
+        tail_percentile: Upper-tail percentile to track per variable
+            (default 99.99).  Logged as ``val/tail_<pct>_<var>`` =
+            student_pXX / target_pXX (correct direction; values < 1 mean
+            the student under-predicts the tail, > 1 means it over-predicts).
+            CRPS remains the best-student selection criterion; this metric is
+            for monitoring only.
+        tail_hist_ranges: Per-variable ``(lo, hi)`` ranges used to bin values
+            for percentile estimation.  Variables not in this dict get the
+            tail metric skipped (CRPS is still computed).  Defaults to
+            ``{"PRATEsfc": (0.0, 0.1)}`` (kg/m²/s); extend for other targets.
+        tail_hist_bins: Number of equal-width bins inside each variable's
+            range (default 10000).  Resolution at the 99.99th percentile is
+            ``(hi - lo) / tail_hist_bins`` — for PRATEsfc that's 1e-5
+            kg/m²/s, much finer than the tail value itself.
 
     To run validation on less data, thin at the data-config level via
     ``subset.step`` in the val YAML (see ``fme.core.dataset.time.TimeSlice``).
@@ -122,7 +166,14 @@ class BestStudentCheckpointCallback:
         coarse_patch_yx: tuple[int, int] | None = None,
         n_student_samples: int = 4,
         student_sample_steps: int = 4,
+        tail_percentile: float = 99.99,
+        tail_hist_ranges: dict[str, tuple[float, float]] | None = None,
+        tail_hist_bins: int = 10000,
     ) -> None:
+        if not 0 < tail_percentile < 100:
+            raise ValueError(
+                f"tail_percentile must be in (0, 100), got {tail_percentile}"
+            )
         self._val_dataset_path = val_dataset_path
         self._coarse_val_data = coarse_val_data
         self._teacher_model = teacher_model
@@ -130,6 +181,13 @@ class BestStudentCheckpointCallback:
         self._coarse_patch_yx = coarse_patch_yx
         self._n_student_samples = n_student_samples
         self._student_sample_steps = student_sample_steps
+        self._tail_percentile = tail_percentile
+        self._tail_hist_ranges: dict[str, tuple[float, float]] = (
+            dict(tail_hist_ranges)
+            if tail_hist_ranges is not None
+            else {"PRATEsfc": (0.0, 0.1)}
+        )
+        self._tail_hist_bins = tail_hist_bins
         self._best_crps = float("inf")
         self._teacher_ds: xr.Dataset | None = None
 
@@ -151,12 +209,14 @@ class BestStudentCheckpointCallback:
 
         student: AceDiffusionTeacher = model.net
         # Validation runs on ALL ranks (sharded) — see class docstring.
-        crps_by_var = self._compute_validation_crps(student)
+        crps_by_var, tail_by_var = self._compute_validation_crps(student)
         crps = crps_by_var["mean"]
 
         if not is_rank0():
             return
 
+        # CRPS remains the best-student selection criterion.  The tail metric
+        # is logged for monitoring but does not drive checkpoint saving.
         if crps < self._best_crps:
             self._best_crps = crps
             from fme.downscaling.distillation.student_checkpoint import (
@@ -168,22 +228,37 @@ class BestStudentCheckpointCallback:
                 teacher=self._teacher_model,
                 path=self._best_checkpoint_path,
             )
+            tail_str = (
+                f", tail_{self._tail_percentile}={tail_by_var.get('mean'):.4f}"
+                if tail_by_var
+                else ""
+            )
             logger.info(
-                f"[BestStudentCallback] iteration={iteration} CRPS={crps:.6f} "
-                f"(new best) → {self._best_checkpoint_path}"
+                f"[BestStudentCallback] iteration={iteration} CRPS={crps:.6f}"
+                f"{tail_str} (new best) → {self._best_checkpoint_path}"
             )
         else:
+            tail_str = (
+                f", tail_{self._tail_percentile}={tail_by_var.get('mean'):.4f}"
+                if tail_by_var
+                else ""
+            )
             logger.info(
-                f"[BestStudentCallback] iteration={iteration} CRPS={crps:.6f} "
-                f"(best={self._best_crps:.6f}, no improvement)"
+                f"[BestStudentCallback] iteration={iteration} CRPS={crps:.6f}"
+                f"{tail_str} (best={self._best_crps:.6f}, no improvement)"
             )
 
         # Log after the best-checkpoint update so val/crps_best includes
         # this iteration's result.
-        self._log_crps_to_wandb(crps_by_var, iteration)
+        self._log_to_wandb(crps_by_var, tail_by_var, iteration)
 
-    def _log_crps_to_wandb(self, crps_by_var: dict[str, float], iteration: int) -> None:
-        """Log per-variable + mean CRPS scalars to wandb at this iteration."""
+    def _log_to_wandb(
+        self,
+        crps_by_var: dict[str, float],
+        tail_by_var: dict[str, float],
+        iteration: int,
+    ) -> None:
+        """Log per-variable + mean CRPS and tail-fraction scalars to wandb."""
         if not np.isfinite(crps_by_var.get("mean", float("inf"))):
             return
         try:
@@ -192,9 +267,12 @@ class BestStudentCheckpointCallback:
             return
         if wandb.run is None:
             return
-        payload = {f"val/crps_{k}": v for k, v in crps_by_var.items()}
+        payload: dict[str, float] = {f"val/crps_{k}": v for k, v in crps_by_var.items()}
         if np.isfinite(self._best_crps):
             payload["val/crps_best"] = self._best_crps
+        pct = self._tail_percentile
+        for k, v in tail_by_var.items():
+            payload[f"val/tail_{pct}_{k}"] = v
         wandb.log(payload, step=iteration)
 
     def __getattr__(self, name: str):
@@ -214,13 +292,19 @@ class BestStudentCheckpointCallback:
     @torch.no_grad()
     def _compute_validation_crps(
         self, student: AceDiffusionTeacher
-    ) -> dict[str, float]:
-        """Return ``{"<var>": crps, "mean": <var-averaged>}``.
+    ) -> tuple[dict[str, float], dict[str, float]]:
+        """Return ``(crps_by_var, tail_by_var)``.
+
+        ``crps_by_var`` has shape ``{"<var>": crps, "mean": <var-averaged>}``.
+        ``tail_by_var`` has shape ``{"<var>": student_pXX / target_pXX,
+        "mean": <var-averaged>}`` (XX = ``self._tail_percentile``).  Variables
+        not in ``self._tail_hist_ranges`` are absent from ``tail_by_var``.
 
         Sampling uses the FastGen "predict x0 → renoise" loop (via
         ``fastgen_sampler``) instead of ACE's Heun sampler so validation
         reflects the trajectory the student was distilled against.  Empty
-        result (no overlapping variables) returns ``{"mean": inf}``.
+        CRPS result (no overlapping variables) returns ``{"mean": inf}``;
+        empty tail result returns an empty dict.
         """
         import torch.distributed as dist
 
@@ -246,6 +330,11 @@ class BestStudentCheckpointCallback:
 
         crps_sum: dict[str, float] = {}
         count: dict[str, int] = {}
+        # Per-variable histograms for the tail-fraction metric.  Allocated on
+        # the same device the student tensors live on; populated lazily on the
+        # first batch so we know the device without assuming one here.
+        hist_student: dict[str, torch.Tensor] = {}
+        hist_target: dict[str, torch.Tensor] = {}
 
         teacher_time_index = teacher_ds.indexes["time"]
         try:
@@ -367,6 +456,35 @@ class BestStudentCheckpointCallback:
                     crps_sum[var] = crps_sum.get(var, 0.0) + float(crps_map.sum())
                     count[var] = count.get(var, 0) + crps_map.numel()
 
+                # Tail-fraction histogram accumulation.  torch.histc clips
+                # out-of-range values to the boundary bin, so the chosen range
+                # must cover the realistic tail; we default to a wide bound.
+                if var in self._tail_hist_ranges:
+                    lo, hi = self._tail_hist_ranges[var]
+                    if var not in hist_student:
+                        hist_student[var] = torch.zeros(
+                            self._tail_hist_bins,
+                            device=student_tensor.device,
+                            dtype=torch.float64,
+                        )
+                        hist_target[var] = torch.zeros(
+                            self._tail_hist_bins,
+                            device=student_tensor.device,
+                            dtype=torch.float64,
+                        )
+                    hist_student[var] += torch.histc(
+                        student_tensor.float().flatten(),
+                        bins=self._tail_hist_bins,
+                        min=lo,
+                        max=hi,
+                    ).to(torch.float64)
+                    hist_target[var] += torch.histc(
+                        teacher_batch.float().flatten(),
+                        bins=self._tail_hist_bins,
+                        min=lo,
+                        max=hi,
+                    ).to(torch.float64)
+
         # Reduce per-variable sums/counts across ranks. The variable order is
         # taken from the teacher's out_packer ∩ teacher_ds so it's identical on
         # every rank, even if a given rank's shard processed no batches.
@@ -413,12 +531,48 @@ class BestStudentCheckpointCallback:
                 f"unmatched_times={total_skipped_times}"
             )
 
-        result: dict[str, float] = {}
+        crps_result: dict[str, float] = {}
         for i, var in enumerate(global_keys):
             c = float(counts[i].item())
             if c > 0:
-                result[var] = float(sums[i].item()) / c
-        if not result:
-            return {"mean": float("inf")}
-        result["mean"] = float(np.mean(list(result.values())))
-        return result
+                crps_result[var] = float(sums[i].item()) / c
+        if crps_result:
+            crps_result["mean"] = float(np.mean(list(crps_result.values())))
+        else:
+            crps_result = {"mean": float("inf")}
+
+        # Tail-fraction reduction.  Variables that any rank populated need a
+        # matching entry on every rank for all_reduce; create zero histograms
+        # on ranks that didn't see the variable so the collective is well-
+        # formed.  In practice every rank sees the same variable set because
+        # the val data is replicated across ranks (force_non_distributed=True)
+        # — this is defensive.
+        tail_result: dict[str, float] = {}
+        tail_keys = sorted(
+            v for v in self._tail_hist_ranges if v in teacher_ds.data_vars
+        )
+        for var in tail_keys:
+            lo, hi = self._tail_hist_ranges[var]
+            if var not in hist_student:
+                hist_student[var] = torch.zeros(
+                    self._tail_hist_bins, device=device, dtype=torch.float64
+                )
+                hist_target[var] = torch.zeros(
+                    self._tail_hist_bins, device=device, dtype=torch.float64
+                )
+            if world_size > 1:
+                dist.all_reduce(hist_student[var], op=dist.ReduceOp.SUM)
+                dist.all_reduce(hist_target[var], op=dist.ReduceOp.SUM)
+            student_p = _quantile_from_histogram(
+                hist_student[var], lo, hi, self._tail_percentile / 100.0
+            )
+            target_p = _quantile_from_histogram(
+                hist_target[var], lo, hi, self._tail_percentile / 100.0
+            )
+            if target_p is None or student_p is None or target_p <= 0:
+                continue
+            tail_result[var] = student_p / target_p
+        if tail_result:
+            tail_result["mean"] = float(np.mean(list(tail_result.values())))
+
+        return crps_result, tail_result
