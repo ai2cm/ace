@@ -16,6 +16,7 @@ Data-source-agnostic helpers used by both the Pangeo pipeline
 
 import logging
 import re
+import threading
 import time
 from typing import Hashable, Optional
 
@@ -38,6 +39,56 @@ BOUNDS_NAMES: frozenset[str] = frozenset(
         "vertices_latitude",
     }
 )
+
+
+def rss_mib() -> float:
+    """Resident-set memory in MiB. Returns NaN if psutil is unavailable
+    so callers can log unconditionally without try/except."""
+    try:
+        import psutil
+
+        return psutil.Process().memory_info().rss / 1024 / 1024
+    except Exception:
+        return float("nan")
+
+
+class RssSampler:
+    """Daemon thread that logs RSS at a fixed interval. Use ``start()``
+    / ``stop()`` around the per-task body, or as a context manager.
+    Catches slow drift between stage boundaries that the per-stage RSS
+    log alone would miss.
+    """
+
+    def __init__(self, interval_seconds: float = 300.0) -> None:
+        self._interval = interval_seconds
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+    def start(self) -> "RssSampler":
+        t0 = time.monotonic()
+
+        def _loop() -> None:
+            while not self._stop_event.wait(self._interval):
+                logging.info(
+                    "  [rss sampler] +%.0fs rss=%.0f MiB",
+                    time.monotonic() - t0,
+                    rss_mib(),
+                )
+
+        self._thread = threading.Thread(target=_loop, daemon=True)
+        self._thread.start()
+        return self
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+
+    def __enter__(self) -> "RssSampler":
+        return self.start()
+
+    def __exit__(self, *exc_info) -> None:
+        self.stop()
 
 
 # ---------------------------------------------------------------------------
@@ -1095,18 +1146,6 @@ def write_zarr(ds: xr.Dataset, path: str, cfg: ResolvedDatasetConfig) -> None:
         )
         return
 
-    def _rss_mib() -> float:
-        """Resident-set memory in MiB, used for the per-batch log line.
-        Lets us spot memory accumulation across batches in pod logs and
-        in the multi-batch regression test.
-        """
-        try:
-            import psutil
-
-            return psutil.Process().memory_info().rss / 1024 / 1024
-        except Exception:
-            return float("nan")
-
     batches = [
         data_vars[i : i + batch_size] for i in range(0, len(data_vars), batch_size)
     ]
@@ -1114,7 +1153,7 @@ def write_zarr(ds: xr.Dataset, path: str, cfg: ResolvedDatasetConfig) -> None:
     for i, batch_vars in enumerate(batches):
         sub = ds[batch_vars]
         batch_t0 = time.monotonic()
-        rss_before = _rss_mib()
+        rss_before = rss_mib()
         if i == 0:
             sub.to_zarr(
                 path,
@@ -1133,7 +1172,7 @@ def write_zarr(ds: xr.Dataset, path: str, cfg: ResolvedDatasetConfig) -> None:
                 zarr_format=3,
                 align_chunks=True,
             )
-        rss_after = _rss_mib()
+        rss_after = rss_mib()
         logging.info(
             "  write_zarr: batch %d/%d (%d vars: %s) in %.1fs " "(rss %.0f → %.0f MiB)",
             i + 1,
@@ -1509,4 +1548,6 @@ __all__ = [
     "run_sanity_checks",
     "plev_hpa_label",
     "flatten_plev_variables",
+    "rss_mib",
+    "RssSampler",
 ]

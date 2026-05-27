@@ -65,6 +65,7 @@ from processing import (  # noqa: E402
     BOUNDS_NAMES,
     UNSTRUCTURED_METHOD,
     DuplicateTimestampsError,
+    RssSampler,
     SimulationBoundaryError,
     apply_output_renames,
     apply_target_land_mask,
@@ -82,6 +83,7 @@ from processing import (  # noqa: E402
     normalize_plev,
     regrid_variables,
     resolve_time_duplicates,
+    rss_mib,
     run_sanity_checks,
     validate_cell_methods,
     write_zarr,
@@ -479,12 +481,15 @@ def process_one_esgf(
     def _stage(label: str, t0: float) -> None:
         now = time.monotonic()
         logging.info(
-            "  [stage %s] +%.1fs (cum %.1fs)",
+            "  [stage %s] +%.1fs (cum %.1fs, rss %.0f MiB)",
             label,
             now - t0,
             now - process_t0,
+            rss_mib(),
         )
 
+    sampler = RssSampler()
+    sampler.start()
     try:
         target = make_target_grid(cfg.target_grid.name)
 
@@ -813,6 +818,7 @@ def process_one_esgf(
         row.skip_reason = f"{type(e).__name__}: {e}"
         row.warnings.append("".join(traceback.format_exception_only(type(e), e)))
     finally:
+        sampler.stop()
         cleanup_scratch_dir(scratch)
 
     return row

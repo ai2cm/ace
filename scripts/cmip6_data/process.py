@@ -60,6 +60,7 @@ from index import DatasetIndexRow, write_index, write_sidecar  # noqa: E402
 from processing import (  # noqa: E402
     UNSTRUCTURED_METHOD,
     DuplicateTimestampsError,
+    RssSampler,
     SimulationBoundaryError,
     apply_output_renames,
     apply_target_land_mask,
@@ -78,6 +79,7 @@ from processing import (  # noqa: E402
     normalize_plev,
     regrid_variables,
     resolve_time_duplicates,
+    rss_mib,
     run_sanity_checks,
     validate_cell_methods,
     write_zarr,
@@ -432,16 +434,20 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
 
     def _stage(label: str, t0: float) -> None:
         """Record a per-stage wall-clock split. Logs the delta and the
-        cumulative since ``process_t0`` so the longest stages are
-        obvious without grep-summing the log."""
+        cumulative since ``process_t0``, plus current RSS, so the
+        longest / heaviest stages are obvious without grep-summing the
+        log."""
         now = time.monotonic()
         logging.info(
-            "  [stage %s] +%.1fs (cum %.1fs)",
+            "  [stage %s] +%.1fs (cum %.1fs, rss %.0f MiB)",
             label,
             now - t0,
             now - process_t0,
+            rss_mib(),
         )
 
+    sampler = RssSampler()
+    sampler.start()
     try:
         # 1. Gate on required core variables. Missing variables are
         # tolerated up to ``cfg.max_core_missing``; the remaining ones
@@ -868,6 +874,8 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
         row.skip_reason = f"{type(e).__name__}: {e}"
         row.warnings.append("".join(traceback.format_exception_only(type(e), e)))
         return row
+    finally:
+        sampler.stop()
 
 
 # ---------------------------------------------------------------------------
@@ -958,6 +966,10 @@ def main() -> None:
     )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+
+    # Bump xarray's file-handle LRU well past the per-task worst case
+    # so we don't race the cache during compute. Mirrors process_esgf.py.
+    xr.set_options(file_cache_maxsize=1024)
 
     config = ProcessConfig.from_file(args.config)
     if args.source_ids is not None:
