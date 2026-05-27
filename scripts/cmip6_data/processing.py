@@ -1036,8 +1036,25 @@ def write_zarr(ds: xr.Dataset, path: str, cfg: ResolvedDatasetConfig) -> None:
             shards: list[int] = []
             for dim, size in zip(var.dims, var.shape):
                 if dim == "time":
-                    chunks.append(min(chunk_time, size))
-                    shards.append(min(shard_time or size, size))
+                    inner = min(chunk_time, size)
+                    chunks.append(inner)
+                    # Zarr v3 sharding requires the outer (shard) chunk
+                    # size to be a multiple of the inner chunk size.
+                    # When ``size`` is small enough that
+                    # ``min(shard_time, size)`` is less than
+                    # ``chunk_time``, or when ``size`` is between two
+                    # chunk-sized multiples (e.g. MRI-ESM2-0 ssp245
+                    # ships only 5844 timesteps for some variants, and
+                    # ``min(7200, 5844) = 5844`` isn't divisible by
+                    # ``chunk_time = 360``), we round the requested
+                    # shard size down to the nearest multiple of
+                    # ``inner`` to keep the codec happy. Trailing
+                    # timesteps beyond the last full shard land in a
+                    # partial trailing shard, which zarr handles
+                    # transparently.
+                    requested = min(shard_time or size, size)
+                    multiple_of_inner = max(inner, (requested // inner) * inner)
+                    shards.append(multiple_of_inner)
                 else:
                     chunks.append(size)
                     shards.append(size)

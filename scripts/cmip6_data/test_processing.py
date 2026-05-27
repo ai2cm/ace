@@ -1370,6 +1370,69 @@ def test_write_zarr_aligns_misaligned_dask_chunks(tmp_path):
     written.close()
 
 
+def test_write_zarr_handles_non_divisible_time_length(tmp_path):
+    """Zarr v3 sharding requires the outer (shard) chunk size to be a
+    multiple of the inner chunk size. When a dataset's ``time`` length
+    is shorter than the configured ``shard_time``, our ``_encoding_for``
+    used to set ``shards = min(shard_time, n_time)``, which could land
+    on a value not divisible by ``chunk_time``.
+
+    Concrete case from prod lnlqt: MRI-ESM2-0 ssp245 r2-r5 ship only
+    5844 timesteps; with ``shard_time=7200`` and ``chunk_time=360``
+    the encoding came out as ``shards=5844``, and zarr complained:
+    ``The array's chunk_shape (got (5844, 45, 90)) needs to be divisible
+    by the shard's inner chunk_shape (got (360, 45, 90))``.
+
+    Fix: round the shard size down to a multiple of ``chunk_time``.
+    """
+    import dask
+    import dask.array as da_arr
+    from config import ChunkingConfig
+
+    chunk_time = 360
+    shard_time = 7200
+    ntime = 5844  # the actual MRI-ESM2-0 ssp245 length
+    nlat, nlon = 45, 90
+
+    data = da_arr.zeros((ntime, nlat, nlon), chunks=(chunk_time, nlat, nlon)).astype(
+        np.float32
+    )
+    ds = xr.Dataset(
+        {"var0": (("time", "lat", "lon"), data)},
+        coords={
+            "time": xr.date_range(
+                "2015-01-01", periods=ntime, freq="D", calendar="noleap"
+            ),
+            "lat": np.linspace(-89, 89, nlat),
+            "lon": np.linspace(2, 358, nlon),
+        },
+    )
+
+    cfg = _make_cfg(
+        chunking=ChunkingConfig(
+            chunk_time=chunk_time,
+            shard_time=shard_time,
+            variable_batch_size=None,
+        ),
+    )
+
+    out_path = str(tmp_path / "short.zarr")
+    with dask.config.set(scheduler="synchronous"):
+        write_zarr(ds, out_path, cfg)
+
+    # Re-open and check shape + that the trailing partial shard worked.
+    written = xr.open_zarr(out_path, consolidated=True)
+    assert written.sizes["time"] == ntime
+    # Encoding shards should now be the largest multiple of chunk_time
+    # that fits in ``min(shard_time, ntime) = 5844``: that's
+    # ``(5844 // 360) * 360 = 5760``.
+    enc = written["var0"].encoding
+    if "shards" in enc:
+        assert enc["shards"][0] == 5760, enc["shards"]
+    assert enc["chunks"][0] == chunk_time
+    written.close()
+
+
 def test_write_zarr_bounds_memory_with_variable_batching(tmp_path):
     """End-to-end integration test for the variable-batched write path.
 
