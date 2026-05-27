@@ -482,7 +482,7 @@ stepper:
       - h500
       global_mean_removal:
         kind: per_channel
-        append_as_input: true
+        append_as_input: false
         field_names:
         - DSWRFtoa
         - HGTsfc
