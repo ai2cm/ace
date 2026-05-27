@@ -9,7 +9,7 @@ SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the reposi
 CONFIG_PATH="${SCRIPT_PATH}${CONFIG_FILENAME}"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=2
+N_GPUS=1
 STATS_DATA=jamesd/2025-06-03-cm4-piControl-200yr-coupled-stats-ocean
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
@@ -21,8 +21,8 @@ gantry run \
     --task-name $JOB_NAME \
     --description "SamudraI CM4 piControl ocean pretraining" \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-    --workspace ai2/ace \
-    --priority normal \
+    --workspace ai2/climate-titan \
+    --priority urgent \
     --preemptible \
     --cluster ai2/titan \
     --weka climate-default:/climate-default \
