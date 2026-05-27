@@ -36,9 +36,9 @@ train_loader:
     - data_path: /climate-default
       file_pattern: ufs-replay-test.zarr
       engine: zarr
-validation_loader:
-  batch_size: 16
-  num_data_workers: 8
+validation:
+  batch_size: 2
+  num_data_workers: 2
   dataset:
     - data_path: /climate-default
       file_pattern: ufs-replay-test.zarr
