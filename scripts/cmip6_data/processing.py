@@ -1095,6 +1095,18 @@ def write_zarr(ds: xr.Dataset, path: str, cfg: ResolvedDatasetConfig) -> None:
         )
         return
 
+    def _rss_mib() -> float:
+        """Resident-set memory in MiB, used for the per-batch log line.
+        Lets us spot memory accumulation across batches in pod logs and
+        in the multi-batch regression test.
+        """
+        try:
+            import psutil
+
+            return psutil.Process().memory_info().rss / 1024 / 1024
+        except Exception:
+            return float("nan")
+
     batches = [
         data_vars[i : i + batch_size] for i in range(0, len(data_vars), batch_size)
     ]
@@ -1102,6 +1114,7 @@ def write_zarr(ds: xr.Dataset, path: str, cfg: ResolvedDatasetConfig) -> None:
     for i, batch_vars in enumerate(batches):
         sub = ds[batch_vars]
         batch_t0 = time.monotonic()
+        rss_before = _rss_mib()
         if i == 0:
             sub.to_zarr(
                 path,
@@ -1120,13 +1133,16 @@ def write_zarr(ds: xr.Dataset, path: str, cfg: ResolvedDatasetConfig) -> None:
                 zarr_format=3,
                 align_chunks=True,
             )
+        rss_after = _rss_mib()
         logging.info(
-            "  write_zarr: batch %d/%d (%d vars: %s) in %.1fs",
+            "  write_zarr: batch %d/%d (%d vars: %s) in %.1fs " "(rss %.0f → %.0f MiB)",
             i + 1,
             len(batches),
             len(batch_vars),
             ",".join(batch_vars),
             time.monotonic() - batch_t0,
+            rss_before,
+            rss_after,
         )
     # Single consolidated metadata pass after every batch has landed.
     import zarr
