@@ -29,7 +29,7 @@ inference:
       histogram:
         enabled: true
       time_mean_reference_data: /statsdata/time-mean.nc
-    name: val_rollout
+    name: inference
     weight: 1.0
   - n_forward_steps: 52960
     forward_steps_in_memory: 100
@@ -53,7 +53,7 @@ inference:
       histogram:
         enabled: true
       time_mean_reference_data: /statsdata/time-mean.nc
-    name: in_sample_rollout
+    name: in_sample_inference
     weight: 0.0
 logging:
   log_to_screen: true
