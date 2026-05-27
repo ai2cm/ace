@@ -585,9 +585,13 @@ class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
                             field_name,
                         )
                     )
-        for key, value in target_metrics.items():
+        # prediction_frac_of_target is prediction / target — values < 1 mean
+        # the student under-predicts the tail, > 1 means it over-predicts.
+        # (Previous code had the ratio inverted under the same name.)
+        for key, target_value in target_metrics.items():
+            prediction_value = return_metrics[key]
             return_metrics[f"prediction_frac_of_target/{key}"] = (
-                value / return_metrics[key]
+                prediction_value / target_value
             )
         return return_metrics
 

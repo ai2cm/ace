@@ -308,3 +308,33 @@ def test_compared_dynamic_tails_histograms():
     for var in ["y", "z"]:
         assert f"0.0001th-percentile/{var}" in wandb_result
         assert f"prediction_frac_of_target/0.0001th-percentile/{var}" in wandb_result
+
+
+def test_compared_dynamic_tails_histograms_frac_direction():
+    """Regression test: ``prediction_frac_of_target`` must be
+    ``prediction_quantile / target_quantile``, not the inverse.  A prior bug
+    in ``ComparedDynamicTailsHistograms.get_wandb`` computed the ratio
+    upside-down under the same name, silently flipping the sign of every
+    tail-bias reading downstream.
+    """
+    n_bins = 1000
+    histogram = ComparedDynamicTailsHistograms(n_bins, percentiles=[99.0])
+    shape = (10, 100, 100)  # 100k samples
+    torch.manual_seed(0)
+    # Target ~ Uniform[0, 1], prediction ~ Uniform[0, 2] — prediction's 99th
+    # percentile is exactly 2× target's. Anything other than ~2 in the
+    # returned ratio means the direction is wrong (or the histogram is
+    # under-resolved).
+    target = {"x": torch.rand(*shape)}
+    prediction = {"x": torch.rand(*shape) * 2}
+    histogram.record_batch(target, prediction)
+    result = histogram.get_wandb()
+
+    pred_q = result["99.0th-percentile/x"]
+    frac = result["prediction_frac_of_target/99.0th-percentile/x"]
+    # Per-source quantile estimates — for n=100k draws from U[0,1] and U[0,2]
+    # the true 99th percentiles are 0.99 and 1.98 respectively.
+    assert 1.9 < pred_q < 2.05, f"prediction 99th not near 1.98: {pred_q}"
+    assert (
+        1.8 < frac < 2.2
+    ), f"prediction_frac_of_target should be ≈ 2 (prediction/target), got {frac}"
