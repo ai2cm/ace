@@ -1,4 +1,5 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
 
-ace-forced-1pct_nosmooth_0256to0350-hfds_prescribed-ft_correctOHC|rs1|01KKDHDK6TDS01C8X4VBVDT94C|run_ICx1_ace|best_inference_ckpt|urgent||||ai2/climate-titan|b200|||100GiB
-aceS-forced-1pct_nosmooth_0256to0350-hfds_prescribed-ft_correctOHC|rs1|01KKDHDK6TDS01C8X4VBVDT94C|run_ICx1_aceS|best_inference_ckpt|urgent||||ai2/climate-titan|b200|||100GiB
+ace-forced-1pct_nosmooth_0256to0350-hfds_prescribed-ft_correctOHC|rs1|01KKDHDK6TDS01C8X4VBVDT94C|done|best_inference_ckpt|urgent||||ai2/climate-titan|b200|||100GiB
+aceS-forced-1pct_nosmooth_0256to0350-hfds_prescribed-ft_correctOHC|rs1|01KKDHDK6TDS01C8X4VBVDT94C|done|best_inference_ckpt|urgent||||ai2/climate-titan|b200|||100GiB
+samudra-from-fto_stochastic-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_cbj61w53|rs0|01KSKCD1N5FH8PP94E2ES48A39|run_ICx1|best_inference_ckpt|urgent|||01KSKCD1N5FH8PP94E2ES48A39|ai2/climate-titan|b200|||100GiB
