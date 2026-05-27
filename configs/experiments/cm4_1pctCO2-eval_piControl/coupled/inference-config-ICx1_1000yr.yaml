@@ -19,7 +19,7 @@ forcing_loader:
   ocean:
     dataset:
       data_path: /climate-default
-      file_pattern: 2025-10-20-cm4-piControl-200yr-no-smoothing-coupled-ocean.zarr
+      file_pattern: 2025-10-15-cm4-piControl-200yr-ocean-no-smoothing.zarr
       engine: zarr
       n_repeats: 6
   num_data_workers: 1
