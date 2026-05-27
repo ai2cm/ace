@@ -1243,3 +1243,108 @@ def test_step_with_include_channel_mask_inputs_no_data_mask():
     for name in ["diagnostic_main", "diagnostic_rad"]:
         assert output_no_mask[name].shape == (n_samples, *img_shape)
         torch.testing.assert_close(output_no_mask[name], output_all_unmasked[name])
+
+
+def test_step_nan_input_does_not_produce_nan_output_with_corrector():
+    """Masked IC variables must not propagate NaN through the atmosphere corrector.
+
+    Masking is now done via channel_mask (explicit bool masks per sample) rather
+    than NaN injection.  The masked variable is zeroed in normalized space before
+    the network forward pass; the corrector sees the original (non-NaN) input
+    for unmasked samples and the mean value (denorm of 0) for masked samples
+    through the normalizer round-trip.  This test verifies that the output
+    has no NaN for any sample regardless of which samples have masked PRESsfc.
+    """
+    in_names = [
+        "DSWRFtoa",
+        "HGTsfc",
+        "air_temperature_0",
+        "air_temperature_1",
+        "air_temperature_2",
+        "air_temperature_3",
+        "air_temperature_4",
+        "air_temperature_5",
+        "specific_total_water_0",
+        "specific_total_water_1",
+        "specific_total_water_2",
+        "specific_total_water_3",
+        "specific_total_water_4",
+        "specific_total_water_5",
+        "PRESsfc",
+        "PRATEsfc",
+    ]
+    out_names = [
+        "air_temperature_0",
+        "air_temperature_1",
+        "air_temperature_2",
+        "air_temperature_3",
+        "air_temperature_4",
+        "air_temperature_5",
+        "specific_total_water_0",
+        "specific_total_water_1",
+        "specific_total_water_2",
+        "specific_total_water_3",
+        "specific_total_water_4",
+        "specific_total_water_5",
+        "PRESsfc",
+        "PRATEsfc",
+        "LHTFLsfc",
+        "SHTFLsfc",
+        "ULWRFsfc",
+        "ULWRFtoa",
+        "DLWRFsfc",
+        "DSWRFsfc",
+        "USWRFtoa",
+        "USWRFsfc",
+        "tendency_of_total_water_path_due_to_advection",
+    ]
+    all_names = list(set(in_names).union(out_names))
+    normalization = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means={name: 1.0 for name in all_names},
+            stds={name: 1.0 for name in all_names},
+            fill_nans_on_normalize=True,
+        ),
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+                ),
+                in_names=in_names,
+                out_names=out_names,
+                normalization=normalization,
+                corrector=AtmosphereCorrectorConfig(
+                    conserve_dry_air=True,
+                    moisture_budget_correction="advection_and_precipitation",
+                    force_positive_names=["PRATEsfc"],
+                ),
+            )
+        ),
+    )
+    img_shape = (9, 18)
+    n_samples = 4
+    step = get_step(config, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples
+    )
+    # Use explicit channel_mask to mask PRESsfc for half the samples.
+    channel_mask = {
+        "PRESsfc": torch.tensor([False, False, True, True], device=fme.get_device()),
+    }
+
+    output = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            channel_mask=channel_mask,
+        ),
+    )
+    for name in step.output_names:
+        assert (
+            not output[name].isnan().any()
+        ), f"NaN found in output '{name}' — masked IC inputs leaked through corrector"
