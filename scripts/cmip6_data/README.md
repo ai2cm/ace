@@ -992,6 +992,16 @@ python make_presence.py --config configs/pilot.yaml
   many-sigma input shift. **Both models excluded** via
   `selection.exclude_source_ids`.
 
+- **MPI-ESM1-2-HR excluded for runtime, not data quality**: The
+  high-resolution (~1°) MPI variant runs very slowly through the
+  pipeline — successful historical realizations in the lnlqt prod
+  run took 30-38 hours each (p100 of the entire workflow) and one
+  realization (r4i1p1f1) stalled past 32 hours. Data quality is
+  fine; excluded via `selection.exclude_source_ids` in both prod
+  configs purely to keep future runs tractable. The MPI-ESM1-2-LR
+  family is retained as the MPI representative. Re-enable when the
+  pipeline is fast enough to absorb it.
+
 - **EC-Earth3/historical/r4i1p1f1 missing plev timesteps**: The last
   13 timesteps (indices 347-359, late December) have all-NaN values
   for all 3D pressure-level variables (ua, va, hus, zg at all levels),

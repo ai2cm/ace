@@ -60,6 +60,15 @@ selection:
     # unaffected. See report/v5/README.md.
     - AWI-ESM-1-1-LR
     - AWI-ESM-1-REcoM
+    # MPI-ESM1-2-HR: high-resolution (~1° native) variants run very
+    # slowly through the pipeline — successful historical realizations
+    # in the lnlqt prod run took 30-38h each (the p100 of the entire
+    # workflow), and r4i1p1f1 stalled past 32h before being dropped
+    # from the workflow. Excluded purely on processing-time grounds
+    # so future runs complete faster. Data quality is fine; the
+    # MPI-ESM1-2-LR family is retained as the MPI representative.
+    # Re-enable when the pipeline is fast enough to absorb it.
+    - MPI-ESM1-2-HR
   exclude_variants:
     # Specific realizations whose 3D state slabs ship as ~10⁶ NaN
     # cells from the publisher. Sibling variants of these same

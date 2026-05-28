@@ -50,6 +50,10 @@ selection:
     # config + report/v5/README.md).
     - AWI-ESM-1-1-LR
     - AWI-ESM-1-REcoM
+    # MPI-ESM1-2-HR excluded for runtime, not data quality. See the
+    # Pangeo config for rationale. Mirrored here so the ESGF backfill
+    # doesn't pull it in either. The MPI-ESM1-2-LR family is retained.
+    - MPI-ESM1-2-HR
   exclude_variants:
     - {source_id: HadGEM3-GC31-MM, experiment: historical, variant_label: r2i1p1f3}
     - {source_id: EC-Earth3, experiment: historical, variant_label: r4i1p1f1}
