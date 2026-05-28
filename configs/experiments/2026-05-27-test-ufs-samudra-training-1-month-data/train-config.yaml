@@ -334,7 +334,7 @@ stepper:
         - vo_18
         - ocean_sea_ice_fraction
         - sea_ice_volume
-        - hfds_total_area
-        - tauuo
-        - tauvo
-        - wfo
+        # - hfds_total_area
+        # - tauuo
+        # - tauvo
+        # - wfo
