@@ -60,7 +60,7 @@ declare -A OUTPUT_DAILY_PRECIPITATION=( \
     [full-rs0]="False" \
     [full-rs1]="False" \
     [full-energy-conserving-rs0]="True" \
-    [full-energy-conserving-rs1]="False" \
+    [full-energy-conserving-rs1]="True" \
 )
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
