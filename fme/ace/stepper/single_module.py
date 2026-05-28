@@ -1481,6 +1481,21 @@ class TrainStepperConfig:
         )
 
 
+def _finalize_per_channel_losses(
+    weighted_sums: dict[str, torch.Tensor],
+    total_counts: dict[str, int],
+) -> dict[str, ChannelLossInfo] | None:
+    if not weighted_sums:
+        return None
+    return {
+        k: ChannelLossInfo(
+            loss=weighted_sums[k] / max(total_counts[k], 1),
+            count=total_counts[k],
+        )
+        for k in weighted_sums
+    }
+
+
 class TrainStepper(
     TrainStepperABC[
         PrognosticState,
@@ -1628,15 +1643,14 @@ class TrainStepper(
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)
-        weighted_sums: dict[str, torch.Tensor] | None = None
-        total_counts: dict[str, int] | None = None
+        weighted_sums: dict[str, torch.Tensor] = {}
+        total_counts: dict[str, int] = {}
         for step in range(n_forward_steps):
             optimize_step = self._loss_schedule.step_is_optimized(step)
-            if optimize_step:
-                context = contextlib.nullcontext()
-            else:
-                context = torch.no_grad()
-            with context:
+            grad_context = (
+                contextlib.nullcontext() if optimize_step else torch.no_grad()
+            )
+            with grad_context:
                 gen_step = next(output_iterator)
                 gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
                 output_list.append(gen_step)
@@ -1646,40 +1660,49 @@ class TrainStepper(
                         for k, v in target_data.data.items()
                     }
                 )
-                step_loss = self._loss_obj(
-                    gen_step,
-                    target_step,
+                step_total_loss = self._accumulate_step_loss(
+                    gen_step=gen_step,
+                    target_step=target_step,
                     step=step,
                     data_mask=input_batch_data.data_mask,
+                    optimize=optimize_step,
+                    metrics=metrics,
+                    weighted_sums=weighted_sums,
+                    total_counts=total_counts,
                 )
-                step_total_loss = step_loss.total()
-                metrics[f"loss_step_{step}"] = step_total_loss.detach()
-                if optimize_step:
-                    per_ch = step_loss.get_channel_losses()
-                    if weighted_sums is None:
-                        weighted_sums = {
-                            k: v.loss.detach() * v.count for k, v in per_ch.items()
-                        }
-                        total_counts = {k: v.count for k, v in per_ch.items()}
-                    else:
-                        assert total_counts is not None
-                        for k, v in per_ch.items():
-                            weighted_sums[k] = (
-                                weighted_sums[k] + v.loss.detach() * v.count
-                            )
-                            total_counts[k] = total_counts[k] + v.count
             if optimize_step:
                 optimization.accumulate_loss(step_total_loss)
-        per_channel_losses: dict[str, ChannelLossInfo] | None = None
-        if weighted_sums is not None and total_counts is not None:
-            per_channel_losses = {
-                k: ChannelLossInfo(
-                    loss=weighted_sums[k] / max(total_counts[k], 1),
-                    count=total_counts[k],
-                )
-                for k in weighted_sums
-            }
-        return output_list, per_channel_losses
+        return output_list, _finalize_per_channel_losses(weighted_sums, total_counts)
+
+    def _accumulate_step_loss(
+        self,
+        gen_step: EnsembleTensorDict,
+        target_step: TensorMapping,
+        step: int,
+        data_mask: TensorMapping | None,
+        optimize: bool,
+        metrics: dict[str, float],
+        weighted_sums: dict[str, torch.Tensor],
+        total_counts: dict[str, int],
+    ) -> torch.Tensor:
+        step_loss = self._loss_obj(
+            gen_step,
+            target_step,
+            step=step,
+            data_mask=data_mask,
+        )
+        step_total_loss = step_loss.total()
+        metrics[f"loss_step_{step}"] = step_total_loss.detach()
+        if optimize:
+            per_ch = step_loss.get_channel_losses()
+            for k, v in per_ch.items():
+                if k in weighted_sums:
+                    weighted_sums[k] = weighted_sums[k] + v.loss.detach() * v.count
+                    total_counts[k] = total_counts[k] + v.count
+                else:
+                    weighted_sums[k] = v.loss.detach() * v.count
+                    total_counts[k] = v.count
+        return step_total_loss
 
     def update_training_history(self, training_job: TrainingJob) -> None:
         """
