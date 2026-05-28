@@ -81,4 +81,5 @@ pressure_level_fine_tuning_base_name="ace2-1-aimip"
 # then uncomment next line, modifying the job name and override args as needed
 
 run_training "ace-train-config-pressure-level-finetuning.yaml" \
-  "$pressure_level_fine_tuning_base_name-era5-pressure-level-fine-tuning-rs0"
+  "$pressure_level_fine_tuning_base_name-era5-energy-corrector-pressure-level-fine-tuning-rs0" \
+  stepper.step.config.corrector.total_energy_budget_correction.method=constant_temperature
