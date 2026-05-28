@@ -58,6 +58,6 @@ epoch-26-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRXZNTWTT
 epoch-26-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRXZNTWTTGSFD84F63XNMRWT|done|best_inference_ckpt|high|--min-runtime 8h||01KS0FCMBJSV81V8ENZNBDR5RH||h100
 epoch-26-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRXZNTWTTGSFD84F63XNMRWT|done|best_inference_ckpt|high|--min-runtime 8h||01KS0FCMBJSV81V8ENZNBDR5RH||h100
 
-ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRC8081HFK82XE2MRWK5TPZ3|run_ICx1_piC_280yr|best_inference_ckpt|urgent||||ai2/climate-titan|b200
+ft-50-50-piControl-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRC8081HFK82XE2MRWK5TPZ3|run_ICx1_piC-280yr|best_inference_ckpt|urgent||||ai2/climate-titan|b200
 
 samudrace-GRL-ft-1y8prir2-20ep-cosine_annealing-fixed_OHC||01JZHQJXBGRW367AXKJFG1BCR0|done|best_inference_ckpt|urgent||||ai2/climate-titan|b200
