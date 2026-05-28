@@ -87,7 +87,11 @@ selection:
     # codec. ESGF still has this variant (all 18 day vars), so the
     # ESGF backfill picks it up — only Pangeo is excluded here.
     - {source_id: HadGEM3-GC31-LL, experiment: ssp245, variant_label: r4i1p1f3}
-  experiments: [historical, ssp126, ssp245, ssp370, ssp585]
+  # ssp126 + ssp370 dropped 2026-05-28 to keep total data size manageable
+  # for the initial training run; can be re-added once the ssp245/ssp585
+  # pair is validated. time_subset entries for the dropped SSPs are
+  # left in place so re-enabling is a one-line edit.
+  experiments: [historical, ssp245, ssp585]
 
 overrides:
   # CESM2-WACCM historical r2i1p1f1 has its psl variable concatenated

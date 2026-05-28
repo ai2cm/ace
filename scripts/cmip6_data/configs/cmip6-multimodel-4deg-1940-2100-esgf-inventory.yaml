@@ -10,4 +10,9 @@
 #             tables (Amon, Eday, SImon, SIday, Oday, Omon) + fx
 #   experiments = [historical, ssp126, ssp245, ssp370, ssp585]
 output_path: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/inventory_esgf.csv
-search_node: https://esgf-data.dkrz.de/esg-search/search
+# LLNL is the more comprehensive federation index — DKRZ even with
+# distrib=true returns ~50% of Eday.prw / siday_* / omon_tob datasets
+# that LLNL sees. Switched 2026-05-28 after discovering the gap during
+# the 4tbbk failure analysis. ORNL (esgf-node.ornl.gov/esgf-1-5-bridge)
+# is equivalent if LLNL is down.
+search_node: https://esgf-node.llnl.gov/esg-search/search
