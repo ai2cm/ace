@@ -25,7 +25,7 @@ model:
   churn: 0.0
 data:
   coarse:
-    merge:
+    - merge:
       - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
         file_pattern: 100km.zarr
         engine: zarr
