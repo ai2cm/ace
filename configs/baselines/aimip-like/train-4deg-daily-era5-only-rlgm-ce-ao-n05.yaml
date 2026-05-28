@@ -355,7 +355,7 @@ stepper:
           remove_latent_global_mean: true
           concat_latent_global_mean: every
           add_latent_global_mean_to_output: true
-          global_mean_noise: 1.0
+          global_mean_noise: 0.05
       normalization:
         network:
           global_means_path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/centering.nc
