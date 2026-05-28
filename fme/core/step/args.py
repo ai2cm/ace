@@ -21,6 +21,8 @@ class StepArgs:
         data_mask: Per-variable, per-sample masks indicating variable
             presence. Keys are variable names, values are [n_batch] bool
             tensors where True means present and False means masked.
+            Used for both loss weighting and network input masking.
+            Training-time dropout is applied on top of this by the step.
     """
 
     def __init__(
