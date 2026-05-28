@@ -75,11 +75,11 @@ from processing import (  # noqa: E402
     compute_below_surface_mask,
     compute_total_water_path,
     derive_ocean_and_correct_sea_ice,
+    fill_below_surface_smooth,
     finalize_surface_and_ocean_variable,
     flatten_plev_variables,
     grid_fingerprint,
     harmonize_temperature_to_kelvin,
-    nearest_above_fill,
     normalize_plev,
     regrid_variables,
     resolve_time_duplicates,
@@ -643,15 +643,16 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
         mask, row.mask_source = compute_below_surface_mask(day_regridded, orog)
         _stage("below_surface_mask", stage_t0)
 
-        # 10. Derive layer-mean T from the un-filled zg + hus. Running
-        # this on filled zg would force dz = 0 in below-surface columns
-        # 11. Nearest-above fill for the level-valued 3D state.
-        # When no mask is available (no orog, no NaN pattern), skip
-        # filling and don't write a mask variable.
+        # 10. Smooth-flood fill for the level-valued 3D state. Replaces
+        # the nearest_above_fill of earlier schema versions with an
+        # iterative horizontal-neighbor average (same algorithm the
+        # model applies at runtime, via fme.core.fill). When no mask
+        # is available (no orog, no NaN pattern), skip filling and
+        # don't write a mask variable.
         if mask is not None:
             for v in ("ua", "va", "hus", "zg"):
                 if v in day_regridded:
-                    day_regridded[v] = nearest_above_fill(day_regridded[v], mask)
+                    day_regridded[v] = fill_below_surface_smooth(day_regridded[v], mask)
             day_regridded = day_regridded.assign(below_surface_mask=mask)
 
         # 12. Surface-and-ocean variables (surface T, sea-ice, ocean). Each

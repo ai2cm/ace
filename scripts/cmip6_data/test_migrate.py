@@ -470,6 +470,140 @@ def test_migration_0_2_0_to_0_3_0_drops_derived_layer_T(tmp_path: Path):
     }
 
 
+def _write_v0_2_0_zarr_with_below_surface(
+    zarr_path: Path,
+    raw: dict[str, np.ndarray],
+    mask_per_hpa: dict[str, np.ndarray],
+    times: xr.CFTimeIndex,
+    fill_strategy: str,
+) -> xr.Dataset:
+    """Write a flattened plev zarr at either 0.2.0 (nearest_above) or
+    0.3.0 (smooth flood) schema. ``raw`` is the un-filled state keyed
+    by ``{var}{hPa}``; ``mask_per_hpa`` is the per-level mask keyed by
+    ``{hPa}``. Returns the resulting xarray Dataset.
+    """
+    from processing import fill_below_surface_smooth, nearest_above_fill
+
+    data_vars: dict = {}
+    nt, nlat, nlon = next(iter(raw.values())).shape
+
+    # Group {var}{hPa} → reconstruct a (time, plev, lat, lon) per var,
+    # apply the chosen fill, then re-flatten. Keeps the test
+    # exercising the same code path as the migration.
+    by_var: dict[str, list[tuple[str, np.ndarray]]] = {}
+    for key in raw:
+        var = "".join(c for c in key if not c.isdigit())
+        by_var.setdefault(var, []).append((key, raw[key]))
+
+    for var, entries in by_var.items():
+        entries.sort(key=lambda kv: -int("".join(c for c in kv[0] if c.isdigit())))
+        hpas = [int("".join(c for c in k if c.isdigit())) for k, _ in entries]
+        stacked = np.stack([v for _, v in entries], axis=1)
+        mask_stacked = np.stack([mask_per_hpa[str(h)] for h in hpas], axis=1)
+        dims4 = ("time", "plev", "lat", "lon")
+        coords4 = {"time": times, "plev": np.array(hpas, dtype=np.float32)}
+        da4 = xr.DataArray(stacked.astype(np.float32), dims=dims4, coords=coords4)
+        mk4 = xr.DataArray(mask_stacked.astype(np.uint8), dims=dims4, coords=coords4)
+        if fill_strategy == "nearest_above":
+            filled = nearest_above_fill(da4, mk4)
+        elif fill_strategy == "smooth":
+            filled = fill_below_surface_smooth(da4, mk4)
+        else:
+            raise ValueError(fill_strategy)
+        for i, (out_name, _) in enumerate(entries):
+            data_vars[out_name] = (("time", "lat", "lon"), filled.isel(plev=i).values)
+
+    # Per-level masks, stored as the pipeline does after flatten.
+    for hpa_str, mask_lvl in mask_per_hpa.items():
+        data_vars[f"below_surface_mask{hpa_str}"] = (
+            ("time", "lat", "lon"),
+            mask_lvl.astype(np.uint8),
+        )
+
+    ds = xr.Dataset(
+        {
+            k: xr.DataArray(v[1] if isinstance(v, tuple) else v, dims=v[0])
+            for k, v in data_vars.items()
+        },
+        coords={"time": times},
+    )
+    ds.to_zarr(str(zarr_path), mode="w", consolidated=True, zarr_format=3)
+    return ds
+
+
+def test_migration_0_2_0_to_0_3_0_refill_matches_fresh(tmp_path: Path):
+    """The 0.2.0 → 0.3.0 migration re-NaN's below-surface cells using
+    the stored mask and refills via smooth flood. A dataset written
+    fresh under 0.3.0 (smooth fill from the start) must end up
+    byte-identical to a 0.2.0 dataset (nearest_above) put through the
+    migration. The mask is the same in both, and nearest_above only
+    touches mask==1 cells, so this is a structural invariant.
+    """
+    from migrations._0_2_0_to_0_3_0 import MIGRATION
+
+    nt, nlat, nlon = 4, 12, 16
+    times = xr.date_range("2010-01-01", periods=nt, freq="D", calendar="noleap")
+    rng = np.random.default_rng(7)
+
+    hpas = ["1000", "850", "700"]
+    raw: dict[str, np.ndarray] = {}
+    mask_per_hpa: dict[str, np.ndarray] = {}
+    for var in ("ua", "va", "hus", "zg"):
+        for h in hpas:
+            raw[f"{var}{h}"] = rng.standard_normal((nt, nlat, nlon)).astype(np.float32)
+    # Same mask for every variable at the same level (matches pipeline).
+    for h_idx, h in enumerate(hpas):
+        m = np.zeros((nt, nlat, nlon), dtype=np.uint8)
+        # Static below-surface region at the bottom level, fewer cells higher up.
+        if h == "1000":
+            m[:, 0, 0:3] = 1
+            m[:, nlat // 2, nlon // 2] = 1
+        if h == "850":
+            m[:, 0, 0:2] = 1
+        if h == "700":
+            m[:, 0, 0:1] = 1
+        # Time-varying speck — only timestep 0 below surface at one cell.
+        if h == "1000":
+            m[0, nlat - 1, nlon - 1] = 1
+        mask_per_hpa[h] = m
+
+    fresh_dir = tmp_path / "fresh.zarr"
+    aged_dir = tmp_path / "aged.zarr"
+    fresh_ds = _write_v0_2_0_zarr_with_below_surface(
+        fresh_dir, raw, mask_per_hpa, times, fill_strategy="smooth"
+    )
+    aged_ds = _write_v0_2_0_zarr_with_below_surface(
+        aged_dir, raw, mask_per_hpa, times, fill_strategy="nearest_above"
+    )
+
+    # Apply the migration to the aged zarr.
+    sidecar = {
+        "source_id": "TEST",
+        "experiment": "historical",
+        "variant_label": "r1i1p1f1",
+        "label": "TEST",
+        "schema_version": "0.2.0",
+        "variables_present": sorted(aged_ds.data_vars),
+    }
+    out_sidecar = MIGRATION.apply(str(aged_dir), sidecar)
+    migrated_ds = xr.open_zarr(str(aged_dir), consolidated=True)
+
+    assert out_sidecar["schema_version"] == "0.3.0"
+    audit = out_sidecar["migrations"][-1]
+    assert set(audit["refilled"]) == {
+        f"{v}{h}" for v in ("ua", "va", "hus", "zg") for h in hpas
+    }
+
+    for var in ("ua", "va", "hus", "zg"):
+        for h in hpas:
+            key = f"{var}{h}"
+            np.testing.assert_array_equal(
+                migrated_ds[key].values,
+                fresh_ds[key].values,
+                err_msg=f"{key}: migrated != fresh",
+            )
+
+
 def test_migration_0_2_0_to_0_3_0_noop_when_no_layer_vars(tmp_path: Path):
     from migrations._0_2_0_to_0_3_0 import MIGRATION
 

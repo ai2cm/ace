@@ -429,9 +429,14 @@ def compute_below_surface_mask(
 
 
 def nearest_above_fill(da: xr.DataArray, mask: xr.DataArray) -> xr.DataArray:
-    """Fill below-surface cells in ``da`` with the value at the lowest
-    above-surface level in that column. Works for any number of
-    consecutive masked bottom levels.
+    """Legacy below-surface fill: each column's masked cells inherit the
+    lowest above-surface level's value.
+
+    Kept in the module for the 0.2.0→0.3.0 migration regression test —
+    it simulates how older schema versions filled below-surface cells
+    before the switch to :func:`fill_below_surface_smooth`. The
+    production pipeline no longer calls this function; use
+    :func:`fill_below_surface_smooth` for new data.
 
     ``da`` is (time, plev, lat, lon); ``mask`` is uint8 same shape.
     Plev axis is assumed descending in altitude (index 0 = 1000 hPa).
@@ -439,6 +444,66 @@ def nearest_above_fill(da: xr.DataArray, mask: xr.DataArray) -> xr.DataArray:
     filled = da.where(mask == 0)
     filled = filled.bfill("plev")
     return filled
+
+
+def fill_below_surface_smooth(
+    da: xr.DataArray,
+    mask: xr.DataArray,
+    num_steps: int = 4,
+    blur_kernel_size: int = 5,
+    blur_sigma: float = 1.0,
+) -> xr.DataArray:
+    """Fill below-surface cells in ``da`` using a smooth flood fill —
+    the same algorithm the model applies at runtime in
+    ``fme.core.fill``. The implementation here is a numpy/scipy port
+    (see :mod:`fill`); the dev parity test ``test_fill.py`` keeps it
+    bit-comparable to the torch reference so the ingest container can
+    stay torch-free.
+
+    For each plev level we set the masked cells to NaN, precompute a
+    static (lat, lon) interior mask from the time-union of NaN cells,
+    and dispatch :func:`fill.fast_flood_fill` with that interior mask.
+    Per-(time) NaN patterns drive the iterative edge-blend loop, so
+    cells that are sometimes-below-surface still keep their real data
+    on the timesteps when they're above surface.
+
+    ``da`` is (time, plev, lat, lon); ``mask`` is uint8 same shape with
+    1 marking below-surface cells.
+    """
+    from fill import fast_flood_fill, get_interior_mask
+
+    dims = ("time", "plev", "lat", "lon")
+    if da.dims != dims or mask.dims != dims:
+        raise ValueError(
+            f"fill_below_surface_smooth expects dims {dims}, got "
+            f"da={da.dims} mask={mask.dims}"
+        )
+
+    out = da.copy().astype(np.float32)
+    n_plev = da.sizes["plev"]
+    H, W = da.sizes["lat"], da.sizes["lon"]
+    for p in range(n_plev):
+        plane = out.isel(plev=p).values  # (time, lat, lon)
+        mask_plane = mask.isel(plev=p).values  # (time, lat, lon)
+        if not mask_plane.any():
+            continue
+        # NaN the below-surface cells per timestep.
+        plane = np.where(mask_plane.astype(bool), np.nan, plane).astype(np.float32)
+        # Union-of-time interior mask, computed once for this level.
+        union_nan = mask_plane.any(axis=0)
+        if not union_nan.any():
+            out.values[:, p] = plane  # type: ignore[index]
+            continue
+        interior = get_interior_mask(union_nan, num_steps=num_steps).reshape(1, 1, H, W)
+        filled = fast_flood_fill(
+            plane[None],  # (1, T, H, W)
+            num_steps=num_steps,
+            blur_kernel_size=blur_kernel_size,
+            blur_sigma=blur_sigma,
+            interior_mask=interior,
+        )
+        out.values[:, p] = filled[0]  # type: ignore[index]
+    return out
 
 
 def fill_horizontal_diffuse(
@@ -1403,6 +1468,7 @@ __all__ = [
     "normalize_plev",
     "compute_below_surface_mask",
     "nearest_above_fill",
+    "fill_below_surface_smooth",
     "fill_horizontal_diffuse",
     "causal_annual_to_daily",
     "causal_monthly_to_daily",

@@ -80,10 +80,10 @@ from processing import (  # noqa: E402
     compute_below_surface_mask,
     compute_total_water_path,
     derive_ocean_and_correct_sea_ice,
+    fill_below_surface_smooth,
     finalize_surface_and_ocean_variable,
     flatten_plev_variables,
     harmonize_temperature_to_kelvin,
-    nearest_above_fill,
     normalize_plev,
     regrid_variables,
     resolve_time_duplicates,
@@ -609,11 +609,12 @@ def process_one_esgf(
         mask, row.mask_source = compute_below_surface_mask(day_regridded, orog)
         _stage("below_surface_mask", stage_t0)
 
-        # 6. Nearest-above fill for the level-valued 3D state.
+        # 6. Smooth-flood fill for the level-valued 3D state (see
+        # process.py for the algorithm rationale).
         if mask is not None:
             for v in ("ua", "va", "hus", "zg"):
                 if v in day_regridded:
-                    day_regridded[v] = nearest_above_fill(day_regridded[v], mask)
+                    day_regridded[v] = fill_below_surface_smooth(day_regridded[v], mask)
             day_regridded = day_regridded.assign(below_surface_mask=mask)
 
         # 7. Surface-and-ocean variables (surface T, sea-ice, ocean) — see
