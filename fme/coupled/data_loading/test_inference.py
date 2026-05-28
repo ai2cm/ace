@@ -239,13 +239,13 @@ def _build_coupled_dataset_info(mock_data: MockCoupledData) -> CoupledDatasetInf
     ocean_info = DatasetInfo(
         horizontal_coordinates=mock_data.ocean.hcoord,
         vertical_coordinate=mock_data.ocean.vcoord,
-        mask_provider=mock_data.ocean.mask_provider,
+        spatial_mask_provider=mock_data.ocean.spatial_mask_provider,
         timestep=mock_data.ocean.timestep,
     )
     atmos_info = DatasetInfo(
         horizontal_coordinates=mock_data.atmosphere.hcoord,
         vertical_coordinate=mock_data.atmosphere.vcoord,
-        mask_provider=mock_data.atmosphere.mask_provider,
+        spatial_mask_provider=mock_data.atmosphere.spatial_mask_provider,
         timestep=mock_data.atmosphere.timestep,
     )
     return CoupledDatasetInfo(ocean=ocean_info, atmosphere=atmos_info)
@@ -344,9 +344,9 @@ def test_no_target_inference_with_n_repeats(tmp_path):
     # Loader yields the expected number of batches.
     batches = list(data.loader)
     expected_n_batches = _TOTAL_COUPLED_STEPS // _COUPLED_STEPS_IN_MEMORY
-    assert (
-        len(batches) == expected_n_batches
-    ), f"Expected {expected_n_batches} batches, got {len(batches)}."
+    assert len(batches) == expected_n_batches, (
+        f"Expected {expected_n_batches} batches, got {len(batches)}."
+    )
 
     n_atmos_per_batch = _COUPLED_STEPS_IN_MEMORY * _N_INNER_STEPS + 1
     n_ocean_per_batch = _COUPLED_STEPS_IN_MEMORY + 1
