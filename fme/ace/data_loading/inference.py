@@ -9,7 +9,7 @@ import torch
 import xarray as xr
 
 from fme.ace.data_loading.batch_data import BatchData
-from fme.ace.data_loading.perturbation import ForcingPerturbation, SSTPerturbation
+from fme.ace.data_loading.perturbation import SSTPerturbation
 from fme.ace.requirements import DataRequirements
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.merged import (
@@ -117,9 +117,7 @@ class InferenceDataLoaderConfig:
             Values following the initial condition will still come from
             the full dataset.
         num_data_workers: Number of parallel workers to use for data loading.
-        perturbations: Configuration for perturbations applied to forcing
-            data. Accepts either SSTPerturbation (legacy) or
-            ForcingPerturbation (general, supports arbitrary variables).
+        perturbations: Configuration for SST perturbations.
         persistence_names: Names of variables for which all returned values
             will be the same as the initial condition. When evaluating initial
             condition predictability, set this to forcing variables that should
@@ -129,7 +127,7 @@ class InferenceDataLoaderConfig:
     dataset: XarrayDataConfig | MergeNoConcatDatasetConfig
     start_indices: InferenceInitialConditionIndices | ExplicitIndices | TimestampList
     num_data_workers: int = 0
-    perturbations: ForcingPerturbation | SSTPerturbation | None = None
+    perturbations: SSTPerturbation | None = None
     persistence_names: Sequence[str] | None = None
 
     def __post_init__(self):
@@ -170,9 +168,8 @@ class ForcingDataLoaderConfig:
     Parameters:
         dataset: Configuration to define the dataset.
         num_data_workers: Number of parallel workers to use for data loading.
-        perturbations: Configuration for perturbations applied to forcing
-            data. Accepts either SSTPerturbation (legacy) or
-            ForcingPerturbation (general, supports arbitrary variables).
+        perturbations: Configuration for SST perturbations
+            used in forcing data.
         persistence_names: Names of variables for which all returned values
             will be the same as the initial condition. When evaluating initial
             condition predictability, set this to forcing variables that should
@@ -181,7 +178,7 @@ class ForcingDataLoaderConfig:
 
     dataset: XarrayDataConfig | MergeNoConcatDatasetConfig
     num_data_workers: int = 0
-    perturbations: ForcingPerturbation | SSTPerturbation | None = None
+    perturbations: SSTPerturbation | None = None
     persistence_names: Sequence[str] | None = None
 
     def __post_init__(self):
@@ -273,9 +270,10 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
         else:
             if self._perturbations is not None:
                 raise ValueError(
-                    "Perturbations are only supported for lat/lon coordinates."
+                    "Currently, SST perturbations are only supported \
+                    for lat/lon coordinates."
                 )
-        if isinstance(self._perturbations, SSTPerturbation) and (
+        if self._perturbations is not None and (
             self._surface_temperature_name is None or self._ocean_fraction_name is None
         ):
             raise ValueError(
@@ -336,48 +334,6 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
             label_encoding=self._label_encoding,
             allow_missing_variables=self._allow_missing_variables,
         )
-
-    def _apply_perturbations(self, tensors: dict[str, torch.Tensor]) -> None:
-        if isinstance(self._perturbations, SSTPerturbation):
-            if (
-                self._surface_temperature_name is None
-                or self._ocean_fraction_name is None
-            ):
-                raise ValueError(
-                    "Surface temperature and ocean fraction names must be provided "
-                    "to apply SST perturbations."
-                )
-            logging.debug("Applying SST perturbations to forcing data")
-            for perturbation in self._perturbations.perturbations:
-                perturbation.apply_perturbation(
-                    tensors[self._surface_temperature_name],
-                    self._lats,
-                    self._lons,
-                    tensors[self._ocean_fraction_name],
-                )
-        elif isinstance(self._perturbations, ForcingPerturbation):
-            logging.debug("Applying forcing perturbations to data")
-            ocean_fraction = (
-                tensors[self._ocean_fraction_name]
-                if self._ocean_fraction_name is not None
-                else torch.ones_like(next(iter(tensors.values())))
-            )
-            for (
-                var_name,
-                perturbations,
-            ) in self._perturbations.built_perturbations.items():
-                if var_name not in tensors:
-                    raise ValueError(
-                        f"Perturbation variable '{var_name}' not found in data. "
-                        f"Available variables: {list(tensors.keys())}"
-                    )
-                for perturbation in perturbations:
-                    perturbation.apply_perturbation(
-                        tensors[var_name],
-                        self._lats,
-                        self._lons,
-                        ocean_fraction,
-                    )
 
     def __getitem__(self, index) -> BatchData:
         dist = Distributed.get_instance()

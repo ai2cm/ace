@@ -44,12 +44,9 @@ from fme.ace.data_loading.inference import (
 )
 from fme.ace.data_loading.perturbation import (
     ConstantConfig,
-    ForcingPerturbation,
     GreensFunctionConfig,
     PerturbationSelector,
-    RedNoiseConfig,
     SSTPerturbation,
-    WhiteNoiseConfig,
 )
 from fme.ace.inference.data_writer import DataWriterConfig, FileWriterConfig
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
