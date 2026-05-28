@@ -1443,7 +1443,9 @@ class CoupledStepperTrainLoss:
         weight = self._weights[realm]
         if weight == 0.0:
             return torch.tensor(0.0, device=fme.get_device())
-        loss_output = self._loss_objs[realm](prediction, target_data)
+        loss_output = self._loss_objs[realm](
+            prediction.data, target_data, prediction.step
+        )
         return weight * loss_output.total()
 
     def __call__(
