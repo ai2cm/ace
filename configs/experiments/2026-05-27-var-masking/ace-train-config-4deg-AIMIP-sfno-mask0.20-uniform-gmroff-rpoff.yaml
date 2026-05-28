@@ -306,6 +306,27 @@ optimization:
   use_gradient_accumulation: true
   kwargs:
     weight_decay: 0.01
+  scheduler:
+    schedulers:
+    - type: LinearLR
+      kwargs:
+        start_factor: 0.01
+        end_factor: 1.0
+        total_iters: 6
+      step_each_iteration: false
+    - type: ConstantLR
+      kwargs:
+        factor: 1.0
+        total_iters: 108
+      step_each_iteration: false
+    - type: PolynomialLR
+      kwargs:
+        power: 0.5
+        total_iters: 6
+      step_each_iteration: false
+    milestones:
+    - 6
+    - 114
 stepper_training:
   n_ensemble: 2
   n_forward_steps: 1
