@@ -70,3 +70,14 @@ run_training "ace-train-config.yaml" "$deterministic_base_name-era5-energy-corre
   stepper.step.config.corrector.total_energy_budget_correction.method=constant_temperature
 run_training "ace-train-config.yaml" "$deterministic_base_name-era5-energy-corrector-training-rs1" \
   stepper.step.config.corrector.total_energy_budget_correction.method=constant_temperature seed=1
+
+# fine tune to add pressure level variables
+
+pressure_level_fine_tuning_base_name="ace2-1-aimip"
+
+# For the finetuning stage take beaker dataset id from the desired job above and add it to
+# ace-train-config-pressure-level-finetuning.yaml, eg,
+# --dataset <beaker_dataset_id>:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar
+# then uncomment next line, modifying the job name and override args as needed
+
+run_training "ace-train-config-pressure-level-finetuning.yaml" "$pressure_level_fine_tuning_base_name-era5-pressure-level-fine-tuning-rs0"
