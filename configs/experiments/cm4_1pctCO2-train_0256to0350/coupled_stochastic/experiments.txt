@@ -88,3 +88,5 @@ ft_mos8mas41_fdCRPSlevs2o-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRFQ7SJQW90
 ft_mos8mas41_fdCRPSlevs1o-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KRFRST726WS286KADG9J94PG|training|best_inference_ckpt|normal|--min-runtime 8h
 
 ft_mos8mas41_fdCRPSlevs1o-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KSJWZC0BP36V0E4VMNMAHBBY|training|best_inference_ckpt|normal|--min-runtime 8h
+
+ft_mos8mas41_fdCRPSlevs1o-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KSQQ2E7VVK30R5AJEV3NYC8D|training|best_inference_ckpt|normal|--min-runtime 8h
