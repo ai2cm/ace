@@ -5,30 +5,57 @@ ema:
   decay: 0.999
 max_epochs: 150
 inference:
-  n_forward_steps: 876
-  forward_steps_in_memory: 20
-  loader:
-    start_indices:
-      times:
-      - '0401-01-03T12:00:00'
-      - '0413-01-03T12:00:00'
-      - '0425-01-03T12:00:00'
-      - '0437-01-03T12:00:00'
-      - '0449-01-03T12:00:00'
-      - '0461-01-03T12:00:00'
-      - '0473-01-03T12:00:00'
-      - '0484-01-03T12:00:00'
-    dataset:
-      merge:
-      - data_path: /pscratch/sd/e/elynnwu/fme-dataset
-        file_pattern: 2026-05-27-E3SMv3-piControl-100yr-coupled-ocean.zarr
-        engine: zarr
-      - data_path: /pscratch/sd/e/elynnwu/fme-dataset
-        file_pattern: 2026-05-26-E3SMv3-piControl-ocean-100yr-5D-average.zarr
-        engine: zarr
-    num_data_workers: 4
-  aggregator:
-    log_histograms: false
+  - name: inference
+    weight: 1.0
+    n_forward_steps: 876
+    forward_steps_in_memory: 20
+    loader:
+      start_indices:
+        times:
+        - '0401-01-03T12:00:00'
+        - '0413-01-03T12:00:00'
+        - '0425-01-03T12:00:00'
+        - '0437-01-03T12:00:00'
+        - '0449-01-03T12:00:00'
+        - '0461-01-03T12:00:00'
+        - '0473-01-03T12:00:00'
+        - '0484-01-03T12:00:00'
+      dataset:
+        merge:
+        - data_path: /pscratch/sd/e/elynnwu/fme-dataset
+          file_pattern: 2026-05-27-E3SMv3-piControl-100yr-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /pscratch/sd/e/elynnwu/fme-dataset
+          file_pattern: 2026-05-26-E3SMv3-piControl-ocean-100yr-5D-average.zarr
+          engine: zarr
+      num_data_workers: 4
+  - name: 10yr_test
+    weight: 0.0
+    epochs:
+      start: 0
+      step: 5    
+    n_forward_steps: 730
+    forward_steps_in_memory: 20
+    loader:
+      start_indices:
+        times:
+        - '0491-01-03T12:00:00'
+        - '0491-01-08T12:00:00'
+        - '0491-01-13T12:00:00'
+        - '0491-01-18T12:00:00'
+        - '0491-01-23T12:00:00'
+        - '0491-01-28T12:00:00'
+        - '0491-02-02T12:00:00'
+        - '0491-02-07T12:00:00'
+      dataset:
+        merge:
+        - data_path: /pscratch/sd/e/elynnwu/fme-dataset
+          file_pattern: 2026-05-27-E3SMv3-piControl-100yr-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /pscratch/sd/e/elynnwu/fme-dataset
+          file_pattern: 2026-05-26-E3SMv3-piControl-ocean-100yr-5D-average.zarr
+          engine: zarr
+      num_data_workers: 4    
 logging:
   log_to_screen: true
   log_to_wandb: true
