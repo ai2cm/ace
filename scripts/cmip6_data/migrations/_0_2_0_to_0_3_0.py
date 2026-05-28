@@ -39,6 +39,50 @@ _LEVELED_VARS = ("ua", "va", "hus", "zg")
 _LEVEL_RE = re.compile(r"^(ua|va|hus|zg)(\d+)$")
 
 
+def _trim_stats_nc(
+    stats_path: str,
+    stale_prefixes: tuple[str, ...],
+    layer_vars: list[str],
+    refilled: list[str],
+) -> None:
+    """Drop stale per-variable entries from ``stats.nc``.
+
+    h5netcdf can't write to GCS directly, so we round-trip: download
+    to a tempfile, edit locally, upload back. The tempfile is cleaned
+    up regardless of success.
+    """
+    import tempfile
+
+    import fsspec
+
+    if not stale_prefixes:
+        return
+    with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp:
+        local_path = tmp.name
+    try:
+        # Download.
+        fs, rel = fsspec.core.url_to_fs(stats_path)
+        if not fs.exists(rel):
+            raise FileNotFoundError(stats_path)
+        fs.get(rel, local_path)
+        stats = xr.open_dataset(local_path, engine="h5netcdf").load()
+        stats.close()
+        to_drop = [k for k in stats.data_vars if k.startswith(stale_prefixes)]
+        if not to_drop:
+            return
+        stats = stats.drop_vars(to_drop)
+        stats.to_netcdf(local_path, mode="w", engine="h5netcdf")
+        fs.put(local_path, rel)
+        logging.info(
+            "  trimmed %d stats.nc entries (%d dropped vars, %d refilled vars)",
+            len(to_drop),
+            len(layer_vars),
+            len(refilled),
+        )
+    finally:
+        Path(local_path).unlink(missing_ok=True)
+
+
 def _list_derived_layer_vars(zarr_path: str) -> list[str]:
     group = zarr.open_group(zarr_path, mode="r")
     return sorted(name for name in group if name.startswith("ta_derived_layer"))
@@ -47,10 +91,17 @@ def _list_derived_layer_vars(zarr_path: str) -> list[str]:
 def _enumerate_leveled_vars(zarr_path: str) -> list[tuple[str, str]]:
     """List ``(var_name, hpa_label)`` pairs for plev-flattened state
     variables present in the zarr (e.g. ``("ua1000", "1000")``).
+
+    ``h500`` is the pipeline's renamed ``zg500`` (via
+    ``CMIP_TO_OUTPUT_RENAMES``); it's a stored geopotential height
+    level and needs the same refill treatment as the other zg levels.
     """
     group = zarr.open_group(zarr_path, mode="r")
     pairs: list[tuple[str, str]] = []
     for name in group:
+        if name == "h500":
+            pairs.append(("h500", "500"))
+            continue
         m = _LEVEL_RE.match(name)
         if m is None:
             continue
@@ -128,22 +179,13 @@ def _apply(zarr_path: str, sidecar: dict) -> dict:
     # 3. Trim stats.nc entries for the dropped layer vars + regenerate
     # entries for the refilled vars. The refill changes values in
     # below-surface cells, so all stats keys for those vars are stale.
+    # h5netcdf can't write directly to GCS, so we round-trip via a
+    # local tempfile.
     stats_path = zarr_path.rstrip("/").rsplit("/", 1)[0] + "/stats.nc"
     if layer_vars or refilled:
         try:
-            stats = xr.open_dataset(stats_path, engine="h5netcdf").load()
-            stats.close()
             stale_prefixes = tuple(f"{v}__" for v in (layer_vars + refilled))
-            to_drop = [k for k in stats.data_vars if k.startswith(stale_prefixes)]
-            if to_drop:
-                stats = stats.drop_vars(to_drop)
-                stats.to_netcdf(stats_path, mode="w", engine="h5netcdf")
-                logging.info(
-                    "  trimmed %d stats.nc entries (%d dropped vars, %d refilled vars)",
-                    len(to_drop),
-                    len(layer_vars),
-                    len(refilled),
-                )
+            _trim_stats_nc(stats_path, stale_prefixes, layer_vars, refilled)
         except FileNotFoundError:
             logging.warning(
                 "  stats.nc not present at %s — skipping stats trim", stats_path
@@ -155,9 +197,22 @@ def _apply(zarr_path: str, sidecar: dict) -> dict:
                 e,
             )
 
-    # 4. Sidecar bookkeeping.
-    remaining = [v for v in sidecar.get("variables_present", []) if v not in layer_vars]
-    sidecar["variables_present"] = sorted(remaining)
+    # 4. Sidecar bookkeeping. Derive variables_present from the actual
+    # zarr group rather than diffing against ``layer_vars``: when the
+    # migration is re-run after a partial first run, ``layer_vars`` is
+    # empty (vars already dropped on disk) but the sidecar still
+    # carries stale references to them, and we want the audit to
+    # reflect on-disk truth either way.
+    group = zarr.open_group(zarr_path, mode="r")
+    actual_vars = sorted(
+        name for name in group if not name.startswith("below_surface_mask_skip_")
+    )
+    # Exclude internal dimension arrays that some zarr v3 readers list
+    # alongside data variables — filter to what the original sidecar
+    # would have listed (everything that's a leaf variable, not a
+    # consolidated-metadata sentinel).
+    actual_vars = [v for v in actual_vars if not v.startswith("_")]
+    sidecar["variables_present"] = actual_vars
     sidecar["schema_version"] = "0.3.0"
     sidecar.setdefault("migrations", []).append(
         {
