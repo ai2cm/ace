@@ -30,8 +30,8 @@ logging:
   entity: ai2cm
   metrics_log_dir: /results/metrics
 train_loader:
-  batch_size: 16
-  num_data_workers: 8
+  batch_size: 1
+  num_data_workers: 1
   dataset:
     data_path: /climate-default
     file_pattern: ufs-replay-test.zarr
