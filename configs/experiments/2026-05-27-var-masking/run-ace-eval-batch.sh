@@ -9,10 +9,10 @@ WANDB_PROJECT=${WANDB_PROJECT:-VarMasking}
 
 # List of (EXISTING_RESULTS_DATASET, JOB_NAME) pairs to evaluate
 JOBS=(
-  "ace2-era5-eval-4deg-norm-gmst-respred 01KSJTET565QRGVX17ZQKH8AXF"
-  "ace2-era5-eval-4deg-norm-respred 01KSNHVEM76HJY67Y5DBGDTCDH"
-  "ace2-era5-eval-4deg-norm-gmst 01KSJG2N2J06AWXRFN94QNSEB8"
-  "ace2-era5-eval-4deg-norm-base 01KSJG2DVBQ30AA2ZQ2VSB20H0"
+  "01KSJTET565QRGVX17ZQKH8AXF ace2-era5-eval-4deg-norm-gmst-respred"
+  "01KSNHVEM76HJY67Y5DBGDTCDH ace2-era5-eval-4deg-norm-respred"
+  "01KSJG2N2J06AWXRFN94QNSEB8l ace2-era5-eval-4deg-norm-gmst"
+  "01KSJG2DVBQ30AA2ZQ2VSB20H0 ace2-era5-eval-4deg-norm-base"
 )
 
 for entry in "${JOBS[@]}"; do
