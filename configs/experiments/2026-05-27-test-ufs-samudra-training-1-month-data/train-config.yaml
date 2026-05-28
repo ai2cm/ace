@@ -158,7 +158,7 @@ stepper:
       in_names:
         - land_fraction
         - sea_surface_fraction
-        - deptho
+        # - deptho
         - DLWRFsfc
         - DSWRFsfc
         - ULWRFsfc

@@ -33,10 +33,11 @@ gantry run \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset $STATS_DATA:/statsdata \
+    --dataset $STATS_DATA:/ocean_stats \
     --gpus $N_GPUS \
     --shared-memory 400GiB \
     --budget ai2/atec-climate \
+    --allow-dirty \
     --system-python \
     --install "pip install --no-deps ." \
     -- torchrun --nproc_per_node $N_GPUS -m fme.ace.train $CONFIG_PATH
