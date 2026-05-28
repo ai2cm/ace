@@ -6,6 +6,7 @@ SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the reposi
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username by default
 WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
+WANDB_PROJECT=${WANDB_PROJECT:-VarMasking}
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=2
 
@@ -38,7 +39,7 @@ run_training() {
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
     --env WANDB_RUN_GROUP="$job_group" \
-    ${WANDB_PROJECT:+--env WANDB_PROJECT="$WANDB_PROJECT"} \
+    --env WANDB_PROJECT="$WANDB_PROJECT" \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \

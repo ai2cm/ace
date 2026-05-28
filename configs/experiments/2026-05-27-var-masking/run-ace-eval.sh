@@ -2,14 +2,16 @@
 
 set -e
 
-JOB_NAME="ace-eval-config-4deg-AIMIP"
-JOB_GROUP="ace2-era5"
-EXISTING_RESULTS_DATASET="01KRF9EXM8CH80BVF8TQXFHM3J"  # this contains the checkpoint to use for inference
-CONFIG_FILENAME="ace-eval-config-4deg-AIMIP.yaml"
+CONFIG_FILENAME="${1:-ace-eval-config-4deg-AIMIP.yaml}"
+JOB_NAME="${2:-ace-eval-config-4deg-AIMIP}"
+JOB_GROUP="${3:-ace2-era5}"
+EXISTING_RESULTS_DATASET="${4:-01KRF9EXM8CH80BVF8TQXFHM3J}"  # this contains the checkpoint to use for inference
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
+WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
+WANDB_PROJECT=${WANDB_PROJECT:-VarMasking}
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
@@ -26,10 +28,11 @@ cd $REPO_ROOT && gantry run \
     --not-preemptible \
     --cluster ai2/saturn-cirrascale \
     --cluster ai2/ceres-cirrascale \
-    --env WANDB_USERNAME=$BEAKER_USERNAME \
-    --env WANDB_NAME=$JOB_NAME \
+    --env WANDB_USERNAME="$WANDB_USERNAME" \
+    --env WANDB_NAME="$JOB_NAME" \
     --env WANDB_JOB_TYPE=inference \
-    --env WANDB_RUN_GROUP=$JOB_GROUP \
+    --env WANDB_RUN_GROUP="$JOB_GROUP" \
+    --env WANDB_PROJECT="$WANDB_PROJECT" \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
