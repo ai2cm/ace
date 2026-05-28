@@ -55,7 +55,7 @@ inference:
         - data_path: /pscratch/sd/e/elynnwu/fme-dataset
           file_pattern: 2026-05-26-E3SMv3-piControl-ocean-100yr-5D-average.zarr
           engine: zarr
-      num_data_workers: 4    
+      num_data_workers: 4
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -80,24 +80,25 @@ train_loader:
       subset:
         start_time: '0401-01-03'
         stop_time: '0491-01-01'
-validation_loader:
-  batch_size: 16
-  num_data_workers: 4
-  prefetch_factor: 2
-  dataset:
-    merge:
-    - data_path: /pscratch/sd/e/elynnwu/fme-dataset
-      file_pattern: 2026-05-27-E3SMv3-piControl-100yr-coupled-ocean.zarr
-      engine: zarr
-      subset:
-        start_time: '0491-01-03'
-        stop_time: '0496-01-01'
-    - data_path: /pscratch/sd/e/elynnwu/fme-dataset
-      file_pattern: 2026-05-26-E3SMv3-piControl-ocean-100yr-5D-average.zarr
-      engine: zarr
-      subset:
-        start_time: '0491-01-03'
-        stop_time: '0496-01-01'
+validation:
+  loader:
+    batch_size: 16
+    num_data_workers: 4
+    prefetch_factor: 2
+    dataset:
+      merge:
+      - data_path: /pscratch/sd/e/elynnwu/fme-dataset
+        file_pattern: 2026-05-27-E3SMv3-piControl-100yr-coupled-ocean.zarr
+        engine: zarr
+        subset:
+          start_time: '0491-01-03'
+          stop_time: '0496-01-01'
+      - data_path: /pscratch/sd/e/elynnwu/fme-dataset
+        file_pattern: 2026-05-26-E3SMv3-piControl-ocean-100yr-5D-average.zarr
+        engine: zarr
+        subset:
+          start_time: '0491-01-03'
+          stop_time: '0496-01-01'
 optimization:
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
