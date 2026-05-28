@@ -1529,7 +1529,6 @@ class TrainStepper(
         self._config = config
         self._loss_schedule = LossSchedule(
             n_forward_steps_schedule=config.n_forward_steps_schedule,
-            optimize_last_step_only=config.optimize_last_step_only,
         )
 
         self._prognostic_names = self._stepper.prognostic_names
@@ -1581,9 +1580,7 @@ class TrainStepper(
             target_data,
             optimization,
             metrics,
-            n_forward_steps=self._loss_schedule.n_forward_steps(
-                n_data_steps, n_loss_steps, evaluate_all_steps
-            ),
+            n_forward_steps=n_data_steps if evaluate_all_steps else n_loss_steps,
             n_loss_steps=n_loss_steps,
         )
 
@@ -1645,7 +1642,10 @@ class TrainStepper(
         weighted_sums: dict[str, torch.Tensor] = {}
         total_counts: dict[str, int] = {}
         for step in range(n_forward_steps):
-            optimize_step = self._loss_schedule.step_is_optimized(step, n_loss_steps)
+            if self._config.optimize_last_step_only:
+                optimize_step = step == n_loss_steps - 1
+            else:
+                optimize_step = step < n_loss_steps
             grad_context = (
                 contextlib.nullcontext() if optimize_step else torch.no_grad()
             )

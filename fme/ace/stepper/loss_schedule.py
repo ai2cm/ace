@@ -17,20 +17,13 @@ def probabilities_from_time_length(value: TimeLength) -> TimeLengthProbabilities
 
 
 class LossSchedule:
-    """Encapsulates which forward steps contribute to loss.
-
-    Manages stochastic n_forward_steps sampling (including epoch-based
-    schedules) and the ``optimize_last_step_only`` policy, answering
-    per-step optimization queries via ``step_is_optimized``.
-    """
+    """Manages stochastic n_forward_steps sampling including epoch-based schedules."""
 
     def __init__(
         self,
         n_forward_steps_schedule: TimeLengthSchedule | None,
-        optimize_last_step_only: bool,
     ):
         self._schedule = n_forward_steps_schedule
-        self._optimize_last_step_only = optimize_last_step_only
         self._train_sampler: TimeLengthProbabilities | None = None
         self._eval_sampler: TimeLengthProbabilities | None = None
         self._is_training: bool = True
@@ -77,19 +70,6 @@ class LossSchedule:
             return sampled
         else:
             return n_data_steps
-
-    def n_forward_steps(
-        self, n_data_steps: int, n_loss_steps: int, evaluate_all_steps: bool
-    ) -> int:
-        """Number of forward steps to iterate in the rollout loop."""
-        if evaluate_all_steps:
-            return n_data_steps
-        return n_loss_steps
-
-    def step_is_optimized(self, step: int, n_loss_steps: int) -> bool:
-        if self._optimize_last_step_only:
-            return step == n_loss_steps - 1
-        return step < n_loss_steps
 
     @property
     def has_sampler(self) -> bool:
