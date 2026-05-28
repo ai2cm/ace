@@ -51,7 +51,7 @@ class SwinTransformerNet(nn.Module):
         img_shape: tuple[int, int],
         embed_dim: int = 96,
         depth_multiplier: int = 1,
-        num_heads: tuple[int, int, int, int] = (3, 6, 6, 3),
+        num_heads: tuple[int, ...] = (3, 6, 6, 3),
         window_size: tuple[int, int] = (4, 8),
         mlp_ratio: float = 4.0,
         drop_path_rate: float = 0.2,

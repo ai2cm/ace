@@ -45,8 +45,8 @@ class SwinTransformerBuilder(ModuleConfig):
     Attributes:
         embed_dim: Channel dimension of the first/last U-Net stage.
         depth_multiplier: Scales the per-stage depths ``[2, 6, 6, 2]``.
-        num_heads: Attention heads for each of the four stages.
-        window_size: ``(ws_h, ws_w)`` attention window.
+        num_heads: Attention heads for each of the four stages (length-4 list).
+        window_size: ``[ws_h, ws_w]`` attention window.
         mlp_ratio: Hidden-dim multiplier for block MLPs.
         drop_path_rate: Maximum stochastic-depth rate.
         use_skip: Whether to concatenate the layer-1 skip into the decoder.
@@ -62,8 +62,8 @@ class SwinTransformerBuilder(ModuleConfig):
 
     embed_dim: int = 96
     depth_multiplier: int = 1
-    num_heads: tuple[int, int, int, int] = (3, 6, 6, 3)
-    window_size: tuple[int, int] = (4, 8)
+    num_heads: list[int] = dataclasses.field(default_factory=lambda: [3, 6, 6, 3])
+    window_size: list[int] = dataclasses.field(default_factory=lambda: [4, 8])
     mlp_ratio: float = 4.0
     drop_path_rate: float = 0.2
     use_skip: bool = True
@@ -94,8 +94,8 @@ class SwinTransformerBuilder(ModuleConfig):
             img_shape=dataset_info.img_shape,
             embed_dim=self.embed_dim,
             depth_multiplier=self.depth_multiplier,
-            num_heads=self.num_heads,
-            window_size=self.window_size,
+            num_heads=tuple(self.num_heads),
+            window_size=(self.window_size[0], self.window_size[1]),
             mlp_ratio=self.mlp_ratio,
             drop_path_rate=self.drop_path_rate,
             use_skip=self.use_skip,
