@@ -1471,8 +1471,9 @@ class ComponentTrainingConfig:
 
     Parameters:
         loss: The step loss function configuration (e.g. MSE, EnsembleLoss).
-        n_steps: Number of consecutive steps contributing to the loss, starting
-            from the first. Can be an int, ``None`` (the default, meaning all
+        n_steps: Number of consecutive component steps in the optimization
+            window, starting from the component's first step after the initial
+            condition. Can be an int, ``None`` (the default, meaning all
             available steps), or a ``TimeLengthProbabilities`` for stochastic
             per-batch sampling.
         optimize_last_step_only: If True, only the last step within the
