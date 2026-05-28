@@ -1,7 +1,7 @@
 experiment_dir: /scratch/cimes/wg4031/fme/valid/OM4_FloeNet-Samudra_coupled_finetune_phase2_seed711_1969-2022
 n_coupled_steps: 3942
 coupled_steps_in_memory: 18
-checkpoint_path: /scratch/cimes/wg4031/fme/train/OM4_FloeNet-SamudraI_coupled_finetune_phase2_seed711_4GPU/training_checkpoints/best_inference_ckpt.tar
+checkpoint_path: /scratch/cimes/wg4031/fme/train/OM4_FloeNet-SamudraI_coupled_finetune_phase2_BEST_seed711_4GPU/training_checkpoints/best_inference_ckpt.tar
 data_writer:
   ocean:
     save_prediction_files: false

@@ -97,12 +97,14 @@ validation_loader:
         value: 0.0
 optimization:
   enable_automatic_mixed_precision: false
-  lr: 0.0001
+  lr: 0.00001
   optimizer_type: AdamW
   kwargs:
     fused: true
     weight_decay: 0.01
   use_gradient_accumulation: true
+  scheduler:
+    type: CosineAnnealingLR
 stepper_training:
   n_coupled_steps: 4
   parameter_init:
@@ -112,6 +114,9 @@ stepper_training:
       weights_path: null
     loss:
       type: MSE
+    loss_contributions:
+      n_steps: 4
+      weight: 1.0
   ice:
     parameter_init:
       weights_path: null
@@ -134,6 +139,9 @@ stepper_training:
         XPRTs: 1
         BMELT: 1
         TMELT: 1
+    loss_contributions:
+      n_steps: 8
+      weight: 1.0
 stepper:
   sst_name: tos
   ocean:

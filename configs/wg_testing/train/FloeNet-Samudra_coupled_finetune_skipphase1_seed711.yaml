@@ -1,4 +1,4 @@
-experiment_dir: /scratch/cimes/wg4031/fme/train/OM4_FloeNet-SamudraI_coupled_finetune_phase1_seed711_4GPU
+experiment_dir: /scratch/cimes/wg4031/fme/train/OM4_FloeNet-SamudraI_coupled_finetune_skipphase1_seed711_4GPU
 save_checkpoint: true
 save_best_inference_epoch_checkpoints: false
 checkpoint_every_n_batches: 100
@@ -97,12 +97,14 @@ validation_loader:
         value: 0.0
 optimization:
   enable_automatic_mixed_precision: false
-  lr: 0.0001
+  lr: 0.00001
   optimizer_type: AdamW
   kwargs:
     fused: true
     weight_decay: 0.01
   use_gradient_accumulation: true
+  scheduler:
+    type: CosineAnnealingLR
 stepper_training:
   n_coupled_steps: 4
   ocean:
@@ -116,12 +118,6 @@ stepper_training:
   ice:
     parameter_init:
       weights_path: /scratch/cimes/wg4031/fme/train/OM4_FloeNet_6h_5docn_nexStep_seed711_4GPU/training_checkpoints/best_inference_ckpt.tar
-      parameters:
-        - frozen:
-            include:
-              - '*'
-    loss_contributions:
-      n_steps: 0
     loss:
       type: MSE
       weights:
@@ -141,6 +137,9 @@ stepper_training:
         XPRTs: 1
         BMELT: 1
         TMELT: 1
+    loss_contributions:
+      n_steps: 8
+      weight: 1.0
 stepper:
   sst_name: tos
   ocean:

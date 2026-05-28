@@ -1,4 +1,4 @@
-experiment_dir: /scratch/cimes/wg4031/fme/train/OM4_FloeNet-SamudraI_coupled_finetune_phase1_seed711_4GPU
+experiment_dir: /scratch/cimes/wg4031/fme/train/OM4_FloeNet-SamudraI_coupled_finetune_skipphase1_BEST_seed711_4GPU
 save_checkpoint: true
 save_best_inference_epoch_checkpoints: false
 checkpoint_every_n_batches: 100
@@ -110,18 +110,9 @@ stepper_training:
       weights_path: /scratch/cimes/wg4031/fme/train/OM4_Samudra_IceForce_seed711_2GPU/training_checkpoints/best_inference_ckpt.tar
     loss:
       type: MSE
-    loss_contributions:
-      n_steps: 4
-      weight: 1.0
   ice:
     parameter_init:
       weights_path: /scratch/cimes/wg4031/fme/train/OM4_FloeNet_6h_5docn_nexStep_seed711_4GPU/training_checkpoints/best_inference_ckpt.tar
-      parameters:
-        - frozen:
-            include:
-              - '*'
-    loss_contributions:
-      n_steps: 0
     loss:
       type: MSE
       weights:
