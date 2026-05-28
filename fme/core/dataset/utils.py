@@ -214,12 +214,18 @@ def get_horizontal_coordinates(
     dtype: torch.dtype | None,
 ) -> tuple[HorizontalCoordinates, list[str]]:
     """Return the horizontal coordinate class and dimension names."""
-    min_ndim = 3 if spatial_dimensions == "latlon" else 4
+    min_ndim = 2 if spatial_dimensions == "latlon" else 3
     coords: HorizontalCoordinates
+    dims: list[str] | None = None
     for da in ds.data_vars.values():
         if da.ndim >= min_ndim:
             dims = list(da.dims)
             break
+    if dims is None:
+        raise RuntimeError(
+            "Could not determine horizontal coordinates from dataset with dims "
+            f"{list(ds.dims)}."
+        )
     if spatial_dimensions == "latlon":
         lat_name, lon_name = dims[-2:]
         coords = LatLonCoordinates(

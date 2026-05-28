@@ -262,7 +262,7 @@ def test_no_target_inference_with_n_repeats(tmp_path):
     - The rollout extends past the end of the first repeat into a later
       repeat, exercising the integration of n_repeats with update_subset.
     """
-    _OCEAN_NAME = "bar"
+    _OCEAN_NAME = "land_fraction"  # time-invariant
     _ATMOS_NAME = "foo"
     _N_FORWARD_OCEAN = 3  # 4 ocean times in source file
     _N_FORWARD_ATMOS = 12  # 13 atmos times in source file (1d step, 4d ocean step)
@@ -309,7 +309,11 @@ def test_no_target_inference_with_n_repeats(tmp_path):
                 n_repeats=_N_REPEATS,
             ),
         ),
-        ocean=None,
+        ocean=ForcingDataLoaderConfig(
+            XarrayDataConfig(
+                data_path=str(tmp_path / "ocean"),
+            ),
+        ),
     )
     window_requirements = CoupledDataRequirements(
         ocean_timestep=mock_data.ocean.timestep,

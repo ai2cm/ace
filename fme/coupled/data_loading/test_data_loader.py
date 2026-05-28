@@ -119,8 +119,15 @@ def _save_netcdf(
                         mask == 1, masked_fill_value
                     )
             data_vars[f"idepth_{i}"] = float(i)
+    has_time = False
+    for data in data_vars.values():
+        has_time = has_time or (isinstance(data, xr.DataArray) and "time" in data.dims)
+    unlimited_dims: list[str] | None = ["time"]
+    if not has_time:
+        del coords["time"]
+        unlimited_dims = None
     ds = xr.Dataset(data_vars=data_vars, coords=coords)
-    ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
+    ds.to_netcdf(filename, unlimited_dims=unlimited_dims, format="NETCDF4_CLASSIC")
     return ds
 
 
@@ -133,11 +140,12 @@ class MockComponentData:
     timedelta: str
 
     def __post_init__(self):
-        self.ds["time"] = cftime.num2date(
-            self.ds["time"].values,
-            units=self.ds["time"].units,
-            calendar=self.ds["time"].calendar,
-        )
+        if "time" in self.ds.dims:
+            self.ds["time"] = cftime.num2date(
+                self.ds["time"].values,
+                units=self.ds["time"].units,
+                calendar=self.ds["time"].calendar,
+            )
 
     @property
     def timestep(self) -> datetime.timedelta:
