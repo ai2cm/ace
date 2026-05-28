@@ -136,14 +136,14 @@ stepper:
             - so_17
             - so_18
             - sea_ice_volume
-          sea_ice_fraction_correction:
-            sea_ice_fraction_name: ocean_sea_ice_fraction
-            land_fraction_name: land_fraction
-            remove_negative_ocean_fraction: false
-            zero_where_ice_free_names:
-              - sea_ice_volume
-          surface_energy_flux_correction:
-            method: prescribed
+          # sea_ice_fraction_correction:
+          #   sea_ice_fraction_name: ocean_sea_ice_fraction
+          #   land_fraction_name: land_fraction
+          #   remove_negative_ocean_fraction: false
+          #   zero_where_ice_free_names:
+          #     - sea_ice_volume
+          # surface_energy_flux_correction:
+          #   method: prescribed
       next_step_forcing_names:
         - DLWRFsfc
         - DSWRFsfc
