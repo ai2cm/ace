@@ -9,7 +9,8 @@ CONFIG_PATH=${4}
 
 beaker dataset fetch ${EXISTING_RESULTS_ATMOS_DATASET} --prefix config.yaml
 mv ./config.yaml ./atmos-config.yaml
-sed -i '' 's/statsdata/atmos_stats/g' ./atmos-config.yaml
+sed -i.bak 's/statsdata/atmos_stats/g' ./atmos-config.yaml
+rm atmos-config.yaml.bak
 
 beaker dataset fetch ${EXISTING_RESULTS_OCEAN_DATASET} --prefix config.yaml
 mv ./config.yaml ./ocean-config.yaml
