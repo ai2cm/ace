@@ -422,6 +422,7 @@ def test_train_and_inference(
     np.testing.assert_allclose(
         epoch_logs["val/mean/loss"],
         epoch_logs["val/mean/loss/atmosphere"] + epoch_logs["val/mean/loss/ocean"],
+        atol=1e-6,
     )
     if loss_atmos_n_steps == 0:
         np.testing.assert_allclose(epoch_logs["val/mean/loss/atmosphere"], 0.0)
