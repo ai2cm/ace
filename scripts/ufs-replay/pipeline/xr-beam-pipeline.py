@@ -919,11 +919,14 @@ def _average_atmo_chunk(
             "long_name": "total frozen precipitation rate",
             "units": "kg/m**2/s",
         }
-        # diff reduces time by 1; pad the first timestep with 0 so we
-        # don't trim other variables.  The first timestep is in the
-        # pre-ocean buffer window, so the 0 has negligible effect
+        # diff reduces time by 1; prepend a zero-filled first timestep
+        # so we don't trim other variables.  The first timestep is in
+        # the pre-ocean buffer window, so the 0 has negligible effect
         # after resample().mean().
-        frozen_rate = frozen_rate.reindex(time=ds_atmo.time, fill_value=0.0)
+        first_time = ds_atmo.time.values[0]
+        zero_pad = xr.zeros_like(frozen_rate.isel(time=0))
+        zero_pad["time"] = first_time
+        frozen_rate = xr.concat([zero_pad, frozen_rate], dim="time")
         ds_atmo = ds_atmo.drop_vars(accum_vars)
         ds_atmo["total_frozen_precipitation_rate"] = frozen_rate
 
