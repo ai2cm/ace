@@ -21,6 +21,11 @@ from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.args import StepArgs
+from fme.core.step.global_mean_removal import (
+    GlobalMeanRemoval,
+    GlobalMeanRemovalConfigUnion,
+    NoGlobalMeanRemoval,
+)
 from fme.core.step.secondary_decoder import (
     NoSecondaryDecoder,
     SecondaryDecoder,
@@ -58,6 +63,10 @@ class SingleModuleStepConfig(StepConfigABC):
             ``len(in_names)`` additional float channels (1.0 = present, 0.0 =
             masked) after the regular input channels, doubling the total input
             channel count.
+        global_mean_removal: Optional configuration for removing global means
+            from fields before normalization and restoring them after
+            denormalization. Supports shared (single reference field) or
+            per-channel removal, with optional extra input channels.
     """
 
     builder: ModuleSelector
@@ -73,9 +82,12 @@ class SingleModuleStepConfig(StepConfigABC):
     prescribed_prognostic_names: list[str] = dataclasses.field(default_factory=list)
     residual_prediction: bool = False
     include_channel_mask_inputs: bool = False
+    global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
+        if self.global_mean_removal is not None:
+            self.global_mean_removal.validate_names(self.in_names, self.out_names)
         for name in self.prescribed_prognostic_names:
             if name not in self.out_names:
                 raise ValueError(
@@ -260,6 +272,15 @@ class SingleModuleStep(StepABC):
         n_in_channels = len(config.in_names)
         if config.include_channel_mask_inputs:
             n_in_channels *= 2
+        if config.global_mean_removal is not None:
+            self._global_mean_removal: GlobalMeanRemoval = (
+                config.global_mean_removal.build(
+                    normalizer=normalizer, in_names=config.in_names
+                )
+            )
+            n_in_channels += self._global_mean_removal.n_extra_input_channels
+        else:
+            self._global_mean_removal = NoGlobalMeanRemoval()
         n_out_channels = len(config.out_names)
         self.in_packer = Packer(config.in_names)
         self.out_packer = Packer(config.out_names)
@@ -373,6 +394,9 @@ class SingleModuleStep(StepABC):
                 input_tensor = torch.cat(
                     [input_tensor, mask_tensor], dim=self.CHANNEL_DIM
                 )
+            extra = self._global_mean_removal.get_extra_channels()
+            if extra is not None:
+                input_tensor = torch.cat([input_tensor, extra], dim=self.CHANNEL_DIM)
             output_tensor = self.module.wrap_module(wrapper)(
                 input_tensor,
                 labels=args.labels,
@@ -394,6 +418,8 @@ class SingleModuleStep(StepABC):
             residual_prediction=self._config.residual_prediction,
             prognostic_names=self.prognostic_names,
             prescribed_prognostic_names=self._config.prescribed_prognostic_names,
+            global_mean_removal=self._global_mean_removal,
+            data_mask=args.data_mask,
         )
 
     def get_regularizer_loss(self):
@@ -477,11 +503,13 @@ def step_with_adjustments(
     next_step_input_data: TensorMapping,
     network_calls: Callable[[TensorDict], TensorDict],
     normalizer: StandardNormalizer,
-    corrector: CorrectorABC,
+    corrector: CorrectorABC | None,
     ocean: Ocean | None,
     residual_prediction: bool,
     prognostic_names: list[str],
     prescribed_prognostic_names: list[str] | None = None,
+    global_mean_removal: GlobalMeanRemoval | None = None,
+    data_mask: TensorMapping | None = None,
 ) -> TensorDict:
     """
     Step the model forward one timestep given input data.
@@ -503,17 +531,33 @@ def step_with_adjustments(
         prognostic_names: Names of prognostic variables.
         prescribed_prognostic_names: Prognostic names to overwrite from
             next_step_input_data after the ocean step (e.g. for inference).
+        global_mean_removal: Optional transform that removes per-sample
+            global means before normalization and restores them after
+            denormalization. When provided, ``forward_transform`` is called
+            before the normalizer and ``inverse_transform`` after
+            denormalization but before the corrector/ocean/prescribed steps,
+            so those adjustments operate in physical space.
+        data_mask: Per-variable boolean masks passed to
+            ``global_mean_removal.forward_transform``.
 
     Returns:
         The denormalized output data at the next time step.
     """
     if prescribed_prognostic_names is None:
         prescribed_prognostic_names = []
-    input_norm = normalizer.normalize(input)
+    if global_mean_removal is not None:
+        network_input: TensorMapping = global_mean_removal.forward_transform(
+            input, data_mask
+        )
+    else:
+        network_input = input
+    input_norm = normalizer.normalize(network_input)
     output_norm = network_calls(input_norm)
     if residual_prediction:
         output_norm = add_names(input_norm, output_norm, prognostic_names)
     output = normalizer.denormalize(output_norm)
+    if global_mean_removal is not None:
+        output = global_mean_removal.inverse_transform(output)
     if corrector is not None:
         output = corrector(input, output, next_step_input_data)
     if ocean is not None:
