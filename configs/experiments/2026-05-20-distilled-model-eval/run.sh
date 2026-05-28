@@ -16,7 +16,8 @@ cd $REPO_ROOT
 
 NGPU=4
 IMAGE="$(cat $REPO_ROOT/latest_deps_only_image.txt)"
-DATASET=01KRYPVQ3Z5YWQWND9X680GBMD
+DATASET_DMD2=01KRYPVQ3Z5YWQWND9X680GBMD
+DATASET_FDISTILL=01KSNTVQW7T21X5FD2CVFXB2S6
 
 usage() {
     echo "Usage: $0 <model> [--suffix <suffix>]"
@@ -28,6 +29,7 @@ usage() {
 run_eval() {
     local model="$1"
     local config="$2"
+    local dataset_mount="$3"
 
     local job_name="evaluate-distilled-${model}-xshield-amip-control-100km-to-3km-conus${SUFFIX}"
 
@@ -45,7 +47,7 @@ run_eval() {
         --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
         --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
         --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-        --dataset "$DATASET":/checkpoints \
+        --dataset "$dataset_mount" \
         --weka climate-default:/climate-default \
         --gpus $NGPU \
         --shared-memory 400GiB \
@@ -75,11 +77,11 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$MODEL" in
-    dmd2)     run_eval dmd2     config-dmd2.yaml ;;
-    fdistill) run_eval fdistill config-fdistill.yaml ;;
+    dmd2)     run_eval dmd2     config-dmd2.yaml     "$DATASET_DMD2:/checkpoints" ;;
+    fdistill) run_eval fdistill config-fdistill.yaml "$DATASET_FDISTILL:fastgen/ace-downscaling-distillation-fdistill-with-val-intended-recipe/checkpoints:/checkpoints" ;;
     all)
-        run_eval dmd2     config-dmd2.yaml
-        run_eval fdistill config-fdistill.yaml
+        run_eval dmd2     config-dmd2.yaml     "$DATASET_DMD2:/checkpoints"
+        run_eval fdistill config-fdistill.yaml "$DATASET_FDISTILL:fastgen/ace-downscaling-distillation-fdistill-with-val-intended-recipe/checkpoints:/checkpoints"
         ;;
     *)
         echo "Unknown model: $MODEL"
