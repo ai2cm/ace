@@ -66,5 +66,7 @@ deterministic_base_name="ace2-1-aimip"
 
 run_training "ace-train-config.yaml" "$deterministic_base_name-era5-training-rs0"
 run_training "ace-train-config.yaml" "$deterministic_base_name-era5-training-rs1" seed=1
-run_training "ace-train-energy-corrector-config.yaml" "$deterministic_base_name-era5-energy-corrector-training-rs0"
-run_training "ace-train-energy-corrector-config.yaml" "$deterministic_base_name-era5-energy-corrector-training-rs1" seed=1
+run_training "ace-train-config.yaml" "$deterministic_base_name-era5-energy-corrector-training-rs0" \
+  stepper.step.config.corrector.total_energy_budget_correction.method=constant_temperature
+run_training "ace-train-config.yaml" "$deterministic_base_name-era5-energy-corrector-training-rs1" \
+  stepper.step.config.corrector.total_energy_budget_correction.method=constant_temperature seed=1
