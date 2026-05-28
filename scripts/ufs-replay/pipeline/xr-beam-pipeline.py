@@ -858,22 +858,26 @@ def _process_chunk(
             ds[name] = ds[name].astype(np.float32)
 
     # xarray-beam's ConsolidateChunks requires all variables to share
-    # the same dimensions.  Drop scalar variables (idepth_*) — they
-    # are written once during template creation.  Broadcast 2-D
-    # time-invariant fields (deptho, mask_*, land_fraction) to have
-    # a time dim so ConsolidateChunks can combine them.
-    scalars_to_drop = [
+    # the same dimensions.  Drop scalar and time-invariant spatial
+    # variables — they are written once during template creation.
+    TIME_INVARIANT_SPATIAL = {
+        "mask_2d",
+        "land_fraction",
+        "sea_surface_fraction",
+        "deptho",
+    }
+    TIME_INVARIANT_SPATIAL.update(
+        name for name in ds.data_vars if name.startswith("mask_")
+    )
+    invariant_to_drop = [
         name
         for name in ds.data_vars
         if ds[name].dims == ()
         or ("lat" not in ds[name].dims and "lon" not in ds[name].dims)
+        or name in TIME_INVARIANT_SPATIAL
     ]
-    if scalars_to_drop:
-        ds = ds.drop_vars(scalars_to_drop)
-
-    for name in list(ds.data_vars):
-        if "time" not in ds[name].dims and "lat" in ds[name].dims:
-            ds[name] = ds[name].expand_dims("time", axis=0)
+    if invariant_to_drop:
+        ds = ds.drop_vars(invariant_to_drop)
 
     return ds
 
@@ -1036,12 +1040,17 @@ def process_ocean_chunk(
 
 def _extract_invariant_fields(
     ds_ocean: xr.Dataset,
+    ds_atmo: xr.Dataset,
     output_grid: str,
     vertical_coarsening_indices: Sequence[Sequence[int]],
-    source_grid: xr.Dataset,
+    source_grid_ocean: xr.Dataset,
+    source_grid_atmo: xr.Dataset,
+    time_coarsen_factor: int,
 ) -> xr.Dataset:
-    """Extract time-invariant fields (idepth_*, deptho) from the ocean data.
+    """Extract time-invariant fields from the ocean data.
 
+    Returns scalar fields (idepth_*) and 2-D spatial fields (mask_*,
+    land_fraction, sea_surface_fraction, deptho) without a time dimension.
     These are written once to the zarr store during template creation,
     not streamed through the Beam pipeline.
     """
@@ -1065,6 +1074,41 @@ def _extract_invariant_fields(
                 attrs={"units": "meters", "long_name": f"Depth at level-{i}"},
             )
 
+    # 2-D spatial invariant fields: process one timestep to get them
+    ds_ocean_1t = ds_ocean.isel(time=slice(0, max(1, time_coarsen_factor))).load()
+    ocean_start = ds_ocean_1t.time.values[0]
+    ocean_end = ds_ocean_1t.time.values[-1]
+    atmo_ref = ds_atmo.time.values[0]
+    atmo_start = _match_time_type(ocean_start, atmo_ref) - datetime.timedelta(hours=6)
+    atmo_end = _match_time_type(ocean_end, atmo_ref) + datetime.timedelta(hours=3)
+    ds_atmo_1t = ds_atmo.sel(time=slice(atmo_start, atmo_end)).load()
+
+    processed = _process_chunk(
+        ds_ocean_1t,
+        ds_atmo_1t,
+        output_grid,
+        vertical_coarsening_indices,
+        time_coarsen_factor,
+        source_grid_ocean,
+        source_grid_atmo,
+    )
+
+    spatial_invariant_names = {
+        "mask_2d",
+        "land_fraction",
+        "sea_surface_fraction",
+        "deptho",
+    }
+    spatial_invariant_names.update(
+        n for n in processed.data_vars if n.startswith("mask_")
+    )
+    for name in spatial_invariant_names:
+        if name in processed:
+            v = processed[name]
+            if "time" in v.dims:
+                v = v.isel(time=0, drop=True)
+            invariant[name] = v
+
     return xr.Dataset(invariant)
 
 
@@ -1079,21 +1123,33 @@ def _make_template(
     """Eagerly process one ocean timestep to build the output zarr template."""
     logging.info("Building template from first timestep")
 
-    # How many ocean timesteps form one output timestep
+    # _extract_invariant_fields processes a chunk internally and returns
+    # both scalar (idepth_*) and 2-D spatial (mask_*, land_fraction, etc.)
+    # invariant fields — all without a time dimension.
+    src_ocean = _make_source_grid(ds_ocean.isel(time=0).load())
+    src_atmo = _make_source_grid(ds_atmo.isel(time=0).load())
+    invariant = _extract_invariant_fields(
+        ds_ocean,
+        ds_atmo,
+        output_grid,
+        vertical_coarsening_indices,
+        src_ocean,
+        src_atmo,
+        time_coarsen_factor,
+    )
+    invariant = invariant.drop_encoding()
+
+    # The processed chunk from _extract_invariant_fields also gives us
+    # the time-varying variable schema.  _process_chunk already drops
+    # invariant fields, so we can re-use the same call.
     ocean_per_output = max(1, time_coarsen_factor)
-
-    # Load a small ocean chunk
     ds_ocean_small = ds_ocean.isel(time=slice(0, ocean_per_output)).load()
-
-    # Load corresponding atmosphere (convert times to match atmo calendar)
     ocean_start = ds_ocean_small.time.values[0]
     ocean_end = ds_ocean_small.time.values[-1]
     atmo_ref = ds_atmo.time.values[0]
     atmo_start = _match_time_type(ocean_start, atmo_ref) - datetime.timedelta(hours=6)
     atmo_end = _match_time_type(ocean_end, atmo_ref) + datetime.timedelta(hours=3)
     ds_atmo_small = ds_atmo.sel(time=slice(atmo_start, atmo_end)).load()
-
-    src_ocean, src_atmo = _get_source_grids(ds_ocean_small, ds_atmo_small)
 
     processed = _process_chunk(
         ds_ocean_small,
@@ -1104,21 +1160,7 @@ def _make_template(
         src_ocean,
         src_atmo,
     )
-
     processed = processed.drop_encoding()
-
-    # Separate invariant fields (scalars like idepth_*, and 2-D fields
-    # like deptho/mask_*/land_fraction) that were dropped by _process_chunk.
-    # We need to re-derive them for the template.  Re-run the coarsening
-    # on the same small chunk but extract invariant fields before cleanup.
-    # For simplicity, just add them back from a dedicated helper.
-    invariant = _extract_invariant_fields(
-        ds_ocean_small,
-        output_grid,
-        vertical_coarsening_indices,
-        src_ocean,
-    )
-    invariant = invariant.drop_encoding()
 
     # Squeeze out the single-timestep time dim, then re-expand with the
     # full output time coordinate (same pattern as ERA5 pipeline).
@@ -1126,8 +1168,7 @@ def _make_template(
     template = xbeam.make_template(processed)
     template = template.expand_dims(dim={"time": output_time}, axis=0)
 
-    # Add invariant fields to template (they are written once, not
-    # streamed through the Beam pipeline)
+    # Add invariant fields to template (written once, no time dimension)
     for name in invariant.data_vars:
         if name not in template:
             template[name] = invariant[name]
