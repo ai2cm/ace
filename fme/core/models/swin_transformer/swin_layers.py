@@ -219,8 +219,9 @@ def _build_mlp(mlp_layer: str, dim: int, hidden_features: int) -> nn.Module:
 
 
 # AdaLN conditioning is passed to a block as a 6-tuple of
-# (shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp), each of
-# shape (B, 1, 1, C) so it broadcasts over (B, H, W, C).
+# (shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp). It is driven
+# only by scalar/label embeddings, which produce (B, 1, 1, C) params that are
+# broadcast (constant) over space; this path carries no per-pixel or noise term.
 CondParams = tuple[
     torch.Tensor,
     torch.Tensor,
