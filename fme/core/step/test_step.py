@@ -1370,18 +1370,7 @@ def test_step_per_channel_global_mean_removal_with_extra_channels():
         assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
 
 
-def test_step_global_mean_removal_affects_output():
-    """Verify the transform is actually invoked during step.
-
-    The per-field unit tests in ``test_global_mean_removal.py`` cover the
-    forward/inverse value behavior. This test ties that unit coverage to the
-    full step by confirming that enabling ``global_mean_removal`` produces a
-    different output than disabling it, with all other state (seed, weights,
-    inputs) held fixed.
-    """
-    in_names = ["forcing_shared", "forcing_rad"]
-    out_names = ["diagnostic_main", "diagnostic_rad"]
-    means = {n: 0.0 for n in set(in_names + out_names)}
+def _assert_global_mean_removal_affects_output(removal, in_names, out_names, means):
     stds = {n: 1.0 for n in set(in_names + out_names)}
     n_samples = 2
     torch.manual_seed(0)
@@ -1390,11 +1379,7 @@ def test_step_global_mean_removal_affects_output():
     )
     torch.manual_seed(0)
     step_with_removal = _make_global_mean_removal_step(
-        PerChannelGlobalMeanRemovalConfig(field_names=in_names),
-        in_names,
-        out_names,
-        means=means,
-        stds=stds,
+        removal, in_names, out_names, means=means, stds=stds
     )
     input_data = get_tensor_dict(
         step_baseline.input_names, DEFAULT_IMG_SHAPE, n_samples
@@ -1411,12 +1396,50 @@ def test_step_global_mean_removal_affects_output():
     removal_output = step_with_removal.step(
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
     )
-    differs = False
-    for name in out_names:
-        if not torch.allclose(baseline_output[name], removal_output[name]):
-            differs = True
-            break
+    differs = any(
+        not torch.allclose(baseline_output[name], removal_output[name])
+        for name in out_names
+    )
     assert differs, "global_mean_removal had no effect on step outputs"
+
+
+def test_step_per_channel_global_mean_removal_affects_output():
+    """Verify PerChannelGlobalMeanRemoval is actually invoked during step.
+
+    The per-field unit tests in ``test_global_mean_removal.py`` cover the
+    forward/inverse value behavior. This test ties that unit coverage to the
+    full step by confirming that enabling ``global_mean_removal`` produces a
+    different output than disabling it, with all other state (seed, weights,
+    inputs) held fixed.
+    """
+    in_names = ["forcing_shared", "forcing_rad"]
+    out_names = ["diagnostic_main", "diagnostic_rad"]
+    means = {n: 0.0 for n in set(in_names + out_names)}
+    _assert_global_mean_removal_affects_output(
+        PerChannelGlobalMeanRemovalConfig(field_names=in_names),
+        in_names,
+        out_names,
+        means,
+    )
+
+
+def test_step_shared_global_mean_removal_affects_output():
+    """Verify SharedGlobalMeanRemoval is actually invoked during step.
+
+    Companion to the PerChannel version above; same rationale.
+    """
+    in_names = ["surface_temperature", "air_temperature_0"]
+    out_names = ["surface_temperature", "air_temperature_0"]
+    means = {n: 280.0 for n in set(in_names + out_names)}
+    _assert_global_mean_removal_affects_output(
+        SharedGlobalMeanRemovalConfig(
+            reference_field="surface_temperature",
+            field_names=in_names,
+        ),
+        in_names,
+        out_names,
+        means,
+    )
 
 
 def test_step_shared_global_mean_removal_raises_on_masked_reference():
