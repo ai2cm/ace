@@ -26,8 +26,12 @@ class ComponentLossSchedule:
             self._n_steps = float("inf") if n_steps is None else float(n_steps)
         self._is_training: bool = True
         self._optimize_last_step_only = optimize_last_step_only
-        self.loss_weight = loss_weight
+        self._loss_weight = loss_weight
         self._n_steps_limit = n_steps_limit
+
+    @property
+    def loss_weight(self) -> float:
+        return self._loss_weight
 
     def sample_n_steps(self) -> None:
         sampler = (

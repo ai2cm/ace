@@ -471,9 +471,7 @@ def test_n_steps_max_property():
 
 def test_coupled_stepper_train_loss_sample_n_steps_delegates():
     ocean_schedule = MagicMock(spec=ComponentLossSchedule)
-    ocean_schedule.loss_weight = 1.0
     atmos_schedule = MagicMock(spec=ComponentLossSchedule)
-    atmos_schedule.loss_weight = 1.0
     coupled_loss = CoupledStepperTrainLoss(
         ocean_loss=Mock(spec=StepLoss),
         atmosphere_loss=Mock(spec=StepLoss),
@@ -526,9 +524,7 @@ def test_seed_rng_does_not_corrupt_training_sampler():
 
 def test_coupled_stepper_train_loss_set_train_eval_delegates():
     ocean_schedule = MagicMock(spec=ComponentLossSchedule)
-    ocean_schedule.loss_weight = 1.0
     atmos_schedule = MagicMock(spec=ComponentLossSchedule)
-    atmos_schedule.loss_weight = 1.0
     coupled_loss = CoupledStepperTrainLoss(
         ocean_loss=MagicMock(spec=StepLoss),
         atmosphere_loss=MagicMock(spec=StepLoss),
@@ -630,9 +626,7 @@ def test_coupled_stepper_train_loss_n_required_outer_steps(
     ocean_required, atmos_required, n_inner_steps, expected_outer
 ):
     ocean_schedule = MagicMock(spec=ComponentLossSchedule)
-    ocean_schedule.loss_weight = 1.0
     atmos_schedule = MagicMock(spec=ComponentLossSchedule)
-    atmos_schedule.loss_weight = 1.0
     ocean_schedule.n_required_forward_steps.return_value = ocean_required
     atmos_schedule.n_required_forward_steps.return_value = atmos_required
     coupled_loss = CoupledStepperTrainLoss(
