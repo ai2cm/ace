@@ -485,6 +485,64 @@ def test_coupled_stepper_train_loss_sample_n_steps_delegates():
     atmos_schedule.sample_n_steps.assert_called_once()
 
 
+def test_seed_rng_does_not_corrupt_training_sampler():
+    """seed_rng must only affect the eval sampler, leaving the training
+    sampler's RNG untouched across eval/train cycles."""
+    sampler = TimeLengthProbabilities(
+        outcomes=[
+            TimeLengthProbability(steps=1, probability=0.5),
+            TimeLengthProbability(steps=4, probability=0.5),
+        ]
+    )
+    loss_sched = ComponentLossSchedule(
+        n_steps=sampler,
+        loss_weight=1.0,
+        optimize_last_step_only=False,
+        n_steps_limit=5,
+    )
+    assert loss_sched._n_steps_sampler is not None
+    loss_sched._n_steps_sampler.seed_rng(42)
+    loss_sched.set_train()
+    train_first_20 = []
+    for _ in range(20):
+        loss_sched.sample_n_steps()
+        train_first_20.append(loss_sched._n_steps)
+    loss_sched.set_eval()
+    loss_sched.seed_rng(0)
+    for _ in range(10):
+        loss_sched.sample_n_steps()
+    loss_sched.set_train()
+    train_next_20 = []
+    for _ in range(20):
+        loss_sched.sample_n_steps()
+        train_next_20.append(loss_sched._n_steps)
+    loss_sched._n_steps_sampler.seed_rng(42)
+    reference_40 = []
+    for _ in range(40):
+        loss_sched.sample_n_steps()
+        reference_40.append(loss_sched._n_steps)
+    assert train_first_20 + train_next_20 == reference_40
+
+
+def test_coupled_stepper_train_loss_set_train_eval_delegates():
+    ocean_schedule = MagicMock(spec=ComponentLossSchedule)
+    ocean_schedule.loss_weight = 1.0
+    atmos_schedule = MagicMock(spec=ComponentLossSchedule)
+    atmos_schedule.loss_weight = 1.0
+    coupled_loss = CoupledStepperTrainLoss(
+        ocean_loss=MagicMock(spec=StepLoss),
+        atmosphere_loss=MagicMock(spec=StepLoss),
+        ocean_schedule=ocean_schedule,
+        atmosphere_schedule=atmos_schedule,
+    )
+    coupled_loss.set_eval()
+    ocean_schedule.set_eval.assert_called_once()
+    atmos_schedule.set_eval.assert_called_once()
+    coupled_loss.set_train()
+    ocean_schedule.set_train.assert_called_once()
+    atmos_schedule.set_train.assert_called_once()
+
+
 @pytest.mark.parametrize(
     "n_steps, n_steps_limit, expected",
     [

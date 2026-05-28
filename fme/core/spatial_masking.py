@@ -32,20 +32,20 @@ def replace_on_mask(
 
 
 @runtime_checkable
-class HasGetMaskTensorFor(Protocol):
-    def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]: ...
+class HasGetSpatialMask(Protocol):
+    def build_output_spatial_masker(self) -> Callable[[TensorMapping], TensorDict]: ...
 
     def get_mask_tensor_for(self, name: str) -> torch.Tensor | None:
         """Get the mask for a specific variable name."""
         ...
 
-    def to(self, device: str) -> "HasGetMaskTensorFor": ...
+    def to(self, device: str) -> "HasGetSpatialMask": ...
 
 
 @dataclasses.dataclass
-class StaticMaskingConfig:
+class StaticSpatialMaskingConfig:
     """
-    Replace static masked regions with a fill value.
+    Replace static spatially masked regions with a fill value.
 
     Parameters:
         mask_value: Value of the mask variable in masked regions. Either 0 or 1.
@@ -67,13 +67,13 @@ class StaticMaskingConfig:
                 f"mask_value must be either 0 or 1, but got {self.mask_value}"
             )
 
-    def build(self, mask: HasGetMaskTensorFor, means: TensorMapping | None = None):
+    def build(self, mask: HasGetSpatialMask, means: TensorMapping | None = None):
         """
-        Build StaticMasking.
+        Build StaticSpatialMasking.
 
         """
         if isinstance(self.fill_value, float):
-            return StaticMasking(
+            return StaticSpatialMasking(
                 mask_value=self.mask_value,
                 fill_value=collections.defaultdict(
                     lambda: torch.as_tensor(self.fill_value)
@@ -86,7 +86,7 @@ class StaticMaskingConfig:
                 "fill_values mapping required by build unless configured "
                 "fill_value is a float."
             )
-        return StaticMasking(
+        return StaticSpatialMasking(
             mask_value=self.mask_value,
             fill_value=means,
             mask=mask,
@@ -94,12 +94,12 @@ class StaticMaskingConfig:
         )
 
 
-class StaticMasking:
+class StaticSpatialMasking:
     def __init__(
         self,
         mask_value: int,
         fill_value: float | TensorMapping,
-        mask: HasGetMaskTensorFor,
+        mask: HasGetSpatialMask,
         exclude_names_and_prefixes: list[str] | None = None,
     ):
         if isinstance(fill_value, float):
@@ -150,7 +150,7 @@ class StaticMasking:
                 fill_value = self._fill_mapping[name]
             except KeyError as err:
                 raise KeyError(
-                    "StaticMasking was initialized with a fill_value mapping "
+                    "StaticSpatialMasking was initialized with a fill_value mapping "
                     f"but the mapping is missing key '{name}'."
                 ) from err
             fill = torch.full_like(tensor, fill_value)
@@ -165,6 +165,6 @@ class StaticMasking:
         return data_
 
 
-class NullMasking:
+class NullSpatialMasking:
     def __call__(self, data: TensorMapping) -> TensorDict:
         return dict(data)

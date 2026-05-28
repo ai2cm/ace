@@ -23,12 +23,12 @@ from fme.core.coordinates import (
 )
 from fme.core.dataset_info import DatasetInfo
 from fme.core.loss import StepLossConfig
-from fme.core.mask_provider import MaskProvider
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
 from fme.coupled.dataset_info import CoupledDatasetInfo
@@ -118,11 +118,11 @@ class CoupledDatasetInfoBuilder:
     hcoord: CoupledHorizontalCoordinates | None = None
     ocean_timestep: datetime.timedelta = OCEAN_TIMESTEP
     atmos_timestep: datetime.timedelta = ATMOS_TIMESTEP
-    ocean_mask_provider: MaskProvider = dataclasses.field(
-        default_factory=lambda: MaskProvider()
+    ocean_spatial_mask_provider: SpatialMaskProvider = dataclasses.field(
+        default_factory=lambda: SpatialMaskProvider()
     )
-    atmos_mask_provider: MaskProvider = dataclasses.field(
-        default_factory=lambda: MaskProvider()
+    atmos_spatial_mask_provider: SpatialMaskProvider = dataclasses.field(
+        default_factory=lambda: SpatialMaskProvider()
     )
 
     def __post_init__(self):
@@ -141,13 +141,13 @@ class CoupledDatasetInfoBuilder:
             ocean=DatasetInfo(
                 horizontal_coordinates=self.hcoord.ocean,
                 vertical_coordinate=self.vcoord.ocean,
-                mask_provider=self.ocean_mask_provider,
+                spatial_mask_provider=self.ocean_spatial_mask_provider,
                 timestep=self.ocean_timestep,
             ),
             atmosphere=DatasetInfo(
                 horizontal_coordinates=self.hcoord.atmosphere,
                 vertical_coordinate=self.vcoord.atmosphere,
-                mask_provider=self.atmos_mask_provider,
+                spatial_mask_provider=self.atmos_spatial_mask_provider,
                 timestep=self.atmos_timestep,
             ),
         )
@@ -881,6 +881,243 @@ def test_forcing_window_data_requirements_names(
     assert sorted(atmos_reqs.names) == sorted(expectations["atmos_forcing_window"])
 
 
+@pytest.mark.parametrize(
+    "in_out_names, ocean_fraction_prediction, expectations",
+    DATA_REQUIREMENTS_TEST_CASES,
+)
+def test_get_train_window_data_requirements_name_partition(
+    in_out_names, ocean_fraction_prediction, expectations
+):
+    """Atmosphere target + forcing names partition all_names.atmosphere
+    exactly: their union equals all_names.atmosphere and they are disjoint.
+    """
+    stepper_config = create_config_for_data_requirements_test(
+        in_out_names, ocean_fraction_prediction
+    )
+    train_config = CoupledTrainStepperConfig(
+        n_coupled_steps=1,
+        ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
+        atmosphere=ComponentTrainingConfig(
+            loss=StepLossConfig(type="MSE"),
+            n_steps=1,
+        ),
+    )
+    requirements = train_config.get_train_window_data_requirements(stepper_config)
+
+    target_names = set(requirements.atmosphere_target_requirements.names)
+    forcing_names = set(requirements.atmosphere_forcing_requirements.names)
+
+    # disjoint
+    assert target_names.isdisjoint(forcing_names)
+    # union equals all_names.atmosphere
+    assert target_names.union(forcing_names) == set(stepper_config.all_names.atmosphere)
+    # forcing names match the atmosphere_forcing_exogenous_names
+    assert forcing_names == set(stepper_config.atmosphere_forcing_exogenous_names)
+
+
+def test_get_train_window_data_requirements_bounded_atmos_n_steps():
+    """Short horizon = atmos n_steps_max + 1; long horizon spans the full
+    rollout."""
+    n_coupled_steps = 4
+    atmos_n_steps_max = 5
+    stepper_config = create_config_for_data_requirements_test(
+        DATA_REQUIREMENTS_TEST_CASES[0].values[0],  # use first case's ForcingInputs
+        DATA_REQUIREMENTS_TEST_CASES[0].values[1],
+    )
+    train_config = CoupledTrainStepperConfig(
+        n_coupled_steps=n_coupled_steps,
+        ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
+        atmosphere=ComponentTrainingConfig(
+            loss=StepLossConfig(type="MSE"),
+            n_steps=atmos_n_steps_max,
+        ),
+    )
+    requirements = train_config.get_train_window_data_requirements(stepper_config)
+
+    long_n = n_coupled_steps * stepper_config.n_inner_steps + 1
+    assert (
+        requirements.atmosphere_forcing_requirements.n_timesteps == long_n
+    ), "forcing horizon should span full atmosphere rollout"
+    assert (
+        requirements.atmosphere_target_requirements.n_timesteps == atmos_n_steps_max + 1
+    ), "target horizon should be n_steps_max + 1 (for the IC)"
+    assert requirements.ocean_requirements.n_timesteps == n_coupled_steps + 1
+
+
+def test_get_train_window_data_requirements_unbounded_falls_back_to_long():
+    """When atmos n_steps_max is None (unbounded), the target horizon collapses
+    to the long horizon, recovering the previous full-load behavior."""
+    n_coupled_steps = 4
+    stepper_config = create_config_for_data_requirements_test(
+        DATA_REQUIREMENTS_TEST_CASES[0].values[0],
+        DATA_REQUIREMENTS_TEST_CASES[0].values[1],
+    )
+    train_config = CoupledTrainStepperConfig(
+        n_coupled_steps=n_coupled_steps,
+        ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
+        atmosphere=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
+    )
+    assert train_config.component_n_steps_max.atmosphere is None
+
+    requirements = train_config.get_train_window_data_requirements(stepper_config)
+
+    long_n = n_coupled_steps * stepper_config.n_inner_steps + 1
+    assert requirements.atmosphere_target_requirements.n_timesteps == long_n
+    assert requirements.atmosphere_forcing_requirements.n_timesteps == long_n
+
+
+def test_get_train_window_data_requirements_zero_atmos_n_steps():
+    """When the atmosphere loss is null (n_steps=0), short horizon = 1
+    (just the IC)."""
+    n_coupled_steps = 4
+    stepper_config = create_config_for_data_requirements_test(
+        DATA_REQUIREMENTS_TEST_CASES[0].values[0],
+        DATA_REQUIREMENTS_TEST_CASES[0].values[1],
+    )
+    train_config = CoupledTrainStepperConfig(
+        n_coupled_steps=n_coupled_steps,
+        ocean=ComponentTrainingConfig(
+            loss=StepLossConfig(type="MSE"),
+            n_steps=1,
+        ),
+        atmosphere=ComponentTrainingConfig(
+            loss=StepLossConfig(type="MSE"),
+            n_steps=0,
+        ),
+    )
+    requirements = train_config.get_train_window_data_requirements(stepper_config)
+    assert requirements.atmosphere_target_requirements.n_timesteps == 1
+
+
+def test_train_on_batch_invariant_to_target_nan_padding_beyond_loss_horizon():
+    """End-to-end: NaN-padding atmosphere target variables beyond the loss
+    horizon does not change the optimized-step losses or the model outputs.
+
+    This validates the safety property that allows the new short-horizon
+    atmosphere target loading: trailing NaNs in atmosphere target variables
+    are never consumed by the loss (skipped for non-optimized steps) or the
+    forward pass (forcings come from a disjoint variable set).
+    """
+    torch.manual_seed(0)
+    n_coupled_steps = 2
+    n_forward_times_ocean = n_coupled_steps
+    n_forward_times_atmosphere = 4  # n_inner_steps = 2
+    atmos_n_steps_max = 2  # short horizon = 3 (IC + 2 steps); long horizon = 5
+
+    stepper, coupled_data, stepper_config, dataset_info = get_stepper_and_batch(
+        ocean_in_names=["sst", "mask_0"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["surface_temperature", "ocean_fraction"],
+        atmosphere_out_names=["surface_temperature"],
+        n_forward_times_ocean=n_forward_times_ocean,
+        n_forward_times_atmosphere=n_forward_times_atmosphere,
+        n_samples=2,
+    )
+    train_stepper_config = CoupledTrainStepperConfig(
+        n_coupled_steps=n_coupled_steps,
+        ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
+        atmosphere=ComponentTrainingConfig(
+            loss=StepLossConfig(type="MSE"),
+            n_steps=atmos_n_steps_max,
+        ),
+    )
+    full_train_stepper = train_stepper_config.get_train_stepper(
+        stepper_config, dataset_info
+    )
+
+    # Reference: run on the un-padded batch
+    full_result = full_train_stepper.train_on_batch(
+        data=coupled_data.data,
+        optimization=NullOptimization(),
+    )
+
+    # Construct the NaN-padded batch by mimicking what TimePaddedMergedDataset
+    # would produce: for each atmosphere target variable, replace timesteps
+    # beyond the short horizon (atmos_n_steps_max + 1 IC-inclusive) with NaN.
+    target_var_names = set(stepper_config.all_names.atmosphere) - set(
+        stepper_config.atmosphere_forcing_exogenous_names
+    )
+    padded_atmos_data_dict = {}
+    short_n = atmos_n_steps_max + 1  # +1 for the IC
+    for name, tensor in coupled_data.data.atmosphere_data.data.items():
+        new_tensor = tensor.clone()
+        if name in target_var_names:
+            # tensor shape is (sample, time, lat, lon); time is axis 1
+            new_tensor[:, short_n:] = float("nan")
+        padded_atmos_data_dict[name] = new_tensor
+    padded_atmos_data = BatchData.new_on_device(
+        data=padded_atmos_data_dict,
+        time=coupled_data.data.atmosphere_data.time,
+        labels=coupled_data.data.atmosphere_data.labels,
+        horizontal_dims=list(coupled_data.data.atmosphere_data.horizontal_dims),
+    )
+    padded_data = CoupledBatchData(
+        ocean_data=coupled_data.data.ocean_data,
+        atmosphere_data=padded_atmos_data,
+    )
+
+    padded_result = full_train_stepper.train_on_batch(
+        data=padded_data, optimization=NullOptimization()
+    )
+
+    # The total loss is summed over only the optimized steps, so it must match.
+    torch.testing.assert_close(
+        full_result.total_metrics["loss"], padded_result.total_metrics["loss"]
+    )
+    # Atmosphere per-step optimized losses must match exactly.
+    for step in range(atmos_n_steps_max):
+        key = f"loss/atmosphere_step_{step}"
+        assert key in full_result.atmosphere.metrics
+        assert key in padded_result.atmosphere.metrics
+        torch.testing.assert_close(
+            full_result.atmosphere.metrics[key],
+            padded_result.atmosphere.metrics[key],
+        )
+    # Ocean losses must match (ocean targets aren't padded).
+    for key in full_result.ocean.metrics:
+        torch.testing.assert_close(
+            full_result.ocean.metrics[key], padded_result.ocean.metrics[key]
+        )
+    # Generated atmosphere outputs must be identical: the forward pass does
+    # not depend on any padded atmosphere target values.
+    for name in full_result.atmosphere.gen_data:
+        torch.testing.assert_close(
+            full_result.atmosphere.gen_data[name],
+            padded_result.atmosphere.gen_data[name],
+        )
+
+
+def test_get_train_window_data_requirements_with_sampler():
+    """When n_steps is a TimeLengthProbabilities sampler, the short horizon
+    uses the sampler's max."""
+    from fme.ace.stepper.time_length_probabilities import (
+        TimeLengthProbabilities,
+        TimeLengthProbability,
+    )
+
+    sampler = TimeLengthProbabilities(
+        outcomes=[
+            TimeLengthProbability(steps=2, probability=0.3),
+            TimeLengthProbability(steps=7, probability=0.7),
+        ]
+    )
+    n_coupled_steps = 4
+    stepper_config = create_config_for_data_requirements_test(
+        DATA_REQUIREMENTS_TEST_CASES[0].values[0],
+        DATA_REQUIREMENTS_TEST_CASES[0].values[1],
+    )
+    train_config = CoupledTrainStepperConfig(
+        n_coupled_steps=n_coupled_steps,
+        ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
+        atmosphere=ComponentTrainingConfig(
+            loss=StepLossConfig(type="MSE"),
+            n_steps=sampler,
+        ),
+    )
+    requirements = train_config.get_train_window_data_requirements(stepper_config)
+    assert requirements.atmosphere_target_requirements.n_timesteps == 7 + 1
+
+
 SphericalData = namedtuple(
     "SphericalData",
     [
@@ -1196,7 +1433,7 @@ def test__get_atmosphere_forcings(
     sst_mask[0, 0] = 0
     dataset_info = CoupledDatasetInfoBuilder(
         vcoord=vertical_coord,
-        ocean_mask_provider=MaskProvider({"mask_2d": sst_mask}),
+        ocean_spatial_mask_provider=SpatialMaskProvider({"mask_2d": sst_mask}),
     ).dataset_info
     coupler = config.get_stepper(dataset_info)
     shape_ocean = (1, 1, N_LAT, N_LON)

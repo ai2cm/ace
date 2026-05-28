@@ -1,6 +1,5 @@
 import dataclasses
 from collections.abc import Mapping
-from typing import Literal
 
 import numpy as np
 import torch
@@ -523,10 +522,11 @@ def _make_video(
 
 @dataclasses.dataclass
 class VideoMetricConfig:
-    type: Literal["video"] = "video"
     variables: list[str] | None = None
     name: str = "video"
     enable_extended_videos: bool = False
+    enabled: bool = False
+    strict: bool = True
 
     def get_name(self) -> str:
         return self.name
