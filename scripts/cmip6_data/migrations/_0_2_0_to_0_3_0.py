@@ -64,12 +64,11 @@ def _refill_below_surface(zarr_path: str) -> list[str]:
     :func:`fill_below_surface_smooth`. Returns the list of variables
     that were refilled.
 
-    Writes go through the zarr library directly (``group[var][:] =
-    new_values``) rather than xarray's to_zarr. xarray's append /
-    region semantics are easy to get wrong here — region="auto" needs
-    matching coords, mode="r+" interacts oddly with consolidated
-    metadata, and the result is silent no-ops if anything's off.
-    Direct chunk writes bypass all of that.
+    Reads + writes go through the zarr library directly (not xarray)
+    so we don't accumulate a per-variable cache across iterations.
+    With xarray, ``ds[var].load()`` 32× over a 31k-timestep dataset
+    runs the local process into multi-GB RSS and gets OOM-killed.
+    The zarr-direct path keeps memory bounded to ~2 GB per variable.
     """
     from processing import fill_below_surface_smooth
 
@@ -77,27 +76,35 @@ def _refill_below_surface(zarr_path: str) -> list[str]:
     if not pairs:
         return []
 
-    ds = xr.open_zarr(zarr_path, consolidated=True)
     group = zarr.open_group(zarr_path, mode="r+")
     refilled: list[str] = []
     for var_name, hpa in pairs:
         mask_name = f"below_surface_mask{hpa}"
-        if mask_name not in ds.data_vars:
+        if mask_name not in group:
             # No stored mask for this level — earlier schema may have
             # skipped writing it (no orog, no NaN pattern). Without
             # the mask we can't safely re-NaN, so leave the variable.
             continue
-        da = ds[var_name].load()
-        mask = ds[mask_name].load()
-        # fill_below_surface_smooth expects (time, plev, lat, lon).
-        # Per-level vars are (time, lat, lon), so add and drop a
-        # singleton plev dim around the call.
-        da4d = da.expand_dims("plev", axis=1)
-        mask4d = mask.expand_dims("plev", axis=1)
+        # Direct zarr reads, no xarray cache.
+        da_vals = group[var_name][:]  # (time, lat, lon)
+        mask_vals = group[mask_name][:]  # (time, lat, lon)
+        # fill_below_surface_smooth expects (time, plev, lat, lon)
+        # xr.DataArrays. Wrap with a singleton plev dim, call, then
+        # drop it. Cheap — no zarr re-read.
+        da4d = xr.DataArray(
+            da_vals[:, None],
+            dims=("time", "plev", "lat", "lon"),
+        )
+        mask4d = xr.DataArray(
+            mask_vals[:, None],
+            dims=("time", "plev", "lat", "lon"),
+        )
         refilled_da = fill_below_surface_smooth(da4d, mask4d).isel(plev=0, drop=True)
         group[var_name][:] = refilled_da.values.astype(np.float32)
         refilled.append(var_name)
-    ds.close()
+        # Help the GC release the working buffers before the next
+        # variable's load — important for prod-scale (31k timesteps).
+        del da_vals, mask_vals, da4d, mask4d, refilled_da
     return refilled
 
 
