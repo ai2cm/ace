@@ -14,17 +14,18 @@ AMIP_DATA_ROOT="/climate-default/2026-01-28-vertically-resolved-c96-1deg-shield-
 declare -A INITIAL_CONDITIONS
 INITIAL_CONDITIONS=( \
     ["1"]="1979-01-01T06:00:00" \
-    # ["2"]="1979-01-01T12:00:00" \
-    # ["3"]="1979-01-01T18:00:00" \
-    # ["4"]="1979-01-02T00:00:00" \
-    # ["5"]="1979-01-02T06:00:00" \
+    ["2"]="1979-01-01T12:00:00" \
+    ["3"]="1979-01-01T18:00:00" \
+    ["4"]="1979-01-02T00:00:00" \
+    ["5"]="1979-01-02T06:00:00" \
 )
 
 declare -A MODELS=( \
     # [published-baseline-rs3]="01J4BR6J5AW32ZDQ77VZ60P4KT" \
     # ["ACE2-SHiELD"]="brianhenn/shield-amip-1deg-ace2-train-RS2-best-inference-ckpt" \
-    [no-random-co2-energy-conserving-rs0]="01KHGDA8TVGP9JKWVJ1N0SMHCN" \
+    # [no-random-co2-energy-conserving-rs0]="01KHGDA8TVGP9JKWVJ1N0SMHCN" \
     # [full-energy-conserving-rs0]="01KHJ5F1M6YKVZESPZAAVVD6G8" \
+    [full-energy-conserving-rs1]="01KHCXABVNA3TJW0ZT5F4YDDQT" \
 )
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
@@ -115,12 +116,9 @@ for model in "${!MODELS[@]}"; do
             --name $job_name \
             --description 'Run inference with ACE' \
             --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-            --workspace ai2/ace \
-            --priority high \
-            --not-preemptible \
-            --cluster ai2/jupiter \
+            --workspace ai2/climate-titan \
+            --priority urgent \
             --cluster ai2/titan \
-            --cluster ai2/ceres \
             --env WANDB_USERNAME=$WANDB_USERNAME \
             --env WANDB_NAME=$job_name \
             --env WANDB_JOB_TYPE=inference \
@@ -132,7 +130,6 @@ for model in "${!MODELS[@]}"; do
             --gpus 1 \
             --shared-memory 20GiB \
             --weka climate-default:/climate-default \
-            --budget ai2/climate \
             --system-python \
             --install "pip install --no-deps ." \
             -- /bin/bash -c "\
