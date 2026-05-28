@@ -645,6 +645,32 @@ def attach_external_forcings(
             name="input4mips_co2",
             attrs={"units": "ppm", "long_name": "global mean CO2 mole fraction"},
         )
+        # ln(CO2): broadcast scalar built from the same daily series so
+        # log(co2) stays exactly consistent with the co2 channel.
+        log_arr = np.log(arr).astype(np.float32)
+        day_dataset["log_input4mips_co2"] = xr.DataArray(
+            log_arr,
+            dims=("time", "lat", "lon"),
+            coords={
+                "time": day_dataset["time"],
+                "lat": day_dataset["lat"],
+                "lon": day_dataset["lon"],
+            },
+            name="log_input4mips_co2",
+            attrs={
+                "units": "ln(ppm)",
+                "long_name": "natural log of global mean CO2 mole fraction",
+                "description": (
+                    "Natural log (ln, base e) of input4mips_co2. Base "
+                    "matches the Myhre et al. (1998) CO2 radiative-forcing "
+                    "formula ΔF = 5.35 · ln(C/C₀), so a unit change in "
+                    "this channel corresponds to one e-fold of CO2 — "
+                    "the physically relevant scale for the model's "
+                    "response. log10 would carry the same information "
+                    "off the physics axis."
+                ),
+            },
+        )
 
     # SO2/BC: gridded monthly. Already at F22.5 (the staging script
     # regridded), so we just need the causal monthly-to-daily mapping

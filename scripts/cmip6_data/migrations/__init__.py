@@ -26,8 +26,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from schema_version import Migration, version_lt  # noqa: E402
 
 from migrations._0_0_0_to_0_1_0 import MIGRATION as _M_0_0_0_TO_0_1_0  # noqa: E402
+from migrations._0_1_0_to_0_2_0 import MIGRATION as _M_0_1_0_TO_0_2_0  # noqa: E402
 
-MIGRATIONS: tuple[Migration, ...] = (_M_0_0_0_TO_0_1_0,)
+MIGRATIONS: tuple[Migration, ...] = (_M_0_0_0_TO_0_1_0, _M_0_1_0_TO_0_2_0)
 
 
 def chain_for(current_version: str, target_version: str) -> list[Migration]:

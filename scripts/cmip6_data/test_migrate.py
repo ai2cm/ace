@@ -309,6 +309,106 @@ def test_migration_0_0_0_to_0_1_0_regenerates_stats(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
+# Layer 2b: 0.1.0 → 0.2.0 migration on a minimal hand-crafted zarr
+# ---------------------------------------------------------------------------
+
+
+def _make_v0_1_0_zarr(zarr_path: Path) -> xr.Dataset:
+    """Write a tiny dataset under the 0.1.0 schema (has
+    ``input4mips_co2`` already, no ``log_input4mips_co2``)."""
+    nt, nlat, nlon = 6, 45, 90
+    times = xr.date_range("2010-01-01", periods=nt, freq="D", calendar="noleap")
+    rng = np.random.default_rng(0)
+    co2_series = np.linspace(390.0, 395.0, nt).astype(np.float32)
+    co2 = xr.DataArray(
+        np.broadcast_to(co2_series[:, None, None], (nt, nlat, nlon)).copy(),
+        dims=("time", "lat", "lon"),
+        coords={"time": times},
+        attrs={"units": "ppm", "long_name": "global mean CO2 mole fraction"},
+    )
+    psl = xr.DataArray(
+        100000 + rng.standard_normal((nt, nlat, nlon)).astype(np.float32) * 1000,
+        dims=("time", "lat", "lon"),
+        coords={"time": times},
+        attrs={"units": "Pa"},
+    )
+    ds = xr.Dataset({"input4mips_co2": co2, "psl": psl})
+    ds.to_zarr(str(zarr_path), mode="w", consolidated=True, zarr_format=3)
+    return ds
+
+
+def test_migration_0_1_0_to_0_2_0_adds_log_co2(tmp_path: Path):
+    from migrations._0_1_0_to_0_2_0 import MIGRATION
+
+    zarr_dir = tmp_path / "data.zarr"
+    src_ds = _make_v0_1_0_zarr(zarr_dir)
+    sidecar = {
+        "source_id": "TEST",
+        "experiment": "historical",
+        "variant_label": "r1i1p1f1",
+        "label": "TEST",
+        "schema_version": "0.1.0",
+        "variables_present": sorted(src_ds.data_vars),
+    }
+    out = MIGRATION.apply(str(zarr_dir), sidecar)
+
+    migrated = xr.open_zarr(str(zarr_dir), consolidated=True)
+    assert "log_input4mips_co2" in migrated.data_vars
+    assert migrated["log_input4mips_co2"].dims == ("time", "lat", "lon")
+    assert migrated["log_input4mips_co2"].dtype == np.float32
+    np.testing.assert_allclose(
+        migrated["log_input4mips_co2"].values,
+        np.log(src_ds["input4mips_co2"].values),
+        rtol=1e-6,
+    )
+    # Untouched.
+    np.testing.assert_array_equal(migrated["psl"].values, src_ds["psl"].values)
+    np.testing.assert_array_equal(
+        migrated["input4mips_co2"].values, src_ds["input4mips_co2"].values
+    )
+
+    assert out["schema_version"] == "0.2.0"
+    assert "log_input4mips_co2" in out["variables_present"]
+    assert out["migrations"][-1] == {
+        "from": "0.1.0",
+        "to": "0.2.0",
+        "added": ["log_input4mips_co2"],
+    }
+
+
+def test_migration_0_1_0_to_0_2_0_noop_when_co2_absent(tmp_path: Path):
+    """Datasets without input4mips_co2 still get version-stamped."""
+    from migrations._0_1_0_to_0_2_0 import MIGRATION
+
+    zarr_dir = tmp_path / "data.zarr"
+    nt, nlat, nlon = 5, 45, 90
+    times = xr.date_range("2010-01-01", periods=nt, freq="D", calendar="noleap")
+    ds = xr.Dataset(
+        {
+            "psl": xr.DataArray(
+                np.full((nt, nlat, nlon), 1.0e5, dtype=np.float32),
+                dims=("time", "lat", "lon"),
+                coords={"time": times},
+            )
+        }
+    )
+    ds.to_zarr(str(zarr_dir), mode="w", consolidated=True, zarr_format=3)
+    sidecar = {
+        "source_id": "T",
+        "experiment": "h",
+        "variant_label": "r1",
+        "label": "",
+        "schema_version": "0.1.0",
+    }
+    out = MIGRATION.apply(str(zarr_dir), sidecar)
+    assert out["schema_version"] == "0.2.0"
+    assert out["migrations"][-1]["added"] == []
+    # Zarr is unchanged.
+    after = xr.open_zarr(str(zarr_dir), consolidated=True)
+    assert "log_input4mips_co2" not in after.data_vars
+
+
+# ---------------------------------------------------------------------------
 # Layer 3: integration with the processing pipeline
 # ---------------------------------------------------------------------------
 

@@ -21,8 +21,8 @@ Each dataset is one zarr per `(source_id, experiment, variant_label)`
 at the F22.5 Gauss-Legendre 45×90 grid, containing ~80 channels:
 8 plev × 4 core 3D vars + 7 derived layer-mean T + 4 surface +
 8 below-surface masks + 2 statics + surface-and-ocean variables with
-masks + 4 external forcings (`input4mips_co2`, `input4mips_so2`,
-`input4mips_bc`, `luh2_forest`). Configured in
+masks + 5 external forcings (`input4mips_co2`, `log_input4mips_co2`,
+`input4mips_so2`, `input4mips_bc`, `luh2_forest`). Configured in
 `configs/pilot.yaml` (`defaults.time_subset`) and
 `configs/process_esgf.yaml`.
 
@@ -261,6 +261,16 @@ historical from ssp245 from ssp585.
     NOAA.
   - Mapped onto each model's daily axis via **causal previous-year**:
     every day in calendar year `Y` reads year `Y-1`'s value.
+
+- **`log_input4mips_co2`** — natural log (ln, base e) of
+  `input4mips_co2`, same `(time, lat, lon)` shape and same daily
+  series. Base e (not log10) so a unit change matches the physics:
+  CO2 radiative forcing follows Myhre et al. (1998) ΔF = 5.35 ·
+  ln(C/C₀), which is the same e-fold scale the IPCC uses to derive
+  the "doubling of CO2" sensitivity. log10 would carry identical
+  information scaled by 1/ln(10) but off the physics axis. Provided
+  as a separate channel so models can ingest it directly without
+  needing to apply log inside the training loop.
 
 - **`input4mips_so2`** — anthropogenic SO2 emission flux
   (kg m⁻² s⁻¹), summed across emission sectors and regridded
