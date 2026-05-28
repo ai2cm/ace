@@ -146,12 +146,12 @@ def _plot_timeseries(
         plt.plot(times, coarse_data, color="black", label="coarse", linestyle="-.")
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
     plt.xlabel("time")
+    caption_name, units = fine_data.name, "unknown_units"
     if variable_metadata is not None:
-        if fine_data.name in variable_metadata:
-            caption_name = variable_metadata[fine_data.name].long_name
-            units = variable_metadata[fine_data.name].units
-    else:
-        caption_name, units = fine_data.name, "unknown_units"
+        if variable_metadata.long_name is not None:
+            caption_name = variable_metadata.long_name
+        if variable_metadata.units is not None:
+            units = variable_metadata.units
     plt.ylabel(f"{caption_name} [{units}]")
     plt.legend()
 
@@ -317,7 +317,7 @@ class _MapAggregator:
 
     def _get_caption(self, key: str, name: str, vmin: float, vmax: float) -> str:
         _caption = (
-            "{name}  mean full field; (left) generated and " "(right) coarse [{units}]"
+            "{name}  mean full field; (left) generated and (right) coarse [{units}]"
         )
 
         if name in self._variable_metadata:
