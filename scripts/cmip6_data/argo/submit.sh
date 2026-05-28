@@ -42,6 +42,12 @@
 #                              <output>/external_forcings/. Heavy one-time
 #                              step (~30 GB source download); re-running
 #                              skips already-staged scenarios.
+#   --migrate                  Scan ``output_directory`` for sidecars
+#                              whose stored ``schema_version`` is older
+#                              than the image's ``SCHEMA_VERSION`` and
+#                              spawn one migrate-dataset pod per match.
+#                              Each pod chains whatever migration steps
+#                              are needed (e.g. 0.1.0 → 0.2.0 → 0.3.0).
 #   --force-inventory          Rebuild ``inventory.csv`` /
 #                              ``inventory_esgf.csv`` even when they
 #                              already exist on GCS. Use when the
@@ -66,6 +72,7 @@ RUN_PROCESS_ESGF=false
 RUN_STATS=false
 RUN_NORMALIZATION=false
 RUN_STAGE_EXTERNALS=false
+RUN_MIGRATE=false
 FORCE_INVENTORY=false
 CONFIG=""
 ESGF_CONFIG=""
@@ -87,6 +94,7 @@ do case $1 in
     --stats) RUN_STATS=true;;
     --normalization) RUN_NORMALIZATION=true;;
     --stage-externals) RUN_STAGE_EXTERNALS=true;;
+    --migrate) RUN_MIGRATE=true;;
     --force-inventory) FORCE_INVENTORY=true;;
     *) echo "Unknown parameter passed: $1"
     exit 1;;
@@ -96,8 +104,8 @@ done
 
 if [[ "${RUN_PROCESS}" = false && "${RUN_PROCESS_ESGF}" = false \
     && "${RUN_STATS}" = false && "${RUN_NORMALIZATION}" = false \
-    && "${RUN_STAGE_EXTERNALS}" = false ]]; then
-    echo "At least one of --process, --process-esgf, --stats, --normalization, or --stage-externals must be specified"
+    && "${RUN_STAGE_EXTERNALS}" = false && "${RUN_MIGRATE}" = false ]]; then
+    echo "At least one of --process, --process-esgf, --stats, --normalization, --stage-externals, or --migrate must be specified"
     exit 1
 fi
 
@@ -202,8 +210,43 @@ fi
 esgf_datasets_count=${#esgf_dataset_keys[@]}
 esgf_datasets_count_minus_one=$((esgf_datasets_count - 1))
 
-# Submit. ESGF params are passed even when --process-esgf is false; the
-# template gates on run_process_esgf so unused params are harmless.
+# Migrate: scan the bucket's sidecars and build the list of datasets
+# whose stored schema_version is older than the image's SCHEMA_VERSION.
+# One pod will migrate each.
+migrate_dataset_keys=()
+if [[ "${RUN_MIGRATE}" = true ]]; then
+    echo "Scanning sidecars for migration-needed datasets..."
+    migrate_lines=$(cd "${CMIP6_DIR}" && python -c "
+import sys
+import fsspec, json
+from config import ProcessConfig
+from schema_version import SCHEMA_VERSION, version_lt
+
+cfg = ProcessConfig.from_file('${ABS_CONFIG}')
+out_dir = cfg.output_directory.rstrip('/')
+fs, rel = fsspec.core.url_to_fs(out_dir)
+for path in fs.glob(f'{rel}/**/data.zarr/metadata.json'):
+    with fs.open(path, 'r') as f:
+        try:
+            sc = json.load(f)
+        except Exception:
+            continue
+    if not all(k in sc for k in ('source_id', 'experiment', 'variant_label')):
+        continue
+    v = sc.get('schema_version', '0.0.0')
+    if version_lt(v, SCHEMA_VERSION):
+        print(f\"{sc['source_id']}/{sc['experiment']}/{sc['variant_label']}\")
+")
+    while IFS= read -r key; do
+        [[ -n "${key}" ]] && migrate_dataset_keys+=("${key}")
+    done <<< "${migrate_lines}"
+    echo "Found ${#migrate_dataset_keys[@]} datasets needing migration."
+fi
+migrate_datasets_count=${#migrate_dataset_keys[@]}
+migrate_datasets_count_minus_one=$((migrate_datasets_count - 1))
+
+# Submit. ESGF / migrate params are passed even when their gates are
+# false; the templates' ``when`` conditions skip unused steps.
 ESGF_CONFIG_CONTENT=""
 if [[ -n "${ABS_ESGF_CONFIG}" ]]; then
     ESGF_CONFIG_CONTENT="$(< "${ABS_ESGF_CONFIG}")"
@@ -214,13 +257,16 @@ output=$(argo submit "${SCRIPT_DIR}/workflow.yaml" \
     -p run_stats="${RUN_STATS}" \
     -p run_normalization="${RUN_NORMALIZATION}" \
     -p run_stage_externals="${RUN_STAGE_EXTERNALS}" \
+    -p run_migrate="${RUN_MIGRATE}" \
     -p config="$(< "${ABS_CONFIG}")" \
     -p dataset_keys="${dataset_keys[*]}" \
     -p datasets_count_minus_one="${datasets_count_minus_one}" \
     -p esgf_config="${ESGF_CONFIG_CONTENT}" \
     -p esgf_inventory_path="${ESGF_INVENTORY_PATH}" \
     -p esgf_dataset_keys="${esgf_dataset_keys[*]}" \
-    -p esgf_datasets_count_minus_one="${esgf_datasets_count_minus_one}")
+    -p esgf_datasets_count_minus_one="${esgf_datasets_count_minus_one}" \
+    -p migrate_dataset_keys="${migrate_dataset_keys[*]}" \
+    -p migrate_datasets_count_minus_one="${migrate_datasets_count_minus_one}")
 
 job_name=$(echo "$output" | grep 'Name:' | awk '{print $2}')
 echo "Argo job submitted: $job_name"

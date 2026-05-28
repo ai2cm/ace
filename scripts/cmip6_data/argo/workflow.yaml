@@ -42,6 +42,17 @@ spec:
       value: ""
     - name: esgf_datasets_count_minus_one
       value: "-1"
+    # Migrate-side parameters (used by run_migrate only).
+    - name: run_migrate
+      value: "false"
+    - name: migrate_dataset_keys
+      # Space-separated "source_id/experiment/variant_label" triples,
+      # one per dataset that needs a schema bump. Built by submit.sh
+      # from a sidecar scan: any dataset whose stored schema_version
+      # is older than the image's SCHEMA_VERSION.
+      value: ""
+    - name: migrate_datasets_count_minus_one
+      value: "-1"
   templates:
     # ------------------------------------------------------------------
     # Entry point: sequential stages, each with a conditional gate.
@@ -74,6 +85,16 @@ spec:
       - - name: rebuild-index
           when: "{{workflow.parameters.run_process}} == true"
           template: rebuild-index
+      - - name: migrate-dataset
+          when: "{{workflow.parameters.run_migrate}} == true"
+          template: migrate-dataset
+          arguments:
+            parameters:
+            - name: dataset_index
+              value: "{{item}}"
+          withSequence:
+            start: "0"
+            end: "{{workflow.parameters.migrate_datasets_count_minus_one}}"
       - - name: compute-stats
           when: "{{workflow.parameters.run_stats}} == true"
           template: compute-stats
@@ -194,6 +215,68 @@ spec:
               --experiments "${experiment}" \
               --variant-labels "${variant}" \
               --max-datasets 1
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret
+
+    # ------------------------------------------------------------------
+    # migrate-dataset: run migrate.py on a single (source_id, exp,
+    # variant) dataset, chaining whatever migration steps are needed
+    # to bring it to the image's SCHEMA_VERSION. Selection happens at
+    # submit time (submit.sh scans sidecars and builds the keys list
+    # of datasets with non-current schema_version), so the pod just
+    # has to migrate the one path it was handed. Smaller resource
+    # ask than process-dataset since migrations are mostly chunk
+    # rewrites + small stats updates, not regrid.
+    # ------------------------------------------------------------------
+    - name: migrate-dataset
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: highmem-sim-pool
+      inputs:
+        parameters:
+          - name: dataset_index
+      container:
+        image: us-central1-docker.pkg.dev/vcm-ml/full-model/cmip6-processing:latest
+        resources:
+          limits:
+            cpu: "4000m"
+            memory: "16Gi"
+          requests:
+            cpu: "4000m"
+            memory: "16Gi"
+        command: ["bash", "-c", "-e"]
+        args:
+          - |
+            cat << 'CONFIGEOF' > config.yaml
+            {{workflow.parameters.config}}
+            CONFIGEOF
+
+            idx={{inputs.parameters.dataset_index}}
+            keys=({{workflow.parameters.migrate_dataset_keys}})
+            key="${keys[${idx}]}"
+
+            source_id=$(echo "${key}" | cut -d/ -f1)
+            experiment=$(echo "${key}" | cut -d/ -f2)
+            variant=$(echo "${key}" | cut -d/ -f3)
+
+            output_directory=$(python -c "
+            from config import ProcessConfig
+            print(ProcessConfig.from_file('config.yaml').output_directory.rstrip('/'))
+            ")
+            zarr_path="${output_directory}/${source_id}/${experiment}/${variant}/data.zarr"
+
+            echo "Migrating ${source_id} ${experiment} ${variant} at ${zarr_path}"
+            python migrate.py \
+              --config config.yaml \
+              --zarr-path "${zarr_path}" \
+              --workers 1
         env:
           - name: GOOGLE_APPLICATION_CREDENTIALS
             value: /secret/gcp-credentials/key.json

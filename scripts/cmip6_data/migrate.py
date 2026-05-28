@@ -132,6 +132,31 @@ def main() -> None:
         help="Restrict to a subset of source_ids.",
     )
     parser.add_argument(
+        "--experiments",
+        nargs="+",
+        default=None,
+        help="Restrict to a subset of experiments (combined with --source-ids).",
+    )
+    parser.add_argument(
+        "--variant-labels",
+        nargs="+",
+        default=None,
+        help=(
+            "Restrict to a subset of variant labels. Combined with --source-ids "
+            "and --experiments, lets a single Argo pod migrate exactly one "
+            "(source, experiment, variant) dataset."
+        ),
+    )
+    parser.add_argument(
+        "--zarr-path",
+        default=None,
+        help=(
+            "Bypass the index lookup and migrate this single zarr path "
+            "directly. Useful for Argo per-dataset pods, where we already "
+            "know the path and don't want a per-pod GCS index read."
+        ),
+    )
+    parser.add_argument(
         "--workers",
         type=int,
         default=None,
@@ -153,17 +178,25 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
     cfg = ProcessConfig.from_file(args.config)
-    out_dir = cfg.output_directory.rstrip("/")
-    index_path = f"{out_dir}/index.csv"
-    fs, rel = fsspec.core.url_to_fs(index_path)
-    if not fs.exists(rel):
-        raise FileNotFoundError(f"{index_path} not found; run process.py first")
-    idx = pd.read_csv(index_path)
-    ok = idx[idx.status == "ok"].reset_index(drop=True)
-    if args.source_ids:
-        ok = ok[ok.source_id.isin(args.source_ids)].reset_index(drop=True)
-
-    zarr_paths = ok["output_zarr"].tolist()
+    if args.zarr_path:
+        # Direct-path mode: skip the index entirely. The caller (e.g. the
+        # Argo migrate-dataset template) has already resolved the path.
+        zarr_paths = [args.zarr_path]
+    else:
+        out_dir = cfg.output_directory.rstrip("/")
+        index_path = f"{out_dir}/index.csv"
+        fs, rel = fsspec.core.url_to_fs(index_path)
+        if not fs.exists(rel):
+            raise FileNotFoundError(f"{index_path} not found; run process.py first")
+        idx = pd.read_csv(index_path)
+        ok = idx[idx.status == "ok"].reset_index(drop=True)
+        if args.source_ids:
+            ok = ok[ok.source_id.isin(args.source_ids)].reset_index(drop=True)
+        if args.experiments:
+            ok = ok[ok.experiment.isin(args.experiments)].reset_index(drop=True)
+        if args.variant_labels:
+            ok = ok[ok.variant_label.isin(args.variant_labels)].reset_index(drop=True)
+        zarr_paths = ok["output_zarr"].tolist()
     logging.info(
         "Found %d ok datasets in index; migrating to %s",
         len(zarr_paths),
