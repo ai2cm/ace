@@ -22,9 +22,10 @@ INITIAL_CONDITIONS=( \
 
 declare -A MODELS=( \
     # [published-baseline-rs3]="01J4BR6J5AW32ZDQ77VZ60P4KT" \
-    ["ACE2-SHiELD"]="brianhenn/shield-amip-1deg-ace2-train-RS2-best-inference-ckpt" \
-    [no-random-co2-energy-conserving-rs0]="01KHGDA8TVGP9JKWVJ1N0SMHCN" \
-    [full-energy-conserving-rs0]="01KHJ5F1M6YKVZESPZAAVVD6G8" \
+    # ["ACE2-SHiELD"]="brianhenn/shield-amip-1deg-ace2-train-RS2-best-inference-ckpt" \
+    # [no-random-co2-energy-conserving-rs0]="01KHGDA8TVGP9JKWVJ1N0SMHCN" \
+    # [full-energy-conserving-rs0]="01KHJ5F1M6YKVZESPZAAVVD6G8" \
+    [full-energy-conserving-rs1]="01KHCXABVNA3TJW0ZT5F4YDDQT" \
 )
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
