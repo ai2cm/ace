@@ -15,8 +15,12 @@ from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
-from fme.core.mask_provider import MaskProvider, MaskProviderABC, NullMaskProvider
 from fme.core.ocean_derived_variables import compute_ocean_derived_quantities
+from fme.core.spatial_mask_provider import (
+    NullSpatialMaskProvider,
+    SpatialMaskProvider,
+    SpatialMaskProviderABC,
+)
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.winds import lon_lat_to_xyz
 
@@ -489,6 +493,11 @@ class SerializableVerticalCoordinate:
 
     @classmethod
     def from_state(cls, state) -> VerticalCoordinate:
+        device = get_device()
+        state = {
+            k: v.to(device, copy=True) if isinstance(v, torch.Tensor) else v
+            for k, v in state.items()
+        }
         return dacite.from_dict(
             data_class=cls,
             data={"vertical_coordinate": state},
@@ -562,7 +571,7 @@ class HorizontalCoordinates(abc.ABC):
 
     @abc.abstractmethod
     def get_gridded_operations(
-        self, mask_provider: MaskProviderABC = NullMaskProvider
+        self, spatial_mask_provider: SpatialMaskProviderABC = NullSpatialMaskProvider
     ) -> GriddedOperations:
         pass
 
@@ -611,6 +620,8 @@ class LatLonCoordinates(HorizontalCoordinates):
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, LatLonCoordinates):
+            return False
+        if self.lat.shape != other.lat.shape or self.lon.shape != other.lon.shape:
             return False
         lat_eq = torch.allclose(self.lat, other.lat)
         lon_eq = torch.allclose(self.lon, other.lon)
@@ -671,9 +682,9 @@ class LatLonCoordinates(HorizontalCoordinates):
             return "legendre-gauss"
 
     def get_gridded_operations(
-        self, mask_provider: MaskProviderABC = NullMaskProvider
+        self, spatial_mask_provider: SpatialMaskProviderABC = NullSpatialMaskProvider
     ) -> LatLonOperations:
-        return LatLonOperations(self.area_weights, mask_provider)
+        return LatLonOperations(self.area_weights, spatial_mask_provider)
 
     @property
     def meshgrid(self) -> tuple[torch.Tensor, torch.Tensor]:
@@ -805,22 +816,23 @@ class HEALPixCoordinates(HorizontalCoordinates):
         return None
 
     def get_gridded_operations(
-        self, mask_provider: MaskProviderABC = NullMaskProvider
+        self, spatial_mask_provider: SpatialMaskProviderABC = NullSpatialMaskProvider
     ) -> HEALPixOperations:
         # this code is necessary because when no masks are in a given dataset, we return
-        # an empty MaskProvider instead of the NullMaskProvider.
-        if mask_provider == NullMaskProvider:
+        # an empty SpatialMaskProvider instead of the NullSpatialMaskProvider.
+        if spatial_mask_provider == NullSpatialMaskProvider:
             null_mask = True
-        elif isinstance(mask_provider, MaskProvider):
-            null_mask = len(mask_provider.masks) == 0
+        elif isinstance(spatial_mask_provider, SpatialMaskProvider):
+            null_mask = len(spatial_mask_provider.masks) == 0
         else:
             raise TypeError(
-                f"Don't know how to handle given mask_provider: {mask_provider}"
+                "Don't know how to handle given spatial_mask_provider: "
+                f"{spatial_mask_provider}"
             )
         if not (null_mask):
             raise NotImplementedError(
                 "HEALPixCoordinates does not support a mask provider. "
-                "Use NullMaskProvider when getting gridded operations "
+                "Use NullSpatialMaskProvider when getting gridded operations "
                 "for HEALPixCoordinates."
             )
         return HEALPixOperations(self.nside)
@@ -860,6 +872,11 @@ class SerializableHorizontalCoordinates:
 
     @classmethod
     def from_state(cls, state) -> HorizontalCoordinates:
+        device = get_device()
+        state = {
+            k: v.to(device, copy=True) if isinstance(v, torch.Tensor) else v
+            for k, v in state.items()
+        }
         return dacite.from_dict(
             data_class=cls,
             data={"horizontal_coordinates": state},

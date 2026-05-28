@@ -97,6 +97,8 @@ dataset_computation:
       - h500
       - h850
       - h1000
+    PRMSL.zarr:
+      - PRMSL
     static.zarr:
       - HGTsfc
     scalar.zarr:
@@ -109,6 +111,7 @@ time_coarsen:
   stats_output_directory: gs://vcm-ml-intermediate/2025-09-11-X-SHiELD-AMIP-4deg-daily-8layer-11yr-fme-dataset-stats
   snapshot_names:
     - PRESsfc
+    - PRMSL
     - Q2m
     - RH200
     - RH500
@@ -194,3 +197,5 @@ time_coarsen:
     - HGTsfc
     - grid_xt
     - grid_yt
+  input_time_slice:  # ensures coarsened data starts on 2013-01-02T00:00:00
+    start: "2013-01-01T06:00:00"

@@ -227,12 +227,13 @@ train_loader:
     spatial_dimensions: latlon
   batch_size: 2
   num_data_workers: 0
-validation_loader:
-  dataset:
-    data_path: '{valid_data_path}'
-    spatial_dimensions: latlon
-  batch_size: 2
-  num_data_workers: 0
+validation:
+- loader:
+    dataset:
+      data_path: '{valid_data_path}'
+      spatial_dimensions: latlon
+    batch_size: 2
+    num_data_workers: 0
 optimization:
   use_gradient_accumulation: true
   optimizer_type: "Adam"
@@ -279,19 +280,19 @@ stepper:
             method: scaled_temperature
             constant_unaccounted_heating: 0.1
 inference:
-  aggregator:
-    monthly_reference_data: {monthly_data_filename}
-    log_step_means: []
-  loader:
-    dataset:
-      data_path: '{valid_data_path}'
-      spatial_dimensions: latlon
-    start_indices:
-      first: 0
-      n_initial_conditions: 2
-      interval: 1
-  n_forward_steps: {inference_forward_steps}
-  forward_steps_in_memory: 2
+  - aggregator:
+      monthly_reference_data: {monthly_data_filename}
+      log_step_means: []
+    loader:
+      dataset:
+        data_path: '{valid_data_path}'
+        spatial_dimensions: latlon
+      start_indices:
+        first: 0
+        n_initial_conditions: 2
+        interval: 1
+    n_forward_steps: {inference_forward_steps}
+    forward_steps_in_memory: 2
 """
 
 _INFERENCE_CONFIG_TEMPLATE = """

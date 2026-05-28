@@ -68,7 +68,7 @@ gantry run \
     --dataset "$EXISTING_RESULTS_DATASET:training_checkpoints/${CKPT_TYPE}.tar:/ckpt.tar" \
     --gpus $N_GPUS \
     --shared-memory 800GiB \
-    --budget ai2/climate \
+    --budget ai2/atec-climate \
     --system-python \
     --install "pip install --no-deps ." \
     -- torchrun --nproc_per_node $N_GPUS -m fme.coupled.train "$CONFIG_PATH"

@@ -156,6 +156,7 @@ def get_noise_conditioned_sfno_module() -> tuple[ModuleSelector, Module]:
             "operator_type": "dhconv",
             "affine_norms": True,
             "spectral_transform": "sht",
+            "label_embed_dim": 3,
         },
     )
     module = selector.build(
@@ -173,7 +174,7 @@ def load_state(selector_name: str) -> dict[str, torch.Tensor]:
             f"State dict for {selector_name} not found at {state_dict_path}. "
             "Please make sure the checkpoint exists and is committed to the repo."
         )
-    return torch.load(state_dict_path)
+    return torch.load(state_dict_path, map_location="cpu")
 
 
 def load_or_cache_state(
@@ -181,7 +182,7 @@ def load_or_cache_state(
 ) -> dict[str, torch.Tensor]:
     state_dict_path = DATA_DIR / f"{selector_name}_state_dict.pt"
     if state_dict_path.exists():
-        return torch.load(state_dict_path)
+        return torch.load(state_dict_path, map_location="cpu")
     else:
         state_dict = module.get_state()
         torch.save(state_dict, state_dict_path)

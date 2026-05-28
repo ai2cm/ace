@@ -38,13 +38,11 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
-from fme.core.device import get_device
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.labels import BatchLabels
-from fme.core.loss import StepLoss, StepLossConfig
-from fme.core.masking import NullMasking, StaticMaskingConfig
+from fme.core.loss import ChannelLossInfo, StepLoss, StepLossConfig
 from fme.core.normalizer import (
     NetworkAndLossNormalizationConfig,
     NormalizationConfig,
@@ -53,6 +51,7 @@ from fme.core.normalizer import (
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.registry import CorrectorSelector, ModuleSelector
+from fme.core.spatial_masking import NullSpatialMasking, StaticSpatialMaskingConfig
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import (
     MultiCallConfig,
@@ -346,6 +345,7 @@ class TrainOutput(TrainOutputABC):
     derive_func: Callable[[TensorMapping, TensorMapping], TensorDict] = lambda x, _: (
         dict(x)
     )
+    per_channel_losses: dict[str, ChannelLossInfo] | None = None
 
     def __post_init__(self):
         for v in self.target_data.values():
@@ -395,6 +395,7 @@ class TrainOutput(TrainOutputABC):
             time=self.time[:, n_ic_timesteps:],
             normalize=self.normalize,
             derive_func=self.derive_func,
+            per_channel_losses=self.per_channel_losses,
         )
 
     def copy(self) -> "TrainOutput":
@@ -406,6 +407,7 @@ class TrainOutput(TrainOutputABC):
             time=self.time,
             normalize=self.normalize,
             derive_func=self.derive_func,
+            per_channel_losses=self.per_channel_losses,
         )
 
     def prepend_initial_condition(
@@ -432,6 +434,7 @@ class TrainOutput(TrainOutputABC):
             time=xr.concat([batch_data.time, self.time], dim="time"),
             normalize=self.normalize,
             derive_func=self.derive_func,
+            per_channel_losses=self.per_channel_losses,
         )
 
     def compute_derived_variables(
@@ -450,6 +453,7 @@ class TrainOutput(TrainOutputABC):
             time=self.time,
             normalize=self.normalize,
             derive_func=self.derive_func,
+            per_channel_losses=self.per_channel_losses,
         )
 
     def get_metrics(self) -> TensorDict:
@@ -481,6 +485,7 @@ def process_ensemble_prediction_generator_list(
 def process_prediction_generator_list(
     output_list: list[TensorDict],
     time: xr.DataArray,
+    n_ensemble: int,
     labels: BatchLabels | None = None,
     horizontal_dims: list[str] | None = None,
 ) -> BatchData:
@@ -490,6 +495,7 @@ def process_prediction_generator_list(
         time=time,
         horizontal_dims=horizontal_dims,
         labels=labels,
+        n_ensemble=n_ensemble,
     )
 
 
@@ -505,7 +511,7 @@ class StepperConfig:
     """
 
     step: StepSelector
-    input_masking: StaticMaskingConfig | None = None
+    input_masking: StaticSpatialMaskingConfig | None = None
     derived_forcings: DerivedForcingsConfig = dataclasses.field(
         default_factory=lambda: DerivedForcingsConfig()
     )
@@ -520,6 +526,7 @@ class StepperConfig:
         requirements = DataRequirements(
             names=self.all_names,
             n_timesteps=self._window_steps_required(n_forward_steps),
+            allow_missing_variables=self.step.allow_missing_variables,
         )
         return self.derived_forcings.update_requirements(requirements)
 
@@ -541,6 +548,7 @@ class StepperConfig:
                 set(self.input_only_names).union(self.step.next_step_input_names)
             ),
             n_timesteps=self._window_steps_required(n_forward_steps),
+            allow_missing_variables=self.step.allow_missing_variables,
         )
         return self.derived_forcings.update_requirements(requirements)
 
@@ -585,14 +593,16 @@ class StepperConfig:
                 dataset_info.timestep
             )
         if self.input_masking is None:
-            input_masking = NullMasking()
+            input_masking = NullSpatialMasking()
         else:
             input_masking = self.input_masking.build(
-                mask=dataset_info.mask_provider,
+                mask=dataset_info.spatial_mask_provider,
                 means=step.normalizer.means,
             )
         try:
-            output_process_func = dataset_info.mask_provider.build_output_masker()
+            output_process_func = (
+                dataset_info.spatial_mask_provider.build_output_spatial_masker()
+            )
         except MissingDatasetInfo:
             output_process_func = NullPostProcessFn()
         return Stepper(
@@ -747,6 +757,24 @@ class StepperConfig:
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
         )
+
+
+@dataclasses.dataclass
+class CheckpointStepperConfig:
+    """
+    Defines a stepper by loading its configuration from a saved checkpoint.
+
+    Does not affect weight initialization, which is handled in a different
+    configuration (likely parameter initialization under stepper_training).
+
+    Parameters:
+        checkpoint_path: Path to a serialized checkpoint containing a stepper.
+    """
+
+    checkpoint_path: str
+
+    def to_stepper_config(self) -> StepperConfig:
+        return load_stepper_config(self.checkpoint_path)
 
 
 class EpochNotProvidedError(ValueError):
@@ -1052,7 +1080,12 @@ class Stepper:
         ic_dict = ic_batch_data.data
         forcing_dict = forcing_data.data
         return self.predict_generator(
-            ic_dict, forcing_dict, n_forward_steps, optimizer, forcing_data.labels
+            ic_dict,
+            forcing_dict,
+            n_forward_steps,
+            optimizer,
+            forcing_data.labels,
+            data_mask=forcing_data.data_mask,
         )
 
     @property
@@ -1068,6 +1101,7 @@ class Stepper:
         n_forward_steps: int,
         optimizer: OptimizationABC,
         labels: BatchLabels | None,
+        data_mask: TensorMapping | None = None,
     ) -> Generator[TensorDict, None, None]:
         state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
         for step in range(n_forward_steps):
@@ -1094,6 +1128,7 @@ class Stepper:
                         input=input_data,
                         next_step_input_data=next_step_input_dict,
                         labels=labels,
+                        data_mask=data_mask,
                     ),
                     wrapper=checkpoint,
                 )
@@ -1163,6 +1198,7 @@ class Stepper:
             time=forcing_data.time[:, self.n_ic_timesteps :],
             horizontal_dims=forcing_data.horizontal_dims,
             labels=forcing.labels,
+            n_ensemble=forcing.n_ensemble,
         )
         if compute_derived_variables:
             with timer.context("compute_derived_variables"):
@@ -1210,6 +1246,10 @@ class Stepper:
             final state, which can be used as a new initial condition.
         """
         forcing = self.forcing_deriver(forcing)
+        if forcing.n_ensemble == 1 and initial_condition.as_batch_data().n_ensemble > 1:
+            forcing = forcing.broadcast_ensemble(
+                n_ensemble=initial_condition.as_batch_data().n_ensemble
+            )
         prediction, new_initial_condition = self.predict(
             initial_condition,
             forcing,
@@ -1488,10 +1528,12 @@ class TrainStepper(
         self._config = config
 
         self._n_forward_steps_sampler: TimeLengthProbabilities | None = None
+        self._eval_n_forward_steps_sampler: TimeLengthProbabilities | None = None
         self._n_forward_steps_schedule: TimeLengthSchedule | None = None
         if config.n_forward_steps_schedule is not None:
             self._n_forward_steps_schedule = config.n_forward_steps_schedule
 
+        self._is_training: bool = True
         self._epoch: int | None = None  # to keep track of cached values
 
         self._prognostic_names = self._stepper.prognostic_names
@@ -1503,6 +1545,7 @@ class TrainStepper(
         data: BatchData,
         optimization: OptimizationABC,
         compute_derived_variables: bool = False,
+        evaluate_all_steps: bool = False,
     ) -> TrainOutput:
         """
         Train the model on a batch of data with one or more forward steps.
@@ -1519,6 +1562,9 @@ class TrainStepper(
                 Use `NullOptimization` to disable training.
             compute_derived_variables: Whether to compute derived variables for the
                 prediction and target data.
+            evaluate_all_steps: When True, run all available forward steps and
+                compute per-step metrics for each, but only count steps within
+                the stochastically-sampled range toward the accumulated loss.
 
         Returns:
             The loss metrics, the generated data, the normalized generated data,
@@ -1533,12 +1579,13 @@ class TrainStepper(
         data = self._stepper.forcing_deriver(data)
 
         optimization.set_mode(self._stepper.modules)
-        output_list = self._accumulate_loss(
+        output_list, per_channel_losses = self._accumulate_loss(
             input_data,
             data,
             target_data,
             optimization,
             metrics,
+            evaluate_all_steps=evaluate_all_steps,
         )
 
         regularizer_loss = self._stepper.get_regularizer_loss()
@@ -1556,6 +1603,7 @@ class TrainStepper(
             time=target_data.time,
             normalize=self.normalizer.normalize,
             derive_func=self._derive_func,
+            per_channel_losses=per_channel_losses,
         )
         ic = data.get_start(
             set(data.data.keys()), self.n_ic_timesteps
@@ -1573,7 +1621,8 @@ class TrainStepper(
         target_data: BatchData,
         optimization: OptimizationABC,
         metrics: dict[str, float],
-    ) -> list[EnsembleTensorDict]:
+        evaluate_all_steps: bool = False,
+    ) -> tuple[list[EnsembleTensorDict], dict[str, ChannelLossInfo] | None]:
         input_data = data.get_start(self._prognostic_names, self.n_ic_timesteps)
         # output from self.predict_paired does not include initial condition
         n_forward_steps = data.time.shape[1] - self.n_ic_timesteps
@@ -1592,11 +1641,18 @@ class TrainStepper(
             n_forward_steps,
             optimization,
             labels=input_ensemble_data.labels,
+            data_mask=input_ensemble_data.data_mask,
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)
-        if self._n_forward_steps_sampler is not None:
-            stochastic_n_forward_steps = self._n_forward_steps_sampler.sample()
+        n_loss_steps = n_forward_steps
+        sampler = (
+            self._n_forward_steps_sampler
+            if self._is_training
+            else self._eval_n_forward_steps_sampler
+        )
+        if sampler is not None:
+            stochastic_n_forward_steps = sampler.sample()
             if stochastic_n_forward_steps > n_forward_steps:
                 raise RuntimeError(
                     "The number of forward steps to train on "
@@ -1605,11 +1661,18 @@ class TrainStepper(
                     "This is supposed to be ensured by the StepperConfig when train "
                     "data requirements are retrieved, so this is a bug."
                 )
-            n_forward_steps = stochastic_n_forward_steps
+            n_loss_steps = stochastic_n_forward_steps
+            if not evaluate_all_steps:
+                n_forward_steps = stochastic_n_forward_steps
+        weighted_sums: dict[str, torch.Tensor] | None = None
+        total_counts: dict[str, int] | None = None
+        last_optimization_window_step = n_loss_steps - 1
         for step in range(n_forward_steps):
-            optimize_step = (
-                step == n_forward_steps - 1 or not self._config.optimize_last_step_only
-            )
+            within_optimization_window = step < n_loss_steps
+            if self._config.optimize_last_step_only:
+                optimize_step = step == last_optimization_window_step
+            else:
+                optimize_step = within_optimization_window
             if optimize_step:
                 context = contextlib.nullcontext()
             else:
@@ -1618,19 +1681,46 @@ class TrainStepper(
                 gen_step = next(output_iterator)
                 gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
                 output_list.append(gen_step)
-                # Note: here we examine the loss for a single timestep,
-                # not a single model call (which may contain multiple timesteps).
                 target_step = add_ensemble_dim(
                     {
                         k: v.select(self.TIME_DIM, step)
                         for k, v in target_data.data.items()
                     }
                 )
-                step_loss = self._loss_obj(gen_step, target_step, step=step)
-                metrics[f"loss_step_{step}"] = step_loss.detach()
+                step_loss = self._loss_obj(
+                    gen_step,
+                    target_step,
+                    step=step,
+                    data_mask=input_batch_data.data_mask,
+                )
+                step_total_loss = step_loss.total()
+                metrics[f"loss_step_{step}"] = step_total_loss.detach()
+                if optimize_step:
+                    per_ch = step_loss.get_channel_losses()
+                    if weighted_sums is None:
+                        weighted_sums = {
+                            k: v.loss.detach() * v.count for k, v in per_ch.items()
+                        }
+                        total_counts = {k: v.count for k, v in per_ch.items()}
+                    else:
+                        assert total_counts is not None
+                        for k, v in per_ch.items():
+                            weighted_sums[k] = (
+                                weighted_sums[k] + v.loss.detach() * v.count
+                            )
+                            total_counts[k] = total_counts[k] + v.count
             if optimize_step:
-                optimization.accumulate_loss(step_loss)
-        return output_list
+                optimization.accumulate_loss(step_total_loss)
+        per_channel_losses: dict[str, ChannelLossInfo] | None = None
+        if weighted_sums is not None and total_counts is not None:
+            per_channel_losses = {
+                k: ChannelLossInfo(
+                    loss=weighted_sums[k] / max(total_counts[k], 1),
+                    count=total_counts[k],
+                )
+                for k in weighted_sums
+            }
+        return output_list, per_channel_losses
 
     def update_training_history(self, training_job: TrainingJob) -> None:
         """
@@ -1703,14 +1793,24 @@ class TrainStepper(
             self._n_forward_steps_sampler = probabilities_from_time_length(
                 self._n_forward_steps_schedule.get_value(epoch)
             )
+            self._eval_n_forward_steps_sampler = TimeLengthProbabilities(
+                outcomes=list(self._n_forward_steps_sampler.outcomes)
+            )
         else:
             self._n_forward_steps_sampler = None
+            self._eval_n_forward_steps_sampler = None
         self._epoch = epoch
 
+    def seed_eval(self, seed: int) -> None:
+        if self._eval_n_forward_steps_sampler is not None:
+            self._eval_n_forward_steps_sampler.seed_rng(seed)
+
     def set_eval(self) -> None:
+        self._is_training = False
         self._stepper.set_eval()
 
     def set_train(self) -> None:
+        self._is_training = True
         self._stepper.set_train()
 
 
@@ -1762,6 +1862,22 @@ class StepperOverrideConfig:
 
 def load_stepper_config(
     checkpoint_path: str | pathlib.Path,
+) -> StepperConfig:
+    """Load a stepper configuration from a checkpoint without instantiating
+    the model.
+
+    Args:
+        checkpoint_path: The path to the serialized checkpoint.
+
+    Returns:
+        The configuration of the stepper serialized in the checkpoint.
+    """
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    return StepperConfig.from_stepper_state(checkpoint["stepper"])
+
+
+def load_stepper_config_with_override(
+    checkpoint_path: str | pathlib.Path,
     override_config: StepperOverrideConfig | None = None,
 ) -> StepperConfig:
     """Load a stepper configuration, optionally overriding certain aspects.
@@ -1774,6 +1890,8 @@ def load_stepper_config(
         The configuration of the stepper serialized in the checkpoint, with
         appropriate options overridden.
     """
+    if override_config is None:
+        return load_stepper_config(checkpoint_path)
     stepper = load_stepper(checkpoint_path, override_config)
     return stepper._config
 
@@ -1795,9 +1913,7 @@ def load_stepper(
     if override_config is None:
         override_config = StepperOverrideConfig()
 
-    checkpoint = torch.load(
-        checkpoint_path, map_location=get_device(), weights_only=False
-    )
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     stepper = Stepper.from_state(checkpoint["stepper"])
 
     if override_config.ocean != "keep":

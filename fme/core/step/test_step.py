@@ -26,7 +26,12 @@ from fme.core.registry import ModuleSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallConfig, MultiCallStepConfig
 from fme.core.step.secondary_decoder import SecondaryDecoderConfig
-from fme.core.step.single_module import SingleModuleStepConfig
+from fme.core.step.secondary_module import SecondaryModuleStepConfig
+from fme.core.step.single_module import (
+    SingleModuleStepConfig,
+    _apply_input_mask,
+    _build_channel_mask_dict,
+)
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.typing_ import TensorDict
 
@@ -208,6 +213,7 @@ def get_label_conditioned_selector(
                             noise_type="isotropic",
                             num_layers=2,
                             local_blocks=[0],
+                            label_embed_dim=3,
                         )
                     ),
                 ),
@@ -374,6 +380,41 @@ def get_fcn3_selector(
     )
 
 
+def get_secondary_module_selector(
+    dir: pathlib.Path | None = None,
+) -> StepSelector:
+    normalization = get_network_and_loss_normalization_config(
+        names=[
+            "forcing_a",
+            "prog_a",
+            "prog_b",
+            "diag_a",
+        ],
+        dir=dir,
+    )
+    return StepSelector(
+        type="secondary_module",
+        config=dataclasses.asdict(
+            SecondaryModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={
+                        "scale_factor": 1,
+                        "embed_dim": 4,
+                        "num_layers": 2,
+                    },
+                ),
+                in_names=["forcing_a", "prog_a", "prog_b"],
+                out_names=["prog_a", "prog_b"],
+                normalization=normalization,
+                secondary_builder=ModuleSelector(type="MLP", config={}),
+                secondary_out_names=["diag_a"],
+                secondary_residual_out_names=["prog_a"],
+            ),
+        ),
+    )
+
+
 def get_multi_call_selector(
     dir: pathlib.Path | None = None,
 ) -> StepSelector:
@@ -403,6 +444,7 @@ SELECTOR_GETTERS = [
     get_separate_radiation_selector,
     get_single_module_selector,
     get_single_module_noise_conditioned_selector,
+    get_secondary_module_selector,
     get_multi_call_selector,
 ]
 
@@ -709,3 +751,495 @@ def test_step_with_prescribed_prognostic_overwrites_output():
         wrapper=lambda x: x,
     )
     torch.testing.assert_close(output["diagnostic_main"], prescribed_value)
+
+
+def test_secondary_module_empty_names_raises():
+    normalization = get_network_and_loss_normalization_config(
+        names=["a", "b"],
+    )
+    with pytest.raises(ValueError, match="at least one of"):
+        SecondaryModuleStepConfig(
+            builder=ModuleSelector(type="MLP", config={}),
+            in_names=["a"],
+            out_names=["b"],
+            normalization=normalization,
+            secondary_builder=ModuleSelector(type="MLP", config={}),
+        )
+
+
+def test_secondary_module_out_name_overlaps_out_names_raises():
+    normalization = get_network_and_loss_normalization_config(
+        names=["a", "b"],
+    )
+    with pytest.raises(ValueError, match="secondary_out_names must not overlap"):
+        SecondaryModuleStepConfig(
+            builder=ModuleSelector(type="MLP", config={}),
+            in_names=["a"],
+            out_names=["b"],
+            normalization=normalization,
+            secondary_builder=ModuleSelector(type="MLP", config={}),
+            secondary_out_names=["b"],
+        )
+
+
+def test_secondary_module_out_name_overlaps_residual_out_names_raises():
+    normalization = get_network_and_loss_normalization_config(
+        names=["a", "b", "c"],
+    )
+    with pytest.raises(
+        ValueError, match="secondary_out_names must not overlap.*residual"
+    ):
+        SecondaryModuleStepConfig(
+            builder=ModuleSelector(type="MLP", config={}),
+            in_names=["a"],
+            out_names=["b"],
+            normalization=normalization,
+            secondary_builder=ModuleSelector(type="MLP", config={}),
+            secondary_out_names=["c"],
+            secondary_residual_out_names=["c"],
+        )
+
+
+def test_secondary_module_residual_out_name_not_in_out_or_in_names_raises():
+    normalization = get_network_and_loss_normalization_config(
+        names=["a", "b", "c"],
+    )
+    with pytest.raises(ValueError, match="secondary_residual_out_name 'c'"):
+        SecondaryModuleStepConfig(
+            builder=ModuleSelector(type="MLP", config={}),
+            in_names=["a"],
+            out_names=["b"],
+            normalization=normalization,
+            secondary_builder=ModuleSelector(type="MLP", config={}),
+            secondary_residual_out_names=["c"],
+        )
+
+
+def test_secondary_module_output_names_full_field_only():
+    """secondary_out_names appear in output_names."""
+    normalization = get_network_and_loss_normalization_config(
+        names=["a", "b", "c"],
+    )
+    config = SecondaryModuleStepConfig(
+        builder=ModuleSelector(type="MLP", config={}),
+        in_names=["a"],
+        out_names=["b"],
+        normalization=normalization,
+        secondary_builder=ModuleSelector(type="MLP", config={}),
+        secondary_out_names=["c"],
+    )
+    assert "c" in config.output_names
+    assert "b" in config.output_names
+
+
+def test_secondary_module_output_names_residual_only():
+    """secondary_residual_out_names that are in out_names appear in output_names."""
+    normalization = get_network_and_loss_normalization_config(
+        names=["a", "b"],
+    )
+    config = SecondaryModuleStepConfig(
+        builder=ModuleSelector(type="MLP", config={}),
+        in_names=["a"],
+        out_names=["b"],
+        normalization=normalization,
+        secondary_builder=ModuleSelector(type="MLP", config={}),
+        secondary_residual_out_names=["b"],
+    )
+    assert "b" in config.output_names
+
+
+def test_secondary_module_output_names_residual_on_input_only():
+    """secondary_residual_out_names on input-only name adds to output_names."""
+    normalization = get_network_and_loss_normalization_config(
+        names=["a", "b"],
+    )
+    config = SecondaryModuleStepConfig(
+        builder=ModuleSelector(type="MLP", config={}),
+        in_names=["a", "b"],
+        out_names=["b"],
+        normalization=normalization,
+        secondary_builder=ModuleSelector(type="MLP", config={}),
+        secondary_residual_out_names=["a"],
+    )
+    assert "a" in config.output_names
+    assert "b" in config.output_names
+
+
+@pytest.mark.parallel
+def test_secondary_module_full_field_and_residual():
+    """Test secondary_out_names and secondary_residual_out_names together."""
+    torch.manual_seed(0)
+    normalization = get_network_and_loss_normalization_config(
+        names=["forcing", "prog", "diag"],
+    )
+    config = StepSelector(
+        type="secondary_module",
+        config=dataclasses.asdict(
+            SecondaryModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={
+                        "scale_factor": 1,
+                        "embed_dim": 4,
+                        "num_layers": 2,
+                    },
+                ),
+                in_names=["forcing", "prog"],
+                out_names=["prog"],
+                normalization=normalization,
+                secondary_builder=ModuleSelector(type="MLP", config={}),
+                secondary_out_names=["diag"],
+                secondary_residual_out_names=["prog"],
+            ),
+        ),
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    step = get_step(config, img_shape)
+    assert "prog" in step.output_names
+    assert "diag" in step.output_names
+    assert "prog" in step.prognostic_names
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples=2)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples=2
+    )
+    output = step.step(
+        args=StepArgs(
+            input=input_data, next_step_input_data=next_step_input_data, labels=None
+        ),
+    )
+    assert "prog" in output
+    assert "diag" in output
+    assert output["prog"].shape == (2, *img_shape)
+    assert output["diag"].shape == (2, *img_shape)
+
+
+@pytest.mark.parallel
+def test_secondary_module_state_round_trip():
+    """Test get_state/load_state with secondary module."""
+    torch.manual_seed(0)
+    normalization = get_network_and_loss_normalization_config(
+        names=["forcing", "prog", "diag"],
+    )
+    config = SecondaryModuleStepConfig(
+        builder=ModuleSelector(
+            type="SphericalFourierNeuralOperatorNet",
+            config={
+                "scale_factor": 1,
+                "embed_dim": 4,
+                "num_layers": 2,
+            },
+        ),
+        in_names=["forcing", "prog"],
+        out_names=["prog"],
+        normalization=normalization,
+        secondary_builder=ModuleSelector(type="MLP", config={}),
+        secondary_out_names=["diag"],
+        secondary_residual_out_names=["prog"],
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    step1 = get_step(
+        StepSelector(type="secondary_module", config=dataclasses.asdict(config)),
+        img_shape,
+    )
+    state = step1.get_state()
+    assert "secondary_module" in state
+
+    step2 = get_step(
+        StepSelector(type="secondary_module", config=dataclasses.asdict(config)),
+        img_shape,
+    )
+    step2.load_state(state)
+
+    input_data = get_tensor_dict(step1.input_names, img_shape, n_samples=1)
+    next_step_input_data = get_tensor_dict(
+        step1.next_step_input_names, img_shape, n_samples=1
+    )
+    args = StepArgs(
+        input=input_data, next_step_input_data=next_step_input_data, labels=None
+    )
+    out1 = step1.step(args=args)
+    out2 = step2.step(args=args)
+    for name in out1:
+        torch.testing.assert_close(out1[name], out2[name])
+
+
+@pytest.mark.parallel
+def test_secondary_module_residual_on_input_only_with_residual_prediction():
+    """When residual_prediction=True and secondary_residual_out_name is in in_names
+    but not out_names, the input should not be added twice."""
+    torch.manual_seed(0)
+    normalization = get_network_and_loss_normalization_config(
+        names=["forcing", "prog_a", "prog_b"],
+    )
+    config = StepSelector(
+        type="secondary_module",
+        config=dataclasses.asdict(
+            SecondaryModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={
+                        "scale_factor": 1,
+                        "embed_dim": 4,
+                        "num_layers": 2,
+                    },
+                ),
+                in_names=["forcing", "prog_a", "prog_b"],
+                out_names=["prog_a", "prog_b"],
+                normalization=normalization,
+                residual_prediction=True,
+                secondary_builder=ModuleSelector(type="MLP", config={}),
+                secondary_residual_out_names=["prog_a"],
+            ),
+        ),
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    step = get_step(config, img_shape)
+    assert "prog_a" in step.output_names
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples=2)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples=2
+    )
+    output = step.step(
+        args=StepArgs(
+            input=input_data, next_step_input_data=next_step_input_data, labels=None
+        ),
+    )
+    assert output["prog_a"].shape == (2, *img_shape)
+    assert output["prog_b"].shape == (2, *img_shape)
+
+
+def test_apply_input_mask_zeros_masked_variables():
+    input_norm = {
+        "a": torch.ones(4, 8, 16),
+        "b": torch.ones(4, 8, 16) * 2.0,
+    }
+    mask = {
+        "a": torch.tensor([True, True, False, False]),
+        "b": torch.tensor([True, False, True, False]),
+    }
+    result = _apply_input_mask(input_norm, mask)
+    expected_a = torch.tensor([1.0, 1.0, 0.0, 0.0]).view(4, 1, 1).expand(4, 8, 16)
+    expected_b = torch.tensor([2.0, 0.0, 2.0, 0.0]).view(4, 1, 1).expand(4, 8, 16)
+    torch.testing.assert_close(result["a"], expected_a)
+    torch.testing.assert_close(result["b"], expected_b)
+
+
+def test_apply_input_mask_ignores_unknown_names():
+    input_norm = {"a": torch.ones(2, 4, 8)}
+    mask = {"not_a_variable": torch.tensor([False, False])}
+    result = _apply_input_mask(input_norm, mask)
+    torch.testing.assert_close(result["a"], input_norm["a"])
+
+
+def test_apply_input_mask_does_not_mutate_original():
+    original = torch.ones(2, 4, 8)
+    input_norm = {"a": original}
+    mask = {"a": torch.tensor([False, False])}
+    result = _apply_input_mask(input_norm, mask)
+    torch.testing.assert_close(original, torch.ones(2, 4, 8))
+    assert result["a"] is not original
+
+
+def test_step_with_data_mask():
+    normalization = get_network_and_loss_normalization_config(
+        names=["forcing_shared", "forcing_rad", "diagnostic_main", "diagnostic_rad"],
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={
+                        "scale_factor": 1,
+                        "embed_dim": 4,
+                        "num_layers": 2,
+                    },
+                ),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main", "diagnostic_rad"],
+                normalization=normalization,
+            ),
+        ),
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    n_samples = 4
+    step = get_step(config, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples
+    )
+    data_mask = {
+        "forcing_shared": torch.tensor(
+            [True, True, False, False], device=fme.get_device()
+        ),
+    }
+    output_no_mask = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+            data_mask=None,
+        ),
+    )
+    output_with_mask = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+            data_mask=data_mask,
+        ),
+    )
+    for name in ["diagnostic_main", "diagnostic_rad"]:
+        assert output_with_mask[name].shape == (n_samples, *img_shape)
+        torch.testing.assert_close(output_with_mask[name][:2], output_no_mask[name][:2])
+        assert not torch.allclose(output_with_mask[name][2:], output_no_mask[name][2:])
+
+
+def test_build_channel_mask_dict_with_data_mask():
+    in_names = ["a", "b"]
+    packed = torch.zeros(3, 2, 8, 16)
+    data_mask = {
+        "a": torch.tensor([True, False, True]),
+        "b": torch.tensor([False, True, True]),
+    }
+    result = _build_channel_mask_dict(in_names, data_mask, packed)
+    assert set(result) == {"a", "b"}
+    assert result["a"].shape == (3, 8, 16)
+    assert result["a"][0, 0, 0] == 1.0
+    assert result["a"][1, 0, 0] == 0.0
+    assert result["a"][2, 0, 0] == 1.0
+    assert result["b"][0, 0, 0] == 0.0
+    assert result["b"][1, 0, 0] == 1.0
+    assert (result["b"][2] == 1.0).all()
+
+
+def test_build_channel_mask_dict_no_data_mask():
+    packed = torch.zeros(2, 3, 4, 8)
+    result = _build_channel_mask_dict(["x", "y", "z"], None, packed)
+    assert set(result) == {"x", "y", "z"}
+    for name in result:
+        assert result[name].shape == (2, 4, 8)
+        assert (result[name] == 1.0).all()
+
+
+def test_build_channel_mask_dict_partial_mask():
+    packed = torch.zeros(2, 2, 4, 8)
+    data_mask = {"a": torch.tensor([True, False])}
+    result = _build_channel_mask_dict(["a", "b"], data_mask, packed)
+    assert set(result) == {"a", "b"}
+    assert result["a"][0, 0, 0] == 1.0
+    assert result["a"][1, 0, 0] == 0.0
+    assert (result["b"] == 1.0).all()
+
+
+def test_step_with_include_channel_mask_inputs():
+    normalization = get_network_and_loss_normalization_config(
+        names=["forcing_shared", "forcing_rad", "diagnostic_main", "diagnostic_rad"],
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={
+                        "scale_factor": 1,
+                        "embed_dim": 4,
+                        "num_layers": 2,
+                    },
+                ),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main", "diagnostic_rad"],
+                normalization=normalization,
+                include_channel_mask_inputs=True,
+            ),
+        ),
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    n_samples = 4
+    step = get_step(config, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples
+    )
+    data_mask = {
+        "forcing_shared": torch.tensor(
+            [True, True, False, False], device=fme.get_device()
+        ),
+    }
+    output_no_mask = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+            data_mask=None,
+        ),
+    )
+    output_with_mask = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+            data_mask=data_mask,
+        ),
+    )
+    for name in ["diagnostic_main", "diagnostic_rad"]:
+        assert output_with_mask[name].shape == (n_samples, *img_shape)
+        torch.testing.assert_close(output_with_mask[name][:2], output_no_mask[name][:2])
+        assert not torch.allclose(output_with_mask[name][2:], output_no_mask[name][2:])
+
+
+def test_step_with_include_channel_mask_inputs_no_data_mask():
+    normalization = get_network_and_loss_normalization_config(
+        names=["forcing_shared", "forcing_rad", "diagnostic_main", "diagnostic_rad"],
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={
+                        "scale_factor": 1,
+                        "embed_dim": 4,
+                        "num_layers": 2,
+                    },
+                ),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main", "diagnostic_rad"],
+                normalization=normalization,
+                include_channel_mask_inputs=True,
+            ),
+        ),
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    n_samples = 2
+    step = get_step(config, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples
+    )
+    output_no_mask = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+            data_mask=None,
+        ),
+    )
+    all_unmasked = {
+        name: torch.ones(n_samples, dtype=torch.bool, device=fme.get_device())
+        for name in step.input_names
+    }
+    output_all_unmasked = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+            data_mask=all_unmasked,
+        ),
+    )
+    for name in ["diagnostic_main", "diagnostic_rad"]:
+        assert output_no_mask[name].shape == (n_samples, *img_shape)
+        torch.testing.assert_close(output_no_mask[name], output_all_unmasked[name])

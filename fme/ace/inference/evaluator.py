@@ -11,9 +11,15 @@ import numpy.typing as npt
 import torch
 
 import fme
-from fme.ace.aggregator import OneStepAggregatorConfig
-from fme.ace.aggregator.inference import InferenceEvaluatorAggregatorConfig
-from fme.ace.data_loading.batch_data import BatchData
+from fme.ace.aggregator import (
+    LegacyFlagOneStepAggregatorConfig,
+    OneStepAggregatorConfig,
+)
+from fme.ace.aggregator.inference import (
+    InferenceEvaluatorAggregatorConfig,
+    LegacyFlagInferenceEvaluatorAggregatorConfig,
+)
+from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_gridded_data, get_inference_data
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig
@@ -25,7 +31,7 @@ from fme.ace.stepper import (
     Stepper,
     StepperOverrideConfig,
     load_stepper,
-    load_stepper_config,
+    load_stepper_config_with_override,
 )
 from fme.ace.stepper.single_module import (
     StepperConfig,
@@ -118,8 +124,8 @@ class ValidationConfig:
     """
 
     loader: DataLoaderConfig
-    aggregator: OneStepAggregatorConfig = dataclasses.field(
-        default_factory=lambda: OneStepAggregatorConfig()
+    aggregator: OneStepAggregatorConfig | LegacyFlagOneStepAggregatorConfig = (
+        dataclasses.field(default_factory=lambda: OneStepAggregatorConfig())
     )
     stepper_training: TrainStepperConfig = dataclasses.field(
         default_factory=lambda: TrainStepperConfig()
@@ -210,6 +216,9 @@ class InferenceEvaluatorConfig:
             before inference. When provided, validation runs first and produces
             metrics prefixed with ``val/`` (e.g. ``val/mean/weighted_rmse``),
             mirroring the validation done at the end of each training epoch.
+        n_ensemble_per_ic: Number of ensemble members per initial condition. Useful for
+            stochastic model weather inference. n_ensemble_per_ic = 1 is default
+            inference behavior.
     """
 
     experiment_dir: str
@@ -222,12 +231,14 @@ class InferenceEvaluatorConfig:
     data_writer: DataWriterConfig = dataclasses.field(
         default_factory=lambda: DataWriterConfig()
     )
-    aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
-        default_factory=lambda: InferenceEvaluatorAggregatorConfig()
-    )
+    aggregator: (
+        InferenceEvaluatorAggregatorConfig
+        | LegacyFlagInferenceEvaluatorAggregatorConfig
+    ) = dataclasses.field(default_factory=lambda: InferenceEvaluatorAggregatorConfig())
     stepper_override: StepperOverrideConfig | None = None
     allow_incompatible_dataset: bool = False
     validation: ValidationConfig | None = None
+    n_ensemble_per_ic: int = 1
 
     def __post_init__(self):
         if self.data_writer.time_coarsen is not None:
@@ -242,8 +253,6 @@ class InferenceEvaluatorConfig:
                         self.forward_steps_in_memory,
                         self.n_forward_steps,
                     )
-        for log_step_mean in self.aggregator.log_step_means:
-            log_step_mean.validate(self.n_forward_steps)
 
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)
@@ -257,7 +266,9 @@ class InferenceEvaluatorConfig:
 
     def load_stepper_config(self) -> StepperConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        return load_stepper_config(self.checkpoint_path, self.stepper_override)
+        return load_stepper_config_with_override(
+            self.checkpoint_path, self.stepper_override
+        )
 
     def get_data_writer(
         self,
@@ -266,6 +277,8 @@ class InferenceEvaluatorConfig:
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ) -> PairedDataWriter:
+        # initial_condition_times from data.initial_time already has one entry per
+        # sample (n_ic * n_ensemble_per_ic); do not repeat by n_ensemble_per_ic again.
         return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
             initial_condition_times=initial_condition_times,
@@ -344,7 +357,11 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             window_requirements=window_requirements,
             initial_condition=initial_condition_requirements,
         )
-
+        if config.n_ensemble_per_ic > 1:
+            ic = data.initial_condition.as_batch_data()
+            data._initial_condition = PrognosticState(
+                ic.broadcast_ensemble(config.n_ensemble_per_ic)
+            )
         stepper = config.load_stepper()
         stepper.set_eval()
 
@@ -358,10 +375,17 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
                     f"error. The incompatiblity found was: {str(err)}"
                 ) from err
 
-        aggregator_config: InferenceEvaluatorAggregatorConfig = config.aggregator
+        aggregator_config = config.aggregator
         for batch in data.loader:
             initial_time = batch.time.isel(time=0)
             break
+        if config.n_ensemble_per_ic > 1:
+            initial_time = initial_time.isel(
+                sample=np.repeat(
+                    np.arange(initial_time.sizes["sample"]),
+                    config.n_ensemble_per_ic,
+                )
+            )
         variable_metadata = resolve_variable_metadata(
             dataset_metadata=data.variable_metadata,
             stepper_metadata=stepper.training_variable_metadata,
@@ -387,7 +411,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             train_stepper_config = config.validation.stepper_training
             train_stepper = TrainStepper(stepper=stepper, config=train_stepper_config)
 
-            aggregator = config.validation.aggregator.build(
+            val_aggregator = config.validation.aggregator.build(
                 dataset_info=dataset_info,
                 loss_scaling=train_stepper.effective_loss_scaling,
                 save_diagnostics=True,
@@ -397,7 +421,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         run_validation(
             train_stepper=train_stepper,
             validation_data=valid_data,
-            aggregator=aggregator,
+            aggregator=val_aggregator,
             label="val",
             log_progress=True,
         )
@@ -413,6 +437,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             channel_mean_names=stepper.loss_names,
             normalize=stepper.normalizer.normalize,
             output_dir=config.experiment_dir,
+            n_ensemble_per_ic=config.n_ensemble_per_ic,
         )
 
         writer = config.get_data_writer(
@@ -431,6 +456,11 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             window_requirements=window_requirements,
             initial_condition=initial_condition_requirements,
         )
+        if config.n_ensemble_per_ic > 1:
+            ic = prediction_data.initial_condition.as_batch_data()
+            prediction_data._initial_condition = PrognosticState(
+                ic.broadcast_ensemble(config.n_ensemble_per_ic)
+            )
         deriver = _Deriver(
             n_ic_timesteps=stepper_config.n_ic_timesteps,
             derive_func=stepper.derive_func,

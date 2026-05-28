@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 
+from fme.ace.aggregator.inference.data import InferenceBatchData, make_dummy_time
 from fme.ace.aggregator.inference.time_mean import (
     TimeMeanAggregator,
     TimeMeanEvaluatorAggregator,
@@ -26,10 +27,14 @@ def test_rmse_of_time_mean_all_channels():
         "b": torch.ones([2, 3, 4, 4], device=get_device()) * 5,
     }
     agg.record_batch(
-        target_data=target_data_norm,
-        gen_data=gen_data_norm,
-        target_data_norm=target_data_norm,
-        gen_data_norm=gen_data_norm,
+        InferenceBatchData(
+            prediction=gen_data_norm,
+            prediction_norm=gen_data_norm,
+            target=target_data_norm,
+            target_norm=target_data_norm,
+            time=make_dummy_time(2, 3),
+            i_time_start=0,
+        )
     )
     logs = agg.get_logs(label="time_mean_norm")
     assert logs["time_mean_norm/rmse/a"] == 1.0
@@ -55,10 +60,14 @@ def test_custom_channel_mean_names():
         "b": torch.ones([2, 3, 4, 4], device=get_device()) * 5,
     }
     agg.record_batch(
-        target_data=target_data_norm,
-        gen_data=gen_data_norm,
-        target_data_norm=target_data_norm,
-        gen_data_norm=gen_data_norm,
+        InferenceBatchData(
+            prediction=gen_data_norm,
+            prediction_norm=gen_data_norm,
+            target=target_data_norm,
+            target_norm=target_data_norm,
+            time=make_dummy_time(2, 3),
+            i_time_start=0,
+        )
     )
     logs = agg.get_logs(label="time_mean_norm")
     assert logs["time_mean_norm/rmse/a"] == 1.0
@@ -82,10 +91,14 @@ def test_mean_all_channels_not_in_denorm():
         "b": torch.ones([2, 3, 4, 4], device=get_device()) * 5,
     }
     agg.record_batch(
-        target_data=target_data,
-        gen_data=gen_data,
-        target_data_norm=target_data,
-        gen_data_norm=gen_data,
+        InferenceBatchData(
+            prediction=gen_data,
+            prediction_norm=gen_data,
+            target=target_data,
+            target_norm=target_data,
+            time=make_dummy_time(2, 3),
+            i_time_start=0,
+        )
     )
     logs = agg.get_logs(label="time_mean")
     assert "time_mean/rmse/channel_mean" not in list(logs.keys())
@@ -109,10 +122,14 @@ def test_bias_values():
         "a": (torch.rand(1) * torch.ones(size=[2, 3, 4, 5])).to(device=get_device()),
     }
     agg.record_batch(
-        target_data=target_data,
-        gen_data=gen_data,
-        target_data_norm=target_data,
-        gen_data_norm=gen_data,
+        InferenceBatchData(
+            prediction=gen_data,
+            prediction_norm=gen_data,
+            target=target_data,
+            target_norm=target_data,
+            time=make_dummy_time(2, 3),
+            i_time_start=0,
+        )
     )
     ds = agg.get_dataset()
     assert "bias_map-a" in ds
@@ -130,6 +147,139 @@ def test_bias_values():
     )
 
 
+def test_log_variables_does_not_affect_channel_mean():
+    torch.manual_seed(0)
+    area_weights = torch.ones(1, 1).to(get_device())
+    target_data_norm = {
+        "a": torch.ones([2, 3, 4, 4], device=get_device()),
+        "b": torch.ones([2, 3, 4, 4], device=get_device()) * 3,
+    }
+    gen_data_norm = {
+        "a": torch.ones([2, 3, 4, 4], device=get_device()) * 2.0,
+        "b": torch.ones([2, 3, 4, 4], device=get_device()) * 5,
+    }
+    batch = InferenceBatchData(
+        prediction=gen_data_norm,
+        prediction_norm=gen_data_norm,
+        target=target_data_norm,
+        target_norm=target_data_norm,
+        time=make_dummy_time(2, 3),
+        i_time_start=0,
+    )
+    agg = TimeMeanEvaluatorAggregator(
+        LatLonOperations(area_weights),
+        horizontal_dims=["lat", "lon"],
+        target="norm",
+        log_variables=frozenset(["a"]),
+    )
+    agg.record_batch(batch)
+    logs = agg.get_logs(label="time_mean_norm")
+    assert logs["time_mean_norm/rmse/a"] == 1.0
+    assert "time_mean_norm/rmse/b" not in logs
+    assert logs["time_mean_norm/rmse/channel_mean"] == 1.5
+
+
+def test_empty_log_variables_still_computes_channel_mean():
+    torch.manual_seed(0)
+    area_weights = torch.ones(1, 1).to(get_device())
+    agg = TimeMeanEvaluatorAggregator(
+        LatLonOperations(area_weights),
+        horizontal_dims=["lat", "lon"],
+        target="norm",
+        log_variables=frozenset(),
+    )
+    target_data_norm = {
+        "a": torch.ones([2, 3, 4, 4], device=get_device()),
+        "b": torch.ones([2, 3, 4, 4], device=get_device()) * 3,
+    }
+    gen_data_norm = {
+        "a": torch.ones([2, 3, 4, 4], device=get_device()) * 2.0,
+        "b": torch.ones([2, 3, 4, 4], device=get_device()) * 5,
+    }
+    agg.record_batch(
+        InferenceBatchData(
+            prediction=gen_data_norm,
+            prediction_norm=gen_data_norm,
+            target=target_data_norm,
+            target_norm=target_data_norm,
+            time=make_dummy_time(2, 3),
+            i_time_start=0,
+        )
+    )
+    logs = agg.get_logs(label="time_mean_norm")
+    assert "time_mean_norm/rmse/a" not in logs
+    assert "time_mean_norm/rmse/b" not in logs
+    assert logs["time_mean_norm/rmse/channel_mean"] == 1.5
+
+
+def test_log_variables_with_channel_mean_names():
+    torch.manual_seed(0)
+    area_weights = torch.ones(1, 1).to(get_device())
+    agg = TimeMeanEvaluatorAggregator(
+        LatLonOperations(area_weights),
+        horizontal_dims=["lat", "lon"],
+        target="norm",
+        channel_mean_names=["a"],
+        log_variables=frozenset(["b"]),
+    )
+    target_data_norm = {
+        "a": torch.ones([2, 3, 4, 4], device=get_device()),
+        "b": torch.ones([2, 3, 4, 4], device=get_device()) * 3,
+    }
+    gen_data_norm = {
+        "a": torch.ones([2, 3, 4, 4], device=get_device()) * 2.0,
+        "b": torch.ones([2, 3, 4, 4], device=get_device()) * 5,
+    }
+    agg.record_batch(
+        InferenceBatchData(
+            prediction=gen_data_norm,
+            prediction_norm=gen_data_norm,
+            target=target_data_norm,
+            target_norm=target_data_norm,
+            time=make_dummy_time(2, 3),
+            i_time_start=0,
+        )
+    )
+    logs = agg.get_logs(label="time_mean_norm")
+    assert "time_mean_norm/rmse/a" not in logs
+    assert logs["time_mean_norm/rmse/b"] == 2.0
+    assert logs["time_mean_norm/rmse/channel_mean"] == 1.0
+
+
+def test_log_variables_filters_dataset():
+    torch.manual_seed(0)
+    area_weights = torch.ones(1, 1).to(get_device())
+    agg = TimeMeanEvaluatorAggregator(
+        LatLonOperations(area_weights),
+        horizontal_dims=["lat", "lon"],
+        target="denorm",
+        log_variables=frozenset(["a"]),
+    )
+    target_data = {
+        "a": torch.ones([2, 3, 4, 4], device=get_device()),
+        "b": torch.ones([2, 3, 4, 4], device=get_device()) * 3,
+    }
+    gen_data = {
+        "a": torch.ones([2, 3, 4, 4], device=get_device()) * 2.0,
+        "b": torch.ones([2, 3, 4, 4], device=get_device()) * 5,
+    }
+    agg.record_batch(
+        InferenceBatchData(
+            prediction=gen_data,
+            prediction_norm=gen_data,
+            target=target_data,
+            target_norm=target_data,
+            time=make_dummy_time(2, 3),
+            i_time_start=0,
+        )
+    )
+    ds = agg.get_dataset()
+    assert "bias_map-a" in ds
+    assert "gen_map-a" in ds
+    assert "bias_map-b" not in ds
+    assert "gen_map-b" not in ds
+
+
 def test_aggregator_mean_values():
     area_weights = torch.ones(1, 1).to(get_device())
     agg = TimeMeanAggregator(LatLonOperations(area_weights))
@@ -138,8 +288,14 @@ def test_aggregator_mean_values():
         "a": (torch.rand(1) * torch.ones(size=[2, 3, 4, 5])).to(device=get_device()),
     }
     agg.record_batch(
-        data=data,
-        i_time_start=0,
+        InferenceBatchData(
+            prediction=data,
+            prediction_norm=data,
+            target=None,
+            target_norm=None,
+            time=make_dummy_time(2, 3),
+            i_time_start=0,
+        )
     )
     ds = agg.get_dataset()
     assert "gen_map-a" in ds
