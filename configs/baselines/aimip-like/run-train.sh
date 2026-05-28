@@ -69,5 +69,12 @@ run_training() {
 # run_training "train-4deg-daily-era5-only-shared-t-append.yaml" "train-4deg-daily-era5-only-rs0-shared-t-append" 1
 # run_training "train-4deg-daily-era5-only-perchan.yaml" "train-4deg-daily-era5-only-rs0-perchan" 1
 # run_training "train-4deg-daily-era5-only-perchan-append.yaml" "train-4deg-daily-era5-only-rs0-perchan-append" 1
-run_training "train-4deg-daily-era5-only-rlgm.yaml" "train-4deg-daily-era5-only-rs0-rlgm" 1
-run_training "train-4deg-daily-era5-only-shared-t-append-rlgm.yaml" "train-4deg-daily-era5-only-rs0-shared-t-append-rlgm" 1
+# run_training "train-4deg-daily-era5-only-rlgm.yaml" "train-4deg-daily-era5-only-rs0-rlgm" 1
+# run_training "train-4deg-daily-era5-only-shared-t-append-rlgm.yaml" "train-4deg-daily-era5-only-rs0-shared-t-append-rlgm" 1
+run_training "train-4deg-daily-era5-only-rlgm-cf.yaml" "train-4deg-daily-era5-only-rs0-rlgm-cf" 1
+run_training "train-4deg-daily-era5-only-rlgm-ce.yaml" "train-4deg-daily-era5-only-rs0-rlgm-ce" 1
+run_training "train-4deg-daily-era5-only-rlgm-ao.yaml" "train-4deg-daily-era5-only-rs0-rlgm-ao" 1
+run_training "train-4deg-daily-era5-only-rlgm-cf-ao.yaml" "train-4deg-daily-era5-only-rs0-rlgm-cf-ao" 1
+run_training "train-4deg-daily-era5-only-rlgm-ce-ao.yaml" "train-4deg-daily-era5-only-rs0-rlgm-ce-ao" 1
+run_training "train-4deg-daily-era5-only-rlgm-ce-ao-n1.yaml" "train-4deg-daily-era5-only-rs0-rlgm-ce-ao-n1" 1
+run_training "train-4deg-daily-era5-only-shared-t-append-rlgm-ce-ao.yaml" "train-4deg-daily-era5-only-rs0-shared-t-append-rlgm-ce-ao" 1
