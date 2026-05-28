@@ -1,4 +1,5 @@
 import os
+from typing import Literal
 
 import pytest
 import torch
@@ -348,6 +349,143 @@ def test_remove_latent_global_mean_zeroes_spatial_mean():
     torch.testing.assert_close(
         demeaned_mean, torch.zeros_like(demeaned_mean), atol=1e-6, rtol=0.0
     )
+
+
+def _make_latent_mean_model(
+    device,
+    remove_latent_global_mean: bool = False,
+    concat_latent_global_mean: Literal["none", "first", "every"] = "none",
+    add_latent_global_mean_to_output: bool = False,
+    global_mean_noise: float = 0.0,
+):
+    params = SFNONetConfig(
+        embed_dim=16,
+        num_layers=2,
+        remove_latent_global_mean=remove_latent_global_mean,
+        concat_latent_global_mean=concat_latent_global_mean,
+        add_latent_global_mean_to_output=add_latent_global_mean_to_output,
+        global_mean_noise=global_mean_noise,
+    )
+    model = get_lat_lon_sfnonet(
+        params=params,
+        img_shape=(9, 18),
+        in_chans=2,
+        out_chans=3,
+    ).to(device)
+    return model
+
+
+def _empty_context(n_samples, device):
+    return Context(
+        embedding_scalar=torch.zeros(n_samples, 0, device=device),
+        labels=torch.zeros(n_samples, 0, device=device),
+        noise=None,
+        embedding_pos=None,
+    )
+
+
+@pytest.mark.parametrize("concat_mode", ["first", "every"])
+def test_concat_latent_global_mean(concat_mode):
+    torch.manual_seed(0)
+    n_samples = 4
+    device = get_device()
+    model = _make_latent_mean_model(
+        device,
+        remove_latent_global_mean=True,
+        concat_latent_global_mean=concat_mode,
+    )
+    x = torch.randn(n_samples, 2, 9, 18, device=device)
+    output = model(x, _empty_context(n_samples, device))
+    assert output.shape == (n_samples, 3, 9, 18)
+    output.sum().backward()
+
+
+def test_add_latent_global_mean_to_output():
+    torch.manual_seed(0)
+    n_samples = 4
+    device = get_device()
+    model = _make_latent_mean_model(
+        device,
+        remove_latent_global_mean=True,
+        add_latent_global_mean_to_output=True,
+    )
+    x = torch.randn(n_samples, 2, 9, 18, device=device)
+    output = model(x, _empty_context(n_samples, device))
+    assert output.shape == (n_samples, 3, 9, 18)
+    output.sum().backward()
+
+
+def test_all_latent_mean_flags():
+    torch.manual_seed(0)
+    n_samples = 4
+    device = get_device()
+    model = _make_latent_mean_model(
+        device,
+        remove_latent_global_mean=True,
+        concat_latent_global_mean="every",
+        add_latent_global_mean_to_output=True,
+    )
+    x = torch.randn(n_samples, 2, 9, 18, device=device)
+    output = model(x, _empty_context(n_samples, device))
+    assert output.shape == (n_samples, 3, 9, 18)
+    output.sum().backward()
+
+
+def test_concat_without_remove():
+    torch.manual_seed(0)
+    n_samples = 4
+    device = get_device()
+    model = _make_latent_mean_model(
+        device,
+        remove_latent_global_mean=False,
+        concat_latent_global_mean="first",
+    )
+    x = torch.randn(n_samples, 2, 9, 18, device=device)
+    output = model(x, _empty_context(n_samples, device))
+    assert output.shape == (n_samples, 3, 9, 18)
+    output.sum().backward()
+
+
+def test_add_output_without_remove():
+    torch.manual_seed(0)
+    n_samples = 4
+    device = get_device()
+    model = _make_latent_mean_model(
+        device,
+        remove_latent_global_mean=False,
+        add_latent_global_mean_to_output=True,
+    )
+    x = torch.randn(n_samples, 2, 9, 18, device=device)
+    output = model(x, _empty_context(n_samples, device))
+    assert output.shape == (n_samples, 3, 9, 18)
+    output.sum().backward()
+
+
+def test_global_mean_noise_only_during_training():
+    torch.manual_seed(0)
+    n_samples = 4
+    device = get_device()
+    model = _make_latent_mean_model(
+        device,
+        remove_latent_global_mean=True,
+        global_mean_noise=1.0,
+    )
+    x = torch.randn(n_samples, 2, 9, 18, device=device)
+    ctx = _empty_context(n_samples, device)
+
+    model.eval()
+    with torch.no_grad():
+        out_eval_1 = model(x, ctx)
+        out_eval_2 = model(x, ctx)
+    torch.testing.assert_close(out_eval_1, out_eval_2)
+
+    model.train()
+    with torch.no_grad():
+        out_train_1 = model(x, ctx)
+        out_train_2 = model(x, ctx)
+    assert not torch.allclose(
+        out_train_1, out_train_2
+    ), "training outputs should differ due to global mean noise"
 
 
 def _make_spectral_conv(nlat, nlon, embed_dim, preserve_global_mean, bias=False):

@@ -16,7 +16,7 @@
 
 import dataclasses
 import math
-from typing import Callable, Tuple
+from typing import Callable, Literal, Tuple
 
 import torch
 import torch.nn as nn
@@ -92,6 +92,16 @@ class SFNONetConfig:
         remove_latent_global_mean: If True, remove the global mean (across
             the last two spatial dimensions) from each channel after the
             encoder and before the FNO blocks.
+        concat_latent_global_mean: When "first" or "every", concatenate the
+            per-channel global means into the MLP input of the first or every
+            FNO block, respectively. The MLP projects from 2*embed_dim back
+            to embed_dim. "none" disables this.
+        add_latent_global_mean_to_output: If True, add the per-channel global
+            means back to the block outputs before the decoder.
+        global_mean_noise: Standard deviation of Gaussian noise added to the
+            computed global means during training. The noised values are used
+            for all downstream operations (removal, concatenation, and
+            re-addition). 0.0 disables noise.
     """
 
     embed_dim: int = 256
@@ -121,6 +131,9 @@ class SFNONetConfig:
     spectral_lora_alpha: float | None = None
     filter_preserves_global_mean: bool = False
     remove_latent_global_mean: bool = False
+    concat_latent_global_mean: Literal["none", "first", "every"] = "none"
+    add_latent_global_mean_to_output: bool = False
+    global_mean_noise: float = 0.0
 
 
 # heuristic for finding theta_cutoff
@@ -262,6 +275,7 @@ class FourierNeuralOperatorBlock(nn.Module):
         spectral_lora_rank: int = 0,
         spectral_lora_alpha: float | None = None,
         filter_preserves_global_mean: bool = False,
+        concat_global_means: bool = False,
     ):
         super(FourierNeuralOperatorBlock, self).__init__()
 
@@ -326,9 +340,11 @@ class FourierNeuralOperatorBlock(nn.Module):
 
         if use_mlp == True:
             mlp_hidden_dim = int(embed_dim * mlp_ratio)
+            mlp_in = 2 * embed_dim if concat_global_means else embed_dim
             self.mlp = MLP(
-                in_features=embed_dim,
+                in_features=mlp_in,
                 hidden_features=mlp_hidden_dim,
+                out_features=embed_dim,
                 act_layer=act_layer,
                 drop_rate=drop_rate,
                 checkpointing=checkpointing,
@@ -353,7 +369,13 @@ class FourierNeuralOperatorBlock(nn.Module):
                 lora_alpha=lora_alpha,
             )
 
-    def forward(self, x, context_embedding, timer: Timer = NullTimer()):
+    def forward(
+        self,
+        x,
+        context_embedding,
+        global_means: torch.Tensor | None = None,
+        timer: Timer = NullTimer(),
+    ):
         with timer.child("norm0") as norm0_timer:
             x_norm = torch.zeros_like(x)
             x_norm[..., : self.input_shape_loc[0], : self.input_shape_loc[1]] = (
@@ -387,6 +409,9 @@ class FourierNeuralOperatorBlock(nn.Module):
                 )
             )
             x = x_norm
+
+        if global_means is not None:
+            x = torch.cat((x, global_means.expand_as(x)), dim=1)
 
         if hasattr(self, "mlp"):
             with timer.child("mlp"):
@@ -538,6 +563,14 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         self.spectral_lora_alpha = params.spectral_lora_alpha
         self.filter_preserves_global_mean = params.filter_preserves_global_mean
         self.remove_latent_global_mean = params.remove_latent_global_mean
+        self._concat_latent_global_mean = params.concat_latent_global_mean
+        self._add_latent_global_mean_to_output = params.add_latent_global_mean_to_output
+        self._global_mean_noise = params.global_mean_noise
+        self._latent_mean_enabled = (
+            params.remove_latent_global_mean
+            or params.concat_latent_global_mean != "none"
+            or params.add_latent_global_mean_to_output
+        )
 
         self.trans_down = trans_down
         self.itrans_up = itrans_up
@@ -620,6 +653,11 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             inner_skip = "linear"
             outer_skip = "identity"
 
+            concat_mode = self._concat_latent_global_mean
+            block_gets_means = concat_mode == "every" or (
+                concat_mode == "first" and i == 0
+            )
+
             block = FourierNeuralOperatorBlock(
                 forward_transform,
                 inverse_transform,
@@ -644,13 +682,18 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                 spectral_lora_rank=self.spectral_lora_rank,
                 spectral_lora_alpha=self.spectral_lora_alpha,
                 filter_preserves_global_mean=self.filter_preserves_global_mean,
+                concat_global_means=block_gets_means,
             )
 
             self.blocks.append(block)
 
         # decoder
         decoder_hidden_dim = self.embed_dim
-        current_dim = self.embed_dim + self.big_skip * self.in_chans
+        if self._latent_mean_enabled and self.big_skip:
+            big_skip_dim = self.embed_dim
+        else:
+            big_skip_dim = self.big_skip * self.in_chans
+        current_dim = self.embed_dim + big_skip_dim
         decoder_modules = []
         for i in range(self.encoder_layers):
             decoder_modules.append(
@@ -683,7 +726,16 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         else:
             self.pos_embed = None
 
-        if params.normalize_big_skip:
+        if self._latent_mean_enabled:
+            self.latent_norm = ConditionalLayerNorm(
+                self.embed_dim,
+                img_shape=self.img_shape,
+                global_layer_norm=self.global_layer_norm,
+                context_config=context_config,
+                elementwise_affine=self.affine_norms,
+            )
+            self.norm_big_skip = NoLayerNorm()
+        elif params.normalize_big_skip:
             self.norm_big_skip = ConditionalLayerNorm(
                 in_chans,
                 img_shape=self.img_shape,
@@ -699,18 +751,27 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         """Helper"""
         return {"pos_embed", "cls_token"}
 
-    def _forward_features(self, x: torch.Tensor, context: Context):
-        for blk in self.blocks:
+    def _forward_features(
+        self,
+        x: torch.Tensor,
+        context: Context,
+        global_means: torch.Tensor | None = None,
+    ):
+        concat_mode = self._concat_latent_global_mean
+        for i, blk in enumerate(self.blocks):
+            pass_means: torch.Tensor | None = None
+            if global_means is not None and concat_mode != "none":
+                if concat_mode == "every" or i == 0:
+                    pass_means = global_means
             if self.checkpointing >= 3:
-                x = checkpoint(blk, x, context)
+                x = checkpoint(blk, x, context, pass_means)
             else:
-                x = blk(x, context)
+                x = blk(x, context, global_means=pass_means)
 
         return x
 
     def forward(self, x: torch.Tensor, context: Context):
-        # save big skip
-        if self.big_skip:
+        if self.big_skip and not self._latent_mean_enabled:
             residual = self.residual_filter_up(self.residual_filter_down(x))
             residual = self.norm_big_skip(residual, context=context)
 
@@ -722,14 +783,26 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         if self.pos_embed is not None:
             x = x + self.pos_embed[..., self._spatial_h_slice, self._spatial_w_slice]
 
-        # maybe clean the padding just in case
-
         x = self.pos_drop(x)
 
-        if self.remove_latent_global_mean:
-            x = x - x.mean(dim=(-2, -1), keepdim=True)
+        global_means: torch.Tensor | None = None
+        if self._latent_mean_enabled:
+            x = self.latent_norm(x, context=context)
+            global_means = x.mean(dim=(-2, -1), keepdim=True)
+            if self.training and self._global_mean_noise > 0:
+                global_means = (
+                    global_means
+                    + self._global_mean_noise * torch.randn_like(global_means)
+                )
+            if self.remove_latent_global_mean:
+                x = x - global_means
+            if self.big_skip:
+                residual = x
 
-        x = self._forward_features(x, context)
+        x = self._forward_features(x, context, global_means=global_means)
+
+        if self._add_latent_global_mean_to_output and global_means is not None:
+            x = x + global_means
 
         if self.big_skip:
             x = torch.cat((x, residual), dim=1)

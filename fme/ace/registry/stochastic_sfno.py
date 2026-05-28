@@ -249,6 +249,13 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
         remove_latent_global_mean: If True, remove the global mean (across
             the last two spatial dimensions) from each channel after the
             encoder and before the FNO blocks.
+        concat_latent_global_mean: When "first" or "every", concatenate the
+            per-channel global means into the MLP input of the first or every
+            FNO block, respectively.
+        add_latent_global_mean_to_output: If True, add the per-channel global
+            means back to the block outputs before the decoder.
+        global_mean_noise: Standard deviation of Gaussian noise added to the
+            computed global means during training only.
     """
 
     spectral_transform: Literal["sht"] = "sht"
@@ -289,6 +296,9 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     spectral_lora_alpha: float | None = None
     filter_preserves_global_mean: bool = False
     remove_latent_global_mean: bool = False
+    concat_latent_global_mean: Literal["none", "first", "every"] = "none"
+    add_latent_global_mean_to_output: bool = False
+    global_mean_noise: float = 0.0
 
     def __post_init__(self):
         if self.context_pos_embed_dim > 0 and self.pos_embed:
@@ -341,6 +351,9 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             spectral_lora_alpha=self.spectral_lora_alpha,
             filter_preserves_global_mean=self.filter_preserves_global_mean,
             remove_latent_global_mean=self.remove_latent_global_mean,
+            concat_latent_global_mean=self.concat_latent_global_mean,
+            add_latent_global_mean_to_output=self.add_latent_global_mean_to_output,
+            global_mean_noise=self.global_mean_noise,
         )
         sfno_net = get_lat_lon_sfnonet(
             params=sfno_config,
