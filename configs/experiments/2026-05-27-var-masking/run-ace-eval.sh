@@ -7,7 +7,7 @@ JOB_NAME="${2:-ace-eval-config-4deg-AIMIP}"
 JOB_GROUP="${3:-ace2-era5}"
 EXISTING_RESULTS_DATASET="${4:-01KRF9EXM8CH80BVF8TQXFHM3J}"  # this contains the checkpoint to use for inference
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
-CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
+CONFIG_PATH=$SCRIPT_PATH$CONFIG_FILENAME
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
