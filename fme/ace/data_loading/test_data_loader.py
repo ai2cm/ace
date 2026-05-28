@@ -1373,3 +1373,80 @@ def test_inference_gridded_data_dataset_info_not_localized(_global_properties):
         local_shape = inference.horizontal_coordinates.shape[-2:]
         assert local_shape != (N_LAT, N_LON)
         assert inference.dataset_info.img_shape == (N_LAT, N_LON)
+
+
+def test_gridded_data_with_variable_masking_concat(tmp_path):
+    dir_a = tmp_path / "a"
+    dir_a.mkdir()
+    _create_dataset_on_disk(
+        dir_a,
+        n_times=2,
+        in_variable_names=["foo", "bar"],
+        out_variable_names=["foo", "bar"],
+    )
+    dir_b = tmp_path / "b"
+    dir_b.mkdir()
+    _create_dataset_on_disk(
+        dir_b, n_times=2, in_variable_names=["foo"], out_variable_names=["foo"]
+    )
+    config = DataLoaderConfig(
+        dataset=ConcatDatasetConfig(
+            concat=[
+                XarrayDataConfig(data_path=str(dir_a)),
+                XarrayDataConfig(data_path=str(dir_b)),
+            ],
+            strict=False,
+        ),
+        batch_size=2,
+    )
+    requirements = DataRequirements(
+        names=["foo", "bar"],
+        n_timesteps=2,
+        allow_missing_variables=True,
+    )
+    data = get_gridded_data(config, train=False, requirements=requirements)
+    batch = next(iter(data.loader))
+    assert isinstance(batch, BatchData)
+    assert "foo" in batch.data
+    assert "bar" in batch.data
+    assert batch.data_mask is not None
+    assert "foo" in batch.data_mask
+    assert batch.data_mask["foo"].all()
+    assert "bar" in batch.data_mask
+    assert batch.data_mask["bar"].any()
+    assert not batch.data_mask["bar"].all()
+
+
+def test_inference_data_loader_excludes_variable_absent_from_all_samples(tmp_path):
+    _create_dataset_on_disk(
+        tmp_path, n_times=14, in_variable_names=["foo"], out_variable_names=["foo"]
+    )
+    config = InferenceDataLoaderConfig(
+        dataset=XarrayDataConfig(data_path=tmp_path, n_repeats=1),
+        start_indices=InferenceInitialConditionIndices(
+            first=0, n_initial_conditions=2, interval=5
+        ),
+        num_data_workers=0,
+    )
+    window_requirements = DataRequirements(
+        names=["foo", "nonexistent_var"],
+        n_timesteps=4,
+        allow_missing_variables=True,
+    )
+    initial_condition = PrognosticStateDataRequirements(names=["foo"], n_timesteps=1)
+    data = get_inference_data(
+        config,
+        total_forward_steps=6,
+        window_requirements=window_requirements,
+        initial_condition=initial_condition,
+    )
+    batch_data = next(iter(data.loader))
+    assert isinstance(batch_data, BatchData)
+    assert "foo" in batch_data.data
+    assert batch_data.data["foo"].shape == (2, 4, N_LAT, N_LON)
+    assert "nonexistent_var" in batch_data.data
+    assert batch_data.data["nonexistent_var"].shape == (2, 4, N_LAT, N_LON)
+    assert torch.isnan(batch_data.data["nonexistent_var"]).all()
+    assert batch_data.data_mask is not None
+    assert batch_data.data_mask["foo"].all()
+    assert not batch_data.data_mask["nonexistent_var"].any()

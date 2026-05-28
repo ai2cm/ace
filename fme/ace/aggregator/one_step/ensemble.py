@@ -1,6 +1,7 @@
 import abc
 import dataclasses
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from typing import Literal
 
 import torch
 import xarray as xr
@@ -14,6 +15,7 @@ from fme.core.typing_ import EnsembleTensorDict, TensorMapping
 
 from ..inference.build_context import MetricBuildContext, MetricNotSupportedError
 from ..inference.data import MetricBuildResult
+from .build_context import OneStepBuildContext, OneStepMetricBuildResult
 
 
 def get_gen_shape(gen_data: TensorMapping):
@@ -26,12 +28,16 @@ def get_one_step_ensemble_aggregator(
     target_time: int = 1,
     log_mean_maps: bool = True,
     metadata: Mapping[str, VariableMetadata] | None = None,
+    target: Literal["norm", "denorm"] = "denorm",
+    channel_mean_names: Sequence[str] | None = None,
 ) -> "SelectStepEnsembleAggregator":
     return SelectStepEnsembleAggregator(
         aggregator=_EnsembleAggregator(
             gridded_operations=gridded_operations,
             log_mean_maps=log_mean_maps,
             metadata=metadata,
+            target=target,
+            channel_mean_names=channel_mean_names,
         ),
         i_target_time=target_time,
     )
@@ -158,6 +164,8 @@ class _EnsembleAggregator:
         gridded_operations: GriddedOperations,
         log_mean_maps: bool = True,
         metadata: Mapping[str, VariableMetadata] | None = None,
+        target: Literal["norm", "denorm"] = "denorm",
+        channel_mean_names: Sequence[str] | None = None,
     ):
         """
         Args:
@@ -165,6 +173,15 @@ class _EnsembleAggregator:
             log_mean_maps: Whether to log mean maps.
             metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
+            target: Whether to compute metrics on normalized ("norm") or
+                denormalized ("denorm") data. Channel-mean metrics are only
+                logged when target is "norm", since averaging metrics across
+                variables with different physical units is not meaningful.
+            channel_mean_names: Names of variables to include in channel-mean
+                metrics. If None and target is "norm", the channel mean is
+                computed over all variables present in the data. Names that
+                are not present in the data raise KeyError. Ignored when
+                target is "denorm".
         """
         self._gridded_operations = gridded_operations
         self._n_batches = 0
@@ -173,6 +190,8 @@ class _EnsembleAggregator:
         self._log_mean_maps = log_mean_maps
         self._metadata = metadata
         self._diverging_metrics = {"ssr_bias"}
+        self._target = target
+        self._channel_mean_names = channel_mean_names
 
     def _get_variable_metrics(self, gen_data: TensorMapping):
         if self._variable_metrics is None:
@@ -194,6 +213,8 @@ class _EnsembleAggregator:
         self,
         target_data: EnsembleTensorDict,
         gen_data: EnsembleTensorDict,
+        target_data_norm: EnsembleTensorDict | None = None,
+        gen_data_norm: EnsembleTensorDict | None = None,
     ):
         """
         Record a batch of data.
@@ -201,7 +222,19 @@ class _EnsembleAggregator:
         Args:
             target_data: Target data, of shape [batch, ensemble, time, ...].
             gen_data: Generated data, of shape [batch, ensemble, time, ...].
+            target_data_norm: Normalized target data. Required when target is
+                "norm".
+            gen_data_norm: Normalized generated data. Required when target is
+                "norm".
         """
+        if self._target == "norm":
+            if target_data_norm is None or gen_data_norm is None:
+                raise ValueError(
+                    "target_data_norm and gen_data_norm must be provided "
+                    "when target is 'norm'."
+                )
+            target_data = target_data_norm
+            gen_data = gen_data_norm
         variable_metrics = self._get_variable_metrics(gen_data)
         for metric in variable_metrics:
             for name in gen_data:
@@ -240,6 +273,22 @@ class _EnsembleAggregator:
                         diverging=metric in self._diverging_metrics,
                         caption=self._get_caption(key),
                     )
+            if self._target == "norm":
+                all_keys = list(self._variable_metrics[metric].keys())
+                if self._channel_mean_names is None:
+                    names = all_keys
+                else:
+                    missing = [n for n in self._channel_mean_names if n not in all_keys]
+                    if missing:
+                        raise KeyError(
+                            f"channel_mean_names contains entries not present "
+                            f"in the recorded data: {missing}. Available: "
+                            f"{sorted(all_keys)}."
+                        )
+                    names = list(self._channel_mean_names)
+                if names:
+                    scalars = [data[f"{metric}/{key}"] for key in names]
+                    data[f"{metric}/channel_mean"] = sum(scalars) / len(scalars)
         return data
 
     @torch.no_grad()
@@ -287,6 +336,8 @@ class SelectStepEnsembleAggregator:
         self,
         target_data: EnsembleTensorDict,
         gen_data: EnsembleTensorDict,
+        target_data_norm: EnsembleTensorDict | None = None,
+        gen_data_norm: EnsembleTensorDict | None = None,
         i_time_start: int = 0,
     ):
         """
@@ -297,6 +348,8 @@ class SelectStepEnsembleAggregator:
         Args:
             target_data: Target data, of shape [batch, ensemble, time, ...].
             gen_data: Generated data, of shape [batch, ensemble, time, ...].
+            target_data_norm: Normalized target data, same shape as target_data.
+            gen_data_norm: Normalized generated data, same shape as gen_data.
             i_time_start: Global time index of the first time step in the batch.
         """
         n_timesteps = next(iter(target_data.values())).shape[2]
@@ -305,21 +358,26 @@ class SelectStepEnsembleAggregator:
             and self._i_target_time < i_time_start + n_timesteps
         ):
             batch_i_target_time = self._i_target_time - i_time_start
-            target_data = EnsembleTensorDict(
-                {
-                    key: value[:, :, batch_i_target_time : batch_i_target_time + 1, ...]
-                    for key, value in target_data.items()
-                }
-            )
-            gen_data = EnsembleTensorDict(
-                {
-                    key: value[:, :, batch_i_target_time : batch_i_target_time + 1, ...]
-                    for key, value in gen_data.items()
-                }
-            )
+
+            def _select(data: EnsembleTensorDict) -> EnsembleTensorDict:
+                return EnsembleTensorDict(
+                    {
+                        key: value[
+                            :, :, batch_i_target_time : batch_i_target_time + 1, ...
+                        ]
+                        for key, value in data.items()
+                    }
+                )
+
             self._aggregator.record_batch(
-                target_data,
-                gen_data,
+                target_data=_select(target_data),
+                gen_data=_select(gen_data),
+                target_data_norm=(
+                    _select(target_data_norm) if target_data_norm is not None else None
+                ),
+                gen_data_norm=(
+                    _select(gen_data_norm) if gen_data_norm is not None else None
+                ),
             )
 
     def get_logs(self, label: str):
@@ -337,15 +395,41 @@ class SelectStepEnsembleAggregator:
 
 @dataclasses.dataclass
 class EnsembleMetricConfig:
+    """
+    Configuration for an ensemble metric (CRPS, SSR bias, ensemble-mean RMSE)
+    at a specific forward step.
+
+    Attributes:
+        step: Forward step at which to compute the metric.
+        name: Name to use for the logged metric. Defaults to
+            ``ensemble_step_{step}`` for ``target="denorm"`` and
+            ``ensemble_step_{step}_norm`` for ``target="norm"``.
+        log_mean_maps: Whether to log per-variable mean maps.
+        enabled: Whether the metric is enabled.
+        strict: Whether to raise if the metric cannot be built.
+        target: Whether to compute metrics on normalized ("norm") or
+            denormalized ("denorm") data. ``channel_mean`` is only logged
+            when ``target="norm"``, since averaging metrics across variables
+            with different physical units is not meaningful.
+        channel_mean_names: Names of variables to include in the channel-mean
+            metric. If None, falls back to the aggregator-level value passed
+            via the build context, and finally to all variables present in
+            the data when that is also None. Names not present in the data
+            raise KeyError. Ignored when ``target="denorm"``.
+    """
+
     step: int = 20
     name: str | None = None
     log_mean_maps: bool = False
     enabled: bool = True
     strict: bool = False
+    target: Literal["norm", "denorm"] = "denorm"
+    channel_mean_names: list[str] | None = None
 
     def __post_init__(self):
         if self.name is None:
-            self.name = f"ensemble_step_{self.step}"
+            base = f"ensemble_step_{self.step}"
+            self.name = f"{base}_norm" if self.target == "norm" else base
 
     def get_name(self) -> str:
         return self.name  # type: ignore[return-value]
@@ -356,11 +440,74 @@ class EnsembleMetricConfig:
                 f"ensemble step {self.step} exceeds "
                 f"n_forward_steps={ctx.n_forward_steps}"
             )
+        is_norm = self.target == "norm"
         return MetricBuildResult(
             ensemble=get_one_step_ensemble_aggregator(
                 gridded_operations=ctx.ops,
                 target_time=self.step,
                 log_mean_maps=self.log_mean_maps,
                 metadata=ctx.variable_metadata,
+                target=self.target,
+                channel_mean_names=(
+                    (self.channel_mean_names or ctx.channel_mean_names)
+                    if is_norm
+                    else None
+                ),
+            )
+        )
+
+
+@dataclasses.dataclass
+class OneStepEnsembleMetricConfig:
+    """
+    Configuration for the one-step ensemble metric (CRPS, SSR bias,
+    ensemble-mean RMSE) at the first forward step.
+
+    Attributes:
+        name: Name to use for the logged metric. Defaults to ``ensemble``
+            for ``target="denorm"`` and ``ensemble_norm`` for
+            ``target="norm"``.
+        log_mean_maps: Whether to log per-variable mean maps.
+        enabled: Whether the metric is enabled.
+        strict: Whether to raise if the metric cannot be built.
+        target: Whether to compute metrics on normalized ("norm") or
+            denormalized ("denorm") data. ``channel_mean`` is only logged
+            when ``target="norm"``, since averaging metrics across variables
+            with different physical units is not meaningful.
+        channel_mean_names: Names of variables to include in the channel-mean
+            metric. If None, falls back to the aggregator-level value passed
+            via the build context, and finally to all variables present in
+            the data when that is also None. Names not present in the data
+            raise KeyError. Ignored when ``target="denorm"``.
+    """
+
+    name: str | None = None
+    log_mean_maps: bool = True
+    enabled: bool = True
+    strict: bool = False
+    target: Literal["norm", "denorm"] = "denorm"
+    channel_mean_names: list[str] | None = None
+
+    def __post_init__(self):
+        if self.name is None:
+            self.name = "ensemble_norm" if self.target == "norm" else "ensemble"
+
+    def get_name(self) -> str:
+        return self.name  # type: ignore[return-value]
+
+    def build(self, ctx: OneStepBuildContext) -> OneStepMetricBuildResult:
+        is_norm = self.target == "norm"
+        return OneStepMetricBuildResult(
+            ensemble=get_one_step_ensemble_aggregator(
+                gridded_operations=ctx.ops,
+                log_mean_maps=self.log_mean_maps,
+                target_time=1,
+                metadata=ctx.variable_metadata,
+                target=self.target,
+                channel_mean_names=(
+                    (self.channel_mean_names or ctx.channel_mean_names)
+                    if is_norm
+                    else None
+                ),
             )
         )

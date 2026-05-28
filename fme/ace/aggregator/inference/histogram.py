@@ -13,7 +13,7 @@ from .data import InferenceBatchData, MetricBuildResult, SubAggregator
 class HistogramMetricConfig:
     variables: list[str] | None = None
     name: str = "histogram"
-    enabled: bool = True
+    enabled: bool = False
     strict: bool = True
 
     def get_name(self) -> str:
