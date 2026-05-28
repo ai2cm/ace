@@ -37,7 +37,7 @@ data:
   strict_ensemble: false
 outputs:
   - name: "CONUS_winter"
-    save_vars: ["PRATEsfc", "TMP2m"]
+    save_vars: ["PRATEsfc", "air_temperature_at_two_meters"]
     n_ens: 2
     max_samples_per_gpu: 32
     time_range:
