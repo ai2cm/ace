@@ -15,6 +15,7 @@ from torch import nn
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
+from fme.ace.stepper.loss_schedule import LossSchedule
 from fme.ace.stepper.parameter_init import (
     ParameterInitializationConfig,
     ParameterInitializer,
@@ -23,11 +24,7 @@ from fme.ace.stepper.parameter_init import (
     WeightsAndHistoryLoader,
     null_weights_and_history,
 )
-from fme.ace.stepper.time_length_probabilities import (
-    TimeLength,
-    TimeLengthProbabilities,
-    TimeLengthSchedule,
-)
+from fme.ace.stepper.time_length_probabilities import TimeLength, TimeLengthSchedule
 from fme.core.coordinates import (
     NullPostProcessFn,
     SerializableVerticalCoordinate,
@@ -777,17 +774,6 @@ class CheckpointStepperConfig:
         return load_stepper_config(self.checkpoint_path)
 
 
-class EpochNotProvidedError(ValueError):
-    pass
-
-
-def probabilities_from_time_length(value: TimeLength) -> TimeLengthProbabilities:
-    if isinstance(value, TimeLengthProbabilities):
-        return value
-    else:
-        return TimeLengthProbabilities.from_constant(value)
-
-
 class Stepper:
     """
     Stepper class for selectable step configurations.
@@ -1526,15 +1512,10 @@ class TrainStepper(
         """
         self._stepper = stepper
         self._config = config
-
-        self._n_forward_steps_sampler: TimeLengthProbabilities | None = None
-        self._eval_n_forward_steps_sampler: TimeLengthProbabilities | None = None
-        self._n_forward_steps_schedule: TimeLengthSchedule | None = None
-        if config.n_forward_steps_schedule is not None:
-            self._n_forward_steps_schedule = config.n_forward_steps_schedule
-
-        self._is_training: bool = True
-        self._epoch: int | None = None  # to keep track of cached values
+        self._loss_schedule = LossSchedule(
+            n_forward_steps_schedule=config.n_forward_steps_schedule,
+            optimize_last_step_only=config.optimize_last_step_only,
+        )
 
         self._prognostic_names = self._stepper.prognostic_names
         self._derive_func = self._stepper.derive_func
@@ -1570,7 +1551,9 @@ class TrainStepper(
             The loss metrics, the generated data, the normalized generated data,
                 and the normalized batch data.
         """
-        self._init_for_epoch(data.epoch)
+        self._loss_schedule.init_for_epoch(data.epoch)
+        n_data_steps = data.time.shape[1] - self.n_ic_timesteps
+        self._loss_schedule.sample(n_data_steps)
         metrics: dict[str, float] = {}
         input_data = data.get_start(self._prognostic_names, self.n_ic_timesteps)
         target_data = self._stepper.get_forward_data(
@@ -1585,7 +1568,9 @@ class TrainStepper(
             target_data,
             optimization,
             metrics,
-            evaluate_all_steps=evaluate_all_steps,
+            n_forward_steps=self._loss_schedule.n_forward_steps(
+                n_data_steps, evaluate_all_steps
+            ),
         )
 
         regularizer_loss = self._stepper.get_regularizer_loss()
@@ -1621,11 +1606,9 @@ class TrainStepper(
         target_data: BatchData,
         optimization: OptimizationABC,
         metrics: dict[str, float],
-        evaluate_all_steps: bool = False,
+        n_forward_steps: int,
     ) -> tuple[list[EnsembleTensorDict], dict[str, ChannelLossInfo] | None]:
         input_data = data.get_start(self._prognostic_names, self.n_ic_timesteps)
-        # output from self.predict_paired does not include initial condition
-        n_forward_steps = data.time.shape[1] - self.n_ic_timesteps
         n_ensemble = self._config.n_ensemble
         input_batch_data = input_data.as_batch_data()
         if input_batch_data.labels != data.labels:
@@ -1645,34 +1628,10 @@ class TrainStepper(
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)
-        n_loss_steps = n_forward_steps
-        sampler = (
-            self._n_forward_steps_sampler
-            if self._is_training
-            else self._eval_n_forward_steps_sampler
-        )
-        if sampler is not None:
-            stochastic_n_forward_steps = sampler.sample()
-            if stochastic_n_forward_steps > n_forward_steps:
-                raise RuntimeError(
-                    "The number of forward steps to train on "
-                    f"({stochastic_n_forward_steps}) is greater than the number of "
-                    f"forward steps in the data ({n_forward_steps}), "
-                    "This is supposed to be ensured by the StepperConfig when train "
-                    "data requirements are retrieved, so this is a bug."
-                )
-            n_loss_steps = stochastic_n_forward_steps
-            if not evaluate_all_steps:
-                n_forward_steps = stochastic_n_forward_steps
         weighted_sums: dict[str, torch.Tensor] | None = None
         total_counts: dict[str, int] | None = None
-        last_optimization_window_step = n_loss_steps - 1
         for step in range(n_forward_steps):
-            within_optimization_window = step < n_loss_steps
-            if self._config.optimize_last_step_only:
-                optimize_step = step == last_optimization_window_step
-            else:
-                optimize_step = within_optimization_window
+            optimize_step = self._loss_schedule.step_is_optimized(step)
             if optimize_step:
                 context = contextlib.nullcontext()
             else:
@@ -1776,41 +1735,15 @@ class TrainStepper(
         """
         return self._loss_obj.effective_loss_scaling
 
-    def _init_for_epoch(self, epoch: int | None):
-        if (
-            epoch is None
-            and self._n_forward_steps_schedule is not None
-            and len(self._n_forward_steps_schedule.milestones) > 0
-        ):
-            raise EpochNotProvidedError(
-                "current configuration requires epoch to be provided "
-                "on BatchData during training"
-            )
-        if self._epoch == epoch:
-            return
-        if self._n_forward_steps_schedule is not None:
-            assert epoch is not None  # already checked, but needed for mypy
-            self._n_forward_steps_sampler = probabilities_from_time_length(
-                self._n_forward_steps_schedule.get_value(epoch)
-            )
-            self._eval_n_forward_steps_sampler = TimeLengthProbabilities(
-                outcomes=list(self._n_forward_steps_sampler.outcomes)
-            )
-        else:
-            self._n_forward_steps_sampler = None
-            self._eval_n_forward_steps_sampler = None
-        self._epoch = epoch
-
     def seed_eval(self, seed: int) -> None:
-        if self._eval_n_forward_steps_sampler is not None:
-            self._eval_n_forward_steps_sampler.seed_rng(seed)
+        self._loss_schedule.seed_eval(seed)
 
     def set_eval(self) -> None:
-        self._is_training = False
+        self._loss_schedule.set_eval()
         self._stepper.set_eval()
 
     def set_train(self) -> None:
-        self._is_training = True
+        self._loss_schedule.set_train()
         self._stepper.set_train()
 
 
