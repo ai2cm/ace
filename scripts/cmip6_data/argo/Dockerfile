@@ -30,4 +30,5 @@ RUN gcloud config set project vcm-ml
 # Copy all pipeline scripts into the container.
 # Build context should be scripts/cmip6_data/.
 COPY *.py /app/
+COPY migrations/ /app/migrations/
 WORKDIR /app
