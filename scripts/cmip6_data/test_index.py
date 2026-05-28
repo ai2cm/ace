@@ -5,7 +5,15 @@ import tempfile
 from pathlib import Path
 
 import pandas as pd
-from index import DatasetIndexRow, rows_to_dataframe, write_index, write_sidecar
+from index import (
+    DatasetIndexRow,
+    clear_failure_record,
+    failure_record_path,
+    rows_to_dataframe,
+    write_failure_record,
+    write_index,
+    write_sidecar,
+)
 
 
 def _example_row(status: str = "ok", suffix: str = "") -> DatasetIndexRow:
@@ -64,6 +72,57 @@ def test_write_sidecar_only_for_ok(tmp_path: Path):
     zarr_dir2.mkdir()
     write_sidecar(_example_row(status="failed"), str(zarr_dir2))
     assert not (zarr_dir2 / "metadata.json").exists()
+
+
+def test_failure_record_path_uses_failures_subdir():
+    row = _example_row(status="failed")
+    p = failure_record_path("gs://bucket/v2", row)
+    assert p == "gs://bucket/v2/failures/CanESM5__historical__r1i1p1f1.json"
+
+
+def test_write_failure_record_persists_non_ok(tmp_path: Path):
+    out = tmp_path / "v2"
+    out.mkdir()
+    # Skipped row → record written.
+    skipped = _example_row(status="skipped")
+    write_failure_record(skipped, str(out))
+    rec = out / "failures" / "CanESM5__historical__r1i1p1f1.json"
+    assert rec.exists()
+    payload = json.loads(rec.read_text())
+    assert payload["status"] == "skipped"
+    assert payload["skip_reason"] == "missing core variable ua"
+
+    # Failed row overwrites the same path with the new attempt.
+    failed = _example_row(status="failed")
+    write_failure_record(failed, str(out))
+    payload = json.loads(rec.read_text())
+    assert payload["status"] == "failed"
+
+
+def test_write_failure_record_noop_for_ok(tmp_path: Path):
+    out = tmp_path / "v2"
+    out.mkdir()
+    write_failure_record(_example_row(status="ok"), str(out))
+    assert not (out / "failures").exists()
+
+
+def test_clear_failure_record_removes_stale_entry(tmp_path: Path):
+    out = tmp_path / "v2"
+    out.mkdir()
+    # Seed a prior failure.
+    write_failure_record(_example_row(status="failed"), str(out))
+    rec = out / "failures" / "CanESM5__historical__r1i1p1f1.json"
+    assert rec.exists()
+    # New attempt succeeds — should remove the prior record.
+    clear_failure_record(_example_row(status="ok"), str(out))
+    assert not rec.exists()
+
+
+def test_clear_failure_record_noop_when_missing(tmp_path: Path):
+    out = tmp_path / "v2"
+    out.mkdir()
+    # No prior record present — must not raise.
+    clear_failure_record(_example_row(status="ok"), str(out))
 
 
 if __name__ == "__main__":

@@ -132,9 +132,54 @@ def write_sidecar(row: DatasetIndexRow, zarr_path: str) -> None:
     logging.info("Wrote sidecar %s", sidecar_path)
 
 
+def failure_record_path(output_directory: str, row: DatasetIndexRow) -> str:
+    """Path to a per-dataset failure record under
+    ``<output_directory>/failures/``. Kept separate from the per-zarr
+    ``metadata.json`` sidecar so the presence of an ok sidecar remains
+    the single source of truth for "completed". The failure record is
+    the forensic trail for runs that exited without producing a zarr —
+    skipped or failed — so we can tell after the fact why a dataset is
+    absent from the archive (lnlqt taught us this is otherwise lost
+    once pods get GC'd).
+    """
+    root = output_directory.rstrip("/")
+    fname = f"{row.source_id}__{row.experiment}__{row.variant_label}.json"
+    return f"{root}/failures/{fname}"
+
+
+def write_failure_record(row: DatasetIndexRow, output_directory: str) -> None:
+    """Persist a forensic record for a ``status != "ok"`` dataset.
+
+    No-op for ok rows (those go through ``write_sidecar``). Idempotent
+    — re-running on a dataset just overwrites the record with the
+    latest attempt's row.
+    """
+    if row.status == "ok":
+        return
+    path = failure_record_path(output_directory, row)
+    with fsspec.open(path, "w") as f:
+        json.dump(dataclasses.asdict(row), f, indent=2, sort_keys=True)
+    logging.info("Wrote failure record %s (status=%s)", path, row.status)
+
+
+def clear_failure_record(row: DatasetIndexRow, output_directory: str) -> None:
+    """Remove any prior failure record for this dataset. Called when an
+    attempt succeeds (status=ok) so we don't leave a stale failure
+    record next to a now-good zarr.
+    """
+    path = failure_record_path(output_directory, row)
+    fs, rel = fsspec.core.url_to_fs(path)
+    if fs.exists(rel):
+        fs.rm(rel)
+        logging.info("Removed stale failure record %s", path)
+
+
 __all__ = [
     "DatasetIndexRow",
+    "clear_failure_record",
+    "failure_record_path",
     "rows_to_dataframe",
+    "write_failure_record",
     "write_index",
     "write_sidecar",
 ]

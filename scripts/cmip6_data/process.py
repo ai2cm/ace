@@ -56,7 +56,13 @@ from config import (  # noqa: E402
 )
 from external_forcings import attach_external_forcings  # noqa: E402
 from grid import make_target_grid  # noqa: E402
-from index import DatasetIndexRow, write_index, write_sidecar  # noqa: E402
+from index import (  # noqa: E402
+    DatasetIndexRow,
+    clear_failure_record,
+    write_failure_record,
+    write_index,
+    write_sidecar,
+)
 from processing import (  # noqa: E402
     UNSTRUCTURED_METHOD,
     DuplicateTimestampsError,
@@ -916,6 +922,10 @@ def run(
         rows.append(row)
         if row.status == "ok":
             write_sidecar(row, zarr_path)
+            # If a prior attempt left a failure record, clear it now.
+            clear_failure_record(row, config.output_directory)
+        else:
+            write_failure_record(row, config.output_directory)
 
     return rows
 
