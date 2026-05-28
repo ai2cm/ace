@@ -295,9 +295,6 @@ class SharedGlobalMeanRemovalConfig:
     )
     append_as_input: bool = False
 
-    def get_n_extra_input_channels(self, in_names: list[str]) -> int:
-        return 1 if self.append_as_input else 0
-
     def validate_names(self, in_names: list[str], out_names: list[str]) -> None:
         if self.reference_field not in in_names:
             raise ValueError(
@@ -353,9 +350,6 @@ class PerChannelGlobalMeanRemovalConfig:
 
     def _resolve_names(self, in_names: list[str]) -> list[str]:
         return self.field_names if self.field_names is not None else list(in_names)
-
-    def get_n_extra_input_channels(self, in_names: list[str]) -> int:
-        return len(self._resolve_names(in_names)) if self.append_as_input else 0
 
     def validate_names(self, in_names: list[str], out_names: list[str]) -> None:
         if self.field_names is not None:
