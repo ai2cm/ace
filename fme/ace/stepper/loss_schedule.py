@@ -35,7 +35,6 @@ class LossSchedule:
         self._eval_sampler: TimeLengthProbabilities | None = None
         self._is_training: bool = True
         self._epoch: int | None = None
-        self._n_loss_steps: int | None = None
 
     def init_for_epoch(self, epoch: int | None) -> None:
         if (
@@ -62,12 +61,8 @@ class LossSchedule:
             self._eval_sampler = None
         self._epoch = epoch
 
-    def sample(self, n_data_steps: int) -> None:
-        """Sample the number of loss steps for the current batch.
-
-        Must be called once per batch before querying ``step_is_optimized``
-        or ``n_forward_steps``.
-        """
+    def sample(self, n_data_steps: int) -> int:
+        """Sample and return the number of loss steps for the current batch."""
         sampler = self._train_sampler if self._is_training else self._eval_sampler
         if sampler is not None:
             sampled = sampler.sample()
@@ -79,27 +74,22 @@ class LossSchedule:
                     "This is supposed to be ensured by the StepperConfig when train "
                     "data requirements are retrieved, so this is a bug."
                 )
-            self._n_loss_steps = sampled
+            return sampled
         else:
-            self._n_loss_steps = n_data_steps
+            return n_data_steps
 
-    @property
-    def n_loss_steps(self) -> int:
-        if self._n_loss_steps is None:
-            raise RuntimeError("Must call sample() before accessing n_loss_steps")
-        return self._n_loss_steps
-
-    def n_forward_steps(self, n_data_steps: int, evaluate_all_steps: bool) -> int:
+    def n_forward_steps(
+        self, n_data_steps: int, n_loss_steps: int, evaluate_all_steps: bool
+    ) -> int:
         """Number of forward steps to iterate in the rollout loop."""
         if evaluate_all_steps:
             return n_data_steps
-        return self.n_loss_steps
+        return n_loss_steps
 
-    def step_is_optimized(self, step: int) -> bool:
-        n = self.n_loss_steps
+    def step_is_optimized(self, step: int, n_loss_steps: int) -> bool:
         if self._optimize_last_step_only:
-            return step == n - 1
-        return step < n
+            return step == n_loss_steps - 1
+        return step < n_loss_steps
 
     @property
     def has_sampler(self) -> bool:

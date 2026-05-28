@@ -15,8 +15,7 @@ def test_no_schedule_no_sampler():
     )
     schedule.init_for_epoch(0)
     assert not schedule.has_sampler
-    schedule.sample(5)
-    assert schedule.n_loss_steps == 5
+    assert schedule.sample(5) == 5
 
 
 def test_constant_schedule_creates_sampler():
@@ -24,8 +23,7 @@ def test_constant_schedule_creates_sampler():
     schedule = LossSchedule(n_forward_steps_schedule=ts, optimize_last_step_only=False)
     schedule.init_for_epoch(0)
     assert schedule.has_sampler
-    schedule.sample(5)
-    assert schedule.n_loss_steps == 3
+    assert schedule.sample(5) == 3
 
 
 def test_epoch_schedule_updates_on_epoch_change():
@@ -35,12 +33,10 @@ def test_epoch_schedule_updates_on_epoch_change():
     )
     schedule = LossSchedule(n_forward_steps_schedule=ts, optimize_last_step_only=False)
     schedule.init_for_epoch(0)
-    schedule.sample(5)
-    assert schedule.n_loss_steps == 2
+    assert schedule.sample(5) == 2
 
     schedule.init_for_epoch(1)
-    schedule.sample(5)
-    assert schedule.n_loss_steps == 4
+    assert schedule.sample(5) == 4
 
 
 def test_epoch_not_provided_with_milestones():
@@ -71,28 +67,24 @@ def test_step_is_optimized_all_steps():
     schedule = LossSchedule(
         n_forward_steps_schedule=None, optimize_last_step_only=False
     )
-    schedule.init_for_epoch(0)
-    schedule.sample(4)
-    assert all(schedule.step_is_optimized(i) for i in range(4))
-    assert not schedule.step_is_optimized(4)
+    assert all(schedule.step_is_optimized(i, n_loss_steps=4) for i in range(4))
+    assert not schedule.step_is_optimized(4, n_loss_steps=4)
 
 
 def test_step_is_optimized_last_only():
     schedule = LossSchedule(n_forward_steps_schedule=None, optimize_last_step_only=True)
-    schedule.init_for_epoch(0)
-    schedule.sample(4)
-    assert not schedule.step_is_optimized(0)
-    assert not schedule.step_is_optimized(2)
-    assert schedule.step_is_optimized(3)
+    assert not schedule.step_is_optimized(0, n_loss_steps=4)
+    assert not schedule.step_is_optimized(2, n_loss_steps=4)
+    assert schedule.step_is_optimized(3, n_loss_steps=4)
 
 
 def test_n_forward_steps_evaluate_all():
     ts = TimeLengthSchedule.from_constant(3)
     schedule = LossSchedule(n_forward_steps_schedule=ts, optimize_last_step_only=False)
     schedule.init_for_epoch(0)
-    schedule.sample(5)
-    assert schedule.n_forward_steps(5, evaluate_all_steps=True) == 5
-    assert schedule.n_forward_steps(5, evaluate_all_steps=False) == 3
+    n_loss_steps = schedule.sample(5)
+    assert schedule.n_forward_steps(5, n_loss_steps, evaluate_all_steps=True) == 5
+    assert schedule.n_forward_steps(5, n_loss_steps, evaluate_all_steps=False) == 3
 
 
 def test_n_forward_steps_no_sampler():
@@ -100,9 +92,9 @@ def test_n_forward_steps_no_sampler():
         n_forward_steps_schedule=None, optimize_last_step_only=False
     )
     schedule.init_for_epoch(0)
-    schedule.sample(5)
-    assert schedule.n_forward_steps(5, evaluate_all_steps=True) == 5
-    assert schedule.n_forward_steps(5, evaluate_all_steps=False) == 5
+    n_loss_steps = schedule.sample(5)
+    assert schedule.n_forward_steps(5, n_loss_steps, evaluate_all_steps=True) == 5
+    assert schedule.n_forward_steps(5, n_loss_steps, evaluate_all_steps=False) == 5
 
 
 def test_train_eval_samplers_are_independent():
@@ -129,12 +121,3 @@ def test_train_eval_samplers_are_independent():
     schedule._train_sampler.seed_rng(42)
     train_after = [schedule._train_sampler.sample() for _ in range(20)]
     assert train_before == train_after
-
-
-def test_n_loss_steps_raises_before_sample():
-    schedule = LossSchedule(
-        n_forward_steps_schedule=None, optimize_last_step_only=False
-    )
-    schedule.init_for_epoch(0)
-    with pytest.raises(RuntimeError, match="Must call sample"):
-        _ = schedule.n_loss_steps

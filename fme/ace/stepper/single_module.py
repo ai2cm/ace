@@ -1568,7 +1568,7 @@ class TrainStepper(
         """
         self._loss_schedule.init_for_epoch(data.epoch)
         n_data_steps = data.time.shape[1] - self.n_ic_timesteps
-        self._loss_schedule.sample(n_data_steps)
+        n_loss_steps = self._loss_schedule.sample(n_data_steps)
         metrics: dict[str, float] = {}
         target_data = self._stepper.get_forward_data(
             data, compute_derived_variables=False
@@ -1582,8 +1582,9 @@ class TrainStepper(
             optimization,
             metrics,
             n_forward_steps=self._loss_schedule.n_forward_steps(
-                n_data_steps, evaluate_all_steps
+                n_data_steps, n_loss_steps, evaluate_all_steps
             ),
+            n_loss_steps=n_loss_steps,
         )
 
         regularizer_loss = self._stepper.get_regularizer_loss()
@@ -1619,6 +1620,7 @@ class TrainStepper(
         optimization: OptimizationABC,
         metrics: dict[str, float],
         n_forward_steps: int,
+        n_loss_steps: int,
     ) -> tuple[list[EnsembleTensorDict], dict[str, ChannelLossInfo] | None]:
         input_data = data.get_start(self._prognostic_names, self.n_ic_timesteps)
         n_ensemble = self._config.n_ensemble
@@ -1643,7 +1645,7 @@ class TrainStepper(
         weighted_sums: dict[str, torch.Tensor] = {}
         total_counts: dict[str, int] = {}
         for step in range(n_forward_steps):
-            optimize_step = self._loss_schedule.step_is_optimized(step)
+            optimize_step = self._loss_schedule.step_is_optimized(step, n_loss_steps)
             grad_context = (
                 contextlib.nullcontext() if optimize_step else torch.no_grad()
             )
