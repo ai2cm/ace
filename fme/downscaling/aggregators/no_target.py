@@ -321,8 +321,8 @@ class _MapAggregator:
         )
 
         if name in self._variable_metadata:
-            caption_name = self._variable_metadata[name].long_name
-            units = self._variable_metadata[name].units
+            caption_name = self._variable_metadata[name].display_long_name(name)
+            units = self._variable_metadata[name].display_units()
         else:
             caption_name, units = name, "unknown_units"
         caption = _caption.format(name=caption_name, units=units)

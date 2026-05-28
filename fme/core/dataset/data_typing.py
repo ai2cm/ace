@@ -17,3 +17,9 @@ class VariableMetadata(NamedTuple):
         if self.long_name is not None:
             result["long_name"] = self.long_name
         return result
+
+    def display_long_name(self, fallback: str) -> str:
+        return self.long_name if self.long_name is not None else fallback
+
+    def display_units(self, fallback: str = "unknown_units") -> str:
+        return self.units if self.units is not None else fallback

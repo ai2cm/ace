@@ -256,8 +256,8 @@ class _EnsembleAggregator:
 
     def _get_caption(self, name: str) -> str:
         if self._metadata is not None and name in self._metadata:
-            caption_name = self._metadata[name].long_name
-            units = self._metadata[name].units
+            caption_name = self._metadata[name].display_long_name(name)
+            units = self._metadata[name].display_units()
         else:
             caption_name, units = name, "unknown_units"
         caption = f"{caption_name} ({units})"
