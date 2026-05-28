@@ -8,8 +8,10 @@ recent production failures.
 import json
 from pathlib import Path
 
+import pandas as pd
+from config import ProcessConfig
 from index import DatasetIndexRow, write_sidecar
-from process import _scan_all_sidecars
+from process import _scan_all_sidecars, select_datasets
 
 
 def _ok_row(source_id: str = "CanESM5") -> DatasetIndexRow:
@@ -71,6 +73,89 @@ def test_scan_all_sidecars_skips_external_forcings(tmp_path: Path):
 
 def test_scan_all_sidecars_empty_directory(tmp_path: Path):
     assert _scan_all_sidecars(str(tmp_path)) == []
+
+
+# ---------------------------------------------------------------------------
+# Planning-time selection: drop tasks that lack enough core day variables
+# so we don't burn a pod per dead-on-arrival dataset (lnlqt / 4tbbk lesson).
+# ---------------------------------------------------------------------------
+
+
+def _inventory_row(
+    source_id: str,
+    experiment: str,
+    member: str,
+    variable: str,
+    table: str = "day",
+) -> dict:
+    parts = member.lstrip("r").split("i")
+    r = int(parts[0])
+    rest = parts[1].split("p")
+    i = int(rest[0])
+    rest2 = rest[1].split("f")
+    p = int(rest2[0])
+    f = int(rest2[1])
+    return {
+        "table_id": table,
+        "source_id": source_id,
+        "experiment_id": experiment,
+        "member_id": member,
+        "variant_r": r,
+        "variant_i": i,
+        "variant_p": p,
+        "variant_f": f,
+        "variable_id": variable,
+        "grid_label": "gn",
+        "zstore": f"gs://x/{source_id}/{experiment}/{member}/{table}/{variable}",
+    }
+
+
+def _make_config(
+    max_core_missing: int = 3, core_vars: list[str] | None = None
+) -> ProcessConfig:
+    cfg = ProcessConfig(inventory_path="x", output_directory="y")
+    cfg.defaults.max_core_missing = max_core_missing
+    if core_vars is not None:
+        cfg.defaults.core_variables = core_vars
+    cfg.selection.experiments = ["historical"]
+    cfg.selection.require_i = None
+    cfg.selection.max_members_per_f = None
+    return cfg
+
+
+def test_select_datasets_drops_tasks_missing_too_many_core_vars():
+    # 4 core variables required; max_core_missing=1 → datasets with
+    # fewer than 3 cores are dropped at planning time.
+    core_vars = ["ua", "va", "hus", "zg"]
+    rows = []
+    # "good": all 4 core vars → kept
+    for v in core_vars:
+        rows.append(_inventory_row("Good", "historical", "r1i1p1f1", v))
+    # "bad": only 1 core var → 3 missing > 1 → dropped
+    rows.append(_inventory_row("Bad", "historical", "r1i1p1f1", "zg"))
+    # "borderline": 3 of 4 cores → 1 missing == max_core_missing → kept
+    for v in ["ua", "va", "hus"]:
+        rows.append(_inventory_row("Borderline", "historical", "r1i1p1f1", v))
+
+    inventory = pd.DataFrame(rows)
+    cfg = _make_config(max_core_missing=1, core_vars=core_vars)
+    tasks = select_datasets(inventory, cfg)
+    surviving_sources = sorted(t.source_id for t in tasks)
+    assert surviving_sources == ["Borderline", "Good"]
+
+
+def test_select_datasets_keeps_when_within_threshold():
+    # Default max_core_missing=3 → a dataset with 5 of 8 cores passes
+    # (3 missing == max_core_missing, not > max_core_missing).
+    core_vars = ["ua", "va", "hus", "zg", "tas", "huss", "psl", "pr"]
+    rows = [
+        _inventory_row("OnlyFive", "historical", "r1i1p1f1", v) for v in core_vars[:5]
+    ]
+    inventory = pd.DataFrame(rows)
+    cfg = _make_config(max_core_missing=3, core_vars=core_vars)
+    tasks = select_datasets(inventory, cfg)
+    assert len(tasks) == 1
+    assert tasks[0].source_id == "OnlyFive"
 
 
 if __name__ == "__main__":

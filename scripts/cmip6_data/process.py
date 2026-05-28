@@ -271,7 +271,36 @@ def select_datasets(
         )
 
     tasks.sort(key=lambda t: (t.source_id, t.experiment, t.variant_label))
-    return tasks
+
+    # Drop tasks whose day-table doesn't carry enough core variables.
+    # process_one would skip these immediately anyway (see "missing
+    # N > max_core_missing core variables" in process_one), so filtering
+    # them here avoids dispatching a pod per dead-on-arrival task — the
+    # 4tbbk run learned this the expensive way (320 pods burned on
+    # Pangeo datasets that lack ua/va/hus/zg). ESGF backfill, when
+    # configured, still picks up these datasets via its own inventory.
+    viable: list[DatasetTask] = []
+    filtered: dict[tuple[str, str], int] = {}
+    for t in tasks:
+        rcfg = config.resolve(t.source_id, t.experiment, t.variant_label)
+        day_zs = t.zstores.get("day", {})
+        n_missing = sum(1 for v in rcfg.core_variables if v not in day_zs)
+        if n_missing > rcfg.max_core_missing:
+            filtered[(t.source_id, t.experiment)] = (
+                filtered.get((t.source_id, t.experiment), 0) + 1
+            )
+        else:
+            viable.append(t)
+    if filtered:
+        total = sum(filtered.values())
+        logging.info(
+            "Filtered %d tasks at selection: insufficient core day "
+            "variables on Pangeo (would skip in-pod otherwise).",
+            total,
+        )
+        for (sid, exp), n in sorted(filtered.items(), key=lambda x: -x[1])[:10]:
+            logging.info("  %s %s: %d", sid, exp, n)
+    return viable
 
 
 # ---------------------------------------------------------------------------
