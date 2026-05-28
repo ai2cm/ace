@@ -39,13 +39,12 @@ def _save_netcdf(
         if len(dim_sizes) > 0:
             data = data.astype(np.float32)
         item_metadata = variable_metadata[name]
-        if item_metadata is None:
-            attrs = {}
-        else:
-            attrs = {
-                "units": item_metadata.units,
-                "long_name": item_metadata.long_name,
-            }
+        attrs: dict[str, str] = {}
+        if item_metadata is not None:
+            if item_metadata.units is not None:
+                attrs["units"] = item_metadata.units
+            if item_metadata.long_name is not None:
+                attrs["long_name"] = item_metadata.long_name
         data_vars[name] = xr.DataArray(data, dims=list(dim_sizes), attrs=attrs)
     coords = {
         dim_name: xr.DataArray(
@@ -74,6 +73,14 @@ def _save_netcdf(
         pytest.param(
             {"bar": VariableMetadata("km", "bar_long_name")},
             id="one_var_metadata",
+        ),
+        pytest.param(
+            {"bar": VariableMetadata("km", None)},
+            id="one_var_units_only",
+        ),
+        pytest.param(
+            {"bar": VariableMetadata(None, "bar_long_name")},
+            id="one_var_long_name_only",
         ),
         pytest.param(
             {"foo": VariableMetadata("m", "foo_long_name"), "bar": None},
@@ -109,7 +116,7 @@ def test_metadata(tmp_path, variable_metadata, n_ensemble_members):
     target_metadata = {
         name: variable_metadata[name]
         if variable_metadata[name] is not None
-        else VariableMetadata(units="", long_name="")
+        else VariableMetadata()
         for name in variable_metadata
     }
     assert data.variable_metadata == target_metadata  # type: ignore

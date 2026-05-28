@@ -716,13 +716,11 @@ class XarrayDataset(DatasetABC):
         for name in self._names:
             if name in StaticDerivedData.names:
                 result[name] = StaticDerivedData.metadata[name]
-            elif hasattr(ds[name], "units") and hasattr(ds[name], "long_name"):
-                result[name] = VariableMetadata(
-                    units=ds[name].units,
-                    long_name=ds[name].long_name,
-                )
             else:
-                result[name] = VariableMetadata(units="", long_name="")
+                result[name] = VariableMetadata(
+                    units=getattr(ds[name], "units", None),
+                    long_name=getattr(ds[name], "long_name", None),
+                )
         self._variable_metadata = result
 
     def _get_files_stats(

@@ -1,3 +1,6 @@
-from collections import namedtuple
+from typing import NamedTuple
 
-VariableMetadata = namedtuple("VariableMetadata", ["units", "long_name"])
+
+class VariableMetadata(NamedTuple):
+    units: str | None = None
+    long_name: str | None = None
