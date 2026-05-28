@@ -23,8 +23,8 @@ declare -A MODELS=( \
     # [no-random-co2-energy-conserving-rs1]="01KH4SDT1Q5246GZ307W8AW4M3" \
     # [full-rs0]="01KHKJ02SQM8S8T4B6030F94CV" \
     # [full-rs1]="01KHJ5EQ04XTFG46QCKX3TTAHF" \
-    [full-energy-conserving-rs0]="01KHJ5F1M6YKVZESPZAAVVD6G8" \
-    # [full-energy-conserving-rs1]="01KHCXABVNA3TJW0ZT5F4YDDQT" \
+    # [full-energy-conserving-rs0]="01KHJ5F1M6YKVZESPZAAVVD6G8" \
+    [full-energy-conserving-rs1]="01KHCXABVNA3TJW0ZT5F4YDDQT" \
 )
 
 SPIN_UP_EXPERIMENT_DIR="/results/spin-up"
@@ -80,11 +80,9 @@ for name in "${!MODELS[@]}"; do
         --description 'Run ACE AMIP inference' \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
         --workspace ai2/ace \
-        --priority high \
-        --not-preemptible \
-        --cluster ai2/jupiter \
+        --priority urgent \
+        --preemptible \
         --cluster ai2/titan \
-        --cluster ai2/ceres \
         --env WANDB_USERNAME=$WANDB_USERNAME \
         --env WANDB_NAME=$job_name \
         --env WANDB_JOB_TYPE=inference \
@@ -96,7 +94,6 @@ for name in "${!MODELS[@]}"; do
         --gpus 1 \
         --shared-memory 20GiB \
         --weka climate-default:/climate-default \
-        --budget ai2/climate \
         --system-python \
         --install "pip install --no-deps ." \
         -- /bin/bash -c "\
