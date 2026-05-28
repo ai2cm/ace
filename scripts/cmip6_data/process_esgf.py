@@ -78,10 +78,8 @@ from processing import (  # noqa: E402
     apply_time_subset,
     clamp_static_fractions,
     compute_below_surface_mask,
-    compute_derived_layer_T,
     compute_total_water_path,
     derive_ocean_and_correct_sea_ice,
-    fill_derived_layer_T,
     finalize_surface_and_ocean_variable,
     flatten_plev_variables,
     harmonize_temperature_to_kelvin,
@@ -611,22 +609,14 @@ def process_one_esgf(
         mask, row.mask_source = compute_below_surface_mask(day_regridded, orog)
         _stage("below_surface_mask", stage_t0)
 
-        # 6. Derived layer-mean T from un-filled zg + hus (only when
-        # both are present).
-        have_derived_T = "zg" in day_regridded and "hus" in day_regridded
-        if have_derived_T:
-            day_regridded = compute_derived_layer_T(day_regridded)
-
-        # 7. Nearest-above fill.
+        # 6. Nearest-above fill for the level-valued 3D state.
         if mask is not None:
             for v in ("ua", "va", "hus", "zg"):
                 if v in day_regridded:
                     day_regridded[v] = nearest_above_fill(day_regridded[v], mask)
             day_regridded = day_regridded.assign(below_surface_mask=mask)
-            if have_derived_T:
-                day_regridded = fill_derived_layer_T(day_regridded, mask)
 
-        # 8. Surface-and-ocean variables (surface T, sea-ice, ocean) — see
+        # 7. Surface-and-ocean variables (surface T, sea-ice, ocean) — see
         # the matching block in process.py for the design. ESGF picks
         # the source by table/var pair and downloads via
         # ``_download_and_regrid_variable``; the post-regrid logic is

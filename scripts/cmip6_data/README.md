@@ -110,11 +110,10 @@ output — see **Plev flattening** below): `ua`, `va`, `hus`, `zg`
 Notably **absent from core**:
 
 - `ta` (air temperature on `plev`) — Pangeo daily coverage is essentially
-  nil (3 models). Instead we derive 7 layer-mean temperatures from `zg` +
-  `hus` via the hypsometric equation at ingest time and store them as
-  `ta_derived_layer_{lo}_{hi}` (e.g. `ta_derived_layer_1000_850`). This
-  is a proxy, not a true temperature; it's treated as derived throughout
-  and labelled as such in the zarr.
+  nil (3 models). Earlier schema versions carried 7 hypsometric layer-mean
+  temperatures derived from `zg + hus` (``ta_derived_layer_{lo}_{hi}``);
+  these were dropped at schema 0.3.0. Consumers that need a layer-mean T
+  can derive it on the fly from the published `zg` and `hus` levels.
 - `ps` (surface pressure) — not published on the standard `day` table by
   any CMIP6 model. It *is* available on `CFday` for ~5,600 models and is
   ingested when present (output `PRESsfc`). For models that publish
@@ -471,56 +470,12 @@ Storage at 338 MB / dataset-year:
 
 ### Derived variables
 
-**Layer-mean temperature `ta_derived_layer_{lo}_{hi}`.** Computed at
-ingest from `zg` and `hus` using the hypsometric equation under
-hydrostatic balance — an excellent approximation for daily means at
-4°×4°:
-
-```
-T_v^{layer}  = g · (z_hi - z_lo) / (R_d · ln(p_lo / p_hi))
-q^{layer}    = (q_lo + q_hi) / 2
-T^{layer}    = T_v^{layer} / (1 + 0.608 · q^{layer})
-```
-
-with `R_d = 287.05 J/kg/K`, `g = 9.80665 m/s²`. All inputs are
-co-located on `plev8` levels, so the computation is just differences
-and averages along the `plev` dimension — no interpolation. The 7
-layers are named by their bounding pressures:
-`ta_derived_layer_1000_850`, `ta_derived_layer_850_700`, ...,
-`ta_derived_layer_50_10`. Expected error from applying an
-instantaneous relation to daily means is <<1 K at these scales; far
-below inter-model spread.
-
-Variables are named `ta_derived_layer_*` throughout (never `ta`) to
-keep it unambiguous that these are proxies, not native CMIP6
-temperatures.
-
-**Vertical-grid note (important for downstream masking).** The derived
-temperatures live on **layers between adjacent plev levels**, so there
-are only 7 of them when plev has 8 levels. This is a different
-vertical grid from `ua`/`va`/`hus`/`zg`, which are on the 8 plev
-levels themselves. The shape of each layer variable is
-`(time, lat, lon)`.
-
-**Masking derived T.** The stored per-level
-`below_surface_mask{hPa}(time, lat, lon)` variables (see **Plev
-flattening**) give the mask at each pressure level. To mask a derived
-layer, combine its two bounding levels — a layer is invalid wherever
-either bounding level is below surface:
-
-```python
-import xarray as xr
-
-ds = xr.open_zarr(<path-to-dataset.zarr>, consolidated=True)
-layer_mask = (ds["below_surface_mask1000"] | ds["below_surface_mask850"]).astype(bool)
-ta_valid = ds["ta_derived_layer_1000_850"].where(~layer_mask)
-```
-
-During ingest we apply a **cascading nearest-above fill** to the
-derived T layers (top-down: each masked layer inherits the layer
-above), so the stored values are NaN-free and physically plausible
-even in below-surface columns. Downstream code that wants to ignore
-filled cells should apply the layer mask recipe above.
+`total_water_path` is the only currently-emitted derived variable —
+`water_vapor_path` (`Eday.prw`) + `clwvi`, emitted when both are
+present. Previously the pipeline also derived 7 hypsometric layer-mean
+temperatures (`ta_derived_layer_*`); these were dropped at schema
+0.3.0 since consumers that need a layer-mean T can compute it on the
+fly from the published `zg` and `hus` plev levels.
 
 ### Vertical & horizontal grid
 
@@ -612,11 +567,6 @@ pressure-named 2D variables before writing:
 **On-level variables** (`plev` dim) use `{var}{hPa}`:
 - `ua` → `ua1000`, `ua850`, `ua700`, `ua500`, `ua250`, `ua100`, `ua50`, `ua10`
 - Same pattern for `va`, `hus`, `zg`, and `below_surface_mask`
-
-**Derived layer variables** (`plev_layer` dim) use
-`{var}_{lo_hPa}_{hi_hPa}`:
-- `ta_derived_layer` → `ta_derived_layer_1000_850`,
-  `ta_derived_layer_850_700`, ..., `ta_derived_layer_50_10`
 
 This makes all stored variables uniformly `(time, lat, lon)` or
 `(lat, lon)`, which is compatible with the fme data loader. The
@@ -736,30 +686,29 @@ Driven by the YAML config + the inventory. For each selected
    unstructured ocean grids like AWI's FESOM).
 5. Below-surface nearest-above fill + emit time-varying
    `below_surface_mask(time, plev, lat, lon)` (uint8).
-6. Derived `ta_derived_layer_{0..6}` from `zg` + `hus`.
-7. Causal-previous-month / -previous-year forcings onto the daily
+6. Causal-previous-month / -previous-year forcings onto the daily
    axis; attach static fields (`sftlf` → `land_fraction` rescaled to
    [0, 1]).
-8. Time-subset per config.
-9. Derive `total_water_path` (if `Eday.prw` + `clwvi` both present)
+7. Time-subset per config.
+8. Derive `total_water_path` (if `Eday.prw` + `clwvi` both present)
    and `{simon,siday}_ocean_fraction` (with the land+ice>1 excess
    pushed back into sea-ice so the triple sums to 1 exactly).
-10. Attach external forcings (`input4mips_*`, `luh2_forest`) from the
+9. Attach external forcings (`input4mips_*`, `luh2_forest`) from the
     per-scenario zarr under `external_forcings_directory`.
-11. Materialize the dataset (xesmf isn't thread-safe; load once
+10. Materialize the dataset (xesmf isn't thread-safe; load once
     sequentially).
-12. Flatten `plev` dimension into pressure-named 2D variables (see
+11. Flatten `plev` dimension into pressure-named 2D variables (see
     **Plev flattening**).
-13. Harmonize all temperature variables to K via
+12. Harmonize all temperature variables to K via
     `harmonize_temperature_to_kelvin` (CMIP6 `tos`/`tob`/`sitemptop`
     are spec'd Celsius; converted based on `units` attribute).
-14. Apply output renames (`CMIP_TO_OUTPUT_RENAMES`) so `tas`→`TMP2m`,
+13. Apply output renames (`CMIP_TO_OUTPUT_RENAMES`) so `tas`→`TMP2m`,
     radiative fluxes get baseline names, etc.
-15. Run sanity checks (advisory; recorded in `warnings`).
-16. Write zarr with zarr v3 chunks+shards; drop sidecar `metadata.json`.
-17. Compute multi-period stats inline and write `stats.nc` next to
+14. Run sanity checks (advisory; recorded in `warnings`).
+15. Write zarr with zarr v3 chunks+shards; drop sidecar `metadata.json`.
+16. Compute multi-period stats inline and write `stats.nc` next to
     the zarr.
-18. Append a row to the central `index.{csv,parquet}`.
+17. Append a row to the central `index.{csv,parquet}`.
 
 ### `process_esgf.py` — ESGF per-dataset processing
 

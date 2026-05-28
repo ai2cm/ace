@@ -20,11 +20,9 @@ from processing import (
     clamp_static_fractions,
     clip_date_for_calendar,
     compute_below_surface_mask,
-    compute_derived_layer_T,
     compute_ocean_fraction,
     derive_ocean_and_correct_sea_ice,
     emit_mask_and_fill,
-    fill_derived_layer_T,
     fill_horizontal_diffuse,
     finalize_surface_and_ocean_variable,
     flatten_plev_variables,
@@ -532,80 +530,6 @@ def test_nearest_above_fill_multiple_levels():
     assert not np.isnan(filled.values).any()
     np.testing.assert_allclose(filled.isel(plev=0).values, 3.0)
     np.testing.assert_allclose(filled.isel(plev=1).values, 3.0)
-
-
-# ---------------------------------------------------------------------------
-# compute_derived_layer_T
-# ---------------------------------------------------------------------------
-
-
-def test_derived_layer_T_shape_and_names():
-    plev_pa = [100000, 85000, 70000, 50000, 25000, 10000, 5000, 1000]
-    ds = _rectilinear_ds(
-        ntime=3,
-        nlat=4,
-        nlon=8,
-        with_plev=True,
-        variables=["zg", "hus"],
-        plev_values=plev_pa,
-    )
-    ds["zg"].values[:] = np.linspace(0, 30000, 8)[None, :, None, None]
-    ds["hus"].values[:] = 0.005
-    result = compute_derived_layer_T(ds)
-    assert "ta_derived_layer" in result.data_vars
-    assert result["ta_derived_layer"].sizes["plev_layer"] == 7
-    assert result["ta_derived_layer"].sizes["time"] == 3
-
-
-def test_derived_layer_T_reasonable_values():
-    plev_pa = [100000, 50000, 10000]
-    ds = _rectilinear_ds(
-        ntime=1,
-        nlat=2,
-        nlon=2,
-        with_plev=True,
-        variables=["zg", "hus"],
-        plev_values=plev_pa,
-    )
-    ds["zg"].values[0, 0, :, :] = 0
-    ds["zg"].values[0, 1, :, :] = 5500
-    ds["zg"].values[0, 2, :, :] = 16000
-    ds["hus"].values[:] = 0.005
-    result = compute_derived_layer_T(ds)
-    ta = result["ta_derived_layer"]
-    assert ta.min() > 150.0
-    assert ta.max() < 350.0
-
-
-# ---------------------------------------------------------------------------
-# fill_derived_layer_T
-# ---------------------------------------------------------------------------
-
-
-def test_fill_derived_layer_T_fills_bottom_layers():
-    plev_pa = [100000, 50000, 10000]
-    ds = _rectilinear_ds(
-        ntime=1,
-        nlat=2,
-        nlon=2,
-        with_plev=True,
-        variables=["zg", "hus"],
-        plev_values=plev_pa,
-    )
-    ds["zg"].values[0, 0, :, :] = 0
-    ds["zg"].values[0, 1, :, :] = 5500
-    ds["zg"].values[0, 2, :, :] = 16000
-    ds["hus"].values[:] = 0.005
-    ds = compute_derived_layer_T(ds)
-
-    mask = xr.zeros_like(ds["zg"], dtype=np.uint8)
-    mask.values[:, 0, :, :] = 1
-
-    result = fill_derived_layer_T(ds, mask)
-    ta = result["ta_derived_layer"]
-    ta_bottom = ta.isel(plev_layer=0).values
-    ta_top = ta.isel(plev_layer=1).values
-    np.testing.assert_allclose(ta_bottom, ta_top)
 
 
 # ---------------------------------------------------------------------------

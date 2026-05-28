@@ -73,10 +73,8 @@ from processing import (  # noqa: E402
     apply_time_subset,
     clamp_static_fractions,
     compute_below_surface_mask,
-    compute_derived_layer_T,
     compute_total_water_path,
     derive_ocean_and_correct_sea_ice,
-    fill_derived_layer_T,
     finalize_surface_and_ocean_variable,
     flatten_plev_variables,
     grid_fingerprint,
@@ -647,12 +645,6 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
 
         # 10. Derive layer-mean T from the un-filled zg + hus. Running
         # this on filled zg would force dz = 0 in below-surface columns
-        # (nearest-above fill copies zg[i+1] down, so zg[i] == zg[i+1])
-        # and collapse the derived T to zero. Do it first, then fill.
-        have_derived_T = "zg" in day_regridded and "hus" in day_regridded
-        if have_derived_T:
-            day_regridded = compute_derived_layer_T(day_regridded)
-
         # 11. Nearest-above fill for the level-valued 3D state.
         # When no mask is available (no orog, no NaN pattern), skip
         # filling and don't write a mask variable.
@@ -662,12 +654,7 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
                     day_regridded[v] = nearest_above_fill(day_regridded[v], mask)
             day_regridded = day_regridded.assign(below_surface_mask=mask)
 
-            # 12. Cascading fill for the derived layer T — layer i is
-            # invalid where either bounding level is below surface.
-            if have_derived_T:
-                day_regridded = fill_derived_layer_T(day_regridded, mask)
-
-        # 13. Surface-and-ocean variables (surface T, sea-ice, ocean). Each
+        # 12. Surface-and-ocean variables (surface T, sea-ice, ocean). Each
         # variable is opened from its source table, regridded, mapped to
         # the daily axis according to its cadence (drop-in for ``daily``,
         # causal previous-month-mean for ``monthly_causal``), and

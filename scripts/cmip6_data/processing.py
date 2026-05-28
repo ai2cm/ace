@@ -5,7 +5,6 @@ Data-source-agnostic helpers used by both the Pangeo pipeline
 
 - plev normalisation
 - below-surface mask computation + nearest-above fill
-- derived layer-mean T from the hypsometric equation
 - xESMF regridding (with CF-bounds normalisation)
 - causal monthly-to-daily mapping for surface-and-ocean variables
 - time subsetting + duplicate-timestamp handling
@@ -23,11 +22,6 @@ from typing import Hashable, Optional
 import numpy as np
 import xarray as xr
 from config import ResolvedDatasetConfig, SurfaceAndOceanVariable
-
-# Physics constants for hypsometric layer-mean T derivation.
-R_D = 287.05  # J / (kg K), dry-air gas constant
-G = 9.80665  # m / s^2, standard gravity
-EPS = 0.608  # (R_v / R_d) - 1, for virtual-to-actual temperature
 
 BOUNDS_NAMES: frozenset[str] = frozenset(
     {
@@ -518,78 +512,6 @@ def _diffuse_one_plane(plane: np.ndarray, max_iterations: int, convolve) -> np.n
         fallback = float(plane[original_valid].mean()) if original_valid.any() else 0.0
         values = np.where(valid, values, fallback)
     return values
-
-
-# ---------------------------------------------------------------------------
-# Derived layer-mean T
-# ---------------------------------------------------------------------------
-
-
-def compute_derived_layer_T(ds: xr.Dataset) -> xr.Dataset:
-    """Add ``ta_derived_layer(time, plev_layer, lat, lon)`` from zg + hus
-    via the hypsometric equation. One layer value per gap between adjacent
-    plev levels. The ``plev_layer`` coordinate stores the log-pressure
-    midpoint of each layer in Pa; the dimension order matches ``plev``
-    (bottom-up: index 0 = layer between the two highest-pressure levels).
-
-    Must be called on *un-filled* zg / hus. Running this on nearest-
-    above-filled zg would force ``dz = 0`` below surface and collapse
-    the derived T to zero; see ``fill_derived_layer_T`` for the
-    post-derivation fill.
-    """
-    plev_pa = ds["plev"].values
-    z = ds["zg"]
-    q = ds["hus"]
-    layers = []
-    n_layers = len(plev_pa) - 1
-    for i in range(n_layers):
-        p_lo = plev_pa[i]
-        p_hi = plev_pa[i + 1]
-        dz = z.isel(plev=i + 1) - z.isel(plev=i)
-        q_mean = 0.5 * (q.isel(plev=i) + q.isel(plev=i + 1))
-        tv = G * dz / (R_D * np.log(p_lo / p_hi))
-        t = tv / (1.0 + EPS * q_mean)
-        layers.append(t.drop_vars("plev", errors="ignore"))
-    plev_layer = np.array(
-        [np.sqrt(plev_pa[i] * plev_pa[i + 1]) for i in range(n_layers)]
-    )
-    ta = xr.concat(layers, dim="plev_layer").assign_coords(plev_layer=plev_layer)
-    ta.attrs = {
-        "long_name": "derived layer-mean temperature from hypsometric equation",
-        "units": "K",
-        "derivation": "hypsometric from zg + hus",
-    }
-    return ds.assign(ta_derived_layer=ta)
-
-
-def fill_derived_layer_T(ds: xr.Dataset, mask: xr.DataArray) -> xr.Dataset:
-    """Cascading nearest-above fill for ``ta_derived_layer``.
-
-    Layer ``i`` (in the internal bottom-up ordering along ``plev_layer``)
-    is treated as invalid where either bounding plev level (``plev[i]``
-    or ``plev[i+1]``) is below-surface per ``mask``, since the
-    hypsometric formula uses the model's below-surface extrapolation
-    there and produces unphysical values.
-
-    The fill cascades top-down: the topmost layer is always valid
-    (stratosphere); each layer below inherits the layer above where
-    invalid.
-    """
-    if "ta_derived_layer" not in ds.data_vars:
-        return ds
-    ta = ds["ta_derived_layer"]
-    n_layers = ta.sizes["plev_layer"]
-    if n_layers < 2:
-        return ds
-    for i in range(n_layers - 2, -1, -1):
-        layer_mask = (mask.isel(plev=i) | mask.isel(plev=i + 1)).astype(bool)
-        ta_i = ta.isel(plev_layer=i)
-        ta_above = ta.isel(plev_layer=i + 1)
-        ta.loc[dict(plev_layer=ta["plev_layer"].values[i])] = ta_i.where(
-            ~layer_mask, ta_above
-        )
-    ds["ta_derived_layer"] = ta
-    return ds
 
 
 # ---------------------------------------------------------------------------
@@ -1302,8 +1224,6 @@ _SANITY_RANGES: dict[str, tuple[float, float]] = {
     "luh2_forest": (-_EPS, 1.0 + _EPS),
 }
 
-_DERIVED_T_RANGE = (150.0, 350.0)
-
 _DAY_SECONDS = 86400.0
 _GLOBAL_MEAN_JUMP_TOL: dict[str, float] = {
     "TMP2m": 2.0,
@@ -1422,34 +1342,6 @@ def run_sanity_checks(ds: xr.Dataset) -> list[str]:
                 f"min={vmin:.3g}, max={vmax:.3g}"
             )
 
-    # Derived layer-mean T comes out of ``flatten_plev_variables`` as
-    # ``ta_derived_layer_{lo}_{hi}`` (one per between-plev layer); range
-    # check covers any present.
-    lo, hi = _DERIVED_T_RANGE
-    layer_vars = sorted(v for v in ds.data_vars if v.startswith("ta_derived_layer_"))
-    for v in layer_vars:
-        arr = ds[v]
-        vmin = float(arr.min())
-        vmax = float(arr.max())
-        if vmin < lo or vmax > hi:
-            messages.append(
-                f"{v} out of range [{lo}, {hi}] K: " f"min={vmin:.2f}, max={vmax:.2f}"
-            )
-
-    # Lapse-rate sanity: post-rename 2 m T should be within a few K of
-    # the bottom-most derived layer (1000-850 hPa mean).
-    bottom_layer = "ta_derived_layer_1000_850"
-    if "TMP2m" in ds.data_vars and bottom_layer in ds.data_vars:
-        tas_mean = float(ds["TMP2m"].mean())
-        layer0_mean = float(ds[bottom_layer].mean())
-        diff = tas_mean - layer0_mean
-        if abs(diff) > 15.0:
-            messages.append(
-                f"global mean TMP2m={tas_mean:.2f} K vs {bottom_layer} "
-                f"mean={layer0_mean:.2f} K differ by {diff:+.2f} K "
-                "(lapse-rate sanity expects a few K)"
-            )
-
     if "time" in ds.dims and ds.sizes["time"] > 1:
         messages.extend(_time_continuity_messages(ds))
 
@@ -1467,49 +1359,27 @@ def plev_hpa_label(plev_pa: float) -> str:
 
 
 def flatten_plev_variables(ds: xr.Dataset) -> xr.Dataset:
-    """Split variables with a ``plev`` or ``plev_layer`` dimension into
-    per-level 2D variables named by pressure.
-
-    On-level variables (``plev`` dim) are named ``{var}{hPa}``, e.g.
-    ``ua1000``, ``ua850``, ..., ``ua10``.
-
-    Between-level derived layers (``plev_layer`` dim) are named
-    ``{var}_{lo_hPa}_{hi_hPa}``, e.g. ``ta_derived_layer_1000_850``.
-
-    Both ``plev`` and ``plev_layer`` coordinates are dropped from the
-    returned dataset, making all variables uniformly
-    ``(time, lat, lon)`` or ``(lat, lon)``.
+    """Split variables with a ``plev`` dimension into per-level 2D
+    variables named ``{var}{hPa}``, e.g. ``ua1000``, ``ua850``, ...,
+    ``ua10``. The ``plev`` coordinate is dropped from the returned
+    dataset, making all variables uniformly ``(time, lat, lon)`` or
+    ``(lat, lon)``.
     """
     plev_vars = [v for v in ds.data_vars if "plev" in ds[v].dims]
-    layer_vars = [v for v in ds.data_vars if "plev_layer" in ds[v].dims]
-    if not plev_vars and not layer_vars:
+    if not plev_vars:
         return ds
 
     new_vars: dict[str, xr.DataArray] = {}
+    plev_pa = ds["plev"].values
+    for v in plev_vars:
+        da = ds[v]
+        for i in range(da.sizes["plev"]):
+            label = plev_hpa_label(plev_pa[i])
+            level_da = da.isel(plev=i).drop_vars("plev", errors="ignore")
+            new_vars[f"{v}{label}"] = level_da
 
-    if plev_vars:
-        plev_pa = ds["plev"].values
-        for v in plev_vars:
-            da = ds[v]
-            for i in range(da.sizes["plev"]):
-                label = plev_hpa_label(plev_pa[i])
-                level_da = da.isel(plev=i).drop_vars("plev", errors="ignore")
-                new_vars[f"{v}{label}"] = level_da
-
-    if layer_vars:
-        plev_pa = ds["plev"].values
-        for v in layer_vars:
-            da = ds[v]
-            for i in range(da.sizes["plev_layer"]):
-                lo = plev_hpa_label(plev_pa[i])
-                hi = plev_hpa_label(plev_pa[i + 1])
-                level_da = da.isel(plev_layer=i).drop_vars(
-                    "plev_layer", errors="ignore"
-                )
-                new_vars[f"{v}_{lo}_{hi}"] = level_da
-
-    ds = ds.drop_vars(plev_vars + layer_vars)
-    ds = ds.drop_vars(["plev", "plev_layer"], errors="ignore")
+    ds = ds.drop_vars(plev_vars)
+    ds = ds.drop_vars(["plev"], errors="ignore")
     return ds.assign(**new_vars)
 
 
@@ -1534,8 +1404,6 @@ __all__ = [
     "compute_below_surface_mask",
     "nearest_above_fill",
     "fill_horizontal_diffuse",
-    "compute_derived_layer_T",
-    "fill_derived_layer_T",
     "causal_annual_to_daily",
     "causal_monthly_to_daily",
     "emit_mask_and_fill",

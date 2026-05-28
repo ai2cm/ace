@@ -412,6 +412,93 @@ def test_migration_0_1_0_to_0_2_0_adds_log_co2(tmp_path: Path):
         stats.close()
 
 
+def _make_v0_2_0_zarr_with_layer_T(zarr_path: Path) -> xr.Dataset:
+    """Tiny dataset under the 0.2.0 schema with derived layer T vars."""
+    nt, nlat, nlon = 4, 45, 90
+    times = xr.date_range("2010-01-01", periods=nt, freq="D", calendar="noleap")
+    rng = np.random.default_rng(0)
+    common = dict(dims=("time", "lat", "lon"), coords={"time": times})
+
+    def _arr(seed_offset: int = 0) -> xr.DataArray:
+        return xr.DataArray(
+            (250 + rng.standard_normal((nt, nlat, nlon))).astype(np.float32),
+            **common,
+        )
+
+    ds = xr.Dataset(
+        {
+            "psl": _arr(),
+            "ta_derived_layer_1000_850": _arr(),
+            "ta_derived_layer_850_700": _arr(),
+            "ta_derived_layer_50_10": _arr(),
+        }
+    )
+    ds.to_zarr(str(zarr_path), mode="w", consolidated=True, zarr_format=3)
+    return ds
+
+
+def test_migration_0_2_0_to_0_3_0_drops_derived_layer_T(tmp_path: Path):
+    from migrations._0_2_0_to_0_3_0 import MIGRATION
+
+    zarr_dir = tmp_path / "data.zarr"
+    src = _make_v0_2_0_zarr_with_layer_T(zarr_dir)
+    sidecar = {
+        "source_id": "TEST",
+        "experiment": "historical",
+        "variant_label": "r1i1p1f1",
+        "label": "TEST",
+        "schema_version": "0.2.0",
+        "variables_present": sorted(src.data_vars),
+    }
+    out = MIGRATION.apply(str(zarr_dir), sidecar)
+
+    migrated = xr.open_zarr(str(zarr_dir), consolidated=True)
+    # Layer vars removed.
+    assert not any(v.startswith("ta_derived_layer_") for v in migrated.data_vars)
+    # Untouched survivor preserved.
+    assert "psl" in migrated.data_vars
+    np.testing.assert_array_equal(migrated["psl"].values, src["psl"].values)
+
+    assert out["schema_version"] == "0.3.0"
+    assert not any(v.startswith("ta_derived_layer_") for v in out["variables_present"])
+    audit = out["migrations"][-1]
+    assert audit["from"] == "0.2.0" and audit["to"] == "0.3.0"
+    assert set(audit["removed"]) == {
+        "ta_derived_layer_1000_850",
+        "ta_derived_layer_850_700",
+        "ta_derived_layer_50_10",
+    }
+
+
+def test_migration_0_2_0_to_0_3_0_noop_when_no_layer_vars(tmp_path: Path):
+    from migrations._0_2_0_to_0_3_0 import MIGRATION
+
+    zarr_dir = tmp_path / "data.zarr"
+    nt, nlat, nlon = 3, 45, 90
+    times = xr.date_range("2010-01-01", periods=nt, freq="D", calendar="noleap")
+    ds = xr.Dataset(
+        {
+            "psl": xr.DataArray(
+                np.full((nt, nlat, nlon), 1.0e5, dtype=np.float32),
+                dims=("time", "lat", "lon"),
+                coords={"time": times},
+            )
+        }
+    )
+    ds.to_zarr(str(zarr_dir), mode="w", consolidated=True, zarr_format=3)
+    sidecar = {
+        "source_id": "T",
+        "experiment": "h",
+        "variant_label": "r1",
+        "label": "",
+        "schema_version": "0.2.0",
+        "variables_present": ["psl"],
+    }
+    out = MIGRATION.apply(str(zarr_dir), sidecar)
+    assert out["schema_version"] == "0.3.0"
+    assert out["migrations"][-1]["removed"] == []
+
+
 def test_migration_0_1_0_to_0_2_0_noop_when_co2_absent(tmp_path: Path):
     """Datasets without input4mips_co2 still get version-stamped."""
     from migrations._0_1_0_to_0_2_0 import MIGRATION
