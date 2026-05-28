@@ -113,10 +113,11 @@ ATMO_FORCING_VARS = {
     "prateb_ave": "PRATEsfc",
 }
 
-# FV3 accumulated frozen precip variables — converted to a rate in the
-# pipeline by differencing consecutive timesteps.  Not included in
-# ATMO_FORCING_VARS because they need special handling.
-FROZEN_PRECIP_ACCUM_VARS = ["frozr", "tsnowp"]
+# FV3 bucket-accumulated frozen precip variables — converted to a rate
+# in the pipeline.  We use the bucket variants (frozrb/tsnowpb) rather
+# than the total accumulators (frozr/tsnowp) to keep values small.
+# Bucket resets (every fhzero=6h) are detected and handled.
+FROZEN_PRECIP_ACCUM_VARS = ["frozrb", "tsnowpb"]
 
 # Sea-ice variables from FV3
 ICE_VARS = {"icec": "ocean_sea_ice_fraction", "icetk": "HI"}
@@ -897,23 +898,33 @@ def _average_atmo_chunk(
             "time range overlaps the ocean range and that calendars match."
         )
 
-    # Derive frozen precipitation rate from accumulated fields before
-    # resampling.  frozr (graupel) and tsnowp (snow) are running totals
-    # in kg/m²; differencing gives the 3h accumulation, dividing by dt
-    # gives a rate in kg/m²/s.
+    # Derive frozen precipitation rate from bucket-accumulated fields
+    # (frozrb = graupel, tsnowpb = snow).  These reset to 0 every
+    # fhzero hours (typically 6h).  We detect resets and handle them:
+    #   - Normal step (value increased): rate = diff / dt
+    #   - Bucket reset (value dropped):  rate = current_value / dt
+    #     (current value IS the full accumulation since the reset)
     accum_vars = [v for v in FROZEN_PRECIP_ACCUM_VARS if v in ds_atmo]
     if accum_vars:
         dt_seconds = ATMO_TIME_STEP * 3600.0  # 3h → seconds
         frozen_accum = sum(ds_atmo[v] for v in accum_vars)
-        frozen_rate = frozen_accum.diff("time") / dt_seconds
-        frozen_rate = frozen_rate.clip(min=0)
+        frozen_diff = frozen_accum.diff("time")
+        frozen_after = frozen_accum.isel(time=slice(1, None))
+        # Where diff >= 0: normal accumulation within a bucket period.
+        # Where diff < 0: bucket was emptied; current value is the
+        # entire accumulation since the reset.
+        frozen_3h = frozen_diff.where(frozen_diff >= 0, frozen_after)
+        frozen_rate = (frozen_3h / dt_seconds).clip(min=0)
         frozen_rate.attrs = {
             "long_name": "total frozen precipitation rate",
             "units": "kg/m**2/s",
         }
+        # diff reduces time by 1; pad the first timestep with 0 so we
+        # don't trim other variables.  The first timestep is in the
+        # pre-ocean buffer window, so the 0 has negligible effect
+        # after resample().mean().
+        frozen_rate = frozen_rate.reindex(time=ds_atmo.time, fill_value=0.0)
         ds_atmo = ds_atmo.drop_vars(accum_vars)
-        # diff reduces time by 1; align to the later timestamp
-        ds_atmo = ds_atmo.isel(time=slice(1, None))
         ds_atmo["total_frozen_precipitation_rate"] = frozen_rate
 
     ds_atmo_6h = ds_atmo.resample(time="6h", closed="right", label="right").mean()
