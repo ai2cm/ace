@@ -862,6 +862,7 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
         day_regridded.attrs["source_id"] = task.source_id
         day_regridded.attrs["experiment"] = task.experiment
         day_regridded.attrs["variant_label"] = task.variant_label
+        day_regridded.attrs["data_source"] = "pangeo"
         logging.info("  streaming zarr write...")
         write_zarr(day_regridded, zarr_path, cfg)
         row.variables_present = sorted(day_regridded.data_vars)

@@ -65,6 +65,21 @@ class DatasetIndexRow:
     # current ``SCHEMA_VERSION``. Sidecars written before this field
     # existed default to ``"0.0.0"`` in migrate.py.
     schema_version: str = ""
+    # Where this dataset's variables came from. ``"pangeo"`` =
+    # written by ``process.py``; ``"esgf"`` = written by
+    # ``process_esgf.py`` without a prior Pangeo zarr; ``"pangeo+esgf"``
+    # = started as a Pangeo zarr and later augmented by the ESGF
+    # pipeline with variables Pangeo didn't have. See
+    # ``esgf_augmented_variables`` for the per-variable list in the
+    # augmented case.
+    data_source: str = "pangeo"
+    # Names of variables that were added by a later ESGF augment pass.
+    # Always empty for ``data_source == "pangeo"``. For
+    # ``data_source == "esgf"`` this lists *all* variables in the
+    # dataset (the whole thing came from ESGF). For
+    # ``data_source == "pangeo+esgf"`` this lists just the variables
+    # ESGF added on top of the existing Pangeo zarr.
+    esgf_augmented_variables: list[str] = field(default_factory=list)
 
 
 # Columns that hold list/dict values. For the flat tabular outputs
@@ -78,6 +93,7 @@ _JSON_ENCODED_FIELDS = (
     "variables_present",
     "cell_methods_mismatch",
     "warnings",
+    "esgf_augmented_variables",
 )
 
 

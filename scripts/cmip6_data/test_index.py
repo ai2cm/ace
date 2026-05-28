@@ -125,6 +125,38 @@ def test_clear_failure_record_noop_when_missing(tmp_path: Path):
     clear_failure_record(_example_row(status="ok"), str(out))
 
 
+def test_data_source_defaults_to_pangeo():
+    row = DatasetIndexRow(
+        source_id="X", experiment="historical", variant_label="r1i1p1f1"
+    )
+    assert row.data_source == "pangeo"
+    assert row.esgf_augmented_variables == []
+
+
+def test_esgf_augmented_variables_json_round_trip(tmp_path: Path):
+    """The audit list must survive the sidecar write/read round-trip and
+    the flat (csv/parquet) JSON encoding used by the index."""
+    row = _example_row()
+    row.data_source = "pangeo+esgf"
+    row.esgf_augmented_variables = ["siday_sea_ice_fraction", "omon_tob"]
+    zarr_dir = tmp_path / "data.zarr"
+    zarr_dir.mkdir()
+    write_sidecar(row, str(zarr_dir))
+    payload = json.loads((zarr_dir / "metadata.json").read_text())
+    assert payload["data_source"] == "pangeo+esgf"
+    assert payload["esgf_augmented_variables"] == [
+        "siday_sea_ice_fraction",
+        "omon_tob",
+    ]
+
+    # Flat encoding for the central index.
+    df = rows_to_dataframe([row])
+    assert df.loc[0, "data_source"] == "pangeo+esgf"
+    assert df.loc[0, "esgf_augmented_variables"] == json.dumps(
+        ["siday_sea_ice_fraction", "omon_tob"]
+    )
+
+
 if __name__ == "__main__":
     # Simple standalone runner for machines without pytest.
     with tempfile.TemporaryDirectory() as d:

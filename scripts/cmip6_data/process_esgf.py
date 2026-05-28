@@ -473,6 +473,9 @@ def process_one_esgf(
         # ESGF queries resolved at download time.
         output_zarr=zarr_path,
         status="pending",
+        # process_one_esgf only runs when no Pangeo zarr is present; the
+        # whole dataset is sourced from ESGF.
+        data_source="esgf",
     )
 
     scratch = scratch_dir_for_dataset(
@@ -812,6 +815,10 @@ def process_one_esgf(
 
         row.schema_version = SCHEMA_VERSION
         row.status = "ok"
+        # Full-ESGF dataset: every variable came from the ESGF pipeline.
+        # Mirror this in the audit list so downstream consumers don't
+        # have to special-case ``data_source == "esgf"``.
+        row.esgf_augmented_variables = sorted(day_regridded.data_vars)
         logging.info(
             "Finished %s in %.1fs total",
             zarr_path,
@@ -828,6 +835,184 @@ def process_one_esgf(
         cleanup_scratch_dir(scratch)
 
     return row
+
+
+def augment_one_esgf(
+    task: ESGFDatasetTask,
+    config: ESGFProcessConfig,
+    existing_row: DatasetIndexRow,
+) -> DatasetIndexRow:
+    """Augment an existing Pangeo zarr with ESGF surface-and-ocean
+    variables it didn't have.
+
+    Strategy:
+
+    - Open the existing zarr to get the daily time axis + target grid.
+    - For each ``SurfaceAndOceanVariable`` whose ``output_name`` is in
+      ``task.available_surface_and_ocean_variables`` but not in
+      ``existing_row.variables_present``, download + regrid + finalize
+      from ESGF and ``to_zarr(mode="a")`` it onto the existing zarr.
+    - Stamp ``data_source=pangeo+esgf``, ``esgf_augmented_variables``
+      in the sidecar and as zarr root attrs so downstream consumers
+      can tell what came from where.
+    - Regenerate ``stats.nc`` so the new variables are covered.
+
+    Limitations (v1):
+    - Only surface-and-ocean variables. 3D plev day variables (ua, va,
+      hus, zg) are skipped because they require running the flatten
+      step against the existing zarr's plev convention — left for a
+      follow-up.
+    - Statics (HGTsfc, land_fraction) are not augmented; the ESGF
+      pipeline would need to re-derive ocean fractions which is too
+      entangled with the day-data path to bolt on cleanly here.
+
+    Caller is responsible for ensuring the existing zarr's
+    ``schema_version`` matches the current ``SCHEMA_VERSION`` —
+    augmenting an older-schema zarr is blocked at the call site so
+    we don't mix on-disk conventions.
+    """
+    cfg = config.resolve(task.source_id, task.experiment, task.variant_label)
+    zarr_path = _output_zarr_path(config.output_directory, task)
+
+    existing_vars = set(existing_row.variables_present)
+    augmentable: list = []
+    for h in SURFACE_AND_OCEAN_VARIABLES:
+        if h.output_name not in cfg.surface_and_ocean_variables:
+            continue
+        if h.output_name not in task.available_surface_and_ocean_variables:
+            continue
+        if h.output_name in existing_vars:
+            continue
+        augmentable.append(h)
+
+    if not augmentable:
+        logging.info("  no ESGF augmentation available; leaving Pangeo zarr as-is")
+        return existing_row
+
+    logging.info(
+        "  augmenting with %d ESGF surface-and-ocean variables: %s",
+        len(augmentable),
+        ", ".join(h.output_name for h in augmentable),
+    )
+
+    scratch = scratch_dir_for_dataset(
+        config.esgf.scratch_dir,
+        task.source_id,
+        task.experiment,
+        task.variant_label,
+    )
+
+    target = make_target_grid(cfg.target_grid.name)
+    existing_ds = xr.open_zarr(zarr_path, consolidated=True)
+    daily_time = existing_ds["time"]
+
+    added_names: list[str] = []
+    sampler = RssSampler()
+    sampler.start()
+    try:
+        import dask
+
+        dask.config.set(scheduler="synchronous")
+        for h in augmentable:
+            try:
+                logging.info(
+                    "  [%s] augment %s/%s -> %s ...",
+                    task.source_id,
+                    h.table_id,
+                    h.var_id,
+                    h.output_name,
+                )
+                result, methods = _download_and_regrid_variable(
+                    task, h.var_id, h.table_id, target, config, scratch
+                )
+                existing_row.regrid_methods.update(
+                    {
+                        h.output_name if k == h.var_id else k: v
+                        for k, v in methods.items()
+                    }
+                )
+                if result is None:
+                    continue
+                regridded_var = result[h.var_id]
+                outputs = finalize_surface_and_ocean_variable(
+                    regridded_var,
+                    h,
+                    daily_time,
+                    fill_iterations=cfg.fill.ocean_fill_iterations,
+                )
+                # to_zarr(mode='a') one variable at a time keeps memory
+                # bounded and gives a clean checkpoint per variable in
+                # case the augment is interrupted partway through.
+                new_ds = xr.Dataset({name: da for name, da in outputs.items()})
+                new_ds.to_zarr(
+                    zarr_path,
+                    mode="a",
+                    consolidated=False,
+                    zarr_format=3,
+                    align_chunks=True,
+                )
+                added_names.extend(outputs.keys())
+            except Exception as e:  # noqa: BLE001
+                logging.warning(
+                    "  augment %s failed: %s: %s — skipping this variable",
+                    h.output_name,
+                    type(e).__name__,
+                    e,
+                )
+                existing_row.warnings.append(
+                    f"augment {h.output_name} failed: {type(e).__name__}: {e}"
+                )
+        existing_ds.close()
+    finally:
+        sampler.stop()
+        cleanup_scratch_dir(scratch)
+
+    if not added_names:
+        logging.info("  no variables successfully added — leaving zarr unchanged")
+        return existing_row
+
+    # Consolidate metadata once after all variable appends.
+    import zarr
+
+    zarr.consolidate_metadata(zarr_path)
+
+    # Stamp dataset-level attrs so the augmentation is visible from
+    # the zarr itself (not just the sidecar). Open the just-written
+    # zarr to apply attrs at the group root.
+    group = zarr.open_group(zarr_path, mode="r+")
+    prior_aug = list(existing_row.esgf_augmented_variables)
+    all_aug = sorted(set(prior_aug) | set(added_names))
+    group.attrs["data_source"] = "pangeo+esgf"
+    group.attrs["esgf_augmented_variables"] = all_aug
+    zarr.consolidate_metadata(zarr_path)
+
+    # Refresh stats.nc so the new variables get per-dataset stats.
+    stats_path = zarr_path.rstrip("/").rsplit("/", 1)[0] + "/stats.nc"
+    try:
+        written = xr.open_zarr(zarr_path, consolidated=True)
+        compute_and_write_stats(
+            written,
+            stats_path,
+            identity={
+                "source_id": task.source_id,
+                "experiment": task.experiment,
+                "variant_label": task.variant_label,
+                "label": existing_row.label,
+            },
+            grid_name=cfg.target_grid.name,
+            periods=tuple(cfg.stats_periods),
+        )
+        written.close()
+    except Exception as e:  # noqa: BLE001
+        existing_row.warnings.append(
+            f"stats regeneration after augment failed: {type(e).__name__}: {e}"
+        )
+        logging.warning("  stats regeneration failed after augment: %s", e)
+
+    existing_row.data_source = "pangeo+esgf"
+    existing_row.esgf_augmented_variables = all_aug
+    existing_row.variables_present = sorted(existing_vars | set(added_names))
+    return existing_row
 
 
 # ---------------------------------------------------------------------------
@@ -856,8 +1041,28 @@ def run(
         if not force:
             existing = _load_existing_sidecar(zarr_path)
             if existing is not None:
-                logging.info("  already complete, skipping (use --force to rebuild)")
-                rows.append(existing)
+                # Existing zarr from the Pangeo pipeline (or a prior
+                # ESGF run): try to augment with ESGF variables Pangeo
+                # didn't have. Gate on schema parity — mixing on-disk
+                # conventions across schema versions would corrupt the
+                # archive, so require migrate.py to bring the dataset
+                # to SCHEMA_VERSION first.
+                if existing.schema_version != SCHEMA_VERSION:
+                    logging.info(
+                        "  schema_version=%r != current %r — augment "
+                        "requires migrate.py first; skipping",
+                        existing.schema_version,
+                        SCHEMA_VERSION,
+                    )
+                    rows.append(existing)
+                    continue
+                row = augment_one_esgf(task, config, existing)
+                rows.append(row)
+                # Augment never produces failures here; if augment
+                # failed for individual variables, those are recorded
+                # in row.warnings and the row stays status=ok.
+                write_sidecar(row, zarr_path)
+                clear_failure_record(row, config.output_directory)
                 continue
 
         if _fs_exists(zarr_path):
