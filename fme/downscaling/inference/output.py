@@ -167,15 +167,16 @@ class DownscalingOutputConfig(ABC):
         pass
 
     @staticmethod
-    def _single_xarray_config(
+    def _single_coarse_config(
         coarse: Sequence[
             XarrayDataConfig | XarrayEnsembleDataConfig | MergeNoConcatDatasetConfig
         ],
-    ) -> list[XarrayDataConfig]:
+    ) -> list[XarrayDataConfig | MergeNoConcatDatasetConfig]:
         """
-        Ensures that the data configuration is a single xarray config.
-        Necessary because we will be using the top-level DataLoaderConfig
-        to build the data, and we'll be replacing time and spatial extents.
+        Ensures that the coarse data configuration is a single XarrayDataConfig
+        or MergeNoConcatDatasetConfig. Necessary because we will be using the
+        top-level DataLoaderConfig to build the data, and we'll be replacing
+        time and spatial extents.
         """
         # TODO: Consider only supporting a single xarray config
         #       for this run type since we use Zarr not netCDF.  Just more
@@ -183,15 +184,15 @@ class DownscalingOutputConfig(ABC):
         #       a single config.
         if len(coarse) != 1:
             raise NotImplementedError(
-                "Only a single XarrayDataConfig is supported in OutputTargetConfig "
-                " coarse specification."
+                "Only a single coarse data config is supported in "
+                "OutputTargetConfig coarse specification."
             )
 
         data_config = coarse[0]
-        if not isinstance(data_config, XarrayDataConfig):
+        if not isinstance(data_config, XarrayDataConfig | MergeNoConcatDatasetConfig):
             raise NotImplementedError(
-                "Only XarrayDataConfig objects are supported in OutputTargetConfig "
-                " coarse specification."
+                "Only XarrayDataConfig or MergeNoConcatDatasetConfig objects "
+                "are supported in OutputTargetConfig coarse specification."
             )
 
         return [data_config]
@@ -199,12 +200,21 @@ class DownscalingOutputConfig(ABC):
     def _replace_loader_config(
         self,
         time,
-        coarse,
+        coarse: Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig],
         lat_extent,
         lon_extent,
         loader_config: DataLoaderConfig,
     ) -> DataLoaderConfig:
-        new_coarse = [replace(coarse[0], subset=time)]
+        config = coarse[0]
+        if isinstance(config, XarrayDataConfig):
+            new_coarse: list[XarrayDataConfig | MergeNoConcatDatasetConfig] = [
+                replace(config, subset=time)
+            ]
+        else:
+            # Apply the subset to each member of the merged dataset, since
+            # MergeNoConcatDatasetConfig has no subset field of its own.
+            new_merge = [replace(c, subset=time) for c in config.merge]
+            new_coarse = [replace(config, merge=new_merge)]
 
         # TODO: log the replacements for debugging
         new_loader_config = replace(
@@ -278,7 +288,7 @@ class DownscalingOutputConfig(ABC):
         loader_config: DataLoaderConfig,
         requirements: DataRequirements,
         patch: PatchPredictionConfig,
-        coarse: list[XarrayDataConfig],
+        coarse: list[XarrayDataConfig | MergeNoConcatDatasetConfig],
         fine_shape: tuple[int, int] | None = None,
     ) -> DownscalingOutput:
         updated_loader_config = self._replace_loader_config(
@@ -392,7 +402,7 @@ class EventConfig(DownscalingOutputConfig):
         else:
             time = Slice(self.event_time, self.event_time + 1)
 
-        coarse = self._single_xarray_config(loader_config.coarse)
+        coarse = self._single_coarse_config(loader_config.coarse)
 
         return self._build(
             time=time,
@@ -464,7 +474,7 @@ class TimeRangeConfig(DownscalingOutputConfig):
         patch: PatchPredictionConfig,
         fine_shape: tuple[int, int] | None = None,
     ) -> DownscalingOutput:
-        coarse = self._single_xarray_config(loader_config.coarse)
+        coarse = self._single_coarse_config(loader_config.coarse)
         return self._build(
             time=self.time_range,
             lat_extent=self.lat_extent,

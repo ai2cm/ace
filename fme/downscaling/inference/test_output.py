@@ -2,6 +2,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from fme.core.dataset.merged import MergeNoConcatDatasetConfig
 from fme.core.dataset.time import TimeSlice
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.downscaling.data import ClosedInterval
@@ -17,17 +18,29 @@ from fme.downscaling.requirements import DataRequirements
 # Tests for OutputTargetConfig validation
 
 
-def test_single_xarray_config_accepts_single_config():
-    """Test that _single_xarray_config accepts a single XarrayDataConfig."""
+def test_single_coarse_config_accepts_single_xarray_config():
+    """Test that _single_coarse_config accepts a single XarrayDataConfig."""
     xarray_config = XarrayDataConfig(
         data_path="/path/to/data", file_pattern="*.nc", engine="netcdf4"
     )
-    result = DownscalingOutputConfig._single_xarray_config([xarray_config])
+    result = DownscalingOutputConfig._single_coarse_config([xarray_config])
     assert result == [xarray_config]
 
 
-def test_single_xarray_config_rejects_multiple_configs():
-    """Test that _single_xarray_config rejects multiple configs."""
+def test_single_coarse_config_accepts_single_merge_config():
+    """Test that _single_coarse_config accepts a single MergeNoConcatDatasetConfig."""
+    merge_config = MergeNoConcatDatasetConfig(
+        merge=[
+            XarrayDataConfig(data_path="/path1", file_pattern="*.nc", engine="netcdf4"),
+            XarrayDataConfig(data_path="/path2", file_pattern="*.nc", engine="netcdf4"),
+        ]
+    )
+    result = DownscalingOutputConfig._single_coarse_config([merge_config])
+    assert result == [merge_config]
+
+
+def test_single_coarse_config_rejects_multiple_configs():
+    """Test that _single_coarse_config rejects multiple configs."""
     config1 = XarrayDataConfig(
         data_path="/path1", file_pattern="*.nc", engine="netcdf4"
     )
@@ -35,16 +48,55 @@ def test_single_xarray_config_rejects_multiple_configs():
         data_path="/path2", file_pattern="*.nc", engine="netcdf4"
     )
 
-    with pytest.raises(NotImplementedError, match="single XarrayDataConfig"):
-        DownscalingOutputConfig._single_xarray_config([config1, config2])
+    with pytest.raises(NotImplementedError, match="single coarse data config"):
+        DownscalingOutputConfig._single_coarse_config([config1, config2])
 
 
-def test_single_xarray_config_rejects_non_xarray_config():
-    """Test that _single_xarray_config rejects non-XarrayDataConfig objects."""
+def test_single_coarse_config_rejects_unsupported_config():
+    """Test that _single_coarse_config rejects unsupported config objects."""
     mock_config = MagicMock()
 
-    with pytest.raises(NotImplementedError, match="XarrayDataConfig objects"):
-        DownscalingOutputConfig._single_xarray_config([mock_config])
+    with pytest.raises(
+        NotImplementedError,
+        match="XarrayDataConfig or MergeNoConcatDatasetConfig",
+    ):
+        DownscalingOutputConfig._single_coarse_config([mock_config])
+
+
+def test_replace_loader_config_propagates_subset_to_merge_members():
+    """Test that _replace_loader_config applies the subset to each member of a
+    MergeNoConcatDatasetConfig without mutating the original config."""
+    from fme.downscaling.data import DataLoaderConfig
+
+    merge_config = MergeNoConcatDatasetConfig(
+        merge=[
+            XarrayDataConfig(data_path="/path1", file_pattern="*.nc", engine="netcdf4"),
+            XarrayDataConfig(data_path="/path2", file_pattern="*.nc", engine="netcdf4"),
+        ]
+    )
+    loader_config = DataLoaderConfig(
+        coarse=[merge_config],
+        batch_size=1,
+        num_data_workers=0,
+        strict_ensemble=False,
+    )
+    time = TimeSlice("2000-01-01T00:00:00", "2000-01-02T00:00:00")
+
+    config = TimeRangeConfig(name="t", n_ens=1, time_range=time)
+    new_loader = config._replace_loader_config(
+        time=time,
+        coarse=[merge_config],
+        lat_extent=loader_config.lat_extent,
+        lon_extent=loader_config.lon_extent,
+        loader_config=loader_config,
+    )
+
+    assert len(new_loader.coarse) == 1
+    new_merge = new_loader.coarse[0]
+    assert isinstance(new_merge, MergeNoConcatDatasetConfig)
+    assert all(ds.subset == time for ds in new_merge.merge)
+    # Original config should not be mutated.
+    assert all(ds.subset != time for ds in merge_config.merge)
 
 
 # Tests for EventConfig instantiation and validation
