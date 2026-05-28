@@ -27,15 +27,7 @@ def _variable_metadata_to_dict(
 ) -> dict[str, dict[str, str]] | None:
     if variable_metadata is None:
         return None
-    result = {}
-    for var, metadata in variable_metadata.items():
-        attrs: dict[str, str] = {}
-        if metadata.units is not None:
-            attrs["units"] = metadata.units
-        if metadata.long_name is not None:
-            attrs["long_name"] = metadata.long_name
-        result[var] = attrs
-    return result
+    return {var: metadata.as_attrs() for var, metadata in variable_metadata.items()}
 
 
 def _get_encoded_lead_times(

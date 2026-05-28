@@ -717,10 +717,7 @@ class XarrayDataset(DatasetABC):
             if name in StaticDerivedData.names:
                 result[name] = StaticDerivedData.metadata[name]
             else:
-                result[name] = VariableMetadata(
-                    units=getattr(ds[name], "units", None),
-                    long_name=getattr(ds[name], "long_name", None),
-                )
+                result[name] = VariableMetadata.from_attrs(ds[name].attrs)
         self._variable_metadata = result
 
     def _get_files_stats(

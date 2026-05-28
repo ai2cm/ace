@@ -39,12 +39,10 @@ def _save_netcdf(
         if len(dim_sizes) > 0:
             data = data.astype(np.float32)
         item_metadata = variable_metadata[name]
-        attrs: dict[str, str] = {}
         if item_metadata is not None:
-            if item_metadata.units is not None:
-                attrs["units"] = item_metadata.units
-            if item_metadata.long_name is not None:
-                attrs["long_name"] = item_metadata.long_name
+            attrs = item_metadata.as_attrs()
+        else:
+            attrs = {}
         data_vars[name] = xr.DataArray(data, dims=list(dim_sizes), attrs=attrs)
     coords = {
         dim_name: xr.DataArray(
