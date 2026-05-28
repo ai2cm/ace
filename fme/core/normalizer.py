@@ -5,7 +5,6 @@ from copy import copy
 
 import numpy as np
 import torch
-import torch.jit
 import xarray as xr
 
 from fme.core.device import move_tensordict_to_device
@@ -183,7 +182,6 @@ class StandardNormalizer:
         )
 
 
-@torch.jit.script
 def _normalize(
     tensors: TensorDict,
     means: TensorDict,
@@ -197,7 +195,6 @@ def _normalize(
     return normalized
 
 
-@torch.jit.script
 def _denormalize(
     tensors: TensorDict,
     means: TensorDict,

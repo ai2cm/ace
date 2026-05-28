@@ -110,6 +110,10 @@ class StepConfigABC(abc.ABC):
         """Replace prescribed prognostic names (e.g. when loading from checkpoint)."""
         pass
 
+    @property
+    def allow_missing_variables(self) -> bool:
+        return False
+
     @abc.abstractmethod
     def load(self):
         """
@@ -211,6 +215,10 @@ class StepSelector(StepConfigABC):
     def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
         self._step_config_instance.replace_prescribed_prognostic_names(names)
         self.config = dataclasses.asdict(self._step_config_instance)
+
+    @property
+    def allow_missing_variables(self) -> bool:
+        return self._step_config_instance.allow_missing_variables
 
     def load(self):
         self._step_config_instance.load()

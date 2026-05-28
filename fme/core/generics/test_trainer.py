@@ -18,7 +18,7 @@ from fme.core.generics.aggregator import (
     InferenceLogs,
 )
 from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
-from fme.core.generics.lr_tuning import LRTuningConfig
+from fme.core.generics.lr_tuning import LRTuningConfig, ValidateStepper
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.trainer import (
     AggregatorBuilderABC,
@@ -31,7 +31,7 @@ from fme.core.generics.trainer import (
     epoch_checkpoint_enabled,
     inference_one_epoch,
 )
-from fme.core.generics.validation import run_validation
+from fme.core.generics.validation import run_validation, run_validation_loop
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
 from fme.core.scheduler import SchedulerConfig
@@ -200,6 +200,7 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
         batch: BDType,
         optimization: OptimizationABC,
         compute_derived_variables: bool = False,
+        evaluate_all_steps: bool = False,
     ) -> TrainOutput:
         optimization.accumulate_loss(torch.tensor(float("inf")))
         optimization.step_weights()
@@ -213,6 +214,9 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
         pass
 
     def set_eval(self) -> None:
+        pass
+
+    def seed_eval(self, seed: int) -> None:
         pass
 
     def update_training_history(self, *args: Any, **kwargs: Any) -> None:
@@ -322,11 +326,6 @@ class AggregatorBuilder(AggregatorBuilderABC[TrainOutput]):
     def get_train_aggregator(self) -> AggregatorABC[TrainOutput]:
         ret = TrainAggregator(self.train_losses[self._train_calls])
         self._train_calls += 1
-        return ret
-
-    def get_validation_aggregator(self) -> AggregatorABC[TrainOutput]:
-        ret = ValidationAggregator(self.validation_losses[self._validation_calls])
-        self._validation_calls += 1
         return ret
 
     def get_inference_aggregator(self) -> InferenceAggregatorABC[PSType, SDType]:
@@ -471,7 +470,10 @@ def get_trainer(
 
     def validation_callback(epoch: int) -> tuple[dict[str, Any], float]:
         validation_data.set_epoch(epoch)
-        val_agg = aggregator_builder.get_validation_aggregator()
+        val_agg = ValidationAggregator(
+            aggregator_builder.validation_losses[aggregator_builder._validation_calls]
+        )
+        aggregator_builder._validation_calls += 1
         logs = run_validation(
             train_stepper=stepper,
             validation_data=validation_data,
@@ -495,9 +497,30 @@ def get_trainer(
         error = logs.get("inference/time_mean_norm/rmse/channel_mean")
         return logs, error
 
+    validate_stepper_callback: ValidateStepper | None = None
+    if lr_tuning is not None:
+
+        def _vs(trial_stepper, trial_ema):
+            val_agg = ValidationAggregator(
+                aggregator_builder.validation_losses[
+                    aggregator_builder._validation_calls
+                ]
+            )
+            aggregator_builder._validation_calls += 1
+            run_validation_loop(
+                stepper=trial_stepper,
+                valid_data=validation_data,
+                aggregator=val_agg,
+                ema=trial_ema,
+                validate_using_ema=config.validate_using_ema,
+            )
+            logs = val_agg.get_logs(label="val")
+            return logs["val/mean/loss"]
+
+        validate_stepper_callback = _vs
+
     trainer = Trainer(
         train_data=train_data,
-        validation_data=validation_data,
         stepper=stepper,
         build_optimization=build_optimization,
         build_ema=build_ema,
@@ -507,6 +530,7 @@ def get_trainer(
         end_of_batch_callback=unittest.mock.MagicMock(),
         end_of_epoch_callback=unittest.mock.MagicMock(side_effect=lambda epoch: {}),
         inference_callback=inference_callback,
+        validate_stepper=validate_stepper_callback,
         do_gc_collect=False,  # for much faster tests
     )
 
@@ -541,11 +565,9 @@ def test_trainer(tmp_path: str, checkpoint_save_epochs: Slice | None):
             assert not os.path.exists(paths.epoch_checkpoint_path(i))
         assert not os.path.exists(paths.ema_epoch_checkpoint_path(i))
     train_data = cast(TrainData, trainer.train_data)
-    valid_data = cast(TrainData, trainer.valid_data)
     assert train_data.set_epoch_mock.mock_calls == [
         unittest.mock.call(i) for i in range(1, config.max_epochs + 1)
     ]
-    assert valid_data.set_epoch_mock.mock_calls == train_data.set_epoch_mock.mock_calls
     assert trainer._end_of_epoch_callback.mock_calls == [  # type: ignore
         unittest.mock.call(i) for i in range(1, config.max_epochs + 1)
     ]
