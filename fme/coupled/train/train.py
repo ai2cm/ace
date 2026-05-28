@@ -1,4 +1,3 @@
-import contextlib
 import dataclasses
 import logging
 import os
@@ -19,8 +18,9 @@ from fme.core.generics.train_stepper import TrainStepperABC
 from fme.core.generics.trainer import (
     AggregatorBuilderABC,
     InferenceCallback,
+    InferenceTask,
     Trainer,
-    inference_one_epoch,
+    build_inference_callback,
 )
 from fme.core.generics.validation import run_validation, run_validation_loop
 from fme.coupled.aggregator import OneStepAggregator, TrainAggregator
@@ -132,50 +132,62 @@ def get_inference_callback(
     output_dir: str,
     save_per_epoch_diagnostics: bool,
 ) -> InferenceCallback:
-    def inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
-        if epoch not in inference_epochs:
-            return {}, None
-        all_logs: dict[str, Any] = {}
-        weighted_error = 0.0
-        has_error = False
-        for i, (entry_config, data, name) in enumerate(inference_entries):
-            if epoch not in inference_epoch_sets[i]:
-                continue
-            batch = next(iter(data.loader))
-            initial_times = batch.ocean_data.time.isel(time=0)
-            n_timesteps_ocean = (
-                entry_config.n_coupled_steps + stepper.ocean.n_ic_timesteps
+    tasks: list[InferenceTask] = []
+    for i, (entry_config, data, name) in enumerate(inference_entries):
+        tasks.append(
+            InferenceTask(
+                name=name,
+                data=data,
+                aggregator_factory=_make_coupled_aggregator_factory(
+                    entry_config=entry_config,
+                    data=data,
+                    name=name,
+                    stepper=stepper,
+                    dataset_info=dataset_info,
+                    output_dir=output_dir,
+                    save_per_epoch_diagnostics=save_per_epoch_diagnostics,
+                ),
+                epoch_set=frozenset(inference_epoch_sets[i]),
+                weight=entry_config.weight,
             )
-            n_timesteps_atmosphere = (
-                entry_config.n_coupled_steps * stepper.n_inner_steps
-                + stepper.atmosphere.n_ic_timesteps
-            )
-            aggregator = entry_config.aggregator.build(
-                dataset_info=dataset_info,
-                n_timesteps_ocean=n_timesteps_ocean,
-                n_timesteps_atmosphere=n_timesteps_atmosphere,
-                initial_time=initial_times,
-                ocean_normalize=stepper.ocean.normalizer.normalize,
-                atmosphere_normalize=stepper.atmosphere.normalizer.normalize,
-                save_diagnostics=save_per_epoch_diagnostics,
-                output_dir=os.path.join(output_dir, name),
-            )
-            logs = inference_one_epoch(
-                stepper=stepper,
-                validation_context=contextlib.nullcontext,
-                dataset=data,
-                aggregator=aggregator,
-                label=name,
-                epoch=epoch,
-            )
-            all_logs.update(logs)
-            error = logs.get(f"{name}/time_mean_norm/rmse/channel_mean")
-            if error is not None:
-                weighted_error += entry_config.weight * error
-                has_error = True
-        return all_logs, weighted_error if has_error else None
+        )
 
-    return inference_callback
+    return build_inference_callback(
+        tasks=tasks,
+        inference_epochs=inference_epochs,
+        stepper=stepper,
+    )
+
+
+def _make_coupled_aggregator_factory(
+    entry_config: InlineInferenceConfig,
+    data: InferenceGriddedData,
+    name: str,
+    stepper: CoupledTrainStepper,
+    dataset_info: CoupledDatasetInfo,
+    output_dir: str,
+    save_per_epoch_diagnostics: bool,
+):
+    def factory(epoch: int):
+        batch = next(iter(data.loader))
+        initial_times = batch.ocean_data.time.isel(time=0)
+        n_timesteps_ocean = entry_config.n_coupled_steps + stepper.ocean.n_ic_timesteps
+        n_timesteps_atmosphere = (
+            entry_config.n_coupled_steps * stepper.n_inner_steps
+            + stepper.atmosphere.n_ic_timesteps
+        )
+        return entry_config.aggregator.build(
+            dataset_info=dataset_info,
+            n_timesteps_ocean=n_timesteps_ocean,
+            n_timesteps_atmosphere=n_timesteps_atmosphere,
+            initial_time=initial_times,
+            ocean_normalize=stepper.ocean.normalizer.normalize,
+            atmosphere_normalize=stepper.atmosphere.normalizer.normalize,
+            save_diagnostics=save_per_epoch_diagnostics,
+            output_dir=os.path.join(output_dir, name),
+        )
+
+    return factory
 
 
 def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:

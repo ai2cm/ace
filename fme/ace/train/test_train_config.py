@@ -413,7 +413,7 @@ class TestGetInferenceCallback:
             inference_epoch_sets = [{1} for _ in entries]
         stepper = MagicMock()
         with patch(
-            "fme.ace.train.train.inference_one_epoch",
+            "fme.core.generics.trainer.inference_one_epoch",
             side_effect=inference_one_epoch_side_effect,
         ):
             callback = get_inference_callback(

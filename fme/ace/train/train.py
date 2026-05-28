@@ -48,7 +48,6 @@
 # Karthik Kashinath - NVIDIA Corporation
 # Animashree Anandkumar - California Institute of Technology, NVIDIA Corporation
 
-import contextlib
 import dataclasses
 import logging
 import os
@@ -80,10 +79,11 @@ from fme.core.generics.train_stepper import TrainStepperABC
 from fme.core.generics.trainer import (
     AggregatorBuilderABC,
     InferenceCallback,
+    InferenceTask,
     TrainConfigProtocol,
     Trainer,
     ValidationCallback,
-    inference_one_epoch,
+    build_inference_callback,
 )
 from fme.core.generics.validation import run_validation, run_validation_loop
 
@@ -187,53 +187,59 @@ def get_inference_callback(
     output_dir: str,
     save_per_epoch_diagnostics: bool,
 ) -> InferenceCallback:
-    def inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
-        if epoch not in inference_epochs:
-            return {}, None
-        all_logs: dict[str, Any] = {}
-        weighted_error: float | None = None
-        for i, (entry_config, data, entry_dataset_info, name) in enumerate(
-            inference_entries
-        ):
-            if epoch not in inference_epoch_sets[i]:
-                continue
-            aggregator = entry_config.aggregator.build(
-                dataset_info=entry_dataset_info,
-                n_ic_steps=stepper.n_ic_timesteps,
-                n_forward_steps=entry_config.n_forward_steps,
-                initial_time=data.initial_time,
-                normalize=stepper.normalizer.normalize,
-                output_dir=os.path.join(output_dir, name),
-                channel_mean_names=stepper.loss_names,
-                save_diagnostics=save_per_epoch_diagnostics,
-                n_ensemble_per_ic=entry_config.n_ensemble_per_ic,
-                enable_time_series=False,
+    tasks: list[InferenceTask] = []
+    for i, (entry_config, data, entry_dataset_info, name) in enumerate(
+        inference_entries
+    ):
+        tasks.append(
+            InferenceTask(
+                name=name,
+                data=data,
+                aggregator_factory=_make_ace_aggregator_factory(
+                    entry_config=entry_config,
+                    data=data,
+                    entry_dataset_info=entry_dataset_info,
+                    name=name,
+                    stepper=stepper,
+                    output_dir=output_dir,
+                    save_per_epoch_diagnostics=save_per_epoch_diagnostics,
+                ),
+                epoch_set=frozenset(inference_epoch_sets[i]),
+                weight=entry_config.weight,
             )
-            logs = inference_one_epoch(
-                stepper=stepper,
-                validation_context=contextlib.nullcontext,
-                dataset=data,
-                aggregator=aggregator,
-                label=name,
-                epoch=epoch,
-            )
-            all_logs.update(logs)
-            if entry_config.weight > 0:
-                metric_key = f"{name}/time_mean_norm/rmse/channel_mean"
-                error = logs.get(metric_key)
-                if error is None:
-                    raise RuntimeError(
-                        f"Inference entry {name!r} with weight={entry_config.weight} "
-                        f"did not produce expected metric key {metric_key!r}. "
-                        f"Entries contributing to checkpoint selection must produce "
-                        f"this metric."
-                    )
-                if weighted_error is None:
-                    weighted_error = 0.0
-                weighted_error += entry_config.weight * error
-        return all_logs, weighted_error
+        )
 
-    return inference_callback
+    return build_inference_callback(
+        tasks=tasks,
+        inference_epochs=inference_epochs,
+        stepper=stepper,
+    )
+
+
+def _make_ace_aggregator_factory(
+    entry_config: InlineInferenceConfig,
+    data: InferenceGriddedData,
+    entry_dataset_info: DatasetInfo,
+    name: str,
+    stepper: TrainStepper,
+    output_dir: str,
+    save_per_epoch_diagnostics: bool,
+):
+    def factory(epoch: int):
+        return entry_config.aggregator.build(
+            dataset_info=entry_dataset_info,
+            n_ic_steps=stepper.n_ic_timesteps,
+            n_forward_steps=entry_config.n_forward_steps,
+            initial_time=data.initial_time,
+            normalize=stepper.normalizer.normalize,
+            output_dir=os.path.join(output_dir, name),
+            channel_mean_names=stepper.loss_names,
+            save_diagnostics=save_per_epoch_diagnostics,
+            n_ensemble_per_ic=entry_config.n_ensemble_per_ic,
+            enable_time_series=False,
+        )
+
+    return factory
 
 
 def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":

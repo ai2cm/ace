@@ -50,6 +50,7 @@
 
 import abc
 import contextlib
+import dataclasses
 import gc
 import logging
 import os
@@ -57,7 +58,7 @@ import signal
 import sys
 import time
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, ClassVar, Generic, Protocol, TypeVar
 
 import torch
@@ -790,6 +791,77 @@ def inference_one_epoch(
     logging.info("Getting inline inference aggregator logs")
     logs = aggregator.get_summary_logs()
     return {f"{label}/{k}": v for k, v in logs.items()}
+
+
+@dataclasses.dataclass
+class InferenceTask(Generic[PS, FD, SD]):
+    """One inline inference run, packaged for ``build_inference_callback``.
+
+    Attributes:
+        name: Used as the log key prefix and output subdirectory.
+        data: Source of initial condition and forcing windows.
+        aggregator_factory: Builds the aggregator for a given epoch. Built lazily
+            per-epoch to match the existing per-epoch construction semantics
+            (e.g. fresh diagnostics path).
+        epoch_set: Epochs on which this task should run.
+        weight: Contribution weight for the combined checkpoint-selection error.
+            Zero means the task runs but does not contribute to the metric.
+        error_metric_template: Format string used to look up the per-task error
+            metric in the task's logs. ``{name}`` is replaced with ``self.name``.
+    """
+
+    name: str
+    data: InferenceDataABC[PS, FD]
+    aggregator_factory: Callable[[int], InferenceAggregatorABC[PS, SD]]
+    epoch_set: frozenset[int]
+    weight: float = 0.0
+    error_metric_template: str = "{name}/time_mean_norm/rmse/channel_mean"
+
+
+def build_inference_callback(
+    tasks: Sequence[InferenceTask[PS, FD, SD]],
+    inference_epochs: Sequence[int],
+    stepper: TrainStepperABC[PS, BD, FD, SD, TO],
+) -> InferenceCallback:
+    """Build an ``InferenceCallback`` shared between ACE and coupled training."""
+    inference_epochs_set = set(inference_epochs)
+
+    def inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
+        if epoch not in inference_epochs_set:
+            return {}, None
+        active_tasks = [t for t in tasks if epoch in t.epoch_set]
+        if not active_tasks:
+            return {}, None
+
+        all_logs: dict[str, Any] = {}
+        weighted_error: float | None = None
+        for task in active_tasks:
+            aggregator = task.aggregator_factory(epoch)
+            logs = inference_one_epoch(
+                stepper=stepper,
+                validation_context=contextlib.nullcontext,
+                dataset=task.data,
+                aggregator=aggregator,
+                label=task.name,
+                epoch=epoch,
+            )
+            all_logs.update(logs)
+            if task.weight > 0:
+                metric_key = task.error_metric_template.format(name=task.name)
+                error = logs.get(metric_key)
+                if error is None:
+                    raise RuntimeError(
+                        f"Inference entry {task.name!r} with "
+                        f"weight={task.weight} did not produce expected metric "
+                        f"key {metric_key!r}. Entries contributing to "
+                        "checkpoint selection must produce this metric."
+                    )
+                if weighted_error is None:
+                    weighted_error = 0.0
+                weighted_error += task.weight * error
+        return all_logs, weighted_error
+
+    return inference_callback
 
 
 def _restore_checkpoint(trainer: Trainer, checkpoint_path):
