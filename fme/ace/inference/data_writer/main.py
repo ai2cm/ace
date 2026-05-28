@@ -300,10 +300,7 @@ def _write(
         array = maybe_squeeze(data.data[name]).detach().cpu().numpy()
         data_arrays[name] = xr.DataArray(array, dims=dims_to_write)
         if name in variable_metadata:
-            data_arrays[name].attrs = {
-                "long_name": variable_metadata[name].long_name,
-                "units": variable_metadata[name].units,
-            }
+            data_arrays[name].attrs = variable_metadata[name].as_attrs()
     data_arrays["time"] = time_array
     ds = xr.Dataset(data_arrays, coords=coords)
     ds.attrs.update(dataset_metadata.as_flat_str_dict())
