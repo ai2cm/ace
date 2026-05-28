@@ -1570,7 +1570,6 @@ class TrainStepper(
         n_data_steps = data.time.shape[1] - self.n_ic_timesteps
         self._loss_schedule.sample(n_data_steps)
         metrics: dict[str, float] = {}
-        input_data = data.get_start(self._prognostic_names, self.n_ic_timesteps)
         target_data = self._stepper.get_forward_data(
             data, compute_derived_variables=False
         )
@@ -1578,7 +1577,6 @@ class TrainStepper(
 
         optimization.set_mode(self._stepper.modules)
         output_list, per_channel_losses = self._accumulate_loss(
-            input_data,
             data,
             target_data,
             optimization,
@@ -1616,7 +1614,6 @@ class TrainStepper(
 
     def _accumulate_loss(
         self,
-        input_data: PrognosticState,
         data: BatchData,
         target_data: BatchData,
         optimization: OptimizationABC,
