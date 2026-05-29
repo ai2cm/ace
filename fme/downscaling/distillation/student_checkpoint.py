@@ -78,8 +78,10 @@ def save_student_checkpoint(
     """
     state: dict[str, Any] = dict(teacher.get_state())
 
-    # Overwrite network weights with the distilled student.
-    state["module"] = student_module.state_dict()
+    # Overwrite network weights with the distilled student.  Add the
+    # "module." prefix so the format matches DDP's state_dict() convention
+    # expected by DiffusionModel.from_state() and CheckpointModelConfig.build().
+    state["module"] = {"module." + k: v for k, v in student_module.state_dict().items()}
 
     state["config"]["sampler_type"] = sampler_type
 
@@ -108,6 +110,10 @@ def load_student_module_into_teacher(
 
     ckpt = torch.load(path, map_location="cpu")
     student_weights = ckpt["model"]["module"]
+
+    # Strip the "module." prefix added by save_student_checkpoint for DDP format.
+    if student_weights and next(iter(student_weights)).startswith("module."):
+        student_weights = {k[len("module.") :]: v for k, v in student_weights.items()}
 
     raw = teacher.module.module if isinstance(teacher.module, DDP) else teacher.module
     raw.load_state_dict(student_weights, strict=True)

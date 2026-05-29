@@ -22,7 +22,7 @@ DATASET_FDISTILL=01KSNTVQW7T21X5FD2CVFXB2S6
 
 usage() {
     echo "Usage: $0 <model> [--suffix <suffix>]"
-    echo "  model:    dmd2 | fdistill | all"
+    echo "  model:    dmd2 | fdistill | fdistill-best-crps | all"
     echo "  --suffix: optional suffix appended to job name"
     exit 1
 }

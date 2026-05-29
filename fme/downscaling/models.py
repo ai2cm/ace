@@ -305,6 +305,20 @@ class DiffusionModelConfig:
         )
 
 
+def _add_ddp_prefix(
+    state_dict: dict[str, torch.Tensor],
+) -> dict[str, torch.Tensor]:
+    """Add the 'module.' prefix expected by DDP if it is absent.
+
+    Checkpoints saved before the save_student_checkpoint fix (May 2026) store
+    bare-module keys without the prefix; this makes them loadable into the DDP-
+    wrapped model without re-training.
+    """
+    if state_dict and not next(iter(state_dict)).startswith("module."):
+        return {"module." + k: v for k, v in state_dict.items()}
+    return state_dict
+
+
 def _repeat_batch_by_samples(tensor: torch.Tensor, n_samples: int) -> torch.Tensor:
     """
     Repeat the batch dimension of a tensor n_samples times.  Used to parallelize
@@ -669,7 +683,7 @@ class DiffusionModel:
             full_fine_coords=full_fine_coords,
             static_inputs=static_inputs,
         )
-        model.module.load_state_dict(state["module"], strict=True)
+        model.module.load_state_dict(_add_ddp_prefix(state["module"]), strict=True)
         return model
 
 
@@ -792,7 +806,9 @@ class CheckpointModelConfig:
             rename=self._rename,
             static_inputs=static_inputs,
         )
-        model.module.load_state_dict(self._checkpoint["model"]["module"])
+        model.module.load_state_dict(
+            _add_ddp_prefix(self._checkpoint["model"]["module"])
+        )
         model.module.eval()
         return model
 
