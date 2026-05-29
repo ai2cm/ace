@@ -1306,6 +1306,66 @@ def test_predict_with_forcing(n_ensemble):
     assert new_input_state.time.equals(output.time[:, -1:])
 
 
+def _get_force_positive_stepper(var: str = "a") -> Stepper:
+    """A stepper whose network negates its input, so a force_positive corrector
+    always clamps the output and the uncorrected shadow holds negative values."""
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": Multiply(-1.0).to(DEVICE)}
+                    ),
+                    in_names=[var],
+                    out_names=[var],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(means={var: 0.0}, stds={var: 1.0}),
+                    ),
+                    corrector=AtmosphereCorrectorConfig(force_positive_names=[var]),
+                )
+            ),
+        ),
+    )
+    return config.get_stepper(get_dataset_info())
+
+
+def test_predict_return_uncorrected():
+    stepper = _get_force_positive_stepper("a")
+    n_steps = 3
+    input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=[])
+    forcing_data.data = {}
+    # Default: 2-tuple, no shadow returned.
+    output, _ = stepper.predict(input_data, forcing_data)
+    assert output.data["a"].shape[1] == n_steps
+    # With return_uncorrected: 3-tuple with the pre-correction shadow.
+    corrected, uncorrected, prognostic_state = stepper.predict(
+        input_data, forcing_data, return_uncorrected=True
+    )
+    assert isinstance(prognostic_state, PrognosticState)
+    assert set(uncorrected.data) == {"a"}
+    assert uncorrected.time.equals(corrected.time)
+    # The corrector clamps to >= 0; the shadow holds the pre-clamp (negative) value.
+    assert torch.all(corrected.data["a"] >= 0.0)
+    assert torch.all(uncorrected.data["a"][:, 0] <= 0.0)
+    assert not torch.allclose(corrected.data["a"], uncorrected.data["a"])
+
+
+def test_predict_paired_return_uncorrected():
+    stepper = _get_force_positive_stepper("a")
+    n_steps = 3
+    input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=[])
+    # Default: the PairedData carries no shadow.
+    paired, _ = stepper.predict_paired(input_data, forcing_data)
+    assert paired.uncorrected_prediction is None
+    # Opt-in: the shadow is paired against the same reference / target.
+    paired, _ = stepper.predict_paired(
+        input_data, forcing_data, return_uncorrected=True
+    )
+    assert paired.uncorrected_prediction is not None
+    assert set(paired.uncorrected_prediction) == {"a"}
+
+
 @pytest.mark.parametrize(
     "in_names,out_names,prescribed,module_name",
     [
