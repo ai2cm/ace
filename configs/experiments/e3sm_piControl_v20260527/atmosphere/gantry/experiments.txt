@@ -1,0 +1,2 @@
+
+BK-v20260527-ACE2S-E3SMv3-piControl-100yr-n512-pretrain|rs0|01KSTKJRRMNVYPVXXQ8BDEEQSK|training|best_inference_ckpt|normal|--min-runtime 8h
