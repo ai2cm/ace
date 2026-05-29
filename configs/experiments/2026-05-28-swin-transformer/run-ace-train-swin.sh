@@ -10,9 +10,9 @@ export BEAKER_CLUSTER=${BEAKER_CLUSTER:-ai2/titan}
 export BEAKER_PRIORITY=${BEAKER_PRIORITY:-urgent}
 
 declare -A JOBS=(
-  ["ace-train-config-4deg-AIMIP-nc-swin.yaml"]="ace2-era5-train-4deg-AIMIP-nc-swin"
-  ["ace-train-config-4deg-AIMIP-sfno.yaml"]="ace2-era5-train-4deg-AIMIP-sfno"
-  ["ace-train-config-4deg-AIMIP-swin.yaml"]="ace2-era5-train-4deg-AIMIP-swin"
+  ["ace-train-config-4deg-AIMIP-nc-swin.yaml"]="ace2-era5-train-4deg-AIMIP-nc-swin-v2"
+  ["ace-train-config-4deg-AIMIP-swin.yaml"]="ace2-era5-train-4deg-AIMIP-swin-v2"
+  #["ace-train-config-4deg-AIMIP-sfno.yaml"]="ace2-era5-train-4deg-AIMIP-sfno"
 )
 
 for config in "${!JOBS[@]}"; do
