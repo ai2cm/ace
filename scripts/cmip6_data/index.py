@@ -80,6 +80,13 @@ class DatasetIndexRow:
     # ``data_source == "pangeo+esgf"`` this lists just the variables
     # ESGF added on top of the existing Pangeo zarr.
     esgf_augmented_variables: list[str] = field(default_factory=list)
+    # Append-only audit log of schema migrations applied to this
+    # dataset (e.g. ``[{"from": "0.1.0", "to": "0.2.0", "added": ...}]``).
+    # Populated by ``migrate.py`` after each successful chain step.
+    # Carried as a field on the row so the ESGF-augment path doesn't
+    # silently drop the audit when it round-trips the sidecar through
+    # a ``DatasetIndexRow`` instance.
+    migrations: list[dict] = field(default_factory=list)
 
 
 # Columns that hold list/dict values. For the flat tabular outputs
@@ -94,6 +101,7 @@ _JSON_ENCODED_FIELDS = (
     "cell_methods_mismatch",
     "warnings",
     "esgf_augmented_variables",
+    "migrations",
 )
 
 
