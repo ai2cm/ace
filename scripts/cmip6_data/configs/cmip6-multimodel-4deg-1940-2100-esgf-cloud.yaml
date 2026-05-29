@@ -56,6 +56,9 @@ selection:
     # Pangeo config for rationale. Mirrored here so the ESGF backfill
     # doesn't pull it in either. The MPI-ESM1-2-LR family is retained.
     - MPI-ESM1-2-HR
+    # HadGEM3-GC31-MM excluded for runtime — see Pangeo config.
+    # HadGEM3-GC31-LL family is the retained HadGEM3 representative.
+    - HadGEM3-GC31-MM
   exclude_variants:
     - {source_id: HadGEM3-GC31-MM, experiment: historical, variant_label: r2i1p1f3}
     - {source_id: EC-Earth3, experiment: historical, variant_label: r4i1p1f1}

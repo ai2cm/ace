@@ -69,12 +69,24 @@ selection:
     # MPI-ESM1-2-LR family is retained as the MPI representative.
     # Re-enable when the pipeline is fast enough to absorb it.
     - MPI-ESM1-2-HR
+    # HadGEM3-GC31-MM: high-resolution (1.875° × 1.25°) native grid;
+    # all 3 clean historical variants (r1, r3, r4 — r2 separately
+    # excluded for NaN slabs) reproducibly run past 30h in process_one
+    # and either OOM or get killed for time. Same runtime-driven
+    # exclusion as MPI-ESM1-2-HR. The HadGEM3-GC31-LL family is
+    # retained as the HadGEM3 representative.
+    - HadGEM3-GC31-MM
   exclude_variants:
     # Specific realizations whose 3D state slabs ship as ~10⁶ NaN
     # cells from the publisher. Sibling variants of these same
     # models are clean. See report/README.md §6c.
-    - {source_id: HadGEM3-GC31-MM, experiment: historical, variant_label: r2i1p1f3}
     - {source_id: EC-Earth3, experiment: historical, variant_label: r4i1p1f1}
+    # EC-Earth3 historical r6i1p1f1 reproducibly stalls past 10h in
+    # the new pipeline (lnlqt killed it after 32h). Sibling variants
+    # (r1, r7, r9) succeed. Exclude this specific realization on
+    # runtime grounds; the rest of the EC-Earth3 historical ensemble
+    # is fine.
+    - {source_id: EC-Earth3, experiment: historical, variant_label: r6i1p1f1}
     # CESM2-WACCM ssp585 r1i1p1f1 has 41 consecutive days of
     # all-NaN data starting 2016-02-15 (publisher missing chunk).
     # Sibling variants of CESM2-WACCM ssp585 are fine.
