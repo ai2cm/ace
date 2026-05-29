@@ -4,7 +4,11 @@ from typing import Any
 import torch
 
 import fme
-from fme.ace.registry.swin_transformer import SwinTransformerBuilder
+from fme.ace.registry.stochastic_sfno import NoiseConditionedModel
+from fme.ace.registry.swin_transformer import (
+    NoiseConditionedSwinTransformerBuilder,
+    SwinTransformerBuilder,
+)
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.labels import BatchLabels
@@ -28,11 +32,24 @@ def _get_dataset_info(all_labels: set[str] | None = None) -> DatasetInfo:
     )
 
 
+def _nc_builder(**kwargs: Any) -> NoiseConditionedSwinTransformerBuilder:
+    defaults: dict[str, Any] = dict(
+        embed_dim=32,
+        num_heads=[2, 4, 4, 2],
+        window_size=[4, 4],
+        mlp_ratio=2.0,
+        drop_path_rate=0.0,
+        noise_embed_dim=8,
+    )
+    defaults.update(kwargs)
+    return NoiseConditionedSwinTransformerBuilder(**defaults)
+
+
 def _builder(**kwargs: Any) -> SwinTransformerBuilder:
     defaults: dict[str, Any] = dict(
         embed_dim=32,
-        num_heads=(2, 4, 4, 2),
-        window_size=(4, 4),
+        num_heads=[2, 4, 4, 2],
+        window_size=[4, 4],
         mlp_ratio=2.0,
         drop_path_rate=0.0,
     )
@@ -83,3 +100,64 @@ def test_swin_transformer_conditional_with_labels():
     labels = BatchLabels.new_from_set(all_labels, n_samples=2, device=fme.get_device())
     out = module(x, labels=labels)
     assert out.shape == (2, n_out, *IMG_SHAPE)
+
+
+def test_nc_swin_transformer_is_registered():
+    assert "NoiseConditionedSwinTransformer" in ModuleSelector.get_available_types()
+
+
+def test_nc_swin_transformer_returns_noise_conditioned_model():
+    """Builder returns a NoiseConditionedModel wrapping the Swin net."""
+    n_in, n_out = 5, 3
+    dataset_info = _get_dataset_info()
+    module = _nc_builder().build(n_in, n_out, dataset_info)
+    assert isinstance(module, NoiseConditionedModel)
+
+
+def test_nc_swin_transformer_via_selector():
+    n_in, n_out = 5, 3
+    dataset_info = _get_dataset_info()
+    selector = ModuleSelector(
+        type="NoiseConditionedSwinTransformer",
+        config=dataclasses.asdict(_nc_builder()),
+    )
+    module = selector.build(
+        n_in_channels=n_in, n_out_channels=n_out, dataset_info=dataset_info
+    ).to(fme.get_device())
+    x = torch.randn(2, n_in, *IMG_SHAPE, device=fme.get_device())
+    out = module(x)
+    assert out.shape == (2, n_out, *IMG_SHAPE)
+
+
+def test_nc_swin_transformer_noise_divergence():
+    """Two forwards on identical input diverge after one optimizer step.
+
+    CLN's zero-init noise convs make the freshly-built model noise-independent.
+    After one optimizer step they move off zero and different resampled noise
+    yields distinct outputs.
+    """
+    n_in, n_out = 4, 2
+    dataset_info = _get_dataset_info()
+    module = _nc_builder().build(n_in, n_out, dataset_info).to(fme.get_device())
+    module.train()
+    optimizer = torch.optim.SGD(module.parameters(), lr=1.0)
+
+    x = torch.randn(2, n_in, *IMG_SHAPE, device=fme.get_device())
+
+    # At init: noise-independent (zero-init CLN convs → scale=1, bias=0).
+    with torch.no_grad():
+        out1 = module(x)
+        out2 = module(x)
+    assert torch.allclose(out1, out2), "Expected noise-independence at init"
+
+    # One optimizer step pushes noise convs off zero.
+    out = module(x)
+    out.sum().backward()
+    optimizer.step()
+    optimizer.zero_grad()
+
+    # After step: two independent forward passes now differ.
+    with torch.no_grad():
+        out1 = module(x)
+        out2 = module(x)
+    assert not torch.allclose(out1, out2), "Expected noise-dependence after step"

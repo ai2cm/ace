@@ -352,9 +352,10 @@ stepper:
     config:
       residual_prediction: false
       builder:
-        type: SwinTransformer
+        type: NoiseConditionedSwinTransformer
         config:
           embed_dim: 256
+          noise_embed_dim: 32
           depth_multiplier: 4
           num_heads: [4, 8, 8, 4]
           window_size: [4, 8]

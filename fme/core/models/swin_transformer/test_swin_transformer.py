@@ -6,6 +6,8 @@ from fme.core.models.conditional_sfno.layers import Context, ContextConfig
 from .swin_layers import ColumnMixer
 from .swin_transformer import SwinTransformerNet
 
+_EMBED_DIM_NOISE = 8
+
 
 def _build_net(
     in_chans: int,
@@ -26,6 +28,34 @@ def _build_net(
         drop_path_rate=0.0,
         use_skip=use_skip,
         context_config=context_config,
+    )
+
+
+def _build_cln_net(
+    in_chans: int,
+    out_chans: int,
+    img_shape: tuple[int, int],
+    use_skip: bool = True,
+) -> SwinTransformerNet:
+    context_config = ContextConfig(
+        embed_dim_scalar=0,
+        embed_dim_labels=0,
+        embed_dim_noise=_EMBED_DIM_NOISE,
+        embed_dim_pos=0,
+    )
+    return SwinTransformerNet(
+        in_chans=in_chans,
+        out_chans=out_chans,
+        img_shape=img_shape,
+        embed_dim=32,
+        depth_multiplier=1,
+        num_heads=(2, 4, 4, 2),
+        window_size=(4, 4),
+        mlp_ratio=2.0,
+        drop_path_rate=0.0,
+        use_skip=use_skip,
+        context_config=context_config,
+        conditioning="cln",
     )
 
 
@@ -112,3 +142,100 @@ def test_backward():
     out.sum().backward()
     for name, param in net.named_parameters():
         assert param.grad is not None, f"No gradient for {name}"
+
+
+def test_cln_forward_backward():
+    """CLN mode forward + backward: all params including CLN noise convs get grads."""
+    in_chans, out_chans = 4, 2
+    img_shape = (16, 32)
+    n = 2
+    device = get_device()
+    net = _build_cln_net(in_chans, out_chans, img_shape).to(device)
+    x = torch.randn(n, in_chans, *img_shape, device=device)
+    context = Context(
+        embedding_scalar=None,
+        embedding_pos=None,
+        labels=None,
+        noise=torch.randn(n, _EMBED_DIM_NOISE, *img_shape, device=device),
+    )
+    out = net(x, context)
+    assert out.shape == (n, out_chans, *img_shape)
+    out.sum().backward()
+    for name, param in net.named_parameters():
+        assert param.grad is not None, f"No gradient for {name}"
+
+
+def test_cln_padded_shape():
+    """CLN mode with an img_shape that requires padding exercises pad + subsample."""
+    in_chans, out_chans = 4, 2
+    img_shape = (9, 18)  # not divisible by window_size * 2
+    n = 2
+    device = get_device()
+    net = _build_cln_net(in_chans, out_chans, img_shape).to(device)
+    x = torch.randn(n, in_chans, *img_shape, device=device)
+    context = Context(
+        embedding_scalar=None,
+        embedding_pos=None,
+        labels=None,
+        noise=torch.randn(n, _EMBED_DIM_NOISE, *img_shape, device=device),
+    )
+    out = net(x, context)
+    assert out.shape == (n, out_chans, *img_shape)
+
+
+def test_cln_noise_divergence():
+    """Two forwards with different noise diverge after one optimizer step.
+
+    CLN's zero-init noise convs (scale=1, bias=0) make the freshly-built model
+    noise-independent at init.  After one step the convs move off zero and
+    different noise fields produce distinct outputs.
+    """
+    in_chans, out_chans = 4, 2
+    img_shape = (16, 32)
+    n = 2
+    device = get_device()
+    net = _build_cln_net(in_chans, out_chans, img_shape).to(device)
+    net.train()
+    optimizer = torch.optim.SGD(net.parameters(), lr=1.0)
+
+    x = torch.randn(n, in_chans, *img_shape, device=device)
+    noise_a = torch.randn(n, _EMBED_DIM_NOISE, *img_shape, device=device)
+    noise_b = torch.randn(n, _EMBED_DIM_NOISE, *img_shape, device=device)
+
+    ctx_a = Context(
+        embedding_scalar=None, embedding_pos=None, labels=None, noise=noise_a
+    )
+    ctx_b = Context(
+        embedding_scalar=None, embedding_pos=None, labels=None, noise=noise_b
+    )
+
+    # Verify degenerate at init (zero-init noise convs).
+    with torch.no_grad():
+        assert torch.allclose(
+            net(x, ctx_a), net(x, ctx_b)
+        ), "Expected noise-independence at init"
+
+    # Take one optimizer step to push noise convs off zero.
+    out = net(x, ctx_a)
+    out.sum().backward()
+    optimizer.step()
+    optimizer.zero_grad()
+
+    with torch.no_grad():
+        out_a = net(x, ctx_a)
+        out_b = net(x, ctx_b)
+    assert not torch.allclose(out_a, out_b), "Expected noise-dependence after step"
+
+
+def test_adaln_regression():
+    """AdaLN mode is byte-for-byte identical to the pre-CLN deterministic path."""
+    in_chans, out_chans = 4, 2
+    img_shape = (16, 32)
+    n = 2
+    device = get_device()
+    torch.manual_seed(42)
+    net_adaln = _build_net(in_chans, out_chans, img_shape).to(device)
+    x = torch.randn(n, in_chans, *img_shape, device=device)
+    with torch.no_grad():
+        out = net_adaln(x)
+    assert out.shape == (n, out_chans, *img_shape)

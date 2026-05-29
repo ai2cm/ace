@@ -5,7 +5,9 @@ This is a 2D adaptation of ArchesWeather's 3D Swin U-Net to ACE's
 channel dimension. See ``swin_transformer.md`` for the design notes.
 """
 
+import dataclasses
 import math
+from typing import Literal
 
 import torch
 import torch.nn as nn
@@ -37,11 +39,14 @@ class SwinTransformerNet(nn.Module):
         mlp_ratio: Hidden-dim multiplier for block MLPs.
         drop_path_rate: Maximum stochastic-depth rate.
         use_skip: Whether to concatenate the layer-1 skip into the decoder.
-        context_config: Conditioning configuration. Scalar and label
-            conditioning are applied as independent additive AdaLN projections
-            (matching the SFNO pattern); ``None`` (or both 0) disables AdaLN
-            and the ``Context`` is ignored.
+        context_config: Conditioning configuration.  In ``"adaln"`` mode,
+            scalar and label conditioning are applied as independent additive
+            AdaLN projections; ``None`` (or both 0) disables AdaLN.  In
+            ``"cln"`` mode, ``embed_dim_noise`` drives per-block
+            ``ConditionalLayerNorm``; ``embed_dim_scalar`` must be 0.
         mlp_layer: ``"mlp"`` or ``"swiglu"``.
+        conditioning: ``"adaln"`` (default) for native per-stage DiT AdaLN, or
+            ``"cln"`` for ``ConditionalLayerNorm``-based noise conditioning.
     """
 
     def __init__(
@@ -58,6 +63,7 @@ class SwinTransformerNet(nn.Module):
         use_skip: bool = True,
         context_config: ContextConfig | None = None,
         mlp_layer: str = "mlp",
+        conditioning: Literal["adaln", "cln"] = "adaln",
     ):
         super().__init__()
         if depth_multiplier < 1:
@@ -67,6 +73,7 @@ class SwinTransformerNet(nn.Module):
         self.img_shape = img_shape
         self.use_skip = use_skip
         self.window_size = window_size
+        self.conditioning = conditioning
 
         ws_h, ws_w = window_size
         self.pad_mult = (ws_h * 2, ws_w * 2)
@@ -78,9 +85,11 @@ class SwinTransformerNet(nn.Module):
         if context_config is not None:
             self.embed_dim_scalar = context_config.embed_dim_scalar
             self.embed_dim_labels = context_config.embed_dim_labels
+            self.embed_dim_noise = context_config.embed_dim_noise
         else:
             self.embed_dim_scalar = 0
             self.embed_dim_labels = 0
+            self.embed_dim_noise = 0
 
         self.encoder = nn.Conv2d(in_chans, embed_dim, kernel_size=3, padding=1)
         self.channel_mixer = ChannelMixer(embed_dim)
@@ -103,6 +112,8 @@ class SwinTransformerNet(nn.Module):
             embed_dim_scalar=self.embed_dim_scalar,
             embed_dim_labels=self.embed_dim_labels,
             mlp_layer=mlp_layer,
+            conditioning=conditioning,
+            context_config=context_config,
         )
         self.downsample = PatchMerging(embed_dim)
         self.layer2 = BasicLayer(
@@ -116,6 +127,8 @@ class SwinTransformerNet(nn.Module):
             embed_dim_scalar=self.embed_dim_scalar,
             embed_dim_labels=self.embed_dim_labels,
             mlp_layer=mlp_layer,
+            conditioning=conditioning,
+            context_config=context_config,
         )
         self.layer3 = BasicLayer(
             2 * embed_dim,
@@ -128,6 +141,8 @@ class SwinTransformerNet(nn.Module):
             embed_dim_scalar=self.embed_dim_scalar,
             embed_dim_labels=self.embed_dim_labels,
             mlp_layer=mlp_layer,
+            conditioning=conditioning,
+            context_config=context_config,
         )
         self.upsample = PatchExpanding(2 * embed_dim)  # -> embed_dim, 2x spatial
 
@@ -143,6 +158,8 @@ class SwinTransformerNet(nn.Module):
             embed_dim_scalar=self.embed_dim_scalar,
             embed_dim_labels=self.embed_dim_labels,
             mlp_layer=mlp_layer,
+            conditioning=conditioning,
+            context_config=context_config,
         )
         self.final_linear = nn.Linear(decoder_dim, embed_dim, bias=False)
         self.decoder = nn.Conv2d(embed_dim, out_chans, kernel_size=3, padding=1)
@@ -159,9 +176,12 @@ class SwinTransformerNet(nn.Module):
         x = x.permute(0, 2, 3, 1)  # (B, Hp, Wp, embed_dim)
         x = self.channel_mixer(x)
 
+        # AdaLN conditioning: extract scalar/label embeddings from context.
         cond_scalar: torch.Tensor | None = None
         cond_labels: torch.Tensor | None = None
-        if self.embed_dim_scalar > 0 or self.embed_dim_labels > 0:
+        if self.conditioning == "adaln" and (
+            self.embed_dim_scalar > 0 or self.embed_dim_labels > 0
+        ):
             if context is None:
                 raise ValueError(
                     "context is required for a conditioned SwinTransformerNet"
@@ -175,15 +195,30 @@ class SwinTransformerNet(nn.Module):
                     raise ValueError("labels are required")
                 cond_labels = context.labels
 
-        x = self.layer1(x, cond_scalar, cond_labels)
+        # CLN conditioning: pad and subsample noise to match U-Net resolutions.
+        ctx_full: Context | None = context
+        ctx_half: Context | None = context
+        if self.conditioning == "cln" and self.embed_dim_noise > 0:
+            if context is None or context.noise is None:
+                raise ValueError(
+                    "context.noise is required for a cln-conditioned SwinTransformerNet"
+                )
+            noise = context.noise  # (B, embed_dim_noise, H, W)
+            if pad_h > 0 or pad_w > 0:
+                noise = F.pad(noise, (0, pad_w, 0, pad_h))
+            noise_half = noise[..., ::2, ::2]
+            ctx_full = dataclasses.replace(context, noise=noise)
+            ctx_half = dataclasses.replace(context, noise=noise_half)
+
+        x = self.layer1(x, cond_scalar, cond_labels, context=ctx_full)
         skip = x
         x = self.downsample(x)
-        x = self.layer2(x, cond_scalar, cond_labels)
-        x = self.layer3(x, cond_scalar, cond_labels)
+        x = self.layer2(x, cond_scalar, cond_labels, context=ctx_half)
+        x = self.layer3(x, cond_scalar, cond_labels, context=ctx_half)
         x = self.upsample(x)
         if self.use_skip:
             x = torch.cat([x, skip], dim=-1)
-        x = self.layer4(x, cond_scalar, cond_labels)
+        x = self.layer4(x, cond_scalar, cond_labels, context=ctx_full)
 
         x = self.final_linear(x)  # (B, Hp, Wp, embed_dim)
         x = x.permute(0, 3, 1, 2)  # (B, embed_dim, Hp, Wp)

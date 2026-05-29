@@ -6,12 +6,19 @@ how the pieces fit together. All transformer blocks operate on tensors with
 a trailing channel dimension, i.e. shape ``(B, H, W, C)``.
 """
 
+from typing import Literal
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from fme.core.models.conditional_sfno.initialization import trunc_normal_
-from fme.core.models.conditional_sfno.layers import DropPath
+from fme.core.models.conditional_sfno.layers import (
+    ConditionalLayerNorm,
+    Context,
+    ContextConfig,
+    DropPath,
+)
 
 
 def window_partition_2d(x: torch.Tensor, ws_h: int, ws_w: int) -> torch.Tensor:
@@ -233,12 +240,13 @@ CondParams = tuple[
 
 
 class SwinTransformerBlock(nn.Module):
-    """A single 2D Swin transformer block with optional AdaLN conditioning.
+    """A single 2D Swin transformer block with optional AdaLN or CLN conditioning.
 
-    Two gated sub-blocks: window attention (with ColumnMixer folded into its
-    output) followed by an MLP. When conditioning is active, AdaLN scale/shift
-    is applied after each norm and a gate scales each residual branch, matching
-    ArchesWeather. ColumnMixer has no conditioning and no separate residual.
+    Two sub-blocks: window attention (with ColumnMixer folded into its output)
+    followed by an MLP. In ``"adaln"`` mode, AdaLN scale/shift is applied after
+    each norm and a gate scales each residual branch. In ``"cln"`` mode,
+    ``ConditionalLayerNorm`` is used for both norms and a plain (ungated) residual
+    is applied, matching the SFNO's noise-conditioned path.
 
     Args:
         dim: Number of channels.
@@ -248,9 +256,12 @@ class SwinTransformerBlock(nn.Module):
         shift_size: ``(sh, sw)`` cyclic shift; ``(0, 0)`` for a regular block.
         mlp_ratio: Hidden-dim multiplier for the MLP.
         drop_path: Stochastic-depth rate for this block.
-        conditioned: Whether AdaLN conditioning parameters will be supplied.
         mlp_layer: ``"mlp"`` or ``"swiglu"``.
         qkv_bias: Whether attention uses a qkv bias.
+        conditioning: ``"adaln"`` (default) for native AdaLN, or ``"cln"`` for
+            ``ConditionalLayerNorm``-based noise conditioning.
+        context_config: Required when ``conditioning="cln"``; passed to each
+            ``ConditionalLayerNorm``.
     """
 
     def __init__(
@@ -264,18 +275,32 @@ class SwinTransformerBlock(nn.Module):
         drop_path: float = 0.0,
         mlp_layer: str = "mlp",
         qkv_bias: bool = True,
+        conditioning: Literal["adaln", "cln"] = "adaln",
+        context_config: ContextConfig | None = None,
     ):
         super().__init__()
         self.dim = dim
         self.input_resolution = input_resolution
         self.window_size = window_size
         self.shift_size = shift_size
+        self.conditioning = conditioning
 
-        self.norm1 = nn.LayerNorm(dim)
+        if conditioning == "cln":
+            if context_config is None:
+                raise ValueError("context_config is required for cln conditioning")
+            self.norm1: nn.Module = ConditionalLayerNorm(
+                dim, input_resolution, context_config
+            )
+            self.norm2: nn.Module = ConditionalLayerNorm(
+                dim, input_resolution, context_config
+            )
+        else:
+            self.norm1 = nn.LayerNorm(dim)
+            self.norm2 = nn.LayerNorm(dim)
+
         self.attn = WindowAttention2D(dim, window_size, num_heads, qkv_bias=qkv_bias)
         self.column_mixer = ColumnMixer(dim)
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
-        self.norm2 = nn.LayerNorm(dim)
         self.mlp = _build_mlp(mlp_layer, dim, int(dim * mlp_ratio))
 
         self.register_buffer("attn_mask", self._build_mask(), persistent=False)
@@ -302,38 +327,61 @@ class SwinTransformerBlock(nn.Module):
         return attn_mask
 
     def forward(
-        self, x: torch.Tensor, cond_params: CondParams | None = None
+        self,
+        x: torch.Tensor,
+        cond_params: CondParams | None = None,
+        context: Context | None = None,
     ) -> torch.Tensor:
         H, W = self.input_resolution
         ws_h, ws_w = self.window_size
         sh, sw = self.shift_size
         _, _, _, C = x.shape
 
-        shortcut = x
-        x = self.norm1(x)
-        if cond_params is not None:
-            shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = cond_params
-            x = x * (1 + scale_msa) + shift_msa
-
-        if sh > 0 or sw > 0:
-            x = torch.roll(x, shifts=(-sh, -sw), dims=(1, 2))
-        x_windows = window_partition_2d(x, ws_h, ws_w).view(-1, ws_h * ws_w, C)
-        attn_windows = self.attn(x_windows, mask=self.attn_mask)
-        attn_windows = attn_windows.view(-1, ws_h, ws_w, C)
-        x = window_reverse_2d(attn_windows, ws_h, ws_w, H, W)
-        if sh > 0 or sw > 0:
-            x = torch.roll(x, shifts=(sh, sw), dims=(1, 2))
-
-        # ColumnMixer folded into the window-attention output (no own residual).
-        x = x + self.column_mixer(x)
-
-        if cond_params is not None:
-            x = shortcut + gate_msa * self.drop_path(x)
-            x_norm = self.norm2(x) * (1 + scale_mlp) + shift_mlp
-            x = x + self.drop_path(gate_mlp * self.mlp(x_norm))
+        if self.conditioning == "cln":
+            shortcut = x
+            # CLN is channels-first; Swin is channels-last → transpose around norm.
+            h = self.norm1(x.permute(0, 3, 1, 2), context).permute(0, 2, 3, 1)
+            if sh > 0 or sw > 0:
+                h = torch.roll(h, shifts=(-sh, -sw), dims=(1, 2))
+            h_windows = window_partition_2d(h, ws_h, ws_w).view(-1, ws_h * ws_w, C)
+            attn_windows = self.attn(h_windows, mask=self.attn_mask)
+            attn_windows = attn_windows.view(-1, ws_h, ws_w, C)
+            h = window_reverse_2d(attn_windows, ws_h, ws_w, H, W)
+            if sh > 0 or sw > 0:
+                h = torch.roll(h, shifts=(sh, sw), dims=(1, 2))
+            # ColumnMixer folded in (no own residual).
+            h = h + self.column_mixer(h)
+            x = shortcut + self.drop_path(h)
+            y = self.norm2(x.permute(0, 3, 1, 2), context).permute(0, 2, 3, 1)
+            x = x + self.drop_path(self.mlp(y))
         else:
-            x = shortcut + self.drop_path(x)
-            x = x + self.drop_path(self.mlp(self.norm2(x)))
+            shortcut = x
+            x = self.norm1(x)
+            if cond_params is not None:
+                shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
+                    cond_params
+                )
+                x = x * (1 + scale_msa) + shift_msa
+
+            if sh > 0 or sw > 0:
+                x = torch.roll(x, shifts=(-sh, -sw), dims=(1, 2))
+            x_windows = window_partition_2d(x, ws_h, ws_w).view(-1, ws_h * ws_w, C)
+            attn_windows = self.attn(x_windows, mask=self.attn_mask)
+            attn_windows = attn_windows.view(-1, ws_h, ws_w, C)
+            x = window_reverse_2d(attn_windows, ws_h, ws_w, H, W)
+            if sh > 0 or sw > 0:
+                x = torch.roll(x, shifts=(sh, sw), dims=(1, 2))
+
+            # ColumnMixer folded into the window-attention output (no own residual).
+            x = x + self.column_mixer(x)
+
+            if cond_params is not None:
+                x = shortcut + gate_msa * self.drop_path(x)
+                x_norm = self.norm2(x) * (1 + scale_mlp) + shift_mlp
+                x = x + self.drop_path(gate_mlp * self.mlp(x_norm))
+            else:
+                x = shortcut + self.drop_path(x)
+                x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x
 
 
@@ -388,13 +436,15 @@ class PatchExpanding(nn.Module):
 
 
 class BasicLayer(nn.Module):
-    """A stack of ``SwinTransformerBlock``s sharing independent AdaLN projections.
+    """A stack of ``SwinTransformerBlock``s with AdaLN or CLN conditioning.
 
-    Blocks alternate regular/shifted windows by index. When conditioning is
-    active, the layer owns separate ``SiLU -> Linear`` projections for scalar
-    and label conditioning, each producing ``6*dim`` AdaLN parameters. Their
-    outputs are summed additively before being split into the 6-tuple passed to
-    each block, matching the SFNO's independent-additive FiLM pattern.
+    In ``"adaln"`` mode, blocks alternate regular/shifted windows by index and
+    the layer owns separate ``SiLU -> Linear`` projections for scalar and label
+    conditioning, each producing ``6*dim`` AdaLN parameters.  Their outputs are
+    summed additively before being split into the 6-tuple passed to each block.
+
+    In ``"cln"`` mode, each block uses ``ConditionalLayerNorm`` (which owns its
+    own per-pixel noise convs) and no AdaLN projections are built.
 
     Args:
         dim: Number of channels.
@@ -404,9 +454,14 @@ class BasicLayer(nn.Module):
         window_size: ``(ws_h, ws_w)`` attention window.
         mlp_ratio: Hidden-dim multiplier for each block's MLP.
         drop_path: Per-block stochastic-depth rates (length ``depth``).
-        embed_dim_scalar: Scalar conditioning dimension; 0 disables that path.
-        embed_dim_labels: Label conditioning dimension; 0 disables that path.
+        embed_dim_scalar: Scalar conditioning dimension; 0 disables that path
+            (only used in ``"adaln"`` mode).
+        embed_dim_labels: Label conditioning dimension; 0 disables that path
+            (only used in ``"adaln"`` mode).
         mlp_layer: ``"mlp"`` or ``"swiglu"``.
+        conditioning: ``"adaln"`` (default) or ``"cln"``.
+        context_config: Required when ``conditioning="cln"``; forwarded to each
+            block's ``ConditionalLayerNorm``.
     """
 
     def __init__(
@@ -421,12 +476,15 @@ class BasicLayer(nn.Module):
         embed_dim_scalar: int,
         embed_dim_labels: int,
         mlp_layer: str,
+        conditioning: Literal["adaln", "cln"] = "adaln",
+        context_config: ContextConfig | None = None,
     ):
         super().__init__()
         if len(drop_path) != depth:
             raise ValueError(
                 f"drop_path has length {len(drop_path)}, expected depth {depth}"
             )
+        self.conditioning = conditioning
         ws_h, ws_w = window_size
         self.blocks = nn.ModuleList(
             [
@@ -439,14 +497,15 @@ class BasicLayer(nn.Module):
                     mlp_ratio=mlp_ratio,
                     drop_path=drop_path[i],
                     mlp_layer=mlp_layer,
+                    conditioning=conditioning,
+                    context_config=context_config,
                 )
                 for i in range(depth)
             ]
         )
-        # DiT-style identity init: zero the projections so blocks start as
-        # identity and conditioning is learned from zero. Both projections are
-        # summed additively, so zero-init on each → zero sum → identity.
-        if embed_dim_scalar > 0:
+        # AdaLN projections: DiT-style zero-init so blocks start as identity.
+        # Only built in "adaln" mode.
+        if conditioning == "adaln" and embed_dim_scalar > 0:
             self.adaln_scalar: nn.Module | None = nn.Sequential(
                 nn.SiLU(), nn.Linear(embed_dim_scalar, 6 * dim)
             )
@@ -454,7 +513,7 @@ class BasicLayer(nn.Module):
             nn.init.zeros_(self.adaln_scalar[1].bias)
         else:
             self.adaln_scalar = None
-        if embed_dim_labels > 0:
+        if conditioning == "adaln" and embed_dim_labels > 0:
             self.adaln_labels: nn.Module | None = nn.Sequential(
                 nn.SiLU(), nn.Linear(embed_dim_labels, 6 * dim)
             )
@@ -468,7 +527,13 @@ class BasicLayer(nn.Module):
         x: torch.Tensor,
         cond_scalar: torch.Tensor | None = None,
         cond_labels: torch.Tensor | None = None,
+        context: Context | None = None,
     ) -> torch.Tensor:
+        if self.conditioning == "cln":
+            for blk in self.blocks:
+                x = blk(x, context=context)
+            return x
+
         cond_params: CondParams | None = None
         raw: torch.Tensor | None = None
         if self.adaln_scalar is not None:

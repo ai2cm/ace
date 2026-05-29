@@ -7,6 +7,7 @@ Usage (from repo root, in the fme conda env):
 
 from pathlib import Path
 
+import pandas as pd
 import yaml
 
 import fme.ace.registry  # noqa: F401 — registers all builders
@@ -57,7 +58,8 @@ def main() -> None:
     config_dir = Path(__file__).resolve().parent
     configs = {
         "SFNO": config_dir / "ace-train-config-4deg-AIMIP-sfno.yaml",
-        "Swin": config_dir / "ace-train-config-4deg-AIMIP-nc-swin.yaml",
+        "Swin": config_dir / "ace-train-config-4deg-AIMIP-swin.yaml",
+        "NC-Swin": config_dir / "ace-train-config-4deg-AIMIP-nc-swin.yaml",
     }
 
     results = {}
@@ -71,18 +73,19 @@ def main() -> None:
         print(f"  trainable: {_fmt(info['trainable'])} ({info['trainable']:,})")
         print()
 
-    col = 14
-    print(
-        f"{'Model':<8} {'Builder':<24} {'In':>{col//2}} {'Out':>{col//2}}"
-        f" {'Total':>{col}} {'Trainable':>{col}}"
-    )
-    print("-" * (8 + 24 + col // 2 * 2 + col * 2 + 5))
-    for label, info in results.items():
-        print(
-            f"{label:<8} {info['builder_type']:<24}"
-            f" {info['n_in']:>{col//2}} {info['n_out']:>{col//2}}"
-            f" {_fmt(info['total']):>{col}} {_fmt(info['trainable']):>{col}}"
-        )
+    rows = [
+        {
+            "Model": label,
+            "Builder": info["builder_type"],
+            "In": info["n_in"],
+            "Out": info["n_out"],
+            "Total": _fmt(info["total"]),
+            "Trainable": _fmt(info["trainable"]),
+        }
+        for label, info in results.items()
+    ]
+    df = pd.DataFrame(rows).set_index("Model")
+    print(df.to_string())
 
     labels = list(results)
     if len(labels) == 2:
