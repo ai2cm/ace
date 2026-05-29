@@ -3,7 +3,7 @@ import torch
 from fme.core.device import get_device
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
 
-from .swin_layers import ColumnMixer
+from .swin_layers import ColumnMixer, WindowAttention2D
 from .swin_transformer import SwinTransformerNet
 
 _EMBED_DIM_NOISE = 8
@@ -228,7 +228,7 @@ def test_cln_noise_divergence():
 
 
 def test_adaln_regression():
-    """AdaLN mode is byte-for-byte identical to the pre-CLN deterministic path."""
+    """Forward pass produces the correct output shape in AdaLN mode."""
     in_chans, out_chans = 4, 2
     img_shape = (16, 32)
     n = 2
@@ -313,5 +313,55 @@ def test_cpb_backward_with_lat_coords():
     ).to(device)
     x = torch.randn(n, in_chans, *img_shape, device=device)
     net(x).sum().backward()
+    for name, param in net.named_parameters():
+        assert param.grad is not None, f"No gradient for {name}"
+
+
+def test_cosine_attention_forward():
+    """Forward pass completes without NaN; every WindowAttention2D has a tau param."""
+    in_chans, out_chans = 5, 3
+    img_shape = (16, 32)
+    n = 2
+    device = get_device()
+    net = _build_net(in_chans, out_chans, img_shape).to(device)
+    x = torch.randn(n, in_chans, *img_shape, device=device)
+    with torch.no_grad():
+        out = net(x)
+    assert not torch.isnan(out).any(), "NaN in output"
+    assert out.shape == (n, out_chans, *img_shape)
+    for name, module in net.named_modules():
+        if isinstance(module, WindowAttention2D):
+            assert hasattr(module, "tau"), f"tau missing on {name}"
+            assert isinstance(module.tau, torch.nn.Parameter)
+
+
+def test_v2_with_conditioning():
+    """
+    Forward + backward with AdaLN conditioning; all params including tau get grads.
+    """
+    in_chans, out_chans = 4, 2
+    img_shape = (16, 32)
+    n = 2
+    embed_dim_scalar, embed_dim_labels = 8, 4
+    device = get_device()
+    context_config = ContextConfig(
+        embed_dim_scalar=embed_dim_scalar,
+        embed_dim_labels=embed_dim_labels,
+        embed_dim_noise=0,
+        embed_dim_pos=0,
+    )
+    net = _build_net(in_chans, out_chans, img_shape, context_config=context_config).to(
+        device
+    )
+    x = torch.randn(n, in_chans, *img_shape, device=device)
+    context = Context(
+        embedding_scalar=torch.randn(n, embed_dim_scalar, device=device),
+        embedding_pos=None,
+        labels=torch.randn(n, embed_dim_labels, device=device),
+        noise=None,
+    )
+    out = net(x, context)
+    assert out.shape == (n, out_chans, *img_shape)
+    out.sum().backward()
     for name, param in net.named_parameters():
         assert param.grad is not None, f"No gradient for {name}"

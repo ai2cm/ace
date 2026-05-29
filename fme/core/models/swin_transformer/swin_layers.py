@@ -75,8 +75,7 @@ class WindowAttention2D(nn.Module):
         self.dim = dim
         self.window_size = window_size
         self.num_heads = num_heads
-        head_dim = dim // num_heads
-        self.scale = head_dim**-0.5
+        self.tau = nn.Parameter(torch.ones(1, num_heads, 1, 1))
 
         ws_h, ws_w = window_size
         self.cpb_mlp = nn.Sequential(
@@ -131,11 +130,15 @@ class WindowAttention2D(nn.Module):
             .permute(2, 0, 3, 1, 4)
         )
         q, k, v = qkv[0], qkv[1], qkv[2]
-        q = q * self.scale
-        attn = q @ k.transpose(-2, -1)
+        norm_q = torch.norm(q, dim=-1, keepdim=True)
+        norm_k = torch.norm(k, dim=-1, keepdim=True).transpose(-2, -1)
+        attn = (q @ k.transpose(-2, -1)) / (norm_q * norm_k).clamp(min=1e-6)
+        attn = attn / self.tau.clamp(min=0.01)
 
         if lat_mean is None:
-            bias = self.cpb_mlp(self.relative_coords_log)  # (N*N, num_heads)
+            bias = 16.0 * torch.sigmoid(
+                self.cpb_mlp(self.relative_coords_log)
+            )  # (N*N, num_heads)
             bias = bias.permute(1, 0).reshape(self.num_heads, N, N)
             attn = attn + bias.unsqueeze(0)
         else:
@@ -149,7 +152,9 @@ class WindowAttention2D(nn.Module):
                 [h_coords.unsqueeze(0).expand(nW, -1), w_coords], dim=-1
             )  # (nW, N*N, 2)
             coords_log = torch.sign(coords) * torch.log(1.0 + coords.abs())
-            bias = self.cpb_mlp(coords_log)  # (nW, N*N, num_heads)
+            bias = 16.0 * torch.sigmoid(
+                self.cpb_mlp(coords_log)
+            )  # (nW, N*N, num_heads)
             bias = bias.permute(0, 2, 1).reshape(nW, self.num_heads, N, N)
             attn = attn.view(B_ // nW, nW, self.num_heads, N, N) + bias.unsqueeze(0)
             attn = attn.view(B_, self.num_heads, N, N)
@@ -394,10 +399,10 @@ class SwinTransformerBlock(nn.Module):
 
         if self.conditioning == "cln":
             shortcut = x
-            # CLN is channels-first; Swin is channels-last → transpose around norm.
-            h = self.norm1(x.permute(0, 3, 1, 2), context).permute(0, 2, 3, 1)
             if sh > 0 or sw > 0:
-                h = torch.roll(h, shifts=(-sh, -sw), dims=(1, 2))
+                h = torch.roll(x, shifts=(-sh, -sw), dims=(1, 2))
+            else:
+                h = x
             h_windows = window_partition_2d(h, ws_h, ws_w).view(-1, ws_h * ws_w, C)
             attn_windows = self.attn(h_windows, mask=self.attn_mask, lat_mean=lat_mean)
             attn_windows = attn_windows.view(-1, ws_h, ws_w, C)
@@ -406,37 +411,44 @@ class SwinTransformerBlock(nn.Module):
                 h = torch.roll(h, shifts=(sh, sw), dims=(1, 2))
             # ColumnMixer folded in (no own residual).
             h = h + self.column_mixer(h)
-            x = shortcut + self.drop_path(h)
-            y = self.norm2(x.permute(0, 3, 1, 2), context).permute(0, 2, 3, 1)
-            x = x + self.drop_path(self.mlp(y))
+            # CLN is channels-first; Swin is channels-last → transpose around norm.
+            h_norm = self.norm1(h.permute(0, 3, 1, 2), context).permute(0, 2, 3, 1)
+            x = shortcut + self.drop_path(h_norm)
+            shortcut = x
+            y_norm = self.norm2(self.mlp(x).permute(0, 3, 1, 2), context).permute(
+                0, 2, 3, 1
+            )
+            x = shortcut + self.drop_path(y_norm)
         else:
             shortcut = x
-            x = self.norm1(x)
             if cond_params is not None:
                 shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
                     cond_params
                 )
-                x = x * (1 + scale_msa) + shift_msa
 
             if sh > 0 or sw > 0:
-                x = torch.roll(x, shifts=(-sh, -sw), dims=(1, 2))
-            x_windows = window_partition_2d(x, ws_h, ws_w).view(-1, ws_h * ws_w, C)
-            attn_windows = self.attn(x_windows, mask=self.attn_mask, lat_mean=lat_mean)
+                h = torch.roll(x, shifts=(-sh, -sw), dims=(1, 2))
+            else:
+                h = x
+            h_windows = window_partition_2d(h, ws_h, ws_w).view(-1, ws_h * ws_w, C)
+            attn_windows = self.attn(h_windows, mask=self.attn_mask, lat_mean=lat_mean)
             attn_windows = attn_windows.view(-1, ws_h, ws_w, C)
-            x = window_reverse_2d(attn_windows, ws_h, ws_w, H, W)
+            h = window_reverse_2d(attn_windows, ws_h, ws_w, H, W)
             if sh > 0 or sw > 0:
-                x = torch.roll(x, shifts=(sh, sw), dims=(1, 2))
+                h = torch.roll(h, shifts=(sh, sw), dims=(1, 2))
 
             # ColumnMixer folded into the window-attention output (no own residual).
-            x = x + self.column_mixer(x)
+            h = h + self.column_mixer(h)
 
             if cond_params is not None:
-                x = shortcut + gate_msa * self.drop_path(x)
-                x_norm = self.norm2(x) * (1 + scale_mlp) + shift_mlp
-                x = x + self.drop_path(gate_mlp * self.mlp(x_norm))
+                h_norm = self.norm1(h) * (1 + scale_msa) + shift_msa
+                x = shortcut + gate_msa * self.drop_path(h_norm)
+                shortcut = x
+                h_norm = self.norm2(self.mlp(x)) * (1 + scale_mlp) + shift_mlp
+                x = shortcut + gate_mlp * self.drop_path(h_norm)
             else:
-                x = shortcut + self.drop_path(x)
-                x = x + self.drop_path(self.mlp(self.norm2(x)))
+                x = shortcut + self.drop_path(self.norm1(h))
+                x = x + self.drop_path(self.norm2(self.mlp(x)))
         return x
 
 
