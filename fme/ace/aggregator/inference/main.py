@@ -248,10 +248,10 @@ class InferenceEvaluatorAggregatorConfig:
     )
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
-    compute_uncorrected_metrics: bool = False
+    compute_uncorrected_metrics: bool = True
     """If True, additionally compute time-mean metrics on the stepper's
     uncorrected (pre-correction) outputs, logged under an ``uncorrected/`` prefix.
-    Quantifies how much the stepper relies on its corrector. Default off; has no
+    Quantifies how much the stepper relies on its corrector. Default on; has no
     effect when the stepper has no corrector."""
 
     def __post_init__(self):
@@ -730,6 +730,11 @@ class InferenceEvaluatorAggregatorWithUncorrected(
     ):
         self._main = main
         self._uncorrected = uncorrected
+        # The shadow records only when a non-empty uncorrected prediction is
+        # present (i.e. the stepper has an active corrector). When it never
+        # records, its aggregators have no data, so we must skip summarizing and
+        # flushing them.
+        self._recorded_uncorrected = False
 
     @staticmethod
     def _shadow_paired(data: PairedData) -> PairedData | None:
@@ -747,6 +752,7 @@ class InferenceEvaluatorAggregatorWithUncorrected(
         logs = self._main.record_batch(data)
         shadow = self._shadow_paired(data)
         if shadow is not None:
+            self._recorded_uncorrected = True
             uncorrected_logs = self._uncorrected.record_batch(shadow)
             logs = _merge_uncorrected_logs(
                 logs, uncorrected_logs, self.UNCORRECTED_LABEL
@@ -765,13 +771,18 @@ class InferenceEvaluatorAggregatorWithUncorrected(
 
     def get_summary_logs(self) -> InferenceLog:
         logs = dict(self._main.get_summary_logs())
-        logs.update(
-            _prefix_keys(self.UNCORRECTED_LABEL, self._uncorrected.get_summary_logs())
-        )
+        if self._recorded_uncorrected:
+            logs.update(
+                _prefix_keys(
+                    self.UNCORRECTED_LABEL, self._uncorrected.get_summary_logs()
+                )
+            )
         return logs
 
     def flush_diagnostics(self, subdir: str | None = None) -> None:
         self._main.flush_diagnostics(subdir)
+        if not self._recorded_uncorrected:
+            return
         uncorrected_subdir = (
             self.UNCORRECTED_LABEL
             if subdir is None

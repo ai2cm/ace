@@ -179,16 +179,16 @@ def test_inference_evaluator_aggregator_ensemble():
             )
 
 
-def test_compute_uncorrected_metrics_defaults_off_and_round_trips():
+def test_compute_uncorrected_metrics_defaults_on_and_round_trips():
     config = InferenceEvaluatorAggregatorConfig()
-    assert config.compute_uncorrected_metrics is False
-    enabled = InferenceEvaluatorAggregatorConfig(compute_uncorrected_metrics=True)
+    assert config.compute_uncorrected_metrics is True
+    disabled = InferenceEvaluatorAggregatorConfig(compute_uncorrected_metrics=False)
     restored = dacite.from_dict(
         InferenceEvaluatorAggregatorConfig,
-        dataclasses.asdict(enabled),
+        dataclasses.asdict(disabled),
         config=dacite.Config(strict=True),
     )
-    assert restored.compute_uncorrected_metrics is True
+    assert restored.compute_uncorrected_metrics is False
 
 
 def test_reduced_for_uncorrected_keeps_only_time_mean():
@@ -281,3 +281,11 @@ def test_with_uncorrected_skips_shadow_when_absent():
     assert logs[0]["time_mean/rmse/a"] == 1.0
     assert "uncorrected/time_mean/rmse/a" not in logs[0]
     assert len(shadow.recorded_batches) == 0
+
+    # With nothing recorded, the shadow is neither summarized nor flushed, so a
+    # shadow aggregator that would error on empty data is never touched.
+    summary = agg.get_summary_logs()
+    assert "uncorrected/time_mean/rmse/a" not in summary
+    agg.flush_diagnostics(None)
+    assert main.flushed_subdirs == [None]
+    assert shadow.flushed_subdirs == []
