@@ -12,16 +12,16 @@ data_writer:
 forcing_loader:
   atmosphere:
     dataset:
-      data_path: /climate-default
-      file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+      data_path: /climate-default/2025-08-29-coupled-inference-no-target-data-example/CM4
+      file_pattern: cm4-atmosphere-forcing-1yr.zarr
       engine: zarr
-      n_repeats: 6
+      n_repeats: 1001
   num_data_workers: 1
 initial_condition:
   ocean:
-    path: /climate-default/home/elynn/ace/scratch/0151-01-03_ocean_ic.nc
+    path: /climate-default/2025-08-29-coupled-inference-no-target-data-example/CM4/cm4-ocean-ic.nc
   atmosphere:
-    path: /climate-default/home/elynn/ace/scratch/0151-01-03_atmosphere_ic.nc
+    path: /climate-default/2025-08-29-coupled-inference-no-target-data-example/CM4/cm4-atmosphere-ic.nc
   start_indices:
     first: 0
     n_initial_conditions: 1
