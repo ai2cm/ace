@@ -79,10 +79,10 @@ done
 
 case "$MODEL" in
     dmd2)     run_eval dmd2     config-dmd2.yaml     "$DATASET_DMD2:/checkpoints" ;;
-    fdistill) run_eval fdistill config-fdistill.yaml "$DATASET_FDISTILL:fastgen/ace-downscaling-distillation-fdistill-with-val-intended-recipe/checkpoints:/checkpoints" ;;
+    fdistill) run_eval fdistill config-fdistill.yaml "$DATASET_FDISTILL:fastgen/ace-downscaling-distillation-fdistill-with-val-intended-recipe/student_checkpoints:/checkpoints" ;;
     all)
         run_eval dmd2     config-dmd2.yaml     "$DATASET_DMD2:/checkpoints"
-        run_eval fdistill config-fdistill.yaml "$DATASET_FDISTILL:fastgen/ace-downscaling-distillation-fdistill-with-val-intended-recipe/checkpoints/best_student_tail.ckpt:/checkpoints/best_student_tail.ckpt"
+        run_eval fdistill config-fdistill.yaml "$DATASET_FDISTILL:fastgen/ace-downscaling-distillation-fdistill-with-val-intended-recipe/student_checkpoints:/checkpoints"
         ;;
     *)
         echo "Unknown model: $MODEL"

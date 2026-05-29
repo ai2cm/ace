@@ -302,8 +302,6 @@ def main() -> None:
     # Patch FastGen's to_wandb to handle non-RGB tensors (ACE outputs C != 3).
     # WandbCallback.to_wandb asserts C == 3; we replicate the first channel to
     # RGB so sample logging works regardless of the number of output channels.
-    from omegaconf import DictConfig
-
     import fastgen.callbacks.wandb as _wandb_mod
     import fastgen.utils.distributed.ddp as _fastgen_ddp
     import fastgen.utils.logging_utils as logger
@@ -314,6 +312,7 @@ def main() -> None:
     from fastgen.utils.distributed import clean_up, is_rank0, synchronize, world_size
     from fastgen.utils.io_utils import set_env_vars
     from fastgen.utils.scripts import set_cuda_backend
+    from omegaconf import DictConfig
 
     _orig_to_wandb = _wandb_mod.to_wandb
 
@@ -527,11 +526,15 @@ def main() -> None:
         coarse_val_data = val_data_cfg.build(
             requirements=requirements, dist=ace_dist_val
         )
-        best_student_path = os.path.join(
-            config.trainer.checkpointer.save_dir, "best_student.ckpt"
+        # Separate directory so evaluation jobs can mount just these two files
+        # without downloading all the raw .pth training checkpoints.
+        best_student_dir = os.path.join(
+            config.log_config.save_path, "student_checkpoints"
         )
+        os.makedirs(best_student_dir, exist_ok=True)
+        best_student_path = os.path.join(best_student_dir, "best_student.ckpt")
         best_student_tail_path = os.path.join(
-            config.trainer.checkpointer.save_dir, "best_student_tail.ckpt"
+            best_student_dir, "best_student_tail.ckpt"
         )
         fastgen_trainer.callbacks._callbacks["best_student"] = (
             BestStudentCheckpointCallback(
