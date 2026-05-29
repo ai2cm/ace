@@ -126,6 +126,10 @@ def query_files(
     variable_id: str,
 ) -> ESGFFileSet:
     """Query ESGF for all files of one variable-dataset."""
+    # No ``fields`` parameter — same incompatibility as inventory_esgf.py
+    # against LLNL/ORNL's new strict Solr-bridge API (HTTP 422
+    # ``extra_forbidden``). We extract the title/size/url/checksum
+    # fields from the response below either way.
     base: dict = {
         "type": "File",
         "project": "CMIP6",
@@ -134,7 +138,6 @@ def query_files(
         "member_id": member_id,
         "table_id": table_id,
         "variable_id": variable_id,
-        "fields": "title,size,url,checksum,checksum_type",
         "limit": 500,
     }
 
