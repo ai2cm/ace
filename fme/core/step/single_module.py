@@ -515,7 +515,7 @@ def step_with_adjustments(
         output_norm = add_names(input_norm, output_norm, prognostic_names)
     output = normalizer.denormalize(output_norm)
     if corrector is not None:
-        output = corrector(input, output, next_step_input_data)
+        output = corrector(input, output, next_step_input_data).corrected
     if ocean is not None:
         output = ocean(input, output, next_step_input_data)
     for name in prescribed_prognostic_names:

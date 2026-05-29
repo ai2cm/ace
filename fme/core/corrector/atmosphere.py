@@ -12,8 +12,12 @@ from fme.core.atmosphere_data import (
     compute_layer_thickness,
 )
 from fme.core.constants import GRAVITY, SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME
-from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
-from fme.core.corrector.utils import force_positive
+from fme.core.corrector.registry import (
+    CorrectionResult,
+    CorrectorABC,
+    CorrectorConfigABC,
+)
+from fme.core.corrector.utils import captured_before, force_positive
 from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.registry.corrector import CorrectorSelector
@@ -167,7 +171,7 @@ class AtmosphereCorrector(CorrectorABC):
         input_data: TensorMapping,
         gen_data: TensorMapping,
         forcing_data: TensorMapping,
-    ) -> TensorDict:
+    ) -> CorrectionResult:
         """Apply corrections to the generated data.
 
         Args:
@@ -176,8 +180,9 @@ class AtmosphereCorrector(CorrectorABC):
             forcing_data: The forcing data for the same time step as gen_data.
 
         Returns:
-            The corrected data.
+            The corrected data and the pre-correction values of modified variables.
         """
+        original = gen_data
         gen_data = dict(gen_data)
         if len(self._config.force_positive_names) > 0:
             # do this step before imposing other conservation correctors, since
@@ -231,7 +236,9 @@ class AtmosphereCorrector(CorrectorABC):
                 method=self._config.total_energy_budget_correction.method,
                 unaccounted_heating=self._config.total_energy_budget_correction.constant_unaccounted_heating,
             )
-        return gen_data
+        return CorrectionResult(
+            corrected=gen_data, before=captured_before(original, gen_data)
+        )
 
 
 class AreaWeightedMean(Protocol):

@@ -455,3 +455,29 @@ def test_corrector_integration(air_temperature_prefix):
     timestep = datetime.timedelta(seconds=3600)
     corrector = AtmosphereCorrector(config, ops, vertical_coord, timestep)
     corrector(input_data, gen_data, forcing_data)
+
+
+def test_atmosphere_corrector_before_captures_modified_variables():
+    config = AtmosphereCorrectorConfig(force_positive_names=["PRATEsfc"])
+    ops = LatLonOperations(torch.ones(size=(5, 5)))
+    corrector = AtmosphereCorrector(config, ops, None, TIMESTEP)
+    gen_data = {
+        "PRATEsfc": -1.0 * torch.ones(5, 5),
+        "other": torch.ones(5, 5),
+    }
+    result = corrector({}, gen_data, {})
+    # corrected clamps the negative; untouched variable is unchanged
+    torch.testing.assert_close(result.corrected["PRATEsfc"], torch.zeros(5, 5))
+    torch.testing.assert_close(result.corrected["other"], torch.ones(5, 5))
+    # before holds exactly the modified variable, with its pre-correction value
+    assert set(result.before) == {"PRATEsfc"}
+    torch.testing.assert_close(result.before["PRATEsfc"], gen_data["PRATEsfc"])
+
+
+def test_atmosphere_corrector_before_empty_when_no_correction():
+    config = AtmosphereCorrectorConfig()
+    ops = LatLonOperations(torch.ones(size=(5, 5)))
+    corrector = AtmosphereCorrector(config, ops, None, TIMESTEP)
+    gen_data = {"PRATEsfc": torch.ones(5, 5)}
+    result = corrector({}, gen_data, {})
+    assert result.before == {}
