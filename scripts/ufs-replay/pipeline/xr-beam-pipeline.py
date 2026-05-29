@@ -111,6 +111,7 @@ ATMO_FORCING_VARS = {
     "lhtfl_ave": "LHTFLsfc",
     "shtfl_ave": "SHTFLsfc",
     "prateb_ave": "PRATEsfc",
+    "pressfc": "PRESsfc",
 }
 
 # FV3 bucket-accumulated frozen precip variables — converted to a rate
@@ -795,7 +796,12 @@ def _process_chunk(
         ds["land_fraction"] = land_frac
 
     # --- Insert NaN on land ---
-    skip_mask = {"land_fraction", "sea_surface_fraction"}
+    # Atmospheric forcing variables are valid globally (FV3 is a global
+    # model) and must NOT be masked — downstream training configs rely
+    # on having values everywhere including over land.
+    atmo_skip = set(ATMO_FORCING_VARS.values())
+    atmo_skip.add("total_frozen_precipitation_rate")
+    skip_mask = {"land_fraction", "sea_surface_fraction"} | atmo_skip
     for name in list(ds.data_vars):
         if name.startswith("mask_") or name.startswith("idepth_"):
             continue
@@ -823,6 +829,10 @@ def _process_chunk(
         ds["HI"] = ds["HI"].where(ds["mask_2d"] > 0, np.nan)
         if "ocean_sea_ice_fraction" in ds:
             ds["HI"] = ds["HI"].where(ds["ocean_sea_ice_fraction"] > 0, 0.0)
+        # Re-apply NaN on land — the ice-free zeroing above converts land
+        # from NaN to 0.0 (because NaN > 0 is False), but ACE's output
+        # masker expects NaN on land to match the target NaN pattern.
+        ds["HI"] = ds["HI"].where(ds["mask_2d"] > 0, np.nan)
 
     # Derived post-masking variables
     if "HI" in ds:
@@ -899,34 +909,18 @@ def _average_atmo_chunk(
         )
 
     # Derive frozen precipitation rate from bucket-accumulated fields
-    # (frozrb = graupel, tsnowpb = snow).  These reset to 0 every
-    # fhzero hours (typically 6h).  We detect resets and handle them:
-    #   - Normal step (value increased): rate = diff / dt
-    #   - Bucket reset (value dropped):  rate = current_value / dt
-    #     (current value IS the full accumulation since the reset)
+    # (frozrb = graupel, tsnowpb = snow).  The bucket empties every
+    # output step (every 3h), so each value IS the 3h accumulation.
+    # Simply divide by dt to get the rate — no differencing needed.
     accum_vars = [v for v in FROZEN_PRECIP_ACCUM_VARS if v in ds_atmo]
     if accum_vars:
         dt_seconds = ATMO_TIME_STEP * 3600.0  # 3h → seconds
         frozen_accum = sum(ds_atmo[v] for v in accum_vars)
-        frozen_diff = frozen_accum.diff("time")
-        frozen_after = frozen_accum.isel(time=slice(1, None))
-        # Where diff >= 0: normal accumulation within a bucket period.
-        # Where diff < 0: bucket was emptied; current value is the
-        # entire accumulation since the reset.
-        frozen_3h = frozen_diff.where(frozen_diff >= 0, frozen_after)
-        frozen_rate = (frozen_3h / dt_seconds).clip(min=0)
+        frozen_rate = (frozen_accum / dt_seconds).clip(min=0)
         frozen_rate.attrs = {
             "long_name": "total frozen precipitation rate",
             "units": "kg/m**2/s",
         }
-        # diff reduces time by 1; prepend a zero-filled first timestep
-        # so we don't trim other variables.  The first timestep is in
-        # the pre-ocean buffer window, so the 0 has negligible effect
-        # after resample().mean().
-        first_time = ds_atmo.time.values[0]
-        zero_pad = xr.zeros_like(frozen_rate.isel(time=0))
-        zero_pad["time"] = first_time
-        frozen_rate = xr.concat([zero_pad, frozen_rate], dim="time")
         ds_atmo = ds_atmo.drop_vars(accum_vars)
         ds_atmo["total_frozen_precipitation_rate"] = frozen_rate
 
@@ -1054,12 +1048,9 @@ def process_ocean_chunk(
 
 def _extract_invariant_fields(
     ds_ocean: xr.Dataset,
-    ds_atmo: xr.Dataset,
     output_grid: str,
     vertical_coarsening_indices: Sequence[Sequence[int]],
     source_grid_ocean: xr.Dataset,
-    source_grid_atmo: xr.Dataset,
-    time_coarsen_factor: int,
 ) -> xr.Dataset:
     """Extract time-invariant fields from the ocean data.
 
@@ -1071,57 +1062,93 @@ def _extract_invariant_fields(
     vdim = "z_l" if "z_l" in ds_ocean.dims else "zl"
     invariant = {}
 
-    # idepth scalars from vertical coarsening config
+    # idepth scalars: level interfaces (N+1 boundaries for N layers).
+    # ACE's DepthCoordinate expects idepth[i] to be the upper boundary
+    # of layer i, with idepth[N] being the bottom of the last layer.
     if vertical_coarsening_indices:
         depths = ds_ocean[vdim].values
+        # Interface 0 = top of first group (surface, use 0.0)
+        invariant["idepth_0"] = xr.DataArray(
+            0.0,
+            attrs={"units": "meters", "long_name": "Depth interface 0 (surface)"},
+        )
         for i, (start, end) in enumerate(vertical_coarsening_indices):
-            level_depths = depths[start:end]
-            invariant[f"idepth_{i}"] = xr.DataArray(
-                float(np.mean(level_depths)),
-                attrs={"units": "meters", "long_name": f"Depth at level-{i}"},
+            # Interface i+1 = bottom of group i
+            bottom_depth = float(depths[end - 1])
+            invariant[f"idepth_{i + 1}"] = xr.DataArray(
+                bottom_depth,
+                attrs={"units": "meters", "long_name": f"Depth interface {i + 1}"},
             )
     else:
         depths = ds_ocean[vdim].values
+        n_levels = len(depths)
+        invariant["idepth_0"] = xr.DataArray(
+            0.0,
+            attrs={"units": "meters", "long_name": "Depth interface 0 (surface)"},
+        )
         for i, depth in enumerate(depths):
-            invariant[f"idepth_{i}"] = xr.DataArray(
+            invariant[f"idepth_{i + 1}"] = xr.DataArray(
                 float(depth),
-                attrs={"units": "meters", "long_name": f"Depth at level-{i}"},
+                attrs={"units": "meters", "long_name": f"Depth interface {i + 1}"},
             )
 
-    # 2-D spatial invariant fields: process one timestep to get them
-    ds_ocean_1t = ds_ocean.isel(time=slice(0, max(1, time_coarsen_factor))).load()
-    ocean_start = ds_ocean_1t.time.values[0]
-    ocean_end = ds_ocean_1t.time.values[-1]
-    atmo_ref = ds_atmo.time.values[0]
-    atmo_start = _match_time_type(ocean_start, atmo_ref) - datetime.timedelta(hours=6)
-    atmo_end = _match_time_type(ocean_end, atmo_ref) + datetime.timedelta(hours=3)
-    ds_atmo_1t = ds_atmo.sel(time=slice(atmo_start, atmo_end)).load()
+    # 2-D spatial invariant fields: derive from a single regridded
+    # ocean timestep (mask, land_fraction, sea_surface_fraction, deptho).
+    vdim = "z_l" if "z_l" in ds_ocean.dims else "zl"
+    ds_ocean_1t = ds_ocean.isel(time=0).load()
 
-    processed = _process_chunk(
-        ds_ocean_1t,
-        ds_atmo_1t,
-        output_grid,
-        vertical_coarsening_indices,
-        time_coarsen_factor,
-        source_grid_ocean,
-        source_grid_atmo,
-    )
+    # Regrid to get the output-grid mask
+    if output_grid:
+        ds_ocean_1t = _regrid_dataset(
+            ds_ocean_1t,
+            output_grid,
+            source_grid_ocean,
+            skipna=True,
+            na_thres=1.0,
+        )
 
-    spatial_invariant_names = {
-        "mask_2d",
-        "land_fraction",
-        "sea_surface_fraction",
-        "deptho",
-    }
-    spatial_invariant_names.update(
-        n for n in processed.data_vars if n.startswith("mask_")
+    # Build mask from a 3-D reference variable
+    ref_var = next(
+        (
+            v
+            for v in ("thetao", "so")
+            if v in ds_ocean_1t and vdim in ds_ocean_1t[v].dims
+        ),
+        None,
     )
-    for name in spatial_invariant_names:
-        if name in processed:
-            v = processed[name]
-            if "time" in v.dims:
-                v = v.isel(time=0, drop=True)
-            invariant[name] = v
+    if ref_var is not None:
+        ref_slice = ds_ocean_1t[ref_var]
+        mask_3d = (~np.isnan(ref_slice.values)).astype(np.float32)
+        mask_3d = xr.DataArray(mask_3d, dims=ref_slice.dims, coords=ref_slice.coords)
+
+        # Per-level masks
+        if vertical_coarsening_indices:
+            for i, (start, end) in enumerate(vertical_coarsening_indices):
+                level_mask = mask_3d.isel({vdim: slice(start, end)}).max(dim=vdim)
+                invariant[f"mask_{i}"] = level_mask.astype(np.float32)
+        else:
+            n_levels = mask_3d.sizes[vdim]
+            for i in range(n_levels):
+                invariant[f"mask_{i}"] = mask_3d.isel({vdim: i}).astype(np.float32)
+
+        mask_2d = mask_3d.isel({vdim: 0}).astype(np.float32)
+        mask_2d.attrs = {"long_name": "ocean mask", "units": "0 if land, 1 if ocean"}
+        invariant["mask_2d"] = mask_2d
+
+        land_frac = (1.0 - mask_2d).astype(np.float32)
+        land_frac.attrs = {"long_name": "land fraction", "units": "fraction"}
+        invariant["land_fraction"] = land_frac
+
+        ssf = mask_2d.copy()
+        ssf.attrs = {"long_name": "sea surface fraction", "units": "fraction"}
+        invariant["sea_surface_fraction"] = ssf
+
+    # deptho
+    depth_name = "depth" if "depth" in ds_ocean_1t else "deptho"
+    if depth_name in ds_ocean_1t:
+        deptho = ds_ocean_1t[depth_name].astype(np.float32)
+        deptho.attrs = {"long_name": "Sea Floor Depth Below Geoid", "units": "m"}
+        invariant["deptho"] = deptho
 
     return xr.Dataset(invariant)
 
@@ -1137,25 +1164,20 @@ def _make_template(
     """Eagerly process one ocean timestep to build the output zarr template."""
     logging.info("Building template from first timestep")
 
-    # _extract_invariant_fields processes a chunk internally and returns
-    # both scalar (idepth_*) and 2-D spatial (mask_*, land_fraction, etc.)
-    # invariant fields — all without a time dimension.
+    # Extract scalar (idepth_*) and 2-D spatial (mask_*, land_fraction,
+    # etc.) invariant fields — all without a time dimension.
     src_ocean = _make_source_grid(ds_ocean.isel(time=0).load())
-    src_atmo = _make_source_grid(ds_atmo.isel(time=0).load())
     invariant = _extract_invariant_fields(
         ds_ocean,
-        ds_atmo,
         output_grid,
         vertical_coarsening_indices,
         src_ocean,
-        src_atmo,
-        time_coarsen_factor,
     )
     invariant = invariant.drop_encoding()
 
-    # The processed chunk from _extract_invariant_fields also gives us
-    # the time-varying variable schema.  _process_chunk already drops
-    # invariant fields, so we can re-use the same call.
+    # Process one chunk to get the time-varying variable schema.
+    # _process_chunk drops invariant fields, which is what we want
+    # for the template (they're added separately below).
     ocean_per_output = max(1, time_coarsen_factor)
     ds_ocean_small = ds_ocean.isel(time=slice(0, ocean_per_output)).load()
     ocean_start = ds_ocean_small.time.values[0]
@@ -1164,6 +1186,7 @@ def _make_template(
     atmo_start = _match_time_type(ocean_start, atmo_ref) - datetime.timedelta(hours=6)
     atmo_end = _match_time_type(ocean_end, atmo_ref) + datetime.timedelta(hours=3)
     ds_atmo_small = ds_atmo.sel(time=slice(atmo_start, atmo_end)).load()
+    src_atmo = _make_source_grid(ds_atmo_small)
 
     processed = _process_chunk(
         ds_ocean_small,
