@@ -62,6 +62,7 @@ CONDITIONAL_BUILDERS = [
     "NoiseConditionedSFNO",
     "LocalNet",
     "SwinTransformer",
+    "NoiseConditionedSwinTransformer",
 ]
 
 

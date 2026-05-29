@@ -262,7 +262,6 @@ class SwinTransformerBlock(nn.Module):
         shift_size: tuple[int, int],
         mlp_ratio: float = 4.0,
         drop_path: float = 0.0,
-        conditioned: bool = False,
         mlp_layer: str = "mlp",
         qkv_bias: bool = True,
     ):
@@ -271,7 +270,6 @@ class SwinTransformerBlock(nn.Module):
         self.input_resolution = input_resolution
         self.window_size = window_size
         self.shift_size = shift_size
-        self.conditioned = conditioned
 
         self.norm1 = nn.LayerNorm(dim)
         self.attn = WindowAttention2D(dim, window_size, num_heads, qkv_bias=qkv_bias)
@@ -430,7 +428,6 @@ class BasicLayer(nn.Module):
                 f"drop_path has length {len(drop_path)}, expected depth {depth}"
             )
         ws_h, ws_w = window_size
-        conditioned = embed_dim_scalar > 0 or embed_dim_labels > 0
         self.blocks = nn.ModuleList(
             [
                 SwinTransformerBlock(
@@ -441,7 +438,6 @@ class BasicLayer(nn.Module):
                     shift_size=((0, 0) if i % 2 == 0 else (ws_h // 2, ws_w // 2)),
                     mlp_ratio=mlp_ratio,
                     drop_path=drop_path[i],
-                    conditioned=conditioned,
                     mlp_layer=mlp_layer,
                 )
                 for i in range(depth)

@@ -33,7 +33,7 @@ Below, the type strings name the builders/configs and `SwinTransformerNet` names
     only gain optional params (defaulting `None`) to thread the `Context` for cln, so the
     deterministic call paths and outputs are identical. Default flag value ⇒ no behavior change.
   - **`NoiseConditionedSwinTransformer` → `"cln"`**: reuses the SFNO's `ConditionalLayerNorm`
-    class as the block norm, plus a learned gate (below). This is the user's explicit
+    class as the block norm with a plain (ungated) residual. This is the user's explicit
     preference: reuse CLN for the noise-conditioned model, keep native AdaLN for the
     deterministic one.
 - **Noise source: per-pixel i.i.d. Gaussian.** The Swin is not spectral, so the SFNO's
@@ -43,11 +43,15 @@ Below, the type strings name the builders/configs and `SwinTransformerNet` names
   `ConditionalLayerNorm`, which owns a zero-bias `Conv2d(embed_dim_noise, n_channels, 1)` per
   norm. Because CLN is inherently per-block, this gives the per-block stochastic capacity we
   want using the literal SFNO class (no custom AdaLN-noise math).
-- **Learned gate on top of CLN.** CLN does normalize + scale/bias but does **not** gate.
-  Add a LayerScale-style learned gate per residual branch: `gate = nn.Parameter(torch.zeros(dim))`,
-  applied as `shortcut + gate * drop_path(branch)`. Zero-init ⇒ each CLN block starts as
-  (near-)identity and ramps up, matching the AdaLN-Zero behavior the deterministic Swin
-  already relies on.
+- **No gate on the CLN residual.** The CLN block uses a plain residual
+  (`shortcut + drop_path(branch)`), exactly like the deterministic Swin's *unconditioned*
+  path and like the SFNO. CLN's own zero-init noise convs (`scale = 1 + W_scale_2d(noise)`,
+  `bias = 0 + W_bias_2d(noise)`) already make the noise contribution start neutral and ramp
+  up as it learns — no separate gate is needed for identity-at-init. Crucially, an ungated
+  residual lets the whole branch (attention/MLP **and** the noise convs) receive gradient
+  from step 1; a zero-init LayerScale gate would instead zero out the branch and starve the
+  noise convs of gradient on the first step. (If LayerScale is ever wanted for stability, it
+  must be initialized to a small **positive** constant, not zero.)
 - **Resampling across U-Net resolutions: one full-res field, strided subsample to the
   bottleneck** (Option 1 / subsample). Full-res noise feeds `layer1`/`layer4`, half-res
   (`noise[..., ::2, ::2]`) feeds `layer2`/`layer3`. Faithful to the SFNO's single-field
@@ -73,18 +77,25 @@ Below, the type strings name the builders/configs and `SwinTransformerNet` names
 
 ## Implementation
 
-### 1. `fme/core/models/swin_transformer/swin_layers.py` — CLN conditioning mode + learned gate
+### 1. `fme/core/models/swin_transformer/swin_layers.py` — CLN conditioning mode
+
+- **New imports required at top of file:**
+  - `from typing import Literal`
+  - Extend the existing `fme.core.models.conditional_sfno.layers` import line to include
+    `ConditionalLayerNorm`, `Context`, `ContextConfig`.
 
 - `SwinTransformerBlock.__init__`: add `conditioning: Literal["adaln", "cln"] = "adaln"`,
   plus `context_config: ContextConfig | None` and `input_resolution`/`img_shape` for this
   stage.
-  - `"adaln"` (default): build exactly as today (native per-stage AdaLN path untouched). The
-    existing `conditioned: bool` arg keeps its meaning (set from `embed_dim_scalar/labels > 0`);
-    `"cln"` mode ignores `conditioned` and always applies CLN.
+  - `"adaln"` (default): build exactly as today (native per-stage AdaLN path untouched).
+    Note: the `conditioned: bool` param and `self.conditioned` attribute have already been
+    **removed** from `SwinTransformerBlock` (they were dead code — `forward` dispatched on
+    `cond_params is not None`, never on `self.conditioned`; `BasicLayer` no longer passes
+    `conditioned=`). No other changes to the AdaLN path.
   - `"cln"`: set `self.norm1 = ConditionalLayerNorm(dim, img_shape, context_config)` and
-    `self.norm2 = ConditionalLayerNorm(dim, img_shape, context_config)`; build
-    `self.gate1 = nn.Parameter(torch.zeros(dim))`, `self.gate2 = nn.Parameter(torch.zeros(dim))`.
-    Do **not** build the native AdaLN projections.
+    `self.norm2 = ConditionalLayerNorm(dim, img_shape, context_config)`. No gate parameters.
+    `BasicLayer` must skip building the native AdaLN projections in this mode (key their
+    construction on `conditioning == "adaln"`, not on `embed_dim_labels > 0`).
 - `SwinTransformerBlock.forward`: add an optional `context` so adaln stays byte-for-byte while
   cln threads it through:
   `forward(x, cond_params: CondParams | None = None, context: Context | None = None)`.
@@ -93,14 +104,25 @@ Below, the type strings name the builders/configs and `SwinTransformerNet` names
     and is ignored. (Note: the block does **not** derive its 6-tuple from a `Context` today —
     `BasicLayer` computes it and passes the tuple; that stays the case.)
   - `"cln"`: `BasicLayer` passes `context`; with `x` as `(B, H, W, C)`:
-    ```
+    ```python
+    H, W = self.input_resolution
+    ws_h, ws_w = self.window_size
+    sh, sw = self.shift_size
+    _, _, _, C = x.shape
     shortcut = x
-    h = self.norm1(x.permute(0,3,1,2), context).permute(0,2,3,1)   # CLN, channels-first
-    h = window_attention(h)
-    h = h + column_mixer(h)                                          # ColumnMixer folded in
-    x = shortcut + self.gate1 * drop_path(h)                         # learned LayerScale gate
-    y = self.norm2(x.permute(0,3,1,2), context).permute(0,2,3,1)
-    x = x + self.gate2 * drop_path(mlp(y))
+    h = self.norm1(x.permute(0, 3, 1, 2), context).permute(0, 2, 3, 1)  # CLN channels-first
+    if sh > 0 or sw > 0:
+        h = torch.roll(h, shifts=(-sh, -sw), dims=(1, 2))
+    h_windows = window_partition_2d(h, ws_h, ws_w).view(-1, ws_h * ws_w, C)
+    attn_windows = self.attn(h_windows, mask=self.attn_mask)
+    attn_windows = attn_windows.view(-1, ws_h, ws_w, C)
+    h = window_reverse_2d(attn_windows, ws_h, ws_w, H, W)
+    if sh > 0 or sw > 0:
+        h = torch.roll(h, shifts=(sh, sw), dims=(1, 2))
+    h = h + self.column_mixer(h)                   # ColumnMixer folded in (no own residual)
+    x = shortcut + self.drop_path(h)               # plain (ungated) residual
+    y = self.norm2(x.permute(0, 3, 1, 2), context).permute(0, 2, 3, 1)
+    x = x + self.drop_path(self.mlp(y))
     ```
 - `BasicLayer.__init__`: thread `conditioning`, `context_config`, `img_shape` to every block.
 - `BasicLayer.forward`: add an optional `context` param
@@ -111,9 +133,14 @@ Below, the type strings name the builders/configs and `SwinTransformerNet` names
 
 ### 2. `fme/core/models/swin_transformer/swin_transformer.py` — wire noise through the U-Net
 
-- `__init__`: read `self.conditioning` / `self.embed_dim_noise` from `context_config`; build
-  the four `BasicLayer`s in the selected mode, passing each stage's resolution
-  (`(Hp, Wp)` for layers 1/4, `(Hp//2, Wp//2)` for layers 2/3) so CLN sizing matches.
+- **New imports required at top of file:** `import dataclasses` (needed for
+  `dataclasses.replace(context, noise=...)`).
+
+- `__init__`: add a new `conditioning: Literal["adaln", "cln"] = "adaln"` parameter (there is
+  **no** `conditioning` field on `ContextConfig`, so it must be its own arg, threaded by the
+  builder); read `self.embed_dim_noise` from `context_config.embed_dim_noise`. Build the four
+  `BasicLayer`s in the selected mode, passing each stage's resolution (`(Hp, Wp)` for layers
+  1/4, `(Hp//2, Wp//2)` for layers 2/3) so CLN sizing matches.
 - `forward(x, context)`: when CLN mode and `embed_dim_noise > 0`, require `context.noise`
   `(B, embed_dim_noise, H, W)` at unpadded input res; pad it with the **same**
   `F.pad(..., (0, pad_w, 0, pad_h))` used for `x`; build `noise_half = noise_pad[..., ::2, ::2]`.
@@ -153,16 +180,22 @@ Below, the type strings name the builders/configs and `SwinTransformerNet` names
 
 - `fme/core/models/swin_transformer/test_swin_transformer.py`: forward+backward in CLN mode
   with `embed_dim_noise>0` (build `Context(noise=randn(n, embed_dim_noise, *img_shape))`,
-  assert output shape and that all params — including `gate1/gate2` and CLN noise convs —
-  receive gradients); a padded-`img_shape` case (exercises pad + subsample); two forwards
-  with different noise differ; and an `"adaln"`-mode regression case that is identical to the
-  pre-change deterministic block.
-- `fme/ace/registry/test_swin_transformer.py` (create) — two complementary tests:
+  assert output shape and that all params — including the CLN noise convs — receive
+  gradients); a padded-`img_shape` case (exercises pad + subsample); and an `"adaln"`-mode
+  regression case that is identical to the pre-change deterministic block. **Noise-divergence
+  must be checked after a step, not at init:** CLN's zero-init noise convs make
+  `scale=1, bias=0` so the freshly-built model is noise-independent — assert that two forwards
+  with different noise differ only after taking one optimizer step (or after perturbing the
+  noise-conv weights off zero).
+- `fme/ace/registry/test_swin_transformer.py` (already exists; **extend** — it currently
+  covers only the deterministic builder) — two complementary tests:
   (a) a mock-style test in the spirit of `fme/ace/registry/test_stochastic_sfno.py` asserting
   `NoiseConditionedSwinTransformerBuilder.build(...)` returns a `NoiseConditionedModel` and that
   noise reaches the wrapped net's `Context`; and (b) a **real-build** test (small `DatasetInfo`,
   no mock) asserting two forwards on identical input differ — a mocked inner model cannot show
-  output divergence. Also assert the deterministic `SwinTransformer` builder path is unchanged.
+  output divergence. As above, this divergence only appears after one optimizer step (zero-init
+  noise convs ⇒ noise-independent at init), so step the model before asserting. Also assert the
+  deterministic `SwinTransformer` builder path is unchanged.
 
 ## Out of scope / unchanged
 
@@ -176,7 +209,7 @@ Below, the type strings name the builders/configs and `SwinTransformerNet` names
 - `NoiseConditionedModel` — `fme/ace/registry/stochastic_sfno.py:49`
 - `ConditionalLayerNorm`, `Context`, `ContextConfig` — `fme/core/models/conditional_sfno/layers.py`
 - `_ContextWrappedModule` (deterministic path) — `fme/ace/registry/swin_transformer.py:12`
-  (an identical copy also lives at `fme/ace/registry/local_net.py:24`; the Swin builder uses the former)
+  (an identical copy also lives at `fme/ace/registry/local_net.py:23`; the Swin builder uses the former)
 - `"NoiseConditionedSwinTransformer"` must be added to `CONDITIONAL_BUILDERS`
   (`fme/core/registry/module.py:61`); `"SwinTransformer"` is already present.
 
@@ -194,6 +227,7 @@ Below, the type strings name the builders/configs and `SwinTransformerNet` names
    assert builder type `SwinTransformer`, `loss.type == 'MSE'`, `n_ensemble == 1`.
 3. **Noise-conditioned config builds and is stochastic**: parse `nc-swin.yaml`; assert
    builder type `NoiseConditionedSwinTransformer`, `loss.type == 'EnsembleLoss'`,
-   `n_ensemble == 2`; build the module from a small `DatasetInfo` and confirm two forward
-   passes on identical input differ.
+   `n_ensemble == 2`; build the module from a small `DatasetInfo`, take one optimizer step,
+   then confirm two forward passes on identical input differ (the model is noise-independent
+   at init, so the step is required).
 4. **Lint/type**: `pre-commit run --files <changed files>` (ruff, ruff-format, mypy).
