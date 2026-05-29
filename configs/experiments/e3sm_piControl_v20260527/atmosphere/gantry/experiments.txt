@@ -2,3 +2,5 @@
 BK-v20260527-ACE2S-E3SMv3-piControl-100yr-n512-pretrain|rs0|01KSTKJRRMNVYPVXXQ8BDEEQSK|training|best_inference_ckpt|normal|--min-runtime 8h
 
 BK-v20260527-ACE2S-E3SMv3-piControl-100yr-n512-pretrain|rs1|01KSTKK14R4VPZEWSMT0H7JTS2|training|best_inference_ckpt|normal|--min-runtime 8h
+
+BK-v20260527-ACE2S-E3SMv3-piControl-100yr-n384-bs8-pretrain|rs0|01KSTT586Z6AEVNRQDD3GZPVFB|training|best_inference_ckpt|normal|--min-runtime 8h
