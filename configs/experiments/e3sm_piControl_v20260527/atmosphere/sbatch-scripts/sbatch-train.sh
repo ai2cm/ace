@@ -2,13 +2,13 @@
 
 #SBATCH -A e3sm
 #SBATCH -q regular
-#SBATCH -C gpu
+#SBATCH -C gpu&hbm80g
 #SBATCH -J train-fme
 #SBATCH --nodes=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=128
-#SBATCH -t 20:00:00
+#SBATCH -t 12:00:00
 #SBATCH --output=joblogs/%j.out
 #SBATCH --signal=USR1@60
 #SBATCH --requeue

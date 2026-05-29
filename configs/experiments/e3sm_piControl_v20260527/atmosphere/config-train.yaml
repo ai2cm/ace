@@ -1,6 +1,8 @@
 experiment_dir: FME_OUTPUT_DIR
 save_checkpoint: true
 validate_using_ema: true
+checkpoint_every_n_batches: 100
+log_train_every_n_batches: 10
 ema:
   decay: 0.999
 max_epochs: 30
@@ -102,24 +104,25 @@ train_loader:
         start_time: '0401-01-03T12:00:00'
         stop_time: '0491-01-01T00:00:00'
 validation:
-  batch_size: 32
-  num_data_workers: 4
-  time_buffer: 10
-  prefetch_factor: 2
-  dataset:
-    merge:
-    - data_path: /pscratch/sd/e/elynnwu/fme-dataset
-      file_pattern: 2026-05-27-E3SMv3-piControl-100yr-coupled-sea_ice.zarr
-      engine: zarr
-      subset:
-        start_time: '0491-01-01T06:00:00'
-        stop_time: '0496-01-01T00:00:00'
-    - data_path: /pscratch/sd/e/elynnwu/fme-dataset
-      file_pattern: 2026-05-26-E3SMv3-piControl-atmosphere-100yr-6H.zarr
-      engine: zarr
-      subset:
-        start_time: '0491-01-01T06:00:00'
-        stop_time: '0496-01-01T00:00:00'
+  loader:
+    batch_size: 32
+    num_data_workers: 4
+    time_buffer: 10
+    prefetch_factor: 2
+    dataset:
+      merge:
+      - data_path: /pscratch/sd/e/elynnwu/fme-dataset
+        file_pattern: 2026-05-27-E3SMv3-piControl-100yr-coupled-sea_ice.zarr
+        engine: zarr
+        subset:
+          start_time: '0491-01-01T06:00:00'
+          stop_time: '0496-01-01T00:00:00'
+      - data_path: /pscratch/sd/e/elynnwu/fme-dataset
+        file_pattern: 2026-05-26-E3SMv3-piControl-atmosphere-100yr-6H.zarr
+        engine: zarr
+        subset:
+          start_time: '0491-01-01T06:00:00'
+          stop_time: '0496-01-01T00:00:00'
 optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001
@@ -162,7 +165,7 @@ stepper:
       builder:
         type: NoiseConditionedSFNO
         config:
-          embed_dim: 384
+          embed_dim: 512
           noise_embed_dim: 64
           noise_type: isotropic
           filter_type: linear
@@ -249,7 +252,7 @@ stepper:
       - Qat2m
       - Uat10m
       - Vat10m
-      - Tat10m
+      - Tat2m
       out_names:
       - PS
       - TS
@@ -301,4 +304,4 @@ stepper:
       - Qat2m
       - Uat10m
       - Vat10m
-      - Tat10m      
+      - Tat2m  
