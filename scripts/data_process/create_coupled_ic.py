@@ -219,75 +219,17 @@ def _load_and_merge(
     return out
 
 
-_LEVEL_PATTERN = re.compile(r"_(\d+)$")
-
-
-def _resolve_mask_name(name: str, mask_names: set[str]) -> str | None:
-    """Resolve the mask variable name for a data variable.
-
-    Mirrors fme.core.spatial_mask_provider.SpatialMaskProvider priority:
-    1. Variable-specific mask, e.g. "mask_sfdsi", "mask_thetao_1".
-    2. Level-specific mask for 3D vars, e.g. "mask_1".
-    3. Catch-all "mask_2d".
-    """
-    if f"mask_{name}" in mask_names:
-        return f"mask_{name}"
-    match = _LEVEL_PATTERN.search(name)
-    if match and f"mask_{match.group(1)}" in mask_names:
-        return f"mask_{match.group(1)}"
-    if "mask_2d" in mask_names:
-        return "mask_2d"
-    return None
-
-
-def _fill_nan_in_valid_mask(ds: xr.Dataset) -> xr.Dataset:
-    """Replace NaNs with 0 in cells the model treats as valid (mask == 1).
-
-    At inference the model only fills cells where mask == 0 (with 0); any NaN
-    sitting in a mask == 1 cell is left untouched and then propagates through
-    the convolutional network, turning the entire field into NaN. Sea-ice
-    variables such as UI/VI are NaN wherever there is no ice on the IC date,
-    but the static mask (max sea-ice extent) marks many of those cells valid.
-    Training data fills them with 0, so we match that here.
-    """
-    mask_names = {v for v in ds.data_vars if v.startswith("mask_")}
-    if not mask_names:
-        return ds
-    for name in list(ds.data_vars):
-        if name.startswith("mask_"):
-            continue
-        mask_name = _resolve_mask_name(name, mask_names)
-        if mask_name is None:
-            continue
-        da = ds[name]
-        valid = ds[mask_name].reset_coords(drop=True).round() == 1
-        leak = valid & da.isnull()
-        if bool(leak.any()):
-            n = int(leak.sum())
-            logging.info(
-                "Filling %d NaN cell(s) in '%s' within mask==1 (mask '%s')",
-                n,
-                name,
-                mask_name,
-            )
-            ds[name] = xr.where(leak, 0.0, da).astype(da.dtype)
-    return ds
-
-
 def _prepare_ic_for_output(ds: xr.Dataset) -> xr.Dataset:
     """Prepare IC dataset for inference compatibility.
 
-    Ensures 'time' is a dimension (not a scalar coordinate), casts all float64
-    data variables to float32 to match model weight dtypes, and fills NaNs that
-    fall inside the valid (mask == 1) region so they don't propagate through the
-    network.
+    Ensures 'time' is a dimension (not a scalar coordinate) and casts all
+    float64 data variables to float32 to match model weight dtypes.
     """
     if "time" in ds.coords and len(ds.time.dims) == 0:
         ds = ds.expand_dims("time")
     for var in ds.data_vars:
         if ds[var].dtype == np.float64:
             ds[var] = ds[var].astype(np.float32)
-    ds = _fill_nan_in_valid_mask(ds)
     return ds
 
 
