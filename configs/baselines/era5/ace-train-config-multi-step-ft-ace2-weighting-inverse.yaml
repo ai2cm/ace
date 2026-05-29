@@ -79,7 +79,21 @@ optimization:
     weight_decay: 0.01
 stepper_training:
   n_ensemble: 2
-  n_forward_steps: 1
+  parameter_init:
+    weights_path: /weights/training_checkpoints/best_ckpt.tar
+  n_forward_steps:
+    outcomes:
+      - steps: 1
+        probability: 0.6
+      - steps: 2
+        probability: 0.2
+      - steps: 4
+        probability: 0.1
+      - steps: 12
+        probability: 0.05
+      - steps: 20
+        probability: 0.05
+  optimize_last_step_only: true
   loss:
     type: EnsembleLoss
     weights:
