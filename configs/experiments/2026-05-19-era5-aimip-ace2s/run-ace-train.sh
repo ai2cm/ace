@@ -73,6 +73,9 @@ run_training "ace-train-config.yaml" "$deterministic_base_name-era5-energy-corre
   stepper.step.config.corrector.total_energy_budget_correction.method=constant_temperature
 run_training "ace-train-config.yaml" "$deterministic_base_name-era5-energy-corrector-training-rs1" \
   stepper.step.config.corrector.total_energy_budget_correction.method=constant_temperature seed=1
+run_training "ace-train-config.yaml" "$deterministic_base_name-era5-energy-corrector-unacc5p7-training-rs0" \
+  stepper.step.config.corrector.total_energy_budget_correction.method=constant_temperature \
+  stepper.step.config.corrector.total_energy_budget_correction.constant_unaccounted_heating=5.7
 
 # fine tune to add pressure level variables
 
