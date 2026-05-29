@@ -80,8 +80,18 @@ class AceDiffusionTeacher(FastGenNetwork):
         self._default_num_steps = cfg.num_diffusion_generation_steps
         self._sigma_data = model.sigma_data
 
+        # Learnable per-sample log-variance used by sCM's adaptive loss
+        # weighting.  A global scalar (not noise-level-dependent) is sufficient
+        # for the EDM teacher.  FastGen loads with strict=False so this new
+        # parameter initialises fresh without disturbing teacher weights.
+        self.logvar_scalar = torch.nn.Parameter(torch.zeros(1))
+
     def freeze(self) -> None:
-        """Freeze teacher weights (call this for f-distill / sCM / DMD2)."""
+        """Freeze teacher weights (call this for f-distill / sCM / DMD2).
+
+        Only the ACE UNet weights are frozen; logvar_scalar stays trainable
+        so sCM can learn the adaptive loss weighting.
+        """
         self._ace_module.requires_grad_(False)
         self._ace_module.eval()
 
@@ -206,18 +216,25 @@ class AceDiffusionTeacher(FastGenNetwork):
                 just the captured encoder feature list (no x0).
             feature_indices: Set of encoder-level indices whose last block
                 activations to capture.  Index 0 = finest resolution.
-            return_logvar: Unused; FastGenNetwork interface compat.
+            return_logvar: If True, return ``(x0, logvar)`` where ``logvar``
+                is a ``[B]`` tensor from a learnable global scalar.  Required
+                by sCM's adaptive loss weighting.
             fwd_pred_type: Unused; FastGenNetwork interface compat.
             **fwd_kwargs: Unused; FastGenNetwork interface compat.
 
         Returns:
             - Normal: x0 prediction ``[B, C_out, H, W]``.
+            - ``return_logvar=True``: ``(x0 [B, C_out, H, W], logvar [B])``.
             - ``return_features_early=True``: list of captured feature tensors.
             - ``feature_indices`` only: ``[x0, [feat_0, feat_1, ...]]``.
         """
         if not feature_indices:
             with torch.amp.autocast(x_t.device.type, dtype=torch.bfloat16):
-                return self._ace_module(x_t, condition, t)
+                x0 = self._ace_module(x_t, condition, t)
+            if return_logvar:
+                logvar = self.logvar_scalar.expand(x_t.shape[0])
+                return x0, logvar
+            return x0
 
         with self._capture_encoder_features(feature_indices) as captured:
             with torch.amp.autocast(x_t.device.type, dtype=torch.bfloat16):
