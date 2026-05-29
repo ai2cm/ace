@@ -51,3 +51,5 @@ group|tag|exper_id|status|ckpt_type|priority|min_runtime|override|results_datase
 1pct_nosmooth_0256to0350-srml0p001_rand4steps|rs0|01KRVS6MVG35NRMM8WAA2HGM3G|training|best_inference_ckpt|normal|--min-runtime 8h
 
 1pct_nosmooth_0256to0350-srml0p001_4steps_noIceCorrector|rs0|01KS1A3K3AF5BFGWSJRQ3E3FK3|training|best_inference_ckpt|normal|--min-runtime 8h
+
+1pct_nosmooth_0256to0350-srml0p001_4steps_noIceCorrector|rs0||training|best_inference_ckpt|normal|--min-runtime 8h
