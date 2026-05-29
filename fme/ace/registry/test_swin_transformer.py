@@ -129,6 +129,20 @@ def test_nc_swin_transformer_via_selector():
     assert out.shape == (2, n_out, *IMG_SHAPE)
 
 
+def test_swin_transformer_cpb_mlp_exists():
+    """Built model has cpb_mlp and no relative_position_bias_table."""
+    n_in, n_out = 5, 3
+    dataset_info = _get_dataset_info()
+    module = _builder().build(n_in, n_out, dataset_info)
+    # _ContextWrappedModule wraps the SwinTransformerNet
+    net = module.module  # type: ignore[attr-defined]
+    block = net.layer1.blocks[0]
+    assert hasattr(block.attn, "cpb_mlp"), "cpb_mlp missing"
+    assert not hasattr(
+        block.attn, "relative_position_bias_table"
+    ), "relative_position_bias_table should not exist"
+
+
 def test_nc_swin_transformer_noise_divergence():
     """Two forwards on identical input diverge after one optimizer step.
 

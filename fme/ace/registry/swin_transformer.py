@@ -5,7 +5,7 @@ from torch import nn
 
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 from fme.ace.registry.stochastic_sfno import NoiseConditionedModel
-from fme.core.dataset_info import DatasetInfo
+from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
 from fme.core.models.swin_transformer import SwinTransformerNet
 
@@ -71,6 +71,7 @@ class SwinTransformerBuilder(ModuleConfig):
     mlp_layer: str = "mlp"
     embed_dim_scalar: int = 0
     embed_dim_labels: int = 0
+    cpb_hidden_dim: int = 64
 
     def build(
         self,
@@ -89,6 +90,10 @@ class SwinTransformerBuilder(ModuleConfig):
             embed_dim_noise=0,
             embed_dim_pos=0,
         )
+        try:
+            lat_coords = dataset_info.horizontal_coordinates.lat_1d
+        except MissingDatasetInfo:
+            lat_coords = None
         net = SwinTransformerNet(
             in_chans=n_in_channels,
             out_chans=n_out_channels,
@@ -102,6 +107,8 @@ class SwinTransformerBuilder(ModuleConfig):
             use_skip=self.use_skip,
             context_config=context_config,
             mlp_layer=self.mlp_layer,
+            cpb_hidden_dim=self.cpb_hidden_dim,
+            lat_coords=lat_coords,
         )
         return _ContextWrappedModule(net)
 
@@ -143,6 +150,7 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
     mlp_layer: str = "mlp"
     noise_embed_dim: int = 256
     label_embed_dim: int = 0
+    cpb_hidden_dim: int = 64
 
     def build(
         self,
@@ -161,6 +169,10 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             embed_dim_noise=self.noise_embed_dim,
             embed_dim_pos=0,
         )
+        try:
+            lat_coords = dataset_info.horizontal_coordinates.lat_1d
+        except MissingDatasetInfo:
+            lat_coords = None
         net = SwinTransformerNet(
             in_chans=n_in_channels,
             out_chans=n_out_channels,
@@ -175,6 +187,8 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             context_config=context_config,
             mlp_layer=self.mlp_layer,
             conditioning="cln",
+            cpb_hidden_dim=self.cpb_hidden_dim,
+            lat_coords=lat_coords,
         )
         return NoiseConditionedModel(
             net,

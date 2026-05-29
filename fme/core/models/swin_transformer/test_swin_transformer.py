@@ -239,3 +239,79 @@ def test_adaln_regression():
     with torch.no_grad():
         out = net_adaln(x)
     assert out.shape == (n, out_chans, *img_shape)
+
+
+def test_cpb_lat_coords_changes_output():
+    """Two nets sharing weights but different lat_coords produce different outputs."""
+    in_chans, out_chans = 4, 2
+    img_shape = (16, 32)
+    n = 2
+    device = get_device()
+    torch.manual_seed(0)
+    lat_low = torch.full((img_shape[0],), 10.0, device=device)
+    lat_high = torch.full((img_shape[0],), 60.0, device=device)
+    net_low = _build_net(in_chans, out_chans, img_shape).to(device)
+    net_low_state = net_low.state_dict()
+    net_high = SwinTransformerNet(
+        in_chans=in_chans,
+        out_chans=out_chans,
+        img_shape=img_shape,
+        embed_dim=32,
+        depth_multiplier=1,
+        num_heads=(2, 4, 4, 2),
+        window_size=(4, 4),
+        mlp_ratio=2.0,
+        drop_path_rate=0.0,
+        lat_coords=lat_high,
+    ).to(device)
+    net_high.load_state_dict(net_low_state)
+    # Push cpb_mlp off zero so lat_mean actually changes the bias.
+    optimizer = torch.optim.SGD(net_low.parameters(), lr=1.0)
+    x = torch.randn(n, in_chans, *img_shape, device=device)
+    net_low.train()
+    net_low(x).sum().backward()
+    optimizer.step()
+    # Give net_high the same updated weights.
+    net_high.load_state_dict(net_low.state_dict())
+    net_low_lat = SwinTransformerNet(
+        in_chans=in_chans,
+        out_chans=out_chans,
+        img_shape=img_shape,
+        embed_dim=32,
+        depth_multiplier=1,
+        num_heads=(2, 4, 4, 2),
+        window_size=(4, 4),
+        mlp_ratio=2.0,
+        drop_path_rate=0.0,
+        lat_coords=lat_low,
+    ).to(device)
+    net_low_lat.load_state_dict(net_low.state_dict())
+    with torch.no_grad():
+        out_low = net_low_lat(x)
+        out_high = net_high(x)
+    assert not torch.allclose(out_low, out_high), "lat_coords should change output"
+
+
+def test_cpb_backward_with_lat_coords():
+    """Gradients reach cpb_mlp when lat_coords is provided."""
+    in_chans, out_chans = 4, 2
+    img_shape = (16, 32)
+    n = 2
+    device = get_device()
+    lat_coords = torch.linspace(-90.0, 90.0, img_shape[0], device=device)
+    net = SwinTransformerNet(
+        in_chans=in_chans,
+        out_chans=out_chans,
+        img_shape=img_shape,
+        embed_dim=32,
+        depth_multiplier=1,
+        num_heads=(2, 4, 4, 2),
+        window_size=(4, 4),
+        mlp_ratio=2.0,
+        drop_path_rate=0.0,
+        lat_coords=lat_coords,
+    ).to(device)
+    x = torch.randn(n, in_chans, *img_shape, device=device)
+    net(x).sum().backward()
+    for name, param in net.named_parameters():
+        assert param.grad is not None, f"No gradient for {name}"

@@ -64,6 +64,8 @@ class SwinTransformerNet(nn.Module):
         context_config: ContextConfig | None = None,
         mlp_layer: str = "mlp",
         conditioning: Literal["adaln", "cln"] = "adaln",
+        cpb_hidden_dim: int = 64,
+        lat_coords: torch.Tensor | None = None,
     ):
         super().__init__()
         if depth_multiplier < 1:
@@ -91,6 +93,19 @@ class SwinTransformerNet(nn.Module):
             self.embed_dim_labels = 0
             self.embed_dim_noise = 0
 
+        if lat_coords is not None:
+            pad_h = Hp - H0
+            lat_full: torch.Tensor | None = (
+                torch.cat([lat_coords, lat_coords[-1:].expand(pad_h)])
+                if pad_h > 0
+                else lat_coords
+            )  # (Hp,)
+            lat_half: torch.Tensor | None = (
+                lat_full[::2] + lat_full[1::2]  # type: ignore[index]
+            ) / 2  # (Hp//2,)
+        else:
+            lat_full = lat_half = None
+
         self.encoder = nn.Conv2d(in_chans, embed_dim, kernel_size=3, padding=1)
         self.channel_mixer = ChannelMixer(embed_dim)
 
@@ -114,6 +129,8 @@ class SwinTransformerNet(nn.Module):
             mlp_layer=mlp_layer,
             conditioning=conditioning,
             context_config=context_config,
+            cpb_hidden_dim=cpb_hidden_dim,
+            lat_coords=lat_full,
         )
         self.downsample = PatchMerging(embed_dim)
         self.layer2 = BasicLayer(
@@ -129,6 +146,8 @@ class SwinTransformerNet(nn.Module):
             mlp_layer=mlp_layer,
             conditioning=conditioning,
             context_config=context_config,
+            cpb_hidden_dim=cpb_hidden_dim,
+            lat_coords=lat_half,
         )
         self.layer3 = BasicLayer(
             2 * embed_dim,
@@ -143,6 +162,8 @@ class SwinTransformerNet(nn.Module):
             mlp_layer=mlp_layer,
             conditioning=conditioning,
             context_config=context_config,
+            cpb_hidden_dim=cpb_hidden_dim,
+            lat_coords=lat_half,
         )
         self.upsample = PatchExpanding(2 * embed_dim)  # -> embed_dim, 2x spatial
 
@@ -160,6 +181,8 @@ class SwinTransformerNet(nn.Module):
             mlp_layer=mlp_layer,
             conditioning=conditioning,
             context_config=context_config,
+            cpb_hidden_dim=cpb_hidden_dim,
+            lat_coords=lat_full,
         )
         self.final_linear = nn.Linear(decoder_dim, embed_dim, bias=False)
         self.decoder = nn.Conv2d(embed_dim, out_chans, kernel_size=3, padding=1)
