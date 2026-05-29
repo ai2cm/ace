@@ -13,7 +13,7 @@
 
 set -e
 
-METHOD="${1:?Usage: $0 <dmd2|fdistill> [--suffix <variant>]}"
+METHOD="${1:?Usage: $0 <dmd2|fdistill|scm> [--suffix <variant>]}"
 shift
 
 SUFFIX=""
@@ -39,8 +39,12 @@ case "$METHOD" in
         CONFIG="fme/downscaling/distillation/configs/fdistill_kl_spike.py"
         DESCRIPTION="ACE downscaling f-distill (forward-KL) with val CRPS checkpoint"
         ;;
+    scm)
+        CONFIG="fme/downscaling/distillation/configs/scm_spike.py"
+        DESCRIPTION="ACE downscaling sCM distillation with val CRPS checkpoint"
+        ;;
     *)
-        echo "Unknown method: $METHOD. Choose from: dmd2, fdistill" >&2
+        echo "Unknown method: $METHOD. Choose from: dmd2, fdistill, scm" >&2
         exit 1
         ;;
 esac

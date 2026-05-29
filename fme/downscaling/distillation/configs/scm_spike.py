@@ -15,12 +15,11 @@ Adapted from:
 
 import os
 
-from omegaconf import DictConfig
-
 import fastgen.configs.methods.config_scm as config_scm_default
 from fastgen.configs.callbacks import EMA_CONST_CALLBACKS
 from fastgen.utils import LazyCall as L
 from fastgen.utils.lr_scheduler import LambdaInverseSquareRootScheduler
+from omegaconf import DictConfig
 
 TEACHER_CKPT_PATH = os.environ.get("ACE_TEACHER_CKPT", "")
 
@@ -49,7 +48,9 @@ def create_config():
     # Noise distribution matching ACE's EDM training.
     config.model.sample_t_cfg.sigma_data = 1.0  # ACE always uses sigma_data=1
     config.model.sample_t_cfg.train_p_mean = -1.2
-    config.model.sample_t_cfg.train_p_std = 1.2
+    config.model.sample_t_cfg.train_p_std = (
+        1.8  # wider tail: samples more high-σ, matches fdistill
+    )
 
     # Optimizer (Adam with conservative LR for sCM)
     config.model.net_optimizer.optim_type = "adam"
@@ -62,8 +63,12 @@ def create_config():
         decay_steps=35_000,
     )
 
-    # Consistency distillation loss (JVP-based, recommended for EDM teacher)
+    # Consistency distillation loss.  Use finite-difference JVP rather than
+    # torch.func.jvp: the UNet's AttentionOp custom autograd.Function lacks
+    # setup_context, which torch.func.jvp requires.  Finite diff is a valid
+    # estimator and avoids the incompatibility entirely.
     config.model.loss_config.use_cd = True
+    config.model.loss_config.use_jvp_finite_diff = True
 
     # EMA
     config.model.use_ema = ["ema_9999", "ema_99995"]
@@ -80,8 +85,8 @@ def create_config():
     config.trainer.ddp = True
     config.trainer.batch_size_global = 32
     config.trainer.max_iter = 200_000
-    config.trainer.save_ckpt_iter = 10_000
-    config.trainer.logging_iter = 500
+    config.trainer.save_ckpt_iter = 500
+    config.trainer.logging_iter = 130
 
     config.log_config.group = ""
 
