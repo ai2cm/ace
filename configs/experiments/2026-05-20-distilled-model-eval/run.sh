@@ -82,7 +82,7 @@ case "$MODEL" in
     fdistill) run_eval fdistill config-fdistill.yaml "$DATASET_FDISTILL:fastgen/ace-downscaling-distillation-fdistill-with-val-intended-recipe/checkpoints:/checkpoints" ;;
     all)
         run_eval dmd2     config-dmd2.yaml     "$DATASET_DMD2:/checkpoints"
-        run_eval fdistill config-fdistill.yaml "$DATASET_FDISTILL:fastgen/ace-downscaling-distillation-fdistill-with-val-intended-recipe/checkpoints:/checkpoints"
+        run_eval fdistill config-fdistill.yaml "$DATASET_FDISTILL:fastgen/ace-downscaling-distillation-fdistill-with-val-intended-recipe/checkpoints/best_student_tail.ckpt:/checkpoints/best_student_tail.ckpt"
         ;;
     *)
         echo "Unknown model: $MODEL"
