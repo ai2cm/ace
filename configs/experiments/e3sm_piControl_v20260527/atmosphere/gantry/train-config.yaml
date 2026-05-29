@@ -83,7 +83,7 @@ logging:
   project: ace-eamv3
   entity: ai2cm
 train_loader:
-  batch_size: 16
+  batch_size: 8
   num_data_workers: 4
   time_buffer: 10
   prefetch_factor: 2
@@ -163,7 +163,7 @@ stepper:
       builder:
         type: NoiseConditionedSFNO
         config:
-          embed_dim: 512
+          embed_dim: 384
           noise_embed_dim: 64
           noise_type: isotropic
           filter_type: linear
