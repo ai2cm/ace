@@ -1,8 +1,6 @@
 experiment_dir: FME_OUTPUT_DIR
 save_checkpoint: true
 validate_using_ema: true
-checkpoint_every_n_batches: 100
-log_train_every_n_batches: 10
 ema:
   decay: 0.999
 max_epochs: 30
@@ -165,7 +163,7 @@ stepper:
       builder:
         type: NoiseConditionedSFNO
         config:
-          embed_dim: 512
+          embed_dim: 384
           noise_embed_dim: 64
           noise_type: isotropic
           filter_type: linear

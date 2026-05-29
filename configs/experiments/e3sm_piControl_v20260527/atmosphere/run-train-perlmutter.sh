@@ -3,8 +3,8 @@
 set -x
 
 # wandb config
-export WANDB_NAME=PM-v20260527-ACE2S-E3SMv3-piControl-100yr-rs0
-export WANDB_RUN_GROUP=v20260527-ACE2S-E3SMv3-piControl
+export WANDB_NAME=PM-v20260527-ACE2S-E3SMv3-piControl-100yr-n384-pretrain-rs1
+export WANDB_RUN_GROUP=v20260527-ACE2S-one-step-pretraining
 
 export COMMIT=$(git rev-parse --short HEAD)
 
