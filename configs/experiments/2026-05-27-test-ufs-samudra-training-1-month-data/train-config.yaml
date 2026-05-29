@@ -85,7 +85,7 @@ stepper:
       - PRATEsfc
       # - eastward_surface_wind_stress
       # - northward_surface_wind_stress
-      - total_frozen_precipitation_rate
+      # - total_frozen_precipitation_rate
   step:
     type: single_module
     config:
@@ -154,7 +154,7 @@ stepper:
         - PRATEsfc
         - eastward_surface_wind_stress
         - northward_surface_wind_stress
-        - total_frozen_precipitation_rate
+        # - total_frozen_precipitation_rate
       in_names:
         - land_fraction
         - sea_surface_fraction
@@ -168,7 +168,7 @@ stepper:
         - PRATEsfc
         - eastward_surface_wind_stress
         - northward_surface_wind_stress
-        - total_frozen_precipitation_rate
+        # - total_frozen_precipitation_rate
         - sst
         - ssu
         - ssv
