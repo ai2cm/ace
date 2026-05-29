@@ -29,7 +29,14 @@ _TIME_RANGE_RE = re.compile(r"_(\d{4,8})-(\d{4,8})\.nc$")
 
 @dataclass
 class ESGFFile:
-    """Metadata for a single file on ESGF."""
+    """Metadata for a single file on ESGF.
+
+    ``url`` is the primary (preferred) HTTP URL; ``replica_urls`` holds
+    additional URLs (typically other data-node replicas of the same
+    file) that ``download_file`` will fall back to when the primary
+    fails — important because individual data nodes routinely go offline
+    or return 404 for files that are still available elsewhere.
+    """
 
     url: str
     filename: str
@@ -38,6 +45,7 @@ class ESGFFile:
     checksum_type: str = ""
     time_start: str = ""
     time_end: str = ""
+    replica_urls: list[str] = field(default_factory=list)
 
     @staticmethod
     def from_doc(doc: dict) -> Optional["ESGFFile"]:
@@ -154,15 +162,23 @@ def query_files(
             break
         time.sleep(_REQUEST_DELAY)
 
-    seen_filenames: set[str] = set()
-    files: list[ESGFFile] = []
+    # Combine across replicas: when ESGF returns multiple Solr docs
+    # for the same filename (each on a different data node), keep one
+    # ESGFFile and tack the other docs' URLs onto ``replica_urls`` so
+    # ``download_file`` can try each in turn. Data nodes go down
+    # routinely — one entry per filename without replicas means a
+    # single dead URL kills the variable.
+    by_filename: dict[str, ESGFFile] = {}
     for doc in all_docs:
         f = ESGFFile.from_doc(doc)
-        if f is not None and f.filename not in seen_filenames:
-            seen_filenames.add(f.filename)
-            files.append(f)
-
-    files.sort(key=lambda f: f.filename)
+        if f is None:
+            continue
+        existing = by_filename.get(f.filename)
+        if existing is None:
+            by_filename[f.filename] = f
+        elif f.url and f.url != existing.url and f.url not in existing.replica_urls:
+            existing.replica_urls.append(f.url)
+    files = sorted(by_filename.values(), key=lambda f: f.filename)
 
     return ESGFFileSet(
         source_id=source_id,
@@ -181,6 +197,12 @@ def download_file(
 ) -> Path:
     """Download a single ESGF file to ``dest_dir``, returning the local path.
 
+    Walks ``[esgf_file.url, *esgf_file.replica_urls]`` and tries each
+    URL up to ``_MAX_RETRIES`` times before falling back to the next
+    replica. ESGF data nodes go down or return 404 for individual files
+    routinely; without replica fallback a single bad URL kills the
+    whole augment.
+
     Skips download if a file of the correct size already exists.
     """
     dest_dir = Path(dest_dir)
@@ -193,30 +215,41 @@ def download_file(
 
     partial = dest.with_suffix(".nc.partial")
 
-    for attempt in range(_MAX_RETRIES):
-        try:
-            req = urllib.request.Request(esgf_file.url)
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                with open(partial, "wb") as out:
-                    while True:
-                        chunk = resp.read(_DOWNLOAD_CHUNK)
-                        if not chunk:
-                            break
-                        out.write(chunk)
-            break
-        except Exception as e:
-            if attempt == _MAX_RETRIES - 1:
-                partial.unlink(missing_ok=True)
-                raise RuntimeError(
-                    f"Download failed for {esgf_file.filename}: {e}"
-                ) from e
-            logging.warning(
-                "  download attempt %d failed for %s: %s",
-                attempt + 1,
-                esgf_file.filename,
-                e,
-            )
-            time.sleep(_RETRY_DELAY * (attempt + 1))
+    urls = [esgf_file.url, *esgf_file.replica_urls]
+    last_err: Optional[Exception] = None
+    for url_idx, url in enumerate(urls):
+        for attempt in range(_MAX_RETRIES):
+            try:
+                req = urllib.request.Request(url)
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    with open(partial, "wb") as out:
+                        while True:
+                            chunk = resp.read(_DOWNLOAD_CHUNK)
+                            if not chunk:
+                                break
+                            out.write(chunk)
+                last_err = None
+                break
+            except Exception as e:
+                last_err = e
+                logging.warning(
+                    "  download attempt %d failed for %s (replica %d/%d, %s): %s",
+                    attempt + 1,
+                    esgf_file.filename,
+                    url_idx + 1,
+                    len(urls),
+                    urllib.parse.urlparse(url).netloc,
+                    e,
+                )
+                time.sleep(_RETRY_DELAY * (attempt + 1))
+        if last_err is None:
+            break  # current replica succeeded; stop walking URLs
+    if last_err is not None:
+        partial.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"Download failed for {esgf_file.filename} across "
+            f"{len(urls)} replica(s): {last_err}"
+        ) from last_err
 
     if verify_checksum and esgf_file.checksum and esgf_file.checksum_type:
         _verify_checksum(partial, esgf_file.checksum, esgf_file.checksum_type)
