@@ -26,7 +26,7 @@ from fme.core.step.secondary_decoder import (
     SecondaryDecoder,
     SecondaryDecoderConfig,
 )
-from fme.core.step.step import StepABC, StepConfigABC, StepSelector
+from fme.core.step.step import StepABC, StepConfigABC, StepOutput, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
@@ -349,7 +349,7 @@ class SingleModuleStep(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
+    ) -> StepOutput:
         """
         Step the model forward one timestep given input data.
 
@@ -358,7 +358,8 @@ class SingleModuleStep(StepABC):
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
-            The denormalized output data at the next time step.
+            The output at the next timestep and the pre-correction values of any
+            corrector-modified variables.
         """
 
         def network_call(input_norm: TensorDict) -> TensorDict:
@@ -482,7 +483,7 @@ def step_with_adjustments(
     residual_prediction: bool,
     prognostic_names: list[str],
     prescribed_prognostic_names: list[str] | None = None,
-) -> TensorDict:
+) -> StepOutput:
     """
     Step the model forward one timestep given input data.
 
@@ -505,7 +506,8 @@ def step_with_adjustments(
             next_step_input_data after the ocean step (e.g. for inference).
 
     Returns:
-        The denormalized output data at the next time step.
+        The denormalized output data at the next time step, together with the
+        pre-correction values of any corrector-modified variables.
     """
     if prescribed_prognostic_names is None:
         prescribed_prognostic_names = []
@@ -514,8 +516,12 @@ def step_with_adjustments(
     if residual_prediction:
         output_norm = add_names(input_norm, output_norm, prognostic_names)
     output = normalizer.denormalize(output_norm)
+    uncorrected: TensorDict = {}
     if corrector is not None:
-        output = corrector(input, output, next_step_input_data).corrected
+        correction = corrector(input, output, next_step_input_data)
+        output = correction.corrected
+        # Detached: unused on the train path, avoids retaining the autograd graph.
+        uncorrected = {k: v.detach() for k, v in correction.before.items()}
     if ocean is not None:
         output = ocean(input, output, next_step_input_data)
     for name in prescribed_prognostic_names:
@@ -525,4 +531,4 @@ def step_with_adjustments(
             raise ValueError(
                 f"prescribed_prognostic_name '{name}' not in next_step_input_data"
             )
-    return output
+    return StepOutput(output=output, uncorrected=uncorrected)

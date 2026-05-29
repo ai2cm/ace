@@ -59,7 +59,7 @@ from fme.core.step.multi_call import (
     replace_multi_call,
 )
 from fme.core.step.single_module import SingleModuleStepConfig
-from fme.core.step.step import StepABC, StepSelector
+from fme.core.step.step import StepABC, StepOutput, StepSelector
 from fme.core.tensors import (
     add_ensemble_dim,
     fold_ensemble_dim,
@@ -1031,7 +1031,7 @@ class Stepper:
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
+    ) -> StepOutput:
         """
         Step the model forward one timestep given input data.
 
@@ -1040,11 +1040,17 @@ class Stepper:
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
-            The denormalized output data at the next time step.
+            The output at the next timestep and the pre-correction values of any
+            corrector-modified variables.
         """
         args = args.apply_input_process_func(self._input_process_func)
-        output = self._step_obj.step(args=args, wrapper=wrapper)
-        return self._output_process_func(output)
+        step_output = self._step_obj.step(args=args, wrapper=wrapper)
+        # The output process func (e.g. spatial masking) is name-preserving and
+        # applied per-variable, so it is safe to apply to the uncorrected subset.
+        return StepOutput(
+            output=self._output_process_func(step_output.output),
+            uncorrected=self._output_process_func(step_output.uncorrected),
+        )
 
     def get_prediction_generator(
         self,
@@ -1052,7 +1058,7 @@ class Stepper:
         forcing_data: BatchData,
         n_forward_steps: int,
         optimizer: OptimizationABC,
-    ) -> Generator[TensorDict, None, None]:
+    ) -> Generator[StepOutput, None, None]:
         """
         Predict multiple steps forward given initial condition and forcing data.
 
@@ -1102,7 +1108,7 @@ class Stepper:
         optimizer: OptimizationABC,
         labels: BatchLabels | None,
         data_mask: TensorMapping | None = None,
-    ) -> Generator[TensorDict, None, None]:
+    ) -> Generator[StepOutput, None, None]:
         state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
         for step in range(n_forward_steps):
             input_forcing = {
@@ -1123,7 +1129,7 @@ class Stepper:
                 return optimizer.checkpoint(module, step=step)
 
             with optimizer.autocast():
-                state = self.step(
+                step_output = self.step(
                     StepArgs(
                         input=input_data,
                         next_step_input_data=next_step_input_dict,
@@ -1132,8 +1138,9 @@ class Stepper:
                     ),
                     wrapper=checkpoint,
                 )
-            yield state
-            state = optimizer.detach_if_using_gradient_accumulation(state)
+            yield step_output
+            # The rollout always feeds the corrected output forward.
+            state = optimizer.detach_if_using_gradient_accumulation(step_output.output)
 
     def predict(
         self,
@@ -1194,7 +1201,7 @@ class Stepper:
                 )
             )
         data = process_prediction_generator_list(
-            output_list,
+            [step_output.output for step_output in output_list],
             time=forcing_data.time[:, self.n_ic_timesteps :],
             horizontal_dims=forcing_data.horizontal_dims,
             labels=forcing.labels,
@@ -1678,7 +1685,7 @@ class TrainStepper(
             else:
                 context = torch.no_grad()
             with context:
-                gen_step = next(output_iterator)
+                gen_step = next(output_iterator).output
                 gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
                 output_list.append(gen_step)
                 target_step = add_ensemble_dim(

@@ -20,7 +20,7 @@ from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.single_module import step_with_adjustments
-from fme.core.step.step import StepABC, StepConfigABC, StepSelector
+from fme.core.step.step import StepABC, StepConfigABC, StepOutput, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -344,7 +344,7 @@ class SeparateRadiationStep(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
+    ) -> StepOutput:
         """
         Step the model forward one timestep given input data.
 
@@ -353,7 +353,8 @@ class SeparateRadiationStep(StepABC):
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
-            The denormalized output data at the next time step.
+            The output at the next timestep and the pre-correction values of any
+            corrector-modified variables.
         """
 
         def network_calls(input_norm: TensorDict) -> TensorDict:

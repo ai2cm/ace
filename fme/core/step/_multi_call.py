@@ -5,6 +5,7 @@ from collections.abc import Callable
 from torch import nn
 
 from fme.core.step.args import StepArgs
+from fme.core.step.step import StepOutput
 from fme.core.typing_ import TensorDict, TensorMapping
 
 LEVEL_PATTERN = re.compile(r"_(\d+)$")
@@ -13,7 +14,7 @@ TEMPLATE = "{name}{suffix}"
 
 StepMethod = Callable[
     [StepArgs, Callable[[nn.Module], nn.Module]],
-    TensorDict,
+    StepOutput,
 ]
 
 
@@ -175,7 +176,7 @@ class MultiCall:
         for suffix, multiplier in self.forcing_multipliers.items():
             scale_forcing_func = self._get_scale_forcing_func(multiplier)
             scaled_args = args.apply_input_process_func(scale_forcing_func)
-            output = self._step(scaled_args, wrapper)
+            output = self._step(scaled_args, wrapper).output
 
             for name in self.output_names:
                 new_name = get_multi_call_name(name, suffix)

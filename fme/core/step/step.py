@@ -15,6 +15,28 @@ from fme.core.step.args import StepArgs
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
+@dataclasses.dataclass
+class StepOutput:
+    """The result of stepping a model forward one timestep.
+
+    Attributes:
+        output: The denormalized output data at the next timestep, after all
+            adjustments (corrector, ocean, prescribed prognostics) are applied.
+        uncorrected: The pre-correction values of exactly the variables the
+            corrector modified. Empty if no corrector ran or none were modified.
+            This is a sparse "shadow" of ``output`` used to evaluate how much the
+            stepper relies on the corrector. Note ocean and prescribed-prognostic
+            adjustments run after the corrector and are not reflected here.
+    """
+
+    output: TensorDict
+    uncorrected: TensorDict
+
+    # Future: this could generalize to a mapping of named stage "overlays" (e.g. a
+    # "pre-ocean" tap) if loss-timing configurability before/after correction is
+    # added. Not built now.
+
+
 # Children still need to decorate with @dataclass, otherwise
 # they will be a dataclass with no dataclass fields.
 @dataclasses.dataclass
@@ -333,7 +355,7 @@ class StepABC(abc.ABC):
         self: SelfType,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
+    ) -> StepOutput:
         """
         Step the model forward one timestep given input data.
 
@@ -342,7 +364,8 @@ class StepABC(abc.ABC):
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
-            The denormalized output data at the next time step.
+            The output at the next timestep and the pre-correction values of any
+            corrector-modified variables.
         """
         pass
 
