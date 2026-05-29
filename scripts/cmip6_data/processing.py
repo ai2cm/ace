@@ -235,6 +235,16 @@ def normalize_regrid_source(ds: xr.Dataset) -> xr.Dataset:
         ("vertices_latitude", "lat_b"),
         ("lon_bnds", "lon_b"),
         ("lat_bnds", "lat_b"),
+        # CMIP6 curvilinear ocean files (Oday/Omon on tripolar grids
+        # like ACCESS-ESM1-5, EC-Earth3, etc.) carry 2D coords named
+        # ``longitude``/``latitude`` on dimensions like ``(j, i)``.
+        # xesmf only looks up ``lon``/``lat`` — without this rename,
+        # ``xesmf.Regridder`` raises "dataset must include lon/lat or
+        # be CF-compliant" even though the data has perfectly valid
+        # coordinates. CMIP6 rectilinear atmos files name them
+        # ``lon``/``lat`` already so this is a no-op there.
+        ("longitude", "lon"),
+        ("latitude", "lat"),
     ):
         if src in ds.variables and dst not in ds.variables:
             ds = ds.rename({src: dst})
