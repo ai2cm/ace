@@ -96,15 +96,16 @@ def query_datasets(config: ESGFInventoryConfig) -> pd.DataFrame:
         )
         for variable in query.variables:
             for experiment in experiments:
+                # No ``fields`` parameter: the new Solr-bridge API on
+                # LLNL/ORNL is strict-Pydantic and rejects ``fields`` as
+                # ``extra_forbidden``. The legacy DKRZ API accepts it
+                # but doesn't require it — we extract just what we
+                # need from the response below either way.
                 base: dict = {
                     "type": "Dataset",
                     "project": "CMIP6",
                     "table_id": query.table_id,
                     "variable_id": variable,
-                    "fields": (
-                        "source_id,experiment_id,member_id,"
-                        "grid_label,activity_id,instance_id"
-                    ),
                 }
                 if experiment is not None:
                     base["experiment_id"] = experiment
