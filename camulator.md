@@ -15,9 +15,147 @@ Copy the four source files from `/Users/alexeyy/Git/ace2/fme/ace/models/miles_cr
 | `__init__.py` | ace2 `__init__.py` | Empty file; no changes needed |
 | `base_model.py` | ace2 `base_model.py` | Copy as-is; `load_model*` methods are CREDIT-specific and never called by ACE, but harmless to include |
 | `boundary_padding.py` | ace2 `boundary_padding.py` | Copy as-is; dimension-agnostic, works for both 4D and 5D tensors |
-| `crossformer.py` | ace2 `crossformer.py` | Copy as-is; internal import paths (`fme.ace.models.miles_credit.*`) are identical in both repos |
+| `crossformer.py` | ace2 `crossformer.py` | **Requires modifications** for noise conditioning (see below) |
 
 The one commented-out import in crossformer.py (`# from credit.postblock import PostBlock`) is already a comment, so no change needed.
+
+#### Modifications to `crossformer.py` for noise conditioning
+
+CrossFormer uses a custom `LayerNorm` that normalizes along the channel dimension (dim 1) — the same operation as `ChannelLayerNorm` in the existing codebase. `ConditionalLayerNorm` wraps `ChannelLayerNorm` when `global_layer_norm=False`, so CrossFormer's norms can be replaced with CLN without any further restructuring. `NoiseConditionedModel` (already used by both SFNO and SwinTransformer) then generates the noise field and injects it through the context.
+
+**New imports** (add at the top of `crossformer.py`):
+```python
+import dataclasses
+from fme.core.models.conditional_sfno.layers import (
+    ConditionalLayerNorm,
+    Context,
+    ContextConfig,
+)
+```
+(`torch.nn.functional as F` is already imported by ace2.)
+
+**Modify `FeedForward`** — accept an optional `context_config` and split the `nn.Sequential` so `context` can be threaded through the norm. Note: this refactor changes state-dict keys for `FeedForward` only (`layers.0.*`/`layers.1-4.*` → `norm.*`/`ff.*`). `Attention` is unaffected because its norm was already a named attribute `self.norm`, so the key `norm.*` is unchanged there. Pre-trained ace2 CrossFormer weights would need a key-remapping shim for the FeedForward layers. There are no such checkpoints yet, so this is not a practical concern.
+```python
+class FeedForward(nn.Module):
+    def __init__(self, dim, mult=4, dropout=0.0, context_config: ContextConfig | None = None):
+        super().__init__()
+        if context_config is not None:
+            self.norm: nn.Module = ConditionalLayerNorm(
+                dim, img_shape=(1, 1), context_config=context_config
+            )
+        else:
+            self.norm = LayerNorm(dim)
+        self.ff = nn.Sequential(
+            nn.Conv2d(dim, dim * mult, 1),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Conv2d(dim * mult, dim, 1),
+        )
+
+    def forward(self, x, context: Context | None = None):
+        if isinstance(self.norm, ConditionalLayerNorm):
+            assert context is not None, "context required when ConditionalLayerNorm is used"
+            x_norm = self.norm(x, context)
+        else:
+            x_norm = self.norm(x)
+        return self.ff(x_norm)
+```
+Note: `img_shape=(1, 1)` is a dummy — `ConditionalLayerNorm` only uses `img_shape` for the `global_layer_norm=True` path (global `nn.LayerNorm`), which we never use here.
+
+**Modify `Attention`** — same pattern for its pre-norm:
+```python
+class Attention(nn.Module):
+    def __init__(
+        self, dim, attn_type, window_size, dim_head=32, dropout=0.0,
+        context_config: ContextConfig | None = None,
+    ):
+        ...
+        if context_config is not None:
+            self.norm: nn.Module = ConditionalLayerNorm(
+                dim, img_shape=(1, 1), context_config=context_config
+            )
+        else:
+            self.norm = LayerNorm(dim)
+        ...
+
+    def forward(self, x, context: Context | None = None):
+        # prenorm (replace bare `x = self.norm(x)`)
+        if isinstance(self.norm, ConditionalLayerNorm):
+            assert context is not None
+            x = self.norm(x, context)
+        else:
+            x = self.norm(x)
+        # rest of forward is unchanged
+        ...
+```
+
+**Modify `Transformer`** — accept `context_config`, pass to sub-modules, and thread `context` through `forward`:
+```python
+class Transformer(nn.Module):
+    def __init__(
+        self, dim, *, local_window_size, global_window_size, depth=4,
+        dim_head=32, attn_dropout=0.0, ff_dropout=0.0,
+        context_config: ContextConfig | None = None,
+    ):
+        super().__init__()
+        self.layers = nn.ModuleList([])
+        for _ in range(depth):
+            self.layers.append(nn.ModuleList([
+                Attention(dim, attn_type="short", window_size=local_window_size,
+                          dim_head=dim_head, dropout=attn_dropout,
+                          context_config=context_config),
+                FeedForward(dim, dropout=ff_dropout, context_config=context_config),
+                Attention(dim, attn_type="long", window_size=global_window_size,
+                          dim_head=dim_head, dropout=attn_dropout,
+                          context_config=context_config),
+                FeedForward(dim, dropout=ff_dropout, context_config=context_config),
+            ]))
+
+    def forward(self, x, context: Context | None = None):
+        for short_attn, short_ff, long_attn, long_ff in self.layers:
+            x = short_attn(x, context=context) + x
+            x = short_ff(x, context=context) + x
+            x = long_attn(x, context=context) + x
+            x = long_ff(x, context=context) + x
+        return x
+```
+
+**Modify `CrossFormer`** — accept `context_config`, pass to each `Transformer`, and thread `context` (with per-stage noise downsampling) through `forward`:
+
+In `__init__`, add:
+```python
+context_config: ContextConfig | None = None,
+```
+and pass it to each `Transformer(...)` call inside the `for` loop.
+
+In `forward`, change the signature and downsample noise at each encoder stage. Use `F.interpolate` to match the actual post-CEL spatial size, which is robust to any `cross_embed_strides` configuration:
+```python
+def forward(self, x, context: Context | None = None):
+    ...
+    # squeeze frames dim (no-op for 4D input with frames=1)
+    x = x.squeeze(2)
+
+    encodings = []
+    for cel, transformer in self.layers:
+        x = cel(x)
+        if context is not None and context.noise is not None:
+            # Resize noise to match the current encoder stage spatial size.
+            # F.interpolate is used (not avg_pool2d) so this works for any
+            # cross_embed_strides, not just uniform stride-2.
+            noise_i = F.interpolate(
+                context.noise, size=x.shape[-2:], mode="bilinear", align_corners=False
+            )
+            ctx_i = dataclasses.replace(context, noise=noise_i)
+        else:
+            ctx_i = context
+        x = transformer(x, context=ctx_i)
+        encodings.append(x)
+
+    # decoder (up_blocks) is unchanged — no CLN in decoder
+    ...
+```
+
+When `context_config=None` (deterministic mode), `context` will be `None` at every call, so all `isinstance(self.norm, ConditionalLayerNorm)` branches are dead code and the model behaves exactly as the ace2 original.
 
 ### 2. `fme/ace/step/camulator.py` (new)
 Copy from `/Users/alexeyy/Git/ace2/fme/ace/step/camulator.py` with the following modifications. All `fme.core.*` imports are identical to those in `fme/ace/step/fcn3.py`. The CrossFormer model import path also matches the new `fme/ace/models/miles_credit/crossformer.py` location.
@@ -29,7 +167,7 @@ Copy from `/Users/alexeyy/Git/ace2/fme/ace/step/camulator.py` with the following
 
 **Changes vs. ace2 source (must be applied when porting):**
 
-1. **Remove dead fields from `CrossFormerConfig`** — the fields `channels`, `surface_channels`, `input_only_channels`, `output_only_channels`, `levels` are declared as dataclass fields in ace2 but are never read by `CrossFormerConfig.build()` (channel counts are always supplied as arguments). Remove them so users cannot mistakenly set them in YAML and expect an effect. Keep them only in the `CrossFormer.__init__` signature (where they are still used by the model itself).
+1. **Remove dead fields from `CrossFormerConfig`** — the fields `channels`, `surface_channels`, `input_only_channels`, `output_only_channels`, `levels`, `image_height`, and `image_width` are declared as dataclass fields in ace2 but are never read by `CrossFormerConfig.build()` (channel counts and image dimensions are always supplied as arguments). Remove them so users cannot mistakenly set them in YAML and expect an effect. Keep them only in the `CrossFormer.__init__` signature (where they are still used by the model itself). Note: `image_height` and `image_width` have misleading defaults (640, 1280) that would silently have no effect — particularly important to remove. Also change the `frames` default from `2` (ace2 value) to `1`, matching `NoiseConditionedCrossFormerConfig` and the YAML configs. The ace2 default of `2` would silently route through the `F.avg_pool3d` branch in `CrossFormer.forward` if a user omits `frames` from their YAML.
 
 2. **`diagnostic_names` property** — the ace2 version returns `[]`, but `surface_diagnostic_names` and `atmosphere_diagnostic_names` are genuine output-only variables. Replace with the correct implementation, matching `SingleModuleStepConfig` (single_module.py:166-168), which uses `self.output_names` (not `self.out_names`):
    ```python
@@ -124,8 +262,112 @@ Copy from `/Users/alexeyy/Git/ace2/fme/ace/step/camulator.py` with the following
 
 5. **`from_state` / `_remove_deprecated_keys`** — keep the ace2 `from_state` override as-is; it calls `_remove_deprecated_keys` before delegating to `dacite.from_dict`. Do **not** remove it or rely on the `StepConfigABC` default (which skips that step).
 
-### 3. `configs/experiments/2026-05-28-swin-transformer/ace-train-config-4deg-AIMIP-crossformer.yaml`
-New training config derived from `ace-train-config-4deg-AIMIP-swin.yaml`. Differences:
+6. **Noise conditioning — two separate builder types (mirrors swin pattern exactly)** — the swin YAML uses `builder.type: SwinTransformer` for deterministic runs and `builder.type: NoiseConditionedSwinTransformer` for stochastic runs, with `noise_embed_dim` as a field at the same level as the architecture parameters. CrossFormer follows exactly the same pattern.
+
+   **Keep `CrossFormerConfig` and `CrossFormerSelector` unchanged** (deterministic, `builder.type: CrossFormer`), except for the dead-field and `frames`-default fixes from item 1 above. `CrossFormerConfig.build()` requires no changes for noise conditioning: after `CrossFormer.__init__` gains `context_config: ContextConfig | None = None`, the existing `build()` call automatically passes `None` via the default — no explicit `context_config=None` argument is needed.
+
+   **New imports** in `camulator.py`:
+   ```python
+   from fme.ace.registry.stochastic_sfno import NoiseConditionedModel
+   from fme.core.models.conditional_sfno.layers import ContextConfig
+   ```
+
+   **New dataclass `NoiseConditionedCrossFormerConfig`** — same architecture fields as `CrossFormerConfig`, plus `noise_embed_dim`:
+   ```python
+   @dataclasses.dataclass
+   class NoiseConditionedCrossFormerConfig:
+       """CrossFormer with CLN-based noise conditioning via NoiseConditionedModel."""
+       frames: int = 1
+       patch_height: int = 1
+       patch_width: int = 1
+       dim: list[int] = dataclasses.field(default_factory=lambda: [256, 512, 1024, 2048])
+       depth: list[int] = dataclasses.field(default_factory=lambda: [2, 2, 18, 2])
+       dim_head: int = 32
+       global_window_size: list[int] = dataclasses.field(
+           default_factory=lambda: [4, 4, 2, 1]
+       )
+       local_window_size: int = 3
+       cross_embed_kernel_sizes: list[list[int]] = dataclasses.field(
+           default_factory=lambda: [[4, 8, 16, 32], [2, 4], [2, 4], [2, 4]]
+       )
+       cross_embed_strides: list[int] = dataclasses.field(
+           default_factory=lambda: [2, 2, 2, 2]
+       )
+       attn_dropout: float = 0.0
+       ff_dropout: float = 0.0
+       use_spectral_norm: bool = True
+       interp: bool = True
+       padding_conf: dict | None = None
+       post_conf: dict | None = None  # PostBlock is commented out in CrossFormer; this field is inert
+       noise_embed_dim: int = 256  # ← the only functional addition vs CrossFormerConfig
+
+       def build(
+           self,
+           n_atmo_channels: int,
+           n_atmo_groups: int,
+           n_surf_channels: int,
+           n_aux_channels: int,
+           n_atmo_diagnostic_channels: int,
+           n_surf_diagnostic_channels: int,
+           img_shape: tuple[int, int],
+       ) -> nn.Module:
+           context_config = ContextConfig(
+               embed_dim_scalar=0,
+               embed_dim_labels=0,
+               embed_dim_noise=self.noise_embed_dim,
+               embed_dim_pos=0,
+           )
+           crossformer = CrossFormer(
+               image_height=img_shape[0],
+               patch_height=self.patch_height,
+               image_width=img_shape[1],
+               patch_width=self.patch_width,
+               ...,  # same remaining kwargs as CrossFormerConfig.build()
+               context_config=context_config,
+           )
+           return NoiseConditionedModel(
+               crossformer,
+               img_shape=img_shape,
+               embed_dim_noise=self.noise_embed_dim,
+               embed_dim_pos=0,
+               n_labels=0,
+               label_embed_dim=0,
+               inverse_sht=None,
+           )
+   ```
+
+   **New selector `NoiseConditionedCrossFormerSelector`**:
+   ```python
+   @dataclasses.dataclass
+   class NoiseConditionedCrossFormerSelector:
+       type: Literal["NoiseConditionedCrossFormer"]
+       config: NoiseConditionedCrossFormerConfig
+
+       def build(self, ...) -> nn.Module:
+           return self.config.build(...)
+   ```
+
+   **Update `CrossFormerStepConfig.builder` type** — change from bare `CrossFormerSelector` to the union:
+   ```python
+   builder: CrossFormerSelector | NoiseConditionedCrossFormerSelector
+   ```
+   dacite will resolve this from the `type` discriminant at parse time.
+
+   **No changes to `CrossFormerStep`** — `NoiseConditionedModel.forward(input_tensor)` accepts a plain tensor (labels default to `None`), generates noise internally, and calls `CrossFormer.forward(x, Context(noise=noise))`. The step's `wrapper(self.module)(input_tensor)` call is unchanged. The labels guard remains in place.
+
+   **`CrossFormerStep.modules` does not need to include `_global_mean_removal`** — none of the `GlobalMeanRemoval` implementations are `nn.Module` subclasses and none carry trainable `nn.Parameter`s. The `modules` property (used for DDP wrapping and the optimizer) correctly covers only `self.module`. This is consistent with `SingleModuleStep`, which also excludes GMR from `modules`.
+
+   **Stochastic outputs** — repeated `step()` calls on the same input produce different outputs when using `NoiseConditionedCrossFormer`, enabling ensemble generation.
+
+### 3. Config files
+Two configs are created (one deterministic, one noise-conditioned), mirroring `ace-train-config-4deg-AIMIP-swin.yaml` / `ace-train-config-4deg-AIMIP-nc-swin.yaml`:
+
+| File | `builder.type` | Stochastic? |
+|---|---|---|
+| `ace-train-config-4deg-AIMIP-crossformer.yaml` | `CrossFormer` | no |
+| `ace-train-config-4deg-AIMIP-nc-crossformer.yaml` | `NoiseConditionedCrossFormer` | yes |
+
+Both are derived from `ace-train-config-4deg-AIMIP-swin.yaml`. Differences vs. swin:
 - `stepper.step.type: CrossFormer` (not `single_module`)
 - Uses structured variable groups (`forcing_names`, `atmosphere_prognostic_names`, etc.) instead of explicit `in_names`/`out_names`
 - CrossFormer hyperparameters tuned for 4-deg grid (see grid analysis below)
@@ -136,9 +378,15 @@ New training config derived from `ace-train-config-4deg-AIMIP-swin.yaml`. Differ
 ## Files to Modify
 
 ### `fme/ace/step/__init__.py`
-Add import to trigger `@StepSelector.register("CrossFormer")` decorator:
+Add import to trigger `@StepSelector.register("CrossFormer")` decorator and expose all public symbols:
 ```python
-from .camulator import CrossFormerConfig, CrossFormerSelector, CrossFormerStepConfig
+from .camulator import (
+    CrossFormerConfig,
+    CrossFormerSelector,
+    CrossFormerStepConfig,
+    NoiseConditionedCrossFormerConfig,
+    NoiseConditionedCrossFormerSelector,
+)
 ```
 The `fme/ace/__init__.py` already has `from . import step`, which loads this `__init__.py` at startup.
 
@@ -266,6 +514,45 @@ stepper:
         append_as_input: true
 ```
 
+The NC config (`ace-train-config-4deg-AIMIP-nc-crossformer.yaml`) is identical except the `builder` block becomes:
+```yaml
+      builder:
+        type: NoiseConditionedCrossFormer
+        config:
+          frames: 1
+          dim: [256, 512, 1024, 2048]
+          depth: [2, 2, 18, 2]
+          global_window_size: [4, 4, 2, 1]
+          local_window_size: 3
+          cross_embed_kernel_sizes: [[4, 8, 16, 32], [2, 4], [2, 4], [2, 4]]
+          cross_embed_strides: [2, 2, 2, 2]
+          attn_dropout: 0.0
+          ff_dropout: 0.0
+          use_spectral_norm: true
+          interp: true
+          padding_conf:
+            activate: true
+            mode: earth
+            pad_lat: [2, 1]
+            pad_lon: [3, 3]
+          noise_embed_dim: 256
+```
+Also change `stepper_training.loss` from `type: MSE` to (matching nc-swin exactly):
+```yaml
+    loss:
+      type: EnsembleLoss
+      weights:
+        air_temperature_0: 0.5
+        air_temperature_1: 0.5
+        eastward_wind_0: 0.5
+        northward_wind_0: 0.5
+        # ... (same per-variable weights as nc-swin)
+      config:
+        crps_weight: 0.9
+        energy_score_weight: 0.1
+```
+`EnsembleLoss` combines CRPS (weight 0.9) and energy score (weight 0.1), both proper scoring rules for probabilistic forecasts. This requires multiple forward passes per training step (ensemble members) — the stochasticity from `NoiseConditionedModel` produces the spread.
+
 ---
 
 ## Tests to Add
@@ -274,12 +561,12 @@ stepper:
 - Forward pass with small spatial dims (e.g., 12×24 with padding to ensure divisibility)
 - Verify output shape matches input spatial dims (with interp=True)
 - Test both with and without padding_conf
+- Forward pass with `context_config` (noise conditioning): verify output shape is unchanged and two calls with the same input produce different outputs
 
 ### `fme/ace/step/test_camulator.py`
 Following the pattern of any existing step test in `fme/core/step/`:
-- Instantiate `CrossFormerStepConfig` with minimal variables
-- Call `get_step(dataset_info, init_weights=lambda mods: None)`
-- Run one `step()` call and verify output names match config's `out_names`
+- Instantiate `CrossFormerStepConfig` with `builder.type: CrossFormer` and minimal variables; call `get_step`; run one `step()` and verify output names match `out_names`
+- Same for `NoiseConditionedCrossFormer` builder: verify two `step()` calls on identical input differ (stochastic check)
 
 ---
 
@@ -287,5 +574,6 @@ Following the pattern of any existing step test in `fme/core/step/`:
 
 1. **Unit tests:** `python -m pytest fme/ace/models/miles_credit/ fme/ace/step/test_camulator.py -v`
 2. **Import check:** `python -c "import fme.ace; from fme.core.step.step import StepSelector; print(StepSelector.get_available_types())"` — should include "CrossFormer"
-3. **Config parse check:** `python -c "import yaml, dacite, fme.ace; from fme.ace.train import TrainConfig; cfg = yaml.safe_load(open('configs/experiments/2026-05-28-swin-transformer/ace-train-config-4deg-AIMIP-crossformer.yaml')); dacite.from_dict(TrainConfig, cfg, config=dacite.Config(strict=True))"` — should not raise
-4. **Pre-commit:** `pre-commit run --all-files` to pass ruff, ruff-format, mypy
+3. **Config parse check (deterministic):** `python -c "import yaml, dacite, fme.ace; from fme.ace.train import TrainConfig; cfg = yaml.safe_load(open('configs/experiments/2026-05-28-swin-transformer/ace-train-config-4deg-AIMIP-crossformer.yaml')); dacite.from_dict(TrainConfig, cfg, config=dacite.Config(strict=True))"` — should not raise
+4. **Config parse check (NC):** same command with `ace-train-config-4deg-AIMIP-nc-crossformer.yaml`
+5. **Pre-commit:** `pre-commit run --all-files` to pass ruff, ruff-format, mypy
