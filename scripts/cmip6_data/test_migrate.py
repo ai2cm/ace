@@ -665,6 +665,86 @@ def test_migration_0_1_0_to_0_2_0_noop_when_co2_absent(tmp_path: Path):
     assert "log_input4mips_co2" not in after.data_vars
 
 
+def test_migration_0_3_0_to_0_4_0_writes_per_cell_maps(tmp_path: Path):
+    """The 0.3.0 → 0.4.0 migration regenerates stats.nc with the new
+    per-cell maps. Zarr data is untouched; only stats.nc changes.
+    """
+    from migrations._0_3_0_to_0_4_0 import MIGRATION
+
+    zarr_dir = tmp_path / "data.zarr"
+    nt, nlat, nlon = 12, 45, 90  # F22.5 grid
+    times = xr.date_range("2010-01-01", periods=nt, freq="D", calendar="noleap")
+    rng = np.random.default_rng(0)
+    ds = xr.Dataset(
+        {
+            "TMP2m": xr.DataArray(
+                rng.normal(280, 10, size=(nt, nlat, nlon)).astype(np.float32),
+                dims=("time", "lat", "lon"),
+                coords={"time": times},
+            ),
+            # 3D var with plev — must produce (period, plev, lat, lon) maps.
+            "ua": xr.DataArray(
+                rng.normal(size=(nt, 3, nlat, nlon)).astype(np.float32),
+                dims=("time", "plev", "lat", "lon"),
+                coords={
+                    "time": times,
+                    "plev": np.array([100000, 50000, 10000], dtype=np.float32),
+                },
+            ),
+            # Static var — should not get a map (statics are their own map).
+            "land_sea_mask": xr.DataArray(
+                rng.uniform(0, 1, size=(nlat, nlon)).astype(np.float32),
+                dims=("lat", "lon"),
+            ),
+        }
+    )
+    ds.to_zarr(str(zarr_dir), mode="w", consolidated=True, zarr_format=3)
+    sidecar = {
+        "source_id": "TEST",
+        "experiment": "historical",
+        "variant_label": "r1i1p1f1",
+        "label": "TEST",
+        "target_grid": "F22.5",
+        "schema_version": "0.3.0",
+        "variables_present": sorted(ds.data_vars),
+    }
+
+    out = MIGRATION.apply(str(zarr_dir), sidecar)
+
+    # Sidecar bookkeeping.
+    assert out["schema_version"] == "0.4.0"
+    audit = out["migrations"][-1]
+    assert audit["from"] == "0.3.0" and audit["to"] == "0.4.0"
+
+    # Stats file exists with the new per-cell maps.
+    stats_path = zarr_dir.parent / "stats.nc"
+    assert stats_path.exists()
+    stats = xr.open_dataset(stats_path)
+    try:
+        # 2D var: (period, lat, lon).
+        for name in (
+            "TMP2m__time_mean_map",
+            "TMP2m__time_var_map",
+            "TMP2m__n_valid_map",
+            "TMP2m__d1_var_map",
+        ):
+            assert name in stats.data_vars, name
+            assert stats[name].dims == ("period", "lat", "lon"), stats[name].dims
+        # 3D var: (period, plev, lat, lon).
+        assert stats["ua__time_mean_map"].dims == ("period", "plev", "lat", "lon")
+        # Static var: no time_mean_map; gets a single static_map.
+        assert "land_sea_mask__time_mean_map" not in stats.data_vars
+        assert stats["land_sea_mask__static_map"].dims == ("lat", "lon")
+        # Scalar stats still present.
+        assert "TMP2m__mean" in stats.data_vars
+        # n_valid_map is int and ≤ nt.
+        n_valid = stats["TMP2m__n_valid_map"].values
+        assert n_valid.dtype.kind in "iu"
+        assert (n_valid <= nt).all()
+    finally:
+        stats.close()
+
+
 # ---------------------------------------------------------------------------
 # Layer 3: integration with the processing pipeline
 # ---------------------------------------------------------------------------

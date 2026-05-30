@@ -30,6 +30,7 @@ import os
 import sys
 import tempfile
 import traceback
+import warnings
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
@@ -134,13 +135,30 @@ def _moment_stats(values: np.ndarray, mean: float, std: float) -> tuple[float, f
     return skew, excess_kurt
 
 
-def _stats_for_time_field(arr: np.ndarray, w2d: np.ndarray) -> dict[str, float]:
-    """Stats for a ``(time, lat, lon)`` array."""
+def _stats_for_time_field(
+    arr: np.ndarray, w2d: np.ndarray
+) -> tuple[dict[str, float], dict[str, np.ndarray]]:
+    """Stats for a ``(time, lat, lon)`` array.
+
+    Returns ``(scalar_stats, maps)``. ``maps`` always has keys
+    ``time_mean_map``, ``time_var_map``, ``n_valid_map``, and
+    ``d1_var_map`` (all ``(lat, lon)``, float32 except ``n_valid_map``
+    which is int32). Persisting per-cell maps lets ``make_normalization``
+    aggregate pooled per-cell mean / std / tendency-std across datasets
+    via the law of total variance, without re-opening every zarr.
+    """
     out = _nan_dict()
     valid_mask = np.isfinite(arr)
     out["finite_fraction"] = float(valid_mask.mean())
+    lat_lon_shape = arr.shape[-2:]
+    maps: dict[str, np.ndarray] = {
+        "time_mean_map": np.full(lat_lon_shape, np.nan, dtype=np.float32),
+        "time_var_map": np.full(lat_lon_shape, np.nan, dtype=np.float32),
+        "n_valid_map": valid_mask.sum(axis=0).astype(np.int32),
+        "d1_var_map": np.full(lat_lon_shape, np.nan, dtype=np.float32),
+    }
     if not valid_mask.any():
-        return out
+        return out, maps
 
     val_v = arr[valid_mask]
     w3 = np.broadcast_to(w2d, arr.shape)
@@ -155,7 +173,16 @@ def _stats_for_time_field(arr: np.ndarray, w2d: np.ndarray) -> dict[str, float]:
     # Variance decomposition: total = climatology + anomaly. The
     # climatology contribution is the spatial std of the time-mean
     # field; the anomaly is whatever's left.
-    time_mean = np.nanmean(arr, axis=0)  # (lat, lon)
+    # ``warnings.catch_warnings`` suppresses "Mean of empty slice" /
+    # "Degrees of freedom <= 0" — both are expected for cells that
+    # are all-NaN (e.g. land cells in an ocean variable). nan/var
+    # already returns NaN for those.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        time_mean = np.nanmean(arr, axis=0)  # (lat, lon)
+        time_var = np.nanvar(arr, axis=0)
+    maps["time_mean_map"] = time_mean.astype(np.float32)
+    maps["time_var_map"] = time_var.astype(np.float32)
     finite_clim = np.isfinite(time_mean)
     if finite_clim.any() and out["std"] > 0:
         clim_w = w2d[finite_clim]
@@ -180,6 +207,10 @@ def _stats_for_time_field(arr: np.ndarray, w2d: np.ndarray) -> dict[str, float]:
             d1_w = np.broadcast_to(w2d, d1.shape)[d1_mask]
             d1_v = d1[d1_mask]
             out["d1_mean"], out["d1_std"] = _weighted_mean_std(d1_v, d1_w)
+        # Per-cell d1 variance for pooled tendency-std aggregation.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            maps["d1_var_map"] = np.nanvar(d1, axis=0).astype(np.float32)
 
     # Lag-1 autocorrelation of the area-weighted spatial mean time series.
     spatial_mean_t = np.nansum(arr * w2d, axis=(1, 2))
@@ -189,16 +220,25 @@ def _stats_for_time_field(arr: np.ndarray, w2d: np.ndarray) -> dict[str, float]:
         denom = float((c**2).sum())
         if denom > 0:
             out["autocorr_lag1"] = float((c[:-1] * c[1:]).sum() / denom)
-    return out
+    return out, maps
 
 
-def _stats_for_static_field(arr: np.ndarray, w2d: np.ndarray) -> dict[str, float]:
-    """Stats for a ``(lat, lon)`` static field (no time, no d1)."""
+def _stats_for_static_field(
+    arr: np.ndarray, w2d: np.ndarray
+) -> tuple[dict[str, float], np.ndarray]:
+    """Stats for a ``(lat, lon)`` static field (no time, no d1).
+
+    Returns ``(scalar_stats, static_map)`` where ``static_map`` is the
+    cast-to-float32 input. Persisted once per variable (not per period)
+    so ``make_normalization`` can read static fields out of ``stats.nc``
+    without re-opening the zarr.
+    """
     out = _nan_dict()
     valid = np.isfinite(arr)
     out["finite_fraction"] = float(valid.mean())
+    static_map = arr.astype(np.float32)
     if not valid.any():
-        return out
+        return out, static_map
 
     val_v = arr[valid]
     val_w = w2d[valid]
@@ -209,7 +249,7 @@ def _stats_for_static_field(arr: np.ndarray, w2d: np.ndarray) -> dict[str, float
     out["p99"] = float(np.percentile(val_v, 99))
     out["skewness"], out["kurtosis"] = _moment_stats(val_v, out["mean"], out["std"])
     # d1 and autocorr left as NaN.
-    return out
+    return out, static_map
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +305,35 @@ def _nan_stats() -> dict[str, float]:
     return _nan_dict()
 
 
+# Names of the per-cell maps emitted by ``_stats_for_time_field``.
+# Order is the persistence order in stats.nc; ``n_valid_map`` is int32,
+# the rest are float32.
+_MAP_NAMES = ("time_mean_map", "time_var_map", "n_valid_map", "d1_var_map")
+_INT_MAP_NAMES = frozenset({"n_valid_map"})
+
+
+def _empty_period_maps(shape: tuple[int, ...]) -> dict[str, np.ndarray]:
+    """All-NaN / zero-count map dict for a period with no data."""
+    return {
+        name: (
+            np.zeros(shape, dtype=np.int32)
+            if name in _INT_MAP_NAMES
+            else np.full(shape, np.nan, dtype=np.float32)
+        )
+        for name in _MAP_NAMES
+    }
+
+
+def _stack_plev_maps(
+    maps_per_plev: list[dict[str, np.ndarray]],
+) -> dict[str, np.ndarray]:
+    """Stack a list of ``(lat, lon)`` map dicts along a new leading
+    ``plev`` axis, keyed by map name."""
+    return {
+        name: np.stack([m[name] for m in maps_per_plev], axis=0) for name in _MAP_NAMES
+    }
+
+
 def compute_dataset_stats(
     ds: xr.Dataset,
     w2d: np.ndarray,
@@ -284,6 +353,11 @@ def compute_dataset_stats(
       ``(period,)``, ``(period, plev)`` for 3D-source variables. Coord
       ``period`` is a string label; ``plev`` carried through when
       present.
+      For time-varying variables, also includes a ``{var}__time_mean_map``
+      variable with shape ``(period, lat, lon)`` (2D) or
+      ``(period, plev, lat, lon)`` (3D). This lets
+      ``make_normalization`` aggregate pooled time-mean maps cheaply
+      across datasets instead of re-scanning every zarr.
     * ``rows``: tidy aggregate, one dict per ``(variable, plev, period)``.
     """
     from config import DEFAULT_STATS_PERIODS
@@ -295,6 +369,8 @@ def compute_dataset_stats(
 
     vars_to_process = [v for v in ds.data_vars if v not in _SKIP_VARS]
     plev_size = int(ds.sizes.get("plev", 0))
+    lat_size = int(ds.sizes.get("lat", 0))
+    lon_size = int(ds.sizes.get("lon", 0))
 
     nc_vars: dict[str, tuple[tuple[str, ...], np.ndarray]] = {}
     rows: list[dict] = []
@@ -307,34 +383,50 @@ def compute_dataset_stats(
         is_3d = "time" in da.dims and "plev" in da.dims
         is_static = "time" not in da.dims
 
-        # Build a (n_periods, [plev]) array per stat.
-        per_period: list = []
+        # Accumulators for scalar stats (dicts) and the per-period
+        # per-cell maps. Maps are stored separately because they're
+        # only persisted for time-varying variables and don't enter the
+        # tidy ``rows`` aggregate. ``per_period_maps[pi]`` is a dict
+        # of per-cell arrays for that period (keys match the names
+        # returned by ``_stats_for_time_field``).
+        per_period_stats: list = []
+        per_period_maps: list[dict[str, np.ndarray]] = []
+        static_map: Optional[np.ndarray] = None
         for p in periods:
             if is_static:
                 # Static: identical across periods; only compute once.
-                if per_period:
-                    per_period.append(per_period[0])
+                if per_period_stats:
+                    per_period_stats.append(per_period_stats[0])
                 else:
-                    per_period.append(_stats_for_static_field(da.values, w2d))
+                    stats, static_map = _stats_for_static_field(da.values, w2d)
+                    per_period_stats.append(stats)
                 continue
             sub = _slice_ds_to_period(ds, p)
             if sub is None:
                 # No data in this period — emit NaN stats.
                 if is_3d:
-                    per_period.append([_nan_stats() for _ in range(plev_size)])
+                    per_period_stats.append([_nan_stats() for _ in range(plev_size)])
+                    per_period_maps.append(
+                        _empty_period_maps((plev_size, lat_size, lon_size))
+                    )
                 else:
-                    per_period.append(_nan_stats())
+                    per_period_stats.append(_nan_stats())
+                    per_period_maps.append(_empty_period_maps((lat_size, lon_size)))
                 continue
             sub_da = sub[v]
             if is_3d:
-                per_period.append(
-                    [
-                        _stats_for_time_field(sub_da.isel(plev=k).values, w2d)
-                        for k in range(sub_da.sizes["plev"])
-                    ]
-                )
+                stats_per_plev: list = []
+                maps_per_plev: list[dict[str, np.ndarray]] = []
+                for k in range(sub_da.sizes["plev"]):
+                    s, m = _stats_for_time_field(sub_da.isel(plev=k).values, w2d)
+                    stats_per_plev.append(s)
+                    maps_per_plev.append(m)
+                per_period_stats.append(stats_per_plev)
+                per_period_maps.append(_stack_plev_maps(maps_per_plev))
             else:
-                per_period.append(_stats_for_time_field(sub_da.values, w2d))
+                s, m = _stats_for_time_field(sub_da.values, w2d)
+                per_period_stats.append(s)
+                per_period_maps.append(m)
 
         # Materialize per-stat arrays. 3D shape: (period, plev). 2D / static
         # shape: (period,).
@@ -343,16 +435,42 @@ def compute_dataset_stats(
                 arr = np.array(
                     [
                         [d.get(stat, float("nan")) for d in per_p]
-                        for per_p in per_period
+                        for per_p in per_period_stats
                     ],
                     dtype=float,
                 )
                 nc_vars[f"{v}__{stat}"] = (("period", "plev"), arr)
             else:
                 arr = np.array(
-                    [d.get(stat, float("nan")) for d in per_period], dtype=float
+                    [d.get(stat, float("nan")) for d in per_period_stats],
+                    dtype=float,
                 )
                 nc_vars[f"{v}__{stat}"] = (("period",), arr)
+
+        # Persist per-period per-cell maps for time-varying variables.
+        # Static vars get a single ``{v}__static_map`` with shape
+        # ``(lat, lon)`` (or ``(plev, lat, lon)`` for 3D statics —
+        # unused today, but cheap to support) since they're identical
+        # across periods.
+        if is_static:
+            if static_map is not None and lat_size > 0 and lon_size > 0:
+                if static_map.ndim == 3:
+                    nc_vars[f"{v}__static_map"] = (
+                        ("plev", "lat", "lon"),
+                        static_map.astype(np.float32),
+                    )
+                else:
+                    nc_vars[f"{v}__static_map"] = (
+                        ("lat", "lon"),
+                        static_map.astype(np.float32),
+                    )
+        elif per_period_maps and lat_size > 0 and lon_size > 0:
+            dims: tuple[str, ...] = (
+                ("period", "plev", "lat", "lon") if is_3d else ("period", "lat", "lon")
+            )
+            for map_name in _MAP_NAMES:
+                stacked = np.stack([pm[map_name] for pm in per_period_maps], axis=0)
+                nc_vars[f"{v}__{map_name}"] = (dims, stacked)
 
         # Tidy rows for the aggregate, one per (variable, plev, period).
         for pi, period_name in enumerate(period_names):
@@ -364,7 +482,7 @@ def compute_dataset_stats(
                         "plev_pa": float(ds["plev"].values[k]),
                         "period": period_name,
                     }
-                    row.update(per_period[pi][k])
+                    row.update(per_period_stats[pi][k])
                     rows.append(row)
             else:
                 row = {
@@ -373,7 +491,7 @@ def compute_dataset_stats(
                     "plev_pa": float("nan"),
                     "period": period_name,
                 }
-                row.update(per_period[pi])
+                row.update(per_period_stats[pi])
                 rows.append(row)
 
     coords: dict[str, xr.DataArray] = {
@@ -381,6 +499,13 @@ def compute_dataset_stats(
     }
     if "plev" in ds.coords:
         coords["plev"] = ds.plev
+    # Carry lat/lon for the ``{var}__time_mean_map`` arrays so consumers
+    # can align them to a target grid without round-tripping through the
+    # source zarr.
+    if "lat" in ds.coords:
+        coords["lat"] = ds.lat
+    if "lon" in ds.coords:
+        coords["lon"] = ds.lon
     data = {
         name: xr.DataArray(np.asarray(payload), dims=dims)
         for name, (dims, payload) in nc_vars.items()

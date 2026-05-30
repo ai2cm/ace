@@ -1,19 +1,7 @@
 """Produce pooled + per-source normalization files for the CMIP6 daily pilot.
 
-Reads the processed zarrs and computes area-weighted global statistics
-both pooled across source models (cross-source) **and** per source.
-For each source_id the **first ensemble member** (lowest ``variant_r``)
-is selected and its available experiments are concatenated in time
-before computing per-model statistics. Models are then averaged with
-equal weight to form the cross-source pooled stats.
-
-The ``--period`` argument selects one of the configured
-``stats_periods`` (default ``full``). The chosen period's time window
-is applied to every dataset's time axis before computing stats — so
-``--period 1940-2014`` produces stats over the historical era only,
-and pure-SSP datasets contribute nothing (no overlap → skipped).
-
-Outputs (into ``<output_directory>``):
+Aggregates per-dataset ``stats.nc`` files (one per processed zarr,
+written by ``compute_and_write_stats``) into:
 
 - ``normalization_{period}/centering.nc`` / ``scaling.nc`` —
   cross-source pooled global mean / std.
@@ -24,12 +12,25 @@ Outputs (into ``<output_directory>``):
   time-mean spatial field per variable.
 - ``per_source_normalization_{period}/<source_id>/centering.nc`` /
   ``scaling.nc`` / ``residual_centering.nc`` / ``residual_scaling.nc``
-  — per-source variants, one set per source. Consumed by
+  — per-source variants. Consumed by
   ``fme.core.per_source_normalizer.PerSourceNormalizationConfig`` at
   training time via the matching ``subdirectory:`` setting.
 
-All files carry global attributes describing provenance (source
-models, experiments, member selection, period window).
+Per source the **first ensemble member** (lowest ``variant_r``) is
+picked; its available experiments are pooled in time using the
+per-experiment scalar mean/std and per-cell ``n_valid_map`` so the
+result matches concatenating-then-computing exactly (up to the missing
+boundary in d1, which we accept). Sources are then averaged with equal
+weight.
+
+The ``--period`` argument selects one of the configured
+``stats_periods`` (default ``full``). Each ``stats.nc`` already carries
+one entry per configured period along a ``period`` coord; this script
+just selects the matching slice. No zarr opens, no time-axis slicing.
+
+Outputs land in ``<output_directory>``. All files carry global
+attributes describing provenance (source models, experiments, member
+selection, period window).
 
 Usage:
     python make_normalization.py --config configs/pilot.yaml \\
@@ -40,7 +41,9 @@ import argparse
 import logging
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 import fsspec
 import numpy as np
@@ -48,15 +51,11 @@ import pandas as pd
 import xarray as xr
 
 sys.path.insert(0, str(Path(__file__).parent))
-from compute_stats import area_weights_2d  # noqa: E402
+from compute_stats import _SCALAR_NAMES  # noqa: E402
 from config import SURFACE_AND_OCEAN_VARIABLES, ProcessConfig, StatsPeriod  # noqa: E402
-from processing import clip_date_for_calendar  # noqa: E402
 
 # Mask variables produced by the pipeline — excluded from normalization
 # stats, since their semantics (0/1 valid-cell) shouldn't be standardised.
-# Includes the per-plev below-surface masks plus one ``{name}_mask`` per
-# ocean/sea-ice surface-and-ocean variable (atmos_surface variables emit
-# no mask channel — see ``finalize_surface_and_ocean_variable``).
 _SKIP_VARS = frozenset(
     ("below_surface_mask",)
     + tuple(f"below_surface_mask{p}" for p in (1000, 850, 700, 500, 250, 100, 50, 10))
@@ -68,11 +67,30 @@ _SKIP_VARS = frozenset(
 )
 
 
+@dataclass
+class _ExperimentStats:
+    """The slice of one stats.nc relevant to one (period, var)."""
+
+    mean: float
+    std: float
+    d1_mean: float
+    d1_std: float
+    # Per-cell maps. ``time_mean_map`` / ``n_valid_map`` have shape
+    # ``(lat, lon)`` for 2D vars and ``(plev, lat, lon)`` for 3D vars;
+    # ``None`` for statics (use ``static_map`` instead).
+    time_mean_map: Optional[np.ndarray]
+    n_valid_map: Optional[np.ndarray]
+    # For static vars only. Same shape as the static field.
+    static_map: Optional[np.ndarray]
+    # True if this is a static (no time) variable.
+    is_static: bool
+
+
 def _select_first_members(
     index: pd.DataFrame,
 ) -> dict[str, list[tuple[str, str]]]:
     """For each source_id, pick the first ensemble member and return
-    its available (experiment, output_zarr) pairs.
+    its available (experiment, stats_nc_path) pairs.
 
     "First" = lowest ``variant_r``, breaking ties by ``variant_i``,
     ``variant_p``, ``variant_f``.
@@ -86,138 +104,256 @@ def _select_first_members(
         first_variant = sorted_g.iloc[0].variant_label
         member_rows = group[group.variant_label == first_variant]
         out[str(source_id)] = [
-            (r.experiment, r.output_zarr) for _, r in member_rows.iterrows()
+            (r.experiment, _stats_path_for(r.output_zarr))
+            for _, r in member_rows.iterrows()
         ]
     return out
 
 
-def _data_variables(ds: xr.Dataset) -> list[str]:
-    return sorted(v for v in ds.data_vars if v not in _SKIP_VARS)
+def _stats_path_for(zarr_path: str) -> str:
+    return zarr_path.rstrip("/").rsplit("/", 1)[0] + "/stats.nc"
 
 
-def _weighted_mean_std(values: np.ndarray, weights: np.ndarray) -> tuple[float, float]:
-    w = weights / weights.sum()
-    mean = float(np.sum(values * w))
-    var = float(np.sum((values - mean) ** 2 * w))
-    return mean, float(np.sqrt(max(var, 0.0)))
+def _open_stats(stats_path: str) -> xr.Dataset:
+    """Open ``stats.nc`` (possibly on GCS) via a local tempfile.
 
-
-def _stats_for_var(
-    datasets: list[xr.Dataset], var: str, w2d: np.ndarray
-) -> dict | None:
-    """Compute stats for one variable across experiment datasets.
-
-    Returns dict with keys: mean, std, d1_mean, d1_std, time_mean_map.
-    Returns None if the variable has no valid data.
+    h5netcdf needs a real file handle; fsspec's GCS stream isn't
+    seekable.
     """
-    is_static = all(
-        "time" not in ds[var].dims for ds in datasets if var in ds.data_vars
-    )
+    fs, rel = fsspec.core.url_to_fs(stats_path)
+    if not fs.exists(rel):
+        raise FileNotFoundError(stats_path)
+    with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp:
+        local = tmp.name
+    fs.get(rel, local)
+    try:
+        return xr.open_dataset(local).load()
+    finally:
+        Path(local).unlink(missing_ok=True)
+
+
+def _extract_var(
+    stats: xr.Dataset, var: str, period_idx: Optional[int]
+) -> Optional[_ExperimentStats]:
+    """Pull all the per-variable, per-period quantities we need.
+
+    Returns ``None`` when ``stats`` doesn't carry this variable (a
+    given source may not have every variable; we silently skip).
+    """
+    mean_key = f"{var}__mean"
+    if mean_key not in stats:
+        return None
+    # ``is_static`` can't be inferred from the scalar's dims —
+    # compute_stats writes both static and time-varying scalars with a
+    # ``period`` axis. Use the presence of ``{v}__static_map`` (only
+    # emitted for statics) as the discriminator instead.
+    is_static = f"{var}__static_map" in stats
+
+    def _scalar(name: str) -> float:
+        da = stats.get(f"{var}__{name}")
+        if da is None:
+            return float("nan")
+        if "period" in da.dims and period_idx is not None:
+            return float(da.isel(period=period_idx).values)
+        return float(da.values)
+
+    mean = _scalar("mean")
+    std = _scalar("std")
+    d1_mean = _scalar("d1_mean")
+    d1_std = _scalar("d1_std")
+
+    time_mean_map: Optional[np.ndarray] = None
+    n_valid_map: Optional[np.ndarray] = None
+    static_map: Optional[np.ndarray] = None
 
     if is_static:
-        arr = next(ds[var].values for ds in datasets if var in ds.data_vars)
-        valid = np.isfinite(arr)
-        if not valid.any():
-            return None
-        mean, std = _weighted_mean_std(arr[valid], w2d[valid])
-        return {
-            "mean": mean,
-            "std": std,
-            "d1_mean": 0.0,
-            "d1_std": 0.0,
-            "time_mean_map": arr.copy(),
-        }
-
-    time_arrays = []
-    for ds in datasets:
-        if var in ds.data_vars and "time" in ds[var].dims:
-            time_arrays.append(ds[var].values)
-    if not time_arrays:
-        return None
-
-    combined = np.concatenate(time_arrays, axis=0)
-    valid = np.isfinite(combined)
-    w3 = np.broadcast_to(w2d, combined.shape)
-    if not valid.any():
-        return None
-    mean, std = _weighted_mean_std(combined[valid], w3[valid])
-
-    # One-step difference — computed per-experiment to avoid a spurious
-    # jump at the historical/ssp585 boundary.
-    d1_parts = [np.diff(a, axis=0) for a in time_arrays]
-    d1 = np.concatenate(d1_parts, axis=0)
-    d1_valid = np.isfinite(d1)
-    w3_d1 = np.broadcast_to(w2d, d1.shape)
-    if d1_valid.any():
-        d1_mean, d1_std = _weighted_mean_std(d1[d1_valid], w3_d1[d1_valid])
+        sm_key = f"{var}__static_map"
+        if sm_key in stats:
+            static_map = np.asarray(stats[sm_key].values, dtype=np.float32)
     else:
-        d1_mean, d1_std = 0.0, 0.0
+        tm_key = f"{var}__time_mean_map"
+        nv_key = f"{var}__n_valid_map"
+        if tm_key in stats and period_idx is not None:
+            time_mean_map = np.asarray(
+                stats[tm_key].isel(period=period_idx).values, dtype=np.float32
+            )
+        if nv_key in stats and period_idx is not None:
+            n_valid_map = np.asarray(stats[nv_key].isel(period=period_idx).values)
 
-    time_mean_map = np.nanmean(combined, axis=0)
-    return {
-        "mean": mean,
-        "std": std,
-        "d1_mean": d1_mean,
-        "d1_std": d1_std,
-        "time_mean_map": time_mean_map,
-    }
+    # Treat NaN d1 stats (statics, single-sample periods) as 0/0 so
+    # they contribute neutrally to the pool. Matches the legacy
+    # behavior of ``_stats_for_var`` returning 0.0/0.0 for those.
+    if np.isnan(d1_mean):
+        d1_mean = 0.0
+    if np.isnan(d1_std):
+        d1_std = 0.0
+
+    return _ExperimentStats(
+        mean=mean,
+        std=std,
+        d1_mean=d1_mean,
+        d1_std=d1_std,
+        time_mean_map=time_mean_map,
+        n_valid_map=n_valid_map,
+        static_map=static_map,
+        is_static=is_static,
+    )
 
 
-def _slice_to_period(ds: xr.Dataset, period: StatsPeriod) -> xr.Dataset:
-    """Return ``ds`` restricted to ``period``'s ``[start, end]`` window.
+def _period_index(stats: xr.Dataset, period_name: str) -> Optional[int]:
+    """Return the index of ``period_name`` in the stats.nc ``period``
+    coord, or ``None`` if the stats has no ``period`` dim (legacy
+    single-period file)."""
+    if "period" not in stats.coords:
+        return None
+    labels = [str(p) for p in stats["period"].values]
+    if period_name not in labels:
+        raise ValueError(
+            f"period {period_name!r} not found in stats.nc "
+            f"({labels}) — re-run compute_stats with the matching "
+            "period configured."
+        )
+    return labels.index(period_name)
 
-    Unbounded ends (``None``) leave that side open. Calendar-aware: a
-    360-day calendar's invalid ``YYYY-MM-31`` end-of-month strings are
-    clipped to day 30. Returns an empty (zero-time) Dataset when there
-    is no overlap.
+
+def _pool_scalar(
+    means: list[float], stds: list[float], weights: list[float]
+) -> tuple[float, float]:
+    """Sample-weighted pool of scalar mean / std across experiments.
+
+    Uses the law of total variance:
+        pooled_var = E[var] + Var[E]
+    where the expectation is over experiments weighted by ``weights``.
+    All-zero weights collapse to an unweighted average — happens only
+    for periods with no overlap, where we expect NaNs all the way.
     """
-    if "time" not in ds.dims:
-        return ds
-    if period.start is None and period.end is None:
-        return ds
-    try:
-        calendar = str(ds["time"].dt.calendar)
-    except (AttributeError, TypeError):
-        calendar = "standard"
-    start = clip_date_for_calendar(period.start, calendar) if period.start else None
-    end = clip_date_for_calendar(period.end, calendar) if period.end else None
-    return ds.sel(time=slice(start, end))
+    ws = np.asarray(weights, dtype=float)
+    finite = np.isfinite(np.asarray(means)) & np.isfinite(np.asarray(stds)) & (ws > 0)
+    if not finite.any():
+        return float("nan"), float("nan")
+    m = np.asarray(means)[finite]
+    s = np.asarray(stds)[finite]
+    w = ws[finite] / ws[finite].sum()
+    pooled_mean = float(np.sum(m * w))
+    pooled_var = float(np.sum(s**2 * w) + np.sum((m - pooled_mean) ** 2 * w))
+    return pooled_mean, float(np.sqrt(max(pooled_var, 0.0)))
 
 
-def _compute_model_stats(
-    zarr_paths: list[str],
-    w2d: np.ndarray,
-    period: StatsPeriod,
+def _pool_per_cell_mean(
+    maps: list[np.ndarray], n_valids: list[np.ndarray]
+) -> np.ndarray:
+    """Per-cell sample-weighted average of time-mean maps.
+
+    ``maps[i]`` is the experiment-i time mean (NaN where no samples);
+    ``n_valids[i]`` is the per-cell valid count for the same experiment.
+    Cells where every experiment has zero valid samples stay NaN.
+    """
+    stacked_m = np.stack(maps, axis=0).astype(np.float64)
+    stacked_n = np.stack(n_valids, axis=0).astype(np.float64)
+    # Treat NaN means as not contributing: zero out both the value and
+    # its weight. (Per-cell ``time_mean`` is NaN exactly when n_valid
+    # is 0 for that cell, but be defensive.)
+    valid = np.isfinite(stacked_m)
+    stacked_m = np.where(valid, stacked_m, 0.0)
+    stacked_n = np.where(valid, stacked_n, 0.0)
+
+    num = np.sum(stacked_m * stacked_n, axis=0)
+    den = np.sum(stacked_n, axis=0)
+    out = np.full_like(num, np.nan, dtype=np.float64)
+    nz = den > 0
+    out[nz] = num[nz] / den[nz]
+    return out.astype(np.float32)
+
+
+def _aggregate_one_source(
+    stats_files: list[xr.Dataset], period_name: str
 ) -> dict[str, dict]:
-    """Load zarrs for one model, slice to ``period``, and compute stats.
+    """Pool one source's experiments into a single per-variable stats dict.
 
-    Datasets with no overlap on ``period`` (e.g. an ssp585 zarr when
-    ``period.start, period.end = 1940-01-01, 2014-12-31``) get an empty
-    time axis and are silently dropped from the contributing set.
+    Returns ``{var: {mean, std, d1_mean, d1_std, time_mean_map}}``.
+    ``time_mean_map`` is the static field for statics and the pooled
+    per-cell time-mean otherwise.
     """
-    datasets: list[xr.Dataset] = []
-    for p in zarr_paths:
-        ds = xr.open_zarr(p, consolidated=True)
-        sliced = _slice_to_period(ds, period)
-        if "time" in sliced.dims and sliced.sizes.get("time", 0) == 0:
-            ds.close()
-            continue
-        datasets.append(sliced)
+    # Resolve the period index once per file (may differ if legacy).
+    period_indices = [_period_index(s, period_name) for s in stats_files]
 
-    if not datasets:
-        return {}
-
+    # Discover variables across all files (different experiments may
+    # carry different variables when an augment landed only one).
     all_vars: set[str] = set()
-    for ds in datasets:
-        all_vars |= set(_data_variables(ds))
+    for s in stats_files:
+        for name in s.data_vars:
+            if "__" not in name:
+                continue
+            base, suffix = name.rsplit("__", 1)
+            if suffix in _SCALAR_NAMES:
+                all_vars.add(base)
+    all_vars -= _SKIP_VARS
 
     out: dict[str, dict] = {}
     for var in sorted(all_vars):
-        result = _stats_for_var(datasets, var, w2d)
-        if result is not None:
-            out[var] = result
-    for ds in datasets:
-        ds.close()
+        extracted = []
+        for s, pidx in zip(stats_files, period_indices, strict=True):
+            ex = _extract_var(s, var, pidx)
+            if ex is None:
+                continue
+            extracted.append(ex)
+        if not extracted:
+            continue
+
+        # Static vars: identical across experiments of the same model.
+        # Take the first non-NaN representation and call it done.
+        if extracted[0].is_static:
+            first = extracted[0]
+            out[var] = {
+                "mean": first.mean,
+                "std": first.std,
+                "d1_mean": 0.0,
+                "d1_std": 0.0,
+                "time_mean_map": first.static_map,
+            }
+            continue
+
+        # Time-varying: weight experiments by total valid sample count.
+        # ``n_valid_map.sum()`` gives an exact area-agnostic sample
+        # count — for the scalar pool this is the same weight a
+        # concatenate-then-mean operation would implicitly use, up to
+        # the area weights being uniform across experiments (they are,
+        # since every experiment of a given model lives on the same
+        # target grid).
+        weights = [
+            float(ex.n_valid_map.sum()) if ex.n_valid_map is not None else 0.0
+            for ex in extracted
+        ]
+        means = [ex.mean for ex in extracted]
+        stds = [ex.std for ex in extracted]
+        pooled_mean, pooled_std = _pool_scalar(means, stds, weights)
+
+        d1_means = [ex.d1_mean for ex in extracted]
+        d1_stds = [ex.d1_std for ex in extracted]
+        # d1 uses (n_time - 1) samples per cell, but since we don't
+        # store that map separately and the offset is tiny vs the time
+        # length, use the same weights. The error is O(1/n_time).
+        pooled_d1_mean, pooled_d1_std = _pool_scalar(d1_means, d1_stds, weights)
+
+        # Per-cell time-mean pool.
+        if all(
+            ex.time_mean_map is not None and ex.n_valid_map is not None
+            for ex in extracted
+        ):
+            tmap = _pool_per_cell_mean(
+                [ex.time_mean_map for ex in extracted],  # type: ignore[list-item]
+                [ex.n_valid_map for ex in extracted],  # type: ignore[list-item]
+            )
+        else:
+            tmap = None
+
+        out[var] = {
+            "mean": pooled_mean,
+            "std": pooled_std,
+            "d1_mean": pooled_d1_mean,
+            "d1_std": pooled_d1_std,
+            "time_mean_map": tmap,
+        }
     return out
 
 
@@ -226,9 +362,8 @@ def _pool_across_models(
 ) -> tuple[dict[str, dict], dict[str, list[str]]]:
     """Average per-variable stats across models with equal weight.
 
-    Returns:
-        pooled: {var: {mean, std, d1_mean, d1_std, time_mean_map}}
-        contributors: {var: [source_id, ...]}
+    Mirrors the legacy behavior: every contributing model contributes
+    equally, regardless of its size or experiment count.
     """
     all_vars: set[str] = set()
     for stats in per_model.values():
@@ -249,8 +384,18 @@ def _pool_across_models(
             "std": sum(s["std"] for _, s in models_with_var) / n,
             "d1_mean": sum(s["d1_mean"] for _, s in models_with_var) / n,
             "d1_std": sum(s["d1_std"] for _, s in models_with_var) / n,
-            "time_mean_map": sum(s["time_mean_map"] for _, s in models_with_var) / n,
         }
+        # Per-cell map averaging: include only models where the map is
+        # present. Pure-static vars without a map drop out cleanly.
+        maps = [
+            s["time_mean_map"]
+            for _, s in models_with_var
+            if s.get("time_mean_map") is not None
+        ]
+        if maps:
+            pooled[var]["time_mean_map"] = np.mean(np.stack(maps, axis=0), axis=0)
+        else:
+            pooled[var]["time_mean_map"] = None
     return pooled, contributors
 
 
@@ -265,13 +410,14 @@ def _global_attrs(
             "Cross-source pooled normalization statistics for the CMIP6 "
             "daily pilot. Per-model stats computed on the first ensemble "
             "member across available experiments, then averaged across "
-            "models with equal weight."
+            "models with equal weight. Aggregated from per-dataset "
+            "stats.nc files (no zarr re-scan)."
         )
     elif scope == "per_source":
         desc = (
             "Per-source normalization statistics for the CMIP6 daily pilot. "
-            "First ensemble member, all available experiments concatenated "
-            "in time, restricted to the configured period window."
+            "First ensemble member, all available experiments pooled by "
+            "sample weight, restricted to the configured period window."
         )
     else:
         raise ValueError(f"unexpected scope {scope!r}")
@@ -306,8 +452,6 @@ def _write_scalar_nc(
         )
         data_vars[var] = da
     ds = xr.Dataset(data_vars, attrs=global_attrs)
-    # Write to a local tempfile first: scipy's netCDF backend calls
-    # seek() on flush, which fsspec's GCS write streams don't support.
     with tempfile.NamedTemporaryFile(suffix=".nc") as tmp:
         ds.to_netcdf(tmp.name)
         with fsspec.open(path, "wb") as f:
@@ -325,8 +469,8 @@ def _write_map_nc(
 ) -> None:
     data_vars = {}
     for var, stats in sorted(pooled.items()):
-        tmap = stats["time_mean_map"]
-        if tmap.ndim != 2:
+        tmap = stats.get("time_mean_map")
+        if tmap is None or tmap.ndim != 2:
             continue
         da = xr.DataArray(
             tmap,
@@ -336,7 +480,6 @@ def _write_map_nc(
         data_vars[var] = da
     coords = {"lat": lat, "lon": lon}
     ds = xr.Dataset(data_vars, coords=coords, attrs=global_attrs)
-    # See _write_scalar_nc for why we use a tempfile.
     with tempfile.NamedTemporaryFile(suffix=".nc") as tmp:
         ds.to_netcdf(tmp.name)
         with fsspec.open(path, "wb") as f:
@@ -366,10 +509,6 @@ def _write_per_source(
     at ``<base_dir>/<source_id>/{centering,scaling,residual_*}.nc`` —
     the directory layout the training-side
     ``PerSourceNormalizationConfig`` expects.
-
-    No ``time_mean_map.nc`` per source — pooled is the only useful
-    map (per-source map is just that source's time-mean, which
-    consumers can load from the zarr directly).
     """
     contributors_one = {var: [source_id] for var in stats}
     _write_scalar_nc(
@@ -441,14 +580,6 @@ def main() -> None:
     idx = pd.read_csv(index_path)
     members = _select_first_members(idx)
 
-    grid_name = cfg.defaults.target_grid.name
-    sample_zarr = members[next(iter(members))][0][1]
-    sample_ds = xr.open_zarr(sample_zarr, consolidated=True)
-    w2d = area_weights_2d(grid_name, sample_ds.sizes["lon"])
-    lat = sample_ds["lat"].values
-    lon = sample_ds["lon"].values
-    sample_ds.close()
-
     logging.info(
         "Computing normalization from %d source models: %s",
         len(members),
@@ -456,33 +587,55 @@ def main() -> None:
     )
 
     per_model: dict[str, dict[str, dict]] = {}
+    lat: Optional[np.ndarray] = None
+    lon: Optional[np.ndarray] = None
     for source_id, exps in sorted(members.items()):
-        zarr_paths = [p for _, p in exps]
-        exp_names = [e for e, _ in exps]
         logging.info(
-            "  %s (member %s, experiments %s)",
+            "  %s (experiments %s)",
             source_id,
-            idx[(idx.source_id == source_id) & (idx.output_zarr == zarr_paths[0])]
-            .iloc[0]
-            .variant_label,
-            ", ".join(exp_names),
+            ", ".join(e for e, _ in exps),
         )
-        stats = _compute_model_stats(zarr_paths, w2d, period)
+        stats_files: list[xr.Dataset] = []
+        for exp_name, stats_path in exps:
+            try:
+                ds = _open_stats(stats_path)
+            except FileNotFoundError:
+                logging.warning(
+                    "    %s/%s: missing %s — skipping (run migrate.py to "
+                    "regenerate or recompute_stats)",
+                    source_id,
+                    exp_name,
+                    stats_path,
+                )
+                continue
+            stats_files.append(ds)
+            if lat is None and "lat" in ds.coords:
+                lat = np.asarray(ds["lat"].values)
+                lon = np.asarray(ds["lon"].values)
+        if not stats_files:
+            logging.info("    %s: no stats files available; skipping", source_id)
+            continue
+        stats = _aggregate_one_source(stats_files, period.name)
+        for ds in stats_files:
+            ds.close()
         if stats:
             per_model[source_id] = stats
         else:
             logging.info(
-                "    %s: no data in [%s, %s] for period %r; skipping",
+                "    %s: no variables passed the period %r filter",
                 source_id,
-                period.start or "-inf",
-                period.end or "+inf",
                 period.name,
             )
 
     if not per_model:
         raise RuntimeError(
             f"No source models contributed any data for period {period.name!r}; "
-            f"check the time_subset overlap with [{period.start}, {period.end}]"
+            f"check that stats.nc files exist and that period names line up."
+        )
+    if lat is None or lon is None:
+        raise RuntimeError(
+            "No stats.nc carried lat/lon coords — regenerate with the "
+            "0.3.0→0.4.0 migration (which writes them) before aggregating."
         )
 
     # --- Cross-source pooled outputs ---
