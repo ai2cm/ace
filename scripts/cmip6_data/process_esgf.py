@@ -940,7 +940,25 @@ def augment_one_esgf(
                     daily_time,
                     fill_iterations=cfg.fill.ocean_fill_iterations,
                 )
-                new_ds = xr.Dataset({name: da for name, da in outputs.items()})
+                # Apply temperature unit harmonization — the fresh
+                # process_one_esgf path runs this on every non-mask
+                # variable but the augment path used to skip it,
+                # which let 77 ESGF-augmented ``omon_tob`` fields
+                # ship in degC and land in the zarr as ~3 K nonsense.
+                # Pass ``var_id=name`` so the spec-default lookup
+                # also fires for sources where the ``units`` attr is
+                # absent.
+                harmonized: dict[str, xr.DataArray] = {}
+                for name, da in outputs.items():
+                    if name.endswith("_mask"):
+                        harmonized[name] = da
+                        continue
+                    converted, msg = harmonize_temperature_to_kelvin(da, var_id=name)
+                    if msg:
+                        logging.info("  augment harmonize: %s", msg)
+                        existing_row.warnings.append(msg)
+                    harmonized[name] = converted
+                new_ds = xr.Dataset(harmonized)
                 new_ds.to_zarr(
                     zarr_path,
                     mode="a",

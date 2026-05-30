@@ -776,6 +776,131 @@ def test_migration_0_4_0_to_0_5_0_no_audit_when_clean(tmp_path: Path):
     assert out["migrations"][-1]["fill_value_clips"] == []
 
 
+def test_migration_0_5_0_to_0_6_0_converts_degc_to_kelvin(tmp_path: Path):
+    """The 0.5.0 → 0.6.0 migration adds 273.15 to every float variable
+    whose stored ``units`` attribute reads as Celsius. Variables
+    already in Kelvin (no degC token in units), mask channels, and
+    non-temperature variables are left alone.
+    """
+    from migrations._0_5_0_to_0_6_0 import MIGRATION
+
+    zarr_dir = tmp_path / "data.zarr"
+    nt, nlat, nlon = 5, 45, 90
+    times = xr.date_range("2010-01-01", periods=nt, freq="D", calendar="noleap")
+
+    rng = np.random.default_rng(0)
+    tob_celsius = rng.uniform(0, 5, size=(nt, nlat, nlon)).astype(np.float32)
+    tas_kelvin = rng.uniform(270, 295, size=(nt, nlat, nlon)).astype(np.float32)
+    psl = rng.normal(101325, 500, size=(nt, nlat, nlon)).astype(np.float32)
+    mask = np.ones((nt, nlat, nlon), dtype=np.uint8)
+
+    ds = xr.Dataset(
+        {
+            "omon_tob": xr.DataArray(
+                tob_celsius,
+                dims=("time", "lat", "lon"),
+                coords={"time": times},
+                attrs={"units": "degC", "standard_name": "tob"},
+            ),
+            "TMP2m": xr.DataArray(
+                tas_kelvin,
+                dims=("time", "lat", "lon"),
+                coords={"time": times},
+                attrs={"units": "K"},
+            ),
+            "psl": xr.DataArray(
+                psl,
+                dims=("time", "lat", "lon"),
+                coords={"time": times},
+                attrs={"units": "Pa"},
+            ),
+            "omon_tob_mask": xr.DataArray(
+                mask,
+                dims=("time", "lat", "lon"),
+                coords={"time": times},
+                attrs={
+                    "units": "degC"
+                },  # Inherited from parent — must not be converted.
+            ),
+        }
+    )
+    ds.to_zarr(str(zarr_dir), mode="w", consolidated=True, zarr_format=3)
+
+    sidecar = {
+        "source_id": "TEST",
+        "experiment": "historical",
+        "variant_label": "r1i1p1f1",
+        "label": "TEST",
+        "target_grid": "F22.5",
+        "schema_version": "0.5.0",
+        "variables_present": sorted(ds.data_vars),
+    }
+
+    out = MIGRATION.apply(str(zarr_dir), sidecar)
+    assert out["schema_version"] == "0.6.0"
+    audit = out["migrations"][-1]
+    converted = {entry["variable"] for entry in audit["degc_to_k"]}
+    assert converted == {"omon_tob"}
+
+    migrated = xr.open_zarr(str(zarr_dir), consolidated=True)
+    np.testing.assert_allclose(
+        migrated["omon_tob"].values, tob_celsius + 273.15, rtol=1e-5
+    )
+    assert migrated["omon_tob"].attrs["units"] == "K"
+    # Untouched vars are byte-identical.
+    np.testing.assert_array_equal(migrated["TMP2m"].values, tas_kelvin)
+    np.testing.assert_array_equal(migrated["psl"].values, psl)
+    np.testing.assert_array_equal(migrated["omon_tob_mask"].values, mask)
+
+
+def test_migration_0_5_0_to_0_6_0_safety_already_kelvin_with_bad_attr(
+    tmp_path: Path,
+):
+    """If a variable declares ``units=degC`` but stored values are
+    obviously already Kelvin (min > 100), the migration refuses to
+    double-convert. Defensive guard against a half-applied prior
+    migration where someone bumped the values without updating the
+    units attribute.
+    """
+    from migrations._0_5_0_to_0_6_0 import MIGRATION
+
+    zarr_dir = tmp_path / "data.zarr"
+    nt, nlat, nlon = 3, 45, 90
+    times = xr.date_range("2010-01-01", periods=nt, freq="D", calendar="noleap")
+    tob_already_k = np.full(
+        (nt, nlat, nlon), 275.0, dtype=np.float32
+    )  # Already in Kelvin
+
+    ds = xr.Dataset(
+        {
+            "omon_tob": xr.DataArray(
+                tob_already_k,
+                dims=("time", "lat", "lon"),
+                coords={"time": times},
+                attrs={"units": "degC"},  # Lying — values are actually K.
+            )
+        }
+    )
+    ds.to_zarr(str(zarr_dir), mode="w", consolidated=True, zarr_format=3)
+
+    sidecar = {
+        "source_id": "T",
+        "experiment": "h",
+        "variant_label": "r1",
+        "label": "",
+        "target_grid": "F22.5",
+        "schema_version": "0.5.0",
+        "variables_present": ["omon_tob"],
+    }
+
+    out = MIGRATION.apply(str(zarr_dir), sidecar)
+    assert out["schema_version"] == "0.6.0"
+    # No conversion recorded — the guard caught it.
+    assert out["migrations"][-1]["degc_to_k"] == []
+    migrated = xr.open_zarr(str(zarr_dir), consolidated=True)
+    np.testing.assert_array_equal(migrated["omon_tob"].values, tob_already_k)
+
+
 def test_migration_0_3_0_to_0_4_0_writes_per_cell_maps(tmp_path: Path):
     """The 0.3.0 → 0.4.0 migration regenerates stats.nc with the new
     per-cell maps. Zarr data is untouched; only stats.nc changes.
