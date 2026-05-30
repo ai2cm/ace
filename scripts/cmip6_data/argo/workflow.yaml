@@ -53,6 +53,16 @@ spec:
       value: ""
     - name: migrate_datasets_count_minus_one
       value: "-1"
+    # Stats-side filters (used by run_stats only). When non-empty,
+    # ``stats_source_ids`` restricts compute_stats.py to those source
+    # models — useful when re-running stats for a targeted subset
+    # (e.g. the 10 datasets whose statics were refreshed in place,
+    # so their stats.nc needs a fresh sweep without redoing the
+    # other 236).
+    - name: stats_source_ids
+      value: ""
+    - name: stats_force
+      value: "false"
   templates:
     # ------------------------------------------------------------------
     # Entry point: sequential stages, each with a conditional gate.
@@ -409,7 +419,14 @@ spec:
             {{workflow.parameters.config}}
             CONFIGEOF
 
-            python compute_stats.py --config config.yaml --workers 8
+            ARGS="--config config.yaml --workers 8"
+            if [ -n "{{workflow.parameters.stats_source_ids}}" ]; then
+              ARGS="${ARGS} --source-ids {{workflow.parameters.stats_source_ids}}"
+            fi
+            if [ "{{workflow.parameters.stats_force}}" = "true" ]; then
+              ARGS="${ARGS} --force"
+            fi
+            python compute_stats.py ${ARGS}
         env:
           - name: GOOGLE_APPLICATION_CREDENTIALS
             value: /secret/gcp-credentials/key.json

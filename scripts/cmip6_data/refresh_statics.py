@@ -34,7 +34,14 @@ Usage::
 
     python refresh_statics.py --config configs/<process.yaml>
                               [--source-ids GFDL-CM4 CMCC-CM2-SR5]
-                              [--dry-run]
+                              [--dry-run] [--no-stats]
+
+``--no-stats`` skips the per-dataset ``compute_and_write_stats`` pass.
+Useful when running this script from outside the GCS bucket's region
+(e.g. dev machine), where reading 30+ GB of zarr data over the network
+is the slow step. Pair with a follow-up ``compute_stats.py`` run on an
+in-region Argo pod with ``--source-ids`` set to the same models to
+finish the job in a fraction of the wall time.
 """
 
 from __future__ import annotations
@@ -302,6 +309,16 @@ def main() -> None:
         action="store_true",
         help="Detect + log affected datasets but don't modify anything.",
     )
+    parser.add_argument(
+        "--no-stats",
+        action="store_true",
+        help=(
+            "Skip the per-dataset compute_and_write_stats pass; only "
+            "rewrite the static fields in the zarr. Stats will need "
+            "to be regenerated separately (e.g. via Argo compute-stats "
+            "with --source-ids + --force)."
+        ),
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
@@ -340,7 +357,8 @@ def main() -> None:
         if args.dry_run or not result.get("refreshed"):
             continue
         sidecar = _read_sidecar(r.output_zarr)
-        _regenerate_stats(r.output_zarr, sidecar, target_grid_name)
+        if not args.no_stats:
+            _regenerate_stats(r.output_zarr, sidecar, target_grid_name)
         sidecar.setdefault("migrations", []).append(
             {
                 "kind": "static_refresh",

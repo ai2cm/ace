@@ -83,6 +83,8 @@ RUN_STAGE_EXTERNALS=false
 RUN_MIGRATE=false
 FORCE_INVENTORY=false
 AUGMENT_ONLY=false
+STATS_SOURCE_IDS=""
+STATS_FORCE=false
 CONFIG=""
 ESGF_CONFIG=""
 INVENTORY_CONFIG=""
@@ -106,6 +108,8 @@ do case $1 in
     --migrate) RUN_MIGRATE=true;;
     --augment-only) AUGMENT_ONLY=true;;
     --force-inventory) FORCE_INVENTORY=true;;
+    --stats-source-ids) STATS_SOURCE_IDS="$2"; shift;;
+    --stats-force) STATS_FORCE=true;;
     *) echo "Unknown parameter passed: $1"
     exit 1;;
 esac
@@ -304,6 +308,8 @@ output=$(argo submit "${SCRIPT_DIR}/workflow.yaml" \
     -p esgf_dataset_keys="${esgf_dataset_keys[*]}" \
     -p esgf_datasets_count_minus_one="${esgf_datasets_count_minus_one}" \
     -p migrate_dataset_keys="${migrate_dataset_keys[*]}" \
+    -p stats_source_ids="${STATS_SOURCE_IDS}" \
+    -p stats_force="${STATS_FORCE}" \
     -p migrate_datasets_count_minus_one="${migrate_datasets_count_minus_one}")
 
 job_name=$(echo "$output" | grep 'Name:' | awk '{print $2}')
