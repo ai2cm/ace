@@ -85,6 +85,8 @@ FORCE_INVENTORY=false
 AUGMENT_ONLY=false
 STATS_SOURCE_IDS=""
 STATS_FORCE=false
+STATS_WORKERS="4"
+STATS_DATASET_KEYS=""
 CONFIG=""
 ESGF_CONFIG=""
 INVENTORY_CONFIG=""
@@ -110,6 +112,14 @@ do case $1 in
     --force-inventory) FORCE_INVENTORY=true;;
     --stats-source-ids) STATS_SOURCE_IDS="$2"; shift;;
     --stats-force) STATS_FORCE=true;;
+    --stats-workers) STATS_WORKERS="$2"; shift;;
+    --stats-dataset-keys)
+        # Space-separated "source_id/experiment/variant_label" triples.
+        # Switches the stats stage to per-dataset pods (one
+        # compute-stats-dataset pod per triple) instead of the
+        # single bucket-wide compute-stats pod. Use for targeted
+        # regens where the in-pod worker pool would OOM.
+        STATS_DATASET_KEYS="$2"; shift;;
     *) echo "Unknown parameter passed: $1"
     exit 1;;
 esac
@@ -287,6 +297,18 @@ fi
 migrate_datasets_count=${#migrate_dataset_keys[@]}
 migrate_datasets_count_minus_one=$((migrate_datasets_count - 1))
 
+# Stats fan-out count. Default ``-1`` selects the legacy single-pod
+# ``compute-stats`` template; non-empty ``STATS_DATASET_KEYS``
+# switches to per-dataset pods via ``compute-stats-dataset``.
+if [[ -n "${STATS_DATASET_KEYS}" ]]; then
+    # shellcheck disable=SC2206
+    stats_dataset_keys_arr=(${STATS_DATASET_KEYS})
+    STATS_DATASETS_COUNT_MINUS_ONE=$((${#stats_dataset_keys_arr[@]} - 1))
+    echo "Stats fan-out: ${#stats_dataset_keys_arr[@]} dataset(s) via compute-stats-dataset"
+else
+    STATS_DATASETS_COUNT_MINUS_ONE=-1
+fi
+
 # Submit. ESGF / migrate params are passed even when their gates are
 # false; the templates' ``when`` conditions skip unused steps.
 ESGF_CONFIG_CONTENT=""
@@ -310,6 +332,9 @@ output=$(argo submit "${SCRIPT_DIR}/workflow.yaml" \
     -p migrate_dataset_keys="${migrate_dataset_keys[*]}" \
     -p stats_source_ids="${STATS_SOURCE_IDS}" \
     -p stats_force="${STATS_FORCE}" \
+    -p stats_workers="${STATS_WORKERS}" \
+    -p stats_dataset_keys="${STATS_DATASET_KEYS}" \
+    -p stats_datasets_count_minus_one="${STATS_DATASETS_COUNT_MINUS_ONE}" \
     -p migrate_datasets_count_minus_one="${migrate_datasets_count_minus_one}")
 
 job_name=$(echo "$output" | grep 'Name:' | awk '{print $2}')

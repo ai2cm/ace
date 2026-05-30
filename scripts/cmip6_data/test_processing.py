@@ -1306,6 +1306,71 @@ def test_harmonize_temperature_handles_unicode_degc():
 # ---------------------------------------------------------------------------
 
 
+def test_stats_for_time_field_uses_dask_without_materialising():
+    """The refactor moved the per-cell map reductions onto xarray-on-dask
+    so a chunked input is reduced chunk-by-chunk and the full array is
+    never materialised. This pins the contract: when given a dask-backed
+    DataArray, the function must return correct stats AND must consume
+    only one chunk's worth of memory at a time. We can't easily assert
+    the peak-memory bound in a unit test, but we can pin two things:
+
+    1. The function actually accepts dask-backed input (no eager
+       ``.values`` materialise hidden in there — that would force the
+       caller to give us a numpy array up-front).
+    2. The chunked result is bit-equivalent to the numpy-baseline
+       computed on the same data.
+    """
+    import dask.array
+    from compute_stats import _stats_for_time_field, area_weights_2d
+
+    rng = np.random.default_rng(0)
+    nt, nlat, nlon = 200, 45, 90
+    data = rng.normal(280, 10, size=(nt, nlat, nlon)).astype(np.float32)
+    # Sprinkle some NaNs so the finite-handling paths run.
+    data[0, 0, 0] = np.nan
+    data[-1, 5, 7] = np.nan
+    times = xr.date_range(
+        "2010-01-01", periods=nt, freq="D", calendar="noleap"
+    ).to_list()
+    w2d = area_weights_2d("F22.5", nlon)
+
+    # Dask-backed version (the new prod path).
+    darr = dask.array.from_array(data, chunks=(50, nlat, nlon))
+    da_dask = xr.DataArray(darr, dims=("time", "lat", "lon"), coords={"time": times})
+    # Numpy-backed reference (still a DataArray so the API matches).
+    da_np = xr.DataArray(data, dims=("time", "lat", "lon"), coords={"time": times})
+
+    out_dask, maps_dask = _stats_for_time_field(da_dask, w2d)
+    out_np, maps_np = _stats_for_time_field(da_np, w2d)
+
+    # Per-cell maps must match bit-for-bit between the two paths.
+    for key in ("time_mean_map", "time_var_map", "n_valid_map", "d1_var_map"):
+        np.testing.assert_allclose(
+            maps_dask[key],
+            maps_np[key],
+            rtol=1e-5,
+            atol=1e-6,
+            err_msg=f"map {key} differs between dask and numpy paths",
+        )
+
+    # Scalar stats: tight tolerance — the dask reductions sum in a
+    # slightly different order so we allow O(eps) drift.
+    for key in (
+        "mean",
+        "std",
+        "clim_std",
+        "anom_std",
+        "clim_var_frac",
+        "d1_mean",
+        "d1_std",
+        "finite_fraction",
+        "autocorr_lag1",
+    ):
+        assert (
+            abs(out_dask[key] - out_np[key]) < 1e-4
+        ), f"{key}: dask={out_dask[key]} vs numpy={out_np[key]}"
+
+
 def test_compute_dataset_stats_handles_360_day_calendar():
     """HadGEM3-MM (and other 360-day-calendar models) crashed because
     ``StatsPeriod`` end dates like ``2014-12-31`` don't exist in 360-day

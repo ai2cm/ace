@@ -63,6 +63,25 @@ spec:
       value: ""
     - name: stats_force
       value: "false"
+    # Worker pool size for compute_stats.py inside the compute-stats
+    # pod. Each worker loads its dataset's zarr fully (~6 GB RSS for
+    # the larger 86-year ssp datasets); the pod has 32 GiB so 4 is
+    # safe, 8 OOMKills. Tune up only if the resource request below
+    # is raised in tandem.
+    - name: stats_workers
+      value: "4"
+    # Per-dataset stats fan-out. When set to a non-empty list (and
+    # ``stats_datasets_count_minus_one`` ≥ 0), the entry point spawns
+    # one ``compute-stats-dataset`` pod per element instead of the
+    # bucket-wide ``compute-stats`` template. Used for targeted
+    # refreshes (e.g. the 10 datasets whose statics were just
+    # rewritten) where each pod handles a single zarr-path under
+    # ``--workers 1``, avoiding the in-pod-worker-pool memory
+    # contention that the 86-year ssp variables trigger.
+    - name: stats_dataset_keys
+      value: ""
+    - name: stats_datasets_count_minus_one
+      value: "-1"
   templates:
     # ------------------------------------------------------------------
     # Entry point: sequential stages, each with a conditional gate.
@@ -106,8 +125,18 @@ spec:
             start: "0"
             end: "{{workflow.parameters.migrate_datasets_count_minus_one}}"
       - - name: compute-stats
-          when: "{{workflow.parameters.run_stats}} == true"
+          when: "{{workflow.parameters.run_stats}} == true and {{workflow.parameters.stats_datasets_count_minus_one}} == -1"
           template: compute-stats
+      - - name: compute-stats-dataset
+          when: "{{workflow.parameters.run_stats}} == true and {{workflow.parameters.stats_datasets_count_minus_one}} != -1"
+          template: compute-stats-dataset
+          arguments:
+            parameters:
+            - name: dataset_index
+              value: "{{item}}"
+          withSequence:
+            start: "0"
+            end: "{{workflow.parameters.stats_datasets_count_minus_one}}"
       - - name: make-normalization
           when: "{{workflow.parameters.run_normalization}} == true"
           template: make-normalization
@@ -419,13 +448,75 @@ spec:
             {{workflow.parameters.config}}
             CONFIGEOF
 
-            ARGS="--config config.yaml --workers 8"
+            ARGS="--config config.yaml --workers {{workflow.parameters.stats_workers}}"
             if [ -n "{{workflow.parameters.stats_source_ids}}" ]; then
               ARGS="${ARGS} --source-ids {{workflow.parameters.stats_source_ids}}"
             fi
             if [ "{{workflow.parameters.stats_force}}" = "true" ]; then
               ARGS="${ARGS} --force"
             fi
+            python compute_stats.py ${ARGS}
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret
+
+    # ------------------------------------------------------------------
+    # compute-stats-dataset: run compute_stats.py --zarr-path X on one
+    # dataset per pod. Used for targeted stats regen (e.g. the 10
+    # datasets whose statics were rewritten) where putting multiple
+    # large ssp datasets through one pod's ProcessPoolExecutor blew
+    # the 32 GiB memory limit. One pod per dataset, --workers 1, so
+    # each pod stays under ~4 GiB RSS; Argo parallelism is naturally
+    # set by the cluster's available pods.
+    # ------------------------------------------------------------------
+    - name: compute-stats-dataset
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: highmem-sim-pool
+      inputs:
+        parameters:
+          - name: dataset_index
+      container:
+        image: us-central1-docker.pkg.dev/vcm-ml/full-model/cmip6-processing:latest
+        resources:
+          limits:
+            cpu: "4000m"
+            memory: "16Gi"
+          requests:
+            cpu: "4000m"
+            memory: "16Gi"
+        command: ["bash", "-c", "-e"]
+        args:
+          - |
+            cat << 'CONFIGEOF' > config.yaml
+            {{workflow.parameters.config}}
+            CONFIGEOF
+
+            idx={{inputs.parameters.dataset_index}}
+            keys=({{workflow.parameters.stats_dataset_keys}})
+            key="${keys[${idx}]}"
+
+            source_id=$(echo "${key}" | cut -d/ -f1)
+            experiment=$(echo "${key}" | cut -d/ -f2)
+            variant=$(echo "${key}" | cut -d/ -f3)
+
+            output_directory=$(python -c "
+            from config import ProcessConfig
+            print(ProcessConfig.from_file('config.yaml').output_directory.rstrip('/'))
+            ")
+            zarr_path="${output_directory}/${source_id}/${experiment}/${variant}/data.zarr"
+
+            ARGS="--config config.yaml --workers 1 --zarr-path ${zarr_path}"
+            if [ "{{workflow.parameters.stats_force}}" = "true" ]; then
+              ARGS="${ARGS} --force"
+            fi
+            echo "Computing stats for ${source_id} ${experiment} ${variant} at ${zarr_path}"
             python compute_stats.py ${ARGS}
         env:
           - name: GOOGLE_APPLICATION_CREDENTIALS

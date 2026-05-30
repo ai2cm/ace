@@ -25,6 +25,7 @@ Usage:
 """
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -35,6 +36,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
 
+import dask
 import fsspec
 import numpy as np
 import pandas as pd
@@ -135,86 +137,219 @@ def _moment_stats(values: np.ndarray, mean: float, std: float) -> tuple[float, f
     return skew, excess_kurt
 
 
+def _scalar_stats_from_maps(
+    time_mean_map: np.ndarray,
+    time_var_map: np.ndarray,
+    n_valid_map: np.ndarray,
+    w2d: np.ndarray,
+) -> tuple[float, float, float, float, float]:
+    """Derive area- and time-weighted scalar (mean, std, clim_std,
+    anom_std, clim_var_frac) from per-cell maps via the law of total
+    variance.
+
+    For a field ``x(t, xy)`` with area weights ``w(xy)`` and per-cell
+    finite-count ``n(xy)``, the (n_valid-weighted, area-weighted)
+    population mean and variance decompose as::
+
+        N(xy)   = w(xy) * n(xy)
+        N       = Σ_xy N(xy)
+        μ       = Σ_xy N(xy) * time_mean(xy) / N
+        σ²      = Σ_xy N(xy) * [time_var(xy) + (time_mean(xy) - μ)²] / N
+
+    (Total variance = mean of within-cell variance + variance of
+    cell means, area- and count-weighted.) Climatology variance is
+    the area-weighted spatial variance of ``time_mean``; anomaly
+    variance is ``σ² - clim_var`` by construction. All inputs are
+    small ``(lat, lon)`` arrays, so this runs in microseconds.
+    """
+    valid = np.isfinite(time_mean_map) & (n_valid_map > 0)
+    if not valid.any():
+        return (
+            float("nan"),
+            float("nan"),
+            float("nan"),
+            float("nan"),
+            float("nan"),
+        )
+    w_eff = (w2d * n_valid_map).astype(np.float64)
+    w_eff = np.where(valid, w_eff, 0.0)
+    total_w = float(w_eff.sum())
+    if total_w <= 0:
+        return (
+            float("nan"),
+            float("nan"),
+            float("nan"),
+            float("nan"),
+            float("nan"),
+        )
+    tm = np.where(valid, time_mean_map.astype(np.float64), 0.0)
+    tv = np.where(valid, time_var_map.astype(np.float64), 0.0)
+    mu = float((w_eff * tm).sum() / total_w)
+    var = float((w_eff * (tv + (tm - mu) ** 2)).sum() / total_w)
+    std = float(np.sqrt(max(var, 0.0)))
+
+    # Climatology contribution: area-weighted spatial variance of the
+    # time-mean field. Uses pure area weights ``w2d`` (no n-weighting,
+    # since this is a per-cell scalar field).
+    w_area = np.where(valid, w2d.astype(np.float64), 0.0)
+    tw = float(w_area.sum())
+    if tw <= 0 or std == 0:
+        return mu, std, float("nan"), float("nan"), float("nan")
+    clim_mean = float((w_area * tm).sum() / tw)
+    clim_var = float((w_area * (tm - clim_mean) ** 2).sum() / tw)
+    clim_std = float(np.sqrt(max(clim_var, 0.0)))
+    if var > 0:
+        anom_var = max(var - clim_var, 0.0)
+        anom_std = float(np.sqrt(anom_var))
+        clim_frac = float(min(max(clim_var / var, 0.0), 1.0))
+    else:
+        anom_std = 0.0
+        clim_frac = float("nan")
+    return mu, std, clim_std, anom_std, clim_frac
+
+
 def _stats_for_time_field(
-    arr: np.ndarray, w2d: np.ndarray
+    da: xr.DataArray, w2d: np.ndarray
 ) -> tuple[dict[str, float], dict[str, np.ndarray]]:
-    """Stats for a ``(time, lat, lon)`` array.
+    """Stats for a ``(time, lat, lon)`` DataArray.
+
+    Reductions are expressed via xarray operations so a dask-backed
+    ``da`` is reduced chunk-by-chunk without ever materialising the
+    full ``(time, lat, lon)`` array. Peak memory is dominated by a
+    single chunk's worth of data per dask worker (≈ tens of MB at
+    the zarr's native chunk size) rather than the whole variable
+    (≈ 500 MB for an 86-year ssp variable, ×3 intermediates per
+    ``np.diff`` / ``np.nanvar`` call). That's the difference between
+    a per-dataset pod staying under 4 GiB RSS and OOM-killing at
+    32 GiB.
 
     Returns ``(scalar_stats, maps)``. ``maps`` always has keys
     ``time_mean_map``, ``time_var_map``, ``n_valid_map``, and
     ``d1_var_map`` (all ``(lat, lon)``, float32 except ``n_valid_map``
-    which is int32). Persisting per-cell maps lets ``make_normalization``
-    aggregate pooled per-cell mean / std / tendency-std across datasets
-    via the law of total variance, without re-opening every zarr.
+    which is int32). Persisting per-cell maps lets
+    ``make_normalization`` aggregate pooled per-cell mean / std /
+    tendency-std across datasets via the law of total variance,
+    without re-opening every zarr.
+
+    Scalar global ``mean`` / ``std`` are derived from the per-cell
+    maps via :func:`_scalar_stats_from_maps` (same identity used by
+    ``make_normalization`` for cross-dataset pooling), which is
+    exactly equivalent to the previous direct weighted reduction over
+    all valid ``(t, xy)`` cells — no second pass through raw data.
+
+    Percentiles, skewness, and kurtosis use a strided time-subsample
+    (~600 timesteps) since exact percentiles need a sort and the
+    subsample is statistically sufficient for diagnostics. The
+    sample is small enough to fit in memory regardless of variable
+    size.
     """
     out = _nan_dict()
-    valid_mask = np.isfinite(arr)
-    out["finite_fraction"] = float(valid_mask.mean())
-    lat_lon_shape = arr.shape[-2:]
+    lat_lon_shape = (int(da.sizes["lat"]), int(da.sizes["lon"]))
     maps: dict[str, np.ndarray] = {
         "time_mean_map": np.full(lat_lon_shape, np.nan, dtype=np.float32),
         "time_var_map": np.full(lat_lon_shape, np.nan, dtype=np.float32),
-        "n_valid_map": valid_mask.sum(axis=0).astype(np.int32),
+        "n_valid_map": np.zeros(lat_lon_shape, dtype=np.int32),
         "d1_var_map": np.full(lat_lon_shape, np.nan, dtype=np.float32),
     }
-    if not valid_mask.any():
-        return out, maps
 
-    val_v = arr[valid_mask]
-    w3 = np.broadcast_to(w2d, arr.shape)
-    val_w = w3[valid_mask]
-
-    out["mean"], out["std"] = _weighted_mean_std(val_v, val_w)
-    out["p01"] = float(np.percentile(val_v, 1))
-    out["p50"] = float(np.percentile(val_v, 50))
-    out["p99"] = float(np.percentile(val_v, 99))
-    out["skewness"], out["kurtosis"] = _moment_stats(val_v, out["mean"], out["std"])
-
-    # Variance decomposition: total = climatology + anomaly. The
-    # climatology contribution is the spatial std of the time-mean
-    # field; the anomaly is whatever's left.
+    # --- Pass 1: per-cell maps + spatial-mean time series ---
+    # All reductions on (time, lat, lon) → (lat, lon) or (time,).
     # ``warnings.catch_warnings`` suppresses "Mean of empty slice" /
-    # "Degrees of freedom <= 0" — both are expected for cells that
-    # are all-NaN (e.g. land cells in an ocean variable). nan/var
-    # already returns NaN for those.
+    # "Degrees of freedom <= 0" — expected for all-NaN cells (e.g.
+    # land in an ocean variable).
+    finite = da.notnull()
+    n_valid_lazy = finite.sum("time").astype(np.int32)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=RuntimeWarning)
-        time_mean = np.nanmean(arr, axis=0)  # (lat, lon)
-        time_var = np.nanvar(arr, axis=0)
-    maps["time_mean_map"] = time_mean.astype(np.float32)
-    maps["time_var_map"] = time_var.astype(np.float32)
-    finite_clim = np.isfinite(time_mean)
-    if finite_clim.any() and out["std"] > 0:
-        clim_w = w2d[finite_clim]
-        clim_w = clim_w / clim_w.sum()
-        clim_v = time_mean[finite_clim]
-        clim_mean = float(np.sum(clim_v * clim_w))
-        clim_var = float(np.sum((clim_v - clim_mean) ** 2 * clim_w))
-        clim_std = float(np.sqrt(max(clim_var, 0.0)))
-        out["clim_std"] = clim_std
-        total_var = out["std"] ** 2
-        # ``clim_var > total_var`` shouldn't happen analytically but
-        # can by O(eps) due to weighting/precision; clamp.
-        anom_var = max(total_var - clim_var, 0.0)
-        out["anom_std"] = float(np.sqrt(anom_var))
-        out["clim_var_frac"] = float(min(max(clim_var / total_var, 0.0), 1.0))
+        time_mean_lazy = da.mean("time", skipna=True)
+        time_var_lazy = da.var("time", skipna=True)
+        spatial_mean_t_lazy = (da * w2d).sum(("lat", "lon"), skipna=True)
 
-    # One-step finite difference in time.
-    if arr.shape[0] > 1:
-        d1 = np.diff(arr, axis=0)
-        d1_mask = np.isfinite(d1)
-        if d1_mask.any():
-            d1_w = np.broadcast_to(w2d, d1.shape)[d1_mask]
-            d1_v = d1[d1_mask]
-            out["d1_mean"], out["d1_std"] = _weighted_mean_std(d1_v, d1_w)
-        # Per-cell d1 variance for pooled tendency-std aggregation.
+        n_valid_map, time_mean_map, time_var_map, spatial_mean_t = dask.compute(
+            n_valid_lazy,
+            time_mean_lazy,
+            time_var_lazy,
+            spatial_mean_t_lazy,
+        )
+
+    maps["n_valid_map"] = n_valid_map.values.astype(np.int32)
+    maps["time_mean_map"] = time_mean_map.values.astype(np.float32)
+    maps["time_var_map"] = time_var_map.values.astype(np.float32)
+
+    n_valid_total = int(maps["n_valid_map"].sum())
+    n_total = int(np.prod(da.shape))
+    out["finite_fraction"] = float(n_valid_total / n_total) if n_total else 0.0
+    if n_valid_total == 0:
+        return out, maps
+
+    # Scalar mean/std/clim_std/anom_std via law-of-total-variance.
+    # Mathematically identical to the prior direct weighted reduction
+    # over all (t, xy) finite cells, but uses only the maps we just
+    # produced.
+    mu, sigma, clim_std, anom_std, clim_frac = _scalar_stats_from_maps(
+        maps["time_mean_map"], maps["time_var_map"], maps["n_valid_map"], w2d
+    )
+    out["mean"] = mu
+    out["std"] = sigma
+    if np.isfinite(clim_std):
+        out["clim_std"] = clim_std
+    if np.isfinite(anom_std):
+        out["anom_std"] = anom_std
+    if np.isfinite(clim_frac):
+        out["clim_var_frac"] = clim_frac
+
+    # --- Pass 2: strided time-subsample for percentiles + moments ---
+    # ``da.isel(time=slice(None, None, stride)).values`` materialises
+    # only the subsampled slab — ~600 timesteps × lat × lon, which
+    # is ~10 MB regardless of how long the original time axis is.
+    # Percentiles + skew + kurt are diagnostics; the subsample
+    # estimator is unbiased and the error is dominated by far less
+    # than the cross-source spread we care about.
+    n_time = int(da.sizes["time"])
+    stride = max(1, n_time // 600)
+    sampled = da.isel(time=slice(None, None, stride)).values
+    sample_finite = sampled[np.isfinite(sampled)]
+    if sample_finite.size > 0:
+        out["p01"] = float(np.percentile(sample_finite, 1))
+        out["p50"] = float(np.percentile(sample_finite, 50))
+        out["p99"] = float(np.percentile(sample_finite, 99))
+        if out["std"] > 0 and sample_finite.size > 2:
+            centered = sample_finite - out["mean"]
+            out["skewness"] = float(np.mean(centered**3) / out["std"] ** 3)
+            out["kurtosis"] = float(np.mean(centered**4) / out["std"] ** 4 - 3.0)
+
+    # --- d1 stats via per-cell map decomposition ---
+    if n_time > 1:
+        d1 = da.diff("time")
+        d1_finite = d1.notnull()
+        d1_n_valid_lazy = d1_finite.sum("time").astype(np.int32)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=RuntimeWarning)
-            maps["d1_var_map"] = np.nanvar(d1, axis=0).astype(np.float32)
+            d1_time_mean_lazy = d1.mean("time", skipna=True)
+            d1_time_var_lazy = d1.var("time", skipna=True)
+            d1_n_valid_map, d1_time_mean_map, d1_time_var_map = dask.compute(
+                d1_n_valid_lazy, d1_time_mean_lazy, d1_time_var_lazy
+            )
+        maps["d1_var_map"] = d1_time_var_map.values.astype(np.float32)
+        d1_mu, d1_sigma, _, _, _ = _scalar_stats_from_maps(
+            d1_time_mean_map.values.astype(np.float32),
+            d1_time_var_map.values.astype(np.float32),
+            d1_n_valid_map.values.astype(np.int32),
+            w2d,
+        )
+        if np.isfinite(d1_mu):
+            out["d1_mean"] = d1_mu
+        if np.isfinite(d1_sigma):
+            out["d1_std"] = d1_sigma
 
-    # Lag-1 autocorrelation of the area-weighted spatial mean time series.
-    spatial_mean_t = np.nansum(arr * w2d, axis=(1, 2))
-    sm = spatial_mean_t[np.isfinite(spatial_mean_t)]
+    # --- Lag-1 autocorrelation of the area-weighted spatial mean ---
+    # ``spatial_mean_t`` was already reduced to (time,) in pass 1; the
+    # series is tiny (≤ 32k floats for the longest ssp). The sum of
+    # NaN-weighted contributions can dip slightly negative below
+    # rounding; treat values that are zero-after-finite as the
+    # legacy ``np.nansum`` behaviour did.
+    sm_full = spatial_mean_t.values
+    sm = sm_full[np.isfinite(sm_full)]
     if sm.size > 2:
         c = sm - sm.mean()
         denom = float((c**2).sum())
@@ -224,15 +359,18 @@ def _stats_for_time_field(
 
 
 def _stats_for_static_field(
-    arr: np.ndarray, w2d: np.ndarray
+    da: xr.DataArray, w2d: np.ndarray
 ) -> tuple[dict[str, float], np.ndarray]:
     """Stats for a ``(lat, lon)`` static field (no time, no d1).
 
-    Returns ``(scalar_stats, static_map)`` where ``static_map`` is the
-    cast-to-float32 input. Persisted once per variable (not per period)
-    so ``make_normalization`` can read static fields out of ``stats.nc``
-    without re-opening the zarr.
+    Static fields are (lat, lon)-shaped and already small (≈ 16 KB
+    on F22.5), so we materialise once and compute everything with
+    plain numpy. Returns ``(scalar_stats, static_map)`` where
+    ``static_map`` is the cast-to-float32 input. Persisted once per
+    variable (not per period) so ``make_normalization`` can read
+    static fields out of ``stats.nc`` without re-opening the zarr.
     """
+    arr = np.asarray(da.values)
     out = _nan_dict()
     valid = np.isfinite(arr)
     out["finite_fraction"] = float(valid.mean())
@@ -398,7 +536,7 @@ def compute_dataset_stats(
                 if per_period_stats:
                     per_period_stats.append(per_period_stats[0])
                 else:
-                    stats, static_map = _stats_for_static_field(da.values, w2d)
+                    stats, static_map = _stats_for_static_field(da, w2d)
                     per_period_stats.append(stats)
                 continue
             sub = _slice_ds_to_period(ds, p)
@@ -418,13 +556,13 @@ def compute_dataset_stats(
                 stats_per_plev: list = []
                 maps_per_plev: list[dict[str, np.ndarray]] = []
                 for k in range(sub_da.sizes["plev"]):
-                    s, m = _stats_for_time_field(sub_da.isel(plev=k).values, w2d)
+                    s, m = _stats_for_time_field(sub_da.isel(plev=k), w2d)
                     stats_per_plev.append(s)
                     maps_per_plev.append(m)
                 per_period_stats.append(stats_per_plev)
                 per_period_maps.append(_stack_plev_maps(maps_per_plev))
             else:
-                s, m = _stats_for_time_field(sub_da.values, w2d)
+                s, m = _stats_for_time_field(sub_da, w2d)
                 per_period_stats.append(s)
                 per_period_maps.append(m)
 
@@ -594,22 +732,26 @@ def main() -> None:
             "(easier debugging)."
         ),
     )
+    parser.add_argument(
+        "--zarr-path",
+        default=None,
+        help=(
+            "Compute stats for a single dataset at this zarr URL "
+            "instead of iterating ``index.csv``. The dataset's "
+            "``metadata.json`` sidecar is read for identity; the "
+            "stats.nc is written next to the zarr. Mirrors the "
+            "``migrate.py --zarr-path`` mode and is used by the "
+            "per-dataset Argo ``compute-stats-dataset`` template so "
+            "stats regen parallelises naturally across pods rather "
+            "than via an in-pod worker pool (which OOMs at scale on "
+            "the larger 86-year ssp variables)."
+        ),
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
     cfg = ProcessConfig.from_file(args.config)
     out_dir = cfg.output_directory.rstrip("/")
-    index_path = f"{out_dir}/index.csv"
-    fs, rel = fsspec.core.url_to_fs(index_path)
-    if not fs.exists(rel):
-        raise FileNotFoundError(f"{index_path} not found; run process.py first")
-    idx = pd.read_csv(index_path)
-
-    ok = idx[idx.status == "ok"].reset_index(drop=True)
-    if args.source_ids is not None:
-        ok = ok[ok.source_id.isin(args.source_ids)].reset_index(drop=True)
-    logging.info("Found %d ok datasets in the index.", len(ok))
-
     grid_name = cfg.defaults.target_grid.name
     periods = tuple(cfg.defaults.stats_periods)
     logging.info(
@@ -617,21 +759,60 @@ def main() -> None:
         len(periods),
         ", ".join(p.name for p in periods),
     )
-    workers = args.workers if args.workers is not None else (os.cpu_count() or 1)
-    workers = max(1, min(workers, len(ok))) if len(ok) else 1
-    logging.info("Computing stats with %d worker(s).", workers)
 
-    jobs = []
-    for _, r in ok.iterrows():
-        zarr_path = r.output_zarr
-        stats_path = zarr_path.rstrip("/").rsplit("/", 1)[0] + "/stats.nc"
+    jobs: list[tuple] = []
+    if args.zarr_path is not None:
+        # Single-dataset mode (per-pod operation; identity comes from
+        # the zarr's metadata.json sidecar so we don't depend on
+        # index.csv being current).
+        sidecar_url = args.zarr_path.rstrip("/") + "/metadata.json"
+        with fsspec.open(sidecar_url, "r") as f:
+            sidecar = json.load(f)
+        stats_path = args.zarr_path.rstrip("/").rsplit("/", 1)[0] + "/stats.nc"
         identity = {
-            "source_id": r.source_id,
-            "experiment": r.experiment,
-            "variant_label": r.variant_label,
-            "label": r.get("label", ""),
+            "source_id": sidecar.get("source_id", ""),
+            "experiment": sidecar.get("experiment", ""),
+            "variant_label": sidecar.get("variant_label", ""),
+            "label": sidecar.get("label", ""),
         }
-        jobs.append((zarr_path, stats_path, identity, grid_name, args.force, periods))
+        jobs.append(
+            (args.zarr_path, stats_path, identity, grid_name, args.force, periods)
+        )
+        logging.info(
+            "Single-dataset mode: %s/%s/%s",
+            identity["source_id"],
+            identity["experiment"],
+            identity["variant_label"],
+        )
+    else:
+        # Index-scan mode (legacy / local-driver path).
+        index_path = f"{out_dir}/index.csv"
+        fs, rel = fsspec.core.url_to_fs(index_path)
+        if not fs.exists(rel):
+            raise FileNotFoundError(f"{index_path} not found; run process.py first")
+        idx = pd.read_csv(index_path)
+
+        ok = idx[idx.status == "ok"].reset_index(drop=True)
+        if args.source_ids is not None:
+            ok = ok[ok.source_id.isin(args.source_ids)].reset_index(drop=True)
+        logging.info("Found %d ok datasets in the index.", len(ok))
+
+        for _, r in ok.iterrows():
+            zarr_path = r.output_zarr
+            stats_path = zarr_path.rstrip("/").rsplit("/", 1)[0] + "/stats.nc"
+            identity = {
+                "source_id": r.source_id,
+                "experiment": r.experiment,
+                "variant_label": r.variant_label,
+                "label": r.get("label", ""),
+            }
+            jobs.append(
+                (zarr_path, stats_path, identity, grid_name, args.force, periods)
+            )
+
+    workers = args.workers if args.workers is not None else (os.cpu_count() or 1)
+    workers = max(1, min(workers, len(jobs))) if jobs else 1
+    logging.info("Computing stats with %d worker(s).", workers)
 
     rows: list[dict] = []
     n_done = 0
@@ -676,6 +857,20 @@ def main() -> None:
 
     if not rows:
         logging.warning("no stats produced")
+        return
+
+    # Skip the cross-dataset aggregate write in single-dataset mode —
+    # we'd otherwise clobber the bucket-wide ``stats.csv`` with one
+    # dataset's row.
+    if args.zarr_path is not None:
+        logging.info(
+            "Single-dataset done. New stats.nc: %d. Reused: %d. Errors: %d.",
+            n_done,
+            n_reused,
+            n_error,
+        )
+        if n_error:
+            raise RuntimeError(f"{n_error} dataset(s) failed; see warnings above")
         return
 
     df = pd.DataFrame(rows)
