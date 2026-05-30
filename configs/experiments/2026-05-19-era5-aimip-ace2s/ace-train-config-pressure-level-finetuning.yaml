@@ -1,5 +1,5 @@
 # arg: --dataset andrep/2026-03-19-era5-1deg-8layer-stats-1990-2019:/statsdata
-# arg: --dataset 01KSNWV164T1GTF7GDFRA539QV:training_checkpoints/best_inference_ckpt.tar:/base_weights/ckpt.tar
+# arg: --dataset 01KSPDHZN7H1TZ9X5GTA1MBNCH:training_checkpoints/best_inference_ckpt.tar:/base_weights/ckpt.tar
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
