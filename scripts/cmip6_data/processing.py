@@ -1398,10 +1398,84 @@ def clamp_static_fractions(ds: xr.Dataset) -> tuple[xr.Dataset, list[str]]:
     return ds, warnings
 
 
+# Magnitude threshold for ``decode_default_fills``. Any float-valued
+# cell whose absolute value exceeds this is treated as a publisher
+# fill-value leak and NaN'd. Calibrated to catch every leak observed
+# in the v2 cohort without false-positive risk:
+#
+# - netCDF C default float fill: ``9.969e+36`` (CESM2 omon_tob)
+# - 1e+36 raw stored value (BCC-CSM2-MR ua* on the last day, despite
+#   ``_FillValue=1e+20`` in metadata — publisher CMOR bug)
+# - 1e+35 (FGOALS-f3-L omon_mlotst / omon_tob)
+# - 1e+15-1e+16 (MPI-ESM1-2-LR siday_sithick on 4 variants — non-
+#   standard fill marker, ``history`` attr says CMOR replaced fills
+#   with 1e+20 but a residue at 1e+15 was missed)
+#
+# 1e10 is at least ~9 orders of magnitude above the largest physical
+# value any variable in this dataset takes (CO2 ppm tops out near
+# 2500; wind ~200 m/s; everything else smaller), so the threshold has
+# effectively zero false-positive surface — there's no physical
+# variable that legitimately reaches it.
+_FILL_VALUE_THRESHOLD = 1.0e10
+
+
+def decode_default_fills(
+    ds: xr.Dataset, threshold: float = _FILL_VALUE_THRESHOLD
+) -> tuple[xr.Dataset, list[str]]:
+    """Mask cells whose magnitude exceeds ``threshold`` as NaN, on the
+    assumption that they're publisher fill-value leaks.
+
+    Why this exists: xarray's default ``mask_and_scale=True`` replaces
+    cells matching ``_FillValue`` / ``missing_value`` with NaN, but
+    several CMIP6 publishers ship files where the *declared* fill
+    value doesn't match the *stored* bytes (BCC's ``ua`` declares
+    1e+20 and stores 1e+36; CESM2's ``omon_tob`` stores 9.97e+36
+    without any ``_FillValue`` attribute at all). xarray's decode
+    leaves those bad cells in place, and they propagate through
+    regridding unchanged because xesmf treats them as ordinary
+    numbers. They'd land in training data as ``1e+36`` "wind speeds"
+    and blow up the first batch.
+
+    The fix is a magnitude-only check: no physical variable in this
+    dataset legitimately exceeds ``threshold``, so anything that does
+    is unambiguously a fill marker — regardless of what the publisher
+    metadata says.
+
+    Returns ``(ds, warnings)`` where each warning names a variable
+    that was masked and the count of cells affected, so the bug is
+    visible in the per-dataset audit trail rather than silently
+    discarded.
+    """
+    warnings: list[str] = []
+    out_vars: dict[str, xr.DataArray] = {}
+    for name, arr in ds.data_vars.items():
+        if arr.dtype.kind != "f":
+            continue
+        # ``abs >= threshold`` rather than ``>``: catches the boundary
+        # exactly in case a future publisher uses ``1e10`` as its fill.
+        bad_count = int((np.abs(arr) >= threshold).sum())
+        if bad_count == 0:
+            continue
+        cleaned = arr.where(np.abs(arr) < threshold)
+        cleaned.attrs = dict(arr.attrs)
+        out_vars[name] = cleaned
+        vmax = float(np.abs(arr).max())
+        warnings.append(
+            f"{name}: {bad_count} cells with |value| >= {threshold:g} "
+            f"(max |value| {vmax:.3g}); treating as publisher fill-value "
+            f"leak and NaN'ing"
+        )
+    if not out_vars:
+        return ds, warnings
+    return ds.assign(out_vars), warnings
+
+
 def run_sanity_checks(ds: xr.Dataset) -> list[str]:
-    """Run cheap per-variable range checks and a tas-vs-derived-T0
-    sanity comparison. Returns a list of human-readable warnings; an
-    empty list means all checks passed.
+    """Run cheap per-variable range checks plus time-axis continuity.
+    Returns a list of human-readable warnings; an empty list means all
+    checks passed. Advisory only — out-of-range values are reported
+    but not modified (use :func:`decode_default_fills` for the
+    fill-value-leak defense).
     """
     messages: list[str] = []
 

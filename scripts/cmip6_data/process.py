@@ -74,6 +74,7 @@ from processing import (  # noqa: E402
     clamp_static_fractions,
     compute_below_surface_mask,
     compute_total_water_path,
+    decode_default_fills,
     derive_ocean_and_correct_sea_ice,
     fill_below_surface_smooth,
     finalize_surface_and_ocean_variable,
@@ -244,14 +245,27 @@ def select_datasets(
                 for _, r in picked.drop_duplicates("variable_id").iterrows():
                     zstores[table][r["variable_id"]] = r["zstore"]
 
-        # Statics (fx) — variant-agnostic per-model.
+        # Statics (fx) — variant-agnostic per-model, but **grid-aware**.
+        # Some models (GFDL-CM4) publish fx fields on multiple grids
+        # (``gr1`` 180×288 AND ``gr2`` 90×144). Without filtering by
+        # ``grid_label``, ``drop_duplicates("variable_id")`` picks
+        # whichever row sorts first — which for GFDL-CM4 gave us
+        # ``orog`` on ``gr2`` and ``sftlf`` on ``gr1``. Merging
+        # mismatched-grid fx vars before regrid produced a sparse-union
+        # field and left ``HGTsfc`` ~20% finite after regrid. Filter
+        # to the day-table's grid first (``row["grid_label"]`` for the
+        # parent day-table row) and only fall through to any-grid if
+        # no fx is published on the matching grid.
         zstores["fx"] = {}
+        day_grid = str(row["grid_label"])
         stat = inventory[
             (inventory["table_id"] == "fx") & (inventory["source_id"] == source_id)
         ]
         if len(stat):
-            stat = stat.sort_values("variant_p")
-            for _, r in stat.drop_duplicates("variable_id").iterrows():
+            same_grid = stat[stat["grid_label"] == day_grid]
+            preferred = same_grid if len(same_grid) else stat
+            preferred = preferred.sort_values("variant_p")
+            for _, r in preferred.drop_duplicates("variable_id").iterrows():
                 zstores["fx"][r["variable_id"]] = r["zstore"]
 
         tasks.append(
@@ -411,15 +425,24 @@ def _open_zstore(url: str) -> xr.Dataset:
     cftime day-table times with datetime64 Amon times later blows up
     ``interp(time=...)`` with a ``UFuncTypeError``. All-cftime avoids
     that.
+
+    Also applies :func:`decode_default_fills` to defend against
+    publisher metadata bugs where the declared ``_FillValue`` doesn't
+    match the bytes actually stored (BCC-CSM2-MR ``ua`` declares
+    1e+20 but stores 1e+36 on its last historical day). The clip is
+    a no-op on well-formed datasets — it only fires when the source
+    contains values above the 1e10 physical-impossibility threshold.
     """
     mapper = fsspec.get_mapper(url)
     # ``chunks={"time": 365}`` forces dask-backed lazy arrays — without
     # explicit chunks, xesmf's regridder can materialize the entire
     # variable into RAM during the call, OOM'ing models with large
     # native grids (AWI-ESM, etc.).
-    return xr.open_zarr(
-        mapper, consolidated=True, use_cftime=True, chunks={"time": 365}
-    )
+    ds = xr.open_zarr(mapper, consolidated=True, use_cftime=True, chunks={"time": 365})
+    ds, fill_warnings = decode_default_fills(ds)
+    for msg in fill_warnings:
+        logging.warning("  %s: %s", url, msg)
+    return ds
 
 
 def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
@@ -598,16 +621,28 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
 
         _stage("regrid_core (lazy graph build)", stage_t0)
 
-        # 8. Static fields from fx — regrid once, drop time.
+        # 8. Static fields from fx — regrid once, drop time. Each fx
+        # variable is regridded **on its own source grid** rather than
+        # merged-then-regridded: some models publish different fx
+        # variables on different grids (GFDL-CM4: ``orog`` on ``gr2``
+        # 90×144, ``sftlf`` on ``gr1`` 180×288). ``xr.merge`` on
+        # mismatched grids produces an outer-join with NaN at the
+        # non-aligned positions, and the regrid of that sparse union
+        # leaves the target field mostly-NaN (HGTsfc came out ~20%
+        # finite for GFDL-CM4 / CMCC family). Per-variable regrid then
+        # merge avoids the issue entirely.
         static_ds: Optional[xr.Dataset] = None
         fx_zs = task.zstores.get("fx", {})
         fx_have = [v for v in cfg.static_variables if v in fx_zs]
         if fx_have:
-            fx_pieces = [
-                _open_zstore(fx_zs[v])[[v]].squeeze(drop=True) for v in fx_have
-            ]
-            fx_merged = xr.merge(fx_pieces, compat="override")
-            static_regridded, static_methods = regrid_variables(fx_merged, target, cfg)
+            static_pieces: list[xr.Dataset] = []
+            static_methods: dict[str, str] = {}
+            for v in fx_have:
+                fx_src = _open_zstore(fx_zs[v])[[v]].squeeze(drop=True)
+                piece, methods = regrid_variables(fx_src, target, cfg)
+                static_pieces.append(piece)
+                static_methods.update(methods)
+            static_regridded = xr.merge(static_pieces, compat="override")
             static_regridded, clip_warnings = clamp_static_fractions(static_regridded)
             row.warnings.extend(clip_warnings)
             static_ds = static_regridded
@@ -832,9 +867,7 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
         # names with SHIELD/ERA5 datasets.
         day_regridded = apply_output_renames(day_regridded, CMIP_TO_OUTPUT_RENAMES)
 
-        # 20. Sanity checks — advisory only. Run *after* renames
-        # and K-harmonization so ``_SANITY_RANGES`` keys off the
-        # final variable names and unit conventions.
+        # 20. Sanity checks — advisory only.
         sanity = run_sanity_checks(day_regridded)
         if sanity:
             row.warnings.extend(sanity)

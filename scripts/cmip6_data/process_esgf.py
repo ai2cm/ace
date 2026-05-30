@@ -79,6 +79,7 @@ from processing import (  # noqa: E402
     clamp_static_fractions,
     compute_below_surface_mask,
     compute_total_water_path,
+    decode_default_fills,
     derive_ocean_and_correct_sea_ice,
     fill_below_surface_smooth,
     finalize_surface_and_ocean_variable,
@@ -371,7 +372,16 @@ def _open_netcdf_files(paths: list[Path], variable: str) -> xr.Dataset:
         )
         if variable in ds.data_vars:
             keep = [variable] + [v for v in ds.data_vars if v in BOUNDS_NAMES]
-            datasets.append(ds[keep])
+            ds = ds[keep]
+            # Defend against publisher fill-value leaks; same rationale
+            # as ``_open_zstore`` in process.py. CESM2 ``omon_tob``
+            # files ship raw 9.97e+36 fills without a ``_FillValue``
+            # attribute set, so xarray's mask_and_scale never decodes
+            # them.
+            ds, fill_warnings = decode_default_fills(ds)
+            for msg in fill_warnings:
+                logging.warning("  %s: %s", p.name, msg)
+            datasets.append(ds)
     if not datasets:
         raise ValueError(f"No data found for {variable} in {len(paths)} files")
     return xr.concat(datasets, dim="time", data_vars="minimal")
@@ -759,8 +769,7 @@ def process_one_esgf(
         # (see process.py for rationale).
         day_regridded = apply_output_renames(day_regridded, CMIP_TO_OUTPUT_RENAMES)
 
-        # 15. Sanity checks — advisory only. Run *after* renames
-        # and K-harmonization.
+        # 15. Sanity checks — advisory only.
         sanity = run_sanity_checks(day_regridded)
         if sanity:
             row.warnings.extend(sanity)
@@ -931,9 +940,6 @@ def augment_one_esgf(
                     daily_time,
                     fill_iterations=cfg.fill.ocean_fill_iterations,
                 )
-                # to_zarr(mode='a') one variable at a time keeps memory
-                # bounded and gives a clean checkpoint per variable in
-                # case the augment is interrupted partway through.
                 new_ds = xr.Dataset({name: da for name, da in outputs.items()})
                 new_ds.to_zarr(
                     zarr_path,

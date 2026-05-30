@@ -17,7 +17,7 @@ convention changes, etc.
 from dataclasses import dataclass
 from typing import Callable
 
-SCHEMA_VERSION: str = "0.4.0"
+SCHEMA_VERSION: str = "0.5.0"
 
 
 @dataclass(frozen=True)

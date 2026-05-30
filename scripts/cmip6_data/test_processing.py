@@ -376,6 +376,97 @@ def test_sanity_checks_flag_out_of_range():
 
 
 # ---------------------------------------------------------------------------
+# decode_default_fills — publisher fill-value leak defense
+# ---------------------------------------------------------------------------
+
+
+def test_decode_default_fills_catches_publisher_metadata_bug():
+    """BCC-CSM2-MR ships ``ua`` cells at ``1e+36`` on its last
+    historical day even though the source declares
+    ``_FillValue=1e+20`` (so xarray's mask_and_scale misses them).
+    The magnitude-only clip catches every cell above the threshold
+    regardless of what the publisher metadata says.
+    """
+    from processing import decode_default_fills
+
+    ds = _rectilinear_ds(ntime=3, variables=["ua"])
+    ds["ua"].values[:] = 12.0  # in-range
+    ds["ua"].values[-1, -1, :] = 1.0e36
+    cleaned, warnings = decode_default_fills(ds)
+    assert np.isnan(cleaned["ua"].values[-1, -1, :]).all()
+    np.testing.assert_array_equal(cleaned["ua"].values[:-1], ds["ua"].values[:-1])
+    assert (cleaned["ua"].values[-1, :-1] == 12.0).all()
+    assert any("ua" in w and "fill" in w for w in warnings)
+
+
+def test_decode_default_fills_threshold_well_above_physical_values():
+    """Real wind speeds (200 m/s), real CO2 concentrations (2500 ppm),
+    or any other variable in this dataset should never be touched —
+    the threshold is 1e10, 9+ orders of magnitude above the largest
+    physical value the dataset can hold.
+    """
+    from processing import _FILL_VALUE_THRESHOLD, decode_default_fills
+
+    assert (
+        _FILL_VALUE_THRESHOLD >= 1.0e9
+    ), "Threshold must stay well above physical-variable extremes."
+    ds = xr.Dataset(
+        {
+            "ua": (
+                ("time", "lat", "lon"),
+                np.full((2, 2, 2), 200.0, dtype=np.float32),
+            ),
+            "TMP2m": (
+                ("time", "lat", "lon"),
+                np.full((2, 2, 2), 350.0, dtype=np.float32),
+            ),
+            "co2": (
+                ("time", "lat", "lon"),
+                np.full((2, 2, 2), 2500.0, dtype=np.float32),
+            ),
+        }
+    )
+    cleaned, warnings = decode_default_fills(ds)
+    assert warnings == []
+    for v in ds.data_vars:
+        np.testing.assert_array_equal(cleaned[v].values, ds[v].values)
+
+
+def test_decode_default_fills_catches_mpi_sithick_residue():
+    """MPI-ESM1-2-LR ``siday_sithick`` has values at 1e+15-1e+16 on
+    four variants — the publisher's CMOR history attribute says fills
+    were replaced with 1e+20 but a residue was missed. 1e+15 is well
+    above the 1e10 threshold so this case is also caught.
+    """
+    from processing import decode_default_fills
+
+    ds = xr.Dataset(
+        {
+            "siday_sithick": (
+                ("time", "lat", "lon"),
+                np.full((2, 2, 2), 0.5, dtype=np.float32),
+            )
+        }
+    )
+    ds["siday_sithick"].values[0, 0, 0] = 5.8e15
+    cleaned, warnings = decode_default_fills(ds)
+    assert np.isnan(cleaned["siday_sithick"].values[0, 0, 0])
+    assert any("siday_sithick" in w for w in warnings)
+
+
+def test_decode_default_fills_leaves_integer_arrays_alone():
+    """Integer mask channels (e.g. ``below_surface_mask500`` uint8)
+    don't take NaN — they should be skipped entirely.
+    """
+    from processing import decode_default_fills
+
+    ds = xr.Dataset({"mask": (("lat", "lon"), np.full((2, 2), 1, dtype=np.uint8))})
+    cleaned, warnings = decode_default_fills(ds)
+    assert warnings == []
+    np.testing.assert_array_equal(cleaned["mask"].values, ds["mask"].values)
+
+
+# ---------------------------------------------------------------------------
 # clamp_static_fractions
 # ---------------------------------------------------------------------------
 

@@ -665,6 +665,117 @@ def test_migration_0_1_0_to_0_2_0_noop_when_co2_absent(tmp_path: Path):
     assert "log_input4mips_co2" not in after.data_vars
 
 
+def test_migration_0_4_0_to_0_5_0_clips_fill_value_leaks(tmp_path: Path):
+    """The 0.4.0 → 0.5.0 migration NaN's any cell with
+    ``|value| >= 1e10`` (publisher fill-value leak) and regenerates
+    ``stats.nc``. Three test cases mirror what the production scan
+    surfaced:
+
+    1. A wind variable with cells at ``1e36`` (BCC-CSM2-MR pattern:
+       publisher declares ``_FillValue=1e+20`` but stores ``1e+36``).
+    2. A sea-ice thickness variable with cells at ``1e15`` (MPI
+       residue pattern).
+    3. A land_fraction static in [0, 1] — left alone.
+    """
+    from migrations._0_4_0_to_0_5_0 import MIGRATION
+
+    zarr_dir = tmp_path / "data.zarr"
+    nt, nlat, nlon = 6, 45, 90
+    times = xr.date_range("2010-01-01", periods=nt, freq="D", calendar="noleap")
+
+    rng = np.random.default_rng(0)
+    ua = rng.normal(0, 20, size=(nt, nlat, nlon)).astype(np.float32)
+    # Spike last timestep last lat-row to 1e36 — BCC pattern.
+    ua[-1, -1, :] = 1.0e36
+    sithick = rng.uniform(0, 5, size=(nt, nlat, nlon)).astype(np.float32)
+    sithick[0, 10, 20] = 1.0e15
+    # Static field (kept around to make sure the migration leaves
+    # non-target variables alone).
+    static_arr = rng.uniform(0, 1, size=(nlat, nlon)).astype(np.float32)
+
+    ds = xr.Dataset(
+        {
+            "ua250": xr.DataArray(
+                ua,
+                dims=("time", "lat", "lon"),
+                coords={"time": times},
+            ),
+            "siday_sithick": xr.DataArray(
+                sithick,
+                dims=("time", "lat", "lon"),
+                coords={"time": times},
+            ),
+            "land_fraction": xr.DataArray(static_arr, dims=("lat", "lon")),
+        }
+    )
+    ds.to_zarr(str(zarr_dir), mode="w", consolidated=True, zarr_format=3)
+
+    sidecar = {
+        "source_id": "TEST",
+        "experiment": "historical",
+        "variant_label": "r1i1p1f1",
+        "label": "TEST",
+        "target_grid": "F22.5",
+        "schema_version": "0.4.0",
+        "variables_present": sorted(ds.data_vars),
+    }
+
+    out = MIGRATION.apply(str(zarr_dir), sidecar)
+    assert out["schema_version"] == "0.5.0"
+    audit = out["migrations"][-1]
+    assert audit["from"] == "0.4.0" and audit["to"] == "0.5.0"
+    clipped_vars = {entry["variable"] for entry in audit["fill_value_clips"]}
+    assert "ua250" in clipped_vars
+    assert "siday_sithick" in clipped_vars
+    assert "land_fraction" not in clipped_vars  # in range, untouched
+
+    migrated = xr.open_zarr(str(zarr_dir), consolidated=True)
+    # Bad cells became NaN.
+    assert np.isnan(migrated["ua250"].values[-1, -1, :]).all()
+    # Good cells preserved byte-exact.
+    np.testing.assert_array_equal(migrated["ua250"].values[:-1], ua[:-1])
+    assert np.isnan(migrated["siday_sithick"].values[0, 10, 20])
+    np.testing.assert_array_equal(migrated["land_fraction"].values, static_arr)
+
+    # stats.nc regenerated with the new schema.
+    stats_path = zarr_dir.parent / "stats.nc"
+    assert stats_path.exists()
+
+
+def test_migration_0_4_0_to_0_5_0_no_audit_when_clean(tmp_path: Path):
+    """If a dataset has no out-of-range values the migration still
+    bumps the version + appends a migrations entry, but the sanitized
+    audit list is empty and stats.nc is left alone (we don't waste
+    pod time recomputing identical maps)."""
+    from migrations._0_4_0_to_0_5_0 import MIGRATION
+
+    zarr_dir = tmp_path / "data.zarr"
+    nt, nlat, nlon = 3, 45, 90
+    times = xr.date_range("2010-01-01", periods=nt, freq="D", calendar="noleap")
+    ds = xr.Dataset(
+        {
+            "TMP2m": xr.DataArray(
+                np.full((nt, nlat, nlon), 280.0, dtype=np.float32),
+                dims=("time", "lat", "lon"),
+                coords={"time": times},
+            )
+        }
+    )
+    ds.to_zarr(str(zarr_dir), mode="w", consolidated=True, zarr_format=3)
+    sidecar = {
+        "source_id": "T",
+        "experiment": "h",
+        "variant_label": "r1",
+        "label": "",
+        "target_grid": "F22.5",
+        "schema_version": "0.4.0",
+        "variables_present": ["TMP2m"],
+    }
+    out = MIGRATION.apply(str(zarr_dir), sidecar)
+    assert out["schema_version"] == "0.5.0"
+    assert out["migrations"][-1]["fill_value_clips"] == []
+
+
 def test_migration_0_3_0_to_0_4_0_writes_per_cell_maps(tmp_path: Path):
     """The 0.3.0 → 0.4.0 migration regenerates stats.nc with the new
     per-cell maps. Zarr data is untouched; only stats.nc changes.
