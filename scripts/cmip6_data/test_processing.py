@@ -467,6 +467,36 @@ def test_decode_default_fills_leaves_integer_arrays_alone():
 
 
 # ---------------------------------------------------------------------------
+# fill_orog_ocean_with_zero — CMCC publisher convention
+# ---------------------------------------------------------------------------
+
+
+def test_fill_orog_ocean_with_zero_fills_missing_cells():
+    """CMCC family publishes ``orog`` only over land cells; ocean
+    cells should be filled with 0 m (sea level) before regrid so the
+    conservative regridder sees a complete field."""
+    from processing import fill_orog_ocean_with_zero
+
+    orog = np.array([[100.0, np.nan, 250.0], [np.nan, np.nan, 500.0]], dtype=np.float32)
+    ds = xr.Dataset({"orog": (("lat", "lon"), orog)})
+    filled, warnings = fill_orog_ocean_with_zero(ds)
+    expected = np.array([[100.0, 0.0, 250.0], [0.0, 0.0, 500.0]], dtype=np.float32)
+    np.testing.assert_array_equal(filled["orog"].values, expected)
+    assert any("orog" in w and "3" in w for w in warnings)
+
+
+def test_fill_orog_ocean_with_zero_noop_when_complete():
+    from processing import fill_orog_ocean_with_zero
+
+    ds = xr.Dataset(
+        {"orog": (("lat", "lon"), np.array([[100.0, 200.0]], dtype=np.float32))}
+    )
+    filled, warnings = fill_orog_ocean_with_zero(ds)
+    np.testing.assert_array_equal(filled["orog"].values, ds["orog"].values)
+    assert warnings == []
+
+
+# ---------------------------------------------------------------------------
 # clamp_static_fractions
 # ---------------------------------------------------------------------------
 

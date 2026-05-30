@@ -77,6 +77,7 @@ from processing import (  # noqa: E402
     decode_default_fills,
     derive_ocean_and_correct_sea_ice,
     fill_below_surface_smooth,
+    fill_orog_ocean_with_zero,
     finalize_surface_and_ocean_variable,
     flatten_plev_variables,
     grid_fingerprint,
@@ -639,6 +640,13 @@ def process_one(task: DatasetTask, config: ProcessConfig) -> DatasetIndexRow:
             static_methods: dict[str, str] = {}
             for v in fx_have:
                 fx_src = _open_zstore(fx_zs[v])[[v]].squeeze(drop=True)
+                if v == "orog":
+                    # CMCC family publishes orog only over land
+                    # (NaN over ocean); fill ocean cells with 0 m
+                    # before regrid so the conservative regridder
+                    # gets a complete field.
+                    fx_src, orog_warnings = fill_orog_ocean_with_zero(fx_src)
+                    row.warnings.extend(orog_warnings)
                 piece, methods = regrid_variables(fx_src, target, cfg)
                 static_pieces.append(piece)
                 static_methods.update(methods)

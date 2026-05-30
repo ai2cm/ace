@@ -1398,6 +1398,39 @@ def clamp_static_fractions(ds: xr.Dataset) -> tuple[xr.Dataset, list[str]]:
     return ds, warnings
 
 
+def fill_orog_ocean_with_zero(ds: xr.Dataset) -> tuple[xr.Dataset, list[str]]:
+    """Fill missing ``orog`` cells with 0 m (sea level).
+
+    Most publishers ship ``orog`` defined everywhere — over the ocean
+    the elevation is 0 m. CMCC's family (CMCC-CM2-HR4, CMCC-CM2-SR5,
+    CMCC-ESM2) instead publishes ``orog`` only over land cells and
+    leaves the ocean as NaN (~63% of the field). The downstream
+    pipeline needs orog defined everywhere for the surface-height
+    field, so we fill the NaN cells with the correct value (0 m)
+    *before* regrid; without this, the conservative regridder produces
+    a sparse target field where many cells overlap entirely-NaN
+    source cells.
+
+    No-op when ``orog`` is already complete. The caller gets a
+    warning entry naming the cell count so the publisher quirk shows
+    up in the per-dataset audit trail.
+    """
+    if "orog" not in ds.data_vars:
+        return ds, []
+    arr = ds["orog"]
+    n_nan = int(arr.isnull().sum())
+    if n_nan == 0:
+        return ds, []
+    filled = arr.fillna(0.0)
+    filled.attrs = dict(arr.attrs)
+    warning = (
+        f"orog: filled {n_nan} NaN cells with 0 m before regrid "
+        "(publisher publishes orog only over land cells; ocean = 0 m "
+        "elevation at sea level)"
+    )
+    return ds.assign(orog=filled), [warning]
+
+
 # Magnitude threshold for ``decode_default_fills``. Any float-valued
 # cell whose absolute value exceeds this is treated as a publisher
 # fill-value leak and NaN'd. Calibrated to catch every leak observed
