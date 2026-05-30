@@ -23,11 +23,77 @@ def _fmt(n: int) -> str:
     return str(n)
 
 
+def _count_crossformer_params(step_cfg: dict) -> dict:
+    import dacite
+
+    from fme.ace.step.camulator import (
+        CrossFormerSelector,
+        NoiseConditionedCrossFormerSelector,
+    )
+
+    atmo_prog = step_cfg["atmosphere_prognostic_names"]
+    atmo_levels = step_cfg["atmosphere_levels"]
+    surf_prog = step_cfg["surface_prognostic_names"]
+    forcing = step_cfg["forcing_names"]
+    atmo_diag = step_cfg.get("atmosphere_diagnostic_names") or []
+    surf_diag = step_cfg.get("surface_diagnostic_names") or []
+    level_start = step_cfg.get("atmosphere_level_start", 0)
+
+    atmo_in_names = [
+        f"{name}_{i}"
+        for name in atmo_prog
+        for i in range(level_start, level_start + atmo_levels)
+    ]
+    atmo_out_names = atmo_in_names + [
+        f"{name}_{i}"
+        for name in atmo_diag
+        for i in range(level_start, level_start + atmo_levels)
+    ]
+    in_names = forcing + surf_prog + atmo_in_names
+    out_names = atmo_out_names + surf_prog + surf_diag
+
+    builder_cfg = step_cfg["builder"]
+    selector_cls = (
+        NoiseConditionedCrossFormerSelector
+        if builder_cfg["type"] == "NoiseConditionedCrossFormer"
+        else CrossFormerSelector
+    )
+    selector = dacite.from_dict(
+        data_class=selector_cls,
+        data=builder_cfg,
+        config=dacite.Config(strict=False),
+    )
+    module = selector.build(
+        n_atmo_channels=len(atmo_prog),
+        n_atmo_groups=atmo_levels,
+        n_surf_channels=len(surf_prog),
+        n_aux_channels=len(forcing),
+        n_atmo_diagnostic_channels=len(atmo_diag),
+        n_surf_diagnostic_channels=len(surf_diag),
+        img_shape=(45, 90),
+    )
+
+    total = sum(p.numel() for p in module.parameters())
+    trainable = sum(p.numel() for p in module.parameters() if p.requires_grad)
+    return {
+        "builder_type": builder_cfg["type"],
+        "n_in": len(in_names),
+        "n_out": len(out_names),
+        "total": total,
+        "trainable": trainable,
+    }
+
+
 def count_params(config_path: Path) -> dict:
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
 
-    step_cfg = cfg["stepper"]["step"]["config"]
+    step = cfg["stepper"]["step"]
+    step_cfg = step["config"]
+
+    if step.get("type") == "CrossFormer":
+        return _count_crossformer_params(step_cfg)
+
     in_names: list[str] = step_cfg["in_names"]
     out_names: list[str] = step_cfg["out_names"]
     builder_cfg = step_cfg["builder"]
@@ -60,6 +126,8 @@ def main() -> None:
         "SFNO": config_dir / "ace-train-config-4deg-AIMIP-sfno.yaml",
         "Swin": config_dir / "ace-train-config-4deg-AIMIP-swin.yaml",
         "NC-Swin": config_dir / "ace-train-config-4deg-AIMIP-nc-swin.yaml",
+        "Camulator": config_dir / "ace-train-config-4deg-AIMIP-crossformer.yaml",
+        "NC-Camulator": config_dir / "ace-train-config-4deg-AIMIP-nc-crossformer.yaml",
     }
 
     results = {}
