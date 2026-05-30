@@ -48,6 +48,14 @@
 #                              spawn one migrate-dataset pod per match.
 #                              Each pod chains whatever migration steps
 #                              are needed (e.g. 0.1.0 → 0.2.0 → 0.3.0).
+#   --augment-only             Together with --process-esgf, drops
+#                              ESGF tasks that don't already have a
+#                              sidecar on GCS. Those would otherwise
+#                              go through process_one_esgf (full
+#                              fresh process), which is OOM-prone at
+#                              prod scale. Use when iterating on
+#                              augment logic without paying for
+#                              fresh-mode runs.
 #   --force-inventory          Rebuild ``inventory.csv`` /
 #                              ``inventory_esgf.csv`` even when they
 #                              already exist on GCS. Use when the
@@ -74,6 +82,7 @@ RUN_NORMALIZATION=false
 RUN_STAGE_EXTERNALS=false
 RUN_MIGRATE=false
 FORCE_INVENTORY=false
+AUGMENT_ONLY=false
 CONFIG=""
 ESGF_CONFIG=""
 INVENTORY_CONFIG=""
@@ -95,6 +104,7 @@ do case $1 in
     --normalization) RUN_NORMALIZATION=true;;
     --stage-externals) RUN_STAGE_EXTERNALS=true;;
     --migrate) RUN_MIGRATE=true;;
+    --augment-only) AUGMENT_ONLY=true;;
     --force-inventory) FORCE_INVENTORY=true;;
     *) echo "Unknown parameter passed: $1"
     exit 1;;
@@ -206,6 +216,34 @@ if [[ "${RUN_PROCESS_ESGF}" = true ]]; then
         esgf_dataset_keys+=("${source_id}/${experiment}/${variant_label}")
     done <<< "${esgf_lines}"
     echo "Found ${#esgf_dataset_keys[@]} ESGF datasets."
+
+    # --augment-only: drop ESGF datasets that don't already have a sidecar
+    # on GCS. Those would go through process_one_esgf (fresh full process)
+    # which is heavy and OOM-prone at prod scale; this flag is the
+    # escape hatch when we just want to augment what we already have.
+    if [[ "${AUGMENT_ONLY}" = true ]]; then
+        echo "Augment-only: filtering ESGF tasks to those with existing sidecars..."
+        filtered_keys=$(cd "${CMIP6_DIR}" && python -c "
+import sys
+import fsspec
+from config import ESGFProcessConfig
+
+cfg = ESGFProcessConfig.from_file('${ABS_ESGF_CONFIG}')
+out_dir = cfg.output_directory.rstrip('/')
+keys = '''${esgf_dataset_keys[*]}'''.split()
+fs, _ = fsspec.core.url_to_fs(out_dir)
+for k in keys:
+    sidecar = f'{out_dir}/{k}/data.zarr/metadata.json'
+    rel = fsspec.core.url_to_fs(sidecar)[1]
+    if fs.exists(rel):
+        print(k)
+")
+        esgf_dataset_keys=()
+        while IFS= read -r k; do
+            [[ -n "${k}" ]] && esgf_dataset_keys+=("${k}")
+        done <<< "${filtered_keys}"
+        echo "After augment-only filter: ${#esgf_dataset_keys[@]} ESGF datasets."
+    fi
 fi
 esgf_datasets_count=${#esgf_dataset_keys[@]}
 esgf_datasets_count_minus_one=$((esgf_datasets_count - 1))
