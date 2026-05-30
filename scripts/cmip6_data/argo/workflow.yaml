@@ -125,10 +125,10 @@ spec:
             start: "0"
             end: "{{workflow.parameters.migrate_datasets_count_minus_one}}"
       - - name: compute-stats
-          when: "{{workflow.parameters.run_stats}} == true and {{workflow.parameters.stats_datasets_count_minus_one}} == -1"
+          when: "{{workflow.parameters.run_stats}} == true && {{workflow.parameters.stats_datasets_count_minus_one}} == -1"
           template: compute-stats
       - - name: compute-stats-dataset
-          when: "{{workflow.parameters.run_stats}} == true and {{workflow.parameters.stats_datasets_count_minus_one}} != -1"
+          when: "{{workflow.parameters.run_stats}} == true && {{workflow.parameters.stats_datasets_count_minus_one}} != -1"
           template: compute-stats-dataset
           arguments:
             parameters:
@@ -485,12 +485,20 @@ spec:
       container:
         image: us-central1-docker.pkg.dev/vcm-ml/full-model/cmip6-processing:latest
         resources:
+          # Peak RSS observed on the heaviest dataset (GFDL-CM4 ssp585,
+          # 86 years × 85 vars × 3 periods) was 1.27 GiB with the
+          # xarray-on-dask refactor — chunk-by-chunk reductions never
+          # hold more than a couple of zarr chunks at a time. 4 GiB
+          # gives a 3× safety margin (other ssp datasets are similar
+          # size; CMCC monthly oceans run smaller; future scaling could
+          # raise the peak somewhat) and lets us pack ~4× more pods
+          # per node than the old 16 GiB request.
           limits:
             cpu: "4000m"
-            memory: "16Gi"
+            memory: "4Gi"
           requests:
             cpu: "4000m"
-            memory: "16Gi"
+            memory: "4Gi"
         command: ["bash", "-c", "-e"]
         args:
           - |

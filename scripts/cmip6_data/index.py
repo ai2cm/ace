@@ -135,10 +135,17 @@ def write_index(rows: list[DatasetIndexRow], output_directory: str) -> None:
     try:
         df.to_parquet(parquet_path, index=False)
         logging.info("Wrote %d rows to %s", len(df), parquet_path)
-    except ImportError as e:
+    except Exception as e:  # noqa: BLE001
+        # ImportError when pyarrow is absent; ArrowNotImplementedError
+        # when pyarrow is present but built without the GCS filesystem
+        # (the dev env's pyarrow ships this way). CSV is the
+        # authoritative form anyway; parquet is for downstream
+        # consumers that prefer typed I/O — skip silently if writing
+        # fails, but log it loudly.
         logging.warning(
-            "Skipped %s (%s). Install pyarrow to enable parquet output.",
+            "Skipped %s (%s: %s); CSV write still succeeded.",
             parquet_path,
+            type(e).__name__,
             e,
         )
 

@@ -678,6 +678,11 @@ def _process_one(
     Runs in a worker process; logs via the root logger (configured in
     each subprocess on import). Returns ``(status, rows, message)`` so
     the parent can aggregate without sharing state.
+
+    Logs RSS before and after the dataset's compute so future regen
+    runs make peak memory visible without re-instrumentation. The
+    sampler also catches long-lived drift between map computations
+    that the begin/end pair would miss.
     """
     fs, rel = fsspec.core.url_to_fs(stats_path)
     if fs.exists(rel) and not force:
@@ -695,14 +700,25 @@ def _process_one(
     except Exception as e:  # noqa: BLE001
         return "error", [], f"could not open {zarr_path}: {e}"
 
+    from processing import RssSampler, rss_mib  # local import: optional dep
+
+    rss_before = rss_mib()
+    sampler = RssSampler(interval_seconds=120.0).start()
     try:
         dataset_rows = compute_and_write_stats(
             ds, stats_path, identity, grid_name, periods=periods
+        )
+        logging.info(
+            "  rss: %s before=%.0f MiB after=%.0f MiB",
+            zarr_path,
+            rss_before,
+            rss_mib(),
         )
     except Exception as e:  # noqa: BLE001
         tb = traceback.format_exc()
         return ("error", [], f"compute failed for {zarr_path}: {e}\n{tb}")
     finally:
+        sampler.stop()
         ds.close()
 
     return "computed", dataset_rows, zarr_path
