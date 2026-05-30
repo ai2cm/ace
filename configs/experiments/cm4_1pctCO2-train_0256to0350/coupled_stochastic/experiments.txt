@@ -8,11 +8,7 @@ fto-1pctCO2_0256to0350-hfds_prescribed-gqmfjs2j_mb4prsz7|rs0|01KKQWTQTEZAAKXGZRW
 
 # -- run_ --
 
-ft_fto_stochastic_ncs4_wuLR_v2-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQ43FG4FJ022C7X9Y2WA4R4W|run_ic0251_100yr|best_inference_ckpt|high|--min-runtime 5h
-ft_fto_stochastic_ncs4_wuLR_v2-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KQ43FG4FJ022C7X9Y2WA4R4W|run_140yr|best_inference_ckpt|high|--min-runtime 8h
-
-ft_fto_stochastic_ncs4_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KNZHD7DGXC8YCVMVS00QZQNX|run_ic0251_100yr|best_ckpt|high|--min-runtime 5h
-ft_fto_stochastic_ncs4_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KNZHD7DGXC8YCVMVS00QZQNX|run_140yr|best_ckpt|high|--min-runtime 5h
+ft_fto_stochastic_ncs4_wuLR-1pctCO2_0256to0350-gqmfjs2j_cbj61w53|rs0|01KNZHD7DGXC8YCVMVS00QZQNX|run_140yr|best_ckpt|high|--min-runtime 8h
 
 
 # -- automatically added by coupled_train.sh --
