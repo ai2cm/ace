@@ -90,6 +90,7 @@ class Optimization(OptimizationABC):
         get_checkpoint: Callable[
             [int], Checkpoint | NoCheckpoint
         ] = lambda _: NoCheckpoint(),
+        max_grad_norm: float | None = None,
     ):
         if optimizer_type == "FusedAdam":
             self.optimizer = torch.optim.AdamW(parameters, lr=lr, fused=True, **kwargs)
@@ -108,6 +109,7 @@ class Optimization(OptimizationABC):
         self._accumulated_loss = torch.tensor(0.0, device=get_device())
         self._use_gradient_accumulation = use_gradient_accumulation
         self._get_checkpoint = get_checkpoint
+        self._max_grad_norm = max_grad_norm
 
     def checkpoint(self, module: nn.Module, step: int) -> nn.Module:
         return self._get_checkpoint(step)(module)
@@ -177,6 +179,11 @@ class Optimization(OptimizationABC):
             loss.backward()
 
     def _step_weights(self):
+        if self._max_grad_norm is not None:
+            if self.gscaler is not None:
+                self.gscaler.unscale_(self.optimizer)
+            params = [p for g in self.optimizer.param_groups for p in g["params"]]
+            torch.nn.utils.clip_grad_norm_(params, self._max_grad_norm)
         if self.gscaler is not None:
             self.gscaler.step(self.optimizer)
         else:
@@ -310,6 +317,7 @@ class OptimizationConfig:
         default_factory=lambda: CheckpointConfig()
     )
     resume_optimizer_ckpt_path: str | None = None
+    max_grad_norm: float | None = None
 
     def __post_init__(self):
         if self.optimizer_type == "FusedAdam":
@@ -337,6 +345,7 @@ class OptimizationConfig:
             kwargs=self.kwargs,
             use_gradient_accumulation=self.use_gradient_accumulation,
             get_checkpoint=self.checkpoint.build,
+            max_grad_norm=self.max_grad_norm,
         )
         if self.resume_optimizer_ckpt_path is not None:
             _load_finetune_optimization_state(

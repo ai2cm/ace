@@ -10,7 +10,7 @@ export BEAKER_CLUSTER=${BEAKER_CLUSTER:-ai2/titan}
 export BEAKER_PRIORITY=${BEAKER_PRIORITY:-urgent}
 
 declare -A JOBS=(
-  ["ace-train-config-4deg-AIMIP-crossformer.yaml"]="ace2-era5-train-4deg-AIMIP-crossformer"
+  #["ace-train-config-4deg-AIMIP-crossformer.yaml"]="ace2-era5-train-4deg-AIMIP-crossformer"
   ["ace-train-config-4deg-AIMIP-nc-crossformer.yaml"]="ace2-era5-train-4deg-AIMIP-nc-crossformer"
   #["ace-train-config-4deg-AIMIP-nc-swin.yaml"]="ace2-era5-train-4deg-AIMIP-nc-swin-v2"
   #["ace-train-config-4deg-AIMIP-swin.yaml"]="ace2-era5-train-4deg-AIMIP-swin-v2"
