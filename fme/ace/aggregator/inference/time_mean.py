@@ -365,6 +365,15 @@ class TimeMeanEvaluatorAggregator:
             if self._channel_mean_names is None:
                 values_to_average = list(rmse_all_channels.values())
             else:
+                missing = [
+                    n for n in self._channel_mean_names if n not in rmse_all_channels
+                ]
+                if missing:
+                    raise KeyError(
+                        f"channel_mean_names contains entries not present in the "
+                        f"recorded data: {missing}. Available: "
+                        f"{sorted(rmse_all_channels)}."
+                    )
                 values_to_average = [
                     rmse_all_channels[name] for name in self._channel_mean_names
                 ]

@@ -27,7 +27,11 @@ from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallConfig, MultiCallStepConfig
 from fme.core.step.secondary_decoder import SecondaryDecoderConfig
 from fme.core.step.secondary_module import SecondaryModuleStepConfig
-from fme.core.step.single_module import SingleModuleStepConfig
+from fme.core.step.single_module import (
+    SingleModuleStepConfig,
+    _apply_input_mask,
+    _build_channel_mask_dict,
+)
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.typing_ import TensorDict
 
@@ -511,6 +515,34 @@ def get_step(
     return selector.get_step(dataset_info, init_weights)
 
 
+def test_step_returns_uncorrected_shadow_of_corrected_variables():
+    """The step exposes pre-correction values for corrector-modified variables."""
+    selector = get_single_module_with_atmosphere_corrector_selector()
+    step = get_step(selector, DEFAULT_IMG_SHAPE)
+    n_samples = 2
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+    out = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+        ),
+    )
+    # The corrector modifies surface pressure (conserve_dry_air) and precipitation
+    # (force_positive), among others. The shadow holds only modified variables.
+    assert set(out.uncorrected).issubset(set(out.output))
+    assert "PRESsfc" in out.uncorrected
+    assert "PRATEsfc" in out.uncorrected
+    # conserve_dry_air changes surface pressure, so corrected != uncorrected.
+    assert not torch.allclose(out.output["PRESsfc"], out.uncorrected["PRESsfc"])
+    # The shadow is detached from the autograd graph (unused on the train path).
+    for tensor in out.uncorrected.values():
+        assert not tensor.requires_grad
+
+
 @pytest.mark.parallel
 def test_label_conditioned_step():
     dist = Distributed.get_instance()
@@ -531,7 +563,7 @@ def test_label_conditioned_step():
             ),
         ),
         wrapper=lambda x: x,
-    )
+    ).output
     h_sl, w_sl = dist.get_local_slices(DEFAULT_IMG_SHAPE)
     local_h = DEFAULT_IMG_SHAPE[0] if h_sl == slice(None) else h_sl.stop - h_sl.start
     local_w = DEFAULT_IMG_SHAPE[1] if w_sl == slice(None) else w_sl.stop - w_sl.start
@@ -745,7 +777,7 @@ def test_step_with_prescribed_prognostic_overwrites_output():
             labels=None,
         ),
         wrapper=lambda x: x,
-    )
+    ).output
     torch.testing.assert_close(output["diagnostic_main"], prescribed_value)
 
 
@@ -902,7 +934,7 @@ def test_secondary_module_full_field_and_residual():
         args=StepArgs(
             input=input_data, next_step_input_data=next_step_input_data, labels=None
         ),
-    )
+    ).output
     assert "prog" in output
     assert "diag" in output
     assert output["prog"].shape == (2, *img_shape)
@@ -953,8 +985,8 @@ def test_secondary_module_state_round_trip():
     args = StepArgs(
         input=input_data, next_step_input_data=next_step_input_data, labels=None
     )
-    out1 = step1.step(args=args)
-    out2 = step2.step(args=args)
+    out1 = step1.step(args=args).output
+    out2 = step2.step(args=args).output
     for name in out1:
         torch.testing.assert_close(out1[name], out2[name])
 
@@ -999,6 +1031,243 @@ def test_secondary_module_residual_on_input_only_with_residual_prediction():
         args=StepArgs(
             input=input_data, next_step_input_data=next_step_input_data, labels=None
         ),
-    )
+    ).output
     assert output["prog_a"].shape == (2, *img_shape)
     assert output["prog_b"].shape == (2, *img_shape)
+
+
+def test_apply_input_mask_zeros_masked_variables():
+    input_norm = {
+        "a": torch.ones(4, 8, 16),
+        "b": torch.ones(4, 8, 16) * 2.0,
+    }
+    mask = {
+        "a": torch.tensor([True, True, False, False]),
+        "b": torch.tensor([True, False, True, False]),
+    }
+    result = _apply_input_mask(input_norm, mask)
+    expected_a = torch.tensor([1.0, 1.0, 0.0, 0.0]).view(4, 1, 1).expand(4, 8, 16)
+    expected_b = torch.tensor([2.0, 0.0, 2.0, 0.0]).view(4, 1, 1).expand(4, 8, 16)
+    torch.testing.assert_close(result["a"], expected_a)
+    torch.testing.assert_close(result["b"], expected_b)
+
+
+def test_apply_input_mask_ignores_unknown_names():
+    input_norm = {"a": torch.ones(2, 4, 8)}
+    mask = {"not_a_variable": torch.tensor([False, False])}
+    result = _apply_input_mask(input_norm, mask)
+    torch.testing.assert_close(result["a"], input_norm["a"])
+
+
+def test_apply_input_mask_does_not_mutate_original():
+    original = torch.ones(2, 4, 8)
+    input_norm = {"a": original}
+    mask = {"a": torch.tensor([False, False])}
+    result = _apply_input_mask(input_norm, mask)
+    torch.testing.assert_close(original, torch.ones(2, 4, 8))
+    assert result["a"] is not original
+
+
+def test_step_with_data_mask():
+    normalization = get_network_and_loss_normalization_config(
+        names=["forcing_shared", "forcing_rad", "diagnostic_main", "diagnostic_rad"],
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={
+                        "scale_factor": 1,
+                        "embed_dim": 4,
+                        "num_layers": 2,
+                    },
+                ),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main", "diagnostic_rad"],
+                normalization=normalization,
+            ),
+        ),
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    n_samples = 4
+    step = get_step(config, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples
+    )
+    data_mask = {
+        "forcing_shared": torch.tensor(
+            [True, True, False, False], device=fme.get_device()
+        ),
+    }
+    output_no_mask = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+            data_mask=None,
+        ),
+    ).output
+    output_with_mask = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+            data_mask=data_mask,
+        ),
+    ).output
+    for name in ["diagnostic_main", "diagnostic_rad"]:
+        assert output_with_mask[name].shape == (n_samples, *img_shape)
+        torch.testing.assert_close(output_with_mask[name][:2], output_no_mask[name][:2])
+        assert not torch.allclose(output_with_mask[name][2:], output_no_mask[name][2:])
+
+
+def test_build_channel_mask_dict_with_data_mask():
+    in_names = ["a", "b"]
+    packed = torch.zeros(3, 2, 8, 16)
+    data_mask = {
+        "a": torch.tensor([True, False, True]),
+        "b": torch.tensor([False, True, True]),
+    }
+    result = _build_channel_mask_dict(in_names, data_mask, packed)
+    assert set(result) == {"a", "b"}
+    assert result["a"].shape == (3, 8, 16)
+    assert result["a"][0, 0, 0] == 1.0
+    assert result["a"][1, 0, 0] == 0.0
+    assert result["a"][2, 0, 0] == 1.0
+    assert result["b"][0, 0, 0] == 0.0
+    assert result["b"][1, 0, 0] == 1.0
+    assert (result["b"][2] == 1.0).all()
+
+
+def test_build_channel_mask_dict_no_data_mask():
+    packed = torch.zeros(2, 3, 4, 8)
+    result = _build_channel_mask_dict(["x", "y", "z"], None, packed)
+    assert set(result) == {"x", "y", "z"}
+    for name in result:
+        assert result[name].shape == (2, 4, 8)
+        assert (result[name] == 1.0).all()
+
+
+def test_build_channel_mask_dict_partial_mask():
+    packed = torch.zeros(2, 2, 4, 8)
+    data_mask = {"a": torch.tensor([True, False])}
+    result = _build_channel_mask_dict(["a", "b"], data_mask, packed)
+    assert set(result) == {"a", "b"}
+    assert result["a"][0, 0, 0] == 1.0
+    assert result["a"][1, 0, 0] == 0.0
+    assert (result["b"] == 1.0).all()
+
+
+def test_step_with_include_channel_mask_inputs():
+    normalization = get_network_and_loss_normalization_config(
+        names=["forcing_shared", "forcing_rad", "diagnostic_main", "diagnostic_rad"],
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={
+                        "scale_factor": 1,
+                        "embed_dim": 4,
+                        "num_layers": 2,
+                    },
+                ),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main", "diagnostic_rad"],
+                normalization=normalization,
+                include_channel_mask_inputs=True,
+            ),
+        ),
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    n_samples = 4
+    step = get_step(config, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples
+    )
+    data_mask = {
+        "forcing_shared": torch.tensor(
+            [True, True, False, False], device=fme.get_device()
+        ),
+    }
+    output_no_mask = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+            data_mask=None,
+        ),
+    ).output
+    output_with_mask = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+            data_mask=data_mask,
+        ),
+    ).output
+    for name in ["diagnostic_main", "diagnostic_rad"]:
+        assert output_with_mask[name].shape == (n_samples, *img_shape)
+        torch.testing.assert_close(output_with_mask[name][:2], output_no_mask[name][:2])
+        assert not torch.allclose(output_with_mask[name][2:], output_no_mask[name][2:])
+
+
+def test_step_with_include_channel_mask_inputs_no_data_mask():
+    normalization = get_network_and_loss_normalization_config(
+        names=["forcing_shared", "forcing_rad", "diagnostic_main", "diagnostic_rad"],
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={
+                        "scale_factor": 1,
+                        "embed_dim": 4,
+                        "num_layers": 2,
+                    },
+                ),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main", "diagnostic_rad"],
+                normalization=normalization,
+                include_channel_mask_inputs=True,
+            ),
+        ),
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    n_samples = 2
+    step = get_step(config, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples
+    )
+    output_no_mask = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+            data_mask=None,
+        ),
+    ).output
+    all_unmasked = {
+        name: torch.ones(n_samples, dtype=torch.bool, device=fme.get_device())
+        for name in step.input_names
+    }
+    output_all_unmasked = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+            data_mask=all_unmasked,
+        ),
+    ).output
+    for name in ["diagnostic_main", "diagnostic_rad"]:
+        assert output_no_mask[name].shape == (n_samples, *img_shape)
+        torch.testing.assert_close(output_no_mask[name], output_all_unmasked[name])

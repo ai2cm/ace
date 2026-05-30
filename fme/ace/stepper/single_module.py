@@ -4,7 +4,7 @@ import datetime
 import logging
 import pathlib
 from collections.abc import Callable, Generator, Mapping
-from typing import Any, Literal, cast
+from typing import Any, Literal, cast, overload
 
 import dacite
 import dacite.exceptions
@@ -59,7 +59,7 @@ from fme.core.step.multi_call import (
     replace_multi_call,
 )
 from fme.core.step.single_module import SingleModuleStepConfig
-from fme.core.step.step import StepABC, StepSelector
+from fme.core.step.step import StepABC, StepOutput, StepSelector
 from fme.core.tensors import (
     add_ensemble_dim,
     fold_ensemble_dim,
@@ -526,6 +526,7 @@ class StepperConfig:
         requirements = DataRequirements(
             names=self.all_names,
             n_timesteps=self._window_steps_required(n_forward_steps),
+            allow_missing_variables=self.step.allow_missing_variables,
         )
         return self.derived_forcings.update_requirements(requirements)
 
@@ -547,6 +548,7 @@ class StepperConfig:
                 set(self.input_only_names).union(self.step.next_step_input_names)
             ),
             n_timesteps=self._window_steps_required(n_forward_steps),
+            allow_missing_variables=self.step.allow_missing_variables,
         )
         return self.derived_forcings.update_requirements(requirements)
 
@@ -1070,7 +1072,7 @@ class Stepper:
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
+    ) -> StepOutput:
         """
         Step the model forward one timestep given input data.
 
@@ -1079,11 +1081,17 @@ class Stepper:
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
-            The denormalized output data at the next time step.
+            The output at the next timestep and the pre-correction values of any
+            corrector-modified variables.
         """
         args = args.apply_input_process_func(self._input_process_func)
-        output = self._step_obj.step(args=args, wrapper=wrapper)
-        return self._output_process_func(output)
+        step_output = self._step_obj.step(args=args, wrapper=wrapper)
+        # The output process func (e.g. spatial masking) is name-preserving and
+        # applied per-variable, so it is safe to apply to the uncorrected subset.
+        return StepOutput(
+            output=self._output_process_func(step_output.output),
+            uncorrected=self._output_process_func(step_output.uncorrected),
+        )
 
     def get_prediction_generator(
         self,
@@ -1091,7 +1099,7 @@ class Stepper:
         forcing_data: BatchData,
         n_forward_steps: int,
         optimizer: OptimizationABC,
-    ) -> Generator[TensorDict, None, None]:
+    ) -> Generator[StepOutput, None, None]:
         """
         Predict multiple steps forward given initial condition and forcing data.
 
@@ -1119,7 +1127,12 @@ class Stepper:
         ic_dict = ic_batch_data.data
         forcing_dict = forcing_data.data
         return self.predict_generator(
-            ic_dict, forcing_dict, n_forward_steps, optimizer, forcing_data.labels
+            ic_dict,
+            forcing_dict,
+            n_forward_steps,
+            optimizer,
+            forcing_data.labels,
+            data_mask=forcing_data.data_mask,
         )
 
     @property
@@ -1135,7 +1148,8 @@ class Stepper:
         n_forward_steps: int,
         optimizer: OptimizationABC,
         labels: BatchLabels | None,
-    ) -> Generator[TensorDict, None, None]:
+        data_mask: TensorMapping | None = None,
+    ) -> Generator[StepOutput, None, None]:
         state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
         for step in range(n_forward_steps):
             input_forcing = {
@@ -1156,16 +1170,40 @@ class Stepper:
                 return optimizer.checkpoint(module, step=step)
 
             with optimizer.autocast():
-                state = self.step(
+                step_output = self.step(
                     StepArgs(
                         input=input_data,
                         next_step_input_data=next_step_input_dict,
                         labels=labels,
+                        data_mask=data_mask,
                     ),
                     wrapper=checkpoint,
                 )
-            yield state
-            state = optimizer.detach_if_using_gradient_accumulation(state)
+            yield step_output
+            # The rollout always feeds the corrected output forward.
+            state = optimizer.detach_if_using_gradient_accumulation(step_output.output)
+
+    @overload
+    def predict(
+        self,
+        initial_condition: PrognosticState,
+        forcing: BatchData,
+        compute_derived_variables: bool = False,
+        compute_derived_forcings: bool = True,
+        *,
+        return_uncorrected: Literal[False] = False,
+    ) -> tuple[BatchData, PrognosticState]: ...
+
+    @overload
+    def predict(
+        self,
+        initial_condition: PrognosticState,
+        forcing: BatchData,
+        compute_derived_variables: bool = False,
+        compute_derived_forcings: bool = True,
+        *,
+        return_uncorrected: Literal[True],
+    ) -> tuple[BatchData, BatchData, PrognosticState]: ...
 
     def predict(
         self,
@@ -1173,7 +1211,11 @@ class Stepper:
         forcing: BatchData,
         compute_derived_variables: bool = False,
         compute_derived_forcings: bool = True,
-    ) -> tuple[BatchData, PrognosticState]:
+        *,
+        return_uncorrected: bool = False,
+    ) -> (
+        tuple[BatchData, PrognosticState] | tuple[BatchData, BatchData, PrognosticState]
+    ):
         """
         Predict multiple steps forward given initial condition and reference data.
 
@@ -1190,10 +1232,15 @@ class Stepper:
             compute_derived_forcings: Whether to compute derived forcing variables for
                 the prediction. Only used to disable computing the derived forcings
                 if they have been computed ahead of time.
+            return_uncorrected: If True, additionally return a BatchData containing the
+                pre-correction ("uncorrected") values of corrector-modified variables,
+                inserted as the second element of the returned tuple. Derived variables
+                are not computed for this shadow.
 
         Returns:
             A batch data containing the prediction and the prediction's final state
-            which can be used as a new initial condition.
+            which can be used as a new initial condition. If ``return_uncorrected`` is
+            True, the uncorrected shadow BatchData is inserted between the two.
         """
         timer = GlobalTimer.get_instance()
         forcing_names = set(self._input_only_names).union(
@@ -1226,7 +1273,7 @@ class Stepper:
                 )
             )
         data = process_prediction_generator_list(
-            output_list,
+            [step_output.output for step_output in output_list],
             time=forcing_data.time[:, self.n_ic_timesteps :],
             horizontal_dims=forcing_data.horizontal_dims,
             labels=forcing.labels,
@@ -1250,6 +1297,18 @@ class Stepper:
             labels=data.labels,
             n_ensemble=data.n_ensemble,
         )
+        if return_uncorrected:
+            # The shadow holds only corrector-modified variables in their
+            # pre-correction form; it shares the corrected prediction's time
+            # coordinate and is intentionally given no derived variables.
+            uncorrected_data = process_prediction_generator_list(
+                [step_output.uncorrected for step_output in output_list],
+                time=forcing_data.time[:, self.n_ic_timesteps :],
+                horizontal_dims=forcing_data.horizontal_dims,
+                labels=forcing.labels,
+                n_ensemble=forcing.n_ensemble,
+            )
+            return data, uncorrected_data, prognostic_state
         return data, prognostic_state
 
     def predict_paired(
@@ -1257,6 +1316,7 @@ class Stepper:
         initial_condition: PrognosticState,
         forcing: BatchData,
         compute_derived_variables: bool = False,
+        return_uncorrected: bool = False,
     ) -> tuple[PairedData, PrognosticState]:
         """
         Predict multiple steps forward given initial condition and reference data.
@@ -1271,6 +1331,10 @@ class Stepper:
                 subsequent timesteps.
             compute_derived_variables: Whether to compute derived variables for the
                 prediction.
+            return_uncorrected: If True, the returned PairedData carries the
+                pre-correction ("uncorrected") values of corrector-modified variables
+                in its ``uncorrected_prediction`` field, paired against the same
+                reference data.
 
         Returns:
             A tuple of 1) a paired data object, containing the prediction paired with
@@ -1282,12 +1346,22 @@ class Stepper:
             forcing = forcing.broadcast_ensemble(
                 n_ensemble=initial_condition.as_batch_data().n_ensemble
             )
-        prediction, new_initial_condition = self.predict(
-            initial_condition,
-            forcing,
-            compute_derived_variables,
-            compute_derived_forcings=False,
-        )
+        uncorrected_prediction: BatchData | None = None
+        if return_uncorrected:
+            prediction, uncorrected_prediction, new_initial_condition = self.predict(
+                initial_condition,
+                forcing,
+                compute_derived_variables,
+                compute_derived_forcings=False,
+                return_uncorrected=True,
+            )
+        else:
+            prediction, new_initial_condition = self.predict(
+                initial_condition,
+                forcing,
+                compute_derived_variables,
+                compute_derived_forcings=False,
+            )
         forward_data = self.get_forward_data(
             forcing, compute_derived_variables=compute_derived_variables
         )
@@ -1300,6 +1374,7 @@ class Stepper:
                     horizontal_dims=forward_data.horizontal_dims,
                     labels=forward_data.labels,
                 ),
+                uncorrected_prediction=uncorrected_prediction,
             ),
             new_initial_condition,
         )
@@ -1673,6 +1748,7 @@ class TrainStepper(
             n_forward_steps,
             optimization,
             labels=input_ensemble_data.labels,
+            data_mask=input_ensemble_data.data_mask,
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)
@@ -1709,7 +1785,7 @@ class TrainStepper(
             else:
                 context = torch.no_grad()
             with context:
-                gen_step = next(output_iterator)
+                gen_step = next(output_iterator).output
                 gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
                 output_list.append(gen_step)
                 target_step = add_ensemble_dim(
@@ -1718,7 +1794,12 @@ class TrainStepper(
                         for k, v in target_data.data.items()
                     }
                 )
-                step_loss = self._loss_obj(gen_step, target_step, step=step)
+                step_loss = self._loss_obj(
+                    gen_step,
+                    target_step,
+                    step=step,
+                    data_mask=input_batch_data.data_mask,
+                )
                 step_total_loss = step_loss.total()
                 metrics[f"loss_step_{step}"] = step_total_loss.detach()
                 if optimize_step:

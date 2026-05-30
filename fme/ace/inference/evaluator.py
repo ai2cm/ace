@@ -1,5 +1,6 @@
 import dataclasses
 import datetime
+import functools
 import logging
 import os
 from collections.abc import Callable, Mapping, Sequence
@@ -11,12 +12,16 @@ import numpy.typing as npt
 import torch
 
 import fme
-from fme.ace.aggregator import OneStepAggregatorConfig
+from fme.ace.aggregator import (
+    LegacyFlagOneStepAggregatorConfig,
+    OneStepAggregatorConfig,
+)
 from fme.ace.aggregator.inference import (
     InferenceEvaluatorAggregatorConfig,
+    InferenceEvaluatorAggregatorWithUncorrected,
     LegacyFlagInferenceEvaluatorAggregatorConfig,
 )
-from fme.ace.data_loading.batch_data import BatchData, PrognosticState
+from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_gridded_data, get_inference_data
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig
@@ -44,6 +49,7 @@ from fme.core.cloud import makedirs
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import IncompatibleDatasetInfo
 from fme.core.derived_variables import get_derived_variable_metadata
+from fme.core.generics.aggregator import InferenceAggregatorABC
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.generics.validation import run_validation
 from fme.core.logging_utils import LoggingConfig
@@ -121,8 +127,8 @@ class ValidationConfig:
     """
 
     loader: DataLoaderConfig
-    aggregator: OneStepAggregatorConfig = dataclasses.field(
-        default_factory=lambda: OneStepAggregatorConfig()
+    aggregator: OneStepAggregatorConfig | LegacyFlagOneStepAggregatorConfig = (
+        dataclasses.field(default_factory=lambda: OneStepAggregatorConfig())
     )
     stepper_training: TrainStepperConfig = dataclasses.field(
         default_factory=lambda: TrainStepperConfig()
@@ -408,7 +414,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             train_stepper_config = config.validation.stepper_training
             train_stepper = TrainStepper(stepper=stepper, config=train_stepper_config)
 
-            aggregator = config.validation.aggregator.build(
+            val_aggregator = config.validation.aggregator.build(
                 dataset_info=dataset_info,
                 loss_scaling=train_stepper.effective_loss_scaling,
                 save_diagnostics=True,
@@ -418,7 +424,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         run_validation(
             train_stepper=train_stepper,
             validation_data=valid_data,
-            aggregator=aggregator,
+            aggregator=val_aggregator,
             label="val",
             log_progress=True,
         )
@@ -426,7 +432,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         timer.start_outer("inference")
 
     with timer.context("initialization"):
-        aggregator = aggregator_config.build(
+        built_aggregator = aggregator_config.build(
             dataset_info=dataset_info,
             n_ic_steps=stepper_config.n_ic_timesteps,
             n_forward_steps=config.n_forward_steps,
@@ -443,6 +449,29 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             variable_metadata=variable_metadata,
             coords=data.coords,
         )
+
+        aggregator: InferenceAggregatorABC[PairedData | PrognosticState, PairedData] = (
+            built_aggregator
+        )
+        predict = stepper.predict_paired
+        if (
+            isinstance(aggregator_config, InferenceEvaluatorAggregatorConfig)
+            and aggregator_config.compute_uncorrected_metrics
+        ):
+            uncorrected_aggregator = aggregator_config.reduced_for_uncorrected().build(
+                dataset_info=dataset_info,
+                n_ic_steps=stepper_config.n_ic_timesteps,
+                n_forward_steps=config.n_forward_steps,
+                initial_time=initial_time,
+                channel_mean_names=stepper.loss_names,
+                normalize=stepper.normalizer.normalize,
+                output_dir=config.experiment_dir,
+                n_ensemble_per_ic=config.n_ensemble_per_ic,
+            )
+            aggregator = InferenceEvaluatorAggregatorWithUncorrected(
+                built_aggregator, uncorrected_aggregator
+            )
+            predict = functools.partial(stepper.predict_paired, return_uncorrected=True)
 
     logging.info("Starting inference")
     logger = get_record_to_wandb(label="inference")
@@ -472,7 +501,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         )
     else:
         run_inference(
-            predict=stepper.predict_paired,
+            predict=predict,
             data=data,
             aggregator=aggregator,
             writer=writer,
@@ -483,7 +512,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         logging.info("Starting final flush of data writer")
         writer.finalize()
         logging.info("Writing reduced metrics to disk in netcdf format.")
-        aggregator.flush_diagnostics()
+        aggregator.flush_diagnostics(subdir=None)
 
     timer.stop_outer("inference")
     total_steps = config.n_forward_steps * config.loader.n_initial_conditions

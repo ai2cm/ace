@@ -19,6 +19,7 @@ from fme.core.generics.aggregator import (
     InferenceLogs,
 )
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
+from fme.core.tensors import unfold_ensemble_dim
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Table, WandB
 
@@ -228,14 +229,12 @@ class InferenceEvaluatorAggregatorConfig:
     time_mean_norm: TimeMeanMetricConfig = dataclasses.field(
         default_factory=lambda: TimeMeanMetricConfig(target="norm")
     )
-    video: VideoMetricConfig = dataclasses.field(
-        default_factory=lambda: VideoMetricConfig(enabled=False)
-    )
+    video: VideoMetricConfig = dataclasses.field(default_factory=VideoMetricConfig)
     histogram: HistogramMetricConfig = dataclasses.field(
-        default_factory=lambda: HistogramMetricConfig(enabled=False)
+        default_factory=HistogramMetricConfig
     )
     seasonal: SeasonalMetricConfig = dataclasses.field(
-        default_factory=lambda: SeasonalMetricConfig(enabled=False)
+        default_factory=SeasonalMetricConfig
     )
     annual: AnnualMetricConfig = dataclasses.field(default_factory=AnnualMetricConfig)
     enso_index: EnsoIndexMetricConfig = dataclasses.field(
@@ -249,6 +248,11 @@ class InferenceEvaluatorAggregatorConfig:
     )
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
+    compute_uncorrected_metrics: bool = True
+    """If True, additionally compute time-mean metrics on the stepper's
+    uncorrected (pre-correction) outputs, logged under an ``uncorrected/`` prefix.
+    Quantifies how much the stepper relies on its corrector. Default on; has no
+    effect when the stepper has no corrector."""
 
     def __post_init__(self):
         if self.mean_denorm.target != "denorm":
@@ -289,6 +293,34 @@ class InferenceEvaluatorAggregatorConfig:
             self.ipo_index,
         ]
         return [m for m in all_metrics if m.enabled]
+
+    def reduced_for_uncorrected(self) -> "InferenceEvaluatorAggregatorConfig":
+        """Return a reduced config computing only time-mean metrics.
+
+        Used to build the secondary aggregator for the uncorrected ("shadow")
+        prediction, which contains only corrector-modified variables. Optional and
+        target-specific metrics are disabled to keep this lightweight and robust to
+        the sparse variable set.
+        """
+        return dataclasses.replace(
+            self,
+            mean_denorm=dataclasses.replace(self.mean_denorm, enabled=False),
+            mean_norm=dataclasses.replace(self.mean_norm, enabled=False),
+            step_means=[],
+            ensembles=[],
+            power_spectrum=dataclasses.replace(self.power_spectrum, enabled=False),
+            zonal_mean=dataclasses.replace(self.zonal_mean, enabled=False),
+            video=dataclasses.replace(self.video, enabled=False),
+            histogram=dataclasses.replace(self.histogram, enabled=False),
+            seasonal=dataclasses.replace(self.seasonal, enabled=False),
+            annual=dataclasses.replace(self.annual, enabled=False),
+            enso_index=dataclasses.replace(self.enso_index, enabled=False),
+            enso_coefficient=dataclasses.replace(self.enso_coefficient, enabled=False),
+            ipo_index=dataclasses.replace(self.ipo_index, enabled=False),
+            monthly_reference_data=None,
+            time_mean_reference_data=None,
+            compute_uncorrected_metrics=False,
+        )
 
     def build(
         self,
@@ -551,10 +583,18 @@ class InferenceEvaluatorAggregator(
             unfolded_target_data, unfolded_prediction_data = (
                 data.as_ensemble_tensor_dicts(data.n_ensemble)
             )
+            unfolded_target_data_norm = unfold_ensemble_dim(
+                TensorDict(batch.target_norm), data.n_ensemble
+            )
+            unfolded_prediction_data_norm = unfold_ensemble_dim(
+                TensorDict(batch.prediction_norm), data.n_ensemble
+            )
             for ensemble_aggregator in self._ensemble_aggregators.values():
                 ensemble_aggregator.record_batch(
                     target_data=unfolded_target_data,
                     gen_data=unfolded_prediction_data,
+                    target_data_norm=unfolded_target_data_norm,
+                    gen_data_norm=unfolded_prediction_data_norm,
                     i_time_start=self._n_timesteps_seen,
                 )
         n_times = data.time.shape[1]
@@ -653,6 +693,102 @@ class InferenceEvaluatorAggregator(
                 )
             else:
                 raise ValueError("Output directory not set.")
+
+
+def _prefix_keys(prefix: str, logs: InferenceLog) -> InferenceLog:
+    return {f"{prefix}/{key}": value for key, value in logs.items()}
+
+
+def _merge_uncorrected_logs(
+    main_logs: InferenceLogs, uncorrected_logs: InferenceLogs, prefix: str
+) -> InferenceLogs:
+    """Merge per-step uncorrected logs (prefixed) into the main per-step logs."""
+    merged = [dict(log) for log in main_logs]
+    for i, uncorrected in enumerate(uncorrected_logs):
+        if i < len(merged):
+            merged[i].update(_prefix_keys(prefix, uncorrected))
+    return merged
+
+
+class InferenceEvaluatorAggregatorWithUncorrected(
+    InferenceAggregatorABC[PairedData | PrognosticState, PairedData]
+):
+    """Records metrics for both the corrected prediction and the uncorrected
+    ("shadow") prediction, with the latter logged under an ``uncorrected/`` prefix.
+
+    The uncorrected metrics quantify how much the stepper relies on its corrector.
+    The shadow prediction (``PairedData.uncorrected_prediction``) contains only
+    corrector-modified variables and is paired against the same reference.
+    """
+
+    UNCORRECTED_LABEL = "uncorrected"
+
+    def __init__(
+        self,
+        main: InferenceAggregatorABC[PairedData | PrognosticState, PairedData],
+        uncorrected: InferenceAggregatorABC[PairedData | PrognosticState, PairedData],
+    ):
+        self._main = main
+        self._uncorrected = uncorrected
+        # The shadow records only when a non-empty uncorrected prediction is
+        # present (i.e. the stepper has an active corrector). When it never
+        # records, its aggregators have no data, so we must skip summarizing and
+        # flushing them.
+        self._recorded_uncorrected = False
+
+    @staticmethod
+    def _shadow_paired(data: PairedData) -> PairedData | None:
+        if data.uncorrected_prediction is None or len(data.uncorrected_prediction) == 0:
+            return None
+        return PairedData(
+            prediction=data.uncorrected_prediction,
+            reference=data.reference,
+            time=data.time,
+            labels=data.labels,
+            n_ensemble=data.n_ensemble,
+        )
+
+    def record_batch(self, data: PairedData) -> InferenceLogs:
+        logs = self._main.record_batch(data)
+        shadow = self._shadow_paired(data)
+        if shadow is not None:
+            self._recorded_uncorrected = True
+            uncorrected_logs = self._uncorrected.record_batch(shadow)
+            logs = _merge_uncorrected_logs(
+                logs, uncorrected_logs, self.UNCORRECTED_LABEL
+            )
+        return logs
+
+    def record_initial_condition(
+        self,
+        initial_condition: PairedData | PrognosticState,
+    ) -> InferenceLogs:
+        # The initial condition has all prognostic variables, but the shadow only
+        # ever records corrector-modified variables; seeding it with the full IC
+        # would pollute its (summary-only) time-mean metrics with non-corrected
+        # variables. The shadow therefore records only forward-step batches.
+        return self._main.record_initial_condition(initial_condition)
+
+    def get_summary_logs(self) -> InferenceLog:
+        logs = dict(self._main.get_summary_logs())
+        if self._recorded_uncorrected:
+            logs.update(
+                _prefix_keys(
+                    self.UNCORRECTED_LABEL, self._uncorrected.get_summary_logs()
+                )
+            )
+        return logs
+
+    def flush_diagnostics(self, subdir: str | None = None) -> None:
+        self._main.flush_diagnostics(subdir)
+        if not self._recorded_uncorrected:
+            return
+        uncorrected_subdir = (
+            self.UNCORRECTED_LABEL
+            if subdir is None
+            else f"{subdir}/{self.UNCORRECTED_LABEL}"
+        )
+        self._uncorrected.flush_diagnostics(uncorrected_subdir)
 
 
 def to_inference_logs(

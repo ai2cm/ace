@@ -3,7 +3,12 @@ import datetime
 
 import torch
 
-from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
+from fme.core.corrector.registry import (
+    CorrectionResult,
+    CorrectorABC,
+    CorrectorConfigABC,
+)
+from fme.core.corrector.utils import captured_before
 from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.registry.corrector import CorrectorSelector
@@ -217,9 +222,13 @@ class IceCorrector(CorrectorABC):
         input_data: TensorMapping,
         gen_data: TensorMapping,
         forcing_data: TensorMapping,
-    ) -> TensorDict:
+    ) -> CorrectionResult:
+        original = gen_data
         timestep = self._timestep.total_seconds()
         if self._config.budget_correction is not None:
             gen_data = self._config.budget_correction(gen_data, input_data, timestep)
 
-        return dict(gen_data)
+        gen_data = dict(gen_data)
+        return CorrectionResult(
+            corrected=gen_data, before=captured_before(original, gen_data)
+        )

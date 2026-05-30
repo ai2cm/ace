@@ -1,4 +1,5 @@
 import abc
+import dataclasses
 from collections.abc import Mapping
 from typing import Any, Self, final
 
@@ -6,6 +7,21 @@ import dacite
 
 from fme.core.dataset_info import DatasetInfo
 from fme.core.typing_ import TensorDict, TensorMapping
+
+
+@dataclasses.dataclass
+class CorrectionResult:
+    """The result of applying a corrector to generated data.
+
+    Attributes:
+        corrected: The corrected data, containing all variables passed to the
+            corrector (corrected or not).
+        before: The pre-correction values of exactly the variables the corrector
+            modified. Variables the corrector did not touch are absent.
+    """
+
+    corrected: TensorDict
+    before: TensorDict
 
 
 class CorrectorConfigABC(abc.ABC):
@@ -38,4 +54,4 @@ class CorrectorABC(abc.ABC):
         input_data: TensorMapping,
         gen_data: TensorMapping,
         forcing_data: TensorMapping,
-    ) -> TensorDict: ...
+    ) -> CorrectionResult: ...

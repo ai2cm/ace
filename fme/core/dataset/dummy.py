@@ -107,7 +107,7 @@ class DummyDataset(DatasetABC):
         """
         time_slice = slice(idx, idx + self.sample_n_times)
         time = xr.DataArray(self.all_times[time_slice].values, dims=["time"])
-        return (self._dummy_dict, time, self._labels, self._epoch)
+        return (self._dummy_dict, time, self._labels, self._epoch, None)
 
     def enable_shared_memory(self):
         pass

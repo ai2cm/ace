@@ -26,7 +26,7 @@ from fme.core.step.secondary_decoder import (
     SecondaryDecoder,
     SecondaryDecoderConfig,
 )
-from fme.core.step.step import StepABC, StepConfigABC, StepSelector
+from fme.core.step.step import StepABC, StepConfigABC, StepOutput, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
@@ -53,6 +53,11 @@ class SingleModuleStepConfig(StepConfigABC):
         prescribed_prognostic_names: Prognostic variable names to overwrite from
             forcing data at each step (e.g. for inference with observed values).
         residual_prediction: Whether to use residual prediction.
+        include_channel_mask_inputs: Whether to append per-variable mask indicator
+            channels to the network input. When True, the network receives
+            ``len(in_names)`` additional float channels (1.0 = present, 0.0 =
+            masked) after the regular input channels, doubling the total input
+            channel count.
     """
 
     builder: ModuleSelector
@@ -67,6 +72,7 @@ class SingleModuleStepConfig(StepConfigABC):
     next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
     prescribed_prognostic_names: list[str] = dataclasses.field(default_factory=list)
     residual_prediction: bool = False
+    include_channel_mask_inputs: bool = False
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
@@ -172,6 +178,10 @@ class SingleModuleStepConfig(StepConfigABC):
     def loss_names(self) -> list[str]:
         return self.output_names
 
+    @property
+    def allow_missing_variables(self) -> bool:
+        return self.builder.allow_missing_variables
+
     def replace_ocean(self, ocean: OceanConfig | None):
         """
         Replace the ocean model with a new one.
@@ -248,6 +258,8 @@ class SingleModuleStep(StepABC):
         """
         super().__init__()
         n_in_channels = len(config.in_names)
+        if config.include_channel_mask_inputs:
+            n_in_channels *= 2
         n_out_channels = len(config.out_names)
         self.in_packer = Packer(config.in_names)
         self.out_packer = Packer(config.out_names)
@@ -337,7 +349,7 @@ class SingleModuleStep(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
+    ) -> StepOutput:
         """
         Step the model forward one timestep given input data.
 
@@ -346,11 +358,22 @@ class SingleModuleStep(StepABC):
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
-            The denormalized output data at the next time step.
+            The output at the next timestep and the pre-correction values of any
+            corrector-modified variables.
         """
 
         def network_call(input_norm: TensorDict) -> TensorDict:
+            if args.data_mask is not None:
+                input_norm = _apply_input_mask(input_norm, args.data_mask)
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
+            if self._config.include_channel_mask_inputs:
+                mask_dict = _build_channel_mask_dict(
+                    self.in_names, args.data_mask, input_tensor
+                )
+                mask_tensor = self.in_packer.pack(mask_dict, axis=self.CHANNEL_DIM)
+                input_tensor = torch.cat(
+                    [input_tensor, mask_tensor], dim=self.CHANNEL_DIM
+                )
             output_tensor = self.module.wrap_module(wrapper)(
                 input_tensor,
                 labels=args.labels,
@@ -404,6 +427,52 @@ class SingleModuleStep(StepABC):
             self.secondary_decoder.load_module_state(state["secondary_decoder"])
 
 
+def _apply_input_mask(input_norm: TensorDict, data_mask: TensorMapping) -> TensorDict:
+    """Zero out masked input variables in normalized space.
+
+    For each variable in data_mask with False entries, sets those batch
+    members' values to 0 in the normalized input. This is equivalent to
+    replacing with the climatological mean in physical space.
+    """
+    result = dict(input_norm)
+    for name, mask in data_mask.items():
+        if name in result:
+            # mask shape: [batch], data shape: [batch, ...spatial...]
+            broadcast_mask = mask.view(mask.shape[0], *([1] * (result[name].ndim - 1)))
+            result[name] = torch.where(broadcast_mask, result[name], 0.0)
+    return result
+
+
+def _build_channel_mask_dict(
+    in_names: list[str],
+    data_mask: TensorMapping | None,
+    packed_input: torch.Tensor,
+) -> TensorDict:
+    """Build a dict of per-variable spatial mask tensors.
+
+    Returns a ``TensorDict`` keyed by variable name, with each value a
+    ``(batch, *spatial)`` float tensor (1.0 = present, 0.0 = masked).
+    The caller is responsible for packing this dict into the correct
+    channel order.
+
+    Args:
+        in_names: Input variable names.
+        data_mask: Per-variable boolean masks of shape ``[batch]``, or None.
+        packed_input: The packed input tensor, used to infer shape and device.
+    """
+    batch = packed_input.shape[0]
+    spatial = packed_input.shape[-2:]
+    device = packed_input.device
+    result: TensorDict = {}
+    for name in in_names:
+        if data_mask is not None and name in data_mask:
+            mask_1d = data_mask[name].to(device=device, dtype=torch.float)
+            result[name] = mask_1d.view(batch, 1, 1).expand(batch, *spatial)
+        else:
+            result[name] = torch.ones(batch, *spatial, device=device)
+    return result
+
+
 def step_with_adjustments(
     input: TensorMapping,
     next_step_input_data: TensorMapping,
@@ -414,7 +483,7 @@ def step_with_adjustments(
     residual_prediction: bool,
     prognostic_names: list[str],
     prescribed_prognostic_names: list[str] | None = None,
-) -> TensorDict:
+) -> StepOutput:
     """
     Step the model forward one timestep given input data.
 
@@ -437,7 +506,8 @@ def step_with_adjustments(
             next_step_input_data after the ocean step (e.g. for inference).
 
     Returns:
-        The denormalized output data at the next time step.
+        The denormalized output data at the next time step, together with the
+        pre-correction values of any corrector-modified variables.
     """
     if prescribed_prognostic_names is None:
         prescribed_prognostic_names = []
@@ -446,8 +516,12 @@ def step_with_adjustments(
     if residual_prediction:
         output_norm = add_names(input_norm, output_norm, prognostic_names)
     output = normalizer.denormalize(output_norm)
+    uncorrected: TensorDict = {}
     if corrector is not None:
-        output = corrector(input, output, next_step_input_data)
+        correction = corrector(input, output, next_step_input_data)
+        output = correction.corrected
+        # Detached: unused on the train path, avoids retaining the autograd graph.
+        uncorrected = {k: v.detach() for k, v in correction.before.items()}
     if ocean is not None:
         output = ocean(input, output, next_step_input_data)
     for name in prescribed_prognostic_names:
@@ -457,4 +531,4 @@ def step_with_adjustments(
             raise ValueError(
                 f"prescribed_prognostic_name '{name}' not in next_step_input_data"
             )
-    return output
+    return StepOutput(output=output, uncorrected=uncorrected)

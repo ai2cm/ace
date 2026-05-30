@@ -17,7 +17,7 @@ import torch
 import xarray as xr
 
 import fme
-from fme.ace.aggregator import OneStepAggregator
+from fme.ace.aggregator import OneStepAggregatorConfig
 from fme.ace.aggregator.plotting import plot_paneled_data
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.inference.test_evaluator import (
@@ -825,7 +825,7 @@ def test_train_on_batch_one_step_aggregator(n_forward_steps):
     # keep area weights ones for simplicity
     lat_lon_coordinates._area_weights = torch.ones(nx, ny)
     ds_info = DatasetInfo(horizontal_coordinates=lat_lon_coordinates)
-    aggregator = OneStepAggregator(ds_info, save_diagnostics=False)
+    aggregator = OneStepAggregatorConfig().build(ds_info, save_diagnostics=False)
 
     train_stepper = _get_train_stepper(config)
     stepped = train_stepper.train_on_batch(data, optimization=NullOptimization())
@@ -1143,7 +1143,7 @@ def test_step():
 
     output = stepper.step(
         StepArgs(input=input_data, next_step_input_data={}, labels=None)
-    )
+    ).output
 
     torch.testing.assert_close(output["a"], input_data["a"] + 1)
     torch.testing.assert_close(output["b"], input_data["b"] + 1)
@@ -1155,7 +1155,7 @@ def test_step_with_diagnostic():
     input_data = {"a": torch.rand(n_samples, 5, 5).to(DEVICE)}
     output = stepper.step(
         StepArgs(input=input_data, next_step_input_data={}, labels=None)
-    )
+    ).output
     torch.testing.assert_close(output["a"], input_data["a"])
     torch.testing.assert_close(output["c"], input_data["a"])
 
@@ -1173,7 +1173,7 @@ def test_step_with_forcing_and_diagnostic(residual_prediction):
     input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
     output = stepper.step(
         StepArgs(input=input_data, next_step_input_data={}, labels=None)
-    )
+    ).output
     if residual_prediction:
         expected_a_output = 2 * input_data["a"] + 1 - norm_mean
     else:
@@ -1191,7 +1191,7 @@ def test_step_with_prescribed_ocean():
     ocean_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "mask"]}
     output = stepper.step(
         StepArgs(input=input_data, next_step_input_data=ocean_data, labels=None)
-    )
+    ).output
     expected_a_output = torch.where(
         torch.round(ocean_data["mask"]).to(int) == 1,
         ocean_data["a"],
@@ -1304,6 +1304,66 @@ def test_predict_with_forcing(n_ensemble):
         torch.testing.assert_close(output.data["a"][:, n], expected_a_output)
     xr.testing.assert_equal(output.time, forcing_data.time[:, 1:])
     assert new_input_state.time.equals(output.time[:, -1:])
+
+
+def _get_force_positive_stepper(var: str = "a") -> Stepper:
+    """A stepper whose network negates its input, so a force_positive corrector
+    always clamps the output and the uncorrected shadow holds negative values."""
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": Multiply(-1.0).to(DEVICE)}
+                    ),
+                    in_names=[var],
+                    out_names=[var],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(means={var: 0.0}, stds={var: 1.0}),
+                    ),
+                    corrector=AtmosphereCorrectorConfig(force_positive_names=[var]),
+                )
+            ),
+        ),
+    )
+    return config.get_stepper(get_dataset_info())
+
+
+def test_predict_return_uncorrected():
+    stepper = _get_force_positive_stepper("a")
+    n_steps = 3
+    input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=[])
+    forcing_data.data = {}
+    # Default: 2-tuple, no shadow returned.
+    output, _ = stepper.predict(input_data, forcing_data)
+    assert output.data["a"].shape[1] == n_steps
+    # With return_uncorrected: 3-tuple with the pre-correction shadow.
+    corrected, uncorrected, prognostic_state = stepper.predict(
+        input_data, forcing_data, return_uncorrected=True
+    )
+    assert isinstance(prognostic_state, PrognosticState)
+    assert set(uncorrected.data) == {"a"}
+    assert uncorrected.time.equals(corrected.time)
+    # The corrector clamps to >= 0; the shadow holds the pre-clamp (negative) value.
+    assert torch.all(corrected.data["a"] >= 0.0)
+    assert torch.all(uncorrected.data["a"][:, 0] <= 0.0)
+    assert not torch.allclose(corrected.data["a"], uncorrected.data["a"])
+
+
+def test_predict_paired_return_uncorrected():
+    stepper = _get_force_positive_stepper("a")
+    n_steps = 3
+    input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=[])
+    # Default: the PairedData carries no shadow.
+    paired, _ = stepper.predict_paired(input_data, forcing_data)
+    assert paired.uncorrected_prediction is None
+    # Opt-in: the shadow is paired against the same reference / target.
+    paired, _ = stepper.predict_paired(
+        input_data, forcing_data, return_uncorrected=True
+    )
+    assert paired.uncorrected_prediction is not None
+    assert set(paired.uncorrected_prediction) == {"a"}
 
 
 @pytest.mark.parametrize(
@@ -2556,3 +2616,37 @@ def test_checkpoint_stepper_config_to_stepper_config(tmp_path: pathlib.Path):
     assert isinstance(loaded_config, StepperConfig)
     assert loaded_config.derived_forcings == original_config.derived_forcings
     assert loaded_config.step.type == original_config.step.type
+
+
+def test_train_on_batch_masked_variable_has_zero_loss_count():
+    """Masked output variable contributes 0 samples to per-channel loss count."""
+    torch.manual_seed(0)
+    n_steps = 1
+    n_samples = 4
+    data_with_ic: BatchData = get_data(
+        ["a", "b"], n_samples=n_samples, n_time=n_steps + 1
+    ).data
+    data_with_ic.data_mask = {
+        "a": torch.ones(n_samples, dtype=torch.bool, device=DEVICE),
+        "b": torch.zeros(n_samples, dtype=torch.bool, device=DEVICE),
+    }
+    config = _get_stepper_config(["a", "b"], ["a", "b"])
+    stepper = _get_train_stepper(config, loss=StepLossConfig(type="MSE"))
+    stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
+    assert stepped.per_channel_losses is not None
+    assert stepped.per_channel_losses["b"].count == 0
+    assert stepped.per_channel_losses["a"].count == n_samples
+
+
+def test_predict_with_data_mask_zeros_masked_forcing():
+    """Masked forcing variable is zeroed in normalized space before the forward pass."""
+    n_steps = 1
+    stepper = _get_stepper(["a", "b"], ["a"], module_name="ChannelSum")
+    input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=["b"])
+    n_samples = forcing_data.data["b"].shape[0]
+    forcing_data.data_mask = {
+        "b": torch.zeros(n_samples, dtype=torch.bool, device=DEVICE),
+    }
+    output, _ = stepper.predict(input_data, forcing_data)
+    ic_a = input_data.as_batch_data().data["a"][:, 0]
+    torch.testing.assert_close(output.data["a"][:, 0], ic_a)

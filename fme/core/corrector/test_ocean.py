@@ -37,6 +37,33 @@ class _MockDepth:
 _VERTICAL_COORD = _MockDepth()
 
 
+def test_ocean_corrector_before_captures_modified_variables():
+    config = OceanCorrectorConfig(force_positive_names=["so_0"])
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    timestep = datetime.timedelta(seconds=3600)
+    corrector = OceanCorrector(config, ops, None, timestep)
+    gen_data = {
+        "so_0": -1.0 * torch.ones(IMG_SHAPE, device=DEVICE),
+        "so_1": torch.ones(IMG_SHAPE, device=DEVICE),
+    }
+    result = corrector({}, gen_data, {})
+    torch.testing.assert_close(
+        result.corrected["so_0"], torch.zeros(IMG_SHAPE, device=DEVICE)
+    )
+    assert set(result.before) == {"so_0"}
+    torch.testing.assert_close(result.before["so_0"], gen_data["so_0"])
+
+
+def test_ocean_corrector_before_empty_when_no_correction():
+    config = OceanCorrectorConfig()
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    timestep = datetime.timedelta(seconds=3600)
+    corrector = OceanCorrector(config, ops, None, timestep)
+    gen_data = {"so_0": torch.ones(IMG_SHAPE, device=DEVICE)}
+    result = corrector({}, gen_data, {})
+    assert result.before == {}
+
+
 def test_ocean_corrector_force_positive():
     """"""
     torch.manual_seed(0)
@@ -48,7 +75,7 @@ def test_ocean_corrector_force_positive():
     input_data["sst"] = torch.randn(IMG_SHAPE, device=DEVICE)
     gen_data = {f"so_{i}": torch.randn(IMG_SHAPE, device=DEVICE) for i in range(NZ)}
     gen_data["sst"] = torch.randn(IMG_SHAPE, device=DEVICE)
-    corrected_gen = corrector(input_data, gen_data, {})
+    corrected_gen = corrector(input_data, gen_data, {}).corrected
     for name in ["so_0", "so_1"]:
         x = corrected_gen[name].clone()
         x[_LAT, _LON] = 0.0
@@ -78,7 +105,7 @@ def test_ocean_corrector_has_no_negative_ocean_fraction():
     assert negative_sea_ice_fraction.any()
 
     next_step_input_data: TensorMapping = {}
-    gen_data_corrected = corrector(input_data, gen_data, next_step_input_data)
+    gen_data_corrected = corrector(input_data, gen_data, next_step_input_data).corrected
     corrected_violation = (
         input_data["land_fraction"] + gen_data_corrected["sea_ice_fraction"]
     ) > 1.0
@@ -110,7 +137,7 @@ def test_ocean_corrector_has_negative_ocean_fraction():
     assert negative_sea_ice_fraction.any()
 
     next_step_input_data: TensorMapping = {}
-    gen_data_corrected = corrector(input_data, gen_data, next_step_input_data)
+    gen_data_corrected = corrector(input_data, gen_data, next_step_input_data).corrected
     corrected_violation = (
         input_data["land_fraction"] + gen_data_corrected["sea_ice_fraction"]
     ) > 1.0
@@ -136,7 +163,7 @@ def test_zero_where_ice_free_names():
         "HI": torch.rand(IMG_SHAPE, device=DEVICE) * 10,
     }
     corrector = OceanCorrector(config, ops, None, timestep)
-    gen_data_corrected = corrector(input_data, gen_data, {})
+    gen_data_corrected = corrector(input_data, gen_data, {}).corrected
     sea_ice_zero = gen_data_corrected["sea_ice_fraction"] == 0.0
     thickness = gen_data_corrected["HI"]
     torch.testing.assert_close(
@@ -162,7 +189,7 @@ def test_zero_where_ice_free_names_multiple_variables():
         "HS": torch.rand(IMG_SHAPE, device=DEVICE) * 5,
     }
     corrector = OceanCorrector(config, ops, None, timestep)
-    gen_data_corrected = corrector(input_data, gen_data, {})
+    gen_data_corrected = corrector(input_data, gen_data, {}).corrected
     sea_ice_zero = gen_data_corrected["sea_ice_fraction"] == 0.0
     for name in ["HI", "HS"]:
         values = gen_data_corrected[name]
@@ -246,7 +273,7 @@ def test_surface_energy_flux_correction_resid():
     expected_net_flux = _compute_ocean_net_surface_energy_flux(input_data, sst)
     expected_hfds = gen_hfds + ocean_fraction * expected_net_flux
 
-    corrected = corrector(input_data, gen_data, forcing_data)
+    corrected = corrector(input_data, gen_data, forcing_data).corrected
     torch.testing.assert_close(corrected["hfds"], expected_hfds)
     # on land ocean_fraction is 0, so hfds is unchanged
     torch.testing.assert_close(corrected["hfds"][-1, :], gen_hfds[-1, :])
@@ -288,7 +315,7 @@ def test_surface_energy_flux_correction_prescribed():
     net_flux = _compute_ocean_net_surface_energy_flux(input_data, sst)
     expected_hfds = net_flux * ocean_fraction + gen_hfds * (1 - ocean_fraction)
 
-    corrected = corrector(input_data, gen_data, forcing_data)
+    corrected = corrector(input_data, gen_data, forcing_data).corrected
     torch.testing.assert_close(corrected["hfds"], expected_hfds)
     # on land (ocean_fraction=0), hfds equals gen_hfds
     torch.testing.assert_close(corrected["hfds"][-1, :], gen_hfds[-1, :])
@@ -366,7 +393,7 @@ def test_ocean_heat_content_correction(hfds_type):
     corrector = OceanCorrector(config, ops, depth_coordinate, timestep)
     gen_data_corrected_dict = corrector(
         input_data_dict, gen_data_dict, forcing_data_dict
-    )
+    ).corrected
 
     input_ohc = input_data.ocean_heat_content.nanmean(dim=(-1, -2), keepdim=True)
     gen_ohc = gen_data.ocean_heat_content.nanmean(dim=(-1, -2), keepdim=True)

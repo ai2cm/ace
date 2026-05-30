@@ -19,7 +19,7 @@ from fme.core.registry.module import ModuleSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallStepConfig
 from fme.core.step.single_module import SingleModuleStepConfig
-from fme.core.step.step import StepSelector
+from fme.core.step.step import StepOutput, StepSelector
 from fme.core.timing import GlobalTimer
 
 from ._multi_call import MultiCallConfig, get_multi_call_name
@@ -32,7 +32,12 @@ TEST_CONFIG = MultiCallConfig(
 
 
 def _step(args: StepArgs, wrapper: Callable[[nn.Module], nn.Module] = lambda x: x):
-    return {k: args.input["CO2"].detach().clone() for k in TEST_CONFIG.output_names}
+    return StepOutput(
+        output={
+            k: args.input["CO2"].detach().clone() for k in TEST_CONFIG.output_names
+        },
+        uncorrected={},
+    )
 
 
 def test_multi_call_names():
