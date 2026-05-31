@@ -36,7 +36,7 @@ from fme.ace.aggregator.inference.main import (
 )
 from fme.ace.aggregator.inference.main import MetricConfig as AceMetricConfig
 from fme.ace.aggregator.loss_metrics import PerStepLossAggregator
-from fme.ace.aggregator.one_step.main import OneStepAggregator as OneStepAggregator_
+from fme.ace.aggregator.one_step.main import OneStepAggregatorConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
@@ -123,9 +123,10 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
         self._loss_ocean = torch.tensor(0.0, device=get_device())
         self._loss_atmos = torch.tensor(0.0, device=get_device())
         self._n_batches = 0
+        config = OneStepAggregatorConfig()
         self._aggregators = {
-            "ocean": OneStepAggregator_(
-                dataset_info.ocean,
+            "ocean": config.build(
+                dataset_info=dataset_info.ocean,
                 save_diagnostics=save_diagnostics,
                 output_dir=(
                     os.path.join(output_dir, "ocean")
@@ -135,8 +136,8 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
                 loss_scaling=loss_scaling.ocean,
                 channel_mean_names=ocean_channel_mean_names,
             ),
-            "atmosphere": OneStepAggregator_(
-                dataset_info.atmosphere,
+            "atmosphere": config.build(
+                dataset_info=dataset_info.atmosphere,
                 save_diagnostics=save_diagnostics,
                 output_dir=(
                     os.path.join(output_dir, "atmosphere")

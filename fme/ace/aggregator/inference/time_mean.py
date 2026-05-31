@@ -211,8 +211,8 @@ class TimeMeanAggregator:
 
     def _get_caption(self, key: str, name: str) -> str:
         if name in self._variable_metadata:
-            caption_name = self._variable_metadata[name].long_name
-            units = self._variable_metadata[name].units
+            caption_name = self._variable_metadata[name].display_long_name(name)
+            units = self._variable_metadata[name].display_units()
         else:
             caption_name, units = name, "unknown_units"
         caption = self._image_captions[key].format(name=caption_name, units=units)
@@ -225,12 +225,12 @@ class TimeMeanAggregator:
             if self._log_variables is not None and name not in self._log_variables:
                 continue
             if name in self._variable_metadata:
-                long_name = self._variable_metadata[name].long_name
-                units = self._variable_metadata[name].units
+                long_name = self._variable_metadata[name].display_long_name(name)
+                units = self._variable_metadata[name].display_units()
             else:
                 long_name = name
                 units = "unknown_units"
-            gen_metadata = VariableMetadata(long_name=long_name, units=units)._asdict()
+            gen_metadata = VariableMetadata(long_name=long_name, units=units).as_attrs()
             data.update(
                 {
                     f"gen_map-{name}": xr.DataArray(
@@ -365,6 +365,15 @@ class TimeMeanEvaluatorAggregator:
             if self._channel_mean_names is None:
                 values_to_average = list(rmse_all_channels.values())
             else:
+                missing = [
+                    n for n in self._channel_mean_names if n not in rmse_all_channels
+                ]
+                if missing:
+                    raise KeyError(
+                        f"channel_mean_names contains entries not present in the "
+                        f"recorded data: {missing}. Available: "
+                        f"{sorted(rmse_all_channels)}."
+                    )
                 values_to_average = [
                     rmse_all_channels[name] for name in self._channel_mean_names
                 ]
@@ -376,8 +385,8 @@ class TimeMeanEvaluatorAggregator:
 
     def _get_caption(self, key: str, name: str) -> str:
         if name in self._variable_metadata:
-            caption_name = self._variable_metadata[name].long_name
-            units = self._variable_metadata[name].units
+            caption_name = self._variable_metadata[name].display_long_name(name)
+            units = self._variable_metadata[name].display_units()
         else:
             caption_name, units = name, "unknown_units"
         caption = self._image_captions[key].format(name=caption_name, units=units)
@@ -390,15 +399,17 @@ class TimeMeanEvaluatorAggregator:
             if self._log_variables is not None and pred.name not in self._log_variables:
                 continue
             if pred.name in self._variable_metadata:
-                long_name = self._variable_metadata[pred.name].long_name
-                units = self._variable_metadata[pred.name].units
+                long_name = self._variable_metadata[pred.name].display_long_name(
+                    pred.name
+                )
+                units = self._variable_metadata[pred.name].display_units()
             else:
                 long_name = pred.name
                 units = "unknown_units"
-            gen_metadata = VariableMetadata(long_name=long_name, units=units)._asdict()
+            gen_metadata = VariableMetadata(long_name=long_name, units=units).as_attrs()
             bias_metadata = self._variable_metadata.get(
                 pred.name, VariableMetadata(long_name=long_name, units=units)
-            )._asdict()
+            ).as_attrs()
             data.update(
                 {
                     f"bias_map-{pred.name}": xr.DataArray(

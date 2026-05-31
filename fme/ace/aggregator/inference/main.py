@@ -19,6 +19,7 @@ from fme.core.generics.aggregator import (
     InferenceLogs,
 )
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
+from fme.core.tensors import unfold_ensemble_dim
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Table, WandB
 
@@ -228,14 +229,12 @@ class InferenceEvaluatorAggregatorConfig:
     time_mean_norm: TimeMeanMetricConfig = dataclasses.field(
         default_factory=lambda: TimeMeanMetricConfig(target="norm")
     )
-    video: VideoMetricConfig = dataclasses.field(
-        default_factory=lambda: VideoMetricConfig(enabled=False)
-    )
+    video: VideoMetricConfig = dataclasses.field(default_factory=VideoMetricConfig)
     histogram: HistogramMetricConfig = dataclasses.field(
-        default_factory=lambda: HistogramMetricConfig(enabled=False)
+        default_factory=HistogramMetricConfig
     )
     seasonal: SeasonalMetricConfig = dataclasses.field(
-        default_factory=lambda: SeasonalMetricConfig(enabled=False)
+        default_factory=SeasonalMetricConfig
     )
     annual: AnnualMetricConfig = dataclasses.field(default_factory=AnnualMetricConfig)
     enso_index: EnsoIndexMetricConfig = dataclasses.field(
@@ -551,10 +550,18 @@ class InferenceEvaluatorAggregator(
             unfolded_target_data, unfolded_prediction_data = (
                 data.as_ensemble_tensor_dicts(data.n_ensemble)
             )
+            unfolded_target_data_norm = unfold_ensemble_dim(
+                TensorDict(batch.target_norm), data.n_ensemble
+            )
+            unfolded_prediction_data_norm = unfold_ensemble_dim(
+                TensorDict(batch.prediction_norm), data.n_ensemble
+            )
             for ensemble_aggregator in self._ensemble_aggregators.values():
                 ensemble_aggregator.record_batch(
                     target_data=unfolded_target_data,
                     gen_data=unfolded_prediction_data,
+                    target_data_norm=unfolded_target_data_norm,
+                    gen_data_norm=unfolded_prediction_data_norm,
                     i_time_start=self._n_timesteps_seen,
                 )
         n_times = data.time.shape[1]

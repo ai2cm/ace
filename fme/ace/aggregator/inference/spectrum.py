@@ -93,9 +93,9 @@ class SphericalPowerSpectrumAggregator:
             spectrum_np = spectrum.cpu().numpy()
             wavenumber = np.arange(len(spectrum_np))
             metadata = self._variable_metadata.get(name)
-            if metadata is not None:
+            if metadata is not None and metadata.long_name is not None:
                 long_name = f"spherical power spectrum of {metadata.long_name}"
-                units = f"({metadata.units})^2"
+                units = f"({metadata.units or 'unknown_units'})^2"
             else:
                 long_name = f"spherical power spectrum of {name}"
                 units = "unknown_units"
