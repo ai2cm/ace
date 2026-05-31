@@ -47,6 +47,58 @@ Deferred for this run:
   / abrupt-4xCO2). Not in v2; flag for a v3 ingest if we want
   these later.
 
+## Model-similarity survey
+
+Before fixing the holdouts, we ran a cross-source clustering pass on
+the v2 per-dataset scalar stats (`(source, variable) → cohort
+z-score`, Pearson similarity, average-linkage hierarchical
+clustering). Two things came out of it that constrain holdout
+selection:
+
+**Outlier models (≥3 outlier vars at |z| > 2.5).** Real models with
+real biases — keep in *training* (they're part of the cohort spread
+we're trying to capture) but **don't put them in eval-only holdouts**,
+or the metric will mostly measure their idiosyncratic biases rather
+than the emulator's generalization:
+
+| Source | # outlier vars | Most extreme variables |
+| --- | --- | --- |
+| MIROC-ES2L | 6 | HGTsfc, omon_zos, UGRD10m, psl, ua850 |
+| IPSL-CM5A2-INCA | 5 | ua10, sfcWind, DLWRFsfc, sea-ice |
+| MIROC6 | 4 | psl/PRESsfc systematically low (~290 Pa below cohort) |
+| IITM-ESM | 3 | negative stratospheric humidity (already excluded) |
+| BCC-ESM1 | 3 | wind at 100 hPa, ULWRFtoa |
+| CanESM5 | 3 | Q2m, ua100 |
+
+**Family pairs (r > 0.85).** If we held out one of these and kept the
+other in training, the "held-out" model would effectively be
+in-sample. Critical if we ever do unseen-model-entirely; informative
+for the current holdouts too:
+
+- CMCC-CM2-SR5 ↔ CMCC-ESM2 (r=0.991 — nearly identical)
+- EC-Earth3-CC ↔ EC-Earth3-Veg (r=0.962)
+- CNRM-CM6-1 ↔ CNRM-ESM2-1 (r=0.935)
+- IPSL-CM6A-LR ↔ IPSL-CM6A-LR-INCA (r=0.876)
+- CNRM-CM6-1-HR ↔ CNRM-ESM2-1 (r=0.860)
+- CESM2 ↔ CESM2-WACCM (r=0.858)
+- HadGEM3-GC31-LL ↔ UKESM1-0-LL (r=0.803)
+
+**Hierarchical clustering (8 clusters).** Eight model families emerge
+cleanly. The ERA5-analog single-realisation run (C below) and any
+future unseen-model holdout should keep at least one representative
+from each family in training:
+
+| Family | Members |
+| --- | --- |
+| EC-Earth | EC-Earth3, -AerChem, -CC, -Veg, -Veg-LR; + IITM-ESM clusters here |
+| BCC / Chinese | BCC-CSM2-MR, BCC-ESM1, CAMS-CSM1-0, CMCC-CM2-HR4, NESM3 |
+| IPSL / MIROC | IPSL-CM6A-LR, IPSL-CM6A-LR-INCA, MIROC-ES2L, MIROC6 |
+| GFDL / MRI | GFDL-CM4, MRI-ESM2-0 |
+| CNRM | CNRM-CM6-1, CNRM-CM6-1-HR, CNRM-ESM2-1 |
+| MPI-adjacent | MPI-ESM-1-2-HAM, MPI-ESM1-2-LR, CESM2-FV2, FGOALS-f3-L, INM-CM5-0, IPSL-CM5A2-INCA |
+| Hadley / ACCESS | ACCESS-CM2, ACCESS-ESM1-5, HadGEM3-GC31-LL, UKESM1-0-LL |
+| CESM-derived | CESM2, CESM2-WACCM, CMCC-CM2-SR5, CMCC-ESM2, CanESM5, NorESM2-LM, NorESM2-MM, TaiESM1 |
+
 ## Held-out cohorts (main training run)
 
 After holdouts, training set ≈ 175–185 datasets across ~30 source
@@ -54,26 +106,33 @@ models.
 
 ### A. Held-out variants (internal-variability test)
 
-For source models that still have ≥3 variants in a given scenario
-after holdouts B/C are applied, hold out their `r2` from training but
-keep the same (source, scenario) cell in. Tentative:
+For source models with ≥3 variants in a given scenario, hold out their
+`r2` (or similar) from training but keep the same (source, scenario)
+cell in. Picks chosen from non-outlier sources spanning multiple
+families (CNRM, GFDL/MRI, EC-Earth, Hadley, MPI), so the result isn't
+dominated by a single family or by an outlier model's biases:
 
 - `CNRM-CM6-1/ssp245/r2i1p1f2`
 - `CNRM-CM6-1/ssp585/r2i1p1f2`
 - `CNRM-ESM2-1/historical/r2i1p1f2`
 - `MRI-ESM2-0/historical/r2i1p1f1`
 - `EC-Earth3-Veg-LR/historical/r2i1p1f1`
+- `MPI-ESM1-2-LR/historical/r2i1p1f1`
 
-~5–10 datasets. Multiple sources so the result isn't model-specific.
+~6 datasets across 5 families.
 
 ### B. Held-out (model, ssp585)
 
 For sources with rich multi-variant ssp585 coverage so the holdout
-signal is statistically meaningful:
+signal is statistically meaningful, drawn from non-outlier sources
+across distinct families:
 
-- `CanESM5/ssp585/*` (10 variants)
-- `MPI-ESM1-2-LR/ssp585/*` (5)
-- `UKESM1-0-LL/ssp585/*` (5)
+- `CanESM5/ssp585/*` (10 variants, CESM-derived family)
+- `MPI-ESM1-2-LR/ssp585/*` (5 variants, MPI family)
+- `UKESM1-0-LL/ssp585/*` (5 variants, Hadley/ACCESS family — but
+  note its sibling HadGEM3-GC31-LL stays in train and has r=0.80
+  similarity, so this is on the easier side of the test; the
+  CanESM5 + MPI picks are the harder probes)
 
 Their `historical` and `ssp245` stay in training, so we're testing
 whether the emulator can extrapolate forcing within the same model
@@ -95,10 +154,15 @@ The eval set then includes:
 - that source's `ssp245` and `ssp585` → can-we-predict-the-future
   -from-one-historical (the ERA5 analog)
 
-Pick a model with rich variant + scenario coverage (CanESM5 fits;
-~30 of its datasets become eval). Compare its eval metrics to the
-main-run eval for the same datasets to see how much the multi-variant
-+ multi-scenario training contributed.
+Pick a model with rich variant + scenario coverage. **CanESM5** fits
+(10/10/10 historical/ssp245/ssp585 = ~30 eval datasets, sits in the
+CESM-derived family but isn't near-identical to any cohort member —
+closest relatives are CESM2 at r≈0.6 and NorESM2-LM at r≈0.6, both
+much weaker than the r>0.85 family pairs above). The single
+realisation kept in train would be `CanESM5/historical/r1i1p1f1`;
+everything else `CanESM5/*` moves to eval. Compare its eval metrics
+to the main-run eval for the same datasets to see how much the
+multi-variant + multi-scenario training contributed.
 
 ### D. Temporal interpolation (held-out 1970-1989)
 
@@ -112,6 +176,18 @@ The 20-year gap is large enough that the model can't trivially
 interpolate from neighbouring days, but short enough that the
 forcing trajectory across the gap isn't wildly different from what
 the model sees.
+
+Candidates — drawn from non-outlier sources with ≥3 historical
+variants (so we can also see ensemble spread of the gap-fill) and
+spanning multiple families to avoid family-specific signals:
+
+- `MRI-ESM2-0/historical/*` (5 variants, GFDL/MRI family)
+- `MPI-ESM1-2-LR/historical/*` (5 variants, MPI family — but note
+  `r2i1p1f1` is in A; use the others)
+- `INM-CM5-0/historical/*` (5 variants, MPI-adjacent)
+- `NorESM2-LM/historical/*` (3 variants, CESM-derived)
+- `EC-Earth3-Veg-LR/historical/*` (3 variants, EC-Earth — but
+  `r2i1p1f1` is in A; use the others)
 
 ## Validation + inline inference (config sketch)
 
