@@ -141,7 +141,16 @@ def main():
     )
     done = 0
     n_failed = 0
-    with ProcessPoolExecutor(max_workers=args.workers) as pool:
+    # ``spawn`` (not the Linux default ``fork``) — once the main
+    # process imports fsspec / gcsfs / xarray-with-dask, fork-cloning
+    # the gRPC threads and async loops into a child interpreter
+    # crashes the child instantly ("A process in the process pool was
+    # terminated abruptly"). Same issue compute_stats.py hits; same
+    # fix. See compute_stats.py for the gory background.
+    import multiprocessing as mp
+
+    ctx = mp.get_context("spawn")
+    with ProcessPoolExecutor(max_workers=args.workers, mp_context=ctx) as pool:
         futures = {
             pool.submit(convert_one, zp, nd, args.years_per_file): zp
             for zp, nd in tasks
