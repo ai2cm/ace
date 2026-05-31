@@ -31,7 +31,14 @@ inference:
         engine: zarr
     num_data_workers: 4
   aggregator:
-    log_histograms: false
+    # Modern InferenceEvaluatorAggregatorConfig schema. The old `log_histograms`
+    # flag selected LegacyFlagInferenceEvaluatorAggregatorConfig, which does not
+    # support uncorrected (pre-correction) metrics. Histograms are off by default
+    # in this schema, matching the previous behavior; compute_uncorrected_metrics
+    # defaults on but is set explicitly here to document intent.
+    compute_uncorrected_metrics: true
+    histogram:
+      enabled: false
 logging:
   log_to_screen: true
   log_to_wandb: true
