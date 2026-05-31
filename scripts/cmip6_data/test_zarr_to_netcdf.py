@@ -113,7 +113,6 @@ def test_convert_one_per_day_chunking_preserved(tmp_path: Path):
     regardless of ``years_per_file`` — the whole point of the
     netCDF mirror is fast random-access per day, and that depends
     on the chunk layout, not the file layout."""
-    import h5py
     from zarr_to_netcdf import convert_one
 
     zarr_path = tmp_path / "src.zarr"
@@ -122,9 +121,15 @@ def test_convert_one_per_day_chunking_preserved(tmp_path: Path):
 
     convert_one(str(zarr_path), str(nc_dir), years_per_file=10)
 
-    # Open one of the netCDF files at the HDF5 level so we can read
-    # the actual chunk shape (xarray won't surface it directly).
-    with h5py.File(nc_dir / "data.1990-1999.nc", "r") as h5:
-        chunks = h5["TMP2m"].chunks
-        # Time dim is chunk size 1; spatial dims are full extent.
-        assert chunks[0] == 1, chunks
+    # xarray's netCDF backend surfaces the stored HDF5 chunk tuple in
+    # ``encoding["chunksizes"]``. Reading h5py directly would be more
+    # authoritative but the dev env's h5py is binary-mismatched
+    # against the libhdf5 netcdf4 ships with (h5py 2.0 headers vs
+    # libhdf5 1.14 runtime), so we use xarray which handles the
+    # version drift cleanly.
+    ds = xr.open_dataset(nc_dir / "data.1990-1999.nc", engine="netcdf4")
+    chunks = ds["TMP2m"].encoding["chunksizes"]
+    # Time dim is chunk size 1; spatial dims are full extent.
+    assert chunks[0] == 1, chunks
+    assert tuple(chunks[1:]) == ds["TMP2m"].shape[1:], chunks
+    ds.close()
