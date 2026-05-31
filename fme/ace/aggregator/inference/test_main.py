@@ -11,7 +11,6 @@ import xarray as xr
 from fme.ace.aggregator.inference.main import (
     EnsembleMetricConfig,
     InferenceEvaluatorAggregatorConfig,
-    InferenceEvaluatorAggregatorWithUncorrected,
     StepMeanMetricConfig,
     TimeMeanMetricConfig,
     build_inference_evaluator_aggregator,
@@ -20,11 +19,6 @@ from fme.ace.data_loading.batch_data import BatchData, PairedData
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
-from fme.core.generics.aggregator import (
-    InferenceAggregatorABC,
-    InferenceLog,
-    InferenceLogs,
-)
 
 
 def get_ds_info(nx: int, ny: int) -> DatasetInfo:
@@ -191,101 +185,101 @@ def test_compute_uncorrected_metrics_defaults_on_and_round_trips():
     assert restored.compute_uncorrected_metrics is False
 
 
-def test_reduced_for_uncorrected_keeps_only_time_mean():
-    reduced = InferenceEvaluatorAggregatorConfig().reduced_for_uncorrected()
-    # Time-mean metrics remain enabled; the rest are disabled / cleared.
-    assert reduced.time_mean_denorm.enabled
-    assert reduced.time_mean_norm.enabled
-    assert not reduced.mean_denorm.enabled
-    assert not reduced.mean_norm.enabled
-    assert not reduced.power_spectrum.enabled
-    assert not reduced.zonal_mean.enabled
-    assert not reduced.annual.enabled
-    assert reduced.step_means == []
-    assert reduced.ensembles == []
-    # Avoid building a shadow-of-a-shadow.
-    assert reduced.compute_uncorrected_metrics is False
+def _build_aggregator_with_uncorrected(
+    ds_info: DatasetInfo,
+    output_dir: str | None = None,
+    save_diagnostics: bool = False,
+):
+    n_ic_steps = 1
+    n_forward_steps = 2
+    initial_time = xr.DataArray(np.zeros((2,)), dims=["sample"])
+    return build_inference_evaluator_aggregator(
+        metrics=[TimeMeanMetricConfig(target="norm")],
+        uncorrected_metrics=[TimeMeanMetricConfig(target="norm")],
+        dataset_info=ds_info,
+        n_ic_steps=n_ic_steps,
+        n_forward_steps=n_forward_steps,
+        initial_time=initial_time,
+        normalize=lambda x: dict(x),
+        save_diagnostics=save_diagnostics,
+        output_dir=output_dir,
+    )
 
 
-class _StubAggregator(InferenceAggregatorABC):
-    """Records calls and returns canned logs, for testing the composite."""
+def _paired(prediction, target, uncorrected, nx=4, ny=4):
+    batch_size, n_timesteps = 2, 3
 
-    def __init__(self, summary: InferenceLog, batch_logs: InferenceLogs):
-        self._summary = summary
-        self._batch_logs = batch_logs
-        self.recorded_batches: list[PairedData] = []
-        self.recorded_ic = 0
-        self.flushed_subdirs: list[str | None] = []
+    def field(value):
+        return (
+            torch.ones([batch_size, n_timesteps, nx, ny], device=get_device()) * value
+        )
 
-    def record_batch(self, data: PairedData) -> InferenceLogs:
-        self.recorded_batches.append(data)
-        return [dict(log) for log in self._batch_logs]
-
-    def record_initial_condition(self, initial_condition) -> InferenceLogs:
-        self.recorded_ic += 1
-        return [{}]
-
-    def get_summary_logs(self) -> InferenceLog:
-        return dict(self._summary)
-
-    def flush_diagnostics(self, subdir: str | None = None) -> None:
-        self.flushed_subdirs.append(subdir)
-
-
-def _paired_with_uncorrected(uncorrected: dict | None) -> PairedData:
-    time = xr.DataArray(np.zeros((1, 2)), dims=["sample", "time"])
+    time = xr.DataArray(np.zeros((batch_size, n_timesteps)), dims=["sample", "time"])
     return PairedData(
-        prediction={"a": torch.zeros(1, 2, 4, 4)},
-        reference={"a": torch.zeros(1, 2, 4, 4)},
+        prediction={"a": field(prediction)},
+        reference={"a": field(target)},
         time=time,
-        uncorrected_prediction=uncorrected,
+        uncorrected_prediction=(
+            {"a": field(uncorrected)} if uncorrected is not None else {}
+        ),
     )
 
 
-def test_with_uncorrected_merges_and_prefixes_shadow_logs():
-    main = _StubAggregator({"time_mean/rmse/a": 1.0}, [{"time_mean/rmse/a": 1.0}])
-    shadow = _StubAggregator({"time_mean/rmse/a": 5.0}, [{"time_mean/rmse/a": 5.0}])
-    agg = InferenceEvaluatorAggregatorWithUncorrected(main, shadow)
+def test_uncorrected_metrics_logged_under_prefix():
+    # The aggregator computes time-mean metrics on both the corrected prediction
+    # and the uncorrected prediction, the latter under an "uncorrected/" prefix.
+    agg = _build_aggregator_with_uncorrected(get_ds_info(4, 4))
+    # corrected pred=2 vs target=1 -> rmse 1; uncorrected pred=4 -> rmse 3.
+    agg.record_batch(_paired(prediction=2.0, target=1.0, uncorrected=4.0))
 
-    data = _paired_with_uncorrected({"a": torch.ones(1, 2, 4, 4)})
-    logs = agg.record_batch(data)
-    assert logs[0]["time_mean/rmse/a"] == 1.0
-    assert logs[0]["uncorrected/time_mean/rmse/a"] == 5.0
-    # The shadow aggregator receives the uncorrected prediction tensors.
-    assert len(shadow.recorded_batches) == 1
-    torch.testing.assert_close(
-        shadow.recorded_batches[0].prediction["a"], torch.ones(1, 2, 4, 4)
+    summary = agg.get_summary_logs()
+    assert "time_mean_norm/rmse/a" in summary
+    assert "uncorrected/time_mean_norm/rmse/a" in summary
+    np.testing.assert_allclose(summary["time_mean_norm/rmse/a"], 1.0)
+    np.testing.assert_allclose(summary["uncorrected/time_mean_norm/rmse/a"], 3.0)
+
+
+def test_uncorrected_metrics_skipped_when_empty(tmp_path):
+    # A corrector-less stepper produces an empty uncorrected prediction. The
+    # uncorrected aggregators must then be neither summarized nor flushed (they
+    # hold no data and would otherwise raise "No data recorded.").
+    agg = _build_aggregator_with_uncorrected(
+        get_ds_info(4, 4), output_dir=str(tmp_path), save_diagnostics=True
     )
+    agg.record_batch(_paired(prediction=2.0, target=1.0, uncorrected=None))
 
     summary = agg.get_summary_logs()
-    assert summary["time_mean/rmse/a"] == 1.0
-    assert summary["uncorrected/time_mean/rmse/a"] == 5.0
-
-    # The initial condition is only recorded into the main aggregator.
-    agg.record_initial_condition(data)
-    assert main.recorded_ic == 1
-    assert shadow.recorded_ic == 0
-
-    # Shadow diagnostics are routed to an "uncorrected" subdirectory.
-    agg.flush_diagnostics(None)
-    assert main.flushed_subdirs == [None]
-    assert shadow.flushed_subdirs == ["uncorrected"]
+    assert "time_mean_norm/rmse/a" in summary
+    assert "uncorrected/time_mean_norm/rmse/a" not in summary
+    # Must not raise even though the uncorrected aggregators recorded nothing.
+    agg.flush_diagnostics(subdir=None)
 
 
-def test_with_uncorrected_skips_shadow_when_absent():
-    main = _StubAggregator({"time_mean/rmse/a": 1.0}, [{"time_mean/rmse/a": 1.0}])
-    shadow = _StubAggregator({"time_mean/rmse/a": 5.0}, [{"time_mean/rmse/a": 5.0}])
-    agg = InferenceEvaluatorAggregatorWithUncorrected(main, shadow)
+def test_config_build_wires_uncorrected_metrics():
+    # The config.build path (used by both the standalone evaluator and the
+    # training inline-inference loop) wires uncorrected time-mean aggregators iff
+    # compute_uncorrected_metrics is set.
+    ds_info = get_ds_info(4, 4)
+    initial_time = xr.DataArray(np.zeros((2,)), dims=["sample"])
 
-    logs = agg.record_batch(_paired_with_uncorrected(None))
-    assert logs[0]["time_mean/rmse/a"] == 1.0
-    assert "uncorrected/time_mean/rmse/a" not in logs[0]
-    assert len(shadow.recorded_batches) == 0
+    def build(compute_uncorrected: bool):
+        return InferenceEvaluatorAggregatorConfig(
+            compute_uncorrected_metrics=compute_uncorrected
+        ).build(
+            dataset_info=ds_info,
+            n_ic_steps=1,
+            n_forward_steps=2,
+            initial_time=initial_time,
+            normalize=lambda x: dict(x),
+            save_diagnostics=False,
+        )
 
-    # With nothing recorded, the shadow is neither summarized nor flushed, so a
-    # shadow aggregator that would error on empty data is never touched.
-    summary = agg.get_summary_logs()
-    assert "uncorrected/time_mean/rmse/a" not in summary
-    agg.flush_diagnostics(None)
-    assert main.flushed_subdirs == [None]
-    assert shadow.flushed_subdirs == []
+    paired = _paired(prediction=2.0, target=1.0, uncorrected=4.0)
+
+    agg_on = build(compute_uncorrected=True)
+    agg_on.record_batch(paired)
+    assert "uncorrected/time_mean_norm/rmse/a" in agg_on.get_summary_logs()
+
+    agg_off = build(compute_uncorrected=False)
+    agg_off.record_batch(paired)
+    assert not any(k.startswith("uncorrected/") for k in agg_off.get_summary_logs())

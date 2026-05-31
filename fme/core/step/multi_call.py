@@ -300,7 +300,7 @@ class MultiCallStep(StepABC):
         output = wrapped.output
         if self._multi_call is not None:
             # Multi-call produces only diagnostic outputs (not corrected), so the
-            # shadow comes entirely from the wrapped step.
+            # uncorrected prediction comes entirely from the wrapped step.
             multi_called_outputs = self._multi_call.step(args=args, wrapper=wrapper)
             output = {**multi_called_outputs, **output}
         return StepOutput(output=output, uncorrected=wrapped.uncorrected)
