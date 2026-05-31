@@ -84,7 +84,7 @@ class AceDiffusionTeacher(FastGenNetwork):
         # weighting.  A global scalar (not noise-level-dependent) is sufficient
         # for the EDM teacher.  FastGen loads with strict=False so this new
         # parameter initialises fresh without disturbing teacher weights.
-        self.logvar_scalar = torch.nn.Parameter(torch.zeros(1))
+        self.logvar_scalar = torch.nn.Parameter(torch.full((1,), -9.0))
 
     def freeze(self) -> None:
         """Freeze teacher weights (call this for f-distill / sCM / DMD2).
