@@ -89,5 +89,6 @@ cd "${REPO_ROOT}" && gantry run \
     --shared-memory 40GiB \
     --weka climate-default:/climate-default \
     --budget ai2/atec-climate \
+    --system-python \
     --install "pip install --no-deps ." \
     -- bash -c "set -e && mkdir -p ${WEKA_DEST} && python scripts/cmip6_data/zarr_to_netcdf.py ${GCS_SOURCE} ${WEKA_DEST} --workers ${WORKERS} --years-per-file ${YEARS_PER_FILE}"
