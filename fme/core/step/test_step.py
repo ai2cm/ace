@@ -515,7 +515,7 @@ def get_step(
     return selector.get_step(dataset_info, init_weights)
 
 
-def test_step_returns_uncorrected_shadow_of_corrected_variables():
+def test_step_returns_uncorrected_values_of_corrected_variables():
     """The step exposes pre-correction values for corrector-modified variables."""
     selector = get_single_module_with_atmosphere_corrector_selector()
     step = get_step(selector, DEFAULT_IMG_SHAPE)
@@ -532,13 +532,13 @@ def test_step_returns_uncorrected_shadow_of_corrected_variables():
         ),
     )
     # The corrector modifies surface pressure (conserve_dry_air) and precipitation
-    # (force_positive), among others. The shadow holds only modified variables.
+    # (force_positive), among others. uncorrected holds only modified variables.
     assert set(out.uncorrected).issubset(set(out.output))
     assert "PRESsfc" in out.uncorrected
     assert "PRATEsfc" in out.uncorrected
     # conserve_dry_air changes surface pressure, so corrected != uncorrected.
     assert not torch.allclose(out.output["PRESsfc"], out.uncorrected["PRESsfc"])
-    # The shadow is detached from the autograd graph (unused on the train path).
+    # uncorrected is detached from the autograd graph (unused on the train path).
     for tensor in out.uncorrected.values():
         assert not tensor.requires_grad
 

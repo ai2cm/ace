@@ -1,6 +1,5 @@
 import dataclasses
 import datetime
-import functools
 import logging
 import os
 from collections.abc import Callable, Mapping, Sequence
@@ -18,7 +17,6 @@ from fme.ace.aggregator import (
 )
 from fme.ace.aggregator.inference import (
     InferenceEvaluatorAggregatorConfig,
-    InferenceEvaluatorAggregatorWithUncorrected,
     LegacyFlagInferenceEvaluatorAggregatorConfig,
 )
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
@@ -450,28 +448,13 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             coords=data.coords,
         )
 
+        # Uncorrected (pre-correction) metrics, when enabled, are computed by the
+        # aggregator itself from PairedData.uncorrected_prediction, which
+        # predict_paired always populates. No entrypoint-level branching needed.
         aggregator: InferenceAggregatorABC[PairedData | PrognosticState, PairedData] = (
             built_aggregator
         )
         predict = stepper.predict_paired
-        if (
-            isinstance(aggregator_config, InferenceEvaluatorAggregatorConfig)
-            and aggregator_config.compute_uncorrected_metrics
-        ):
-            uncorrected_aggregator = aggregator_config.reduced_for_uncorrected().build(
-                dataset_info=dataset_info,
-                n_ic_steps=stepper_config.n_ic_timesteps,
-                n_forward_steps=config.n_forward_steps,
-                initial_time=initial_time,
-                channel_mean_names=stepper.loss_names,
-                normalize=stepper.normalizer.normalize,
-                output_dir=config.experiment_dir,
-                n_ensemble_per_ic=config.n_ensemble_per_ic,
-            )
-            aggregator = InferenceEvaluatorAggregatorWithUncorrected(
-                built_aggregator, uncorrected_aggregator
-            )
-            predict = functools.partial(stepper.predict_paired, return_uncorrected=True)
 
     logging.info("Starting inference")
     logger = get_record_to_wandb(label="inference")

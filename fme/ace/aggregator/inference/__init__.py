@@ -10,7 +10,6 @@ from .main import (
     InferenceAggregatorConfig,
     InferenceEvaluatorAggregator,
     InferenceEvaluatorAggregatorConfig,
-    InferenceEvaluatorAggregatorWithUncorrected,
     LegacyFlagInferenceEvaluatorAggregatorConfig,
     MetricConfig,
     StepMeanEntry,

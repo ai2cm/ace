@@ -1194,12 +1194,12 @@ class Stepper:
             return_uncorrected: If True, additionally return a BatchData containing the
                 pre-correction ("uncorrected") values of corrector-modified variables,
                 inserted as the second element of the returned tuple. Derived variables
-                are not computed for this shadow.
+                are not computed for the uncorrected prediction.
 
         Returns:
             A batch data containing the prediction and the prediction's final state
             which can be used as a new initial condition. If ``return_uncorrected`` is
-            True, the uncorrected shadow BatchData is inserted between the two.
+            True, the uncorrected BatchData is inserted between the two.
         """
         timer = GlobalTimer.get_instance()
         forcing_names = set(self._input_only_names).union(
@@ -1257,9 +1257,9 @@ class Stepper:
             n_ensemble=data.n_ensemble,
         )
         if return_uncorrected:
-            # The shadow holds only corrector-modified variables in their
-            # pre-correction form; it shares the corrected prediction's time
-            # coordinate and is intentionally given no derived variables.
+            # The uncorrected prediction holds only corrector-modified variables
+            # in their pre-correction form; it shares the corrected prediction's
+            # time coordinate and is intentionally given no derived variables.
             uncorrected_data = process_prediction_generator_list(
                 [step_output.uncorrected for step_output in output_list],
                 time=forcing_data.time[:, self.n_ic_timesteps :],
@@ -1275,7 +1275,6 @@ class Stepper:
         initial_condition: PrognosticState,
         forcing: BatchData,
         compute_derived_variables: bool = False,
-        return_uncorrected: bool = False,
     ) -> tuple[PairedData, PrognosticState]:
         """
         Predict multiple steps forward given initial condition and reference data.
@@ -1290,37 +1289,27 @@ class Stepper:
                 subsequent timesteps.
             compute_derived_variables: Whether to compute derived variables for the
                 prediction.
-            return_uncorrected: If True, the returned PairedData carries the
-                pre-correction ("uncorrected") values of corrector-modified variables
-                in its ``uncorrected_prediction`` field, paired against the same
-                reference data.
 
         Returns:
             A tuple of 1) a paired data object, containing the prediction paired with
             all target/forcing data at the same timesteps, and 2) the prediction's
-            final state, which can be used as a new initial condition.
+            final state, which can be used as a new initial condition. The paired data
+            also carries the pre-correction ("uncorrected") values of corrector-modified
+            variables in its ``uncorrected_prediction`` field (empty when the stepper
+            has no corrector), paired against the same reference data.
         """
         forcing = self.forcing_deriver(forcing)
         if forcing.n_ensemble == 1 and initial_condition.as_batch_data().n_ensemble > 1:
             forcing = forcing.broadcast_ensemble(
                 n_ensemble=initial_condition.as_batch_data().n_ensemble
             )
-        uncorrected_prediction: BatchData | None = None
-        if return_uncorrected:
-            prediction, uncorrected_prediction, new_initial_condition = self.predict(
-                initial_condition,
-                forcing,
-                compute_derived_variables,
-                compute_derived_forcings=False,
-                return_uncorrected=True,
-            )
-        else:
-            prediction, new_initial_condition = self.predict(
-                initial_condition,
-                forcing,
-                compute_derived_variables,
-                compute_derived_forcings=False,
-            )
+        prediction, uncorrected_prediction, new_initial_condition = self.predict(
+            initial_condition,
+            forcing,
+            compute_derived_variables,
+            compute_derived_forcings=False,
+            return_uncorrected=True,
+        )
         forward_data = self.get_forward_data(
             forcing, compute_derived_variables=compute_derived_variables
         )

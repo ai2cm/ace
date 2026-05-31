@@ -1083,7 +1083,7 @@ class CoupledStepper:
             for i_inner in range(self.n_inner_steps):
                 atmos_step_num = i_outer * self.n_inner_steps + i_inner
                 # The coupled stepper feeds corrected outputs forward; the
-                # uncorrected shadow is not used here.
+                # uncorrected prediction is not used here.
                 atmos_step = next(atmos_generator).output
                 yield ComponentStepPrediction(
                     realm="atmosphere",

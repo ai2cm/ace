@@ -24,7 +24,7 @@ class StepOutput:
             adjustments (corrector, ocean, prescribed prognostics) are applied.
         uncorrected: The pre-correction values of exactly the variables the
             corrector modified. Empty if no corrector ran or none were modified.
-            This is a sparse "shadow" of ``output`` used to evaluate how much the
+            This is a sparse subset of ``output`` used to evaluate how much the
             stepper relies on the corrector. Note ocean and prescribed-prognostic
             adjustments run after the corrector and are not reflected here.
     """
