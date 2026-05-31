@@ -8,7 +8,12 @@
 
 gcs_source: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2
 weka_destination: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2
-workers: 16
+# Per-decade-load peak RSS is ~2-3 GB per worker; phobos default pod
+# memory leaves room for ~8 concurrent workers without OOM headroom
+# concerns. The original 16-worker run wedged the process pool when
+# every worker tried to materialise its full zarr at once (the pre-
+# decade-load version of convert_one did a full ds.load()).
+workers: 8
 # 10-year files (``data.YYYY-YYYY.nc``) trade a 10× reduction in
 # file count for slightly bigger per-file sizes (~5 GB at this
 # variable count). Intra-file chunking is unchanged (1 day per

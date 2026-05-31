@@ -44,8 +44,10 @@ def convert_one(zarr_path: str, nc_dir: str, years_per_file: int) -> str:
     is unaffected).
     """
     os.makedirs(nc_dir, exist_ok=True)
+    # Open lazy — DO NOT call ``ds.load()`` here. A full 86-year ssp
+    # zarr is ~17 GB resident; with multiple workers it OOM-kills the
+    # process pool. We materialise per output file instead.
     ds = xr.open_zarr(zarr_path)
-    ds.load()
     encoding = {
         name: {"chunksizes": (1,) + ds[name].shape[1:]}
         for name in ds.data_vars
@@ -53,7 +55,8 @@ def convert_one(zarr_path: str, nc_dir: str, years_per_file: int) -> str:
     }
     # Group by the floor-divided decade-or-N-year bin. ``groupby`` on an
     # xarray-derived integer label keeps each group's time slice contiguous
-    # so the resulting netCDF retains time-monotonicity.
+    # so the resulting netCDF retains time-monotonicity. Per-group load +
+    # write keeps peak RSS at one decade's worth (~2 GB per dataset).
     bin_label = (ds["time.year"] // years_per_file) * years_per_file
     for _, group_ds in ds.groupby(bin_label.rename("year_bin")):
         years = group_ds["time.year"].values
@@ -61,7 +64,9 @@ def convert_one(zarr_path: str, nc_dir: str, years_per_file: int) -> str:
         nc_path = os.path.join(nc_dir, f"data.{first_year}-{last_year}.nc")
         if os.path.exists(nc_path):
             continue
+        group_ds.load()
         group_ds.to_netcdf(nc_path, encoding=encoding)
+        group_ds.close()
     ds.close()
     return f"ok: {nc_dir}"
 
@@ -135,6 +140,7 @@ def main():
         args.years_per_file,
     )
     done = 0
+    n_failed = 0
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
         futures = {
             pool.submit(convert_one, zp, nd, args.years_per_file): zp
@@ -146,9 +152,21 @@ def main():
                 msg = future.result()
             except Exception as e:
                 msg = f"FAILED: {futures[future]}: {e}"
+                n_failed += 1
             logger.info("[%d/%d] %s", done, len(tasks), msg)
 
-    logger.info("Done. Output at %s", output_dir)
+    logger.info(
+        "Done. Output at %s. %d/%d datasets failed.",
+        output_dir,
+        n_failed,
+        len(tasks),
+    )
+    # Exit non-zero so Beaker / CI marks the job failed if any
+    # dataset's conversion didn't land. The legacy behaviour returned
+    # 0 unconditionally, which silently masked a 243/243-failed run
+    # earlier in this session.
+    if n_failed:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
