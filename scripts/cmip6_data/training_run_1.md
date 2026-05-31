@@ -99,6 +99,83 @@ from each family in training:
 | Hadley / ACCESS | ACCESS-CM2, ACCESS-ESM1-5, HadGEM3-GC31-LL, UKESM1-0-LL |
 | CESM-derived | CESM2, CESM2-WACCM, CMCC-CM2-SR5, CMCC-ESM2, CanESM5, NorESM2-LM, NorESM2-MM, TaiESM1 |
 
+## Warming response (ssp585 − historical)
+
+Cohort warming response, computed as area-weighted (ssp585
+time_mean_map − historical time_mean_map) per (source, variable),
+exposes a clear **climate-sensitivity axis** that aligns with known
+CMIP6 ECS rankings:
+
+| Sensitivity tier | Sources | TMP2m Δ (K) |
+| --- | --- | --- |
+| High (z > +1) | CanESM5, UKESM1-0-LL, HadGEM3-GC31-LL | +3.8, +3.7, +3.5 |
+| Median cohort | most models | +2.5 to +3.0 |
+| Low (z < −1) | MIROC6 (z=−2.89), IITM-ESM, MPI-ESM1-2-LR | +0.74, +1.76, +1.89 |
+
+The Hadley family (HadGEM3 ↔ UKESM1 ↔ ACCESS) consistently leads
+warming response on `TMP2m`, `amon_ts`, `PRATEsfc`, `h500`, `Q2m`;
+MIROC6 / IITM-ESM consistently lag. CanESM5 is at the top with
+ECS ≈ 5.6 K — among the highest in CMIP6.
+
+Cross-variable warming-response outliers (|z|>2.5 on ≥1 variable):
+
+- **MIROC6 (8 vars)**: consistently *low* — known low-sensitivity.
+- **EC-Earth3 (8)**: stratospheric heights *decrease* with warming
+  (zg10 Δ=−290 m vs cohort −30) — unusual response shape.
+- **CanESM5 (5)**: high Q2m / hus250, very negative psl response.
+- **BCC-CSM2-MR (5)**: all `ua` levels — **suspect** (same model
+  has unphysical 88,800 m/s wind values that the 1e10 sanity clip
+  missed; investigation queued).
+- **UKESM1-0-LL (3)**: high stratospheric hus + ua10 response.
+
+Implications for the holdout design:
+
+- **(C) ERA5-analog on CanESM5** picks a high-sensitivity *outlier*.
+  Deliberately hard test, but means failure could be either
+  sample-size or unusual physics. Note: if (C) results look bad,
+  re-run with a cohort-typical source (CMCC-ESM2 or MRI-ESM2-0)
+  to disentangle.
+- **(B) ssp585 holdout** (CanESM5, MPI-ESM1-2-LR, UKESM1-0-LL)
+  happens to span the sensitivity range cleanly (high / low / high).
+  Good as-is.
+- **MIROC6 and EC-Earth3 ssp585 rollouts** are particularly
+  informative as inline-inference targets even though they're in
+  training — if the emulator reproduces their unusual sensitivity
+  patterns from forcing alone, that's evidence the embedding has
+  learned ECS-axis structure.
+
+## Variability outliers
+
+Per-source `std` and `d1_std` scans across all variables surface
+several models with anomalously wide variability:
+
+- **BCC-CSM2-MR**: 19 variables at |z|>2 on std, 25 on d1_std.
+  Caused by remaining unphysical wind values up to 88,800 m/s
+  that the 1e10 clip missed. **Treat with caution until the
+  follow-up investigation completes.**
+- **ACCESS-ESM1-5**: massively elevated stratospheric `hus` std
+  (z≈+4.6 on hus10/50/100). Real model behaviour or another
+  publisher quirk — flag for inspection during training, may
+  warrant per-model normalization for stratospheric humidity.
+- **EC-Earth3**: elevated stratospheric `zg` variability (z=+3.2
+  to +3.6 on zg10/50/100). Consistent with EC-Earth's known
+  strong stratospheric dynamics; real, not pathological.
+- **GFDL-CM4**: very strong `omon_hfds` variability (z=+4.3) —
+  noisy ocean heat-flux field.
+- **MIROC-ES2L, IITM-ESM**: *suppressed* variability (e.g. psl std
+  ~25% below cohort, stratospheric zg std ~20% below). Real model
+  behaviour but means these are easy "in-sample" cases — they
+  contribute little signal to the loss.
+
+Practical impact for training:
+
+- High-std models dominate shared-normalization loss; the
+  stratospheric `hus` problem (training.md issue #11) is
+  ACCESS-ESM1-5 and BCC-CSM2-MR amplifying that effect.
+- Low-std models (MIROC-ES2L, IITM-ESM) contribute little to the
+  loss signal under shared normalization — per-source normalization
+  matters most for them.
+
 ## Held-out cohorts (main training run)
 
 After holdouts, training set ≈ 175–185 datasets across ~30 source
