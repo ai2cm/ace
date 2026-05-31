@@ -53,3 +53,5 @@ ace-samudra-coupled-cm4-8ez70kzy-decoupled_samudra|||run_140yr|best_inference_ck
 1pct_nosmooth_0256to0350-ft_correctOHC|rs0|01KSY33FGG7X2S328H75R297EJ|training|best_inference_ckpt|normal|--min-runtime 8h
 
 1pct_nosmooth_0256to0350-ft_correctOHC|rs0|01KSY5453QDCS8YXQV51DVB25F|training|best_inference_ckpt|normal|--min-runtime 8h
+
+1pct_nosmooth_0256to0350-ft_correctOHC|rs0|01KSZQKHJYBBK0R7EBHPM16P80|training|best_inference_ckpt|normal|--min-runtime 8h
