@@ -13,9 +13,10 @@
 #   ./zarr_to_netcdf_beaker.sh --config configs/zarr-to-netcdf-pilot.yaml
 #
 # Config (YAML):
-#   gcs_source:        gs://bucket/<project>/<version>     # required
-#   weka_destination:  /climate-default/<project>/<version>  # required
-#   workers:           8                                     # optional, default 4
+#   gcs_source:        gs://bucket/<project>/<version>      # required
+#   weka_destination:  /climate-default/<project>/<version> # required
+#   workers:           8                                    # optional, default 4
+#   years_per_file:    10                                   # optional, default 10
 #
 # Prerequisites:
 #   - gantry on PATH
@@ -41,6 +42,10 @@ fi
 GCS_SOURCE=$(yq -r '.gcs_source' "${CONFIG}")
 WEKA_DEST=$(yq -r '.weka_destination' "${CONFIG}")
 WORKERS=$(yq -r '.workers // 4' "${CONFIG}")
+# Number of consecutive calendar years per output netCDF (default 10).
+# Inner per-day chunking is unaffected. Use 1 for legacy yearly files
+# or 20 for half-century files.
+YEARS_PER_FILE=$(yq -r '.years_per_file // 10' "${CONFIG}")
 
 if [[ -z "${GCS_SOURCE}" || "${GCS_SOURCE}" == "null" ]]; then
     echo "Config ${CONFIG} missing required key 'gcs_source'"
@@ -85,4 +90,4 @@ cd "${REPO_ROOT}" && gantry run \
     --weka climate-default:/climate-default \
     --budget ai2/atec-climate \
     --install "pip install --no-deps ." \
-    -- bash -c "set -e && mkdir -p ${WEKA_DEST} && python scripts/cmip6_data/zarr_to_netcdf.py ${GCS_SOURCE} ${WEKA_DEST} --workers ${WORKERS}"
+    -- bash -c "set -e && mkdir -p ${WEKA_DEST} && python scripts/cmip6_data/zarr_to_netcdf.py ${GCS_SOURCE} ${WEKA_DEST} --workers ${WORKERS} --years-per-file ${YEARS_PER_FILE}"

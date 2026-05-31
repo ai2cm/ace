@@ -32,8 +32,17 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 
-def convert_one(zarr_path: str, nc_dir: str) -> str:
-    """Convert a single zarr store to yearly netCDF files with 1-day chunks."""
+def convert_one(zarr_path: str, nc_dir: str, years_per_file: int) -> str:
+    """Convert a single zarr store to multi-year netCDF files with 1-day chunks.
+
+    Files are grouped in spans of ``years_per_file`` consecutive years,
+    named ``data.{first}-{last}.nc`` (e.g. ``data.1940-1949.nc`` for
+    ``years_per_file=10``). The intra-file chunking stays at 1 day per
+    chunk so per-day random access remains fast — only file granularity
+    changes. ``years_per_file=1`` recovers the legacy per-year layout
+    with names ``data.{year}-{year}.nc`` (consumer-side glob ``data.*.nc``
+    is unaffected).
+    """
     os.makedirs(nc_dir, exist_ok=True)
     ds = xr.open_zarr(zarr_path)
     ds.load()
@@ -42,11 +51,17 @@ def convert_one(zarr_path: str, nc_dir: str) -> str:
         for name in ds.data_vars
         if "time" in ds[name].dims
     }
-    for year, yearly_ds in ds.groupby("time.year"):
-        nc_path = os.path.join(nc_dir, f"data.{year}.nc")
+    # Group by the floor-divided decade-or-N-year bin. ``groupby`` on an
+    # xarray-derived integer label keeps each group's time slice contiguous
+    # so the resulting netCDF retains time-monotonicity.
+    bin_label = (ds["time.year"] // years_per_file) * years_per_file
+    for _, group_ds in ds.groupby(bin_label.rename("year_bin")):
+        years = group_ds["time.year"].values
+        first_year, last_year = int(years.min()), int(years.max())
+        nc_path = os.path.join(nc_dir, f"data.{first_year}-{last_year}.nc")
         if os.path.exists(nc_path):
             continue
-        yearly_ds.to_netcdf(nc_path, encoding=encoding)
+        group_ds.to_netcdf(nc_path, encoding=encoding)
     ds.close()
     return f"ok: {nc_dir}"
 
@@ -60,7 +75,21 @@ def main():
     parser.add_argument(
         "--workers", type=int, default=4, help="Parallel conversion workers"
     )
+    parser.add_argument(
+        "--years-per-file",
+        type=int,
+        default=10,
+        help=(
+            "Number of consecutive calendar years per output netCDF file "
+            "(default 10 = decade files like ``data.1940-1949.nc``). "
+            "Intra-file chunking stays at 1 day regardless. Use 1 to "
+            "recover the legacy per-year layout, or 20 for half-century "
+            "files."
+        ),
+    )
     args = parser.parse_args()
+    if args.years_per_file < 1:
+        parser.error("--years-per-file must be >= 1")
 
     input_dir = args.input_dir.rstrip("/")
     output_dir = args.output_dir.rstrip("/")
@@ -99,10 +128,18 @@ def main():
             continue
         tasks.append((zarr_path, nc_dir))
 
-    logger.info("Converting %d datasets with %d workers", len(tasks), args.workers)
+    logger.info(
+        "Converting %d datasets with %d workers, %d years per file",
+        len(tasks),
+        args.workers,
+        args.years_per_file,
+    )
     done = 0
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
-        futures = {pool.submit(convert_one, zp, nd): zp for zp, nd in tasks}
+        futures = {
+            pool.submit(convert_one, zp, nd, args.years_per_file): zp
+            for zp, nd in tasks
+        }
         for future in as_completed(futures):
             done += 1
             try:
