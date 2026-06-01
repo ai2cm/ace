@@ -8,7 +8,11 @@ import pandas as pd
 import pytest
 import xarray as xr
 from config import ESGFProcessConfig
-from process_esgf import _open_netcdf_files, select_esgf_datasets
+from process_esgf import (
+    _open_netcdf_files,
+    _select_day_augmentables,
+    select_esgf_datasets,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -261,7 +265,7 @@ def test_select_detects_surface_and_ocean_and_statics():
     t = tasks[0]
     assert "amon_ts" in t.available_surface_and_ocean_variables
     assert "simon_sea_ice_fraction" in t.available_surface_and_ocean_variables
-    assert "eday_ts" in t.available_surface_and_ocean_variables
+    assert "surface_temperature" in t.available_surface_and_ocean_variables
     assert "oday_tos" in t.available_surface_and_ocean_variables
     assert t.has_orog is True
     assert t.has_sftlf is True
@@ -389,6 +393,73 @@ def test_select_includes_optional_vars_in_available():
     tasks = select_esgf_datasets(inv, cfg)
     assert "sfcWind" in tasks[0].available_day_variables
     assert "hfls" in tasks[0].available_day_variables
+
+
+# ---------------------------------------------------------------------------
+# _select_day_augmentables — pure-function filter for the day-cadence
+# augmenter (downloads + writes are integration-only and not exercised
+# here; this just locks the filter logic).
+# ---------------------------------------------------------------------------
+
+
+def test_day_augmentables_picks_published_and_missing_from_existing():
+    """Variables are augmentable iff published per
+    ``available_day_variables`` AND their renamed output name is
+    missing from the existing zarr."""
+    # ``rsdt`` (CFday) renames to ``DSWRFtoa``; ``rsds`` (day)
+    # renames to ``DSWRFsfc``; ``wap500`` keeps its name.
+    out = _select_day_augmentables(
+        optional_variables=["rsdt", "rsds", "wap500"],
+        available_day_variables=["rsdt", "rsds", "wap500", "tas"],
+        existing_vars={"DSWRFsfc"},  # rsds already in
+    )
+    assert out == ["rsdt", "wap500"]  # rsds excluded, others kept
+
+
+def test_day_augmentables_skips_unpublished_vars():
+    """A variable not in ``available_day_variables`` is not
+    augmentable even if absent from the existing zarr — the source
+    model doesn't publish it."""
+    out = _select_day_augmentables(
+        optional_variables=["rsdt", "rsds", "wap500"],
+        available_day_variables=["rsds"],  # only rsds is published
+        existing_vars=set(),
+    )
+    assert out == ["rsds"]
+
+
+def test_day_augmentables_respects_rename_map_for_existing_check():
+    """The existing-zarr filter checks the RENAMED output name, not
+    the CMIP6 source name. ``rsdt`` written to the zarr as
+    ``DSWRFtoa`` should still block its own re-augmentation."""
+    out = _select_day_augmentables(
+        optional_variables=["rsdt", "rsut"],
+        available_day_variables=["rsdt", "rsut"],
+        existing_vars={"DSWRFtoa"},  # rsdt's output name
+    )
+    assert out == ["rsut"]
+
+
+def test_day_augmentables_no_rename_variable():
+    """Variables without an entry in ``CMIP_TO_OUTPUT_RENAMES``
+    (e.g. ``wap500``, ``clivi``, ``clwvi``) keep their CMIP6 name
+    as the output name; the existing-zarr filter uses that name
+    directly."""
+    out = _select_day_augmentables(
+        optional_variables=["wap500", "clivi", "clwvi"],
+        available_day_variables=["wap500", "clivi", "clwvi"],
+        existing_vars={"clivi"},
+    )
+    assert out == ["wap500", "clwvi"]
+
+
+def test_day_augmentables_returns_empty_when_nothing_to_do():
+    out = _select_day_augmentables(
+        optional_variables=["rsdt", "rsut"],
+        available_day_variables=["rsdt", "rsut"],
+        existing_vars={"DSWRFtoa", "USWRFtoa"},  # both already present
+    )
+    assert out == []
 
 
 if __name__ == "__main__":

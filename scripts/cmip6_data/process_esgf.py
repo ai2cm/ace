@@ -837,6 +837,142 @@ def process_one_esgf(
     return row
 
 
+def _select_day_augmentables(
+    optional_variables: list[str],
+    available_day_variables: list[str],
+    existing_vars: set[str],
+) -> list[str]:
+    """Return CMIP6 names of optional day-cadence variables to augment.
+
+    Filtering rules:
+    - The variable must be published for this (source, experiment,
+      member) per ``available_day_variables`` (which already merges
+      day-table + CFday-table entries).
+    - The variable's renamed output name (via
+      ``CMIP_TO_OUTPUT_RENAMES``) must not already be in
+      ``existing_vars`` — augmenting an existing variable would
+      conflict with the prior write.
+
+    The actual download / regrid / write happens in
+    :func:`_augment_day_variables` — this is the pure-function bit so
+    we can unit-test the filtering without touching the network.
+
+    Parameters:
+        optional_variables: Configured optional day-cadence variables
+            to consider (typically ``cfg.optional_variables``).
+        available_day_variables: CMIP6 variable names the model
+            actually publishes on either ``day`` or ``CFday`` for
+            this (source, experiment, member). Comes from
+            ``ESGFDatasetTask.available_day_variables``.
+        existing_vars: Output names already present in the existing
+            zarr (from ``DatasetIndexRow.variables_present``).
+
+    Returns:
+        CMIP6 names to download + augment, in deterministic order.
+    """
+    augmentable: list[str] = []
+    available = set(available_day_variables)
+    for var in optional_variables:
+        if var not in available:
+            continue
+        out_name = CMIP_TO_OUTPUT_RENAMES.get(var, var)
+        if out_name in existing_vars:
+            continue
+        augmentable.append(var)
+    return augmentable
+
+
+def _augment_day_variables(
+    task: ESGFDatasetTask,
+    config: ESGFProcessConfig,
+    cfg,
+    zarr_path: str,
+    target_grid: xr.Dataset,
+    existing_vars: set[str],
+    existing_row: DatasetIndexRow,
+    scratch: Path,
+) -> list[str]:
+    """Augment the existing zarr with missing day-cadence variables.
+
+    Counterpart to the surface-and-ocean augment loop, focused on
+    optional day / CFday day-cadence variables that Pangeo's CMIP6
+    mirror misses for most models (clear-sky + TOA radiation,
+    wap500, clivi, clwvi, ta700, surface pressure). ESGF carries
+    these for 200-350 (source, experiment, member) tuples; Pangeo
+    publishes only 1-3 each, so the augment recovers near-cohort
+    coverage.
+
+    Each augmentable variable goes through the same pipeline as the
+    fresh-process path (download → regrid → rename → harmonize →
+    write); only surface-and-ocean masking / monthly_causal mapping
+    is skipped (these are real daily atmospheric variables).
+
+    Returns the list of output names successfully added.
+    """
+    augmentable = _select_day_augmentables(
+        cfg.optional_variables, task.available_day_variables, existing_vars
+    )
+    if not augmentable:
+        return []
+
+    logging.info(
+        "  augmenting with %d day-cadence variables: %s",
+        len(augmentable),
+        ", ".join(augmentable),
+    )
+
+    added: list[str] = []
+    for var in augmentable:
+        try:
+            source_table = cmip6_source_table(var)
+            out_name = CMIP_TO_OUTPUT_RENAMES.get(var, var)
+            logging.info(
+                "  [%s] augment day %s/%s -> %s ...",
+                task.source_id,
+                source_table,
+                var,
+                out_name,
+            )
+            result, methods = _download_and_regrid_variable(
+                task, var, source_table, target_grid, config, scratch
+            )
+            existing_row.regrid_methods.update(
+                {out_name if k == var else k: v for k, v in methods.items()}
+            )
+            if result is None:
+                continue
+            # Rename to the output convention BEFORE harmonize so the
+            # warning messages reference the canonical output name.
+            renamed = apply_output_renames(result, CMIP_TO_OUTPUT_RENAMES)
+            harmonized: dict[str, xr.DataArray] = {}
+            for name, da in renamed.data_vars.items():
+                converted, msg = harmonize_temperature_to_kelvin(da, var_id=name)
+                if msg:
+                    logging.info("  augment harmonize: %s", msg)
+                    existing_row.warnings.append(msg)
+                harmonized[name] = converted
+            new_ds = xr.Dataset(harmonized)
+            new_ds.to_zarr(
+                zarr_path,
+                mode="a",
+                consolidated=False,
+                zarr_format=3,
+                align_chunks=True,
+            )
+            added.extend(new_ds.data_vars.keys())
+        except Exception as e:  # noqa: BLE001
+            logging.warning(
+                "  augment day %s failed: %s: %s — skipping this variable",
+                var,
+                type(e).__name__,
+                e,
+            )
+            existing_row.warnings.append(
+                f"augment day {var} failed: {type(e).__name__}: {e}"
+            )
+    return added
+
+
 def augment_one_esgf(
     task: ESGFDatasetTask,
     config: ESGFProcessConfig,
@@ -857,11 +993,16 @@ def augment_one_esgf(
       can tell what came from where.
     - Regenerate ``stats.nc`` so the new variables are covered.
 
-    Limitations (v1):
-    - Only surface-and-ocean variables. 3D plev day variables (ua, va,
-      hus, zg) are skipped because they require running the flatten
-      step against the existing zarr's plev convention — left for a
-      follow-up.
+    Day-cadence augment (CFday + day): a second pass picks up
+    optional day-table + CFday-table variables Pangeo missed (clear-
+    sky + TOA radiation, wap500, clivi, clwvi, ta700, surface
+    pressure). Same download → regrid → rename → harmonize → write
+    flow as the surface-and-ocean loop, without the mask/fill step.
+
+    Limitations (v2):
+    - 3D plev day variables (ua, va, hus, zg) are still skipped —
+      augmenting them requires running the flatten step against the
+      existing zarr's plev convention.
     - Statics (HGTsfc, land_fraction) are not augmented; the ESGF
       pipeline would need to re-derive ocean fractions which is too
       entangled with the day-data path to bolt on cleanly here.
@@ -885,7 +1026,10 @@ def augment_one_esgf(
             continue
         augmentable.append(h)
 
-    if not augmentable:
+    day_augmentable = _select_day_augmentables(
+        cfg.optional_variables, task.available_day_variables, existing_vars
+    )
+    if not augmentable and not day_augmentable:
         logging.info("  no ESGF augmentation available; leaving Pangeo zarr as-is")
         return existing_row
 
@@ -978,6 +1122,53 @@ def augment_one_esgf(
                     f"augment {h.output_name} failed: {type(e).__name__}: {e}"
                 )
         existing_ds.close()
+
+        # Day-cadence augment (CFday + day). Runs after the
+        # surface-and-ocean loop so existing_vars reflects any
+        # surface-and-ocean adds — though in practice the two
+        # variable sets don't intersect, this ordering keeps the
+        # filter logic clean.
+        day_added = _augment_day_variables(
+            task,
+            config,
+            cfg,
+            zarr_path,
+            target,
+            existing_vars | set(added_names),
+            existing_row,
+            scratch,
+        )
+        added_names.extend(day_added)
+
+        # Derived total_water_path mirrors the fresh-process path's
+        # step 9_pre — if clwvi just got augmented in and the prior
+        # ingest already had water_vapor_path, emit the sum.
+        if day_added and "clwvi" in day_added and "water_vapor_path" in existing_vars:
+            try:
+                reopened = xr.open_zarr(zarr_path, consolidated=False)
+                twp = compute_total_water_path(
+                    reopened["water_vapor_path"], reopened["clwvi"]
+                )
+                twp_ds = xr.Dataset({"total_water_path": twp})
+                twp_ds.to_zarr(
+                    zarr_path,
+                    mode="a",
+                    consolidated=False,
+                    zarr_format=3,
+                    align_chunks=True,
+                )
+                reopened.close()
+                added_names.append("total_water_path")
+                logging.info("  derived total_water_path from water_vapor_path + clwvi")
+            except Exception as e:  # noqa: BLE001
+                logging.warning(
+                    "  derive total_water_path failed: %s: %s — skipping",
+                    type(e).__name__,
+                    e,
+                )
+                existing_row.warnings.append(
+                    f"derive total_water_path failed: {type(e).__name__}: {e}"
+                )
     finally:
         sampler.stop()
         cleanup_scratch_dir(scratch)
