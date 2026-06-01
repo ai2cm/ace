@@ -203,10 +203,20 @@ sources spanning 5 families:
 - `CNRM-CM6-1/ssp585/r2i1p1f2` (same source, ssp585 sibling)
 - `CNRM-ESM2-1/historical/r2i1p1f2` (CNRM family)
 - `MRI-ESM2-0/historical/r2i1p1f1` (GFDL/MRI family)
-- `EC-Earth3-Veg-LR/historical/r2i1p1f1` (EC-Earth family)
+- `EC-Earth3/ssp585/r2i1p1f1` (EC-Earth family, doubles as the
+  unusual-response-shape probe — see (A) inline inference below)
 - `IPSL-CM6A-LR/historical/r2i1p1f1` (IPSL/MIROC family)
 
 = **6 datasets** across 5 sources, 5 families.
+
+EC-Earth3 itself sits in (A) rather than EC-Earth3-Veg-LR so that the
+held-out variant rollout doubles as the test of whether the embedding
+captured EC-Earth3's unusual stratospheric warming-response shape
+(`zg10` Δ=−290 m vs cohort −30; see "Warming response" above). The
+model has seen EC-Earth3/historical + ssp245 + 2 other ssp585
+variants in training, so this asks whether the embedding *represents*
+that shape in a transferable way — stronger test than an in-sample
+rollout.
 
 ### B. Held-out (model, ssp585) — future-scenario extrapolation
 
@@ -283,7 +293,7 @@ validation:
     weight: 0.0
     loader:
       dataset: { source_ids: [CNRM-CM6-1, CNRM-ESM2-1, MRI-ESM2-0,
-                              EC-Earth3-Veg-LR, IPSL-CM6A-LR],
+                              EC-Earth3, IPSL-CM6A-LR],
                  realizations: [2] }
   - name: val_holdout_ssp585      # (B) scenario-for-known-model
     weight: 0.0
@@ -323,20 +333,29 @@ inference:
     weight: 0.5
     n_forward_steps: 7300          # 20 years × 365
 
-  # (A) ensemble-spread on 2 held-out variants from different families
-  - name: inf_holdout_variants_A
+  # (A) ensemble-spread on held-out variants — 3 picks across
+  # different families + scenarios, including the EC-Earth3 case
+  # that doubles as the unusual-stratospheric-warming-shape probe.
+  - name: inf_holdout_variants_cnrm
     weight: 0.0
     n_forward_steps: 3650          # 10 years
     n_ensemble_per_ic: 5
     loader:
       dataset: { source_ids: [CNRM-CM6-1], experiments: [ssp585],
                  realizations: [2] }
-  - name: inf_holdout_variants_B
+  - name: inf_holdout_variants_ipsl
     weight: 0.0
     n_forward_steps: 3650
     n_ensemble_per_ic: 5
     loader:
       dataset: { source_ids: [IPSL-CM6A-LR], experiments: [historical],
+                 realizations: [2] }
+  - name: inf_holdout_variants_ecearth3_shape
+    weight: 0.0
+    n_forward_steps: 3650
+    n_ensemble_per_ic: 5
+    loader:
+      dataset: { source_ids: [EC-Earth3], experiments: [ssp585],
                  realizations: [2] }
 
   # (B) future-scenario rollouts — one variant per held-out source
@@ -382,17 +401,17 @@ inference:
       dataset: { source_ids: [NorESM2-LM], experiments: [historical],
                  realizations: [1] }
 
-  # In-sample, but with unusual physics — informative even though
-  # the model has seen these. EC-Earth3 has an unusual stratospheric
-  # warming-response shape; rolling it out tests whether the embedding
-  # captured shape, not just magnitude.
-  - name: inf_in_sample_ecEarth3_ssp585
-    weight: 0.0
-    n_forward_steps: 7300
-    loader:
-      dataset: { source_ids: [EC-Earth3], experiments: [ssp585],
-                 realizations: [1] }
 ```
+
+The EC-Earth3 unusual-response-shape probe is now part of the (A)
+cohort (`inf_holdout_variants_ecearth3_shape` above); no separate
+in-sample EC-Earth3 inference is needed.
+
+(A) now has three inline-inference picks rather than the proposed
+two-per-cohort cap — accepted to keep the shape-probe distinct from
+the IC-only probes. We can reduce reported metrics later if the
+output volume becomes a problem; the marginal inference cost is
+small relative to the train pass.
 
 ## Open items to iterate on
 
