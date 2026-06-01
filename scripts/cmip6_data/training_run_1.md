@@ -278,6 +278,45 @@ interpolate from neighbouring days, but short enough that the
 forcing trajectory across the gap isn't wildly different from what
 the model sees.
 
+## Variables
+
+**Input-only**: statics + exogenous forcings only — `HGTsfc`,
+`land_fraction`, `log_input4mips_co2`, `input4mips_so2`,
+`input4mips_bc`, `luh2_forest`. Everything else is in both
+`in_names` and `out_names`.
+
+**Excluded**: all CMIP6 monthly-Amon / monthly-Omon / monthly-SImon
+variables that the v2 ingest sampled as ``monthly_causal`` (each
+day in month M takes month M-1's value, producing stepped daily
+fields). They are physically correct but misleading as daily
+training targets — the model would learn to be artificially smooth
+within each month and then discontinuous on month boundaries.
+Specifically dropped from this run: `amon_ts` (universal but
+stepped), `omon_zos`, `omon_hfds`, `omon_mlotst`, `omon_tob`,
+`simon_sea_ice_fraction`, `simon_sitemptop`, `simon_ocean_fraction`.
+
+**Surface temperature**: the proper daily field is `eday_ts`
+(Eday.ts, 40% coverage in v2). v2 keeps it under the prefixed
+`eday_ts` name; the schema-0.8.0 update renames it to
+`surface_temperature` at the data-processing layer so future cohort
+ingests align with the SHIELD/ERA5 baseline convention. No
+migration is written for v2 → v3 — we'll reprocess fresh rather
+than rename in place.
+
+**In + out** (everything except the input-only six):
+
+- Universal (100%): TMP2m, Q2m, UGRD10m, VGRD10m, PRATEsfc, h500,
+  psl, ua/va/hus/zg × 8 plev (32 vars)
+- Daily, sub-universal (with allow_variable_masking on the step):
+  sfcWind (84%), DSWRFsfc (93%), LHTFLsfc (89%), ULWRFsfc (86%),
+  ULWRFtoa (82%), SHTFLsfc (80%), USWRFsfc (65%), oday_tos (56%),
+  DLWRFsfc (52%), eday_ts (40%), water_vapor_path (40%),
+  siday_sitemptop (38%), siday_sithick (27%).
+
+The 13 sub-universal variables use the per-sample variable-masking
+path; datasets without them contribute no loss signal for those
+channels but stay in training for everything else.
+
 ## Validation + inline inference (config sketch)
 
 `TrainConfig.validation` is a list of `InlineValidationConfig` —

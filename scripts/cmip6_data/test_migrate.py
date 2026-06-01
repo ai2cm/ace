@@ -83,16 +83,20 @@ def test_chain_for_empty_when_at_target():
 
 def test_chain_for_returns_registered_steps():
     from migrations import MIGRATIONS, chain_for
-    from schema_version import SCHEMA_VERSION
 
     if not MIGRATIONS:
         pytest.skip("no migrations registered yet")
-    chain = chain_for("0.0.0", SCHEMA_VERSION)
-    # Chain composes: each step starts where the previous ended.
+    # Validate chain composition up to the last registered migration.
+    # ``SCHEMA_VERSION`` may legitimately be ahead of the chain when a
+    # new data-format change is deferred to fresh ingest rather than
+    # an in-place migration (e.g. v2 stays at 0.7.0; v3 will be
+    # processed fresh at 0.8.0 — no 0.7.0 → 0.8.0 step is registered).
+    last_registered = MIGRATIONS[-1].to_version
+    chain = chain_for("0.0.0", last_registered)
     assert chain[0].from_version == "0.0.0"
     for prev, curr in zip(chain, chain[1:]):
         assert prev.to_version == curr.from_version
-    assert chain[-1].to_version == SCHEMA_VERSION
+    assert chain[-1].to_version == last_registered
 
 
 def test_chain_for_raises_on_unreachable_target():
@@ -148,7 +152,15 @@ def test_migrate_one_missing_sidecar(tmp_path: Path):
 
 def test_migrate_one_dry_run_describes_chain(tmp_path: Path):
     from migrate import migrate_one
-    from schema_version import SCHEMA_VERSION
+    from migrations import MIGRATIONS
+
+    # Target the last registered migration step rather than
+    # ``SCHEMA_VERSION`` — when a new data-format change is deferred
+    # to fresh ingest (e.g. v3 with ``surface_temperature``), the
+    # schema version can be ahead of the migration chain. The
+    # dry-run path's contract is still "describe what would happen
+    # for the registered steps".
+    target_version = MIGRATIONS[-1].to_version
 
     zarr = _make_sidecar_only_dataset(
         tmp_path,
@@ -160,10 +172,10 @@ def test_migrate_one_dry_run_describes_chain(tmp_path: Path):
             # No schema_version → treated as 0.0.0.
         },
     )
-    status, detail = migrate_one(zarr, target_version=SCHEMA_VERSION, dry_run=True)
+    status, detail = migrate_one(zarr, target_version=target_version, dry_run=True)
     assert status == "would-migrate"
     assert "0.0.0" in detail
-    assert SCHEMA_VERSION in detail
+    assert target_version in detail
     # Dry-run must NOT mutate the sidecar.
     after = json.loads((Path(zarr) / "metadata.json").read_text())
     assert after.get("schema_version", "") == ""

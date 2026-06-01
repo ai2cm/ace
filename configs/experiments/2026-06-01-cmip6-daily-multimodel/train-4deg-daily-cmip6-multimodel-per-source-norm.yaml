@@ -165,7 +165,7 @@ inference:
           - VGRD10m
           - PRATEsfc
           - h500
-          - amon_ts
+          - eday_ts
           - psl
           - DLWRFsfc
           - DSWRFsfc
@@ -744,49 +744,58 @@ stepper:
         data_dir: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2
         subdirectory: per_source_normalization_full
       corrector:
-        # Conservative atmospheric corrector: enforces dry-air mass
-        # conservation; moisture corrector matches reference. Drop
-        # corrector entirely if it causes problems on the v2 cohort
-        # (multi-model dry air mass varies more than ERA5's).
+        # Dry-air mass conservation only. Moisture-budget correction
+        # (advection + precipitation) needs evap + advection-tendency
+        # variables that v2 doesn't carry, and force_positive
+        # constraints on hus / radiation aren't guaranteed at the
+        # source by all publishers — so we skip both and let the
+        # network output whatever it learns.
         conserve_dry_air: true
-        moisture_budget_correction: advection_and_precipitation
-        force_positive_names:
-          - hus10
-          - hus50
-          - hus100
-          - hus250
-          - hus500
-          - hus700
-          - hus850
-          - hus1000
-          - Q2m
-          - PRATEsfc
-          - ULWRFsfc
-          - ULWRFtoa
-          - DLWRFsfc
-          - DSWRFsfc
-          - USWRFsfc
-          - USWRFtoa
+      # Input-only variables are restricted to statics + exogenous
+      # forcings (training_run_1 §variables — "I'd like the only
+      # input-only variables to be the static and input4mips ones").
+      # Everything else is a real prognostic and lives in both
+      # ``in_names`` and ``out_names``. Monthly-causal variables
+      # (amon_ts, omon_*, simon_*) are dropped entirely from this
+      # run because their stepped-monthly cadence would teach the
+      # model an artificially smooth target.
       in_names:
-        # Statics (in only)
+        # ---- input-only: statics ----
         - HGTsfc
         - land_fraction
-        # Forcings (in only — vary per timestep but driven by external
-        # data, not predicted).
+        # ---- input-only: exogenous forcings ----
         - log_input4mips_co2
         - input4mips_so2
         - input4mips_bc
         - luh2_forest
-        # Surface prognostics (in + out)
+        # ---- prognostic-class: in + out (everything below is
+        # also in out_names) ----
+        # Surface (universal)
         - TMP2m
         - Q2m
         - UGRD10m
         - VGRD10m
         - PRATEsfc
         - h500
-        - amon_ts
         - psl
-        # 3D plev prognostics
+        # Surface (sub-universal; allow_missing handles datasets
+        # missing each one — see SCHEMA-by-coverage table in
+        # training_run_1 §variables)
+        - sfcWind                  # 84%
+        - eday_ts                  # 40% — daily Eday.ts surface T
+        - water_vapor_path         # 40% — Eday.prw
+        - oday_tos                 # 56% — daily SST
+        - siday_sitemptop          # 38% — daily sea-ice top T
+        - siday_sithick            # 27% — daily sea-ice thickness
+        # Radiative + heat-flux diagnostics (mostly sub-universal)
+        - DLWRFsfc                 # 52%
+        - DSWRFsfc                 # 93%
+        - ULWRFsfc                 # 86%
+        - USWRFsfc                 # 65%
+        - ULWRFtoa                 # 82%
+        - SHTFLsfc                 # 80%
+        - LHTFLsfc                 # 89%
+        # 3D plev prognostics (universal)
         - ua10
         - ua50
         - ua100
@@ -820,15 +829,29 @@ stepper:
         - zg850
         - zg1000
       out_names:
-        # Surface prognostics
+        # Surface prognostics (universal)
         - TMP2m
         - Q2m
         - UGRD10m
         - VGRD10m
         - PRATEsfc
         - h500
-        - amon_ts
         - psl
+        # Surface (sub-universal)
+        - sfcWind
+        - eday_ts
+        - water_vapor_path
+        - oday_tos
+        - siday_sitemptop
+        - siday_sithick
+        # Radiative + heat-flux diagnostics
+        - DLWRFsfc
+        - DSWRFsfc
+        - ULWRFsfc
+        - USWRFsfc
+        - ULWRFtoa
+        - SHTFLsfc
+        - LHTFLsfc
         # 3D plev prognostics
         - ua10
         - ua50
@@ -862,14 +885,3 @@ stepper:
         - zg700
         - zg850
         - zg1000
-        # Surface diagnostics (out only; sub-universal in cohort —
-        # rely on allow_variable_masking to skip datasets without
-        # them rather than dropping the dataset entirely).
-        - DLWRFsfc
-        - DSWRFsfc
-        - ULWRFsfc
-        - USWRFsfc
-        - USWRFtoa
-        - ULWRFtoa
-        - SHTFLsfc
-        - LHTFLsfc

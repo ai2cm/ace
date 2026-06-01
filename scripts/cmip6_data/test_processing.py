@@ -915,7 +915,7 @@ def test_finalize_surface_and_ocean_atmos_surface_no_mask():
     """atmos_surface kind should NOT emit a _mask companion."""
     from config import SURFACE_AND_OCEAN_BY_OUTPUT
 
-    h = SURFACE_AND_OCEAN_BY_OUTPUT["eday_ts"]
+    h = SURFACE_AND_OCEAN_BY_OUTPUT["surface_temperature"]
     daily_times = xr.date_range(
         "2010-01-01", "2010-01-05", freq="D", use_cftime=True, calendar="noleap"
     )
@@ -927,7 +927,7 @@ def test_finalize_surface_and_ocean_atmos_surface_no_mask():
     outputs = finalize_surface_and_ocean_variable(
         da, h, xr.DataArray(daily_times, dims=("time",))
     )
-    assert set(outputs.keys()) == {"eday_ts"}
+    assert set(outputs.keys()) == {"surface_temperature"}
 
 
 def test_finalize_surface_and_ocean_ocean_emits_mask():
@@ -1206,7 +1206,7 @@ def test_finalize_surface_and_ocean_applies_unit_scale():
 def test_finalize_surface_and_ocean_atmos_kind_carries_original_name():
     from config import SURFACE_AND_OCEAN_BY_OUTPUT
 
-    h = SURFACE_AND_OCEAN_BY_OUTPUT["eday_ts"]
+    h = SURFACE_AND_OCEAN_BY_OUTPUT["surface_temperature"]
     daily_times = xr.date_range(
         "2010-01-01", "2010-01-05", freq="D", use_cftime=True, calendar="noleap"
     )
@@ -1218,7 +1218,7 @@ def test_finalize_surface_and_ocean_atmos_kind_carries_original_name():
     outputs = finalize_surface_and_ocean_variable(
         da, h, xr.DataArray(daily_times, dims=("time",))
     )
-    assert outputs["eday_ts"].attrs["original_name"] == "ts"
+    assert outputs["surface_temperature"].attrs["original_name"] == "ts"
 
 
 # ---------------------------------------------------------------------------

@@ -1252,7 +1252,7 @@ _SANITY_RANGES: dict[str, tuple[float, float]] = {
     # Surface-and-ocean variables — source-prefixed output names.
     # Atmospheric surface T (always K post-harmonization).
     "amon_ts": (180.0, 340.0),
-    "surface_temperature": (180.0, 340.0),  # renamed from ``eday_ts``
+    "surface_temperature": (180.0, 340.0),  # Eday.ts
     # Total column water-vapor path (kg/m²). Polar dry-air → ~0,
     # tropical column → ~70; allow some headroom.
     "water_vapor_path": (-_EPS, 100.0),

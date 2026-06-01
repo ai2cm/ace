@@ -178,12 +178,14 @@ CMIP_TO_OUTPUT_RENAMES: dict[str, str] = {
     # ``wap500``, ``clwvi``, ``clivi`` stay as-is (no baseline name).
     "ta700": "TMP700",
     "ps": "PRESsfc",
-    # Match the SHIELD/ERA5 baselines exactly on the two remaining
-    # name disagreements: the daily surface-T composite and the
-    # static surface altitude. ``amon_ts`` (monthly causal fallback)
-    # stays as-is — it's a different cadence and the prefix carries
-    # useful traceability information.
-    "eday_ts": "surface_temperature",
+    # Match the SHIELD/ERA5 baselines on the static surface altitude.
+    # ``amon_ts`` (monthly causal fallback) stays as-is — it's a
+    # different cadence and the prefix carries useful traceability
+    # information. The daily-cadence ``Eday.ts`` is renamed to
+    # ``surface_temperature`` at the surface-and-ocean
+    # ``SurfaceAndOceanVariable`` layer below (its output_name field)
+    # rather than here, because the rename map below is only consulted
+    # on the ``day_regridded`` path.
     "orog": "HGTsfc",
 }
 
@@ -257,10 +259,18 @@ class SurfaceAndOceanVariable:
 SURFACE_AND_OCEAN_VARIABLES: tuple[SurfaceAndOceanVariable, ...] = (
     # Surface temperature.
     # ``Amon.ts`` is the universal monthly fallback (model's own correct
-    # SST + ice-top + skin composite). ``Eday.ts`` is the same quantity
-    # daily — drop-in upgrade where published.
+    # SST + ice-top + skin composite); kept under the prefixed
+    # ``amon_ts`` name to flag the stepped-monthly cadence (each day
+    # in month M takes month M-1's value via monthly_causal sampling).
+    # ``Eday.ts`` is the same physical quantity at real daily cadence;
+    # renamed to ``surface_temperature`` here to align with the
+    # SHIELD/ERA5 baseline convention (schema 0.8.0+; v2 datasets at
+    # schema 0.7.0 still carry it under the original ``eday_ts``
+    # name).
     SurfaceAndOceanVariable("Amon", "ts", "amon_ts", "monthly_causal", "atmos_surface"),
-    SurfaceAndOceanVariable("Eday", "ts", "eday_ts", "daily", "atmos_surface"),
+    SurfaceAndOceanVariable(
+        "Eday", "ts", "surface_temperature", "daily", "atmos_surface"
+    ),
     # Water-vapor path (CMIP6 ``Eday.prw`` — vapor only). Output
     # name aligns with the CM4/SHIELD baseline convention. A
     # separate derived ``total_water_path = water_vapor_path + clwvi``
