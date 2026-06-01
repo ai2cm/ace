@@ -564,10 +564,13 @@ train set.
   the full `aggregator: {...}` block per entry. Not blocking — we
   can author the verbose form first and tidy later.
 
-- **Pending small code changes for metric pruning** (see Metric
-  pruning section below):
-  - `PowerSpectrumMetricConfig.report_directional_bias: bool = False`.
-  - `HistogramMetricConfig.percentile_variables: list[str] | None`.
+- **Aggregator config additions** for metric pruning have landed
+  (`PowerSpectrumMetricConfig.report_directional_bias`,
+  `PowerSpectrumMetricConfig.plot_variables`,
+  `HistogramMetricConfig.percentile_variables`); see Metric
+  pruning section below for the values to set per entry. All
+  three default to current behaviour so existing configs aren't
+  affected.
 
 ## Metric pruning
 
@@ -578,41 +581,31 @@ W&B run page and the per-epoch artefact size. Trim by tier:
 ### Cohort-wide (apply to every train / val / inference entry)
 
 - **Power spectrum scalar metrics: drop `positive_norm_bias` and
-  `negative_norm_bias`.** Keep `mean_abs_norm_bias` and
-  `smallest_scale_norm_bias` — those summarise the same
-  information. The directional split is redundant. *Pending small
-  code change*: add a `report_directional_bias: bool = False`
-  field to `PowerSpectrumMetricConfig` in
-  `fme/ace/aggregator/inference/spectrum.py`; default off here.
+  `negative_norm_bias`.** Set
+  `power_spectrum.report_directional_bias: false` on every
+  inference entry's aggregator. `mean_abs_norm_bias` is the
+  directional pair's redundant summary and stays.
 
 - **Power spectrum chart-plot: restrict to `ua10, va10, hus10,
-  zg10, h500, PRATEsfc` by default.** The per-variable
-  spectrum-pair PNGs are the expensive part to store (one
-  matplotlib figure per variable per epoch per entry × 11
+  zg10, h500, PRATEsfc` by default.** Set
+  `power_spectrum.plot_variables: [ua10, va10, hus10, zg10, h500,
+  PRATEsfc]` on every non-reference inference entry. The
+  per-variable spectrum-pair PNGs are the expensive part to
+  store (one figure per variable per epoch per entry × 11
   entries); the scalar metrics are cheap and stay for all
-  variables. Uppermost-level (10 hPa) probes the
+  variables because `plot_variables` is finer-grained than
+  `variables`. Uppermost-level (10 hPa) probes the
   stratosphere where most models have spectrum issues, `h500`
   is the standard mid-troposphere reference, and `PRATEsfc`
-  catches precipitation tail behaviour. *Pending small code
-  change*: `PowerSpectrumMetricConfig.variables` currently
-  filters BOTH scalar metrics AND the plot — we'd lose the
-  scalar `mean_abs_norm_bias` for all the unplotted variables
-  if we used it. Add a separate
-  `plot_variables: list[str] | None = None` field (default
-  None → plot all, matching current behaviour) that gates
-  plotting per variable in
-  `PairedSphericalPowerSpectrumAggregator.get_logs`.
-  Reference runs (see per-entry rules below) override to
-  `plot_variables: null` for full coverage.
+  catches precipitation tail behaviour. Reference runs (see
+  per-entry rules below) leave `plot_variables: null` for full
+  coverage.
 
 - **Histogram percentile reporting: 99.9999th percentile values
   only for precipitation** (`PRATEsfc`, plus `pr` where present).
-  No other variables. *Pending small code change*:
-  `HistogramMetricConfig` currently has no per-variable
-  percentile control; the simplest fix is a
-  `percentile_variables: list[str] | None = None` field that
-  restricts which variables get percentile keys emitted (default
-  None → all, set to `[PRATEsfc, pr]` here).
+  Set `histogram.percentile_variables: [PRATEsfc, pr]` on every
+  inference entry. Histogram plots are unaffected; only the
+  scalar percentile keys are gated by this allowlist.
 
 ### Per-entry (apply via aggregator config)
 
