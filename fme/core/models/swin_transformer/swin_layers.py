@@ -121,6 +121,14 @@ class WindowAttention2D(nn.Module):
         relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()
         attn = attn + relative_position_bias.unsqueeze(0)
 
+        if not torch.isfinite(attn).all():
+            raise ValueError(
+                f"Attention logits contain NaN/inf before softmax "
+                f"(max abs: {attn.abs().max().item():.3e}). "
+                "Q or K projections have grown large enough to overflow the "
+                "dot-product."
+            )
+
         if mask is not None:
             nW = mask.shape[0]
             attn = attn.view(B_ // nW, nW, self.num_heads, N, N) + mask.unsqueeze(
@@ -128,10 +136,26 @@ class WindowAttention2D(nn.Module):
             ).unsqueeze(0)
             attn = attn.view(-1, self.num_heads, N, N)
         attn = self.softmax(attn)
+        if not torch.isfinite(attn).all():
+            raise ValueError(
+                f"Attention weights contain NaN/inf after softmax "
+                f"(max abs: {attn.abs().max().item():.3e}). "
+                "Logits were finite but softmax produced NaN (all-inf row)."
+            )
         attn = self.attn_drop(attn)
 
         x = (attn @ v).transpose(1, 2).reshape(B_, N, C)
+        if not torch.isfinite(x).all():
+            raise ValueError(
+                f"Attention output contains NaN/inf after attn @ v "
+                f"(max abs: {x.abs().max().item():.3e})."
+            )
         x = self.proj(x)
+        if not torch.isfinite(x).all():
+            raise ValueError(
+                f"Attention output contains NaN/inf after output projection "
+                f"(max abs: {x.abs().max().item():.3e})."
+            )
         x = self.proj_drop(x)
         return x
 
@@ -341,19 +365,43 @@ class SwinTransformerBlock(nn.Module):
             shortcut = x
             # CLN is channels-first; Swin is channels-last → transpose around norm.
             h = self.norm1(x.permute(0, 3, 1, 2), context).permute(0, 2, 3, 1)
+            if not torch.isfinite(h).all():
+                raise ValueError(
+                    f"NaN/inf after norm1 (max abs: {h.abs().max().item():.3e})"
+                )
             if sh > 0 or sw > 0:
                 h = torch.roll(h, shifts=(-sh, -sw), dims=(1, 2))
             h_windows = window_partition_2d(h, ws_h, ws_w).view(-1, ws_h * ws_w, C)
             attn_windows = self.attn(h_windows, mask=self.attn_mask)
             attn_windows = attn_windows.view(-1, ws_h, ws_w, C)
             h = window_reverse_2d(attn_windows, ws_h, ws_w, H, W)
+            if not torch.isfinite(h).all():
+                raise ValueError(
+                    f"NaN/inf after attention (max abs: {h.abs().max().item():.3e})"
+                )
             if sh > 0 or sw > 0:
                 h = torch.roll(h, shifts=(sh, sw), dims=(1, 2))
             # ColumnMixer folded in (no own residual).
             h = h + self.column_mixer(h)
+            if not torch.isfinite(h).all():
+                raise ValueError(
+                    f"NaN/inf after column_mixer (max abs: {h.abs().max().item():.3e})"
+                )
             x = shortcut + self.drop_path(h)
+            if not torch.isfinite(x).all():
+                raise ValueError(
+                    f"NaN/inf after attn residual (max abs: {x.abs().max().item():.3e})"
+                )
             y = self.norm2(x.permute(0, 3, 1, 2), context).permute(0, 2, 3, 1)
+            if not torch.isfinite(y).all():
+                raise ValueError(
+                    f"NaN/inf after norm2 (max abs: {y.abs().max().item():.3e})"
+                )
             x = x + self.drop_path(self.mlp(y))
+            if not torch.isfinite(x).all():
+                raise ValueError(
+                    f"NaN/inf after mlp residual (max abs: {x.abs().max().item():.3e})"
+                )
         else:
             shortcut = x
             x = self.norm1(x)
@@ -530,8 +578,13 @@ class BasicLayer(nn.Module):
         context: Context | None = None,
     ) -> torch.Tensor:
         if self.conditioning == "cln":
-            for blk in self.blocks:
+            for i, blk in enumerate(self.blocks):
                 x = blk(x, context=context)
+                if not torch.isfinite(x).all():
+                    raise ValueError(
+                        f"NaN/inf after cln block {i} "
+                        f"(max abs: {x.abs().max().item():.3e})"
+                    )
             return x
 
         cond_params: CondParams | None = None

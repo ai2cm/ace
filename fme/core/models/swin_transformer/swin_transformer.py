@@ -164,6 +164,14 @@ class SwinTransformerNet(nn.Module):
         self.final_linear = nn.Linear(decoder_dim, embed_dim, bias=False)
         self.decoder = nn.Conv2d(embed_dim, out_chans, kernel_size=3, padding=1)
 
+    @staticmethod
+    def _check(x: torch.Tensor, location: str) -> None:
+        if not torch.isfinite(x).all():
+            raise ValueError(
+                f"NaN/inf after {location} "
+                f"(max abs: {x.abs().max().item():.3e})"
+            )
+
     def forward(self, x: torch.Tensor, context: Context | None = None) -> torch.Tensor:
         _, _, H, W = x.shape
         Hp, Wp = self.padded_shape
@@ -173,8 +181,10 @@ class SwinTransformerNet(nn.Module):
             x = F.pad(x, (0, pad_w, 0, pad_h))
 
         x = self.encoder(x)  # (B, embed_dim, Hp, Wp)
+        self._check(x, "encoder")
         x = x.permute(0, 2, 3, 1)  # (B, Hp, Wp, embed_dim)
         x = self.channel_mixer(x)
+        self._check(x, "channel_mixer")
 
         # AdaLN conditioning: extract scalar/label embeddings from context.
         cond_scalar: torch.Tensor | None = None
@@ -211,17 +221,26 @@ class SwinTransformerNet(nn.Module):
             ctx_half = dataclasses.replace(context, noise=noise_half)
 
         x = self.layer1(x, cond_scalar, cond_labels, context=ctx_full)
+        self._check(x, "layer1")
         skip = x
         x = self.downsample(x)
+        self._check(x, "downsample")
         x = self.layer2(x, cond_scalar, cond_labels, context=ctx_half)
+        self._check(x, "layer2")
         x = self.layer3(x, cond_scalar, cond_labels, context=ctx_half)
+        self._check(x, "layer3")
         x = self.upsample(x)
+        self._check(x, "upsample")
         if self.use_skip:
             x = torch.cat([x, skip], dim=-1)
+            self._check(x, "skip_cat")
         x = self.layer4(x, cond_scalar, cond_labels, context=ctx_full)
+        self._check(x, "layer4")
 
         x = self.final_linear(x)  # (B, Hp, Wp, embed_dim)
+        self._check(x, "final_linear")
         x = x.permute(0, 3, 1, 2)  # (B, embed_dim, Hp, Wp)
         x = self.decoder(x)  # (B, out_chans, Hp, Wp)
+        self._check(x, "decoder")
         x = x[..., :H, :W]
         return x

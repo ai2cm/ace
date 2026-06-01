@@ -327,6 +327,12 @@ class ConditionalLayerNorm(nn.Module):
                 if context.embedding_pos is None:
                     raise ValueError("embedding_pos must be provided")
                 bias = bias + self.W_bias_pos(context.embedding_pos)
+        if not torch.isfinite(x).all():
+            raise ValueError(
+                f"ConditionalLayerNorm input contains NaN/inf "
+                f"(max abs: {x.abs().max().item():.3e}). "
+                "Overflow occurred in a preceding layer before reaching CLN."
+            )
         with timer.child("normalize"):
             x_norm: torch.Tensor = self.norm(x)
         with timer.child("apply_scaling_and_bias"):
