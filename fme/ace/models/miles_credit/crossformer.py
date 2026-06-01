@@ -35,14 +35,17 @@ def cast_tuple(val, length=1):
 
 
 def apply_spectral_norm(model):
+    skip: set[nn.Module] = set()
+    for m in model.modules():
+        if isinstance(m, ConditionalLayerNorm):
+            for attr in ("W_scale_2d", "W_bias_2d", "W_scale_pos", "W_bias_pos"):
+                layer = getattr(m, attr, None)
+                if layer is not None:
+                    skip.add(layer)
     for module in model.modules():
-        if isinstance(module, nn.Conv2d | nn.Linear | nn.ConvTranspose2d):
-            if not torch.any(module.weight != 0):
-                raise ValueError(
-                    f"apply_spectral_norm: {type(module).__name__} has all-zero "
-                    "weights. Spectral norm computes sigma=0 → weight=0/0=NaN "
-                    "on the first forward pass."
-                )
+        if module not in skip and isinstance(
+            module, nn.Conv2d | nn.Linear | nn.ConvTranspose2d
+        ):
             nn.utils.spectral_norm(module)
 
 
