@@ -734,12 +734,21 @@ stepper:
           num_layers: 8
           operator_type: dhconv
       normalization:
+        # ``fill_nans_on_normalize: true`` is required because
+        # ``allow_missing_variables: true`` on the builder lets
+        # datasets without a given output variable contribute
+        # NaN-filled slabs. The per-sample ``data_mask`` zeroes out
+        # those contributions in the loss aggregator, but ``0 * NaN``
+        # is still NaN; the fill on normalize step replaces them
+        # with zeros first so the loss tensors stay finite.
         network:
           global_means_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/normalization_full/centering.nc
           global_stds_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/normalization_full/scaling.nc
+          fill_nans_on_normalize: true
         residual:
           global_means_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/normalization_full/residual_centering.nc
           global_stds_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/normalization_full/residual_scaling.nc
+          fill_nans_on_normalize: true
       per_source_normalization:
         data_dir: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2
         subdirectory: per_source_normalization_full
