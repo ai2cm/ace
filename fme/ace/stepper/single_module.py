@@ -53,6 +53,7 @@ from fme.core.optimization import NullOptimization
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.spatial_masking import NullSpatialMasking, StaticSpatialMaskingConfig
 from fme.core.step.args import StepArgs
+from fme.core.step.global_mean_removal import GlobalMeanRemovalConfigUnion
 from fme.core.step.multi_call import (
     MultiCallConfig,
     MultiCallStepConfig,
@@ -109,6 +110,9 @@ class SingleModuleStepperConfig:
             loss. The same loss configuration as specified in 'loss' is used.
         residual_prediction: Whether to have ML module predict tendencies for
             prognostic variables.
+        global_mean_removal: Optional configuration for removing global means
+            from fields before normalization and restoring them after
+            denormalization. Passed through to ``SingleModuleStepConfig``.
     """
 
     builder: ModuleSelector
@@ -130,6 +134,7 @@ class SingleModuleStepperConfig:
     multi_call: MultiCallConfig | None = None
     include_multi_call_in_loss: bool = False
     residual_prediction: bool = False
+    global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
 
     def __post_init__(self):
         for name in self.prescribed_prognostic_names:
@@ -308,6 +313,7 @@ class SingleModuleStepperConfig:
             next_step_forcing_names=self.next_step_forcing_names,
             prescribed_prognostic_names=self.prescribed_prognostic_names,
             residual_prediction=self.residual_prediction,
+            global_mean_removal=self.global_mean_removal,
         )
 
 

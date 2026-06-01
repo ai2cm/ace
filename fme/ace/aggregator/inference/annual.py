@@ -91,8 +91,8 @@ class PairedGlobalMeanAnnualAggregator:
                 continue
 
             if name in self.variable_metadata:
-                long_name = self.variable_metadata[name].long_name
-                units = self.variable_metadata[name].units
+                long_name = self.variable_metadata[name].display_long_name(name)
+                units = self.variable_metadata[name].display_units("unknown units")
             else:
                 long_name = name
                 units = "unknown units"
@@ -235,8 +235,8 @@ class GlobalMeanAnnualAggregator:
                 continue
 
             if name in self.variable_metadata:
-                long_name = self.variable_metadata[name].long_name
-                units = self.variable_metadata[name].units
+                long_name = self.variable_metadata[name].display_long_name(name)
+                units = self.variable_metadata[name].display_units("unknown units")
             else:
                 long_name = name
                 units = "unknown units"
