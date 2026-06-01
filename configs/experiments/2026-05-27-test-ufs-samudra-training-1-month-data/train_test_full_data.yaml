@@ -158,11 +158,11 @@ stepper:
         - PRATEsfc
         - eastward_surface_wind_stress
         - northward_surface_wind_stress
-        - total_frozen_precipitation_rate
+        # - total_frozen_precipitation_rate
       in_names:
         - land_fraction
         - sea_surface_fraction
-        - deptho
+        # - deptho
         - DLWRFsfc
         - DSWRFsfc
         - ULWRFsfc
@@ -172,7 +172,7 @@ stepper:
         - PRATEsfc
         - eastward_surface_wind_stress
         - northward_surface_wind_stress
-        - total_frozen_precipitation_rate
+        # - total_frozen_precipitation_rate
         - sst
         - ssu
         - ssv
@@ -338,7 +338,7 @@ stepper:
         - vo_18
         - ocean_sea_ice_fraction
         - sea_ice_volume
-        - hfds_total_area
-        - tauuo
-        - tauvo
+        # - hfds_total_area
+        # - tauuo
+        # - tauvo
         # - wfo
