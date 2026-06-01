@@ -5,7 +5,8 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from fme.ace.data_loading.cmip6 import Cmip6DataConfig
+from fme.ace.data_loading.cmip6 import Cmip6DataConfig, Cmip6TimeMask
+from fme.core.dataset.time import TimeSlice
 from fme.core.dataset.xarray import XarrayDataConfig
 
 
@@ -290,3 +291,187 @@ def test_netcdf4_build(cmip6_netcdf_dir):
     data, time, labels, epoch, _source_ids = sample
     assert "tas" in data
     assert "pr" in data
+
+
+# ---------------------------------------------------------------------------
+# exclude_variants: drop specific (source, experiment, variant) triples
+# ---------------------------------------------------------------------------
+
+
+def test_exclude_variants_drops_matching_rows(cmip6_data_dir):
+    """``exclude_variants`` is subtractive: it drops a specific row
+    after the include filters have run. Other variants of the same
+    source remain."""
+    config = Cmip6DataConfig(
+        data_dir=cmip6_data_dir,
+        exclude_variants=[["ModelA", "historical", "r2i1p1f1"]],
+    )
+    concat = config._get_concat_config()
+    paths = [c.data_path for c in concat.concat]
+    assert not any("r2i1p1f1" in p for p in paths)
+    # The r1 variant of ModelA/historical and ModelA/ssp585 are still in.
+    assert any("ModelA/historical/r1i1p1f1" in p for p in paths)
+    assert any("ModelA/ssp585/r1i1p1f1" in p for p in paths)
+
+
+def test_exclude_variants_unknown_triple_raises(cmip6_data_dir):
+    """Listing a triple that's not in index.csv is almost certainly a
+    typo; raise to catch it loudly rather than silently dropping
+    nothing."""
+    with pytest.raises(ValueError, match="not present in index.csv"):
+        Cmip6DataConfig(
+            data_dir=cmip6_data_dir,
+            exclude_variants=[["NonexistentModel", "historical", "r1i1p1f1"]],
+        )._get_concat_config()
+
+
+def test_exclude_variants_invalid_triple_shape_raises(cmip6_data_dir):
+    """Each exclude_variants entry must be a 3-element list. A
+    2-element entry is a config bug — raise at __post_init__ so the
+    failure is visible before any data load."""
+    with pytest.raises(ValueError, match="triple"):
+        Cmip6DataConfig(
+            data_dir=cmip6_data_dir,
+            exclude_variants=[["ModelA", "historical"]],
+        )
+
+
+# ---------------------------------------------------------------------------
+# time_masks: split matched datasets into pre-mask + post-mask slices
+# ---------------------------------------------------------------------------
+
+
+def test_time_mask_splits_matched_dataset(cmip6_data_dir):
+    """A matched (source, experiment) dataset becomes two
+    XarrayDataConfig entries — one with stop_time=keep_before, one
+    with start_time=keep_after — both labelled identically so
+    downstream per-source handling treats them as the same dataset."""
+    config = Cmip6DataConfig(
+        data_dir=cmip6_data_dir,
+        source_ids=["ModelA"],
+        experiments=["historical"],
+        time_masks=[
+            Cmip6TimeMask(
+                source_ids=["ModelA"],
+                experiments=["historical"],
+                keep_before="2000-01-04",
+                keep_after="2000-01-08",
+            )
+        ],
+    )
+    concat = config._get_concat_config()
+    # ModelA has two historical variants (r1, r2). Each gets split, so
+    # 4 entries total.
+    assert len(concat.concat) == 4
+    # All four point at a ModelA/historical/r? directory.
+    for entry in concat.concat:
+        assert "ModelA/historical/" in entry.data_path
+    # Each variant produces a pre-mask (stop_time set) and a post-mask
+    # (start_time set) entry; labels match across the pair.
+    pre = [
+        e
+        for e in concat.concat
+        if isinstance(e.subset, TimeSlice) and e.subset.stop_time == "2000-01-04"
+    ]
+    post = [
+        e
+        for e in concat.concat
+        if isinstance(e.subset, TimeSlice) and e.subset.start_time == "2000-01-08"
+    ]
+    assert len(pre) == 2
+    assert len(post) == 2
+    for entry in pre + post:
+        assert isinstance(entry.subset, TimeSlice)
+        assert entry.labels == ["ModelA.p1"]
+
+
+def test_time_mask_skips_non_matching_dataset(cmip6_data_dir):
+    """A dataset whose (source, experiment) doesn't match any mask
+    keeps its single un-subsetted entry — masks are opt-in per
+    (source, experiment) pair."""
+    config = Cmip6DataConfig(
+        data_dir=cmip6_data_dir,
+        experiments=["historical", "ssp585"],
+        time_masks=[
+            Cmip6TimeMask(
+                source_ids=["ModelA"],
+                experiments=["historical"],
+                keep_before="2000-01-04",
+                keep_after="2000-01-08",
+            )
+        ],
+    )
+    concat = config._get_concat_config()
+    # ModelA/historical r1 + r2: 2 datasets × 2 (pre/post) = 4.
+    # ModelA/ssp585 r1: 1 dataset, no mask, 1 entry.
+    # ModelB/historical r1: 1 dataset, no mask, 1 entry.
+    # Total: 6.
+    assert len(concat.concat) == 6
+    ssp_entries = [e for e in concat.concat if "ssp585" in e.data_path]
+    assert len(ssp_entries) == 1
+    # Unmasked entry has a default empty Slice/TimeSlice with no
+    # bounds set — gate the attribute access on the type so mypy is
+    # happy.
+    ssp_subset = ssp_entries[0].subset
+    if isinstance(ssp_subset, TimeSlice):
+        assert ssp_subset.start_time is None
+        assert ssp_subset.stop_time is None
+
+
+def test_time_mask_overlapping_configs_raise():
+    """Two masks targeting the same (source, experiment) pair are a
+    config bug — only one mask per pair is supported. Raise at
+    __post_init__ so it fails before any data load."""
+    with pytest.raises(ValueError, match="Multiple time_masks match"):
+        Cmip6DataConfig(
+            data_dir="/nonexistent",
+            time_masks=[
+                Cmip6TimeMask(
+                    source_ids=["ModelA"],
+                    experiments=["historical"],
+                    keep_before="1970-12-31",
+                    keep_after="1980-01-01",
+                ),
+                Cmip6TimeMask(
+                    source_ids=["ModelA", "ModelB"],
+                    experiments=["historical"],
+                    keep_before="1990-12-31",
+                    keep_after="2000-01-01",
+                ),
+            ],
+        )
+
+
+def test_time_mask_end_to_end_build(cmip6_netcdf_dir):
+    """End-to-end smoke test: build a real dataset from a time-masked
+    Cmip6DataConfig. The mask covers timesteps 4-7 of a 10-step
+    fixture (2000-01-04 through 2000-01-07 in noleap), so keep_before
+    2000-01-03 + keep_after 2000-01-08 leaves 6 timesteps total per
+    variant (3 pre + 3 post)."""
+    from fme.core.dataset.schedule import IntSchedule
+
+    config = Cmip6DataConfig(
+        data_dir=cmip6_netcdf_dir,
+        source_ids=["ModelA"],
+        experiments=["historical"],
+        realizations=[1],
+        engine="netcdf4",
+        time_masks=[
+            Cmip6TimeMask(
+                source_ids=["ModelA"],
+                experiments=["historical"],
+                keep_before="2000-01-03",
+                keep_after="2000-01-08",
+            )
+        ],
+    )
+    dataset, _properties = config.build(
+        names=["tas", "pr"],
+        n_timesteps=IntSchedule.from_constant(2),
+    )
+    # 6 surviving timesteps × n_timesteps=2 window → 5 samples
+    # (overlapping windows), but the pre/post boundary means windows
+    # crossing it are dropped — exact count depends on the concat
+    # internals. The substantive assertion: dataset built without
+    # error and is non-empty.
+    assert len(dataset) > 0
