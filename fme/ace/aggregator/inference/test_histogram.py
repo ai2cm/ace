@@ -9,11 +9,15 @@ percentile keys are only worth tracking for a small variable list
 (precipitation, etc.).
 """
 
+import pytest
 import torch
 
 import fme
 from fme.ace.aggregator.inference.data import InferenceBatchData, make_dummy_time
-from fme.ace.aggregator.inference.histogram import HistogramAggregator
+from fme.ace.aggregator.inference.histogram import (
+    HistogramAggregator,
+    HistogramMetricConfig,
+)
 
 
 def _batch_two_vars(nlat: int = 8, nlon: int = 16) -> InferenceBatchData:
@@ -79,3 +83,11 @@ def test_histogram_aggregator_percentile_variables_empty_drops_all():
     assert pct_keys == []
     # Plots survive.
     assert any("hist/PRATEsfc" == k or k.endswith("/PRATEsfc") for k in logs)
+
+
+def test_histogram_config_raises_if_percentile_variables_not_subset_of_variables():
+    with pytest.raises(ValueError, match="percentile_variables contains names not in"):
+        HistogramMetricConfig(
+            variables=["TMP2m"],
+            percentile_variables=["TMP2m", "PRATEsfc"],
+        )

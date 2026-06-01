@@ -35,6 +35,15 @@ class HistogramMetricConfig:
     strict: bool = True
     percentile_variables: list[str] | None = None
 
+    def __post_init__(self):
+        if self.variables is not None and self.percentile_variables is not None:
+            extra = set(self.percentile_variables) - set(self.variables)
+            if extra:
+                raise ValueError(
+                    f"percentile_variables contains names not in variables: "
+                    f"{sorted(extra)}"
+                )
+
     def get_name(self) -> str:
         return self.name
 
