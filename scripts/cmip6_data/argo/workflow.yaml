@@ -124,6 +124,15 @@ spec:
           withSequence:
             start: "0"
             end: "{{workflow.parameters.migrate_datasets_count_minus_one}}"
+      # Second rebuild-index pass after migrate-dataset: every migrated
+      # sidecar got its ``schema_version`` bumped (and possibly other
+      # fields, e.g. ``n_timesteps`` / ``time_end`` for migrations that
+      # truncate data) so the top-level ``index.csv`` is stale until we
+      # re-scan. Gated on ``run_migrate`` only — the post-process
+      # rebuild-index above already covers ``run_process``.
+      - - name: rebuild-index-after-migrate
+          when: "{{workflow.parameters.run_migrate}} == true"
+          template: rebuild-index
       - - name: compute-stats
           when: "{{workflow.parameters.run_stats}} == true && {{workflow.parameters.stats_datasets_count_minus_one}} == -1"
           template: compute-stats

@@ -901,6 +901,177 @@ def test_migration_0_5_0_to_0_6_0_safety_already_kelvin_with_bad_attr(
     np.testing.assert_array_equal(migrated["omon_tob"].values, tob_already_k)
 
 
+def _build_bcc_test_zarr(
+    zarr_dir: Path, *, last_day_bad: bool, n_timesteps: int = 23725
+) -> tuple[Path, dict]:
+    """Build a minimal zarr that looks like the v2
+    ``BCC-CSM2-MR/historical/r1i1p1f1`` dataset for migration-test
+    purposes: ``n_timesteps`` timesteps with ``ua500[-1]`` set to
+    the corruption signature (max ~88000 m/s) when ``last_day_bad``.
+
+    Includes one static (no-time) variable so the test catches
+    "this also resizes the wrong things" regressions. Default
+    ``n_timesteps=23725`` mirrors the real dataset so the
+    pre-state guards see the values they expect.
+    """
+    nlat, nlon = 45, 90
+    times = xr.date_range(
+        "1950-01-02", periods=n_timesteps, freq="D", calendar="noleap"
+    )
+    rng = np.random.default_rng(0)
+    ua500 = rng.normal(0, 10, size=(n_timesteps, nlat, nlon)).astype(np.float32)
+    if last_day_bad:
+        ua500[-1] = rng.uniform(50000, 90000, size=(nlat, nlon)).astype(np.float32)
+    tmp2m = rng.normal(280, 5, size=(n_timesteps, nlat, nlon)).astype(np.float32)
+    orog = rng.uniform(0, 4000, size=(nlat, nlon)).astype(np.float32)
+    ds = xr.Dataset(
+        {
+            "ua500": xr.DataArray(
+                ua500,
+                dims=("time", "lat", "lon"),
+                coords={"time": times},
+                attrs={"units": "m s-1"},
+            ),
+            "TMP2m": xr.DataArray(
+                tmp2m,
+                dims=("time", "lat", "lon"),
+                coords={"time": times},
+                attrs={"units": "K"},
+            ),
+            "HGTsfc": xr.DataArray(
+                orog,
+                dims=("lat", "lon"),
+                attrs={"units": "m"},
+            ),
+        }
+    )
+    ds.to_zarr(str(zarr_dir), mode="w", consolidated=True, zarr_format=3)
+    sidecar = {
+        "source_id": "BCC-CSM2-MR",
+        "experiment": "historical",
+        "variant_label": "r1i1p1f1",
+        "label": "BCC-CSM2-MR.p1",
+        "target_grid": "F22.5",
+        "schema_version": "0.6.0",
+        "n_timesteps": n_timesteps,
+        "time_end": "2014-12-31 12:00:00",
+    }
+    return zarr_dir, sidecar
+
+
+def test_migration_0_6_0_to_0_7_0_truncates_target(tmp_path: Path):
+    """When the target identity + sidecar pre-state + on-disk
+    symptom all agree, the migration drops the last timestep of
+    every time-dimensioned array. Non-time arrays (HGTsfc) and
+    untouched timesteps must be byte-identical post-migration.
+    """
+    from migrations._0_6_0_to_0_7_0 import MIGRATION
+
+    z, sc = _build_bcc_test_zarr(tmp_path / "data.zarr", last_day_bad=True)
+    pre = xr.open_zarr(str(z), consolidated=True)
+    pre_ua_head = pre["ua500"].isel(time=slice(None, -1)).values.copy()
+    pre_tmp_head = pre["TMP2m"].isel(time=slice(None, -1)).values.copy()
+    pre_orog = pre["HGTsfc"].values.copy()
+    pre.close()
+
+    out = MIGRATION.apply(str(z), sc)
+
+    assert out["schema_version"] == "0.7.0"
+    audit = out["migrations"][-1]["bcc_csm2_mr_last_day_truncation"]
+    truncated_vars = {e["variable"] for e in audit["variables_truncated"]}
+    assert truncated_vars == {"ua500", "TMP2m", "time"}
+    assert all(e["old_n"] - e["new_n"] == 1 for e in audit["variables_truncated"])
+    assert out["n_timesteps"] == 23724
+    # Sidecar's time_end refreshed from the truncated zarr's new
+    # last value. (Don't check the exact date — the test fixture's
+    # calendar / start date differs from the real BCC dataset; what
+    # matters is that the sidecar was rewritten, not retained.)
+    assert out["time_end"] != "2014-12-31 12:00:00"
+
+    post = xr.open_zarr(str(z), consolidated=True)
+    assert post.sizes["time"] == 23724
+    np.testing.assert_array_equal(post["ua500"].values, pre_ua_head)
+    np.testing.assert_array_equal(post["TMP2m"].values, pre_tmp_head)
+    np.testing.assert_array_equal(post["HGTsfc"].values, pre_orog)
+    post.close()
+
+
+def test_migration_0_6_0_to_0_7_0_noop_for_non_target(tmp_path: Path):
+    """A dataset whose identity tuple doesn't match the target gets
+    a sidecar version bump and nothing else — pre-state guards
+    aren't even run.
+    """
+    from migrations._0_6_0_to_0_7_0 import MIGRATION
+
+    z, sc = _build_bcc_test_zarr(
+        tmp_path / "data.zarr", last_day_bad=False, n_timesteps=7
+    )
+    sc["source_id"] = "OTHER"
+    sc["n_timesteps"] = 7
+    pre = xr.open_zarr(str(z), consolidated=True)
+    pre_ua = pre["ua500"].values.copy()
+    pre.close()
+
+    out = MIGRATION.apply(str(z), sc)
+    assert out["schema_version"] == "0.7.0"
+    assert out["migrations"][-1]["bcc_csm2_mr_last_day_truncation"] == {
+        "skipped": True,
+        "reason": "not_target",
+    }
+    assert out["n_timesteps"] == 7
+
+    post = xr.open_zarr(str(z), consolidated=True)
+    assert post.sizes["time"] == 7
+    np.testing.assert_array_equal(post["ua500"].values, pre_ua)
+    post.close()
+
+
+def test_migration_0_6_0_to_0_7_0_refuses_when_pre_state_clean(tmp_path: Path):
+    """Even when the identity tuple matches the target, the
+    migration MUST refuse to truncate a dataset whose ``ua500[-1]``
+    doesn't show the corruption signature. This is the load-bearing
+    safety guard — without it, an identity collision would silently
+    drop a clean last day.
+    """
+    from migrations._0_6_0_to_0_7_0 import MIGRATION
+
+    z, sc = _build_bcc_test_zarr(tmp_path / "data.zarr", last_day_bad=False)
+    with pytest.raises(RuntimeError, match="ua500.*max.*expected > 50000"):
+        MIGRATION.apply(str(z), sc)
+
+    post = xr.open_zarr(str(z), consolidated=True)
+    assert post.sizes["time"] == 23725
+    post.close()
+
+
+def test_migration_0_6_0_to_0_7_0_refuses_when_n_timesteps_mismatch(tmp_path: Path):
+    """A sidecar that claims an unexpected ``n_timesteps`` (i.e.
+    already truncated by another tool, or a future BCC dataset of
+    different length) MUST fail loudly rather than blindly chopping
+    off another timestep.
+    """
+    from migrations._0_6_0_to_0_7_0 import MIGRATION
+
+    z, sc = _build_bcc_test_zarr(tmp_path / "data.zarr", last_day_bad=True)
+    sc["n_timesteps"] = 23724
+    with pytest.raises(RuntimeError, match="n_timesteps.*expected 23725"):
+        MIGRATION.apply(str(z), sc)
+
+
+def test_migration_0_6_0_to_0_7_0_refuses_when_time_end_mismatch(tmp_path: Path):
+    """A sidecar whose ``time_end`` disagrees with the known
+    v2-cohort end date for this dataset MUST fail loudly. Catches
+    "different (also-named-r1i1p1f1) reprocessing changed the time
+    window."
+    """
+    from migrations._0_6_0_to_0_7_0 import MIGRATION
+
+    z, sc = _build_bcc_test_zarr(tmp_path / "data.zarr", last_day_bad=True)
+    sc["time_end"] = "2099-12-31 12:00:00"
+    with pytest.raises(RuntimeError, match="time_end.*expected"):
+        MIGRATION.apply(str(z), sc)
+
+
 def test_migration_0_3_0_to_0_4_0_writes_per_cell_maps(tmp_path: Path):
     """The 0.3.0 → 0.4.0 migration regenerates stats.nc with the new
     per-cell maps. Zarr data is untouched; only stats.nc changes.
