@@ -305,6 +305,20 @@ class ConditionalLayerNorm(nn.Module):
                 if context.noise is None:
                     raise ValueError("embedding_2d must be provided")
                 bias = bias + self.W_bias_2d(context.noise)
+            if not torch.isfinite(scale).all():
+                raise ValueError(
+                    f"ConditionalLayerNorm scale contains NaN/inf "
+                    f"(max abs: {scale.abs().max().item():.3e}). "
+                    "W_scale_2d weights have grown large enough to overflow "
+                    "when applied to noise inputs."
+                )
+            if not torch.isfinite(bias).all():
+                raise ValueError(
+                    f"ConditionalLayerNorm bias contains NaN/inf "
+                    f"(max abs: {bias.abs().max().item():.3e}). "
+                    "W_bias_2d weights have grown large enough to overflow "
+                    "when applied to noise inputs."
+                )
             if self.W_scale_pos is not None:
                 if context.embedding_pos is None:
                     raise ValueError("embedding_pos must be provided")
