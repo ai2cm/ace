@@ -72,6 +72,7 @@ class SwinTransformerBuilder(ModuleConfig):
     embed_dim_scalar: int = 0
     embed_dim_labels: int = 0
     cpb_hidden_dim: int = 64
+    padding_conf: dict | None = None
 
     def build(
         self,
@@ -109,6 +110,7 @@ class SwinTransformerBuilder(ModuleConfig):
             mlp_layer=self.mlp_layer,
             cpb_hidden_dim=self.cpb_hidden_dim,
             lat_coords=lat_coords,
+            padding_conf=self.padding_conf,
         )
         return _ContextWrappedModule(net)
 
@@ -151,6 +153,7 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
     noise_embed_dim: int = 256
     label_embed_dim: int = 0
     cpb_hidden_dim: int = 64
+    padding_conf: dict | None = None
 
     def build(
         self,
@@ -189,6 +192,7 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             conditioning="cln",
             cpb_hidden_dim=self.cpb_hidden_dim,
             lat_coords=lat_coords,
+            padding_conf=self.padding_conf,
         )
         return NoiseConditionedModel(
             net,

@@ -36,6 +36,7 @@ def _build_cln_net(
     out_chans: int,
     img_shape: tuple[int, int],
     use_skip: bool = True,
+    padding_conf: dict | None = None,
 ) -> SwinTransformerNet:
     context_config = ContextConfig(
         embed_dim_scalar=0,
@@ -56,6 +57,7 @@ def _build_cln_net(
         use_skip=use_skip,
         context_config=context_config,
         conditioning="cln",
+        padding_conf=padding_conf,
     )
 
 
@@ -365,3 +367,44 @@ def test_v2_with_conditioning():
     out.sum().backward()
     for name, param in net.named_parameters():
         assert param.grad is not None, f"No gradient for {name}"
+
+
+def test_earth_padding_forward():
+    img_shape = (9, 18)
+    padding_conf = {
+        "activate": True,
+        "mode": "earth",
+        "pad_lat": [2, 1],
+        "pad_lon": [2, 2],
+    }
+    net = SwinTransformerNet(
+        3,
+        3,
+        img_shape,
+        embed_dim=32,
+        num_heads=(2, 4, 4, 2),
+        window_size=(4, 4),
+        mlp_ratio=2.0,
+        drop_path_rate=0.0,
+        padding_conf=padding_conf,
+    ).to(get_device())
+    x = torch.randn(2, 3, *img_shape, device=get_device())
+    assert net(x).shape == (2, 3, *img_shape)
+
+
+def test_earth_padding_cln_forward():
+    img_shape = (9, 18)
+    padding_conf = {
+        "activate": True,
+        "mode": "earth",
+        "pad_lat": [2, 1],
+        "pad_lon": [2, 2],
+    }
+    net = _build_cln_net(3, 3, img_shape, padding_conf=padding_conf).to(get_device())
+    noise = torch.randn(2, _EMBED_DIM_NOISE, *img_shape, device=get_device())
+    ctx = Context(embedding_scalar=None, embedding_pos=None, labels=None, noise=noise)
+    assert net(torch.randn(2, 3, *img_shape, device=get_device()), ctx).shape == (
+        2,
+        3,
+        *img_shape,
+    )

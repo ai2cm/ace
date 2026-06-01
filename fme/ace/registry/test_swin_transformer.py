@@ -175,3 +175,26 @@ def test_nc_swin_transformer_noise_divergence():
         out1 = module(x)
         out2 = module(x)
     assert not torch.allclose(out1, out2), "Expected noise-dependence after step"
+
+
+_PAD_CONF = {"activate": True, "mode": "earth", "pad_lat": [2, 1], "pad_lon": [2, 2]}
+
+
+def test_swin_transformer_earth_padding():
+    module = (
+        _builder(padding_conf=_PAD_CONF)
+        .build(5, 3, _get_dataset_info())
+        .to(fme.get_device())
+    )
+    x = torch.randn(2, 5, *IMG_SHAPE, device=fme.get_device())
+    assert module(x).shape == (2, 3, *IMG_SHAPE)
+
+
+def test_nc_swin_transformer_earth_padding():
+    module = (
+        _nc_builder(padding_conf=_PAD_CONF)
+        .build(5, 3, _get_dataset_info())
+        .to(fme.get_device())
+    )
+    x = torch.randn(2, 5, *IMG_SHAPE, device=fme.get_device())
+    assert module(x).shape == (2, 3, *IMG_SHAPE)

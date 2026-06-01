@@ -11,9 +11,9 @@ export BEAKER_PRIORITY=${BEAKER_PRIORITY:-urgent}
 
 declare -A JOBS=(
   #["ace-train-config-4deg-AIMIP-crossformer.yaml"]="ace2-era5-train-4deg-AIMIP-crossformer"
-  ["ace-train-config-4deg-AIMIP-nc-crossformer.yaml"]="ace2-era5-train-4deg-AIMIP-nc-crossformer"
+  #["ace-train-config-4deg-AIMIP-nc-crossformer.yaml"]="ace2-era5-train-4deg-AIMIP-nc-crossformer"
   #["ace-train-config-4deg-AIMIP-nc-swin.yaml"]="ace2-era5-train-4deg-AIMIP-nc-swin-v2"
-  #["ace-train-config-4deg-AIMIP-swin.yaml"]="ace2-era5-train-4deg-AIMIP-swin-v2"
+  ["ace-train-config-4deg-AIMIP-swin.yaml"]="ace2-era5-train-4deg-AIMIP-swin-v2-earth-pad"
   #["ace-train-config-4deg-AIMIP-sfno.yaml"]="ace2-era5-train-4deg-AIMIP-sfno"
 )
 

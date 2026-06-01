@@ -13,6 +13,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from fme.core.models.boundary_padding import TensorPadding
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
 
 from .swin_layers import BasicLayer, ChannelMixer, PatchExpanding, PatchMerging
@@ -66,6 +67,7 @@ class SwinTransformerNet(nn.Module):
         conditioning: Literal["adaln", "cln"] = "adaln",
         cpb_hidden_dim: int = 64,
         lat_coords: torch.Tensor | None = None,
+        padding_conf: dict | None = None,
     ):
         super().__init__()
         if depth_multiplier < 1:
@@ -79,10 +81,26 @@ class SwinTransformerNet(nn.Module):
 
         ws_h, ws_w = window_size
         self.pad_mult = (ws_h * 2, ws_w * 2)
-        H0, W0 = img_shape
+
+        if padding_conf is None:
+            padding_conf = {"activate": False}
+        self.use_padding = padding_conf["activate"]
+        if self.use_padding:
+            self.padding_opt = TensorPadding(**padding_conf)
+            pl = padding_conf["pad_lat"]
+            pw = padding_conf["pad_lon"]
+            H0 = img_shape[0] + pl[0] + pl[1]
+            W0 = img_shape[1] + pw[0] + pw[1]
+        else:
+            H0, W0 = img_shape
         Hp = math.ceil(H0 / self.pad_mult[0]) * self.pad_mult[0]
         Wp = math.ceil(W0 / self.pad_mult[1]) * self.pad_mult[1]
         self.padded_shape = (Hp, Wp)
+
+        if self.use_padding and lat_coords is not None:
+            north = torch.flip(lat_coords[: pl[0]], dims=[0])
+            south = torch.flip(lat_coords[-pl[1] :], dims=[0])
+            lat_coords = torch.cat([north, lat_coords, south])
 
         if context_config is not None:
             self.embed_dim_scalar = context_config.embed_dim_scalar
@@ -188,6 +206,8 @@ class SwinTransformerNet(nn.Module):
         self.decoder = nn.Conv2d(embed_dim, out_chans, kernel_size=3, padding=1)
 
     def forward(self, x: torch.Tensor, context: Context | None = None) -> torch.Tensor:
+        if self.use_padding:
+            x = self.padding_opt.pad(x)
         _, _, H, W = x.shape
         Hp, Wp = self.padded_shape
         pad_h = Hp - H
@@ -227,6 +247,8 @@ class SwinTransformerNet(nn.Module):
                     "context.noise is required for a cln-conditioned SwinTransformerNet"
                 )
             noise = context.noise  # (B, embed_dim_noise, H, W)
+            if self.use_padding:
+                noise = self.padding_opt.pad(noise)
             if pad_h > 0 or pad_w > 0:
                 noise = F.pad(noise, (0, pad_w, 0, pad_h))
             noise_half = noise[..., ::2, ::2]
@@ -247,4 +269,6 @@ class SwinTransformerNet(nn.Module):
         x = x.permute(0, 3, 1, 2)  # (B, embed_dim, Hp, Wp)
         x = self.decoder(x)  # (B, out_chans, Hp, Wp)
         x = x[..., :H, :W]
+        if self.use_padding:
+            x = self.padding_opt.unpad(x)
         return x
