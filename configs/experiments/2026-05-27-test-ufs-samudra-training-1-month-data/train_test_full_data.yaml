@@ -46,7 +46,7 @@ validation:
     num_data_workers: 8
     dataset:
       data_path: /climate-default
-      file_pattern: ufs-replay-test.zarr
+      file_pattern:  ufs-replay-ocean-1deg-19level-1994-2023.zarr
       engine: zarr
       subset:
         start_time: '2022-01-01T12:00:00'
