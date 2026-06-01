@@ -23,10 +23,12 @@ from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.trainer import (
     AggregatorBuilderABC,
     CheckpointPaths,
+    InferenceTask,
     TrainConfigProtocol,
     Trainer,
     TrainOutputABC,
     TrainStepperABC,
+    build_inference_callback,
     count_parameters,
     epoch_checkpoint_enabled,
     inference_one_epoch,
@@ -1598,3 +1600,129 @@ def test_finetune_ema_checkpoint_loads_ema_state(tmp_path: str):
 
     # decay is from stage2 config, not the checkpoint
     assert float(stage2_ema_state["decay"]) == pytest.approx(stage2_decay)
+
+
+class TestBuildInferenceCallback:
+    @staticmethod
+    def _make_task(name, weight=1.0, epoch_set=frozenset({1})):
+        data = unittest.mock.MagicMock()
+        aggregator_factory = unittest.mock.MagicMock()
+        return InferenceTask(
+            name=name,
+            data=data,
+            aggregator_factory=aggregator_factory,
+            epoch_set=epoch_set,
+            weight=weight,
+        )
+
+    @staticmethod
+    def _call(
+        tasks,
+        inference_one_epoch_side_effect,
+        epoch=1,
+        inference_epochs=(1,),
+    ):
+        stepper = unittest.mock.MagicMock()
+        with unittest.mock.patch(
+            "fme.core.generics.trainer.inference_one_epoch",
+            side_effect=inference_one_epoch_side_effect,
+        ):
+            callback = build_inference_callback(
+                tasks=tasks,
+                inference_epochs=list(inference_epochs),
+                stepper=stepper,
+            )
+            return callback(epoch=epoch)
+
+    def test_epoch_not_in_inference_epochs_returns_empty(self):
+        tasks = [self._make_task("inference")]
+        logs, error = self._call(
+            tasks,
+            inference_one_epoch_side_effect=[],
+            epoch=2,
+            inference_epochs=(1,),
+        )
+        assert logs == {}
+        assert error is None
+
+    def test_single_entry_weighted_error(self):
+        tasks = [self._make_task("inference", weight=2.0)]
+        logs, error = self._call(
+            tasks,
+            [{"inference/time_mean_norm/rmse/channel_mean": 0.4}],
+        )
+        assert error == pytest.approx(2.0 * 0.4)
+        assert "inference/time_mean_norm/rmse/channel_mean" in logs
+
+    def test_zero_weight_excluded_from_error(self):
+        tasks = [
+            self._make_task("a", weight=1.0),
+            self._make_task("b", weight=0.0),
+        ]
+        logs, error = self._call(
+            tasks,
+            [
+                {"a/time_mean_norm/rmse/channel_mean": 0.3},
+                {"b/time_mean_norm/rmse/channel_mean": 999.0},
+            ],
+        )
+        assert error == pytest.approx(0.3)
+        assert "a/time_mean_norm/rmse/channel_mean" in logs
+        assert "b/time_mean_norm/rmse/channel_mean" in logs
+
+    def test_multiple_weighted_entries(self):
+        tasks = [
+            self._make_task("a", weight=2.0),
+            self._make_task("b", weight=3.0),
+        ]
+        logs, error = self._call(
+            tasks,
+            [
+                {"a/time_mean_norm/rmse/channel_mean": 0.1},
+                {"b/time_mean_norm/rmse/channel_mean": 0.2},
+            ],
+        )
+        assert error == pytest.approx(2.0 * 0.1 + 3.0 * 0.2)
+
+    def test_entry_skipped_when_not_in_epoch_set(self):
+        tasks = [
+            self._make_task("a", weight=1.0, epoch_set=frozenset({1})),
+            self._make_task("b", weight=1.0, epoch_set=frozenset({2})),
+        ]
+        logs, error = self._call(
+            tasks,
+            [{"a/time_mean_norm/rmse/channel_mean": 0.5}],
+            epoch=1,
+            inference_epochs=(1,),
+        )
+        assert error == pytest.approx(0.5)
+        assert "a/time_mean_norm/rmse/channel_mean" in logs
+        assert "b/time_mean_norm/rmse/channel_mean" not in logs
+
+    def test_weighted_entry_missing_metric_raises(self):
+        tasks = [self._make_task("a", weight=1.0)]
+        with pytest.raises(RuntimeError, match="did not produce expected metric key"):
+            self._call(
+                tasks,
+                [{"a/other_metric": 1.0}],
+            )
+
+    def test_all_zero_weight_returns_none_error(self):
+        tasks = [self._make_task("a", weight=0.0)]
+        logs, error = self._call(
+            tasks,
+            [{"a/time_mean_norm/rmse/channel_mean": 0.5}],
+        )
+        assert error is None
+        assert "a/time_mean_norm/rmse/channel_mean" in logs
+
+    def test_all_tasks_skipped_returns_none_error(self):
+        tasks = [self._make_task("a", epoch_set=frozenset({2}))]
+        logs, error = self._call(
+            tasks,
+            inference_one_epoch_side_effect=[],
+            epoch=1,
+            inference_epochs=(1,),
+        )
+        assert logs == {}
+        assert error is None
