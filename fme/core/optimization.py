@@ -177,17 +177,51 @@ class Optimization(OptimizationABC):
             self.gscaler.scale(loss).backward()
         else:
             loss.backward()
+        if self._max_grad_norm is not None:
+            nan_grad_count = sum(
+                1
+                for group in self.optimizer.param_groups
+                for p in group["params"]
+                if p.grad is not None and not torch.isfinite(p.grad).all()
+            )
+            if nan_grad_count:
+                raise ValueError(
+                    f"NaN/inf detected in gradients of {nan_grad_count} parameter "
+                    "tensor(s) immediately after backward pass. The forward pass or "
+                    "loss computation produced NaN values that propagated through "
+                    "autograd."
+                )
 
     def _step_weights(self):
         if self._max_grad_norm is not None:
             if self.gscaler is not None:
                 self.gscaler.unscale_(self.optimizer)
             params = [p for g in self.optimizer.param_groups for p in g["params"]]
+            pre_clip_norm = torch.nn.utils.clip_grad_norm_(params, float("inf"))
+            if not torch.isfinite(pre_clip_norm):
+                raise ValueError(
+                    f"Gradient norm is {pre_clip_norm.item()} before clipping — "
+                    "the backward pass produced NaN/inf gradients. "
+                    "Gradient clipping cannot prevent weight corruption. "
+                    "Check for numerical instability in the forward or backward pass "
+                    "(e.g. CLN scale blowup, attention logit overflow)."
+                )
             torch.nn.utils.clip_grad_norm_(params, self._max_grad_norm)
         if self.gscaler is not None:
             self.gscaler.step(self.optimizer)
         else:
             self.optimizer.step()
+        if self._max_grad_norm is not None:
+            params = [p for g in self.optimizer.param_groups for p in g["params"]]
+            nan_param_count = sum(1 for p in params if not torch.isfinite(p).all())
+            if nan_param_count:
+                raise ValueError(
+                    f"NaN/inf detected in {nan_param_count} parameter tensor(s) "
+                    "after optimizer step. Pre-clip gradient norm was finite — "
+                    "the optimizer update itself introduced NaN "
+                    "(possible cause: Adam second-moment underflow with very large "
+                    "gradients)."
+                )
 
     def step_weights(self):
         if not self._use_gradient_accumulation:
