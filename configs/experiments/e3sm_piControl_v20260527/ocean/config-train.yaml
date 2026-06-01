@@ -33,7 +33,7 @@ inference:
     weight: 0.0
     epochs:
       start: 0
-      step: 5    
+      step: 5
     n_forward_steps: 730
     forward_steps_in_memory: 20
     loader:
@@ -116,7 +116,7 @@ stepper:
     mask_value: 0
     fill_value: 0
     exclude_names_and_prefixes:
-    - land_fraction
+    - LANDFRAC
     - TAUX
     - TAUY
     - surface_precipitation_rate
@@ -126,7 +126,7 @@ stepper:
     - FLDS
     - FSDS
     - LHFLX
-    - SHFLX    
+    - SHFLX
   step:
     type: single_module
     config:
@@ -200,8 +200,8 @@ stepper:
       in_names:
       # time-invariant
       - LANDFRAC
-      - sea_surface_fraction    
-      # atmosphere forcing  
+      - sea_surface_fraction
+      # atmosphere forcing
       - TAUX
       - TAUY
       - surface_precipitation_rate
@@ -293,7 +293,7 @@ stepper:
       - velocityMeridionalCoarsened_18
       # sea ice prognostic
       - ocean_sea_ice_fraction
-      - iceVolumeTotal      
+      - iceVolumeTotal
       out_names:
       - sst
       - ssh
