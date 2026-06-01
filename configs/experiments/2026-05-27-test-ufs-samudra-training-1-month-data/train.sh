@@ -10,7 +10,7 @@ CONFIG_PATH="${SCRIPT_PATH}${CONFIG_FILENAME}"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=4
-STATS_DATA=01KT0GDTNWS9FRMNJZ8EZEZ5A6
+STATS_DATA="troya/2026-06-01-ufs-replay-ocean-1deg-19level-1994-2023-stats"
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
