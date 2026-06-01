@@ -255,6 +255,55 @@ def test_aggregator_norm_logs_channel_mean_subset():
         )
 
 
+def test_aggregator_report_variables_filters_per_variable_but_keeps_channel_mean():
+    torch.manual_seed(0)
+    area_weights = torch.ones([4, 4], device=get_device())
+    names = ["a", "b", "c"]
+    target = _make_ensemble_batch(names)
+    gen = _make_ensemble_batch(names)
+
+    agg_full = _EnsembleAggregator(
+        gridded_operations=LatLonOperations(area_weights),
+        log_mean_maps=False,
+        target="norm",
+        channel_mean_names=names,
+    )
+    agg_full.record_batch(
+        target_data=target,
+        gen_data=gen,
+        target_data_norm=target,
+        gen_data_norm=gen,
+    )
+    full_logs = agg_full.get_logs(label="metrics")
+
+    agg_filtered = _EnsembleAggregator(
+        gridded_operations=LatLonOperations(area_weights),
+        log_mean_maps=False,
+        target="norm",
+        channel_mean_names=names,
+        report_variables=["a"],
+    )
+    agg_filtered.record_batch(
+        target_data=target,
+        gen_data=gen,
+        target_data_norm=target,
+        gen_data_norm=gen,
+    )
+    filtered_logs = agg_filtered.get_logs(label="metrics")
+
+    for metric in ("crps", "ssr_bias", "ensemble_mean_rmse"):
+        assert f"metrics/{metric}/a" in filtered_logs
+        assert f"metrics/{metric}/b" not in filtered_logs
+        assert f"metrics/{metric}/c" not in filtered_logs
+        assert f"metrics/{metric}/channel_mean" in filtered_logs
+        torch.testing.assert_close(
+            torch.tensor(float(filtered_logs[f"metrics/{metric}/channel_mean"])),
+            torch.tensor(float(full_logs[f"metrics/{metric}/channel_mean"])),
+            atol=1e-6,
+            rtol=1e-6,
+        )
+
+
 def test_aggregator_norm_raises_on_unknown_channel_mean_names():
     """Names in channel_mean_names that aren't in the data raise KeyError."""
     torch.manual_seed(0)
