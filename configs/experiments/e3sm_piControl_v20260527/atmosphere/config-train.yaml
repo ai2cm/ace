@@ -8,7 +8,7 @@ inference:
   - name: inference
     weight: 1.0
     n_forward_steps: 8760
-    forward_steps_in_memory: 40
+    forward_steps_in_memory: 20
     loader:
       start_indices:
         times:
@@ -36,7 +36,7 @@ inference:
         - data_path: /pscratch/sd/e/elynnwu/fme-dataset
           file_pattern: 2026-05-26-E3SMv3-piControl-atmosphere-100yr-6H.zarr
           engine: zarr
-      num_data_workers: 4
+      num_data_workers: 2
     aggregator:
       log_histograms: true
   - name: 10yr_test
@@ -45,7 +45,7 @@ inference:
       start: 0
       step: 5        
     n_forward_steps: 14600
-    forward_steps_in_memory: 40
+    forward_steps_in_memory: 20
     loader:
       start_indices:
         times:
@@ -73,7 +73,7 @@ inference:
         - data_path: /pscratch/sd/e/elynnwu/fme-dataset
           file_pattern: 2026-05-26-E3SMv3-piControl-atmosphere-100yr-6H.zarr
           engine: zarr
-      num_data_workers: 4
+      num_data_workers: 2
     aggregator:
       log_histograms: true      
 logging:
@@ -84,9 +84,9 @@ logging:
   entity: ai2cm
 train_loader:
   batch_size: 16
-  num_data_workers: 4
+  num_data_workers: 2
   time_buffer: 10
-  prefetch_factor: 2
+  prefetch_factor: 1
   dataset:
     merge:
     - data_path: /pscratch/sd/e/elynnwu/fme-dataset
@@ -104,9 +104,9 @@ train_loader:
 validation:
   loader:
     batch_size: 32
-    num_data_workers: 4
+    num_data_workers: 2
     time_buffer: 10
-    prefetch_factor: 2
+    prefetch_factor: 1
     dataset:
       merge:
       - data_path: /pscratch/sd/e/elynnwu/fme-dataset
