@@ -251,3 +251,38 @@ def test_per_source_normalization_from_directory():
     )
     step = _build_step(config, all_labels={"model_a"})
     assert "model_a" in step._per_source_normalizer._normalizers
+
+
+def test_allow_missing_variables_delegates_to_builder():
+    """``Cmip6StepConfig.allow_missing_variables`` reads off the
+    builder's flag, mirroring SingleModuleStepConfig. The trainer
+    keys on this to decide whether the data loader can emit
+    masked-variable batches — needed for multi-model cohorts where
+    sub-universal outputs (radiation / heat-flux diagnostics) are
+    absent from a substantial fraction of datasets."""
+    in_names = ["ta1000"]
+    out_names = ["ta1000"]
+    normalization = _get_normalization(in_names)
+
+    default_config = Cmip6StepConfig(
+        builder=ModuleSelector(
+            type="SphericalFourierNeuralOperatorNet",
+            config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+        ),
+        in_names=in_names,
+        out_names=out_names,
+        normalization=normalization,
+    )
+    assert default_config.allow_missing_variables is False
+
+    permissive_config = Cmip6StepConfig(
+        builder=ModuleSelector(
+            type="SphericalFourierNeuralOperatorNet",
+            config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+            allow_missing_variables=True,
+        ),
+        in_names=in_names,
+        out_names=out_names,
+        normalization=normalization,
+    )
+    assert permissive_config.allow_missing_variables is True

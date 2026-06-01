@@ -565,8 +565,10 @@ validation:
         # historical r1 stays in train; eval is ssp245 + ssp585 only.
         experiments: [ssp245, ssp585]
 
-  # (D) eval window: 1970-07-01 to 1989-06-30 (6-month gap from train
-  # data which ends 1969-12-31 / starts 1990-01-01).
+  # (D) eval window: 1970-07-01 to 1989-06-30 — inverse of the
+  # train_loader.time_masks block. The 6-month gap on either side of
+  # the cut (train ends 1969-12-31, starts again 1990-01-01) means no
+  # eval timestep sits within 6 months of a training timestep.
   - name: val_holdout_years
     weight: 0.0
     loader:
@@ -579,18 +581,11 @@ validation:
         engine: netcdf4
         source_ids: [INM-CM5-0, NorESM2-LM]
         experiments: [historical]
-        # No exclude_variants here: we want all variants of these two
-        # historical sources, since the train_loader's time_mask drops
-        # 1970-1989 from the same datasets — so this eval window is
-        # already disjoint from the train data.
-        # TimeSlice via time_masks on the train side; on the eval side
-        # the loader's dataset config doesn't support per-(source,
-        # experiment) time slicing yet, so the eval covers the full
-        # historical period. The val metric isn't checkpoint-driving
-        # so the contamination is bounded.
-        # TODO: extend Cmip6DataConfig with a positive-window
-        # selection that mirrors time_masks but keeps the masked
-        # window (i.e. invert the polarity) for cleaner eval framing.
+        time_keeps:
+          - source_ids: [INM-CM5-0, NorESM2-LM]
+            experiments: [historical]
+            keep_start: '1970-07-01'
+            keep_end: '1989-06-30'
 
 logging:
   log_to_screen: true
@@ -721,6 +716,12 @@ stepper:
         # centering/scaling stack per dataset. Cmip6DataConfig
         # propagates one label per (source_id, variant) row.
         conditional: true
+        # Tolerate sub-universal output variables (radiation /
+        # heat-flux diagnostics missing from ~half the cohort) by
+        # masking them per-sample rather than dropping the dataset.
+        # Cmip6StepConfig delegates allow_missing_variables to this
+        # flag.
+        allow_missing_variables: true
         config:
           embed_dim: 512
           noise_embed_dim: 32

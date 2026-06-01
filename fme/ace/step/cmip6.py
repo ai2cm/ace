@@ -106,6 +106,18 @@ class Cmip6StepConfig(StepConfigABC):
     def n_ic_timesteps(self) -> int:
         return 1
 
+    @property
+    def allow_missing_variables(self) -> bool:
+        # Mirror SingleModuleStepConfig: the trainer reads this off
+        # the step config to decide whether the data pipeline can emit
+        # masked variables. Cmip6Step's forward already handles a
+        # masked TensorDict, so we just expose the builder flag here
+        # — set ``builder.allow_missing_variables: true`` in the YAML
+        # when sub-universal outputs (e.g. v2's radiation/heat-flux
+        # diagnostics, which are missing from ~half the cohort) should
+        # be tolerated rather than causing dataset drops.
+        return self.builder.allow_missing_variables
+
     def get_state(self):
         return dataclasses.asdict(self)
 

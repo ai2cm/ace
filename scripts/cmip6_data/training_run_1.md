@@ -205,8 +205,12 @@ sources spanning 5 families:
 - `CNRM-CM6-1/ssp585/r2i1p1f2` (same source, ssp585 sibling)
 - `CNRM-ESM2-1/historical/r2i1p1f2` (CNRM family)
 - `MRI-ESM2-0/historical/r2i1p1f1` (GFDL/MRI family)
-- `EC-Earth3/ssp585/r2i1p1f1` (EC-Earth family, doubles as the
-  unusual-response-shape probe — see (A) inline inference below)
+- `EC-Earth3/ssp585/r3i1p1f1` (EC-Earth family, doubles as the
+  unusual-response-shape probe — see (A) inline inference below).
+  EC-Earth3/ssp585 has no `r2i1p1f1` variant in v2 (available are
+  r1, r3, r4); r1 has a publisher-side full-slab NaN issue (v2
+  report §8b), so r3 is the cleanest pick at the planned "second
+  realisation" slot.
 - `IPSL-CM6A-LR/historical/r2i1p1f1` (IPSL/MIROC family)
 
 = **6 datasets** across 5 sources, 5 families.
@@ -215,10 +219,10 @@ EC-Earth3 itself sits in (A) rather than EC-Earth3-Veg-LR so that the
 held-out variant rollout doubles as the test of whether the embedding
 captured EC-Earth3's unusual stratospheric warming-response shape
 (`zg10` Δ=−290 m vs cohort −30; see "Warming response" above). The
-model has seen EC-Earth3/historical + ssp245 + 2 other ssp585
-variants in training, so this asks whether the embedding *represents*
-that shape in a transferable way — stronger test than an in-sample
-rollout.
+model has seen EC-Earth3/historical + ssp245 + the other ssp585
+variants (r1, r4) in training, so this asks whether the embedding
+*represents* that shape in a transferable way — stronger test than an
+in-sample rollout.
 
 ### B. Held-out (model, ssp585) — future-scenario extrapolation
 
@@ -472,7 +476,7 @@ inference:
       dataset:
         source_ids: [EC-Earth3]
         experiments: [ssp585]
-        realizations: [2]
+        realizations: [3]   # r3i1p1f1 — see "Held-out cohorts §A" note
       start_indices: { times: [2015-03-01, 2015-06-01, 2015-09-01, 2015-12-01] }
 
   # ----- (B) future scenario — one entry per held-out source -----

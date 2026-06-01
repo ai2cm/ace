@@ -56,6 +56,40 @@ class Cmip6TimeMask:
 
 
 @dataclasses.dataclass
+class Cmip6TimeKeep:
+    """The inverse of :class:`Cmip6TimeMask`: keep only a contiguous
+    time window of datasets matching the ``source_ids`` ×
+    ``experiments`` filter.
+
+    Designed for the eval side of the temporal-interpolation holdout:
+    the train loader runs with ``time_masks`` to drop a window, and
+    the matching val loader runs with ``time_keeps`` covering the
+    same window (or a sub-window with a temporal gap from the train
+    set) to evaluate exactly the held-out period.
+
+    Each matched dataset becomes a single XarrayDataConfig entry with
+    a ``TimeSlice(start_time=keep_start, stop_time=keep_end)``.
+    Calendar-independent, same as ``Cmip6TimeMask``.
+
+    Parameters:
+        source_ids: Source models the keep applies to.
+        experiments: Experiments the keep applies to.
+        keep_start: Inclusive start of the retained window
+            (e.g. ``"1970-07-01"``).
+        keep_end: Inclusive end of the retained window
+            (e.g. ``"1989-06-30"``).
+    """
+
+    source_ids: list[str]
+    experiments: list[str]
+    keep_start: str
+    keep_end: str
+
+    def matches(self, source_id: str, experiment: str) -> bool:
+        return source_id in self.source_ids and experiment in self.experiments
+
+
+@dataclasses.dataclass
 class Cmip6DataConfig(DatasetConfigABC):
     """Configuration for loading CMIP6 processed datasets.
 
@@ -83,6 +117,15 @@ class Cmip6DataConfig(DatasetConfigABC):
             entry. Only one mask per (source_id, experiment) is
             supported; overlapping configurations raise at
             ``__post_init__``.
+        time_keeps: Inverse of ``time_masks``: keep only a contiguous
+            window per matched (source_id, experiment) pair. Each
+            matched dataset becomes a single XarrayDataConfig with
+            ``TimeSlice(start_time, stop_time)``. Used on the eval
+            side of the temporal-interpolation holdout (the train
+            loader drops the window with ``time_masks``; the val
+            loader keeps the same window with ``time_keeps``). One
+            keep per (source_id, experiment); a single dataset
+            can't be in both ``time_masks`` and ``time_keeps``.
         engine: Xarray engine for reading data files. "zarr" reads data.zarr
             stores, "netcdf4" reads data.nc files. Use "netcdf4" with
             zarr_to_netcdf.py-converted datasets for fork-safe data workers.
@@ -97,6 +140,7 @@ class Cmip6DataConfig(DatasetConfigABC):
     realizations: list[int] | None = None
     exclude_variants: list[list[str]] = dataclasses.field(default_factory=list)
     time_masks: list[Cmip6TimeMask] = dataclasses.field(default_factory=list)
+    time_keeps: list[Cmip6TimeKeep] = dataclasses.field(default_factory=list)
     engine: Literal["zarr", "netcdf4"] = "zarr"
 
     def __post_init__(self):
@@ -113,18 +157,41 @@ class Cmip6DataConfig(DatasetConfigABC):
         # Disallow overlapping time_masks on the same (source, experiment) —
         # the pre/post split this class produces assumes a single mask
         # window per dataset.
-        seen: set[tuple[str, str]] = set()
+        seen_masks: set[tuple[str, str]] = set()
         for mask in self.time_masks:
             for src in mask.source_ids:
                 for exp in mask.experiments:
                     key = (src, exp)
-                    if key in seen:
+                    if key in seen_masks:
                         raise ValueError(
                             f"Multiple time_masks match ({src!r}, {exp!r}); "
                             "only one mask per (source_id, experiment) is "
                             "supported."
                         )
-                    seen.add(key)
+                    seen_masks.add(key)
+        # Same constraint for time_keeps. Additionally, a single
+        # (source_id, experiment) pair can't be in both ``time_masks``
+        # and ``time_keeps`` — the two are inverse operations and
+        # mixing them on the same dataset would produce an
+        # contradictory slice list.
+        seen_keeps: set[tuple[str, str]] = set()
+        for keep in self.time_keeps:
+            for src in keep.source_ids:
+                for exp in keep.experiments:
+                    key = (src, exp)
+                    if key in seen_keeps:
+                        raise ValueError(
+                            f"Multiple time_keeps match ({src!r}, {exp!r}); "
+                            "only one keep per (source_id, experiment) is "
+                            "supported."
+                        )
+                    if key in seen_masks:
+                        raise ValueError(
+                            f"({src!r}, {exp!r}) is in both time_masks and "
+                            "time_keeps; the two are inverse operations and "
+                            "a single dataset can be in at most one."
+                        )
+                    seen_keeps.add(key)
 
     @property
     def _file_pattern(self) -> str:
@@ -193,10 +260,17 @@ class Cmip6DataConfig(DatasetConfigABC):
                 return mask
         return None
 
+    def _find_time_keep(self, source_id: str, experiment: str) -> Cmip6TimeKeep | None:
+        for keep in self.time_keeps:
+            if keep.matches(source_id, experiment):
+                return keep
+        return None
+
     def _build_concat_config(self) -> ConcatDatasetConfig:
         idx = self._load_and_filter_index()
         configs: list[XarrayDataConfig] = []
         n_masked = 0
+        n_kept = 0
         for _, row in idx.iterrows():
             data_path = os.path.join(
                 self.data_dir,
@@ -204,6 +278,24 @@ class Cmip6DataConfig(DatasetConfigABC):
                 row["experiment"],
                 row["variant_label"],
             )
+            keep = self._find_time_keep(row["source_id"], row["experiment"])
+            if keep is not None:
+                # Positive-window: one entry covering only
+                # ``[keep_start, keep_end]``. Label preserved.
+                configs.append(
+                    XarrayDataConfig(
+                        data_path=data_path,
+                        file_pattern=self._file_pattern,
+                        engine=self.engine,
+                        labels=[row["label"]],
+                        subset=TimeSlice(
+                            start_time=keep.keep_start,
+                            stop_time=keep.keep_end,
+                        ),
+                    )
+                )
+                n_kept += 1
+                continue
             mask = self._find_time_mask(row["source_id"], row["experiment"])
             if mask is None:
                 configs.append(
@@ -240,10 +332,11 @@ class Cmip6DataConfig(DatasetConfigABC):
             n_masked += 1
         logger.info(
             "Cmip6DataConfig: %d datasets from %d source models "
-            "(%d masked into pre/post slices)",
+            "(%d masked into pre/post slices, %d kept to a window)",
             len(configs),
             idx["source_id"].nunique(),
             n_masked,
+            n_kept,
         )
         return ConcatDatasetConfig(concat=configs, strict=False)
 

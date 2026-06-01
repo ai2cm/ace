@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from fme.ace.data_loading.cmip6 import Cmip6DataConfig, Cmip6TimeMask
+from fme.ace.data_loading.cmip6 import Cmip6DataConfig, Cmip6TimeKeep, Cmip6TimeMask
 from fme.core.dataset.time import TimeSlice
 from fme.core.dataset.xarray import XarrayDataConfig
 
@@ -474,4 +474,124 @@ def test_time_mask_end_to_end_build(cmip6_netcdf_dir):
     # crossing it are dropped — exact count depends on the concat
     # internals. The substantive assertion: dataset built without
     # error and is non-empty.
+    assert len(dataset) > 0
+
+
+# ---------------------------------------------------------------------------
+# time_keeps: keep only a contiguous window of matched datasets
+# (inverse of time_masks; for the eval side of temporal-interp holdouts)
+# ---------------------------------------------------------------------------
+
+
+def test_time_keep_restricts_matched_dataset_to_window(cmip6_data_dir):
+    """``time_keeps`` produces one XarrayDataConfig per matched
+    dataset, with ``TimeSlice(start_time=keep_start, stop_time=
+    keep_end)``. Unmatched datasets keep their default un-subsetted
+    entry."""
+    config = Cmip6DataConfig(
+        data_dir=cmip6_data_dir,
+        experiments=["historical", "ssp585"],
+        time_keeps=[
+            Cmip6TimeKeep(
+                source_ids=["ModelA"],
+                experiments=["historical"],
+                keep_start="2000-01-04",
+                keep_end="2000-01-07",
+            )
+        ],
+    )
+    concat = config._get_concat_config()
+    # ModelA/historical r1 + r2: 2 datasets, each becomes ONE windowed entry.
+    # ModelA/ssp585 r1: 1 dataset, untouched (no time mask, no time keep).
+    # ModelB/historical r1: 1 dataset, untouched.
+    # Total: 4 entries (not split — unlike time_masks).
+    assert len(concat.concat) == 4
+    windowed = [
+        e
+        for e in concat.concat
+        if isinstance(e.subset, TimeSlice) and e.subset.start_time == "2000-01-04"
+    ]
+    assert len(windowed) == 2
+    for entry in windowed:
+        assert isinstance(entry.subset, TimeSlice)
+        assert entry.subset.stop_time == "2000-01-07"
+        assert "ModelA/historical/" in entry.data_path
+        assert entry.labels == ["ModelA.p1"]
+
+
+def test_time_keep_and_time_mask_on_same_pair_raises():
+    """A single (source, experiment) pair can't appear in both
+    time_masks and time_keeps — the two are inverse operations and
+    mixing them produces a contradictory slice list."""
+    with pytest.raises(ValueError, match="both time_masks and time_keeps"):
+        Cmip6DataConfig(
+            data_dir="/nonexistent",
+            time_masks=[
+                Cmip6TimeMask(
+                    source_ids=["ModelA"],
+                    experiments=["historical"],
+                    keep_before="1969-12-31",
+                    keep_after="1990-01-01",
+                )
+            ],
+            time_keeps=[
+                Cmip6TimeKeep(
+                    source_ids=["ModelA"],
+                    experiments=["historical"],
+                    keep_start="1970-07-01",
+                    keep_end="1989-06-30",
+                )
+            ],
+        )
+
+
+def test_time_keep_overlapping_configs_raise():
+    """Two keeps targeting the same (source, experiment) pair is a
+    config bug — raise at __post_init__."""
+    with pytest.raises(ValueError, match="Multiple time_keeps match"):
+        Cmip6DataConfig(
+            data_dir="/nonexistent",
+            time_keeps=[
+                Cmip6TimeKeep(
+                    source_ids=["ModelA"],
+                    experiments=["historical"],
+                    keep_start="1970-01-01",
+                    keep_end="1980-12-31",
+                ),
+                Cmip6TimeKeep(
+                    source_ids=["ModelA", "ModelB"],
+                    experiments=["historical"],
+                    keep_start="1990-01-01",
+                    keep_end="2000-12-31",
+                ),
+            ],
+        )
+
+
+def test_time_keep_end_to_end_build(cmip6_netcdf_dir):
+    """End-to-end smoke: keep only timesteps 4-7 of a 10-step fixture
+    via ``time_keeps``, build the dataset, and confirm it's non-empty.
+    Complements the time_masks end-to-end test by exercising the
+    opposite polarity."""
+    from fme.core.dataset.schedule import IntSchedule
+
+    config = Cmip6DataConfig(
+        data_dir=cmip6_netcdf_dir,
+        source_ids=["ModelA"],
+        experiments=["historical"],
+        realizations=[1],
+        engine="netcdf4",
+        time_keeps=[
+            Cmip6TimeKeep(
+                source_ids=["ModelA"],
+                experiments=["historical"],
+                keep_start="2000-01-04",
+                keep_end="2000-01-07",
+            )
+        ],
+    )
+    dataset, _properties = config.build(
+        names=["tas", "pr"],
+        n_timesteps=IntSchedule.from_constant(2),
+    )
     assert len(dataset) > 0
