@@ -32,6 +32,7 @@ from migrations._0_3_0_to_0_4_0 import MIGRATION as _M_0_3_0_TO_0_4_0  # noqa: E
 from migrations._0_4_0_to_0_5_0 import MIGRATION as _M_0_4_0_TO_0_5_0  # noqa: E402
 from migrations._0_5_0_to_0_6_0 import MIGRATION as _M_0_5_0_TO_0_6_0  # noqa: E402
 from migrations._0_6_0_to_0_7_0 import MIGRATION as _M_0_6_0_TO_0_7_0  # noqa: E402
+from migrations._0_7_0_to_0_8_0 import MIGRATION as _M_0_7_0_TO_0_8_0  # noqa: E402
 
 MIGRATIONS: tuple[Migration, ...] = (
     _M_0_0_0_TO_0_1_0,
@@ -41,6 +42,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     _M_0_4_0_TO_0_5_0,
     _M_0_5_0_TO_0_6_0,
     _M_0_6_0_TO_0_7_0,
+    _M_0_7_0_TO_0_8_0,
 )
 
 

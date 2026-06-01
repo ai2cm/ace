@@ -83,20 +83,16 @@ def test_chain_for_empty_when_at_target():
 
 def test_chain_for_returns_registered_steps():
     from migrations import MIGRATIONS, chain_for
+    from schema_version import SCHEMA_VERSION
 
     if not MIGRATIONS:
         pytest.skip("no migrations registered yet")
-    # Validate chain composition up to the last registered migration.
-    # ``SCHEMA_VERSION`` may legitimately be ahead of the chain when a
-    # new data-format change is deferred to fresh ingest rather than
-    # an in-place migration (e.g. v2 stays at 0.7.0; v3 will be
-    # processed fresh at 0.8.0 — no 0.7.0 → 0.8.0 step is registered).
-    last_registered = MIGRATIONS[-1].to_version
-    chain = chain_for("0.0.0", last_registered)
+    chain = chain_for("0.0.0", SCHEMA_VERSION)
+    # Chain composes: each step starts where the previous ended.
     assert chain[0].from_version == "0.0.0"
     for prev, curr in zip(chain, chain[1:]):
         assert prev.to_version == curr.from_version
-    assert chain[-1].to_version == last_registered
+    assert chain[-1].to_version == SCHEMA_VERSION
 
 
 def test_chain_for_raises_on_unreachable_target():
@@ -152,15 +148,7 @@ def test_migrate_one_missing_sidecar(tmp_path: Path):
 
 def test_migrate_one_dry_run_describes_chain(tmp_path: Path):
     from migrate import migrate_one
-    from migrations import MIGRATIONS
-
-    # Target the last registered migration step rather than
-    # ``SCHEMA_VERSION`` — when a new data-format change is deferred
-    # to fresh ingest (e.g. v3 with ``surface_temperature``), the
-    # schema version can be ahead of the migration chain. The
-    # dry-run path's contract is still "describe what would happen
-    # for the registered steps".
-    target_version = MIGRATIONS[-1].to_version
+    from schema_version import SCHEMA_VERSION
 
     zarr = _make_sidecar_only_dataset(
         tmp_path,
@@ -172,10 +160,10 @@ def test_migrate_one_dry_run_describes_chain(tmp_path: Path):
             # No schema_version → treated as 0.0.0.
         },
     )
-    status, detail = migrate_one(zarr, target_version=target_version, dry_run=True)
+    status, detail = migrate_one(zarr, target_version=SCHEMA_VERSION, dry_run=True)
     assert status == "would-migrate"
     assert "0.0.0" in detail
-    assert target_version in detail
+    assert SCHEMA_VERSION in detail
     # Dry-run must NOT mutate the sidecar.
     after = json.loads((Path(zarr) / "metadata.json").read_text())
     assert after.get("schema_version", "") == ""
@@ -1082,6 +1070,118 @@ def test_migration_0_6_0_to_0_7_0_refuses_when_time_end_mismatch(tmp_path: Path)
     sc["time_end"] = "2099-12-31 12:00:00"
     with pytest.raises(RuntimeError, match="time_end.*expected"):
         MIGRATION.apply(str(z), sc)
+
+
+# ---------------------------------------------------------------------------
+# 0.7.0 → 0.8.0 — rename eday_ts → surface_temperature in zarr
+# ---------------------------------------------------------------------------
+
+
+def _make_0_7_0_zarr_with_eday(tmp_path: Path, with_eday: bool) -> Path:
+    """Tiny F22.5-grid zarr at schema 0.7.0 layout. ``with_eday``
+    toggles whether ``eday_ts`` is present (testing the rename path
+    vs the no-op-bump path)."""
+    zarr_dir = tmp_path / "data.zarr"
+    nt, nlat, nlon = 5, 45, 90
+    times = xr.date_range("2010-01-01", periods=nt, freq="D", calendar="noleap")
+    rng = np.random.default_rng(0)
+    psl = rng.normal(101325, 100, size=(nt, nlat, nlon)).astype(np.float32)
+    data_vars: dict[str, xr.DataArray] = {
+        "psl": xr.DataArray(
+            psl,
+            dims=("time", "lat", "lon"),
+            coords={"time": times},
+            attrs={"units": "Pa"},
+        ),
+    }
+    if with_eday:
+        eday = rng.normal(280, 5, size=(nt, nlat, nlon)).astype(np.float32)
+        data_vars["eday_ts"] = xr.DataArray(
+            eday,
+            dims=("time", "lat", "lon"),
+            coords={"time": times},
+            attrs={"units": "K", "original_name": "ts"},
+        )
+    ds = xr.Dataset(data_vars)
+    ds.to_zarr(str(zarr_dir), mode="w", consolidated=True, zarr_format=3)
+    return zarr_dir
+
+
+def test_migration_0_7_0_to_0_8_0_renames_eday_ts(tmp_path: Path):
+    """The 0.7.0 → 0.8.0 migration moves ``eday_ts`` to
+    ``surface_temperature`` in the zarr (storage-level rename
+    preserves the data byte-for-byte), updates the sidecar's
+    ``variables_present``, regenerates ``stats.nc``, and bumps the
+    schema version."""
+    from migrations._0_7_0_to_0_8_0 import MIGRATION
+
+    zarr_dir = _make_0_7_0_zarr_with_eday(tmp_path, with_eday=True)
+    # Capture the pre-rename data so we can verify integrity.
+    pre = xr.open_zarr(str(zarr_dir), consolidated=True)
+    pre_values = pre["eday_ts"].values.copy()
+    pre_psl_values = pre["psl"].values.copy()
+    pre.close()
+
+    sidecar = {
+        "source_id": "TEST",
+        "experiment": "historical",
+        "variant_label": "r1i1p1f1",
+        "label": "TEST.p1",
+        "target_grid": "F22.5",
+        "schema_version": "0.7.0",
+        "variables_present": ["eday_ts", "psl"],
+    }
+
+    out = MIGRATION.apply(str(zarr_dir), sidecar)
+
+    assert out["schema_version"] == "0.8.0"
+    assert "surface_temperature" in out["variables_present"]
+    assert "eday_ts" not in out["variables_present"]
+    assert "psl" in out["variables_present"]
+    audit = out["migrations"][-1]
+    assert audit == {
+        "from": "0.7.0",
+        "to": "0.8.0",
+        "renamed": {"eday_ts": "surface_temperature"},
+    }
+
+    # On-disk: eday_ts gone, surface_temperature present with same data.
+    post = xr.open_zarr(str(zarr_dir), consolidated=True)
+    assert "eday_ts" not in post.data_vars
+    assert "surface_temperature" in post.data_vars
+    np.testing.assert_array_equal(post["surface_temperature"].values, pre_values)
+    np.testing.assert_array_equal(post["psl"].values, pre_psl_values)
+    post.close()
+
+
+def test_migration_0_7_0_to_0_8_0_no_eday_is_sidecar_only(tmp_path: Path):
+    """Datasets without ``eday_ts`` in v2 (~60% of the cohort) skip
+    the zarr rename and become a pure sidecar bump. Audit records an
+    empty rename map."""
+    from migrations._0_7_0_to_0_8_0 import MIGRATION
+
+    zarr_dir = _make_0_7_0_zarr_with_eday(tmp_path, with_eday=False)
+    sidecar = {
+        "source_id": "TEST",
+        "experiment": "historical",
+        "variant_label": "r1i1p1f1",
+        "label": "TEST.p1",
+        "target_grid": "F22.5",
+        "schema_version": "0.7.0",
+        "variables_present": ["psl"],
+    }
+
+    out = MIGRATION.apply(str(zarr_dir), sidecar)
+
+    assert out["schema_version"] == "0.8.0"
+    assert out["variables_present"] == ["psl"]
+    audit = out["migrations"][-1]
+    assert audit == {"from": "0.7.0", "to": "0.8.0", "renamed": {}}
+
+    # Zarr untouched.
+    post = xr.open_zarr(str(zarr_dir), consolidated=True)
+    assert set(post.data_vars) == {"psl"}
+    post.close()
 
 
 def test_migration_0_3_0_to_0_4_0_writes_per_cell_maps(tmp_path: Path):
