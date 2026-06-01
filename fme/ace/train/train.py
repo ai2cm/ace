@@ -83,9 +83,11 @@ from fme.core.generics.trainer import (
     TrainConfigProtocol,
     Trainer,
     ValidationCallback,
+    ValidationTask,
+    build_validation_callback,
     inference_one_epoch,
 )
-from fme.core.generics.validation import run_validation, run_validation_loop
+from fme.core.generics.validation import run_validation_loop
 
 
 def get_validation_callback(
@@ -97,46 +99,45 @@ def get_validation_callback(
     save_per_epoch_diagnostics: bool,
     output_dir: str,
 ) -> ValidationCallback:
-    def validation_callback(epoch: int) -> tuple[dict[str, Any], float]:
-        all_logs: dict[str, Any] = {}
-        weighted_loss = 0.0
-        for entry_config, data, name in validation_entries:
-            data.set_epoch(epoch)
-            aggregator = entry_config.aggregator.build(
+    tasks: list[ValidationTask] = [
+        ValidationTask(
+            name=name,
+            data=data,
+            aggregator_factory=_make_ace_validation_aggregator_factory(
+                entry_config=entry_config,
+                name=name,
                 dataset_info=dataset_info,
                 loss_scaling=loss_scaling,
-                save_diagnostics=save_per_epoch_diagnostics,
-                output_dir=os.path.join(output_dir, name),
-                channel_mean_names=loss_names,
-            )
-            logs = run_validation(
-                train_stepper=stepper,
-                validation_data=data,
-                aggregator=aggregator,
-                label=name,
-                diagnostics_subdir=f"epoch_{epoch:04d}",
-                record_logs=lambda logs: None,
-            )
-            overlap = all_logs.keys() & logs.keys()
-            if overlap:
-                raise RuntimeError(
-                    f"Validation entry {name!r} produced log keys that "
-                    f"overlap with earlier entries: {sorted(overlap)}"
-                )
-            all_logs.update(logs)
-            if entry_config.weight > 0:
-                metric_key = f"{name}/mean/loss"
-                loss = logs.get(metric_key)
-                if loss is None:
-                    raise RuntimeError(
-                        f"Validation entry {name!r} with "
-                        f"weight={entry_config.weight} did not produce "
-                        f"expected metric key {metric_key!r}."
-                    )
-                weighted_loss += entry_config.weight * loss
-        return all_logs, weighted_loss
+                loss_names=loss_names,
+                save_per_epoch_diagnostics=save_per_epoch_diagnostics,
+                output_dir=output_dir,
+            ),
+            weight=entry_config.weight,
+        )
+        for entry_config, data, name in validation_entries
+    ]
+    return build_validation_callback(tasks=tasks, stepper=stepper)
 
-    return validation_callback
+
+def _make_ace_validation_aggregator_factory(
+    entry_config: InlineValidationConfig,
+    name: str,
+    dataset_info: DatasetInfo,
+    loss_scaling: dict[str, torch.Tensor] | None,
+    loss_names: Sequence[str] | None,
+    save_per_epoch_diagnostics: bool,
+    output_dir: str,
+):
+    def factory():
+        return entry_config.aggregator.build(
+            dataset_info=dataset_info,
+            loss_scaling=loss_scaling,
+            save_diagnostics=save_per_epoch_diagnostics,
+            output_dir=os.path.join(output_dir, name),
+            channel_mean_names=loss_names,
+        )
+
+    return factory
 
 
 def get_validate_stepper_callback(

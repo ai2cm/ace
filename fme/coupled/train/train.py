@@ -20,9 +20,11 @@ from fme.core.generics.trainer import (
     AggregatorBuilderABC,
     InferenceCallback,
     Trainer,
+    ValidationTask,
+    build_validation_callback,
     inference_one_epoch,
 )
-from fme.core.generics.validation import run_validation, run_validation_loop
+from fme.core.generics.validation import run_validation_loop
 from fme.coupled.aggregator import OneStepAggregator, TrainAggregator
 from fme.coupled.data_loading.gridded_data import InferenceGriddedData
 from fme.coupled.dataset_info import CoupledDatasetInfo
@@ -44,45 +46,40 @@ def get_validation_callback(
     save_per_epoch_diagnostics: bool,
     output_dir: str,
 ):
-    def validation_callback(epoch: int) -> tuple[dict[str, Any], float]:
-        all_logs: dict[str, Any] = {}
-        weighted_loss = 0.0
-        for entry_config, data, name in validation_entries:
-            data.set_epoch(epoch)
-            aggregator = OneStepAggregator(
+    tasks: list[ValidationTask] = [
+        ValidationTask(
+            name=name,
+            data=data,
+            aggregator_factory=_make_coupled_validation_aggregator_factory(
+                name=name,
                 dataset_info=dataset_info,
-                save_diagnostics=save_per_epoch_diagnostics,
-                output_dir=os.path.join(output_dir, name),
                 loss_scaling=loss_scaling,
-            )
-            logs = run_validation(
-                train_stepper=stepper,
-                validation_data=data,
-                aggregator=aggregator,
-                label=name,
-                diagnostics_subdir=f"epoch_{epoch:04d}",
-                record_logs=lambda logs: None,
-            )
-            overlap = all_logs.keys() & logs.keys()
-            if overlap:
-                raise RuntimeError(
-                    f"Validation entry {name!r} produced log keys that "
-                    f"overlap with earlier entries: {sorted(overlap)}"
-                )
-            all_logs.update(logs)
-            if entry_config.weight > 0:
-                metric_key = f"{name}/mean/loss"
-                loss = logs.get(metric_key)
-                if loss is None:
-                    raise RuntimeError(
-                        f"Validation entry {name!r} with "
-                        f"weight={entry_config.weight} did not produce "
-                        f"expected metric key {metric_key!r}."
-                    )
-                weighted_loss += entry_config.weight * loss
-        return all_logs, weighted_loss
+                save_per_epoch_diagnostics=save_per_epoch_diagnostics,
+                output_dir=output_dir,
+            ),
+            weight=entry_config.weight,
+        )
+        for entry_config, data, name in validation_entries
+    ]
+    return build_validation_callback(tasks=tasks, stepper=stepper)
 
-    return validation_callback
+
+def _make_coupled_validation_aggregator_factory(
+    name: str,
+    dataset_info: CoupledDatasetInfo,
+    loss_scaling: CoupledTensorMapping,
+    save_per_epoch_diagnostics: bool,
+    output_dir: str,
+):
+    def factory():
+        return OneStepAggregator(
+            dataset_info=dataset_info,
+            save_diagnostics=save_per_epoch_diagnostics,
+            output_dir=os.path.join(output_dir, name),
+            loss_scaling=loss_scaling,
+        )
+
+    return factory
 
 
 def get_validate_stepper_callback(

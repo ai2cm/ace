@@ -334,7 +334,7 @@ class TestGetValidationCallback:
 
         stepper = MagicMock()
         with patch(
-            "fme.ace.train.train.run_validation",
+            "fme.core.generics.trainer.run_validation",
             side_effect=run_validation_side_effect,
         ):
             callback = get_validation_callback(
