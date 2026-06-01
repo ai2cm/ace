@@ -126,9 +126,8 @@ stepper_training:
       weights_path: /ocean_ckpt.tar
     loss:
       type: MSE
-    loss_contributions:
-      n_steps: 4
-      weight: 1.0
+    n_steps: 4
+    loss_weight: 1.0
   atmosphere:
     parameter_init:
       weights_path: /atmos_ckpt.tar
@@ -136,8 +135,7 @@ stepper_training:
         - frozen:
             include:
               - '*'
-    loss_contributions:
-      n_steps: 0
+    n_steps: 0
     loss:
       type: MSE
       weights:
