@@ -81,11 +81,11 @@ done
 case "$MODEL" in
     dmd2)     run_eval dmd2     config-dmd2.yaml     "$DATASET_DMD2:/checkpoints" ;;
     fdistill) run_eval fdistill config-fdistill.yaml "$DATASET_FDISTILL:fastgen/ace-downscaling-distillation-fdistill-with-val-intended-recipe/student_checkpoints:/checkpoints" ;;
-    hirov1)   run_eval hirov1   config-hirov1.yaml   "$DATASET_HIROV1:/checkpoints" ;;
+    hirov1)   run_eval hirov1   config-hirov1.yaml   "$DATASET_HIROV1:checkpoints:/checkpoints" ;;
     all)
         run_eval dmd2     config-dmd2.yaml     "$DATASET_DMD2:/checkpoints"
         run_eval fdistill config-fdistill.yaml "$DATASET_FDISTILL:fastgen/ace-downscaling-distillation-fdistill-with-val-intended-recipe/student_checkpoints:/checkpoints"
-        run_eval hirov1   config-hirov1.yaml   "$DATASET_HIROV1:/checkpoints"
+        run_eval hirov1   config-hirov1.yaml   "$DATASET_HIROV1:checkpoints:/checkpoints"
         ;;
     *)
         echo "Unknown model: $MODEL"
