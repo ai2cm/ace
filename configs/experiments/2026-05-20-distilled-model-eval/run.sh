@@ -1,9 +1,9 @@
 #!/bin/bash
-# Evaluate distilled student checkpoints (DMD2 / f-distill) on the CONUS
-# holdout year (2023) against X-SHiELD AMIP ground truth.
+# Evaluate distilled student checkpoints (DMD2 / f-distill / hirov1) on the
+# CONUS holdout year (2023) against X-SHiELD AMIP ground truth.
 #
 # Usage: ./run.sh <model> [--suffix <suffix>]
-#   model:    dmd2 | fdistill | all
+#   model:    dmd2 | fdistill | hirov1 | all
 #   --suffix: optional suffix appended to the job name
 
 set -e
@@ -19,10 +19,11 @@ NGPU=4
 IMAGE="$(cat $REPO_ROOT/latest_deps_only_image.txt)"
 DATASET_DMD2=01KRYPVQ3Z5YWQWND9X680GBMD
 DATASET_FDISTILL=01KT25011Z8TZ08X1NFKD53RD1
+DATASET_HIROV1=01KNM6H3JB1ZNS76HX17AAZRF7
 
 usage() {
     echo "Usage: $0 <model> [--suffix <suffix>]"
-    echo "  model:    dmd2 | fdistill | fdistill-best-crps | all"
+    echo "  model:    dmd2 | fdistill | fdistill-best-crps | hirov1 | all"
     echo "  --suffix: optional suffix appended to job name"
     exit 1
 }
@@ -80,9 +81,11 @@ done
 case "$MODEL" in
     dmd2)     run_eval dmd2     config-dmd2.yaml     "$DATASET_DMD2:/checkpoints" ;;
     fdistill) run_eval fdistill config-fdistill.yaml "$DATASET_FDISTILL:fastgen/ace-downscaling-distillation-fdistill-with-val-intended-recipe/student_checkpoints:/checkpoints" ;;
+    hirov1)   run_eval hirov1   config-hirov1.yaml   "$DATASET_HIROV1:/checkpoints" ;;
     all)
         run_eval dmd2     config-dmd2.yaml     "$DATASET_DMD2:/checkpoints"
         run_eval fdistill config-fdistill.yaml "$DATASET_FDISTILL:fastgen/ace-downscaling-distillation-fdistill-with-val-intended-recipe/student_checkpoints:/checkpoints"
+        run_eval hirov1   config-hirov1.yaml   "$DATASET_HIROV1:/checkpoints"
         ;;
     *)
         echo "Unknown model: $MODEL"
