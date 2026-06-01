@@ -737,7 +737,7 @@ def test_healpix_padding_isolatitude_matches_folded_reference(
 
 
 @pytest.mark.parametrize("padding", [1, 2])
-@pytest.mark.parametrize("hw", [8, 16])
+@pytest.mark.parametrize("hw", [4, 8])
 @pytest.mark.parametrize("enable_nhwc", [False, True])
 def test_healpix_padding_isolatitude_gradcheck_cpu(
     padding: int, hw: int, enable_nhwc: bool
