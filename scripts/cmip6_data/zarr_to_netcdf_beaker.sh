@@ -56,10 +56,26 @@ WORKERS=$(yq -r '.workers // 4' "${CONFIG}")
 YEARS_PER_FILE=$(yq -r '.years_per_file // 10' "${CONFIG}")
 FORCE=$(yq -r '.force // false' "${CONFIG}")
 # Space-separated list of source_id/experiment/variant_label triples,
-# or empty if not present. ``yq -o=tsv`` over a YAML list gives us a
-# tab-separated single line; we ``tr`` that to spaces so the python
-# argparse ``nargs='*'`` consumes them as separate args.
+# or empty if not present. ``yq -r '... | join(" ")'`` collapses the
+# YAML list to a single space-separated line so the python argparse
+# ``nargs='*'`` consumes them as separate args.
 DATASET_KEYS=$(yq -r '.dataset_keys // [] | join(" ")' "${CONFIG}")
+
+# Pre-build the optional CLI fragments here, not inline in the
+# ``bash -c "..."`` string below. Putting ``$([ ... ] && echo ...)``
+# inside the gantry double-quoted command leaks literal ``"`` chars
+# (the inner ``echo \"..\"`` becomes a literal quote in the final
+# substituted string, glueing all subsequent args into one token —
+# argparse then sees ``--years-per-file '10 --force --dataset-keys
+# ...'`` as one value and errors out).
+OPT_FORCE=""
+if [[ "${FORCE}" == "true" ]]; then
+    OPT_FORCE="--force"
+fi
+OPT_DATASET_KEYS=""
+if [[ -n "${DATASET_KEYS}" ]]; then
+    OPT_DATASET_KEYS="--dataset-keys ${DATASET_KEYS}"
+fi
 
 if [[ -z "${GCS_SOURCE}" || "${GCS_SOURCE}" == "null" ]]; then
     echo "Config ${CONFIG} missing required key 'gcs_source'"
@@ -105,4 +121,4 @@ cd "${REPO_ROOT}" && gantry run \
     --budget ai2/atec-climate \
     --system-python \
     --install "pip install --no-deps ." \
-    -- bash -c "set -e && mkdir -p ${WEKA_DEST} && python scripts/cmip6_data/zarr_to_netcdf.py ${GCS_SOURCE} ${WEKA_DEST} --workers ${WORKERS} --years-per-file ${YEARS_PER_FILE}$([ \"${FORCE}\" = \"true\" ] && echo \" --force\")$([ -n \"${DATASET_KEYS}\" ] && echo \" --dataset-keys ${DATASET_KEYS}\")"
+    -- bash -c "set -e && mkdir -p ${WEKA_DEST} && python scripts/cmip6_data/zarr_to_netcdf.py ${GCS_SOURCE} ${WEKA_DEST} --workers ${WORKERS} --years-per-file ${YEARS_PER_FILE} ${OPT_FORCE} ${OPT_DATASET_KEYS}"
