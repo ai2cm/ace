@@ -1333,7 +1333,7 @@ def test_step_shared_global_mean_removal():
     )
     output = step.step(
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
-    )
+    ).output
     for name in out_names:
         assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
 
@@ -1358,7 +1358,7 @@ def test_step_shared_global_mean_removal_with_extra_channels():
     )
     output = step.step(
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
-    )
+    ).output
     for name in out_names:
         assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
 
@@ -1373,7 +1373,7 @@ def test_step_per_channel_global_mean_removal():
     )
     output = step.step(
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
-    )
+    ).output
     for name in step.output_names:
         assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
 
@@ -1393,7 +1393,7 @@ def test_step_per_channel_global_mean_removal_with_extra_channels():
     )
     output = step.step(
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
-    )
+    ).output
     for name in step.output_names:
         assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
 
@@ -1420,10 +1420,10 @@ def _assert_global_mean_removal_affects_output(removal, in_names, out_names, mea
     )
     baseline_output = step_baseline.step(
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
-    )
+    ).output
     removal_output = step_with_removal.step(
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
-    )
+    ).output
     differs = any(
         not torch.allclose(baseline_output[name], removal_output[name])
         for name in out_names
