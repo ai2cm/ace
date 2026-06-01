@@ -27,6 +27,8 @@ from fme.core.generics.trainer import (
     Trainer,
     TrainOutputABC,
     TrainStepperABC,
+    ValidationTask,
+    build_validation_callback,
     count_parameters,
     epoch_checkpoint_enabled,
     inference_one_epoch,
@@ -1598,3 +1600,118 @@ def test_finetune_ema_checkpoint_loads_ema_state(tmp_path: str):
 
     # decay is from stage2 config, not the checkpoint
     assert float(stage2_ema_state["decay"]) == pytest.approx(stage2_decay)
+
+
+class TestBuildValidationCallback:
+    """Unit tests for the generic ``build_validation_callback`` helper.
+
+    These cover behavior shared between ACE and coupled training. ACE/coupled
+    test suites only verify the trainer-specific wiring (factory closures,
+    config passthrough) on top of this.
+    """
+
+    @staticmethod
+    def _make_task(name, weight=1.0, aggregator=None):
+        data = unittest.mock.MagicMock()
+        if aggregator is None:
+            aggregator = unittest.mock.MagicMock()
+        return ValidationTask(
+            name=name,
+            data=data,
+            aggregator_factory=lambda: aggregator,
+            weight=weight,
+        )
+
+    @staticmethod
+    def _call(tasks, run_validation_side_effect, epoch=1):
+        stepper = unittest.mock.MagicMock()
+        with unittest.mock.patch(
+            "fme.core.generics.trainer.run_validation",
+            side_effect=run_validation_side_effect,
+        ):
+            callback = build_validation_callback(tasks=tasks, stepper=stepper)
+            return callback(epoch=epoch)
+
+    def test_single_entry_weighted_loss(self):
+        tasks = [self._make_task("val", weight=2.0)]
+        logs, loss = self._call(tasks, [{"val/mean/loss": 0.5, "val/other": 1.0}])
+        assert loss == pytest.approx(2.0 * 0.5)
+        assert logs == {"val/mean/loss": 0.5, "val/other": 1.0}
+
+    def test_zero_weight_excluded_from_loss_but_logs_kept(self):
+        tasks = [
+            self._make_task("a", weight=1.0),
+            self._make_task("b", weight=0.0),
+        ]
+        logs, loss = self._call(
+            tasks,
+            [
+                {"a/mean/loss": 0.5},
+                {"b/mean/loss": 999.0},
+            ],
+        )
+        assert loss == pytest.approx(0.5)
+        assert "a/mean/loss" in logs
+        assert "b/mean/loss" in logs
+
+    def test_multiple_weighted_entries_sum_weighted(self):
+        tasks = [
+            self._make_task("a", weight=2.0),
+            self._make_task("b", weight=3.0),
+        ]
+        _, loss = self._call(
+            tasks,
+            [{"a/mean/loss": 0.1}, {"b/mean/loss": 0.2}],
+        )
+        assert loss == pytest.approx(2.0 * 0.1 + 3.0 * 0.2)
+
+    def test_missing_metric_for_weighted_entry_raises(self):
+        tasks = [self._make_task("a", weight=1.0)]
+        with pytest.raises(RuntimeError, match="did not produce expected metric key"):
+            self._call(tasks, [{"a/other_metric": 1.0}])
+
+    def test_missing_metric_for_zero_weight_entry_is_skipped(self):
+        tasks = [self._make_task("a", weight=0.0)]
+        logs, loss = self._call(tasks, [{"a/other_metric": 1.0}])
+        assert loss == 0.0
+        assert "a/other_metric" in logs
+
+    def test_overlapping_log_keys_between_entries_raises(self):
+        tasks = [
+            self._make_task("a", weight=1.0),
+            self._make_task("b", weight=1.0),
+        ]
+        with pytest.raises(RuntimeError, match="overlap with earlier entries"):
+            self._call(
+                tasks,
+                [
+                    {"shared/key": 0.1, "a/mean/loss": 0.5},
+                    {"shared/key": 0.2, "b/mean/loss": 0.6},
+                ],
+            )
+
+    def test_set_epoch_called_on_each_data(self):
+        tasks = [self._make_task("a"), self._make_task("b")]
+        self._call(
+            tasks,
+            [{"a/mean/loss": 0.1}, {"b/mean/loss": 0.2}],
+            epoch=7,
+        )
+        for task in tasks:
+            task.data.set_epoch.assert_called_once_with(7)
+
+    def test_aggregator_factory_called_per_invocation(self):
+        factory = unittest.mock.MagicMock(return_value=unittest.mock.MagicMock())
+        data = unittest.mock.MagicMock()
+        task: ValidationTask = ValidationTask(
+            name="a", data=data, aggregator_factory=factory, weight=1.0
+        )
+        stepper = unittest.mock.MagicMock()
+        with unittest.mock.patch(
+            "fme.core.generics.trainer.run_validation",
+            side_effect=[{"a/mean/loss": 0.1}, {"a/mean/loss": 0.2}],
+        ):
+            callback = build_validation_callback(tasks=[task], stepper=stepper)
+            callback(epoch=1)
+            callback(epoch=2)
+        assert factory.call_count == 2
