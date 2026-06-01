@@ -42,7 +42,7 @@ group|tag|exper_id|status|ckpt_type|priority|min_runtime|override|results_datase
 
 1pct_nosmooth_0256to0350-hfds_prescribed-ft_gqmfjs2j_w_OSC|rs0|01KKZMVVTGNKZ1P2M3W48PS5R2|training|best_inference_ckpt|normal|--not-preemptible
 
-ace-samudra-coupled-cm4-8ez70kzy-decoupled_samudra|||run_140yr|best_inference_ckpt|high|--min-runtime 1h||01KQE68R17KDYVS3585JPY2R32
+ace-samudra-coupled-cm4-8ez70kzy-decoupled_samudra|||trained|best_inference_ckpt|high|--min-runtime 1h||01KQE68R17KDYVS3585JPY2R32
 
 1pct_nosmooth_0256to0350-hfds_prescribed-ft_correctOHC|rs0|01KRCAGJ64R8WXVE2542S0RBP6|training|best_inference_ckpt|normal|--min-runtime 8h
 
@@ -54,4 +54,4 @@ ace-samudra-coupled-cm4-8ez70kzy-decoupled_samudra|||run_140yr|best_inference_ck
 
 1pct_nosmooth_0256to0350-ft_correctOHC|rs0|01KSY5453QDCS8YXQV51DVB25F|training|best_inference_ckpt|normal|--min-runtime 8h
 
-1pct_nosmooth_0256to0350-ft_correctOHC|rs0|01KSZQKHJYBBK0R7EBHPM16P80|training|best_inference_ckpt|normal|--min-runtime 8h
+1pct_nosmooth_0256to0350-ft_correctOHC|rs0|01KSZQKHJYBBK0R7EBHPM16P80|run_ICx1|best_inference_ckpt|high|--min-runtime 3h
