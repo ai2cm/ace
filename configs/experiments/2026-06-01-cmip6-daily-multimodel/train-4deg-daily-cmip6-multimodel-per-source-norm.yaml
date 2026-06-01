@@ -768,9 +768,21 @@ stepper:
         - input4mips_so2
         - input4mips_bc
         - luh2_forest
-        # ---- prognostic-class: in + out (everything below is
-        # also in out_names) ----
-        # Surface (universal)
+        # ---- prognostic-class: in + out (every variable below
+        # is also in out_names — foundation-model framing, with
+        # allow_missing handling per-dataset coverage gaps).
+        # Monthly-causal variables (amon_ts, omon_*, simon_*) are
+        # excluded because their stepped-monthly cadence would
+        # teach an artificially smooth daily target.
+        # CFday-augmented variables (DSWRFtoa, USWRFtoa, UCLWRFtoa,
+        # UCSWRFsfc, UCSWRFtoa, DCLWRFsfc, DCSWRFsfc, wap500, clivi,
+        # clwvi) are excluded because process_esgf.py's augmenter
+        # doesn't currently pull CFday-cadence variables from ESGF
+        # (only surface-and-ocean tables). They exist in ESGF for
+        # ~200-350 (source, experiment, member) tuples but v2 only
+        # captured 1-3 per variable from Pangeo. To be fixed in a
+        # data-pipeline follow-up.
+        # ---- Surface (universal) ----
         - TMP2m
         - Q2m
         - UGRD10m
@@ -778,16 +790,19 @@ stepper:
         - PRATEsfc
         - h500
         - psl
-        # Surface (sub-universal; allow_missing handles datasets
-        # missing each one — see SCHEMA-by-coverage table in
-        # training_run_1 §variables)
+        # ---- Surface (sub-universal daily) ----
         - sfcWind                  # 84%
         - eday_ts                  # 40% — daily Eday.ts surface T
         - water_vapor_path         # 40% — Eday.prw
         - oday_tos                 # 56% — daily SST
+        - oday_sos                 # 23% — daily sea surface salinity
+        - oday_tossq               # 18% — daily SST²
+        - oday_omldamax            # 9%  — daily max mixed-layer depth
         - siday_sitemptop          # 38% — daily sea-ice top T
         - siday_sithick            # 27% — daily sea-ice thickness
-        # Radiative + heat-flux diagnostics (mostly sub-universal)
+        - siday_sea_ice_fraction   # 12% — daily sea-ice fraction
+        - TMP700                   # 6%  — 700 hPa T (CFday: sparse)
+        # ---- Radiative + heat-flux diagnostics (day table) ----
         - DLWRFsfc                 # 52%
         - DSWRFsfc                 # 93%
         - ULWRFsfc                 # 86%
@@ -795,7 +810,7 @@ stepper:
         - ULWRFtoa                 # 82%
         - SHTFLsfc                 # 80%
         - LHTFLsfc                 # 89%
-        # 3D plev prognostics (universal)
+        # ---- 3D plev prognostics (universal) ----
         - ua10
         - ua50
         - ua100
@@ -828,6 +843,28 @@ stepper:
         - zg700
         - zg850
         - zg1000
+        # ---- Mask channels (in+out per foundation-model rule).
+        # ``below_surface_mask{plev}`` is derived per-dataset from
+        # 3D state — quasi-static topographic mask. ``*_mask``
+        # companions of ocean/ice variables tell the network where
+        # the corresponding variable is defined. omon_* / simon_*
+        # masks excluded because we dropped the parent monthly
+        # variables. ----
+        - below_surface_mask10
+        - below_surface_mask50
+        - below_surface_mask100
+        - below_surface_mask250
+        - below_surface_mask500
+        - below_surface_mask700
+        - below_surface_mask850
+        - below_surface_mask1000
+        - oday_tos_mask
+        - oday_sos_mask
+        - oday_tossq_mask
+        - oday_omldamax_mask
+        - siday_sitemptop_mask
+        - siday_sithick_mask
+        - siday_sea_ice_fraction_mask
       out_names:
         # Surface prognostics (universal)
         - TMP2m
@@ -837,13 +874,18 @@ stepper:
         - PRATEsfc
         - h500
         - psl
-        # Surface (sub-universal)
+        # Surface (sub-universal daily)
         - sfcWind
         - eday_ts
         - water_vapor_path
         - oday_tos
+        - oday_sos
+        - oday_tossq
+        - oday_omldamax
         - siday_sitemptop
         - siday_sithick
+        - siday_sea_ice_fraction
+        - TMP700
         # Radiative + heat-flux diagnostics
         - DLWRFsfc
         - DSWRFsfc
@@ -885,3 +927,19 @@ stepper:
         - zg700
         - zg850
         - zg1000
+        # Mask channels
+        - below_surface_mask10
+        - below_surface_mask50
+        - below_surface_mask100
+        - below_surface_mask250
+        - below_surface_mask500
+        - below_surface_mask700
+        - below_surface_mask850
+        - below_surface_mask1000
+        - oday_tos_mask
+        - oday_sos_mask
+        - oday_tossq_mask
+        - oday_omldamax_mask
+        - siday_sitemptop_mask
+        - siday_sithick_mask
+        - siday_sea_ice_fraction_mask

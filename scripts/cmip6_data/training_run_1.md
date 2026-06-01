@@ -283,39 +283,61 @@ the model sees.
 **Input-only**: statics + exogenous forcings only — `HGTsfc`,
 `land_fraction`, `log_input4mips_co2`, `input4mips_so2`,
 `input4mips_bc`, `luh2_forest`. Everything else is in both
-`in_names` and `out_names`.
+`in_names` and `out_names` (foundation-model framing; future
+random-input-dropout augmentation will let the model use any
+variable diagnostically at inference time).
 
-**Excluded**: all CMIP6 monthly-Amon / monthly-Omon / monthly-SImon
-variables that the v2 ingest sampled as ``monthly_causal`` (each
-day in month M takes month M-1's value, producing stepped daily
-fields). They are physically correct but misleading as daily
-training targets — the model would learn to be artificially smooth
-within each month and then discontinuous on month boundaries.
-Specifically dropped from this run: `amon_ts` (universal but
-stepped), `omon_zos`, `omon_hfds`, `omon_mlotst`, `omon_tob`,
-`simon_sea_ice_fraction`, `simon_sitemptop`, `simon_ocean_fraction`.
+**Excluded from this run**:
 
-**Surface temperature**: the proper daily field is `eday_ts`
-(Eday.ts, 40% coverage in v2). v2 keeps it under the prefixed
-`eday_ts` name; the schema-0.8.0 update renames it to
-`surface_temperature` at the data-processing layer so future cohort
+- All CMIP6 **monthly-causal** variables (`amon_ts`, `omon_zos`,
+  `omon_hfds`, `omon_mlotst`, `omon_tob`, `simon_sea_ice_fraction`,
+  `simon_sitemptop`, `simon_ocean_fraction`). The v2 ingest samples
+  these monthly variables to daily by repeating each month's value
+  across that month's days. Including them as daily targets would
+  teach an artificially smooth within-month, discontinuous-at-
+  month-boundary pattern. The `*_mask` companions of the monthly
+  variables are also excluded.
+- All **CFday-augmented** variables — `DSWRFtoa`, `USWRFtoa`,
+  `UCLWRFtoa`, `UCSWRFsfc`, `UCSWRFtoa`, `DCLWRFsfc`, `DCSWRFsfc`,
+  `wap500`, `clivi`, `clwvi`. These show only 1-3 datasets of v2
+  coverage but ESGF has them at 200-350 (source, experiment,
+  member) tuples — the gap is that `process_esgf.py`'s augmenter
+  only pulls surface-and-ocean tables, not CFday. To be fixed in a
+  data-pipeline follow-up; for now drop from training.
+- `surface_temperature` (3 datasets) — anomaly from the
+  ``CMIP_TO_OUTPUT_RENAMES`` path firing on Eday.ts; the proper
+  daily surface T is `eday_ts` (40% coverage). Future ingests at
+  schema 0.8.0 emit `surface_temperature` directly from the
+  surface-and-ocean path.
+
+**Surface temperature**: `eday_ts` (Eday.ts, real daily, 40%
+coverage in v2). The schema-0.8.0 update renames the data-
+processing output to `surface_temperature` so future cohort
 ingests align with the SHIELD/ERA5 baseline convention. No
-migration is written for v2 → v3 — we'll reprocess fresh rather
-than rename in place.
+migration written for v2 → v3 — reprocess fresh rather than
+rename in place.
 
 **In + out** (everything except the input-only six):
 
-- Universal (100%): TMP2m, Q2m, UGRD10m, VGRD10m, PRATEsfc, h500,
-  psl, ua/va/hus/zg × 8 plev (32 vars)
-- Daily, sub-universal (with allow_variable_masking on the step):
-  sfcWind (84%), DSWRFsfc (93%), LHTFLsfc (89%), ULWRFsfc (86%),
-  ULWRFtoa (82%), SHTFLsfc (80%), USWRFsfc (65%), oday_tos (56%),
-  DLWRFsfc (52%), eday_ts (40%), water_vapor_path (40%),
-  siday_sitemptop (38%), siday_sithick (27%).
+- **Universal (100%)**: TMP2m, Q2m, UGRD10m, VGRD10m, PRATEsfc,
+  h500, psl, ua/va/hus/zg × 8 plev (32 plev vars).
+- **Sub-universal daily** (with `allow_missing_variables` on the
+  step): sfcWind (84%), oday_tos (56%), eday_ts (40%),
+  water_vapor_path (40%), siday_sitemptop (38%), siday_sithick
+  (27%), oday_sos (23%), oday_tossq (18%), siday_sea_ice_fraction
+  (12%), oday_omldamax (9%), TMP700 (6%).
+- **Radiative + heat-flux day-table diagnostics**: DSWRFsfc (93%),
+  LHTFLsfc (89%), ULWRFsfc (86%), ULWRFtoa (82%), SHTFLsfc (80%),
+  USWRFsfc (65%), DLWRFsfc (52%).
+- **Mask channels** (in+out): `below_surface_mask{10,…,1000}` (8,
+  78% each), `oday_tos_mask`, `oday_sos_mask`, `oday_tossq_mask`,
+  `oday_omldamax_mask`, `siday_sitemptop_mask`, `siday_sithick_mask`,
+  `siday_sea_ice_fraction_mask`. ``*_mask`` companions of monthly
+  variables are NOT included (the parent variables are excluded).
 
-The 13 sub-universal variables use the per-sample variable-masking
-path; datasets without them contribute no loss signal for those
-channels but stay in training for everything else.
+The sub-universal variables use per-sample variable-masking;
+datasets without them contribute no loss signal for those channels
+but stay in training for everything else.
 
 ## Validation + inline inference (config sketch)
 
