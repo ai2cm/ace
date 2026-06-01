@@ -244,10 +244,13 @@ class DiffusionModelConfig:
     ) -> "DiffusionModel":
         # self.in_names / self.out_names are the ORIGINAL (training-time) names
         # keying the normalization means/stds. `rename` translates them to the
-        # runtime names exposed by the built DiffusionModel (used by packers,
-        # data_requirements, etc.). All rename logic lives here, not in
-        # CheckpointModelConfig.
+        # runtime names exposed by the built DiffusionModel. All rename
+        # application happens here: normalizer keys, in_names, out_names. The
+        # DiffusionModel itself just stores what it is given.
         rename = rename or None
+        rename_map = rename or {}
+        in_names = [rename_map.get(n, n) for n in self.in_names]
+        out_names = [rename_map.get(n, n) for n in self.out_names]
         normalizer = self.normalization.build(self.in_names, self.out_names, rename)
         loss = self.loss.build(gridded_operations=None)
         # We always use standard score normalization, so sigma_data is
@@ -256,7 +259,7 @@ class DiffusionModelConfig:
         sigma_data = 1.0
 
         num_static_in_channels = len(static_inputs.fields) if static_inputs else 0
-        n_in_channels = len(self.in_names) + num_static_in_channels
+        n_in_channels = len(in_names) + num_static_in_channels
         if self.use_fine_topography and (
             not static_inputs or len(static_inputs.fields) == 0
         ):
@@ -274,7 +277,7 @@ class DiffusionModelConfig:
 
         module = self.module.build(
             n_in_channels=n_in_channels,
-            n_out_channels=len(self.out_names),
+            n_out_channels=len(out_names),
             coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
             sigma_data=sigma_data,
@@ -290,6 +293,8 @@ class DiffusionModelConfig:
             downscale_factor=downscale_factor,
             sigma_data=sigma_data,
             full_fine_coords=full_fine_coords,
+            in_names=in_names,
+            out_names=out_names,
             static_inputs=static_inputs,
             rename=rename,
         )
@@ -348,14 +353,17 @@ class DiffusionModel:
         downscale_factor: int,
         sigma_data: float,
         full_fine_coords: LatLonCoordinates,
+        in_names: list[str],
+        out_names: list[str],
         static_inputs: StaticInputs | None = None,
         rename: dict[str, str] | None = None,
     ) -> None:
         """
         Args:
-            config: The configuration object for the diffusion model. Its
-                ``in_names`` / ``out_names`` are the original training-time
-                names; ``rename`` translates them to the runtime names.
+            config: The configuration object for the diffusion model. Holds the
+                original training-time ``in_names``/``out_names``; the runtime
+                names are passed separately because rename is applied in
+                ``DiffusionModelConfig.build``.
             module: The neural network module used for downscaling. Note: this
                 should *not* be DistributedDataParallel since it is wrapped by
                 it in this init method.
@@ -371,12 +379,17 @@ class DiffusionModel:
                 model preconditioning.
             full_fine_coords: The full fine-resolution domain coordinates.
                 Serves as the canonical source of truth for the model output grid.
+            in_names: Runtime input variable names (i.e. ``rename`` already
+                applied to ``config.in_names``).
+            out_names: Runtime output variable names (i.e. ``rename`` already
+                applied to ``config.out_names``).
             static_inputs: Static inputs to the model. May be None when
                 no static data is needed. If present, coordinates
                 must match full_fine_coords.
-            rename: ``{original: renamed}`` mapping translating training-time
-                variable names to runtime names. ``None`` means no rename.
-                Round-tripped via ``get_state`` / ``from_state``.
+            rename: ``{original: renamed}`` mapping that was applied at build
+                time, or ``None`` if no rename. Stored only so ``get_state`` /
+                ``from_state`` can round-trip it; ``DiffusionModel`` does not
+                apply it.
         """
         self.coarse_shape = coarse_shape
         self.downscale_factor = downscale_factor
@@ -387,9 +400,8 @@ class DiffusionModel:
         self.loss = loss
         self.config = config
         self.rename = rename or None
-        rename_map = self.rename or {}
-        self.in_names = [rename_map.get(n, n) for n in config.in_names]
-        self.out_names = [rename_map.get(n, n) for n in config.out_names]
+        self.in_names = in_names
+        self.out_names = out_names
         self.in_packer = Packer(self.in_names)
         self.out_packer = Packer(self.out_names)
         self._channel_axis = -3
