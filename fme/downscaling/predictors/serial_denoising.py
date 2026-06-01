@@ -1,4 +1,6 @@
 import dataclasses
+from collections.abc import Mapping
+from typing import Any
 
 import torch
 
@@ -275,4 +277,81 @@ class DenoisingMoEPredictor:
         loss = self._primary.loss(generated_norm, targets_norm)
         return ModelOutputs(
             prediction=generated, target=targets, loss=loss, latent_steps=latent_steps
+        )
+
+    def get_state(self) -> Mapping[str, Any]:
+        """Serialize to a single state dict reloadable via
+        ``DenoisingMoECheckpointConfig``.
+
+        Contains each expert's full ``DiffusionModel`` state plus the MoE-level
+        routing and sampler parameters; no original checkpoint paths required.
+        Each expert's rename (from the original ``CheckpointModelConfig``) is
+        carried within its own state via ``DiffusionModel.get_state``.
+        """
+        return {
+            "experts": [expert.get_state() for expert in self._experts],
+            "sigma_ranges": [list(r) for r in self._sigma_ranges],
+            "num_diffusion_generation_steps": self._num_diffusion_generation_steps,
+            "churn": self._churn,
+        }
+
+    def save(self, path: str) -> None:
+        torch.save(self.get_state(), path)
+
+    @classmethod
+    def from_state(cls, state: Mapping[str, Any]) -> "DenoisingMoEPredictor":
+        experts = [DiffusionModel.from_state(s) for s in state["experts"]]
+        sigma_ranges = [(float(lo), float(hi)) for lo, hi in state["sigma_ranges"]]
+        return cls(
+            experts=experts,
+            sigma_ranges=sigma_ranges,
+            num_diffusion_generation_steps=int(state["num_diffusion_generation_steps"]),
+            churn=float(state["churn"]),
+        )
+
+
+@dataclasses.dataclass
+class DenoisingMoECheckpointConfig:
+    """
+    Loads a ``DenoisingMoEPredictor`` from a single bundled checkpoint produced
+    by ``DenoisingMoEPredictor.save``. The bundle contains every expert's
+    weights and config plus the MoE-level sigma ranges and sampler parameters,
+    so no original per-expert checkpoint paths are required.
+
+    Parameters:
+        checkpoint_path: Path to a checkpoint written by
+            ``DenoisingMoEPredictor.save``.
+    """
+
+    checkpoint_path: str
+
+    def __post_init__(self) -> None:
+        self._state_is_loaded = False
+        self._state: Mapping[str, Any] | None = None
+
+    @property
+    def _bundle(self) -> Mapping[str, Any]:
+        if not self._state_is_loaded:
+            self._state = torch.load(
+                self.checkpoint_path, map_location="cpu", weights_only=False
+            )
+            self._state_is_loaded = True
+        assert self._state is not None
+        return self._state
+
+    def build(self) -> "DenoisingMoEPredictor":
+        return DenoisingMoEPredictor.from_state(self._bundle)
+
+    @property
+    def data_requirements(self) -> DataRequirements:
+        expert_state = self._bundle["experts"][0]
+        expert_config = expert_state["config"]
+        rename = expert_state.get("rename") or {}
+        in_names = [rename.get(n, n) for n in expert_config["in_names"]]
+        out_names = [rename.get(n, n) for n in expert_config["out_names"]]
+        return DataRequirements(
+            fine_names=out_names,
+            coarse_names=list(set(in_names).union(out_names)),
+            n_timesteps=1,
+            use_fine_topography=expert_config["use_fine_topography"],
         )
