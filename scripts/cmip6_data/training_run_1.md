@@ -135,14 +135,16 @@ Cross-variable warming-response outliers (|z|>2.5 on ≥1 variable):
 
 Implications for the holdout design:
 
-- **(C) ERA5-analog on CanESM5** picks a high-sensitivity *outlier*.
-  Deliberately hard test, but means failure could be either
-  sample-size or unusual physics. Note: if (C) results look bad,
-  a future run could redo on a cohort-typical source — MRI-ESM2-0
-  is the cleanest backup (its closest sibling GFDL-CM4 is below
-  the r=0.85 fake-holdout threshold). Avoid CMCC-ESM2 as the
-  backup — its near-twin CMCC-CM2-SR5 (r=0.991) would still be
-  in train and trivially predict it.
+- **(C) ERA5-analog spans two ECS regimes.** CanESM5 picks the
+  high-sensitivity outlier (Δ +3.83 K) — a deliberately hard test.
+  **GFDL-CM4** joins as the mid-ECS complement (Δ ≈ +2.5 K, sits
+  near the cohort median); cleanest pick at this ECS tier because
+  no source pairs with it at r>0.85 (closest cluster-mate
+  MRI-ESM2-0 is well below threshold). GFDL-CM4 has only one
+  historical realisation in v2, so the ERA5-analog setup
+  collapses to "train on that one historical, hold out all SSPs"
+  — same single-realisation spirit but a thinner eval surface
+  (2 SSP datasets vs CanESM5's 29).
 - **(B) ssp585 holdout** spans the ECS axis cleanly under the
   one-source-per-cohort rule: UKESM1-0-LL (high) + MPI-ESM1-2-LR
   (low). CanESM5 moved to (C) since it's the strongest (C) target.
@@ -186,11 +188,11 @@ Practical impact for training:
 
 ## Held-out cohorts
 
-**Rule.** Each source appears in at most one cohort. 10 of 38 sources
-are assigned to a holdout; the remaining 28 are unconstrained
+**Rule.** Each source appears in at most one cohort. 11 of 38 sources
+are assigned to a holdout; the remaining 27 are unconstrained
 training models.
 
-After holdouts: train set = **198 datasets** (81% of 243), with 8 of
+After holdouts: train set = **196 datasets** (81% of 243), with 8 of
 those (from D) carrying a 1970-1989 time mask.
 
 ### A. Held-out variants — internal variability
@@ -233,18 +235,25 @@ and one source can't be in two cohorts. Acceptable trade.
 
 ### C. Single-realisation training — ERA5-analog
 
-`CanESM5` is the only source in this cohort. Of its 30 datasets,
-**only `CanESM5/historical/r1i1p1f1` stays in training**; the other
-29 (9 historical variants + 10 ssp245 + 10 ssp585) all become eval.
+Two sources, each with **only** `<source>/historical/r1i1p1f1` in
+training; every other variant + every SSP variant of that source
+becomes eval.
 
-CanESM5 is the strongest (C) target: rich variant + scenario
-coverage, no r>0.85 sibling in the cohort (closest are CESM2 and
-NorESM2-LM at r≈0.6), and its high-ECS warming response (+3.83 K)
-makes for a deliberately hard test — if the model can predict
-CanESM5/ssp585 from a single CanESM5/historical realisation, that's
-strong evidence the embedding generalizes within a model.
+- **`CanESM5`** (high-ECS, +3.83 K) — 30 v2 datasets, 1 stays in
+  train, **29 to eval** (9 historical variants + 10 ssp245 +
+  10 ssp585). The deliberately hard test: rich coverage, no
+  r>0.85 sibling (closest are CESM2 and NorESM2-LM at r≈0.6).
+- **`GFDL-CM4`** (mid-ECS, ≈ +2.5 K) — 3 v2 datasets, 1 stays in
+  train, **2 to eval** (ssp245 + ssp585; no other historical
+  realisations exist in v2). Thinner eval surface but no
+  r>0.85 sibling either (closest is MRI-ESM2-0, well below
+  threshold).
 
-= **29 datasets** removed from train.
+= **31 datasets** removed from train (29 CanESM5 + 2 GFDL-CM4).
+The two ECS regimes let us tell apart "ERA5-analog failed because
+of high-ECS extrapolation" from "ERA5-analog failed because of
+single-realisation training" — failure on both points at the
+latter, failure on CanESM5 only points at the former.
 
 ### D. Temporal interpolation — held-out 1970-1989
 
@@ -281,146 +290,397 @@ Only in-sample validation drives the checkpoint metric.
 
 ### Validation (one-step error, all datasets in cohort)
 
-Run on *all* datasets in each cohort — cheap, gives per-source signal.
+Run on *all* datasets in each cohort, every epoch. **Stride to
+~1000 samples per dataset** (`subset: { step: N }` on the loader,
+with N chosen per dataset so 23k-31k timesteps land at ~1000
+samples — N≈25 for historical, N≈30 for SSP) — that's roughly 3
+years of daily data per dataset, enough for a tight per-source
+one-step error estimate while keeping per-epoch cost bounded.
+
+**No `val_in_sample` entry.** The training loop already runs a
+"training" evaluation each epoch on a random subsample of the
+training data (`train_evaluation_samples`); a separate
+`val_in_sample` entry would duplicate that signal. **Set
+`train_evaluation_samples: 2000`** (default is 1000) — with a
+train set of 196 datasets × ~30k timesteps each ≈ 6M total, 2000
+samples gives a relative SE under 2-3% on the per-epoch
+train-distribution loss without materially adding to epoch cost.
+
+`val_holdout_variants` (A) carries `weight: 1.0` and drives
+checkpoint selection. Cohorts B/C/D get `weight: 0.0` (eval
+signal only; not in the checkpoint metric).
+
+**Separate entries** for the two SSP holdouts (B) and the two
+ERA5-analog targets (C) so we can read per-source signal at a
+glance. Cohorts A and D combine their multiple sources into a
+single entry each.
+
+**6-month gap (D only).** For temporal-interpolation eval, the
+training data ends at 1969-12-31 on the early side and starts at
+1990-01-01 on the late side; trim the eval window to
+[1970-07-01, 1989-06-30] so no eval timestep sits within 6 months
+of a training timestep. For A/B/C the train and eval datasets are
+different (variant, scenario, or source), so calendar-time
+proximity isn't a leak vector and no time slicing is needed.
 
 ```yaml
 validation:
-  - name: val_in_sample           # training-distribution sanity
+  - name: val_holdout_variants      # (A) internal-variability — drives checkpoint
     weight: 1.0
     loader:
-      dataset: { source_ids: <train>, experiments: [historical, ssp245, ssp585] }
-  - name: val_holdout_variants    # (A) internal-variability
+      dataset:
+        source_ids: [CNRM-CM6-1, CNRM-ESM2-1, MRI-ESM2-0,
+                     EC-Earth3, IPSL-CM6A-LR]
+        realizations: [2]
+        subset: { step: 25 }        # ~1000 samples per dataset
+
+  - name: val_holdout_ssp585_ukesm  # (B) high-ECS scenario probe
     weight: 0.0
     loader:
-      dataset: { source_ids: [CNRM-CM6-1, CNRM-ESM2-1, MRI-ESM2-0,
-                              EC-Earth3, IPSL-CM6A-LR],
-                 realizations: [2] }
-  - name: val_holdout_ssp585      # (B) scenario-for-known-model
+      dataset:
+        source_ids: [UKESM1-0-LL]
+        experiments: [ssp585]
+        subset: { step: 30 }
+  - name: val_holdout_ssp585_mpi    # (B) low-ECS scenario probe
     weight: 0.0
     loader:
-      dataset: { source_ids: [UKESM1-0-LL, MPI-ESM1-2-LR],
-                 experiments: [ssp585] }
-  - name: val_era5_analog         # (C) ERA5-analog
+      dataset:
+        source_ids: [MPI-ESM1-2-LR]
+        experiments: [ssp585]
+        subset: { step: 30 }
+
+  - name: val_era5_analog_canesm5   # (C) high-ECS ERA5-analog
     weight: 0.0
     loader:
-      dataset: { source_ids: [CanESM5] }
-      # held-out: everything except historical r1i1p1f1
-  - name: val_holdout_years       # (D) temporal interpolation
+      dataset:
+        source_ids: [CanESM5]
+        # held-out: everything except historical/r1i1p1f1
+        subset: { step: 28 }
+  - name: val_era5_analog_gfdl      # (C) mid-ECS ERA5-analog
     weight: 0.0
     loader:
-      dataset: { source_ids: [INM-CM5-0, NorESM2-LM], experiments: [historical] }
-      # time_slice restricts to 1970-1989
+      dataset:
+        source_ids: [GFDL-CM4]
+        experiments: [ssp245, ssp585]
+        subset: { step: 30 }
+
+  - name: val_holdout_years         # (D) temporal interpolation, 6mo gap
+    weight: 0.0
+    loader:
+      dataset:
+        source_ids: [INM-CM5-0, NorESM2-LM]
+        experiments: [historical]
+        time_slice: { start: 1970-07-01, end: 1989-06-30 }
+        subset: { step: 7 }         # 19y × 365 / 7 ≈ 990 samples
 ```
 
-### Long inference (multi-step rollout, ≤2 sources per cohort)
+### Long inference (multi-step rollout)
 
-Rollout is expensive — pick at most 2 sources per cohort. Run every
-epoch (training-pass cost dominates; long rollouts are cheap on the
-margin).
+**One dataset per inference entry.** The current
+`InferenceDataLoaderConfig` accepts a single
+`XarrayDataConfig` (or a `MergeNoConcatDatasetConfig` for
+side-by-side merge, not concat-over-time across sources), so
+"hold out N variants and run rollouts on all" must be expressed
+as N separate inference entries. That keeps per-entry metrics
+clearly attributable to one source × scenario × variant.
+
+**IC convention.** Unless noted otherwise:
+
+- **4 ICs starting at the first of each season** (Mar 1, Jun 1,
+  Sep 1, Dec 1) of the first available year of the dataset.
+- **1 ensemble member per IC.**
+
+The one exception: **5-day weather forecasts use 8 ICs × 5
+ensemble members per IC** so we can compute CRPS / ensemble
+spread-skill / rank histograms. Other rollouts are too long for
+ensemble skill measures to add useful signal beyond a single
+realisation.
+
+**Rollout horizons.** Calibrated so each rollout fits inside its
+dataset's available time window even when the last IC (Dec 1)
+needs the full horizon ahead of it:
+
+| Cohort | Horizon | n_forward_steps (noleap) | Notes |
+| --- | --- | --- | --- |
+| in-sample weather | 5 days | 5 | 8 ICs × 5 members |
+| in-sample long | 30 years | 10950 | 4 seasonal ICs, 1 source |
+| (A) held-out variants | 10 years | 3650 | 1 ensemble |
+| (B) future scenario | 30 years | 10950 | 1 ensemble |
+| (C) ERA5-analog | 30 years | 10950 | 1 ensemble |
+| (D) temporal interp | 19 years | 6935 | 19y so Dec-1-1970 IC stays inside 1970-1989 window |
+
+**`evaluate_before_training: true`** at the `TrainConfig` level —
+inline validation + inference run once before the first training
+epoch, so any data-loading / OOM / config issue trips before we
+commit to a long training pass.
 
 ```yaml
+evaluate_before_training: true
+train_evaluation_samples: 2000
+
 inference:
-  # In-sample sanity — short and long at training distribution.
-  - name: inf_in_sample_5day
+  # ----- in-sample sanity -----
+  - name: inf_in_sample_5day             # weather-scale, IC-ensemble
     weight: 1.0
     n_forward_steps: 5
-
-  - name: inf_in_sample_seasonal
-    weight: 0.5
-    n_forward_steps: 365
-
-  - name: inf_in_sample_20yr
-    weight: 0.5
-    n_forward_steps: 7300          # 20 years × 365
-
-  # (A) ensemble-spread on held-out variants — 3 picks across
-  # different families + scenarios, including the EC-Earth3 case
-  # that doubles as the unusual-stratospheric-warming-shape probe.
-  - name: inf_holdout_variants_cnrm
-    weight: 0.0
-    n_forward_steps: 3650          # 10 years
     n_ensemble_per_ic: 5
     loader:
-      dataset: { source_ids: [CNRM-CM6-1], experiments: [ssp585],
-                 realizations: [2] }
+      dataset:
+        source_ids: [EC-Earth3]          # representative cohort-median source
+        experiments: [historical]
+        realizations: [1]
+      start_indices:
+        # 8 ICs spread across the historical period; ensemble of 5 per IC.
+        times: [1950-03-01, 1950-09-01, 1970-03-01, 1970-09-01,
+                1990-03-01, 1990-09-01, 2010-03-01, 2010-09-01]
+
+  - name: inf_in_sample_30yr             # long climate-scale, single source
+    weight: 0.5
+    n_forward_steps: 10950
+    loader:
+      dataset:
+        source_ids: [EC-Earth3]
+        experiments: [historical]
+        realizations: [1]
+      start_indices: { times: [1950-03-01, 1950-06-01, 1950-09-01, 1950-12-01] }
+
+  # ----- (A) held-out variants — internal variability -----
+  # 3 representative picks across families + scenarios; the EC-Earth3
+  # entry doubles as the unusual-stratospheric-warming-shape probe.
+  - name: inf_holdout_variants_cnrm
+    weight: 0.0
+    n_forward_steps: 3650                # 10 years
+    loader:
+      dataset:
+        source_ids: [CNRM-CM6-1]
+        experiments: [ssp585]
+        realizations: [2]
+      start_indices: { times: [2015-03-01, 2015-06-01, 2015-09-01, 2015-12-01] }
   - name: inf_holdout_variants_ipsl
     weight: 0.0
     n_forward_steps: 3650
-    n_ensemble_per_ic: 5
     loader:
-      dataset: { source_ids: [IPSL-CM6A-LR], experiments: [historical],
-                 realizations: [2] }
+      dataset:
+        source_ids: [IPSL-CM6A-LR]
+        experiments: [historical]
+        realizations: [2]
+      start_indices: { times: [1940-03-01, 1940-06-01, 1940-09-01, 1940-12-01] }
   - name: inf_holdout_variants_ecearth3_shape
     weight: 0.0
     n_forward_steps: 3650
-    n_ensemble_per_ic: 5
     loader:
-      dataset: { source_ids: [EC-Earth3], experiments: [ssp585],
-                 realizations: [2] }
+      dataset:
+        source_ids: [EC-Earth3]
+        experiments: [ssp585]
+        realizations: [2]
+      start_indices: { times: [2015-03-01, 2015-06-01, 2015-09-01, 2015-12-01] }
 
-  # (B) future-scenario rollouts — one variant per held-out source
-  - name: inf_holdout_ssp585_high   # UKESM1-0-LL (high-ECS)
+  # ----- (B) future scenario — one entry per held-out source -----
+  - name: inf_holdout_ssp585_ukesm       # high-ECS, +3.66 K
     weight: 0.0
-    n_forward_steps: 10950         # 30 years × 365
+    n_forward_steps: 10950               # 30 years
     loader:
-      dataset: { source_ids: [UKESM1-0-LL], experiments: [ssp585],
-                 realizations: [1] }
-  - name: inf_holdout_ssp585_low    # MPI-ESM1-2-LR (low-ECS)
+      dataset:
+        source_ids: [UKESM1-0-LL]
+        experiments: [ssp585]
+        realizations: [1]
+      start_indices: { times: [2015-03-01, 2015-06-01, 2015-09-01, 2015-12-01] }
+  - name: inf_holdout_ssp585_mpi         # low-ECS, +1.89 K
     weight: 0.0
     n_forward_steps: 10950
     loader:
-      dataset: { source_ids: [MPI-ESM1-2-LR], experiments: [ssp585],
-                 realizations: [1] }
+      dataset:
+        source_ids: [MPI-ESM1-2-LR]
+        experiments: [ssp585]
+        realizations: [1]
+      start_indices: { times: [2015-03-01, 2015-06-01, 2015-09-01, 2015-12-01] }
 
-  # (C) ERA5-analog — one future + one other-realisation probe
-  - name: inf_era5_analog_ssp585
+  # ----- (C) ERA5-analog — one entry per held-out source -----
+  - name: inf_era5_analog_canesm5        # high-ECS (+3.83 K)
     weight: 0.0
-    n_forward_steps: 10950         # 30 years × 365
+    n_forward_steps: 10950               # 30 years
     loader:
-      dataset: { source_ids: [CanESM5], experiments: [ssp585],
-                 realizations: [1] }
-  - name: inf_era5_analog_other_variant
+      dataset:
+        source_ids: [CanESM5]
+        experiments: [ssp585]
+        realizations: [1]
+      start_indices: { times: [2015-03-01, 2015-06-01, 2015-09-01, 2015-12-01] }
+  - name: inf_era5_analog_gfdl           # mid-ECS (+2.5 K)
     weight: 0.0
-    n_forward_steps: 7300          # 20 years
+    n_forward_steps: 10950
     loader:
-      dataset: { source_ids: [CanESM5], experiments: [historical],
-                 realizations: [2] }
+      dataset:
+        source_ids: [GFDL-CM4]
+        experiments: [ssp585]
+        realizations: [1]
+      start_indices: { times: [2015-03-01, 2015-06-01, 2015-09-01, 2015-12-01] }
 
-  # (D) bridging the 1970-1989 gap — one variant per source, start at 1970
-  - name: inf_holdout_years_A
+  # ----- (D) temporal interpolation — one entry per source -----
+  # 19y horizon so Dec-1-1970 IC's rollout stays inside 1970-01-01..1989-12-31.
+  - name: inf_holdout_years_inm
     weight: 0.0
-    n_forward_steps: 7300          # 20 years
+    n_forward_steps: 6935                # 19 years × 365
     loader:
-      dataset: { source_ids: [INM-CM5-0], experiments: [historical],
-                 realizations: [1] }
-      # initial condition at 1970-01-01
-  - name: inf_holdout_years_B
+      dataset:
+        source_ids: [INM-CM5-0]
+        experiments: [historical]
+        realizations: [1]
+      start_indices: { times: [1970-03-01, 1970-06-01, 1970-09-01, 1970-12-01] }
+  - name: inf_holdout_years_noresm
     weight: 0.0
-    n_forward_steps: 7300
+    n_forward_steps: 6935
     loader:
-      dataset: { source_ids: [NorESM2-LM], experiments: [historical],
-                 realizations: [1] }
-
+      dataset:
+        source_ids: [NorESM2-LM]
+        experiments: [historical]
+        realizations: [1]
+      start_indices: { times: [1970-03-01, 1970-06-01, 1970-09-01, 1970-12-01] }
 ```
 
-The EC-Earth3 unusual-response-shape probe is now part of the (A)
-cohort (`inf_holdout_variants_ecearth3_shape` above); no separate
-in-sample EC-Earth3 inference is needed.
-
-(A) now has three inline-inference picks rather than the proposed
-two-per-cohort cap — accepted to keep the shape-probe distinct from
-the IC-only probes. We can reduce reported metrics later if the
-output volume becomes a problem; the marginal inference cost is
-small relative to the train pass.
+**Total inference entries: 11.** Per-entry runtime is bounded by
+the longest single rollout (30 years × 4 ICs); aggregate cost is
+small relative to a single training epoch on the 196-dataset
+train set.
 
 ## Open items to iterate on
 
-- Whether to add a `val_in_sample_recent` (last 5 years of training
-  data) variant — useful as a smoke check for distribution drift.
-- Rollout horizons: 5-day / 365-day / 7300-day / 10950-day are
-  placeholders. Confirm the longer rollouts fit in time + memory on
-  one training pod before committing.
-- BCC-CSM2-MR investigation (task #87) — if the unphysical wind
-  values are confined to specific cells/timesteps and can be cleanly
-  excised, BCC-CSM2-MR stays in train as a useful Chinese-family
-  representative. If the contamination is widespread, exclude.
+- **Rollout-horizon memory check.** 30-year rollouts (10,950 steps)
+  with the configured stepper haven't been benchmarked on the
+  target training pod. Confirm peak GPU memory + wall time before
+  committing — if the 4-IC × 30y combination doesn't fit, options
+  are: drop to 2 ICs (Mar + Sep), or run the long rollouts on a
+  subset of epochs via `epochs` slice rather than every epoch.
+
+- **BCC-CSM2-MR**: task #87 is now resolved — the corrupt last
+  day was truncated by migration 0.6.0 → 0.7.0 (sidecar
+  `n_timesteps`: 23725 → 23724). BCC-CSM2-MR/historical/r1i1p1f1
+  stays in train as the Chinese-family representative; no
+  further action.
+
+- **Per-entry aggregator override pattern.** Several metric-pruning
+  rules (histograms full vs subset, zonal_mean on vs off, annual
+  plev subset) would be cleaner with a "base aggregator + per-
+  entry override" mechanism in `TrainConfig` rather than repeating
+  the full `aggregator: {...}` block per entry. Not blocking — we
+  can author the verbose form first and tidy later.
+
+- **Pending small code changes for metric pruning** (see Metric
+  pruning section below):
+  - `PowerSpectrumMetricConfig.report_directional_bias: bool = False`.
+  - `HistogramMetricConfig.percentile_variables: list[str] | None`.
+
+## Metric pruning
+
+Default per-inference-entry metric output is wide enough that 11
+inference entries × every-epoch reporting will quickly bloat the
+W&B run page and the per-epoch artefact size. Trim by tier:
+
+### Cohort-wide (apply to every train / val / inference entry)
+
+- **Power spectrum scalar metrics: drop `positive_norm_bias` and
+  `negative_norm_bias`.** Keep `mean_abs_norm_bias` and
+  `smallest_scale_norm_bias` — those summarise the same
+  information. The directional split is redundant. *Pending small
+  code change*: add a `report_directional_bias: bool = False`
+  field to `PowerSpectrumMetricConfig` in
+  `fme/ace/aggregator/inference/spectrum.py`; default off here.
+
+- **Power spectrum chart-plot: restrict to `ua10, va10, hus10,
+  zg10, h500, PRATEsfc` by default.** The per-variable
+  spectrum-pair PNGs are the expensive part to store (one
+  matplotlib figure per variable per epoch per entry × 11
+  entries); the scalar metrics are cheap and stay for all
+  variables. Uppermost-level (10 hPa) probes the
+  stratosphere where most models have spectrum issues, `h500`
+  is the standard mid-troposphere reference, and `PRATEsfc`
+  catches precipitation tail behaviour. *Pending small code
+  change*: `PowerSpectrumMetricConfig.variables` currently
+  filters BOTH scalar metrics AND the plot — we'd lose the
+  scalar `mean_abs_norm_bias` for all the unplotted variables
+  if we used it. Add a separate
+  `plot_variables: list[str] | None = None` field (default
+  None → plot all, matching current behaviour) that gates
+  plotting per variable in
+  `PairedSphericalPowerSpectrumAggregator.get_logs`.
+  Reference runs (see per-entry rules below) override to
+  `plot_variables: null` for full coverage.
+
+- **Histogram percentile reporting: 99.9999th percentile values
+  only for precipitation** (`PRATEsfc`, plus `pr` where present).
+  No other variables. *Pending small code change*:
+  `HistogramMetricConfig` currently has no per-variable
+  percentile control; the simplest fix is a
+  `percentile_variables: list[str] | None = None` field that
+  restricts which variables get percentile keys emitted (default
+  None → all, set to `[PRATEsfc, pr]` here).
+
+### Per-entry (apply via aggregator config)
+
+- **Histograms — restrict per entry.**
+  - **`inf_era5_analog_canesm5` and `inf_holdout_ssp585_ukesm`**:
+    full histograms (`enabled: true`, `variables: null` to keep
+    all). These are the two reference long-rollouts where the
+    full distribution shape is the goal.
+  - **All other long-rollouts** (variants, GFDL, MPI, INM,
+    NorESM, in-sample 30yr): `enabled: true`,
+    `variables: [PRATEsfc, hus10, hus50, ua10]` — precipitation
+    + stratospheric tracers that we already know are
+    distribution-tail sensitive (ACCESS-ESM1-5 / EC-Earth3
+    stratosphere variability flagged earlier).
+  - **Weather-scale (`inf_in_sample_5day`)**: `enabled: false`.
+    Histograms over 5-day rollouts don't have enough samples to
+    be informative.
+
+- **Annual means — subset 3D pressure levels.**
+  The default annual config emits one metric per `{var}{plev}`.
+  Restrict the plev set on `AnnualMetricConfig.variables` to
+  **stratosphere + tropopause + near-surface, plus one mid-trop
+  representative**:
+  - Keep: `ua10`, `ua250`, `ua700`, `va10`, `va250`, `va700`,
+    `hus10`, `hus250`, `hus700`, `zg10`, `zg250`, `zg500`,
+    `zg1000` (one mid-trop pick per variable).
+  - Drop: every other plev for `ua`, `va`, `hus`, `zg` (50, 100,
+    500 for the first three; 50, 100, 700, 850 for `zg`).
+  - 2D variables (`TMP2m`, `pr`, `psl`, etc.) — keep all.
+
+- **Zonal-mean evolutions — restrict by entry.**
+  - **`inf_era5_analog_canesm5`**: full zonal-mean output
+    (`enabled: true`, `variables: null`).
+  - **`inf_holdout_variants_ecearth3_shape`**: subset to a sparse
+    key-variable list — `variables: [TMP2m, amon_ts, hus250,
+    ua250, ua10, zg10]`. The 3D picks target the
+    stratospheric-shape probe; the surface picks anchor the
+    response.
+  - **All other entries**: `zonal_mean.enabled: false`. Zonal
+    means are heavy and we don't need them for every rollout.
+
+### Additional pruning
+
+- **`step_means` and `ensembles`: step=5 only, drop step=20.**
+  The default `InferenceEvaluatorAggregatorConfig` snapshots at
+  step=20 (20 days in). The 5-day weather entry can't reach
+  step=20 anyway, and on the long rollouts a 20-day snapshot is
+  not meaningfully different from a 5-day one — both are early
+  weather, neither captures the climate behaviour the long runs
+  exist to probe. Override every entry to use step=5 for
+  `step_means` and `ensembles` (ensembles only fires on the
+  5-day weather entry since the others have `n_ensemble_per_ic:
+  1`).
+
+- **ENSO / IPO indices** — useful only on long ocean-tracking
+  rollouts. Disable on (A) 10-year variants and on the
+  weather-scale entry; keep on (B), (C), (D), and
+  `inf_in_sample_30yr`.
+
+- **Video metrics** — already off by default; keep off.
+
+- **Seasonal metrics** — already off by default; keep off (the
+  user removed seasonal forecasts from the inference list).
+
+Open question: there's no per-cohort default-aggregator
+override mechanism in `TrainConfig` today — each
+`InlineInferenceConfig.aggregator` is set per entry. The cleanest
+path is to author the per-entry aggregator configs explicitly
+in the YAML; a small refactor to support "base aggregator +
+per-entry override" would let us express the rules above more
+compactly but isn't blocking.
