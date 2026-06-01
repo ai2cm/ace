@@ -2,15 +2,15 @@
 
 set -e
 
-JOB_NAME="ufs-replay-test-month-ocean-train"
+JOB_NAME="ufs-replay-test-full-30-years-ocean-train"
 JOB_GROUP="ufs-replay-ocean"
 CONFIG_FILENAME="train-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH="${SCRIPT_PATH}${CONFIG_FILENAME}"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=1
-STATS_DATA=01KSTMKQ80R5EBQTJZY0H54KKX
+N_GPUS=4
+STATS_DATA=01KT0GDTNWS9FRMNJZ8EZEZ5A6
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
@@ -19,7 +19,7 @@ python -m fme.ace.validate_config --config_type train $CONFIG_PATH
 gantry run \
     --name $JOB_NAME \
     --task-name $JOB_NAME \
-    --description "SamudraI CM4 piControl ocean pretraining" \
+    --description "SamudraI UFS pre-training" \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/climate-titan \
     --priority urgent \
