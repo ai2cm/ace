@@ -633,6 +633,12 @@ class EnsembleLoss(torch.nn.Module):
         gen_norm: torch.Tensor,
         target_norm: torch.Tensor,
     ) -> list[LossComponent]:
+        if torch.isnan(gen_norm).any():
+            raise ValueError(
+                "EnsembleLoss: gen_norm (model output) contains NaN. "
+                f"gen_norm shape={tuple(gen_norm.shape)}, "
+                f"nan_frac={torch.isnan(gen_norm).float().mean():.3f}"
+            )
         components: list[LossComponent] = []
         if self.crps_weight > 0:
             for c in self.crps_loss(gen_norm, target_norm):

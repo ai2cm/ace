@@ -83,16 +83,9 @@ def get_energy_score(
             f"got {gen.shape[1]} ensemble members. "
             "Update this function (and its tests) to support more."
         )
-    diff = gen[:, 0, ...] - gen[:, 1, ...]
-    if torch.all(diff == 0):
-        raise ValueError(
-            "Energy score: both ensemble members are identical "
-            "(noise-conditioning weights may be zero). "
-            "torch.abs(0+0j) has NaN gradient and will corrupt all parameters."
-        )
     # CRPS is `E[|X - y|] - 1/2 E[|X - X'|]`
     # below we compute the first term as the average of two ensemble members
     # meaning the 0.5 factor can be pulled out
     target_term = torch.abs(gen - target).mean(axis=1)
-    internal_term = -0.5 * torch.abs(diff)
+    internal_term = -0.5 * torch.abs(gen[:, 0, ...] - gen[:, 1, ...])
     return target_term + internal_term
