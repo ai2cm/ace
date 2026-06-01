@@ -2640,6 +2640,198 @@ def test_train_on_batch_masked_variable_has_zero_loss_count():
     assert stepped.per_channel_losses["a"].count == n_samples
 
 
+@pytest.mark.parametrize("optimize_precorrected", [True, False])
+def test_train_on_batch_optimize_precorrected(optimize_precorrected: bool):
+    """When optimize_precorrected=True, loss is computed on pre-corrector values."""
+    torch.random.manual_seed(0)
+    n_forward_steps = 2
+    device = get_device()
+    names = [
+        "PRESsfc",
+        "specific_total_water_0",
+        "specific_total_water_1",
+        "PRATEsfc",
+        "LHTFLsfc",
+        "tendency_of_total_water_path_due_to_advection",
+    ]
+    data = {
+        "PRESsfc": 10.0 + torch.rand(size=(3, n_forward_steps + 1, 5, 5)),
+        "specific_total_water_0": torch.rand(size=(3, n_forward_steps + 1, 5, 5)),
+        "specific_total_water_1": torch.rand(size=(3, n_forward_steps + 1, 5, 5)),
+        "PRATEsfc": torch.rand(size=(3, n_forward_steps + 1, 5, 5)),
+        "LHTFLsfc": torch.rand(size=(3, n_forward_steps + 1, 5, 5)),
+        "tendency_of_total_water_path_due_to_advection": torch.rand(
+            size=(3, n_forward_steps + 1, 5, 5)
+        ),
+    }
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
+    ).to(device)
+    horizontal_coordinate = LatLonCoordinates(
+        lat=torch.linspace(-89.5, 89.5, 5, device=device),
+        lon=torch.linspace(-179.5, 179.5, 5, device=device),
+    )
+    dataset_info = get_dataset_info(
+        vertical_coordinate=vertical_coordinate,
+        horizontal_coordinate=horizontal_coordinate,
+    )
+    corrector_config = AtmosphereCorrectorConfig(
+        conserve_dry_air=True,
+        zero_global_mean_moisture_advection=True,
+        force_positive_names=["PRATEsfc"],
+    )
+    stepper_config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt",
+                        config={"module": Multiply(1.5).to(device)},
+                    ),
+                    in_names=names,
+                    out_names=names,
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means={key: 0.0 for key in names},
+                            stds={key: 1.0 for key in names},
+                        ),
+                    ),
+                    corrector=corrector_config,
+                )
+            ),
+        ),
+    )
+    stepper = _get_train_stepper(
+        stepper_config,
+        dataset_info,
+        optimize_precorrected=optimize_precorrected,
+    )
+    time = xr.DataArray(
+        [
+            [
+                cftime.DatetimeProlepticGregorian(
+                    2000, 1, int(i * 6 // 24) + 1, i * 6 % 24
+                )
+                for i in range(n_forward_steps + 1)
+            ]
+            for _ in range(3)
+        ],
+        dims=["sample", "time"],
+    )
+    batch_data = BatchData.new_on_cpu(
+        data=data, time=time, labels=None, epoch=0
+    ).to_device()
+
+    with torch.no_grad():
+        stepped = stepper.train_on_batch(
+            data=batch_data, optimization=NullOptimization()
+        )
+
+    # gen_data should always contain the corrected outputs regardless of flag
+    assert "PRESsfc" in stepped.gen_data
+    assert "PRATEsfc" in stepped.gen_data
+
+
+def test_optimize_precorrected_changes_loss():
+    """Verify optimize_precorrected=True produces a different loss value."""
+    torch.random.manual_seed(0)
+    n_forward_steps = 2
+    device = get_device()
+    names = [
+        "PRESsfc",
+        "specific_total_water_0",
+        "specific_total_water_1",
+        "PRATEsfc",
+        "LHTFLsfc",
+        "tendency_of_total_water_path_due_to_advection",
+    ]
+    data = {
+        "PRESsfc": 10.0 + torch.rand(size=(3, n_forward_steps + 1, 5, 5)),
+        "specific_total_water_0": torch.rand(size=(3, n_forward_steps + 1, 5, 5)),
+        "specific_total_water_1": torch.rand(size=(3, n_forward_steps + 1, 5, 5)),
+        "PRATEsfc": torch.rand(size=(3, n_forward_steps + 1, 5, 5)),
+        "LHTFLsfc": torch.rand(size=(3, n_forward_steps + 1, 5, 5)),
+        "tendency_of_total_water_path_due_to_advection": torch.rand(
+            size=(3, n_forward_steps + 1, 5, 5)
+        ),
+    }
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
+    ).to(device)
+    horizontal_coordinate = LatLonCoordinates(
+        lat=torch.linspace(-89.5, 89.5, 5, device=device),
+        lon=torch.linspace(-179.5, 179.5, 5, device=device),
+    )
+    dataset_info = get_dataset_info(
+        vertical_coordinate=vertical_coordinate,
+        horizontal_coordinate=horizontal_coordinate,
+    )
+    corrector_config = AtmosphereCorrectorConfig(
+        conserve_dry_air=True,
+        zero_global_mean_moisture_advection=True,
+        force_positive_names=["PRATEsfc"],
+    )
+
+    def make_stepper(optimize_precorrected):
+        stepper_config = StepperConfig(
+            step=StepSelector(
+                type="single_module",
+                config=dataclasses.asdict(
+                    SingleModuleStepConfig(
+                        builder=ModuleSelector(
+                            type="prebuilt",
+                            config={"module": Multiply(1.5).to(device)},
+                        ),
+                        in_names=names,
+                        out_names=names,
+                        normalization=NetworkAndLossNormalizationConfig(
+                            network=NormalizationConfig(
+                                means={key: 0.0 for key in names},
+                                stds={key: 1.0 for key in names},
+                            ),
+                        ),
+                        corrector=corrector_config,
+                    )
+                ),
+            ),
+        )
+        return _get_train_stepper(
+            stepper_config,
+            dataset_info,
+            optimize_precorrected=optimize_precorrected,
+        )
+
+    time = xr.DataArray(
+        [
+            [
+                cftime.DatetimeProlepticGregorian(
+                    2000, 1, int(i * 6 // 24) + 1, i * 6 % 24
+                )
+                for i in range(n_forward_steps + 1)
+            ]
+            for _ in range(3)
+        ],
+        dims=["sample", "time"],
+    )
+    batch_data = BatchData.new_on_cpu(
+        data=data, time=time, labels=None, epoch=0
+    ).to_device()
+
+    with torch.no_grad():
+        corrected_stepper = make_stepper(optimize_precorrected=False)
+        corrected_result = corrected_stepper.train_on_batch(
+            data=batch_data, optimization=NullOptimization()
+        )
+        precorrected_stepper = make_stepper(optimize_precorrected=True)
+        precorrected_result = precorrected_stepper.train_on_batch(
+            data=batch_data, optimization=NullOptimization()
+        )
+
+    # The corrector modifies outputs, so the two losses should differ
+    assert corrected_result.metrics["loss"] != precorrected_result.metrics["loss"]
+
+
 def test_predict_with_data_mask_zeros_masked_forcing():
     """Masked forcing variable is zeroed in normalized space before the forward pass."""
     n_steps = 1

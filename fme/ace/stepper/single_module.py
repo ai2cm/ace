@@ -53,6 +53,7 @@ from fme.core.optimization import NullOptimization
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.spatial_masking import NullSpatialMasking, StaticSpatialMaskingConfig
 from fme.core.step.args import StepArgs
+from fme.core.step.global_mean_removal import GlobalMeanRemovalConfigUnion
 from fme.core.step.multi_call import (
     MultiCallConfig,
     MultiCallStepConfig,
@@ -109,6 +110,9 @@ class SingleModuleStepperConfig:
             loss. The same loss configuration as specified in 'loss' is used.
         residual_prediction: Whether to have ML module predict tendencies for
             prognostic variables.
+        global_mean_removal: Optional configuration for removing global means
+            from fields before normalization and restoring them after
+            denormalization. Passed through to ``SingleModuleStepConfig``.
     """
 
     builder: ModuleSelector
@@ -130,6 +134,7 @@ class SingleModuleStepperConfig:
     multi_call: MultiCallConfig | None = None
     include_multi_call_in_loss: bool = False
     residual_prediction: bool = False
+    global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
 
     def __post_init__(self):
         for name in self.prescribed_prognostic_names:
@@ -308,6 +313,7 @@ class SingleModuleStepperConfig:
             next_step_forcing_names=self.next_step_forcing_names,
             prescribed_prognostic_names=self.prescribed_prognostic_names,
             residual_prediction=self.residual_prediction,
+            global_mean_removal=self.global_mean_removal,
         )
 
 
@@ -1072,6 +1078,8 @@ class Stepper:
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
+        *,
+        detach_uncorrected: bool = True,
     ) -> StepOutput:
         """
         Step the model forward one timestep given input data.
@@ -1079,6 +1087,11 @@ class Stepper:
         Args:
             args: The arguments to the step function.
             wrapper: Wrapper to apply over each nn.Module before calling.
+            detach_uncorrected: If True (default), detach the uncorrected
+                tensors from the autograd graph to avoid retaining it when
+                uncorrected values are only used for metrics. Set to False
+                when gradients through uncorrected values are needed (e.g.
+                for ``optimize_precorrected`` training).
 
         Returns:
             The output at the next timestep and the pre-correction values of any
@@ -1088,9 +1101,12 @@ class Stepper:
         step_output = self._step_obj.step(args=args, wrapper=wrapper)
         # The output process func (e.g. spatial masking) is name-preserving and
         # applied per-variable, so it is safe to apply to the uncorrected subset.
+        uncorrected = self._output_process_func(step_output.uncorrected)
+        if detach_uncorrected:
+            uncorrected = {k: v.detach() for k, v in uncorrected.items()}
         return StepOutput(
             output=self._output_process_func(step_output.output),
-            uncorrected=self._output_process_func(step_output.uncorrected),
+            uncorrected=uncorrected,
         )
 
     def get_prediction_generator(
@@ -1149,6 +1165,7 @@ class Stepper:
         optimizer: OptimizationABC,
         labels: BatchLabels | None,
         data_mask: TensorMapping | None = None,
+        detach_uncorrected: bool = True,
     ) -> Generator[StepOutput, None, None]:
         state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
         for step in range(n_forward_steps):
@@ -1178,6 +1195,7 @@ class Stepper:
                         data_mask=data_mask,
                     ),
                     wrapper=checkpoint,
+                    detach_uncorrected=detach_uncorrected,
                 )
             yield step_output
             # The rollout always feeds the corrected output forward.
@@ -1512,6 +1530,11 @@ class TrainStepperConfig:
             be less than or equal to the number of timesteps present
             in the training dataset samples.
         parameter_init: The parameter initialization configuration for fine-tuning.
+        optimize_precorrected: When True, compute the training loss on
+            pre-corrector outputs for variables the corrector modifies.
+            Variables the corrector does not modify use the normal
+            (post-adjustment) values. The rollout state and returned gen_data
+            always use the fully corrected outputs regardless of this flag.
     """
 
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
@@ -1521,6 +1544,7 @@ class TrainStepperConfig:
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
+    optimize_precorrected: bool = False
 
     def __post_init__(self):
         if self.n_ensemble == -1:
@@ -1738,6 +1762,7 @@ class TrainStepper(
             optimization,
             labels=input_ensemble_data.labels,
             data_mask=input_ensemble_data.data_mask,
+            detach_uncorrected=not self._config.optimize_precorrected,
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)
@@ -1774,9 +1799,21 @@ class TrainStepper(
             else:
                 context = torch.no_grad()
             with context:
-                gen_step = next(output_iterator).output
-                gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
+                step_output = next(output_iterator)
+                gen_step = unfold_ensemble_dim(
+                    step_output.output, n_ensemble=n_ensemble
+                )
                 output_list.append(gen_step)
+                if (
+                    self._config.optimize_precorrected
+                    and step_output.uncorrected
+                ):
+                    loss_gen = unfold_ensemble_dim(
+                        {**step_output.output, **step_output.uncorrected},
+                        n_ensemble=n_ensemble,
+                    )
+                else:
+                    loss_gen = gen_step
                 target_step = add_ensemble_dim(
                     {
                         k: v.select(self.TIME_DIM, step)
@@ -1784,7 +1821,7 @@ class TrainStepper(
                     }
                 )
                 step_loss = self._loss_obj(
-                    gen_step,
+                    loss_gen,
                     target_step,
                     step=step,
                     data_mask=input_batch_data.data_mask,

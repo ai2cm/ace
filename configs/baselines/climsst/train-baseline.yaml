@@ -109,6 +109,8 @@ stepper:
           separable: false
           spectral_layers: 3
           spectral_transform: sht
+          affine_norms: true
+          normalize_big_skip: true
       normalization:
         network:
           global_means_path: /statsdata/centering.nc
