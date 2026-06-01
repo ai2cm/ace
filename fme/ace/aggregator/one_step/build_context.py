@@ -32,6 +32,8 @@ class EnsembleAggregator(Protocol):
         self,
         target_data: EnsembleTensorDict,
         gen_data: EnsembleTensorDict,
+        target_data_norm: EnsembleTensorDict | None = ...,
+        gen_data_norm: EnsembleTensorDict | None = ...,
         i_time_start: int = ...,
     ) -> None: ...
 

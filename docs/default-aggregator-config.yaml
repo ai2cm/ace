@@ -32,6 +32,8 @@ aggregator:
     log_mean_maps: false
     enabled: true
     strict: false
+    target: denorm
+    channel_mean_names: null
   power_spectrum:
     variables: null
     name: power_spectrum
