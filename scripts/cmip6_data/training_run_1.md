@@ -5,8 +5,12 @@ Plan for the first end-to-end CMIP6 emulator training on the v2 cohort
 2015-2100` + `ssp585 2015-2100`, schema 0.6.0). Goal of this doc:
 state the generalization dimensions we want to measure, propose the
 held-out cohorts that probe each, and sketch the matching validation
-+ inline inference entries. Numbers below are starting proposals; we
-will iterate on them when we build the actual `TrainConfig`.
++ inline inference entries.
+
+This is a **single training configuration**: one model, one train
+set, one set of held-out cohorts. Each source model appears in at
+most one cohort so each eval signal maps to exactly one
+generalization dimension.
 
 ## Dimensions tested
 
@@ -21,12 +25,13 @@ it:
    historical+ssp245; its ssp585 is held out). Tests whether the
    model has learned a response to forcing rather than memorising
    trajectories.
-3. **Single-realisation training (ERA5-analog)**. *Separate
-   training experiment.* Train on **one historical realisation of
-   one source model only** (no other variants, no SSPs of that
-   source), then test that source's other variants and its SSPs.
-   Simulates "what happens when we only have one historical (like
-   ERA5)" — can we still produce reasonable scenarios?
+3. **Single-realisation training (ERA5-analog)**. In the *same*
+   training config as the other cohorts, deliberately reduce one
+   source model's training data to a single historical realisation
+   (no other variants, no SSPs of that source), then test that
+   source's other variants and its SSPs. Simulates "what happens
+   when we only have one historical (like ERA5)" — can we still
+   produce reasonable scenarios?
 4. **Temporal interpolation within historical** (replaces the
    "extrapolation" sketch). Withhold a 20-year window in the middle
    of historical (e.g. 1970-1989) for ~5 training source models.
@@ -133,11 +138,14 @@ Implications for the holdout design:
 - **(C) ERA5-analog on CanESM5** picks a high-sensitivity *outlier*.
   Deliberately hard test, but means failure could be either
   sample-size or unusual physics. Note: if (C) results look bad,
-  re-run with a cohort-typical source (CMCC-ESM2 or MRI-ESM2-0)
-  to disentangle.
-- **(B) ssp585 holdout** (CanESM5, MPI-ESM1-2-LR, UKESM1-0-LL)
-  happens to span the sensitivity range cleanly (high / low / high).
-  Good as-is.
+  a future run could redo on a cohort-typical source — MRI-ESM2-0
+  is the cleanest backup (its closest sibling GFDL-CM4 is below
+  the r=0.85 fake-holdout threshold). Avoid CMCC-ESM2 as the
+  backup — its near-twin CMCC-CM2-SR5 (r=0.991) would still be
+  in train and trivially predict it.
+- **(B) ssp585 holdout** spans the ECS axis cleanly under the
+  one-source-per-cohort rule: UKESM1-0-LL (high) + MPI-ESM1-2-LR
+  (low). CanESM5 moved to (C) since it's the strongest (C) target.
 - **MIROC6 and EC-Earth3 ssp585 rollouts** are particularly
   informative as inline-inference targets even though they're in
   training — if the emulator reproduces their unusual sensitivity
@@ -176,95 +184,76 @@ Practical impact for training:
   loss signal under shared normalization — per-source normalization
   matters most for them.
 
-## Held-out cohorts (main training run)
+## Held-out cohorts
 
-After holdouts, training set ≈ 175–185 datasets across ~30 source
-models.
+**Rule.** Each source appears in at most one cohort. 10 of 38 sources
+are assigned to a holdout; the remaining 28 are unconstrained
+training models.
 
-### A. Held-out variants (internal-variability test)
+After holdouts: train set = **198 datasets** (81% of 243), with 8 of
+those (from D) carrying a 1970-1989 time mask.
 
-For source models with ≥3 variants in a given scenario, hold out their
-`r2` (or similar) from training but keep the same (source, scenario)
-cell in. Picks chosen from non-outlier sources spanning multiple
-families (CNRM, GFDL/MRI, EC-Earth, Hadley, MPI), so the result isn't
-dominated by a single family or by an outlier model's biases:
+### A. Held-out variants — internal variability
 
-- `CNRM-CM6-1/ssp245/r2i1p1f2`
-- `CNRM-CM6-1/ssp585/r2i1p1f2`
-- `CNRM-ESM2-1/historical/r2i1p1f2`
-- `MRI-ESM2-0/historical/r2i1p1f1`
-- `EC-Earth3-Veg-LR/historical/r2i1p1f1`
-- `MPI-ESM1-2-LR/historical/r2i1p1f1`
+For source models with ≥3 variants in a given scenario, hold out
+their `r2` (or similar) from training. Picks chosen from non-outlier
+sources spanning 5 families:
 
-~6 datasets across 5 families.
+- `CNRM-CM6-1/ssp245/r2i1p1f2` (CNRM family, mid-ECS)
+- `CNRM-CM6-1/ssp585/r2i1p1f2` (same source, ssp585 sibling)
+- `CNRM-ESM2-1/historical/r2i1p1f2` (CNRM family)
+- `MRI-ESM2-0/historical/r2i1p1f1` (GFDL/MRI family)
+- `EC-Earth3-Veg-LR/historical/r2i1p1f1` (EC-Earth family)
+- `IPSL-CM6A-LR/historical/r2i1p1f1` (IPSL/MIROC family)
 
-### B. Held-out (model, ssp585)
+= **6 datasets** across 5 sources, 5 families.
 
-For sources with rich multi-variant ssp585 coverage so the holdout
-signal is statistically meaningful, drawn from non-outlier sources
-across distinct families:
+### B. Held-out (model, ssp585) — future-scenario extrapolation
 
-- `CanESM5/ssp585/*` (10 variants, CESM-derived family)
-- `MPI-ESM1-2-LR/ssp585/*` (5 variants, MPI family)
-- `UKESM1-0-LL/ssp585/*` (5 variants, Hadley/ACCESS family — but
-  note its sibling HadGEM3-GC31-LL stays in train and has r=0.80
-  similarity, so this is on the easier side of the test; the
-  CanESM5 + MPI picks are the harder probes)
+Two sources, all ssp585 variants held out; their historical + ssp245
+stay in train:
 
-Their `historical` and `ssp245` stay in training, so we're testing
-whether the emulator can extrapolate forcing within the same model
-family. Total: 20 datasets.
+- `UKESM1-0-LL/ssp585/*` (5 variants, **high-ECS** at +3.66 K)
+- `MPI-ESM1-2-LR/ssp585/*` (5 variants, **low-ECS** at +1.89 K)
 
-### C. Single-realisation training (separate experiment)
+= **10 datasets** removed. Cleanly spans the sensitivity axis.
+UKESM1's sibling HadGEM3-GC31-LL stays in train at r=0.80 — slightly
+easier than CanESM5 would have been, but CanESM5 is the (C) target
+and one source can't be in two cohorts. Acceptable trade.
 
-A second training run, otherwise identical to the main one, except
-the train set for one specific source model is reduced to:
+### C. Single-realisation training — ERA5-analog
 
-- exactly one historical variant of that source (e.g. `CanESM5
-  historical r1i1p1f1`)
-- nothing else from that source
+`CanESM5` is the only source in this cohort. Of its 30 datasets,
+**only `CanESM5/historical/r1i1p1f1` stays in training**; the other
+29 (9 historical variants + 10 ssp245 + 10 ssp585) all become eval.
 
-The eval set then includes:
+CanESM5 is the strongest (C) target: rich variant + scenario
+coverage, no r>0.85 sibling in the cohort (closest are CESM2 and
+NorESM2-LM at r≈0.6), and its high-ECS warming response (+3.83 K)
+makes for a deliberately hard test — if the model can predict
+CanESM5/ssp585 from a single CanESM5/historical realisation, that's
+strong evidence the embedding generalizes within a model.
 
-- that source's other historical variants → ensemble-spread under
-  data-scarcity
-- that source's `ssp245` and `ssp585` → can-we-predict-the-future
-  -from-one-historical (the ERA5 analog)
+= **29 datasets** removed from train.
 
-Pick a model with rich variant + scenario coverage. **CanESM5** fits
-(10/10/10 historical/ssp245/ssp585 = ~30 eval datasets, sits in the
-CESM-derived family but isn't near-identical to any cohort member —
-closest relatives are CESM2 at r≈0.6 and NorESM2-LM at r≈0.6, both
-much weaker than the r>0.85 family pairs above). The single
-realisation kept in train would be `CanESM5/historical/r1i1p1f1`;
-everything else `CanESM5/*` moves to eval. Compare its eval metrics
-to the main-run eval for the same datasets to see how much the
-multi-variant + multi-scenario training contributed.
+### D. Temporal interpolation — held-out 1970-1989
 
-### D. Temporal interpolation (held-out 1970-1989)
+Two sources, time-mask the 1970-1989 window of their historical
+training data (keep `[1940, 1969] ∪ [1990, 2014]`). Eval set is the
+same sources' historical restricted to the 1970-1989 window.
 
-For ~5 training source models, restrict their `historical` training
-data to `[1940-01-01, 1969-12-31] ∪ [1990-01-01, 2014-12-31]`, dropping
-the 20-year middle. Done by filtering the time axis at the data
-loader, not by removing datasets. Eval set is the same source's
-historical 1970-1989 window.
+- `INM-CM5-0/historical/*` (5 variants, MPI-adjacent family)
+- `NorESM2-LM/historical/*` (3 variants, CESM-derived family)
+
+= **0 datasets** removed (time slice only on 8 dataset-equivalents).
+Both sources are non-outlier, multi-variant, and chosen to avoid
+overlap with (A)/(B)/(C). Different families so the result isn't
+family-specific.
 
 The 20-year gap is large enough that the model can't trivially
 interpolate from neighbouring days, but short enough that the
 forcing trajectory across the gap isn't wildly different from what
 the model sees.
-
-Candidates — drawn from non-outlier sources with ≥3 historical
-variants (so we can also see ensemble spread of the gap-fill) and
-spanning multiple families to avoid family-specific signals:
-
-- `MRI-ESM2-0/historical/*` (5 variants, GFDL/MRI family)
-- `MPI-ESM1-2-LR/historical/*` (5 variants, MPI family — but note
-  `r2i1p1f1` is in A; use the others)
-- `INM-CM5-0/historical/*` (5 variants, MPI-adjacent)
-- `NorESM2-LM/historical/*` (3 variants, CESM-derived)
-- `EC-Earth3-Veg-LR/historical/*` (3 variants, EC-Earth — but
-  `r2i1p1f1` is in A; use the others)
 
 ## Validation + inline inference (config sketch)
 
@@ -280,76 +269,139 @@ Held-out cohorts get `weight: 0.0` so they don't contaminate
 checkpoint selection (otherwise we'd overfit to the small eval set).
 Only in-sample validation drives the checkpoint metric.
 
+### Validation (one-step error, all datasets in cohort)
+
+Run on *all* datasets in each cohort — cheap, gives per-source signal.
+
 ```yaml
 validation:
   - name: val_in_sample           # training-distribution sanity
     weight: 1.0
     loader:
       dataset: { source_ids: <train>, experiments: [historical, ssp245, ssp585] }
-  - name: val_holdout_variants    # internal-variability (A)
+  - name: val_holdout_variants    # (A) internal-variability
     weight: 0.0
     loader:
-      dataset: { source_ids: [CNRM-CM6-1, CNRM-ESM2-1, MRI-ESM2-0, EC-Earth3-Veg-LR],
+      dataset: { source_ids: [CNRM-CM6-1, CNRM-ESM2-1, MRI-ESM2-0,
+                              EC-Earth3-Veg-LR, IPSL-CM6A-LR],
                  realizations: [2] }
-  - name: val_holdout_ssp585      # scenario-for-known-model (B)
+  - name: val_holdout_ssp585      # (B) scenario-for-known-model
     weight: 0.0
     loader:
-      dataset: { source_ids: [CanESM5, MPI-ESM1-2-LR, UKESM1-0-LL],
+      dataset: { source_ids: [UKESM1-0-LL, MPI-ESM1-2-LR],
                  experiments: [ssp585] }
-  - name: val_holdout_years       # temporal interpolation (D)
+  - name: val_era5_analog         # (C) ERA5-analog
     weight: 0.0
     loader:
-      dataset: { source_ids: <D models>, experiments: [historical] }
-      # time_slice (or equivalent) restricts to 1970-1989
+      dataset: { source_ids: [CanESM5] }
+      # held-out: everything except historical r1i1p1f1
+  - name: val_holdout_years       # (D) temporal interpolation
+    weight: 0.0
+    loader:
+      dataset: { source_ids: [INM-CM5-0, NorESM2-LM], experiments: [historical] }
+      # time_slice restricts to 1970-1989
 ```
+
+### Long inference (multi-step rollout, ≤2 sources per cohort)
+
+Rollout is expensive — pick at most 2 sources per cohort. Run every
+epoch (training-pass cost dominates; long rollouts are cheap on the
+margin).
 
 ```yaml
 inference:
-  # short rollouts at training distribution → catch obvious blowups
+  # In-sample sanity — short and long at training distribution.
   - name: inf_in_sample_5day
     weight: 1.0
     n_forward_steps: 5
-    # ... aggregator etc.
 
   - name: inf_in_sample_seasonal
     weight: 0.5
     n_forward_steps: 365
 
-  # long rollouts — 20-40 years; every epoch is fine, train pass
-  # cost dominates and we'll run many epochs anyway
-  - name: inf_in_sample_20yr      # in-distribution climate
+  - name: inf_in_sample_20yr
     weight: 0.5
     n_forward_steps: 7300          # 20 years × 365
 
-  - name: inf_holdout_variants_decadal   # (A) ensemble-spread
+  # (A) ensemble-spread on 2 held-out variants from different families
+  - name: inf_holdout_variants_A
     weight: 0.0
     n_forward_steps: 3650          # 10 years
     n_ensemble_per_ic: 5
+    loader:
+      dataset: { source_ids: [CNRM-CM6-1], experiments: [ssp585],
+                 realizations: [2] }
+  - name: inf_holdout_variants_B
+    weight: 0.0
+    n_forward_steps: 3650
+    n_ensemble_per_ic: 5
+    loader:
+      dataset: { source_ids: [IPSL-CM6A-LR], experiments: [historical],
+                 realizations: [2] }
 
-  - name: inf_holdout_ssp585_30yr        # (B) future-scenario climate
+  # (B) future-scenario rollouts — one variant per held-out source
+  - name: inf_holdout_ssp585_high   # UKESM1-0-LL (high-ECS)
     weight: 0.0
     n_forward_steps: 10950         # 30 years × 365
+    loader:
+      dataset: { source_ids: [UKESM1-0-LL], experiments: [ssp585],
+                 realizations: [1] }
+  - name: inf_holdout_ssp585_low    # MPI-ESM1-2-LR (low-ECS)
+    weight: 0.0
+    n_forward_steps: 10950
+    loader:
+      dataset: { source_ids: [MPI-ESM1-2-LR], experiments: [ssp585],
+                 realizations: [1] }
 
-  - name: inf_holdout_years_20yr         # (D) bridging the 1970-1989 gap
+  # (C) ERA5-analog — one future + one other-realisation probe
+  - name: inf_era5_analog_ssp585
+    weight: 0.0
+    n_forward_steps: 10950         # 30 years × 365
+    loader:
+      dataset: { source_ids: [CanESM5], experiments: [ssp585],
+                 realizations: [1] }
+  - name: inf_era5_analog_other_variant
+    weight: 0.0
+    n_forward_steps: 7300          # 20 years
+    loader:
+      dataset: { source_ids: [CanESM5], experiments: [historical],
+                 realizations: [2] }
+
+  # (D) bridging the 1970-1989 gap — one variant per source, start at 1970
+  - name: inf_holdout_years_A
+    weight: 0.0
+    n_forward_steps: 7300          # 20 years
+    loader:
+      dataset: { source_ids: [INM-CM5-0], experiments: [historical],
+                 realizations: [1] }
+      # initial condition at 1970-01-01
+  - name: inf_holdout_years_B
     weight: 0.0
     n_forward_steps: 7300
+    loader:
+      dataset: { source_ids: [NorESM2-LM], experiments: [historical],
+                 realizations: [1] }
 
-  # (C) lives in a separate run; same inference set but trained on
-  # a single historical realisation, see "Single-realisation training"
-  # above.
+  # In-sample, but with unusual physics — informative even though
+  # the model has seen these. EC-Earth3 has an unusual stratospheric
+  # warming-response shape; rolling it out tests whether the embedding
+  # captured shape, not just magnitude.
+  - name: inf_in_sample_ecEarth3_ssp585
+    weight: 0.0
+    n_forward_steps: 7300
+    loader:
+      dataset: { source_ids: [EC-Earth3], experiments: [ssp585],
+                 realizations: [1] }
 ```
 
 ## Open items to iterate on
 
-- Which source(s) for the temporal-interpolation cohort (D) — needs
-  ≥1940 coverage and clean data; pick from the strongest in-cohort
-  models so the gap-fill isn't masked by data-quality noise.
-- Which source for the ERA5-analog separate run (C) — `CanESM5` is
-  the default candidate (deepest multi-variant + multi-scenario
-  coverage), but a smaller-ensemble model would more honestly
-  simulate the data-scarcity setting we'll have with ERA5. The
-  trade-off is statistical power of the eval signal.
 - Whether to add a `val_in_sample_recent` (last 5 years of training
   data) variant — useful as a smoke check for distribution drift.
-- Rollout horizons: 5-day / 365-day / 7300-day are placeholders.
-  Confirm 7300-day rollouts fit in time + memory before committing.
+- Rollout horizons: 5-day / 365-day / 7300-day / 10950-day are
+  placeholders. Confirm the longer rollouts fit in time + memory on
+  one training pod before committing.
+- BCC-CSM2-MR investigation (task #87) — if the unphysical wind
+  values are confined to specific cells/timesteps and can be cleanly
+  excised, BCC-CSM2-MR stays in train as a useful Chinese-family
+  representative. If the contamination is widespread, exclude.
