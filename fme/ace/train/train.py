@@ -225,7 +225,7 @@ def _make_ace_aggregator_factory(
     output_dir: str,
     save_per_epoch_diagnostics: bool,
 ):
-    def factory(epoch: int):
+    def factory():
         return entry_config.aggregator.build(
             dataset_info=entry_dataset_info,
             n_ic_steps=stepper.n_ic_timesteps,

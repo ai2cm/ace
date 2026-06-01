@@ -800,22 +800,18 @@ class InferenceTask(Generic[PS, FD, SD]):
     Attributes:
         name: Used as the log key prefix and output subdirectory.
         data: Source of initial condition and forcing windows.
-        aggregator_factory: Builds the aggregator for a given epoch. Built lazily
-            per-epoch to match the existing per-epoch construction semantics
-            (e.g. fresh diagnostics path).
+        aggregator_factory: Builds the aggregator. Called once per epoch the task
+            runs on, preserving the existing per-epoch construction semantics.
         epoch_set: Epochs on which this task should run.
         weight: Contribution weight for the combined checkpoint-selection error.
             Zero means the task runs but does not contribute to the metric.
-        error_metric_template: Format string used to look up the per-task error
-            metric in the task's logs. ``{name}`` is replaced with ``self.name``.
     """
 
     name: str
     data: InferenceDataABC[PS, FD]
-    aggregator_factory: Callable[[int], InferenceAggregatorABC[PS, SD]]
+    aggregator_factory: Callable[[], InferenceAggregatorABC[PS, SD]]
     epoch_set: frozenset[int]
     weight: float = 0.0
-    error_metric_template: str = "{name}/time_mean_norm/rmse/channel_mean"
 
 
 def build_inference_callback(
@@ -836,7 +832,7 @@ def build_inference_callback(
         all_logs: dict[str, Any] = {}
         weighted_error: float | None = None
         for task in active_tasks:
-            aggregator = task.aggregator_factory(epoch)
+            aggregator = task.aggregator_factory()
             logs = inference_one_epoch(
                 stepper=stepper,
                 validation_context=contextlib.nullcontext,
@@ -847,7 +843,7 @@ def build_inference_callback(
             )
             all_logs.update(logs)
             if task.weight > 0:
-                metric_key = task.error_metric_template.format(name=task.name)
+                metric_key = f"{task.name}/time_mean_norm/rmse/channel_mean"
                 error = logs.get(metric_key)
                 if error is None:
                     raise RuntimeError(

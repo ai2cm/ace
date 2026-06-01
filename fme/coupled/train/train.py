@@ -168,7 +168,7 @@ def _make_coupled_aggregator_factory(
     output_dir: str,
     save_per_epoch_diagnostics: bool,
 ):
-    def factory(epoch: int):
+    def factory():
         batch = next(iter(data.loader))
         initial_times = batch.ocean_data.time.isel(time=0)
         n_timesteps_ocean = entry_config.n_coupled_steps + stepper.ocean.n_ic_timesteps
