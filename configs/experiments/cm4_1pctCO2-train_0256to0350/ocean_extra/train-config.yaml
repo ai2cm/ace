@@ -29,7 +29,9 @@ inference:
         engine: zarr
     num_data_workers: 4
   aggregator:
-    log_histograms: false
+    compute_uncorrected_metrics: true
+    histogram:
+      enabled: false
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -52,23 +54,24 @@ train_loader:
       engine: zarr
       subset:
         start_time: '0256-01-03T12:00:00'
-validation_loader:
-  batch_size: 16
-  num_data_workers: 8
-  dataset:
-    merge:
-    - data_path: /climate-default
-      file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-ocean.zarr
-      engine: zarr
-      subset:
-        start_time: '0251-01-03T12:00:00'
-        stop_time: '0255-12-29T12:00:00'
-    - data_path: /climate-default
-      file_pattern: 2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr
-      engine: zarr
-      subset:
-        start_time: '0251-01-03T12:00:00'
-        stop_time: '0255-12-29T12:00:00'
+validation:
+  loader:
+    batch_size: 16
+    num_data_workers: 8
+    dataset:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-ocean.zarr
+        engine: zarr
+        subset:
+          start_time: '0251-01-03T12:00:00'
+          stop_time: '0255-12-29T12:00:00'
+      - data_path: /climate-default
+        file_pattern: 2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr
+        engine: zarr
+        subset:
+          start_time: '0251-01-03T12:00:00'
+          stop_time: '0255-12-29T12:00:00'
 optimization:
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
