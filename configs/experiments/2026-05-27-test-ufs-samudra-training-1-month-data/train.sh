@@ -4,7 +4,7 @@ set -e
 
 JOB_NAME="ufs-replay-test-full-30-years-ocean-train"
 JOB_GROUP="ufs-replay-ocean"
-CONFIG_FILENAME="train-config.yaml"
+CONFIG_FILENAME="train_test_full_data.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH="${SCRIPT_PATH}${CONFIG_FILENAME}"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
