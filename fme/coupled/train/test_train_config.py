@@ -503,6 +503,15 @@ class TestGetInferenceCallback:
                 [{"a/other_metric": 1.0}],
             )
 
+    def test_all_zero_weight_returns_none_error(self):
+        entries = [self._make_entry("a", weight=0.0)]
+        logs, error = self._call(
+            entries,
+            [{"a/time_mean_norm/rmse/channel_mean": 0.5}],
+        )
+        assert error is None
+        assert "a/time_mean_norm/rmse/channel_mean" in logs
+
     def test_multiple_weighted_entries(self):
         entries = [
             self._make_entry("a", weight=2.0),
