@@ -155,14 +155,20 @@ def build_inference_evaluator_aggregator(
     # Sub-aggregators evaluating the stepper's uncorrected (pre-correction)
     # outputs. These mirror a subset of the main metrics but are fed the
     # uncorrected prediction in record_batch and logged under an "uncorrected/"
-    # prefix. Only summary aggregators (e.g. time-mean) are supported here. The
-    # uncorrected prediction holds only the (sparse) corrector-modified variables,
-    # so channel-mean is disabled: a mean over an arbitrary corrector-determined
-    # subset is not comparable to the main channel-mean and would error when
-    # channel_mean_names references absent variables.
+    # prefix. The uncorrected prediction holds only the (sparse)
+    # corrector-modified variables, so channel-mean is disabled: a mean over an
+    # arbitrary corrector-determined subset is not comparable to the main
+    # channel-mean and would error when channel_mean_names references absent
+    # variables.
     uncorrected_ctx = dataclasses.replace(ctx, channel_mean_names=None)
     uncorrected_aggregators: dict[str, SubAggregator] = {}
-    for metric in uncorrected_metrics or []:
+    uncorrected_time_series: dict[str, TimeSeriesLogs] = {}
+    uncorrected_metric_list = list(uncorrected_metrics or [])
+    if not enable_time_series:
+        uncorrected_metric_list = [
+            m for m in uncorrected_metric_list if not isinstance(m, MeanMetricConfig)
+        ]
+    for metric in uncorrected_metric_list:
         name = metric.get_name()
         try:
             result = metric.build(uncorrected_ctx)
@@ -176,6 +182,8 @@ def build_inference_evaluator_aggregator(
             continue
         if result.aggregator is not None:
             uncorrected_aggregators[name] = result.aggregator
+        if result.time_series is not None:
+            uncorrected_time_series[name] = result.time_series
 
     return InferenceEvaluatorAggregator(
         aggregators=aggregators,
@@ -188,6 +196,7 @@ def build_inference_evaluator_aggregator(
         n_ensemble_per_ic=n_ensemble_per_ic,
         ensemble_aggregators=ensemble_aggregators,
         uncorrected_aggregators=uncorrected_aggregators,
+        uncorrected_time_series_aggregators=uncorrected_time_series,
     )
 
 
@@ -325,14 +334,20 @@ class InferenceEvaluatorAggregatorConfig:
     def _uncorrected_metrics(self) -> list[MetricConfig] | None:
         """Metrics to compute on the uncorrected (pre-correction) prediction.
 
-        Restricted to the enabled time-mean metrics: these are summary aggregators
-        that remain meaningful over the sparse set of corrector-modified variables,
-        and keep the uncorrected pass lightweight. Returns None when uncorrected
-        metrics are disabled.
+        Includes the enabled time-mean and global-mean time-series metrics.
+        Target-only metrics (``weighted_mean_target``) are excluded from the
+        time-series because the target is identical to the main (corrected)
+        target. Returns None when uncorrected metrics are disabled.
         """
         if not self.compute_uncorrected_metrics:
             return None
-        return [m for m in (self.time_mean_denorm, self.time_mean_norm) if m.enabled]
+        metrics: list[MetricConfig] = [
+            m for m in (self.time_mean_denorm, self.time_mean_norm) if m.enabled
+        ]
+        for m in (self.mean_denorm, self.mean_norm):
+            if m.enabled:
+                metrics.append(dataclasses.replace(m, include_target_metrics=False))
+        return metrics
 
     def build(
         self,
@@ -553,6 +568,7 @@ class InferenceEvaluatorAggregator(
         n_ensemble_per_ic: int = 1,
         ensemble_aggregators: dict[str, SelectStepEnsembleAggregator] | None = None,
         uncorrected_aggregators: dict[str, SubAggregator] | None = None,
+        uncorrected_time_series_aggregators: dict[str, TimeSeriesLogs] | None = None,
     ):
         if save_diagnostics and output_dir is None:
             raise ValueError("Output directory must be set to save diagnostics")
@@ -561,6 +577,9 @@ class InferenceEvaluatorAggregator(
         self.n_ensemble_per_ic = n_ensemble_per_ic
         self._ensemble_aggregators = ensemble_aggregators or {}
         self._uncorrected_aggregators = uncorrected_aggregators or {}
+        self._uncorrected_time_series_aggregators = (
+            uncorrected_time_series_aggregators or {}
+        )
         # Set once a non-empty uncorrected prediction is recorded (i.e. the
         # stepper has an active corrector). Until then the uncorrected
         # aggregators hold no data and must be skipped when summarizing/flushing.
@@ -573,6 +592,11 @@ class InferenceEvaluatorAggregator(
         if n_ensemble_per_ic > 1:
             summary_aggregators.update(self._ensemble_aggregators)
         self._summary_aggregators = summary_aggregators
+        self._uncorrected_summary_aggregators: dict[str, SubAggregator] = {
+            name: agg
+            for name, agg in self._uncorrected_aggregators.items()
+            if name not in self._uncorrected_time_series_aggregators
+        }
         self._coords = coords
         self.n_ic_steps = n_ic_steps
         self._normalize = normalize
@@ -704,7 +728,7 @@ class InferenceEvaluatorAggregator(
             logging.info(f"Getting summary logs for {name} aggregator")
             logs.update(aggregator.get_logs(label=name))
         if self._recorded_uncorrected:
-            for name, aggregator in self._uncorrected_aggregators.items():
+            for name, aggregator in self._uncorrected_summary_aggregators.items():
                 logging.info(f"Getting summary logs for uncorrected {name} aggregator")
                 logs.update(
                     aggregator.get_logs(label=f"{self.UNCORRECTED_LABEL}/{name}")
@@ -737,6 +761,14 @@ class InferenceEvaluatorAggregator(
         logs = {}
         for name, aggregator in self._time_series_aggregators.items():
             logs.update(aggregator.get_logs(label=name, step_slice=step_slice))
+        if self._recorded_uncorrected:
+            for name, aggregator in self._uncorrected_time_series_aggregators.items():
+                logs.update(
+                    aggregator.get_logs(
+                        label=f"{self.UNCORRECTED_LABEL}/{name}",
+                        step_slice=step_slice,
+                    )
+                )
         return to_inference_logs(logs)
 
     @torch.no_grad()
