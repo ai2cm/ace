@@ -161,6 +161,7 @@ class AtmosphereCorrector(CorrectorABC):
             self._dry_air_precision = torch.float32
         else:
             self._dry_air_precision = torch.float64
+        self._global_mean_dry_air = None
 
     def __call__(
         self,
@@ -184,6 +185,11 @@ class AtmosphereCorrector(CorrectorABC):
             # otherwise it could end up creating violations of those constraints.
             gen_data = force_positive(gen_data, self._config.force_positive_names)
         if self._config.conserve_dry_air:
+            if self._global_mean_dry_air is None:
+                input = AtmosphereData(input_data, self._vertical_coordinate)
+                self._global_mean_dry_air = self._gridded_operations.area_weighted_mean(
+                    input.surface_pressure_due_to_dry_air, keepdim=True
+                )
             if self._vertical_coordinate is None:
                 raise ValueError(
                     "conserve_dry_air is set to True, but no vertical coordinate is "
@@ -195,6 +201,7 @@ class AtmosphereCorrector(CorrectorABC):
                 area_weighted_mean=self._gridded_operations.area_weighted_mean,
                 vertical_coordinate=self._vertical_coordinate,
                 precision=self._dry_air_precision,
+                global_mean_dry_air=self._global_mean_dry_air,
             )
         if self._config.zero_global_mean_moisture_advection:
             gen_data = _force_zero_global_mean_moisture_advection(
@@ -246,6 +253,7 @@ def _force_conserve_dry_air(
     area_weighted_mean: AreaWeightedMean,
     vertical_coordinate: HasAtmosphereVerticalIntegral,
     precision: torch.dtype = torch.float64,
+    global_mean_dry_air: torch.Tensor | None = None,
 ) -> TensorDict:
     """
     Update the generated data to conserve dry air.
@@ -278,11 +286,12 @@ def _force_conserve_dry_air(
     gen = AtmosphereData(gen_data, vertical_coordinate)
     gen_dry_air = gen.surface_pressure_due_to_dry_air
     global_gen_dry_air = area_weighted_mean(gen_dry_air.to(precision), keepdim=True)
-    global_target_gen_dry_air = area_weighted_mean(
-        input.surface_pressure_due_to_dry_air.to(precision),
-        keepdim=True,
-    )
-    error = global_gen_dry_air - global_target_gen_dry_air
+    if global_mean_dry_air is None:
+        global_mean_dry_air = area_weighted_mean(
+            input.surface_pressure_due_to_dry_air.to(precision),
+            keepdim=True,
+        )
+    error = global_gen_dry_air - global_mean_dry_air
     new_gen_dry_air = gen_dry_air.to(precision) - error
     try:
         wat = gen.specific_total_water.to(precision)
