@@ -33,7 +33,7 @@ inference:
     weight: 0.0
     epochs:
       start: 0
-      step: 5    
+      step: 5
     n_forward_steps: 730
     forward_steps_in_memory: 20
     loader:
@@ -190,8 +190,8 @@ stepper:
       in_names:
       # time-invariant
       - LANDFRAC
-      - sea_surface_fraction    
-      # atmosphere forcing  
+      - sea_surface_fraction
+      # atmosphere forcing
       - TAUX
       - TAUY
       - surface_precipitation_rate
@@ -283,7 +283,7 @@ stepper:
       - velocityMeridionalCoarsened_18
       # sea ice prognostic
       - ocean_sea_ice_fraction
-      - iceVolumeTotal      
+      - iceVolumeTotal
       out_names:
       - sst
       - ssh
