@@ -542,9 +542,8 @@ def test_step_returns_uncorrected_values_of_corrected_variables():
     assert "PRATEsfc" in out.uncorrected
     # conserve_dry_air changes surface pressure, so corrected != uncorrected.
     assert not torch.allclose(out.output["PRESsfc"], out.uncorrected["PRESsfc"])
-    # uncorrected is detached from the autograd graph (unused on the train path).
-    for tensor in out.uncorrected.values():
-        assert not tensor.requires_grad
+    # uncorrected retains the autograd graph at this level; detaching is handled
+    # by the higher-level Stepper.step() when gradients are not needed.
 
 
 @pytest.mark.parallel

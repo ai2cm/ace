@@ -564,8 +564,7 @@ def step_with_adjustments(
     if corrector is not None:
         correction = corrector(input, output, next_step_input_data)
         output = correction.corrected
-        # Detached: unused on the train path, avoids retaining the autograd graph.
-        uncorrected = {k: v.detach() for k, v in correction.before.items()}
+        uncorrected = dict(correction.before)
     if ocean is not None:
         output = ocean(input, output, next_step_input_data)
     for name in prescribed_prognostic_names:
