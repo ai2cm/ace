@@ -1,0 +1,23 @@
+# Beaker/gantry config for refreshing the Weka netCDF mirror for the
+# v2 cohort after the schema 0.6.0 → 0.7.0 migration. That migration
+# truncated the corrupt last day of BCC-CSM2-MR/historical/r1i1p1f1
+# and regenerated the bucket-wide stats. Only the BCC zarr's bytes
+# actually changed; everything else just got a sidecar version bump.
+#
+# This config re-mirrors *only* the BCC dataset and lets ``--force``
+# overwrite the stale Weka netCDFs. The top-level aux files
+# (stats.csv, stats.parquet, presence.*, index.csv) are always copied
+# regardless of the dataset filter, so they get refreshed too.
+#
+# Submit with:
+#   ./zarr_to_netcdf_beaker.sh --config configs/zarr-to-netcdf-prod-v2-bcc-refresh.yaml
+
+gcs_source: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2
+weka_destination: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2
+# One worker — there's only one zarr to convert, so parallelism would
+# just leave 7 cores idle.
+workers: 1
+years_per_file: 10
+force: true
+dataset_keys:
+  - BCC-CSM2-MR/historical/r1i1p1f1

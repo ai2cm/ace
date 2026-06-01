@@ -133,3 +133,46 @@ def test_convert_one_per_day_chunking_preserved(tmp_path: Path):
     assert chunks[0] == 1, chunks
     assert tuple(chunks[1:]) == ds["TMP2m"].shape[1:], chunks
     ds.close()
+
+
+def test_convert_one_skips_existing_without_force(tmp_path: Path):
+    """Without ``force``, an existing output netCDF is left alone.
+    Pre-create a sentinel file with one-byte content; ``convert_one``
+    must leave it untouched (it would otherwise be replaced by a
+    real conversion of the input zarr).
+    """
+    from zarr_to_netcdf import convert_one
+
+    zarr_path = tmp_path / "src.zarr"
+    _make_zarr(zarr_path, (1940, 1949))
+    nc_dir = tmp_path / "out"
+    nc_dir.mkdir()
+    sentinel = nc_dir / "data.1940-1949.nc"
+    sentinel.write_bytes(b"x")
+
+    convert_one(str(zarr_path), str(nc_dir), years_per_file=10)
+
+    assert sentinel.read_bytes() == b"x"
+
+
+def test_convert_one_overwrites_with_force(tmp_path: Path):
+    """With ``force=True``, ``convert_one`` deletes the stale output
+    and writes a fresh conversion in its place. The resulting file
+    must be a real netCDF that round-trips the input timesteps —
+    not the 1-byte sentinel we seeded.
+    """
+    from zarr_to_netcdf import convert_one
+
+    zarr_path = tmp_path / "src.zarr"
+    n_input = _make_zarr(zarr_path, (1940, 1949))
+    nc_dir = tmp_path / "out"
+    nc_dir.mkdir()
+    sentinel = nc_dir / "data.1940-1949.nc"
+    sentinel.write_bytes(b"x")
+
+    convert_one(str(zarr_path), str(nc_dir), years_per_file=10, force=True)
+
+    # Real netCDF now, not the sentinel.
+    ds = xr.open_dataset(sentinel)
+    assert ds.sizes["time"] == n_input
+    ds.close()

@@ -39,7 +39,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def convert_one(zarr_path: str, nc_dir: str, years_per_file: int) -> str:
+def convert_one(
+    zarr_path: str, nc_dir: str, years_per_file: int, force: bool = False
+) -> str:
     """Convert a single zarr store to multi-year netCDF files with 1-day chunks.
 
     Files are grouped in spans of ``years_per_file`` consecutive years,
@@ -94,8 +96,13 @@ def convert_one(zarr_path: str, nc_dir: str, years_per_file: int) -> str:
         first_year, last_year = int(years.min()), int(years.max())
         nc_path = os.path.join(nc_dir, f"data.{first_year}-{last_year}.nc")
         if os.path.exists(nc_path):
-            n_skipped += 1
-            continue
+            if not force:
+                n_skipped += 1
+                continue
+            os.remove(nc_path)
+            worker_log.info(
+                "    %d-%d: overwriting existing file", first_year, last_year
+            )
         t_group = time.monotonic()
         worker_log.info(
             "    %d-%d: loading %d timesteps...",
@@ -154,6 +161,25 @@ def main():
             "files."
         ),
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Overwrite existing output netCDFs and top-level aux files "
+            "(stats.csv, presence.*, etc.). Default is skip-if-exists."
+        ),
+    )
+    parser.add_argument(
+        "--dataset-keys",
+        nargs="*",
+        default=None,
+        help=(
+            "Restrict per-dataset conversion to the listed "
+            "``source_id/experiment/variant_label`` triples (one per arg). "
+            "Top-level aux files are still copied regardless. If omitted, "
+            "convert every dataset in the index."
+        ),
+    )
     args = parser.parse_args()
     if args.years_per_file < 1:
         parser.error("--years-per-file must be >= 1")
@@ -171,13 +197,14 @@ def main():
 
     # Auxiliary top-level files (index.csv, stats.csv, stats.parquet,
     # presence.*, etc.). ``fs.ls(detail=True)`` lets us skip the dataset
-    # sub-directories without a second probe.
+    # sub-directories without a second probe. Always re-copied under
+    # ``--force`` so a stats-refresh in GCS lands on Weka too.
     for entry in fs.ls(in_root, detail=True):
         if entry.get("type") != "file":
             continue
         name = os.path.basename(entry["name"])
         dst = os.path.join(output_dir, name)
-        if os.path.exists(dst):
+        if os.path.exists(dst) and not args.force:
             continue
         logger.info("Copying %s -> %s", name, dst)
         if input_dir.startswith(("gs://", "s3://", "http://", "https://")):
@@ -185,15 +212,28 @@ def main():
         else:
             shutil.copy2(entry["name"], dst)
 
+    allow = set(args.dataset_keys) if args.dataset_keys else None
     tasks = []
     for _, row in idx.iterrows():
         rel = os.path.join(row["source_id"], row["experiment"], row["variant_label"])
+        if allow is not None and rel not in allow:
+            continue
         zarr_path = f"{input_dir}/{rel}/data.zarr"
         nc_dir = os.path.join(output_dir, rel)
         if not fs.exists(f"{in_root}/{rel}/data.zarr"):
             logger.warning("Zarr not found, skipping: %s", zarr_path)
             continue
         tasks.append((zarr_path, nc_dir))
+    if allow is not None:
+        unmatched = allow - {
+            os.path.join(r["source_id"], r["experiment"], r["variant_label"])
+            for _, r in idx.iterrows()
+        }
+        if unmatched:
+            raise SystemExit(
+                f"--dataset-keys had {len(unmatched)} entries not found in "
+                f"index.csv: {sorted(unmatched)}"
+            )
 
     logger.info(
         "Converting %d datasets with %d workers, %d years per file",
@@ -218,7 +258,7 @@ def main():
     ctx = mp.get_context("spawn")
     with ProcessPoolExecutor(max_workers=args.workers, mp_context=ctx) as pool:
         futures = {
-            pool.submit(convert_one, zp, nd, args.years_per_file): zp
+            pool.submit(convert_one, zp, nd, args.years_per_file, args.force): zp
             for zp, nd in tasks
         }
         for future in as_completed(futures):
