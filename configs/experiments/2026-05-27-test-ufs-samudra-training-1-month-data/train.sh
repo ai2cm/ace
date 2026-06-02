@@ -2,15 +2,15 @@
 
 set -e
 
-JOB_NAME="ufs-replay-test-full-30-years-ocean-train"
+JOB_NAME="cm4-samudra-1pct-ocean-train-using-ufs-var-subset"
 JOB_GROUP="ufs-replay-ocean"
-CONFIG_FILENAME="train_test_full_data.yaml"
+CONFIG_FILENAME="train_test_full_data-cm4.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH="${SCRIPT_PATH}${CONFIG_FILENAME}"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=4
-STATS_DATA="troya/2026-06-01-ufs-replay-ocean-1deg-19level-1994-2023-stats"
+STATS_DATA="jamesd/2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-stats"  # "troya/2026-06-01-ufs-replay-ocean-1deg-19level-1994-2023-stats"
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
