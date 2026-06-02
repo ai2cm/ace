@@ -14,7 +14,7 @@ initial_condition:
       - '1979-01-01T06:00:00'
 forcing_loader:
   dataset:
-    data_path: /climate-default/2026-03-19-era5-1deg-8layer-1940-2025.zarr
+    data_path: /climate-default/2026-03-19-era5-1deg-8layer-daily-1940-2025.zarr
     file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
     engine: zarr
   num_data_workers: 8
