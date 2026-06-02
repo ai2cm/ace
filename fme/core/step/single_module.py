@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import dacite
@@ -36,6 +36,18 @@ from fme.core.typing_ import TensorDict, TensorMapping
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
+
+
+def _check_finite_dict(data: Mapping[str, torch.Tensor], location: str) -> None:
+    bad = [
+        f"{k} (max abs: {v.abs().max().item():.3e})"
+        for k, v in data.items()
+        if not torch.isfinite(v).all()
+    ]
+    if bad:
+        raise ValueError(
+            f"NaN/inf in {len(bad)} variable(s) at {location}: {bad}"
+        )
 
 
 @StepSelector.register("single_module")
@@ -555,13 +567,18 @@ def step_with_adjustments(
     output_norm = network_calls(input_norm)
     if residual_prediction:
         output_norm = add_names(input_norm, output_norm, prognostic_names)
+    _check_finite_dict(output_norm, "network output (normalized)")
     output = normalizer.denormalize(output_norm)
+    _check_finite_dict(output, "denormalized output")
     if global_mean_removal is not None:
         output = global_mean_removal.inverse_transform(output)
+        _check_finite_dict(output, "global_mean_removal.inverse_transform")
     if corrector is not None:
         output = corrector(input, output, next_step_input_data)
+        _check_finite_dict(output, "corrector output")
     if ocean is not None:
         output = ocean(input, output, next_step_input_data)
+        _check_finite_dict(output, "ocean output")
     for name in prescribed_prognostic_names:
         if name in next_step_input_data:
             output = {**output, name: next_step_input_data[name]}
