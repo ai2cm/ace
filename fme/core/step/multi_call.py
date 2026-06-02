@@ -300,7 +300,7 @@ class MultiCallStep(StepABC):
         if self._multi_call is not None:
             multi_called_outputs = self._multi_call.step(args=args, wrapper=wrapper)
             output = {**multi_called_outputs, **step_result.output}
-            return StepResult(output=output)
+            return StepResult(output=output, corrections=step_result.corrections)
         return step_result
 
     def get_state(self) -> dict[str, Any]:

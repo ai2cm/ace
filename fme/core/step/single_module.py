@@ -543,7 +543,8 @@ def step_with_adjustments(
 
     Returns:
         A :class:`StepResult` carrying the denormalized output data at the
-        next time step.
+        next time step and, when a corrector is applied, the per-variable
+        corrections (post-corrector minus pre-corrector, in physical space).
     """
     if prescribed_prognostic_names is None:
         prescribed_prognostic_names = []
@@ -560,8 +561,11 @@ def step_with_adjustments(
     output = normalizer.denormalize(output_norm)
     if global_mean_removal is not None:
         output = global_mean_removal.inverse_transform(output)
+    corrections: TensorDict | None = None
     if corrector is not None:
+        pre_corrector_output = output
         output = corrector(input, output, next_step_input_data)
+        corrections = {k: output[k] - pre_corrector_output[k] for k in output}
     if ocean is not None:
         output = ocean(input, output, next_step_input_data)
     for name in prescribed_prognostic_names:
@@ -571,4 +575,4 @@ def step_with_adjustments(
             raise ValueError(
                 f"prescribed_prognostic_name '{name}' not in next_step_input_data"
             )
-    return StepResult(output=output)
+    return StepResult(output=output, corrections=corrections)

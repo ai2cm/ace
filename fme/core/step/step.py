@@ -17,9 +17,15 @@ from fme.core.typing_ import TensorDict, TensorMapping
 
 @dataclasses.dataclass
 class StepResult:
-    """Return value of :meth:`StepABC.step`."""
+    """Return value of :meth:`StepABC.step`.
+
+    ``corrections`` is the difference between the post-corrector and
+    pre-corrector outputs, per variable, in physical (denormalized) space.
+    It is ``None`` when no corrector is applied.
+    """
 
     output: TensorDict
+    corrections: TensorDict | None = None
 
 
 # Children still need to decorate with @dataclass, otherwise

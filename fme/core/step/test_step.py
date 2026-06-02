@@ -17,11 +17,16 @@ from fme.ace.step.fcn3 import FCN3Config, FCN3Selector, FCN3StepConfig
 from fme.ace.testing.fv3gfs_data import get_scalar_dataset
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
+from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed.distributed import Distributed
 from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.labels import BatchLabels
-from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
+from fme.core.normalizer import (
+    NetworkAndLossNormalizationConfig,
+    NormalizationConfig,
+    StandardNormalizer,
+)
 from fme.core.registry import ModuleSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.global_mean_removal import (
@@ -35,9 +40,10 @@ from fme.core.step.single_module import (
     SingleModuleStepConfig,
     _apply_input_mask,
     _build_channel_mask_dict,
+    step_with_adjustments,
 )
-from fme.core.step.step import StepABC, StepSelector
-from fme.core.typing_ import TensorDict
+from fme.core.step.step import StepABC, StepResult, StepSelector
+from fme.core.typing_ import TensorDict, TensorMapping
 
 from .radiation import SeparateRadiationStepConfig
 
@@ -1471,3 +1477,80 @@ def test_step_shared_global_mean_removal_raises_on_masked_reference():
                 data_mask=data_mask,
             ),
         )
+
+
+class _AddConstantCorrector(CorrectorABC):
+    """Test-only corrector that adds a fixed per-variable constant to each output."""
+
+    def __init__(self, shifts: TensorDict):
+        self._shifts = shifts
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+    ) -> TensorDict:
+        return {k: v + self._shifts[k] for k, v in gen_data.items()}
+
+
+def _identity_network_call(input_norm: TensorDict) -> TensorDict:
+    return {k: v.clone() for k, v in input_norm.items()}
+
+
+def _build_standard_normalizer(
+    names: list[str], mean: float = 0.0, std: float = 1.0
+) -> StandardNormalizer:
+    device = fme.get_device()
+    return StandardNormalizer(
+        means={k: torch.tensor(mean, device=device) for k in names},
+        stds={k: torch.tensor(std, device=device) for k in names},
+    )
+
+
+def test_step_with_adjustments_no_corrector_has_no_corrections():
+    names = ["a", "b"]
+    n_samples = 2
+    input_data = {
+        k: torch.rand(n_samples, 4, 4, device=fme.get_device()) for k in names
+    }
+    result = step_with_adjustments(
+        input=input_data,
+        next_step_input_data={},
+        network_calls=_identity_network_call,
+        normalizer=_build_standard_normalizer(names),
+        corrector=None,
+        ocean=None,
+        residual_prediction=False,
+        prognostic_names=names,
+    )
+    assert isinstance(result, StepResult)
+    assert result.corrections is None
+    for k in names:
+        torch.testing.assert_close(result.output[k], input_data[k])
+
+
+def test_step_with_adjustments_corrections_equal_post_minus_pre():
+    names = ["a", "b"]
+    n_samples = 2
+    device = fme.get_device()
+    input_data = {k: torch.rand(n_samples, 4, 4, device=device) for k in names}
+    shifts = {
+        "a": torch.full((n_samples, 4, 4), 0.25, device=device),
+        "b": torch.full((n_samples, 4, 4), -0.5, device=device),
+    }
+    corrector = _AddConstantCorrector(shifts)
+    result = step_with_adjustments(
+        input=input_data,
+        next_step_input_data={},
+        network_calls=_identity_network_call,
+        normalizer=_build_standard_normalizer(names),
+        corrector=corrector,
+        ocean=None,
+        residual_prediction=False,
+        prognostic_names=names,
+    )
+    assert result.corrections is not None
+    for k in names:
+        torch.testing.assert_close(result.output[k], input_data[k] + shifts[k])
+        torch.testing.assert_close(result.corrections[k], shifts[k])
