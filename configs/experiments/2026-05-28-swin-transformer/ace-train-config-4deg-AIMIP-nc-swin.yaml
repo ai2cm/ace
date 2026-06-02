@@ -363,6 +363,11 @@ stepper:
           drop_path_rate: 0.2
           use_skip: true
           mlp_layer: mlp
+          padding_conf:
+            activate: true
+            mode: earth
+            pad_lat: [2, 1]
+            pad_lon: [3, 3]
       normalization:
         network:
           global_means_path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/centering.nc
