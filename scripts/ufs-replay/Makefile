@@ -1,6 +1,8 @@
 VERSION ?= latest
 IMAGE_NAME ?= us-central1-docker.pkg.dev/vcm-ml/full-model/ufs-replay-ingest-dataflow:$(VERSION)
 LOCAL_ENVIRONMENT ?= ufs-replay-ingest
+DATE := $(shell date +%Y-%m-%d)
+DATASET_NAME ?= ufs-replay-ocean-1deg-19level-1994-2023
 
 # Production run parameters
 # Ocean (MOM6): 1993-12-31 18:00 to 2023-12-31 00:00
@@ -9,13 +11,13 @@ LOCAL_ENVIRONMENT ?= ufs-replay-ingest
 # Start at 00Z so daily groups are (00,06,12,18) → centered at 12Z.
 START_TIME=1994-01-01T00:00:00
 END_TIME=2023-10-12T18:00:00
-OUTPUT_PATH_ONE_DEGREE=gs://vcm-ml-intermediate/ufs-replay-ocean-1deg-19level-1994-2023.zarr
+OUTPUT_PATH_ONE_DEGREE=gs://vcm-ml-intermediate/$(DATE)-$(DATASET_NAME).zarr
 OUTPUT_GRID_ONE_DEGREE=F90
 
 # Test run parameters (Dataflow)
 START_TIME_TEST_RUN ?= 2023-10-01T00:00:00
 END_TIME_TEST_RUN ?= 2023-10-12T18:00:00
-OUTPUT_PATH_TEST_RUN ?= gs://vcm-ml-scratch/ufs-replay-test/ocean-1deg.zarr
+OUTPUT_PATH_TEST_RUN ?= gs://vcm-ml-scratch/$(DATE)-ufs-replay-test/ocean-1deg.zarr
 OUTPUT_GRID_TEST_RUN ?= F90
 
 # Local debug parameters (just 1 day = 4 ocean timesteps → 1 daily output)
@@ -76,3 +78,9 @@ ufs_replay_local_debug:
 		--runner DirectRunner \
 		--save_main_session \
 		--job_server_timeout=3600
+
+# Compute normalization stats from the processed zarr via data_process pipeline
+.PHONY: compute_stats
+compute_stats:
+	cd ../data_process && \
+		./compute_stats.sh --config configs/ufs-replay-ocean-1deg-19level.yaml
