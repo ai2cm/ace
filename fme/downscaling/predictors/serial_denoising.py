@@ -272,7 +272,8 @@ class DenoisingMoEPredictor:
         )
         targets = {k: v.unsqueeze(1) for k, v in targets.items()}
 
-        loss = self._primary.loss(generated_norm, targets_norm)
+        [loss_component] = self._primary.loss(generated_norm, targets_norm)
+        loss = loss_component.loss.mean()
         return ModelOutputs(
             prediction=generated, target=targets, loss=loss, latent_steps=latent_steps
         )
