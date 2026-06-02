@@ -41,9 +41,9 @@ TrainConfig
 │       │   ├── out_names: list[str]
 │       │   ├── next_step_forcing_names: list[str]
 │       │   └── prescribed_prognostic_names: list[str]
-│       ├── include_channel_mask_inputs: bool = True  (required for this step type)
+│       ├── include_channel_mask_inputs: bool = True  (always True for this step type)
 │       ├── corrector, ocean, global_mean_removal, secondary_decoder  (same as SingleModuleStep)
-│       └── ...
+│       └── ...  (no task_sampling here — that is a training concern)
 └── stepper_training: TrainStepperConfig
     ├── loss, n_ensemble, n_forward_steps, parameter_init  (existing fields)
     └── task_sampling: TaskSamplingConfig | None = None  (new, optional)
@@ -173,12 +173,20 @@ class TaskSampler:
         forcing_names: list[str],
     ): ...
 
-    def sample(self) -> TrainingTask:
-        """Sample a task type, then sample variable assignments for that task."""
+    def sample(self, data_mask: TensorMapping | None = None) -> TrainingTask:
+        """Sample a task type, then sample variable assignments for that task.
+
+        Args:
+            data_mask: Per-variable boolean masks from the data loader. Variables
+                that are False for every sample in the batch are excluded from
+                the candidate pool to avoid degenerate tasks.
+        """
         ...
 ```
 
 The sampler first draws a task type from the weighted distribution, then randomly selects which variables serve as inputs and outputs subject to the task's constraints. The number of input and output variables is drawn uniformly between the configured minimum and the maximum allowed by the constraint (all non-forcing variables for outputs, all variables for inputs).
+
+The sampler must also account for the batch's `data_mask` (from the data loader) to avoid selecting variables that are missing in every sample of the batch. Before sampling variable assignments, variables that are entirely absent (all-False in `data_mask`) are excluded from the candidate pool. This prevents degenerate tasks with no effective inputs.
 
 ### `InfillPredictionStepConfig` and `InfillPredictionStep`
 
@@ -189,7 +197,7 @@ Registered as `@StepSelector.register("infill_prediction")`.
 **Config** (`InfillPredictionStepConfig`):
 - Inherits from `StepConfigABC`.
 - Contains `all_names`, `forcing_names`, `inference_scheme`, plus the same builder/normalization/corrector/ocean fields as `SingleModuleStepConfig`.
-- Contains `task_sampling: TaskSamplingConfig` for building a `TaskSampler` (used by the TrainStepper, not by the step itself).
+- No task sampling config — that lives in `TrainStepperConfig` since it is purely a training concern.
 - The `StepConfigABC` interface properties (`input_names`, `output_names`, `prognostic_names`, `next_step_input_names`, etc.) are derived from `inference_scheme` — they describe the inference-time behavior, not the training-time behavior. This is critical because the `Stepper` and inference pipeline use these properties to route variables.
 - `n_ic_timesteps` returns 1 (same as SingleModuleStep).
 - Residual prediction is not supported (omitted from config).
@@ -204,14 +212,12 @@ Registered as `@StepSelector.register("infill_prediction")`.
 - Internally, packers use `all_names` for both input and output channels:
   - `n_in_channels = len(all_names) * 2` (variables + mask indicators, since `include_channel_mask_inputs` is always True).
   - `n_out_channels = len(all_names)`.
-- The `step()` method:
-  1. Starts with a zero tensor dict for all `all_names` (in normalized space).
-  2. Overwrites entries for variables present in `args.input`.
-  3. Applies `data_mask` (zeros masked variables, builds channel mask indicators).
-  4. Packs, runs network, unpacks all `all_names`.
-  5. Applies post-processing (corrector, ocean, prescribed prognostics) — these use the inference_scheme's variable routing and are applied if configured.
-  6. Returns the full output dict.
-- Has a `build_task_sampler()` method that returns a `TaskSampler` for the TrainStepper to use.
+- The `step()` method works identically to `SingleModuleStep.step()`: it expects all `all_names` to be present in `args.input`, and uses `data_mask` to zero out masked variables and build channel mask indicators. The caller is responsible for providing all variables and an appropriate `data_mask`. This is consistent with how SingleModuleStep handles missing variables (the data loader fills them with values and provides `data_mask`).
+  1. Applies `data_mask` via `_apply_input_mask` (zeros masked variables in normalized space).
+  2. Packs with `all_names` packer, appends channel mask indicators.
+  3. Runs network, unpacks all `all_names`.
+  4. Applies post-processing (corrector, ocean, prescribed prognostics) — these use the inference_scheme's variable routing and are applied if configured.
+  5. Returns the full output dict.
 
 Key insight: The `step()` method doesn't need to know about tasks. The task determines (1) which variables to put in `StepArgs.input` vs. mask via `data_mask`, and (2) which variables to include in the loss. The `step()` method just does the forward pass with whatever masking is provided. This means `StepABC` doesn't need changes.
 
@@ -234,7 +240,7 @@ class TrainStepperConfig:
 ```
 
 **`TrainStepper` changes:**
-- In `__init__`, if `task_sampling` is configured, build a `TaskSampler` from the underlying step's config. The step must be an `InfillPredictionStep` (validated at init time).
+- In `__init__`, if `task_sampling` is configured, build a `TaskSampler` using `all_names` and `forcing_names` from the underlying step's config. The step must be an `InfillPredictionStep` (validated at init time).
 - In `_accumulate_loss`, when task sampling is active, the method branches to `_accumulate_loss_with_task`.
 
 **`_accumulate_loss_with_task` — two-phase training loop:**
@@ -245,13 +251,13 @@ Phase 1 — Normal forward prediction (steps 0 to N-2):
 - The model learns standard forward prediction for intermediate steps.
 
 Phase 2 — Task step (step N-1):
-1. Sample a `TrainingTask` from the `TaskSampler`.
+1. Sample a `TrainingTask` from the `TaskSampler`, passing the batch's `data_mask` so that variables missing from the entire batch are excluded from sampling.
 2. Extract state from the last predict_generator output (the model's prediction at step N-2). This state contains prognostic variables that serve as "previous step" data.
-3. Construct the task step input:
+3. Construct the task step input — a dict containing all `all_names`:
    - For variables in `task.previous_step_input_names`: take from the model's state.
    - For variables in `task.current_step_input_names`: take from ground truth data at the output timestep.
-   - For all other `all_names`: provide as zeros (masked).
-4. Construct `input_data_mask`: True for variables in `task.previous_step_input_names ∪ task.current_step_input_names`, False otherwise.
+   - For all other `all_names`: fill with zeros (these will be masked).
+4. Construct `input_data_mask`: True for variables in `task.previous_step_input_names ∪ task.current_step_input_names`, False otherwise. This is consistent with how SingleModuleStep expects its inputs — all variables present, with `data_mask` indicating which are real.
 5. Gather `next_step_input_data` from forcing data at the output timestep (same as predict_generator would for this step).
 6. Call `self._stepper.step(StepArgs(input=input_dict, next_step_input_data=..., labels=..., data_mask=input_data_mask))`.
 7. Construct `loss_data_mask`: True for variables in `task.output_names`, False otherwise. This ensures the loss function only penalizes the task's target variables.
@@ -343,20 +349,6 @@ stepper:
       normalization:
         network: ...
         loss: ...
-      task_sampling:
-        task_weights:
-          auto_encode: 1.0
-          infill: 1.0
-          prediction: 1.0
-          infill_prediction: 1.0
-          combined_all: 1.0
-          auto_encode_loss_scale: 0.5
-          infill_loss_scale: 1.0
-          prediction_loss_scale: 1.0
-          infill_prediction_loss_scale: 1.0
-          combined_all_loss_scale: 1.0
-        min_input_variables: 1
-        min_output_variables: 1
       inference_scheme:
         in_names:
           - air_temperature
@@ -388,13 +380,11 @@ stepper_training:
   parameter_init: {}
 ```
 
-Note: `task_sampling` appears in `stepper_training` (where it controls the training loop behavior), while `task_sampling` in the step config provides the default config that gets passed up. The `TrainStepperConfig.task_sampling` field is what actually drives the behavior — if it's `None`, no task sampling occurs regardless of what's in the step config.
+`task_sampling` lives exclusively in `stepper_training` since it is a training concern. The step config (`InfillPredictionStepConfig`) provides `all_names` and `forcing_names` which the `TrainStepper` reads to build the `TaskSampler`, but the step itself has no knowledge of task sampling.
 
 ## Open Questions
 
-1. **`InfillPredictionStep.step()` handling of missing input variables**: The step receives only a subset of `all_names` in `args.input` (either inference inputs, or task-selected inputs). It needs to fill in zeros for the rest before packing. Two approaches: (a) fill in zeros in normalized space for missing variables inside `step()`, or (b) require the caller to always provide all `all_names` with masked variables already zeroed. Option (a) is more encapsulated; option (b) is more explicit. Leaning toward (a) since it makes `step()` robust to partial inputs from any caller.
-
-2. **Where `TaskSamplingConfig` lives**: The config is needed by both the step (to validate variable names, build the sampler) and the `TrainStepperConfig` (to control training behavior). Should it be defined once in the step config and referenced by `TrainStepperConfig`? Or duplicated? The YAML example above shows it in `stepper_training`, which is the cleanest since task sampling is a training concern, not an inference concern. The step config can omit it and just provide `all_names` and `forcing_names` for the sampler to use.
+None — all design questions have been resolved.
 
 ## Follow-on Work
 
