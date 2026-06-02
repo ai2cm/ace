@@ -40,7 +40,12 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
-from fme.core.loss import StepLoss, StepLossConfig
+from fme.core.loss import (
+    CorrectorRegularizationConfig,
+    StepLoss,
+    StepLossConfig,
+    WeightedMappingLoss,
+)
 from fme.core.ocean import OceanConfig
 from fme.core.ocean_data import OceanData
 from fme.core.optimization import NullOptimization
@@ -743,10 +748,12 @@ class ComponentStepPrediction:
         realm: Literal["ocean", "atmosphere"],
         data: TensorDict,
         step: int,
+        corrections: TensorDict | None = None,
     ):
         self._realm: Literal["ocean", "atmosphere"] = realm
         self._data = data
         self._step = step
+        self._corrections = corrections
 
     @property
     def realm(self) -> Literal["ocean", "atmosphere"]:
@@ -759,6 +766,10 @@ class ComponentStepPrediction:
     @property
     def step(self) -> int:
         return self._step
+
+    @property
+    def corrections(self) -> TensorDict | None:
+        return self._corrections
 
 
 class CoupledStepper:
@@ -1083,11 +1094,13 @@ class CoupledStepper:
             # predict and yield atmosphere steps
             for i_inner in range(self.n_inner_steps):
                 atmos_step_num = i_outer * self.n_inner_steps + i_inner
-                atmos_step = next(atmos_generator).output
+                atmos_step_result = next(atmos_generator)
+                atmos_step = atmos_step_result.output
                 yield ComponentStepPrediction(
                     realm="atmosphere",
                     data=atmos_step,
                     step=atmos_step_num,
+                    corrections=atmos_step_result.corrections,
                 )
                 atmos_step = optimizer.detach_if_using_gradient_accumulation(atmos_step)
                 atmos_steps.append(atmos_step)
@@ -1114,7 +1127,7 @@ class CoupledStepper:
                 labels=ocean_window.labels,
             )
             # predict and yield a single ocean step
-            ocean_step = next(
+            ocean_step_result = next(
                 iter(
                     self.ocean.get_prediction_generator(
                         ocean_ic_state,
@@ -1123,11 +1136,13 @@ class CoupledStepper:
                         optimizer=optimizer,
                     )
                 )
-            ).output
+            )
+            ocean_step = ocean_step_result.output
             yield ComponentStepPrediction(
                 realm="ocean",
                 data=ocean_step,
                 step=i_outer,
+                corrections=ocean_step_result.corrections,
             )
 
             # prepare ic states for next coupled step
@@ -1303,10 +1318,12 @@ class ComponentEnsembleStepPrediction:
         realm: Literal["ocean", "atmosphere"],
         data: EnsembleTensorDict,
         step: int,
+        corrections: EnsembleTensorDict | None = None,
     ):
         self._realm: Literal["ocean", "atmosphere"] = realm
         self._data = data
         self._step = step
+        self._corrections = corrections
 
     @property
     def realm(self) -> Literal["ocean", "atmosphere"]:
@@ -1319,6 +1336,10 @@ class ComponentEnsembleStepPrediction:
     @property
     def step(self) -> int:
         return self._step
+
+    @property
+    def corrections(self) -> EnsembleTensorDict | None:
+        return self._corrections
 
     def detach_if_using_gradient_accumulation(
         self, optimizer: OptimizationABC
@@ -1333,6 +1354,7 @@ class ComponentEnsembleStepPrediction:
                 optimizer.detach_if_using_gradient_accumulation(self.data)
             ),
             step=self.step,
+            corrections=self._corrections,
         )
 
     def detach(self) -> "ComponentEnsembleStepPrediction":
@@ -1344,6 +1366,13 @@ class ComponentEnsembleStepPrediction:
             realm=self.realm,
             data=EnsembleTensorDict({k: v.detach() for k, v in self.data.items()}),
             step=self.step,
+            corrections=(
+                EnsembleTensorDict(
+                    {k: v.detach() for k, v in self._corrections.items()}
+                )
+                if self._corrections is not None
+                else None
+            ),
         )
 
 
@@ -1378,6 +1407,10 @@ class CoupledStepperTrainLoss:
         atmosphere_loss: StepLoss,
         ocean_schedule: ComponentLossSchedule,
         atmosphere_schedule: ComponentLossSchedule,
+        ocean_corrector_reg_loss: WeightedMappingLoss | None = None,
+        atmosphere_corrector_reg_loss: WeightedMappingLoss | None = None,
+        ocean_corrector_reg_weight: float = 0.0,
+        atmosphere_corrector_reg_weight: float = 0.0,
     ):
         self._loss_objs: dict[str, StepLoss] = {
             "ocean": ocean_loss,
@@ -1390,6 +1423,14 @@ class CoupledStepperTrainLoss:
         self._weights = {
             "ocean": ocean_schedule.loss_weight,
             "atmosphere": atmosphere_schedule.loss_weight,
+        }
+        self._corrector_reg_losses: dict[str, WeightedMappingLoss | None] = {
+            "ocean": ocean_corrector_reg_loss,
+            "atmosphere": atmosphere_corrector_reg_loss,
+        }
+        self._corrector_reg_weights = {
+            "ocean": ocean_corrector_reg_weight,
+            "atmosphere": atmosphere_corrector_reg_weight,
         }
 
     @property
@@ -1463,6 +1504,26 @@ class CoupledStepperTrainLoss:
         )
         return self._weights[realm] * loss_output.total()
 
+    def compute_corrector_regularization(
+        self,
+        prediction: ComponentEnsembleStepPrediction,
+    ) -> torch.Tensor | None:
+        """Compute the corrector regularization loss for one component step.
+
+        Returns ``None`` when this realm has no regularization configured,
+        the prediction has no corrections, or the step is not within the
+        realm's optimization window.
+        """
+        realm = prediction.realm
+        reg_loss = self._corrector_reg_losses[realm]
+        if reg_loss is None or prediction.corrections is None:
+            return None
+        if not self._schedules[realm].step_is_optimized(prediction.step):
+            return None
+        corrections = prediction.corrections
+        zeros = {k: torch.zeros_like(v) for k, v in corrections.items()}
+        return self._corrector_reg_weights[realm] * reg_loss(corrections, zeros).total()
+
 
 @dataclasses.dataclass
 class ComponentTrainingConfig:
@@ -1481,6 +1542,8 @@ class ComponentTrainingConfig:
             contributes to the loss and has gradients enabled).
         loss_weight: Weight applied to the loss for this component.
         parameter_init: Component-level parameter initialization.
+        corrector_regularization: Optional configuration for penalizing the
+            magnitude of this component's corrector adjustments.
     """
 
     loss: StepLossConfig
@@ -1490,6 +1553,7 @@ class ComponentTrainingConfig:
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
+    corrector_regularization: CorrectorRegularizationConfig | None = None
 
     @property
     def n_steps_max(self) -> int | None:
@@ -1648,11 +1712,33 @@ class CoupledTrainStepperConfig:
             loss_weight=self.atmosphere.loss_weight,
             n_steps_limit=n_steps_limit_atmos,
         )
+        ocean_corrector_reg_loss: WeightedMappingLoss | None = None
+        ocean_corrector_reg_weight = 0.0
+        if self.ocean.corrector_regularization is not None:
+            ocean_corrector_reg_loss = (
+                stepper.ocean.build_corrector_regularization_loss(
+                    self.ocean.corrector_regularization
+                )
+            )
+            ocean_corrector_reg_weight = self.ocean.corrector_regularization.weight
+        atmos_corrector_reg_loss: WeightedMappingLoss | None = None
+        atmos_corrector_reg_weight = 0.0
+        if self.atmosphere.corrector_regularization is not None:
+            atmos_corrector_reg_loss = (
+                stepper.atmosphere.build_corrector_regularization_loss(
+                    self.atmosphere.corrector_regularization
+                )
+            )
+            atmos_corrector_reg_weight = self.atmosphere.corrector_regularization.weight
         return CoupledStepperTrainLoss(
             ocean_loss=ocean_step_loss,
             atmosphere_loss=atmos_step_loss,
             ocean_schedule=ocean_schedule,
             atmosphere_schedule=atmos_schedule,
+            ocean_corrector_reg_loss=ocean_corrector_reg_loss,
+            atmosphere_corrector_reg_loss=atmos_corrector_reg_loss,
+            ocean_corrector_reg_weight=ocean_corrector_reg_weight,
+            atmosphere_corrector_reg_weight=atmos_corrector_reg_weight,
         )
 
     def get_train_stepper(
@@ -1804,10 +1890,14 @@ class CoupledTrainStepper(
         target_step = {
             k: v.select(time_dim, gen_step.step) for k, v in forward_data.items()
         }
+        ensemble_corrections: EnsembleTensorDict | None = None
+        if gen_step.corrections is not None:
+            ensemble_corrections = unfold_ensemble_dim(gen_step.corrections, n_ensemble)
         ensemble_step = ComponentEnsembleStepPrediction(
             realm=gen_step.realm,
             data=unfold_ensemble_dim(gen_step.data, n_ensemble),
             step=gen_step.step,
+            corrections=ensemble_corrections,
         )
         target_step_ensemble = add_ensemble_dim(target_step)
         if evaluate_all_steps:
@@ -1822,6 +1912,12 @@ class CoupledTrainStepper(
                 label = f"loss/{gen_step.realm}_step_{gen_step.step}"
                 metrics.add_metric(label, step_loss.detach(), gen_step.realm)
                 optimization.accumulate_loss(step_loss)
+        reg_loss = self._loss.compute_corrector_regularization(ensemble_step)
+        if reg_loss is not None:
+            realm = gen_step.realm
+            label = f"loss/{realm}_corrector_regularization_step_{gen_step.step}"
+            metrics.add_metric(label, reg_loss.detach(), realm)
+            optimization.accumulate_loss(reg_loss)
         output_list.append(
             ensemble_step.detach_if_using_gradient_accumulation(
                 optimization
