@@ -1,4 +1,4 @@
 group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
 
-BK-v20260527-Samudra-piControl-100yr|rs0|train|urgent|titan|2|400GiB|1|ai2/climate-titan|seed=0
-BK-v20260527-Samudra-piControl-100yr|rs1|train|low|titan|2|400GiB|1|ai2/climate-titan|seed=1
+BK-v20260527-Samudra-piControl-100yr-extended-mask|rs0|train|urgent|titan|2|400GiB|1|ai2/climate-titan|seed=0
+BK-v20260527-Samudra-piControl-100yr-extended-mask|rs1|train|low|titan|2|400GiB|1|ai2/climate-titan|seed=1
