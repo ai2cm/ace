@@ -55,7 +55,7 @@ launch_job () {
         --shared-memory 50GiB \
         --allow-dirty \
         --weka climate-default:/climate-default \
-        --budget ai2/climate \
+        --budget ai2/atec-climate \
         --system-python \
         --install "pip install --no-deps ." \
         -- python -I -m fme.ace.inference $CONFIG_PATH
