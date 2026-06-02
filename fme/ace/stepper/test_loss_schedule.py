@@ -61,6 +61,32 @@ def test_sample_raises_when_exceeds_data():
         schedule.sample(5)
 
 
+def test_sample_dispatches_to_eval_sampler_after_set_eval():
+    ts = TimeLengthSchedule(
+        start_value=TimeLengthProbabilities(
+            outcomes=[
+                TimeLengthProbability(steps=5, probability=0.5),
+                TimeLengthProbability(steps=10, probability=0.5),
+            ]
+        ),
+        milestones=[],
+    )
+    schedule = LossSchedule(n_forward_steps_schedule=ts)
+    schedule.init_for_epoch(0)
+    assert schedule._train_sampler is not None
+    assert schedule._eval_sampler is not None
+
+    schedule._train_sampler.seed_rng(1)
+    schedule._eval_sampler.seed_rng(2)
+    expected_eval = [schedule._eval_sampler.sample() for _ in range(20)]
+
+    schedule._train_sampler.seed_rng(1)
+    schedule._eval_sampler.seed_rng(2)
+    schedule.set_eval()
+    sampled = [schedule.sample(10) for _ in range(20)]
+    assert sampled == expected_eval
+
+
 def test_train_eval_samplers_are_independent():
     ts = TimeLengthSchedule(
         start_value=TimeLengthProbabilities(
