@@ -33,7 +33,7 @@ from fme.core.step.secondary_decoder import (
 )
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
-from fme.core.var_masking import VariableMaskingConfig
+from fme.core.var_masking import UniformVariableMaskingConfig, VariableMaskingConfig
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
@@ -87,7 +87,7 @@ class SingleModuleStepConfig(StepConfigABC):
     prescribed_prognostic_names: list[str] = dataclasses.field(default_factory=list)
     residual_prediction: bool = False
     include_channel_mask_inputs: bool = False
-    input_dropout: VariableMaskingConfig | None = None
+    input_dropout: VariableMaskingConfig | UniformVariableMaskingConfig | None = None
     global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
 
     def __post_init__(self):
