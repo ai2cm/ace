@@ -59,6 +59,9 @@ class SwinTransformerBuilder(ModuleConfig):
         embed_dim_labels: Label conditioning dimension. When 0 and the dataset
             has labels (``conditional=True``), it defaults to the number of
             labels, which is the dimension the registry feeds the model.
+        padding_conf: Optional dict configuring earth-aware boundary padding.
+            Set ``{"activate": True, "mode": "earth", "pad_lat": [N, S],
+            "pad_lon": [W, E]}`` to enable.  When ``None``, no padding is applied.
     """
 
     embed_dim: int = 96
@@ -71,6 +74,7 @@ class SwinTransformerBuilder(ModuleConfig):
     mlp_layer: str = "mlp"
     embed_dim_scalar: int = 0
     embed_dim_labels: int = 0
+    padding_conf: dict | None = None
 
     def build(
         self,
@@ -102,6 +106,7 @@ class SwinTransformerBuilder(ModuleConfig):
             use_skip=self.use_skip,
             context_config=context_config,
             mlp_layer=self.mlp_layer,
+            padding_conf=self.padding_conf,
         )
         return _ContextWrappedModule(net)
 
@@ -131,6 +136,9 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             When > 0, a shared ``Linear(n_labels, label_embed_dim)`` layer maps
             one-hot labels before downstream CLN conditioning.
             When 0 (default), one-hot labels are used directly.
+        padding_conf: Optional dict configuring earth-aware boundary padding.
+            Set ``{"activate": True, "mode": "earth", "pad_lat": [N, S],
+            "pad_lon": [W, E]}`` to enable.  When ``None``, no padding is applied.
     """
 
     embed_dim: int = 96
@@ -143,6 +151,7 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
     mlp_layer: str = "mlp"
     noise_embed_dim: int = 256
     label_embed_dim: int = 0
+    padding_conf: dict | None = None
 
     def build(
         self,
@@ -175,6 +184,7 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             context_config=context_config,
             mlp_layer=self.mlp_layer,
             conditioning="cln",
+            padding_conf=self.padding_conf,
         )
         return NoiseConditionedModel(
             net,
