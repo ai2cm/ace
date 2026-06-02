@@ -98,8 +98,8 @@ class SeasonalAggregator:
                 continue
 
             if self._variable_metadata is not None and name in self._variable_metadata:
-                long_name = self._variable_metadata[name].long_name
-                units = self._variable_metadata[name].units
+                long_name = self._variable_metadata[name].display_long_name(name)
+                units = self._variable_metadata[name].display_units()
                 caption_name = f"{long_name} ({units})"
             else:
                 caption_name = name
