@@ -68,12 +68,12 @@ def test_labels_exist():
         "test/power_spectrum/negative_norm_bias/a",
         "test/power_spectrum/mean_abs_norm_bias/a",
         "test/power_spectrum/smallest_scale_norm_bias/a",
-        "test/crps/a",
-        "test/crps/mean_map/a",
-        "test/ssr_bias/a",
-        "test/ssr_bias/mean_map/a",
-        "test/ensemble_mean_rmse/mean_map/a",
-        "test/ensemble_mean_rmse/a",
+        "test/ensemble/crps/a",
+        "test/ensemble/crps/mean_map/a",
+        "test/ensemble/ssr_bias/a",
+        "test/ensemble/ssr_bias/mean_map/a",
+        "test/ensemble/ensemble_mean_rmse/mean_map/a",
+        "test/ensemble/ensemble_mean_rmse/a",
     ]
     assert set(logs.keys()) == set(expected_keys)
 
@@ -406,7 +406,7 @@ def test_disabled_ensemble_produces_no_ensemble_logs():
     nx, ny = 2, 2
     ds_info = get_ds_info(nx, ny)
     agg = OneStepAggregatorConfig(
-        ensemble=OneStepEnsembleMetricConfig(enabled=False),
+        ensemble_denorm=OneStepEnsembleMetricConfig(target="denorm", enabled=False),
     ).build(ds_info, save_diagnostics=False)
 
     n_ensemble = 2
@@ -429,6 +429,57 @@ def test_disabled_ensemble_produces_no_ensemble_logs():
     assert not any("crps" in k for k in logs)
     assert not any("ssr_bias" in k for k in logs)
     assert not any("ensemble_mean_rmse" in k for k in logs)
+
+
+def test_both_norm_and_denorm_ensemble_metrics_coexist():
+    """Configuring both norm and denorm ensemble metrics emits both sets of
+    log keys, with the norm side also producing a channel_mean scalar."""
+    from fme.ace.aggregator.one_step.ensemble import OneStepEnsembleMetricConfig
+
+    nx, ny = 2, 2
+    ds_info = get_ds_info(nx, ny)
+    agg = OneStepAggregatorConfig(
+        ensemble_denorm=OneStepEnsembleMetricConfig(
+            target="denorm", log_mean_maps=False
+        ),
+        ensemble_norm=OneStepEnsembleMetricConfig(
+            target="norm", enabled=True, log_mean_maps=False
+        ),
+    ).build(ds_info, save_diagnostics=False)
+
+    n_ensemble = 2
+    names = ["a", "b"]
+    target_data = EnsembleTensorDict(
+        {n: torch.randn(2, 1, 3, nx, ny, device=get_device()) for n in names},
+    )
+    gen_data = EnsembleTensorDict(
+        {n: torch.randn(2, n_ensemble, 3, nx, ny, device=get_device()) for n in names},
+    )
+    agg.record_batch(
+        batch=TrainOutput(
+            metrics={"loss": 1.0},
+            target_data=target_data,
+            gen_data=gen_data,
+            time=xr.DataArray(np.zeros((2, 3)), dims=["sample", "time"]),
+            normalize=lambda x: {k: v * 0.5 for k, v in x.items()},
+        ),
+    )
+    logs = agg.get_logs(label="test")
+    for metric in ("crps", "ssr_bias", "ensemble_mean_rmse"):
+        for var in names:
+            assert f"test/ensemble/{metric}/{var}" in logs
+            assert f"test/ensemble_norm/{metric}/{var}" in logs
+        assert f"test/ensemble_norm/{metric}/channel_mean" in logs
+        assert f"test/ensemble/{metric}/channel_mean" not in logs
+    # The denorm and norm sides see different inputs (the normalize callback
+    # scales by 0.5), so scale-sensitive metric values must differ. SSR-bias
+    # is scale-invariant and is excluded from this differential check.
+    for metric in ("crps", "ensemble_mean_rmse"):
+        for var in names:
+            assert (
+                logs[f"test/ensemble/{metric}/{var}"]
+                != logs[f"test/ensemble_norm/{metric}/{var}"]
+            )
 
 
 def test_raise_on_unsupported_true_raises(monkeypatch):

@@ -32,11 +32,15 @@ aggregator:
     log_mean_maps: false
     enabled: true
     strict: false
+    target: denorm
+    channel_mean_names: null
   power_spectrum:
     variables: null
     name: power_spectrum
     enabled: true
     strict: false
+    report_directional_bias: true
+    plot_variables: null
   zonal_mean:
     variables: null
     name: zonal_mean
@@ -70,6 +74,7 @@ aggregator:
     name: histogram
     enabled: false
     strict: true
+    percentile_variables: null
   seasonal:
     variables: null
     name: seasonal

@@ -8,6 +8,7 @@ from fme.ace.stepper.time_length_probabilities import (
     TimeLengthProbability,
 )
 from fme.core.dataset.xarray import XarrayDataConfig
+from fme.core.loss import StepLossConfig
 from fme.core.typing_ import Slice
 from fme.coupled.aggregator import InferenceEvaluatorAggregatorConfig
 from fme.coupled.data_loading.config import (
@@ -15,14 +16,17 @@ from fme.coupled.data_loading.config import (
     CoupledDatasetWithOptionalOceanConfig,
 )
 from fme.coupled.data_loading.inference import InferenceDataLoaderConfig
-from fme.coupled.loss import LossContributionsConfig
+from fme.coupled.stepper import ComponentTrainingConfig
 from fme.coupled.train.train_config import (
     InlineInferenceConfig,
     InlineValidationConfig,
     TrainConfig,
-    _validate_loss_n_steps,
 )
 from fme.coupled.typing_ import CoupledOptionalInt
+
+from .train_config import _validate_n_steps
+
+_MOCK_LOSS = MagicMock(spec=StepLossConfig)
 
 
 def _make_stepper_mock():
@@ -214,46 +218,48 @@ def test_get_inference_epoch_sets_per_config(tmp_path):
     assert config.get_inference_epochs() == [0, 2, 3, 4, 6]
 
 
-def test_validate_loss_n_steps_passes_when_unbounded():
-    _validate_loss_n_steps(
+def test_validate_n_steps_passes_when_unbounded():
+    _validate_n_steps(
         n_coupled_steps=1,
         n_inner_steps=2,
         component_n_steps_max=CoupledOptionalInt(ocean=None, atmosphere=None),
     )
 
 
-def test_validate_loss_n_steps_passes_at_limit():
-    _validate_loss_n_steps(
+def test_validate_n_steps_passes_at_limit():
+    # Equality is allowed: n_steps==n_coupled_steps means losses for steps
+    # 0..n_steps-1, all within range.
+    _validate_n_steps(
         n_coupled_steps=4,
         n_inner_steps=2,
         component_n_steps_max=CoupledOptionalInt(ocean=4, atmosphere=8),
     )
 
 
-def test_validate_loss_n_steps_rejects_ocean_overshoot():
+def test_validate_n_steps_rejects_ocean_overshoot():
     with pytest.raises(ValueError, match=r"ocean.*exceeds n_coupled_steps"):
-        _validate_loss_n_steps(
+        _validate_n_steps(
             n_coupled_steps=2,
             n_inner_steps=3,
             component_n_steps_max=CoupledOptionalInt(ocean=3, atmosphere=None),
         )
 
 
-def test_validate_loss_n_steps_rejects_atmosphere_overshoot():
+def test_validate_n_steps_rejects_atmosphere_overshoot():
     with pytest.raises(
         ValueError,
         match=r"atmosphere.*exceeds n_coupled_steps \* n_inner_steps",
     ):
-        _validate_loss_n_steps(
+        _validate_n_steps(
             n_coupled_steps=2,
             n_inner_steps=3,
             component_n_steps_max=CoupledOptionalInt(ocean=None, atmosphere=7),
         )
 
 
-def test_validate_loss_n_steps_lists_both_components_when_both_misconfigured():
+def test_validate_n_steps_lists_both_components_when_both_misconfigured():
     with pytest.raises(ValueError) as exc_info:
-        _validate_loss_n_steps(
+        _validate_n_steps(
             n_coupled_steps=2,
             n_inner_steps=3,
             component_n_steps_max=CoupledOptionalInt(ocean=5, atmosphere=10),
@@ -263,26 +269,33 @@ def test_validate_loss_n_steps_lists_both_components_when_both_misconfigured():
     assert "atmosphere" in msg
 
 
-def test_validate_loss_n_steps_uses_sampler_max_via_config():
+def test_validate_n_steps_uses_sampler_max_via_config():
     sampler = TimeLengthProbabilities(
         outcomes=[
             TimeLengthProbability(steps=1, probability=0.5),
             TimeLengthProbability(steps=5, probability=0.5),
         ]
     )
-    config = LossContributionsConfig(n_steps=sampler)
+    config = ComponentTrainingConfig(loss=_MOCK_LOSS, n_steps=sampler)
     bounds = CoupledOptionalInt(ocean=config.n_steps_max, atmosphere=None)
     with pytest.raises(ValueError, match=r"ocean"):
-        _validate_loss_n_steps(
+        _validate_n_steps(
             n_coupled_steps=2, n_inner_steps=2, component_n_steps_max=bounds
         )
 
 
-def test_validate_loss_n_steps_does_not_short_circuit_on_null_weight():
-    null_config = LossContributionsConfig(weight=0.0, n_steps=999)
+def test_validate_n_steps_does_not_short_circuit_on_null_weight():
+    # A loss_weight=0 component still has a non-None n_steps_max if a value was
+    # explicitly set, and the validator surfaces the misconfiguration even
+    # though the loss is null. This avoids silently accepting confused configs.
+    null_config = ComponentTrainingConfig(
+        loss=_MOCK_LOSS,
+        loss_weight=0.0,
+        n_steps=999,
+    )
     bounds = CoupledOptionalInt(ocean=null_config.n_steps_max, atmosphere=None)
     with pytest.raises(ValueError, match=r"ocean"):
-        _validate_loss_n_steps(
+        _validate_n_steps(
             n_coupled_steps=1, n_inner_steps=1, component_n_steps_max=bounds
         )
 
@@ -358,20 +371,25 @@ def test_duplicate_validation_names_raises(tmp_path):
 
 
 class TestGetValidationCallback:
-    @staticmethod
-    def _make_entry(name, weight=1.0):
-        config = _make_validation_config(name=name, weight=weight)
-        data = MagicMock()
-        return (config, data, name)
+    """Smoke test for `get_validation_callback` wiring.
 
-    @staticmethod
-    def _call(entries, run_validation_side_effect):
+    Helper behavior (weighted loss, missing-metric raise, overlap raise, etc.)
+    is covered by `TestBuildValidationCallback` in
+    `fme.core.generics.test_trainer`. This test only verifies that entry name
+    and weight flow correctly from config through to the shared helper.
+    """
+
+    def test_entries_wired_to_tasks(self):
         from fme.coupled.train.train import get_validation_callback
 
+        entries = [
+            (_make_validation_config(name="a", weight=2.0), MagicMock(), "a"),
+            (_make_validation_config(name="b", weight=3.0), MagicMock(), "b"),
+        ]
         stepper = MagicMock()
         with patch(
-            "fme.coupled.train.train.run_validation",
-            side_effect=run_validation_side_effect,
+            "fme.core.generics.trainer.run_validation",
+            side_effect=[{"a/mean/loss": 0.1}, {"b/mean/loss": 0.2}],
         ):
             callback = get_validation_callback(
                 validation_entries=entries,
@@ -381,45 +399,7 @@ class TestGetValidationCallback:
                 save_per_epoch_diagnostics=False,
                 output_dir="/tmp/out",
             )
-            return callback(epoch=1)
-
-    def test_single_entry(self):
-        entries = [self._make_entry("val")]
-        logs, loss = self._call(
-            entries,
-            [{"val/mean/loss": 0.5, "val/other": 1.0}],
-        )
-        assert loss == 0.5
-        assert logs == {"val/mean/loss": 0.5, "val/other": 1.0}
-
-    def test_zero_weight_excluded_from_loss(self):
-        entries = [
-            self._make_entry("val_0", weight=1.0),
-            self._make_entry("val_extra", weight=0.0),
-        ]
-        logs, loss = self._call(
-            entries,
-            [
-                {"val_0/mean/loss": 0.5},
-                {"val_extra/mean/loss": 999.0},
-            ],
-        )
-        assert loss == 0.5
-        assert "val_0/mean/loss" in logs
-        assert "val_extra/mean/loss" in logs
-
-    def test_multiple_weighted_entries(self):
-        entries = [
-            self._make_entry("a", weight=2.0),
-            self._make_entry("b", weight=3.0),
-        ]
-        logs, loss = self._call(
-            entries,
-            [
-                {"a/mean/loss": 0.1},
-                {"b/mean/loss": 0.2},
-            ],
-        )
+            _, loss = callback(epoch=1)
         assert loss == pytest.approx(2.0 * 0.1 + 3.0 * 0.2)
 
 
@@ -489,6 +469,15 @@ class TestGetInferenceCallback:
                 entries,
                 [{"a/other_metric": 1.0}],
             )
+
+    def test_all_zero_weight_returns_none_error(self):
+        entries = [self._make_entry("a", weight=0.0)]
+        logs, error = self._call(
+            entries,
+            [{"a/time_mean_norm/rmse/channel_mean": 0.5}],
+        )
+        assert error is None
+        assert "a/time_mean_norm/rmse/channel_mean" in logs
 
     def test_multiple_weighted_entries(self):
         entries = [
