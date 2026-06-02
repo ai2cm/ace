@@ -230,6 +230,50 @@ def test_total_size():
     assert fs.total_size == 200
 
 
+# ---------------------------------------------------------------------------
+# _replica_priority — ranks replica hosts so download_file tries fast nodes
+# first and only falls through to DIAS Japan as a last resort.
+# ---------------------------------------------------------------------------
+
+
+def test_replica_priority_orders_known_hosts():
+    """LLNL ranks above other named replicas; DIAS Japan goes to the back.
+    The numeric values matter only for the relative ordering — what we
+    rely on is that ``sorted`` puts hosts in the order [LLNL fast,
+    other-fast, unknown, DIASJP last]."""
+    from esgf import _replica_priority
+
+    urls = [
+        "https://esgf-data02.diasjp.net/thredds/fileServer/CMIP6/.../file.nc",
+        "https://aims3.llnl.gov/thredds/fileServer/CMIP6/.../file.nc",
+        "https://esgf3.dkrz.de/thredds/fileServer/CMIP6/.../file.nc",
+        "https://esgf-node.llnl.gov/thredds/fileServer/CMIP6/.../file.nc",
+        "https://some-other-host.example.org/.../file.nc",
+    ]
+    sorted_urls = sorted(urls, key=_replica_priority)
+    # LLNL search-node URL ranks first (matches our search node);
+    # DIAS Japan is last.
+    assert "esgf-node.llnl.gov" in sorted_urls[0]
+    assert "diasjp.net" in sorted_urls[-1]
+    # Stable-by-key middle ranks include the two other named fast
+    # hosts before the unknown one.
+    middle = sorted_urls[1:-1]
+    assert any("aims3.llnl.gov" in u for u in middle[:2])
+    assert any("esgf3.dkrz.de" in u for u in middle[:2])
+    assert "some-other-host.example.org" in middle[-1]
+
+
+def test_replica_priority_unknown_host_outranks_diasjp():
+    """An unknown host (priority 5) still beats DIAS Japan (priority
+    10) — better to gamble on an unknown replica than to wait through
+    the DIASJP timeout chain."""
+    from esgf import _replica_priority
+
+    diasjp = "https://esgf-data04.diasjp.net/thredds/.../file.nc"
+    unknown = "https://random-mirror.invalid/.../file.nc"
+    assert _replica_priority(unknown) < _replica_priority(diasjp)
+
+
 if __name__ == "__main__":
     import sys
 

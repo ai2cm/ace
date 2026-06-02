@@ -26,6 +26,36 @@ _DOWNLOAD_CHUNK = 8 * 1024 * 1024  # 8 MB
 
 _TIME_RANGE_RE = re.compile(r"_(\d{4,8})-(\d{4,8})\.nc$")
 
+# Per-host replica priority. ``download_file`` tries
+# ``[esgf_file.url, *esgf_file.replica_urls]`` in order, falling
+# through to the next URL only after ``_MAX_RETRIES`` failures
+# (with linear backoff) on the current one. ESGF Solr returns
+# replicas in an order that often puts ``esgf-data*.diasjp.jp``
+# (DKRZ→DIAS Japan mirror) first for EC-Earth-family files, even
+# though that node is much slower than LLNL/DKRZ for North-American
+# traffic. Sorting URLs by host before download lets us prefer fast
+# nodes and only fall through to DIAS Japan as a last resort.
+_REPLICA_PREFERENCE = {
+    "esgf-node.llnl.gov": 0,
+    "esgf3.dkrz.de": 1,
+    "aims3.llnl.gov": 1,
+    "esgf-data.ucar.edu": 1,
+    "esgf.ceda.ac.uk": 1,
+}
+_REPLICA_DEPRIORITISE = ("diasjp",)
+
+
+def _replica_priority(url: str) -> int:
+    """Lower = preferred. Known fast hosts get 0/1; unknown hosts
+    keep the middle position 5; hosts containing a deprioritise
+    substring (currently DIAS Japan) get pushed to 10 so they're
+    only used when every other replica fails.
+    """
+    host = urllib.parse.urlparse(url).netloc
+    if any(token in host for token in _REPLICA_DEPRIORITISE):
+        return 10
+    return _REPLICA_PREFERENCE.get(host, 5)
+
 
 @dataclass
 class ESGFFile:
@@ -178,6 +208,21 @@ def query_files(
             by_filename[f.filename] = f
         elif f.url and f.url != existing.url and f.url not in existing.replica_urls:
             existing.replica_urls.append(f.url)
+
+    # Reorder each file's URL list by host preference so the fast
+    # replicas get tried first. Without this, ESGF Solr's default
+    # ordering puts DIAS Japan first for EC-Earth-family files,
+    # which produces ~6 minutes of timeout-retries per file before
+    # the code falls through to a working replica — death by a
+    # thousand cuts across 800+ files per dataset augment.
+    for f in by_filename.values():
+        all_urls = [f.url, *f.replica_urls]
+        # Stable-sort so equal-priority URLs keep their original
+        # Solr order (Solr's order itself is meaningful for ties).
+        all_urls.sort(key=_replica_priority)
+        f.url = all_urls[0]
+        f.replica_urls = all_urls[1:]
+
     files = sorted(by_filename.values(), key=lambda f: f.filename)
 
     return ESGFFileSet(
