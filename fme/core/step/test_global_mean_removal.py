@@ -449,9 +449,6 @@ def test_union_resolved_by_kind_via_dacite():
     assert result3.removal is None
 
 
-# ── NoGlobalMeanRemoval ─────────────────────────────────────────────────
-
-
 def test_no_global_mean_removal_extra_channel_names():
     transform = NoGlobalMeanRemoval()
     assert transform.n_extra_input_channels == 0

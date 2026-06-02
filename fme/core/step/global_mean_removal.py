@@ -39,6 +39,14 @@ class GlobalMeanRemoval(abc.ABC):
     so all listed fields — whether input, output, or both — share the
     same global-mean offset.
 
+    Note:
+        "Global mean" here refers to a *cellwise* (unweighted) spatial
+        mean of each sample, not the area-weighted global mean used
+        elsewhere in ACE for stats and metrics.  The two differ slightly
+        on a non-uniform grid; this transform uses the cellwise mean
+        for simplicity, since the network learns to compensate during
+        end-to-end training.
+
     Call sequence per step: ``forward_transform`` -> ``get_extra_channels``
     -> ``inverse_transform``.
     """
@@ -108,12 +116,14 @@ class NoGlobalMeanRemoval(GlobalMeanRemoval):
 
 
 class SharedGlobalMeanRemoval(GlobalMeanRemoval):
-    """Remove a single reference field's global mean from a set of fields.
+    """Remove a single reference field's cellwise global mean from a set
+    of fields.
 
     All listed fields share the same offset (derived from the reference
-    field), regardless of whether they appear in the input, the output,
-    or both.  See ``GlobalMeanRemoval`` for details on the asymmetric
-    forward/inverse behavior for output-only fields.
+    field's cellwise spatial mean), regardless of whether they appear in
+    the input, the output, or both.  See ``GlobalMeanRemoval`` for
+    details on the asymmetric forward/inverse behavior for output-only
+    fields, and on the choice of cellwise (vs. area-weighted) mean.
     """
 
     def __init__(
@@ -197,14 +207,16 @@ class SharedGlobalMeanRemoval(GlobalMeanRemoval):
 
 
 class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
-    """Shift each field's per-sample spatial mean to its climatology.
+    """Shift each field's per-sample cellwise spatial mean to its climatology.
 
     For each field, ``forward_transform`` adds ``clim_mean - sample_mean``
-    so the field's spatial mean is equal to its climatology mean in
-    physical space; after normalization the field's spatial mean is
-    approximately zero.  This mirrors ``SharedGlobalMeanRemoval`` but
-    computes the offset per field rather than from a single reference
-    field.
+    (where ``sample_mean`` is the cellwise, unweighted spatial mean) so
+    the field's spatial mean equals its climatology mean in physical
+    space; after normalization the field's spatial mean is approximately
+    zero.  This mirrors ``SharedGlobalMeanRemoval`` but computes the
+    offset per field rather than from a single reference field.  See
+    ``GlobalMeanRemoval`` for the choice of cellwise (vs. area-weighted)
+    mean.
     """
 
     def __init__(
@@ -291,7 +303,12 @@ class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
 
 @dataclasses.dataclass
 class SharedGlobalMeanRemovalConfig:
-    """Remove a shared reference field's global mean from specified fields.
+    """Remove a shared reference field's cellwise global mean from specified
+    fields.
+
+    The offset is derived from the reference field's *cellwise* (unweighted)
+    spatial mean, not the area-weighted mean used elsewhere in ACE — see
+    ``GlobalMeanRemoval`` for the rationale.
 
     Fields in ``field_names`` that appear only in the output (not the
     input) are still un-shifted by ``inverse_transform``, so the network
@@ -301,8 +318,9 @@ class SharedGlobalMeanRemovalConfig:
 
     Parameters:
         kind: Must be ``"shared"``.
-        reference_field: Name of the field whose per-sample spatial mean
-            determines the offset applied to all ``field_names``.
+        reference_field: Name of the field whose per-sample cellwise
+            spatial mean determines the offset applied to all
+            ``field_names``.
         field_names: Names of fields to shift by the shared offset.
             Fields may be inputs, outputs, or both.
         append_as_input: If true, the removed sample mean (normalized) is
@@ -350,14 +368,17 @@ class SharedGlobalMeanRemovalConfig:
 
 @dataclasses.dataclass
 class PerChannelGlobalMeanRemovalConfig:
-    """Shift each field's per-sample spatial mean to its climatology.
+    """Shift each field's per-sample cellwise spatial mean to its climatology.
 
     For each listed field, ``forward_transform`` adds
-    ``clim_mean - sample_mean`` so that after normalization the field's
+    ``clim_mean - sample_mean`` (where ``sample_mean`` is the cellwise,
+    unweighted spatial mean) so that after normalization the field's
     spatial mean is approximately zero (avoiding large constant biases
-    on the network input).  Unlike ``SharedGlobalMeanRemovalConfig``,
-    per-channel removal requires each field to be present in the input
-    so its individual sample mean can be computed.
+    on the network input).  See ``GlobalMeanRemoval`` for the choice of
+    cellwise (vs. area-weighted) mean.  Unlike
+    ``SharedGlobalMeanRemovalConfig``, per-channel removal requires each
+    field to be present in the input so its individual sample mean can
+    be computed.
 
     Parameters:
         kind: Must be ``"per_channel"``.
