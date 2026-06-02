@@ -1047,7 +1047,15 @@ def augment_one_esgf(
     )
 
     target = make_target_grid(cfg.target_grid.name)
-    existing_ds = xr.open_zarr(zarr_path, consolidated=True)
+    # ``consolidated=False`` (not True): a handful of v2 zarrs from the
+    # initial ingest don't have consolidated metadata (their ingest pod
+    # was preempted between the last to_zarr write and the
+    # ``consolidate_metadata`` call). The augment reconsolidates at the
+    # end (see line ~1183), so opening here without consolidated
+    # metadata is a safe one-time slowdown; opening with
+    # ``consolidated=True`` would crash those zarrs with
+    # ``ValueError: Consolidated metadata requested ... but not found``.
+    existing_ds = xr.open_zarr(zarr_path, consolidated=False)
     daily_time = existing_ds["time"]
 
     added_names: list[str] = []
