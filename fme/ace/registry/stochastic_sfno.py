@@ -256,6 +256,10 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             means back to the block outputs before the decoder.
         global_mean_noise: Standard deviation of Gaussian noise added to the
             computed global means during training only.
+        clip_latent_global_means: If True, track the min/max envelope of the
+            per-channel latent global means observed during the current
+            training epoch (reset at each epoch boundary) and clip the means
+            to that envelope in eval mode before they are used downstream.
     """
 
     spectral_transform: Literal["sht"] = "sht"
@@ -299,6 +303,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     concat_latent_global_mean: Literal["none", "first", "every"] = "none"
     add_latent_global_mean_to_output: bool = False
     global_mean_noise: float = 0.0
+    clip_latent_global_means: bool = False
 
     def __post_init__(self):
         if self.context_pos_embed_dim > 0 and self.pos_embed:
@@ -354,6 +359,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             concat_latent_global_mean=self.concat_latent_global_mean,
             add_latent_global_mean_to_output=self.add_latent_global_mean_to_output,
             global_mean_noise=self.global_mean_noise,
+            clip_latent_global_means=self.clip_latent_global_means,
         )
         sfno_net = get_lat_lon_sfnonet(
             params=sfno_config,

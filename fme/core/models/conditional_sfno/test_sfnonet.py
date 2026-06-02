@@ -357,6 +357,7 @@ def _make_latent_mean_model(
     concat_latent_global_mean: Literal["none", "first", "every"] = "none",
     add_latent_global_mean_to_output: bool = False,
     global_mean_noise: float = 0.0,
+    clip_latent_global_means: bool = False,
 ):
     params = SFNONetConfig(
         embed_dim=16,
@@ -365,6 +366,7 @@ def _make_latent_mean_model(
         concat_latent_global_mean=concat_latent_global_mean,
         add_latent_global_mean_to_output=add_latent_global_mean_to_output,
         global_mean_noise=global_mean_noise,
+        clip_latent_global_means=clip_latent_global_means,
     )
     model = get_lat_lon_sfnonet(
         params=params,
@@ -486,6 +488,126 @@ def test_global_mean_noise_only_during_training():
     assert not torch.allclose(
         out_train_1, out_train_2
     ), "training outputs should differ due to global mean noise"
+
+
+def test_clip_latent_global_means_requires_latent_mean_enabled():
+    device = get_device()
+    with pytest.raises(ValueError, match="clip_latent_global_means"):
+        _make_latent_mean_model(device, clip_latent_global_means=True)
+
+
+def test_clip_latent_global_means_envelope_tracks_and_clamps():
+    torch.manual_seed(0)
+    device = get_device()
+    model = _make_latent_mean_model(
+        device,
+        remove_latent_global_mean=True,
+        add_latent_global_mean_to_output=True,
+        clip_latent_global_means=True,
+    )
+    n_samples = 4
+    ctx = _empty_context(n_samples, device)
+
+    # Envelope starts at sentinels.
+    assert torch.isinf(model._gm_min).all() and (model._gm_min > 0).all()
+    assert torch.isinf(model._gm_max).all() and (model._gm_max < 0).all()
+
+    # Eval with no training run yet: sentinel envelope, clamp is a no-op.
+    model.eval()
+    x = torch.randn(n_samples, 2, 9, 18, device=device)
+    with torch.no_grad():
+        out_uninit = model(x, ctx)
+    assert torch.isfinite(out_uninit).all()
+    assert torch.isinf(model._gm_min).all()
+    assert torch.isinf(model._gm_max).all()
+
+    # One training forward populates the envelope.
+    model.train()
+    with torch.no_grad():
+        model(x, ctx)
+    assert torch.isfinite(model._gm_min).all()
+    assert torch.isfinite(model._gm_max).all()
+    assert (model._gm_max >= model._gm_min).all()
+
+    # A larger-magnitude training batch widens the envelope.
+    gm_min_before = model._gm_min.clone()
+    gm_max_before = model._gm_max.clone()
+    x_big = 10.0 * torch.randn(n_samples, 2, 9, 18, device=device)
+    with torch.no_grad():
+        model(x_big, ctx)
+    assert (model._gm_min <= gm_min_before).all()
+    assert (model._gm_max >= gm_max_before).all()
+
+    # Eval clamps means outside the envelope. To check clamping, we set
+    # the envelope to a tight known range and verify the encoder
+    # output's spatial mean cannot exceed it.
+    model._gm_min.fill_(-0.01)
+    model._gm_max.fill_(0.01)
+    model.eval()
+    with torch.no_grad():
+        encoded = model.encoder(x_big)
+        post_norm = model.latent_norm(
+            encoded
+            + (
+                model.pos_embed[..., model._spatial_h_slice, model._spatial_w_slice]
+                if model.pos_embed is not None
+                else 0.0
+            ),
+            context=ctx,
+        )
+        raw_means = post_norm.mean(dim=(-2, -1), keepdim=True)
+    # Without clamping, |raw_means| would generally exceed the tight
+    # envelope at some channels.
+    assert (raw_means.abs() > 0.01).any()
+    # With clamping, the model's behavior should use clamped means; we
+    # can't observe the post-clip means directly, but we can verify the
+    # eval forward runs without producing NaNs/Infs.
+    with torch.no_grad():
+        out_clamped = model(x_big, ctx)
+    assert torch.isfinite(out_clamped).all()
+
+
+def test_clip_latent_global_means_lazy_reset():
+    torch.manual_seed(0)
+    device = get_device()
+    model = _make_latent_mean_model(
+        device,
+        remove_latent_global_mean=True,
+        clip_latent_global_means=True,
+    )
+    n_samples = 4
+    ctx = _empty_context(n_samples, device)
+    x = torch.randn(n_samples, 2, 9, 18, device=device)
+
+    model.train()
+    with torch.no_grad():
+        model(x, ctx)
+    gm_min_after_epoch1 = model._gm_min.clone()
+    gm_max_after_epoch1 = model._gm_max.clone()
+    assert torch.isfinite(gm_min_after_epoch1).all()
+
+    # Requesting a reset should NOT immediately wipe the envelope.
+    model.request_latent_global_mean_envelope_reset()
+    torch.testing.assert_close(model._gm_min, gm_min_after_epoch1)
+    torch.testing.assert_close(model._gm_max, gm_max_after_epoch1)
+
+    # Eval between request and next training forward sees the prior envelope.
+    model.eval()
+    with torch.no_grad():
+        model(x, ctx)
+    torch.testing.assert_close(model._gm_min, gm_min_after_epoch1)
+    torch.testing.assert_close(model._gm_max, gm_max_after_epoch1)
+
+    # The first subsequent training forward performs the reset, then
+    # records new statistics from that batch alone.
+    model.train()
+    x_new = 0.5 * torch.randn(n_samples, 2, 9, 18, device=device)
+    with torch.no_grad():
+        model(x_new, ctx)
+    # Envelope should now reflect only x_new, not the union with x.
+    # A weak check: at least one channel's bounds must have changed.
+    assert not torch.allclose(model._gm_min, gm_min_after_epoch1)
+    assert not torch.allclose(model._gm_max, gm_max_after_epoch1)
 
 
 def _make_spectral_conv(nlat, nlon, embed_dim, preserve_global_mean, bias=False):

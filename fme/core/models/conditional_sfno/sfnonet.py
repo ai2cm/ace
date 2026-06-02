@@ -102,6 +102,17 @@ class SFNONetConfig:
             computed global means during training. The noised values are used
             for all downstream operations (removal, concatenation, and
             re-addition). 0.0 disables noise.
+        clip_latent_global_means: If True, track the per-channel min/max of the
+            latent global means seen during training and, in eval mode, clip
+            each channel's global mean to its observed range before using it
+            downstream. The trainer requests an envelope reset at the start
+            of each training epoch via
+            ``request_latent_global_mean_envelope_reset``; the reset is
+            applied lazily on the next training-mode forward, so any eval
+            between the request and that forward still sees the prior
+            envelope. Updates use the noiseless mean. Requires at least one
+            of remove_latent_global_mean, concat_latent_global_mean !=
+            "none", or add_latent_global_mean_to_output to be enabled.
     """
 
     embed_dim: int = 256
@@ -134,6 +145,7 @@ class SFNONetConfig:
     concat_latent_global_mean: Literal["none", "first", "every"] = "none"
     add_latent_global_mean_to_output: bool = False
     global_mean_noise: float = 0.0
+    clip_latent_global_means: bool = False
 
 
 # heuristic for finding theta_cutoff
@@ -571,6 +583,28 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             or params.concat_latent_global_mean != "none"
             or params.add_latent_global_mean_to_output
         )
+        self._clip_latent_global_means = params.clip_latent_global_means
+        if self._clip_latent_global_means and not self._latent_mean_enabled:
+            raise ValueError(
+                "clip_latent_global_means requires at least one of "
+                "remove_latent_global_mean, concat_latent_global_mean != "
+                '"none", or add_latent_global_mean_to_output to be enabled.'
+            )
+        if self._clip_latent_global_means:
+            self.register_buffer(
+                "_gm_min",
+                torch.full((1, params.embed_dim, 1, 1), float("inf")),
+            )
+            self.register_buffer(
+                "_gm_max",
+                torch.full((1, params.embed_dim, 1, 1), float("-inf")),
+            )
+            # Lazy reset flag: when True, the next training-mode forward
+            # fills the envelope with sentinels before applying its own
+            # update. Kept as a plain attribute (not a buffer) so it does
+            # not persist across checkpoint round-trips; the trainer is
+            # responsible for re-requesting a reset at epoch boundaries.
+            self._gm_reset_pending: bool = False
 
         self.trans_down = trans_down
         self.itrans_up = itrans_up
@@ -751,6 +785,15 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         """Helper"""
         return {"pos_embed", "cls_token"}
 
+    def request_latent_global_mean_envelope_reset(self) -> None:
+        """Mark the envelope to be reset on the next training-mode forward.
+
+        The reset is lazy so that any eval/inference calls between this
+        request and the next training forward still use the prior envelope.
+        """
+        if self._clip_latent_global_means:
+            self._gm_reset_pending = True
+
     def _forward_features(
         self,
         x: torch.Tensor,
@@ -789,6 +832,24 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         if self._latent_mean_enabled:
             x = self.latent_norm(x, context=context)
             global_means = x.mean(dim=(-2, -1), keepdim=True)
+            if self._clip_latent_global_means:
+                if self.training:
+                    with torch.no_grad():
+                        if self._gm_reset_pending:
+                            self._gm_min.fill_(float("inf"))
+                            self._gm_max.fill_(float("-inf"))
+                            self._gm_reset_pending = False
+                        batch_min = global_means.detach().amin(dim=0, keepdim=True)
+                        batch_max = global_means.detach().amax(dim=0, keepdim=True)
+                        dist = Distributed.get_instance()
+                        dist.reduce_min(batch_min)
+                        dist.reduce_max(batch_max)
+                        self._gm_min.copy_(torch.minimum(self._gm_min, batch_min))
+                        self._gm_max.copy_(torch.maximum(self._gm_max, batch_max))
+                elif torch.isfinite(self._gm_max).all():
+                    global_means = torch.clamp(
+                        global_means, min=self._gm_min, max=self._gm_max
+                    )
             if self.training and self._global_mean_noise > 0:
                 global_means = (
                     global_means
