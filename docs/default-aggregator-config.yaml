@@ -39,6 +39,8 @@ aggregator:
     name: power_spectrum
     enabled: true
     strict: false
+    report_directional_bias: true
+    plot_variables: null
   zonal_mean:
     variables: null
     name: zonal_mean
@@ -72,6 +74,7 @@ aggregator:
     name: histogram
     enabled: false
     strict: true
+    percentile_variables: null
   seasonal:
     variables: null
     name: seasonal
