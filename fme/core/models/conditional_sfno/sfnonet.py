@@ -584,12 +584,6 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             or params.add_latent_global_mean_to_output
         )
         self._clip_latent_global_means = params.clip_latent_global_means
-        if self._clip_latent_global_means and not self._latent_mean_enabled:
-            raise ValueError(
-                "clip_latent_global_means requires at least one of "
-                "remove_latent_global_mean, concat_latent_global_mean != "
-                '"none", or add_latent_global_mean_to_output to be enabled.'
-            )
         if self._clip_latent_global_means:
             self.register_buffer(
                 "_gm_min",
@@ -794,6 +788,26 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         if self._clip_latent_global_means:
             self._gm_reset_pending = True
 
+    def _update_or_clip_global_means(self, global_means: torch.Tensor) -> torch.Tensor:
+        if self.training:
+            with torch.no_grad():
+                if self._gm_reset_pending:
+                    self._gm_min.fill_(float("inf"))
+                    self._gm_max.fill_(float("-inf"))
+                    self._gm_reset_pending = False
+                batch_min = global_means.detach().amin(dim=0, keepdim=True)
+                batch_max = global_means.detach().amax(dim=0, keepdim=True)
+                dist = Distributed.get_instance()
+                dist.reduce_min(batch_min)
+                dist.reduce_max(batch_max)
+                self._gm_min.copy_(torch.minimum(self._gm_min, batch_min))
+                self._gm_max.copy_(torch.maximum(self._gm_max, batch_max))
+            return global_means
+        elif torch.isfinite(self._gm_max).all():
+            return torch.clamp(global_means, min=self._gm_min, max=self._gm_max)
+        else:
+            return global_means
+
     def _forward_features(
         self,
         x: torch.Tensor,
@@ -828,28 +842,17 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
 
         x = self.pos_drop(x)
 
+        if self._clip_latent_global_means and not self._latent_mean_enabled:
+            gm = x.mean(dim=(-2, -1), keepdim=True)
+            clamped = self._update_or_clip_global_means(gm)
+            x = x + (clamped - gm)
+
         global_means: torch.Tensor | None = None
         if self._latent_mean_enabled:
             x = self.latent_norm(x, context=context)
             global_means = x.mean(dim=(-2, -1), keepdim=True)
             if self._clip_latent_global_means:
-                if self.training:
-                    with torch.no_grad():
-                        if self._gm_reset_pending:
-                            self._gm_min.fill_(float("inf"))
-                            self._gm_max.fill_(float("-inf"))
-                            self._gm_reset_pending = False
-                        batch_min = global_means.detach().amin(dim=0, keepdim=True)
-                        batch_max = global_means.detach().amax(dim=0, keepdim=True)
-                        dist = Distributed.get_instance()
-                        dist.reduce_min(batch_min)
-                        dist.reduce_max(batch_max)
-                        self._gm_min.copy_(torch.minimum(self._gm_min, batch_min))
-                        self._gm_max.copy_(torch.maximum(self._gm_max, batch_max))
-                elif torch.isfinite(self._gm_max).all():
-                    global_means = torch.clamp(
-                        global_means, min=self._gm_min, max=self._gm_max
-                    )
+                global_means = self._update_or_clip_global_means(global_means)
             if self.training and self._global_mean_noise > 0:
                 global_means = (
                     global_means

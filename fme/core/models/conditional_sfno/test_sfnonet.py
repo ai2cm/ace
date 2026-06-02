@@ -490,10 +490,44 @@ def test_global_mean_noise_only_during_training():
     ), "training outputs should differ due to global mean noise"
 
 
-def test_clip_latent_global_means_requires_latent_mean_enabled():
+def test_clip_latent_global_means_standalone():
+    """clip_latent_global_means works without any rlgm features enabled."""
+    torch.manual_seed(0)
     device = get_device()
-    with pytest.raises(ValueError, match="clip_latent_global_means"):
-        _make_latent_mean_model(device, clip_latent_global_means=True)
+    model = _make_latent_mean_model(device, clip_latent_global_means=True)
+    n_samples = 4
+    ctx = _empty_context(n_samples, device)
+
+    assert not model._latent_mean_enabled
+
+    # Envelope starts at sentinels.
+    assert torch.isinf(model._gm_min).all() and (model._gm_min > 0).all()
+    assert torch.isinf(model._gm_max).all() and (model._gm_max < 0).all()
+
+    # Training forward populates the envelope.
+    model.train()
+    x = torch.randn(n_samples, 2, 9, 18, device=device)
+    with torch.no_grad():
+        model(x, ctx)
+    assert torch.isfinite(model._gm_min).all()
+    assert torch.isfinite(model._gm_max).all()
+    assert (model._gm_max >= model._gm_min).all()
+
+    # Eval with tight envelope applies correction: the output should differ
+    # from the no-clip baseline.
+    model_noclip = _make_latent_mean_model(device, clip_latent_global_means=False)
+    model_noclip.load_state_dict(model.state_dict(), strict=False)
+    model_noclip.eval()
+    model.eval()
+
+    x_big = 10.0 * torch.randn(n_samples, 2, 9, 18, device=device)
+    model._gm_min.fill_(-0.01)
+    model._gm_max.fill_(0.01)
+    with torch.no_grad():
+        out_clip = model(x_big, ctx)
+        out_noclip = model_noclip(x_big, ctx)
+    assert torch.isfinite(out_clip).all()
+    assert not torch.allclose(out_clip, out_noclip)
 
 
 def test_clip_latent_global_means_envelope_tracks_and_clamps():
