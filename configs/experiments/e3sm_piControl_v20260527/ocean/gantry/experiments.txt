@@ -4,3 +4,5 @@ BK-v20260527-Samudra-piControl-100yr|rs0|01KT2FACQSTBTKJ75S3Q0WK10S|training|bes
 BK-v20260527-Samudra-piControl-100yr|rs1|01KT2FANEB7P1ZTXG18SX6FD4H|training|best_inference_ckpt|normal|--min-runtime 8h
 
 BK-v20260527-Samudra-piControl-100yr-extended-mask|rs0|01KT3H63M44B1SFX0Y00Z542C5|training|best_inference_ckpt|normal|--min-runtime 8h
+
+BK-v20260527-Samudra-piControl-100yr-extended-mask|rs1|01KT3H6C4K6MZB38AST98A07ER|training|best_inference_ckpt|normal|--min-runtime 8h
