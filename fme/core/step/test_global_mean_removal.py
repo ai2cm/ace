@@ -128,6 +128,102 @@ def test_shared_extra_channels():
     torch.testing.assert_close(extra, torch.full_like(extra, 1.0))
 
 
+def test_shared_noise_zero_is_deterministic():
+    means = {"surface_temperature": 280.0, "air_temperature_4": 250.0}
+    stds = {"surface_temperature": 2.0, "air_temperature_4": 4.0}
+    normalizer = _build_normalizer_for(means, stds)
+    config = SharedGlobalMeanRemovalConfig(
+        reference_field="surface_temperature",
+        field_names=list(means.keys()),
+        append_as_input=False,
+        noise_amount=0.0,
+    )
+    transform = config.build(normalizer, list(means.keys()))
+    tensors = move_tensordict_to_device(
+        {
+            "surface_temperature": torch.full((1, 4, 4), 285.0),
+            "air_temperature_4": torch.full((1, 4, 4), 245.0),
+        }
+    )
+    torch.manual_seed(0)
+    result_a = transform.forward_transform(tensors, None)
+    torch.manual_seed(1)
+    result_b = transform.forward_transform(tensors, None)
+    for k in result_a:
+        torch.testing.assert_close(result_a[k], result_b[k])
+
+
+def test_shared_noise_shifts_offset_by_noise_value():
+    means = {"surface_temperature": 280.0, "air_temperature_4": 250.0}
+    stds = {"surface_temperature": 2.0, "air_temperature_4": 4.0}
+    normalizer = _build_normalizer_for(means, stds)
+    config_noisy = SharedGlobalMeanRemovalConfig(
+        reference_field="surface_temperature",
+        field_names=list(means.keys()),
+        append_as_input=True,
+        noise_amount=1.0,
+    )
+    config_clean = SharedGlobalMeanRemovalConfig(
+        reference_field="surface_temperature",
+        field_names=list(means.keys()),
+        append_as_input=True,
+        noise_amount=0.0,
+    )
+    transform_noisy = config_noisy.build(normalizer, list(means.keys()))
+    transform_clean = config_clean.build(normalizer, list(means.keys()))
+    tensors = move_tensordict_to_device(
+        {
+            "surface_temperature": torch.full((2, 4, 4), 285.0),
+            "air_temperature_4": torch.full((2, 4, 4), 245.0),
+        }
+    )
+    torch.manual_seed(42)
+    noisy_result = transform_noisy.forward_transform(tensors, None)
+    clean_result = transform_clean.forward_transform(tensors, None)
+
+    # Reproduce the noise: torch.randn called once for sample_mean (shape [2]).
+    torch.manual_seed(42)
+    expected_noise = 1.0 * torch.randn(2, device=tensors["surface_temperature"].device)
+    # noisy_sample_mean = 285 + noise; offset = 280 - (285 + noise) = -5 - noise
+    # field result = field + offset; difference from clean = -noise
+    for name in ("surface_temperature", "air_temperature_4"):
+        diff = noisy_result[name] - clean_result[name]
+        per_sample_diff = diff.mean(dim=tuple(range(1, diff.ndim))).cpu()
+        torch.testing.assert_close(per_sample_diff, -expected_noise.cpu())
+
+    # Extra input channel uses (noisy_sample_mean - reference_mean) / std =
+    # (5 + noise) / 2; difference from clean = noise / 2.
+    extra_noisy = transform_noisy.get_extra_channels()
+    extra_clean = transform_clean.get_extra_channels()
+    assert extra_noisy is not None and extra_clean is not None
+    per_sample_extra_diff = (
+        (extra_noisy - extra_clean).mean(dim=tuple(range(1, extra_noisy.ndim))).cpu()
+    )
+    torch.testing.assert_close(per_sample_extra_diff, expected_noise.cpu() / 2.0)
+
+
+def test_shared_noise_round_trip_uses_noisy_offset():
+    """Inverse transform uses the cached (noisy) offset so the field-level
+    shift and unshift cancel exactly even when noise is nonzero."""
+    means = {"surface_temperature": 280.0, "air_temperature_0": 220.0}
+    stds = {"surface_temperature": 5.0, "air_temperature_0": 3.0}
+    normalizer = _build_normalizer_for(means, stds)
+    config = SharedGlobalMeanRemovalConfig(
+        reference_field="surface_temperature",
+        field_names=list(means.keys()),
+        noise_amount=2.0,
+    )
+    transform = config.build(normalizer, list(means.keys()))
+    torch.manual_seed(0)
+    tensors = move_tensordict_to_device(
+        {k: torch.randn(2, 4, 4) + means[k] for k in means}
+    )
+    shifted = transform.forward_transform(tensors, None)
+    restored = transform.inverse_transform(shifted)
+    for k in means:
+        torch.testing.assert_close(restored[k], tensors[k])
+
+
 def test_shared_raises_on_masked_reference():
     means = {"surface_temperature": 280.0}
     stds = {"surface_temperature": 1.0}
@@ -393,6 +489,7 @@ def test_shared_config_round_trips_through_dacite():
         reference_field="surface_temperature",
         field_names=["surface_temperature", "air_temperature_0"],
         append_as_input=True,
+        noise_amount=0.5,
     )
     data = dataclasses.asdict(config)
     restored = dacite.from_dict(

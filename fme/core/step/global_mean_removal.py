@@ -110,12 +110,14 @@ class SharedGlobalMeanRemoval(GlobalMeanRemoval):
         append_as_input: bool,
         reference_mean: torch.Tensor,
         reference_std: torch.Tensor,
+        noise_amount: float = 0.0,
     ):
         self._reference_field = reference_field
         self._field_names = field_names
         self._append_as_input = append_as_input
         self._reference_mean = reference_mean
         self._reference_std = reference_std
+        self._noise_amount = noise_amount
         self._cached_offset: torch.Tensor | None = None
         self._cached_extra: torch.Tensor | None = None
 
@@ -141,6 +143,10 @@ class SharedGlobalMeanRemoval(GlobalMeanRemoval):
                 )
         ref = input[ref_name]
         sample_mean = ref.mean(dim=tuple(range(1, ref.ndim)))
+        if self._noise_amount > 0:
+            sample_mean = sample_mean + self._noise_amount * torch.randn_like(
+                sample_mean
+            )
         offset = self._reference_mean - sample_mean
         self._cached_offset = offset
 
@@ -286,6 +292,12 @@ class SharedGlobalMeanRemovalConfig:
             Fields may be inputs, outputs, or both.
         append_as_input: If true, the removed sample mean (normalized) is
             appended as an extra network input channel.
+        noise_amount: Standard deviation of Gaussian noise added (in
+            physical/denormalized units) to the reference field's per-sample
+            spatial mean before it is used.  The noised mean is what gets
+            subtracted from each field in ``field_names`` and (if
+            ``append_as_input`` is true) appended as an extra input channel.
+            Default ``0.0`` disables noise.
     """
 
     kind: Literal["shared"] = "shared"
@@ -294,6 +306,7 @@ class SharedGlobalMeanRemovalConfig:
         default_factory=lambda: list(DEFAULT_TEMPERATURE_FIELD_NAMES)
     )
     append_as_input: bool = False
+    noise_amount: float = 0.0
 
     def get_n_extra_input_channels(self, in_names: list[str]) -> int:
         return 1 if self.append_as_input else 0
@@ -324,6 +337,7 @@ class SharedGlobalMeanRemovalConfig:
             append_as_input=self.append_as_input,
             reference_mean=normalizer.means[self.reference_field],
             reference_std=normalizer.stds[self.reference_field],
+            noise_amount=self.noise_amount,
         )
 
 
