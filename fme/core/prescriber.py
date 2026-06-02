@@ -1,6 +1,6 @@
 import dataclasses
 
-from fme.core.masking import replace_on_mask
+from fme.core.spatial_masking import replace_on_mask
 from fme.core.typing_ import TensorDict, TensorMapping
 
 

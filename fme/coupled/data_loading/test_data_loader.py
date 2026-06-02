@@ -25,11 +25,11 @@ from fme.core.coordinates import (
 from fme.core.dataset.merged import MergeNoConcatDatasetConfig
 from fme.core.dataset.xarray import (
     XarrayDataConfig,
-    _get_mask_provider,
+    _get_spatial_mask_provider,
     _get_vertical_coordinate,
     get_horizontal_coordinates,
 )
-from fme.core.mask_provider import MaskProvider
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.typing_ import Slice
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
 from fme.coupled.data_loading.config import CoupledDatasetWithOptionalOceanConfig
@@ -38,6 +38,7 @@ from fme.coupled.data_loading.data_typing import (
     CoupledHorizontalCoordinates,
     CoupledVerticalCoordinate,
 )
+from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.requirements import CoupledDataRequirements
 
 from .config import (
@@ -144,8 +145,8 @@ class MockComponentData:
         return pd.Timedelta(self.timedelta).to_pytimedelta()
 
     @property
-    def mask_provider(self) -> MaskProvider:
-        return _get_mask_provider(self.ds, dtype=None)
+    def spatial_mask_provider(self) -> SpatialMaskProvider:
+        return _get_spatial_mask_provider(self.ds, dtype=None)
 
     @property
     def vcoord(self) -> VerticalCoordinate:
@@ -220,6 +221,28 @@ class MockCoupledData:
                 **atmos_kwargs,
             ),
         )
+
+    def build_dataset_info(self) -> CoupledDatasetInfo:
+        """Construct a CoupledDatasetInfo directly from the mock on-disk data.
+
+        This mimics what the stepper's training_dataset_info would provide in the
+        no-target inference path (used by _make_dummy_ocean_forcing).
+        """
+        from fme.core.dataset_info import DatasetInfo
+
+        ocean_info = DatasetInfo(
+            horizontal_coordinates=self.ocean.hcoord,
+            vertical_coordinate=self.ocean.vcoord,
+            spatial_mask_provider=self.ocean.spatial_mask_provider,
+            timestep=self.ocean.timestep,
+        )
+        atmos_info = DatasetInfo(
+            horizontal_coordinates=self.atmosphere.hcoord,
+            vertical_coordinate=self.atmosphere.vcoord,
+            spatial_mask_provider=self.atmosphere.spatial_mask_provider,
+            timestep=self.atmosphere.timestep,
+        )
+        return CoupledDatasetInfo(ocean=ocean_info, atmosphere=atmos_info)
 
 
 def create_coupled_data_on_disk(

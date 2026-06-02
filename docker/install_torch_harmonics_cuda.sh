@@ -1,6 +1,6 @@
 #!/bin/bash
 # Reinstall torch-harmonics with optimized CUDA kernels
-# Tested on: Python 3.11, PyTorch 2.7.1, CUDA 12.8, Ubuntu 22.04
+# Tested on: Python 3.11, PyTorch 2.8.0, CUDA 12.8, Ubuntu 22.04
 #
 # The default pip install of torch-harmonics does not compile custom CUDA
 # extensions because the runtime Docker image lacks nvcc. This script

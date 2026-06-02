@@ -246,7 +246,7 @@ class DiffusionModelConfig:
         orig_in_names = [invert_rename.get(name, name) for name in self.in_names]
         orig_out_names = [invert_rename.get(name, name) for name in self.out_names]
         normalizer = self.normalization.build(orig_in_names, orig_out_names, rename)
-        loss = self.loss.build(reduction="none", gridded_operations=None)
+        loss = self.loss.build(gridded_operations=None)
         # We always use standard score normalization, so sigma_data is
         # always 1.0. See below for standard score normalization:
         # https://en.wikipedia.org/wiki/Standard_score
@@ -502,10 +502,9 @@ class DiffusionModel:
         denoised_norm = self.module(
             conditioned_target.latents, inputs_norm, conditioned_target.sigma
         )
+        [loss_component] = self.loss(denoised_norm, targets_norm)
         weighted_loss = (  # has dims (batch, channels, lat, lon)
-            conditioned_target.weight
-            * self._loss_weight_tensor
-            * self.loss(denoised_norm, targets_norm)
+            conditioned_target.weight * self._loss_weight_tensor * loss_component.loss
         )
         loss = torch.mean(weighted_loss)
         optimizer.accumulate_loss(loss)
@@ -645,7 +644,8 @@ class DiffusionModel:
         targets = filter_tensor_mapping(batch.fine.data, set(self.out_packer.names))
         targets = {k: v.unsqueeze(1) for k, v in targets.items()}
 
-        loss = self.loss(generated_norm, targets_norm)
+        [loss_component] = self.loss(generated_norm, targets_norm)
+        loss = loss_component.loss.mean()
         return ModelOutputs(
             prediction=generated, target=targets, loss=loss, latent_steps=latent_steps
         )

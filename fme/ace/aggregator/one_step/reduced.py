@@ -1,7 +1,7 @@
+import dataclasses
 from collections.abc import Sequence
-from typing import Literal
+from typing import Any, Literal
 
-import numpy as np
 import torch
 import xarray as xr
 
@@ -10,6 +10,9 @@ from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorMapping
 
+from ..inference.build_context import MetricBuildContext, MetricNotSupportedError
+from ..inference.data import InferenceBatchData, MetricBuildResult, SubAggregator
+from .build_context import OneStepBuildContext, OneStepMetricBuildResult
 from .reduced_metrics import AreaWeightedReducedMetric, ReducedMetric
 
 
@@ -37,6 +40,7 @@ class MeanAggregator:
         target: Literal["norm", "denorm"] = "denorm",
         channel_mean_names: Sequence[str] | None = None,
         log_loss: bool = True,
+        report_variables: Sequence[str] | None = None,
     ):
         """
         Args:
@@ -53,6 +57,10 @@ class MeanAggregator:
             channel_mean_names: Names to include in channel-mean metrics. If None,
                 channel means will not be logged.
             log_loss: Whether to log the mean loss across batches.
+            report_variables: If set, only per-variable entries for these
+                variables will appear in logs and datasets. Aggregate entries
+                like ``channel_mean`` are always included. All variables are
+                still used for channel-mean computation.
         """
         self._gridded_operations = gridded_operations
         self._n_batches = 0
@@ -60,6 +68,9 @@ class MeanAggregator:
         self._target_time = target_time
         self._target = target
         self._log_loss = log_loss
+        self._report_variables = (
+            frozenset(report_variables) if report_variables is not None else None
+        )
         self._dist = Distributed.get_instance()
 
         device = get_device()
@@ -89,7 +100,7 @@ class MeanAggregator:
         gen_data: TensorMapping,
         target_data_norm: TensorMapping | None = None,
         gen_data_norm: TensorMapping | None = None,
-        loss: torch.Tensor = torch.tensor(np.nan),
+        loss: float = float("nan"),
         i_time_start: int = 0,
     ):
         self._loss += loss
@@ -126,16 +137,25 @@ class MeanAggregator:
         if self._n_batches == 0:
             raise ValueError("No batches have been recorded.")
         data: dict[str, torch.Tensor] = {}
+        all_variable_names: set[str] = set()
         if self._log_loss:
             data["loss"] = self._loss / self._n_batches
         for name, metric in self._variable_metrics.items():
             metric_results = metric.get()
+            all_variable_names.update(metric_results.keys())
             for key in metric_results:
                 data[f"{name}/{key}"] = metric_results[key] / self._n_batches
             if self._target == "norm":
                 data[f"{name}/channel_mean"] = (
                     metric.get_channel_mean() / self._n_batches
                 )
+        if self._report_variables is not None:
+            excluded = all_variable_names - self._report_variables
+            data = {
+                k: v
+                for k, v in data.items()
+                if not any(seg in excluded for seg in k.split("/"))
+            }
         for key in sorted(data.keys()):
             data[key] = float(self._dist.reduce_mean(data[key].detach()).cpu().numpy())
         return data
@@ -160,3 +180,110 @@ class MeanAggregator:
         for key, value in data.items():
             data_vars[key] = xr.DataArray(value)
         return xr.Dataset(data_vars=data_vars)
+
+
+class OneStepMeanAdapter:
+    """Adapts OneStepMeanAggregator to accept InferenceBatchData."""
+
+    def __init__(self, inner: MeanAggregator):
+        self._inner = inner
+
+    def record_batch(self, data: InferenceBatchData) -> None:
+        self._inner.record_batch(
+            target_data=data.target,
+            gen_data=data.prediction,
+            target_data_norm=data.target_norm,
+            gen_data_norm=data.prediction_norm,
+            i_time_start=data.i_time_start,
+        )
+
+    def get_logs(self, label: str) -> dict[str, Any]:
+        return self._inner.get_logs(label)
+
+    def get_dataset(self) -> xr.Dataset:
+        return self._inner.get_dataset()
+
+
+@dataclasses.dataclass
+class StepMeanMetricConfig:
+    step: int
+    variables: list[str] | None = None
+    name: str | None = None
+    target: Literal["denorm", "norm"] = "denorm"
+    channel_mean_names: list[str] | None = None
+    enabled: bool = True
+    strict: bool = False
+
+    def __post_init__(self):
+        if self.name is None:
+            base = f"mean_step_{self.step}"
+            self.name = f"{base}_norm" if self.target == "norm" else base
+
+    def get_name(self) -> str:
+        return self.name  # type: ignore[return-value]
+
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        if self.step > ctx.n_forward_steps:
+            raise MetricNotSupportedError(
+                f"step_mean step {self.step} exceeds "
+                f"n_forward_steps={ctx.n_forward_steps}"
+            )
+        target_time = self.step + ctx.n_ic_steps - 1
+        is_norm = self.target == "norm"
+        agg: SubAggregator = OneStepMeanAdapter(
+            MeanAggregator(
+                ctx.ops,
+                target_time=target_time,
+                target=self.target,
+                log_loss=False,
+                include_bias=not is_norm,
+                include_grad_mag_percent_diff=not is_norm,
+                channel_mean_names=(
+                    (self.channel_mean_names or ctx.channel_mean_names)
+                    if is_norm
+                    else None
+                ),
+                report_variables=self.variables,
+            )
+        )
+        return MetricBuildResult(aggregator=agg)
+
+
+@dataclasses.dataclass
+class OneStepMeanMetricConfig:
+    name: str | None = None
+    target: Literal["denorm", "norm"] = "denorm"
+    include_bias: bool = True
+    include_grad_mag_percent_diff: bool = True
+    channel_mean_names: list[str] | None = None
+    enabled: bool = True
+    strict: bool = False
+
+    def __post_init__(self):
+        if self.name is None:
+            self.name = "mean" if self.target == "denorm" else "mean_norm"
+        if self.target == "norm":
+            if self.include_bias:
+                raise ValueError("include_bias is not supported when target='norm'.")
+            if self.include_grad_mag_percent_diff:
+                raise ValueError(
+                    "include_grad_mag_percent_diff is not supported "
+                    "when target='norm'."
+                )
+
+    def get_name(self) -> str:
+        return self.name  # type: ignore[return-value]
+
+    def build(self, ctx: OneStepBuildContext) -> OneStepMetricBuildResult:
+        agg = MeanAggregator(
+            ctx.ops,
+            target=self.target,
+            include_bias=self.include_bias,
+            include_grad_mag_percent_diff=self.include_grad_mag_percent_diff,
+            channel_mean_names=(
+                (self.channel_mean_names or ctx.channel_mean_names)
+                if self.target == "norm"
+                else None
+            ),
+        )
+        return OneStepMetricBuildResult(deterministic=agg)

@@ -46,6 +46,7 @@ def run_validation_loop(
     """
     timer = GlobalTimer.get_instance()
     stepper.set_eval()
+    stepper.seed_eval(seed=0)
     ema_context: contextlib.AbstractContextManager = (
         ema.applied_params(stepper.modules)
         if validate_using_ema and ema is not None
@@ -61,6 +62,7 @@ def run_validation_loop(
                 batch,
                 optimization=no_opt,
                 compute_derived_variables=compute_derived_variables,
+                evaluate_all_steps=True,
             )
             with timer.context("aggregator"):
                 aggregator.record_batch(batch=stepped)
