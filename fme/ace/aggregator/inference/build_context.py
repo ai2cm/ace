@@ -72,6 +72,11 @@ class MetricBuildContext:
     monthly_reference_data: xr.Dataset | None
     time_mean_reference_data: xr.Dataset | None
     initial_time: xr.DataArray
+    n_local_samples: int | None = None
+    """Number of samples (initial conditions, including ensemble members) this
+    process holds locally. Used to weight cross-rank metric reduction when
+    initial conditions are sharded unevenly across ranks. ``None`` falls back to
+    an unweighted reduction (equal weight per rank)."""
 
     @property
     def n_forward_steps(self) -> int:

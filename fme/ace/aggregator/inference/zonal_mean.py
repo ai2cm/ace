@@ -236,15 +236,25 @@ class ZonalMeanAggregator:
         data: dict[str, _RawData] = {}
         sorted_names = sorted(list(self._gen_data.keys()))
         for name in sorted_names:
+            # Reduce over the local sample dimension first, then combine across
+            # ranks weighted by the local sample count. Doing the sample-mean
+            # before the cross-rank reduction is required when ranks hold
+            # different numbers of samples (the per-sample tensors would
+            # otherwise have mismatched shapes across ranks).
+            n_local = self._gen_data[name].shape[sample_dim]
             gen = (
-                self._dist.reduce_mean(self._gen_data[name] / self._n_batches)
-                .mean(sample_dim)
+                self._dist.reduce_mean_weighted(
+                    (self._gen_data[name] / self._n_batches).mean(sample_dim),
+                    n_local,
+                )
                 .cpu()
                 .numpy()
             )
             target = (
-                self._dist.reduce_mean(self._target_data[name] / self._n_batches)
-                .mean(sample_dim)
+                self._dist.reduce_mean_weighted(
+                    (self._target_data[name] / self._n_batches).mean(sample_dim),
+                    n_local,
+                )
                 .cpu()
                 .numpy()
             )

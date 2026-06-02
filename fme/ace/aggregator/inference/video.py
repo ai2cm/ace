@@ -42,6 +42,8 @@ class _ErrorVideoData:
         self._n_timesteps = n_timesteps
         self._n_batches = torch.zeros([n_timesteps], dtype=torch.int32).cpu()
         self._dist = Distributed.get_instance()
+        # local sample count, captured at record time to weight cross-rank reduction
+        self._n_local_samples: int | None = None
 
     @torch.no_grad()
     def record_batch(
@@ -69,6 +71,8 @@ class _ErrorVideoData:
                 gen_data, self._n_timesteps, fill_value=-np.inf
             )
 
+        if self._n_local_samples is None:
+            self._n_local_samples = next(iter(gen_data.values())).shape[0]
         window_steps = next(iter(target_data.values())).shape[1]
         time_slice = slice(i_time_start, i_time_start + window_steps)
         for name, gen_tensor in gen_data.items():
@@ -102,7 +106,7 @@ class _ErrorVideoData:
         for name in sorted(self._mse_data):
             tensor = self._mse_data[name]
             mse = (tensor / self._n_batches[None, :, None, None]).mean(dim=0)
-            mse = self._dist.reduce_mean(mse)
+            mse = self._dist.reduce_mean_weighted(mse, self._n_local_samples)
             rmse_data[name] = torch.sqrt(mse)
         for name in sorted(self._min_err_data):
             min_err_data[name] = self._dist.reduce_min(self._min_err_data[name])
@@ -122,6 +126,7 @@ class _MeanVideoData:
         self._n_timesteps = n_timesteps
         self._n_batches = torch.zeros([n_timesteps], dtype=torch.int32).cpu()
         self._dist = Distributed.get_instance()
+        self._n_local_samples: int | None = None
 
     @torch.no_grad()
     def record_batch(
@@ -145,6 +150,8 @@ class _MeanVideoData:
         if self._gen_data is None:
             self._gen_data = _initialize_video_from_batch(gen_data, self._n_timesteps)
 
+        if self._n_local_samples is None:
+            self._n_local_samples = next(iter(gen_data.values())).shape[0]
         window_steps = next(iter(target_data.values())).shape[1]
         time_slice = slice(i_time_start, i_time_start + window_steps)
         for name, tensor in target_data.items():
@@ -163,11 +170,15 @@ class _MeanVideoData:
         for name in sorted(self._target_data):
             tensor = self._target_data[name]
             target_data[name] = tensor / self._n_batches[:, None, None]
-            target_data[name] = self._dist.reduce_mean(target_data[name])
+            target_data[name] = self._dist.reduce_mean_weighted(
+                target_data[name], self._n_local_samples
+            )
         for name in sorted(self._gen_data):
             tensor = self._gen_data[name]
             gen_data[name] = tensor / self._n_batches[:, None, None]
-            gen_data[name] = self._dist.reduce_mean(gen_data[name])
+            gen_data[name] = self._dist.reduce_mean_weighted(
+                gen_data[name], self._n_local_samples
+            )
         return gen_data, target_data
 
 
@@ -181,6 +192,7 @@ class _VarianceVideoData:
         self._gen_means: TensorDict | None = None
         self._target_squares: TensorDict | None = None
         self._gen_squares: TensorDict | None = None
+        self._n_local_samples: int | None = None
         self._n_timesteps = n_timesteps
         self._n_batches = torch.zeros([n_timesteps], dtype=torch.int32).cpu()
         self._dist = Distributed.get_instance()
@@ -216,6 +228,8 @@ class _VarianceVideoData:
                 gen_data, self._n_timesteps
             )
 
+        if self._n_local_samples is None:
+            self._n_local_samples = next(iter(gen_data.values())).shape[0]
         window_steps = next(iter(target_data.values())).shape[1]
         time_slice = slice(i_time_start, i_time_start + window_steps)
         for name, tensor in target_data.items():
@@ -241,16 +255,16 @@ class _VarianceVideoData:
         for name in sorted(self._target_means):
             tensor = self._target_means[name]
             mean = tensor / self._n_batches[:, None, None]
-            mean = self._dist.reduce_mean(mean)
+            mean = self._dist.reduce_mean_weighted(mean, self._n_local_samples)
             square = self._target_squares[name] / self._n_batches[:, None, None]
-            square = self._dist.reduce_mean(square)
+            square = self._dist.reduce_mean_weighted(square, self._n_local_samples)
             target_data[name] = square - mean**2
         for name in sorted(self._gen_means):
             tensor = self._gen_means[name]
             mean = tensor / self._n_batches[:, None, None]
-            mean = self._dist.reduce_mean(mean)
+            mean = self._dist.reduce_mean_weighted(mean, self._n_local_samples)
             square = self._gen_squares[name] / self._n_batches[:, None, None]
-            square = self._dist.reduce_mean(square)
+            square = self._dist.reduce_mean_weighted(square, self._n_local_samples)
             gen_data[name] = square - mean**2
         return gen_data, target_data
 

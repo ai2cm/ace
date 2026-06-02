@@ -115,6 +115,49 @@ def test_distributed_gather():
 
 
 @pytest.mark.parallel
+def test_reduce_mean_weighted_uneven():
+    """Weighted reduction must give the true global mean when ranks hold
+    different numbers of samples, unlike the plain (equal-weight) mean."""
+    dist = Distributed()
+    if dist.world_size != 2:
+        pytest.skip("requires exactly 2 ranks")
+    # rank 0 holds 3 samples [1, 2, 3]; rank 1 holds 1 sample [4].
+    if dist.rank == 0:
+        local_values = torch.tensor([1.0, 2.0, 3.0], device=get_device())
+    else:
+        local_values = torch.tensor([4.0], device=get_device())
+    n_local = local_values.numel()
+    local_mean = local_values.mean()
+
+    weighted = dist.reduce_mean_weighted(local_mean.clone(), n_local)
+    # global mean over all 4 samples is (1+2+3+4)/4 = 2.5
+    assert torch.allclose(weighted, torch.tensor(2.5, device=get_device())), weighted
+
+    # an equal-weight mean of per-rank means would give the wrong (2.0+4.0)/2 = 3.0
+    plain = dist.reduce_mean(local_mean.clone())
+    assert torch.allclose(plain, torch.tensor(3.0, device=get_device())), plain
+
+
+@pytest.mark.parallel
+def test_reduce_mean_weighted_empty_rank():
+    """A rank with zero samples (weight 0) must be ignored entirely, including
+    any NaN produced by averaging over an empty local batch."""
+    dist = Distributed()
+    if dist.world_size != 2:
+        pytest.skip("requires exactly 2 ranks")
+    if dist.rank == 0:
+        local_mean = torch.tensor([2.0, 4.0], device=get_device()).mean()  # n=2
+        n_local = 2
+    else:
+        local_mean = torch.tensor(float("nan"), device=get_device())  # empty rank
+        n_local = 0
+
+    weighted = dist.reduce_mean_weighted(local_mean.clone(), n_local)
+    # only rank 0's two samples contribute: mean is 3.0, no NaN propagation
+    assert torch.allclose(weighted, torch.tensor(3.0, device=get_device())), weighted
+
+
+@pytest.mark.parallel
 def test_scatter_object():
     dist = Distributed()
     if dist.is_root():

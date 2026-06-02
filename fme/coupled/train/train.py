@@ -143,6 +143,7 @@ def get_inference_callback(
                 continue
             batch = next(iter(data.loader))
             initial_times = batch.ocean_data.time.isel(time=0)
+            n_local_samples = batch.ocean_data.time.shape[0]
             n_timesteps_ocean = (
                 entry_config.n_coupled_steps + stepper.ocean.n_ic_timesteps
             )
@@ -159,6 +160,7 @@ def get_inference_callback(
                 atmosphere_normalize=stepper.atmosphere.normalizer.normalize,
                 save_diagnostics=save_per_epoch_diagnostics,
                 output_dir=os.path.join(output_dir, name),
+                n_local_samples=n_local_samples,
             )
             logs = inference_one_epoch(
                 stepper=stepper,

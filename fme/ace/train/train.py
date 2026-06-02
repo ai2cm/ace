@@ -197,6 +197,7 @@ def get_inference_callback(
         ):
             if epoch not in inference_epoch_sets[i]:
                 continue
+            n_local_samples = data.initial_condition.as_batch_data().time.shape[0]
             aggregator = entry_config.aggregator.build(
                 dataset_info=entry_dataset_info,
                 n_ic_steps=stepper.n_ic_timesteps,
@@ -208,6 +209,7 @@ def get_inference_callback(
                 save_diagnostics=save_per_epoch_diagnostics,
                 n_ensemble_per_ic=entry_config.n_ensemble_per_ic,
                 enable_time_series=False,
+                n_local_samples=n_local_samples,
             )
             logs = inference_one_epoch(
                 stepper=stepper,

@@ -94,6 +94,7 @@ def build_inference_evaluator_aggregator(
     n_ensemble_per_ic: int = 1,
     enable_time_series: bool = True,
     raise_on_unsupported: bool = True,
+    n_local_samples: int | None = None,
 ) -> "InferenceEvaluatorAggregator":
     _validate_no_duplicate_names(metrics)
     if save_diagnostics and output_dir is None:
@@ -121,6 +122,7 @@ def build_inference_evaluator_aggregator(
         monthly_reference_data=monthly_ref,
         time_mean_reference_data=time_mean_ref,
         initial_time=initial_time,
+        n_local_samples=n_local_samples,
     )
 
     metrics = list(metrics)
@@ -300,6 +302,7 @@ class InferenceEvaluatorAggregatorConfig:
         save_diagnostics: bool = True,
         n_ensemble_per_ic: int = 1,
         enable_time_series: bool = True,
+        n_local_samples: int | None = None,
     ) -> "InferenceEvaluatorAggregator":
         return build_inference_evaluator_aggregator(
             metrics=self._get_metrics(),
@@ -316,6 +319,7 @@ class InferenceEvaluatorAggregatorConfig:
             n_ensemble_per_ic=n_ensemble_per_ic,
             enable_time_series=enable_time_series,
             raise_on_unsupported=False,
+            n_local_samples=n_local_samples,
         )
 
 
@@ -451,6 +455,7 @@ class LegacyFlagInferenceEvaluatorAggregatorConfig:
         save_diagnostics: bool = True,
         n_ensemble_per_ic: int = 1,
         enable_time_series: bool = True,
+        n_local_samples: int | None = None,
     ) -> "InferenceEvaluatorAggregator":
         n_timesteps = n_ic_steps + n_forward_steps
         metrics = self._get_metrics(
@@ -474,6 +479,7 @@ class LegacyFlagInferenceEvaluatorAggregatorConfig:
             save_diagnostics=save_diagnostics,
             n_ensemble_per_ic=n_ensemble_per_ic,
             enable_time_series=enable_time_series,
+            n_local_samples=n_local_samples,
         )
 
 

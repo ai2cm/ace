@@ -314,6 +314,7 @@ class InferenceEvaluatorAggregatorConfig:
         output_dir: str | None = None,
         ocean_channel_mean_names: Sequence[str] | None = None,
         atmosphere_channel_mean_names: Sequence[str] | None = None,
+        n_local_samples: int | None = None,
     ) -> "InferenceEvaluatorAggregator":
         if n_timesteps_atmosphere > 2**15 and self.log_zonal_mean_images:
             # matplotlib raises an error if image size is too large, and we plot
@@ -354,6 +355,7 @@ class InferenceEvaluatorAggregatorConfig:
             ),
             channel_mean_names=ocean_channel_mean_names,
             save_diagnostics=save_diagnostics,
+            n_local_samples=n_local_samples,
         )
         atmosphere_agg = build_inference_evaluator_aggregator(
             metrics=atmosphere_metrics,
@@ -371,6 +373,7 @@ class InferenceEvaluatorAggregatorConfig:
             ),
             channel_mean_names=atmosphere_channel_mean_names,
             save_diagnostics=save_diagnostics,
+            n_local_samples=n_local_samples,
         )
 
         return InferenceEvaluatorAggregator(

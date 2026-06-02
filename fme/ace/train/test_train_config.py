@@ -27,6 +27,7 @@ from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import OptimizationConfig
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
+from fme.core.testing import mock_distributed
 from fme.core.typing_ import Slice
 
 
@@ -60,6 +61,39 @@ def _make_inference_config(
         name=name,
         weight=weight,
     )
+
+
+def _make_inference_config_with_n_ic(
+    n_initial_conditions: int,
+) -> InlineInferenceConfig:
+    return InlineInferenceConfig(
+        loader=InferenceDataLoaderConfig(
+            dataset=XarrayDataConfig(data_path=""),
+            start_indices=InferenceInitialConditionIndices(
+                first=0, n_initial_conditions=n_initial_conditions, interval=1
+            ),
+        ),
+        n_forward_steps=1,
+        forward_steps_in_memory=1,
+    )
+
+
+@pytest.mark.parametrize("n_initial_conditions", [4, 5, 6, 8])
+def test_inline_inference_allows_uneven_initial_conditions(n_initial_conditions):
+    """Initial conditions no longer need to be divisible by the number of ranks,
+    as long as every rank receives at least one."""
+    with mock_distributed(world_size=4):
+        config = _make_inference_config_with_n_ic(n_initial_conditions)
+    assert config.loader.start_indices.n_initial_conditions == n_initial_conditions
+
+
+@pytest.mark.parametrize("n_initial_conditions", [1, 2, 3])
+def test_inline_inference_rejects_fewer_initial_conditions_than_ranks(
+    n_initial_conditions,
+):
+    with mock_distributed(world_size=4):
+        with pytest.raises(ValueError, match="at least the number of parallel"):
+            _make_inference_config_with_n_ic(n_initial_conditions)
 
 
 def _make_stepper_config() -> StepperConfig:

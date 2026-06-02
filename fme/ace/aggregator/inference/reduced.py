@@ -179,11 +179,13 @@ class MeanAggregator:
         target: Literal["norm", "denorm"],
         n_timesteps: int,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
+        n_local_samples: int | None = None,
     ):
         self._gridded_operations = gridded_operations
         # Store one metric object per metric type (e.g., rmse, bias)
         self._target = target
         self._n_timesteps = n_timesteps
+        self._n_local_samples = n_local_samples
 
         self._dist = Distributed.get_instance()
         if variable_metadata is None:
@@ -284,7 +286,9 @@ class MeanAggregator:
                 datum = _SeriesData(
                     metric_name=name,
                     var_name=key,
-                    data=self._dist.reduce_mean(arr).cpu().numpy(),
+                    data=self._dist.reduce_mean_weighted(arr, self._n_local_samples)
+                    .cpu()
+                    .numpy(),
                 )
                 data.append(datum)
         return data
@@ -408,9 +412,11 @@ class SingleTargetMeanAggregator:
         gridded_operations: GriddedOperations,
         n_timesteps: int,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
+        n_local_samples: int | None = None,
     ):
         self._ops = gridded_operations
         self._n_timesteps = n_timesteps
+        self._n_local_samples = n_local_samples
 
         self._dist = Distributed.get_instance()
         if variable_metadata is None:
@@ -468,7 +474,9 @@ class SingleTargetMeanAggregator:
                 datum = _SeriesData(
                     metric_name=name,
                     var_name=key,
-                    data=self._dist.reduce_mean(arr).cpu().numpy(),
+                    data=self._dist.reduce_mean_weighted(arr, self._n_local_samples)
+                    .cpu()
+                    .numpy(),
                 )
                 data.append(datum)
         return data
@@ -532,6 +540,7 @@ class MeanMetricConfig:
             target=self.target,
             n_timesteps=ctx.n_timesteps,
             variable_metadata=ctx.variable_metadata,
+            n_local_samples=ctx.n_local_samples,
         )
         return MetricBuildResult(
             aggregator=maybe_filter(agg, self.variables), time_series=agg

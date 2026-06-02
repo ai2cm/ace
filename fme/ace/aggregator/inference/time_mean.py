@@ -157,7 +157,11 @@ class TimeMeanAggregator:
         names = sorted(list(self._data.keys()))  # sort for rank-consistent order
         for name in names:
             value = self._data[name]
-            gen = dist.reduce_mean(value / self._n_timesteps / self._n_samples)
+            # Weight by the local sample count so that ranks holding different
+            # numbers of initial conditions are combined into the correct global
+            # time mean (sum over all samples / total sample count).
+            local_mean = value / self._n_timesteps / self._n_samples
+            gen = dist.reduce_mean_weighted(local_mean, self._n_samples)
             ret[name] = gen
         return ret
 

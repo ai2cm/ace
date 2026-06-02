@@ -232,13 +232,19 @@ class EnsoCoefficientEvaluatorAggregator:
                 .mean(dim=0)
                 .to(device=get_device())
             )
-        # average coefficients across processes
+        # average coefficients across processes, weighted by the local number of
+        # samples that contributed so uneven shards combine correctly
+        n_local = sum(1 for s in self._sample_index_series if s is not None)
         if target_coefficients_all:
-            reduced_target_coefficients = reduce_data(dist, target_coefficients_all)
+            reduced_target_coefficients = reduce_data(
+                dist, target_coefficients_all, weight=n_local
+            )
         else:
             reduced_target_coefficients = None
         if gen_coefficients_all:
-            reduced_gen_coefficients = reduce_data(dist, gen_coefficients_all)
+            reduced_gen_coefficients = reduce_data(
+                dist, gen_coefficients_all, weight=n_local
+            )
         else:
             reduced_gen_coefficients = None
         return reduced_target_coefficients, reduced_gen_coefficients
@@ -435,12 +441,18 @@ def data_index_covariance(
     return (data * index_values_broadcast).sum(dim=index_dim)
 
 
-def reduce_data(dist: Distributed, rank_tensor_dict: TensorDict) -> TensorDict | None:
+def reduce_data(
+    dist: Distributed,
+    rank_tensor_dict: TensorDict,
+    weight: float | None = None,
+) -> TensorDict | None:
     """Reduce tensor dicts across distributed processes by taking the mean.
 
     Args:
         dist: Distributed instance.
         rank_tensor_dict: Tensor dict to reduce.
+        weight: Local sample count used to weight the cross-rank mean when ranks
+            hold different numbers of samples. ``None`` uses an equal-weight mean.
 
     Returns:
         Reduced tensor dict.
@@ -449,7 +461,7 @@ def reduce_data(dist: Distributed, rank_tensor_dict: TensorDict) -> TensorDict |
         # sort for determinism
         names = sorted(list(rank_tensor_dict.keys()))
         rank_tensor = torch.stack([rank_tensor_dict[name] for name in names], dim=0)
-        reduced_tensor = dist.reduce_mean(rank_tensor)
+        reduced_tensor = dist.reduce_mean_weighted(rank_tensor, weight)
         gathered_tensor_dict = {name: reduced_tensor[i] for i, name in enumerate(names)}
     else:
         gathered_tensor_dict = rank_tensor_dict

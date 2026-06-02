@@ -71,8 +71,11 @@ class SphericalPowerSpectrumAggregator:
         for name in sorted_names:
             _mean_spectrum = self._power_spectrum[name]
             if dist.world_size > 1:
-                # assuming same count on all workers
-                _mean_spectrum = dist.reduce_mean(_mean_spectrum)
+                # Weight by the local element count so ranks holding different
+                # numbers of samples combine into the correct global mean.
+                _mean_spectrum = dist.reduce_mean_weighted(
+                    _mean_spectrum, self._counts[name]
+                )
             logs[name] = _mean_spectrum
         return logs
 

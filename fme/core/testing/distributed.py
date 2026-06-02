@@ -20,6 +20,13 @@ class MockDistributed:
         self.reduce_called = True
         return tensor
 
+    def reduce_mean_weighted(
+        self, tensor: torch.Tensor, weight: float | None = None
+    ) -> torch.Tensor:
+        tensor.fill_(self.fill_value)
+        self.reduce_called = True
+        return tensor
+
     def reduce_max(self, tensor: torch.Tensor) -> torch.Tensor:
         return tensor + 1
 

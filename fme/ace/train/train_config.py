@@ -122,12 +122,19 @@ class InlineInferenceConfig:
                 "metric."
             )
         dist = Distributed.get_instance()
-        if self.loader.start_indices.n_initial_conditions % dist.world_size != 0:
+        n_initial_conditions = self.loader.start_indices.n_initial_conditions
+        # Initial conditions are sharded round-robin across ranks and metrics are
+        # combined with a sample-count-weighted reduction, so the count no longer
+        # needs to be divisible by the number of ranks. We do still require every
+        # rank to receive at least one initial condition; supporting empty ranks
+        # (n_initial_conditions < world_size) requires additional handling of the
+        # model forward pass on empty batches and is not yet supported.
+        if n_initial_conditions < dist.world_size:
             raise ValueError(
-                "Number of inference initial conditions must be divisible by the "
-                "number of parallel workers, got "
-                f"{self.loader.start_indices.n_initial_conditions} and "
-                f"{dist.world_size}."
+                "Number of inference initial conditions must be at least the "
+                "number of parallel workers (so every rank receives at least one "
+                f"initial condition), got {n_initial_conditions} initial "
+                f"conditions and {dist.world_size} workers."
             )
 
     @property

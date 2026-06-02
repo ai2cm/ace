@@ -248,6 +248,38 @@ class Distributed:
         """
         return self._distributed.reduce_mean(tensor)
 
+    def reduce_mean_weighted(
+        self, tensor: torch.Tensor, weight: float | None = None
+    ) -> torch.Tensor:
+        """Reduce a per-process mean weighted by each process's sample count.
+
+        Computes ``sum_r(weight_r * tensor_r) / sum_r(weight_r)`` across the
+        data-parallel group, which is the correct global mean when processes
+        hold means over different numbers of samples (e.g. inference initial
+        conditions sharded unevenly across ranks). When ``weight`` is equal on
+        every rank this reduces to the plain mean of per-rank means, matching
+        ``reduce_mean``.
+
+        A rank with ``weight == 0`` contributes nothing, and its ``tensor`` is
+        ignored entirely (so NaNs from an empty local batch do not propagate).
+
+        Args:
+            tensor: This process's mean over its local samples.
+            weight: This process's local sample count. If ``None``, falls back
+                to an unweighted ``reduce_mean`` (equal weight per process).
+        """
+        if weight is None:
+            return self.reduce_mean(tensor)
+        if weight == 0:
+            weighted = torch.zeros_like(tensor)
+        else:
+            weighted = tensor * weight
+        numerator = self.reduce_sum(weighted)
+        denominator = self.reduce_sum(
+            torch.tensor(float(weight), device=tensor.device, dtype=tensor.dtype)
+        )
+        return numerator / denominator
+
     def get_local_slices(
         self,
         tensor_shape,
