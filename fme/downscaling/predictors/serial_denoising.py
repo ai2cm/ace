@@ -336,11 +336,13 @@ class DenoisingMoECheckpointConfig:
     so no original per-expert checkpoint paths are required.
 
     Parameters:
-        checkpoint_path: Path to a checkpoint written by
-            ``DenoisingMoEPredictor.save``.
+        mixture_of_experts_path: Path to a bundle written by
+            ``DenoisingMoEPredictor.save``. Named distinctly from
+            ``CheckpointModelConfig.checkpoint_path`` so the two configs are
+            unambiguous when used as alternatives in a YAML model union.
     """
 
-    checkpoint_path: str
+    mixture_of_experts_path: str
 
     def __post_init__(self) -> None:
         self._state_is_loaded = False
@@ -350,7 +352,9 @@ class DenoisingMoECheckpointConfig:
     def _bundle(self) -> Mapping[str, Any]:
         if not self._state_is_loaded:
             self._state = torch.load(
-                self.checkpoint_path, map_location="cpu", weights_only=False
+                self.mixture_of_experts_path,
+                map_location="cpu",
+                weights_only=False,
             )
             self._state_is_loaded = True
         assert self._state is not None

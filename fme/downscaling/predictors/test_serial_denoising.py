@@ -165,7 +165,7 @@ def test_save_and_load_roundtrip_preserves_predictor(tmp_path):
     ckpt = tmp_path / "moe.pt"
     predictor.save(str(ckpt))
 
-    loaded = DenoisingMoECheckpointConfig(checkpoint_path=str(ckpt)).build()
+    loaded = DenoisingMoECheckpointConfig(mixture_of_experts_path=str(ckpt)).build()
 
     assert loaded._sigma_ranges == predictor._sigma_ranges
     assert (
@@ -187,7 +187,7 @@ def test_loaded_predictor_dispatches_to_same_experts(tmp_path):
     predictor = _build_two_expert_predictor()
     ckpt = tmp_path / "moe.pt"
     predictor.save(str(ckpt))
-    loaded = DenoisingMoECheckpointConfig(checkpoint_path=str(ckpt)).build()
+    loaded = DenoisingMoECheckpointConfig(mixture_of_experts_path=str(ckpt)).build()
 
     x = torch.randn(
         1, 1, 16, 32, device=next(predictor._experts[0].module.parameters()).device
@@ -205,7 +205,9 @@ def test_checkpoint_config_data_requirements(tmp_path):
     ckpt = tmp_path / "moe.pt"
     predictor.save(str(ckpt))
 
-    reqs = DenoisingMoECheckpointConfig(checkpoint_path=str(ckpt)).data_requirements
+    reqs = DenoisingMoECheckpointConfig(
+        mixture_of_experts_path=str(ckpt)
+    ).data_requirements
     assert reqs.fine_names == ["x"]
     assert set(reqs.coarse_names) == {"x"}
     assert reqs.n_timesteps == 1
@@ -263,7 +265,9 @@ def test_save_preserves_rename_applied_by_checkpoint_model_config(tmp_path):
 
     bundle_path = tmp_path / "moe.pt"
     predictor.save(str(bundle_path))
-    loaded = DenoisingMoECheckpointConfig(checkpoint_path=str(bundle_path)).build()
+    loaded = DenoisingMoECheckpointConfig(
+        mixture_of_experts_path=str(bundle_path)
+    ).build()
 
     for expert in loaded._experts:
         assert expert.in_names == ["renamed_x"]
@@ -273,7 +277,7 @@ def test_save_preserves_rename_applied_by_checkpoint_model_config(tmp_path):
     assert loaded._expert_renames == [{"x": "renamed_x"}, {"x": "renamed_x"}]
 
     reqs = DenoisingMoECheckpointConfig(
-        checkpoint_path=str(bundle_path)
+        mixture_of_experts_path=str(bundle_path)
     ).data_requirements
     assert reqs.fine_names == ["renamed_x"]
     assert set(reqs.coarse_names) == {"renamed_x"}
