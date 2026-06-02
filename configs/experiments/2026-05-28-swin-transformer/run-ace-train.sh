@@ -9,6 +9,7 @@ WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
 WANDB_PROJECT=${WANDB_PROJECT:-VarMasking}
 BEAKER_WORKSPACE=${BEAKER_WORKSPACE:-ai2/ace}
 BEAKER_CLUSTER=${BEAKER_CLUSTER:-ai2/titan}
+BEAKER_PRIORITY=${BEAKER_PRIORITY:-high}
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=2
 
@@ -34,7 +35,7 @@ run_training() {
     --description 'Run ACE2-ERA5 training' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace "$BEAKER_WORKSPACE" \
-    --priority "${BEAKER_PRIORITY:-high}" \
+    --priority "$BREAKER_PRIORITY" \
     --preemptible \
     --cluster "$BEAKER_CLUSTER" \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
