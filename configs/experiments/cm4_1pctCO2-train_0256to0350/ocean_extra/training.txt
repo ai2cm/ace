@@ -1,3 +1,3 @@
 group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
 
-1pct_nosmooth_0256to0350-precorrector_optim|rs0|train|high|a100+h100|4|500GiB|0||seed=0 stepper_training.optimize_precorrected=True stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'|30m
+1pct_nosmooth_0256to0350-no_correctors|rs0|train|high|a100+h100|4|500GiB|0||seed=0 stepper.step.config.force_positive_names=[] stepper.step.config.sea_ice_fraction_correction=null|30m
