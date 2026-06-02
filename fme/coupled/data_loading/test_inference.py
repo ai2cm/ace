@@ -22,7 +22,6 @@ from fme.coupled.data_loading.inference import (
     InferenceDataLoaderConfig,
     InferenceDataset,
 )
-from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.requirements import CoupledDataRequirements
 
 from .test_data_loader import MockCoupledData, create_coupled_data_on_disk
@@ -228,29 +227,6 @@ def test_validate_inference_length_atmos(
         )
 
 
-def _build_coupled_dataset_info(mock_data: MockCoupledData) -> CoupledDatasetInfo:
-    """Construct a CoupledDatasetInfo directly from the mock on-disk data.
-
-    This mimics what the stepper's training_dataset_info would provide in the
-    no-target inference path (used by _make_dummy_ocean_forcing).
-    """
-    from fme.core.dataset_info import DatasetInfo
-
-    ocean_info = DatasetInfo(
-        horizontal_coordinates=mock_data.ocean.hcoord,
-        vertical_coordinate=mock_data.ocean.vcoord,
-        spatial_mask_provider=mock_data.ocean.spatial_mask_provider,
-        timestep=mock_data.ocean.timestep,
-    )
-    atmos_info = DatasetInfo(
-        horizontal_coordinates=mock_data.atmosphere.hcoord,
-        vertical_coordinate=mock_data.atmosphere.vcoord,
-        spatial_mask_provider=mock_data.atmosphere.spatial_mask_provider,
-        timestep=mock_data.atmosphere.timestep,
-    )
-    return CoupledDatasetInfo(ocean=ocean_info, atmosphere=atmos_info)
-
-
 def test_no_target_inference_with_n_repeats(tmp_path):
     """Test integration of n_repeats + update_subset alignment in no-target inference.
 
@@ -323,7 +299,7 @@ def test_no_target_inference_with_n_repeats(tmp_path):
         ),
     )
 
-    dataset_info = _build_coupled_dataset_info(mock_data)
+    dataset_info = mock_data.build_dataset_info()
     initial_condition = CoupledPrognosticState(
         ocean_data=PrognosticState(ocean_initial_condition),
         atmosphere_data=PrognosticState(atmos_initial_condition),
@@ -356,7 +332,7 @@ def test_no_target_inference_with_n_repeats(tmp_path):
     end_of_first_repeat = first_atmos_time_on_disk + source_span
     source_values = mock_data.atmosphere.ds[_ATMOS_NAME].values
 
-    all_atmos_times_seen: set = set()
+    all_atmos_times_seen = set()
     for batch_idx, batch in enumerate(batches):
         assert isinstance(batch, CoupledBatchData)
         atmos_times = batch.atmosphere_data.time.isel(sample=0).values
