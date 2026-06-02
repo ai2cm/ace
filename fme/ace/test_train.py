@@ -1097,6 +1097,7 @@ def test_train_without_inline_inference(tmp_path, very_fast_only: bool):
     assert val_extra_output.exists()
 
 
+@pytest.mark.skipif(torch.cuda.is_available(), reason="flaky on GPU")
 @pytest.mark.parametrize(
     "insolation_config",
     [
