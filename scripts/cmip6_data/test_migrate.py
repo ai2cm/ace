@@ -1184,6 +1184,135 @@ def test_migration_0_7_0_to_0_8_0_no_eday_is_sidecar_only(tmp_path: Path):
     post.close()
 
 
+# ---------------------------------------------------------------------------
+# 0.8.0 → 0.8.1 — backfill esgf_failed_augment_variables from warnings
+# ---------------------------------------------------------------------------
+
+
+def test_migration_0_8_0_to_0_8_1_backfills_from_warnings(tmp_path: Path):
+    """The migration parses ``warnings`` for ``augment <name> failed:``
+    (surface-and-ocean) and ``augment day <var> failed:`` (day-
+    cadence) entries, dedupes them, and stores the result under
+    ``esgf_failed_augment_variables`` on the sidecar. Day-cadence
+    names are translated from CMIP6 to the canonical output name.
+    """
+    from migrations._0_8_0_to_0_8_1 import MIGRATION
+
+    sidecar = {
+        "schema_version": "0.8.0",
+        "variables_present": ["TMP2m", "PRATEsfc"],
+        "warnings": [
+            # Surface-and-ocean: name is already the output name.
+            "augment simon_sitemptop failed: ValueError: ESMC rc=506",
+            "augment siday_sithick failed: ValueError: ESMC rc=506",
+            # Day-cadence: CMIP6 name needs renaming. ``rsdt`` ->
+            # ``DSWRFtoa`` per CMIP_TO_OUTPUT_RENAMES.
+            "augment day rsdt failed: RuntimeError: HTTP 422",
+            # Repeated failures for the same variable should dedupe.
+            "augment simon_sitemptop failed: RuntimeError: HTTP 422",
+            # A non-augment warning shouldn't match.
+            "DSWRFsfc out of expected range",
+            "core variables absent (tolerated): ['ua']",
+        ],
+    }
+
+    out = MIGRATION.apply("ignored", sidecar)
+
+    assert out["schema_version"] == "0.8.1"
+    # Sorted, deduped, output names.
+    assert out["esgf_failed_augment_variables"] == [
+        "DSWRFtoa",
+        "siday_sithick",
+        "simon_sitemptop",
+    ]
+    audit = out["migrations"][-1]
+    assert audit == {
+        "from": "0.8.0",
+        "to": "0.8.1",
+        "backfilled_failed_augment_variables": [
+            "DSWRFtoa",
+            "siday_sithick",
+            "simon_sitemptop",
+        ],
+    }
+
+
+def test_migration_0_8_0_to_0_8_1_excludes_eventually_succeeded(tmp_path: Path):
+    """A variable that failed in an early attempt but eventually
+    landed in the zarr (``variables_present`` includes it) is NOT
+    marked as failed — the early failure is no longer load-bearing.
+    Matches the augment loop's invariant that a variable in the zarr
+    is by definition not a failure case."""
+    from migrations._0_8_0_to_0_8_1 import MIGRATION
+
+    sidecar = {
+        "schema_version": "0.8.0",
+        # simon_sitemptop failed once but the retry put it in the
+        # zarr. siday_sithick failed and never succeeded.
+        "variables_present": ["TMP2m", "simon_sitemptop"],
+        "warnings": [
+            "augment simon_sitemptop failed: RuntimeError: HTTP 422",
+            "augment siday_sithick failed: ValueError: ESMC rc=506",
+        ],
+    }
+
+    out = MIGRATION.apply("ignored", sidecar)
+
+    assert out["esgf_failed_augment_variables"] == ["siday_sithick"]
+
+
+def test_migration_0_8_0_to_0_8_1_no_warnings_is_empty_list(tmp_path: Path):
+    """Sidecars with no augment warnings get an empty
+    ``esgf_failed_augment_variables`` and a sidecar-only bump. Common
+    case for freshly-augmented datasets where everything worked
+    first try."""
+    from migrations._0_8_0_to_0_8_1 import MIGRATION
+
+    sidecar = {
+        "schema_version": "0.8.0",
+        "variables_present": ["TMP2m"],
+        "warnings": [],
+    }
+
+    out = MIGRATION.apply("ignored", sidecar)
+
+    assert out["esgf_failed_augment_variables"] == []
+    assert out["schema_version"] == "0.8.1"
+    audit = out["migrations"][-1]
+    assert audit["backfilled_failed_augment_variables"] == []
+
+
+def test_migration_0_8_0_to_0_8_1_idempotent(tmp_path: Path):
+    """Running the migration twice (defensive: shouldn't happen in
+    the chain, but the field is owned by the augment loop afterwards
+    and might be re-populated independently) yields the same list —
+    the migration recomputes from ``warnings`` each time rather than
+    appending."""
+    from migrations._0_8_0_to_0_8_1 import MIGRATION
+
+    sidecar = {
+        "schema_version": "0.8.0",
+        "variables_present": [],
+        "warnings": [
+            "augment foo failed: X: y",
+            "augment foo failed: X: y",
+        ],
+    }
+
+    out1 = MIGRATION.apply("ignored", sidecar)
+    # The chain would have advanced the schema_version, but let's
+    # force a re-apply by resetting (simulating an
+    # independently-triggered re-run).
+    out1["schema_version"] = "0.8.0"
+    out2 = MIGRATION.apply("ignored", out1)
+
+    assert (
+        out2["esgf_failed_augment_variables"]
+        == out1["esgf_failed_augment_variables"]
+        == ["foo"]
+    )
+
+
 def test_migration_0_3_0_to_0_4_0_writes_per_cell_maps(tmp_path: Path):
     """The 0.3.0 → 0.4.0 migration regenerates stats.nc with the new
     per-cell maps. Zarr data is untouched; only stats.nc changes.
