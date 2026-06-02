@@ -1,0 +1,11 @@
+denoising_expert_configs:
+  - checkpoint_config:
+      checkpoint_path: /Users/annak/Code/scratch/checkpoints/no-tmp2m/low_sigma.ckpt
+    sigma_min: 0.005
+    sigma_max: 200.0
+  - checkpoint_config:
+      checkpoint_path: /Users/annak/Code/scratch/checkpoints/no-tmp2m/high_sigma.ckpt
+    sigma_min: 200.0
+    sigma_max: 2000.0
+num_diffusion_generation_steps: 18
+churn: 0.0
