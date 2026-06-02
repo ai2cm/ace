@@ -39,7 +39,13 @@ from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.labels import BatchLabels
-from fme.core.loss import ChannelLossInfo, StepLoss, StepLossConfig
+from fme.core.loss import (
+    ChannelLossInfo,
+    CorrectorRegularizationConfig,
+    StepLoss,
+    StepLossConfig,
+    WeightedMappingLoss,
+)
 from fme.core.normalizer import (
     NetworkAndLossNormalizationConfig,
     NormalizationConfig,
@@ -868,6 +874,22 @@ class Stepper:
             normalizer=loss_normalizer,
         )
 
+    def build_corrector_regularization_loss(
+        self, config: CorrectorRegularizationConfig
+    ) -> WeightedMappingLoss:
+        """Build a loss for penalizing corrector adjustments.
+
+        The returned loss compares per-variable corrections against a zero
+        baseline in the loss-normalized space.
+        """
+        loss_normalizer = self._step_obj.get_loss_normalizer()
+        return config.build(
+            gridded_ops=self._dataset_info.gridded_operations,
+            out_names=self.loss_names,
+            normalizer=loss_normalizer,
+            channel_dim=self.CHANNEL_DIM,
+        )
+
     @property
     def config(self) -> StepperConfig:
         return self._config
@@ -1033,11 +1055,15 @@ class Stepper:
 
         Returns:
             A :class:`StepResult` carrying the denormalized output data at
-            the next time step.
+            the next time step and, when a corrector is applied, the
+            per-variable corrections in physical space.
         """
         args = args.apply_input_process_func(self._input_process_func)
         step_result = self._step_obj.step(args=args, wrapper=wrapper)
-        return StepResult(output=self._output_process_func(step_result.output))
+        return StepResult(
+            output=self._output_process_func(step_result.output),
+            corrections=step_result.corrections,
+        )
 
     def get_prediction_generator(
         self,
@@ -1410,6 +1436,11 @@ class TrainStepperConfig:
             be less than or equal to the number of timesteps present
             in the training dataset samples.
         parameter_init: The parameter initialization configuration for fine-tuning.
+        corrector_regularization: Optional configuration for penalizing the
+            magnitude of corrector adjustments. When set, the configured loss
+            is applied between the per-variable corrector corrections
+            (post-corrector minus pre-corrector) and a zero baseline in the
+            loss-normalized space, and added to the training loss.
     """
 
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
@@ -1419,6 +1450,7 @@ class TrainStepperConfig:
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
+    corrector_regularization: CorrectorRegularizationConfig | None = None
 
     def __post_init__(self):
         if self.n_ensemble == -1:
@@ -1542,6 +1574,15 @@ class TrainStepper(
         self._prognostic_names = self._stepper.prognostic_names
         self._derive_func = self._stepper.derive_func
         self._loss_obj = self._stepper.build_loss(config.loss)
+        self._corrector_reg_loss: WeightedMappingLoss | None = None
+        self._corrector_reg_weight: float = 0.0
+        if config.corrector_regularization is not None:
+            self._corrector_reg_loss = (
+                self._stepper.build_corrector_regularization_loss(
+                    config.corrector_regularization
+                )
+            )
+            self._corrector_reg_weight = config.corrector_regularization.weight
 
     def train_on_batch(
         self,
@@ -1649,6 +1690,8 @@ class TrainStepper(
         output_iterator = iter(output_generator)
         weighted_sums: dict[str, torch.Tensor] = {}
         total_counts: dict[str, int] = {}
+        reg_loss_sum: torch.Tensor | None = None
+        reg_loss_count: int = 0
         for step in range(n_forward_steps):
             if self._config.optimize_last_step_only:
                 optimize_step = step == n_loss_steps - 1
@@ -1679,8 +1722,35 @@ class TrainStepper(
                     weighted_sums=weighted_sums,
                     total_counts=total_counts,
                 )
+                reg_loss: torch.Tensor | None = None
+                if (
+                    self._corrector_reg_loss is not None
+                    and step_result.corrections is not None
+                ):
+                    corrections = unfold_ensemble_dim(
+                        step_result.corrections, n_ensemble=n_ensemble
+                    )
+                    zeros = {k: torch.zeros_like(v) for k, v in corrections.items()}
+                    reg_loss = (
+                        self._corrector_reg_weight
+                        * self._corrector_reg_loss(
+                            corrections,
+                            zeros,
+                            data_mask=input_batch_data.data_mask,
+                        ).total()
+                    )
+                    metrics[f"corrector_regularization_step_{step}"] = reg_loss.detach()
             if optimize_step:
                 optimization.accumulate_loss(step_total_loss)
+                if reg_loss is not None:
+                    optimization.accumulate_loss(reg_loss)
+                    if reg_loss_sum is None:
+                        reg_loss_sum = reg_loss.detach()
+                    else:
+                        reg_loss_sum = reg_loss_sum + reg_loss.detach()
+                    reg_loss_count += 1
+        if reg_loss_sum is not None and reg_loss_count > 0:
+            metrics["corrector_regularization"] = reg_loss_sum / reg_loss_count
         return output_list, _finalize_per_channel_losses(weighted_sums, total_counts)
 
     def _accumulate_step_loss(
