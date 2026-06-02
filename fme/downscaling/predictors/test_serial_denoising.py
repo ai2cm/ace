@@ -252,13 +252,14 @@ def test_save_preserves_rename_applied_by_checkpoint_model_config(tmp_path):
     )
     predictor = moe_config.build()
     # Sanity: each expert exposes runtime (renamed) names while config retains
-    # the original training-time names plus the rename mapping.
+    # the original training-time names. Rename is owned by the predictor, not
+    # the model.
     for expert in predictor._experts:
         assert expert.in_names == ["renamed_x"]
         assert expert.out_names == ["renamed_x"]
         assert expert.config.in_names == ["x"]
         assert expert.config.out_names == ["x"]
-        assert expert.rename == {"x": "renamed_x"}
+    assert predictor._expert_renames == [{"x": "renamed_x"}, {"x": "renamed_x"}]
 
     bundle_path = tmp_path / "moe.pt"
     predictor.save(str(bundle_path))
@@ -269,7 +270,7 @@ def test_save_preserves_rename_applied_by_checkpoint_model_config(tmp_path):
         assert expert.out_names == ["renamed_x"]
         assert expert.config.in_names == ["x"]
         assert expert.config.out_names == ["x"]
-        assert expert.rename == {"x": "renamed_x"}
+    assert loaded._expert_renames == [{"x": "renamed_x"}, {"x": "renamed_x"}]
 
     reqs = DenoisingMoECheckpointConfig(
         checkpoint_path=str(bundle_path)

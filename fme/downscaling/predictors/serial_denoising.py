@@ -148,11 +148,15 @@ class DenoisingMoEConfig:
         sigma_ranges = [
             (rc.sigma_min, rc.sigma_max) for rc in self.denoising_expert_configs
         ]
+        expert_renames = [
+            rc.checkpoint_config.rename for rc in self.denoising_expert_configs
+        ]
         return DenoisingMoEPredictor(
             experts=experts,
             sigma_ranges=sigma_ranges,
             num_diffusion_generation_steps=self.num_diffusion_generation_steps,
             churn=self.churn,
+            expert_renames=expert_renames,
         )
 
     @property
@@ -172,11 +176,16 @@ class DenoisingMoEPredictor:
         sigma_ranges: list[tuple[float, float]],
         num_diffusion_generation_steps: int,
         churn: float,
+        expert_renames: list[dict[str, str] | None] | None = None,
     ) -> None:
         if not experts:
             raise ValueError("experts must be non-empty.")
         if len(experts) != len(sigma_ranges):
             raise ValueError("experts and sigma_ranges must have the same length.")
+        if expert_renames is None:
+            expert_renames = [None] * len(experts)
+        if len(expert_renames) != len(experts):
+            raise ValueError("expert_renames and experts must have the same length.")
         self._experts = experts
         self._primary = experts[0]
         self._sigma_ranges = sigma_ranges
@@ -185,6 +194,7 @@ class DenoisingMoEPredictor:
         self._sigma_schedule_max = sigma_ranges[-1][1]
         self._num_diffusion_generation_steps = num_diffusion_generation_steps
         self._churn = churn
+        self._expert_renames = expert_renames
         self._dispatch_module = _SigmaDispatchModule(
             sigma_ranges,
             [e.module for e in experts],
@@ -284,15 +294,16 @@ class DenoisingMoEPredictor:
         ``DenoisingMoECheckpointConfig``.
 
         Contains each expert's full ``DiffusionModel`` state plus the MoE-level
-        routing and sampler parameters; no original checkpoint paths required.
-        Each expert's rename (from the original ``CheckpointModelConfig``) is
-        carried within its own state via ``DiffusionModel.get_state``.
+        routing and sampler parameters and the per-expert rename mappings (from
+        the original ``CheckpointModelConfig``s) so the reloaded predictor
+        exposes the same runtime variable names.
         """
         return {
             "experts": [expert.get_state() for expert in self._experts],
             "sigma_ranges": [list(r) for r in self._sigma_ranges],
             "num_diffusion_generation_steps": self._num_diffusion_generation_steps,
             "churn": self._churn,
+            "expert_renames": self._expert_renames,
         }
 
     def save(self, path: str) -> None:
@@ -300,13 +311,19 @@ class DenoisingMoEPredictor:
 
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> "DenoisingMoEPredictor":
-        experts = [DiffusionModel.from_state(s) for s in state["experts"]]
+        expert_states = state["experts"]
+        expert_renames = state.get("expert_renames") or [None] * len(expert_states)
+        experts = [
+            DiffusionModel.from_state(s, rename=r)
+            for s, r in zip(expert_states, expert_renames, strict=True)
+        ]
         sigma_ranges = [(float(lo), float(hi)) for lo, hi in state["sigma_ranges"]]
         return cls(
             experts=experts,
             sigma_ranges=sigma_ranges,
             num_diffusion_generation_steps=int(state["num_diffusion_generation_steps"]),
             churn=float(state["churn"]),
+            expert_renames=list(expert_renames),
         )
 
 
@@ -344,9 +361,9 @@ class DenoisingMoECheckpointConfig:
 
     @property
     def data_requirements(self) -> DataRequirements:
-        expert_state = self._bundle["experts"][0]
-        expert_config = expert_state["config"]
-        rename = expert_state.get("rename") or {}
+        expert_config = self._bundle["experts"][0]["config"]
+        renames = self._bundle.get("expert_renames") or [None]
+        rename = renames[0] or {}
         in_names = [rename.get(n, n) for n in expert_config["in_names"]]
         out_names = [rename.get(n, n) for n in expert_config["out_names"]]
         return DataRequirements(

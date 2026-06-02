@@ -296,7 +296,6 @@ class DiffusionModelConfig:
             in_names=in_names,
             out_names=out_names,
             static_inputs=static_inputs,
-            rename=rename,
         )
 
     def get_state(self) -> Mapping[str, Any]:
@@ -356,7 +355,6 @@ class DiffusionModel:
         in_names: list[str],
         out_names: list[str],
         static_inputs: StaticInputs | None = None,
-        rename: dict[str, str] | None = None,
     ) -> None:
         """
         Args:
@@ -386,10 +384,6 @@ class DiffusionModel:
             static_inputs: Static inputs to the model. May be None when
                 no static data is needed. If present, coordinates
                 must match full_fine_coords.
-            rename: ``{original: renamed}`` mapping that was applied at build
-                time, or ``None`` if no rename. Stored only so ``get_state`` /
-                ``from_state`` can round-trip it; ``DiffusionModel`` does not
-                apply it.
         """
         self.coarse_shape = coarse_shape
         self.downscale_factor = downscale_factor
@@ -399,7 +393,6 @@ class DiffusionModel:
         self.normalizer = normalizer
         self.loss = loss
         self.config = config
-        self.rename = rename or None
         self.in_names = in_names
         self.out_names = out_names
         self.in_packer = Packer(self.in_names)
@@ -690,18 +683,24 @@ class DiffusionModel:
             "downscale_factor": self.downscale_factor,
             "full_fine_coords": self.full_fine_coords.get_state(),
             "static_inputs": static_inputs_state,
-            "rename": self.rename,
         }
 
     @classmethod
     def from_state(
         cls,
         state: Mapping[str, Any],
+        rename: dict[str, str] | None = None,
     ) -> "DiffusionModel":
         """
         Reconstruct model from state (used during training checkpoint resumption).
         Requires full_fine_coords in state. For old checkpoints without it, use
         CheckpointModelConfig with fine_coordinates_path for backwards compatibility.
+
+        Args:
+            state: Saved DiffusionModel state from ``get_state``.
+            rename: Optional ``{original: renamed}`` mapping to apply at build
+                time. Not stored in ``state``; supply it here if the caller
+                needs the reloaded model to expose renamed runtime names.
         """
         static_inputs_state = state.get("static_inputs")
         static_inputs = (
@@ -727,7 +726,7 @@ class DiffusionModel:
             state["coarse_shape"],
             state["downscale_factor"],
             full_fine_coords=full_fine_coords,
-            rename=state.get("rename"),
+            rename=rename,
             static_inputs=static_inputs,
         )
         model.module.load_state_dict(state["module"], strict=True)
