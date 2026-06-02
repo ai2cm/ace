@@ -19,7 +19,7 @@ from fme.core.dataset.merged import (
 )
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.xarray import XarrayDataConfig, XarrayDataset
-from fme.core.distributed import Distributed
+from fme.core.distributed import Distributed, local_sample_count
 from fme.core.labels import LabelEncoding
 from fme.core.typing_ import Slice
 
@@ -343,8 +343,10 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
             for key, value in self._persistence_data.data.items():
                 updated_data[key] = value.expand_as(result.data[key])
             result.data = {**result.data, **updated_data}
-        assert result.time.shape[0] == (
-            self._n_initial_conditions // dist.total_data_parallel_ranks
+        assert result.time.shape[0] == local_sample_count(
+            self._n_initial_conditions,
+            dist.total_data_parallel_ranks,
+            dist.data_parallel_rank,
         )
         return result
 

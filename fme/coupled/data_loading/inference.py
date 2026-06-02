@@ -17,7 +17,7 @@ from fme.core.dataset.merged import MergedXarrayDataset
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.time import TimeSlice
 from fme.core.dataset.xarray import XarraySubset
-from fme.core.distributed import Distributed
+from fme.core.distributed import Distributed, local_sample_count
 from fme.core.typing_ import Slice
 from fme.coupled.data_loading.batch_data import CoupledBatchData
 from fme.coupled.data_loading.config import CoupledDatasetWithOptionalOceanConfig
@@ -189,9 +189,8 @@ class InferenceDataset(torch.utils.data.Dataset):
     def __getitem__(self, index) -> CoupledBatchData:
         dist = Distributed.get_instance()
         result = self._get_batch_data(index)
-        assert (
-            result.ocean_data.time.shape[0]
-            == self._n_initial_conditions // dist.world_size
+        assert result.ocean_data.time.shape[0] == local_sample_count(
+            self._n_initial_conditions, dist.world_size, dist.rank
         )
         return result
 

@@ -5,12 +5,44 @@ import torch
 import torch.multiprocessing as mp
 
 from fme import get_device
-from fme.core.distributed import Distributed
+from fme.core.distributed import Distributed, local_sample_count
 from fme.core.distributed.torch_distributed import (
     _gather_irregular,
     _pad_tensor_at_end,
     _unpad_tensor_at_end,
 )
+
+
+@pytest.mark.parametrize(
+    ["n_total", "n_ranks", "expected_per_rank"],
+    [
+        pytest.param(4, 4, [1, 1, 1, 1], id="even_equal"),
+        pytest.param(8, 4, [2, 2, 2, 2], id="even_multiple"),
+        pytest.param(5, 4, [2, 1, 1, 1], id="uneven_remainder"),
+        pytest.param(6, 4, [2, 2, 1, 1], id="uneven_remainder_two"),
+        pytest.param(2, 4, [1, 1, 0, 0], id="fewer_than_ranks"),
+        pytest.param(1, 4, [1, 0, 0, 0], id="single_ic"),
+        pytest.param(7, 1, [7], id="single_rank"),
+    ],
+)
+def test_local_sample_count(n_total, n_ranks, expected_per_rank):
+    counts = [local_sample_count(n_total, n_ranks, rank) for rank in range(n_ranks)]
+    assert counts == expected_per_rank
+    # round-robin sharding must account for every sample exactly once
+    assert sum(counts) == n_total
+
+
+@pytest.mark.parametrize(
+    ["n_ranks", "rank"],
+    [
+        pytest.param(0, 0, id="zero_ranks"),
+        pytest.param(4, 4, id="rank_out_of_range_high"),
+        pytest.param(4, -1, id="rank_out_of_range_low"),
+    ],
+)
+def test_local_sample_count_invalid(n_ranks, rank):
+    with pytest.raises(ValueError):
+        local_sample_count(8, n_ranks, rank)
 
 
 @pytest.mark.parametrize(

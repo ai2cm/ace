@@ -24,6 +24,22 @@ class SpatialParallelismNotImplemented(NotImplementedError):
     pass
 
 
+def local_sample_count(n_total: int, n_ranks: int, rank: int) -> int:
+    """Number of samples assigned to ``rank`` under round-robin sharding.
+
+    Samples are assigned to ranks by ``i % n_ranks``, so the first
+    ``n_total % n_ranks`` ranks receive one extra sample. This matches the
+    inference dataset sharding loop and tolerates ``n_total`` that is not a
+    multiple of ``n_ranks`` (including ``n_total < n_ranks``, where high ranks
+    receive zero samples).
+    """
+    if n_ranks <= 0:
+        raise ValueError(f"n_ranks must be positive, got {n_ranks}")
+    if not 0 <= rank < n_ranks:
+        raise ValueError(f"rank must be in [0, {n_ranks}), got {rank}")
+    return n_total // n_ranks + (1 if rank < n_total % n_ranks else 0)
+
+
 class Distributed:
     """
     A class to represent the distributed concerns for FME training.
