@@ -319,7 +319,8 @@ optimization:
         step_each_iteration: false
     milestones: [6, 114]
 stepper_training:
-  n_forward_steps: 1
+  n_forward_steps: 2
+  optimize_last_step_only: false
   loss:
     type: MSE
     weights:
