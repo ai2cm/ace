@@ -5,7 +5,7 @@ set -e
 SCRIPT_DIR=$(dirname "${BASH_SOURCE[0]}")
 JOB_GROUP="swin-transformer-comparison"
 export WANDB_PROJECT=${WANDB_PROJECT:-SwinTransformer}
-export BEAKER_WORKSPACE=${BEAKER_WORKSPACE:-ai2/climate-titan}
+export BEAKER_WORKSPACE=${BEAKER_WORKSPACE:-ai2/ace}
 export BEAKER_CLUSTER=${BEAKER_CLUSTER:-ai2/titan}
 
 declare -A JOBS=(
