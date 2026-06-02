@@ -5,7 +5,7 @@ patch:
   composite_prediction: true
   coarse_horizontal_overlap: 1
 model:
-  mixture_of_experts_path: /bundled_moe.ckpt
+  mixture_of_experts_path: /checkpoints/bundled_moe.ckpt
 data:
   coarse:
   - merge:
