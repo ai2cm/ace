@@ -462,6 +462,36 @@ def test_day_augmentables_returns_empty_when_nothing_to_do():
     assert out == []
 
 
+def test_day_augmentables_skips_previously_failed():
+    """A variable a prior pass tried + failed (recorded in the sidecar
+    as ``esgf_failed_augment_variables``) must not be re-attempted —
+    that's the whole point of persisting the failure state. The match
+    is on the renamed output name (same convention as
+    ``existing_vars``)."""
+    # ``rsdt`` renames to ``DSWRFtoa``; if a prior pass recorded
+    # ``DSWRFtoa`` as failed, the next pass should skip it even
+    # though it's published and not already in the zarr.
+    out = _select_day_augmentables(
+        optional_variables=["rsdt", "rsut"],
+        available_day_variables=["rsdt", "rsut"],
+        existing_vars=set(),
+        failed_augment_vars={"DSWRFtoa"},
+    )
+    assert out == ["rsut"]
+
+
+def test_day_augmentables_failed_default_is_empty_set():
+    """The ``failed_augment_vars`` parameter defaults to None and is
+    treated as the empty set — callers that don't track persisted
+    failure state (e.g. older callers, unit tests) keep working."""
+    out = _select_day_augmentables(
+        optional_variables=["rsdt"],
+        available_day_variables=["rsdt"],
+        existing_vars=set(),
+    )
+    assert out == ["rsdt"]
+
+
 if __name__ == "__main__":
     import sys
 

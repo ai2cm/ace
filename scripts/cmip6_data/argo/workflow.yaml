@@ -42,6 +42,14 @@ spec:
       value: ""
     - name: esgf_datasets_count_minus_one
       value: "-1"
+    # When "true", process_esgf.py is invoked with
+    # ``--retry-failed-augments`` for the augment-mode path. Use to
+    # re-try variables a prior pass recorded in the sidecar's
+    # ``esgf_failed_augment_variables`` (typically after fixing the
+    # upstream regrid / library issue that caused the original
+    # failure).
+    - name: retry_failed_augments
+      value: "false"
     # Migrate-side parameters (used by run_migrate only).
     - name: run_migrate
       value: "false"
@@ -378,6 +386,10 @@ spec:
             variant=$(echo "${key}" | cut -d/ -f3)
 
             echo "Processing ESGF ${source_id} ${experiment} ${variant}"
+            retry_flag=""
+            if [ "{{workflow.parameters.retry_failed_augments}}" = "true" ]; then
+              retry_flag="--retry-failed-augments"
+            fi
             python process_esgf.py \
               --config esgf_config.yaml \
               --inventory "{{workflow.parameters.esgf_inventory_path}}" \
@@ -385,7 +397,8 @@ spec:
               --source-ids "${source_id}" \
               --experiments "${experiment}" \
               --variant-labels "${variant}" \
-              --max-datasets 1
+              --max-datasets 1 \
+              ${retry_flag}
         env:
           - name: GOOGLE_APPLICATION_CREDENTIALS
             value: /secret/gcp-credentials/key.json

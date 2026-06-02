@@ -841,6 +841,7 @@ def _select_day_augmentables(
     optional_variables: list[str],
     available_day_variables: list[str],
     existing_vars: set[str],
+    failed_augment_vars: set[str] | None = None,
 ) -> list[str]:
     """Return CMIP6 names of optional day-cadence variables to augment.
 
@@ -852,6 +853,12 @@ def _select_day_augmentables(
       ``CMIP_TO_OUTPUT_RENAMES``) must not already be in
       ``existing_vars`` — augmenting an existing variable would
       conflict with the prior write.
+    - The variable's renamed output name must not be in
+      ``failed_augment_vars`` — a prior augment pass tried this
+      variable and failed downstream of the network (regrid, write).
+      Retrying would re-download the same files for the same
+      deterministic failure. Drop the name from the sidecar's
+      ``esgf_failed_augment_variables`` to force a retry.
 
     The actual download / regrid / write happens in
     :func:`_augment_day_variables` — this is the pure-function bit so
@@ -866,17 +873,25 @@ def _select_day_augmentables(
             ``ESGFDatasetTask.available_day_variables``.
         existing_vars: Output names already present in the existing
             zarr (from ``DatasetIndexRow.variables_present``).
+        failed_augment_vars: Output names a prior augment pass tried
+            and failed on (from
+            ``DatasetIndexRow.esgf_failed_augment_variables``).
+            Defaults to empty for callers (e.g. unit tests) that
+            don't track persisted failure state.
 
     Returns:
         CMIP6 names to download + augment, in deterministic order.
     """
     augmentable: list[str] = []
     available = set(available_day_variables)
+    failed = failed_augment_vars or set()
     for var in optional_variables:
         if var not in available:
             continue
         out_name = CMIP_TO_OUTPUT_RENAMES.get(var, var)
         if out_name in existing_vars:
+            continue
+        if out_name in failed:
             continue
         augmentable.append(var)
     return augmentable
@@ -910,7 +925,10 @@ def _augment_day_variables(
     Returns the list of output names successfully added.
     """
     augmentable = _select_day_augmentables(
-        cfg.optional_variables, task.available_day_variables, existing_vars
+        cfg.optional_variables,
+        task.available_day_variables,
+        existing_vars,
+        set(existing_row.esgf_failed_augment_variables),
     )
     if not augmentable:
         return []
@@ -923,9 +941,11 @@ def _augment_day_variables(
 
     added: list[str] = []
     for var in augmentable:
+        # Bound outside the try so the except handler can record the
+        # failure under the canonical output name.
+        out_name = CMIP_TO_OUTPUT_RENAMES.get(var, var)
         try:
             source_table = cmip6_source_table(var)
-            out_name = CMIP_TO_OUTPUT_RENAMES.get(var, var)
             logging.info(
                 "  [%s] augment day %s/%s -> %s ...",
                 task.source_id,
@@ -970,6 +990,8 @@ def _augment_day_variables(
             existing_row.warnings.append(
                 f"augment day {var} failed: {type(e).__name__}: {e}"
             )
+            if out_name not in existing_row.esgf_failed_augment_variables:
+                existing_row.esgf_failed_augment_variables.append(out_name)
     return added
 
 
@@ -977,6 +999,8 @@ def augment_one_esgf(
     task: ESGFDatasetTask,
     config: ESGFProcessConfig,
     existing_row: DatasetIndexRow,
+    *,
+    retry_failed_augments: bool = False,
 ) -> DatasetIndexRow:
     """Augment an existing Pangeo zarr with ESGF surface-and-ocean
     variables it didn't have.
@@ -1015,7 +1039,15 @@ def augment_one_esgf(
     cfg = config.resolve(task.source_id, task.experiment, task.variant_label)
     zarr_path = _output_zarr_path(config.output_directory, task)
 
+    # ``retry_failed_augments``: wipe the prior failure list so
+    # previously-failed variables become eligible again. Whatever
+    # fails this pass gets re-added to the (now empty) list, so
+    # ``esgf_failed_augment_variables`` after the run reflects only
+    # variables that failed *this* attempt — not a stale accumulation.
+    if retry_failed_augments:
+        existing_row.esgf_failed_augment_variables = []
     existing_vars = set(existing_row.variables_present)
+    failed_aug_vars = set(existing_row.esgf_failed_augment_variables)
     augmentable: list = []
     for h in SURFACE_AND_OCEAN_VARIABLES:
         if h.output_name not in cfg.surface_and_ocean_variables:
@@ -1024,10 +1056,20 @@ def augment_one_esgf(
             continue
         if h.output_name in existing_vars:
             continue
+        # Prior augment pass already tried + failed this variable.
+        # Re-attempting would redownload the same files for the same
+        # deterministic failure (typically ESMF regrid rc=506 from a
+        # publisher grid mismatch). Force-retry by deleting the entry
+        # from the sidecar's ``esgf_failed_augment_variables``.
+        if h.output_name in failed_aug_vars:
+            continue
         augmentable.append(h)
 
     day_augmentable = _select_day_augmentables(
-        cfg.optional_variables, task.available_day_variables, existing_vars
+        cfg.optional_variables,
+        task.available_day_variables,
+        existing_vars,
+        failed_aug_vars,
     )
     if not augmentable and not day_augmentable:
         logging.info("  no ESGF augmentation available; leaving Pangeo zarr as-is")
@@ -1129,6 +1171,8 @@ def augment_one_esgf(
                 existing_row.warnings.append(
                     f"augment {h.output_name} failed: {type(e).__name__}: {e}"
                 )
+                if h.output_name not in existing_row.esgf_failed_augment_variables:
+                    existing_row.esgf_failed_augment_variables.append(h.output_name)
         existing_ds.close()
 
         # Day-cadence augment (CFday + day). Runs after the
@@ -1239,6 +1283,7 @@ def run(
     tasks: list[ESGFDatasetTask],
     *,
     force: bool = False,
+    retry_failed_augments: bool = False,
 ) -> list[DatasetIndexRow]:
     rows: list[DatasetIndexRow] = []
     for i, task in enumerate(tasks, start=1):
@@ -1270,7 +1315,12 @@ def run(
                     )
                     rows.append(existing)
                     continue
-                row = augment_one_esgf(task, config, existing)
+                row = augment_one_esgf(
+                    task,
+                    config,
+                    existing,
+                    retry_failed_augments=retry_failed_augments,
+                )
                 rows.append(row)
                 # Augment never produces failures here; if augment
                 # failed for individual variables, those are recorded
@@ -1305,6 +1355,19 @@ def main() -> None:
     parser.add_argument("--variant-labels", nargs="+", default=None)
     parser.add_argument("--max-datasets", type=int, default=None)
     parser.add_argument("--skip-index", action="store_true")
+    parser.add_argument(
+        "--retry-failed-augments",
+        action="store_true",
+        help=(
+            "For each dataset's augment pass: clear the sidecar's "
+            "``esgf_failed_augment_variables`` before deciding what to "
+            "augment, so variables a prior pass tried + failed become "
+            "eligible again. Use after fixing the upstream issue (e.g. "
+            "an ESMF regrid failure that's been resolved by a config "
+            "or library update). Variables that fail again get re-added "
+            "to the sidecar's failure list."
+        ),
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
@@ -1346,7 +1409,12 @@ def main() -> None:
             )
         return
 
-    rows = run(config, tasks, force=args.force)
+    rows = run(
+        config,
+        tasks,
+        force=args.force,
+        retry_failed_augments=args.retry_failed_augments,
+    )
 
     if not args.skip_index:
         all_rows = _merge_rows_for_index(rows, config.output_directory)

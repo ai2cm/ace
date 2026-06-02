@@ -56,6 +56,15 @@
 #                              prod scale. Use when iterating on
 #                              augment logic without paying for
 #                              fresh-mode runs.
+#   --retry-failed-augments    Together with --process-esgf, clears
+#                              each dataset's
+#                              ``esgf_failed_augment_variables``
+#                              sidecar entry at the start of the
+#                              augment, so variables a prior pass
+#                              tried + failed (typically ESMF regrid
+#                              ``rc=506``) become eligible again.
+#                              Use after fixing the upstream cause
+#                              (e.g. ESMF / xESMF library update).
 #   --force-inventory          Rebuild ``inventory.csv`` /
 #                              ``inventory_esgf.csv`` even when they
 #                              already exist on GCS. Use when the
@@ -83,6 +92,7 @@ RUN_STAGE_EXTERNALS=false
 RUN_MIGRATE=false
 FORCE_INVENTORY=false
 AUGMENT_ONLY=false
+RETRY_FAILED_AUGMENTS=false
 STATS_SOURCE_IDS=""
 STATS_FORCE=false
 STATS_WORKERS="4"
@@ -109,6 +119,7 @@ do case $1 in
     --stage-externals) RUN_STAGE_EXTERNALS=true;;
     --migrate) RUN_MIGRATE=true;;
     --augment-only) AUGMENT_ONLY=true;;
+    --retry-failed-augments) RETRY_FAILED_AUGMENTS=true;;
     --force-inventory) FORCE_INVENTORY=true;;
     --stats-source-ids) STATS_SOURCE_IDS="$2"; shift;;
     --stats-force) STATS_FORCE=true;;
@@ -322,6 +333,7 @@ output=$(argo submit "${SCRIPT_DIR}/workflow.yaml" \
     -p run_normalization="${RUN_NORMALIZATION}" \
     -p run_stage_externals="${RUN_STAGE_EXTERNALS}" \
     -p run_migrate="${RUN_MIGRATE}" \
+    -p retry_failed_augments="${RETRY_FAILED_AUGMENTS}" \
     -p config="$(< "${ABS_CONFIG}")" \
     -p dataset_keys="${dataset_keys[*]}" \
     -p datasets_count_minus_one="${datasets_count_minus_one}" \
