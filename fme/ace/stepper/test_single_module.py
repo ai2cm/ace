@@ -105,7 +105,9 @@ DERIVED_FORCINGS_CONFIG = DerivedForcingsConfig(insolation=INSOLATION_CONFIG)
 EMPTY_DERIVED_FORCINGS_CONFIG = DerivedForcingsConfig()
 
 
-def get_data(names: Iterable[str], n_samples, n_time, epoch: int = 0) -> SphericalData:
+def get_data(
+    names: Iterable[str], n_samples, n_time, epoch: int | None = 0
+) -> SphericalData:
     data_dict = {}
     n_lat, n_lon, nz = 5, 5, 7
 
@@ -475,6 +477,47 @@ def test_train_on_batch_optimize_last_step_only(optimize_last_step_only: bool):
     else:
         assert len(optimization.accumulate_loss.call_args_list) == n_steps
         assert all(forward_calls_grad_enabled)
+
+
+def test_train_on_batch_n_forward_steps_respected_when_epoch_is_none():
+    """n_forward_steps should control the number of loss steps even when
+    BatchData.epoch is None (constant schedule, no milestones)."""
+    torch.manual_seed(0)
+
+    n_forward_steps = 2
+    n_data_steps = 4
+    data_with_ic: BatchData = get_data(
+        ["a", "b"], n_samples=5, n_time=n_data_steps + 1, epoch=None
+    ).data
+
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": torch.nn.Identity()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means=get_scalar_data(["a", "b"], 0.0),
+                            stds=get_scalar_data(["a", "b"], 1.0),
+                        ),
+                    ),
+                )
+            ),
+        ),
+    )
+    stepper = _get_train_stepper(
+        config,
+        n_forward_steps=n_forward_steps,
+        loss=StepLossConfig(type="MSE"),
+    )
+    optimization = unittest.mock.Mock(wraps=NullOptimization())
+    stepper.train_on_batch(data=data_with_ic, optimization=optimization)
+    assert len(optimization.accumulate_loss.call_args_list) == n_forward_steps
 
 
 def test_per_channel_losses_bounded_by_accumulated_loss():
