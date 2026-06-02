@@ -31,15 +31,16 @@ CONFIGS = [
     "ace-train-config-4deg-AIMIP-sfno-mask0.20-forcing-gmron-rpoff.yaml",
     "ace-train-config-4deg-AIMIP-sfno-mask0.20-forcing-gmroff-rpon.yaml",
     "ace-train-config-4deg-AIMIP-sfno-mask0.20-forcing-gmroff-rpoff.yaml",
-    "ace-train-config-4deg-AIMIP-sfno-mask0.80-uniform-gmron-rpon.yaml",
-    "ace-train-config-4deg-AIMIP-sfno-mask0.80-uniform-gmron-rpoff.yaml",
-    "ace-train-config-4deg-AIMIP-sfno-mask0.80-uniform-gmroff-rpon.yaml",
-    "ace-train-config-4deg-AIMIP-sfno-mask0.80-uniform-gmroff-rpoff.yaml",
-    "ace-train-config-4deg-AIMIP-sfno-mask0.80-forcing-gmron-rpon.yaml",
-    "ace-train-config-4deg-AIMIP-sfno-mask0.80-forcing-gmron-rpoff.yaml",
-    "ace-train-config-4deg-AIMIP-sfno-mask0.80-forcing-gmroff-rpon.yaml",
-    "ace-train-config-4deg-AIMIP-sfno-mask0.80-forcing-gmroff-rpoff.yaml",
 ]
+# "ace-train-config-4deg-AIMIP-sfno-mask0.80-uniform-gmron-rpon.yaml",
+# "ace-train-config-4deg-AIMIP-sfno-mask0.80-uniform-gmron-rpoff.yaml",
+# "ace-train-config-4deg-AIMIP-sfno-mask0.80-uniform-gmroff-rpon.yaml",
+# "ace-train-config-4deg-AIMIP-sfno-mask0.80-uniform-gmroff-rpoff.yaml",
+# "ace-train-config-4deg-AIMIP-sfno-mask0.80-forcing-gmron-rpon.yaml",
+# "ace-train-config-4deg-AIMIP-sfno-mask0.80-forcing-gmron-rpoff.yaml",
+# "ace-train-config-4deg-AIMIP-sfno-mask0.80-forcing-gmroff-rpon.yaml",
+# "ace-train-config-4deg-AIMIP-sfno-mask0.80-forcing-gmroff-rpoff.yaml",
+# ]
 
 
 def config_to_job_name(config_filename: str) -> str:

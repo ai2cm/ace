@@ -24,6 +24,8 @@ FORCING_VARS = [
 ]
 
 MASK_RATES = [0.0, 0.2, 0.8]
+GMR_VALS = [True, False]
+RP_VALS = [True, False]
 
 HERE = pathlib.Path(__file__).parent
 BASE_CONFIG = HERE / "ace-train-config-4deg-AIMIP-sfno.yaml"
@@ -45,8 +47,8 @@ def main():
             if mask_rate == 0.0 and exclude_forcing:
                 continue
 
-            for gmr_on in (True, False):
-                for rp_on in (True, False):
+            for gmr_on in GMR_VALS:
+                for rp_on in RP_VALS:
                     cfg = copy.deepcopy(base)
                     masking_type = "forcing" if exclude_forcing else "uniform"
                     gmr_suffix = "gmron" if gmr_on else "gmroff"
