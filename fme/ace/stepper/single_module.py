@@ -57,7 +57,7 @@ from fme.core.step.multi_call import (
     replace_multi_call,
 )
 from fme.core.step.single_module import SingleModuleStepConfig
-from fme.core.step.step import StepABC, StepSelector
+from fme.core.step.step import StepABC, StepResult, StepSelector
 from fme.core.tensors import (
     add_ensemble_dim,
     fold_ensemble_dim,
@@ -1023,7 +1023,7 @@ class Stepper:
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
+    ) -> StepResult:
         """
         Step the model forward one timestep given input data.
 
@@ -1032,11 +1032,12 @@ class Stepper:
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
-            The denormalized output data at the next time step.
+            A :class:`StepResult` carrying the denormalized output data at
+            the next time step.
         """
         args = args.apply_input_process_func(self._input_process_func)
-        output = self._step_obj.step(args=args, wrapper=wrapper)
-        return self._output_process_func(output)
+        step_result = self._step_obj.step(args=args, wrapper=wrapper)
+        return StepResult(output=self._output_process_func(step_result.output))
 
     def get_prediction_generator(
         self,
@@ -1044,7 +1045,7 @@ class Stepper:
         forcing_data: BatchData,
         n_forward_steps: int,
         optimizer: OptimizationABC,
-    ) -> Generator[TensorDict, None, None]:
+    ) -> Generator[StepResult, None, None]:
         """
         Predict multiple steps forward given initial condition and forcing data.
 
@@ -1094,7 +1095,7 @@ class Stepper:
         optimizer: OptimizationABC,
         labels: BatchLabels | None,
         data_mask: TensorMapping | None = None,
-    ) -> Generator[TensorDict, None, None]:
+    ) -> Generator[StepResult, None, None]:
         state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
         for step in range(n_forward_steps):
             input_forcing = {
@@ -1115,7 +1116,7 @@ class Stepper:
                 return optimizer.checkpoint(module, step=step)
 
             with optimizer.autocast():
-                state = self.step(
+                step_result = self.step(
                     StepArgs(
                         input=input_data,
                         next_step_input_data=next_step_input_dict,
@@ -1124,8 +1125,8 @@ class Stepper:
                     ),
                     wrapper=checkpoint,
                 )
-            yield state
-            state = optimizer.detach_if_using_gradient_accumulation(state)
+            yield step_result
+            state = optimizer.detach_if_using_gradient_accumulation(step_result.output)
 
     def predict(
         self,
@@ -1177,14 +1178,15 @@ class Stepper:
                     f"{ic_batch_data.n_timesteps}."
                 )
             n_forward_steps = forcing_data.n_timesteps - self.n_ic_timesteps
-            output_list = list(
-                self.get_prediction_generator(
+            output_list = [
+                step_result.output
+                for step_result in self.get_prediction_generator(
                     initial_condition,
                     forcing_data,
                     n_forward_steps,
                     NullOptimization(),
                 )
-            )
+            ]
         data = process_prediction_generator_list(
             output_list,
             time=forcing_data.time[:, self.n_ic_timesteps :],
@@ -1656,8 +1658,10 @@ class TrainStepper(
                 contextlib.nullcontext() if optimize_step else torch.no_grad()
             )
             with grad_context:
-                gen_step = next(output_iterator)
-                gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
+                step_result = next(output_iterator)
+                gen_step = unfold_ensemble_dim(
+                    step_result.output, n_ensemble=n_ensemble
+                )
                 output_list.append(gen_step)
                 target_step = add_ensemble_dim(
                     {

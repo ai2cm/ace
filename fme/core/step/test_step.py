@@ -539,7 +539,7 @@ def test_label_conditioned_step():
             ),
         ),
         wrapper=lambda x: x,
-    )
+    ).output
     h_sl, w_sl = dist.get_local_slices(DEFAULT_IMG_SHAPE)
     local_h = DEFAULT_IMG_SHAPE[0] if h_sl == slice(None) else h_sl.stop - h_sl.start
     local_w = DEFAULT_IMG_SHAPE[1] if w_sl == slice(None) else w_sl.stop - w_sl.start
@@ -753,7 +753,7 @@ def test_step_with_prescribed_prognostic_overwrites_output():
             labels=None,
         ),
         wrapper=lambda x: x,
-    )
+    ).output
     torch.testing.assert_close(output["diagnostic_main"], prescribed_value)
 
 
@@ -910,7 +910,7 @@ def test_secondary_module_full_field_and_residual():
         args=StepArgs(
             input=input_data, next_step_input_data=next_step_input_data, labels=None
         ),
-    )
+    ).output
     assert "prog" in output
     assert "diag" in output
     assert output["prog"].shape == (2, *img_shape)
@@ -961,8 +961,8 @@ def test_secondary_module_state_round_trip():
     args = StepArgs(
         input=input_data, next_step_input_data=next_step_input_data, labels=None
     )
-    out1 = step1.step(args=args)
-    out2 = step2.step(args=args)
+    out1 = step1.step(args=args).output
+    out2 = step2.step(args=args).output
     for name in out1:
         torch.testing.assert_close(out1[name], out2[name])
 
@@ -1007,7 +1007,7 @@ def test_secondary_module_residual_on_input_only_with_residual_prediction():
         args=StepArgs(
             input=input_data, next_step_input_data=next_step_input_data, labels=None
         ),
-    )
+    ).output
     assert output["prog_a"].shape == (2, *img_shape)
     assert output["prog_b"].shape == (2, *img_shape)
 
@@ -1085,7 +1085,7 @@ def test_step_with_data_mask():
             labels=None,
             data_mask=None,
         ),
-    )
+    ).output
     output_with_mask = step.step(
         args=StepArgs(
             input=input_data,
@@ -1093,7 +1093,7 @@ def test_step_with_data_mask():
             labels=None,
             data_mask=data_mask,
         ),
-    )
+    ).output
     for name in ["diagnostic_main", "diagnostic_rad"]:
         assert output_with_mask[name].shape == (n_samples, *img_shape)
         torch.testing.assert_close(output_with_mask[name][:2], output_no_mask[name][:2])
@@ -1179,7 +1179,7 @@ def test_step_with_include_channel_mask_inputs():
             labels=None,
             data_mask=None,
         ),
-    )
+    ).output
     output_with_mask = step.step(
         args=StepArgs(
             input=input_data,
@@ -1187,7 +1187,7 @@ def test_step_with_include_channel_mask_inputs():
             labels=None,
             data_mask=data_mask,
         ),
-    )
+    ).output
     for name in ["diagnostic_main", "diagnostic_rad"]:
         assert output_with_mask[name].shape == (n_samples, *img_shape)
         torch.testing.assert_close(output_with_mask[name][:2], output_no_mask[name][:2])
@@ -1231,7 +1231,7 @@ def test_step_with_include_channel_mask_inputs_no_data_mask():
             labels=None,
             data_mask=None,
         ),
-    )
+    ).output
     all_unmasked = {
         name: torch.ones(n_samples, dtype=torch.bool, device=fme.get_device())
         for name in step.input_names
@@ -1243,7 +1243,7 @@ def test_step_with_include_channel_mask_inputs_no_data_mask():
             labels=None,
             data_mask=all_unmasked,
         ),
-    )
+    ).output
     for name in ["diagnostic_main", "diagnostic_rad"]:
         assert output_no_mask[name].shape == (n_samples, *img_shape)
         torch.testing.assert_close(output_no_mask[name], output_all_unmasked[name])
@@ -1305,7 +1305,7 @@ def test_step_shared_global_mean_removal():
     )
     output = step.step(
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
-    )
+    ).output
     for name in out_names:
         assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
 
@@ -1330,7 +1330,7 @@ def test_step_shared_global_mean_removal_with_extra_channels():
     )
     output = step.step(
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
-    )
+    ).output
     for name in out_names:
         assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
 
@@ -1345,7 +1345,7 @@ def test_step_per_channel_global_mean_removal():
     )
     output = step.step(
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
-    )
+    ).output
     for name in step.output_names:
         assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
 
@@ -1365,7 +1365,7 @@ def test_step_per_channel_global_mean_removal_with_extra_channels():
     )
     output = step.step(
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
-    )
+    ).output
     for name in step.output_names:
         assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
 
@@ -1392,10 +1392,10 @@ def _assert_global_mean_removal_affects_output(removal, in_names, out_names, mea
     )
     baseline_output = step_baseline.step(
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
-    )
+    ).output
     removal_output = step_with_removal.step(
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
-    )
+    ).output
     differs = any(
         not torch.allclose(baseline_output[name], removal_output[name])
         for name in out_names
