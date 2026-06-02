@@ -381,6 +381,7 @@ class SingleModuleStep(StepABC):
         Returns:
             The denormalized output data at the next time step.
         """
+        self._global_mean_removal.training = self.module.torch_module.training
 
         def network_call(input_norm: TensorDict) -> TensorDict:
             if args.data_mask is not None:

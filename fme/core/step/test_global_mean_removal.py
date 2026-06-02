@@ -202,6 +202,28 @@ def test_shared_noise_shifts_offset_by_noise_value():
     torch.testing.assert_close(per_sample_extra_diff, expected_noise.cpu() / 2.0)
 
 
+def test_shared_noise_disabled_during_eval():
+    means = {"surface_temperature": 280.0}
+    stds = {"surface_temperature": 2.0}
+    normalizer = _build_normalizer_for(means, stds)
+    config = SharedGlobalMeanRemovalConfig(
+        reference_field="surface_temperature",
+        field_names=list(means.keys()),
+        noise_amount=1.0,
+    )
+    transform = config.build(normalizer, list(means.keys()))
+    tensors = move_tensordict_to_device(
+        {"surface_temperature": torch.full((2, 4, 4), 285.0)}
+    )
+    transform.training = False
+    torch.manual_seed(0)
+    result_a = transform.forward_transform(tensors, None)
+    torch.manual_seed(1)
+    result_b = transform.forward_transform(tensors, None)
+    for k in result_a:
+        torch.testing.assert_close(result_a[k], result_b[k])
+
+
 def test_shared_noise_round_trip_uses_noisy_offset():
     """Inverse transform uses the cached (noisy) offset so the field-level
     shift and unshift cancel exactly even when noise is nonzero."""

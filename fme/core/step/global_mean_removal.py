@@ -43,6 +43,8 @@ class GlobalMeanRemoval(abc.ABC):
     -> ``inverse_transform``.
     """
 
+    training: bool = True
+
     @property
     @abc.abstractmethod
     def n_extra_input_channels(self) -> int:
@@ -143,7 +145,7 @@ class SharedGlobalMeanRemoval(GlobalMeanRemoval):
                 )
         ref = input[ref_name]
         sample_mean = ref.mean(dim=tuple(range(1, ref.ndim)))
-        if self._noise_amount > 0:
+        if self.training and self._noise_amount > 0:
             sample_mean = sample_mean + self._noise_amount * torch.randn_like(
                 sample_mean
             )
