@@ -100,32 +100,35 @@ n_total ~ Uniform(min_output_variables + min_in_contested, n_non_forcing_availab
 n_out ~ Uniform(min_output_variables, n_total - min_in_contested)
 n_in_contested = n_total - n_out
 
-# 5. Select variables
-Select n_out non-forcing variables randomly as outputs
-Select n_in_contested from remaining non-forcing randomly as current-step inputs
-Select n_additional_in from forcing randomly as additional current-step inputs
+# 5. Assign specific variables to roles (uniform random subsets)
+Shuffle available non-forcing variables, take first n_total as participants
+Shuffle participants, take first n_out as outputs, rest as current-step inputs
+Shuffle available forcing variables, take first n_additional_in as additional inputs
 ```
+
+Variable assignment in step 5 uses **uniform random subsets** — every variable in a pool has equal probability of being selected for each role. Implemented via `random.sample(pool, k)` (equivalent to shuffling and taking the first k). No variable is privileged by its position in `all_names`.
 
 When `min_input_variables = min_output_variables` and `n_additional_in = 0`, the split in step 4 is perfectly symmetric: `E[n_out] = E[n_in_contested]`. When forcing inputs are sampled, they add to the input side without distorting the contested-pool symmetry. When `n_additional_in >= min_input_variables`, the contested pool can be entirely outputs (all inputs are forcing).
 
 **Non-disjoint tasks (prediction, combined_all):**
 
-Inputs and outputs don't compete (inputs come from t-1, or overlap is allowed), so they're sampled independently:
+Inputs and outputs don't compete (inputs come from t-1, or overlap is allowed), so counts and assignments are independent:
 
 ```
 n_out ~ Uniform(min_output_variables, n_non_forcing_available)
 n_in ~ Uniform(min_input_variables, n_all_available)
-Select n_out non-forcing variables randomly as outputs
-Select n_in from all available variables randomly as inputs
+outputs = random.sample(available_non_forcing, n_out)
+inputs = random.sample(available_all, n_in)
 ```
 
-For **prediction**, all inputs are previous-step. For **combined_all**, inputs can be previous-step, current-step, or both — the split between previous/current for each input variable is random.
+For **prediction**, all inputs are previous-step. For **combined_all**, inputs can be previous-step, current-step, or both — each selected input variable is independently assigned to previous-step, current-step, or both with equal probability.
 
 **Auto-encode:**
 
 ```
 n ~ Uniform(max(min_input_variables, min_output_variables), n_non_forcing_available)
-Select n non-forcing variables — they are both current-step inputs and outputs
+selected = random.sample(available_non_forcing, n)
+# selected are both current-step inputs and outputs
 ```
 
 **Infill_prediction specifics:**
@@ -133,26 +136,43 @@ Select n non-forcing variables — they are both current-step inputs and outputs
 Uses the disjoint algorithm above for the current-step input/output split, then additionally samples previous-step inputs (at least 1) from all available variables independently:
 
 ```
-# Disjoint split for current-step (as above)
+# Disjoint split for current-step (as above, steps 1-5)
 ...
 # Additionally, sample previous-step inputs
 n_prev ~ Uniform(1, n_all_available)
-Select n_prev from all available as previous-step inputs
+prev_inputs = random.sample(available_all, n_prev)
 ```
 
 ### Tests (`fme/core/step/test_infill_prediction.py`)
+
+**Constraint validation tests** (deterministic, per task type):
 - TaskSampler produces valid SampledTasks for each task type
-- Task constraints are satisfied per sample (e.g., auto_encode outputs = inputs)
-- Disjoint constraint: for infill/infill_prediction, current-step inputs ∩ outputs = ∅
-- data_mask filtering: per-sample absent variables are excluded from that sample's assignments
-- Zero-weight tasks never sampled
-- min_input/output_variables respected
-- Infeasible tasks raise ValueError in constructor
-- output_data_mask values are loss_scale (float), not bool
-- Per-sample independence: different samples can get different task types
-- Sampling symmetry: over many samples, E[n_in_contested] ≈ E[n_out] for disjoint tasks
+- auto_encode: output variables are exactly the current-step input variables
+- infill/infill_prediction: current-step inputs ∩ outputs = ∅ for every sample
+- prediction: no current-step inputs, all inputs are previous-step
+- All tasks: outputs only contain non-forcing variables
+- All tasks: at least `min_output_variables` outputs per sample
+- All tasks: at least `min_input_variables` total inputs per sample
+- Per-sample data_mask: absent variables never appear as inputs or outputs for that sample
+- output_data_mask values are the task's loss_scale (float), not bool
+
+**Config/error tests:**
+- Infeasible task (non-zero weight but impossible given variable counts) raises ValueError
+- Zero-weight tasks never sampled (run many samples, verify)
+- `min_output_variables < 1` raises ValueError
+
+**Variable selection algorithm tests** (statistical, run many samples):
+- Symmetry: for disjoint tasks with `min_in = min_out`, `E[n_out] ≈ E[n_in_contested]` (within statistical tolerance)
+- Uniformity: each non-forcing variable appears as output with approximately equal frequency
+- Uniformity: each variable appears as input with approximately equal frequency
 - Forcing variables appear as inputs but never as outputs
-- Full coverage cases occur (all non-forcing as outputs, or all as inputs)
+- Full coverage: with enough samples, at least one sample has all non-forcing as outputs
+- Full coverage: with enough samples, at least one sample has all non-forcing as inputs
+- Forcing coverage: some samples have all-forcing inputs (no contested inputs)
+
+**Per-sample independence tests:**
+- Different samples in the same batch can get different task types
+- Samples with different data_masks get different variable pools
 
 ---
 
