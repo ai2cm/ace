@@ -7,7 +7,7 @@ max_epochs: 150
 inference:
   - name: inference
     weight: 1.0
-    n_forward_steps: 840
+    n_forward_steps: 880
     forward_steps_in_memory: 20
     loader:
       start_indices:
@@ -29,24 +29,24 @@ inference:
           file_pattern: 2026-06-02-E3SMv3-piControl-ocean-105yr-5D-average.zarr
           engine: zarr
       num_data_workers: 2
-  - name: 10yr_test
+  - name: 12yr_test
     weight: 0.0
     epochs:
       start: 0
       step: 5
-    n_forward_steps: 730
+    n_forward_steps: 880
     forward_steps_in_memory: 20
     loader:
       start_indices:
         times:
         - '0515-01-03T12:00:00'
-        - '0515-09-05T12:00:00'
-        - '0516-06-02T12:00:00'
+        - '0515-06-02T12:00:00'
+        - '0515-11-04T12:00:00'
+        - '0516-04-03T12:00:00'
+        - '0516-09-05T12:00:00'
         - '0517-02-02T12:00:00'
-        - '0517-11-04T12:00:00'
-        - '0518-07-02T12:00:00'
-        - '0519-04-03T12:00:00'
-        - '0520-01-03T12:00:00'
+        - '0517-07-02T12:00:00'
+        - '0518-01-03T12:00:00'
       dataset:
         merge:
         - data_path: /pscratch/sd/e/elynnwu/fme-dataset
