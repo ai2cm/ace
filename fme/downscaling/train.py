@@ -329,14 +329,10 @@ class Trainer:
                     "best checkpoint."
                 )
         if self.best_histogram_tail_checkpoint_path is not None:
-            if (
-                valid_metrics[self._best_histogram_tail_name]
-                < self.best_histogram_tail_metric
-            ):
+            histogram_tail_metric = self._get_best_histogram_tail_metric(valid_metrics)
+            if histogram_tail_metric < self.best_histogram_tail_metric:
                 logging.info("Saving checkpoint for best histogram tail.")
-                self.best_histogram_tail_metric = valid_metrics[
-                    self._best_histogram_tail_name
-                ]
+                self.best_histogram_tail_metric = histogram_tail_metric
                 with best_checkpoint_context():
                     _save_checkpoint(self, self.best_histogram_tail_checkpoint_path)
             else:
@@ -346,6 +342,12 @@ class Trainer:
                 )
         else:
             raise ValueError("Best checkpoint path is not set")
+
+    def _get_best_histogram_tail_metric(self, valid_metrics: dict[str, float]) -> float:
+        metric = valid_metrics[self._best_histogram_tail_name]
+        if "frac_of_target" in self._best_histogram_tail_name:
+            return abs(1.0 - metric)
+        return metric
 
     def save_epoch_checkpoints(self) -> None:
         if self.epoch_checkpoint_path is not None:
