@@ -16,7 +16,11 @@ from fme.downscaling.predictors.serial_denoising import (
     _validate_experts_compatible,
     _validate_sigma_ranges,
 )
-from fme.downscaling.test_models import _get_diffusion_model, make_fine_coords
+from fme.downscaling.test_models import (
+    _get_diffusion_model,
+    make_fine_coords,
+    make_paired_batch_data,
+)
 
 
 def _range(sigma_min: float, sigma_max: float) -> DenoisingExpertCheckpointConfig:
@@ -136,8 +140,45 @@ def test_validate_experts_compatible():
         _validate_experts_compatible([e0, e1])
 
 
-def _build_two_expert_predictor() -> DenoisingMoEPredictor:
+def test_generate_on_batch_returns_scalar_loss():
     """Two-expert MoE with real DiffusionModel experts (different weights)."""
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    fine_coords = make_fine_coords(fine_shape)
+    experts = [
+        _get_diffusion_model(
+            coarse_shape=coarse_shape,
+            downscale_factor=2,
+            full_fine_coords=fine_coords,
+            predict_residual=False,
+            use_fine_topography=False,
+            static_inputs=StaticInputs(fields=[], coords=fine_coords),
+        )
+        for _ in range(2)
+    ]
+    predictor = DenoisingMoEPredictor(
+        experts=experts,
+        sigma_ranges=[(0.1, 0.5), (0.5, 1.0)],
+        num_diffusion_generation_steps=4,
+        churn=0.0,
+    )
+    batch = make_paired_batch_data(coarse_shape, fine_shape, batch_size=1)
+    outputs = predictor.generate_on_batch(batch, n_samples=1)
+    assert isinstance(outputs.loss, torch.Tensor)
+    assert outputs.loss.ndim == 0
+
+
+def _build_two_expert_predictor() -> DenoisingMoEPredictor:
+    """``DenoisingMoEPredictor.generate_on_batch`` must reduce the per-component
+    loss list returned by ``self._primary.loss(...)`` to a scalar tensor, the
+    same way ``DiffusionModel.generate_on_batch`` does.
+
+    Regression for the post-#1159 loss-architecture refactor: the loss module
+    now returns ``list[LossComponent]``; if the MoE predictor forgets to unpack
+    and ``.mean()`` it, ``ModelOutputs.loss`` is a list and downstream
+    consumers (``PatchPredictor`` accumulator, loss aggregator) explode with a
+    confusing ``TypeError`` or ``AttributeError`` deep in unrelated code.
+    """
     coarse_shape = (8, 16)
     fine_shape = (16, 32)
     fine_coords = make_fine_coords(fine_shape)
