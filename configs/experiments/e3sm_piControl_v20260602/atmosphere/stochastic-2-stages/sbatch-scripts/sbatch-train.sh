@@ -4,7 +4,7 @@
 #SBATCH -q regular
 #SBATCH -C gpu&hbm80g
 #SBATCH -J train-fme
-#SBATCH --nodes=4
+#SBATCH --nodes=2
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=128

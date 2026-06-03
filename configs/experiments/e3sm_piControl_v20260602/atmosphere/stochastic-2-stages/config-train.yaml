@@ -67,7 +67,7 @@ logging:
   project: ace-eamv3
   entity: ai2cm
 train_loader:
-  batch_size: 16
+  batch_size: 8
   num_data_workers: 2
   time_buffer: 10
   prefetch_factor: 1
