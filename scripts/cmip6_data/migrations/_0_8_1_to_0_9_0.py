@@ -77,16 +77,29 @@ def _derive_total_water_path(zarr_path: str) -> None:
     """Compute total_water_path = water_vapor_path + clwvi and write
     it to the zarr.
 
-    Reads only the two input variables (not the full dataset). Uses
-    the same ``to_zarr(mode="a", align_chunks=True)`` pattern as the
-    augment-side write so chunks align with the existing zarr layout.
-    Re-consolidates the metadata at the end so subsequent
-    ``open_zarr(consolidated=True)`` reads see the new variable.
+    Reads only the two input variables (not the full dataset).
+    Rechunks the sum explicitly to match ``water_vapor_path``'s
+    on-disk layout (time=360 years-of-day chunks, full lat/lon)
+    because the two augment passes that produced ``wvp`` and
+    ``clwvi`` wrote with different chunk shapes — the day-cadence
+    augmenter chunked clwvi as ``(3422, 6, 12)`` for some datasets,
+    so a naive sum carries irregular dask chunks that ``to_zarr``
+    rejects with "Zarr requires uniform chunk sizes". Re-consolidates
+    the metadata at the end so subsequent ``open_zarr(consolidated=
+    True)`` reads see the new variable.
     """
     logging.info("  deriving %s from %s + %s", _TWP, _WVP, _CLWVI)
     ds = xr.open_zarr(zarr_path, consolidated=False)
     try:
         twp = compute_total_water_path(ds[_WVP], ds[_CLWVI])
+        # Use water_vapor_path's chunk layout as the canonical
+        # target — that's the shape the rest of the atmospheric vars
+        # in the zarr use (time=360, full lat/lon). Pulling chunk
+        # sizes from the source variable means we adapt automatically
+        # to whatever the dataset's actual layout is.
+        wvp_chunks = ds[_WVP].chunks
+        chunk_spec = {dim: max(wvp_chunks[i]) for i, dim in enumerate(ds[_WVP].dims)}
+        twp = twp.chunk(chunk_spec)
         twp_ds = xr.Dataset({_TWP: twp})
         twp_ds.to_zarr(
             zarr_path,

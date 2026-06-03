@@ -1513,6 +1513,94 @@ def test_migration_0_8_1_to_0_9_0_sidecar_bump_when_one_input_missing(
     assert out["migrations"][-1]["derived_total_water_path"] is False
 
 
+def test_migration_0_8_1_to_0_9_0_handles_mismatched_input_chunks(tmp_path: Path):
+    """Regression for the v2 augment chunking quirk: the day-cadence
+    augmenter wrote clwvi with small lat/lon chunks (6, 12) while
+    water_vapor_path landed at full lat/lon (45, 90). Their sum
+    inherits dask's chunk intersection — irregular per-block sizes
+    that ``to_zarr`` rejects with "Zarr requires uniform chunk
+    sizes". The migration rechunks the sum explicitly to wvp's
+    layout before writing."""
+    from migrations._0_8_1_to_0_9_0 import MIGRATION
+
+    nt, nlat, nlon = 12, 45, 90
+    times = xr.date_range("2010-01-01", periods=nt, freq="D", calendar="noleap")
+    lat = np.linspace(-88, 88, nlat)
+    lon = np.linspace(0, 356, nlon)
+    rng = np.random.default_rng(0)
+    base = rng.uniform(0.0, 50.0, size=(nt, nlat, nlon)).astype("float32")
+    # wvp: full lat/lon chunks (the conventional layout).
+    wvp_da = xr.DataArray(
+        base + 5.0,
+        dims=("time", "lat", "lon"),
+        coords={"time": times, "lat": lat, "lon": lon},
+        attrs={"units": "kg m-2"},
+    ).chunk({"time": nt, "lat": -1, "lon": -1})
+    # clwvi: small lat/lon chunks (mirrors the v2 day-cadence
+    # augmenter's quirk).
+    clwvi_da = xr.DataArray(
+        base * 0.1 + 0.5,
+        dims=("time", "lat", "lon"),
+        coords={"time": times, "lat": lat, "lon": lon},
+        attrs={"units": "kg m-2"},
+    ).chunk({"time": nt, "lat": 6, "lon": 12})
+    psl_da = xr.DataArray(
+        base + 100000.0,
+        dims=("time", "lat", "lon"),
+        coords={"time": times, "lat": lat, "lon": lon},
+        attrs={"units": "Pa"},
+    ).chunk({"time": nt, "lat": -1, "lon": -1})
+    ds_to_write = xr.Dataset(
+        {"water_vapor_path": wvp_da, "clwvi": clwvi_da, "psl": psl_da}
+    )
+    zarr_dir = tmp_path / "data.zarr"
+    ds_to_write.to_zarr(str(zarr_dir), mode="w", consolidated=True, zarr_format=3)
+
+    # Companion stats.nc spanning the three DEFAULT_STATS_PERIODS so
+    # the incremental merge aligns.
+    periods = ["full", "1940-2014", "1979-2014"]
+    stats_ds = xr.Dataset(
+        {
+            "psl__mean": xr.DataArray(
+                np.array([100000.0, 100000.0, 100000.0], dtype="float32"),
+                dims=("period",),
+                coords={"period": periods},
+            ),
+            "psl__std": xr.DataArray(
+                np.array([14.4, 14.4, 14.4], dtype="float32"),
+                dims=("period",),
+                coords={"period": periods},
+            ),
+        },
+        attrs={"source_id": "TEST", "experiment": "historical"},
+    )
+    stats_ds.to_netcdf(str(tmp_path / "stats.nc"))
+
+    sidecar = {
+        "source_id": "TEST",
+        "target_grid": "F22.5",
+        "schema_version": "0.8.1",
+        "variables_present": ["psl", "water_vapor_path", "clwvi"],
+    }
+
+    out = MIGRATION.apply(str(zarr_dir), sidecar)
+
+    assert out["schema_version"] == "0.9.0"
+    assert "total_water_path" in out["variables_present"]
+    post = xr.open_zarr(str(zarr_dir), consolidated=True)
+    assert "total_water_path" in post.data_vars
+    # The derivation's on-disk chunks should match wvp's layout, not
+    # clwvi's — so subsequent reads / writes don't compound the
+    # original mismatch.
+    assert post["total_water_path"].chunks == post["water_vapor_path"].chunks
+    np.testing.assert_allclose(
+        post["total_water_path"].values,
+        post["water_vapor_path"].values + post["clwvi"].values,
+        rtol=1e-6,
+    )
+    post.close()
+
+
 def test_migration_0_3_0_to_0_4_0_writes_per_cell_maps(tmp_path: Path):
     """The 0.3.0 → 0.4.0 migration regenerates stats.nc with the new
     per-cell maps. Zarr data is untouched; only stats.nc changes.
