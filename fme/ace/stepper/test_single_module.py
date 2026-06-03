@@ -2688,3 +2688,65 @@ def test_corrector_regularization_config_rejects_invalid_loss_types():
         CorrectorRegularizationConfig(
             loss=LossConfig(type="MSE", global_mean_type="LpLoss")
         )
+
+
+def _get_force_positive_stepper(var: str = "a") -> Stepper:
+    """A stepper whose network negates its input, so a force_positive corrector
+    always clamps the output and the uncorrected (pre-correction) prediction,
+    reconstructed as output - corrections, holds the negative pre-clamp values."""
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": Multiply(-1.0).to(DEVICE)}
+                    ),
+                    in_names=[var],
+                    out_names=[var],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(means={var: 0.0}, stds={var: 1.0}),
+                    ),
+                    corrector=AtmosphereCorrectorConfig(force_positive_names=[var]),
+                )
+            ),
+        ),
+    )
+    return config.get_stepper(get_dataset_info())
+
+
+def test_predict_return_uncorrected():
+    stepper = _get_force_positive_stepper("a")
+    n_steps = 3
+    input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=[])
+    forcing_data.data = {}
+    # Default: 2-tuple, no uncorrected prediction returned.
+    output, _ = stepper.predict(input_data, forcing_data)
+    assert output.data["a"].shape[1] == n_steps
+    # With return_uncorrected: 3-tuple with the pre-correction values.
+    corrected, uncorrected, prognostic_state = stepper.predict(
+        input_data, forcing_data, return_uncorrected=True
+    )
+    assert isinstance(prognostic_state, PrognosticState)
+    assert set(uncorrected.data) == {"a"}
+    assert uncorrected.time.equals(corrected.time)
+    # The corrector clamps to >= 0; the uncorrected prediction (output -
+    # corrections) holds the pre-clamp (negative) value.
+    assert torch.all(corrected.data["a"] >= 0.0)
+    assert torch.all(uncorrected.data["a"][:, 0] <= 0.0)
+    assert not torch.allclose(corrected.data["a"], uncorrected.data["a"])
+
+
+def test_predict_paired_carries_uncorrected_prediction():
+    stepper = _get_force_positive_stepper("a")
+    n_steps = 3
+    input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=[])
+    # predict_paired always populates uncorrected_prediction, paired against the
+    # same reference / target.
+    paired, _ = stepper.predict_paired(input_data, forcing_data)
+    assert paired.uncorrected_prediction is not None
+    assert set(paired.uncorrected_prediction) == {"a"}
+    # The corrector clamps to >= 0; the uncorrected values are the pre-clamp
+    # (negative) network outputs, so they differ from the corrected prediction.
+    assert torch.all(paired.prediction["a"] >= 0.0)
+    assert torch.all(paired.uncorrected_prediction["a"][:, 0] <= 0.0)

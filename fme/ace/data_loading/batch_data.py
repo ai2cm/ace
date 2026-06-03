@@ -599,6 +599,10 @@ class PairedData:
     time: xr.DataArray
     labels: BatchLabels | None = None
     n_ensemble: int = 1
+    uncorrected_prediction: TensorMapping | None = None
+    """Optional pre-correction ("uncorrected") values of corrector-modified
+    prediction variables, paired against the same ``reference``. Used to evaluate
+    how much the stepper relies on its corrector. ``None`` when not requested."""
 
     @property
     def forcing(self) -> TensorMapping:
@@ -630,12 +634,22 @@ class PairedData:
                 torch.repeat_interleave(self.labels.tensor, n_ensemble, dim=0),
                 self.labels.names,
             )
+        if self.uncorrected_prediction is None:
+            uncorrected_prediction = None
+        else:
+            uncorrected = repeat_interleave_batch_dim(
+                self.uncorrected_prediction, n_ensemble
+            )
+            uncorrected_prediction = {
+                k: v.to(get_device()) for k, v in uncorrected.items()
+            }
         return PairedData(
             prediction={k: v.to(get_device()) for k, v in prediction.items()},
             reference={k: v.to(get_device()) for k, v in reference.items()},
             time=time,
             labels=labels,
             n_ensemble=n_ensemble,
+            uncorrected_prediction=uncorrected_prediction,
         )
 
     def as_ensemble_tensor_dicts(
@@ -661,6 +675,7 @@ class PairedData:
         cls,
         prediction: BatchData,
         reference: BatchData,
+        uncorrected_prediction: BatchData | None = None,
     ) -> "PairedData":
         if not np.all(prediction.time.values == reference.time.values):
             raise ValueError("Prediction and target time coordinate must be the same.")
@@ -670,6 +685,9 @@ class PairedData:
             labels=prediction.labels,
             time=prediction.time,
             n_ensemble=prediction.n_ensemble,
+            uncorrected_prediction=(
+                None if uncorrected_prediction is None else uncorrected_prediction.data
+            ),
         )
 
     @classmethod
