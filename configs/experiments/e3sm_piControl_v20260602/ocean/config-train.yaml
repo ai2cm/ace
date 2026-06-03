@@ -1,0 +1,367 @@
+experiment_dir: FME_OUTPUT_DIR
+save_checkpoint: true
+validate_using_ema: true
+ema:
+  decay: 0.999
+max_epochs: 150
+inference:
+  - name: inference
+    weight: 1.0
+    n_forward_steps: 840
+    forward_steps_in_memory: 20
+    loader:
+      start_indices:
+        times:
+        - '0425-01-03T12:00:00'
+        - '0436-01-03T12:00:00'
+        - '0447-01-03T12:00:00'
+        - '0458-01-03T12:00:00'
+        - '0469-01-03T12:00:00'
+        - '0480-01-03T12:00:00'
+        - '0491-01-03T12:00:00'
+        - '0502-01-03T12:00:00'
+      dataset:
+        merge:
+        - data_path: /pscratch/sd/e/elynnwu/fme-dataset
+          file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /pscratch/sd/e/elynnwu/fme-dataset
+          file_pattern: 2026-06-02-E3SMv3-piControl-ocean-105yr-5D-average.zarr
+          engine: zarr
+      num_data_workers: 2
+  - name: 10yr_test
+    weight: 0.0
+    epochs:
+      start: 0
+      step: 5
+    n_forward_steps: 730
+    forward_steps_in_memory: 20
+    loader:
+      start_indices:
+        times:
+        - '0515-01-03T12:00:00'
+        - '0515-09-05T12:00:00'
+        - '0516-06-02T12:00:00'
+        - '0517-02-02T12:00:00'
+        - '0517-11-04T12:00:00'
+        - '0518-07-02T12:00:00'
+        - '0519-04-03T12:00:00'
+        - '0520-01-03T12:00:00'
+      dataset:
+        merge:
+        - data_path: /pscratch/sd/e/elynnwu/fme-dataset
+          file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /pscratch/sd/e/elynnwu/fme-dataset
+          file_pattern: 2026-06-02-E3SMv3-piControl-ocean-105yr-5D-average.zarr
+          engine: zarr
+      num_data_workers: 2
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ocean-emulator-e3sm
+  entity: ai2cm
+train_loader:
+  batch_size: 16
+  num_data_workers: 2
+  prefetch_factor: 1
+  dataset:
+    merge:
+    - data_path: /pscratch/sd/e/elynnwu/fme-dataset
+      file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-ocean.zarr
+      engine: zarr
+      subset:
+        start_time: '0425-01-03'
+        stop_time: '0515-01-01'
+    - data_path: /pscratch/sd/e/elynnwu/fme-dataset
+      file_pattern: 2026-06-02-E3SMv3-piControl-ocean-105yr-5D-average.zarr
+      engine: zarr
+      subset:
+        start_time: '0425-01-03'
+        stop_time: '0515-01-01'
+validation:
+  loader:
+    batch_size: 16
+    num_data_workers: 2
+    prefetch_factor: 1
+    dataset:
+      merge:
+      - data_path: /pscratch/sd/e/elynnwu/fme-dataset
+        file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-ocean.zarr
+        engine: zarr
+        subset:
+          start_time: '0515-01-03'
+          stop_time: '0520-01-01'
+      - data_path: /pscratch/sd/e/elynnwu/fme-dataset
+        file_pattern: 2026-06-02-E3SMv3-piControl-ocean-105yr-5D-average.zarr
+        engine: zarr
+        subset:
+          start_time: '0515-01-03'
+          stop_time: '0520-01-01'
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+stepper_training:
+  n_forward_steps: 4
+  loss:
+    type: MSE
+stepper:
+  input_masking:
+    mask_value: 0
+    fill_value: 0
+    exclude_names_and_prefixes:
+    - LANDFRAC
+  step:
+    type: single_module
+    config:
+      builder:
+        type: Samudra
+        config:
+          ch_width:
+          - 280
+          - 380
+          - 480
+          - 520
+          dilation:
+          - 1
+          - 2
+          - 4
+          - 8
+          n_layers:
+          - 1
+          - 1
+          - 1
+          - 1
+          norm: instance
+          upscale_factor: 2
+          checkpoint_strategy: all
+      normalization:
+        network:
+          global_means_path: FME_STATS_DIR/centering.nc
+          global_stds_path: FME_STATS_DIR/scaling-full-field.nc
+      corrector:
+        type: ocean_corrector
+        config:
+          force_positive_names:
+          - salinityCoarsened_0
+          - salinityCoarsened_1
+          - salinityCoarsened_2
+          - salinityCoarsened_3
+          - salinityCoarsened_4
+          - salinityCoarsened_5
+          - salinityCoarsened_6
+          - salinityCoarsened_7
+          - salinityCoarsened_8
+          - salinityCoarsened_9
+          - salinityCoarsened_10
+          - salinityCoarsened_11
+          - salinityCoarsened_12
+          - salinityCoarsened_13
+          - salinityCoarsened_14
+          - salinityCoarsened_15
+          - salinityCoarsened_16
+          - salinityCoarsened_17
+          - salinityCoarsened_18
+          - iceVolumeTotal
+          sea_ice_fraction_correction:
+            sea_ice_fraction_name: ocean_sea_ice_fraction
+            land_fraction_name: LANDFRAC
+            remove_negative_ocean_fraction: false
+            sea_ice_thickness_name: iceVolumeTotal
+            zero_where_ice_free_names:
+              - iceVolumeTotal
+      next_step_forcing_names:
+      - TAUX
+      - TAUY
+      - surface_precipitation_rate
+      - frozen_precipitation_rate
+      - FLUS
+      - FSUS
+      - FLDS
+      - FSDS
+      - LHFLX
+      - SHFLX
+      in_names:
+      # time-invariant
+      - LANDFRAC
+      - sea_surface_fraction
+      # atmosphere forcing
+      - TAUX
+      - TAUY
+      - surface_precipitation_rate
+      - frozen_precipitation_rate
+      - FLUS
+      - FSUS
+      - FLDS
+      - FSDS
+      - LHFLX
+      - SHFLX
+      # ocean prognostic
+      - sst
+      - ssh
+      - salinityCoarsened_0
+      - salinityCoarsened_1
+      - salinityCoarsened_2
+      - salinityCoarsened_3
+      - salinityCoarsened_4
+      - salinityCoarsened_5
+      - salinityCoarsened_6
+      - salinityCoarsened_7
+      - salinityCoarsened_8
+      - salinityCoarsened_9
+      - salinityCoarsened_10
+      - salinityCoarsened_11
+      - salinityCoarsened_12
+      - salinityCoarsened_13
+      - salinityCoarsened_14
+      - salinityCoarsened_15
+      - salinityCoarsened_16
+      - salinityCoarsened_17
+      - salinityCoarsened_18
+      - temperatureCoarsened_0
+      - temperatureCoarsened_1
+      - temperatureCoarsened_2
+      - temperatureCoarsened_3
+      - temperatureCoarsened_4
+      - temperatureCoarsened_5
+      - temperatureCoarsened_6
+      - temperatureCoarsened_7
+      - temperatureCoarsened_8
+      - temperatureCoarsened_9
+      - temperatureCoarsened_10
+      - temperatureCoarsened_11
+      - temperatureCoarsened_12
+      - temperatureCoarsened_13
+      - temperatureCoarsened_14
+      - temperatureCoarsened_15
+      - temperatureCoarsened_16
+      - temperatureCoarsened_17
+      - temperatureCoarsened_18
+      - velocityZonalCoarsened_0
+      - velocityZonalCoarsened_1
+      - velocityZonalCoarsened_2
+      - velocityZonalCoarsened_3
+      - velocityZonalCoarsened_4
+      - velocityZonalCoarsened_5
+      - velocityZonalCoarsened_6
+      - velocityZonalCoarsened_7
+      - velocityZonalCoarsened_8
+      - velocityZonalCoarsened_9
+      - velocityZonalCoarsened_10
+      - velocityZonalCoarsened_11
+      - velocityZonalCoarsened_12
+      - velocityZonalCoarsened_13
+      - velocityZonalCoarsened_14
+      - velocityZonalCoarsened_15
+      - velocityZonalCoarsened_16
+      - velocityZonalCoarsened_17
+      - velocityZonalCoarsened_18
+      - velocityMeridionalCoarsened_0
+      - velocityMeridionalCoarsened_1
+      - velocityMeridionalCoarsened_2
+      - velocityMeridionalCoarsened_3
+      - velocityMeridionalCoarsened_4
+      - velocityMeridionalCoarsened_5
+      - velocityMeridionalCoarsened_6
+      - velocityMeridionalCoarsened_7
+      - velocityMeridionalCoarsened_8
+      - velocityMeridionalCoarsened_9
+      - velocityMeridionalCoarsened_10
+      - velocityMeridionalCoarsened_11
+      - velocityMeridionalCoarsened_12
+      - velocityMeridionalCoarsened_13
+      - velocityMeridionalCoarsened_14
+      - velocityMeridionalCoarsened_15
+      - velocityMeridionalCoarsened_16
+      - velocityMeridionalCoarsened_17
+      - velocityMeridionalCoarsened_18
+      # sea ice prognostic
+      - ocean_sea_ice_fraction
+      - iceVolumeTotal
+      out_names:
+      - sst
+      - ssh
+      - salinityCoarsened_0
+      - salinityCoarsened_1
+      - salinityCoarsened_2
+      - salinityCoarsened_3
+      - salinityCoarsened_4
+      - salinityCoarsened_5
+      - salinityCoarsened_6
+      - salinityCoarsened_7
+      - salinityCoarsened_8
+      - salinityCoarsened_9
+      - salinityCoarsened_10
+      - salinityCoarsened_11
+      - salinityCoarsened_12
+      - salinityCoarsened_13
+      - salinityCoarsened_14
+      - salinityCoarsened_15
+      - salinityCoarsened_16
+      - salinityCoarsened_17
+      - salinityCoarsened_18
+      - temperatureCoarsened_0
+      - temperatureCoarsened_1
+      - temperatureCoarsened_2
+      - temperatureCoarsened_3
+      - temperatureCoarsened_4
+      - temperatureCoarsened_5
+      - temperatureCoarsened_6
+      - temperatureCoarsened_7
+      - temperatureCoarsened_8
+      - temperatureCoarsened_9
+      - temperatureCoarsened_10
+      - temperatureCoarsened_11
+      - temperatureCoarsened_12
+      - temperatureCoarsened_13
+      - temperatureCoarsened_14
+      - temperatureCoarsened_15
+      - temperatureCoarsened_16
+      - temperatureCoarsened_17
+      - temperatureCoarsened_18
+      - velocityZonalCoarsened_0
+      - velocityZonalCoarsened_1
+      - velocityZonalCoarsened_2
+      - velocityZonalCoarsened_3
+      - velocityZonalCoarsened_4
+      - velocityZonalCoarsened_5
+      - velocityZonalCoarsened_6
+      - velocityZonalCoarsened_7
+      - velocityZonalCoarsened_8
+      - velocityZonalCoarsened_9
+      - velocityZonalCoarsened_10
+      - velocityZonalCoarsened_11
+      - velocityZonalCoarsened_12
+      - velocityZonalCoarsened_13
+      - velocityZonalCoarsened_14
+      - velocityZonalCoarsened_15
+      - velocityZonalCoarsened_16
+      - velocityZonalCoarsened_17
+      - velocityZonalCoarsened_18
+      - velocityMeridionalCoarsened_0
+      - velocityMeridionalCoarsened_1
+      - velocityMeridionalCoarsened_2
+      - velocityMeridionalCoarsened_3
+      - velocityMeridionalCoarsened_4
+      - velocityMeridionalCoarsened_5
+      - velocityMeridionalCoarsened_6
+      - velocityMeridionalCoarsened_7
+      - velocityMeridionalCoarsened_8
+      - velocityMeridionalCoarsened_9
+      - velocityMeridionalCoarsened_10
+      - velocityMeridionalCoarsened_11
+      - velocityMeridionalCoarsened_12
+      - velocityMeridionalCoarsened_13
+      - velocityMeridionalCoarsened_14
+      - velocityMeridionalCoarsened_15
+      - velocityMeridionalCoarsened_16
+      - velocityMeridionalCoarsened_17
+      - velocityMeridionalCoarsened_18
+      - ocean_sea_ice_fraction
+      - iceVolumeTotal

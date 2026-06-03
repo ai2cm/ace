@@ -2,13 +2,13 @@
 
 #SBATCH -A e3sm
 #SBATCH -q regular
-#SBATCH -C gpu&hbm80g
+#SBATCH -C gpu
 #SBATCH -J train-fme
-#SBATCH --nodes=4
+#SBATCH --nodes=2
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=128
-#SBATCH -t 04:00:00
+#SBATCH -t 08:00:00
 #SBATCH --output=joblogs/%j.out
 #SBATCH --signal=USR1@60
 #SBATCH --requeue
@@ -43,6 +43,7 @@ sed -i "s|FME_OUTPUT_DIR|${FME_OUTPUT_DIR}|" ${TRAIN_CONFIG}
 sed -i "s|FME_TRAIN_DIR|${FME_TRAIN_DIR}|" ${TRAIN_CONFIG}
 sed -i "s|FME_VALID_DIR|${FME_VALID_DIR}|" ${TRAIN_CONFIG}
 sed -i "s|FME_STATS_DIR|${FME_STATS_DIR}|" ${TRAIN_CONFIG}
+sed -i "s|FINETUNE_CHECKPOINT_PATH|${FINETUNE_CHECKPOINT_PATH}|" ${TRAIN_CONFIG}
 
 cp -r $CONFIG_DIR $FME_OUTPUT_DIR/job_config
 

@@ -3,18 +3,17 @@
 set -x
 
 # wandb config
-export WANDB_NAME=PM-v20260527-ACE2S-E3SMv3-piControl-100yr-n384-pretrain-rs2
-export WANDB_RUN_GROUP=v20260527-ACE2S-one-step-pretraining
+export WANDB_NAME=PM-v20260602-Samudra-piControl-105yr-rs0
+export WANDB_RUN_GROUP=v20260602
 
 export COMMIT=$(git rev-parse --short HEAD)
 
 export FME_TRAIN_DIR=/pscratch/sd/e/elynnwu/fme-dataset
-export FME_STATS_DIR=/pscratch/sd/e/elynnwu/fme-dataset/2026-05-27-E3SMv3-piControl-100yr-coupled-stats/uncoupled_atmosphere
-
+export FME_STATS_DIR=/pscratch/sd/e/elynnwu/fme-dataset/2026-06-02-E3SMv3-piControl-105yr-coupled-stats/ocean
 # if resuming a failed job, provide its slurm job ID below and uncomment;
 # note that information entered above should be consistent with that of
 # the failed job
-# export RESUME_JOB_ID=45114004
+# export RESUME_JOB_ID=45211571
 
 # user should not need to modify below
 
@@ -37,4 +36,4 @@ export FME_VENV=$($CONFIG_DIR/make-venv.sh $COMMIT | tail -n 1)
 conda activate $FME_VENV
 set -e
 python -m fme.ace.validate_config --config_type train $CONFIG_DIR/train-config.yaml
-sbatch sbatch-scripts/sbatch-train.sh
+sbatch --dependency=afterok:53828623 sbatch-scripts/sbatch-train.sh
