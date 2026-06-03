@@ -500,5 +500,5 @@ stepper:
         append_as_input: true
       input_dropout:
         min_vars: min
-        max_vars: max
+        max_vars: 42
       include_channel_mask_inputs: true

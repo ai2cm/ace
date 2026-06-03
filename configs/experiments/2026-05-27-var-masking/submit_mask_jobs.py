@@ -22,8 +22,8 @@ WANDB_GROUP = "ace2-var-masking-2026-05-27"
 
 CONFIGS = [
     # bernoulli configs
-    "ace-train-config-4deg-AIMIP-sfno-mask0.00-all-gmron-rpoff-bernoulli.yaml",  # noqa: E501
-    "ace-train-config-4deg-AIMIP-sfno-mask0.20-all-gmron-rpoff-bernoulli.yaml",  # noqa: E501
+    # "ace-train-config-4deg-AIMIP-sfno-mask0.00-all-gmron-rpoff-bernoulli.yaml",  # noqa: E501
+    # "ace-train-config-4deg-AIMIP-sfno-mask0.20-all-gmron-rpoff-bernoulli.yaml",  # noqa: E501
     # "ace-train-config-4deg-AIMIP-sfno-mask0.20-noforcing-gmron-rpoff-bernoulli.yaml",  # noqa: E501
     # "ace-train-config-4deg-AIMIP-sfno-mask0.40-all-gmron-rpoff-bernoulli.yaml",  # noqa: E501
     # "ace-train-config-4deg-AIMIP-sfno-mask0.40-noforcing-gmron-rpoff-bernoulli.yaml",  # noqa: E501
@@ -33,7 +33,7 @@ CONFIGS = [
     # "ace-train-config-4deg-AIMIP-nc-sfno-mask0.40-all-gmron-rpoff-bernoulli.yaml", # noqa: E501
     # "ace-train-config-4deg-AIMIP-nc-sfno-mask0.40-noforcing-gmron-rpoff-bernoulli.yaml", # noqa: E501
     # uniform configs
-    # "ace-train-config-4deg-AIMIP-sfno-maskall-all-gmron-rpoff-uniform.yaml", # noqa: E501
+    "ace-train-config-4deg-AIMIP-sfno-maskall-all-gmron-rpoff-uniform.yaml",  # noqa: E501
     # "ace-train-config-4deg-AIMIP-sfno-maskall-noforcing-gmron-rpoff-uniform.yaml", # noqa: E501
     # "ace-train-config-4deg-AIMIP-sfno-mask17-all-gmron-rpoff-uniform.yaml", # noqa: E501
     # "ace-train-config-4deg-AIMIP-sfno-mask15-noforcing-gmron-rpoff-uniform.yaml", # noqa: E501
@@ -67,7 +67,7 @@ def main() -> None:
     parser.add_argument(
         "--beaker-cluster",
         nargs="+",
-        default=["ai2/titan", "ai2/jupiter", "ai2/ceres"],
+        default=["ai2/titan", "ai2/jupiter", "ai2/ceres", "ai2/saturn"],
         metavar="CLUSTER",
         help=(
             "Beaker cluster(s) to target (default: ai2/titan ai2/saturn "
