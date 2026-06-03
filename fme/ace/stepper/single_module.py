@@ -677,6 +677,9 @@ class StepperConfig:
     @property
     def all_names(self) -> list[str]:
         """Names of all variables."""
+        training_names = self.step.all_training_names
+        if training_names is not None:
+            return training_names
         return list(set(self.input_names + self.output_names))
 
     @property

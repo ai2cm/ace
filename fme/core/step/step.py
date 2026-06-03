@@ -111,6 +111,10 @@ class StepConfigABC(abc.ABC):
         pass
 
     @property
+    def all_training_names(self) -> list[str] | None:
+        return None
+
+    @property
     def allow_missing_variables(self) -> bool:
         return False
 
@@ -215,6 +219,10 @@ class StepSelector(StepConfigABC):
     def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
         self._step_config_instance.replace_prescribed_prognostic_names(names)
         self.config = dataclasses.asdict(self._step_config_instance)
+
+    @property
+    def all_training_names(self) -> list[str] | None:
+        return self._step_config_instance.all_training_names
 
     @property
     def allow_missing_variables(self) -> bool:
