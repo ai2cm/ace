@@ -22,25 +22,25 @@ WANDB_GROUP = "ace2-var-masking-2026-05-27"
 
 CONFIGS = [
     # bernoulli configs
-    # "ace-train-config-4deg-AIMIP-sfno-mask0.00-all-gmron-rpoff-bernoulli.yaml",
-    # "ace-train-config-4deg-AIMIP-sfno-mask0.20-all-gmron-rpoff-bernoulli.yaml",
-    # "ace-train-config-4deg-AIMIP-sfno-mask0.20-noforcing-gmron-rpoff-bernoulli.yaml",
-    # "ace-train-config-4deg-AIMIP-sfno-mask0.40-all-gmron-rpoff-bernoulli.yaml",
-    # "ace-train-config-4deg-AIMIP-sfno-mask0.40-noforcing-gmron-rpoff-bernoulli.yaml",
+    "ace-train-config-4deg-AIMIP-sfno-mask0.00-all-gmron-rpoff-bernoulli.yaml",
+    "ace-train-config-4deg-AIMIP-sfno-mask0.20-all-gmron-rpoff-bernoulli.yaml",
+    "ace-train-config-4deg-AIMIP-sfno-mask0.20-noforcing-gmron-rpoff-bernoulli.yaml",
+    "ace-train-config-4deg-AIMIP-sfno-mask0.40-all-gmron-rpoff-bernoulli.yaml",
+    "ace-train-config-4deg-AIMIP-sfno-mask0.40-noforcing-gmron-rpoff-bernoulli.yaml",
     "ace-train-config-4deg-AIMIP-nc-sfno-mask0.00-all-gmron-rpoff-bernoulli.yaml",
-    "ace-train-config-4deg-AIMIP-nc-sfno-mask0.20-all-gmron-rpoff-bernoulli.yaml",
-    "ace-train-config-4deg-AIMIP-nc-sfno-mask0.20-noforcing-gmron-rpoff-bernoulli.yaml",
-    "ace-train-config-4deg-AIMIP-nc-sfno-mask0.40-all-gmron-rpoff-bernoulli.yaml",
-    "ace-train-config-4deg-AIMIP-nc-sfno-mask0.40-noforcing-gmron-rpoff-bernoulli.yaml",
+    # "ace-train-config-5deg-AIMIP-nc-sfno-mask0.20-all-gmron-rpoff-bernoulli.yaml",  # noqa: E501
+    # "ace-train-config-4deg-AIMIP-nc-sfno-mask0.20-noforcing-gmron-rpoff-bernoulli.yaml", # noqa: E501
+    # "ace-train-config-4deg-AIMIP-nc-sfno-mask0.40-all-gmron-rpoff-bernoulli.yaml", # noqa: E501
+    # "ace-train-config-4deg-AIMIP-nc-sfno-mask0.40-noforcing-gmron-rpoff-bernoulli.yaml", # noqa: E501
     # uniform configs
     "ace-train-config-4deg-AIMIP-sfno-maskall-all-gmron-rpoff-uniform.yaml",
-    "ace-train-config-4deg-AIMIP-sfno-maskall-noforcing-gmron-rpoff-uniform.yaml",
-    "ace-train-config-4deg-AIMIP-sfno-mask17-all-gmron-rpoff-uniform.yaml",
-    "ace-train-config-4deg-AIMIP-sfno-mask15-noforcing-gmron-rpoff-uniform.yaml",
-    "ace-train-config-4deg-AIMIP-nc-sfno-maskall-all-gmron-rpoff-uniform.yaml",
-    "ace-train-config-4deg-AIMIP-nc-sfno-maskall-noforcing-gmron-rpoff-uniform.yaml",
-    "ace-train-config-4deg-AIMIP-nc-sfno-mask17-all-gmron-rpoff-uniform.yaml",
-    "ace-train-config-4deg-AIMIP-nc-sfno-mask15-noforcing-gmron-rpoff-uniform.yaml",
+    # "ace-train-config-4deg-AIMIP-sfno-maskall-noforcing-gmron-rpoff-uniform.yaml", # noqa: E501
+    # "ace-train-config-4deg-AIMIP-sfno-mask17-all-gmron-rpoff-uniform.yaml", # noqa: E501
+    # "ace-train-config-4deg-AIMIP-sfno-mask15-noforcing-gmron-rpoff-uniform.yaml", # noqa: E501
+    # "ace-train-config-4deg-AIMIP-nc-sfno-maskall-all-gmron-rpoff-uniform.yaml", # noqa: E501
+    # "ace-train-config-4deg-AIMIP-nc-sfno-maskall-noforcing-gmron-rpoff-uniform.yaml", # noqa: E501
+    # "ace-train-config-4deg-AIMIP-nc-sfno-mask17-all-gmron-rpoff-uniform.yaml", # noqa: E501
+    # "ace-train-config-4deg-AIMIP-nc-sfno-mask15-noforcing-gmron-rpoff-uniform.yaml", # noqa: E501
 ]
 
 
