@@ -454,4 +454,4 @@ def test_corrector_integration(air_temperature_prefix):
     )
     timestep = datetime.timedelta(seconds=3600)
     corrector = AtmosphereCorrector(config, ops, vertical_coord, timestep)
-    corrector(input_data, gen_data, forcing_data)
+    corrector(input_data, gen_data, forcing_data, None)

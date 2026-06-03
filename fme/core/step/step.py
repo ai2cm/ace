@@ -12,6 +12,7 @@ from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
 from fme.core.registry.registry import Registry
 from fme.core.step.args import StepArgs
+from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -333,7 +334,7 @@ class StepABC(abc.ABC):
         self: SelfType,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
+    ) -> tuple[TensorDict, StepperState | None]:
         """
         Step the model forward one timestep given input data.
 
@@ -342,7 +343,9 @@ class StepABC(abc.ABC):
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
-            The denormalized output data at the next time step.
+            A tuple ``(output, stepper_state)`` where ``output`` is the
+            denormalized data at the next time step and ``stepper_state`` is
+            the per-sample state to thread into the next call (or ``None``).
         """
         pass
 
