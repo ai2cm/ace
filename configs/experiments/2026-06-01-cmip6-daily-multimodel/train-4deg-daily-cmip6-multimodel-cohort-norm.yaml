@@ -1,4 +1,4 @@
-# CMIP6 daily multi-model training, F22.5 4deg, schema 0.7.0,
+# CMIP6 daily multi-model training, F22.5 4deg, schema 0.8.1,
 # cohort normalization variant. See
 # ``scripts/cmip6_data/training_run_1.md`` for the full design (cohort
 # holdouts, eval entries, metric pruning rules) — this YAML is the
@@ -168,7 +168,7 @@ inference:
           - VGRD10m
           - PRATEsfc
           - h500
-          - eday_ts
+          - surface_temperature
           - psl
           - DLWRFsfc
           - DSWRFsfc
@@ -189,7 +189,6 @@ inference:
           - hus700
           - zg10
           - zg250
-          - zg500
           - zg1000
 
   # --- (A) held-out variants: 3 picks across families + scenarios ---
@@ -782,14 +781,15 @@ stepper:
         # Monthly-causal variables (amon_ts, omon_*, simon_*) are
         # excluded because their stepped-monthly cadence would
         # teach an artificially smooth daily target.
-        # CFday-augmented variables (DSWRFtoa, USWRFtoa, UCLWRFtoa,
-        # UCSWRFsfc, UCSWRFtoa, DCLWRFsfc, DCSWRFsfc, wap500, clivi,
-        # clwvi) are excluded because process_esgf.py's augmenter
-        # doesn't currently pull CFday-cadence variables from ESGF
-        # (only surface-and-ocean tables). They exist in ESGF for
-        # ~200-350 (source, experiment, member) tuples but v2 only
-        # captured 1-3 per variable from Pangeo. To be fixed in a
-        # data-pipeline follow-up.
+        # CFday-augmented variables (clear-sky + TOA radiation, w500,
+        # cloud-water paths, surface pressure) are included as
+        # sub-universal daily variables with allow_missing handling.
+        # process_esgf.py's day-cadence augmenter (commit 025c294fd)
+        # pulled them from ESGF for the (source, experiment, member)
+        # tuples that publish on CFday/day; v2.5 cohort coverage is
+        # listed inline below per variable. ``total_water_path``
+        # (derived from water_vapor_path + clwvi) is omitted — only
+        # 2% of v2.5 datasets have both inputs present.
         # ---- Surface (universal) ----
         - TMP2m
         - Q2m
@@ -799,25 +799,38 @@ stepper:
         - h500
         - psl
         # ---- Surface (sub-universal daily) ----
-        - sfcWind                  # 84%
-        - eday_ts                  # 40% — daily Eday.ts surface T
+        - sfcWind                  # 85%
+        - surface_temperature      # 43% — daily Eday.ts (was eday_ts pre-0.8.0)
         - water_vapor_path         # 40% — Eday.prw
         - oday_tos                 # 56% — daily SST
         - oday_sos                 # 23% — daily sea surface salinity
-        - oday_tossq               # 18% — daily SST²
-        - oday_omldamax            # 9%  — daily max mixed-layer depth
-        - siday_sitemptop          # 38% — daily sea-ice top T
-        - siday_sithick            # 27% — daily sea-ice thickness
-        - siday_sea_ice_fraction   # 12% — daily sea-ice fraction
-        - TMP700                   # 6%  — 700 hPa T (CFday: sparse)
-        # ---- Radiative + heat-flux diagnostics (day table) ----
-        - DLWRFsfc                 # 52%
-        - DSWRFsfc                 # 93%
-        - ULWRFsfc                 # 86%
-        - USWRFsfc                 # 65%
-        - ULWRFtoa                 # 82%
-        - SHTFLsfc                 # 80%
-        - LHTFLsfc                 # 89%
+        - oday_tossq               # 19% — daily SST²
+        - oday_omldamax            # 10% — daily max mixed-layer depth
+        - siday_sitemptop          # 39% — daily sea-ice top T
+        - siday_sithick            # 28% — daily sea-ice thickness
+        - siday_sea_ice_fraction   # 27% — daily sea-ice fraction
+        - TMP700                   # 22% — 700 hPa T
+        - PRESsfc                  # 38% — surface pressure
+        # ---- Radiative + heat-flux diagnostics (day + CFday) ----
+        - DLWRFsfc                 # 93%
+        - DSWRFsfc                 # 97%
+        - ULWRFsfc                 # 93%
+        - USWRFsfc                 # 74%
+        - ULWRFtoa                 # 88%
+        - SHTFLsfc                 # 80% (assumed; existed pre-augment)
+        - LHTFLsfc                 # 89% (assumed; existed pre-augment)
+        # CFday TOA / clear-sky radiation (new in v2.5 cohort).
+        - DSWRFtoa                 # 27% — TOA incoming SW
+        - USWRFtoa                 # 27% — TOA outgoing SW
+        - UCLWRFtoa                # 22% — TOA clear-sky outgoing LW
+        - UCSWRFsfc                # 28% — surface clear-sky outgoing SW
+        - UCSWRFtoa                # 28% — TOA clear-sky outgoing SW
+        - DCLWRFsfc                # 28% — surface clear-sky incoming LW
+        - DCSWRFsfc                # 32% — surface clear-sky incoming SW
+        # CFday dynamics / cloud-water tracers (new in v2.5 cohort).
+        - wap500                   # 23% — pressure velocity at 500 hPa
+        - clivi                    # 19% — cloud ice water path
+        - clwvi                    # 16% — total cloud water path
         # ---- 3D plev prognostics (universal) ----
         - ua10
         - ua50
@@ -847,32 +860,19 @@ stepper:
         - zg50
         - zg100
         - zg250
-        - zg500
         - zg700
         - zg850
         - zg1000
-        # ---- Mask channels (in+out per foundation-model rule).
-        # ``below_surface_mask{plev}`` is derived per-dataset from
-        # 3D state — quasi-static topographic mask. ``*_mask``
-        # companions of ocean/ice variables tell the network where
-        # the corresponding variable is defined. omon_* / simon_*
-        # masks excluded because we dropped the parent monthly
-        # variables. ----
-        - below_surface_mask10
-        - below_surface_mask50
-        - below_surface_mask100
-        - below_surface_mask250
-        - below_surface_mask500
-        - below_surface_mask700
-        - below_surface_mask850
-        - below_surface_mask1000
-        - oday_tos_mask
-        - oday_sos_mask
-        - oday_tossq_mask
-        - oday_omldamax_mask
-        - siday_sitemptop_mask
-        - siday_sithick_mask
-        - siday_sea_ice_fraction_mask
+        # NB: Mask channels (``below_surface_mask*``, ``oday_*_mask``,
+        # ``siday_*_mask``) intentionally excluded from this first
+        # training run — we don't want to prescribe them as inputs
+        # and the long-rollout-cycle case for them is shaky (model
+        # has to keep predicting a sensible 0/1 field for hundreds of
+        # steps). Sub-universal-ocean variables are still in
+        # in_names + out_names; on datasets that lack them, the
+        # ``allow_missing_variables`` + ``fill_nans_on_normalize``
+        # path handles them with infilling rather than masking.
+        # Plan: add masks back in a follow-up run after baseline.
       out_names:
         # Surface prognostics (universal)
         - TMP2m
@@ -884,7 +884,7 @@ stepper:
         - psl
         # Surface (sub-universal daily)
         - sfcWind
-        - eday_ts
+        - surface_temperature
         - water_vapor_path
         - oday_tos
         - oday_sos
@@ -894,7 +894,8 @@ stepper:
         - siday_sithick
         - siday_sea_ice_fraction
         - TMP700
-        # Radiative + heat-flux diagnostics
+        - PRESsfc
+        # Radiative + heat-flux diagnostics (day + CFday)
         - DLWRFsfc
         - DSWRFsfc
         - ULWRFsfc
@@ -902,6 +903,17 @@ stepper:
         - ULWRFtoa
         - SHTFLsfc
         - LHTFLsfc
+        - DSWRFtoa
+        - USWRFtoa
+        - UCLWRFtoa
+        - UCSWRFsfc
+        - UCSWRFtoa
+        - DCLWRFsfc
+        - DCSWRFsfc
+        # CFday dynamics / cloud-water tracers
+        - wap500
+        - clivi
+        - clwvi
         # 3D plev prognostics
         - ua10
         - ua50
@@ -931,23 +943,8 @@ stepper:
         - zg50
         - zg100
         - zg250
-        - zg500
         - zg700
         - zg850
         - zg1000
-        # Mask channels
-        - below_surface_mask10
-        - below_surface_mask50
-        - below_surface_mask100
-        - below_surface_mask250
-        - below_surface_mask500
-        - below_surface_mask700
-        - below_surface_mask850
-        - below_surface_mask1000
-        - oday_tos_mask
-        - oday_sos_mask
-        - oday_tossq_mask
-        - oday_omldamax_mask
-        - siday_sitemptop_mask
-        - siday_sithick_mask
-        - siday_sea_ice_fraction_mask
+        # NB: Mask channels excluded from this first run — see
+        # in_names above for the rationale.
