@@ -165,6 +165,7 @@ def _get_test_yaml_files(
     partial_train_data_path: pathlib.Path | None = None,
     batch_size: int = 2,
     sample_with_replacement: int | None = 10,
+    corrector: "AtmosphereCorrectorConfig | CorrectorSelector | None" = None,
 ):
     if derived_forcings is None:
         derived_forcings = DerivedForcingsConfig()
@@ -218,14 +219,12 @@ def _get_test_yaml_files(
     else:
         conditional = False
 
-    if nettype == "SphericalFourierNeuralOperatorNet":
-        corrector_config: AtmosphereCorrectorConfig | CorrectorSelector = (
-            CorrectorSelector(
-                type="atmosphere_corrector",
-                config=dataclasses.asdict(
-                    AtmosphereCorrectorConfig(conserve_dry_air=True)
-                ),
-            )
+    if corrector is not None:
+        corrector_config: AtmosphereCorrectorConfig | CorrectorSelector = corrector
+    elif nettype == "SphericalFourierNeuralOperatorNet":
+        corrector_config = CorrectorSelector(
+            type="atmosphere_corrector",
+            config=dataclasses.asdict(AtmosphereCorrectorConfig(conserve_dry_air=True)),
         )
     else:
         corrector_config = AtmosphereCorrectorConfig()
@@ -491,6 +490,7 @@ def _setup(
     stats_std_fill_value: float | None = None,
     multi_validation: bool = False,
     use_variable_masking: bool = False,
+    corrector: "AtmosphereCorrectorConfig | CorrectorSelector | None" = None,
 ):
     if not path.exists():
         path.mkdir()
@@ -605,6 +605,7 @@ def _setup(
         validate_using_ema=validate_using_ema,
         multi_validation=multi_validation,
         partial_train_data_path=partial_data_dir,
+        corrector=corrector,
     )
     return train_config_filename, inference_config_filename
 
@@ -1095,6 +1096,42 @@ def test_train_without_inline_inference(tmp_path, very_fast_only: bool):
     assert "val_extra/mean/loss" in epoch_logs
     val_extra_output = tmp_path / "results" / "output" / "val_extra" / "epoch_0001"
     assert val_extra_output.exists()
+
+
+def test_inline_inference_logs_uncorrected_metrics(tmp_path, very_fast_only: bool):
+    """Inline inference during training must emit uncorrected time-mean metrics
+    when the stepper has a corrector (compute_uncorrected_metrics defaults on).
+
+    Regression test: this path (get_inference_callback -> inference_one_epoch)
+    shares InferenceEvaluatorAggregator and predict_paired with the standalone
+    evaluator, so it gets uncorrected metrics for free. force_positive always
+    rewrites its variable, so the uncorrected prediction is reliably non-empty.
+    """
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+    train_config, _ = _setup(
+        tmp_path,
+        "SphericalFourierNeuralOperatorNet",
+        log_to_wandb=True,
+        corrector=AtmosphereCorrectorConfig(
+            force_positive_names=["specific_total_water_0"]
+        ),
+    )
+    with mock_wandb() as wandb:
+        train_main(yaml_config=train_config)
+        wandb_logs = wandb.get_logs()
+    epoch_logs = wandb_logs[-1]
+    uncorrected_keys = [
+        k for k in epoch_logs if "/uncorrected/time_mean" in k and "/rmse/" in k
+    ]
+    assert uncorrected_keys, (
+        "expected inline inference to log uncorrected time-mean rmse metrics; "
+        f"got keys: {sorted(epoch_logs)}"
+    )
+    # The corrected time-mean metrics are still logged, distinctly.
+    assert any(
+        k.startswith("inference_0/time_mean") for k in epoch_logs
+    ), "expected corrected time-mean metrics alongside the uncorrected ones"
 
 
 @pytest.mark.skipif(torch.cuda.is_available(), reason="flaky on GPU")
