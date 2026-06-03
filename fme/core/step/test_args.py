@@ -17,7 +17,7 @@ def test_apply_input_process_func_propagates_metadata():
     }
     stepper_state = StepperState(
         corrector_state=CorrectorState(
-            global_mean_surface_pressure=torch.ones(n_batch, 1, 1),
+            global_dry_air_mass=torch.ones(n_batch, 1, 1),
         ),
     )
     args = StepArgs(

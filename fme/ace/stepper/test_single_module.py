@@ -1284,7 +1284,7 @@ def test_predict():
 class _RecordingCorrector(CorrectorABC):
     """Test corrector that seeds and bumps a counter inside CorrectorState.
 
-    On first call: seeds ``global_mean_surface_pressure`` from the area-mean
+    On first call: seeds ``global_dry_air_mass`` from the area-mean
     of ``input_data["a"]`` (using a trivial uniform weighting). On subsequent
     calls: increments the existing value by 1 each time it is invoked, so the
     test can observe both seeding and propagation across step calls.
@@ -1303,18 +1303,13 @@ class _RecordingCorrector(CorrectorABC):
     ) -> tuple[TensorDict, CorrectorState | None]:
         self.call_count += 1
         self.seen_states.append(corrector_state)
-        if (
-            corrector_state is None
-            or corrector_state.global_mean_surface_pressure is None
-        ):
+        if corrector_state is None or corrector_state.global_dry_air_mass is None:
             n = input_data["a"].shape[0]
             seed = input_data["a"].mean(dim=(-1, -2), keepdim=True).reshape(n, 1, 1)
-            corrector_state = CorrectorState(global_mean_surface_pressure=seed)
+            corrector_state = CorrectorState(global_dry_air_mass=seed)
         else:
             corrector_state = CorrectorState(
-                global_mean_surface_pressure=(
-                    corrector_state.global_mean_surface_pressure + 1.0
-                ),
+                global_dry_air_mass=(corrector_state.global_dry_air_mass + 1.0),
             )
         return dict(gen_data), corrector_state
 
@@ -1337,13 +1332,13 @@ def test_predict_threads_stepper_state_across_calls():
     # The first invocation saw None; later invocations saw the seeded state.
     assert recording_corrector.seen_states[0] is None
     assert recording_corrector.seen_states[1] is not None
-    seeded_1 = recording_corrector.seen_states[1].global_mean_surface_pressure
+    seeded_1 = recording_corrector.seen_states[1].global_dry_air_mass
     assert seeded_1 is not None
 
     ic_after_1 = new_state_1.as_batch_data()
     assert ic_after_1.stepper_state is not None
     assert ic_after_1.stepper_state.corrector_state is not None
-    pres_after_1 = ic_after_1.stepper_state.corrector_state.global_mean_surface_pressure
+    pres_after_1 = ic_after_1.stepper_state.corrector_state.global_dry_air_mass
     assert pres_after_1 is not None
     # n_steps invocations after seeding: seed + (n_steps - 1) increments.
     expected = seeded_1 + float(n_steps - 1)
@@ -1355,15 +1350,13 @@ def test_predict_threads_stepper_state_across_calls():
     _, new_state_2 = stepper.predict(new_state_1, forcing_data)
     first_state_call_2 = recording_corrector.seen_states[seen_before_call_2]
     assert first_state_call_2 is not None
-    assert first_state_call_2.global_mean_surface_pressure is not None
-    torch.testing.assert_close(
-        first_state_call_2.global_mean_surface_pressure, pres_after_1
-    )
+    assert first_state_call_2.global_dry_air_mass is not None
+    torch.testing.assert_close(first_state_call_2.global_dry_air_mass, pres_after_1)
 
     ic_after_2 = new_state_2.as_batch_data()
     assert ic_after_2.stepper_state is not None
     assert ic_after_2.stepper_state.corrector_state is not None
-    pres_after_2 = ic_after_2.stepper_state.corrector_state.global_mean_surface_pressure
+    pres_after_2 = ic_after_2.stepper_state.corrector_state.global_dry_air_mass
     assert pres_after_2 is not None
     torch.testing.assert_close(pres_after_2, pres_after_1 + float(n_steps))
 

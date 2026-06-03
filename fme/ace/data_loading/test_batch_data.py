@@ -61,8 +61,8 @@ def _assert_stepper_state_equal_up_to_device(
     if a.corrector_state is None or b.corrector_state is None:
         assert a.corrector_state is None and b.corrector_state is None
         return
-    pa = a.corrector_state.global_mean_surface_pressure
-    pb = b.corrector_state.global_mean_surface_pressure
+    pa = a.corrector_state.global_dry_air_mass
+    pb = b.corrector_state.global_dry_air_mass
     if pa is None or pb is None:
         assert pa is None and pb is None
         return
@@ -878,7 +878,7 @@ def _stepper_state_with_pressure(
         device = get_device()
     return StepperState(
         corrector_state=CorrectorState(
-            global_mean_surface_pressure=torch.linspace(
+            global_dry_air_mass=torch.linspace(
                 1.0, 1.0 + 0.1 * n_samples, n_samples, device=device
             ).view(n_samples, 1, 1),
         ),
@@ -915,7 +915,7 @@ def test_stepper_state_default_is_none():
 def test_stepper_state_post_init_validates_sample_dim():
     bad_state = StepperState(
         corrector_state=CorrectorState(
-            global_mean_surface_pressure=torch.zeros(3, 1, 1),
+            global_dry_air_mass=torch.zeros(3, 1, 1),
         ),
     )
     with pytest.raises(ValueError, match="stepper_state leading dim"):
@@ -941,7 +941,7 @@ def test_stepper_state_roundtrips_through_to_device_to_cpu():
     cpu_batch = _batch_data_with_stepper_state().to_cpu()
     assert cpu_batch.stepper_state is not None
     assert cpu_batch.stepper_state.corrector_state is not None
-    p = cpu_batch.stepper_state.corrector_state.global_mean_surface_pressure
+    p = cpu_batch.stepper_state.corrector_state.global_dry_air_mass
     assert p is not None
     assert p.device.type == "cpu"
     device_batch = cpu_batch.to_device()
@@ -967,8 +967,8 @@ def test_stepper_state_prepend_preserves_self_state():
     n_samples, n_times = 2, 3
     ic_state = _stepper_state_with_pressure(n_samples)
     assert ic_state.corrector_state is not None
-    assert ic_state.corrector_state.global_mean_surface_pressure is not None
-    ic_state.corrector_state.global_mean_surface_pressure *= 0  # distinguishable
+    assert ic_state.corrector_state.global_dry_air_mass is not None
+    ic_state.corrector_state.global_dry_air_mass *= 0  # distinguishable
     new_state = _stepper_state_with_pressure(n_samples)
     ic_batch = BatchData(
         data={"x": torch.zeros(n_samples, 1, 4, 6, device=get_device())},
@@ -1002,11 +1002,11 @@ def test_stepper_state_broadcast_ensemble_broadcasts_sample_dim():
     bcast = batch.broadcast_ensemble(n_ensemble)
     assert bcast.stepper_state is not None
     assert bcast.stepper_state.corrector_state is not None
-    bcast_pres = bcast.stepper_state.corrector_state.global_mean_surface_pressure
+    bcast_pres = bcast.stepper_state.corrector_state.global_dry_air_mass
     assert bcast_pres is not None
     assert bcast_pres.shape == (n_samples * n_ensemble, 1, 1)
     assert state.corrector_state is not None
-    src = state.corrector_state.global_mean_surface_pressure
+    src = state.corrector_state.global_dry_air_mass
     assert src is not None
     expected = torch.repeat_interleave(src, n_ensemble, dim=0)
     torch.testing.assert_close(bcast_pres, expected)
@@ -1036,6 +1036,6 @@ def test_stepper_state_pin_memory():
     pinned = batch.pin_memory()
     assert pinned.stepper_state is state
     assert state.corrector_state is not None
-    p = state.corrector_state.global_mean_surface_pressure
+    p = state.corrector_state.global_dry_air_mass
     assert p is not None
     assert p.is_pinned()
