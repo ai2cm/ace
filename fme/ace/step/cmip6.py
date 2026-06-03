@@ -360,7 +360,9 @@ class Cmip6Step(StepABC):
         input_data = args.input
         normalizer = self._per_source_normalizer
 
-        input_norm = normalizer.normalize(input_data, labels=args.labels)
+        input_norm = normalizer.normalize(
+            input_data, labels=args.labels, data_mask=args.data_mask
+        )
 
         input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
         output_tensor = self.module.wrap_module(wrapper)(
@@ -375,7 +377,9 @@ class Cmip6Step(StepABC):
         if self._config.residual_prediction:
             output_norm = add_names(input_norm, output_norm, self.prognostic_names)
 
-        output = normalizer.denormalize(output_norm, labels=args.labels)
+        output = normalizer.denormalize(
+            output_norm, labels=args.labels, data_mask=args.data_mask
+        )
 
         if self._corrector is not None:
             output = self._corrector(input_data, output, args.next_step_input_data)
