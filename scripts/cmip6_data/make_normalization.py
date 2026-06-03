@@ -54,8 +54,11 @@ sys.path.insert(0, str(Path(__file__).parent))
 from compute_stats import _SCALAR_NAMES  # noqa: E402
 from config import SURFACE_AND_OCEAN_VARIABLES, ProcessConfig, StatsPeriod  # noqa: E402
 
-# Mask variables produced by the pipeline — excluded from normalization
-# stats, since their semantics (0/1 valid-cell) shouldn't be standardised.
+# Mask variables produced by the pipeline — excluded from the
+# aggregation pass, since their semantics (0/1 valid-cell) make
+# standardised mean/std nonsensical. Trivial entries (mean=0, std=1)
+# are injected after aggregation via :func:`_inject_trivial_norm`;
+# see ``_TRIVIAL_NORM_VARS`` below.
 _SKIP_VARS = frozenset(
     ("below_surface_mask",)
     + tuple(f"below_surface_mask{p}" for p in (1000, 850, 700, 500, 250, 100, 50, 10))
@@ -65,6 +68,46 @@ _SKIP_VARS = frozenset(
         if h.kind in ("ocean_surface", "seaice_surface")
     )
 )
+
+# Variables that get **trivial** normalization (mean=0, std=1) rather
+# than aggregated stats. Two families fall in here, sharing the same
+# rationale — for fields whose natural domain is [0, 1], the network
+# is better off seeing the raw value than a (val - 0.3) / 0.5
+# standardisation that scrambles the semantics:
+#
+# - Per-cell binary masks (``below_surface_mask*``, ``oday_*_mask``,
+#   ``siday_*_mask``) — 0/1 indicators of "this variable is defined
+#   at this cell". Already in ``_SKIP_VARS`` so the aggregator never
+#   tries to compute real stats for them.
+# - ``land_fraction`` (CMIP6 sftlf) — a static [0, 1] field that the
+#   model uses to know where land is. Real aggregated stats (mean
+#   ~0.3, std ~0.45) would standardise away the 0/1 interpretation;
+#   trivial norm preserves the raw value the network expects.
+#
+# Injection happens post-aggregation so any real stats for
+# ``land_fraction`` (which is NOT in _SKIP_VARS) get *overridden* —
+# making the convention authoritative regardless of upstream stats.
+_TRIVIAL_NORM_VARS = frozenset(("land_fraction",) + tuple(_SKIP_VARS))
+
+
+def _inject_trivial_norm(stats: dict[str, dict]) -> None:
+    """Override / insert mean=0, std=1, d1=0/1 entries for
+    ``_TRIVIAL_NORM_VARS`` in-place.
+
+    Used in both cohort and per-source paths so that every centering /
+    scaling / residual file carries entries for the trivial-norm
+    names — important because ``PerSourceNormalizationConfig.build``
+    iterates over the model's full ``in_names`` and raises on
+    missing keys (no implicit pass-through).
+    """
+    for var in _TRIVIAL_NORM_VARS:
+        stats[var] = {
+            "mean": 0.0,
+            "std": 1.0,
+            "d1_mean": 0.0,
+            "d1_std": 1.0,
+            "time_mean_map": None,
+        }
 
 
 @dataclass
@@ -640,6 +683,13 @@ def main() -> None:
 
     # --- Cross-source pooled outputs ---
     pooled, contributors = _pool_across_models(per_model)
+    _inject_trivial_norm(pooled)
+    # ``contributors`` keyed by every var in ``pooled``; trivial-norm
+    # entries get a sentinel marker so the downstream nc carries a
+    # discoverable hint that the stats came from the convention,
+    # not from data aggregation.
+    for var in _TRIVIAL_NORM_VARS:
+        contributors[var] = ["(convention: mean=0, std=1)"]
     pooled_attrs = _global_attrs(list(per_model.keys()), members, period, "pooled")
     _write_scalar_nc(
         f"{pooled_dir}/centering.nc", pooled, "mean", contributors, pooled_attrs
@@ -672,6 +722,11 @@ def main() -> None:
 
     # --- Per-source outputs ---
     for source_id, stats in sorted(per_model.items()):
+        # Inject trivial-norm entries here too so per-source lookup
+        # for masks + land_fraction always succeeds. Without this,
+        # PerSourceNormalizer.build would raise on any source that
+        # doesn't publish (e.g.) ``oday_tos_mask`` in its data.
+        _inject_trivial_norm(stats)
         per_src_attrs = _global_attrs(
             [source_id], {source_id: members[source_id]}, period, "per_source"
         )

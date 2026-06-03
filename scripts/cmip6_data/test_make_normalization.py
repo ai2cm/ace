@@ -124,3 +124,59 @@ def test_aggregate_static_var_passes_through_static_map():
     np.testing.assert_allclose(agg["time_mean_map"], static, atol=0)
     assert agg["d1_mean"] == 0.0
     assert agg["d1_std"] == 0.0
+
+
+def test_inject_trivial_norm_writes_mean0_std1_for_masks_and_land_fraction():
+    """``_inject_trivial_norm`` populates the convention entries for
+    every mask name + ``land_fraction``. Used by both cohort and
+    per-source paths so that downstream lookups always succeed for
+    the trivial-norm set regardless of upstream aggregation."""
+    from make_normalization import _TRIVIAL_NORM_VARS, _inject_trivial_norm
+
+    stats: dict[str, dict] = {}
+    _inject_trivial_norm(stats)
+
+    assert "land_fraction" in stats
+    assert "below_surface_mask500" in stats
+    assert "oday_tos_mask" in stats
+    for name in _TRIVIAL_NORM_VARS:
+        assert stats[name] == {
+            "mean": 0.0,
+            "std": 1.0,
+            "d1_mean": 0.0,
+            "d1_std": 1.0,
+            "time_mean_map": None,
+        }
+
+
+def test_inject_trivial_norm_overrides_existing_land_fraction_entry():
+    """``land_fraction`` has real per-dataset stats from the aggregator
+    (~mean 0.3, std 0.45). The injection must *override* those with
+    the 0/1 convention — preserving the natural [0, 1] domain so the
+    network sees raw values, not a (val - 0.3) / 0.45 standardisation
+    that scrambles the semantics."""
+    from make_normalization import _inject_trivial_norm
+
+    stats = {
+        "land_fraction": {
+            "mean": 0.3,
+            "std": 0.45,
+            "d1_mean": 0.0,
+            "d1_std": 0.0,
+            "time_mean_map": np.zeros((4, 8), dtype=np.float32),
+        },
+        "TMP2m": {
+            "mean": 287.0,
+            "std": 21.0,
+            "d1_mean": 0.0,
+            "d1_std": 0.4,
+            "time_mean_map": None,
+        },
+    }
+    _inject_trivial_norm(stats)
+
+    assert stats["land_fraction"]["mean"] == 0.0
+    assert stats["land_fraction"]["std"] == 1.0
+    # Non-trivial-norm variable left untouched.
+    assert stats["TMP2m"]["mean"] == 287.0
+    assert stats["TMP2m"]["std"] == 21.0

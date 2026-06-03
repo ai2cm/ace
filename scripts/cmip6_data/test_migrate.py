@@ -1313,6 +1313,206 @@ def test_migration_0_8_0_to_0_8_1_idempotent(tmp_path: Path):
     )
 
 
+# ---------------------------------------------------------------------------
+# 0.8.1 → 0.9.0 — derive total_water_path + (downstream) mask/sftlf trivial
+# normalization. The mask/sftlf convention is recorded in the version bump
+# but the actual centering-file rewrite is owned by make_normalization.py.
+# ---------------------------------------------------------------------------
+
+
+def _make_0_8_1_zarr(
+    tmp_path: Path,
+    *,
+    with_wvp: bool,
+    with_clwvi: bool,
+    with_twp: bool = False,
+) -> Path:
+    """Build a small zarr suitable for the 0.8.1 → 0.9.0 migration
+    tests. ``water_vapor_path``, ``clwvi``, and ``total_water_path``
+    are toggled independently so the test matrix can exercise every
+    case the migration cares about. Includes a ``time`` axis and a
+    stats.nc so the migration's incremental stats append has a real
+    target to merge into."""
+    zarr_dir = tmp_path / "data.zarr"
+    nt, nlat, nlon = 12, 45, 90  # F22.5 grid (4-degree)
+    times = xr.date_range("2010-01-01", periods=nt, freq="D", calendar="noleap")
+    lat = np.linspace(-88, 88, nlat)
+    lon = np.linspace(0, 356, nlon)
+    rng = np.random.default_rng(0)
+    base = rng.uniform(0.0, 50.0, size=(nt, nlat, nlon)).astype("float32")
+    data_vars = {
+        # ``psl`` is the "other variable" whose stats we don't want
+        # the migration to touch — it lets us verify the incremental
+        # append doesn't clobber existing stats entries.
+        "psl": xr.DataArray(
+            base + 100000.0,
+            dims=("time", "lat", "lon"),
+            coords={"time": times, "lat": lat, "lon": lon},
+            attrs={"units": "Pa"},
+        ),
+    }
+    if with_wvp:
+        data_vars["water_vapor_path"] = xr.DataArray(
+            base + 5.0,
+            dims=("time", "lat", "lon"),
+            coords={"time": times, "lat": lat, "lon": lon},
+            attrs={"units": "kg m-2"},
+        )
+    if with_clwvi:
+        data_vars["clwvi"] = xr.DataArray(
+            base * 0.1 + 0.5,
+            dims=("time", "lat", "lon"),
+            coords={"time": times, "lat": lat, "lon": lon},
+            attrs={"units": "kg m-2"},
+        )
+    if with_twp:
+        # Sum of wvp + clwvi using the same data so a sanity check
+        # would pass even pre-migration.
+        data_vars["total_water_path"] = xr.DataArray(
+            (base + 5.0) + (base * 0.1 + 0.5),
+            dims=("time", "lat", "lon"),
+            coords={"time": times, "lat": lat, "lon": lon},
+            attrs={"units": "kg m-2"},
+        )
+    ds = xr.Dataset(data_vars)
+    ds.to_zarr(str(zarr_dir), mode="w", consolidated=True, zarr_format=3)
+
+    # Minimal companion stats.nc — psl mean/std across the three
+    # DEFAULT_STATS_PERIODS so the migration's xr.merge can align
+    # cleanly with the new variable's per-period stats (the
+    # production aggregator always emits all three periods, even
+    # when a period has no overlapping timesteps).
+    stats_path = tmp_path / "stats.nc"
+    periods = ["full", "1940-2014", "1979-2014"]
+    stats_ds = xr.Dataset(
+        {
+            "psl__mean": xr.DataArray(
+                np.array([100000.0, 100000.0, 100000.0], dtype="float32"),
+                dims=("period",),
+                coords={"period": periods},
+            ),
+            "psl__std": xr.DataArray(
+                np.array([14.4, 14.4, 14.4], dtype="float32"),
+                dims=("period",),
+                coords={"period": periods},
+            ),
+        },
+        attrs={"source_id": "TEST", "experiment": "historical"},
+    )
+    stats_ds.to_netcdf(str(stats_path))
+    return zarr_dir
+
+
+def test_migration_0_8_1_to_0_9_0_derives_twp_when_both_inputs_present(
+    tmp_path: Path,
+):
+    """The 22-of-26 case: both water_vapor_path + clwvi present,
+    total_water_path absent. Migration derives the sum, writes it to
+    the zarr, appends stats, updates sidecar."""
+    from migrations._0_8_1_to_0_9_0 import MIGRATION
+
+    zarr_dir = _make_0_8_1_zarr(tmp_path, with_wvp=True, with_clwvi=True)
+    sidecar = {
+        "source_id": "TEST",
+        "experiment": "historical",
+        "variant_label": "r1i1p1f1",
+        "label": "TEST.p1",
+        "target_grid": "F22.5",
+        "schema_version": "0.8.1",
+        "variables_present": ["psl", "water_vapor_path", "clwvi"],
+    }
+
+    out = MIGRATION.apply(str(zarr_dir), sidecar)
+
+    assert out["schema_version"] == "0.9.0"
+    assert "total_water_path" in out["variables_present"]
+    audit = out["migrations"][-1]
+    assert audit == {
+        "from": "0.8.1",
+        "to": "0.9.0",
+        "derived_total_water_path": True,
+    }
+
+    # Zarr now carries the derived variable, sum of the two inputs.
+    post = xr.open_zarr(str(zarr_dir), consolidated=True)
+    assert "total_water_path" in post.data_vars
+    np.testing.assert_allclose(
+        post["total_water_path"].values,
+        post["water_vapor_path"].values + post["clwvi"].values,
+        rtol=1e-6,
+    )
+    post.close()
+
+    # Incremental stats append: total_water_path stats added,
+    # pre-existing psl stats preserved (not recomputed).
+    stats_ds = xr.open_dataset(str(tmp_path / "stats.nc")).load()
+    assert any(v.startswith("total_water_path__") for v in stats_ds.data_vars)
+    assert "psl__mean" in stats_ds.data_vars
+    assert "psl__std" in stats_ds.data_vars
+    # Pre-existing value preserved verbatim (incremental, not recompute).
+    np.testing.assert_array_equal(
+        stats_ds["psl__mean"].values,
+        np.array([100000.0, 100000.0, 100000.0], dtype="float32"),
+    )
+    stats_ds.close()
+
+
+def test_migration_0_8_1_to_0_9_0_sidecar_bump_when_twp_already_present(
+    tmp_path: Path,
+):
+    """Dataset that already has total_water_path (one of the 4
+    happy-path v2 datasets) gets a pure sidecar bump — no zarr or
+    stats change."""
+    from migrations._0_8_1_to_0_9_0 import MIGRATION
+
+    zarr_dir = _make_0_8_1_zarr(tmp_path, with_wvp=True, with_clwvi=True, with_twp=True)
+    sidecar = {
+        "source_id": "TEST",
+        "target_grid": "F22.5",
+        "schema_version": "0.8.1",
+        "variables_present": [
+            "psl",
+            "water_vapor_path",
+            "clwvi",
+            "total_water_path",
+        ],
+    }
+    pre_zarr_vars = set(xr.open_zarr(str(zarr_dir), consolidated=True).data_vars)
+    pre_stats_vars = set(xr.open_dataset(str(tmp_path / "stats.nc")).data_vars)
+
+    out = MIGRATION.apply(str(zarr_dir), sidecar)
+
+    assert out["schema_version"] == "0.9.0"
+    audit = out["migrations"][-1]
+    assert audit["derived_total_water_path"] is False
+    post_zarr_vars = set(xr.open_zarr(str(zarr_dir), consolidated=True).data_vars)
+    post_stats_vars = set(xr.open_dataset(str(tmp_path / "stats.nc")).data_vars)
+    assert pre_zarr_vars == post_zarr_vars
+    assert pre_stats_vars == post_stats_vars
+
+
+def test_migration_0_8_1_to_0_9_0_sidecar_bump_when_one_input_missing(
+    tmp_path: Path,
+):
+    """Dataset with only water_vapor_path (no clwvi): derivation
+    isn't possible; migration is a pure sidecar bump."""
+    from migrations._0_8_1_to_0_9_0 import MIGRATION
+
+    zarr_dir = _make_0_8_1_zarr(tmp_path, with_wvp=True, with_clwvi=False)
+    sidecar = {
+        "source_id": "TEST",
+        "target_grid": "F22.5",
+        "schema_version": "0.8.1",
+        "variables_present": ["psl", "water_vapor_path"],
+    }
+
+    out = MIGRATION.apply(str(zarr_dir), sidecar)
+
+    assert out["schema_version"] == "0.9.0"
+    assert "total_water_path" not in out["variables_present"]
+    assert out["migrations"][-1]["derived_total_water_path"] is False
+
+
 def test_migration_0_3_0_to_0_4_0_writes_per_cell_maps(tmp_path: Path):
     """The 0.3.0 → 0.4.0 migration regenerates stats.nc with the new
     per-cell maps. Zarr data is untouched; only stats.nc changes.
