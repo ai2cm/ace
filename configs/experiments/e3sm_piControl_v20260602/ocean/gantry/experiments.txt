@@ -4,3 +4,5 @@ BK-v20260602-Samudra-piControl-105yr|rs0||training|best_inference_ckpt|normal|--
 BK-v20260602-Samudra-piControl-105yr|rs1||training|best_inference_ckpt|normal|--min-runtime 8h
 
 BK-v20260602-Samudra-piControl-105yr|rs0|01KT7Q3HVKW0SEPBBRR27NWTNQ|training|best_inference_ckpt|normal|--min-runtime 8h
+
+BK-v20260602-Samudra-piControl-105yr|rs1|01KT7Q3SS69NC6DWZTM57KZXAC|training|best_inference_ckpt|normal|--min-runtime 8h
