@@ -1,40 +1,51 @@
-"""Migration 0.8.1 → 0.9.0: derive ``total_water_path`` + normalize masks.
+"""Migration 0.8.1 → 0.9.0: derive ``total_water_path`` + flag the
+mask/sftlf trivial-norm convention.
 
-Two conventions change in this version, both affecting how derived /
-trivial fields are surfaced:
+Two conventions advance to 0.9.0:
 
 1. **``total_water_path`` backfill.** The ESGF augment in 0.8.1's
    ``process_esgf.py`` only derived ``total_water_path = water_vapor_path
-   + clwvi`` when ``water_vapor_path`` was *pre-existing* in the zarr
-   (i.e., from Pangeo's ingest), not when it was added by the same
-   augment pass via Eday.prw. That mismatch missed 22 of 26 eligible
-   v2 datasets. The augment-side bug is fixed in process_esgf.py;
-   this migration backfills the derivation for already-augmented
-   datasets so they don't need a fresh augment pass.
+   + clwvi`` when ``water_vapor_path`` was pre-existing in the zarr;
+   when both inputs landed in the same augment pass (the common v2
+   case) the derivation was silently skipped. The augment-side bug is
+   fixed in process_esgf.py; this migration backfills the 22 v2
+   datasets that need it.
 
-2. **Mask + sftlf trivial normalization.** Mask channels
-   (``below_surface_mask{plev}``, ``oday_*_mask``, ``siday_*_mask``)
-   and the static ``land_fraction`` field (``sftlf``) are now
-   expected to have mean=0/std=1 entries in the cohort + per-source
-   ``centering.nc`` / ``scaling.nc`` files — preserving their
-   0/1-valued semantics rather than standardising. The
-   make_normalization.py change owns the centering-file rewrite;
-   this migration doesn't touch zarrs for that convention, just
-   records the version bump so consumers know the 0.9.0 stats
-   files include trivial entries for those names.
+   For each eligible dataset (both inputs present, ``total_water_path``
+   absent), the migration:
 
-Behaviour:
+   * reads only the two input variables, computes the sum, writes
+     ``total_water_path`` to the zarr via ``to_zarr(mode="a")``, and
+     re-consolidates metadata;
+   * computes stats *only* for the new ``total_water_path`` variable
+     (subsetting the dataset before calling
+     ``compute_dataset_stats``) and merges them into the existing
+     per-dataset ``stats.nc``. The ~80 other variables' stats are
+     read-through and re-written without recomputation.
 
-- If ``water_vapor_path`` and ``clwvi`` are both present in
-  ``variables_present`` and ``total_water_path`` is absent: derive
-  the sum, write the new variable into the zarr via
-  ``to_zarr(mode="a", consolidated=False)``, re-consolidate, and
-  append ``total_water_path`` stats to the existing ``stats.nc``
-  (incremental — does not recompute the other ~80 variables).
-- Otherwise: sidecar-only bump (schema version + audit entry).
+   ``total_water_path`` is a real continuous physical field
+   (kg/m²); its normalization needs real mean/std, not the trivial
+   (0, 1) we use for masks. After this migration the per-dataset
+   ``stats.nc`` files carry real ``total_water_path__*`` entries, so
+   the next ``make_normalization.py`` aggregation pass picks them
+   up in both cohort and per-source centering files.
 
-Sidecar audit log records ``derived_total_water_path`` either as
-``True`` or ``False`` to make pre/post comparisons trivial.
+2. **Trivial normalization for masks + land_fraction.** The cohort
+   + per-source ``centering.nc`` / ``scaling.nc`` files get
+   trivial mean=0/std=1 entries for the 15 mask vars and
+   ``land_fraction`` (sftlf) during the next aggregation via
+   ``make_normalization._inject_trivial_norm``. This migration does
+   not touch per-dataset stats for those — the convention is owned
+   by the aggregator. The version bump here is the marker that
+   downstream consumers can rely on the new convention.
+
+Sources that don't publish ``total_water_path`` (no
+``water_vapor_path`` or no ``clwvi``) get a pure sidecar bump.
+The per-source norm gap that creates (some sources have TWP, some
+don't) is handled at training time by ``PerSourceNormalizer``'s
+data-mask-aware pass-through — a variable a source lacks is left
+unchanged for that source's batch slice rather than queried in a
+nonexistent stats entry.
 """
 
 import logging
@@ -62,74 +73,15 @@ def _stats_path_for(zarr_path: str) -> str:
     return zarr_path.rstrip("/").rsplit("/", 1)[0] + "/stats.nc"
 
 
-def _append_var_stats(
-    zarr_path: str,
-    sidecar: dict,
-    var_name: str,
-) -> None:
-    """Compute stats for a single new variable and merge them into
-    the existing ``stats.nc``.
+def _derive_total_water_path(zarr_path: str) -> None:
+    """Compute total_water_path = water_vapor_path + clwvi and write
+    it to the zarr.
 
-    Why incremental: a full recompute (re-running
-    ``compute_dataset_stats`` over every variable) is O(minutes) per
-    dataset and pointlessly redoes the ~80 variables whose values
-    didn't change. Subsetting the dataset to just ``var_name``
-    before calling ``compute_dataset_stats`` keeps the migration
-    fast at scale.
-    """
-    grid_name = sidecar.get("target_grid", "")
-    if not grid_name:
-        raise RuntimeError(
-            f"sidecar at {zarr_path} has no ``target_grid``; cannot "
-            "compute stats for the new variable."
-        )
-    ds = xr.open_zarr(zarr_path, consolidated=False)
-    try:
-        sub = ds[[var_name]]
-        n_lon = int(ds.sizes.get("lon", 90))
-        w2d = area_weights_2d(grid_name, n_lon)
-        new_stats_ds, _ = compute_dataset_stats(
-            sub, w2d, periods=tuple(DEFAULT_STATS_PERIODS)
-        )
-    finally:
-        ds.close()
-
-    stats_path = _stats_path_for(zarr_path)
-    fs, rel = fsspec.core.url_to_fs(stats_path)
-    if not fs.exists(rel):
-        raise FileNotFoundError(
-            f"stats.nc missing for {zarr_path}; cannot append " f"{var_name} stats."
-        )
-
-    # Read existing stats.nc, merge in the new variable's stats,
-    # write back. Drop overlapping vars from the existing dataset
-    # so xr.merge doesn't conflict on coord re-emission (e.g.
-    # ``period``).
-    with tempfile.NamedTemporaryFile(suffix=".nc") as tmp_in:
-        fs.get(rel, tmp_in.name)
-        existing = xr.open_dataset(tmp_in.name).load()
-    overlap = [v for v in new_stats_ds.data_vars if v in existing.data_vars]
-    if overlap:
-        existing = existing.drop_vars(overlap)
-    merged = xr.merge([existing, new_stats_ds])
-    # Preserve identity attrs the original stats.nc carried.
-    merged.attrs.update(existing.attrs)
-    with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp_out:
-        local = tmp_out.name
-    try:
-        merged.to_netcdf(local)
-        with fs.open(rel, "wb") as fobj, open(local, "rb") as src:
-            fobj.write(src.read())
-    finally:
-        Path(local).unlink(missing_ok=True)
-
-
-def _derive_total_water_path(zarr_path: str, sidecar: dict) -> dict:
-    """Compute total_water_path and write it into the zarr.
-
-    Returns an updated sidecar with ``total_water_path`` appended to
-    ``variables_present``. Stats are appended via
-    :func:`_append_var_stats`.
+    Reads only the two input variables (not the full dataset). Uses
+    the same ``to_zarr(mode="a", align_chunks=True)`` pattern as the
+    augment-side write so chunks align with the existing zarr layout.
+    Re-consolidates the metadata at the end so subsequent
+    ``open_zarr(consolidated=True)`` reads see the new variable.
     """
     logging.info("  deriving %s from %s + %s", _TWP, _WVP, _CLWVI)
     ds = xr.open_zarr(zarr_path, consolidated=False)
@@ -146,11 +98,61 @@ def _derive_total_water_path(zarr_path: str, sidecar: dict) -> dict:
     finally:
         ds.close()
     zarr.consolidate_metadata(zarr_path)
-    _append_var_stats(zarr_path, sidecar, _TWP)
 
-    variables_present = sorted(set(sidecar.get("variables_present", [])) | {_TWP})
-    sidecar["variables_present"] = variables_present
-    return sidecar
+
+def _append_total_water_path_stats(zarr_path: str, sidecar: dict) -> None:
+    """Compute stats for just ``total_water_path`` and merge them
+    into the existing per-dataset ``stats.nc``.
+
+    The subset ``ds[[_TWP]]`` ensures ``compute_dataset_stats`` only
+    iterates over the one new variable — the ~80 existing variables'
+    entries are copied through via ``xr.merge`` without
+    recomputation. Cost is one variable's time-axis read + scalar/map
+    reduction per period.
+    """
+    grid_name = sidecar.get("target_grid", "")
+    if not grid_name:
+        raise RuntimeError(
+            f"sidecar at {zarr_path} has no ``target_grid``; cannot "
+            f"compute stats for {_TWP}."
+        )
+    ds = xr.open_zarr(zarr_path, consolidated=False)
+    try:
+        sub = ds[[_TWP]]
+        n_lon = int(ds.sizes.get("lon", 90))
+        w2d = area_weights_2d(grid_name, n_lon)
+        new_stats_ds, _ = compute_dataset_stats(
+            sub, w2d, periods=tuple(DEFAULT_STATS_PERIODS)
+        )
+    finally:
+        ds.close()
+
+    stats_path = _stats_path_for(zarr_path)
+    fs, rel = fsspec.core.url_to_fs(stats_path)
+    if not fs.exists(rel):
+        raise FileNotFoundError(
+            f"stats.nc missing for {zarr_path}; cannot append " f"{_TWP} stats."
+        )
+
+    # Read existing, drop any overlap (re-runs of this migration would
+    # otherwise produce conflict-on-merge), merge in the new variable's
+    # stats, write back. Preserve identity attrs from the existing file.
+    with tempfile.NamedTemporaryFile(suffix=".nc") as tmp_in:
+        fs.get(rel, tmp_in.name)
+        existing = xr.open_dataset(tmp_in.name).load()
+    overlap = [v for v in new_stats_ds.data_vars if v in existing.data_vars]
+    if overlap:
+        existing = existing.drop_vars(overlap)
+    merged = xr.merge([existing, new_stats_ds])
+    merged.attrs.update(existing.attrs)
+    with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp_out:
+        local = tmp_out.name
+    try:
+        merged.to_netcdf(local)
+        with fs.open(rel, "wb") as fobj, open(local, "rb") as src:
+            fobj.write(src.read())
+    finally:
+        Path(local).unlink(missing_ok=True)
 
 
 def _apply(zarr_path: str, sidecar: dict) -> dict:
@@ -161,7 +163,10 @@ def _apply(zarr_path: str, sidecar: dict) -> dict:
         and _TWP not in variables_present
     )
     if can_derive:
-        sidecar = _derive_total_water_path(zarr_path, sidecar)
+        _derive_total_water_path(zarr_path)
+        _append_total_water_path_stats(zarr_path, sidecar)
+        variables_present.add(_TWP)
+        sidecar["variables_present"] = sorted(variables_present)
         derived = True
     else:
         derived = False
@@ -182,11 +187,13 @@ MIGRATION = Migration(
     from_version="0.8.1",
     to_version="0.9.0",
     description=(
-        "Derive total_water_path for datasets that have both inputs "
-        "(water_vapor_path + clwvi) but missed the derivation in the "
-        "0.8.1 augment pass (22 of 26 eligible v2 datasets). Marks "
-        "the convention bump for mask + sftlf trivial normalization "
-        "in 0.9.0 centering.nc files."
+        "Derive total_water_path + append its real stats (per-dataset, "
+        "single-variable, incremental — no full-dataset recompute) for "
+        "the 22 v2 datasets that have both inputs (water_vapor_path + "
+        "clwvi) but missed the derivation in the 0.8.1 augment pass. "
+        "Marks the convention bump for trivial mean=0/std=1 "
+        "normalization of masks + land_fraction in 0.9.0 centering.nc "
+        "files (applied by make_normalization.py at aggregation time)."
     ),
     apply=_apply,
 )
