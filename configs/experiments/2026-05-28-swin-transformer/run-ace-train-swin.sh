@@ -13,7 +13,7 @@ declare -A JOBS=(
   #["ace-train-config-4deg-AIMIP-swin-gmron.yaml"]="ace2-era5-train-4deg-AIMIP-swin-v1-gmron"
   #["ace-train-config-4deg-AIMIP-swin-gmroff.yaml"]="ace2-era5-train-4deg-AIMIP-swin-v1-gmroff"
   ["ace-train-config-4deg-AIMIP-nc-swin-gmron.yaml"]="ace2-era5-train-4deg-AIMIP-nc-swin-v1-gmron"
-  ["ace-train-config-4deg-AIMIP-nc-swin-gmroff.yaml"]="ace2-era5-train-4deg-AIMIP-nc-swin-v1-gmroff"
+  #["ace-train-config-4deg-AIMIP-nc-swin-gmroff.yaml"]="ace2-era5-train-4deg-AIMIP-nc-swin-v1-gmroff"
 )
 
 for config in "${!JOBS[@]}"; do
