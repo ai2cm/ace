@@ -63,11 +63,10 @@ Key implementation details:
 - `sample()` loops over batch samples. For each sample:
   1. Filter available variables using that sample's `data_mask`
   2. Draw a task type from the weighted distribution
-  3. Sample variable assignments per the task's constraints
+  3. Sample variable assignments per the task's constraints (see below)
   4. Set the corresponding entries in the mask tensors
-- Variable count drawn uniformly between min and max allowed
 
-**Task constraints to enforce:**
+**Task constraints:**
 
 | Task | Previous-step inputs | Current-step inputs | Outputs | Key constraint |
 |------|---------------------|--------------------|---------|----|
@@ -79,15 +78,81 @@ Key implementation details:
 
 All tasks require at least one output variable (`min_output_variables ≥ 1` enforced in config validation).
 
+### Variable selection algorithm
+
+The core challenge is sampling input and output variable sets without biasing toward more outputs than inputs (or vice versa). For tasks where current-step inputs and outputs must be disjoint, they compete over the same pool of non-forcing variables. Forcing variables are input-only and don't compete.
+
+**Disjoint tasks (infill, infill_prediction current-step portion):**
+
+Non-forcing variables are the "contested pool" — each can be either a current-step input or an output, but not both. Forcing variables are sampled independently as additional inputs.
+
+```
+# 1. Sample forcing inputs (independent of the contested split)
+n_additional_in ~ Uniform(0, n_forcing_available)
+
+# 2. Determine how many contested inputs are needed given forcing coverage
+min_in_contested = max(0, min_input_variables - n_additional_in)
+
+# 3. Sample total contested participants
+n_total ~ Uniform(min_output_variables + min_in_contested, n_non_forcing_available)
+
+# 4. Split contested pool symmetrically
+n_out ~ Uniform(min_output_variables, n_total - min_in_contested)
+n_in_contested = n_total - n_out
+
+# 5. Select variables
+Select n_out non-forcing variables randomly as outputs
+Select n_in_contested from remaining non-forcing randomly as current-step inputs
+Select n_additional_in from forcing randomly as additional current-step inputs
+```
+
+When `min_input_variables = min_output_variables` and `n_additional_in = 0`, the split in step 4 is perfectly symmetric: `E[n_out] = E[n_in_contested]`. When forcing inputs are sampled, they add to the input side without distorting the contested-pool symmetry. When `n_additional_in >= min_input_variables`, the contested pool can be entirely outputs (all inputs are forcing).
+
+**Non-disjoint tasks (prediction, combined_all):**
+
+Inputs and outputs don't compete (inputs come from t-1, or overlap is allowed), so they're sampled independently:
+
+```
+n_out ~ Uniform(min_output_variables, n_non_forcing_available)
+n_in ~ Uniform(min_input_variables, n_all_available)
+Select n_out non-forcing variables randomly as outputs
+Select n_in from all available variables randomly as inputs
+```
+
+For **prediction**, all inputs are previous-step. For **combined_all**, inputs can be previous-step, current-step, or both — the split between previous/current for each input variable is random.
+
+**Auto-encode:**
+
+```
+n ~ Uniform(max(min_input_variables, min_output_variables), n_non_forcing_available)
+Select n non-forcing variables — they are both current-step inputs and outputs
+```
+
+**Infill_prediction specifics:**
+
+Uses the disjoint algorithm above for the current-step input/output split, then additionally samples previous-step inputs (at least 1) from all available variables independently:
+
+```
+# Disjoint split for current-step (as above)
+...
+# Additionally, sample previous-step inputs
+n_prev ~ Uniform(1, n_all_available)
+Select n_prev from all available as previous-step inputs
+```
+
 ### Tests (`fme/core/step/test_infill_prediction.py`)
 - TaskSampler produces valid SampledTasks for each task type
 - Task constraints are satisfied per sample (e.g., auto_encode outputs = inputs)
+- Disjoint constraint: for infill/infill_prediction, current-step inputs ∩ outputs = ∅
 - data_mask filtering: per-sample absent variables are excluded from that sample's assignments
 - Zero-weight tasks never sampled
 - min_input/output_variables respected
 - Infeasible tasks raise ValueError in constructor
 - output_data_mask values are loss_scale (float), not bool
 - Per-sample independence: different samples can get different task types
+- Sampling symmetry: over many samples, E[n_in_contested] ≈ E[n_out] for disjoint tasks
+- Forcing variables appear as inputs but never as outputs
+- Full coverage cases occur (all non-forcing as outputs, or all as inputs)
 
 ---
 
