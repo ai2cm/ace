@@ -179,6 +179,7 @@ class MeanAggregator:
         target: Literal["norm", "denorm"],
         n_timesteps: int,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
+        include_target_metrics: bool = True,
     ):
         self._gridded_operations = gridded_operations
         # Store one metric object per metric type (e.g., rmse, bias)
@@ -219,18 +220,19 @@ class MeanAggregator:
             ),
             n_timesteps=self._n_timesteps,
         )
-        self._variable_metrics["weighted_mean_target"] = AreaWeightedReducedMetric(
-            device=device,
-            compute_metric=compute_metric_on(
-                source="target",
-                metric=(
-                    lambda tensors: self._gridded_operations.area_weighted_mean_dict(
-                        tensors
-                    )
+        if include_target_metrics:
+            self._variable_metrics["weighted_mean_target"] = AreaWeightedReducedMetric(
+                device=device,
+                compute_metric=compute_metric_on(
+                    source="target",
+                    metric=(
+                        lambda tensors: self._gridded_operations.area_weighted_mean_dict(  # noqa: E501
+                            tensors
+                        )
+                    ),
                 ),
-            ),
-            n_timesteps=self._n_timesteps,
-        )
+                n_timesteps=self._n_timesteps,
+            )
         self._variable_metrics["weighted_bias"] = AreaWeightedReducedMetric(
             device=device,
             compute_metric=self._gridded_operations.area_weighted_mean_bias_dict,
@@ -518,6 +520,7 @@ class MeanMetricConfig:
     target: Literal["denorm", "norm"] = "denorm"
     enabled: bool = True
     strict: bool = False
+    include_target_metrics: bool = True
 
     def __post_init__(self):
         if self.name is None:
@@ -532,6 +535,7 @@ class MeanMetricConfig:
             target=self.target,
             n_timesteps=ctx.n_timesteps,
             variable_metadata=ctx.variable_metadata,
+            include_target_metrics=self.include_target_metrics,
         )
         return MetricBuildResult(
             aggregator=maybe_filter(agg, self.variables), time_series=agg

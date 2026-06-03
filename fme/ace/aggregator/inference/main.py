@@ -95,6 +95,7 @@ def build_inference_evaluator_aggregator(
     n_ensemble_per_ic: int = 1,
     enable_time_series: bool = True,
     raise_on_unsupported: bool = True,
+    uncorrected_metrics: list[MetricConfig] | None = None,
 ) -> "InferenceEvaluatorAggregator":
     _validate_no_duplicate_names(metrics)
     if save_diagnostics and output_dir is None:
@@ -151,6 +152,39 @@ def build_inference_evaluator_aggregator(
         if result.ensemble is not None:
             ensemble_aggregators[name] = result.ensemble
 
+    # Sub-aggregators evaluating the stepper's uncorrected (pre-correction)
+    # outputs. These mirror a subset of the main metrics but are fed the
+    # uncorrected prediction in record_batch and logged under an "uncorrected/"
+    # prefix. The uncorrected prediction holds only the (sparse)
+    # corrector-modified variables, so channel-mean is disabled: a mean over an
+    # arbitrary corrector-determined subset is not comparable to the main
+    # channel-mean and would error when channel_mean_names references absent
+    # variables.
+    uncorrected_ctx = dataclasses.replace(ctx, channel_mean_names=None)
+    uncorrected_aggregators: dict[str, SubAggregator] = {}
+    uncorrected_time_series: dict[str, TimeSeriesLogs] = {}
+    uncorrected_metric_list = list(uncorrected_metrics or [])
+    if not enable_time_series:
+        uncorrected_metric_list = [
+            m for m in uncorrected_metric_list if not isinstance(m, MeanMetricConfig)
+        ]
+    for metric in uncorrected_metric_list:
+        name = metric.get_name()
+        try:
+            result = metric.build(uncorrected_ctx)
+        except MetricNotSupportedError as e:
+            if raise_on_unsupported or metric.strict:
+                raise
+            logging.warning(
+                f"uncorrected {name} metric not supported for this "
+                f"configuration, omitting: {e}"
+            )
+            continue
+        if result.aggregator is not None:
+            uncorrected_aggregators[name] = result.aggregator
+        if result.time_series is not None:
+            uncorrected_time_series[name] = result.time_series
+
     return InferenceEvaluatorAggregator(
         aggregators=aggregators,
         time_series_aggregators=time_series_aggregators,
@@ -161,6 +195,8 @@ def build_inference_evaluator_aggregator(
         output_dir=output_dir,
         n_ensemble_per_ic=n_ensemble_per_ic,
         ensemble_aggregators=ensemble_aggregators,
+        uncorrected_aggregators=uncorrected_aggregators,
+        uncorrected_time_series_aggregators=uncorrected_time_series,
     )
 
 
@@ -248,6 +284,12 @@ class InferenceEvaluatorAggregatorConfig:
     )
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
+    compute_uncorrected_metrics: bool = True
+    """If True, additionally compute time-mean metrics on the stepper's
+    uncorrected (pre-correction) outputs, logged under an ``uncorrected/`` prefix.
+    Quantifies how much the stepper relies on its corrector. Default on; has no
+    effect when the stepper has no corrector (the uncorrected prediction is then
+    empty and is skipped)."""
 
     def __post_init__(self):
         if self.mean_denorm.target != "denorm":
@@ -289,6 +331,24 @@ class InferenceEvaluatorAggregatorConfig:
         ]
         return [m for m in all_metrics if m.enabled]
 
+    def _uncorrected_metrics(self) -> list[MetricConfig] | None:
+        """Metrics to compute on the uncorrected (pre-correction) prediction.
+
+        Includes the enabled time-mean and global-mean time-series metrics.
+        Target-only metrics (``weighted_mean_target``) are excluded from the
+        time-series because the target is identical to the main (corrected)
+        target. Returns None when uncorrected metrics are disabled.
+        """
+        if not self.compute_uncorrected_metrics:
+            return None
+        metrics: list[MetricConfig] = [
+            m for m in (self.time_mean_denorm, self.time_mean_norm) if m.enabled
+        ]
+        for m in (self.mean_denorm, self.mean_norm):
+            if m.enabled:
+                metrics.append(dataclasses.replace(m, include_target_metrics=False))
+        return metrics
+
     def build(
         self,
         dataset_info: DatasetInfo,
@@ -317,6 +377,7 @@ class InferenceEvaluatorAggregatorConfig:
             n_ensemble_per_ic=n_ensemble_per_ic,
             enable_time_series=enable_time_series,
             raise_on_unsupported=False,
+            uncorrected_metrics=self._uncorrected_metrics(),
         )
 
 
@@ -486,7 +547,14 @@ class InferenceEvaluatorAggregator(
 
     To use, call `record_batch` on the results of each batch, then call
     `get_logs` to get a dictionary of statistics when you're done.
+
+    When ``uncorrected_aggregators`` are provided, the same metrics are also
+    computed on the stepper's uncorrected (pre-correction) outputs, taken from
+    ``PairedData.uncorrected_prediction``, and logged under an ``uncorrected/``
+    prefix. This quantifies how much the stepper relies on its corrector.
     """
+
+    UNCORRECTED_LABEL = "uncorrected"
 
     def __init__(
         self,
@@ -499,6 +567,8 @@ class InferenceEvaluatorAggregator(
         output_dir: str | None = None,
         n_ensemble_per_ic: int = 1,
         ensemble_aggregators: dict[str, SelectStepEnsembleAggregator] | None = None,
+        uncorrected_aggregators: dict[str, SubAggregator] | None = None,
+        uncorrected_time_series_aggregators: dict[str, TimeSeriesLogs] | None = None,
     ):
         if save_diagnostics and output_dir is None:
             raise ValueError("Output directory must be set to save diagnostics")
@@ -506,6 +576,14 @@ class InferenceEvaluatorAggregator(
         self._time_series_aggregators = time_series_aggregators
         self.n_ensemble_per_ic = n_ensemble_per_ic
         self._ensemble_aggregators = ensemble_aggregators or {}
+        self._uncorrected_aggregators = uncorrected_aggregators or {}
+        self._uncorrected_time_series_aggregators = (
+            uncorrected_time_series_aggregators or {}
+        )
+        # Set once a non-empty uncorrected prediction is recorded (i.e. the
+        # stepper has an active corrector). Until then the uncorrected
+        # aggregators hold no data and must be skipped when summarizing/flushing.
+        self._recorded_uncorrected = False
         summary_aggregators: dict[str, SubAggregator | SelectStepEnsembleAggregator] = {
             name: agg
             for name, agg in aggregators.items()
@@ -514,6 +592,11 @@ class InferenceEvaluatorAggregator(
         if n_ensemble_per_ic > 1:
             summary_aggregators.update(self._ensemble_aggregators)
         self._summary_aggregators = summary_aggregators
+        self._uncorrected_summary_aggregators: dict[str, SubAggregator] = {
+            name: agg
+            for name, agg in self._uncorrected_aggregators.items()
+            if name not in self._uncorrected_time_series_aggregators
+        }
         self._coords = coords
         self.n_ic_steps = n_ic_steps
         self._normalize = normalize
@@ -564,12 +647,41 @@ class InferenceEvaluatorAggregator(
                     gen_data_norm=unfolded_prediction_data_norm,
                     i_time_start=self._n_timesteps_seen,
                 )
+        if self._uncorrected_aggregators and data.uncorrected_prediction:
+            self._record_uncorrected_batch(data)
         n_times = data.time.shape[1]
         logs = self._get_inference_logs_slice(
             step_slice=slice(self._n_timesteps_seen, self._n_timesteps_seen + n_times),
         )
         self._n_timesteps_seen += n_times
         return logs
+
+    def _record_uncorrected_batch(self, data: PairedData) -> None:
+        # View the uncorrected prediction as the prediction so PairedData.target
+        # restricts the reference to the corrector-modified variables. Use the
+        # shared timestep counter (= n_ic_steps at the first forward batch) so
+        # the uncorrected time-mean counts all forward steps, consistent with the
+        # main time-mean. The uncorrected aggregators never see the initial
+        # condition (record_initial_condition only feeds time-series aggregators).
+        assert data.uncorrected_prediction is not None  # guarded by caller
+        uncorrected = dataclasses.replace(
+            data,
+            prediction=data.uncorrected_prediction,
+            uncorrected_prediction=None,
+        )
+        prediction = uncorrected.prediction
+        target = uncorrected.target
+        batch = InferenceBatchData(
+            prediction=prediction,
+            prediction_norm=self._normalize(prediction),
+            target=target,
+            target_norm=self._normalize(target),
+            time=data.time,
+            i_time_start=self._n_timesteps_seen,
+        )
+        for aggregator in self._uncorrected_aggregators.values():
+            aggregator.record_batch(batch)
+        self._recorded_uncorrected = True
 
     def record_initial_condition(
         self,
@@ -615,6 +727,12 @@ class InferenceEvaluatorAggregator(
         for name, aggregator in self._summary_aggregators.items():
             logging.info(f"Getting summary logs for {name} aggregator")
             logs.update(aggregator.get_logs(label=name))
+        if self._recorded_uncorrected:
+            for name, aggregator in self._uncorrected_summary_aggregators.items():
+                logging.info(f"Getting summary logs for uncorrected {name} aggregator")
+                logs.update(
+                    aggregator.get_logs(label=f"{self.UNCORRECTED_LABEL}/{name}")
+                )
         return logs
 
     @torch.no_grad()
@@ -643,23 +761,44 @@ class InferenceEvaluatorAggregator(
         logs = {}
         for name, aggregator in self._time_series_aggregators.items():
             logs.update(aggregator.get_logs(label=name, step_slice=step_slice))
+        if self._recorded_uncorrected:
+            for name, aggregator in self._uncorrected_time_series_aggregators.items():
+                logs.update(
+                    aggregator.get_logs(
+                        label=f"{self.UNCORRECTED_LABEL}/{name}",
+                        step_slice=step_slice,
+                    )
+                )
         return to_inference_logs(logs)
 
     @torch.no_grad()
     def flush_diagnostics(self, subdir: str | None = None):
-        if self._save_diagnostics:
-            reduced_diagnostics = get_reduced_diagnostics(
+        if not self._save_diagnostics:
+            return
+        if self._output_dir is None:
+            raise ValueError("Output directory not set.")
+        write_reduced_diagnostics(
+            reduced_diagnostics=get_reduced_diagnostics(
                 sub_aggregators=self._aggregators,
                 coords=self._coords,
+            ),
+            output_dir=self._output_dir,
+            subdir=subdir,
+        )
+        if self._recorded_uncorrected:
+            uncorrected_subdir = (
+                self.UNCORRECTED_LABEL
+                if subdir is None
+                else f"{subdir}/{self.UNCORRECTED_LABEL}"
             )
-            if self._output_dir is not None:
-                write_reduced_diagnostics(
-                    reduced_diagnostics=reduced_diagnostics,
-                    output_dir=self._output_dir,
-                    subdir=subdir,
-                )
-            else:
-                raise ValueError("Output directory not set.")
+            write_reduced_diagnostics(
+                reduced_diagnostics=get_reduced_diagnostics(
+                    sub_aggregators=self._uncorrected_aggregators,
+                    coords=self._coords,
+                ),
+                output_dir=self._output_dir,
+                subdir=uncorrected_subdir,
+            )
 
 
 def to_inference_logs(
