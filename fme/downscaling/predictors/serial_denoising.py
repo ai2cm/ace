@@ -361,7 +361,10 @@ class DenoisingMoECheckpointConfig:
         return self._state
 
     def build(self) -> "DenoisingMoEPredictor":
-        return DenoisingMoEPredictor.from_state(self._bundle)
+        predictor = DenoisingMoEPredictor.from_state(self._bundle)
+        for expert in predictor._experts:
+            expert.module.eval()
+        return predictor
 
     @property
     def data_requirements(self) -> DataRequirements:
