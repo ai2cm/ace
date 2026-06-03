@@ -193,8 +193,15 @@ class AtmosphereCorrector(CorrectorABC):
                         _t.max().item(),
                         _t.mean().item(),
                     )
-            _prate_pre_max = (
-                gen_data["PRATEsfc"].max().item() if "PRATEsfc" in gen_data else None
+                    if _diag_name == "PRATEsfc":
+                        logging.warning(
+                            "pre-force_positive PRATEsfc: min=%.3e max=%.3e mean=%.3e",
+                            _t.min().item(),
+                            _t.max().item(),
+                            _t.mean().item(),
+                        )
+            _prate_pre = (
+                gen_data["PRATEsfc"].detach() if "PRATEsfc" in gen_data else None
             )
             gen_data = force_positive(gen_data, self._config.force_positive_names)
             if "PRATEsfc" in gen_data:
@@ -205,12 +212,21 @@ class AtmosphereCorrector(CorrectorABC):
                     _prate.max().item(),
                     _prate.mean().item(),
                 )
-                if _prate.max().item() < 1e-20:
+                # Check per batch element: a single zero-precipitation sample
+                # will cause NaN when the budget correction divides by global mean.
+                _prate_batch_max = _prate.flatten(1).max(dim=1).values  # (batch,)
+                _zero_mask = _prate_batch_max < 1e-20
+                if _zero_mask.any():
+                    _pre_min = _prate_pre.min().item() if _prate_pre is not None else float("nan")
+                    _pre_max = _prate_pre.max().item() if _prate_pre is not None else float("nan")
                     logging.warning(
-                        "PRATEsfc is all-zero after force_positive "
-                        "(pre-force_positive max was %.3e); "
+                        "PRATEsfc is all-zero after force_positive for %d/%d batch "
+                        "elements (pre-force_positive PRATEsfc min=%.3e max=%.3e); "
                         "moisture budget correction will produce NaN.",
-                        _prate_pre_max,
+                        _zero_mask.sum().item(),
+                        _zero_mask.numel(),
+                        _pre_min,
+                        _pre_max,
                     )
         if self._config.conserve_dry_air:
             if self._vertical_coordinate is None:
@@ -424,11 +440,14 @@ def _force_conserve_moisture(
             "_force_conserve_moisture: precipitation_global_mean=%.3e",
             precipitation_global_mean.mean().item(),
         )
-        if precipitation_global_mean.abs().max().item() < 1e-20:
-            logging.warning(
-                "Near-zero global precipitation mean (%.3e); "
-                "scale factor will be NaN/inf.",
-                precipitation_global_mean.mean().item(),
+        _near_zero_mask = precipitation_global_mean.abs() < 1e-20
+        if _near_zero_mask.any():
+            raise ValueError(
+                f"Near-zero precipitation_global_mean for "
+                f"{_near_zero_mask.sum().item()}/{_near_zero_mask.numel()} "
+                f"batch elements; scale factor would be NaN/inf. "
+                f"precipitation_global_mean={precipitation_global_mean.flatten().tolist()}, "
+                f"new_precipitation_global_mean={new_precipitation_global_mean.flatten().tolist()}"
             )
         gen.set_precipitation_rate(
             gen.precipitation_rate
