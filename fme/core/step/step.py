@@ -15,6 +15,19 @@ from fme.core.step.args import StepArgs
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
+@dataclasses.dataclass
+class StepResult:
+    """Return value of :meth:`StepABC.step`.
+
+    ``corrections`` is the difference between the post-corrector and
+    pre-corrector outputs, per variable, in physical (denormalized) space.
+    It is ``None`` when no corrector is applied.
+    """
+
+    output: TensorDict
+    corrections: TensorDict | None = None
+
+
 # Children still need to decorate with @dataclass, otherwise
 # they will be a dataclass with no dataclass fields.
 @dataclasses.dataclass
@@ -333,7 +346,7 @@ class StepABC(abc.ABC):
         self: SelfType,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
+    ) -> StepResult:
         """
         Step the model forward one timestep given input data.
 
@@ -342,7 +355,8 @@ class StepABC(abc.ABC):
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
-            The denormalized output data at the next time step.
+            A :class:`StepResult` carrying the denormalized output at the
+            next time step.
         """
         pass
 

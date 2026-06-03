@@ -25,7 +25,7 @@ from fme.core.step.secondary_decoder import (
     SecondaryDecoderConfig,
 )
 from fme.core.step.single_module import step_with_adjustments
-from fme.core.step.step import StepABC, StepConfigABC, StepSelector
+from fme.core.step.step import StepABC, StepConfigABC, StepResult, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -382,7 +382,7 @@ class SecondaryModuleStep(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
+    ) -> StepResult:
         """
         Step the model forward one timestep given input data.
 
@@ -391,7 +391,8 @@ class SecondaryModuleStep(StepABC):
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
-            The denormalized output data at the next time step.
+            A :class:`StepResult` carrying the denormalized output data at
+            the next time step.
         """
 
         def network_call(input_norm: TensorDict) -> TensorDict:

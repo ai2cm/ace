@@ -6,7 +6,7 @@ import torch
 
 from fme.ace.stepper.parameter_init import ParameterInitializationConfig
 from fme.core.coordinates import NullVerticalCoordinate
-from fme.core.loss import StepLossConfig
+from fme.core.loss import CorrectorRegularizationConfig, LossConfig, StepLossConfig
 from fme.core.optimization import NullOptimization, OptimizationConfig
 from fme.core.registry.module import ModuleSelector
 
@@ -558,3 +558,50 @@ def test_outer_steps_clamped_to_one_when_both_realms_sample_zero():
         assert tensor.shape[2] == 2  # [sample, ensemble, time, ...]
     for tensor in result.atmosphere.gen_data.values():
         assert tensor.shape[2] == 3
+
+
+def test_coupled_corrector_regularization_per_realm():
+    """corrector_regularization fires only for the configured realm.
+
+    Configures corrector_regularization on atmosphere only and verifies that
+    the metric is emitted for atmosphere steps but not ocean steps. The
+    default correctors are no-ops, so the regularization value is exactly
+    zero — this test pins down the wiring, not the magnitude.
+    """
+    train_stepper_config = CoupledTrainStepperConfig(
+        n_coupled_steps=2,
+        ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
+        atmosphere=ComponentTrainingConfig(
+            loss=StepLossConfig(type="MSE"),
+            corrector_regularization=CorrectorRegularizationConfig(
+                loss=LossConfig(type="MSE"), weight=1.0
+            ),
+        ),
+    )
+    train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(
+        train_stepper_config=train_stepper_config,
+        ocean_in_names=["sst", "mask_0"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["surface_temperature", "ocean_fraction"],
+        atmosphere_out_names=["surface_temperature"],
+        n_forward_times_ocean=2,
+        n_forward_times_atmosphere=4,
+        n_samples=1,
+    )
+    result = train_stepper.train_on_batch(
+        data=coupled_data.data,
+        optimization=NullOptimization(),
+    )
+    # atmosphere has 4 inner steps (n_coupled_steps=2 * inner=2)
+    for i in range(4):
+        key = f"loss/atmosphere_corrector_regularization_step_{i}"
+        assert key in result.atmosphere.metrics
+        # default AtmosphereCorrector with no flags is a no-op
+        torch.testing.assert_close(
+            result.atmosphere.metrics[key],
+            torch.tensor(0.0, device=result.atmosphere.metrics[key].device),
+        )
+    # Ocean realm has no regularization configured.
+    for i in range(2):
+        key = f"loss/ocean_corrector_regularization_step_{i}"
+        assert key not in result.ocean.metrics
