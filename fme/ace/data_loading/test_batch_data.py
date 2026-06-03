@@ -6,12 +6,21 @@ import torch
 import xarray as xr
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, _collate_with_masking
+from fme.core.corrector.state import CorrectorState
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.labels import BatchLabels
+from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorDict
 
-_METADATA_FIELDS = {"horizontal_dims", "epoch", "n_ensemble", "labels", "data_mask"}
+_METADATA_FIELDS = {
+    "horizontal_dims",
+    "epoch",
+    "n_ensemble",
+    "labels",
+    "data_mask",
+    "stepper_state",
+}
 _NON_METADATA_FIELDS = {"data", "time"}
 
 
@@ -40,6 +49,24 @@ def assert_metadata_equal(
             dict(a.data_mask) if a.data_mask is not None else None,
             dict(b.data_mask) if b.data_mask is not None else None,
         )
+    _assert_stepper_state_equal_up_to_device(a.stepper_state, b.stepper_state)
+
+
+def _assert_stepper_state_equal_up_to_device(
+    a: StepperState | None, b: StepperState | None
+) -> None:
+    if a is None or b is None:
+        assert a is None and b is None
+        return
+    if a.corrector_state is None or b.corrector_state is None:
+        assert a.corrector_state is None and b.corrector_state is None
+        return
+    pa = a.corrector_state.global_mean_surface_pressure
+    pb = b.corrector_state.global_mean_surface_pressure
+    if pa is None or pb is None:
+        assert pa is None and pb is None
+        return
+    torch.testing.assert_close(pa.detach().cpu(), pb.detach().cpu())
 
 
 def _assert_tensor_mapping_equal_up_to_device(va: dict | None, vb: dict | None) -> None:
@@ -81,6 +108,8 @@ def assert_batchdata_equal_up_to_device(a: BatchData, b: BatchData) -> None:
                 )
         elif field.name == "data_mask":
             _assert_tensor_mapping_equal_up_to_device(va, vb)
+        elif field.name == "stepper_state":
+            _assert_stepper_state_equal_up_to_device(va, vb)
         else:
             assert va == vb
 
@@ -840,3 +869,173 @@ def test_collate_with_masking_variable_missing_from_all_samples():
     assert data_mask is not None
     assert data_mask["x"].all()
     assert not data_mask["y"].any()
+
+
+def _stepper_state_with_pressure(
+    n_samples: int, device: torch.device | None = None
+) -> StepperState:
+    if device is None:
+        device = get_device()
+    return StepperState(
+        corrector_state=CorrectorState(
+            global_mean_surface_pressure=torch.linspace(
+                1.0, 1.0 + 0.1 * n_samples, n_samples, device=device
+            ).view(n_samples, 1, 1),
+        ),
+    )
+
+
+def _batch_data_with_stepper_state(
+    n_samples: int = 2,
+    n_times: int = 3,
+    stepper_state: StepperState | None = None,
+) -> BatchData:
+    device = get_device()
+    if stepper_state is None:
+        stepper_state = _stepper_state_with_pressure(n_samples, device=device)
+    return BatchData(
+        data={"x": torch.randn(n_samples, n_times, 4, 6, device=device)},
+        time=xr.DataArray(
+            np.arange(n_samples * n_times).reshape(n_samples, n_times),
+            dims=["sample", "time"],
+        ),
+        horizontal_dims=["lat", "lon"],
+        stepper_state=stepper_state,
+    )
+
+
+def test_stepper_state_default_is_none():
+    batch = BatchData(
+        data={"x": torch.zeros(2, 3, 4, 6)},
+        time=xr.DataArray(np.zeros((2, 3)), dims=["sample", "time"]),
+    )
+    assert batch.stepper_state is None
+
+
+def test_stepper_state_post_init_validates_sample_dim():
+    bad_state = StepperState(
+        corrector_state=CorrectorState(
+            global_mean_surface_pressure=torch.zeros(3, 1, 1),
+        ),
+    )
+    with pytest.raises(ValueError, match="stepper_state leading dim"):
+        BatchData(
+            data={"x": torch.zeros(2, 3, 4, 6)},
+            time=xr.DataArray(np.zeros((2, 3)), dims=["sample", "time"]),
+            stepper_state=bad_state,
+        )
+
+
+def test_stepper_state_post_init_accepts_empty_state():
+    # An all-None CorrectorState has no sample dim to validate; allowed.
+    state = StepperState(corrector_state=CorrectorState())
+    batch = BatchData(
+        data={"x": torch.zeros(2, 3, 4, 6)},
+        time=xr.DataArray(np.zeros((2, 3)), dims=["sample", "time"]),
+        stepper_state=state,
+    )
+    assert batch.stepper_state is state
+
+
+def test_stepper_state_roundtrips_through_to_device_to_cpu():
+    cpu_batch = _batch_data_with_stepper_state().to_cpu()
+    assert cpu_batch.stepper_state is not None
+    assert cpu_batch.stepper_state.corrector_state is not None
+    p = cpu_batch.stepper_state.corrector_state.global_mean_surface_pressure
+    assert p is not None
+    assert p.device.type == "cpu"
+    device_batch = cpu_batch.to_device()
+    assert_batchdata_equal_up_to_device(cpu_batch, device_batch)
+
+
+def test_stepper_state_preserved_through_pass_through_methods():
+    n_samples, n_times = 2, 4
+    base = _batch_data_with_stepper_state(n_samples=n_samples, n_times=n_times)
+    expected = base.stepper_state
+    assert base.remove_initial_condition(1).stepper_state is expected
+    assert base.select_time_slice(slice(0, 2)).stepper_state is expected
+    assert base.subset_names(["x"]).stepper_state is expected
+    derived = base.compute_derived_variables(lambda a, f: TensorDict({}), base)
+    assert derived.stepper_state is expected
+    # scatter_spatial under no distribution should be a no-op pass-through
+    assert base.scatter_spatial(global_img_shape=(4, 6)).stepper_state is expected
+
+
+def test_stepper_state_prepend_preserves_self_state():
+    # prepend is used during predict() to attach the IC to fresh prediction data;
+    # the prediction's (newer) terminal stepper_state should be the one preserved.
+    n_samples, n_times = 2, 3
+    ic_state = _stepper_state_with_pressure(n_samples)
+    assert ic_state.corrector_state is not None
+    assert ic_state.corrector_state.global_mean_surface_pressure is not None
+    ic_state.corrector_state.global_mean_surface_pressure *= 0  # distinguishable
+    new_state = _stepper_state_with_pressure(n_samples)
+    ic_batch = BatchData(
+        data={"x": torch.zeros(n_samples, 1, 4, 6, device=get_device())},
+        time=xr.DataArray(np.zeros((n_samples, 1)), dims=["sample", "time"]),
+        horizontal_dims=["lat", "lon"],
+        stepper_state=ic_state,
+    )
+    from fme.ace.data_loading.batch_data import PrognosticState
+
+    ic = PrognosticState(ic_batch)
+    new_batch = BatchData(
+        data={"x": torch.zeros(n_samples, n_times, 4, 6, device=get_device())},
+        time=xr.DataArray(np.zeros((n_samples, n_times)), dims=["sample", "time"]),
+        horizontal_dims=["lat", "lon"],
+        stepper_state=new_state,
+    )
+    prepended = new_batch.prepend(ic)
+    assert prepended.stepper_state is new_state
+
+
+def test_stepper_state_broadcast_ensemble_broadcasts_sample_dim():
+    n_samples = 2
+    n_ensemble = 3
+    state = _stepper_state_with_pressure(n_samples, device=torch.device("cpu"))
+    batch = BatchData(
+        data={"x": torch.zeros(n_samples, 3, 4, 6)},
+        time=xr.DataArray(np.zeros((n_samples, 3)), dims=["sample", "time"]),
+        horizontal_dims=["lat", "lon"],
+        stepper_state=state,
+    )
+    bcast = batch.broadcast_ensemble(n_ensemble)
+    assert bcast.stepper_state is not None
+    assert bcast.stepper_state.corrector_state is not None
+    bcast_pres = bcast.stepper_state.corrector_state.global_mean_surface_pressure
+    assert bcast_pres is not None
+    assert bcast_pres.shape == (n_samples * n_ensemble, 1, 1)
+    assert state.corrector_state is not None
+    src = state.corrector_state.global_mean_surface_pressure
+    assert src is not None
+    expected = torch.repeat_interleave(src, n_ensemble, dim=0)
+    torch.testing.assert_close(bcast_pres, expected)
+
+
+def test_from_sample_tuples_yields_no_stepper_state():
+    sample = (
+        {"a": torch.ones(2, 3)},
+        xr.DataArray([0, 1]),
+        None,
+        0,
+        None,
+    )
+    batch = BatchData.from_sample_tuples([sample])
+    assert batch.stepper_state is None
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="pin_memory requires CUDA")
+def test_stepper_state_pin_memory():
+    state = _stepper_state_with_pressure(2, device=torch.device("cpu"))
+    batch = BatchData(
+        data={"x": torch.zeros(2, 3, 4, 6)},
+        time=xr.DataArray(np.zeros((2, 3)), dims=["sample", "time"]),
+        horizontal_dims=["lat", "lon"],
+        stepper_state=state,
+    )
+    pinned = batch.pin_memory()
+    assert pinned.stepper_state is state
+    assert state.corrector_state is not None
+    p = state.corrector_state.global_mean_surface_pressure
+    assert p is not None
+    assert p.is_pinned()
