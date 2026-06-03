@@ -4,6 +4,10 @@
 
 ACE currently trains models for a single task: forward prediction. The design in `infill-prediction-design.md` specifies a new step type (`InfillPredictionStep`) that trains on multiple tasks per batch (auto-encoding, infill, prediction, infill-prediction, combined-all) by randomly masking variables. At inference time, it behaves like the existing `SingleModuleStep`.
 
+**Multi-task per update**: Rather than replacing the final step's prediction loss with a task loss, we compute the normal prediction loss for ALL N forward steps, then run one additional forward pass with task masking and add its loss. Every gradient update includes both the prediction objective and a task objective.
+
+**Per-sample task sampling**: Task type and variable assignments are sampled independently for each sample in the batch, since `data_mask` (variable availability) varies per sample.
+
 This plan breaks the implementation into 3 independently reviewable, tested commits.
 
 ---
@@ -16,41 +20,74 @@ This plan breaks the implementation into 3 independently reviewable, tested comm
 
 - **`TaskWeights`** — dataclass with sampling weights and loss scales per task type (10 float fields)
 - **`TaskSamplingConfig`** — wraps `TaskWeights` + `min_input_variables: int` + `min_output_variables: int`
-- **`TrainingTask`** — runtime dataclass: `previous_step_input_names`, `current_step_input_names`, `output_names`, `loss_scale`
 - **`InferenceSchemeConfig`** — dataclass: `in_names`, `out_names`, `next_step_forcing_names`, `prescribed_prognostic_names`
+
+### SampledTasks — per-sample task assignments
+
+Instead of a single `TrainingTask` with lists of variable names (which can't represent per-sample variation), the sampler returns per-sample masks:
+
+```python
+@dataclasses.dataclass
+class SampledTasks:
+    """Per-sample task assignments for one training batch.
+
+    Attributes:
+        previous_step_input_mask: {var_name: [batch] bool} — True where the
+            variable should be taken from the previous-step model state.
+        current_step_input_mask: {var_name: [batch] bool} — True where the
+            variable should be taken from current-step ground truth.
+        output_data_mask: {var_name: [batch] float} — loss_scale where the
+            variable is a prediction target, 0.0 otherwise. Float values
+            (rather than bool) naturally weight different task types in the
+            loss computation.
+    """
+    previous_step_input_mask: dict[str, torch.Tensor]
+    current_step_input_mask: dict[str, torch.Tensor]
+    output_data_mask: dict[str, torch.Tensor]
+```
+
+The combined `input_data_mask` (for passing to the step) is `prev | curr` per variable.
+
+The `output_data_mask` uses float values equal to the task's `loss_scale` (instead of bool) so that the existing `WeightedMappingLoss` reduction (`(bc * mask).sum(dim=0) / mask.sum(dim=0)`) naturally produces a properly weighted average across samples with different task types.
 
 ### TaskSampler class
 
 ```python
 class TaskSampler:
-    def __init__(self, config, all_names, forcing_names): ...
-    def sample(self, data_mask=None) -> TrainingTask: ...
+    def __init__(self, config: TaskSamplingConfig, all_names: list[str], forcing_names: list[str]): ...
+    def sample(self, data_mask: TensorMapping | None, batch_size: int) -> SampledTasks: ...
 ```
 
 Key implementation details:
 - Pre-compute which tasks are feasible given variable counts and constraints; raise `ValueError` in `__init__` if a task with non-zero weight is infeasible
-- `sample()` filters out variables absent in data_mask (all-False), draws a task type from the weighted distribution, then samples variable assignments per the task's constraints
+- `sample()` loops over batch samples. For each sample:
+  1. Filter available variables using that sample's `data_mask`
+  2. Draw a task type from the weighted distribution
+  3. Sample variable assignments per the task's constraints
+  4. Set the corresponding entries in the mask tensors
 - Variable count drawn uniformly between min and max allowed
-- Task constraint enforcement per the design doc table (see below)
 
 **Task constraints to enforce:**
 
 | Task | Previous-step inputs | Current-step inputs | Outputs | Key constraint |
 |------|---------------------|--------------------|---------|----|
-| auto_encode | (none) | subset of all_names | subset of current inputs; excludes forcing | inputs ⊇ outputs |
+| auto_encode | (none) | subset of non-forcing | exactly the current inputs | outputs = inputs |
 | infill | (none) | from all_names | from non-forcing; disjoint from current inputs | inputs ∩ outputs = ∅ |
 | prediction | from all_names | (none) | from non-forcing | standard forward prediction |
 | infill_prediction | ≥1 from all_names | ≥1 from all_names | from non-forcing; disjoint from current inputs | mixed timestep |
 | combined_all | from all_names | from all_names | from non-forcing | at least 1 input, 1 output |
 
+All tasks require at least one output variable (`min_output_variables ≥ 1` enforced in config validation).
+
 ### Tests (`fme/core/step/test_infill_prediction.py`)
-- TaskSampler produces valid TrainingTask for each task type
-- Task constraints are satisfied (e.g., auto_encode inputs ⊇ outputs)
-- data_mask filtering excludes absent variables
+- TaskSampler produces valid SampledTasks for each task type
+- Task constraints are satisfied per sample (e.g., auto_encode outputs = inputs)
+- data_mask filtering: per-sample absent variables are excluded from that sample's assignments
 - Zero-weight tasks never sampled
 - min_input/output_variables respected
 - Infeasible tasks raise ValueError in constructor
-- InferenceSchemeConfig and TrainingTask construction
+- output_data_mask values are loss_scale (float), not bool
+- Per-sample independence: different samples can get different task types
 
 ---
 
@@ -110,9 +147,11 @@ Validation in `__post_init__`:
 
 ### InfillPredictionStep
 
-Implements `StepABC`. Internal packers use `all_names`:
+Implements `StepABC`. Internal packers use `all_names` for input and non-forcing names for output:
 - `n_in_channels = len(all_names) * 2` (variables + channel mask indicators)
-- `n_out_channels = len(all_names)`
+- `n_out_channels = len(non_forcing_names)` (forcing variables are input-only, never predicted)
+- `in_packer = Packer(all_names)`
+- `out_packer = Packer(non_forcing_names)` where `non_forcing_names = [n for n in all_names if n not in forcing_names]`
 
 The `step()` method is nearly identical to `SingleModuleStep.step()`, reusing `_apply_input_mask`, `_build_channel_mask_dict`, and `step_with_adjustments` from `fme/core/step/single_module.py`.
 
@@ -130,6 +169,7 @@ This makes the step self-contained — no changes needed to `Stepper` or `predic
 - StepSelector registry: `StepSelector(type="infill_prediction", config=...)` works
 - `all_training_names` returns the right value
 - `StepperConfig.all_names` returns `all_training_names` when available, falls back for other step types
+- Output only contains non-forcing variables
 
 ---
 
@@ -150,36 +190,27 @@ When `task_sampling` is not None:
 - Access the underlying step config via `stepper._step_obj.config`
 - Validate it's an `InfillPredictionStepConfig` (runtime check)
 - Build a `TaskSampler` from `task_sampling`, `step_config.all_names`, `step_config.forcing_names`
+- Build a separate task loss object using `loss_names` from the step config (all non-forcing variables)
 
-Also build a separate loss object using all training names (loss_names from the step config, which includes all non-forcing variables).
+### Multi-task loss accumulation
 
-### _accumulate_loss branching
+The existing `_accumulate_loss` loop runs ALL N forward prediction steps unchanged. When `task_sampling` is active, additional logic runs after the prediction loop:
 
-In `_accumulate_loss`, when `self._task_sampler` is set, delegate to `_accumulate_loss_with_task`.
+**After the prediction loop:**
+1. Retrieve the model's state from step N-2 (saved during the loop), or IC if `n_forward_steps=1`
+2. Call `self._task_sampler.sample(data_mask, batch_size)` → `SampledTasks` with per-sample masks
+3. Construct task step input for all `all_names`:
+   - For each variable, combine per-sample from previous-step state, current-step ground truth, or zeros using `SampledTasks.previous_step_input_mask` and `current_step_input_mask`
+   - Forcing variables at the previous timestep come from `forcing_dict`, not model state (model doesn't predict forcing)
+4. Compute `input_data_mask = prev_mask | curr_mask` per variable
+5. Construct forcing/next_step_input at the correct timestep
+6. Run `self._stepper.step(StepArgs(input=..., data_mask=input_data_mask, ...))` — one additional forward pass
+7. Compute task loss using the task loss object with `output_data_mask` (float-valued, incorporates per-sample loss_scale)
+8. `optimization.accumulate_loss(task_loss.total())` — adds to the prediction loss already accumulated
 
-### _accumulate_loss_with_task — two-phase training loop
+**When `n_forward_steps = 1`:** The prediction loop runs 1 step normally. The task step uses the IC as "previous step" data.
 
-**Phase 1 — Normal forward prediction (steps 0 to N-2):**
-- Use existing `predict_generator` for `n_forward_steps - 1` steps
-- Compute loss at each step on inference scheme output variables (same as current behavior)
-- Keep the last yielded state (contains all `all_names` from step output)
-
-**Phase 2 — Task step (step N-1):**
-1. Sample a `TrainingTask` from the `TaskSampler`, passing the batch's `data_mask`
-2. Get "previous step" data from Phase 1's last output state (or IC if `n_forward_steps=1`)
-3. Construct input dict with all `all_names`:
-   - `task.previous_step_input_names`: from model state
-   - `task.current_step_input_names`: from ground truth at output timestep
-   - Others: fill with zeros (will be masked)
-4. Construct `input_data_mask`: True for task inputs, False for others
-5. Construct forcing/next_step_input at the correct timestep (replicate predict_generator's forcing routing for step N-1)
-6. Call `self._stepper.step(StepArgs(input=..., next_step_input_data=..., labels=..., data_mask=input_data_mask))`
-7. Construct `loss_data_mask`: True only for `task.output_names`
-8. Compute loss with `loss_data_mask`, scale by `task.loss_scale`
-
-**When `n_forward_steps = 1`:** Phase 1 is skipped. The single step IS the task step. "Previous step" data comes from the initial condition.
-
-**Forcing routing for the task step** (replicates predict_generator logic for step index N-1):
+**Forcing routing for the task step** (same indexing as predict_generator for step N-1):
 ```python
 step = n_forward_steps - 1
 input_forcing = {
@@ -194,12 +225,13 @@ next_step_input_dict = {
 ```
 
 ### Tests
-- `task_sampling=None` preserves existing behavior
-- Training with `n_forward_steps=1` (task step only)
-- Training with `n_forward_steps=2` (Phase 1 + Phase 2)
+- `task_sampling=None` preserves existing behavior exactly
+- Training with `n_forward_steps=1` (prediction + task on same step)
+- Training with `n_forward_steps=2` (prediction for both steps + task on final)
 - Validate that `task_sampling` requires an `InfillPredictionStep`
-- Loss is computed and backpropagated correctly
-- `loss_data_mask` correctly restricts loss to task output variables
+- Loss includes both prediction and task components
+- Per-sample task masks are correctly applied
+- `output_data_mask` float values correctly weight the task loss
 
 ---
 
