@@ -4,7 +4,9 @@ Each config produced by generate_masking_configs.py is submitted via
 run-ace-train.sh, which validates the config and calls gantry.
 
 Usage:
-    python submit_mask_jobs.py [--dry-run]
+    python submit_mask_jobs.py [--dry-run] [--beaker-workspace WORKSPACE]
+                               [--beaker-cluster CLUSTER [CLUSTER ...]]
+                               [--beaker-priority PRIORITY]
 """
 
 import argparse
@@ -20,11 +22,11 @@ WANDB_GROUP = "ace2-var-masking-2026-05-27"
 
 CONFIGS = [
     # bernoulli configs
-    "ace-train-config-4deg-AIMIP-sfno-mask0.00-all-gmron-rpoff-bernoulli.yaml",
-    "ace-train-config-4deg-AIMIP-sfno-mask0.20-all-gmron-rpoff-bernoulli.yaml",
-    "ace-train-config-4deg-AIMIP-sfno-mask0.20-noforcing-gmron-rpoff-bernoulli.yaml",
-    "ace-train-config-4deg-AIMIP-sfno-mask0.40-all-gmron-rpoff-bernoulli.yaml",
-    "ace-train-config-4deg-AIMIP-sfno-mask0.40-noforcing-gmron-rpoff-bernoulli.yaml",
+    # "ace-train-config-4deg-AIMIP-sfno-mask0.00-all-gmron-rpoff-bernoulli.yaml",
+    # "ace-train-config-4deg-AIMIP-sfno-mask0.20-all-gmron-rpoff-bernoulli.yaml",
+    # "ace-train-config-4deg-AIMIP-sfno-mask0.20-noforcing-gmron-rpoff-bernoulli.yaml",
+    # "ace-train-config-4deg-AIMIP-sfno-mask0.40-all-gmron-rpoff-bernoulli.yaml",
+    # "ace-train-config-4deg-AIMIP-sfno-mask0.40-noforcing-gmron-rpoff-bernoulli.yaml",
     "ace-train-config-4deg-AIMIP-nc-sfno-mask0.00-all-gmron-rpoff-bernoulli.yaml",
     "ace-train-config-4deg-AIMIP-nc-sfno-mask0.20-all-gmron-rpoff-bernoulli.yaml",
     "ace-train-config-4deg-AIMIP-nc-sfno-mask0.20-noforcing-gmron-rpoff-bernoulli.yaml",
@@ -57,6 +59,26 @@ def main() -> None:
         action="store_true",
         help="Print commands without executing them.",
     )
+    parser.add_argument(
+        "--beaker-workspace",
+        default="ai2/ace",
+        help="Beaker workspace to submit jobs to (default: ai2/ace).",
+    )
+    parser.add_argument(
+        "--beaker-cluster",
+        nargs="+",
+        default=["ai2/titan", "ai2/saturn", "ai2/jupiter", "ai2/ceres"],
+        metavar="CLUSTER",
+        help=(
+            "Beaker cluster(s) to target (default: ai2/titan ai2/saturn "
+            "ai2/jupiter ai2/ceres)."
+        ),
+    )
+    parser.add_argument(
+        "--beaker-priority",
+        default="high",
+        help="Beaker job priority (default: high).",
+    )
     args = parser.parse_args()
 
     for config_filename in CONFIGS:
@@ -69,7 +91,13 @@ def main() -> None:
         cmd = [str(RUN_SCRIPT), config_filename, job_name, WANDB_GROUP]
         print("Submitting:", " ".join(cmd))
         if not args.dry_run:
-            env = {**os.environ, "WANDB_PROJECT": WANDB_PROJECT}
+            env = {
+                **os.environ,
+                "WANDB_PROJECT": WANDB_PROJECT,
+                "BEAKER_WORKSPACE": args.beaker_workspace,
+                "BEAKER_CLUSTER": " ".join(args.beaker_cluster),
+                "BEAKER_PRIORITY": args.beaker_priority,
+            }
             subprocess.run(cmd, check=True, cwd=HERE, env=env)
 
 

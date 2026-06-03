@@ -7,6 +7,9 @@ BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username by default
 WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
 WANDB_PROJECT=${WANDB_PROJECT:-VarMasking}
+BEAKER_WORKSPACE=${BEAKER_WORKSPACE:-ai2/ace}
+BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/titan ai2/saturn ai2/jupiter ai2/ceres"}
+BEAKER_PRIORITY=${BEAKER_PRIORITY:-high}
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=2
 
@@ -26,15 +29,20 @@ run_training() {
     [[ "$line" =~ ^#\ arg:\ (.*) ]] && extra_args+=(${BASH_REMATCH[1]})
   done < "$CONFIG_PATH"
 
+  local cluster_args=()
+  for cluster in $BEAKER_CLUSTER; do
+    cluster_args+=(--cluster "$cluster")
+  done
+
   gantry run \
     --name "$job_name" \
     --task-name "$job_name" \
     --description 'Run ACE2-ERA5 training' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-    --workspace ai2/ace \
-    --priority high \
+    --workspace "$BEAKER_WORKSPACE" \
+    --priority "$BEAKER_PRIORITY" \
     --preemptible \
-    --cluster ai2/titan \
+    "${cluster_args[@]}" \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
