@@ -455,3 +455,95 @@ def test_corrector_integration(air_temperature_prefix):
     timestep = datetime.timedelta(seconds=3600)
     corrector = AtmosphereCorrector(config, ops, vertical_coord, timestep)
     corrector(input_data, gen_data, forcing_data, None)
+
+
+def _build_pin_corrector(tensor_shape):
+    config = AtmosphereCorrectorConfig(pin_global_dry_air_mass=True)
+    _, _, _, vertical_coord = _get_corrector_test_input(tensor_shape)
+    # Uniform area weights so the global mean is just the spatial mean.
+    ops = LatLonOperations(
+        torch.ones(size=(tensor_shape[-2], 1)).broadcast_to(size=tensor_shape)
+    )
+    timestep = datetime.timedelta(seconds=3600)
+    return AtmosphereCorrector(config, ops, vertical_coord, timestep), vertical_coord
+
+
+def _global_dry_air_mass(
+    data: TensorMapping, vertical_coord: HybridSigmaPressureCoordinate
+) -> torch.Tensor:
+    atm = AtmosphereData(data, vertical_coord)
+    return atm.surface_pressure_due_to_dry_air.to(torch.float64).mean(dim=(-1, -2))
+
+
+def test_pin_global_dry_air_mass_seeds_from_ic_input():
+    """The first call with no prior state should seed the reference from
+    ``input_data`` (the IC) and shift gen's surface pressure so its global
+    dry-air mass equals the IC's global dry-air mass.
+    """
+    torch.manual_seed(0)
+    tensor_shape = (1, 5, 5)
+    ic, gen, _, vertical_coord = _get_corrector_test_input(tensor_shape)
+    corrector, _ = _build_pin_corrector(tensor_shape)
+
+    ic_dry_air = _global_dry_air_mass(ic, vertical_coord)
+    gen_dry_air_before = _global_dry_air_mass(gen, vertical_coord)
+    # Sanity: gen and ic differ (otherwise the test is trivial).
+    assert not torch.allclose(ic_dry_air, gen_dry_air_before)
+
+    corrected, state = corrector(ic, gen, {}, None)
+    assert state is not None
+    assert state.global_dry_air_mass is not None
+
+    # Reference matches the IC's global dry-air mass.
+    torch.testing.assert_close(
+        state.global_dry_air_mass.squeeze(-1).squeeze(-1),
+        ic_dry_air,
+        rtol=1e-6,
+        atol=0,
+    )
+    # And the corrected gen now also matches that reference.
+    corrected_dry_air = _global_dry_air_mass(corrected, vertical_coord)
+    torch.testing.assert_close(corrected_dry_air, ic_dry_air, rtol=1e-6, atol=0)
+
+
+def test_pin_global_dry_air_mass_persists_across_calls():
+    """The reference seeded on the first call must be reused on the second
+    call: even when the second call's ``input_data`` has a different global
+    dry-air mass, gen is pinned to the *first* call's reference.
+    """
+    torch.manual_seed(1)
+    tensor_shape = (1, 5, 5)
+    ic, _, _, vertical_coord = _get_corrector_test_input(tensor_shape)
+    corrector, _ = _build_pin_corrector(tensor_shape)
+
+    # First call seeds the reference from `ic`.
+    _, gen2, _, _ = _get_corrector_test_input(tensor_shape)
+    _, state_after_1 = corrector(ic, gen2, {}, None)
+    ic_dry_air = _global_dry_air_mass(ic, vertical_coord)
+
+    # Second call with a *different* input (simulating drift). The reference
+    # must remain the IC's value, not be re-seeded from this new input.
+    drifted_input, gen3, _, _ = _get_corrector_test_input(tensor_shape)
+    # Make the drifted input meaningfully different in dry-air mass.
+    drifted_input = {**drifted_input, "PRESsfc": drifted_input["PRESsfc"] + 500.0}
+    corrected, state_after_2 = corrector(drifted_input, gen3, {}, state_after_1)
+
+    assert state_after_2 is not None
+    assert state_after_2.global_dry_air_mass is not None
+    # Reference unchanged from call 1.
+    torch.testing.assert_close(
+        state_after_2.global_dry_air_mass,
+        state_after_1.global_dry_air_mass,
+    )
+    # Corrected gen matches the IC's value, not the drifted input's.
+    corrected_dry_air = _global_dry_air_mass(corrected, vertical_coord)
+    torch.testing.assert_close(corrected_dry_air, ic_dry_air, rtol=1e-6, atol=0)
+
+
+def test_pin_global_dry_air_mass_requires_vertical_coordinate():
+    config = AtmosphereCorrectorConfig(pin_global_dry_air_mass=True)
+    ops = LatLonOperations(torch.ones(size=(5, 1)).broadcast_to(size=(5, 5)))
+    timestep = datetime.timedelta(seconds=3600)
+    corrector = AtmosphereCorrector(config, ops, None, timestep)
+    with pytest.raises(ValueError, match="vertical coordinate"):
+        corrector({}, {}, {}, None)
