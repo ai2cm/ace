@@ -294,15 +294,10 @@ def _compute_ocean_vertical_coarsening(
             coarsened[name] = ds[name]
 
     # Surface mask + related fields
-    mask_2d = coarsened["mask_0"].copy()
+    mask_2d = coarsened["mask_0"].astype(np.float32)
     mask_2d.attrs = {"long_name": "ocean mask", "units": "0 if land, 1 if ocean"}
     coarsened["mask_2d"] = mask_2d
-    land_frac = (1.0 - mask_2d).astype(np.float32)
-    land_frac.attrs = {"long_name": "land fraction", "units": "fraction"}
-    coarsened["land_fraction"] = land_frac
-    ssf = mask_2d.copy()
-    ssf.attrs = {"long_name": "sea surface fraction", "units": "fraction"}
-    coarsened["sea_surface_fraction"] = ssf
+    coarsened.update(_build_land_sea_fractions(mask_2d))
 
     # Drop stray coordinates
     keep_coords = {"time", "lat", "lon"}
@@ -352,19 +347,88 @@ def _split_3d_to_levels(
 
 
 # ---------------------------------------------------------------------------
+# Mask helpers (shared by _process_chunk and _extract_invariant_fields)
+# ---------------------------------------------------------------------------
+
+
+def _build_3d_mask(
+    ds: xr.Dataset, vdim: str, time_idx: int = 0
+) -> tuple[xr.DataArray, xr.DataArray]:
+    """Build 3-D and 2-D masks from the NaN pattern of a reference variable.
+
+    Returns (mask_3d, mask_2d) where 1 = ocean, 0 = land.
+    """
+    ref_var = next(
+        (v for v in ("thetao", "so") if v in ds and vdim in ds[v].dims),
+        None,
+    )
+    if ref_var is None:
+        raise ValueError("Cannot build mask: no 3-D ocean variable found")
+
+    ref_slice = ds[ref_var]
+    if "time" in ref_slice.dims:
+        ref_slice = ref_slice.isel(time=time_idx)
+    mask_3d = (~np.isnan(ref_slice.values)).astype(np.float32)
+    mask_3d = xr.DataArray(mask_3d, dims=ref_slice.dims, coords=ref_slice.coords)
+
+    mask_2d = mask_3d.isel({vdim: 0}).astype(np.float32)
+    mask_2d.attrs = {"long_name": "ocean mask", "units": "0 if land, 1 if ocean"}
+    return mask_3d, mask_2d
+
+
+def _build_per_level_masks(
+    mask_3d: xr.DataArray,
+    vdim: str,
+    vertical_coarsening_indices: Sequence[Sequence[int]] | None,
+) -> dict[str, xr.DataArray]:
+    """Build per-level mask variables from a 3-D mask.
+
+    With coarsening indices, each level mask is the max over the group.
+    Without, each level mask is the raw slice.
+    """
+    masks = {}
+    if vertical_coarsening_indices:
+        for i, (start, end) in enumerate(vertical_coarsening_indices):
+            level_mask = mask_3d.isel({vdim: slice(start, end)}).max(dim=vdim)
+            masks[f"mask_{i}"] = level_mask.astype(np.float32)
+    else:
+        n_levels = mask_3d.sizes[vdim]
+        for i in range(n_levels):
+            masks[f"mask_{i}"] = mask_3d.isel({vdim: i}).astype(np.float32)
+    return masks
+
+
+def _build_land_sea_fractions(
+    mask_2d: xr.DataArray,
+) -> dict[str, xr.DataArray]:
+    """Derive land_fraction and sea_surface_fraction from mask_2d."""
+    land_frac = (1.0 - mask_2d).astype(np.float32)
+    land_frac.attrs = {"long_name": "land fraction", "units": "fraction"}
+    ssf = mask_2d.astype(np.float32)
+    ssf.attrs = {"long_name": "sea surface fraction", "units": "fraction"}
+    return {"land_fraction": land_frac, "sea_surface_fraction": ssf}
+
+
+# ---------------------------------------------------------------------------
 # Nearest-neighbour fill for residual coastal NaN
 # ---------------------------------------------------------------------------
 
 
-def _nn_fill_2d_vars(ds: xr.Dataset, mask_2d: np.ndarray) -> xr.Dataset:
-    """Fill NaN in 2-D ocean variables using nearest valid neighbour.
+def _compute_nn_fill_indices(
+    ds: xr.Dataset, mask_2d: np.ndarray
+) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """Precompute NN-fill index pairs for variables with coastal NaN.
 
-    Only applies to time-varying 2-D variables (not per-level 3-D splits).
+    Returns a dict mapping variable name → (fill_flat, src_flat) arrays
+    of 1-D indices into a (lat*lon) flat view.  Computed once from the
+    first timestep; the fill pattern is time-invariant because it derives
+    from the static land/ocean mask.
     """
     from scipy.ndimage import distance_transform_edt
 
     level_prefixes = tuple(f"{v}_" for v in VARS_3D)
     ocean = mask_2d > 0
+    fill_map: dict[str, tuple[np.ndarray, np.ndarray]] = {}
 
     for name in list(ds.data_vars):
         if name.startswith("mask_") or name.startswith("idepth_"):
@@ -383,7 +447,7 @@ def _nn_fill_2d_vars(ds: xr.Dataset, mask_2d: np.ndarray) -> xr.Dataset:
             continue
 
         n_fill = int(need_fill.sum())
-        logging.info("NN-filling %d ocean cells for '%s'", n_fill, name)
+        logging.info("NN-fill indices: %d ocean cells for '%s'", n_fill, name)
 
         valid = ~np.isnan(sample)
         _, nn_idx = distance_transform_edt(
@@ -395,13 +459,24 @@ def _nn_fill_2d_vars(ds: xr.Dataset, mask_2d: np.ndarray) -> xr.Dataset:
         nlat, nlon = sample.shape
         fill_flat = np.ravel_multi_index(np.where(need_fill), (nlat, nlon))
         src_flat = np.ravel_multi_index((src_rows, src_cols), (nlat, nlon))
+        fill_map[name] = (fill_flat, src_flat)
 
-        # Vectorized fill over all timesteps
-        data = v.values  # (time, lat, lon) — already in memory for Beam
+    return fill_map
+
+
+def _apply_nn_fill(
+    ds: xr.Dataset,
+    fill_map: dict[str, tuple[np.ndarray, np.ndarray]],
+) -> xr.Dataset:
+    """Apply precomputed NN-fill indices to fill coastal NaN."""
+    for name, (fill_flat, src_flat) in fill_map.items():
+        if name not in ds:
+            continue
+        v = ds[name]
+        data = v.values
         flat = data.reshape(data.shape[0], -1)
         flat[:, fill_flat] = flat[:, src_flat]
         ds[name] = xr.DataArray(data, dims=v.dims, coords=v.coords, attrs=v.attrs)
-
     return ds
 
 
@@ -512,6 +587,7 @@ def _process_chunk(
     time_coarsen_factor: int,
     source_grid_ocean: xr.Dataset,
     source_grid_atmo: xr.Dataset,
+    nn_fill_map: dict[str, tuple[np.ndarray, np.ndarray]] | None = None,
 ) -> xr.Dataset:
     """Process one time-chunk of ocean + atmosphere data.
 
@@ -573,24 +649,7 @@ def _process_chunk(
             )
 
     # Rebuild masks from regridded NaN pattern
-    ref_var = next(
-        (v for v in ("thetao", "so") if v in ds_ocean and vdim in ds_ocean[v].dims),
-        None,
-    )
-    if ref_var is not None:
-        ref_slice = ds_ocean[ref_var].isel(time=0)
-        mask_3d = (~np.isnan(ref_slice.values)).astype(np.float32)
-        mask_3d = xr.DataArray(
-            mask_3d,
-            dims=ref_slice.dims,
-            coords=ref_slice.coords,
-            attrs={"long_name": "ocean mask from regridded NaN pattern"},
-        )
-    else:
-        raise ValueError("Cannot build mask: no 3-D ocean variable found")
-
-    mask_2d = mask_3d.isel({vdim: 0}).astype(np.float32)
-    mask_2d.attrs = {"long_name": "ocean mask", "units": "0 if land, 1 if ocean"}
+    mask_3d, mask_2d = _build_3d_mask(ds_ocean, vdim, time_idx=0)
 
     # --- Vertical coarsening ---
     vars_3d_present = [v for v in VARS_3D if v in ds_ocean]
@@ -634,17 +693,13 @@ def _process_chunk(
 
     # Surface velocity aliases
     if "uo_0" in ds_levels:
-        ds_levels["ssu"] = ds_levels["uo_0"].copy()
-        ds_levels["ssu"].attrs = {
-            "long_name": "Sea surface x-velocity",
-            "units": "m/s",
-        }
+        ssu = ds_levels["uo_0"]
+        ssu.attrs = {"long_name": "Sea surface x-velocity", "units": "m/s"}
+        ds_levels["ssu"] = ssu
     if "vo_0" in ds_levels:
-        ds_levels["ssv"] = ds_levels["vo_0"].copy()
-        ds_levels["ssv"].attrs = {
-            "long_name": "Sea surface y-velocity",
-            "units": "m/s",
-        }
+        ssv = ds_levels["vo_0"]
+        ssv.attrs = {"long_name": "Sea surface y-velocity", "units": "m/s"}
+        ds_levels["ssv"] = ssv
 
     # deptho from MOM6 "depth" (time-invariant)
     if "depth" in ds_ocean_2d:
@@ -657,17 +712,13 @@ def _process_chunk(
 
     # Stress aliases
     if "eastward_surface_wind_stress" in ds_ocean_2d:
-        ds_ocean_2d["tauuo"] = ds_ocean_2d["eastward_surface_wind_stress"].copy()
-        ds_ocean_2d["tauuo"].attrs = {
-            "long_name": "Surface Downward X Stress",
-            "units": "N/m2",
-        }
+        tauuo = ds_ocean_2d["eastward_surface_wind_stress"]
+        tauuo.attrs = {"long_name": "Surface Downward X Stress", "units": "N/m2"}
+        ds_ocean_2d["tauuo"] = tauuo
     if "northward_surface_wind_stress" in ds_ocean_2d:
-        ds_ocean_2d["tauvo"] = ds_ocean_2d["northward_surface_wind_stress"].copy()
-        ds_ocean_2d["tauvo"].attrs = {
-            "long_name": "Surface Downward Y Stress",
-            "units": "N/m2",
-        }
+        tauvo = ds_ocean_2d["northward_surface_wind_stress"]
+        tauvo.attrs = {"long_name": "Surface Downward Y Stress", "units": "N/m2"}
+        ds_ocean_2d["tauvo"] = tauvo
 
     # wfo: water flux = evap + lprec + fprec + lrunoff
     if all(v in ds_ocean_2d for v in WFO_COMPONENTS):
@@ -770,19 +821,8 @@ def _process_chunk(
     if ds_derived_atmo is not None:
         to_merge.append(ds_derived_atmo)
     if not vertical_coarsening_indices:
-        land_frac = (1.0 - mask_2d).astype(np.float32)
-        land_frac.attrs = {"long_name": "land fraction", "units": "fraction"}
-        ssf = mask_2d.copy()
-        ssf.attrs = {"long_name": "sea surface fraction", "units": "fraction"}
-        to_merge.append(
-            xr.Dataset(
-                {
-                    "mask_2d": mask_2d,
-                    "land_fraction": land_frac,
-                    "sea_surface_fraction": ssf,
-                }
-            )
-        )
+        fractions = _build_land_sea_fractions(mask_2d)
+        to_merge.append(xr.Dataset({"mask_2d": mask_2d, **fractions}))
 
     cleaned = []
     for d in to_merge:
@@ -791,9 +831,8 @@ def _process_chunk(
     ds = xr.merge(cleaned, join="inner")
 
     if "land_fraction" not in ds:
-        land_frac = (1.0 - mask_2d).astype(np.float32)
-        land_frac.attrs = {"long_name": "land fraction", "units": "fraction"}
-        ds["land_fraction"] = land_frac
+        fractions = _build_land_sea_fractions(mask_2d)
+        ds["land_fraction"] = fractions["land_fraction"]
 
     # --- Insert NaN on land ---
     # Atmospheric forcing variables are valid globally (FV3 is a global
@@ -836,11 +875,9 @@ def _process_chunk(
 
     # Derived post-masking variables
     if "HI" in ds:
-        ds["sea_ice_volume"] = ds["HI"].copy()
-        ds["sea_ice_volume"].attrs = {
-            "long_name": "Sea Ice Volume Per Area",
-            "units": "m",
-        }
+        siv = ds["HI"]
+        siv.attrs = {"long_name": "Sea Ice Volume Per Area", "units": "m"}
+        ds["sea_ice_volume"] = siv
     if "hfds" in ds and "sea_surface_fraction" in ds:
         ds["hfds_total_area"] = ds["hfds"] * ds["sea_surface_fraction"]
         ds["hfds_total_area"].attrs = {
@@ -849,8 +886,12 @@ def _process_chunk(
         }
 
     # --- NN fill ---
-    mask_2d_arr = ds["mask_2d"].values if "mask_2d" in ds else mask_2d.values
-    ds = _nn_fill_2d_vars(ds, mask_2d_arr)
+    if nn_fill_map is not None:
+        ds = _apply_nn_fill(ds, nn_fill_map)
+    else:
+        mask_2d_arr = ds["mask_2d"].values if "mask_2d" in ds else mask_2d.values
+        nn_fill_map = _compute_nn_fill_indices(ds, mask_2d_arr)
+        ds = _apply_nn_fill(ds, nn_fill_map)
 
     # --- Clean up ---
     # Drop raw MOM6 flux components that were only needed for deriving
@@ -971,6 +1012,7 @@ def process_ocean_chunk(
     output_grid=DEFAULT_OUTPUT_GRID,
     vertical_coarsening_indices=None,
     time_coarsen_factor=1,
+    nn_fill_map=None,
 ):
     """Beam-compatible processing function: (key, ds) → (new_key, output_ds).
 
@@ -1025,6 +1067,7 @@ def process_ocean_chunk(
         time_coarsen_factor,
         src_ocean,
         src_atmo,
+        nn_fill_map=nn_fill_map,
     )
 
     # Update key for output dimensions
@@ -1081,7 +1124,6 @@ def _extract_invariant_fields(
             )
     else:
         depths = ds_ocean[vdim].values
-        n_levels = len(depths)
         invariant["idepth_0"] = xr.DataArray(
             0.0,
             attrs={"units": "meters", "long_name": "Depth interface 0 (surface)"},
@@ -1107,41 +1149,12 @@ def _extract_invariant_fields(
             na_thres=1.0,
         )
 
-    # Build mask from a 3-D reference variable
-    ref_var = next(
-        (
-            v
-            for v in ("thetao", "so")
-            if v in ds_ocean_1t and vdim in ds_ocean_1t[v].dims
-        ),
-        None,
-    )
-    if ref_var is not None:
-        ref_slice = ds_ocean_1t[ref_var]
-        mask_3d = (~np.isnan(ref_slice.values)).astype(np.float32)
-        mask_3d = xr.DataArray(mask_3d, dims=ref_slice.dims, coords=ref_slice.coords)
-
-        # Per-level masks
-        if vertical_coarsening_indices:
-            for i, (start, end) in enumerate(vertical_coarsening_indices):
-                level_mask = mask_3d.isel({vdim: slice(start, end)}).max(dim=vdim)
-                invariant[f"mask_{i}"] = level_mask.astype(np.float32)
-        else:
-            n_levels = mask_3d.sizes[vdim]
-            for i in range(n_levels):
-                invariant[f"mask_{i}"] = mask_3d.isel({vdim: i}).astype(np.float32)
-
-        mask_2d = mask_3d.isel({vdim: 0}).astype(np.float32)
-        mask_2d.attrs = {"long_name": "ocean mask", "units": "0 if land, 1 if ocean"}
-        invariant["mask_2d"] = mask_2d
-
-        land_frac = (1.0 - mask_2d).astype(np.float32)
-        land_frac.attrs = {"long_name": "land fraction", "units": "fraction"}
-        invariant["land_fraction"] = land_frac
-
-        ssf = mask_2d.copy()
-        ssf.attrs = {"long_name": "sea surface fraction", "units": "fraction"}
-        invariant["sea_surface_fraction"] = ssf
+    # Build masks using shared helpers
+    mask_3d, mask_2d = _build_3d_mask(ds_ocean_1t, vdim)
+    level_masks = _build_per_level_masks(mask_3d, vdim, vertical_coarsening_indices)
+    invariant.update(level_masks)
+    invariant["mask_2d"] = mask_2d
+    invariant.update(_build_land_sea_fractions(mask_2d))
 
     # deptho
     depth_name = "depth" if "depth" in ds_ocean_1t else "deptho"
@@ -1160,8 +1173,12 @@ def _make_template(
     vertical_coarsening_indices: Sequence[Sequence[int]],
     time_coarsen_factor: int,
     output_time: list,
-) -> xr.Dataset:
-    """Eagerly process one ocean timestep to build the output zarr template."""
+) -> tuple[xr.Dataset, dict[str, tuple[np.ndarray, np.ndarray]]]:
+    """Eagerly process one ocean timestep to build the output zarr template.
+
+    Returns (template, nn_fill_map) where nn_fill_map contains precomputed
+    nearest-neighbour fill indices to be reused by every worker.
+    """
     logging.info("Building template from first timestep")
 
     # Extract scalar (idepth_*) and 2-D spatial (mask_*, land_fraction,
@@ -1199,6 +1216,16 @@ def _make_template(
     )
     processed = processed.drop_encoding()
 
+    # Precompute NN-fill indices from the template chunk. The fill
+    # pattern depends only on the static ocean mask, so we compute
+    # it once here and pass to every worker.
+    mask_2d_arr = (
+        invariant["mask_2d"].values
+        if "mask_2d" in invariant
+        else processed["mask_2d"].values
+    )
+    nn_fill_map = _compute_nn_fill_indices(processed, mask_2d_arr)
+
     # Squeeze out the single-timestep time dim, then re-expand with the
     # full output time coordinate (same pattern as ERA5 pipeline).
     processed = processed.squeeze("time", drop=True)
@@ -1210,7 +1237,7 @@ def _make_template(
         if name not in template:
             template[name] = invariant[name]
 
-    return template
+    return template, nn_fill_map
 
 
 # ---------------------------------------------------------------------------
@@ -1283,7 +1310,7 @@ def main():
 
     parser = _get_parser()
     args, pipeline_args = parser.parse_known_args()
-    print(pipeline_args)
+    logging.info("Pipeline args: %s", pipeline_args)
 
     start_time = datetime.datetime.strptime(args.start_time, "%Y-%m-%dT%H:%M:%S")
     end_time = datetime.datetime.strptime(args.end_time, "%Y-%m-%dT%H:%M:%S")
@@ -1437,7 +1464,7 @@ def main():
 
     # --- Build template ---
     logging.info("Generating template")
-    template = _make_template(
+    template, nn_fill_map = _make_template(
         ds_ocean,
         ds_atmo,
         args.output_grid,
@@ -1448,7 +1475,10 @@ def main():
 
     logging.info("Template generated. Starting pipeline.")
     output_store = _make_zarr_store(args.output_path, read_only=False)
-    print(PipelineOptions(pipeline_args).get_all_options())
+    logging.info(
+        "Pipeline options: %s",
+        PipelineOptions(pipeline_args).get_all_options(),
+    )
 
     with beam.Pipeline(options=PipelineOptions(pipeline_args)) as p:
         (
@@ -1461,6 +1491,7 @@ def main():
                 output_grid=args.output_grid,
                 vertical_coarsening_indices=vert_indices,
                 time_coarsen_factor=time_coarsen_factor,
+                nn_fill_map=nn_fill_map,
             )
             | xbeam.ConsolidateChunks(output_shards)
             | xbeam.ChunksToZarr(
