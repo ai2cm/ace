@@ -141,7 +141,16 @@ def test_validate_experts_compatible():
 
 
 def test_generate_on_batch_returns_scalar_loss():
-    """Two-expert MoE with real DiffusionModel experts (different weights)."""
+    """``DenoisingMoEPredictor.generate_on_batch`` must reduce the per-component
+    loss list returned by ``self._primary.loss(...)`` to a scalar tensor, the
+    same way ``DiffusionModel.generate_on_batch`` does.
+
+    Regression for the post-#1159 loss-architecture refactor: the loss module
+    now returns ``list[LossComponent]``; if the MoE predictor forgets to unpack
+    and ``.mean()`` it, ``ModelOutputs.loss`` is a list and downstream
+    consumers (``PatchPredictor`` accumulator, loss aggregator) explode with a
+    confusing ``TypeError`` or ``AttributeError`` deep in unrelated code.
+    """
     coarse_shape = (8, 16)
     fine_shape = (16, 32)
     fine_coords = make_fine_coords(fine_shape)
@@ -169,16 +178,7 @@ def test_generate_on_batch_returns_scalar_loss():
 
 
 def _build_two_expert_predictor() -> DenoisingMoEPredictor:
-    """``DenoisingMoEPredictor.generate_on_batch`` must reduce the per-component
-    loss list returned by ``self._primary.loss(...)`` to a scalar tensor, the
-    same way ``DiffusionModel.generate_on_batch`` does.
-
-    Regression for the post-#1159 loss-architecture refactor: the loss module
-    now returns ``list[LossComponent]``; if the MoE predictor forgets to unpack
-    and ``.mean()`` it, ``ModelOutputs.loss`` is a list and downstream
-    consumers (``PatchPredictor`` accumulator, loss aggregator) explode with a
-    confusing ``TypeError`` or ``AttributeError`` deep in unrelated code.
-    """
+    """Two-expert MoE with real DiffusionModel experts (different weights)."""
     coarse_shape = (8, 16)
     fine_shape = (16, 32)
     fine_coords = make_fine_coords(fine_shape)
