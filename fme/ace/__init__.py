@@ -18,9 +18,22 @@ from fme.ace.aggregator.inference.spectrum import PowerSpectrumMetricConfig
 from fme.ace.aggregator.inference.time_mean import TimeMeanMetricConfig
 from fme.ace.aggregator.inference.video import VideoMetricConfig
 from fme.ace.aggregator.inference.zonal_mean import ZonalMeanMetricConfig
-from fme.ace.aggregator.one_step import OneStepAggregatorConfig
-from fme.ace.aggregator.one_step.ensemble import EnsembleMetricConfig
-from fme.ace.aggregator.one_step.reduced import StepMeanMetricConfig
+from fme.ace.aggregator.one_step import (
+    LegacyFlagOneStepAggregatorConfig,
+    OneStepAggregatorConfig,
+    build_one_step_aggregator,
+)
+from fme.ace.aggregator.one_step.ensemble import (
+    EnsembleMetricConfig,
+    OneStepEnsembleMetricConfig,
+)
+from fme.ace.aggregator.one_step.map import OneStepMapMetricConfig
+from fme.ace.aggregator.one_step.reduced import (
+    OneStepMeanMetricConfig,
+    StepMeanMetricConfig,
+)
+from fme.ace.aggregator.one_step.snapshot import OneStepSnapshotMetricConfig
+from fme.ace.aggregator.one_step.spectrum import OneStepSpectrumMetricConfig
 from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.augmentation import AugmentationConfig
 from fme.ace.data_loading.getters import get_forcing_data
@@ -50,13 +63,14 @@ from fme.ace.inference.inference import (
     InitialConditionConfig,
     run_inference_from_config,
 )
-from fme.ace.models.healpix.healpix_activations import (
-    CappedGELUConfig,
+from fme.ace.models.healpix.healpix_activations import CappedGELUConfig
+from fme.ace.models.healpix.healpix_blocks import (
+    ConvBlockConfig,
     DownsamplingBlockConfig,
+    UpsamplingBlockConfig,
 )
-from fme.ace.models.healpix.healpix_blocks import ConvBlockConfig, RecurrentBlockConfig
 from fme.ace.registry.hpx import (
-    HEALPixRecUNetBuilder,
+    HEALPixUNetBuilder,
     UNetDecoderConfig,
     UNetEncoderConfig,
 )

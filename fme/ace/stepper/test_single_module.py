@@ -17,7 +17,7 @@ import torch
 import xarray as xr
 
 import fme
-from fme.ace.aggregator import OneStepAggregator
+from fme.ace.aggregator import OneStepAggregatorConfig
 from fme.ace.aggregator.plotting import plot_paneled_data
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.inference.test_evaluator import (
@@ -29,10 +29,10 @@ from fme.ace.inference.test_evaluator import (
 from fme.ace.registry.sfno import SphericalFourierNeuralOperatorBuilder
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig, ForcingDeriver
 from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
+from fme.ace.stepper.loss_schedule import EpochNotProvidedError
 from fme.ace.stepper.single_module import (
     AtmosphereCorrectorConfig,
     CheckpointStepperConfig,
-    EpochNotProvidedError,
     SingleModuleStepperConfig,
     Stepper,
     StepperConfig,
@@ -156,17 +156,17 @@ def get_scalar_data(names, value):
 
 def test_stepper_no_train_step_specified():
     stepper = _init_train_stepper(loss=StepLossConfig(type="MSE"))
-    stepper._init_for_epoch(0)
-    assert stepper._n_forward_steps_sampler is None
-    assert stepper._eval_n_forward_steps_sampler is None
+    schedule = stepper._loss_schedule
+    schedule.init_for_epoch(0)
+    assert not schedule.has_sampler
 
 
 def test_stepper_step_int():
     stepper = _init_train_stepper(n_forward_steps=2, loss=StepLossConfig(type="MSE"))
-    assert stepper._n_forward_steps_schedule is not None
-    stepper._init_for_epoch(0)
-    assert stepper._n_forward_steps_sampler is not None
-    assert stepper._eval_n_forward_steps_sampler is not None
+    schedule = stepper._loss_schedule
+    assert schedule._schedule is not None
+    schedule.init_for_epoch(0)
+    assert schedule.has_sampler
 
 
 def test_stepper_step_probabilities():
@@ -179,10 +179,10 @@ def test_stepper_step_probabilities():
         ),
         loss=StepLossConfig(type="MSE"),
     )
-    assert stepper._n_forward_steps_schedule is not None
-    stepper._init_for_epoch(0)
-    assert stepper._n_forward_steps_sampler is not None
-    assert stepper._eval_n_forward_steps_sampler is not None
+    schedule = stepper._loss_schedule
+    assert schedule._schedule is not None
+    schedule.init_for_epoch(0)
+    assert schedule.has_sampler
 
 
 def test_stepper_step_schedule():
@@ -203,9 +203,10 @@ def test_stepper_step_schedule():
         ),
         loss=StepLossConfig(type="MSE"),
     )
-    assert stepper._n_forward_steps_schedule is not None
-    stepper._init_for_epoch(0)
-    assert stepper._n_forward_steps_sampler is not None
+    schedule = stepper._loss_schedule
+    assert schedule._schedule is not None
+    schedule.init_for_epoch(0)
+    assert schedule.has_sampler
 
 
 def test_seed_eval_does_not_corrupt_training_sampler():
@@ -218,19 +219,18 @@ def test_seed_eval_does_not_corrupt_training_sampler():
         ),
         loss=StepLossConfig(type="MSE"),
     )
-    stepper._init_for_epoch(0)
-    assert stepper._n_forward_steps_sampler is not None
-    assert stepper._eval_n_forward_steps_sampler is not None
-    stepper._n_forward_steps_sampler.seed_rng(42)
-    train_samples_before = [
-        stepper._n_forward_steps_sampler.sample() for _ in range(20)
-    ]
+    schedule = stepper._loss_schedule
+    schedule.init_for_epoch(0)
+    assert schedule._train_sampler is not None
+    assert schedule._eval_sampler is not None
+    schedule._train_sampler.seed_rng(42)
+    train_samples_before = [schedule._train_sampler.sample() for _ in range(20)]
     stepper.set_eval()
     stepper.seed_eval(seed=0)
-    [stepper._eval_n_forward_steps_sampler.sample() for _ in range(10)]
+    [schedule._eval_sampler.sample() for _ in range(10)]
     stepper.set_train()
-    stepper._n_forward_steps_sampler.seed_rng(42)
-    train_samples_after = [stepper._n_forward_steps_sampler.sample() for _ in range(20)]
+    schedule._train_sampler.seed_rng(42)
+    train_samples_after = [schedule._train_sampler.sample() for _ in range(20)]
     assert train_samples_before == train_samples_after
 
 
@@ -825,7 +825,7 @@ def test_train_on_batch_one_step_aggregator(n_forward_steps):
     # keep area weights ones for simplicity
     lat_lon_coordinates._area_weights = torch.ones(nx, ny)
     ds_info = DatasetInfo(horizontal_coordinates=lat_lon_coordinates)
-    aggregator = OneStepAggregator(ds_info, save_diagnostics=False)
+    aggregator = OneStepAggregatorConfig().build(ds_info, save_diagnostics=False)
 
     train_stepper = _get_train_stepper(config)
     stepped = train_stepper.train_on_batch(data, optimization=NullOptimization())
@@ -2556,3 +2556,37 @@ def test_checkpoint_stepper_config_to_stepper_config(tmp_path: pathlib.Path):
     assert isinstance(loaded_config, StepperConfig)
     assert loaded_config.derived_forcings == original_config.derived_forcings
     assert loaded_config.step.type == original_config.step.type
+
+
+def test_train_on_batch_masked_variable_has_zero_loss_count():
+    """Masked output variable contributes 0 samples to per-channel loss count."""
+    torch.manual_seed(0)
+    n_steps = 1
+    n_samples = 4
+    data_with_ic: BatchData = get_data(
+        ["a", "b"], n_samples=n_samples, n_time=n_steps + 1
+    ).data
+    data_with_ic.data_mask = {
+        "a": torch.ones(n_samples, dtype=torch.bool, device=DEVICE),
+        "b": torch.zeros(n_samples, dtype=torch.bool, device=DEVICE),
+    }
+    config = _get_stepper_config(["a", "b"], ["a", "b"])
+    stepper = _get_train_stepper(config, loss=StepLossConfig(type="MSE"))
+    stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
+    assert stepped.per_channel_losses is not None
+    assert stepped.per_channel_losses["b"].count == 0
+    assert stepped.per_channel_losses["a"].count == n_samples
+
+
+def test_predict_with_data_mask_zeros_masked_forcing():
+    """Masked forcing variable is zeroed in normalized space before the forward pass."""
+    n_steps = 1
+    stepper = _get_stepper(["a", "b"], ["a"], module_name="ChannelSum")
+    input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=["b"])
+    n_samples = forcing_data.data["b"].shape[0]
+    forcing_data.data_mask = {
+        "b": torch.zeros(n_samples, dtype=torch.bool, device=DEVICE),
+    }
+    output, _ = stepper.predict(input_data, forcing_data)
+    ic_a = input_data.as_batch_data().data["a"][:, 0]
+    torch.testing.assert_close(output.data["a"][:, 0], ic_a)
