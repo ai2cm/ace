@@ -80,6 +80,12 @@ from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.spatial_masking import StaticSpatialMaskingConfig
 from fme.core.step import SingleModuleStepConfig, StepSelector
 from fme.core.step.args import StepArgs
+from fme.core.step.infill_prediction import (
+    InferenceSchemeConfig,
+    InfillPredictionStepConfig,
+    TaskSamplingConfig,
+    TaskWeights,
+)
 from fme.core.step.multi_call import MultiCallConfig
 from fme.core.step.single_module import SingleModuleStep
 from fme.core.testing.regression import validate_tensor_dict
@@ -2531,12 +2537,6 @@ def test_predict_with_data_mask_zeros_masked_forcing():
 # ---------------------------------------------------------------------------
 # Task sampling integration tests (Commit 3)
 # ---------------------------------------------------------------------------
-from fme.core.step.infill_prediction import (
-    InferenceSchemeConfig,
-    InfillPredictionStepConfig,
-    TaskSamplingConfig,
-    TaskWeights,
-)
 
 
 def _get_infill_prediction_stepper_config(

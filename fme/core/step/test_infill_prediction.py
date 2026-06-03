@@ -398,11 +398,14 @@ class TestDataMaskFiltering:
         sampler = _make_sampler(
             TaskType.PREDICTION, all_names=["a", "b"], forcing_names=[]
         )
-        data_mask = {"a": torch.tensor([True])}
+        data_mask = {"a": torch.tensor([True] * 64)}
         random.seed(42)
-        tasks = sampler.sample(data_mask, 1)
-        prev, _, out = _extract_sample(tasks, 0, ["a", "b"])
-        assert "b" in prev or "b" in out or True  # b should be available
+        tasks = sampler.sample(data_mask, 64)
+        seen = set()
+        for i in range(64):
+            prev, _, out = _extract_sample(tasks, i, ["a", "b"])
+            seen.update(prev | out)
+        assert "b" in seen
 
     def test_device_propagated_from_data_mask(self):
         sampler = _make_sampler(TaskType.PREDICTION, all_names=["a", "b"])
