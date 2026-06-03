@@ -23,6 +23,7 @@ from fme.core.per_source_normalizer import (
 )
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.args import StepArgs
+from fme.core.step.masking import apply_input_mask, build_channel_mask_dict
 from fme.core.step.secondary_decoder import (
     NoSecondaryDecoder,
     SecondaryDecoder,
@@ -53,6 +54,16 @@ class Cmip6StepConfig(StepConfigABC):
         prescribed_prognostic_names: Prognostic variable names to overwrite from
             forcing data at each step (e.g. for inference with observed values).
         residual_prediction: Whether to use residual prediction.
+        include_channel_mask_inputs: Whether to append per-variable mask
+            indicator channels to the network input. When True the
+            network receives ``len(in_names)`` additional float channels
+            (1.0 = present, 0.0 = masked) after the regular input
+            channels, doubling the total input channel count.
+            Mirrors ``SingleModuleStepConfig.include_channel_mask_inputs``.
+            Pair with ``builder.allow_missing_variables: true`` and the
+            data pipeline's ``allow_missing_variables`` so the model
+            actually receives mask bits at training/inference time;
+            otherwise masks degenerate to all-ones and add no signal.
     """
 
     builder: ModuleSelector
@@ -68,6 +79,7 @@ class Cmip6StepConfig(StepConfigABC):
     next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
     prescribed_prognostic_names: list[str] = dataclasses.field(default_factory=list)
     residual_prediction: bool = False
+    include_channel_mask_inputs: bool = False
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
@@ -267,6 +279,11 @@ class Cmip6Step(StepABC):
     ):
         super().__init__()
         n_in_channels = len(config.in_names)
+        if config.include_channel_mask_inputs:
+            # Doubles the input channel count: data channels followed
+            # by one mask channel per ``in_names`` entry (1.0 present,
+            # 0.0 masked). Mirrors SingleModuleStep.
+            n_in_channels *= 2
         n_out_channels = len(config.out_names)
         self.in_packer = Packer(config.in_names)
         self.out_packer = Packer(config.out_names)
@@ -364,7 +381,23 @@ class Cmip6Step(StepABC):
             input_data, labels=args.labels, data_mask=args.data_mask
         )
 
+        # Explicitly zero out masked-sample values in normalized space
+        # (climatological-mean equivalent). Mirrors SingleModuleStep —
+        # keeps the silent NaN→0 path in the normalizer from being the
+        # sole signal carrier; the mask channels below tell the model
+        # which inputs were filled.
+        if args.data_mask is not None:
+            input_norm = apply_input_mask(input_norm, args.data_mask)
+
         input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
+
+        if self._config.include_channel_mask_inputs:
+            mask_dict = build_channel_mask_dict(
+                self.in_names, args.data_mask, input_tensor
+            )
+            mask_tensor = self.in_packer.pack(mask_dict, axis=self.CHANNEL_DIM)
+            input_tensor = torch.cat([input_tensor, mask_tensor], dim=self.CHANNEL_DIM)
+
         output_tensor = self.module.wrap_module(wrapper)(
             input_tensor, labels=args.labels
         )

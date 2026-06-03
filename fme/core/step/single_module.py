@@ -26,6 +26,7 @@ from fme.core.step.global_mean_removal import (
     GlobalMeanRemovalConfigUnion,
     NoGlobalMeanRemoval,
 )
+from fme.core.step.masking import apply_input_mask, build_channel_mask_dict
 from fme.core.step.secondary_decoder import (
     NoSecondaryDecoder,
     SecondaryDecoder,
@@ -384,10 +385,10 @@ class SingleModuleStep(StepABC):
 
         def network_call(input_norm: TensorDict) -> TensorDict:
             if args.data_mask is not None:
-                input_norm = _apply_input_mask(input_norm, args.data_mask)
+                input_norm = apply_input_mask(input_norm, args.data_mask)
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
             if self._config.include_channel_mask_inputs:
-                mask_dict = _build_channel_mask_dict(
+                mask_dict = build_channel_mask_dict(
                     self.in_names, args.data_mask, input_tensor
                 )
                 mask_tensor = self.in_packer.pack(mask_dict, axis=self.CHANNEL_DIM)
@@ -450,52 +451,6 @@ class SingleModuleStep(StepABC):
         self.module.load_state(module)
         if "secondary_decoder" in state:
             self.secondary_decoder.load_module_state(state["secondary_decoder"])
-
-
-def _apply_input_mask(input_norm: TensorDict, data_mask: TensorMapping) -> TensorDict:
-    """Zero out masked input variables in normalized space.
-
-    For each variable in data_mask with False entries, sets those batch
-    members' values to 0 in the normalized input. This is equivalent to
-    replacing with the climatological mean in physical space.
-    """
-    result = dict(input_norm)
-    for name, mask in data_mask.items():
-        if name in result:
-            # mask shape: [batch], data shape: [batch, ...spatial...]
-            broadcast_mask = mask.view(mask.shape[0], *([1] * (result[name].ndim - 1)))
-            result[name] = torch.where(broadcast_mask, result[name], 0.0)
-    return result
-
-
-def _build_channel_mask_dict(
-    in_names: list[str],
-    data_mask: TensorMapping | None,
-    packed_input: torch.Tensor,
-) -> TensorDict:
-    """Build a dict of per-variable spatial mask tensors.
-
-    Returns a ``TensorDict`` keyed by variable name, with each value a
-    ``(batch, *spatial)`` float tensor (1.0 = present, 0.0 = masked).
-    The caller is responsible for packing this dict into the correct
-    channel order.
-
-    Args:
-        in_names: Input variable names.
-        data_mask: Per-variable boolean masks of shape ``[batch]``, or None.
-        packed_input: The packed input tensor, used to infer shape and device.
-    """
-    batch = packed_input.shape[0]
-    spatial = packed_input.shape[-2:]
-    device = packed_input.device
-    result: TensorDict = {}
-    for name in in_names:
-        if data_mask is not None and name in data_mask:
-            mask_1d = data_mask[name].to(device=device, dtype=torch.float)
-            result[name] = mask_1d.view(batch, 1, 1).expand(batch, *spatial)
-        else:
-            result[name] = torch.ones(batch, *spatial, device=device)
-    return result
 
 
 def step_with_adjustments(

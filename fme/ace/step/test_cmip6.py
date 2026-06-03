@@ -286,3 +286,113 @@ def test_allow_missing_variables_delegates_to_builder():
         normalization=normalization,
     )
     assert permissive_config.allow_missing_variables is True
+
+
+def test_include_channel_mask_inputs_doubles_in_channels():
+    """When ``include_channel_mask_inputs=True`` the model is built
+    with double the in_names channel count — one data channel + one
+    mask channel per input. We verify the input-tensor shape the
+    packer + concat produce during ``step`` matches twice the data
+    channel count (the model itself is built around this contract)."""
+    in_names = ["ta1000", "forcing"]
+    out_names = ["ta1000"]
+    config_masked = dataclasses.replace(
+        _get_cmip6_config(in_names=in_names, out_names=out_names),
+        include_channel_mask_inputs=True,
+    )
+    step = _build_step(config_masked)
+
+    # Capture the actual input_tensor the step feeds to the model by
+    # patching the module's forward. The captured tensor's channel
+    # dim must equal 2 * len(in_names) — data channels followed by
+    # mask channels.
+    captured: dict[str, torch.Tensor] = {}
+    original_forward = step.module.torch_module.forward
+
+    def capture(x, *args, **kwargs):
+        captured["x"] = x
+        return original_forward(x, *args, **kwargs)
+
+    step.module.torch_module.forward = capture
+    input_data = _tensor_dict(step.input_names)
+    next_step_input = {name: torch.zeros_like(v) for name, v in input_data.items()}
+    step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input,
+            labels=None,
+            data_mask=None,
+        )
+    )
+    # CHANNEL_DIM is -3 (B, C, H, W); after the mask concat the
+    # channel count should be 2*len(in_names) = 4.
+    assert captured["x"].shape[step.CHANNEL_DIM] == 2 * len(in_names)
+
+
+def test_include_channel_mask_inputs_changes_output_for_masked_samples():
+    """A batch with a partial data_mask should produce different
+    outputs than the same batch without a mask — masked samples are
+    explicitly zeroed in normalized space and the mask bit is fed to
+    the network alongside, so the model behavior on the masked rows
+    diverges. Unmasked rows stay deterministically the same."""
+    in_names = ["ta1000", "forcing"]
+    out_names = ["ta1000"]
+    config = _get_cmip6_config(in_names=in_names, out_names=out_names)
+    config_masked = dataclasses.replace(config, include_channel_mask_inputs=True)
+    torch.manual_seed(0)
+    step = _build_step(config_masked)
+    n = 4
+    input_data = {
+        name: torch.rand(n, *IMG_SHAPE, device=fme.get_device()) for name in in_names
+    }
+    next_step_input = {name: torch.zeros_like(input_data[name]) for name in in_names}
+    mask = {
+        "forcing": torch.tensor([True, True, False, False], device=fme.get_device())
+    }
+    out_no_mask = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input,
+            labels=None,
+            data_mask=None,
+        )
+    )
+    out_with_mask = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input,
+            labels=None,
+            data_mask=mask,
+        )
+    )
+    # Unmasked rows: forcing.mask==True for these, same as the
+    # synthesised all-ones mask in the no-data_mask path. Outputs
+    # are deterministically identical.
+    torch.testing.assert_close(out_with_mask["ta1000"][:2], out_no_mask["ta1000"][:2])
+    # Masked rows: forcing is zeroed AND the mask channel reads 0 for
+    # those samples — different from the no-mask call.
+    assert not torch.allclose(out_with_mask["ta1000"][2:], out_no_mask["ta1000"][2:])
+
+
+def test_include_channel_mask_inputs_no_data_mask_uses_all_ones():
+    """When ``include_channel_mask_inputs=True`` but the call doesn't
+    pass a data_mask (inference, validation), the step synthesises an
+    all-ones mask so the model receives a consistent input shape."""
+    in_names = ["ta1000", "forcing"]
+    out_names = ["ta1000"]
+    config = _get_cmip6_config(in_names=in_names, out_names=out_names)
+    config_masked = dataclasses.replace(config, include_channel_mask_inputs=True)
+    step = _build_step(config_masked)
+    input_data = _tensor_dict(step.input_names)
+    next_step_input = {name: torch.zeros_like(v) for name, v in input_data.items()}
+    out = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input,
+            labels=None,
+            data_mask=None,
+        )
+    )
+    # Output shape matches the regular step — the doubled in_channels
+    # come from input + mask, but n_out_channels is unchanged.
+    assert out["ta1000"].shape == (N_SAMPLES, *IMG_SHAPE)
