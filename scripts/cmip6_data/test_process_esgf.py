@@ -492,6 +492,67 @@ def test_day_augmentables_failed_default_is_empty_set():
     assert out == ["rsdt"]
 
 
+# ---------------------------------------------------------------------------
+# _should_derive_total_water_path — predicate for the derived TWP write
+# in augment_one_esgf. Tests the same-pass-both-inputs case that the
+# original implementation missed (22 of 26 eligible v2 datasets).
+# ---------------------------------------------------------------------------
+
+
+def test_total_water_path_derived_when_both_added_in_same_pass():
+    """The common v2 case: Pangeo ingest had neither water_vapor_path
+    nor clwvi; this augment pass added water_vapor_path via the
+    surface-and-ocean loop and clwvi via the day-cadence loop.
+    Pre-fix this returned False because water_vapor_path wasn't in
+    ``existing_vars``."""
+    from process_esgf import _should_derive_total_water_path
+
+    assert _should_derive_total_water_path(
+        day_added=["clwvi"],
+        existing_vars=set(),
+        added_names=["water_vapor_path"],
+    )
+
+
+def test_total_water_path_derived_when_wvp_preexisting_and_clwvi_added():
+    """The 4-of-26 case that the pre-fix code already handled:
+    water_vapor_path was in the Pangeo zarr already and clwvi got
+    augmented in this pass."""
+    from process_esgf import _should_derive_total_water_path
+
+    assert _should_derive_total_water_path(
+        day_added=["clwvi"],
+        existing_vars={"water_vapor_path"},
+        added_names=[],
+    )
+
+
+def test_total_water_path_skipped_when_clwvi_already_present():
+    """If clwvi was added in a *prior* augment pass (not this one),
+    skip the derivation. Either total_water_path already exists from
+    that prior pass, or it was deliberately not derived then. Don't
+    second-guess history; force-rederive via a migration if needed."""
+    from process_esgf import _should_derive_total_water_path
+
+    assert not _should_derive_total_water_path(
+        day_added=[],
+        existing_vars={"water_vapor_path", "clwvi"},
+        added_names=[],
+    )
+
+
+def test_total_water_path_skipped_when_wvp_missing_everywhere():
+    """clwvi alone is not enough — without water_vapor_path the
+    derivation is undefined."""
+    from process_esgf import _should_derive_total_water_path
+
+    assert not _should_derive_total_water_path(
+        day_added=["clwvi"],
+        existing_vars=set(),
+        added_names=[],
+    )
+
+
 if __name__ == "__main__":
     import sys
 

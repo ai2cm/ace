@@ -995,6 +995,33 @@ def _augment_day_variables(
     return added
 
 
+def _should_derive_total_water_path(
+    day_added: list[str],
+    existing_vars: set[str],
+    added_names: list[str],
+) -> bool:
+    """True iff the augment pass should derive ``total_water_path``.
+
+    Derivation requires ``water_vapor_path`` + ``clwvi`` both to be
+    on disk after the augment writes finish, AND for ``clwvi`` to
+    have been added by *this* pass (otherwise total_water_path
+    either already exists or the prior pass deliberately didn't
+    derive it). ``water_vapor_path`` can come from either source:
+
+    - Pre-augment (in ``existing_vars``): the Pangeo zarr already
+      carried Eday.prw.
+    - Same pass (in ``added_names``): the surface-and-ocean loop
+      added it via ESGF earlier in this run.
+
+    The historical bug only checked ``existing_vars``, missing
+    the common v2 case where both inputs are augmented in the same
+    pass (22 of 26 eligible datasets affected).
+    """
+    if "clwvi" not in day_added:
+        return False
+    return "water_vapor_path" in existing_vars or "water_vapor_path" in added_names
+
+
 def augment_one_esgf(
     task: ESGFDatasetTask,
     config: ESGFProcessConfig,
@@ -1193,9 +1220,13 @@ def augment_one_esgf(
         added_names.extend(day_added)
 
         # Derived total_water_path mirrors the fresh-process path's
-        # step 9_pre — if clwvi just got augmented in and the prior
-        # ingest already had water_vapor_path, emit the sum.
-        if day_added and "clwvi" in day_added and "water_vapor_path" in existing_vars:
+        # step 9_pre — see :func:`_should_derive_total_water_path`
+        # for the predicate.
+        if _should_derive_total_water_path(
+            day_added=day_added,
+            existing_vars=existing_vars,
+            added_names=added_names,
+        ):
             try:
                 reopened = xr.open_zarr(zarr_path, consolidated=False)
                 twp = compute_total_water_path(
