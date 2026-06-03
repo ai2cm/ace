@@ -422,13 +422,13 @@ def _force_conserve_moisture(
         #    ) * current_precip_rate
         logging.debug(
             "_force_conserve_moisture: precipitation_global_mean=%.3e",
-            precipitation_global_mean.item(),
+            precipitation_global_mean.mean().item(),
         )
         if precipitation_global_mean.abs().max().item() < 1e-20:
             logging.warning(
                 "Near-zero global precipitation mean (%.3e); "
                 "scale factor will be NaN/inf.",
-                precipitation_global_mean.item(),
+                precipitation_global_mean.mean().item(),
             )
         gen.set_precipitation_rate(
             gen.precipitation_rate
@@ -441,13 +441,13 @@ def _force_conserve_moisture(
         )
         logging.debug(
             "_force_conserve_moisture: evaporation_global_mean=%.3e",
-            evaporation_global_mean.item(),
+            evaporation_global_mean.mean().item(),
         )
         if evaporation_global_mean.abs().max().item() < 1e-20:
             logging.warning(
                 "Near-zero global evaporation mean (%.3e); "
                 "scale factor will be NaN/inf.",
-                evaporation_global_mean.item(),
+                evaporation_global_mean.mean().item(),
             )
         gen.set_evaporation_rate(
             gen.evaporation_rate
