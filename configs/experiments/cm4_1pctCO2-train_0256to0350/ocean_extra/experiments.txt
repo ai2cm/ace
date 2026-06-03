@@ -36,7 +36,7 @@ group|tag|exper_id|status|ckpt_type|priority|min_runtime|override|results_datase
 
 1pct_nosmooth_0256to0350-hfds_resid-ft_correctOHC|rs0|01KKCSCFVA1ECA8CWBPPY04BC4|trained|best_inference_ckpt|normal|--not-preemptible
 
-1pct_nosmooth_0256to0350-hfds_prescribed-ft_correctOHC|rs0|01KKDHDK6TDS01C8X4VBVDT94C|trained|best_inference_ckpt|normal|--not-preemptible
+1pct_nosmooth_0256to0350-hfds_prescribed-ft_correctOHC|rs0|01KKDHDK6TDS01C8X4VBVDT94C|maybe_run_ic0211_20yr|best_inference_ckpt|normal|--not-preemptible
 
 1pct_nosmooth_0256to0350-hfds_prescribed-ft_OHC_OSC|rs0|01KKZ29EDG5X7KN4EMSP102Y8D|training|best_inference_ckpt|normal|--not-preemptible
 
@@ -56,7 +56,7 @@ ace-samudra-coupled-cm4-8ez70kzy-decoupled_samudra|||trained|best_inference_ckpt
 
 1pct_nosmooth_0256to0350-ft_correctOHC|rs0|01KSZQKHJYBBK0R7EBHPM16P80|trained|best_inference_ckpt|high|--min-runtime 3h|||ai2/ace|a100+h100|
 
-1pct_nosmooth_0256to0350-ft_correctOHC-precorrector_optim|rs0|01KT2NEKDV5J2ZZY75CZN6VEWW|run_ic0211_20yr|best_inference_ckpt|high|--min-runtime 2h|||ai2/ace|a100+h100|
+1pct_nosmooth_0256to0350-ft_correctOHC-precorrector_optim|rs0|01KT2NEKDV5J2ZZY75CZN6VEWW|trained|best_inference_ckpt|high|--min-runtime 2h|||ai2/ace|a100+h100|
 
 1pct_nosmooth_0256to0350-precorrector_optim|rs0|01KT2SR554EEX28Q567HDGB6D9|training|best_inference_ckpt|normal|--min-runtime 8h
 
