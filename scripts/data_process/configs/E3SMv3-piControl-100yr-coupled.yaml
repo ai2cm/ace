@@ -1,4 +1,4 @@
-version: "2026-05-27"
+version: "2026-06-02"
 family_name: E3SMv3-piControl-100yr-coupled
 output_directory: /pscratch/sd/e/elynnwu/fme-dataset
 
@@ -10,11 +10,11 @@ coupled_datasets:
     ocean_extra_masked_names: ["iceVolumeTotal", "iceThicknessMean"]
     ocean_extra_fill_values:
       uVelocityGeoCell: 0.0
-      vVelocityGeoCell: 0.0    
+      vVelocityGeoCell: 0.0
     surface_flux_window_avg:
       window_timedelta: 120h
-      first_timestamp: "0401-01-03T12:00:00"
-      last_timestamp: "0501-01-03T12:00:00"
+      first_timestamp: "0425-01-03T12:00:00"
+      last_timestamp: "0530-12-29T12:00:00"
       subset_names:
         - FLUS
         - FSUS
@@ -29,7 +29,7 @@ coupled_datasets:
   coupled_sea_ice:
     window_avg:
       window_timedelta: 120h
-      first_timestamp: "0401-01-06T00:00:00"
+      first_timestamp: "0425-01-01T00:00:00"
       shift_timestamps_to_avg_interval_midpoint: true
     include_ts: true
   output_writer:
@@ -46,15 +46,15 @@ coupled_datasets:
 input_datasets:
   climate_data_type: "E3SMV2"
   atmosphere:
-    zarr_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-05-26-E3SMv3-piControl-atmosphere-100yr-6H.zarr
-    time_chunk_size: 500
+    zarr_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H-data.zarr
+    time_chunk_size: 360
     extra_fields:
       names_and_prefixes: ["ak_", "bk_"]
   ocean:
-    zarr_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-05-26-E3SMv3-piControl-ocean-100yr-5D-average.zarr
-    time_chunk_size: 25
+    zarr_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-06-02-E3SMv3-piControl-ocean-105yr-5D-average.zarr
+    time_chunk_size: 60
     extra_fields:
       names_and_prefixes: ["idepth_", "mask_"]
   stats:
-    atmosphere_dir: /pscratch/sd/e/elynnwu/fme-dataset/2026-05-26-E3SMv3-piControl-atmosphere-100yr-6H-stats
-    ocean_dir: /pscratch/sd/e/elynnwu/fme-dataset/2026-05-26-E3SMv3-piControl-ocean-100yr-5D-average-stats
+    atmosphere_dir: /pscratch/sd/e/elynnwu/fme-dataset/2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H-stats
+    ocean_dir: /pscratch/sd/e/elynnwu/fme-dataset/2026-06-02-E3SMv3-piControl-ocean-105yr-5D-average-stats
