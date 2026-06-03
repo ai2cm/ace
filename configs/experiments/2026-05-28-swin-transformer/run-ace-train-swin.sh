@@ -6,7 +6,7 @@ SCRIPT_DIR=$(dirname "${BASH_SOURCE[0]}")
 JOB_GROUP="swin-transformer-comparison"
 export WANDB_PROJECT=${WANDB_PROJECT:-SwinTransformer}
 export BEAKER_WORKSPACE=${BEAKER_WORKSPACE:-ai2/ace}
-export BEAKER_CLUSTER=${BEAKER_CLUSTER:-ai2/titan}
+export BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/titan ai2/saturn ai2/jupiter ai2/ceres"}
 export BEAKER_PRIORITY=${BEAKER_PRIORITY:-high}
 
 declare -A JOBS=(
