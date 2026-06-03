@@ -1,4 +1,4 @@
 group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
 
 
-1pct_nosmooth_0256to0350-precorrector_optima|rs0|ace-samudra-cm4|yhintf1d|best_ckpt|train|high|a100+h100|4|500GiB|0||stepper_training.optimize_precorrected=True stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' max_epochs=50 seed=0||1h
+1pct_nosmooth_0256to0350-precorrector_optim-ft_correctOHC|rs0|ace-samudra-cm4|yhintf1d|best_ckpt|train|high|a100+h100|4|500GiB|0||stepper_training.optimize_precorrected=True stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' max_epochs=50 seed=0||1h
