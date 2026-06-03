@@ -5,12 +5,14 @@ import numpy as np
 import torch
 import xarray as xr
 
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import WandB
 
-from .data import InferenceBatchData
+from .build_context import MetricBuildContext, MetricNotSupportedError, maybe_filter
+from .data import InferenceBatchData, MetricBuildResult, SubAggregator
 
 wandb = WandB.get_instance()
 
@@ -371,22 +373,21 @@ class VideoAggregator:
         def get_units(name: str) -> str | None:
             if name in self._variable_metadata:
                 return self._variable_metadata[name].units
-            else:
-                return None
+            return None
 
         def get_long_name(name: str) -> str | None:
             if name in self._variable_metadata:
                 return self._variable_metadata[name].long_name
-            else:
-                return None
+            return None
 
         for name in gen_data:
+            long_name = get_long_name(name) or name
             video_data[name] = _MaybePairedVideoData(
                 caption=self._get_caption(name),
                 gen=gen_data[name],
                 target=target_data[name],
                 units=get_units(name),
-                long_name=f"ensemble mean of {get_long_name(name)}",
+                long_name=f"ensemble mean of {long_name}",
             )
             if self._enable_extended_videos:
                 video_data[f"bias/{name}"] = _MaybePairedVideoData(
@@ -475,8 +476,8 @@ class VideoAggregator:
             "Autoregressive (left) prediction and (right) target for {name} [{units}]"
         )
         if name in self._variable_metadata:
-            caption_name = self._variable_metadata[name].long_name
-            units = self._variable_metadata[name].units
+            caption_name = self._variable_metadata[name].display_long_name(name)
+            units = self._variable_metadata[name].display_units("unknown units")
         else:
             caption_name, units = name, "unknown units"
         return caption.format(name=caption_name, units=units)
@@ -516,3 +517,25 @@ def _make_video(
         fps=4,
         format="gif",
     )
+
+
+@dataclasses.dataclass
+class VideoMetricConfig:
+    variables: list[str] | None = None
+    name: str = "video"
+    enable_extended_videos: bool = False
+    enabled: bool = False
+    strict: bool = True
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        if not isinstance(ctx.horizontal_coordinates, LatLonCoordinates):
+            raise MetricNotSupportedError("Video metric requires LatLonCoordinates.")
+        agg: SubAggregator = VideoAggregator(
+            n_timesteps=ctx.n_timesteps,
+            enable_extended_videos=self.enable_extended_videos,
+            variable_metadata=ctx.variable_metadata,
+        )
+        return MetricBuildResult(aggregator=maybe_filter(agg, self.variables))
