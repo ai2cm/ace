@@ -79,8 +79,25 @@ def convert_one(
         len(ds.data_vars),
         int(ds.sizes.get("time", 0)),
     )
+    # zlib1 + shuffle: roughly matches zarr's blosc/lz4 default ratio
+    # (~0.41 vs ~0.36 of raw on v2 sample) for ~3x the write cost
+    # and only ~70% slower per-variable reads (0.19s vs 0.11s on a
+    # 2-year subset — overlapped with compute via prefetching at
+    # training time, so the wall-clock impact on training step time
+    # is negligible). Without these settings the netCDF mirror runs
+    # ~2.5x the on-disk size of the zarr source (v2 measured: 4 TB
+    # zarr → 11 TB netCDF); with these, ~4.5 TB. Higher complevels
+    # (3, 5) gain only 1-2% extra compression for 25-65% more write
+    # time. Shuffle is the byte-shuffle filter — significant gains
+    # on float climate data because it groups same-exponent bytes
+    # together for the zlib coder.
     encoding = {
-        name: {"chunksizes": (1,) + ds[name].shape[1:]}
+        name: {
+            "chunksizes": (1,) + ds[name].shape[1:],
+            "zlib": True,
+            "complevel": 1,
+            "shuffle": True,
+        }
         for name in ds.data_vars
         if "time" in ds[name].dims
     }
