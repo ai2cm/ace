@@ -29,6 +29,10 @@ inference:
         engine: zarr
     num_data_workers: 4
   aggregator:
+    # Log uncorrected (pre-corrector) inference metrics under an "uncorrected/"
+    # prefix to quantify corrector reliance. Defaults on; set explicitly to
+    # document intent for this corrector-regularization experiment.
+    compute_uncorrected_metrics: true
     histogram:
       enabled: false
 logging:
