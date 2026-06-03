@@ -83,11 +83,16 @@ _SKIP_VARS = frozenset(
 #   model uses to know where land is. Real aggregated stats (mean
 #   ~0.3, std ~0.45) would standardise away the 0/1 interpretation;
 #   trivial norm preserves the raw value the network expects.
+# - ``luh2_forest`` — a static [0, 1] field carrying the LUH2 forest
+#   fraction. Same rationale as ``land_fraction``: real aggregated
+#   stats (mean ~0.07, std ~0.23) would standardise away the
+#   semantic 0/1 interpretation.
 #
 # Injection happens post-aggregation so any real stats for
-# ``land_fraction`` (which is NOT in _SKIP_VARS) get *overridden* —
-# making the convention authoritative regardless of upstream stats.
-_TRIVIAL_NORM_VARS = frozenset(("land_fraction",) + tuple(_SKIP_VARS))
+# ``land_fraction`` / ``luh2_forest`` (neither of which is in
+# _SKIP_VARS) get *overridden* — making the convention authoritative
+# regardless of upstream stats.
+_TRIVIAL_NORM_VARS = frozenset(("land_fraction", "luh2_forest") + tuple(_SKIP_VARS))
 
 
 def _inject_trivial_norm(stats: dict[str, dict]) -> None:

@@ -759,6 +759,16 @@ stepper:
         # source by all publishers — so we skip both and let the
         # network output whatever it learns.
         conserve_dry_air: true
+      # Pass per-variable mask channels to the model. With
+      # ``allow_missing_variables: true`` on the builder, the loader
+      # NaN-fills variables a dataset doesn't publish. The step
+      # logic then zeros those entries in normalized space and
+      # appends one mask channel per ``in_names`` entry (1.0
+      # present, 0.0 masked). Without these channels the model
+      # would see "0" indistinguishable from "missing" — see
+      # ``fme.core.step.masking`` and Cmip6Step.step for the
+      # mechanics.
+      include_channel_mask_inputs: true
       # Input-only variables are restricted to statics + exogenous
       # forcings (training_run_1 §variables — "I'd like the only
       # input-only variables to be the static and input4mips ones").
