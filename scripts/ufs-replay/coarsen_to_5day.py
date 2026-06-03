@@ -98,7 +98,7 @@ def coarsen_dataset(input_path: str, output_path: str, factor: int = 5):
     n_out = ds_out.sizes.get("time", 0)
     logging.info("Output: %d timesteps, %d variables", n_out, len(ds_out.data_vars))
 
-    # Write
+    # Write — rechunk uniformly and clear source encoding to avoid conflicts
     logging.info("Writing to %s", output_path)
     chunk_spec = {}
     if "time" in ds_out.dims:
@@ -109,6 +109,10 @@ def coarsen_dataset(input_path: str, output_path: str, factor: int = 5):
         chunk_spec["lon"] = ds_out.sizes["lon"]
 
     ds_out = ds_out.chunk(chunk_spec)
+    for var in ds_out.data_vars:
+        ds_out[var].encoding.clear()
+    for coord in ds_out.coords:
+        ds_out[coord].encoding.clear()
     ds_out.to_zarr(output_path, mode="w", consolidated=True)
     logging.info("Done. Output at %s", output_path)
 
