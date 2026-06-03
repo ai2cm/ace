@@ -1,5 +1,6 @@
 import dataclasses
 import datetime
+import logging
 from collections.abc import Callable
 from typing import Literal, Protocol
 
@@ -182,7 +183,35 @@ class AtmosphereCorrector(CorrectorABC):
         if len(self._config.force_positive_names) > 0:
             # do this step before imposing other conservation correctors, since
             # otherwise it could end up creating violations of those constraints.
+            for _diag_name in self._config.force_positive_names:
+                if _diag_name in gen_data:
+                    _t = gen_data[_diag_name]
+                    logging.debug(
+                        "pre-force_positive %s: min=%.3e max=%.3e mean=%.3e",
+                        _diag_name,
+                        _t.min().item(),
+                        _t.max().item(),
+                        _t.mean().item(),
+                    )
+            _prate_pre_max = (
+                gen_data["PRATEsfc"].max().item() if "PRATEsfc" in gen_data else None
+            )
             gen_data = force_positive(gen_data, self._config.force_positive_names)
+            if "PRATEsfc" in gen_data:
+                _prate = gen_data["PRATEsfc"]
+                logging.debug(
+                    "post-force_positive PRATEsfc: min=%.3e max=%.3e mean=%.3e",
+                    _prate.min().item(),
+                    _prate.max().item(),
+                    _prate.mean().item(),
+                )
+                if _prate.max().item() < 1e-20:
+                    logging.warning(
+                        "PRATEsfc is all-zero after force_positive "
+                        "(pre-force_positive max was %.3e); "
+                        "moisture budget correction will produce NaN.",
+                        _prate_pre_max,
+                    )
         if self._config.conserve_dry_air:
             if self._vertical_coordinate is None:
                 raise ValueError(
@@ -391,6 +420,16 @@ def _force_conserve_moisture(
         #    new_precip_rate = (
         #        new_global_precip_rate / current_global_precip_rate
         #    ) * current_precip_rate
+        logging.debug(
+            "_force_conserve_moisture: precipitation_global_mean=%.3e",
+            precipitation_global_mean.item(),
+        )
+        if precipitation_global_mean.abs().max().item() < 1e-20:
+            logging.warning(
+                "Near-zero global precipitation mean (%.3e); "
+                "scale factor will be NaN/inf.",
+                precipitation_global_mean.item(),
+            )
         gen.set_precipitation_rate(
             gen.precipitation_rate
             * (new_precipitation_global_mean / precipitation_global_mean)
@@ -400,6 +439,16 @@ def _force_conserve_moisture(
         new_evaporation_global_mean = (
             twp_tendency_global_mean + precipitation_global_mean
         )
+        logging.debug(
+            "_force_conserve_moisture: evaporation_global_mean=%.3e",
+            evaporation_global_mean.item(),
+        )
+        if evaporation_global_mean.abs().max().item() < 1e-20:
+            logging.warning(
+                "Near-zero global evaporation mean (%.3e); "
+                "scale factor will be NaN/inf.",
+                evaporation_global_mean.item(),
+            )
         gen.set_evaporation_rate(
             gen.evaporation_rate
             * (new_evaporation_global_mean / evaporation_global_mean)
@@ -409,6 +458,14 @@ def _force_conserve_moisture(
         # advection based on assumption that the columnwise
         # moisture budget closes. Correcting the global mean budget first
         # is important to ensure the resulting advection has zero global mean.
+        logging.debug(
+            "_force_conserve_moisture: pre-advection evap min=%.3e max=%.3e,"
+            " precip min=%.3e max=%.3e",
+            gen.evaporation_rate.min().item(),
+            gen.evaporation_rate.max().item(),
+            gen.precipitation_rate.min().item(),
+            gen.precipitation_rate.max().item(),
+        )
         new_advection = twp_total_tendency - (
             gen.evaporation_rate - gen.precipitation_rate
         )

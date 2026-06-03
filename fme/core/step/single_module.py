@@ -574,6 +574,19 @@ def step_with_adjustments(
         output = global_mean_removal.inverse_transform(output)
         _check_finite_dict(output, "global_mean_removal.inverse_transform")
     if corrector is not None:
+        for _diag_name in (
+            "PRATEsfc",
+            "tendency_of_total_water_path_due_to_advection",
+        ):
+            if _diag_name in output:
+                _t = output[_diag_name]
+                logging.debug(
+                    "pre-corrector %s: min=%.3e max=%.3e mean=%.3e",
+                    _diag_name,
+                    _t.min().item(),
+                    _t.max().item(),
+                    _t.mean().item(),
+                )
         output = corrector(input, output, next_step_input_data)
         _check_finite_dict(output, "corrector output")
     if ocean is not None:
