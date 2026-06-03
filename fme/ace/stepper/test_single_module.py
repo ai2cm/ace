@@ -2526,3 +2526,142 @@ def test_predict_with_data_mask_zeros_masked_forcing():
     output, _ = stepper.predict(input_data, forcing_data)
     ic_a = input_data.as_batch_data().data["a"][:, 0]
     torch.testing.assert_close(output.data["a"][:, 0], ic_a)
+
+
+# ---------------------------------------------------------------------------
+# Task sampling integration tests (Commit 3)
+# ---------------------------------------------------------------------------
+from fme.core.step.infill_prediction import (
+    InferenceSchemeConfig,
+    InfillPredictionStepConfig,
+    TaskSamplingConfig,
+    TaskWeights,
+)
+
+
+def _get_infill_prediction_stepper_config(
+    all_names: list[str] | None = None,
+    forcing_names: list[str] | None = None,
+    in_names: list[str] | None = None,
+    out_names: list[str] | None = None,
+) -> StepperConfig:
+    if all_names is None:
+        all_names = ["a", "b", "forcing_x"]
+    if forcing_names is None:
+        forcing_names = ["forcing_x"]
+    if in_names is None:
+        in_names = ["a", "b", "forcing_x"]
+    if out_names is None:
+        out_names = ["a", "b"]
+
+    n_non_forcing = len(all_names) - len(forcing_names)
+
+    class AddOne(torch.nn.Module):
+        def forward(self, x):
+            return x[:, :n_non_forcing] + 1
+
+    return StepperConfig(
+        step=StepSelector(
+            type="infill_prediction",
+            config=dataclasses.asdict(
+                InfillPredictionStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": AddOne()}
+                    ),
+                    all_names=all_names,
+                    forcing_names=forcing_names,
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means=get_scalar_data(all_names, 0.0),
+                            stds=get_scalar_data(all_names, 1.0),
+                        ),
+                    ),
+                    inference_scheme=InferenceSchemeConfig(
+                        in_names=in_names,
+                        out_names=out_names,
+                    ),
+                )
+            ),
+        ),
+    )
+
+
+def test_task_sampling_none_preserves_existing_behavior():
+    torch.manual_seed(0)
+    config = _get_stepper_config(["a", "b"], ["a", "b"])
+    stepper = _get_train_stepper(config, loss=StepLossConfig(type="MSE"))
+    data = get_data(["a", "b"], n_samples=3, n_time=3).data
+    stepped = stepper.train_on_batch(data, optimization=NullOptimization())
+    assert "loss_task" not in stepped.metrics
+    assert "loss" in stepped.metrics
+
+
+def test_task_sampling_requires_infill_prediction_step():
+    config = _get_stepper_config(["a", "b"], ["a", "b"])
+    with pytest.raises(ValueError, match="InfillPredictionStepConfig"):
+        _get_train_stepper(
+            config,
+            loss=StepLossConfig(type="MSE"),
+            task_sampling=TaskSamplingConfig(),
+        )
+
+
+@pytest.mark.parametrize("n_forward_steps", [1, 2])
+def test_task_sampling_training(n_forward_steps):
+    torch.manual_seed(0)
+    all_names = ["a", "b", "forcing_x"]
+    config = _get_infill_prediction_stepper_config()
+    task_sampling = TaskSamplingConfig(
+        task_weights=TaskWeights(
+            auto_encode=0.0,
+            infill=0.0,
+            prediction=1.0,
+            infill_prediction=0.0,
+            combined_all=0.0,
+        ),
+    )
+    stepper = _get_train_stepper(
+        config,
+        loss=StepLossConfig(type="MSE"),
+        task_sampling=task_sampling,
+    )
+    data = get_data(all_names, n_samples=3, n_time=n_forward_steps + 1).data
+    stepped = stepper.train_on_batch(data, optimization=NullOptimization())
+    assert "loss" in stepped.metrics
+    assert "loss_task" in stepped.metrics
+    assert stepped.metrics["loss_task"] > 0
+    for step in range(n_forward_steps):
+        assert f"loss_step_{step}" in stepped.metrics
+
+
+def test_task_sampling_loss_included_in_total():
+    torch.manual_seed(0)
+    all_names = ["a", "b", "forcing_x"]
+
+    config_no_task = _get_infill_prediction_stepper_config()
+    stepper_no_task = _get_train_stepper(
+        config_no_task, loss=StepLossConfig(type="MSE")
+    )
+    data = get_data(all_names, n_samples=3, n_time=2).data
+    result_no_task = stepper_no_task.train_on_batch(
+        data, optimization=NullOptimization()
+    )
+
+    torch.manual_seed(0)
+    config_task = _get_infill_prediction_stepper_config()
+    stepper_task = _get_train_stepper(
+        config_task,
+        loss=StepLossConfig(type="MSE"),
+        task_sampling=TaskSamplingConfig(
+            task_weights=TaskWeights(
+                auto_encode=0.0,
+                infill=0.0,
+                prediction=1.0,
+                infill_prediction=0.0,
+                combined_all=0.0,
+            ),
+        ),
+    )
+    result_task = stepper_task.train_on_batch(data, optimization=NullOptimization())
+
+    assert result_task.metrics["loss"] > result_no_task.metrics["loss"]

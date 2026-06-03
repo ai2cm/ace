@@ -54,6 +54,11 @@ from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.spatial_masking import NullSpatialMasking, StaticSpatialMaskingConfig
 from fme.core.step.args import StepArgs
 from fme.core.step.global_mean_removal import GlobalMeanRemovalConfigUnion
+from fme.core.step.infill_prediction import (
+    InfillPredictionStepConfig,
+    TaskSampler,
+    TaskSamplingConfig,
+)
 from fme.core.step.multi_call import (
     MultiCallConfig,
     MultiCallStepConfig,
@@ -1434,6 +1439,7 @@ class TrainStepperConfig:
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
+    task_sampling: TaskSamplingConfig | None = None
 
     def __post_init__(self):
         if self.n_ensemble == -1:
@@ -1548,6 +1554,28 @@ class TrainStepper(
         self._prognostic_names = self._stepper.prognostic_names
         self._derive_func = self._stepper.derive_func
         self._loss_obj = self._stepper.build_loss(config.loss)
+
+        self._task_sampler: TaskSampler | None = None
+        self._task_loss_obj: StepLoss | None = None
+        if config.task_sampling is not None:
+            step_config = stepper._step_obj.config
+            if not isinstance(step_config, InfillPredictionStepConfig):
+                raise ValueError(
+                    "task_sampling requires an InfillPredictionStepConfig, "
+                    f"got {type(step_config).__name__}"
+                )
+            self._task_sampler = TaskSampler(
+                config.task_sampling,
+                step_config.all_names,
+                step_config.forcing_names,
+            )
+            task_loss_normalizer = stepper._step_obj.get_loss_normalizer()
+            self._task_loss_obj = config.loss.build(
+                stepper._dataset_info.gridded_operations,
+                out_names=step_config.non_forcing_names,
+                channel_dim=self.CHANNEL_DIM,
+                normalizer=task_loss_normalizer,
+            )
 
     def train_on_batch(
         self,
@@ -1676,6 +1704,7 @@ class TrainStepper(
         weighted_sums: dict[str, torch.Tensor] | None = None
         total_counts: dict[str, int] | None = None
         last_optimization_window_step = n_loss_steps - 1
+        last_gen_step: EnsembleTensorDict | None = None
         for step in range(n_forward_steps):
             within_optimization_window = step < n_loss_steps
             if self._config.optimize_last_step_only:
@@ -1688,8 +1717,8 @@ class TrainStepper(
                 context = torch.no_grad()
             with context:
                 gen_step = next(output_iterator)
-                gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
-                output_list.append(gen_step)
+                last_gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
+                output_list.append(last_gen_step)
                 target_step = add_ensemble_dim(
                     {
                         k: v.select(self.TIME_DIM, step)
@@ -1697,7 +1726,7 @@ class TrainStepper(
                     }
                 )
                 step_loss = self._loss_obj(
-                    gen_step,
+                    last_gen_step,
                     target_step,
                     step=step,
                     data_mask=input_batch_data.data_mask,
@@ -1720,6 +1749,24 @@ class TrainStepper(
                             total_counts[k] = total_counts[k] + v.count
             if optimize_step:
                 optimization.accumulate_loss(step_total_loss)
+
+        if (
+            self._task_sampler is not None
+            and self._is_training
+            and last_gen_step is not None
+        ):
+            task_loss = self._run_task_step(
+                last_gen_step=last_gen_step,
+                input_batch_data=input_batch_data,
+                forcing_ensemble_data=forcing_ensemble_data,
+                target_data=target_data,
+                n_forward_steps=n_loss_steps,
+                n_ensemble=n_ensemble,
+                optimization=optimization,
+            )
+            optimization.accumulate_loss(task_loss)
+            metrics["loss_task"] = task_loss.detach()
+
         per_channel_losses: dict[str, ChannelLossInfo] | None = None
         if weighted_sums is not None and total_counts is not None:
             per_channel_losses = {
@@ -1730,6 +1777,93 @@ class TrainStepper(
                 for k in weighted_sums
             }
         return output_list, per_channel_losses
+
+    def _run_task_step(
+        self,
+        last_gen_step: EnsembleTensorDict,
+        input_batch_data: BatchData,
+        forcing_ensemble_data: BatchData,
+        target_data: BatchData,
+        n_forward_steps: int,
+        n_ensemble: int,
+        optimization: OptimizationABC,
+    ) -> torch.Tensor:
+        """Run the additional task step after the prediction loop."""
+        assert self._task_sampler is not None
+        assert self._task_loss_obj is not None
+        step_config = cast(InfillPredictionStepConfig, self._stepper._step_obj.config)
+
+        batch_size = next(iter(input_batch_data.data.values())).shape[0]
+        sampled = self._task_sampler.sample(input_batch_data.data_mask, batch_size)
+
+        prev_state = fold_sized_ensemble_dim(last_gen_step, n_ensemble=n_ensemble)
+        task_step_idx = n_forward_steps - 1
+
+        forcing_dict = forcing_ensemble_data.data
+        next_step_forcing_names = step_config.get_next_step_forcing_names()
+        input_only_names = self._stepper._input_only_names
+
+        forcing_at_step: TensorDict = {}
+        for k in input_only_names:
+            if k not in forcing_dict:
+                continue
+            if k in next_step_forcing_names:
+                forcing_at_step[k] = forcing_dict[k][:, task_step_idx + 1]
+            else:
+                forcing_at_step[k] = forcing_dict[k][:, task_step_idx]
+
+        ground_truth: TensorDict = {
+            k: v.select(self.TIME_DIM, task_step_idx)
+            for k, v in target_data.data.items()
+        }
+
+        ref_tensor = next(iter(prev_state.values()))
+        device = ref_tensor.device
+        spatial = ref_tensor.shape[-2:]
+        task_input: TensorDict = {}
+        task_data_mask: dict[str, torch.Tensor] = {}
+        for name in step_config.all_names:
+            prev_mask = sampled.previous_step_input_mask[name]
+            curr_mask = sampled.current_step_input_mask[name]
+            task_data_mask[name] = prev_mask | curr_mask
+
+            broadcast_prev = prev_mask.view(-1, *([1] * len(spatial)))
+            broadcast_curr = curr_mask.view(-1, *([1] * len(spatial)))
+            value = torch.zeros(batch_size, *spatial, device=device)
+            if name in prev_state:
+                value = torch.where(broadcast_prev, prev_state[name], value)
+            elif name in forcing_at_step:
+                value = torch.where(broadcast_prev, forcing_at_step[name], value)
+            if name in ground_truth:
+                value = torch.where(broadcast_curr, ground_truth[name], value)
+            elif name in forcing_at_step:
+                value = torch.where(broadcast_curr, forcing_at_step[name], value)
+            task_input[name] = value
+
+        next_step_input_dict: TensorDict = {}
+        for k in self._stepper._step_obj.next_step_input_names:
+            if k in forcing_dict:
+                next_step_input_dict[k] = forcing_dict[k][:, task_step_idx + 1]
+
+        with optimization.autocast():
+            task_output = self._stepper.step(
+                StepArgs(
+                    input=task_input,
+                    next_step_input_data=next_step_input_dict,
+                    labels=input_batch_data.labels,
+                    data_mask=task_data_mask,
+                ),
+            )
+
+        task_target = add_ensemble_dim(ground_truth)
+        task_gen = add_ensemble_dim(task_output)
+        task_loss_output = self._task_loss_obj(
+            task_gen,
+            task_target,
+            step=0,
+            data_mask=sampled.output_data_mask,
+        )
+        return task_loss_output.total()
 
     def update_training_history(self, training_job: TrainingJob) -> None:
         """
