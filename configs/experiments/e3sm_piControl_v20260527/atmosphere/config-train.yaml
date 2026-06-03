@@ -43,7 +43,7 @@ inference:
     weight: 0.0
     epochs:
       start: 0
-      step: 5        
+      step: 5
     n_forward_steps: 14600
     forward_steps_in_memory: 20
     loader:
@@ -75,7 +75,7 @@ inference:
           engine: zarr
       num_data_workers: 2
     aggregator:
-      log_histograms: true      
+      log_histograms: true
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -154,7 +154,7 @@ stepper_training:
       PS: 3
     kwargs:
       crps_weight: 0.9
-      energy_score_weight: 0.1  
+      energy_score_weight: 0.1
 stepper:
   step:
     type: single_module
@@ -302,4 +302,4 @@ stepper:
       - Qat2m
       - Uat10m
       - Vat10m
-      - Tat2m  
+      - Tat2m
