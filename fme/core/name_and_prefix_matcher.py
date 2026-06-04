@@ -29,6 +29,8 @@ class NameAndPrefixMatcher:
             return r"|".join(regex)
         return None
 
-    def matches(self, name: str) -> bool:
+    def match(self, name: str) -> bool:
         """Return whether ``name`` matches any configured name or prefix."""
-        return bool(self._regex and re.match(self._regex, name))
+        if self._regex is None:
+            return False
+        return bool(re.match(self._regex, name))
