@@ -87,6 +87,7 @@ from fme.ace.stepper.parameter_init import (
 )
 from fme.ace.stepper.single_module import (
     CheckpointStepperConfig,
+    PreCorrectorOptimizationConfig,
     Stepper,
     StepperConfig,
     StepSelector,

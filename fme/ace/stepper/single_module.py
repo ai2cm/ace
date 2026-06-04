@@ -3,7 +3,7 @@ import dataclasses
 import datetime
 import logging
 import pathlib
-from collections.abc import Callable, Generator, Mapping
+from collections.abc import Callable, Generator, Iterable, Mapping
 from typing import Any, Literal, cast, overload
 
 import dacite
@@ -15,6 +15,7 @@ from torch import nn
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
+from fme.ace.stepper.loss_schedule import LossSchedule
 from fme.ace.stepper.parameter_init import (
     ParameterInitializationConfig,
     ParameterInitializer,
@@ -23,11 +24,7 @@ from fme.ace.stepper.parameter_init import (
     WeightsAndHistoryLoader,
     null_weights_and_history,
 )
-from fme.ace.stepper.time_length_probabilities import (
-    TimeLength,
-    TimeLengthProbabilities,
-    TimeLengthSchedule,
-)
+from fme.ace.stepper.time_length_probabilities import TimeLength, TimeLengthSchedule
 from fme.core.coordinates import (
     NullPostProcessFn,
     SerializableVerticalCoordinate,
@@ -43,6 +40,7 @@ from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.labels import BatchLabels
 from fme.core.loss import ChannelLossInfo, StepLoss, StepLossConfig
+from fme.core.name_and_prefix_matcher import NameAndPrefixMatcher
 from fme.core.normalizer import (
     NetworkAndLossNormalizationConfig,
     NormalizationConfig,
@@ -783,17 +781,6 @@ class CheckpointStepperConfig:
         return load_stepper_config(self.checkpoint_path)
 
 
-class EpochNotProvidedError(ValueError):
-    pass
-
-
-def probabilities_from_time_length(value: TimeLength) -> TimeLengthProbabilities:
-    if isinstance(value, TimeLengthProbabilities):
-        return value
-    else:
-        return TimeLengthProbabilities.from_constant(value)
-
-
 class Stepper:
     """
     Stepper class for selectable step configurations.
@@ -1514,6 +1501,62 @@ class Stepper:
 
 
 @dataclasses.dataclass
+class PreCorrectorOptimizationConfig:
+    """
+    Configuration enabling pre-corrector optimization of the training loss.
+
+    When this config is present, the training loss for corrector-modified
+    variables is computed against the model's pre-correction (uncorrected)
+    output rather than its corrected output, except for variables matched by
+    ``exclude_names_and_prefixes``, which continue to be optimized against their
+    corrected (post-adjustment) values. The presence of this object is itself
+    the on/off switch; there is no separate ``enabled`` flag.
+
+    The rollout state and returned predictions always use the fully corrected
+    outputs regardless of this config; only the training loss target is affected.
+
+    Parameters:
+        exclude_names_and_prefixes: Names and prefixes of variables to exclude
+            from pre-corrector optimization. Matching follows the same
+            name-and-prefix convention as spatial masking: a bare name matches
+            the 2D variable and all of its 3D levels, a trailing-underscore
+            prefix (e.g. ``thetao_``) matches all levels, and an explicit
+            ``name_<level>`` matches exactly.
+    """
+
+    exclude_names_and_prefixes: list[str] = dataclasses.field(default_factory=list)
+
+    def __post_init__(self):
+        self._matcher = NameAndPrefixMatcher(self.exclude_names_and_prefixes)
+
+    def select_precorrected(self, uncorrected: TensorMapping) -> TensorDict:
+        """Return the subset of ``uncorrected`` to override into the loss target.
+
+        Excluded variables are dropped so that they retain their corrected value
+        in the loss; all other corrector-modified variables are returned so they
+        override their corrected value with their pre-correction value.
+        """
+        return {
+            name: value
+            for name, value in uncorrected.items()
+            if not self._matcher.matches(name)
+        }
+
+    def unmatched_exclusions(self, names: Iterable[str]) -> list[str]:
+        """Return exclusion entries that match none of ``names``.
+
+        Used for warn-once validation against the actual set of
+        corrector-modified variables, which is only known at runtime.
+        """
+        names = list(names)
+        return [
+            entry
+            for entry in self.exclude_names_and_prefixes
+            if not any(NameAndPrefixMatcher([entry]).matches(name) for name in names)
+        ]
+
+
+@dataclasses.dataclass
 class TrainStepperConfig:
     """
     Configuration for training-specific aspects of a stepper.
@@ -1530,11 +1573,14 @@ class TrainStepperConfig:
             be less than or equal to the number of timesteps present
             in the training dataset samples.
         parameter_init: The parameter initialization configuration for fine-tuning.
-        optimize_precorrected: When True, compute the training loss on
-            pre-corrector outputs for variables the corrector modifies.
-            Variables the corrector does not modify use the normal
-            (post-adjustment) values. The rollout state and returned gen_data
-            always use the fully corrected outputs regardless of this flag.
+        precorrector_optimization: When set, enables pre-corrector optimization:
+            the training loss for corrector-modified variables is computed on
+            their pre-correction outputs, except for variables the config
+            excludes, which use the normal (post-adjustment) values. Variables
+            the corrector does not modify are unaffected. The rollout state and
+            returned gen_data always use the fully corrected outputs regardless
+            of this config. When None (default), standard post-corrector
+            optimization is used.
     """
 
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
@@ -1544,7 +1590,7 @@ class TrainStepperConfig:
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
-    optimize_precorrected: bool = False
+    precorrector_optimization: PreCorrectorOptimizationConfig | None = None
 
     def __post_init__(self):
         if self.n_ensemble == -1:
@@ -1615,6 +1661,21 @@ class TrainStepperConfig:
         )
 
 
+def _finalize_per_channel_losses(
+    weighted_sums: dict[str, torch.Tensor],
+    total_counts: dict[str, int],
+) -> dict[str, ChannelLossInfo] | None:
+    if not weighted_sums:
+        return None
+    return {
+        k: ChannelLossInfo(
+            loss=weighted_sums[k] / max(total_counts[k], 1),
+            count=total_counts[k],
+        )
+        for k in weighted_sums
+    }
+
+
 class TrainStepper(
     TrainStepperABC[
         PrognosticState,
@@ -1646,19 +1707,14 @@ class TrainStepper(
         """
         self._stepper = stepper
         self._config = config
-
-        self._n_forward_steps_sampler: TimeLengthProbabilities | None = None
-        self._eval_n_forward_steps_sampler: TimeLengthProbabilities | None = None
-        self._n_forward_steps_schedule: TimeLengthSchedule | None = None
-        if config.n_forward_steps_schedule is not None:
-            self._n_forward_steps_schedule = config.n_forward_steps_schedule
-
-        self._is_training: bool = True
-        self._epoch: int | None = None  # to keep track of cached values
+        self._loss_schedule = LossSchedule(
+            n_forward_steps_schedule=config.n_forward_steps_schedule,
+        )
 
         self._prognostic_names = self._stepper.prognostic_names
         self._derive_func = self._stepper.derive_func
         self._loss_obj = self._stepper.build_loss(config.loss)
+        self._validated_precorrector_exclusions = False
 
     def train_on_batch(
         self,
@@ -1690,9 +1746,10 @@ class TrainStepper(
             The loss metrics, the generated data, the normalized generated data,
                 and the normalized batch data.
         """
-        self._init_for_epoch(data.epoch)
+        self._loss_schedule.init_for_epoch(data.epoch)
+        n_data_steps = data.time.shape[1] - self.n_ic_timesteps
+        n_loss_steps = self._loss_schedule.sample(n_data_steps)
         metrics: dict[str, float] = {}
-        input_data = data.get_start(self._prognostic_names, self.n_ic_timesteps)
         target_data = self._stepper.get_forward_data(
             data, compute_derived_variables=False
         )
@@ -1700,12 +1757,12 @@ class TrainStepper(
 
         optimization.set_mode(self._stepper.modules)
         output_list, per_channel_losses = self._accumulate_loss(
-            input_data,
             data,
             target_data,
             optimization,
             metrics,
-            evaluate_all_steps=evaluate_all_steps,
+            n_forward_steps=n_data_steps if evaluate_all_steps else n_loss_steps,
+            n_loss_steps=n_loss_steps,
         )
 
         regularizer_loss = self._stepper.get_regularizer_loss()
@@ -1734,18 +1791,43 @@ class TrainStepper(
         # apply post-processing and return
         return stepped
 
+    def _validate_precorrector_exclusions(
+        self,
+        precorrector_optimization: PreCorrectorOptimizationConfig,
+        corrector_modified_names: Iterable[str],
+    ) -> None:
+        """Warn once if an exclusion entry matches no corrector-modified variable.
+
+        The set of corrector-modified variables is only known at runtime, so this
+        cannot be validated in ``__post_init__``. Checked on the first training
+        step against the actual corrector-modified variable set.
+        """
+        if self._validated_precorrector_exclusions:
+            return
+        self._validated_precorrector_exclusions = True
+        corrector_modified_names = list(corrector_modified_names)
+        unmatched = precorrector_optimization.unmatched_exclusions(
+            corrector_modified_names
+        )
+        if unmatched:
+            logging.warning(
+                "Pre-corrector optimization exclusion entries %s did not match "
+                "any corrector-modified variable (modified variables: %s); these "
+                "entries have no effect.",
+                unmatched,
+                sorted(corrector_modified_names),
+            )
+
     def _accumulate_loss(
         self,
-        input_data: PrognosticState,
         data: BatchData,
         target_data: BatchData,
         optimization: OptimizationABC,
         metrics: dict[str, float],
-        evaluate_all_steps: bool = False,
+        n_forward_steps: int,
+        n_loss_steps: int,
     ) -> tuple[list[EnsembleTensorDict], dict[str, ChannelLossInfo] | None]:
         input_data = data.get_start(self._prognostic_names, self.n_ic_timesteps)
-        # output from self.predict_paired does not include initial condition
-        n_forward_steps = data.time.shape[1] - self.n_ic_timesteps
         n_ensemble = self._config.n_ensemble
         input_batch_data = input_data.as_batch_data()
         if input_batch_data.labels != data.labels:
@@ -1762,54 +1844,38 @@ class TrainStepper(
             optimization,
             labels=input_ensemble_data.labels,
             data_mask=input_ensemble_data.data_mask,
-            detach_uncorrected=not self._config.optimize_precorrected,
+            detach_uncorrected=self._config.precorrector_optimization is None,
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)
-        n_loss_steps = n_forward_steps
-        sampler = (
-            self._n_forward_steps_sampler
-            if self._is_training
-            else self._eval_n_forward_steps_sampler
-        )
-        if sampler is not None:
-            stochastic_n_forward_steps = sampler.sample()
-            if stochastic_n_forward_steps > n_forward_steps:
-                raise RuntimeError(
-                    "The number of forward steps to train on "
-                    f"({stochastic_n_forward_steps}) is greater than the number of "
-                    f"forward steps in the data ({n_forward_steps}), "
-                    "This is supposed to be ensured by the StepperConfig when train "
-                    "data requirements are retrieved, so this is a bug."
-                )
-            n_loss_steps = stochastic_n_forward_steps
-            if not evaluate_all_steps:
-                n_forward_steps = stochastic_n_forward_steps
-        weighted_sums: dict[str, torch.Tensor] | None = None
-        total_counts: dict[str, int] | None = None
-        last_optimization_window_step = n_loss_steps - 1
+        weighted_sums: dict[str, torch.Tensor] = {}
+        total_counts: dict[str, int] = {}
         for step in range(n_forward_steps):
-            within_optimization_window = step < n_loss_steps
             if self._config.optimize_last_step_only:
-                optimize_step = step == last_optimization_window_step
+                optimize_step = step == n_loss_steps - 1
             else:
-                optimize_step = within_optimization_window
-            if optimize_step:
-                context = contextlib.nullcontext()
-            else:
-                context = torch.no_grad()
-            with context:
+                optimize_step = step < n_loss_steps
+            grad_context = (
+                contextlib.nullcontext() if optimize_step else torch.no_grad()
+            )
+            with grad_context:
                 step_output = next(output_iterator)
                 gen_step = unfold_ensemble_dim(
                     step_output.output, n_ensemble=n_ensemble
                 )
                 output_list.append(gen_step)
-                if (
-                    self._config.optimize_precorrected
-                    and step_output.uncorrected
-                ):
+                precorrector_optimization = self._config.precorrector_optimization
+                if precorrector_optimization is not None and step_output.uncorrected:
+                    self._validate_precorrector_exclusions(
+                        precorrector_optimization, step_output.uncorrected.keys()
+                    )
                     loss_gen = unfold_ensemble_dim(
-                        {**step_output.output, **step_output.uncorrected},
+                        {
+                            **step_output.output,
+                            **precorrector_optimization.select_precorrected(
+                                step_output.uncorrected
+                            ),
+                        },
                         n_ensemble=n_ensemble,
                     )
                 else:
@@ -1820,40 +1886,49 @@ class TrainStepper(
                         for k, v in target_data.data.items()
                     }
                 )
-                step_loss = self._loss_obj(
-                    loss_gen,
-                    target_step,
+                step_total_loss = self._accumulate_step_loss(
+                    gen_step=loss_gen,
+                    target_step=target_step,
                     step=step,
                     data_mask=input_batch_data.data_mask,
+                    optimize=optimize_step,
+                    metrics=metrics,
+                    weighted_sums=weighted_sums,
+                    total_counts=total_counts,
                 )
-                step_total_loss = step_loss.total()
-                metrics[f"loss_step_{step}"] = step_total_loss.detach()
-                if optimize_step:
-                    per_ch = step_loss.get_channel_losses()
-                    if weighted_sums is None:
-                        weighted_sums = {
-                            k: v.loss.detach() * v.count for k, v in per_ch.items()
-                        }
-                        total_counts = {k: v.count for k, v in per_ch.items()}
-                    else:
-                        assert total_counts is not None
-                        for k, v in per_ch.items():
-                            weighted_sums[k] = (
-                                weighted_sums[k] + v.loss.detach() * v.count
-                            )
-                            total_counts[k] = total_counts[k] + v.count
             if optimize_step:
                 optimization.accumulate_loss(step_total_loss)
-        per_channel_losses: dict[str, ChannelLossInfo] | None = None
-        if weighted_sums is not None and total_counts is not None:
-            per_channel_losses = {
-                k: ChannelLossInfo(
-                    loss=weighted_sums[k] / max(total_counts[k], 1),
-                    count=total_counts[k],
-                )
-                for k in weighted_sums
-            }
-        return output_list, per_channel_losses
+        return output_list, _finalize_per_channel_losses(weighted_sums, total_counts)
+
+    def _accumulate_step_loss(
+        self,
+        gen_step: EnsembleTensorDict,
+        target_step: TensorMapping,
+        step: int,
+        data_mask: TensorMapping | None,
+        optimize: bool,
+        metrics: dict[str, float],
+        weighted_sums: dict[str, torch.Tensor],
+        total_counts: dict[str, int],
+    ) -> torch.Tensor:
+        step_loss = self._loss_obj(
+            gen_step,
+            target_step,
+            step=step,
+            data_mask=data_mask,
+        )
+        step_total_loss = step_loss.total()
+        metrics[f"loss_step_{step}"] = step_total_loss.detach()
+        if optimize:
+            per_ch = step_loss.get_channel_losses()
+            for k, v in per_ch.items():
+                if k in weighted_sums:
+                    weighted_sums[k] = weighted_sums[k] + v.loss.detach() * v.count
+                    total_counts[k] = total_counts[k] + v.count
+                else:
+                    weighted_sums[k] = v.loss.detach() * v.count
+                    total_counts[k] = v.count
+        return step_total_loss
 
     def update_training_history(self, training_job: TrainingJob) -> None:
         """
@@ -1909,41 +1984,15 @@ class TrainStepper(
         """
         return self._loss_obj.effective_loss_scaling
 
-    def _init_for_epoch(self, epoch: int | None):
-        if (
-            epoch is None
-            and self._n_forward_steps_schedule is not None
-            and len(self._n_forward_steps_schedule.milestones) > 0
-        ):
-            raise EpochNotProvidedError(
-                "current configuration requires epoch to be provided "
-                "on BatchData during training"
-            )
-        if self._epoch == epoch:
-            return
-        if self._n_forward_steps_schedule is not None:
-            assert epoch is not None  # already checked, but needed for mypy
-            self._n_forward_steps_sampler = probabilities_from_time_length(
-                self._n_forward_steps_schedule.get_value(epoch)
-            )
-            self._eval_n_forward_steps_sampler = TimeLengthProbabilities(
-                outcomes=list(self._n_forward_steps_sampler.outcomes)
-            )
-        else:
-            self._n_forward_steps_sampler = None
-            self._eval_n_forward_steps_sampler = None
-        self._epoch = epoch
-
     def seed_eval(self, seed: int) -> None:
-        if self._eval_n_forward_steps_sampler is not None:
-            self._eval_n_forward_steps_sampler.seed_rng(seed)
+        self._loss_schedule.seed_eval(seed)
 
     def set_eval(self) -> None:
-        self._is_training = False
+        self._loss_schedule.set_eval()
         self._stepper.set_eval()
 
     def set_train(self) -> None:
-        self._is_training = True
+        self._loss_schedule.set_train()
         self._stepper.set_train()
 
 

@@ -248,7 +248,9 @@ stepper_training:
   n_forward_steps: 2
   loss:
     type: "MSE"
-  optimize_precorrected: true
+  precorrector_optimization:
+    exclude_names_and_prefixes:
+      - sea_ice_fraction
 stepper:
   input_masking:
     mask_value: 0
@@ -565,9 +567,9 @@ def test_train_and_inference(tmp_path, very_fast_only: bool):
 
     assert "val/mean/loss" in all_inference_logs
     for var in ["sst", "thetao_0", "thetao_1"]:
-        assert f"val/mean/weighted_rmse/{var}" in all_inference_logs, (
-            f"Expected val/mean/weighted_rmse/{var} in inference logs"
-        )
+        assert (
+            f"val/mean/weighted_rmse/{var}" in all_inference_logs
+        ), f"Expected val/mean/weighted_rmse/{var} in inference logs"
     validation_output_dir = results_dir / "validation"
     assert validation_output_dir.exists()
 
