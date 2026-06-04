@@ -12,7 +12,7 @@ from fme.downscaling.data import BatchData, BatchedLatLonCoordinates, PairedBatc
 
 from .. import metrics_and_maths
 from ..models import ModelOutputs
-from .generation import GenerationAggregator
+from .generation import GenerationAggregator, _get_complement_percentile_prefix
 from .main import (
     LossVsNoiseAggregator,
     Mean,
@@ -421,3 +421,25 @@ def test_upsample_tensor():
     t = torch.tensor([[1, 2], [3, 4]])
     expected = torch.tensor([[1, 1, 2, 2], [1, 1, 2, 2], [3, 3, 4, 4], [3, 3, 4, 4]])
     assert torch.equal(expected, upsample_tensor(t, 2))
+
+
+@pytest.mark.parametrize(
+    "prefix, expected",
+    [
+        (
+            "histogram/prediction_frac_of_target/99.99th-percentile/var0",
+            "histogram/prediction_frac_of_target/0.01th-percentile/var0",
+        ),
+        (
+            "some_metric/percentile/99.9999/var0",
+            "some_metric/percentile/0.0001/var0",
+        ),
+        (
+            "no_percentile_here/some_metric",
+            None,
+        ),
+    ],
+)
+def test_get_complement_percentile_prefix(prefix, expected):
+    result = _get_complement_percentile_prefix(prefix)
+    assert result == expected

@@ -1,3 +1,4 @@
+import re
 from collections.abc import Collection, Mapping
 from typing import Any
 
@@ -50,6 +51,50 @@ def _get_map_caption(key: str, data: torch.Tensor) -> str:
     vmin, vmax = data.min(), data.max()
     caption = f"{key},  mean: {avg:.4g}, min: {vmin:.4g}, max: {vmax:.4g}"
     return caption
+
+
+def _get_complement_percentile_prefix(prefix):
+    """
+    Given a prefix containing a percentile value, return a prefix with
+    100 minus that percentile. Returns None if no percentile pattern is found.
+    Ex. "prediction_frac_of_target/99.9999th-percentile"
+        -> "prediction_frac_of_target/0.0001th-percentile", or
+        "some_var/percentile/99.9999" -> "some_var/percentile/0.0001".
+    """
+    match = re.search(
+        r"(\d+(?:\.\d+)?)(?:th)?[-_/]percentile|percentile[-_/](\d+(?:\.\d+)?)",
+        prefix,
+    )
+    if match is None:
+        return None
+    if match.group(1) is not None:
+        num_str = match.group(1)
+        num_start, num_end = match.start(1), match.end(1)
+    else:
+        num_str = match.group(2)
+        num_start, num_end = match.start(2), match.end(2)
+    complement = 100 - float(num_str)
+    if "." in num_str:
+        decimal_places = len(num_str.split(".")[1])
+        complement_str = f"{complement:.{decimal_places}f}"
+    else:
+        complement_str = str(int(complement))
+    return prefix[:num_start] + complement_str + prefix[num_end:]
+
+
+def _get_channel_mean_scalar_metric(metrics, prefix="relative_crps_bicubic"):
+    # This ensures that left tailed extreme values are also considered
+    # in checkpoint selection if 99.x percentile is used as metric
+    prefixes = [prefix]
+    if "percentile" in prefix:
+        complement = _get_complement_percentile_prefix(prefix)
+        if complement is not None and complement != prefix:
+            prefixes.append(complement)
+    channel_metric = [v for k, v in metrics.items() if any(p in k for p in prefixes)]
+    if len(channel_metric) == 0:
+        return float("inf")
+    else:
+        return sum(channel_metric) / len(channel_metric)
 
 
 class RelativeCRPSInterpAggregator:
@@ -266,6 +311,10 @@ class GenerationAggregator:
         ssim_kwargs: Mapping[str, Any] | None = None,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
         include_positional_comparisons: bool = True,
+        histogram_ckpt_selection_metric: str = (
+            "prediction_frac_of_target/99.9999th-percentile"
+        ),
+        best_ckpt_selection_metric: str = "relative_crps_bicubic",
     ) -> None:
         self._agg = Aggregator(
             dims,
@@ -301,6 +350,8 @@ class GenerationAggregator:
             self._single_sample_aggregators.append(
                 MeanMapAggregator(variable_metadata, name="single_sample_time_mean")
             )
+        self._histogram_ckpt_selection_metric = histogram_ckpt_selection_metric
+        self._best_ckpt_selection_metric = best_ckpt_selection_metric
         self._wandb_logs: Mapping[str, Any] | None = None
 
     @torch.no_grad()
@@ -364,3 +415,23 @@ class GenerationAggregator:
             if hasattr(agg, "get_dataset"):
                 ds = ds.merge(agg.get_dataset())
         return ds
+
+    def get_checkpoint_selection_metrics(self) -> dict[str, float]:
+        """
+        Get the checkpoint selection metrics from the underlying aggregator.
+        """
+        metrics: dict[str, float] = {}
+        wandb_logs = self.get_wandb()
+        # Compute channel mean of all percentile*_frac_of_target
+        histogram_tail_metric = _get_channel_mean_scalar_metric(
+            wandb_logs,
+            self._histogram_ckpt_selection_metric,
+        )
+        if "frac_of_target" in self._histogram_ckpt_selection_metric:
+            histogram_tail_metric = abs(1.0 - histogram_tail_metric)
+        metrics[self._histogram_ckpt_selection_metric] = histogram_tail_metric
+        metrics[self._best_ckpt_selection_metric] = _get_channel_mean_scalar_metric(
+            wandb_logs,
+            self._best_ckpt_selection_metric,
+        )
+        return metrics
