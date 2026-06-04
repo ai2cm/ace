@@ -475,3 +475,28 @@ def test_get_channel_mean_scalar_metric_excludes_matching_maps():
 
     assert best_result == 2.0
     assert histogram_result == 1.0
+
+
+def test_generation_aggregator_get_checkpoint_selection_metrics():
+    aggregator = GenerationAggregator(["lat", "lon"], downscale_factor=2)
+    aggregator._wandb_logs = {
+        "generation/maps/relative_crps_bicubic/var0": object(),
+        "generation/metrics/relative_crps_bicubic/var0": 1.0,
+        "generation/metrics/relative_crps_bicubic/var1": 3.0,
+        "generation/some_other/prediction_frac_of_target/99.9999th-percentile/var0": (
+            object()
+        ),
+        "generation/histogram/prediction_frac_of_target/99.9999th-percentile/var0": (
+            1.2
+        ),
+        "generation/histogram/prediction_frac_of_target/0.0001th-percentile/var0": (
+            0.9
+        ),
+    }
+
+    metrics = aggregator.get_checkpoint_selection_metrics()
+
+    assert metrics["metrics/relative_crps_bicubic"] == 2.0
+    assert metrics[
+        "histogram/prediction_frac_of_target/99.9999th-percentile"
+    ] == pytest.approx(0.05)
