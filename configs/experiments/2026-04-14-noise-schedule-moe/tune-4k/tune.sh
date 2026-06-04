@@ -6,8 +6,8 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-100km-to-3km-low-sigma-increase-cap-multemb12"
-CONFIG_FILENAME="train-prmsl-multivar-low-sigma-oversample-increase-cap-tropics.yaml"
+JOB_NAME="xshield-downscaling-100km-to-3km-multivar-4k-tune"
+CONFIG_FILENAME="tune.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -22,11 +22,15 @@ cd $REPO_ROOT  # so config path is valid no matter where we are running this scr
 
 IMAGE=$(cat $REPO_ROOT/latest_deps_only_image.txt)
 
+PREVIOUS_RESULTS_DATASET="01KRMB40EFK524BZE5HQ4EYWKJ"
+
+
 gantry run \
     --name $JOB_NAME \
     --description 'Run downscaling 100km to 3km multivar training' \
     --workspace ai2/climate-titan \
-    --priority urgent \
+    --priority high \
+    --preemptible \
     --cluster ai2/titan \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
@@ -35,6 +39,7 @@ gantry run \
     --env WANDB_RUN_GROUP=$wandb_group \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-annak \
+    --dataset $PREVIOUS_RESULTS_DATASET:/previous_results \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --weka climate-default:/climate-default \
     --gpus $N_GPUS \
