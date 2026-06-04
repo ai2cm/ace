@@ -7,10 +7,12 @@ Bernoulli (suffix -bernoulli):
   - mask_rates: 0.0, 0.2, 0.4
     (applied as input_dropout.per_variable.default_rate)
   - masking_types:
-      all      - all variables share per_variable.default_rate
+      all      - all variables share per_variable.default_rate, except the
+                 shared global_mean_removal reference when gmr is enabled
       noforcing - forcing/static variables (land_fraction, ocean_fraction,
                  sea_ice_fraction, DSWRFtoa, HGTsfc) are explicitly
-                 handled with rate=0.0
+                 handled with rate=0.0; the shared global_mean_removal
+                 reference is also handled with rate=0.0 when gmr is enabled
   - gmr: gmron (global mean removal enabled) / gmroff (disabled)
   - rp:  rpon  (residual_prediction=true)   / rpoff (residual_prediction=false)
 
@@ -18,7 +20,8 @@ Jeremy/uniform (suffix -uniform):
   One config per (max_vars, masking_type, gmr, rp):
   - max_vars: "all" (0 to all eligible) or an integer k (0 to k)
   - masking_types:
-      all      - all variables are eligible for masking
+      all      - all variables are eligible for masking, except the shared
+                 global_mean_removal reference when gmr is enabled
       noforcing - forcing/static variables are excluded via uniform.ignore_vars
   - gmr / rp: same as above
   File names use mask{k} where k is "all" or the integer (e.g. mask10).
@@ -36,14 +39,17 @@ FORCING_VARS = [
     "DSWRFtoa",
     "HGTsfc",
 ]
+SHARED_GMR_REFERENCE_FIELD = "surface_temperature"
+CO2_FIELD = "global_mean_co2"
+CO2_MASK_RATE = 0.8
 
 MASK_RATES = [0.0, 0.2, 0.4]
 GMR_VALS = [True]
 RP_VALS = [False]
 EXCLUDE_FORCING = [False, True]
 UNIFORM_MAX_VARS: dict[bool, list[int | str]] = {
-    False: ["all", 17],  # all vars eligible: 0.20 × 43 ≈ 8.6 → max = 17
-    True: ["all", 15],  # forcing vars excluded: 0.20 × 38 ≈ 7.6 → max = 15
+    False: ["all", 17],  # with GMR reference excluded: 0.20 × 42 ≈ 8.4 → max = 17
+    True: ["all", 15],  # forcing + GMR reference excluded: 0.20 × 37 ≈ 7.4 → max = 15
 }
 
 HERE = pathlib.Path(__file__).parent
@@ -72,9 +78,27 @@ def build_uniform_input_dropout(
     return {"uniform": uniform}
 
 
+def _protect_shared_gmr_reference(input_dropout: dict) -> dict:
+    """Prevent input dropout from masking the shared GMR reference field."""
+    if "per_variable" in input_dropout:
+        per_variable = dict(input_dropout["per_variable"])
+        per_variable[SHARED_GMR_REFERENCE_FIELD] = 0.0
+        input_dropout["per_variable"] = per_variable
+    if "uniform" in input_dropout:
+        uniform = dict(input_dropout["uniform"])
+        ignore_vars = list(uniform.get("ignore_vars", []))
+        if SHARED_GMR_REFERENCE_FIELD not in ignore_vars:
+            ignore_vars.append(SHARED_GMR_REFERENCE_FIELD)
+        uniform["ignore_vars"] = ignore_vars
+        input_dropout["uniform"] = uniform
+    return input_dropout
+
+
 def _apply_common_settings(
     step_cfg: dict, gmr_on: bool, rp_on: bool, input_dropout: dict
 ) -> None:
+    if gmr_on:
+        input_dropout = _protect_shared_gmr_reference(input_dropout)
     step_cfg["input_dropout"] = input_dropout
     step_cfg["residual_prediction"] = rp_on
     step_cfg["include_channel_mask_inputs"] = True
@@ -145,7 +169,7 @@ def generate_uniform_configs(base: dict, stem: str) -> None:
 
 
 def generate_co2_variants(base: dict, stem: str) -> None:
-    """Generate -co2 configs for maskall-noforcing-gmron-rpoff-uniform only."""
+    """Generate -co2 configs with an 80% per-variable CO2 masking rate."""
     cfg = copy.deepcopy(base)
     name = f"{stem}-maskall-noforcing-gmron-rpoff-uniform"
     source_path = HERE / f"{name}.yaml"
@@ -153,9 +177,14 @@ def generate_co2_variants(base: dict, stem: str) -> None:
         cfg = yaml.safe_load(f)
     step_cfg = cfg["stepper"]["step"]["config"]
     step_cfg["next_step_forcing_names"] = list(step_cfg["next_step_forcing_names"]) + [
-        "global_mean_co2"
+        CO2_FIELD
     ]
-    step_cfg["in_names"] = list(step_cfg["in_names"]) + ["global_mean_co2"]
+    step_cfg["in_names"] = list(step_cfg["in_names"]) + [CO2_FIELD]
+    input_dropout = dict(step_cfg["input_dropout"])
+    per_variable = dict(input_dropout.get("per_variable", {}))
+    per_variable[CO2_FIELD] = CO2_MASK_RATE
+    input_dropout["per_variable"] = per_variable
+    step_cfg["input_dropout"] = input_dropout
     out_path = HERE / f"{name}-co2.yaml"
     with out_path.open("w") as f:
         yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)

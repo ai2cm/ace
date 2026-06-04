@@ -508,4 +508,5 @@ stepper:
           - sea_ice_fraction
           - DSWRFtoa
           - HGTsfc
+          - surface_temperature
       include_channel_mask_inputs: true

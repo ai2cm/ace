@@ -502,4 +502,6 @@ stepper:
         uniform:
           min_vars: min
           max_vars: max
+          ignore_vars:
+          - surface_temperature
       include_channel_mask_inputs: true

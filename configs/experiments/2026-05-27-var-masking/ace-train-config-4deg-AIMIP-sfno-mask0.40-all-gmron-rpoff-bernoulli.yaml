@@ -501,4 +501,5 @@ stepper:
       input_dropout:
         per_variable:
           default_rate: 0.4
+          surface_temperature: 0.0
       include_channel_mask_inputs: true

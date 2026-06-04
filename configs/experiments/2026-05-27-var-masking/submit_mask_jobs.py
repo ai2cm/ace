@@ -51,7 +51,7 @@ def config_to_job_name(config_filename: str) -> str:
     # → ace2-var-mask-sfno-mask0.20-forcing-gmron-rpon
     stem = pathlib.Path(config_filename).stem  # strip .yaml
     suffix = stem.removeprefix("ace-train-config-4deg-AIMIP-")
-    return f"ace2-var-mask-{suffix}"
+    return f"ace2-var-mask-{suffix}-v2"
 
 
 def main() -> None:

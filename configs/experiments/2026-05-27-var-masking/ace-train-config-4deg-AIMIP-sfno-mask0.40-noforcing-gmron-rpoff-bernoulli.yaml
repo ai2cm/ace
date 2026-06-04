@@ -506,4 +506,5 @@ stepper:
           sea_ice_fraction: 0.0
           DSWRFtoa: 0.0
           HGTsfc: 0.0
+          surface_temperature: 0.0
       include_channel_mask_inputs: true
