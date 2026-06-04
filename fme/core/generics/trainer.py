@@ -819,13 +819,12 @@ def build_validation_callback(
                 )
             all_logs.update(logs)
             if task.weight > 0:
-                metric_key = f"{task.name}/mean/loss"
-                loss = logs.get(metric_key)
+                loss = aggregator.get_loss()
                 if loss is None:
                     raise RuntimeError(
                         f"Validation entry {task.name!r} with "
-                        f"weight={task.weight} did not produce "
-                        f"expected metric key {metric_key!r}."
+                        f"weight={task.weight} did not produce a loss "
+                        "for checkpoint selection."
                     )
                 weighted_loss += task.weight * loss
         return all_logs, weighted_loss
@@ -911,14 +910,12 @@ def build_inference_callback(
                 )
             all_logs.update(logs)
             if task.weight > 0:
-                metric_key = f"{task.name}/time_mean_norm/rmse/channel_mean"
-                error = logs.get(metric_key)
+                error = aggregator.get_loss()
                 if error is None:
                     raise RuntimeError(
                         f"Inference entry {task.name!r} with "
-                        f"weight={task.weight} did not produce expected metric "
-                        f"key {metric_key!r}. Entries contributing to "
-                        "checkpoint selection must produce this metric."
+                        f"weight={task.weight} did not produce a loss "
+                        "for checkpoint selection."
                     )
                 if weighted_error is None:
                     weighted_error = 0.0

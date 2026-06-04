@@ -143,14 +143,16 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
                 logs.update(
                     {f"{label}/{k}": v for k, v in aggregator.get_logs(name).items()}
                 )
-        dist = Distributed.get_instance()
-        logs[f"{label}/mean/loss"] = float(
-            dist.reduce_mean(self._loss / self._n_loss_batches).cpu().numpy()
-        )
+        logs[f"{label}/mean/loss"] = self.get_loss()
         logs.update(self._per_step_losses.get_logs(label))
         if self._per_channel_losses is not None:
             logs.update(self._per_channel_losses.get_logs(label))
         return logs
+
+    @torch.no_grad()
+    def get_loss(self) -> float:
+        dist = Distributed.get_instance()
+        return float(dist.reduce_mean(self._loss / self._n_loss_batches).cpu().numpy())
 
     @torch.no_grad()
     def flush_diagnostics(self, subdir: str | None) -> None:

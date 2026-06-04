@@ -121,6 +121,10 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
             return deterministic_logs
 
     @torch.no_grad()
+    def get_loss(self) -> float | None:
+        return self._deterministic_aggregator.get_loss()
+
+    @torch.no_grad()
     def flush_diagnostics(self, subdir: str | None = None):
         self._deterministic_aggregator.flush_diagnostics(subdir)
 

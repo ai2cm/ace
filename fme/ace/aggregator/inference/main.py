@@ -521,6 +521,7 @@ class InferenceEvaluatorAggregator(
         self._output_dir = output_dir
         self._log_time_series = len(time_series_aggregators) > 0
         self._n_timesteps_seen = 0
+        self._summary_logs_cache: InferenceLog | None = None
 
     @property
     def log_time_series(self) -> bool:
@@ -611,11 +612,16 @@ class InferenceEvaluatorAggregator(
         return logs
 
     def get_summary_logs(self) -> InferenceLog:
-        logs: InferenceLog = {}
-        for name, aggregator in self._summary_aggregators.items():
-            logging.info(f"Getting summary logs for {name} aggregator")
-            logs.update(aggregator.get_logs(label=name))
-        return logs
+        if self._summary_logs_cache is None:
+            logs: InferenceLog = {}
+            for name, aggregator in self._summary_aggregators.items():
+                logging.info(f"Getting summary logs for {name} aggregator")
+                logs.update(aggregator.get_logs(label=name))
+            self._summary_logs_cache = logs
+        return self._summary_logs_cache
+
+    def get_loss(self) -> float | None:
+        return self.get_summary_logs().get("time_mean_norm/rmse/channel_mean")
 
     @torch.no_grad()
     def _get_logs(self):
@@ -876,6 +882,9 @@ class InferenceAggregator(
             logging.info(f"Getting summary logs for {name} aggregator")
             logs.update(aggregator.get_logs(label=name))
         return logs
+
+    def get_loss(self) -> float | None:
+        return None
 
     @torch.no_grad()
     def _get_logs(self):

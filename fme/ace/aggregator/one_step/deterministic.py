@@ -5,7 +5,9 @@ from collections.abc import Callable, Mapping
 import numpy as np
 import torch
 
+from fme.core.device import get_device
 from fme.core.diagnostics import get_reduced_diagnostics, write_reduced_diagnostics
+from fme.core.distributed import Distributed
 from fme.core.generics.aggregator import AggregatorABC
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -61,6 +63,8 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
         self._coords = coords
         self._aggregators = aggregators
         self._loss_scaling = loss_scaling or {}
+        self._loss = torch.tensor(0.0, device=get_device())
+        self._n_loss_batches = 0
 
     @torch.no_grad()
     def record_batch(
@@ -72,11 +76,14 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
         if len(batch.gen_data) == 0:
             raise ValueError("No data in gen_data")
 
+        loss = batch.metrics.get("loss", np.nan)
+        self._loss = self._loss + loss
+        self._n_loss_batches += 1
         target_data_norm = batch.normalize(batch.target_data)
         gen_data_norm = batch.normalize(batch.gen_data)
         for agg in self._aggregators.values():
             agg.record_batch(
-                loss=batch.metrics.get("loss", np.nan),
+                loss=loss,
                 target_data=batch.target_data,
                 gen_data=batch.gen_data,
                 target_data_norm=target_data_norm,
@@ -125,6 +132,13 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
             for k, v in scaled_squared_errors.items()
         }
         return fractional_contribs
+
+    @torch.no_grad()
+    def get_loss(self) -> float | None:
+        if self._n_loss_batches == 0:
+            return None
+        dist = Distributed.get_instance()
+        return float(dist.reduce_mean(self._loss / self._n_loss_batches).cpu().numpy())
 
     @torch.no_grad()
     def flush_diagnostics(self, subdir: str | None = None):

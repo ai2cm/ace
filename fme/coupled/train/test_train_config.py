@@ -387,9 +387,22 @@ class TestGetValidationCallback:
             (_make_validation_config(name="b", weight=3.0), MagicMock(), "b"),
         ]
         stepper = MagicMock()
-        with patch(
-            "fme.core.generics.trainer.run_validation",
-            side_effect=[{"a/mean/loss": 0.1}, {"b/mean/loss": 0.2}],
+        aggregator_losses = iter([0.1, 0.2])
+
+        def make_aggregator(*args, **kwargs):
+            mock = MagicMock()
+            mock.get_loss.return_value = next(aggregator_losses)
+            return mock
+
+        with (
+            patch(
+                "fme.core.generics.trainer.run_validation",
+                side_effect=[{}, {}],
+            ),
+            patch(
+                "fme.coupled.train.train.OneStepAggregator",
+                side_effect=make_aggregator,
+            ),
         ):
             callback = get_validation_callback(
                 validation_entries=entries,
@@ -405,10 +418,13 @@ class TestGetValidationCallback:
 
 class TestGetInferenceCallback:
     @staticmethod
-    def _make_entry(name, weight=1.0, n_coupled_steps=1):
+    def _make_entry(name, weight=1.0, n_coupled_steps=1, aggregator_loss=None):
         config = MagicMock()
         config.weight = weight
         config.n_coupled_steps = n_coupled_steps
+        # Configure the aggregator returned by entry_config.aggregator.build(...)
+        # so the callback's aggregator.get_loss() yields the desired scalar.
+        config.aggregator.build.return_value.get_loss.return_value = aggregator_loss
         data = MagicMock()
         # data.loader is iterated once to get a batch for initial_times
         data.loader = iter([MagicMock()])
@@ -417,7 +433,7 @@ class TestGetInferenceCallback:
     @staticmethod
     def _call(
         entries,
-        inference_one_epoch_side_effect,
+        inference_one_epoch_logs,
         epoch=1,
         inference_epochs=(1,),
         inference_epoch_sets=None,
@@ -429,7 +445,7 @@ class TestGetInferenceCallback:
         stepper = MagicMock()
         with patch(
             "fme.core.generics.trainer.inference_one_epoch",
-            side_effect=inference_one_epoch_side_effect,
+            side_effect=inference_one_epoch_logs,
         ):
             callback = get_inference_callback(
                 inference_entries=entries,
@@ -446,7 +462,7 @@ class TestGetInferenceCallback:
         entries = [self._make_entry("inference")]
         logs, error = self._call(
             entries,
-            inference_one_epoch_side_effect=[],
+            inference_one_epoch_logs=[],
             epoch=2,
             inference_epochs=(1,),
         )
@@ -454,57 +470,57 @@ class TestGetInferenceCallback:
         assert error is None
 
     def test_single_entry_weighted_error(self):
-        entries = [self._make_entry("inference", weight=2.0)]
+        entries = [self._make_entry("inference", weight=2.0, aggregator_loss=0.4)]
         logs, error = self._call(
             entries,
-            [{"inference/time_mean_norm/rmse/channel_mean": 0.4}],
+            [{"inference/some_metric": 0.4}],
         )
         assert error == pytest.approx(2.0 * 0.4)
-        assert "inference/time_mean_norm/rmse/channel_mean" in logs
+        assert "inference/some_metric" in logs
 
     def test_weighted_entry_missing_metric_raises(self):
-        entries = [self._make_entry("a", weight=1.0)]
-        with pytest.raises(RuntimeError, match="did not produce expected metric key"):
+        entries = [self._make_entry("a", weight=1.0, aggregator_loss=None)]
+        with pytest.raises(RuntimeError, match="did not produce a loss"):
             self._call(
                 entries,
                 [{"a/other_metric": 1.0}],
             )
 
     def test_all_zero_weight_returns_none_error(self):
-        entries = [self._make_entry("a", weight=0.0)]
+        entries = [self._make_entry("a", weight=0.0, aggregator_loss=0.5)]
         logs, error = self._call(
             entries,
-            [{"a/time_mean_norm/rmse/channel_mean": 0.5}],
+            [{"a/some_metric": 0.5}],
         )
         assert error is None
-        assert "a/time_mean_norm/rmse/channel_mean" in logs
+        assert "a/some_metric" in logs
 
     def test_multiple_weighted_entries(self):
         entries = [
-            self._make_entry("a", weight=2.0),
-            self._make_entry("b", weight=3.0),
+            self._make_entry("a", weight=2.0, aggregator_loss=0.1),
+            self._make_entry("b", weight=3.0, aggregator_loss=0.2),
         ]
         logs, error = self._call(
             entries,
             [
-                {"a/time_mean_norm/rmse/channel_mean": 0.1},
-                {"b/time_mean_norm/rmse/channel_mean": 0.2},
+                {"a/some_metric": 0.1},
+                {"b/some_metric": 0.2},
             ],
         )
         assert error == pytest.approx(2.0 * 0.1 + 3.0 * 0.2)
 
     def test_entry_skipped_when_not_in_epoch_set(self):
         entries = [
-            self._make_entry("a", weight=1.0),
-            self._make_entry("b", weight=1.0),
+            self._make_entry("a", weight=1.0, aggregator_loss=0.5),
+            self._make_entry("b", weight=1.0, aggregator_loss=0.7),
         ]
         logs, error = self._call(
             entries,
-            [{"a/time_mean_norm/rmse/channel_mean": 0.5}],
+            [{"a/some_metric": 0.5}],
             epoch=1,
             inference_epochs=(1,),
             inference_epoch_sets=[{1}, {2}],
         )
         assert error == pytest.approx(0.5)
-        assert "a/time_mean_norm/rmse/channel_mean" in logs
-        assert "b/time_mean_norm/rmse/channel_mean" not in logs
+        assert "a/some_metric" in logs
+        assert "b/some_metric" not in logs

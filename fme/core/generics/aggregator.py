@@ -15,6 +15,15 @@ class AggregatorABC(abc.ABC, Generic[T]):
         pass
 
     @abc.abstractmethod
+    def get_loss(self) -> float | None:
+        """Scalar to minimize for best-validation checkpoint selection.
+
+        Returns ``None`` if this aggregator does not contribute to checkpoint
+        selection (the validation pass still runs and logs metrics).
+        """
+        pass
+
+    @abc.abstractmethod
     def flush_diagnostics(self, subdir: str | None) -> None:
         pass
 
@@ -54,6 +63,15 @@ class InferenceAggregatorABC(abc.ABC, Generic[PS, T]):
 
     @abc.abstractmethod
     def get_summary_logs(self) -> InferenceLog:
+        pass
+
+    @abc.abstractmethod
+    def get_loss(self) -> float | None:
+        """Scalar to minimize for best-inference checkpoint selection.
+
+        Returns ``None`` if this aggregator does not contribute to checkpoint
+        selection (the inference pass still runs and logs metrics).
+        """
         pass
 
     @abc.abstractmethod

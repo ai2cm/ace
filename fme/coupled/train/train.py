@@ -106,10 +106,8 @@ def get_validate_stepper_callback(
                 ema=ema,
                 validate_using_ema=validate_using_ema,
             )
-            logs = aggregator.get_logs(label=name)
             if entry_config.weight > 0:
-                metric_key = f"{name}/mean/loss"
-                loss = logs.get(metric_key)
+                loss = aggregator.get_loss()
                 if loss is not None:
                     weighted_loss += entry_config.weight * loss
         return weighted_loss
