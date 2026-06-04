@@ -7,16 +7,7 @@ import torch
 from torch import nn
 
 import fme
-from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
-from fme.core.dataset_info import DatasetInfo
-from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
-from fme.core.registry import ModuleSelector
-from fme.core.step.args import StepArgs
-from fme.core.step.step import StepSelector
-from fme.core.step.task_step import (
-    InferenceSchemeConfig,
-    InfillPredictionStep,
-    InfillPredictionStepConfig,
+from fme.ace.stepper.task import (
     SampledTasks,
     TaskConfig,
     TaskSampler,
@@ -25,6 +16,17 @@ from fme.core.step.task_step import (
     TaskWeights,
     _get_task_config,
 )
+from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
+from fme.core.dataset_info import DatasetInfo
+from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
+from fme.core.registry import ModuleSelector
+from fme.core.step.args import StepArgs
+from fme.core.step.infill_prediction import (
+    InferenceSchemeConfig,
+    InfillPredictionStep,
+    InfillPredictionStepConfig,
+)
+from fme.core.step.step import StepSelector
 
 
 def _only_weight(task_type: TaskType, loss_scale: float = 1.0) -> TaskWeights:

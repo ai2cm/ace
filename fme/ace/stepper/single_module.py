@@ -24,6 +24,7 @@ from fme.ace.stepper.parameter_init import (
     WeightsAndHistoryLoader,
     null_weights_and_history,
 )
+from fme.ace.stepper.task import TaskSampler, TaskSamplingConfig
 from fme.ace.stepper.time_length_probabilities import TimeLength, TimeLengthSchedule
 from fme.core.coordinates import (
     NullPostProcessFn,
@@ -58,7 +59,6 @@ from fme.core.step.multi_call import (
 )
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
-from fme.core.step.task_step import TaskSampler, TaskSamplingConfig
 from fme.core.tensors import (
     add_ensemble_dim,
     fold_ensemble_dim,
@@ -854,12 +854,18 @@ class Stepper:
         self._dataset_info = dataset_info
         self.forcing_deriver = config.derived_forcings.build(dataset_info)
 
-    def build_loss(self, loss_config: StepLossConfig) -> StepLoss:
+    def build_loss(
+        self,
+        loss_config: StepLossConfig,
+        out_names: list[str] | None = None,
+    ) -> StepLoss:
         """Build a StepLoss from the given config using this stepper's normalizer
         and dataset info.
 
         Args:
             loss_config: The loss configuration to build from.
+            out_names: Override for the output variable names. Defaults to
+                this stepper's loss_names.
 
         Returns:
             A StepLoss built using this stepper's loss normalizer, gridded
@@ -868,7 +874,7 @@ class Stepper:
         loss_normalizer = self._step_obj.get_loss_normalizer()
         return loss_config.build(
             self._dataset_info.gridded_operations,
-            out_names=self.loss_names,
+            out_names=out_names if out_names is not None else self.loss_names,
             channel_dim=self.CHANNEL_DIM,
             normalizer=loss_normalizer,
         )
@@ -1554,14 +1560,8 @@ class TrainStepper(
             accepted = step_config.accepted_input_names
             loss = step_config.loss_names
             self._task_sampler = TaskSampler(config.task_sampling, accepted, loss)
-            task_loss_normalizer = stepper._step_obj.get_loss_normalizer()
             non_forcing = [n for n in accepted if n in set(loss)]
-            self._task_loss_obj = config.loss.build(
-                stepper._dataset_info.gridded_operations,
-                out_names=non_forcing,
-                channel_dim=self.CHANNEL_DIM,
-                normalizer=task_loss_normalizer,
-            )
+            self._task_loss_obj = stepper.build_loss(config.loss, out_names=non_forcing)
 
     def train_on_batch(
         self,
@@ -1716,7 +1716,6 @@ class TrainStepper(
                 optimization=optimization,
             )
             optimization.accumulate_loss(task_loss)
-            metrics["loss_task"] = task_loss.detach()
 
         return output_list, _finalize_per_channel_losses(weighted_sums, total_counts)
 

@@ -1253,3 +1253,202 @@ def test_train_config_with_stepper_config_sets_stepper_config(tmp_path: pathlib.
         inference=[],
     )
     assert train_config.stepper_config is stepper
+
+
+def _setup_task_sampling_data(tmp_path, variable_names, n_time=4, timestep_days=5):
+    """Create minimal data and stats for task sampling integration tests."""
+    dim_sizes = get_sizes(n_time=n_time)
+    data_dir = tmp_path / "data"
+    stats_dir = tmp_path / "stats"
+    results_dir = tmp_path / "results"
+    data_dir.mkdir()
+    stats_dir.mkdir()
+    results_dir.mkdir()
+    save_nd_netcdf(
+        data_dir / "data.nc",
+        dim_sizes,
+        variable_names=variable_names,
+        timestep_days=timestep_days,
+    )
+    save_scalar_netcdf(
+        stats_dir / "stats-mean.nc",
+        variable_names=variable_names,
+    )
+    save_scalar_netcdf(
+        stats_dir / "stats-stddev.nc",
+        variable_names=variable_names,
+    )
+    return data_dir, stats_dir, results_dir
+
+
+def test_train_task_sampling_single_module_step(tmp_path):
+    """Integration test: SingleModuleStep with prediction-only task sampling."""
+    from fme.ace.stepper.task import TaskConfig, TaskSamplingConfig, TaskWeights
+
+    in_names = ["a", "b"]
+    out_names = ["a", "b"]
+    all_names = list(set(in_names + out_names))
+    data_dir, stats_dir, results_dir = _setup_task_sampling_data(
+        tmp_path, all_names, n_time=4
+    )
+
+    train_config = TrainConfig(
+        train_loader=DataLoaderConfig(
+            dataset=XarrayDataConfig(
+                data_path=str(data_dir),
+                spatial_dimensions="latlon",
+            ),
+            batch_size=2,
+            num_data_workers=0,
+            sample_with_replacement=10,
+        ),
+        validation=InlineValidationConfig(
+            loader=DataLoaderConfig(
+                dataset=XarrayDataConfig(
+                    data_path=str(data_dir),
+                    spatial_dimensions="latlon",
+                ),
+                batch_size=2,
+                num_data_workers=0,
+            ),
+        ),
+        optimization=OptimizationConfig(
+            optimizer_type="Adam",
+            lr=0.0001,
+        ),
+        stepper=StepperConfig(
+            step=StepSelector(
+                type="single_module",
+                config=dataclasses.asdict(
+                    SingleModuleStepConfig(
+                        in_names=in_names,
+                        out_names=out_names,
+                        normalization=NetworkAndLossNormalizationConfig(
+                            network=NormalizationConfig(
+                                global_means_path=str(stats_dir / "stats-mean.nc"),
+                                global_stds_path=str(stats_dir / "stats-stddev.nc"),
+                            ),
+                        ),
+                        builder=ModuleSelector(
+                            type="SphericalFourierNeuralOperatorNet",
+                            config=dict(num_layers=2, embed_dim=12),
+                        ),
+                    )
+                ),
+            ),
+        ),
+        stepper_training=TrainStepperConfig(
+            loss=StepLossConfig(type="MSE"),
+            n_forward_steps=2,
+            task_sampling=TaskSamplingConfig(
+                tasks=TaskWeights(
+                    auto_encode=TaskConfig(probability=0.0),
+                    infill=TaskConfig(probability=0.0),
+                    prediction=TaskConfig(probability=1.0),
+                    infill_prediction=TaskConfig(probability=0.0),
+                    combined_all=TaskConfig(probability=0.0),
+                ),
+            ),
+        ),
+        inference=[],
+        max_epochs=1,
+        save_checkpoint=False,
+        logging=LoggingConfig(
+            log_to_screen=True, log_to_wandb=False, log_to_file=False
+        ),
+        experiment_dir=str(results_dir),
+    )
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(yaml.dump(dataclasses.asdict(train_config)))
+    with mock_wandb():
+        train_main(yaml_config=f.name)
+
+
+def test_train_task_sampling_infill_prediction_step(tmp_path):
+    """Integration test: InfillPredictionStep with mixed task modes."""
+    from fme.ace.stepper.task import TaskConfig, TaskSamplingConfig, TaskWeights
+    from fme.core.step.infill_prediction import (
+        InferenceSchemeConfig,
+        InfillPredictionStepConfig,
+    )
+
+    all_names = ["a", "b", "forcing_x"]
+    forcing_names = ["forcing_x"]
+    data_dir, stats_dir, results_dir = _setup_task_sampling_data(
+        tmp_path, all_names, n_time=4
+    )
+
+    train_config = TrainConfig(
+        train_loader=DataLoaderConfig(
+            dataset=XarrayDataConfig(
+                data_path=str(data_dir),
+                spatial_dimensions="latlon",
+            ),
+            batch_size=2,
+            num_data_workers=0,
+            sample_with_replacement=10,
+        ),
+        validation=InlineValidationConfig(
+            loader=DataLoaderConfig(
+                dataset=XarrayDataConfig(
+                    data_path=str(data_dir),
+                    spatial_dimensions="latlon",
+                ),
+                batch_size=2,
+                num_data_workers=0,
+            ),
+        ),
+        optimization=OptimizationConfig(
+            optimizer_type="Adam",
+            lr=0.0001,
+        ),
+        stepper=StepperConfig(
+            step=StepSelector(
+                type="infill_prediction",
+                config=dataclasses.asdict(
+                    InfillPredictionStepConfig(
+                        builder=ModuleSelector(
+                            type="SphericalFourierNeuralOperatorNet",
+                            config=dict(num_layers=2, embed_dim=12),
+                        ),
+                        all_names=all_names,
+                        forcing_names=forcing_names,
+                        normalization=NetworkAndLossNormalizationConfig(
+                            network=NormalizationConfig(
+                                global_means_path=str(stats_dir / "stats-mean.nc"),
+                                global_stds_path=str(stats_dir / "stats-stddev.nc"),
+                            ),
+                        ),
+                        inference_scheme=InferenceSchemeConfig(
+                            in_names=all_names,
+                            out_names=["a", "b"],
+                        ),
+                    )
+                ),
+            ),
+        ),
+        stepper_training=TrainStepperConfig(
+            loss=StepLossConfig(type="MSE"),
+            n_forward_steps=2,
+            task_sampling=TaskSamplingConfig(
+                tasks=TaskWeights(
+                    auto_encode=TaskConfig(probability=1.0),
+                    infill=TaskConfig(probability=1.0),
+                    prediction=TaskConfig(probability=1.0),
+                    infill_prediction=TaskConfig(probability=1.0),
+                    combined_all=TaskConfig(probability=1.0),
+                ),
+            ),
+        ),
+        inference=[],
+        max_epochs=1,
+        save_checkpoint=False,
+        logging=LoggingConfig(
+            log_to_screen=True, log_to_wandb=False, log_to_file=False
+        ),
+        experiment_dir=str(results_dir),
+    )
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(yaml.dump(dataclasses.asdict(train_config)))
+    with mock_wandb():
+        train_main(yaml_config=f.name)

@@ -45,6 +45,7 @@ from fme.ace.stepper.single_module import (
     load_stepper_config,
     load_stepper_config_with_override,
 )
+from fme.ace.stepper.task import TaskConfig, TaskSamplingConfig, TaskWeights
 from fme.ace.stepper.time_length_probabilities import (
     TimeLength,
     TimeLengthMilestone,
@@ -80,15 +81,12 @@ from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.spatial_masking import StaticSpatialMaskingConfig
 from fme.core.step import SingleModuleStepConfig, StepSelector
 from fme.core.step.args import StepArgs
-from fme.core.step.multi_call import MultiCallConfig
-from fme.core.step.single_module import SingleModuleStep
-from fme.core.step.task_step import (
+from fme.core.step.infill_prediction import (
     InferenceSchemeConfig,
     InfillPredictionStepConfig,
-    TaskConfig,
-    TaskSamplingConfig,
-    TaskWeights,
 )
+from fme.core.step.multi_call import MultiCallConfig
+from fme.core.step.single_module import SingleModuleStep
 from fme.core.testing.regression import validate_tensor_dict
 from fme.core.training_history import TrainingJob
 from fme.core.typing_ import EnsembleTensorDict
@@ -2588,7 +2586,6 @@ def test_task_sampling_none_preserves_existing_behavior():
     stepper = _get_train_stepper(config, loss=StepLossConfig(type="MSE"))
     data = get_data(["a", "b"], n_samples=3, n_time=3).data
     stepped = stepper.train_on_batch(data, optimization=NullOptimization())
-    assert "loss_task" not in stepped.metrics
     assert "loss" in stepped.metrics
 
 
@@ -2609,8 +2606,8 @@ def test_task_sampling_works_with_single_module_step():
     )
     data = get_data(["a", "b"], n_samples=3, n_time=2).data
     stepped = stepper.train_on_batch(data, optimization=NullOptimization())
-    assert "loss_task" in stepped.metrics
-    assert stepped.metrics["loss_task"] > 0
+    assert "loss" in stepped.metrics
+    assert stepped.metrics["loss"] > 0
 
 
 @pytest.mark.parametrize("n_forward_steps", [1, 2])
@@ -2637,8 +2634,6 @@ def test_task_sampling_training(n_forward_steps, n_ensemble):
     data = get_data(all_names, n_samples=3, n_time=n_forward_steps + 1).data
     stepped = stepper.train_on_batch(data, optimization=NullOptimization())
     assert "loss" in stepped.metrics
-    assert "loss_task" in stepped.metrics
-    assert stepped.metrics["loss_task"] > 0
     for step in range(n_forward_steps):
         assert f"loss_step_{step}" in stepped.metrics
 
