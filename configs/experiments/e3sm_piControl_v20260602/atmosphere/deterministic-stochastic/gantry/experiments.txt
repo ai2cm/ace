@@ -1,2 +1,4 @@
 
 BK-v20260602-ACE2S-E3SMv3-piControl-100yr-n512-bs8-deterministic|rs0|01KTADY7A12RBXGBE73KRF6P8R|training|best_inference_ckpt|normal|--min-runtime 8h
+
+BK-v20260602-ACE2S-E3SMv3-piControl-100yr-n384-bs8-deterministic|rs0|01KTADZ08WSVMHQZRJYQTD5R0X|training|best_inference_ckpt|normal|--min-runtime 8h
