@@ -1805,14 +1805,16 @@ class TrainStepper(
         # sees the same ground truth for its IC
         ground_truth_expanded = repeat_interleave_batch_dim(ground_truth, n_ensemble)
 
+        ref_tensor = next(iter(prev_state.values()))
+        device = ref_tensor.device
+
         def _expand_mask(m: torch.Tensor) -> torch.Tensor:
-            """Repeat per-IC masks for each ensemble member."""
+            """Repeat per-IC masks for each ensemble member, on model device."""
+            m = m.to(device=device)
             if n_ensemble == 1:
                 return m
             return torch.repeat_interleave(m, n_ensemble, dim=0)
 
-        ref_tensor = next(iter(prev_state.values()))
-        device = ref_tensor.device
         spatial = ref_tensor.shape[-2:]
         task_input: TensorDict = {}
         task_data_mask: dict[str, torch.Tensor] = {}
@@ -1858,11 +1860,14 @@ class TrainStepper(
 
         task_target = add_ensemble_dim(ground_truth)
         task_gen = unfold_ensemble_dim(task_output, n_ensemble=n_ensemble)
+        output_data_mask = {
+            k: v.to(device=device) for k, v in sampled.output_data_mask.items()
+        }
         task_loss_output = self._task_loss_obj(
             task_gen,
             task_target,
             step=0,
-            data_mask=sampled.output_data_mask,
+            data_mask=output_data_mask,
         )
         return task_loss_output.total()
 
