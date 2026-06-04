@@ -7,18 +7,18 @@ ema:
   faster_decay_at_start: false
 max_epochs: 120
 inference:
-  - n_forward_steps: 3650 #10 years
+  - n_forward_steps: 730 #10 years
     forward_steps_in_memory: 40
     loader:
       start_indices:
         times:
-          - '2010-01-01T12:00:00'
-          - '2010-02-01T12:00:00'
-          - '2010-03-01T12:00:00'
-          - '2010-04-01T12:00:00'
+          - '2010-01-04T12:00:00'
+          - '2010-02-03T12:00:00'
+          - '2010-03-05T12:00:00'
+          - '2010-04-04T12:00:00'
       dataset:
         data_path: /climate-default
-        file_pattern: ufs-replay-ocean-1deg-19level-1994-2023.zarr
+        file_pattern: 2026-06-03-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
         engine: zarr
       num_data_workers: 4
     aggregator:
@@ -36,7 +36,7 @@ train_loader:
   num_data_workers: 8
   dataset:
     data_path: /climate-default
-    file_pattern: ufs-replay-ocean-1deg-19level-1994-2023.zarr
+    file_pattern: 2026-06-03-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
     engine: zarr
     subset:
         stop_time: '2021-12-31T12:00:00'
@@ -46,7 +46,7 @@ validation:
     num_data_workers: 8
     dataset:
       data_path: /climate-default
-      file_pattern:  ufs-replay-ocean-1deg-19level-1994-2023.zarr
+      file_pattern: 2026-06-03-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
       engine: zarr
       subset:
         start_time: '2022-01-01T12:00:00'
