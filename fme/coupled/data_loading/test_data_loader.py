@@ -38,6 +38,7 @@ from fme.coupled.data_loading.data_typing import (
     CoupledHorizontalCoordinates,
     CoupledVerticalCoordinate,
 )
+from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.requirements import CoupledDataRequirements
 
 from .config import (
@@ -220,6 +221,28 @@ class MockCoupledData:
                 **atmos_kwargs,
             ),
         )
+
+    def build_dataset_info(self) -> CoupledDatasetInfo:
+        """Construct a CoupledDatasetInfo directly from the mock on-disk data.
+
+        This mimics what the stepper's training_dataset_info would provide in the
+        no-target inference path (used by _make_dummy_ocean_forcing).
+        """
+        from fme.core.dataset_info import DatasetInfo
+
+        ocean_info = DatasetInfo(
+            horizontal_coordinates=self.ocean.hcoord,
+            vertical_coordinate=self.ocean.vcoord,
+            spatial_mask_provider=self.ocean.spatial_mask_provider,
+            timestep=self.ocean.timestep,
+        )
+        atmos_info = DatasetInfo(
+            horizontal_coordinates=self.atmosphere.hcoord,
+            vertical_coordinate=self.atmosphere.vcoord,
+            spatial_mask_provider=self.atmosphere.spatial_mask_provider,
+            timestep=self.atmosphere.timestep,
+        )
+        return CoupledDatasetInfo(ocean=ocean_info, atmosphere=atmos_info)
 
 
 def create_coupled_data_on_disk(

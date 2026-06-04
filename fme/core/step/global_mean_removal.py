@@ -160,13 +160,14 @@ class SharedGlobalMeanRemoval(GlobalMeanRemoval):
             raise ValueError(
                 f"Reference field '{ref_name}' is not present in the input."
             )
+        ref = input[ref_name]
         if data_mask is not None and ref_name in data_mask:
-            if not data_mask[ref_name].all():
+            ref_mask = data_mask[ref_name].to(device=ref.device, dtype=torch.bool)
+            if not ref_mask.all():
                 raise ValueError(
                     f"Reference field '{ref_name}' is masked for some samples, "
                     "which is not supported for shared global mean removal."
                 )
-        ref = input[ref_name]
         sample_mean = ref.mean(dim=tuple(range(1, ref.ndim)))
         offset = self._reference_mean - sample_mean
         self._cached_offset = offset
@@ -259,7 +260,7 @@ class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
             sample_mean = t.mean(dim=tuple(range(1, t.ndim)))
             shift = self._means[name] - sample_mean
             if data_mask is not None and name in data_mask:
-                mask = data_mask[name]
+                mask = data_mask[name].to(device=shift.device, dtype=torch.bool)
                 shift = torch.where(mask, shift, torch.zeros_like(shift))
             shifts[name] = shift
             broadcast = shift.view(shift.shape[0], *(1,) * (t.ndim - 1))

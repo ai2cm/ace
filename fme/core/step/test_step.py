@@ -36,9 +36,11 @@ from fme.core.step.single_module import (
     _apply_extra_channel_mask,
     _apply_input_mask,
     _build_channel_mask_dict,
+    _build_effective_input_mask,
 )
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.typing_ import TensorDict
+from fme.core.var_masking import UniformMaskingConfig, VariableMaskingConfig
 
 from .radiation import SeparateRadiationStepConfig
 
@@ -1250,95 +1252,54 @@ def test_step_with_include_channel_mask_inputs_no_data_mask():
         torch.testing.assert_close(output_no_mask[name], output_all_unmasked[name])
 
 
-def test_step_nan_input_does_not_produce_nan_output_with_corrector():
-    """Masked variables must not propagate NaN through the atmosphere corrector.
-
-    A variable absent per data_mask is zeroed in normalized space before the
-    network forward pass; the corrector sees the mean value (denorm of 0) for
-    masked samples through the normalizer round-trip.  This test verifies that
-    the output has no NaN for any sample regardless of which samples have masked
-    PRESsfc.
-    """
-    in_names = [
-        "DSWRFtoa",
-        "HGTsfc",
-        "air_temperature_0",
-        "air_temperature_1",
-        "air_temperature_2",
-        "air_temperature_3",
-        "air_temperature_4",
-        "air_temperature_5",
-        "specific_total_water_0",
-        "specific_total_water_1",
-        "specific_total_water_2",
-        "specific_total_water_3",
-        "specific_total_water_4",
-        "specific_total_water_5",
-        "PRESsfc",
-        "PRATEsfc",
-    ]
-    out_names = [
-        "air_temperature_0",
-        "air_temperature_1",
-        "air_temperature_2",
-        "air_temperature_3",
-        "air_temperature_4",
-        "air_temperature_5",
-        "specific_total_water_0",
-        "specific_total_water_1",
-        "specific_total_water_2",
-        "specific_total_water_3",
-        "specific_total_water_4",
-        "specific_total_water_5",
-        "PRESsfc",
-        "PRATEsfc",
-        "LHTFLsfc",
-        "SHTFLsfc",
-        "ULWRFsfc",
-        "ULWRFtoa",
-        "DLWRFsfc",
-        "DSWRFsfc",
-        "USWRFtoa",
-        "USWRFsfc",
-        "tendency_of_total_water_path_due_to_advection",
-    ]
-    all_names = list(set(in_names).union(out_names))
+def test_step_masked_nan_input_is_zeroed_before_network_with_corrector():
+    """Masked NaNs should be replaced in normalized space before module input."""
+    in_names = ["masked_input", "forcing"]
+    out_names = ["masked_input"]
     normalization = NetworkAndLossNormalizationConfig(
         network=NormalizationConfig(
-            means={name: 1.0 for name in all_names},
-            stds={name: 1.0 for name in all_names},
-            fill_nans_on_normalize=True,
+            means={name: 0.0 for name in set(in_names + out_names)},
+            stds={name: 1.0 for name in set(in_names + out_names)},
         ),
     )
+
+    class AssertFiniteInputModule(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self._p = nn.Parameter(torch.zeros(1))
+
+        def forward(self, inp):
+            assert not torch.isnan(inp).any()
+            return self._p.new_full(
+                (inp.shape[0], len(out_names), *inp.shape[-2:]), -1.0
+            )
+
     config = StepSelector(
         type="single_module",
         config=dataclasses.asdict(
             SingleModuleStepConfig(
                 builder=ModuleSelector(
-                    type="SphericalFourierNeuralOperatorNet",
-                    config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+                    type="prebuilt", config={"module": AssertFiniteInputModule()}
                 ),
                 in_names=in_names,
                 out_names=out_names,
                 normalization=normalization,
-                corrector=AtmosphereCorrectorConfig(
-                    conserve_dry_air=True,
-                    moisture_budget_correction="advection_and_precipitation",
-                    force_positive_names=["PRATEsfc"],
-                ),
+                corrector=AtmosphereCorrectorConfig(force_positive_names=out_names),
             )
         ),
     )
-    img_shape = (9, 18)
+    img_shape = (4, 8)
     n_samples = 4
     step = get_step(config, img_shape)
     input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
+    input_data["masked_input"][2:] = torch.nan
     next_step_input_data = get_tensor_dict(
         step.next_step_input_names, img_shape, n_samples
     )
-    # Use data_mask to mark PRESsfc absent for half the samples.
     data_mask = {
-        "PRESsfc": torch.tensor([False, False, True, True], device=fme.get_device()),
+        "masked_input": torch.tensor(
+            [True, True, False, False], device=fme.get_device()
+        ),
     }
 
     output = step.step(
@@ -1348,10 +1309,8 @@ def test_step_nan_input_does_not_produce_nan_output_with_corrector():
             data_mask=data_mask,
         ),
     )
-    for name in step.output_names:
-        assert (
-            not output[name].isnan().any()
-        ), f"NaN found in output '{name}' — masked inputs leaked through corrector"
+    assert not output["masked_input"].isnan().any()
+    assert (output["masked_input"] == 0.0).all()
 
 
 def test_input_dropout_applied_in_train_mode_not_eval():
@@ -1363,8 +1322,6 @@ def test_input_dropout_applied_in_train_mode_not_eval():
     fires during training, so the indicator channel for the dropped variable
     must be 0.0 in train output and 1.0 in eval output.
     """
-    from fme.core.var_masking import VariableMaskingConfig
-
     in_names = ["x", "y"]
     out_names = ["x"]
     img_shape = (4, 8)
@@ -1401,7 +1358,7 @@ def test_input_dropout_applied_in_train_mode_not_eval():
         out_names=out_names,
         normalization=normalization,
         include_channel_mask_inputs=True,
-        input_dropout=VariableMaskingConfig(rates={"x": 1.0}),
+        input_dropout=VariableMaskingConfig(per_variable={"x": 1.0}),
     )
     dataset_info = DatasetInfo(
         horizontal_coordinates=LatLonCoordinates(
@@ -1430,6 +1387,138 @@ def test_input_dropout_applied_in_train_mode_not_eval():
     step_obj.module.torch_module.eval()
     step_obj.step(StepArgs(input=input_data, next_step_input_data=next_step_input_data))
     assert (recorder.last_x_indicator == 1.0).all(), "Expected x present in eval mode"
+
+
+def _make_input_dropout_step_config(
+    input_dropout: VariableMaskingConfig | None = None,
+    in_names: list[str] | None = None,
+    out_names: list[str] | None = None,
+    global_mean_removal: (
+        PerChannelGlobalMeanRemovalConfig | SharedGlobalMeanRemovalConfig | None
+    ) = None,
+) -> SingleModuleStepConfig:
+    if in_names is None:
+        in_names = ["x", "y"]
+    if out_names is None:
+        out_names = ["x"]
+    all_names = set(in_names + out_names)
+    normalization = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means={name: 0.0 for name in all_names},
+            stds={name: 1.0 for name in all_names},
+        )
+    )
+    return SingleModuleStepConfig(
+        builder=ModuleSelector(
+            type="SphericalFourierNeuralOperatorNet",
+            config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+        ),
+        in_names=in_names,
+        out_names=out_names,
+        normalization=normalization,
+        global_mean_removal=global_mean_removal,
+        input_dropout=input_dropout,
+    )
+
+
+def test_input_dropout_config_round_trips_through_dacite():
+    variable_config = _make_input_dropout_step_config(
+        VariableMaskingConfig(per_variable={"x": 0.25})
+    )
+    variable_restored = dacite.from_dict(
+        SingleModuleStepConfig,
+        dataclasses.asdict(variable_config),
+        config=dacite.Config(strict=True),
+    )
+    assert isinstance(variable_restored.input_dropout, VariableMaskingConfig)
+    assert variable_restored.input_dropout.per_variable == {"x": 0.25}
+
+    uniform_config = _make_input_dropout_step_config(
+        VariableMaskingConfig(uniform=UniformMaskingConfig(min_vars=1, max_vars=1))
+    )
+    uniform_restored = dacite.from_dict(
+        SingleModuleStepConfig,
+        dataclasses.asdict(uniform_config),
+        config=dacite.Config(strict=True),
+    )
+    assert isinstance(uniform_restored.input_dropout, VariableMaskingConfig)
+    assert isinstance(uniform_restored.input_dropout.uniform, UniformMaskingConfig)
+    assert uniform_restored.input_dropout.uniform.min_vars == 1
+    assert uniform_restored.input_dropout.uniform.max_vars == 1
+
+
+def test_build_effective_input_mask_merges_data_mask_and_dropout():
+    data_mask = {
+        "a": torch.tensor([True, False, True]),
+        "b": torch.tensor([True, True, False]),
+    }
+    input_data = {"a": torch.ones(3, 1, 1)}
+    result = _build_effective_input_mask(
+        data_mask=data_mask,
+        input_dropout=VariableMaskingConfig(per_variable={"a": 1.0}),
+        training=True,
+        in_names=["a"],
+        input_data=input_data,
+    )
+
+    torch.testing.assert_close(result["a"], torch.tensor([False, False, False]))
+    torch.testing.assert_close(result["b"], data_mask["b"])
+
+
+def test_input_dropout_uniform_bounds_validated_against_in_names():
+    with pytest.raises(ValueError, match="min_vars"):
+        _make_input_dropout_step_config(
+            in_names=["x", "y"],
+            out_names=["x"],
+            input_dropout=VariableMaskingConfig(
+                uniform=UniformMaskingConfig(
+                    min_vars=2, max_vars="max", ignore_vars=["y"]
+                )
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    "input_dropout",
+    [
+        pytest.param(
+            VariableMaskingConfig(per_variable={"surface_temperature": 1.0}),
+            id="variable",
+        ),
+        pytest.param(
+            VariableMaskingConfig(uniform=UniformMaskingConfig(min_vars=1, max_vars=1)),
+            id="uniform",
+        ),
+    ],
+)
+def test_input_dropout_cannot_mask_shared_global_mean_reference(input_dropout):
+    with pytest.raises(ValueError, match="reference_field 'surface_temperature'"):
+        _make_input_dropout_step_config(
+            in_names=["surface_temperature", "x"],
+            out_names=["surface_temperature"],
+            global_mean_removal=SharedGlobalMeanRemovalConfig(
+                reference_field="surface_temperature",
+                field_names=["surface_temperature", "x"],
+            ),
+            input_dropout=input_dropout,
+        )
+
+
+def test_input_dropout_allows_shared_global_mean_reference_when_ignored():
+    config = _make_input_dropout_step_config(
+        in_names=["surface_temperature", "x"],
+        out_names=["surface_temperature"],
+        global_mean_removal=SharedGlobalMeanRemovalConfig(
+            reference_field="surface_temperature",
+            field_names=["surface_temperature", "x"],
+        ),
+        input_dropout=VariableMaskingConfig(
+            uniform=UniformMaskingConfig(
+                min_vars=1, max_vars=1, ignore_vars=["surface_temperature"]
+            )
+        ),
+    )
+    assert isinstance(config.input_dropout, VariableMaskingConfig)
 
 
 def _make_global_mean_removal_step(
@@ -1659,8 +1748,6 @@ def test_step_shared_global_mean_removal_raises_on_masked_reference():
 def test_dropout_masks_extra_channels():
     """When a field is dropout-masked, its extra mean-removal channel must
     also be zeroed so the network cannot infer the dropped field's mean."""
-    from fme.core.var_masking import VariableMaskingConfig
-
     in_names = ["a", "b"]
     out_names = ["a"]
     img_shape = (4, 8)
@@ -1696,7 +1783,7 @@ def test_dropout_masks_extra_channels():
             field_names=in_names,
             append_as_input=True,
         ),
-        input_dropout=VariableMaskingConfig(rates={"a": 1.0}),
+        input_dropout=VariableMaskingConfig(per_variable={"a": 1.0}),
     )
     dataset_info = DatasetInfo(
         horizontal_coordinates=LatLonCoordinates(
@@ -1736,6 +1823,68 @@ def test_dropout_masks_extra_channels():
     assert (
         recorder.last_extra[:, 1] != 0.0
     ).all(), "extra channel for 'b' zeroed in eval"
+
+
+def test_dropout_mask_applies_to_global_mean_removal_inverse():
+    """Dropout must make global mean removal behave like data_mask.
+
+    Without applying the dropout mask to ``forward_transform``, the removed
+    input mean would be cached and restored after the network call, leaking
+    information from a dropped input channel into the output.
+    """
+    in_names = ["a"]
+    out_names = ["a"]
+    img_shape = (4, 8)
+    n_samples = 2
+    clim_mean = 10.0
+
+    class ReturnZerosModule(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self._p = nn.Parameter(torch.zeros(1))
+
+        def forward(self, inp):
+            return self._p.new_zeros(n_samples, len(out_names), *img_shape)
+
+    normalization = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means={n: clim_mean for n in in_names + out_names},
+            stds={n: 1.0 for n in in_names + out_names},
+        ),
+    )
+    step_config = SingleModuleStepConfig(
+        builder=ModuleSelector(type="prebuilt", config={"module": ReturnZerosModule()}),
+        in_names=in_names,
+        out_names=out_names,
+        normalization=normalization,
+        global_mean_removal=PerChannelGlobalMeanRemovalConfig(field_names=in_names),
+        input_dropout=VariableMaskingConfig(per_variable={"a": 1.0}),
+    )
+    dataset_info = DatasetInfo(
+        horizontal_coordinates=LatLonCoordinates(
+            lat=torch.zeros(img_shape[0], device=fme.get_device()),
+            lon=torch.zeros(img_shape[1], device=fme.get_device()),
+        ),
+        vertical_coordinate=HybridSigmaPressureCoordinate(
+            ak=torch.arange(7, device=fme.get_device()),
+            bk=torch.arange(7, device=fme.get_device()),
+        ),
+        timestep=TIMESTEP,
+    )
+    step_obj = step_config.get_step(dataset_info, init_weights=lambda _: None)
+    input_data = {
+        "a": torch.full((n_samples, *img_shape), 15.0, device=fme.get_device())
+    }
+
+    step_obj.module.torch_module.train()
+    output = step_obj.step(
+        StepArgs(input=input_data, next_step_input_data={}),
+    )
+
+    torch.testing.assert_close(
+        output["a"],
+        torch.full_like(output["a"], clim_mean),
+    )
 
 
 def test_apply_extra_channel_mask_no_op_when_no_names_match():
