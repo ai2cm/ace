@@ -14,7 +14,7 @@ from fme.core.logging_utils import LoggingConfig
 from ..data import DataLoaderConfig
 from ..models import CheckpointModelConfig, DiffusionModel
 from ..predictors import (
-    DenoisingMoECheckpointConfig,
+    DenoisingMoEBundledConfig,
     DenoisingMoEConfig,
     DenoisingMoEPredictor,
     PatchPredictionConfig,
@@ -226,7 +226,7 @@ class InferenceConfig:
             entity: my_organization
     """
 
-    model: DenoisingMoEConfig | DenoisingMoECheckpointConfig | CheckpointModelConfig
+    model: DenoisingMoEConfig | DenoisingMoEBundledConfig | CheckpointModelConfig
     data: DataLoaderConfig
     experiment_dir: str
     outputs: list[EventConfig | TimeRangeConfig]

@@ -182,9 +182,7 @@ class DenoisingMoEPredictor:
             raise ValueError("experts must be non-empty.")
         if len(experts) != len(sigma_ranges):
             raise ValueError("experts and sigma_ranges must have the same length.")
-        if expert_renames is None:
-            expert_renames = [None] * len(experts)
-        if len(expert_renames) != len(experts):
+        if expert_renames is not None and len(expert_renames) != len(experts):
             raise ValueError("expert_renames and experts must have the same length.")
         self._experts = experts
         self._primary = experts[0]
@@ -329,7 +327,7 @@ class DenoisingMoEPredictor:
 
 
 @dataclasses.dataclass
-class DenoisingMoECheckpointConfig:
+class DenoisingMoEBundledConfig:
     """
     Loads a ``DenoisingMoEPredictor`` from a single bundled checkpoint produced
     by ``DenoisingMoEPredictor.save``. The bundle contains every expert's

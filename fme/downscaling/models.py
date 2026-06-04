@@ -247,7 +247,6 @@ class DiffusionModelConfig:
         # runtime names exposed by the built DiffusionModel. All rename
         # application happens here: normalizer keys, in_names, out_names. The
         # DiffusionModel itself just stores what it is given.
-        rename = rename or None
         rename_map = rename or {}
         in_names = [rename_map.get(n, n) for n in self.in_names]
         out_names = [rename_map.get(n, n) for n in self.out_names]

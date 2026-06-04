@@ -24,7 +24,7 @@ from fme.downscaling.data import (
 )
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
 from fme.downscaling.predictors import (
-    DenoisingMoECheckpointConfig,
+    DenoisingMoEBundledConfig,
     DenoisingMoEConfig,
     DenoisingMoEPredictor,
     PatchPredictionConfig,
@@ -243,7 +243,7 @@ class Downscaler:
 
 @dataclasses.dataclass
 class DownscalerConfig:
-    model: DenoisingMoEConfig | DenoisingMoECheckpointConfig | CheckpointModelConfig
+    model: DenoisingMoEConfig | DenoisingMoEBundledConfig | CheckpointModelConfig
     experiment_dir: str
     data: DataLoaderConfig
     logging: LoggingConfig

@@ -20,7 +20,7 @@ from fme.downscaling.data import (
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
 from fme.downscaling.predict import EventConfig
 from fme.downscaling.predictors import (
-    DenoisingMoECheckpointConfig,
+    DenoisingMoEBundledConfig,
     DenoisingMoEConfig,
     DenoisingMoEPredictor,
     PatchPredictionConfig,
@@ -178,7 +178,7 @@ class PairedEventConfig(EventConfig):
 
 @dataclasses.dataclass
 class EvaluatorConfig:
-    model: DenoisingMoEConfig | DenoisingMoECheckpointConfig | CheckpointModelConfig
+    model: DenoisingMoEConfig | DenoisingMoEBundledConfig | CheckpointModelConfig
     experiment_dir: str
     data: PairedDataLoaderConfig
     logging: LoggingConfig
