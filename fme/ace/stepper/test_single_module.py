@@ -80,14 +80,15 @@ from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.spatial_masking import StaticSpatialMaskingConfig
 from fme.core.step import SingleModuleStepConfig, StepSelector
 from fme.core.step.args import StepArgs
-from fme.core.step.infill_prediction import (
+from fme.core.step.multi_call import MultiCallConfig
+from fme.core.step.single_module import SingleModuleStep
+from fme.core.step.task_step import (
     InferenceSchemeConfig,
     InfillPredictionStepConfig,
+    TaskConfig,
     TaskSamplingConfig,
     TaskWeights,
 )
-from fme.core.step.multi_call import MultiCallConfig
-from fme.core.step.single_module import SingleModuleStep
 from fme.core.testing.regression import validate_tensor_dict
 from fme.core.training_history import TrainingJob
 from fme.core.typing_ import EnsembleTensorDict
@@ -2534,11 +2535,6 @@ def test_predict_with_data_mask_zeros_masked_forcing():
     torch.testing.assert_close(output.data["a"][:, 0], ic_a)
 
 
-# ---------------------------------------------------------------------------
-# Task sampling integration tests (Commit 3)
-# ---------------------------------------------------------------------------
-
-
 def _get_infill_prediction_stepper_config(
     all_names: list[str] | None = None,
     forcing_names: list[str] | None = None,
@@ -2613,12 +2609,12 @@ def test_task_sampling_training(n_forward_steps, n_ensemble):
     all_names = ["a", "b", "forcing_x"]
     config = _get_infill_prediction_stepper_config()
     task_sampling = TaskSamplingConfig(
-        task_weights=TaskWeights(
-            auto_encode=0.0,
-            infill=0.0,
-            prediction=1.0,
-            infill_prediction=0.0,
-            combined_all=0.0,
+        tasks=TaskWeights(
+            auto_encode=TaskConfig(probability=0.0),
+            infill=TaskConfig(probability=0.0),
+            prediction=TaskConfig(probability=1.0),
+            infill_prediction=TaskConfig(probability=0.0),
+            combined_all=TaskConfig(probability=0.0),
         ),
     )
     stepper = _get_train_stepper(
@@ -2655,12 +2651,12 @@ def test_task_sampling_loss_included_in_total():
         config_task,
         loss=StepLossConfig(type="MSE"),
         task_sampling=TaskSamplingConfig(
-            task_weights=TaskWeights(
-                auto_encode=0.0,
-                infill=0.0,
-                prediction=1.0,
-                infill_prediction=0.0,
-                combined_all=0.0,
+            tasks=TaskWeights(
+                auto_encode=TaskConfig(probability=0.0),
+                infill=TaskConfig(probability=0.0),
+                prediction=TaskConfig(probability=1.0),
+                infill_prediction=TaskConfig(probability=0.0),
+                combined_all=TaskConfig(probability=0.0),
             ),
         ),
     )

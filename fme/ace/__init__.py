@@ -123,12 +123,13 @@ from fme.core.step import (
     SeparateRadiationStepConfig,
     SingleModuleStepConfig,
 )
-from fme.core.step.infill_prediction import (
+from fme.core.step.multi_call import MultiCallConfig
+from fme.core.step.task_step import (
     InferenceSchemeConfig,
+    TaskConfig,
     TaskSamplingConfig,
     TaskWeights,
 )
-from fme.core.step.multi_call import MultiCallConfig
 from fme.core.typing_ import Slice
 
 from . import step

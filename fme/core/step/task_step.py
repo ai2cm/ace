@@ -35,27 +35,29 @@ from fme.core.typing_ import TensorDict, TensorMapping
 
 
 @dataclasses.dataclass
-class TaskWeights:
-    """Relative sampling weights and loss scaling for each task type.
+class TaskConfig:
+    """Configuration for a single task type.
 
-    Sampling probabilities are derived from the weight values
-    (normalized to sum to 1). Loss scaling is applied as a multiplier
-    on the task step's loss.
-
-    A weight of 0 disables a task entirely.
+    Attributes:
+        probability: Relative sampling weight. Normalized across all tasks
+            to derive the sampling probability. A value of 0 disables the task.
+        loss_scaling: Multiplier applied to the task step's loss when this
+            task is sampled.
     """
 
-    auto_encode: float = 1.0
-    infill: float = 1.0
-    prediction: float = 1.0
-    infill_prediction: float = 1.0
-    combined_all: float = 1.0
+    probability: float = 1.0
+    loss_scaling: float = 1.0
 
-    auto_encode_loss_scale: float = 1.0
-    infill_loss_scale: float = 1.0
-    prediction_loss_scale: float = 1.0
-    infill_prediction_loss_scale: float = 1.0
-    combined_all_loss_scale: float = 1.0
+
+@dataclasses.dataclass
+class TaskWeights:
+    """Per-task sampling and loss scaling configuration."""
+
+    auto_encode: TaskConfig = dataclasses.field(default_factory=TaskConfig)
+    infill: TaskConfig = dataclasses.field(default_factory=TaskConfig)
+    prediction: TaskConfig = dataclasses.field(default_factory=TaskConfig)
+    infill_prediction: TaskConfig = dataclasses.field(default_factory=TaskConfig)
+    combined_all: TaskConfig = dataclasses.field(default_factory=TaskConfig)
 
 
 @dataclasses.dataclass
@@ -63,12 +65,12 @@ class TaskSamplingConfig:
     """Configuration for random task selection during training.
 
     Attributes:
-        task_weights: Sampling weights and loss scaling per task type.
+        tasks: Per-task sampling and loss scaling configuration.
         min_input_variables: Minimum number of input variables to select.
         min_output_variables: Minimum number of output variables to select.
     """
 
-    task_weights: TaskWeights = dataclasses.field(default_factory=TaskWeights)
+    tasks: TaskWeights = dataclasses.field(default_factory=TaskWeights)
     min_input_variables: int = 1
     min_output_variables: int = 1
 
@@ -88,8 +90,7 @@ class InferenceSchemeConfig:
     """Defines how the model behaves at inference time.
 
     This mirrors the variable routing of SingleModuleStepConfig for
-    standard forward prediction. Future schemes could add post-hoc
-    auto-encoding or iterative infill.
+    standard forward prediction.
 
     Attributes:
         in_names: Input variable names for inference.
@@ -135,12 +136,8 @@ class TaskType(enum.Enum):
     COMBINED_ALL = "combined_all"
 
 
-def _get_task_weight(weights: TaskWeights, task: TaskType) -> float:
+def _get_task_config(weights: TaskWeights, task: TaskType) -> TaskConfig:
     return getattr(weights, task.value)
-
-
-def _get_task_loss_scale(weights: TaskWeights, task: TaskType) -> float:
-    return getattr(weights, f"{task.value}_loss_scale")
 
 
 def _randint(low: int, high: int) -> int:
@@ -167,23 +164,24 @@ class TaskSampler:
         self._non_forcing_names = [n for n in all_names if n not in self._forcing_names]
         self._forcing_name_list = [n for n in all_names if n in self._forcing_names]
 
-        task_weights: list[tuple[TaskType, float]] = []
+        enabled_tasks: list[tuple[TaskType, float]] = []
         for task_type in TaskType:
-            w = _get_task_weight(config.task_weights, task_type)
-            if w < 0:
+            task_cfg = _get_task_config(config.tasks, task_type)
+            if task_cfg.probability < 0:
                 raise ValueError(
-                    f"Task weight for {task_type.value} must be >= 0, got {w}"
+                    f"Task probability for {task_type.value} must be >= 0, "
+                    f"got {task_cfg.probability}"
                 )
-            if w > 0:
+            if task_cfg.probability > 0:
                 self._validate_task_feasibility(task_type)
-                task_weights.append((task_type, w))
+                enabled_tasks.append((task_type, task_cfg.probability))
 
-        if not task_weights:
-            raise ValueError("At least one task must have a non-zero weight")
+        if not enabled_tasks:
+            raise ValueError("At least one task must have a non-zero probability")
 
-        total = sum(w for _, w in task_weights)
-        self._task_types = [t for t, _ in task_weights]
-        self._task_probabilities = [w / total for _, w in task_weights]
+        total = sum(w for _, w in enabled_tasks)
+        self._task_types = [t for t, _ in enabled_tasks]
+        self._task_probabilities = [w / total for _, w in enabled_tasks]
 
     def _validate_task_feasibility(self, task_type: TaskType) -> None:
         n_nf = len(self._non_forcing_names)
@@ -260,7 +258,7 @@ class TaskSampler:
             available_all = available_nf + available_forcing
 
             task_type = self._sample_task_type()
-            loss_scale = _get_task_loss_scale(self._config.task_weights, task_type)
+            loss_scale = _get_task_config(self._config.tasks, task_type).loss_scaling
 
             prev_inputs, curr_inputs, outputs = self._sample_assignment(
                 task_type, available_nf, available_forcing, available_all

@@ -51,11 +51,6 @@ from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.spatial_masking import NullSpatialMasking, StaticSpatialMaskingConfig
 from fme.core.step.args import StepArgs
 from fme.core.step.global_mean_removal import GlobalMeanRemovalConfigUnion
-from fme.core.step.infill_prediction import (
-    InfillPredictionStepConfig,
-    TaskSampler,
-    TaskSamplingConfig,
-)
 from fme.core.step.multi_call import (
     MultiCallConfig,
     MultiCallStepConfig,
@@ -63,6 +58,11 @@ from fme.core.step.multi_call import (
 )
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
+from fme.core.step.task_step import (
+    InfillPredictionStepConfig,
+    TaskSampler,
+    TaskSamplingConfig,
+)
 from fme.core.tensors import (
     add_ensemble_dim,
     fold_ensemble_dim,
@@ -1553,6 +1553,7 @@ class TrainStepper(
 
         self._task_sampler: TaskSampler | None = None
         self._task_loss_obj: StepLoss | None = None
+        self._task_step_config: InfillPredictionStepConfig | None = None
         if config.task_sampling is not None:
             step_config = stepper._step_obj.config
             if not isinstance(step_config, InfillPredictionStepConfig):
@@ -1560,6 +1561,7 @@ class TrainStepper(
                     "task_sampling requires an InfillPredictionStepConfig, "
                     f"got {type(step_config).__name__}"
                 )
+            self._task_step_config = step_config
             self._task_sampler = TaskSampler(
                 config.task_sampling,
                 step_config.all_names,
@@ -1773,7 +1775,8 @@ class TrainStepper(
         """Run the additional task step after the prediction loop."""
         assert self._task_sampler is not None
         assert self._task_loss_obj is not None
-        step_config = cast(InfillPredictionStepConfig, self._stepper._step_obj.config)
+        assert self._task_step_config is not None
+        step_config = self._task_step_config
 
         batch_size = next(iter(input_batch_data.data.values())).shape[0]
         sampled = self._task_sampler.sample(input_batch_data.data_mask, batch_size)

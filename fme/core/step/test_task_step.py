@@ -12,25 +12,25 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry import ModuleSelector
 from fme.core.step.args import StepArgs
-from fme.core.step.infill_prediction import (
+from fme.core.step.step import StepSelector
+from fme.core.step.task_step import (
     InferenceSchemeConfig,
     InfillPredictionStep,
     InfillPredictionStepConfig,
     SampledTasks,
+    TaskConfig,
     TaskSampler,
     TaskSamplingConfig,
     TaskType,
     TaskWeights,
-    _get_task_loss_scale,
+    _get_task_config,
 )
-from fme.core.step.step import StepSelector
 
 
 def _only_weight(task_type: TaskType, loss_scale: float = 1.0) -> TaskWeights:
     """Return TaskWeights with only the given task enabled."""
-    kwargs = {t.value: 0.0 for t in TaskType}
-    kwargs[task_type.value] = 1.0
-    kwargs[f"{task_type.value}_loss_scale"] = loss_scale
+    kwargs = {t.value: TaskConfig(probability=0.0) for t in TaskType}
+    kwargs[task_type.value] = TaskConfig(probability=1.0, loss_scaling=loss_scale)
     return TaskWeights(**kwargs)
 
 
@@ -47,7 +47,7 @@ def _make_sampler(
     if forcing_names is None:
         forcing_names = []
     config = TaskSamplingConfig(
-        task_weights=_only_weight(task_type, loss_scale),
+        tasks=_only_weight(task_type, loss_scale),
         min_input_variables=min_in,
         min_output_variables=min_out,
     )
@@ -86,15 +86,17 @@ class TestTaskSamplingConfig:
 
 
 class TestTaskSamplerErrors:
-    def test_negative_weight_raises(self):
-        weights = TaskWeights(auto_encode=-1.0)
-        config = TaskSamplingConfig(task_weights=weights)
+    def test_negative_probability_raises(self):
+        weights = TaskWeights(auto_encode=TaskConfig(probability=-1.0))
+        config = TaskSamplingConfig(tasks=weights)
         with pytest.raises(ValueError, match="must be >= 0"):
             TaskSampler(config, ["a", "b"], [])
 
-    def test_all_zero_weights_raises(self):
-        weights = TaskWeights(**{t.value: 0.0 for t in TaskType})
-        config = TaskSamplingConfig(task_weights=weights)
+    def test_all_zero_probabilities_raises(self):
+        weights = TaskWeights(
+            **{t.value: TaskConfig(probability=0.0) for t in TaskType}
+        )
+        config = TaskSamplingConfig(tasks=weights)
         with pytest.raises(ValueError, match="At least one task"):
             TaskSampler(config, ["a", "b"], [])
 
@@ -140,15 +142,15 @@ class TestTaskSamplerErrors:
                 min_out=1,
             )
 
-    def test_zero_weight_task_skips_feasibility_check(self):
+    def test_zero_probability_task_skips_feasibility_check(self):
         weights = TaskWeights(
-            auto_encode=0.0,
-            infill=0.0,
-            prediction=1.0,
-            infill_prediction=0.0,
-            combined_all=0.0,
+            auto_encode=TaskConfig(probability=0.0),
+            infill=TaskConfig(probability=0.0),
+            prediction=TaskConfig(probability=1.0),
+            infill_prediction=TaskConfig(probability=0.0),
+            combined_all=TaskConfig(probability=0.0),
         )
-        config = TaskSamplingConfig(task_weights=weights)
+        config = TaskSamplingConfig(tasks=weights)
         TaskSampler(config, ["a"], [])
 
 
@@ -421,15 +423,15 @@ class TestDataMaskFiltering:
 
 
 class TestZeroWeightExclusion:
-    def test_zero_weight_task_never_sampled(self):
+    def test_zero_probability_task_never_sampled(self):
         weights = TaskWeights(
-            auto_encode=0.0,
-            infill=0.0,
-            prediction=1.0,
-            infill_prediction=0.0,
-            combined_all=0.0,
+            auto_encode=TaskConfig(probability=0.0),
+            infill=TaskConfig(probability=0.0),
+            prediction=TaskConfig(probability=1.0),
+            infill_prediction=TaskConfig(probability=0.0),
+            combined_all=TaskConfig(probability=0.0),
         )
-        config = TaskSamplingConfig(task_weights=weights)
+        config = TaskSamplingConfig(tasks=weights)
         sampler = TaskSampler(config, ALL_NAMES, FORCING_NAMES)
         random.seed(42)
         for _ in range(100):
@@ -647,13 +649,13 @@ class TestMultipleTaskWeights:
     def test_mixed_weights_sample_multiple_task_types(self):
         """With multiple tasks enabled, different task patterns should appear."""
         weights = TaskWeights(
-            auto_encode=1.0,
-            infill=0.0,
-            prediction=1.0,
-            infill_prediction=0.0,
-            combined_all=0.0,
+            auto_encode=TaskConfig(probability=1.0),
+            infill=TaskConfig(probability=0.0),
+            prediction=TaskConfig(probability=1.0),
+            infill_prediction=TaskConfig(probability=0.0),
+            combined_all=TaskConfig(probability=0.0),
         )
-        config = TaskSamplingConfig(task_weights=weights)
+        config = TaskSamplingConfig(tasks=weights)
         sampler = TaskSampler(config, ALL_NAMES, FORCING_NAMES)
         random.seed(42)
         has_prev_only = False
@@ -669,15 +671,15 @@ class TestMultipleTaskWeights:
         assert has_curr_only, "Expected auto_encode tasks (curr only)"
 
 
-class TestGetTaskLossScale:
+class TestGetTaskConfig:
     def test_returns_correct_scale(self):
-        weights = TaskWeights(prediction_loss_scale=3.0)
-        assert _get_task_loss_scale(weights, TaskType.PREDICTION) == 3.0
+        weights = TaskWeights(prediction=TaskConfig(loss_scaling=3.0))
+        assert _get_task_config(weights, TaskType.PREDICTION).loss_scaling == 3.0
 
     def test_default_scale_is_one(self):
         weights = TaskWeights()
         for task_type in TaskType:
-            assert _get_task_loss_scale(weights, task_type) == 1.0
+            assert _get_task_config(weights, task_type).loss_scaling == 1.0
 
 
 # ---------------------------------------------------------------------------
