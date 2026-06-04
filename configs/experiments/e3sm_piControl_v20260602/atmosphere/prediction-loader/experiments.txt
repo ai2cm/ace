@@ -1,2 +1,2 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
-v20260602-E3SMv3-piControl-target-data-only||01KSTT586Z6AEVNRQDD3GZPVFB|run_105yr|best_inference_ckpt|high|--min-runtime 8h||||ai2/ace|a100+h100
+v20260602-E3SMv3-piControl-target-data-only||01KSTT586Z6AEVNRQDD3GZPVFB|run_105yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|a100+h100
