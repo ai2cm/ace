@@ -141,9 +141,9 @@ class Trainer:
                 self.config.checkpoint_dir, "best_histogram_tail.ckpt"
             )
 
-        self._best_valid_loss_name = "relative_crps_bicubic"
+        self._best_valid_loss_name = "metrics/relative_crps_bicubic"
         self._best_histogram_tail_name = (
-            "prediction_frac_of_target/99.9999th-percentile"
+            "histogram/prediction_frac_of_target/99.9999th-percentile"
         )
 
     def _get_batch_generator(

@@ -312,9 +312,9 @@ class GenerationAggregator:
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
         include_positional_comparisons: bool = True,
         histogram_ckpt_selection_metric: str = (
-            "prediction_frac_of_target/99.9999th-percentile"
+            "histogram/prediction_frac_of_target/99.9999th-percentile"
         ),
-        best_ckpt_selection_metric: str = "relative_crps_bicubic",
+        best_ckpt_selection_metric: str = "metrics/relative_crps_bicubic",
     ) -> None:
         self._agg = Aggregator(
             dims,

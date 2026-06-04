@@ -12,7 +12,11 @@ from fme.downscaling.data import BatchData, BatchedLatLonCoordinates, PairedBatc
 
 from .. import metrics_and_maths
 from ..models import ModelOutputs
-from .generation import GenerationAggregator, _get_complement_percentile_prefix
+from .generation import (
+    GenerationAggregator,
+    _get_channel_mean_scalar_metric,
+    _get_complement_percentile_prefix,
+)
 from .main import (
     LossVsNoiseAggregator,
     Mean,
@@ -443,3 +447,31 @@ def test_upsample_tensor():
 def test_get_complement_percentile_prefix(prefix, expected):
     result = _get_complement_percentile_prefix(prefix)
     assert result == expected
+
+
+def test_get_channel_mean_scalar_metric_excludes_matching_maps():
+    metrics = {
+        "generation/maps/relative_crps_bicubic/var0": object(),
+        "generation/metrics/relative_crps_bicubic/var0": 1.0,
+        "generation/metrics/relative_crps_bicubic/var1": 3.0,
+        "generation/some_other/prediction_frac_of_target/99.9999th-percentile/var0": (
+            object()
+        ),
+        "generation/histogram/prediction_frac_of_target/99.9999th-percentile/var0": (
+            1.02
+        ),
+        "generation/histogram/prediction_frac_of_target/0.0001th-percentile/var0": (
+            0.98
+        ),
+    }
+
+    best_result = _get_channel_mean_scalar_metric(
+        metrics, prefix="metrics/relative_crps_bicubic"
+    )
+    histogram_result = _get_channel_mean_scalar_metric(
+        metrics,
+        prefix="histogram/prediction_frac_of_target/99.9999th-percentile",
+    )
+
+    assert best_result == 2.0
+    assert histogram_result == 1.0
