@@ -53,6 +53,7 @@ def benchmark(fn, iters=10, warmup=1) -> BenchmarkResult:
         "it's testing speed of DHConv groups on GPU."
     ),
 )  # noqa: E501
+@pytest.mark.serial
 def test_contract_dhconv_groups_are_faster():
     B = 2
     C = 512

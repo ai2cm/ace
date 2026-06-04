@@ -4,6 +4,7 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.core.dataset.dataset import DatasetItem
 from fme.core.dataset.properties import DatasetProperties
 from fme.downscaling.data.datasets import (
     BatchData,
@@ -13,7 +14,11 @@ from fme.downscaling.data.datasets import (
     FineCoarsePairedDataset,
     HorizontalSubsetDataset,
     LatLonCoordinates,
+    PairedBatchData,
     PairedBatchItem,
+    RegionSamplingConfig,
+    _sample_indices_with_region_sampling,
+    patched_batch_gen_from_paired_loader,
 )
 from fme.downscaling.data.patching import Patch, _HorizontalSlice
 from fme.downscaling.data.utils import BatchedLatLonCoordinates, ClosedInterval
@@ -214,11 +219,12 @@ def test_horizontal_subset(
         lat=torch.linspace(0.0, 1.0, n_lat), lon=torch.linspace(0.0, 1.0, n_lon)
     )
 
-    datum: tuple[dict[str, torch.Tensor], xr.DataArray, set[str], int] = (
+    datum: DatasetItem = (
         {"x": torch.zeros(batch_size, n_timesteps, n_lat, n_lon)},
         xr.DataArray([0.0]),
         set(),
         0,
+        None,
     )
     base_dataset = MagicMock(spec=torch.utils.data.Dataset)
     properties = MagicMock(spec=DatasetProperties)
@@ -232,7 +238,7 @@ def test_horizontal_subset(
         lon_interval=ClosedInterval(float(lon_interval[0]), float(lon_interval[1])),
     )
 
-    subset, _, labels, _ = dataset[0]
+    subset, _, labels, _, _ = dataset[0]
     assert labels is properties.all_labels
     assert subset["x"].shape == (
         batch_size,
@@ -326,7 +332,7 @@ def test_batch_data_expand_and_fold():
 
 
 def get_mock_dataset(field_leading_dim=1):
-    # Mock dataset that returns (data, time) tuples
+    # Mock dataset that returns DatasetItem tuples
     dataset = MagicMock()
     dataset.__len__ = MagicMock(return_value=2)
     dataset.__getitem__ = MagicMock(
@@ -335,6 +341,7 @@ def get_mock_dataset(field_leading_dim=1):
             data_array([0]),
             set(),
             0,
+            None,
         )
     )
     return dataset
@@ -507,3 +514,156 @@ def test_batch_data_apply_patch_already_patched_raises():
     (patched,) = list(batch.generate_from_patches([patch]))
     with pytest.raises(ValueError, match="previously patched"):
         list(patched.generate_from_patches([patch]))
+
+
+def test_region_sampling_config_error_on_negative():
+    with pytest.raises(ValueError, match="weight must be > 0"):
+        RegionSamplingConfig(weight=-1.0)
+
+
+def _make_patches(
+    slices_y: list[slice], slices_x: list[slice] | None = None
+) -> list[Patch]:
+    if slices_x is None:
+        slices_x = [slice(None)] * len(slices_y)
+    return [
+        Patch(
+            input_slice=_HorizontalSlice(y=sy, x=sx),
+            output_slice=_HorizontalSlice(y=slice(None), x=slice(None)),
+        )
+        for sy, sx in zip(slices_y, slices_x)
+    ]
+
+
+def test_sample_indices_preserves_length():
+    coarse_lats = torch.linspace(-66, 70, 12)
+    coarse_lons = torch.linspace(0, 360, 8)
+    patches = _make_patches(
+        slices_y=[slice(0, 4), slice(4, 8), slice(8, 12)], slices_x=None
+    )
+    config = RegionSamplingConfig(lat_interval=ClosedInterval(-30.0, 30.0), weight=3)
+    indices = _sample_indices_with_region_sampling(
+        patches, coarse_lats, coarse_lons, config
+    )
+    assert len(indices) == len(patches)
+
+
+def test_sample_indices_region_overrepresented():
+    coarse_lats = torch.linspace(-90, 90, 12)
+    coarse_lons = torch.linspace(0, 360, 8)
+    patches = _make_patches(
+        slices_y=[slice(0, 4), slice(4, 8), slice(8, 12)], slices_x=None
+    )
+    config = RegionSamplingConfig(
+        lat_interval=ClosedInterval(-30.0, 30.0), weight=1000.0
+    )
+    counts = [0, 0, 0]
+    n_draws = 300
+    for _ in range(n_draws):
+        indices = _sample_indices_with_region_sampling(
+            patches, coarse_lats, coarse_lons, config
+        )
+        for idx in indices:
+            counts[idx] += 1
+    total = sum(counts)
+    assert counts[1] / total > 0.99
+
+
+def test_sample_indices_lat_and_lon_selection():
+    # 2x2 grid of patches; only the patch at (lat_center ~ 0, lon_center ~ 45)
+    # falls inside both intervals.
+    coarse_lats = torch.linspace(-60, 60, 8)  # 4-point patches span ~60 deg
+    coarse_lons = torch.linspace(0, 180, 8)
+    patches = _make_patches(
+        slices_y=[slice(0, 4), slice(4, 8), slice(0, 4), slice(4, 8)],
+        slices_x=[slice(0, 4), slice(0, 4), slice(4, 8), slice(4, 8)],
+    )
+    # patch centers:
+    #   0: lat ~ -30, lon ~ 38.6
+    #   1: lat ~ 30,  lon ~ 38.6
+    #   2: lat ~ -30, lon ~ 141.4
+    #   3: lat ~ 30,  lon ~ 141.4
+    config = RegionSamplingConfig(
+        lat_interval=ClosedInterval(-35.0, -25.0),
+        lon_interval=ClosedInterval(30.0, 50.0),
+        weight=1000,
+    )
+    counts = [0, 0, 0, 0]
+    n_draws = 300
+    for _ in range(n_draws):
+        indices = _sample_indices_with_region_sampling(
+            patches, coarse_lats, coarse_lons, config
+        )
+        for idx in indices:
+            counts[idx] += 1
+    total = sum(counts)
+    # Only patch 0 (lat ~ -30, lon ~ 38.6) is inside both intervals
+    assert counts[0] / total > 0.99
+
+
+def _make_paired_batch(
+    n_lat=12, n_lon=8, batch_size=2, downscale_factor=1
+) -> PairedBatchData:
+    lat_coarse = torch.linspace(-66.0, 70.0, n_lat)
+    lon_coarse = torch.linspace(0.0, 360.0, n_lon)
+    coarse = BatchData(
+        data={"x": torch.zeros(batch_size, n_lat, n_lon)},
+        time=xr.DataArray(list(range(batch_size)), dims=["batch"]),
+        latlon_coordinates=BatchedLatLonCoordinates(
+            lat=lat_coarse.unsqueeze(0).expand(batch_size, -1).clone(),
+            lon=lon_coarse.unsqueeze(0).expand(batch_size, -1).clone(),
+        ),
+    )
+    n_lat_fine = n_lat * downscale_factor
+    n_lon_fine = n_lon * downscale_factor
+    lat_fine = torch.linspace(-66.0, 70.0, n_lat_fine)
+    lon_fine = torch.linspace(0.0, 360.0, n_lon_fine)
+    fine = BatchData(
+        data={"x": torch.zeros(batch_size, n_lat_fine, n_lon_fine)},
+        time=xr.DataArray(list(range(batch_size)), dims=["batch"]),
+        latlon_coordinates=BatchedLatLonCoordinates(
+            lat=lat_fine.unsqueeze(0).expand(batch_size, -1).clone(),
+            lon=lon_fine.unsqueeze(0).expand(batch_size, -1).clone(),
+        ),
+    )
+    return PairedBatchData(fine=fine, coarse=coarse)
+
+
+def test_patched_batch_gen_from_paired_loader_no_oversampling():
+    n_lat, n_lon = 12, 8
+    batch = _make_paired_batch(n_lat=n_lat, n_lon=n_lon)
+
+    yielded = list(
+        patched_batch_gen_from_paired_loader(
+            loader=[batch],
+            coarse_yx_extent=(n_lat, n_lon),
+            coarse_yx_patch_extent=(4, n_lon),
+            downscale_factor=1,
+            random_offset=False,
+            shuffle=False,
+            drop_partial_patches=True,
+        )
+    )
+    # 3 lat slices x 1 lon slice = 3 patches
+    assert len(yielded) == 3
+
+
+def test_patched_batch_gen_from_paired_loader_with_oversampling_preserves_count():
+    n_lat, n_lon = 12, 8
+    batch = _make_paired_batch(n_lat=n_lat, n_lon=n_lon)
+    config = RegionSamplingConfig(lat_interval=ClosedInterval(-30.0, 30.0), weight=3)
+
+    yielded = list(
+        patched_batch_gen_from_paired_loader(
+            loader=[batch],
+            coarse_yx_extent=(n_lat, n_lon),
+            coarse_yx_patch_extent=(4, n_lon),
+            downscale_factor=1,
+            random_offset=False,
+            shuffle=False,
+            drop_partial_patches=True,
+            region_sampling=config,
+        )
+    )
+    # Same number of patches as without oversampling (3)
+    assert len(yielded) == 3

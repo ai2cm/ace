@@ -29,16 +29,21 @@ logger = logging.getLogger(__name__)
 
 class CollateFn:
     def __init__(
-        self, horizontal_dims: list[str], label_encoding: LabelEncoding | None = None
+        self,
+        horizontal_dims: list[str],
+        label_encoding: LabelEncoding | None = None,
+        allow_missing_variables: bool = False,
     ):
         self.horizontal_dims = horizontal_dims
         self.label_encoding = label_encoding
+        self.allow_missing_variables = allow_missing_variables
 
     def __call__(self, samples: Sequence[DatasetItem]) -> BatchData:
         return BatchData.from_sample_tuples(
             samples,
             horizontal_dims=self.horizontal_dims,
             label_encoding=self.label_encoding,
+            allow_missing_variables=self.allow_missing_variables,
         )
 
 
@@ -84,7 +89,11 @@ def get_gridded_data(
             the default, but should generally be unused in production code.
     """
     n_timesteps_preloaded = requirements.n_timesteps_schedule.add(config.time_buffer)
-    dataset, properties = config.get_dataset(requirements.names, n_timesteps_preloaded)
+    dataset, properties = config.get_dataset(
+        requirements.names,
+        n_timesteps_preloaded,
+        allow_missing_variables=requirements.allow_missing_variables,
+    )
 
     if config.time_buffer > 0:
         # include requirements.n_timesteps - 1 steps of overlap so that no samples are
@@ -102,6 +111,7 @@ def get_gridded_data(
         # reading zarr with async from weka also requires forkserver
         mp_context = "forkserver"
         persistent_workers = True
+        dataset.enable_shared_memory()
     else:
         mp_context = None
         persistent_workers = False
@@ -119,6 +129,7 @@ def get_gridded_data(
         batch_size=batch_size,
         n_window_timesteps=requirements.n_timesteps_schedule,
         time_buffer=config.time_buffer,
+        time_buffer_pool_size=config.time_buffer_pool_size,
         num_workers=config.num_data_workers,
         sampler=sampler,
         shuffled=train,
@@ -127,6 +138,7 @@ def get_gridded_data(
         collate_fn=CollateFn(
             list(properties.horizontal_coordinates.dims),
             label_encoding,
+            allow_missing_variables=requirements.allow_missing_variables,
         ),
         multiprocessing_context=mp_context,
         persistent_workers=persistent_workers,
@@ -263,6 +275,7 @@ def get_forcing_data(
             config.dataset,
             window_requirements.names,
             window_requirements.n_timesteps_schedule,
+            allow_missing_variables=window_requirements.allow_missing_variables,
         ).all_times
     elif isinstance(config.dataset, MergeNoConcatDatasetConfig):
         # Some forcing variables may not be in the first dataset,

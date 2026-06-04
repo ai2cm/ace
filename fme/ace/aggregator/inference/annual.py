@@ -16,7 +16,8 @@ from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorMapping
 
 from ..plotting import plot_mean_and_samples
-from .data import InferenceBatchData
+from .build_context import MetricBuildContext, MetricNotSupportedError, maybe_filter
+from .data import InferenceBatchData, MetricBuildResult, SubAggregator
 
 
 class PairedGlobalMeanAnnualAggregator:
@@ -90,8 +91,8 @@ class PairedGlobalMeanAnnualAggregator:
                 continue
 
             if name in self.variable_metadata:
-                long_name = self.variable_metadata[name].long_name
-                units = self.variable_metadata[name].units
+                long_name = self.variable_metadata[name].display_long_name(name)
+                units = self.variable_metadata[name].display_units("unknown units")
             else:
                 long_name = name
                 units = "unknown units"
@@ -234,8 +235,8 @@ class GlobalMeanAnnualAggregator:
                 continue
 
             if name in self.variable_metadata:
-                long_name = self.variable_metadata[name].long_name
-                units = self.variable_metadata[name].units
+                long_name = self.variable_metadata[name].display_long_name(name)
+                units = self.variable_metadata[name].display_units("unknown units")
             else:
                 long_name = name
                 units = "unknown units"
@@ -367,3 +368,34 @@ def to_dataset(data: TensorMapping, time: xr.DataArray) -> xr.Dataset:
 def _get_min_samples(timestep: datetime.timedelta) -> int:
     steps_per_day = datetime.timedelta(days=1) // timestep
     return 362 * steps_per_day
+
+
+@dataclasses.dataclass
+class AnnualMetricConfig:
+    variables: list[str] | None = None
+    name: str = "annual"
+    reference_data: str | None = None
+    enabled: bool = True
+    strict: bool = False
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        total_duration = ctx.n_timesteps * ctx.timestep
+        if total_duration <= datetime.timedelta(days=730):
+            raise MetricNotSupportedError(
+                f"annual metric requires > ~2 years of data, "
+                f"got {total_duration.days} days"
+            )
+        if self.reference_data is not None:
+            ref = xr.open_dataset(self.reference_data, decode_timedelta=False)
+        else:
+            ref = ctx.monthly_reference_data
+        agg: SubAggregator = PairedGlobalMeanAnnualAggregator(
+            ops=ctx.ops,
+            timestep=ctx.timestep,
+            variable_metadata=ctx.variable_metadata,
+            monthly_reference_data=ref,
+        )
+        return MetricBuildResult(aggregator=maybe_filter(agg, self.variables))

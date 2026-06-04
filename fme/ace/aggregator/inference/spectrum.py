@@ -1,3 +1,4 @@
+import dataclasses
 import warnings
 from collections import defaultdict
 from collections.abc import Callable, Mapping
@@ -9,11 +10,13 @@ import xarray as xr
 
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
+from fme.core.fill import SmoothFloodFill
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.metrics import spherical_power_spectrum
 from fme.core.typing_ import TensorMapping
 
-from .data import InferenceBatchData
+from .build_context import MetricBuildContext, MetricNotSupportedError, maybe_filter
+from .data import InferenceBatchData, MetricBuildResult, SubAggregator
 
 
 class SphericalPowerSpectrumAggregator:
@@ -90,9 +93,9 @@ class SphericalPowerSpectrumAggregator:
             spectrum_np = spectrum.cpu().numpy()
             wavenumber = np.arange(len(spectrum_np))
             metadata = self._variable_metadata.get(name)
-            if metadata is not None:
+            if metadata is not None and metadata.long_name is not None:
                 long_name = f"spherical power spectrum of {metadata.long_name}"
-                units = f"({metadata.units})^2"
+                units = f"({metadata.units or 'unknown_units'})^2"
             else:
                 long_name = f"spherical power spectrum of {name}"
                 units = "unknown_units"
@@ -107,7 +110,27 @@ class SphericalPowerSpectrumAggregator:
 
 
 class PairedSphericalPowerSpectrumAggregator:
-    """Record batches and return plots for paired prediction and target data."""
+    """Record batches and return plots for paired prediction and target data.
+
+    Parameters:
+        gridded_operations: lat/lon grid helpers used to build the SHT.
+        report_plot: master plot toggle. When ``False``, no per-variable
+            spectrum-pair PNGs are emitted regardless of ``plot_variables``.
+        nan_fill_fn: per-variable NaN filler applied before the SHT.
+        variable_metadata: optional CF metadata for spectrum-dataset attrs.
+        report_directional_bias: when ``True`` (default), emit
+            ``positive_norm_bias`` and ``negative_norm_bias`` scalar metrics
+            per variable. When ``False``, only ``mean_abs_norm_bias`` and
+            ``smallest_scale_norm_bias`` are emitted — useful when the
+            directional split is redundant clutter in the W&B run.
+        plot_variables: when ``None`` (default), plot spectrum-pair figures
+            for every variable (current behaviour). When a list, restrict
+            plotting to those variable names — scalar metrics are still
+            emitted for every variable regardless. Lets callers keep the
+            cheap scalar comparisons cohort-wide while limiting the
+            expensive per-variable plot output to a small reference set
+            (e.g. upper-level + h500 + precipitation).
+    """
 
     def __init__(
         self,
@@ -115,6 +138,8 @@ class PairedSphericalPowerSpectrumAggregator:
         report_plot: bool,
         nan_fill_fn: Callable[[torch.Tensor, str], torch.Tensor] = lambda x, _: x,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
+        report_directional_bias: bool = True,
+        plot_variables: list[str] | None = None,
     ):
         self._gen_aggregator = SphericalPowerSpectrumAggregator(
             gridded_operations,
@@ -129,6 +154,10 @@ class PairedSphericalPowerSpectrumAggregator:
             variable_metadata=variable_metadata,
         )
         self._report_plot = report_plot
+        self._report_directional_bias = report_directional_bias
+        self._plot_variables: set[str] | None = (
+            None if plot_variables is None else set(plot_variables)
+        )
 
     @torch.no_grad()
     def record_batch(self, data: InferenceBatchData):
@@ -152,6 +181,11 @@ class PairedSphericalPowerSpectrumAggregator:
         target_spectrum = self._target_aggregator.get_mean()
         if self._report_plot:
             for name in gen_spectrum:
+                if (
+                    self._plot_variables is not None
+                    and name not in self._plot_variables
+                ):
+                    continue
                 gen_spectrum_cpu = gen_spectrum[name].cpu()
                 if name not in target_spectrum:
                     warnings.warn(f"Missing power spectrum target data for {name}")
@@ -161,7 +195,11 @@ class PairedSphericalPowerSpectrumAggregator:
                 fig = _plot_spectrum_pair(gen_spectrum_cpu, target_spectrum_cpu)
                 logs[f"{label}/{name}"] = fig
                 plt.close(fig)
-        metrics = _get_spectrum_metrics(gen_spectrum, target_spectrum)
+        metrics = _get_spectrum_metrics(
+            gen_spectrum,
+            target_spectrum,
+            report_directional_bias=self._report_directional_bias,
+        )
         for name, value in metrics.items():
             logs[f"{label}/{name}"] = value
         return logs
@@ -180,6 +218,7 @@ class PairedSphericalPowerSpectrumAggregator:
 def _get_spectrum_metrics(
     gen_spectrum: dict[str, torch.Tensor],
     target_spectrum: dict[str, torch.Tensor],
+    report_directional_bias: bool = True,
 ) -> dict[str, float]:
     """
     Compute metrics for the spectrum.
@@ -187,6 +226,11 @@ def _get_spectrum_metrics(
     Args:
         gen_spectrum: Dictionary of 1-dimensional generated mean power spectra.
         target_spectrum: Dictionary of 1-dimensional target mean power spectra.
+        report_directional_bias: when True (default), emit per-variable
+            ``positive_norm_bias`` and ``negative_norm_bias`` keys. When
+            False, only ``mean_abs_norm_bias`` and ``smallest_scale_norm_bias``
+            are emitted — the directional pair is redundant with
+            ``mean_abs_norm_bias``.
 
     Returns:
         Dictionary of metrics.
@@ -204,8 +248,9 @@ def _get_spectrum_metrics(
         positive_bias, negative_bias = get_positive_and_negative_power_bias(
             gen_spectrum[name], target_spectrum[name]
         )
-        metrics[f"positive_norm_bias/{name}"] = positive_bias
-        metrics[f"negative_norm_bias/{name}"] = negative_bias
+        if report_directional_bias:
+            metrics[f"positive_norm_bias/{name}"] = positive_bias
+            metrics[f"negative_norm_bias/{name}"] = negative_bias
         metrics[f"mean_abs_norm_bias/{name}"] = abs(positive_bias) + abs(negative_bias)
     return metrics
 
@@ -243,3 +288,52 @@ def _plot_spectrum_pair(
     ax.legend()
     plt.tight_layout()
     return fig
+
+
+@dataclasses.dataclass
+class PowerSpectrumMetricConfig:
+    """
+    Parameters:
+        variables: when set, filter the aggregator to these variables only
+            (affects every output — scalar metrics and the per-variable
+            spectrum-pair plots).
+        name: log prefix and wandb key prefix.
+        enabled: master toggle for the metric.
+        strict: raise if the metric can't be built (e.g. wrong grid).
+        report_directional_bias: when False, drop the
+            ``positive_norm_bias`` and ``negative_norm_bias`` scalar
+            metrics. ``mean_abs_norm_bias`` is unaffected (and is the
+            directional pair's redundant summary). Defaults to True for
+            backwards compatibility.
+        plot_variables: when set, restrict the per-variable spectrum-pair
+            plot to these variable names — scalar metrics are still
+            emitted for every variable that passed ``variables``. Use to
+            keep the cheap scalar comparisons cohort-wide while limiting
+            the expensive per-variable plot output to a small reference
+            list. Defaults to None (plot everything that passed
+            ``variables``, current behaviour).
+    """
+
+    variables: list[str] | None = None
+    name: str = "power_spectrum"
+    enabled: bool = True
+    strict: bool = False
+    report_directional_bias: bool = True
+    plot_variables: list[str] | None = None
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        try:
+            agg: SubAggregator = PairedSphericalPowerSpectrumAggregator(
+                gridded_operations=ctx.ops,
+                nan_fill_fn=SmoothFloodFill(num_steps=4),
+                report_plot=True,
+                variable_metadata=ctx.variable_metadata,
+                report_directional_bias=self.report_directional_bias,
+                plot_variables=self.plot_variables,
+            )
+        except NotImplementedError as e:
+            raise MetricNotSupportedError(str(e)) from e
+        return MetricBuildResult(aggregator=maybe_filter(agg, self.variables))

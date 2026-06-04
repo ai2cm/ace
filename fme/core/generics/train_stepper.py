@@ -31,6 +31,7 @@ class TrainStepperABC(abc.ABC, Generic[PS, BD, FD, SD, TO]):
         data: BD,
         optimization: OptimizationABC,
         compute_derived_variables: bool = False,
+        evaluate_all_steps: bool = False,
     ) -> TO:
         pass
 
@@ -66,4 +67,8 @@ class TrainStepperABC(abc.ABC, Generic[PS, BD, FD, SD, TO]):
 
     @abc.abstractmethod
     def update_training_history(self, training_job: TrainingJob) -> None:
+        pass
+
+    @abc.abstractmethod
+    def seed_eval(self, seed: int) -> None:
         pass
