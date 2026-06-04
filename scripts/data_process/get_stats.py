@@ -153,18 +153,23 @@ def get_stats(
     ds = ds.sel(time=slice(config.start_date, config.end_date))
 
     dims = DIMS[config.data_type]
+    skipna = config.data_type in ("UFS_REPLAY",)
 
     # Explicitly compute the statistics here, since xarray does not support
     # writing netCDFs with the scipy engine with the distributed scheduler.
     # There is no harm to computing here versus later, since the end result is
     # not something memory intensive.
-    centering = ds.mean(dim=dims).compute()
+    centering = ds.mean(dim=dims, skipna=skipna).compute().reset_coords(drop=True)
     logging.info("Computed centering")
-    scaling_full_field = ds.std(dim=dims).compute()
+    scaling_full_field = (
+        ds.std(dim=dims, skipna=skipna).compute().reset_coords(drop=True)
+    )
     logging.info("Computed scaling_full_field")
-    scaling_residual = ds.diff("time").std(dim=dims).compute()
+    scaling_residual = (
+        ds.diff("time").std(dim=dims, skipna=skipna).compute().reset_coords(drop=True)
+    )
     logging.info("Computed scaling_residual")
-    time_means = ds.mean(dim="time").compute()
+    time_means = ds.mean(dim="time", skipna=skipna).compute()
     logging.info("Computed time_means")
 
     for dataset in [
