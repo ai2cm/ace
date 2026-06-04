@@ -1347,7 +1347,7 @@ def test_input_dropout_applied_in_train_mode_not_eval():
             indicators = inp[:, n_in:]
             # "x" is first in in_names
             self.last_x_indicator = indicators[:, 0].detach().clone()
-            return torch.zeros(n_samples, len(out_names), *img_shape) + self._p
+            return self._p.new_zeros(n_samples, len(out_names), *img_shape)
 
     recorder = RecordMaskModule()
     from fme.core.step.single_module import SingleModuleStep
@@ -1769,7 +1769,7 @@ def test_dropout_masks_extra_channels():
         def forward(self, inp):
             # extra channels are the last 2 (one per field in per-channel removal)
             self.last_extra = inp[:, -2:].detach().clone()
-            return torch.zeros(n_samples, len(out_names), *img_shape) + self._p
+            return self._p.new_zeros(n_samples, len(out_names), *img_shape)
 
     recorder = RecordExtraModule()
     from fme.core.step.single_module import SingleModuleStep
