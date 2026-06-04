@@ -1,6 +1,7 @@
 import dataclasses
 import datetime
 import gc
+import logging
 import os
 import pathlib
 import unittest
@@ -33,6 +34,7 @@ from fme.ace.stepper.loss_schedule import EpochNotProvidedError
 from fme.ace.stepper.single_module import (
     AtmosphereCorrectorConfig,
     CheckpointStepperConfig,
+    PreCorrectorOptimizationConfig,
     SingleModuleStepperConfig,
     Stepper,
     StepperConfig,
@@ -2576,103 +2578,14 @@ def test_train_on_batch_masked_variable_has_zero_loss_count():
     assert stepped.per_channel_losses["a"].count == n_samples
 
 
-@pytest.mark.parametrize("optimize_precorrected", [True, False])
-def test_train_on_batch_optimize_precorrected(optimize_precorrected: bool):
-    """When optimize_precorrected=True, loss is computed on pre-corrector values."""
-    torch.random.manual_seed(0)
-    n_forward_steps = 2
-    device = get_device()
-    names = [
-        "PRESsfc",
-        "specific_total_water_0",
-        "specific_total_water_1",
-        "PRATEsfc",
-        "LHTFLsfc",
-        "tendency_of_total_water_path_due_to_advection",
-    ]
-    data = {
-        "PRESsfc": 10.0 + torch.rand(size=(3, n_forward_steps + 1, 5, 5)),
-        "specific_total_water_0": torch.rand(size=(3, n_forward_steps + 1, 5, 5)),
-        "specific_total_water_1": torch.rand(size=(3, n_forward_steps + 1, 5, 5)),
-        "PRATEsfc": torch.rand(size=(3, n_forward_steps + 1, 5, 5)),
-        "LHTFLsfc": torch.rand(size=(3, n_forward_steps + 1, 5, 5)),
-        "tendency_of_total_water_path_due_to_advection": torch.rand(
-            size=(3, n_forward_steps + 1, 5, 5)
-        ),
-    }
-    vertical_coordinate = HybridSigmaPressureCoordinate(
-        ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
-    ).to(device)
-    horizontal_coordinate = LatLonCoordinates(
-        lat=torch.linspace(-89.5, 89.5, 5, device=device),
-        lon=torch.linspace(-179.5, 179.5, 5, device=device),
-    )
-    dataset_info = get_dataset_info(
-        vertical_coordinate=vertical_coordinate,
-        horizontal_coordinate=horizontal_coordinate,
-    )
-    corrector_config = AtmosphereCorrectorConfig(
-        conserve_dry_air=True,
-        zero_global_mean_moisture_advection=True,
-        force_positive_names=["PRATEsfc"],
-    )
-    stepper_config = StepperConfig(
-        step=StepSelector(
-            type="single_module",
-            config=dataclasses.asdict(
-                SingleModuleStepConfig(
-                    builder=ModuleSelector(
-                        type="prebuilt",
-                        config={"module": Multiply(1.5).to(device)},
-                    ),
-                    in_names=names,
-                    out_names=names,
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means={key: 0.0 for key in names},
-                            stds={key: 1.0 for key in names},
-                        ),
-                    ),
-                    corrector=corrector_config,
-                )
-            ),
-        ),
-    )
-    stepper = _get_train_stepper(
-        stepper_config,
-        dataset_info,
-        optimize_precorrected=optimize_precorrected,
-    )
-    time = xr.DataArray(
-        [
-            [
-                cftime.DatetimeProlepticGregorian(
-                    2000, 1, int(i * 6 // 24) + 1, i * 6 % 24
-                )
-                for i in range(n_forward_steps + 1)
-            ]
-            for _ in range(3)
-        ],
-        dims=["sample", "time"],
-    )
-    batch_data = BatchData.new_on_cpu(
-        data=data, time=time, labels=None, epoch=0
-    ).to_device()
+def _get_precorrector_stepper_factory_and_batch(n_forward_steps: int = 2):
+    """Build a (make_stepper, batch_data) pair for pre-corrector optimization tests.
 
-    with torch.no_grad():
-        stepped = stepper.train_on_batch(
-            data=batch_data, optimization=NullOptimization()
-        )
-
-    # gen_data should always contain the corrected outputs regardless of flag
-    assert "PRESsfc" in stepped.gen_data
-    assert "PRATEsfc" in stepped.gen_data
-
-
-def test_optimize_precorrected_changes_loss():
-    """Verify optimize_precorrected=True produces a different loss value."""
-    torch.random.manual_seed(0)
-    n_forward_steps = 2
+    The corrector (conserve_dry_air + zero_global_mean_moisture_advection +
+    force_positive) modifies several output variables, so the pre- and
+    post-correction loss targets differ. ``make_stepper`` takes a
+    ``precorrector_optimization`` config (or None) and returns a TrainStepper.
+    """
     device = get_device()
     names = [
         "PRESsfc",
@@ -2709,7 +2622,7 @@ def test_optimize_precorrected_changes_loss():
         force_positive_names=["PRATEsfc"],
     )
 
-    def make_stepper(optimize_precorrected):
+    def make_stepper(precorrector_optimization):
         stepper_config = StepperConfig(
             step=StepSelector(
                 type="single_module",
@@ -2735,7 +2648,7 @@ def test_optimize_precorrected_changes_loss():
         return _get_train_stepper(
             stepper_config,
             dataset_info,
-            optimize_precorrected=optimize_precorrected,
+            precorrector_optimization=precorrector_optimization,
         )
 
     time = xr.DataArray(
@@ -2753,19 +2666,152 @@ def test_optimize_precorrected_changes_loss():
     batch_data = BatchData.new_on_cpu(
         data=data, time=time, labels=None, epoch=0
     ).to_device()
+    return make_stepper, batch_data
+
+
+@pytest.mark.parametrize(
+    "precorrector_optimization",
+    [PreCorrectorOptimizationConfig(), None],
+    ids=["precorrected", "corrected"],
+)
+def test_train_on_batch_optimize_precorrected(
+    precorrector_optimization: PreCorrectorOptimizationConfig | None,
+):
+    """When precorrector_optimization is set, loss is on pre-corrector values."""
+    torch.random.manual_seed(0)
+    make_stepper, batch_data = _get_precorrector_stepper_factory_and_batch()
+    stepper = make_stepper(precorrector_optimization=precorrector_optimization)
 
     with torch.no_grad():
-        corrected_stepper = make_stepper(optimize_precorrected=False)
+        stepped = stepper.train_on_batch(
+            data=batch_data, optimization=NullOptimization()
+        )
+
+    # gen_data should always contain the corrected outputs regardless of config
+    assert "PRESsfc" in stepped.gen_data
+    assert "PRATEsfc" in stepped.gen_data
+
+
+def test_optimize_precorrected_changes_loss():
+    """Verify enabling pre-corrector optimization produces a different loss."""
+    torch.random.manual_seed(0)
+    make_stepper, batch_data = _get_precorrector_stepper_factory_and_batch()
+
+    with torch.no_grad():
+        corrected_stepper = make_stepper(precorrector_optimization=None)
         corrected_result = corrected_stepper.train_on_batch(
             data=batch_data, optimization=NullOptimization()
         )
-        precorrected_stepper = make_stepper(optimize_precorrected=True)
+        precorrected_stepper = make_stepper(
+            precorrector_optimization=PreCorrectorOptimizationConfig()
+        )
         precorrected_result = precorrected_stepper.train_on_batch(
             data=batch_data, optimization=NullOptimization()
         )
 
     # The corrector modifies outputs, so the two losses should differ
     assert corrected_result.metrics["loss"] != precorrected_result.metrics["loss"]
+
+
+def test_select_precorrected():
+    """select_precorrected returns the non-excluded uncorrected variables."""
+    uncorrected = {
+        "thetao_0": torch.tensor(0.0),
+        "thetao_1": torch.tensor(1.0),
+        "sea_ice_fraction": torch.tensor(2.0),
+        "hfds": torch.tensor(3.0),
+    }
+    # Empty list reproduces the previous optimize_precorrected=True: override all.
+    assert set(
+        PreCorrectorOptimizationConfig().select_precorrected(uncorrected)
+    ) == set(uncorrected)
+    # A bare name excludes the 2D variable and all of its 3D levels.
+    assert set(
+        PreCorrectorOptimizationConfig(["thetao"]).select_precorrected(uncorrected)
+    ) == {"sea_ice_fraction", "hfds"}
+    # A trailing-underscore prefix excludes all 3D levels.
+    assert set(
+        PreCorrectorOptimizationConfig(["thetao_"]).select_precorrected(uncorrected)
+    ) == {"sea_ice_fraction", "hfds"}
+    # An explicit name_<level> excludes exactly that level.
+    assert set(
+        PreCorrectorOptimizationConfig(["thetao_0"]).select_precorrected(uncorrected)
+    ) == {"thetao_1", "sea_ice_fraction", "hfds"}
+    # Excluding every variable reduces to base (post-corrector) behavior: nothing
+    # is overridden into the loss target.
+    assert (
+        PreCorrectorOptimizationConfig(list(uncorrected)).select_precorrected(
+            uncorrected
+        )
+        == {}
+    )
+
+
+def test_optimize_precorrected_exclusion_uses_corrected_value():
+    """An excluded variable contributes its corrected value to the loss.
+
+    Excluding a corrector-modified variable should make its per-channel loss
+    match the fully post-corrected case and differ from the fully-precorrected
+    case, while leaving the other corrector-modified variables precorrected.
+    """
+    torch.random.manual_seed(0)
+    make_stepper, batch_data = _get_precorrector_stepper_factory_and_batch()
+
+    def per_channel_losses(precorrector_optimization):
+        stepper = make_stepper(precorrector_optimization=precorrector_optimization)
+        result = stepper.train_on_batch(
+            data=batch_data, optimization=NullOptimization()
+        )
+        assert result.per_channel_losses is not None
+        return result.per_channel_losses
+
+    with torch.no_grad():
+        corrected = per_channel_losses(None)
+        precorrected = per_channel_losses(PreCorrectorOptimizationConfig())
+        # Find a variable the corrector actually modifies (its loss differs
+        # between the precorrected and post-corrected targets).
+        excluded = next(
+            name
+            for name in corrected
+            if not torch.equal(corrected[name].loss, precorrected[name].loss)
+        )
+        partial = per_channel_losses(PreCorrectorOptimizationConfig([excluded]))
+
+    # The excluded variable now uses its corrected value, matching the fully
+    # post-corrected case rather than the fully-precorrected case.
+    torch.testing.assert_close(partial[excluded].loss, corrected[excluded].loss)
+    assert not torch.equal(partial[excluded].loss, precorrected[excluded].loss)
+    # Other corrector-modified variables remain precorrected.
+    other = next(
+        name
+        for name in precorrected
+        if name != excluded
+        and not torch.equal(corrected[name].loss, precorrected[name].loss)
+    )
+    torch.testing.assert_close(partial[other].loss, precorrected[other].loss)
+
+
+def test_optimize_precorrected_warns_once_on_unmatched_exclusion(caplog):
+    """An exclusion matching no corrector-modified variable warns exactly once."""
+    torch.random.manual_seed(0)
+    make_stepper, batch_data = _get_precorrector_stepper_factory_and_batch()
+    stepper = make_stepper(
+        precorrector_optimization=PreCorrectorOptimizationConfig(
+            ["not_a_corrector_variable"]
+        )
+    )
+
+    with torch.no_grad(), caplog.at_level(logging.WARNING):
+        # Two batches, each with multiple forward steps, to confirm warn-once.
+        stepper.train_on_batch(data=batch_data, optimization=NullOptimization())
+        stepper.train_on_batch(data=batch_data, optimization=NullOptimization())
+
+    matching = [
+        record
+        for record in caplog.records
+        if "not_a_corrector_variable" in record.getMessage()
+    ]
+    assert len(matching) == 1
 
 
 def test_predict_with_data_mask_zeros_masked_forcing():

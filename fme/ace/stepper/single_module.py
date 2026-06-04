@@ -3,7 +3,7 @@ import dataclasses
 import datetime
 import logging
 import pathlib
-from collections.abc import Callable, Generator, Mapping
+from collections.abc import Callable, Generator, Iterable, Mapping
 from typing import Any, Literal, cast, overload
 
 import dacite
@@ -40,6 +40,7 @@ from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.labels import BatchLabels
 from fme.core.loss import ChannelLossInfo, StepLoss, StepLossConfig
+from fme.core.name_and_prefix_matcher import NameAndPrefixMatcher
 from fme.core.normalizer import (
     NetworkAndLossNormalizationConfig,
     NormalizationConfig,
@@ -1459,6 +1460,62 @@ class Stepper:
 
 
 @dataclasses.dataclass
+class PreCorrectorOptimizationConfig:
+    """
+    Configuration enabling pre-corrector optimization of the training loss.
+
+    When this config is present, the training loss for corrector-modified
+    variables is computed against the model's pre-correction (uncorrected)
+    output rather than its corrected output, except for variables matched by
+    ``exclude_names_and_prefixes``, which continue to be optimized against their
+    corrected (post-adjustment) values. The presence of this object is itself
+    the on/off switch; there is no separate ``enabled`` flag.
+
+    The rollout state and returned predictions always use the fully corrected
+    outputs regardless of this config; only the training loss target is affected.
+
+    Parameters:
+        exclude_names_and_prefixes: Names and prefixes of variables to exclude
+            from pre-corrector optimization. Matching follows the same
+            name-and-prefix convention as spatial masking: a bare name matches
+            the 2D variable and all of its 3D levels, a trailing-underscore
+            prefix (e.g. ``thetao_``) matches all levels, and an explicit
+            ``name_<level>`` matches exactly.
+    """
+
+    exclude_names_and_prefixes: list[str] = dataclasses.field(default_factory=list)
+
+    def __post_init__(self):
+        self._matcher = NameAndPrefixMatcher(self.exclude_names_and_prefixes)
+
+    def select_precorrected(self, uncorrected: TensorMapping) -> TensorDict:
+        """Return the subset of ``uncorrected`` to override into the loss target.
+
+        Excluded variables are dropped so that they retain their corrected value
+        in the loss; all other corrector-modified variables are returned so they
+        override their corrected value with their pre-correction value.
+        """
+        return {
+            name: value
+            for name, value in uncorrected.items()
+            if not self._matcher.matches(name)
+        }
+
+    def unmatched_exclusions(self, names: Iterable[str]) -> list[str]:
+        """Return exclusion entries that match none of ``names``.
+
+        Used for warn-once validation against the actual set of
+        corrector-modified variables, which is only known at runtime.
+        """
+        names = list(names)
+        return [
+            entry
+            for entry in self.exclude_names_and_prefixes
+            if not any(NameAndPrefixMatcher([entry]).matches(name) for name in names)
+        ]
+
+
+@dataclasses.dataclass
 class TrainStepperConfig:
     """
     Configuration for training-specific aspects of a stepper.
@@ -1475,11 +1532,14 @@ class TrainStepperConfig:
             be less than or equal to the number of timesteps present
             in the training dataset samples.
         parameter_init: The parameter initialization configuration for fine-tuning.
-        optimize_precorrected: When True, compute the training loss on
-            pre-corrector outputs for variables the corrector modifies.
-            Variables the corrector does not modify use the normal
-            (post-adjustment) values. The rollout state and returned gen_data
-            always use the fully corrected outputs regardless of this flag.
+        precorrector_optimization: When set, enables pre-corrector optimization:
+            the training loss for corrector-modified variables is computed on
+            their pre-correction outputs, except for variables the config
+            excludes, which use the normal (post-adjustment) values. Variables
+            the corrector does not modify are unaffected. The rollout state and
+            returned gen_data always use the fully corrected outputs regardless
+            of this config. When None (default), standard post-corrector
+            optimization is used.
     """
 
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
@@ -1489,7 +1549,7 @@ class TrainStepperConfig:
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
-    optimize_precorrected: bool = False
+    precorrector_optimization: PreCorrectorOptimizationConfig | None = None
 
     def __post_init__(self):
         if self.n_ensemble == -1:
@@ -1613,6 +1673,7 @@ class TrainStepper(
         self._prognostic_names = self._stepper.prognostic_names
         self._derive_func = self._stepper.derive_func
         self._loss_obj = self._stepper.build_loss(config.loss)
+        self._validated_precorrector_exclusions = False
 
     def train_on_batch(
         self,
@@ -1689,6 +1750,33 @@ class TrainStepper(
         # apply post-processing and return
         return stepped
 
+    def _validate_precorrector_exclusions(
+        self,
+        precorrector_optimization: PreCorrectorOptimizationConfig,
+        corrector_modified_names: Iterable[str],
+    ) -> None:
+        """Warn once if an exclusion entry matches no corrector-modified variable.
+
+        The set of corrector-modified variables is only known at runtime, so this
+        cannot be validated in ``__post_init__``. Checked on the first training
+        step against the actual corrector-modified variable set.
+        """
+        if self._validated_precorrector_exclusions:
+            return
+        self._validated_precorrector_exclusions = True
+        corrector_modified_names = list(corrector_modified_names)
+        unmatched = precorrector_optimization.unmatched_exclusions(
+            corrector_modified_names
+        )
+        if unmatched:
+            logging.warning(
+                "Pre-corrector optimization exclusion entries %s did not match "
+                "any corrector-modified variable (modified variables: %s); these "
+                "entries have no effect.",
+                unmatched,
+                sorted(corrector_modified_names),
+            )
+
     def _accumulate_loss(
         self,
         data: BatchData,
@@ -1715,7 +1803,7 @@ class TrainStepper(
             optimization,
             labels=input_ensemble_data.labels,
             data_mask=input_ensemble_data.data_mask,
-            detach_uncorrected=not self._config.optimize_precorrected,
+            detach_uncorrected=self._config.precorrector_optimization is None,
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)
@@ -1735,12 +1823,18 @@ class TrainStepper(
                     step_output.output, n_ensemble=n_ensemble
                 )
                 output_list.append(gen_step)
-                if (
-                    self._config.optimize_precorrected
-                    and step_output.uncorrected
-                ):
+                precorrector_optimization = self._config.precorrector_optimization
+                if precorrector_optimization is not None and step_output.uncorrected:
+                    self._validate_precorrector_exclusions(
+                        precorrector_optimization, step_output.uncorrected.keys()
+                    )
                     loss_gen = unfold_ensemble_dim(
-                        {**step_output.output, **step_output.uncorrected},
+                        {
+                            **step_output.output,
+                            **precorrector_optimization.select_precorrected(
+                                step_output.uncorrected
+                            ),
+                        },
                         n_ensemble=n_ensemble,
                     )
                 else:
