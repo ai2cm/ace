@@ -1,0 +1,9 @@
+runs:
+  2026-06-03-ufs-replay-ocean-1deg-19level-5day-1994-2023: ""
+data_output_directory: gs://vcm-ml-intermediate
+stats:
+  output_directory: gs://vcm-ml-intermediate/ufs-replay-ocean-1deg-19level-5day-stats
+  beaker_dataset: ufs-replay-ocean-1deg-19level-5day-stats
+  data_type: UFS_REPLAY
+  start_date: "1994-01-01"
+  end_date: "2021-12-31"

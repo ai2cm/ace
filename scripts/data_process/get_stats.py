@@ -46,9 +46,10 @@ DIMS = {
     "E3SMV2": ["time", "lat", "lon"],
     "ERA5": ["time", "latitude", "longitude"],
     "CM4": ["time", "lat", "lon"],
+    "UFS_REPLAY": ["time", "lat", "lon"],
 }
 
-ClimateDataType = Literal["FV3GFS", "E3SMV2", "ERA5", "CM4"]
+ClimateDataType = Literal["FV3GFS", "E3SMV2", "ERA5", "CM4", "UFS_REPLAY"]
 
 
 def add_history_attrs(ds, input_zarr, start_date, end_date, n_samples):
