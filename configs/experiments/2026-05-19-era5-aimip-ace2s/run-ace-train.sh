@@ -61,7 +61,15 @@ run_training "ace-train-config-1-step-pretrain.yaml" "$base_name-era5-energy-cor
 # For the finetuning stage take beaker dataset id from the above job and add it to
 # ace-train-config-multi-step-finetuning.yaml then uncomment next line
 
-run_training "ace-train-config-multi-step-finetuning.yaml" "$base_name-era5-energy-corrector-multi-step-fine-tuning-rs0"
+# run_training "ace-train-config-multi-step-finetuning.yaml" "$base_name-era5-energy-corrector-multi-step-fine-tuning-rs0"
+
+# stochastic pressure level fine-tuning
+# For the finetuning stage take beaker dataset id from the stochastic multi-step FT job and
+# update the TBD dataset id in ace-train-config-pressure-level-finetuning-stochastic.yaml,
+# then uncomment the desired run below
+
+# run_training "ace-train-config-pressure-level-finetuning-stochastic.yaml" \
+#   "$base_name-era5-pressure-level-fine-tuning-rs0"
 
 # deterministic versions
 
@@ -79,14 +87,12 @@ run_training "ace-train-config.yaml" "$deterministic_base_name-era5-energy-corre
 
 # fine tune to add pressure level variables
 
-pressure_level_fine_tuning_base_name="ace2-1-aimip"
-
 # For the finetuning stage take beaker dataset id from the desired job above and add it to
 # ace-train-config-pressure-level-finetuning.yaml, eg,
 # --dataset <beaker_dataset_id>:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar
 # then uncomment next line, modifying the job name and override args as needed
 
-run_training "ace-train-config-pressure-level-finetuning.yaml" \
-  "$pressure_level_fine_tuning_base_name-era5-energy-corrector-unacc5p7-pressure-level-fine-tuning-rs0" \
-  stepper.step.config.corrector.total_energy_budget_correction.method=constant_temperature \
-  stepper.step.config.corrector.total_energy_budget_correction.constant_unaccounted_heating=5.7
+# run_training "ace-train-config-pressure-level-finetuning.yaml" \
+#   "$deterministic_base_name-era5-energy-corrector-unacc5p7-pressure-level-fine-tuning-rs0" \
+#   stepper.step.config.corrector.total_energy_budget_correction.method=constant_temperature \
+#   stepper.step.config.corrector.total_energy_budget_correction.constant_unaccounted_heating=5.7
