@@ -12,7 +12,11 @@ from fme.downscaling.data import BatchData, BatchedLatLonCoordinates, PairedBatc
 
 from .. import metrics_and_maths
 from ..models import ModelOutputs
-from .generation import GenerationAggregator
+from .generation import (
+    GenerationAggregator,
+    _get_channel_mean_scalar_metric,
+    _get_complement_percentile_prefix,
+)
 from .main import (
     LossVsNoiseAggregator,
     Mean,
@@ -421,3 +425,78 @@ def test_upsample_tensor():
     t = torch.tensor([[1, 2], [3, 4]])
     expected = torch.tensor([[1, 1, 2, 2], [1, 1, 2, 2], [3, 3, 4, 4], [3, 3, 4, 4]])
     assert torch.equal(expected, upsample_tensor(t, 2))
+
+
+@pytest.mark.parametrize(
+    "prefix, expected",
+    [
+        (
+            "histogram/prediction_frac_of_target/99.99th-percentile/var0",
+            "histogram/prediction_frac_of_target/0.01th-percentile/var0",
+        ),
+        (
+            "some_metric/percentile/99.9999/var0",
+            "some_metric/percentile/0.0001/var0",
+        ),
+        (
+            "no_percentile_here/some_metric",
+            None,
+        ),
+    ],
+)
+def test_get_complement_percentile_prefix(prefix, expected):
+    result = _get_complement_percentile_prefix(prefix)
+    assert result == expected
+
+
+def test_get_channel_mean_scalar_metric_excludes_matching_maps():
+    metrics = {
+        "generation/maps/relative_crps_bicubic/var0": object(),
+        "generation/metrics/relative_crps_bicubic/var0": 1.0,
+        "generation/metrics/relative_crps_bicubic/var1": 3.0,
+        "generation/some_other/prediction_frac_of_target/99.9999th-percentile/var0": (
+            object()
+        ),
+        "generation/histogram/prediction_frac_of_target/99.9999th-percentile/var0": (
+            1.02
+        ),
+        "generation/histogram/prediction_frac_of_target/0.0001th-percentile/var0": (
+            0.98
+        ),
+    }
+
+    best_result = _get_channel_mean_scalar_metric(
+        metrics, prefix="metrics/relative_crps_bicubic"
+    )
+    histogram_result = _get_channel_mean_scalar_metric(
+        metrics,
+        prefix="histogram/prediction_frac_of_target/99.9999th-percentile",
+    )
+
+    assert best_result == 2.0
+    assert histogram_result == 1.0
+
+
+def test_generation_aggregator_get_checkpoint_selection_metrics():
+    aggregator = GenerationAggregator(["lat", "lon"], downscale_factor=2)
+    aggregator._wandb_logs = {
+        "generation/maps/relative_crps_bicubic/var0": object(),
+        "generation/metrics/relative_crps_bicubic/var0": 1.0,
+        "generation/metrics/relative_crps_bicubic/var1": 3.0,
+        "generation/some_other/prediction_frac_of_target/99.9999th-percentile/var0": (
+            object()
+        ),
+        "generation/histogram/prediction_frac_of_target/99.9999th-percentile/var0": (
+            1.2
+        ),
+        "generation/histogram/prediction_frac_of_target/0.0001th-percentile/var0": (
+            0.9
+        ),
+    }
+
+    metrics = aggregator.get_checkpoint_selection_metrics()
+
+    assert metrics["metrics/relative_crps_bicubic"] == 2.0
+    assert metrics[
+        "histogram/prediction_frac_of_target/99.9999th-percentile"
+    ] == pytest.approx(0.05)
