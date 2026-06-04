@@ -118,9 +118,15 @@ from fme.core.registry.module import ModuleSelector
 from fme.core.scheduler import SchedulerConfig, SequentialSchedulerConfig
 from fme.core.spatial_masking import StaticSpatialMaskingConfig
 from fme.core.step import (
+    InfillPredictionStepConfig,
     MultiCallStepConfig,
     SeparateRadiationStepConfig,
     SingleModuleStepConfig,
+)
+from fme.core.step.infill_prediction import (
+    InferenceSchemeConfig,
+    TaskSamplingConfig,
+    TaskWeights,
 )
 from fme.core.step.multi_call import MultiCallConfig
 from fme.core.typing_ import Slice
