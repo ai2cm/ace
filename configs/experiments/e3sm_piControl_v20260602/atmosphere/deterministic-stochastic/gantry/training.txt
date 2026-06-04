@@ -1,0 +1,4 @@
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
+
+BK-v20260602-ACE2S-E3SMv3-piControl-100yr-n512-bs8-deterministic|rs0|train|high|h100|8|600GiB|1|ai2/ace|seed=0
+BK-v20260602-ACE2S-E3SMv3-piControl-100yr-n384-bs8-deterministic|rs0|train|normal|h100|8|600GiB|1|ai2/ace|seed=0 stepper.step.config.builder.config.embed_dim=384
