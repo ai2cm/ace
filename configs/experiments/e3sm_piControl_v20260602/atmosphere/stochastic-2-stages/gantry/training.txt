@@ -1,0 +1,4 @@
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
+
+BK-v20260602-ACE2S-E3SMv3-piControl-100yr-n512-bs8-pretrain|rs0|train|urgent|titan|4|600GiB|1|ai2/climate-titan|seed=0
+BK-v20260602-ACE2S-E3SMv3-piControl-100yr-n512-bs8-pretrain|rs1|train|high|titan|4|600GiB|1|ai2/climate-titan|seed=1

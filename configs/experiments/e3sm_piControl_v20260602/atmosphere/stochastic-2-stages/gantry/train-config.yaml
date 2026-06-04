@@ -1,0 +1,289 @@
+experiment_dir: /results
+save_checkpoint: true
+validate_using_ema: true
+ema:
+  decay: 0.999
+max_epochs: 30
+inference:
+  - name: inference
+    weight: 1.0
+    n_forward_steps: 17520
+    forward_steps_in_memory: 20
+    loader:
+      start_indices:
+        times:
+        - '0425-01-03T12:00:00'
+        - '0436-01-03T12:00:00'
+        - '0447-01-03T12:00:00'
+        - '0458-01-03T12:00:00'
+        - '0469-01-03T12:00:00'
+        - '0480-01-03T12:00:00'
+        - '0491-01-03T12:00:00'
+        - '0502-01-03T12:00:00'
+      dataset:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-sea_ice.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H.zarr
+          engine: zarr
+      num_data_workers: 2
+    aggregator:
+      log_histograms: true
+  - name: 12r_test
+    weight: 0.0
+    epochs:
+      start: 0
+      step: 5
+    n_forward_steps: 17520
+    forward_steps_in_memory: 20
+    loader:
+      start_indices:
+        times:
+        - '0515-01-03T12:00:00'
+        - '0515-06-08T12:00:00'
+        - '0515-11-12T12:00:00'
+        - '0516-04-17T12:00:00'
+        - '0516-09-21T12:00:00'
+        - '0517-02-24T12:00:00'
+        - '0517-07-31T12:00:00'
+        - '0518-01-03T12:00:00'
+      dataset:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-sea_ice.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H.zarr
+          engine: zarr
+      num_data_workers: 2
+    aggregator:
+      log_histograms: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-eamv3
+  entity: ai2cm
+train_loader:
+  batch_size: 8
+  num_data_workers: 2
+  time_buffer: 10
+  prefetch_factor: 1
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-sea_ice.zarr
+      engine: zarr
+      subset:
+        start_time: '0425-01-03T12:00:00'
+        stop_time: '0515-01-01T00:00:00'
+    - data_path: /climate-default
+      file_pattern: 2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H.zarr
+      engine: zarr
+      subset:
+        start_time: '0425-01-03T12:00:00'
+        stop_time: '0515-01-01T00:00:00'
+validation:
+  loader:
+    batch_size: 32
+    num_data_workers: 2
+    time_buffer: 10
+    prefetch_factor: 1
+    dataset:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-sea_ice.zarr
+        engine: zarr
+        subset:
+          start_time: '0515-01-01T06:00:00'
+          stop_time: '0520-01-01T00:00:00'
+      - data_path: /climate-default
+        file_pattern: 2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H.zarr
+        engine: zarr
+        subset:
+          start_time: '0515-01-01T06:00:00'
+          stop_time: '0520-01-01T00:00:00'
+optimization:
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: FusedAdam
+  use_gradient_accumulation: true
+  kwargs:
+    weight_decay: 0.01
+stepper_training:
+  n_ensemble: 2
+  n_forward_steps: 1
+  loss:
+    type: MSE
+  optimize_last_step_only: true
+  loss:
+    type: EnsembleLoss
+    weights:
+      T_0: 0.5
+      T_1: 0.5
+      U_0: 0.5
+      V_0: 0.5
+      STW_0: 0.25
+      STW_1: 0.25
+      STW_2: 0.5
+      surface_precipitation_rate: 2
+      FLDS: 2
+      FLUS: 5
+      FSUS: 2
+      FSDS: 2
+      FSUTOA: 2
+      DTENDTTW: 0.5
+      PS: 3
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
+stepper:
+  step:
+    type: single_module
+    config:
+      residual_prediction: false
+      builder:
+        type: NoiseConditionedSFNO
+        config:
+          embed_dim: 512
+          noise_embed_dim: 64
+          noise_type: isotropic
+          filter_type: linear
+          use_mlp: true
+          num_layers: 8
+          operator_type: dhconv
+          separable: false
+          spectral_layers: 3
+          spectral_transform: sht
+          affine_norms: true
+      normalization:
+        network:
+          global_means_path: /atmos_stats/centering.nc
+          global_stds_path: /atmos_stats/scaling-full-field.nc
+        residual:
+          global_means_path: /atmos_stats/centering.nc
+          global_stds_path: /atmos_stats/scaling-residual.nc
+      ocean:
+        surface_temperature_name: TS
+        ocean_fraction_name: OCNFRAC
+        interpolate: true
+      corrector:
+        conserve_dry_air: true
+        moisture_budget_correction: advection_and_precipitation
+        force_positive_names:
+        - STW_0
+        - STW_1
+        - STW_2
+        - STW_3
+        - STW_4
+        - STW_5
+        - STW_6
+        - STW_7
+        - surface_precipitation_rate
+        - frozen_precipitation_rate
+        - FLUS
+        - FLUT
+        - FLDS
+        - FSDS
+        - FSUS
+        - FSUTOA
+      next_step_forcing_names:
+      - SOLIN
+      in_names:
+      - LANDFRAC
+      - OCNFRAC
+      - ICEFRAC
+      - PHIS
+      - SOLIN
+      - PS
+      - TS
+      - T_0
+      - T_1
+      - T_2
+      - T_3
+      - T_4
+      - T_5
+      - T_6
+      - T_7
+      - STW_0
+      - STW_1
+      - STW_2
+      - STW_3
+      - STW_4
+      - STW_5
+      - STW_6
+      - STW_7
+      - U_0
+      - U_1
+      - U_2
+      - U_3
+      - U_4
+      - U_5
+      - U_6
+      - U_7
+      - V_0
+      - V_1
+      - V_2
+      - V_3
+      - V_4
+      - V_5
+      - V_6
+      - V_7
+      - Qat2m
+      - Uat10m
+      - Vat10m
+      - Tat2m
+      out_names:
+      - PS
+      - TS
+      - T_0
+      - T_1
+      - T_2
+      - T_3
+      - T_4
+      - T_5
+      - T_6
+      - T_7
+      - STW_0
+      - STW_1
+      - STW_2
+      - STW_3
+      - STW_4
+      - STW_5
+      - STW_6
+      - STW_7
+      - U_0
+      - U_1
+      - U_2
+      - U_3
+      - U_4
+      - U_5
+      - U_6
+      - U_7
+      - V_0
+      - V_1
+      - V_2
+      - V_3
+      - V_4
+      - V_5
+      - V_6
+      - V_7
+      - LHFLX
+      - SHFLX
+      - surface_precipitation_rate
+      - frozen_precipitation_rate
+      - FLUS
+      - FLUT
+      - FLDS
+      - FSDS
+      - FSUS
+      - FSUTOA
+      - DTENDTTW
+      - TAUX
+      - TAUY
+      - Qat2m
+      - Uat10m
+      - Vat10m
+      - Tat2m
