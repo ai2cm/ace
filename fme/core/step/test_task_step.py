@@ -46,12 +46,14 @@ def _make_sampler(
         all_names = ["a", "b", "c", "d", "e"]
     if forcing_names is None:
         forcing_names = []
+    forcing_set = set(forcing_names)
+    loss_names = [n for n in all_names if n not in forcing_set]
     config = TaskSamplingConfig(
         tasks=_only_weight(task_type, loss_scale),
         min_input_variables=min_in,
         min_output_variables=min_out,
     )
-    return TaskSampler(config, all_names, forcing_names)
+    return TaskSampler(config, all_names, loss_names)
 
 
 def _extract_sample(
@@ -90,7 +92,7 @@ class TestTaskSamplerErrors:
         weights = TaskWeights(auto_encode=TaskConfig(probability=-1.0))
         config = TaskSamplingConfig(tasks=weights)
         with pytest.raises(ValueError, match="must be >= 0"):
-            TaskSampler(config, ["a", "b"], [])
+            TaskSampler(config, ["a", "b"], ["a", "b"])
 
     def test_all_zero_probabilities_raises(self):
         weights = TaskWeights(
@@ -98,7 +100,7 @@ class TestTaskSamplerErrors:
         )
         config = TaskSamplingConfig(tasks=weights)
         with pytest.raises(ValueError, match="At least one task"):
-            TaskSampler(config, ["a", "b"], [])
+            TaskSampler(config, ["a", "b"], ["a", "b"])
 
     def test_infeasible_auto_encode_raises(self):
         with pytest.raises(ValueError, match="auto_encode"):
@@ -151,7 +153,7 @@ class TestTaskSamplerErrors:
             combined_all=TaskConfig(probability=0.0),
         )
         config = TaskSamplingConfig(tasks=weights)
-        TaskSampler(config, ["a"], [])
+        TaskSampler(config, ["a"], ["a"])
 
 
 # ---------------------------------------------------------------------------
@@ -432,7 +434,7 @@ class TestZeroWeightExclusion:
             combined_all=TaskConfig(probability=0.0),
         )
         config = TaskSamplingConfig(tasks=weights)
-        sampler = TaskSampler(config, ALL_NAMES, FORCING_NAMES)
+        sampler = TaskSampler(config, ALL_NAMES, NON_FORCING)
         random.seed(42)
         for _ in range(100):
             tasks = sampler.sample(None, BATCH_SIZE)
@@ -656,7 +658,7 @@ class TestMultipleTaskWeights:
             combined_all=TaskConfig(probability=0.0),
         )
         config = TaskSamplingConfig(tasks=weights)
-        sampler = TaskSampler(config, ALL_NAMES, FORCING_NAMES)
+        sampler = TaskSampler(config, ALL_NAMES, NON_FORCING)
         random.seed(42)
         has_prev_only = False
         has_curr_only = False

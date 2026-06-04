@@ -111,6 +111,24 @@ class StepConfigABC(abc.ABC):
         pass
 
     @property
+    def accepted_input_names(self) -> list[str]:
+        """All variables the model can accept as input.
+
+        Defaults to `input_names` (the inference routing). Override when the
+        model can accept a broader set of variables than it uses at inference
+        time.
+        """
+        return self.input_names
+
+    @property
+    def accepted_next_step_input_names(self) -> list[str]:
+        """All variables accepted in next_step_input_data.
+
+        Defaults to `next_step_input_names` (the inference routing).
+        """
+        return self.next_step_input_names
+
+    @property
     def all_training_names(self) -> list[str] | None:
         return None
 
@@ -219,6 +237,14 @@ class StepSelector(StepConfigABC):
     def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
         self._step_config_instance.replace_prescribed_prognostic_names(names)
         self.config = dataclasses.asdict(self._step_config_instance)
+
+    @property
+    def accepted_input_names(self) -> list[str]:
+        return self._step_config_instance.accepted_input_names
+
+    @property
+    def accepted_next_step_input_names(self) -> list[str]:
+        return self._step_config_instance.accepted_next_step_input_names
 
     @property
     def all_training_names(self) -> list[str] | None:

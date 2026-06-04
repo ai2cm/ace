@@ -84,6 +84,18 @@ class TaskSamplingConfig:
                 f"min_input_variables must be >= 1, got {self.min_input_variables}"
             )
 
+    def validate_for_step(
+        self,
+        accepted_input_names: list[str],
+        loss_names: list[str],
+    ) -> None:
+        """Validate that enabled tasks are feasible for the given step.
+
+        Raises ValueError if any enabled task cannot be satisfied by the
+        step's variable routing.
+        """
+        TaskSampler(self, accepted_input_names, loss_names)
+
 
 @dataclasses.dataclass
 class InferenceSchemeConfig:
@@ -148,21 +160,23 @@ def _randint(low: int, high: int) -> int:
 class TaskSampler:
     """Samples training tasks for each batch element.
 
-    Built from TaskSamplingConfig + all_names + forcing_names. Each call
-    to sample() returns per-sample masks for one batch.
+    Built from TaskSamplingConfig + the step's accepted input names and
+    loss names. Forcing (input-only) names are derived as
+    ``accepted_input_names - loss_names``.
     """
 
     def __init__(
         self,
         config: TaskSamplingConfig,
-        all_names: list[str],
-        forcing_names: list[str],
+        accepted_input_names: list[str],
+        loss_names: list[str],
     ):
         self._config = config
-        self._all_names = list(all_names)
-        self._forcing_names = set(forcing_names)
-        self._non_forcing_names = [n for n in all_names if n not in self._forcing_names]
-        self._forcing_name_list = [n for n in all_names if n in self._forcing_names]
+        loss_set = set(loss_names)
+        self._all_names = list(accepted_input_names)
+        self._non_forcing_names = [n for n in accepted_input_names if n in loss_set]
+        self._forcing_name_list = [n for n in accepted_input_names if n not in loss_set]
+        self._forcing_names = set(self._forcing_name_list)
 
         enabled_tasks: list[tuple[TaskType, float]] = []
         for task_type in TaskType:
@@ -564,6 +578,10 @@ class InfillPredictionStepConfig(StepConfigABC):
     @property
     def loss_names(self) -> list[str]:
         return self.non_forcing_names
+
+    @property
+    def accepted_input_names(self) -> list[str]:
+        return list(self.all_names)
 
     @property
     def all_training_names(self) -> list[str] | None:

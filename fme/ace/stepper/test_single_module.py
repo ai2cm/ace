@@ -2592,14 +2592,25 @@ def test_task_sampling_none_preserves_existing_behavior():
     assert "loss" in stepped.metrics
 
 
-def test_task_sampling_requires_infill_prediction_step():
+def test_task_sampling_works_with_single_module_step():
+    torch.manual_seed(0)
     config = _get_stepper_config(["a", "b"], ["a", "b"])
-    with pytest.raises(ValueError, match="InfillPredictionStepConfig"):
-        _get_train_stepper(
-            config,
-            loss=StepLossConfig(type="MSE"),
-            task_sampling=TaskSamplingConfig(),
-        )
+    task_sampling = TaskSamplingConfig(
+        tasks=TaskWeights(
+            auto_encode=TaskConfig(probability=1.0),
+            infill=TaskConfig(probability=0.0),
+            prediction=TaskConfig(probability=0.0),
+            infill_prediction=TaskConfig(probability=0.0),
+            combined_all=TaskConfig(probability=0.0),
+        ),
+    )
+    stepper = _get_train_stepper(
+        config, loss=StepLossConfig(type="MSE"), task_sampling=task_sampling
+    )
+    data = get_data(["a", "b"], n_samples=3, n_time=2).data
+    stepped = stepper.train_on_batch(data, optimization=NullOptimization())
+    assert "loss_task" in stepped.metrics
+    assert stepped.metrics["loss_task"] > 0
 
 
 @pytest.mark.parametrize("n_forward_steps", [1, 2])

@@ -58,11 +58,7 @@ from fme.core.step.multi_call import (
 )
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
-from fme.core.step.task_step import (
-    InfillPredictionStepConfig,
-    TaskSampler,
-    TaskSamplingConfig,
-)
+from fme.core.step.task_step import TaskSampler, TaskSamplingConfig
 from fme.core.tensors import (
     add_ensemble_dim,
     fold_ensemble_dim,
@@ -1553,24 +1549,16 @@ class TrainStepper(
 
         self._task_sampler: TaskSampler | None = None
         self._task_loss_obj: StepLoss | None = None
-        self._task_step_config: InfillPredictionStepConfig | None = None
         if config.task_sampling is not None:
             step_config = stepper._step_obj.config
-            if not isinstance(step_config, InfillPredictionStepConfig):
-                raise ValueError(
-                    "task_sampling requires an InfillPredictionStepConfig, "
-                    f"got {type(step_config).__name__}"
-                )
-            self._task_step_config = step_config
-            self._task_sampler = TaskSampler(
-                config.task_sampling,
-                step_config.all_names,
-                step_config.forcing_names,
-            )
+            accepted = step_config.accepted_input_names
+            loss = step_config.loss_names
+            self._task_sampler = TaskSampler(config.task_sampling, accepted, loss)
             task_loss_normalizer = stepper._step_obj.get_loss_normalizer()
+            non_forcing = [n for n in accepted if n in set(loss)]
             self._task_loss_obj = config.loss.build(
                 stepper._dataset_info.gridded_operations,
-                out_names=step_config.non_forcing_names,
+                out_names=non_forcing,
                 channel_dim=self.CHANNEL_DIM,
                 normalizer=task_loss_normalizer,
             )
@@ -1775,8 +1763,7 @@ class TrainStepper(
         """Run the additional task step after the prediction loop."""
         assert self._task_sampler is not None
         assert self._task_loss_obj is not None
-        assert self._task_step_config is not None
-        step_config = self._task_step_config
+        step_config = self._stepper._step_obj.config
 
         batch_size = next(iter(input_batch_data.data.values())).shape[0]
         sampled = self._task_sampler.sample(input_batch_data.data_mask, batch_size)
@@ -1790,8 +1777,12 @@ class TrainStepper(
         forcing_dict = forcing_ensemble_data.data
         next_step_forcing_names = step_config.get_next_step_forcing_names()
 
+        accepted = step_config.accepted_input_names
+        loss_set = set(step_config.loss_names)
+        input_only_names = [n for n in accepted if n not in loss_set]
+
         forcing_at_step: TensorDict = {}
-        for k in step_config.forcing_names:
+        for k in input_only_names:
             if k not in forcing_dict:
                 continue
             if k in next_step_forcing_names:
@@ -1821,7 +1812,7 @@ class TrainStepper(
         spatial = ref_tensor.shape[-2:]
         task_input: TensorDict = {}
         task_data_mask: dict[str, torch.Tensor] = {}
-        for name in step_config.all_names:
+        for name in accepted:
             prev_mask = _expand_mask(sampled.previous_step_input_mask[name])
             curr_mask = _expand_mask(sampled.current_step_input_mask[name])
             task_data_mask[name] = prev_mask | curr_mask

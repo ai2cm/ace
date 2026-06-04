@@ -314,6 +314,11 @@ class TrainConfig:
                 "expected n_forward_steps_schedule to be defined when "
                 "n_forward_steps is not None, is there a bug?"
             )
+        if self.stepper_training.task_sampling is not None:
+            step = self.stepper_config.step
+            self.stepper_training.task_sampling.validate_for_step(
+                step.accepted_input_names, step.loss_names
+            )
 
     def _validate_weighted_inference_epochs(self):
         epoch_sets = self.get_inference_epoch_sets()
