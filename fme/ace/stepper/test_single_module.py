@@ -2607,7 +2607,8 @@ def test_task_sampling_requires_infill_prediction_step():
 
 
 @pytest.mark.parametrize("n_forward_steps", [1, 2])
-def test_task_sampling_training(n_forward_steps):
+@pytest.mark.parametrize("n_ensemble", [1, 2])
+def test_task_sampling_training(n_forward_steps, n_ensemble):
     torch.manual_seed(0)
     all_names = ["a", "b", "forcing_x"]
     config = _get_infill_prediction_stepper_config()
@@ -2624,6 +2625,7 @@ def test_task_sampling_training(n_forward_steps):
         config,
         loss=StepLossConfig(type="MSE"),
         task_sampling=task_sampling,
+        n_ensemble=n_ensemble,
     )
     data = get_data(all_names, n_samples=3, n_time=n_forward_steps + 1).data
     stepped = stepper.train_on_batch(data, optimization=NullOptimization())

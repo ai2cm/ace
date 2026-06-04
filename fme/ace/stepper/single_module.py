@@ -67,6 +67,7 @@ from fme.core.tensors import (
     add_ensemble_dim,
     fold_ensemble_dim,
     fold_sized_ensemble_dim,
+    repeat_interleave_batch_dim,
     unfold_ensemble_dim,
 )
 from fme.core.timing import GlobalTimer
@@ -1777,15 +1778,17 @@ class TrainStepper(
         batch_size = next(iter(input_batch_data.data.values())).shape[0]
         sampled = self._task_sampler.sample(input_batch_data.data_mask, batch_size)
 
+        # prev_state is [batch * n_ensemble, H, W] (folded ensemble)
         prev_state = fold_sized_ensemble_dim(last_gen_step, n_ensemble=n_ensemble)
         task_step_idx = n_forward_steps - 1
+        effective_batch = batch_size * n_ensemble
 
+        # forcing_dict is already ensemble-broadcasted: [batch * n_ensemble, T, H, W]
         forcing_dict = forcing_ensemble_data.data
         next_step_forcing_names = step_config.get_next_step_forcing_names()
-        input_only_names = self._stepper._input_only_names
 
         forcing_at_step: TensorDict = {}
-        for k in input_only_names:
+        for k in step_config.forcing_names:
             if k not in forcing_dict:
                 continue
             if k in next_step_forcing_names:
@@ -1793,10 +1796,20 @@ class TrainStepper(
             else:
                 forcing_at_step[k] = forcing_dict[k][:, task_step_idx]
 
+        # ground_truth is [batch, H, W] (NOT ensemble-broadcasted)
         ground_truth: TensorDict = {
             k: v.select(self.TIME_DIM, task_step_idx)
             for k, v in target_data.data.items()
         }
+        # expand to [batch * n_ensemble, H, W] so each ensemble member
+        # sees the same ground truth for its IC
+        ground_truth_expanded = repeat_interleave_batch_dim(ground_truth, n_ensemble)
+
+        def _expand_mask(m: torch.Tensor) -> torch.Tensor:
+            """Repeat per-IC masks for each ensemble member."""
+            if n_ensemble == 1:
+                return m
+            return torch.repeat_interleave(m, n_ensemble, dim=0)
 
         ref_tensor = next(iter(prev_state.values()))
         device = ref_tensor.device
@@ -1804,19 +1817,19 @@ class TrainStepper(
         task_input: TensorDict = {}
         task_data_mask: dict[str, torch.Tensor] = {}
         for name in step_config.all_names:
-            prev_mask = sampled.previous_step_input_mask[name]
-            curr_mask = sampled.current_step_input_mask[name]
+            prev_mask = _expand_mask(sampled.previous_step_input_mask[name])
+            curr_mask = _expand_mask(sampled.current_step_input_mask[name])
             task_data_mask[name] = prev_mask | curr_mask
 
             broadcast_prev = prev_mask.view(-1, *([1] * len(spatial)))
             broadcast_curr = curr_mask.view(-1, *([1] * len(spatial)))
-            value = torch.zeros(batch_size, *spatial, device=device)
+            value = torch.zeros(effective_batch, *spatial, device=device)
             if name in prev_state:
                 value = torch.where(broadcast_prev, prev_state[name], value)
             elif name in forcing_at_step:
                 value = torch.where(broadcast_prev, forcing_at_step[name], value)
-            if name in ground_truth:
-                value = torch.where(broadcast_curr, ground_truth[name], value)
+            if name in ground_truth_expanded:
+                value = torch.where(broadcast_curr, ground_truth_expanded[name], value)
             elif name in forcing_at_step:
                 value = torch.where(broadcast_curr, forcing_at_step[name], value)
             task_input[name] = value
@@ -1826,18 +1839,25 @@ class TrainStepper(
             if k in forcing_dict:
                 next_step_input_dict[k] = forcing_dict[k][:, task_step_idx + 1]
 
+        task_labels: BatchLabels | None = input_batch_data.labels
+        if n_ensemble > 1 and task_labels is not None:
+            task_labels = BatchLabels(
+                torch.repeat_interleave(task_labels.tensor, n_ensemble, dim=0),
+                task_labels.names,
+            )
+
         with optimization.autocast():
             task_output = self._stepper.step(
                 StepArgs(
                     input=task_input,
                     next_step_input_data=next_step_input_dict,
-                    labels=input_batch_data.labels,
+                    labels=task_labels,
                     data_mask=task_data_mask,
                 ),
             )
 
         task_target = add_ensemble_dim(ground_truth)
-        task_gen = add_ensemble_dim(task_output)
+        task_gen = unfold_ensemble_dim(task_output, n_ensemble=n_ensemble)
         task_loss_output = self._task_loss_obj(
             task_gen,
             task_target,
