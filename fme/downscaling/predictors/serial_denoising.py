@@ -222,7 +222,7 @@ class DenoisingMoEPredictor:
         static_inputs: StaticInputs | None,
         n_samples: int = 1,
     ) -> tuple[TensorDict, torch.Tensor, list[torch.Tensor]]:
-        latents, inputs = self._primary.prepare_generation_inputs(
+        inputs, latents = self._primary.prepare_generation_inputs(
             coarse_data, static_inputs, n_samples
         )
         generated_norm, latent_steps = edm_sampler(
@@ -272,7 +272,8 @@ class DenoisingMoEPredictor:
         )
         targets = {k: v.unsqueeze(1) for k, v in targets.items()}
 
-        loss = self._primary.loss(generated_norm, targets_norm)
+        [loss_component] = self._primary.loss(generated_norm, targets_norm)
+        loss = loss_component.loss.mean()
         return ModelOutputs(
             prediction=generated, target=targets, loss=loss, latent_steps=latent_steps
         )

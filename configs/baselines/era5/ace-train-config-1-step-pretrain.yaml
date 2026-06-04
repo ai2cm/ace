@@ -57,17 +57,18 @@ train_loader:
       engine: zarr
       subset:
         start_time: '2021-01-01'
-validation_loader:
-  batch_size: 64
-  num_data_workers: 8
-  prefetch_factor: 2
-  dataset:
-    data_path: /climate-default/
+validation:
+  loader:
+    batch_size: 64
+    num_data_workers: 8
+    prefetch_factor: 2
+    dataset:
+      data_path: /climate-default/
     file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
     engine: zarr
-    subset:
-      start_time: '1996-01-01'
-      stop_time: '1997-12-31'
+      subset:
+        start_time: '1996-01-01'
+        stop_time: '1997-12-31'
 optimization:
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
@@ -102,6 +103,7 @@ stepper:
           spectral_layers: 3
           spectral_transform: sht
           affine_norms: true
+          normalize_big_skip: true
       normalization:
         network:
           global_means_path: /statsdata/centering.nc

@@ -88,9 +88,14 @@ class AreaWeightedReducedMetric:
         if self._channel_mean is None:
             self._channel_mean = torch.tensor(0.0, device=self._device)
         channel_mean_names = self._get_channel_mean_names(batch_avgs)
-        for name, tensor in batch_avgs.items():
-            if name in channel_mean_names:
-                self._channel_mean += tensor / len(channel_mean_names)
+        missing = [n for n in channel_mean_names if n not in batch_avgs]
+        if missing:
+            raise KeyError(
+                f"channel_mean_names contains entries not present in the "
+                f"recorded data: {missing}. Available: {sorted(batch_avgs)}."
+            )
+        for name in channel_mean_names:
+            self._channel_mean += batch_avgs[name] / len(channel_mean_names)
         self._accumulator.add(batch_avgs)
 
     def get(self) -> TensorDict:

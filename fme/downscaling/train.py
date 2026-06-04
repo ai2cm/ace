@@ -12,7 +12,7 @@ import dacite
 import torch
 import yaml
 
-from fme.core.cli import prepare_directory
+from fme.core.cli import prepare_directory, remove_stale_tmp_checkpoints
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
@@ -25,6 +25,7 @@ from fme.downscaling.data import (
     PairedBatchData,
     PairedDataLoaderConfig,
     PairedGriddedData,
+    RegionSamplingConfig,
     load_static_inputs,
 )
 from fme.downscaling.models import DiffusionModel, DiffusionModelConfig
@@ -117,6 +118,8 @@ class Trainer:
                 self.config.checkpoint_dir
             ):
                 os.makedirs(self.config.checkpoint_dir)
+            if self.config.checkpoint_dir is not None:
+                remove_stale_tmp_checkpoints(self.config.checkpoint_dir)
 
         self.epoch_checkpoint_path: str | None = None
 
@@ -145,7 +148,11 @@ class Trainer:
         )
 
     def _get_batch_generator(
-        self, data: PairedGriddedData, random_offset: bool, shuffle: bool
+        self,
+        data: PairedGriddedData,
+        random_offset: bool,
+        shuffle: bool,
+        region_sampling: RegionSamplingConfig | None = None,
     ):
         if self.patch_data:
             batch_generator = data.get_patched_generator(
@@ -154,6 +161,7 @@ class Trainer:
                 drop_partial_patches=True,
                 random_offset=random_offset,
                 shuffle=shuffle,
+                region_sampling=region_sampling,
             )
         else:
             batch_generator = data.get_generator()
@@ -172,7 +180,10 @@ class Trainer:
         batch: PairedBatchData
         wandb = WandB.get_instance()
         train_batch_generator = self._get_batch_generator(
-            self.train_data, random_offset=True, shuffle=True
+            self.train_data,
+            random_offset=True,
+            shuffle=True,
+            region_sampling=self.config.region_sampling,
         )
         outputs = None
         for i, batch in enumerate(train_batch_generator):
@@ -393,6 +404,28 @@ class Trainer:
 
 @dataclasses.dataclass
 class TrainerConfig:
+    """
+    Configuration for the downscaling Trainer.
+
+    Most fields are self-explanatory; the following deserve note:
+
+    Parameters:
+        coarse_patch_extent_lat: If set together with
+            ``coarse_patch_extent_lon``, training and validation iterate
+            over patches of the given coarse extent rather than the full
+            domain.
+        coarse_patch_extent_lon: See ``coarse_patch_extent_lat``.
+        region_sampling: Optional config to oversample patches
+            whose center falls within a specified lat/lon region
+            during training. The total number of patches per batch is
+            unchanged; patches are drawn with replacement from a
+            weighted distribution where region patches have higher
+            relative weight. Only applied to the training generator
+            (validation patches are unchanged so metrics
+            stay comparable). Requires ``coarse_patch_extent_lat`` and
+            ``coarse_patch_extent_lon`` to be set.
+    """
+
     model: DiffusionModelConfig
     optimization: OptimizationConfig
     train_data: PairedDataLoaderConfig
@@ -411,6 +444,7 @@ class TrainerConfig:
     coarse_patch_extent_lon: int | None = None
     resume_results_dir: str | None = None
     log_loss_vs_noise: bool = False
+    region_sampling: RegionSamplingConfig | None = None
 
     def __post_init__(self):
         if (
@@ -423,6 +457,13 @@ class TrainerConfig:
             raise ValueError(
                 "Either none or both of coarse_patch_extent_lat and "
                 "coarse_patch_extent_lon must be set."
+            )
+        if self.region_sampling is not None and (
+            self.coarse_patch_extent_lat is None or self.coarse_patch_extent_lon is None
+        ):
+            raise ValueError(
+                "region_sampling requires both coarse_patch_extent_lat "
+                "and coarse_patch_extent_lon to be set."
             )
 
     @property
@@ -535,6 +576,7 @@ def _resume_from_results_dir_if_not_preempted(experiment_dir, resume_results_dir
                 f"Existing results directory {resume_results_dir} does not exist."
             )
         shutil.copytree(resume_results_dir, experiment_dir, dirs_exist_ok=True)
+        remove_stale_tmp_checkpoints(os.path.join(experiment_dir, "checkpoints"))
 
 
 def main(config_path: str):

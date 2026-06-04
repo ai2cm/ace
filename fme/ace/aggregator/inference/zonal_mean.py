@@ -13,6 +13,8 @@ from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Image
 
 from ..plotting import plot_paneled_data
+from .build_context import MetricBuildContext, MetricNotSupportedError, maybe_filter
+from .data import InferenceBatchData, MetricBuildResult, SubAggregator
 
 
 @dataclasses.dataclass
@@ -144,12 +146,12 @@ class ZonalMeanAggregator:
 
     def record_batch(
         self,
-        target_data: TensorMapping,
-        gen_data: TensorMapping,
-        target_data_norm: TensorMapping,
-        gen_data_norm: TensorMapping,
-        i_time_start: int,
+        data: InferenceBatchData,
     ):
+        target_data = data.target
+        gen_data = data.prediction
+        i_time_start = data.i_time_start
+
         if self._target_data is None:
             self._target_data = self._initialize_zeros_zonal_mean_from_batch(
                 target_data, self._n_timesteps
@@ -277,7 +279,7 @@ class ZonalMeanAggregator:
     def get_dataset(self) -> xr.Dataset:
         data = {
             k.replace("/", "-"): xr.DataArray(
-                v.datum, dims=("forecast_step", "lat"), attrs=v.metadata._asdict()
+                v.datum, dims=("forecast_step", "lat"), attrs=v.metadata.as_attrs()
             )
             for k, v in self._get_data().items()
         }
@@ -287,8 +289,8 @@ class ZonalMeanAggregator:
 
     def _get_caption(self, key: str, varname: str) -> str:
         if varname in self._variable_metadata:
-            caption_name = self._variable_metadata[varname].long_name
-            units = self._variable_metadata[varname].units
+            caption_name = self._variable_metadata[varname].display_long_name(varname)
+            units = self._variable_metadata[varname].display_units()
         else:
             caption_name, units = varname, "unknown_units"
         caption = self._captions[key].format(name=caption_name, units=units)
@@ -314,3 +316,28 @@ class ZonalMeanAggregator:
             )
             for name, tensor in data.items()
         }
+
+
+@dataclasses.dataclass
+class ZonalMeanMetricConfig:
+    variables: list[str] | None = None
+    name: str = "zonal_mean"
+    zonal_mean_max_size: int = 4096
+    enabled: bool = True
+    strict: bool = False
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        if ctx.ops.zonal_mean is None:
+            raise MetricNotSupportedError(
+                "Zonal mean metric requires a grid type that supports zonal means."
+            )
+        agg: SubAggregator = ZonalMeanAggregator(
+            zonal_mean=ctx.ops.zonal_mean,
+            n_timesteps=ctx.n_timesteps,
+            variable_metadata=ctx.variable_metadata,
+            zonal_mean_max_size=self.zonal_mean_max_size,
+        )
+        return MetricBuildResult(aggregator=maybe_filter(agg, self.variables))

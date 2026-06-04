@@ -13,11 +13,12 @@ from fme.ace.aggregator.inference.annual import (
     GlobalMeanAnnualAggregator,
     PairedGlobalMeanAnnualAggregator,
 )
+from fme.ace.aggregator.inference.data import InferenceBatchData
 from fme.ace.testing import DimSizes, MonthlyReferenceData
 from fme.core.coordinates import DimSize
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
-from fme.core.mask_provider import MaskProvider
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.testing import mock_distributed
 
 TIMESTEP = datetime.timedelta(hours=6)
@@ -68,7 +69,15 @@ def test_paired_annual_aggregator(tmpdir):
         ],
         dims=["sample", "time"],
     )
-    agg.record_batch(time, target_data, gen_data)
+    batch = InferenceBatchData(
+        prediction=gen_data,
+        prediction_norm={},
+        target=target_data,
+        target_norm=None,
+        time=time,
+        i_time_start=0,
+    )
+    agg.record_batch(batch)
     logs = agg.get_logs(label="test")
     assert len(logs) > 0
     assert "test/a" in logs
@@ -104,9 +113,11 @@ def test_paired_annual_aggregator_with_nans(tmpdir):
     mask = np.ones((n_lat, n_lon))
     mask[1, 1] = 0
     monthly_ds["a"] = monthly_ds["a"].where(mask > 0)
-    mask_provider = MaskProvider({"mask_a": torch.tensor(mask)}).to(get_device())
+    spatial_mask_provider = SpatialMaskProvider({"mask_a": torch.tensor(mask)}).to(
+        get_device()
+    )
     agg = PairedGlobalMeanAnnualAggregator(
-        ops=LatLonOperations(area_weights, mask_provider),
+        ops=LatLonOperations(area_weights, spatial_mask_provider),
         timestep=TIMESTEP,
         monthly_reference_data=monthly_ds,
     )
@@ -129,7 +140,15 @@ def test_paired_annual_aggregator_with_nans(tmpdir):
         ],
         dims=["sample", "time"],
     )
-    agg.record_batch(time, target_data, gen_data)
+    batch = InferenceBatchData(
+        prediction=gen_data,
+        prediction_norm={},
+        target=target_data,
+        target_norm=None,
+        time=time,
+        i_time_start=0,
+    )
+    agg.record_batch(batch)
     annual_mean_series = agg.get_dataset()["a"].values
     expected_series = (
         xr.DataArray(
@@ -196,7 +215,15 @@ def test__get_gathered_means(use_mock_distributed):
         ],
         dims=["sample", "time"],
     )
-    agg.record_batch(time, target_data, gen_data)
+    batch = InferenceBatchData(
+        prediction=gen_data,
+        prediction_norm={},
+        target=target_data,
+        target_norm=None,
+        time=time,
+        i_time_start=0,
+    )
+    agg.record_batch(batch)
     if use_mock_distributed:
         world_size = 2
         with mock_distributed(world_size=world_size):
@@ -241,7 +268,15 @@ def test_annual_aggregator():
         ],
         dims=["sample", "time"],
     )
-    agg.record_batch(time, data)
+    batch = InferenceBatchData(
+        prediction=data,
+        prediction_norm={},
+        target=None,
+        target_norm=None,
+        time=time,
+        i_time_start=0,
+    )
+    agg.record_batch(batch)
     logs = agg.get_logs(label="test")
     assert len(logs) > 0
     assert "test/a" in logs
@@ -261,10 +296,10 @@ def test_annual_aggregator_with_nans():
     data["a"][:, :, 1, 1] = float("nan")
     masks = {"mask_a": torch.ones_like(data["a"][0, 0])}
     masks["mask_a"][1, 1] = 0
-    mask_provider = MaskProvider(masks).to(get_device())
+    spatial_mask_provider = SpatialMaskProvider(masks).to(get_device())
 
     agg = GlobalMeanAnnualAggregator(
-        ops=LatLonOperations(area_weights, mask_provider), timestep=TIMESTEP
+        ops=LatLonOperations(area_weights, spatial_mask_provider), timestep=TIMESTEP
     )
     time = xr.DataArray(
         [
@@ -279,7 +314,15 @@ def test_annual_aggregator_with_nans():
         ],
         dims=["sample", "time"],
     )
-    agg.record_batch(time, data)
+    batch = InferenceBatchData(
+        prediction=data,
+        prediction_norm={},
+        target=None,
+        target_norm=None,
+        time=time,
+        i_time_start=0,
+    )
+    agg.record_batch(batch)
     expected_series = (
         xr.DataArray(
             data["a"].cpu().numpy(),
