@@ -118,10 +118,10 @@ def coarsen_dataset(input_path: str, output_path: str, factor: int = 5):
     # Now open the store and resize + write the time coordinate
     store = zarr.open(output_path, mode="r+")
     for name in time_vars:
-        store[name].resize(n_out, nlat, nlon)
+        store[name].resize((n_out, nlat, nlon))
     # Write time coordinate
     if "time" in store:
-        store["time"].resize(n_out)
+        store["time"].resize((n_out,))
     else:
         store.create_dataset("time", shape=(n_out,), dtype=object, overwrite=True)
     store["time"][:] = np.array(out_times)
