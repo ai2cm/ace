@@ -1,10 +1,18 @@
 # Beaker/gantry config for mirroring the v2 production zarr output to
-# Weka as netCDF. v2 is the cohort that landed in this session after
-# the fill-value, fx-grid, orog-ocean-fill, and degC→K fixes; schema
-# version 0.6.0 across all 243 datasets.
+# Weka as netCDF. v2 is the cohort sitting at schema 0.9.0 across all
+# 243 datasets, including:
+#   - the ESGF CFday-cadence augment (TOA + clear-sky radiation,
+#     wap500, clivi, clwvi, surface pressure, ...)
+#   - derived ``total_water_path`` (via 0.8.1 → 0.9.0 migration)
+#   - cohort + per-source normalization stats that include trivial
+#     mean=0/std=1 entries for masks, ``land_fraction`` (sftlf), and
+#     ``luh2_forest``
+# The per-dataset netCDF writes use zlib1+shuffle so the on-Weka size
+# is ~4.5 TB rather than the ~11 TB uncompressed prior pass produced.
 #
 # Submit with:
-#   ./zarr_to_netcdf_beaker.sh --config configs/zarr-to-netcdf-prod-v2.yaml
+#   ./zarr_to_netcdf_beaker.sh --config configs/zarr-to-netcdf-prod-v2.yaml \
+#     [--force]   # pass when overwriting a stale Weka mirror
 
 gcs_source: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2
 weka_destination: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2

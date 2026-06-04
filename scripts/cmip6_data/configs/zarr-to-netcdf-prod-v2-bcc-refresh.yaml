@@ -4,13 +4,13 @@
 # and regenerated the bucket-wide stats. Only the BCC zarr's bytes
 # actually changed; everything else just got a sidecar version bump.
 #
-# This config re-mirrors *only* the BCC dataset and lets ``--force``
-# overwrite the stale Weka netCDFs. The top-level aux files
-# (stats.csv, stats.parquet, presence.*, index.csv) are always copied
-# regardless of the dataset filter, so they get refreshed too.
+# This config re-mirrors *only* the BCC dataset. The top-level aux
+# files (stats.csv, stats.parquet, presence.*, index.csv) are always
+# copied regardless of the dataset filter, so they get refreshed too.
 #
-# Submit with:
-#   ./zarr_to_netcdf_beaker.sh --config configs/zarr-to-netcdf-prod-v2-bcc-refresh.yaml
+# Submit with (note ``--force`` is now a CLI flag, not a YAML key):
+#   ./zarr_to_netcdf_beaker.sh \
+#     --config configs/zarr-to-netcdf-prod-v2-bcc-refresh.yaml --force
 
 gcs_source: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2
 weka_destination: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2
@@ -18,6 +18,5 @@ weka_destination: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-
 # just leave 7 cores idle.
 workers: 1
 years_per_file: 10
-force: true
 dataset_keys:
   - BCC-CSM2-MR/historical/r1i1p1f1

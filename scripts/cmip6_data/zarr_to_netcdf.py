@@ -213,21 +213,39 @@ def main():
     idx = pd.read_csv(index_url)
 
     # Auxiliary top-level files (index.csv, stats.csv, stats.parquet,
-    # presence.*, etc.). ``fs.ls(detail=True)`` lets us skip the dataset
-    # sub-directories without a second probe. Always re-copied under
-    # ``--force`` so a stats-refresh in GCS lands on Weka too.
+    # presence.*, etc.) and aux subdirectories that the training side
+    # reads from Weka (``normalization_*`` carries cohort + per-source
+    # ``centering.nc`` / ``scaling.nc`` consumed by the model's
+    # normalizer). Recursive copies skip the per-dataset directories
+    # (source_id/experiment/variant) — those are handled by the
+    # converter pass below.
+    aux_dirs_to_copy = ("normalization_full", "per_source_normalization_full")
     for entry in fs.ls(in_root, detail=True):
-        if entry.get("type") != "file":
-            continue
         name = os.path.basename(entry["name"])
         dst = os.path.join(output_dir, name)
-        if os.path.exists(dst) and not args.force:
-            continue
-        logger.info("Copying %s -> %s", name, dst)
-        if input_dir.startswith(("gs://", "s3://", "http://", "https://")):
-            fs.get(entry["name"], dst)
-        else:
-            shutil.copy2(entry["name"], dst)
+        kind = entry.get("type")
+        if kind == "file":
+            if os.path.exists(dst) and not args.force:
+                continue
+            logger.info("Copying %s -> %s", name, dst)
+            if input_dir.startswith(("gs://", "s3://", "http://", "https://")):
+                fs.get(entry["name"], dst)
+            else:
+                shutil.copy2(entry["name"], dst)
+        elif kind == "directory" and name in aux_dirs_to_copy:
+            # Trees of centering / scaling / residual netCDFs. Small
+            # enough (a few MB up to ~100 MB total) to copy in one
+            # shot per pass.
+            if os.path.exists(dst) and not args.force:
+                logger.info(
+                    "Skipping existing aux dir %s (use --force to overwrite)",
+                    dst,
+                )
+                continue
+            if os.path.exists(dst):
+                shutil.rmtree(dst)
+            logger.info("Copying aux dir %s/ -> %s/", name, dst)
+            fs.get(entry["name"], dst, recursive=True)
 
     allow = set(args.dataset_keys) if args.dataset_keys else None
     tasks = []

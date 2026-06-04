@@ -10,21 +10,25 @@
 # climate-default share at the same path.
 #
 # Usage:
-#   ./zarr_to_netcdf_beaker.sh --config configs/zarr-to-netcdf-pilot.yaml
+#   ./zarr_to_netcdf_beaker.sh --config configs/zarr-to-netcdf-pilot.yaml [--force]
 #
-# Config (YAML):
+# Config (YAML) — describes the canonical state we want on Weka:
 #   gcs_source:        gs://bucket/<project>/<version>      # required
 #   weka_destination:  /climate-default/<project>/<version> # required
 #   workers:           8                                    # optional, default 4
 #   years_per_file:    10                                   # optional, default 10
-#   force:             true                                 # optional, default false
-#     # Overwrite existing netCDFs and top-level aux files (stats/presence/
-#     # index). Use after a v2-cohort fix so the Weka mirror picks up the
-#     # new bytes rather than the stale skip-if-exists behaviour.
 #   dataset_keys:                                           # optional
 #     - source_id/experiment/variant_label
 #     # Restrict per-dataset conversion to these triples. Top-level aux
 #     # files are still copied regardless. Omit to convert everything.
+#
+# CLI flags — describe the operation, not the state:
+#   --force   Overwrite existing netCDFs, top-level aux files (stats/
+#             presence/index), and the normalization_* aux dirs on
+#             Weka. Default is skip-if-exists, which is the right
+#             choice for a fresh transfer; pass --force when the GCS
+#             side has changed (schema bump, stats refresh, etc.)
+#             and Weka should be fully replaced.
 #
 # Prerequisites:
 #   - gantry on PATH
@@ -34,9 +38,11 @@
 
 set -e
 
+FORCE=false
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --config) CONFIG="$2"; shift;;
+        --force) FORCE=true;;
         *) echo "Unknown parameter: $1"; exit 1;;
     esac
     shift
@@ -54,7 +60,6 @@ WORKERS=$(yq -r '.workers // 4' "${CONFIG}")
 # Inner per-day chunking is unaffected. Use 1 for legacy yearly files
 # or 20 for half-century files.
 YEARS_PER_FILE=$(yq -r '.years_per_file // 10' "${CONFIG}")
-FORCE=$(yq -r '.force // false' "${CONFIG}")
 # Space-separated list of source_id/experiment/variant_label triples,
 # or empty if not present. ``yq -r '... | join(" ")'`` collapses the
 # YAML list to a single space-separated line so the python argparse
