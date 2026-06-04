@@ -1,30 +1,30 @@
 """
 Coarsen the existing daily-mean UFS Replay zarr dataset to 5-day means.
 
-Reads the fully processed 1-day dataset, averages every 5 consecutive
-timesteps, and writes a new zarr store.  Time-invariant fields (mask_*,
-idepth_*, land_fraction, sea_surface_fraction, deptho) are copied as-is.
+Processes variable-by-variable to keep memory bounded and avoid
+building a massive dask task graph.
 
 Usage:
     python coarsen_to_5day.py <input_zarr> <output_zarr> [--factor 5]
 
 Example (GCS):
     python coarsen_to_5day.py \
-      gs://vcm-ml-intermediate/2026-06-01-ufs-replay-ocean-1deg-19level-1994-2023.zarr \
-      gs://vcm-ml-intermediate/2026-06-03-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
-
-Example (local):
-    python coarsen_to_5day.py ./ufs-daily.zarr ./ufs-5day.zarr
+        gs://vcm-ml-intermediate/ufs-replay-ocean-1deg-19level-1994-2023.zarr \
+        gs://vcm-ml-intermediate/2026-06-03-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
 """
 
 import argparse
 import logging
+import time
 
 import numpy as np
 import xarray as xr
+import zarr
 
 TIME_INVARIANT_PREFIXES = ("mask_", "idepth_")
 TIME_INVARIANT_NAMES = {"land_fraction", "sea_surface_fraction", "deptho", "mask_2d"}
+
+BATCH_SIZE = 500  # timesteps to load at a time (must be divisible by factor)
 
 
 def is_time_invariant(name: str) -> bool:
@@ -38,19 +38,23 @@ def coarsen_dataset(input_path: str, output_path: str, factor: int = 5):
     ds = xr.open_zarr(input_path)
 
     n_times = ds.sizes["time"]
-    logging.info("Input: %d timesteps, %d variables", n_times, len(ds.data_vars))
+    nlat = ds.sizes["lat"]
+    nlon = ds.sizes["lon"]
+    logging.info(
+        "Input: %d timesteps, %d lat, %d lon, %d vars",
+        n_times,
+        nlat,
+        nlon,
+        len(ds.data_vars),
+    )
 
     usable = (n_times // factor) * factor
+    n_out = usable // factor
     remainder = n_times - usable
     if remainder > 0:
-        logging.warning(
-            "Trimming %d trailing timesteps (%d not divisible by %d)",
-            remainder,
-            n_times,
-            factor,
-        )
+        logging.warning("Trimming %d trailing timesteps", remainder)
 
-    # Separate time-varying and time-invariant variables
+    # Separate variables
     time_vars = []
     invariant_vars = []
     for name in ds.data_vars:
@@ -60,68 +64,118 @@ def coarsen_dataset(input_path: str, output_path: str, factor: int = 5):
             time_vars.append(name)
 
     logging.info(
-        "Time-varying: %d vars, time-invariant: %d vars",
-        len(time_vars),
-        len(invariant_vars),
+        "Time-varying: %d, time-invariant: %d", len(time_vars), len(invariant_vars)
     )
 
-    # Coarsen time-varying variables
-    ds_tv = ds[time_vars].isel(time=slice(0, usable))
-    logging.info(
-        "Coarsening %d timesteps by factor %d -> %d", usable, factor, usable // factor
-    )
-    ds_coarsened = ds_tv.coarsen(time=factor, boundary="exact").mean()
-
-    # Snap time labels to 12Z on the middle day of each window
-    snapped = []
-    for t in ds_coarsened.time.values:
+    # Compute output time coordinate
+    # Load input times and average each group of `factor`
+    in_times = ds.time.values[:usable]
+    out_times = []
+    for i in range(0, usable, factor):
+        t = in_times[i + factor // 2]  # middle day of window
         if hasattr(t, "year"):
             import cftime
 
             if isinstance(t, cftime.datetime):
-                snapped.append(type(t)(t.year, t.month, t.day, 12, 0, 0))
+                out_times.append(type(t)(t.year, t.month, t.day, 12, 0, 0))
             else:
-                snapped.append(np.datetime64(f"{t.astype('datetime64[D]')}T12:00:00"))
+                day = np.datetime64(t, "D")
+                out_times.append(np.datetime64(str(day) + "T12:00:00"))
         else:
-            snapped.append(t)
-    ds_coarsened = ds_coarsened.assign_coords(time=snapped)
+            out_times.append(t)
 
-    # Merge with invariant fields
-    ds_inv = ds[invariant_vars]
-    ds_out = xr.merge([ds_coarsened, ds_inv])
+    # Initialize output zarr store with a skeleton dataset
+    logging.info("Initializing output store at %s", output_path)
+    time_chunk = min(50, n_out)
 
-    # Preserve float32
-    for name in ds_out.data_vars:
-        if ds_out[name].dtype == np.float64:
-            ds_out[name] = ds_out[name].astype(np.float32)
+    skeleton_vars = {}
+    for name in time_vars:
+        skeleton_vars[name] = xr.DataArray(
+            data=np.empty((0, nlat, nlon), dtype=np.float32),
+            dims=["time", "lat", "lon"],
+            attrs=ds[name].attrs,
+        )
+    for name in invariant_vars:
+        skeleton_vars[name] = ds[name].load()
 
-    n_out = ds_out.sizes.get("time", 0)
-    logging.info("Output: %d timesteps, %d variables", n_out, len(ds_out.data_vars))
+    skeleton = xr.Dataset(skeleton_vars)
+    skeleton = skeleton.assign_coords(
+        time=xr.DataArray([], dims="time"),
+        lat=ds.lat,
+        lon=ds.lon,
+    )
 
-    # Write — rechunk uniformly and clear source encoding to avoid conflicts
-    logging.info("Writing to %s", output_path)
-    chunk_spec = {}
-    if "time" in ds_out.dims:
-        chunk_spec["time"] = min(50, n_out)
-    if "lat" in ds_out.dims:
-        chunk_spec["lat"] = ds_out.sizes["lat"]
-    if "lon" in ds_out.dims:
-        chunk_spec["lon"] = ds_out.sizes["lon"]
+    # Write skeleton to create the store structure, then resize
+    encoding = {}
+    for name in time_vars:
+        encoding[name] = {
+            "chunks": (time_chunk, nlat, nlon),
+            "dtype": "float32",
+        }
 
-    ds_out = ds_out.chunk(chunk_spec)
-    for var in ds_out.data_vars:
-        ds_out[var].encoding.clear()
-    for coord in ds_out.coords:
-        ds_out[coord].encoding.clear()
-    ds_out.to_zarr(output_path, mode="w", consolidated=True)
-    logging.info("Done. Output at %s", output_path)
+    skeleton.to_zarr(output_path, mode="w", encoding=encoding, consolidated=False)
 
-    # Summary
+    # Now open the store and resize + write the time coordinate
+    store = zarr.open(output_path, mode="r+")
+    for name in time_vars:
+        store[name].resize(n_out, nlat, nlon)
+    # Write time coordinate
+    if "time" in store:
+        store["time"].resize(n_out)
+    else:
+        store.create_dataset("time", shape=(n_out,), dtype=object, overwrite=True)
+    store["time"][:] = np.array(out_times)
+
+    # Process time-varying variables one at a time
+    t_start = time.time()
+    batch = max(factor, (BATCH_SIZE // factor) * factor)
+    logging.info(
+        "Processing %d vars, batch_size=%d input timesteps", len(time_vars), batch
+    )
+
+    for vi, name in enumerate(time_vars):
+        var_start = time.time()
+        out_idx = 0
+
+        for t0 in range(0, usable, batch):
+            t1 = min(t0 + batch, usable)
+            chunk = ds[name].isel(time=slice(t0, t1)).values  # eager load
+            n_chunk = t1 - t0
+            n_groups = n_chunk // factor
+
+            # Reshape to (n_groups, factor, lat, lon) and mean
+            reshaped = chunk[: n_groups * factor].reshape(n_groups, factor, nlat, nlon)
+            coarsened = reshaped.mean(axis=1).astype(np.float32)
+
+            store[name][out_idx : out_idx + n_groups] = coarsened
+            out_idx += n_groups
+
+        elapsed = time.time() - var_start
+        logging.info(
+            "  [%d/%d] %s done (%.1fs, wrote %d timesteps)",
+            vi + 1,
+            len(time_vars),
+            name,
+            elapsed,
+            out_idx,
+        )
+
+    # Consolidate metadata
+    zarr.consolidate_metadata(output_path)
+
+    total = time.time() - t_start
+    logging.info(
+        "Done in %.1f minutes. Output: %d timesteps at %s",
+        total / 60,
+        n_out,
+        output_path,
+    )
+
     print(f"\n=== Summary ===")
     print(f"Input:  {n_times} daily timesteps")
     print(f"Output: {n_out} {factor}-day mean timesteps")
-    print(f"Time range: {ds_out.time.values[0]} to {ds_out.time.values[-1]}")
-    print(f"Variables: {sorted(ds_out.data_vars)}")
+    print(f"Time range: {out_times[0]} to {out_times[-1]}")
+    print(f"Total time: {total / 60:.1f} minutes")
 
 
 def main():
