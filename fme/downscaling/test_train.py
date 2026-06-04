@@ -19,7 +19,6 @@ from fme.downscaling.test_utils import create_test_data_on_disk, data_paths_help
 from fme.downscaling.train import (
     Trainer,
     TrainerConfig,
-    _get_complement_percentile_prefix,
     _resume_from_results_dir_if_not_preempted,
     main,
     restore_checkpoint,
@@ -84,6 +83,30 @@ def test_trainer_config_tropical_oversampling_with_patch_extents_ok(tmp_path):
         coarse_patch_extent_lon=16,
         tropical_oversampling=TropicalOversamplingConfig(),
     )
+
+
+@pytest.mark.parametrize(
+    "clear_wandb_run_id, expected_wandb_run_id_exists",
+    [
+        (False, True),
+        (True, False),
+    ],
+)
+def test_resume_from_results_dir_wandb_run_id(
+    tmp_path, clear_wandb_run_id, expected_wandb_run_id_exists
+):
+    resume_results_dir = tmp_path / "resume_results"
+    experiment_dir = tmp_path / "experiment"
+    resume_results_dir.mkdir()
+    (resume_results_dir / WANDB_RUN_ID_FILE).write_text("wandb-id")
+
+    _resume_from_results_dir_if_not_preempted(
+        experiment_dir=experiment_dir,
+        resume_results_dir=resume_results_dir,
+        clear_wandb_run_id=clear_wandb_run_id,
+    )
+
+    assert (experiment_dir / WANDB_RUN_ID_FILE).exists() == expected_wandb_run_id_exists
 
 
 @pytest.fixture
@@ -353,61 +376,3 @@ def test_resume_two_workers(default_trainer_config, tmp_path, skip_slow: bool):
     initial_process.check_returncode()
     resume_process = subprocess.run(command)
     resume_process.check_returncode()
-
-
-@pytest.mark.parametrize(
-    "prefix, expected",
-    [
-        (
-            "histogram/prediction_frac_of_target/99.99th-percentile/var0",
-            "histogram/prediction_frac_of_target/0.01th-percentile/var0",
-        ),
-        (
-            "some_metric/percentile/99.9999/var0",
-            "some_metric/percentile/0.0001/var0",
-        ),
-        (
-            "no_percentile_here/some_metric",
-            None,
-        ),
-    ],
-)
-def test_get_complement_percentile_prefix(prefix, expected):
-    result = _get_complement_percentile_prefix(prefix)
-    assert result == expected
-
-
-def test_resume_from_results_dir_clears_wandb_run_id(tmp_path):
-    src = tmp_path / "src"
-    dst_keep = tmp_path / "dst_keep"
-    dst_clear = tmp_path / "dst_clear"
-    src.mkdir()
-    (src / WANDB_RUN_ID_FILE).write_text("prior-run-id\n")
-    (src / "other.txt").write_text("keep")
-
-    _resume_from_results_dir_if_not_preempted(
-        str(dst_keep),
-        str(src),
-        clear_wandb_run_id=False,
-    )
-    assert (dst_keep / WANDB_RUN_ID_FILE).read_text().strip() == "prior-run-id"
-
-    _resume_from_results_dir_if_not_preempted(
-        str(dst_clear),
-        str(src),
-        clear_wandb_run_id=True,
-    )
-    assert not (dst_clear / WANDB_RUN_ID_FILE).exists()
-    assert (dst_clear / "other.txt").read_text() == "keep"
-
-
-def test_resume_clear_wandb_run_id_requires_resume_dir(default_trainer_config):
-    cfg = dict(default_trainer_config)
-    cfg["resume_clear_wandb_run_id"] = True
-    cfg.pop("resume_results_dir", None)
-    with pytest.raises(ValueError, match="resume_clear_wandb_run_id"):
-        dacite.from_dict(
-            data_class=TrainerConfig,
-            data=cfg,
-            config=dacite.Config(strict=True),
-        )

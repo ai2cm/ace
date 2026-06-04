@@ -587,7 +587,7 @@ class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
                     )
         for key, value in target_metrics.items():
             return_metrics[f"prediction_frac_of_target/{key}"] = (
-                value / return_metrics[key]
+                return_metrics[key] / value
             )
         return return_metrics
 
