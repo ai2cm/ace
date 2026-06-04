@@ -301,6 +301,7 @@ class GenerationAggregator:
             self._single_sample_aggregators.append(
                 MeanMapAggregator(variable_metadata, name="single_sample_time_mean")
             )
+        self._wandb_logs: Mapping[str, Any] | None = None
 
     @torch.no_grad()
     def record_batch(
@@ -341,16 +342,17 @@ class GenerationAggregator:
         """
         Get the wandb output to log from all sub aggregators.
         """
-        ret = {**self._agg.get_wandb(prefix)}
-        for comparison in self._probabilistic_comparisons:
-            ret.update(comparison.get_wandb(prefix))
-        for coarse_comparison in self._probabilistic_coarse_comparisons:
-            ret.update(coarse_comparison.get_wandb(prefix))
-        ret.update(self._latent_step_aggregator.get_wandb(prefix))
-        for single_sample_record in self._single_sample_aggregators:
-            ret.update(single_sample_record.get_wandb(prefix))
-
-        return ret
+        if self._wandb_logs is None:
+            ret = {**self._agg.get_wandb(prefix)}
+            for comparison in self._probabilistic_comparisons:
+                ret.update(comparison.get_wandb(prefix))
+            for coarse_comparison in self._probabilistic_coarse_comparisons:
+                ret.update(coarse_comparison.get_wandb(prefix))
+            ret.update(self._latent_step_aggregator.get_wandb(prefix))
+            for single_sample_record in self._single_sample_aggregators:
+                ret.update(single_sample_record.get_wandb(prefix))
+            self._wandb_logs = ret
+        return self._wandb_logs
 
     def get_dataset(self) -> xr.Dataset:
         """
