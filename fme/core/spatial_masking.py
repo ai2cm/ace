@@ -1,11 +1,11 @@
 import collections
 import dataclasses
-import re
 from collections.abc import Callable
 from typing import Literal, Protocol, runtime_checkable
 
 import torch
 
+from fme.core.name_and_prefix_matcher import NameAndPrefixMatcher
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -111,25 +111,10 @@ class StaticSpatialMasking:
         self._fill_mapping = fill_mapping
         self._mask_value = mask_value
         self._mask = mask
-        self._exclude_regex = self._build_regex(exclude_names_and_prefixes)
-
-    def _build_regex(self, names_and_prefixes: list[str] | None) -> str | None:
-        if names_and_prefixes:
-            regex = []
-            for name in names_and_prefixes:
-                if name.endswith("_"):
-                    regex.append(rf"^{name}\d+$")
-                elif not re.match(r".+_\d+$", name):
-                    regex.append(f"^{name}$")
-                    regex.append(rf"^{name}_\d+$")
-                else:
-                    regex.append(rf"^{name}$")
-            return r"|".join(regex)
-        return None
+        self._exclude_matcher = NameAndPrefixMatcher(exclude_names_and_prefixes)
 
     def _masks(self, name: str):
-        exclude = self._exclude_regex and re.match(self._exclude_regex, name)
-        return not exclude
+        return not self._exclude_matcher.matches(name)
 
     def __call__(self, data: TensorMapping) -> TensorDict:
         """

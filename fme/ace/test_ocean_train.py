@@ -248,6 +248,9 @@ stepper_training:
   n_forward_steps: 2
   loss:
     type: "MSE"
+  precorrector_optimization:
+    exclude_names_and_prefixes:
+      - sea_ice_fraction
 stepper:
   input_masking:
     mask_value: 0

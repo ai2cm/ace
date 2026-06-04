@@ -1,6 +1,8 @@
+import dataclasses
 import datetime
 from collections.abc import Sequence
 
+import dacite
 import numpy as np
 import pytest
 import torch
@@ -8,10 +10,12 @@ import xarray as xr
 
 from fme.ace.aggregator.inference.main import (
     EnsembleMetricConfig,
+    InferenceEvaluatorAggregatorConfig,
     StepMeanMetricConfig,
     TimeMeanMetricConfig,
     build_inference_evaluator_aggregator,
 )
+from fme.ace.aggregator.inference.reduced import MeanMetricConfig
 from fme.ace.data_loading.batch_data import BatchData, PairedData
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
@@ -168,3 +172,206 @@ def test_inference_evaluator_aggregator_ensemble():
                 summary_logs[f"ensemble_step_20/{metric}/{varname}"]
                 != summary_logs[f"ensemble_step_20_norm/{metric}/{varname}"]
             )
+
+
+def test_compute_uncorrected_metrics_defaults_on_and_round_trips():
+    config = InferenceEvaluatorAggregatorConfig()
+    assert config.compute_uncorrected_metrics is True
+    disabled = InferenceEvaluatorAggregatorConfig(compute_uncorrected_metrics=False)
+    restored = dacite.from_dict(
+        InferenceEvaluatorAggregatorConfig,
+        dataclasses.asdict(disabled),
+        config=dacite.Config(strict=True),
+    )
+    assert restored.compute_uncorrected_metrics is False
+
+
+def _build_aggregator_with_uncorrected(
+    ds_info: DatasetInfo,
+    output_dir: str | None = None,
+    save_diagnostics: bool = False,
+):
+    n_ic_steps = 1
+    n_forward_steps = 2
+    initial_time = xr.DataArray(np.zeros((2,)), dims=["sample"])
+    return build_inference_evaluator_aggregator(
+        metrics=[TimeMeanMetricConfig(target="norm")],
+        uncorrected_metrics=[TimeMeanMetricConfig(target="norm")],
+        dataset_info=ds_info,
+        n_ic_steps=n_ic_steps,
+        n_forward_steps=n_forward_steps,
+        initial_time=initial_time,
+        normalize=lambda x: dict(x),
+        save_diagnostics=save_diagnostics,
+        output_dir=output_dir,
+    )
+
+
+def _paired(prediction, target, uncorrected, nx=4, ny=4):
+    batch_size, n_timesteps = 2, 3
+
+    def field(value):
+        return (
+            torch.ones([batch_size, n_timesteps, nx, ny], device=get_device()) * value
+        )
+
+    time = xr.DataArray(np.zeros((batch_size, n_timesteps)), dims=["sample", "time"])
+    return PairedData(
+        prediction={"a": field(prediction)},
+        reference={"a": field(target)},
+        time=time,
+        uncorrected_prediction=(
+            {"a": field(uncorrected)} if uncorrected is not None else {}
+        ),
+    )
+
+
+def test_uncorrected_metrics_logged_under_prefix():
+    # The aggregator computes time-mean metrics on both the corrected prediction
+    # and the uncorrected prediction, the latter under an "uncorrected/" prefix.
+    agg = _build_aggregator_with_uncorrected(get_ds_info(4, 4))
+    # corrected pred=2 vs target=1 -> rmse 1; uncorrected pred=4 -> rmse 3.
+    agg.record_batch(_paired(prediction=2.0, target=1.0, uncorrected=4.0))
+
+    summary = agg.get_summary_logs()
+    assert "time_mean_norm/rmse/a" in summary
+    assert "uncorrected/time_mean_norm/rmse/a" in summary
+    np.testing.assert_allclose(summary["time_mean_norm/rmse/a"], 1.0)
+    np.testing.assert_allclose(summary["uncorrected/time_mean_norm/rmse/a"], 3.0)
+
+
+def test_uncorrected_metrics_skipped_when_empty(tmp_path):
+    # A corrector-less stepper produces an empty uncorrected prediction. The
+    # uncorrected aggregators must then be neither summarized nor flushed (they
+    # hold no data and would otherwise raise "No data recorded.").
+    agg = _build_aggregator_with_uncorrected(
+        get_ds_info(4, 4), output_dir=str(tmp_path), save_diagnostics=True
+    )
+    agg.record_batch(_paired(prediction=2.0, target=1.0, uncorrected=None))
+
+    summary = agg.get_summary_logs()
+    assert "time_mean_norm/rmse/a" in summary
+    assert "uncorrected/time_mean_norm/rmse/a" not in summary
+    # Must not raise even though the uncorrected aggregators recorded nothing.
+    agg.flush_diagnostics(subdir=None)
+
+
+def test_config_build_wires_uncorrected_metrics():
+    # The config.build path (used by both the standalone evaluator and the
+    # training inline-inference loop) wires uncorrected time-mean aggregators iff
+    # compute_uncorrected_metrics is set.
+    ds_info = get_ds_info(4, 4)
+    initial_time = xr.DataArray(np.zeros((2,)), dims=["sample"])
+
+    def build(compute_uncorrected: bool):
+        return InferenceEvaluatorAggregatorConfig(
+            compute_uncorrected_metrics=compute_uncorrected
+        ).build(
+            dataset_info=ds_info,
+            n_ic_steps=1,
+            n_forward_steps=2,
+            initial_time=initial_time,
+            normalize=lambda x: dict(x),
+            save_diagnostics=False,
+        )
+
+    paired = _paired(prediction=2.0, target=1.0, uncorrected=4.0)
+
+    agg_on = build(compute_uncorrected=True)
+    step_logs = agg_on.record_batch(paired)
+    assert "uncorrected/time_mean_norm/rmse/a" in agg_on.get_summary_logs()
+
+    # Per-step time-series also appear for uncorrected mean metrics.
+    all_step_keys: set[str] = set()
+    for log_dict in step_logs:
+        all_step_keys.update(log_dict.keys())
+    assert "uncorrected/mean/weighted_mean_gen/a" in all_step_keys
+    assert "uncorrected/mean_norm/weighted_mean_gen/a" in all_step_keys
+    assert "uncorrected/mean/weighted_mean_target/a" not in all_step_keys
+    assert "uncorrected/mean_norm/weighted_mean_target/a" not in all_step_keys
+
+    agg_off = build(compute_uncorrected=False)
+    agg_off.record_batch(paired)
+    assert not any(k.startswith("uncorrected/") for k in agg_off.get_summary_logs())
+
+
+def test_uncorrected_mean_time_series_logged():
+    """Uncorrected mean time-series keys appear with correct prefix and values."""
+    ds_info = get_ds_info(4, 4)
+    n_ic_steps = 1
+    n_forward_steps = 2
+    initial_time = xr.DataArray(np.zeros((2,)), dims=["sample"])
+    agg = build_inference_evaluator_aggregator(
+        metrics=[MeanMetricConfig(target="denorm")],
+        uncorrected_metrics=[
+            MeanMetricConfig(target="denorm", include_target_metrics=False),
+        ],
+        dataset_info=ds_info,
+        n_ic_steps=n_ic_steps,
+        n_forward_steps=n_forward_steps,
+        initial_time=initial_time,
+        normalize=lambda x: dict(x),
+        save_diagnostics=False,
+    )
+
+    paired = _paired(prediction=2.0, target=1.0, uncorrected=4.0)
+    step_logs = agg.record_batch(paired)
+
+    all_step_keys: set[str] = set()
+    for log_dict in step_logs:
+        all_step_keys.update(log_dict.keys())
+
+    # Main mean keys present
+    assert "mean/weighted_mean_gen/a" in all_step_keys
+    assert "mean/weighted_mean_target/a" in all_step_keys
+
+    # Uncorrected mean keys present (gen-side)
+    assert "uncorrected/mean/weighted_mean_gen/a" in all_step_keys
+    assert "uncorrected/mean/weighted_rmse/a" in all_step_keys
+    assert "uncorrected/mean/weighted_bias/a" in all_step_keys
+    assert "uncorrected/mean/weighted_std_gen/a" in all_step_keys
+
+    # Target excluded from uncorrected
+    assert "uncorrected/mean/weighted_mean_target/a" not in all_step_keys
+
+    # Values differ: main gen=2.0 vs uncorrected gen=4.0
+    for log_dict in step_logs:
+        if "mean/weighted_mean_gen/a" in log_dict:
+            main_gen = log_dict["mean/weighted_mean_gen/a"]
+            uncorrected_gen = log_dict["uncorrected/mean/weighted_mean_gen/a"]
+            assert main_gen != uncorrected_gen
+            np.testing.assert_allclose(main_gen, 2.0)
+            np.testing.assert_allclose(uncorrected_gen, 4.0)
+            break
+    else:
+        raise AssertionError("weighted_mean_gen/a not found in step logs")
+
+
+def test_uncorrected_mean_time_series_skipped_when_empty():
+    """Empty uncorrected prediction produces no uncorrected time-series keys."""
+    ds_info = get_ds_info(4, 4)
+    n_ic_steps = 1
+    n_forward_steps = 2
+    initial_time = xr.DataArray(np.zeros((2,)), dims=["sample"])
+    agg = build_inference_evaluator_aggregator(
+        metrics=[MeanMetricConfig(target="denorm")],
+        uncorrected_metrics=[
+            MeanMetricConfig(target="denorm", include_target_metrics=False),
+        ],
+        dataset_info=ds_info,
+        n_ic_steps=n_ic_steps,
+        n_forward_steps=n_forward_steps,
+        initial_time=initial_time,
+        normalize=lambda x: dict(x),
+        save_diagnostics=False,
+    )
+
+    paired = _paired(prediction=2.0, target=1.0, uncorrected=None)
+    step_logs = agg.record_batch(paired)
+
+    all_step_keys: set[str] = set()
+    for log_dict in step_logs:
+        all_step_keys.update(log_dict.keys())
+
+    assert "mean/weighted_mean_gen/a" in all_step_keys
+    assert not any(k.startswith("uncorrected/") for k in all_step_keys)

@@ -461,7 +461,7 @@ def test_step_regression(
             input=input_data, next_step_input_data=next_step_input_data, labels=labels
         ),
         wrapper=lambda x: x,
-    )
+    ).output
 
     # Gather local outputs back to global for comparison
     output = dist.gather_spatial(output, img_shape)

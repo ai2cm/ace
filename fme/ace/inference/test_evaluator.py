@@ -49,6 +49,7 @@ from fme.core.coordinates import (
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
 )
+from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.dataset_info import DatasetInfo
@@ -85,6 +86,7 @@ def save_plus_one_stepper(
     ocean=None,
     multi_call: MultiCallConfig | None = None,
     derived_forcings: DerivedForcingsConfig | None = None,
+    corrector=None,
 ):
     if multi_call is None:
         all_names = list(set(in_names).union(out_names))
@@ -94,6 +96,8 @@ def save_plus_one_stepper(
         normalization_names = all_names
     if derived_forcings is None:
         derived_forcings = DerivedForcingsConfig()
+    if corrector is None:
+        corrector = AtmosphereCorrectorConfig()
     with tempfile.TemporaryDirectory() as temp_dir:
         mean_filename = pathlib.Path(temp_dir) / "means.nc"
         std_filename = pathlib.Path(temp_dir) / "stds.nc"
@@ -129,6 +133,7 @@ def save_plus_one_stepper(
                                         ),
                                     ),
                                     ocean=ocean,
+                                    corrector=corrector,
                                 ),
                             ),
                         ),
@@ -346,6 +351,75 @@ def test_typed_metric_config_inference(tmp_path: pathlib.Path, n_forward_steps: 
                 assert f"inference/mean/weighted_rmse/{var}" not in log
             else:
                 assert log[f"inference/mean/weighted_rmse/{var}"] == 0.0
+
+
+def test_inference_uncorrected_metrics(tmp_path: pathlib.Path):
+    """compute_uncorrected_metrics logs time-mean metrics for the stepper's
+    uncorrected outputs under an ``inference/uncorrected/`` prefix."""
+    in_names = ["var"]
+    out_names = ["var"]
+    stepper_path = tmp_path / "stepper"
+    n_forward_steps = 2
+    horizontal = [DimSize("lat", 16), DimSize("lon", 32)]
+    dim_sizes = DimSizes(
+        n_time=n_forward_steps + 1, horizontal=horizontal, nz_interface=4
+    )
+    save_plus_one_stepper(
+        stepper_path,
+        in_names,
+        out_names,
+        mean=0.0,
+        std=1.0,
+        data_shape=dim_sizes.shape_nd,
+        timestep=datetime.timedelta(days=20),
+        corrector=AtmosphereCorrectorConfig(force_positive_names=["var"]),
+    )
+    all_names = list(set(in_names).union(out_names))
+    time_varying_values = [float(i) for i in range(dim_sizes.n_time)]
+    data = FV3GFSData(
+        path=tmp_path,
+        names=all_names,
+        dim_sizes=dim_sizes,
+        time_varying_values=time_varying_values,
+        timestep_days=datetime.timedelta(days=20).total_seconds() / 86400,
+        save_vertical_coordinate=False,
+    )
+    config = InferenceEvaluatorConfig(
+        experiment_dir=str(tmp_path),
+        n_forward_steps=n_forward_steps,
+        checkpoint_path=str(stepper_path),
+        logging=LoggingConfig(
+            log_to_screen=True,
+            log_to_file=False,
+            log_to_wandb=True,
+        ),
+        loader=data.inference_data_loader_config,
+        aggregator=InferenceEvaluatorAggregatorConfig(compute_uncorrected_metrics=True),
+        data_writer=DataWriterConfig(
+            save_prediction_files=False,
+            save_monthly_files=False,
+            files=[FileWriterConfig("autoregressive")],
+        ),
+        forward_steps_in_memory=1,
+        allow_incompatible_dataset=True,
+    )
+    config_filename = tmp_path / "config.yaml"
+    with open(config_filename, "w") as f:
+        yaml.dump(dataclasses.asdict(config), f)
+
+    with mock_wandb() as wandb:
+        wandb.configure(log_to_wandb=True)
+        main(yaml_config=str(config_filename))
+        wandb_logs = wandb.get_logs()
+
+    all_keys: set[str] = set().union(*(log.keys() for log in wandb_logs))
+    uncorrected_keys = {k for k in all_keys if k.startswith("inference/uncorrected/")}
+    assert uncorrected_keys, "expected uncorrected metrics to be logged"
+    assert any("time_mean" in k for k in uncorrected_keys)
+    # Corrected time-mean metrics are still logged, distinct from the uncorrected ones.
+    assert any(
+        k.startswith("inference/time_mean") for k in all_keys
+    ), "expected corrected time-mean metrics alongside uncorrected ones"
 
 
 def inference_helper(

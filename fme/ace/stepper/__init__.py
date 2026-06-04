@@ -1,5 +1,6 @@
 from .derived_forcings import DerivedForcingsConfig, ForcingDeriver
 from .single_module import (
+    PreCorrectorOptimizationConfig,
     Stepper,
     StepperConfig,
     StepperOverrideConfig,

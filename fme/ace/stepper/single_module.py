@@ -3,8 +3,8 @@ import dataclasses
 import datetime
 import logging
 import pathlib
-from collections.abc import Callable, Generator, Mapping
-from typing import Any, Literal, cast
+from collections.abc import Callable, Generator, Iterable, Mapping
+from typing import Any, Literal, cast, overload
 
 import dacite
 import dacite.exceptions
@@ -40,6 +40,7 @@ from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.labels import BatchLabels
 from fme.core.loss import ChannelLossInfo, StepLoss, StepLossConfig
+from fme.core.name_and_prefix_matcher import NameAndPrefixMatcher
 from fme.core.normalizer import (
     NetworkAndLossNormalizationConfig,
     NormalizationConfig,
@@ -57,7 +58,7 @@ from fme.core.step.multi_call import (
     replace_multi_call,
 )
 from fme.core.step.single_module import SingleModuleStepConfig
-from fme.core.step.step import StepABC, StepSelector
+from fme.core.step.step import StepABC, StepOutput, StepSelector
 from fme.core.tensors import (
     add_ensemble_dim,
     fold_ensemble_dim,
@@ -1023,20 +1024,36 @@ class Stepper:
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
+        *,
+        detach_uncorrected: bool = True,
+    ) -> StepOutput:
         """
         Step the model forward one timestep given input data.
 
         Args:
             args: The arguments to the step function.
             wrapper: Wrapper to apply over each nn.Module before calling.
+            detach_uncorrected: If True (default), detach the uncorrected
+                tensors from the autograd graph to avoid retaining it when
+                uncorrected values are only used for metrics. Set to False
+                when gradients through uncorrected values are needed (e.g.
+                for ``optimize_precorrected`` training).
 
         Returns:
-            The denormalized output data at the next time step.
+            The output at the next timestep and the pre-correction values of any
+            corrector-modified variables.
         """
         args = args.apply_input_process_func(self._input_process_func)
-        output = self._step_obj.step(args=args, wrapper=wrapper)
-        return self._output_process_func(output)
+        step_output = self._step_obj.step(args=args, wrapper=wrapper)
+        # The output process func (e.g. spatial masking) is name-preserving and
+        # applied per-variable, so it is safe to apply to the uncorrected subset.
+        uncorrected = self._output_process_func(step_output.uncorrected)
+        if detach_uncorrected:
+            uncorrected = {k: v.detach() for k, v in uncorrected.items()}
+        return StepOutput(
+            output=self._output_process_func(step_output.output),
+            uncorrected=uncorrected,
+        )
 
     def get_prediction_generator(
         self,
@@ -1044,7 +1061,7 @@ class Stepper:
         forcing_data: BatchData,
         n_forward_steps: int,
         optimizer: OptimizationABC,
-    ) -> Generator[TensorDict, None, None]:
+    ) -> Generator[StepOutput, None, None]:
         """
         Predict multiple steps forward given initial condition and forcing data.
 
@@ -1094,7 +1111,8 @@ class Stepper:
         optimizer: OptimizationABC,
         labels: BatchLabels | None,
         data_mask: TensorMapping | None = None,
-    ) -> Generator[TensorDict, None, None]:
+        detach_uncorrected: bool = True,
+    ) -> Generator[StepOutput, None, None]:
         state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
         for step in range(n_forward_steps):
             input_forcing = {
@@ -1115,7 +1133,7 @@ class Stepper:
                 return optimizer.checkpoint(module, step=step)
 
             with optimizer.autocast():
-                state = self.step(
+                step_output = self.step(
                     StepArgs(
                         input=input_data,
                         next_step_input_data=next_step_input_dict,
@@ -1123,9 +1141,33 @@ class Stepper:
                         data_mask=data_mask,
                     ),
                     wrapper=checkpoint,
+                    detach_uncorrected=detach_uncorrected,
                 )
-            yield state
-            state = optimizer.detach_if_using_gradient_accumulation(state)
+            yield step_output
+            # The rollout always feeds the corrected output forward.
+            state = optimizer.detach_if_using_gradient_accumulation(step_output.output)
+
+    @overload
+    def predict(
+        self,
+        initial_condition: PrognosticState,
+        forcing: BatchData,
+        compute_derived_variables: bool = False,
+        compute_derived_forcings: bool = True,
+        *,
+        return_uncorrected: Literal[False] = False,
+    ) -> tuple[BatchData, PrognosticState]: ...
+
+    @overload
+    def predict(
+        self,
+        initial_condition: PrognosticState,
+        forcing: BatchData,
+        compute_derived_variables: bool = False,
+        compute_derived_forcings: bool = True,
+        *,
+        return_uncorrected: Literal[True],
+    ) -> tuple[BatchData, BatchData, PrognosticState]: ...
 
     def predict(
         self,
@@ -1133,7 +1175,11 @@ class Stepper:
         forcing: BatchData,
         compute_derived_variables: bool = False,
         compute_derived_forcings: bool = True,
-    ) -> tuple[BatchData, PrognosticState]:
+        *,
+        return_uncorrected: bool = False,
+    ) -> (
+        tuple[BatchData, PrognosticState] | tuple[BatchData, BatchData, PrognosticState]
+    ):
         """
         Predict multiple steps forward given initial condition and reference data.
 
@@ -1150,10 +1196,15 @@ class Stepper:
             compute_derived_forcings: Whether to compute derived forcing variables for
                 the prediction. Only used to disable computing the derived forcings
                 if they have been computed ahead of time.
+            return_uncorrected: If True, additionally return a BatchData containing the
+                pre-correction ("uncorrected") values of corrector-modified variables,
+                inserted as the second element of the returned tuple. Derived variables
+                are not computed for the uncorrected prediction.
 
         Returns:
             A batch data containing the prediction and the prediction's final state
-            which can be used as a new initial condition.
+            which can be used as a new initial condition. If ``return_uncorrected`` is
+            True, the uncorrected BatchData is inserted between the two.
         """
         timer = GlobalTimer.get_instance()
         forcing_names = set(self._input_only_names).union(
@@ -1186,7 +1237,7 @@ class Stepper:
                 )
             )
         data = process_prediction_generator_list(
-            output_list,
+            [step_output.output for step_output in output_list],
             time=forcing_data.time[:, self.n_ic_timesteps :],
             horizontal_dims=forcing_data.horizontal_dims,
             labels=forcing.labels,
@@ -1210,6 +1261,18 @@ class Stepper:
             labels=data.labels,
             n_ensemble=data.n_ensemble,
         )
+        if return_uncorrected:
+            # The uncorrected prediction holds only corrector-modified variables
+            # in their pre-correction form; it shares the corrected prediction's
+            # time coordinate and is intentionally given no derived variables.
+            uncorrected_data = process_prediction_generator_list(
+                [step_output.uncorrected for step_output in output_list],
+                time=forcing_data.time[:, self.n_ic_timesteps :],
+                horizontal_dims=forcing_data.horizontal_dims,
+                labels=forcing.labels,
+                n_ensemble=forcing.n_ensemble,
+            )
+            return data, uncorrected_data, prognostic_state
         return data, prognostic_state
 
     def predict_paired(
@@ -1235,18 +1298,22 @@ class Stepper:
         Returns:
             A tuple of 1) a paired data object, containing the prediction paired with
             all target/forcing data at the same timesteps, and 2) the prediction's
-            final state, which can be used as a new initial condition.
+            final state, which can be used as a new initial condition. The paired data
+            also carries the pre-correction ("uncorrected") values of corrector-modified
+            variables in its ``uncorrected_prediction`` field (empty when the stepper
+            has no corrector), paired against the same reference data.
         """
         forcing = self.forcing_deriver(forcing)
         if forcing.n_ensemble == 1 and initial_condition.as_batch_data().n_ensemble > 1:
             forcing = forcing.broadcast_ensemble(
                 n_ensemble=initial_condition.as_batch_data().n_ensemble
             )
-        prediction, new_initial_condition = self.predict(
+        prediction, uncorrected_prediction, new_initial_condition = self.predict(
             initial_condition,
             forcing,
             compute_derived_variables,
             compute_derived_forcings=False,
+            return_uncorrected=True,
         )
         forward_data = self.get_forward_data(
             forcing, compute_derived_variables=compute_derived_variables
@@ -1260,6 +1327,7 @@ class Stepper:
                     horizontal_dims=forward_data.horizontal_dims,
                     labels=forward_data.labels,
                 ),
+                uncorrected_prediction=uncorrected_prediction,
             ),
             new_initial_condition,
         )
@@ -1392,6 +1460,62 @@ class Stepper:
 
 
 @dataclasses.dataclass
+class PreCorrectorOptimizationConfig:
+    """
+    Configuration enabling pre-corrector optimization of the training loss.
+
+    When this config is present, the training loss for corrector-modified
+    variables is computed against the model's pre-correction (uncorrected)
+    output rather than its corrected output, except for variables matched by
+    ``exclude_names_and_prefixes``, which continue to be optimized against their
+    corrected (post-adjustment) values. The presence of this object is itself
+    the on/off switch; there is no separate ``enabled`` flag.
+
+    The rollout state and returned predictions always use the fully corrected
+    outputs regardless of this config; only the training loss target is affected.
+
+    Parameters:
+        exclude_names_and_prefixes: Names and prefixes of variables to exclude
+            from pre-corrector optimization. Matching follows the same
+            name-and-prefix convention as spatial masking: a bare name matches
+            the 2D variable and all of its 3D levels, a trailing-underscore
+            prefix (e.g. ``thetao_``) matches all levels, and an explicit
+            ``name_<level>`` matches exactly.
+    """
+
+    exclude_names_and_prefixes: list[str] = dataclasses.field(default_factory=list)
+
+    def __post_init__(self):
+        self._matcher = NameAndPrefixMatcher(self.exclude_names_and_prefixes)
+
+    def select_precorrected(self, uncorrected: TensorMapping) -> TensorDict:
+        """Return the subset of ``uncorrected`` to override into the loss target.
+
+        Excluded variables are dropped so that they retain their corrected value
+        in the loss; all other corrector-modified variables are returned so they
+        override their corrected value with their pre-correction value.
+        """
+        return {
+            name: value
+            for name, value in uncorrected.items()
+            if not self._matcher.matches(name)
+        }
+
+    def unmatched_exclusions(self, names: Iterable[str]) -> list[str]:
+        """Return exclusion entries that match none of ``names``.
+
+        Used for warn-once validation against the actual set of
+        corrector-modified variables, which is only known at runtime.
+        """
+        names = list(names)
+        return [
+            entry
+            for entry in self.exclude_names_and_prefixes
+            if not any(NameAndPrefixMatcher([entry]).matches(name) for name in names)
+        ]
+
+
+@dataclasses.dataclass
 class TrainStepperConfig:
     """
     Configuration for training-specific aspects of a stepper.
@@ -1408,6 +1532,14 @@ class TrainStepperConfig:
             be less than or equal to the number of timesteps present
             in the training dataset samples.
         parameter_init: The parameter initialization configuration for fine-tuning.
+        precorrector_optimization: When set, enables pre-corrector optimization:
+            the training loss for corrector-modified variables is computed on
+            their pre-correction outputs, except for variables the config
+            excludes, which use the normal (post-adjustment) values. Variables
+            the corrector does not modify are unaffected. The rollout state and
+            returned gen_data always use the fully corrected outputs regardless
+            of this config. When None (default), standard post-corrector
+            optimization is used.
     """
 
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
@@ -1417,6 +1549,7 @@ class TrainStepperConfig:
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
+    precorrector_optimization: PreCorrectorOptimizationConfig | None = None
 
     def __post_init__(self):
         if self.n_ensemble == -1:
@@ -1540,6 +1673,7 @@ class TrainStepper(
         self._prognostic_names = self._stepper.prognostic_names
         self._derive_func = self._stepper.derive_func
         self._loss_obj = self._stepper.build_loss(config.loss)
+        self._validated_precorrector_exclusions = False
 
     def train_on_batch(
         self,
@@ -1616,6 +1750,33 @@ class TrainStepper(
         # apply post-processing and return
         return stepped
 
+    def _validate_precorrector_exclusions(
+        self,
+        precorrector_optimization: PreCorrectorOptimizationConfig,
+        corrector_modified_names: Iterable[str],
+    ) -> None:
+        """Warn once if an exclusion entry matches no corrector-modified variable.
+
+        The set of corrector-modified variables is only known at runtime, so this
+        cannot be validated in ``__post_init__``. Checked on the first training
+        step against the actual corrector-modified variable set.
+        """
+        if self._validated_precorrector_exclusions:
+            return
+        self._validated_precorrector_exclusions = True
+        corrector_modified_names = list(corrector_modified_names)
+        unmatched = precorrector_optimization.unmatched_exclusions(
+            corrector_modified_names
+        )
+        if unmatched:
+            logging.warning(
+                "Pre-corrector optimization exclusion entries %s did not match "
+                "any corrector-modified variable (modified variables: %s); these "
+                "entries have no effect.",
+                unmatched,
+                sorted(corrector_modified_names),
+            )
+
     def _accumulate_loss(
         self,
         data: BatchData,
@@ -1642,6 +1803,7 @@ class TrainStepper(
             optimization,
             labels=input_ensemble_data.labels,
             data_mask=input_ensemble_data.data_mask,
+            detach_uncorrected=self._config.precorrector_optimization is None,
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)
@@ -1656,9 +1818,27 @@ class TrainStepper(
                 contextlib.nullcontext() if optimize_step else torch.no_grad()
             )
             with grad_context:
-                gen_step = next(output_iterator)
-                gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
+                step_output = next(output_iterator)
+                gen_step = unfold_ensemble_dim(
+                    step_output.output, n_ensemble=n_ensemble
+                )
                 output_list.append(gen_step)
+                precorrector_optimization = self._config.precorrector_optimization
+                if precorrector_optimization is not None and step_output.uncorrected:
+                    self._validate_precorrector_exclusions(
+                        precorrector_optimization, step_output.uncorrected.keys()
+                    )
+                    loss_gen = unfold_ensemble_dim(
+                        {
+                            **step_output.output,
+                            **precorrector_optimization.select_precorrected(
+                                step_output.uncorrected
+                            ),
+                        },
+                        n_ensemble=n_ensemble,
+                    )
+                else:
+                    loss_gen = gen_step
                 target_step = add_ensemble_dim(
                     {
                         k: v.select(self.TIME_DIM, step)
@@ -1666,7 +1846,7 @@ class TrainStepper(
                     }
                 )
                 step_total_loss = self._accumulate_step_loss(
-                    gen_step=gen_step,
+                    gen_step=loss_gen,
                     target_step=target_step,
                     step=step,
                     data_mask=input_batch_data.data_mask,

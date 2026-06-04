@@ -24,7 +24,7 @@ from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.single_module import step_with_adjustments
-from fme.core.step.step import StepABC, StepConfigABC, StepSelector
+from fme.core.step.step import StepABC, StepConfigABC, StepOutput, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
@@ -439,7 +439,7 @@ class FCN3Step(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
+    ) -> StepOutput:
         """
         Step the model forward one timestep given input data.
 
@@ -448,7 +448,8 @@ class FCN3Step(StepABC):
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
-            The denormalized output data at the next time step.
+            The output at the next timestep and the pre-correction values of any
+            corrector-modified variables.
         """
         if args.labels is not None:
             raise ValueError("Labels are not supported for FCN3")

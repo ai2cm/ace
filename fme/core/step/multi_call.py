@@ -11,7 +11,7 @@ from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
 from fme.core.step._multi_call import MultiCall, MultiCallConfig, StepMethod
 from fme.core.step.args import StepArgs
-from fme.core.step.step import StepABC, StepConfigABC, StepSelector
+from fme.core.step.step import StepABC, StepConfigABC, StepOutput, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -292,15 +292,18 @@ class MultiCallStep(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[torch.nn.Module], torch.nn.Module] = lambda x: x,
-    ) -> TensorDict:
-        state = self._wrapped_step.step(
+    ) -> StepOutput:
+        wrapped = self._wrapped_step.step(
             args=args,
             wrapper=wrapper,
         )
+        output = wrapped.output
         if self._multi_call is not None:
+            # Multi-call produces only diagnostic outputs (not corrected), so the
+            # uncorrected prediction comes entirely from the wrapped step.
             multi_called_outputs = self._multi_call.step(args=args, wrapper=wrapper)
-            state = {**multi_called_outputs, **state}
-        return state
+            output = {**multi_called_outputs, **output}
+        return StepOutput(output=output, uncorrected=wrapped.uncorrected)
 
     def get_state(self) -> dict[str, Any]:
         """
