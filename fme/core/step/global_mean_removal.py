@@ -56,6 +56,15 @@ class GlobalMeanRemoval(abc.ABC):
     def n_extra_input_channels(self) -> int:
         """Number of extra channels appended to the network input."""
 
+    @property
+    @abc.abstractmethod
+    def extra_channel_names(self) -> list[str]:
+        """Ordered field names for each extra input channel.
+
+        Empty when ``n_extra_input_channels == 0``. The i-th name
+        corresponds to the i-th channel returned by ``get_extra_channels``.
+        """
+
     @abc.abstractmethod
     def forward_transform(
         self,
@@ -87,6 +96,10 @@ class NoGlobalMeanRemoval(GlobalMeanRemoval):
     @property
     def n_extra_input_channels(self) -> int:
         return 0
+
+    @property
+    def extra_channel_names(self) -> list[str]:
+        return []
 
     def forward_transform(
         self,
@@ -133,6 +146,10 @@ class SharedGlobalMeanRemoval(GlobalMeanRemoval):
     def n_extra_input_channels(self) -> int:
         return 1 if self._append_as_input else 0
 
+    @property
+    def extra_channel_names(self) -> list[str]:
+        return [self._reference_field] if self._append_as_input else []
+
     def forward_transform(
         self,
         input: TensorMapping,
@@ -143,13 +160,14 @@ class SharedGlobalMeanRemoval(GlobalMeanRemoval):
             raise ValueError(
                 f"Reference field '{ref_name}' is not present in the input."
             )
+        ref = input[ref_name]
         if data_mask is not None and ref_name in data_mask:
-            if not data_mask[ref_name].all():
+            ref_mask = data_mask[ref_name].to(device=ref.device, dtype=torch.bool)
+            if not ref_mask.all():
                 raise ValueError(
                     f"Reference field '{ref_name}' is masked for some samples, "
                     "which is not supported for shared global mean removal."
                 )
-        ref = input[ref_name]
         sample_mean = ref.mean(dim=tuple(range(1, ref.ndim)))
         offset = self._reference_mean - sample_mean
         self._cached_offset = offset
@@ -220,6 +238,10 @@ class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
     def n_extra_input_channels(self) -> int:
         return len(self._field_names) if self._append_as_input else 0
 
+    @property
+    def extra_channel_names(self) -> list[str]:
+        return list(self._field_names) if self._append_as_input else []
+
     def forward_transform(
         self,
         input: TensorMapping,
@@ -238,7 +260,7 @@ class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
             sample_mean = t.mean(dim=tuple(range(1, t.ndim)))
             shift = self._means[name] - sample_mean
             if data_mask is not None and name in data_mask:
-                mask = data_mask[name]
+                mask = data_mask[name].to(device=shift.device, dtype=torch.bool)
                 shift = torch.where(mask, shift, torch.zeros_like(shift))
             shifts[name] = shift
             broadcast = shift.view(shift.shape[0], *(1,) * (t.ndim - 1))
@@ -313,6 +335,9 @@ class SharedGlobalMeanRemovalConfig:
     )
     append_as_input: bool = False
 
+    def get_n_extra_input_channels(self, in_names: list[str]) -> int:
+        return 1 if self.append_as_input else 0
+
     def validate_names(self, in_names: list[str], out_names: list[str]) -> None:
         if self.reference_field not in in_names:
             raise ValueError(
@@ -371,6 +396,9 @@ class PerChannelGlobalMeanRemovalConfig:
 
     def _resolve_names(self, in_names: list[str]) -> list[str]:
         return self.field_names if self.field_names is not None else list(in_names)
+
+    def get_n_extra_input_channels(self, in_names: list[str]) -> int:
+        return len(self._resolve_names(in_names)) if self.append_as_input else 0
 
     def validate_names(self, in_names: list[str], out_names: list[str]) -> None:
         if self.field_names is not None:

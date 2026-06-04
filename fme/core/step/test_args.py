@@ -36,7 +36,12 @@ def test_apply_input_process_func_propagates_metadata():
     for name in data_mask:
         torch.testing.assert_close(result.data_mask[name], data_mask[name])
 
-    known_attrs = {"input", "next_step_input_data", "labels", "data_mask"}
+    known_attrs = {
+        "input",
+        "next_step_input_data",
+        "labels",
+        "data_mask",
+    }
     actual_attrs = {
         name
         for name in vars(result)

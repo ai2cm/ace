@@ -7,6 +7,7 @@ import torch
 from fme.core.device import move_tensordict_to_device
 from fme.core.step.global_mean_removal import (
     GlobalMeanRemovalConfigUnion,
+    NoGlobalMeanRemoval,
     PerChannelGlobalMeanRemovalConfig,
     SharedGlobalMeanRemovalConfig,
 )
@@ -105,6 +106,7 @@ def test_shared_no_extra_channels():
     stds = {"surface_temperature": 1.0}
     transform = _make_shared(means, stds)
     assert transform.n_extra_input_channels == 0
+    assert transform.extra_channel_names == []
     tensors = move_tensordict_to_device(
         {"surface_temperature": torch.full((2, 4, 4), 285.0)}
     )
@@ -117,6 +119,7 @@ def test_shared_extra_channels():
     stds = {"surface_temperature": 5.0}
     transform = _make_shared(means, stds, append_as_input=True)
     assert transform.n_extra_input_channels == 1
+    assert transform.extra_channel_names == ["surface_temperature"]
     tensors = move_tensordict_to_device(
         {"surface_temperature": torch.full((2, 4, 4), 285.0)}
     )
@@ -223,6 +226,7 @@ def test_per_channel_no_extra_channels():
     stds = {"a": 1.0}
     transform = _make_per_channel(means, stds)
     assert transform.n_extra_input_channels == 0
+    assert transform.extra_channel_names == []
     tensors = move_tensordict_to_device({"a": torch.full((2, 4, 4), 5.0)})
     transform.forward_transform(tensors, None)
     assert transform.get_extra_channels() is None
@@ -233,6 +237,7 @@ def test_per_channel_extra_channels():
     stds = {"a": 2.0, "b": 5.0}
     transform = _make_per_channel(means, stds, append_as_input=True)
     assert transform.n_extra_input_channels == 2
+    assert transform.extra_channel_names == ["a", "b"]
     tensors = move_tensordict_to_device(
         {
             "a": torch.full((1, 4, 4), 14.0),  # mean=14
@@ -376,16 +381,13 @@ def test_per_channel_config_raises_on_output_only_field():
 
 
 def test_per_channel_config_none_field_names_means_all():
-    means = {"a": 0.0, "b": 0.0}
-    stds = {"a": 1.0, "b": 1.0}
-    normalizer = _build_normalizer_for(means, stds)
     config = PerChannelGlobalMeanRemovalConfig(field_names=None)
     config.validate_names(["a", "b"], ["a", "b"])
-    assert config.build(normalizer, ["a", "b"]).n_extra_input_channels == 0
+    assert config.get_n_extra_input_channels(["a", "b"]) == 0
     config_with_input = PerChannelGlobalMeanRemovalConfig(
         field_names=None, append_as_input=True
     )
-    assert config_with_input.build(normalizer, ["a", "b"]).n_extra_input_channels == 2
+    assert config_with_input.get_n_extra_input_channels(["a", "b"]) == 2
 
 
 # ── Dacite union serialization ──────────────────────────────────────────
@@ -445,3 +447,9 @@ def test_union_resolved_by_kind_via_dacite():
     none_data: dict = {}
     result3 = dacite.from_dict(Container, none_data, dacite.Config(strict=True))
     assert result3.removal is None
+
+
+def test_no_global_mean_removal_extra_channel_names():
+    transform = NoGlobalMeanRemoval()
+    assert transform.n_extra_input_channels == 0
+    assert transform.extra_channel_names == []

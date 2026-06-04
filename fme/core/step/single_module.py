@@ -25,6 +25,7 @@ from fme.core.step.global_mean_removal import (
     GlobalMeanRemoval,
     GlobalMeanRemovalConfigUnion,
     NoGlobalMeanRemoval,
+    SharedGlobalMeanRemovalConfig,
 )
 from fme.core.step.secondary_decoder import (
     NoSecondaryDecoder,
@@ -33,6 +34,7 @@ from fme.core.step.secondary_decoder import (
 )
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.var_masking import VariableMaskingConfig
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
@@ -63,6 +65,10 @@ class SingleModuleStepConfig(StepConfigABC):
             ``len(in_names)`` additional float channels (1.0 = present, 0.0 =
             masked) after the regular input channels, doubling the total input
             channel count.
+        input_dropout: Optional dropout config for randomly zeroing input channels
+            during training. Each forward call independently samples a per-sample
+            mask. Variables that must never be masked (e.g. SST for a slab ocean)
+            should be given a per_variable rate of 0.0 in the config.
         global_mean_removal: Optional configuration for removing global means
             from fields before normalization and restoring them after
             denormalization. Supports shared (single reference field) or
@@ -82,12 +88,23 @@ class SingleModuleStepConfig(StepConfigABC):
     prescribed_prognostic_names: list[str] = dataclasses.field(default_factory=list)
     residual_prediction: bool = False
     include_channel_mask_inputs: bool = False
+    input_dropout: VariableMaskingConfig | None = None
     global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
         if self.global_mean_removal is not None:
             self.global_mean_removal.validate_names(self.in_names, self.out_names)
+        if self.input_dropout is not None:
+            self.input_dropout.validate_variable_names(self.in_names)
+            if isinstance(self.global_mean_removal, SharedGlobalMeanRemovalConfig):
+                reference_field = self.global_mean_removal.reference_field
+                if self.input_dropout.can_mask(reference_field, self.in_names):
+                    raise ValueError(
+                        "input_dropout must not mask shared global_mean_removal "
+                        f"reference_field '{reference_field}'. Set its per_variable "
+                        "rate to 0.0 or list it in uniform.ignore_vars."
+                    )
         for name in self.prescribed_prognostic_names:
             if name not in self.out_names:
                 raise ValueError(
@@ -381,14 +398,23 @@ class SingleModuleStep(StepABC):
         Returns:
             The denormalized output data at the next time step.
         """
+        effective_mask = _build_effective_input_mask(
+            data_mask=args.data_mask,
+            input_dropout=self._config.input_dropout,
+            training=self.module.torch_module.training,
+            in_names=self.in_names,
+            input_data=args.input,
+        )
 
         def network_call(input_norm: TensorDict) -> TensorDict:
-            if args.data_mask is not None:
-                input_norm = _apply_input_mask(input_norm, args.data_mask)
+            if effective_mask:
+                input_norm = _apply_input_mask(input_norm, effective_mask)
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
             if self._config.include_channel_mask_inputs:
                 mask_dict = _build_channel_mask_dict(
-                    self.in_names, args.data_mask, input_tensor
+                    self.in_names,
+                    effective_mask if effective_mask else None,
+                    input_tensor,
                 )
                 mask_tensor = self.in_packer.pack(mask_dict, axis=self.CHANNEL_DIM)
                 input_tensor = torch.cat(
@@ -396,6 +422,12 @@ class SingleModuleStep(StepABC):
                 )
             extra = self._global_mean_removal.get_extra_channels()
             if extra is not None:
+                if effective_mask:
+                    extra = _apply_extra_channel_mask(
+                        extra,
+                        self._global_mean_removal.extra_channel_names,
+                        effective_mask,
+                    )
                 input_tensor = torch.cat([input_tensor, extra], dim=self.CHANNEL_DIM)
             output_tensor = self.module.wrap_module(wrapper)(
                 input_tensor,
@@ -419,7 +451,7 @@ class SingleModuleStep(StepABC):
             prognostic_names=self.prognostic_names,
             prescribed_prognostic_names=self._config.prescribed_prognostic_names,
             global_mean_removal=self._global_mean_removal,
-            data_mask=args.data_mask,
+            data_mask=effective_mask if effective_mask else None,
         )
 
     def get_regularizer_loss(self):
@@ -452,6 +484,33 @@ class SingleModuleStep(StepABC):
             self.secondary_decoder.load_module_state(state["secondary_decoder"])
 
 
+def _build_effective_input_mask(
+    data_mask: TensorMapping | None,
+    input_dropout: VariableMaskingConfig | None,
+    training: bool,
+    in_names: list[str],
+    input_data: TensorMapping,
+) -> dict[str, torch.Tensor]:
+    """Merge data-provided masks with training-time input dropout masks."""
+    result = dict(data_mask) if data_mask is not None else {}
+    if input_dropout is None or not training:
+        return result
+
+    try:
+        ref = next(iter(input_data.values()))
+    except StopIteration as err:
+        raise ValueError("input_dropout requires at least one input tensor.") from err
+
+    dropout_masks = input_dropout.sample_masks(in_names, ref.shape[0], ref.device)
+    for name, mask in dropout_masks.items():
+        mask = mask.to(dtype=torch.bool)
+        if name in result:
+            result[name] = result[name].to(device=mask.device, dtype=torch.bool) & mask
+        else:
+            result[name] = mask
+    return result
+
+
 def _apply_input_mask(input_norm: TensorDict, data_mask: TensorMapping) -> TensorDict:
     """Zero out masked input variables in normalized space.
 
@@ -462,10 +521,43 @@ def _apply_input_mask(input_norm: TensorDict, data_mask: TensorMapping) -> Tenso
     result = dict(input_norm)
     for name, mask in data_mask.items():
         if name in result:
+            mask = mask.to(device=result[name].device, dtype=torch.bool)
             # mask shape: [batch], data shape: [batch, ...spatial...]
             broadcast_mask = mask.view(mask.shape[0], *([1] * (result[name].ndim - 1)))
             result[name] = torch.where(broadcast_mask, result[name], 0.0)
     return result
+
+
+def _apply_extra_channel_mask(
+    extra: torch.Tensor,
+    extra_channel_names: list[str],
+    data_mask: "TensorMapping",
+) -> torch.Tensor:
+    """Zero extra channels whose corresponding field is masked.
+
+    Args:
+        extra: ``[batch, n_extra, *spatial]`` extra channel tensor.
+        extra_channel_names: Field name for each channel (same order).
+        data_mask: Per-variable boolean masks of shape ``[batch]``.
+
+    Returns:
+        The (possibly cloned and modified) extra tensor.
+    """
+    needs_clone = any(n in data_mask for n in extra_channel_names)
+    if not needs_clone:
+        return extra
+    extra = extra.clone()
+    for i, name in enumerate(extra_channel_names):
+        if name in data_mask:
+            present = (
+                data_mask[name]
+                .to(device=extra.device, dtype=torch.bool)
+                .view(-1, *([1] * (extra.ndim - 1)))
+            )
+            extra[:, i : i + 1] = torch.where(
+                present, extra[:, i : i + 1], torch.zeros_like(extra[:, i : i + 1])
+            )
+    return extra
 
 
 def _build_channel_mask_dict(

@@ -124,6 +124,7 @@ from fme.core.step import (
 )
 from fme.core.step.multi_call import MultiCallConfig
 from fme.core.typing_ import Slice
+from fme.core.var_masking import UniformMaskingConfig, VariableMaskingConfig
 
 from . import step
 from .inference.inference import get_initial_condition
