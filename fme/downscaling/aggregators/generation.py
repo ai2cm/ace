@@ -82,7 +82,7 @@ def _get_complement_percentile_prefix(prefix):
     return prefix[:num_start] + complement_str + prefix[num_end:]
 
 
-def _get_channel_mean_scalar_metric(metrics, prefix="relative_crps_bicubic"):
+def _get_channel_mean_scalar_metric(metrics, prefix="metrics/relative_crps_bicubic"):
     # This ensures that left tailed extreme values are also considered
     # in checkpoint selection if 99.x percentile is used as metric
     prefixes = [prefix]
