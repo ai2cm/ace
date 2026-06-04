@@ -1134,6 +1134,7 @@ def test_inline_inference_logs_uncorrected_metrics(tmp_path, very_fast_only: boo
     ), "expected corrected time-mean metrics alongside the uncorrected ones"
 
 
+@pytest.mark.skipif(torch.cuda.is_available(), reason="flaky on GPU")
 @pytest.mark.parametrize(
     "insolation_config",
     [

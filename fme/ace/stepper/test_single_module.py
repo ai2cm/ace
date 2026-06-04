@@ -29,10 +29,10 @@ from fme.ace.inference.test_evaluator import (
 from fme.ace.registry.sfno import SphericalFourierNeuralOperatorBuilder
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig, ForcingDeriver
 from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
+from fme.ace.stepper.loss_schedule import EpochNotProvidedError
 from fme.ace.stepper.single_module import (
     AtmosphereCorrectorConfig,
     CheckpointStepperConfig,
-    EpochNotProvidedError,
     SingleModuleStepperConfig,
     Stepper,
     StepperConfig,
@@ -156,17 +156,17 @@ def get_scalar_data(names, value):
 
 def test_stepper_no_train_step_specified():
     stepper = _init_train_stepper(loss=StepLossConfig(type="MSE"))
-    stepper._init_for_epoch(0)
-    assert stepper._n_forward_steps_sampler is None
-    assert stepper._eval_n_forward_steps_sampler is None
+    schedule = stepper._loss_schedule
+    schedule.init_for_epoch(0)
+    assert not schedule.has_sampler
 
 
 def test_stepper_step_int():
     stepper = _init_train_stepper(n_forward_steps=2, loss=StepLossConfig(type="MSE"))
-    assert stepper._n_forward_steps_schedule is not None
-    stepper._init_for_epoch(0)
-    assert stepper._n_forward_steps_sampler is not None
-    assert stepper._eval_n_forward_steps_sampler is not None
+    schedule = stepper._loss_schedule
+    assert schedule._schedule is not None
+    schedule.init_for_epoch(0)
+    assert schedule.has_sampler
 
 
 def test_stepper_step_probabilities():
@@ -179,10 +179,10 @@ def test_stepper_step_probabilities():
         ),
         loss=StepLossConfig(type="MSE"),
     )
-    assert stepper._n_forward_steps_schedule is not None
-    stepper._init_for_epoch(0)
-    assert stepper._n_forward_steps_sampler is not None
-    assert stepper._eval_n_forward_steps_sampler is not None
+    schedule = stepper._loss_schedule
+    assert schedule._schedule is not None
+    schedule.init_for_epoch(0)
+    assert schedule.has_sampler
 
 
 def test_stepper_step_schedule():
@@ -203,9 +203,10 @@ def test_stepper_step_schedule():
         ),
         loss=StepLossConfig(type="MSE"),
     )
-    assert stepper._n_forward_steps_schedule is not None
-    stepper._init_for_epoch(0)
-    assert stepper._n_forward_steps_sampler is not None
+    schedule = stepper._loss_schedule
+    assert schedule._schedule is not None
+    schedule.init_for_epoch(0)
+    assert schedule.has_sampler
 
 
 def test_seed_eval_does_not_corrupt_training_sampler():
@@ -218,19 +219,18 @@ def test_seed_eval_does_not_corrupt_training_sampler():
         ),
         loss=StepLossConfig(type="MSE"),
     )
-    stepper._init_for_epoch(0)
-    assert stepper._n_forward_steps_sampler is not None
-    assert stepper._eval_n_forward_steps_sampler is not None
-    stepper._n_forward_steps_sampler.seed_rng(42)
-    train_samples_before = [
-        stepper._n_forward_steps_sampler.sample() for _ in range(20)
-    ]
+    schedule = stepper._loss_schedule
+    schedule.init_for_epoch(0)
+    assert schedule._train_sampler is not None
+    assert schedule._eval_sampler is not None
+    schedule._train_sampler.seed_rng(42)
+    train_samples_before = [schedule._train_sampler.sample() for _ in range(20)]
     stepper.set_eval()
     stepper.seed_eval(seed=0)
-    [stepper._eval_n_forward_steps_sampler.sample() for _ in range(10)]
+    [schedule._eval_sampler.sample() for _ in range(10)]
     stepper.set_train()
-    stepper._n_forward_steps_sampler.seed_rng(42)
-    train_samples_after = [stepper._n_forward_steps_sampler.sample() for _ in range(20)]
+    schedule._train_sampler.seed_rng(42)
+    train_samples_after = [schedule._train_sampler.sample() for _ in range(20)]
     assert train_samples_before == train_samples_after
 
 
