@@ -61,7 +61,7 @@ run_training "ace-train-config-1-step-pretrain.yaml" "$base_name-era5-energy-cor
 # For the finetuning stage take beaker dataset id from the above job and add it to
 # ace-train-config-multi-step-finetuning.yaml then uncomment next line
 
-# run_training "ace-train-config-multi-step-finetuning.yaml" "$base_name-era5-multi-step-fine-tuning-rs0"
+run_training "ace-train-config-multi-step-finetuning.yaml" "$base_name-era5-energy-corrector-multi-step-fine-tuning-rs0"
 
 # deterministic versions
 
