@@ -1741,14 +1741,19 @@ class TrainStepper(
                     )
                     metrics[f"corrector_regularization_step_{step}"] = reg_loss.detach()
             if optimize_step:
-                optimization.accumulate_loss(step_total_loss)
                 if reg_loss is not None:
-                    optimization.accumulate_loss(reg_loss)
+                    # Combine before accumulate: step_total_loss and reg_loss
+                    # share the same forward graph. With gradient accumulation,
+                    # accumulate_loss backward()s immediately, so two separate
+                    # calls would backward the freed graph twice.
+                    optimization.accumulate_loss(step_total_loss + reg_loss)
                     if reg_loss_sum is None:
                         reg_loss_sum = reg_loss.detach()
                     else:
                         reg_loss_sum = reg_loss_sum + reg_loss.detach()
                     reg_loss_count += 1
+                else:
+                    optimization.accumulate_loss(step_total_loss)
         if reg_loss_sum is not None and reg_loss_count > 0:
             metrics["corrector_regularization"] = reg_loss_sum / reg_loss_count
         return output_list, _finalize_per_channel_losses(weighted_sums, total_counts)
