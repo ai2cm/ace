@@ -1,5 +1,5 @@
 version: "2026-06-02"
-family_name: E3SMv3-piControl-100yr-coupled
+family_name: E3SMv3-piControl-105yr-coupled
 output_directory: /pscratch/sd/e/elynnwu/fme-dataset
 
 coupled_datasets:
