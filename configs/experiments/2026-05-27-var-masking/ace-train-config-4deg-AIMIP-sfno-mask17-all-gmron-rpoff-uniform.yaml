@@ -258,7 +258,7 @@ logging:
   project: ace
   entity: ai2cm
 train_loader:
-  batch_size: 16
+  batch_size: 8
   num_data_workers: 4
   prefetch_factor: 4
   time_buffer: 8
@@ -499,6 +499,7 @@ stepper:
         kind: shared
         append_as_input: true
       input_dropout:
-        min_vars: min
-        max_vars: 17
+        uniform:
+          min_vars: min
+          max_vars: 17
       include_channel_mask_inputs: true

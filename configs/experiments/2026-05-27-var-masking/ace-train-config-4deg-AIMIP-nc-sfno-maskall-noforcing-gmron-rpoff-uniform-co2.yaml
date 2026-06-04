@@ -405,6 +405,7 @@ stepper:
         - USWRFtoa
       next_step_forcing_names:
       - DSWRFtoa
+      - global_mean_co2
       in_names:
       - land_fraction
       - ocean_fraction
@@ -449,6 +450,7 @@ stepper:
       - northward_wind_5
       - northward_wind_6
       - northward_wind_7
+      - global_mean_co2
       out_names:
       - PRESsfc
       - surface_temperature
@@ -504,6 +506,13 @@ stepper:
         kind: shared
         append_as_input: true
       input_dropout:
-        per_variable:
-          default_rate: 0.0
+        uniform:
+          min_vars: min
+          max_vars: max
+          ignore_vars:
+          - land_fraction
+          - ocean_fraction
+          - sea_ice_fraction
+          - DSWRFtoa
+          - HGTsfc
       include_channel_mask_inputs: true

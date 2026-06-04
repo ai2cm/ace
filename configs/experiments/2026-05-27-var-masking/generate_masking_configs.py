@@ -4,11 +4,13 @@ Produces configs for two masking schemes:
 
 Bernoulli (suffix -bernoulli):
   One config per (mask_rate, masking_type, gmr, rp):
-  - mask_rates: 0.0, 0.2  (applied as input_dropout.default_rate)
+  - mask_rates: 0.0, 0.2, 0.4
+    (applied as input_dropout.per_variable.default_rate)
   - masking_types:
-      all      - all variables share default_rate
+      all      - all variables share per_variable.default_rate
       noforcing - forcing/static variables (land_fraction, ocean_fraction,
-                 sea_ice_fraction, DSWRFtoa, HGTsfc) are excluded (rate=0.0)
+                 sea_ice_fraction, DSWRFtoa, HGTsfc) are explicitly
+                 handled with rate=0.0
   - gmr: gmron (global mean removal enabled) / gmroff (disabled)
   - rp:  rpon  (residual_prediction=true)   / rpoff (residual_prediction=false)
 
@@ -17,7 +19,7 @@ Jeremy/uniform (suffix -uniform):
   - max_vars: "all" (0 to all eligible) or an integer k (0 to k)
   - masking_types:
       all      - all variables are eligible for masking
-      noforcing - forcing/static variables are excluded via ignore_vars
+      noforcing - forcing/static variables are excluded via uniform.ignore_vars
   - gmr / rp: same as above
   File names use mask{k} where k is "all" or the integer (e.g. mask10).
 """
@@ -52,22 +54,22 @@ BASE_CONFIG_STEMS = [
 
 
 def build_bernoulli_input_dropout(mask_rate: float, exclude_forcing: bool) -> dict:
-    cfg: dict = {"default_rate": mask_rate}
+    per_variable: dict[str, float] = {"default_rate": mask_rate}
     if exclude_forcing:
-        cfg["rates"] = {v: 0.0 for v in FORCING_VARS}
-    return cfg
+        per_variable.update({v: 0.0 for v in FORCING_VARS})
+    return {"per_variable": per_variable}
 
 
 def build_uniform_input_dropout(
     exclude_forcing: bool, max_vars: int | str = "all"
 ) -> dict:
-    cfg: dict = {
+    uniform: dict = {
         "min_vars": "min",
         "max_vars": "max" if max_vars == "all" else max_vars,
     }
     if exclude_forcing:
-        cfg["ignore_vars"] = list(FORCING_VARS)
-    return cfg
+        uniform["ignore_vars"] = list(FORCING_VARS)
+    return {"uniform": uniform}
 
 
 def _apply_common_settings(
@@ -142,6 +144,24 @@ def generate_uniform_configs(base: dict, stem: str) -> None:
                     print(f"Wrote {out_path.name}")
 
 
+def generate_co2_variants(base: dict, stem: str) -> None:
+    """Generate -co2 configs for maskall-noforcing-gmron-rpoff-uniform only."""
+    cfg = copy.deepcopy(base)
+    name = f"{stem}-maskall-noforcing-gmron-rpoff-uniform"
+    source_path = HERE / f"{name}.yaml"
+    with source_path.open() as f:
+        cfg = yaml.safe_load(f)
+    step_cfg = cfg["stepper"]["step"]["config"]
+    step_cfg["next_step_forcing_names"] = list(step_cfg["next_step_forcing_names"]) + [
+        "global_mean_co2"
+    ]
+    step_cfg["in_names"] = list(step_cfg["in_names"]) + ["global_mean_co2"]
+    out_path = HERE / f"{name}-co2.yaml"
+    with out_path.open("w") as f:
+        yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)
+    print(f"Wrote {out_path.name}")
+
+
 def main():
     for stem in BASE_CONFIG_STEMS:
         base_config = HERE / f"{stem}.yaml"
@@ -149,6 +169,7 @@ def main():
             base = yaml.safe_load(f)
         generate_bernoulli_configs(base, stem)
         generate_uniform_configs(base, stem)
+        generate_co2_variants(base, stem)
 
 
 if __name__ == "__main__":
