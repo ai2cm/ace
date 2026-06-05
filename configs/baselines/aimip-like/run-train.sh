@@ -49,4 +49,7 @@ run_training() {
     -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train "$CONFIG_PATH"
 }
 
-run_training "train-4deg-daily-v1-era5-only.yaml" "train-4deg-daily-v1-era5-only-rs0" 1
+# run_training "train-4deg-daily-v1-era5-only.yaml" "train-4deg-daily-v1-era5-only-rs0" 1
+run_training "train-4deg-daily-v1-labels.yaml" "train-4deg-daily-v1-labels-rs0" 1
+run_training "train-4deg-daily-v1-era5-only-residual.yaml" "train-4deg-daily-v1-era5-only-residual-rs0" 1
+run_training "train-4deg-daily-v1-era5-only-lr-tuning.yaml" "train-4deg-daily-v1-era5-only-lr-tuning-rs0" 1
