@@ -157,6 +157,7 @@ def get_noise_conditioned_sfno_module() -> tuple[ModuleSelector, Module]:
             "affine_norms": True,
             "spectral_transform": "sht",
             "label_embed_dim": 3,
+            "clip_latent_global_means": True,
         },
     )
     module = selector.build(
