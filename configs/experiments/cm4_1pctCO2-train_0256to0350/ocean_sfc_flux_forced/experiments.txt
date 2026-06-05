@@ -1,2 +1,4 @@
 
 1pct_nosmooth_0256to0350-net_sfc_flux_forced|rs0|01KTCNG9HP7GF861EV4FCRYVJZ|training|best_inference_ckpt|normal|--min-runtime 8h
+
+1pct_nosmooth_0256to0350-optPre_excl_seaice-net_sfc_flux_forced|rs0|01KTCNGPCF3BXKPN1JR0SXZ2YS|training|best_inference_ckpt|normal|--min-runtime 8h
