@@ -6,3 +6,5 @@ BK-v20260602-ACE2S-E3SMv3-piControl-100yr-n512-bs8-pretrain|rs1|01KT8HJ963CECCDG
 BK-v20260602-ACE2S-E3SMv3-piControl-105yr-n384-bs8-pretrain|rs0|01KTAD6G6E0FNR6VM4E9M54YQV|training|best_inference_ckpt|normal|--min-runtime 8h
 
 BK-v20260602-ACE2S-E3SMv3-piControl-100yr-n512-bs8-equal-loss-pretrain|rs0|01KTCEC1HFQJMCF02Q58WVDXH8|training|best_inference_ckpt|normal|--min-runtime 8h
+
+BK-v20260602-ACE2S-E3SMv3-piControl-100yr-n512-bs8-equal-loss-pretrain|rs1|01KTCECA5MPH0BF4H77G5GAJ3Q|training|best_inference_ckpt|normal|--min-runtime 8h
