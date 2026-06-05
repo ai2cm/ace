@@ -19,7 +19,9 @@ loader:
   num_data_workers: 16
 aggregator:
   zonal_mean:
-    enabled: false
+    enabled: true
+  histogram:
+    enabled: true
 data_writer:
   save_prediction_files: false
   save_monthly_files: false
