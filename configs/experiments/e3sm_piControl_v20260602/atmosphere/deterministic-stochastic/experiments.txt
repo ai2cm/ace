@@ -1,1 +1,9 @@
 group|tag|slurm_job_id|status|account|queue|constraint|nodes|gpus_per_node|cpus_per_task|time|override_args
+
+PM-v20260602-ACE2S-E3SMv3-piControl-100yr-n512-bs8-deterministic|rs0|53966195|submitted|e3sm|regular|gpu&hbm80g|2|4|128|23:00:00|seed=0
+
+PM-v20260602-ACE2S-E3SMv3-piControl-100yr-n512-bs8-deterministic|rs1|53966205|submitted|e3sm|regular|gpu&hbm80g|2|4|128|23:00:00|seed=1
+
+PM-v20260602-ACE2S-E3SMv3-piControl-100yr-n384-bs8-deterministic|rs0|53966208|submitted|e3sm|regular|gpu&hbm80g|2|4|128|23:00:00|seed=0 stepper.step.config.builder.config.embed_dim=384
+
+PM-v20260602-ACE2S-E3SMv3-piControl-100yr-n384-bs8-deterministic|rs1|53966211|submitted|e3sm|regular|gpu&hbm80g|2|4|128|23:00:00|seed=1 stepper.step.config.builder.config.embed_dim=384
