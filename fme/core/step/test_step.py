@@ -537,6 +537,7 @@ def test_label_conditioned_step():
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
+            n_ensemble=1,
             labels=BatchLabels.new_from_set(
                 {"a", "b"}, n_samples=1, device=fme.get_device()
             ),
@@ -606,7 +607,10 @@ def test_step_applies_wrapper(config: StepSelector):
     wrapper = unittest.mock.MagicMock(side_effect=lambda x: x)
     step.step(
         args=StepArgs(
-            input=input_data, next_step_input_data=next_step_input_data, labels=None
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            n_ensemble=1,
+            labels=None,
         ),
         wrapper=wrapper,
     )
@@ -753,6 +757,7 @@ def test_step_with_prescribed_prognostic_overwrites_output():
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
+            n_ensemble=1,
             labels=None,
         ),
         wrapper=lambda x: x,
@@ -911,7 +916,10 @@ def test_secondary_module_full_field_and_residual():
     )
     output = step.step(
         args=StepArgs(
-            input=input_data, next_step_input_data=next_step_input_data, labels=None
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            n_ensemble=1,
+            labels=None,
         ),
     )
     assert "prog" in output
@@ -962,7 +970,10 @@ def test_secondary_module_state_round_trip():
         step1.next_step_input_names, img_shape, n_samples=1
     )
     args = StepArgs(
-        input=input_data, next_step_input_data=next_step_input_data, labels=None
+        input=input_data,
+        next_step_input_data=next_step_input_data,
+        n_ensemble=1,
+        labels=None,
     )
     out1 = step1.step(args=args)
     out2 = step2.step(args=args)
@@ -1008,7 +1019,10 @@ def test_secondary_module_residual_on_input_only_with_residual_prediction():
     )
     output = step.step(
         args=StepArgs(
-            input=input_data, next_step_input_data=next_step_input_data, labels=None
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            n_ensemble=1,
+            labels=None,
         ),
     )
     assert output["prog_a"].shape == (2, *img_shape)
@@ -1085,6 +1099,7 @@ def test_step_with_data_mask():
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
+            n_ensemble=1,
             labels=None,
             data_mask=None,
         ),
@@ -1093,6 +1108,7 @@ def test_step_with_data_mask():
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
+            n_ensemble=1,
             labels=None,
             data_mask=data_mask,
         ),
@@ -1179,6 +1195,7 @@ def test_step_with_include_channel_mask_inputs():
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
+            n_ensemble=1,
             labels=None,
             data_mask=None,
         ),
@@ -1187,6 +1204,7 @@ def test_step_with_include_channel_mask_inputs():
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
+            n_ensemble=1,
             labels=None,
             data_mask=data_mask,
         ),
@@ -1231,6 +1249,7 @@ def test_step_with_include_channel_mask_inputs_no_data_mask():
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
+            n_ensemble=1,
             labels=None,
             data_mask=None,
         ),
@@ -1243,6 +1262,7 @@ def test_step_with_include_channel_mask_inputs_no_data_mask():
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
+            n_ensemble=1,
             labels=None,
             data_mask=all_unmasked,
         ),
@@ -1306,6 +1326,7 @@ def test_step_masked_nan_input_is_zeroed_before_network_with_corrector():
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
+            n_ensemble=1,
             data_mask=data_mask,
         ),
     )
@@ -1347,7 +1368,7 @@ def test_input_dropout_applied_in_train_mode_not_eval():
             indicators = inp[:, n_in:]
             # "x" is first in in_names
             self.last_x_indicator = indicators[:, 0].detach().clone()
-            return torch.zeros(n_samples, len(out_names), *img_shape) + self._p
+            return self._p.new_zeros(n_samples, len(out_names), *img_shape)
 
     recorder = RecordMaskModule()
     from fme.core.step.single_module import SingleModuleStep
@@ -1379,13 +1400,25 @@ def test_input_dropout_applied_in_train_mode_not_eval():
 
     # Training mode: dropout fires, indicator for "x" should be 0.0
     step_obj.module.torch_module.train()
-    step_obj.step(StepArgs(input=input_data, next_step_input_data=next_step_input_data))
+    step_obj.step(
+        StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            n_ensemble=1,
+        )
+    )
     assert recorder.last_x_indicator is not None
     assert (recorder.last_x_indicator == 0.0).all(), "Expected x masked in train mode"
 
     # Eval mode: dropout disabled, indicator for "x" should be 1.0
     step_obj.module.torch_module.eval()
-    step_obj.step(StepArgs(input=input_data, next_step_input_data=next_step_input_data))
+    step_obj.step(
+        StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            n_ensemble=1,
+        )
+    )
     assert (recorder.last_x_indicator == 1.0).all(), "Expected x present in eval mode"
 
 
@@ -1459,9 +1492,32 @@ def test_build_effective_input_mask_merges_data_mask_and_dropout():
         training=True,
         in_names=["a"],
         input_data=input_data,
+        n_ensemble=1,
     )
 
     torch.testing.assert_close(result["a"], torch.tensor([False, False, False]))
+    torch.testing.assert_close(result["b"], data_mask["b"])
+
+
+def test_build_effective_input_mask_repeats_dropout_for_ensemble_members():
+    torch.manual_seed(0)
+    n_samples = 4
+    n_ensemble = 3
+    data_mask = {"b": torch.ones(n_samples * n_ensemble, dtype=torch.bool)}
+    input_data = {"a": torch.ones(n_samples * n_ensemble, 1, 1)}
+    result = _build_effective_input_mask(
+        data_mask=data_mask,
+        input_dropout=VariableMaskingConfig(per_variable={"a": 0.5}),
+        training=True,
+        in_names=["a"],
+        input_data=input_data,
+        n_ensemble=n_ensemble,
+    )
+
+    grouped = result["a"].view(n_samples, n_ensemble)
+    assert (grouped == grouped[:, :1]).all()
+    assert grouped[:, 0].any()
+    assert (~grouped[:, 0]).any()
     torch.testing.assert_close(result["b"], data_mask["b"])
 
 
@@ -1576,7 +1632,12 @@ def test_step_shared_global_mean_removal():
         step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
     output = step.step(
-        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step,
+            n_ensemble=1,
+            labels=None,
+        ),
     )
     for name in out_names:
         assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
@@ -1601,7 +1662,12 @@ def test_step_shared_global_mean_removal_with_extra_channels():
         step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
     output = step.step(
-        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step,
+            n_ensemble=1,
+            labels=None,
+        ),
     )
     for name in out_names:
         assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
@@ -1616,7 +1682,12 @@ def test_step_per_channel_global_mean_removal():
         step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
     output = step.step(
-        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step,
+            n_ensemble=1,
+            labels=None,
+        ),
     )
     for name in step.output_names:
         assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
@@ -1636,7 +1707,12 @@ def test_step_per_channel_global_mean_removal_with_extra_channels():
         step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
     output = step.step(
-        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step,
+            n_ensemble=1,
+            labels=None,
+        ),
     )
     for name in step.output_names:
         assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
@@ -1663,10 +1739,20 @@ def _assert_global_mean_removal_affects_output(removal, in_names, out_names, mea
         step_baseline.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
     baseline_output = step_baseline.step(
-        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step,
+            n_ensemble=1,
+            labels=None,
+        ),
     )
     removal_output = step_with_removal.step(
-        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step,
+            n_ensemble=1,
+            labels=None,
+        ),
     )
     differs = any(
         not torch.allclose(baseline_output[name], removal_output[name])
@@ -1739,6 +1825,7 @@ def test_step_shared_global_mean_removal_raises_on_masked_reference():
             args=StepArgs(
                 input=input_data,
                 next_step_input_data=next_step,
+                n_ensemble=1,
                 labels=None,
                 data_mask=data_mask,
             ),
@@ -1752,6 +1839,7 @@ def test_dropout_masks_extra_channels():
     out_names = ["a"]
     img_shape = (4, 8)
     n_samples = 2
+    device = fme.get_device()
     means = {n: 10.0 for n in in_names + out_names}
     stds = {n: 1.0 for n in in_names + out_names}
 
@@ -1769,7 +1857,7 @@ def test_dropout_masks_extra_channels():
         def forward(self, inp):
             # extra channels are the last 2 (one per field in per-channel removal)
             self.last_extra = inp[:, -2:].detach().clone()
-            return torch.zeros(n_samples, len(out_names), *img_shape) + self._p
+            return self._p.new_zeros(n_samples, len(out_names), *img_shape)
 
     recorder = RecordExtraModule()
     from fme.core.step.single_module import SingleModuleStep
@@ -1787,25 +1875,29 @@ def test_dropout_masks_extra_channels():
     )
     dataset_info = DatasetInfo(
         horizontal_coordinates=LatLonCoordinates(
-            lat=torch.zeros(img_shape[0]),
-            lon=torch.zeros(img_shape[1]),
+            lat=torch.zeros(img_shape[0], device=device),
+            lon=torch.zeros(img_shape[1], device=device),
         ),
         vertical_coordinate=HybridSigmaPressureCoordinate(
-            ak=torch.arange(7), bk=torch.arange(7)
+            ak=torch.arange(7, device=device), bk=torch.arange(7, device=device)
         ),
         timestep=TIMESTEP,
     )
     step_obj = step_config.get_step(dataset_info, init_weights=lambda _: None)
     assert isinstance(step_obj, SingleModuleStep)
 
-    input_data = {n: torch.full((n_samples, *img_shape), 15.0) for n in in_names}
+    input_data = {
+        n: torch.full((n_samples, *img_shape), 15.0, device=device) for n in in_names
+    }
     next_step_data = get_tensor_dict(
         step_obj.next_step_input_names, img_shape, n_samples
     )
 
     # Training: dropout rate=1.0 for "a", so extra channel for "a" must be 0.
     step_obj.module.torch_module.train()
-    step_obj.step(StepArgs(input=input_data, next_step_input_data=next_step_data))
+    step_obj.step(
+        StepArgs(input=input_data, next_step_input_data=next_step_data, n_ensemble=1)
+    )
     assert recorder.last_extra is not None
     # channel 0 = extra for "a" (masked) → must be 0
     assert (recorder.last_extra[:, 0] == 0.0).all(), "extra channel for 'a' not zeroed"
@@ -1816,7 +1908,9 @@ def test_dropout_masks_extra_channels():
 
     # Eval: no dropout, both extra channels should be non-zero.
     step_obj.module.torch_module.eval()
-    step_obj.step(StepArgs(input=input_data, next_step_input_data=next_step_data))
+    step_obj.step(
+        StepArgs(input=input_data, next_step_input_data=next_step_data, n_ensemble=1)
+    )
     assert (
         recorder.last_extra[:, 0] != 0.0
     ).all(), "extra channel for 'a' zeroed in eval"
@@ -1878,7 +1972,7 @@ def test_dropout_mask_applies_to_global_mean_removal_inverse():
 
     step_obj.module.torch_module.train()
     output = step_obj.step(
-        StepArgs(input=input_data, next_step_input_data={}),
+        StepArgs(input=input_data, next_step_input_data={}, n_ensemble=1),
     )
 
     torch.testing.assert_close(

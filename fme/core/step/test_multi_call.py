@@ -57,6 +57,7 @@ def test_multi_call(include_multi_call_in_loss: bool):
             args=StepArgs(
                 input=input,
                 next_step_input_data={},
+                n_ensemble=1,
                 labels=None,
             ),
             wrapper=lambda x: x,
