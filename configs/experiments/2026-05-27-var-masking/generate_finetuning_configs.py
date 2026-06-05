@@ -15,7 +15,7 @@ import yaml
 
 HERE = pathlib.Path(__file__).parent
 WANDB_PROJECT = "VarMasking2"
-DEFAULT_CHECKPOINT_NAME = "best_ckpt.tar"
+DEFAULT_CHECKPOINT_NAME = "training_checkpoints/best_ckpt.tar"
 DEFAULT_EPOCHS = 10
 DEFAULT_LR = 0.0001
 
