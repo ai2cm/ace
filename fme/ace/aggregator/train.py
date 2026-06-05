@@ -10,6 +10,7 @@ from fme.ace.aggregator.loss_metrics import (
     PerChannelLossAggregator,
     PerStepLossAggregator,
 )
+from fme.ace.aggregator.one_step.ensemble import _EnsembleAggregator
 from fme.ace.aggregator.one_step.reduced import MeanAggregator
 from fme.ace.stepper import TrainOutput
 from fme.core.device import get_device
@@ -36,6 +37,7 @@ class TrainAggregatorConfig:
     spherical_power_spectrum: bool = True
     weighted_rmse: bool = True
     per_channel_loss: bool = True
+    ensemble_metrics: bool = False
 
 
 class Aggregator(Protocol):
@@ -106,6 +108,12 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
                 include_bias=False,
                 include_grad_mag_percent_diff=False,
             )
+        self._ensemble_aggregator: _EnsembleAggregator | None = None
+        if config.ensemble_metrics:
+            self._ensemble_aggregator = _EnsembleAggregator(
+                gridded_operations=operations,
+                log_mean_maps=False,
+            )
 
     @torch.no_grad()
     def record_batch(self, batch: TrainOutput):
@@ -120,6 +128,12 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
             and batch.per_channel_losses is not None
         ):
             self._per_channel_losses.record(batch.per_channel_losses)
+
+        if self._ensemble_aggregator is not None:
+            self._ensemble_aggregator.record_batch(
+                target_data=batch.target_data,
+                gen_data=batch.gen_data,
+            )
 
         folded_gen_data, n_ensemble = fold_ensemble_dim(batch.gen_data)
         folded_target_data = fold_sized_ensemble_dim(batch.target_data, n_ensemble)
@@ -142,6 +156,15 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
             for name, aggregator in self._paired_aggregators.items():
                 logs.update(
                     {f"{label}/{k}": v for k, v in aggregator.get_logs(name).items()}
+                )
+            if self._ensemble_aggregator is not None:
+                logs.update(
+                    {
+                        f"{label}/{k}": v
+                        for k, v in self._ensemble_aggregator.get_logs(
+                            "ensemble"
+                        ).items()
+                    }
                 )
         dist = Distributed.get_instance()
         logs[f"{label}/mean/loss"] = float(
