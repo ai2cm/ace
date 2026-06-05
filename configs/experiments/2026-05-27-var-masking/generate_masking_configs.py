@@ -28,9 +28,10 @@ Jeremy/uniform (suffix -uniform):
 
 CO2 variants are generated for every Bernoulli and uniform config:
   - suffix -co2-mask: global_mean_co2 is masked the same way as other variables
-  - suffix -co2-nomask: global_mean_co2 has a per_variable rate of 0.0
+  - suffix -co2-nomask: global_mean_co2 is excluded from input dropout
 """
 
+import argparse
 import copy
 import pathlib
 
@@ -84,17 +85,26 @@ def build_uniform_input_dropout(
 
 def _protect_shared_gmr_reference(input_dropout: dict) -> dict:
     """Prevent input dropout from masking the shared GMR reference field."""
-    if "per_variable" in input_dropout:
-        per_variable = dict(input_dropout["per_variable"])
-        per_variable[SHARED_GMR_REFERENCE_FIELD] = 0.0
-        input_dropout["per_variable"] = per_variable
+    return _exclude_from_input_dropout(input_dropout, SHARED_GMR_REFERENCE_FIELD)
+
+
+def _exclude_from_input_dropout(input_dropout: dict, name: str) -> dict:
+    input_dropout = copy.deepcopy(input_dropout)
     if "uniform" in input_dropout:
         uniform = dict(input_dropout["uniform"])
         ignore_vars = list(uniform.get("ignore_vars", []))
-        if SHARED_GMR_REFERENCE_FIELD not in ignore_vars:
-            ignore_vars.append(SHARED_GMR_REFERENCE_FIELD)
+        if name not in ignore_vars:
+            ignore_vars.append(name)
         uniform["ignore_vars"] = ignore_vars
         input_dropout["uniform"] = uniform
+        per_variable = dict(input_dropout.get("per_variable", {}))
+        if per_variable.get("default_rate", 0.0) > 0.0:
+            per_variable[name] = 0.0
+            input_dropout["per_variable"] = per_variable
+    else:
+        per_variable = dict(input_dropout.get("per_variable", {}))
+        per_variable[name] = 0.0
+        input_dropout["per_variable"] = per_variable
     return input_dropout
 
 
@@ -107,11 +117,7 @@ def _add_co2(step_cfg: dict) -> None:
 
 
 def _unmask_co2(input_dropout: dict) -> dict:
-    input_dropout = copy.deepcopy(input_dropout)
-    per_variable = dict(input_dropout.get("per_variable", {}))
-    per_variable[CO2_FIELD] = 0.0
-    input_dropout["per_variable"] = per_variable
-    return input_dropout
+    return _exclude_from_input_dropout(input_dropout, CO2_FIELD)
 
 
 def _co2_suffix(co2_mode: str | None) -> str:
@@ -145,8 +151,20 @@ def _apply_common_settings(
         step_cfg.pop("global_mean_removal", None)
 
 
+def _write_config(cfg: dict, out_path: pathlib.Path, existing_only: bool) -> None:
+    if existing_only and not out_path.exists():
+        print(f"Skipped {out_path.name}")
+        return
+    with out_path.open("w") as f:
+        yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)
+    print(f"Wrote {out_path.name}")
+
+
 def generate_bernoulli_configs(
-    base: dict, stem: str, co2_mode: str | None = None
+    base: dict,
+    stem: str,
+    co2_mode: str | None = None,
+    existing_only: bool = False,
 ) -> None:
     for mask_rate in MASK_RATES:
         for exclude_forcing in EXCLUDE_FORCING:
@@ -173,13 +191,14 @@ def generate_bernoulli_configs(
                         build_bernoulli_input_dropout(mask_rate, exclude_forcing),
                         co2_mode=co2_mode,
                     )
-                    with out_path.open("w") as f:
-                        yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)
-                    print(f"Wrote {out_path.name}")
+                    _write_config(cfg, out_path, existing_only)
 
 
 def generate_uniform_configs(
-    base: dict, stem: str, co2_mode: str | None = None
+    base: dict,
+    stem: str,
+    co2_mode: str | None = None,
+    existing_only: bool = False,
 ) -> None:
     for exclude_forcing in EXCLUDE_FORCING:
         for max_vars in UNIFORM_MAX_VARS[exclude_forcing]:
@@ -205,26 +224,36 @@ def generate_uniform_configs(
                         build_uniform_input_dropout(exclude_forcing, max_vars),
                         co2_mode=co2_mode,
                     )
-                    with out_path.open("w") as f:
-                        yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)
-                    print(f"Wrote {out_path.name}")
+                    _write_config(cfg, out_path, existing_only)
 
 
-def generate_co2_variants(base: dict, stem: str) -> None:
+def generate_co2_variants(base: dict, stem: str, existing_only: bool = False) -> None:
     """Generate -co2-mask and -co2-nomask configs."""
     for co2_mode in CO2_MODES:
-        generate_bernoulli_configs(base, stem, co2_mode=co2_mode)
-        generate_uniform_configs(base, stem, co2_mode=co2_mode)
+        generate_bernoulli_configs(
+            base, stem, co2_mode=co2_mode, existing_only=existing_only
+        )
+        generate_uniform_configs(
+            base, stem, co2_mode=co2_mode, existing_only=existing_only
+        )
 
 
-def main():
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--existing-only",
+        action="store_true",
+        help="Only rewrite generated YAML files that already exist.",
+    )
+    args = parser.parse_args()
+
     for stem in BASE_CONFIG_STEMS:
         base_config = HERE / f"{stem}.yaml"
         with base_config.open() as f:
             base = yaml.safe_load(f)
-        # generate_bernoulli_configs(base, stem)
-        # generate_uniform_configs(base, stem)
-        generate_co2_variants(base, stem)
+        # generate_bernoulli_configs(base, stem, existing_only=args.existing_only)
+        # generate_uniform_configs(base, stem, existing_only=args.existing_only)
+        generate_co2_variants(base, stem, existing_only=args.existing_only)
 
 
 if __name__ == "__main__":

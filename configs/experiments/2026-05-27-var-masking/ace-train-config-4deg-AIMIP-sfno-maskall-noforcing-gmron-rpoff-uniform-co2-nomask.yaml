@@ -510,8 +510,6 @@ stepper:
           - sea_ice_fraction
           - DSWRFtoa
           - HGTsfc
+          - global_mean_co2
           - surface_temperature
-        per_variable:
-          global_mean_co2: 0.0
-          surface_temperature: 0.0
       include_channel_mask_inputs: true
