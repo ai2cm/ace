@@ -3,6 +3,7 @@ from collections.abc import Callable
 from copy import copy
 from typing import Any, TypeVar
 
+import dacite
 import torch
 from torch import nn
 
@@ -206,6 +207,14 @@ class MultiCallStepConfig(StepConfigABC):
 
     def load(self):
         self.wrapped_step.load()
+
+    @property
+    def allow_missing_variables(self) -> bool:
+        return self.wrapped_step.allow_missing_variables
+
+    @classmethod
+    def from_state(cls, state) -> "MultiCallStepConfig":
+        return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
 
 
 def _extend_normalizer_with_multi_call_outputs(

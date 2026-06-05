@@ -35,6 +35,15 @@ class HistogramMetricConfig:
     strict: bool = True
     percentile_variables: list[str] | None = None
 
+    def __post_init__(self):
+        if self.variables is not None and self.percentile_variables is not None:
+            extra = set(self.percentile_variables) - set(self.variables)
+            if extra:
+                raise ValueError(
+                    f"percentile_variables contains names not in variables: "
+                    f"{sorted(extra)}"
+                )
+
     def get_name(self) -> str:
         return self.name
 
@@ -61,19 +70,9 @@ class HistogramAggregator:
 
     @torch.no_grad()
     def get_logs(self, label: str):
-        logs = self._histograms.get_wandb()
-        if self._percentile_variables is not None:
-            # Percentile keys look like ``target/99.9999th-percentile/<var>``
-            # or ``prediction/99.9999th-percentile/<var>`` — the field name
-            # is always the last "/"-separated segment. Drop those whose
-            # variable isn't in the allowlist; keep all other keys
-            # (histogram-plot figures, etc.) untouched.
-            logs = {
-                k: v
-                for k, v in logs.items()
-                if "th-percentile/" not in k
-                or k.rsplit("/", 1)[-1] in self._percentile_variables
-            }
+        logs = self._histograms.get_wandb(
+            percentile_variables=self._percentile_variables
+        )
         if label != "":
             logs = {f"{label}/{k}": v for k, v in logs.items()}
         return logs
