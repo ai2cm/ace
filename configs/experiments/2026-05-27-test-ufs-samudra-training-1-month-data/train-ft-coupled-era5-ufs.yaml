@@ -247,7 +247,6 @@ stepper:
           - land_fraction
           - sea_surface_fraction
           - deptho
-          - hfgeou
           - DLWRFsfc
           - DSWRFsfc
           - ULWRFsfc
