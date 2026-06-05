@@ -25,6 +25,10 @@ Jeremy/uniform (suffix -uniform):
       noforcing - forcing/static variables are excluded via uniform.ignore_vars
   - gmr / rp: same as above
   File names use mask{k} where k is "all" or the integer (e.g. mask10).
+
+CO2 variants are generated for every Bernoulli and uniform config:
+  - suffix -co2-mask: global_mean_co2 is masked the same way as other variables
+  - suffix -co2-nomask: global_mean_co2 has a per_variable rate of 0.0
 """
 
 import copy
@@ -41,12 +45,12 @@ FORCING_VARS = [
 ]
 SHARED_GMR_REFERENCE_FIELD = "surface_temperature"
 CO2_FIELD = "global_mean_co2"
-CO2_MASK_RATE = 0.8
 
 MASK_RATES = [0.0, 0.2, 0.4]
 GMR_VALS = [True]
 RP_VALS = [False]
 EXCLUDE_FORCING = [False, True]
+CO2_MODES = ["mask", "nomask"]
 UNIFORM_MAX_VARS: dict[bool, list[int | str]] = {
     False: ["all", 17],  # with GMR reference excluded: 0.20 × 42 ≈ 8.4 → max = 17
     True: ["all", 15],  # forcing + GMR reference excluded: 0.20 × 37 ≈ 7.4 → max = 15
@@ -94,9 +98,39 @@ def _protect_shared_gmr_reference(input_dropout: dict) -> dict:
     return input_dropout
 
 
+def _add_co2(step_cfg: dict) -> None:
+    for name_key in ["next_step_forcing_names", "in_names"]:
+        names = list(step_cfg[name_key])
+        if CO2_FIELD not in names:
+            names.append(CO2_FIELD)
+        step_cfg[name_key] = names
+
+
+def _unmask_co2(input_dropout: dict) -> dict:
+    input_dropout = copy.deepcopy(input_dropout)
+    per_variable = dict(input_dropout.get("per_variable", {}))
+    per_variable[CO2_FIELD] = 0.0
+    input_dropout["per_variable"] = per_variable
+    return input_dropout
+
+
+def _co2_suffix(co2_mode: str | None) -> str:
+    return "" if co2_mode is None else f"-co2-{co2_mode}"
+
+
 def _apply_common_settings(
-    step_cfg: dict, gmr_on: bool, rp_on: bool, input_dropout: dict
+    step_cfg: dict,
+    gmr_on: bool,
+    rp_on: bool,
+    input_dropout: dict,
+    co2_mode: str | None = None,
 ) -> None:
+    if co2_mode is not None:
+        _add_co2(step_cfg)
+        if co2_mode == "nomask":
+            input_dropout = _unmask_co2(input_dropout)
+        elif co2_mode != "mask":
+            raise ValueError(f"Invalid CO2 mode: {co2_mode}")
     if gmr_on:
         input_dropout = _protect_shared_gmr_reference(input_dropout)
     step_cfg["input_dropout"] = input_dropout
@@ -111,7 +145,9 @@ def _apply_common_settings(
         step_cfg.pop("global_mean_removal", None)
 
 
-def generate_bernoulli_configs(base: dict, stem: str) -> None:
+def generate_bernoulli_configs(
+    base: dict, stem: str, co2_mode: str | None = None
+) -> None:
     for mask_rate in MASK_RATES:
         for exclude_forcing in EXCLUDE_FORCING:
             if mask_rate == 0.0 and exclude_forcing:
@@ -126,6 +162,7 @@ def generate_bernoulli_configs(base: dict, stem: str) -> None:
                         f"{stem}"
                         f"-mask{mask_rate:.2f}-{masking_type}"
                         f"-{gmr_suffix}-{rp_suffix}-bernoulli"
+                        f"{_co2_suffix(co2_mode)}"
                     )
                     out_path = HERE / f"{name}.yaml"
                     step_cfg = cfg["stepper"]["step"]["config"]
@@ -134,13 +171,16 @@ def generate_bernoulli_configs(base: dict, stem: str) -> None:
                         gmr_on,
                         rp_on,
                         build_bernoulli_input_dropout(mask_rate, exclude_forcing),
+                        co2_mode=co2_mode,
                     )
                     with out_path.open("w") as f:
                         yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)
                     print(f"Wrote {out_path.name}")
 
 
-def generate_uniform_configs(base: dict, stem: str) -> None:
+def generate_uniform_configs(
+    base: dict, stem: str, co2_mode: str | None = None
+) -> None:
     for exclude_forcing in EXCLUDE_FORCING:
         for max_vars in UNIFORM_MAX_VARS[exclude_forcing]:
             for gmr_on in GMR_VALS:
@@ -154,6 +194,7 @@ def generate_uniform_configs(base: dict, stem: str) -> None:
                         f"{stem}"
                         f"-mask{k}-{masking_type}"
                         f"-{gmr_suffix}-{rp_suffix}-uniform"
+                        f"{_co2_suffix(co2_mode)}"
                     )
                     out_path = HERE / f"{name}.yaml"
                     step_cfg = cfg["stepper"]["step"]["config"]
@@ -162,6 +203,7 @@ def generate_uniform_configs(base: dict, stem: str) -> None:
                         gmr_on,
                         rp_on,
                         build_uniform_input_dropout(exclude_forcing, max_vars),
+                        co2_mode=co2_mode,
                     )
                     with out_path.open("w") as f:
                         yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)
@@ -169,26 +211,10 @@ def generate_uniform_configs(base: dict, stem: str) -> None:
 
 
 def generate_co2_variants(base: dict, stem: str) -> None:
-    """Generate -co2 configs with an 80% per-variable CO2 masking rate."""
-    cfg = copy.deepcopy(base)
-    name = f"{stem}-maskall-noforcing-gmron-rpoff-uniform"
-    source_path = HERE / f"{name}.yaml"
-    with source_path.open() as f:
-        cfg = yaml.safe_load(f)
-    step_cfg = cfg["stepper"]["step"]["config"]
-    step_cfg["next_step_forcing_names"] = list(step_cfg["next_step_forcing_names"]) + [
-        CO2_FIELD
-    ]
-    step_cfg["in_names"] = list(step_cfg["in_names"]) + [CO2_FIELD]
-    input_dropout = dict(step_cfg["input_dropout"])
-    per_variable = dict(input_dropout.get("per_variable", {}))
-    per_variable[CO2_FIELD] = CO2_MASK_RATE
-    input_dropout["per_variable"] = per_variable
-    step_cfg["input_dropout"] = input_dropout
-    out_path = HERE / f"{name}-co2.yaml"
-    with out_path.open("w") as f:
-        yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)
-    print(f"Wrote {out_path.name}")
+    """Generate -co2-mask and -co2-nomask configs."""
+    for co2_mode in CO2_MODES:
+        generate_bernoulli_configs(base, stem, co2_mode=co2_mode)
+        generate_uniform_configs(base, stem, co2_mode=co2_mode)
 
 
 def main():
@@ -196,8 +222,8 @@ def main():
         base_config = HERE / f"{stem}.yaml"
         with base_config.open() as f:
             base = yaml.safe_load(f)
-        generate_bernoulli_configs(base, stem)
-        generate_uniform_configs(base, stem)
+        # generate_bernoulli_configs(base, stem)
+        # generate_uniform_configs(base, stem)
         generate_co2_variants(base, stem)
 
 
