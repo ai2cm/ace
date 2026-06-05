@@ -1,0 +1,23 @@
+# Re-mirror the 3 v2 datasets that hung on dead workers during the
+# 0.9.0 / zlib1+shuffle transfer (beaker job 01KT9JW4NXCN8RC7PYWVQ89YN0).
+# Those workers died mid-conversion ~hours before the master gave up,
+# so each dataset has partial decade-files on Weka. ``--force`` on the
+# CLI side overwrites them.
+#
+# Top-level aux files (index.csv, stats.*, normalization_*) get
+# re-copied regardless of dataset filter — they're cheap. The other
+# 240 datasets have already converted cleanly and won't be touched.
+#
+# Submit with:
+#   ./zarr_to_netcdf_beaker.sh \
+#     --config configs/zarr-to-netcdf-prod-v2-stuck-3.yaml --force
+
+gcs_source: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2
+weka_destination: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2
+# 3 workers for 3 datasets — anything more leaves CPU idle.
+workers: 3
+years_per_file: 10
+dataset_keys:
+  - CESM2/ssp245/r11i1p1f1
+  - CESM2-FV2/historical/r1i1p1f1
+  - CanESM5/ssp585/r1i1p1f1
