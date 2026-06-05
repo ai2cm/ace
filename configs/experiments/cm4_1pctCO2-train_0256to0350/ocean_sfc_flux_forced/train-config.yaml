@@ -90,6 +90,7 @@ stepper:
     fill_value: 0.0
     exclude_names_and_prefixes:
       - land_fraction
+      - LHTFLsfc
       - PRATEsfc
       - eastward_surface_wind_stress
       - northward_surface_wind_stress
@@ -168,6 +169,7 @@ stepper:
             - UI
             - VI
       next_step_forcing_names:
+      - LHTFLsfc
       - PRATEsfc
       - eastward_surface_wind_stress
       - northward_surface_wind_stress
@@ -180,6 +182,7 @@ stepper:
       - deptho
       - hfgeou
       # atmosphere forcing
+      - LHTFLsfc
       - PRATEsfc
       - eastward_surface_wind_stress
       - northward_surface_wind_stress
