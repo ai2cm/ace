@@ -1,10 +1,9 @@
-# arg: --dataset 01KTAT09WSW54PC3T6H3900VJ5:/checkpoints
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
 checkpoint_every_n_batches: 5000
 validate_using_ema: true
-max_epochs: 10
+max_epochs: 70
 ema:
   decay: 0.999
 inference:
@@ -309,17 +308,31 @@ optimization:
     weight_decay: 0.01
   scheduler:
     schedulers:
+    - type: LinearLR
+      kwargs:
+        start_factor: 0.01
+        end_factor: 1.0
+        total_iters: 4
+      step_each_iteration: false
+    - type: ConstantLR
+      kwargs:
+        factor: 1.0
+        total_iters: 62
+      step_each_iteration: false
     - type: PolynomialLR
       kwargs:
         power: 0.5
-        total_iters: 10
+        total_iters: 4
       step_each_iteration: false
-    milestones: []
+    milestones:
+    - 4
+    - 66
 stepper_training:
-  n_forward_steps: 2
-  optimize_last_step_only: false
+  n_ensemble: 2
+  n_forward_steps: 1
+  optimize_last_step_only: true
   loss:
-    type: MSE
+    type: EnsembleLoss
     weights:
       air_temperature_0: 0.5
       air_temperature_1: 0.5
@@ -339,8 +352,9 @@ stepper_training:
       USWRFtoa: 2
       tendency_of_total_water_path_due_to_advection: 0.5
       PRESsfc: 3
-  parameter_init:
-    weights_path: /checkpoints/best_ckpt.tar
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
 stepper:
   step:
     type: single_module
@@ -350,7 +364,8 @@ stepper:
         type: NoiseConditionedSFNO
         config:
           embed_dim: 512
-          noise_embed_dim: 0
+          noise_embed_dim: 32
+          noise_type: isotropic
           filter_type: linear
           affine_norms: true
           normalize_big_skip: true
@@ -390,6 +405,7 @@ stepper:
         - USWRFtoa
       next_step_forcing_names:
       - DSWRFtoa
+      - global_mean_co2
       in_names:
       - land_fraction
       - ocean_fraction
@@ -434,6 +450,7 @@ stepper:
       - northward_wind_5
       - northward_wind_6
       - northward_wind_7
+      - global_mean_co2
       out_names:
       - PRESsfc
       - surface_temperature
@@ -488,5 +505,9 @@ stepper:
       global_mean_removal:
         kind: shared
         append_as_input: true
+      input_dropout:
+        per_variable:
+          default_rate: 0.0
+          surface_temperature: 0.0
       include_channel_mask_inputs: true
-pre_cooldown_checkpoint_epoch: null
+pre_cooldown_checkpoint_epoch: 66

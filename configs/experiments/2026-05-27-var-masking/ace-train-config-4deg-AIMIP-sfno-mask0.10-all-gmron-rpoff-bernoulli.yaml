@@ -500,6 +500,7 @@ stepper:
         append_as_input: true
       input_dropout:
         per_variable:
-          default_rate: 0.0
+          default_rate: 0.1
           surface_temperature: 0.0
       include_channel_mask_inputs: true
+pre_cooldown_checkpoint_epoch: 66
