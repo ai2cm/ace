@@ -73,7 +73,7 @@ optimization:
 stepper_training:
   parameter_init:
     weights_path: /weights/training_checkpoints/best_ckpt.tar
-  n_forward_steps: 4
+  n_forward_steps: 20
   loss:
     type: MSE
 stepper:
