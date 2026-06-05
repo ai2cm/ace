@@ -60,7 +60,7 @@ def generate_finetune_config(
     lr: float,
     existing_only: bool,
 ) -> None:
-    out_path = HERE / f"{source_path.stem}-finetune.yaml"
+    out_path = HERE / f"{source_path.stem}-v2-finetune.yaml"
 
     beaker_dataset_id = None
     if source_map is not None:
