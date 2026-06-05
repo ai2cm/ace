@@ -48,7 +48,7 @@ def test_logs_labels_exist():
         assert len(log) == len(expected_step_keys), set(log).difference(
             expected_step_keys
         )
-    summary_logs = agg.get_summary_logs()
+    summary_logs = agg.get_summary().logs
     expected_summary_keys = ["time_mean/gen_map/a", "annual/a", "power_spectrum/a"]
     for key in expected_summary_keys:
         assert key in summary_logs, key
@@ -101,7 +101,7 @@ def test_logs_labels_exist_with_reference_time_means(tmp_path):
         assert len(log) == len(expected_step_keys), set(log).difference(
             expected_step_keys
         )
-    summary_logs = agg.get_summary_logs()
+    summary_logs = agg.get_summary().logs
     expected_summary_keys = [
         "time_mean/gen_map/a",
         "time_mean/ref_bias_map/a",

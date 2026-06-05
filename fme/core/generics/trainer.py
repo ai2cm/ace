@@ -67,7 +67,11 @@ import fme
 from fme.core.cli import remove_stale_tmp_checkpoints
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
-from fme.core.generics.aggregator import AggregatorABC, InferenceAggregatorABC
+from fme.core.generics.aggregator import (
+    AggregatorABC,
+    InferenceAggregatorABC,
+    InferenceSummary,
+)
 from fme.core.generics.data import GriddedDataABC, InferenceDataABC
 from fme.core.generics.inference import run_inference
 from fme.core.generics.lr_tuning import (
@@ -441,7 +445,7 @@ class Trainer:
             )
             self._maybe_tune_lr()
             start_time = time.time()
-            train_logs = self.train_one_epoch()
+            train_summary = self.train_one_epoch()
             train_end = time.time()
             logging.info(
                 f"Starting validation step for model trained for "
@@ -459,7 +463,7 @@ class Trainer:
                 )
                 inference_end: float | None = time.time() if inference_logs else None
 
-            train_loss = train_logs.get("train/mean/loss")
+            train_loss = train_summary.loss
             # need to get the learning rate before stepping the scheduler
             lr = self.optimization.learning_rate
             self.optimization.step_scheduler(valid_loss=valid_loss, is_iteration=False)
@@ -481,7 +485,7 @@ class Trainer:
 
             logging.info("Logging to wandb")
             all_logs = {
-                **train_logs,
+                **train_summary.logs,
                 **valid_logs,
                 **inference_logs,
                 **additional_logs,
@@ -615,7 +619,7 @@ class Trainer:
         self._epochs_trained += 1
         self._current_epoch_num_batches_seen = 0
         aggregator.flush_diagnostics(subdir=f"epoch_{self._epochs_trained:04d}")
-        return aggregator.get_logs(label="train")
+        return aggregator.get_summary(label="train")
 
     def _save_restart_checkpoints(self):
         logging.info(
@@ -803,7 +807,7 @@ def build_validation_callback(
         for task in tasks:
             task.data.set_epoch(epoch)
             aggregator = task.aggregator_factory()
-            logs = run_validation(
+            summary = run_validation(
                 train_stepper=stepper,
                 validation_data=task.data,
                 aggregator=aggregator,
@@ -811,22 +815,21 @@ def build_validation_callback(
                 diagnostics_subdir=f"epoch_{epoch:04d}",
                 record_logs=lambda logs: None,
             )
-            overlap = all_logs.keys() & logs.keys()
+            overlap = all_logs.keys() & summary.logs.keys()
             if overlap:
                 raise RuntimeError(
                     f"Validation entry {task.name!r} produced log keys that "
                     f"overlap with earlier entries: {sorted(overlap)}"
                 )
-            all_logs.update(logs)
+            all_logs.update(summary.logs)
             if task.weight > 0:
-                loss = aggregator.get_loss()
-                if loss is None:
+                if summary.loss is None:
                     raise RuntimeError(
                         f"Validation entry {task.name!r} with "
                         f"weight={task.weight} did not produce a loss "
                         "for checkpoint selection."
                     )
-                weighted_loss += task.weight * loss
+                weighted_loss += task.weight * summary.loss
         return all_logs, weighted_loss
 
     return validation_callback
@@ -839,7 +842,7 @@ def inference_one_epoch(
     aggregator: InferenceAggregatorABC[PS, SD],
     label: str,
     epoch: int,
-):
+) -> InferenceSummary:
     stepper.set_eval()
     with torch.no_grad(), validation_context(), GlobalTimer():
         run_inference(
@@ -849,9 +852,10 @@ def inference_one_epoch(
         )
     logging.info("Starting flush of reduced diagnostics to disk")
     aggregator.flush_diagnostics(subdir=f"epoch_{epoch:04d}")
-    logging.info("Getting inline inference aggregator logs")
-    logs = aggregator.get_summary_logs()
-    return {f"{label}/{k}": v for k, v in logs.items()}
+    logging.info("Getting inline inference aggregator summary")
+    summary = aggregator.get_summary()
+    prefixed_logs = {f"{label}/{k}": v for k, v in summary.logs.items()}
+    return InferenceSummary(logs=prefixed_logs, loss=summary.loss)
 
 
 @dataclasses.dataclass
@@ -894,7 +898,7 @@ def build_inference_callback(
         weighted_error: float | None = None
         for task in active_tasks:
             aggregator = task.aggregator_factory()
-            logs = inference_one_epoch(
+            summary = inference_one_epoch(
                 stepper=stepper,
                 validation_context=contextlib.nullcontext,
                 dataset=task.data,
@@ -902,16 +906,15 @@ def build_inference_callback(
                 label=task.name,
                 epoch=epoch,
             )
-            overlap = all_logs.keys() & logs.keys()
+            overlap = all_logs.keys() & summary.logs.keys()
             if overlap:
                 raise RuntimeError(
                     f"Inference entry {task.name!r} produced log keys that "
                     f"overlap with earlier entries: {sorted(overlap)}"
                 )
-            all_logs.update(logs)
+            all_logs.update(summary.logs)
             if task.weight > 0:
-                error = aggregator.get_loss()
-                if error is None:
+                if summary.loss is None:
                     raise RuntimeError(
                         f"Inference entry {task.name!r} with "
                         f"weight={task.weight} did not produce a loss "
@@ -919,7 +922,7 @@ def build_inference_callback(
                     )
                 if weighted_error is None:
                     weighted_error = 0.0
-                weighted_error += task.weight * error
+                weighted_error += task.weight * summary.loss
         return all_logs, weighted_error
 
     return inference_callback

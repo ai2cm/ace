@@ -167,7 +167,7 @@ def test_logs_regression():
             expected_step_keys
         )
 
-    summary_logs = agg.get_summary_logs()
+    summary_logs = agg.get_summary().logs
     for key, value in summary_logs.items():
         if not isinstance(value, float | Image | plt.Figure):
             pytest.fail(
@@ -506,7 +506,7 @@ class TestAggregatorConfigMetrics:
         )
         assert len(logs) == n_time
         assert "mean/weighted_rmse/a" in logs[0]
-        summary = agg.get_summary_logs()
+        summary = agg.get_summary().logs
         assert "mean_step_20/weighted_rmse/a" in summary
 
     def test_enable_time_series_false(self):
@@ -616,8 +616,8 @@ def test_legacy_config_matches_typed_config():
     legacy_agg.record_batch(data=data)
     typed_agg.record_batch(data=data)
 
-    legacy_logs = legacy_agg.get_summary_logs()
-    typed_logs = typed_agg.get_summary_logs()
+    legacy_logs = legacy_agg.get_summary().logs
+    typed_logs = typed_agg.get_summary().logs
 
     assert set(legacy_logs.keys()) == set(typed_logs.keys()), (
         f"Key mismatch.\n"
@@ -699,8 +699,8 @@ def test_legacy_config_long_run_includes_annual_and_enso():
     legacy_agg.record_batch(data=data)
     typed_agg.record_batch(data=data)
 
-    legacy_logs = legacy_agg.get_summary_logs()
-    typed_logs = typed_agg.get_summary_logs()
+    legacy_logs = legacy_agg.get_summary().logs
+    typed_logs = typed_agg.get_summary().logs
 
     assert set(legacy_logs.keys()) == set(typed_logs.keys()), (
         f"Key mismatch.\n"

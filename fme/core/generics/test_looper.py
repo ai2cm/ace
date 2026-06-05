@@ -450,12 +450,12 @@ def get_mock_aggregator(
         return_value=[{"step": j} for j in range(n_ic_timesteps)]
     )
 
-    def get_summary_logs_side_effect():
+    def get_summary_side_effect():
         # we expect this gets called _outside_ of run_inference
         raise ValueError("should not be called")
 
-    mock_aggregator.get_summary_logs = unittest.mock.MagicMock(
-        side_effect=get_summary_logs_side_effect
+    mock_aggregator.get_summary = unittest.mock.MagicMock(
+        side_effect=get_summary_side_effect
     )
     mock_aggregator.record_batch = unittest.mock.MagicMock(
         side_effect=record_batch_side_effect

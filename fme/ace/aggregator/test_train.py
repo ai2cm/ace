@@ -57,7 +57,7 @@ def test_labels_exist(config: TrainAggregatorConfig, expected_keys: list[str]):
             normalize=lambda x: x,
         ),
     )
-    logs = agg.get_logs(label="test")
+    logs = agg.get_summary(label="test").logs
     assert set(logs.keys()) == set(expected_keys)
     assert not np.isnan(float(logs["test/mean/loss"]))
 
@@ -76,7 +76,7 @@ def test_aggregator_gets_logs_with_no_batches(config: TrainAggregatorConfig):
         area_weights=torch.ones(ny, nx, device=device)
     )
     agg = TrainAggregator(config=config, operations=gridded_operations)
-    logs = agg.get_logs(label="test")
+    logs = agg.get_summary(label="test").logs
     assert np.isnan(logs.pop("test/mean/loss"))
     assert logs == {}
 
@@ -127,7 +127,7 @@ def test_aggregator_logs_per_channel_loss():
             },
         ),
     )
-    logs = agg.get_logs(label="train")
+    logs = agg.get_summary(label="train").logs
     assert logs["train/mean/loss"] == 1.5
     assert logs["train/mean/loss/a"] == 0.75
 
@@ -178,13 +178,13 @@ def test_aggregator_per_channel_loss_weighted_by_count():
             },
         ),
     )
-    logs = agg.get_logs(label="train")
+    logs = agg.get_summary(label="train").logs
     # weighted mean: (1.0*2 + 3.0*6) / (2+6) = 20/8 = 2.5
     assert logs["train/mean/loss/a"] == pytest.approx(2.5)
 
 
 def test_aggregator_per_channel_loss_disabled():
-    """When per_channel_loss=False, get_logs does not include per-variable loss."""
+    """When per_channel_loss=False, get_summary does not include per-variable loss."""
     batch_size = 4
     n_ensemble = 1
     n_time = 2
@@ -217,6 +217,6 @@ def test_aggregator_per_channel_loss_disabled():
             },
         ),
     )
-    logs = agg.get_logs(label="train")
+    logs = agg.get_summary(label="train").logs
     assert logs["train/mean/loss"] == 1.0
     assert "train/mean/loss/a" not in logs

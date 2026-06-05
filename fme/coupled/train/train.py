@@ -107,9 +107,9 @@ def get_validate_stepper_callback(
                 validate_using_ema=validate_using_ema,
             )
             if entry_config.weight > 0:
-                loss = aggregator.get_loss()
-                if loss is not None:
-                    weighted_loss += entry_config.weight * loss
+                summary = aggregator.get_summary(label=name)
+                if summary.loss is not None:
+                    weighted_loss += entry_config.weight * summary.loss
         return weighted_loss
 
     return validate_stepper
