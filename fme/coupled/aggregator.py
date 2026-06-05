@@ -533,6 +533,9 @@ class InferenceEvaluatorAggregator(
         }
         return InferenceSummary(logs=logs, loss=channel_mean)
 
+    def get_summary_logs(self):
+        return self.get_summary().logs
+
     @torch.no_grad()
     def flush_diagnostics(self, subdir: str | None = None):
         """
@@ -660,6 +663,9 @@ class InferenceAggregator(
         return InferenceSummary(
             logs={**ocean_summary.logs, **atmos_summary.logs}, loss=None
         )
+
+    def get_summary_logs(self):
+        return self.get_summary().logs
 
     @torch.no_grad()
     def flush_diagnostics(self, subdir: str | None = None):

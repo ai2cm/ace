@@ -20,7 +20,7 @@ def test_run_validation_loop():
     )
 
     assert stepper.validation_batches_seen == [0, 1, 2]
-    logs = aggregator.get_summary(label="val").logs
+    logs = aggregator.get_logs(label="val")
     assert "val/mean/loss" in logs
     assert logs["val/mean/loss"] == 0.5
 
@@ -50,7 +50,7 @@ def test_run_validation_loop_with_ema():
 
     # After run_validation_loop, the original weights should be restored
     assert torch.allclose(stepper.modules[0].weight.data, weight_before)
-    logs = aggregator.get_summary(label="val").logs
+    logs = aggregator.get_logs(label="val")
     assert "val/mean/loss" in logs
 
 
@@ -68,5 +68,5 @@ def test_run_validation_loop_without_ema():
         validate_using_ema=False,
     )
 
-    logs = aggregator.get_summary(label="val").logs
+    logs = aggregator.get_logs(label="val")
     assert logs["val/mean/loss"] == 0.7

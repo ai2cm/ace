@@ -501,7 +501,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     summary_logs = {
         "total_steps_per_second": total_steps_per_second,
-        **aggregator.get_summary().logs,
+        **aggregator.get_summary_logs(),
     }
     logger.log_to_current_step(summary_logs)  # prefix "inference/"
     logger.log_to_current_step(

@@ -832,7 +832,7 @@ def test_train_on_batch_one_step_aggregator(n_forward_steps):
     assert stepped.gen_data["a"].shape[2] == n_forward_steps + 1
 
     aggregator.record_batch(stepped)
-    logs = aggregator.get_summary("one_step").logs
+    logs = aggregator.get_logs("one_step")
 
     gen = data.data["a"].select(dim=1, index=0) + 1
     tar = data.data["a"].select(dim=1, index=1)

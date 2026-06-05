@@ -114,6 +114,9 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
             logs.update(stochastic_logs)
         return AggregatorSummary(logs=logs, loss=det_summary.loss)
 
+    def get_logs(self, label: str):
+        return self.get_summary(label).logs
+
     @torch.no_grad()
     def flush_diagnostics(self, subdir: str | None = None):
         self._deterministic_aggregator.flush_diagnostics(subdir)

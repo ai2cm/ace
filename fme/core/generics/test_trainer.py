@@ -286,6 +286,9 @@ class ValidationAggregator(AggregatorABC[TrainOutput]):
             loss=self.validation_loss,
         )
 
+    def get_logs(self, label: str) -> dict[str, float]:
+        return self.get_summary(label).logs
+
     def flush_diagnostics(self, subdir: str | None) -> None:
         pass
 
@@ -1651,10 +1654,14 @@ class TestBuildValidationCallback:
         tasks = [self._make_task("val", weight=2.0, aggregator_loss=0.5)]
         logs, loss = self._call(
             tasks,
-            [AggregatorSummary(logs={"val/some_metric": 1.0}, loss=0.5)],
+            [
+                AggregatorSummary(
+                    logs={"val/mean/loss": 0.5, "val/other": 1.0}, loss=0.5
+                )
+            ],
         )
         assert loss == pytest.approx(2.0 * 0.5)
-        assert logs == {"val/some_metric": 1.0}
+        assert logs == {"val/mean/loss": 0.5, "val/other": 1.0}
 
     def test_zero_weight_excluded_from_loss_but_logs_kept(self):
         tasks = [
@@ -1664,13 +1671,13 @@ class TestBuildValidationCallback:
         logs, loss = self._call(
             tasks,
             [
-                AggregatorSummary(logs={"a/some_metric": 0.5}, loss=0.5),
-                AggregatorSummary(logs={"b/some_metric": 999.0}, loss=999.0),
+                AggregatorSummary(logs={"a/mean/loss": 0.5}, loss=0.5),
+                AggregatorSummary(logs={"b/mean/loss": 999.0}, loss=999.0),
             ],
         )
         assert loss == pytest.approx(0.5)
-        assert "a/some_metric" in logs
-        assert "b/some_metric" in logs
+        assert "a/mean/loss" in logs
+        assert "b/mean/loss" in logs
 
     def test_multiple_weighted_entries_sum_weighted(self):
         tasks = [
@@ -1680,8 +1687,8 @@ class TestBuildValidationCallback:
         _, loss = self._call(
             tasks,
             [
-                AggregatorSummary(logs={"a/some_metric": 0.1}, loss=0.1),
-                AggregatorSummary(logs={"b/some_metric": 0.2}, loss=0.2),
+                AggregatorSummary(logs={"a/mean/loss": 0.1}, loss=0.1),
+                AggregatorSummary(logs={"b/mean/loss": 0.2}, loss=0.2),
             ],
         )
         assert loss == pytest.approx(2.0 * 0.1 + 3.0 * 0.2)
@@ -1713,10 +1720,10 @@ class TestBuildValidationCallback:
                 tasks,
                 [
                     AggregatorSummary(
-                        logs={"shared/key": 0.1, "a/some_metric": 0.5}, loss=0.5
+                        logs={"shared/key": 0.1, "a/mean/loss": 0.5}, loss=0.5
                     ),
                     AggregatorSummary(
-                        logs={"shared/key": 0.2, "b/some_metric": 0.6}, loss=0.6
+                        logs={"shared/key": 0.2, "b/mean/loss": 0.6}, loss=0.6
                     ),
                 ],
             )
@@ -1726,8 +1733,8 @@ class TestBuildValidationCallback:
         self._call(
             tasks,
             [
-                AggregatorSummary(logs={"a/some_metric": 0.1}, loss=0.0),
-                AggregatorSummary(logs={"b/some_metric": 0.2}, loss=0.0),
+                AggregatorSummary(logs={"a/mean/loss": 0.1}, loss=0.0),
+                AggregatorSummary(logs={"b/mean/loss": 0.2}, loss=0.0),
             ],
             epoch=7,
         )
@@ -1746,8 +1753,8 @@ class TestBuildValidationCallback:
         with unittest.mock.patch(
             "fme.core.generics.trainer.run_validation",
             side_effect=[
-                AggregatorSummary(logs={"a/some_metric": 0.1}, loss=0.1),
-                AggregatorSummary(logs={"a/some_metric": 0.2}, loss=0.2),
+                AggregatorSummary(logs={"a/mean/loss": 0.1}, loss=0.1),
+                AggregatorSummary(logs={"a/mean/loss": 0.2}, loss=0.2),
             ],
         ):
             callback = build_validation_callback(tasks=[task], stepper=stepper)
@@ -1822,11 +1829,22 @@ class TestBuildInferenceCallback:
         tasks = [self._make_task("inf", weight=2.0)]
         logs, error = self._call(
             tasks,
-            [InferenceSummary(logs={"inf/some_metric": 1.0}, loss=0.5)],
+            [
+                InferenceSummary(
+                    logs={
+                        "inf/time_mean_norm/rmse/channel_mean": 0.5,
+                        "inf/other": 1.0,
+                    },
+                    loss=0.5,
+                )
+            ],
             inference_epochs=[1],
         )
         assert error == pytest.approx(2.0 * 0.5)
-        assert logs == {"inf/some_metric": 1.0}
+        assert logs == {
+            "inf/time_mean_norm/rmse/channel_mean": 0.5,
+            "inf/other": 1.0,
+        }
 
     def test_multiple_weighted_entries_sum_weighted(self):
         tasks = [
@@ -1836,8 +1854,12 @@ class TestBuildInferenceCallback:
         _, error = self._call(
             tasks,
             [
-                InferenceSummary(logs={"a/some_metric": 0.1}, loss=0.1),
-                InferenceSummary(logs={"b/some_metric": 0.2}, loss=0.2),
+                InferenceSummary(
+                    logs={"a/time_mean_norm/rmse/channel_mean": 0.1}, loss=0.1
+                ),
+                InferenceSummary(
+                    logs={"b/time_mean_norm/rmse/channel_mean": 0.2}, loss=0.2
+                ),
             ],
             inference_epochs=[1],
         )
@@ -1851,14 +1873,18 @@ class TestBuildInferenceCallback:
         logs, error = self._call(
             tasks,
             [
-                InferenceSummary(logs={"a/some_metric": 0.5}, loss=0.5),
-                InferenceSummary(logs={"b/some_metric": 999.0}, loss=999.0),
+                InferenceSummary(
+                    logs={"a/time_mean_norm/rmse/channel_mean": 0.5}, loss=0.5
+                ),
+                InferenceSummary(
+                    logs={"b/time_mean_norm/rmse/channel_mean": 999.0}, loss=999.0
+                ),
             ],
             inference_epochs=[1],
         )
         assert error == pytest.approx(0.5)
-        assert "a/some_metric" in logs
-        assert "b/some_metric" in logs
+        assert "a/time_mean_norm/rmse/channel_mean" in logs
+        assert "b/time_mean_norm/rmse/channel_mean" in logs
 
     def test_all_zero_weight_returns_none_error(self):
         tasks = [
@@ -1868,14 +1894,18 @@ class TestBuildInferenceCallback:
         logs, error = self._call(
             tasks,
             [
-                InferenceSummary(logs={"a/some_metric": 0.5}, loss=0.5),
-                InferenceSummary(logs={"b/some_metric": 0.6}, loss=0.6),
+                InferenceSummary(
+                    logs={"a/time_mean_norm/rmse/channel_mean": 0.5}, loss=0.5
+                ),
+                InferenceSummary(
+                    logs={"b/time_mean_norm/rmse/channel_mean": 0.6}, loss=0.6
+                ),
             ],
             inference_epochs=[1],
         )
         assert error is None
-        assert "a/some_metric" in logs
-        assert "b/some_metric" in logs
+        assert "a/time_mean_norm/rmse/channel_mean" in logs
+        assert "b/time_mean_norm/rmse/channel_mean" in logs
 
     def test_missing_loss_for_weighted_entry_raises(self):
         tasks = [self._make_task("a", weight=1.0)]
@@ -1906,10 +1936,18 @@ class TestBuildInferenceCallback:
                 tasks,
                 [
                     InferenceSummary(
-                        logs={"shared/key": 0.1, "a/some_metric": 0.5}, loss=0.5
+                        logs={
+                            "shared/key": 0.1,
+                            "a/time_mean_norm/rmse/channel_mean": 0.5,
+                        },
+                        loss=0.5,
                     ),
                     InferenceSummary(
-                        logs={"shared/key": 0.2, "b/some_metric": 0.6}, loss=0.6
+                        logs={
+                            "shared/key": 0.2,
+                            "b/time_mean_norm/rmse/channel_mean": 0.6,
+                        },
+                        loss=0.6,
                     ),
                 ],
                 inference_epochs=[1],
@@ -1922,13 +1960,17 @@ class TestBuildInferenceCallback:
         ]
         logs, error = self._call(
             tasks,
-            [InferenceSummary(logs={"a/some_metric": 0.5}, loss=0.5)],
+            [
+                InferenceSummary(
+                    logs={"a/time_mean_norm/rmse/channel_mean": 0.5}, loss=0.5
+                )
+            ],
             inference_epochs=[1, 2],
             epoch=1,
         )
         assert error == pytest.approx(0.5)
-        assert "a/some_metric" in logs
-        assert "b/some_metric" not in logs
+        assert "a/time_mean_norm/rmse/channel_mean" in logs
+        assert "b/time_mean_norm/rmse/channel_mean" not in logs
 
     def test_aggregator_factory_called_per_invocation(self):
         aggregator = unittest.mock.MagicMock()
@@ -1945,8 +1987,12 @@ class TestBuildInferenceCallback:
         with unittest.mock.patch(
             "fme.core.generics.trainer.inference_one_epoch",
             side_effect=[
-                InferenceSummary(logs={"a/some_metric": 0.1}, loss=0.1),
-                InferenceSummary(logs={"a/some_metric": 0.2}, loss=0.2),
+                InferenceSummary(
+                    logs={"a/time_mean_norm/rmse/channel_mean": 0.1}, loss=0.1
+                ),
+                InferenceSummary(
+                    logs={"a/time_mean_norm/rmse/channel_mean": 0.2}, loss=0.2
+                ),
             ],
         ):
             callback = build_inference_callback(

@@ -81,7 +81,7 @@ def test_inference_evaluator_aggregator_channel_mean_names(
 
     agg.record_batch(paired_data)
 
-    summary_logs = agg.get_summary().logs
+    summary_logs = agg.get_summary_logs()
 
     for varname in ["a", "b", "c"]:
         assert f"time_mean_norm/rmse/{varname}" in summary_logs
@@ -148,7 +148,7 @@ def test_inference_evaluator_aggregator_ensemble():
     paired_data = PairedData.from_batch_data(prediction=gen_data, reference=target_data)
     agg.record_batch(paired_data)
 
-    summary_logs = agg.get_summary().logs
+    summary_logs = agg.get_summary_logs()
     for varname in ["a", "b", "c"]:
         assert f"ensemble_step_20/crps/{varname}" in summary_logs
         assert f"ensemble_step_20_norm/crps/{varname}" in summary_logs

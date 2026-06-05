@@ -51,7 +51,7 @@ def test_labels_exist():
             normalize=lambda x: x,
         ),
     )
-    logs = agg.get_summary(label="test").logs
+    logs = agg.get_logs(label="test")
     expected_keys = [
         "test/mean/loss",
         "test/mean/weighted_rmse/a",
@@ -174,7 +174,7 @@ def test_explicit_metrics_build():
             normalize=lambda x: x,
         ),
     )
-    logs = agg.get_summary(label="test").logs
+    logs = agg.get_logs(label="test")
     assert "test/mean/weighted_rmse/a" in logs
     assert "test/snapshot/image-full-field/a" not in logs
 
@@ -228,8 +228,8 @@ def test_legacy_config_builds_same_log_keys():
     typed_agg.record_batch(batch=batch)
     legacy_agg.record_batch(batch=batch)
 
-    typed_logs = typed_agg.get_summary(label="test").logs
-    legacy_logs = legacy_agg.get_summary(label="test").logs
+    typed_logs = typed_agg.get_logs(label="test")
+    legacy_logs = legacy_agg.get_logs(label="test")
 
     assert set(typed_logs.keys()) == set(legacy_logs.keys())
     for key in typed_logs:
@@ -259,7 +259,7 @@ def test_hierarchical_defaults_build():
             normalize=lambda x: x,
         ),
     )
-    logs = agg.get_summary(label="test").logs
+    logs = agg.get_logs(label="test")
     for expected in ["mean", "mean_norm", "power_spectrum", "snapshot", "mean_map"]:
         assert any(expected in k for k in logs), f"Expected {expected} in log keys"
 
@@ -286,7 +286,7 @@ def test_hierarchical_enable_disable():
             normalize=lambda x: x,
         ),
     )
-    logs = agg.get_summary(label="test").logs
+    logs = agg.get_logs(label="test")
     assert not any("snapshot" in k for k in logs)
     assert any("mean" in k for k in logs)
 
@@ -380,8 +380,8 @@ def test_legacy_disabled_flags_match_typed_config():
     typed_agg.record_batch(batch=batch)
     legacy_agg.record_batch(batch=batch)
 
-    typed_logs = typed_agg.get_summary(label="test").logs
-    legacy_logs = legacy_agg.get_summary(label="test").logs
+    typed_logs = typed_agg.get_logs(label="test")
+    legacy_logs = legacy_agg.get_logs(label="test")
 
     assert set(typed_logs.keys()) == set(legacy_logs.keys())
     assert not any("snapshot" in k for k in typed_logs)
@@ -425,7 +425,7 @@ def test_disabled_ensemble_produces_no_ensemble_logs():
             normalize=lambda x: x,
         ),
     )
-    logs = agg.get_summary(label="test").logs
+    logs = agg.get_logs(label="test")
     assert not any("crps" in k for k in logs)
     assert not any("ssr_bias" in k for k in logs)
     assert not any("ensemble_mean_rmse" in k for k in logs)
@@ -464,7 +464,7 @@ def test_both_norm_and_denorm_ensemble_metrics_coexist():
             normalize=lambda x: {k: v * 0.5 for k, v in x.items()},
         ),
     )
-    logs = agg.get_summary(label="test").logs
+    logs = agg.get_logs(label="test")
     for metric in ("crps", "ssr_bias", "ensemble_mean_rmse"):
         for var in names:
             assert f"test/ensemble/{metric}/{var}" in logs
@@ -537,7 +537,7 @@ def test_raise_on_unsupported_false_skips(monkeypatch):
             normalize=lambda x: x,
         ),
     )
-    logs = agg.get_summary(label="test").logs
+    logs = agg.get_logs(label="test")
     assert any("mean" in k for k in logs)
     assert not any("power_spectrum" in k for k in logs)
 

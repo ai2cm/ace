@@ -619,6 +619,9 @@ class InferenceEvaluatorAggregator(
         loss = logs.get("time_mean_norm/rmse/channel_mean")
         return InferenceSummary(logs=logs, loss=loss)
 
+    def get_summary_logs(self) -> InferenceLog:
+        return self.get_summary().logs
+
     @torch.no_grad()
     def _get_logs(self):
         """Returns logs as can be reported to WandB."""
@@ -878,6 +881,9 @@ class InferenceAggregator(
             logging.info(f"Getting summary logs for {name} aggregator")
             logs.update(aggregator.get_logs(label=name))
         return InferenceSummary(logs=logs, loss=None)
+
+    def get_summary_logs(self) -> InferenceLog:
+        return self.get_summary().logs
 
     @torch.no_grad()
     def _get_logs(self):
