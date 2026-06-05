@@ -246,6 +246,12 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             the l=0 (global mean) spherical harmonic coefficient, so that
             global mean changes can only result from local operations
             (norms, MLPs, skip connections).
+        clip_latent_global_means: If True, the per-channel spatial mean of
+            the post-encoder latent representation is tracked during
+            training and, in eval, the latent is shifted so that mean falls
+            within the observed envelope (no-op when it already does).
+            Bounds the global-mean of the latent the transformer blocks see
+            at inference to the range observed in training.
     """
 
     spectral_transform: Literal["sht"] = "sht"
@@ -285,6 +291,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     spectral_lora_rank: int = 0
     spectral_lora_alpha: float | None = None
     filter_preserves_global_mean: bool = False
+    clip_latent_global_means: bool = False
 
     def __post_init__(self):
         if self.context_pos_embed_dim > 0 and self.pos_embed:
@@ -336,6 +343,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             spectral_lora_rank=self.spectral_lora_rank,
             spectral_lora_alpha=self.spectral_lora_alpha,
             filter_preserves_global_mean=self.filter_preserves_global_mean,
+            clip_latent_global_means=self.clip_latent_global_means,
         )
         sfno_net = get_lat_lon_sfnonet(
             params=sfno_config,
