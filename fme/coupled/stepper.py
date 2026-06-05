@@ -805,6 +805,10 @@ class CoupledStepper:
         self.atmosphere.set_eval()
         self.ocean.set_eval()
 
+    def set_epoch(self, epoch: int) -> None:
+        self.atmosphere.set_epoch(epoch)
+        self.ocean.set_epoch(epoch)
+
     def get_state(self):
         """
         Returns:
@@ -1780,6 +1784,9 @@ class CoupledTrainStepper(
     def set_eval(self):
         self._stepper.set_eval()
         self._loss.set_eval()
+
+    def set_epoch(self, epoch: int) -> None:
+        self._stepper.set_epoch(epoch)
 
     def get_state(self) -> dict[str, Any]:
         return self._stepper.get_state()
