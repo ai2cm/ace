@@ -107,13 +107,14 @@ class StepConfigABC(abc.ABC):
     def get_ocean(self) -> OceanConfig | None:
         pass
 
+    @abc.abstractmethod
     def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
         """Replace prescribed prognostic names (e.g. when loading from checkpoint)."""
-        pass
 
     @property
+    @abc.abstractmethod
     def allow_missing_variables(self) -> bool:
-        return False
+        pass
 
     @abc.abstractmethod
     def load(self):
@@ -123,8 +124,9 @@ class StepConfigABC(abc.ABC):
         pass
 
     @classmethod
+    @abc.abstractmethod
     def from_state(cls, state: Mapping[str, Any]) -> Self:
-        return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
+        pass
 
 
 @dataclasses.dataclass
@@ -224,6 +226,10 @@ class StepSelector(StepConfigABC):
     def load(self):
         self._step_config_instance.load()
         self.config = dataclasses.asdict(self._step_config_instance)
+
+    @classmethod
+    def from_state(cls, state: Mapping[str, Any]) -> Self:
+        return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
 
 
 class StepABC(abc.ABC):

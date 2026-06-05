@@ -3,6 +3,7 @@ import datetime
 from collections.abc import Callable
 from unittest.mock import MagicMock
 
+import dacite
 import torch
 from torch import nn
 
@@ -125,6 +126,17 @@ class MockStepConfig(StepConfigABC):
 
     def load(self):
         pass
+
+    def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
+        pass
+
+    @property
+    def allow_missing_variables(self) -> bool:
+        return False
+
+    @classmethod
+    def from_state(cls, state) -> "MockStepConfig":
+        return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
 
 
 def test_register():

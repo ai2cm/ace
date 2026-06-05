@@ -161,6 +161,13 @@ class SeparateRadiationStepConfig(StepConfigABC):
     def get_next_step_forcing_names(self) -> list[str]:
         return self.next_step_forcing_names
 
+    def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
+        pass
+
+    @property
+    def allow_missing_variables(self) -> bool:
+        return False
+
     @property
     def diagnostic_names(self) -> list[str]:
         return list(
