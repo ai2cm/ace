@@ -31,6 +31,10 @@ class NormalizationConfig:
         fill_nans_on_denormalize: Whether to fill NaNs during denormalization. If
             true, on denormalization NaNs in the normalized input become global means in
             the denormalized output.
+        stat_aliases: Optional mapping from a variable name to the name of another
+            variable whose mean/std it should borrow. Useful when a name in the
+            normalize-name set (e.g. a derived forcing) has no entry in the stats
+            files; aliasing it to a present variable avoids regenerating the stats.
     """
 
     global_means_path: str | pathlib.Path | None = None
@@ -39,6 +43,7 @@ class NormalizationConfig:
     stds: Mapping[str, float] = dataclasses.field(default_factory=dict)
     fill_nans_on_normalize: bool = False
     fill_nans_on_denormalize: bool = False
+    stat_aliases: Mapping[str, str] = dataclasses.field(default_factory=dict)
 
     def __post_init__(self):
         using_path = (
@@ -81,26 +86,32 @@ class NormalizationConfig:
             self.global_stds_path = None
 
     def build(self, names: list[str]):
+        # Resolve each requested name to the variable whose stats it uses; an
+        # aliased name borrows its target's mean/std (no-op when no alias given).
+        resolved = {k: self.stat_aliases.get(k, k) for k in names}
         using_path = (
             self.global_means_path is not None and self.global_stds_path is not None
         )
         if using_path:
-            return get_normalizer(
+            load_names = list(set(resolved.values()))
+            base = get_normalizer(
                 global_means_path=self.global_means_path,
                 global_stds_path=self.global_stds_path,
-                names=names,
+                names=load_names,
                 fill_nans_on_normalize=self.fill_nans_on_normalize,
                 fill_nans_on_denormalize=self.fill_nans_on_denormalize,
             )
+            means = {k: base.means[resolved[k]] for k in names}
+            stds = {k: base.stds[resolved[k]] for k in names}
         else:
-            means = {k: torch.tensor(self.means[k]) for k in names}
-            stds = {k: torch.tensor(self.stds[k]) for k in names}
-            return StandardNormalizer(
-                means=means,
-                stds=stds,
-                fill_nans_on_normalize=self.fill_nans_on_normalize,
-                fill_nans_on_denormalize=self.fill_nans_on_denormalize,
-            )
+            means = {k: torch.tensor(self.means[resolved[k]]) for k in names}
+            stds = {k: torch.tensor(self.stds[resolved[k]]) for k in names}
+        return StandardNormalizer(
+            means=means,
+            stds=stds,
+            fill_nans_on_normalize=self.fill_nans_on_normalize,
+            fill_nans_on_denormalize=self.fill_nans_on_denormalize,
+        )
 
 
 class StandardNormalizer:

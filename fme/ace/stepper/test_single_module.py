@@ -28,7 +28,11 @@ from fme.ace.inference.test_evaluator import (
     validate_stepper_ocean,
 )
 from fme.ace.registry.sfno import SphericalFourierNeuralOperatorBuilder
-from fme.ace.stepper.derived_forcings import DerivedForcingsConfig, ForcingDeriver
+from fme.ace.stepper.derived_forcings import (
+    DerivedForcingsConfig,
+    ForcingDeriver,
+    NetSurfaceEnergyFluxConfig,
+)
 from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
 from fme.ace.stepper.loss_schedule import EpochNotProvidedError
 from fme.ace.stepper.single_module import (
@@ -1493,6 +1497,44 @@ def test_next_step_forcing_names():
     torch.testing.assert_close(
         stepper.modules[0].module.last_input[:, 2, :],
         forcing_data.data["c"][:, 1],
+    )
+
+
+def test_derived_net_surface_energy_flux_packed_at_next_step():
+    # A derived net_surface_energy_flux listed in in_names + next_step_forcing_names
+    # must be computed from constituent fluxes and packed as input at step+1.
+    flux_names = [
+        "DLWRFsfc",
+        "ULWRFsfc",
+        "DSWRFsfc",
+        "USWRFsfc",
+        "LHTFLsfc",
+        "SHTFLsfc",
+        "total_frozen_precipitation_rate",
+    ]
+    derived_name = "net_surface_energy_flux"
+    derived_forcings = DerivedForcingsConfig(
+        net_surface_energy_flux=NetSurfaceEnergyFluxConfig(
+            name=derived_name, flux_names=flux_names
+        )
+    )
+    stepper = _get_stepper(
+        ["a", derived_name],
+        ["a"],
+        module_name="ChannelSum",
+        next_step_forcing_names=[derived_name],
+        derived_forcings=derived_forcings,
+    )
+    input_data, forcing_data = get_data_for_predict(n_steps=1, forcing_names=flux_names)
+    stepper.predict(input_data, forcing_data)
+
+    expected = AtmosphereData(forcing_data.data).net_surface_energy_flux
+    # in_names order is ["a", derived_name]; channel 1 is the derived flux,
+    # sampled at step+1 (time index 1). Normalization is mean 0 / std 1.
+    assert len(stepper.modules) == 1
+    torch.testing.assert_close(
+        stepper.modules[0].module.last_input[:, 1, :],
+        expected[:, 1],
     )
 
 

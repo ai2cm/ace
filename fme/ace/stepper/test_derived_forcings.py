@@ -7,11 +7,28 @@ import xarray as xr
 
 from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.requirements import DataRequirements
-from fme.ace.stepper.derived_forcings import DerivedForcingsConfig, ForcingDeriver
+from fme.ace.stepper.derived_forcings import (
+    DerivedForcingsConfig,
+    ForcingDeriver,
+    NetSurfaceEnergyFluxConfig,
+)
 from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
 from fme.ace.stepper.insolation.test_insolation import validate_insolation
+from fme.core import metrics
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
+
+NET_SURFACE_ENERGY_FLUX_NAME = "net_surface_energy_flux"
+# Constituent flux names recognized by AtmosphereData.
+FLUX_NAMES = [
+    "DLWRFsfc",
+    "ULWRFsfc",
+    "DSWRFsfc",
+    "USWRFsfc",
+    "LHTFLsfc",
+    "SHTFLsfc",
+    "total_frozen_precipitation_rate",
+]
 
 INSOLATION_NAME = "DSWRFtoa"
 SOLAR_CONSTANT_NAME = "solar_constant"
@@ -171,3 +188,58 @@ def test_forcing_deriver(insolation: InsolationConfig | None):
 
         # Check that we did not mutate the input tensor dictionary.
         assert forcing_dict != result.data
+
+
+def test_net_surface_energy_flux_update_requirements():
+    config = NetSurfaceEnergyFluxConfig(
+        name=NET_SURFACE_ENERGY_FLUX_NAME, flux_names=FLUX_NAMES
+    )
+    derived_forcings = DerivedForcingsConfig(net_surface_energy_flux=config)
+    n_timesteps = 2
+    requirements = DataRequirements(
+        names=[NET_SURFACE_ENERGY_FLUX_NAME, "a"], n_timesteps=n_timesteps
+    )
+    result = derived_forcings.update_requirements(requirements)
+    # Derived name removed, constituent fluxes added, other names preserved.
+    assert NET_SURFACE_ENERGY_FLUX_NAME not in result.names
+    assert "a" in result.names
+    for flux_name in FLUX_NAMES:
+        assert flux_name in result.names
+    assert result.n_timesteps == n_timesteps
+
+
+def test_net_surface_energy_flux_forcing_deriver():
+    n_timesteps = 2
+    n_samples = 3
+    index = xr.date_range("2000", freq="6h", periods=n_timesteps, use_cftime=True)
+    time = xr.DataArray(np.stack(n_samples * [index]), dims=["sample", "time"])
+    shape = (n_samples, n_timesteps, N_LAT, N_LON)
+
+    dataset_info = DatasetInfo(
+        timestep=TIMESTEP,
+        horizontal_coordinates=HORIZONTAL_COORDINATES,
+        variable_metadata={},
+    )
+    config = NetSurfaceEnergyFluxConfig(
+        name=NET_SURFACE_ENERGY_FLUX_NAME, flux_names=FLUX_NAMES
+    )
+    derived_forcings = DerivedForcingsConfig(net_surface_energy_flux=config)
+    forcing_deriver = derived_forcings.build(dataset_info)
+
+    forcing_dict = {name: torch.rand(shape) for name in FLUX_NAMES}
+    forcing = BatchData(dict(forcing_dict), time, labels=None)
+    result = forcing_deriver(forcing)
+
+    expected = metrics.net_surface_energy_flux(
+        forcing_dict["DLWRFsfc"],
+        forcing_dict["ULWRFsfc"],
+        forcing_dict["DSWRFsfc"],
+        forcing_dict["USWRFsfc"],
+        forcing_dict["LHTFLsfc"],
+        forcing_dict["SHTFLsfc"],
+        frozen_precipitation_rate=forcing_dict["total_frozen_precipitation_rate"],
+    )
+    assert result.data[NET_SURFACE_ENERGY_FLUX_NAME].shape == shape
+    torch.testing.assert_close(result.data[NET_SURFACE_ENERGY_FLUX_NAME], expected)
+    # Check that we did not mutate the input tensor dictionary.
+    assert NET_SURFACE_ENERGY_FLUX_NAME not in forcing_dict
