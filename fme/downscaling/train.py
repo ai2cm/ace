@@ -19,7 +19,11 @@ from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
 from fme.core.wandb import WandB
-from fme.downscaling.aggregators import Aggregator, GenerationAggregator
+from fme.downscaling.aggregators import (
+    Aggregator,
+    GenerationAggregator,
+    GenerationSummary,
+)
 from fme.downscaling.data import (
     PairedBatchData,
     PairedDataLoaderConfig,
@@ -234,7 +238,7 @@ class Trainer:
         else:
             yield
 
-    def valid_one_epoch(self) -> GenerationAggregator:
+    def valid_one_epoch(self) -> GenerationSummary:
         self.model.module.eval()
         if (
             self.patch_data
@@ -284,13 +288,13 @@ class Trainer:
 
         wandb = WandB.get_instance()
         validation_metrics = validation_aggregator.get_wandb(prefix="validation")
-        generation_metrics = generation_aggregator.get_wandb(prefix="generation")
+        generation_summary = generation_aggregator.get_summary(prefix="generation")
 
         wandb.log(
-            {**generation_metrics, **validation_metrics},
+            {**generation_summary.logs, **validation_metrics},
             self.num_batches_seen,
         )
-        return generation_aggregator
+        return generation_summary
 
     @property
     def resuming(self) -> bool:
@@ -298,17 +302,16 @@ class Trainer:
             return False
         return os.path.isfile(self.epoch_checkpoint_path)
 
-    def save_best_checkpoint(self, generation_aggregator: GenerationAggregator) -> None:
+    def save_best_checkpoint(self, summary: GenerationSummary) -> None:
         if self.best_checkpoint_path is None:
             raise ValueError("Best checkpoint path is not set")
         if self.validate_using_ema:
             best_checkpoint_context = self._ema_context
         else:
             best_checkpoint_context = contextlib.nullcontext  # type: ignore
-        valid_loss = generation_aggregator.get_validation_loss()
-        if valid_loss < self.best_valid_loss:
+        if summary.validation_loss < self.best_valid_loss:
             logging.info("Saving best checkpoint")
-            self.best_valid_loss = valid_loss
+            self.best_valid_loss = summary.validation_loss
             with best_checkpoint_context():
                 _save_checkpoint(self, self.best_checkpoint_path)
         else:
@@ -318,10 +321,9 @@ class Trainer:
             )
         if self.best_histogram_tail_checkpoint_path is None:
             raise ValueError("Best checkpoint path is not set")
-        histogram_tail_metric = generation_aggregator.get_histogram_tail_metric()
-        if histogram_tail_metric < self.best_histogram_tail_metric:
+        if summary.histogram_tail_metric < self.best_histogram_tail_metric:
             logging.info("Saving checkpoint for best histogram tail.")
-            self.best_histogram_tail_metric = histogram_tail_metric
+            self.best_histogram_tail_metric = summary.histogram_tail_metric
             with best_checkpoint_context():
                 _save_checkpoint(self, self.best_histogram_tail_checkpoint_path)
         else:
@@ -368,10 +370,10 @@ class Trainer:
             wandb.log({"epoch": epoch}, step=self.num_batches_seen)
             if self._validate_current_epoch(epoch):
                 logging.info("Running metrics on validation data.")
-                generation_aggregator = self.valid_one_epoch()
+                generation_summary = self.valid_one_epoch()
                 valid_end = time.time()
                 if dist.is_root():
-                    self.save_best_checkpoint(generation_aggregator)
+                    self.save_best_checkpoint(generation_summary)
             else:
                 valid_end = train_end
             if dist.is_root():

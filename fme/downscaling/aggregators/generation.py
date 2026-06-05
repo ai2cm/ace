@@ -1,3 +1,4 @@
+import dataclasses
 import re
 from collections.abc import Collection, Mapping
 from typing import Any
@@ -416,6 +417,14 @@ class GenerationAggregator:
                 ds = ds.merge(agg.get_dataset())
         return ds
 
+    def get_summary(self, prefix: str = "") -> "GenerationSummary":
+        logs = self.get_wandb(prefix)
+        return GenerationSummary(
+            logs=logs,
+            validation_loss=self.get_validation_loss(),
+            histogram_tail_metric=self.get_histogram_tail_metric(),
+        )
+
     def get_validation_loss(self) -> float:
         """Scalar to minimize for best-validation checkpoint selection."""
         return _get_channel_mean_scalar_metric(
@@ -433,3 +442,19 @@ class GenerationAggregator:
             # frac_of_target metrics are best at 1.0, not 0.0
             value = abs(1.0 - value)
         return value
+
+
+@dataclasses.dataclass
+class GenerationSummary:
+    """Summary returned by GenerationAggregator.
+
+    Attributes:
+        logs: Metrics dict suitable for wandb logging.
+        validation_loss: Scalar to minimize for best-validation checkpoint.
+        histogram_tail_metric: Scalar to minimize for best-histogram-tail
+            checkpoint.
+    """
+
+    logs: Mapping[str, Any]
+    validation_loss: float
+    histogram_tail_metric: float
