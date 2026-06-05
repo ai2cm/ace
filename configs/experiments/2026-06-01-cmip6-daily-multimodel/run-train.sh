@@ -26,14 +26,19 @@ run_training() {
   local N_GPUS="$3"
   local CONFIG_PATH="$SCRIPT_PATH/$config_filename"
 
-  python -m fme.ace.validate_config --config_type train "$CONFIG_PATH"
-
   # Extract additional args from config header
   local extra_args=()
   while IFS= read -r line; do
     [[ "$line" =~ ^#\ arg:\ (.*) ]] && extra_args+=(${BASH_REMATCH[1]})
   done <"$CONFIG_PATH"
 
+  # ``validate_config`` runs *inside* the gantry container as the first
+  # step of the bash entrypoint so that Weka (mounted via the
+  # ``--weka`` flag below) is available — the validators load
+  # ``index.csv`` / ``centering.nc`` to check data-side invariants.
+  # Running it before ``torchrun`` lets the job fail fast on config
+  # bugs without paying for GPU spin-up; ``set -e`` propagates the
+  # exit so beaker marks the experiment failed at the right step.
   gantry run \
     --name "$job_name" \
     --description 'Run ACE training (CMIP6 daily multi-model run 1)' \
@@ -56,9 +61,9 @@ run_training() {
     --system-python \
     --install "pip install --no-deps ." \
     "${extra_args[@]}" \
-    -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train "$CONFIG_PATH"
+    -- bash -c "set -e && python -m fme.ace.validate_config --config_type train '$CONFIG_PATH' && torchrun --nproc_per_node '$N_GPUS' -m fme.ace.train '$CONFIG_PATH'"
 }
 
 # Active runs (uncomment one at a time; sweeps go in this block).
 # run_training "train-4deg-daily-cmip6-multimodel-per-source-norm.yaml" "train-4deg-daily-cmip6-multimodel-per-source-norm-rs0" 4
-# run_training "train-4deg-daily-cmip6-multimodel-cohort-norm.yaml" "train-4deg-daily-cmip6-multimodel-cohort-norm-rs0" 4
+run_training "train-4deg-daily-cmip6-multimodel-cohort-norm.yaml" "train-4deg-daily-cmip6-multimodel-cohort-norm-rs0" 1

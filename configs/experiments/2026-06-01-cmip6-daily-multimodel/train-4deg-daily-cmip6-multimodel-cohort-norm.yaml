@@ -87,6 +87,7 @@ inference:
           - '2010-09-01'
       dataset:
         data_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/EC-Earth3/historical/r1i1p1f1
+        labels: ["EC-Earth3.p1"]
         file_pattern: data.*.nc
         engine: netcdf4
       num_data_workers: 8
@@ -131,6 +132,7 @@ inference:
         times: ['1950-03-01', '1950-06-01', '1950-09-01', '1950-12-01']
       dataset:
         data_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/EC-Earth3/historical/r1i1p1f1
+        labels: ["EC-Earth3.p1"]
         file_pattern: data.*.nc
         engine: netcdf4
       num_data_workers: 8
@@ -202,6 +204,7 @@ inference:
         times: ['2015-03-01', '2015-06-01', '2015-09-01', '2015-12-01']
       dataset:
         data_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/CNRM-CM6-1/ssp585/r2i1p1f2
+        labels: ["CNRM-CM6-1.p1"]
         file_pattern: data.*.nc
         engine: netcdf4
       num_data_workers: 8
@@ -234,6 +237,7 @@ inference:
         times: ['1940-03-01', '1940-06-01', '1940-09-01', '1940-12-01']
       dataset:
         data_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/IPSL-CM6A-LR/historical/r2i1p1f1
+        labels: ["IPSL-CM6A-LR.p1"]
         file_pattern: data.*.nc
         engine: netcdf4
       num_data_workers: 8
@@ -269,6 +273,7 @@ inference:
         times: ['2015-03-01', '2015-06-01', '2015-09-01', '2015-12-01']
       dataset:
         data_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/EC-Earth3/ssp585/r3i1p1f1
+        labels: ["EC-Earth3.p1"]
         file_pattern: data.*.nc
         engine: netcdf4
       num_data_workers: 8
@@ -314,6 +319,7 @@ inference:
         times: ['2015-03-01', '2015-06-01', '2015-09-01', '2015-12-01']
       dataset:
         data_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/UKESM1-0-LL/ssp585/r1i1p1f2
+        labels: ["UKESM1-0-LL.p1"]
         file_pattern: data.*.nc
         engine: netcdf4
       num_data_workers: 8
@@ -345,6 +351,7 @@ inference:
         times: ['2015-03-01', '2015-06-01', '2015-09-01', '2015-12-01']
       dataset:
         data_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/MPI-ESM1-2-LR/ssp585/r1i1p1f1
+        labels: ["MPI-ESM1-2-LR.p1"]
         file_pattern: data.*.nc
         engine: netcdf4
       num_data_workers: 8
@@ -376,6 +383,7 @@ inference:
         times: ['2015-03-01', '2015-06-01', '2015-09-01', '2015-12-01']
       dataset:
         data_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/CanESM5/ssp585/r1i1p1f1
+        labels: ["CanESM5.p1"]
         file_pattern: data.*.nc
         engine: netcdf4
       num_data_workers: 8
@@ -407,6 +415,7 @@ inference:
         times: ['2015-03-01', '2015-06-01', '2015-09-01', '2015-12-01']
       dataset:
         data_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/GFDL-CM4/ssp585/r1i1p1f1
+        labels: ["GFDL-CM4.p1"]
         file_pattern: data.*.nc
         engine: netcdf4
       num_data_workers: 8
@@ -437,6 +446,7 @@ inference:
         times: ['1970-03-01', '1970-06-01', '1970-09-01', '1970-12-01']
       dataset:
         data_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/INM-CM5-0/historical/r1i1p1f1
+        labels: ["INM-CM5-0.p1"]
         file_pattern: data.*.nc
         engine: netcdf4
       num_data_workers: 8
@@ -466,6 +476,7 @@ inference:
         times: ['1970-03-01', '1970-06-01', '1970-09-01', '1970-12-01']
       dataset:
         data_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/NorESM2-LM/historical/r1i1p1f1
+        labels: ["NorESM2-LM.p1"]
         file_pattern: data.*.nc
         engine: netcdf4
       num_data_workers: 8
