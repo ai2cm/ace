@@ -77,14 +77,14 @@ train_loader:
       file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-sea_ice.zarr
       engine: zarr
       subset:
-        start_time: '0401-01-03T12:00:00'
-        stop_time: '0491-01-01T00:00:00'
+        start_time: '0425-01-03T12:00:00'
+        stop_time: '0515-01-01T00:00:00'
     - data_path: /pscratch/sd/e/elynnwu/fme-dataset
       file_pattern: 2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H.zarr
       engine: zarr
       subset:
-        start_time: '0401-01-03T12:00:00'
-        stop_time: '0491-01-01T00:00:00'
+        start_time: '0425-01-03T12:00:00'
+        stop_time: '0515-01-01T00:00:00'
 validation:
   loader:
     batch_size: 32
@@ -97,14 +97,14 @@ validation:
         file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-sea_ice.zarr
         engine: zarr
         subset:
-          start_time: '0491-01-01T06:00:00'
-          stop_time: '0496-01-01T00:00:00'
+          start_time: '0515-01-01T06:00:00'
+          stop_time: '0520-01-01T00:00:00'
       - data_path: /pscratch/sd/e/elynnwu/fme-dataset
         file_pattern: 2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H.zarr
         engine: zarr
         subset:
-          start_time: '0491-01-01T06:00:00'
-          stop_time: '0496-01-01T00:00:00'
+          start_time: '0515-01-01T06:00:00'
+          stop_time: '0520-01-01T00:00:00'
 optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001
@@ -116,22 +116,6 @@ stepper_training:
   n_forward_steps: 2
   loss:
     type: MSE
-    weights:
-      T_0: 0.5
-      T_1: 0.5
-      U_0: 0.5
-      V_0: 0.5
-      STW_0: 0.25
-      STW_1: 0.25
-      STW_2: 0.5
-      surface_precipitation_rate: 2
-      FLDS: 2
-      FLUS: 5
-      FSUS: 2
-      FSDS: 2
-      FSUTOA: 2
-      DTENDTTW: 0.5
-      PS: 3
 stepper:
   step:
     type: single_module
