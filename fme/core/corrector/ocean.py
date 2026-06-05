@@ -19,6 +19,11 @@ from fme.core.ocean_data import HasOceanDepthIntegral, OceanData
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
+# Name of the precomputed net surface energy flux forcing, if present. Must match
+# the default name of the ace-side NetSurfaceEnergyFluxConfig deriver (fme.core
+# cannot import fme.ace, so the coupling is by value).
+NET_SURFACE_ENERGY_FLUX_NAME = "net_surface_energy_flux"
+
 
 @dataclasses.dataclass
 class SeaIceFractionConfig:
@@ -210,11 +215,23 @@ def _compute_ocean_net_surface_energy_flux(
 
     This extends the atmosphere net surface energy flux with SST-dependent
     heat transport by precipitation and evaporation.
+
+    The atmosphere net surface energy flux (``base_flux``) is taken directly from
+    a precomputed ``net_surface_energy_flux`` forcing field when present (e.g. the
+    derived forcing fed to the network); otherwise it is computed from the
+    constituent atmosphere fluxes. The two are equivalent by construction, but the
+    precomputed path is needed when the constituents have been dropped from the
+    forcing (only the net flux is kept). The SST-dependent mass heat flux term is
+    always computed from the constituent precipitation and latent heat fluxes,
+    which must remain available in ``forcing_data``.
     """
     atmos = AtmosphereData(forcing_data)
-    base_flux = (
-        atmos.net_surface_energy_flux
-    )  # missing: - calving * LATENT_HEAT_OF_FREEZING
+    if NET_SURFACE_ENERGY_FLUX_NAME in forcing_data:
+        base_flux = forcing_data[NET_SURFACE_ENERGY_FLUX_NAME]
+    else:
+        base_flux = (
+            atmos.net_surface_energy_flux
+        )  # missing: - calving * LATENT_HEAT_OF_FREEZING
     mass_heat_flux = (
         SPECIFIC_HEAT_OF_SEA_WATER_CM4
         * (

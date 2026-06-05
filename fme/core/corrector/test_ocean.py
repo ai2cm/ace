@@ -4,8 +4,10 @@ import pytest
 import torch
 
 from fme import get_device
+from fme.core.atmosphere_data import AtmosphereData
 from fme.core.coordinates import DepthCoordinate
 from fme.core.corrector.ocean import (
+    NET_SURFACE_ENERGY_FLUX_NAME,
     OceanCorrector,
     OceanCorrectorConfig,
     OceanHeatContentBudgetConfig,
@@ -212,6 +214,32 @@ def _make_atmos_forcing_data(shape, device=DEVICE):
         "PRATEsfc": torch.full(shape, 1e-4, device=device),
         "total_frozen_precipitation_rate": torch.full(shape, 1e-5, device=device),
     }
+
+
+def test_compute_ocean_net_surface_energy_flux_uses_forcing_value():
+    """A precomputed net_surface_energy_flux forcing is used as the base flux,
+    falling back to the constituent fluxes when absent. The SST-dependent mass
+    heat flux term is added in both cases."""
+    sst = torch.full(IMG_SHAPE, 300.0, device=DEVICE)
+    forcing = _make_atmos_forcing_data(IMG_SHAPE)
+
+    # Constituent path: no precomputed net flux present.
+    constituent_result = _compute_ocean_net_surface_energy_flux(forcing, sst)
+    base_flux = AtmosphereData(forcing).net_surface_energy_flux
+
+    # Equivalence: a precomputed net flux equal to the constituent base flux
+    # reproduces the constituent path exactly.
+    forcing_equal = {**forcing, NET_SURFACE_ENERGY_FLUX_NAME: base_flux.clone()}
+    equal_result = _compute_ocean_net_surface_energy_flux(forcing_equal, sst)
+    torch.testing.assert_close(equal_result, constituent_result)
+
+    # Sentinel: a distinct precomputed value is used verbatim as the base flux,
+    # with the mass heat flux term (constituent_result - base_flux) still added.
+    mass_heat_flux = constituent_result - base_flux
+    sentinel = torch.full(IMG_SHAPE, -1234.0, device=DEVICE)
+    forcing_sentinel = {**forcing, NET_SURFACE_ENERGY_FLUX_NAME: sentinel}
+    sentinel_result = _compute_ocean_net_surface_energy_flux(forcing_sentinel, sst)
+    torch.testing.assert_close(sentinel_result, sentinel + mass_heat_flux)
 
 
 def test_surface_energy_flux_correction_resid():
