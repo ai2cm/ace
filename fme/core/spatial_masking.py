@@ -72,6 +72,7 @@ class StaticSpatialMaskingConfig:
         Build StaticSpatialMasking.
 
         """
+        exclude = NameAndPrefixMatcher(self.exclude_names_and_prefixes)
         if isinstance(self.fill_value, float):
             return StaticSpatialMasking(
                 mask_value=self.mask_value,
@@ -79,7 +80,7 @@ class StaticSpatialMaskingConfig:
                     lambda: torch.as_tensor(self.fill_value)
                 ),
                 mask=mask,
-                exclude_names_and_prefixes=self.exclude_names_and_prefixes,
+                exclude=exclude,
             )
         if means is None:
             raise ValueError(
@@ -90,7 +91,7 @@ class StaticSpatialMaskingConfig:
             mask_value=self.mask_value,
             fill_value=means,
             mask=mask,
-            exclude_names_and_prefixes=self.exclude_names_and_prefixes,
+            exclude=exclude,
         )
 
 
@@ -100,7 +101,7 @@ class StaticSpatialMasking:
         mask_value: int,
         fill_value: float | TensorMapping,
         mask: HasGetSpatialMask,
-        exclude_names_and_prefixes: list[str] | None = None,
+        exclude: NameAndPrefixMatcher = NameAndPrefixMatcher(),
     ):
         if isinstance(fill_value, float):
             fill_mapping: TensorMapping = collections.defaultdict(
@@ -111,10 +112,10 @@ class StaticSpatialMasking:
         self._fill_mapping = fill_mapping
         self._mask_value = mask_value
         self._mask = mask
-        self._exclude_matcher = NameAndPrefixMatcher(exclude_names_and_prefixes)
+        self._exclude = exclude
 
-    def _masks(self, name: str):
-        return not self._exclude_matcher.matches(name)
+    def _masks(self, name: str) -> bool:
+        return not self._exclude.match(name)
 
     def __call__(self, data: TensorMapping) -> TensorDict:
         """

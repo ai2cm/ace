@@ -217,6 +217,13 @@ class OceanCorrector(CorrectorABC):
         )
 
 
+# Name of the precomputed net surface energy flux forcing, if present. Must
+# match the name of the equivalent property on AtmosphereData, and assumed to be
+# computed in the same way (i.e., not including the SST-dependent mass heat flux
+# term).
+NET_SURFACE_ENERGY_FLUX_NAME = "net_surface_energy_flux"
+
+
 def _compute_ocean_net_surface_energy_flux(
     forcing_data: TensorMapping,
     sst: torch.Tensor,
@@ -226,11 +233,22 @@ def _compute_ocean_net_surface_energy_flux(
 
     This extends the atmosphere net surface energy flux with SST-dependent
     heat transport by precipitation and evaporation.
+
+    The atmosphere net surface energy flux (``base_flux``) is taken directly
+    from a precomputed ``net_surface_energy_flux`` forcing field when present;
+    otherwise it is computed from the constituent atmosphere fluxes. The two are
+    equivalent by construction. The SST-dependent mass heat flux term is always
+    computed from the constituent precipitation and latent heat fluxes, which
+    must remain available in ``forcing_data``.
+
     """
     atmos = AtmosphereData(forcing_data)
-    base_flux = (
-        atmos.net_surface_energy_flux
-    )  # missing: - calving * LATENT_HEAT_OF_FREEZING
+    if NET_SURFACE_ENERGY_FLUX_NAME in forcing_data:
+        base_flux = forcing_data[NET_SURFACE_ENERGY_FLUX_NAME]
+    else:
+        base_flux = (
+            atmos.net_surface_energy_flux
+        )  # missing: - calving * LATENT_HEAT_OF_FREEZING
     mass_heat_flux = (
         SPECIFIC_HEAT_OF_SEA_WATER_CM4
         * (

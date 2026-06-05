@@ -1539,7 +1539,7 @@ class PreCorrectorOptimizationConfig:
         return {
             name: value
             for name, value in uncorrected.items()
-            if not self._matcher.matches(name)
+            if not self._matcher.match(name)
         }
 
     def unmatched_exclusions(self, names: Iterable[str]) -> list[str]:
@@ -1552,7 +1552,7 @@ class PreCorrectorOptimizationConfig:
         return [
             entry
             for entry in self.exclude_names_and_prefixes
-            if not any(NameAndPrefixMatcher([entry]).matches(name) for name in names)
+            if not any(NameAndPrefixMatcher([entry]).match(name) for name in names)
         ]
 
 
