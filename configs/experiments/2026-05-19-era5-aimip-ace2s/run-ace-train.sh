@@ -69,7 +69,8 @@ run_training "ace-train-config-1-step-pretrain.yaml" "$base_name-era5-energy-cor
 # then uncomment the desired run below
 
 # run_training "ace-train-config-pressure-level-finetuning-stochastic.yaml" \
-#   "$base_name-era5-pressure-level-fine-tuning-rs0"
+#   "$base_name-era5-energy-corrector-pressure-level-fine-tuning-rs0" \
+#   stepper.step.config.corrector.total_energy_budget_correction.method=constant_temperature
 
 # deterministic versions
 
