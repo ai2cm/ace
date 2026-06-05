@@ -37,6 +37,8 @@ import pathlib
 
 import yaml
 
+WANDB_PROJECT = "VarMasking2"
+
 FORCING_VARS = [
     "land_fraction",
     "ocean_fraction",
@@ -151,10 +153,15 @@ def _apply_common_settings(
         step_cfg.pop("global_mean_removal", None)
 
 
+def _set_wandb_project(cfg: dict) -> None:
+    cfg["logging"]["project"] = WANDB_PROJECT
+
+
 def _write_config(cfg: dict, out_path: pathlib.Path, existing_only: bool) -> None:
     if existing_only and not out_path.exists():
         print(f"Skipped {out_path.name}")
         return
+    _set_wandb_project(cfg)
     with out_path.open("w") as f:
         yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)
     print(f"Wrote {out_path.name}")
@@ -251,8 +258,8 @@ def main() -> None:
         base_config = HERE / f"{stem}.yaml"
         with base_config.open() as f:
             base = yaml.safe_load(f)
-        # generate_bernoulli_configs(base, stem, existing_only=args.existing_only)
-        # generate_uniform_configs(base, stem, existing_only=args.existing_only)
+        generate_bernoulli_configs(base, stem, existing_only=args.existing_only)
+        generate_uniform_configs(base, stem, existing_only=args.existing_only)
         generate_co2_variants(base, stem, existing_only=args.existing_only)
 
 

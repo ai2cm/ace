@@ -255,7 +255,7 @@ logging:
   log_to_screen: true
   log_to_wandb: true
   log_to_file: true
-  project: ace
+  project: VarMasking2
   entity: ai2cm
 train_loader:
   batch_size: 8
