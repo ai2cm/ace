@@ -33,9 +33,12 @@ wandb_group=""
 gantry run \
     --name $JOB_NAME \
     --description 'Run 100km to 3km evaluation on coarsened X-SHiELD' \
-    --workspace ai2/climate-titan \
+    --workspace ai2/ace \
     --priority high \
+    --not-preemptible \
     --cluster ai2/titan \
+    --cluster ai2/jupiter \
+    --cluster ai2/ceres \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
@@ -50,7 +53,7 @@ gantry run \
     --gpus $NGPU \
     --shared-memory 400GiB \
     --budget ai2/atec-climate \
-    --no-conda \
+    --system-python \
     --install "pip install --no-deps ." \
     --allow-dirty \
     -- torchrun --nproc_per_node $NGPU -m fme.downscaling.evaluator $CONFIG_PATH

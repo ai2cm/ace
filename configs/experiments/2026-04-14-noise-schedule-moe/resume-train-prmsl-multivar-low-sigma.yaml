@@ -1,4 +1,8 @@
 resume_results_dir: /previous_results
+log_loss_vs_noise: true
+tropical_oversampling:
+  lat_threshold: 30.0
+  multiplier: 8
 static_inputs:
   HGTsfc: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
   land_fraction: /climate-default/2025-11-19-X-SHiELD-AMIP-downscaling-land-fraction/3km/land_fraction.zarr
@@ -13,11 +17,13 @@ model:
   - northward_wind_at_ten_meters
   - PRMSL
   - PRATEsfc
+  - air_temperature_at_two_meters
   in_names:
   - PRATEsfc
   - eastward_wind_at_ten_meters
   - northward_wind_at_ten_meters
   - PRMSL
+  - air_temperature_at_two_meters
   loss:
     type: MSE
   module:
@@ -25,24 +31,24 @@ model:
       bottleneck_attention: false
       model_channels: 128
       attn_resolutions: []
-      num_blocks: 1
-      channel_mult_emb: 6
+      num_blocks: 2
+      channel_mult_emb: 12
       channel_mult:
       - 1
       - 2
       - 2
       - 2
-      - 1
-      - 1
+      - 2
+      - 2
       use_apex_gn: true
     type: unet_diffusion_song_v2
   normalization:
     coarse:
-      global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/100km/centering-20260407.nc
-      global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/100km/scaling-full-field-20260407.nc
+      global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/100km/centering-20260514.nc
+      global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/100km/scaling-full-field-20260514.nc
     fine:
-      global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/3km/centering-20260206.nc
-      global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/3km/scaling-full-field-20260206.nc
+      global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/3km/centering-20260514.nc
+      global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/3km/scaling-full-field-20260514.nc
   num_diffusion_generation_steps: 18
   churn: 0.0
   training_noise_distribution:
@@ -59,8 +65,8 @@ ema:
   decay: 0.999
 validate_using_ema: true
 train_data:
-  sample_with_replacement: 640
-  batch_size: 120
+  sample_with_replacement: 144
+  batch_size: 48
   num_data_workers: 2
   fine:
   - merge:
@@ -91,8 +97,8 @@ train_data:
         start_time: '2014-01-01T00:00:00'
         stop_time: '2022-12-31T23:59:00'
   lat_extent:
-    start: -30
-    stop: 30
+    start: -66.0
+    stop: 70
   strict_ensemble: false
 validation_data:
   batch_size: 16
@@ -139,8 +145,8 @@ validation_data:
   drop_last: true
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
-max_epochs: 400
-validate_interval: 50
+max_epochs: 200
+validate_interval: 10
 experiment_dir: /results
 save_checkpoints: false
 logging:

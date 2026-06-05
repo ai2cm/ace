@@ -6,8 +6,8 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-100km-to-3km-multivar-tropics-sig200-2000-global-resume"
-CONFIG_FILENAME="resume-train-prmsl-multivar-high-sigma.yaml"
+JOB_NAME="xshield-downscaling-100km-to-3km-low-sigma-increase-cap-multemb12-correct-hist-ckpt-resume"
+CONFIG_FILENAME="resume-train-prmsl-multivar-low-sigma.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -22,7 +22,7 @@ cd $REPO_ROOT  # so config path is valid no matter where we are running this scr
 
 IMAGE=$(cat $REPO_ROOT/latest_deps_only_image.txt)
 
-PREVIOUS_RESULTS_DATASET="01KNWGPBT9WYD4BCR5GQ5Q78H0"
+PREVIOUS_RESULTS_DATASET="01KTCANBGJS4DJJQMS05RCQNY6"
 
 
 gantry run \
@@ -45,7 +45,7 @@ gantry run \
     --gpus $N_GPUS \
     --shared-memory 400GiB \
     --budget ai2/atec-climate \
-    --no-conda \
+    --system-python \
     --install "pip install --no-deps ." \
     --allow-dirty \
     -- torchrun --nproc_per_node $N_GPUS -m fme.downscaling.train $CONFIG_PATH
