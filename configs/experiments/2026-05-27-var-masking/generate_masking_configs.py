@@ -38,6 +38,7 @@ import pathlib
 import yaml
 
 WANDB_PROJECT = "VarMasking2"
+PRE_COOLDOWN_CHECKPOINT_EPOCH = 66
 
 FORCING_VARS = [
     "land_fraction",
@@ -157,11 +158,16 @@ def _set_wandb_project(cfg: dict) -> None:
     cfg["logging"]["project"] = WANDB_PROJECT
 
 
+def _set_pre_cooldown_checkpoint_epoch(cfg: dict) -> None:
+    cfg["pre_cooldown_checkpoint_epoch"] = PRE_COOLDOWN_CHECKPOINT_EPOCH
+
+
 def _write_config(cfg: dict, out_path: pathlib.Path, existing_only: bool) -> None:
     if existing_only and not out_path.exists():
         print(f"Skipped {out_path.name}")
         return
     _set_wandb_project(cfg)
+    _set_pre_cooldown_checkpoint_epoch(cfg)
     with out_path.open("w") as f:
         yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)
     print(f"Wrote {out_path.name}")
