@@ -328,6 +328,10 @@ class FCN3StepConfig(StepConfigABC):
     def load(self):
         self.normalization.load()
 
+    @property
+    def allow_missing_variables(self) -> bool:
+        return False
+
 
 class FCN3Step(StepABC):
     """
