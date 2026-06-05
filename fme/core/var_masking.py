@@ -5,6 +5,21 @@ from typing import ClassVar, Literal
 import torch
 
 
+def _get_base_batch_size(batch_size: int, n_ensemble: int) -> int:
+    if n_ensemble <= 0:
+        raise ValueError(f"n_ensemble must be positive, got {n_ensemble}")
+    if batch_size % n_ensemble != 0:
+        raise ValueError(
+            f"batch_size ({batch_size}) must be divisible by n_ensemble "
+            f"({n_ensemble})"
+        )
+    return batch_size // n_ensemble
+
+
+def _repeat_ensemble_mask(mask: torch.Tensor, n_ensemble: int) -> torch.Tensor:
+    return torch.repeat_interleave(mask, n_ensemble, dim=0)
+
+
 @dataclasses.dataclass
 class UniformMaskingConfig:
     """
@@ -63,20 +78,22 @@ class UniformMaskingConfig:
         self,
         variable_names: list[str],
         batch_size: int,
+        n_ensemble: int,
         device: torch.device | None = None,
     ) -> dict[str, torch.Tensor]:
         """Sample per-sample presence masks (True = present, False = masked)."""
+        base_batch_size = _get_base_batch_size(batch_size, n_ensemble)
         eligible, lo, hi = self._eligible_and_bounds(variable_names)
         n_eligible = len(eligible)
         if hi == 0:
             return {}
         if device is None:
-            present = torch.ones(batch_size, n_eligible, dtype=torch.bool)
+            present = torch.ones(base_batch_size, n_eligible, dtype=torch.bool)
         else:
             present = torch.ones(
-                batch_size, n_eligible, dtype=torch.bool, device=device
+                base_batch_size, n_eligible, dtype=torch.bool, device=device
             )
-        for i in range(batch_size):
+        for i in range(base_batch_size):
             n = int(torch.randint(lo, hi + 1, (1,)).item())
             if n > 0:
                 if device is None:
@@ -88,7 +105,7 @@ class UniformMaskingConfig:
         for j, name in enumerate(eligible):
             col = present[:, j]
             if not bool(col.all().item()):
-                result[name] = col
+                result[name] = _repeat_ensemble_mask(col, n_ensemble)
         return result
 
 
@@ -201,16 +218,21 @@ class VariableMaskingConfig:
         self,
         variable_names: list[str],
         batch_size: int,
+        n_ensemble: int,
         device: torch.device | None = None,
     ) -> dict[str, torch.Tensor]:
         """Sample per-sample presence masks (True = present, False = masked)."""
+        base_batch_size = _get_base_batch_size(batch_size, n_ensemble)
         result: dict[str, torch.Tensor] = {}
 
         explicit_groups = self._explicit_groups(variable_names)
         for key, group_vars in explicit_groups.items():
             rate = self.per_variable[key]
             if rate > 0.0:
-                present = self._sample_rate_mask(rate, batch_size, device)
+                present = _repeat_ensemble_mask(
+                    self._sample_rate_mask(rate, base_batch_size, device),
+                    n_ensemble,
+                )
                 for name in group_vars:
                     self._merge_mask(result, name, present)
 
@@ -221,12 +243,18 @@ class VariableMaskingConfig:
         if default_rate > 0.0:
             for name in variable_names:
                 if name not in explicit_handled:
-                    present = self._sample_rate_mask(default_rate, batch_size, device)
+                    present = _repeat_ensemble_mask(
+                        self._sample_rate_mask(default_rate, base_batch_size, device),
+                        n_ensemble,
+                    )
                     self._merge_mask(result, name, present)
 
         if self.uniform is not None:
             uniform_masks = self.uniform.sample_masks(
-                self._uniform_candidate_names(variable_names), batch_size, device
+                self._uniform_candidate_names(variable_names),
+                batch_size,
+                n_ensemble,
+                device,
             )
             for name, mask in uniform_masks.items():
                 self._merge_mask(result, name, mask)

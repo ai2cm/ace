@@ -16,6 +16,7 @@ def test_apply_input_process_func_propagates_metadata():
     args = StepArgs(
         input=input_data,
         next_step_input_data=next_step,
+        n_ensemble=2,
         labels=labels,
         data_mask=data_mask,
     )
@@ -32,6 +33,7 @@ def test_apply_input_process_func_propagates_metadata():
         )
 
     assert result.labels == labels
+    assert result.n_ensemble == 2
     assert result.data_mask is not None
     for name in data_mask:
         torch.testing.assert_close(result.data_mask[name], data_mask[name])
@@ -39,6 +41,7 @@ def test_apply_input_process_func_propagates_metadata():
     known_attrs = {
         "input",
         "next_step_input_data",
+        "n_ensemble",
         "labels",
         "data_mask",
     }

@@ -404,6 +404,7 @@ class SingleModuleStep(StepABC):
             training=self.module.torch_module.training,
             in_names=self.in_names,
             input_data=args.input,
+            n_ensemble=args.n_ensemble,
         )
 
         def network_call(input_norm: TensorDict) -> TensorDict:
@@ -490,6 +491,7 @@ def _build_effective_input_mask(
     training: bool,
     in_names: list[str],
     input_data: TensorMapping,
+    n_ensemble: int,
 ) -> dict[str, torch.Tensor]:
     """Merge data-provided masks with training-time input dropout masks."""
     result = dict(data_mask) if data_mask is not None else {}
@@ -501,7 +503,12 @@ def _build_effective_input_mask(
     except StopIteration as err:
         raise ValueError("input_dropout requires at least one input tensor.") from err
 
-    dropout_masks = input_dropout.sample_masks(in_names, ref.shape[0], ref.device)
+    dropout_masks = input_dropout.sample_masks(
+        in_names,
+        ref.shape[0],
+        n_ensemble,
+        ref.device,
+    )
     for name, mask in dropout_masks.items():
         mask = mask.to(dtype=torch.bool)
         if name in result:

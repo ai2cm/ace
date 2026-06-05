@@ -132,7 +132,12 @@ def test_detach_radiation(detach_radiation: bool):
     )
     input_data["forcing_rad"].requires_grad = True
     output_data = step.step(
-        args=StepArgs(input=input_data, next_step_input_data=input_data, labels=None),
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=input_data,
+            n_ensemble=1,
+            labels=None,
+        ),
         wrapper=lambda x: x,
     )
     for name, value in output_data.items():
@@ -145,7 +150,12 @@ def test_detach_radiation(detach_radiation: bool):
     assert grad is not None
     # have to call again as torch.autograd.grad frees the graph
     output_data = step.step(
-        args=StepArgs(input=input_data, next_step_input_data=input_data, labels=None),
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=input_data,
+            n_ensemble=1,
+            labels=None,
+        ),
         wrapper=lambda x: x,
     )
     grad = torch.autograd.grad(
@@ -177,6 +187,7 @@ def test_residual_prediction(residual_prediction: bool):
         args=StepArgs(
             input=input_data,
             next_step_input_data={},
+            n_ensemble=1,
             labels=None,
         ),
         wrapper=lambda x: x,
