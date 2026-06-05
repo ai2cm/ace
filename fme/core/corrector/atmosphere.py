@@ -52,11 +52,14 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
         global\_dry\_air = global\_mean(ps -
         sum_k((ak\_diff + bk\_diff \* ps) \* wat_k))
 
-    in the generated data is equal to its value in the input data. This is done
-    by adding a globally-constant correction to the surface pressure in each
-    column. As per-mass values such as mixing ratios of water are unchanged,
-    this can cause changes in total water or energy. Note all global means here
-    are area-weighted.
+    in the generated data is equal to its value at the initial condition. The
+    reference is captured the first time the corrector runs (using the
+    ``input_data`` it sees, which is the IC during the first step of inference
+    or training rollout) and threaded across step calls via ``CorrectorState``.
+    The correction is applied by adding a globally-constant offset to the
+    surface pressure in each column. As per-mass values such as mixing ratios
+    of water are unchanged, this can cause changes in total water or energy.
+    Note all global means here are area-weighted.
 
     ``zero_global_mean_moisture_advection`` enforces the constraint that:
 
@@ -88,10 +91,15 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
     True if using a ``moisture_budget_correction`` option other than ``None``.
 
     Parameters:
-        conserve_dry_air: If True, force the generated data to conserve dry air
-            by subtracting a constant offset from the surface pressure of each
-            column. This can cause changes in per-mass values such as total water
-            or energy.
+        conserve_dry_air: If True, pin the global-mean dry-air mass of the
+            generated data to its value at the initial condition. The reference
+            is captured the first time the corrector runs (from ``input_data``,
+            which is the IC during the first step of an inference or training
+            rollout) and threaded across step calls via ``CorrectorState``.
+            The correction is applied by adding a globally-constant offset to
+            the dry-air pressure of each column and solving for the consistent
+            surface pressure. As per-mass values such as mixing ratios of water
+            are unchanged, this can cause changes in total water or energy.
         zero_global_mean_moisture_advection: If True, force the generated data to
             have zero global mean moisture advection by subtracting a constant
             offset from the moisture advection tendency of each column.
@@ -117,16 +125,6 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
         total_energy_budget_correction: If not None, force the generated data to
             conserve an idealized version of total energy using the provided
             configuration.
-        pin_global_dry_air_mass: If True, pin the global-mean dry-air mass of
-            the generated data to its value at the initial condition. The
-            reference is captured the first time the corrector runs (using the
-            ``input_data`` it sees, which is the IC during the first step of
-            inference or training rollout) and threaded across step calls via
-            ``CorrectorState``. The correction is applied as a uniform offset
-            to the dry-air pressure of each column, identical in form to
-            ``conserve_dry_air`` but pinning to the IC rather than the prior
-            step. Runs after ``conserve_dry_air``, so its constraint wins when
-            both are enabled.
     """
 
     conserve_dry_air: bool = False
@@ -142,7 +140,6 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
     ) = None
     force_positive_names: list[str] = dataclasses.field(default_factory=list)
     total_energy_budget_correction: EnergyBudgetConfig | None = None
-    pin_global_dry_air_mass: bool = False
 
     def get_corrector(
         self,
@@ -192,9 +189,17 @@ class AtmosphereCorrector(CorrectorABC):
                     "conserve_dry_air is set to True, but no vertical coordinate is "
                     "available."
                 )
-            gen_data = _force_conserve_dry_air(
+            corrector_state = _seed_global_dry_air_mass(
                 input_data=input_data,
-                gen_data=gen_data,
+                corrector_state=corrector_state,
+                area_weighted_mean=self._gridded_operations.area_weighted_mean,
+                vertical_coordinate=self._vertical_coordinate,
+                precision=self._dry_air_precision,
+            )
+            assert corrector_state.global_dry_air_mass is not None
+            gen_data = _adjust_gen_dry_air_to_target(
+                gen_data,
+                target_global_dry_air=corrector_state.global_dry_air_mass,
                 area_weighted_mean=self._gridded_operations.area_weighted_mean,
                 vertical_coordinate=self._vertical_coordinate,
                 precision=self._dry_air_precision,
@@ -233,27 +238,6 @@ class AtmosphereCorrector(CorrectorABC):
                 timestep_seconds=self._timestep_seconds,
                 method=self._config.total_energy_budget_correction.method,
                 unaccounted_heating=self._config.total_energy_budget_correction.constant_unaccounted_heating,
-            )
-        if self._config.pin_global_dry_air_mass:
-            if self._vertical_coordinate is None:
-                raise ValueError(
-                    "pin_global_dry_air_mass is set to True, but no vertical "
-                    "coordinate is available."
-                )
-            corrector_state = _seed_global_dry_air_mass(
-                input_data=input_data,
-                corrector_state=corrector_state,
-                area_weighted_mean=self._gridded_operations.area_weighted_mean,
-                vertical_coordinate=self._vertical_coordinate,
-                precision=self._dry_air_precision,
-            )
-            assert corrector_state.global_dry_air_mass is not None
-            gen_data = _adjust_gen_dry_air_to_target(
-                gen_data,
-                target_global_dry_air=corrector_state.global_dry_air_mass,
-                area_weighted_mean=self._gridded_operations.area_weighted_mean,
-                vertical_coordinate=self._vertical_coordinate,
-                precision=self._dry_air_precision,
             )
         return gen_data, corrector_state
 
@@ -325,35 +309,6 @@ def _adjust_gen_dry_air_to_target(
     )
     gen.set_surface_pressure(new_pressure.to(dtype=gen.surface_pressure.dtype))
     return gen.data
-
-
-def _force_conserve_dry_air(
-    input_data: TensorMapping,
-    gen_data: TensorMapping,
-    area_weighted_mean: AreaWeightedMean,
-    vertical_coordinate: HasAtmosphereVerticalIntegral,
-    precision: torch.dtype = torch.float64,
-) -> TensorDict:
-    """
-    Update the generated data to conserve dry air against ``input_data``.
-
-    Computes the globally-averaged dry-air pressure of ``input_data`` and uses
-    that as the target for ``_adjust_gen_dry_air_to_target``.
-    """
-    input = AtmosphereData(input_data, vertical_coordinate)
-    if input.surface_pressure is None:
-        raise ValueError("surface_pressure is required to force dry air conservation")
-    target = area_weighted_mean(
-        input.surface_pressure_due_to_dry_air.to(precision),
-        keepdim=True,
-    )
-    return _adjust_gen_dry_air_to_target(
-        gen_data,
-        target_global_dry_air=target,
-        area_weighted_mean=area_weighted_mean,
-        vertical_coordinate=vertical_coordinate,
-        precision=precision,
-    )
 
 
 def _force_zero_global_mean_moisture_advection(
