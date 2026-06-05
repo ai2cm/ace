@@ -736,6 +736,56 @@ class LossConfig:
         return final_loss.to(device=get_device())
 
 
+@dataclasses.dataclass
+class CorrectorRegularizationConfig:
+    """Configuration for penalizing the magnitude of corrector adjustments.
+
+    The configured loss is applied between the per-variable corrector
+    corrections (post-corrector minus pre-corrector outputs) and a zero
+    baseline, in the loss-normalized space. This produces an L1- or
+    L2-style penalty on the size of the corrector's adjustments.
+
+    Args:
+        loss: The loss function configuration. Comparisons are gen-vs-gen,
+            so ``EnsembleLoss``/``NaN`` are not supported and
+            ``global_mean_type`` must be ``None``.
+        weight: Scalar multiplier applied to the regularization term.
+    """
+
+    loss: LossConfig
+    weight: float = 1.0
+
+    def __post_init__(self):
+        if self.loss.type in ("EnsembleLoss", "NaN"):
+            raise ValueError(
+                f"CorrectorRegularizationConfig does not support loss type "
+                f"{self.loss.type!r}; corrections are compared against a "
+                "zero baseline, so only standard pointwise losses make sense."
+            )
+        if self.loss.global_mean_type is not None:
+            raise ValueError(
+                "CorrectorRegularizationConfig does not support "
+                "global_mean_type; corrections are compared against a zero "
+                "baseline, so a global-mean component is ill-defined."
+            )
+
+    def build(
+        self,
+        gridded_ops: GriddedOperations | None,
+        out_names: list[str],
+        normalizer: StandardNormalizer,
+        channel_dim: int = -3,
+    ) -> "WeightedMappingLoss":
+        bare_loss = self.loss.build(gridded_operations=gridded_ops)
+        return WeightedMappingLoss(
+            loss=bare_loss,
+            weights={},
+            out_names=out_names,
+            channel_dim=channel_dim,
+            normalizer=normalizer,
+        )
+
+
 class StepLoss(torch.nn.Module):
     def __init__(
         self, loss: WeightedMappingLoss, sqrt_loss_decay_constant: float = 0.0

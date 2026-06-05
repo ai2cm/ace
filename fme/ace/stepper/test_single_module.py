@@ -65,7 +65,7 @@ from fme.core.coordinates import (
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
-from fme.core.loss import StepLossConfig
+from fme.core.loss import CorrectorRegularizationConfig, LossConfig, StepLossConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import (
@@ -1143,7 +1143,7 @@ def test_step():
 
     output = stepper.step(
         StepArgs(input=input_data, next_step_input_data={}, labels=None)
-    )
+    ).output
 
     torch.testing.assert_close(output["a"], input_data["a"] + 1)
     torch.testing.assert_close(output["b"], input_data["b"] + 1)
@@ -1155,7 +1155,7 @@ def test_step_with_diagnostic():
     input_data = {"a": torch.rand(n_samples, 5, 5).to(DEVICE)}
     output = stepper.step(
         StepArgs(input=input_data, next_step_input_data={}, labels=None)
-    )
+    ).output
     torch.testing.assert_close(output["a"], input_data["a"])
     torch.testing.assert_close(output["c"], input_data["a"])
 
@@ -1173,7 +1173,7 @@ def test_step_with_forcing_and_diagnostic(residual_prediction):
     input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
     output = stepper.step(
         StepArgs(input=input_data, next_step_input_data={}, labels=None)
-    )
+    ).output
     if residual_prediction:
         expected_a_output = 2 * input_data["a"] + 1 - norm_mean
     else:
@@ -1191,7 +1191,7 @@ def test_step_with_prescribed_ocean():
     ocean_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "mask"]}
     output = stepper.step(
         StepArgs(input=input_data, next_step_input_data=ocean_data, labels=None)
-    )
+    ).output
     expected_a_output = torch.where(
         torch.round(ocean_data["mask"]).to(int) == 1,
         ocean_data["a"],
@@ -2526,3 +2526,101 @@ def test_predict_with_data_mask_zeros_masked_forcing():
     output, _ = stepper.predict(input_data, forcing_data)
     ic_a = input_data.as_batch_data().data["a"][:, 0]
     torch.testing.assert_close(output.data["a"][:, 0], ic_a)
+
+
+def test_train_on_batch_no_corrector_regularization_metric_when_unconfigured():
+    """When corrector_regularization is None, the metric is not recorded."""
+    torch.manual_seed(0)
+    n_steps = 2
+    data_with_ic = get_data(["a", "b"], n_samples=3, n_time=n_steps + 1).data
+    config = _get_stepper_config(["a", "b"], ["a", "b"])
+    stepper = _get_train_stepper(config, loss=StepLossConfig(type="MSE"))
+    stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
+    assert "corrector_regularization" not in stepped.metrics
+    for step in range(n_steps):
+        assert f"corrector_regularization_step_{step}" not in stepped.metrics
+
+
+def test_train_on_batch_corrector_regularization_metric_when_configured():
+    """When corrector_regularization is set, per-step and aggregate metrics appear.
+
+    The default corrector is a no-op, so the regularization value is exactly 0.
+    """
+    torch.manual_seed(0)
+    n_steps = 2
+    data_with_ic = get_data(["a", "b"], n_samples=3, n_time=n_steps + 1).data
+    config = _get_stepper_config(["a", "b"], ["a", "b"])
+    reg = CorrectorRegularizationConfig(loss=LossConfig(type="MSE"), weight=1.0)
+    stepper = _get_train_stepper(
+        config,
+        loss=StepLossConfig(type="MSE"),
+        corrector_regularization=reg,
+    )
+    stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
+    assert "corrector_regularization" in stepped.metrics
+    for step in range(n_steps):
+        assert f"corrector_regularization_step_{step}" in stepped.metrics
+        # default AtmosphereCorrector with no flags is a no-op: corrections = 0
+        torch.testing.assert_close(
+            stepped.metrics[f"corrector_regularization_step_{step}"],
+            torch.tensor(0.0, device=DEVICE),
+        )
+
+
+def test_train_on_batch_corrector_regularization_active_with_force_positive():
+    """A corrector that clips negatives produces non-zero regularization.
+
+    Uses ``Multiply(-1)`` so the network produces negative outputs from
+    non-negative inputs, and ``force_positive_names=["a"]`` clips them to 0.
+    The resulting corrections are non-zero, so the regularization loss is
+    strictly positive.
+    """
+    torch.manual_seed(0)
+    n_steps = 1
+    data_with_ic = get_data(["a"], n_samples=3, n_time=n_steps + 1).data
+    corrector_config = AtmosphereCorrectorConfig(force_positive_names=["a"])
+    config = _get_stepper_config(
+        ["a"], ["a"], module_name="AddOne", corrector=corrector_config
+    )
+    # AddOne would keep things positive — swap in Multiply(-1) by overriding
+    # the module config below
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": Multiply(-1.0)}
+                    ),
+                    in_names=["a"],
+                    out_names=["a"],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(means={"a": 0.0}, stds={"a": 1.0}),
+                    ),
+                    corrector=corrector_config,
+                )
+            ),
+        ),
+    )
+    reg = CorrectorRegularizationConfig(loss=LossConfig(type="MSE"), weight=2.0)
+    stepper = _get_train_stepper(
+        config,
+        loss=StepLossConfig(type="MSE"),
+        corrector_regularization=reg,
+    )
+    stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
+    assert "corrector_regularization" in stepped.metrics
+    reg_value = stepped.metrics["corrector_regularization"].item()
+    assert reg_value > 0.0
+
+
+def test_corrector_regularization_config_rejects_invalid_loss_types():
+    """EnsembleLoss/NaN and global_mean_type are not valid for gen-vs-gen."""
+    with pytest.raises(ValueError, match="EnsembleLoss"):
+        CorrectorRegularizationConfig(loss=LossConfig(type="EnsembleLoss"))
+    with pytest.raises(ValueError, match="NaN"):
+        CorrectorRegularizationConfig(loss=LossConfig(type="NaN"))
+    with pytest.raises(ValueError, match="global_mean_type"):
+        CorrectorRegularizationConfig(
+            loss=LossConfig(type="MSE", global_mean_type="LpLoss")
+        )

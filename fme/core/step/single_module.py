@@ -31,7 +31,7 @@ from fme.core.step.secondary_decoder import (
     SecondaryDecoder,
     SecondaryDecoderConfig,
 )
-from fme.core.step.step import StepABC, StepConfigABC, StepSelector
+from fme.core.step.step import StepABC, StepConfigABC, StepResult, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
@@ -370,7 +370,7 @@ class SingleModuleStep(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
+    ) -> StepResult:
         """
         Step the model forward one timestep given input data.
 
@@ -379,7 +379,8 @@ class SingleModuleStep(StepABC):
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
-            The denormalized output data at the next time step.
+            A :class:`StepResult` carrying the denormalized output data at
+            the next time step.
         """
 
         def network_call(input_norm: TensorDict) -> TensorDict:
@@ -510,7 +511,7 @@ def step_with_adjustments(
     prescribed_prognostic_names: list[str] | None = None,
     global_mean_removal: GlobalMeanRemoval | None = None,
     data_mask: TensorMapping | None = None,
-) -> TensorDict:
+) -> StepResult:
     """
     Step the model forward one timestep given input data.
 
@@ -541,7 +542,9 @@ def step_with_adjustments(
             ``global_mean_removal.forward_transform``.
 
     Returns:
-        The denormalized output data at the next time step.
+        A :class:`StepResult` carrying the denormalized output data at the
+        next time step and, when a corrector is applied, the per-variable
+        corrections (post-corrector minus pre-corrector, in physical space).
     """
     if prescribed_prognostic_names is None:
         prescribed_prognostic_names = []
@@ -558,8 +561,11 @@ def step_with_adjustments(
     output = normalizer.denormalize(output_norm)
     if global_mean_removal is not None:
         output = global_mean_removal.inverse_transform(output)
+    corrections: TensorDict | None = None
     if corrector is not None:
+        pre_corrector_output = output
         output = corrector(input, output, next_step_input_data)
+        corrections = {k: output[k] - pre_corrector_output[k] for k in output}
     if ocean is not None:
         output = ocean(input, output, next_step_input_data)
     for name in prescribed_prognostic_names:
@@ -569,4 +575,4 @@ def step_with_adjustments(
             raise ValueError(
                 f"prescribed_prognostic_name '{name}' not in next_step_input_data"
             )
-    return output
+    return StepResult(output=output, corrections=corrections)
