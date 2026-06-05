@@ -496,3 +496,8 @@ def test_generation_aggregator_checkpoint_selection_methods():
 
     assert aggregator.get_validation_loss() == 2.0
     assert aggregator.get_histogram_tail_metric() == pytest.approx(0.05)
+
+    summary = aggregator.get_summary(prefix="generation")
+    assert summary.validation_loss == 2.0
+    assert summary.histogram_tail_metric == pytest.approx(0.05)
+    assert set(summary.logs.keys()) == set(aggregator._wandb_logs.keys())

@@ -57,9 +57,10 @@ def test_labels_exist(config: TrainAggregatorConfig, expected_keys: list[str]):
             normalize=lambda x: x,
         ),
     )
-    logs = agg.get_logs(label="test")
-    assert set(logs.keys()) == set(expected_keys)
-    assert not np.isnan(float(logs["test/mean/loss"]))
+    summary = agg.get_summary(label="test")
+    assert set(summary.logs.keys()) == set(expected_keys)
+    assert not np.isnan(float(summary.logs["test/mean/loss"]))
+    assert summary.loss == float(summary.logs["test/mean/loss"])
 
 
 @pytest.mark.parametrize(
