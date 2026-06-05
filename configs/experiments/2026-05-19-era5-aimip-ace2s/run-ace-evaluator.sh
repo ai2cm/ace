@@ -58,6 +58,6 @@ run_evaluation "ace2-1-aimip-era5-energy-corrector-rs0-evaluator"          "01KS
 run_evaluation "ace2-1-aimip-era5-energy-corrector-rs1-evaluator"          "01KT9Q6PX1FF7TZ2N4VD50EMCQ"
 run_evaluation "ace2-1-aimip-era5-energy-corrector-unacc5p7-rs0-evaluator" "01KT8JRN0D25D8NSDCKY8SEMHM"
 
-# stochastic seeds (no rs1); uncomment and fill in IDs once PLFT jobs complete
-run_evaluation "ace2s-aimip-era5-rs0-evaluator"                 "TBD"
-run_evaluation "ace2s-aimip-era5-energy-corrector-rs0-evaluator" "TBD"
+# stochastic seeds (no rs1)
+run_evaluation "ace2s-aimip-era5-rs0-evaluator"                  "01KTB9E2GC25N0Q91R35KFNV9W"
+run_evaluation "ace2s-aimip-era5-energy-corrector-rs0-evaluator" "01KTCNV4EP12BHCJBX4PSRKMW3"  # PLFT job still running
