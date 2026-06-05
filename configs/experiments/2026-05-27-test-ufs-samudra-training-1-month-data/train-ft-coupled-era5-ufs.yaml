@@ -226,13 +226,10 @@ stepper:
                 remove_negative_ocean_fraction: false
                 zero_where_ice_free_names:
                 - sea_ice_volume
-                - sfdsi
-                - UI
-                - VI
-              surface_energy_flux_correction:
-                method: prescribed
-              ocean_heat_content_correction:
-                method: scaled_temperature
+              # surface_energy_flux_correction:
+              #   method: prescribed
+              # ocean_heat_content_correction:
+              #   method: scaled_temperature
           next_step_forcing_names:
           - DLWRFsfc
           - DSWRFsfc
