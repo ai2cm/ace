@@ -1752,6 +1752,7 @@ def test_dropout_masks_extra_channels():
     out_names = ["a"]
     img_shape = (4, 8)
     n_samples = 2
+    device = fme.get_device()
     means = {n: 10.0 for n in in_names + out_names}
     stds = {n: 1.0 for n in in_names + out_names}
 
@@ -1787,18 +1788,20 @@ def test_dropout_masks_extra_channels():
     )
     dataset_info = DatasetInfo(
         horizontal_coordinates=LatLonCoordinates(
-            lat=torch.zeros(img_shape[0]),
-            lon=torch.zeros(img_shape[1]),
+            lat=torch.zeros(img_shape[0], device=device),
+            lon=torch.zeros(img_shape[1], device=device),
         ),
         vertical_coordinate=HybridSigmaPressureCoordinate(
-            ak=torch.arange(7), bk=torch.arange(7)
+            ak=torch.arange(7, device=device), bk=torch.arange(7, device=device)
         ),
         timestep=TIMESTEP,
     )
     step_obj = step_config.get_step(dataset_info, init_weights=lambda _: None)
     assert isinstance(step_obj, SingleModuleStep)
 
-    input_data = {n: torch.full((n_samples, *img_shape), 15.0) for n in in_names}
+    input_data = {
+        n: torch.full((n_samples, *img_shape), 15.0, device=device) for n in in_names
+    }
     next_step_data = get_tensor_dict(
         step_obj.next_step_input_names, img_shape, n_samples
     )
