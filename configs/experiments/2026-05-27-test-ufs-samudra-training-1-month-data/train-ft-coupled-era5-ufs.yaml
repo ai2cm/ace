@@ -17,13 +17,13 @@ inference:
     num_data_workers: 4
     dataset:
       ocean:
-        - data_path: /climate-default
-          file_pattern: 2026-06-03-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
-          engine: zarr
+        data_path: /climate-default
+        file_pattern: 2026-06-03-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
+        engine: zarr
       atmosphere:
-        - data_path: /climate-default
-          file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
-          engine: zarr
+        data_path: /climate-default
+        file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+        engine: zarr
     start_indices:
       times:
       - '2010-01-04T12:00:00'
@@ -52,25 +52,26 @@ train_loader:
       subset:
           stop_time: '2021-12-31T12:00:00'
     atmosphere:
-      - data_path: /climate-default
-        file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
-        engine: zarr
-        subset:
-          start_time: '2021-12-31T12:00:00'
-validation_loader:
-  batch_size: 16
-  num_data_workers: 2
-  prefetch_factor: 2
-  dataset:
-    ocean:
       data_path: /climate-default
-      file_pattern: 2026-06-03-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
       engine: zarr
       subset:
-          start_time: '2022-01-01T12:00:00'
-          stop_time: '2023-12-31T12:00:00'
-    atmosphere:
-      - data_path: /climate-default
+        stop_time: '2021-12-31T12:00:00'
+validation:
+  loader:
+    batch_size: 16
+    num_data_workers: 2
+    prefetch_factor: 2
+    dataset:
+      ocean:
+        data_path: /climate-default
+        file_pattern: 2026-06-03-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
+        engine: zarr
+        subset:
+            start_time: '2022-01-01T12:00:00'
+            stop_time: '2023-12-31T12:00:00'
+      atmosphere:
+        data_path: /climate-default
         file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
         engine: zarr
         subset:
