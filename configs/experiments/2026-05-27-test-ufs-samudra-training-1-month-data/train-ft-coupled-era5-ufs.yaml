@@ -50,12 +50,14 @@ train_loader:
       file_pattern: 2026-06-03-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
       engine: zarr
       subset:
+          start_time: '1994-01-03T12:00:00'
           stop_time: '2021-12-31T12:00:00'
     atmosphere:
       data_path: /climate-default
       file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
       engine: zarr
       subset:
+        start_time: '1994-01-03T12:00:00'
         stop_time: '2021-12-31T12:00:00'
 validation:
   loader:
