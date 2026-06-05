@@ -1626,13 +1626,10 @@ class TestBuildValidationCallback:
     """
 
     @staticmethod
-    def _make_task(name, weight=1.0, aggregator=None, aggregator_loss=0.0):
+    def _make_task(name, weight=1.0, aggregator=None):
         data = unittest.mock.MagicMock()
         if aggregator is None:
             aggregator = unittest.mock.MagicMock()
-            aggregator.get_summary.return_value = AggregatorSummary(
-                logs={}, loss=aggregator_loss
-            )
         return ValidationTask(
             name=name,
             data=data,
@@ -1651,7 +1648,7 @@ class TestBuildValidationCallback:
             return callback(epoch=epoch)
 
     def test_single_entry_weighted_loss(self):
-        tasks = [self._make_task("val", weight=2.0, aggregator_loss=0.5)]
+        tasks = [self._make_task("val", weight=2.0)]
         logs, loss = self._call(
             tasks,
             [
@@ -1665,8 +1662,8 @@ class TestBuildValidationCallback:
 
     def test_zero_weight_excluded_from_loss_but_logs_kept(self):
         tasks = [
-            self._make_task("a", weight=1.0, aggregator_loss=0.5),
-            self._make_task("b", weight=0.0, aggregator_loss=999.0),
+            self._make_task("a", weight=1.0),
+            self._make_task("b", weight=0.0),
         ]
         logs, loss = self._call(
             tasks,
@@ -1681,8 +1678,8 @@ class TestBuildValidationCallback:
 
     def test_multiple_weighted_entries_sum_weighted(self):
         tasks = [
-            self._make_task("a", weight=2.0, aggregator_loss=0.1),
-            self._make_task("b", weight=3.0, aggregator_loss=0.2),
+            self._make_task("a", weight=2.0),
+            self._make_task("b", weight=3.0),
         ]
         _, loss = self._call(
             tasks,
@@ -1694,7 +1691,7 @@ class TestBuildValidationCallback:
         assert loss == pytest.approx(2.0 * 0.1 + 3.0 * 0.2)
 
     def test_missing_loss_for_weighted_entry_raises(self):
-        tasks = [self._make_task("a", weight=1.0, aggregator_loss=None)]
+        tasks = [self._make_task("a", weight=1.0)]
         with pytest.raises(RuntimeError, match="did not produce a loss"):
             self._call(
                 tasks,
@@ -1702,7 +1699,7 @@ class TestBuildValidationCallback:
             )
 
     def test_missing_loss_for_zero_weight_entry_is_skipped(self):
-        tasks = [self._make_task("a", weight=0.0, aggregator_loss=None)]
+        tasks = [self._make_task("a", weight=0.0)]
         logs, loss = self._call(
             tasks,
             [AggregatorSummary(logs={"a/other_metric": 1.0}, loss=None)],
@@ -1712,8 +1709,8 @@ class TestBuildValidationCallback:
 
     def test_overlapping_log_keys_between_entries_raises(self):
         tasks = [
-            self._make_task("a", weight=1.0, aggregator_loss=0.5),
-            self._make_task("b", weight=1.0, aggregator_loss=0.6),
+            self._make_task("a", weight=1.0),
+            self._make_task("b", weight=1.0),
         ]
         with pytest.raises(RuntimeError, match="overlap with earlier entries"):
             self._call(
@@ -1733,8 +1730,8 @@ class TestBuildValidationCallback:
         self._call(
             tasks,
             [
-                AggregatorSummary(logs={"a/mean/loss": 0.1}, loss=0.0),
-                AggregatorSummary(logs={"b/mean/loss": 0.2}, loss=0.0),
+                AggregatorSummary(logs={"a/mean/loss": 0.1}, loss=0.1),
+                AggregatorSummary(logs={"b/mean/loss": 0.2}, loss=0.2),
             ],
             epoch=7,
         )
@@ -1742,9 +1739,7 @@ class TestBuildValidationCallback:
             task.data.set_epoch.assert_called_once_with(7)
 
     def test_aggregator_factory_called_per_invocation(self):
-        aggregator = unittest.mock.MagicMock()
-        aggregator.get_summary.return_value = AggregatorSummary(logs={}, loss=0.1)
-        factory = unittest.mock.MagicMock(return_value=aggregator)
+        factory = unittest.mock.MagicMock(return_value=unittest.mock.MagicMock())
         data = unittest.mock.MagicMock()
         task: ValidationTask = ValidationTask(
             name="a", data=data, aggregator_factory=factory, weight=1.0
@@ -1772,12 +1767,7 @@ class TestBuildInferenceCallback:
     """
 
     @staticmethod
-    def _make_task(
-        name,
-        weight=0.0,
-        epoch_set=frozenset({1}),
-        aggregator=None,
-    ):
+    def _make_task(name, weight=0.0, epoch_set=frozenset({1}), aggregator=None):
         data = unittest.mock.MagicMock()
         if aggregator is None:
             aggregator = unittest.mock.MagicMock()
@@ -1973,8 +1963,7 @@ class TestBuildInferenceCallback:
         assert "b/time_mean_norm/rmse/channel_mean" not in logs
 
     def test_aggregator_factory_called_per_invocation(self):
-        aggregator = unittest.mock.MagicMock()
-        factory = unittest.mock.MagicMock(return_value=aggregator)
+        factory = unittest.mock.MagicMock(return_value=unittest.mock.MagicMock())
         data = unittest.mock.MagicMock()
         task: InferenceTask = InferenceTask(
             name="a",
