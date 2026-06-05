@@ -328,11 +328,10 @@ optimization:
     - 4
     - 66
 stepper_training:
-  n_ensemble: 2
-  n_forward_steps: 1
-  optimize_last_step_only: true
+  n_forward_steps: 2
+  optimize_last_step_only: false
   loss:
-    type: EnsembleLoss
+    type: MSE
     weights:
       air_temperature_0: 0.5
       air_temperature_1: 0.5
@@ -352,9 +351,6 @@ stepper_training:
       USWRFtoa: 2
       tendency_of_total_water_path_due_to_advection: 0.5
       PRESsfc: 3
-    kwargs:
-      crps_weight: 0.9
-      energy_score_weight: 0.1
 stepper:
   step:
     type: single_module
@@ -364,8 +360,7 @@ stepper:
         type: NoiseConditionedSFNO
         config:
           embed_dim: 512
-          noise_embed_dim: 32
-          noise_type: isotropic
+          noise_embed_dim: 0
           filter_type: linear
           affine_norms: true
           normalize_big_skip: true
@@ -504,14 +499,12 @@ stepper:
         kind: shared
         append_as_input: true
       input_dropout:
-        uniform:
-          min_vars: min
-          max_vars: 15
-          ignore_vars:
-          - land_fraction
-          - ocean_fraction
-          - sea_ice_fraction
-          - DSWRFtoa
-          - HGTsfc
-          - surface_temperature
+        per_variable:
+          default_rate: 0.2
+          land_fraction: 0.0
+          ocean_fraction: 0.0
+          sea_ice_fraction: 0.0
+          DSWRFtoa: 0.0
+          HGTsfc: 0.0
+          surface_temperature: 0.0
       include_channel_mask_inputs: true
