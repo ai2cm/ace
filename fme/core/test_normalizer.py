@@ -300,6 +300,43 @@ def test_build_from_files():
         assert "c" not in normalizer.stds
 
 
+def test_stat_aliases_from_files():
+    # Stats files contain only the alias target; the derived name borrows it.
+    mean_ds = get_scalar_dataset(["hfds_total_area"], fill_value=1.0)
+    std_ds = get_scalar_dataset(["hfds_total_area"], fill_value=2.0)
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = pathlib.Path(tmp_dir)
+        mean_ds.to_netcdf(tmp_path / "mean.nc")
+        std_ds.to_netcdf(tmp_path / "std.nc")
+        normalizer = NormalizationConfig(
+            global_means_path=tmp_path / "mean.nc",
+            global_stds_path=tmp_path / "std.nc",
+            stat_aliases={"net_surface_energy_flux": "hfds_total_area"},
+        ).build(["net_surface_energy_flux"])
+    # No ValueError raised; alias resolves to the target's mean/std.
+    assert normalizer.means["net_surface_energy_flux"] == 1.0
+    assert normalizer.stds["net_surface_energy_flux"] == 2.0
+
+
+def test_stat_aliases_explicit():
+    normalizer = NormalizationConfig(
+        means={"hfds_total_area": 1.0},
+        stds={"hfds_total_area": 2.0},
+        stat_aliases={"net_surface_energy_flux": "hfds_total_area"},
+    ).build(["net_surface_energy_flux"])
+    assert normalizer.means["net_surface_energy_flux"] == 1.0
+    assert normalizer.stds["net_surface_energy_flux"] == 2.0
+
+
+def test_stat_aliases_default_empty_is_noop():
+    # Default empty stat_aliases changes no existing behavior.
+    config = NormalizationConfig(means={"a": 1.0}, stds={"a": 2.0})
+    assert config.stat_aliases == {}
+    normalizer = config.build(["a"])
+    assert normalizer.means["a"] == 1.0
+    assert normalizer.stds["a"] == 2.0
+
+
 @pytest.mark.parametrize("fill_nans_on_normalize", [True, False])
 @pytest.mark.parametrize("fill_nans_on_denormalize", [True, False])
 def test_load_from_files(fill_nans_on_normalize: bool, fill_nans_on_denormalize: bool):

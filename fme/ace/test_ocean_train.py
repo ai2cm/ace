@@ -295,6 +295,102 @@ inference:
     forward_steps_in_memory: 2
 """
 
+# Constituent surface energy flux names recognized by AtmosphereData, used to
+# derive net_surface_energy_flux as a forcing input.
+_NET_SFC_FLUX_NAME = "net_surface_energy_flux"
+_NET_SFC_FLUX_CONSTITUENTS = [
+    "DLWRFsfc",
+    "ULWRFsfc",
+    "DSWRFsfc",
+    "USWRFsfc",
+    "LHTFLsfc",
+    "SHTFLsfc",
+    "total_frozen_precipitation_rate",
+]
+
+# Training config that derives net_surface_energy_flux from constituent fluxes and
+# feeds it to the network as a next-step forcing. The derived name borrows
+# hfds_total_area's normalization stats via stat_aliases (it is absent from the
+# stats files).
+_DERIVED_FORCING_TRAIN_CONFIG_TEMPLATE = """
+experiment_dir: {results_dir}
+save_checkpoint: true
+save_per_epoch_diagnostics: false
+max_epochs: 1
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: false
+  project: fme
+  entity: ai2cm
+train_loader:
+  dataset:
+    data_path: '{train_data_path}'
+    spatial_dimensions: latlon
+  batch_size: 2
+  num_data_workers: 0
+validation:
+- loader:
+    dataset:
+      data_path: '{valid_data_path}'
+      spatial_dimensions: latlon
+    batch_size: 2
+    num_data_workers: 0
+optimization:
+  use_gradient_accumulation: true
+  optimizer_type: "Adam"
+  lr: 0.001
+  kwargs:
+    weight_decay: 0.01
+  scheduler:
+      type: CosineAnnealingLR
+      kwargs:
+        T_max: 1
+stepper_training:
+  n_forward_steps: 2
+  loss:
+    type: "MSE"
+stepper:
+  input_masking:
+    mask_value: 0
+    fill_value: 0.0
+  derived_forcings:
+    net_surface_energy_flux:
+      name: {net_flux_name}
+      flux_names: {flux_constituents}
+  step:
+    type: single_module
+    config:
+      in_names: {in_variable_names}
+      out_names: {out_variable_names}
+      next_step_forcing_names:
+      - {net_flux_name}
+      normalization:
+        network:
+          global_means_path: '{global_means_path}'
+          global_stds_path: '{global_stds_path}'
+          stat_aliases:
+            {net_flux_name}: hfds_total_area
+      builder:
+        type: Samudra
+        config:
+          ch_width: [8, 16]
+          dilation: [2, 4]
+          n_layers: [1, 1]
+          norm: batch
+          norm_kwargs:
+            track_running_stats: false
+      corrector:
+        type: "ocean_corrector"
+        config:
+          sea_ice_fraction_correction:
+            sea_ice_fraction_name: sea_ice_fraction
+            land_fraction_name: land_fraction
+          ocean_heat_content_correction:
+            method: scaled_temperature
+            constant_unaccounted_heating: 0.1
+"""
+
 _INFERENCE_CONFIG_TEMPLATE = """
 experiment_dir: {results_dir}
 n_forward_steps: 6
@@ -505,6 +601,102 @@ def _setup(
         save_per_epoch_diagnostics=save_per_epoch_diagnostics,
     )
     return train_config_filename, inference_config_filename
+
+
+def _setup_derived_forcing(path, max_epochs=1, n_time=60, timestep_days=2):
+    """Generate data + a train config that derives net_surface_energy_flux."""
+    if not path.exists():
+        path.mkdir(parents=True, exist_ok=True)
+    np.random.seed(0)
+    torch.manual_seed(0)
+
+    nz_levels = 2
+    # Standard ocean inputs plus the derived net flux (constituents are loaded as
+    # forcings via update_requirements, not listed as model inputs).
+    base_in_variable_names = [
+        "thetao_0",
+        "thetao_1",
+        "sst",
+        "hfgeou",
+        "sea_surface_fraction",
+        "sea_ice_fraction",
+        "land_fraction",
+    ]
+    in_variable_names = base_in_variable_names + [_NET_SFC_FLUX_NAME]
+    out_variable_names = [
+        "thetao_0",
+        "thetao_1",
+        "sst",
+        "sea_ice_fraction",
+        "hfds_total_area",
+    ]
+
+    mask_names = [f"mask_{i}" for i in range(nz_levels)]
+    idepth_names = [f"idepth_{i}" for i in range(nz_levels + 1)]
+    all_variable_names_for_data_gen = list(
+        set(
+            base_in_variable_names
+            + out_variable_names
+            + mask_names
+            + idepth_names
+            + _NET_SFC_FLUX_CONSTITUENTS
+        )
+    )
+    # The derived net flux is absent from the stats files (borrows hfds_total_area).
+    stats_variable_names = list(set(base_in_variable_names + out_variable_names))
+
+    dim_sizes = get_ocean_dim_sizes(n_time=n_time, nz_levels=nz_levels)
+
+    data_dir = path / "data"
+    stats_dir = path / "stats"
+    results_dir = path / "results"
+    for d in (data_dir, stats_dir, results_dir):
+        d.mkdir(exist_ok=True)
+
+    save_ocean_nd_netcdf(
+        filename=data_dir / "data.nc",
+        dim_sizes=dim_sizes,
+        variable_names=all_variable_names_for_data_gen,
+        timestep_days=timestep_days,
+        nz_levels=nz_levels,
+    )
+    _save_ocean_scalar_stats_netcdf(
+        stats_dir / "stats-mean.nc", variable_names=stats_variable_names, kind="mean"
+    )
+    _save_ocean_scalar_stats_netcdf(
+        stats_dir / "stats-stddev.nc", variable_names=stats_variable_names, kind="std"
+    )
+
+    train_string = _DERIVED_FORCING_TRAIN_CONFIG_TEMPLATE.format(
+        results_dir=results_dir,
+        train_data_path=data_dir,
+        valid_data_path=data_dir,
+        global_means_path=stats_dir / "stats-mean.nc",
+        global_stds_path=stats_dir / "stats-stddev.nc",
+        in_variable_names=in_variable_names,
+        out_variable_names=out_variable_names,
+        net_flux_name=_NET_SFC_FLUX_NAME,
+        flux_constituents=_NET_SFC_FLUX_CONSTITUENTS,
+    )
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".yaml") as f:
+        f.write(train_string)
+    return f.name
+
+
+def test_train_with_derived_net_surface_energy_flux(tmp_path, very_fast_only: bool):
+    """Training with net_surface_energy_flux as a derived forcing input runs."""
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+
+    train_config = _setup_derived_forcing(tmp_path)
+
+    with mock_wandb():
+        train_main(yaml_config=train_config)
+
+    best_checkpoint_path = (
+        tmp_path / "results" / "training_checkpoints" / "best_ckpt.tar"
+    )
+    assert best_checkpoint_path.exists()
 
 
 def test_train_and_inference(tmp_path, very_fast_only: bool):
