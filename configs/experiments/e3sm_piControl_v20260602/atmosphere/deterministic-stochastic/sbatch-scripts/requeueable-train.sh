@@ -30,5 +30,10 @@ torchrun --nnodes "$SLURM_JOB_NUM_NODES" \
 pid=$!
 trap "preempt_handler '$pid'" SIGTERM
 trap "timeout_handler '$pid'" USR1
-wait "$pid"
+if wait $pid; then
+    echo "Training completed successfully. Uploading artifacts..."
+    $CONFIG_DIR/upload-to-beaker.sh $SLURM_JOB_ID
+else
+    echo "Training failed or was interrupted (exit code $?). Skipping upload."
+fi
 sleep 120

@@ -115,8 +115,6 @@ optimization:
 stepper_training:
   n_ensemble: 2
   n_forward_steps: 1
-  loss:
-    type: MSE
   optimize_last_step_only: true
   loss:
     type: EnsembleLoss
