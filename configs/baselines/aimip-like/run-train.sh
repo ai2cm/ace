@@ -58,11 +58,17 @@ run_training() {
 # run_training "train-4deg-daily-v1-era5-only-residual.yaml" "train-4deg-daily-v1-era5-only-residual-rs0" 1
 # run_training "train-4deg-daily-v1-era5-only-lr-tuning.yaml" "train-4deg-daily-v1-era5-only-lr-tuning-rs0" 1
 
-# --- Wave 2 (Jupiter, high) ---
-run_training "train-4deg-daily-v1-labels-384-lr-tuning.yaml" "train-4deg-daily-v1-labels-384-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
-run_training "train-4deg-daily-v1-labels-384-residual-lr-tuning.yaml" "train-4deg-daily-v1-labels-384-residual-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
-run_training "train-4deg-daily-v1-era5-only-384-residual-lr-tuning.yaml" "train-4deg-daily-v1-era5-only-384-residual-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
-run_training "train-4deg-daily-v1-era5-only-rs1.yaml" "train-4deg-daily-v1-era5-only-rs1" 1 ai2/ace high ai2/jupiter
-run_training "train-4deg-daily-v1-era5-only-lr-tuning-rs1.yaml" "train-4deg-daily-v1-era5-only-lr-tuning-rs1" 1 ai2/ace high ai2/jupiter
-run_training "train-4deg-daily-v1-labels-residual-lr-tuning-rs1.yaml" "train-4deg-daily-v1-labels-residual-lr-tuning-rs1" 1 ai2/ace high ai2/jupiter
-run_training "train-4deg-daily-v1-era5-only-256-lr-tuning.yaml" "train-4deg-daily-v1-era5-only-256-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
+# --- Wave 2 (Jupiter, high) --- [canceled by user]
+# run_training "train-4deg-daily-v1-labels-384-lr-tuning.yaml" "train-4deg-daily-v1-labels-384-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-labels-384-residual-lr-tuning.yaml" "train-4deg-daily-v1-labels-384-residual-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-era5-only-384-residual-lr-tuning.yaml" "train-4deg-daily-v1-era5-only-384-residual-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-era5-only-rs1.yaml" "train-4deg-daily-v1-era5-only-rs1" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-era5-only-lr-tuning-rs1.yaml" "train-4deg-daily-v1-era5-only-lr-tuning-rs1" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-labels-residual-lr-tuning-rs1.yaml" "train-4deg-daily-v1-labels-residual-lr-tuning-rs1" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-era5-only-256-lr-tuning.yaml" "train-4deg-daily-v1-era5-only-256-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
+
+# --- Wave 3: Residual drift fixes (Jupiter, high) ---
+run_training "train-4deg-daily-v1-era5-only-residual-winds-anomaly-ft.yaml" "train-4deg-daily-v1-era5-only-residual-winds-anomaly-ft-rs0" 1 ai2/ace high ai2/jupiter
+run_training "train-4deg-daily-v1-era5-only-residual-all-anomaly-ft.yaml" "train-4deg-daily-v1-era5-only-residual-all-anomaly-ft-rs0" 1 ai2/ace high ai2/jupiter
+run_training "train-4deg-daily-v1-era5-only-residual-tend-reg-ft.yaml" "train-4deg-daily-v1-era5-only-residual-tend-reg-ft-rs0" 1 ai2/ace high ai2/jupiter
+run_training "train-4deg-daily-v1-era5-only-residual-winds-anomaly-tend-reg-ft.yaml" "train-4deg-daily-v1-era5-only-residual-winds-anomaly-tend-reg-ft-rs0" 1 ai2/ace high ai2/jupiter
