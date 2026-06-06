@@ -1551,3 +1551,79 @@ def test_anomaly_only_residual_invalid_string_raises():
             normalization=get_network_and_loss_normalization_config(["a"]),
             anomaly_only_residual_names="invalid",
         )
+
+
+def test_tendency_regularization_loss():
+    """tendency_regularization_weight > 0 produces a nonzero regularizer loss
+    when the network tendency has nonzero spatial mean."""
+    in_names = ["a", "b"]
+    out_names = ["a", "b"]
+    normalization = get_network_and_loss_normalization_config(in_names)
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+                ),
+                in_names=in_names,
+                out_names=out_names,
+                normalization=normalization,
+                residual_prediction=True,
+                tendency_regularization_weight=1.0,
+            ),
+        ),
+    )
+    step = get_step(config, DEFAULT_IMG_SHAPE)
+    n_samples = 2
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+    step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step,
+            labels=None,
+        ),
+    )
+    reg_loss = step.get_regularizer_loss()
+    assert reg_loss.item() > 0
+
+
+def test_tendency_regularization_zero_weight_gives_zero_loss():
+    in_names = ["a", "b"]
+    out_names = ["a", "b"]
+    normalization = get_network_and_loss_normalization_config(in_names)
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+                ),
+                in_names=in_names,
+                out_names=out_names,
+                normalization=normalization,
+                residual_prediction=True,
+                tendency_regularization_weight=0.0,
+            ),
+        ),
+    )
+    step = get_step(config, DEFAULT_IMG_SHAPE)
+    n_samples = 2
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+    step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step,
+            labels=None,
+        ),
+    )
+    reg_loss = step.get_regularizer_loss()
+    assert reg_loss.item() == 0.0

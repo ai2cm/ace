@@ -82,6 +82,7 @@ class SingleModuleStepConfig(StepConfigABC):
     prescribed_prognostic_names: list[str] = dataclasses.field(default_factory=list)
     residual_prediction: bool = False
     anomaly_only_residual_names: list[str] | str | None = None
+    tendency_regularization_weight: float = 0.0
     include_channel_mask_inputs: bool = False
     global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
 
@@ -422,6 +423,18 @@ class SingleModuleStep(StepABC):
             output_dict.update(secondary_output_dict)
             return output_dict
 
+        if self._config.tendency_regularization_weight > 0:
+            raw_network_call = network_call
+
+            def network_call_with_capture(input_norm):
+                output = raw_network_call(input_norm)
+                self._last_tendency = {
+                    k: output[k] for k in self.prognostic_names if k in output
+                }
+                return output
+
+            network_call = network_call_with_capture
+
         return step_with_adjustments(
             input=args.input,
             next_step_input_data=args.next_step_input_data,
@@ -438,6 +451,14 @@ class SingleModuleStep(StepABC):
         )
 
     def get_regularizer_loss(self):
+        if self._config.tendency_regularization_weight > 0 and hasattr(
+            self, "_last_tendency"
+        ):
+            loss = torch.tensor(0.0, device=get_device())
+            for name, tendency in self._last_tendency.items():
+                spatial_mean = tendency.mean(dim=(-2, -1))
+                loss = loss + (spatial_mean**2).mean()
+            return self._config.tendency_regularization_weight * loss
         return torch.tensor(0.0)
 
     def get_state(self):
