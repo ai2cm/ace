@@ -183,10 +183,7 @@ class DenoisingMoEPredictor:
             raise ValueError("experts and sigma_ranges must have the same length.")
         if expert_renames is not None and len(expert_renames) != len(experts):
             raise ValueError("expert_renames and experts must have the same length.")
-        # Experts must share the same grid/metadata: only _primary's coordinates
-        # are used for input prep and output coords, so a mismatched expert would
-        # silently use the wrong grid. Enforced here so it holds for every
-        # construction path (build, from_state, with_rolled_lon).
+
         _validate_experts_compatible(experts)
         self._experts = experts
         self._primary = experts[0]
