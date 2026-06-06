@@ -79,10 +79,15 @@ class BatchLabels:
         if new_mask.any():
             gathered[:, new_mask] = 0
 
-        # Warn on dropped labels
+        # Note dropped labels. Held-out-source eval entries (per
+        # training_run_1's (C) bucket) deliberately feed variants
+        # the trainer never saw, so this fires on every batch from
+        # those entries — log at info level rather than warning to
+        # keep the train log readable when the held-out-variant
+        # behavior is by design.
         dropped = self._names_set.difference(new_names)
         if dropped:
-            logging.warning(f"Dropping labels not present in new encoding: {dropped}")
+            logging.info(f"Dropping labels not present in new encoding: {dropped}")
 
         return BatchLabels(gathered, new_names)
 
