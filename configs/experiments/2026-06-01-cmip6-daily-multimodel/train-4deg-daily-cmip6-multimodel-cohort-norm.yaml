@@ -771,21 +771,20 @@ stepper:
           global_stds_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/normalization_full/residual_scaling.nc
           fill_nans_on_normalize: true
       corrector:
-        # Originally meant to enable dry-air mass conservation, but
-        # that corrector requires a vertical coordinate the v2 data
-        # layer doesn't expose — the ingest "flattens plev" so each
-        # level is a separate 2D channel (``ua10``, ``ua50``, ...)
-        # rather than a 3D field with a plev coord. Without a vertical
-        # coordinate ``conserve_dry_air`` raises at step build:
-        # ``ValueError: conserve_dry_air is set to True, but no
-        # vertical coordinate is available.``. Disabled here; the
-        # network is unconstrained on dry-air mass for the first
-        # run. Moisture-budget correction is similarly off — v2
-        # lacks the evap + advection-tendency variables it needs;
-        # force_positive on hus / radiation isn't guaranteed at the
-        # source either.
-        # TODO: revisit once the flatten-plev → vertical-coord
-        # mapping is exposed to the corrector path.
+        # Dry-air mass conservation is OFF for this run: it requires
+        # a vertical coordinate the v2 data layer doesn't expose —
+        # the ingest "flattens plev" so each level is a separate 2D
+        # channel (``ua10``, ``ua50``, ...) rather than a 3D field
+        # with a plev coord. With ``conserve_dry_air: true`` the
+        # step build raises ``ValueError: conserve_dry_air is set
+        # to True, but no vertical coordinate is available.``.
+        # Moisture-budget correction is similarly off: v2 lacks the
+        # evap + advection-tendency variables it needs.
+        # force_positive on hus / radiation isn't enforced either —
+        # not guaranteed at the source by all publishers.
+        # TODO: revisit ``conserve_dry_air`` once the flatten-plev
+        # → vertical-coord mapping is exposed to the corrector path.
+        conserve_dry_air: false
       # Pass per-variable mask channels to the model. With
       # ``allow_missing_variables: true`` on the builder, the loader
       # NaN-fills variables a dataset doesn't publish. The step
