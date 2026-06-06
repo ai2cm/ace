@@ -183,7 +183,6 @@ class DenoisingMoEPredictor:
             raise ValueError("experts and sigma_ranges must have the same length.")
         if expert_renames is not None and len(expert_renames) != len(experts):
             raise ValueError("expert_renames and experts must have the same length.")
-
         _validate_experts_compatible(experts)
         self._experts = experts
         self._primary = experts[0]
