@@ -26,8 +26,11 @@ from fme.downscaling.data.utils import (
     ClosedInterval,
     check_leading_dim,
     expand_and_fold_tensor,
+    find_roll_anchor_from_interval,
     get_offset,
     paired_shuffle,
+    roll_data_lon_dim,
+    roll_lon_coords,
     scale_tuple,
 )
 
@@ -121,29 +124,23 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
             )
 
         self._orig_coords: LatLonCoordinates = properties.horizontal_coordinates
+        lon_start, _ = self.lon_interval.finite_values
 
-        if (self.lon_interval.stop != float("inf")) and (
-            torch.any(self._orig_coords.lon < self.lon_interval.stop - 360.0)
-        ):
-            lon_max = self._orig_coords.lon.max()
-            raise NotImplementedError(
-                f"lon wraparound not implemented, received lon_max {lon_max} but "
-                f"expected lon_max > {self.lon_interval.stop - 360.0}"
-            )
-        if (self.lon_interval.start != -float("inf")) and (
-            torch.any(self._orig_coords.lon > self.lon_interval.start + 360.0)
-        ):
-            lon_min = self._orig_coords.lon.min()
-            raise NotImplementedError(
-                f"lon wraparound not implemented, received lon_min {lon_min} but "
-                f"expected lon_min < {self.lon_interval.start + 360.0}"
-            )
+        # determine roll amount for each dataset get item operation
+        self._lon_roll_amount = find_roll_anchor_from_interval(
+            self._orig_coords.lon, self.lon_interval
+        )
+
+        # set coordinate metadata for the subsetted region
+        rolled_lon = roll_lon_coords(
+            self._orig_coords.lon, self._lon_roll_amount, lon_start
+        )
 
         self._lats_slice = self.lat_interval.slice_from(self._orig_coords.lat)
-        self._lons_slice = self.lon_interval.slice_from(self._orig_coords.lon)
+        self._lons_slice = self.lon_interval.slice_from(rolled_lon)
         self._latlon_coordinates = LatLonCoordinates(
             lat=self._orig_coords.lat[self._lats_slice],
-            lon=self._orig_coords.lon[self._lons_slice],
+            lon=rolled_lon[self._lons_slice],
         )
         self._area_weights = self._latlon_coordinates.area_weights
 
@@ -172,7 +169,7 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
             missing_names is None
         ), "Variable masking is not supported in downscaling."
         batch = {
-            k: v[
+            k: roll_data_lon_dim(v, self._lon_roll_amount)[
                 ...,
                 self._lats_slice,
                 self._lons_slice,
@@ -217,6 +214,10 @@ class BatchItemDatasetAdapter(torch.utils.data.Dataset):
             )
 
         return BatchItem(fields, time.squeeze(), self._coordinates)
+
+    @property
+    def latlon_coordinates(self) -> LatLonCoordinates:
+        return self._coordinates
 
     @property
     def variable_metadata(self) -> dict[str, VariableMetadata]:
@@ -303,6 +304,7 @@ class GriddedData:
     dims: list[str]
     variable_metadata: Mapping[str, VariableMetadata]
     all_times: xr.CFTimeIndex
+    coarse_latlon_coords: LatLonCoordinates
 
     @property
     def loader(self) -> DataLoader[BatchItem]:
@@ -345,6 +347,7 @@ class PairedGriddedData:
     variable_metadata: Mapping[str, VariableMetadata]
     all_times: xr.CFTimeIndex
     fine_coords: LatLonCoordinates
+    coarse_latlon_coords: LatLonCoordinates
 
     @property
     def loader(self) -> DataLoader[PairedBatchItem]:
