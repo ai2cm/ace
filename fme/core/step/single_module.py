@@ -10,6 +10,7 @@ from torch import nn
 
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
+from fme.core.corrector.state import CorrectorState
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
@@ -32,6 +33,7 @@ from fme.core.step.secondary_decoder import (
     SecondaryDecoderConfig,
 )
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
+from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorDict, TensorMapping
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
@@ -370,18 +372,7 @@ class SingleModuleStep(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
-        """
-        Step the model forward one timestep given input data.
-
-        Args:
-            args: The arguments to the step function.
-            wrapper: Wrapper to apply over each nn.Module before calling.
-
-        Returns:
-            The denormalized output data at the next time step.
-        """
-
+    ) -> tuple[TensorDict, StepperState | None]:
         def network_call(input_norm: TensorDict) -> TensorDict:
             if args.data_mask is not None:
                 input_norm = _apply_input_mask(input_norm, args.data_mask)
@@ -420,6 +411,7 @@ class SingleModuleStep(StepABC):
             prescribed_prognostic_names=self._config.prescribed_prognostic_names,
             global_mean_removal=self._global_mean_removal,
             data_mask=args.data_mask,
+            stepper_state=args.stepper_state,
         )
 
     def get_regularizer_loss(self):
@@ -510,7 +502,8 @@ def step_with_adjustments(
     prescribed_prognostic_names: list[str] | None = None,
     global_mean_removal: GlobalMeanRemoval | None = None,
     data_mask: TensorMapping | None = None,
-) -> TensorDict:
+    stepper_state: StepperState | None = None,
+) -> tuple[TensorDict, StepperState | None]:
     """
     Step the model forward one timestep given input data.
 
@@ -539,9 +532,14 @@ def step_with_adjustments(
             so those adjustments operate in physical space.
         data_mask: Per-variable boolean masks passed to
             ``global_mean_removal.forward_transform``.
+        stepper_state: Per-sample state carried across step calls. The
+            corrector's slice (``stepper_state.corrector_state``) is passed to
+            the corrector and any updates are written back into a returned
+            ``StepperState``. Pass-through unchanged when no corrector is set.
 
     Returns:
-        The denormalized output data at the next time step.
+        A tuple ``(output, stepper_state)`` where ``output`` is the
+        denormalized data at the next time step.
     """
     if prescribed_prognostic_names is None:
         prescribed_prognostic_names = []
@@ -559,7 +557,14 @@ def step_with_adjustments(
     if global_mean_removal is not None:
         output = global_mean_removal.inverse_transform(output)
     if corrector is not None:
-        output = corrector(input, output, next_step_input_data)
+        corrector_state: CorrectorState | None = (
+            stepper_state.corrector_state if stepper_state is not None else None
+        )
+        output, corrector_state = corrector(
+            input, output, next_step_input_data, corrector_state
+        )
+        if corrector_state is not None:
+            stepper_state = StepperState(corrector_state=corrector_state)
     if ocean is not None:
         output = ocean(input, output, next_step_input_data)
     for name in prescribed_prognostic_names:
@@ -569,4 +574,4 @@ def step_with_adjustments(
             raise ValueError(
                 f"prescribed_prognostic_name '{name}' not in next_step_input_data"
             )
-    return output
+    return output, stepper_state
