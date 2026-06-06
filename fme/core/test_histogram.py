@@ -122,6 +122,20 @@ def test_histogram_handles_uniform_field():
     histogram.add(torch.as_tensor([[1.0, 2.0, 3.0]]))  # has non-zero range
 
 
+def test_histogram_handles_empty_input():
+    """The upstream NaN-stripper can produce an empty tensor when an
+    entire batch's values for a variable are NaN — typical of the
+    CMIP6 ``allow_missing_variables`` path when an inference dataset
+    doesn't publish a given variable. ``torch.min`` / ``torch.max``
+    on an empty tensor raises; we want ``add`` to skip silently."""
+    histogram = DynamicHistogram(n_times=1, n_bins=200)
+    histogram.add(torch.empty(0))
+    assert histogram.bin_edges is None  # nothing recorded
+    # Then a non-empty batch still works.
+    histogram.add(torch.as_tensor([[1.0, 2.0, 3.0]]))
+    assert histogram.bin_edges is not None
+
+
 @pytest.mark.parametrize(
     "shape",
     [
