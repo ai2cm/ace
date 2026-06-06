@@ -459,7 +459,7 @@ class SingleModuleStep(StepABC):
                 spatial_mean = tendency.mean(dim=(-2, -1))
                 loss = loss + (spatial_mean**2).mean()
             return self._config.tendency_regularization_weight * loss
-        return torch.tensor(0.0)
+        return torch.tensor(0.0, device=get_device())
 
     def get_state(self):
         """

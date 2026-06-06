@@ -477,6 +477,58 @@ def test_train_on_batch_optimize_last_step_only(optimize_last_step_only: bool):
         assert all(forward_calls_grad_enabled)
 
 
+@pytest.mark.parametrize("optimize_last_step_only", [True, False])
+def test_tendency_regularization_with_gradient_accumulation(
+    optimize_last_step_only: bool,
+):
+    """Regression: tendency regularization must backpropagate while the forward
+    graph is alive. Under gradient accumulation the per-step backward frees the
+    graph, so deferring the regularizer to the end of the batch backpropagates
+    through a freed graph and raises a RuntimeError."""
+    torch.manual_seed(0)
+
+    class ScaledIdentity(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.tensor(0.1))
+
+        def forward(self, x):
+            return x * self.weight
+
+    n_steps = 3
+    data_with_ic: BatchData = get_data(["a"], n_samples=2, n_time=n_steps + 1).data
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": ScaledIdentity()}
+                    ),
+                    in_names=["a"],
+                    out_names=["a"],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means=get_scalar_data(["a"], 0.0),
+                            stds=get_scalar_data(["a"], 1.0),
+                        ),
+                    ),
+                    residual_prediction=True,
+                    tendency_regularization_weight=0.1,
+                )
+            ),
+        ),
+    )
+    stepper = _get_train_stepper(
+        config, optimize_last_step_only=optimize_last_step_only
+    )
+    optimization = OptimizationConfig(use_gradient_accumulation=True).build(
+        stepper.modules, max_epochs=1
+    )
+    stepper.train_on_batch(data=data_with_ic, optimization=optimization)
+    optimization.step_weights()
+
+
 def test_per_channel_losses_bounded_by_accumulated_loss():
     """Per-channel loss total must not exceed optimization accumulated loss."""
     torch.manual_seed(0)

@@ -1276,8 +1276,20 @@ class Stepper:
                 )
         return data.remove_initial_condition(self.n_ic_timesteps)
 
-    def get_regularizer_loss(self) -> torch.Tensor:
-        return self._l2_sp_tuning_regularizer() + self._step_obj.get_regularizer_loss()
+    def get_weight_regularizer_loss(self) -> torch.Tensor:
+        """Weight-based regularizer (e.g. L2-SP). Builds a fresh graph from the
+        leaf parameters on each call, so it can be backpropagated at any time,
+        including after the forward graph has been freed by gradient
+        accumulation.
+        """
+        return self._l2_sp_tuning_regularizer()
+
+    def get_step_regularizer_loss(self) -> torch.Tensor:
+        """Activation-based regularizer (e.g. tendency regularization). Depends
+        on the forward graph, so it must be backpropagated while that graph is
+        alive (before the per-step backward under gradient accumulation).
+        """
+        return self._step_obj.get_regularizer_loss()
 
     def update_training_history(self, training_job: TrainingJob) -> None:
         """
@@ -1599,9 +1611,9 @@ class TrainStepper(
             n_loss_steps=n_loss_steps,
         )
 
-        regularizer_loss = self._stepper.get_regularizer_loss()
-        if torch.any(regularizer_loss > 0):
-            optimization.accumulate_loss(regularizer_loss)
+        weight_regularizer_loss = self._stepper.get_weight_regularizer_loss()
+        if torch.any(weight_regularizer_loss > 0):
+            optimization.accumulate_loss(weight_regularizer_loss)
         metrics["loss"] = optimization.get_accumulated_loss().detach()
         optimization.step_weights()
 
@@ -1685,6 +1697,9 @@ class TrainStepper(
                     total_counts=total_counts,
                 )
             if optimize_step:
+                step_total_loss = (
+                    step_total_loss + self._stepper.get_step_regularizer_loss()
+                )
                 optimization.accumulate_loss(step_total_loss)
         return output_list, _finalize_per_channel_losses(weighted_sums, total_counts)
 
