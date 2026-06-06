@@ -1,0 +1,45 @@
+experiment_dir: /results
+model:
+  checkpoint_path: /checkpoints/best_histogram_tail.ckpt
+  fine_coordinates_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
+data:
+  coarse:
+  - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+    engine: zarr
+    file_pattern: 100km.zarr
+  batch_size: 4
+  num_data_workers: 2
+  strict_ensemble: false
+patch:
+  divide_generation: true
+  composite_prediction: true
+  coarse_horizontal_overlap: 1
+outputs:
+- name: europe-may-2023
+  n_ens: 2
+  max_samples_per_gpu: 2
+  time_range:
+    start_time: "2023-05-01T00:00:00"
+    stop_time: "2023-05-11T00:00:00"
+  lat_extent:
+    start: 32.0
+    stop: 50.0
+  lon_extent:
+    start: -16.0
+    stop: 30.0
+- name: europe-20230505
+  n_ens: 2
+  max_samples_per_gpu: 2
+  event_time: "2023-05-05T12:00:00"
+  lat_extent:
+    start: 32.0
+    stop: 50.0
+  lon_extent:
+    start: -16.0
+    stop: 30.0
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: andrep-downscaling
+  entity: ai2cm
