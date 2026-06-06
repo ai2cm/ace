@@ -6,6 +6,7 @@ import torch
 import xarray as xr
 from torch.utils.data import DataLoader
 
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
 from fme.core.generics.data import SizedMap
@@ -297,6 +298,7 @@ class SliceWorkItemGriddedData:
     all_times: xr.CFTimeIndex
     dtype: torch.dtype
     max_output_shape: tuple[int, ...]
+    coarse_latlon_coords: LatLonCoordinates
 
     # TODO: currently no protocol or ABC for gridded data objects
     #       if we want to unify, we will need one and just raise

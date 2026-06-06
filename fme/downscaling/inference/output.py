@@ -268,6 +268,7 @@ class DownscalingOutputConfig(ABC):
             all_times=xr_dataset.sample_start_times,
             dtype=slice_dataset.dtype,
             max_output_shape=slice_dataset.max_output_shape,
+            coarse_latlon_coords=dataset.latlon_coordinates,
         )
 
     def _build(
