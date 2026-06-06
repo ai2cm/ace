@@ -5,7 +5,12 @@ import torch
 from fme.downscaling.data.utils import (
     ClosedInterval,
     adjust_fine_coord_range,
+    coords_require_lon_roll,
+    find_roll_anchor,
+    find_roll_anchor_from_interval,
     paired_shuffle,
+    roll_data_lon_dim,
+    roll_lon_coords,
     scale_slice,
 )
 
@@ -17,6 +22,127 @@ def _fine_midpoints(coarse_edges, downscale_factor):
         mids = (fine_edges[:-1] + fine_edges[1:]) / 2
         fine_mids.append(mids)
     return torch.concatenate(fine_mids)
+
+
+def _one_deg_lon_coords():
+    """0.5, 1.5, ..., 359.5 — standard 1-degree global grid."""
+    return torch.arange(0.5, 360.0, 1.0)
+
+
+@pytest.mark.parametrize(
+    "lon_start, lon_stop, expected_roll",
+    [
+        pytest.param(0.0, 90.0, 0, id="zero_no_roll"),
+        pytest.param(10.0, 100.0, 0, id="positive_in_range_no_roll"),
+        pytest.param(-5.0, 5.0, 355, id="negative_start_rolls"),
+        pytest.param(-0.5, 5.0, 359, id="just_negative_rolls"),
+        pytest.param(-180.0, 0.0, 180, id="half_period"),
+        pytest.param(0.0, 360.0, 0, id="stop_exactly_360_no_roll"),
+        pytest.param(340.0, 375.0, 340, id="stop_past_360_rolls"),
+    ],
+)
+def test_compute_lon_roll(lon_start, lon_stop, expected_roll):
+    coords = _one_deg_lon_coords()
+    assert (
+        find_roll_anchor_from_interval(coords, ClosedInterval(lon_start, lon_stop))
+        == expected_roll
+    )
+
+
+@pytest.mark.parametrize(
+    "lon, expected",
+    [
+        pytest.param([10.0, 20.0, 30.0], False, id="in_range_no_roll"),
+        pytest.param([-90.0, -45.0, 0.0, 45.0], True, id="negative_min_rolls"),
+        pytest.param([270.0, 315.0, 360.0, 405.0], True, id="max_past_360_rolls"),
+        pytest.param([0.0, 180.0, 360.0], False, id="max_exactly_360_no_roll"),
+    ],
+)
+def test_requires_lon_roll(lon, expected):
+    assert coords_require_lon_roll(torch.tensor(lon)) is expected
+
+
+def test_compute_lon_roll_full_rotation_is_noop():
+    """A wide interval over a small regional grid resolves to no roll.
+
+    lon_extent=(-180, 360) marks a crossing via its negative start, but every
+    point of a small 0–8° grid lies below the 180° anchor, so the roll is a full
+    rotation. That canonicalizes to 0, which also keeps it clear of the
+    global-grid validation in roll_lon_coords.
+    """
+    coords = torch.arange(0.5, 8.0, 1.0)  # 0–8°, 8 points, not global
+    assert find_roll_anchor_from_interval(coords, ClosedInterval(-180.0, 360.0)) == 0
+
+
+def test_roll_lon_coords_negative_start():
+    """Rolled coords for lon_start=-5 should be monotone and start near -5."""
+    coords = _one_deg_lon_coords()
+    roll_amount = find_roll_anchor_from_interval(coords, ClosedInterval(-5.0, 5.0))
+    rolled = roll_lon_coords(coords, roll_amount, -5.0)
+
+    assert rolled.shape == coords.shape
+    # monotonically increasing
+    assert torch.all(rolled[1:] > rolled[:-1])
+    # first element is the first coord >= 355, shifted to negative convention
+    assert rolled[0].item() == pytest.approx(-4.5)
+    # last element of the original-convention "low" portion, shifted by -360
+    assert rolled[-1].item() == pytest.approx(354.5)
+
+
+def test_roll_lon_coords_zero_roll_returns_original():
+    coords = _one_deg_lon_coords()
+    result = roll_lon_coords(coords, 0, 0.0)
+    assert torch.equal(result, coords)
+
+
+def test_roll_lon_coords_already_rolled_same_anchor_is_noop():
+    """Re-rolling an already-rolled grid to the same anchor is a no-op.
+
+    A rolled global grid is still contiguous, uniform, and global, so rolling it
+    again to the same anchor is a full rotation, which find_anchor_for_roll
+    canonicalizes to 0. Rolling is therefore idempotent, not a monotonicity break.
+    """
+    coords = _one_deg_lon_coords()
+    anchor = -90.0
+    rolled = roll_lon_coords(coords, find_roll_anchor(coords, anchor), anchor)
+    # the rolled grid is still monotonically increasing
+    assert torch.all(rolled[1:] > rolled[:-1])
+    # re-rolling to the same anchor resolves to 0 and leaves the grid unchanged
+    roll2 = find_roll_anchor(rolled, anchor)
+    assert roll2 == 0
+    assert torch.equal(roll_lon_coords(rolled, roll2, anchor), rolled)
+
+
+def test_roll_lon_coords_rejects_non_global_grid():
+    """A regional grid that does not reach the 360° wrap point cannot be rolled."""
+    # 1-degree grid covering only 0–180°; wrap gap is ~181°, not the 1° spacing.
+    coords = torch.arange(0.5, 180.0, 1.0)
+    with pytest.raises(ValueError, match="span the full globe"):
+        roll_lon_coords(coords, 90, -90.0)
+
+
+def test_roll_lon_coords_rejects_non_uniform_grid():
+    """A grid with a gap is not contiguous and cannot be rolled."""
+    coords = torch.tensor([0.5, 1.5, 2.5, 50.0, 359.5])
+    with pytest.raises(ValueError, match="uniformly spaced"):
+        roll_lon_coords(coords, 2, -5.0)
+
+
+def test_roll_lon_data_shifts_correctly():
+    """Rolling data by r positions moves index r to index 0."""
+    n = 8
+    tensor = torch.arange(n, dtype=torch.float).unsqueeze(0)  # shape (1, 8)
+    roll_amount = 3
+    rolled = roll_data_lon_dim(tensor, roll_amount, lon_dim=-1)
+    assert rolled.shape == tensor.shape
+    assert rolled[0, 0].item() == pytest.approx(3.0)  # original index 3 → 0
+    assert rolled[0, -1].item() == pytest.approx(2.0)  # original index 2 → last
+
+
+def test_roll_lon_data_zero_roll_returns_original():
+    tensor = torch.randn(4, 8)
+    result = roll_data_lon_dim(tensor, 0)
+    assert torch.equal(result, tensor)
 
 
 def test_paired_shuffle():

@@ -2,10 +2,13 @@ import os
 import unittest.mock
 from collections.abc import Mapping
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
+import torch
 import yaml
 
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.logging_utils import LoggingConfig
 from fme.core.loss import LossConfig
@@ -158,3 +161,86 @@ def test_evaluator_runs(
         with mock_wandb():
             evaluator.main(str(evaluator_config_path))
     mock_get_gen_agg_wandb.assert_called()
+
+
+def _mock_evaluator_config(coarse_lon, monkeypatch):
+    """EvaluatorConfig over mocked model/data configs, with Evaluator and
+    EventEvaluator patched to capture the model that gets handed to them. The
+    mock model's with_rolled_lon returns a distinct sentinel so we can observe
+    the seam-crossing roll branch in the build methods. Default (no-op) patching
+    means the (possibly rolled) base model is passed through unwrapped.
+    """
+    rolled_model = MagicMock(name="rolled_model")
+    rolled_model.coarse_shape = (4, 4)
+    model = MagicMock(name="model")
+    model.coarse_shape = (4, 4)
+    model.with_rolled_lon.return_value = rolled_model
+
+    model_config = MagicMock(name="model_config")
+    model_config.build.return_value = model
+
+    dataset = MagicMock(name="dataset")
+    dataset.coarse_latlon_coords = LatLonCoordinates(
+        lat=torch.tensor([0.0, 1.0]), lon=coarse_lon
+    )
+    dataset.coarse_shape = (4, 4)
+
+    data_config = MagicMock(name="data_config")
+    data_config.build.return_value = dataset
+
+    config = evaluator.EvaluatorConfig(
+        model=model_config,
+        experiment_dir="unused",
+        data=data_config,
+        logging=MagicMock(),
+    )
+
+    captured: dict[str, Any] = {}
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        return MagicMock()
+
+    monkeypatch.setattr(evaluator, "Evaluator", _capture)
+    monkeypatch.setattr(evaluator, "EventEvaluator", _capture)
+    return config, model, rolled_model, dataset, captured
+
+
+@pytest.mark.parametrize("crossing", [True, False])
+def test_build_default_evaluator_rolls_for_seam_crossing(monkeypatch, crossing):
+    coarse_lon = (
+        torch.tensor([-10.0, -5.0, 0.0, 5.0])
+        if crossing
+        else torch.tensor([0.0, 5.0, 10.0, 15.0])
+    )
+    config, model, rolled_model, _, captured = _mock_evaluator_config(
+        coarse_lon, monkeypatch
+    )
+
+    config._build_default_evaluator()
+
+    if crossing:
+        model.with_rolled_lon.assert_called_once()
+        assert torch.equal(model.with_rolled_lon.call_args[0][0], coarse_lon)
+        assert captured["model"] is rolled_model
+    else:
+        model.with_rolled_lon.assert_not_called()
+        assert captured["model"] is model
+
+
+def test_build_event_evaluator_rolls_for_seam_crossing(monkeypatch):
+    coarse_lon = torch.tensor([-10.0, -5.0, 0.0, 5.0])
+    config, model, rolled_model, dataset, captured = _mock_evaluator_config(
+        coarse_lon, monkeypatch
+    )
+    event_config = MagicMock()
+    event_config.get_paired_gridded_data.return_value = dataset
+    event_config.name = "evt"
+    event_config.n_samples = 1
+    event_config.save_generated_samples = False
+
+    config._build_event_evaluator(event_config)
+
+    model.with_rolled_lon.assert_called_once()
+    assert torch.equal(model.with_rolled_lon.call_args[0][0], coarse_lon)
+    assert captured["model"] is rolled_model

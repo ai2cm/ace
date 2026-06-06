@@ -144,7 +144,6 @@ class DenoisingMoEConfig:
 
     def build(self) -> "DenoisingMoEPredictor":
         experts = [rc.checkpoint_config.build() for rc in self.denoising_expert_configs]
-        _validate_experts_compatible(experts)
         sigma_ranges = [
             (rc.sigma_min, rc.sigma_max) for rc in self.denoising_expert_configs
         ]
@@ -184,6 +183,11 @@ class DenoisingMoEPredictor:
             raise ValueError("experts and sigma_ranges must have the same length.")
         if expert_renames is not None and len(expert_renames) != len(experts):
             raise ValueError("expert_renames and experts must have the same length.")
+        # Experts must share the same grid/metadata: only _primary's coordinates
+        # are used for input prep and output coords, so a mismatched expert would
+        # silently use the wrong grid. Enforced here so it holds for every
+        # construction path (build, from_state, with_rolled_lon).
+        _validate_experts_compatible(experts)
         self._experts = experts
         self._primary = experts[0]
         self._sigma_ranges = sigma_ranges
@@ -224,6 +228,26 @@ class DenoisingMoEPredictor:
 
     def get_fine_coords_for_batch(self, batch: BatchData) -> LatLonCoordinates:
         return self._primary.get_fine_coords_for_batch(batch)
+
+    def with_rolled_lon(self, coarse_lon: torch.Tensor) -> "DenoisingMoEPredictor":
+        """New predictor with every expert's coords rolled to match coarse_lon.
+
+        All experts are rolled (not just the primary) so the shared-grid invariant
+        enforced in __init__ still holds -- nothing relies on the non-primary
+        experts' coordinates being left unrolled. Rebuilt through __init__ so
+        _dispatch_module is reconstructed from the rolled experts. Returns self
+        unchanged when no roll is needed.
+        """
+        rolled = [expert.with_rolled_lon(coarse_lon) for expert in self._experts]
+        if all(r is e for r, e in zip(rolled, self._experts)):
+            return self
+        return DenoisingMoEPredictor(
+            experts=rolled,
+            sigma_ranges=self._sigma_ranges,
+            num_diffusion_generation_steps=self._num_diffusion_generation_steps,
+            churn=self._churn,
+            expert_renames=self._expert_renames,
+        )
 
     @torch.no_grad()
     def generate(

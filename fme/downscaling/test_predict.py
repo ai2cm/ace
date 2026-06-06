@@ -1,9 +1,11 @@
 import os
+from unittest.mock import MagicMock
 
 import pytest
 import torch
 import yaml
 
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.testing.wandb import mock_wandb
@@ -11,6 +13,7 @@ from fme.downscaling import predict
 from fme.downscaling.data import load_static_inputs
 from fme.downscaling.models import DiffusionModelConfig, PairedNormalizationConfig
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
+from fme.downscaling.predictors import PatchPredictionConfig
 from fme.downscaling.test_models import LinearDownscaling
 from fme.downscaling.test_utils import data_paths_helper
 
@@ -181,3 +184,56 @@ def test_predictor_renaming(
     )
     with mock_wandb():
         predict.main(str(predictor_config_path))
+
+
+def _mock_downscaler(coarse_lon, cls):
+    """Build a Downscaler/EventDownscaler over a mock model whose with_rolled_lon
+    returns a distinct sentinel, so we can observe the seam-crossing roll branch
+    of _get_generation_model. Uses default (no-op) patching so the base model is
+    returned directly rather than wrapped in a PatchPredictor.
+    """
+    rolled_model = MagicMock(name="rolled_model")
+    model = MagicMock(name="model")
+    model.with_rolled_lon.return_value = rolled_model
+    data = MagicMock()
+    data.coarse_latlon_coords = LatLonCoordinates(
+        lat=torch.tensor([0.0, 1.0]), lon=coarse_lon
+    )
+    data.shape = (2, len(coarse_lon))
+    kwargs = dict(
+        data=data,
+        model=model,
+        experiment_dir="unused",
+        n_samples=1,
+        patch=PatchPredictionConfig(),
+    )
+    if cls is predict.EventDownscaler:
+        downscaler = cls(event_name="evt", **kwargs)
+    else:
+        downscaler = cls(**kwargs)
+    return downscaler, model, rolled_model
+
+
+@pytest.mark.parametrize("cls", [predict.Downscaler, predict.EventDownscaler])
+def test_get_generation_model_rolls_for_seam_crossing_domain(cls):
+    """A coarse domain west of 0° triggers with_rolled_lon on the model."""
+    coarse_lon = torch.tensor([-10.0, -5.0, 0.0, 5.0])
+    downscaler, model, rolled_model = _mock_downscaler(coarse_lon, cls)
+
+    result = downscaler._get_generation_model()
+
+    model.with_rolled_lon.assert_called_once()
+    assert torch.equal(model.with_rolled_lon.call_args[0][0], coarse_lon)
+    assert result is rolled_model
+
+
+@pytest.mark.parametrize("cls", [predict.Downscaler, predict.EventDownscaler])
+def test_get_generation_model_no_roll_for_in_range_domain(cls):
+    """An in-range coarse domain leaves the model unrolled."""
+    coarse_lon = torch.tensor([0.0, 5.0, 10.0, 15.0])
+    downscaler, model, _ = _mock_downscaler(coarse_lon, cls)
+
+    result = downscaler._get_generation_model()
+
+    model.with_rolled_lon.assert_not_called()
+    assert result is model
