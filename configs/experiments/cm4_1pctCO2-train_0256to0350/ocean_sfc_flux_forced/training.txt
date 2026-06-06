@@ -1,5 +1,6 @@
 group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
 
-1pct_nosmooth_0256to0350-net_sfc_flux_forced|rs0|train|high|a100+h100|4|500GiB|0||seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'|1h
+# plusOHC: with OHC corrector, nsff: net surface flux forced
+1pct_nosmooth_0256to0350-plusOHC-nsff|rs0|train|high|a100+h100|4|500GiB|0||seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed' stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature'|
 
-1pct_nosmooth_0256to0350-optPre_excl_seaice-net_sfc_flux_forced|rs0|train|high|a100+h100|4|500GiB|0||seed=0 stepper_training.precorrector_optimization.exclude_names_and_prefixes=[ocean_sea_ice_fraction] stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'|1h
+1pct_nosmooth_0256to0350-optPre_plusOHC_excl_seaice-nsff|rs0|train|high|a100+h100|4|500GiB|0||seed=0 stepper_training.precorrector_optimization.exclude_names_and_prefixes=[ocean_sea_ice_fraction] stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed' stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature'|
