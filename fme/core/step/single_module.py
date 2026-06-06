@@ -13,7 +13,7 @@ from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
-from fme.core.dicts import add_names
+from fme.core.dicts import add_names, add_residual
 from fme.core.distributed import Distributed
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
@@ -81,11 +81,18 @@ class SingleModuleStepConfig(StepConfigABC):
     next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
     prescribed_prognostic_names: list[str] = dataclasses.field(default_factory=list)
     residual_prediction: bool = False
+    anomaly_only_residual_names: list[str] | str | None = None
     include_channel_mask_inputs: bool = False
     global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
+        if isinstance(self.anomaly_only_residual_names, str):
+            if self.anomaly_only_residual_names != "all":
+                raise ValueError(
+                    f"anomaly_only_residual_names string must be 'all', "
+                    f"got '{self.anomaly_only_residual_names}'"
+                )
         if self.global_mean_removal is not None:
             self.global_mean_removal.validate_names(self.in_names, self.out_names)
         for name in self.prescribed_prognostic_names:
@@ -185,6 +192,13 @@ class SingleModuleStepConfig(StepConfigABC):
             result = result.union(self.ocean.forcing_names)
         result = result.union(self.prescribed_prognostic_names)
         return list(result)
+
+    def get_anomaly_only_names(self) -> list[str]:
+        if self.anomaly_only_residual_names is None:
+            return []
+        if self.anomaly_only_residual_names == "all":
+            return self.prognostic_names
+        return list(self.anomaly_only_residual_names)
 
     @property
     def loss_names(self) -> list[str]:
@@ -420,6 +434,7 @@ class SingleModuleStep(StepABC):
             prescribed_prognostic_names=self._config.prescribed_prognostic_names,
             global_mean_removal=self._global_mean_removal,
             data_mask=args.data_mask,
+            anomaly_only_residual_names=self._config.get_anomaly_only_names(),
         )
 
     def get_regularizer_loss(self):
@@ -510,6 +525,7 @@ def step_with_adjustments(
     prescribed_prognostic_names: list[str] | None = None,
     global_mean_removal: GlobalMeanRemoval | None = None,
     data_mask: TensorMapping | None = None,
+    anomaly_only_residual_names: list[str] | None = None,
 ) -> TensorDict:
     """
     Step the model forward one timestep given input data.
@@ -539,12 +555,19 @@ def step_with_adjustments(
             so those adjustments operate in physical space.
         data_mask: Per-variable boolean masks passed to
             ``global_mean_removal.forward_transform``.
+        anomaly_only_residual_names: Prognostic variable names that should
+            use anomaly-only residual connections (spatial anomaly of input
+            added instead of full input). Variables not in this list use
+            full residual connections. Only used when residual_prediction
+            is True.
 
     Returns:
         The denormalized output data at the next time step.
     """
     if prescribed_prognostic_names is None:
         prescribed_prognostic_names = []
+    if anomaly_only_residual_names is None:
+        anomaly_only_residual_names = []
     if global_mean_removal is not None:
         network_input: TensorMapping = global_mean_removal.forward_transform(
             input, data_mask
@@ -554,7 +577,18 @@ def step_with_adjustments(
     input_norm = normalizer.normalize(network_input)
     output_norm = network_calls(input_norm)
     if residual_prediction:
-        output_norm = add_names(input_norm, output_norm, prognostic_names)
+        if anomaly_only_residual_names:
+            full_residual_names = [
+                n for n in prognostic_names if n not in anomaly_only_residual_names
+            ]
+            output_norm = add_residual(
+                input_norm,
+                output_norm,
+                full_residual_names=full_residual_names,
+                anomaly_only_residual_names=anomaly_only_residual_names,
+            )
+        else:
+            output_norm = add_names(input_norm, output_norm, prognostic_names)
     output = normalizer.denormalize(output_norm)
     if global_mean_removal is not None:
         output = global_mean_removal.inverse_transform(output)

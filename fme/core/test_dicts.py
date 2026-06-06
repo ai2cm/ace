@@ -1,6 +1,7 @@
 import pytest
+import torch
 
-from fme.core.dicts import add_names, to_flat_dict, to_nested_dict
+from fme.core.dicts import add_names, add_residual, to_flat_dict, to_nested_dict
 
 
 def get_cfg_and_args_dicts():
@@ -67,3 +68,45 @@ def test_add_names_raises_key_error_on_missing_input():
     names = ["b"]
     with pytest.raises(KeyError):
         add_names(input, output, names)
+
+
+def test_add_residual_full_only():
+    inp = {"a": torch.tensor([[[1.0, 3.0]]]), "b": torch.tensor([[[2.0, 4.0]]])}
+    tend = {"a": torch.tensor([[[0.1, 0.2]]]), "b": torch.tensor([[[0.3, 0.4]]])}
+    result = add_residual(
+        inp, tend, full_residual_names=["a", "b"], anomaly_only_residual_names=[]
+    )
+    torch.testing.assert_close(result["a"], torch.tensor([[[1.1, 3.2]]]))
+    torch.testing.assert_close(result["b"], torch.tensor([[[2.3, 4.4]]]))
+
+
+def test_add_residual_anomaly_only():
+    inp = {"a": torch.tensor([[[10.0, 20.0]]])}
+    tend = {"a": torch.tensor([[[0.5, 0.5]]])}
+    result = add_residual(
+        inp, tend, full_residual_names=[], anomaly_only_residual_names=["a"]
+    )
+    spatial_mean = inp["a"].mean(dim=(-2, -1), keepdim=True)
+    expected = (inp["a"] - spatial_mean) + tend["a"]
+    torch.testing.assert_close(result["a"], expected)
+
+
+def test_add_residual_mixed():
+    inp = {"a": torch.tensor([[[10.0, 20.0]]]), "b": torch.tensor([[[5.0, 5.0]]])}
+    tend = {"a": torch.tensor([[[1.0, 1.0]]]), "b": torch.tensor([[[2.0, 2.0]]])}
+    result = add_residual(
+        inp, tend, full_residual_names=["b"], anomaly_only_residual_names=["a"]
+    )
+    # "b" gets full residual
+    torch.testing.assert_close(result["b"], torch.tensor([[[7.0, 7.0]]]))
+    # "a" gets anomaly-only: spatial_mean of [10, 20] = 15, anomaly = [-5, 5]
+    torch.testing.assert_close(result["a"], torch.tensor([[[-4.0, 6.0]]]))
+
+
+def test_add_residual_no_residual():
+    inp = {"a": torch.tensor([[[10.0, 20.0]]])}
+    tend = {"a": torch.tensor([[[1.0, 2.0]]])}
+    result = add_residual(
+        inp, tend, full_residual_names=[], anomaly_only_residual_names=[]
+    )
+    torch.testing.assert_close(result["a"], tend["a"])

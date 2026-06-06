@@ -55,3 +55,37 @@ def add_names(
         for specified names.
     """
     return {k: left[k] + right[k] if k in names else right[k] for k in right}
+
+
+def add_residual(
+    input: Mapping[str, Any],
+    tendency: Mapping[str, Any],
+    full_residual_names: list[str],
+    anomaly_only_residual_names: list[str],
+) -> dict[str, Any]:
+    """Add residual connections with per-variable control over global mean.
+
+    For full_residual_names, adds the full input value to the tendency.
+    For anomaly_only_residual_names, adds only the spatial anomaly
+    (input minus its spatial mean) to the tendency, so the network must
+    predict the global mean directly.
+
+    Args:
+        input: Normalized input values.
+        tendency: Network output (tendency) values.
+        full_residual_names: Variables getting a full residual skip connection.
+        anomaly_only_residual_names: Variables getting anomaly-only residual.
+
+    Returns:
+        Dict with the same keys as tendency, with residuals applied.
+    """
+    result = {}
+    for k in tendency:
+        if k in full_residual_names:
+            result[k] = input[k] + tendency[k]
+        elif k in anomaly_only_residual_names:
+            spatial_mean = input[k].mean(dim=(-2, -1), keepdim=True)
+            result[k] = (input[k] - spatial_mean) + tendency[k]
+        else:
+            result[k] = tendency[k]
+    return result

@@ -1471,3 +1471,83 @@ def test_step_shared_global_mean_removal_raises_on_masked_reference():
                 data_mask=data_mask,
             ),
         )
+
+
+def test_anomaly_only_residual_removes_spatial_mean():
+    """Anomaly-only residual adds only the spatial anomaly of the input,
+    not its spatial mean, so the network must predict the global mean."""
+    from fme.core.step.single_module import step_with_adjustments
+
+    torch.manual_seed(0)
+    names = ["a", "b"]
+    batch, nlat, nlon = 2, 4, 8
+    device = fme.get_device()
+    input_norm = {
+        n: torch.randn(batch, nlat, nlon, device=device) + (i + 1) * 10
+        for i, n in enumerate(names)
+    }
+    tendency = {n: torch.randn(batch, nlat, nlon, device=device) for n in names}
+    identity_normalizer = unittest.mock.MagicMock()
+    identity_normalizer.normalize = lambda x: dict(x)
+    identity_normalizer.denormalize = lambda x: dict(x)
+
+    # Full residual baseline
+    output_full = step_with_adjustments(
+        input=input_norm,
+        next_step_input_data={},
+        network_calls=lambda _: dict(tendency),
+        normalizer=identity_normalizer,
+        corrector=None,
+        ocean=None,
+        residual_prediction=True,
+        prognostic_names=names,
+    )
+    # "a" gets anomaly-only, "b" gets full
+    output_mixed = step_with_adjustments(
+        input=input_norm,
+        next_step_input_data={},
+        network_calls=lambda _: dict(tendency),
+        normalizer=identity_normalizer,
+        corrector=None,
+        ocean=None,
+        residual_prediction=True,
+        prognostic_names=names,
+        anomaly_only_residual_names=["a"],
+    )
+    # "b" should be identical (full residual in both cases)
+    torch.testing.assert_close(output_full["b"], output_mixed["b"])
+    # "a" should differ by the spatial mean of input_norm["a"]
+    spatial_mean_a = input_norm["a"].mean(dim=(-2, -1), keepdim=True)
+    torch.testing.assert_close(output_full["a"] - spatial_mean_a, output_mixed["a"])
+
+
+def test_anomaly_only_residual_all_string():
+    """anomaly_only_residual_names='all' resolves to all prognostic names."""
+    in_names = ["a", "b"]
+    out_names = ["a", "b"]
+    config = SingleModuleStepConfig(
+        builder=ModuleSelector(
+            type="SphericalFourierNeuralOperatorNet",
+            config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+        ),
+        in_names=in_names,
+        out_names=out_names,
+        normalization=get_network_and_loss_normalization_config(in_names),
+        residual_prediction=True,
+        anomaly_only_residual_names="all",
+    )
+    assert set(config.get_anomaly_only_names()) == {"a", "b"}
+
+
+def test_anomaly_only_residual_invalid_string_raises():
+    with pytest.raises(ValueError, match="must be 'all'"):
+        SingleModuleStepConfig(
+            builder=ModuleSelector(
+                type="SphericalFourierNeuralOperatorNet",
+                config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+            ),
+            in_names=["a"],
+            out_names=["a"],
+            normalization=get_network_and_loss_normalization_config(["a"]),
+            anomaly_only_residual_names="invalid",
+        )
