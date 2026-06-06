@@ -532,6 +532,209 @@ def test_get_fine_coords_for_batch():
     assert torch.allclose(result.lon, expected_lon)
 
 
+def _make_global_fine_coords_and_static(fine_shape: tuple[int, int]):
+    """Return a global-covering LatLonCoordinates and matching StaticInputs."""
+    step = 360 / fine_shape[1]
+    global_fine_lon = torch.arange(fine_shape[1]) * step + step / 2
+    global_fine_lat = _get_monotonic_coordinate(fine_shape[0], stop=fine_shape[0])
+    full_fine_coords = LatLonCoordinates(lat=global_fine_lat, lon=global_fine_lon)
+    static_field = torch.arange(
+        fine_shape[0] * fine_shape[1], dtype=torch.float32
+    ).reshape(*fine_shape)
+    static_inputs = StaticInputs(
+        fields=[StaticInput(static_field)], coords=full_fine_coords
+    )
+    return full_fine_coords, static_inputs
+
+
+def test_with_rolled_lon_no_roll_returns_same():
+    """with_rolled_lon returns the original model when no roll is needed."""
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    static_inputs = make_static_inputs(fine_shape)
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=static_inputs.coords,
+        static_inputs=static_inputs,
+    )
+    coarse_lon = _get_monotonic_coordinate(coarse_shape[1], stop=fine_shape[1])
+    assert model.with_rolled_lon(coarse_lon) is model
+
+
+def test_with_rolled_lon_shifts_coords_and_shares_weights():
+    """with_rolled_lon: new model with rolled coords, shared network weights."""
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    full_fine_coords, static_inputs = _make_global_fine_coords_and_static(fine_shape)
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=full_fine_coords,
+        static_inputs=static_inputs,
+    )
+
+    coarse_lon = torch.tensor([-10.0, -5.0, 0.0, 5.0], dtype=torch.float32)
+    rolled = model.with_rolled_lon(coarse_lon)
+
+    # Reconstruction wraps a fresh module around the SAME raw weights.
+    assert rolled.module is not model.module
+    assert next(rolled.module.parameters()) is next(model.module.parameters())
+    assert not torch.equal(rolled.full_fine_coords.lon, model.full_fine_coords.lon)
+    assert torch.all(rolled.full_fine_coords.lon[1:] > rolled.full_fine_coords.lon[:-1])
+    assert rolled.full_fine_coords.lon[0].item() < 0
+    assert rolled.static_inputs is not None
+    # Compare against model.static_inputs (on-device) rather than the CPU-side original
+    assert not torch.equal(
+        rolled.static_inputs.fields[0].data, model.static_inputs.fields[0].data
+    )
+
+
+def test_with_rolled_lon_is_idempotent():
+    """Rolling an already-rolled model with the same domain is a no-op.
+
+    Guards against accidental double-rolling: the second roll resolves to 0
+    (full rotation), so the twice-rolled model has identical coords and static
+    inputs to the once-rolled one.
+    """
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    full_fine_coords, static_inputs = _make_global_fine_coords_and_static(fine_shape)
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=full_fine_coords,
+        static_inputs=static_inputs,
+    )
+
+    coarse_lon = torch.tensor([-10.0, -5.0, 0.0, 5.0], dtype=torch.float32)
+    rolled = model.with_rolled_lon(coarse_lon)
+    twice = rolled.with_rolled_lon(coarse_lon)
+
+    assert torch.equal(twice.full_fine_coords.lon, rolled.full_fine_coords.lon)
+    assert rolled.static_inputs is not None and twice.static_inputs is not None
+    assert torch.equal(
+        twice.static_inputs.fields[0].data, rolled.static_inputs.fields[0].data
+    )
+
+
+def test_roll_diffusion_model_keeps_fine_aligned_to_coarse_cells():
+    """A seam-crossing domain must roll the fine grid by whole coarse cells.
+
+    The roll is anchored on the western coarse-cell edge, not its center. If it
+    anchored on the center it would roll an extra downscale_factor // 2 fine
+    points, leaving no fine margin below the western coarse cell -- which makes
+    get_fine_coords_for_batch raise -- and splitting that cell across the seam.
+    """
+    coarse_shape = (4, 8)
+    fine_shape = (16, 32)
+    factor = 4
+    full_fine_coords, static_inputs = _make_global_fine_coords_and_static(fine_shape)
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=factor,
+        full_fine_coords=full_fine_coords,
+        static_inputs=static_inputs,
+    )
+
+    # Four of the eight global 45-degree coarse cells, crossing the 0/360 seam and
+    # expressed in negative convention (physically 292.5, 337.5 and 22.5, 67.5).
+    # Coarse-lat centers [6, 10] are interior, leaving fine margin above and below.
+    coarse_lat = [6.0, 10.0]
+    coarse_lon = [-67.5, -22.5, 22.5, 67.5]
+    batch = make_batch_data(
+        (1, len(coarse_lat), len(coarse_lon)), coarse_lat, coarse_lon
+    )
+
+    rolled = model.with_rolled_lon(torch.tensor(coarse_lon, dtype=torch.float32))
+    # Anchoring on the cell center would leave no margin and raise here.
+    fine_coords = rolled.get_fine_coords_for_batch(batch)
+
+    # Each coarse cell is covered by exactly `factor` fine cells whose mean is the
+    # coarse-cell center -- i.e. the fine grid stayed aligned to the coarse cells.
+    recentered = fine_coords.lon.reshape(len(coarse_lon), factor).mean(dim=1).cpu()
+    assert torch.allclose(recentered, torch.tensor(coarse_lon), atol=1e-3)
+
+
+def test_denoising_moe_predictor_with_rolled_lon_rolls_all_experts():
+    """with_rolled_lon rolls every expert (keeping the shared-grid invariant)."""
+    from fme.downscaling.predictors.serial_denoising import DenoisingMoEPredictor
+
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    full_fine_coords, static_inputs = _make_global_fine_coords_and_static(fine_shape)
+
+    expert0 = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=full_fine_coords,
+        static_inputs=static_inputs,
+    )
+    expert1 = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=full_fine_coords,
+        static_inputs=static_inputs,
+    )
+    predictor = DenoisingMoEPredictor(
+        experts=[expert0, expert1],
+        sigma_ranges=[(0.0, 0.5), (0.5, 1.0)],
+        num_diffusion_generation_steps=2,
+        churn=0.0,
+    )
+
+    coarse_lon = torch.tensor([-10.0, -5.0, 0.0, 5.0], dtype=torch.float32)
+    rolled = predictor.with_rolled_lon(coarse_lon)
+
+    # Every expert is a new (rolled) object; _primary stays _experts[0].
+    assert rolled._primary is rolled._experts[0]
+    for rolled_expert, original, source in zip(
+        rolled._experts, predictor._experts, [expert0, expert1]
+    ):
+        assert rolled_expert is not original
+        # Coords are rolled...
+        assert rolled_expert.full_fine_coords.lon[0].item() < 0
+        # ...but the raw network weights are still shared (fresh wrapper).
+        assert next(rolled_expert.module.parameters()) is next(
+            source.module.parameters()
+        )
+    # The sigma dispatcher is rebuilt from the rolled experts, consistent with
+    # _experts (not left pointing at any pre-roll module).
+    for entry, rolled_expert in zip(rolled._dispatch_module._entries, rolled._experts):
+        assert entry[2] is rolled_expert.module
+
+    # No-roll case returns self
+    non_neg_lon = torch.tensor([0.0, 5.0, 10.0, 15.0], dtype=torch.float32)
+    assert predictor.with_rolled_lon(non_neg_lon) is predictor
+
+
+def test_denoising_moe_predictor_rejects_mismatched_expert_grids():
+    """Experts on different grids are rejected at construction (shared-grid)."""
+    from fme.downscaling.predictors.serial_denoising import DenoisingMoEPredictor
+
+    fine_coords_a, static_a = _make_global_fine_coords_and_static((16, 32))
+    fine_coords_b, static_b = _make_global_fine_coords_and_static((16, 16))
+    expert_a = _get_diffusion_model(
+        coarse_shape=(8, 16),
+        downscale_factor=2,
+        full_fine_coords=fine_coords_a,
+        static_inputs=static_a,
+    )
+    expert_b = _get_diffusion_model(
+        coarse_shape=(8, 8),
+        downscale_factor=2,
+        full_fine_coords=fine_coords_b,
+        static_inputs=static_b,
+    )
+    with pytest.raises(ValueError, match="metadata"):
+        DenoisingMoEPredictor(
+            experts=[expert_a, expert_b],
+            sigma_ranges=[(0.0, 0.5), (0.5, 1.0)],
+            num_diffusion_generation_steps=2,
+            churn=0.0,
+        )
+
+
 def test_checkpoint_config_topography_raises():
     with pytest.raises(ValueError):
         CheckpointModelConfig(
