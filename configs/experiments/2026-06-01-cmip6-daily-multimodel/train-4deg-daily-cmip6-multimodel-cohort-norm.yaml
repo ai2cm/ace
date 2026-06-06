@@ -724,10 +724,19 @@ stepper:
       residual_prediction: false
       builder:
         type: NoiseConditionedSFNO
-        # ``conditional: false`` (default) for the cohort variant —
-        # no per-source label conditioning. Labels are still
-        # propagated by Cmip6DataConfig and shown in the W&B run, but
-        # the network treats every batch identically.
+        # ``conditional: true`` because Cmip6DataConfig emits labels
+        # unconditionally and the stepper passes them through to the
+        # model. The framework rejects labels for unconditional
+        # builders (``TypeError: Labels are not allowed for
+        # unconditional models``) so we can't run cohort norm with
+        # ``conditional: false`` without a framework change. The
+        # practical difference from the per-source variant: this
+        # variant uses cohort centering / scaling rather than
+        # per-source, but the network still receives the label
+        # embedding into its conditional layer norms. Treat it as
+        # "label-aware-but-cohort-normalized" rather than truly
+        # unconditional.
+        conditional: true
         # Tolerate sub-universal output variables (radiation /
         # heat-flux diagnostics missing from ~half the cohort) by
         # masking them per-sample rather than dropping the dataset.
