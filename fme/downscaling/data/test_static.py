@@ -204,15 +204,3 @@ def test_StaticInputs_roll_shifts_data_and_coords():
     # Coordinates should be monotonically increasing and start near lon_start
     assert torch.all(rolled.coords.lon[1:] > rolled.coords.lon[:-1])
     assert rolled.coords.lon[0].item() == pytest.approx(354.5 - 360)  # = -5.5
-
-
-def test_StaticInputs_roll_zero_returns_self():
-    from fme.core.coordinates import LatLonCoordinates
-
-    coords = LatLonCoordinates(
-        lat=torch.tensor([0.0]),
-        lon=torch.tensor([0.5, 1.5, 2.5]),
-    )
-    data = torch.zeros(1, 3)
-    static = StaticInputs(fields=[StaticInput(data)], coords=coords)
-    assert static.roll(0, 0.0) is static

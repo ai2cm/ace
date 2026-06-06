@@ -21,7 +21,8 @@ from fme.downscaling.data import (
     PairedBatchData,
     StaticInputs,
     adjust_fine_coord_range,
-    compute_lon_roll,
+    coords_require_lon_roll,
+    find_roll_anchor,
     load_coords_from_path,
     roll_latlon_coords,
 )
@@ -749,29 +750,57 @@ class DiffusionModel:
             else 0,
         )
 
+    def _lon_roll_amount(self, coarse_lon: torch.Tensor) -> tuple[int, float]:
+        """
+        Number of positions to roll the fine grid (and the lon_start it aligns to)
+        so the fine cells stay aligned to coarse_lon's coarse cells.
 
-def lon_rolled_model(model: DiffusionModel, coarse_lon: torch.Tensor) -> DiffusionModel:
-    """
-    Return a shallow copy of model with full_fine_coords and static_inputs pre-rolled
-    to match the longitude convention of coarse_lon. Shares all neural network weights.
-    Returns model unchanged when no roll is needed.
-    """
-    import copy
+        coarse_lon is the actual coarse domain grid, so it already carries the
+        convention to align to. The roll is anchored on the western coarse-cell
+        *edge* (half a coarse cell below coarse_lon.min(), which is a cell *center*)
+        so the fine grid rolls by a whole number of coarse cells and its cells stay
+        aligned to the coarse cells. Anchoring on the center instead would roll by an
+        extra downscale_factor // 2 fine points, splitting the boundary coarse cell
+        across the seam.
+        """
+        lon_start = float(coarse_lon.min())
+        fine_lon = self.full_fine_coords.lon
+        fine_spacing = float(fine_lon[1] - fine_lon[0])
+        western_edge = lon_start - self.downscale_factor * fine_spacing / 2.0
+        return find_roll_anchor(fine_lon, western_edge), lon_start
 
-    lon_start = coarse_lon.min().item()
-    roll_amount = compute_lon_roll(model.full_fine_coords.lon, lon_start)
-    if roll_amount == 0:
-        return model
-    rolled_fine = roll_latlon_coords(model.full_fine_coords, roll_amount, lon_start)
-    rolled_static = (
-        model.static_inputs.roll(roll_amount, lon_start)
-        if model.static_inputs is not None
-        else None
-    )
-    result = copy.copy(model)
-    result.full_fine_coords = rolled_fine
-    result.static_inputs = rolled_static
-    return result
+    def with_rolled_lon(self, coarse_lon: torch.Tensor) -> "DiffusionModel":
+        """
+        Return a new model with full_fine_coords and static_inputs rolled to match
+        coarse_lon's longitude convention, sharing the network weights.
+
+        Returns self unchanged when coarse_lon does not cross the prime meridian.
+        The new model is built through the constructor (rather than a shallow copy)
+        so its coords are re-validated and derived state is rebuilt fresh; the raw
+        module is unwrapped and passed so __init__ re-wraps it exactly once.
+        """
+        if not coords_require_lon_roll(coarse_lon):
+            return self
+        roll_amount, lon_start = self._lon_roll_amount(coarse_lon)
+        return DiffusionModel(
+            config=self.config,
+            module=self.module.module,
+            normalizer=self.normalizer,
+            loss=self.loss,
+            coarse_shape=self.coarse_shape,
+            downscale_factor=self.downscale_factor,
+            sigma_data=self.sigma_data,
+            full_fine_coords=roll_latlon_coords(
+                self.full_fine_coords, roll_amount, lon_start
+            ),
+            in_names=self.in_names,
+            out_names=self.out_names,
+            static_inputs=(
+                self.static_inputs.roll(roll_amount, lon_start)
+                if self.static_inputs is not None
+                else None
+            ),
+        )
 
 
 @dataclasses.dataclass

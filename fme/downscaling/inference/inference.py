@@ -11,8 +11,8 @@ from fme.core.cli import prepare_directory
 from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
 
-from ..data import DataLoaderConfig
-from ..models import CheckpointModelConfig, DiffusionModel, lon_rolled_model
+from ..data import DataLoaderConfig, coords_require_lon_roll
+from ..models import CheckpointModelConfig, DiffusionModel
 from ..predictors import (
     DenoisingMoEBundledConfig,
     DenoisingMoEConfig,
@@ -59,19 +59,25 @@ class Downscaler:
         self,
         input_shape: tuple[int, int],
         output: DownscalingOutput,
+        coarse_lon: torch.Tensor,
     ) -> DiffusionModel | DenoisingMoEPredictor | PatchPredictor:
         """
-        Set up the model, wrapping with PatchPredictor if needed.  While models are
+        Set up the model for inference: roll coordinates to match the coarse lon
+        convention, then wrap with PatchPredictor if needed.  While models are
         probably capable of generating any domain size, we haven't tested for domains
         smaller than the model patch size, so we raise an error in that case, and prompt
         the user to use patching for larger domains because that provides better
         generations.
         """
-        model_patch_shape = self.model.coarse_shape
+        if coords_require_lon_roll(coarse_lon):
+            base_model = self.model.with_rolled_lon(coarse_lon)
+        else:
+            base_model = self.model
+        model_patch_shape = base_model.coarse_shape
 
         if model_patch_shape == input_shape:
             # short circuit, no patching necessary
-            return self.model
+            return base_model
         elif any(
             expected > actual
             for expected, actual in zip(model_patch_shape, input_shape)
@@ -88,7 +94,7 @@ class Downscaler:
             # Use a patch predictor
             logging.info(f"Using PatchPredictor for output: {output.name}")
             return PatchPredictor(
-                model=self.model,
+                model=base_model,
                 coarse_horizontal_overlap=output.patch.coarse_horizontal_overlap,
             )
         else:
@@ -110,9 +116,9 @@ class Downscaler:
 
         coarse_coords = output.data.coarse_latlon_coords
         input_shape = (len(coarse_coords.lat), len(coarse_coords.lon))
-        model = self._get_generation_model(input_shape=input_shape, output=output)
-        if isinstance(model, DiffusionModel):
-            model = lon_rolled_model(model, coarse_coords.lon)
+        model = self._get_generation_model(
+            input_shape=input_shape, output=output, coarse_lon=coarse_coords.lon
+        )
 
         writer = None
         total_batches = len(output.data.loader)

@@ -45,6 +45,7 @@ def mock_model():
     model = MagicMock()
     model.coarse_shape = (16, 16)
     model.fine_shape = (32, 32)
+    model.with_rolled_lon.return_value = model
     return model
 
 
@@ -101,9 +102,11 @@ def test_get_generation_model_exact_match(mock_model, mock_output_target):
         outputs=[mock_output_target],
     )
 
+    coarse_lon = torch.arange(16, dtype=torch.float32)
     result = downscaler._get_generation_model(
         input_shape=(16, 16),
         output=mock_output_target,
+        coarse_lon=coarse_lon,
     )
 
     assert result is mock_model
@@ -124,10 +127,12 @@ def test_get_generation_model_raises_when_domain_too_small(
         outputs=[mock_output_target],
     )
 
+    coarse_lon = torch.arange(input_shape[1], dtype=torch.float32)
     with pytest.raises(ValueError):
         downscaler._get_generation_model(
             input_shape=input_shape,
             output=mock_output_target,
+            coarse_lon=coarse_lon,
         )
 
 
@@ -151,9 +156,11 @@ def test_get_generation_model_creates_patch_predictor_when_needed(
         outputs=[mock_output_target],
     )
 
+    coarse_lon = torch.arange(32, dtype=torch.float32)
     model = downscaler._get_generation_model(
         input_shape=(32, 32),
         output=mock_output_target,
+        coarse_lon=coarse_lon,
     )
 
     assert isinstance(model, PatchPredictor)
@@ -175,10 +182,12 @@ def test_get_generation_model_raises_when_large_domain_without_patching(
         outputs=[mock_output_target],
     )
 
+    coarse_lon = torch.arange(32, dtype=torch.float32)
     with pytest.raises(ValueError):
         downscaler._get_generation_model(
             input_shape=(32, 32),
             output=mock_output_target,
+            coarse_lon=coarse_lon,
         )
 
 

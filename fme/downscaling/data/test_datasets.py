@@ -263,11 +263,12 @@ def test_horizontal_subset_prime_meridian_spanning():
     data_tensor = torch.arange(n_lon, dtype=torch.float).unsqueeze(0).unsqueeze(0)
     data_tensor = data_tensor.expand(1, 1, n_lat, n_lon).clone()
 
-    datum: tuple[dict[str, torch.Tensor], xr.DataArray, set[str], int] = (
+    datum: tuple[dict[str, torch.Tensor], xr.DataArray, set[str], int, None] = (
         {"x": data_tensor},
         xr.DataArray([0.0]),
         set(),
         0,
+        None,
     )
     base_dataset = MagicMock(spec=torch.utils.data.Dataset)
     properties = MagicMock(spec=DatasetProperties)
@@ -288,11 +289,56 @@ def test_horizontal_subset_prime_meridian_spanning():
     expected_lons = torch.tensor([-90.0, -45.0, 0.0, 45.0])
     assert torch.allclose(dataset.subset_latlon_coordinates.lon, expected_lons)
 
-    subset, _, _, _ = dataset[0]
+    subset, _, _, _, _ = dataset[0]
     assert subset["x"].shape == (1, 1, n_lat, 4)
     # Data values should correspond to original lon indices 6, 7, 0, 1
     expected_vals = torch.tensor([6.0, 7.0, 0.0, 1.0])
     assert torch.allclose(subset["x"][0, 0, 0], expected_vals)
+
+
+def test_horizontal_subset_prime_meridian_spanning_positive_convention():
+    """stop > 360 triggers the same roll as the equivalent negative-start interval.
+
+    (270, 405) and (-90, 45) select the same physical data; coordinates are
+    returned in whichever convention the caller supplied.
+    """
+    lons = torch.tensor([0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0])
+    n_lat, n_lon = 4, 8
+    coords = LatLonCoordinates(lat=torch.linspace(0.0, 1.0, n_lat), lon=lons)
+    data_tensor = torch.arange(n_lon, dtype=torch.float).unsqueeze(0).unsqueeze(0)
+    data_tensor = data_tensor.expand(1, 1, n_lat, n_lon).clone()
+    datum: tuple[dict[str, torch.Tensor], xr.DataArray, set[str], int, None] = (
+        {"x": data_tensor},
+        xr.DataArray([0.0]),
+        set(),
+        0,
+        None,
+    )
+
+    def make_dataset(lon_interval):
+        base_dataset = MagicMock(spec=torch.utils.data.Dataset)
+        properties = MagicMock(spec=DatasetProperties)
+        properties.horizontal_coordinates = coords
+        properties.all_labels = MagicMock(spec=set)
+        base_dataset.__getitem__.return_value = datum
+        return HorizontalSubsetDataset(
+            dataset=base_dataset,
+            properties=properties,
+            lat_interval=ClosedInterval(float("-inf"), float("inf")),
+            lon_interval=lon_interval,
+        )
+
+    # (270, 405): stop > 360 convention — coords preserved in that convention
+    ds_positive = make_dataset(ClosedInterval(270.0, 405.0))
+    assert ds_positive.subset_latlon_coordinates.lon.shape == (4,)
+    expected_lons = torch.tensor([270.0, 315.0, 360.0, 405.0])
+    assert torch.allclose(ds_positive.subset_latlon_coordinates.lon, expected_lons)
+
+    pos_subset, _, _, _, _ = ds_positive[0]
+    assert pos_subset["x"].shape == (1, 1, n_lat, 4)
+    # Same physical data as (-90, 45): original lon indices 6, 7, 0, 1
+    expected_vals = torch.tensor([6.0, 7.0, 0.0, 1.0])
+    assert torch.allclose(pos_subset["x"][0, 0, 0], expected_vals)
 
 
 def test_batch_data_from_sequence():

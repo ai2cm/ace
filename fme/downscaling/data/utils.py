@@ -16,76 +16,6 @@ def null_generator(num: int):
         yield None
 
 
-def compute_lon_roll(lon_coords: torch.Tensor, lon_start: float) -> int:
-    """
-    Compute the number of positions to roll lon_coords (leftward) so that an
-    interval starting at lon_start becomes contiguous in the rolled array.
-
-    Returns 0 when lon_start is already representable without wrapping (i.e.,
-    lon_start is within one period of the coordinate origin).
-
-    Args:
-        lon_coords: 1-D tensor of monotonically increasing longitudes (e.g. 0–360°).
-        lon_start: Start of the desired longitude interval.
-
-    Returns:
-        Roll amount r such that ``torch.roll(lon_coords, -r)`` places the first
-        coordinate >= (lon_start % 360) at index 0 of the rolled array.
-    """
-    start_360 = lon_start % 360
-    if abs(lon_start - start_360) < 1e-6:
-        return 0
-    return int((lon_coords < start_360).sum().item())
-
-
-def roll_lon_coords(
-    lon_coords: torch.Tensor, roll_amount: int, lon_start: float
-) -> torch.Tensor:
-    """
-    Roll longitude coordinates and adjust values to maintain a monotonically
-    increasing sequence whose first element is consistent with lon_start's
-    sign convention.
-
-    After rolling, coordinates that wrapped around the end of the array have
-    360 added, then a global offset (a multiple of 360) shifts the whole array
-    so that rolled_coords[0] ≈ lon_start.
-
-    Args:
-        lon_coords: 1-D tensor of monotonically increasing longitudes.
-        roll_amount: Value returned by :func:`compute_lon_roll`.
-        lon_start: The lon_start used when computing roll_amount.
-
-    Returns:
-        A new tensor of the same shape with monotonically increasing values.
-    """
-    if roll_amount == 0:
-        return lon_coords
-    n = len(lon_coords)
-    rolled = torch.roll(lon_coords, -roll_amount).clone()
-    rolled[n - roll_amount :] += 360.0
-    offset = lon_start - (lon_start % 360)
-    return rolled + offset
-
-
-def roll_lon_data(
-    tensor: torch.Tensor, roll_amount: int, lon_dim: int = -1
-) -> torch.Tensor:
-    """Roll a data tensor along its longitude dimension by roll_amount positions."""
-    if roll_amount == 0:
-        return tensor
-    return torch.roll(tensor, -roll_amount, dims=lon_dim)
-
-
-def roll_latlon_coords(
-    coords: LatLonCoordinates, roll_amount: int, lon_start: float
-) -> LatLonCoordinates:
-    """Return a new LatLonCoordinates with lon rolled by roll_amount."""
-    return LatLonCoordinates(
-        lat=coords.lat,
-        lon=roll_lon_coords(coords.lon, roll_amount, lon_start),
-    )
-
-
 @dataclasses.dataclass
 class ClosedInterval:
     """
@@ -139,6 +69,178 @@ class ClosedInterval:
         This assumes `coords` is monotonically increasing.
         """
         return coords[self.slice_from(coords)]
+
+    @property
+    def finite_values(self) -> tuple[float, float]:
+        """
+        Return longitude constrained values for this interval,
+        handling infinite endpoints as 0 and 360, respectively.
+        """
+        start = self.start if self.start != -float("inf") else 0.0
+        stop = self.stop if self.stop != float("inf") else 360.0
+        return start, stop
+
+
+def _validate_rollable_lon(lon_coords: torch.Tensor) -> None:
+    """Raise if lon_coords cannot be rolled across the prime meridian.
+
+    Rolling adds 360 to the coordinates that wrap around the end of the array,
+    which yields a monotonic, contiguous result only if the grid extends the whole
+    globe: it must be uniformly spaced and the gap from the last point back to
+    the first must equal that spacing (i.e. the grid reaches the 360° wrap
+    point). This is the precondition the wrap arithmetic assumes.
+
+    The wrap-gap test ``lon[0] + 360 - lon[-1] == spacing`` is convention
+    independent: for any global grid ``lon[-1] - lon[0] == 360 - spacing``,
+    whether expressed as [0, 360), [-180, 180), or any offset.
+    """
+    if lon_coords.numel() < 2:
+        raise ValueError(
+            "Cannot roll a longitude grid with fewer than 2 points across the "
+            "prime meridian."
+        )
+
+    lon = lon_coords.detach().double()
+    diffs = lon[1:] - lon[:-1]
+    spacing = float(diffs.mean())
+    tol = abs(spacing) * 1e-3
+    if float((diffs - spacing).abs().max()) > tol:
+        raise ValueError(
+            "Longitude coordinates are not uniformly spaced; cannot roll across "
+            "the prime meridian."
+        )
+    wrap_gap = float(lon[0] + 360.0 - lon[-1])
+    if abs(wrap_gap - spacing) > tol:
+        raise ValueError(
+            "Longitude coordinates do not span the full globe; cannot roll across "
+            f"the prime meridian (wrap gap {wrap_gap:.4f}°, grid spacing "
+            f"{spacing:.4f}°)."
+        )
+
+
+def coords_require_lon_roll(coarse_lon: torch.Tensor) -> bool:
+    """
+    Return True if coarse_lon spans the prime meridian and needs rolling.
+
+    Triggers when any longitude is negative (domain shifted west of 0°) or
+    exceeds 360° (domain shifted east of 360°).
+
+    Args:
+        coarse_lon: 1-D tensor of longitudes (e.g. 0–360°).
+    """
+    return bool(coarse_lon.min() < 0.0 or coarse_lon.max() > 360.0)
+
+
+def find_roll_anchor(lon_coords: torch.Tensor, anchor: float) -> int:
+    """
+    Leftward roll that places the first coord >= (anchor mod 360) at index 0.
+
+    The roll amount is the number of coordinates strictly below the anchor
+    longitude, which is taken mod 360 so that any caller convention (negative
+    or > 360) is accepted. Used directly when the target coordinates are known
+    such as the start of a longitude interval.
+
+    The result is reduced modulo the grid length: rolling is cyclic, so when
+    every coordinate falls below the anchor the roll is a full rotation, which
+    is a no-op and canonicalizes to 0.
+
+    Assumes lon_coords are monotonically increasing and cyclic.
+
+    Args:
+        lon_coords: 1-D tensor of monotonically increasing longitudes (e.g. 0–360°).
+        anchor: The longitude to anchor at index 0 after rolling.
+    """
+    n = len(lon_coords)
+    below = int((lon_coords < anchor % 360.0).sum().item())
+    return below % n
+
+
+def find_roll_anchor_from_interval(
+    lon_coords: torch.Tensor, lon_interval: ClosedInterval
+) -> int:
+    """
+    Find the roll anchor index for a longitude interval. See
+    :func:`find_roll_anchor` for details.
+
+    Returns 0 unless the interval crosses the prime meridian (its effective
+    start is below 0° or its effective stop is above 360°). An in-range interval
+    needs no roll, so this mirrors the :func:`coords_require_lon_roll` gate used
+    on the model side and avoids rolling a non-global grid, which cannot be
+    rolled across the seam.
+
+    Args:
+        lon_coords: 1-D tensor of monotonically increasing longitudes (e.g. 0–360°).
+        lon_interval: The desired longitude interval.
+    """
+    lon_start, lon_stop = lon_interval.finite_values
+    if lon_start >= 0.0 and lon_stop <= 360.0:
+        return 0
+    return find_roll_anchor(lon_coords, lon_start)
+
+
+def roll_lon_coords(
+    lon_coords: torch.Tensor, roll_amount: int, lon_start: float
+) -> torch.Tensor:
+    """
+    Re-express a global longitude grid as a monotonically increasing sequence
+    that starts near ``lon_start``, matching the same leftward roll applied to
+    the data by :func:`roll_lon_data` (so coords and data stay aligned).
+
+    Used so that we can use the user-supplied interval for slicing of the
+    rolled coordinates, which is more intuitive if the rolled coordinates are in
+    the same convention (e.g. -90 to 270 for an interval starting at -90)
+    rather than the original (e.g. 0 to 360).
+
+    Worked example -- 1 degree grid ``[0.5, 1.5, ..., 359.5]`` with
+    ``roll_amount=270`` and ``lon_start=-90``:
+
+    1. roll left by 270 -> ``[270.5, ..., 359.5, 0.5, ..., 269.5]`` (drops at seam)
+    2. +360 on wrapped tail -> ``[270.5, ..., 359.5, 360.5, ..., 629.5]`` (monotonic)
+    3. shift by -360 period -> ``[-89.5, ..., -0.5, 0.5, ..., 269.5]`` (-90 convention)
+
+    Args:
+        lon_coords: 1-D tensor of monotonically increasing longitudes.
+        roll_amount: Leftward roll from :func:`find_roll_anchor` -- the number
+            of coordinates below the anchor, which wrap around to the tail.
+        lon_start: Target first longitude; selects which 360 degree window the
+            result lands in (e.g. negative for a domain expressed west of 0).
+
+    Returns:
+        A new tensor of the same shape, monotonically increasing, with
+        ``result[0] ≈ lon_start``.
+    """
+    if roll_amount == 0:
+        return lon_coords
+    _validate_rollable_lon(lon_coords)
+    n = len(lon_coords)
+    rolled = torch.roll(lon_coords, -roll_amount).clone()
+    rolled[n - roll_amount :] += 360.0
+    period_offset = lon_start - (lon_start % 360.0)
+    return rolled + period_offset
+
+
+def roll_data_lon_dim(
+    tensor: torch.Tensor, roll_amount: int, lon_dim: int = -1
+) -> torch.Tensor:
+    """Roll a data tensor along its longitude dimension by roll_amount positions."""
+    if roll_amount == 0:
+        return tensor
+    return torch.roll(tensor, -roll_amount, dims=lon_dim)
+
+
+def roll_latlon_coords(
+    coords: LatLonCoordinates, roll_amount: int, lon_start: float
+) -> LatLonCoordinates:
+    """
+    Return a new LatLonCoordinates with lon rolled by roll_amount.
+
+    Currently expressed as a function and not a method until roll is
+    used outside of downscaling.
+    """
+    return LatLonCoordinates(
+        lat=coords.lat,
+        lon=roll_lon_coords(coords.lon, roll_amount, lon_start),
+    )
 
 
 def scale_slice(slice_: slice, scale: int) -> slice:
@@ -217,14 +319,7 @@ def adjust_fine_coord_range(
     coarse_min = full_coarse_coord[full_coarse_coord >= coord_range.start][0]
     coarse_max = full_coarse_coord[full_coarse_coord <= coord_range.stop][-1]
 
-    # Detect a wrapping longitude domain: coord_range uses a shifted convention
-    # (coarse_min is negative) while the fine coord array is in 0–360°.
-    # Fine points "just before" the wrapped edge live at the high end of the
-    # unshifted fine array (e.g. near 270° when the edge is at -90° / 270°).
-    is_lon_wrap = float(coarse_min) < 0 and float(full_fine_coord.min()) >= 0
-    fine_ref = float(coarse_min) + (360.0 if is_lon_wrap else 0.0)
-
-    n_fine_below = int((full_fine_coord < fine_ref).sum())
+    n_fine_below = int((full_fine_coord < coarse_min).sum())
     n_fine_above = int((full_fine_coord > coarse_max).sum())
     if n_fine_below < n_half_fine or n_fine_above < n_half_fine:
         raise ValueError(
@@ -236,9 +331,8 @@ def adjust_fine_coord_range(
             f"the domain edges."
         )
 
-    fine_min_ref = float(full_fine_coord[full_fine_coord < fine_ref][-n_half_fine])
-    fine_min = fine_min_ref - (360.0 if is_lon_wrap else 0.0)
-    fine_max = float(full_fine_coord[full_fine_coord > coarse_max][n_half_fine - 1])
+    fine_min = full_fine_coord[full_fine_coord < coarse_min][-n_half_fine]
+    fine_max = full_fine_coord[full_fine_coord > coarse_max][n_half_fine - 1]
 
     return ClosedInterval(start=fine_min, stop=fine_max)
 

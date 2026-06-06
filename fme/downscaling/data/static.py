@@ -5,7 +5,11 @@ import xarray as xr
 
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
-from fme.downscaling.data.utils import ClosedInterval, roll_lon_coords, roll_lon_data
+from fme.downscaling.data.utils import (
+    ClosedInterval,
+    roll_data_lon_dim,
+    roll_lon_coords,
+)
 
 
 @dataclasses.dataclass
@@ -163,10 +167,7 @@ class StaticInputs:
         lat_slice = lat_interval.slice_from(self.coords.lat)
         lon_slice = lon_interval.slice_from(self.coords.lon)
         return StaticInputs(
-            fields=[
-                StaticInput(data=field.data[lat_slice, lon_slice])
-                for field in self.fields
-            ],
+            fields=[field.subset(lat_slice, lon_slice) for field in self.fields],
             coords=LatLonCoordinates(
                 lat=lat_interval.subset_of(self.coords.lat),
                 lon=lon_interval.subset_of(self.coords.lon),
@@ -182,7 +183,7 @@ class StaticInputs:
         rolled_lon = roll_lon_coords(self.coords.lon, roll_amount, lon_start)
         return StaticInputs(
             fields=[
-                StaticInput(data=roll_lon_data(f.data, roll_amount, lon_dim=-1))
+                StaticInput(data=roll_data_lon_dim(f.data, roll_amount, lon_dim=-1))
                 for f in self.fields
             ],
             coords=LatLonCoordinates(lat=self.coords.lat, lon=rolled_lon),

@@ -25,12 +25,12 @@ from fme.downscaling.data.utils import (
     BatchedLatLonCoordinates,
     ClosedInterval,
     check_leading_dim,
-    compute_lon_roll,
     expand_and_fold_tensor,
+    find_roll_anchor_from_interval,
     get_offset,
     paired_shuffle,
+    roll_data_lon_dim,
     roll_lon_coords,
-    roll_lon_data,
     scale_tuple,
 )
 
@@ -124,14 +124,14 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
             )
 
         self._orig_coords: LatLonCoordinates = properties.horizontal_coordinates
+        lon_start, _ = self.lon_interval.finite_values
 
-        # Detect whether the requested lon interval spans the 0°/360° seam of the
-        # stored coordinates (e.g. start=-5, stop=3 on 0–360° data). When it does,
-        # roll the data along the longitude axis so the interval is contiguous.
-        lon_start = (
-            self.lon_interval.start if self.lon_interval.start != -float("inf") else 0.0
+        # determine roll amount for each dataset get item operation
+        self._lon_roll_amount = find_roll_anchor_from_interval(
+            self._orig_coords.lon, self.lon_interval
         )
-        self._lon_roll_amount = compute_lon_roll(self._orig_coords.lon, lon_start)
+
+        # set coordinate metadata for the subsetted region
         rolled_lon = roll_lon_coords(
             self._orig_coords.lon, self._lon_roll_amount, lon_start
         )
@@ -169,7 +169,7 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
             missing_names is None
         ), "Variable masking is not supported in downscaling."
         batch = {
-            k: roll_lon_data(v, self._lon_roll_amount)[
+            k: roll_data_lon_dim(v, self._lon_roll_amount)[
                 ...,
                 self._lats_slice,
                 self._lons_slice,
@@ -304,6 +304,7 @@ class GriddedData:
     dims: list[str]
     variable_metadata: Mapping[str, VariableMetadata]
     all_times: xr.CFTimeIndex
+    coarse_latlon_coords: LatLonCoordinates
 
     @property
     def loader(self) -> DataLoader[BatchItem]:
@@ -346,6 +347,7 @@ class PairedGriddedData:
     variable_metadata: Mapping[str, VariableMetadata]
     all_times: xr.CFTimeIndex
     fine_coords: LatLonCoordinates
+    coarse_latlon_coords: LatLonCoordinates
 
     @property
     def loader(self) -> DataLoader[PairedBatchItem]:
