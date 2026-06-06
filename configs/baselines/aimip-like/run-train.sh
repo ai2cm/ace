@@ -14,6 +14,9 @@ run_training() {
   local config_filename="$1"
   local job_name="$2"
   local N_GPUS="$3"
+  local WORKSPACE="${4:-ai2/climate-titan}"
+  local PRIORITY="${5:-urgent}"
+  local CLUSTER="${6:-ai2/titan}"
   local CONFIG_PATH="$SCRIPT_PATH/$config_filename"
 
   python -m fme.ace.validate_config --config_type train "$CONFIG_PATH"
@@ -28,9 +31,9 @@ run_training() {
     --name "$job_name" \
     --description 'Run ACE training (AIMIP-like baseline)' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-    --workspace ai2/climate-titan \
-    --priority urgent \
-    --cluster ai2/titan \
+    --workspace "$WORKSPACE" \
+    --priority "$PRIORITY" \
+    --cluster "$CLUSTER" \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
@@ -49,7 +52,17 @@ run_training() {
     -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train "$CONFIG_PATH"
 }
 
+# --- Wave 1 (climate-titan, urgent) ---
 # run_training "train-4deg-daily-v1-era5-only.yaml" "train-4deg-daily-v1-era5-only-rs0" 1
-run_training "train-4deg-daily-v1-labels.yaml" "train-4deg-daily-v1-labels-rs0" 1
-run_training "train-4deg-daily-v1-era5-only-residual.yaml" "train-4deg-daily-v1-era5-only-residual-rs0" 1
-run_training "train-4deg-daily-v1-era5-only-lr-tuning.yaml" "train-4deg-daily-v1-era5-only-lr-tuning-rs0" 1
+# run_training "train-4deg-daily-v1-labels.yaml" "train-4deg-daily-v1-labels-rs0" 1
+# run_training "train-4deg-daily-v1-era5-only-residual.yaml" "train-4deg-daily-v1-era5-only-residual-rs0" 1
+# run_training "train-4deg-daily-v1-era5-only-lr-tuning.yaml" "train-4deg-daily-v1-era5-only-lr-tuning-rs0" 1
+
+# --- Wave 2 (Jupiter, high) ---
+run_training "train-4deg-daily-v1-labels-384-lr-tuning.yaml" "train-4deg-daily-v1-labels-384-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
+run_training "train-4deg-daily-v1-labels-384-residual-lr-tuning.yaml" "train-4deg-daily-v1-labels-384-residual-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
+run_training "train-4deg-daily-v1-era5-only-384-residual-lr-tuning.yaml" "train-4deg-daily-v1-era5-only-384-residual-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
+run_training "train-4deg-daily-v1-era5-only-rs1.yaml" "train-4deg-daily-v1-era5-only-rs1" 1 ai2/ace high ai2/jupiter
+run_training "train-4deg-daily-v1-era5-only-lr-tuning-rs1.yaml" "train-4deg-daily-v1-era5-only-lr-tuning-rs1" 1 ai2/ace high ai2/jupiter
+run_training "train-4deg-daily-v1-labels-residual-lr-tuning-rs1.yaml" "train-4deg-daily-v1-labels-residual-lr-tuning-rs1" 1 ai2/ace high ai2/jupiter
+run_training "train-4deg-daily-v1-era5-only-256-lr-tuning.yaml" "train-4deg-daily-v1-era5-only-256-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
