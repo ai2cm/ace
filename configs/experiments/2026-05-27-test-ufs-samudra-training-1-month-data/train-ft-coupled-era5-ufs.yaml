@@ -11,10 +11,10 @@ ema:
   decay: 0.999
 max_epochs: 1
 inference:
-  n_coupled_steps: 4  # smoke: 20 days; enough for mean_step_20 metrics (2 ocean steps)
+  n_coupled_steps: 730 #10 years with 5 day steps
   coupled_steps_in_memory: 2
   loader:
-    num_data_workers: 1
+    num_data_workers: 4
     dataset:
       ocean:
         data_path: /climate-default
@@ -31,8 +31,8 @@ inference:
       - '2010-03-05T12:00:00'
       - '2010-04-04T12:00:00'
   aggregator:
-    log_zonal_mean_images: false
-    log_histograms: false
+    log_zonal_mean_images: true
+    log_histograms: true
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -41,8 +41,8 @@ logging:
   entity: ai2cm
   metrics_log_dir: /results/metrics
 train_loader:
-  batch_size: 4
-  num_data_workers: 2
+  batch_size: 8
+  num_data_workers: 4
   prefetch_factor: 2
   dataset:
     ocean:
@@ -100,7 +100,7 @@ optimization:
     milestones:
     - 3000
 stepper_training:
-  n_coupled_steps: 2  # smoke: 40 atmos steps; covers loss step 21 (first SST feedback)
+  n_coupled_steps: 4
   n_ensemble: 2
   ocean:
     parameter_init:
@@ -110,12 +110,14 @@ stepper_training:
       n_steps:
         outcomes:
         - steps: 0
-          probability: 0.2
+          probability: 0.1
         - steps: 1
-          probability: 0.5
+          probability: 0.3
         - steps: 2
           probability: 0.3
-      optimize_last_step_only: false
+        - steps: 4
+          probability: 0.3
+      optimize_last_step_only: true
     loss:
       type: EnsembleLoss
       kwargs:
@@ -135,9 +137,11 @@ stepper_training:
         - steps: 2
           probability: 0.29
         - steps: 4
-          probability: 0.19
+          probability: 0.29
         - steps: 21
           probability: 0.1
+        - steps: 41
+          probability: 0.05
       optimize_last_step_only: true
     loss:
       type: EnsembleLoss
