@@ -68,7 +68,14 @@ run_training() {
 # run_training "train-4deg-daily-v1-era5-only-256-lr-tuning.yaml" "train-4deg-daily-v1-era5-only-256-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
 
 # --- Wave 3: Residual drift fixes (Jupiter, high) ---
-run_training "train-4deg-daily-v1-era5-only-residual-winds-anomaly-ft.yaml" "train-4deg-daily-v1-era5-only-residual-winds-anomaly-ft-rs0" 1 ai2/ace high ai2/jupiter
-run_training "train-4deg-daily-v1-era5-only-residual-all-anomaly-ft.yaml" "train-4deg-daily-v1-era5-only-residual-all-anomaly-ft-rs0" 1 ai2/ace high ai2/jupiter
-run_training "train-4deg-daily-v1-era5-only-residual-tend-reg-ft.yaml" "train-4deg-daily-v1-era5-only-residual-tend-reg-ft-rs0" 1 ai2/ace high ai2/jupiter
-run_training "train-4deg-daily-v1-era5-only-residual-winds-anomaly-tend-reg-ft.yaml" "train-4deg-daily-v1-era5-only-residual-winds-anomaly-tend-reg-ft-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-era5-only-residual-winds-anomaly-ft.yaml" "train-4deg-daily-v1-era5-only-residual-winds-anomaly-ft-rs0" 1 ai2/ace high ai2/jupiter  # already running
+# run_training "train-4deg-daily-v1-era5-only-residual-all-anomaly-ft.yaml" "train-4deg-daily-v1-era5-only-residual-all-anomaly-ft-rs0" 1 ai2/ace high ai2/jupiter  # already running
+# --- Wave 3b: tend-reg relaunch after gradient-accumulation backward fix (21f54000f) --- [finished]
+# run_training "train-4deg-daily-v1-era5-only-residual-tend-reg-ft.yaml" "train-4deg-daily-v1-era5-only-residual-tend-reg-ft-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-era5-only-residual-winds-anomaly-tend-reg-ft.yaml" "train-4deg-daily-v1-era5-only-residual-winds-anomaly-tend-reg-ft-rs0" 1 ai2/ace high ai2/jupiter
+
+# --- Wave 4: label-conditioned (ERA5 + c96-shield) residual, tend-reg weight 0.05, from-scratch 60ep (Jupiter, high) ---
+run_training "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg.yaml" "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-rs0" 1 ai2/ace high ai2/jupiter
+run_training "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-multistep.yaml" "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-multistep-rs0" 1 ai2/ace high ai2/jupiter
+run_training "train-4deg-daily-v1-labels-residual-all-anomaly-tend-reg-multistep.yaml" "train-4deg-daily-v1-labels-residual-all-anomaly-tend-reg-multistep-rs0" 1 ai2/ace high ai2/jupiter
+run_training "train-4deg-daily-v1-labels-residual-tend-reg.yaml" "train-4deg-daily-v1-labels-residual-tend-reg-rs0" 1 ai2/ace high ai2/jupiter
