@@ -246,6 +246,32 @@ def test_compared_dynamic_histogram_varying_variables_with_record_batch():
     histogram.record_batch(target_extra_z, prediction_extra_w)
 
 
+def test_compared_dynamic_histogram_with_all_nan_variable():
+    """A variable that is entirely NaN in every recorded batch (the CMIP6
+    ``allow_missing_variables`` path emits this for inference datasets
+    that don't publish a given variable) must be skipped at output time
+    rather than crashing the histogram aggregator with ``bin_edges`` ==
+    None.
+    """
+    n_bins = 300
+    histogram = ComparedDynamicHistograms(n_bins, percentiles=[99.0])
+    shape = (2, 1, 8, 16)
+    target = {"x": torch.ones(*shape), "y": torch.full(shape, float("nan"))}
+    prediction = {"x": torch.rand(*shape), "y": torch.full(shape, float("nan"))}
+    histogram.record_batch(target, prediction)
+
+    wandb_result = histogram.get_wandb()
+    # x still emits, y is silently dropped
+    assert "x" in wandb_result
+    assert "target/99.0th-percentile/x" in wandb_result
+    assert "y" not in wandb_result
+    assert not any(key.endswith("/y") for key in wandb_result)
+
+    ds = histogram.get_dataset()
+    assert "x" in ds.data_vars
+    assert "y" not in ds.data_vars
+
+
 def test_compared_dynamic_histogram_with_nans_record_batch():
     n_bins = 300
     histogram = ComparedDynamicHistograms(n_bins, percentiles=[99.0])
