@@ -74,8 +74,16 @@ run_training() {
 # run_training "train-4deg-daily-v1-era5-only-residual-tend-reg-ft.yaml" "train-4deg-daily-v1-era5-only-residual-tend-reg-ft-rs0" 1 ai2/ace high ai2/jupiter
 # run_training "train-4deg-daily-v1-era5-only-residual-winds-anomaly-tend-reg-ft.yaml" "train-4deg-daily-v1-era5-only-residual-winds-anomaly-tend-reg-ft-rs0" 1 ai2/ace high ai2/jupiter
 
-# --- Wave 4: label-conditioned (ERA5 + c96-shield) residual, tend-reg weight 0.05, from-scratch 60ep (Jupiter, high) ---
-run_training "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg.yaml" "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-rs0" 1 ai2/ace high ai2/jupiter
-run_training "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-multistep.yaml" "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-multistep-rs0" 1 ai2/ace high ai2/jupiter
-run_training "train-4deg-daily-v1-labels-residual-all-anomaly-tend-reg-multistep.yaml" "train-4deg-daily-v1-labels-residual-all-anomaly-tend-reg-multistep-rs0" 1 ai2/ace high ai2/jupiter
-run_training "train-4deg-daily-v1-labels-residual-tend-reg.yaml" "train-4deg-daily-v1-labels-residual-tend-reg-rs0" 1 ai2/ace high ai2/jupiter
+# --- Wave 4: label-conditioned (ERA5 + c96-shield) residual, tend-reg weight 0.05, from-scratch 60ep (Jupiter, high) --- [running]
+# run_training "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg.yaml" "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-multistep.yaml" "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-multistep-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-labels-residual-all-anomaly-tend-reg-multistep.yaml" "train-4deg-daily-v1-labels-residual-all-anomaly-tend-reg-multistep-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-labels-residual-tend-reg.yaml" "train-4deg-daily-v1-labels-residual-tend-reg-rs0" 1 ai2/ace high ai2/jupiter
+
+# --- Wave 5: residual ablations on tend-reg 0.05, from-scratch 60ep (Jupiter, high) ---
+# 1) ERA5-only winds-anomaly control (no labels) to isolate the label effect
+# 2) labels + winds+temperature anomaly  3) labels + winds-anomaly + embed_dim 384  4) labels + winds-anomaly + aggressive rollout
+run_training "train-4deg-daily-v1-era5-only-residual-winds-anomaly-tend-reg.yaml" "train-4deg-daily-v1-era5-only-residual-winds-anomaly-tend-reg-rs0" 1 ai2/ace high ai2/jupiter
+run_training "train-4deg-daily-v1-labels-residual-winds-temp-anomaly-tend-reg.yaml" "train-4deg-daily-v1-labels-residual-winds-temp-anomaly-tend-reg-rs0" 1 ai2/ace high ai2/jupiter
+run_training "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-384.yaml" "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-384-rs0" 1 ai2/ace high ai2/jupiter
+run_training "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-rollout.yaml" "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-rollout-rs0" 1 ai2/ace high ai2/jupiter
