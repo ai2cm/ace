@@ -34,6 +34,7 @@ from fme.downscaling.data.datasets import BatchData, GriddedData
 if TYPE_CHECKING:
     from fme.downscaling.distillation.fastgen_teacher import AceDiffusionTeacher
     from fme.downscaling.models import DiffusionModel
+    from fme.downscaling.predictors.serial_denoising import DenoisingMoEPredictor
 
 
 class AceConditionBuilder:
@@ -43,19 +44,24 @@ class AceConditionBuilder:
     so the fine-resolution zarr dataset is not needed.
 
     Args:
-        model: Fully loaded ``DiffusionModel`` instance (e.g. from
-            ``CheckpointModelConfig.build()``).
+        model: Fully loaded ``DiffusionModel`` or ``DenoisingMoEPredictor``.
+            For a ``DenoisingMoEPredictor`` the primary expert is used to
+            build condition tensors and determine output variable names.
         teacher: ``AceDiffusionTeacher`` wrapping the same model, used to
             run the EDM sampler for x0 target generation.
     """
 
     def __init__(
         self,
-        model: DiffusionModel,
+        model: DiffusionModel | DenoisingMoEPredictor,
         teacher: AceDiffusionTeacher,
         teacher_num_steps: int = 0,
     ) -> None:
-        self._model = model
+        from fme.downscaling.predictors.serial_denoising import DenoisingMoEPredictor
+
+        self._model = (
+            model._primary if isinstance(model, DenoisingMoEPredictor) else model
+        )
         self._teacher = teacher
         self._teacher_num_steps = teacher_num_steps
 

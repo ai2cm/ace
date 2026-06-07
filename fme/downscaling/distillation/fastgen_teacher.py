@@ -30,55 +30,89 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 if TYPE_CHECKING:
     from fme.downscaling.models import DiffusionModel
+    from fme.downscaling.predictors.serial_denoising import DenoisingMoEPredictor
 
 
 class AceDiffusionTeacher(FastGenNetwork):
-    """FastGenNetwork wrapping an ACE DiffusionModel for distillation.
+    """FastGenNetwork wrapping an ACE DiffusionModel (or DenoisingMoEPredictor)
+    for distillation.
 
     Parameters
     ----------
     model:
-        A fully loaded ``DiffusionModel`` (e.g. from
-        ``CheckpointModelConfig.build()``).  Weights are **not frozen** by
-        default; call ``freeze()`` before distillation training (f-distill /
-        sCM / DMD2) and omit the call for SFT fine-tuning.
+        A fully loaded ``DiffusionModel`` or ``DenoisingMoEPredictor``.
+        Weights are **not frozen** by default; call ``freeze()`` before
+        distillation training (f-distill / sCM / DMD2) and omit for SFT.
 
     Notes:
     -----
     - ``forward()`` returns an x0 prediction (``net_pred_type = "x0"``).
-    - The EDM noise schedule is initialised with ``sigma_min``/``sigma_max``
-      from the ACE model config, so FastGen's noise sampling aligns with the
-      teacher's training distribution.
-    - ``sample()`` delegates to ACE's ``stochastic_sampler`` so visualisation
-      during distillation training uses the teacher's own Heun-sampler.
+    - For a ``DenoisingMoEPredictor`` the sigma-dispatch module is used for
+      all forward passes, so the correct expert is routed at every noise level.
+      The primary expert's UNet is used for encoder-feature introspection
+      (DMD2 discriminator wiring).
     """
 
-    def __init__(self, model: DiffusionModel) -> None:
-        cfg = model.config
+    def __init__(self, model: DiffusionModel | DenoisingMoEPredictor) -> None:
+        from fme.core.distributed.non_distributed import DummyWrapper
+        from fme.downscaling.predictors.serial_denoising import DenoisingMoEPredictor
+
+        if isinstance(model, DenoisingMoEPredictor):
+            sigma_min = model._sigma_schedule_min
+            sigma_max = model._sigma_schedule_max
+            churn = model._churn
+            num_steps = model._num_diffusion_generation_steps
+            sigma_data = model._primary.sigma_data
+            # Use the primary expert's bare module for forward passes and for
+            # student initialisation (deepcopy).  The primary expert covers the
+            # full sigma schedule well enough for distillation; the student is
+            # a single model that approximates the full MoE with fewer steps.
+            primary_raw = (
+                model._primary.module.module
+                if isinstance(model._primary.module, DDP)
+                else model._primary.module
+            )
+            if isinstance(primary_raw, DummyWrapper):
+                primary_raw = primary_raw.module
+            ace_module: torch.nn.Module = primary_raw
+            self._primary_ace_module = primary_raw
+            # Store the MoE predictor ONLY on the original instance so that
+            # deepcopies (student / teacher copy) don't carry all expert weights.
+            self._moe_experts: list[torch.nn.Module] | None = [
+                e.module for e in model._experts
+            ]
+        else:
+            cfg = model.config
+            sigma_min = cfg.sigma_min
+            sigma_max = cfg.sigma_max
+            churn = cfg.churn
+            num_steps = cfg.num_diffusion_generation_steps
+            sigma_data = model.sigma_data
+            # Unwrap DDP / DummyWrapper so FastGen can re-wrap the bare module.
+            # Module chain: DiffusionModel.module → DummyWrapper → UNetDiffusionModule
+            raw_module = (
+                model.module.module if isinstance(model.module, DDP) else model.module
+            )
+            if isinstance(raw_module, DummyWrapper):
+                raw_module = raw_module.module
+            ace_module = raw_module
+            self._primary_ace_module = raw_module
+            self._moe_experts = None
+
         super().__init__(
             net_pred_type="x0",
             schedule_type="edm",
-            min_t=cfg.sigma_min,
-            max_t=cfg.sigma_max,
+            min_t=sigma_min,
+            max_t=sigma_max,
         )
+        self._ace_module = ace_module
 
-        # Unwrap DDP / DummyWrapper so FastGen can re-wrap the bare module itself.
-        # Module chain: DiffusionModel.module → DummyWrapper → UNetDiffusionModule
-        from fme.core.distributed.non_distributed import DummyWrapper
-
-        raw_module = (
-            model.module.module if isinstance(model.module, DDP) else model.module
-        )
-        if isinstance(raw_module, DummyWrapper):
-            raw_module = raw_module.module
-        self._ace_module = raw_module
-
-        # Stash sampling hyperparameters from the teacher config.
-        self._sigma_min = cfg.sigma_min
-        self._sigma_max = cfg.sigma_max
-        self._churn = cfg.churn
-        self._default_num_steps = cfg.num_diffusion_generation_steps
-        self._sigma_data = model.sigma_data
+        # Stash sampling hyperparameters.
+        self._sigma_min = sigma_min
+        self._sigma_max = sigma_max
+        self._churn = churn
+        self._default_num_steps = num_steps
+        self._sigma_data = sigma_data
 
         # Learnable per-sample log-variance used by sCM's adaptive loss
         # weighting.  A global scalar (not noise-level-dependent) is sufficient
@@ -86,17 +120,45 @@ class AceDiffusionTeacher(FastGenNetwork):
         # parameter initialises fresh without disturbing teacher weights.
         self.logvar_scalar = torch.nn.Parameter(torch.full((1,), -9.0))
 
+    def __deepcopy__(self, memo: dict) -> AceDiffusionTeacher:
+        """Return a copy that does NOT carry all MoE expert weights.
+
+        When FastGen deepcopies this teacher (for student and frozen-teacher
+        initialisation), we want only the primary expert's weights — not the
+        full expert list.  ``_moe_experts`` is set to ``None`` in the copy so
+        that ``freeze``/``unfreeze`` operate only on ``_ace_module``.
+        """
+        import copy
+
+        cls = type(self)
+        result = object.__new__(cls)
+        memo[id(self)] = result
+        for k, v in self.__dict__.items():
+            if k == "_moe_experts":
+                object.__setattr__(result, k, None)
+            else:
+                object.__setattr__(result, k, copy.deepcopy(v, memo))
+        return result
+
     def freeze(self) -> None:
         """Freeze teacher weights (call this for f-distill / sCM / DMD2).
 
         Only the ACE UNet weights are frozen; logvar_scalar stays trainable
         so sCM can learn the adaptive loss weighting.
         """
+        if self._moe_experts is not None:
+            for m in self._moe_experts:
+                m.requires_grad_(False)
+                m.eval()
         self._ace_module.requires_grad_(False)
         self._ace_module.eval()
 
     def unfreeze(self) -> None:
         """Allow teacher weights to be updated (call this for SFT fine-tuning)."""
+        if self._moe_experts is not None:
+            for m in self._moe_experts:
+                m.requires_grad_(True)
+                m.train()
         self._ace_module.requires_grad_(True)
         self._ace_module.train()
 
@@ -110,8 +172,11 @@ class AceDiffusionTeacher(FastGenNetwork):
         Actual chain: UNetDiffusionModule → .unet (EDMPrecond) → .model (SongUNet).
         We step through known wrapper attributes until we find a module that
         exposes `.enc`, so this is robust to future wrapper changes.
+
+        For MoE teachers the primary expert's module is used (the dispatch
+        module is not a nn.Module and cannot be traversed).
         """
-        m = self._ace_module
+        m = self._primary_ace_module
         for attr in ("unet", "model", "module"):
             candidate = getattr(m, attr, None)
             if candidate is not None and hasattr(candidate, "enc"):

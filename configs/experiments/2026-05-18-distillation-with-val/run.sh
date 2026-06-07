@@ -4,24 +4,34 @@
 # Saves best_student.ckpt (ACE format, by validation CRPS) into /results so
 # it is captured as a Beaker dataset artifact alongside the raw .pth files.
 #
-# Usage: ./run.sh <method> [--suffix <variant>]
-#   method:  dmd2 | fdistill
-#   suffix:  optional training-variant tag appended to JOB_NAME, e.g.
-#            "1step" → ace-downscaling-distillation-fdistill-with-val-1step.
-#            Useful when running multiple variants in parallel so each gets
-#            a distinct wandb run name.
+# Usage: ./run.sh <method> [--suffix <variant>] [--moe-teacher]
+#   method:      dmd2 | fdistill | scm
+#   --suffix:    optional training-variant tag appended to JOB_NAME, e.g.
+#                "1step" → ace-downscaling-distillation-fdistill-with-val-1step.
+#                Useful when running multiple variants in parallel so each gets
+#                a distinct wandb run name.
+#   --moe-teacher: use the bundled multivariate MoE checkpoint
+#                (01KTCHVDHY0SATWH9E0AW2PDS6 / bundled_moe_multivariate.ckpt)
+#                as the teacher instead of the default single-model checkpoint.
+#                Note: DMD2 + MoE teacher requires additional discriminator
+#                wiring via the primary expert; fdistill/scm are fully supported.
 
 set -e
 
-METHOD="${1:?Usage: $0 <dmd2|fdistill|scm> [--suffix <variant>]}"
+METHOD="${1:?Usage: $0 <dmd2|fdistill|scm> [--suffix <variant>] [--moe-teacher]}"
 shift
 
 SUFFIX=""
+MOE_TEACHER=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --suffix)
             SUFFIX="${2:?--suffix requires a value}"
             shift 2
+            ;;
+        --moe-teacher)
+            MOE_TEACHER=true
+            shift
             ;;
         *)
             echo "Unknown arg: $1" >&2
@@ -63,9 +73,18 @@ cd $REPO_ROOT
 NGPU=4
 IMAGE="$(cat $REPO_ROOT/latest_distillation_image.txt)"
 
-TEACHER_DATASET=01KNM6H3JB1ZNS76HX17AAZRF7
-ACE_TEACHER_CKPT=/checkpoints/best_histogram_tail.ckpt
 VAL_DATASET=/climate-default/2026-04-29-distillation-teacher-val-dataset/conus_val_2023.zarr
+
+if [[ "$MOE_TEACHER" == "true" ]]; then
+    # Bundled multivariate MoE teacher: precip + winds + pressure.
+    TEACHER_DATASET=01KTCHVDHY0SATWH9E0AW2PDS6
+    TEACHER_CKPT_FLAG="--teacher-moe-checkpoint /checkpoints/bundled_moe_multivariate.ckpt"
+    JOB_NAME="${JOB_NAME}-moe-teacher"
+else
+    # Default single-model teacher.
+    TEACHER_DATASET=01KNM6H3JB1ZNS76HX17AAZRF7
+    TEACHER_CKPT_FLAG="--teacher-checkpoint /checkpoints/best_histogram_tail.ckpt"
+fi
 
 gantry run \
     --name $JOB_NAME \
@@ -77,7 +96,6 @@ gantry run \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_JOB_TYPE=distillation \
-    --env ACE_TEACHER_CKPT=$ACE_TEACHER_CKPT \
     --env FASTGEN_OUTPUT_ROOT=/results \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
@@ -91,7 +109,7 @@ gantry run \
     --install "pip install --no-deps ." \
     -- torchrun --nproc-per-node $NGPU -m fme.downscaling.distillation.fastgen_train \
         --config $CONFIG \
-        --teacher-checkpoint $ACE_TEACHER_CKPT \
+        $TEACHER_CKPT_FLAG \
         --teacher-num-steps 15 \
         --data-yaml $SCRIPT_PATH/data-config.yaml \
         --val-dataset $VAL_DATASET \

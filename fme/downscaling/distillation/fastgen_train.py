@@ -210,8 +210,18 @@ def _parse_args() -> argparse.Namespace:
         "--teacher-checkpoint",
         default=os.environ.get("ACE_TEACHER_CKPT", ""),
         metavar="CKPT",
-        help="Path to the pre-trained ACE teacher checkpoint. "
+        help="Path to the pre-trained ACE teacher checkpoint (.ckpt). "
         "Defaults to $ACE_TEACHER_CKPT.",
+    )
+    parser.add_argument(
+        "--teacher-moe-checkpoint",
+        default=os.environ.get("ACE_TEACHER_MOE_CKPT", ""),
+        metavar="CKPT",
+        dest="teacher_moe_checkpoint",
+        help="Path to a bundled DenoisingMoEPredictor checkpoint (.ckpt) "
+        "produced by DenoisingMoEPredictor.save(). When set, this takes "
+        "precedence over --teacher-checkpoint. Defaults to "
+        "$ACE_TEACHER_MOE_CKPT.",
     )
     parser.add_argument(
         "--data-yaml",
@@ -328,8 +338,11 @@ def main() -> None:
 
     logger.set_log_level(args.log_level)
 
-    if not args.teacher_checkpoint:
-        raise ValueError("Provide --teacher-checkpoint or set $ACE_TEACHER_CKPT.")
+    if not args.teacher_checkpoint and not args.teacher_moe_checkpoint:
+        raise ValueError(
+            "Provide --teacher-checkpoint / $ACE_TEACHER_CKPT "
+            "or --teacher-moe-checkpoint / $ACE_TEACHER_MOE_CKPT."
+        )
 
     # ------------------------------------------------------------------
     # 1. Import and optionally override the FastGen spike config.
@@ -363,15 +376,33 @@ def main() -> None:
 
     # ------------------------------------------------------------------
     # 3. Load ACE teacher checkpoint.
+    #
+    #    Supports two formats:
+    #    - Single DiffusionModel (.ckpt): use --teacher-checkpoint
+    #    - Bundled DenoisingMoEPredictor (.ckpt): use --teacher-moe-checkpoint
     # ------------------------------------------------------------------
-    ckpt_config = CheckpointModelConfig(
-        checkpoint_path=args.teacher_checkpoint,
-        fine_coordinates_path="/climate-default/2026-02-23-X-SHiELD-AMIP-plus-4K-downscaling/3km.zarr",
-    )
-    requirements = ckpt_config.data_requirements
-    teacher_model = ckpt_config.build()
+    from fme.downscaling.models import DiffusionModel
+    from fme.downscaling.predictors.serial_denoising import DenoisingMoEPredictor
+
+    teacher_model: DiffusionModel | DenoisingMoEPredictor
+    if args.teacher_moe_checkpoint:
+        from fme.downscaling.predictors import DenoisingMoEBundledConfig
+
+        moe_cfg = DenoisingMoEBundledConfig(
+            mixture_of_experts_path=args.teacher_moe_checkpoint
+        )
+        requirements = moe_cfg.data_requirements
+        teacher_model = moe_cfg.build()
+        logger.info(f"MoE teacher loaded from {args.teacher_moe_checkpoint!r}")
+    else:
+        ckpt_config = CheckpointModelConfig(
+            checkpoint_path=args.teacher_checkpoint,
+            fine_coordinates_path="/climate-default/2026-02-23-X-SHiELD-AMIP-plus-4K-downscaling/3km.zarr",
+        )
+        requirements = ckpt_config.data_requirements
+        teacher_model = ckpt_config.build()
+        logger.info(f"Teacher loaded from {args.teacher_checkpoint!r}")
     teacher = AceDiffusionTeacher(teacher_model)
-    logger.info(f"Teacher loaded from {args.teacher_checkpoint!r}")
 
     # ------------------------------------------------------------------
     # 3b. Auto-configure the DMD2 discriminator from the teacher's UNet.
@@ -536,11 +567,16 @@ def main() -> None:
         best_student_tail_path = os.path.join(
             best_student_dir, "best_student_tail.ckpt"
         )
+        _teacher_diffusion_model: DiffusionModel = (
+            teacher_model._primary
+            if isinstance(teacher_model, DenoisingMoEPredictor)
+            else teacher_model
+        )
         fastgen_trainer.callbacks._callbacks["best_student"] = (
             BestStudentCheckpointCallback(
                 val_dataset_path=args.val_dataset,
                 coarse_val_data=coarse_val_data,
-                teacher_model=teacher_model,
+                teacher_model=_teacher_diffusion_model,
                 best_checkpoint_path=best_student_path,
                 coarse_patch_yx=coarse_patch_yx,
                 student_sample_steps=config.model.student_sample_steps,
