@@ -3,7 +3,6 @@ import contextlib
 import dataclasses
 import logging
 import os
-import re
 import shutil
 import time
 import uuid
@@ -12,8 +11,7 @@ import dacite
 import torch
 import yaml
 
-from fme.core.cli import prepare_directory
-from fme.core.device import get_device
+from fme.core.cli import prepare_directory, remove_stale_tmp_checkpoints
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
@@ -26,6 +24,7 @@ from fme.downscaling.data import (
     PairedBatchData,
     PairedDataLoaderConfig,
     PairedGriddedData,
+    RegionSamplingConfig,
     load_static_inputs,
 )
 from fme.downscaling.models import DiffusionModel, DiffusionModelConfig
@@ -59,7 +58,7 @@ def restore_checkpoint(trainer: "Trainer") -> None:
         raise ValueError("Cannot restore checkpoint without a checkpoint path")
 
     checkpoint = torch.load(
-        trainer.epoch_checkpoint_path, map_location=get_device(), weights_only=False
+        trainer.epoch_checkpoint_path, map_location="cpu", weights_only=False
     )
     trainer.model.module.load_state_dict(checkpoint["model"]["module"])
     trainer.optimization.load_state(checkpoint["optimization"])
@@ -73,7 +72,7 @@ def restore_checkpoint(trainer: "Trainer") -> None:
 
     trainer.validate_using_ema = checkpoint["validate_using_ema"]
     ema_checkpoint = torch.load(
-        trainer.ema_checkpoint_path, map_location=get_device(), weights_only=False
+        trainer.ema_checkpoint_path, map_location="cpu", weights_only=False
     )
     ema_model = trainer.model.from_state(ema_checkpoint["model"])
     trainer.ema = EMATracker.from_state(ema_checkpoint["ema"], ema_model.modules)
@@ -118,6 +117,8 @@ class Trainer:
                 self.config.checkpoint_dir
             ):
                 os.makedirs(self.config.checkpoint_dir)
+            if self.config.checkpoint_dir is not None:
+                remove_stale_tmp_checkpoints(self.config.checkpoint_dir)
 
         self.epoch_checkpoint_path: str | None = None
 
@@ -140,13 +141,17 @@ class Trainer:
                 self.config.checkpoint_dir, "best_histogram_tail.ckpt"
             )
 
-        self._best_valid_loss_name = "generation/metrics/relative_crps_bicubic"
+        self._best_valid_loss_name = "metrics/relative_crps_bicubic"
         self._best_histogram_tail_name = (
-            "generation/histogram/prediction_frac_of_target/99.9999th-percentile"
+            "histogram/prediction_frac_of_target/99.9999th-percentile"
         )
 
     def _get_batch_generator(
-        self, data: PairedGriddedData, random_offset: bool, shuffle: bool
+        self,
+        data: PairedGriddedData,
+        random_offset: bool,
+        shuffle: bool,
+        region_sampling: RegionSamplingConfig | None = None,
     ):
         if self.patch_data:
             batch_generator = data.get_patched_generator(
@@ -155,6 +160,7 @@ class Trainer:
                 drop_partial_patches=True,
                 random_offset=random_offset,
                 shuffle=shuffle,
+                region_sampling=region_sampling,
             )
         else:
             batch_generator = data.get_generator()
@@ -173,7 +179,10 @@ class Trainer:
         batch: PairedBatchData
         wandb = WandB.get_instance()
         train_batch_generator = self._get_batch_generator(
-            self.train_data, random_offset=True, shuffle=True
+            self.train_data,
+            random_offset=True,
+            shuffle=True,
+            region_sampling=self.config.region_sampling,
         )
         outputs = None
         for i, batch in enumerate(train_batch_generator):
@@ -251,6 +260,8 @@ class Trainer:
                 self.model.downscale_factor,
                 percentiles=[99.99, 99.9999],
                 include_positional_comparisons=include_positional_comparisons,
+                histogram_ckpt_selection_metric=self._best_histogram_tail_name,
+                best_ckpt_selection_metric=self._best_valid_loss_name,
             )
             batch: PairedBatchData
             validation_batch_generator = self._get_batch_generator(
@@ -286,13 +297,9 @@ class Trainer:
             {**generation_metrics, **validation_metrics},
             self.num_batches_seen,
         )
-        channel_mean_checkpoint_metrics = {
-            prefix: _get_channel_mean_scalar_metric(generation_metrics, prefix)
-            for prefix in [
-                self._best_valid_loss_name,
-                self._best_histogram_tail_name,
-            ]
-        }
+        channel_mean_checkpoint_metrics = (
+            generation_aggregator.get_checkpoint_selection_metrics()
+        )
         return channel_mean_checkpoint_metrics
 
     @property
@@ -319,14 +326,10 @@ class Trainer:
                     "best checkpoint."
                 )
         if self.best_histogram_tail_checkpoint_path is not None:
-            if (
-                valid_metrics[self._best_histogram_tail_name]
-                < self.best_histogram_tail_metric
-            ):
+            histogram_tail_metric = valid_metrics[self._best_histogram_tail_name]
+            if histogram_tail_metric < self.best_histogram_tail_metric:
                 logging.info("Saving checkpoint for best histogram tail.")
-                self.best_histogram_tail_metric = valid_metrics[
-                    self._best_histogram_tail_name
-                ]
+                self.best_histogram_tail_metric = histogram_tail_metric
                 with best_checkpoint_context():
                     _save_checkpoint(self, self.best_histogram_tail_checkpoint_path)
             else:
@@ -394,6 +397,28 @@ class Trainer:
 
 @dataclasses.dataclass
 class TrainerConfig:
+    """
+    Configuration for the downscaling Trainer.
+
+    Most fields are self-explanatory; the following deserve note:
+
+    Parameters:
+        coarse_patch_extent_lat: If set together with
+            ``coarse_patch_extent_lon``, training and validation iterate
+            over patches of the given coarse extent rather than the full
+            domain.
+        coarse_patch_extent_lon: See ``coarse_patch_extent_lat``.
+        region_sampling: Optional config to oversample patches
+            whose center falls within a specified lat/lon region
+            during training. The total number of patches per batch is
+            unchanged; patches are drawn with replacement from a
+            weighted distribution where region patches have higher
+            relative weight. Only applied to the training generator
+            (validation patches are unchanged so metrics
+            stay comparable). Requires ``coarse_patch_extent_lat`` and
+            ``coarse_patch_extent_lon`` to be set.
+    """
+
     model: DiffusionModelConfig
     optimization: OptimizationConfig
     train_data: PairedDataLoaderConfig
@@ -412,6 +437,7 @@ class TrainerConfig:
     coarse_patch_extent_lon: int | None = None
     resume_results_dir: str | None = None
     log_loss_vs_noise: bool = False
+    region_sampling: RegionSamplingConfig | None = None
 
     def __post_init__(self):
         if (
@@ -424,6 +450,13 @@ class TrainerConfig:
             raise ValueError(
                 "Either none or both of coarse_patch_extent_lat and "
                 "coarse_patch_extent_lon must be set."
+            )
+        if self.region_sampling is not None and (
+            self.coarse_patch_extent_lat is None or self.coarse_patch_extent_lon is None
+        ):
+            raise ValueError(
+                "region_sampling requires both coarse_patch_extent_lat "
+                "and coarse_patch_extent_lon to be set."
             )
 
     @property
@@ -478,52 +511,6 @@ class TrainerConfig:
         )
 
 
-def _get_complement_percentile_prefix(prefix):
-    """
-    Given a prefix containing a percentile value, return a prefix with
-    100 minus that percentile. Returns None if no percentile pattern is found.
-    Ex. "prediction_frac_of_target/99.9999th-percentile"
-        -> "prediction_frac_of_target/0.0001th-percentile", or
-        "some_var/percentile/99.9999" -> "some_var/percentile/0.0001".
-    """
-    match = re.search(
-        r"(\d+(?:\.\d+)?)(?:th)?[-_/]percentile|percentile[-_/](\d+(?:\.\d+)?)",
-        prefix,
-    )
-    if match is None:
-        return None
-    if match.group(1) is not None:
-        num_str = match.group(1)
-        num_start, num_end = match.start(1), match.end(1)
-    else:
-        num_str = match.group(2)
-        num_start, num_end = match.start(2), match.end(2)
-    complement = 100 - float(num_str)
-    if "." in num_str:
-        decimal_places = len(num_str.split(".")[1])
-        complement_str = f"{complement:.{decimal_places}f}"
-    else:
-        complement_str = str(int(complement))
-    return prefix[:num_start] + complement_str + prefix[num_end:]
-
-
-def _get_channel_mean_scalar_metric(
-    metrics, prefix="generation/metrics/relative_crps_bicubic"
-):
-    prefixes = [prefix]
-    if "percentile" in prefix:
-        complement = _get_complement_percentile_prefix(prefix)
-        if complement is not None and complement != prefix:
-            prefixes.append(complement)
-    channel_metric = [
-        v for k, v in metrics.items() if any(k.startswith(p) for p in prefixes)
-    ]
-    if len(channel_metric) == 0:
-        return float("inf")
-    else:
-        return sum(channel_metric) / len(channel_metric)
-
-
 def _resume_from_results_dir_if_not_preempted(experiment_dir, resume_results_dir):
     resuming_from_preempt = os.path.isfile(
         os.path.join(experiment_dir, "checkpoints/latest.ckpt")
@@ -536,6 +523,7 @@ def _resume_from_results_dir_if_not_preempted(experiment_dir, resume_results_dir
                 f"Existing results directory {resume_results_dir} does not exist."
             )
         shutil.copytree(resume_results_dir, experiment_dir, dirs_exist_ok=True)
+        remove_stale_tmp_checkpoints(os.path.join(experiment_dir, "checkpoints"))
 
 
 def main(config_path: str):

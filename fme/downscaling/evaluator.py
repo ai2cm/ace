@@ -23,7 +23,13 @@ from fme.downscaling.models import (
     FastgenStudentConfig,
 )
 from fme.downscaling.predict import EventConfig
-from fme.downscaling.predictors import PatchPredictionConfig, PatchPredictor
+from fme.downscaling.predictors import (
+    DenoisingMoEBundledConfig,
+    DenoisingMoEConfig,
+    DenoisingMoEPredictor,
+    PatchPredictionConfig,
+    PatchPredictor,
+)
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.typing_ import FineResCoarseResPair
 
@@ -32,7 +38,7 @@ class Evaluator:
     def __init__(
         self,
         data: PairedGriddedData,
-        model: DiffusionModel | PatchPredictor,
+        model: DiffusionModel | DenoisingMoEPredictor | PatchPredictor,
         experiment_dir: str,
         n_samples: int,
         patch_data: bool = False,
@@ -92,7 +98,7 @@ class EventEvaluator:
         self,
         event_name: str,
         data: PairedGriddedData,
-        model: DiffusionModel | PatchPredictor,
+        model: DiffusionModel | DenoisingMoEPredictor | PatchPredictor,
         experiment_dir: str,
         n_samples: int,
         save_generated_samples: bool = False,
@@ -176,7 +182,12 @@ class PairedEventConfig(EventConfig):
 
 @dataclasses.dataclass
 class EvaluatorConfig:
-    model: CheckpointModelConfig | FastgenStudentConfig
+    model: (
+        DenoisingMoEConfig
+        | DenoisingMoEBundledConfig
+        | CheckpointModelConfig
+        | FastgenStudentConfig
+    )
     experiment_dir: str
     data: PairedDataLoaderConfig
     logging: LoggingConfig
@@ -198,7 +209,7 @@ class EvaluatorConfig:
             train=False,
             requirements=self.model.data_requirements,
         )
-        evaluator_model: DiffusionModel | PatchPredictor
+        evaluator_model: DiffusionModel | DenoisingMoEPredictor | PatchPredictor
         if self.patch.divide_generation and self.patch.composite_prediction:
             evaluator_model = PatchPredictor(
                 model,
@@ -228,7 +239,7 @@ class EvaluatorConfig:
         event_config: PairedEventConfig,
     ) -> EventEvaluator:
         model = self.model.build()
-        evaluator_model: DiffusionModel | PatchPredictor
+        evaluator_model: DiffusionModel | DenoisingMoEPredictor | PatchPredictor
 
         dataset = event_config.get_paired_gridded_data(
             base_data_config=self.data,

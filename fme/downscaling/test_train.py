@@ -13,14 +13,9 @@ import yaml
 
 from fme.core.testing.model import compare_restored_parameters
 from fme.core.testing.wandb import mock_wandb
+from fme.downscaling.data import RegionSamplingConfig
 from fme.downscaling.test_utils import create_test_data_on_disk, data_paths_helper
-from fme.downscaling.train import (
-    Trainer,
-    TrainerConfig,
-    _get_complement_percentile_prefix,
-    main,
-    restore_checkpoint,
-)
+from fme.downscaling.train import Trainer, TrainerConfig, main, restore_checkpoint
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 NUM_TIMESTEPS = 4
@@ -49,6 +44,28 @@ def test_trainer(tmp_path):
 
     with pytest.raises(RuntimeError):
         trainer.train_one_epoch()
+
+
+def _trainer_config_kwargs(tmp_path):
+    return dict(
+        model=MagicMock(),
+        optimization=MagicMock(),
+        train_data=MagicMock(),
+        validation_data=MagicMock(),
+        max_epochs=1,
+        experiment_dir=str(tmp_path),
+        save_checkpoints=False,
+        logging=MagicMock(),
+    )
+
+
+def test_trainer_config_region_sampling_requires_patch_extents(tmp_path):
+    base = _trainer_config_kwargs(tmp_path)
+    with pytest.raises(ValueError, match="region_sampling requires"):
+        TrainerConfig(
+            **base,
+            region_sampling=RegionSamplingConfig(),
+        )
 
 
 @pytest.fixture
@@ -318,25 +335,3 @@ def test_resume_two_workers(default_trainer_config, tmp_path, skip_slow: bool):
     initial_process.check_returncode()
     resume_process = subprocess.run(command)
     resume_process.check_returncode()
-
-
-@pytest.mark.parametrize(
-    "prefix, expected",
-    [
-        (
-            "histogram/prediction_frac_of_target/99.99th-percentile/var0",
-            "histogram/prediction_frac_of_target/0.01th-percentile/var0",
-        ),
-        (
-            "some_metric/percentile/99.9999/var0",
-            "some_metric/percentile/0.0001/var0",
-        ),
-        (
-            "no_percentile_here/some_metric",
-            None,
-        ),
-    ],
-)
-def test_get_complement_percentile_prefix(prefix, expected):
-    result = _get_complement_percentile_prefix(prefix)
-    assert result == expected

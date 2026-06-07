@@ -7,14 +7,12 @@ from typing import Callable, List, Optional, Sequence, Tuple
 
 import dacite
 import dask.diagnostics
+import distributed
 import fsspec
 import numpy as np
 import xarray as xr
 import yaml
 from scipy.optimize import curve_fit
-
-from fme.core import metrics
-from fme.core.distributed.distributed import Distributed
 
 
 @dataclasses.dataclass
@@ -27,7 +25,9 @@ class DataConfig:
     end_date: Optional[str] = None
 
     def get_dataset(self) -> xr.Dataset:
-        datasets = [xr.open_zarr(path) for path in self.paths]
+        chunks = {"time": "auto"}
+        with dask.config.set({"array.chunk-size": "128MiB"}):
+            datasets = [xr.open_zarr(path, chunks=chunks) for path in self.paths]
         ds = xr.concat(datasets, "sample")
         ds = ds.sel(time=slice(self.start_date, self.end_date))
         return ds
@@ -145,11 +145,9 @@ def get_output_datasets(
     years_per_ensemble: int,
     amip: bool,
 ) -> Tuple[xr.Dataset, xr.Dataset, xr.Dataset]:
+    lon = dataset["grid_xt"]
     lat = dataset["grid_yt"]
-    area = xr.DataArray(
-        metrics.spherical_area_weights(lat.values, dataset.sizes["grid_xt"]),
-        dims=["grid_yt", "grid_xt"],
-    )
+    area = np.cos(np.deg2rad(lat)).broadcast_like(lon)
     annual = get_annual(dataset)
     available_years = annual.sizes["year"]
     if available_years != years_per_ensemble:
@@ -157,9 +155,7 @@ def get_output_datasets(
             f"There are {available_years} years of data available, "
             f"but received value {years_per_ensemble} for years_per_ensemble."
         )
-    with dask.diagnostics.ProgressBar():
-        with dask.config.set(scheduler="processes"):
-            annual = annual.isel(year=range(0, years_per_ensemble)).load()
+    annual = annual.isel(year=range(0, years_per_ensemble)).load()
     m, s = combine_window_stats(
         [1, 2, 5, 10],
         years_per_ensemble,
@@ -205,7 +201,7 @@ if __name__ == "__main__":
     with open(args.data_config, "r") as f:
         data_config = dacite.from_dict(DataConfig, yaml.safe_load(f))
 
-    with Distributed.context():
+    with distributed.Client(n_workers=16) as client:
         main(
             dataset=data_config.get_dataset(),
             years_per_ensemble=data_config.years_per_ensemble,

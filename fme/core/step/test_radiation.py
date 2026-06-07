@@ -131,7 +131,7 @@ def test_detach_radiation(detach_radiation: bool):
         n_samples=1,
     )
     input_data["forcing_rad"].requires_grad = True
-    output_data = step.step(
+    output_data, _ = step.step(
         args=StepArgs(input=input_data, next_step_input_data=input_data, labels=None),
         wrapper=lambda x: x,
     )
@@ -144,7 +144,7 @@ def test_detach_radiation(detach_radiation: bool):
     )[0]
     assert grad is not None
     # have to call again as torch.autograd.grad frees the graph
-    output_data = step.step(
+    output_data, _ = step.step(
         args=StepArgs(input=input_data, next_step_input_data=input_data, labels=None),
         wrapper=lambda x: x,
     )
@@ -173,7 +173,7 @@ def test_residual_prediction(residual_prediction: bool):
         img_shape=IMAGE_SHAPE,
         n_samples=1,
     )
-    output = step.step(
+    output, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data={},

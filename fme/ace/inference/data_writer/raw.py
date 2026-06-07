@@ -214,12 +214,10 @@ class RawDataWriter:
                     fill_value=np.nan,
                 )
                 if variable_name in self.variable_metadata:
-                    self.dataset.variables[
-                        variable_name
-                    ].units = self.variable_metadata[variable_name].units
-                    self.dataset.variables[
-                        variable_name
-                    ].long_name = self.variable_metadata[variable_name].long_name
+                    for attr, val in (
+                        self.variable_metadata[variable_name].as_attrs().items()
+                    ):
+                        setattr(self.dataset.variables[variable_name], attr, val)
                 self.dataset.variables[variable_name].coordinates = " ".join(
                     [INIT_TIME, VALID_TIME]
                 )

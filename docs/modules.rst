@@ -37,7 +37,7 @@ The following module builders are available:
    :show-inheritance:
    :noindex:
 
-.. autoclass:: fme.ace.HEALPixRecUNetBuilder
+.. autoclass:: fme.ace.HEALPixUNetBuilder
    :members:
    :undoc-members:
    :show-inheritance:

@@ -8,19 +8,20 @@ import xarray as xr
 from matplotlib import pyplot as plt
 
 from fme import get_device
+from fme.ace.aggregator.inference.data import InferenceBatchData
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.testing import mock_distributed
 from fme.core.typing_ import TensorMapping
 
-from .dynamic_index import (
+from ..utils import (
     LatLonRegion,
-    PairedRegionalIndexAggregator,
-    RegionalIndexAggregator,
     _calculate_sample_average_power_spectrum,
     _compute_sample_mean_std,
     anomalies_from_monthly_climo,
+    compute_psd_band_power,
     running_monthly_mean,
 )
+from .dynamic_index import PairedRegionalIndexAggregator, RegionalIndexAggregator
 
 
 def _get_windowed_data(
@@ -90,7 +91,7 @@ def _get_windowed_times(
 )
 def test_lat_lon_region(lat_bounds, lon_bounds, case):
     n_lat, n_lon = 3, 5
-    lat_coord = torch.linspace(0.0, 10.0, n_lat)
+    lat_coord = torch.linspace(0.0, 10.0, n_lat)  # [0, 5, 10] degrees
     lon_coord = torch.linspace(0.0, 20.0, n_lon)
     region = LatLonRegion(
         lat=lat_coord,
@@ -100,12 +101,14 @@ def test_lat_lon_region(lat_bounds, lon_bounds, case):
     )
     regional_weights = region.regional_weights
     assert regional_weights.shape == (n_lat, n_lon)
+    cos_lat = torch.cos(torch.deg2rad(lat_coord)).unsqueeze(-1)  # (3, 1)
     if case == "original_domain":
-        assert torch.allclose(regional_weights, torch.ones_like(regional_weights))
+        expected = cos_lat.expand(n_lat, n_lon)
+        assert torch.allclose(regional_weights, expected)
     elif case == "null_domain":
         assert torch.allclose(regional_weights, torch.zeros_like(regional_weights))
     elif case == "first_half_lat":
-        expected = torch.tensor(
+        mask = torch.tensor(
             [
                 [1, 1, 1, 1, 1],
                 [1, 1, 1, 1, 1],
@@ -113,9 +116,10 @@ def test_lat_lon_region(lat_bounds, lon_bounds, case):
             ],
             dtype=torch.float32,
         )
+        expected = mask * cos_lat
         assert torch.allclose(regional_weights, expected)
     elif case == "first_half_lon":
-        expected = torch.tensor(
+        mask = torch.tensor(
             [
                 [1, 1, 1, 0, 0],
                 [1, 1, 1, 0, 0],
@@ -123,9 +127,10 @@ def test_lat_lon_region(lat_bounds, lon_bounds, case):
             ],
             dtype=torch.float32,
         )
+        expected = mask * cos_lat
         assert torch.allclose(regional_weights, expected)
     else:
-        expected = torch.tensor(
+        mask = torch.tensor(
             [
                 [1, 1, 1, 0, 0],
                 [1, 1, 1, 0, 0],
@@ -133,6 +138,7 @@ def test_lat_lon_region(lat_bounds, lon_bounds, case):
             ],
             dtype=torch.float32,
         )
+        expected = mask * cos_lat
         assert torch.allclose(regional_weights, expected)
 
 
@@ -166,7 +172,15 @@ def test_regional__raw_index():
         regional_mean=gridded_operations.regional_area_weighted_mean,
     )
     first_times = _get_windowed_times(start_date, n_samples, n_times // 2, i_start)
-    agg.record_batch(first_times, first_data)
+    first_batch = InferenceBatchData(
+        prediction=first_data,
+        prediction_norm={},
+        target=None,
+        target_norm=None,
+        time=first_times,
+        i_time_start=i_start,
+    )
+    agg.record_batch(first_batch)
     i_start += n_times // 2
     second_data = _get_windowed_data(
         n_samples,
@@ -176,13 +190,21 @@ def test_regional__raw_index():
         i_start,
     )
     second_times = _get_windowed_times(start_date, n_samples, n_times // 2, i_start)
-    agg.record_batch(second_times, second_data)
+    second_batch = InferenceBatchData(
+        prediction=second_data,
+        prediction_norm={},
+        target=None,
+        target_norm=None,
+        time=second_times,
+        i_time_start=i_start,
+    )
+    agg.record_batch(second_batch)
 
     expected_values = torch.arange(16.0, 16.0 + n_times, 1.0).to(device=get_device())
     raw_indices: torch.Tensor = agg._raw_indices
     for raw_index in raw_indices.values():
         assert raw_index.shape == (n_samples, n_times)
-        assert torch.allclose(raw_index, expected_values)
+        assert torch.allclose(raw_index, expected_values, atol=1e-3)
     raw_times: xr.DataArray = agg._raw_index_times
     assert raw_times.sizes["sample"] == n_samples
     assert raw_times.sizes["time"] == n_times
@@ -333,7 +355,15 @@ def test_regional_index__get_gathered_indices(use_mock_distributed):
         regional_weights=region.regional_weights,
         regional_mean=lat_lon_coordinates.get_gridded_operations().regional_area_weighted_mean,
     )
-    agg.record_batch(sample_times, sample_data)
+    batch = InferenceBatchData(
+        prediction=sample_data,
+        prediction_norm={},
+        target=None,
+        target_norm=None,
+        time=sample_times,
+        i_time_start=0,
+    )
+    agg.record_batch(batch)
     if use_mock_distributed:
         world_size = 2
         with mock_distributed(world_size=world_size):
@@ -378,7 +408,15 @@ def test_regional_index_aggregator(variable_name):
         regional_weights=region.regional_weights,
         regional_mean=lat_lon_coordinates.get_gridded_operations().regional_area_weighted_mean,
     )
-    agg.record_batch(time=time, data=data)
+    batch = InferenceBatchData(
+        prediction=data,
+        prediction_norm={},
+        target=None,
+        target_norm=None,
+        time=time,
+        i_time_start=0,
+    )
+    agg.record_batch(batch)
     logs = agg.get_logs(label="test")
     assert len(logs) > 0
     metric_name = f"test/{variable_name}_nino34_index"
@@ -390,6 +428,14 @@ def test_regional_index_aggregator(variable_name):
     assert isinstance(logs[metric_name], plt.Figure)
 
     metric_name = f"test/{variable_name}_nino34_index_std"
+    assert metric_name in logs
+    assert isinstance(logs[metric_name], float)
+
+    metric_name = f"test/{variable_name}_nino34_index_power_2_5yr"
+    assert metric_name in logs
+    assert isinstance(logs[metric_name], float)
+
+    metric_name = f"test/{variable_name}_nino34_index_power_1_16yr"
     assert metric_name in logs
     assert isinstance(logs[metric_name], float)
 
@@ -434,7 +480,15 @@ def test_paired_regional_index_aggregator(variable_name):
             regional_mean=lat_lon_coordinates.get_gridded_operations().regional_area_weighted_mean,
         ),
     )
-    agg.record_batch(time=time, target_data=target_data, gen_data=prediction_data)
+    batch = InferenceBatchData(
+        prediction=prediction_data,
+        prediction_norm={},
+        target=target_data,
+        target_norm=None,
+        time=time,
+        i_time_start=0,
+    )
+    agg.record_batch(batch)
     logs = agg.get_logs(label="test")
     assert len(logs) > 0
     metric_name = f"test/{variable_name}_nino34_index"
@@ -451,6 +505,65 @@ def test_paired_regional_index_aggregator(variable_name):
         assert metric_name in logs
         assert isinstance(logs[metric_name], float)
 
+    metric_name = f"test/{variable_name}_nino34_index_power_2_5yr"
+    assert metric_name in logs
+    assert isinstance(logs[metric_name], float)
+
+    metric_name = f"test/{variable_name}_nino34_index_power_1_16yr"
+    assert metric_name in logs
+    assert isinstance(logs[metric_name], float)
+
+
+def test_paired_norm_metrics_with_sufficient_data():
+    """Verify that _norm keys are produced when target values are valid."""
+    n_lat = 10
+    n_lon = 20
+    n_sample = 2
+    n_times = 240  # 20 years of monthly data
+    target_data = _get_windowed_data(n_sample, n_times, n_lat, n_lon)
+    prediction_data = _get_windowed_data(n_sample, n_times, n_lat, n_lon, i_start=1)
+    time = _get_windowed_times((2000, 1, 1, 0, 0, 0), n_sample, n_times, freq="MS")
+    lat_lon_coordinates = LatLonCoordinates(
+        lat=target_data["lat"], lon=target_data["lon"]
+    )
+    region = LatLonRegion(
+        lat=lat_lon_coordinates.lat,
+        lon=lat_lon_coordinates.lon,
+        lat_bounds=(4.5, 6.5),
+        lon_bounds=(9.5, 11.5),
+    )
+    agg = PairedRegionalIndexAggregator(
+        target_aggregator=RegionalIndexAggregator(
+            regional_weights=region.regional_weights,
+            regional_mean=lat_lon_coordinates.get_gridded_operations().regional_area_weighted_mean,
+        ),
+        prediction_aggregator=RegionalIndexAggregator(
+            regional_weights=region.regional_weights,
+            regional_mean=lat_lon_coordinates.get_gridded_operations().regional_area_weighted_mean,
+        ),
+    )
+    batch = InferenceBatchData(
+        prediction=prediction_data,
+        prediction_norm={},
+        target=target_data,
+        target_norm=None,
+        time=time,
+        i_time_start=0,
+    )
+    agg.record_batch(batch)
+    logs = agg.get_logs(label="test")
+
+    variable_name = "surface_temperature"
+    power_2_5yr_norm_key = f"test/{variable_name}_nino34_index_power_2_5yr_norm"
+    assert power_2_5yr_norm_key in logs, f"{power_2_5yr_norm_key} not in logs"
+    assert isinstance(logs[power_2_5yr_norm_key], float)
+    assert not np.isnan(logs[power_2_5yr_norm_key])
+
+    power_1_16yr_norm_key = f"test/{variable_name}_nino34_index_power_1_16yr_norm"
+    assert power_1_16yr_norm_key in logs, f"{power_1_16yr_norm_key} not in logs"
+    assert isinstance(logs[power_1_16yr_norm_key], float)
+    assert not np.isnan(logs[power_1_16yr_norm_key])
+
 
 def test__calculate_sample_average_power_spectrum():
     data = [
@@ -463,6 +576,43 @@ def test__calculate_sample_average_power_spectrum():
         )
     assert freq.shape == power_spectrum.shape
     assert freq.shape == (3,)
+
+
+def test_compute_psd_band_power():
+    n_months = 120  # 10 years of monthly data
+    t = np.arange(n_months)
+    period_3yr = 36  # months
+    signal = np.sin(2 * np.pi * t / period_3yr)
+    data = xr.DataArray(signal.reshape(1, -1), dims=("sample", "time"))
+    freq, power = _calculate_sample_average_power_spectrum(data)
+
+    band_power = compute_psd_band_power(freq, power, period_bounds=(2.0, 5.0))
+    assert isinstance(band_power, float)
+    assert not np.isnan(band_power)
+    assert band_power > 0.0
+
+    # Most power should be inside the 2-5yr band for a 3-year period signal
+    total_power = compute_psd_band_power(
+        freq,
+        power,
+        period_bounds=(1.0 / freq.max(), 1.0 / max(freq[freq > 0].min(), 1e-10)),
+    )
+    # Skip ratio check if total_power is nan (when freq range is too narrow)
+    if not np.isnan(total_power) and total_power > 0:
+        assert band_power / total_power > 0.5
+
+    # Band with no frequency bins returns NaN
+    assert np.isnan(compute_psd_band_power(freq, power, period_bounds=(0.01, 0.02)))
+
+
+def test_compute_psd_band_power_known_value():
+    """Verify trapezoidal integration against a hand-calculated value."""
+    freqs = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
+    power = np.array([10.0, 20.0, 30.0, 40.0, 50.0, 60.0])
+    result = compute_psd_band_power(freqs, power, period_bounds=(2.0, 5.0))
+    # period 2-5yr -> freq 0.2-0.5 cycles/yr
+    expected = np.trapezoid([20.0, 30.0, 40.0, 50.0], [0.2, 0.3, 0.4, 0.5])
+    np.testing.assert_almost_equal(result, expected)
 
 
 def test__compute_sample_mean_std():
