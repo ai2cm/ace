@@ -601,7 +601,7 @@ logging:
   log_to_screen: true
   log_to_wandb: true
   log_to_file: true
-  project: ace
+  project: cmip6
   entity: ai2cm
 
 # ---------------------------------------------------------------------
