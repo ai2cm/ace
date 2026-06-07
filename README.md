@@ -41,5 +41,5 @@ The following papers described models trained using code in this repository.
 - "ACE2: Accurately learning subseasonal to decadal atmospheric variability and forced responses" ([link](https://www.nature.com/articles/s41612-025-01090-0))
 - "ACE2-SOM: Coupling an ML Atmospheric Emulator to a Slab Ocean and Learning the Sensitivity of Climate to Changed CO<sub>2</sub>" ([link](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2024JH000575))
 - "Applying the ACE2 Emulator to SST Green's Functions for the E3SMv3 Global Atmosphere Model" ([link](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2025JH000774))
-- "SamudrACE: Fast and Accurate Coupled Climate Modeling with 3D Ocean and Atmosphere Emulators" ([link](https://arxiv.org/abs/2509.12490))
+- "SamudrACE: Fast and Accurate Coupled Climate Modeling with 3D Ocean and Atmosphere Emulators" ([link](https://agupubs.onlinelibrary.wiley.com/doi/10.1029/2025GL119340))
 - "HiRO-ACE: Fast and skillful AI emulation and downscaling trained on a 3 km global storm-resolving model" ([link](https://arxiv.org/abs/2512.18224))
