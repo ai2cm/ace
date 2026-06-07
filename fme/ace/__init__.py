@@ -36,7 +36,7 @@ from fme.ace.aggregator.one_step.snapshot import OneStepSnapshotMetricConfig
 from fme.ace.aggregator.one_step.spectrum import OneStepSpectrumMetricConfig
 from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.augmentation import AugmentationConfig
-from fme.ace.data_loading.cmip6 import Cmip6DataConfig
+from fme.ace.data_loading.cmip6 import Cmip6DataConfig, Cmip6TimeKeep, Cmip6TimeMask
 from fme.ace.data_loading.getters import get_forcing_data
 from fme.ace.data_loading.inference import (
     ExplicitIndices,

@@ -114,7 +114,7 @@ def test_step_forward():
     step = _build_step(config)
     input_data = _tensor_dict(step.input_names)
     next_step = _tensor_dict(step.next_step_input_names)
-    output = step.step(
+    output, _ = step.step(
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
     )
     assert "ta1000" in output
@@ -131,7 +131,7 @@ def test_residual_prediction():
     step = _build_step(config)
     input_data = _tensor_dict(step.input_names)
     next_step = _tensor_dict(step.next_step_input_names)
-    output = step.step(
+    output, _ = step.step(
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
     )
     assert "ta1000" in output
@@ -163,9 +163,9 @@ def test_state_round_trip():
     next_step = _tensor_dict(step.next_step_input_names)
     args = StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
     torch.manual_seed(0)
-    out1 = step.step(args=args)
+    out1, _ = step.step(args=args)
     torch.manual_seed(0)
-    out2 = step2.step(args=args)
+    out2, _ = step2.step(args=args)
     for name in out1:
         torch.testing.assert_close(out1[name], out2[name])
 
@@ -220,7 +220,7 @@ def test_per_source_normalization_config_in_step():
     next_step = _tensor_dict(step.next_step_input_names)
     label_tensor = torch.ones(N_SAMPLES, 1, device=device)
     labels = BatchLabels(tensor=label_tensor, names=["model_a"])
-    output = step.step(
+    output, _ = step.step(
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=labels)
     )
     assert "ta1000" in output
@@ -349,7 +349,7 @@ def test_include_channel_mask_inputs_changes_output_for_masked_samples():
     mask = {
         "forcing": torch.tensor([True, True, False, False], device=fme.get_device())
     }
-    out_no_mask = step.step(
+    out_no_mask, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input,
@@ -357,7 +357,7 @@ def test_include_channel_mask_inputs_changes_output_for_masked_samples():
             data_mask=None,
         )
     )
-    out_with_mask = step.step(
+    out_with_mask, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input,
@@ -385,7 +385,7 @@ def test_include_channel_mask_inputs_no_data_mask_uses_all_ones():
     step = _build_step(config_masked)
     input_data = _tensor_dict(step.input_names)
     next_step_input = {name: torch.zeros_like(v) for name, v in input_data.items()}
-    out = step.step(
+    out, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input,

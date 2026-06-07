@@ -9,6 +9,7 @@ from torch import nn
 
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
+from fme.core.corrector.state import CorrectorState
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.dicts import add_names
@@ -30,6 +31,7 @@ from fme.core.step.secondary_decoder import (
     SecondaryDecoderConfig,
 )
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
+from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -373,7 +375,7 @@ class Cmip6Step(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
+    ) -> tuple[TensorDict, StepperState | None]:
         input_data = args.input
         normalizer = self._per_source_normalizer
 
@@ -414,8 +416,16 @@ class Cmip6Step(StepABC):
             output_norm, labels=args.labels, data_mask=args.data_mask
         )
 
+        stepper_state = args.stepper_state
         if self._corrector is not None:
-            output = self._corrector(input_data, output, args.next_step_input_data)
+            corrector_state: CorrectorState | None = (
+                stepper_state.corrector_state if stepper_state is not None else None
+            )
+            output, corrector_state = self._corrector(
+                input_data, output, args.next_step_input_data, corrector_state
+            )
+            if corrector_state is not None:
+                stepper_state = StepperState(corrector_state=corrector_state)
         if self.ocean is not None:
             output = self.ocean(input_data, output, args.next_step_input_data)
         for name in self._config.prescribed_prognostic_names:
@@ -426,7 +436,7 @@ class Cmip6Step(StepABC):
                     f"prescribed_prognostic_name '{name}' not in next_step_input_data"
                 )
 
-        return output
+        return output, stepper_state
 
     def get_regularizer_loss(self):
         return torch.tensor(0.0)
