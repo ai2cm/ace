@@ -619,7 +619,7 @@ train_loader:
   batch_size: 8
   num_data_workers: 4
   prefetch_factor: 4
-  time_buffer: 8
+  time_buffer: 16
   time_buffer_pool_size: 32
   dataset:
     data_dir: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2
