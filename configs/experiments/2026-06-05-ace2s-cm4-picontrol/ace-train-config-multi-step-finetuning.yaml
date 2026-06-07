@@ -1,0 +1,86 @@
+seed: 0
+experiment_dir: /results
+save_checkpoint: true
+validate_using_ema: true
+max_epochs: 50
+ema:
+  decay: 0.999
+inference:
+  - n_forward_steps: 29200
+    forward_steps_in_memory: 20
+    loader:
+      start_indices:
+        times:
+          - '0151-01-01T06:00:00'
+          - '0171-01-01T06:00:00'
+          - '0191-01-01T06:00:00'
+          - '0211-01-01T06:00:00'
+          - '0231-01-01T06:00:00'
+          - '0251-01-01T06:00:00'
+          - '0271-01-01T06:00:00'
+          - '0291-01-01T06:00:00'
+      dataset:
+        data_path: /climate-default
+        file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+        engine: zarr
+      num_data_workers: 8
+    aggregator:
+      log_histograms: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+train_loader:
+  batch_size: 8
+  num_data_workers: 4
+  prefetch_factor: 2
+  dataset:
+    data_path: /climate-default
+    file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+    engine: zarr
+    subset:
+      stop_time: '0306-01-01T06:00:00'
+validation:
+  loader:
+    batch_size: 64
+    num_data_workers: 4
+    prefetch_factor: 4
+    dataset:
+      data_path: /climate-default
+      file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+      engine: zarr
+      subset:
+        start_time: '0306-01-01T06:00:00'
+        stop_time: '0311-01-01T06:00:00'
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+stepper_training:
+  n_ensemble: 2
+  n_forward_steps:
+    outcomes:
+      - steps: 1
+        probability: 0.6
+      - steps: 2
+        probability: 0.2
+      - steps: 4
+        probability: 0.1
+      - steps: 12
+        probability: 0.05
+      - steps: 20
+        probability: 0.05
+  optimize_last_step_only: true
+  loss:
+    type: EnsembleLoss
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
+stepper:
+  checkpoint_path: /weights/training_checkpoints/best_ckpt.tar
