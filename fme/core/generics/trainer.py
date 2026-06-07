@@ -370,12 +370,14 @@ class Trainer:
         """Create a new EMATracker initialized from the current EMA state."""
         return EMATracker.from_state(self._ema.get_state(), modules)
 
-    def _validate_stepper(self, stepper: TrainStepperABC, ema: EMATracker) -> float:
+    def _validate_stepper(
+        self, stepper: TrainStepperABC, ema: EMATracker, epoch: int
+    ) -> float:
         if self._validate_stepper_callback is None:
             raise RuntimeError(
                 "validate_stepper callback is required when lr_tuning is configured"
             )
-        return self._validate_stepper_callback(stepper, ema)
+        return self._validate_stepper_callback(stepper, ema, epoch)
 
     def _maybe_tune_lr(self):
         cfg = self.config.lr_tuning
@@ -396,6 +398,7 @@ class Trainer:
             copy_ema=self._copy_ema,
             config=cfg,
             current_lr=self.optimization.learning_rate,
+            epoch=self._epochs_trained + 1,
             validate_stepper=self._validate_stepper,
         )
         if new_lr is not None:

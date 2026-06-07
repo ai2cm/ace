@@ -477,7 +477,8 @@ def get_trainer(
     validate_stepper_callback: ValidateStepper | None = None
     if lr_tuning is not None:
 
-        def _vs(trial_stepper, trial_ema):
+        def _vs(trial_stepper, trial_ema, epoch):
+            validation_data.set_epoch(epoch)
             val_agg = ValidationAggregator(
                 aggregator_builder.validation_losses[
                     aggregator_builder._validation_calls

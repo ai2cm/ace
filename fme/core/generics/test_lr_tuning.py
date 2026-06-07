@@ -147,10 +147,47 @@ def _make_validate_stepper(*losses: float):
     """Return a ValidateStepper callback that returns the given losses in order."""
     it = iter(losses)
 
-    def validate_stepper(stepper, ema):
+    def validate_stepper(stepper, ema, epoch):
         return next(it)
 
     return validate_stepper
+
+
+def test_epoch_forwarded_to_validate_stepper():
+    """The trial forwards its epoch to validate_stepper for both forks.
+
+    Regression test: an epoch-based loss schedule needs the validation data
+    advanced to the trial's epoch, so the epoch must reach validate_stepper.
+    """
+    stepper = _Stepper()
+    train_data = _TrainData(n_batches=5)
+    optimization = _build_optimization(stepper.modules)
+    config = LRTuningConfig(
+        epochs=Slice(),
+        lr_factor=0.5,
+        num_batches=3,
+        improvement_threshold=0.1,
+    )
+
+    seen_epochs: list[int] = []
+
+    def validate_stepper(stepper, ema, epoch):
+        seen_epochs.append(epoch)
+        return 0.5
+
+    run_lr_tuning_trial(
+        train_data=train_data,
+        optimization=optimization,
+        copy_stepper=_make_copy_stepper(stepper),
+        build_optimization=_build_optimization,
+        copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
+        config=config,
+        current_lr=0.01,
+        epoch=4,
+        validate_stepper=validate_stepper,
+    )
+
+    assert seen_epochs == [4, 4]
 
 
 def test_candidate_wins():
@@ -175,6 +212,7 @@ def test_candidate_wins():
         copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
+        epoch=1,
         validate_stepper=_make_validate_stepper(0.8, 0.5),
     )
 
@@ -203,6 +241,7 @@ def test_candidate_below_threshold():
         copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
+        epoch=1,
         validate_stepper=_make_validate_stepper(0.8, 0.75),
     )
 
@@ -231,6 +270,7 @@ def test_candidate_worsens():
         copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
+        epoch=1,
         validate_stepper=_make_validate_stepper(0.9, 1.1),
     )
 
@@ -259,6 +299,7 @@ def test_both_worsen():
         copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
+        epoch=1,
         validate_stepper=_make_validate_stepper(1.2, 1.3),
     )
 
@@ -287,6 +328,7 @@ def test_baseline_worsens_candidate_improves():
         copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
+        epoch=1,
         validate_stepper=_make_validate_stepper(1.1, 0.5),
     )
 
@@ -316,6 +358,7 @@ def test_does_not_mutate_original_stepper():
         copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
+        epoch=1,
         validate_stepper=_make_validate_stepper(0.8, 0.5),
     )
 
@@ -345,6 +388,7 @@ def test_uses_subset_loader_with_num_batches():
         copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
         config=config,
         current_lr=0.01,
+        epoch=1,
         validate_stepper=_make_validate_stepper(0.9, 0.8),
     )
 
@@ -376,6 +420,7 @@ def test_trial_does_not_mutate_original_ema_num_updates():
         copy_ema=_make_copy_ema(ema),
         config=config,
         current_lr=0.01,
+        epoch=1,
         validate_stepper=_make_validate_stepper(0.8, 0.5),
     )
 
@@ -409,6 +454,7 @@ def test_trial_does_not_mutate_original_ema_params():
         copy_ema=_make_copy_ema(ema),
         config=config,
         current_lr=0.01,
+        epoch=1,
         validate_stepper=_make_validate_stepper(0.8, 0.5),
     )
 
@@ -479,6 +525,7 @@ def test_trial_does_not_mutate_original_optimizer_state():
         copy_ema=_make_copy_ema(ema),
         config=config,
         current_lr=0.01,
+        epoch=1,
         validate_stepper=_make_validate_stepper(0.8, 0.5),
     )
 
