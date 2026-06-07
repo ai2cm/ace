@@ -243,6 +243,12 @@ class CoupledStepperConfig:
             ocean fraction to replace the ocean fraction variable specified in the
             atmosphere's OceanConfig. If the atmosphere uses the ocean fraction as
             an ML forcing, the generated ocean fraction is also passed as an input.
+        atmosphere_output_rename: Optional mapping from ocean forcing names to
+            atmosphere output names when the two components use different names
+            for the same quantity. Uses the same ``{target: source}`` convention
+            as ``CheckpointModelConfig.rename`` in downscaling, e.g.
+            ``eastward_surface_wind_stress: eastward_surface_stress`` couples the
+            ocean input to the atmosphere checkpoint output name.
 
     """
 
@@ -250,8 +256,10 @@ class CoupledStepperConfig:
     atmosphere: ComponentConfig
     sst_name: str = "sst"
     ocean_fraction_prediction: CoupledOceanFractionConfig | None = None
+    atmosphere_output_rename: dict[str, str] | None = None
 
     def __post_init__(self):
+        self._validate_atmosphere_output_rename()
         self._validate_component_configs()
 
         atmosphere_ocean_config = self.atmosphere.stepper.get_ocean()
@@ -269,9 +277,12 @@ class CoupledStepperConfig:
         ).to_pytimedelta()
 
         # calculate forcing sets
+        self._atmosphere_to_ocean_forcing_names = (
+            self._compute_atmosphere_to_ocean_forcing_names()
+        )
         self._ocean_forcing_exogenous_names = list(
             set(self.ocean.stepper.input_only_names).difference(
-                self.atmosphere.stepper.output_names
+                self._atmosphere_to_ocean_forcing_names
             )
         )
         unfiltered_atmosphere_forcing_names = list(
@@ -293,11 +304,6 @@ class CoupledStepperConfig:
         self._shared_forcing_exogenous_names = list(
             set(self._ocean_forcing_exogenous_names).intersection(
                 self._atmosphere_forcing_exogenous_names
-            )
-        )
-        self._atmosphere_to_ocean_forcing_names = list(
-            set(self.ocean.stepper.input_only_names).intersection(
-                self.atmosphere.stepper.output_names
             )
         )
         extra_forcings_names = [self.sst_name]
@@ -420,6 +426,35 @@ class CoupledStepperConfig:
         """Atmosphere forcing variables that are outputs of the ocean."""
         return self._ocean_to_atmosphere_forcing_names
 
+    def atmosphere_output_name_for_ocean_forcing(self, ocean_forcing_name: str) -> str:
+        """Atmosphere output tensor name used to force the given ocean input."""
+        if self.atmosphere_output_rename is None:
+            return ocean_forcing_name
+        return self.atmosphere_output_rename.get(ocean_forcing_name, ocean_forcing_name)
+
+    def _compute_atmosphere_to_ocean_forcing_names(self) -> list[str]:
+        return [
+            name
+            for name in self.ocean.stepper.input_only_names
+            if self.atmosphere_output_name_for_ocean_forcing(name)
+            in self.atmosphere.stepper.output_names
+        ]
+
+    def _validate_atmosphere_output_rename(self) -> None:
+        if self.atmosphere_output_rename is None:
+            return
+        for ocean_name, atmos_name in self.atmosphere_output_rename.items():
+            if ocean_name not in self.ocean.stepper.input_only_names:
+                raise ValueError(
+                    f"atmosphere_output_rename key {ocean_name!r} is not an ocean "
+                    "input-only name."
+                )
+            if atmos_name not in self.atmosphere.stepper.output_names:
+                raise ValueError(
+                    f"atmosphere_output_rename[{ocean_name!r}]={atmos_name!r} is not "
+                    "an atmosphere output name."
+                )
+
     def _validate_component_configs(self):
         # validate atmosphere's OceanConfig
         atmosphere_ocean_config = self.atmosphere.stepper.get_ocean()
@@ -467,10 +502,8 @@ class CoupledStepperConfig:
 
         # all ocean inputs that are atmosphere outputs must be "next step"
         # forcings according to the ocean stepper config
-        atmosphere_to_ocean_forcing_names = list(
-            set(self.ocean.stepper.input_only_names).intersection(
-                self.atmosphere.stepper.output_names
-            )
+        atmosphere_to_ocean_forcing_names = (
+            self._compute_atmosphere_to_ocean_forcing_names()
         )
         missing_next_step_forcings = list(
             set(atmosphere_to_ocean_forcing_names).difference(
@@ -1011,8 +1044,10 @@ class CoupledStepper:
         forcing_data = dict(exogenous_from_ocean_zarr)
         # get time-averaged forcings from atmosphere
         from_atmos_gen = {
-            k: atmos_gen[k].mean(time_dim, keepdim=True)
-            for k in self._atmosphere_to_ocean_forcing_names
+            ocean_name: atmos_gen[
+                self._config.atmosphere_output_name_for_ocean_forcing(ocean_name)
+            ].mean(time_dim, keepdim=True)
+            for ocean_name in self._atmosphere_to_ocean_forcing_names
         }
         from_atmos_forcings_shared = {
             k: atmos_forcings[k].mean(time_dim, keepdim=True)
@@ -1041,6 +1076,9 @@ class CoupledStepper:
                 ),
                 atmosphere_to_ocean_forcing_names=list(
                     self._atmosphere_to_ocean_forcing_names
+                ),
+                atmosphere_output_rename=dict(
+                    self._config.atmosphere_output_rename or {}
                 ),
                 atmosphere_output_names=list(
                     self._config.atmosphere.stepper.output_names

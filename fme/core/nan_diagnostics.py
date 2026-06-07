@@ -102,6 +102,7 @@ def log_coupled_ocean_step0(
     ocean_prognostic_names: list[str],
     ocean_next_step_forcing_names: list[str],
     atmosphere_to_ocean_forcing_names: list[str],
+    atmosphere_output_rename: dict[str, str],
     atmosphere_output_names: list[str],
     ocean_forcing_exogenous_names: list[str],
     shared_forcing_exogenous_names: list[str],
@@ -120,9 +121,10 @@ def log_coupled_ocean_step0(
 
     info("=== coupled ocean step 0 audit (compare to ocean-only pretrain) ===")
     info(
-        "coupling: atmosphere_to_ocean=%s shared_exogenous=%s "
-        "ocean_exogenous_only=%s ocean_next_step=%s",
+        "coupling: atmosphere_to_ocean=%s atmosphere_output_rename=%s "
+        "shared_exogenous=%s ocean_exogenous_only=%s ocean_next_step=%s",
         sorted(atmosphere_to_ocean_forcing_names),
+        atmosphere_output_rename,
         sorted(shared_forcing_exogenous_names),
         sorted(
             set(ocean_forcing_exogenous_names).difference(
@@ -131,23 +133,6 @@ def log_coupled_ocean_step0(
         ),
         sorted(ocean_next_step_forcing_names),
     )
-
-    wind_stress = {
-        "eastward_surface_wind_stress",
-        "northward_surface_wind_stress",
-    }
-    atmos_stress = {
-        "eastward_surface_stress",
-        "northward_surface_stress",
-    }
-    missing_coupled = wind_stress - set(atmosphere_to_ocean_forcing_names)
-    if missing_coupled:
-        info(
-            "coupling: wind stress NOT from atmosphere (ocean zarr replay instead): "
-            "missing=%s atmosphere_outputs=%s",
-            sorted(missing_coupled),
-            sorted(atmos_stress & set(atmosphere_output_names)),
-        )
 
     expected_forcings = set(ocean_input_only_names)
     got_forcings = set(final_ocean_forcings.keys())
@@ -162,7 +147,8 @@ def log_coupled_ocean_step0(
         if key in exogenous_from_ocean_zarr:
             source = "ocean_zarr"
         elif key in from_atmos_gen:
-            source = "atmos_gen_avg"
+            atmos_key = atmosphere_output_rename.get(key, key)
+            source = f"atmos_gen_avg({atmos_key})"
         elif key in from_atmos_forcings_shared:
             source = "atmos_forcing_avg"
         else:
