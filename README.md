@@ -43,3 +43,4 @@ The following papers described models trained using code in this repository.
 - "Applying the ACE2 Emulator to SST Green's Functions for the E3SMv3 Global Atmosphere Model" ([link](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2025JH000774))
 - "SamudrACE: Fast and Accurate Coupled Climate Modeling with 3D Ocean and Atmosphere Emulators" ([link](https://agupubs.onlinelibrary.wiley.com/doi/10.1029/2025GL119340))
 - "HiRO-ACE: Fast and skillful AI emulation and downscaling trained on a 3 km global storm-resolving model" ([link](https://arxiv.org/abs/2512.18224))
+- "FloeNet: A mass-conserving global sea ice emulator that generalizes across climates" ([link](https://arxiv.org/abs/2603.12449))
