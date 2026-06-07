@@ -40,6 +40,12 @@ from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.loss import StepLossConfig
+from fme.core.nan_diagnostics import check as _nan_check
+from fme.core.nan_diagnostics import (
+    clear_stepper_context,
+    log_coupled_ocean_step0,
+    set_stepper_context,
+)
 from fme.core.ocean import OceanConfig
 from fme.core.ocean_data import OceanData
 from fme.core.optimization import NullOptimization
@@ -878,6 +884,7 @@ class CoupledStepper:
             gen_data=atmos_ic_data,
             target_data=forcing_ic_data,
         )
+        _nan_check("coupled/prescribe_ic_sst", atmos_ic_data)
         return PrognosticState(
             BatchData(
                 data=atmos_ic_data,
@@ -925,6 +932,7 @@ class CoupledStepper:
             if mask is not None:
                 mask = mask.expand(tensor.shape)
                 forcings_from_ocean[name] = tensor.where(mask != 0, 0)
+        _nan_check("coupled/forcings_from_ocean", forcings_from_ocean)
         return forcings_from_ocean
 
     def _get_atmosphere_forcings(
@@ -965,6 +973,7 @@ class CoupledStepper:
         )
         # update atmosphere forcings
         forcing_data.update(forcings_from_ocean)
+        _nan_check("coupled/atmosphere_forcings", forcing_data)
         return forcing_data
 
     def _get_ocean_forcings(
@@ -972,6 +981,9 @@ class CoupledStepper:
         ocean_data: TensorMapping,
         atmos_gen: TensorMapping,
         atmos_forcings: TensorMapping,
+        *,
+        outer_step: int | None = None,
+        ocean_ic: TensorMapping | None = None,
     ) -> TensorDict:
         """
         Get the forcings for the ocean component.
@@ -981,6 +993,8 @@ class CoupledStepper:
                 steps.
             atmos_gen: Generated atmosphere data covering the ocean forward steps.
             atmos_forcings: Atmosphere forcing data covering the ocean forward steps.
+            outer_step: Coupled outer (ocean) step index; step-0 diagnostics when 0.
+            ocean_ic: Ocean initial-condition tensors for step-0 diagnostics.
         """
         time_dim = self.ocean.TIME_DIM
         # NOTE: only n_ic_timesteps = 1 is currently supported
@@ -988,23 +1002,23 @@ class CoupledStepper:
             next(iter(ocean_data.values())).shape[time_dim] == self.n_ic_timesteps + 1
         )
         # get n_ic_timesteps of ocean exogenous forcings
-        forcing_data = {
+        exogenous_from_ocean_zarr = {
             k: ocean_data[k]
             for k in set(self._ocean_forcing_exogenous_names).difference(
                 self._shared_forcing_exogenous_names
             )
         }
+        forcing_data = dict(exogenous_from_ocean_zarr)
         # get time-averaged forcings from atmosphere
-        forcings_from_atmosphere = {
-            **{
-                k: atmos_gen[k].mean(time_dim, keepdim=True)
-                for k in self._atmosphere_to_ocean_forcing_names
-            },
-            **{
-                k: atmos_forcings[k].mean(time_dim, keepdim=True)
-                for k in self._shared_forcing_exogenous_names
-            },
+        from_atmos_gen = {
+            k: atmos_gen[k].mean(time_dim, keepdim=True)
+            for k in self._atmosphere_to_ocean_forcing_names
         }
+        from_atmos_forcings_shared = {
+            k: atmos_forcings[k].mean(time_dim, keepdim=True)
+            for k in self._shared_forcing_exogenous_names
+        }
+        before_nan_pad = {**from_atmos_gen, **from_atmos_forcings_shared}
         # append or prepend nans depending on whether or not the forcing is a
         # "next step" forcing
         forcings_from_atmosphere = {
@@ -1013,9 +1027,40 @@ class CoupledStepper:
                 if k in self._config.ocean_next_step_forcing_names
                 else torch.cat([v, torch.full_like(v, fill_value=np.nan)], dim=time_dim)
             )
-            for k, v in forcings_from_atmosphere.items()
+            for k, v in before_nan_pad.items()
         }
         forcing_data.update(forcings_from_atmosphere)
+        if outer_step == 0 and ocean_ic is not None:
+            log_coupled_ocean_step0(
+                ocean_input_only_names=list(
+                    self._config.ocean.stepper.input_only_names
+                ),
+                ocean_prognostic_names=list(self.ocean.prognostic_names),
+                ocean_next_step_forcing_names=list(
+                    self._config.ocean_next_step_forcing_names
+                ),
+                atmosphere_to_ocean_forcing_names=list(
+                    self._atmosphere_to_ocean_forcing_names
+                ),
+                atmosphere_output_names=list(
+                    self._config.atmosphere.stepper.output_names
+                ),
+                ocean_forcing_exogenous_names=list(
+                    self._config.ocean_forcing_exogenous_names
+                ),
+                shared_forcing_exogenous_names=list(
+                    self._config.shared_forcing_exogenous_names
+                ),
+                exogenous_from_ocean_zarr=exogenous_from_ocean_zarr,
+                from_atmos_gen=from_atmos_gen,
+                from_atmos_forcings_shared=from_atmos_forcings_shared,
+                before_nan_pad=before_nan_pad,
+                final_ocean_forcings=dict(forcing_data),
+                ocean_ic=ocean_ic,
+                ocean_zarr_window=ocean_data,
+                atmos_gen_keys=sorted(atmos_gen.keys()),
+            )
+        _nan_check("coupled/ocean_forcings", forcing_data)
         return forcing_data
 
     def get_prediction_generator(
@@ -1064,12 +1109,18 @@ class CoupledStepper:
                 time=atmos_window.time,
                 labels=atmos_window.labels,
             )
+            _nan_check(
+                f"coupled/outer={i_outer}/ocean_ic", ocean_ic_state.as_batch_data().data
+            )
             # prescribe the initial condition SST state
             atmos_ic_state = self._prescribe_ic_sst(
                 atmos_ic_state,
                 atmos_forcings.select_time_slice(
                     slice(None, self.atmosphere.n_ic_timesteps)
                 ),
+            )
+            _nan_check(
+                f"coupled/outer={i_outer}/atmos_ic", atmos_ic_state.as_batch_data().data
             )
             atmos_generator = self.atmosphere.get_prediction_generator(
                 atmos_ic_state,
@@ -1083,6 +1134,10 @@ class CoupledStepper:
             for i_inner in range(self.n_inner_steps):
                 atmos_step_num = i_outer * self.n_inner_steps + i_inner
                 atmos_step = next(atmos_generator)
+                _nan_check(
+                    f"coupled/outer={i_outer}/atmos_step={atmos_step_num}",
+                    atmos_step,
+                )
                 yield ComponentStepPrediction(
                     realm="atmosphere",
                     data=atmos_step,
@@ -1094,6 +1149,7 @@ class CoupledStepper:
             atmos_gen = stack_list_of_tensor_dicts(
                 atmos_steps, self.atmosphere.TIME_DIM
             )
+            _nan_check(f"coupled/outer={i_outer}/atmos_gen", atmos_gen)
             atmos_data_forcings = atmos_window.select_time_slice(
                 time_slice=slice(
                     self.atmosphere.n_ic_timesteps,
@@ -1108,21 +1164,28 @@ class CoupledStepper:
                     ocean_window.data,
                     atmos_gen,
                     atmos_data_forcings.data,
+                    outer_step=i_outer,
+                    ocean_ic=ocean_ic_state.as_batch_data().data,
                 ),
                 time=ocean_window.time,
                 labels=ocean_window.labels,
             )
             # predict and yield a single ocean step
-            ocean_step = next(
-                iter(
-                    self.ocean.get_prediction_generator(
-                        ocean_ic_state,
-                        ocean_forcings,
-                        n_forward_steps=1,
-                        optimizer=optimizer,
+            set_stepper_context(f"coupled/ocean outer={i_outer}")
+            try:
+                ocean_step = next(
+                    iter(
+                        self.ocean.get_prediction_generator(
+                            ocean_ic_state,
+                            ocean_forcings,
+                            n_forward_steps=1,
+                            optimizer=optimizer,
+                        )
                     )
                 )
-            )
+            finally:
+                clear_stepper_context()
+            _nan_check(f"coupled/outer={i_outer}/ocean_step", ocean_step)
             yield ComponentStepPrediction(
                 realm="ocean",
                 data=ocean_step,
@@ -1152,6 +1215,14 @@ class CoupledStepper:
                     time=ocean_window.time.isel(time=slice(-self.n_ic_timesteps, None)),
                     labels=ocean_window.labels,
                 )
+            )
+            _nan_check(
+                f"coupled/outer={i_outer}/next_ocean_ic",
+                ocean_ic_state.as_batch_data().data,
+            )
+            _nan_check(
+                f"coupled/outer={i_outer}/next_atmos_ic",
+                atmos_ic_state.as_batch_data().data,
             )
 
     def _process_prediction_generator_list(
@@ -1741,6 +1812,15 @@ class CoupledTrainStepper(
             step_loss = self._loss.compute_loss(ensemble_step, target_step_ensemble)
             label = f"loss/{gen_step.realm}_step_{gen_step.step}"
             metrics.add_metric(label, step_loss.detach(), gen_step.realm)
+            if not torch.isfinite(step_loss):
+                _nan_check(
+                    f"coupled/loss {gen_step.realm} step={gen_step.step} gen",
+                    gen_step.data,
+                )
+                _nan_check(
+                    f"coupled/loss {gen_step.realm} step={gen_step.step} target",
+                    target_step_ensemble,
+                )
             if self._loss.step_is_optimized(gen_step.realm, gen_step.step):
                 optimization.accumulate_loss(step_loss)
         else:
@@ -1748,6 +1828,15 @@ class CoupledTrainStepper(
             if step_loss is not None:
                 label = f"loss/{gen_step.realm}_step_{gen_step.step}"
                 metrics.add_metric(label, step_loss.detach(), gen_step.realm)
+                if not torch.isfinite(step_loss):
+                    _nan_check(
+                        f"coupled/loss {gen_step.realm} step={gen_step.step} gen",
+                        gen_step.data,
+                    )
+                    _nan_check(
+                        f"coupled/loss {gen_step.realm} step={gen_step.step} target",
+                        target_step_ensemble,
+                    )
                 optimization.accumulate_loss(step_loss)
         output_list.append(
             ensemble_step.detach_if_using_gradient_accumulation(
@@ -1858,6 +1947,8 @@ class CoupledTrainStepper(
                 the stochastically-sampled range toward the accumulated loss.
 
         """
+        _nan_check("coupled/batch_input atmosphere", data.atmosphere_data.data)
+        _nan_check("coupled/batch_input ocean", data.ocean_data.data)
         atmos_forward_data = self.atmosphere.get_forward_data(
             data.atmosphere_data,
             compute_derived_variables=False,
@@ -1866,6 +1957,8 @@ class CoupledTrainStepper(
             data.ocean_data,
             compute_derived_variables=False,
         )
+        _nan_check("coupled/forward_target atmosphere", atmos_forward_data.data)
+        _nan_check("coupled/forward_target ocean", ocean_forward_data.data)
 
         metrics = ComponentStepMetrics()
         self._loss.sample_n_steps()

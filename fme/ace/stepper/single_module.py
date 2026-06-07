@@ -43,6 +43,8 @@ from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.labels import BatchLabels
 from fme.core.loss import ChannelLossInfo, StepLoss, StepLossConfig
+from fme.core.nan_diagnostics import check as _nan_check
+from fme.core.nan_diagnostics import stepper_context
 from fme.core.normalizer import (
     NetworkAndLossNormalizationConfig,
     NormalizationConfig,
@@ -1118,6 +1120,12 @@ class Stepper:
                 for k in self._step_obj.next_step_input_names
             }
             input_data = {**state, **input_forcing}
+            ctx = stepper_context()
+            _nan_check(f"{ctx}/predict input step={step}", input_data)
+            _nan_check(f"{ctx}/predict forcing step={step}", input_forcing)
+            _nan_check(
+                f"{ctx}/predict next_step_input step={step}", next_step_input_dict
+            )
 
             def checkpoint(module):
                 return optimizer.checkpoint(module, step=step)
@@ -1132,6 +1140,7 @@ class Stepper:
                     ),
                     wrapper=checkpoint,
                 )
+            _nan_check(f"{ctx}/predict output step={step}", state)
             yield state
             state = optimizer.detach_if_using_gradient_accumulation(state)
 

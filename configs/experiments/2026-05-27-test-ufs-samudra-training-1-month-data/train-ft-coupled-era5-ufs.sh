@@ -34,6 +34,7 @@ gantry run \
     --env WANDB_NAME=$JOB_NAME \
     --env WANDB_JOB_TYPE=training \
     --env WANDB_RUN_GROUP=$JOB_GROUP \
+    --env FME_LOG_NAN_DIAGNOSTICS=1 \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
