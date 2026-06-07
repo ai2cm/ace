@@ -949,6 +949,12 @@ def build_inference_callback(
         weighted_error: float | None = None
         for task in active_tasks:
             logs = per_task_logs[task.name]
+            overlap = all_logs.keys() & logs.keys()
+            if overlap:
+                raise RuntimeError(
+                    f"Inference entry {task.name!r} produced log keys that "
+                    f"overlap with earlier entries: {sorted(overlap)}"
+                )
             all_logs.update(logs)
             if task.weight > 0:
                 metric_key = task.error_metric_template.format(name=task.name)
