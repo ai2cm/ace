@@ -83,6 +83,17 @@ def test_paired_annual_aggregator(tmpdir):
     assert "test/a" in logs
     assert isinstance(logs["test/a"], plt.Figure)
     assert "test/r2/a_target" in logs
+    assert "test/rmse/a" in logs
+
+    # the reported RMSE should equal the RMSE between the ensemble-mean annual
+    # evolution of the prediction and that of the target
+    ds = agg.get_dataset()
+    target_ensemble_mean = ds["a"].sel(source="target").mean("sample")
+    gen_ensemble_mean = ds["a"].sel(source="prediction").mean("sample")
+    expected_rmse = float(
+        np.sqrt(np.nanmean((gen_ensemble_mean - target_ensemble_mean).values ** 2))
+    )
+    np.testing.assert_allclose(logs["test/rmse/a"], expected_rmse, rtol=1e-5)
 
 
 def test_paired_annual_aggregator_with_nans(tmpdir):
