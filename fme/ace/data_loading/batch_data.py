@@ -91,6 +91,15 @@ class PrognosticState:
     def as_batch_data(self) -> "BatchData":
         return self._data
 
+    @classmethod
+    def cat(cls, states: Sequence["PrognosticState"]) -> "PrognosticState":
+        """Concatenate prognostic states along the sample dimension."""
+        return cls(BatchData.cat([s._data for s in states]))
+
+    def split(self, sample_sizes: Sequence[int]) -> list["PrognosticState"]:
+        """Split along the sample dimension into the given sample sizes."""
+        return [PrognosticState(b) for b in self._data.split(sample_sizes)]
+
 
 @dataclasses.dataclass
 class BatchData:
@@ -532,6 +541,132 @@ class BatchData:
             data_mask=self.data_mask,
         )
 
+    @classmethod
+    def cat(cls, batches: Sequence["BatchData"]) -> "BatchData":
+        """Concatenate a sequence of BatchData along the sample dimension.
+
+        All inputs must share variable names, ``horizontal_dims``, ``epoch``,
+        ``n_ensemble``, label names, ``n_timesteps``, and whether labels and
+        data_mask are present. Tensors must already be on the same device.
+        """
+        if len(batches) == 0:
+            raise ValueError("Cannot cat an empty sequence of BatchData.")
+        if len(batches) == 1:
+            return batches[0]
+        first = batches[0]
+        first_names = set(first.data.keys())
+        for b in batches[1:]:
+            if b.horizontal_dims != first.horizontal_dims:
+                raise ValueError(
+                    "Cannot cat BatchData with different horizontal_dims: "
+                    f"{first.horizontal_dims} != {b.horizontal_dims}"
+                )
+            if b.epoch != first.epoch:
+                raise ValueError(
+                    "Cannot cat BatchData with different epochs: "
+                    f"{first.epoch} != {b.epoch}"
+                )
+            if b.n_ensemble != first.n_ensemble:
+                raise ValueError(
+                    "Cannot cat BatchData with different n_ensemble: "
+                    f"{first.n_ensemble} != {b.n_ensemble}"
+                )
+            if set(b.data.keys()) != first_names:
+                raise ValueError(
+                    "Cannot cat BatchData with different variable names: "
+                    f"{sorted(first_names)} != {sorted(b.data.keys())}"
+                )
+            if b.n_timesteps != first.n_timesteps:
+                raise ValueError(
+                    "Cannot cat BatchData with different n_timesteps: "
+                    f"{first.n_timesteps} != {b.n_timesteps}"
+                )
+            if (b.labels is None) != (first.labels is None):
+                raise ValueError(
+                    "Cannot cat BatchData with inconsistent labels presence."
+                )
+            if (
+                first.labels is not None
+                and b.labels is not None
+                and b.labels.names != first.labels.names
+            ):
+                raise ValueError(
+                    "Cannot cat BatchData with different label names: "
+                    f"{first.labels.names} != {b.labels.names}"
+                )
+            if (b.data_mask is None) != (first.data_mask is None):
+                raise ValueError(
+                    "Cannot cat BatchData with inconsistent data_mask presence."
+                )
+        data = {k: torch.cat([b.data[k] for b in batches], dim=0) for k in first.data}
+        time = xr.concat([b.time for b in batches], dim="sample")
+        if first.labels is None:
+            labels = None
+        else:
+            labels = BatchLabels(
+                torch.cat(
+                    [b.labels.tensor for b in batches if b.labels is not None], dim=0
+                ),
+                first.labels.names,
+            )
+        if first.data_mask is None:
+            data_mask = None
+        else:
+            data_mask = {
+                k: torch.cat(
+                    [b.data_mask[k] for b in batches if b.data_mask is not None],
+                    dim=0,
+                )
+                for k in first.data_mask
+            }
+        return cls(
+            data=data,
+            time=time,
+            labels=labels,
+            horizontal_dims=first.horizontal_dims,
+            epoch=first.epoch,
+            n_ensemble=first.n_ensemble,
+            data_mask=data_mask,
+        )
+
+    def split(self: SelfType, sample_sizes: Sequence[int]) -> list[SelfType]:
+        """Split into pieces with the given sample sizes along the sample dim."""
+        n_samples = self.time.shape[0]
+        total = sum(sample_sizes)
+        if total != n_samples:
+            raise ValueError(
+                f"sample_sizes must sum to n_samples={n_samples}, got {total}"
+            )
+        if len(sample_sizes) == 1:
+            return [self]
+        out: list[SelfType] = []
+        start = 0
+        for size in sample_sizes:
+            end = start + size
+            data = {k: v[start:end] for k, v in self.data.items()}
+            time = self.time.isel(sample=slice(start, end))
+            if self.labels is None:
+                labels = None
+            else:
+                labels = BatchLabels(self.labels.tensor[start:end], self.labels.names)
+            if self.data_mask is None:
+                data_mask = None
+            else:
+                data_mask = {k: v[start:end] for k, v in self.data_mask.items()}
+            out.append(
+                self.__class__(
+                    data=data,
+                    time=time,
+                    labels=labels,
+                    horizontal_dims=self.horizontal_dims,
+                    epoch=self.epoch,
+                    n_ensemble=self.n_ensemble,
+                    data_mask=data_mask,
+                )
+            )
+            start = end
+        return out
+
     def broadcast_ensemble(self: SelfType, n_ensemble: int) -> SelfType:
         """
         Broadcast a singleton ensemble to a new BatchData obj with n_ensemble members
@@ -671,6 +806,97 @@ class PairedData:
             time=prediction.time,
             n_ensemble=prediction.n_ensemble,
         )
+
+    @classmethod
+    def cat(cls, batches: Sequence["PairedData"]) -> "PairedData":
+        """Concatenate a sequence of PairedData along the sample dimension."""
+        if len(batches) == 0:
+            raise ValueError("Cannot cat an empty sequence of PairedData.")
+        if len(batches) == 1:
+            return batches[0]
+        first = batches[0]
+        for b in batches[1:]:
+            if b.n_ensemble != first.n_ensemble:
+                raise ValueError(
+                    "Cannot cat PairedData with different n_ensemble: "
+                    f"{first.n_ensemble} != {b.n_ensemble}"
+                )
+            if set(b.prediction.keys()) != set(first.prediction.keys()):
+                raise ValueError(
+                    "Cannot cat PairedData with different prediction variables."
+                )
+            if set(b.reference.keys()) != set(first.reference.keys()):
+                raise ValueError(
+                    "Cannot cat PairedData with different reference variables."
+                )
+            if (b.labels is None) != (first.labels is None):
+                raise ValueError(
+                    "Cannot cat PairedData with inconsistent labels presence."
+                )
+            if (
+                first.labels is not None
+                and b.labels is not None
+                and b.labels.names != first.labels.names
+            ):
+                raise ValueError("Cannot cat PairedData with different label names.")
+        prediction = {
+            k: torch.cat([b.prediction[k] for b in batches], dim=0)
+            for k in first.prediction
+        }
+        reference = {
+            k: torch.cat([b.reference[k] for b in batches], dim=0)
+            for k in first.reference
+        }
+        time = xr.concat([b.time for b in batches], dim="sample")
+        if first.labels is None:
+            labels = None
+        else:
+            labels = BatchLabels(
+                torch.cat(
+                    [b.labels.tensor for b in batches if b.labels is not None], dim=0
+                ),
+                first.labels.names,
+            )
+        return cls(
+            prediction=prediction,
+            reference=reference,
+            time=time,
+            labels=labels,
+            n_ensemble=first.n_ensemble,
+        )
+
+    def split(self, sample_sizes: Sequence[int]) -> list["PairedData"]:
+        """Split into pieces with the given sample sizes along the sample dim."""
+        n_samples = self.time.shape[0]
+        total = sum(sample_sizes)
+        if total != n_samples:
+            raise ValueError(
+                f"sample_sizes must sum to n_samples={n_samples}, got {total}"
+            )
+        if len(sample_sizes) == 1:
+            return [self]
+        out: list[PairedData] = []
+        start = 0
+        for size in sample_sizes:
+            end = start + size
+            prediction = {k: v[start:end] for k, v in self.prediction.items()}
+            reference = {k: v[start:end] for k, v in self.reference.items()}
+            time = self.time.isel(sample=slice(start, end))
+            if self.labels is None:
+                labels = None
+            else:
+                labels = BatchLabels(self.labels.tensor[start:end], self.labels.names)
+            out.append(
+                PairedData(
+                    prediction=prediction,
+                    reference=reference,
+                    time=time,
+                    labels=labels,
+                    n_ensemble=self.n_ensemble,
+                )
+            )
+            start = end
+        return out
 
     @classmethod
     def new_on_device(

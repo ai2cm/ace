@@ -5,7 +5,12 @@ import pytest
 import torch
 import xarray as xr
 
-from fme.ace.data_loading.batch_data import BatchData, PairedData, _collate_with_masking
+from fme.ace.data_loading.batch_data import (
+    BatchData,
+    PairedData,
+    PrognosticState,
+    _collate_with_masking,
+)
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.labels import BatchLabels
@@ -840,3 +845,171 @@ def test_collate_with_masking_variable_missing_from_all_samples():
     assert data_mask is not None
     assert data_mask["x"].all()
     assert not data_mask["y"].any()
+
+
+@pytest.mark.parametrize("with_labels", [False, True])
+@pytest.mark.parametrize("with_data_mask", [False, True])
+def test_batchdata_cat_and_split_roundtrip(with_labels: bool, with_data_mask: bool):
+    names = ["foo", "bar"]
+    n_times = 4
+    horizontal_dims = ["lat", "lon"]
+    n_labels = 2 if with_labels else 0
+    a = get_batch_data(
+        names=names,
+        n_samples=2,
+        n_times=n_times,
+        horizontal_dims=horizontal_dims,
+        n_labels=n_labels,
+    )
+    b = get_batch_data(
+        names=names,
+        n_samples=3,
+        n_times=n_times,
+        horizontal_dims=horizontal_dims,
+        n_labels=n_labels,
+    )
+    # align time coords (cat does not require it, but split returns them so
+    # the explicit indexing is well-defined for the round trip test)
+    b.time = xr.DataArray(np.random.rand(3, n_times) + 100.0, dims=["sample", "time"])
+    if not with_data_mask:
+        a.data_mask = None
+        b.data_mask = None
+    cat = BatchData.cat([a, b])
+    assert cat.time.shape == (5, n_times)
+    for name in names:
+        torch.testing.assert_close(cat.data[name][:2].cpu(), a.data[name].cpu())
+        torch.testing.assert_close(cat.data[name][2:].cpu(), b.data[name].cpu())
+    if with_labels:
+        assert cat.labels is not None
+        assert cat.labels.tensor.shape == (5, n_labels)
+    if with_data_mask:
+        assert cat.data_mask is not None
+        for name in names:
+            assert cat.data_mask[name].shape == (5,)
+    pieces = cat.split([2, 3])
+    assert len(pieces) == 2
+    assert_batchdata_equal_up_to_device(pieces[0], a)
+    assert_batchdata_equal_up_to_device(pieces[1], b)
+
+
+def test_batchdata_cat_empty_raises():
+    with pytest.raises(ValueError, match="empty sequence"):
+        BatchData.cat([])
+
+
+def test_batchdata_cat_single_returns_input():
+    a = get_batch_data(
+        names=["foo"],
+        n_samples=2,
+        n_times=3,
+        horizontal_dims=["lat", "lon"],
+    )
+    assert BatchData.cat([a]) is a
+
+
+def test_batchdata_cat_mismatched_n_timesteps_raises():
+    a = get_batch_data(
+        names=["foo"], n_samples=2, n_times=3, horizontal_dims=["lat", "lon"]
+    )
+    b = get_batch_data(
+        names=["foo"], n_samples=2, n_times=4, horizontal_dims=["lat", "lon"]
+    )
+    with pytest.raises(ValueError, match="n_timesteps"):
+        BatchData.cat([a, b])
+
+
+def test_batchdata_cat_mismatched_n_ensemble_raises():
+    a = get_batch_data(
+        names=["foo"],
+        n_samples=2,
+        n_times=3,
+        horizontal_dims=["lat", "lon"],
+        n_ensemble=1,
+    )
+    b = get_batch_data(
+        names=["foo"],
+        n_samples=2,
+        n_times=3,
+        horizontal_dims=["lat", "lon"],
+        n_ensemble=2,
+    )
+    with pytest.raises(ValueError, match="n_ensemble"):
+        BatchData.cat([a, b])
+
+
+def test_batchdata_split_wrong_sum_raises():
+    a = get_batch_data(
+        names=["foo"], n_samples=2, n_times=3, horizontal_dims=["lat", "lon"]
+    )
+    with pytest.raises(ValueError, match="sample_sizes"):
+        a.split([1, 2])
+
+
+def test_prognostic_state_cat_and_split_roundtrip():
+    a = get_batch_data(
+        names=["foo"], n_samples=2, n_times=2, horizontal_dims=["lat", "lon"]
+    )
+    b = get_batch_data(
+        names=["foo"], n_samples=3, n_times=2, horizontal_dims=["lat", "lon"]
+    )
+    sa = PrognosticState(a)
+    sb = PrognosticState(b)
+    cat = PrognosticState.cat([sa, sb])
+    assert cat.as_batch_data().time.shape == (5, 2)
+    pieces = cat.split([2, 3])
+    assert len(pieces) == 2
+    assert_batchdata_equal_up_to_device(pieces[0].as_batch_data(), a)
+    assert_batchdata_equal_up_to_device(pieces[1].as_batch_data(), b)
+
+
+def _paired(
+    prediction_names: list[str],
+    reference_names: list[str],
+    n_samples: int,
+    n_times: int = 3,
+    n_labels: int = 0,
+) -> PairedData:
+    device = get_device()
+    if n_labels == 0:
+        labels = None
+    else:
+        labels = BatchLabels(
+            torch.zeros(n_samples, n_labels, device=device),
+            [f"label_{i}" for i in range(n_labels)],
+        )
+    return PairedData(
+        prediction={
+            k: torch.randn(n_samples, n_times, 4, 8, device=device)
+            for k in prediction_names
+        },
+        reference={
+            k: torch.randn(n_samples, n_times, 4, 8, device=device)
+            for k in reference_names
+        },
+        time=xr.DataArray(np.random.rand(n_samples, n_times), dims=["sample", "time"]),
+        labels=labels,
+    )
+
+
+@pytest.mark.parametrize("with_labels", [False, True])
+def test_paired_data_cat_and_split_roundtrip(with_labels: bool):
+    n_labels = 2 if with_labels else 0
+    a = _paired(["bar"], ["foo", "bar"], n_samples=2, n_labels=n_labels)
+    b = _paired(["bar"], ["foo", "bar"], n_samples=3, n_labels=n_labels)
+    cat = PairedData.cat([a, b])
+    assert cat.time.shape == (5, 3)
+    torch.testing.assert_close(
+        cat.prediction["bar"][:2].cpu(), a.prediction["bar"].cpu()
+    )
+    torch.testing.assert_close(cat.reference["foo"][2:].cpu(), b.reference["foo"].cpu())
+    pieces = cat.split([2, 3])
+    assert len(pieces) == 2
+    assert_paired_data_equal_up_to_device(pieces[0], a)
+    assert_paired_data_equal_up_to_device(pieces[1], b)
+
+
+def test_paired_data_cat_mismatched_prediction_names_raises():
+    a = _paired(["bar"], ["foo", "bar"], n_samples=2)
+    b = _paired(["foo"], ["foo", "bar"], n_samples=2)
+    with pytest.raises(ValueError, match="prediction variables"):
+        PairedData.cat([a, b])

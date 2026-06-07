@@ -357,11 +357,13 @@ class TestGetValidationCallback:
 
 class TestGetInferenceCallback:
     @staticmethod
-    def _make_entry(name, weight=1.0):
+    def _make_entry(name, weight=1.0, forward_steps_in_memory=None):
         config = MagicMock()
         config.weight = weight
         config.n_forward_steps = 1
         config.n_ensemble_per_ic = 1
+        if forward_steps_in_memory is not None:
+            config.forward_steps_in_memory = forward_steps_in_memory
         data = MagicMock()
         dataset_info = MagicMock()
         return (config, data, dataset_info, name)

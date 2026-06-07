@@ -12,6 +12,7 @@ from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.distributed import Distributed
 from fme.core.ema import EMATracker
 from fme.core.generics.data import GriddedDataABC
+from fme.core.generics.inference import BatchedPredictor
 from fme.core.generics.lr_tuning import ValidateStepper
 from fme.core.generics.train_stepper import TrainStepperABC
 from fme.core.generics.trainer import (
@@ -25,6 +26,7 @@ from fme.core.generics.trainer import (
 )
 from fme.core.generics.validation import run_validation_loop
 from fme.coupled.aggregator import OneStepAggregator, TrainAggregator
+from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
 from fme.coupled.data_loading.gridded_data import InferenceGriddedData
 from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.stepper import CoupledTrainOutput, CoupledTrainStepper
@@ -145,13 +147,47 @@ def get_inference_callback(
                 ),
                 epoch_set=frozenset(inference_epoch_sets[i]),
                 weight=entry_config.weight,
+                concurrent_group=(
+                    entry_config.coupled_steps_in_memory,
+                    _ic_label_signature(data),
+                ),
             )
+        )
+
+    def build_predictor() -> BatchedPredictor:
+        return BatchedPredictor(
+            base_predict=stepper.predict_paired,
+            concat_ic=CoupledPrognosticState.cat,
+            concat_forcing=CoupledBatchData.cat,
+            split_output=lambda sd, sizes: sd.split(sizes),
+            split_state=lambda ps, sizes: ps.split(sizes),
+            sample_size_of_state=lambda ic: (
+                ic.as_batch_data().ocean_data.time.shape[0]
+            ),
         )
 
     return build_inference_callback(
         tasks=tasks,
         inference_epochs=inference_epochs,
         stepper=stepper,
+        build_batched_predictor=build_predictor,
+    )
+
+
+def _ic_label_signature(
+    data: InferenceGriddedData,
+) -> tuple[tuple[str, ...] | None, tuple[str, ...] | None] | None:
+    """Per-component label fingerprint used to gate concurrent batching.
+
+    Forcings whose ocean or atmosphere ``BatchLabels.names`` differ between
+    entries cannot be concatenated, so they must run in distinct groups.
+    """
+    coupled_ic = data.initial_condition.as_batch_data()
+    ocean_labels = coupled_ic.ocean_data.labels
+    atmos_labels = coupled_ic.atmosphere_data.labels
+    return (
+        tuple(ocean_labels.names) if ocean_labels is not None else None,
+        tuple(atmos_labels.names) if atmos_labels is not None else None,
     )
 
 
@@ -164,7 +200,7 @@ def _make_coupled_aggregator_factory(
     output_dir: str,
     save_per_epoch_diagnostics: bool,
 ):
-    def factory():
+    def factory(epoch: int):
         batch = next(iter(data.loader))
         initial_times = batch.ocean_data.time.isel(time=0)
         n_timesteps_ocean = entry_config.n_coupled_steps + stepper.ocean.n_ic_timesteps

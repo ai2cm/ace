@@ -59,6 +59,7 @@ import torch
 import fme
 from fme.ace.aggregator import TrainAggregator
 from fme.ace.aggregator.train import TrainAggregatorConfig
+from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.data_loading.gridded_data import InferenceGriddedData
 from fme.ace.stepper import TrainOutput, TrainStepper
 from fme.ace.train.train_config import (
@@ -73,6 +74,7 @@ from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.distributed import Distributed
 from fme.core.ema import EMATracker
 from fme.core.generics.data import GriddedDataABC
+from fme.core.generics.inference import BatchedPredictor
 from fme.core.generics.lr_tuning import ValidateStepper
 from fme.core.generics.train_stepper import TrainStepperABC
 from fme.core.generics.trainer import (
@@ -206,14 +208,44 @@ def get_inference_callback(
                 ),
                 epoch_set=frozenset(inference_epoch_sets[i]),
                 weight=entry_config.weight,
+                concurrent_group=(
+                    entry_config.forward_steps_in_memory,
+                    entry_config.n_ensemble_per_ic,
+                    _ic_label_signature(data),
+                ),
             )
+        )
+
+    def build_predictor() -> BatchedPredictor:
+        return BatchedPredictor(
+            base_predict=stepper.predict_paired,
+            concat_ic=PrognosticState.cat,
+            concat_forcing=BatchData.cat,
+            split_output=lambda sd, sizes: sd.split(sizes),
+            split_state=lambda ps, sizes: ps.split(sizes),
+            sample_size_of_state=lambda ic: ic.as_batch_data().time.shape[0],
         )
 
     return build_inference_callback(
         tasks=tasks,
         inference_epochs=inference_epochs,
         stepper=stepper,
+        build_batched_predictor=build_predictor,
     )
+
+
+def _ic_label_signature(data: InferenceGriddedData) -> tuple[str, ...] | None:
+    """Label-encoding fingerprint used to gate concurrent batching.
+
+    Datasets with different conditional-label sets produce forcing batches
+    whose ``BatchLabels.names`` differ, and those cannot be concatenated
+    along the sample dimension. Using the IC's labels avoids touching the
+    loader iterator (which has separate side effects).
+    """
+    labels = data.initial_condition.as_batch_data().labels
+    if labels is None:
+        return None
+    return tuple(labels.names)
 
 
 def _make_ace_aggregator_factory(
@@ -225,7 +257,7 @@ def _make_ace_aggregator_factory(
     output_dir: str,
     save_per_epoch_diagnostics: bool,
 ):
-    def factory():
+    def factory(epoch: int):
         return entry_config.aggregator.build(
             dataset_info=entry_dataset_info,
             n_ic_steps=stepper.n_ic_timesteps,
