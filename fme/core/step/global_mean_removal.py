@@ -5,6 +5,7 @@ from typing import Literal
 
 import torch
 
+from fme.core.humidity import bolton_saturation_vapor_pressure
 from fme.core.normalizer import StandardNormalizer
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -120,13 +121,16 @@ class SharedGlobalMeanRemoval(GlobalMeanRemoval):
         append_as_input: bool,
         reference_mean: torch.Tensor,
         reference_std: torch.Tensor,
+        qsat_scaled_names: frozenset[str] = frozenset(),
     ):
         self._reference_field = reference_field
         self._field_names = field_names
+        self._qsat_scaled_names = qsat_scaled_names
         self._append_as_input = append_as_input
         self._reference_mean = reference_mean
         self._reference_std = reference_std
         self._cached_offset: torch.Tensor | None = None
+        self._cached_qsat_factor: torch.Tensor | None = None
         self._cached_extra: torch.Tensor | None = None
 
     @property
@@ -154,6 +158,14 @@ class SharedGlobalMeanRemoval(GlobalMeanRemoval):
         offset = self._reference_mean - sample_mean
         self._cached_offset = offset
 
+        if self._qsat_scaled_names:
+            qsat_clim = bolton_saturation_vapor_pressure(self._reference_mean)
+            qsat_sample = bolton_saturation_vapor_pressure(sample_mean)
+            qsat_factor = qsat_clim / qsat_sample
+        else:
+            qsat_factor = None
+        self._cached_qsat_factor = qsat_factor
+
         if self._append_as_input:
             normalized_mean = -offset / self._reference_std
             spatial_shape = ref.shape[1:]
@@ -170,13 +182,28 @@ class SharedGlobalMeanRemoval(GlobalMeanRemoval):
             t = result[name]
             broadcast = offset.view(offset.shape[0], *(1,) * (t.ndim - 1))
             result[name] = t + broadcast
+        if qsat_factor is not None:
+            for name in self._qsat_scaled_names:
+                if name not in result:
+                    continue
+                t = result[name]
+                broadcast = qsat_factor.view(qsat_factor.shape[0], *(1,) * (t.ndim - 1))
+                result[name] = t * broadcast
         return result
 
     def inverse_transform(self, output: TensorDict) -> TensorDict:
         if self._cached_offset is None:
             raise RuntimeError("inverse_transform() called before forward_transform().")
         offset = self._cached_offset
+        qsat_factor = self._cached_qsat_factor
         result = dict(output)
+        if qsat_factor is not None:
+            for name in self._qsat_scaled_names:
+                if name not in result:
+                    continue
+                t = result[name]
+                broadcast = qsat_factor.view(qsat_factor.shape[0], *(1,) * (t.ndim - 1))
+                result[name] = t / broadcast
         for name in self._field_names:
             if name not in result:
                 continue
@@ -295,15 +322,26 @@ class SharedGlobalMeanRemovalConfig:
     appear in neither input nor output are silently ignored (a warning
     is logged).
 
+    Fields in ``qsat_scaled_names`` are multiplied by
+    ``qsat(reference_mean) / qsat(sample_mean_of_reference_field)`` in
+    ``forward_transform`` and divided back in ``inverse_transform``,
+    where ``qsat`` is the Bolton (1980) saturation vapor pressure as a
+    function of temperature in Kelvin.  This is intended for humidity-
+    like fields that scale with saturation vapor pressure; the reference
+    field is expected to be a temperature.
+
     Parameters:
         kind: Must be ``"shared"``.
         reference_field: Name of the field whose per-sample cellwise
             spatial mean determines the offset applied to all
-            ``field_names``.
+            ``field_names`` and the qsat ratio applied to all
+            ``qsat_scaled_names``.
         field_names: Names of fields to shift by the shared offset.
             Fields may be inputs, outputs, or both.
         append_as_input: If true, the removed sample mean (normalized) is
             appended as an extra network input channel.
+        qsat_scaled_names: Names of fields to scale by the qsat ratio.
+            Fields may be inputs, outputs, or both.
     """
 
     kind: Literal["shared"] = "shared"
@@ -312,6 +350,7 @@ class SharedGlobalMeanRemovalConfig:
         default_factory=lambda: list(DEFAULT_TEMPERATURE_FIELD_NAMES)
     )
     append_as_input: bool = False
+    qsat_scaled_names: list[str] = dataclasses.field(default_factory=list)
 
     def validate_names(self, in_names: list[str], out_names: list[str]) -> None:
         if self.reference_field not in in_names:
@@ -327,6 +366,13 @@ class SharedGlobalMeanRemovalConfig:
                     "in_names or out_names and will have no effect",
                     name,
                 )
+        for name in self.qsat_scaled_names:
+            if name not in all_names:
+                logger.warning(
+                    "global_mean_removal qsat_scaled_name '%s' is not in "
+                    "in_names or out_names and will have no effect",
+                    name,
+                )
 
     def build(
         self,
@@ -339,6 +385,7 @@ class SharedGlobalMeanRemovalConfig:
             append_as_input=self.append_as_input,
             reference_mean=normalizer.means[self.reference_field],
             reference_std=normalizer.stds[self.reference_field],
+            qsat_scaled_names=frozenset(self.qsat_scaled_names),
         )
 
 

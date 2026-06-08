@@ -5,6 +5,7 @@ import pytest
 import torch
 
 from fme.core.device import move_tensordict_to_device
+from fme.core.humidity import bolton_saturation_vapor_pressure
 from fme.core.step.global_mean_removal import (
     GlobalMeanRemovalConfigUnion,
     PerChannelGlobalMeanRemovalConfig,
@@ -21,12 +22,15 @@ def _build_normalizer_for(means, stds):
 # ── SharedGlobalMeanRemoval ─────────────────────────────────────────────
 
 
-def _make_shared(means, stds, append_as_input=False):
+def _make_shared(
+    means, stds, append_as_input=False, qsat_scaled_names=None, field_names=None
+):
     normalizer = _build_normalizer_for(means, stds)
     config = SharedGlobalMeanRemovalConfig(
         reference_field="surface_temperature",
-        field_names=list(means.keys()),
+        field_names=list(means.keys()) if field_names is None else field_names,
         append_as_input=append_as_input,
+        qsat_scaled_names=qsat_scaled_names or [],
     )
     return config.build(normalizer, list(means.keys()))
 
@@ -157,6 +161,136 @@ def test_shared_inverse_before_forward_raises():
     transform = _make_shared(means, stds)
     with pytest.raises(RuntimeError, match="forward_transform"):
         transform.inverse_transform({"surface_temperature": torch.zeros(1, 4, 4)})
+
+
+# ── SharedGlobalMeanRemoval qsat_scaled_names ───────────────────────────
+
+
+def test_shared_qsat_scaled_worked_example():
+    means = {"surface_temperature": 280.0, "specific_humidity_4": 0.005}
+    stds = {"surface_temperature": 2.0, "specific_humidity_4": 0.001}
+    transform = _make_shared(
+        means, stds, field_names=[], qsat_scaled_names=["specific_humidity_4"]
+    )
+    tensors = move_tensordict_to_device(
+        {
+            "surface_temperature": torch.full((1, 4, 4), 290.0),
+            "specific_humidity_4": torch.full((1, 4, 4), 0.006),
+        }
+    )
+    result = transform.forward_transform(tensors, None)
+    expected_factor = (
+        bolton_saturation_vapor_pressure(torch.tensor(280.0))
+        / bolton_saturation_vapor_pressure(torch.tensor(290.0))
+    ).item()
+    # reference is unchanged (only listed in qsat_scaled_names? no, it's not listed)
+    torch.testing.assert_close(
+        result["surface_temperature"],
+        torch.full_like(result["surface_temperature"], 290.0),
+    )
+    torch.testing.assert_close(
+        result["specific_humidity_4"].cpu(),
+        torch.full((1, 4, 4), 0.006 * expected_factor),
+    )
+
+
+def test_shared_qsat_scaled_round_trip():
+    torch.manual_seed(0)
+    means = {"surface_temperature": 288.0, "specific_humidity_0": 0.01}
+    stds = {"surface_temperature": 5.0, "specific_humidity_0": 0.002}
+    transform = _make_shared(
+        means, stds, field_names=[], qsat_scaled_names=["specific_humidity_0"]
+    )
+    tensors = move_tensordict_to_device(
+        {
+            "surface_temperature": torch.randn(2, 4, 4) + 290.0,
+            "specific_humidity_0": torch.rand(2, 4, 4) * 0.01 + 0.005,
+        }
+    )
+    result = transform.forward_transform(tensors, None)
+    restored = transform.inverse_transform(result)
+    for k in tensors:
+        torch.testing.assert_close(restored[k], tensors[k])
+
+
+def test_shared_qsat_scaled_is_per_sample():
+    means = {"surface_temperature": 280.0, "q": 0.005}
+    stds = {"surface_temperature": 1.0, "q": 0.001}
+    transform = _make_shared(means, stds, field_names=[], qsat_scaled_names=["q"])
+    surface_t = torch.tensor([[[285.0]], [[270.0]]])
+    q = torch.tensor([[[0.01]], [[0.01]]])
+    tensors = move_tensordict_to_device({"surface_temperature": surface_t, "q": q})
+    result = transform.forward_transform(tensors, None)
+    factor_warm = (
+        bolton_saturation_vapor_pressure(torch.tensor(280.0))
+        / bolton_saturation_vapor_pressure(torch.tensor(285.0))
+    ).item()
+    factor_cold = (
+        bolton_saturation_vapor_pressure(torch.tensor(280.0))
+        / bolton_saturation_vapor_pressure(torch.tensor(270.0))
+    ).item()
+    expected = torch.tensor([[[0.01 * factor_warm]], [[0.01 * factor_cold]]])
+    torch.testing.assert_close(result["q"].cpu(), expected)
+
+
+def test_shared_qsat_scaled_does_not_apply_offset_to_humidity():
+    """Humidities listed only in qsat_scaled_names must not be shifted by
+    the temperature offset — only multiplicatively scaled."""
+    means = {"surface_temperature": 280.0, "q": 0.005}
+    stds = {"surface_temperature": 1.0, "q": 0.001}
+    # field_names is empty: no fields get the additive offset
+    transform = _make_shared(means, stds, field_names=[], qsat_scaled_names=["q"])
+    tensors = move_tensordict_to_device(
+        {
+            # sample_mean equals climatology, so factor = 1
+            "surface_temperature": torch.full((1, 4, 4), 280.0),
+            "q": torch.full((1, 4, 4), 0.01),
+        }
+    )
+    result = transform.forward_transform(tensors, None)
+    torch.testing.assert_close(result["q"].cpu(), torch.full((1, 4, 4), 0.01))
+
+
+def test_shared_qsat_scaled_output_only_field_unscaled_by_inverse():
+    """A field listed in qsat_scaled_names that only appears in the
+    output is not scaled by forward_transform (it isn't an input) but
+    *is* unscaled by inverse_transform, so the network learns to
+    produce it in the scaled space."""
+    means = {"surface_temperature": 280.0, "q_out": 0.005}
+    stds = {"surface_temperature": 1.0, "q_out": 0.001}
+    transform = _make_shared(means, stds, field_names=[], qsat_scaled_names=["q_out"])
+    inputs = move_tensordict_to_device(
+        {"surface_temperature": torch.full((1, 4, 4), 290.0)}
+    )
+    transform.forward_transform(inputs, None)
+    output = move_tensordict_to_device({"q_out": torch.full((1, 4, 4), 0.01)})
+    restored = transform.inverse_transform(output)
+    factor = (
+        bolton_saturation_vapor_pressure(torch.tensor(280.0))
+        / bolton_saturation_vapor_pressure(torch.tensor(290.0))
+    ).item()
+    torch.testing.assert_close(
+        restored["q_out"].cpu(), torch.full((1, 4, 4), 0.01 / factor)
+    )
+
+
+def test_shared_qsat_scaled_default_empty_is_noop():
+    """Default empty qsat_scaled_names must not change behavior vs. the
+    pre-existing shared transform."""
+    means = {"surface_temperature": 280.0, "q": 0.005}
+    stds = {"surface_temperature": 1.0, "q": 0.001}
+    transform = _make_shared(
+        means, stds, field_names=["surface_temperature"], qsat_scaled_names=[]
+    )
+    tensors = move_tensordict_to_device(
+        {
+            "surface_temperature": torch.full((1, 4, 4), 285.0),
+            "q": torch.full((1, 4, 4), 0.01),
+        }
+    )
+    result = transform.forward_transform(tensors, None)
+    # q is in neither field_names nor qsat_scaled_names — unchanged.
+    torch.testing.assert_close(result["q"].cpu(), torch.full((1, 4, 4), 0.01))
 
 
 # ── PerChannelGlobalMeanRemoval ─────────────────────────────────────────
@@ -363,6 +497,15 @@ def test_shared_config_warns_on_unknown_field_names(caplog):
     assert "will have no effect" in caplog.text
 
 
+def test_shared_config_warns_on_unknown_qsat_scaled_names(caplog):
+    config = SharedGlobalMeanRemovalConfig(
+        reference_field="a", field_names=["a"], qsat_scaled_names=["missing_q"]
+    )
+    config.validate_names(["a", "b"], ["a", "b"])
+    assert "missing_q" in caplog.text
+    assert "will have no effect" in caplog.text
+
+
 def test_per_channel_config_warns_on_unknown_field_names(caplog):
     config = PerChannelGlobalMeanRemovalConfig(field_names=["missing"])
     config.validate_names(["a", "b"], ["a", "b"])
@@ -396,6 +539,7 @@ def test_shared_config_round_trips_through_dacite():
         reference_field="surface_temperature",
         field_names=["surface_temperature", "air_temperature_0"],
         append_as_input=True,
+        qsat_scaled_names=["specific_humidity_0"],
     )
     data = dataclasses.asdict(config)
     restored = dacite.from_dict(
