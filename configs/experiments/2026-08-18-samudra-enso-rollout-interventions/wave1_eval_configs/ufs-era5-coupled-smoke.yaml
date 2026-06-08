@@ -11,6 +11,9 @@ checkpoint_path:
     sea_ice_fraction_name: ocean_sea_ice_fraction
     land_fraction_name: land_fraction
     sea_ice_fraction_name_in_atmosphere: sea_ice_fraction
+  atmosphere_output_rename:
+    eastward_surface_wind_stress: eastward_surface_stress
+    northward_surface_wind_stress: northward_surface_stress
 n_coupled_steps: 12
 coupled_steps_in_memory: 1
 loader:
