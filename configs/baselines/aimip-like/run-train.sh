@@ -106,5 +106,8 @@ run_training() {
 
 # --- Wave 8: finite-difference CRPS loss (crps 0.7 / fd-crps 0.2 / energy 0.1), 1-step, fg=1 (Jupiter, high) ---
 # labels-vs-era5-only contrast at the new loss weighting (same two-way split as the fg8 probe, without fg8)
-run_training "train-4deg-daily-v1-labels-c7d2e1.yaml" "train-4deg-daily-v1-labels-c7d2e1-rs0" 1 ai2/ace high ai2/jupiter
-run_training "train-4deg-daily-v1-era5-only-c7d2e1.yaml" "train-4deg-daily-v1-era5-only-c7d2e1-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-labels-c7d2e1.yaml" "train-4deg-daily-v1-labels-c7d2e1-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-era5-only-c7d2e1.yaml" "train-4deg-daily-v1-era5-only-c7d2e1-rs0" 1 ai2/ace high ai2/jupiter
+
+# --- Wave 9: era5-only residual with CO2 excluded from inputs (Jupiter, high; intentionally over cap) ---
+run_training "train-4deg-daily-v1-era5-only-no-co2-residual.yaml" "train-4deg-daily-v1-era5-only-no-co2-residual-rs0" 1 ai2/ace high ai2/jupiter
