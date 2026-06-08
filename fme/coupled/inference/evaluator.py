@@ -122,6 +122,8 @@ class StandaloneComponentCheckpointsConfig:
         ocean_stepper_override: Optional overrides when loading the ocean Stepper.
         atmosphere_stepper_override: Optional overrides when loading the atmosphere
             Stepper (e.g. prescribed_prognostic_names for inference).
+        atmosphere_output_rename: Optional mapping from ocean forcing names to
+            atmosphere output names. See ``CoupledStepperConfig``.
 
     """
 
@@ -131,6 +133,7 @@ class StandaloneComponentCheckpointsConfig:
     ocean_fraction_prediction: CoupledOceanFractionConfig | None = None
     ocean_stepper_override: StepperOverrideConfig | None = None
     atmosphere_stepper_override: StepperOverrideConfig | None = None
+    atmosphere_output_rename: dict[str, str] | None = None
 
     def load_stepper_config(self) -> CoupledStepperConfig:
         return CoupledStepperConfig(
@@ -148,6 +151,7 @@ class StandaloneComponentCheckpointsConfig:
             ),
             sst_name=self.sst_name,
             ocean_fraction_prediction=self.ocean_fraction_prediction,
+            atmosphere_output_rename=self.atmosphere_output_rename,
         )
 
     def load_stepper(self) -> CoupledStepper:
