@@ -65,5 +65,5 @@ run_training() {
 }
 
 # Active runs (uncomment one at a time; sweeps go in this block).
-# run_training "train-4deg-daily-cmip6-multimodel-per-source-norm.yaml" "train-4deg-daily-cmip6-multimodel-per-source-norm-rs0" 4
-run_training "train-4deg-daily-cmip6-multimodel-cohort-norm.yaml" "train-4deg-daily-cmip6-multimodel-cohort-norm-rs0" 1
+run_training "train-4deg-daily-cmip6-multimodel-per-source-norm.yaml" "train-4deg-daily-cmip6-multimodel-per-source-norm-rs0" 1
+# run_training "train-4deg-daily-cmip6-multimodel-cohort-norm.yaml" "train-4deg-daily-cmip6-multimodel-cohort-norm-rs0" 1
