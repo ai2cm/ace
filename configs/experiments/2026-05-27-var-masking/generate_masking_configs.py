@@ -7,16 +7,14 @@ Bernoulli (suffix -bernoulli):
   - mask_rates: 0.05, 0.1, 0.2, 0.3, 0.4
     (applied as input_dropout.per_variable.default_rate)
   - gmr: gmron (global mean removal enabled) / gmroff (disabled)
-  All variables share per_variable.default_rate; the shared
-  global_mean_removal reference is protected when gmr is enabled.
-  Forcing variables are masked the same as all other variables.
+  All variables share per_variable.default_rate, including surface_temperature
+  and forcing variables.
 
 Jeremy/uniform (suffix -uniform):
   One config per (gmr):
   - uniform masking from 0 to all eligible variables
   - gmr: gmron / gmroff
-  Forcing variables are eligible for masking.
-  The shared global_mean_removal reference is protected when gmr is enabled.
+  All variables including surface_temperature and forcing variables are eligible.
 
 CO2 variants are generated for every Bernoulli and uniform config:
   - suffix -co2-mask: global_mean_co2 is masked the same way as other variables
@@ -83,11 +81,6 @@ def build_uniform_input_dropout() -> dict:
     return {"uniform": {"min_vars": "min", "max_vars": "max"}}
 
 
-def _protect_shared_gmr_reference(input_dropout: dict) -> dict:
-    """Prevent input dropout from masking the shared GMR reference field."""
-    return _exclude_from_input_dropout(input_dropout, SHARED_GMR_REFERENCE_FIELD)
-
-
 def _exclude_from_input_dropout(input_dropout: dict, name: str) -> dict:
     input_dropout = copy.deepcopy(input_dropout)
     if "uniform" in input_dropout:
@@ -136,8 +129,6 @@ def _apply_common_settings(
             input_dropout = _unmask_co2(input_dropout)
         elif co2_mode != "mask":
             raise ValueError(f"Invalid CO2 mode: {co2_mode}")
-    if gmr_on:
-        input_dropout = _protect_shared_gmr_reference(input_dropout)
     step_cfg["input_dropout"] = input_dropout
     step_cfg["residual_prediction"] = False
     step_cfg["include_channel_mask_inputs"] = True

@@ -255,7 +255,7 @@ logging:
   log_to_screen: true
   log_to_wandb: true
   log_to_file: true
-  project: VarMasking2
+  project: VarMasking3
   entity: ai2cm
 train_loader:
   batch_size: 8
@@ -506,6 +506,5 @@ stepper:
       input_dropout:
         per_variable:
           default_rate: 0.0
-          surface_temperature: 0.0
       include_channel_mask_inputs: true
 pre_cooldown_checkpoint_epoch: 143

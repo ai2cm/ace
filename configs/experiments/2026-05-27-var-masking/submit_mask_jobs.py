@@ -17,7 +17,7 @@ import subprocess
 HERE = pathlib.Path(__file__).parent
 RUN_SCRIPT = HERE / "run-ace-train.sh"
 
-WANDB_PROJECT = "VarMasking2"
+WANDB_PROJECT = "VarMasking3"
 WANDB_GROUP = "ace2-var-masking-2026-06-04"
 
 CONFIGS = sorted(
@@ -32,7 +32,7 @@ def config_to_job_name(config_filename: str) -> str:
     # → ace2-var-mask-sfno-mask0.20-forcing-gmron-rpon
     stem = pathlib.Path(config_filename).stem  # strip .yaml
     suffix = stem.removeprefix("ace-train-config-4deg-AIMIP-")
-    return f"ace2-var-mask-{suffix}-v2"
+    return f"ace2-var-mask-{suffix}-v3"
 
 
 def main() -> None:
