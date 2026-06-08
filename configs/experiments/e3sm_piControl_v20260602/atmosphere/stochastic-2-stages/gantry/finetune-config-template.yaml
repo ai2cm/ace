@@ -117,7 +117,7 @@ stepper_training:
   parameter_init:
     weights_path: /ckpt.tar
   n_ensemble: 2
-  train_n_forward_steps:
+  n_forward_steps:
     outcomes:
       - steps: 1
         probability: 0.6
