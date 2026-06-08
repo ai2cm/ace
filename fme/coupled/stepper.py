@@ -3107,9 +3107,9 @@ class CoupledStepperTrainLoss:
 
     def __init__(
         self,
-        ocean_loss: StepLossABC | None = None,
-        ice_loss: StepLossABC | None = None,
-        atmosphere_loss: StepLossABC | None = None,
+        ocean_loss: StepLoss | None = None,
+        ice_loss: StepLoss | None = None,
+        atmosphere_loss: StepLoss | None = None,
         ocean_schedule: ComponentLossSchedule | None = None,
         ice_schedule: ComponentLossSchedule | None = None,
         atmosphere_schedule: ComponentLossSchedule | None = None,
