@@ -119,7 +119,7 @@ def test_shared_extra_channels():
     stds = {"surface_temperature": 5.0}
     transform = _make_shared(means, stds, append_as_input=True)
     assert transform.n_extra_input_channels == 1
-    assert transform.extra_channel_names == ["surface_temperature"]
+    assert transform.extra_channel_names == ["surface_temperature_global_mean"]
     tensors = move_tensordict_to_device(
         {"surface_temperature": torch.full((2, 4, 4), 285.0)}
     )
@@ -237,7 +237,7 @@ def test_per_channel_extra_channels():
     stds = {"a": 2.0, "b": 5.0}
     transform = _make_per_channel(means, stds, append_as_input=True)
     assert transform.n_extra_input_channels == 2
-    assert transform.extra_channel_names == ["a", "b"]
+    assert transform.extra_channel_names == ["a_global_mean", "b_global_mean"]
     tensors = move_tensordict_to_device(
         {
             "a": torch.full((1, 4, 4), 14.0),  # mean=14

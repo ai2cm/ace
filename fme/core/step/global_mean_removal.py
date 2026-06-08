@@ -148,7 +148,7 @@ class SharedGlobalMeanRemoval(GlobalMeanRemoval):
 
     @property
     def extra_channel_names(self) -> list[str]:
-        return [self._reference_field] if self._append_as_input else []
+        return [f"{self._reference_field}_global_mean"] if self._append_as_input else []
 
     def forward_transform(
         self,
@@ -240,7 +240,11 @@ class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
 
     @property
     def extra_channel_names(self) -> list[str]:
-        return list(self._field_names) if self._append_as_input else []
+        return (
+            [f"{name}_global_mean" for name in self._field_names]
+            if self._append_as_input
+            else []
+        )
 
     def forward_transform(
         self,
@@ -338,6 +342,9 @@ class SharedGlobalMeanRemovalConfig:
     def get_n_extra_input_channels(self, in_names: list[str]) -> int:
         return 1 if self.append_as_input else 0
 
+    def extra_channel_names(self, in_names: list[str]) -> list[str]:
+        return [f"{self.reference_field}_global_mean"] if self.append_as_input else []
+
     def validate_names(self, in_names: list[str], out_names: list[str]) -> None:
         if self.reference_field not in in_names:
             raise ValueError(
@@ -399,6 +406,13 @@ class PerChannelGlobalMeanRemovalConfig:
 
     def get_n_extra_input_channels(self, in_names: list[str]) -> int:
         return len(self._resolve_names(in_names)) if self.append_as_input else 0
+
+    def extra_channel_names(self, in_names: list[str]) -> list[str]:
+        return (
+            [f"{n}_global_mean" for n in self._resolve_names(in_names)]
+            if self.append_as_input
+            else []
+        )
 
     def validate_names(self, in_names: list[str], out_names: list[str]) -> None:
         if self.field_names is not None:

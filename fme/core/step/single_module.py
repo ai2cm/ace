@@ -26,7 +26,6 @@ from fme.core.step.global_mean_removal import (
     GlobalMeanRemoval,
     GlobalMeanRemovalConfigUnion,
     NoGlobalMeanRemoval,
-    SharedGlobalMeanRemovalConfig,
 )
 from fme.core.step.secondary_decoder import (
     NoSecondaryDecoder,
@@ -98,15 +97,12 @@ class SingleModuleStepConfig(StepConfigABC):
         if self.global_mean_removal is not None:
             self.global_mean_removal.validate_names(self.in_names, self.out_names)
         if self.input_dropout is not None:
-            self.input_dropout.validate_variable_names(self.in_names)
-            if isinstance(self.global_mean_removal, SharedGlobalMeanRemovalConfig):
-                reference_field = self.global_mean_removal.reference_field
-                if self.input_dropout.can_mask(reference_field, self.in_names):
-                    raise ValueError(
-                        "input_dropout must not mask shared global_mean_removal "
-                        f"reference_field '{reference_field}'. Set its per_variable "
-                        "rate to 0.0 or list it in uniform.ignore_vars."
-                    )
+            gmr_extra_names = (
+                self.global_mean_removal.extra_channel_names(self.in_names)
+                if self.global_mean_removal is not None
+                else []
+            )
+            self.input_dropout.validate_variable_names(self.in_names + gmr_extra_names)
         for name in self.prescribed_prognostic_names:
             if name not in self.out_names:
                 raise ValueError(
@@ -395,6 +391,7 @@ class SingleModuleStep(StepABC):
             input_dropout=self._config.input_dropout,
             training=self.module.torch_module.training,
             in_names=self.in_names,
+            extra_channel_names=self._global_mean_removal.extra_channel_names,
             input_data=args.input,
             n_ensemble=args.n_ensemble,
         )
@@ -444,7 +441,7 @@ class SingleModuleStep(StepABC):
             prognostic_names=self.prognostic_names,
             prescribed_prognostic_names=self._config.prescribed_prognostic_names,
             global_mean_removal=self._global_mean_removal,
-            data_mask=effective_mask if effective_mask else None,
+            data_mask=args.data_mask,
             stepper_state=args.stepper_state,
         )
 
@@ -483,6 +480,7 @@ def _build_effective_input_mask(
     input_dropout: VariableMaskingConfig | None,
     training: bool,
     in_names: list[str],
+    extra_channel_names: list[str],
     input_data: TensorMapping,
     n_ensemble: int,
 ) -> dict[str, torch.Tensor]:
@@ -497,7 +495,7 @@ def _build_effective_input_mask(
         raise ValueError("input_dropout requires at least one input tensor.") from err
 
     dropout_masks = input_dropout.sample_masks(
-        in_names,
+        in_names + extra_channel_names,
         ref.shape[0],
         n_ensemble,
         ref.device,
