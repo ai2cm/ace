@@ -533,7 +533,7 @@ def test_label_conditioned_step():
     )
     input_data = dist.scatter_spatial(input_data, DEFAULT_IMG_SHAPE)
     next_step_input_data = dist.scatter_spatial(next_step_input_data, DEFAULT_IMG_SHAPE)
-    output = step.step(
+    output, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
@@ -753,7 +753,7 @@ def test_step_with_prescribed_prognostic_overwrites_output():
         (n_samples,) + img_shape, 42.0, device=fme.get_device()
     )
     next_step_input_data["diagnostic_main"] = prescribed_value
-    output = step.step(
+    output, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
@@ -914,7 +914,7 @@ def test_secondary_module_full_field_and_residual():
     next_step_input_data = get_tensor_dict(
         step.next_step_input_names, img_shape, n_samples=2
     )
-    output = step.step(
+    output, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
@@ -975,8 +975,8 @@ def test_secondary_module_state_round_trip():
         n_ensemble=1,
         labels=None,
     )
-    out1 = step1.step(args=args)
-    out2 = step2.step(args=args)
+    out1, _ = step1.step(args=args)
+    out2, _ = step2.step(args=args)
     for name in out1:
         torch.testing.assert_close(out1[name], out2[name])
 
@@ -1017,7 +1017,7 @@ def test_secondary_module_residual_on_input_only_with_residual_prediction():
     next_step_input_data = get_tensor_dict(
         step.next_step_input_names, img_shape, n_samples=2
     )
-    output = step.step(
+    output, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
@@ -1095,7 +1095,7 @@ def test_step_with_data_mask():
             [True, True, False, False], device=fme.get_device()
         ),
     }
-    output_no_mask = step.step(
+    output_no_mask, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
@@ -1104,7 +1104,7 @@ def test_step_with_data_mask():
             data_mask=None,
         ),
     )
-    output_with_mask = step.step(
+    output_with_mask, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
@@ -1191,7 +1191,7 @@ def test_step_with_include_channel_mask_inputs():
             [True, True, False, False], device=fme.get_device()
         ),
     }
-    output_no_mask = step.step(
+    output_no_mask, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
@@ -1200,7 +1200,7 @@ def test_step_with_include_channel_mask_inputs():
             data_mask=None,
         ),
     )
-    output_with_mask = step.step(
+    output_with_mask, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
@@ -1245,7 +1245,7 @@ def test_step_with_include_channel_mask_inputs_no_data_mask():
     next_step_input_data = get_tensor_dict(
         step.next_step_input_names, img_shape, n_samples
     )
-    output_no_mask = step.step(
+    output_no_mask, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
@@ -1258,7 +1258,7 @@ def test_step_with_include_channel_mask_inputs_no_data_mask():
         name: torch.ones(n_samples, dtype=torch.bool, device=fme.get_device())
         for name in step.input_names
     }
-    output_all_unmasked = step.step(
+    output_all_unmasked, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
@@ -1322,7 +1322,7 @@ def test_step_masked_nan_input_is_zeroed_before_network_with_corrector():
         ),
     }
 
-    output = step.step(
+    output, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
@@ -1631,7 +1631,7 @@ def test_step_shared_global_mean_removal():
     next_step = get_tensor_dict(
         step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
-    output = step.step(
+    output, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step,
@@ -1661,7 +1661,7 @@ def test_step_shared_global_mean_removal_with_extra_channels():
     next_step = get_tensor_dict(
         step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
-    output = step.step(
+    output, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step,
@@ -1681,7 +1681,7 @@ def test_step_per_channel_global_mean_removal():
     next_step = get_tensor_dict(
         step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
-    output = step.step(
+    output, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step,
@@ -1706,7 +1706,7 @@ def test_step_per_channel_global_mean_removal_with_extra_channels():
     next_step = get_tensor_dict(
         step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
-    output = step.step(
+    output, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step,
@@ -1738,7 +1738,7 @@ def _assert_global_mean_removal_affects_output(removal, in_names, out_names, mea
     next_step = get_tensor_dict(
         step_baseline.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
-    baseline_output = step_baseline.step(
+    baseline_output, _ = step_baseline.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step,
@@ -1746,7 +1746,7 @@ def _assert_global_mean_removal_affects_output(removal, in_names, out_names, mea
             labels=None,
         ),
     )
-    removal_output = step_with_removal.step(
+    removal_output, _ = step_with_removal.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step,
@@ -1971,7 +1971,7 @@ def test_dropout_mask_applies_to_global_mean_removal_inverse():
     }
 
     step_obj.module.torch_module.train()
-    output = step_obj.step(
+    output, _ = step_obj.step(
         StepArgs(input=input_data, next_step_input_data={}, n_ensemble=1),
     )
 

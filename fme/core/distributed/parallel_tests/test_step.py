@@ -459,7 +459,7 @@ def test_step_regression(
     input_data = dist.scatter_spatial(input_data, img_shape)
     next_step_input_data = dist.scatter_spatial(next_step_input_data, img_shape)
 
-    output = step.step(
+    output, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,

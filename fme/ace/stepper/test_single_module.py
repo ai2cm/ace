@@ -62,6 +62,8 @@ from fme.core.coordinates import (
     LatLonCoordinates,
     VerticalCoordinate,
 )
+from fme.core.corrector.registry import CorrectorABC
+from fme.core.corrector.state import CorrectorState
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
@@ -84,7 +86,7 @@ from fme.core.step.multi_call import MultiCallConfig
 from fme.core.step.single_module import SingleModuleStep
 from fme.core.testing.regression import validate_tensor_dict
 from fme.core.training_history import TrainingJob
-from fme.core.typing_ import EnsembleTensorDict
+from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
 DIR = os.path.abspath(os.path.dirname(__file__))
 
@@ -1141,7 +1143,7 @@ def test_step():
     n_samples = 3
     input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
 
-    output = stepper.step(
+    output, _ = stepper.step(
         StepArgs(input=input_data, next_step_input_data={}, n_ensemble=1, labels=None)
     )
 
@@ -1153,7 +1155,7 @@ def test_step_with_diagnostic():
     stepper = _get_stepper(["a"], ["a", "c"], module_name="RepeatChannel")
     n_samples = 3
     input_data = {"a": torch.rand(n_samples, 5, 5).to(DEVICE)}
-    output = stepper.step(
+    output, _ = stepper.step(
         StepArgs(input=input_data, next_step_input_data={}, n_ensemble=1, labels=None)
     )
     torch.testing.assert_close(output["a"], input_data["a"])
@@ -1171,7 +1173,7 @@ def test_step_with_forcing_and_diagnostic(residual_prediction):
     )
     n_samples = 3
     input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
-    output = stepper.step(
+    output, _ = stepper.step(
         StepArgs(input=input_data, next_step_input_data={}, n_ensemble=1, labels=None)
     )
     if residual_prediction:
@@ -1189,7 +1191,7 @@ def test_step_with_prescribed_ocean():
     )
     input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
     ocean_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "mask"]}
-    output = stepper.step(
+    output, _ = stepper.step(
         StepArgs(
             input=input_data,
             next_step_input_data=ocean_data,
@@ -1282,6 +1284,86 @@ def test_predict():
         new_input_state.data[variable][:, 0], output.data[variable][:, -1]
     )
     assert new_input_state.time.equals(output.time[:, -1:])
+
+
+class _RecordingCorrector(CorrectorABC):
+    """Test corrector that seeds and bumps a counter inside CorrectorState.
+
+    On first call: seeds ``global_dry_air_mass`` from the area-mean
+    of ``input_data["a"]`` (using a trivial uniform weighting). On subsequent
+    calls: increments the existing value by 1 each time it is invoked, so the
+    test can observe both seeding and propagation across step calls.
+    """
+
+    def __init__(self):
+        self.call_count = 0
+        self.seen_states: list[CorrectorState | None] = []
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> tuple[TensorDict, CorrectorState | None]:
+        self.call_count += 1
+        self.seen_states.append(corrector_state)
+        if corrector_state is None or corrector_state.global_dry_air_mass is None:
+            n = input_data["a"].shape[0]
+            seed = input_data["a"].mean(dim=(-1, -2), keepdim=True).reshape(n, 1, 1)
+            corrector_state = CorrectorState(global_dry_air_mass=seed)
+        else:
+            corrector_state = CorrectorState(
+                global_dry_air_mass=(corrector_state.global_dry_air_mass + 1.0),
+            )
+        return dict(gen_data), corrector_state
+
+
+def test_predict_threads_stepper_state_across_calls():
+    """End-to-end propagation: corrector state seeded on call 1 must arrive
+    in call 2 inside the PrognosticState returned by ``predict``.
+    """
+    stepper = _get_stepper(["a"], ["a"])
+    recording_corrector = _RecordingCorrector()
+    stepper._step_obj._corrector = recording_corrector  # type: ignore[attr-defined]
+
+    n_steps = 2
+    input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=[])
+    forcing_data.data = {}
+
+    # First predict: no stepper_state on IC, corrector seeds it.
+    _, new_state_1 = stepper.predict(input_data, forcing_data)
+    assert recording_corrector.call_count == n_steps
+    # The first invocation saw None; later invocations saw the seeded state.
+    assert recording_corrector.seen_states[0] is None
+    assert recording_corrector.seen_states[1] is not None
+    seeded_1 = recording_corrector.seen_states[1].global_dry_air_mass
+    assert seeded_1 is not None
+
+    ic_after_1 = new_state_1.as_batch_data()
+    assert ic_after_1.stepper_state is not None
+    assert ic_after_1.stepper_state.corrector_state is not None
+    pres_after_1 = ic_after_1.stepper_state.corrector_state.global_dry_air_mass
+    assert pres_after_1 is not None
+    # n_steps invocations after seeding: seed + (n_steps - 1) increments.
+    expected = seeded_1 + float(n_steps - 1)
+    torch.testing.assert_close(pres_after_1, expected)
+
+    # Second predict: feed back the prognostic state from call 1; corrector
+    # should now see a non-None state on its very first invocation.
+    seen_before_call_2 = len(recording_corrector.seen_states)
+    _, new_state_2 = stepper.predict(new_state_1, forcing_data)
+    first_state_call_2 = recording_corrector.seen_states[seen_before_call_2]
+    assert first_state_call_2 is not None
+    assert first_state_call_2.global_dry_air_mass is not None
+    torch.testing.assert_close(first_state_call_2.global_dry_air_mass, pres_after_1)
+
+    ic_after_2 = new_state_2.as_batch_data()
+    assert ic_after_2.stepper_state is not None
+    assert ic_after_2.stepper_state.corrector_state is not None
+    pres_after_2 = ic_after_2.stepper_state.corrector_state.global_dry_air_mass
+    assert pres_after_2 is not None
+    torch.testing.assert_close(pres_after_2, pres_after_1 + float(n_steps))
 
 
 @pytest.mark.parametrize("n_ensemble", [1, 3])

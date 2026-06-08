@@ -144,7 +144,6 @@ class DenoisingMoEConfig:
 
     def build(self) -> "DenoisingMoEPredictor":
         experts = [rc.checkpoint_config.build() for rc in self.denoising_expert_configs]
-        _validate_experts_compatible(experts)
         sigma_ranges = [
             (rc.sigma_min, rc.sigma_max) for rc in self.denoising_expert_configs
         ]
@@ -184,6 +183,8 @@ class DenoisingMoEPredictor:
             raise ValueError("experts and sigma_ranges must have the same length.")
         if expert_renames is not None and len(expert_renames) != len(experts):
             raise ValueError("expert_renames and experts must have the same length.")
+
+        _validate_experts_compatible(experts)
         self._experts = experts
         self._primary = experts[0]
         self._sigma_ranges = sigma_ranges
