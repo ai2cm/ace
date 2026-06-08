@@ -22,7 +22,6 @@ data:
   - data_path: /climate-default/2026-02-23-X-SHiELD-AMIP-plus-4K-downscaling
     file_pattern: 3km.zarr
     engine: zarr
-    n_repeats: 10
     subset:
       interval_length: 6d
       start: 0d
@@ -31,7 +30,6 @@ data:
   - data_path: /climate-default/2026-02-23-X-SHiELD-AMIP-plus-4K-downscaling
     file_pattern: 100km.zarr
     engine: zarr
-    n_repeats: 10
     subset:
       interval_length: 6d
       start: 0d

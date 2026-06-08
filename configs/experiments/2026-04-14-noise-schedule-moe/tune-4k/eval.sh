@@ -34,7 +34,7 @@ gantry run \
     --name $JOB_NAME \
     --description 'Run 100km to 3km evaluation on coarsened X-SHiELD' \
     --workspace ai2/ace \
-    --priority high \
+    --priority urgent \
     --not-preemptible \
     --cluster ai2/titan \
     --cluster ai2/jupiter \

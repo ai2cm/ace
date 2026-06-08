@@ -45,7 +45,7 @@ gantry run \
     --gpus $N_GPUS \
     --shared-memory 400GiB \
     --budget ai2/atec-climate \
-    --no-conda \
+    --system-python \
     --install "pip install --no-deps ." \
     --allow-dirty \
     -- torchrun --nproc_per_node $N_GPUS -m fme.downscaling.train $CONFIG_PATH

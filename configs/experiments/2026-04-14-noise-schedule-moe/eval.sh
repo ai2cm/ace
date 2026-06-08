@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="eval-global-trained-low-oversample8x-downweight-tmp2m-denoising-moe-tropics"
+JOB_NAME="eval-global-trained-best-hist-ckpt-moe-tropics"
 #JOB_NAME="eval-global-trained-denoising-moe-events"
 
 CONFIG_FILENAME="eval-coarse-prmsl-tropic-pac.yaml"
@@ -22,7 +22,7 @@ NGPU=2
 IMAGE="$(cat latest_deps_only_image.txt)"
 
 EXISTING_RESULTS_DATASET_HIGH_SIGMA=01KRPP269PFM7G9EY8BWZ3AW04
-EXISTING_RESULTS_DATASET_LOW_SIGMA=01KS3K5FXRNDC8W0JWH7AHG6BX
+EXISTING_RESULTS_DATASET_LOW_SIGMA=01KTCYVZBJJJ7C8K81C0VG0ZNB
 wandb_group=""
 
 #--not-preemptible \
@@ -50,7 +50,7 @@ gantry run \
     --gpus $NGPU \
     --shared-memory 400GiB \
     --budget ai2/atec-climate \
-    --no-conda \
+    --system-python \
     --install "pip install --no-deps ." \
     --allow-dirty \
     -- torchrun --nproc_per_node $NGPU -m fme.downscaling.evaluator $CONFIG_PATH
