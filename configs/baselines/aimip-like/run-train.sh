@@ -114,4 +114,7 @@ run_training() {
 
 # --- Wave 10: era5-only with qsat-scaled shared global-mean removal on humidity-impacted fields (Jupiter, high; intentionally over cap) ---
 # specific_total_water_0-7, LHTFLsfc, PRATEsfc, tendency_of_total_water_path_due_to_advection, Q2m scaled by qsat ratio; needs merge of feature/qsat-scaled-shared-global-mean-removal (commit 0ed51f4d3)
-run_training "train-4deg-daily-v1-era5-only-qsat-scaling.yaml" "train-4deg-daily-v1-era5-only-qsat-scaling-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-era5-only-qsat-scaling.yaml" "train-4deg-daily-v1-era5-only-qsat-scaling-rs0" 1 ai2/ace high ai2/jupiter
+
+# --- Wave 11: era5-only qsat-scaling + CO2 excluded from inputs (Jupiter, high; intentionally over cap) ---
+run_training "train-4deg-daily-v1-era5-only-no-co2-qsat-scaling.yaml" "train-4deg-daily-v1-era5-only-no-co2-qsat-scaling-rs0" 1 ai2/ace high ai2/jupiter
