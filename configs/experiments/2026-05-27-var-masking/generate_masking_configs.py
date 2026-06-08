@@ -63,7 +63,7 @@ SHARED_GMR_REFERENCE_FIELD = "surface_temperature"
 CO2_FIELD = "global_mean_co2"
 
 MASK_RATES = [0.05, 0.1, 0.2, 0.3, 0.4]
-GMR_VALS = [True]
+GMR_VALS = [True, False]
 NO_MASKING_GMR_VALS = [True, False]
 NO_MASKING_CO2_MODES = [True, False]  # True = CO2 added as input, False = no CO2
 RP_VALS = [False]
