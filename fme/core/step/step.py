@@ -78,6 +78,19 @@ class StepConfigABC(abc.ABC):
         """
         pass
 
+    @property
+    @abc.abstractmethod
+    def all_training_names(self) -> list[str] | None:
+        """All variable names used during training.
+
+        Return ``None`` when training uses the same variables as inference
+        (``input_names`` plus ``output_names``). Return an explicit list when
+        the step accepts a broader variable pool during training than at
+        inference time, in which case the data loader will fetch this larger
+        set.
+        """
+        pass
+
     @abc.abstractmethod
     def get_next_step_forcing_names(self) -> list[str]:
         pass
@@ -197,6 +210,10 @@ class StepSelector(StepConfigABC):
         Names of variables to be included in the loss function.
         """
         return self._step_config_instance.loss_names
+
+    @property
+    def all_training_names(self) -> list[str] | None:
+        return self._step_config_instance.all_training_names
 
     def get_loss_normalizer(
         self,

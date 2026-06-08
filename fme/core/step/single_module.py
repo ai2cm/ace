@@ -193,6 +193,10 @@ class SingleModuleStepConfig(StepConfigABC):
         return self.output_names
 
     @property
+    def all_training_names(self) -> list[str] | None:
+        return None
+
+    @property
     def allow_missing_variables(self) -> bool:
         return self.builder.allow_missing_variables
 

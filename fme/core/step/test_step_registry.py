@@ -108,6 +108,10 @@ class MockStepConfig(StepConfigABC):
         return self.out_names
 
     @property
+    def all_training_names(self) -> list[str] | None:
+        return None
+
+    @property
     def n_ic_timesteps(self) -> int:
         raise NotImplementedError()
 

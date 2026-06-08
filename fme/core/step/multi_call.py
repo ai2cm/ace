@@ -190,6 +190,10 @@ class MultiCallStepConfig(StepConfigABC):
         else:
             return self.wrapped_step.loss_names
 
+    @property
+    def all_training_names(self) -> list[str] | None:
+        return self.wrapped_step.all_training_names
+
     def replace_ocean(self, ocean: OceanConfig | None):
         self.wrapped_step.replace_ocean(ocean)
 

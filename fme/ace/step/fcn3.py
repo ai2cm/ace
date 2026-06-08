@@ -282,6 +282,10 @@ class FCN3StepConfig(StepConfigABC):
     def loss_names(self) -> list[str]:
         return self.output_names
 
+    @property
+    def all_training_names(self) -> list[str] | None:
+        return None
+
     def replace_ocean(self, ocean: OceanConfig | None):
         """
         Replace the ocean model with a new one.

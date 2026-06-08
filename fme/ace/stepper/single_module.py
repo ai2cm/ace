@@ -683,7 +683,14 @@ class StepperConfig:
 
     @property
     def all_names(self) -> list[str]:
-        """Names of all variables."""
+        """Names of all variables.
+
+        When the step declares ``all_training_names``, the data loader fetches
+        that larger set so training can use more variables than inference.
+        """
+        training_names = self.step.all_training_names
+        if training_names is not None:
+            return training_names
         return list(set(self.input_names + self.output_names))
 
     @property
