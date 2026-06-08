@@ -75,10 +75,7 @@ class AceDiffusionTeacher(FastGenNetwork):
             if isinstance(primary_raw, DummyWrapper):
                 primary_raw = primary_raw.module
             ace_module: torch.nn.Module = primary_raw
-            self._primary_ace_module = primary_raw
-            # Store the MoE predictor ONLY on the original instance so that
-            # deepcopies (student / teacher copy) don't carry all expert weights.
-            self._moe_experts: list[torch.nn.Module] | None = [
+            moe_experts: list[torch.nn.Module] | None = [
                 e.module for e in model._experts
             ]
         else:
@@ -96,8 +93,7 @@ class AceDiffusionTeacher(FastGenNetwork):
             if isinstance(raw_module, DummyWrapper):
                 raw_module = raw_module.module
             ace_module = raw_module
-            self._primary_ace_module = raw_module
-            self._moe_experts = None
+            moe_experts = None
 
         super().__init__(
             net_pred_type="x0",
@@ -106,6 +102,10 @@ class AceDiffusionTeacher(FastGenNetwork):
             max_t=sigma_max,
         )
         self._ace_module = ace_module
+        self._primary_ace_module = ace_module
+        # Store the MoE predictor ONLY on the original instance so that
+        # deepcopies (student / teacher copy) don't carry all expert weights.
+        self._moe_experts = moe_experts
 
         # Stash sampling hyperparameters.
         self._sigma_min = sigma_min
