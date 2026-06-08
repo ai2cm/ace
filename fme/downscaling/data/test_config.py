@@ -1,6 +1,11 @@
 import dataclasses
+import datetime
+from pathlib import Path
 
+import cftime
+import numpy as np
 import pytest
+import xarray as xr
 
 from fme.core.dataset.merged import MergeNoConcatDatasetConfig
 from fme.core.dataset.xarray import XarrayDataConfig
@@ -12,6 +17,53 @@ from fme.downscaling.data.config import (
 from fme.downscaling.data.utils import ClosedInterval
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.test_utils import data_paths_helper
+from fme.downscaling.typing_ import FineResCoarseResPair
+
+
+def _write_global_nc(path: Path, n_lat: int, n_lon: int, num_timesteps: int) -> None:
+    """Write a minimal NetCDF with global (0-360) lon coords and lat in 0-8 range."""
+    time_coord = [
+        cftime.DatetimeProlepticGregorian(2000, 1, 1) + datetime.timedelta(days=i)
+        for i in range(num_timesteps)
+    ]
+    lon_spacing = 360.0 / n_lon
+    lat_spacing = 8.0 / n_lat
+    lons = np.array(
+        [lon_spacing / 2 + i * lon_spacing for i in range(n_lon)], dtype=np.float32
+    )
+    lats = np.array(
+        [lat_spacing / 2 + i * lat_spacing for i in range(n_lat)], dtype=np.float32
+    )
+    data = np.zeros((num_timesteps, n_lat, n_lon), dtype=np.float32)
+    ds = xr.Dataset(
+        {
+            "var0": xr.DataArray(data, dims=["time", "lat", "lon"]),
+            "var1": xr.DataArray(data, dims=["time", "lat", "lon"]),
+        },
+        coords={
+            "time": xr.DataArray(time_coord, dims=["time"]),
+            "lat": xr.DataArray(lats, dims=["lat"]),
+            "lon": xr.DataArray(lons, dims=["lon"]),
+        },
+    )
+    path.parent.mkdir(exist_ok=True)
+    ds.to_netcdf(path, format="NETCDF4_CLASSIC")
+
+
+def global_data_paths_helper(tmp_path: Path, num_timesteps: int = 4):
+    """Like data_paths_helper but with global (0-360) lon coordinates.
+
+    Coarse is 4 lat × 8 lon (45° lon spacing), fine is 8 lat × 16 lon
+    (22.5° lon spacing) -- 2× scale factor in each spatial dimension.
+    Lat midpoints are in [0, 8] so ClosedInterval(1, 4) works for lat_extent.
+    """
+    fine_path = tmp_path / "fine" / "data.nc"
+    coarse_path = tmp_path / "coarse" / "data.nc"
+    _write_global_nc(fine_path, n_lat=8, n_lon=16, num_timesteps=num_timesteps)
+    _write_global_nc(coarse_path, n_lat=4, n_lon=8, num_timesteps=num_timesteps)
+    return FineResCoarseResPair[str](
+        fine=str(tmp_path / "fine"), coarse=str(tmp_path / "coarse")
+    )
 
 
 @pytest.mark.parametrize(
@@ -223,3 +275,38 @@ def test_PairedDataLoaderConfig_includes_merge(tmp_path, very_fast_only: bool):
     batch = next(iter(data.loader))
     assert batch.coarse.data["var0"].shape == (2, 3, 3)
     assert batch.fine.data["var0"].shape == (2, 6, 6)
+
+
+def test_PairedDataLoaderConfig_prime_meridian_crossing(tmp_path):
+    """PairedDataLoaderConfig must not raise a scale-factor error for a
+    lon_extent that crosses the prime meridian (lon_start < 0).
+
+    Regression test for the bug where adjust_fine_coord_range received
+    unrolled (0-360) coordinates, causing coarse_min to snap to ~0 instead
+    of the correct negative value, making the fine lon selection too narrow.
+    """
+    paths = global_data_paths_helper(tmp_path)
+    requirements = DataRequirements(
+        fine_names=["var0"],
+        coarse_names=["var0"],
+        n_timesteps=1,
+        use_fine_topography=False,
+    )
+    data_config = PairedDataLoaderConfig(
+        fine=[XarrayDataConfig(paths.fine)],
+        coarse=[XarrayDataConfig(paths.coarse)],
+        batch_size=1,
+        num_data_workers=0,
+        strict_ensemble=False,
+        lat_extent=ClosedInterval(1.0, 4.0),
+        lon_extent=ClosedInterval(-22.5, 22.5),
+    )
+    # Before the fix this raised:
+    #   ValueError: Fine and coarse datasets must have the same scale factor
+    #   between lat and lon dimensions.
+    data = data_config.build(requirements=requirements, train=False)
+    batch = next(iter(data.loader))
+    # coarse: 2 lat pts in [1,4], 2 lon pts in [-22.5,22.5] (with overlap padding)
+    # fine: 4 lat pts, 4 lon pts (2× scale factor)
+    assert batch.coarse.data["var0"].shape[-2] * 2 == batch.fine.data["var0"].shape[-2]
+    assert batch.coarse.data["var0"].shape[-1] * 2 == batch.fine.data["var0"].shape[-1]
