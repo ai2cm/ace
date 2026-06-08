@@ -157,6 +157,10 @@ def find_roll_anchor(lon_coords: torch.Tensor, anchor: float) -> int:
     anchor is taken mod 360 so negative or >360 values are accepted. The count is taken
     mod n so that a full-wrap (all coords below anchor) reduces to 0, a no-op.
 
+    Callers pre-compute this once and pass it to both :func:`roll_lon_coords` and
+    :func:`roll_lon_data`, keeping coordinates and field tensors aligned without
+    repeating the computation.
+
     Assumes lon_coords are monotonically increasing and cyclic.
     """
     _validate_monotonic_lon(lon_coords)
