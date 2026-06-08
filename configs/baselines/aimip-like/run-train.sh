@@ -97,9 +97,14 @@ run_training() {
 # 1-4) non-residual labels: multistep, aggressive rollout, embed_dim 384, seed-1 replicate
 # 5) labels + filter_num_groups 8 (1-step, vs finished labels-lr-tuning fg=1 baseline)
 # 6) era5-only (no labels) + filter_num_groups 8 (1-step), label-vs-not contrast at fg8
-run_training "train-4deg-daily-v1-labels-multistep.yaml" "train-4deg-daily-v1-labels-multistep-rs0" 1 ai2/ace high ai2/jupiter
-run_training "train-4deg-daily-v1-labels-rollout.yaml" "train-4deg-daily-v1-labels-rollout-rs0" 1 ai2/ace high ai2/jupiter
-run_training "train-4deg-daily-v1-labels-384-multistep.yaml" "train-4deg-daily-v1-labels-384-multistep-rs0" 1 ai2/ace high ai2/jupiter
-run_training "train-4deg-daily-v1-labels-multistep-rs1.yaml" "train-4deg-daily-v1-labels-multistep-rs1" 1 ai2/ace high ai2/jupiter
-run_training "train-4deg-daily-v1-labels-fg8.yaml" "train-4deg-daily-v1-labels-fg8-rs0" 1 ai2/ace high ai2/jupiter
-run_training "train-4deg-daily-v1-era5-only-fg8.yaml" "train-4deg-daily-v1-era5-only-fg8-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-labels-multistep.yaml" "train-4deg-daily-v1-labels-multistep-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-labels-rollout.yaml" "train-4deg-daily-v1-labels-rollout-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-labels-384-multistep.yaml" "train-4deg-daily-v1-labels-384-multistep-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-labels-multistep-rs1.yaml" "train-4deg-daily-v1-labels-multistep-rs1" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-labels-fg8.yaml" "train-4deg-daily-v1-labels-fg8-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-era5-only-fg8.yaml" "train-4deg-daily-v1-era5-only-fg8-rs0" 1 ai2/ace high ai2/jupiter
+
+# --- Wave 8: finite-difference CRPS loss (crps 0.7 / fd-crps 0.2 / energy 0.1), 1-step, fg=1 (Jupiter, high) ---
+# labels-vs-era5-only contrast at the new loss weighting (same two-way split as the fg8 probe, without fg8)
+run_training "train-4deg-daily-v1-labels-c7d2e1.yaml" "train-4deg-daily-v1-labels-c7d2e1-rs0" 1 ai2/ace high ai2/jupiter
+run_training "train-4deg-daily-v1-era5-only-c7d2e1.yaml" "train-4deg-daily-v1-era5-only-c7d2e1-rs0" 1 ai2/ace high ai2/jupiter
