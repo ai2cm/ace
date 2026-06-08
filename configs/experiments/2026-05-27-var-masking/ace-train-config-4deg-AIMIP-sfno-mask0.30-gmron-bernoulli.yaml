@@ -1,10 +1,9 @@
-# arg: --dataset 01KTAT09WSW54PC3T6H3900VJ5:/checkpoints
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
 checkpoint_every_n_batches: 5000
 validate_using_ema: true
-max_epochs: 10
+max_epochs: 150
 ema:
   decay: 0.999
 inference:
@@ -309,12 +308,25 @@ optimization:
     weight_decay: 0.01
   scheduler:
     schedulers:
+    - type: LinearLR
+      kwargs:
+        start_factor: 0.01
+        end_factor: 1.0
+        total_iters: 4
+      step_each_iteration: false
+    - type: ConstantLR
+      kwargs:
+        factor: 1.0
+        total_iters: 136
+      step_each_iteration: false
     - type: PolynomialLR
       kwargs:
         power: 0.5
-        total_iters: 10
+        total_iters: 4
       step_each_iteration: false
-    milestones: []
+    milestones:
+    - 7
+    - 143
 stepper_training:
   n_forward_steps: 2
   optimize_last_step_only: false
@@ -339,8 +351,6 @@ stepper_training:
       USWRFtoa: 2
       tendency_of_total_water_path_due_to_advection: 0.5
       PRESsfc: 3
-  parameter_init:
-    weights_path: /checkpoints/training_checkpoints/best_ckpt.tar
 stepper:
   step:
     type: single_module
@@ -488,5 +498,9 @@ stepper:
       global_mean_removal:
         kind: shared
         append_as_input: true
+      input_dropout:
+        per_variable:
+          default_rate: 0.3
+          surface_temperature: 0.0
       include_channel_mask_inputs: true
-pre_cooldown_checkpoint_epoch: null
+pre_cooldown_checkpoint_epoch: 143

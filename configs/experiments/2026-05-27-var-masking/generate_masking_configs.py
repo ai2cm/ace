@@ -3,38 +3,32 @@
 Produces configs for two masking schemes:
 
 Bernoulli (suffix -bernoulli):
-  One config per (mask_rate, masking_type, gmr, rp):
-  - mask_rates: 0.0, 0.2, 0.4
+  One config per (mask_rate, gmr):
+  - mask_rates: 0.05, 0.1, 0.2, 0.3, 0.4
     (applied as input_dropout.per_variable.default_rate)
-  - masking_types:
-      all      - all variables share per_variable.default_rate, except the
-                 shared global_mean_removal reference when gmr is enabled
-      noforcing - forcing/static variables (land_fraction, ocean_fraction,
-                 sea_ice_fraction, DSWRFtoa, HGTsfc) are explicitly
-                 handled with rate=0.0; the shared global_mean_removal
-                 reference is also handled with rate=0.0 when gmr is enabled
   - gmr: gmron (global mean removal enabled) / gmroff (disabled)
-  - rp:  rpon  (residual_prediction=true)   / rpoff (residual_prediction=false)
+  All variables share per_variable.default_rate; the shared
+  global_mean_removal reference is protected when gmr is enabled.
+  Forcing variables are masked the same as all other variables.
 
 Jeremy/uniform (suffix -uniform):
-  One config per (max_vars, masking_type, gmr, rp):
-  - max_vars: "all" (0 to all eligible) or an integer k (0 to k)
-  - masking_types:
-      all      - all variables are eligible for masking, except the shared
-                 global_mean_removal reference when gmr is enabled
-      noforcing - forcing/static variables are excluded via uniform.ignore_vars
-  - gmr / rp: same as above
-  File names use mask{k} where k is "all" or the integer (e.g. mask10).
+  One config per (gmr):
+  - uniform masking from 0 to all eligible variables
+  - gmr: gmron / gmroff
+  Forcing variables are eligible for masking.
+  The shared global_mean_removal reference is protected when gmr is enabled.
 
 CO2 variants are generated for every Bernoulli and uniform config:
   - suffix -co2-mask: global_mean_co2 is masked the same way as other variables
   - suffix -co2-nomask: global_mean_co2 is excluded from input dropout
 
-No-masking (suffix -mask0.00-all):
-  One config per (gmr, rp, co2_mode):
+No-masking (suffix -mask0.00):
+  One config per (gmr, co2_mode):
   - gmr: gmron / gmroff
-  - rp:  rpon  / rpoff  (same as RP_VALS)
   - co2: no suffix (no co2 field), -co2-mask, -co2-nomask
+
+All runs: 150 epochs (4 warmup, 142 constant, 4 cooldown).
+Residual prediction is always off.
 """
 
 import argparse
@@ -43,14 +37,19 @@ import pathlib
 
 import yaml
 
-WANDB_PROJECT = "VarMasking2"
+WANDB_PROJECT = "VarMasking3"
 WANDB_ENTITY = "ai2cm"
 WANDB_PREFIX = "ace2-var-mask-"  # stripped from wandb run names before comparison
-WANDB_SUFFIX = "-v2"  # stripped from wandb run names before comparison
+WANDB_SUFFIX = "-v3"  # stripped from wandb run names before comparison
 CONFIG_PREFIX = (
     "ace-train-config-4deg-AIMIP-"  # stripped from config stems before comparison
 )
-PRE_COOLDOWN_CHECKPOINT_EPOCH = 66
+
+MAX_EPOCHS = 150
+WARMUP_EPOCHS = 7
+COOLDOWN_EPOCHS = 7
+COOLDOWN_START_EPOCH = MAX_EPOCHS - COOLDOWN_EPOCHS
+PRE_COOLDOWN_CHECKPOINT_EPOCH = COOLDOWN_START_EPOCH
 
 FORCING_VARS = [
     "land_fraction",
@@ -66,17 +65,7 @@ MASK_RATES = [0.05, 0.1, 0.2, 0.3, 0.4]
 GMR_VALS = [True, False]
 NO_MASKING_GMR_VALS = [True, False]
 NO_MASKING_CO2_MODES = [True, False]  # True = CO2 added as input, False = no CO2
-RP_VALS = [False]
-EXCLUDE_FORCING = [False, True]
 CO2_MODES: list[str] = []
-UNIFORM_MAX_VARS: dict[bool, list[int | str]] = {
-    False: ["all", 17, 3],  # with GMR reference excluded: 0.20 × 42 ≈ 8.4 → max = 17
-    True: [
-        "all",
-        15,
-        3,
-    ],  # forcing + GMR reference excluded: 0.20 × 37 ≈ 7.4 → max = 15
-}
 
 HERE = pathlib.Path(__file__).parent
 BASE_CONFIG_STEMS = [
@@ -85,23 +74,13 @@ BASE_CONFIG_STEMS = [
 ]
 
 
-def build_bernoulli_input_dropout(mask_rate: float, exclude_forcing: bool) -> dict:
+def build_bernoulli_input_dropout(mask_rate: float) -> dict:
     per_variable: dict[str, float] = {"default_rate": mask_rate}
-    if exclude_forcing:
-        per_variable.update({v: 0.0 for v in FORCING_VARS})
     return {"per_variable": per_variable}
 
 
-def build_uniform_input_dropout(
-    exclude_forcing: bool, max_vars: int | str = "all"
-) -> dict:
-    uniform: dict = {
-        "min_vars": "min",
-        "max_vars": "max" if max_vars == "all" else max_vars,
-    }
-    if exclude_forcing:
-        uniform["ignore_vars"] = list(FORCING_VARS)
-    return {"uniform": uniform}
+def build_uniform_input_dropout() -> dict:
+    return {"uniform": {"min_vars": "min", "max_vars": "max"}}
 
 
 def _protect_shared_gmr_reference(input_dropout: dict) -> dict:
@@ -148,7 +127,6 @@ def _co2_suffix(co2_mode: str | None) -> str:
 def _apply_common_settings(
     step_cfg: dict,
     gmr_on: bool,
-    rp_on: bool,
     input_dropout: dict,
     co2_mode: str | None = None,
 ) -> None:
@@ -161,7 +139,7 @@ def _apply_common_settings(
     if gmr_on:
         input_dropout = _protect_shared_gmr_reference(input_dropout)
     step_cfg["input_dropout"] = input_dropout
-    step_cfg["residual_prediction"] = rp_on
+    step_cfg["residual_prediction"] = False
     step_cfg["include_channel_mask_inputs"] = True
     if gmr_on:
         step_cfg["global_mean_removal"] = {
@@ -178,6 +156,17 @@ def _set_wandb_project(cfg: dict) -> None:
 
 def _set_pre_cooldown_checkpoint_epoch(cfg: dict) -> None:
     cfg["pre_cooldown_checkpoint_epoch"] = PRE_COOLDOWN_CHECKPOINT_EPOCH
+
+
+def _set_training_duration(cfg: dict) -> None:
+    cfg["max_epochs"] = MAX_EPOCHS
+    schedulers = cfg["optimization"]["scheduler"]["schedulers"]
+    main_epochs = MAX_EPOCHS - WARMUP_EPOCHS - COOLDOWN_EPOCHS
+    schedulers[1]["kwargs"]["total_iters"] = main_epochs
+    cfg["optimization"]["scheduler"]["milestones"] = [
+        WARMUP_EPOCHS,
+        COOLDOWN_START_EPOCH,
+    ]
 
 
 def _fetch_wandb_run_names() -> set[str]:
@@ -217,6 +206,7 @@ def _write_config(
         return
     _set_wandb_project(cfg)
     _set_pre_cooldown_checkpoint_epoch(cfg)
+    _set_training_duration(cfg)
     with out_path.open("w") as f:
         yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)
     print(f"Wrote {out_path.name}")
@@ -230,31 +220,24 @@ def generate_bernoulli_configs(
     wandb_run_names: set[str] | None = None,
 ) -> None:
     for mask_rate in MASK_RATES:
-        for exclude_forcing in EXCLUDE_FORCING:
-            if mask_rate == 0.0 and exclude_forcing:
-                continue
-            for gmr_on in GMR_VALS:
-                for rp_on in RP_VALS:
-                    cfg = copy.deepcopy(base)
-                    masking_type = "noforcing" if exclude_forcing else "all"
-                    gmr_suffix = "gmron" if gmr_on else "gmroff"
-                    rp_suffix = "rpon" if rp_on else "rpoff"
-                    name = (
-                        f"{stem}"
-                        f"-mask{mask_rate:.2f}-{masking_type}"
-                        f"-{gmr_suffix}-{rp_suffix}-bernoulli"
-                        f"{_co2_suffix(co2_mode)}"
-                    )
-                    out_path = HERE / f"{name}.yaml"
-                    step_cfg = cfg["stepper"]["step"]["config"]
-                    _apply_common_settings(
-                        step_cfg,
-                        gmr_on,
-                        rp_on,
-                        build_bernoulli_input_dropout(mask_rate, exclude_forcing),
-                        co2_mode=co2_mode,
-                    )
-                    _write_config(cfg, out_path, existing_only, wandb_run_names)
+        for gmr_on in GMR_VALS:
+            cfg = copy.deepcopy(base)
+            gmr_suffix = "gmron" if gmr_on else "gmroff"
+            name = (
+                f"{stem}"
+                f"-mask{mask_rate:.2f}"
+                f"-{gmr_suffix}-bernoulli"
+                f"{_co2_suffix(co2_mode)}"
+            )
+            out_path = HERE / f"{name}.yaml"
+            step_cfg = cfg["stepper"]["step"]["config"]
+            _apply_common_settings(
+                step_cfg,
+                gmr_on,
+                build_bernoulli_input_dropout(mask_rate),
+                co2_mode=co2_mode,
+            )
+            _write_config(cfg, out_path, existing_only, wandb_run_names)
 
 
 def generate_uniform_configs(
@@ -264,31 +247,19 @@ def generate_uniform_configs(
     existing_only: bool = False,
     wandb_run_names: set[str] | None = None,
 ) -> None:
-    for exclude_forcing in EXCLUDE_FORCING:
-        for max_vars in UNIFORM_MAX_VARS[exclude_forcing]:
-            for gmr_on in GMR_VALS:
-                for rp_on in RP_VALS:
-                    cfg = copy.deepcopy(base)
-                    masking_type = "noforcing" if exclude_forcing else "all"
-                    gmr_suffix = "gmron" if gmr_on else "gmroff"
-                    rp_suffix = "rpon" if rp_on else "rpoff"
-                    k = "all" if max_vars == "all" else max_vars
-                    name = (
-                        f"{stem}"
-                        f"-mask{k}-{masking_type}"
-                        f"-{gmr_suffix}-{rp_suffix}-uniform"
-                        f"{_co2_suffix(co2_mode)}"
-                    )
-                    out_path = HERE / f"{name}.yaml"
-                    step_cfg = cfg["stepper"]["step"]["config"]
-                    _apply_common_settings(
-                        step_cfg,
-                        gmr_on,
-                        rp_on,
-                        build_uniform_input_dropout(exclude_forcing, max_vars),
-                        co2_mode=co2_mode,
-                    )
-                    _write_config(cfg, out_path, existing_only, wandb_run_names)
+    for gmr_on in GMR_VALS:
+        cfg = copy.deepcopy(base)
+        gmr_suffix = "gmron" if gmr_on else "gmroff"
+        name = f"{stem}" f"-maskall" f"-{gmr_suffix}-uniform" f"{_co2_suffix(co2_mode)}"
+        out_path = HERE / f"{name}.yaml"
+        step_cfg = cfg["stepper"]["step"]["config"]
+        _apply_common_settings(
+            step_cfg,
+            gmr_on,
+            build_uniform_input_dropout(),
+            co2_mode=co2_mode,
+        )
+        _write_config(cfg, out_path, existing_only, wandb_run_names)
 
 
 def generate_co2_variants(
@@ -323,28 +294,20 @@ def generate_no_masking_configs(
 ) -> None:
     """Generate no-masking configs with GMR on/off and CO2 on/off."""
     for gmr_on in NO_MASKING_GMR_VALS:
-        for rp_on in RP_VALS:
-            for co2_on in NO_MASKING_CO2_MODES:
-                cfg = copy.deepcopy(base)
-                gmr_suffix = "gmron" if gmr_on else "gmroff"
-                rp_suffix = "rpon" if rp_on else "rpoff"
-                co2_suffix = "-co2" if co2_on else ""
-                name = (
-                    f"{stem}"
-                    f"-mask0.00-all"
-                    f"-{gmr_suffix}-{rp_suffix}-bernoulli"
-                    f"{co2_suffix}"
-                )
-                out_path = HERE / f"{name}.yaml"
-                step_cfg = cfg["stepper"]["step"]["config"]
-                _apply_common_settings(
-                    step_cfg,
-                    gmr_on,
-                    rp_on,
-                    build_bernoulli_input_dropout(0.0, False),
-                    co2_mode="mask" if co2_on else None,
-                )
-                _write_config(cfg, out_path, existing_only, wandb_run_names)
+        for co2_on in NO_MASKING_CO2_MODES:
+            cfg = copy.deepcopy(base)
+            gmr_suffix = "gmron" if gmr_on else "gmroff"
+            co2_suffix = "-co2" if co2_on else ""
+            name = f"{stem}" f"-mask0.00" f"-{gmr_suffix}-bernoulli" f"{co2_suffix}"
+            out_path = HERE / f"{name}.yaml"
+            step_cfg = cfg["stepper"]["step"]["config"]
+            _apply_common_settings(
+                step_cfg,
+                gmr_on,
+                build_bernoulli_input_dropout(0.0),
+                co2_mode="mask" if co2_on else None,
+            )
+            _write_config(cfg, out_path, existing_only, wandb_run_names)
 
 
 def main() -> None:
