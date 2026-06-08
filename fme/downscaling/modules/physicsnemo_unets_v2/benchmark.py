@@ -1,6 +1,5 @@
 import dataclasses
 from dataclasses import dataclass
-from typing import Self
 
 import torch
 
@@ -168,182 +167,181 @@ def _run_channels_last_diagnostics(
     )
 
 
-class SongUNetv2Benchmark(BenchmarkABC):
-    def __init__(
-        self,
-        model: SongUNetv2,
-        x: torch.Tensor,
-        noise_labels: torch.Tensor,
-        class_labels: torch.Tensor | None,
-        use_amp_bf16: bool = False,
-    ):
-        self.model = model
-        self.x = x
-        self.noise_labels = noise_labels
-        self.class_labels = class_labels
-        self.use_amp_bf16 = use_amp_bf16
-        self._channels_last_diagnostics = _run_channels_last_diagnostics(
-            model, x, noise_labels, class_labels
-        )
+@dataclass(frozen=True)
+class _SongUNetv2BenchmarkParams:
+    img_resolution: int
+    in_channels: int
+    out_channels: int
+    label_dim: int
+    model_channels: int
+    channel_mult: list[int]
+    use_apex_gn: bool = False
+    use_amp_bf16: bool = False
 
-    def _get_amp_context(self):
-        if self.use_amp_bf16:
-            return torch.amp.autocast(get_device().type, dtype=torch.bfloat16)
-        return torch.amp.autocast(get_device().type, enabled=False)
 
-    def run_instance(self, timer) -> TensorDict:
-        with self._get_amp_context():
-            result = self.model(
-                self.x,
-                self.noise_labels,
-                self.class_labels,
-                timer=timer,
+def _make_song_unet_benchmark(
+    *,
+    new_params: _SongUNetv2BenchmarkParams,
+    regression_params: _SongUNetv2BenchmarkParams | None,
+) -> type[BenchmarkABC]:
+    class _SongUNetv2BenchmarkVariant(BenchmarkABC):
+        def __init__(
+            self,
+            model: SongUNetv2,
+            x: torch.Tensor,
+            noise_labels: torch.Tensor,
+            class_labels: torch.Tensor | None,
+            use_amp_bf16: bool,
+        ):
+            self.model = model
+            self.x = x
+            self.noise_labels = noise_labels
+            self.class_labels = class_labels
+            self.use_amp_bf16 = use_amp_bf16
+            self._channels_last_diagnostics = _run_channels_last_diagnostics(
+                model, x, noise_labels, class_labels
             )
-        return {
-            "output": result.detach(),
-            "diagnostics": self._channels_last_diagnostics.to_tensor_dict(),
-        }
 
-    @classmethod
-    def new(cls) -> Self:
-        return cls._new_with_params(
-            img_resolution=64,
-            B=1,
-            in_channels=3,
-            out_channels=2,
-            label_dim=0,
-            model_channels=16,
-            channel_mult=[1, 2, 2, 2],
-            use_apex_gn=False,
-        )
+        def _get_amp_context(self):
+            if self.use_amp_bf16:
+                return torch.amp.autocast(get_device().type, dtype=torch.bfloat16)
+            return torch.amp.autocast(get_device().type, enabled=False)
 
-    @classmethod
-    def _new_with_params(
-        cls,
-        img_resolution: int,
-        B: int,
-        in_channels: int,
-        out_channels: int,
-        label_dim: int,
-        model_channels: int,
-        channel_mult: list[int],
-        use_apex_gn: bool = False,
-        use_amp_bf16: bool = False,
-    ) -> Self:
-        device = get_device()
-        model = SongUNetv2(
-            img_resolution=img_resolution,
-            in_channels=in_channels,
-            out_channels=out_channels,
-            label_dim=label_dim,
-            model_channels=model_channels,
-            channel_mult=channel_mult,
-            num_blocks=4,
-            attn_resolutions=[],
-            dropout=0.0,
-            use_apex_gn=use_apex_gn,
-        ).to(device)
-        model.eval()
+        def run_instance(self, timer) -> TensorDict:
+            with self._get_amp_context():
+                result = self.model(
+                    self.x,
+                    self.noise_labels,
+                    self.class_labels,
+                    timer=timer,
+                )
+            return {
+                "output": result.detach(),
+                "diagnostics": self._channels_last_diagnostics.to_tensor_dict(),
+            }
 
-        H = W = img_resolution
-        x = torch.randn(B, in_channels, H, W, device=device)
-        noise_labels = torch.rand(B, device=device)
-        class_labels = (
-            torch.randn(B, label_dim, device=device) if label_dim > 0 else None
-        )
-        if use_apex_gn:
-            if not apex_available():
-                raise ValueError("'apex' is not installed, set `use_apex_gn=False`")
-            x = x.to(memory_format=torch.channels_last)
+        @classmethod
+        def _build(
+            cls, params: _SongUNetv2BenchmarkParams
+        ) -> "_SongUNetv2BenchmarkVariant":
+            device = get_device()
+            model = SongUNetv2(
+                img_resolution=params.img_resolution,
+                in_channels=params.in_channels,
+                out_channels=params.out_channels,
+                label_dim=params.label_dim,
+                model_channels=params.model_channels,
+                channel_mult=params.channel_mult,
+                num_blocks=4,
+                attn_resolutions=[],
+                dropout=0.0,
+                use_apex_gn=params.use_apex_gn,
+            ).to(device)
+            model.eval()
 
-        return cls(
-            model=model,
-            x=x,
-            noise_labels=noise_labels,
-            class_labels=class_labels,
-            use_amp_bf16=use_amp_bf16,
-        )
+            B = 1
+            H = W = params.img_resolution
+            x = torch.randn(B, params.in_channels, H, W, device=device)
+            noise_labels = torch.rand(B, device=device)
+            class_labels = (
+                torch.randn(B, params.label_dim, device=device)
+                if params.label_dim > 0
+                else None
+            )
+            if params.use_apex_gn:
+                if not apex_available():
+                    raise ValueError(
+                        "'apex' is not installed, set `use_apex_gn=False`"
+                    )
+                x = x.to(memory_format=torch.channels_last)
 
-    @classmethod
-    def new_for_regression(cls) -> Self | None:
-        return cls._new_with_params(
-            img_resolution=16,
-            B=1,
-            in_channels=3,
-            out_channels=2,
-            label_dim=0,
-            model_channels=16,
-            channel_mult=[1, 2],
-            use_apex_gn=False,
-        )
+            return cls(
+                model=model,
+                x=x,
+                noise_labels=noise_labels,
+                class_labels=class_labels,
+                use_amp_bf16=params.use_amp_bf16,
+            )
 
-class SongUNetv2BenchmarkBf16(SongUNetv2Benchmark):
-    @classmethod
-    def new(cls) -> Self:
-        return cls._new_with_params(
-            img_resolution=64,
-            B=1,
-            in_channels=3,
-            out_channels=2,
-            label_dim=0,
-            model_channels=16,
-            channel_mult=[1, 2, 2, 2],
-            use_apex_gn=False,
-            use_amp_bf16=True,
-        )
+        @classmethod
+        def new(cls) -> "_SongUNetv2BenchmarkVariant":
+            return cls._build(new_params)
 
-    @classmethod
-    def new_for_regression(cls) -> Self | None:
-        return cls._new_with_params(
-            img_resolution=16,
-            B=1,
-            in_channels=3,
-            out_channels=2,
-            label_dim=0,
-            model_channels=16,
-            channel_mult=[1, 2],
-            use_apex_gn=False,
-            use_amp_bf16=True,
-        )
+        @classmethod
+        def new_for_regression(cls) -> "_SongUNetv2BenchmarkVariant | None":
+            if regression_params is None:
+                return None
+            return cls._build(regression_params)
+
+    return _SongUNetv2BenchmarkVariant
 
 
-class SongUNetv2BenchmarkApex(SongUNetv2Benchmark):
-    @classmethod
-    def new(cls) -> Self:
-        return cls._new_with_params(
-            img_resolution=512,
-            B=1,
-            in_channels=6,
-            out_channels=4,
-            label_dim=0,
-            model_channels=128, # min for apex gn
-            channel_mult=[1, 2, 2, 2],
-            use_apex_gn=True,
-        )
+SongUNetv2Benchmark = _make_song_unet_benchmark(
+    new_params=_SongUNetv2BenchmarkParams(
+        img_resolution=64,
+        in_channels=3,
+        out_channels=2,
+        label_dim=0,
+        model_channels=16,
+        channel_mult=[1, 2, 2, 2],
+    ),
+    regression_params=_SongUNetv2BenchmarkParams(
+        img_resolution=16,
+        in_channels=3,
+        out_channels=2,
+        label_dim=0,
+        model_channels=16,
+        channel_mult=[1, 2],
+    ),
+)
 
-    @classmethod
-    def new_for_regression(cls) -> Self | None:
-        return None
+SongUNetv2BenchmarkBf16 = _make_song_unet_benchmark(
+    new_params=_SongUNetv2BenchmarkParams(
+        img_resolution=64,
+        in_channels=3,
+        out_channels=2,
+        label_dim=0,
+        model_channels=16,
+        channel_mult=[1, 2, 2, 2],
+        use_amp_bf16=True,
+    ),
+    regression_params=_SongUNetv2BenchmarkParams(
+        img_resolution=16,
+        in_channels=3,
+        out_channels=2,
+        label_dim=0,
+        model_channels=16,
+        channel_mult=[1, 2],
+        use_amp_bf16=True,
+    ),
+)
 
+SongUNetv2BenchmarkApex = _make_song_unet_benchmark(
+    new_params=_SongUNetv2BenchmarkParams(
+        img_resolution=512,
+        in_channels=6,
+        out_channels=4,
+        label_dim=0,
+        model_channels=128,  # min for apex gn
+        channel_mult=[1, 2, 2, 2],
+        use_apex_gn=True,
+    ),
+    regression_params=None,
+)
 
-class SongUNetv2BenchmarkApexBf16(SongUNetv2Benchmark):
-    @classmethod
-    def new(cls) -> Self:
-        return cls._new_with_params(
-            img_resolution=512,
-            B=1,
-            in_channels=6,
-            out_channels=4,
-            label_dim=0,
-            model_channels=128, # min for apex gn
-            channel_mult=[1, 2, 2, 2],
-            use_apex_gn=True,
-            use_amp_bf16=True,
-        )
-
-    @classmethod
-    def new_for_regression(cls) -> Self | None:
-        return None
+SongUNetv2BenchmarkApexBf16 = _make_song_unet_benchmark(
+    new_params=_SongUNetv2BenchmarkParams(
+        img_resolution=512,
+        in_channels=6,
+        out_channels=4,
+        label_dim=0,
+        model_channels=128,  # min for apex gn
+        channel_mult=[1, 2, 2, 2],
+        use_apex_gn=True,
+        use_amp_bf16=True,
+    ),
+    regression_params=None,
+)
 
 
 register_benchmark("songunetv2")(SongUNetv2Benchmark)

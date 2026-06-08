@@ -10,6 +10,7 @@ from torch import nn
 
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
+from fme.core.corrector.state import CorrectorState
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
@@ -25,7 +26,6 @@ from fme.core.step.global_mean_removal import (
     GlobalMeanRemoval,
     GlobalMeanRemovalConfigUnion,
     NoGlobalMeanRemoval,
-    SharedGlobalMeanRemovalConfig,
 )
 from fme.core.step.secondary_decoder import (
     NoSecondaryDecoder,
@@ -33,6 +33,7 @@ from fme.core.step.secondary_decoder import (
     SecondaryDecoderConfig,
 )
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
+from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.var_masking import VariableMaskingConfig
 
@@ -96,15 +97,12 @@ class SingleModuleStepConfig(StepConfigABC):
         if self.global_mean_removal is not None:
             self.global_mean_removal.validate_names(self.in_names, self.out_names)
         if self.input_dropout is not None:
-            self.input_dropout.validate_variable_names(self.in_names)
-            if isinstance(self.global_mean_removal, SharedGlobalMeanRemovalConfig):
-                reference_field = self.global_mean_removal.reference_field
-                if self.input_dropout.can_mask(reference_field, self.in_names):
-                    raise ValueError(
-                        "input_dropout must not mask shared global_mean_removal "
-                        f"reference_field '{reference_field}'. Set its per_variable "
-                        "rate to 0.0 or list it in uniform.ignore_vars."
-                    )
+            gmr_extra_names = (
+                self.global_mean_removal.extra_channel_names(self.in_names)
+                if self.global_mean_removal is not None
+                else []
+            )
+            self.input_dropout.validate_variable_names(self.in_names + gmr_extra_names)
         for name in self.prescribed_prognostic_names:
             if name not in self.out_names:
                 raise ValueError(
@@ -387,22 +385,13 @@ class SingleModuleStep(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
-        """
-        Step the model forward one timestep given input data.
-
-        Args:
-            args: The arguments to the step function.
-            wrapper: Wrapper to apply over each nn.Module before calling.
-
-        Returns:
-            The denormalized output data at the next time step.
-        """
+    ) -> tuple[TensorDict, StepperState | None]:
         effective_mask = _build_effective_input_mask(
             data_mask=args.data_mask,
             input_dropout=self._config.input_dropout,
             training=self.module.torch_module.training,
             in_names=self.in_names,
+            extra_channel_names=self._global_mean_removal.extra_channel_names,
             input_data=args.input,
             n_ensemble=args.n_ensemble,
         )
@@ -452,7 +441,8 @@ class SingleModuleStep(StepABC):
             prognostic_names=self.prognostic_names,
             prescribed_prognostic_names=self._config.prescribed_prognostic_names,
             global_mean_removal=self._global_mean_removal,
-            data_mask=effective_mask if effective_mask else None,
+            data_mask=args.data_mask,
+            stepper_state=args.stepper_state,
         )
 
     def get_regularizer_loss(self):
@@ -490,6 +480,7 @@ def _build_effective_input_mask(
     input_dropout: VariableMaskingConfig | None,
     training: bool,
     in_names: list[str],
+    extra_channel_names: list[str],
     input_data: TensorMapping,
     n_ensemble: int,
 ) -> dict[str, torch.Tensor]:
@@ -504,7 +495,7 @@ def _build_effective_input_mask(
         raise ValueError("input_dropout requires at least one input tensor.") from err
 
     dropout_masks = input_dropout.sample_masks(
-        in_names,
+        in_names + extra_channel_names,
         ref.shape[0],
         n_ensemble,
         ref.device,
@@ -609,7 +600,8 @@ def step_with_adjustments(
     prescribed_prognostic_names: list[str] | None = None,
     global_mean_removal: GlobalMeanRemoval | None = None,
     data_mask: TensorMapping | None = None,
-) -> TensorDict:
+    stepper_state: StepperState | None = None,
+) -> tuple[TensorDict, StepperState | None]:
     """
     Step the model forward one timestep given input data.
 
@@ -638,9 +630,14 @@ def step_with_adjustments(
             so those adjustments operate in physical space.
         data_mask: Per-variable boolean masks passed to
             ``global_mean_removal.forward_transform``.
+        stepper_state: Per-sample state carried across step calls. The
+            corrector's slice (``stepper_state.corrector_state``) is passed to
+            the corrector and any updates are written back into a returned
+            ``StepperState``. Pass-through unchanged when no corrector is set.
 
     Returns:
-        The denormalized output data at the next time step.
+        A tuple ``(output, stepper_state)`` where ``output`` is the
+        denormalized data at the next time step.
     """
     if prescribed_prognostic_names is None:
         prescribed_prognostic_names = []
@@ -658,7 +655,14 @@ def step_with_adjustments(
     if global_mean_removal is not None:
         output = global_mean_removal.inverse_transform(output)
     if corrector is not None:
-        output = corrector(input, output, next_step_input_data)
+        corrector_state: CorrectorState | None = (
+            stepper_state.corrector_state if stepper_state is not None else None
+        )
+        output, corrector_state = corrector(
+            input, output, next_step_input_data, corrector_state
+        )
+        if corrector_state is not None:
+            stepper_state = StepperState(corrector_state=corrector_state)
     if ocean is not None:
         output = ocean(input, output, next_step_input_data)
     for name in prescribed_prognostic_names:
@@ -668,4 +672,4 @@ def step_with_adjustments(
             raise ValueError(
                 f"prescribed_prognostic_name '{name}' not in next_step_input_data"
             )
-    return output
+    return output, stepper_state

@@ -1,6 +1,7 @@
 from collections.abc import Callable
 
 from fme.core.labels import BatchLabels
+from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorMapping
 
 
@@ -23,6 +24,10 @@ class StepArgs:
             tensors where True means present and False means masked.
             Used for both loss weighting and network input masking.
             Training-time dropout is applied on top of this by the step.
+        stepper_state: Per-sample state carried across step calls (e.g.
+            corrector references seeded from the IC). ``None`` if no state
+            has been seeded yet. The step returns an updated stepper_state
+            alongside its output dict.
         n_ensemble: Number of ensemble members represented per original
             sample in the leading batch dimension.
     """
@@ -34,12 +39,14 @@ class StepArgs:
         n_ensemble: int,
         labels: BatchLabels | None = None,
         data_mask: TensorMapping | None = None,
+        stepper_state: StepperState | None = None,
     ):
         self.input = input
         self.next_step_input_data = next_step_input_data
         self.n_ensemble = n_ensemble
         self.labels = labels
         self.data_mask = data_mask
+        self.stepper_state = stepper_state
 
     def apply_input_process_func(
         self, func: Callable[[TensorMapping], TensorMapping]
@@ -52,4 +59,5 @@ class StepArgs:
             n_ensemble=self.n_ensemble,
             labels=self.labels,
             data_mask=self.data_mask,
+            stepper_state=self.stepper_state,
         )
