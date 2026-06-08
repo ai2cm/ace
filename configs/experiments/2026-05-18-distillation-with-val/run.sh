@@ -82,7 +82,7 @@ if [[ "$MOE_TEACHER" == "true" ]]; then
     JOB_NAME="${JOB_NAME}-moe-teacher"
 else
     # Default single-model teacher.
-    TEACHER_DATASET=01KNM6H3JB1ZNS76HX17AAZRF7
+    TEACHER_DATASET=01KNM6H3JB1ZNS76HX17AAZRF7:checkpoints
     TEACHER_CKPT_FLAG="--teacher-checkpoint /checkpoints/best_histogram_tail.ckpt"
 fi
 
@@ -100,7 +100,7 @@ gantry run \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset $TEACHER_DATASET:checkpoints:/checkpoints \
+    --dataset $TEACHER_DATASET:/checkpoints \
     --weka climate-default:/climate-default \
     --gpus $NGPU \
     --shared-memory 100GiB \
