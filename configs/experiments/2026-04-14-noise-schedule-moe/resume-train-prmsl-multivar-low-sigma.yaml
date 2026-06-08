@@ -31,15 +31,15 @@ model:
       bottleneck_attention: false
       model_channels: 128
       attn_resolutions: []
-      num_blocks: 1
-      channel_mult_emb: 6
+      num_blocks: 2
+      channel_mult_emb: 12
       channel_mult:
       - 1
       - 2
       - 2
       - 2
-      - 1
-      - 1
+      - 2
+      - 2
       use_apex_gn: true
     type: unet_diffusion_song_v2
   normalization:
@@ -146,7 +146,7 @@ validation_data:
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
 max_epochs: 200
-validate_interval: 20
+validate_interval: 10
 experiment_dir: /results
 save_checkpoints: false
 logging:
