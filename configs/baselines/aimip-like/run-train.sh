@@ -83,7 +83,23 @@ run_training() {
 # --- Wave 5: residual ablations on tend-reg 0.05, from-scratch 60ep (Jupiter, high) ---
 # 1) ERA5-only winds-anomaly control (no labels) to isolate the label effect
 # 2) labels + winds+temperature anomaly  3) labels + winds-anomaly + embed_dim 384  4) labels + winds-anomaly + aggressive rollout
-run_training "train-4deg-daily-v1-era5-only-residual-winds-anomaly-tend-reg.yaml" "train-4deg-daily-v1-era5-only-residual-winds-anomaly-tend-reg-rs0" 1 ai2/ace high ai2/jupiter
-run_training "train-4deg-daily-v1-labels-residual-winds-temp-anomaly-tend-reg.yaml" "train-4deg-daily-v1-labels-residual-winds-temp-anomaly-tend-reg-rs0" 1 ai2/ace high ai2/jupiter
-run_training "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-384.yaml" "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-384-rs0" 1 ai2/ace high ai2/jupiter
-run_training "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-rollout.yaml" "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-rollout-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-era5-only-residual-winds-anomaly-tend-reg.yaml" "train-4deg-daily-v1-era5-only-residual-winds-anomaly-tend-reg-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-labels-residual-winds-temp-anomaly-tend-reg.yaml" "train-4deg-daily-v1-labels-residual-winds-temp-anomaly-tend-reg-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-384.yaml" "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-384-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-rollout.yaml" "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-rollout-rs0" 1 ai2/ace high ai2/jupiter
+
+# --- Wave 6: relaunch of 92b1 + c1bc after epoch=None LR-tuning/loss-schedule fix (76dc6836d) (Jupiter, high) --- [running]
+# run_training "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg.yaml" "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-rs0-76dc" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-labels-residual-lr-tuning-rs1.yaml" "train-4deg-daily-v1-labels-residual-lr-tuning-rs1-76dc" 1 ai2/ace high ai2/jupiter
+
+# --- Wave 7: non-residual label-conditioned study + filter_num_groups=8 probe (Jupiter, high) ---
+# Does label-conditioning need residual once the recipe is modernized (lr-tuning + multistep rollout)?
+# 1-4) non-residual labels: multistep, aggressive rollout, embed_dim 384, seed-1 replicate
+# 5) labels + filter_num_groups 8 (1-step, vs finished labels-lr-tuning fg=1 baseline)
+# 6) era5-only (no labels) + filter_num_groups 8 (1-step), label-vs-not contrast at fg8
+run_training "train-4deg-daily-v1-labels-multistep.yaml" "train-4deg-daily-v1-labels-multistep-rs0" 1 ai2/ace high ai2/jupiter
+run_training "train-4deg-daily-v1-labels-rollout.yaml" "train-4deg-daily-v1-labels-rollout-rs0" 1 ai2/ace high ai2/jupiter
+run_training "train-4deg-daily-v1-labels-384-multistep.yaml" "train-4deg-daily-v1-labels-384-multistep-rs0" 1 ai2/ace high ai2/jupiter
+run_training "train-4deg-daily-v1-labels-multistep-rs1.yaml" "train-4deg-daily-v1-labels-multistep-rs1" 1 ai2/ace high ai2/jupiter
+run_training "train-4deg-daily-v1-labels-fg8.yaml" "train-4deg-daily-v1-labels-fg8-rs0" 1 ai2/ace high ai2/jupiter
+run_training "train-4deg-daily-v1-era5-only-fg8.yaml" "train-4deg-daily-v1-era5-only-fg8-rs0" 1 ai2/ace high ai2/jupiter
