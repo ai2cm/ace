@@ -771,8 +771,8 @@ class MeanMapAggregator:
 
     def _get_caption(self, key: str, name: str, vmin: float, vmax: float) -> str:
         if name in self._variable_metadata:
-            caption_name = self._variable_metadata[name].long_name
-            units = self._variable_metadata[name].units
+            caption_name = self._variable_metadata[name].display_long_name(name)
+            units = self._variable_metadata[name].display_units()
         else:
             caption_name, units = name, "unknown_units"
         caption = self._captions[key].format(name=caption_name, units=units)

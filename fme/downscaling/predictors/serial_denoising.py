@@ -1,4 +1,6 @@
 import dataclasses
+from collections.abc import Mapping
+from typing import Any
 
 import torch
 
@@ -146,11 +148,15 @@ class DenoisingMoEConfig:
         sigma_ranges = [
             (rc.sigma_min, rc.sigma_max) for rc in self.denoising_expert_configs
         ]
+        expert_renames = [
+            rc.checkpoint_config.rename for rc in self.denoising_expert_configs
+        ]
         return DenoisingMoEPredictor(
             experts=experts,
             sigma_ranges=sigma_ranges,
             num_diffusion_generation_steps=self.num_diffusion_generation_steps,
             churn=self.churn,
+            expert_renames=expert_renames,
         )
 
     @property
@@ -170,11 +176,14 @@ class DenoisingMoEPredictor:
         sigma_ranges: list[tuple[float, float]],
         num_diffusion_generation_steps: int,
         churn: float,
+        expert_renames: list[dict[str, str] | None] | None = None,
     ) -> None:
         if not experts:
             raise ValueError("experts must be non-empty.")
         if len(experts) != len(sigma_ranges):
             raise ValueError("experts and sigma_ranges must have the same length.")
+        if expert_renames is not None and len(expert_renames) != len(experts):
+            raise ValueError("expert_renames and experts must have the same length.")
         self._experts = experts
         self._primary = experts[0]
         self._sigma_ranges = sigma_ranges
@@ -183,6 +192,7 @@ class DenoisingMoEPredictor:
         self._sigma_schedule_max = sigma_ranges[-1][1]
         self._num_diffusion_generation_steps = num_diffusion_generation_steps
         self._churn = churn
+        self._expert_renames = expert_renames
         self._dispatch_module = _SigmaDispatchModule(
             sigma_ranges,
             [e.module for e in experts],
@@ -272,7 +282,99 @@ class DenoisingMoEPredictor:
         )
         targets = {k: v.unsqueeze(1) for k, v in targets.items()}
 
-        loss = self._primary.loss(generated_norm, targets_norm)
+        [loss_component] = self._primary.loss(generated_norm, targets_norm)
+        loss = loss_component.loss.mean()
         return ModelOutputs(
             prediction=generated, target=targets, loss=loss, latent_steps=latent_steps
+        )
+
+    def get_state(self) -> Mapping[str, Any]:
+        """Serialize to a single state dict reloadable via
+        ``DenoisingMoECheckpointConfig``.
+
+        Contains each expert's full ``DiffusionModel`` state plus the MoE-level
+        routing and sampler parameters and the per-expert rename mappings (from
+        the original ``CheckpointModelConfig``s) so the reloaded predictor
+        exposes the same runtime variable names.
+        """
+        return {
+            "experts": [expert.get_state() for expert in self._experts],
+            "sigma_ranges": [list(r) for r in self._sigma_ranges],
+            "num_diffusion_generation_steps": self._num_diffusion_generation_steps,
+            "churn": self._churn,
+            "expert_renames": self._expert_renames,
+        }
+
+    def save(self, path: str) -> None:
+        torch.save(self.get_state(), path)
+
+    @classmethod
+    def from_state(cls, state: Mapping[str, Any]) -> "DenoisingMoEPredictor":
+        expert_states = state["experts"]
+        expert_renames = state.get("expert_renames") or [None] * len(expert_states)
+        experts = [
+            DiffusionModel.from_state(s, rename=r)
+            for s, r in zip(expert_states, expert_renames, strict=True)
+        ]
+        sigma_ranges = [(float(lo), float(hi)) for lo, hi in state["sigma_ranges"]]
+        return cls(
+            experts=experts,
+            sigma_ranges=sigma_ranges,
+            num_diffusion_generation_steps=int(state["num_diffusion_generation_steps"]),
+            churn=float(state["churn"]),
+            expert_renames=list(expert_renames),
+        )
+
+
+@dataclasses.dataclass
+class DenoisingMoEBundledConfig:
+    """
+    Loads a ``DenoisingMoEPredictor`` from a single bundled checkpoint produced
+    by ``DenoisingMoEPredictor.save``. The bundle contains every expert's
+    weights and config plus the MoE-level sigma ranges and sampler parameters,
+    so no original per-expert checkpoint paths are required.
+
+    Parameters:
+        mixture_of_experts_path: Path to a bundle written by
+            ``DenoisingMoEPredictor.save``. Named distinctly from
+            ``CheckpointModelConfig.checkpoint_path`` so the two configs are
+            unambiguous when used as alternatives in a YAML model union.
+    """
+
+    mixture_of_experts_path: str
+
+    def __post_init__(self) -> None:
+        self._state_is_loaded = False
+        self._state: Mapping[str, Any] | None = None
+
+    @property
+    def _bundle(self) -> Mapping[str, Any]:
+        if not self._state_is_loaded:
+            self._state = torch.load(
+                self.mixture_of_experts_path,
+                map_location="cpu",
+                weights_only=False,
+            )
+            self._state_is_loaded = True
+        assert self._state is not None
+        return self._state
+
+    def build(self) -> "DenoisingMoEPredictor":
+        predictor = DenoisingMoEPredictor.from_state(self._bundle)
+        for expert in predictor._experts:
+            expert.module.eval()
+        return predictor
+
+    @property
+    def data_requirements(self) -> DataRequirements:
+        expert_config = self._bundle["experts"][0]["config"]
+        renames = self._bundle.get("expert_renames") or [None]
+        rename = renames[0] or {}
+        in_names = [rename.get(n, n) for n in expert_config["in_names"]]
+        out_names = [rename.get(n, n) for n in expert_config["out_names"]]
+        return DataRequirements(
+            fine_names=out_names,
+            coarse_names=list(set(in_names).union(out_names)),
+            n_timesteps=1,
+            use_fine_topography=expert_config["use_fine_topography"],
         )

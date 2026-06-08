@@ -16,6 +16,7 @@ from fme.core.constants import (
     SPECIFIC_HEAT_OF_SEA_WATER_CM4,
 )
 from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
+from fme.core.corrector.state import CorrectorState
 from fme.core.corrector.utils import force_positive
 from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import GriddedOperations
@@ -195,7 +196,8 @@ class OceanCorrector(CorrectorABC):
         input_data: TensorMapping,
         gen_data: TensorMapping,
         forcing_data: TensorMapping,
-    ) -> TensorDict:
+        corrector_state: CorrectorState | None,
+    ) -> tuple[TensorDict, CorrectorState | None]:
         if len(self._config.force_positive_names) > 0:
             gen_data = force_positive(gen_data, self._config.force_positive_names)
         if self._config.sea_ice_fraction_correction is not None:
@@ -223,7 +225,7 @@ class OceanCorrector(CorrectorABC):
                 self._config.ocean_heat_content_correction.method,
                 self._config.ocean_heat_content_correction.constant_unaccounted_heating,
             )
-        return dict(gen_data)
+        return dict(gen_data), corrector_state
 
 
 def _compute_ocean_net_surface_energy_flux(

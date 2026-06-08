@@ -42,7 +42,6 @@ from .data_loading.data_typing import (
     CoupledHorizontalCoordinates,
     CoupledVerticalCoordinate,
 )
-from .loss import LossContributionsConfig
 from .stepper import (
     ComponentConfig,
     ComponentTrainingConfig,
@@ -670,11 +669,11 @@ def test_component_n_steps_max_with_explicit_int_and_sampler():
         n_coupled_steps=4,
         ocean=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
-            loss_contributions=LossContributionsConfig(n_steps=3),
+            n_steps=3,
         ),
         atmosphere=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
-            loss_contributions=LossContributionsConfig(n_steps=sampler),
+            n_steps=sampler,
         ),
     )
     assert config.component_n_steps_max.ocean == 3
@@ -902,7 +901,7 @@ def test_get_train_window_data_requirements_name_partition(
         ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
         atmosphere=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
-            loss_contributions=LossContributionsConfig(n_steps=1),
+            n_steps=1,
         ),
     )
     requirements = train_config.get_train_window_data_requirements(stepper_config)
@@ -932,7 +931,7 @@ def test_get_train_window_data_requirements_bounded_atmos_n_steps():
         ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
         atmosphere=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
-            loss_contributions=LossContributionsConfig(n_steps=atmos_n_steps_max),
+            n_steps=atmos_n_steps_max,
         ),
     )
     requirements = train_config.get_train_window_data_requirements(stepper_config)
@@ -981,11 +980,11 @@ def test_get_train_window_data_requirements_zero_atmos_n_steps():
         n_coupled_steps=n_coupled_steps,
         ocean=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
-            loss_contributions=LossContributionsConfig(n_steps=1),
+            n_steps=1,
         ),
         atmosphere=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
-            loss_contributions=LossContributionsConfig(n_steps=0),
+            n_steps=0,
         ),
     )
     requirements = train_config.get_train_window_data_requirements(stepper_config)
@@ -1021,7 +1020,7 @@ def test_train_on_batch_invariant_to_target_nan_padding_beyond_loss_horizon():
         ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
         atmosphere=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
-            loss_contributions=LossContributionsConfig(n_steps=atmos_n_steps_max),
+            n_steps=atmos_n_steps_max,
         ),
     )
     full_train_stepper = train_stepper_config.get_train_stepper(
@@ -1114,7 +1113,7 @@ def test_get_train_window_data_requirements_with_sampler():
         ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
         atmosphere=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
-            loss_contributions=LossContributionsConfig(n_steps=sampler),
+            n_steps=sampler,
         ),
     )
     requirements = train_config.get_train_window_data_requirements(stepper_config)
@@ -1953,15 +1952,11 @@ def test_train_on_batch_optimize_last_step_only(optimize_last_step_only: bool):
         n_coupled_steps=2,
         ocean=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
-            loss_contributions=LossContributionsConfig(
-                optimize_last_step_only=optimize_last_step_only,
-            ),
+            optimize_last_step_only=optimize_last_step_only,
         ),
         atmosphere=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
-            loss_contributions=LossContributionsConfig(
-                optimize_last_step_only=optimize_last_step_only,
-            ),
+            optimize_last_step_only=optimize_last_step_only,
         ),
     )
     train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(
@@ -2004,17 +1999,13 @@ def test_train_on_batch_optimize_last_step_only_with_n_steps(
         n_coupled_steps=2,
         ocean=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
-            loss_contributions=LossContributionsConfig(
-                n_steps=ocean_n_steps,
-                optimize_last_step_only=optimize_last_step_only,
-            ),
+            n_steps=ocean_n_steps,
+            optimize_last_step_only=optimize_last_step_only,
         ),
         atmosphere=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
-            loss_contributions=LossContributionsConfig(
-                n_steps=atmos_n_steps,
-                optimize_last_step_only=optimize_last_step_only,
-            ),
+            n_steps=atmos_n_steps,
+            optimize_last_step_only=optimize_last_step_only,
         ),
     )
     train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(
@@ -2065,11 +2056,11 @@ def test_train_on_batch_stochastic_n_steps():
         n_coupled_steps=1,
         ocean=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
-            loss_contributions=LossContributionsConfig(n_steps=ocean_sampler),
+            n_steps=ocean_sampler,
         ),
         atmosphere=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
-            loss_contributions=LossContributionsConfig(n_steps=atmos_sampler),
+            n_steps=atmos_sampler,
         ),
     )
     train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(

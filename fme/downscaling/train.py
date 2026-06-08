@@ -3,7 +3,6 @@ import contextlib
 import dataclasses
 import logging
 import os
-import re
 import shutil
 import time
 import uuid
@@ -142,9 +141,9 @@ class Trainer:
                 self.config.checkpoint_dir, "best_histogram_tail.ckpt"
             )
 
-        self._best_valid_loss_name = "generation/metrics/relative_crps_bicubic"
+        self._best_valid_loss_name = "metrics/relative_crps_bicubic"
         self._best_histogram_tail_name = (
-            "generation/histogram/prediction_frac_of_target/99.9999th-percentile"
+            "histogram/prediction_frac_of_target/99.9999th-percentile"
         )
 
     def _get_batch_generator(
@@ -261,6 +260,8 @@ class Trainer:
                 self.model.downscale_factor,
                 percentiles=[99.99, 99.9999],
                 include_positional_comparisons=include_positional_comparisons,
+                histogram_ckpt_selection_metric=self._best_histogram_tail_name,
+                best_ckpt_selection_metric=self._best_valid_loss_name,
             )
             batch: PairedBatchData
             validation_batch_generator = self._get_batch_generator(
@@ -296,13 +297,9 @@ class Trainer:
             {**generation_metrics, **validation_metrics},
             self.num_batches_seen,
         )
-        channel_mean_checkpoint_metrics = {
-            prefix: _get_channel_mean_scalar_metric(generation_metrics, prefix)
-            for prefix in [
-                self._best_valid_loss_name,
-                self._best_histogram_tail_name,
-            ]
-        }
+        channel_mean_checkpoint_metrics = (
+            generation_aggregator.get_checkpoint_selection_metrics()
+        )
         return channel_mean_checkpoint_metrics
 
     @property
@@ -329,14 +326,10 @@ class Trainer:
                     "best checkpoint."
                 )
         if self.best_histogram_tail_checkpoint_path is not None:
-            if (
-                valid_metrics[self._best_histogram_tail_name]
-                < self.best_histogram_tail_metric
-            ):
+            histogram_tail_metric = valid_metrics[self._best_histogram_tail_name]
+            if histogram_tail_metric < self.best_histogram_tail_metric:
                 logging.info("Saving checkpoint for best histogram tail.")
-                self.best_histogram_tail_metric = valid_metrics[
-                    self._best_histogram_tail_name
-                ]
+                self.best_histogram_tail_metric = histogram_tail_metric
                 with best_checkpoint_context():
                     _save_checkpoint(self, self.best_histogram_tail_checkpoint_path)
             else:
@@ -516,52 +509,6 @@ class TrainerConfig:
         self.logging.configure_logging(
             self.experiment_dir, log_filename, config=config, resumable=True
         )
-
-
-def _get_complement_percentile_prefix(prefix):
-    """
-    Given a prefix containing a percentile value, return a prefix with
-    100 minus that percentile. Returns None if no percentile pattern is found.
-    Ex. "prediction_frac_of_target/99.9999th-percentile"
-        -> "prediction_frac_of_target/0.0001th-percentile", or
-        "some_var/percentile/99.9999" -> "some_var/percentile/0.0001".
-    """
-    match = re.search(
-        r"(\d+(?:\.\d+)?)(?:th)?[-_/]percentile|percentile[-_/](\d+(?:\.\d+)?)",
-        prefix,
-    )
-    if match is None:
-        return None
-    if match.group(1) is not None:
-        num_str = match.group(1)
-        num_start, num_end = match.start(1), match.end(1)
-    else:
-        num_str = match.group(2)
-        num_start, num_end = match.start(2), match.end(2)
-    complement = 100 - float(num_str)
-    if "." in num_str:
-        decimal_places = len(num_str.split(".")[1])
-        complement_str = f"{complement:.{decimal_places}f}"
-    else:
-        complement_str = str(int(complement))
-    return prefix[:num_start] + complement_str + prefix[num_end:]
-
-
-def _get_channel_mean_scalar_metric(
-    metrics, prefix="generation/metrics/relative_crps_bicubic"
-):
-    prefixes = [prefix]
-    if "percentile" in prefix:
-        complement = _get_complement_percentile_prefix(prefix)
-        if complement is not None and complement != prefix:
-            prefixes.append(complement)
-    channel_metric = [
-        v for k, v in metrics.items() if any(k.startswith(p) for p in prefixes)
-    ]
-    if len(channel_metric) == 0:
-        return float("inf")
-    else:
-        return sum(channel_metric) / len(channel_metric)
 
 
 def _resume_from_results_dir_if_not_preempted(experiment_dir, resume_results_dir):
