@@ -54,7 +54,7 @@ from fme.ace.testing import (
     MonthlyReferenceData,
     patch_cm4_solar_constant,
     save_nd_netcdf,
-    save_scalar_netcdf,
+    save_stats_netcdfs,
     save_stepper_checkpoint,
 )
 from fme.ace.train.train import build_trainer, prepare_directory
@@ -488,7 +488,6 @@ def _setup(
     derived_forcings=None,
     use_schedule: bool = False,
     validate_using_ema: bool = False,
-    stats_std_fill_value: float | None = None,
     multi_validation: bool = False,
     use_variable_masking: bool = False,
 ):
@@ -553,14 +552,10 @@ def _setup(
             variable_names=partial_names,
             timestep_days=timestep_days,
         )
-    save_scalar_netcdf(
+    save_stats_netcdfs(
         stats_dir / "stats-mean.nc",
-        variable_names=all_variable_names,
-    )
-    save_scalar_netcdf(
         stats_dir / "stats-stddev.nc",
         variable_names=all_variable_names,
-        fill_value=stats_std_fill_value,
     )
 
     monthly_dim_sizes: DimSizes
@@ -1132,7 +1127,6 @@ def test_train_and_inference_with_derived_forcings(
         crps_training=crps_training,
         log_validation_maps=log_validation_maps,
         derived_forcings=derived_forcings,
-        stats_std_fill_value=1.0,
     )
     with patch_cm4_solar_constant(1.0):
         with mock_wandb() as wandb:

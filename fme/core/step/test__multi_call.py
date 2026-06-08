@@ -32,7 +32,8 @@ TEST_CONFIG = MultiCallConfig(
 
 
 def _step(args: StepArgs, wrapper: Callable[[nn.Module], nn.Module] = lambda x: x):
-    return {k: args.input["CO2"].detach().clone() for k in TEST_CONFIG.output_names}
+    output = {k: args.input["CO2"].detach().clone() for k in TEST_CONFIG.output_names}
+    return output, args.stepper_state
 
 
 def test_multi_call_names():
@@ -56,7 +57,7 @@ def test_multi_call():
     initial_condition = {"temperature": torch.ones(shape)}
     co2_data = {"CO2": torch.full(shape, co2_value)}
 
-    output = multi_call.step(
+    output, _ = multi_call.step(
         args=StepArgs(
             input=initial_condition | co2_data,
             next_step_input_data={},

@@ -25,6 +25,7 @@ from fme.core.registry import CorrectorSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.single_module import step_with_adjustments
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
+from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorDict, TensorMapping
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
@@ -328,6 +329,10 @@ class FCN3StepConfig(StepConfigABC):
     def load(self):
         self.normalization.load()
 
+    @property
+    def allow_missing_variables(self) -> bool:
+        return False
+
 
 class FCN3Step(StepABC):
     """
@@ -439,17 +444,7 @@ class FCN3Step(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
-        """
-        Step the model forward one timestep given input data.
-
-        Args:
-            args: The arguments to the step function.
-            wrapper: Wrapper to apply over each nn.Module before calling.
-
-        Returns:
-            The denormalized output data at the next time step.
-        """
+    ) -> tuple[TensorDict, StepperState | None]:
         if args.labels is not None:
             raise ValueError("Labels are not supported for FCN3")
 
@@ -485,6 +480,7 @@ class FCN3Step(StepABC):
             residual_prediction=self._config.residual_prediction,
             prognostic_names=self.prognostic_names,
             prescribed_prognostic_names=self._config.prescribed_prognostic_names,
+            stepper_state=args.stepper_state,
         )
 
     def get_regularizer_loss(self):
