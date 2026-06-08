@@ -9,8 +9,8 @@ from fme.downscaling.data.utils import (
     find_roll_anchor,
     find_roll_anchor_from_interval,
     paired_shuffle,
-    roll_data_lon_dim,
     roll_lon_coords,
+    roll_lon_data,
     scale_slice,
 )
 
@@ -113,6 +113,19 @@ def test_roll_lon_coords_already_rolled_same_anchor_is_noop():
     assert torch.equal(roll_lon_coords(rolled, roll2, anchor), rolled)
 
 
+@pytest.mark.parametrize(
+    "coords, match",
+    [
+        (torch.tensor([]), "empty"),
+        (torch.zeros(4, 4), "1-D"),
+        (torch.tensor([1.0, 0.5, 2.0]), "strictly increasing"),
+    ],
+)
+def test_find_roll_anchor_rejects_invalid_coords(coords, match):
+    with pytest.raises(ValueError, match=match):
+        find_roll_anchor(coords, 0.0)
+
+
 def test_roll_lon_coords_rejects_non_global_grid():
     """A regional grid that does not reach the 360° wrap point cannot be rolled."""
     # 1-degree grid covering only 0–180°; wrap gap is ~181°, not the 1° spacing.
@@ -133,7 +146,7 @@ def test_roll_lon_data_shifts_correctly():
     n = 8
     tensor = torch.arange(n, dtype=torch.float).unsqueeze(0)  # shape (1, 8)
     roll_amount = 3
-    rolled = roll_data_lon_dim(tensor, roll_amount, lon_dim=-1)
+    rolled = roll_lon_data(tensor, roll_amount, lon_dim=-1)
     assert rolled.shape == tensor.shape
     assert rolled[0, 0].item() == pytest.approx(3.0)  # original index 3 → 0
     assert rolled[0, -1].item() == pytest.approx(2.0)  # original index 2 → last
@@ -141,7 +154,7 @@ def test_roll_lon_data_shifts_correctly():
 
 def test_roll_lon_data_zero_roll_returns_original():
     tensor = torch.randn(4, 8)
-    result = roll_data_lon_dim(tensor, 0)
+    result = roll_lon_data(tensor, 0)
     assert torch.equal(result, tensor)
 
 
