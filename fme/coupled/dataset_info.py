@@ -1,7 +1,7 @@
 from typing import Any, Literal
 
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
-from fme.core.masking import HasGetMaskTensorFor
+from fme.core.spatial_masking import HasGetSpatialMask
 from fme.coupled.data_loading.data_typing import CoupledHorizontalCoordinates
 
 
@@ -24,22 +24,22 @@ class CoupledDatasetInfo:
         self.atmosphere = atmosphere
 
     @property
-    def ocean_mask_provider(self) -> HasGetMaskTensorFor:
+    def ocean_spatial_mask_provider(self) -> HasGetSpatialMask:
         if self.ocean is not None:
             try:
-                return self.ocean.mask_provider
+                return self.ocean.spatial_mask_provider
             except MissingDatasetInfo as err:
-                raise MissingCoupledDatasetInfo("ocean_mask_provider") from err
+                raise MissingCoupledDatasetInfo("ocean_spatial_mask_provider") from err
         else:
             return None
         
     @property
-    def ice_mask_provider(self) -> HasGetMaskTensorFor:
+    def ice_spatial_mask_provider(self) -> HasGetSpatialMask:
         if self.ice is not None:
             try:
-                return self.ice.mask_provider
+                return self.ice.spatial_mask_provider
             except MissingDatasetInfo as err:
-                raise MissingCoupledDatasetInfo("ice_mask_provider") from err
+                raise MissingCoupledDatasetInfo("ice_spatial_mask_provider") from err
         else:
             return None
 

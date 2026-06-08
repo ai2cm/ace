@@ -12,57 +12,126 @@ import fme
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.distributed import Distributed
-from fme.core.generics.trainer import AggregatorBuilderABC, Trainer, inference_one_epoch
-from fme.core.generics.validation import run_validation
+from fme.core.ema import EMATracker
+from fme.core.generics.data import GriddedDataABC
+from fme.core.generics.lr_tuning import ValidateStepper
+from fme.core.generics.train_stepper import TrainStepperABC
+from fme.core.generics.trainer import (
+    AggregatorBuilderABC,
+    InferenceCallback,
+    Trainer,
+    inference_one_epoch,
+)
+from fme.core.generics.validation import run_validation, run_validation_loop
 from fme.coupled.aggregator import OneStepAggregator, TrainAggregator
+from fme.coupled.data_loading.gridded_data import InferenceGriddedData
 from fme.coupled.dataset_info import CoupledDatasetInfo
-from fme.coupled.stepper import CoupledTrainOutput
-from fme.coupled.train.train_config import TrainBuilders, TrainConfig
+from fme.coupled.stepper import CoupledTrainOutput, CoupledTrainStepper
+from fme.coupled.train.train_config import (
+    InlineInferenceConfig,
+    InlineValidationConfig,
+    TrainBuilders,
+    TrainConfig,
+)
 from fme.coupled.typing_ import CoupledTensorMapping
 
 
-def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
-    logging.info("Initializing training data loader")
-    train_data = builder.get_train_data()
-    logging.info("Initializing validation data loader")
-    validation_data = builder.get_validation_data()
-
-    variable_metadata = get_derived_variable_metadata() | train_data.variable_metadata
-    dataset_info = train_data.dataset_info.update_variable_metadata(variable_metadata)
-    for data, name in zip((train_data, validation_data), ("train", "valid")):
-        data.log_info(name)
-
-    if config.inference_list:
-        logging.info("Initializing inline inference data loaders")
-    else:
-        logging.info("Skipping inline inference")
-    inference_entries = builder.get_inference_data()
-    inference_epochs = config.get_inference_epochs()
-    inference_epoch_sets = config.get_inference_epoch_sets()
-
-    logging.info("Starting model initialization")
-    stepper = builder.get_stepper(train_data.dataset_info)
-    end_of_batch_ops = builder.get_end_of_batch_ops(stepper.modules)
-
-    aggregator_builder = CoupledAggregatorBuilder(
-        dataset_info=dataset_info,
-        loss_scaling=stepper.effective_loss_scaling,
-        save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
-        output_dir=config.output_dir,
-    )
-
+def get_validation_callback(
+    validation_entries: Sequence[tuple[InlineValidationConfig, GriddedDataABC, str]],
+    stepper: TrainStepperABC,
+    dataset_info: CoupledDatasetInfo,
+    loss_scaling: CoupledTensorMapping,
+    save_per_epoch_diagnostics: bool,
+    output_dir: str,
+):
     def validation_callback(epoch: int) -> tuple[dict[str, Any], float]:
-        validation_data.set_epoch(epoch)
-        aggregator = aggregator_builder.get_validation_aggregator()
-        logs = run_validation(
-            train_stepper=stepper,
-            validation_data=validation_data,
-            aggregator=aggregator,
-            diagnostics_subdir=f"epoch_{epoch:04d}",
-            record_logs=lambda logs: None,
-        )
-        return logs, logs["val/mean/loss"]
+        all_logs: dict[str, Any] = {}
+        weighted_loss = 0.0
+        for entry_config, data, name in validation_entries:
+            data.set_epoch(epoch)
+            aggregator = OneStepAggregator(
+                dataset_info=dataset_info,
+                save_diagnostics=save_per_epoch_diagnostics,
+                output_dir=os.path.join(output_dir, name),
+                loss_scaling=loss_scaling,
+            )
+            logs = run_validation(
+                train_stepper=stepper,
+                validation_data=data,
+                aggregator=aggregator,
+                label=name,
+                diagnostics_subdir=f"epoch_{epoch:04d}",
+                record_logs=lambda logs: None,
+            )
+            overlap = all_logs.keys() & logs.keys()
+            if overlap:
+                raise RuntimeError(
+                    f"Validation entry {name!r} produced log keys that "
+                    f"overlap with earlier entries: {sorted(overlap)}"
+                )
+            all_logs.update(logs)
+            if entry_config.weight > 0:
+                metric_key = f"{name}/mean/loss"
+                loss = logs.get(metric_key)
+                if loss is None:
+                    raise RuntimeError(
+                        f"Validation entry {name!r} with "
+                        f"weight={entry_config.weight} did not produce "
+                        f"expected metric key {metric_key!r}."
+                    )
+                weighted_loss += entry_config.weight * loss
+        return all_logs, weighted_loss
 
+    return validation_callback
+
+
+def get_validate_stepper_callback(
+    validation_entries: Sequence[tuple[InlineValidationConfig, GriddedDataABC, str]],
+    dataset_info: CoupledDatasetInfo,
+    loss_scaling: CoupledTensorMapping,
+    validate_using_ema: bool,
+) -> ValidateStepper:
+    # LR tuning passes trial stepper/EMA instances distinct from the Trainer's
+    # own stepper, so this callback manages its own EMA via run_validation_loop
+    # rather than relying on the Trainer's validation_context().
+    def validate_stepper(stepper: TrainStepperABC, ema: EMATracker) -> float:
+        weighted_loss = 0.0
+        for entry_config, data, name in validation_entries:
+            aggregator = OneStepAggregator(
+                dataset_info=dataset_info,
+                save_diagnostics=False,
+                output_dir="",
+                loss_scaling=loss_scaling,
+            )
+            run_validation_loop(
+                stepper=stepper,
+                valid_data=data,
+                aggregator=aggregator,
+                ema=ema,
+                validate_using_ema=validate_using_ema,
+            )
+            logs = aggregator.get_logs(label=name)
+            if entry_config.weight > 0:
+                metric_key = f"{name}/mean/loss"
+                loss = logs.get(metric_key)
+                if loss is not None:
+                    weighted_loss += entry_config.weight * loss
+        return weighted_loss
+
+    return validate_stepper
+
+
+def get_inference_callback(
+    inference_entries: Sequence[
+        tuple[InlineInferenceConfig, InferenceGriddedData, str]
+    ],
+    inference_epochs: Sequence[int],
+    inference_epoch_sets: Sequence[set[int]],
+    stepper: CoupledTrainStepper,
+    dataset_info: CoupledDatasetInfo,
+    output_dir: str,
+    save_per_epoch_diagnostics: bool,
+) -> InferenceCallback:
     def inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
         if epoch not in inference_epochs:
             return {}, None
@@ -106,8 +175,8 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
                 ocean_normalize=ocean_norm,
                 atmosphere_normalize=atmosphere_norm,
                 ice_normalize=ice_norm,
-                save_diagnostics=config.save_per_epoch_diagnostics,
-                output_dir=os.path.join(config.output_dir, name),
+                save_diagnostics=save_per_epoch_diagnostics,
+                output_dir=os.path.join(output_dir, name),
             )
             logs = inference_one_epoch(
                 stepper=stepper,
@@ -122,12 +191,77 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
             if error is not None:
                 weighted_error += entry_config.weight * error
                 has_error = True
-
         return all_logs, weighted_error if has_error else None
+
+    return inference_callback
+
+
+def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
+    logging.info("Initializing training data loader")
+    train_data = builder.get_train_data()
+
+    variable_metadata = get_derived_variable_metadata() | train_data.variable_metadata
+    dataset_info = train_data.dataset_info.update_variable_metadata(variable_metadata)
+
+    logging.info("Initializing validation data loaders")
+    validation_entries = builder.get_validation_data()
+
+    for data, name in zip(
+        [train_data] + [data for _, data, _ in validation_entries],
+        ["train"] + [name for _, _, name in validation_entries],
+    ):
+        data.log_info(name)
+
+    if config.inference_list:
+        logging.info("Initializing inline inference data loaders")
+    else:
+        logging.info("Skipping inline inference")
+    inference_entries = builder.get_inference_data()
+    inference_epochs = config.get_inference_epochs()
+    inference_epoch_sets = config.get_inference_epoch_sets()
+
+    logging.info("Starting model initialization")
+    stepper = builder.get_stepper(train_data.dataset_info)
+    end_of_batch_ops = builder.get_end_of_batch_ops(stepper.modules)
+
+    loss_scaling = stepper.effective_loss_scaling
+    aggregator_builder = CoupledAggregatorBuilder(
+        dataset_info=dataset_info,
+        loss_scaling=loss_scaling,
+        save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
+        output_dir=config.output_dir,
+    )
+
+    validation_callback = get_validation_callback(
+        validation_entries=validation_entries,
+        stepper=stepper,
+        dataset_info=dataset_info,
+        loss_scaling=loss_scaling,
+        save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
+        output_dir=config.output_dir,
+    )
+
+    validate_stepper: ValidateStepper | None = None
+    if config.lr_tuning is not None:
+        validate_stepper = get_validate_stepper_callback(
+            validation_entries=validation_entries,
+            dataset_info=dataset_info,
+            loss_scaling=loss_scaling,
+            validate_using_ema=config.validate_using_ema,
+        )
+
+    inference_callback = get_inference_callback(
+        inference_entries=inference_entries,
+        inference_epochs=inference_epochs,
+        inference_epoch_sets=inference_epoch_sets,
+        stepper=stepper,
+        dataset_info=dataset_info,
+        output_dir=config.output_dir,
+        save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
+    )
 
     return Trainer(
         train_data=train_data,
-        validation_data=validation_data,
         stepper=stepper,
         build_optimization=builder.get_optimization,
         build_ema=builder.get_ema,
@@ -136,6 +270,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
         validation_callback=validation_callback,
         end_of_batch_callback=end_of_batch_ops,
         inference_callback=inference_callback,
+        validate_stepper=validate_stepper,
     )
 
 
@@ -156,14 +291,6 @@ class CoupledAggregatorBuilder(
 
     def get_train_aggregator(self) -> TrainAggregator:
         return TrainAggregator()
-
-    def get_validation_aggregator(self) -> OneStepAggregator:
-        return OneStepAggregator(
-            dataset_info=self.dataset_info,
-            save_diagnostics=self.save_per_epoch_diagnostics,
-            output_dir=os.path.join(self.output_dir, "val"),
-            loss_scaling=self.loss_scaling,
-        )
 
 
 def run_train(builders: TrainBuilders, config: TrainConfig):

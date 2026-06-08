@@ -47,7 +47,7 @@ class DeterministicModelConfig:
         orig_in_names = [invert_rename.get(name, name) for name in self.in_names]
         orig_out_names = [invert_rename.get(name, name) for name in self.out_names]
         normalizer = self.normalization.build(orig_in_names, orig_out_names, rename)
-        loss = self.loss.build(reduction="mean", gridded_operations=None)
+        loss = self.loss.build(gridded_operations=None)
         n_in_channels = len(self.in_names)
 
         if self.use_fine_topography:
@@ -184,7 +184,8 @@ class DeterministicModel:
             self.normalizer.fine.normalize(dict(fine)), axis=self._channel_axis
         )
         predicted_norm = self.module(coarse_norm)
-        loss = self.loss(predicted_norm, targets_norm)
+        [loss_component] = self.loss(predicted_norm, targets_norm)
+        loss = loss_component.loss.mean()
         optimizer.accumulate_loss(loss)
         optimizer.step_weights()
         target = filter_tensor_mapping(fine, set(self.out_packer.names))

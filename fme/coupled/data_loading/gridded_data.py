@@ -86,7 +86,7 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
             ocean = DatasetInfo(
                 horizontal_coordinates=self._ocean.horizontal_coordinates,
                 vertical_coordinate=self._ocean.vertical_coordinate,
-                mask_provider=self._ocean.mask_provider,
+                spatial_mask_provider=self._ocean.spatial_mask_provider,
                 timestep=self._ocean.timestep,
                 variable_metadata=self._properties.variable_metadata,
             )
@@ -94,7 +94,7 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
             atmosphere = DatasetInfo(
                 horizontal_coordinates=self._atmosphere.horizontal_coordinates,
                 vertical_coordinate=self._atmosphere.vertical_coordinate,
-                mask_provider=self._atmosphere.mask_provider,
+                spatial_mask_provider=self._atmosphere.spatial_mask_provider,
                 timestep=self._atmosphere.timestep,
                 variable_metadata=self._properties.variable_metadata,
             )
@@ -261,21 +261,21 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
             ocean = DatasetInfo(
                 horizontal_coordinates=self._properties.ocean.horizontal_coordinates,
                 vertical_coordinate=self._properties.ocean.vertical_coordinate,
-                mask_provider=self._properties.ocean.mask_provider,
+                spatial_mask_provider=self._properties.ocean.spatial_mask_provider,
                 timestep=self.ocean_timestep,
             )
         if self._properties.atmosphere is not None:
             atmosphere = DatasetInfo(
                 horizontal_coordinates=self._properties.atmosphere.horizontal_coordinates,
                 vertical_coordinate=self._properties.atmosphere.vertical_coordinate,
-                mask_provider=self._properties.atmosphere.mask_provider,
+                spatial_mask_provider=self._properties.atmosphere.spatial_mask_provider,
                 timestep=self.atmosphere_timestep,
             )
         if self._properties.ice is not None:
             ice = DatasetInfo(
                 horizontal_coordinates=self._properties.ice.horizontal_coordinates,
                 vertical_coordinate=self._properties.ice.vertical_coordinate,
-                mask_provider=self._properties.ice.mask_provider,
+                spatial_mask_provider=self._properties.ice.spatial_mask_provider,
                 timestep=self.ice_timestep,
             )
         return CoupledDatasetInfo(ocean=ocean, atmosphere=atmosphere, ice=ice)

@@ -59,6 +59,7 @@ from fme.coupled.loss import LossContributionsConfig, StepLossABC, StepPredictio
 from fme.coupled.requirements import (
     CoupledDataRequirements,
     CoupledPrognosticStateDataRequirements,
+    CoupledTrainDataRequirements,
 )
 from fme.coupled.typing_ import CoupledNames, CoupledOptionalInt, CoupledTensorMapping
 
@@ -1644,8 +1645,8 @@ class CoupledStepper:
         self.atmosphere = atmosphere
         self._config = config
         self._dataset_info = dataset_info
-        self._ocean_mask_provider = dataset_info.ocean_mask_provider
-        self._ice_mask_provider = dataset_info.ice_mask_provider
+        self._ocean_spatial_mask_provider = dataset_info.ocean_spatial_mask_provider
+        self._ice_spatial_mask_provider = dataset_info.ice_spatial_mask_provider
         _: PredictFunction[  # for type checking
             CoupledPrognosticState,
             CoupledBatchData,
@@ -1859,7 +1860,7 @@ class CoupledStepper:
                 )
         for name, tensor in forcings_from_ocean.items():
             # set ocean invalid points to 0 based on the ocean masking
-            mask = self._ocean_mask_provider.get_mask_tensor_for(name)
+            mask = self._ocean_spatial_mask_provider.get_mask_tensor_for(name)
             if mask is not None:
                 mask = mask.expand(tensor.shape)
                 forcings_from_ocean[name] = tensor.where(mask != 0, 0)
@@ -3135,6 +3136,18 @@ class CoupledStepperTrainLoss:
         for loss_obj in self._loss_objs.values():
             loss_obj.sample_n_steps()
 
+    def seed_step_sampler(self, seed: int) -> None:
+        for i, loss_obj in enumerate(self._loss_objs.values()):
+            loss_obj.seed_rng(seed + i)
+
+    def set_train(self) -> None:
+        for loss_obj in self._loss_objs.values():
+            loss_obj.set_train()
+
+    def set_eval(self) -> None:
+        for loss_obj in self._loss_objs.values():
+            loss_obj.set_eval()
+
     def n_required_outer_steps(self, n_inner_steps: int) -> int:
         """Minimum number of outer (ocean) steps needed so that every
         component step contributing to the current batch's loss is computed.
@@ -3171,6 +3184,13 @@ class CoupledStepperTrainLoss:
         step: int,
     ) -> bool:
         return self._loss_objs[realm].step_is_optimized(step)
+
+    def compute_loss(
+        self,
+        prediction: ComponentEnsembleStepPrediction,
+        target_data: TensorMapping,
+    ) -> torch.Tensor:
+        return self._loss_objs[prediction.realm].compute_loss(prediction, target_data)
 
     def __call__(
         self,
@@ -3300,6 +3320,54 @@ class CoupledTrainStepperConfig:
             ocean=ocean_nsteps,
             atmosphere=atmos_nsteps,
             ice=ice_nsteps,
+        )
+
+    def get_train_window_data_requirements(
+        self,
+        stepper_config: CoupledStepperConfig,
+    ) -> CoupledTrainDataRequirements:
+        """Data requirements for the coupled training loader.
+
+        Atmosphere target variables are loaded for the loss horizon plus the
+        initial condition timestep; atmosphere forcing variables are loaded
+        for the full rollout. Beyond the target horizon, target variables are
+        NaN-padded by the dataset wrapper. Trailing NaNs are never consumed
+        by the loss (loss is skipped for non-optimized steps) or by the
+        forward pass (forcings come from a disjoint variable set).
+
+        When the atmosphere loss has unbounded ``n_steps`` (``None``), the
+        target horizon collapses to the full rollout length, recovering the
+        previous behavior.
+
+        Args:
+            stepper_config: The coupled stepper config, used for variable
+                names and timesteps.
+
+        """
+        long_atmos_n = self.n_coupled_steps * stepper_config.n_inner_steps + 1
+        atmos_n_steps_max = self.component_n_steps_max.atmosphere
+        if atmos_n_steps_max is None:
+            short_atmos_n = long_atmos_n
+        else:
+            # +1 for n_ic_timesteps (asserted to be 1 in CoupledStepper.__init__)
+            short_atmos_n = atmos_n_steps_max + 1
+        forcing_names = list(stepper_config.atmosphere_forcing_exogenous_names)
+        target_names = list(
+            set(stepper_config.all_names.atmosphere) - set(forcing_names)
+        )
+        return CoupledTrainDataRequirements(
+            ocean_timestep=stepper_config.ocean_timestep,
+            ocean_requirements=DataRequirements(
+                names=stepper_config.all_names.ocean,
+                n_timesteps=self.n_coupled_steps + 1,
+            ),
+            atmosphere_timestep=stepper_config.atmosphere_timestep,
+            atmosphere_target_requirements=DataRequirements(
+                names=target_names, n_timesteps=short_atmos_n
+            ),
+            atmosphere_forcing_requirements=DataRequirements(
+                names=forcing_names, n_timesteps=long_atmos_n
+            ),
         )
 
     def _build_loss(
@@ -3476,11 +3544,16 @@ class CoupledTrainStepper(
             initial_condition, forcing, compute_derived_variables
         )
 
+    def seed_eval(self, seed: int) -> None:
+        self._loss.seed_step_sampler(seed)
+
     def set_train(self):
         self._stepper.set_train()
+        self._loss.set_train()
 
     def set_eval(self):
         self._stepper.set_eval()
+        self._loss.set_eval()
 
     def get_state(self) -> dict[str, Any]:
         return self._stepper.get_state()
@@ -3500,6 +3573,7 @@ class CoupledTrainStepper(
         optimization: OptimizationABC,
         metrics: ComponentStepMetrics,
         output_list: list[ComponentEnsembleStepPrediction],
+        evaluate_all_steps: bool = False,
     ) -> None:
         target_step = {
             k: v.select(time_dim, gen_step.step) for k, v in forward_data.items()
@@ -3510,11 +3584,18 @@ class CoupledTrainStepper(
             step=gen_step.step,
         )
         target_step_ensemble = add_ensemble_dim(target_step)
-        step_loss = self._loss(ensemble_step, target_step_ensemble)
-        if step_loss is not None:
+        if evaluate_all_steps:
+            step_loss = self._loss.compute_loss(ensemble_step, target_step_ensemble)
             label = f"loss/{gen_step.realm}_step_{gen_step.step}"
             metrics.add_metric(label, step_loss.detach(), gen_step.realm)
-            optimization.accumulate_loss(step_loss)
+            if self._loss.step_is_optimized(gen_step.realm, gen_step.step):
+                optimization.accumulate_loss(step_loss)
+        else:
+            step_loss = self._loss(ensemble_step, target_step_ensemble)
+            if step_loss is not None:
+                label = f"loss/{gen_step.realm}_step_{gen_step.step}"
+                metrics.add_metric(label, step_loss.detach(), gen_step.realm)
+                optimization.accumulate_loss(step_loss)
         output_list.append(
             ensemble_step.detach_if_using_gradient_accumulation(
                 optimization
@@ -3529,6 +3610,7 @@ class CoupledTrainStepper(
         ocean_forward_data: BatchData | None = None,
         ice_forward_data: BatchData | None = None,
         atmos_forward_data: BatchData | None = None,
+        evaluate_all_steps: bool = False,
     ) -> list[ComponentEnsembleStepPrediction]:
         n_ensemble = self._config.n_ensemble
         if atmos_forward_data is None:
@@ -3553,13 +3635,16 @@ class CoupledTrainStepper(
             output_iterator = iter(output_generator)
             output_list: list[ComponentEnsembleStepPrediction] = []
             n_outer_steps_data = data.ocean_data.n_timesteps - self.n_ic_timesteps
-            # Clamp to at least 1 outer step so downstream gen_data is non-empty
-            # in the rare case where stochastic samplers yield n_steps=0 for both
-            # realms; that batch contributes zero loss but a valid TrainOutput.
-            n_outer_steps = min(
-                n_outer_steps_data,
-                max(1, self._loss.n_required_outer_steps(self.n_inner_steps)),
-            )
+            if evaluate_all_steps:
+                n_outer_steps = n_outer_steps_data
+            else:
+                # Clamp to at least 1 outer step so downstream gen_data is non-empty
+                # in the rare case where stochastic samplers yield n_steps=0 for both
+                # realms; that batch contributes zero loss but a valid TrainOutput.
+                n_outer_steps = min(
+                    n_outer_steps_data,
+                    max(1, self._loss.n_required_outer_steps(self.n_inner_steps)),
+                )
             for i_outer in range(n_outer_steps):
                 for i_inner in range(self.n_inner_steps):
                     global_ice_step = i_outer * self.n_inner_steps + i_inner
@@ -3582,6 +3667,7 @@ class CoupledTrainStepper(
                             optimization=optimization,
                             metrics=metrics,
                             output_list=output_list,
+                            evaluate_all_steps=evaluate_all_steps,
                         )
                 optimize = self._loss.step_is_optimized("ocean", i_outer)
                 grad_context = contextlib.nullcontext() if optimize else torch.no_grad()
@@ -3596,6 +3682,7 @@ class CoupledTrainStepper(
                         optimization=optimization,
                         metrics=metrics,
                         output_list=output_list,
+                        evaluate_all_steps=evaluate_all_steps,
                     )
         elif ice_forward_data is None:
             data_ensemble = CoupledBatchData(
@@ -3619,10 +3706,13 @@ class CoupledTrainStepper(
             output_iterator = iter(output_generator)
             output_list: list[ComponentEnsembleStepPrediction] = []
             n_outer_steps_data = data.ocean_data.n_timesteps - self.n_ic_timesteps
-            n_outer_steps = min(
-                n_outer_steps_data,
-                max(1, self._loss.n_required_outer_steps(self.n_inner_steps)),
-            )
+            if evaluate_all_steps:
+                n_outer_steps = n_outer_steps_data
+            else:
+                n_outer_steps = min(
+                    n_outer_steps_data,
+                    max(1, self._loss.n_required_outer_steps(self.n_inner_steps)),
+                )
             for i_outer in range(n_outer_steps):
                 for i_inner in range(self.n_inner_steps):
                     global_atmos_step = i_outer * self.n_inner_steps + i_inner
@@ -3645,6 +3735,7 @@ class CoupledTrainStepper(
                             optimization=optimization,
                             metrics=metrics,
                             output_list=output_list,
+                            evaluate_all_steps=evaluate_all_steps,
                         )
                 optimize = self._loss.step_is_optimized("ocean", i_outer)
                 grad_context = contextlib.nullcontext() if optimize else torch.no_grad()
@@ -3659,6 +3750,7 @@ class CoupledTrainStepper(
                         optimization=optimization,
                         metrics=metrics,
                         output_list=output_list,
+                        evaluate_all_steps=evaluate_all_steps,
                     )
         elif ocean_forward_data is None:
             data_ensemble = CoupledBatchData(
@@ -3682,10 +3774,13 @@ class CoupledTrainStepper(
             output_iterator = iter(output_generator)
             output_list: list[ComponentEnsembleStepPrediction] = []
             n_outer_steps_data = data.ice_data.n_timesteps - self.n_ic_timesteps
-            n_outer_steps = min(
-                n_outer_steps_data,
-                max(1, self._loss.n_required_outer_steps(self.n_inner_steps)),
-            )
+            if evaluate_all_steps:
+                n_outer_steps = n_outer_steps_data
+            else:
+                n_outer_steps = min(
+                    n_outer_steps_data,
+                    max(1, self._loss.n_required_outer_steps(self.n_inner_steps)),
+                )
             for i_outer in range(n_outer_steps):
                 for i_inner in range(self.n_inner_steps):
                     global_atmos_step = i_outer * self.n_inner_steps + i_inner
@@ -3708,6 +3803,7 @@ class CoupledTrainStepper(
                             optimization=optimization,
                             metrics=metrics,
                             output_list=output_list,
+                            evaluate_all_steps=evaluate_all_steps,
                         )
                 optimize = self._loss.step_is_optimized("ice", i_outer)
                 grad_context = contextlib.nullcontext() if optimize else torch.no_grad()
@@ -3722,6 +3818,7 @@ class CoupledTrainStepper(
                         optimization=optimization,
                         metrics=metrics,
                         output_list=output_list,
+                        evaluate_all_steps=evaluate_all_steps,
                     )
         else:
             data_ensemble = CoupledBatchData(
@@ -3749,10 +3846,13 @@ class CoupledTrainStepper(
             output_iterator = iter(output_generator)
             output_list: list[ComponentEnsembleStepPrediction] = []
             n_outer_steps_data = data.ocean_data.n_timesteps - self.n_ic_timesteps
-            n_outer_steps = min(
-                n_outer_steps_data,
-                max(1, self._loss.n_required_outer_steps(self.n_inner_steps)),
-            )
+            if evaluate_all_steps:
+                n_outer_steps = n_outer_steps_data
+            else:
+                n_outer_steps = min(
+                    n_outer_steps_data,
+                    max(1, self._loss.n_required_outer_steps(self.n_inner_steps)),
+                )
             for i_outer in range(n_outer_steps):
                 for i_inner in range(self.n_inner_steps):
                     global_atmos_step = i_outer * self.n_inner_steps + i_inner
@@ -3775,6 +3875,7 @@ class CoupledTrainStepper(
                             optimization=optimization,
                             metrics=metrics,
                             output_list=output_list,
+                            evaluate_all_steps=evaluate_all_steps,
                         )
                     global_ice_step = i_outer * self.n_inner_steps + i_inner
                     optimize = self._loss.step_is_optimized(
@@ -3796,6 +3897,7 @@ class CoupledTrainStepper(
                             optimization=optimization,
                             metrics=metrics,
                             output_list=output_list,
+                            evaluate_all_steps=evaluate_all_steps,
                         )
                 optimize = self._loss.step_is_optimized("ocean", i_outer)
                 grad_context = contextlib.nullcontext() if optimize else torch.no_grad()
@@ -3810,6 +3912,7 @@ class CoupledTrainStepper(
                         optimization=optimization,
                         metrics=metrics,
                         output_list=output_list,
+                        evaluate_all_steps=evaluate_all_steps,
                     )
 
         return output_list
@@ -3819,6 +3922,7 @@ class CoupledTrainStepper(
         data: CoupledBatchData,
         optimization: OptimizationABC,
         compute_derived_variables: bool = False,
+        evaluate_all_steps: bool = False,
     ) -> CoupledTrainOutput:
         """
         Args:
@@ -3828,6 +3932,9 @@ class CoupledTrainStepper(
                 Use `NullOptimization` to disable training.
             compute_derived_variables: Whether to compute derived variables for the
                 prediction and target atmosphere data.
+            evaluate_all_steps: When True, run all available forward steps and
+                compute per-step metrics for each, but only count steps within
+                the stochastically-sampled range toward the accumulated loss.
 
         """
         atmos_forward_data = None
@@ -3860,6 +3967,7 @@ class CoupledTrainStepper(
                 ocean_forward_data=ocean_forward_data,
                 atmos_forward_data=atmos_forward_data,
                 ice_forward_data=ice_forward_data, 
+                evaluate_all_steps=evaluate_all_steps,
             )
 
         loss = optimization.get_accumulated_loss().detach()
