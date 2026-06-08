@@ -29,6 +29,7 @@ from fme.core.step.single_module import (
     step_with_adjustments,
 )
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
+from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -392,7 +393,7 @@ class InfillPredictionStep(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
+    ) -> tuple[TensorDict, StepperState | None]:
         has_all_names = all(n in args.input for n in self._config.all_names)
         if has_all_names:
             full_input = dict(args.input)

@@ -886,7 +886,7 @@ class TestInfillPredictionStep:
             n: torch.ones(2, dtype=torch.bool, device=fme.get_device())
             for n in STEP_ALL_NAMES
         }
-        output = step.step(
+        output, _ = step.step(
             StepArgs(
                 input=input_data,
                 next_step_input_data=next_step,
@@ -902,7 +902,7 @@ class TestInfillPredictionStep:
         inference_names = ["a", "b", "forcing_x"]
         input_data = _tensor_dict(inference_names)
         next_step = _tensor_dict(step.next_step_input_names)
-        output = step.step(
+        output, _ = step.step(
             StepArgs(
                 input=input_data,
                 next_step_input_data=next_step,
@@ -916,7 +916,7 @@ class TestInfillPredictionStep:
         step = _make_step()
         input_data = _tensor_dict(STEP_ALL_NAMES)
         next_step = _tensor_dict(step.next_step_input_names)
-        output = step.step(
+        output, _ = step.step(
             StepArgs(
                 input=input_data,
                 next_step_input_data=next_step,
