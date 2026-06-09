@@ -966,6 +966,35 @@ def test_batchdata_cat_mismatched_n_ensemble_raises():
         BatchData.cat([a, b])
 
 
+def test_batchdata_cat_unions_different_label_names():
+    """Cat is permitted across batches with different label encodings."""
+    device = get_device()
+    a = get_batch_data(
+        names=["foo"], n_samples=2, n_times=3, horizontal_dims=["lat", "lon"]
+    )
+    b = get_batch_data(
+        names=["foo"], n_samples=3, n_times=3, horizontal_dims=["lat", "lon"]
+    )
+    a.labels = BatchLabels(torch.ones(2, 2, device=device), ["x", "y"])
+    b.labels = BatchLabels(torch.ones(3, 2, device=device), ["y", "z"])
+    cat = BatchData.cat([a, b])
+    assert cat.labels is not None
+    assert cat.labels.names == ["x", "y", "z"]
+    # Sample 0 was originally "x"+"y" → ["x","y","z"] = [1,1,0]
+    # Sample 2 was originally "y"+"z" → ["x","y","z"] = [0,1,1]
+    expected = torch.tensor(
+        [
+            [1.0, 1.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 1.0],
+            [0.0, 1.0, 1.0],
+            [0.0, 1.0, 1.0],
+        ],
+        device=device,
+    )
+    torch.testing.assert_close(cat.labels.tensor, expected)
+
+
 def test_batchdata_split_wrong_sum_raises():
     a = get_batch_data(
         names=["foo"], n_samples=2, n_times=3, horizontal_dims=["lat", "lon"]

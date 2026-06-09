@@ -147,10 +147,7 @@ def get_inference_callback(
                 ),
                 epoch_set=frozenset(inference_epoch_sets[i]),
                 weight=entry_config.weight,
-                concurrent_group=(
-                    entry_config.coupled_steps_in_memory,
-                    _ic_label_signature(data),
-                ),
+                concurrent_group=(entry_config.coupled_steps_in_memory,),
             )
         )
 
@@ -171,23 +168,6 @@ def get_inference_callback(
         inference_epochs=inference_epochs,
         stepper=stepper,
         build_batched_predictor=build_predictor,
-    )
-
-
-def _ic_label_signature(
-    data: InferenceGriddedData,
-) -> tuple[tuple[str, ...] | None, tuple[str, ...] | None] | None:
-    """Per-component label fingerprint used to gate concurrent batching.
-
-    Forcings whose ocean or atmosphere ``BatchLabels.names`` differ between
-    entries cannot be concatenated, so they must run in distinct groups.
-    """
-    coupled_ic = data.initial_condition.as_batch_data()
-    ocean_labels = coupled_ic.ocean_data.labels
-    atmos_labels = coupled_ic.atmosphere_data.labels
-    return (
-        tuple(ocean_labels.names) if ocean_labels is not None else None,
-        tuple(atmos_labels.names) if atmos_labels is not None else None,
     )
 
 

@@ -1,4 +1,5 @@
 import warnings
+from collections.abc import Sequence
 from typing import Any
 
 import torch
@@ -101,6 +102,50 @@ class BatchLabels:
         if self.names != other.names:
             return False
         return torch.equal(self.tensor, other.tensor)
+
+    def semantically_equal(self, other: "BatchLabels") -> bool:
+        """Equality after conforming both sides to a common encoding.
+
+        Returns True when the two label sets describe the same per-sample
+        memberships, even if encoded with different column orderings or
+        different name sets (extra columns are treated as zero).
+        """
+        if self.tensor.shape[0] != other.tensor.shape[0]:
+            return False
+        common = LabelEncoding(sorted(set(self.names) | set(other.names)))
+        return torch.equal(
+            self.conform_to_encoding(common).tensor,
+            other.conform_to_encoding(common).tensor,
+        )
+
+    @classmethod
+    def cat(cls, items: Sequence["BatchLabels"]) -> "BatchLabels":
+        """Concatenate a sequence of BatchLabels along the sample dimension.
+
+        Inputs may have differing ``names``. The result uses the sorted union
+        of all names, with each input conformed to that encoding before
+        concatenation. Missing-from-an-input names contribute zeros.
+        """
+        if len(items) == 0:
+            raise ValueError("Cannot cat an empty sequence of BatchLabels.")
+        if len(items) == 1:
+            return items[0]
+        all_names: set[str] = set()
+        for item in items:
+            all_names.update(item.names)
+        union_names = sorted(all_names)
+        if all(item.names == union_names for item in items):
+            return cls(
+                torch.cat([item.tensor for item in items], dim=0),
+                union_names,
+            )
+        encoding = LabelEncoding(union_names)
+        return cls(
+            torch.cat(
+                [item.conform_to_encoding(encoding).tensor for item in items], dim=0
+            ),
+            union_names,
+        )
 
     @classmethod
     def new_from_set(cls, label_set: set[str], n_samples: int, device) -> "BatchLabels":

@@ -577,8 +577,11 @@ class BatchData:
         """Concatenate a sequence of BatchData along the sample dimension.
 
         All inputs must share variable names, ``horizontal_dims``, ``epoch``,
-        ``n_ensemble``, label names, ``n_timesteps``, and whether labels and
-        data_mask are present. Tensors must already be on the same device.
+        ``n_ensemble``, ``n_timesteps``, and whether labels and data_mask are
+        present. Label names may differ across inputs: the result uses the
+        sorted union of all label names, with each input conformed to that
+        encoding before concatenation. Tensors must already be on the same
+        device.
         """
         if len(batches) == 0:
             raise ValueError("Cannot cat an empty sequence of BatchData.")
@@ -616,15 +619,6 @@ class BatchData:
                 raise ValueError(
                     "Cannot cat BatchData with inconsistent labels presence."
                 )
-            if (
-                first.labels is not None
-                and b.labels is not None
-                and b.labels.names != first.labels.names
-            ):
-                raise ValueError(
-                    "Cannot cat BatchData with different label names: "
-                    f"{first.labels.names} != {b.labels.names}"
-                )
             if (b.data_mask is None) != (first.data_mask is None):
                 raise ValueError(
                     "Cannot cat BatchData with inconsistent data_mask presence."
@@ -634,11 +628,8 @@ class BatchData:
         if first.labels is None:
             labels = None
         else:
-            labels = BatchLabels(
-                torch.cat(
-                    [b.labels.tensor for b in batches if b.labels is not None], dim=0
-                ),
-                first.labels.names,
+            labels = BatchLabels.cat(
+                [b.labels for b in batches if b.labels is not None]
             )
         if first.data_mask is None:
             data_mask = None
@@ -847,7 +838,12 @@ class PairedData:
 
     @classmethod
     def cat(cls, batches: Sequence["PairedData"]) -> "PairedData":
-        """Concatenate a sequence of PairedData along the sample dimension."""
+        """Concatenate a sequence of PairedData along the sample dimension.
+
+        Label names may differ across inputs: the result uses the sorted
+        union of all label names, with each input conformed to that encoding
+        before concatenation.
+        """
         if len(batches) == 0:
             raise ValueError("Cannot cat an empty sequence of PairedData.")
         if len(batches) == 1:
@@ -871,12 +867,6 @@ class PairedData:
                 raise ValueError(
                     "Cannot cat PairedData with inconsistent labels presence."
                 )
-            if (
-                first.labels is not None
-                and b.labels is not None
-                and b.labels.names != first.labels.names
-            ):
-                raise ValueError("Cannot cat PairedData with different label names.")
         prediction = {
             k: torch.cat([b.prediction[k] for b in batches], dim=0)
             for k in first.prediction
@@ -889,11 +879,8 @@ class PairedData:
         if first.labels is None:
             labels = None
         else:
-            labels = BatchLabels(
-                torch.cat(
-                    [b.labels.tensor for b in batches if b.labels is not None], dim=0
-                ),
-                first.labels.names,
+            labels = BatchLabels.cat(
+                [b.labels for b in batches if b.labels is not None]
             )
         return cls(
             prediction=prediction,
