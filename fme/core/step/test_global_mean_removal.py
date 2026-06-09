@@ -376,13 +376,16 @@ def test_per_channel_config_raises_on_output_only_field():
 
 
 def test_per_channel_config_none_field_names_means_all():
+    means = {"a": 0.0, "b": 0.0}
+    stds = {"a": 1.0, "b": 1.0}
+    normalizer = _build_normalizer_for(means, stds)
     config = PerChannelGlobalMeanRemovalConfig(field_names=None)
     config.validate_names(["a", "b"], ["a", "b"])
-    assert config.get_n_extra_input_channels(["a", "b"]) == 0
+    assert config.build(normalizer, ["a", "b"]).n_extra_input_channels == 0
     config_with_input = PerChannelGlobalMeanRemovalConfig(
         field_names=None, append_as_input=True
     )
-    assert config_with_input.get_n_extra_input_channels(["a", "b"]) == 2
+    assert config_with_input.build(normalizer, ["a", "b"]).n_extra_input_channels == 2
 
 
 # ── Dacite union serialization ──────────────────────────────────────────
