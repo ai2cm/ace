@@ -6,7 +6,7 @@ patch:
   coarse_horizontal_overlap: 0
 
 model:
-  checkpoint_path: /checkpoints/bundled_moe_multivariate.ckpt
+  mixture_of_experts_path: /checkpoints/bundled_moe_multivariate.ckpt
 
 data:
   coarse:
