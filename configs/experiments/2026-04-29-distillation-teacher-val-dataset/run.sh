@@ -35,12 +35,14 @@ NGPU=8
 IMAGE="$(cat $REPO_ROOT/latest_distillation_image.txt)"
 
 if $MULTIVAR_MOE; then
+    # MoE dataset has no checkpoints/ subdirectory; mount root directly.
     TEACHER_DATASET=01KTCHVDHY0SATWH9E0AW2PDS6
     JOB_NAME=ace-downscaling-distillation-teacher-val-CONUS-2023-multivar-moe
     CONFIG_YAML=$SCRIPT_PATH/generate-teacher-val-multivar-moe.yaml
     DESCRIPTION="Generate pre-saved multivar MoE teacher validation dataset (CONUS 2023, n_ens=12)"
 else
-    TEACHER_DATASET=01KNM6H3JB1ZNS76HX17AAZRF7
+    # Default dataset stores the checkpoint under a checkpoints/ subdirectory.
+    TEACHER_DATASET=01KNM6H3JB1ZNS76HX17AAZRF7:checkpoints
     JOB_NAME=ace-downscaling-distillation-teacher-val-CONUS-2023
     CONFIG_YAML=$SCRIPT_PATH/generate-teacher-val.yaml
     DESCRIPTION="Generate pre-saved teacher validation dataset (CONUS 2023, n_ens=12)"
@@ -59,7 +61,7 @@ gantry run \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset $TEACHER_DATASET:checkpoints:/checkpoints \
+    --dataset $TEACHER_DATASET:/checkpoints \
     --weka climate-default:/climate-default \
     --gpus $NGPU \
     --shared-memory 100GiB \
