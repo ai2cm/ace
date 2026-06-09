@@ -246,6 +246,12 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             the l=0 (global mean) spherical harmonic coefficient, so that
             global mean changes can only result from local operations
             (norms, MLPs, skip connections).
+        spectral_ratio: Fraction of embed_dim that participates in the
+            spectral filter's SHT and per-mode complex weight. When < 1, a
+            Conv1x1 down-projection is applied before forward_transform and
+            an up-projection after inverse_transform, reducing both the SHT
+            cost and the size of the per-mode complex weight tensor. Only
+            supported for filter_type='linear'.
     """
 
     spectral_transform: Literal["sht"] = "sht"
@@ -285,6 +291,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     spectral_lora_rank: int = 0
     spectral_lora_alpha: float | None = None
     filter_preserves_global_mean: bool = False
+    spectral_ratio: float = 1.0
 
     def __post_init__(self):
         if self.context_pos_embed_dim > 0 and self.pos_embed:
@@ -336,6 +343,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             spectral_lora_rank=self.spectral_lora_rank,
             spectral_lora_alpha=self.spectral_lora_alpha,
             filter_preserves_global_mean=self.filter_preserves_global_mean,
+            spectral_ratio=self.spectral_ratio,
         )
         sfno_net = get_lat_lon_sfnonet(
             params=sfno_config,
