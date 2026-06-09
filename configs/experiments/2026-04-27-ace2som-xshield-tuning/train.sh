@@ -3,7 +3,7 @@
 set -e
 
 
-CONFIG_FILENAME="tune-xshield-10yr-control.yaml"
+CONFIG_FILENAME="tune-shieldplus-prmsl.yaml"
 
 SCRIPT_PATH=$(git rev-parse --show-prefix)
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -12,7 +12,7 @@ WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
 WANDB_GROUP=ace
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=4
-STATS_DATASET=annak/2026-04-27-vertically-resolved-1deg-c96-shield-ramped-climSST-random-CO2-ensemble-xshield-prmsl-stats
+STATS_DATASET=andrep/2026-06-08-vertically-resolved-1deg-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-stats
 PRE_TRAINED_WEIGHTS_PATH=/pre-trained-weights/training_checkpoints/best_ckpt.tar
 SEED_OFFSET=10
 
@@ -34,7 +34,7 @@ PRE_TRAINED_WEIGHTS_DATASETS=("01KHJ5F1M6YKVZESPZAAVVD6G8" "01KHCEF1SBYCZCGDM78N
 #        --dataset ${PRE_TRAINED_WEIGHTS_DATASETS[$seed]}:/pre-trained-weights \
 for seed in {0..0}; do
     #job_name="ace2som-xshield-tune-1yr-even-split-single-decoder-seed${seed}"
-    job_name="ace2som-xshield-tune-10yr-control-seed${seed}"
+    job_name="ace2s-shieldplus-tune-prmsl-seed${seed}"
     fine_tune_seed=$((seed + SEED_OFFSET))
     override="seed=${fine_tune_seed}"
     python -m fme.ace.validate_config --config_type train $CONFIG_PATH --override $override
@@ -43,12 +43,10 @@ for seed in {0..0}; do
         --name $job_name \
         --description 'Run ACE training' \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-        --workspace ai2/ace \
-        --priority high \
+        --workspace ai2/climate-titan \
+        --priority urgent \
         --preemptible \
         --cluster ai2/titan \
-        --cluster ai2/jupiter \
-        --cluster ai2/ceres \
         --env WANDB_NAME=$job_name \
         --env WANDB_USERNAME=$WANDB_USERNAME \
         --env WANDB_JOB_TYPE=training \
