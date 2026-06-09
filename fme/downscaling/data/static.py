@@ -7,7 +7,7 @@ from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
 from fme.downscaling.data.utils import (
     ClosedInterval,
-    roll_data_lon_dim,
+    roll_data_along_lon_dim,
     roll_lon_coords,
 )
 
@@ -183,7 +183,9 @@ class StaticInputs:
         rolled_lon = roll_lon_coords(self.coords.lon, roll_amount, lon_start)
         return StaticInputs(
             fields=[
-                StaticInput(data=roll_data_lon_dim(f.data, roll_amount, lon_dim=-1))
+                StaticInput(
+                    data=roll_data_along_lon_dim(f.data, roll_amount, lon_dim=-1)
+                )
                 for f in self.fields
             ],
             coords=LatLonCoordinates(lat=self.coords.lat, lon=rolled_lon),

@@ -29,7 +29,7 @@ from fme.downscaling.data.utils import (
     find_roll_anchor_from_interval,
     get_offset,
     paired_shuffle,
-    roll_data_lon_dim,
+    roll_data_along_lon_dim,
     roll_lon_coords,
     scale_tuple,
 )
@@ -169,7 +169,7 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
             missing_names is None
         ), "Variable masking is not supported in downscaling."
         batch = {
-            k: roll_data_lon_dim(v, self._lon_roll_amount)[
+            k: roll_data_along_lon_dim(v, self._lon_roll_amount)[
                 ...,
                 self._lats_slice,
                 self._lons_slice,
