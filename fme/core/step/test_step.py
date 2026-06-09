@@ -39,6 +39,11 @@ from fme.core.step.single_module import (
 )
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.typing_ import TensorDict
+from fme.core.var_masking import (
+    PerVariableMaskingConfig,
+    UniformMaskingConfig,
+    VariableMaskingConfig,
+)
 
 from .radiation import SeparateRadiationStepConfig
 
@@ -1524,3 +1529,125 @@ def test_step_shared_global_mean_removal_raises_on_masked_reference():
                 data_mask=data_mask,
             ),
         )
+
+
+def _make_input_dropout_step(input_dropout: VariableMaskingConfig) -> SingleModuleStep:
+    in_names = ["forcing_shared", "forcing_rad"]
+    out_names = ["diagnostic_main", "diagnostic_rad"]
+    normalization = get_network_and_loss_normalization_config(
+        names=list(set(in_names + out_names))
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+                ),
+                in_names=in_names,
+                out_names=out_names,
+                normalization=normalization,
+                input_dropout=input_dropout,
+            )
+        ),
+    )
+    step = get_step(config, DEFAULT_IMG_SHAPE)
+    assert isinstance(step, SingleModuleStep)
+    return step
+
+
+def test_input_dropout_disabled_in_eval_mode():
+    """Output is deterministic in eval mode regardless of input_dropout config."""
+    step = _make_input_dropout_step(
+        VariableMaskingConfig(uniform=UniformMaskingConfig(min_vars=1, max_vars=1))
+    )
+    step.module.torch_module.eval()
+    n_samples = 4
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+    out1, _ = step.step(
+        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
+    )
+    out2, _ = step.step(
+        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
+    )
+    for name in step.out_names:
+        torch.testing.assert_close(out1[name], out2[name])
+
+
+def test_input_dropout_active_in_train_mode():
+    """With rate=1.0 all inputs are zeroed, so outputs differ from no-dropout."""
+    step = _make_input_dropout_step(
+        VariableMaskingConfig(per_variable=PerVariableMaskingConfig(rate=1.0))
+    )
+    step.module.torch_module.train()
+    n_samples = 4
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+
+    step_no_dropout = _make_input_dropout_step(
+        VariableMaskingConfig(per_variable=PerVariableMaskingConfig(rate=0.0))
+    )
+    step_no_dropout.module.torch_module.train()
+    # Copy weights so only the masking differs
+    step_no_dropout.module.torch_module.load_state_dict(
+        step.module.torch_module.state_dict()
+    )
+
+    out_dropout, _ = step.step(
+        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
+    )
+    out_no_dropout, _ = step_no_dropout.step(
+        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
+    )
+    differs = any(
+        not torch.allclose(out_dropout[name], out_no_dropout[name])
+        for name in step.out_names
+    )
+    assert differs, "rate=1.0 dropout should produce different outputs from rate=0.0"
+
+
+def test_input_dropout_with_channel_mask_inputs():
+    """With include_channel_mask_inputs, rate=1.0 zeroes the mask indicators too."""
+    in_names = ["forcing_shared", "forcing_rad"]
+    out_names = ["diagnostic_main", "diagnostic_rad"]
+    normalization = get_network_and_loss_normalization_config(
+        names=list(set(in_names + out_names))
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+                ),
+                in_names=in_names,
+                out_names=out_names,
+                normalization=normalization,
+                include_channel_mask_inputs=True,
+                input_dropout=VariableMaskingConfig(
+                    per_variable=PerVariableMaskingConfig(rate=0.0)
+                ),
+            )
+        ),
+    )
+    step = get_step(config, DEFAULT_IMG_SHAPE)
+    assert isinstance(step, SingleModuleStep)
+    step.module.torch_module.train()
+
+    n_samples = 2
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+    out, _ = step.step(
+        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
+    )
+    for name in out_names:
+        assert out[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)

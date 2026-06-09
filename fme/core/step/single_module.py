@@ -36,6 +36,7 @@ from fme.core.step.secondary_decoder import (
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.var_masking import VariableMaskingConfig
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
@@ -70,6 +71,9 @@ class SingleModuleStepConfig(StepConfigABC):
             from fields before normalization and restoring them after
             denormalization. Supports shared (single reference field) or
             per-channel removal, with optional extra input channels.
+        input_dropout: Optional training-time input channel dropout. When set,
+            a random subset of input channels is zeroed per sample during
+            training. Disabled during inference (eval mode).
     """
 
     builder: ModuleSelector
@@ -86,6 +90,7 @@ class SingleModuleStepConfig(StepConfigABC):
     residual_prediction: bool = False
     include_channel_mask_inputs: bool = False
     global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
+    input_dropout: VariableMaskingConfig | None = None
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
@@ -382,11 +387,29 @@ class SingleModuleStep(StepABC):
             if args.data_mask is not None:
                 input_norm = _apply_input_mask(input_norm, args.data_mask)
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
+            channel_mask: torch.Tensor | None = None
+            if (
+                self._config.input_dropout is not None
+                and self.module.torch_module.training
+            ):
+                batch_size = input_tensor.shape[0]
+                n_channels = input_tensor.shape[self.CHANNEL_DIM]
+                channel_mask = self._config.input_dropout.sample_mask(
+                    n_channels, batch_size, input_tensor.device
+                )
+                input_tensor = input_tensor * channel_mask.view(
+                    batch_size, n_channels, 1, 1
+                ).to(dtype=input_tensor.dtype)
             if self._config.include_channel_mask_inputs:
                 mask_dict = _build_channel_mask_dict(
                     self.in_packer.names, args.data_mask, input_tensor
                 )
                 mask_tensor = self.in_packer.pack(mask_dict, axis=self.CHANNEL_DIM)
+                if channel_mask is not None:
+                    n_ch = input_tensor.shape[self.CHANNEL_DIM]
+                    mask_tensor = mask_tensor * channel_mask.view(
+                        channel_mask.shape[0], n_ch, 1, 1
+                    ).to(dtype=mask_tensor.dtype)
                 input_tensor = torch.cat(
                     [input_tensor, mask_tensor], dim=self.CHANNEL_DIM
                 )
