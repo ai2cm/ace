@@ -12,14 +12,12 @@ from fme.ace.models.miles_credit.crossformer import CrossFormer  # type: ignore
 from fme.ace.registry.stochastic_sfno import NoiseConditionedModel
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
-from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.models.conditional_sfno.layers import ContextConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
-from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector
 from fme.core.step.args import StepArgs
@@ -31,9 +29,6 @@ from fme.core.step.global_mean_removal import (
 from fme.core.step.single_module import _apply_input_mask, step_with_adjustments
 from fme.core.step.step import StepABC, StepConfigABC, StepperState, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
-
-DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
-DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
 
 
 @dataclasses.dataclass
@@ -228,6 +223,11 @@ class CrossFormerStepConfig(StepConfigABC):
     global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
 
     def __post_init__(self):
+        if self.builder.frames != 1:
+            raise ValueError(
+                "CrossFormerStepConfig only supports builder.frames == 1; "
+                "multi-frame input loading is not implemented for this stepper."
+            )
         for name in self.next_step_forcing_names:
             if name not in self.forcing_names:
                 raise ValueError(
@@ -447,11 +447,7 @@ class CrossFormerStep(StepABC):
         dist = Distributed.get_instance()
         self.module = dist.wrap_module(module)
         logging.info("DDP wrapping complete")
-        self._img_shape = img_shape
         self._config = config
-        self._no_optimization = NullOptimization()
-
-        self._timestep = timestep
 
         self._corrector = corrector
         self.in_names = config.in_names

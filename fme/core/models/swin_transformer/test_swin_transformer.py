@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from fme.core.device import get_device
@@ -390,6 +391,45 @@ def test_earth_padding_forward():
     ).to(get_device())
     x = torch.randn(2, 3, *img_shape, device=get_device())
     assert net(x).shape == (2, 3, *img_shape)
+
+
+@pytest.mark.parametrize("pad_lat", [(2, 0), (0, 2), (0, 0)])
+def test_earth_padding_lat_coords_allow_one_sided_or_zero_padding(
+    pad_lat: tuple[int, int],
+):
+    img_shape = (9, 18)
+    lat_coords = torch.arange(img_shape[0], dtype=torch.float32)
+    padding_conf = {
+        "activate": True,
+        "mode": "earth",
+        "pad_lat": list(pad_lat),
+        "pad_lon": [0, 0],
+    }
+
+    net = SwinTransformerNet(
+        3,
+        3,
+        img_shape,
+        embed_dim=32,
+        num_heads=(2, 4, 4, 2),
+        window_size=(4, 4),
+        mlp_ratio=2.0,
+        drop_path_rate=0.0,
+        lat_coords=lat_coords,
+        padding_conf=padding_conf,
+    )
+
+    expected_pieces = []
+    if pad_lat[0] > 0:
+        expected_pieces.append(torch.flip(lat_coords[: pad_lat[0]], dims=[0]))
+    expected_pieces.append(lat_coords)
+    if pad_lat[1] > 0:
+        expected_pieces.append(torch.flip(lat_coords[-pad_lat[1] :], dims=[0]))
+    expected = torch.cat(expected_pieces)
+    pad_h = net.padded_shape[0] - expected.shape[0]
+    if pad_h > 0:
+        expected = torch.cat([expected, expected[-1:].expand(pad_h)])
+    torch.testing.assert_close(net.layer1.blocks[0].lat_coords, expected)
 
 
 def test_earth_padding_cln_forward():

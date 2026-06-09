@@ -1657,7 +1657,7 @@ class TrainStepper(
             n_forward_steps,
             optimization,
             labels=input_ensemble_data.labels,
-            data_mask=input_ensemble_data.data_mask,
+            data_mask=forcing_ensemble_data.data_mask,
             stepper_state=input_ensemble_data.stepper_state,
         )
         output_list: list[EnsembleTensorDict] = []
@@ -1686,7 +1686,7 @@ class TrainStepper(
                     gen_step=gen_step,
                     target_step=target_step,
                     step=step,
-                    data_mask=input_batch_data.data_mask,
+                    data_mask=data.data_mask,
                     optimize=optimize_step,
                     metrics=metrics,
                     weighted_sums=weighted_sums,

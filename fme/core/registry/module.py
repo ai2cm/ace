@@ -47,6 +47,22 @@ class ModuleConfig(abc.ABC):
         """
         ...
 
+    def build_for_selector(
+        self,
+        n_in_channels: int,
+        n_out_channels: int,
+        dataset_info: DatasetInfo,
+        conditional: bool,
+    ) -> nn.Module:
+        """
+        Build a nn.Module for a ModuleSelector, including selector-level flags.
+        """
+        return self.build(
+            n_in_channels=n_in_channels,
+            n_out_channels=n_out_channels,
+            dataset_info=dataset_info,
+        )
+
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> "ModuleConfig":
         """
@@ -193,10 +209,11 @@ class ModuleSelector:
             label_encoding = LabelEncoding(sorted(list(dataset_info.all_labels)))
         else:
             label_encoding = None
-        module = self._instance.build(
+        module = self._instance.build_for_selector(
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
             dataset_info=dataset_info,
+            conditional=self.conditional,
         )
         return Module(module, label_encoding)
 

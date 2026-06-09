@@ -1,5 +1,7 @@
+import dataclasses
 import datetime
 
+import pytest
 import torch
 
 import fme
@@ -12,6 +14,8 @@ from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinate
 from fme.core.dataset_info import DatasetInfo
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.step.args import StepArgs
+from fme.core.step.global_mean_removal import PerChannelGlobalMeanRemovalConfig
+from fme.core.step.step import StepSelector
 
 IMG_SHAPE = (48, 96)
 TIMESTEP = datetime.timedelta(hours=6)
@@ -119,6 +123,36 @@ def test_crossformer_step_output_names():
     assert set(output.keys()) == set(config.out_names)
 
 
+def test_crossformer_step_selector_loads_yaml_style_config():
+    config = make_config(make_crossformer_config())
+    selector = StepSelector(type="CrossFormer", config=dataclasses.asdict(config))
+    dataset_info = make_dataset_info()
+
+    step = selector.get_step(dataset_info, init_weights=lambda _: None)
+    input_data = get_tensor_dict(step.input_names)
+    next_step_data = get_tensor_dict(step.next_step_input_names)
+    output, _ = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_data,
+            labels=None,
+            data_mask=None,
+        )
+    )
+
+    assert set(output.keys()) == set(config.out_names)
+
+
+@pytest.mark.parametrize(
+    "builder_factory", [make_crossformer_config, make_nc_crossformer_config]
+)
+def test_crossformer_step_config_rejects_multi_frame_builder(builder_factory):
+    builder = dataclasses.replace(builder_factory(), frames=2)
+
+    with pytest.raises(ValueError, match="builder.frames == 1"):
+        make_config(builder)
+
+
 def test_noise_conditioned_crossformer_step_output_names():
     config = make_config(make_nc_crossformer_config())
     dataset_info = make_dataset_info()
@@ -134,6 +168,30 @@ def test_noise_conditioned_crossformer_step_output_names():
         )
     )
     assert set(output.keys()) == set(config.out_names)
+
+
+def test_crossformer_step_global_mean_removal_with_extra_channels():
+    config = make_config(make_crossformer_config())
+    config.global_mean_removal = PerChannelGlobalMeanRemovalConfig(
+        field_names=[SURF_PROGNOSTIC_NAMES[0]],
+        append_as_input=True,
+    )
+    dataset_info = make_dataset_info()
+
+    step = config.get_step(dataset_info, init_weights=lambda _: None)
+    input_data = get_tensor_dict(step.input_names)
+    next_step_data = get_tensor_dict(step.next_step_input_names)
+    output, _ = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_data,
+            labels=None,
+            data_mask=None,
+        )
+    )
+
+    assert set(output.keys()) == set(config.out_names)
+    assert step.module.module.input_only_channels == len(FORCING_NAMES) + 1
 
 
 def test_noise_conditioned_crossformer_noise_divergence():

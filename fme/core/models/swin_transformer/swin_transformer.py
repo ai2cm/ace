@@ -98,9 +98,13 @@ class SwinTransformerNet(nn.Module):
         self.padded_shape = (Hp, Wp)
 
         if self.use_padding and lat_coords is not None:
-            north = torch.flip(lat_coords[: pl[0]], dims=[0])
-            south = torch.flip(lat_coords[-pl[1] :], dims=[0])
-            lat_coords = torch.cat([north, lat_coords, south])
+            padded_lat_coords = []
+            if pl[0] > 0:
+                padded_lat_coords.append(torch.flip(lat_coords[: pl[0]], dims=[0]))
+            padded_lat_coords.append(lat_coords)
+            if pl[1] > 0:
+                padded_lat_coords.append(torch.flip(lat_coords[-pl[1] :], dims=[0]))
+            lat_coords = torch.cat(padded_lat_coords)
 
         if context_config is not None:
             self.embed_dim_scalar = context_config.embed_dim_scalar

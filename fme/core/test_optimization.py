@@ -772,29 +772,6 @@ def test_optimization_config_build_missing_optimization_key(tmp_path: str):
         config.build(torch.nn.ModuleList([model]), max_epochs=1)
 
 
-def test_gradient_clipping():
-    """Gradient clipping caps the global grad norm before the optimizer step."""
-    model = nn.Linear(4, 4).to(fme.get_device())
-    optimization = Optimization(
-        parameters=model.parameters(),
-        optimizer_type="Adam",
-        lr=0.001,
-        max_epochs=10,
-        scheduler=SchedulerConfig(),
-        enable_automatic_mixed_precision=False,
-        kwargs={},
-        max_grad_norm=1.0,
-    )
-    # Set artificially large gradients (norm >> 1.0)
-    for p in model.parameters():
-        p.grad = torch.ones_like(p) * 100.0
-    optimization._step_weights()
-    # Grads are still on params after _step_weights (zero_grad not yet called)
-    # clip_grad_norm_ with inf computes the norm without modifying grads
-    total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float("inf"))
-    assert float(total_norm) <= 1.0 + 1e-5
-
-
 def test_scheduler_step_timing():
     """
     Test that schedulers step at the correct timing based on

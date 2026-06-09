@@ -1,9 +1,7 @@
 import pytest
 import torch
 
-from fme.ace.models.miles_credit.crossformer import (  # type: ignore[attr-defined]
-    CrossFormer,
-)
+from fme.ace.models.miles_credit.crossformer import CrossFormer
 from fme.core.models.conditional_sfno.layers import ContextConfig
 
 

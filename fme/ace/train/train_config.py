@@ -219,11 +219,6 @@ class TrainConfig:
             subdirectory, then it is assumed that this is a new run to resume a
             previously completed run and resume_results.existing_dir is recursively
             copied to experiment_dir.
-        pre_cooldown_checkpoint_epoch: If provided, save a dedicated checkpoint
-            named pre_cooldown_ckpt.tar after this epoch completes. Intended to
-            capture the model state at the end of the constant-learning-rate phase
-            and before any cooldown scheduler begins. Set this to the last milestone
-            of the SequentialSchedulerConfig (e.g. milestones[-1]).
     """
 
     train_loader: DataLoaderConfig
@@ -260,7 +255,6 @@ class TrainConfig:
     save_best_inference_epoch_checkpoints: bool = False
     lr_tuning: LRTuningConfig | None = None
     resume_results: ResumeResultsConfig | None = None
-    pre_cooldown_checkpoint_epoch: int | None = None
 
     @functools.cached_property
     def stepper_config(self) -> StepperConfig:

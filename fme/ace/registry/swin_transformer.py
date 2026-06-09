@@ -5,7 +5,7 @@ from torch import nn
 
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 from fme.ace.registry.stochastic_sfno import NoiseConditionedModel
-from fme.core.dataset_info import DatasetInfo
+from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
 from fme.core.models.swin_transformer import SwinTransformerNet
 
@@ -57,8 +57,9 @@ class SwinTransformerBuilder(ModuleConfig):
             ``context.embedding_scalar`` (analogous to ``NoiseConditionedModel``
             for diffusion timesteps), which does not yet exist; leave at 0.
         embed_dim_labels: Label conditioning dimension. When 0 and the dataset
-            has labels (``conditional=True``), it defaults to the number of
-            labels, which is the dimension the registry feeds the model.
+            has labels and the selector is conditional, it defaults to the
+            number of labels, which is the dimension the registry feeds the
+            model.
     """
 
     embed_dim: int = 96
@@ -80,9 +81,45 @@ class SwinTransformerBuilder(ModuleConfig):
         n_out_channels: int,
         dataset_info: DatasetInfo,
     ) -> nn.Module:
+        return self._build(
+            n_in_channels=n_in_channels,
+            n_out_channels=n_out_channels,
+            dataset_info=dataset_info,
+            enable_label_conditioning=len(dataset_info.all_labels) > 0
+            or self.embed_dim_labels > 0,
+        )
+
+    def build_for_selector(
+        self,
+        n_in_channels: int,
+        n_out_channels: int,
+        dataset_info: DatasetInfo,
+        conditional: bool,
+    ) -> nn.Module:
+        if self.embed_dim_labels > 0 and not conditional:
+            raise ValueError(
+                "SwinTransformer label conditioning requires "
+                "ModuleSelector(conditional=True)"
+            )
+        return self._build(
+            n_in_channels=n_in_channels,
+            n_out_channels=n_out_channels,
+            dataset_info=dataset_info,
+            enable_label_conditioning=conditional,
+        )
+
+    def _build(
+        self,
+        n_in_channels: int,
+        n_out_channels: int,
+        dataset_info: DatasetInfo,
+        enable_label_conditioning: bool,
+    ) -> nn.Module:
         n_labels = len(dataset_info.all_labels)
         embed_dim_labels = self.embed_dim_labels
-        if n_labels > 0 and embed_dim_labels == 0:
+        if not enable_label_conditioning:
+            embed_dim_labels = 0
+        elif n_labels > 0 and embed_dim_labels == 0:
             # The registry feeds one-hot labels of dimension n_labels.
             embed_dim_labels = n_labels
         context_config = ContextConfig(
@@ -91,7 +128,10 @@ class SwinTransformerBuilder(ModuleConfig):
             embed_dim_noise=0,
             embed_dim_pos=0,
         )
-        lat_coords = dataset_info.horizontal_coordinates.lat_1d
+        try:
+            lat_coords = dataset_info.horizontal_coordinates.lat_1d
+        except MissingDatasetInfo:
+            lat_coords = None
         net = SwinTransformerNet(
             in_chans=n_in_channels,
             out_chans=n_out_channels,
@@ -137,6 +177,8 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             When > 0, a shared ``Linear(n_labels, label_embed_dim)`` layer maps
             one-hot labels before downstream CLN conditioning.
             When 0 (default), one-hot labels are used directly.
+            Label conditioning is enabled only when the selector is conditional,
+            or when building directly with dataset labels.
     """
 
     embed_dim: int = 96
@@ -158,8 +200,44 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
         n_out_channels: int,
         dataset_info: DatasetInfo,
     ) -> nn.Module:
-        n_labels = len(dataset_info.all_labels)
-        if self.label_embed_dim > 0:
+        return self._build(
+            n_in_channels=n_in_channels,
+            n_out_channels=n_out_channels,
+            dataset_info=dataset_info,
+            enable_label_conditioning=len(dataset_info.all_labels) > 0
+            or self.label_embed_dim > 0,
+        )
+
+    def build_for_selector(
+        self,
+        n_in_channels: int,
+        n_out_channels: int,
+        dataset_info: DatasetInfo,
+        conditional: bool,
+    ) -> nn.Module:
+        if self.label_embed_dim > 0 and not conditional:
+            raise ValueError(
+                "NoiseConditionedSwinTransformer label conditioning requires "
+                "ModuleSelector(conditional=True)"
+            )
+        return self._build(
+            n_in_channels=n_in_channels,
+            n_out_channels=n_out_channels,
+            dataset_info=dataset_info,
+            enable_label_conditioning=conditional,
+        )
+
+    def _build(
+        self,
+        n_in_channels: int,
+        n_out_channels: int,
+        dataset_info: DatasetInfo,
+        enable_label_conditioning: bool,
+    ) -> nn.Module:
+        n_dataset_labels = len(dataset_info.all_labels)
+        n_labels = n_dataset_labels if enable_label_conditioning else 0
+        label_embed_dim = self.label_embed_dim if enable_label_conditioning else 0
+        if label_embed_dim > 0:
             effective_label_dim = self.label_embed_dim
         else:
             effective_label_dim = n_labels
@@ -169,7 +247,10 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             embed_dim_noise=self.noise_embed_dim,
             embed_dim_pos=0,
         )
-        lat_coords = dataset_info.horizontal_coordinates.lat_1d
+        try:
+            lat_coords = dataset_info.horizontal_coordinates.lat_1d
+        except MissingDatasetInfo:
+            lat_coords = None
         net = SwinTransformerNet(
             in_chans=n_in_channels,
             out_chans=n_out_channels,
@@ -194,6 +275,6 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             embed_dim_noise=self.noise_embed_dim,
             embed_dim_pos=0,
             n_labels=n_labels,
-            label_embed_dim=self.label_embed_dim,
+            label_embed_dim=label_embed_dim,
             inverse_sht=None,
         )

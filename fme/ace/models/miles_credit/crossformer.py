@@ -7,27 +7,12 @@ from einops import rearrange
 from einops.layers.torch import Rearrange
 from torch import einsum, nn
 
-from fme.ace.models.miles_credit.base_model import BaseModel
-
-# from credit.postblock import PostBlock
-from fme.ace.models.miles_credit.boundary_padding import TensorPadding
+from fme.core.models.boundary_padding import TensorPadding
 from fme.core.models.conditional_sfno.layers import (
     ConditionalLayerNorm,
     Context,
     ContextConfig,
 )
-
-# helpers
-
-
-def to_nested_tuple(nested_list):
-    """
-    Recursively converts a nested list into a nested tuple.
-    """
-    if isinstance(nested_list, list):
-        return tuple(to_nested_tuple(item) for item in nested_list)
-    else:
-        return nested_list
 
 
 def cast_tuple(val: Any, length: int = 1) -> tuple:
@@ -407,7 +392,7 @@ class Transformer(nn.Module):
 # classes
 
 
-class CrossFormer(BaseModel):
+class CrossFormer(nn.Module):
     def __init__(
         self,
         image_height: int = 640,
@@ -566,7 +551,7 @@ class CrossFormer(BaseModel):
         encodings = []
         for cel, transformer in self.layers:
             x = cel(x)
-            ctx_i: Context | None
+            ctx_i: Context | None = context
             if context is not None and context.noise is not None:
                 # Resize noise to match the current encoder stage spatial size.
                 # F.interpolate is used (not avg_pool2d) so this works for any
@@ -578,8 +563,6 @@ class CrossFormer(BaseModel):
                     align_corners=False,
                 )
                 ctx_i = dataclasses.replace(context, noise=noise_i)
-            else:
-                ctx_i = context
             x = transformer(x, context=ctx_i)
             encodings.append(x)
 
