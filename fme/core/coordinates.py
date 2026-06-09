@@ -627,8 +627,8 @@ class LatLonCoordinates(HorizontalCoordinates):
             return False
         if self.lat.shape != other.lat.shape or self.lon.shape != other.lon.shape:
             return False
-        lat_eq = torch.allclose(self.lat, other.lat)
-        lon_eq = torch.allclose(self.lon, other.lon)
+        lat_eq = torch.allclose(self.lat.cpu(), other.lat.cpu())
+        lon_eq = torch.allclose(self.lon.cpu(), other.lon.cpu())
         return lat_eq and lon_eq
 
     def __repr__(self) -> str:
