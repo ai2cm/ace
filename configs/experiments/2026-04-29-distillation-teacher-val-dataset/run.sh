@@ -63,7 +63,7 @@ gantry run \
     --weka climate-default:/climate-default \
     --gpus $NGPU \
     --shared-memory 100GiB \
-    --budget ai2/climate \
+    --budget ai2/atec-climate \
     --system-python \
     --install "pip install --no-deps ." \
     -- torchrun --nproc-per-node $NGPU -m fme.downscaling.inference \
