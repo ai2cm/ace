@@ -831,7 +831,7 @@ class CheckpointModelConfig:
                 lon=coords_from_state["lon"].to(get_device(), copy=True),
             )
         elif fine_coordinates_path is not None:
-            return load_coords_from_path(fine_coordinates_path)
+            return load_coords_from_path(fine_coordinates_path).to(get_device())
         else:
             raise ValueError(
                 "No fine coordinates found in checkpoint state and no "
