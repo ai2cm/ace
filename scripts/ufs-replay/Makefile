@@ -64,6 +64,10 @@ ufs_replay_dataflow_test_run:
 		$(START_TIME_TEST_RUN) \
 		$(END_TIME_TEST_RUN)
 
+# Local test run with DirectRunner (referenced in README)
+.PHONY: ufs_replay_direct_test_run
+ufs_replay_direct_test_run: ufs_replay_local_debug
+
 # Minimal local test: 1 day of data, runs on a laptop with DirectRunner
 .PHONY: ufs_replay_local_debug
 ufs_replay_local_debug:

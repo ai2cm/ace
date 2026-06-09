@@ -1205,6 +1205,8 @@ def _make_template(
     ds_atmo_small = ds_atmo.sel(time=slice(atmo_start, atmo_end)).load()
     src_atmo = _make_source_grid(ds_atmo_small)
 
+    # First pass: process WITHOUT NN-fill so we can extract fill indices
+    # from the un-filled data.  Then apply fill and continue.
     processed = _process_chunk(
         ds_ocean_small,
         ds_atmo_small,
@@ -1213,18 +1215,22 @@ def _make_template(
         time_coarsen_factor,
         src_ocean,
         src_atmo,
+        nn_fill_map={},  # empty map → no fill applied, no fallback
     )
     processed = processed.drop_encoding()
 
-    # Precompute NN-fill indices from the template chunk. The fill
-    # pattern depends only on the static ocean mask, so we compute
-    # it once here and pass to every worker.
+    # Precompute NN-fill indices from the UN-FILLED template chunk.
+    # The fill pattern depends only on the static ocean mask, so we
+    # compute it once here and pass to every Beam worker.
     mask_2d_arr = (
         invariant["mask_2d"].values
         if "mask_2d" in invariant
         else processed["mask_2d"].values
     )
     nn_fill_map = _compute_nn_fill_indices(processed, mask_2d_arr)
+
+    # Now apply NN fill to the template data
+    processed = _apply_nn_fill(processed, nn_fill_map)
 
     # Squeeze out the single-timestep time dim, then re-expand with the
     # full output time coordinate (same pattern as ERA5 pipeline).
