@@ -512,9 +512,16 @@ class CrossFormerStep(StepABC):
             if args.data_mask is not None:
                 input_norm = _apply_input_mask(input_norm, args.data_mask)
             input_tensor = self.input_packer.pack(input_norm, axis=self.CHANNEL_DIM)
-            extra = self._global_mean_removal.get_extra_channels()
-            if extra is not None:
-                input_tensor = torch.cat([input_tensor, extra], dim=self.CHANNEL_DIM)
+            extra_dict = self._global_mean_removal.extras_normalized()
+            if extra_dict:
+                extras = torch.cat(
+                    [
+                        extra_dict[name].unsqueeze(self.CHANNEL_DIM)
+                        for name in self._global_mean_removal.extra_channel_names
+                    ],
+                    dim=self.CHANNEL_DIM,
+                )
+                input_tensor = torch.cat([input_tensor, extras], dim=self.CHANNEL_DIM)
             output_tensor = wrapper(self.module)(input_tensor)
             output_tensor = output_tensor.squeeze(2)
             return self.output_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
