@@ -8,6 +8,7 @@ import xarray as xr
 from fme.ace.data_loading.cmip6 import Cmip6DataConfig, Cmip6TimeKeep, Cmip6TimeMask
 from fme.core.dataset.time import TimeSlice
 from fme.core.dataset.xarray import XarrayDataConfig
+from fme.core.typing_ import Slice
 
 
 def _make_zarr(path, n_times=10, n_lat=4, n_lon=8, varnames=("tas", "pr")):
@@ -517,6 +518,79 @@ def test_time_keep_restricts_matched_dataset_to_window(cmip6_data_dir):
         assert entry.subset.stop_time == "2000-01-07"
         assert "ModelA/historical/" in entry.data_path
         assert entry.labels == ["ModelA.p1"]
+
+
+def test_subsample_step_applied_to_plain_entries(cmip6_data_dir):
+    """``subsample_step`` propagates to ``XarrayDataConfig.subset.step``
+    for entries that would otherwise be un-subsetted."""
+    config = Cmip6DataConfig(data_dir=cmip6_data_dir, subsample_step=7)
+    concat = config._get_concat_config()
+    for entry in concat.concat:
+        assert isinstance(entry.subset, Slice)
+        assert entry.subset.step == 7
+        assert entry.subset.start is None
+        assert entry.subset.stop is None
+
+
+def test_subsample_step_applied_to_time_keep_window(cmip6_data_dir):
+    """``subsample_step`` writes through to the ``TimeSlice.step`` on
+    matched ``time_keeps`` entries."""
+    config = Cmip6DataConfig(
+        data_dir=cmip6_data_dir,
+        experiments=["historical", "ssp585"],
+        time_keeps=[
+            Cmip6TimeKeep(
+                source_ids=["ModelA"],
+                experiments=["historical"],
+                keep_start="2000-01-04",
+                keep_end="2000-01-07",
+            )
+        ],
+        subsample_step=3,
+    )
+    concat = config._get_concat_config()
+    windowed = [
+        e
+        for e in concat.concat
+        if isinstance(e.subset, TimeSlice) and e.subset.start_time == "2000-01-04"
+    ]
+    assert len(windowed) == 2
+    for entry in windowed:
+        assert isinstance(entry.subset, TimeSlice)
+        assert entry.subset.step == 3
+    # Untouched entries still get a Slice with the step.
+    plain = [e for e in concat.concat if isinstance(e.subset, Slice)]
+    for entry in plain:
+        assert isinstance(entry.subset, Slice)
+        assert entry.subset.step == 3
+
+
+def test_subsample_step_applied_to_time_mask_split_entries(cmip6_data_dir):
+    """``subsample_step`` writes through to both the pre-mask and the
+    post-mask ``TimeSlice``s when a ``time_masks`` entry matches."""
+    config = Cmip6DataConfig(
+        data_dir=cmip6_data_dir,
+        source_ids=["ModelA"],
+        experiments=["historical"],
+        time_masks=[
+            Cmip6TimeMask(
+                source_ids=["ModelA"],
+                experiments=["historical"],
+                keep_before="2000-01-04",
+                keep_after="2000-01-08",
+            )
+        ],
+        subsample_step=5,
+    )
+    concat = config._get_concat_config()
+    for entry in concat.concat:
+        assert isinstance(entry.subset, TimeSlice)
+        assert entry.subset.step == 5
+
+
+def test_subsample_step_rejects_invalid_values():
+    with pytest.raises(ValueError, match="subsample_step must be >= 1"):
+        Cmip6DataConfig(data_dir="/nonexistent", subsample_step=0)
 
 
 def test_time_keep_and_time_mask_on_same_pair_raises():

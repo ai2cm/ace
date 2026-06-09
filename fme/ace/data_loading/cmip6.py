@@ -13,6 +13,7 @@ from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.time import TimeSlice
 from fme.core.dataset.xarray import XarrayDataConfig
+from fme.core.typing_ import Slice
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +127,16 @@ class Cmip6DataConfig(DatasetConfigABC):
             loader keeps the same window with ``time_keeps``). One
             keep per (source_id, experiment); a single dataset
             can't be in both ``time_masks`` and ``time_keeps``.
+        subsample_step: When set, keep every Nth sample per matched
+            dataset. Applied via the ``step`` field on each internal
+            ``XarrayDataConfig.subset`` (``Slice`` for entries without a
+            time window, ``TimeSlice`` for entries with one). Used to
+            cap validation cost without changing the dataset filter —
+            e.g. ``subsample_step: 100`` on a 1M-sample val loader
+            yields ~10k samples uniformly drawn across the original
+            temporal coverage. The reduction multiplies across all
+            matched datasets, so size targets are per-segment (the
+            full validation entry), not per-dataset.
         engine: Xarray engine for reading data files. "zarr" reads data.zarr
             stores, "netcdf4" reads data.nc files. Use "netcdf4" with
             zarr_to_netcdf.py-converted datasets for fork-safe data workers.
@@ -141,12 +152,15 @@ class Cmip6DataConfig(DatasetConfigABC):
     exclude_variants: list[list[str]] = dataclasses.field(default_factory=list)
     time_masks: list[Cmip6TimeMask] = dataclasses.field(default_factory=list)
     time_keeps: list[Cmip6TimeKeep] = dataclasses.field(default_factory=list)
+    subsample_step: int | None = None
     engine: Literal["zarr", "netcdf4"] = "zarr"
 
     def __post_init__(self):
         self._concat_config_cache: ConcatDatasetConfig | None = None
         if self.engine not in ("zarr", "netcdf4"):
             raise ValueError(f"engine must be 'zarr' or 'netcdf4', got {self.engine!r}")
+        if self.subsample_step is not None and self.subsample_step < 1:
+            raise ValueError(f"subsample_step must be >= 1, got {self.subsample_step}")
         for triple in self.exclude_variants:
             if len(triple) != 3:
                 raise ValueError(
@@ -278,6 +292,7 @@ class Cmip6DataConfig(DatasetConfigABC):
                 row["experiment"],
                 row["variant_label"],
             )
+            step = self.subsample_step
             keep = self._find_time_keep(row["source_id"], row["experiment"])
             if keep is not None:
                 # Positive-window: one entry covering only
@@ -291,6 +306,7 @@ class Cmip6DataConfig(DatasetConfigABC):
                         subset=TimeSlice(
                             start_time=keep.keep_start,
                             stop_time=keep.keep_end,
+                            step=step,
                         ),
                     )
                 )
@@ -304,6 +320,7 @@ class Cmip6DataConfig(DatasetConfigABC):
                         file_pattern=self._file_pattern,
                         engine=self.engine,
                         labels=[row["label"]],
+                        subset=(Slice(step=step) if step is not None else Slice()),
                     )
                 )
                 continue
@@ -317,7 +334,7 @@ class Cmip6DataConfig(DatasetConfigABC):
                     file_pattern=self._file_pattern,
                     engine=self.engine,
                     labels=[row["label"]],
-                    subset=TimeSlice(stop_time=mask.keep_before),
+                    subset=TimeSlice(stop_time=mask.keep_before, step=step),
                 )
             )
             configs.append(
@@ -326,7 +343,7 @@ class Cmip6DataConfig(DatasetConfigABC):
                     file_pattern=self._file_pattern,
                     engine=self.engine,
                     labels=[row["label"]],
-                    subset=TimeSlice(start_time=mask.keep_after),
+                    subset=TimeSlice(start_time=mask.keep_after, step=step),
                 )
             )
             n_masked += 1
