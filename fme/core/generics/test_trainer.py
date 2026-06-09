@@ -246,6 +246,7 @@ class Config:
     save_best_inference_epoch_checkpoints: bool = False
     ema: EMAConfig = dataclasses.field(default_factory=EMAConfig)
     lr_tuning: LRTuningConfig | None = None
+    pre_cooldown_checkpoint_epoch: int | None = None
 
     def __post_init__(self):
         start_epoch = 0 if self.evaluate_before_training else 1
@@ -342,6 +343,7 @@ def get_trainer(
     checkpoint_every_n_batches: int = 0,
     n_train_batches: int = 100,
     save_best_inference_epoch_checkpoints: bool = False,
+    pre_cooldown_checkpoint_epoch: int | None = None,
     scheduler_config: SchedulerConfig | None = None,
     n_validation_batches: int = 5,
     save_checkpoint: bool = True,
@@ -434,6 +436,7 @@ def get_trainer(
         validate_using_ema=validate_using_ema,
         evaluate_before_training=evaluate_before_training,
         save_best_inference_epoch_checkpoints=save_best_inference_epoch_checkpoints,
+        pre_cooldown_checkpoint_epoch=pre_cooldown_checkpoint_epoch,
         save_checkpoint=save_checkpoint,
         ema=ema_config,
         lr_tuning=lr_tuning,
@@ -1144,6 +1147,39 @@ def test_save_best_inference_epoch_ckpts_disabled(tmp_path: str):
         assert not os.path.exists(
             paths.best_inference_epoch_checkpoint_path(epoch)
         ), f"Should not save best_inference_ckpt_{epoch}.tar when disabled"
+
+
+def test_pre_cooldown_checkpoint_saved(tmp_path: str):
+    max_epochs = 3
+    pre_cooldown_epoch = 2
+
+    config, trainer = get_trainer(
+        tmp_path,
+        max_epochs=max_epochs,
+        pre_cooldown_checkpoint_epoch=pre_cooldown_epoch,
+        validate_using_ema=False,
+    )
+    trainer.train()
+
+    paths = CheckpointPaths(config.checkpoint_dir)
+    assert os.path.exists(paths.pre_cooldown_checkpoint_path)
+    ckpt = torch.load(
+        paths.pre_cooldown_checkpoint_path, map_location="cpu", weights_only=False
+    )
+    assert ckpt["epoch"] == pre_cooldown_epoch
+
+
+def test_pre_cooldown_checkpoint_not_saved_when_unset(tmp_path: str):
+    config, trainer = get_trainer(
+        tmp_path,
+        max_epochs=3,
+        pre_cooldown_checkpoint_epoch=None,
+        validate_using_ema=False,
+    )
+    trainer.train()
+
+    paths = CheckpointPaths(config.checkpoint_dir)
+    assert not os.path.exists(paths.pre_cooldown_checkpoint_path)
 
 
 def test_lr_logging_by_epoch(tmp_path: str):
