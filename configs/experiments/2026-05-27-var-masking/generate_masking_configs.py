@@ -60,7 +60,7 @@ CO2_FIELD = "global_mean_co2"
 
 MASK_RATES = [0.05, 0.1, 0.2, 0.3, 0.4]
 CO2_BERNOULLI_RATES: list[float] = [0.40]
-GMR_VALS = [True, False]
+GMR_VALS = [True]
 UNIFORM_MAX_VARS: list[int | str] = ["all", 3, 17]
 
 HERE = pathlib.Path(__file__).parent
