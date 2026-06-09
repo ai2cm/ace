@@ -556,19 +556,19 @@ def step_with_adjustments(
         network_input, gmr_state = global_mean_removal.forward_transform(
             input, data_mask
         )
-    else:
-        network_input = dict(input)
-    input_norm = normalizer.normalize(network_input)
-    if global_mean_removal is not None and gmr_state is not None:
+        input_norm = normalizer.normalize(network_input)
         # Synthetic GMR channels are produced in normalized space; merge
         # them in after normalization so the network sees a single uniform
         # input dict.
         input_norm = {**input_norm, **global_mean_removal.extras_normalized(gmr_state)}
+    else:
+        input_norm = normalizer.normalize(input)
     output_norm = network_calls(input_norm)
     if residual_prediction:
         output_norm = add_names(input_norm, output_norm, prognostic_names)
     output = normalizer.denormalize(output_norm)
-    if global_mean_removal is not None and gmr_state is not None:
+    if global_mean_removal is not None:
+        assert gmr_state is not None
         output = global_mean_removal.inverse_transform(output, gmr_state)
     if corrector is not None:
         corrector_state: CorrectorState | None = (
