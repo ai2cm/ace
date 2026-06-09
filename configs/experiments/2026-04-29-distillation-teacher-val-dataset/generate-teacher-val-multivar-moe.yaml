@@ -1,0 +1,49 @@
+experiment_dir: /climate-default/2026-06-09-distillation-teacher-moe-multivar-val-dataset
+
+patch:
+  divide_generation: true
+  composite_prediction: true
+  coarse_horizontal_overlap: 0
+
+model:
+  checkpoint_path: /checkpoints/bundled_moe_multivariate.ckpt
+
+data:
+  coarse:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 100km.zarr
+      engine: zarr
+      subset:
+        start_time: '2023-01-01T00:00:00'
+        stop_time: '2023-12-31T23:59:59'
+    - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: prmsl_100km.zarr
+      engine: zarr
+      subset:
+        start_time: '2023-01-01T00:00:00'
+        stop_time: '2023-12-31T23:59:59'
+  batch_size: 16
+  num_data_workers: 2
+  strict_ensemble: false
+
+outputs:
+  - name: conus_multivar_val_2023
+    n_ens: 12
+    max_samples_per_gpu: 16
+    time_range:
+      start_time: "2023-01-01T00:00:00"
+      stop_time: "2023-12-31T23:59:59"
+    lat_extent:
+      start: 22.0
+      stop: 50.0
+    lon_extent:
+      start: 230.0
+      stop: 295.0
+
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: andrep-downscaling
+  entity: ai2cm
