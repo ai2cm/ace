@@ -494,9 +494,12 @@ inference:
         variables: *annual_variables
 
 # ---------------------------------------------------------------------
-# Validation entries (one-step error, every-N strided to ~1000 samples
-# per dataset). val_holdout_variants carries weight 1.0 and drives
-# checkpoint selection per training_run_1 §validation.
+# Validation entries (one-step error). ``subsample_step`` is sized
+# per-entry to target a few thousand samples total per validation
+# segment — enough for a stable estimator of the loss without paying
+# the full multi-million-sample cost of iterating the cohort.
+# val_holdout_variants carries weight 1.0 and drives checkpoint
+# selection per training_run_1 §validation.
 # ---------------------------------------------------------------------
 validation:
   - name: val_holdout_variants
@@ -516,6 +519,8 @@ validation:
         # exact 6 held-out (A) variants (with r2 of EC-Earth3 ssp585
         # absent in v2, the matched eval set is 5).
         realizations: [2]
+        # ~14 datasets × ~85 yr × 365 ≈ 410k samples → ~4100 post-step.
+        subsample_step: 100
 
   - name: val_holdout_ssp585_ukesm
     weight: 0.0
@@ -529,6 +534,8 @@ validation:
         engine: netcdf4
         source_ids: [UKESM1-0-LL]
         experiments: [ssp585]
+        # ~16 variants × 86 yr × 365 ≈ 500k samples → ~4000 post-step.
+        subsample_step: 125
   - name: val_holdout_ssp585_mpi
     weight: 0.0
     loader:
@@ -541,6 +548,8 @@ validation:
         engine: netcdf4
         source_ids: [MPI-ESM1-2-LR]
         experiments: [ssp585]
+        # ~30 variants × 86 yr × 365 ≈ 940k samples → ~3700 post-step.
+        subsample_step: 250
 
   - name: val_era5_analog_canesm5
     weight: 0.0
@@ -561,6 +570,10 @@ validation:
         # there's no overlap of train + eval.
         exclude_variants:
           - [CanESM5, historical, r1i1p1f1]
+        # ~99 datasets × ~85 yr × 365 ≈ 3M samples → ~4000 post-step.
+        # CanESM5's large ensemble makes this the dominant val by far;
+        # without this step it iterates ~2.5 h on the cohort run.
+        subsample_step: 750
   - name: val_era5_analog_gfdl
     weight: 0.0
     loader:
@@ -574,6 +587,8 @@ validation:
         source_ids: [GFDL-CM4]
         # historical r1 stays in train; eval is ssp245 + ssp585 only.
         experiments: [ssp245, ssp585]
+        # ~8 datasets × 86 yr × 365 ≈ 250k samples → ~4200 post-step.
+        subsample_step: 60
 
   # (D) eval window: 1970-07-01 to 1989-06-30 — inverse of the
   # train_loader.time_masks block. The 6-month gap on either side of
@@ -596,6 +611,8 @@ validation:
             experiments: [historical]
             keep_start: '1970-07-01'
             keep_end: '1989-06-30'
+        # ~40 datasets × 19 yr × 365 ≈ 280k samples → ~4000 post-step.
+        subsample_step: 70
 
 logging:
   log_to_screen: true
