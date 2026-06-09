@@ -64,6 +64,6 @@ run_training() {
     -- bash -c "set -e && python -m fme.ace.validate_config --config_type train '$CONFIG_PATH' && torchrun --nproc_per_node '$N_GPUS' -m fme.ace.train '$CONFIG_PATH'"
 }
 
-# Active runs (uncomment one at a time; sweeps go in this block).
+# Active runs (sweeps go in this block).
 run_training "train-4deg-daily-cmip6-multimodel-per-source-norm.yaml" "train-4deg-daily-cmip6-multimodel-per-source-norm-rs0" 1
-# run_training "train-4deg-daily-cmip6-multimodel-cohort-norm.yaml" "train-4deg-daily-cmip6-multimodel-cohort-norm-rs0" 1
+run_training "train-4deg-daily-cmip6-multimodel-cohort-norm.yaml" "train-4deg-daily-cmip6-multimodel-cohort-norm-rs0" 1

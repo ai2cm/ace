@@ -15,10 +15,13 @@ save_checkpoint: true
 checkpoint_every_n_batches: 5000
 validate_using_ema: true
 max_epochs: 5
-# Run inline validation + inference once before the first training
-# epoch so any data-loading / OOM / config issue trips before we
-# commit to a long training pass (training_run_1 §inference).
-evaluate_before_training: true
+# Skipping pre-training eval: on jupiter we get frequent preemption,
+# and the bootstrap problem (no checkpoint exists until after epoch 1
+# training, so each restart redoes eval-before-training from scratch)
+# keeps us from ever clearing the gate. Defer the first val/inf pass
+# to end-of-epoch-1, which lands behind a checkpoint that survives
+# preemption.
+evaluate_before_training: false
 # 2x the framework default so per-epoch in-sample loss has tight SE
 # (training_run_1 §validation).
 train_evaluation_samples: 2000
