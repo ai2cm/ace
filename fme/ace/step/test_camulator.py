@@ -199,6 +199,10 @@ def test_noise_conditioned_crossformer_noise_divergence():
     CLN zero-init makes outputs noise-independent at init; diverge after a step.
 
     This mirrors test_nc_swin_transformer_noise_divergence from the swin tests.
+    Deterministic mode is required because CrossFormer's UpBlock uses
+    ConvTranspose2d, whose cuDNN kernel uses atomicAdd and is non-deterministic
+    by default.  Enabling deterministic algorithms removes that variability so
+    the CLN zero-init property is testable end-to-end.
     """
     config = make_nc_crossformer_config()
     module = config.build(
@@ -220,25 +224,30 @@ def test_noise_conditioned_crossformer_noise_divergence():
     )
     x = torch.randn(2, n_in, *IMG_SHAPE, device=fme.get_device())
 
-    # At init: CLN noise convs are zero → noise-independent.
-    with torch.no_grad():
-        out1 = module(x)
-        out2 = module(x)
-    assert torch.allclose(out1, out2), "Expected noise-independence at init"
+    prev_det = torch.are_deterministic_algorithms_enabled()
+    torch.use_deterministic_algorithms(True)
+    try:
+        # At init: CLN noise convs are zero → noise-independent.
+        with torch.no_grad():
+            out1 = module(x)
+            out2 = module(x)
+        assert torch.allclose(out1, out2), "Expected noise-independence at init"
 
-    # One optimizer step pushes CLN noise convs off zero.
-    out = module(x)
-    out.sum().backward()
-    optimizer.step()
-    optimizer.zero_grad()
+        # One optimizer step pushes CLN noise convs off zero.
+        out = module(x)
+        out.sum().backward()
+        optimizer.step()
+        optimizer.zero_grad()
 
-    # After step: two independent forward passes should differ.
-    with torch.no_grad():
-        out1 = module(x)
-        out2 = module(x)
-    assert not torch.allclose(
-        out1, out2
-    ), "Expected noise-dependence after optimizer step"
+        # After step: two independent forward passes should differ.
+        with torch.no_grad():
+            out1 = module(x)
+            out2 = module(x)
+        assert not torch.allclose(
+            out1, out2
+        ), "Expected noise-dependence after optimizer step"
+    finally:
+        torch.use_deterministic_algorithms(prev_det)
 
 
 def test_crossformer_diagnostic_names():
