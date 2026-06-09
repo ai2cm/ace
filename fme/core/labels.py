@@ -1,4 +1,4 @@
-import logging
+import warnings
 from typing import Any
 
 import torch
@@ -82,12 +82,16 @@ class BatchLabels:
         # Note dropped labels. Held-out-source eval entries (per
         # training_run_1's (C) bucket) deliberately feed variants
         # the trainer never saw, so this fires on every batch from
-        # those entries — log at info level rather than warning to
-        # keep the train log readable when the held-out-variant
-        # behavior is by design.
+        # those entries. Use ``warnings.warn`` so Python's default
+        # warning filter deduplicates the message per unique dropped
+        # set (one line per held-out variant per process, instead of
+        # a per-batch flood that drowns the train log).
         dropped = self._names_set.difference(new_names)
         if dropped:
-            logging.info(f"Dropping labels not present in new encoding: {dropped}")
+            warnings.warn(
+                f"Dropping labels not present in new encoding: {dropped}",
+                stacklevel=2,
+            )
 
         return BatchLabels(gathered, new_names)
 
