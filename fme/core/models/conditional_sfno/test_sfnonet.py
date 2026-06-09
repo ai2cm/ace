@@ -324,6 +324,70 @@ def test_filter_preserves_global_mean():
     )
 
 
+def test_sfnonet_spectral_ratio_end_to_end():
+    """End-to-end: SFNO with spectral_ratio < 1 builds, forwards, and shrinks
+    the per-block spectral weight tensor."""
+    torch.manual_seed(0)
+    input_channels = 2
+    output_channels = 3
+    embed_dim = 16
+    img_shape = (9, 18)
+    device = get_device()
+    params = SFNONetConfig(
+        embed_dim=embed_dim,
+        num_layers=2,
+        filter_type="linear",
+        spectral_ratio=0.5,
+    )
+    model = get_lat_lon_sfnonet(
+        params=params,
+        img_shape=img_shape,
+        in_chans=input_channels,
+        out_chans=output_channels,
+    ).to(device)
+    x = torch.randn(2, input_channels, *img_shape, device=device)
+    context = Context(
+        embedding_scalar=torch.zeros(2, 0, device=device),
+        labels=torch.zeros(2, 0, device=device),
+        noise=None,
+        embedding_pos=None,
+    )
+    output = model(x, context)
+    assert output.shape == (2, output_channels, *img_shape)
+    output.sum().backward()
+    for block in model.blocks:
+        spectral_conv = block.filter.filter
+        assert spectral_conv.spectral_channels == embed_dim // 2
+        assert spectral_conv.weight.shape[-2] == embed_dim // 2
+        assert spectral_conv.weight.shape[-3] == embed_dim // 2
+        assert spectral_conv.pre_proj is not None
+        assert spectral_conv.post_proj is not None
+        assert spectral_conv.weight.grad is not None
+        assert spectral_conv.pre_proj.weight.grad is not None
+        assert spectral_conv.post_proj.weight.grad is not None
+
+
+def test_sfnonet_spectral_ratio_rejects_non_linear_filter():
+    with pytest.raises(NotImplementedError, match="filter_type='linear'"):
+        SFNONetConfig(
+            embed_dim=16,
+            num_layers=2,
+            filter_type="makani-linear",
+            spectral_ratio=0.5,
+        )
+
+
+def test_sfnonet_spectral_ratio_rejects_preserve_global_mean():
+    with pytest.raises(NotImplementedError, match="filter_preserves_global_mean"):
+        SFNONetConfig(
+            embed_dim=16,
+            num_layers=2,
+            filter_type="linear",
+            spectral_ratio=0.5,
+            filter_preserves_global_mean=True,
+        )
+
+
 def test_filter_preserves_global_mean_allows_grad():
     torch.manual_seed(0)
     input_channels = 2

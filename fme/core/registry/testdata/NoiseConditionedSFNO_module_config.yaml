@@ -2,6 +2,7 @@ activation_function: gelu
 affine_norms: true
 big_skip: true
 checkpointing: 0
+clip_latent_global_means: false
 complex_activation: real
 complex_network: true
 context_pos_embed_dim: 0
@@ -32,5 +33,6 @@ separable: false
 spectral_layers: 1
 spectral_lora_alpha: null
 spectral_lora_rank: 0
+spectral_ratio: 1.0
 spectral_transform: sht
 use_mlp: true

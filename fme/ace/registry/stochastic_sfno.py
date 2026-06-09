@@ -252,6 +252,12 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             within the observed envelope (no-op when it already does).
             Bounds the global-mean of the latent the transformer blocks see
             at inference to the range observed in training.
+        spectral_ratio: Fraction of embed_dim that participates in the
+            spectral filter's SHT and per-mode complex weight. When < 1, a
+            Conv1x1 down-projection is applied before forward_transform and
+            an up-projection after inverse_transform, reducing both the SHT
+            cost and the size of the per-mode complex weight tensor. Only
+            supported for filter_type='linear'.
     """
 
     spectral_transform: Literal["sht"] = "sht"
@@ -292,6 +298,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     spectral_lora_alpha: float | None = None
     filter_preserves_global_mean: bool = False
     clip_latent_global_means: bool = False
+    spectral_ratio: float = 1.0
 
     def __post_init__(self):
         if self.context_pos_embed_dim > 0 and self.pos_embed:
@@ -306,6 +313,20 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             raise ValueError(
                 "Only 'dhconv' operator_type is supported for "
                 "NoiseConditionedSFNO models."
+            )
+        if not 0.0 < self.spectral_ratio <= 1.0:
+            raise ValueError(
+                f"spectral_ratio must be in (0, 1], got {self.spectral_ratio}."
+            )
+        if self.spectral_ratio < 1.0 and self.filter_type != "linear":
+            raise NotImplementedError(
+                "spectral_ratio < 1 is only supported for filter_type='linear', "
+                f"got filter_type='{self.filter_type}'."
+            )
+        if self.spectral_ratio < 1.0 and self.filter_preserves_global_mean:
+            raise NotImplementedError(
+                "filter_preserves_global_mean is not supported with "
+                "spectral_ratio < 1."
             )
 
     def build(
@@ -344,6 +365,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             spectral_lora_alpha=self.spectral_lora_alpha,
             filter_preserves_global_mean=self.filter_preserves_global_mean,
             clip_latent_global_means=self.clip_latent_global_means,
+            spectral_ratio=self.spectral_ratio,
         )
         sfno_net = get_lat_lon_sfnonet(
             params=sfno_config,

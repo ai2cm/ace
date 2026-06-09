@@ -91,6 +91,108 @@ def test_contract_dhconv_groups_are_faster():
     )
 
 
+def _make_conv(embed_dim, n_lat=12, n_lon=24, **kwargs):
+    operations = LatLonOperations(
+        area_weights=torch.ones(n_lat, n_lon),
+        grid="legendre-gauss",
+    )
+    sht = operations.get_real_sht()
+    isht = operations.get_real_isht()
+    return SpectralConvS2(
+        forward_transform=sht,
+        inverse_transform=isht,
+        in_channels=embed_dim,
+        out_channels=embed_dim,
+        **kwargs,
+    )
+
+
+def test_spectral_ratio_reduces_internal_weight_shape():
+    embed_dim = 16
+    n_lat, n_lon = 12, 24
+    full = _make_conv(embed_dim, n_lat, n_lon)
+    half = _make_conv(embed_dim, n_lat, n_lon, spectral_ratio=0.5)
+
+    assert full.spectral_channels == embed_dim
+    assert half.spectral_channels == embed_dim // 2
+    # weight is (num_groups, modes_lat, out_ch // g, in_ch // g, 2)
+    assert full.weight.shape == (1, n_lat, embed_dim, embed_dim, 2)
+    assert half.weight.shape == (
+        1,
+        n_lat,
+        embed_dim // 2,
+        embed_dim // 2,
+        2,
+    )
+    # Projections present iff spectral_ratio < 1
+    assert full.pre_proj is None and full.post_proj is None
+    assert half.pre_proj is not None and half.post_proj is not None
+    assert half.pre_proj.weight.shape == (embed_dim // 2, embed_dim, 1, 1)
+    assert half.post_proj.weight.shape == (embed_dim, embed_dim // 2, 1, 1)
+
+
+def test_spectral_ratio_forward_pass_and_shape():
+    embed_dim = 16
+    n_lat, n_lon = 12, 24
+    conv = _make_conv(embed_dim, n_lat, n_lon, spectral_ratio=0.5)
+    x = torch.randn(2, embed_dim, n_lat, n_lon)
+    y, residual = conv(x)
+    assert y.shape == (2, embed_dim, n_lat, n_lon)
+    # No round-trip residual (grids match, no filter_residual), so residual
+    # should be the original input passed through unchanged.
+    assert torch.equal(residual, x)
+
+
+def test_spectral_ratio_matches_manual_qwp_contraction():
+    """Verify that the spectral_ratio < 1 forward pass is equivalent to a
+    sandwich Q @ inv_F( W'_l @ F(P x) )."""
+    torch.manual_seed(0)
+    embed_dim = 8
+    n_lat, n_lon = 12, 24
+    conv = _make_conv(embed_dim, n_lat, n_lon, spectral_ratio=0.5)
+    x = torch.randn(2, embed_dim, n_lat, n_lon)
+    with torch.no_grad():
+        y, _ = conv(x)
+
+        # manual reference
+        sht = conv.forward_transform
+        isht = conv.inverse_transform
+        xp = conv.pre_proj(x.float())  # (B, C_spec, H, W)
+        xs = sht(xp.float())  # (B, C_spec, lmax, mmax) complex
+        # apply per-mode weight: w shape (1, modes_lat, out, in, 2)
+        w = torch.view_as_complex(conv.weight)[0]  # (modes_lat, out, in)
+        # contract over in -> out, per (lat)
+        ys = torch.einsum("loi,bily->boly", w, xs)
+        y_ref = isht(ys.contiguous())
+        y_ref = conv.post_proj(y_ref)
+
+    torch.testing.assert_close(y, y_ref, atol=1e-5, rtol=1e-5)
+
+
+def test_spectral_ratio_default_unchanged():
+    """spectral_ratio=1.0 must not add projections or change params."""
+    torch.manual_seed(0)
+    embed_dim = 8
+    baseline = _make_conv(embed_dim)
+    with_default = _make_conv(embed_dim, spectral_ratio=1.0)
+    baseline_params = {k: v.shape for k, v in baseline.state_dict().items()}
+    default_params = {k: v.shape for k, v in with_default.state_dict().items()}
+    assert baseline_params == default_params
+
+
+def test_spectral_ratio_validation():
+    embed_dim = 8
+    with pytest.raises(ValueError, match="spectral_ratio"):
+        _make_conv(embed_dim, spectral_ratio=0.0)
+    with pytest.raises(ValueError, match="spectral_ratio"):
+        _make_conv(embed_dim, spectral_ratio=1.5)
+    # 8 * 0.25 -> 2 spectral channels, not divisible by num_groups=4
+    with pytest.raises(ValueError, match="num_groups"):
+        _make_conv(embed_dim, spectral_ratio=0.25, num_groups=4)
+    with pytest.raises(NotImplementedError, match="preserve_global_mean"):
+        _make_conv(embed_dim, spectral_ratio=0.5, preserve_global_mean=True)
+
+
 def test_spectral_conv_s2_lora():
     in_channels = 8
     out_channels = in_channels
