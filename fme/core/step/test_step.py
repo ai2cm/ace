@@ -32,6 +32,7 @@ from fme.core.step.multi_call import MultiCallConfig, MultiCallStepConfig
 from fme.core.step.secondary_decoder import SecondaryDecoderConfig
 from fme.core.step.secondary_module import SecondaryModuleStepConfig
 from fme.core.step.single_module import (
+    SingleModuleStep,
     SingleModuleStepConfig,
     _apply_input_mask,
     _build_channel_mask_dict,
@@ -1440,6 +1441,58 @@ def test_step_shared_global_mean_removal_affects_output():
         out_names,
         means,
     )
+
+
+def test_step_per_channel_global_mean_removal_with_channel_masks():
+    """When both ``include_channel_mask_inputs`` and per-channel GMR extras
+    are enabled, the GMR extras should be packed as ordinary input
+    channels and receive their own mask channels.  Total network input
+    channels = ``2 * (n_in_names + n_extras)``.
+    """
+    in_names = ["forcing_shared", "forcing_rad"]
+    out_names = ["diagnostic_main", "diagnostic_rad"]
+    all_names = list(set(in_names + out_names))
+    normalization = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means={name: 0.0 for name in all_names},
+            stds={name: 1.0 for name in all_names},
+        ),
+    )
+    removal = PerChannelGlobalMeanRemovalConfig(
+        field_names=in_names, append_as_input=True
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+                ),
+                in_names=in_names,
+                out_names=out_names,
+                normalization=normalization,
+                include_channel_mask_inputs=True,
+                global_mean_removal=removal,
+            ),
+        ),
+    )
+    step = get_step(config, DEFAULT_IMG_SHAPE)
+    assert isinstance(step, SingleModuleStep)
+    # 2 real inputs + 2 GMR extras → 4 packed input channels (doubled to 8
+    # by the channel-mask append in network_call).
+    assert len(step.in_packer.names) == 4
+
+    n_samples = 2
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+    output, _ = step.step(
+        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
+    )
+    for name in out_names:
+        assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
 
 
 def test_step_shared_global_mean_removal_raises_on_masked_reference():

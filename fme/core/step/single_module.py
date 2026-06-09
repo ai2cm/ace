@@ -271,20 +271,24 @@ class SingleModuleStep(StepABC):
             init_weights: Function to initialize the weights of the module.
         """
         super().__init__()
-        n_in_channels = len(config.in_names)
-        if config.include_channel_mask_inputs:
-            n_in_channels *= 2
         if config.global_mean_removal is not None:
             self._global_mean_removal: GlobalMeanRemoval = (
                 config.global_mean_removal.build(
                     normalizer=normalizer, in_names=config.in_names
                 )
             )
-            n_in_channels += self._global_mean_removal.n_extra_input_channels
         else:
             self._global_mean_removal = NoGlobalMeanRemoval()
+        # Synthetic GMR channels are packed alongside real inputs so they
+        # flow through the packer and channel-mask machinery uniformly.
+        packed_in_names = (
+            list(config.in_names) + self._global_mean_removal.extra_channel_names
+        )
+        n_in_channels = len(packed_in_names)
+        if config.include_channel_mask_inputs:
+            n_in_channels *= 2
         n_out_channels = len(config.out_names)
-        self.in_packer = Packer(config.in_names)
+        self.in_packer = Packer(packed_in_names)
         self.out_packer = Packer(config.out_names)
         self._normalizer = normalizer
         if config.ocean is not None:
@@ -379,15 +383,12 @@ class SingleModuleStep(StepABC):
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
             if self._config.include_channel_mask_inputs:
                 mask_dict = _build_channel_mask_dict(
-                    self.in_names, args.data_mask, input_tensor
+                    self.in_packer.names, args.data_mask, input_tensor
                 )
                 mask_tensor = self.in_packer.pack(mask_dict, axis=self.CHANNEL_DIM)
                 input_tensor = torch.cat(
                     [input_tensor, mask_tensor], dim=self.CHANNEL_DIM
                 )
-            extra = self._global_mean_removal.get_extra_channels()
-            if extra is not None:
-                input_tensor = torch.cat([input_tensor, extra], dim=self.CHANNEL_DIM)
             output_tensor = self.module.wrap_module(wrapper)(
                 input_tensor,
                 labels=args.labels,
@@ -550,6 +551,11 @@ def step_with_adjustments(
     else:
         network_input = input
     input_norm = normalizer.normalize(network_input)
+    if global_mean_removal is not None:
+        # Synthetic GMR channels are produced in normalized space; merge
+        # them in after normalization so the network sees a single uniform
+        # input dict.
+        input_norm = {**input_norm, **global_mean_removal.extras_normalized()}
     output_norm = network_calls(input_norm)
     if residual_prediction:
         output_norm = add_names(input_norm, output_norm, prognostic_names)
