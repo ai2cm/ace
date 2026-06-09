@@ -61,6 +61,7 @@ def test_multi_call():
         args=StepArgs(
             input=initial_condition | co2_data,
             next_step_input_data={},
+            n_ensemble=1,
             labels=None,
         ),
         wrapper=lambda x: x,

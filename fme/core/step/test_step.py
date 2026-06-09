@@ -33,11 +33,14 @@ from fme.core.step.secondary_decoder import SecondaryDecoderConfig
 from fme.core.step.secondary_module import SecondaryModuleStepConfig
 from fme.core.step.single_module import (
     SingleModuleStepConfig,
+    _apply_extra_channel_mask,
     _apply_input_mask,
     _build_channel_mask_dict,
+    _build_effective_input_mask,
 )
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.typing_ import TensorDict
+from fme.core.var_masking import UniformMaskingConfig, VariableMaskingConfig
 
 from .radiation import SeparateRadiationStepConfig
 
@@ -534,6 +537,7 @@ def test_label_conditioned_step():
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
+            n_ensemble=1,
             labels=BatchLabels.new_from_set(
                 {"a", "b"}, n_samples=1, device=fme.get_device()
             ),
@@ -603,7 +607,10 @@ def test_step_applies_wrapper(config: StepSelector):
     wrapper = unittest.mock.MagicMock(side_effect=lambda x: x)
     step.step(
         args=StepArgs(
-            input=input_data, next_step_input_data=next_step_input_data, labels=None
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            n_ensemble=1,
+            labels=None,
         ),
         wrapper=wrapper,
     )
@@ -750,6 +757,7 @@ def test_step_with_prescribed_prognostic_overwrites_output():
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
+            n_ensemble=1,
             labels=None,
         ),
         wrapper=lambda x: x,
@@ -908,7 +916,10 @@ def test_secondary_module_full_field_and_residual():
     )
     output, _ = step.step(
         args=StepArgs(
-            input=input_data, next_step_input_data=next_step_input_data, labels=None
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            n_ensemble=1,
+            labels=None,
         ),
     )
     assert "prog" in output
@@ -959,7 +970,10 @@ def test_secondary_module_state_round_trip():
         step1.next_step_input_names, img_shape, n_samples=1
     )
     args = StepArgs(
-        input=input_data, next_step_input_data=next_step_input_data, labels=None
+        input=input_data,
+        next_step_input_data=next_step_input_data,
+        n_ensemble=1,
+        labels=None,
     )
     out1, _ = step1.step(args=args)
     out2, _ = step2.step(args=args)
@@ -1005,7 +1019,10 @@ def test_secondary_module_residual_on_input_only_with_residual_prediction():
     )
     output, _ = step.step(
         args=StepArgs(
-            input=input_data, next_step_input_data=next_step_input_data, labels=None
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            n_ensemble=1,
+            labels=None,
         ),
     )
     assert output["prog_a"].shape == (2, *img_shape)
@@ -1082,6 +1099,7 @@ def test_step_with_data_mask():
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
+            n_ensemble=1,
             labels=None,
             data_mask=None,
         ),
@@ -1090,6 +1108,7 @@ def test_step_with_data_mask():
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
+            n_ensemble=1,
             labels=None,
             data_mask=data_mask,
         ),
@@ -1176,6 +1195,7 @@ def test_step_with_include_channel_mask_inputs():
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
+            n_ensemble=1,
             labels=None,
             data_mask=None,
         ),
@@ -1184,6 +1204,7 @@ def test_step_with_include_channel_mask_inputs():
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
+            n_ensemble=1,
             labels=None,
             data_mask=data_mask,
         ),
@@ -1228,6 +1249,7 @@ def test_step_with_include_channel_mask_inputs_no_data_mask():
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
+            n_ensemble=1,
             labels=None,
             data_mask=None,
         ),
@@ -1240,6 +1262,7 @@ def test_step_with_include_channel_mask_inputs_no_data_mask():
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
+            n_ensemble=1,
             labels=None,
             data_mask=all_unmasked,
         ),
@@ -1247,6 +1270,313 @@ def test_step_with_include_channel_mask_inputs_no_data_mask():
     for name in ["diagnostic_main", "diagnostic_rad"]:
         assert output_no_mask[name].shape == (n_samples, *img_shape)
         torch.testing.assert_close(output_no_mask[name], output_all_unmasked[name])
+
+
+def test_step_masked_nan_input_is_zeroed_before_network_with_corrector():
+    """Masked NaNs should be replaced in normalized space before module input."""
+    in_names = ["masked_input", "forcing"]
+    out_names = ["masked_input"]
+    normalization = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means={name: 0.0 for name in set(in_names + out_names)},
+            stds={name: 1.0 for name in set(in_names + out_names)},
+        ),
+    )
+
+    class AssertFiniteInputModule(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self._p = nn.Parameter(torch.zeros(1))
+
+        def forward(self, inp):
+            assert not torch.isnan(inp).any()
+            return self._p.new_full(
+                (inp.shape[0], len(out_names), *inp.shape[-2:]), -1.0
+            )
+
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="prebuilt", config={"module": AssertFiniteInputModule()}
+                ),
+                in_names=in_names,
+                out_names=out_names,
+                normalization=normalization,
+                corrector=AtmosphereCorrectorConfig(force_positive_names=out_names),
+            )
+        ),
+    )
+    img_shape = (4, 8)
+    n_samples = 4
+    step = get_step(config, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
+    input_data["masked_input"][2:] = torch.nan
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples
+    )
+    data_mask = {
+        "masked_input": torch.tensor(
+            [True, True, False, False], device=fme.get_device()
+        ),
+    }
+
+    output, _ = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            n_ensemble=1,
+            data_mask=data_mask,
+        ),
+    )
+    assert not output["masked_input"].isnan().any()
+    assert (output["masked_input"] == 0.0).all()
+
+
+def test_input_dropout_applied_in_train_mode_not_eval():
+    """input_dropout must zero channels when the module is training and skip
+    when it is in eval mode.
+
+    Two calls are made with the same non-zero input: one in train mode (module
+    in training state) and one in eval mode.  With rate=1.0 the dropout always
+    fires during training, so the indicator channel for the dropped variable
+    must be 0.0 in train output and 1.0 in eval output.
+    """
+    in_names = ["x", "y"]
+    out_names = ["x"]
+    img_shape = (4, 8)
+    n_samples = 2
+
+    normalization = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means={n: 0.0 for n in in_names + out_names},
+            stds={n: 1.0 for n in in_names + out_names},
+        )
+    )
+
+    # Module records the indicator channels (second half of input) for inspection.
+    class RecordMaskModule(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.last_x_indicator: torch.Tensor | None = None
+            self._p = nn.Parameter(torch.zeros(1))
+
+        def forward(self, inp):
+            n_in = inp.shape[1] // 2
+            # indicator channels are the second half
+            indicators = inp[:, n_in:]
+            # "x" is first in in_names
+            self.last_x_indicator = indicators[:, 0].detach().clone()
+            return self._p.new_zeros(n_samples, len(out_names), *img_shape)
+
+    recorder = RecordMaskModule()
+    from fme.core.step.single_module import SingleModuleStep
+
+    step_config = SingleModuleStepConfig(
+        builder=ModuleSelector(type="prebuilt", config={"module": recorder}),
+        in_names=in_names,
+        out_names=out_names,
+        normalization=normalization,
+        include_channel_mask_inputs=True,
+        input_dropout=VariableMaskingConfig(per_variable={"x": 1.0}),
+    )
+    dataset_info = DatasetInfo(
+        horizontal_coordinates=LatLonCoordinates(
+            lat=torch.zeros(img_shape[0]),
+            lon=torch.zeros(img_shape[1]),
+        ),
+        vertical_coordinate=HybridSigmaPressureCoordinate(
+            ak=torch.arange(7), bk=torch.arange(7)
+        ),
+        timestep=TIMESTEP,
+    )
+    step_obj = step_config.get_step(dataset_info, init_weights=lambda _: None)
+    assert isinstance(step_obj, SingleModuleStep)
+    input_data = get_tensor_dict(in_names, img_shape, n_samples)
+    next_step_input_data = get_tensor_dict(
+        step_obj.next_step_input_names, img_shape, n_samples
+    )
+
+    # Training mode: dropout fires, indicator for "x" should be 0.0
+    step_obj.module.torch_module.train()
+    step_obj.step(
+        StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            n_ensemble=1,
+        )
+    )
+    assert recorder.last_x_indicator is not None
+    assert (recorder.last_x_indicator == 0.0).all(), "Expected x masked in train mode"
+
+    # Eval mode: dropout disabled, indicator for "x" should be 1.0
+    step_obj.module.torch_module.eval()
+    step_obj.step(
+        StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            n_ensemble=1,
+        )
+    )
+    assert (recorder.last_x_indicator == 1.0).all(), "Expected x present in eval mode"
+
+
+def _make_input_dropout_step_config(
+    input_dropout: VariableMaskingConfig | None = None,
+    in_names: list[str] | None = None,
+    out_names: list[str] | None = None,
+    global_mean_removal: (
+        PerChannelGlobalMeanRemovalConfig | SharedGlobalMeanRemovalConfig | None
+    ) = None,
+) -> SingleModuleStepConfig:
+    if in_names is None:
+        in_names = ["x", "y"]
+    if out_names is None:
+        out_names = ["x"]
+    all_names = set(in_names + out_names)
+    normalization = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means={name: 0.0 for name in all_names},
+            stds={name: 1.0 for name in all_names},
+        )
+    )
+    return SingleModuleStepConfig(
+        builder=ModuleSelector(
+            type="SphericalFourierNeuralOperatorNet",
+            config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+        ),
+        in_names=in_names,
+        out_names=out_names,
+        normalization=normalization,
+        global_mean_removal=global_mean_removal,
+        input_dropout=input_dropout,
+    )
+
+
+def test_input_dropout_config_round_trips_through_dacite():
+    variable_config = _make_input_dropout_step_config(
+        VariableMaskingConfig(per_variable={"x": 0.25})
+    )
+    variable_restored = dacite.from_dict(
+        SingleModuleStepConfig,
+        dataclasses.asdict(variable_config),
+        config=dacite.Config(strict=True),
+    )
+    assert isinstance(variable_restored.input_dropout, VariableMaskingConfig)
+    assert variable_restored.input_dropout.per_variable == {"x": 0.25}
+
+    uniform_config = _make_input_dropout_step_config(
+        VariableMaskingConfig(uniform=UniformMaskingConfig(min_vars=1, max_vars=1))
+    )
+    uniform_restored = dacite.from_dict(
+        SingleModuleStepConfig,
+        dataclasses.asdict(uniform_config),
+        config=dacite.Config(strict=True),
+    )
+    assert isinstance(uniform_restored.input_dropout, VariableMaskingConfig)
+    assert isinstance(uniform_restored.input_dropout.uniform, UniformMaskingConfig)
+    assert uniform_restored.input_dropout.uniform.min_vars == 1
+    assert uniform_restored.input_dropout.uniform.max_vars == 1
+
+
+def test_build_effective_input_mask_merges_data_mask_and_dropout():
+    data_mask = {
+        "a": torch.tensor([True, False, True]),
+        "b": torch.tensor([True, True, False]),
+    }
+    input_data = {"a": torch.ones(3, 1, 1)}
+    result = _build_effective_input_mask(
+        data_mask=data_mask,
+        input_dropout=VariableMaskingConfig(per_variable={"a": 1.0}),
+        training=True,
+        in_names=["a"],
+        extra_channel_names=[],
+        input_data=input_data,
+        n_ensemble=1,
+    )
+
+    torch.testing.assert_close(result["a"], torch.tensor([False, False, False]))
+    torch.testing.assert_close(result["b"], data_mask["b"])
+
+
+def test_build_effective_input_mask_repeats_dropout_for_ensemble_members():
+    torch.manual_seed(0)
+    n_samples = 4
+    n_ensemble = 3
+    data_mask = {"b": torch.ones(n_samples * n_ensemble, dtype=torch.bool)}
+    input_data = {"a": torch.ones(n_samples * n_ensemble, 1, 1)}
+    result = _build_effective_input_mask(
+        data_mask=data_mask,
+        input_dropout=VariableMaskingConfig(per_variable={"a": 0.5}),
+        training=True,
+        in_names=["a"],
+        extra_channel_names=[],
+        input_data=input_data,
+        n_ensemble=n_ensemble,
+    )
+
+    grouped = result["a"].view(n_samples, n_ensemble)
+    assert (grouped == grouped[:, :1]).all()
+    assert grouped[:, 0].any()
+    assert (~grouped[:, 0]).any()
+    torch.testing.assert_close(result["b"], data_mask["b"])
+
+
+def test_input_dropout_uniform_bounds_validated_against_in_names():
+    with pytest.raises(ValueError, match="min_vars"):
+        _make_input_dropout_step_config(
+            in_names=["x", "y"],
+            out_names=["x"],
+            input_dropout=VariableMaskingConfig(
+                uniform=UniformMaskingConfig(
+                    min_vars=2, max_vars="max", ignore_vars=["y"]
+                )
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    "input_dropout",
+    [
+        pytest.param(
+            VariableMaskingConfig(per_variable={"surface_temperature": 1.0}),
+            id="variable",
+        ),
+        pytest.param(
+            VariableMaskingConfig(uniform=UniformMaskingConfig(min_vars=1, max_vars=1)),
+            id="uniform",
+        ),
+    ],
+)
+def test_input_dropout_can_mask_shared_global_mean_reference(input_dropout):
+    config = _make_input_dropout_step_config(
+        in_names=["surface_temperature", "x"],
+        out_names=["surface_temperature"],
+        global_mean_removal=SharedGlobalMeanRemovalConfig(
+            reference_field="surface_temperature",
+            field_names=["surface_temperature", "x"],
+        ),
+        input_dropout=input_dropout,
+    )
+    assert isinstance(config.input_dropout, VariableMaskingConfig)
+
+
+def test_input_dropout_allows_shared_global_mean_reference_when_ignored():
+    config = _make_input_dropout_step_config(
+        in_names=["surface_temperature", "x"],
+        out_names=["surface_temperature"],
+        global_mean_removal=SharedGlobalMeanRemovalConfig(
+            reference_field="surface_temperature",
+            field_names=["surface_temperature", "x"],
+        ),
+        input_dropout=VariableMaskingConfig(
+            uniform=UniformMaskingConfig(
+                min_vars=1, max_vars=1, ignore_vars=["surface_temperature"]
+            )
+        ),
+    )
+    assert isinstance(config.input_dropout, VariableMaskingConfig)
 
 
 def _make_global_mean_removal_step(
@@ -1304,7 +1634,12 @@ def test_step_shared_global_mean_removal():
         step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
     output, _ = step.step(
-        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step,
+            n_ensemble=1,
+            labels=None,
+        ),
     )
     for name in out_names:
         assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
@@ -1329,7 +1664,12 @@ def test_step_shared_global_mean_removal_with_extra_channels():
         step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
     output, _ = step.step(
-        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step,
+            n_ensemble=1,
+            labels=None,
+        ),
     )
     for name in out_names:
         assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
@@ -1344,7 +1684,12 @@ def test_step_per_channel_global_mean_removal():
         step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
     output, _ = step.step(
-        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step,
+            n_ensemble=1,
+            labels=None,
+        ),
     )
     for name in step.output_names:
         assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
@@ -1364,7 +1709,12 @@ def test_step_per_channel_global_mean_removal_with_extra_channels():
         step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
     output, _ = step.step(
-        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step,
+            n_ensemble=1,
+            labels=None,
+        ),
     )
     for name in step.output_names:
         assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
@@ -1391,10 +1741,20 @@ def _assert_global_mean_removal_affects_output(removal, in_names, out_names, mea
         step_baseline.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
     baseline_output, _ = step_baseline.step(
-        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step,
+            n_ensemble=1,
+            labels=None,
+        ),
     )
     removal_output, _ = step_with_removal.step(
-        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step,
+            n_ensemble=1,
+            labels=None,
+        ),
     )
     differs = any(
         not torch.allclose(baseline_output[name], removal_output[name])
@@ -1467,7 +1827,442 @@ def test_step_shared_global_mean_removal_raises_on_masked_reference():
             args=StepArgs(
                 input=input_data,
                 next_step_input_data=next_step,
+                n_ensemble=1,
                 labels=None,
                 data_mask=data_mask,
             ),
         )
+
+
+def _make_shared_gmr_recorder_step(img_shape, n_samples, input_dropout):
+    """SharedGMR+append_as_input step; records named and extra channels."""
+    in_names = ["surface_temperature", "x"]
+    out_names = ["surface_temperature"]
+    means = {n: 280.0 for n in in_names + out_names}
+    stds = {n: 5.0 for n in in_names + out_names}
+    normalization = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(means=means, stds=stds),
+    )
+    device = fme.get_device()
+
+    class RecordModule(nn.Module):
+        def __init__(self):
+            super().__init__()
+            # named channels + 1 extra (surface_temperature_global_mean)
+            self.last_named: torch.Tensor | None = None
+            self.last_extra: torch.Tensor | None = None
+            self._p = nn.Parameter(torch.zeros(1))
+
+        def forward(self, inp):
+            n_named = len(in_names)
+            self.last_named = inp[:, :n_named].detach().clone()
+            self.last_extra = inp[:, n_named:].detach().clone()
+            return self._p.new_zeros(n_samples, len(out_names), *img_shape)
+
+    recorder = RecordModule()
+    step_config = SingleModuleStepConfig(
+        builder=ModuleSelector(type="prebuilt", config={"module": recorder}),
+        in_names=in_names,
+        out_names=out_names,
+        normalization=normalization,
+        global_mean_removal=SharedGlobalMeanRemovalConfig(
+            reference_field="surface_temperature",
+            field_names=list(in_names),
+            append_as_input=True,
+        ),
+        input_dropout=input_dropout,
+    )
+    dataset_info = DatasetInfo(
+        horizontal_coordinates=LatLonCoordinates(
+            lat=torch.zeros(img_shape[0], device=device),
+            lon=torch.zeros(img_shape[1], device=device),
+        ),
+        vertical_coordinate=HybridSigmaPressureCoordinate(
+            ak=torch.arange(7, device=device), bk=torch.arange(7, device=device)
+        ),
+        timestep=TIMESTEP,
+    )
+    from fme.core.step.single_module import SingleModuleStep
+
+    step_obj = step_config.get_step(dataset_info, init_weights=lambda _: None)
+    assert isinstance(step_obj, SingleModuleStep)
+    return step_obj, recorder
+
+
+def test_input_dropout_shared_gmr_reference_dropout_does_not_raise_at_step_time():
+    """input_dropout targeting the shared reference field must not raise at step time.
+
+    forward_transform receives args.data_mask (no dropout), so it sees the
+    unmasked reference field and computes the correct offset.
+    """
+    img_shape = (4, 8)
+    n_samples = 2
+    device = fme.get_device()
+
+    step_obj, _ = _make_shared_gmr_recorder_step(
+        img_shape,
+        n_samples,
+        input_dropout=VariableMaskingConfig(per_variable={"surface_temperature": 1.0}),
+    )
+    input_data = {
+        "surface_temperature": torch.full(
+            (n_samples, *img_shape), 285.0, device=device
+        ),
+        "x": torch.full((n_samples, *img_shape), 275.0, device=device),
+    }
+    next_step_data = get_tensor_dict(
+        step_obj.next_step_input_names, img_shape, n_samples
+    )
+    step_obj.module.torch_module.train()
+    # Must not raise, even though surface_temperature is the shared reference.
+    step_obj.step(
+        StepArgs(input=input_data, next_step_input_data=next_step_data, n_ensemble=1)
+    )
+
+
+def test_input_dropout_shared_gmr_reference_zeroes_named_not_extra():
+    """Masking the reference field zeroes only the named channel, not the extra."""
+    img_shape = (4, 8)
+    n_samples = 2
+    device = fme.get_device()
+
+    step_obj, recorder = _make_shared_gmr_recorder_step(
+        img_shape,
+        n_samples,
+        input_dropout=VariableMaskingConfig(per_variable={"surface_temperature": 1.0}),
+    )
+    input_data = {
+        "surface_temperature": torch.full(
+            (n_samples, *img_shape), 285.0, device=device
+        ),
+        "x": torch.full((n_samples, *img_shape), 275.0, device=device),
+    }
+    next_step_data = get_tensor_dict(
+        step_obj.next_step_input_names, img_shape, n_samples
+    )
+    step_obj.module.torch_module.train()
+    step_obj.step(
+        StepArgs(input=input_data, next_step_input_data=next_step_data, n_ensemble=1)
+    )
+    assert recorder.last_named is not None
+    assert recorder.last_extra is not None
+    # surface_temperature is the first named channel → must be zeroed
+    assert (
+        recorder.last_named[:, 0] == 0.0
+    ).all(), "named 'surface_temperature' not zeroed when masked"
+    # extra channel (surface_temperature_global_mean) must NOT be zeroed
+    assert (
+        recorder.last_extra[:, 0] != 0.0
+    ).all(), "extra 'surface_temperature_global_mean' wrongly zeroed"
+
+
+def test_input_dropout_shared_gmr_global_mean_name_zeroes_only_extra():
+    """Masking 'surface_temperature_global_mean' zeroes only the extra channel."""
+    img_shape = (4, 8)
+    n_samples = 2
+    device = fme.get_device()
+
+    step_obj, recorder = _make_shared_gmr_recorder_step(
+        img_shape,
+        n_samples,
+        input_dropout=VariableMaskingConfig(
+            per_variable={"surface_temperature_global_mean": 1.0}
+        ),
+    )
+    input_data = {
+        "surface_temperature": torch.full(
+            (n_samples, *img_shape), 285.0, device=device
+        ),
+        "x": torch.full((n_samples, *img_shape), 275.0, device=device),
+    }
+    next_step_data = get_tensor_dict(
+        step_obj.next_step_input_names, img_shape, n_samples
+    )
+    step_obj.module.torch_module.train()
+    step_obj.step(
+        StepArgs(input=input_data, next_step_input_data=next_step_data, n_ensemble=1)
+    )
+    assert recorder.last_named is not None
+    assert recorder.last_extra is not None
+    # We verify the extra channel is zeroed (named channel check is omitted because
+    # SharedGMR shifts surface_temperature to clim_mean → normalizes to 0 regardless).
+    assert (
+        recorder.last_extra[:, 0] == 0.0
+    ).all(), "extra 'surface_temperature_global_mean' not zeroed when explicitly masked"
+
+
+def test_extra_channel_names_have_global_mean_suffix():
+    """extra_channel_names returns _global_mean-suffixed strings."""
+    in_names = ["surface_temperature", "x"]
+    out_names = ["surface_temperature"]
+    means = {n: 280.0 for n in in_names + out_names}
+    stds = {n: 5.0 for n in in_names + out_names}
+
+    shared_config = SharedGlobalMeanRemovalConfig(
+        reference_field="surface_temperature",
+        field_names=list(in_names),
+        append_as_input=True,
+    )
+    assert shared_config.extra_channel_names(in_names) == [
+        "surface_temperature_global_mean"
+    ]
+
+    per_ch_config = PerChannelGlobalMeanRemovalConfig(
+        field_names=list(in_names), append_as_input=True
+    )
+    assert per_ch_config.extra_channel_names(in_names) == [
+        "surface_temperature_global_mean",
+        "x_global_mean",
+    ]
+
+    # Verify the runtime objects match.
+    from fme.core.normalizer import NormalizationConfig
+
+    normalizer = NormalizationConfig(means=means, stds=stds).build(list(means))
+    shared_rt = shared_config.build(normalizer, in_names)
+    assert shared_rt.extra_channel_names == ["surface_temperature_global_mean"]
+
+    per_ch_rt = per_ch_config.build(normalizer, in_names)
+    assert per_ch_rt.extra_channel_names == [
+        "surface_temperature_global_mean",
+        "x_global_mean",
+    ]
+
+
+def _make_recorder_step(
+    in_names, out_names, img_shape, n_samples, means, stds, input_dropout
+):
+    """Helper: build a step with PerChannelGMR+extra channels and a recording module."""
+    normalization = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(means=means, stds=stds),
+    )
+
+    class RecordExtraModule(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.last_extra: torch.Tensor | None = None
+            self._p = nn.Parameter(torch.zeros(1))
+
+        def forward(self, inp):
+            self.last_extra = inp[:, -len(in_names) :].detach().clone()
+            return self._p.new_zeros(n_samples, len(out_names), *img_shape)
+
+    recorder = RecordExtraModule()
+    device = fme.get_device()
+    step_config = SingleModuleStepConfig(
+        builder=ModuleSelector(type="prebuilt", config={"module": recorder}),
+        in_names=in_names,
+        out_names=out_names,
+        normalization=normalization,
+        global_mean_removal=PerChannelGlobalMeanRemovalConfig(
+            field_names=in_names,
+            append_as_input=True,
+        ),
+        input_dropout=input_dropout,
+    )
+    dataset_info = DatasetInfo(
+        horizontal_coordinates=LatLonCoordinates(
+            lat=torch.zeros(img_shape[0], device=device),
+            lon=torch.zeros(img_shape[1], device=device),
+        ),
+        vertical_coordinate=HybridSigmaPressureCoordinate(
+            ak=torch.arange(7, device=device), bk=torch.arange(7, device=device)
+        ),
+        timestep=TIMESTEP,
+    )
+    from fme.core.step.single_module import SingleModuleStep
+
+    step_obj = step_config.get_step(dataset_info, init_weights=lambda _: None)
+    assert isinstance(step_obj, SingleModuleStep)
+    return step_obj, recorder
+
+
+def test_dropout_masking_named_channel_does_not_zero_extra_channel():
+    """Masking 'a' via per_variable does NOT zero the 'a_global_mean' extra channel.
+
+    The extra channel is independently named; to zero it, target 'a_global_mean'.
+    """
+    in_names = ["a", "b"]
+    out_names = ["a"]
+    img_shape = (4, 8)
+    n_samples = 2
+    device = fme.get_device()
+    means = {n: 10.0 for n in in_names + out_names}
+    stds = {n: 1.0 for n in in_names + out_names}
+
+    step_obj, recorder = _make_recorder_step(
+        in_names,
+        out_names,
+        img_shape,
+        n_samples,
+        means,
+        stds,
+        input_dropout=VariableMaskingConfig(per_variable={"a": 1.0}),
+    )
+    input_data = {
+        n: torch.full((n_samples, *img_shape), 15.0, device=device) for n in in_names
+    }
+    next_step_data = get_tensor_dict(
+        step_obj.next_step_input_names, img_shape, n_samples
+    )
+
+    step_obj.module.torch_module.train()
+    step_obj.step(
+        StepArgs(input=input_data, next_step_input_data=next_step_data, n_ensemble=1)
+    )
+    assert recorder.last_extra is not None
+    # channel 0 = extra for "a_global_mean": NOT zeroed because dropout targets "a"
+    assert (
+        recorder.last_extra[:, 0] != 0.0
+    ).all(), "extra channel for 'a_global_mean' wrongly zeroed when masking 'a'"
+    # channel 1 = extra for "b_global_mean": also non-zero
+    assert (
+        recorder.last_extra[:, 1] != 0.0
+    ).all(), "extra channel for 'b_global_mean' wrongly zeroed"
+
+
+def test_dropout_masking_extra_channel_name_zeroes_only_extra_channel():
+    """Masking 'a_global_mean' zeroes only the extra channel, not the named input."""
+    in_names = ["a", "b"]
+    out_names = ["a"]
+    img_shape = (4, 8)
+    n_samples = 2
+    device = fme.get_device()
+    means = {n: 10.0 for n in in_names + out_names}
+    stds = {n: 1.0 for n in in_names + out_names}
+
+    step_obj, recorder = _make_recorder_step(
+        in_names,
+        out_names,
+        img_shape,
+        n_samples,
+        means,
+        stds,
+        input_dropout=VariableMaskingConfig(per_variable={"a_global_mean": 1.0}),
+    )
+    input_data = {
+        n: torch.full((n_samples, *img_shape), 15.0, device=device) for n in in_names
+    }
+    next_step_data = get_tensor_dict(
+        step_obj.next_step_input_names, img_shape, n_samples
+    )
+
+    step_obj.module.torch_module.train()
+    step_obj.step(
+        StepArgs(input=input_data, next_step_input_data=next_step_data, n_ensemble=1)
+    )
+    assert recorder.last_extra is not None
+    # extra channel 0 = "a_global_mean": must be zeroed (rate=1.0)
+    assert (
+        recorder.last_extra[:, 0] == 0.0
+    ).all(), "extra channel 'a_global_mean' not zeroed when explicitly masked"
+    # extra channel 1 = "b_global_mean": NOT zeroed
+    assert (
+        recorder.last_extra[:, 1] != 0.0
+    ).all(), "extra channel 'b_global_mean' wrongly zeroed"
+
+
+def test_dropout_global_mean_removal_inverse_restores_sample_mean():
+    """When dropout masks a field with PerChannelGMR, the inverse transform
+    restores the per-sample global mean rather than zeroing it out.
+
+    forward_transform receives args.data_mask (no dropout), so it computes
+    the real shift from the unmasked input.  The network sees 0 for the
+    masked field, outputs 0, and inverse_transform restores the shift, giving
+    the original sample mean as the output.
+    """
+    in_names = ["a"]
+    out_names = ["a"]
+    img_shape = (4, 8)
+    n_samples = 2
+    input_value = 15.0
+    clim_mean = 10.0
+
+    class ReturnZerosModule(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self._p = nn.Parameter(torch.zeros(1))
+
+        def forward(self, inp):
+            return self._p.new_zeros(n_samples, len(out_names), *img_shape)
+
+    normalization = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means={n: clim_mean for n in in_names + out_names},
+            stds={n: 1.0 for n in in_names + out_names},
+        ),
+    )
+    step_config = SingleModuleStepConfig(
+        builder=ModuleSelector(type="prebuilt", config={"module": ReturnZerosModule()}),
+        in_names=in_names,
+        out_names=out_names,
+        normalization=normalization,
+        global_mean_removal=PerChannelGlobalMeanRemovalConfig(field_names=in_names),
+        input_dropout=VariableMaskingConfig(per_variable={"a": 1.0}),
+    )
+    dataset_info = DatasetInfo(
+        horizontal_coordinates=LatLonCoordinates(
+            lat=torch.zeros(img_shape[0], device=fme.get_device()),
+            lon=torch.zeros(img_shape[1], device=fme.get_device()),
+        ),
+        vertical_coordinate=HybridSigmaPressureCoordinate(
+            ak=torch.arange(7, device=fme.get_device()),
+            bk=torch.arange(7, device=fme.get_device()),
+        ),
+        timestep=TIMESTEP,
+    )
+    step_obj = step_config.get_step(dataset_info, init_weights=lambda _: None)
+    input_data = {
+        "a": torch.full((n_samples, *img_shape), input_value, device=fme.get_device())
+    }
+
+    step_obj.module.torch_module.train()
+    output, _ = step_obj.step(
+        StepArgs(input=input_data, next_step_input_data={}, n_ensemble=1),
+    )
+
+    # forward_transform shifts "a" by (clim_mean - input_value) so the field is
+    # at clim_mean → normalizes to 0.  Network outputs 0 → denormalizes to
+    # clim_mean.  inverse_transform subtracts the cached shift, restoring the
+    # original sample mean (input_value when input is spatially constant).
+    torch.testing.assert_close(
+        output["a"],
+        torch.full_like(output["a"], input_value),
+    )
+
+
+def test_apply_extra_channel_mask_no_op_when_no_names_match():
+    """Returns the original tensor object when no channel names appear in the mask."""
+    extra = torch.ones(2, 3, 4, 4)
+    data_mask = {"c": torch.tensor([True, False])}
+    result = _apply_extra_channel_mask(extra, ["a", "b"], data_mask)
+    assert result is extra
+
+
+def test_apply_extra_channel_mask_zeros_masked_channels_per_sample():
+    """Channels whose name is in data_mask are zeroed for samples where
+    mask is False."""
+    # batch=2, 2 channels, 1x1 spatial
+    extra = torch.ones(2, 2, 1, 1)
+    # sample 0 present=True (keep), sample 1 present=False (zero)
+    data_mask = {"a": torch.tensor([True, False])}
+    result = _apply_extra_channel_mask(extra, ["a", "b"], data_mask)
+    assert result is not extra  # must be a clone
+    assert result[0, 0, 0, 0].item() == 1.0  # sample 0, channel "a": kept
+    assert result[1, 0, 0, 0].item() == 0.0  # sample 1, channel "a": zeroed
+    assert result[0, 1, 0, 0].item() == 1.0  # channel "b": untouched
+    assert result[1, 1, 0, 0].item() == 1.0  # channel "b": untouched
+
+
+def test_apply_extra_channel_mask_multiple_channels_masked_independently():
+    """Each channel uses its own per-sample mask independently."""
+    extra = torch.ones(2, 2, 1, 1) * 5.0
+    data_mask = {
+        "x": torch.tensor([True, False]),  # sample 1 zeroed for channel 0
+        "y": torch.tensor([False, True]),  # sample 0 zeroed for channel 1
+    }
+    result = _apply_extra_channel_mask(extra, ["x", "y"], data_mask)
+    assert result[0, 0, 0, 0].item() == 5.0  # x, sample 0: present
+    assert result[1, 0, 0, 0].item() == 0.0  # x, sample 1: absent
+    assert result[0, 1, 0, 0].item() == 0.0  # y, sample 0: absent
+    assert result[1, 1, 0, 0].item() == 5.0  # y, sample 1: present

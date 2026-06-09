@@ -1089,6 +1089,7 @@ class Stepper:
             n_forward_steps,
             optimizer,
             forcing_data.labels,
+            n_ensemble=forcing_data.n_ensemble,
             data_mask=forcing_data.data_mask,
             stepper_state=ic_batch_data.stepper_state,
         )
@@ -1106,6 +1107,7 @@ class Stepper:
         n_forward_steps: int,
         optimizer: OptimizationABC,
         labels: BatchLabels | None,
+        n_ensemble: int,
         data_mask: TensorMapping | None = None,
         stepper_state: StepperState | None = None,
     ) -> Generator[tuple[TensorDict, StepperState | None], None, None]:
@@ -1133,6 +1135,7 @@ class Stepper:
                     StepArgs(
                         input=input_data,
                         next_step_input_data=next_step_input_dict,
+                        n_ensemble=n_ensemble,
                         labels=labels,
                         data_mask=data_mask,
                         stepper_state=stepper_state,
@@ -1657,6 +1660,7 @@ class TrainStepper(
             n_forward_steps,
             optimization,
             labels=input_ensemble_data.labels,
+            n_ensemble=n_ensemble,
             data_mask=input_ensemble_data.data_mask,
             stepper_state=input_ensemble_data.stepper_state,
         )

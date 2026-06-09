@@ -1144,7 +1144,7 @@ def test_step():
     input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
 
     output, _ = stepper.step(
-        StepArgs(input=input_data, next_step_input_data={}, labels=None)
+        StepArgs(input=input_data, next_step_input_data={}, n_ensemble=1, labels=None)
     )
 
     torch.testing.assert_close(output["a"], input_data["a"] + 1)
@@ -1156,7 +1156,7 @@ def test_step_with_diagnostic():
     n_samples = 3
     input_data = {"a": torch.rand(n_samples, 5, 5).to(DEVICE)}
     output, _ = stepper.step(
-        StepArgs(input=input_data, next_step_input_data={}, labels=None)
+        StepArgs(input=input_data, next_step_input_data={}, n_ensemble=1, labels=None)
     )
     torch.testing.assert_close(output["a"], input_data["a"])
     torch.testing.assert_close(output["c"], input_data["a"])
@@ -1174,7 +1174,7 @@ def test_step_with_forcing_and_diagnostic(residual_prediction):
     n_samples = 3
     input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
     output, _ = stepper.step(
-        StepArgs(input=input_data, next_step_input_data={}, labels=None)
+        StepArgs(input=input_data, next_step_input_data={}, n_ensemble=1, labels=None)
     )
     if residual_prediction:
         expected_a_output = 2 * input_data["a"] + 1 - norm_mean
@@ -1192,7 +1192,12 @@ def test_step_with_prescribed_ocean():
     input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
     ocean_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "mask"]}
     output, _ = stepper.step(
-        StepArgs(input=input_data, next_step_input_data=ocean_data, labels=None)
+        StepArgs(
+            input=input_data,
+            next_step_input_data=ocean_data,
+            n_ensemble=1,
+            labels=None,
+        )
     )
     expected_a_output = torch.where(
         torch.round(ocean_data["mask"]).to(int) == 1,
@@ -2574,6 +2579,191 @@ def test_checkpoint_stepper_config_to_stepper_config(tmp_path: pathlib.Path):
     assert isinstance(loaded_config, StepperConfig)
     assert loaded_config.derived_forcings == original_config.derived_forcings
     assert loaded_config.step.type == original_config.step.type
+
+
+def test_train_on_batch_input_dropout_zeroed_during_training():
+    """input_dropout in SingleModuleStepConfig must zero the masked variable
+    in normalized space before the model forward pass.
+
+    ReturnZerosModule asserts no NaN in its input, which verifies that the
+    masked channel is zeroed (not filled with NaN). Loss must be finite.
+    """
+    torch.manual_seed(0)
+    from fme.core.var_masking import VariableMaskingConfig
+
+    in_names = ["a", "b"]
+    out_names = ["a"]
+    n_samples, n_timesteps = 4, 4  # 1 IC + 3 targets
+
+    data_dict = {
+        "a": torch.rand(n_samples, n_timesteps, 5, 5, device=DEVICE),
+        "b": torch.rand(n_samples, n_timesteps, 5, 5, device=DEVICE),
+    }
+    data = BatchData.new_on_device(
+        data=data_dict,
+        time=xr.DataArray(np.zeros((n_samples, n_timesteps)), dims=["sample", "time"]),
+        labels=None,
+        epoch=0,
+    )
+
+    # include_channel_mask_inputs doubles the input channel count.
+    module = ReturnZerosModule(
+        n_in_channels=len(in_names) * 2, n_out_channels=len(out_names)
+    )
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(type="prebuilt", config={"module": module}),
+                    in_names=in_names,
+                    out_names=out_names,
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means=get_scalar_data(set(in_names + out_names), 0.0),
+                            stds=get_scalar_data(set(in_names + out_names), 1.0),
+                        ),
+                    ),
+                    include_channel_mask_inputs=True,
+                    input_dropout=VariableMaskingConfig(per_variable={"a": 1.0}),
+                )
+            ),
+        ),
+    )
+    train_config = TrainStepperConfig(loss=StepLossConfig(type="MSE"))
+    stepper = train_config.get_train_stepper(config, get_dataset_info())
+    stepped = stepper.train_on_batch(data, optimization=NullOptimization())
+    assert torch.isfinite(stepped.metrics["loss"]).item()
+
+
+def test_train_on_batch_input_dropout_merged_with_data_mask():
+    """Dropout mask and data_mask are ANDed so both absent-variable sources
+    zero the network input.  Loss must remain finite.
+    """
+    torch.manual_seed(0)
+    from fme.core.var_masking import VariableMaskingConfig
+
+    in_names = ["a", "b"]
+    out_names = ["a"]
+    n_samples, n_timesteps = 4, 2  # 1 IC + 1 target
+
+    data_dict = {
+        "a": torch.rand(n_samples, n_timesteps, 5, 5, device=DEVICE),
+        "b": torch.rand(n_samples, n_timesteps, 5, 5, device=DEVICE),
+    }
+    # data_mask: "b" is absent for all samples (False = absent).
+    data_mask = {"b": torch.zeros(n_samples, dtype=torch.bool, device=DEVICE)}
+    data = BatchData.new_on_device(
+        data=data_dict,
+        time=xr.DataArray(np.zeros((n_samples, n_timesteps)), dims=["sample", "time"]),
+        labels=None,
+        epoch=0,
+        data_mask=data_mask,
+    )
+
+    module = ReturnZerosModule(
+        n_in_channels=len(in_names) * 2, n_out_channels=len(out_names)
+    )
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(type="prebuilt", config={"module": module}),
+                    in_names=in_names,
+                    out_names=out_names,
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means=get_scalar_data(set(in_names + out_names), 0.0),
+                            stds=get_scalar_data(set(in_names + out_names), 1.0),
+                        ),
+                    ),
+                    include_channel_mask_inputs=True,
+                    # dropout also masks "b" (already absent per data_mask) and "a"
+                    input_dropout=VariableMaskingConfig(
+                        per_variable={"a": 1.0, "b": 1.0}
+                    ),
+                )
+            ),
+        ),
+    )
+    train_config = TrainStepperConfig(loss=StepLossConfig(type="MSE"))
+    stepper = train_config.get_train_stepper(config, get_dataset_info())
+    stepped = stepper.train_on_batch(data, optimization=NullOptimization())
+    assert torch.isfinite(stepped.metrics["loss"]).item()
+
+
+def test_train_on_batch_input_dropout_repeats_masks_for_ensemble_members():
+    torch.manual_seed(0)
+    from fme.core.var_masking import UniformMaskingConfig, VariableMaskingConfig
+
+    in_names = ["a", "b"]
+    out_names = ["a"]
+    n_samples, n_ensemble, n_timesteps = 4, 3, 2
+
+    data_dict = {
+        "a": torch.rand(n_samples, n_timesteps, 5, 5, device=DEVICE),
+        "b": torch.rand(n_samples, n_timesteps, 5, 5, device=DEVICE),
+    }
+    data = BatchData.new_on_device(
+        data=data_dict,
+        time=xr.DataArray(np.zeros((n_samples, n_timesteps)), dims=["sample", "time"]),
+        labels=None,
+        epoch=0,
+    )
+
+    class RecordMaskInputsModule(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self._param = torch.nn.Parameter(torch.tensor(0.0, device=DEVICE))
+            self.last_mask_inputs: torch.Tensor | None = None
+
+        def forward(self, x):
+            self.last_mask_inputs = x[:, len(in_names) :].detach().clone()
+            batch_size, _, nlat, nlon = x.shape
+            return self._param.new_zeros(batch_size, len(out_names), nlat, nlon) + (
+                self._param * 0.0
+            )
+
+    module = RecordMaskInputsModule()
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(type="prebuilt", config={"module": module}),
+                    in_names=in_names,
+                    out_names=out_names,
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means=get_scalar_data(set(in_names + out_names), 0.0),
+                            stds=get_scalar_data(set(in_names + out_names), 1.0),
+                        ),
+                    ),
+                    include_channel_mask_inputs=True,
+                    input_dropout=VariableMaskingConfig(
+                        uniform=UniformMaskingConfig(min_vars=1, max_vars=1)
+                    ),
+                )
+            ),
+        ),
+    )
+    train_config = TrainStepperConfig(
+        loss=StepLossConfig(type="MSE"), n_ensemble=n_ensemble
+    )
+    stepper = train_config.get_train_stepper(config, get_dataset_info())
+    optimization = OptimizationConfig().build(stepper.modules, max_epochs=1)
+    torch.manual_seed(0)
+    stepped = stepper.train_on_batch(data, optimization=optimization)
+
+    assert torch.isfinite(stepped.metrics["loss"]).item()
+    last_mask_inputs = getattr(
+        getattr(stepper.modules[0], "module"), "last_mask_inputs"
+    )
+    assert last_mask_inputs is not None
+    indicators = last_mask_inputs[:, :, 0, 0].view(n_samples, n_ensemble, len(in_names))
+    assert (indicators == indicators[:, :1]).all()
+    assert (indicators.sum(dim=-1) == len(in_names) - 1).all()
 
 
 def test_train_on_batch_masked_variable_has_zero_loss_count():

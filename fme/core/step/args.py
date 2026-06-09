@@ -22,22 +22,28 @@ class StepArgs:
         data_mask: Per-variable, per-sample masks indicating variable
             presence. Keys are variable names, values are [n_batch] bool
             tensors where True means present and False means masked.
+            Used for both loss weighting and network input masking.
+            Training-time dropout is applied on top of this by the step.
         stepper_state: Per-sample state carried across step calls (e.g.
             corrector references seeded from the IC). ``None`` if no state
             has been seeded yet. The step returns an updated stepper_state
             alongside its output dict.
+        n_ensemble: Number of ensemble members represented per original
+            sample in the leading batch dimension.
     """
 
     def __init__(
         self,
         input: TensorMapping,
         next_step_input_data: TensorMapping,
+        n_ensemble: int,
         labels: BatchLabels | None = None,
         data_mask: TensorMapping | None = None,
         stepper_state: StepperState | None = None,
     ):
         self.input = input
         self.next_step_input_data = next_step_input_data
+        self.n_ensemble = n_ensemble
         self.labels = labels
         self.data_mask = data_mask
         self.stepper_state = stepper_state
@@ -50,6 +56,7 @@ class StepArgs:
         return StepArgs(
             input=input,
             next_step_input_data=next_step_input_data,
+            n_ensemble=self.n_ensemble,
             labels=self.labels,
             data_mask=self.data_mask,
             stepper_state=self.stepper_state,

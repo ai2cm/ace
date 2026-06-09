@@ -284,7 +284,10 @@ def test_step_applies_wrapper(config: StepSelector):
     wrapper = unittest.mock.MagicMock(side_effect=lambda x: x)
     step.step(
         args=StepArgs(
-            input=input_data, next_step_input_data=next_step_input_data, labels=None
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            n_ensemble=1,
+            labels=None,
         ),
         wrapper=wrapper,
     )
@@ -458,7 +461,10 @@ def test_step_regression(
 
     output, _ = step.step(
         args=StepArgs(
-            input=input_data, next_step_input_data=next_step_input_data, labels=labels
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            n_ensemble=1,
+            labels=labels,
         ),
         wrapper=lambda x: x,
     )
