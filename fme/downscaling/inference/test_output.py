@@ -43,7 +43,10 @@ def test_single_xarray_config_rejects_non_xarray_config():
     """Test that _single_xarray_config rejects non-XarrayDataConfig objects."""
     mock_config = MagicMock()
 
-    with pytest.raises(NotImplementedError, match="XarrayDataConfig objects"):
+    with pytest.raises(
+        NotImplementedError,
+        match="XarrayDataConfig or MergeNoConcatDatasetConfig objects",
+    ):
         DownscalingOutputConfig._single_xarray_config([mock_config])
 
 

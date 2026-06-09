@@ -1,3 +1,4 @@
+import copy
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
@@ -171,7 +172,7 @@ class DownscalingOutputConfig(ABC):
         coarse: Sequence[
             XarrayDataConfig | XarrayEnsembleDataConfig | MergeNoConcatDatasetConfig
         ],
-    ) -> list[XarrayDataConfig]:
+    ) -> list[XarrayDataConfig | MergeNoConcatDatasetConfig]:
         """
         Ensures that the data configuration is a single xarray config.
         Necessary because we will be using the top-level DataLoaderConfig
@@ -188,10 +189,10 @@ class DownscalingOutputConfig(ABC):
             )
 
         data_config = coarse[0]
-        if not isinstance(data_config, XarrayDataConfig):
+        if not isinstance(data_config, XarrayDataConfig | MergeNoConcatDatasetConfig):
             raise NotImplementedError(
-                "Only XarrayDataConfig objects are supported in OutputTargetConfig "
-                " coarse specification."
+                "Only XarrayDataConfig or MergeNoConcatDatasetConfig objects are "
+                "supported in OutputTargetConfig coarse specification."
             )
 
         return [data_config]
@@ -204,7 +205,13 @@ class DownscalingOutputConfig(ABC):
         lon_extent,
         loader_config: DataLoaderConfig,
     ) -> DataLoaderConfig:
-        new_coarse = [replace(coarse[0], subset=time)]
+        cfg = coarse[0]
+        if isinstance(cfg, MergeNoConcatDatasetConfig):
+            new_cfg = copy.deepcopy(cfg)
+            new_cfg.update_subset(time)
+            new_coarse = [new_cfg]
+        else:
+            new_coarse = [replace(cfg, subset=time)]
 
         # TODO: log the replacements for debugging
         new_loader_config = replace(
@@ -278,7 +285,7 @@ class DownscalingOutputConfig(ABC):
         loader_config: DataLoaderConfig,
         requirements: DataRequirements,
         patch: PatchPredictionConfig,
-        coarse: list[XarrayDataConfig],
+        coarse: list[XarrayDataConfig | MergeNoConcatDatasetConfig],
         fine_shape: tuple[int, int] | None = None,
     ) -> DownscalingOutput:
         updated_loader_config = self._replace_loader_config(
