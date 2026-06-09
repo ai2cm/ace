@@ -1,7 +1,7 @@
 import dataclasses
 import logging
 from collections.abc import Mapping
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -98,8 +98,8 @@ class SeasonalAggregator:
                 continue
 
             if self._variable_metadata is not None and name in self._variable_metadata:
-                long_name = self._variable_metadata[name].long_name
-                units = self._variable_metadata[name].units
+                long_name = self._variable_metadata[name].display_long_name(name)
+                units = self._variable_metadata[name].display_units()
                 caption_name = f"{long_name} ({units})"
             else:
                 caption_name = name
@@ -249,9 +249,10 @@ def _to_dataset(data: TensorMapping, time: xr.DataArray) -> xr.Dataset:
 
 @dataclasses.dataclass
 class SeasonalMetricConfig:
-    type: Literal["seasonal"] = "seasonal"
     variables: list[str] | None = None
     name: str = "seasonal"
+    enabled: bool = False
+    strict: bool = True
 
     def get_name(self) -> str:
         return self.name

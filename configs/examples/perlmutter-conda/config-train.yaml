@@ -43,11 +43,12 @@ train_loader:
   num_data_workers: 4
   dataset:
     data_path: FME_TRAIN_DIR
-validation_loader:
-  batch_size: 32
-  num_data_workers: 4
-  dataset:
-    data_path: FME_VALID_DIR
+validation:
+  loader:
+    batch_size: 32
+    num_data_workers: 4
+    dataset:
+      data_path: FME_VALID_DIR
 optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001

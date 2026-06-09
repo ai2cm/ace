@@ -1,4 +1,4 @@
-from collections.abc import Callable, Generator
+from collections.abc import Generator
 from unittest.mock import MagicMock, Mock
 
 import pytest
@@ -8,16 +8,33 @@ from fme.ace.stepper.time_length_probabilities import (
     TimeLengthProbabilities,
     TimeLengthProbability,
 )
-from fme.core.loss import LossOutput, StepLoss
+from fme.core.loss import LossOutput, StandardLoss, StepLoss
 from fme.core.typing_ import EnsembleTensorDict, TensorMapping
 
-from .loss import LossContributionsConfig, StepLossABC, StepPredictionABC
-from .stepper import ComponentEnsembleStepPrediction, CoupledStepperTrainLoss
+from .loss import ComponentLossSchedule
+from .stepper import (
+    ComponentEnsembleStepPrediction,
+    ComponentTrainingConfig,
+    CoupledStepperTrainLoss,
+)
 
 
 def _wrap_as_loss_output(value: torch.Tensor) -> LossOutput:
     """Wrap a scalar tensor as a LossOutput for mocking StepLoss."""
-    return LossOutput(loss=value, channel_dim=0, channel_names=["mock"])
+    return LossOutput(
+        losses=[StandardLoss(value.unsqueeze(0).unsqueeze(0))],
+        channel_names=["mock"],
+    )
+
+
+def _mock_step_loss(fn):
+    """Create a Mock(spec=StepLoss) whose forward returns LossOutput."""
+    mock = Mock(spec=StepLoss)
+    mock.side_effect = lambda data, target, step: _wrap_as_loss_output(
+        fn(data, target, step)
+    )
+    mock.effective_loss_scaling = {}
+    return mock
 
 
 def step_and_target_gen(
@@ -65,31 +82,6 @@ def steps_thru_atmos_7() -> list[tuple[ComponentEnsembleStepPrediction, TensorMa
     return out
 
 
-class _StepLoss(StepLossABC):
-    def __init__(
-        self,
-        loss_obj: Callable[[TensorMapping, TensorMapping, int], torch.Tensor],
-        time_dim: int = 1,
-    ):
-        self._loss_obj = loss_obj
-        self._time_dim = time_dim
-
-    @property
-    def effective_loss_scaling(self):
-        raise NotImplementedError()
-
-    def step_is_optimized(self, step: int, n_total_steps: int | None = None) -> bool:
-        return step < 2
-
-    def n_required_forward_steps(self) -> int:
-        return 2
-
-    def __call__(
-        self, prediction: StepPredictionABC, target_data: TensorMapping
-    ) -> torch.Tensor:
-        return self._loss_obj(prediction.data, target_data, prediction.step)
-
-
 def assert_tensor_dicts_close(
     x: dict[str, torch.Tensor | None], y: dict[str, torch.Tensor | None]
 ):
@@ -100,11 +92,46 @@ def assert_tensor_dicts_close(
         torch.testing.assert_close(x[key], y[key])
 
 
+def _build_coupled_loss(
+    ocean_loss: StepLoss,
+    atmosphere_loss: StepLoss,
+    ocean_n_steps=None,
+    atmos_n_steps=None,
+    ocean_weight=1.0,
+    atmos_weight=1.0,
+    ocean_optimize_last_step_only=False,
+    atmos_optimize_last_step_only=False,
+    ocean_n_steps_limit=10,
+    atmos_n_steps_limit=10,
+) -> CoupledStepperTrainLoss:
+    ocean_schedule = ComponentLossSchedule(
+        n_steps=ocean_n_steps,
+        optimize_last_step_only=ocean_optimize_last_step_only,
+        loss_weight=ocean_weight,
+        n_steps_limit=ocean_n_steps_limit,
+    )
+    atmos_schedule = ComponentLossSchedule(
+        n_steps=atmos_n_steps,
+        optimize_last_step_only=atmos_optimize_last_step_only,
+        loss_weight=atmos_weight,
+        n_steps_limit=atmos_n_steps_limit,
+    )
+    return CoupledStepperTrainLoss(
+        ocean_loss=ocean_loss,
+        atmosphere_loss=atmosphere_loss,
+        ocean_schedule=ocean_schedule,
+        atmosphere_schedule=atmos_schedule,
+    )
+
+
 def test_coupled_stepper_train_loss(steps_thru_atmos_7):
-    ocean_loss_obj = _StepLoss(loss_obj=lambda *_, **__: torch.tensor(2.0))
-    atmos_loss_obj = _StepLoss(loss_obj=lambda *_, **__: torch.tensor(1.0))
-    loss_obj = CoupledStepperTrainLoss(
-        ocean_loss=ocean_loss_obj, atmosphere_loss=atmos_loss_obj
+    ocean_loss_obj = _mock_step_loss(lambda *_, **__: torch.tensor(2.0))
+    atmos_loss_obj = _mock_step_loss(lambda *_, **__: torch.tensor(1.0))
+    loss_obj = _build_coupled_loss(
+        ocean_loss=ocean_loss_obj,
+        atmosphere_loss=atmos_loss_obj,
+        ocean_n_steps=2,
+        atmos_n_steps=2,
     )
     metrics = {}
     for prediction, target_data in steps_thru_atmos_7:
@@ -134,23 +161,14 @@ def test_loss_contributions(steps_thru_atmos_7):
             loss += (gen[key] - target[key]).abs().mean() / (step + 1)
         return loss
 
-    def mae_loss_as_output(gen, target, step: int):
-        return _wrap_as_loss_output(mae_loss(gen, target, step))
-
-    atmos_loss_config = LossContributionsConfig(
-        n_steps=6,
-        weight=1 / 3,
-    )
-    mock_step_loss = Mock(spec=StepLoss, side_effect=mae_loss_as_output)
-    atmosphere_loss = atmos_loss_config.build(
-        loss_obj=mock_step_loss,
-        time_dim=1,
-        n_steps_limit=20,
-    )
-    ocean_loss = _StepLoss(loss_obj=mae_loss)
-    loss_obj = CoupledStepperTrainLoss(
-        ocean_loss=ocean_loss,
-        atmosphere_loss=atmosphere_loss,
+    atmos_loss_obj = _mock_step_loss(mae_loss)
+    ocean_loss_obj = _mock_step_loss(mae_loss)
+    loss_obj = _build_coupled_loss(
+        ocean_loss=ocean_loss_obj,
+        atmosphere_loss=atmos_loss_obj,
+        ocean_n_steps=2,
+        atmos_n_steps=6,
+        atmos_weight=1 / 3,
     )
     metrics = {}
     expected_metrics: dict[str, torch.Tensor | None] = {}
@@ -181,34 +199,20 @@ def test_loss_contributions_optimize_last_step_only(steps_thru_atmos_7):
             loss += (gen[key] - target[key]).abs().mean() / (step + 1)
         return loss
 
-    def mae_loss_as_output(gen, target, step: int):
-        return _wrap_as_loss_output(mae_loss(gen, target, step))
-
     n_total_atmos = 8
     n_total_ocean = 4
-    atmos_loss_config = LossContributionsConfig(
-        n_steps=6,
-        weight=1 / 3,
-        optimize_last_step_only=True,
-    )
-    mock_step_loss = Mock(spec=StepLoss, side_effect=mae_loss_as_output)
-    atmosphere_loss = atmos_loss_config.build(
-        loss_obj=mock_step_loss,
-        time_dim=1,
-        n_steps_limit=n_total_atmos,
-    )
-    ocean_loss_config = LossContributionsConfig(
-        n_steps=3,
-        optimize_last_step_only=True,
-    )
-    ocean_loss = ocean_loss_config.build(
-        loss_obj=Mock(spec=StepLoss, side_effect=mae_loss_as_output),
-        time_dim=1,
-        n_steps_limit=n_total_ocean,
-    )
-    loss_obj = CoupledStepperTrainLoss(
-        ocean_loss=ocean_loss,
-        atmosphere_loss=atmosphere_loss,
+    atmos_loss_obj = _mock_step_loss(mae_loss)
+    ocean_loss_obj = _mock_step_loss(mae_loss)
+    loss_obj = _build_coupled_loss(
+        ocean_loss=ocean_loss_obj,
+        atmosphere_loss=atmos_loss_obj,
+        ocean_n_steps=3,
+        atmos_n_steps=6,
+        atmos_weight=1 / 3,
+        ocean_optimize_last_step_only=True,
+        atmos_optimize_last_step_only=True,
+        ocean_n_steps_limit=n_total_ocean,
+        atmos_n_steps_limit=n_total_atmos,
     )
     metrics = {}
     expected_metrics: dict[str, torch.Tensor | None] = {}
@@ -247,14 +251,14 @@ def test_loss_contributions_optimize_last_step_only(steps_thru_atmos_7):
 def test_step_is_optimized_last_step_only(
     n_steps, n_total_steps, expected_optimized_step
 ):
-    config = LossContributionsConfig(n_steps=n_steps, optimize_last_step_only=True)
-    loss = config.build(
-        loss_obj=Mock(spec=StepLoss),
-        time_dim=1,
+    schedule = ComponentLossSchedule(
+        n_steps=n_steps,
+        optimize_last_step_only=True,
+        loss_weight=1.0,
         n_steps_limit=n_total_steps,
     )
     for step in range(n_total_steps):
-        result = loss.step_is_optimized(step)
+        result = schedule.step_is_optimized(step)
         if step == expected_optimized_step:
             assert result, f"step {step} should be optimized"
         else:
@@ -262,14 +266,13 @@ def test_step_is_optimized_last_step_only(
 
 
 def test_step_is_optimized_last_step_only_weight_zero():
-    config = LossContributionsConfig(optimize_last_step_only=True, weight=0.0)
-    loss = config.build(
-        loss_obj=Mock(spec=StepLoss),
-        time_dim=1,
+    schedule = ComponentLossSchedule(
+        n_steps=None,
+        optimize_last_step_only=True,
+        loss_weight=0.0,
         n_steps_limit=5,
     )
-    # weight=0 → NullLossContributions, always returns False
-    assert not loss.step_is_optimized(0)
+    assert not schedule.step_is_optimized(0)
 
 
 def test_stochastic_n_steps_sample_changes_step_is_optimized():
@@ -278,18 +281,22 @@ def test_stochastic_n_steps_sample_changes_step_is_optimized():
             TimeLengthProbability(steps=2, probability=1.0),
         ]
     )
-    config = LossContributionsConfig(n_steps=sampler)
-    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1, n_steps_limit=4)
+    schedule = ComponentLossSchedule(
+        n_steps=sampler,
+        optimize_last_step_only=False,
+        loss_weight=1.0,
+        n_steps_limit=4,
+    )
     # before sampling, _n_steps is max_n_forward_steps = 2
-    assert loss.step_is_optimized(0)
-    assert loss.step_is_optimized(1)
-    assert not loss.step_is_optimized(2)
+    assert schedule.step_is_optimized(0)
+    assert schedule.step_is_optimized(1)
+    assert not schedule.step_is_optimized(2)
 
     # after sampling (deterministic: always 2), same behavior
-    loss.sample_n_steps()
-    assert loss.step_is_optimized(0)
-    assert loss.step_is_optimized(1)
-    assert not loss.step_is_optimized(2)
+    schedule.sample_n_steps()
+    assert schedule.step_is_optimized(0)
+    assert schedule.step_is_optimized(1)
+    assert not schedule.step_is_optimized(2)
 
 
 def test_stochastic_n_steps_deterministic_outcome():
@@ -298,13 +305,17 @@ def test_stochastic_n_steps_deterministic_outcome():
             TimeLengthProbability(steps=3, probability=1.0),
         ]
     )
-    config = LossContributionsConfig(n_steps=sampler)
-    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1, n_steps_limit=4)
-    loss.sample_n_steps()
-    assert loss.step_is_optimized(0)
-    assert loss.step_is_optimized(1)
-    assert loss.step_is_optimized(2)
-    assert not loss.step_is_optimized(3)
+    schedule = ComponentLossSchedule(
+        n_steps=sampler,
+        optimize_last_step_only=False,
+        loss_weight=1.0,
+        n_steps_limit=4,
+    )
+    schedule.sample_n_steps()
+    assert schedule.step_is_optimized(0)
+    assert schedule.step_is_optimized(1)
+    assert schedule.step_is_optimized(2)
+    assert not schedule.step_is_optimized(3)
 
 
 def test_stochastic_n_steps_samples_vary():
@@ -316,15 +327,19 @@ def test_stochastic_n_steps_samples_vary():
             TimeLengthProbability(steps=4, probability=0.5),
         ]
     )
-    config = LossContributionsConfig(n_steps=sampler)
-    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1, n_steps_limit=5)
+    schedule = ComponentLossSchedule(
+        n_steps=sampler,
+        optimize_last_step_only=False,
+        loss_weight=1.0,
+        n_steps_limit=5,
+    )
     seen_optimized_step_3 = False
     seen_not_optimized_step_1 = False
     for _ in range(20):  # about 1 in a million prob of test failure
-        loss.sample_n_steps()
-        if loss.step_is_optimized(3):
+        schedule.sample_n_steps()
+        if schedule.step_is_optimized(3):
             seen_optimized_step_3 = True
-        if not loss.step_is_optimized(1):
+        if not schedule.step_is_optimized(1):
             seen_not_optimized_step_1 = True
         if seen_optimized_step_3 and seen_not_optimized_step_1:
             break
@@ -334,9 +349,11 @@ def test_stochastic_n_steps_samples_vary():
 
 class TestOptimizeLastStepOnlyStochastic:
     def _build(self, sampler, n_steps_limit=6):
-        config = LossContributionsConfig(n_steps=sampler, optimize_last_step_only=True)
-        return config.build(
-            loss_obj=Mock(spec=StepLoss), time_dim=1, n_steps_limit=n_steps_limit
+        return ComponentLossSchedule(
+            n_steps=sampler,
+            optimize_last_step_only=True,
+            loss_weight=1.0,
+            n_steps_limit=n_steps_limit,
         )
 
     def _sampler(self, outcomes):
@@ -348,39 +365,43 @@ class TestOptimizeLastStepOnlyStochastic:
 
     def test_before_sampling(self):
         sampler = self._sampler([(2, 0.5), (5, 0.5)])
-        loss = self._build(sampler, n_steps_limit=6)
+        schedule = self._build(sampler, n_steps_limit=6)
         # _n_steps = max_n_forward_steps = 5; last optimized = min(5,6)-1 = 4
         for step in range(6):
             if step == 4:
-                assert loss.step_is_optimized(step), f"step {step} should be optimized"
+                assert schedule.step_is_optimized(
+                    step
+                ), f"step {step} should be optimized"
             else:
-                assert not loss.step_is_optimized(
+                assert not schedule.step_is_optimized(
                     step
                 ), f"step {step} should not be optimized"
 
     def test_deterministic_sample(self):
         sampler = self._sampler([(3, 1.0)])
-        loss = self._build(sampler, n_steps_limit=6)
-        loss.sample_n_steps()
+        schedule = self._build(sampler, n_steps_limit=6)
+        schedule.sample_n_steps()
         # _n_steps = 3; last optimized = min(3,6)-1 = 2
         for step in range(6):
             if step == 2:
-                assert loss.step_is_optimized(step), f"step {step} should be optimized"
+                assert schedule.step_is_optimized(
+                    step
+                ), f"step {step} should be optimized"
             else:
-                assert not loss.step_is_optimized(
+                assert not schedule.step_is_optimized(
                     step
                 ), f"step {step} should not be optimized"
 
     def test_varying_samples(self):
         sampler = self._sampler([(2, 0.5), (5, 0.5)])
-        loss = self._build(sampler, n_steps_limit=6)
+        schedule = self._build(sampler, n_steps_limit=6)
         seen_step_1 = False  # min(2,6)-1 = 1
         seen_step_4 = False  # min(5,6)-1 = 4
         for _ in range(20):  # about 1 in a million prob of test failure
-            loss.sample_n_steps()
-            if loss.step_is_optimized(1) and not loss.step_is_optimized(4):
+            schedule.sample_n_steps()
+            if schedule.step_is_optimized(1) and not schedule.step_is_optimized(4):
                 seen_step_1 = True
-            if loss.step_is_optimized(4) and not loss.step_is_optimized(1):
+            if schedule.step_is_optimized(4) and not schedule.step_is_optimized(1):
                 seen_step_4 = True
             if seen_step_1 and seen_step_4:
                 break
@@ -389,45 +410,133 @@ class TestOptimizeLastStepOnlyStochastic:
 
 
 def test_sample_n_steps_noop_for_int_config():
-    config = LossContributionsConfig(n_steps=5)
-    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1, n_steps_limit=5)
-    loss.sample_n_steps()
-    assert loss.step_is_optimized(4)
-    assert not loss.step_is_optimized(5)
+    schedule = ComponentLossSchedule(
+        n_steps=5,
+        optimize_last_step_only=False,
+        loss_weight=1.0,
+        n_steps_limit=5,
+    )
+    schedule.sample_n_steps()
+    assert schedule.step_is_optimized(4)
+    assert not schedule.step_is_optimized(5)
 
 
 def test_sample_n_steps_noop_for_none_config():
-    config = LossContributionsConfig(n_steps=None)
-    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1, n_steps_limit=5)
-    loss.sample_n_steps()
-    # n_steps=None is unbounded (treated internally as inf), so every step
-    # is optimized; the rollout-imposed n_steps_limit is the only cap.
-    assert loss.step_is_optimized(4)
-    assert loss.step_is_optimized(100)
+    schedule = ComponentLossSchedule(
+        n_steps=None,
+        optimize_last_step_only=False,
+        loss_weight=1.0,
+        n_steps_limit=5,
+    )
+    schedule.sample_n_steps()
+    assert schedule.step_is_optimized(4)
+    assert schedule.step_is_optimized(100)
 
 
 def test_n_steps_max_property():
-    assert LossContributionsConfig().n_steps_max is None
-    assert LossContributionsConfig(n_steps=None).n_steps_max is None
-    assert LossContributionsConfig(n_steps=5).n_steps_max == 5
+    assert (
+        ComponentTrainingConfig(
+            loss=Mock(),
+        ).n_steps_max
+        is None
+    )
+    assert (
+        ComponentTrainingConfig(
+            loss=Mock(),
+            n_steps=None,
+        ).n_steps_max
+        is None
+    )
+    assert (
+        ComponentTrainingConfig(
+            loss=Mock(),
+            n_steps=5,
+        ).n_steps_max
+        == 5
+    )
     sampler = TimeLengthProbabilities(
         outcomes=[
             TimeLengthProbability(steps=2, probability=0.5),
             TimeLengthProbability(steps=4, probability=0.5),
         ]
     )
-    assert LossContributionsConfig(n_steps=sampler).n_steps_max == 4
+    assert (
+        ComponentTrainingConfig(
+            loss=Mock(),
+            n_steps=sampler,
+        ).n_steps_max
+        == 4
+    )
 
 
 def test_coupled_stepper_train_loss_sample_n_steps_delegates():
-    ocean_loss = MagicMock(spec=StepLossABC)
-    atmos_loss = MagicMock(spec=StepLossABC)
+    ocean_schedule = MagicMock(spec=ComponentLossSchedule)
+    atmos_schedule = MagicMock(spec=ComponentLossSchedule)
     coupled_loss = CoupledStepperTrainLoss(
-        ocean_loss=ocean_loss, atmosphere_loss=atmos_loss
+        ocean_loss=Mock(spec=StepLoss),
+        atmosphere_loss=Mock(spec=StepLoss),
+        ocean_schedule=ocean_schedule,
+        atmosphere_schedule=atmos_schedule,
     )
     coupled_loss.sample_n_steps()
-    ocean_loss.sample_n_steps.assert_called_once()
-    atmos_loss.sample_n_steps.assert_called_once()
+    ocean_schedule.sample_n_steps.assert_called_once()
+    atmos_schedule.sample_n_steps.assert_called_once()
+
+
+def test_seed_rng_does_not_corrupt_training_sampler():
+    """seed_rng must only affect the eval sampler, leaving the training
+    sampler's RNG untouched across eval/train cycles."""
+    sampler = TimeLengthProbabilities(
+        outcomes=[
+            TimeLengthProbability(steps=1, probability=0.5),
+            TimeLengthProbability(steps=4, probability=0.5),
+        ]
+    )
+    loss_sched = ComponentLossSchedule(
+        n_steps=sampler,
+        loss_weight=1.0,
+        optimize_last_step_only=False,
+        n_steps_limit=5,
+    )
+    assert loss_sched._n_steps_sampler is not None
+    loss_sched._n_steps_sampler.seed_rng(42)
+    loss_sched.set_train()
+    train_first_20 = []
+    for _ in range(20):
+        loss_sched.sample_n_steps()
+        train_first_20.append(loss_sched._n_steps)
+    loss_sched.set_eval()
+    loss_sched.seed_rng(0)
+    for _ in range(10):
+        loss_sched.sample_n_steps()
+    loss_sched.set_train()
+    train_next_20 = []
+    for _ in range(20):
+        loss_sched.sample_n_steps()
+        train_next_20.append(loss_sched._n_steps)
+    loss_sched._n_steps_sampler.seed_rng(42)
+    reference_40 = []
+    for _ in range(40):
+        loss_sched.sample_n_steps()
+        reference_40.append(loss_sched._n_steps)
+    assert train_first_20 + train_next_20 == reference_40
+
+
+def test_coupled_stepper_train_loss_set_train_eval_delegates():
+    ocean_schedule = MagicMock(spec=ComponentLossSchedule)
+    atmos_schedule = MagicMock(spec=ComponentLossSchedule)
+    coupled_loss = CoupledStepperTrainLoss(
+        ocean_loss=MagicMock(spec=StepLoss),
+        atmosphere_loss=MagicMock(spec=StepLoss),
+        ocean_schedule=ocean_schedule,
+        atmosphere_schedule=atmos_schedule,
+    )
+    coupled_loss.set_eval()
+    ocean_schedule.set_eval.assert_called_once()
+    atmos_schedule.set_eval.assert_called_once()
+    coupled_loss.set_train()
+    ocean_schedule.set_train.assert_called_once()
+    atmos_schedule.set_train.assert_called_once()
 
 
 @pytest.mark.parametrize(
@@ -439,12 +548,14 @@ def test_coupled_stepper_train_loss_sample_n_steps_delegates():
         (5.0, 5, 5),
     ],
 )
-def test_loss_contributions_n_required_forward_steps(n_steps, n_steps_limit, expected):
-    config = LossContributionsConfig(n_steps=n_steps)
-    loss = config.build(
-        loss_obj=Mock(spec=StepLoss), time_dim=1, n_steps_limit=n_steps_limit
+def test_schedule_n_required_forward_steps(n_steps, n_steps_limit, expected):
+    schedule = ComponentLossSchedule(
+        n_steps=n_steps,
+        optimize_last_step_only=False,
+        loss_weight=1.0,
+        n_steps_limit=n_steps_limit,
     )
-    assert loss.n_required_forward_steps() == expected
+    assert schedule.n_required_forward_steps() == expected
 
 
 @pytest.mark.parametrize(
@@ -455,33 +566,48 @@ def test_loss_contributions_n_required_forward_steps(n_steps, n_steps_limit, exp
         (float("inf"), 5, 5),
     ],
 )
-def test_loss_contributions_n_required_forward_steps_optimize_last_step_only(
+def test_schedule_n_required_forward_steps_optimize_last_step_only(
     n_steps, n_steps_limit, expected
 ):
-    config = LossContributionsConfig(n_steps=n_steps, optimize_last_step_only=True)
-    loss = config.build(
-        loss_obj=Mock(spec=StepLoss), time_dim=1, n_steps_limit=n_steps_limit
+    schedule = ComponentLossSchedule(
+        n_steps=n_steps,
+        optimize_last_step_only=True,
+        loss_weight=1.0,
+        n_steps_limit=n_steps_limit,
     )
-    assert loss.n_required_forward_steps() == expected
+    assert schedule.n_required_forward_steps() == expected
 
 
-def test_loss_contributions_n_required_forward_steps_after_sampling():
+def test_schedule_n_required_forward_steps_after_sampling():
     sampler = TimeLengthProbabilities(
         outcomes=[TimeLengthProbability(steps=2, probability=1.0)]
     )
-    config = LossContributionsConfig(n_steps=sampler)
-    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1, n_steps_limit=5)
+    schedule = ComponentLossSchedule(
+        n_steps=sampler,
+        optimize_last_step_only=False,
+        loss_weight=1.0,
+        n_steps_limit=5,
+    )
     # before sampling, _n_steps == max_n_forward_steps == 2
-    assert loss.n_required_forward_steps() == 2
-    loss.sample_n_steps()
-    assert loss.n_required_forward_steps() == 2
+    assert schedule.n_required_forward_steps() == 2
+    schedule.sample_n_steps()
+    assert schedule.n_required_forward_steps() == 2
 
 
-@pytest.mark.parametrize("config_kwargs", [{"n_steps": 0}, {"weight": 0.0}])
-def test_null_loss_contributions_n_required_forward_steps(config_kwargs):
-    config = LossContributionsConfig(**config_kwargs)
-    loss = config.build(loss_obj=Mock(spec=StepLoss), time_dim=1, n_steps_limit=10)
-    assert loss.n_required_forward_steps() == 0
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"n_steps": 0, "loss_weight": 1.0},
+        {"n_steps": None, "loss_weight": 0.0},
+    ],
+)
+def test_null_schedule_n_required_forward_steps(kwargs):
+    schedule = ComponentLossSchedule(
+        optimize_last_step_only=False,
+        n_steps_limit=10,
+        **kwargs,
+    )
+    assert schedule.n_required_forward_steps() == 0
 
 
 @pytest.mark.parametrize(
@@ -499,12 +625,15 @@ def test_null_loss_contributions_n_required_forward_steps(config_kwargs):
 def test_coupled_stepper_train_loss_n_required_outer_steps(
     ocean_required, atmos_required, n_inner_steps, expected_outer
 ):
-    ocean_loss = MagicMock(spec=StepLossABC)
-    atmos_loss = MagicMock(spec=StepLossABC)
-    ocean_loss.n_required_forward_steps.return_value = ocean_required
-    atmos_loss.n_required_forward_steps.return_value = atmos_required
+    ocean_schedule = MagicMock(spec=ComponentLossSchedule)
+    atmos_schedule = MagicMock(spec=ComponentLossSchedule)
+    ocean_schedule.n_required_forward_steps.return_value = ocean_required
+    atmos_schedule.n_required_forward_steps.return_value = atmos_required
     coupled_loss = CoupledStepperTrainLoss(
-        ocean_loss=ocean_loss, atmosphere_loss=atmos_loss
+        ocean_loss=Mock(spec=StepLoss),
+        atmosphere_loss=Mock(spec=StepLoss),
+        ocean_schedule=ocean_schedule,
+        atmosphere_schedule=atmos_schedule,
     )
     assert coupled_loss.n_required_outer_steps(n_inner_steps) == expected_outer
 
@@ -514,39 +643,32 @@ def test_coupled_stepper_train_loss_n_required_outer_steps(
     [
         ({}, False),
         ({"n_steps": 0}, True),
-        ({"weight": 0.0}, True),
+        ({"loss_weight": 0.0}, True),
         ({"n_steps": 5}, False),
         ({"n_steps": 0}, True),
     ],
 )
-def test_loss_contributions_config_is_null(config_kwargs, expected_is_null):
-    config = LossContributionsConfig(**config_kwargs)
-    assert config.is_null is expected_is_null
+def test_component_training_config_loss_is_null(config_kwargs, expected_is_null):
+    config = ComponentTrainingConfig(loss=Mock(), **config_kwargs)
+    assert config.loss_is_null is expected_is_null
 
 
-@pytest.mark.parametrize("ocean_config_kwargs", [{"n_steps": 0}, {"weight": 0.0}])
-def test_null_loss_contributions(steps_thru_atmos_7, ocean_config_kwargs):
-    atmos_loss_config = LossContributionsConfig()
-    atmosphere_loss = atmos_loss_config.build(
-        loss_obj=Mock(
-            spec=StepLoss,
-            return_value=_wrap_as_loss_output(torch.tensor(5.25)),
-        ),
-        time_dim=1,
-        n_steps_limit=10,
-    )
-    ocean_loss_config = LossContributionsConfig(**ocean_config_kwargs)
-    ocean_loss = ocean_loss_config.build(
-        loss_obj=Mock(
-            spec=StepLoss,
-            return_value=_wrap_as_loss_output(torch.tensor(42.0)),
-        ),
-        time_dim=1,
-        n_steps_limit=10,
-    )
-    loss_obj = CoupledStepperTrainLoss(
-        ocean_loss=ocean_loss,
-        atmosphere_loss=atmosphere_loss,
+@pytest.mark.parametrize(
+    "ocean_kwargs",
+    [
+        {"ocean_n_steps": 0},
+        {"ocean_weight": 0.0},
+    ],
+)
+def test_null_loss_contributions(steps_thru_atmos_7, ocean_kwargs):
+    atmos_loss_obj = _mock_step_loss(lambda *_, **__: torch.tensor(5.25))
+    ocean_loss_obj = _mock_step_loss(lambda *_, **__: torch.tensor(42.0))
+    loss_obj = _build_coupled_loss(
+        ocean_loss=ocean_loss_obj,
+        atmosphere_loss=atmos_loss_obj,
+        ocean_n_steps_limit=10,
+        atmos_n_steps_limit=10,
+        **ocean_kwargs,
     )
     for prediction, target_data in steps_thru_atmos_7:
         loss = loss_obj(prediction, target_data)

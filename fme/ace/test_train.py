@@ -14,11 +14,10 @@ import xarray as xr
 import yaml
 
 import fme
-from fme.ace.aggregator.inference.main import (
-    InferenceEvaluatorAggregatorConfig,
-    MeanMetricConfig,
-)
+from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregatorConfig
 from fme.ace.aggregator.one_step.main import OneStepAggregatorConfig
+from fme.ace.aggregator.one_step.map import OneStepMapMetricConfig
+from fme.ace.aggregator.one_step.snapshot import OneStepSnapshotMetricConfig
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.inference import (
     InferenceDataLoaderConfig,
@@ -34,7 +33,6 @@ from fme.ace.registry.test_hpx import (
     down_sampling_block_config,
     encoder_config,
     output_layer_config,
-    recurrent_block_config,
     up_sampling_block_config,
 )
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
@@ -54,13 +52,19 @@ from fme.ace.stepper.time_length_probabilities import (
 from fme.ace.testing import (
     DimSizes,
     MonthlyReferenceData,
+    patch_cm4_solar_constant,
     save_nd_netcdf,
-    save_scalar_netcdf,
+    save_stats_netcdfs,
     save_stepper_checkpoint,
 )
 from fme.ace.train.train import build_trainer, prepare_directory
 from fme.ace.train.train import main as train_main
-from fme.ace.train.train_config import InlineInferenceConfig, TrainBuilders, TrainConfig
+from fme.ace.train.train_config import (
+    InlineInferenceConfig,
+    InlineValidationConfig,
+    TrainBuilders,
+    TrainConfig,
+)
 from fme.core.coordinates import (
     HEALPixCoordinates,
     HorizontalCoordinates,
@@ -87,6 +91,47 @@ from fme.core.testing.wandb import mock_wandb
 JOB_SUBMISSION_SCRIPT_PATH = (
     pathlib.PurePath(__file__).parent / "run-train-and-inference.sh"
 )
+
+
+def _make_validation_entries(
+    *,
+    valid_data_path,
+    spatial_dimensions_str,
+    conditional,
+    log_validation_maps,
+    multi_validation=False,
+) -> InlineValidationConfig | list[InlineValidationConfig]:
+    primary = InlineValidationConfig(
+        loader=DataLoaderConfig(
+            dataset=XarrayDataConfig(
+                data_path=str(valid_data_path),
+                spatial_dimensions=spatial_dimensions_str,
+                labels=["era5"] if conditional else None,
+            ),
+            batch_size=2,
+            num_data_workers=0,
+        ),
+        aggregator=OneStepAggregatorConfig(
+            snapshot=OneStepSnapshotMetricConfig(enabled=log_validation_maps),
+            mean_map=OneStepMapMetricConfig(enabled=log_validation_maps),
+        ),
+    )
+    if not multi_validation:
+        return primary
+    secondary = InlineValidationConfig(
+        loader=DataLoaderConfig(
+            dataset=XarrayDataConfig(
+                data_path=str(valid_data_path),
+                spatial_dimensions=spatial_dimensions_str,
+                labels=["era5"] if conditional else None,
+            ),
+            batch_size=2,
+            num_data_workers=0,
+        ),
+        name="val_extra",
+        weight=0.0,
+    )
+    return [primary, secondary]
 
 
 def _get_test_yaml_files(
@@ -116,28 +161,17 @@ def _get_test_yaml_files(
     use_schedule=False,
     validate_using_ema=False,
     derived_forcings=None,
+    multi_validation=False,
+    partial_train_data_path: pathlib.Path | None = None,
+    batch_size: int = 2,
+    sample_with_replacement: int | None = 10,
 ):
-    input_time_size = 1
-    output_time_size = 1
     if derived_forcings is None:
         derived_forcings = DerivedForcingsConfig()
-    if nettype == "HEALPixRecUNet":
+    if nettype == "HEALPixUNet":
         in_channels = len(in_variable_names)
-        out_channels = len(out_variable_names)
-        prognostic_variables = min(
-            out_channels, in_channels
-        )  # how many variables in/out share.
-        # in practice, we will need to compare variable names, since there
-        # are some input-only and some output-only channels.
-        # TODO: https://github.com/ai2cm/full-model/issues/1046
-        n_constants = 0
-        decoder_input_channels = 0  # was 1, to indicate insolation - now 0
-        input_time_size = 1  # TODO: change to 2 (issue #1177)
-        output_time_size = 1  # TODO: change to 4 (issue #1177)
-
         conv_next_block = conv_next_block_config(in_channels=in_channels)
         down_sampling_block = down_sampling_block_config()
-        recurrent_block = recurrent_block_config()
         encoder = encoder_config(
             conv_next_block, down_sampling_block, n_channels=[16, 8, 4]
         )
@@ -147,17 +181,11 @@ def _get_test_yaml_files(
             conv_next_block,
             up_sampling_block,
             output_layer,
-            recurrent_block,
             n_channels=[4, 8, 16],
         )
         net_config = dict(
             encoder=encoder,
             decoder=decoder,
-            prognostic_variables=prognostic_variables,
-            n_constants=n_constants,
-            decoder_input_channels=decoder_input_channels,
-            input_time_size=input_time_size,
-            output_time_size=output_time_size,
         )
         spatial_dimensions_str: Literal["healpix", "latlon"] = "healpix"
     elif nettype == "Samudra":
@@ -177,6 +205,7 @@ def _get_test_yaml_files(
         net_config = dict(
             num_layers=2,
             embed_dim=12,
+            label_embed_dim=3,
         )
         if use_healpix:
             net_config["data_grid"] = "healpix"
@@ -308,31 +337,30 @@ def _get_test_yaml_files(
                         spatial_dimensions=spatial_dimensions_str,
                     ),
                     XarrayDataConfig(
-                        data_path=str(train_data_path),
+                        data_path=str(partial_train_data_path or train_data_path),
                         labels=[] if conditional else None,
                         spatial_dimensions=spatial_dimensions_str,
                     ),
                 ],
+                strict=(partial_train_data_path is None),
             ),
-            batch_size=2,
+            batch_size=batch_size,
             num_data_workers=0,
             time_buffer=time_buffer,
-            sample_with_replacement=10,
+            sample_with_replacement=sample_with_replacement,
         ),
-        validation_loader=DataLoaderConfig(
-            dataset=XarrayDataConfig(
-                data_path=str(valid_data_path),
-                spatial_dimensions=spatial_dimensions_str,
-                labels=["era5"] if conditional else None,
-            ),
-            batch_size=2,
-            num_data_workers=0,
+        validation=_make_validation_entries(
+            valid_data_path=valid_data_path,
+            spatial_dimensions_str=spatial_dimensions_str,
+            conditional=conditional,
+            log_validation_maps=log_validation_maps,
+            multi_validation=multi_validation,
         ),
         optimization=OptimizationConfig(
             use_gradient_accumulation=True,
             enable_automatic_mixed_precision=True,
             optimizer_type="Adam",
-            lr=0.001,
+            lr=0.0001,
             kwargs=dict(weight_decay=0.01),
             scheduler=SchedulerConfig(
                 type="CosineAnnealingLR",
@@ -361,6 +389,9 @@ def _get_test_yaml_files(
                             type=nettype,
                             conditional=conditional,
                             config=net_config,
+                            allow_missing_variables=(
+                                partial_train_data_path is not None
+                            ),
                         ),
                         ocean=OceanConfig(
                             surface_temperature_name=in_variable_names[0],
@@ -384,10 +415,6 @@ def _get_test_yaml_files(
         logging=logging_config,
         experiment_dir=str(results_dir),
         save_per_epoch_diagnostics=save_per_epoch_diagnostics,
-        validation_aggregator=OneStepAggregatorConfig(
-            log_snapshots=log_validation_maps,
-            log_mean_maps=log_validation_maps,
-        ),
     )
 
     inference_config = InferenceEvaluatorConfig(
@@ -400,9 +427,7 @@ def _get_test_yaml_files(
             save_prediction_files=False,
             files=[FileWriterConfig("autoregressive")],
         ),
-        aggregator=InferenceEvaluatorAggregatorConfig(
-            metrics=[MeanMetricConfig(target="denorm")],
-        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(),
         logging=logging_config,
         loader=InferenceDataLoaderConfig(
             dataset=XarrayDataConfig(
@@ -463,13 +488,15 @@ def _setup(
     derived_forcings=None,
     use_schedule: bool = False,
     validate_using_ema: bool = False,
+    multi_validation: bool = False,
+    use_variable_masking: bool = False,
 ):
     if not path.exists():
         path.mkdir()
     if derived_forcings is None:
         derived_forcings = DerivedForcingsConfig()
     seed = 0
-    np.random.seed(seed)
+    set_seed(seed)
     in_variable_names = [
         "PRESsfc",
         "specific_total_water_0",
@@ -514,11 +541,19 @@ def _setup(
         variable_names=on_disk_names,
         timestep_days=timestep_days,
     )
-    save_scalar_netcdf(
+    partial_data_dir = None
+    if use_variable_masking:
+        partial_data_dir = path / "data_partial"
+        partial_data_dir.mkdir()
+        partial_names = [n for n in on_disk_names if n != "specific_total_water_1"]
+        save_nd_netcdf(
+            partial_data_dir / "data.nc",
+            dim_sizes,
+            variable_names=partial_names,
+            timestep_days=timestep_days,
+        )
+    save_stats_netcdfs(
         stats_dir / "stats-mean.nc",
-        variable_names=all_variable_names,
-    )
-    save_scalar_netcdf(
         stats_dir / "stats-stddev.nc",
         variable_names=all_variable_names,
     )
@@ -563,60 +598,98 @@ def _setup(
         derived_forcings=derived_forcings,
         use_schedule=use_schedule,
         validate_using_ema=validate_using_ema,
+        multi_validation=multi_validation,
+        partial_train_data_path=partial_data_dir,
     )
     return train_config_filename, inference_config_filename
 
 
-@pytest.mark.parametrize(
-    "nettype, crps_training, log_validation_maps, \
-        use_healpix, use_schedule, validate_using_ema",
-    [
-        ("NoiseConditionedSFNO", True, False, False, True, False),
-        ("SphericalFourierNeuralOperatorNet", False, True, False, False, False),
-        ("HEALPixRecUNet", False, False, True, False, False),
-        ("Samudra", False, False, False, False, False),
-        ("NoiseConditionedSFNO", False, False, False, False, False),
-        ("NoiseConditionedSFNO", True, False, False, True, True),
-    ],
-)
+@dataclasses.dataclass
+class TrainAndInferenceTestSettings:
+    nettype: str = "SphericalFourierNeuralOperatorNet"
+    crps_training: bool = False
+    log_validation_maps: bool = False
+    use_healpix: bool = False
+    use_schedule: bool = False
+    validate_using_ema: bool = False
+    multi_validation: bool = False
+    use_variable_masking: bool = False
+
+
+_TRAIN_AND_INFERENCE_CASES = [
+    pytest.param(
+        TrainAndInferenceTestSettings(
+            nettype="NoiseConditionedSFNO",
+            crps_training=True,
+            use_schedule=True,
+        ),
+        id="SFNO-crps-schedule",
+    ),
+    pytest.param(
+        TrainAndInferenceTestSettings(
+            log_validation_maps=True,
+            multi_validation=True,
+        ),
+        id="SFNO-val-maps-multi",
+    ),
+    pytest.param(
+        TrainAndInferenceTestSettings(
+            nettype="HEALPixUNet",
+            use_healpix=True,
+        ),
+        id="HEALPix",
+    ),
+    pytest.param(
+        TrainAndInferenceTestSettings(nettype="Samudra"),
+        id="Samudra",
+    ),
+    pytest.param(
+        TrainAndInferenceTestSettings(
+            nettype="NoiseConditionedSFNO",
+            use_variable_masking=True,
+        ),
+        id="SFNO-masking",
+        marks=pytest.mark.filterwarnings(
+            "ignore:Metadata for each ensemble member:UserWarning"
+        ),
+    ),
+    pytest.param(
+        TrainAndInferenceTestSettings(
+            nettype="NoiseConditionedSFNO",
+            crps_training=True,
+            use_schedule=True,
+            validate_using_ema=True,
+        ),
+        id="SFNO-crps-schedule-ema",
+    ),
+]
+
+
+@pytest.mark.parametrize("settings", _TRAIN_AND_INFERENCE_CASES)
 def test_train_and_inference(
     tmp_path,
-    nettype,
-    crps_training,
-    log_validation_maps: bool,
-    use_healpix: bool,
-    use_schedule: bool,
-    validate_using_ema: bool,
+    settings: TrainAndInferenceTestSettings,
     very_fast_only: bool,
 ):
-    """Ensure that ACE training and subsequent standalone inference run without errors.
-
-    Args:
-        tmp_path: pytext fixture for temporary workspace.
-        nettype: parameter indicating model architecture to use.
-        crps_training: parameter indicating whether to use CRPS training.
-        log_validation_maps: parameter indicating whether to log validation maps.
-        use_healpix: parameter indicating whether to use HEALPix grid.
-        use_schedule: parameter indicating whether to use
-            a schedule for n_forward_steps.
-        very_fast_only: parameter indicating whether to skip slow tests.
-    """
+    """Ensure that training and standalone inference run without errors."""
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
     # need multi-year to cover annual aggregator
     train_config, inference_config = _setup(
         tmp_path,
-        nettype,
+        settings.nettype,
         log_to_wandb=True,
         timestep_days=20,
         n_time=int(366 * 3 / 20 + 1),
         inference_forward_steps=int(366 * 3 / 20 / 2 - 1) * 2,  # must be even
-        use_healpix=use_healpix,
-        crps_training=crps_training,
+        use_healpix=settings.use_healpix,
+        crps_training=settings.crps_training,
         save_per_epoch_diagnostics=True,
-        use_schedule=use_schedule,
-        validate_using_ema=validate_using_ema,
-        log_validation_maps=log_validation_maps,
+        use_schedule=settings.use_schedule,
+        validate_using_ema=settings.validate_using_ema,
+        log_validation_maps=settings.log_validation_maps,
+        multi_validation=settings.multi_validation,
+        use_variable_masking=settings.use_variable_masking,
     )
     # using pdb requires calling main functions directly
     with mock_wandb() as wandb:
@@ -630,7 +703,10 @@ def test_train_and_inference(
 
         epoch_logs = wandb_logs[-1]
         assert "inference_0/mean_step_20_norm/weighted_rmse/channel_mean" in epoch_logs
-        assert "val/mean_norm/weighted_rmse/channel_mean" in epoch_logs
+        primary_val_name = "val_0" if settings.multi_validation else "val"
+        assert f"{primary_val_name}/mean_norm/weighted_rmse/channel_mean" in epoch_logs
+        if settings.multi_validation:
+            assert "val_extra/mean/loss" in epoch_logs
         ensemble_step_20_keys = [
             k for k in epoch_logs if "inference_0/ensemble_step_20/" in k
         ]
@@ -650,13 +726,15 @@ def test_train_and_inference(
             "inference epoch log"
         )
 
-    validation_output_dir = tmp_path / "results" / "output" / "val" / "epoch_0001"
+    validation_output_dir = (
+        tmp_path / "results" / "output" / primary_val_name / "epoch_0001"
+    )
     assert validation_output_dir.exists()
     validation_diags = ["mean"]
     validation_map_diags = ["snapshot", "mean_map"]
     for diagnostic in validation_diags + validation_map_diags:
         diagnostic_output = validation_output_dir / f"{diagnostic}_diagnostics.nc"
-        if diagnostic in validation_map_diags and not log_validation_maps:
+        if diagnostic in validation_map_diags and not settings.log_validation_maps:
             assert not diagnostic_output.exists()
         else:
             assert diagnostic_output.exists()
@@ -992,12 +1070,13 @@ def test_train_without_inline_inference(tmp_path, very_fast_only: bool):
         timestep_days=20,
         n_time=int(366 * 3 / 20 + 1),
         inference_forward_steps=int(366 * 3 / 20 / 2 - 1) * 2,  # must be even
-        use_healpix=(nettype == "HEALPixRecUNet"),
+        use_healpix=False,
         crps_training=crps_training,
         save_per_epoch_diagnostics=True,
         log_validation_maps=log_validation_maps,
         skip_inline_inference=True,
         time_buffer=2,
+        multi_validation=True,
     )
     with mock_wandb() as wandb:
         train_main(
@@ -1006,8 +1085,14 @@ def test_train_without_inline_inference(tmp_path, very_fast_only: bool):
         wandb_logs = wandb.get_logs()
     assert np.isinf(wandb_logs[-1]["best_inference_error"])
     assert not any("inference/" in key for key in wandb_logs[-1])
+    epoch_logs = wandb_logs[-1]
+    assert "val_0/mean/loss" in epoch_logs
+    assert "val_extra/mean/loss" in epoch_logs
+    val_extra_output = tmp_path / "results" / "output" / "val_extra" / "epoch_0001"
+    assert val_extra_output.exists()
 
 
+@pytest.mark.skipif(torch.cuda.is_available(), reason="flaky on GPU")
 @pytest.mark.parametrize(
     "insolation_config",
     [
@@ -1043,14 +1128,14 @@ def test_train_and_inference_with_derived_forcings(
         log_validation_maps=log_validation_maps,
         derived_forcings=derived_forcings,
     )
-    # using pdb requires calling main functions directly
-    with mock_wandb() as wandb:
-        train_main(
-            yaml_config=train_config,
-        )
-    with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
-        inference_evaluator_main(yaml_config=inference_config)
+    with patch_cm4_solar_constant(1.0):
+        with mock_wandb() as wandb:
+            train_main(
+                yaml_config=train_config,
+            )
+        with mock_wandb() as wandb:
+            wandb.configure(log_to_wandb=True)
+            inference_evaluator_main(yaml_config=inference_config)
 
 
 def test_train_with_non_local_experiment_dir_error():
@@ -1090,7 +1175,7 @@ def test_train_with_non_local_experiment_dir_error():
             experiment_dir=non_local_experiment_dir,
             stepper=stepper,
             train_loader=dummy_data_loader,
-            validation_loader=dummy_data_loader,
+            validation=InlineValidationConfig(loader=dummy_data_loader),
             optimization=OptimizationConfig(),
             logging=LoggingConfig(),
             max_epochs=1,
@@ -1111,7 +1196,7 @@ def test_train_config_with_checkpoint_stepper(tmp_path: pathlib.Path):
         stepper=CheckpointStepperConfig(checkpoint_path=str(checkpoint_path)),
         stepper_training=TrainStepperConfig(n_forward_steps=2),
         train_loader=dummy_data_loader,
-        validation_loader=dummy_data_loader,
+        validation=InlineValidationConfig(loader=dummy_data_loader),
         optimization=OptimizationConfig(),
         logging=LoggingConfig(),
         max_epochs=1,
@@ -1154,7 +1239,7 @@ def test_train_config_with_stepper_config_sets_stepper_config(tmp_path: pathlib.
         stepper=stepper,
         stepper_training=TrainStepperConfig(n_forward_steps=2),
         train_loader=dummy_data_loader,
-        validation_loader=dummy_data_loader,
+        validation=InlineValidationConfig(loader=dummy_data_loader),
         optimization=OptimizationConfig(),
         logging=LoggingConfig(),
         max_epochs=1,

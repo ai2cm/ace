@@ -31,7 +31,7 @@ from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.time import RepeatedInterval, TimeSlice
 from fme.core.dataset.utils import FillNaNsConfig
-from fme.core.mask_provider import MaskProvider
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.stacker import Stacker
 from fme.core.typing_ import Slice, TensorDict
 
@@ -333,12 +333,14 @@ def get_raw_paths(path, file_pattern):
     return raw_paths
 
 
-def _get_mask_provider(ds: xr.Dataset, dtype: torch.dtype | None) -> MaskProvider:
+def _get_spatial_mask_provider(
+    ds: xr.Dataset, dtype: torch.dtype | None
+) -> SpatialMaskProvider:
     """Get mask provider from a dataset.
 
     If the dataset contains time-invariant variables that start with the string
-    "mask_" then these variables will be used to instantiate a MaskProvider
-    object. Otherwise, an empty MaskProvider is returned.
+    "mask_" then these variables will be used to instantiate a SpatialMaskProvider
+    object. Otherwise, an empty SpatialMaskProvider is returned.
 
     Args:
         ds: Dataset to get vertical coordinates from.
@@ -354,9 +356,9 @@ def _get_mask_provider(ds: xr.Dataset, dtype: torch.dtype | None) -> MaskProvide
     for name in masks:
         if "time" in ds[name].dims:
             raise ValueError("Masks must be time-independent.")
-    mask_provider = MaskProvider(masks)
-    logging.info(f"Initialized {mask_provider}.")
-    return mask_provider
+    spatial_mask_provider = SpatialMaskProvider(masks)
+    logging.info(f"Initialized {spatial_mask_provider}.")
+    return spatial_mask_provider
 
 
 @dataclasses.dataclass
@@ -519,11 +521,13 @@ class XarrayDataConfig(DatasetConfigABC):
         self,
         names: Sequence[str],
         n_timesteps: IntSchedule,
+        allow_missing_variables: bool = False,
     ) -> tuple["XarraySubset", DatasetProperties]:
         return get_xarray_dataset(
             self,
             list(names),
             n_timesteps,
+            allow_missing_variables=allow_missing_variables,
         )
 
 
@@ -538,10 +542,15 @@ class XarrayDataset(DatasetABC):
     """
 
     def __init__(
-        self, config: XarrayDataConfig, names: Sequence[str], n_timesteps: IntSchedule
+        self,
+        config: XarrayDataConfig,
+        names: Sequence[str],
+        n_timesteps: IntSchedule,
+        allow_missing_variables: bool = False,
     ):
         self._horizontal_coordinates: HorizontalCoordinates
         self._names = names
+        self._allow_missing_variables = allow_missing_variables
         self.path = config.data_path
         self.file_pattern = config.file_pattern
         self.engine = config.engine
@@ -568,7 +577,9 @@ class XarrayDataset(DatasetABC):
             engine=self.engine,
             chunks=None,
         )
-        self._mask_provider = _get_mask_provider(first_dataset, self.dtype)
+        self._spatial_mask_provider = _get_spatial_mask_provider(
+            first_dataset, self.dtype
+        )
         (
             self._horizontal_coordinates,
             self._static_derived_data,
@@ -579,6 +590,13 @@ class XarrayDataset(DatasetABC):
             self._time_invariant_names,
             self._static_derived_names,
         ) = self._group_variable_names_by_time_type()
+        self._names = (
+            list(self._time_dependent_names)
+            + list(self._time_invariant_names)
+            + list(self._static_derived_names)
+        )
+        self._missing_names = frozenset(set(names) - set(self._names))
+        self._get_variable_metadata(first_dataset)
 
         self._vertical_coordinate = _get_vertical_coordinate(first_dataset, self.dtype)
         self.overwrite = config.overwrite
@@ -680,7 +698,7 @@ class XarrayDataset(DatasetABC):
             self._variable_metadata,
             self._vertical_coordinate,
             self._horizontal_coordinates,
-            self._mask_provider,
+            self._spatial_mask_provider,
             self.timestep,
             self._is_remote,
             self._labels,
@@ -698,11 +716,8 @@ class XarrayDataset(DatasetABC):
         for name in self._names:
             if name in StaticDerivedData.names:
                 result[name] = StaticDerivedData.metadata[name]
-            elif hasattr(ds[name], "units") and hasattr(ds[name], "long_name"):
-                result[name] = VariableMetadata(
-                    units=ds[name].units,
-                    long_name=ds[name].long_name,
-                )
+            else:
+                result[name] = VariableMetadata.from_attrs(ds[name].attrs)
         self._variable_metadata = result
 
     def _get_files_stats(
@@ -733,10 +748,6 @@ class XarrayDataset(DatasetABC):
 
         del cum_num_timesteps
 
-        ds = self._open_file(0)
-        self._get_variable_metadata(ds)
-        ds.close()
-
     def _group_variable_names_by_time_type(self) -> VariableNames:
         """Returns lists of time-dependent variable names, time-independent
         variable names, and variables which are only present as an initial
@@ -754,22 +765,21 @@ class XarrayDataset(DatasetABC):
             for name in self._names:
                 if name in StaticDerivedData.names:
                     static_derived_names.append(name)
-                else:
-                    try:
-                        da = ds[name]
-                    except KeyError:
-                        raise ValueError(
-                            f"Required variable not found in dataset: {name}."
-                        )
+                elif name in ds:
+                    dims = ds[name].dims
+                    if "time" in dims:
+                        time_dependent_names.append(name)
                     else:
-                        dims = da.dims
-                        if "time" in dims:
-                            time_dependent_names.append(name)
-                        else:
-                            time_invariant_names.append(name)
-            logging.info(
-                f"The required variables have been found in the dataset: {self._names}."
-            )
+                        time_invariant_names.append(name)
+                elif self._allow_missing_variables:
+                    logging.info(
+                        f"Variable '{name}' not found in dataset, "
+                        "skipping due to allow_missing_variables=True."
+                    )
+                else:
+                    raise ValueError(f"Required variable not found in dataset: {name}.")
+        found = time_dependent_names + time_invariant_names + static_derived_names
+        logging.info(f"The required variables have been found in the dataset: {found}.")
 
         return VariableNames(
             time_dependent_names,
@@ -950,11 +960,20 @@ class XarrayDataset(DatasetABC):
         # Apply field overwrites
         tensors = self.overwrite.apply(tensors)
 
+        # Fill NaN for missing variables so all samples share the same keys
+        missing_names: frozenset[str] | None = None
+        if self._allow_missing_variables and self._missing_names:
+            fill_shape = [total_steps] + self._shape_excluding_time_after_selection
+            fill_dtype = self.dtype if self.dtype is not None else torch.float32
+            for name in self._missing_names:
+                tensors[name] = torch.full(fill_shape, float("nan"), dtype=fill_dtype)
+            missing_names = self._missing_names
+
         # Create a DataArray of times to return corresponding to the slice that
         # is valid even when n_repeats > 1.
         time = xr.DataArray(self.all_times[time_slice].values, dims=["time"])
 
-        return tensors, time, self._labels, self._epoch
+        return tensors, time, self._labels, self._epoch, missing_names
 
     def enable_shared_memory(self):
         """Move epoch counter to shared memory for multi-worker data loading."""
@@ -1091,9 +1110,14 @@ class XarraySubset(DatasetABC):
 
 
 def get_xarray_dataset(
-    config: XarrayDataConfig, names: Sequence[str], n_timesteps: IntSchedule
+    config: XarrayDataConfig,
+    names: Sequence[str],
+    n_timesteps: IntSchedule,
+    allow_missing_variables: bool = False,
 ) -> tuple["XarraySubset", DatasetProperties]:
-    dataset = XarrayDataset(config, names, n_timesteps)
+    dataset = XarrayDataset(
+        config, names, n_timesteps, allow_missing_variables=allow_missing_variables
+    )
     properties = dataset.properties
     index_slice = _as_index_selection(config.subset, dataset)
     return XarraySubset(dataset, index_slice), properties
@@ -1104,11 +1128,14 @@ def get_xarray_datasets(
     names: Sequence[str],
     n_timesteps: IntSchedule,
     strict: bool = True,
+    allow_missing_variables: bool = False,
 ) -> tuple[list[XarraySubset], DatasetProperties]:
     datasets = []
     properties: DatasetProperties | None = None
     for config in dataset_configs:
-        dataset, new_properties = get_xarray_dataset(config, names, n_timesteps)
+        dataset, new_properties = get_xarray_dataset(
+            config, names, n_timesteps, allow_missing_variables=allow_missing_variables
+        )
         datasets.append(dataset)
         if properties is None:
             properties = new_properties

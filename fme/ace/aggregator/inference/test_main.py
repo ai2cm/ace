@@ -8,9 +8,9 @@ import xarray as xr
 
 from fme.ace.aggregator.inference.main import (
     EnsembleMetricConfig,
-    InferenceEvaluatorAggregatorConfig,
     StepMeanMetricConfig,
     TimeMeanMetricConfig,
+    build_inference_evaluator_aggregator,
 )
 from fme.ace.data_loading.batch_data import BatchData, PairedData
 from fme.core.coordinates import LatLonCoordinates
@@ -40,12 +40,10 @@ def test_inference_evaluator_aggregator_channel_mean_names(
     ds_info = get_ds_info(nx, ny)
     initial_time = xr.DataArray(np.zeros((batch_size * n_ensemble,)), dims=["sample"])
 
-    config = InferenceEvaluatorAggregatorConfig(
+    agg = build_inference_evaluator_aggregator(
         metrics=[
             TimeMeanMetricConfig(target="norm"),
         ],
-    )
-    agg = config.build(
         dataset_info=ds_info,
         n_ic_steps=n_ic_steps,
         n_forward_steps=n_forward_steps,
@@ -112,20 +110,19 @@ def test_inference_evaluator_aggregator_ensemble():
     ds_info = get_ds_info(nx, ny)
     initial_time = xr.DataArray(np.zeros((batch_size,)), dims=["sample"])
 
-    config = InferenceEvaluatorAggregatorConfig(
+    agg = build_inference_evaluator_aggregator(
         metrics=[
             StepMeanMetricConfig(step=20, target="denorm"),
             StepMeanMetricConfig(step=20, target="norm"),
             TimeMeanMetricConfig(target="norm"),
-            EnsembleMetricConfig(step=20),
+            EnsembleMetricConfig(step=20, target="denorm"),
+            EnsembleMetricConfig(step=20, target="norm"),
         ],
-    )
-    agg = config.build(
         dataset_info=ds_info,
         n_ic_steps=n_ic_steps,
         n_forward_steps=n_forward_steps,
         initial_time=initial_time,
-        normalize=lambda x: dict(x),
+        normalize=lambda x: {k: v * 0.5 for k, v in x.items()},
         channel_mean_names=channel_mean_names,
         save_diagnostics=False,
         n_ensemble_per_ic=n_ensemble,
@@ -154,5 +151,20 @@ def test_inference_evaluator_aggregator_ensemble():
     summary_logs = agg.get_summary_logs()
     for varname in ["a", "b", "c"]:
         assert f"ensemble_step_20/crps/{varname}" in summary_logs
+        assert f"ensemble_step_20_norm/crps/{varname}" in summary_logs
     for varname in ["a", "b", "c"]:
         assert f"ensemble_step_20/ssr_bias/{varname}" in summary_logs
+        assert f"ensemble_step_20_norm/ssr_bias/{varname}" in summary_logs
+    # channel_mean is only emitted by the norm aggregator, and only for the
+    # variables listed in channel_mean_names (["a", "b"], not "c").
+    for metric in ("crps", "ensemble_mean_rmse"):
+        assert f"ensemble_step_20_norm/{metric}/channel_mean" in summary_logs
+        assert f"ensemble_step_20/{metric}/channel_mean" not in summary_logs
+    # Differential: scaling by 0.5 changes crps/rmse, so denorm and norm
+    # values must differ.
+    for varname in ["a", "b", "c"]:
+        for metric in ("crps", "ensemble_mean_rmse"):
+            assert (
+                summary_logs[f"ensemble_step_20/{metric}/{varname}"]
+                != summary_logs[f"ensemble_step_20_norm/{metric}/{varname}"]
+            )

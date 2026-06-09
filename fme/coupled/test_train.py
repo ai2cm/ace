@@ -37,18 +37,19 @@ train_loader:
       data_path: {atmosphere_data_path}
       subset:
           start_time: '1970-01-01'
-validation_loader:
-  batch_size: 2
-  num_data_workers: 0
-  dataset:
-    ocean:
-      data_path: {ocean_data_path}
-      subset:
-          start_time: '1970-01-01'
-    atmosphere:
-      data_path: {atmosphere_data_path}
-      subset:
-          start_time: '1970-01-01'
+validation:
+- loader:
+    batch_size: 2
+    num_data_workers: 0
+    dataset:
+      ocean:
+        data_path: {ocean_data_path}
+        subset:
+            start_time: '1970-01-01'
+      atmosphere:
+        data_path: {atmosphere_data_path}
+        subset:
+            start_time: '1970-01-01'
 inference:
   loader:
     dataset:
@@ -65,7 +66,7 @@ inference:
     log_zonal_mean_images: True
 optimization:
   enable_automatic_mixed_precision: false
-  lr: 0.0001
+  lr: 0.00001
   optimizer_type: Adam
 stepper_training:
   n_coupled_steps: {n_coupled_steps}
@@ -73,14 +74,12 @@ stepper_training:
     loss:
       type: {loss_type}
       kwargs: {loss_kwargs}
-    loss_contributions:
-      weight: {loss_ocean_weight}
+    loss_weight: {loss_ocean_weight}
   atmosphere:
     loss:
       type: {loss_type}
       kwargs: {loss_kwargs}
-    loss_contributions:
-      n_steps: {loss_atmos_n_steps}
+    n_steps: {loss_atmos_n_steps}
 stepper:
   sst_name: {ocean_sfc_temp_name}
   ocean_fraction_prediction:
@@ -420,6 +419,11 @@ def test_train_and_inference(
     assert "val/mean/loss/ocean" in epoch_logs
     # atmos loss contributions
     assert "val/mean/loss/atmosphere" in epoch_logs
+    np.testing.assert_allclose(
+        epoch_logs["val/mean/loss"],
+        epoch_logs["val/mean/loss/atmosphere"] + epoch_logs["val/mean/loss/ocean"],
+        atol=1e-6,
+    )
     if loss_atmos_n_steps == 0:
         np.testing.assert_allclose(epoch_logs["val/mean/loss/atmosphere"], 0.0)
 

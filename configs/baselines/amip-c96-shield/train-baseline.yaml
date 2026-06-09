@@ -24,7 +24,8 @@ inference:
         data_path: /climate-default/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/netCDFs/ic_0002
       num_data_workers: 8
     aggregator:
-      log_histograms: true
+      histogram:
+        enabled: true
       time_mean_reference_data: /statsdata/time-mean.nc
       monthly_reference_data: /refdata/monthly_mean_data.nc
 logging:
@@ -46,16 +47,17 @@ train_loader:
       - data_path: /climate-default/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/netCDFs/ic_0002
         subset:
           start_time: '2011-01-01'
-validation_loader:
-  batch_size: 64
-  num_data_workers: 8
-  prefetch_factor: 4
-  dataset:
-    concat:
-      - data_path: /climate-default/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/netCDFs/ic_0002
-        subset:
-          start_time: '1996-01-01'
-          stop_time: '2000-12-31'
+validation:
+  loader:
+    batch_size: 64
+    num_data_workers: 8
+    prefetch_factor: 4
+    dataset:
+      concat:
+        - data_path: /climate-default/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/netCDFs/ic_0002
+          subset:
+            start_time: '1996-01-01'
+            stop_time: '2000-12-31'
 optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001
@@ -101,6 +103,8 @@ stepper:
           separable: false
           spectral_layers: 3
           spectral_transform: sht
+          affine_norms: true
+          normalize_big_skip: true
       normalization:
         network:
           global_means_path: /statsdata/centering.nc
