@@ -39,11 +39,7 @@ from fme.core.step.single_module import (
 )
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.typing_ import TensorDict
-from fme.core.var_masking import (
-    PerVariableMaskingConfig,
-    UniformMaskingConfig,
-    VariableMaskingConfig,
-)
+from fme.core.var_masking import PerVariableMaskingConfig, UniformMaskingConfig
 
 from .radiation import SeparateRadiationStepConfig
 
@@ -1531,7 +1527,9 @@ def test_step_shared_global_mean_removal_raises_on_masked_reference():
         )
 
 
-def _make_input_dropout_step(input_dropout: VariableMaskingConfig) -> SingleModuleStep:
+def _make_input_dropout_step(
+    input_dropout: UniformMaskingConfig | PerVariableMaskingConfig,
+) -> SingleModuleStep:
     in_names = ["forcing_shared", "forcing_rad"]
     out_names = ["diagnostic_main", "diagnostic_rad"]
     normalization = get_network_and_loss_normalization_config(
@@ -1559,9 +1557,7 @@ def _make_input_dropout_step(input_dropout: VariableMaskingConfig) -> SingleModu
 
 def test_input_dropout_disabled_in_eval_mode():
     """Output is deterministic in eval mode regardless of input_dropout config."""
-    step = _make_input_dropout_step(
-        VariableMaskingConfig(uniform=UniformMaskingConfig(min_vars=1, max_vars=1))
-    )
+    step = _make_input_dropout_step(UniformMaskingConfig(min_vars=1, max_vars=1))
     step.module.torch_module.eval()
     n_samples = 4
     input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
@@ -1580,9 +1576,7 @@ def test_input_dropout_disabled_in_eval_mode():
 
 def test_input_dropout_active_in_train_mode():
     """With rate=1.0 all inputs are zeroed, so outputs differ from no-dropout."""
-    step = _make_input_dropout_step(
-        VariableMaskingConfig(per_variable=PerVariableMaskingConfig(rate=1.0))
-    )
+    step = _make_input_dropout_step(PerVariableMaskingConfig(rate=1.0))
     step.module.torch_module.train()
     n_samples = 4
     input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
@@ -1590,9 +1584,7 @@ def test_input_dropout_active_in_train_mode():
         step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
 
-    step_no_dropout = _make_input_dropout_step(
-        VariableMaskingConfig(per_variable=PerVariableMaskingConfig(rate=0.0))
-    )
+    step_no_dropout = _make_input_dropout_step(PerVariableMaskingConfig(rate=0.0))
     step_no_dropout.module.torch_module.train()
     # Copy weights so only the masking differs
     step_no_dropout.module.torch_module.load_state_dict(
@@ -1613,19 +1605,9 @@ def test_input_dropout_active_in_train_mode():
 
 
 def test_input_dropout_with_channel_mask_inputs():
-    """With include_channel_mask_inputs, rate=1.0 zeroes the mask indicators too.
-
-    Outputs with rate=1.0 must differ from rate=0.0 with the same weights,
-    confirming that zeroing both input channels and their mask indicators
-    has an effect.
+    """With include_channel_mask_inputs=True, rate=1.0 produces different outputs
+    than rate=0.0 with the same weights.
     """
-    step_full = _make_input_dropout_step(
-        VariableMaskingConfig(per_variable=PerVariableMaskingConfig(rate=1.0))
-    )
-    step_none = _make_input_dropout_step(
-        VariableMaskingConfig(per_variable=PerVariableMaskingConfig(rate=0.0))
-    )
-    # Rebuild with include_channel_mask_inputs=True
     in_names = ["forcing_shared", "forcing_rad"]
     out_names = ["diagnostic_main", "diagnostic_rad"]
     normalization = get_network_and_loss_normalization_config(
@@ -1645,9 +1627,7 @@ def test_input_dropout_with_channel_mask_inputs():
                     out_names=out_names,
                     normalization=normalization,
                     include_channel_mask_inputs=True,
-                    input_dropout=VariableMaskingConfig(
-                        per_variable=PerVariableMaskingConfig(rate=rate)
-                    ),
+                    input_dropout=PerVariableMaskingConfig(rate=rate),
                 )
             ),
         )
@@ -1677,9 +1657,7 @@ def test_input_dropout_with_channel_mask_inputs():
     differs = any(
         not torch.allclose(out_full[name], out_none[name]) for name in out_names
     )
-    assert (
-        differs
-    ), "rate=1.0 should zero inputs and mask indicators, producing different outputs"
+    assert differs, "rate=1.0 should produce different outputs from rate=0.0"
 
 
 def _make_gmr_input_dropout_step(rate: float, include_channel_mask_inputs: bool):
@@ -1707,9 +1685,7 @@ def _make_gmr_input_dropout_step(rate: float, include_channel_mask_inputs: bool)
                     field_names=in_names, append_as_input=True
                 ),
                 include_channel_mask_inputs=include_channel_mask_inputs,
-                input_dropout=VariableMaskingConfig(
-                    per_variable=PerVariableMaskingConfig(rate=rate)
-                ),
+                input_dropout=PerVariableMaskingConfig(rate=rate),
             )
         ),
     )
@@ -1756,13 +1732,9 @@ def test_input_dropout_masks_gmr_extra_channels():
     assert differs, "rate=1.0 should zero all channels including GMR extras"
 
 
-def test_input_dropout_with_channel_mask_inputs_zeroes_gmr_indicators():
-    """With include_channel_mask_inputs=True, rate=1.0 zeroes both input
-    channels and their mask indicators (including those for GMR extras).
-
-    Outputs with rate=1.0 must differ from rate=0.0 with the same weights,
-    confirming that the channel-mask indicators for GMR extras are zeroed
-    consistently with the input dropout mask.
+def test_input_dropout_with_channel_mask_inputs_and_gmr():
+    """With include_channel_mask_inputs=True and GMR extras, rate=1.0 produces
+    different outputs than rate=0.0 with the same weights.
     """
     step_full = _make_gmr_input_dropout_step(rate=1.0, include_channel_mask_inputs=True)
     step_none = _make_gmr_input_dropout_step(rate=0.0, include_channel_mask_inputs=True)
@@ -1789,9 +1761,7 @@ def test_input_dropout_with_channel_mask_inputs_zeroes_gmr_indicators():
         not torch.allclose(out_full[name], out_none[name])
         for name in step_full.out_names
     )
-    assert (
-        differs
-    ), "rate=1.0 should zero all inputs and mask indicators (including GMR extras)"
+    assert differs, "rate=1.0 should produce different outputs from rate=0.0"
 
 
 def test_input_dropout_ensemble_members_share_mask():
@@ -1820,9 +1790,7 @@ def test_input_dropout_ensemble_members_share_mask():
                 out_names=out_names,
                 normalization=normalization,
                 include_channel_mask_inputs=True,
-                input_dropout=VariableMaskingConfig(
-                    per_variable=PerVariableMaskingConfig(rate=0.5)
-                ),
+                input_dropout=PerVariableMaskingConfig(rate=0.5),
             )
         ),
     )

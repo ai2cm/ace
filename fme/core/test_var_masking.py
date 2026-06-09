@@ -8,16 +8,6 @@ from fme.core.var_masking import (
 )
 
 
-def test_variable_masking_config_requires_exactly_one_mode():
-    with pytest.raises(ValueError, match="Exactly one"):
-        VariableMaskingConfig()
-    with pytest.raises(ValueError, match="Exactly one"):
-        VariableMaskingConfig(
-            uniform=UniformMaskingConfig(),
-            per_variable=PerVariableMaskingConfig(rate=0.5),
-        )
-
-
 def test_per_variable_masking_config_rate_validation():
     with pytest.raises(ValueError, match="rate"):
         PerVariableMaskingConfig(rate=-0.1)
@@ -35,14 +25,14 @@ def test_uniform_masking_config_validation():
 
 
 def test_uniform_mask_shape_and_dtype():
-    config = VariableMaskingConfig(uniform=UniformMaskingConfig(min_vars=1, max_vars=3))
+    config = UniformMaskingConfig(min_vars=1, max_vars=3)
     mask = config.sample_mask(n_channels=10, batch_size=4, device=torch.device("cpu"))
     assert mask.shape == (4, 10)
     assert mask.dtype == torch.bool
 
 
 def test_uniform_mask_counts_in_range():
-    config = VariableMaskingConfig(uniform=UniformMaskingConfig(min_vars=2, max_vars=4))
+    config = UniformMaskingConfig(min_vars=2, max_vars=4)
     n_channels = 8
     batch_size = 64
     mask = config.sample_mask(n_channels, batch_size, torch.device("cpu"))
@@ -55,35 +45,35 @@ def test_uniform_mask_counts_in_range():
 def test_uniform_mask_defaults_min_max():
     n_channels = 5
     batch_size = 16
-    config = VariableMaskingConfig(uniform=UniformMaskingConfig())
+    config = UniformMaskingConfig()
     mask = config.sample_mask(n_channels, batch_size, torch.device("cpu"))
     n_masked = (~mask).sum(dim=1)
-    assert (n_masked >= 0).all()
+    assert (n_masked >= 1).all()
     assert (n_masked <= n_channels).all()
 
 
 def test_per_variable_mask_shape_and_dtype():
-    config = VariableMaskingConfig(per_variable=PerVariableMaskingConfig(rate=0.5))
+    config = PerVariableMaskingConfig(rate=0.5)
     mask = config.sample_mask(n_channels=10, batch_size=8, device=torch.device("cpu"))
     assert mask.shape == (8, 10)
     assert mask.dtype == torch.bool
 
 
 def test_per_variable_mask_rate_zero_keeps_all():
-    config = VariableMaskingConfig(per_variable=PerVariableMaskingConfig(rate=0.0))
+    config = PerVariableMaskingConfig(rate=0.0)
     mask = config.sample_mask(n_channels=20, batch_size=32, device=torch.device("cpu"))
     assert mask.all()
 
 
 def test_per_variable_mask_rate_one_drops_all():
-    config = VariableMaskingConfig(per_variable=PerVariableMaskingConfig(rate=1.0))
+    config = PerVariableMaskingConfig(rate=1.0)
     mask = config.sample_mask(n_channels=20, batch_size=32, device=torch.device("cpu"))
     assert not mask.any()
 
 
 def test_uniform_mask_ensemble_members_share_mask():
     n_samples, n_ensemble, n_channels = 6, 3, 8
-    config = VariableMaskingConfig(uniform=UniformMaskingConfig(min_vars=1, max_vars=3))
+    config = UniformMaskingConfig(min_vars=1, max_vars=3)
     mask = config.sample_mask(
         n_channels,
         batch_size=n_samples * n_ensemble,
@@ -99,7 +89,7 @@ def test_uniform_mask_ensemble_members_share_mask():
 
 def test_per_variable_mask_ensemble_members_share_mask():
     n_samples, n_ensemble, n_channels = 6, 3, 8
-    config = VariableMaskingConfig(per_variable=PerVariableMaskingConfig(rate=0.5))
+    config = PerVariableMaskingConfig(rate=0.5)
     mask = config.sample_mask(
         n_channels,
         batch_size=n_samples * n_ensemble,
@@ -114,8 +104,12 @@ def test_per_variable_mask_ensemble_members_share_mask():
 
 
 def test_sample_mask_raises_on_indivisible_batch():
-    config = VariableMaskingConfig(uniform=UniformMaskingConfig())
+    config = UniformMaskingConfig()
     with pytest.raises(ValueError, match="divisible"):
         config.sample_mask(
             n_channels=4, batch_size=7, device=torch.device("cpu"), n_ensemble=3
         )
+
+
+def test_variable_masking_config_is_union_of_sub_configs():
+    assert VariableMaskingConfig == UniformMaskingConfig | PerVariableMaskingConfig

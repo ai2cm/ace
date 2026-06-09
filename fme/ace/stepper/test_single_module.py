@@ -87,7 +87,7 @@ from fme.core.step.single_module import SingleModuleStep
 from fme.core.testing.regression import validate_tensor_dict
 from fme.core.training_history import TrainingJob
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
-from fme.core.var_masking import PerVariableMaskingConfig, VariableMaskingConfig
+from fme.core.var_masking import PerVariableMaskingConfig
 
 DIR = os.path.abspath(os.path.dirname(__file__))
 
@@ -1397,9 +1397,7 @@ def test_get_prediction_generator_infers_n_ensemble_for_input_dropout():
         ["a"],
         module_name="ChannelSum",
         include_channel_mask_inputs=True,
-        input_dropout=VariableMaskingConfig(
-            per_variable=PerVariableMaskingConfig(rate=0.5)
-        ),
+        input_dropout=PerVariableMaskingConfig(rate=0.5),
     )
     stepper.set_train()
     input_data, forcing_data = get_data_for_predict(
@@ -1418,7 +1416,7 @@ def test_get_prediction_generator_infers_n_ensemble_for_input_dropout():
         return torch.ones(batch_size, n_channels, dtype=torch.bool, device=device)
 
     with patch.object(
-        VariableMaskingConfig,
+        PerVariableMaskingConfig,
         "sample_mask",
         autospec=True,
         side_effect=_sample_mask,
