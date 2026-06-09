@@ -73,17 +73,17 @@ cd $REPO_ROOT
 NGPU=4
 IMAGE="$(cat $REPO_ROOT/latest_distillation_image.txt)"
 
-VAL_DATASET=/climate-default/2026-04-29-distillation-teacher-val-dataset/conus_val_2023.zarr
-
 if [[ "$MOE_TEACHER" == "true" ]]; then
     # Bundled multivariate MoE teacher: precip + winds + pressure.
     TEACHER_DATASET=01KTCHVDHY0SATWH9E0AW2PDS6
     TEACHER_CKPT_FLAG="--teacher-moe-checkpoint /checkpoints/bundled_moe_multivariate.ckpt"
     JOB_NAME="${JOB_NAME}-moe-teacher"
+    VAL_DATASET=/climate-default/2026-06-09-distillation-teacher-moe-multivar-val-dataset/conus_multivar_val_2023.zarr
 else
     # Default single-model teacher.
     TEACHER_DATASET=01KNM6H3JB1ZNS76HX17AAZRF7:checkpoints
     TEACHER_CKPT_FLAG="--teacher-checkpoint /checkpoints/best_histogram_tail.ckpt"
+    VAL_DATASET=/climate-default/2026-04-29-distillation-teacher-val-dataset/conus_val_2023.zarr
 fi
 
 gantry run \
