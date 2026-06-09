@@ -30,6 +30,14 @@ class UniformMaskingConfig:
             raise ValueError(
                 f"max_vars must be a non-negative int or 'max', got {self.max_vars!r}"
             )
+        if (
+            isinstance(self.min_vars, int)
+            and isinstance(self.max_vars, int)
+            and self.min_vars > self.max_vars
+        ):
+            raise ValueError(
+                f"min_vars ({self.min_vars}) must be <= max_vars ({self.max_vars})"
+            )
 
 
 @dataclasses.dataclass
@@ -95,13 +103,13 @@ def _sample_uniform(
     min_n = 0 if config.min_vars == "min" else int(config.min_vars)
     max_n = n_channels if config.max_vars == "max" else int(config.max_vars)
     max_n = min(max_n, n_channels)
-    mask = torch.ones(batch_size, n_channels, dtype=torch.bool, device=device)
-    for i in range(batch_size):
-        n_mask = int(torch.randint(min_n, max_n + 1, ()).item())
-        if n_mask > 0:
-            indices = torch.randperm(n_channels, device=device)[:n_mask]
-            mask[i, indices] = False
-    return mask
+    # For each sample, draw a random count then assign random ranks to channels.
+    # Channels whose rank < n_masks[i] are masked (False); the rest are kept (True).
+    n_masks = torch.randint(min_n, max_n + 1, (batch_size,), device=device)
+    noise = torch.rand(batch_size, n_channels, device=device)
+    # rank[i, j] = ordinal rank of channel j within sample i (0 = first masked)
+    rank = noise.argsort(dim=1).argsort(dim=1)
+    return rank >= n_masks.unsqueeze(1)
 
 
 def _sample_per_variable(

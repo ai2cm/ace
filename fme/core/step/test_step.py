@@ -1613,44 +1613,73 @@ def test_input_dropout_active_in_train_mode():
 
 
 def test_input_dropout_with_channel_mask_inputs():
-    """With include_channel_mask_inputs, rate=1.0 zeroes the mask indicators too."""
+    """With include_channel_mask_inputs, rate=1.0 zeroes the mask indicators too.
+
+    Outputs with rate=1.0 must differ from rate=0.0 with the same weights,
+    confirming that zeroing both input channels and their mask indicators
+    has an effect.
+    """
+    step_full = _make_input_dropout_step(
+        VariableMaskingConfig(per_variable=PerVariableMaskingConfig(rate=1.0))
+    )
+    step_none = _make_input_dropout_step(
+        VariableMaskingConfig(per_variable=PerVariableMaskingConfig(rate=0.0))
+    )
+    # Rebuild with include_channel_mask_inputs=True
     in_names = ["forcing_shared", "forcing_rad"]
     out_names = ["diagnostic_main", "diagnostic_rad"]
     normalization = get_network_and_loss_normalization_config(
         names=list(set(in_names + out_names))
     )
-    config = StepSelector(
-        type="single_module",
-        config=dataclasses.asdict(
-            SingleModuleStepConfig(
-                builder=ModuleSelector(
-                    type="SphericalFourierNeuralOperatorNet",
-                    config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
-                ),
-                in_names=in_names,
-                out_names=out_names,
-                normalization=normalization,
-                include_channel_mask_inputs=True,
-                input_dropout=VariableMaskingConfig(
-                    per_variable=PerVariableMaskingConfig(rate=0.0)
-                ),
-            )
-        ),
-    )
-    step = get_step(config, DEFAULT_IMG_SHAPE)
-    assert isinstance(step, SingleModuleStep)
-    step.module.torch_module.train()
 
-    n_samples = 2
-    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
-    next_step = get_tensor_dict(
-        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    def _make_with_mask(rate: float) -> SingleModuleStep:
+        config = StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="SphericalFourierNeuralOperatorNet",
+                        config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+                    ),
+                    in_names=in_names,
+                    out_names=out_names,
+                    normalization=normalization,
+                    include_channel_mask_inputs=True,
+                    input_dropout=VariableMaskingConfig(
+                        per_variable=PerVariableMaskingConfig(rate=rate)
+                    ),
+                )
+            ),
+        )
+        step = get_step(config, DEFAULT_IMG_SHAPE)
+        assert isinstance(step, SingleModuleStep)
+        return step
+
+    step_full = _make_with_mask(rate=1.0)
+    step_none = _make_with_mask(rate=0.0)
+    step_full.module.torch_module.train()
+    step_none.module.torch_module.train()
+    step_none.module.torch_module.load_state_dict(
+        step_full.module.torch_module.state_dict()
     )
-    out, _ = step.step(
+
+    n_samples = 4
+    input_data = get_tensor_dict(step_full.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step_full.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+    out_full, _ = step_full.step(
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
     )
-    for name in out_names:
-        assert out[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
+    out_none, _ = step_none.step(
+        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
+    )
+    differs = any(
+        not torch.allclose(out_full[name], out_none[name]) for name in out_names
+    )
+    assert (
+        differs
+    ), "rate=1.0 should zero inputs and mask indicators, producing different outputs"
 
 
 def _make_gmr_input_dropout_step(rate: float, include_channel_mask_inputs: bool):

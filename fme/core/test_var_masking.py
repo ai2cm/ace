@@ -30,6 +30,8 @@ def test_uniform_masking_config_validation():
         UniformMaskingConfig(min_vars=-1)
     with pytest.raises(ValueError, match="max_vars"):
         UniformMaskingConfig(max_vars=-1)
+    with pytest.raises(ValueError, match="min_vars"):
+        UniformMaskingConfig(min_vars=5, max_vars=2)
 
 
 def test_uniform_mask_shape_and_dtype():

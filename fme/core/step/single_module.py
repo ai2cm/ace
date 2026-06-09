@@ -406,9 +406,8 @@ class SingleModuleStep(StepABC):
                 )
                 mask_tensor = self.in_packer.pack(mask_dict, axis=self.CHANNEL_DIM)
                 if channel_mask is not None:
-                    n_ch = input_tensor.shape[self.CHANNEL_DIM]
                     mask_tensor = mask_tensor * channel_mask.view(
-                        channel_mask.shape[0], n_ch, 1, 1
+                        channel_mask.shape[0], n_channels, 1, 1
                     ).to(dtype=mask_tensor.dtype)
                 input_tensor = torch.cat(
                     [input_tensor, mask_tensor], dim=self.CHANNEL_DIM
@@ -576,7 +575,8 @@ def step_with_adjustments(
     else:
         network_input = dict(input)
     input_norm = normalizer.normalize(network_input)
-    if global_mean_removal is not None and gmr_state is not None:
+    if global_mean_removal is not None:
+        assert gmr_state is not None
         # Synthetic GMR channels are produced in normalized space; merge
         # them in after normalization so the network sees a single uniform
         # input dict.
@@ -585,7 +585,8 @@ def step_with_adjustments(
     if residual_prediction:
         output_norm = add_names(input_norm, output_norm, prognostic_names)
     output = normalizer.denormalize(output_norm)
-    if global_mean_removal is not None and gmr_state is not None:
+    if global_mean_removal is not None:
+        assert gmr_state is not None
         output = global_mean_removal.inverse_transform(output, gmr_state)
     if corrector is not None:
         corrector_state: CorrectorState | None = (
