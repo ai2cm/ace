@@ -1,6 +1,7 @@
 import dataclasses
 from collections.abc import Sequence
 
+import torch
 from torch.utils.data import DataLoader, Dataset, RandomSampler
 from torch.utils.data.distributed import DistributedSampler
 
@@ -32,6 +33,35 @@ from fme.downscaling.data.utils import (
     roll_lon_coords,
 )
 from fme.downscaling.requirements import DataRequirements
+
+
+def _roll_lons_to_extent_convention(
+    coarse_lon: torch.Tensor,
+    fine_lon: torch.Tensor,
+    lon_extent: ClosedInterval,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Roll coarse and fine lon coords into the convention of lon_extent so that
+    adjust_fine_coord_range can align fine and coarse subselection for domains
+    crossing the prime meridian (lon_start < 0 or lon_stop > 360). No-op for
+    in-range extents.
+
+    The fine roll is anchored one half-coarse-spacing before lon_start so the
+    fine half-cells below the first coarse grid point remain accessible.
+    """
+    lon_start, _ = lon_extent.finite_values
+    coarse_roll = find_roll_anchor_from_interval(coarse_lon, lon_extent)
+    rolled_coarse_lon = roll_lon_coords(coarse_lon, coarse_roll, lon_start)
+
+    if coarse_roll > 0 and len(rolled_coarse_lon) >= 2:
+        coarse_spacing = float((rolled_coarse_lon[1] - rolled_coarse_lon[0]).item())
+        fine_anchor = lon_start - coarse_spacing / 2
+        fine_roll = find_roll_anchor(fine_lon, fine_anchor % 360.0)
+        rolled_fine_lon = roll_lon_coords(fine_lon, fine_roll, fine_anchor)
+    else:
+        rolled_fine_lon = fine_lon
+
+    return rolled_coarse_lon, rolled_fine_lon
 
 
 def enforce_lat_bounds(lat: ClosedInterval):
@@ -466,28 +496,11 @@ class PairedDataLoaderConfig:
         dataset_coarse = self._repeat_if_requested(dataset_coarse)
 
         # Ensure fine data subselection lines up exactly with coarse data.
-        # For domains that cross the prime meridian (lon_start < 0 or lon_stop > 360),
-        # roll both coordinate tensors into the same convention as self.lon_extent so
-        # that adjust_fine_coord_range can find coarse_min/coarse_max and the fine
-        # half-cells around them.
-        #
-        # The fine roll uses a slightly earlier anchor than the coarse roll (one
-        # half-coarse-spacing before lon_start) so that adjust_fine_coord_range can
-        # access the fine half-cells below the first coarse grid point.
-        coarse_lon = properties_coarse.horizontal_coordinates.lon
-        fine_lon = properties_fine.horizontal_coordinates.lon
-        lon_start, _ = self.lon_extent.finite_values
-
-        coarse_roll = find_roll_anchor_from_interval(coarse_lon, self.lon_extent)
-        rolled_coarse_lon = roll_lon_coords(coarse_lon, coarse_roll, lon_start)
-
-        if coarse_roll > 0 and len(rolled_coarse_lon) >= 2:
-            coarse_spacing = float((rolled_coarse_lon[1] - rolled_coarse_lon[0]).item())
-            fine_anchor = lon_start - coarse_spacing / 2
-            fine_roll = find_roll_anchor(fine_lon, fine_anchor % 360.0)
-            rolled_fine_lon = roll_lon_coords(fine_lon, fine_roll, fine_anchor)
-        else:
-            rolled_fine_lon = fine_lon
+        rolled_coarse_lon, rolled_fine_lon = _roll_lons_to_extent_convention(
+            coarse_lon=properties_coarse.horizontal_coordinates.lon,
+            fine_lon=properties_fine.horizontal_coordinates.lon,
+            lon_extent=self.lon_extent,
+        )
 
         fine_lat_extent = adjust_fine_coord_range(
             self.lat_extent,
