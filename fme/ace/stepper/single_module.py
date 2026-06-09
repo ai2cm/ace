@@ -314,6 +314,14 @@ class SingleModuleStepperConfig:
         )
 
 
+def _labels_semantically_equal(a: BatchLabels | None, b: BatchLabels | None) -> bool:
+    if a is None and b is None:
+        return True
+    if a is None or b is None:
+        return False
+    return a.semantically_equal(b)
+
+
 def _prepend_timesteps(
     data: EnsembleTensorDict, timesteps: TensorMapping, time_dim: int = 2
 ) -> EnsembleTensorDict:
@@ -1064,7 +1072,7 @@ class Stepper:
             Generator yielding the output data at each timestep.
         """
         ic_batch_data = initial_condition.as_batch_data()
-        if ic_batch_data.labels != forcing_data.labels:
+        if not _labels_semantically_equal(ic_batch_data.labels, forcing_data.labels):
             raise ValueError(
                 "Initial condition and forcing data must have the same labels, "
                 f"got {ic_batch_data.labels} and {forcing_data.labels}."
@@ -1628,7 +1636,7 @@ class TrainStepper(
         input_data = data.get_start(self._prognostic_names, self.n_ic_timesteps)
         n_ensemble = self._config.n_ensemble
         input_batch_data = input_data.as_batch_data()
-        if input_batch_data.labels != data.labels:
+        if not _labels_semantically_equal(input_batch_data.labels, data.labels):
             raise ValueError(
                 "Initial condition and forcing data must have the same labels, "
                 f"got {input_batch_data.labels} and {data.labels}."

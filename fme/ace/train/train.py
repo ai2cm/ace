@@ -211,7 +211,6 @@ def get_inference_callback(
                 concurrent_group=(
                     entry_config.forward_steps_in_memory,
                     entry_config.n_ensemble_per_ic,
-                    _ic_label_signature(data),
                 ),
             )
         )
@@ -232,20 +231,6 @@ def get_inference_callback(
         stepper=stepper,
         build_batched_predictor=build_predictor,
     )
-
-
-def _ic_label_signature(data: InferenceGriddedData) -> tuple[str, ...] | None:
-    """Label-encoding fingerprint used to gate concurrent batching.
-
-    Datasets with different conditional-label sets produce forcing batches
-    whose ``BatchLabels.names`` differ, and those cannot be concatenated
-    along the sample dimension. Using the IC's labels avoids touching the
-    loader iterator (which has separate side effects).
-    """
-    labels = data.initial_condition.as_batch_data().labels
-    if labels is None:
-        return None
-    return tuple(labels.names)
 
 
 def _make_ace_aggregator_factory(
