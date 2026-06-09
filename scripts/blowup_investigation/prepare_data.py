@@ -83,7 +83,7 @@ def main():
 
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     encoding = {v: {"zlib": True, "complevel": 1} for v in sub.data_vars}
-    sub.to_netcdf(args.out, engine="h5netcdf", encoding=encoding)
+    sub.to_netcdf(args.out, encoding=encoding)
     size_mb = os.path.getsize(args.out) / 1e6
     print(f"wrote {args.out} ({size_mb:.0f} MB), dims={dict(sub.sizes)}")
 

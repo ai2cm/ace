@@ -16,7 +16,7 @@ cd "$(dirname "$0")"
 
 N_STEPS="${1:-2922}"
 
-python -m fme.ace.inference.inference inference.yaml \
+python -m fme.ace.inference inference.yaml \
     --override "n_forward_steps=${N_STEPS}"
 
 echo "predictions at $(pwd)/output/run/autoregressive_predictions.nc"

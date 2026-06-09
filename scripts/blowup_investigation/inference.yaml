@@ -8,7 +8,7 @@ forward_steps_in_memory: 90
 # 01KTCTN1TCJ89NGQCMTJ9GWC2K (train-4deg-daily-v1-era5-only-residual-rs0).
 # Fetch with download_checkpoint.sh; normalization stats are baked into the
 # checkpoint, so no /climate-default mount is required to load the stepper.
-checkpoint_path: ./checkpoint/best_inference_ckpt.tar
+checkpoint_path: ./checkpoint/best_ckpt.tar
 logging:
   log_to_screen: true
   log_to_wandb: false
@@ -31,11 +31,11 @@ forcing_loader:
   dataset:
     data_path: ./data
     file_pattern: era5_4deg_blowup_slice.nc
-    engine: h5netcdf
+    engine: netcdf4
   num_data_workers: 0
 initial_condition:
   path: ./data/era5_4deg_blowup_slice.nc
-  engine: h5netcdf
+  engine: netcdf4
   start_indices:
     # Same IC as the first member of the long_46year inference in the training
     # config. Single IC keeps the run cheap; the blowup is not IC-specific.
