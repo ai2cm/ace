@@ -82,16 +82,39 @@ class VariableMaskingConfig:
         n_channels: int,
         batch_size: int,
         device: torch.device,
+        n_ensemble: int = 1,
     ) -> torch.Tensor:
         """
         Sample a boolean presence mask of shape ``[batch_size, n_channels]``.
 
         ``True`` means the channel is present; ``False`` means it is dropped.
+
+        When ``n_ensemble > 1``, masks are sampled for ``batch_size //
+        n_ensemble`` base samples and then repeated so that every ensemble
+        member belonging to the same base sample receives the same mask.
         """
+        base_batch_size = _get_base_batch_size(batch_size, n_ensemble)
         if self.uniform is not None:
-            return _sample_uniform(self.uniform, n_channels, batch_size, device)
-        assert self.per_variable is not None
-        return _sample_per_variable(self.per_variable, n_channels, batch_size, device)
+            mask = _sample_uniform(self.uniform, n_channels, base_batch_size, device)
+        else:
+            assert self.per_variable is not None
+            mask = _sample_per_variable(
+                self.per_variable, n_channels, base_batch_size, device
+            )
+        return _repeat_ensemble_mask(mask, n_ensemble)
+
+
+def _get_base_batch_size(batch_size: int, n_ensemble: int) -> int:
+    if batch_size % n_ensemble != 0:
+        raise ValueError(
+            f"batch_size ({batch_size}) must be divisible by n_ensemble ({n_ensemble})"
+        )
+    return batch_size // n_ensemble
+
+
+def _repeat_ensemble_mask(mask: torch.Tensor, n_ensemble: int) -> torch.Tensor:
+    """Repeat each row of mask n_ensemble times (interleaved)."""
+    return torch.repeat_interleave(mask, n_ensemble, dim=0)
 
 
 def _sample_uniform(

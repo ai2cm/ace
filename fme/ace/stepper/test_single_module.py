@@ -87,6 +87,7 @@ from fme.core.step.single_module import SingleModuleStep
 from fme.core.testing.regression import validate_tensor_dict
 from fme.core.training_history import TrainingJob
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
+from fme.core.var_masking import PerVariableMaskingConfig, VariableMaskingConfig
 
 DIR = os.path.abspath(os.path.dirname(__file__))
 
@@ -1386,6 +1387,52 @@ def test_predict_with_forcing(n_ensemble):
         torch.testing.assert_close(output.data["a"][:, n], expected_a_output)
     xr.testing.assert_equal(output.time, forcing_data.time[:, 1:])
     assert new_input_state.time.equals(output.time[:, -1:])
+
+
+def test_get_prediction_generator_infers_n_ensemble_for_input_dropout():
+    n_ensemble = 3
+    n_steps = 1
+    stepper = _get_stepper(
+        ["a"],
+        ["a"],
+        module_name="ChannelSum",
+        include_channel_mask_inputs=True,
+        input_dropout=VariableMaskingConfig(
+            per_variable=PerVariableMaskingConfig(rate=0.5)
+        ),
+    )
+    stepper.set_train()
+    input_data, forcing_data = get_data_for_predict(
+        n_steps, forcing_names=[], n_ensemble=n_ensemble
+    )
+    observed_n_ensemble: list[int] = []
+
+    def _sample_mask(
+        self,
+        n_channels: int,
+        batch_size: int,
+        device: torch.device,
+        n_ensemble: int = 1,
+    ) -> torch.Tensor:
+        observed_n_ensemble.append(n_ensemble)
+        return torch.ones(batch_size, n_channels, dtype=torch.bool, device=device)
+
+    with patch.object(
+        VariableMaskingConfig,
+        "sample_mask",
+        autospec=True,
+        side_effect=_sample_mask,
+    ):
+        list(
+            stepper.get_prediction_generator(
+                input_data,
+                forcing_data,
+                n_steps,
+                NullOptimization(),
+            )
+        )
+
+    assert observed_n_ensemble == [n_ensemble]
 
 
 @pytest.mark.parametrize(

@@ -79,3 +79,43 @@ def test_per_variable_mask_rate_one_drops_all():
     config = VariableMaskingConfig(per_variable=PerVariableMaskingConfig(rate=1.0))
     mask = config.sample_mask(n_channels=20, batch_size=32, device=torch.device("cpu"))
     assert not mask.any()
+
+
+def test_uniform_mask_ensemble_members_share_mask():
+    n_samples, n_ensemble, n_channels = 6, 3, 8
+    config = VariableMaskingConfig(uniform=UniformMaskingConfig(min_vars=1, max_vars=3))
+    mask = config.sample_mask(
+        n_channels,
+        batch_size=n_samples * n_ensemble,
+        device=torch.device("cpu"),
+        n_ensemble=n_ensemble,
+    )
+    assert mask.shape == (n_samples * n_ensemble, n_channels)
+    grouped = mask.view(n_samples, n_ensemble, n_channels)
+    assert (
+        grouped == grouped[:, :1, :]
+    ).all(), "All ensemble members of a base sample must share the same mask"
+
+
+def test_per_variable_mask_ensemble_members_share_mask():
+    n_samples, n_ensemble, n_channels = 6, 3, 8
+    config = VariableMaskingConfig(per_variable=PerVariableMaskingConfig(rate=0.5))
+    mask = config.sample_mask(
+        n_channels,
+        batch_size=n_samples * n_ensemble,
+        device=torch.device("cpu"),
+        n_ensemble=n_ensemble,
+    )
+    assert mask.shape == (n_samples * n_ensemble, n_channels)
+    grouped = mask.view(n_samples, n_ensemble, n_channels)
+    assert (
+        grouped == grouped[:, :1, :]
+    ).all(), "All ensemble members of a base sample must share the same mask"
+
+
+def test_sample_mask_raises_on_indivisible_batch():
+    config = VariableMaskingConfig(uniform=UniformMaskingConfig())
+    with pytest.raises(ValueError, match="divisible"):
+        config.sample_mask(
+            n_channels=4, batch_size=7, device=torch.device("cpu"), n_ensemble=3
+        )

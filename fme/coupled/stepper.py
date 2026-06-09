@@ -884,6 +884,7 @@ class CoupledStepper:
                 data=atmos_ic_data,
                 time=forcing_ic_batch.time,
                 labels=forcing_ic_batch.labels,
+                n_ensemble=forcing_ic_batch.n_ensemble,
             )
         )
 
@@ -1024,6 +1025,7 @@ class CoupledStepper:
         initial_condition: CoupledPrognosticState,
         forcing_data: CoupledBatchData,
         optimizer: OptimizationABC,
+        n_ensemble: int | None = None,
     ) -> Generator[ComponentStepPrediction, None, None]:
         if (
             initial_condition.atmosphere_data.as_batch_data().n_timesteps
@@ -1043,6 +1045,42 @@ class CoupledStepper:
                 "Ocean initial condition must have "
                 f"{self.n_ic_timesteps} timesteps, got "
                 f"{initial_condition.ocean_data.as_batch_data().n_timesteps}."
+            )
+        ic_batch_data = initial_condition.as_batch_data()
+        if (
+            ic_batch_data.atmosphere_data.n_ensemble
+            != ic_batch_data.ocean_data.n_ensemble
+        ):
+            raise ValueError(
+                "Atmosphere and ocean initial condition data must have the same "
+                "n_ensemble, got "
+                f"{ic_batch_data.atmosphere_data.n_ensemble} and "
+                f"{ic_batch_data.ocean_data.n_ensemble}."
+            )
+        if (
+            forcing_data.atmosphere_data.n_ensemble
+            != forcing_data.ocean_data.n_ensemble
+        ):
+            raise ValueError(
+                "Atmosphere and ocean forcing data must have the same n_ensemble, "
+                f"got {forcing_data.atmosphere_data.n_ensemble} and "
+                f"{forcing_data.ocean_data.n_ensemble}."
+            )
+        if (
+            ic_batch_data.atmosphere_data.n_ensemble
+            != forcing_data.atmosphere_data.n_ensemble
+        ):
+            raise ValueError(
+                "Initial condition and forcing data must have the same n_ensemble, "
+                f"got {ic_batch_data.atmosphere_data.n_ensemble} and "
+                f"{forcing_data.atmosphere_data.n_ensemble}."
+            )
+        if n_ensemble is None:
+            n_ensemble = forcing_data.atmosphere_data.n_ensemble
+        elif n_ensemble != forcing_data.atmosphere_data.n_ensemble:
+            raise ValueError(
+                "n_ensemble argument must match forcing_data n_ensemble, "
+                f"got {n_ensemble} and {forcing_data.atmosphere_data.n_ensemble}."
             )
         atmos_ic_state = initial_condition.atmosphere_data
         ocean_ic_state = initial_condition.ocean_data
@@ -1064,6 +1102,7 @@ class CoupledStepper:
                 ),
                 time=atmos_window.time,
                 labels=atmos_window.labels,
+                n_ensemble=atmos_window.n_ensemble,
             )
             # prescribe the initial condition SST state
             atmos_ic_state = self._prescribe_ic_sst(
@@ -1077,6 +1116,7 @@ class CoupledStepper:
                 atmos_forcings,
                 self.n_inner_steps,
                 optimizer,
+                n_ensemble=n_ensemble,
             )
             atmos_steps = []
 
@@ -1112,6 +1152,7 @@ class CoupledStepper:
                 ),
                 time=ocean_window.time,
                 labels=ocean_window.labels,
+                n_ensemble=ocean_window.n_ensemble,
             )
             # predict and yield a single ocean step
             ocean_step, _ = next(
@@ -1121,6 +1162,7 @@ class CoupledStepper:
                         ocean_forcings,
                         n_forward_steps=1,
                         optimizer=optimizer,
+                        n_ensemble=n_ensemble,
                     )
                 )
             )
@@ -1142,6 +1184,7 @@ class CoupledStepper:
                         time=slice(-self.atmosphere.n_ic_timesteps, None)
                     ),
                     labels=atmos_window.labels,
+                    n_ensemble=atmos_window.n_ensemble,
                 )
             )
             ocean_ic_data = {
@@ -1152,6 +1195,7 @@ class CoupledStepper:
                     data=optimizer.detach_if_using_gradient_accumulation(ocean_ic_data),
                     time=ocean_window.time.isel(time=slice(-self.n_ic_timesteps, None)),
                     labels=ocean_window.labels,
+                    n_ensemble=ocean_window.n_ensemble,
                 )
             )
 
@@ -1855,6 +1899,7 @@ class CoupledTrainStepper(
             input_data,
             data_ensemble,
             optimization,
+            n_ensemble=n_ensemble,
         )
         output_iterator = iter(output_generator)
         output_list: list[ComponentEnsembleStepPrediction] = []

@@ -1056,6 +1056,7 @@ class Stepper:
         forcing_data: BatchData,
         n_forward_steps: int,
         optimizer: OptimizationABC,
+        n_ensemble: int | None = None,
     ) -> Generator[tuple[TensorDict, StepperState | None], None, None]:
         """
         Predict multiple steps forward given initial condition and forcing data.
@@ -1071,6 +1072,8 @@ class Stepper:
             n_forward_steps: The number of forward steps to predict, corresponding
                 to the data shapes of forcing_data.
             optimizer: The optimizer to use for updating the module.
+            n_ensemble: Number of ensemble members per base sample (see
+                predict_generator). If omitted, inferred from the batch data.
 
         Returns:
             Generator yielding (output, stepper_state) tuples at each timestep.
@@ -1080,6 +1083,18 @@ class Stepper:
             raise ValueError(
                 "Initial condition and forcing data must have the same labels, "
                 f"got {ic_batch_data.labels} and {forcing_data.labels}."
+            )
+        if ic_batch_data.n_ensemble != forcing_data.n_ensemble:
+            raise ValueError(
+                "Initial condition and forcing data must have the same n_ensemble, "
+                f"got {ic_batch_data.n_ensemble} and {forcing_data.n_ensemble}."
+            )
+        if n_ensemble is None:
+            n_ensemble = forcing_data.n_ensemble
+        elif n_ensemble != forcing_data.n_ensemble:
+            raise ValueError(
+                "n_ensemble argument must match forcing_data.n_ensemble, "
+                f"got {n_ensemble} and {forcing_data.n_ensemble}."
             )
         ic_dict = ic_batch_data.data
         forcing_dict = forcing_data.data
@@ -1091,6 +1106,7 @@ class Stepper:
             forcing_data.labels,
             data_mask=forcing_data.data_mask,
             stepper_state=ic_batch_data.stepper_state,
+            n_ensemble=n_ensemble,
         )
 
     @property
@@ -1108,6 +1124,7 @@ class Stepper:
         labels: BatchLabels | None,
         data_mask: TensorMapping | None = None,
         stepper_state: StepperState | None = None,
+        n_ensemble: int = 1,
     ) -> Generator[tuple[TensorDict, StepperState | None], None, None]:
         state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
         for step in range(n_forward_steps):
@@ -1136,6 +1153,7 @@ class Stepper:
                         labels=labels,
                         data_mask=data_mask,
                         stepper_state=stepper_state,
+                        n_ensemble=n_ensemble,
                     ),
                     wrapper=checkpoint,
                 )
@@ -1659,6 +1677,7 @@ class TrainStepper(
             labels=input_ensemble_data.labels,
             data_mask=input_ensemble_data.data_mask,
             stepper_state=input_ensemble_data.stepper_state,
+            n_ensemble=n_ensemble,
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)

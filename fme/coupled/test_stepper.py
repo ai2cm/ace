@@ -4,7 +4,7 @@ import datetime
 from collections import namedtuple
 from collections.abc import Iterable
 from typing import Literal
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import numpy as np
 import pytest
@@ -31,6 +31,7 @@ from fme.core.registry.module import ModuleSelector
 from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
+from fme.core.typing_ import TensorDict
 from fme.coupled.dataset_info import CoupledDatasetInfo
 
 from .data_loading.batch_data import (
@@ -1368,6 +1369,97 @@ def get_train_stepper_and_batch(
         )
     train_stepper = train_stepper_config.get_train_stepper(config, dataset_info)
     return train_stepper, coupled_data, config, dataset_info
+
+
+def test_get_prediction_generator_preserves_n_ensemble():
+    n_ensemble = 3
+    coupler, coupled_data, _, _ = get_stepper_and_batch(
+        ocean_in_names=["sst"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["surface_temperature", "ocean_fraction"],
+        atmosphere_out_names=["surface_temperature"],
+        n_forward_times_ocean=1,
+        n_forward_times_atmosphere=2,
+        n_samples=2,
+    )
+    data = CoupledBatchData(
+        ocean_data=coupled_data.data.ocean_data.broadcast_ensemble(n_ensemble),
+        atmosphere_data=coupled_data.data.atmosphere_data.broadcast_ensemble(
+            n_ensemble
+        ),
+    )
+    input_data = CoupledPrognosticState(
+        atmosphere_data=data.atmosphere_data.get_start(
+            coupler.atmosphere.prognostic_names,
+            coupler.atmosphere.n_ic_timesteps,
+        ),
+        ocean_data=data.ocean_data.get_start(
+            coupler.ocean.prognostic_names,
+            coupler.ocean.n_ic_timesteps,
+        ),
+    )
+    observed: list[tuple[str, int, int, int | None]] = []
+
+    def _get_step_data(initial_condition, names: list[str]) -> TensorDict:
+        ic_batch = initial_condition.as_batch_data()
+        return {name: ic_batch.data[name].select(1, -1) for name in names}
+
+    def _atmos_generator(
+        initial_condition,
+        forcing_data,
+        n_forward_steps,
+        optimizer,
+        n_ensemble=None,
+    ):
+        observed.append(
+            (
+                "atmosphere",
+                initial_condition.as_batch_data().n_ensemble,
+                forcing_data.n_ensemble,
+                n_ensemble,
+            )
+        )
+        for _ in range(n_forward_steps):
+            yield (
+                _get_step_data(initial_condition, coupler.atmosphere.prognostic_names),
+                None,
+            )
+
+    def _ocean_generator(
+        initial_condition,
+        forcing_data,
+        n_forward_steps,
+        optimizer,
+        n_ensemble=None,
+    ):
+        observed.append(
+            (
+                "ocean",
+                initial_condition.as_batch_data().n_ensemble,
+                forcing_data.n_ensemble,
+                n_ensemble,
+            )
+        )
+        for _ in range(n_forward_steps):
+            yield (
+                _get_step_data(initial_condition, coupler.ocean.prognostic_names),
+                None,
+            )
+
+    with (
+        patch.object(
+            coupler.atmosphere,
+            "get_prediction_generator",
+            _atmos_generator,
+        ),
+        patch.object(coupler.ocean, "get_prediction_generator", _ocean_generator),
+    ):
+        list(coupler.get_prediction_generator(input_data, data, NullOptimization()))
+
+    assert observed == [
+        ("atmosphere", n_ensemble, n_ensemble, n_ensemble),
+        ("ocean", n_ensemble, n_ensemble, n_ensemble),
+    ]
 
 
 @pytest.mark.parametrize(

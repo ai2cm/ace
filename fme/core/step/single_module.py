@@ -395,7 +395,10 @@ class SingleModuleStep(StepABC):
                 batch_size = input_tensor.shape[0]
                 n_channels = input_tensor.shape[self.CHANNEL_DIM]
                 channel_mask = self._config.input_dropout.sample_mask(
-                    n_channels, batch_size, input_tensor.device
+                    n_channels,
+                    batch_size,
+                    input_tensor.device,
+                    n_ensemble=args.n_ensemble,
                 )
                 input_tensor = input_tensor * channel_mask.view(
                     batch_size, n_channels, 1, 1

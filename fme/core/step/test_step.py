@@ -1792,3 +1792,75 @@ def test_input_dropout_with_channel_mask_inputs_zeroes_gmr_indicators():
     assert (
         differs
     ), "rate=1.0 should zero all inputs and mask indicators (including GMR extras)"
+
+
+def test_input_dropout_ensemble_members_share_mask():
+    """With n_ensemble > 1, all ensemble members of a base sample see the same mask.
+
+    We verify this by inspecting the mask-indicator channels that the network
+    receives when include_channel_mask_inputs=True. Those channels reflect the
+    input_dropout mask directly (0.0 = dropped, 1.0 = present) and must be
+    identical across ensemble members belonging to the same base sample.
+    """
+    n_base, n_ensemble = 4, 3
+    in_names = ["forcing_shared", "forcing_rad"]
+    out_names = ["diagnostic_main", "diagnostic_rad"]
+    normalization = get_network_and_loss_normalization_config(
+        names=list(set(in_names + out_names))
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+                ),
+                in_names=in_names,
+                out_names=out_names,
+                normalization=normalization,
+                include_channel_mask_inputs=True,
+                input_dropout=VariableMaskingConfig(
+                    per_variable=PerVariableMaskingConfig(rate=0.5)
+                ),
+            )
+        ),
+    )
+    step = get_step(config, DEFAULT_IMG_SHAPE)
+    assert isinstance(step, SingleModuleStep)
+    step.module.torch_module.train()
+
+    # Hook to capture the raw input tensor passed to the torch module
+    captured: list[torch.Tensor] = []
+
+    def _pre_hook(module, args):
+        captured.append(args[0].detach().cpu())
+
+    handle = step.module.torch_module.register_forward_pre_hook(_pre_hook)
+
+    base_input = get_tensor_dict(in_names, DEFAULT_IMG_SHAPE, n_base)
+    base_next = get_tensor_dict(step.next_step_input_names, DEFAULT_IMG_SHAPE, n_base)
+
+    def _repeat(d, repeats):
+        return {k: v.repeat_interleave(repeats, dim=0) for k, v in d.items()}
+
+    try:
+        step.step(
+            args=StepArgs(
+                input=_repeat(base_input, n_ensemble),
+                next_step_input_data=_repeat(base_next, n_ensemble),
+                labels=None,
+                n_ensemble=n_ensemble,
+            )
+        )
+    finally:
+        handle.remove()
+
+    assert len(captured) > 0
+    # Second half of channels are mask indicators reflecting the dropout mask.
+    n_channels = len(in_names)
+    mask_indicators = captured[0][:, n_channels:, 0, 0]  # [batch, n_channels]
+    grouped = mask_indicators.view(n_base, n_ensemble, n_channels)
+    assert (
+        grouped == grouped[:, :1]
+    ).all(), "All ensemble members of a base sample must see the same dropout mask"
