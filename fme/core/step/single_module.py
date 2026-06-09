@@ -25,6 +25,7 @@ from fme.core.step.args import StepArgs
 from fme.core.step.global_mean_removal import (
     GlobalMeanRemoval,
     GlobalMeanRemovalConfigUnion,
+    GlobalMeanRemovalState,
     NoGlobalMeanRemoval,
     extra_channel_source_field,
 )
@@ -550,24 +551,25 @@ def step_with_adjustments(
     """
     if prescribed_prognostic_names is None:
         prescribed_prognostic_names = []
+    gmr_state: GlobalMeanRemovalState | None = None
     if global_mean_removal is not None:
-        network_input: TensorMapping = global_mean_removal.forward_transform(
+        network_input, gmr_state = global_mean_removal.forward_transform(
             input, data_mask
         )
     else:
-        network_input = input
+        network_input = dict(input)
     input_norm = normalizer.normalize(network_input)
-    if global_mean_removal is not None:
+    if global_mean_removal is not None and gmr_state is not None:
         # Synthetic GMR channels are produced in normalized space; merge
         # them in after normalization so the network sees a single uniform
         # input dict.
-        input_norm = {**input_norm, **global_mean_removal.extras_normalized()}
+        input_norm = {**input_norm, **global_mean_removal.extras_normalized(gmr_state)}
     output_norm = network_calls(input_norm)
     if residual_prediction:
         output_norm = add_names(input_norm, output_norm, prognostic_names)
     output = normalizer.denormalize(output_norm)
-    if global_mean_removal is not None:
-        output = global_mean_removal.inverse_transform(output)
+    if global_mean_removal is not None and gmr_state is not None:
+        output = global_mean_removal.inverse_transform(output, gmr_state)
     if corrector is not None:
         corrector_state: CorrectorState | None = (
             stepper_state.corrector_state if stepper_state is not None else None
