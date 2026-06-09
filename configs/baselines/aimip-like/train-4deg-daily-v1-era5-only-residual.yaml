@@ -3,6 +3,9 @@ experiment_dir: /results
 save_checkpoint: true
 checkpoint_every_n_batches: 5000
 validate_using_ema: true
+ema_checkpoint_save_epochs:
+  start: 1
+  step: 5
 max_epochs: 60
 ema:
   decay: 0.999
