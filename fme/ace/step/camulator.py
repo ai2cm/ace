@@ -42,6 +42,7 @@ class CrossFormerConfig:
     Configuration for a CrossFormer model.
     """
 
+    type: Literal["CrossFormer"] = "CrossFormer"
     patch_height: int = 1
     patch_width: int = 1
     frames: int = 1
@@ -63,7 +64,6 @@ class CrossFormerConfig:
     use_spectral_norm: bool = True
     interp: bool = True
     padding_conf: dict | None = None
-    post_conf: dict | None = None
 
     def build(
         self,
@@ -100,33 +100,6 @@ class CrossFormerConfig:
             use_spectral_norm=self.use_spectral_norm,
             interp=self.interp,
             padding_conf=self.padding_conf,
-            post_conf=self.post_conf,
-        )
-
-
-@dataclasses.dataclass
-class CrossFormerSelector:
-    type: Literal["CrossFormer"]
-    config: CrossFormerConfig
-
-    def build(
-        self,
-        n_atmo_channels: int,
-        n_atmo_groups: int,
-        n_surf_channels: int,
-        n_aux_channels: int,
-        n_atmo_diagnostic_channels: int,
-        n_surf_diagnostic_channels: int,
-        img_shape: tuple[int, int],
-    ) -> CrossFormer:
-        return self.config.build(
-            n_atmo_channels=n_atmo_channels,
-            n_atmo_groups=n_atmo_groups,
-            n_surf_channels=n_surf_channels,
-            n_aux_channels=n_aux_channels,
-            n_atmo_diagnostic_channels=n_atmo_diagnostic_channels,
-            n_surf_diagnostic_channels=n_surf_diagnostic_channels,
-            img_shape=img_shape,
         )
 
 
@@ -134,6 +107,7 @@ class CrossFormerSelector:
 class NoiseConditionedCrossFormerConfig:
     """CrossFormer with CLN-based noise conditioning via NoiseConditionedModel."""
 
+    type: Literal["NoiseConditionedCrossFormer"] = "NoiseConditionedCrossFormer"
     patch_height: int = 1
     patch_width: int = 1
     frames: int = 1
@@ -155,7 +129,6 @@ class NoiseConditionedCrossFormerConfig:
     use_spectral_norm: bool = True
     interp: bool = True
     padding_conf: dict | None = None
-    post_conf: dict | None = None
     noise_embed_dim: int = 256
 
     def build(
@@ -199,7 +172,6 @@ class NoiseConditionedCrossFormerConfig:
             use_spectral_norm=self.use_spectral_norm,
             interp=self.interp,
             padding_conf=self.padding_conf,
-            post_conf=self.post_conf,
             context_config=context_config,
         )
         return NoiseConditionedModel(
@@ -210,32 +182,6 @@ class NoiseConditionedCrossFormerConfig:
             n_labels=0,
             label_embed_dim=0,
             inverse_sht=None,
-        )
-
-
-@dataclasses.dataclass
-class NoiseConditionedCrossFormerSelector:
-    type: Literal["NoiseConditionedCrossFormer"]
-    config: NoiseConditionedCrossFormerConfig
-
-    def build(
-        self,
-        n_atmo_channels: int,
-        n_atmo_groups: int,
-        n_surf_channels: int,
-        n_aux_channels: int,
-        n_atmo_diagnostic_channels: int,
-        n_surf_diagnostic_channels: int,
-        img_shape: tuple[int, int],
-    ) -> nn.Module:
-        return self.config.build(
-            n_atmo_channels=n_atmo_channels,
-            n_atmo_groups=n_atmo_groups,
-            n_surf_channels=n_surf_channels,
-            n_aux_channels=n_aux_channels,
-            n_atmo_diagnostic_channels=n_atmo_diagnostic_channels,
-            n_surf_diagnostic_channels=n_surf_diagnostic_channels,
-            img_shape=img_shape,
         )
 
 
@@ -263,7 +209,7 @@ class CrossFormerStepConfig(StepConfigABC):
         global_mean_removal: Optional configuration for global mean removal.
     """
 
-    builder: CrossFormerSelector | NoiseConditionedCrossFormerSelector
+    builder: CrossFormerConfig | NoiseConditionedCrossFormerConfig
     forcing_names: list[str]
     atmosphere_prognostic_names: list[str]
     atmosphere_levels: int
@@ -298,10 +244,9 @@ class CrossFormerStepConfig(StepConfigABC):
             for i in range(level_start, level_start + self.atmosphere_levels):
                 atmosphere_in_names.append(f"{name}_{i}")
                 atmosphere_out_names.append(f"{name}_{i}")
-        if self.atmosphere_diagnostic_names is not None:
-            for name in self.atmosphere_diagnostic_names:
-                for i in range(level_start, level_start + self.atmosphere_levels):
-                    atmosphere_out_names.append(f"{name}_{i}")
+        for name in self.atmosphere_diagnostic_names:
+            for i in range(level_start, level_start + self.atmosphere_levels):
+                atmosphere_out_names.append(f"{name}_{i}")
         self.atmosphere_input_names = atmosphere_in_names
         self.atmosphere_output_names = atmosphere_out_names
         self.surface_input_names = self.surface_prognostic_names
@@ -345,9 +290,8 @@ class CrossFormerStepConfig(StepConfigABC):
 
     @classmethod
     def from_state(cls, state) -> "CrossFormerStepConfig":
-        state = cls._remove_deprecated_keys(state)
         return dacite.from_dict(
-            data_class=cls, data=state, config=dacite.Config(strict=True)
+            data_class=cls, data=state.copy(), config=dacite.Config(strict=True)
         )
 
     @property
@@ -408,11 +352,6 @@ class CrossFormerStepConfig(StepConfigABC):
                 )
         self.prescribed_prognostic_names = names
 
-    @classmethod
-    def _remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
-        state_copy = state.copy()
-        return state_copy
-
     def get_step(
         self,
         dataset_info: DatasetInfo,
@@ -429,6 +368,10 @@ class CrossFormerStepConfig(StepConfigABC):
             timestep=dataset_info.timestep,
             init_weights=init_weights,
         )
+
+    @property
+    def allow_missing_variables(self) -> bool:
+        return False
 
     def load(self):
         self.normalization.load()

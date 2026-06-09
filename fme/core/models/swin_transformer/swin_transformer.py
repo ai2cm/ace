@@ -132,6 +132,8 @@ class SwinTransformerNet(nn.Module):
         # share the first 2*d rates, deep stages (2 & 3) share the last 6*d.
         dpr = torch.linspace(0, drop_path_rate / d, 8 * d).tolist()
         dpr_shallow = dpr[: 2 * d]
+        # Intentionally shared between layer2 and layer3 (matching ArchesWeather):
+        # both deep stages get the same drop-path schedule.
         dpr_deep = dpr[2 * d : 8 * d]
 
         self.layer1 = BasicLayer(

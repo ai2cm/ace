@@ -5,10 +5,8 @@ import torch
 import fme
 from fme.ace.step.camulator import (
     CrossFormerConfig,
-    CrossFormerSelector,
     CrossFormerStepConfig,
     NoiseConditionedCrossFormerConfig,
-    NoiseConditionedCrossFormerSelector,
 )
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
@@ -35,40 +33,34 @@ def make_normalization(names: list[str]) -> NetworkAndLossNormalizationConfig:
     )
 
 
-def make_crossformer_selector() -> CrossFormerSelector:
-    return CrossFormerSelector(
-        type="CrossFormer",
-        config=CrossFormerConfig(
-            frames=1,
-            dim=[16, 32, 64, 128],
-            depth=[1, 1, 1, 1],
-            dim_head=8,
-            global_window_size=[4, 4, 2, 1],
-            local_window_size=3,
-            cross_embed_kernel_sizes=[[4, 8, 16, 32], [2, 4], [2, 4], [2, 4]],
-            cross_embed_strides=[2, 2, 2, 2],
-            use_spectral_norm=False,
-            interp=True,
-        ),
+def make_crossformer_config() -> CrossFormerConfig:
+    return CrossFormerConfig(
+        frames=1,
+        dim=[16, 32, 64, 128],
+        depth=[1, 1, 1, 1],
+        dim_head=8,
+        global_window_size=[4, 4, 2, 1],
+        local_window_size=3,
+        cross_embed_kernel_sizes=[[4, 8, 16, 32], [2, 4], [2, 4], [2, 4]],
+        cross_embed_strides=[2, 2, 2, 2],
+        use_spectral_norm=False,
+        interp=True,
     )
 
 
-def make_nc_crossformer_selector() -> NoiseConditionedCrossFormerSelector:
-    return NoiseConditionedCrossFormerSelector(
-        type="NoiseConditionedCrossFormer",
-        config=NoiseConditionedCrossFormerConfig(
-            frames=1,
-            dim=[16, 32, 64, 128],
-            depth=[1, 1, 1, 1],
-            dim_head=8,
-            global_window_size=[4, 4, 2, 1],
-            local_window_size=3,
-            cross_embed_kernel_sizes=[[4, 8, 16, 32], [2, 4], [2, 4], [2, 4]],
-            cross_embed_strides=[2, 2, 2, 2],
-            use_spectral_norm=False,
-            interp=True,
-            noise_embed_dim=8,
-        ),
+def make_nc_crossformer_config() -> NoiseConditionedCrossFormerConfig:
+    return NoiseConditionedCrossFormerConfig(
+        frames=1,
+        dim=[16, 32, 64, 128],
+        depth=[1, 1, 1, 1],
+        dim_head=8,
+        global_window_size=[4, 4, 2, 1],
+        local_window_size=3,
+        cross_embed_kernel_sizes=[[4, 8, 16, 32], [2, 4], [2, 4], [2, 4]],
+        cross_embed_strides=[2, 2, 2, 2],
+        use_spectral_norm=False,
+        interp=True,
+        noise_embed_dim=8,
     )
 
 
@@ -111,12 +103,12 @@ def get_tensor_dict(names, n_samples=2):
 
 
 def test_crossformer_step_output_names():
-    config = make_config(make_crossformer_selector())
+    config = make_config(make_crossformer_config())
     dataset_info = make_dataset_info()
     step = config.get_step(dataset_info, init_weights=lambda _: None)
     input_data = get_tensor_dict(step.input_names)
     next_step_data = get_tensor_dict(step.next_step_input_names)
-    output = step.step(
+    output, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_data,
@@ -128,12 +120,12 @@ def test_crossformer_step_output_names():
 
 
 def test_noise_conditioned_crossformer_step_output_names():
-    config = make_config(make_nc_crossformer_selector())
+    config = make_config(make_nc_crossformer_config())
     dataset_info = make_dataset_info()
     step = config.get_step(dataset_info, init_weights=lambda _: None)
     input_data = get_tensor_dict(step.input_names)
     next_step_data = get_tensor_dict(step.next_step_input_names)
-    output = step.step(
+    output, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_data,
@@ -150,8 +142,8 @@ def test_noise_conditioned_crossformer_noise_divergence():
 
     This mirrors test_nc_swin_transformer_noise_divergence from the swin tests.
     """
-    selector = make_nc_crossformer_selector()
-    module = selector.build(
+    config = make_nc_crossformer_config()
+    module = config.build(
         n_atmo_channels=len(ATM_PROGNOSTIC_NAMES),
         n_atmo_groups=ATM_LEVELS,
         n_surf_channels=len(SURF_PROGNOSTIC_NAMES),
@@ -192,13 +184,27 @@ def test_noise_conditioned_crossformer_noise_divergence():
 
 
 def test_crossformer_diagnostic_names():
-    config = make_config(make_crossformer_selector())
+    config = make_config(make_crossformer_config())
     assert set(config.diagnostic_names) == set(SURF_DIAGNOSTIC_NAMES)
+
+
+def test_crossformer_step_config_from_state_roundtrip():
+    config = make_config(make_crossformer_config())
+    state = config.get_state()
+    restored = CrossFormerStepConfig.from_state(state)
+    assert restored.get_state() == state
+
+
+def test_nc_crossformer_step_config_from_state_roundtrip():
+    config = make_config(make_nc_crossformer_config())
+    state = config.get_state()
+    restored = CrossFormerStepConfig.from_state(state)
+    assert restored.get_state() == state
 
 
 def test_crossformer_step_config_in_names_ordering():
     """in_names should be: forcing -> surface -> atmosphere."""
-    config = make_config(make_crossformer_selector())
+    config = make_config(make_crossformer_config())
     forcing_end = len(FORCING_NAMES)
     surf_end = forcing_end + len(SURF_PROGNOSTIC_NAMES)
     assert config.in_names[:forcing_end] == FORCING_NAMES

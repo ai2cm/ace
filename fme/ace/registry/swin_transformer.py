@@ -5,7 +5,7 @@ from torch import nn
 
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 from fme.ace.registry.stochastic_sfno import NoiseConditionedModel
-from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
+from fme.core.dataset_info import DatasetInfo
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
 from fme.core.models.swin_transformer import SwinTransformerNet
 
@@ -91,10 +91,7 @@ class SwinTransformerBuilder(ModuleConfig):
             embed_dim_noise=0,
             embed_dim_pos=0,
         )
-        try:
-            lat_coords = dataset_info.horizontal_coordinates.lat_1d
-        except MissingDatasetInfo:
-            lat_coords = None
+        lat_coords = dataset_info.horizontal_coordinates.lat_1d
         net = SwinTransformerNet(
             in_chans=n_in_channels,
             out_chans=n_out_channels,
@@ -172,10 +169,7 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             embed_dim_noise=self.noise_embed_dim,
             embed_dim_pos=0,
         )
-        try:
-            lat_coords = dataset_info.horizontal_coordinates.lat_1d
-        except MissingDatasetInfo:
-            lat_coords = None
+        lat_coords = dataset_info.horizontal_coordinates.lat_1d
         net = SwinTransformerNet(
             in_chans=n_in_channels,
             out_chans=n_out_channels,

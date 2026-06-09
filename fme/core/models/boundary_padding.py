@@ -1,4 +1,3 @@
-# flake8: noqa
 import torch
 import torch.nn.functional as F
 
@@ -10,8 +9,9 @@ class TensorPadding:
 
         Args:
             mode (str): The padding mode, either 'mirror' or 'earth'.
-            pad_lat (list[int]): Padding sizes for the North-South (latitude) dimension [top, bottom].
-            pad_lon (list[int]): Padding sizes for the West-East (longitude) dimension [left, right].
+            pad_lat (list[int]): Padding sizes [top, bottom] for lat (N-S) dimension.
+            pad_lon (list[int]): Padding sizes [left, right] for lon (W-E) dimension.
+            **kwargs: Additional keyword arguments (ignored).
         """
         self.mode = mode
         self.pad_NS = pad_lat
@@ -22,7 +22,7 @@ class TensorPadding:
         Apply padding to the tensor based on the specified mode.
 
         Args:
-            x (torch.Tensor): Input tensor of shape (batch, var, time, lat, lon).
+            x (torch.Tensor): Input tensor of shape (batch, channels, lat, lon).
 
         Returns:
             torch.Tensor: The padded tensor.
@@ -37,7 +37,7 @@ class TensorPadding:
         Remove padding from the tensor based on the specified mode.
 
         Args:
-            x (torch.Tensor): Padded tensor of shape (batch, var, time, lat, lon).
+            x (torch.Tensor): Padded tensor of shape (batch, channels, lat, lon).
 
         Returns:
             torch.Tensor: The unpadded tensor.
@@ -131,10 +131,12 @@ class TensorPadding:
         """
         # unpad along latitude (north-south)
         if any(p > 0 for p in self.pad_NS):
-            x = x[..., self.pad_NS[0] : -self.pad_NS[1], :]
+            end_NS = -self.pad_NS[1] if self.pad_NS[1] > 0 else None
+            x = x[..., self.pad_NS[0] : end_NS, :]
 
         # unpad along longitude (west-east)
         if any(p > 0 for p in self.pad_WE):
-            x = x[..., :, self.pad_WE[0] : -self.pad_WE[1]]
+            end_WE = -self.pad_WE[1] if self.pad_WE[1] > 0 else None
+            x = x[..., :, self.pad_WE[0] : end_WE]
 
         return x

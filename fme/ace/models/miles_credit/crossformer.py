@@ -1,5 +1,5 @@
-# type: ignore
 import dataclasses
+from typing import Any
 
 import torch
 import torch.nn.functional as F
@@ -30,7 +30,7 @@ def to_nested_tuple(nested_list):
         return nested_list
 
 
-def cast_tuple(val, length=1):
+def cast_tuple(val: Any, length: int = 1) -> tuple:
     return val if isinstance(val, tuple) else ((val,) * length)
 
 
@@ -196,6 +196,7 @@ class FeedForward(nn.Module):
         self, dim, mult=4, dropout=0.0, context_config: ContextConfig | None = None
     ):
         super().__init__()
+        self.conditioning = "cln" if context_config is not None else "none"
         if context_config is not None:
             self.norm: nn.Module = ConditionalLayerNorm(
                 dim, img_shape=(1, 1), context_config=context_config
@@ -210,7 +211,7 @@ class FeedForward(nn.Module):
         )
 
     def forward(self, x, context: Context | None = None):
-        if isinstance(self.norm, ConditionalLayerNorm):
+        if self.conditioning == "cln":
             assert (
                 context is not None
             ), "context required when ConditionalLayerNorm is used"
@@ -243,6 +244,7 @@ class Attention(nn.Module):
         self.attn_type = attn_type
         self.window_size = window_size
 
+        self.conditioning = "cln" if context_config is not None else "none"
         if context_config is not None:
             self.norm: nn.Module = ConditionalLayerNorm(
                 dim, img_shape=(1, 1), context_config=context_config
@@ -271,15 +273,13 @@ class Attention(nn.Module):
         self.register_buffer("rel_pos_indices", rel_pos_indices, persistent=False)
 
     def forward(self, x, context: Context | None = None):
-        *_, height, width, heads, wsz, device = (
-            *x.shape,
-            self.heads,
-            self.window_size,
-            x.device,
-        )
+        height, width = x.shape[-2], x.shape[-1]
+        heads = self.heads
+        wsz = self.window_size
+        device = x.device
 
         # prenorm
-        if isinstance(self.norm, ConditionalLayerNorm):
+        if self.conditioning == "cln":
             assert (
                 context is not None
             ), "context required when ConditionalLayerNorm is used"
@@ -420,24 +420,23 @@ class CrossFormer(BaseModel):
         input_only_channels: int = 3,
         output_only_channels: int = 0,
         levels: int = 15,
-        dim: list[int] = [64, 128, 256, 512],
-        depth: list[int] = [2, 2, 8, 2],
+        dim: list[int] | tuple[int, ...] = (64, 128, 256, 512),
+        depth: list[int] | tuple[int, ...] = (2, 2, 8, 2),
         dim_head: int = 32,
-        global_window_size: list[int] = [5, 5, 2, 1],
-        local_window_size: int = 10,
-        cross_embed_kernel_sizes: list[list[int]] = [
-            [4, 8, 16, 32],
-            [2, 4],
-            [2, 4],
-            [2, 4],
-        ],
-        cross_embed_strides: list[int] = [4, 2, 2, 2],
+        global_window_size: list[int] | tuple[int, ...] = (5, 5, 2, 1),
+        local_window_size: int | tuple[int, ...] = 10,
+        cross_embed_kernel_sizes: list[list[int]] | tuple[tuple[int, ...], ...] = (
+            (4, 8, 16, 32),
+            (2, 4),
+            (2, 4),
+            (2, 4),
+        ),
+        cross_embed_strides: list[int] | tuple[int, ...] = (4, 2, 2, 2),
         attn_dropout: float = 0.0,
         ff_dropout: float = 0.0,
         use_spectral_norm: bool = True,
         interp: bool = True,
-        padding_conf: dict = None,
-        post_conf: dict = None,
+        padding_conf: dict[Any, Any] | None = None,
         context_config: ContextConfig | None = None,
     ):
         super().__init__()
@@ -461,10 +460,6 @@ class CrossFormer(BaseModel):
         if padding_conf is None:
             padding_conf = {"activate": False}
         self.use_padding = padding_conf["activate"]
-
-        if post_conf is None:
-            post_conf = {"activate": False}
-        self.use_post_block = post_conf["activate"]
 
         # input channels
         self.input_only_channels = input_only_channels
@@ -557,20 +552,7 @@ class CrossFormer(BaseModel):
         if self.use_spectral_norm:
             apply_spectral_norm(self)
 
-        if self.use_post_block:
-            # freeze base model weights before postblock init
-            if "skebs" in post_conf.keys():
-                if post_conf["skebs"].get("activate", False) and post_conf["skebs"].get(
-                    "freeze_base_model_weights", False
-                ):
-                    for param in self.parameters():
-                        param.requires_grad = False
-
     def forward(self, x, context: Context | None = None):
-        x_copy = None
-        if self.use_post_block:  # copy tensor to feed into postBlock later
-            x_copy = x.clone().detach()
-
         if self.use_padding:
             x = self.padding_opt.pad(x)
 
@@ -584,6 +566,7 @@ class CrossFormer(BaseModel):
         encodings = []
         for cel, transformer in self.layers:
             x = cel(x)
+            ctx_i: Context | None
             if context is not None and context.noise is not None:
                 # Resize noise to match the current encoder stage spatial size.
                 # F.interpolate is used (not avg_pool2d) so this works for any
@@ -618,24 +601,4 @@ class CrossFormer(BaseModel):
 
         x = x.unsqueeze(2)
 
-        if self.use_post_block:
-            x = {
-                "y_pred": x,
-                "x": x_copy,
-            }
-
         return x
-
-    def rk4(self, x):
-        def integrate_step(x, k, factor):
-            return self.forward(x + k * factor)
-
-        k1 = self.forward(x)  # State at i
-        k1 = torch.cat([x[:, :, -2:-1], k1], dim=2)
-        k2 = integrate_step(x, k1, 0.5)  # State at i + 0.5
-        k2 = torch.cat([x[:, :, -2:-1], k2], dim=2)
-        k3 = integrate_step(x, k2, 0.5)  # State at i + 0.5
-        k3 = torch.cat([x[:, :, -2:-1], k3], dim=2)
-        k4 = integrate_step(x, k3, 1.0)  # State at i + 1
-
-        return (k1 + 2 * k2 + 2 * k3 + k4) / 6

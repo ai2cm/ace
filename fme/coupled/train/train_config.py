@@ -284,6 +284,7 @@ class TrainConfig:
 
     @property
     def pre_cooldown_checkpoint_epoch(self) -> int | None:
+        # Cooldown scheduling is not supported in coupled training.
         return None
 
     @property
