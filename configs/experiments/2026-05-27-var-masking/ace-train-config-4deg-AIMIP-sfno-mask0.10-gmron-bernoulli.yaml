@@ -312,7 +312,7 @@ optimization:
       kwargs:
         start_factor: 0.01
         end_factor: 1.0
-        total_iters: 4
+        total_iters: 7
       step_each_iteration: false
     - type: ConstantLR
       kwargs:
@@ -322,7 +322,7 @@ optimization:
     - type: PolynomialLR
       kwargs:
         power: 0.5
-        total_iters: 4
+        total_iters: 7
       step_each_iteration: false
     milestones:
     - 7

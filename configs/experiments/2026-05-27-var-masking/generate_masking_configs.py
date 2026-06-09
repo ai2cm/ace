@@ -25,7 +25,7 @@ No-masking (suffix -mask0.00):
   - gmr: gmron / gmroff
   - co2: no suffix (no co2 field), -co2-mask, -co2-nomask
 
-All runs: 150 epochs (4 warmup, 142 constant, 4 cooldown).
+All runs: 150 epochs (7 warmup, 136 constant, 7 cooldown).
 Residual prediction is always off.
 """
 
@@ -152,8 +152,11 @@ def _set_pre_cooldown_checkpoint_epoch(cfg: dict) -> None:
 def _set_training_duration(cfg: dict) -> None:
     cfg["max_epochs"] = MAX_EPOCHS
     schedulers = cfg["optimization"]["scheduler"]["schedulers"]
-    main_epochs = MAX_EPOCHS - WARMUP_EPOCHS - COOLDOWN_EPOCHS
-    schedulers[1]["kwargs"]["total_iters"] = main_epochs
+    schedulers[0]["kwargs"]["total_iters"] = WARMUP_EPOCHS
+    schedulers[1]["kwargs"]["total_iters"] = (
+        MAX_EPOCHS - WARMUP_EPOCHS - COOLDOWN_EPOCHS
+    )
+    schedulers[2]["kwargs"]["total_iters"] = COOLDOWN_EPOCHS
     cfg["optimization"]["scheduler"]["milestones"] = [
         WARMUP_EPOCHS,
         COOLDOWN_START_EPOCH,
