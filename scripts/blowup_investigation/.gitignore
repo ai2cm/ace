@@ -1,0 +1,4 @@
+# large local artifacts, not for version control
+checkpoint/
+data/
+output/

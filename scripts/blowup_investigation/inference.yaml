@@ -1,0 +1,48 @@
+experiment_dir: ./output/run
+# 8 years of daily steps (through ~1987). The runaway drift begins in year 1 and
+# by year ~8 the state is well into the blowup, while still far short of the full
+# 46-year rollout. Override on the CLI for shorter/longer rollouts.
+n_forward_steps: 2922
+forward_steps_in_memory: 90
+# Best-validation (EMA) inference checkpoint from beaker run
+# 01KTCTN1TCJ89NGQCMTJ9GWC2K (train-4deg-daily-v1-era5-only-residual-rs0).
+# Fetch with download_checkpoint.sh; normalization stats are baked into the
+# checkpoint, so no /climate-default mount is required to load the stepper.
+checkpoint_path: ./checkpoint/best_inference_ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: false
+  project: ace
+  entity: ai2cm
+forcing_loader:
+  # Default: read a local netCDF slice staged by prepare_data.py. This is the
+  # robust path on a non-weka machine because it reads single-process
+  # (num_data_workers: 0, engine: h5netcdf) and needs no forkserver.
+  #
+  # Alternative (direct GCS, no staging step): set
+  #   dataset.data_path: gs://vcm-ml-intermediate/2026-04-17-era5-4deg-8layer-daily-1940-2025
+  #   dataset.file_pattern: 2026-03-19-era5-4deg-8layer-1940-2025.zarr
+  #   dataset.engine: zarr
+  #   num_data_workers: 4
+  # and also set initial_condition below to the same zarr with engine: zarr.
+  # The zarr code path forces a forkserver data-loader worker (GCSFS is not
+  # fork-safe), so it only works where forkserver is healthy.
+  dataset:
+    data_path: ./data
+    file_pattern: era5_4deg_blowup_slice.nc
+    engine: h5netcdf
+  num_data_workers: 0
+initial_condition:
+  path: ./data/era5_4deg_blowup_slice.nc
+  engine: h5netcdf
+  start_indices:
+    # Same IC as the first member of the long_46year inference in the training
+    # config. Single IC keeps the run cheap; the blowup is not IC-specific.
+    times:
+      - "1979-01-01T00:00:00"
+data_writer:
+  # Full prognostic + diagnostic fields at every (daily) step, so the diagnostic
+  # script can resolve the onset of the drift at native temporal resolution.
+  save_prediction_files: true
+  save_monthly_files: false
