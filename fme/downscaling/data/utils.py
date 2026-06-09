@@ -230,7 +230,7 @@ def roll_lon_coords(
     return rolled + period_offset
 
 
-def roll_lon_data(
+def roll_data_along_lon_dim(
     tensor: torch.Tensor, roll_amount: int, lon_dim: int = -1
 ) -> torch.Tensor:
     """

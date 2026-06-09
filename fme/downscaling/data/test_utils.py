@@ -9,8 +9,8 @@ from fme.downscaling.data.utils import (
     find_roll_anchor,
     find_roll_anchor_from_interval,
     paired_shuffle,
+    roll_data_along_lon_dim,
     roll_lon_coords,
-    roll_lon_data,
     scale_slice,
 )
 
@@ -153,7 +153,7 @@ def test_roll_lon_data_shifts_correctly():
     n = 8
     tensor = torch.arange(n, dtype=torch.float).unsqueeze(0)  # shape (1, 8)
     roll_amount = 3
-    rolled = roll_lon_data(tensor, roll_amount, lon_dim=-1)
+    rolled = roll_data_along_lon_dim(tensor, roll_amount, lon_dim=-1)
     assert rolled.shape == tensor.shape
     assert rolled[0, 0].item() == pytest.approx(3.0)  # original index 3 → 0
     assert rolled[0, -1].item() == pytest.approx(2.0)  # original index 2 → last
@@ -161,7 +161,7 @@ def test_roll_lon_data_shifts_correctly():
 
 def test_roll_lon_data_zero_roll_returns_original():
     tensor = torch.randn(4, 8)
-    result = roll_lon_data(tensor, 0)
+    result = roll_data_along_lon_dim(tensor, 0)
     assert torch.equal(result, tensor)
 
 
