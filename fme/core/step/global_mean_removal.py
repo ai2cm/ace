@@ -26,6 +26,25 @@ DEFAULT_TEMPERATURE_FIELD_NAMES: list[str] = [
 logger = logging.getLogger(__name__)
 
 
+_EXTRA_CHANNEL_PREFIX = "__gmr_extra__"
+
+
+def _extra_channel_name(field: str) -> str:
+    return f"{_EXTRA_CHANNEL_PREFIX}{field}"
+
+
+def extra_channel_source_field(name: str) -> str | None:
+    """Return the source field for a GMR sentinel name, or None if not a sentinel.
+
+    GMR synthetic input channels are named ``__gmr_extra__<source_field>``;
+    they share their source field's data mask because their values are
+    derived from that field and are zeroed when it is masked.
+    """
+    if name.startswith(_EXTRA_CHANNEL_PREFIX):
+        return name[len(_EXTRA_CHANNEL_PREFIX) :]
+    return None
+
+
 class GlobalMeanRemoval(abc.ABC):
     """Removes global means from fields before normalization and restores
     them after denormalization.
@@ -39,6 +58,14 @@ class GlobalMeanRemoval(abc.ABC):
     so all listed fields — whether input, output, or both — share the
     same global-mean offset.
 
+    Optional synthetic input channels (when ``append_as_input=True``) are
+    produced by ``forward_transform`` already in *normalized* space and
+    exposed via ``extras_normalized()`` as a name -> tensor mapping
+    keyed by ``extra_channel_names``.  Callers append the sentinel names
+    to their input packer's name list and merge the dict into the
+    normalized-input dict, so the extras flow through packing and the
+    channel-mask machinery uniformly with real input channels.
+
     Note:
         "Global mean" here refers to a *cellwise* (unweighted) spatial
         mean of each sample, not the area-weighted global mean used
@@ -47,14 +74,24 @@ class GlobalMeanRemoval(abc.ABC):
         for simplicity, since the network learns to compensate during
         end-to-end training.
 
-    Call sequence per step: ``forward_transform`` -> ``get_extra_channels``
+    Call sequence per step: ``forward_transform`` -> ``extras_normalized``
     -> ``inverse_transform``.
     """
 
     @property
     @abc.abstractmethod
+    def extra_channel_names(self) -> list[str]:
+        """Sentinel names for the synthetic input channels this transform
+        contributes.  Empty if no extras are configured.
+
+        Names are prefixed with ``__gmr_extra__`` and are intended to be
+        appended to the stepper's input packer so the extras flow through
+        packing and channel-mask routines as ordinary inputs.
+        """
+
+    @property
     def n_extra_input_channels(self) -> int:
-        """Number of extra channels appended to the network input."""
+        return len(self.extra_channel_names)
 
     @abc.abstractmethod
     def forward_transform(
@@ -65,7 +102,7 @@ class GlobalMeanRemoval(abc.ABC):
         """Remove global means from denormalized input fields.
 
         Caches internal state needed by ``inverse_transform`` and
-        ``get_extra_channels``.
+        ``extras_normalized``.
         """
 
     @abc.abstractmethod
@@ -73,10 +110,12 @@ class GlobalMeanRemoval(abc.ABC):
         """Restore global means on denormalized output fields."""
 
     @abc.abstractmethod
-    def get_extra_channels(self) -> torch.Tensor | None:
-        """Return ``[batch, n_extra, *spatial]`` normalized extra channels.
+    def extras_normalized(self) -> TensorDict:
+        """Return the synthetic input channels in *normalized* space,
+        keyed by the names in ``extra_channel_names``.
 
-        Returns ``None`` when ``n_extra_input_channels == 0``.  Must be
+        Each value has shape ``[batch, *spatial]`` (no channel dim).
+        Returns an empty dict when no extras are configured.  Must be
         called after ``forward_transform``.
         """
 
@@ -85,8 +124,8 @@ class NoGlobalMeanRemoval(GlobalMeanRemoval):
     """No-op implementation used when global mean removal is disabled."""
 
     @property
-    def n_extra_input_channels(self) -> int:
-        return 0
+    def extra_channel_names(self) -> list[str]:
+        return []
 
     def forward_transform(
         self,
@@ -98,8 +137,17 @@ class NoGlobalMeanRemoval(GlobalMeanRemoval):
     def inverse_transform(self, output: TensorDict) -> TensorDict:
         return output
 
-    def get_extra_channels(self) -> torch.Tensor | None:
-        return None
+    def extras_normalized(self) -> TensorDict:
+        return {}
+
+
+def _broadcast_to_spatial(
+    scalar_per_sample: torch.Tensor, spatial_shape: tuple[int, ...]
+) -> torch.Tensor:
+    """Broadcast a ``[batch]`` tensor to ``[batch, *spatial]``."""
+    return scalar_per_sample.view(-1, *(1,) * len(spatial_shape)).expand(
+        -1, *spatial_shape
+    )
 
 
 class SharedGlobalMeanRemoval(GlobalMeanRemoval):
@@ -127,11 +175,13 @@ class SharedGlobalMeanRemoval(GlobalMeanRemoval):
         self._reference_mean = reference_mean
         self._reference_std = reference_std
         self._cached_offset: torch.Tensor | None = None
-        self._cached_extra: torch.Tensor | None = None
+        self._cached_extras: TensorDict = {}
 
     @property
-    def n_extra_input_channels(self) -> int:
-        return 1 if self._append_as_input else 0
+    def extra_channel_names(self) -> list[str]:
+        if not self._append_as_input:
+            return []
+        return [_extra_channel_name(self._reference_field)]
 
     def forward_transform(
         self,
@@ -153,15 +203,17 @@ class SharedGlobalMeanRemoval(GlobalMeanRemoval):
         sample_mean = ref.mean(dim=tuple(range(1, ref.ndim)))
         offset = self._reference_mean - sample_mean
         self._cached_offset = offset
+        spatial_shape = tuple(ref.shape[1:])
 
         if self._append_as_input:
             normalized_mean = -offset / self._reference_std
-            spatial_shape = ref.shape[1:]
-            self._cached_extra = normalized_mean.view(
-                -1, 1, *(1,) * len(spatial_shape)
-            ).expand(-1, 1, *spatial_shape)
+            self._cached_extras = {
+                _extra_channel_name(ref_name): _broadcast_to_spatial(
+                    normalized_mean, spatial_shape
+                )
+            }
         else:
-            self._cached_extra = None
+            self._cached_extras = {}
 
         result = dict(input)
         for name in self._field_names:
@@ -185,8 +237,8 @@ class SharedGlobalMeanRemoval(GlobalMeanRemoval):
             result[name] = t - broadcast
         return result
 
-    def get_extra_channels(self) -> torch.Tensor | None:
-        return self._cached_extra
+    def extras_normalized(self) -> TensorDict:
+        return dict(self._cached_extras)
 
 
 class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
@@ -214,11 +266,13 @@ class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
         self._means = means
         self._stds = stds
         self._cached_shifts: dict[str, torch.Tensor] | None = None
-        self._cached_extra: torch.Tensor | None = None
+        self._cached_extras: TensorDict = {}
 
     @property
-    def n_extra_input_channels(self) -> int:
-        return len(self._field_names) if self._append_as_input else 0
+    def extra_channel_names(self) -> list[str]:
+        if not self._append_as_input:
+            return []
+        return [_extra_channel_name(name) for name in self._field_names]
 
     def forward_transform(
         self,
@@ -234,7 +288,7 @@ class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
                 continue
             t = result[name]
             if spatial_shape is None:
-                spatial_shape = t.shape[1:]
+                spatial_shape = tuple(t.shape[1:])
             sample_mean = t.mean(dim=tuple(range(1, t.ndim)))
             shift = self._means[name] - sample_mean
             if data_mask is not None and name in data_mask:
@@ -246,20 +300,16 @@ class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
 
         self._cached_shifts = shifts
 
+        extras: TensorDict = {}
         if self._append_as_input and spatial_shape is not None:
-            channels: list[torch.Tensor] = []
             for name in self._field_names:
                 if name not in shifts:
                     continue
-                sh = shifts[name]
-                normalized = -sh / self._stds[name]
-                ch = normalized.view(-1, 1, *(1,) * len(spatial_shape)).expand(
-                    -1, 1, *spatial_shape
+                normalized = -shifts[name] / self._stds[name]
+                extras[_extra_channel_name(name)] = _broadcast_to_spatial(
+                    normalized, spatial_shape
                 )
-                channels.append(ch)
-            self._cached_extra = torch.cat(channels, dim=1) if channels else None
-        else:
-            self._cached_extra = None
+        self._cached_extras = extras
 
         return result
 
@@ -276,8 +326,8 @@ class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
             result[name] = t - broadcast
         return result
 
-    def get_extra_channels(self) -> torch.Tensor | None:
-        return self._cached_extra
+    def extras_normalized(self) -> TensorDict:
+        return dict(self._cached_extras)
 
 
 @dataclasses.dataclass
