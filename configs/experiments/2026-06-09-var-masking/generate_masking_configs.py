@@ -5,9 +5,9 @@ Produces configs for two masking schemes:
 Bernoulli (suffix -bernoulli):
   One config per (mask_rate, gmr):
   - mask_rates: 0.05, 0.1, 0.2, 0.3, 0.4
-    (applied as input_dropout.per_variable.default_rate)
+    (applied as input_dropout.per_variable.rate)
   - gmr: gmron (global mean removal enabled) / gmroff (disabled)
-  All variables share per_variable.default_rate, including surface_temperature
+  All variables share per_variable.rate, including surface_temperature
   and forcing variables.
   A -co2 variant is also generated for mask0.40 (CO2 added as input, never masked).
 
@@ -71,7 +71,7 @@ BASE_CONFIG_STEMS = [
 
 
 def build_bernoulli_input_dropout(mask_rate: float) -> dict:
-    per_variable: dict[str, float] = {"default_rate": mask_rate}
+    per_variable: dict[str, float] = {"rate": mask_rate}
     return {"per_variable": per_variable}
 
 
