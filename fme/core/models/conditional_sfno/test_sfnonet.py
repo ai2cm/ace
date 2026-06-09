@@ -377,6 +377,17 @@ def test_sfnonet_spectral_ratio_rejects_non_linear_filter():
         )
 
 
+def test_sfnonet_spectral_ratio_rejects_preserve_global_mean():
+    with pytest.raises(NotImplementedError, match="filter_preserves_global_mean"):
+        SFNONetConfig(
+            embed_dim=16,
+            num_layers=2,
+            filter_type="linear",
+            spectral_ratio=0.5,
+            filter_preserves_global_mean=True,
+        )
+
+
 def test_filter_preserves_global_mean_allows_grad():
     torch.manual_seed(0)
     input_channels = 2

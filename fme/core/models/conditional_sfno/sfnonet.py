@@ -136,6 +136,12 @@ class SFNONetConfig:
                 "spectral_ratio < 1 is only supported for filter_type='linear', "
                 f"got filter_type='{self.filter_type}'."
             )
+        if self.spectral_ratio < 1.0 and self.filter_preserves_global_mean:
+            raise NotImplementedError(
+                "filter_preserves_global_mean is not supported with "
+                "spectral_ratio < 1, since the l=0 mode is sandwiched between "
+                "the pre/post channel projections."
+            )
 
 
 # heuristic for finding theta_cutoff

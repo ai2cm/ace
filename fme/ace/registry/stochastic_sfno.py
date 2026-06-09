@@ -307,6 +307,20 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
                 "Only 'dhconv' operator_type is supported for "
                 "NoiseConditionedSFNO models."
             )
+        if not 0.0 < self.spectral_ratio <= 1.0:
+            raise ValueError(
+                f"spectral_ratio must be in (0, 1], got {self.spectral_ratio}."
+            )
+        if self.spectral_ratio < 1.0 and self.filter_type != "linear":
+            raise NotImplementedError(
+                "spectral_ratio < 1 is only supported for filter_type='linear', "
+                f"got filter_type='{self.filter_type}'."
+            )
+        if self.spectral_ratio < 1.0 and self.filter_preserves_global_mean:
+            raise NotImplementedError(
+                "filter_preserves_global_mean is not supported with "
+                "spectral_ratio < 1."
+            )
 
     def build(
         self,
