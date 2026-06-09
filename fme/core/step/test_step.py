@@ -1651,3 +1651,115 @@ def test_input_dropout_with_channel_mask_inputs():
     )
     for name in out_names:
         assert out[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
+
+
+def _make_gmr_input_dropout_step(rate: float, include_channel_mask_inputs: bool):
+    in_names = ["forcing_shared", "forcing_rad"]
+    out_names = ["diagnostic_main", "diagnostic_rad"]
+    all_names = list(set(in_names + out_names))
+    normalization = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means={name: 0.0 for name in all_names},
+            stds={name: 1.0 for name in all_names},
+        ),
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+                ),
+                in_names=in_names,
+                out_names=out_names,
+                normalization=normalization,
+                global_mean_removal=PerChannelGlobalMeanRemovalConfig(
+                    field_names=in_names, append_as_input=True
+                ),
+                include_channel_mask_inputs=include_channel_mask_inputs,
+                input_dropout=VariableMaskingConfig(
+                    per_variable=PerVariableMaskingConfig(rate=rate)
+                ),
+            )
+        ),
+    )
+    step = get_step(config, DEFAULT_IMG_SHAPE)
+    assert isinstance(step, SingleModuleStep)
+    return step
+
+
+def test_input_dropout_masks_gmr_extra_channels():
+    """input_dropout is applied to all packed channels including GMR extras.
+
+    With rate=1.0 all four channels (2 named + 2 GMR extras) are zeroed, so
+    train-mode outputs must differ from rate=0.0 with the same weights.
+    """
+    step_full = _make_gmr_input_dropout_step(
+        rate=1.0, include_channel_mask_inputs=False
+    )
+    step_none = _make_gmr_input_dropout_step(
+        rate=0.0, include_channel_mask_inputs=False
+    )
+    # Verify GMR extras are packed alongside named inputs (4 total channels).
+    assert len(step_full.in_packer.names) == 4
+    step_full.module.torch_module.train()
+    step_none.module.torch_module.train()
+    step_none.module.torch_module.load_state_dict(
+        step_full.module.torch_module.state_dict()
+    )
+
+    n_samples = 2
+    input_data = get_tensor_dict(step_full.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step_full.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+    out_full, _ = step_full.step(
+        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
+    )
+    out_none, _ = step_none.step(
+        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
+    )
+    differs = any(
+        not torch.allclose(out_full[name], out_none[name])
+        for name in step_full.out_names
+    )
+    assert differs, "rate=1.0 should zero all channels including GMR extras"
+
+
+def test_input_dropout_with_channel_mask_inputs_zeroes_gmr_indicators():
+    """With include_channel_mask_inputs=True, rate=1.0 zeroes both input
+    channels and their mask indicators (including those for GMR extras).
+
+    Outputs with rate=1.0 must differ from rate=0.0 with the same weights,
+    confirming that the channel-mask indicators for GMR extras are zeroed
+    consistently with the input dropout mask.
+    """
+    step_full = _make_gmr_input_dropout_step(rate=1.0, include_channel_mask_inputs=True)
+    step_none = _make_gmr_input_dropout_step(rate=0.0, include_channel_mask_inputs=True)
+    # 2 named + 2 GMR extras = 4 packed input channels.
+    assert len(step_full.in_packer.names) == 4
+    step_full.module.torch_module.train()
+    step_none.module.torch_module.train()
+    step_none.module.torch_module.load_state_dict(
+        step_full.module.torch_module.state_dict()
+    )
+
+    n_samples = 2
+    input_data = get_tensor_dict(step_full.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step_full.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+    out_full, _ = step_full.step(
+        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
+    )
+    out_none, _ = step_none.step(
+        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
+    )
+    differs = any(
+        not torch.allclose(out_full[name], out_none[name])
+        for name in step_full.out_names
+    )
+    assert (
+        differs
+    ), "rate=1.0 should zero all inputs and mask indicators (including GMR extras)"
