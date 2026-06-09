@@ -95,6 +95,7 @@ class GlobalMeanRemoval(abc.ABC):
 
     @property
     def n_extra_input_channels(self) -> int:
+        """Number of extra channels appended to the network input."""
         return len(self.extra_channel_names)
 
     @abc.abstractmethod
