@@ -33,26 +33,45 @@ def _extra_channel_name(field: str) -> str:
     return f"{_EXTRA_CHANNEL_PREFIX}{field}"
 
 
+@dataclasses.dataclass
+class GlobalMeanRemovalState:
+    """Opaque token produced by ``forward_transform`` and consumed by the
+    same ``GlobalMeanRemoval`` instance via ``inverse_transform`` and
+    ``extras_normalized``.
+
+    Callers should thread this value from ``forward_transform`` through
+    to those methods, but not read its fields directly — layout is an
+    implementation detail.
+    """
+
+    shifts: dict[str, torch.Tensor]
+    extras: TensorDict
+
+
 class GlobalMeanRemoval(abc.ABC):
     """Removes global means from fields before normalization and restores
     them after denormalization.
 
     ``forward_transform`` shifts input fields toward their climatological
-    means.  ``inverse_transform`` reverses that shift on output fields.
+    means and returns a ``GlobalMeanRemovalState`` that must be passed
+    back to ``inverse_transform`` to reverse the shift on output fields.
+    Threading the state explicitly (rather than caching it on the
+    instance) makes the transform stateless and order-independent.
+
+    Optional synthetic input channels (when ``append_as_input=True``) are
+    produced by ``forward_transform`` already in *normalized* space and
+    exposed via ``extras_normalized(state)`` as a name -> tensor mapping
+    keyed by ``extra_channel_names``.  Callers append the sentinel names
+    to their input packer's name list and merge the dict into the
+    normalized-input dict, so the extras flow through packing and the
+    channel-mask machinery uniformly with real input channels.
+
     Fields listed in ``field_names`` that appear only in the output (e.g.
     diagnostic temperatures) are not shifted by ``forward_transform``
     (they are not inputs), but *are* un-shifted by ``inverse_transform``.
     The network learns to compensate for this through end-to-end training,
     so all listed fields — whether input, output, or both — share the
     same global-mean offset.
-
-    Optional synthetic input channels (when ``append_as_input=True``) are
-    produced by ``forward_transform`` already in *normalized* space and
-    exposed via ``extras_normalized()`` as a name -> tensor mapping
-    keyed by ``extra_channel_names``.  Callers append the sentinel names
-    to their input packer's name list and merge the dict into the
-    normalized-input dict, so the extras flow through packing and the
-    channel-mask machinery uniformly with real input channels.
 
     Note:
         "Global mean" here refers to a *cellwise* (unweighted) spatial
@@ -61,9 +80,6 @@ class GlobalMeanRemoval(abc.ABC):
         on a non-uniform grid; this transform uses the cellwise mean
         for simplicity, since the network learns to compensate during
         end-to-end training.
-
-    Call sequence per step: ``forward_transform`` -> ``extras_normalized``
-    -> ``inverse_transform``.
     """
 
     @property
@@ -86,26 +102,38 @@ class GlobalMeanRemoval(abc.ABC):
         self,
         input: TensorMapping,
         data_mask: TensorMapping | None,
-    ) -> TensorDict:
+    ) -> tuple[TensorDict, GlobalMeanRemovalState]:
         """Remove global means from denormalized input fields.
 
-        Caches internal state needed by ``inverse_transform`` and
-        ``extras_normalized``.
+        Returns:
+            ``(shifted_input, state)``.  ``state`` is an opaque value
+            that must be passed back to ``inverse_transform`` to reverse
+            the shift, and to ``extras_normalized`` to obtain the
+            synthetic input channels.
         """
 
     @abc.abstractmethod
-    def inverse_transform(self, output: TensorDict) -> TensorDict:
-        """Restore global means on denormalized output fields."""
+    def inverse_transform(
+        self,
+        output: TensorDict,
+        state: GlobalMeanRemovalState,
+    ) -> TensorDict:
+        """Restore global means on denormalized output fields using
+        ``state`` produced by ``forward_transform``.
+        """
 
-    @abc.abstractmethod
-    def extras_normalized(self) -> TensorDict:
+    def extras_normalized(
+        self,
+        state: GlobalMeanRemovalState,
+    ) -> TensorDict:
         """Return the synthetic input channels in *normalized* space,
         keyed by the names in ``extra_channel_names``.
 
-        Each value has shape ``[batch, *spatial]`` (no channel dim).
-        Returns an empty dict when no extras are configured.  Must be
-        called after ``forward_transform``.
+        Each value has shape ``[batch, *spatial]`` (no channel dim) so
+        it can be fed to the same packer that handles real inputs.
+        Returns an empty dict if no extra channels are configured.
         """
+        return dict(state.extras)
 
 
 class NoGlobalMeanRemoval(GlobalMeanRemoval):
@@ -119,14 +147,15 @@ class NoGlobalMeanRemoval(GlobalMeanRemoval):
         self,
         input: TensorMapping,
         data_mask: TensorMapping | None,
+    ) -> tuple[TensorDict, GlobalMeanRemovalState]:
+        return dict(input), GlobalMeanRemovalState(shifts={}, extras={})
+
+    def inverse_transform(
+        self,
+        output: TensorDict,
+        state: GlobalMeanRemovalState,
     ) -> TensorDict:
-        return dict(input)
-
-    def inverse_transform(self, output: TensorDict) -> TensorDict:
         return output
-
-    def extras_normalized(self) -> TensorDict:
-        return {}
 
 
 def _broadcast_to_spatial(
@@ -162,8 +191,6 @@ class SharedGlobalMeanRemoval(GlobalMeanRemoval):
         self._append_as_input = append_as_input
         self._reference_mean = reference_mean
         self._reference_std = reference_std
-        self._cached_offset: torch.Tensor | None = None
-        self._cached_extras: TensorDict = {}
 
     @property
     def extra_channel_names(self) -> list[str]:
@@ -175,7 +202,7 @@ class SharedGlobalMeanRemoval(GlobalMeanRemoval):
         self,
         input: TensorMapping,
         data_mask: TensorMapping | None,
-    ) -> TensorDict:
+    ) -> tuple[TensorDict, GlobalMeanRemovalState]:
         ref_name = self._reference_field
         if ref_name not in input:
             raise ValueError(
@@ -190,18 +217,14 @@ class SharedGlobalMeanRemoval(GlobalMeanRemoval):
         ref = input[ref_name]
         sample_mean = ref.mean(dim=tuple(range(1, ref.ndim)))
         offset = self._reference_mean - sample_mean
-        self._cached_offset = offset
         spatial_shape = tuple(ref.shape[1:])
 
+        extras: TensorDict = {}
         if self._append_as_input:
             normalized_mean = -offset / self._reference_std
-            self._cached_extras = {
-                _extra_channel_name(ref_name): _broadcast_to_spatial(
-                    normalized_mean, spatial_shape
-                )
-            }
-        else:
-            self._cached_extras = {}
+            extras[_extra_channel_name(ref_name)] = _broadcast_to_spatial(
+                normalized_mean, spatial_shape
+            )
 
         result = dict(input)
         for name in self._field_names:
@@ -210,23 +233,25 @@ class SharedGlobalMeanRemoval(GlobalMeanRemoval):
             t = result[name]
             broadcast = offset.view(offset.shape[0], *(1,) * (t.ndim - 1))
             result[name] = t + broadcast
-        return result
 
-    def inverse_transform(self, output: TensorDict) -> TensorDict:
-        if self._cached_offset is None:
-            raise RuntimeError("inverse_transform() called before forward_transform().")
-        offset = self._cached_offset
+        # All listed fields share the same offset; inverse will un-shift
+        # those that appear in the output (including output-only fields).
+        shifts = {name: offset for name in self._field_names}
+        return result, GlobalMeanRemovalState(shifts=shifts, extras=extras)
+
+    def inverse_transform(
+        self,
+        output: TensorDict,
+        state: GlobalMeanRemovalState,
+    ) -> TensorDict:
         result = dict(output)
-        for name in self._field_names:
+        for name, shift in state.shifts.items():
             if name not in result:
                 continue
             t = result[name]
-            broadcast = offset.view(offset.shape[0], *(1,) * (t.ndim - 1))
+            broadcast = shift.view(shift.shape[0], *(1,) * (t.ndim - 1))
             result[name] = t - broadcast
         return result
-
-    def extras_normalized(self) -> TensorDict:
-        return dict(self._cached_extras)
 
 
 class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
@@ -253,8 +278,6 @@ class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
         self._append_as_input = append_as_input
         self._means = means
         self._stds = stds
-        self._cached_shifts: dict[str, torch.Tensor] | None = None
-        self._cached_extras: TensorDict = {}
 
     @property
     def extra_channel_names(self) -> list[str]:
@@ -266,7 +289,7 @@ class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
         self,
         input: TensorMapping,
         data_mask: TensorMapping | None,
-    ) -> TensorDict:
+    ) -> tuple[TensorDict, GlobalMeanRemovalState]:
         result = dict(input)
         shifts: dict[str, torch.Tensor] = {}
         spatial_shape: tuple[int, ...] | None = None
@@ -286,8 +309,6 @@ class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
             broadcast = shift.view(shift.shape[0], *(1,) * (t.ndim - 1))
             result[name] = t + broadcast
 
-        self._cached_shifts = shifts
-
         extras: TensorDict = {}
         if self._append_as_input and spatial_shape is not None:
             for name in self._field_names:
@@ -297,25 +318,22 @@ class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
                 extras[_extra_channel_name(name)] = _broadcast_to_spatial(
                     normalized, spatial_shape
                 )
-        self._cached_extras = extras
 
-        return result
+        return result, GlobalMeanRemovalState(shifts=shifts, extras=extras)
 
-    def inverse_transform(self, output: TensorDict) -> TensorDict:
-        if self._cached_shifts is None:
-            raise RuntimeError("inverse_transform() called before forward_transform().")
+    def inverse_transform(
+        self,
+        output: TensorDict,
+        state: GlobalMeanRemovalState,
+    ) -> TensorDict:
         result = dict(output)
-        for name in self._field_names:
-            if name not in result or name not in self._cached_shifts:
+        for name, shift in state.shifts.items():
+            if name not in result:
                 continue
             t = result[name]
-            sh = self._cached_shifts[name]
-            broadcast = sh.view(sh.shape[0], *(1,) * (t.ndim - 1))
+            broadcast = shift.view(shift.shape[0], *(1,) * (t.ndim - 1))
             result[name] = t - broadcast
         return result
-
-    def extras_normalized(self) -> TensorDict:
-        return dict(self._cached_extras)
 
 
 @dataclasses.dataclass
