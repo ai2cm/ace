@@ -161,6 +161,10 @@ def generate_configs(
                     step_cfg = cfg["stepper"]["step"]["config"]
                     _apply_common_settings(step_cfg, gmr_on, input_dropout, co2=co2)
                     cfg["stepper_training"]["n_forward_steps"] = n_steps
+                    loss_type = cfg["stepper_training"]["loss"]["type"]
+                    cfg["stepper_training"]["optimize_last_step_only"] = (
+                        loss_type == "EnsembleLoss"
+                    )
                     _write_config(cfg, out_path, existing_only, wandb_run_names)
 
 
