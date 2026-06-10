@@ -61,6 +61,10 @@ class SwinTransformerBuilder(ModuleConfig):
             has labels and the selector is conditional, it defaults to the
             number of labels, which is the dimension the registry feeds the
             model.
+        use_cpb_scaling: When True (default), requires 1D latitude coordinates
+            and applies cos-lat scaling to CPB longitude offsets. Set to False
+            to use plain log-spaced CPB offsets (Swin V2 style) without a
+            latitude requirement.
     """
 
     embed_dim: int = 96
@@ -75,6 +79,7 @@ class SwinTransformerBuilder(ModuleConfig):
     embed_dim_labels: int = 0
     cpb_hidden_dim: int = 64
     padding_conf: TensorPaddingConfig | None = None
+    use_cpb_scaling: bool = True
 
     def __post_init__(self):
         if isinstance(self.padding_conf, dict):
@@ -133,16 +138,18 @@ class SwinTransformerBuilder(ModuleConfig):
             embed_dim_noise=0,
             embed_dim_pos=0,
         )
-        try:
-            lat_coords = dataset_info.horizontal_coordinates.lat_1d
-        except MissingDatasetInfo:
+        if self.use_cpb_scaling:
+            try:
+                lat_coords = dataset_info.horizontal_coordinates.lat_1d
+            except MissingDatasetInfo:
+                raise ValueError(
+                    "SwinTransformer requires 1D latitude coordinates for cos-lat CPB "
+                    "scaling, but the dataset provides none. Non-lat-lon grids such as "
+                    "HEALPix are not supported. Set use_cpb_scaling=False to disable "
+                    "this requirement."
+                ) from None
+        else:
             lat_coords = None
-        if lat_coords is None:
-            raise ValueError(
-                "SwinTransformer requires 1D latitude coordinates for cos-lat CPB "
-                "scaling, but the dataset provides none. Non-lat-lon grids such as "
-                "HEALPix are not supported."
-            )
         net = SwinTransformerNet(
             in_chans=n_in_channels,
             out_chans=n_out_channels,
@@ -192,6 +199,10 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             When 0 (default), one-hot labels are used directly.
             Label conditioning is enabled only when the selector is conditional,
             or when building directly with dataset labels.
+        use_cpb_scaling: When True (default), requires 1D latitude coordinates
+            and applies cos-lat scaling to CPB longitude offsets. Set to False
+            to use plain log-spaced CPB offsets (Swin V2 style) without a
+            latitude requirement.
     """
 
     embed_dim: int = 96
@@ -206,6 +217,7 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
     label_embed_dim: int = 0
     cpb_hidden_dim: int = 64
     padding_conf: TensorPaddingConfig | None = None
+    use_cpb_scaling: bool = True
 
     def __post_init__(self):
         if isinstance(self.padding_conf, dict):
@@ -264,16 +276,18 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             embed_dim_noise=self.noise_embed_dim,
             embed_dim_pos=0,
         )
-        try:
-            lat_coords = dataset_info.horizontal_coordinates.lat_1d
-        except MissingDatasetInfo:
+        if self.use_cpb_scaling:
+            try:
+                lat_coords = dataset_info.horizontal_coordinates.lat_1d
+            except MissingDatasetInfo:
+                raise ValueError(
+                    "SwinTransformer requires 1D latitude coordinates for cos-lat CPB "
+                    "scaling, but the dataset provides none. Non-lat-lon grids such as "
+                    "HEALPix are not supported. Set use_cpb_scaling=False to disable "
+                    "this requirement."
+                ) from None
+        else:
             lat_coords = None
-        if lat_coords is None:
-            raise ValueError(
-                "SwinTransformer requires 1D latitude coordinates for cos-lat CPB "
-                "scaling, but the dataset provides none. Non-lat-lon grids such as "
-                "HEALPix are not supported."
-            )
         net = SwinTransformerNet(
             in_chans=n_in_channels,
             out_chans=n_out_channels,

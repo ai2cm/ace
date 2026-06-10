@@ -74,7 +74,7 @@ def test_swin_transformer_build_and_forward():
 def test_swin_transformer_raises_without_lat_coords():
     n_in, n_out = 5, 3
     dataset_info = DatasetInfo(img_shape=IMG_SHAPE)
-    with pytest.raises(ValueError, match="1D latitude coordinates"):
+    with pytest.raises(ValueError, match="use_cpb_scaling=False"):
         _builder().build(n_in, n_out, dataset_info)
 
 
@@ -171,7 +171,7 @@ def test_nc_swin_transformer_via_selector():
 def test_nc_swin_transformer_raises_without_lat_coords():
     n_in, n_out = 5, 3
     dataset_info = DatasetInfo(img_shape=IMG_SHAPE)
-    with pytest.raises(ValueError, match="1D latitude coordinates"):
+    with pytest.raises(ValueError, match="use_cpb_scaling=False"):
         _nc_builder().build(n_in, n_out, dataset_info)
 
 
@@ -273,3 +273,27 @@ def test_nc_swin_transformer_earth_padding():
     )
     x = torch.randn(2, 5, *IMG_SHAPE, device=fme.get_device())
     assert module(x).shape == (2, 3, *IMG_SHAPE)
+
+
+def test_swin_transformer_no_cpb_scaling_builds_without_lat_coords():
+    n_in, n_out = 5, 3
+    dataset_info = DatasetInfo(img_shape=IMG_SHAPE)
+    module = (
+        _builder(use_cpb_scaling=False)
+        .build(n_in, n_out, dataset_info)
+        .to(fme.get_device())
+    )
+    x = torch.randn(2, n_in, *IMG_SHAPE, device=fme.get_device())
+    assert module(x).shape == (2, n_out, *IMG_SHAPE)
+
+
+def test_nc_swin_transformer_no_cpb_scaling_builds_without_lat_coords():
+    n_in, n_out = 5, 3
+    dataset_info = DatasetInfo(img_shape=IMG_SHAPE)
+    module = (
+        _nc_builder(use_cpb_scaling=False)
+        .build(n_in, n_out, dataset_info)
+        .to(fme.get_device())
+    )
+    x = torch.randn(2, n_in, *IMG_SHAPE, device=fme.get_device())
+    assert module(x).shape == (2, n_out, *IMG_SHAPE)
