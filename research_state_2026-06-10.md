@@ -2,15 +2,16 @@
 
 A synthesis of the `experiment/2026-06-05-aimip-like` branch, the
 `scripts/blowup_investigation` tooling and its accumulated outputs, recent
-feature implementations, and research notes in the repo. (Round 4: probes
-1, 2, 3, 5, 6 executed on the existing checkpoint — results inline in the
+feature implementations, and research notes in the repo. (Round 5: probes
+1, 2, 3, 5, 6, 7 executed on the existing checkpoint — results inline in the
 probe and avenue sections. Headline updates: the saturation bound cannot
 prevent onset; the neutral subspace is the top-of-atmosphere moisture block
 with one-sided (moistening) neutrality-to-amplification at drifted states;
-and the runaway is driven by a small systematic per-step bias, not noise
-accumulation — which reframes the Avenue 1 design around bias·τ rather than
-the OU noise floor. Code-reading items — Avenue 1 implementation, Avenue
-3b/4 attachment points — still deferred.)
+the runaway is a secular ~−1.1 mσ/day dry bias in gm q0 accumulating against
+a weak restoring force that targets the model's own sliding equilibrium —
+not noise accumulation; and the current tendency-regularization form buries
+the bias term under legitimate tendency variance ~100:1. Code-reading items
+— Avenue 1 implementation, Avenue 3b/4 attachment points — still deferred.)
 
 ## Current state of the research
 
@@ -650,15 +651,83 @@ is now bias-dominated: the trained restoring time must satisfy
 b·τ ≪ envelope, i.e. τ ≲ 50–100 d for the measured b — much shorter than the
 physically-justifiable months-to-years relaxation of stratospheric water
 vapor. Three ways to resolve the tension, complementary: (1) attack the bias
-itself — it is exactly what tendency regularization was meant to suppress,
-yet this checkpoint trains with tend-reg 0.05 and the bias persists, so
-diagnosing why (does the penalty see the *inference-time* bias at all, since
-training is 1-step?) is now a first-class question; (2) accept a
+itself — it is exactly what tendency regularization was introduced to
+suppress (note: *this* checkpoint is the Wave-1 plain residual model with no
+tend-reg, so whether tend-reg actually fixes the bias is untested on this
+harness; see probe 7 below for both the bias measurement and an analysis of
+why the current penalty form may not target it); (2) accept a
 shorter-than-physical τ for q0 specifically, arguing the stratospheric
 column's *entry* value is externally controlled in reality; (3) relax toward
 the seasonal climatology rather than a fixed value, so the augmentation
 doesn't fight the annual cycle. The probe numbers make this a concrete
 design discussion rather than a guess.
+
+### Probe 7 results (2026-06-10, `probe7_bias_vs_seasonal.py`)
+
+Secular bias separated from the seasonal cycle by differencing global means
+against ERA5 on matching dates (both in training-σ units; the seasonal cycle
+cancels in the difference). Pure post-processing of the saved rollout plus
+the staged ERA5 slice. Full output in `output/probe7_bias_vs_seasonal/`.
+
+| variable | bias 0–500d | 500–1500d | 1500–2100d | net @2100 (σ) |
+|---|---|---|---|---|
+| specific_total_water_0 | −0.07 | −1.17 | −1.01 | **−1.90** |
+| specific_total_water_1 | −0.63 | +0.05 | +0.66 | −0.18 |
+| air_temperature_0 | −0.16 | −0.09 | +0.05 | −0.08 |
+| eastward_wind_0 | −0.63 | −0.21 | −0.25 | −0.06 |
+| PRESsfc | −0.00 | −0.00 | +0.00 | −0.00 |
+
+(slopes in mσ/day)
+
+- **The q0 drift is a persistent secular dry bias**, ~−1.1 mσ/day from day
+  ~500 onward, accumulating −1.9σ by onset. It is nearly absent in the first
+  500 days and then switches on — the bias is state-dependent, consistent
+  with the eroding restoring force. The 90-day window numbers from probe 3
+  were indeed seasonally contaminated (u0's +6 mσ/day at the February
+  snapshot does not survive the ERA5 differencing); the ERA5-differenced
+  slopes are the trustworthy bias numbers.
+- **PRESsfc bias is exactly zero** — the dry-air corrector anchors it, a
+  good sanity check that correctors do eliminate bias in the modes they
+  constrain.
+- **Reconciling with probe 1's asymmetry**: drying *displacements* relax
+  while the baseline itself slides dry — so the relaxation observed in probe
+  1 is toward the **model's own equilibrium, which is displaced from ERA5
+  and sliding**. The model has a restoring force; it just restores to the
+  wrong, moving target. This reframes Avenue 1 favorably: training with
+  perturbed inputs against *data* targets re-anchors the equilibrium to the
+  data climatology and sets the timescale at once — it is not just adding
+  damping, it is fixing the attractor.
+- Caveat: (model − ERA5) also contains real-world signals absent from the
+  model's forcing (e.g. El Chichón in April 1982 perturbs ERA5's
+  stratosphere; the 500–1500d window covers it). Some of the "bias" may be
+  ERA5 responding to forcing the model never sees. For stability purposes
+  the distinction is secondary — either way the state slides relative to the
+  training distribution and nothing pulls it back — but it matters for how
+  much of the bias a better model could in principle remove.
+- Direction note: this offline single-IC reproduction drifts q0 *dry*
+  (−1.9σ), while the original training-time 46-year inference showed a
+  warming/*moistening* runaway. Both are escapes through the same neutral
+  subspace, but in different directions — consistent with a basin that is
+  weak on both sides (probe 1: drying relaxes only toward a sliding
+  equilibrium; moistening is outright neutral-to-amplifying), and a caution
+  against tuning any fix to one sign of excursion.
+
+**Why the current tendency regularization may not fix this** (analysis of
+`c188f558e`, untested empirically since this checkpoint predates it): the
+penalty is the squared *per-sample* spatial mean of the network tendency,
+i.e. E[gm(tendency)²] = var(gm tendency) + bias². Legitimate per-sample
+global-mean tendencies (the seasonal cycle, real weather variability, ~1e-2 σ
+/day) are ~10× the bias (~1e-3 σ/day), so the variance term outweighs the
+bias term ~100:1 in the loss — the penalty mostly suppresses *real*
+global-mean tendency variability, with only ~1% of its gradient pressure on
+the bias, and it actively fights the seasonal cycle by pulling all gm
+tendencies toward zero. Two better-targeted forms: penalize the *error*
+gm(predicted tendency) − gm(target tendency) per sample (doesn't fight the
+seasonal cycle; bias still enters at var+bias² but the variance term is now
+error variance, much smaller), or penalize the *batch-mean* of that error
+(averaging B samples shrinks the variance term by B, exposing the bias).
+Empirical follow-up: run probe 7 on a Wave-3+/tend-reg checkpoint to see
+what the existing penalty actually does to the bias.
 
 ## Development workflow for code changes
 
@@ -691,17 +760,21 @@ resolved:
 
 Next steps, in order:
 
-1. **Resolve the bias question**: separate secular bias from the seasonal
-   cycle (compare unperturbed-ensemble gm trajectories against ERA5's over
-   the same dates — pure post-processing of probe 1+3 output plus the staged
-   data), and diagnose why tendency regularization at 0.05 doesn't suppress
-   the inference-time bias.
+1. ~~Resolve the bias question~~ → **done as probe 7** (secular dry bias in
+   gm q0 of ~−1.1 mσ/day confirmed against ERA5; relaxation targets the
+   model's own sliding equilibrium; tend-reg penalty form analyzed). The
+   remaining empirical piece needs user input: **which finished tend-reg
+   checkpoint to download** (Wave 3b ft runs are marked finished in
+   run-train.sh) to run probes 7/2/1 against and see what tend-reg actually
+   does to the bias and the neutral mode.
 2. **Probe 4** (uniform vs. patterned displacement, short runs from
    snapshots).
 3. **Code round** (per the workflow section, each as a PR branch from
    `main`): Avenue 1 perturbation augmentation in `SingleModuleStep` (config
    dataclass design pending the code-reading round), the Avenue 4 probe task
-   + `fork_rng`, the Avenue 3b input-channel variant, and a `fix/` PR for the
-   inference ensemble double-broadcast bug found by probe 1+3.
+   + `fork_rng`, the Avenue 3b input-channel variant, a bias-targeted
+   tendency-regularization variant (error-based or batch-mean, per probe 7's
+   analysis), and a `fix/` PR for the inference ensemble double-broadcast
+   bug found by probe 1+3.
 4. In parallel: the qsat-scaling residual run (Avenue 2) as a control, run
    through the same probe harness when it lands.
