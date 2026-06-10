@@ -22,6 +22,10 @@ from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.args import StepArgs
+from fme.core.step.global_mean_relaxation import (
+    GlobalMeanRelaxation,
+    GlobalMeanRelaxationConfig,
+)
 from fme.core.step.global_mean_removal import (
     GlobalMeanRemoval,
     GlobalMeanRemovalConfigUnion,
@@ -70,6 +74,10 @@ class SingleModuleStepConfig(StepConfigABC):
             from fields before normalization and restoring them after
             denormalization. Supports shared (single reference field) or
             per-channel removal, with optional extra input channels.
+        global_mean_relaxation: Optional configuration for Newtonian
+            relaxation of the global mean of selected output variables
+            toward configured target values. Applied only in eval mode,
+            after the network call and before the corrector.
     """
 
     builder: ModuleSelector
@@ -86,11 +94,14 @@ class SingleModuleStepConfig(StepConfigABC):
     residual_prediction: bool = False
     include_channel_mask_inputs: bool = False
     global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
+    global_mean_relaxation: GlobalMeanRelaxationConfig | None = None
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
         if self.global_mean_removal is not None:
             self.global_mean_removal.validate_names(self.in_names, self.out_names)
+        if self.global_mean_relaxation is not None:
+            self.global_mean_relaxation.validate_names(self.out_names)
         for name in self.prescribed_prognostic_names:
             if name not in self.out_names:
                 raise ValueError(
@@ -280,6 +291,15 @@ class SingleModuleStep(StepABC):
             )
         else:
             self._global_mean_removal = NoGlobalMeanRemoval()
+        if config.global_mean_relaxation is not None:
+            self._global_mean_relaxation: GlobalMeanRelaxation | None = (
+                config.global_mean_relaxation.build(
+                    gridded_operations=dataset_info.gridded_operations,
+                    normalizer=normalizer,
+                )
+            )
+        else:
+            self._global_mean_relaxation = None
         # Synthetic GMR channels are packed alongside real inputs so they
         # flow through the packer and channel-mask machinery uniformly.
         packed_in_names = (
@@ -401,6 +421,19 @@ class SingleModuleStep(StepABC):
             output_dict.update(secondary_output_dict)
             return output_dict
 
+        # Newtonian relaxation toward configured target global means is an
+        # eval-time-only adjustment; gating on the network module's training
+        # flag keeps it from contributing to the loss during training.
+        if (
+            self._global_mean_relaxation is not None
+            and not self.module.torch_module.training
+        ):
+            global_mean_relaxation: GlobalMeanRelaxation | None = (
+                self._global_mean_relaxation
+            )
+        else:
+            global_mean_relaxation = None
+
         return step_with_adjustments(
             input=args.input,
             next_step_input_data=args.next_step_input_data,
@@ -412,6 +445,7 @@ class SingleModuleStep(StepABC):
             prognostic_names=self.prognostic_names,
             prescribed_prognostic_names=self._config.prescribed_prognostic_names,
             global_mean_removal=self._global_mean_removal,
+            global_mean_relaxation=global_mean_relaxation,
             data_mask=args.data_mask,
             stepper_state=args.stepper_state,
         )
@@ -508,6 +542,7 @@ def step_with_adjustments(
     prognostic_names: list[str],
     prescribed_prognostic_names: list[str] | None = None,
     global_mean_removal: GlobalMeanRemoval | None = None,
+    global_mean_relaxation: GlobalMeanRelaxation | None = None,
     data_mask: TensorMapping | None = None,
     stepper_state: StepperState | None = None,
 ) -> tuple[TensorDict, StepperState | None]:
@@ -537,6 +572,11 @@ def step_with_adjustments(
             before the normalizer and ``inverse_transform`` after
             denormalization but before the corrector/ocean/prescribed steps,
             so those adjustments operate in physical space.
+        global_mean_relaxation: Optional Newtonian relaxation of the global
+            mean of selected output fields toward configured target values.
+            Applied after the network call (and any ``global_mean_removal``
+            inverse transform) and before the corrector. Pass ``None`` to
+            disable (e.g. during training).
         data_mask: Per-variable boolean masks passed to
             ``global_mean_removal.forward_transform``.
         stepper_state: Per-sample state carried across step calls. The
@@ -568,6 +608,8 @@ def step_with_adjustments(
     output = normalizer.denormalize(output_norm)
     if global_mean_removal is not None:
         output = global_mean_removal.inverse_transform(output)
+    if global_mean_relaxation is not None:
+        output = global_mean_relaxation(output)
     if corrector is not None:
         corrector_state: CorrectorState | None = (
             stepper_state.corrector_state if stepper_state is not None else None
