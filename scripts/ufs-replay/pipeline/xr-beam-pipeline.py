@@ -451,10 +451,9 @@ def _make_zarr_store(url: str, read_only: bool = True):
 def _match_time_type(dt, reference_time):
     """Convert *dt* to match the type of *reference_time*.
 
-    The UFS zarr stores may use different calendars (Julian for MOM6,
-    possibly standard/proleptic_gregorian for FV3).  This function
-    inspects the actual time values in the dataset and converts
-    accordingly.
+    CLI arguments are parsed as ``datetime.datetime`` but the zarr stores
+    use cftime objects.  This converts so that ``xr.sel(time=slice(...))``
+    works correctly.
     """
     if isinstance(reference_time, _cftime.datetime):
         # Match the exact cftime subclass used in the dataset
@@ -724,16 +723,11 @@ def _process_chunk(
             lat=ds_ocean.lat.values, lon=ds_ocean.lon.values
         )
 
-    # Restrict to common times (string-based to handle cross-calendar types)
-    atmo_time_strs = {str(t) for t in ds_atmo_6h.time.values}
-    ocean_mask = [str(t) in atmo_time_strs for t in ds_ocean.time.values]
-    atmo_mask = [
-        str(t) in {str(t) for t in ds_ocean.time.values[ocean_mask]}
-        for t in ds_atmo_6h.time.values
-    ]
-    ds_atmo_6h = ds_atmo_6h.isel(time=atmo_mask)
-    ds_ocean_2d = ds_ocean_2d.isel(time=ocean_mask)
-    ds_levels = ds_levels.isel(time=ocean_mask)
+    # Restrict to common times
+    common_times = sorted(set(ds_ocean.time.values) & set(ds_atmo_6h.time.values))
+    ds_atmo_6h = ds_atmo_6h.sel(time=common_times)
+    ds_ocean_2d = ds_ocean_2d.sel(time=common_times)
+    ds_levels = ds_levels.sel(time=common_times)
 
     # Time coarsening
     if time_coarsen_factor > 1:
@@ -927,22 +921,16 @@ def _average_atmo_chunk(
 
     ds_atmo_6h = ds_atmo.resample(time="6h", closed="right", label="right").mean()
 
-    # Match ocean and atmo times — they may be different cftime subclasses,
-    # so compare by converting to strings.
-    atmo_strs = [str(t) for t in ds_atmo_6h.time.values]
-    ocean_strs = [str(t) for t in ocean_times.values]
-    common_strs = set(atmo_strs) & set(ocean_strs)
+    common_times = sorted(set(ds_atmo_6h.time.values) & set(ocean_times.values))
 
-    if not common_strs:
+    if not common_times:
         raise ValueError(
             f"No overlapping times between averaged atmosphere and ocean. "
-            f"Atmo 6h times: {atmo_strs[:5]}..., "
-            f"Ocean times: {ocean_strs[:5]}..."
+            f"Atmo 6h times: {ds_atmo_6h.time.values[:5]}..., "
+            f"Ocean times: {ocean_times.values[:5]}..."
         )
 
-    # Select by position using the string-matched indices
-    mask = [str(t) in common_strs for t in ds_atmo_6h.time.values]
-    return ds_atmo_6h.isel(time=mask)
+    return ds_atmo_6h.sel(time=common_times)
 
 
 # ---------------------------------------------------------------------------
@@ -1319,8 +1307,6 @@ def main():
     ocean_load_vars = list(dict.fromkeys(ocean_load_vars))
 
     ds_ocean = open_ocean(ocean_load_vars, start_time, end_time)
-    ds_ocean = _clean_ocean_dataset(ds_ocean)
-
     # Truncate to a multiple of process_time_chunksize so every chunk has
     # exactly the same number of timesteps (avoids coarsen failures).
     n_ocean = ds_ocean.sizes["time"]
@@ -1349,10 +1335,9 @@ def main():
     logging.info("Atmo dataset: %s", dict(ds_atmo.sizes))
 
     # Pre-compute integer index mapping from ocean chunk offset → atmo
-    # time slice.  This avoids cftime type-matching issues on workers.
+    # time slice so workers can select by position.
     ocean_times_arr = ds_ocean.time.values
     atmo_times_arr = ds_atmo.time.values
-    atmo_strs = [str(t) for t in atmo_times_arr]
     atmo_isel_map = {}  # ocean_time_offset → slice(start, end)
     pcs = args.process_time_chunksize
     for chunk_idx in range(len(ocean_times_arr) // pcs):
@@ -1362,16 +1347,13 @@ def main():
         # Atmo window: 6h before first ocean time to 3h after last
         a_start = ocean_chunk_start - datetime.timedelta(hours=6)
         a_end = ocean_chunk_end + datetime.timedelta(hours=3)
-        a_start_str = str(a_start)
-        a_end_str = str(a_end)
-        # Find matching integer indices in atmo
         idx_start = None
         idx_end = None
-        for i, s in enumerate(atmo_strs):
-            if s >= a_start_str:
+        for i, t in enumerate(atmo_times_arr):
+            if t >= a_start:
                 if idx_start is None:
                     idx_start = i
-                if s <= a_end_str:
+                if t <= a_end:
                     idx_end = i
         if idx_start is not None and idx_end is not None:
             atmo_isel_map[ocean_offset] = slice(idx_start, idx_end + 1)
