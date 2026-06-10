@@ -168,7 +168,7 @@ stepper:
       corrector:
         total_energy_budget_correction:
           method: constant_temperature
-          constant_unaccounted_heating: 0.09      
+          constant_unaccounted_heating: 0.09
         conserve_dry_air: true
         moisture_budget_correction: advection_and_precipitation
         force_positive_names:
