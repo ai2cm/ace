@@ -148,6 +148,12 @@ class SwinTransformerBuilder(ModuleConfig):
                     "HEALPix are not supported. Set use_cpb_scaling=False to disable "
                     "this requirement."
                 ) from None
+            if lat_coords is None:
+                raise ValueError(
+                    "SwinTransformer requires 1D latitude coordinates for cos-lat CPB "
+                    "scaling, but this coordinate type returns None for lat_1d. "
+                    "Set use_cpb_scaling=False to disable this requirement."
+                )
         else:
             lat_coords = None
         net = SwinTransformerNet(
@@ -286,6 +292,12 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
                     "HEALPix are not supported. Set use_cpb_scaling=False to disable "
                     "this requirement."
                 ) from None
+            if lat_coords is None:
+                raise ValueError(
+                    "SwinTransformer requires 1D latitude coordinates for cos-lat CPB "
+                    "scaling, but this coordinate type returns None for lat_1d. "
+                    "Set use_cpb_scaling=False to disable this requirement."
+                )
         else:
             lat_coords = None
         net = SwinTransformerNet(

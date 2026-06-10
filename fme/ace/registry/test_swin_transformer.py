@@ -10,7 +10,11 @@ from fme.ace.registry.swin_transformer import (
     NoiseConditionedSwinTransformerBuilder,
     SwinTransformerBuilder,
 )
-from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
+from fme.core.coordinates import (
+    HEALPixCoordinates,
+    HybridSigmaPressureCoordinate,
+    LatLonCoordinates,
+)
 from fme.core.dataset_info import DatasetInfo
 from fme.core.labels import BatchLabels
 from fme.core.registry import ModuleSelector
@@ -74,6 +78,19 @@ def test_swin_transformer_build_and_forward():
 def test_swin_transformer_raises_without_lat_coords():
     n_in, n_out = 5, 3
     dataset_info = DatasetInfo(img_shape=IMG_SHAPE)
+    with pytest.raises(ValueError, match="use_cpb_scaling=False"):
+        _builder().build(n_in, n_out, dataset_info)
+
+
+def test_swin_transformer_raises_when_lat_1d_is_none():
+    n_in, n_out = 5, 3
+    nside = 4
+    healpix_coords = HEALPixCoordinates(
+        face=torch.arange(12),
+        height=torch.arange(nside),
+        width=torch.arange(nside),
+    )
+    dataset_info = DatasetInfo(horizontal_coordinates=healpix_coords)
     with pytest.raises(ValueError, match="use_cpb_scaling=False"):
         _builder().build(n_in, n_out, dataset_info)
 
@@ -171,6 +188,19 @@ def test_nc_swin_transformer_via_selector():
 def test_nc_swin_transformer_raises_without_lat_coords():
     n_in, n_out = 5, 3
     dataset_info = DatasetInfo(img_shape=IMG_SHAPE)
+    with pytest.raises(ValueError, match="use_cpb_scaling=False"):
+        _nc_builder().build(n_in, n_out, dataset_info)
+
+
+def test_nc_swin_transformer_raises_when_lat_1d_is_none():
+    n_in, n_out = 5, 3
+    nside = 4
+    healpix_coords = HEALPixCoordinates(
+        face=torch.arange(12),
+        height=torch.arange(nside),
+        width=torch.arange(nside),
+    )
+    dataset_info = DatasetInfo(horizontal_coordinates=healpix_coords)
     with pytest.raises(ValueError, match="use_cpb_scaling=False"):
         _nc_builder().build(n_in, n_out, dataset_info)
 
