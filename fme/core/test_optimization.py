@@ -848,3 +848,56 @@ def test_scheduler_step_timing():
         lr_after_iteration == initial_lr
     ), "LR should not change on per-iteration step when step_each_iteration=False"
     assert lr_after_epoch < initial_lr, "LR should decrease after per-epoch step"
+
+
+def test_no_weight_decay_bias_and_norm_splits_param_groups():
+    """When no_weight_decay_bias_and_norm=True, weight params (non-norm) use the
+    configured weight_decay and bias/norm params use weight_decay=0."""
+
+    class SimpleModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.linear = nn.Linear(4, 4)
+            self.norm = nn.LayerNorm(4)
+
+        def forward(self, x):
+            return self.norm(self.linear(x))
+
+    model = SimpleModel().to(fme.get_device())
+    wd = 0.05
+    config = OptimizationConfig(
+        optimizer_type="AdamW",
+        lr=3e-4,
+        kwargs={"weight_decay": wd, "betas": (0.9, 0.98)},
+        no_weight_decay_bias_and_norm=True,
+    )
+    opt = config.build(torch.nn.ModuleList([model]), max_epochs=1)
+
+    assert len(opt.optimizer.param_groups) == 2
+    decay_group = opt.optimizer.param_groups[0]
+    no_decay_group = opt.optimizer.param_groups[1]
+    assert decay_group["weight_decay"] == wd
+    assert no_decay_group["weight_decay"] == 0.0
+
+    decay_param_ids = {id(p) for p in decay_group["params"]}
+    no_decay_param_ids = {id(p) for p in no_decay_group["params"]}
+
+    for name, param in model.named_parameters():
+        if "weight" in name and "norm" not in name:
+            assert id(param) in decay_param_ids, f"{name} should be in decay group"
+        else:
+            assert (
+                id(param) in no_decay_param_ids
+            ), f"{name} should be in no-decay group"
+
+
+def test_no_weight_decay_bias_and_norm_false_single_group():
+    """no_weight_decay_bias_and_norm=False (default) uses a single param group."""
+    model = nn.Linear(4, 4).to(fme.get_device())
+    config = OptimizationConfig(
+        optimizer_type="AdamW",
+        kwargs={"weight_decay": 0.05},
+        no_weight_decay_bias_and_norm=False,
+    )
+    opt = config.build(torch.nn.ModuleList([model]), max_epochs=1)
+    assert len(opt.optimizer.param_groups) == 1

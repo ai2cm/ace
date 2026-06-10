@@ -75,7 +75,7 @@ class CheckpointConfig:
 class Optimization(OptimizationABC):
     def __init__(
         self,
-        parameters: Iterable[torch.nn.Parameter],
+        parameters: Iterable[torch.nn.Parameter] | list[dict[str, Any]],
         optimizer_type: Literal[
             "Adam",
             "FusedAdam",
@@ -296,6 +296,12 @@ class OptimizationConfig:
             ``betas``, ...) and scheduler are kept; only the running state is
             transferred. Intended for non-resuming jobs; preemption resume in
             the Trainer overrides this state via ``Optimization.load_state``.
+        no_weight_decay_bias_and_norm: When True, splits parameters into two
+            optimizer groups: weight parameters (names containing ``"weight"``
+            but not ``"norm"``) use the configured ``weight_decay`` from
+            ``kwargs``; all other parameters (biases and norm-layer weights)
+            use ``weight_decay=0``. Defaults to False so existing configs are
+            unaffected.
     """
 
     optimizer_type: Literal["Adam", "AdamW", "FusedAdam"] = "Adam"
@@ -310,6 +316,7 @@ class OptimizationConfig:
         default_factory=lambda: CheckpointConfig()
     )
     resume_optimizer_ckpt_path: str | None = None
+    no_weight_decay_bias_and_norm: bool = False
 
     def __post_init__(self):
         if self.optimizer_type == "FusedAdam":
@@ -326,7 +333,22 @@ class OptimizationConfig:
         return self.scheduler.type is not None
 
     def build(self, modules: torch.nn.ModuleList, max_epochs: int) -> Optimization:
-        parameters = itertools.chain(*[module.parameters() for module in modules])
+        if self.no_weight_decay_bias_and_norm:
+            decay_wd = self.kwargs.get("weight_decay", 0.0)
+            decay_params = []
+            no_decay_params = []
+            for module in modules:
+                for name, param in module.named_parameters():
+                    if "weight" in name and "norm" not in name:
+                        decay_params.append(param)
+                    else:
+                        no_decay_params.append(param)
+            parameters: Iterable[torch.nn.Parameter] | list[dict[str, Any]] = [
+                {"params": decay_params, "weight_decay": decay_wd},
+                {"params": no_decay_params, "weight_decay": 0.0},
+            ]
+        else:
+            parameters = itertools.chain(*[module.parameters() for module in modules])
         optimization = Optimization(
             parameters=parameters,
             optimizer_type=self.optimizer_type,

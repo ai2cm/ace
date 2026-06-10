@@ -10,7 +10,7 @@ ArchesWeather embeds the forecast timestamp's calendar month and hour-of-day via
 
 ---
 
-### 2. **Optimizer: differential weight decay** — training config
+### 2. **Optimizer: differential weight decay** — training config ✅
 
 ArchesWeather's `configure_optimizers` splits parameters into two groups:
 - Weights (non-norm): `weight_decay=0.05`
@@ -19,7 +19,7 @@ ArchesWeather's `configure_optimizers` splits parameters into two groups:
 
 ACE's `OptimizationConfig` applies a single weight decay across all parameters. There's no built-in support for this split.
 
-**Fix needed**: Add a `no_weight_decay_bias_and_norm: bool = False` flag to `OptimizationConfig`. When `True`, `build()` partitions `named_parameters()` into two groups — params whose name contains `"weight"` but not `"norm"` get the configured `weight_decay`; all others (biases and norm-layer weights) get `weight_decay=0`. Flag defaults to `False` so existing configs are unaffected.
+**Implemented**: Added `no_weight_decay_bias_and_norm: bool = False` to `OptimizationConfig` in `fme/core/optimization.py`. When `True`, `build()` partitions `named_parameters()` into two optimizer groups — params whose name contains `"weight"` but not `"norm"` get the configured `weight_decay`; all others (biases and norm-layer weights) get `weight_decay=0`. Flag defaults to `False` so existing configs are unaffected.
 
 ---
 
