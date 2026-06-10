@@ -158,3 +158,10 @@ stepper:
         total_energy_budget_correction:
           method: constant_temperature
           constant_unaccounted_heating: 0.09
+      normalization:
+        network:
+          global_means_path: /atmos_stats/centering.nc
+          global_stds_path: /atmos_stats/scaling-full-field.nc
+        residual:
+          global_means_path: /atmos_stats/centering.nc
+          global_stds_path: /atmos_stats/scaling-residual.nc

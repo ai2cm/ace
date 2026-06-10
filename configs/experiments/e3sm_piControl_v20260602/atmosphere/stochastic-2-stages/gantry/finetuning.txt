@@ -1,3 +1,4 @@
 group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
 BK-v20260602-ACE2S-E3SMv3-piControl-100yr-n384-bs8-equal-loss-multi-step-FT|rs0|ace-eamv3|bvigdtwp|best_inference_ckpt|inprogress|urgent|titan|4|600GiB|1|ai2/climate-titan|seed=0 stepper.step.config.builder.config.embed_dim=384
-BK-v20260602-ACE2S-E3SMv3-piControl-100yr-n384-bs8-multi-step-FT|rs0|ace-eamv3|tu6kkzxd|best_inference_ckpt|train|high|titan|4|600GiB|1|ai2/climate-titan|seed=0 stepper.step.config.builder.config.embed_dim=384
+BK-v20260602-ACE2S-E3SMv3-piControl-100yr-n384-bs8-multi-step-FT|rs0|ace-eamv3|tu6kkzxd|best_inference_ckpt|inprogress|high|titan|4|600GiB|1|ai2/climate-titan|seed=0 stepper.step.config.builder.config.embed_dim=384
+BK-v20260602-ACE2S-E3SMv3-piControl-100yr-n384-bs8-multi-step-FT-from-PM|rs0|ace-eamv3|ui7kcu2q|best_inference_ckpt|train|high|titan|4|600GiB|1|ai2/climate-titan|stepper.step.config.builder.config.embed_dim=384|01KTSPJVNWXTYDBY24JSG6BVJ7
