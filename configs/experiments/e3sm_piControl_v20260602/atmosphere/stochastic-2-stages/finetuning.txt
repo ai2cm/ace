@@ -1,0 +1,2 @@
+group|tag|skip_or_train|account|queue|constraint|nodes|gpus_per_node|cpus_per_task|time|override_args|pretrain_job_id|ckpt_type|ckpt_path|resume_job_id
+PM-v20260602-ACE2S-E3SMv3-piControl-105yr-n512-bs8-from-BK-multi-step-FT|rs0|train|e3sm|regular|gpu&hbm80g|2|4|128|3-20:00:00|stepper.step.config.builder.config.embed_dim=512||best_inference_ckpt|/pscratch/sd/e/elynnwu/fme-output/BK-v20260602-ACE2S-E3SMv3-piControl-100yr-n512-bs8-pretrain-rs0/training_checkpoints/best_inference_ckpt.tar|

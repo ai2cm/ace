@@ -1,6 +1,7 @@
 group|tag|skip_or_train|account|queue|constraint|nodes|gpus_per_node|cpus_per_task|time|override_args|resume_job_id
 
-PM-v20260602-Samudra-piControl-105yr|rs1|train|e3sm|regular|gpu&hbm80g|2|4|128|4-18:00:00|seed=1|
-PM-v20260602-Samudra-piControl-105yr|rs2|train|e3sm|regular|gpu&hbm80g|2|4|128|4-18:00:00|seed=2|
-PM-v20260602-Samudra-piControl-105yr-nfw-8|rs0|train|e3sm|regular|gpu&hbm80g|2|4|128|4-18:00:00|seed=0 stepper_training.n_forward_steps=8|
-PM-v20260602-Samudra-piControl-105yr-nfw-8|rs1|train|e3sm|regular|gpu&hbm80g|2|4|128|4-18:00:00|seed=1 stepper_training.n_forward_steps=8|
+PM-v20260602-Samudra-piControl-105yr|rs1|inprogress|e3sm|regular|gpu&hbm80g|2|4|128|4-18:00:00|seed=1|
+PM-v20260602-Samudra-piControl-105yr|rs2|inprogress|e3sm|regular|gpu&hbm80g|2|4|128|4-18:00:00|seed=2|
+PM-v20260602-Samudra-piControl-105yr-nfw-8|rs0|inprogress|e3sm|regular|gpu&hbm80g|2|4|128|4-18:00:00|seed=0 stepper_training.n_forward_steps=8|
+PM-v20260602-Samudra-piControl-105yr-nfw-8|rs1|inprogress|e3sm|regular|gpu&hbm80g|2|4|128|4-18:00:00|seed=1 stepper_training.n_forward_steps=8|
+PM-v20260602-Samudra-piControl-105yr-fine-tune-nfw-8|rs0|train|e3sm|regular|gpu&hbm80g|2|4|128|4-10:00:00|seed=0 max_epochs=20 stepper_training.n_forward_steps=8 stepper_training.parameter_init.weights_path=/pscratch/sd/e/elynnwu/fme-output/53833443/training_checkpoints/best_inference_ckpt.tar|

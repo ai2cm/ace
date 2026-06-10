@@ -1,0 +1,4 @@
+
+PM-v20260606-Samudra-piControl-105yr-1D-inst-nfw-20|rs0|54263206|submitted|e3sm|regular|gpu&hbm80g|2|4|128|3-18:00:00|seed=0 stepper_training.n_forward_steps=20
+
+PM-v20260606-Samudra-piControl-105yr-1D-inst-nfw-10|rs0|54263212|submitted|e3sm|regular|gpu&hbm80g|2|4|128|3-18:00:00|seed=0 stepper_training.n_forward_steps=10

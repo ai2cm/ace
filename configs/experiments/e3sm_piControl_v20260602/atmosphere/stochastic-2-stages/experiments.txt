@@ -1,0 +1,10 @@
+
+PM-v20260602-ACE2S-E3SMv3-piControl-105yr-n512-bs8-equal-loss-pretrain|rs0|54024592|submitted|e3sm|regular|gpu&hbm80g|2|4|128|4-18:00:00|seed=0
+
+PM-v20260602-ACE2S-E3SMv3-piControl-105yr-n512-bs8-equal-loss-pretrain|rs1|54024594|submitted|e3sm|regular|gpu&hbm80g|2|4|128|4-18:00:00|seed=1
+
+PM-v20260602-ACE2S-E3SMv3-piControl-105yr-n384-bs8-equal-loss-pretrain|rs0|54024597|submitted|e3sm|regular|gpu&hbm80g|2|4|128|4-18:00:00|seed=0 stepper.step.config.builder.config.embed_dim=384
+
+PM-v20260602-ACE2S-E3SMv3-piControl-105yr-n384-bs8-equal-loss-pretrain|rs1|54024601|submitted|e3sm|regular|gpu&hbm80g|2|4|128|4-18:00:00|seed=1 stepper.step.config.builder.config.embed_dim=384
+
+PM-v20260602-ACE2S-E3SMv3-piControl-105yr-n512-bs8-from-BK-multi-step-FT|rs0|54194572|submitted|e3sm|regular|gpu&hbm80g|2|4|128|3-20:00:00|stepper.step.config.builder.config.embed_dim=512||best_inference_ckpt

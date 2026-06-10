@@ -1,0 +1,14 @@
+
+PM-v20260606-Samudra-piControl-105yr-1D|rs0|54195523|submitted|e3sm|regular|gpu&hbm80g|2|4|128|3-18:00:00|seed=0
+
+PM-v20260606-Samudra-piControl-105yr-1D|rs1|54195525|submitted|e3sm|regular|gpu&hbm80g|2|4|128|3-18:00:00|seed=1
+
+PM-v20260606-Samudra-piControl-105yr-1D-nfw-20|rs0|54195544|submitted|e3sm|regular|gpu&hbm80g|2|4|128|3-18:00:00|seed=0 stepper_training.n_forward_steps=20
+
+PM-v20260606-Samudra-piControl-105yr-1D|rs0|54195613|submitted|e3sm|regular|gpu&hbm80g|2|4|128|3-18:00:00|seed=0
+
+PM-v20260606-Samudra-piControl-105yr-1D|rs1|54195659|submitted|e3sm|regular|gpu&hbm80g|2|4|128|3-18:00:00|seed=1
+
+PM-v20260606-Samudra-piControl-105yr-1D-nfw-20|rs0|54195666|submitted|e3sm|regular|gpu&hbm80g|2|4|128|3-18:00:00|seed=0 stepper_training.n_forward_steps=20
+
+PM-v20260606-Samudra-piControl-105yr-1D-nfw-20|rs1|54195668|submitted|e3sm|regular|gpu&hbm80g|2|4|128|3-18:00:00|seed=1 stepper_training.n_forward_steps=20

@@ -1,9 +1,12 @@
-group|tag|slurm_job_id|status|account|queue|constraint|nodes|gpus_per_node|cpus_per_task|time|override_args
 
-PM-v20260602-ACE2S-E3SMv3-piControl-100yr-n512-bs8-deterministic|rs0|53966195|submitted|e3sm|regular|gpu&hbm80g|2|4|128|23:00:00|seed=0
+PM-v20260602-ACE2S-E3SMv3-piControl-105yr-n512-bs8-equal-loss-deterministic|rs0|54024647|submitted|e3sm|regular|gpu&hbm80g|2|4|128|4-18:00:00|seed=0
 
-PM-v20260602-ACE2S-E3SMv3-piControl-100yr-n512-bs8-deterministic|rs1|53966205|submitted|e3sm|regular|gpu&hbm80g|2|4|128|23:00:00|seed=1
+PM-v20260602-ACE2S-E3SMv3-piControl-105yr-n512-bs8-equal-loss-deterministic|rs1|54024651|submitted|e3sm|regular|gpu&hbm80g|2|4|128|4-18:00:00|seed=1
 
-PM-v20260602-ACE2S-E3SMv3-piControl-100yr-n384-bs8-deterministic|rs0|53966208|submitted|e3sm|regular|gpu&hbm80g|2|4|128|23:00:00|seed=0 stepper.step.config.builder.config.embed_dim=384
+PM-v20260602-ACE2S-E3SMv3-piControl-105yr-n384-bs8-equal-loss-deterministic|rs0|54024653|submitted|e3sm|regular|gpu&hbm80g|2|4|128|4-18:00:00|seed=0 stepper.step.config.builder.config.embed_dim=384
 
-PM-v20260602-ACE2S-E3SMv3-piControl-100yr-n384-bs8-deterministic|rs1|53966211|submitted|e3sm|regular|gpu&hbm80g|2|4|128|23:00:00|seed=1 stepper.step.config.builder.config.embed_dim=384
+PM-v20260602-ACE2S-E3SMv3-piControl-105yr-n384-bs8-equal-loss-deterministic|rs1|54024656|submitted|e3sm|regular|gpu&hbm80g|2|4|128|4-18:00:00|seed=1 stepper.step.config.builder.config.embed_dim=384
+
+PM-v20260602-ACE2S-E3SMv3-piControl-105yr-n384-bs8-equal-loss-deterministic-from-BK|rs0|54179300|submitted|e3sm|regular|gpu&hbm80g|2|4|128|3-22:00:00|stepper.step.config.builder.config.embed_dim=384||best_inference_ckpt
+
+PM-v20260602-ACE2S-E3SMv3-piControl-105yr-n384-bs8-equal-loss-deterministic-from-BK-multi-step-FT-energy-corrector|rs0|54194693|submitted|e3sm|regular|gpu&hbm80g|2|4|128|3-19:00:00|stepper.step.config.builder.config.embed_dim=384||best_inference_ckpt
