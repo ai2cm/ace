@@ -6,42 +6,69 @@ ema:
   decay: 0.999
 max_epochs: 40
 inference:
-  n_forward_steps: 7300
-  forward_steps_in_memory: 10
-  loader:
-    start_indices:
-      times:
-      - '2033-01-01T00:00:00'
-      - '2033-06-06T12:00:00'
-      - '2033-11-09T18:00:00'
-      - '2034-04-15T06:00:00'
-      - '2034-09-18T18:00:00'
-      - '2035-02-22T06:00:00'
-      - '2035-07-28T12:00:00'
-      - '2036-01-01T00:00:00'
-      - '2041-01-01T00:00:00'
-      - '2041-06-06T12:00:00'
-      - '2041-11-09T18:00:00'
-      - '2042-04-15T06:00:00'
-      - '2042-09-18T18:00:00'
-      - '2043-02-22T06:00:00'
-      - '2043-07-28T12:00:00'
-      - '2044-01-01T00:00:00'
-      - '2049-01-01T00:00:00'
-      - '2049-06-06T12:00:00'
-      - '2049-11-09T18:00:00'
-      - '2050-04-15T06:00:00'
-      - '2050-09-18T18:00:00'
-      - '2051-02-22T06:00:00'
-      - '2051-07-28T12:00:00'
-      - '2052-01-01T00:00:00'
-    dataset:
-      data_path: /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset
-      file_pattern: concatenated-1xCO2-2xCO2-4xCO2-ic_0003.zarr
-      engine: zarr
-    num_data_workers: 1
-  aggregator:
-    log_histograms: true
+  - name: 1xC02
+    n_forward_steps: 7300
+    forward_steps_in_memory: 10
+    loader:
+      start_indices:
+        times:
+        - '2033-01-01T00:00:00'
+        - '2033-06-06T12:00:00'
+        - '2033-11-09T18:00:00'
+        - '2034-04-15T06:00:00'
+        - '2034-09-18T18:00:00'
+        - '2035-02-22T06:00:00'
+        - '2035-07-28T12:00:00'
+        - '2036-01-01T00:00:00'
+      dataset:
+        data_path: /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset
+        file_pattern: 1xCO2-ic_0003.zarr
+        engine: zarr
+      num_data_workers: 1
+    aggregator:
+      log_histograms: true
+  - name: 2xC02
+    n_forward_steps: 7300
+    forward_steps_in_memory: 10
+    loader:
+      start_indices:
+        times:
+        - '2033-01-01T00:00:00'
+        - '2033-06-06T12:00:00'
+        - '2033-11-09T18:00:00'
+        - '2034-04-15T06:00:00'
+        - '2034-09-18T18:00:00'
+        - '2035-02-22T06:00:00'
+        - '2035-07-28T12:00:00'
+        - '2036-01-01T00:00:00'
+      dataset:
+        data_path: /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset
+        file_pattern: 2xCO2-ic_0003.zarr
+        engine: zarr
+      num_data_workers: 1
+    aggregator:
+      log_histograms: true
+  - name: 4xC02
+    n_forward_steps: 7300
+    forward_steps_in_memory: 10
+    loader:
+      start_indices:
+        times:
+        - '2033-01-01T00:00:00'
+        - '2033-06-06T12:00:00'
+        - '2033-11-09T18:00:00'
+        - '2034-04-15T06:00:00'
+        - '2034-09-18T18:00:00'
+        - '2035-02-22T06:00:00'
+        - '2035-07-28T12:00:00'
+        - '2036-01-01T00:00:00'
+      dataset:
+        data_path: /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset
+        file_pattern: 4xCO2-ic_0003.zarr
+        engine: zarr
+      num_data_workers: 1
+    aggregator:
+      log_histograms: true
 logging:
   log_to_screen: true
   log_to_wandb: true
