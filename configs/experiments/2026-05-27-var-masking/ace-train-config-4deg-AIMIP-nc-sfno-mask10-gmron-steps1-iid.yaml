@@ -316,7 +316,7 @@ optimization:
     milestones: []
 stepper_training:
   n_ensemble: 2
-  n_forward_steps: 2
+  n_forward_steps: 1
   optimize_last_step_only: true
   loss:
     type: EnsembleLoss
@@ -490,4 +490,9 @@ stepper:
       global_mean_removal:
         kind: shared
         append_as_input: true
+      input_dropout:
+        kind: uniform
+        min_vars: 1
+        max_vars: 10
+        shared_across_ensemble: false
       include_channel_mask_inputs: true

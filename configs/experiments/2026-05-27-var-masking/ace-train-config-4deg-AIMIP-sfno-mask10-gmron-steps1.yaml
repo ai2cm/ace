@@ -488,5 +488,5 @@ stepper:
       input_dropout:
         kind: uniform
         min_vars: 1
-        max_vars: 5
+        max_vars: 10
       include_channel_mask_inputs: true

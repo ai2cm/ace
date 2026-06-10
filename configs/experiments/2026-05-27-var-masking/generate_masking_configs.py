@@ -6,9 +6,15 @@ Ablation dimensions (fully crossed):
   - GMR:      gmron (global mean removal enabled), gmroff (disabled)
   - CO2:      no suffix (no CO2 field), -co2 (global_mean_co2 added as input)
   - Steps:    -steps1 (n_forward_steps=1), -steps2 (n_forward_steps=2)
+  - IID:      no suffix (masks shared across ensemble members, default),
+              -iid (independent mask per ensemble member, nc-sfno only,
+              requires masking to be active)
 
 CO2 rule: when a -co2 variant is generated, global_mean_co2 is added to
 in_names and next_step_forcing_names but is never masked.
+
+IID rule: -iid variants are only generated for nc-sfno models with active
+masking (mask5, mask40). mask0-iid would be a no-op and is skipped.
 
 All runs: 150 epochs, constant LR (no warmup or cooldown).
 Residual prediction is always off.
@@ -39,6 +45,7 @@ N_FORWARD_STEPS = [1, 2]
 MASK_CONFIGS: list[tuple[str, dict | None]] = [
     ("mask40", {"kind": "uniform", "min_vars": 1, "max_vars": 40}),
     ("mask5", {"kind": "uniform", "min_vars": 1, "max_vars": 5}),
+    ("mask10", {"kind": "uniform", "min_vars": 1, "max_vars": 10}),
     ("mask0", None),
 ]
 
@@ -62,11 +69,15 @@ def _apply_common_settings(
     gmr_on: bool,
     input_dropout: dict | None,
     co2: bool = False,
+    iid: bool = False,
 ) -> None:
     if co2:
         _add_co2(step_cfg)
     if input_dropout is not None:
-        step_cfg["input_dropout"] = input_dropout
+        dropout_cfg = dict(input_dropout)
+        if iid:
+            dropout_cfg["shared_across_ensemble"] = False
+        step_cfg["input_dropout"] = dropout_cfg
     else:
         step_cfg.pop("input_dropout", None)
     step_cfg["residual_prediction"] = False
@@ -146,26 +157,36 @@ def generate_configs(
     stem: str,
     existing_only: bool = False,
     wandb_run_names: set[str] | None = None,
+    iid_vals: list[bool] | None = None,
 ) -> None:
+    if iid_vals is None:
+        iid_vals = [False]
     for mask_suffix, input_dropout in MASK_CONFIGS:
         for gmr_on in GMR_VALS:
             for co2 in CO2_VALS:
                 for n_steps in N_FORWARD_STEPS:
-                    cfg = copy.deepcopy(base)
-                    gmr_suffix = "gmron" if gmr_on else "gmroff"
-                    co2_suffix = "-co2" if co2 else ""
-                    name = (
-                        f"{stem}-{mask_suffix}-{gmr_suffix}{co2_suffix}-steps{n_steps}"
-                    )
-                    out_path = HERE / f"{name}.yaml"
-                    step_cfg = cfg["stepper"]["step"]["config"]
-                    _apply_common_settings(step_cfg, gmr_on, input_dropout, co2=co2)
-                    cfg["stepper_training"]["n_forward_steps"] = n_steps
-                    loss_type = cfg["stepper_training"]["loss"]["type"]
-                    cfg["stepper_training"]["optimize_last_step_only"] = (
-                        loss_type == "EnsembleLoss"
-                    )
-                    _write_config(cfg, out_path, existing_only, wandb_run_names)
+                    for iid in iid_vals:
+                        if iid and input_dropout is None:
+                            continue  # mask0-iid would be a no-op
+                        cfg = copy.deepcopy(base)
+                        gmr_suffix = "gmron" if gmr_on else "gmroff"
+                        co2_suffix = "-co2" if co2 else ""
+                        iid_suffix = "-iid" if iid else ""
+                        name = (
+                            f"{stem}-{mask_suffix}-{gmr_suffix}"
+                            f"{co2_suffix}-steps{n_steps}{iid_suffix}"
+                        )
+                        out_path = HERE / f"{name}.yaml"
+                        step_cfg = cfg["stepper"]["step"]["config"]
+                        _apply_common_settings(
+                            step_cfg, gmr_on, input_dropout, co2=co2, iid=iid
+                        )
+                        cfg["stepper_training"]["n_forward_steps"] = n_steps
+                        loss_type = cfg["stepper_training"]["loss"]["type"]
+                        cfg["stepper_training"]["optimize_last_step_only"] = (
+                            loss_type == "EnsembleLoss"
+                        )
+                        _write_config(cfg, out_path, existing_only, wandb_run_names)
 
 
 def main() -> None:
@@ -206,11 +227,13 @@ def main() -> None:
         base_config = HERE / f"{stem}.yaml"
         with base_config.open() as f:
             base = yaml.safe_load(f)
+        iid_vals = [False, True] if "nc-sfno" in stem else [False]
         generate_configs(
             base,
             stem,
             existing_only=args.existing_only,
             wandb_run_names=wandb_run_names,
+            iid_vals=iid_vals,
         )
 
 

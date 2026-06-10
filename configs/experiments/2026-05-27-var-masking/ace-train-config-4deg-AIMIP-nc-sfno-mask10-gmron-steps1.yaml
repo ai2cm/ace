@@ -316,7 +316,7 @@ optimization:
     milestones: []
 stepper_training:
   n_ensemble: 2
-  n_forward_steps: 2
+  n_forward_steps: 1
   optimize_last_step_only: true
   loss:
     type: EnsembleLoss
@@ -493,5 +493,5 @@ stepper:
       input_dropout:
         kind: uniform
         min_vars: 1
-        max_vars: 5
+        max_vars: 10
       include_channel_mask_inputs: true
