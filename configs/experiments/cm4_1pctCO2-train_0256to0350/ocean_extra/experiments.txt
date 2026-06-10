@@ -32,7 +32,7 @@ group|tag|exper_id|status|ckpt_type|priority|min_runtime|override|results_datase
 
 1pct_nosmooth_0256to0350-hfds_resid|rs2|01KK3BPSW07GQEH03GX5XA6R7X|training|best_inference_ckpt|normal|--not-preemptible
 
-1pct_nosmooth_0256to0350-hfds_prescribed|rs0|01KKA692A9ACSB9HA8SVA0E4RB|run_ICx1|best_inference_ckpt|high|--min-runtime 30m|||ai2/ace|a100+h100|
+1pct_nosmooth_0256to0350-hfds_prescribed|rs0|01KKA692A9ACSB9HA8SVA0E4RB|run_ic0211_20steps|best_inference_ckpt|high|--min-runtime 30m|||ai2/ace|a100+h100|
 
 1pct_nosmooth_0256to0350-hfds_resid-ft_correctOHC|rs0|01KKCSCFVA1ECA8CWBPPY04BC4|trained|best_inference_ckpt|normal|--not-preemptible
 
@@ -54,7 +54,7 @@ ace-samudra-coupled-cm4-8ez70kzy-decoupled_samudra|||trained|best_inference_ckpt
 
 1pct_nosmooth_0256to0350-ft_correctOHC|rs0|01KSY5453QDCS8YXQV51DVB25F|training|best_inference_ckpt|normal|--min-runtime 8h
 
-1pct_nosmooth_0256to0350-ft_correctOHC|rs0|01KSZQKHJYBBK0R7EBHPM16P80|trained|best_inference_ckpt|high|--min-runtime 3h|||ai2/ace|a100+h100|
+1pct_nosmooth_0256to0350-ft_correctOHC|rs0|01KSZQKHJYBBK0R7EBHPM16P80|run_ic0211_20steps|best_inference_ckpt|high|--min-runtime 30m|||ai2/ace|a100+h100|
 
 1pct_nosmooth_0256to0350-ft_correctOHC-precorrector_optim|rs0|01KT2NEKDV5J2ZZY75CZN6VEWW|trained|best_inference_ckpt|high|--min-runtime 2h|||ai2/ace|a100+h100|
 
@@ -68,10 +68,7 @@ ace-samudra-coupled-cm4-8ez70kzy-decoupled_samudra|||trained|best_inference_ckpt
 
 1pct_nosmooth_0256to0350-precorrector_optim-ft_correctOHC|rs0|01KT7XWTPE5T500P6D2QX19MWX|trained|best_inference_ckpt|high|--min-runtime 1h
 
-# cancelled, never started
-1pct_nosmooth_0256to0350-optPre_excl_seaice_plus_OHC|rs0|01KTA3GPBXW1TX50VC3XND0HZP|trained|best_inference_ckpt|high|--min-runtime 1h
-
-1pct_nosmooth_0256to0350-optPre_excl_seaice|rs0|01KTA3QJNYTBZYK8GVD8Q3FRXN|trained|best_inference_ckpt|high|--min-runtime 1h
+1pct_nosmooth_0256to0350-optPre_excl_seaice|rs0|01KTA3QJNYTBZYK8GVD8Q3FRXN|run_ic0211_20steps|best_inference_ckpt|high|--min-runtime 30m|||ai2/ace|a100+h100|
 
 1pct_nosmooth_0256to0350-optPre_plusOHC_excl_seaice|rs0|01KTSH3JXDQB8Y3T3JVCQQ2AM1|training|best_inference_ckpt|normal|--min-runtime 8h
 
