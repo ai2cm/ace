@@ -37,8 +37,8 @@ N_FORWARD_STEPS = [1, 2]
 
 # (name_suffix, input_dropout_config_or_None)
 MASK_CONFIGS: list[tuple[str, dict | None]] = [
-    ("mask40", {"uniform": {"min_vars": 1, "max_vars": 40}}),
-    ("mask5", {"uniform": {"min_vars": 1, "max_vars": 5}}),
+    ("mask40", {"kind": "uniform", "min_vars": 1, "max_vars": 40}),
+    ("mask5", {"kind": "uniform", "min_vars": 1, "max_vars": 5}),
     ("mask0", None),
 ]
 
