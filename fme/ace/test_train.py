@@ -183,6 +183,11 @@ def _get_test_yaml_files(
             output_layer,
             n_channels=[4, 8, 16],
         )
+        # HEALPix conv padding equals the dilation, and padding cannot exceed
+        # the face size. The deepest UNet level has 2x2 faces for the 8x8
+        # test data, so dilations must be capped at 2.
+        encoder = dataclasses.replace(encoder, dilations=[1, 2, 2])
+        decoder = dataclasses.replace(decoder, dilations=[2, 2, 1])
         net_config = dict(
             encoder=encoder,
             decoder=decoder,
@@ -518,8 +523,8 @@ def _setup(
     if use_healpix:
         hpx_coords = HEALPixCoordinates(
             face=torch.Tensor(np.arange(12)),
-            width=torch.Tensor(np.arange(16)),
-            height=torch.Tensor(np.arange(16)),
+            width=torch.Tensor(np.arange(8)),
+            height=torch.Tensor(np.arange(8)),
         )
         dim_sizes = get_sizes(spatial_dims=hpx_coords, n_time=n_time)
     else:
