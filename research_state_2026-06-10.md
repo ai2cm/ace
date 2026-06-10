@@ -3,7 +3,7 @@
 A synthesis of the `experiment/2026-06-05-aimip-like` branch, the
 `scripts/blowup_investigation` tooling and its accumulated outputs, recent
 feature implementations, and research notes in the repo. (Round 5: probes
-1, 2, 3, 5, 6, 7 executed on the existing checkpoint — results inline in the
+1–7 executed on the existing checkpoint — results inline in the
 probe and avenue sections. Headline updates: the saturation bound cannot
 prevent onset; the neutral subspace is the top-of-atmosphere moisture block
 with one-sided (moistening) neutrality-to-amplification at drifted states;
@@ -712,6 +712,41 @@ the staged ERA5 slice. Full output in `output/probe7_bias_vs_seasonal/`.
   equilibrium; moistening is outright neutral-to-amplifying), and a caution
   against tuning any fix to one sign of excursion.
 
+### Probe 4 results (2026-06-10, `probe4_spatial_structure.py`)
+
+Patterned gm-equivalent ±1σ displacements of q0 at the step-1500 snapshot
+(uniform / tropics-only / extratropics-only, 3 replicates each, 90 days),
+plus the drift-phase bias map vs. ERA5. Full output in
+`output/probe4_spatial/`.
+
+| pattern | −1σ retained @90d | +1σ retained @90d |
+|---|---|---|
+| uniform | 0.58 | 1.01 |
+| tropics | ~1.0 (noisy) | 1.00 |
+| extratropics | 0.29 | **1.23** |
+
+- **The pattern matters.** Extratropical dry anomalies damp fastest (0.29),
+  extratropical *moist* anomalies actively amplify (+23% in 90 days — the
+  first outright growth seen in any probe), and tropical anomalies are
+  roughly neutral in both signs (with noisier statistics, as expected for
+  the smaller area). A uniform offset is a blend of these behaviors.
+- **The secular dry bias is tropics-centered**: drift-phase bias map global
+  mean −1.5σ, tropics −2.0σ vs extratropics −1.1σ, zonal-mean peak −3.8σ at
+  8°N — i.e. the model over-dehydrates the tropical lower-stratospheric
+  entry region (physically the cold-point/tape-recorder region, where
+  stratospheric water is set in reality).
+- **Implication for Avenue 1**: a uniform global-mean perturbation is a
+  reasonable first cut but mismatched to both the bias pattern (tropical)
+  and the amplifying direction (extratropical moist). The natural
+  generalization is spatially-structured perturbations — e.g. random
+  low-order spherical-harmonic patterns (l ≤ 2–4) with the same
+  decaying-target supervision — so the model learns to damp a *family* of
+  large-scale moisture displacements rather than only the l=0 component.
+  This also future-proofs against the next blowup finding a patterned
+  escape direction that global-mean-only training left open. Caveat: single
+  snapshot, 3 replicates per cell; worth re-running at another snapshot
+  before designing around the exact numbers.
+
 **Why the current tendency regularization may not fix this** (analysis of
 `c188f558e`, untested empirically since this checkpoint predates it): the
 penalty is the squared *per-sample* spatial mean of the network tendency,
@@ -767,8 +802,10 @@ Next steps, in order:
    checkpoint to download** (Wave 3b ft runs are marked finished in
    run-train.sh) to run probes 7/2/1 against and see what tend-reg actually
    does to the bias and the neutral mode.
-2. **Probe 4** (uniform vs. patterned displacement, short runs from
-   snapshots).
+2. ~~Probe 4~~ → **done** (extratropical moist anomalies amplify, +23% in
+   90 d; the dry bias is tropics-centered; Avenue 1 should use
+   spatially-structured perturbations, e.g. random low-order spherical
+   harmonics, not just uniform offsets).
 3. **Code round** (per the workflow section, each as a PR branch from
    `main`): Avenue 1 perturbation augmentation in `SingleModuleStep` (config
    dataclass design pending the code-reading round), the Avenue 4 probe task
