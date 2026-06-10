@@ -52,7 +52,7 @@ from fme.ace.stepper.time_length_probabilities import (
     TimeLengthProbability,
     TimeLengthSchedule,
 )
-from fme.ace.testing import DimSizes, save_stepper_checkpoint
+from fme.ace.testing import DimSizes, get_batch_data, save_stepper_checkpoint
 from fme.core import AtmosphereData
 from fme.core.benchmark.memory import benchmark_memory
 from fme.core.coordinates import (
@@ -84,6 +84,11 @@ from fme.core.step import SingleModuleStepConfig, StepSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallConfig
 from fme.core.step.single_module import SingleModuleStep
+from fme.core.testing import (
+    get_dataset_info,
+    trivial_network_and_loss_normalization,
+    trivial_normalization,
+)
 from fme.core.testing.regression import validate_tensor_dict
 from fme.core.training_history import TrainingJob
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
@@ -91,7 +96,6 @@ from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 DIR = os.path.abspath(os.path.dirname(__file__))
 
 SphericalData = namedtuple("SphericalData", ["data", "area_weights", "vertical_coord"])
-TIMESTEP = datetime.timedelta(hours=6)
 DEVICE = fme.get_device()
 OCEAN_CONFIG = OceanConfig(surface_temperature_name="a", ocean_fraction_name="b")
 MULTI_CALL_CONFIG = MultiCallConfig(
@@ -108,52 +112,14 @@ EMPTY_DERIVED_FORCINGS_CONFIG = DerivedForcingsConfig()
 
 
 def get_data(names: Iterable[str], n_samples, n_time, epoch: int = 0) -> SphericalData:
-    data_dict = {}
     n_lat, n_lon, nz = 5, 5, 7
-
+    data = get_batch_data(
+        names, n_samples, n_time, img_shape=(n_lat, n_lon), epoch=epoch
+    )
     lats = torch.linspace(-89.5, 89.5, n_lat)  # arbitary choice
-    for name in names:
-        data_dict[name] = torch.rand(n_samples, n_time, n_lat, n_lon, device=DEVICE)
     area_weights = fme.spherical_area_weights(lats, n_lon).to(DEVICE)
-    ak, bk = torch.arange(nz), torch.arange(nz)
-    vertical_coord = HybridSigmaPressureCoordinate(ak, bk)
-    data = BatchData.new_on_device(
-        data=data_dict,
-        time=xr.DataArray(
-            np.zeros((n_samples, n_time)),
-            dims=["sample", "time"],
-        ),
-        labels=None,
-        epoch=epoch,
-    )
+    vertical_coord = HybridSigmaPressureCoordinate(torch.arange(nz), torch.arange(nz))
     return SphericalData(data, area_weights, vertical_coord)
-
-
-def get_dataset_info(
-    img_shape=(5, 5),
-    spatial_mask_provider=None,
-    vertical_coordinate=None,
-    horizontal_coordinate=None,
-) -> DatasetInfo:
-    if horizontal_coordinate is None:
-        horizontal_coordinate = LatLonCoordinates(
-            lat=torch.zeros(img_shape[-2]),
-            lon=torch.zeros(img_shape[-1]),
-        )
-    if vertical_coordinate is None:
-        vertical_coordinate = HybridSigmaPressureCoordinate(
-            ak=torch.arange(7), bk=torch.arange(7)
-        )
-    return DatasetInfo(
-        horizontal_coordinates=horizontal_coordinate,
-        vertical_coordinate=vertical_coordinate,
-        timestep=TIMESTEP,
-        spatial_mask_provider=spatial_mask_provider,
-    )
-
-
-def get_scalar_data(names, value):
-    return {n: float(value) for n in names}
 
 
 def test_stepper_no_train_step_specified():
@@ -239,10 +205,7 @@ def test_seed_eval_does_not_corrupt_training_sampler():
 def test_train_on_batch_normalizer_changes_only_norm_data():
     torch.manual_seed(0)
     data = get_data(["a", "b"], n_samples=5, n_time=2).data
-    normalization_config = NormalizationConfig(
-        means=get_scalar_data(["a", "b"], 0.0),
-        stds=get_scalar_data(["a", "b"], 1.0),
-    )
+    normalization_config = trivial_normalization(["a", "b"])
 
     def get_stepper_config(normalization_config: NetworkAndLossNormalizationConfig):
         return StepperConfig(
@@ -272,14 +235,8 @@ def test_train_on_batch_normalizer_changes_only_norm_data():
     )  # as std=1, mean=0, no change
     config = get_stepper_config(
         NetworkAndLossNormalizationConfig(
-            network=NormalizationConfig(
-                means=get_scalar_data(["a", "b"], 0.0),
-                stds=get_scalar_data(["a", "b"], 2.0),
-            ),
-            loss=NormalizationConfig(
-                means=get_scalar_data(["a", "b"], 0.0),
-                stds=get_scalar_data(["a", "b"], 3.0),
-            ),
+            network=trivial_normalization(["a", "b"], std=2.0),
+            loss=trivial_normalization(["a", "b"], std=3.0),
         )
     )
     stepper = _get_train_stepper(config, dataset_info, loss=StepLossConfig(type="MSE"))
@@ -396,12 +353,7 @@ def test_train_on_batch_crps_loss():
                     ),
                     in_names=["a", "b"],
                     out_names=["a", "b"],
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means=get_scalar_data(["a", "b"], 0.0),
-                            stds=get_scalar_data(["a", "b"], 1.0),
-                        ),
-                    ),
+                    normalization=trivial_network_and_loss_normalization(["a", "b"]),
                 )
             ),
         ),
@@ -446,12 +398,7 @@ def test_train_on_batch_optimize_last_step_only(optimize_last_step_only: bool):
                     ),
                     in_names=["a", "b"],
                     out_names=["a", "b"],
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means=get_scalar_data(["a", "b"], 0.0),
-                            stds=get_scalar_data(["a", "b"], 1.0),
-                        ),
-                    ),
+                    normalization=trivial_network_and_loss_normalization(["a", "b"]),
                 )
             ),
         ),
@@ -496,12 +443,7 @@ def test_per_channel_losses_bounded_by_accumulated_loss():
                     ),
                     in_names=["a", "b"],
                     out_names=["a", "b"],
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means=get_scalar_data(["a", "b"], 0.0),
-                            stds=get_scalar_data(["a", "b"], 1.0),
-                        ),
-                    ),
+                    normalization=trivial_network_and_loss_normalization(["a", "b"]),
                 )
             ),
         ),
@@ -564,12 +506,7 @@ def test_reloaded_stepper_gives_same_prediction():
                     ),
                     in_names=["a", "b"],
                     out_names=["a", "b"],
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means=get_scalar_data(["a", "b"], 0.0),
-                            stds=get_scalar_data(["a", "b"], 1.0),
-                        ),
-                    ),
+                    normalization=trivial_network_and_loss_normalization(["a", "b"]),
                 )
             ),
         ),
@@ -683,11 +620,8 @@ def _setup_and_train_on_batch(
                     builder=ModuleSelector(type="prebuilt", config={"module": module}),
                     in_names=in_names,
                     out_names=out_names,
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means=get_scalar_data(set(in_names + out_names), 0.0),
-                            stds=get_scalar_data(set(in_names + out_names), 1.0),
-                        ),
+                    normalization=trivial_network_and_loss_normalization(
+                        set(in_names + out_names)
                     ),
                     ocean=ocean_config,
                     **stepper_config_kwargs,
@@ -730,11 +664,8 @@ def test_train_on_batch_requires_epoch(has_epoch: bool, uses_scheduling: bool):
                     builder=ModuleSelector(type="prebuilt", config={"module": module}),
                     in_names=in_names,
                     out_names=out_names,
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means=get_scalar_data(set(in_names + out_names), 0.0),
-                            stds=get_scalar_data(set(in_names + out_names), 1.0),
-                        ),
+                    normalization=trivial_network_and_loss_normalization(
+                        set(in_names + out_names)
                     ),
                 )
             ),
@@ -950,12 +881,7 @@ def test_stepper_corrector(
                     ),
                     in_names=list(data.keys()),
                     out_names=list(data.keys()),
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means={key: 0.0 for key in data.keys()},
-                            stds={key: 1.0 for key in data.keys()},
-                        ),
-                    ),
+                    normalization=trivial_network_and_loss_normalization(data.keys()),
                     corrector=corrector_config,
                 )
             ),
@@ -1092,11 +1018,8 @@ def _get_stepper_config(
                     builder=ModuleSelector(type="prebuilt", config=module_config),
                     in_names=in_names,
                     out_names=out_names,
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means=get_scalar_data(set(in_names + out_names), norm_mean),
-                            stds=get_scalar_data(set(in_names + out_names), 1.0),
-                        ),
+                    normalization=trivial_network_and_loss_normalization(
+                        set(in_names + out_names), mean=norm_mean
                     ),
                     ocean=ocean_config,
                     **kwargs,
@@ -1430,7 +1353,7 @@ def test_prescribed_prognostic_config_validation_raises():
             ),
             in_names=["a"],
             out_names=["a"],
-            normalization=NormalizationConfig(means={"a": 0.0}, stds={"a": 1.0}),
+            normalization=trivial_normalization(["a"]),
             prescribed_prognostic_names=["b"],
         )
     assert "prescribed_prognostic_name" in str(err.value)
@@ -1448,12 +1371,7 @@ def test_get_forcing_window_data_requirements_includes_prescribed_names():
                     ),
                     in_names=["a", "b"],
                     out_names=["a"],
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means={"a": 0.0, "b": 0.0},
-                            stds={"a": 1.0, "b": 1.0},
-                        ),
-                    ),
+                    normalization=trivial_network_and_loss_normalization(["a", "b"]),
                     prescribed_prognostic_names=["a"],
                 )
             ),
@@ -1900,11 +1818,8 @@ def test_load_stepper_does_not_double_buffer_on_gpu(tmp_path: pathlib.Path):
                         ),
                         in_names=in_names,
                         out_names=out_names,
-                        normalization=NetworkAndLossNormalizationConfig(
-                            network=NormalizationConfig(
-                                means={n: 0.0 for n in in_names + out_names},
-                                stds={n: 1.0 for n in in_names + out_names},
-                            ),
+                        normalization=trivial_network_and_loss_normalization(
+                            in_names + out_names
                         ),
                     ),
                 ),
@@ -1984,11 +1899,8 @@ def get_regression_stepper_and_data(
                     ),
                     in_names=in_names,
                     out_names=out_names,
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means={n: 0.1 for n in all_names},
-                            stds={n: 1.1 for n in all_names},
-                        ),
+                    normalization=trivial_network_and_loss_normalization(
+                        all_names, mean=0.1, std=1.1
                     ),
                     ocean=None,
                 )
@@ -2154,12 +2066,7 @@ def _get_stepper_with_input_masking(
                     ),
                     in_names=["a"],
                     out_names=["a"],
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means={"a": 0.0},
-                            stds={"a": 1.0},
-                        ),
-                    ),
+                    normalization=trivial_network_and_loss_normalization(["a"]),
                 )
             ),
         ),
@@ -2322,12 +2229,7 @@ def _get_ocean_stepper(
                     ),
                     in_names=in_names,
                     out_names=out_names,
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means={name: 0.0 for name in all_names},
-                            stds={name: 1.0 for name in all_names},
-                        ),
-                    ),
+                    normalization=trivial_network_and_loss_normalization(all_names),
                     corrector=CorrectorSelector("ocean_corrector", {}),
                     next_step_forcing_names=next_step_forcing_names,
                 )
