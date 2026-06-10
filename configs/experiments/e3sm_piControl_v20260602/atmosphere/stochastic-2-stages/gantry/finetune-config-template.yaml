@@ -1,0 +1,167 @@
+experiment_dir: /results
+save_checkpoint: true
+validate_using_ema: true
+evaluate_before_training: true
+ema:
+  decay: 0.999
+max_epochs: 30
+inference:
+  - name: inference
+    weight: 1.0
+    n_forward_steps: 17520
+    forward_steps_in_memory: 20
+    loader:
+      start_indices:
+        times:
+        - '0425-01-03T12:00:00'
+        - '0436-01-03T12:00:00'
+        - '0447-01-03T12:00:00'
+        - '0458-01-03T12:00:00'
+        - '0469-01-03T12:00:00'
+        - '0480-01-03T12:00:00'
+        - '0491-01-03T12:00:00'
+        - '0502-01-03T12:00:00'
+      dataset:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-sea_ice.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H.zarr
+          engine: zarr
+      num_data_workers: 2
+    aggregator:
+      log_histograms: true
+  - name: 12r_test
+    weight: 0.0
+    epochs:
+      start: 0
+      step: 5
+    n_forward_steps: 17520
+    forward_steps_in_memory: 20
+    loader:
+      start_indices:
+        times:
+        - '0515-01-03T12:00:00'
+        - '0515-06-08T12:00:00'
+        - '0515-11-12T12:00:00'
+        - '0516-04-17T12:00:00'
+        - '0516-09-21T12:00:00'
+        - '0517-02-24T12:00:00'
+        - '0517-07-31T12:00:00'
+        - '0518-01-03T12:00:00'
+      dataset:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-sea_ice.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H.zarr
+          engine: zarr
+      num_data_workers: 2
+    aggregator:
+      log_histograms: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-eamv3
+  entity: ai2cm
+train_loader:
+  batch_size: 8
+  num_data_workers: 2
+  time_buffer: 10
+  prefetch_factor: 1
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-sea_ice.zarr
+      engine: zarr
+      subset:
+        start_time: '0425-01-03T12:00:00'
+        stop_time: '0515-01-01T00:00:00'
+    - data_path: /climate-default
+      file_pattern: 2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H.zarr
+      engine: zarr
+      subset:
+        start_time: '0425-01-03T12:00:00'
+        stop_time: '0515-01-01T00:00:00'
+validation:
+  loader:
+    batch_size: 32
+    num_data_workers: 2
+    time_buffer: 10
+    prefetch_factor: 1
+    dataset:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-sea_ice.zarr
+        engine: zarr
+        subset:
+          start_time: '0515-01-01T06:00:00'
+          stop_time: '0520-01-01T00:00:00'
+      - data_path: /climate-default
+        file_pattern: 2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H.zarr
+        engine: zarr
+        subset:
+          start_time: '0515-01-01T06:00:00'
+          stop_time: '0520-01-01T00:00:00'
+optimization:
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: FusedAdam
+  use_gradient_accumulation: true
+  kwargs:
+    weight_decay: 0.01
+stepper_training:
+  parameter_init:
+    weights_path: /ckpt.tar
+  n_ensemble: 2
+  n_forward_steps:
+    outcomes:
+      - steps: 1
+        probability: 0.6
+      - steps: 2
+        probability: 0.2
+      - steps: 4
+        probability: 0.1
+      - steps: 12
+        probability: 0.05
+      - steps: 20
+        probability: 0.05
+  optimize_last_step_only: true
+  loss:
+    type: EnsembleLoss
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
+stepper:
+  step:
+    type: single_module
+    config:
+      residual_prediction: false
+      builder:
+        type: NoiseConditionedSFNO
+        config:
+          embed_dim: 512
+          noise_embed_dim: 64
+          noise_type: isotropic
+          filter_type: linear
+          use_mlp: true
+          num_layers: 8
+          operator_type: dhconv
+          separable: false
+          spectral_layers: 3
+          spectral_transform: sht
+          affine_norms: true
+      corrector:
+        total_energy_budget_correction:
+          method: constant_temperature
+          constant_unaccounted_heating: 0.09
+      normalization:
+        network:
+          global_means_path: /atmos_stats/centering.nc
+          global_stds_path: /atmos_stats/scaling-full-field.nc
+        residual:
+          global_means_path: /atmos_stats/centering.nc
+          global_stds_path: /atmos_stats/scaling-residual.nc
