@@ -312,6 +312,8 @@ def main() -> None:
     # Patch FastGen's to_wandb to handle non-RGB tensors (ACE outputs C != 3).
     # WandbCallback.to_wandb asserts C == 3; we replicate the first channel to
     # RGB so sample logging works regardless of the number of output channels.
+    from omegaconf import DictConfig
+
     import fastgen.callbacks.wandb as _wandb_mod
     import fastgen.utils.distributed.ddp as _fastgen_ddp
     import fastgen.utils.logging_utils as logger
@@ -322,7 +324,6 @@ def main() -> None:
     from fastgen.utils.distributed import clean_up, is_rank0, synchronize, world_size
     from fastgen.utils.io_utils import set_env_vars
     from fastgen.utils.scripts import set_cuda_backend
-    from omegaconf import DictConfig
 
     _orig_to_wandb = _wandb_mod.to_wandb
 
@@ -405,7 +406,34 @@ def main() -> None:
     teacher = AceDiffusionTeacher(teacher_model)
 
     # ------------------------------------------------------------------
-    # 3b. Auto-configure the DMD2 discriminator from the teacher's UNet.
+    # 3b. Override input_shape channel count from the teacher.
+    #
+    #     The spike configs derive C_out from ACE_C_OUT, which must be set
+    #     manually and can disagree with the actual teacher (e.g. a MoE bundle
+    #     whose primary expert has fewer output channels than the full ensemble).
+    #     Overriding here after the teacher loads is the authoritative source.
+    # ------------------------------------------------------------------
+
+    _ref_model = (
+        teacher_model._primary
+        if isinstance(teacher_model, DenoisingMoEPredictor)
+        else teacher_model
+    )
+    c_out_teacher = len(_ref_model.out_packer.names)
+    c_out_config = config.model.input_shape[0]
+    if c_out_config != c_out_teacher:
+        logger.warning(
+            f"input_shape channel count ({c_out_config}) does not match "
+            f"teacher out_packer ({c_out_teacher}); overriding."
+        )
+    config.model.input_shape[0] = c_out_teacher
+    logger.info(
+        f"input_shape set to {list(config.model.input_shape)} "
+        f"(C_out={c_out_teacher} from teacher)"
+    )
+
+    # ------------------------------------------------------------------
+    # 3c. Auto-configure the DMD2 discriminator from the teacher's UNet.
     #
     #     The default Discriminator_EDM_CIFAR10_Config uses in_channels=256
     #     at all_res=[32,16,8], which won't match ACE's 512×512 UNet.  We
