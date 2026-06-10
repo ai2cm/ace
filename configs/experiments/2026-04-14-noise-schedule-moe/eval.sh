@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="eval-tmp2m-prate-eventss"
+JOB_NAME="eval-tmp2m-prate-events"
 #JOB_NAME="eval-global-trained-denoising-moe-events"
 
 CONFIG_FILENAME="eval-tmp2m-prate-events.yaml"

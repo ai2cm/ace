@@ -5,7 +5,7 @@ patch:
   composite_prediction: true
   coarse_horizontal_overlap: 1
 model:
-  checkpoint_path: /checkpoint/best.ckpt
+  checkpoint_path: /checkpoints/best.ckpt
 data:
   coarse:
   - merge:
