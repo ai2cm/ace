@@ -9,12 +9,19 @@ Ablation dimensions (fully crossed):
   - IID:      no suffix (masks shared across ensemble members, default),
               -iid (independent mask per ensemble member, nc-sfno only,
               requires masking to be active)
-
-CO2 rule: when a -co2 variant is generated, global_mean_co2 is added to
-in_names and next_step_forcing_names but is never masked.
+  - Noise:    no suffix (noise conditioning in layernorm enabled, nc-sfno only),
+              -nonoise (noise_embed_dim=0, noise conditioning disabled)
 
 IID rule: -iid variants are only generated for nc-sfno models with active
 masking (mask5, mask40). mask0-iid would be a no-op and is skipped.
+
+Noise rule: -nonoise variants are only generated for nc-sfno models (sfno has
+no noise conditioning to disable).
+
+Together, nc-sfno produces a 2x2 over (iid/non-iid) x (noise/nonoise).
+
+CO2 rule: when a -co2 variant is generated, global_mean_co2 is added to
+in_names and next_step_forcing_names but is never masked.
 
 All runs: 150 epochs, constant LR (no warmup or cooldown).
 Residual prediction is always off.
@@ -43,8 +50,6 @@ N_FORWARD_STEPS = [1, 2]
 
 # (name_suffix, input_dropout_config_or_None)
 MASK_CONFIGS: list[tuple[str, dict | None]] = [
-    ("mask40", {"kind": "uniform", "min_vars": 1, "max_vars": 40}),
-    ("mask5", {"kind": "uniform", "min_vars": 1, "max_vars": 5}),
     ("mask10", {"kind": "uniform", "min_vars": 1, "max_vars": 10}),
     ("mask0", None),
 ]
@@ -70,6 +75,7 @@ def _apply_common_settings(
     input_dropout: dict | None,
     co2: bool = False,
     iid: bool = False,
+    noise_conditioning: bool = True,
 ) -> None:
     if co2:
         _add_co2(step_cfg)
@@ -80,6 +86,8 @@ def _apply_common_settings(
         step_cfg["input_dropout"] = dropout_cfg
     else:
         step_cfg.pop("input_dropout", None)
+    if not noise_conditioning:
+        step_cfg["builder"]["config"]["noise_embed_dim"] = 0
     step_cfg["residual_prediction"] = False
     step_cfg["include_channel_mask_inputs"] = True
     if gmr_on:
@@ -158,9 +166,12 @@ def generate_configs(
     existing_only: bool = False,
     wandb_run_names: set[str] | None = None,
     iid_vals: list[bool] | None = None,
+    noise_conditioning_vals: list[bool] | None = None,
 ) -> None:
     if iid_vals is None:
         iid_vals = [False]
+    if noise_conditioning_vals is None:
+        noise_conditioning_vals = [True]
     for mask_suffix, input_dropout in MASK_CONFIGS:
         for gmr_on in GMR_VALS:
             for co2 in CO2_VALS:
@@ -168,25 +179,32 @@ def generate_configs(
                     for iid in iid_vals:
                         if iid and input_dropout is None:
                             continue  # mask0-iid would be a no-op
-                        cfg = copy.deepcopy(base)
-                        gmr_suffix = "gmron" if gmr_on else "gmroff"
-                        co2_suffix = "-co2" if co2 else ""
-                        iid_suffix = "-iid" if iid else ""
-                        name = (
-                            f"{stem}-{mask_suffix}-{gmr_suffix}"
-                            f"{co2_suffix}-steps{n_steps}{iid_suffix}"
-                        )
-                        out_path = HERE / f"{name}.yaml"
-                        step_cfg = cfg["stepper"]["step"]["config"]
-                        _apply_common_settings(
-                            step_cfg, gmr_on, input_dropout, co2=co2, iid=iid
-                        )
-                        cfg["stepper_training"]["n_forward_steps"] = n_steps
-                        loss_type = cfg["stepper_training"]["loss"]["type"]
-                        cfg["stepper_training"]["optimize_last_step_only"] = (
-                            loss_type == "EnsembleLoss"
-                        )
-                        _write_config(cfg, out_path, existing_only, wandb_run_names)
+                        for noise_conditioning in noise_conditioning_vals:
+                            cfg = copy.deepcopy(base)
+                            gmr_suffix = "gmron" if gmr_on else "gmroff"
+                            co2_suffix = "-co2" if co2 else ""
+                            iid_suffix = "-iid" if iid else ""
+                            noise_suffix = "-nonoise" if not noise_conditioning else ""
+                            name = (
+                                f"{stem}-{mask_suffix}-{gmr_suffix}"
+                                f"{co2_suffix}-steps{n_steps}{iid_suffix}{noise_suffix}"
+                            )
+                            out_path = HERE / f"{name}.yaml"
+                            step_cfg = cfg["stepper"]["step"]["config"]
+                            _apply_common_settings(
+                                step_cfg,
+                                gmr_on,
+                                input_dropout,
+                                co2=co2,
+                                iid=iid,
+                                noise_conditioning=noise_conditioning,
+                            )
+                            cfg["stepper_training"]["n_forward_steps"] = n_steps
+                            loss_type = cfg["stepper_training"]["loss"]["type"]
+                            cfg["stepper_training"]["optimize_last_step_only"] = (
+                                loss_type == "EnsembleLoss"
+                            )
+                            _write_config(cfg, out_path, existing_only, wandb_run_names)
 
 
 def main() -> None:
@@ -228,12 +246,14 @@ def main() -> None:
         with base_config.open() as f:
             base = yaml.safe_load(f)
         iid_vals = [False, True] if "nc-sfno" in stem else [False]
+        noise_conditioning_vals = [True, False] if "nc-sfno" in stem else [True]
         generate_configs(
             base,
             stem,
             existing_only=args.existing_only,
             wandb_run_names=wandb_run_names,
             iid_vals=iid_vals,
+            noise_conditioning_vals=noise_conditioning_vals,
         )
 
 

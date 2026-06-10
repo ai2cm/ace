@@ -50,11 +50,10 @@ def main() -> None:
     parser.add_argument(
         "--beaker-cluster",
         nargs="+",
-        default=["ai2/titan", "ai2/jupiter", "ai2/ceres", "ai2/saturn"],
+        default=["ai2/titan", "ai2/jupiter", "ai2/ceres"],
         metavar="CLUSTER",
         help=(
-            "Beaker cluster(s) to target (default: ai2/titan ai2/saturn "
-            "ai2/jupiter ai2/ceres)."
+            "Beaker cluster(s) to target (default: ai2/titan" "ai2/jupiter ai2/ceres)."
         ),
     )
     parser.add_argument(
