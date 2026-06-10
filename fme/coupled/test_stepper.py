@@ -6,14 +6,13 @@ from collections.abc import Iterable
 from typing import Literal
 from unittest.mock import Mock
 
-import numpy as np
 import pytest
 import torch
-import xarray as xr
 
 import fme
 from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.stepper import StepperConfig
+from fme.ace.testing import get_batch_data
 from fme.core.coordinates import (
     DepthCoordinate,
     HybridSigmaPressureCoordinate,
@@ -23,7 +22,6 @@ from fme.core.coordinates import (
 )
 from fme.core.dataset_info import DatasetInfo
 from fme.core.loss import StepLossConfig
-from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.registry.corrector import CorrectorSelector
@@ -31,6 +29,7 @@ from fme.core.registry.module import ModuleSelector
 from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
+from fme.core.testing import trivial_network_and_loss_normalization
 from fme.coupled.dataset_info import CoupledDatasetInfo
 
 from .data_loading.batch_data import (
@@ -74,12 +73,7 @@ ATMOS_STEPPER_CONFIG = StepperConfig(
                 ),
                 in_names=["a", "f"],
                 out_names=["a"],
-                normalization=NetworkAndLossNormalizationConfig(
-                    network=NormalizationConfig(
-                        means={"a": 0.0, "f": 0.0},
-                        stds={"a": 1.0, "f": 1.0},
-                    ),
-                ),
+                normalization=trivial_network_and_loss_normalization(["a", "f"]),
                 ocean=OceanConfig(
                     surface_temperature_name="a",
                     ocean_fraction_name="f",
@@ -100,12 +94,7 @@ OCEAN_STEPPER_CONFIG = StepperConfig(
                 ),
                 in_names=["sst"],
                 out_names=["sst"],
-                normalization=NetworkAndLossNormalizationConfig(
-                    network=NormalizationConfig(
-                        means={"sst": 0.0},
-                        stds={"sst": 1.0},
-                    ),
-                ),
+                normalization=trivial_network_and_loss_normalization(["sst"]),
             ),
         ),
     ),
@@ -215,11 +204,8 @@ def test_config_names(inputs, expectations):
                         ),
                         in_names=atmos_in,
                         out_names=atmos_out,
-                        normalization=NetworkAndLossNormalizationConfig(
-                            network=NormalizationConfig(
-                                means={"a_sfc_temp": 0.0},
-                                stds={"a_sfc_temp": 1.0},
-                            ),
+                        normalization=trivial_network_and_loss_normalization(
+                            ["a_sfc_temp"]
                         ),
                         ocean=OceanConfig(
                             surface_temperature_name="a_sfc_temp",
@@ -246,11 +232,8 @@ def test_config_names(inputs, expectations):
                         in_names=ocean_in,
                         out_names=ocean_out,
                         next_step_forcing_names=expectations.atmos_to_ocean_forcings,
-                        normalization=NetworkAndLossNormalizationConfig(
-                            network=NormalizationConfig(
-                                means={"o_sfc_temp": 0.0},
-                                stds={"o_sfc_temp": 1.0},
-                            ),
+                        normalization=trivial_network_and_loss_normalization(
+                            ["o_sfc_temp"]
                         ),
                     ),
                 ),
@@ -308,11 +291,8 @@ def test_config_names_diff_sfc_temp_names(inputs, expectations):
                         ),
                         in_names=atmos_in,
                         out_names=atmos_out,
-                        normalization=NetworkAndLossNormalizationConfig(
-                            network=NormalizationConfig(
-                                means={"atmos_surface_temp": 0.0},
-                                stds={"atmos_surface_temp": 1.0},
-                            ),
+                        normalization=trivial_network_and_loss_normalization(
+                            ["atmos_surface_temp"]
                         ),
                         ocean=OceanConfig(
                             surface_temperature_name="atmos_surface_temp",
@@ -339,11 +319,8 @@ def test_config_names_diff_sfc_temp_names(inputs, expectations):
                         in_names=ocean_in,
                         out_names=ocean_out,
                         next_step_forcing_names=expectations.atmos_to_ocean_forcings,
-                        normalization=NetworkAndLossNormalizationConfig(
-                            network=NormalizationConfig(
-                                means={"ocean_surface_temp": 0.0},
-                                stds={"ocean_surface_temp": 1.0},
-                            ),
+                        normalization=trivial_network_and_loss_normalization(
+                            ["ocean_surface_temp"]
                         ),
                     ),
                 ),
@@ -459,11 +436,8 @@ def test_config_init_atmos_stepper_with_slab_ocean_error():
                         ),
                         in_names=["a", "f"],
                         out_names=["a"],
-                        normalization=NetworkAndLossNormalizationConfig(
-                            network=NormalizationConfig(
-                                means={"a": 0.0, "f": 0.0},
-                                stds={"a": 1.0, "f": 1.0},
-                            ),
+                        normalization=trivial_network_and_loss_normalization(
+                            ["a", "f"]
                         ),
                         ocean=OceanConfig(
                             surface_temperature_name="a",
@@ -544,11 +518,8 @@ def test_config_missing_next_step_forcings_error():
                         in_names=["sst", "a", "b"],
                         out_names=["sst"],
                         next_step_forcing_names=["b"],
-                        normalization=NetworkAndLossNormalizationConfig(
-                            network=NormalizationConfig(
-                                means={"sst": 0.0, "a": 0.0, "b": 0.0},
-                                stds={"sst": 1.0, "a": 1.0, "b": 1.0},
-                            ),
+                        normalization=trivial_network_and_loss_normalization(
+                            ["sst", "a", "b"]
                         ),
                     ),
                 ),
@@ -573,11 +544,8 @@ def test_config_ocean_diag_to_atmos_forcing_error():
                         ),
                         in_names=["a_sfc", "o_diag", "o_frac"],
                         out_names=["a_sfc", "a_diag"],
-                        normalization=NetworkAndLossNormalizationConfig(
-                            network=NormalizationConfig(
-                                means={"a_sfc": 0.0, "a_diag": 0.0},
-                                stds={"a_sfc": 1.0, "a_diag": 1.0},
-                            ),
+                        normalization=trivial_network_and_loss_normalization(
+                            ["a_sfc", "a_diag"]
                         ),
                         ocean=OceanConfig(
                             surface_temperature_name="a_sfc",
@@ -602,11 +570,8 @@ def test_config_ocean_diag_to_atmos_forcing_error():
                         in_names=["sst", "a_diag"],
                         out_names=["sst", "o_diag"],
                         next_step_forcing_names=["a_diag"],
-                        normalization=NetworkAndLossNormalizationConfig(
-                            network=NormalizationConfig(
-                                means={"sst": 0.0, "a_diag": 0.0},
-                                stds={"sst": 1.0, "a_diag": 1.0},
-                            ),
+                        normalization=trivial_network_and_loss_normalization(
+                            ["sst", "a_diag"]
                         ),
                     ),
                 ),
@@ -1131,11 +1096,13 @@ SphericalData = namedtuple(
 def get_data(
     names: Iterable[str], n_samples, n_time, realm: Literal["atmosphere", "ocean"]
 ) -> SphericalData:
-    data_dict = {}
-    for name in names:
-        data_dict[name] = torch.rand(
-            n_samples, n_time, N_LAT, N_LON, device=fme.get_device()
-        )
+    data = get_batch_data(
+        names,
+        n_samples,
+        n_time,
+        img_shape=(N_LAT, N_LON),
+        horizontal_dims=["lat", "lon"],
+    )
     lats = torch.linspace(-89.5, 89.5, N_LAT)
     horizontal_coords = LatLonCoordinates(lat=lats, lon=torch.linspace(0, 360, N_LON))
     vertical_coord: VerticalCoordinate
@@ -1146,15 +1113,6 @@ def get_data(
         vertical_coord = DepthCoordinate(
             torch.arange(NZ), torch.ones(N_LAT, N_LON, NZ - 1)
         ).to(fme.get_device())
-    data = BatchData.new_on_device(
-        data=data_dict,
-        time=xr.DataArray(
-            np.zeros((n_samples, n_time)),
-            dims=["sample", "time"],
-        ),
-        labels=None,
-        horizontal_dims=["lat", "lon"],
-    )
     return SphericalData(data, horizontal_coords, vertical_coord)
 
 
@@ -1240,11 +1198,8 @@ def get_stepper_config(
                             builder=atmosphere_builder,
                             in_names=atmosphere_in_names,
                             out_names=atmosphere_out_names,
-                            normalization=NetworkAndLossNormalizationConfig(
-                                network=NormalizationConfig(
-                                    means={name: 0.0 for name in atmos_norm_names},
-                                    stds={name: 1.0 for name in atmos_norm_names},
-                                ),
+                            normalization=trivial_network_and_loss_normalization(
+                                atmos_norm_names
                             ),
                             ocean=OceanConfig(
                                 surface_temperature_name=sfc_temp_name_in_atmosphere_data,
@@ -1266,11 +1221,8 @@ def get_stepper_config(
                             in_names=ocean_in_names,
                             out_names=ocean_out_names,
                             next_step_forcing_names=next_step_forcing_names,
-                            normalization=NetworkAndLossNormalizationConfig(
-                                network=NormalizationConfig(
-                                    means={name: 0.0 for name in ocean_norm_names},
-                                    stds={name: 1.0 for name in ocean_norm_names},
-                                ),
+                            normalization=trivial_network_and_loss_normalization(
+                                ocean_norm_names
                             ),
                             corrector=CorrectorSelector("ocean_corrector", {}),
                         ),
@@ -1802,15 +1754,8 @@ def test_reloaded_stepper_gives_same_prediction():
                             ),
                             in_names=["a", "a_sfc", "constant_mask"],
                             out_names=["a", "a_sfc"],
-                            normalization=NetworkAndLossNormalizationConfig(
-                                network=NormalizationConfig(
-                                    means={
-                                        "a": 0.0,
-                                        "a_sfc": 0.0,
-                                        "constant_mask": 0.0,
-                                    },
-                                    stds={"a": 1.0, "a_sfc": 1.0, "constant_mask": 1.0},
-                                ),
+                            normalization=trivial_network_and_loss_normalization(
+                                ["a", "a_sfc", "constant_mask"]
                             ),
                             ocean=OceanConfig(
                                 surface_temperature_name="a_sfc",
@@ -1834,11 +1779,8 @@ def test_reloaded_stepper_gives_same_prediction():
                             ),
                             in_names=["o", "o_sfc", "o_mask"],
                             out_names=["o", "o_sfc"],
-                            normalization=NetworkAndLossNormalizationConfig(
-                                network=NormalizationConfig(
-                                    means={"o": 0.0, "o_sfc": 0.0, "o_mask": 0.0},
-                                    stds={"o": 1.0, "o_sfc": 1.0, "o_mask": 1.0},
-                                ),
+                            normalization=trivial_network_and_loss_normalization(
+                                ["o", "o_sfc", "o_mask"]
                             ),
                             corrector=CorrectorSelector("ocean_corrector", {}),
                         ),
