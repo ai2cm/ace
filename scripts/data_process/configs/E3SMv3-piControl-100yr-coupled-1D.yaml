@@ -1,0 +1,61 @@
+version: "2026-06-06"
+family_name: E3SMv3-piControl-105yr-coupled-1D
+output_directory: /pscratch/sd/e/elynnwu/fme-dataset
+
+coupled_datasets:
+  coupled_ts:
+    how: interpolate_sst
+  coupled_sea_surface:
+    timedelta: 24h
+    sst_threshold: 291.75
+    ocean_extra_masked_names: ["iceVolumeTotal", "iceThicknessMean"]
+    ocean_extra_fill_values:
+      uVelocityGeoCell: 0.0
+      vVelocityGeoCell: 0.0
+    surface_flux_window_avg:
+      window_timedelta: 24h
+      first_timestamp: "0425-01-01T00:00:00"
+      last_timestamp: "0531-01-01T00:00:00"
+      subset_names:
+        - FLUS
+        - FSUS
+        - FLDS
+        - FSDS
+        - LHFLX
+        - SHFLX
+        - surface_precipitation_rate
+        - frozen_precipitation_rate
+        - TAUX
+        - TAUY
+  coupled_sea_ice:
+    window_avg:
+      window_timedelta: 24h
+      first_timestamp: "0425-01-01T00:00:00"
+      shift_timestamps_to_avg_interval_midpoint: false
+    include_ts: true
+  output_writer:
+    n_dask_workers: 32
+  input_field_names:
+    atmosphere:
+      surface_temperature_name: TS
+      sea_ice_fraction_name: ICEFRAC
+      land_fraction_name: LANDFRAC
+      ocean_fraction_name: OCNFRAC
+    ocean:
+      hfds_name: surfaceHeatFluxTotal
+
+input_datasets:
+  climate_data_type: "E3SMV2"
+  atmosphere:
+    zarr_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H.zarr
+    time_chunk_size: 360
+    extra_fields:
+      names_and_prefixes: ["ak_", "bk_"]
+  ocean:
+    zarr_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-06-06-E3SMv3-piControl-ocean-105yr-1D.zarr
+    time_chunk_size: 100
+    extra_fields:
+      names_and_prefixes: ["idepth_", "mask_"]
+  stats:
+    atmosphere_dir: /pscratch/sd/e/elynnwu/fme-dataset/2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H-stats
+    ocean_dir: /pscratch/sd/e/elynnwu/fme-dataset/2026-06-06-E3SMv3-piControl-ocean-105yr-1D-stats
