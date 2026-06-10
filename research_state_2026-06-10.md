@@ -2,13 +2,15 @@
 
 A synthesis of the `experiment/2026-06-05-aimip-like` branch, the
 `scripts/blowup_investigation` tooling and its accumulated outputs, recent
-feature implementations, and research notes in the repo. (Round 3:
-saturation-normalized humidity split into its own avenue with a
-representation analysis; the Jacobian metric reframed as an inline evaluation
-probe rather than an aggregator; probes redesigned to run from saved rollout
-snapshots, eliminating the need for any new multi-year rollout. Code-reading
-items — Avenue 1 implementation, Avenue 3b/4 attachment points — deferred to
-the next round.)
+feature implementations, and research notes in the repo. (Round 4: probes
+1, 2, 3, 5, 6 executed on the existing checkpoint — results inline in the
+probe and avenue sections. Headline updates: the saturation bound cannot
+prevent onset; the neutral subspace is the top-of-atmosphere moisture block
+with one-sided (moistening) neutrality-to-amplification at drifted states;
+and the runaway is driven by a small systematic per-step bias, not noise
+accumulation — which reframes the Avenue 1 design around bias·τ rather than
+the OU noise floor. Code-reading items — Avenue 1 implementation, Avenue
+3b/4 attachment points — still deferred.)
 
 ## Current state of the research
 
@@ -552,6 +554,112 @@ acceptance test matters: it front-loads that verdict.
    or temperature needs its own restoring force trained through the
    appended-mean channel. Same harness and runs as probe 2.
 
+### Probe 2+6 results (2026-06-10, `probe26_jacobian_spectrum.py`)
+
+Full 38×38 global-mean Jacobian, seeds {101, 202, 303} controlled per forward
+pass, per-σ units, at snapshots 200 / 1500 / 2050 of the `run_best_ckpt`
+rollout (351 forwards, ~13 min on the T4). Seed spread is ±0.001–0.005 on
+every reported entry, so the seed control works and the numbers below are
+real. Full output in `output/probe26_jacobian_spectrum/`.
+
+- **The neutral-mode structure is a clean altitude hierarchy.** Diagonals:
+  gm q0 at 0.996–0.998 (implied τ ≈ 250–500 days — effectively neutral on
+  rollout timescales), T0 and u0 at ~0.97 (τ ≈ 30–40 d), then q1/T1/u1 at
+  0.85–0.93, decaying with depth. The weakly-damped subspace is specifically
+  the top-of-atmosphere block, consistent with those levels being least
+  anchored by the prescribed SST.
+- **Eigenmodes at or slightly above 1, persistently.** Top |λ| =
+  1.000–1.003 at every snapshot (outside seed spread), and the eigenvector is
+  moisture-dominated: q0 mixed with q1, lower-stratospheric T, and PRESsfc.
+  PRESsfc participates *by design* — dry-air conservation makes gm surface
+  pressure track total column water — and its own diagonal (1.001) is the
+  designed-neutral entry the Avenue 4 metric must whitelist. Near onset (step
+  2050) the spectrum crowds toward 1: a new T0/q1/T1 mode appears at 0.992.
+- **The linear q0↔T0 coupling is tiny** (|Jn| ≤ 0.013 both directions, vs.
+  intra-tropospheric couplings of 0.2–0.34 like q5←T4). At linear order the
+  warming–moistening runaway is *not* a two-way global-mean feedback — q0
+  drifts on its own near-unit persistence, and the temperature blowup follows
+  through other channels once q0 is far out of distribution. This supports
+  targeting the Avenue 1 augmentation at the moisture block (q0, q1) first,
+  and is consistent with the clamp interventions where bounding gm q0 alone
+  stabilized everything.
+- **τ_q0 shrinks as the state drifts**: 499 d (step 200) → 430 d (1500) →
+  254 d (2050). The weak restoring force erodes off-manifold, which is the
+  measured version of "restoring forces that exist near data can vanish
+  off-manifold" — and a reason the Avenue 1 perturbation training should
+  include moderately drifted states, not just data states.
+- Confirmed: the huge off-diagonals in the earlier uncontrolled-noise
+  timeseries were noise artifacts; with seed control nothing exceeds |0.34|
+  per σ.
+- **Upstream finding worth a fix or at least an issue**: the standalone
+  inference path double-expands ensembles. `get_initial_condition(n_ensemble=N)`
+  tiles the IC to N samples *and* sets the `n_ensemble` flag;
+  `get_forcing_data` then derives one forcing start-index per tiled sample
+  (forcing: N samples, `n_ensemble=1`); `predict_paired` sees
+  `forcing.n_ensemble == 1` with state `n_ensemble == N` and broadcasts the
+  already-tiled forcing again → N² samples vs. N, a shape error. Inline
+  training inference uses a different evaluator path and is unaffected, which
+  is why `n_ensemble_per_ic > 1` works there. Probe 1+3 works around it by
+  building forcing from a single-sample IC.
+
+### Probe 1+3 results (2026-06-10, `probe13_response_and_noise.py`)
+
+One batched 32-member, 90-day rollout per snapshot (8 unperturbed replicates
++ ±{0.25, 0.5, 1, 2}σ uniform displacements of gm q0 × 3 replicates each;
+~4 min per snapshot on the T4). Full output in
+`output/probe13_specific_total_water_0_step{200,1500,2050}/`.
+
+**Probe 1 — the response is one-sided.** Retained fraction of the imposed
+gm q0 displacement after 90 days:
+
+| amplitude | step 200 | step 1500 | step 2050 |
+|---|---|---|---|
+| −2σ | 0.72 | 0.39 | 0.42 |
+| −1σ | 0.91 | 0.52 | 0.51 |
+| +0.5σ | 0.86 | 1.01 | 1.07 |
+| +1σ | 0.82 | 1.03 | 1.03 |
+| +2σ | 0.61 | 0.88 | 0.97 |
+
+On-manifold (step 200) everything relaxes weakly and roughly symmetrically
+(τ ~ 200–600 d). At drifted states, *drying* displacements relax on τ ≈
+100–150 d, but *moistening* displacements of +0.25 to +1σ are retained at
+≥ 1.0 — neutral to weakly amplifying. The dangerous direction has no
+restoring force at all, and the finite-amplitude behavior is worse than the
+infinitesimal Jacobian suggested. For Avenue 1 sizing: σ_δ ≈ 1σ covers the
+amplifying zone, and the asymmetry justifies sampling both signs rather than
+only moistening.
+
+**Probe 3 — noise injection is too weak to explain the drift; the runaway is
+bias-driven.** Measured σ_step for gm q0 is (1.5–3)×10⁻³ σ/√day. A pure
+neutral random walk at that rate accumulates only ~0.14σ over the ~2100 days
+to onset — an order of magnitude short of the observed ≥1σ drift. But the
+unperturbed ensemble mean itself drifts at ~1–2 mσ/day (highly significant
+against the ensemble s.e.m. of ~0.005σ), and a deterministic bias b
+integrated against a weak restoring time τ equilibrates at b·τ ≈ 0.4–0.9σ
+for τ ≈ 430 d — exactly onset scale — with no equilibrium at all on the
+neutral-to-amplifying moist side. So the mechanism is: **a small systematic
+per-step bias in gm q0, unchecked (and at drifted states slightly amplified)
+by the near-unit persistence**, not stochastic accumulation. Caveat: 90-day
+windows confound secular bias with the seasonal cycle of the global means
+(u0 shows +6 mσ/day at the February-start snapshot, likely seasonal); the
+cheap refinement is comparing against ERA5's gm seasonal trajectory over the
+same dates, or a 365-day unperturbed ensemble.
+
+**Implications for Avenue 1 (and the τ tension).** The stability condition
+is now bias-dominated: the trained restoring time must satisfy
+b·τ ≪ envelope, i.e. τ ≲ 50–100 d for the measured b — much shorter than the
+physically-justifiable months-to-years relaxation of stratospheric water
+vapor. Three ways to resolve the tension, complementary: (1) attack the bias
+itself — it is exactly what tendency regularization was meant to suppress,
+yet this checkpoint trains with tend-reg 0.05 and the bias persists, so
+diagnosing why (does the penalty see the *inference-time* bias at all, since
+training is 1-step?) is now a first-class question; (2) accept a
+shorter-than-physical τ for q0 specifically, arguing the stratospheric
+column's *entry* value is externally controlled in reality; (3) relax toward
+the seasonal climatology rather than a fixed value, so the augmentation
+doesn't fight the annual cycle. The probe numbers make this a concrete
+design discussion rather than a guess.
+
 ## Development workflow for code changes
 
 General procedure for changes coming out of this work: each feature gets its
@@ -564,22 +672,36 @@ merged only if it's something we'll continue using.
 
 ## Suggested sequencing
 
-Everything below is sub-day on a single GPU; nothing waits on a long rollout.
+Probes 1, 2, 3, 5, 6 are **done** (results above; the probe scripts used
+inline seeding rather than waiting on the `fork_rng` utility, which remains
+the right shape for the productionized Avenue 4 task). Status and what they
+resolved:
 
-1. **`fork_rng` utility** in `fme.core.rand` — small, unblocks probes 2/6 and
-   the Avenue 4 probe task.
-2. **Probe 5** (free; gates the Avenue 3 corrector) and **probes 2+6
-   together** (same harness; full spectrum + trustworthy cross terms; doubles
-   as the Avenue 4 prototype).
-3. **Probe 3** (batched noise-injection ensemble) → σ_step per mode.
-4. **Probe 1** (batched amplitude ladders at 3 rollout stages) → σ_δ, τ,
-   basin boundary, stage-dependence.
-5. **Probe 4** if probe 2's results suggest the undamped direction has
-   spatial structure worth resolving.
+- Probe 5 → the saturation-bound corrector cannot prevent onset; demoted to
+  a possible cascade-phase backstop.
+- Probes 2+6 → neutral subspace = top-of-atmosphere moisture block; q0↔T0
+  linear coupling negligible; PRESsfc is the designed-neutral entry to
+  whitelist; τ_q0 erodes off-manifold.
+- Probes 1+3 → response is one-sided (moistening neutral-to-amplifying at
+  drifted states); runaway is bias-driven (b ≈ 1–2 mσ/day) rather than
+  noise-driven; Avenue 1 needs τ ≲ 50–100 d or a smaller b.
+- Probe 4 (spatial structure) — still pending; worth running before
+  finalizing the Avenue 1 perturbation pattern, since a uniform offset may
+  not match the actual undamped direction.
 
-In parallel: the qsat-scaling residual run (Avenue 2) as a control. Then
-implement the Avenue 1 perturbation augmentation with the probe-derived
-numbers (σ_δ, τ, mode set, acceptance threshold) and the Avenue 4 probe as
-its acceptance test, with the saturation bound (Avenue 3) as a cheap backstop
-if probe 5 says it binds, and the Avenue 3b input-channel variant as the
-cheapest representation experiment alongside.
+Next steps, in order:
+
+1. **Resolve the bias question**: separate secular bias from the seasonal
+   cycle (compare unperturbed-ensemble gm trajectories against ERA5's over
+   the same dates — pure post-processing of probe 1+3 output plus the staged
+   data), and diagnose why tendency regularization at 0.05 doesn't suppress
+   the inference-time bias.
+2. **Probe 4** (uniform vs. patterned displacement, short runs from
+   snapshots).
+3. **Code round** (per the workflow section, each as a PR branch from
+   `main`): Avenue 1 perturbation augmentation in `SingleModuleStep` (config
+   dataclass design pending the code-reading round), the Avenue 4 probe task
+   + `fork_rng`, the Avenue 3b input-channel variant, and a `fix/` PR for the
+   inference ensemble double-broadcast bug found by probe 1+3.
+4. In parallel: the qsat-scaling residual run (Avenue 2) as a control, run
+   through the same probe harness when it lands.

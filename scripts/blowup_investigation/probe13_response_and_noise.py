@@ -84,7 +84,6 @@ def main():
     config_data["n_forward_steps"] = args.days
     config_data["forward_steps_in_memory"] = 1
     config_data["experiment_dir"] = "./output/probe13_tmp"
-    config_data["n_ensemble_per_ic"] = n_members
     config_data["initial_condition"]["start_indices"]["times"] = [
         snap_time.strftime("%Y-%m-%dT%H:%M:%S")
     ]
@@ -97,11 +96,17 @@ def main():
     req = stepper_config.get_forcing_window_data_requirements(
         n_forward_steps=config.forward_steps_in_memory
     )
+    # The forcing must be built from a single-sample IC: get_forcing_data
+    # derives one forcing start-index per IC *sample*, so a pre-broadcast IC
+    # (n_ensemble members tiled into the sample dim, n_ensemble flag set)
+    # yields forcing with n members but n_ensemble=1, which predict_paired
+    # then broadcasts a second time (n^2 samples). With a single-sample IC,
+    # predict_paired's forcing broadcast performs the one expansion needed.
     ic = get_initial_condition(
         config.initial_condition.get_dataset(),
         stepper_config.prognostic_names,
         labels=config.labels,
-        n_ensemble=config.n_ensemble_per_ic,
+        n_ensemble=1,
     )
     stepper = config.load_stepper()
     stepper.set_eval()
@@ -119,7 +124,7 @@ def main():
     means, stds = load_norm_stats(CKPT)
     std_v = float(stds[args.var])
 
-    ic_bd = data.initial_condition.as_batch_data()
+    ic_bd = data.initial_condition.as_batch_data().broadcast_ensemble(n_members)
     device = next(iter(ic_bd.data.values())).device
     nlat = ic_bd.data[prog_names[0]].shape[-2]
     w = area_weights(nlat, device)
