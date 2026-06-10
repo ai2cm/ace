@@ -2,10 +2,13 @@
 
 A synthesis of the `experiment/2026-06-05-aimip-like` branch, the
 `scripts/blowup_investigation` tooling and its accumulated outputs, recent
-feature implementations, and research notes in the repo. (Round 2: expanded
-with a concrete training-time procedure, corrected scope on the qsat-scaling
-runs, alternative physical constraints on moisture, metric design answers, and
-a proposed set of cheap checkpoint probes.)
+feature implementations, and research notes in the repo. (Round 3:
+saturation-normalized humidity split into its own avenue with a
+representation analysis; the Jacobian metric reframed as an inline evaluation
+probe rather than an aggregator; probes redesigned to run from saved rollout
+snapshots, eliminating the need for any new multi-year rollout. Code-reading
+items — Avenue 1 implementation, Avenue 3b/4 attachment points — deferred to
+the next round.)
 
 ## Current state of the research
 
@@ -223,26 +226,130 @@ data:
 
 USER: Does the vapor pressure actually get anywhere close to exceeding saturation, even during blowup? Check as a diagnostic on the existing rollouts before planning out this feature.
 
-- **Saturation-normalized prediction space.** The thorough version: predict
-  upper-level moisture as q/qsat(T_input, p) — a *local, pointwise*
-  generalization of the global qsat scaling. The model's moisture variable
-  becomes RH-like, bounded ~[0, 1] and climate-invariant by construction, and
-  a neutral random walk in the normalized variable can no longer take q
-  itself out of physical range. Using input-step temperature for the
-  normalization avoids circularity with the predicted temperature. This is a
-  bigger change (touches normalization and checkpoint compatibility) but is
-  the same philosophy that already paid off twice (shared mean removal, qsat
-  scaling), taken to its limit.
+This is complementary to Avenue 1, not competing: the saturation bound caps
+the worst-case excursion; the perturbation augmentation removes the random
+walk that drives states toward it.
 
-Note these are complementary to Avenue 1, not competing: the saturation bound
-caps the worst-case excursion; the perturbation augmentation removes the
-random walk that drives states toward it.
+## Avenue 3b: saturation-normalized humidity representation
 
-USER: Saturation-normalized prediction space is a reasonable idea, split it into its own category since it's distinct from the saturation bound. It would be nice to be able to configure this to act only on q0, or to act on all levels of humidity, or to cherry-pick specific levels. Also, consider whether to use relative humidity q/qsat or humidity deficit q - qsat, and think about how this kind of representation of humidity might or might not make it harder to advect moisture (which would get bourne out by testing).
+Distinct from the saturation bound (a constraint clamped onto predictions),
+this is a *change of variables*: the model's humidity state becomes a
+saturation-relative quantity, the local pointwise generalization of the
+global qsat scaling. A neutral random walk in the transformed variable can no
+longer carry q itself out of physical range, because the physical range is
+built into the representation.
 
-A separate version of this that can be used together or on its own is to saturation-normalize the input space, either in addition to or in replacement of the non-saturation-normalized input.
+### Representation: q/qsat vs. q − qsat
 
-There's a considerable multiplication of configurations between input vs output, rh vs deficit, and per-level vs column-coherent, so the configuration dataclass should be designed to cleanly handle that combinatorial space without exploding in complexity. You can proceed to planning the code implementation for this - at what level does it live, and what does the configuration look like?
+**q/qsat (RH-like) is the right choice; the deficit fails the purpose on
+several counts.**
+
+- *Conditioning and climate-invariance.* q/qsat is dimensionless and O(1) at
+  every level, latitude, and climate — at cold upper levels both q and qsat
+  are tiny and their ratio stays well-conditioned. The deficit q − qsat
+  inherits qsat's own dynamic range: its natural magnitude spans orders of
+  magnitude from the warm boundary layer (~1e-2 kg/kg) to the cold upper
+  levels (~1e-6), which is exactly the problem normalization is supposed to
+  remove. A per-level std for the deficit would be dominated by warm regions,
+  leaving cold-region variations in the noise floor — the same failure mode
+  full-field q normalization already has at upper levels.
+- *Boundedness.* Reconstruction from RH is multiplicative, q = x·qsat, so
+  positivity is automatic given x ≥ 0 (the existing `force_positive`
+  machinery applied to the transformed variable). Reconstruction from the
+  deficit is additive, q = x + qsat, which does not preserve positivity and
+  leaves the lower side unbounded — a random walk in deficit space can still
+  walk q below zero or arbitrarily far down.
+- The deficit's one theoretical advantage — additivity, so advection acts
+  linearly on it — is mostly illusory because qsat varies in space, which
+  makes the deficit non-conserved under transport anyway (same issue as RH,
+  analyzed next).
+- One free choice within RH: do **not** hard-cap at 1. Total water includes
+  condensate, so values modestly above 1 are physical; cap behavior, if any,
+  belongs to the Avenue 3 bound (which becomes nearly free in this
+  representation — a clamp at α on the normalized variable).
+
+### Does it make advection harder?
+
+Yes, somewhat, and it's worth being explicit about the mechanism so the
+testing can target it. Outside condensation, q is approximately a conserved
+tracer: Dq/Dt ≈ 0, and the SFNO demonstrably learns this operation. RH is
+*not* conserved under transport: D(RH)/Dt = −RH·D(ln qsat)/Dt, so whenever
+air crosses a temperature gradient, plain moisture transport shows up in RH
+space as advection *plus* a source term ∝ RH·(u·∇ ln qsat). The network must
+learn an additional coupled wind–temperature term to represent what used to
+be linear. (That source term is real physics — it is why advection toward
+cold air makes clouds — but it is extra work for the model.)
+
+Implications:
+
+- The risk is concentrated where temperature advection is strong and moisture
+  advection dominates the budget: winter storm tracks, mid/lower troposphere.
+  It is smallest at the top level — where qsat gradients are precisely what
+  make q0's in-sample range so narrow, and where the neutral-mode problem
+  lives. So the per-level cherry-picking isn't just nice to have; the
+  sensible first experiment is RH-space prediction for q0 (perhaps q0–q1)
+  only, keeping the advection-dominated levels in q space.
+- There is a compensating effect to watch for: condensation/precipitation
+  thresholds at RH ≈ 1, so precipitation may be *easier* to predict from an
+  RH-space state.
+- How it would bear out in testing: day-1/day-5 RMSE for q, `PRATEsfc`, and
+  `tendency_of_total_water_path_due_to_advection`, with a regional breakdown
+  in strongly baroclinic regions, compared level-by-level against the q-space
+  control.
+
+USER: Let's make sure we can configure this to be per-level, so we could isolate it to just the q0 level. Maybe by allowing a wildcard in the name? But also make it straighforward to configure uniformly across q-levels (e.g. not require a list of items, one per level).
+
+### Input space vs. prediction space
+
+These are separable decisions with different jobs. *Prediction* space is
+where boundedness matters — it is the recurrent update that random-walks.
+*Input* space is feature engineering — giving the network a well-conditioned
+view of how close to saturation the air is. They compose freely, and the
+input side is cheap in a way the output side is not: input channels can be
+**redundant** (provide both q and q/qsat and let the network use either),
+while the prediction must be exactly one representation per variable to avoid
+reconstruction ambiguity. That makes "append RH input channels, keep q
+predictions" the cheapest first experiment of the whole avenue — no change to
+prediction semantics, normalization stats, or checkpoint compatibility logic
+— and it isolates whether saturation *information* alone helps before
+committing to the variable change.
+
+In all cases qsat should be computed from the input-step temperature at the
+same level (avoids circularity with predicted temperature) and the level
+pressure from `PRESsfc` plus the vertical coordinate; the Bolton helper
+already exists.
+
+### Configuration shape
+
+The combinatorial space is (which fields) × (rh | deficit) × (input |
+prediction | both), with the input option further splitting into replace vs.
+append. This stays flat as a list of entries with orthogonal knobs rather
+than a matrix of variants:
+
+```yaml
+saturation_normalization:
+  - names: [specific_total_water_0, specific_total_water_1]
+    representation: rh        # rh | deficit
+    prediction: true          # transform the prediction for these fields
+    input: append             # none | replace | append
+```
+
+USER: Based on your reasoning earlier, let's remove the deficit option for now, and focus on RH. That means the representation key can be dropped.
+
+Per-level cherry-picking is just the explicit `names` list (consistent with
+how `qsat_scaled_names` and `force_positive_names` already work — no implicit
+"all levels"). Validation in `__post_init__`: a field may appear in at most
+one entry; overlap with `qsat_scaled_names` is an error (the global and local
+scalings would double-count); each entry must do something (`prediction:
+true` or `input != none`). With residual prediction, the residual is taken in
+the transformed variable — which is the point: the random walk happens in the
+bounded representation.
+
+USER: You can proceed to planning the code implementation for this - at what level does it live, and what does the configuration look like?
+
+(Code-reading round: settle the attachment point — where this transform
+lives relative to normalization, `global_mean_removal`, and the corrector —
+and reconcile the config sketch above with the existing dataclass structure.)
 
 ## Avenue 4: neutral-mode spectrum as a metric — design answers
 
@@ -280,7 +387,61 @@ design inputs need a short round of checkpoint probing first:
 That probing is shared work with the probes below, so the metric falls out of
 them nearly for free.
 
-USER: OK, this seems reasonable so long as we're able to come up with a way to implement it without adding too much complexity to the codebase. I'm a little concerned that this requires changing the way the model does forward passes during validation - it's not simply another aggregator plugged into the existing aggregator system. The noise control requirement is also more complexity. Are you able to come up with a way to implement this where each of these complexities feels "natural" for the responsibility it lives on, instead of feeling specific to this jacobian aggregator that lives at a different level of complexity? Iterate on the code-design of this, but it's not ready for a fully fleshed out configuration and implementation plan until we've worked through these design details.
+### Code-design iteration: where the complexities naturally live
+
+The concern is right: this is not an aggregator, and forcing it to be one is
+what would make it feel bolted-on. Two reframings dissolve the two
+complexities.
+
+**1. It's not an aggregator; it's an evaluation task — and that level already
+exists.** The aggregator contract is passive: consume (target, prediction)
+pairs from forward passes the trainer already runs. The Jacobian probe
+violates that contract because it must *drive* forward passes of its own.
+But the codebase already has a level whose responsibility is exactly "owns
+its own data, drives its own forwards on an epoch cadence, reports metrics":
+the inline inference blocks in the training config, each with its own loader,
+`epochs: {start, step}` schedule, and aggregator. The probe is a natural
+sibling of those — a small evaluation task with a tiny loader (a handful of
+validation times), an epoch cadence, and a few hundred single-step calls
+through the stepper's existing public predict API. Nothing in the aggregator
+system changes; the trainer's only change is invoking configured probe tasks
+at the same place it invokes inline inference. Evidence that no new
+model-side capability is needed: `compute_jacobian_timeseries.py` already
+does paired base/perturbed predictions entirely through public interfaces
+(`get_forcing_data`, `predict_paired`, `PrognosticState`) — the probe is that
+script, productionized at the inline-evaluation level.
+
+This reframing also retires the "validation vs. inference metric"
+distinction from above: as its own task, the probe samples whatever states
+its loader provides (data states now, rollout snapshots later) without
+belonging to either system.
+
+USER: That sounds right to me. Make sure the way it lives alongside validation is clear, and that it's easy to not include the task type at all.
+
+**2. Noise control is a generic RNG utility, not probe plumbing.** The
+requirement is common random numbers across two forward calls. RNG policy
+already has a single owner in the codebase: `fme.core.rand` (the `set_seed`
+and `randn` wrappers exist precisely so RNG behavior is centralized). A
+`fork_rng(seed)` context manager there — wrapping `torch.random.fork_rng`
+over CPU and CUDA so the global RNG state is saved, seeded, and restored — is
+a small, general-purpose tool: equally useful for regression tests,
+reproducible inference ensembles, paired model comparisons, and antithetic
+variance reduction. The probe simply enters the context once per forward
+pass. Nothing Jacobian-specific leaks outside the probe module.
+
+The rejected alternative, for the record: threading an optional `generator=`
+parameter through predict/step/module-forward signatures would place noise
+control "at the source" (the stochastic module draws the noise), but at the
+cost of touching every layer of the call stack for one consumer. The context
+manager gets identical semantics through the existing centralized-RNG
+responsibility with zero API churn. If a second consumer someday needs
+per-sample generators (e.g. noise-shared batched ensembles), revisit then.
+
+Remaining before an implementation plan (code-reading round): confirm the
+interface inline-inference tasks implement and where the trainer invokes
+them; confirm a `PrognosticState` can be built from a validation batch
+without loader gymnastics; then the config dataclass. The empirical
+questions (eps rule, mode set) fold into probe 2 below.
 
 ## Avenue 5: the architecture thread
 
@@ -298,57 +459,90 @@ the probes; kept as a thread.
 
 Things to measure on the existing residual checkpoint with the existing
 harness, each directly informing the design of the training-time
-intervention:
+intervention.
+
+**None of these need the 8-year horizon — or any new long rollout at all.**
+The 8-year runs already exist and saved the full prognostic state at every
+step, and `compute_jacobians.py` already demonstrates re-initializing a
+`PrognosticState` directly from those saved predictions. So every probe runs
+from saved snapshots, and "initializing near the instability" is not just a
+speedup but part of the experimental design: the restoring force should be
+measured at on-manifold states (early rollout), mildly drifted states
+(mid-rollout), and near-onset states (~step 2000), because its
+stage-dependence is one of the questions. The only thing that genuinely
+requires a multi-year rollout is end-to-end acceptance of a *retrained*
+model (natural onset was ~5.8 years on this checkpoint, so a confirmation
+run needs the full ~8 years) — which is exactly why the one-step Jacobian
+acceptance test matters: it front-loads that verdict.
 
 1. **Finite-amplitude response curves (sizes σ_δ and τ).** The Jacobian
    measures the infinitesimal response; the augmentation needs the
-   finite-amplitude landscape. From a mid-rollout state, displace gm q0 (and
-   column q, T, barotropic u) by a ladder of amplitudes in both signs, run
-   30–90 days each, and measure relaxation/amplification vs. amplitude. This
-   answers whether the model is neutral everywhere or weakly restoring for
-   small δ and unstable beyond a threshold, and reads off the basin boundary
-   — which is exactly σ_δ for the augmentation and the validation that a
-   relaxation-shaped target is the right supervision. (~50 short runs; hours
-   on GPU.)
+   finite-amplitude landscape. From 3 saved snapshots (early / mid /
+   near-onset), displace gm q0 (and column q, T, barotropic u) by a ladder of
+   amplitudes in both signs and run ~90 days. The whole amplitude ladder
+   stacks into the sample/ensemble batch dimension, so this is ~3 batched
+   90-step rollouts rather than ~50 sequential runs. Per-sample noise
+   differences are fine here — the measurement is the mean relaxation
+   trajectory over many steps, and a few replicate seeds per amplitude give
+   error bars. 90 days cleanly separates τ ≈ 10 d relaxation from neutral
+   drift; only if a curve looks neutral-but-bounded would a ~1-year extension
+   of that single case be worth running. Reads off: whether the model is
+   neutral everywhere or restoring-then-unstable beyond a threshold, the
+   basin boundary (= σ_δ), τ, and their stage-dependence. **Minutes on GPU.**
 2. **Full neutral-mode spectrum.** Extend the 3×3 Jacobian to all prognostic
-   global means (~50×50, with seed-controlled noise and per-σ units) at a few
-   states along the rollout. Finds *every* near-unit mode — if barotropic
-   wind or another mode is also neutral, the augmentation should cover it
-   from the start rather than being discovered by the next blowup. Doubles as
-   the prototyping work for the Avenue 4 metric.
-3. **Noise-injection rate.** Run an ensemble of short rollouts from one IC
-   with different seeds and measure the per-step variance injected into each
-   global-mean mode. Combined with τ from probe 1, the OU stationary-variance
-   formula gives the quantitative stability condition the trained restoring
-   force must meet — i.e. the acceptance threshold for the retrained model's
-   Jacobian, not just "less than 1."
+   global means (~50×50, seed-controlled noise, per-σ units) at the same 3
+   snapshots. Single-step finite differences — no rollout at all: ~51 seeded
+   forward passes × 3 states × ~3 noise seeds ≈ 500 forwards. Finds *every*
+   near-unit mode — if barotropic wind or another mode is also neutral, the
+   augmentation covers it from the start rather than being discovered by the
+   next blowup. Doubles as the prototype of the Avenue 4 probe task. Only
+   dependency: the `fork_rng` utility. **Minutes on GPU.**
+3. **Noise-injection rate.** Variance injection is a short-time statistic:
+   the across-seed variance of each global-mean mode grows roughly linearly
+   over the first weeks, so 16–32 seeds × 30–60 days from one saved snapshot
+   — batched in the ensemble dimension, i.e. one short rollout — pins down
+   σ_step per mode. The long horizon contributes nothing here. Combined with
+   τ from probe 1, the OU stationary-variance formula gives the quantitative
+   stability condition the trained restoring force must meet — the acceptance
+   threshold for the retrained model's Jacobian, not just "less than 1."
+   **Minutes on GPU.**
 4. **Spatial structure of the neutral mode.** Perturb gm q0 via a uniform
    offset vs. equal-mean localized patterns (tropics-only, extratropics-only)
-   and compare responses; also inspect the spatial pattern of the q0 drift in
-   the existing rollouts. If the undamped direction is not actually uniform,
-   the augmentation should perturb with the right pattern, and a
-   global-mean-only intervention may underconstrain.
+   in short runs from saved snapshots; also inspect the spatial pattern of
+   the q0 drift in the existing outputs. If the undamped direction is not
+   actually uniform, the augmentation should perturb with the right pattern,
+   and a global-mean-only intervention may underconstrain.
 5. **Saturation check on existing output.** From the saved drifting rollouts,
    compute upper-level RH against qsat(T, p) through the drift phase. If q0
    exceeds physical saturation early, the saturation-bound corrector (Avenue
    3) would have bitten early and is worth building; if the drift stays
    sub-saturated because T drifts in tandem, the bound alone won't prevent
-   onset. Free — no model runs needed.
+   onset. Pure post-processing of existing files — no model runs.
 6. **Causal direction of the q0–T coupling.** With seed-controlled noise, the
    off-diagonal Jacobians (d gm T/d gm q0 vs. d gm q0/d gm T, in per-σ units)
    become trustworthy and show which way the warming–moistening feedback loop
    runs, and whether breaking one leg (the augmentation on q alone) suffices
    or temperature needs its own restoring force trained through the
-   appended-mean channel.
+   appended-mean channel. Same harness and runs as probe 2.
 
 ## Suggested sequencing
 
-Probes 5 and 6 are nearly free; probes 1–3 are a day or two of GPU time and
-directly parameterize the Avenue 1 augmentation (σ_δ, τ, mode set, acceptance
-threshold). The qsat-scaling residual run (Avenue 2) proceeds in parallel as
-a control. Then implement the perturbation augmentation with the
-probe-derived numbers and the Avenue 4 validation metric as its acceptance
-test, with the saturation bound (Avenue 3) as a cheap backstop if probe 5
-says it binds.
+Everything below is sub-day on a single GPU; nothing waits on a long rollout.
 
-USER: These all sound worth doing. Is there a way to modify probes 1-3 so they can be completed faster? For example, is it reasonable to run them on a shorter series of data, either initializing near an instability or just running for fewer steps? Which probes if any require the full 8 years (which I chose arbitrarily)? Further develop the plans and ordering of these experiments.
+1. **`fork_rng` utility** in `fme.core.rand` — small, unblocks probes 2/6 and
+   the Avenue 4 probe task.
+2. **Probe 5** (free; gates the Avenue 3 corrector) and **probes 2+6
+   together** (same harness; full spectrum + trustworthy cross terms; doubles
+   as the Avenue 4 prototype).
+3. **Probe 3** (batched noise-injection ensemble) → σ_step per mode.
+4. **Probe 1** (batched amplitude ladders at 3 rollout stages) → σ_δ, τ,
+   basin boundary, stage-dependence.
+5. **Probe 4** if probe 2's results suggest the undamped direction has
+   spatial structure worth resolving.
+
+In parallel: the qsat-scaling residual run (Avenue 2) as a control. Then
+implement the Avenue 1 perturbation augmentation with the probe-derived
+numbers (σ_δ, τ, mode set, acceptance threshold) and the Avenue 4 probe as
+its acceptance test, with the saturation bound (Avenue 3) as a cheap backstop
+if probe 5 says it binds, and the Avenue 3b input-channel variant as the
+cheapest representation experiment alongside.
