@@ -9,8 +9,8 @@ from fme import get_device
 from fme.ace.aggregator.inference.data import InferenceBatchData
 
 from ..utils import LatLonRegion
+from . import ipo_index
 from .ipo_index import (
-    MIN_YEARS_FOR_FILTERED_TPI,
     PairedIPOIndexAggregator,
     _IPORegionalAccumulator,
     low_pass_filter,
@@ -174,17 +174,26 @@ class TestIPORegionalAccumulator:
 
 
 class TestPairedIPOIndexAggregator:
-    def test_get_logs_returns_expected_keys(self, very_fast_only: bool):
+    def test_get_logs_returns_expected_keys(
+        self, very_fast_only: bool, monkeypatch: pytest.MonkeyPatch
+    ):
         if very_fast_only:
             pytest.skip("Skipping non-fast tests")
         """Test that get_logs returns the expected metric keys for long runs."""
+        # Patch the minimum-length threshold so the "long run" behavior can be
+        # exercised with far less data than the production 80-year minimum.
+        min_years = 5
+        monkeypatch.setattr(ipo_index, "MIN_YEARS_FOR_FILTERED_TPI", min_years)
         lat = torch.linspace(-60.0, 60.0, 13)
         lon = torch.linspace(100.0, 300.0, 17)
         n_lat, n_lon = len(lat), len(lon)
         n_samples = 1
-        n_months = (MIN_YEARS_FOR_FILTERED_TPI + 5) * 12
+        n_months = (min_years + 5) * 12
 
-        agg = PairedIPOIndexAggregator(lat=lat, lon=lon)
+        # The cutoff period must be short relative to the (reduced) data
+        # length, since one cutoff period is trimmed from each end of the
+        # filtered series.
+        agg = PairedIPOIndexAggregator(lat=lat, lon=lon, cutoff_period_yrs=2.0)
 
         chunk_size = 60
         for i_start in range(0, n_months, chunk_size):
@@ -226,15 +235,21 @@ class TestPairedIPOIndexAggregator:
         assert any("ipo_tpi_power_spectrum" in k for k in logs)
         assert not any("ipo_tpi_std_ratio" in k for k in logs)
 
-    def test_get_logs_empty_for_short_rollout(self, very_fast_only: bool):
+    def test_get_logs_empty_for_short_rollout(
+        self, very_fast_only: bool, monkeypatch: pytest.MonkeyPatch
+    ):
         if very_fast_only:
             pytest.skip("Skipping non-fast tests")
         """Rollouts shorter than the minimum should not report IPO metrics."""
+        # Patch the minimum-length threshold so the "short run" behavior can be
+        # exercised with far less data than the production 80-year minimum.
+        min_years = 5
+        monkeypatch.setattr(ipo_index, "MIN_YEARS_FOR_FILTERED_TPI", min_years)
         lat = torch.linspace(-60.0, 60.0, 13)
         lon = torch.linspace(100.0, 300.0, 17)
         n_lat, n_lon = len(lat), len(lon)
         n_samples = 1
-        n_months = (MIN_YEARS_FOR_FILTERED_TPI // 2) * 12
+        n_months = (min_years // 2) * 12
 
         agg = PairedIPOIndexAggregator(lat=lat, lon=lon)
 
