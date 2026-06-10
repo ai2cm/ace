@@ -380,7 +380,7 @@ class SingleModuleStep(StepABC):
     ) -> tuple[TensorDict, StepperState | None]:
         def network_call(input_norm: TensorDict) -> TensorDict:
             if args.data_mask is not None:
-                input_norm = _apply_input_mask(input_norm, args.data_mask)
+                input_norm = apply_input_mask(input_norm, args.data_mask)
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
             if self._config.include_channel_mask_inputs:
                 mask_dict = _build_channel_mask_dict(
@@ -446,7 +446,7 @@ class SingleModuleStep(StepABC):
             self.secondary_decoder.load_module_state(state["secondary_decoder"])
 
 
-def _apply_input_mask(input_norm: TensorDict, data_mask: TensorMapping) -> TensorDict:
+def apply_input_mask(input_norm: TensorDict, data_mask: TensorMapping) -> TensorDict:
     """Zero out masked input variables in normalized space.
 
     For each variable in data_mask with False entries, sets those batch

@@ -71,13 +71,11 @@ def test_swin_transformer_build_and_forward():
     assert out.shape == (2, n_out, *IMG_SHAPE)
 
 
-def test_swin_transformer_builds_with_img_shape_only_dataset_info():
+def test_swin_transformer_raises_without_lat_coords():
     n_in, n_out = 5, 3
     dataset_info = DatasetInfo(img_shape=IMG_SHAPE)
-    module = _builder().build(n_in, n_out, dataset_info).to(fme.get_device())
-    x = torch.randn(2, n_in, *IMG_SHAPE, device=fme.get_device())
-    out = module(x)
-    assert out.shape == (2, n_out, *IMG_SHAPE)
+    with pytest.raises(ValueError, match="1D latitude coordinates"):
+        _builder().build(n_in, n_out, dataset_info)
 
 
 def test_swin_transformer_via_selector():
@@ -170,13 +168,11 @@ def test_nc_swin_transformer_via_selector():
     assert out.shape == (2, n_out, *IMG_SHAPE)
 
 
-def test_nc_swin_transformer_builds_with_img_shape_only_dataset_info():
+def test_nc_swin_transformer_raises_without_lat_coords():
     n_in, n_out = 5, 3
     dataset_info = DatasetInfo(img_shape=IMG_SHAPE)
-    module = _nc_builder().build(n_in, n_out, dataset_info).to(fme.get_device())
-    x = torch.randn(2, n_in, *IMG_SHAPE, device=fme.get_device())
-    out = module(x)
-    assert out.shape == (2, n_out, *IMG_SHAPE)
+    with pytest.raises(ValueError, match="1D latitude coordinates"):
+        _nc_builder().build(n_in, n_out, dataset_info)
 
 
 def test_nc_swin_transformer_unconditional_ignores_dataset_labels():

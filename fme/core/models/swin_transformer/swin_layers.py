@@ -1,9 +1,9 @@
 """Building blocks for the 2D Swin U-Net used in ACE.
 
 These are a 2D adaptation of ArchesWeather's 3D Swin U-Net. See
-``swin_transformer.py`` and the design notes in ``swin_transformer.md`` for
-how the pieces fit together. All transformer blocks operate on tensors with
-a trailing channel dimension, i.e. shape ``(B, H, W, C)``.
+``swin_transformer.py`` for how the pieces fit together. All transformer
+blocks operate on tensors with a trailing channel dimension, i.e. shape
+``(B, H, W, C)``.
 """
 
 import math

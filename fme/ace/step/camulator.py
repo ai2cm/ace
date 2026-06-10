@@ -8,9 +8,10 @@ import dacite
 import torch
 from torch import nn
 
-from fme.ace.models.miles_credit.crossformer import CrossFormer  # type: ignore
+from fme.ace.models.miles_credit.crossformer import CrossFormer
 from fme.ace.registry.stochastic_sfno import NoiseConditionedModel
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
+from fme.core.models.boundary_padding import TensorPaddingConfig
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
@@ -26,7 +27,7 @@ from fme.core.step.global_mean_removal import (
     GlobalMeanRemovalConfigUnion,
     NoGlobalMeanRemoval,
 )
-from fme.core.step.single_module import _apply_input_mask, step_with_adjustments
+from fme.core.step.single_module import apply_input_mask, step_with_adjustments
 from fme.core.step.step import StepABC, StepConfigABC, StepperState, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -58,7 +59,11 @@ class CrossFormerConfig:
     ff_dropout: float = 0.0
     use_spectral_norm: bool = True
     interp: bool = True
-    padding_conf: dict | None = None
+    padding_conf: TensorPaddingConfig | None = None
+
+    def __post_init__(self):
+        if isinstance(self.padding_conf, dict):
+            self.padding_conf = TensorPaddingConfig(**self.padding_conf)
 
     def build(
         self,
@@ -94,7 +99,9 @@ class CrossFormerConfig:
             ff_dropout=self.ff_dropout,
             use_spectral_norm=self.use_spectral_norm,
             interp=self.interp,
-            padding_conf=self.padding_conf,
+            padding_conf=dataclasses.asdict(self.padding_conf)
+            if self.padding_conf is not None
+            else None,
         )
 
 
@@ -123,8 +130,12 @@ class NoiseConditionedCrossFormerConfig:
     ff_dropout: float = 0.0
     use_spectral_norm: bool = True
     interp: bool = True
-    padding_conf: dict | None = None
+    padding_conf: TensorPaddingConfig | None = None
     noise_embed_dim: int = 256
+
+    def __post_init__(self):
+        if isinstance(self.padding_conf, dict):
+            self.padding_conf = TensorPaddingConfig(**self.padding_conf)
 
     def build(
         self,
@@ -166,7 +177,9 @@ class NoiseConditionedCrossFormerConfig:
             ff_dropout=self.ff_dropout,
             use_spectral_norm=self.use_spectral_norm,
             interp=self.interp,
-            padding_conf=self.padding_conf,
+            padding_conf=dataclasses.asdict(self.padding_conf)
+            if self.padding_conf is not None
+            else None,
             context_config=context_config,
         )
         return NoiseConditionedModel(
@@ -228,6 +241,13 @@ class CrossFormerStepConfig(StepConfigABC):
                 "CrossFormerStepConfig only supports builder.frames == 1; "
                 "multi-frame input loading is not implemented for this stepper."
             )
+        ph = self.builder.patch_height
+        pw = self.builder.patch_width
+        if (ph == 1) != (pw == 1):
+            raise ValueError(
+                "CrossFormer patch_height and patch_width must both be 1 or both > 1; "
+                f"got patch_height={ph}, patch_width={pw}."
+            )
         for name in self.next_step_forcing_names:
             if name not in self.forcing_names:
                 raise ValueError(
@@ -253,7 +273,6 @@ class CrossFormerStepConfig(StepConfigABC):
         self.surface_output_names = (
             self.surface_prognostic_names + self.surface_diagnostic_names
         )
-        # surface before atmosphere to match swin YAML channel ordering
         self.in_names = (
             self.forcing_names + self.surface_input_names + self.atmosphere_input_names
         )
@@ -510,7 +529,7 @@ class CrossFormerStep(StepABC):
 
         def network_call(input_norm: TensorDict) -> TensorDict:
             if args.data_mask is not None:
-                input_norm = _apply_input_mask(input_norm, args.data_mask)
+                input_norm = apply_input_mask(input_norm, args.data_mask)
             input_tensor = self.input_packer.pack(input_norm, axis=self.CHANNEL_DIM)
             extra_dict = self._global_mean_removal.extras_normalized()
             if extra_dict:

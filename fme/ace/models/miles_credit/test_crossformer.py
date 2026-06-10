@@ -2,7 +2,11 @@ import pytest
 import torch
 
 from fme.ace.models.miles_credit.crossformer import CrossFormer
-from fme.core.models.conditional_sfno.layers import ContextConfig
+from fme.core.models.conditional_sfno.layers import (
+    Context,
+    ConditionalLayerNorm,
+    ContextConfig,
+)
 
 
 def make_crossformer(img_shape, context_config=None):
@@ -94,8 +98,6 @@ def test_crossformer_noise_conditioned_shape(img_shape):
     n_channels = 2 * 2 + 2 + 1
     x = torch.randn(batch_size, n_channels, 1, *img_shape)
     # noise shape: (batch, embed_dim_noise, H, W)
-    from fme.core.models.conditional_sfno.layers import Context
-
     noise = torch.randn(batch_size, noise_embed_dim, *img_shape)
     ctx = Context(embedding_scalar=None, embedding_pos=None, labels=None, noise=noise)
     out = model(x, context=ctx)
@@ -118,8 +120,6 @@ def test_crossformer_noise_stochastic(img_shape):
     model = make_crossformer(img_shape, context_config=context_config)
     # CLN weight initializes to zero (no-op); set non-zero to enable noise effect.
     for m in model.modules():
-        from fme.core.models.conditional_sfno.layers import ConditionalLayerNorm
-
         if isinstance(m, ConditionalLayerNorm):
             if m.W_scale_2d is not None:
                 torch.nn.init.normal_(m.W_scale_2d.weight)
@@ -127,8 +127,6 @@ def test_crossformer_noise_stochastic(img_shape):
     batch_size = 1
     n_channels = 2 * 2 + 2 + 1
     x = torch.randn(batch_size, n_channels, 1, *img_shape)
-    from fme.core.models.conditional_sfno.layers import Context
-
     noise1 = torch.randn(batch_size, noise_embed_dim, *img_shape)
     noise2 = torch.randn(batch_size, noise_embed_dim, *img_shape)
     ctx1 = Context(embedding_scalar=None, embedding_pos=None, labels=None, noise=noise1)
@@ -160,8 +158,6 @@ def test_noise_conditioned_crossformer_spectral_norm_no_nan(img_shape):
     CLN conditioning layers are zero-initialized; spectral norm must skip them to
     avoid sigma=0 → weight=0/0=NaN.
     """
-    from fme.core.models.conditional_sfno.layers import Context
-
     noise_embed_dim = 8
     context_config = ContextConfig(
         embed_dim_scalar=0,

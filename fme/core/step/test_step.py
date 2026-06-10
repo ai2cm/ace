@@ -34,7 +34,7 @@ from fme.core.step.secondary_module import SecondaryModuleStepConfig
 from fme.core.step.single_module import (
     SingleModuleStep,
     SingleModuleStepConfig,
-    _apply_input_mask,
+    apply_input_mask,
     _build_channel_mask_dict,
 )
 from fme.core.step.step import StepABC, StepSelector
@@ -1022,7 +1022,7 @@ def test_apply_input_mask_zeros_masked_variables():
         "a": torch.tensor([True, True, False, False]),
         "b": torch.tensor([True, False, True, False]),
     }
-    result = _apply_input_mask(input_norm, mask)
+    result = apply_input_mask(input_norm, mask)
     expected_a = torch.tensor([1.0, 1.0, 0.0, 0.0]).view(4, 1, 1).expand(4, 8, 16)
     expected_b = torch.tensor([2.0, 0.0, 2.0, 0.0]).view(4, 1, 1).expand(4, 8, 16)
     torch.testing.assert_close(result["a"], expected_a)
@@ -1032,7 +1032,7 @@ def test_apply_input_mask_zeros_masked_variables():
 def test_apply_input_mask_ignores_unknown_names():
     input_norm = {"a": torch.ones(2, 4, 8)}
     mask = {"not_a_variable": torch.tensor([False, False])}
-    result = _apply_input_mask(input_norm, mask)
+    result = apply_input_mask(input_norm, mask)
     torch.testing.assert_close(result["a"], input_norm["a"])
 
 
@@ -1040,7 +1040,7 @@ def test_apply_input_mask_does_not_mutate_original():
     original = torch.ones(2, 4, 8)
     input_norm = {"a": original}
     mask = {"a": torch.tensor([False, False])}
-    result = _apply_input_mask(input_norm, mask)
+    result = apply_input_mask(input_norm, mask)
     torch.testing.assert_close(original, torch.ones(2, 4, 8))
     assert result["a"] is not original
 

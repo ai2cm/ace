@@ -2,7 +2,7 @@
 
 This is a 2D adaptation of ArchesWeather's 3D Swin U-Net to ACE's
 ``(B, C, H, W)`` interface, where all vertical levels are stacked into the
-channel dimension. See ``swin_transformer.md`` for the design notes.
+channel dimension.
 """
 
 import dataclasses

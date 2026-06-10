@@ -1,9 +1,32 @@
+import dataclasses
+from typing import Literal
+
 import torch
 import torch.nn.functional as F
 
 
+@dataclasses.dataclass
+class TensorPaddingConfig:
+    """Typed configuration for TensorPadding, validated at construction time."""
+
+    activate: bool = False
+    mode: Literal["mirror", "earth"] = "earth"
+    pad_lat: list[int] = dataclasses.field(default_factory=lambda: [40, 40])
+    pad_lon: list[int] = dataclasses.field(default_factory=lambda: [40, 40])
+
+    def __post_init__(self):
+        if self.mode not in ("mirror", "earth"):
+            raise ValueError(f"Unknown padding mode {self.mode!r}")
+
+
 class TensorPadding:
-    def __init__(self, mode="earth", pad_lat=(40, 40), pad_lon=(40, 40), **kwargs):
+    def __init__(
+        self,
+        mode: Literal["mirror", "earth"] = "earth",
+        pad_lat=(40, 40),
+        pad_lon=(40, 40),
+        **kwargs,
+    ):
         """
         Initialize the TensorPadding class with the specified mode and padding sizes.
 
@@ -13,6 +36,8 @@ class TensorPadding:
             pad_lon (list[int]): Padding sizes [left, right] for lon (W-E) dimension.
             **kwargs: Additional keyword arguments (ignored).
         """
+        if mode not in ("mirror", "earth"):
+            raise ValueError(f"Unknown padding mode {mode!r}")
         self.mode = mode
         self.pad_NS = pad_lat
         self.pad_WE = pad_lon

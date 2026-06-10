@@ -6,6 +6,7 @@ from torch import nn
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 from fme.ace.registry.stochastic_sfno import NoiseConditionedModel
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
+from fme.core.models.boundary_padding import TensorPaddingConfig
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
 from fme.core.models.swin_transformer import SwinTransformerNet
 
@@ -73,7 +74,11 @@ class SwinTransformerBuilder(ModuleConfig):
     embed_dim_scalar: int = 0
     embed_dim_labels: int = 0
     cpb_hidden_dim: int = 64
-    padding_conf: dict | None = None
+    padding_conf: TensorPaddingConfig | None = None
+
+    def __post_init__(self):
+        if isinstance(self.padding_conf, dict):
+            self.padding_conf = TensorPaddingConfig(**self.padding_conf)
 
     def build(
         self,
@@ -132,6 +137,12 @@ class SwinTransformerBuilder(ModuleConfig):
             lat_coords = dataset_info.horizontal_coordinates.lat_1d
         except MissingDatasetInfo:
             lat_coords = None
+        if lat_coords is None:
+            raise ValueError(
+                "SwinTransformer requires 1D latitude coordinates for cos-lat CPB "
+                "scaling, but the dataset provides none. Non-lat-lon grids such as "
+                "HEALPix are not supported."
+            )
         net = SwinTransformerNet(
             in_chans=n_in_channels,
             out_chans=n_out_channels,
@@ -147,7 +158,9 @@ class SwinTransformerBuilder(ModuleConfig):
             mlp_layer=self.mlp_layer,
             cpb_hidden_dim=self.cpb_hidden_dim,
             lat_coords=lat_coords,
-            padding_conf=self.padding_conf,
+            padding_conf=dataclasses.asdict(self.padding_conf)
+            if self.padding_conf is not None
+            else None,
         )
         return _ContextWrappedModule(net)
 
@@ -192,7 +205,11 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
     noise_embed_dim: int = 256
     label_embed_dim: int = 0
     cpb_hidden_dim: int = 64
-    padding_conf: dict | None = None
+    padding_conf: TensorPaddingConfig | None = None
+
+    def __post_init__(self):
+        if isinstance(self.padding_conf, dict):
+            self.padding_conf = TensorPaddingConfig(**self.padding_conf)
 
     def build(
         self,
@@ -251,6 +268,12 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             lat_coords = dataset_info.horizontal_coordinates.lat_1d
         except MissingDatasetInfo:
             lat_coords = None
+        if lat_coords is None:
+            raise ValueError(
+                "SwinTransformer requires 1D latitude coordinates for cos-lat CPB "
+                "scaling, but the dataset provides none. Non-lat-lon grids such as "
+                "HEALPix are not supported."
+            )
         net = SwinTransformerNet(
             in_chans=n_in_channels,
             out_chans=n_out_channels,
@@ -267,7 +290,9 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             conditioning="cln",
             cpb_hidden_dim=self.cpb_hidden_dim,
             lat_coords=lat_coords,
-            padding_conf=self.padding_conf,
+            padding_conf=dataclasses.asdict(self.padding_conf)
+            if self.padding_conf is not None
+            else None,
         )
         return NoiseConditionedModel(
             net,

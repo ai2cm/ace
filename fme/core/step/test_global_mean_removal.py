@@ -347,7 +347,7 @@ def test_per_channel_post_normalization_mean_near_zero_when_masked():
     # Unmasked sample: spatial mean ≈ 0 in normalized space.
     assert normalized["a"][0].mean().abs().item() < 1e-5
     # Masked sample: not shifted, so it retains (110 - 100) / 5 = 2.0
-    # — this is fine because _apply_input_mask zeros the channel later.
+    # — this is fine because apply_input_mask zeros the channel later.
     assert normalized["a"][1].mean().item() == pytest.approx(2.0)
 
 
