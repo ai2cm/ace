@@ -127,7 +127,7 @@ train_loader:
     - data_path: /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset
       file_pattern: 4xCO2-ic_0001.zarr
       engine: zarr
-validation_loader:
+validation:
   batch_size: 32
   num_data_workers: 4
   prefetch_factor: 4
