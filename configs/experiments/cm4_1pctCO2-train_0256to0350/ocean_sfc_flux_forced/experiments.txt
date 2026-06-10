@@ -1,8 +1,8 @@
 
-1pct_nosmooth_0256to0350-net_sfc_flux_forced|rs0|01KTCNG9HP7GF861EV4FCRYVJZ|training|best_inference_ckpt|normal|--min-runtime 8h
+1pct_nosmooth_0256to0350-net_sfc_flux_forced|rs0|01KTCNG9HP7GF861EV4FCRYVJZ|run_ICx1|best_inference_ckpt|high|--min-runtime 1h
 
-1pct_nosmooth_0256to0350-optPre_excl_seaice-net_sfc_flux_forced|rs0|01KTCNGPCF3BXKPN1JR0SXZ2YS|training|best_inference_ckpt|normal|--min-runtime 8h
+1pct_nosmooth_0256to0350-optPre_excl_seaice-net_sfc_flux_forced|rs0|01KTCNGPCF3BXKPN1JR0SXZ2YS|run_ICx1|best_inference_ckpt|high|--min-runtime 1h
 
-1pct_nosmooth_0256to0350-plusOHC-nsff|rs0|01KTDWHTXNP6FN16F60XJ39DPY|training|best_inference_ckpt|normal|--min-runtime 8h
+1pct_nosmooth_0256to0350-plusOHC-nsff|rs0|01KTDWHTXNP6FN16F60XJ39DPY|run_ICx1|best_inference_ckpt|high|--min-runtime 1h
 
-1pct_nosmooth_0256to0350-optPre_plusOHC_excl_seaice-nsff|rs0|01KTDWJ86W0KH0RCY57880AECV|training|best_inference_ckpt|normal|--min-runtime 8h
+1pct_nosmooth_0256to0350-optPre_plusOHC_excl_seaice-nsff|rs0|01KTDWJ86W0KH0RCY57880AECV|run_ICx1|best_inference_ckpt|high|--min-runtime 1h
