@@ -6,6 +6,7 @@ import torch_harmonics
 import xarray as xr
 
 import fme
+from fme.ace.aggregator.inference.data import InferenceBatchData, make_dummy_time
 from fme.ace.aggregator.inference.spectrum import (
     PairedSphericalPowerSpectrumAggregator,
     SphericalPowerSpectrumAggregator,
@@ -32,8 +33,26 @@ def test_spherical_power_spectrum_aggregator(report_plot: bool):
     agg = SphericalPowerSpectrumAggregator(gridded_operations, report_plot=report_plot)
     data = {"a": torch.randn(2, 2, nlat, nlon, device=fme.get_device())}
     data2 = {"a": torch.randn(2, 3, nlat, nlon, device=fme.get_device())}
-    agg.record_batch(data)
-    agg.record_batch(data2)
+    agg.record_batch(
+        InferenceBatchData(
+            prediction=data,
+            prediction_norm={},
+            target=None,
+            target_norm=None,
+            time=make_dummy_time(2, 2),
+            i_time_start=0,
+        )
+    )
+    agg.record_batch(
+        InferenceBatchData(
+            prediction=data2,
+            prediction_norm={},
+            target=None,
+            target_norm=None,
+            time=make_dummy_time(2, 3),
+            i_time_start=0,
+        )
+    )
     result = agg.get_mean()
     assert "a" in result
     assert result["a"].shape == (nlat,)
@@ -59,7 +78,16 @@ def test_spherical_power_spectrum_aggregator_get_dataset():
         gridded_operations, report_plot=False, variable_metadata=metadata
     )
     data = {"a": torch.randn(2, 3, nlat, nlon, device=DEVICE)}
-    agg.record_batch(data)
+    agg.record_batch(
+        InferenceBatchData(
+            prediction=data,
+            prediction_norm={},
+            target=None,
+            target_norm=None,
+            time=make_dummy_time(2, 3),
+            i_time_start=0,
+        )
+    )
     result = agg.get_dataset()
     sht = torch_harmonics.RealSHT(nlat, nlon, grid=grid).to(DEVICE)
     expected_values = torch.mean(spherical_power_spectrum(data["a"], sht), dim=(0, 1))
@@ -85,7 +113,16 @@ def test_paired_spherical_power_spectrum_aggregator_get_dataset():
     agg = PairedSphericalPowerSpectrumAggregator(gridded_operations, report_plot=False)
     gen_data = {"a": torch.randn(2, 3, nlat, nlon, device=DEVICE)}
     target_data = {"a": torch.randn(2, 3, nlat, nlon, device=DEVICE)}
-    agg.record_batch(target_data=target_data, gen_data=gen_data)
+    agg.record_batch(
+        InferenceBatchData(
+            prediction=gen_data,
+            prediction_norm={},
+            target=target_data,
+            target_norm={},
+            time=make_dummy_time(2, 3),
+            i_time_start=0,
+        )
+    )
     result = agg.get_dataset()
     sht = torch_harmonics.RealSHT(nlat, nlon, grid=grid).to(DEVICE)
     expected_gen = torch.mean(spherical_power_spectrum(gen_data["a"], sht), dim=(0, 1))
@@ -128,12 +165,94 @@ def test_paired_spherical_power_spectrum_aggregator(report_plot: bool):
         gridded_operations, report_plot=report_plot
     )
     data = {"a": torch.randn(2, 3, nlat, nlon, device=fme.get_device())}
-    agg.record_batch(data, data, None, None)
+    agg.record_batch(
+        InferenceBatchData(
+            prediction=data,
+            prediction_norm={},
+            target=data,
+            target_norm={},
+            time=make_dummy_time(2, 3),
+            i_time_start=0,
+        )
+    )
     result = agg.get_logs("spectrum")
     if report_plot:
         assert isinstance(result["spectrum/a"], plt.Figure)
     else:
         assert "spectrum/a" not in result
+
+
+def _record_two_variables(
+    agg: PairedSphericalPowerSpectrumAggregator, nlat: int, nlon: int
+):
+    """Push one batch through ``agg`` for two distinct variables. Helper for
+    the directional-bias and plot-variables tests below — both want a
+    populated aggregator state and the same fixture twice would be churn."""
+    data = {
+        "a": torch.randn(2, 3, nlat, nlon, device=fme.get_device()),
+        "b": torch.randn(2, 3, nlat, nlon, device=fme.get_device()),
+    }
+    agg.record_batch(
+        InferenceBatchData(
+            prediction=data,
+            prediction_norm={},
+            target=data,
+            target_norm={},
+            time=make_dummy_time(2, 3),
+            i_time_start=0,
+        )
+    )
+
+
+@pytest.mark.parametrize("report_directional_bias", [True, False])
+def test_paired_spherical_power_spectrum_directional_bias_flag(
+    report_directional_bias: bool,
+):
+    """When ``report_directional_bias=False``, the per-variable
+    ``positive_norm_bias`` and ``negative_norm_bias`` scalars are not
+    emitted. ``mean_abs_norm_bias`` and ``smallest_scale_norm_bias``
+    are unaffected.
+    """
+    nlat, nlon = 8, 16
+    agg = PairedSphericalPowerSpectrumAggregator(
+        get_gridded_operations(nlat, nlon),
+        report_plot=False,
+        report_directional_bias=report_directional_bias,
+    )
+    _record_two_variables(agg, nlat, nlon)
+    result = agg.get_logs("spectrum")
+    keys = set(result)
+    if report_directional_bias:
+        assert "spectrum/positive_norm_bias/a" in keys
+        assert "spectrum/negative_norm_bias/a" in keys
+    else:
+        assert not any(k.startswith("spectrum/positive_norm_bias/") for k in keys)
+        assert not any(k.startswith("spectrum/negative_norm_bias/") for k in keys)
+    # ``mean_abs_norm_bias`` is the directional pair's summary; always emitted.
+    assert "spectrum/mean_abs_norm_bias/a" in keys
+    assert "spectrum/smallest_scale_norm_bias/a" in keys
+
+
+def test_paired_spherical_power_spectrum_plot_variables_filter():
+    """``plot_variables`` restricts which variables get per-variable
+    spectrum-pair PNGs while leaving scalar metrics intact for every
+    variable. This is the key property: cohort-wide scalar comparisons
+    stay cheap while plot output is capped at the named subset.
+    """
+    nlat, nlon = 8, 16
+    agg = PairedSphericalPowerSpectrumAggregator(
+        get_gridded_operations(nlat, nlon),
+        report_plot=True,
+        plot_variables=["a"],
+    )
+    _record_two_variables(agg, nlat, nlon)
+    result = agg.get_logs("spectrum")
+    # Plot only for "a".
+    assert isinstance(result["spectrum/a"], plt.Figure)
+    assert "spectrum/b" not in result
+    # Scalars for BOTH variables.
+    assert "spectrum/mean_abs_norm_bias/a" in result
+    assert "spectrum/mean_abs_norm_bias/b" in result
 
 
 @pytest.mark.parametrize(

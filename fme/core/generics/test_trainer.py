@@ -1,6 +1,5 @@
 import contextlib
 import dataclasses
-import itertools
 import os
 import signal
 import unittest.mock
@@ -11,7 +10,7 @@ import pytest
 import torch
 
 from fme.core.device import get_device
-from fme.core.ema import EMATracker
+from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.aggregator import (
     AggregatorABC,
     InferenceAggregatorABC,
@@ -19,20 +18,26 @@ from fme.core.generics.aggregator import (
     InferenceLogs,
 )
 from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
-from fme.core.generics.lr_tuning import LRTuningConfig
+from fme.core.generics.lr_tuning import LRTuningConfig, ValidateStepper
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.trainer import (
     AggregatorBuilderABC,
     CheckpointPaths,
+    InferenceTask,
     TrainConfigProtocol,
     Trainer,
     TrainOutputABC,
     TrainStepperABC,
+    ValidationTask,
+    build_inference_callback,
+    build_validation_callback,
     count_parameters,
     epoch_checkpoint_enabled,
+    inference_one_epoch,
 )
+from fme.core.generics.validation import run_validation, run_validation_loop
 from fme.core.logging_utils import LoggingConfig
-from fme.core.optimization import NullOptimization, Optimization
+from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
 from fme.core.scheduler import SchedulerConfig
 from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import Slice, TensorDict, TensorMapping
@@ -199,6 +204,7 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
         batch: BDType,
         optimization: OptimizationABC,
         compute_derived_variables: bool = False,
+        evaluate_all_steps: bool = False,
     ) -> TrainOutput:
         optimization.accumulate_loss(torch.tensor(float("inf")))
         optimization.step_weights()
@@ -212,6 +218,9 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
         pass
 
     def set_eval(self) -> None:
+        pass
+
+    def seed_eval(self, seed: int) -> None:
         pass
 
     def update_training_history(self, *args: Any, **kwargs: Any) -> None:
@@ -235,13 +244,12 @@ class Config:
     segment_epochs: int | None = None
     evaluate_before_training: bool = False
     save_best_inference_epoch_checkpoints: bool = False
+    ema: EMAConfig = dataclasses.field(default_factory=EMAConfig)
     lr_tuning: LRTuningConfig | None = None
 
     def __post_init__(self):
         start_epoch = 0 if self.evaluate_before_training else 1
-        self.get_inference_epochs = unittest.mock.MagicMock(
-            return_value=[i for i in range(start_epoch, self.max_epochs + 1)]
-        )
+        self._inference_epochs = [i for i in range(start_epoch, self.max_epochs + 1)]
 
 
 _: TrainConfigProtocol = Config()
@@ -292,7 +300,7 @@ class InferenceAggregator(InferenceAggregatorABC[PSType, SDType]):
         pass
 
 
-class AggregatorBuilder(AggregatorBuilderABC[PSType, TrainOutput, SDType]):
+class AggregatorBuilder(AggregatorBuilderABC[TrainOutput]):
     def __init__(
         self,
         train_losses: np.ndarray,
@@ -309,11 +317,6 @@ class AggregatorBuilder(AggregatorBuilderABC[PSType, TrainOutput, SDType]):
     def get_train_aggregator(self) -> AggregatorABC[TrainOutput]:
         ret = TrainAggregator(self.train_losses[self._train_calls])
         self._train_calls += 1
-        return ret
-
-    def get_validation_aggregator(self) -> AggregatorABC[TrainOutput]:
-        ret = ValidationAggregator(self.validation_losses[self._validation_calls])
-        self._validation_calls += 1
         return ret
 
     def get_inference_aggregator(self) -> InferenceAggregatorABC[PSType, SDType]:
@@ -343,6 +346,9 @@ def get_trainer(
     n_validation_batches: int = 5,
     save_checkpoint: bool = True,
     lr_tuning: LRTuningConfig | None = None,
+    resume_optimizer_ckpt_path: str | None = None,
+    resume_ema_ckpt_path: str | None = None,
+    lr: float = 0.01,
 ) -> tuple[TrainConfigProtocol, Trainer]:
     if checkpoint_dir is None:
         checkpoint_dir = os.path.join(tmp_path, "checkpoints")
@@ -373,15 +379,13 @@ def get_trainer(
         nonlocal scheduler_config
         if scheduler_config is None:
             scheduler_config = SchedulerConfig()
-        opt = Optimization(
-            parameters=itertools.chain(*[module.parameters() for module in modules]),
+        opt = OptimizationConfig(
             optimizer_type="Adam",
-            lr=0.01,
-            max_epochs=max_epochs,
+            lr=lr,
             scheduler=scheduler_config,
             enable_automatic_mixed_precision=False,
-            kwargs={},
-        )
+            resume_optimizer_ckpt_path=resume_optimizer_ckpt_path,
+        ).build(torch.nn.ModuleList(modules), max_epochs=max_epochs)
         original_step_scheduler = opt.step_scheduler
 
         def step_scheduler_side_effect(*args, **kwargs):
@@ -400,14 +404,27 @@ def get_trainer(
             if stepper_module_values is None:
                 raise ValueError("stepper_module_values is None")
             module.weight.data.fill_(stepper_module_values[i])
+            for param in module.parameters():
+                if param not in opt.optimizer.state:
+                    opt.optimizer.state[param] = {
+                        "step": torch.tensor(0.0, device=param.data.device),
+                        "exp_avg": torch.zeros_like(param.data),
+                        "exp_avg_sq": torch.zeros_like(param.data),
+                    }
+                state = opt.optimizer.state[param]
+                state["step"] += 1
+                state["exp_avg"] += 0.1
+                state["exp_avg_sq"] += 0.01
 
         opt.step_weights = unittest.mock.MagicMock(side_effect=step_weights_side_effect)  # type: ignore
         return opt
 
-    def build_ema(modules: torch.nn.ModuleList) -> EMATracker:
-        return EMATracker(modules, decay=ema_decay)
+    ema_config = EMAConfig(decay=ema_decay, resume_ema_ckpt_path=resume_ema_ckpt_path)
 
-    config: TrainConfigProtocol = Config(
+    def build_ema(modules: torch.nn.ModuleList) -> EMATracker:
+        return ema_config.build(modules)
+
+    config = Config(
         experiment_dir=tmp_path,
         checkpoint_dir=checkpoint_dir,
         checkpoint_save_epochs=checkpoint_save_epochs,
@@ -418,6 +435,7 @@ def get_trainer(
         evaluate_before_training=evaluate_before_training,
         save_best_inference_epoch_checkpoints=save_best_inference_epoch_checkpoints,
         save_checkpoint=save_checkpoint,
+        ema=ema_config,
         lr_tuning=lr_tuning,
     )
     aggregator_builder = AggregatorBuilder(
@@ -425,19 +443,75 @@ def get_trainer(
         validation_losses=validation_losses,
         inference_losses=inference_losses,
     )
-    return config, Trainer(
+    inference_epochs = config._inference_epochs
+
+    def validation_callback(epoch: int) -> tuple[dict[str, Any], float]:
+        validation_data.set_epoch(epoch)
+        val_agg = ValidationAggregator(
+            aggregator_builder.validation_losses[aggregator_builder._validation_calls]
+        )
+        aggregator_builder._validation_calls += 1
+        logs = run_validation(
+            train_stepper=stepper,
+            validation_data=validation_data,
+            aggregator=val_agg,
+            diagnostics_subdir=f"epoch_{epoch:04d}",
+            record_logs=lambda logs: None,
+        )
+        return logs, logs["val/mean/loss"]
+
+    def inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
+        if epoch not in inference_epochs:
+            return {}, None
+        logs = inference_one_epoch(
+            stepper=stepper,
+            validation_context=contextlib.nullcontext,
+            dataset=inference_data,
+            aggregator=aggregator_builder.get_inference_aggregator(),
+            label="inference",
+            epoch=epoch,
+        )
+        error = logs.get("inference/time_mean_norm/rmse/channel_mean")
+        return logs, error
+
+    validate_stepper_callback: ValidateStepper | None = None
+    if lr_tuning is not None:
+
+        def _vs(trial_stepper, trial_ema):
+            val_agg = ValidationAggregator(
+                aggregator_builder.validation_losses[
+                    aggregator_builder._validation_calls
+                ]
+            )
+            aggregator_builder._validation_calls += 1
+            run_validation_loop(
+                stepper=trial_stepper,
+                valid_data=validation_data,
+                aggregator=val_agg,
+                ema=trial_ema,
+                validate_using_ema=config.validate_using_ema,
+            )
+            logs = val_agg.get_logs(label="val")
+            return logs["val/mean/loss"]
+
+        validate_stepper_callback = _vs
+
+    trainer = Trainer(
         train_data=train_data,
-        validation_data=validation_data,
-        inference_data=inference_data,
         stepper=stepper,
         build_optimization=build_optimization,
         build_ema=build_ema,
         config=config,
         aggregator_builder=aggregator_builder,
+        validation_callback=validation_callback,
         end_of_batch_callback=unittest.mock.MagicMock(),
         end_of_epoch_callback=unittest.mock.MagicMock(side_effect=lambda epoch: {}),
+        inference_callback=inference_callback,
+        validate_stepper=validate_stepper_callback,
         do_gc_collect=False,  # for much faster tests
     )
+
+    return config, trainer
 
 
 @pytest.mark.parametrize(
@@ -460,18 +534,17 @@ def test_trainer(tmp_path: str, checkpoint_save_epochs: Slice | None):
         save_epochs = []
     for i in range(config.max_epochs):
         if i in save_epochs:
-            assert os.path.exists(paths.epoch_checkpoint_path(i))
+            epoch_path = paths.epoch_checkpoint_path(i)
+            assert os.path.exists(epoch_path)
+            ckpt = torch.load(epoch_path, weights_only=False)
+            assert "optimization" in ckpt
         else:
             assert not os.path.exists(paths.epoch_checkpoint_path(i))
         assert not os.path.exists(paths.ema_epoch_checkpoint_path(i))
     train_data = cast(TrainData, trainer.train_data)
-    valid_data = cast(TrainData, trainer.valid_data)
     assert train_data.set_epoch_mock.mock_calls == [
         unittest.mock.call(i) for i in range(1, config.max_epochs + 1)
     ]
-    assert valid_data.set_epoch_mock.mock_calls == train_data.set_epoch_mock.mock_calls
-    assert train_data.log_info_mock.called
-    assert valid_data.log_info_mock.called
     assert trainer._end_of_epoch_callback.mock_calls == [  # type: ignore
         unittest.mock.call(i) for i in range(1, config.max_epochs + 1)
     ]
@@ -549,7 +622,7 @@ def preempt_after_calls_patch(object, method: str, call_count: int):
 
 @pytest.mark.parametrize(
     "interrupt_method",
-    ["train_one_epoch", "validate_one_epoch", "inference_one_epoch"],
+    ["train_one_epoch", "_validation_callback", "_inference_callback"],
 )
 def test_resume_after_interrupted_training(tmp_path: str, interrupt_method: str):
     max_epochs = 4
@@ -663,7 +736,9 @@ def test_resume_after_interrupted_training_during_epoch(
     )
     with (
         unittest.mock.patch.object(
-            trainer, "validate_one_epoch", return_value={"val/mean/loss": 0.0}
+            trainer,
+            "_validation_callback",
+            return_value=({"val/mean/loss": 0.0}, 0.0),
         ),
     ):  # would throw off count for actual training batches seen
         trainer.train()
@@ -706,7 +781,7 @@ def test_resume_after_preemption_during_validation(
     ):  # would throw off count for actual training batches seen
         with preempt_after_calls_patch(
             trainer,
-            "validate_one_epoch",
+            "_validation_callback",
             1 + int(evaluate_before_training),
         ):
             trainer.train()
@@ -732,7 +807,9 @@ def test_resume_after_preemption_during_validation(
     )
     with (
         unittest.mock.patch.object(
-            trainer, "validate_one_epoch", return_value={"val/mean/loss": 0.0}
+            trainer,
+            "_validation_callback",
+            return_value=({"val/mean/loss": 0.0}, 0.0),
         ) as validate_mock,
     ):
         assert trainer._epochs_trained == 0
@@ -1405,3 +1482,427 @@ def test_epoch_checkpoint_enabled_includes_final_epoch():
     save_epochs = Slice(step=5)
     assert epoch_checkpoint_enabled(5, max_epochs, save_epochs)
     assert epoch_checkpoint_enabled(10, max_epochs, save_epochs)
+
+
+def test_finetune_optimization_checkpoint_loads_optimizer_state(tmp_path: str):
+    """Trainer loads optimizer state from a finetune checkpoint while
+    keeping counters and scheduler fresh.
+
+    Uses a StepLR scheduler on stage 1 so the saved checkpoint contains a
+    decayed LR and advanced scheduler state, then verifies stage 2 starts
+    with the fresh configured LR and a fresh scheduler.
+    """
+    configured_lr = 0.01
+    stage1_scheduler = SchedulerConfig(
+        type="StepLR", kwargs={"step_size": 1, "gamma": 0.5}
+    )
+
+    stage1_dir = os.path.join(tmp_path, "stage1")
+    _, stage1_trainer = get_trainer(
+        stage1_dir,
+        max_epochs=1,
+        n_train_batches=4,
+        stepper_module_values=np.array([1.0]),
+        scheduler_config=stage1_scheduler,
+        lr=configured_lr,
+    )
+    assert stage1_trainer.optimization.optimizer.state_dict()["state"] == {}
+
+    stage1_trainer.train()
+    assert stage1_trainer.optimization.learning_rate < configured_lr
+
+    stage1_trainer._save_restart_checkpoints()
+    stage1_ckpt_path = stage1_trainer.paths.latest_checkpoint_path
+
+    # verify training updated the optimizer state dict
+    stage1_opt_state = stage1_trainer.optimization.optimizer.state_dict()["state"]
+    assert stage1_opt_state != {}, "optimizer state should change during training"
+
+    stage2_dir = os.path.join(tmp_path, "stage2")
+    _, stage2_trainer = get_trainer(
+        stage2_dir,
+        max_epochs=1,
+        n_train_batches=4,
+        stepper_module_values=np.array([2.0]),
+        resume_optimizer_ckpt_path=stage1_ckpt_path,
+        lr=configured_lr,
+    )
+
+    assert stage2_trainer._epochs_trained == 0
+    assert stage2_trainer._start_epoch == 0
+    assert stage2_trainer.num_batches_seen == 0
+
+    # optimizer state loaded from stage1 ckpt
+    stage2_opt_state = stage2_trainer.optimization.optimizer.state_dict()["state"]
+    for param_id in stage1_opt_state:
+        assert param_id in stage2_opt_state
+        for key in ("step", "exp_avg", "exp_avg_sq"):
+            assert key in stage2_opt_state[param_id]
+            torch.testing.assert_close(
+                stage2_opt_state[param_id][key],
+                stage1_opt_state[param_id][key],
+            )
+
+    # lr and scheduler are overwritten by OptimizationConfig
+    assert stage2_trainer.optimization.learning_rate == configured_lr
+    fresh_scheduler = SchedulerConfig().build(
+        stage2_trainer.optimization.optimizer, max_epochs=1
+    )
+    assert (
+        stage2_trainer.optimization.scheduler.state_dict()
+        == fresh_scheduler.state_dict()
+    )
+
+
+def test_finetune_ema_checkpoint_loads_ema_state(tmp_path: str):
+    """Trainer loads EMA state from a finetune checkpoint while keeping
+    training counters fresh and preserving the configured decay."""
+    n_train_batches = 4
+    stage1_decay = 0.99
+    stage2_decay = 0.9999
+
+    stage1_dir = os.path.join(tmp_path, "stage1")
+    _, stage1_trainer = get_trainer(
+        stage1_dir,
+        max_epochs=1,
+        n_train_batches=n_train_batches,
+        stepper_module_values=np.array([1.0]),
+        ema_decay=stage1_decay,
+    )
+    stage1_trainer.train()
+
+    stage1_ema_state = stage1_trainer._ema.get_state()
+    assert int(stage1_ema_state["num_updates"]) == n_train_batches
+
+    stage1_trainer._save_restart_checkpoints()
+    stage1_ckpt_path = stage1_trainer.paths.latest_checkpoint_path
+
+    stage2_dir = os.path.join(tmp_path, "stage2")
+    _, stage2_trainer = get_trainer(
+        stage2_dir,
+        max_epochs=1,
+        n_train_batches=n_train_batches,
+        stepper_module_values=np.array([2.0]),
+        ema_decay=stage2_decay,
+        resume_ema_ckpt_path=stage1_ckpt_path,
+    )
+
+    assert stage2_trainer._epochs_trained == 0
+    assert stage2_trainer._start_epoch == 0
+    assert stage2_trainer.num_batches_seen == 0
+
+    # EMA state loaded from stage1 checkpoint
+    stage2_ema_state = stage2_trainer._ema.get_state()
+    assert int(stage2_ema_state["num_updates"]) == n_train_batches
+    for key in stage1_ema_state["ema_params"]:
+        torch.testing.assert_close(
+            stage2_ema_state["ema_params"][key],
+            stage1_ema_state["ema_params"][key],
+        )
+
+    # decay is from stage2 config, not the checkpoint
+    assert float(stage2_ema_state["decay"]) == pytest.approx(stage2_decay)
+
+
+class TestBuildValidationCallback:
+    """Unit tests for the generic ``build_validation_callback`` helper.
+
+    These cover behavior shared between ACE and coupled training. ACE/coupled
+    test suites only verify the trainer-specific wiring (factory closures,
+    config passthrough) on top of this.
+    """
+
+    @staticmethod
+    def _make_task(name, weight=1.0, aggregator=None):
+        data = unittest.mock.MagicMock()
+        if aggregator is None:
+            aggregator = unittest.mock.MagicMock()
+        return ValidationTask(
+            name=name,
+            data=data,
+            aggregator_factory=lambda: aggregator,
+            weight=weight,
+        )
+
+    @staticmethod
+    def _call(tasks, run_validation_side_effect, epoch=1):
+        stepper = unittest.mock.MagicMock()
+        with unittest.mock.patch(
+            "fme.core.generics.trainer.run_validation",
+            side_effect=run_validation_side_effect,
+        ):
+            callback = build_validation_callback(tasks=tasks, stepper=stepper)
+            return callback(epoch=epoch)
+
+    def test_single_entry_weighted_loss(self):
+        tasks = [self._make_task("val", weight=2.0)]
+        logs, loss = self._call(tasks, [{"val/mean/loss": 0.5, "val/other": 1.0}])
+        assert loss == pytest.approx(2.0 * 0.5)
+        assert logs == {"val/mean/loss": 0.5, "val/other": 1.0}
+
+    def test_zero_weight_excluded_from_loss_but_logs_kept(self):
+        tasks = [
+            self._make_task("a", weight=1.0),
+            self._make_task("b", weight=0.0),
+        ]
+        logs, loss = self._call(
+            tasks,
+            [
+                {"a/mean/loss": 0.5},
+                {"b/mean/loss": 999.0},
+            ],
+        )
+        assert loss == pytest.approx(0.5)
+        assert "a/mean/loss" in logs
+        assert "b/mean/loss" in logs
+
+    def test_multiple_weighted_entries_sum_weighted(self):
+        tasks = [
+            self._make_task("a", weight=2.0),
+            self._make_task("b", weight=3.0),
+        ]
+        _, loss = self._call(
+            tasks,
+            [{"a/mean/loss": 0.1}, {"b/mean/loss": 0.2}],
+        )
+        assert loss == pytest.approx(2.0 * 0.1 + 3.0 * 0.2)
+
+    def test_missing_metric_for_weighted_entry_raises(self):
+        tasks = [self._make_task("a", weight=1.0)]
+        with pytest.raises(RuntimeError, match="did not produce expected metric key"):
+            self._call(tasks, [{"a/other_metric": 1.0}])
+
+    def test_missing_metric_for_zero_weight_entry_is_skipped(self):
+        tasks = [self._make_task("a", weight=0.0)]
+        logs, loss = self._call(tasks, [{"a/other_metric": 1.0}])
+        assert loss == 0.0
+        assert "a/other_metric" in logs
+
+    def test_overlapping_log_keys_between_entries_raises(self):
+        tasks = [
+            self._make_task("a", weight=1.0),
+            self._make_task("b", weight=1.0),
+        ]
+        with pytest.raises(RuntimeError, match="overlap with earlier entries"):
+            self._call(
+                tasks,
+                [
+                    {"shared/key": 0.1, "a/mean/loss": 0.5},
+                    {"shared/key": 0.2, "b/mean/loss": 0.6},
+                ],
+            )
+
+    def test_set_epoch_called_on_each_data(self):
+        tasks = [self._make_task("a"), self._make_task("b")]
+        self._call(
+            tasks,
+            [{"a/mean/loss": 0.1}, {"b/mean/loss": 0.2}],
+            epoch=7,
+        )
+        for task in tasks:
+            task.data.set_epoch.assert_called_once_with(7)
+
+    def test_aggregator_factory_called_per_invocation(self):
+        factory = unittest.mock.MagicMock(return_value=unittest.mock.MagicMock())
+        data = unittest.mock.MagicMock()
+        task: ValidationTask = ValidationTask(
+            name="a", data=data, aggregator_factory=factory, weight=1.0
+        )
+        stepper = unittest.mock.MagicMock()
+        with unittest.mock.patch(
+            "fme.core.generics.trainer.run_validation",
+            side_effect=[{"a/mean/loss": 0.1}, {"a/mean/loss": 0.2}],
+        ):
+            callback = build_validation_callback(tasks=[task], stepper=stepper)
+            callback(epoch=1)
+            callback(epoch=2)
+        assert factory.call_count == 2
+
+
+class TestBuildInferenceCallback:
+    """Unit tests for the generic ``build_inference_callback`` helper.
+
+    These cover behavior shared between ACE and coupled training. ACE/coupled
+    test suites only verify the trainer-specific wiring (factory closures,
+    config passthrough) on top of this.
+    """
+
+    @staticmethod
+    def _make_task(name, weight=0.0, epoch_set=frozenset({1}), aggregator=None):
+        data = unittest.mock.MagicMock()
+        if aggregator is None:
+            aggregator = unittest.mock.MagicMock()
+        return InferenceTask(
+            name=name,
+            data=data,
+            aggregator_factory=lambda: aggregator,
+            epoch_set=epoch_set,
+            weight=weight,
+        )
+
+    @staticmethod
+    def _call(tasks, inference_one_epoch_side_effect, inference_epochs, epoch=1):
+        stepper = unittest.mock.MagicMock()
+        with unittest.mock.patch(
+            "fme.core.generics.trainer.inference_one_epoch",
+            side_effect=inference_one_epoch_side_effect,
+        ):
+            callback = build_inference_callback(
+                tasks=tasks,
+                inference_epochs=inference_epochs,
+                stepper=stepper,
+            )
+            return callback(epoch=epoch)
+
+    def test_epoch_not_in_inference_epochs_returns_none(self):
+        tasks = [self._make_task("a", weight=1.0, epoch_set=frozenset({1, 2}))]
+        logs, error = self._call(
+            tasks,
+            [],
+            inference_epochs=[1, 2],
+            epoch=3,
+        )
+        assert logs == {}
+        assert error is None
+
+    def test_no_active_task_returns_none(self):
+        tasks = [self._make_task("a", weight=1.0, epoch_set=frozenset({2}))]
+        logs, error = self._call(
+            tasks,
+            [],
+            inference_epochs=[1, 2],
+            epoch=1,
+        )
+        assert logs == {}
+        assert error is None
+
+    def test_single_entry_weighted_error(self):
+        tasks = [self._make_task("inf", weight=2.0)]
+        logs, error = self._call(
+            tasks,
+            [{"inf/time_mean_norm/rmse/channel_mean": 0.5, "inf/other": 1.0}],
+            inference_epochs=[1],
+        )
+        assert error == pytest.approx(2.0 * 0.5)
+        assert logs == {"inf/time_mean_norm/rmse/channel_mean": 0.5, "inf/other": 1.0}
+
+    def test_multiple_weighted_entries_sum_weighted(self):
+        tasks = [
+            self._make_task("a", weight=2.0),
+            self._make_task("b", weight=3.0),
+        ]
+        _, error = self._call(
+            tasks,
+            [
+                {"a/time_mean_norm/rmse/channel_mean": 0.1},
+                {"b/time_mean_norm/rmse/channel_mean": 0.2},
+            ],
+            inference_epochs=[1],
+        )
+        assert error == pytest.approx(2.0 * 0.1 + 3.0 * 0.2)
+
+    def test_zero_weight_excluded_from_error_but_logs_kept(self):
+        tasks = [
+            self._make_task("a", weight=1.0),
+            self._make_task("b", weight=0.0),
+        ]
+        logs, error = self._call(
+            tasks,
+            [
+                {"a/time_mean_norm/rmse/channel_mean": 0.5},
+                {"b/time_mean_norm/rmse/channel_mean": 999.0},
+            ],
+            inference_epochs=[1],
+        )
+        assert error == pytest.approx(0.5)
+        assert "a/time_mean_norm/rmse/channel_mean" in logs
+        assert "b/time_mean_norm/rmse/channel_mean" in logs
+
+    def test_all_zero_weight_returns_none_error(self):
+        tasks = [
+            self._make_task("a", weight=0.0),
+            self._make_task("b", weight=0.0),
+        ]
+        logs, error = self._call(
+            tasks,
+            [
+                {"a/time_mean_norm/rmse/channel_mean": 0.5},
+                {"b/time_mean_norm/rmse/channel_mean": 0.6},
+            ],
+            inference_epochs=[1],
+        )
+        assert error is None
+        assert "a/time_mean_norm/rmse/channel_mean" in logs
+        assert "b/time_mean_norm/rmse/channel_mean" in logs
+
+    def test_missing_metric_for_weighted_entry_raises(self):
+        tasks = [self._make_task("a", weight=1.0)]
+        with pytest.raises(RuntimeError, match="did not produce expected metric"):
+            self._call(tasks, [{"a/other_metric": 1.0}], inference_epochs=[1])
+
+    def test_missing_metric_for_zero_weight_entry_is_skipped(self):
+        tasks = [self._make_task("a", weight=0.0)]
+        logs, error = self._call(tasks, [{"a/other_metric": 1.0}], inference_epochs=[1])
+        assert error is None
+        assert "a/other_metric" in logs
+
+    def test_overlapping_log_keys_between_entries_raises(self):
+        tasks = [
+            self._make_task("a", weight=1.0),
+            self._make_task("b", weight=1.0),
+        ]
+        with pytest.raises(RuntimeError, match="overlap with earlier entries"):
+            self._call(
+                tasks,
+                [
+                    {
+                        "shared/key": 0.1,
+                        "a/time_mean_norm/rmse/channel_mean": 0.5,
+                    },
+                    {
+                        "shared/key": 0.2,
+                        "b/time_mean_norm/rmse/channel_mean": 0.6,
+                    },
+                ],
+                inference_epochs=[1],
+            )
+
+    def test_per_task_epoch_set_filters_tasks(self):
+        tasks = [
+            self._make_task("a", weight=1.0, epoch_set=frozenset({1})),
+            self._make_task("b", weight=1.0, epoch_set=frozenset({2})),
+        ]
+        logs, error = self._call(
+            tasks,
+            [{"a/time_mean_norm/rmse/channel_mean": 0.5}],
+            inference_epochs=[1, 2],
+            epoch=1,
+        )
+        assert error == pytest.approx(0.5)
+        assert "a/time_mean_norm/rmse/channel_mean" in logs
+        assert "b/time_mean_norm/rmse/channel_mean" not in logs
+
+    def test_aggregator_factory_called_per_invocation(self):
+        factory = unittest.mock.MagicMock(return_value=unittest.mock.MagicMock())
+        data = unittest.mock.MagicMock()
+        task: InferenceTask = InferenceTask(
+            name="a",
+            data=data,
+            aggregator_factory=factory,
+            epoch_set=frozenset({1, 2}),
+            weight=1.0,
+        )
+        stepper = unittest.mock.MagicMock()
+        with unittest.mock.patch(
+            "fme.core.generics.trainer.inference_one_epoch",
+            side_effect=[
+                {"a/time_mean_norm/rmse/channel_mean": 0.1},
+                {"a/time_mean_norm/rmse/channel_mean": 0.2},
+            ],
+        ):
+            callback = build_inference_callback(
+                tasks=[task], inference_epochs=[1, 2], stepper=stepper
+            )
+            callback(epoch=1)
+            callback(epoch=2)
+        assert factory.call_count == 2
