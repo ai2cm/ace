@@ -54,6 +54,33 @@ def pytest_configure(config):
         "markers",
         "serial: test must run without interference from any other test process",
     )
+    config.addinivalue_line(
+        "markers",
+        "slow: slow test, deselected when --fast or --very-fast is given",
+    )
+    config.addinivalue_line(
+        "markers",
+        "medium: not very fast test, deselected when --very-fast is given",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    very_fast_only = config.getoption("--very-fast")
+    skip_slow = very_fast_only or config.getoption("--fast")
+    if not skip_slow:
+        return
+    deselected = []
+    selected = []
+    for item in items:
+        if item.get_closest_marker("slow") is not None or (
+            very_fast_only and item.get_closest_marker("medium") is not None
+        ):
+            deselected.append(item)
+        else:
+            selected.append(item)
+    if deselected:
+        config.hook.pytest_deselected(items=deselected)
+        items[:] = selected
 
 
 def _lock_path(config: pytest.Config) -> Path:
