@@ -34,8 +34,8 @@ from fme.core.step.secondary_module import SecondaryModuleStepConfig
 from fme.core.step.single_module import (
     SingleModuleStep,
     SingleModuleStepConfig,
-    apply_input_mask,
     _build_channel_mask_dict,
+    apply_input_mask,
 )
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.typing_ import TensorDict
