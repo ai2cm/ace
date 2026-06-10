@@ -132,10 +132,14 @@ run_training() {
 # 1-2) era5-only (non-residual) spectral_ratio 0.5 / 0.25 (no epoch checkpoints)
 # 3-6) era5-only-residual variants WITH EMA epoch checkpoints on the 46-year inference epochs: embed_dim 256, embed_dim 384, spectral_ratio 0.25, filter_num_groups 8
 # 7) era5-only embed_dim 256 (non-residual) clean counterpart to the finished clean 384-rs0 (no epoch checkpoints)
-run_training "train-4deg-daily-v1-era5-only-sr0p50.yaml" "train-4deg-daily-v1-era5-only-sr0p50-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
-run_training "train-4deg-daily-v1-era5-only-sr0p25.yaml" "train-4deg-daily-v1-era5-only-sr0p25-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
-run_training "train-4deg-daily-v1-era5-only-256-residual.yaml" "train-4deg-daily-v1-era5-only-256-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
-run_training "train-4deg-daily-v1-era5-only-384-residual.yaml" "train-4deg-daily-v1-era5-only-384-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
-run_training "train-4deg-daily-v1-era5-only-sr0p25-residual.yaml" "train-4deg-daily-v1-era5-only-sr0p25-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
-run_training "train-4deg-daily-v1-era5-only-fg8-residual.yaml" "train-4deg-daily-v1-era5-only-fg8-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
-run_training "train-4deg-daily-v1-era5-only-256.yaml" "train-4deg-daily-v1-era5-only-256-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-sr0p50.yaml" "train-4deg-daily-v1-era5-only-sr0p50-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-sr0p25.yaml" "train-4deg-daily-v1-era5-only-sr0p25-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-256-residual.yaml" "train-4deg-daily-v1-era5-only-256-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-384-residual.yaml" "train-4deg-daily-v1-era5-only-384-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-sr0p25-residual.yaml" "train-4deg-daily-v1-era5-only-sr0p25-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-fg8-residual.yaml" "train-4deg-daily-v1-era5-only-fg8-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-256.yaml" "train-4deg-daily-v1-era5-only-256-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# --- Wave 14: era5-only-residual with eval-time global-mean relaxation of specific_total_water_0 toward its normalization mean, e-folding timescales of 200 and 100 steps (Jupiter+Titan, high) ---
+run_training "train-4deg-daily-v1-era5-only-residual-q0-tau200.yaml" "train-4deg-daily-v1-era5-only-residual-q0-tau200-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+run_training "train-4deg-daily-v1-era5-only-residual-q0-tau100.yaml" "train-4deg-daily-v1-era5-only-residual-q0-tau100-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
