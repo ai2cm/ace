@@ -54,7 +54,7 @@ for seed in {0..0}; do
         --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
         --env-secret WANDB_API_KEY=wandb-api-key-annak \
         --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-        --dataset ${PRE_TRAINED_WEIGHTS_DATASETS[$seed]}:training_checkpoints/best_ckpt.tar:/ckpt.tar \
+        --dataset ${PRE_TRAINED_WEIGHTS_DATASETS[$seed]}:/pre-trained-weights \
         --dataset $STATS_DATASET:/statsdata \
         --gpus $N_GPUS \
         --shared-memory 400GiB \
