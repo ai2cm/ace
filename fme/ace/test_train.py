@@ -36,7 +36,7 @@ from fme.ace.registry.test_hpx import (
     up_sampling_block_config,
 )
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
-from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
+from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig
 from fme.ace.stepper.single_module import (
     CheckpointStepperConfig,
     StepperConfig,
@@ -1085,28 +1085,17 @@ def test_train_without_inline_inference(tmp_path, very_fast_only: bool):
 
 
 @pytest.mark.skipif(torch.cuda.is_available(), reason="flaky on GPU")
-@pytest.mark.parametrize(
-    "insolation_config",
-    [
-        pytest.param(
-            InsolationConfig("DSWRFtoa", ValueConfig(1360.0)),
-            id="solar-constant-as-value",
-        ),
-        pytest.param(
-            InsolationConfig("DSWRFtoa", NameConfig("solar_constant")),
-            id="solar-constant-as-name",
-        ),
-    ],
-)
-def test_train_and_inference_with_derived_forcings(
-    tmp_path, insolation_config: InsolationConfig, very_fast_only: bool
-):
+def test_train_and_inference_with_derived_forcings(tmp_path, very_fast_only: bool):
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
 
     nettype = "SphericalFourierNeuralOperatorNet"
     crps_training = False
     log_validation_maps = False
+    # The solar-constant-as-name case exercises the more complex path (loading
+    # the solar constant from data on disk); the as-value alternative is
+    # covered by unit tests in test_insolation.py and test_derived_forcings.py.
+    insolation_config = InsolationConfig("DSWRFtoa", NameConfig("solar_constant"))
     derived_forcings = DerivedForcingsConfig(insolation_config)
     train_config, inference_config = _setup(
         tmp_path,
