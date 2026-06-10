@@ -622,6 +622,7 @@ _TRAIN_AND_INFERENCE_CASES = [
             nettype="NoiseConditionedSFNO",
             crps_training=True,
             use_schedule=True,
+            validate_using_ema=True,
         ),
         id="SFNO-crps-schedule",
     ),
@@ -652,15 +653,6 @@ _TRAIN_AND_INFERENCE_CASES = [
         marks=pytest.mark.filterwarnings(
             "ignore:Metadata for each ensemble member:UserWarning"
         ),
-    ),
-    pytest.param(
-        TrainAndInferenceTestSettings(
-            nettype="NoiseConditionedSFNO",
-            crps_training=True,
-            use_schedule=True,
-            validate_using_ema=True,
-        ),
-        id="SFNO-crps-schedule-ema",
     ),
 ]
 
