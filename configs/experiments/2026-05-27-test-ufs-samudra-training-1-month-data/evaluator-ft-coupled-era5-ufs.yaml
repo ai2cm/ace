@@ -1,5 +1,5 @@
 experiment_dir: /results
-n_coupled_steps: 2173  # 30 years with 5-day ocean steps
+n_coupled_steps: 2170  # 30 years with 5-day ocean steps
 coupled_steps_in_memory: 10
 checkpoint_path: /ckpt.tar
 logging:
