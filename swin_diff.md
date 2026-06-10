@@ -2,13 +2,11 @@
 
 ## Differences that need to be addressed
 
-### 1. **Scalar time conditioning (month + hour) — model gap**
+### 1. **Scalar time conditioning (month + hour) — model gap** ✅
 
 ArchesWeather embeds the forecast timestamp's calendar month and hour-of-day via `TimestepEmbedder` (DiT-style sinusoidal embedder), sums them to a `cond_emb` of shape `(B, cond_dim=256)`, and feeds it to every `CondBasicLayer` as an AdaLN modulation.
 
-ACE's `SwinTransformerNet` supports this via `embed_dim_scalar` → `context.embedding_scalar`, but **the wrapper that populates it doesn't exist yet** (acknowledged in `SwinTransformerBuilder`'s docstring at `swin_transformer.py:56-59`). `_ContextWrappedModule` only passes `labels`, never `embedding_scalar`.
-
-**Fix needed**: A new wrapper (analogous to `ForecastModuleWithCond`) that takes the forward timestamp, embeds `(month, hour)` via a `TimestepEmbedder`, and passes the result as `context.embedding_scalar` when calling `SwinTransformerNet`.
+**Implemented**: `TimeConditionedSwinTransformerBuilder` in `fme/ace/registry/swin_transformer.py`. Adds `TimestepEmbedder` (sinusoidal + MLP) and `_TimeConditionedContextWrappedModule` which embeds month+hour from `StepArgs.forward_time` and passes the sum as `context.embedding_scalar`. Timestamp flows from `forcing_data.time` through `predict_generator` → `StepArgs.forward_time` → `Module.__call__` (gated by `has_time_conditioning`) → wrapper. Use `type: TimeConditionedSwinTransformer` with `embed_dim_scalar: 256` in config.
 
 ---
 

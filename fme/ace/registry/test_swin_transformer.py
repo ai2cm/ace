@@ -9,6 +9,7 @@ from fme.ace.registry.stochastic_sfno import NoiseConditionedModel
 from fme.ace.registry.swin_transformer import (
     NoiseConditionedSwinTransformerBuilder,
     SwinTransformerBuilder,
+    TimeConditionedSwinTransformerBuilder,
 )
 from fme.core.coordinates import (
     HEALPixCoordinates,
@@ -327,3 +328,50 @@ def test_nc_swin_transformer_no_cpb_scaling_builds_without_lat_coords():
     )
     x = torch.randn(2, n_in, *IMG_SHAPE, device=fme.get_device())
     assert module(x).shape == (2, n_out, *IMG_SHAPE)
+
+
+def _tc_builder(**kwargs) -> TimeConditionedSwinTransformerBuilder:
+    defaults: dict = dict(
+        embed_dim=32,
+        num_heads=[2, 4, 4, 2],
+        window_size=[4, 4],
+        mlp_ratio=2.0,
+        drop_path_rate=0.0,
+        embed_dim_scalar=16,
+        frequency_embedding_size=32,
+    )
+    defaults.update(kwargs)
+    return TimeConditionedSwinTransformerBuilder(**defaults)
+
+
+def test_time_conditioned_swin_is_registered():
+    assert "TimeConditionedSwinTransformer" in ModuleSelector.get_available_types()
+
+
+def test_time_conditioned_swin_build_and_forward_with_time():
+    n_in, n_out, batch = 5, 3, 2
+    dataset_info = _get_dataset_info()
+    module = _tc_builder().build(n_in, n_out, dataset_info).to(fme.get_device())
+    x = torch.randn(batch, n_in, *IMG_SHAPE, device=fme.get_device())
+    forward_time = torch.tensor([[3.0, 6.0], [7.0, 18.0]], device=fme.get_device())
+    out = module(x, forward_time=forward_time)
+    assert out.shape == (batch, n_out, *IMG_SHAPE)
+
+
+def test_time_conditioned_swin_forward_without_time_uses_zero_embedding():
+    n_in, n_out, batch = 5, 3, 2
+    dataset_info = _get_dataset_info()
+    module = _tc_builder().build(n_in, n_out, dataset_info).to(fme.get_device())
+    x = torch.randn(batch, n_in, *IMG_SHAPE, device=fme.get_device())
+    out = module(x, forward_time=None)
+    assert out.shape == (batch, n_out, *IMG_SHAPE)
+
+
+def test_time_conditioned_swin_requires_positive_embed_dim_scalar():
+    with pytest.raises(ValueError, match="embed_dim_scalar"):
+        TimeConditionedSwinTransformerBuilder(embed_dim_scalar=0)
+
+
+def test_time_conditioned_swin_has_time_conditioning():
+    builder = _tc_builder()
+    assert builder.has_time_conditioning is True

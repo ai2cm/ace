@@ -393,6 +393,7 @@ class SingleModuleStep(StepABC):
             output_tensor = self.module.wrap_module(wrapper)(
                 input_tensor,
                 labels=args.labels,
+                forward_time=args.forward_time,
             )
             output_dict = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
             secondary_output_dict = self.secondary_decoder.wrap_module(wrapper)(
