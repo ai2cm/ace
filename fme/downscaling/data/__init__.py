@@ -19,6 +19,8 @@ from .utils import (
     ClosedInterval,
     LatLonCoordinates,
     adjust_fine_coord_range,
+    coords_require_lon_roll,
     expand_and_fold_tensor,
+    find_roll_anchor,
     scale_tuple,
 )
