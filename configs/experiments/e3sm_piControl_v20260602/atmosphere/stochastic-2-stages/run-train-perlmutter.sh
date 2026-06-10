@@ -163,6 +163,7 @@ while IFS= read -r TRAINING || [[ -n "$TRAINING" ]]; do
   cp "$SBATCH_SCRIPT" "$CONFIG_DIR/sbatch-train.sh"
   cp sbatch-scripts/requeueable-train.sh "$CONFIG_DIR/requeueable-train.sh"
   cp make-venv.sh "$CONFIG_DIR/make-venv.sh"
+  cp upload-to-beaker.sh "$CONFIG_DIR/upload-to-beaker.sh"
   printf "%s\n" "$OVERRIDE_ARGS" > "$CONFIG_DIR/override_args.txt"
 
   validate_config "$CONFIG_DIR/train-config.yaml" "$OVERRIDE_ARGS"
