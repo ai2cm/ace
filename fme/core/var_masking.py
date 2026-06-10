@@ -18,6 +18,7 @@ class UniformMaskingConfig:
     kind: Literal["uniform"] = "uniform"
     min_vars: int = 1
     max_vars: int | str = "max"
+    shared_across_ensemble: bool = True
 
     def __post_init__(self):
         if not isinstance(self.min_vars, int) or self.min_vars < 0:
@@ -47,13 +48,20 @@ class UniformMaskingConfig:
 
         ``True`` means the channel is present; ``False`` means it is dropped.
 
-        When ``n_ensemble > 1``, masks are sampled for ``batch_size //
-        n_ensemble`` base samples and then repeated so that every ensemble
-        member belonging to the same base sample receives the same mask.
+        When ``n_ensemble > 1`` and ``shared_across_ensemble=True`` (the
+        default), masks are sampled for ``batch_size // n_ensemble`` base
+        samples and then repeated so that every ensemble member belonging to
+        the same base sample receives the same mask.
+
+        When ``shared_across_ensemble=False``, ``batch_size`` independent
+        masks are sampled — no divisibility requirement applies.
         """
-        base_batch_size = _get_base_batch_size(batch_size, n_ensemble)
-        mask = _sample_uniform(self, n_channels, base_batch_size, device)
-        return _repeat_ensemble_mask(mask, n_ensemble)
+        if self.shared_across_ensemble:
+            base_batch_size = _get_base_batch_size(batch_size, n_ensemble)
+            mask = _sample_uniform(self, n_channels, base_batch_size, device)
+            return _repeat_ensemble_mask(mask, n_ensemble)
+        else:
+            return _sample_uniform(self, n_channels, batch_size, device)
 
 
 @dataclasses.dataclass
@@ -67,6 +75,7 @@ class PerVariableMaskingConfig:
 
     kind: Literal["per_variable"] = "per_variable"
     rate: float = 0.0
+    shared_across_ensemble: bool = True
 
     def __post_init__(self):
         if not 0.0 <= self.rate <= 1.0:
@@ -84,13 +93,20 @@ class PerVariableMaskingConfig:
 
         ``True`` means the channel is present; ``False`` means it is dropped.
 
-        When ``n_ensemble > 1``, masks are sampled for ``batch_size //
-        n_ensemble`` base samples and then repeated so that every ensemble
-        member belonging to the same base sample receives the same mask.
+        When ``n_ensemble > 1`` and ``shared_across_ensemble=True`` (the
+        default), masks are sampled for ``batch_size // n_ensemble`` base
+        samples and then repeated so that every ensemble member belonging to
+        the same base sample receives the same mask.
+
+        When ``shared_across_ensemble=False``, ``batch_size`` independent
+        masks are sampled — no divisibility requirement applies.
         """
-        base_batch_size = _get_base_batch_size(batch_size, n_ensemble)
-        mask = _sample_per_variable(self, n_channels, base_batch_size, device)
-        return _repeat_ensemble_mask(mask, n_ensemble)
+        if self.shared_across_ensemble:
+            base_batch_size = _get_base_batch_size(batch_size, n_ensemble)
+            mask = _sample_per_variable(self, n_channels, base_batch_size, device)
+            return _repeat_ensemble_mask(mask, n_ensemble)
+        else:
+            return _sample_per_variable(self, n_channels, batch_size, device)
 
 
 VariableMaskingConfig = UniformMaskingConfig | PerVariableMaskingConfig
