@@ -224,7 +224,32 @@ data:
   drifted, raising qsat with it) is exactly probe 5 below, and worth checking
   before building it.
 
-USER: Does the vapor pressure actually get anywhere close to exceeding saturation, even during blowup? Check as a diagnostic on the existing rollouts before planning out this feature.
+**Probe 5 result (2026-06-10, `probe5_saturation_check.py`): it does not —
+the saturation bound would not have prevented this blowup.** Computing
+RH = q/qsat(T, p_mid) per level over the saved `run_best_ckpt` rollout (ak/bk
+from the checkpoint, Bolton es): level 0 sits at ~25 hPa — stratospheric —
+with mean RH ≈ 0.003–0.004 and grid-max RH ≤ 0.34 through the entire drift
+phase (steps 1500–2100). q0 leaves the *statistical* training envelope while
+still two orders of magnitude below the *physical* saturation bound.
+Widespread supersaturation appears only post-onset, during the cascade
+(area fractions RH > 1 of 5–18% and absurd RH values as T blows up). So the
+corrector is at best a cascade-phase backstop, not a stabilization mechanism;
+the drift needs a restoring force (Avenue 1), not a distant wall. Full tables
+in `output/probe5_saturation/summary.md`. (Baseline note: even in-sample,
+~0.2–2.6% of the grid exceeds RH 1 at most levels — total water includes
+condensate and Bolton-over-liquid overstates RH at cold temperatures — so any
+future bound needs α comfortably above 1.)
+
+This result also weakens the *boundedness* argument for Avenue 3b at q0: the
+RH = 1 wall is ~300× above q0's operating point, so a random walk in RH space
+still goes statistically out-of-sample long before touching it. The remaining
+case for RH-space prediction at q0 is conditioning and climate-invariance,
+not physical bounding. And it refines Avenue 1's τ for q0: this level is
+stratospheric, where water vapor is controlled by tropopause dehydration and
+slow overturning rather than the ~10-day tropospheric vapor residence — the
+physically justifiable relaxation for q0 is toward climatology on a timescale
+of months, and whether that is fast enough to beat the noise injection is
+exactly what the probe 1/probe 3 OU arithmetic will tell us.
 
 This is complementary to Avenue 1, not competing: the saturation bound caps
 the worst-case excursion; the perturbation augmentation removes the random
@@ -297,8 +322,6 @@ Implications:
   in strongly baroclinic regions, compared level-by-level against the q-space
   control.
 
-USER: Let's make sure we can configure this to be per-level, so we could isolate it to just the q0 level. Maybe by allowing a wildcard in the name? But also make it straighforward to configure uniformly across q-levels (e.g. not require a list of items, one per level).
-
 ### Input space vs. prediction space
 
 These are separable decisions with different jobs. *Prediction* space is
@@ -321,29 +344,33 @@ already exists.
 
 ### Configuration shape
 
-The combinatorial space is (which fields) × (rh | deficit) × (input |
-prediction | both), with the input option further splitting into replace vs.
-append. This stays flat as a list of entries with orthogonal knobs rather
-than a matrix of variants:
+RH-only (the deficit option is dropped per the representation analysis above,
+which removes the `representation` key entirely). The remaining space is
+(which fields) × (input | prediction | both), with the input option further
+splitting into replace vs. append. This stays flat as a list of entries with
+orthogonal knobs rather than a matrix of variants:
 
 ```yaml
 saturation_normalization:
-  - names: [specific_total_water_0, specific_total_water_1]
-    representation: rh        # rh | deficit
+  - names: ["specific_total_water_*"]
     prediction: true          # transform the prediction for these fields
     input: append             # none | replace | append
 ```
 
-USER: Based on your reasoning earlier, let's remove the deficit option for now, and focus on RH. That means the representation key can be dropped.
-
-Per-level cherry-picking is just the explicit `names` list (consistent with
-how `qsat_scaled_names` and `force_positive_names` already work — no implicit
-"all levels"). Validation in `__post_init__`: a field may appear in at most
-one entry; overlap with `qsat_scaled_names` is an error (the global and local
-scalings would double-count); each entry must do something (`prediction:
-true` or `input != none`). With residual prediction, the residual is taken in
-the transformed variable — which is the point: the random walk happens in the
-bounded representation.
+Per-level selection: `names` accepts exact names and `*` wildcards, expanded
+against the stepper's variable list. A single wildcard entry covers the
+uniform across-all-q-levels case without listing eight names, while
+`names: [specific_total_water_0]` isolates the treatment to q0, and a mixed
+list cherry-picks levels. (Precedent to confirm in the code round: whether an
+fme config already does wildcard name matching; if not, expansion is a small
+helper validated against the resolved `out_names`.) Validation in
+`__post_init__` or at name resolution: a field may match at most one entry;
+overlap with `qsat_scaled_names` is an error (the global and local scalings
+would double-count); each entry must do something (`prediction: true` or
+`input != none`); a wildcard matching zero variables is an error, not a
+no-op. With residual prediction, the residual is taken in the transformed
+variable — which is the point: the random walk happens in the bounded
+representation.
 
 USER: You can proceed to planning the code implementation for this - at what level does it live, and what does the configuration look like?
 
@@ -524,6 +551,16 @@ acceptance test matters: it front-loads that verdict.
    runs, and whether breaking one leg (the augmentation on q alone) suffices
    or temperature needs its own restoring force trained through the
    appended-mean channel. Same harness and runs as probe 2.
+
+## Development workflow for code changes
+
+General procedure for changes coming out of this work: each feature gets its
+own PR branch based from `main`. An experiment branch forked from `main`
+collects potentially multiple feature PRs merged together for running
+experiments. A PR is reviewed and merged to `main` directly if the feature is
+generally useful, very clean, or something we know we want; otherwise it
+waits on experiments demonstrating that it improves model behavior, and is
+merged only if it's something we'll continue using.
 
 ## Suggested sequencing
 
