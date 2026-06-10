@@ -24,6 +24,10 @@ from fme.core.labels import BatchLabels
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry import ModuleSelector
 from fme.core.step.args import StepArgs
+from fme.core.step.global_mean_relaxation import (
+    GlobalMeanRelaxationConfig,
+    GlobalMeanRelaxationVariableConfig,
+)
 from fme.core.step.global_mean_removal import (
     PerChannelGlobalMeanRemovalConfig,
     SharedGlobalMeanRemovalConfig,
@@ -32,6 +36,7 @@ from fme.core.step.multi_call import MultiCallConfig, MultiCallStepConfig
 from fme.core.step.secondary_decoder import SecondaryDecoderConfig
 from fme.core.step.secondary_module import SecondaryModuleStepConfig
 from fme.core.step.single_module import (
+    SingleModuleStep,
     SingleModuleStepConfig,
     _apply_input_mask,
     _build_channel_mask_dict,
@@ -917,6 +922,130 @@ def test_secondary_module_full_field_and_residual():
     assert output["diag"].shape == (2, *img_shape)
 
 
+def _get_relaxation_single_module_selector(
+    relaxation: GlobalMeanRelaxationConfig | None,
+) -> StepSelector:
+    normalization = get_network_and_loss_normalization_config(
+        names=["forcing_shared", "forcing_rad", "diagnostic_main", "diagnostic_rad"]
+    )
+    return StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+                ),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main", "diagnostic_rad"],
+                normalization=normalization,
+                global_mean_relaxation=relaxation,
+            )
+        ),
+    )
+
+
+def test_step_train_eval_toggle_propagates_to_modules():
+    config = _get_relaxation_single_module_selector(None)
+    step = get_step(config, DEFAULT_IMG_SHAPE)
+    # Default is training mode (matches torch.nn.Module).
+    assert all(module.training for module in step.modules)
+    step.eval()
+    assert all(not module.training for module in step.modules)
+    step.train()
+    assert all(module.training for module in step.modules)
+    step.train(False)
+    assert all(not module.training for module in step.modules)
+
+
+def test_global_mean_relaxation_name_not_in_out_names_raises():
+    normalization = get_network_and_loss_normalization_config(
+        names=["a", "b"],
+    )
+    with pytest.raises(ValueError, match="missing.*'c'"):
+        SingleModuleStepConfig(
+            builder=ModuleSelector(type="MLP", config={}),
+            in_names=["a"],
+            out_names=["b"],
+            normalization=normalization,
+            global_mean_relaxation=GlobalMeanRelaxationConfig(
+                variables={
+                    "c": GlobalMeanRelaxationVariableConfig(
+                        target=0.0, timescale_steps=2.0
+                    ),
+                }
+            ),
+        )
+
+
+@pytest.mark.parallel
+def test_global_mean_relaxation_only_applied_in_eval_mode():
+    torch.manual_seed(0)
+    relaxation = GlobalMeanRelaxationConfig(
+        variables={
+            "diagnostic_main": GlobalMeanRelaxationVariableConfig(
+                target=0.0, timescale_steps=2.0
+            ),
+        }
+    )
+    config = _get_relaxation_single_module_selector(relaxation)
+    img_shape = DEFAULT_IMG_SHAPE
+    step = get_step(config, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples=2)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples=2
+    )
+    args = StepArgs(
+        input=input_data, next_step_input_data=next_step_input_data, labels=None
+    )
+
+    step.train()
+    train_output, _ = step.step(args=args)
+
+    step.eval()
+    eval_output, _ = step.step(args=args)
+
+    # Other variables are untouched.
+    torch.testing.assert_close(
+        train_output["diagnostic_rad"], eval_output["diagnostic_rad"]
+    )
+    # The relaxation pushes diagnostic_main toward the target (0.0) by a
+    # constant per-sample offset, so eval and train differ by exactly that
+    # offset and the offset is spatially uniform.
+    delta = eval_output["diagnostic_main"] - train_output["diagnostic_main"]
+    per_sample = delta.flatten(start_dim=1)
+    torch.testing.assert_close(
+        per_sample, per_sample[:, :1].expand_as(per_sample), rtol=1e-5, atol=1e-6
+    )
+    # And shifts away from the train output (we cannot guarantee toward 0
+    # in a single step, but the offset should be nonzero).
+    assert not torch.allclose(delta, torch.zeros_like(delta))
+
+
+@pytest.mark.parallel
+def test_global_mean_relaxation_disabled_when_none():
+    torch.manual_seed(0)
+    config = _get_relaxation_single_module_selector(None)
+    img_shape = DEFAULT_IMG_SHAPE
+    step = get_step(config, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples=2)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples=2
+    )
+    args = StepArgs(
+        input=input_data, next_step_input_data=next_step_input_data, labels=None
+    )
+    step.eval()
+    eval_output, _ = step.step(args=args)
+    step.train()
+    train_output, _ = step.step(args=args)
+    # Without relaxation, eval and train produce identical outputs for SFNO
+    # (no dropout/batchnorm), since both go through step_with_adjustments
+    # with the same seed-free network call.
+    for name in eval_output:
+        torch.testing.assert_close(eval_output[name], train_output[name])
+
+
 @pytest.mark.parallel
 def test_secondary_module_state_round_trip():
     """Test get_state/load_state with secondary module."""
@@ -1135,6 +1264,24 @@ def test_build_channel_mask_dict_partial_mask():
     assert result["a"][0, 0, 0] == 1.0
     assert result["a"][1, 0, 0] == 0.0
     assert (result["b"] == 1.0).all()
+
+
+def test_build_channel_mask_dict_gmr_extra_inherits_source_mask():
+    # The GMR sentinel channel `__gmr_extra__a` must inherit `a`'s mask
+    # because its value is zeroed in forward_transform when `a` is masked;
+    # otherwise the network sees a 0-valued extra with a 1-valued mask
+    # (i.e. contradictory "present" signal on a masked sample).
+    packed = torch.zeros(2, 4, 4, 8)
+    data_mask = {"a": torch.tensor([True, False])}
+    result = _build_channel_mask_dict(
+        ["a", "b", "__gmr_extra__a", "__gmr_extra__b"], data_mask, packed
+    )
+    assert result["a"][0, 0, 0] == 1.0
+    assert result["a"][1, 0, 0] == 0.0
+    assert result["__gmr_extra__a"][0, 0, 0] == 1.0
+    assert result["__gmr_extra__a"][1, 0, 0] == 0.0
+    assert (result["b"] == 1.0).all()
+    assert (result["__gmr_extra__b"] == 1.0).all()
 
 
 def test_step_with_include_channel_mask_inputs():
@@ -1440,6 +1587,58 @@ def test_step_shared_global_mean_removal_affects_output():
         out_names,
         means,
     )
+
+
+def test_step_per_channel_global_mean_removal_with_channel_masks():
+    """When both ``include_channel_mask_inputs`` and per-channel GMR extras
+    are enabled, the GMR extras should be packed as ordinary input
+    channels and receive their own mask channels.  Total network input
+    channels = ``2 * (n_in_names + n_extras)``.
+    """
+    in_names = ["forcing_shared", "forcing_rad"]
+    out_names = ["diagnostic_main", "diagnostic_rad"]
+    all_names = list(set(in_names + out_names))
+    normalization = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means={name: 0.0 for name in all_names},
+            stds={name: 1.0 for name in all_names},
+        ),
+    )
+    removal = PerChannelGlobalMeanRemovalConfig(
+        field_names=in_names, append_as_input=True
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+                ),
+                in_names=in_names,
+                out_names=out_names,
+                normalization=normalization,
+                include_channel_mask_inputs=True,
+                global_mean_removal=removal,
+            ),
+        ),
+    )
+    step = get_step(config, DEFAULT_IMG_SHAPE)
+    assert isinstance(step, SingleModuleStep)
+    # 2 real inputs + 2 GMR extras → 4 packed input channels (doubled to 8
+    # by the channel-mask append in network_call).
+    assert len(step.in_packer.names) == 4
+
+    n_samples = 2
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+    output, _ = step.step(
+        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
+    )
+    for name in out_names:
+        assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
 
 
 def test_step_shared_global_mean_removal_raises_on_masked_reference():

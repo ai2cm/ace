@@ -109,11 +109,12 @@ def test_shared_no_extra_channels():
     stds = {"surface_temperature": 1.0}
     transform = _make_shared(means, stds)
     assert transform.n_extra_input_channels == 0
+    assert transform.extra_channel_names == []
     tensors = move_tensordict_to_device(
         {"surface_temperature": torch.full((2, 4, 4), 285.0)}
     )
     transform.forward_transform(tensors, None)
-    assert transform.get_extra_channels() is None
+    assert transform.extras_normalized() == {}
 
 
 def test_shared_extra_channels():
@@ -121,13 +122,15 @@ def test_shared_extra_channels():
     stds = {"surface_temperature": 5.0}
     transform = _make_shared(means, stds, append_as_input=True)
     assert transform.n_extra_input_channels == 1
+    [extra_name] = transform.extra_channel_names
     tensors = move_tensordict_to_device(
         {"surface_temperature": torch.full((2, 4, 4), 285.0)}
     )
     transform.forward_transform(tensors, None)
-    extra = transform.get_extra_channels()
-    assert extra is not None
-    assert extra.shape == (2, 1, 4, 4)
+    extras = transform.extras_normalized()
+    assert list(extras) == [extra_name]
+    extra = extras[extra_name]
+    assert extra.shape == (2, 4, 4)
     # sample_mean = 285, normalized = (285 - 280) / 5 = 1.0
     torch.testing.assert_close(extra, torch.full_like(extra, 1.0))
 
@@ -357,9 +360,10 @@ def test_per_channel_no_extra_channels():
     stds = {"a": 1.0}
     transform = _make_per_channel(means, stds)
     assert transform.n_extra_input_channels == 0
+    assert transform.extra_channel_names == []
     tensors = move_tensordict_to_device({"a": torch.full((2, 4, 4), 5.0)})
     transform.forward_transform(tensors, None)
-    assert transform.get_extra_channels() is None
+    assert transform.extras_normalized() == {}
 
 
 def test_per_channel_extra_channels():
@@ -367,6 +371,7 @@ def test_per_channel_extra_channels():
     stds = {"a": 2.0, "b": 5.0}
     transform = _make_per_channel(means, stds, append_as_input=True)
     assert transform.n_extra_input_channels == 2
+    a_extra, b_extra = transform.extra_channel_names
     tensors = move_tensordict_to_device(
         {
             "a": torch.full((1, 4, 4), 14.0),  # mean=14
@@ -374,13 +379,13 @@ def test_per_channel_extra_channels():
         }
     )
     transform.forward_transform(tensors, None)
-    extra = transform.get_extra_channels()
-    assert extra is not None
-    assert extra.shape == (1, 2, 4, 4)
+    extras = transform.extras_normalized()
+    assert list(extras) == [a_extra, b_extra]
+    assert extras[a_extra].shape == (1, 4, 4)
     # a: (14 - 10) / 2 = 2.0
-    torch.testing.assert_close(extra[:, 0].cpu(), torch.full((1, 4, 4), 2.0))
+    torch.testing.assert_close(extras[a_extra].cpu(), torch.full((1, 4, 4), 2.0))
     # b: (25 - 20) / 5 = 1.0
-    torch.testing.assert_close(extra[:, 1].cpu(), torch.full((1, 4, 4), 1.0))
+    torch.testing.assert_close(extras[b_extra].cpu(), torch.full((1, 4, 4), 1.0))
 
 
 def test_per_channel_with_field_names_subset():
@@ -401,6 +406,7 @@ def test_per_channel_masked_no_shift():
     means = {"a": 10.0}
     stds = {"a": 2.0}
     transform = _make_per_channel(means, stds, append_as_input=True)
+    [extra_name] = transform.extra_channel_names
     tensors = move_tensordict_to_device(
         {"a": torch.tensor([[[14.0, 14.0]], [[14.0, 14.0]]])}
     )
@@ -411,12 +417,11 @@ def test_per_channel_masked_no_shift():
     # sample 1 (masked): no shift, unchanged
     torch.testing.assert_close(result["a"][1].cpu(), torch.full((1, 2), 14.0))
 
-    extra = transform.get_extra_channels()
-    assert extra is not None
+    extra = transform.extras_normalized()[extra_name]
     # sample 0: -shift/std = -(-4)/2 = 2.0
-    assert extra[0, 0, 0, 0].item() == pytest.approx(2.0)
+    assert extra[0, 0, 0].item() == pytest.approx(2.0)
     # sample 1 (masked): no shift, extra = 0
-    assert extra[1, 0, 0, 0].item() == pytest.approx(0.0)
+    assert extra[1, 0, 0].item() == pytest.approx(0.0)
 
 
 def test_per_channel_inverse_before_forward_raises():

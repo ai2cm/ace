@@ -22,10 +22,15 @@ from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.args import StepArgs
+from fme.core.step.global_mean_relaxation import (
+    GlobalMeanRelaxation,
+    GlobalMeanRelaxationConfig,
+)
 from fme.core.step.global_mean_removal import (
     GlobalMeanRemoval,
     GlobalMeanRemovalConfigUnion,
     NoGlobalMeanRemoval,
+    extra_channel_source_field,
 )
 from fme.core.step.secondary_decoder import (
     NoSecondaryDecoder,
@@ -69,6 +74,10 @@ class SingleModuleStepConfig(StepConfigABC):
             from fields before normalization and restoring them after
             denormalization. Supports shared (single reference field) or
             per-channel removal, with optional extra input channels.
+        global_mean_relaxation: Optional configuration for Newtonian
+            relaxation of the global mean of selected output variables
+            toward configured target values. Applied only in eval mode,
+            after the network call and before the corrector.
     """
 
     builder: ModuleSelector
@@ -87,6 +96,7 @@ class SingleModuleStepConfig(StepConfigABC):
     tendency_regularization_weight: float = 0.0
     include_channel_mask_inputs: bool = False
     global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
+    global_mean_relaxation: GlobalMeanRelaxationConfig | None = None
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
@@ -98,6 +108,8 @@ class SingleModuleStepConfig(StepConfigABC):
                 )
         if self.global_mean_removal is not None:
             self.global_mean_removal.validate_names(self.in_names, self.out_names)
+        if self.global_mean_relaxation is not None:
+            self.global_mean_relaxation.validate_names(self.out_names)
         for name in self.prescribed_prognostic_names:
             if name not in self.out_names:
                 raise ValueError(
@@ -286,20 +298,33 @@ class SingleModuleStep(StepABC):
             init_weights: Function to initialize the weights of the module.
         """
         super().__init__()
-        n_in_channels = len(config.in_names)
-        if config.include_channel_mask_inputs:
-            n_in_channels *= 2
         if config.global_mean_removal is not None:
             self._global_mean_removal: GlobalMeanRemoval = (
                 config.global_mean_removal.build(
                     normalizer=normalizer, in_names=config.in_names
                 )
             )
-            n_in_channels += self._global_mean_removal.n_extra_input_channels
         else:
             self._global_mean_removal = NoGlobalMeanRemoval()
+        if config.global_mean_relaxation is not None:
+            self._global_mean_relaxation: GlobalMeanRelaxation | None = (
+                config.global_mean_relaxation.build(
+                    gridded_operations=dataset_info.gridded_operations,
+                    normalizer=normalizer,
+                )
+            )
+        else:
+            self._global_mean_relaxation = None
+        # Synthetic GMR channels are packed alongside real inputs so they
+        # flow through the packer and channel-mask machinery uniformly.
+        packed_in_names = (
+            list(config.in_names) + self._global_mean_removal.extra_channel_names
+        )
+        n_in_channels = len(packed_in_names)
+        if config.include_channel_mask_inputs:
+            n_in_channels *= 2
         n_out_channels = len(config.out_names)
-        self.in_packer = Packer(config.in_names)
+        self.in_packer = Packer(packed_in_names)
         self.out_packer = Packer(config.out_names)
         self._normalizer = normalizer
         if config.ocean is not None:
@@ -394,15 +419,12 @@ class SingleModuleStep(StepABC):
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
             if self._config.include_channel_mask_inputs:
                 mask_dict = _build_channel_mask_dict(
-                    self.in_names, args.data_mask, input_tensor
+                    self.in_packer.names, args.data_mask, input_tensor
                 )
                 mask_tensor = self.in_packer.pack(mask_dict, axis=self.CHANNEL_DIM)
                 input_tensor = torch.cat(
                     [input_tensor, mask_tensor], dim=self.CHANNEL_DIM
                 )
-            extra = self._global_mean_removal.get_extra_channels()
-            if extra is not None:
-                input_tensor = torch.cat([input_tensor, extra], dim=self.CHANNEL_DIM)
             output_tensor = self.module.wrap_module(wrapper)(
                 input_tensor,
                 labels=args.labels,
@@ -426,6 +448,16 @@ class SingleModuleStep(StepABC):
 
             network_call = network_call_with_capture
 
+        # Newtonian relaxation toward configured target global means is an
+        # eval-time-only adjustment; gating on the step's training flag
+        # keeps it from contributing to the loss during training.
+        if self._global_mean_relaxation is not None and not self._training:
+            global_mean_relaxation: GlobalMeanRelaxation | None = (
+                self._global_mean_relaxation
+            )
+        else:
+            global_mean_relaxation = None
+
         return step_with_adjustments(
             input=args.input,
             next_step_input_data=args.next_step_input_data,
@@ -437,6 +469,7 @@ class SingleModuleStep(StepABC):
             prognostic_names=self.prognostic_names,
             prescribed_prognostic_names=self._config.prescribed_prognostic_names,
             global_mean_removal=self._global_mean_removal,
+            global_mean_relaxation=global_mean_relaxation,
             data_mask=args.data_mask,
             anomaly_only_residual_names=self._config.get_anomaly_only_names(),
             stepper_state=args.stepper_state,
@@ -518,8 +551,13 @@ def _build_channel_mask_dict(
     device = packed_input.device
     result: TensorDict = {}
     for name in in_names:
-        if data_mask is not None and name in data_mask:
-            mask_1d = data_mask[name].to(device=device, dtype=torch.float)
+        # GMR sentinel channels share their source field's mask: the extra
+        # value is already zeroed in forward_transform when the source is
+        # masked, so the mask channel must agree rather than default to 1.
+        source = extra_channel_source_field(name)
+        lookup_name = source if source is not None else name
+        if data_mask is not None and lookup_name in data_mask:
+            mask_1d = data_mask[lookup_name].to(device=device, dtype=torch.float)
             result[name] = mask_1d.view(batch, 1, 1).expand(batch, *spatial)
         else:
             result[name] = torch.ones(batch, *spatial, device=device)
@@ -537,6 +575,7 @@ def step_with_adjustments(
     prognostic_names: list[str],
     prescribed_prognostic_names: list[str] | None = None,
     global_mean_removal: GlobalMeanRemoval | None = None,
+    global_mean_relaxation: GlobalMeanRelaxation | None = None,
     data_mask: TensorMapping | None = None,
     anomaly_only_residual_names: list[str] | None = None,
     stepper_state: StepperState | None = None,
@@ -567,6 +606,11 @@ def step_with_adjustments(
             before the normalizer and ``inverse_transform`` after
             denormalization but before the corrector/ocean/prescribed steps,
             so those adjustments operate in physical space.
+        global_mean_relaxation: Optional Newtonian relaxation of the global
+            mean of selected output fields toward configured target values.
+            Applied after the network call (and any ``global_mean_removal``
+            inverse transform) and before the corrector. Pass ``None`` to
+            disable (e.g. during training).
         data_mask: Per-variable boolean masks passed to
             ``global_mean_removal.forward_transform``.
         anomaly_only_residual_names: Prognostic variable names that should
@@ -594,6 +638,11 @@ def step_with_adjustments(
     else:
         network_input = input
     input_norm = normalizer.normalize(network_input)
+    if global_mean_removal is not None:
+        # Synthetic GMR channels are produced in normalized space; merge
+        # them in after normalization so the network sees a single uniform
+        # input dict.
+        input_norm = {**input_norm, **global_mean_removal.extras_normalized()}
     output_norm = network_calls(input_norm)
     if residual_prediction:
         if anomaly_only_residual_names:
@@ -611,6 +660,8 @@ def step_with_adjustments(
     output = normalizer.denormalize(output_norm)
     if global_mean_removal is not None:
         output = global_mean_removal.inverse_transform(output)
+    if global_mean_relaxation is not None:
+        output = global_mean_relaxation(output)
     if corrector is not None:
         corrector_state: CorrectorState | None = (
             stepper_state.corrector_state if stepper_state is not None else None
