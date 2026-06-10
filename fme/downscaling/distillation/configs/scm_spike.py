@@ -15,11 +15,12 @@ Adapted from:
 
 import os
 
+from omegaconf import DictConfig
+
 import fastgen.configs.methods.config_scm as config_scm_default
 from fastgen.configs.callbacks import EMA_CONST_CALLBACKS
 from fastgen.utils import LazyCall as L
 from fastgen.utils.lr_scheduler import LambdaInverseSquareRootScheduler
-from omegaconf import DictConfig
 
 TEACHER_CKPT_PATH = os.environ.get("ACE_TEACHER_CKPT", "")
 
@@ -28,6 +29,15 @@ H_FINE = int(os.environ.get("ACE_H_FINE", "512"))
 W_FINE = int(os.environ.get("ACE_W_FINE", "512"))
 
 STUDENT_STEPS = int(os.environ.get("ACE_STUDENT_STEPS", "2"))
+
+# Teacher training-noise parameters.  Defaults match the original
+# single-model CONUS teacher, trained with sigma ~ lognormal(p_mean=-1.2,
+# p_std=1.8) on sigma in [0.002, 150].  The multivariate MoE teachers are
+# trained with sigma ~ loguniform on [0.005, 200]; run.sh sets these env
+# vars for --moe-teacher runs.
+NOISE_DIST = os.environ.get("ACE_NOISE_DIST", "lognormal")
+SIGMA_MIN = float(os.environ.get("ACE_SIGMA_MIN", "0.002"))
+SIGMA_MAX = float(os.environ.get("ACE_SIGMA_MAX", "150.0"))
 
 
 def create_config():
@@ -45,12 +55,18 @@ def create_config():
 
     config.model.pretrained_model_path = TEACHER_CKPT_PATH
 
-    # Noise distribution matching ACE's EDM training.
+    # Noise distribution matching the teacher's training distribution.
+    # min_t/max_t truncate the lognormal and parameterize the loguniform;
+    # they must span the teacher's full sigma range — the SampleTConfig
+    # defaults of [0.002, 80] would otherwise clamp sampling at sigma=80.
     config.model.sample_t_cfg.sigma_data = 1.0  # ACE always uses sigma_data=1
-    config.model.sample_t_cfg.train_p_mean = -1.2
+    config.model.sample_t_cfg.time_dist_type = NOISE_DIST
+    config.model.sample_t_cfg.train_p_mean = -1.2  # lognormal only
     config.model.sample_t_cfg.train_p_std = (
-        1.8  # wider tail: samples more high-σ, matches fdistill
+        1.8  # lognormal only; wider tail: samples more high-σ, matches fdistill
     )
+    config.model.sample_t_cfg.min_t = SIGMA_MIN
+    config.model.sample_t_cfg.max_t = SIGMA_MAX
 
     # Optimizer (Adam with conservative LR for sCM)
     config.model.net_optimizer.optim_type = "adam"

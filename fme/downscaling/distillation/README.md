@@ -15,6 +15,10 @@ Primary go/no-go metric:
 `generation/histogram/prediction_frac_of_target/99.9999th-percentile`
 within ~5 % of the teacher.
 
+For how the ACE↔FastGen integration works — adapter design, where every
+teacher-dependent parameter lives (noise schedule, sigma ranges, channel
+counts), and known pitfalls — see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ---
 
 ## Prerequisites
@@ -44,7 +48,10 @@ pip install hydra-core boto3 torchvision   # FastGen extras not in fme env
 |---|---|---|
 | `ACE_TEACHER_CKPT` | **yes** | Path to the pre-trained CONUS 100 km→25 km teacher `.ckpt` |
 | `WANDB_API_KEY` | **yes** | W&B API key (or store in `./credentials/wandb_api.txt`) |
-| `ACE_C_OUT` | no | Number of output channels (default `7`) |
+| `ACE_C_OUT` | no | Number of output channels; must match the teacher's `out_names` (default `1`) |
+| `ACE_NOISE_DIST` | no | Training t-distribution: `lognormal` (default) or `loguniform` (MoE teachers) |
+| `ACE_SIGMA_MIN` | no | Teacher training sigma min (default `0.002`) |
+| `ACE_SIGMA_MAX` | no | Teacher training sigma max (default `150.0`) |
 | `ACE_H_FINE` | no | Fine-grid height in pixels (default `512`) |
 | `ACE_W_FINE` | no | Fine-grid width in pixels (default `512`) |
 | `ACE_STUDENT_STEPS` | no | Student inference steps (default per config; see table above) |

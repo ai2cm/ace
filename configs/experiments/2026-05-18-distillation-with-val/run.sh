@@ -79,11 +79,24 @@ if [[ "$MOE_TEACHER" == "true" ]]; then
     TEACHER_CKPT_FLAG="--teacher-moe-checkpoint /checkpoints/bundled_moe_multivariate.ckpt"
     JOB_NAME="${JOB_NAME}-moe-teacher"
     VAL_DATASET=/climate-default/2026-06-09-distillation-teacher-moe-multivar-val-dataset/conus_multivar_val_2023.zarr
+    # MoE teacher training parameters: 5 output variables (u10/v10/PRMSL/
+    # PRATEsfc/T2m), sigma ~ loguniform on [0.005, 200], generated with 18
+    # diffusion steps.  The spike configs read the ACE_* env vars.
+    TEACHER_NUM_STEPS=18
+    TEACHER_ENV_FLAGS=(
+        --env ACE_C_OUT=5
+        --env ACE_NOISE_DIST=loguniform
+        --env ACE_SIGMA_MIN=0.005
+        --env ACE_SIGMA_MAX=200.0
+    )
 else
-    # Default single-model teacher.
+    # Default single-model teacher, trained with sigma ~ lognormal(-1.2, 1.8)
+    # on [0.002, 150] (the spike config defaults).
     TEACHER_DATASET=01KNM6H3JB1ZNS76HX17AAZRF7:checkpoints
     TEACHER_CKPT_FLAG="--teacher-checkpoint /checkpoints/best_histogram_tail.ckpt"
     VAL_DATASET=/climate-default/2026-04-29-distillation-teacher-val-dataset/conus_val_2023.zarr
+    TEACHER_NUM_STEPS=15
+    TEACHER_ENV_FLAGS=()
 fi
 
 gantry run \
@@ -98,6 +111,7 @@ gantry run \
     --env WANDB_JOB_TYPE=distillation \
     --env FASTGEN_OUTPUT_ROOT=/results \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
+    "${TEACHER_ENV_FLAGS[@]}" \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --dataset $TEACHER_DATASET:/checkpoints \
@@ -110,7 +124,7 @@ gantry run \
     -- torchrun --nproc-per-node $NGPU -m fme.downscaling.distillation.fastgen_train \
         --config $CONFIG \
         $TEACHER_CKPT_FLAG \
-        --teacher-num-steps 15 \
+        --teacher-num-steps $TEACHER_NUM_STEPS \
         --data-yaml $SCRIPT_PATH/data-config.yaml \
         --val-dataset $VAL_DATASET \
         --val-data-yaml $SCRIPT_PATH/val-data-config.yaml \

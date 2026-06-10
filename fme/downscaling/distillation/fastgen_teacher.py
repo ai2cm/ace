@@ -21,16 +21,63 @@ without any changes to the ACE model weights.
 from __future__ import annotations
 
 import contextlib
+import math
 from collections.abc import Generator
 from typing import TYPE_CHECKING, Any
 
 import torch
-from fastgen.networks.network import FastGenNetwork
 from torch.nn.parallel import DistributedDataParallel as DDP
+
+from fastgen.networks.network import FastGenNetwork
+from fastgen.networks.noise_schedule import EDMNoiseSchedule
 
 if TYPE_CHECKING:
     from fme.downscaling.models import DiffusionModel
     from fme.downscaling.predictors.serial_denoising import DenoisingMoEPredictor
+
+
+class AceEDMNoiseSchedule(EDMNoiseSchedule):
+    """EDM noise schedule extended with a ``"loguniform"`` time distribution.
+
+    ACE teachers trained with ``LogUniformNoiseDistribution`` (e.g. the
+    multivariate MoE teachers) draw sigma log-uniformly over
+    ``[sigma_min, sigma_max]``.  FastGen's stock EDM schedule has no
+    equivalent ``time_dist_type``, so it is added here rather than patching
+    the vendored FastGen package.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._supported_time_dist_types = tuple(  # type: ignore
+            list(self._supported_time_dist_types) + ["loguniform"]  # type: ignore
+        )
+
+    def sample_t(
+        self,
+        n: int,
+        time_dist_type: str = "polynomial",
+        min_t: float | None = 0.002,
+        max_t: float | None = 80.0,
+        device: torch.device | None = None,
+        **kwargs,
+    ) -> torch.Tensor:
+        if time_dist_type != "loguniform":
+            return super().sample_t(
+                n,
+                time_dist_type=time_dist_type,
+                min_t=min_t,
+                max_t=max_t,
+                device=device,
+                **kwargs,
+            )
+        min_t = max(min_t, self.min_t) if min_t is not None else self.min_t
+        max_t = min(max_t, self.max_t) if max_t is not None else self.max_t
+        target_device = device or self._sigmas.device
+        log_min = math.log(max(min_t, self.clamp_min))
+        log_max = math.log(max_t)  # type: ignore
+        u = torch.rand(n, device=target_device, dtype=self.t_precision)
+        t = torch.exp(u * (log_max - log_min) + log_min)
+        return self.safe_clamp(t, min_t, max_t)
 
 
 class AceDiffusionTeacher(FastGenNetwork):
@@ -119,6 +166,28 @@ class AceDiffusionTeacher(FastGenNetwork):
         # for the EDM teacher.  FastGen loads with strict=False so this new
         # parameter initialises fresh without disturbing teacher weights.
         self.logvar_scalar = torch.nn.Parameter(torch.full((1,), -9.0))
+
+    def set_noise_schedule(
+        self, schedule_type: str | None = None, **noise_schedule_kwargs
+    ) -> None:
+        """Build the noise schedule with ``"loguniform"`` support.
+
+        FastGen's ``reset_parameters`` re-invokes this with no arguments,
+        which under the base implementation would rebuild the schedule with
+        default EDM bounds (sigma in [0.002, 80]) and silently lose the
+        teacher's sigma range, so the construction kwargs are remembered.
+        """
+        if schedule_type is not None and schedule_type != "edm":
+            raise ValueError(
+                f"AceDiffusionTeacher only supports the 'edm' noise schedule, "
+                f"got {schedule_type!r}"
+            )
+        self.schedule_type = "edm"
+        if noise_schedule_kwargs:
+            self._noise_schedule_kwargs = noise_schedule_kwargs
+        self.noise_scheduler = AceEDMNoiseSchedule(
+            **getattr(self, "_noise_schedule_kwargs", {})
+        )
 
     def __deepcopy__(self, memo: dict) -> AceDiffusionTeacher:
         """Return a copy that does NOT carry all MoE expert weights.

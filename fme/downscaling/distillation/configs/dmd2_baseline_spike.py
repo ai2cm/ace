@@ -16,9 +16,10 @@ Adapted from:
 
 import os
 
+from omegaconf import DictConfig
+
 import fastgen.configs.methods.config_dmd2 as config_dmd2_default
 from fastgen.configs.callbacks import EMA_CONST_CALLBACKS
-from omegaconf import DictConfig
 
 TEACHER_CKPT_PATH = os.environ.get("ACE_TEACHER_CKPT", "")
 
@@ -27,6 +28,12 @@ H_FINE = int(os.environ.get("ACE_H_FINE", "512"))
 W_FINE = int(os.environ.get("ACE_W_FINE", "512"))
 
 STUDENT_STEPS = int(os.environ.get("ACE_STUDENT_STEPS", "1"))
+
+# Teacher sigma range.  Defaults match the original single-model CONUS
+# teacher (sigma in [0.002, 150]); the multivariate MoE teachers use
+# [0.005, 200].  run.sh sets these env vars for --moe-teacher runs.
+SIGMA_MIN = float(os.environ.get("ACE_SIGMA_MIN", "0.002"))
+SIGMA_MAX = float(os.environ.get("ACE_SIGMA_MAX", "150.0"))
 
 
 def create_config():
@@ -42,8 +49,14 @@ def create_config():
     config.model.precision_amp = "bfloat16"
     config.model.grad_scaler_enabled = False
 
-    # Noise distribution matching ACE's training.
+    # Sample t from the Karras sigma grid, which the AceDiffusionTeacher
+    # builds over the teacher checkpoint's [sigma_min, sigma_max].  min_t and
+    # max_t must still span the teacher's full sigma range — the
+    # SampleTConfig defaults of [0.002, 80] would otherwise clamp sampled
+    # sigmas at 80.
     config.model.sample_t_cfg.time_dist_type = "polynomial"
+    config.model.sample_t_cfg.min_t = SIGMA_MIN
+    config.model.sample_t_cfg.max_t = SIGMA_MAX
 
     config.model.pretrained_model_path = TEACHER_CKPT_PATH
 

@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Smoke tests for AceDiffusionTeacher."""
 
+import math
+
 import torch
 
 from fme.core.coordinates import LatLonCoordinates
@@ -26,7 +28,9 @@ def _make_fine_coords(fine_shape: tuple[int, int]) -> LatLonCoordinates:
     )
 
 
-def _build_small_model(coarse_shape=(8, 16), fine_shape=(16, 32)):
+def _build_small_model(
+    coarse_shape=(8, 16), fine_shape=(16, 32), sigma_min=0.1, sigma_max=1.0
+):
     normalizer = PairedNormalizationConfig(
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
@@ -43,8 +47,8 @@ def _build_small_model(coarse_shape=(8, 16), fine_shape=(16, 32)):
         normalization=normalizer,
         p_mean=-1.0,
         p_std=1.0,
-        sigma_min=0.1,
-        sigma_max=1.0,
+        sigma_min=sigma_min,
+        sigma_max=sigma_max,
         churn=0.5,
         num_diffusion_generation_steps=3,
         predict_residual=False,
@@ -109,6 +113,74 @@ def test_teacher_deepcopy_independent():
         out_orig = teacher(x_t, t, condition=condition)
         out_copy = teacher_copy(x_t, t, condition=condition)
     assert torch.allclose(out_orig, out_copy)
+
+
+def test_noise_schedule_uses_teacher_sigma_range():
+    """The schedule's t range comes from the teacher checkpoint config."""
+    model = _build_small_model(sigma_min=0.005, sigma_max=200.0)
+    teacher = AceDiffusionTeacher(model)
+
+    assert teacher.noise_scheduler.min_t == 0.005
+    assert teacher.noise_scheduler.max_t == 200.0
+
+
+def test_noise_schedule_range_survives_reset_parameters():
+    """reset_parameters() must not revert the schedule to EDM default bounds.
+
+    FastGen's FSDP path calls reset_parameters(), whose base implementation
+    rebuilds the schedule with no kwargs (sigma in [0.002, 80]).
+    """
+    model = _build_small_model(sigma_min=0.005, sigma_max=200.0)
+    teacher = AceDiffusionTeacher(model)
+
+    teacher.reset_parameters()
+
+    assert teacher.noise_scheduler.min_t == 0.005
+    assert teacher.noise_scheduler.max_t == 200.0
+
+
+def test_loguniform_sample_t():
+    """ "loguniform" samples lie in [min_t, max_t] and are uniform in log space."""
+    torch.manual_seed(0)
+    model = _build_small_model(sigma_min=0.005, sigma_max=200.0)
+    teacher = AceDiffusionTeacher(model)
+
+    n = 20_000
+    t = teacher.noise_scheduler.sample_t(
+        n, time_dist_type="loguniform", min_t=0.005, max_t=200.0
+    )
+
+    assert t.shape == (n,)
+    assert t.min() >= 0.005
+    assert t.max() <= 200.0
+    # Log-uniform on [0.005, 200]: log t is uniform, so the median is the
+    # geometric mean sqrt(0.005 * 200) = 1 and each log-space quartile holds
+    # ~25% of samples.
+    log_t = torch.log(t)
+    quartile = (math.log(200.0) - math.log(0.005)) / 4
+    for k in range(4):
+        lo = math.log(0.005) + k * quartile
+        frac = ((log_t >= lo) & (log_t < lo + quartile)).float().mean()
+        assert abs(frac - 0.25) < 0.02
+
+
+def test_lognormal_sample_t_still_supported():
+    """The extended schedule defers non-loguniform types to FastGen's EDM."""
+    torch.manual_seed(0)
+    model = _build_small_model(sigma_min=0.002, sigma_max=150.0)
+    teacher = AceDiffusionTeacher(model)
+
+    t = teacher.noise_scheduler.sample_t(
+        1000,
+        time_dist_type="lognormal",
+        train_p_mean=-1.2,
+        train_p_std=1.8,
+        min_t=0.002,
+        max_t=150.0,
+    )
+    assert t.shape == (1000,)
+    assert t.min() >= 0.002
+    assert t.max() <= 150.0
 
 
 def test_lazy_deepcopy_roundtrip():

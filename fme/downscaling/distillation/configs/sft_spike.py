@@ -17,9 +17,10 @@ Adapted from:
 
 import os
 
+from omegaconf import DictConfig
+
 import fastgen.configs.methods.config_sft as config_sft_default
 from fastgen.configs.callbacks import EMA_CONST_CALLBACKS
-from omegaconf import DictConfig
 
 # Path to the pre-trained ACE teacher checkpoint.
 # Override via: config.model.pretrained_model_path = "/path/to/teacher.ckpt"
@@ -34,6 +35,15 @@ TEACHER_CKPT_PATH = os.environ.get(
 C_OUT = int(os.environ.get("ACE_C_OUT", "1"))
 H_FINE = int(os.environ.get("ACE_H_FINE", "512"))
 W_FINE = int(os.environ.get("ACE_W_FINE", "512"))
+
+# Teacher training-noise parameters.  Defaults match the original
+# single-model CONUS teacher, trained with sigma ~ lognormal on
+# sigma in [0.002, 150].  The multivariate MoE teachers are trained with
+# sigma ~ loguniform on [0.005, 200]; run.sh sets these env vars for
+# --moe-teacher runs.
+NOISE_DIST = os.environ.get("ACE_NOISE_DIST", "lognormal")
+SIGMA_MIN = float(os.environ.get("ACE_SIGMA_MIN", "0.002"))
+SIGMA_MAX = float(os.environ.get("ACE_SIGMA_MAX", "150.0"))
 
 
 def create_config():
@@ -54,11 +64,15 @@ def create_config():
     config.model.precision_amp = "bfloat16"
     config.model.grad_scaler_enabled = False  # bf16 doesn't need grad scaler
 
-    # ACE uses log-normal noise sampling (p_mean=-1.2, p_std=1.2 typical).
-    # These match the SFT defaults; override from the teacher config if needed.
-    config.model.sample_t_cfg.time_dist_type = "lognormal"
-    config.model.sample_t_cfg.train_p_mean = -1.2
-    config.model.sample_t_cfg.train_p_std = 1.2
+    # Noise distribution matching the teacher's training distribution.
+    # min_t/max_t truncate the lognormal and parameterize the loguniform;
+    # they must span the teacher's full sigma range — the SampleTConfig
+    # defaults of [0.002, 80] would otherwise clamp sampling at sigma=80.
+    config.model.sample_t_cfg.time_dist_type = NOISE_DIST
+    config.model.sample_t_cfg.train_p_mean = -1.2  # lognormal only
+    config.model.sample_t_cfg.train_p_std = 1.2  # lognormal only
+    config.model.sample_t_cfg.min_t = SIGMA_MIN
+    config.model.sample_t_cfg.max_t = SIGMA_MAX
 
     config.model.pretrained_model_path = TEACHER_CKPT_PATH
 
