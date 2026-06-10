@@ -679,14 +679,19 @@ def test_train_and_inference(
     """Ensure that training and standalone inference run without errors."""
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
-    # need multi-year to cover annual aggregator
+    # Inline inference must reach forward step 20 for the default step-20
+    # metrics, and the annual aggregator requires more than 730 days of
+    # inference data. 20 forward steps (even, as required by
+    # forward_steps_in_memory=2) at 40-day spacing gives 21 timesteps
+    # spanning 840 days and three calendar years. Two initial conditions at
+    # indices 0 and 1 require two extra timesteps of data on disk.
     train_config, inference_config = _setup(
         tmp_path,
         settings.nettype,
         log_to_wandb=True,
-        timestep_days=20,
-        n_time=int(366 * 3 / 20 + 1),
-        inference_forward_steps=int(366 * 3 / 20 / 2 - 1) * 2,  # must be even
+        timestep_days=40,
+        n_time=22,
+        inference_forward_steps=20,
         use_healpix=settings.use_healpix,
         crps_training=settings.crps_training,
         save_per_epoch_diagnostics=True,
@@ -1072,9 +1077,9 @@ def test_train_without_inline_inference(tmp_path, very_fast_only: bool):
         tmp_path,
         nettype,
         log_to_wandb=True,
-        timestep_days=20,
-        n_time=int(366 * 3 / 20 + 1),
-        inference_forward_steps=int(366 * 3 / 20 / 2 - 1) * 2,  # must be even
+        timestep_days=40,
+        n_time=22,
+        inference_forward_steps=20,  # must be even
         use_healpix=False,
         crps_training=crps_training,
         save_per_epoch_diagnostics=True,
