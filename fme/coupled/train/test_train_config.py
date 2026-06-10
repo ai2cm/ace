@@ -8,6 +8,7 @@ from fme.ace.stepper.time_length_probabilities import (
     TimeLengthProbability,
 )
 from fme.core.dataset.xarray import XarrayDataConfig
+from fme.core.generics.aggregator import AggregatorSummary, InferenceSummary
 from fme.core.loss import StepLossConfig
 from fme.core.typing_ import Slice
 from fme.coupled.aggregator import InferenceEvaluatorAggregatorConfig
@@ -389,7 +390,10 @@ class TestGetValidationCallback:
         stepper = MagicMock()
         with patch(
             "fme.core.generics.trainer.run_validation",
-            side_effect=[{"a/mean/loss": 0.1}, {"b/mean/loss": 0.2}],
+            side_effect=[
+                AggregatorSummary(logs={}, loss=0.1),
+                AggregatorSummary(logs={}, loss=0.2),
+            ],
         ):
             callback = get_validation_callback(
                 validation_entries=entries,
@@ -457,24 +461,32 @@ class TestGetInferenceCallback:
         entries = [self._make_entry("inference", weight=2.0)]
         logs, error = self._call(
             entries,
-            [{"inference/time_mean_norm/rmse/channel_mean": 0.4}],
+            [
+                InferenceSummary(
+                    logs={"inference/time_mean_norm/rmse/channel_mean": 0.4}, loss=0.4
+                )
+            ],
         )
         assert error == pytest.approx(2.0 * 0.4)
         assert "inference/time_mean_norm/rmse/channel_mean" in logs
 
     def test_weighted_entry_missing_metric_raises(self):
         entries = [self._make_entry("a", weight=1.0)]
-        with pytest.raises(RuntimeError, match="did not produce expected metric key"):
+        with pytest.raises(RuntimeError, match="did not produce a loss"):
             self._call(
                 entries,
-                [{"a/other_metric": 1.0}],
+                [InferenceSummary(logs={"a/other_metric": 1.0}, loss=None)],
             )
 
     def test_all_zero_weight_returns_none_error(self):
         entries = [self._make_entry("a", weight=0.0)]
         logs, error = self._call(
             entries,
-            [{"a/time_mean_norm/rmse/channel_mean": 0.5}],
+            [
+                InferenceSummary(
+                    logs={"a/time_mean_norm/rmse/channel_mean": 0.5}, loss=0.5
+                )
+            ],
         )
         assert error is None
         assert "a/time_mean_norm/rmse/channel_mean" in logs
@@ -487,8 +499,12 @@ class TestGetInferenceCallback:
         logs, error = self._call(
             entries,
             [
-                {"a/time_mean_norm/rmse/channel_mean": 0.1},
-                {"b/time_mean_norm/rmse/channel_mean": 0.2},
+                InferenceSummary(
+                    logs={"a/time_mean_norm/rmse/channel_mean": 0.1}, loss=0.1
+                ),
+                InferenceSummary(
+                    logs={"b/time_mean_norm/rmse/channel_mean": 0.2}, loss=0.2
+                ),
             ],
         )
         assert error == pytest.approx(2.0 * 0.1 + 3.0 * 0.2)
@@ -500,7 +516,11 @@ class TestGetInferenceCallback:
         ]
         logs, error = self._call(
             entries,
-            [{"a/time_mean_norm/rmse/channel_mean": 0.5}],
+            [
+                InferenceSummary(
+                    logs={"a/time_mean_norm/rmse/channel_mean": 0.5}, loss=0.5
+                ),
+            ],
             epoch=1,
             inference_epochs=(1,),
             inference_epoch_sets=[{1}, {2}],
