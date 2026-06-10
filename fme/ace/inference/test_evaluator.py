@@ -842,13 +842,9 @@ def test_compute_derived_quantities(has_required_fields):
         assert not existence_check
 
 
-def test_derived_metrics_run_without_errors(
-    tmp_path: pathlib.Path, very_fast_only: bool
-):
+@pytest.mark.medium
+def test_derived_metrics_run_without_errors(tmp_path: pathlib.Path):
     """Checks that derived metrics are computed during inferece without errors."""
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-
     n_forward_steps = 2
 
     in_names = ["var", "PRESsfc", "specific_total_water_0", "specific_total_water_1"]
@@ -1224,13 +1220,11 @@ def test_resolve_variable_metadata(
         pytest.param(NameConfig("solar_constant"), id="solar-constant-as-name"),
     ],
 )
+@pytest.mark.medium
 def test_evaluator_with_derived_forcings(
     tmp_path: pathlib.Path,
     solar_constant: NameConfig | ValueConfig,
-    very_fast_only: bool,
 ):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
     forward_steps_in_memory = 2
     insolation_name = "DSWRFtoa"
     in_names = ["var", "forcing_var", insolation_name]
@@ -1300,12 +1294,8 @@ def test_evaluator_with_derived_forcings(
     assert insolation_name not in ds
 
 
-def test_evaluator_with_non_local_experiment_dir(
-    tmp_path: pathlib.Path, very_fast_only: bool
-):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-
+@pytest.mark.medium
+def test_evaluator_with_non_local_experiment_dir(tmp_path: pathlib.Path):
     # Use an in-memory filesystem for the experiment directory to test using
     # an experiment_dir on a non-local filesystem.
     experiment_dir = "memory://experiment_dir"

@@ -46,11 +46,10 @@ def test_DataLoaderConfig_mpcontext(
     assert loader_config._mp_context() == expected
 
 
-def test_DataLoaderConfig_build(tmp_path, very_fast_only: bool):
+@pytest.mark.medium
+def test_DataLoaderConfig_build(tmp_path):
     # TODO: this test can be removed after future PRs add a no-target
     # run script integration test that covers this functionality.
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
     paths = data_paths_helper(tmp_path)
     requirements = DataRequirements(
         fine_names=[], coarse_names=["var0"], n_timesteps=1, use_fine_topography=True
@@ -110,11 +109,10 @@ def test_PairedDataLoaderConfig_sample_with_replacement(tmp_path):
     assert len(data.loader) == n_sample
 
 
-def test_DataLoaderConfig_includes_merge(tmp_path, very_fast_only: bool):
+@pytest.mark.medium
+def test_DataLoaderConfig_includes_merge(tmp_path):
     """Test DataLoaderConfig with coarse as
     [XarrayDataConfig, MergeNoConcatDatasetConfig]."""
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
     paths = data_paths_helper(tmp_path, num_timesteps=4)
     requirements = DataRequirements(
         fine_names=[],
@@ -189,9 +187,8 @@ def test_paired_config_raise_error_on_deprecated_topography():
         )
 
 
-def test_PairedDataLoaderConfig_includes_merge(tmp_path, very_fast_only: bool):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
+@pytest.mark.medium
+def test_PairedDataLoaderConfig_includes_merge(tmp_path):
     paths = data_paths_helper(tmp_path, num_timesteps=4)
     requirements = DataRequirements(
         fine_names=["var0"],

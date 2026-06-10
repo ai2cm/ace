@@ -665,15 +665,13 @@ _TRAIN_AND_INFERENCE_CASES = [
 ]
 
 
+@pytest.mark.medium
 @pytest.mark.parametrize("settings", _TRAIN_AND_INFERENCE_CASES)
 def test_train_and_inference(
     tmp_path,
     settings: TrainAndInferenceTestSettings,
-    very_fast_only: bool,
 ):
     """Ensure that training and standalone inference run without errors."""
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
     # need multi-year to cover annual aggregator
     train_config, inference_config = _setup(
         tmp_path,
@@ -796,11 +794,10 @@ def test_train_and_inference(
     assert np.sum(np.isnan(ds_target["baz"].values)) == 0
 
 
+@pytest.mark.medium
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
-def test_resume(tmp_path, nettype, very_fast_only: bool):
+def test_resume(tmp_path, nettype):
     """Make sure the training is resumed from a checkpoint when restarted."""
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
 
     mock = unittest.mock.MagicMock(side_effect=_restore_checkpoint)
     with unittest.mock.patch("fme.core.generics.trainer._restore_checkpoint", new=mock):
@@ -843,11 +840,10 @@ def _get_reproducible_trainer(config_dict, seed):
     return build_trainer(builders, config)
 
 
+@pytest.mark.medium
 @pytest.mark.parametrize("nettype", ["NoiseConditionedSFNO"])
-def test_set_seed(tmp_path, nettype, very_fast_only: bool):
+def test_set_seed(tmp_path, nettype):
     """Test that set_seed leads to identical training outcomes."""
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
 
     config_path, _ = _setup(tmp_path, nettype)
     with open(config_path) as f:
@@ -873,17 +869,15 @@ def test_set_seed(tmp_path, nettype, very_fast_only: bool):
     )
 
 
+@pytest.mark.medium
 @pytest.mark.parametrize("nettype", ["NoiseConditionedSFNO"])
 @pytest.mark.parametrize("save_type", ["restart", "all"])
 def test_restore_checkpoint(
     tmp_path,
     nettype: str,
     save_type: Literal["restart", "all"],
-    very_fast_only: bool,
 ):
     """Test that restoring a checkpoint works."""
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
 
     # this test will fail if the config has rng
     config_path, _ = _setup(tmp_path, nettype, use_time_length_probabilities=False)
@@ -985,17 +979,15 @@ def test_restore_checkpoint(
             )
 
 
+@pytest.mark.slow
 @pytest.mark.serial
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
 @pytest.mark.skipif(
     fme.get_device().type == "mps", reason="MPS does not support multi-device training."
 )
-def test_resume_two_workers(tmp_path, nettype, skip_slow: bool, tmpdir: pathlib.Path):
+def test_resume_two_workers(tmp_path, nettype, tmpdir: pathlib.Path):
     """Make sure the training is resumed from a checkpoint when restarted, using
     torchrun with NPROC_PER_NODE set to 2."""
-    if skip_slow:
-        # script is slow as everything is re-imported when it runs
-        pytest.skip("Skipping slow tests")
     train_config, inference_config = _setup(tmp_path, nettype)
     subprocess_args = [
         JOB_SUBMISSION_SCRIPT_PATH,
@@ -1035,13 +1027,11 @@ def _create_copy_weights_after_batch_config(
     return new_config_file.name
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
-def test_copy_weights_after_batch(tmp_path, nettype, skip_slow: bool):
+def test_copy_weights_after_batch(tmp_path, nettype):
     """Check that fine tuning config using copy_weights_after_batch
     runs without errors."""
-    if skip_slow:
-        pytest.skip("Skipping slow tests")
-
     train_config, _ = _setup(tmp_path, nettype)
 
     train_main(
@@ -1057,9 +1047,8 @@ def test_copy_weights_after_batch(tmp_path, nettype, skip_slow: bool):
     train_main(yaml_config=fine_tuning_config)
 
 
-def test_train_without_inline_inference(tmp_path, very_fast_only: bool):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
+@pytest.mark.medium
+def test_train_without_inline_inference(tmp_path):
     nettype = "SphericalFourierNeuralOperatorNet"
     crps_training = False
     log_validation_maps = False
@@ -1106,12 +1095,10 @@ def test_train_without_inline_inference(tmp_path, very_fast_only: bool):
         ),
     ],
 )
+@pytest.mark.medium
 def test_train_and_inference_with_derived_forcings(
-    tmp_path, insolation_config: InsolationConfig, very_fast_only: bool
+    tmp_path, insolation_config: InsolationConfig
 ):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-
     nettype = "SphericalFourierNeuralOperatorNet"
     crps_training = False
     log_validation_maps = False

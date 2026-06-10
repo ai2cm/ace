@@ -335,11 +335,9 @@ def generation_config_path(generation_config):
     return config_path
 
 
-def test_generation_main(generation_config_path, skip_slow):
+@pytest.mark.slow
+def test_generation_main(generation_config_path):
     """Test the main generation process end-to-end."""
-    if skip_slow:
-        pytest.skip("Skipping slow test.")
-
     main(str(generation_config_path))
 
     output_dir = generation_config_path.parent
@@ -363,16 +361,14 @@ def test_generation_main(generation_config_path, skip_slow):
     assert event["var0"].sizes[TIME_NAME] == 1
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(
     (not torch.cuda.is_available() or torch.cuda.device_count() < 2),
     reason="Skipping multi-GPU test: less than 2 GPUs available.",
 )
 @pytest.mark.serial
-def test_generation_entrypoint(generation_config_path, skip_slow):
+def test_generation_entrypoint(generation_config_path):
     """Test the main generation process end-to-end."""
-    if skip_slow:
-        pytest.skip("Skipping slow test.")
-
     command = [
         "torchrun",
         "--nproc_per_node",

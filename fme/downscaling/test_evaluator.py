@@ -107,14 +107,12 @@ def get_trainer_model_config():
         ),
     ],
 )
+@pytest.mark.medium
 def test_evaluator_runs(
     tmp_path,
     evaluator_model_config,
     num_samples,
-    very_fast_only: bool,
 ):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
     """Check that evaluator runs with different models."""
     evaluator_config_path = create_evaluator_config(
         tmp_path, evaluator_model_config, num_samples

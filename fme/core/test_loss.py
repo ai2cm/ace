@@ -46,9 +46,8 @@ def test_loss_builds_and_runs(global_mean_type):
     assert all(isinstance(c, LossComponent) for c in result)
 
 
-def test_spectral_energy_score(very_fast_only: bool):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
+@pytest.mark.medium
+def test_spectral_energy_score():
     torch.manual_seed(0)
     DEVICE = get_device()
     n_lat, n_lon = 16, 32
@@ -739,10 +738,9 @@ def test_per_channel_losses_are_distinct_mse():
     assert channel_losses["var_a"].loss < channel_losses["var_b"].loss
 
 
-def test_energy_score_preweighting_preserves_total(very_fast_only: bool):
+@pytest.mark.medium
+def test_energy_score_preweighting_preserves_total():
     """Verify the pre-weighted spectral tensor's mean matches the old scalar."""
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
     torch.manual_seed(42)
     DEVICE = get_device()
     n_lat, n_lon = 16, 32

@@ -1688,6 +1688,7 @@ LOAD_STEPPER_TESTS = {
     list(LOAD_STEPPER_TESTS.values()),
     ids=list(LOAD_STEPPER_TESTS.keys()),
 )
+@pytest.mark.medium
 def test_load_stepper_and_load_stepper_config(
     tmp_path: pathlib.Path,
     serialized_ocean_config: OceanConfig | None,
@@ -1699,10 +1700,7 @@ def test_load_stepper_and_load_stepper_config(
     expected_ocean_config: OceanConfig | None,
     expected_multi_call_config: MultiCallConfig | None,
     expected_derived_forcings_config: DerivedForcingsConfig,
-    very_fast_only: bool,
 ):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
     in_names = ["co2", "var", "a", "b"]
     fluxes = ["ULWRFtoa"]
     out_names = ["var", "a"] + fluxes
@@ -1788,13 +1786,10 @@ def validate_stepper_prescribed_prognostic_names(
     assert config.prescribed_prognostic_names == expected
 
 
-def test_load_stepper_with_prescribed_prognostic_override(
-    tmp_path: pathlib.Path, very_fast_only: bool
-):
+@pytest.mark.medium
+def test_load_stepper_with_prescribed_prognostic_override(tmp_path: pathlib.Path):
     """Loading with StepperOverrideConfig(prescribed_prognostic_names=...) applies the
     override."""
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
     in_names = ["co2", "var", "a", "b"]
     out_names = ["var", "a"]
     stepper_path = tmp_path / "stepper"

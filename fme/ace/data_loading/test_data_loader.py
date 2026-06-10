@@ -260,17 +260,15 @@ def test_xarray_loader(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "workers, force_zarr_engine_used", [(0, False), (0, True), (1, True)]
+    "workers, force_zarr_engine_used",
+    [(0, False), (0, True), pytest.param(1, True, marks=pytest.mark.medium)],
 )
 def test_xarray_loader_scheduled_epoch(
     tmp_path,
     force_zarr_engine_used: bool,
     workers: int,
-    very_fast_only: bool,
 ):
     """Checks that vertical coordinates are present."""
-    if very_fast_only and workers > 0:
-        pytest.skip("Skipping non-fast tests")
     _create_dataset_on_disk(tmp_path, n_times=4)
     config = DataLoaderConfig(
         dataset=ConcatDatasetConfig(
@@ -506,13 +504,10 @@ def test_loader_n_repeats_but_not_infer_timestep_error(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "num_data_workers, force_forkserver", [(0, False), (3, False), (3, True)]
+    "num_data_workers, force_forkserver",
+    [(0, False), (3, False), pytest.param(3, True, marks=pytest.mark.medium)],
 )
-def test_inference_data_loader(
-    tmp_path, num_data_workers: int, force_forkserver: bool, very_fast_only: bool
-):
-    if very_fast_only and force_forkserver:
-        pytest.skip("Skipping non-fast tests")
+def test_inference_data_loader(tmp_path, num_data_workers: int, force_forkserver: bool):
     _create_dataset_on_disk(tmp_path, n_times=14)
     batch_size = 2
     step = 7

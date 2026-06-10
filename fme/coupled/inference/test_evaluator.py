@@ -323,6 +323,7 @@ def test_evaluator_n_coupled_steps_divisible_by_coupled_steps_in_memory():
         (2, 1, 2, False, True),
     ],
 )
+@pytest.mark.medium
 def test_evaluator_inference(
     tmp_path: pathlib.Path,
     n_coupled_steps: int,
@@ -330,11 +331,7 @@ def test_evaluator_inference(
     n_initial_conditions: int,
     save_standalone_component_checkpoints: bool,
     use_prediction_data: bool,
-    very_fast_only: bool,
 ):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-
     ocean_in_names = ["o_prog", "sst", "mask_0", "a_diag", "thetao_0"]
     ocean_out_names = ["o_prog", "sst", "o_diag", "thetao_0"]
     atmos_in_names = ["a_prog", "surface_temperature", "ocean_fraction"]

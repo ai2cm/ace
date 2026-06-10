@@ -100,9 +100,8 @@ def create_predictor_config(
     return out_path, f"{paths.fine}/data.nc"
 
 
-def test_predictor_runs(tmp_path, very_fast_only: bool):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
+@pytest.mark.medium
+def test_predictor_runs(tmp_path):
     n_samples = 2
     coarse_shape = (4, 4)
     downscale_factor = 2
@@ -139,12 +138,10 @@ def test_predictor_runs(tmp_path, very_fast_only: bool):
     assert os.path.exists(f"{predictor_config['experiment_dir']}/test_event.nc")
 
 
+@pytest.mark.medium
 def test_predictor_renaming(
     tmp_path,
-    very_fast_only: bool,
 ):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
     n_samples = 2
     coarse_shape = (4, 4)
     downscale_factor = 2

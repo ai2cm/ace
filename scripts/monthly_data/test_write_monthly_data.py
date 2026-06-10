@@ -30,9 +30,8 @@ def write_ensemble_dataset(
         )
 
 
-def test_write_monthly_data(very_fast_only: bool, tmp_path: pathlib.Path):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
+@pytest.mark.medium
+def test_write_monthly_data(tmp_path: pathlib.Path):
     all_names = ["a", "b"]
     horizontal = [DimSize("lat", 8), DimSize("lon", 4)]
     dim_sizes = DimSizes(

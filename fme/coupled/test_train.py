@@ -266,13 +266,9 @@ def _write_test_yaml_files(
         (3, True),  # CRPS training with EnsembleLoss
     ],
 )
-def test_train_and_inference(
-    tmp_path, loss_atmos_n_steps, crps_training: bool, very_fast_only: bool
-):
+@pytest.mark.medium
+def test_train_and_inference(tmp_path, loss_atmos_n_steps, crps_training: bool):
     """Ensure that coupled training and standalone inference run without errors."""
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-
     set_seed(42 + loss_atmos_n_steps)
 
     data_dir = tmp_path / "coupled_data"
