@@ -15,7 +15,7 @@ from fme.ace.stepper import TrainOutput
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.fill import SmoothFloodFill
-from fme.core.generics.aggregator import AggregatorABC
+from fme.core.generics.aggregator import AggregatorABC, AggregatorSummary
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.tensors import fold_ensemble_dim, fold_sized_ensemble_dim
 from fme.core.typing_ import TensorMapping
@@ -130,27 +130,23 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
             )
 
     @torch.no_grad()
-    def get_logs(self, label: str) -> dict[str, torch.Tensor]:
-        """
-        Returns logs as can be reported to WandB.
-
-        Args:
-            label: Label to prepend to all log keys.
-        """
-        logs = {}
+    def get_summary(self, label: str) -> AggregatorSummary:
+        logs: dict[str, float] = {}
         if self._n_loss_batches > 0:
             for name, aggregator in self._paired_aggregators.items():
                 logs.update(
                     {f"{label}/{k}": v for k, v in aggregator.get_logs(name).items()}
                 )
         dist = Distributed.get_instance()
-        logs[f"{label}/mean/loss"] = float(
-            dist.reduce_mean(self._loss / self._n_loss_batches).cpu().numpy()
-        )
+        loss = float(dist.reduce_mean(self._loss / self._n_loss_batches).cpu().numpy())
+        logs[f"{label}/mean/loss"] = loss
         logs.update(self._per_step_losses.get_logs(label))
         if self._per_channel_losses is not None:
             logs.update(self._per_channel_losses.get_logs(label))
-        return logs
+        return AggregatorSummary(logs=logs, loss=loss)
+
+    def get_logs(self, label: str):
+        return self.get_summary(label).logs
 
     @torch.no_grad()
     def flush_diagnostics(self, subdir: str | None) -> None:

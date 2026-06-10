@@ -5,7 +5,7 @@ import pytest
 import torch
 
 from fme.core.coordinates import LatLonCoordinates
-from fme.downscaling.data import StaticInputs
+from fme.downscaling.data import StaticInput, StaticInputs
 from fme.downscaling.models import CheckpointModelConfig
 from fme.downscaling.predictors.serial_denoising import (
     DenoisingExpertCheckpointConfig,
@@ -18,6 +18,7 @@ from fme.downscaling.predictors.serial_denoising import (
 )
 from fme.downscaling.test_models import (
     _get_diffusion_model,
+    _get_monotonic_coordinate,
     make_fine_coords,
     make_paired_batch_data,
 )
@@ -320,3 +321,44 @@ def test_save_preserves_rename_applied_by_checkpoint_model_config(tmp_path):
     ).data_requirements
     assert reqs.fine_names == ["renamed_x"]
     assert set(reqs.coarse_names) == {"renamed_x"}
+
+
+def _make_global_fine_coords_and_static(fine_shape: tuple[int, int]):
+    """Return a global-covering LatLonCoordinates and matching StaticInputs."""
+    step = 360 / fine_shape[1]
+    global_fine_lon = torch.arange(fine_shape[1]) * step + step / 2
+    global_fine_lat = _get_monotonic_coordinate(fine_shape[0], stop=fine_shape[0])
+    full_fine_coords = LatLonCoordinates(lat=global_fine_lat, lon=global_fine_lon)
+    static_field = torch.arange(
+        fine_shape[0] * fine_shape[1], dtype=torch.float32
+    ).reshape(*fine_shape)
+    static_inputs = StaticInputs(
+        fields=[StaticInput(static_field)], coords=full_fine_coords
+    )
+    return full_fine_coords, static_inputs
+
+
+def test_denoising_moe_predictor_rejects_mismatched_expert_grids():
+    """Experts on different grids are rejected at construction (shared-grid)."""
+
+    fine_coords_a, static_a = _make_global_fine_coords_and_static((16, 32))
+    fine_coords_b, static_b = _make_global_fine_coords_and_static((16, 16))
+    expert_a = _get_diffusion_model(
+        coarse_shape=(8, 16),
+        downscale_factor=2,
+        full_fine_coords=fine_coords_a,
+        static_inputs=static_a,
+    )
+    expert_b = _get_diffusion_model(
+        coarse_shape=(8, 8),
+        downscale_factor=2,
+        full_fine_coords=fine_coords_b,
+        static_inputs=static_b,
+    )
+    with pytest.raises(ValueError, match="metadata"):
+        DenoisingMoEPredictor(
+            experts=[expert_a, expert_b],
+            sigma_ranges=[(0.0, 0.5), (0.5, 1.0)],
+            num_diffusion_generation_steps=2,
+            churn=0.0,
+        )
