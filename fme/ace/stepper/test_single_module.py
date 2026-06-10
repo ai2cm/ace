@@ -693,9 +693,9 @@ def test_train_on_batch_requires_epoch(has_epoch: bool, uses_scheduling: bool):
     ],
 )
 @pytest.mark.parametrize("n_forward_steps", [1, 2, 3], ids=lambda p: f"k={p}")
-@pytest.mark.parametrize("is_train", [True, False], ids=["is_train", ""])
+@pytest.mark.parametrize("is_train", [True, False], ids=["train", "eval"])
 @pytest.mark.parametrize(
-    "with_activation_checkpointing", [True, False], ids=["act_ckpt", ""]
+    "with_activation_checkpointing", [True, False], ids=["act_ckpt", "no_act_ckpt"]
 )
 def test_train_on_batch(
     n_forward_steps,
@@ -806,26 +806,15 @@ class Multiply(torch.nn.Module):
         return x * self.factor
 
 
-@pytest.mark.parametrize(
-    "global_only, terms_to_modify, force_positive",
-    [
-        (True, None, False),
-        (True, "precipitation", False),
-        (True, "evaporation", False),
-        (False, "advection_and_precipitation", False),
-        (False, "advection_and_evaporation", False),
-        (False, "advection_and_precipitation", True),
-    ],
-)
-@pytest.mark.parametrize("compute_derived_in_train_on_batch", [False, True])
-def test_stepper_corrector(
-    global_only: bool,
+def _get_corrector_stepper_and_data(
     terms_to_modify,
-    force_positive: bool,
-    compute_derived_in_train_on_batch: bool,
-):
+    force_positive_names: list[str],
+    n_forward_steps: int,
+) -> tuple[TrainStepper, BatchData, DatasetInfo, HybridSigmaPressureCoordinate]:
+    """Build a stepper with an atmosphere corrector and a batch of data
+    with a nonzero global-mean moisture advection for the corrector to remove.
+    """
     torch.random.manual_seed(0)
-    n_forward_steps = 5
     device = get_device()
     data = {
         "PRESsfc": 10.0 + torch.rand(size=(3, n_forward_steps + 1, 5, 5)),
@@ -849,12 +838,6 @@ def test_stepper_corrector(
         vertical_coordinate=vertical_coordinate,
         horizontal_coordinate=horizontal_coordinate,
     )
-    gridded_ops = dataset_info.gridded_operations
-
-    if force_positive:
-        force_positive_names = ["specific_total_water_0"]
-    else:
-        force_positive_names = []
 
     corrector_config = AtmosphereCorrectorConfig(
         conserve_dry_air=True,
@@ -863,7 +846,7 @@ def test_stepper_corrector(
         force_positive_names=force_positive_names,
     )
 
-    mean_advection = gridded_ops.area_weighted_mean(
+    mean_advection = dataset_info.gridded_operations.area_weighted_mean(
         data["tendency_of_total_water_path_due_to_advection"].to(device)
     )
     assert (mean_advection.abs() > 0.0).all()
@@ -906,6 +889,37 @@ def test_stepper_corrector(
         labels=None,
         epoch=0,
     ).to_device()
+    return stepper, batch_data, dataset_info, vertical_coordinate
+
+
+@pytest.mark.parametrize(
+    "global_only, terms_to_modify, force_positive",
+    [
+        (True, None, False),
+        (True, "precipitation", False),
+        (True, "evaporation", False),
+        (False, "advection_and_precipitation", False),
+        (False, "advection_and_evaporation", False),
+        (False, "advection_and_precipitation", True),
+    ],
+)
+@pytest.mark.parametrize("compute_derived_in_train_on_batch", [False, True])
+def test_stepper_corrector(
+    global_only: bool,
+    terms_to_modify,
+    force_positive: bool,
+    compute_derived_in_train_on_batch: bool,
+):
+    if force_positive:
+        force_positive_names = ["specific_total_water_0"]
+    else:
+        force_positive_names = []
+    stepper, batch_data, dataset_info, vertical_coordinate = (
+        _get_corrector_stepper_and_data(
+            terms_to_modify, force_positive_names, n_forward_steps=5
+        )
+    )
+    gridded_ops = dataset_info.gridded_operations
     # run the stepper on the data
     with torch.no_grad():
         stepped = stepper.train_on_batch(
