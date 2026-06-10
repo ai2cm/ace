@@ -50,6 +50,7 @@ from zarr.storage import ObjectStore
 OCEAN_TIME_STEP = 6  # hours between ocean output timesteps
 ATMO_TIME_STEP = 3  # hours between atmosphere output timesteps
 DEFAULT_OUTPUT_GRID = "F90"
+VDIM = "z_l"  # vertical dimension name after cleaning
 
 # Source zarr URLs (0.25-degree, full ~30-year record 1994–2023)
 URL_OCEAN = "gs://noaa-ufs-gefsv13replay/ufs-hr1/0.25-degree/06h-freq/zarr/mom6.zarr"
@@ -111,7 +112,6 @@ ATMO_FORCING_VARS = {
     "lhtfl_ave": "LHTFLsfc",
     "shtfl_ave": "SHTFLsfc",
     "prateb_ave": "PRATEsfc",
-    "pressfc": "PRESsfc",
 }
 
 # FV3 bucket-accumulated frozen precip variables — converted to a rate
@@ -299,51 +299,7 @@ def _compute_ocean_vertical_coarsening(
     coarsened["mask_2d"] = mask_2d
     coarsened.update(_build_land_sea_fractions(mask_2d))
 
-    # Drop stray coordinates
-    keep_coords = {"time", "lat", "lon"}
-    cleaned = {}
-    for name, da in coarsened.items():
-        stray = [c for c in da.coords if c not in keep_coords and c not in da.dims]
-        cleaned[name] = da.drop_vars(stray) if stray else da
-
-    return xr.Dataset(cleaned)
-
-
-def _split_3d_to_levels(
-    ds: xr.Dataset,
-    vars_3d: Sequence[str],
-    vdim: str,
-    mask_3d: xr.DataArray,
-) -> xr.Dataset:
-    """Split 3-D variables into per-level 2-D variables (no coarsening)."""
-    n_levels = ds.sizes[vdim]
-    new_vars: dict[str, xr.DataArray] = {}
-    depths = ds[vdim].values
-    keep_coords = {"time", "lat", "lon"}
-
-    for var in vars_3d:
-        if var not in ds:
-            continue
-        for i in range(n_levels):
-            da = ds[var].isel({vdim: i}, drop=True)
-            da = da.drop_vars([c for c in da.coords if c not in keep_coords])
-            long_name = ds[var].attrs.get("long_name", var)
-            da.attrs["long_name"] = f"{long_name} level-{i}"
-            new_vars[f"{var}_{i}"] = da
-
-    for i in range(n_levels):
-        mask_i = mask_3d.isel({vdim: i}, drop=True).astype(np.float32)
-        mask_i = mask_i.drop_vars([c for c in mask_i.coords if c not in keep_coords])
-        mask_i.attrs = {"long_name": f"ocean mask level-{i}"}
-        new_vars[f"mask_{i}"] = mask_i
-
-    for i, depth in enumerate(depths):
-        new_vars[f"idepth_{i}"] = xr.DataArray(
-            float(depth),
-            attrs={"units": "meters", "long_name": f"Depth at level-{i}"},
-        )
-
-    return xr.Dataset(new_vars)
+    return xr.Dataset(coarsened)
 
 
 # ---------------------------------------------------------------------------
@@ -574,6 +530,44 @@ def open_atmo(variables: list[str], start_time, end_time) -> xr.Dataset:
     return ds
 
 
+def _clean_ocean_dataset(ds: xr.Dataset) -> xr.Dataset:
+    """Clean UFS MOM6 ocean dataset right after opening.
+
+    Normalizes vertical dimensions, drops unused variables, renames
+    to standard names, and removes stray non-dimension coordinates.
+    This runs once at the front of the pipeline so that every downstream
+    function receives a consistently shaped dataset.
+    """
+    # MOM6's layer thickness 'ho' lives on the 'zl' dimension while all
+    # tracer variables (thetao, so, …) use 'z_l'.  Move ho onto z_l so
+    # that the rest of the pipeline only has to deal with one vertical dim.
+    if "zl" in ds.dims and "ho" in ds and "zl" in ds["ho"].dims:
+        ho = ds["ho"].rename({"zl": VDIM})
+        ho = ho.assign_coords({VDIM: ds[VDIM].values})
+        ds = ds.drop_vars("ho")
+        ds["ho"] = ho
+        ds = ds.drop_dims("zl", errors="ignore")
+
+    ds = ds.drop_vars(
+        [v for v in OCEAN_DROP if v in ds] + ["landsea_mask"],
+        errors="ignore",
+    )
+
+    rename_map = {k: v for k, v in OCEAN_RENAME.items() if k in ds}
+    rename_map.update({k: v for k, v in STRESS_RENAME.items() if k in ds})
+    if rename_map:
+        ds = ds.rename(rename_map)
+
+    # Drop stray non-dimension coordinates (cftime, ftime, etc.) that
+    # pollute downstream merge/coarsen steps.
+    keep_coords = {"time", "lat", "lon", VDIM}
+    stray = [c for c in ds.coords if c not in keep_coords and c not in ds.dims]
+    if stray:
+        ds = ds.drop_vars(stray)
+
+    return ds
+
+
 # ---------------------------------------------------------------------------
 # Per-chunk processing (called by each Beam worker)
 # ---------------------------------------------------------------------------
@@ -597,33 +591,11 @@ def _process_chunk(
     """
     xr.set_options(keep_attrs=True)
 
-    # Detect vertical dim
-    vdim = "z_l" if "z_l" in ds_ocean.dims else "zl"
-
-    # Handle duplicate vertical dims: move ho from zl to z_l if needed
-    if "zl" in ds_ocean.dims and vdim != "zl":
-        if "ho" in ds_ocean and "zl" in ds_ocean["ho"].dims:
-            ho_on_vdim = ds_ocean["ho"].rename({"zl": vdim})
-            ho_on_vdim = ho_on_vdim.assign_coords({vdim: ds_ocean[vdim].values})
-            ds_ocean = ds_ocean.drop_vars("ho")
-            ds_ocean["ho"] = ho_on_vdim
-        ds_ocean = ds_ocean.drop_dims("zl", errors="ignore")
-
-    # Drop unneeded variables
-    ds_ocean = ds_ocean.drop_vars(
-        [v for v in OCEAN_DROP if v in ds_ocean], errors="ignore"
-    )
-    ds_ocean = ds_ocean.drop_vars("landsea_mask", errors="ignore")
-
-    # Rename ocean variables
-    rename_map = {k: v for k, v in OCEAN_RENAME.items() if k in ds_ocean}
-    ds_ocean = ds_ocean.rename(rename_map)
-    stress_map = {k: v for k, v in STRESS_RENAME.items() if k in ds_ocean}
-    ds_ocean = ds_ocean.rename(stress_map)
-
-    # Separate ho for independent regridding
+    # Separate ho for independent regridding (thickness-weighted
+    # coarsening needs ho regridded without NaN-masking influence
+    # from tracer fields that have deeper NaN patterns).
     ho_ds = None
-    if "ho" in ds_ocean and vertical_coarsening_indices:
+    if "ho" in ds_ocean:
         ho_ds = ds_ocean[["ho"]]
         ds_ocean = ds_ocean.drop_vars("ho")
 
@@ -649,36 +621,27 @@ def _process_chunk(
             )
 
     # Rebuild masks from regridded NaN pattern
-    mask_3d, mask_2d = _build_3d_mask(ds_ocean, vdim, time_idx=0)
+    mask_3d, mask_2d = _build_3d_mask(ds_ocean, VDIM, time_idx=0)
 
     # --- Vertical coarsening ---
     vars_3d_present = [v for v in VARS_3D if v in ds_ocean]
 
-    if vertical_coarsening_indices:
-        if ho_ds is None or "ho" not in ho_ds:
-            raise ValueError("'ho' is required for thickness-weighted coarsening")
-        ds_ocean["ho"] = ho_ds["ho"]
-        indices_as_tuples = [tuple(pair) for pair in vertical_coarsening_indices]
-        ds_levels = _compute_ocean_vertical_coarsening(
-            ds_ocean,
-            vars_3d_present,
-            indices_as_tuples,
-            vdim,
-        )
-    else:
-        ds_ocean = ds_ocean.drop_vars("ho", errors="ignore")
-        ds_levels = _split_3d_to_levels(
-            ds_ocean,
-            vars_3d_present,
-            vdim,
-            mask_3d,
-        )
+    if ho_ds is None or "ho" not in ho_ds:
+        raise ValueError("'ho' is required for thickness-weighted coarsening")
+    ds_ocean["ho"] = ho_ds["ho"]
+    indices_as_tuples = [tuple(pair) for pair in vertical_coarsening_indices]
+    ds_levels = _compute_ocean_vertical_coarsening(
+        ds_ocean,
+        vars_3d_present,
+        indices_as_tuples,
+        VDIM,
+    )
 
     # Collect 2-D ocean variables
     ocean_2d_names = [
         n
         for n in ds_ocean.data_vars
-        if vdim not in ds_ocean[n].dims and n not in vars_3d_present and n != "ho"
+        if VDIM not in ds_ocean[n].dims and n not in vars_3d_present and n != "ho"
     ]
     ds_ocean_2d = ds_ocean[ocean_2d_names]
 
@@ -820,9 +783,6 @@ def _process_chunk(
     to_merge = [ds_ocean_2d, ds_levels, ds_forcing, ds_ice]
     if ds_derived_atmo is not None:
         to_merge.append(ds_derived_atmo)
-    if not vertical_coarsening_indices:
-        fractions = _build_land_sea_fractions(mask_2d)
-        to_merge.append(xr.Dataset({"mask_2d": mask_2d, **fractions}))
 
     cleaned = []
     for d in to_merge:
@@ -1102,41 +1062,25 @@ def _extract_invariant_fields(
     These are written once to the zarr store during template creation,
     not streamed through the Beam pipeline.
     """
-    vdim = "z_l" if "z_l" in ds_ocean.dims else "zl"
     invariant = {}
 
     # idepth scalars: level interfaces (N+1 boundaries for N layers).
     # ACE's DepthCoordinate expects idepth[i] to be the upper boundary
     # of layer i, with idepth[N] being the bottom of the last layer.
-    if vertical_coarsening_indices:
-        depths = ds_ocean[vdim].values
-        # Interface 0 = top of first group (surface, use 0.0)
-        invariant["idepth_0"] = xr.DataArray(
-            0.0,
-            attrs={"units": "meters", "long_name": "Depth interface 0 (surface)"},
+    depths = ds_ocean[VDIM].values
+    invariant["idepth_0"] = xr.DataArray(
+        0.0,
+        attrs={"units": "meters", "long_name": "Depth interface 0 (surface)"},
+    )
+    for i, (start, end) in enumerate(vertical_coarsening_indices):
+        bottom_depth = float(depths[end - 1])
+        invariant[f"idepth_{i + 1}"] = xr.DataArray(
+            bottom_depth,
+            attrs={"units": "meters", "long_name": f"Depth interface {i + 1}"},
         )
-        for i, (start, end) in enumerate(vertical_coarsening_indices):
-            # Interface i+1 = bottom of group i
-            bottom_depth = float(depths[end - 1])
-            invariant[f"idepth_{i + 1}"] = xr.DataArray(
-                bottom_depth,
-                attrs={"units": "meters", "long_name": f"Depth interface {i + 1}"},
-            )
-    else:
-        depths = ds_ocean[vdim].values
-        invariant["idepth_0"] = xr.DataArray(
-            0.0,
-            attrs={"units": "meters", "long_name": "Depth interface 0 (surface)"},
-        )
-        for i, depth in enumerate(depths):
-            invariant[f"idepth_{i + 1}"] = xr.DataArray(
-                float(depth),
-                attrs={"units": "meters", "long_name": f"Depth interface {i + 1}"},
-            )
 
     # 2-D spatial invariant fields: derive from a single regridded
     # ocean timestep (mask, land_fraction, sea_surface_fraction, deptho).
-    vdim = "z_l" if "z_l" in ds_ocean.dims else "zl"
     ds_ocean_1t = ds_ocean.isel(time=0).load()
 
     # Regrid to get the output-grid mask
@@ -1150,8 +1094,8 @@ def _extract_invariant_fields(
         )
 
     # Build masks using shared helpers
-    mask_3d, mask_2d = _build_3d_mask(ds_ocean_1t, vdim)
-    level_masks = _build_per_level_masks(mask_3d, vdim, vertical_coarsening_indices)
+    mask_3d, mask_2d = _build_3d_mask(ds_ocean_1t, VDIM)
+    level_masks = _build_per_level_masks(mask_3d, VDIM, vertical_coarsening_indices)
     invariant.update(level_masks)
     invariant["mask_2d"] = mask_2d
     invariant.update(_build_land_sea_fractions(mask_2d))
@@ -1375,6 +1319,8 @@ def main():
     ocean_load_vars = list(dict.fromkeys(ocean_load_vars))
 
     ds_ocean = open_ocean(ocean_load_vars, start_time, end_time)
+    ds_ocean = _clean_ocean_dataset(ds_ocean)
+
     # Truncate to a multiple of process_time_chunksize so every chunk has
     # exactly the same number of timesteps (avoids coarsen failures).
     n_ocean = ds_ocean.sizes["time"]
