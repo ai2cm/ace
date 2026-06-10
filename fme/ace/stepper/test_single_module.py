@@ -29,10 +29,10 @@ from fme.ace.inference.test_evaluator import (
 from fme.ace.registry.sfno import SphericalFourierNeuralOperatorBuilder
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig, ForcingDeriver
 from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
+from fme.ace.stepper.loss_schedule import EpochNotProvidedError
 from fme.ace.stepper.single_module import (
     AtmosphereCorrectorConfig,
     CheckpointStepperConfig,
-    EpochNotProvidedError,
     SingleModuleStepperConfig,
     Stepper,
     StepperConfig,
@@ -62,6 +62,8 @@ from fme.core.coordinates import (
     LatLonCoordinates,
     VerticalCoordinate,
 )
+from fme.core.corrector.registry import CorrectorABC
+from fme.core.corrector.state import CorrectorState
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
@@ -84,7 +86,7 @@ from fme.core.step.multi_call import MultiCallConfig
 from fme.core.step.single_module import SingleModuleStep
 from fme.core.testing.regression import validate_tensor_dict
 from fme.core.training_history import TrainingJob
-from fme.core.typing_ import EnsembleTensorDict
+from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
 DIR = os.path.abspath(os.path.dirname(__file__))
 
@@ -156,17 +158,17 @@ def get_scalar_data(names, value):
 
 def test_stepper_no_train_step_specified():
     stepper = _init_train_stepper(loss=StepLossConfig(type="MSE"))
-    stepper._init_for_epoch(0)
-    assert stepper._n_forward_steps_sampler is None
-    assert stepper._eval_n_forward_steps_sampler is None
+    schedule = stepper._loss_schedule
+    schedule.init_for_epoch(0)
+    assert not schedule.has_sampler
 
 
 def test_stepper_step_int():
     stepper = _init_train_stepper(n_forward_steps=2, loss=StepLossConfig(type="MSE"))
-    assert stepper._n_forward_steps_schedule is not None
-    stepper._init_for_epoch(0)
-    assert stepper._n_forward_steps_sampler is not None
-    assert stepper._eval_n_forward_steps_sampler is not None
+    schedule = stepper._loss_schedule
+    assert schedule._schedule is not None
+    schedule.init_for_epoch(0)
+    assert schedule.has_sampler
 
 
 def test_stepper_step_probabilities():
@@ -179,10 +181,10 @@ def test_stepper_step_probabilities():
         ),
         loss=StepLossConfig(type="MSE"),
     )
-    assert stepper._n_forward_steps_schedule is not None
-    stepper._init_for_epoch(0)
-    assert stepper._n_forward_steps_sampler is not None
-    assert stepper._eval_n_forward_steps_sampler is not None
+    schedule = stepper._loss_schedule
+    assert schedule._schedule is not None
+    schedule.init_for_epoch(0)
+    assert schedule.has_sampler
 
 
 def test_stepper_step_schedule():
@@ -203,9 +205,10 @@ def test_stepper_step_schedule():
         ),
         loss=StepLossConfig(type="MSE"),
     )
-    assert stepper._n_forward_steps_schedule is not None
-    stepper._init_for_epoch(0)
-    assert stepper._n_forward_steps_sampler is not None
+    schedule = stepper._loss_schedule
+    assert schedule._schedule is not None
+    schedule.init_for_epoch(0)
+    assert schedule.has_sampler
 
 
 def test_seed_eval_does_not_corrupt_training_sampler():
@@ -218,19 +221,18 @@ def test_seed_eval_does_not_corrupt_training_sampler():
         ),
         loss=StepLossConfig(type="MSE"),
     )
-    stepper._init_for_epoch(0)
-    assert stepper._n_forward_steps_sampler is not None
-    assert stepper._eval_n_forward_steps_sampler is not None
-    stepper._n_forward_steps_sampler.seed_rng(42)
-    train_samples_before = [
-        stepper._n_forward_steps_sampler.sample() for _ in range(20)
-    ]
+    schedule = stepper._loss_schedule
+    schedule.init_for_epoch(0)
+    assert schedule._train_sampler is not None
+    assert schedule._eval_sampler is not None
+    schedule._train_sampler.seed_rng(42)
+    train_samples_before = [schedule._train_sampler.sample() for _ in range(20)]
     stepper.set_eval()
     stepper.seed_eval(seed=0)
-    [stepper._eval_n_forward_steps_sampler.sample() for _ in range(10)]
+    [schedule._eval_sampler.sample() for _ in range(10)]
     stepper.set_train()
-    stepper._n_forward_steps_sampler.seed_rng(42)
-    train_samples_after = [stepper._n_forward_steps_sampler.sample() for _ in range(20)]
+    schedule._train_sampler.seed_rng(42)
+    train_samples_after = [schedule._train_sampler.sample() for _ in range(20)]
     assert train_samples_before == train_samples_after
 
 
@@ -1141,7 +1143,7 @@ def test_step():
     n_samples = 3
     input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
 
-    output = stepper.step(
+    output, _ = stepper.step(
         StepArgs(input=input_data, next_step_input_data={}, labels=None)
     )
 
@@ -1153,7 +1155,7 @@ def test_step_with_diagnostic():
     stepper = _get_stepper(["a"], ["a", "c"], module_name="RepeatChannel")
     n_samples = 3
     input_data = {"a": torch.rand(n_samples, 5, 5).to(DEVICE)}
-    output = stepper.step(
+    output, _ = stepper.step(
         StepArgs(input=input_data, next_step_input_data={}, labels=None)
     )
     torch.testing.assert_close(output["a"], input_data["a"])
@@ -1171,7 +1173,7 @@ def test_step_with_forcing_and_diagnostic(residual_prediction):
     )
     n_samples = 3
     input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
-    output = stepper.step(
+    output, _ = stepper.step(
         StepArgs(input=input_data, next_step_input_data={}, labels=None)
     )
     if residual_prediction:
@@ -1189,7 +1191,7 @@ def test_step_with_prescribed_ocean():
     )
     input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
     ocean_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "mask"]}
-    output = stepper.step(
+    output, _ = stepper.step(
         StepArgs(input=input_data, next_step_input_data=ocean_data, labels=None)
     )
     expected_a_output = torch.where(
@@ -1277,6 +1279,86 @@ def test_predict():
         new_input_state.data[variable][:, 0], output.data[variable][:, -1]
     )
     assert new_input_state.time.equals(output.time[:, -1:])
+
+
+class _RecordingCorrector(CorrectorABC):
+    """Test corrector that seeds and bumps a counter inside CorrectorState.
+
+    On first call: seeds ``global_dry_air_mass`` from the area-mean
+    of ``input_data["a"]`` (using a trivial uniform weighting). On subsequent
+    calls: increments the existing value by 1 each time it is invoked, so the
+    test can observe both seeding and propagation across step calls.
+    """
+
+    def __init__(self):
+        self.call_count = 0
+        self.seen_states: list[CorrectorState | None] = []
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> tuple[TensorDict, CorrectorState | None]:
+        self.call_count += 1
+        self.seen_states.append(corrector_state)
+        if corrector_state is None or corrector_state.global_dry_air_mass is None:
+            n = input_data["a"].shape[0]
+            seed = input_data["a"].mean(dim=(-1, -2), keepdim=True).reshape(n, 1, 1)
+            corrector_state = CorrectorState(global_dry_air_mass=seed)
+        else:
+            corrector_state = CorrectorState(
+                global_dry_air_mass=(corrector_state.global_dry_air_mass + 1.0),
+            )
+        return dict(gen_data), corrector_state
+
+
+def test_predict_threads_stepper_state_across_calls():
+    """End-to-end propagation: corrector state seeded on call 1 must arrive
+    in call 2 inside the PrognosticState returned by ``predict``.
+    """
+    stepper = _get_stepper(["a"], ["a"])
+    recording_corrector = _RecordingCorrector()
+    stepper._step_obj._corrector = recording_corrector  # type: ignore[attr-defined]
+
+    n_steps = 2
+    input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=[])
+    forcing_data.data = {}
+
+    # First predict: no stepper_state on IC, corrector seeds it.
+    _, new_state_1 = stepper.predict(input_data, forcing_data)
+    assert recording_corrector.call_count == n_steps
+    # The first invocation saw None; later invocations saw the seeded state.
+    assert recording_corrector.seen_states[0] is None
+    assert recording_corrector.seen_states[1] is not None
+    seeded_1 = recording_corrector.seen_states[1].global_dry_air_mass
+    assert seeded_1 is not None
+
+    ic_after_1 = new_state_1.as_batch_data()
+    assert ic_after_1.stepper_state is not None
+    assert ic_after_1.stepper_state.corrector_state is not None
+    pres_after_1 = ic_after_1.stepper_state.corrector_state.global_dry_air_mass
+    assert pres_after_1 is not None
+    # n_steps invocations after seeding: seed + (n_steps - 1) increments.
+    expected = seeded_1 + float(n_steps - 1)
+    torch.testing.assert_close(pres_after_1, expected)
+
+    # Second predict: feed back the prognostic state from call 1; corrector
+    # should now see a non-None state on its very first invocation.
+    seen_before_call_2 = len(recording_corrector.seen_states)
+    _, new_state_2 = stepper.predict(new_state_1, forcing_data)
+    first_state_call_2 = recording_corrector.seen_states[seen_before_call_2]
+    assert first_state_call_2 is not None
+    assert first_state_call_2.global_dry_air_mass is not None
+    torch.testing.assert_close(first_state_call_2.global_dry_air_mass, pres_after_1)
+
+    ic_after_2 = new_state_2.as_batch_data()
+    assert ic_after_2.stepper_state is not None
+    assert ic_after_2.stepper_state.corrector_state is not None
+    pres_after_2 = ic_after_2.stepper_state.corrector_state.global_dry_air_mass
+    assert pres_after_2 is not None
+    torch.testing.assert_close(pres_after_2, pres_after_1 + float(n_steps))
 
 
 @pytest.mark.parametrize("n_ensemble", [1, 3])
@@ -2056,6 +2138,73 @@ def test_get_serialized_stepper_vertical_coordinate():
     state = stepper.get_state()
     vertical_coordinate = get_serialized_stepper_vertical_coordinate(state)
     assert isinstance(vertical_coordinate, VerticalCoordinate)
+
+
+def _get_force_positive_stepper(corrector_disabled_epochs: int) -> Stepper:
+    return _get_stepper(
+        ["a"],
+        ["a"],
+        corrector=AtmosphereCorrectorConfig(force_positive_names=["a"]),
+        corrector_disabled_epochs=corrector_disabled_epochs,
+    )
+
+
+def _step_negative_input(stepper: Stepper) -> tuple[torch.Tensor, torch.Tensor]:
+    """Step on all-negative input and return (output, raw prediction).
+
+    The stepper adds one to its input, so the raw prediction is negative
+    everywhere and the force-positive corrector clamps it to zero.
+    """
+    input_data = {"a": torch.full((3, 5, 5), -5.0, device=DEVICE)}
+    output, _ = stepper.step(
+        StepArgs(input=input_data, next_step_input_data={}, labels=None)
+    )
+    return output["a"], input_data["a"] + 1
+
+
+def test_corrector_disabled_epochs():
+    stepper = _get_force_positive_stepper(corrector_disabled_epochs=1)
+
+    stepper.set_train()
+    stepper.set_epoch(1)
+    output, raw_prediction = _step_negative_input(stepper)
+    torch.testing.assert_close(output, raw_prediction)
+
+    # the corrector is still applied in eval mode (validation/inference)
+    stepper.set_eval()
+    output, raw_prediction = _step_negative_input(stepper)
+    torch.testing.assert_close(output, torch.zeros_like(raw_prediction))
+
+    stepper.set_train()
+    stepper.set_epoch(2)
+    output, raw_prediction = _step_negative_input(stepper)
+    torch.testing.assert_close(output, torch.zeros_like(raw_prediction))
+
+
+def test_corrector_applied_in_train_mode_by_default():
+    stepper = _get_force_positive_stepper(corrector_disabled_epochs=0)
+    stepper.set_train()
+    output, raw_prediction = _step_negative_input(stepper)
+    torch.testing.assert_close(output, torch.zeros_like(raw_prediction))
+
+
+def test_corrector_disabled_state_restored_on_resume():
+    stepper = _get_force_positive_stepper(corrector_disabled_epochs=1)
+    stepper.set_train()
+    stepper.set_epoch(2)
+    state = stepper.get_state()
+
+    # a freshly-built stepper assumes the first epoch, so the corrector is
+    # disabled for train-mode steps until load_state restores the state of
+    # the interrupted epoch (mid-epoch resume does not call set_epoch)
+    resumed = _get_force_positive_stepper(corrector_disabled_epochs=1)
+    resumed.set_train()
+    output, raw_prediction = _step_negative_input(resumed)
+    torch.testing.assert_close(output, raw_prediction)
+
+    resumed.load_state(state)
+    output, raw_prediction = _step_negative_input(resumed)
+    torch.testing.assert_close(output, torch.zeros_like(raw_prediction))
 
 
 def _get_stepper_with_input_masking(

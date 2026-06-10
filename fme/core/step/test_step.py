@@ -24,10 +24,15 @@ from fme.core.labels import BatchLabels
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry import ModuleSelector
 from fme.core.step.args import StepArgs
-from fme.core.step.multi_call import MultiCallConfig, MultiCallStepConfig
+from fme.core.step.global_mean_removal import (
+    PerChannelGlobalMeanRemovalConfig,
+    SharedGlobalMeanRemovalConfig,
+)
+from fme.core.step.multi_call import MultiCallConfig, MultiCallStep, MultiCallStepConfig
 from fme.core.step.secondary_decoder import SecondaryDecoderConfig
 from fme.core.step.secondary_module import SecondaryModuleStepConfig
 from fme.core.step.single_module import (
+    SingleModuleStep,
     SingleModuleStepConfig,
     _apply_input_mask,
     _build_channel_mask_dict,
@@ -526,7 +531,7 @@ def test_label_conditioned_step():
     )
     input_data = dist.scatter_spatial(input_data, DEFAULT_IMG_SHAPE)
     next_step_input_data = dist.scatter_spatial(next_step_input_data, DEFAULT_IMG_SHAPE)
-    output = step.step(
+    output, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
@@ -742,7 +747,7 @@ def test_step_with_prescribed_prognostic_overwrites_output():
         (n_samples,) + img_shape, 42.0, device=fme.get_device()
     )
     next_step_input_data["diagnostic_main"] = prescribed_value
-    output = step.step(
+    output, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
@@ -902,7 +907,7 @@ def test_secondary_module_full_field_and_residual():
     next_step_input_data = get_tensor_dict(
         step.next_step_input_names, img_shape, n_samples=2
     )
-    output = step.step(
+    output, _ = step.step(
         args=StepArgs(
             input=input_data, next_step_input_data=next_step_input_data, labels=None
         ),
@@ -957,8 +962,8 @@ def test_secondary_module_state_round_trip():
     args = StepArgs(
         input=input_data, next_step_input_data=next_step_input_data, labels=None
     )
-    out1 = step1.step(args=args)
-    out2 = step2.step(args=args)
+    out1, _ = step1.step(args=args)
+    out2, _ = step2.step(args=args)
     for name in out1:
         torch.testing.assert_close(out1[name], out2[name])
 
@@ -999,7 +1004,7 @@ def test_secondary_module_residual_on_input_only_with_residual_prediction():
     next_step_input_data = get_tensor_dict(
         step.next_step_input_names, img_shape, n_samples=2
     )
-    output = step.step(
+    output, _ = step.step(
         args=StepArgs(
             input=input_data, next_step_input_data=next_step_input_data, labels=None
         ),
@@ -1074,7 +1079,7 @@ def test_step_with_data_mask():
             [True, True, False, False], device=fme.get_device()
         ),
     }
-    output_no_mask = step.step(
+    output_no_mask, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
@@ -1082,7 +1087,7 @@ def test_step_with_data_mask():
             data_mask=None,
         ),
     )
-    output_with_mask = step.step(
+    output_with_mask, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
@@ -1133,6 +1138,24 @@ def test_build_channel_mask_dict_partial_mask():
     assert (result["b"] == 1.0).all()
 
 
+def test_build_channel_mask_dict_gmr_extra_inherits_source_mask():
+    # The GMR sentinel channel `__gmr_extra__a` must inherit `a`'s mask
+    # because its value is zeroed in forward_transform when `a` is masked;
+    # otherwise the network sees a 0-valued extra with a 1-valued mask
+    # (i.e. contradictory "present" signal on a masked sample).
+    packed = torch.zeros(2, 4, 4, 8)
+    data_mask = {"a": torch.tensor([True, False])}
+    result = _build_channel_mask_dict(
+        ["a", "b", "__gmr_extra__a", "__gmr_extra__b"], data_mask, packed
+    )
+    assert result["a"][0, 0, 0] == 1.0
+    assert result["a"][1, 0, 0] == 0.0
+    assert result["__gmr_extra__a"][0, 0, 0] == 1.0
+    assert result["__gmr_extra__a"][1, 0, 0] == 0.0
+    assert (result["b"] == 1.0).all()
+    assert (result["__gmr_extra__b"] == 1.0).all()
+
+
 def test_step_with_include_channel_mask_inputs():
     normalization = get_network_and_loss_normalization_config(
         names=["forcing_shared", "forcing_rad", "diagnostic_main", "diagnostic_rad"],
@@ -1168,7 +1191,7 @@ def test_step_with_include_channel_mask_inputs():
             [True, True, False, False], device=fme.get_device()
         ),
     }
-    output_no_mask = step.step(
+    output_no_mask, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
@@ -1176,7 +1199,7 @@ def test_step_with_include_channel_mask_inputs():
             data_mask=None,
         ),
     )
-    output_with_mask = step.step(
+    output_with_mask, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
@@ -1220,7 +1243,7 @@ def test_step_with_include_channel_mask_inputs_no_data_mask():
     next_step_input_data = get_tensor_dict(
         step.next_step_input_names, img_shape, n_samples
     )
-    output_no_mask = step.step(
+    output_no_mask, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
@@ -1232,7 +1255,7 @@ def test_step_with_include_channel_mask_inputs_no_data_mask():
         name: torch.ones(n_samples, dtype=torch.bool, device=fme.get_device())
         for name in step.input_names
     }
-    output_all_unmasked = step.step(
+    output_all_unmasked, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
@@ -1243,3 +1266,296 @@ def test_step_with_include_channel_mask_inputs_no_data_mask():
     for name in ["diagnostic_main", "diagnostic_rad"]:
         assert output_no_mask[name].shape == (n_samples, *img_shape)
         torch.testing.assert_close(output_no_mask[name], output_all_unmasked[name])
+
+
+def _make_global_mean_removal_step(
+    global_mean_removal, in_names=None, out_names=None, means=None, stds=None
+):
+    if in_names is None:
+        in_names = ["forcing_shared", "forcing_rad"]
+    if out_names is None:
+        out_names = ["diagnostic_main", "diagnostic_rad"]
+    all_names = list(set(in_names + out_names))
+    if means is None:
+        means = {name: 0.0 for name in all_names}
+    if stds is None:
+        stds = {name: 1.0 for name in all_names}
+    normalization = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(means=means, stds=stds),
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={
+                        "scale_factor": 1,
+                        "embed_dim": 4,
+                        "num_layers": 2,
+                    },
+                ),
+                in_names=in_names,
+                out_names=out_names,
+                normalization=normalization,
+                global_mean_removal=global_mean_removal,
+            ),
+        ),
+    )
+    return get_step(config, DEFAULT_IMG_SHAPE)
+
+
+def test_step_shared_global_mean_removal():
+    in_names = ["surface_temperature", "air_temperature_0"]
+    out_names = ["surface_temperature", "air_temperature_0"]
+    means = {n: 280.0 for n in in_names}
+    stds = {n: 5.0 for n in in_names}
+    removal = SharedGlobalMeanRemovalConfig(
+        reference_field="surface_temperature",
+        field_names=in_names,
+    )
+    step = _make_global_mean_removal_step(
+        removal, in_names, out_names, means=means, stds=stds
+    )
+    n_samples = 2
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+    output, _ = step.step(
+        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
+    )
+    for name in out_names:
+        assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
+
+
+def test_step_shared_global_mean_removal_with_extra_channels():
+    in_names = ["surface_temperature", "air_temperature_0"]
+    out_names = ["surface_temperature", "air_temperature_0"]
+    means = {n: 280.0 for n in in_names}
+    stds = {n: 5.0 for n in in_names}
+    removal = SharedGlobalMeanRemovalConfig(
+        reference_field="surface_temperature",
+        field_names=in_names,
+        append_as_input=True,
+    )
+    step = _make_global_mean_removal_step(
+        removal, in_names, out_names, means=means, stds=stds
+    )
+    n_samples = 2
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+    output, _ = step.step(
+        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
+    )
+    for name in out_names:
+        assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
+
+
+def test_step_per_channel_global_mean_removal():
+    removal = PerChannelGlobalMeanRemovalConfig(field_names=None)
+    step = _make_global_mean_removal_step(removal)
+    n_samples = 2
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+    output, _ = step.step(
+        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
+    )
+    for name in step.output_names:
+        assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
+
+
+def test_step_per_channel_global_mean_removal_with_extra_channels():
+    in_names = ["forcing_shared", "forcing_rad"]
+    out_names = ["diagnostic_main", "diagnostic_rad"]
+    removal = PerChannelGlobalMeanRemovalConfig(
+        field_names=in_names,
+        append_as_input=True,
+    )
+    step = _make_global_mean_removal_step(removal, in_names, out_names)
+    n_samples = 2
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+    output, _ = step.step(
+        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
+    )
+    for name in step.output_names:
+        assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
+
+
+def _assert_global_mean_removal_affects_output(removal, in_names, out_names, means):
+    stds = {n: 1.0 for n in set(in_names + out_names)}
+    n_samples = 2
+    torch.manual_seed(0)
+    step_baseline = _make_global_mean_removal_step(
+        None, in_names, out_names, means=means, stds=stds
+    )
+    torch.manual_seed(0)
+    step_with_removal = _make_global_mean_removal_step(
+        removal, in_names, out_names, means=means, stds=stds
+    )
+    input_data = get_tensor_dict(
+        step_baseline.input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+    # Shift inputs so they have a non-zero spatial mean per channel; otherwise
+    # forward_transform would be a no-op and the outputs would coincide.
+    input_data = {k: v + 5.0 for k, v in input_data.items()}
+    next_step = get_tensor_dict(
+        step_baseline.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+    baseline_output, _ = step_baseline.step(
+        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
+    )
+    removal_output, _ = step_with_removal.step(
+        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
+    )
+    differs = any(
+        not torch.allclose(baseline_output[name], removal_output[name])
+        for name in out_names
+    )
+    assert differs, "global_mean_removal had no effect on step outputs"
+
+
+def test_step_per_channel_global_mean_removal_affects_output():
+    """Verify PerChannelGlobalMeanRemoval is actually invoked during step.
+
+    The per-field unit tests in ``test_global_mean_removal.py`` cover the
+    forward/inverse value behavior. This test ties that unit coverage to the
+    full step by confirming that enabling ``global_mean_removal`` produces a
+    different output than disabling it, with all other state (seed, weights,
+    inputs) held fixed.
+    """
+    in_names = ["forcing_shared", "forcing_rad"]
+    out_names = ["diagnostic_main", "diagnostic_rad"]
+    means = {n: 0.0 for n in set(in_names + out_names)}
+    _assert_global_mean_removal_affects_output(
+        PerChannelGlobalMeanRemovalConfig(field_names=in_names),
+        in_names,
+        out_names,
+        means,
+    )
+
+
+def test_step_shared_global_mean_removal_affects_output():
+    """Verify SharedGlobalMeanRemoval is actually invoked during step.
+
+    Companion to the PerChannel version above; same rationale.
+    """
+    in_names = ["surface_temperature", "air_temperature_0"]
+    out_names = ["surface_temperature", "air_temperature_0"]
+    means = {n: 280.0 for n in set(in_names + out_names)}
+    _assert_global_mean_removal_affects_output(
+        SharedGlobalMeanRemovalConfig(
+            reference_field="surface_temperature",
+            field_names=in_names,
+        ),
+        in_names,
+        out_names,
+        means,
+    )
+
+
+def test_step_per_channel_global_mean_removal_with_channel_masks():
+    """When both ``include_channel_mask_inputs`` and per-channel GMR extras
+    are enabled, the GMR extras should be packed as ordinary input
+    channels and receive their own mask channels.  Total network input
+    channels = ``2 * (n_in_names + n_extras)``.
+    """
+    in_names = ["forcing_shared", "forcing_rad"]
+    out_names = ["diagnostic_main", "diagnostic_rad"]
+    all_names = list(set(in_names + out_names))
+    normalization = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means={name: 0.0 for name in all_names},
+            stds={name: 1.0 for name in all_names},
+        ),
+    )
+    removal = PerChannelGlobalMeanRemovalConfig(
+        field_names=in_names, append_as_input=True
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+                ),
+                in_names=in_names,
+                out_names=out_names,
+                normalization=normalization,
+                include_channel_mask_inputs=True,
+                global_mean_removal=removal,
+            ),
+        ),
+    )
+    step = get_step(config, DEFAULT_IMG_SHAPE)
+    assert isinstance(step, SingleModuleStep)
+    # 2 real inputs + 2 GMR extras → 4 packed input channels (doubled to 8
+    # by the channel-mask append in network_call).
+    assert len(step.in_packer.names) == 4
+
+    n_samples = 2
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+    output, _ = step.step(
+        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
+    )
+    for name in out_names:
+        assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
+
+
+def test_step_shared_global_mean_removal_raises_on_masked_reference():
+    in_names = ["surface_temperature", "air_temperature_0"]
+    out_names = ["surface_temperature", "air_temperature_0"]
+    means = {n: 280.0 for n in in_names}
+    stds = {n: 5.0 for n in in_names}
+    removal = SharedGlobalMeanRemovalConfig(
+        reference_field="surface_temperature",
+        field_names=in_names,
+    )
+    step = _make_global_mean_removal_step(
+        removal, in_names, out_names, means=means, stds=stds
+    )
+    n_samples = 2
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+    data_mask = {
+        "surface_temperature": torch.tensor([True, False], device=fme.get_device()),
+    }
+    with pytest.raises(ValueError, match="masked"):
+        step.step(
+            args=StepArgs(
+                input=input_data,
+                next_step_input_data=next_step,
+                labels=None,
+                data_mask=data_mask,
+            ),
+        )
+
+
+def test_corrector_disabled_not_in_state_by_default():
+    step = get_step(get_single_module_selector(), DEFAULT_IMG_SHAPE)
+    assert "corrector_disabled" not in step.get_state()
+
+
+def test_multi_call_step_forwards_set_epoch():
+    wrapped_step = unittest.mock.MagicMock(spec=StepABC)
+    config = MultiCallStepConfig(
+        wrapped_step=get_single_module_selector(),
+        config=None,
+        include_multi_call_in_loss=False,
+    )
+    step = MultiCallStep(wrapped_step=wrapped_step, config=config)
+    step.set_epoch(3)
+    wrapped_step.set_epoch.assert_called_once_with(3)

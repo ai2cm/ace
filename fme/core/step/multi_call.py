@@ -3,6 +3,7 @@ from collections.abc import Callable
 from copy import copy
 from typing import Any, TypeVar
 
+import dacite
 import torch
 from torch import nn
 
@@ -12,6 +13,7 @@ from fme.core.ocean import OceanConfig
 from fme.core.step._multi_call import MultiCall, MultiCallConfig, StepMethod
 from fme.core.step.args import StepArgs
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
+from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -207,6 +209,14 @@ class MultiCallStepConfig(StepConfigABC):
     def load(self):
         self.wrapped_step.load()
 
+    @property
+    def allow_missing_variables(self) -> bool:
+        return self.wrapped_step.allow_missing_variables
+
+    @classmethod
+    def from_state(cls, state) -> "MultiCallStepConfig":
+        return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
+
 
 def _extend_normalizer_with_multi_call_outputs(
     config: MultiCallConfig, normalizer: StandardNormalizer
@@ -288,19 +298,22 @@ class MultiCallStep(StepABC):
     def get_regularizer_loss(self) -> torch.Tensor:
         return self._wrapped_step.get_regularizer_loss()
 
+    def set_epoch(self, epoch: int) -> None:
+        self._wrapped_step.set_epoch(epoch)
+
     def step(
         self,
         args: StepArgs,
         wrapper: Callable[[torch.nn.Module], torch.nn.Module] = lambda x: x,
-    ) -> TensorDict:
-        state = self._wrapped_step.step(
+    ) -> tuple[TensorDict, StepperState | None]:
+        state, stepper_state = self._wrapped_step.step(
             args=args,
             wrapper=wrapper,
         )
         if self._multi_call is not None:
-            multi_called_outputs = self._multi_call.step(args=args, wrapper=wrapper)
+            multi_called_outputs, _ = self._multi_call.step(args=args, wrapper=wrapper)
             state = {**multi_called_outputs, **state}
-        return state
+        return state, stepper_state
 
     def get_state(self) -> dict[str, Any]:
         """

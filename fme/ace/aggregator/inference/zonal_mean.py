@@ -315,7 +315,7 @@ class ZonalMeanAggregator:
     def get_dataset(self) -> xr.Dataset:
         data = {
             k.replace("/", "-"): xr.DataArray(
-                v.datum, dims=("forecast_step", "lat"), attrs=v.metadata._asdict()
+                v.datum, dims=("forecast_step", "lat"), attrs=v.metadata.as_attrs()
             )
             for k, v in self._get_data().items()
         }
@@ -325,8 +325,8 @@ class ZonalMeanAggregator:
 
     def _get_caption(self, key: str, varname: str) -> str:
         if varname in self._variable_metadata:
-            caption_name = self._variable_metadata[varname].long_name
-            units = self._variable_metadata[varname].units
+            caption_name = self._variable_metadata[varname].display_long_name(varname)
+            units = self._variable_metadata[varname].display_units()
         else:
             caption_name, units = varname, "unknown_units"
         caption = self._captions[key].format(name=caption_name, units=units)

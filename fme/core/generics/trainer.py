@@ -50,6 +50,7 @@
 
 import abc
 import contextlib
+import dataclasses
 import gc
 import logging
 import os
@@ -57,7 +58,7 @@ import signal
 import sys
 import time
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, ClassVar, Generic, Protocol, TypeVar
 
 import torch
@@ -66,7 +67,11 @@ import fme
 from fme.core.cli import remove_stale_tmp_checkpoints
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
-from fme.core.generics.aggregator import AggregatorABC, InferenceAggregatorABC
+from fme.core.generics.aggregator import (
+    AggregatorABC,
+    InferenceAggregatorABC,
+    InferenceSummary,
+)
 from fme.core.generics.data import GriddedDataABC, InferenceDataABC
 from fme.core.generics.inference import run_inference
 from fme.core.generics.lr_tuning import (
@@ -76,6 +81,7 @@ from fme.core.generics.lr_tuning import (
 )
 from fme.core.generics.metrics_aggregator import MetricsAggregator
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
+from fme.core.generics.validation import run_validation
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.timing import GlobalTimer
 from fme.core.training_history import TrainingJob
@@ -439,7 +445,7 @@ class Trainer:
             )
             self._maybe_tune_lr()
             start_time = time.time()
-            train_logs = self.train_one_epoch()
+            train_summary = self.train_one_epoch()
             train_end = time.time()
             logging.info(
                 f"Starting validation step for model trained for "
@@ -457,7 +463,7 @@ class Trainer:
                 )
                 inference_end: float | None = time.time() if inference_logs else None
 
-            train_loss = train_logs.get("train/mean/loss")
+            train_loss = train_summary.loss
             # need to get the learning rate before stepping the scheduler
             lr = self.optimization.learning_rate
             self.optimization.step_scheduler(valid_loss=valid_loss, is_iteration=False)
@@ -479,7 +485,7 @@ class Trainer:
 
             logging.info("Logging to wandb")
             all_logs = {
-                **train_logs,
+                **train_summary.logs,
                 **valid_logs,
                 **inference_logs,
                 **additional_logs,
@@ -529,6 +535,12 @@ class Trainer:
             "complete epochs"
         )
         self.train_data.set_epoch(self._epochs_trained + 1)
+        # Only signal a fresh-epoch boundary to the stepper if we are
+        # actually starting one; on mid-epoch resume the in-module
+        # per-epoch state should reflect the partial epoch up to the
+        # crash and then continue accumulating.
+        if self._current_epoch_num_batches_seen == 0:
+            self.stepper.set_epoch(self._epochs_trained + 1)
         wandb = WandB.get_instance()
         names_to_log = ("batch_loss", "training_samples_per_second_on_rank_0", "lr")
         n_samples_seen_since_logging = 0
@@ -613,7 +625,7 @@ class Trainer:
         self._epochs_trained += 1
         self._current_epoch_num_batches_seen = 0
         aggregator.flush_diagnostics(subdir=f"epoch_{self._epochs_trained:04d}")
-        return aggregator.get_logs(label="train")
+        return aggregator.get_summary(label="train")
 
     def _save_restart_checkpoints(self):
         logging.info(
@@ -770,6 +782,65 @@ class Trainer:
             self.save_checkpoint(epoch_checkpoint_path, include_optimization=True)
 
 
+@dataclasses.dataclass
+class ValidationTask(Generic[BD, TO]):
+    """One per-epoch validation run, packaged for ``build_validation_callback``.
+
+    Attributes:
+        name: Used as the log key prefix and output subdirectory.
+        data: Validation dataset; ``set_epoch`` is called on it each epoch.
+        aggregator_factory: Builds the aggregator. Called once per epoch,
+            preserving the existing per-epoch construction semantics.
+        weight: Contribution weight for the combined validation loss. Zero means
+            the task runs but does not contribute to the metric.
+    """
+
+    name: str
+    data: GriddedDataABC[BD]
+    aggregator_factory: Callable[[], AggregatorABC[TO]]
+    weight: float = 0.0
+
+
+def build_validation_callback(
+    tasks: Sequence[ValidationTask[BD, TO]],
+    stepper: TrainStepperABC[PS, BD, FD, SD, TO],
+) -> ValidationCallback:
+    """Build a ``ValidationCallback`` shared between ACE and coupled training."""
+
+    def validation_callback(epoch: int) -> tuple[dict[str, Any], float]:
+        all_logs: dict[str, Any] = {}
+        weighted_loss = 0.0
+        for task in tasks:
+            task.data.set_epoch(epoch)
+            aggregator = task.aggregator_factory()
+            summary = run_validation(
+                train_stepper=stepper,
+                validation_data=task.data,
+                aggregator=aggregator,
+                label=task.name,
+                diagnostics_subdir=f"epoch_{epoch:04d}",
+                record_logs=lambda logs: None,
+            )
+            overlap = all_logs.keys() & summary.logs.keys()
+            if overlap:
+                raise RuntimeError(
+                    f"Validation entry {task.name!r} produced log keys that "
+                    f"overlap with earlier entries: {sorted(overlap)}"
+                )
+            all_logs.update(summary.logs)
+            if task.weight > 0:
+                if summary.loss is None:
+                    raise RuntimeError(
+                        f"Validation entry {task.name!r} with "
+                        f"weight={task.weight} did not produce a loss "
+                        "for checkpoint selection."
+                    )
+                weighted_loss += task.weight * summary.loss
+        return all_logs, weighted_loss
+
+    return validation_callback
+
+
 def inference_one_epoch(
     stepper: TrainStepperABC[PS, BD, FD, SD, TO],
     validation_context: Callable[[], contextlib.AbstractContextManager],
@@ -777,7 +848,7 @@ def inference_one_epoch(
     aggregator: InferenceAggregatorABC[PS, SD],
     label: str,
     epoch: int,
-):
+) -> InferenceSummary:
     stepper.set_eval()
     with torch.no_grad(), validation_context(), GlobalTimer():
         run_inference(
@@ -787,9 +858,80 @@ def inference_one_epoch(
         )
     logging.info("Starting flush of reduced diagnostics to disk")
     aggregator.flush_diagnostics(subdir=f"epoch_{epoch:04d}")
-    logging.info("Getting inline inference aggregator logs")
-    logs = aggregator.get_summary_logs()
-    return {f"{label}/{k}": v for k, v in logs.items()}
+    logging.info("Getting inline inference aggregator summary")
+    summary = aggregator.get_summary()
+    prefixed_logs = {f"{label}/{k}": v for k, v in summary.logs.items()}
+    return InferenceSummary(logs=prefixed_logs, loss=summary.loss)
+
+
+@dataclasses.dataclass
+class InferenceTask(Generic[PS, FD, SD]):
+    """One inline inference run, packaged for ``build_inference_callback``.
+
+    Attributes:
+        name: Used as the log key prefix and output subdirectory.
+        data: Source of initial condition and forcing windows.
+        aggregator_factory: Builds the aggregator. Called once per epoch the task
+            runs on, preserving the existing per-epoch construction semantics.
+        epoch_set: Epochs on which this task should run.
+        weight: Contribution weight for the combined checkpoint-selection error.
+            Zero means the task runs but does not contribute to the metric.
+    """
+
+    name: str
+    data: InferenceDataABC[PS, FD]
+    aggregator_factory: Callable[[], InferenceAggregatorABC[PS, SD]]
+    epoch_set: frozenset[int]
+    weight: float = 0.0
+
+
+def build_inference_callback(
+    tasks: Sequence[InferenceTask[PS, FD, SD]],
+    inference_epochs: Sequence[int],
+    stepper: TrainStepperABC[PS, BD, FD, SD, TO],
+) -> InferenceCallback:
+    """Build an ``InferenceCallback`` shared between ACE and coupled training."""
+    inference_epochs_set = set(inference_epochs)
+
+    def inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
+        if epoch not in inference_epochs_set:
+            return {}, None
+        active_tasks = [t for t in tasks if epoch in t.epoch_set]
+        if not active_tasks:
+            return {}, None
+
+        all_logs: dict[str, Any] = {}
+        weighted_error: float | None = None
+        for task in active_tasks:
+            aggregator = task.aggregator_factory()
+            summary = inference_one_epoch(
+                stepper=stepper,
+                validation_context=contextlib.nullcontext,
+                dataset=task.data,
+                aggregator=aggregator,
+                label=task.name,
+                epoch=epoch,
+            )
+            overlap = all_logs.keys() & summary.logs.keys()
+            if overlap:
+                raise RuntimeError(
+                    f"Inference entry {task.name!r} produced log keys that "
+                    f"overlap with earlier entries: {sorted(overlap)}"
+                )
+            all_logs.update(summary.logs)
+            if task.weight > 0:
+                if summary.loss is None:
+                    raise RuntimeError(
+                        f"Inference entry {task.name!r} with "
+                        f"weight={task.weight} did not produce a loss "
+                        "for checkpoint selection."
+                    )
+                if weighted_error is None:
+                    weighted_error = 0.0
+                weighted_error += task.weight * summary.loss
+        return all_logs, weighted_error
+
+    return inference_callback
 
 
 def _restore_checkpoint(trainer: Trainer, checkpoint_path):

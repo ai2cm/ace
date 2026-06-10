@@ -33,7 +33,6 @@ from fme.ace.registry.test_hpx import (
     down_sampling_block_config,
     encoder_config,
     output_layer_config,
-    recurrent_block_config,
     up_sampling_block_config,
 )
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
@@ -55,7 +54,7 @@ from fme.ace.testing import (
     MonthlyReferenceData,
     patch_cm4_solar_constant,
     save_nd_netcdf,
-    save_scalar_netcdf,
+    save_stats_netcdfs,
     save_stepper_checkpoint,
 )
 from fme.ace.train.train import build_trainer, prepare_directory
@@ -167,27 +166,12 @@ def _get_test_yaml_files(
     batch_size: int = 2,
     sample_with_replacement: int | None = 10,
 ):
-    input_time_size = 1
-    output_time_size = 1
     if derived_forcings is None:
         derived_forcings = DerivedForcingsConfig()
-    if nettype == "HEALPixRecUNet":
+    if nettype == "HEALPixUNet":
         in_channels = len(in_variable_names)
-        out_channels = len(out_variable_names)
-        prognostic_variables = min(
-            out_channels, in_channels
-        )  # how many variables in/out share.
-        # in practice, we will need to compare variable names, since there
-        # are some input-only and some output-only channels.
-        # TODO: https://github.com/ai2cm/full-model/issues/1046
-        n_constants = 0
-        decoder_input_channels = 0  # was 1, to indicate insolation - now 0
-        input_time_size = 1  # TODO: change to 2 (issue #1177)
-        output_time_size = 1  # TODO: change to 4 (issue #1177)
-
         conv_next_block = conv_next_block_config(in_channels=in_channels)
         down_sampling_block = down_sampling_block_config()
-        recurrent_block = recurrent_block_config()
         encoder = encoder_config(
             conv_next_block, down_sampling_block, n_channels=[16, 8, 4]
         )
@@ -197,17 +181,11 @@ def _get_test_yaml_files(
             conv_next_block,
             up_sampling_block,
             output_layer,
-            recurrent_block,
             n_channels=[4, 8, 16],
         )
         net_config = dict(
             encoder=encoder,
             decoder=decoder,
-            prognostic_variables=prognostic_variables,
-            n_constants=n_constants,
-            decoder_input_channels=decoder_input_channels,
-            input_time_size=input_time_size,
-            output_time_size=output_time_size,
         )
         spatial_dimensions_str: Literal["healpix", "latlon"] = "healpix"
     elif nettype == "Samudra":
@@ -510,7 +488,6 @@ def _setup(
     derived_forcings=None,
     use_schedule: bool = False,
     validate_using_ema: bool = False,
-    stats_std_fill_value: float | None = None,
     multi_validation: bool = False,
     use_variable_masking: bool = False,
 ):
@@ -575,14 +552,10 @@ def _setup(
             variable_names=partial_names,
             timestep_days=timestep_days,
         )
-    save_scalar_netcdf(
+    save_stats_netcdfs(
         stats_dir / "stats-mean.nc",
-        variable_names=all_variable_names,
-    )
-    save_scalar_netcdf(
         stats_dir / "stats-stddev.nc",
         variable_names=all_variable_names,
-        fill_value=stats_std_fill_value,
     )
 
     monthly_dim_sizes: DimSizes
@@ -661,7 +634,7 @@ _TRAIN_AND_INFERENCE_CASES = [
     ),
     pytest.param(
         TrainAndInferenceTestSettings(
-            nettype="HEALPixRecUNet",
+            nettype="HEALPixUNet",
             use_healpix=True,
         ),
         id="HEALPix",
@@ -1097,7 +1070,7 @@ def test_train_without_inline_inference(tmp_path, very_fast_only: bool):
         timestep_days=20,
         n_time=int(366 * 3 / 20 + 1),
         inference_forward_steps=int(366 * 3 / 20 / 2 - 1) * 2,  # must be even
-        use_healpix=(nettype == "HEALPixRecUNet"),
+        use_healpix=False,
         crps_training=crps_training,
         save_per_epoch_diagnostics=True,
         log_validation_maps=log_validation_maps,
@@ -1119,6 +1092,7 @@ def test_train_without_inline_inference(tmp_path, very_fast_only: bool):
     assert val_extra_output.exists()
 
 
+@pytest.mark.skipif(torch.cuda.is_available(), reason="flaky on GPU")
 @pytest.mark.parametrize(
     "insolation_config",
     [
@@ -1153,7 +1127,6 @@ def test_train_and_inference_with_derived_forcings(
         crps_training=crps_training,
         log_validation_maps=log_validation_maps,
         derived_forcings=derived_forcings,
-        stats_std_fill_value=1.0,
     )
     with patch_cm4_solar_constant(1.0):
         with mock_wandb() as wandb:

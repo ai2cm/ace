@@ -4,6 +4,7 @@ from typing import Any, Self, final
 
 import dacite
 
+from fme.core.corrector.state import CorrectorState
 from fme.core.dataset_info import DatasetInfo
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -38,4 +39,19 @@ class CorrectorABC(abc.ABC):
         input_data: TensorMapping,
         gen_data: TensorMapping,
         forcing_data: TensorMapping,
-    ) -> TensorDict: ...
+        corrector_state: CorrectorState | None,
+    ) -> tuple[TensorDict, CorrectorState | None]:
+        """Apply corrections to ``gen_data``.
+
+        Args:
+            input_data: Denormalized data from the previous time step.
+            gen_data: Raw model output for the current step, to be corrected.
+            forcing_data: Forcing data at the current step.
+            corrector_state: Per-sample state carried across step calls,
+                or None if no state has been seeded. Implementations that do
+                not maintain state should pass this through unchanged.
+
+        Returns:
+            A tuple ``(corrected_gen_data, corrector_state)``.
+        """
+        ...
