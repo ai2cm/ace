@@ -24,6 +24,10 @@ from fme.core.labels import BatchLabels
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry import ModuleSelector
 from fme.core.step.args import StepArgs
+from fme.core.step.global_mean_relaxation import (
+    GlobalMeanRelaxationConfig,
+    GlobalMeanRelaxationVariableConfig,
+)
 from fme.core.step.global_mean_removal import (
     PerChannelGlobalMeanRemovalConfig,
     SharedGlobalMeanRemovalConfig,
@@ -916,6 +920,121 @@ def test_secondary_module_full_field_and_residual():
     assert "diag" in output
     assert output["prog"].shape == (2, *img_shape)
     assert output["diag"].shape == (2, *img_shape)
+
+
+def _get_relaxation_single_module_selector(
+    relaxation: GlobalMeanRelaxationConfig | None,
+) -> StepSelector:
+    normalization = get_network_and_loss_normalization_config(
+        names=["forcing_shared", "forcing_rad", "diagnostic_main", "diagnostic_rad"]
+    )
+    return StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+                ),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main", "diagnostic_rad"],
+                normalization=normalization,
+                global_mean_relaxation=relaxation,
+            )
+        ),
+    )
+
+
+def test_global_mean_relaxation_name_not_in_out_names_raises():
+    normalization = get_network_and_loss_normalization_config(
+        names=["a", "b"],
+    )
+    with pytest.raises(ValueError, match="missing.*'c'"):
+        SingleModuleStepConfig(
+            builder=ModuleSelector(type="MLP", config={}),
+            in_names=["a"],
+            out_names=["b"],
+            normalization=normalization,
+            global_mean_relaxation=GlobalMeanRelaxationConfig(
+                variables={
+                    "c": GlobalMeanRelaxationVariableConfig(
+                        target=0.0, timescale_steps=2.0
+                    ),
+                }
+            ),
+        )
+
+
+@pytest.mark.parallel
+def test_global_mean_relaxation_only_applied_in_eval_mode():
+    torch.manual_seed(0)
+    relaxation = GlobalMeanRelaxationConfig(
+        variables={
+            "diagnostic_main": GlobalMeanRelaxationVariableConfig(
+                target=0.0, timescale_steps=2.0
+            ),
+        }
+    )
+    config = _get_relaxation_single_module_selector(relaxation)
+    img_shape = DEFAULT_IMG_SHAPE
+    step = get_step(config, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples=2)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples=2
+    )
+    args = StepArgs(
+        input=input_data, next_step_input_data=next_step_input_data, labels=None
+    )
+
+    for module in step.modules:
+        module.train()
+    train_output, _ = step.step(args=args)
+
+    for module in step.modules:
+        module.eval()
+    eval_output, _ = step.step(args=args)
+
+    # Other variables are untouched.
+    torch.testing.assert_close(
+        train_output["diagnostic_rad"], eval_output["diagnostic_rad"]
+    )
+    # The relaxation pushes diagnostic_main toward the target (0.0) by a
+    # constant per-sample offset, so eval and train differ by exactly that
+    # offset and the offset is spatially uniform.
+    delta = eval_output["diagnostic_main"] - train_output["diagnostic_main"]
+    per_sample = delta.flatten(start_dim=1)
+    torch.testing.assert_close(
+        per_sample, per_sample[:, :1].expand_as(per_sample), rtol=1e-5, atol=1e-6
+    )
+    # And shifts away from the train output (we cannot guarantee toward 0
+    # in a single step, but the offset should be nonzero).
+    assert not torch.allclose(delta, torch.zeros_like(delta))
+
+
+@pytest.mark.parallel
+def test_global_mean_relaxation_disabled_when_none():
+    torch.manual_seed(0)
+    config = _get_relaxation_single_module_selector(None)
+    img_shape = DEFAULT_IMG_SHAPE
+    step = get_step(config, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples=2)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples=2
+    )
+    args = StepArgs(
+        input=input_data, next_step_input_data=next_step_input_data, labels=None
+    )
+    for module in step.modules:
+        module.eval()
+    eval_output, _ = step.step(args=args)
+    for module in step.modules:
+        module.train()
+    train_output, _ = step.step(args=args)
+    # Without relaxation, eval and train produce identical outputs for SFNO
+    # (no dropout/batchnorm), since both go through step_with_adjustments
+    # with the same seed-free network call.
+    for name in eval_output:
+        torch.testing.assert_close(eval_output[name], train_output[name])
 
 
 @pytest.mark.parallel
