@@ -120,16 +120,6 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
 
 
 @pytest.fixture
-def skip_slow(request, very_fast_only):
-    return very_fast_only or request.config.getoption("--fast")
-
-
-@pytest.fixture
-def very_fast_only(request):
-    return request.config.getoption("--very-fast")
-
-
-@pytest.fixture
 def meta_get_device(request):
     return request.config.getoption("--meta-get-device")
 
@@ -159,15 +149,13 @@ def distributed_context():
 
 
 @pytest.fixture(autouse=True, scope="function")
-def enforce_timeout(
-    skip_slow, very_fast_only, pdb_enabled, no_timeout, _serialize_when_needed
-):
+def enforce_timeout(request, pdb_enabled, no_timeout, _serialize_when_needed):
     if pdb_enabled or no_timeout:
         yield  # Do not enforce timeout if we are debugging
         return
-    if very_fast_only:
+    if request.config.getoption("--very-fast"):
         timeout_seconds = 3
-    elif skip_slow:
+    elif request.config.getoption("--fast"):
         timeout_seconds = 30
     else:
         timeout_seconds = 90
