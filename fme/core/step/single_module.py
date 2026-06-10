@@ -71,6 +71,10 @@ class SingleModuleStepConfig(StepConfigABC):
             from fields before normalization and restoring them after
             denormalization. Supports shared (single reference field) or
             per-channel removal, with optional extra input channels.
+        corrector_disabled_epochs: Number of initial training epochs during
+            which the corrector is not applied to train-mode steps. The
+            corrector is always applied when the module is in eval mode
+            (validation, inline inference and standalone inference).
     """
 
     builder: ModuleSelector
@@ -87,9 +91,15 @@ class SingleModuleStepConfig(StepConfigABC):
     residual_prediction: bool = False
     include_channel_mask_inputs: bool = False
     global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
+    corrector_disabled_epochs: int = 0
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
+        if self.corrector_disabled_epochs < 0:
+            raise ValueError(
+                "corrector_disabled_epochs must be non-negative, got "
+                f"{self.corrector_disabled_epochs}"
+            )
         if self.global_mean_removal is not None:
             self.global_mean_removal.validate_names(self.in_names, self.out_names)
         for name in self.prescribed_prognostic_names:
@@ -328,6 +338,11 @@ class SingleModuleStep(StepABC):
         self._timestep = dataset_info.timestep
 
         self._corrector = corrector
+        # Until set_epoch is called we assume we are in the first epoch, so
+        # that the corrector is disabled for train-mode steps taken before the
+        # trainer signals an epoch boundary. Eval-mode steps (validation and
+        # inference) always apply the corrector regardless of this flag.
+        self._corrector_disabled = config.corrector_disabled_epochs > 0
         self.in_names = config.in_names
         self.out_names = config.out_names
 
@@ -402,12 +417,16 @@ class SingleModuleStep(StepABC):
             output_dict.update(secondary_output_dict)
             return output_dict
 
+        corrector: CorrectorABC | None = self._corrector
+        if self._corrector_disabled and self.module.torch_module.training:
+            corrector = None
+
         return step_with_adjustments(
             input=args.input,
             next_step_input_data=args.next_step_input_data,
             network_calls=network_call,
             normalizer=self.normalizer,
-            corrector=self._corrector,
+            corrector=corrector,
             ocean=self.ocean,
             residual_prediction=self._config.residual_prediction,
             prognostic_names=self.prognostic_names,
@@ -420,15 +439,23 @@ class SingleModuleStep(StepABC):
     def get_regularizer_loss(self):
         return torch.tensor(0.0)
 
+    def set_epoch(self, epoch: int) -> None:
+        self._corrector_disabled = epoch <= self._config.corrector_disabled_epochs
+
     def get_state(self):
         """
         Returns:
             The state of the stepper.
         """
-        state = {
+        state: dict[str, Any] = {
             "module": self.module.get_state(),
             "secondary_decoder": self.secondary_decoder.get_module_state(),
         }
+        if self._config.corrector_disabled_epochs > 0:
+            # persisted so that mid-epoch resume, which does not signal an
+            # epoch boundary via set_epoch, keeps the corrector state of the
+            # interrupted epoch
+            state["corrector_disabled"] = self._corrector_disabled
         return state
 
     def load_state(self, state: dict[str, Any]) -> None:
@@ -445,6 +472,8 @@ class SingleModuleStep(StepABC):
         self.module.load_state(module)
         if "secondary_decoder" in state:
             self.secondary_decoder.load_module_state(state["secondary_decoder"])
+        if "corrector_disabled" in state:
+            self._corrector_disabled = state["corrector_disabled"]
 
 
 def _apply_input_mask(input_norm: TensorDict, data_mask: TensorMapping) -> TensorDict:

@@ -355,6 +355,15 @@ class StepABC(abc.ABC):
         """
         pass
 
+    def set_epoch(self, epoch: int) -> None:
+        """Called by the stepper at the start of each training epoch.
+
+        Default implementation is a no-op. Override to update per-epoch
+        behavior, e.g. epoch-dependent corrector enablement. Steps which
+        wrap another step must forward the call to the wrapped step.
+        """
+        pass
+
     @abc.abstractmethod
     def get_state(self) -> dict[str, Any]:
         """

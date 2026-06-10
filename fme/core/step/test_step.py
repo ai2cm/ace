@@ -28,7 +28,7 @@ from fme.core.step.global_mean_removal import (
     PerChannelGlobalMeanRemovalConfig,
     SharedGlobalMeanRemovalConfig,
 )
-from fme.core.step.multi_call import MultiCallConfig, MultiCallStepConfig
+from fme.core.step.multi_call import MultiCallConfig, MultiCallStep, MultiCallStepConfig
 from fme.core.step.secondary_decoder import SecondaryDecoderConfig
 from fme.core.step.secondary_module import SecondaryModuleStepConfig
 from fme.core.step.single_module import (
@@ -1542,3 +1542,20 @@ def test_step_shared_global_mean_removal_raises_on_masked_reference():
                 data_mask=data_mask,
             ),
         )
+
+
+def test_corrector_disabled_not_in_state_by_default():
+    step = get_step(get_single_module_selector(), DEFAULT_IMG_SHAPE)
+    assert "corrector_disabled" not in step.get_state()
+
+
+def test_multi_call_step_forwards_set_epoch():
+    wrapped_step = unittest.mock.MagicMock(spec=StepABC)
+    config = MultiCallStepConfig(
+        wrapped_step=get_single_module_selector(),
+        config=None,
+        include_multi_call_in_loss=False,
+    )
+    step = MultiCallStep(wrapped_step=wrapped_step, config=config)
+    step.set_epoch(3)
+    wrapped_step.set_epoch.assert_called_once_with(3)

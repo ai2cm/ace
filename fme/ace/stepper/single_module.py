@@ -1407,6 +1407,7 @@ class Stepper:
             module.train()
 
     def set_epoch(self, epoch: int) -> None:
+        self._step_obj.set_epoch(epoch)
         for module in self.modules:
             for submodule in module.modules():
                 request_reset = getattr(

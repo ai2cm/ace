@@ -298,6 +298,9 @@ class MultiCallStep(StepABC):
     def get_regularizer_loss(self) -> torch.Tensor:
         return self._wrapped_step.get_regularizer_loss()
 
+    def set_epoch(self, epoch: int) -> None:
+        self._wrapped_step.set_epoch(epoch)
+
     def step(
         self,
         args: StepArgs,
