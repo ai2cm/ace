@@ -1399,12 +1399,10 @@ class Stepper:
         return stepper
 
     def set_eval(self) -> None:
-        for module in self.modules:
-            module.eval()
+        self._step_obj.eval()
 
     def set_train(self) -> None:
-        for module in self.modules:
-            module.train()
+        self._step_obj.train()
 
 
 @dataclasses.dataclass

@@ -422,12 +422,9 @@ class SingleModuleStep(StepABC):
             return output_dict
 
         # Newtonian relaxation toward configured target global means is an
-        # eval-time-only adjustment; gating on the network module's training
-        # flag keeps it from contributing to the loss during training.
-        if (
-            self._global_mean_relaxation is not None
-            and not self.module.torch_module.training
-        ):
+        # eval-time-only adjustment; gating on the step's training flag
+        # keeps it from contributing to the loss during training.
+        if self._global_mean_relaxation is not None and not self._training:
             global_mean_relaxation: GlobalMeanRelaxation | None = (
                 self._global_mean_relaxation
             )

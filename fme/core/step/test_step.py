@@ -945,6 +945,19 @@ def _get_relaxation_single_module_selector(
     )
 
 
+def test_step_train_eval_toggle_propagates_to_modules():
+    config = _get_relaxation_single_module_selector(None)
+    step = get_step(config, DEFAULT_IMG_SHAPE)
+    # Default is training mode (matches torch.nn.Module).
+    assert all(module.training for module in step.modules)
+    step.eval()
+    assert all(not module.training for module in step.modules)
+    step.train()
+    assert all(module.training for module in step.modules)
+    step.train(False)
+    assert all(not module.training for module in step.modules)
+
+
 def test_global_mean_relaxation_name_not_in_out_names_raises():
     normalization = get_network_and_loss_normalization_config(
         names=["a", "b"],
@@ -986,12 +999,10 @@ def test_global_mean_relaxation_only_applied_in_eval_mode():
         input=input_data, next_step_input_data=next_step_input_data, labels=None
     )
 
-    for module in step.modules:
-        module.train()
+    step.train()
     train_output, _ = step.step(args=args)
 
-    for module in step.modules:
-        module.eval()
+    step.eval()
     eval_output, _ = step.step(args=args)
 
     # Other variables are untouched.
@@ -1024,11 +1035,9 @@ def test_global_mean_relaxation_disabled_when_none():
     args = StepArgs(
         input=input_data, next_step_input_data=next_step_input_data, labels=None
     )
-    for module in step.modules:
-        module.eval()
+    step.eval()
     eval_output, _ = step.step(args=args)
-    for module in step.modules:
-        module.train()
+    step.train()
     train_output, _ = step.step(args=args)
     # Without relaxation, eval and train produce identical outputs for SFNO
     # (no dropout/batchnorm), since both go through step_with_adjustments
