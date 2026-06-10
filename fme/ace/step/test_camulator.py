@@ -199,12 +199,12 @@ def test_noise_conditioned_crossformer_noise_divergence():
     CLN zero-init makes outputs noise-independent at init; diverge after a step.
 
     This mirrors test_nc_swin_transformer_noise_divergence from the swin tests.
-    Deterministic mode is required because CrossFormer's UpBlock uses
-    ConvTranspose2d, whose cuDNN kernel uses atomicAdd and is non-deterministic
-    by default.  Enabling deterministic algorithms removes that variability so
-    the CLN zero-init property is testable end-to-end.
+    Run on CPU to avoid non-determinism from ConvTranspose2d (cuDNN scatter-add)
+    and CuBLAS on CUDA >= 10.2, both of which cannot be made deterministic
+    in-process without environment variables set before process start.
     """
     config = make_nc_crossformer_config()
+    device = torch.device("cpu")
     module = config.build(
         n_atmo_channels=len(ATM_PROGNOSTIC_NAMES),
         n_atmo_groups=ATM_LEVELS,
@@ -213,7 +213,7 @@ def test_noise_conditioned_crossformer_noise_divergence():
         n_atmo_diagnostic_channels=len(ATM_DIAGNOSTIC_NAMES),
         n_surf_diagnostic_channels=len(SURF_DIAGNOSTIC_NAMES),
         img_shape=IMG_SHAPE,
-    ).to(fme.get_device())
+    ).to(device)
     module.train()
     optimizer = torch.optim.SGD(module.parameters(), lr=1.0)
 
@@ -222,32 +222,27 @@ def test_noise_conditioned_crossformer_noise_divergence():
         + len(SURF_PROGNOSTIC_NAMES)
         + len(FORCING_NAMES)
     )
-    x = torch.randn(2, n_in, *IMG_SHAPE, device=fme.get_device())
+    x = torch.randn(2, n_in, *IMG_SHAPE, device=device)
 
-    prev_det = torch.are_deterministic_algorithms_enabled()
-    torch.use_deterministic_algorithms(True)
-    try:
-        # At init: CLN noise convs are zero → noise-independent.
-        with torch.no_grad():
-            out1 = module(x)
-            out2 = module(x)
-        assert torch.allclose(out1, out2), "Expected noise-independence at init"
+    # At init: CLN noise convs are zero → noise-independent.
+    with torch.no_grad():
+        out1 = module(x)
+        out2 = module(x)
+    assert torch.allclose(out1, out2), "Expected noise-independence at init"
 
-        # One optimizer step pushes CLN noise convs off zero.
-        out = module(x)
-        out.sum().backward()
-        optimizer.step()
-        optimizer.zero_grad()
+    # One optimizer step pushes CLN noise convs off zero.
+    out = module(x)
+    out.sum().backward()
+    optimizer.step()
+    optimizer.zero_grad()
 
-        # After step: two independent forward passes should differ.
-        with torch.no_grad():
-            out1 = module(x)
-            out2 = module(x)
-        assert not torch.allclose(
-            out1, out2
-        ), "Expected noise-dependence after optimizer step"
-    finally:
-        torch.use_deterministic_algorithms(prev_det)
+    # After step: two independent forward passes should differ.
+    with torch.no_grad():
+        out1 = module(x)
+        out2 = module(x)
+    assert not torch.allclose(
+        out1, out2
+    ), "Expected noise-dependence after optimizer step"
 
 
 def test_crossformer_diagnostic_names():
