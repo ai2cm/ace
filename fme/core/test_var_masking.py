@@ -113,3 +113,81 @@ def test_sample_mask_raises_on_indivisible_batch():
 
 def test_variable_masking_config_is_union_of_sub_configs():
     assert VariableMaskingConfig == UniformMaskingConfig | PerVariableMaskingConfig
+
+
+def test_uniform_mask_independent_ensemble_shape():
+    n_samples, n_ensemble, n_channels = 6, 3, 8
+    config = UniformMaskingConfig(min_vars=1, max_vars=3, shared_across_ensemble=False)
+    mask = config.sample_mask(
+        n_channels,
+        batch_size=n_samples * n_ensemble,
+        device=torch.device("cpu"),
+        n_ensemble=n_ensemble,
+    )
+    assert mask.shape == (n_samples * n_ensemble, n_channels)
+    assert mask.dtype == torch.bool
+
+
+def test_uniform_mask_independent_ensemble_members_differ():
+    torch.manual_seed(0)
+    n_samples, n_ensemble, n_channels = 20, 4, 16
+    config = UniformMaskingConfig(min_vars=1, max_vars=8, shared_across_ensemble=False)
+    mask = config.sample_mask(
+        n_channels,
+        batch_size=n_samples * n_ensemble,
+        device=torch.device("cpu"),
+        n_ensemble=n_ensemble,
+    )
+    grouped = mask.view(n_samples, n_ensemble, n_channels)
+    all_same = (grouped == grouped[:, :1, :]).all(dim=(1, 2))
+    assert not all_same.all(), (
+        "Expected at least some base samples to have different masks "
+        "across ensemble members when shared_across_ensemble=False"
+    )
+
+
+def test_uniform_mask_independent_no_divisibility_requirement():
+    config = UniformMaskingConfig(shared_across_ensemble=False)
+    mask = config.sample_mask(
+        n_channels=4, batch_size=7, device=torch.device("cpu"), n_ensemble=3
+    )
+    assert mask.shape == (7, 4)
+
+
+def test_per_variable_mask_independent_ensemble_shape():
+    n_samples, n_ensemble, n_channels = 6, 3, 8
+    config = PerVariableMaskingConfig(rate=0.5, shared_across_ensemble=False)
+    mask = config.sample_mask(
+        n_channels,
+        batch_size=n_samples * n_ensemble,
+        device=torch.device("cpu"),
+        n_ensemble=n_ensemble,
+    )
+    assert mask.shape == (n_samples * n_ensemble, n_channels)
+    assert mask.dtype == torch.bool
+
+
+def test_per_variable_mask_independent_ensemble_members_differ():
+    torch.manual_seed(0)
+    n_samples, n_ensemble, n_channels = 20, 4, 16
+    config = PerVariableMaskingConfig(rate=0.5, shared_across_ensemble=False)
+    mask = config.sample_mask(
+        n_channels,
+        batch_size=n_samples * n_ensemble,
+        device=torch.device("cpu"),
+        n_ensemble=n_ensemble,
+    )
+    grouped = mask.view(n_samples, n_ensemble, n_channels)
+    all_same = (grouped == grouped[:, :1, :]).all(dim=(1, 2))
+    assert not all_same.all(), (
+        "Expected at least some base samples to have different masks "
+        "across ensemble members when shared_across_ensemble=False"
+    )
+
+
+def test_per_variable_mask_independent_no_divisibility_requirement():
+    config = PerVariableMaskingConfig(rate=0.5, shared_across_ensemble=False)
+    mask = config.sample_mask(
+        n_channels=4, batch_size=7, device=torch.device("cpu"), n_ensemble=3
+    )
+    assert mask.shape == (7, 4)
