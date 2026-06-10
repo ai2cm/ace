@@ -815,3 +815,198 @@ Next steps, in order:
    bug found by probe 1+3.
 4. In parallel: the qsat-scaling residual run (Avenue 2) as a control, run
    through the same probe harness when it lands.
+
+## Code task plans (round 6, 2026-06-10)
+
+Planning only — no code written. Each task is a PR branch from `main` per
+the workflow section. Code references verified against `main` and
+`feature/global-mean-relaxation` (`aecb09be2`).
+
+### Task A: Avenue 1 perturbation augmentation — PROCEED (with flagged design deltas)
+
+**Branch**: `feature/perturbation-augmentation`.
+
+**Key design insight (removes the target-plumbing problem).** The original
+proposal perturbed the input *and* shifted the loss target by the decayed
+perturbation, which would touch the train stepper, loss, and data path. An
+equivalent formulation is fully step-local: perturb the input by `p·δ`
+(pattern × amplitude) at the top of the step, and subtract `p·δ·exp(−Δt/τ)`
+from the output at the bottom. Then the ordinary loss against the *unmodified*
+data target trains exactly the relaxation response: the optimum is
+`f(x + p·δ) = y + p·δ·exp(−Δt/τ)`. Nothing outside `SingleModuleStep`
+changes — no target adjustment, no loss change, no data-loading change. In
+multistep training each step draws an independent δ and the rolled-out state
+stays on-data (each step gets an independent displacement lesson rather than
+one compounding trajectory — slightly different from the round-2 proposal,
+and simpler). A bonus from probe 7's "sliding equilibrium" finding: because
+supervision is anchored to the data target, the learned relaxation pulls
+toward the *data* climatology, fixing the attractor and the timescale at
+once, with no explicit target value to configure and no conflict with the
+seasonal cycle.
+
+**Placement.** `SingleModuleStep`, exactly as suggested, as the train-mode
+mirror of the eval-only `GlobalMeanRelaxation` on
+`feature/global-mean-relaxation`:
+
+- That branch adds `StepABC.train(mode)/eval()` with a `_training` flag,
+  and `Stepper.set_train/set_eval` delegate to it; the relaxation gates on
+  `not self._training`. The augmentation gates on `self._training` — this PR
+  should be based on (or merge) that branch's `StepABC` commit (`aecb09be2`).
+- Hook points in `step_with_adjustments`
+  (`fme/core/step/single_module.py:537`): forward perturbation applied to
+  the *network's view* of the input, composed before
+  `global_mean_removal.forward_transform` (so it interacts with shared-mean
+  removal and qsat scaling the way a real displacement would); inverse
+  (decayed) correction applied after `global_mean_removal.inverse_transform`
+  and **before the corrector**, so budget corrections close on the
+  corrected-back state. The `input` mapping passed to the corrector/ocean
+  stays unperturbed (the corrector budgets against the true state). This is
+  one new optional argument to `step_with_adjustments`, same shape as
+  `global_mean_relaxation` on the feature branch.
+- Randomness drawn via `fme.core.rand` per step call in train mode.
+
+**Config dataclass** (attribute on `SingleModuleStepConfig`, sibling of
+`global_mean_removal`/`global_mean_relaxation`):
+
+```python
+@dataclasses.dataclass
+class PerturbationSpecConfig:
+    names: list[str]                  # explicit names; wildcard via shared helper (see Task B)
+    type: Literal["additive", "multiplicative"]
+    amplitude: float                  # sigma_delta in training-std units
+    timescale_steps: float            # tau for the decayed response target
+    max_degree: int = 0               # spatial pattern: 0 = uniform; l<=max_degree
+                                      # random real spherical harmonics otherwise
+
+@dataclasses.dataclass
+class PerturbationAugmentationConfig:
+    perturbations: list[PerturbationSpecConfig]
+    probability: float = 1.0          # per-sample apply probability
+```
+
+`__post_init__` validation: names must be prognostic (in `in_names` and
+`out_names`); amplitudes/timescales positive; `probability` in (0, 1];
+`multiplicative` restricted to `force_positive_names`-style fields (warn or
+error otherwise); a field in at most one spec. Backwards compatibility:
+optional field defaulting to `None`, so old checkpoints load unchanged; new
+checkpoints carry it but it is inert in eval mode, so inference loading is
+unaffected.
+
+**Tests** (with the change, same PR): train-mode supervision identity on a
+linear toy module (optimal output equals decayed displacement); eval-mode
+no-op (bitwise-identical step output with config present); composition with
+global-mean removal (temperature perturbation visible to network only via
+the appended mean channel); multistep rollout shape/state sanity; config
+validation errors; checkpoint save/load round-trip with and without the
+field.
+
+**Flagged design deltas from the probe results (input wanted, non-blocking):**
+
+1. τ is now a stability choice, not a physical one: probe 7's bias arithmetic
+   wants `timescale_steps` ≈ 20–50 for q0 (b·τ ≪ envelope), far shorter than
+   physical stratospheric vapor relaxation. Default suggestion: 30.
+2. `max_degree`: probe 4 says the amplifying direction is extratropical and
+   the bias tropical, so uniform-only (l=0) perturbations underconstrain;
+   suggest defaulting the first experiments to `max_degree: 2-4` for q0/q1.
+   Uniform remains the `max_degree: 0` special case.
+3. Two-sided by construction (δ ~ N(0, σ²)) — required, since this rollout
+   escaped dry while the training-time run escaped moist.
+
+### Task B: Avenue 3b saturation normalization — ON HOLD (flagged for discussion)
+
+**The experimental results undercut this feature's stability rationale, so
+flagging before any branch is cut.** Probe 5: q0 goes statistically OOS two
+orders of magnitude below saturation. Probe 7: the actual escape is a *dry*
+bias — motion *away* from the RH = 1 wall that the representation builds in.
+An RH-space q0 would still random-walk/bias-drift out of its statistical
+envelope exactly as q does now. What survives is the *climate-invariance*
+rationale (q/qsat stays in-sample as the climate warms — same philosophy as
+qsat scaling, and aligned with the project's forcing-scenario goal), which
+is a different workstream from the blowup fix. Recommend deciding: drop,
+defer to the climate-invariance ladder, or proceed for invariance reasons.
+
+For when/if it proceeds, the planning answers requested earlier:
+
+- **Placement**: a paired forward/inverse transform exactly like
+  `GlobalMeanRemoval` — `forward_transform` divides selected q fields by
+  `qsat(T_input, p_mid)` (caching qsat), `inverse_transform` multiplies
+  back. Lives in `fme/core/step/` as a sibling module; invoked from
+  `step_with_adjustments` adjacent to `global_mean_removal` (qsat computed
+  from the raw pre-GMR input temperature; ordering is then free because
+  overlap with `qsat_scaled_names` is forbidden). Needs `PRESsfc` plus the
+  vertical coordinate: available at build time via `dataset_info`
+  (`dataset_info.vertical_coordinate` carries ak/bk; the constructor already
+  receives `dataset_info`, used the same way `GlobalMeanRelaxation.build`
+  uses `dataset_info.gridded_operations`). The Bolton helper exists on the
+  experiment branch (`fme/core/humidity.py`) and would move to `main` with
+  this PR.
+- **`input: append` mechanism**: commit `7d0562039` ("treat global mean
+  removal extras as ordinary input channels") added `extra_channel_names`
+  packed into `in_packer` — RH input channels use the same mechanism, so
+  the cheap input-only variant is genuinely cheap.
+- **Wildcard names**: precedent on `main` is the `"all"` string sentinel
+  (`anomaly_only_residual_names: list[str] | str`), not globs. Proposal: a
+  small shared `match_names(patterns, available)` helper (fnmatch
+  semantics, error on zero matches) in `fme/core`, used here and reusable
+  by Task A; `names: ["specific_total_water_*"]` covers the uniform case
+  and explicit lists cherry-pick levels.
+- Config shape as sketched in the Avenue 3b section (RH-only, `prediction`
+  bool + `input: none|replace|append`), attribute
+  `saturation_normalization` on `SingleModuleStepConfig`, `__post_init__`
+  validation incl. forbidden overlap with `qsat_scaled_names`.
+
+### Task C: Avenue 4 Jacobian probe task + `fork_rng` — PROCEED
+
+**Branch**: `feature/jacobian-probe` (with `fork_rng` bundled — new utility
+ships with its first usage).
+
+- **`fme.core.rand.fork_rng(seed)`**: context manager wrapping
+  `torch.random.fork_rng` over CPU+CUDA, seeding inside, restoring on exit.
+- **"Lives alongside validation, easy to omit"**: the generic trainer
+  (`fme/core/generics/trainer.py`) already takes
+  `inference_callback: InferenceCallback = _null_inference_callback` — an
+  optional per-epoch evaluation hook. Two options, recommending the first:
+  (1) compose at the `fme.ace.train` level: `TrainConfig` gains
+  `probes: list[JacobianProbeConfig] = []`; `train.py` builds a probe
+  callback and wraps it together with the existing inference callback into
+  the single callback handed to the trainer (generic trainer unchanged, logs
+  merged like `inference_logs`); (2) add a parallel
+  `probe_callback` parameter to the trainer mirroring `inference_callback`.
+  Option 1 keeps `fme/core/generics` untouched and the default
+  `probes: []` means omitting the key omits the feature entirely — nothing
+  else changes.
+- **`JacobianProbeConfig`** (sibling shape to `InlineInferenceConfig`):
+  `loader` (a few validation ICs), `epochs: EpochSchedule`, `name`,
+  `variables` (mode set, default all prognostics), `excluded_diagonal`
+  (whitelist for designed-neutral modes — `PRESsfc` under dry-air
+  conservation, shared-GMR reference behavior), `eps_frac` (default 1e-3 ×
+  per-variable std), `seeds` (default 2–3). Logs: per-variable diagonal,
+  top-k eigenvalue moduli of the per-σ matrix, max non-whitelisted
+  diagonal as a scalar for cross-run comparison.
+- The probe body is `probe26_jacobian_spectrum.py` productionized: batched
+  base+perturbed single-step `predict` calls under `fork_rng`, global means
+  in per-σ units. No model-side changes needed (demonstrated by the
+  script).
+- **Tests**: analytic Jacobian of a linear toy stepper recovered to
+  tolerance; whitelist behavior; `fork_rng` determinism and state
+  restoration; config-omitted ⇒ trainer behavior identical.
+
+### Task D: `fix/` inference ensemble double-broadcast — PROCEED (small)
+
+**Branch**: `fix/inference-ensemble-broadcast`. Failing test first: standalone
+inference path (`get_initial_condition(n_ensemble=2)` →
+`get_forcing_data` → `predict_paired`) currently raises
+`DataShapesNotUniform` (4 vs 2 samples). Two candidate fixes, decide in PR:
+(a) the forcing loader stamps its `BatchData` with the IC's `n_ensemble`
+(it built one window per already-tiled IC sample, so the flag is simply
+wrong); (b) `predict_paired` broadcasts on sample-count mismatch rather
+than flag state. (a) looks correct-by-construction; (b) is more defensive.
+Inline-training inference is unaffected either way (different path).
+
+### Task E: bias-targeted tendency regularization — NOT STARTED (not green-lit)
+
+Proposed by probe 7's analysis (error-based or batch-mean penalty instead of
+per-sample second moment), but it emerged from results and hasn't been
+discussed; also pending the empirical question of what existing tend-reg
+checkpoints actually do to the bias (needs a Wave-3b+ checkpoint to probe —
+open question to Jeremy). Flagging rather than planning.
