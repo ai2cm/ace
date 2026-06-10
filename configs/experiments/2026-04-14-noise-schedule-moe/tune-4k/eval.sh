@@ -2,10 +2,10 @@
 
 set -e
 
-JOB_NAME="eval-control-climate-multivar-downscale-on-4k-tropics"
+JOB_NAME="eval-control-climate-multivar-downscale-on-4k-conus"
 #JOB_NAME="eval-global-trained-denoising-moe-events"
 
-CONFIG_FILENAME="eval.yaml"
+CONFIG_FILENAME="eval-conus.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -33,12 +33,9 @@ wandb_group=""
 gantry run \
     --name $JOB_NAME \
     --description 'Run 100km to 3km evaluation on coarsened X-SHiELD' \
-    --workspace ai2/ace \
+    --workspace ai2/climate-titan \
     --priority urgent \
-    --not-preemptible \
     --cluster ai2/titan \
-    --cluster ai2/jupiter \
-    --cluster ai2/ceres \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
