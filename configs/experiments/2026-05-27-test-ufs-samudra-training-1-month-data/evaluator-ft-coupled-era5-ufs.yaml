@@ -20,7 +20,7 @@ loader:
       file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
       engine: zarr
   start_indices:
-    times:start_time:
+    times:
     - '1994-01-03T12:00:00'
 aggregator:
   log_zonal_mean_images: true
