@@ -4,7 +4,7 @@ import torch
 from fme.core.device import get_device
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
 
-from .swin_layers import ColumnMixer, WindowAttention2D
+from .swin_layers import AxialAttentionMixer, ColumnMixer, WindowAttention2D
 from .swin_transformer import SwinTransformerNet
 
 _EMBED_DIM_NOISE = 8
@@ -132,6 +132,51 @@ def test_column_mixer():
     x = torch.randn(2, 4, 8, dim, device=device)
     out = mixer(x)
     torch.testing.assert_close(out, torch.zeros_like(out))
+
+
+def test_axis_attn_forward_backward():
+    """AxialAttentionMixer: correct output shape and all params receive grads."""
+    device = get_device()
+    dim, num_heads = 16, 2
+    H, W = 8, 16
+    mixer = AxialAttentionMixer(dim, (H, W), num_heads).to(device)
+    x = torch.randn(2, H, W, dim, device=device, requires_grad=True)
+    out = mixer(x)
+    assert out.shape == (2, H, W, dim)
+    out.sum().backward()
+    assert x.grad is not None
+    for name, param in mixer.named_parameters():
+        assert param.grad is not None, f"No gradient for {name}"
+
+
+def test_axis_attn_net_forward_backward():
+    """SwinTransformerNet with axis_attn=True: correct shape, all params get grads."""
+    in_chans, out_chans = 4, 2
+    img_shape = (16, 32)
+    n = 2
+    device = get_device()
+    net = SwinTransformerNet(
+        in_chans=in_chans,
+        out_chans=out_chans,
+        img_shape=img_shape,
+        embed_dim=32,
+        depth_multiplier=1,
+        num_heads=(2, 4, 4, 2),
+        window_size=(4, 4),
+        mlp_ratio=2.0,
+        drop_path_rate=0.0,
+        axis_attn=True,
+    ).to(device)
+    x = torch.randn(n, in_chans, *img_shape, device=device)
+    out = net(x)
+    assert out.shape == (n, out_chans, *img_shape)
+    out.sum().backward()
+    for name, param in net.named_parameters():
+        assert param.grad is not None, f"No gradient for {name}"
+    for name, module in net.named_modules():
+        if isinstance(module, AxialAttentionMixer):
+            return  # confirmed at least one AxialAttentionMixer is present
+    raise AssertionError("No AxialAttentionMixer found in network")
 
 
 def test_backward():

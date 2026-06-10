@@ -177,10 +177,10 @@ class WindowAttention2D(nn.Module):
 class ColumnMixer(nn.Module):
     """Pointwise ``Linear(dim, dim)`` applied at every spatial location.
 
-    The 2D equivalent of ArchesWeather's cross-level attention (``axis_attn``).
-    It has no normalization and no residual of its own; its output is folded
-    into the window-attention output before the gated shortcut (see
-    ``SwinTransformerBlock``).
+    The simplified 2D fallback for ArchesWeather's cross-level attention
+    (``axis_attn``).  It has no normalization and no residual of its own;
+    its output is folded into the window-attention output before the gated
+    shortcut (see ``SwinTransformerBlock``).
     """
 
     def __init__(self, dim: int):
@@ -189,6 +189,83 @@ class ColumnMixer(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.fc(x)
+
+
+class _SelfAttention(nn.Module):
+    """Scaled dot-product self-attention.
+
+    Faithful port of the ``SelfAttention`` class from the ``axial-attention``
+    library (lucidrains/axial-attention), replicated here so that
+    ``AxialAttentionMixer`` carries no hard package dependency.
+    """
+
+    def __init__(self, dim: int, heads: int):
+        super().__init__()
+        self.heads = heads
+        self.dim_heads = dim // heads
+        dim_hidden = self.dim_heads * heads
+        self.to_q = nn.Linear(dim, dim_hidden, bias=False)
+        self.to_kv = nn.Linear(dim, 2 * dim_hidden, bias=False)
+        self.to_out = nn.Linear(dim_hidden, dim)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        b, t, _ = x.shape
+        h, e = self.heads, self.dim_heads
+        q = self.to_q(x)
+        k, v = self.to_kv(x).chunk(2, dim=-1)
+
+        def _merge(tensor: torch.Tensor) -> torch.Tensor:
+            return tensor.reshape(b, -1, h, e).transpose(1, 2).reshape(b * h, -1, e)
+
+        q, k, v = _merge(q), _merge(k), _merge(v)
+        attn = (q @ k.transpose(-2, -1)) * (e**-0.5)
+        attn = attn.softmax(dim=-1)
+        out = attn @ v
+        out = out.reshape(b, h, -1, e).transpose(1, 2).reshape(b, -1, h * e)
+        return self.to_out(out)
+
+
+class AxialAttentionMixer(nn.Module):
+    """2D axial self-attention with learnable positional embeddings.
+
+    A zero-dependency port of ArchesWeather's ``axis_attn`` component adapted
+    for ACE's 2D ``(B, H, W, C)`` layout.  Replicates exactly:
+
+    * ``AxialPositionalEmbedding(dim, shape=(H, W), emb_dim_index=-1)`` —
+      a ``(1, H, 1, dim)`` per-row parameter and a ``(1, 1, W, dim)``
+      per-column parameter, both initialised with ``torch.randn`` and summed
+      into the input before attention.
+    * ``AxialAttention(dim, dim_index=-1, heads=..., num_dimensions=2,
+      sum_axial_out=True)`` — independent H-axis and W-axis self-attentions
+      whose outputs are summed (``sum_axial_out=True``).
+
+    The caller is responsible for the outer residual (``h = h + mixer(h)``),
+    matching the ``ColumnMixer`` API.
+    """
+
+    def __init__(self, dim: int, input_resolution: tuple[int, int], num_heads: int):
+        super().__init__()
+        H, W = input_resolution
+        # AxialPositionalEmbedding parameters (emb_dim_index=-1 → channels last)
+        self.pos_h = nn.Parameter(torch.randn(1, H, 1, dim))
+        self.pos_w = nn.Parameter(torch.randn(1, 1, W, dim))
+        # One SelfAttention per axis (AxialAttention with num_dimensions=2)
+        self.attn_h = _SelfAttention(dim, num_heads)
+        self.attn_w = _SelfAttention(dim, num_heads)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, H, W, C = x.shape
+        x_pos = x + self.pos_h + self.pos_w
+
+        # H-axis: permutation [0,2,1,3] → attend along H for every column
+        x_h = x_pos.permute(0, 2, 1, 3).contiguous().reshape(B * W, H, C)
+        x_h = self.attn_h(x_h).reshape(B, W, H, C).permute(0, 2, 1, 3).contiguous()
+
+        # W-axis: permutation [0,1,2,3] (identity) → attend along W for every row
+        x_w = x_pos.reshape(B * H, W, C)
+        x_w = self.attn_w(x_w).reshape(B, H, W, C)
+
+        return x_h + x_w  # sum_axial_out=True
 
 
 class ChannelMixer(nn.Module):
@@ -280,11 +357,16 @@ CondParams = tuple[
 class SwinTransformerBlock(nn.Module):
     """A single 2D Swin transformer block with optional AdaLN or CLN conditioning.
 
-    Two sub-blocks: window attention (with ColumnMixer folded into its output)
-    followed by an MLP. In ``"adaln"`` mode, AdaLN scale/shift is applied after
-    each norm and a gate scales each residual branch. In ``"cln"`` mode,
-    ``ConditionalLayerNorm`` is used for both norms and a plain (ungated) residual
-    is applied, matching the SFNO's noise-conditioned path.
+    Two sub-blocks: window attention (with a column-interaction mixer folded into
+    its output) followed by an MLP. When ``axis_attn=False`` (default) the mixer
+    is a simple ``ColumnMixer`` (pointwise linear); when ``axis_attn=True`` it is
+    replaced by ``AxialAttentionMixer``, a zero-dependency port of ArchesWeather's
+    ``axis_attn`` component that applies independent H- and W-axis self-attention.
+
+    In ``"adaln"`` mode, AdaLN scale/shift is applied after each norm and a gate
+    scales each residual branch. In ``"cln"`` mode, ``ConditionalLayerNorm`` is
+    used for both norms and a plain (ungated) residual is applied, matching the
+    SFNO's noise-conditioned path.
 
     Args:
         dim: Number of channels.
@@ -300,6 +382,9 @@ class SwinTransformerBlock(nn.Module):
             ``ConditionalLayerNorm``-based noise conditioning.
         context_config: Required when ``conditioning="cln"``; passed to each
             ``ConditionalLayerNorm``.
+        axis_attn: When ``True``, replace the ``ColumnMixer`` with
+            ``AxialAttentionMixer`` (2D axial self-attention matching
+            ArchesWeather's ``axis_attn``).
     """
 
     def __init__(
@@ -317,6 +402,7 @@ class SwinTransformerBlock(nn.Module):
         context_config: ContextConfig | None = None,
         cpb_hidden_dim: int = 64,
         lat_coords: torch.Tensor | None = None,
+        axis_attn: bool = False,
     ):
         super().__init__()
         self.dim = dim
@@ -345,7 +431,11 @@ class SwinTransformerBlock(nn.Module):
             cpb_hidden_dim=cpb_hidden_dim,
             qkv_bias=qkv_bias,
         )
-        self.column_mixer = ColumnMixer(dim)
+        self.column_mixer: nn.Module = (
+            AxialAttentionMixer(dim, input_resolution, num_heads)
+            if axis_attn
+            else ColumnMixer(dim)
+        )
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
         self.mlp = _build_mlp(mlp_layer, dim, int(dim * mlp_ratio))
 
@@ -547,6 +637,7 @@ class BasicLayer(nn.Module):
         context_config: ContextConfig | None = None,
         cpb_hidden_dim: int = 64,
         lat_coords: torch.Tensor | None = None,
+        axis_attn: bool = False,
     ):
         super().__init__()
         if len(drop_path) != depth:
@@ -570,6 +661,7 @@ class BasicLayer(nn.Module):
                     context_config=context_config,
                     cpb_hidden_dim=cpb_hidden_dim,
                     lat_coords=lat_coords,
+                    axis_attn=axis_attn,
                 )
                 for i in range(depth)
             ]

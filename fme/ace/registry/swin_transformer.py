@@ -176,6 +176,7 @@ class SwinTransformerBuilder(ModuleConfig):
     cpb_hidden_dim: int = 64
     padding_conf: TensorPaddingConfig | None = None
     use_cpb_scaling: bool = True
+    axis_attn: bool = False
 
     def __post_init__(self):
         if isinstance(self.padding_conf, dict):
@@ -270,6 +271,7 @@ class SwinTransformerBuilder(ModuleConfig):
             padding_conf=dataclasses.asdict(self.padding_conf)
             if self.padding_conf is not None
             else None,
+            axis_attn=self.axis_attn,
         )
         return _ContextWrappedModule(net)
 
@@ -320,6 +322,7 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
     cpb_hidden_dim: int = 64
     padding_conf: TensorPaddingConfig | None = None
     use_cpb_scaling: bool = True
+    axis_attn: bool = False
 
     def __post_init__(self):
         if isinstance(self.padding_conf, dict):
@@ -415,6 +418,7 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             padding_conf=dataclasses.asdict(self.padding_conf)
             if self.padding_conf is not None
             else None,
+            axis_attn=self.axis_attn,
         )
         return NoiseConditionedModel(
             net,
@@ -470,6 +474,7 @@ class TimeConditionedSwinTransformerBuilder(ModuleConfig):
     frequency_embedding_size: int = 256
     padding_conf: TensorPaddingConfig | None = None
     use_cpb_scaling: bool = True
+    axis_attn: bool = False
 
     def __post_init__(self):
         if self.embed_dim_scalar <= 0:
@@ -569,6 +574,7 @@ class TimeConditionedSwinTransformerBuilder(ModuleConfig):
             padding_conf=dataclasses.asdict(self.padding_conf)
             if self.padding_conf is not None
             else None,
+            axis_attn=self.axis_attn,
         )
         return _TimeConditionedContextWrappedModule(
             net,

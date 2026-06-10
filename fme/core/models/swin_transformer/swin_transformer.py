@@ -68,6 +68,7 @@ class SwinTransformerNet(nn.Module):
         cpb_hidden_dim: int = 64,
         lat_coords: torch.Tensor | None = None,
         padding_conf: dict | None = None,
+        axis_attn: bool = False,
     ):
         super().__init__()
         if depth_multiplier < 1:
@@ -155,6 +156,7 @@ class SwinTransformerNet(nn.Module):
             context_config=context_config,
             cpb_hidden_dim=cpb_hidden_dim,
             lat_coords=lat_full,
+            axis_attn=axis_attn,
         )
         self.downsample = PatchMerging(embed_dim)
         self.layer2 = BasicLayer(
@@ -172,6 +174,7 @@ class SwinTransformerNet(nn.Module):
             context_config=context_config,
             cpb_hidden_dim=cpb_hidden_dim,
             lat_coords=lat_half,
+            axis_attn=axis_attn,
         )
         self.layer3 = BasicLayer(
             2 * embed_dim,
@@ -188,6 +191,7 @@ class SwinTransformerNet(nn.Module):
             context_config=context_config,
             cpb_hidden_dim=cpb_hidden_dim,
             lat_coords=lat_half,
+            axis_attn=axis_attn,
         )
         self.upsample = PatchExpanding(2 * embed_dim)  # -> embed_dim, 2x spatial
 
@@ -207,6 +211,7 @@ class SwinTransformerNet(nn.Module):
             context_config=context_config,
             cpb_hidden_dim=cpb_hidden_dim,
             lat_coords=lat_full,
+            axis_attn=axis_attn,
         )
         self.final_linear = nn.Linear(decoder_dim, embed_dim, bias=False)
         self.decoder = nn.Conv2d(embed_dim, out_chans, kernel_size=3, padding=1)
