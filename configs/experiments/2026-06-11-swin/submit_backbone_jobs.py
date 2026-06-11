@@ -24,6 +24,7 @@ CONFIGS = sorted(
     path.name
     for path in HERE.glob("*.yaml")
     if path.name.startswith("ace-train-config-4deg-AIMIP-")
+    and "hybrid-swin" in path.name
 )
 
 
@@ -44,13 +45,13 @@ def main() -> None:
     )
     parser.add_argument(
         "--beaker-workspace",
-        default="ai2/ace",
+        default="ai2/climate-titan",
         help="Beaker workspace to submit jobs to (default: ai2/ace).",
     )
     parser.add_argument(
         "--beaker-cluster",
         nargs="+",
-        default=["ai2/titan", "ai2/jupiter", "ai2/ceres"],
+        default=["ai2/titan"],
         metavar="CLUSTER",
         help=(
             "Beaker cluster(s) to target (default: ai2/titan" "ai2/jupiter ai2/ceres)."
@@ -58,7 +59,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--beaker-priority",
-        default="high",
+        default="urgent",
         help="Beaker job priority (default: high).",
     )
     args = parser.parse_args()
