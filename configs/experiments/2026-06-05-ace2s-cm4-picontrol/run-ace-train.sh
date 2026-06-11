@@ -69,10 +69,10 @@ done
 # from the pretrain jobs, then uncomment and run the loop below
 
 # Beaker dataset IDs for pretrain checkpoints, used to initialize finetuning (one per seed)
-# PRETRAIN_DATASETS=(
-#     ""  # rs0
-#     ""  # rs1
-# )
+PRETRAIN_DATASETS=(
+    "01KTPTS6C23P8SWB9RBFWB09BE"  # rs0
+    "01KTPTSCCCTABD52YA5N6CE1K9"  # rs1
+)
 
 # for RS in 0 1; do
 #   run_training "ace-train-config-multi-step-finetuning.yaml" "ace2s-cm4-picontrol-multi-step-finetuning-rs${RS}" --ckpt "${PRETRAIN_DATASETS[$RS]}" "seed=${RS}"
