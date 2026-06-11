@@ -603,6 +603,36 @@ def test_checkpoint_model_build_with_fine_coordinates_path(tmp_path):
     assert torch.equal(loaded_model.full_fine_coords.lon.cpu(), fine_coords.lon.cpu())
 
 
+def test_checkpoint_model_build_with_legacy_static_input_coords(tmp_path):
+    """In-between-format checkpoint (no full_fine_coords key, legacy per-field
+    coords in static_inputs) should load using the static input coordinates."""
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    static_inputs = make_static_inputs(fine_shape)
+    fine_coords = static_inputs.coords
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=fine_coords,
+        use_fine_topography=True,
+        static_inputs=static_inputs,
+    )
+    state = model.get_state()
+    # Simulate in-between checkpoint: no full_fine_coords, coords stored
+    # per-field in static_inputs instead of at the top level
+    del state["full_fine_coords"]
+    coords_state = state["static_inputs"].pop("coords")
+    for field_state in state["static_inputs"]["fields"]:
+        field_state["coords"] = coords_state
+
+    checkpoint_path = tmp_path / "test.ckpt"
+    torch.save({"model": state}, checkpoint_path)
+
+    loaded_model = CheckpointModelConfig(checkpoint_path=str(checkpoint_path)).build()
+    assert torch.equal(loaded_model.full_fine_coords.lat.cpu(), fine_coords.lat.cpu())
+    assert torch.equal(loaded_model.full_fine_coords.lon.cpu(), fine_coords.lon.cpu())
+
+
 def test_checkpoint_model_build(tmp_path):
     """CheckpointModelConfig loads a modern checkpoint and restores the model."""
     coarse_shape = (8, 16)
