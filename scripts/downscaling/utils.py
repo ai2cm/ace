@@ -46,11 +46,11 @@ def fetch_beaker_dataset(
 
 
 def find_event_files(directory: str) -> dict[str, Path]:
-    """Find netCDF files matching the event naming pattern, keyed by event name."""
+    """Find netCDF files matching the event naming pattern, keyed by filename
+    stem (event name including date, so multiple dates of the same event are
+    kept)."""
     event_files = {}
     for p in sorted(Path(directory).glob("*.nc")):
-        # extract event name
-        matched = _EVENT_FILE_RE.match(p.name)
-        if matched:
-            event_files[matched.group(1)] = p
+        if _EVENT_FILE_RE.match(p.name):
+            event_files[p.stem] = p
     return event_files
