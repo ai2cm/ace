@@ -104,7 +104,7 @@ train_loader:
           engine: zarr
           subset:
             start_time: '0425-01-03T12:00:00'
-            stop_time: '0515-01-01T12:00:00'
+            stop_time: '0515-01-03T12:00:00'
         - data_path: /climate-default
           file_pattern: 2026-06-02-E3SMv3-piControl-ocean-105yr-5D-average.zarr
           engine: zarr
