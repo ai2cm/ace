@@ -239,10 +239,10 @@ class SwinTransformerNet(nn.Module):
                 if context.embedding_scalar is None:
                     raise ValueError("embedding_scalar is required")
                 cond_scalar = context.embedding_scalar
-            if self.embed_dim_labels > 0 and context is not None:
-                cond_labels = (
-                    context.labels
-                )  # None → BasicLayer skips label conditioning
+            if self.embed_dim_labels > 0:
+                if context.labels is None:
+                    raise ValueError("labels are required")
+                cond_labels = context.labels
 
         # CLN conditioning: pad and subsample noise to match U-Net resolutions.
         ctx_full: Context | None = context

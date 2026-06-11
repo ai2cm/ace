@@ -262,8 +262,10 @@ class ConditionalLayerNorm(nn.Module):
         Returns:
             The normalized tensor, of shape (batch_size, channels, height, width).
         """
-        # labels may be None when the model has label capacity but is called without
-        # labels (e.g. unconditional inference); skip label conditioning in that case.
+        if context.labels is None and (
+            self.W_scale_labels is not None or self.W_bias_labels is not None
+        ):
+            raise ValueError("labels must be provided")
         with timer.child("compute_scaling_and_bias"):
             if self.W_scale is not None:
                 if context.embedding_scalar is None:
@@ -291,11 +293,11 @@ class ConditionalLayerNorm(nn.Module):
                     list(x.shape[:-2]) + [1, 1], device=x.device, dtype=x.dtype
                 )
 
-            if self.W_scale_labels is not None and context.labels is not None:
+            if self.W_scale_labels is not None:
                 scale = scale + self.W_scale_labels(context.labels).unsqueeze(
                     -1
                 ).unsqueeze(-1)
-            if self.W_bias_labels is not None and context.labels is not None:
+            if self.W_bias_labels is not None:
                 bias = bias + self.W_bias_labels(context.labels).unsqueeze(
                     -1
                 ).unsqueeze(-1)
