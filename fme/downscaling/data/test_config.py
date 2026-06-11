@@ -9,11 +9,14 @@ import torch
 import xarray as xr
 
 from fme.core.dataset.merged import MergeNoConcatDatasetConfig
+from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.downscaling.data.config import (
     DataLoaderConfig,
     PairedDataLoaderConfig,
     XarrayEnsembleDataConfig,
+    _build_aligned_subset_pair,
+    build_from_config_sequence,
 )
 from fme.downscaling.data.utils import ClosedInterval
 from fme.downscaling.requirements import DataRequirements
@@ -305,20 +308,56 @@ def test_PairedDataLoaderConfig_includes_merge(tmp_path, very_fast_only: bool):
         pytest.param(3, id="odd-factor-half-cell-anchor"),
     ],
 )
-def test_PairedDataLoaderConfig_prime_meridian_crossing(tmp_path, scale_factor):
-    """PairedDataLoaderConfig must not fail on a prime meridian crossing
-    in the longitude coordinates.  To pass, the fine and coarse
-    datasets must be correctly rolled such that the subset preserves the
-    scale factor between them.
+def test_build_aligned_subset_pair_preserves_scale_factor_across_seam(
+    tmp_path, scale_factor
+):
+    """Fine/coarse subsets must keep the scale factor for a seam-crossing extent.
 
-    The odd scale factor is the non-trivial case: the config rolls the fine
-    grid using a half-coarse-cell anchor, while HorizontalSubsetDataset
-    re-derives its roll from the adjusted fine extent (an integer number of
-    fine cells). For odd factors these anchors differ by half a fine cell, so
-    this guards that the two independent rolls still agree (see
-    _roll_lons_to_extent_convention).
+    The odd scale factor is the non-trivial case: _roll_lons_to_extent_convention
+    rolls the fine grid using a half-coarse-cell anchor, while
+    HorizontalSubsetDataset re-derives its roll from the adjusted fine extent (an
+    integer number of fine cells). For odd factors these anchors differ by half a
+    fine cell, so this guards that the two independent rolls still agree.
     """
     paths = global_data_paths_helper(tmp_path, scale_factor=scale_factor)
+    n_timesteps = IntSchedule.from_constant(1)
+    dataset_fine, properties_fine = build_from_config_sequence(
+        configs=[XarrayDataConfig(paths.fine)],
+        names=["var0"],
+        n_timesteps=n_timesteps,
+        strict_ensemble=False,
+    )
+    dataset_coarse, properties_coarse = build_from_config_sequence(
+        configs=[XarrayDataConfig(paths.coarse)],
+        names=["var0"],
+        n_timesteps=n_timesteps,
+        strict_ensemble=False,
+    )
+
+    fine_subset, coarse_subset = _build_aligned_subset_pair(
+        dataset_fine=dataset_fine,
+        properties_fine=properties_fine,
+        dataset_coarse=dataset_coarse,
+        properties_coarse=properties_coarse,
+        lat_extent=ClosedInterval(1.0, 4.0),
+        lon_extent=ClosedInterval(-22.5, 22.5),
+    )
+
+    coarse_coords = coarse_subset.subset_latlon_coordinates
+    fine_coords = fine_subset.subset_latlon_coordinates
+    assert len(fine_coords.lat) == scale_factor * len(coarse_coords.lat)
+    assert len(fine_coords.lon) == scale_factor * len(coarse_coords.lon)
+
+
+def test_PairedDataLoaderConfig_prime_meridian_crossing(tmp_path):
+    """A seam-crossing extent must load with data and coordinates rolled together.
+
+    Verifies the end-to-end loader: each value encodes its source longitude, so
+    after the roll every lat row of the loaded data must still equal that grid's
+    (rolled) lon coordinate. Scale-factor preservation across downscale factors is
+    covered by test_build_aligned_subset_pair_preserves_scale_factor_across_seam.
+    """
+    paths = global_data_paths_helper(tmp_path)
     requirements = DataRequirements(
         fine_names=["var0"],
         coarse_names=["var0"],
@@ -337,17 +376,10 @@ def test_PairedDataLoaderConfig_prime_meridian_crossing(tmp_path, scale_factor):
 
     data = data_config.build(requirements=requirements, train=False)
     batch = next(iter(data.loader))
-    assert (
-        batch.coarse.data["var0"].shape[-2] * scale_factor
-        == batch.fine.data["var0"].shape[-2]
-    )
-    assert (
-        batch.coarse.data["var0"].shape[-1] * scale_factor
-        == batch.fine.data["var0"].shape[-1]
-    )
 
     # Each value encodes its source longitude, so after the roll every lat row of
-    # the data must still equal that grid's (rolled) lon coordinate.
+    # the data must still equal that grid's (rolled) lon coordinate. Comparing mod
+    # 360 absorbs the convention shift the roll introduces (e.g. 337.5 -> -22.5).
     for grid in (batch.coarse, batch.fine):
         lon = grid.latlon_coordinates.lon[0].cpu()  # batch members are identical
         values = grid.data["var0"][0].cpu()  # (n_lat, n_lon)

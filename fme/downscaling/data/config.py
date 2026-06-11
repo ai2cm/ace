@@ -64,6 +64,60 @@ def _roll_lons_to_extent_convention(
     return rolled_coarse_lon, rolled_fine_lon
 
 
+def _build_aligned_subset_pair(
+    dataset_fine: XarrayConcat,
+    properties_fine: DatasetProperties,
+    dataset_coarse: XarrayConcat,
+    properties_coarse: DatasetProperties,
+    lat_extent: ClosedInterval,
+    lon_extent: ClosedInterval,
+) -> tuple[HorizontalSubsetDataset, HorizontalSubsetDataset]:
+    """Subset fine and coarse datasets so their selections align exactly.
+
+    The coarse dataset is subset with the requested lat/lon extent. The fine
+    extent is adjusted (adjust_fine_coord_range) so the fine subselection lines up
+    with the coarse one; both grids are first rolled into the extent's longitude
+    convention so this holds for prime-meridian-crossing domains as well (see
+    _roll_lons_to_extent_convention).
+
+    This is the production use of HorizontalSubsetDataset exercised by the unit
+    tests in test_datasets.py; keeping it in one function makes that association
+    explicit.
+    """
+    coarse_coords = get_latlon_coords_from_properties(properties_coarse)
+    fine_coords = get_latlon_coords_from_properties(properties_fine)
+
+    rolled_coarse_lon, rolled_fine_lon = _roll_lons_to_extent_convention(
+        coarse_lon=coarse_coords.lon,
+        fine_lon=fine_coords.lon,
+        lon_extent=lon_extent,
+    )
+    fine_lat_extent = adjust_fine_coord_range(
+        lat_extent,
+        full_coarse_coord=coarse_coords.lat,
+        full_fine_coord=fine_coords.lat,
+    )
+    fine_lon_extent = adjust_fine_coord_range(
+        lon_extent,
+        full_coarse_coord=rolled_coarse_lon,
+        full_fine_coord=rolled_fine_lon,
+    )
+
+    dataset_fine_subset = HorizontalSubsetDataset(
+        dataset_fine,
+        properties=properties_fine,
+        lat_interval=fine_lat_extent,
+        lon_interval=fine_lon_extent,
+    )
+    dataset_coarse_subset = HorizontalSubsetDataset(
+        dataset_coarse,
+        properties=properties_coarse,
+        lat_interval=lat_extent,
+        lon_interval=lon_extent,
+    )
+    return dataset_fine_subset, dataset_coarse_subset
+
+
 def enforce_lat_bounds(lat: ClosedInterval):
     if lat.start < -88.0 or lat.stop > 88.0:
         raise ValueError(
@@ -494,36 +548,15 @@ class PairedDataLoaderConfig:
         dataset_fine = self._repeat_if_requested(dataset_fine)
         dataset_coarse = self._repeat_if_requested(dataset_coarse)
 
-        # Ensure fine data subselection lines up exactly with coarse data.
-        rolled_coarse_lon, rolled_fine_lon = _roll_lons_to_extent_convention(
-            coarse_lon=properties_coarse.horizontal_coordinates.lon,
-            fine_lon=properties_fine.horizontal_coordinates.lon,
+        # Subset fine and coarse so their selections align exactly (handles
+        # prime-meridian-crossing extents by rolling into the lon convention).
+        dataset_fine_subset, dataset_coarse_subset = _build_aligned_subset_pair(
+            dataset_fine=dataset_fine,
+            properties_fine=properties_fine,
+            dataset_coarse=dataset_coarse,
+            properties_coarse=properties_coarse,
+            lat_extent=self.lat_extent,
             lon_extent=self.lon_extent,
-        )
-
-        fine_lat_extent = adjust_fine_coord_range(
-            self.lat_extent,
-            full_coarse_coord=properties_coarse.horizontal_coordinates.lat,
-            full_fine_coord=properties_fine.horizontal_coordinates.lat,
-        )
-        fine_lon_extent = adjust_fine_coord_range(
-            self.lon_extent,
-            full_coarse_coord=rolled_coarse_lon,
-            full_fine_coord=rolled_fine_lon,
-        )
-
-        dataset_fine_subset = HorizontalSubsetDataset(
-            dataset_fine,
-            properties=properties_fine,
-            lat_interval=fine_lat_extent,
-            lon_interval=fine_lon_extent,
-        )
-
-        dataset_coarse_subset = HorizontalSubsetDataset(
-            dataset_coarse,
-            properties=properties_coarse,
-            lat_interval=self.lat_extent,
-            lon_interval=self.lon_extent,
         )
 
         # Convert datasets to produce BatchItems
