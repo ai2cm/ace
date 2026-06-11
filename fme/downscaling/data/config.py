@@ -79,10 +79,6 @@ def _build_aligned_subset_pair(
     with the coarse one; both grids are first rolled into the extent's longitude
     convention so this holds for prime-meridian-crossing domains as well (see
     _roll_lons_to_extent_convention).
-
-    This is the production use of HorizontalSubsetDataset exercised by the unit
-    tests in test_datasets.py; keeping it in one function makes that association
-    explicit.
     """
     coarse_coords = get_latlon_coords_from_properties(properties_coarse)
     fine_coords = get_latlon_coords_from_properties(properties_fine)
@@ -548,8 +544,6 @@ class PairedDataLoaderConfig:
         dataset_fine = self._repeat_if_requested(dataset_fine)
         dataset_coarse = self._repeat_if_requested(dataset_coarse)
 
-        # Subset fine and coarse so their selections align exactly (handles
-        # prime-meridian-crossing extents by rolling into the lon convention).
         dataset_fine_subset, dataset_coarse_subset = _build_aligned_subset_pair(
             dataset_fine=dataset_fine,
             properties_fine=properties_fine,
