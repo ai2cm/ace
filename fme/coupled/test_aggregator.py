@@ -218,7 +218,8 @@ def test_inference_logs_labels_exist(tmpdir):
         assert "mean/weighted_bias/ocean_var" in log
         assert "mean/weighted_bias/atmos_var" in log
 
-    summary_logs = agg.get_summary_logs()
+    summary = agg.get_summary()
+    summary_logs = summary.logs
     expected_keys = [
         # ocean-specific keys
         "annual/ocean_var",
@@ -280,6 +281,7 @@ def test_inference_logs_labels_exist(tmpdir):
 
     # Check that all expected keys exist in the logs and no extra keys are present
     assert set(summary_logs) == set(expected_keys)
+    assert summary.loss == summary_logs["time_mean_norm/rmse/channel_mean"]
 
     agg.flush_diagnostics()
     ocean_directory = output_dir / "ocean"

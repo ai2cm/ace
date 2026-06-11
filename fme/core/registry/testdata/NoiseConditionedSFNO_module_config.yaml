@@ -2,6 +2,7 @@ activation_function: gelu
 affine_norms: true
 big_skip: true
 checkpointing: 0
+clip_latent_global_means: true
 complex_activation: real
 complex_network: true
 context_pos_embed_dim: 0
