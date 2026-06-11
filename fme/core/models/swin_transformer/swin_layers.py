@@ -613,11 +613,7 @@ class BasicLayer(nn.Module):
                     "cond_scalar must be provided for a scalar-conditioned BasicLayer"
                 )
             raw = self.adaln_scalar(cond_scalar)
-        if self.adaln_labels is not None:
-            if cond_labels is None:
-                raise ValueError(
-                    "cond_labels must be provided for a label-conditioned BasicLayer"
-                )
+        if self.adaln_labels is not None and cond_labels is not None:
             labels_out = self.adaln_labels(cond_labels)
             raw = labels_out if raw is None else raw + labels_out
         if raw is not None:

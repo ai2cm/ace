@@ -1,3 +1,10 @@
+# Adapted from
+# https://github.com/NCAR/miles-credit/blob/main/credit/boundary_padding.py
+# CREDIT (Community Research Earth Digital Intelligence Twin) is an open
+# software platform by the NSF NCAR MILES group for training and deploying
+# AI atmospheric prediction models.
+# Reference: Schreck et al., npj Clim Atmos Sci 8, 239 (2025).
+#   https://doi.org/10.1038/s41612-025-01125-6
 import dataclasses
 from typing import Literal
 

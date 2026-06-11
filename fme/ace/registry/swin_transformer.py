@@ -58,9 +58,8 @@ class SwinTransformerBuilder(ModuleConfig):
             ``context.embedding_scalar`` (analogous to ``NoiseConditionedModel``
             for diffusion timesteps), which does not yet exist; leave at 0.
         embed_dim_labels: Label conditioning dimension. When 0 and the dataset
-            has labels and the selector is conditional, it defaults to the
-            number of labels, which is the dimension the registry feeds the
-            model.
+            has labels, it defaults to the number of labels, which is the
+            dimension the registry feeds the model.
         use_cpb_scaling: When True (default), requires 1D latitude coordinates
             and applies cos-lat scaling to CPB longitude offsets. Set to False
             to use plain log-spaced CPB offsets (Swin V2 style) without a
