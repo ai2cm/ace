@@ -175,10 +175,14 @@ run_gantry_training_job() {
     local DESCRIPTION="${1:-Training job}"
     local MIN_RUNTIME="${MIN_RUNTIME:-0}"
 
-    # Build override string
-    local OVERRIDE=""
+    # Build override argv. Re-tokenize via eval so single quotes in finetuning.txt
+    # group list/dict values with spaces into single argv elements (literal quotes
+    # read from the file are otherwise ignored by word-splitting).
+    local OVERRIDE=()
     if [[ -n "${OVERRIDE_ARGS:-}" ]]; then
-        OVERRIDE="--override ${OVERRIDE_ARGS}"
+        local OVERRIDE_ARGV
+        eval "OVERRIDE_ARGV=($OVERRIDE_ARGS)"
+        OVERRIDE=(--override "${OVERRIDE_ARGV[@]}")
     fi
 
     # Initialize checkpoint args if not set
@@ -212,7 +216,7 @@ run_gantry_training_job() {
             --budget ai2/atec-climate \
             --system-python \
             --install "pip install --no-deps ." \
-            -- torchrun --nproc_per_node "$N_GPUS" -m $FME_MODULE "$CONFIG_PATH" $OVERRIDE |
+            -- torchrun --nproc_per_node "$N_GPUS" -m $FME_MODULE "$CONFIG_PATH" "${OVERRIDE[@]}" |
             tee /dev/tty |
             sed -n 's|.*https://beaker\.org/ex/\([A-Z0-9]*\).*|\1|p'
     )
