@@ -127,18 +127,20 @@ def get_coarse_data(path: str | None, time_sel: slice | None = TIME_SEL) -> xr.D
         return xr.open_zarr(path)
     else:
         gcs_root = "gs://vcm-ml-raw-flexible-retention/2025-07-25-X-SHiELD-AMIP-FME/regridded-zarrs/gaussian_grid_180_by_360/control"
-        winds = xr.open_zarr(f"{gcs_root}/instantaneous_physics_fields.zarr").sel(
+        phys = xr.open_zarr(f"{gcs_root}/instantaneous_physics_fields.zarr").sel(
             time=time_sel
-        )[["eastward_wind_at_ten_meters", "northward_wind_at_ten_meters"]]
+        )[
+            [
+                "eastward_wind_at_ten_meters",
+                "northward_wind_at_ten_meters",
+                "air_temperature_at_two_meters",
+            ]
+        ]
         prate = xr.open_zarr(f"{gcs_root}/fluxes_2d.zarr").sel(time=time_sel)[
             "PRATEsfc"
         ]
-        pres = xr.open_zarr(f"{gcs_root}/column_integrated_dynamical_fields.zarr").sel(
-            time=time_sel
-        )["PRESsfc"]
-        # in training, PRESsfc is used as input for outputting PRMSL
-        prmsl = pres.rename("PRMSL")
-        return xr.merge([winds, prate, pres, prmsl])
+        prmsl = xr.open_zarr(f"{gcs_root}/PRMSL").sel(time=time_sel)["PRMSL"]
+        return xr.merge([phys, prate, prmsl])
 
 
 def bbox(lat, lon, width=2.0):
@@ -183,11 +185,6 @@ def plot_event(ds, var_name, samples=None, sel=None, n_cols=5, **plot_kwargs):
     if len(samples) == 0:
         samples = [0]
 
-    if var_name == "PRMSL":
-        # fill PRMSL_coarse with nans
-        ds_["PRMSL_coarse"].values[:] = np.nan
-        # For colorbar range, use only target and predicted (coarse is hidden)
-        arr = ds_[["PRMSL_target", "PRMSL_predicted"]].to_array()
     else:
         arr = ds_.to_array()
 
