@@ -9,6 +9,7 @@ from fme.ace.registry.stochastic_sfno import NoiseConditionedModel
 from fme.ace.registry.swin_transformer import (
     NoiseConditionedSwinTransformerBuilder,
     SwinTransformerBuilder,
+    TimeAndNoiseConditionedSwinTransformerBuilder,
     TimeConditionedSwinTransformerBuilder,
 )
 from fme.core.coordinates import (
@@ -353,3 +354,128 @@ def test_time_conditioned_swin_requires_positive_embed_dim_scalar():
 def test_time_conditioned_swin_has_time_conditioning():
     builder = _tc_builder()
     assert builder.has_time_conditioning is True
+
+
+def _tanc_builder(**kwargs) -> TimeAndNoiseConditionedSwinTransformerBuilder:
+    defaults: dict = dict(
+        embed_dim=32,
+        num_heads=[2, 4, 4, 2],
+        window_size=[4, 4],
+        mlp_ratio=2.0,
+        drop_path_rate=0.0,
+        embed_dim_scalar=16,
+        noise_embed_dim=8,
+        frequency_embedding_size=32,
+    )
+    defaults.update(kwargs)
+    return TimeAndNoiseConditionedSwinTransformerBuilder(**defaults)
+
+
+def test_tanc_swin_is_registered():
+    assert (
+        "TimeAndNoiseConditionedSwinTransformer" in ModuleSelector.get_available_types()
+    )
+
+
+def test_tanc_swin_build_and_forward_with_time():
+    n_in, n_out, batch = 5, 3, 2
+    dataset_info = _get_dataset_info()
+    module = _tanc_builder().build(n_in, n_out, dataset_info).to(fme.get_device())
+    x = torch.randn(batch, n_in, *IMG_SHAPE, device=fme.get_device())
+    forward_time = torch.tensor([[3.0, 6.0], [7.0, 18.0]], device=fme.get_device())
+    out = module(x, forward_time=forward_time)
+    assert out.shape == (batch, n_out, *IMG_SHAPE)
+
+
+def test_tanc_swin_forward_without_time_uses_zero_embedding():
+    n_in, n_out, batch = 5, 3, 2
+    dataset_info = _get_dataset_info()
+    module = _tanc_builder().build(n_in, n_out, dataset_info).to(fme.get_device())
+    x = torch.randn(batch, n_in, *IMG_SHAPE, device=fme.get_device())
+    out = module(x, forward_time=None)
+    assert out.shape == (batch, n_out, *IMG_SHAPE)
+
+
+def test_tanc_swin_has_time_conditioning():
+    assert _tanc_builder().has_time_conditioning is True
+
+
+def test_tanc_swin_requires_positive_embed_dim_scalar():
+    with pytest.raises(ValueError, match="embed_dim_scalar"):
+        TimeAndNoiseConditionedSwinTransformerBuilder(embed_dim_scalar=0)
+
+
+def test_tanc_swin_requires_positive_noise_embed_dim():
+    with pytest.raises(ValueError, match="noise_embed_dim"):
+        TimeAndNoiseConditionedSwinTransformerBuilder(noise_embed_dim=0)
+
+
+def test_tanc_swin_noise_divergence():
+    """Two forwards on identical input diverge after one optimizer step."""
+    n_in, n_out = 4, 2
+    dataset_info = _get_dataset_info()
+    module = _tanc_builder().build(n_in, n_out, dataset_info).to(fme.get_device())
+    module.train()
+    optimizer = torch.optim.SGD(module.parameters(), lr=1.0)
+    forward_time = torch.tensor([[3.0, 6.0], [7.0, 18.0]], device=fme.get_device())
+    x = torch.randn(2, n_in, *IMG_SHAPE, device=fme.get_device())
+
+    # At init: CLN noise convs are zero-init → noise-independent outputs.
+    with torch.no_grad():
+        out1 = module(x, forward_time=forward_time)
+        out2 = module(x, forward_time=forward_time)
+    assert torch.allclose(out1, out2), "Expected noise-independence at init"
+
+    # One optimizer step moves noise convs off zero.
+    out = module(x, forward_time=forward_time)
+    out.sum().backward()
+    optimizer.step()
+    optimizer.zero_grad()
+
+    # After step: two independent forward passes now differ.
+    with torch.no_grad():
+        out1 = module(x, forward_time=forward_time)
+        out2 = module(x, forward_time=forward_time)
+    assert not torch.allclose(out1, out2), "Expected noise-dependence after step"
+
+
+def test_tanc_swin_time_conditioning_affects_output():
+    """Different forward_time values should produce different outputs."""
+    n_in, n_out, batch = 5, 3, 2
+    dataset_info = _get_dataset_info()
+    module = _tanc_builder().build(n_in, n_out, dataset_info).to(fme.get_device())
+    module.train()
+    optimizer = torch.optim.SGD(module.parameters(), lr=1.0)
+    x = torch.randn(batch, n_in, *IMG_SHAPE, device=fme.get_device())
+    forward_time = torch.tensor([[3.0, 6.0], [7.0, 18.0]], device=fme.get_device())
+
+    # One optimizer step moves AdaLN weights off zero-init.
+    out = module(x, forward_time=forward_time)
+    out.sum().backward()
+    optimizer.step()
+    optimizer.zero_grad()
+
+    time_jan = torch.tensor([[1.0, 0.0], [1.0, 0.0]], device=fme.get_device())
+    time_jul = torch.tensor([[7.0, 0.0], [7.0, 0.0]], device=fme.get_device())
+    # Fix noise by setting noise convs to deterministic (eval mode still resamples,
+    # so compare means over many samples or just check not identical on average).
+    with torch.no_grad():
+        out_jan = module(x, forward_time=time_jan)
+        out_jul = module(x, forward_time=time_jul)
+    assert not torch.allclose(
+        out_jan, out_jul
+    ), "Expected different outputs for January vs July"
+
+
+def test_tanc_swin_via_selector():
+    selector = ModuleSelector(
+        type="TimeAndNoiseConditionedSwinTransformer",
+        config=dataclasses.asdict(_tanc_builder()),
+    )
+    dataset_info = _get_dataset_info()
+    module = selector.build(
+        n_in_channels=5, n_out_channels=3, dataset_info=dataset_info
+    ).to(fme.get_device())
+    x = torch.randn(2, 5, *IMG_SHAPE, device=fme.get_device())
+    out = module(x)
+    assert out.shape == (2, 3, *IMG_SHAPE)

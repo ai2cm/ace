@@ -523,3 +523,208 @@ class TimeConditionedSwinTransformerBuilder(ModuleConfig):
             embed_dim_scalar=self.embed_dim_scalar,
             frequency_embedding_size=self.frequency_embedding_size,
         )
+
+
+class _TimeAndNoiseConditionedWrapper(nn.Module):
+    """Wraps SwinTransformerNet to accept (x, labels, forward_time) with hybrid
+    conditioning.
+
+    Embeds ``(month, hour)`` via ``TimestepEmbedder`` modules into
+    ``context.embedding_scalar`` (for per-block AdaLN) and samples a fresh
+    Gaussian noise field into ``context.noise`` (for per-block CLN) on each
+    forward pass.  This gives genuinely stochastic ensemble members while
+    preserving the seasonal/diurnal time signal.
+
+    Args:
+        module: The underlying ``SwinTransformerNet`` (must use
+            ``conditioning="hybrid"``).
+        embed_dim_scalar: Must match the net's ``ContextConfig.embed_dim_scalar``.
+        embed_dim_noise: Must match the net's ``ContextConfig.embed_dim_noise``.
+        frequency_embedding_size: Sinusoidal feature size inside each
+            ``TimestepEmbedder`` MLP.
+    """
+
+    def __init__(
+        self,
+        module: nn.Module,
+        embed_dim_scalar: int,
+        embed_dim_noise: int,
+        frequency_embedding_size: int = 256,
+    ):
+        super().__init__()
+        self.module = module
+        self.embed_dim_scalar = embed_dim_scalar
+        self.embed_dim_noise = embed_dim_noise
+        self.month_embedder = TimestepEmbedder(
+            embed_dim_scalar, frequency_embedding_size
+        )
+        self.hour_embedder = TimestepEmbedder(
+            embed_dim_scalar, frequency_embedding_size
+        )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        labels: torch.Tensor | None = None,
+        forward_time: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        B, _, H, W = x.shape
+        if forward_time is not None:
+            month = forward_time[:, 0]
+            hour = forward_time[:, 1]
+            embedding_scalar: torch.Tensor = self.month_embedder(
+                month
+            ) + self.hour_embedder(hour)
+        else:
+            embedding_scalar = torch.zeros(
+                B, self.embed_dim_scalar, device=x.device, dtype=x.dtype
+            )
+        noise = torch.randn(
+            B, self.embed_dim_noise, H, W, device=x.device, dtype=x.dtype
+        )
+        context = Context(
+            embedding_scalar=embedding_scalar,
+            embedding_pos=None,
+            labels=labels,
+            noise=noise,
+        )
+        return self.module(x, context)
+
+
+@ModuleSelector.register("TimeAndNoiseConditionedSwinTransformer")
+@dataclasses.dataclass
+class TimeAndNoiseConditionedSwinTransformerBuilder(ModuleConfig):
+    """Swin U-Net with AdaLN time conditioning and CLN noise conditioning (hybrid).
+
+    Combines the time conditioning of ``TimeConditionedSwinTransformer`` (month
+    and hour-of-day via DiT-style AdaLN) with the stochastic noise conditioning
+    of ``NoiseConditionedSwinTransformer`` (per-block Gaussian noise via CLN).
+    Each forward pass samples a fresh noise field so multiple calls on the same
+    input produce genuinely different outputs, enabling CRPS / ensemble training.
+
+    Attributes:
+        embed_dim: Channel dimension of the first/last U-Net stage.
+        depth_multiplier: Scales the per-stage depths ``[2, 6, 6, 2]``.
+        num_heads: Attention heads for each of the four stages (length-4 list).
+        window_size: ``[ws_h, ws_w]`` attention window.
+        mlp_ratio: Hidden-dim multiplier for block MLPs.
+        drop_path_rate: Maximum stochastic-depth rate.
+        use_skip: Whether to concatenate the layer-1 skip into the decoder.
+        mlp_layer: ``"mlp"`` or ``"swiglu"``.
+        embed_dim_scalar: Dimension of the time conditioning embedding fed to
+            every block's AdaLN.  Must be > 0.
+        embed_dim_labels: Label conditioning dimension (0 = disabled).
+        noise_embed_dim: Dimension of the Gaussian noise field fed to every
+            block's CLN.  Must be > 0.
+        frequency_embedding_size: Sinusoidal feature size inside each
+            ``TimestepEmbedder`` MLP.
+        use_cpb_scaling: When True (default), requires 1D latitude coordinates.
+    """
+
+    embed_dim: int = 96
+    depth_multiplier: int = 1
+    num_heads: list[int] = dataclasses.field(default_factory=lambda: [3, 6, 6, 3])
+    window_size: list[int] = dataclasses.field(default_factory=lambda: [4, 8])
+    mlp_ratio: float = 4.0
+    drop_path_rate: float = 0.2
+    use_skip: bool = True
+    mlp_layer: str = "mlp"
+    embed_dim_scalar: int = 256
+    embed_dim_labels: int = 0
+    noise_embed_dim: int = 256
+    cpb_hidden_dim: int = 64
+    frequency_embedding_size: int = 256
+    padding_conf: TensorPaddingConfig | None = None
+    use_cpb_scaling: bool = True
+    axis_attn: bool = False
+
+    def __post_init__(self):
+        if self.embed_dim_scalar <= 0:
+            raise ValueError("embed_dim_scalar must be > 0 for time conditioning")
+        if self.noise_embed_dim <= 0:
+            raise ValueError("noise_embed_dim must be > 0 for noise conditioning")
+        if isinstance(self.padding_conf, dict):
+            self.padding_conf = TensorPaddingConfig(**self.padding_conf)
+
+    @property
+    def has_time_conditioning(self) -> bool:
+        return True
+
+    def build(
+        self,
+        n_in_channels: int,
+        n_out_channels: int,
+        dataset_info: DatasetInfo,
+    ) -> nn.Module:
+        return self._build(
+            n_in_channels=n_in_channels,
+            n_out_channels=n_out_channels,
+            dataset_info=dataset_info,
+            enable_label_conditioning=len(dataset_info.all_labels) > 0
+            or self.embed_dim_labels > 0,
+        )
+
+    def _build(
+        self,
+        n_in_channels: int,
+        n_out_channels: int,
+        dataset_info: DatasetInfo,
+        enable_label_conditioning: bool,
+    ) -> nn.Module:
+        n_labels = len(dataset_info.all_labels)
+        embed_dim_labels = self.embed_dim_labels
+        if not enable_label_conditioning:
+            embed_dim_labels = 0
+        elif n_labels > 0 and embed_dim_labels == 0:
+            embed_dim_labels = n_labels
+        context_config = ContextConfig(
+            embed_dim_scalar=self.embed_dim_scalar,
+            embed_dim_labels=embed_dim_labels,
+            embed_dim_noise=self.noise_embed_dim,
+            embed_dim_pos=0,
+        )
+        if self.use_cpb_scaling:
+            try:
+                lat_coords = dataset_info.horizontal_coordinates.lat_1d
+            except MissingDatasetInfo:
+                raise ValueError(
+                    "SwinTransformer requires 1D latitude coordinates for cos-lat CPB "
+                    "scaling, but the dataset provides none. Non-lat-lon grids such as "
+                    "HEALPix are not supported. Set use_cpb_scaling=False to disable "
+                    "this requirement."
+                ) from None
+            if lat_coords is None:
+                raise ValueError(
+                    "SwinTransformer requires 1D latitude coordinates for cos-lat CPB "
+                    "scaling, but this coordinate type returns None for lat_1d. "
+                    "Set use_cpb_scaling=False to disable this requirement."
+                )
+        else:
+            lat_coords = None
+        net = SwinTransformerNet(
+            in_chans=n_in_channels,
+            out_chans=n_out_channels,
+            img_shape=dataset_info.img_shape,
+            embed_dim=self.embed_dim,
+            depth_multiplier=self.depth_multiplier,
+            num_heads=tuple(self.num_heads),
+            window_size=(self.window_size[0], self.window_size[1]),
+            mlp_ratio=self.mlp_ratio,
+            drop_path_rate=self.drop_path_rate,
+            use_skip=self.use_skip,
+            context_config=context_config,
+            mlp_layer=self.mlp_layer,
+            conditioning="hybrid",
+            cpb_hidden_dim=self.cpb_hidden_dim,
+            lat_coords=lat_coords,
+            padding_conf=dataclasses.asdict(self.padding_conf)
+            if self.padding_conf is not None
+            else None,
+            axis_attn=self.axis_attn,
+        )
+        return _TimeAndNoiseConditionedWrapper(
+            net,
+            embed_dim_scalar=self.embed_dim_scalar,
+            embed_dim_noise=self.noise_embed_dim,
+            frequency_embedding_size=self.frequency_embedding_size,
+        )

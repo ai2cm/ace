@@ -44,10 +44,13 @@ class SwinTransformerNet(nn.Module):
             scalar and label conditioning are applied as independent additive
             AdaLN projections; ``None`` (or both 0) disables AdaLN.  In
             ``"cln"`` mode, ``embed_dim_noise`` drives per-block
-            ``ConditionalLayerNorm``; ``embed_dim_scalar`` must be 0.
+            ``ConditionalLayerNorm``; ``embed_dim_scalar`` must be 0.  In
+            ``"hybrid"`` mode, both ``embed_dim_scalar`` (time, via AdaLN) and
+            ``embed_dim_noise`` (noise, via CLN) must be > 0.
         mlp_layer: ``"mlp"`` or ``"swiglu"``.
-        conditioning: ``"adaln"`` (default) for native per-stage DiT AdaLN, or
-            ``"cln"`` for ``ConditionalLayerNorm``-based noise conditioning.
+        conditioning: ``"adaln"`` (default) for native per-stage DiT AdaLN,
+            ``"cln"`` for ``ConditionalLayerNorm``-based noise conditioning, or
+            ``"hybrid"`` for AdaLN time + CLN noise conditioning combined.
     """
 
     def __init__(
@@ -64,7 +67,7 @@ class SwinTransformerNet(nn.Module):
         use_skip: bool = True,
         context_config: ContextConfig | None = None,
         mlp_layer: str = "mlp",
-        conditioning: Literal["adaln", "cln"] = "adaln",
+        conditioning: Literal["adaln", "cln", "hybrid"] = "adaln",
         cpb_hidden_dim: int = 64,
         lat_coords: torch.Tensor | None = None,
         padding_conf: dict | None = None,
@@ -256,6 +259,27 @@ class SwinTransformerNet(nn.Module):
                     "context.noise is required for a cln-conditioned SwinTransformerNet"
                 )
             noise = context.noise  # (B, embed_dim_noise, H, W)
+            if self.use_padding:
+                noise = self.padding_opt.pad(noise)
+            if pad_h > 0 or pad_w > 0:
+                noise = F.pad(noise, (0, pad_w, 0, pad_h))
+            noise_half = noise[..., ::2, ::2]
+            ctx_full = dataclasses.replace(context, noise=noise)
+            ctx_half = dataclasses.replace(context, noise=noise_half)
+
+        # Hybrid conditioning: AdaLN for time (scalar) + CLN for noise (spatial).
+        if self.conditioning == "hybrid":
+            if context is None:
+                raise ValueError(
+                    "context is required for a hybrid-conditioned SwinTransformerNet"
+                )
+            if context.embedding_scalar is None:
+                raise ValueError("embedding_scalar is required for hybrid conditioning")
+            if context.noise is None:
+                raise ValueError("context.noise is required for hybrid conditioning")
+            cond_scalar = context.embedding_scalar
+            cond_labels = context.labels
+            noise = context.noise
             if self.use_padding:
                 noise = self.padding_opt.pad(noise)
             if pad_h > 0 or pad_w > 0:

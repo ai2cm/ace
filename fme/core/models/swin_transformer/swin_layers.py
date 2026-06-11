@@ -6,6 +6,7 @@ blocks operate on tensors with a trailing channel dimension, i.e. shape
 ``(B, H, W, C)``.
 """
 
+import dataclasses
 import math
 from typing import Literal
 
@@ -366,7 +367,11 @@ class SwinTransformerBlock(nn.Module):
     In ``"adaln"`` mode, AdaLN scale/shift is applied after each norm and a gate
     scales each residual branch. In ``"cln"`` mode, ``ConditionalLayerNorm`` is
     used for both norms and a plain (ungated) residual is applied, matching the
-    SFNO's noise-conditioned path.
+    SFNO's noise-conditioned path. In ``"hybrid"`` mode, ``ConditionalLayerNorm``
+    handles per-pixel noise conditioning (with ``embed_dim_scalar=0`` so the CLN
+    sees only noise) and AdaLN scale/shift (without gate) is applied on top for
+    global time conditioning.  The gate is omitted so CLN noise convs receive
+    gradient from the first backward step.
 
     Args:
         dim: Number of channels.
@@ -378,10 +383,11 @@ class SwinTransformerBlock(nn.Module):
         drop_path: Stochastic-depth rate for this block.
         mlp_layer: ``"mlp"`` or ``"swiglu"``.
         qkv_bias: Whether attention uses a qkv bias.
-        conditioning: ``"adaln"`` (default) for native AdaLN, or ``"cln"`` for
-            ``ConditionalLayerNorm``-based noise conditioning.
-        context_config: Required when ``conditioning="cln"``; passed to each
-            ``ConditionalLayerNorm``.
+        conditioning: ``"adaln"`` (default) for native AdaLN, ``"cln"`` for
+            ``ConditionalLayerNorm``-based noise conditioning, or ``"hybrid"``
+            for CLN noise + AdaLN time conditioning combined.
+        context_config: Required when ``conditioning="cln"`` or ``"hybrid"``;
+            passed to each ``ConditionalLayerNorm``.
         axis_attn: When ``True``, replace the ``ColumnMixer`` with
             ``AxialAttentionMixer`` (2D axial self-attention matching
             ArchesWeather's ``axis_attn``).
@@ -398,7 +404,7 @@ class SwinTransformerBlock(nn.Module):
         drop_path: float = 0.0,
         mlp_layer: str = "mlp",
         qkv_bias: bool = True,
-        conditioning: Literal["adaln", "cln"] = "adaln",
+        conditioning: Literal["adaln", "cln", "hybrid"] = "adaln",
         context_config: ContextConfig | None = None,
         cpb_hidden_dim: int = 64,
         lat_coords: torch.Tensor | None = None,
@@ -420,6 +426,13 @@ class SwinTransformerBlock(nn.Module):
             self.norm2: nn.Module = ConditionalLayerNorm(
                 dim, input_resolution, context_config
             )
+        elif conditioning == "hybrid":
+            if context_config is None:
+                raise ValueError("context_config is required for hybrid conditioning")
+            # CLN sees only noise; time conditioning is handled by AdaLN in BasicLayer.
+            noise_only_config = dataclasses.replace(context_config, embed_dim_scalar=0)
+            self.norm1 = ConditionalLayerNorm(dim, input_resolution, noise_only_config)
+            self.norm2 = ConditionalLayerNorm(dim, input_resolution, noise_only_config)
         else:
             self.norm1 = nn.LayerNorm(dim)
             self.norm2 = nn.LayerNorm(dim)
@@ -508,6 +521,42 @@ class SwinTransformerBlock(nn.Module):
             y_norm = self.norm2(self.mlp(x).permute(0, 3, 1, 2), context).permute(
                 0, 2, 3, 1
             )
+            x = shortcut + self.drop_path(y_norm)
+        elif self.conditioning == "hybrid":
+            shortcut = x
+            if cond_params is not None:
+                shift_msa, scale_msa, _gate_msa, shift_mlp, scale_mlp, _gate_mlp = (
+                    cond_params
+                )
+            if sh > 0 or sw > 0:
+                h = torch.roll(x, shifts=(-sh, -sw), dims=(1, 2))
+            else:
+                h = x
+            h_windows = window_partition_2d(h, ws_h, ws_w).view(-1, ws_h * ws_w, C)
+            attn_windows = self.attn(h_windows, mask=self.attn_mask, lat_mean=lat_mean)
+            attn_windows = attn_windows.view(-1, ws_h, ws_w, C)
+            h = window_reverse_2d(attn_windows, ws_h, ws_w, H, W)
+            if sh > 0 or sw > 0:
+                h = torch.roll(h, shifts=(sh, sw), dims=(1, 2))
+            h = h + self.column_mixer(h)
+            # CLN handles per-pixel noise; AdaLN scale/shift applied on top for
+            # time conditioning. Gate is intentionally omitted: zero-init gates
+            # would block gradient flow to the CLN noise convs on the first
+            # backward, preventing noise conditioning from learning at step 1.
+            h_cln = self.norm1(h.permute(0, 3, 1, 2), context).permute(0, 2, 3, 1)
+            if cond_params is not None:
+                h_norm = h_cln * (1 + scale_msa) + shift_msa
+            else:
+                h_norm = h_cln
+            x = shortcut + self.drop_path(h_norm)
+            shortcut = x
+            y_cln = self.norm2(self.mlp(x).permute(0, 3, 1, 2), context).permute(
+                0, 2, 3, 1
+            )
+            if cond_params is not None:
+                y_norm = y_cln * (1 + scale_mlp) + shift_mlp
+            else:
+                y_norm = y_cln
             x = shortcut + self.drop_path(y_norm)
         else:
             shortcut = x
@@ -603,6 +652,10 @@ class BasicLayer(nn.Module):
     In ``"cln"`` mode, each block uses ``ConditionalLayerNorm`` (which owns its
     own per-pixel noise convs) and no AdaLN projections are built.
 
+    In ``"hybrid"`` mode, both AdaLN projections (for time) and CLN norms (for
+    noise) are active.  The layer computes ``cond_params`` from the scalar
+    embedding and passes both ``cond_params`` and ``context`` to each block.
+
     Args:
         dim: Number of channels.
         input_resolution: ``(H, W)`` of the (padded) feature map.
@@ -616,9 +669,9 @@ class BasicLayer(nn.Module):
         embed_dim_labels: Label conditioning dimension; 0 disables that path
             (only used in ``"adaln"`` mode).
         mlp_layer: ``"mlp"`` or ``"swiglu"``.
-        conditioning: ``"adaln"`` (default) or ``"cln"``.
-        context_config: Required when ``conditioning="cln"``; forwarded to each
-            block's ``ConditionalLayerNorm``.
+        conditioning: ``"adaln"`` (default), ``"cln"``, or ``"hybrid"``.
+        context_config: Required when ``conditioning="cln"`` or ``"hybrid"``;
+            forwarded to each block's ``ConditionalLayerNorm``.
     """
 
     def __init__(
@@ -633,7 +686,7 @@ class BasicLayer(nn.Module):
         embed_dim_scalar: int,
         embed_dim_labels: int,
         mlp_layer: str,
-        conditioning: Literal["adaln", "cln"] = "adaln",
+        conditioning: Literal["adaln", "cln", "hybrid"] = "adaln",
         context_config: ContextConfig | None = None,
         cpb_hidden_dim: int = 64,
         lat_coords: torch.Tensor | None = None,
@@ -667,8 +720,8 @@ class BasicLayer(nn.Module):
             ]
         )
         # AdaLN projections: DiT-style zero-init so blocks start as identity.
-        # Only built in "adaln" mode.
-        if conditioning == "adaln" and embed_dim_scalar > 0:
+        # Built in "adaln" and "hybrid" modes.
+        if conditioning in ("adaln", "hybrid") and embed_dim_scalar > 0:
             self.adaln_scalar: nn.Module | None = nn.Sequential(
                 nn.SiLU(), nn.Linear(embed_dim_scalar, 6 * dim)
             )
@@ -676,7 +729,7 @@ class BasicLayer(nn.Module):
             nn.init.zeros_(self.adaln_scalar[1].bias)
         else:
             self.adaln_scalar = None
-        if conditioning == "adaln" and embed_dim_labels > 0:
+        if conditioning in ("adaln", "hybrid") and embed_dim_labels > 0:
             self.adaln_labels: nn.Module | None = nn.Sequential(
                 nn.SiLU(), nn.Linear(embed_dim_labels, 6 * dim)
             )
@@ -714,5 +767,8 @@ class BasicLayer(nn.Module):
                 p.unsqueeze(1).unsqueeze(1) for p in params
             )
         for blk in self.blocks:
-            x = blk(x, cond_params)
+            if self.conditioning == "hybrid":
+                x = blk(x, cond_params, context=context)
+            else:
+                x = blk(x, cond_params)
         return x

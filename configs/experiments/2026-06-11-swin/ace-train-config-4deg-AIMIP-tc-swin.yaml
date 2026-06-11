@@ -392,7 +392,7 @@ stepper:
       n_ic_timesteps: 2
       builder:
         # swin_diff.md item 9: axis_attn (2D axial self-attention replacing ColumnMixer)
-        type: SwinTransformer
+        type: TimeConditionedSwinTransformer
         config:
           embed_dim: 256
           depth_multiplier: 4
@@ -409,6 +409,8 @@ stepper:
           use_skip: true
           mlp_layer: swiglu
           axis_attn: true
+          embed_dim_scalar: 256
+          frequency_embedding_size: 256
           padding_conf:
             activate: true
             mode: earth

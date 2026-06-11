@@ -493,3 +493,164 @@ def test_earth_padding_cln_forward():
         3,
         *img_shape,
     )
+
+
+_EMBED_DIM_SCALAR = 8
+
+
+def _build_hybrid_net(
+    in_chans: int,
+    out_chans: int,
+    img_shape: tuple[int, int],
+    use_skip: bool = True,
+    padding_conf: dict | None = None,
+) -> SwinTransformerNet:
+    context_config = ContextConfig(
+        embed_dim_scalar=_EMBED_DIM_SCALAR,
+        embed_dim_labels=0,
+        embed_dim_noise=_EMBED_DIM_NOISE,
+        embed_dim_pos=0,
+    )
+    return SwinTransformerNet(
+        in_chans=in_chans,
+        out_chans=out_chans,
+        img_shape=img_shape,
+        embed_dim=32,
+        depth_multiplier=1,
+        num_heads=(2, 4, 4, 2),
+        window_size=(4, 4),
+        mlp_ratio=2.0,
+        drop_path_rate=0.0,
+        use_skip=use_skip,
+        context_config=context_config,
+        conditioning="hybrid",
+        padding_conf=padding_conf,
+    )
+
+
+def test_hybrid_forward_backward():
+    """Hybrid mode forward + backward: all params get gradients."""
+    in_chans, out_chans = 4, 2
+    img_shape = (16, 32)
+    n = 2
+    device = get_device()
+    net = _build_hybrid_net(in_chans, out_chans, img_shape).to(device)
+    x = torch.randn(n, in_chans, *img_shape, device=device)
+    context = Context(
+        embedding_scalar=torch.randn(n, _EMBED_DIM_SCALAR, device=device),
+        embedding_pos=None,
+        labels=None,
+        noise=torch.randn(n, _EMBED_DIM_NOISE, *img_shape, device=device),
+    )
+    out = net(x, context)
+    assert out.shape == (n, out_chans, *img_shape)
+    out.sum().backward()
+    for name, param in net.named_parameters():
+        assert param.grad is not None, f"No gradient for {name}"
+
+
+def test_hybrid_raises_without_embedding_scalar():
+    in_chans, out_chans = 4, 2
+    img_shape = (16, 32)
+    device = get_device()
+    net = _build_hybrid_net(in_chans, out_chans, img_shape).to(device)
+    x = torch.randn(2, in_chans, *img_shape, device=device)
+    context = Context(
+        embedding_scalar=None,
+        embedding_pos=None,
+        labels=None,
+        noise=torch.randn(2, _EMBED_DIM_NOISE, *img_shape, device=device),
+    )
+    with pytest.raises(ValueError, match="embedding_scalar"):
+        net(x, context)
+
+
+def test_hybrid_raises_without_noise():
+    in_chans, out_chans = 4, 2
+    img_shape = (16, 32)
+    device = get_device()
+    net = _build_hybrid_net(in_chans, out_chans, img_shape).to(device)
+    x = torch.randn(2, in_chans, *img_shape, device=device)
+    context = Context(
+        embedding_scalar=torch.randn(2, _EMBED_DIM_SCALAR, device=device),
+        embedding_pos=None,
+        labels=None,
+        noise=None,
+    )
+    with pytest.raises(ValueError, match="noise"):
+        net(x, context)
+
+
+def test_hybrid_noise_divergence():
+    """Different noise fields yield different outputs after one optimizer step.
+
+    CLN noise convs are zero-init (noise-independent at init). Because the
+    hybrid path uses an ungated residual, CLN receives gradient from the first
+    backward and noise convs move off zero after one step.
+    """
+    in_chans, out_chans = 4, 2
+    img_shape = (16, 32)
+    n = 2
+    device = get_device()
+    net = _build_hybrid_net(in_chans, out_chans, img_shape).to(device)
+    net.train()
+    optimizer = torch.optim.SGD(net.parameters(), lr=1.0)
+
+    x = torch.randn(n, in_chans, *img_shape, device=device)
+    scalar = torch.randn(n, _EMBED_DIM_SCALAR, device=device)
+    noise_a = torch.randn(n, _EMBED_DIM_NOISE, *img_shape, device=device)
+    noise_b = torch.randn(n, _EMBED_DIM_NOISE, *img_shape, device=device)
+    ctx_a = Context(
+        embedding_scalar=scalar, embedding_pos=None, labels=None, noise=noise_a
+    )
+    ctx_b = Context(
+        embedding_scalar=scalar, embedding_pos=None, labels=None, noise=noise_b
+    )
+
+    # At init: CLN noise convs are zero-init → noise-independent outputs.
+    with torch.no_grad():
+        assert torch.allclose(
+            net(x, ctx_a), net(x, ctx_b)
+        ), "Expected noise-independence at init"
+
+    # One optimizer step moves CLN noise convs off zero.
+    net(x, ctx_a).sum().backward()
+    optimizer.step()
+    optimizer.zero_grad()
+
+    with torch.no_grad():
+        assert not torch.allclose(
+            net(x, ctx_a), net(x, ctx_b)
+        ), "Expected noise-dependence after step"
+
+
+def test_hybrid_scalar_affects_output():
+    """Different time embeddings yield different outputs after one optimizer step."""
+    in_chans, out_chans = 4, 2
+    img_shape = (16, 32)
+    n = 2
+    device = get_device()
+    net = _build_hybrid_net(in_chans, out_chans, img_shape).to(device)
+    net.train()
+    optimizer = torch.optim.SGD(net.parameters(), lr=1.0)
+
+    x = torch.randn(n, in_chans, *img_shape, device=device)
+    noise = torch.randn(n, _EMBED_DIM_NOISE, *img_shape, device=device)
+    scalar_a = torch.randn(n, _EMBED_DIM_SCALAR, device=device)
+    scalar_b = -scalar_a  # guaranteed to differ
+    ctx_a = Context(
+        embedding_scalar=scalar_a, embedding_pos=None, labels=None, noise=noise
+    )
+    ctx_b = Context(
+        embedding_scalar=scalar_b, embedding_pos=None, labels=None, noise=noise
+    )
+
+    # One step to move AdaLN weights off zero-init.
+    net(x, ctx_a).sum().backward()
+    optimizer.step()
+    optimizer.zero_grad()
+
+    with torch.no_grad():
+        assert not torch.allclose(
+            net(x, ctx_a), net(x, ctx_b)
+        ), "Expected scalar conditioning to affect output"

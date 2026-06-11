@@ -41,12 +41,9 @@ optimization:
 
 ### 3. **LR schedule: cosine-with-warmup** — training config
 
-ArchesWeather uses `diffusers.get_cosine_schedule_with_warmup` stepped per-iteration:
-- 5000 warmup steps, 300k total steps, 0.5 cosine cycles (single decay to 0)
+ArchesWeather uses `diffusers.get_cosine_schedule_with_warmup` stepped **per-iteration** (`"interval": "step"`): 5000 warmup steps, 300k total steps, 0.5 cosine cycles (single decay to 0).
 
-ACE has `SequentialSchedulerConfig` which could chain a `LinearLR` warmup with `CosineAnnealingLR` to approximate this. Currently typical ACE configs don't configure this for the SwinTransformer.
-
-**Config Option:** Set `scheduler` inside `optimization` to a `SequentialSchedulerConfig` chaining `LinearLR` warmup into `CosineAnnealingLR`. Both sub-schedulers must have `step_each_iteration: true` so they are stepped per batch, not per epoch. The `milestones` value must match `total_iters` of the warmup scheduler.
+ACE's `SequentialSchedulerConfig` supports per-iteration stepping via `step_each_iteration: true` on each sub-scheduler. The config below uses the simpler **per-epoch** approximation (default `step_each_iteration: false`) with counts proportionally scaled to 120 epochs: 5000/300k ≈ 1.67% → 2 warmup epochs, 118 cosine epochs. To step per-iteration instead, add `step_each_iteration: true` to each sub-scheduler and replace `total_iters`/`T_max` with actual batch counts.
 
 ```yaml
 optimization:
@@ -56,58 +53,47 @@ optimization:
         kwargs:
           start_factor: 0.0001   # near-zero initial LR
           end_factor: 1.0
-          total_iters: 5000
-        step_each_iteration: true
+          total_iters: 2         # epochs (~1.67% of 120, matching ArchesWeather proportion)
       - type: CosineAnnealingLR
         kwargs:
-          T_max: 295000          # 300k total − 5k warmup
+          T_max: 118             # 120 total − 2 warmup epochs
           eta_min: 0.0
-        step_each_iteration: true
-    milestones: [5000]
+    milestones: [2]
 ```
 
 ---
 
-### 4. **Delta normalization in the loss** — training config
+### 4. **Delta normalization in the loss** — training config ✅
 
-ArchesWeather's `loss_delta_normalization=True` rescales per-variable loss by `(var_std / delta_std)^2`, where `delta_std` is the estimated 6-hour tendency std (loaded from `pangu_norm_stats2_with_w.pt`). This is more aggressive weighting of slowly-changing variables than a raw MSE on normalized outputs.
+ArchesWeather's `loss_delta_normalization=True` rescales per-variable loss by `(var_std / delta_std)^2`, where `delta_std` values are **hardcoded constants** loaded from `pangu_norm_stats2_with_w.pt` (not computed from the training dataset). This upweights slowly-changing variables relative to a raw MSE on normalized outputs.
 
-ACE's loss uses `loss_normalization` (normalizer std), which is equivalent to ArchesWeather's *un-delta-normalized* mode. The delta normalization is a separate scaling on top.
+**Note**: Delta normalization is not described in either the ArchesWeather paper or the ArchesWeatherAIMIP paper — it exists only in the code (`ArchesWeather/geoarches/lightning_modules/forecast.py:77–93`), where it is explicitly called **"fake delta normalization"** in a comment (line 84). It is enabled by default with no ablation or justification in the papers.
 
-**Config Option:** No code change required — `residual_normalization` in `StepperConfig` already does this. It overrides the loss normalizer's std for prognostic variables with per-variable residual stds from a separate stats file, while leaving the network normalizer unchanged. Precompute a per-variable 6-hour tendency std stats file from the training dataset (equivalent to ArchesWeather's hardcoded `delta_std` constants) and point `residual_normalization` at it:
+**Implemented**: The equivalent in ACE is `normalization.residual` inside `step.config`, which makes the network predict residuals and normalises the loss by per-variable residual (tendency) stds from a pre-computed stats file. The current config already points this at `scaling-residual.nc`, which plays the role of ArchesWeather's hardcoded `delta_std` values.
 
 ```yaml
-stepper_config:
-  residual_normalization:
-    global_means_path: /path/to/tendency_means.nc
-    global_stds_path: /path/to/tendency_stds.nc  # per-variable 6h tendency stds
+stepper:
+  step:
+    config:
+      normalization:
+        residual:
+          global_means_path: /path/to/centering.nc
+          global_stds_path: /path/to/scaling-residual.nc  # per-variable tendency stds
 ```
 
 ---
 
-### 5. **Multistep curriculum** — training config
+### 5. **Multi-step fine-tuning (optional Phase 3)** — training config
 
-ArchesWeather starts at 2-step rollouts and increments by 1 every 2 epochs. ACE supports `TimeLengthSchedule` for `n_forward_steps` in `TrainStepperConfig`, so the infrastructure is there — it just needs to be configured.
+ArchesWeather uses **single-step training** (`rollout_iterations: 1`) for its full main training run (Phase 1 + Phase 2). Phase 3 is an optional separate fine-tuning stage applied after Phase 1/2: fixed-length rollouts of 2 days for 8k steps, then 3 days for 8k steps, then 4 days for 4k steps, summing MSE losses over all rollout steps.
 
-**Config Option:** Set `n_forward_steps` in `stepper_training` to a `TimeLengthSchedule` with `start_value: 2` and milestones incrementing by 1 every 2 epochs up to the desired maximum. The data loader window is sized to the schedule's `max_n_forward_steps`, so set that to the intended ceiling (e.g. 8):
+The `on_train_epoch_start` progressive-curriculum code in `forecast.py` (lines 314-316) does exist but is never triggered for standard ArchesWeather training: the `dataset.multistep > 1` guard is never satisfied because the training config starts with `rollout_iterations: 1`.
+
+**Config:** Use `n_forward_steps: 1` for the main training run. Multi-step fine-tuning would be a separate run starting from a Phase 1/2 checkpoint with a higher fixed `n_forward_steps`.
 
 ```yaml
 stepper_training:
-  n_forward_steps:
-    start_value: 2
-    milestones:
-      - epoch: 2
-        value: 3
-      - epoch: 4
-        value: 4
-      - epoch: 6
-        value: 5
-      - epoch: 8
-        value: 6
-      - epoch: 10
-        value: 7
-      - epoch: 12
-        value: 8
+  n_forward_steps: 1
 ```
 
 ---
@@ -140,13 +126,13 @@ ACE has no equivalent multi-model averaging infrastructure at inference time.
 
 ---
 
-### 8. **Daily-averaged input variables** — data preprocessing
+### 8. **Daily-averaged input variables** — data preprocessing ✅
 
-From the paper: "Rather than using instantaneous state variables as in ERA5, we pre-process the dataset by computing daily averaged physical variables… Daily averages are generated from 6-hourly ERA5 using a rolling window of size 4 and stride 1."
+From the ArchesWeatherAIMIP paper: "Rather than using instantaneous state variables as in ERA5, we pre-process the dataset by computing daily averaged physical variables… Daily averages are generated from 6-hourly ERA5 using a rolling window of size 4 and stride 1."
 
-This is an **offline preprocessing step** — the code just loads whatever files are on disk. The rolling average is applied to the ERA5 files before training, producing daily-mean snapshots that still step at 6-hourly intervals (stride-1 rolling window). The effect is to remove the diurnal cycle from the target, making long-range dynamics easier to learn.
+This is an **offline preprocessing step** — the code just loads whatever files are on disk. The rolling average produces daily-mean snapshots that still step at 6-hourly intervals (stride-1 rolling window), removing the diurnal cycle and making long-range dynamics easier to learn. There is no daily-averaging code in the ArchesWeather repository; it was applied externally before training.
 
-**Fix needed**: Preprocess the training dataset by applying a rolling mean of window size 4 (24 h) over the 6-hourly ERA5 files before feeding them to ACE. No model code changes required.
+**Implemented**: The ACE training config already uses `2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr`, which is a pre-computed daily-averaged ERA5 dataset. No further action required.
 
 ---
 
@@ -166,20 +152,45 @@ module:
 
 ---
 
+### 10. **SwiGLU MLP** — model config
+
+ArchesWeather uses SwiGLU in all transformer blocks (`mlp_layer: swiglu`). To keep parameter count equal to a standard MLP at `mlp_ratio=4.0`, it internally adjusts the hidden dimension to `mlp_ratio * 2/3 = 2.667` before constructing the SwiGLU (timm's two-branch formulation). ACE's SwiGLU implementation doubles the hidden dimension internally (single `Linear(d, 2h)` then chunk), so to match ArchesWeather's parameter count, `mlp_ratio` must be set to `8/3 ≈ 2.6667`.
+
+**Config:** Change `mlp_layer` and `mlp_ratio` in the module config:
+
+```yaml
+module:
+  config:
+    mlp_layer: swiglu
+    mlp_ratio: 2.6667   # matches ArchesWeather param count; mlp_ratio=4.0 with standard MLP
+```
+
+---
+
+### 11. **Gradient clipping** — training config
+
+ArchesWeather uses `gradient_clip_val=1` (via PyTorch Lightning's `Trainer`). ACE's training loop has no gradient clipping support — no equivalent config field exists.
+
+**Fix needed**: Add gradient clipping support to `fme/core/optimization.py` (e.g. a `gradient_clip_val: float | None = None` field that calls `torch.nn.utils.clip_grad_norm_` before the optimizer step), then set it to `1.0` in the config.
+
+---
+
 ## Summary
 
 | Gap | Where |
 |---|---|
 | Month/hour time conditioning (embedding_scalar wrapper) ✅ | **Model / registry** |
 | Differential weight decay (norm params get wd=0) ✅ | **Optimizer config** |
-| Cosine schedule with warmup | **LR scheduler config** |
-| Delta normalization in loss | **Loss config** |
-| Multistep curriculum (2-step start, +1 per 2 epochs) | **Training loop config** |
+| Cosine schedule with warmup (per-epoch approximation) | **LR scheduler config** |
+| Delta normalization in loss ✅ | **Step config (`normalization.residual`)** |
+| Multi-step fine-tuning (Phase 3, optional; single-step main training) | **Training loop config** |
 | 2-step input (`n_ic_timesteps=2`) | **Stepper config** |
 | 4-seed ensemble + averaging at inference | **Training strategy / inference** |
-| Daily-averaged inputs (rolling window of 4 over 6-hourly ERA5) | **Data preprocessing** |
+| Daily-averaged inputs ✅ | **Data preprocessing (zarr already daily)** |
 | `axis_attn` (2D axial self-attention replacing ColumnMixer) ✅ | **Model / registry** |
+| SwiGLU MLP (`mlp_layer: swiglu`, `mlp_ratio: 2.6667`) | **Model config** |
+| Gradient clipping (`clip_val=1`) | **Training loop (needs code change)** |
 
-**Not found in ArchesWeather codebase**: monthly mean SST/sea ice forcings. This does not appear in the ArchesWeather codebase or documentation; ArchesWeather's surface variables are `[U10m, V10m, T2m, MSLP]` only.
+**ArchesWeather (original) only**: surface variables are `[U10m, V10m, T2m, MSLP]` — no SST/SIC forcings.
 
-**In paper but implemented as offline preprocessing**: daily variable averaging (see item 9 above).
+**ArchesWeatherAIMIP addition**: monthly mean SST and sea ice cover (SIC) are concatenated to surface variables as additional conditioning inputs before embedding. ACE handles `surface_temperature` and `sea_ice_fraction` as regular instantaneous state variables, not as separate monthly-mean forcings — this is a fidelity gap for the AIMIP protocol but requires a code change to properly implement.
