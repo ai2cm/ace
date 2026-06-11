@@ -352,8 +352,8 @@ stepper:
         type: NoiseConditionedSFNO
         config:
           embed_dim: 512
-          noise_embed_dim: 32
-          noise_type: isotropic
+          noise_embed_dim: 0
+          noise_type: gaussian
           filter_type: linear
           affine_norms: true
           normalize_big_skip: true
