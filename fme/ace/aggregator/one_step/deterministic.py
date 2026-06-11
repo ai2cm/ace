@@ -6,7 +6,7 @@ import numpy as np
 import torch
 
 from fme.core.diagnostics import get_reduced_diagnostics, write_reduced_diagnostics
-from fme.core.generics.aggregator import AggregatorABC
+from fme.core.generics.aggregator import AggregatorABC, AggregatorSummary
 from fme.core.typing_ import TensorDict, TensorMapping
 
 from .build_context import Aggregator
@@ -84,14 +84,8 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
             )
 
     @torch.no_grad()
-    def get_logs(self, label: str):
-        """
-        Returns logs as can be reported to WandB.
-
-        Args:
-            label: Label to prepend to all log keys.
-        """
-        logs = {}
+    def get_summary(self, label: str) -> AggregatorSummary:
+        logs: dict[str, float] = {}
         for agg_label in self._aggregators:
             logging.info(f"Getting logs for {agg_label} aggregator")
             for k, v in self._aggregators[agg_label].get_logs(label=agg_label).items():
@@ -104,7 +98,8 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
                 label=label,
             )
         )
-        return logs
+        loss = logs.get(f"{label}/mean/loss")
+        return AggregatorSummary(logs=logs, loss=loss)
 
     def _get_loss_scaled_mse_components(
         self,

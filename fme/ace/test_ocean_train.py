@@ -404,7 +404,9 @@ def _setup(
     path,
     log_to_wandb=True,
     max_epochs=1,
-    n_time=60,
+    # inline inference uses two initial conditions at indices 0 and 1, so it
+    # needs inference_forward_steps + 2 timesteps of data on disk
+    n_time=12,
     timestep_days=2,
     inference_forward_steps=10,
     save_per_epoch_diagnostics=True,

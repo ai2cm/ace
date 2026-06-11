@@ -252,6 +252,12 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             an up-projection after inverse_transform, reducing both the SHT
             cost and the size of the per-mode complex weight tensor. Only
             supported for filter_type='linear'.
+        clip_latent_global_means: If True, the per-channel spatial mean of
+            the post-encoder latent representation is tracked during
+            training and, in eval, the latent is shifted so that mean falls
+            within the observed envelope (no-op when it already does).
+            Bounds the global-mean of the latent the transformer blocks see
+            at inference to the range observed in training.
     """
 
     spectral_transform: Literal["sht"] = "sht"
@@ -292,6 +298,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     spectral_lora_alpha: float | None = None
     filter_preserves_global_mean: bool = False
     spectral_ratio: float = 1.0
+    clip_latent_global_means: bool = False
 
     def __post_init__(self):
         if self.context_pos_embed_dim > 0 and self.pos_embed:
@@ -358,6 +365,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             spectral_lora_alpha=self.spectral_lora_alpha,
             filter_preserves_global_mean=self.filter_preserves_global_mean,
             spectral_ratio=self.spectral_ratio,
+            clip_latent_global_means=self.clip_latent_global_means,
         )
         sfno_net = get_lat_lon_sfnonet(
             params=sfno_config,
