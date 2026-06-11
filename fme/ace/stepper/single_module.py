@@ -1111,7 +1111,15 @@ class Stepper:
         stepper_state: StepperState | None = None,
         time: xr.DataArray | None = None,
     ) -> Generator[tuple[TensorDict, StepperState | None], None, None]:
-        state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
+        n_ic = self.n_ic_timesteps
+        if n_ic > 1:
+            state = {k: ic_dict[k][:, -1] for k in ic_dict}
+            history: list[TensorMapping] | None = [
+                {k: ic_dict[k][:, i] for k in ic_dict} for i in range(n_ic - 1)
+            ]
+        else:
+            state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
+            history = None
         for step in range(n_forward_steps):
             input_forcing = {
                 k: (
@@ -1144,7 +1152,7 @@ class Stepper:
                 return optimizer.checkpoint(module, step=step)
 
             with optimizer.autocast():
-                state, stepper_state = self.step(
+                new_state, stepper_state = self.step(
                     StepArgs(
                         input=input_data,
                         next_step_input_data=next_step_input_dict,
@@ -1152,11 +1160,15 @@ class Stepper:
                         data_mask=data_mask,
                         stepper_state=stepper_state,
                         forward_time=forward_time,
+                        history=history,
                     ),
                     wrapper=checkpoint,
                 )
-            yield state, stepper_state
-            state = optimizer.detach_if_using_gradient_accumulation(state)
+            yield new_state, stepper_state
+            new_state = optimizer.detach_if_using_gradient_accumulation(new_state)
+            if history is not None:
+                history = history[1:] + [state]
+            state = new_state
 
     def predict(
         self,

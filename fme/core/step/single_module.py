@@ -87,9 +87,22 @@ class SingleModuleStepConfig(StepConfigABC):
     residual_prediction: bool = False
     include_channel_mask_inputs: bool = False
     global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
+    n_ic_timesteps: int = 1
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
+        if self.n_ic_timesteps < 1:
+            raise ValueError(
+                f"n_ic_timesteps must be at least 1, got {self.n_ic_timesteps}"
+            )
+        if self.n_ic_timesteps > 1 and self.global_mean_removal is not None:
+            raise ValueError(
+                "n_ic_timesteps > 1 is not supported with global_mean_removal"
+            )
+        if self.n_ic_timesteps > 1 and self.include_channel_mask_inputs:
+            raise ValueError(
+                "n_ic_timesteps > 1 is not supported with include_channel_mask_inputs"
+            )
         if self.global_mean_removal is not None:
             self.global_mean_removal.validate_names(self.in_names, self.out_names)
         for name in self.prescribed_prognostic_names:
@@ -117,10 +130,6 @@ class SingleModuleStepConfig(StepConfigABC):
                     raise ValueError(
                         f"secondary_diagnostic_name is an output variable: '{name}'"
                     )
-
-    @property
-    def n_ic_timesteps(self) -> int:
-        return 1
 
     def get_state(self):
         return dataclasses.asdict(self)
@@ -286,7 +295,7 @@ class SingleModuleStep(StepABC):
         packed_in_names = (
             list(config.in_names) + self._global_mean_removal.extra_channel_names
         )
-        n_in_channels = len(packed_in_names)
+        n_in_channels = len(packed_in_names) * config.n_ic_timesteps
         if config.include_channel_mask_inputs:
             n_in_channels *= 2
         n_out_channels = len(config.out_names)
@@ -383,6 +392,18 @@ class SingleModuleStep(StepABC):
             if args.data_mask is not None:
                 input_norm = apply_input_mask(input_norm, args.data_mask)
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
+            if args.history:
+                history_tensors = []
+                for hist_state in args.history:
+                    hist_norm = self._normalizer.normalize(hist_state)
+                    if args.data_mask is not None:
+                        hist_norm = apply_input_mask(hist_norm, args.data_mask)
+                    history_tensors.append(
+                        self.in_packer.pack(hist_norm, axis=self.CHANNEL_DIM)
+                    )
+                input_tensor = torch.cat(
+                    history_tensors + [input_tensor], dim=self.CHANNEL_DIM
+                )
             if self._config.include_channel_mask_inputs:
                 mask_dict = _build_channel_mask_dict(
                     self.in_packer.names, args.data_mask, input_tensor

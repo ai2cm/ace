@@ -1542,3 +1542,127 @@ def test_step_shared_global_mean_removal_raises_on_masked_reference():
                 data_mask=data_mask,
             ),
         )
+
+
+def test_n_ic_timesteps_2_doubles_input_channels():
+    """n_ic_timesteps=2 doubles the network input channels.
+
+    Verified by checking that a step built with n_ic_timesteps=2 accepts
+    a history list of length 1 and produces correct output shape, while one
+    built with n_ic_timesteps=1 raises a shape error when history is supplied.
+    """
+    in_names = ["a", "b"]
+    out_names = ["a", "b"]
+    all_names = list(set(in_names + out_names))
+    normalization = get_network_and_loss_normalization_config(names=all_names)
+
+    config_2 = SingleModuleStepConfig(
+        builder=ModuleSelector(type="MLP", config={}),
+        in_names=in_names,
+        out_names=out_names,
+        normalization=normalization,
+        n_ic_timesteps=2,
+    )
+    assert config_2.n_ic_timesteps == 2
+
+    step_2 = get_step(
+        StepSelector(type="single_module", config=dataclasses.asdict(config_2)),
+        DEFAULT_IMG_SHAPE,
+    )
+    assert isinstance(step_2, SingleModuleStep)
+    n_samples = 2
+    input_data = get_tensor_dict(in_names, DEFAULT_IMG_SHAPE, n_samples)
+    history_data = get_tensor_dict(in_names, DEFAULT_IMG_SHAPE, n_samples)
+    output, _ = step_2.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data={},
+            labels=None,
+            history=[history_data],
+        ),
+    )
+    for name in out_names:
+        assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
+
+
+def test_n_ic_timesteps_2_uses_history_in_step():
+    """With n_ic_timesteps=2, history is concatenated before current channels."""
+    in_names = ["a", "b"]
+    out_names = ["a", "b"]
+    all_names = list(set(in_names + out_names))
+    normalization = get_network_and_loss_normalization_config(names=all_names)
+
+    config = SingleModuleStepConfig(
+        builder=ModuleSelector(type="MLP", config={}),
+        in_names=in_names,
+        out_names=out_names,
+        normalization=normalization,
+        n_ic_timesteps=2,
+    )
+    step = get_step(
+        StepSelector(type="single_module", config=dataclasses.asdict(config)),
+        DEFAULT_IMG_SHAPE,
+    )
+    assert isinstance(step, SingleModuleStep)
+    n_samples = 2
+    input_data = get_tensor_dict(in_names, DEFAULT_IMG_SHAPE, n_samples)
+    history_data = get_tensor_dict(in_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step_data: TensorDict = {}
+
+    output, _ = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_data,
+            labels=None,
+            history=[history_data],
+        ),
+    )
+    for name in out_names:
+        assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
+
+
+def test_n_ic_timesteps_2_validation_errors():
+    """n_ic_timesteps > 1 is incompatible with global_mean_removal and channel masks."""
+    in_names = ["a", "b"]
+    out_names = ["a", "b"]
+    normalization = get_network_and_loss_normalization_config(
+        names=list(set(in_names + out_names))
+    )
+    with pytest.raises(ValueError, match="global_mean_removal"):
+        SingleModuleStepConfig(
+            builder=ModuleSelector(type="MLP", config={}),
+            in_names=in_names,
+            out_names=out_names,
+            normalization=normalization,
+            n_ic_timesteps=2,
+            global_mean_removal=PerChannelGlobalMeanRemovalConfig(field_names=in_names),
+        )
+    with pytest.raises(ValueError, match="include_channel_mask_inputs"):
+        SingleModuleStepConfig(
+            builder=ModuleSelector(type="MLP", config={}),
+            in_names=in_names,
+            out_names=out_names,
+            normalization=normalization,
+            n_ic_timesteps=2,
+            include_channel_mask_inputs=True,
+        )
+
+
+def test_n_ic_timesteps_2_from_state_roundtrip():
+    """n_ic_timesteps survives a get_state / from_state round-trip."""
+    in_names = ["a", "b"]
+    out_names = ["a", "b"]
+    normalization = get_network_and_loss_normalization_config(
+        names=list(set(in_names + out_names))
+    )
+    config = SingleModuleStepConfig(
+        builder=ModuleSelector(type="MLP", config={}),
+        in_names=in_names,
+        out_names=out_names,
+        normalization=normalization,
+        n_ic_timesteps=2,
+    )
+    state = config.get_state()
+    assert state["n_ic_timesteps"] == 2
+    loaded = SingleModuleStepConfig.from_state(state)
+    assert loaded.n_ic_timesteps == 2

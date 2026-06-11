@@ -1,3 +1,5 @@
+from collections.abc import Mapping
+
 import torch
 
 from fme.core.corrector.state import CorrectorState
@@ -10,6 +12,9 @@ def test_apply_input_process_func_propagates_metadata():
     n_batch = 4
     input_data = {"a": torch.randn(n_batch, 8, 16), "b": torch.randn(n_batch, 8, 16)}
     next_step = {"a": torch.randn(n_batch, 8, 16), "b": torch.randn(n_batch, 8, 16)}
+    history_data: list[Mapping[str, torch.Tensor]] = [
+        {"a": torch.randn(n_batch, 8, 16), "b": torch.randn(n_batch, 8, 16)}
+    ]
     labels = BatchLabels(torch.zeros(n_batch, 2), ["label_0", "label_1"])
     data_mask = {
         "a": torch.ones(n_batch, dtype=torch.bool),
@@ -28,6 +33,7 @@ def test_apply_input_process_func_propagates_metadata():
         data_mask=data_mask,
         stepper_state=stepper_state,
         forward_time=forward_time,
+        history=history_data,
     )
 
     def double(tensors):
@@ -47,6 +53,10 @@ def test_apply_input_process_func_propagates_metadata():
         torch.testing.assert_close(result.data_mask[name], data_mask[name])
     assert result.stepper_state is stepper_state
     assert result.forward_time is forward_time
+    assert result.history is not None
+    assert len(result.history) == 1
+    for name in history_data[0]:
+        torch.testing.assert_close(result.history[0][name], history_data[0][name] * 2)
 
     known_attrs = {
         "input",
@@ -55,6 +65,7 @@ def test_apply_input_process_func_propagates_metadata():
         "data_mask",
         "stepper_state",
         "forward_time",
+        "history",
     }
     actual_attrs = {
         name

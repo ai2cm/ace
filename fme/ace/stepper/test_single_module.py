@@ -2662,3 +2662,57 @@ def test_predict_with_data_mask_zeros_masked_forcing():
     output, _ = stepper.predict(input_data, forcing_data)
     ic_a = input_data.as_batch_data().data["a"][:, 0]
     torch.testing.assert_close(output.data["a"][:, 0], ic_a)
+
+
+def test_predict_generator_with_n_ic_timesteps_2():
+    """With n_ic_timesteps=2, predict_generator uses both IC timesteps.
+
+    Uses a ChannelSum module: each output channel is the sum of all input
+    channels.  With n_ic_timesteps=2 and in_names=["a"], the network receives
+    2 channels (history_a, current_a), so output = history_a + current_a.
+
+    At step 0: history=ic[:,0], current=ic[:,1] → output = ic[:,0] + ic[:,1]
+    At step 1: history=ic[:,1], current=output_0 → output = ic[:,1] + output_0
+    """
+    n_ic = 2
+    n_steps = 2
+    n_samples = 3
+    img_shape = (5, 5)
+
+    # Build a stepper that sums all input channels into 1 output channel
+    config = _get_stepper_config(
+        ["a"], ["a"], module_name="ChannelSum", n_ic_timesteps=n_ic
+    )
+    stepper = config.get_stepper(get_dataset_info())
+
+    # IC has shape [n_samples, n_ic, *img_shape]
+    ic_data = torch.rand(n_samples, n_ic, *img_shape, device=DEVICE)
+    index = xr.date_range("2000", freq="6h", periods=n_steps + n_ic, use_cftime=True)
+    forcing_time = xr.DataArray(np.stack(n_samples * [index]), dims=["sample", "time"])
+
+    full_data = BatchData.new_on_device(
+        data={
+            "a": torch.cat(
+                [ic_data, torch.zeros(n_samples, n_steps, *img_shape, device=DEVICE)],
+                dim=1,
+            )
+        },
+        time=forcing_time,
+        labels=None,
+    )
+    input_state = full_data.get_start(prognostic_names=["a"], n_ic_timesteps=n_ic)
+    forcing_data = BatchData.new_on_device(
+        data={},
+        time=forcing_time,
+        labels=None,
+    )
+
+    output, _ = stepper.predict(input_state, forcing_data)
+
+    # step 0: network sees [ic[:,0], ic[:,1]] → output = ic[:,0] + ic[:,1]
+    expected_step0 = ic_data[:, 0] + ic_data[:, 1]
+    torch.testing.assert_close(output.data["a"][:, 0], expected_step0)
+
+    # step 1: network sees [ic[:,1], output_step0] → output = ic[:,1] + expected_step0
+    expected_step1 = ic_data[:, 1] + expected_step0
+    torch.testing.assert_close(output.data["a"][:, 1], expected_step1)

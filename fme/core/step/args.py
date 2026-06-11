@@ -28,6 +28,9 @@ class StepArgs:
             corrector references seeded from the IC). ``None`` if no state
             has been seeded yet. The step returns an updated stepper_state
             alongside its output dict.
+        history: Ordered list of previous-timestep state mappings
+            (oldest first) for multi-IC input. Each entry has the same
+            shape as ``input``. ``None`` when ``n_ic_timesteps == 1``.
     """
 
     def __init__(
@@ -38,6 +41,7 @@ class StepArgs:
         data_mask: TensorMapping | None = None,
         stepper_state: StepperState | None = None,
         forward_time: torch.Tensor | None = None,
+        history: list[TensorMapping] | None = None,
     ):
         self.input = input
         self.next_step_input_data = next_step_input_data
@@ -45,12 +49,14 @@ class StepArgs:
         self.data_mask = data_mask
         self.stepper_state = stepper_state
         self.forward_time = forward_time
+        self.history = history
 
     def apply_input_process_func(
         self, func: Callable[[TensorMapping], TensorMapping]
     ) -> "StepArgs":
         input = func(self.input)
         next_step_input_data = func(self.next_step_input_data)
+        history = [func(h) for h in self.history] if self.history is not None else None
         return StepArgs(
             input=input,
             next_step_input_data=next_step_input_data,
@@ -58,4 +64,5 @@ class StepArgs:
             data_mask=self.data_mask,
             stepper_state=self.stepper_state,
             forward_time=self.forward_time,
+            history=history,
         )
