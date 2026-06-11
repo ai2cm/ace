@@ -144,18 +144,7 @@ def test_swin_transformer_unconditional_ignores_dataset_labels():
     out = module(x)
     assert out.shape == (2, n_out, *IMG_SHAPE)
     net = getattr(module.torch_module, "module")
-    assert net.embed_dim_labels == 0
-
-
-def test_swin_transformer_unconditional_rejects_label_embed_dim():
-    all_labels = {"label_a", "label_b"}
-    dataset_info = _get_dataset_info(all_labels=all_labels)
-    selector = ModuleSelector(
-        type="SwinTransformer",
-        config=dataclasses.asdict(_builder(embed_dim_labels=2)),
-    )
-    with pytest.raises(ValueError, match="conditional=True"):
-        selector.build(n_in_channels=5, n_out_channels=3, dataset_info=dataset_info)
+    assert net.embed_dim_labels == len(all_labels)
 
 
 def test_nc_swin_transformer_is_registered():
@@ -220,18 +209,7 @@ def test_nc_swin_transformer_unconditional_ignores_dataset_labels():
     out = module(x)
     assert out.shape == (2, n_out, *IMG_SHAPE)
     net = getattr(module.torch_module, "conditional_model")
-    assert net.embed_dim_labels == 0
-
-
-def test_nc_swin_transformer_unconditional_rejects_label_embed_dim():
-    all_labels = {"label_a", "label_b"}
-    dataset_info = _get_dataset_info(all_labels=all_labels)
-    selector = ModuleSelector(
-        type="NoiseConditionedSwinTransformer",
-        config=dataclasses.asdict(_nc_builder(label_embed_dim=2)),
-    )
-    with pytest.raises(ValueError, match="conditional=True"):
-        selector.build(n_in_channels=5, n_out_channels=3, dataset_info=dataset_info)
+    assert net.embed_dim_labels == len(all_labels)
 
 
 def test_swin_transformer_cpb_mlp_exists():

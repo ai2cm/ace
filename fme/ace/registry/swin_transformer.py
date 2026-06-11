@@ -6,8 +6,8 @@ from torch import nn
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 from fme.ace.registry.stochastic_sfno import NoiseConditionedModel
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
-from fme.core.models.boundary_padding import TensorPaddingConfig
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
+from fme.core.models.miles_credit.boundary_padding import TensorPaddingConfig
 from fme.core.models.swin_transformer import SwinTransformerNet
 
 
@@ -97,25 +97,6 @@ class SwinTransformerBuilder(ModuleConfig):
             dataset_info=dataset_info,
             enable_label_conditioning=len(dataset_info.all_labels) > 0
             or self.embed_dim_labels > 0,
-        )
-
-    def build_for_selector(
-        self,
-        n_in_channels: int,
-        n_out_channels: int,
-        dataset_info: DatasetInfo,
-        conditional: bool,
-    ) -> nn.Module:
-        if self.embed_dim_labels > 0 and not conditional:
-            raise ValueError(
-                "SwinTransformer label conditioning requires "
-                "ModuleSelector(conditional=True)"
-            )
-        return self._build(
-            n_in_channels=n_in_channels,
-            n_out_channels=n_out_channels,
-            dataset_info=dataset_info,
-            enable_label_conditioning=conditional,
         )
 
     def _build(
@@ -241,25 +222,6 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             dataset_info=dataset_info,
             enable_label_conditioning=len(dataset_info.all_labels) > 0
             or self.label_embed_dim > 0,
-        )
-
-    def build_for_selector(
-        self,
-        n_in_channels: int,
-        n_out_channels: int,
-        dataset_info: DatasetInfo,
-        conditional: bool,
-    ) -> nn.Module:
-        if self.label_embed_dim > 0 and not conditional:
-            raise ValueError(
-                "NoiseConditionedSwinTransformer label conditioning requires "
-                "ModuleSelector(conditional=True)"
-            )
-        return self._build(
-            n_in_channels=n_in_channels,
-            n_out_channels=n_out_channels,
-            dataset_info=dataset_info,
-            enable_label_conditioning=conditional,
         )
 
     def _build(
