@@ -1115,7 +1115,15 @@ class Stepper:
         if n_ic > 1:
             state = {k: ic_dict[k][:, -1] for k in ic_dict}
             history: list[TensorMapping] | None = [
-                {k: ic_dict[k][:, i] for k in ic_dict} for i in range(n_ic - 1)
+                {
+                    **{k: ic_dict[k][:, i] for k in ic_dict},
+                    **{
+                        k: forcing_dict[k][:, i]
+                        for k in self._input_only_names
+                        if k in forcing_dict
+                    },
+                }
+                for i in range(n_ic - 1)
             ]
         else:
             state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
@@ -1167,7 +1175,7 @@ class Stepper:
             yield new_state, stepper_state
             new_state = optimizer.detach_if_using_gradient_accumulation(new_state)
             if history is not None:
-                history = history[1:] + [state]
+                history = history[1:] + [{**state, **input_forcing}]
             state = new_state
 
     def predict(

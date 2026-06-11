@@ -2716,3 +2716,60 @@ def test_predict_generator_with_n_ic_timesteps_2():
     # step 1: network sees [ic[:,1], output_step0] → output = ic[:,1] + expected_step0
     expected_step1 = ic_data[:, 1] + expected_step0
     torch.testing.assert_close(output.data["a"][:, 1], expected_step1)
+
+
+def test_predict_generator_with_n_ic_timesteps_2_and_forcing():
+    """n_ic_timesteps=2 with an input-only (forcing) variable must not KeyError.
+
+    Regression test for the bug where history states built from ic_dict were
+    missing input-only variables (e.g. land_fraction), causing in_packer.pack
+    to raise a KeyError.
+    """
+    n_ic = 2
+    n_steps = 2
+    n_samples = 3
+    img_shape = (5, 5)
+
+    # "a" is prognostic (in + out), "f" is forcing (in only)
+    config = _get_stepper_config(
+        ["a", "f"], ["a"], module_name="ChannelSum", n_ic_timesteps=n_ic
+    )
+    stepper = config.get_stepper(get_dataset_info())
+
+    ic_data = torch.rand(n_samples, n_ic, *img_shape, device=DEVICE)
+    forcing_data_tensor = torch.rand(
+        n_samples, n_steps + n_ic, *img_shape, device=DEVICE
+    )
+    index = xr.date_range("2000", freq="6h", periods=n_steps + n_ic, use_cftime=True)
+    forcing_time = xr.DataArray(np.stack(n_samples * [index]), dims=["sample", "time"])
+
+    full_data = BatchData.new_on_device(
+        data={
+            "a": torch.cat(
+                [ic_data, torch.zeros(n_samples, n_steps, *img_shape, device=DEVICE)],
+                dim=1,
+            ),
+            "f": forcing_data_tensor,
+        },
+        time=forcing_time,
+        labels=None,
+    )
+    input_state = full_data.get_start(prognostic_names=["a"], n_ic_timesteps=n_ic)
+    forcing_bd = BatchData.new_on_device(
+        data={"f": forcing_data_tensor},
+        time=forcing_time,
+        labels=None,
+    )
+
+    # Should not raise KeyError for missing forcing variable in history
+    output, _ = stepper.predict(input_state, forcing_bd)
+
+    # in_packer order is ["a", "f"]; step 0 sees [ic[:,0], f[:,0], ic[:,1], f[:,0]]
+    # (history at IC timestep 0 uses forcing[:,0]; current step also uses forcing[:,0])
+    expected_step0 = (
+        ic_data[:, 0]
+        + forcing_data_tensor[:, 0]
+        + ic_data[:, 1]
+        + forcing_data_tensor[:, 0]
+    )
+    torch.testing.assert_close(output.data["a"][:, 0], expected_step0)
