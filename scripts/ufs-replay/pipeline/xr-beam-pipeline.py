@@ -553,6 +553,7 @@ def _process_chunk(
     source_grid_ocean: xr.Dataset,
     source_grid_atmo: xr.Dataset,
     nn_fill_map: dict[str, tuple[np.ndarray, np.ndarray]] | None = None,
+    mask_3d: xr.DataArray | None = None,
 ) -> xr.Dataset:
     """Process one time-chunk of ocean + atmosphere data.
 
@@ -591,8 +592,12 @@ def _process_chunk(
                 lat=ds_ocean.lat.values, lon=ds_ocean.lon.values
             )
 
-    # Rebuild masks from regridded NaN pattern
-    mask_3d, mask_2d = _build_3d_mask(ds_ocean, VDIM, time_idx=0)
+    # Use precomputed mask (invariant across chunks) or build if not provided
+    if mask_3d is None:
+        mask_3d, mask_2d = _build_3d_mask(ds_ocean, VDIM, time_idx=0)
+    else:
+        mask_2d = mask_3d.isel({VDIM: 0}).astype(np.float32)
+        mask_2d.attrs = {"long_name": "ocean mask", "units": "0 if land, 1 if ocean"}
 
     # --- Vertical coarsening ---
     vars_3d_present = [v for v in VARS_3D if v in ds_ocean]
@@ -937,6 +942,7 @@ def process_ocean_chunk(
     vertical_coarsening_indices=None,
     time_coarsen_factor=1,
     nn_fill_map=None,
+    mask_3d=None,
 ):
     """Beam-compatible processing function: (key, ds) → (new_key, output_ds).
 
@@ -992,6 +998,7 @@ def process_ocean_chunk(
         src_ocean,
         src_atmo,
         nn_fill_map=nn_fill_map,
+        mask_3d=mask_3d,
     )
 
     # Update key for output dimensions
@@ -1071,7 +1078,7 @@ def _extract_invariant_fields(
         deptho.attrs = {"long_name": "Sea Floor Depth Below Geoid", "units": "m"}
         invariant["deptho"] = deptho
 
-    return xr.Dataset(invariant)
+    return xr.Dataset(invariant), mask_3d
 
 
 def _make_template(
@@ -1081,18 +1088,18 @@ def _make_template(
     vertical_coarsening_indices: Sequence[Sequence[int]],
     time_coarsen_factor: int,
     output_time: list,
-) -> tuple[xr.Dataset, dict[str, tuple[np.ndarray, np.ndarray]]]:
+) -> tuple[xr.Dataset, dict[str, tuple[np.ndarray, np.ndarray]], xr.DataArray]:
     """Eagerly process one ocean timestep to build the output zarr template.
 
-    Returns (template, nn_fill_map) where nn_fill_map contains precomputed
-    nearest-neighbour fill indices to be reused by every worker.
+    Returns (template, nn_fill_map, mask_3d) where nn_fill_map and mask_3d
+    are precomputed invariant data to be reused by every Beam worker.
     """
     logging.info("Building template from first timestep")
 
     # Extract scalar (idepth_*) and 2-D spatial (mask_*, land_fraction,
     # etc.) invariant fields — all without a time dimension.
     src_ocean = _make_source_grid(ds_ocean.isel(time=0).load())
-    invariant = _extract_invariant_fields(
+    invariant, mask_3d = _extract_invariant_fields(
         ds_ocean,
         output_grid,
         vertical_coarsening_indices,
@@ -1124,6 +1131,7 @@ def _make_template(
         src_ocean,
         src_atmo,
         nn_fill_map={},  # empty map → no fill applied, no fallback
+        mask_3d=mask_3d,
     )
     processed = processed.drop_encoding()
 
@@ -1151,7 +1159,7 @@ def _make_template(
         if name not in template:
             template[name] = invariant[name]
 
-    return template, nn_fill_map
+    return template, nn_fill_map, mask_3d
 
 
 # ---------------------------------------------------------------------------
@@ -1374,7 +1382,7 @@ def main():
 
     # --- Build template ---
     logging.info("Generating template")
-    template, nn_fill_map = _make_template(
+    template, nn_fill_map, mask_3d = _make_template(
         ds_ocean,
         ds_atmo,
         args.output_grid,
@@ -1402,6 +1410,7 @@ def main():
                 vertical_coarsening_indices=vert_indices,
                 time_coarsen_factor=time_coarsen_factor,
                 nn_fill_map=nn_fill_map,
+                mask_3d=mask_3d,
             )
             | xbeam.ConsolidateChunks(output_shards)
             | xbeam.ChunksToZarr(
