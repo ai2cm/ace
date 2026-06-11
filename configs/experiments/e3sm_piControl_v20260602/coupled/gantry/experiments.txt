@@ -1,2 +1,4 @@
 
 ft-v20260602-E3SMv3-piControl-zltomfxg-l6ktf4nj-early|rs0|01KTTFXP3S17T7FT16FD84959K|training|best_inference_ckpt|normal|--min-runtime 8h
+
+ft-v20260602-E3SMv3-piControl-zltomfxg-l6ktf4nj-early|rs0|01KTTJP3NJVTZ6GQGQ5CQY2W8A|training|best_inference_ckpt|normal|--min-runtime 8h
