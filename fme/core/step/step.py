@@ -235,10 +235,32 @@ class StepSelector(StepConfigABC):
 class StepABC(abc.ABC):
     SelfType = TypeVar("SelfType", bound="StepABC")
 
+    def __init__(self) -> None:
+        # Mirrors ``torch.nn.Module.training`` so that step-level eval/train
+        # state is observable without reaching into the underlying modules.
+        self._training: bool = True
+
     @property
     @abc.abstractmethod
     def config(self) -> StepConfigABC:
         pass
+
+    @final
+    def train(self, mode: bool = True) -> "StepABC":
+        """Set the step (and all submodules) to training mode.
+
+        Matches the ``torch.nn.Module.train`` signature so step instances
+        can be toggled with the same API as the modules they own.
+        """
+        self._training = mode
+        for module in self.modules:
+            module.train(mode)
+        return self
+
+    @final
+    def eval(self) -> "StepABC":
+        """Set the step (and all submodules) to evaluation mode."""
+        return self.train(False)
 
     @final
     def get_loss_normalizer(

@@ -1544,6 +1544,25 @@ def test_step_shared_global_mean_removal_raises_on_masked_reference():
         )
 
 
+def test_step_train_eval_toggle_propagates_to_modules():
+    step = get_step(get_single_module_selector(), DEFAULT_IMG_SHAPE)
+
+    assert all(module.training for module in step.modules)
+    assert step._training
+
+    step.eval()
+    assert all(not module.training for module in step.modules)
+    assert not step._training
+
+    step.train()
+    assert all(module.training for module in step.modules)
+    assert step._training
+
+    step.train(False)
+    assert all(not module.training for module in step.modules)
+    assert not step._training
+
+
 def test_corrector_disabled_not_in_state_by_default():
     step = get_step(get_single_module_selector(), DEFAULT_IMG_SHAPE)
     assert "corrector_disabled" not in step.get_state()

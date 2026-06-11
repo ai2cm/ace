@@ -418,7 +418,7 @@ class SingleModuleStep(StepABC):
             return output_dict
 
         corrector: CorrectorABC | None = self._corrector
-        if self._corrector_disabled and self.module.torch_module.training:
+        if self._corrector_disabled and self._training:
             corrector = None
 
         return step_with_adjustments(
