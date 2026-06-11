@@ -535,6 +535,12 @@ class Trainer:
             "complete epochs"
         )
         self.train_data.set_epoch(self._epochs_trained + 1)
+        # Only signal a fresh-epoch boundary to the stepper if we are
+        # actually starting one; on mid-epoch resume the in-module
+        # per-epoch state should reflect the partial epoch up to the
+        # crash and then continue accumulating.
+        if self._current_epoch_num_batches_seen == 0:
+            self.stepper.set_epoch(self._epochs_trained + 1)
         wandb = WandB.get_instance()
         names_to_log = ("batch_loss", "training_samples_per_second_on_rank_0", "lr")
         n_samples_seen_since_logging = 0

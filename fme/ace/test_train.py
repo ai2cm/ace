@@ -36,7 +36,7 @@ from fme.ace.registry.test_hpx import (
     up_sampling_block_config,
 )
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
-from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
+from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig
 from fme.ace.stepper.single_module import (
     CheckpointStepperConfig,
     StepperConfig,
@@ -183,6 +183,11 @@ def _get_test_yaml_files(
             output_layer,
             n_channels=[4, 8, 16],
         )
+        # HEALPix conv padding equals the dilation, and padding cannot exceed
+        # the face size. The deepest UNet level has 2x2 faces for the 8x8
+        # test data, so dilations must be capped at 2.
+        encoder = dataclasses.replace(encoder, dilations=[1, 2, 2])
+        decoder = dataclasses.replace(decoder, dilations=[2, 2, 1])
         net_config = dict(
             encoder=encoder,
             decoder=decoder,
@@ -518,8 +523,8 @@ def _setup(
     if use_healpix:
         hpx_coords = HEALPixCoordinates(
             face=torch.Tensor(np.arange(12)),
-            width=torch.Tensor(np.arange(16)),
-            height=torch.Tensor(np.arange(16)),
+            width=torch.Tensor(np.arange(8)),
+            height=torch.Tensor(np.arange(8)),
         )
         dim_sizes = get_sizes(spatial_dims=hpx_coords, n_time=n_time)
     else:
@@ -622,6 +627,7 @@ _TRAIN_AND_INFERENCE_CASES = [
             nettype="NoiseConditionedSFNO",
             crps_training=True,
             use_schedule=True,
+            validate_using_ema=True,
         ),
         id="SFNO-crps-schedule",
     ),
@@ -653,15 +659,6 @@ _TRAIN_AND_INFERENCE_CASES = [
             "ignore:Metadata for each ensemble member:UserWarning"
         ),
     ),
-    pytest.param(
-        TrainAndInferenceTestSettings(
-            nettype="NoiseConditionedSFNO",
-            crps_training=True,
-            use_schedule=True,
-            validate_using_ema=True,
-        ),
-        id="SFNO-crps-schedule-ema",
-    ),
 ]
 
 
@@ -672,14 +669,19 @@ def test_train_and_inference(
     settings: TrainAndInferenceTestSettings,
 ):
     """Ensure that training and standalone inference run without errors."""
-    # need multi-year to cover annual aggregator
+    # Inline inference must reach forward step 20 for the default step-20
+    # metrics, and the annual aggregator requires more than 730 days of
+    # inference data. 20 forward steps (even, as required by
+    # forward_steps_in_memory=2) at 40-day spacing gives 21 timesteps
+    # spanning 840 days and three calendar years. Two initial conditions at
+    # indices 0 and 1 require two extra timesteps of data on disk.
     train_config, inference_config = _setup(
         tmp_path,
         settings.nettype,
         log_to_wandb=True,
-        timestep_days=20,
-        n_time=int(366 * 3 / 20 + 1),
-        inference_forward_steps=int(366 * 3 / 20 / 2 - 1) * 2,  # must be even
+        timestep_days=40,
+        n_time=22,
+        inference_forward_steps=20,
         use_healpix=settings.use_healpix,
         crps_training=settings.crps_training,
         save_per_epoch_diagnostics=True,
@@ -1056,9 +1058,9 @@ def test_train_without_inline_inference(tmp_path):
         tmp_path,
         nettype,
         log_to_wandb=True,
-        timestep_days=20,
-        n_time=int(366 * 3 / 20 + 1),
-        inference_forward_steps=int(366 * 3 / 20 / 2 - 1) * 2,  # must be even
+        timestep_days=40,
+        n_time=22,
+        inference_forward_steps=20,  # must be even
         use_healpix=False,
         crps_training=crps_training,
         save_per_epoch_diagnostics=True,
@@ -1082,26 +1084,15 @@ def test_train_without_inline_inference(tmp_path):
 
 
 @pytest.mark.skipif(torch.cuda.is_available(), reason="flaky on GPU")
-@pytest.mark.parametrize(
-    "insolation_config",
-    [
-        pytest.param(
-            InsolationConfig("DSWRFtoa", ValueConfig(1360.0)),
-            id="solar-constant-as-value",
-        ),
-        pytest.param(
-            InsolationConfig("DSWRFtoa", NameConfig("solar_constant")),
-            id="solar-constant-as-name",
-        ),
-    ],
-)
 @pytest.mark.medium_duration
-def test_train_and_inference_with_derived_forcings(
-    tmp_path, insolation_config: InsolationConfig
-):
+def test_train_and_inference_with_derived_forcings(tmp_path):
     nettype = "SphericalFourierNeuralOperatorNet"
     crps_training = False
     log_validation_maps = False
+    # The solar-constant-as-name case exercises the more complex path (loading
+    # the solar constant from data on disk); the as-value alternative is
+    # covered by unit tests in test_insolation.py and test_derived_forcings.py.
+    insolation_config = InsolationConfig("DSWRFtoa", NameConfig("solar_constant"))
     derived_forcings = DerivedForcingsConfig(insolation_config)
     train_config, inference_config = _setup(
         tmp_path,
