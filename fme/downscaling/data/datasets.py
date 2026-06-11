@@ -216,10 +216,6 @@ class BatchItemDatasetAdapter(torch.utils.data.Dataset):
         return BatchItem(fields, time.squeeze(), self._coordinates)
 
     @property
-    def latlon_coordinates(self) -> LatLonCoordinates:
-        return self._coordinates
-
-    @property
     def variable_metadata(self) -> dict[str, VariableMetadata]:
         if self._properties is None:
             raise ValueError("Properties not set for this dataset.")
@@ -304,7 +300,6 @@ class GriddedData:
     dims: list[str]
     variable_metadata: Mapping[str, VariableMetadata]
     all_times: xr.CFTimeIndex
-    coarse_extent_latlon_coords: LatLonCoordinates
 
     @property
     def loader(self) -> DataLoader[BatchItem]:
@@ -347,7 +342,6 @@ class PairedGriddedData:
     variable_metadata: Mapping[str, VariableMetadata]
     all_times: xr.CFTimeIndex
     fine_coords: LatLonCoordinates
-    coarse_extent_latlon_coords: LatLonCoordinates
 
     @property
     def loader(self) -> DataLoader[PairedBatchItem]:
