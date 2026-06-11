@@ -14,7 +14,13 @@ import pathlib
 import yaml
 
 HERE = pathlib.Path(__file__).parent
-WANDB_PROJECT = "VarMasking2"
+WANDB_PROJECT = "VarMasking3"
+WANDB_ENTITY = "ai2cm"
+WANDB_PREFIX = "ace2-var-mask-"  # stripped from wandb run names before comparison
+WANDB_SUFFIX = "-v3"  # stripped from wandb run names before comparison
+CONFIG_PREFIX = (
+    "ace-train-config-4deg-AIMIP-"  # stripped from config stems before comparison
+)
 DEFAULT_CHECKPOINT_NAME = "training_checkpoints/best_ckpt.tar"
 DEFAULT_EPOCHS = 10
 DEFAULT_LR = 0.0001
@@ -33,15 +39,39 @@ def _build_scheduler(epochs: int) -> dict:
     }
 
 
+def _fetch_wandb_run_names() -> set[str]:
+    import wandb  # lazy import: only needed with --skip-wandb
+
+    api = wandb.Api()
+    runs = api.runs(f"{WANDB_ENTITY}/{WANDB_PROJECT}")
+    names = set()
+    for run in runs:
+        name = run.name
+        if WANDB_PREFIX and name.startswith(WANDB_PREFIX):
+            name = name[len(WANDB_PREFIX):]
+        if WANDB_SUFFIX and name.endswith(WANDB_SUFFIX):
+            name = name[: -len(WANDB_SUFFIX)]
+        names.add(name)
+    return names
+
+
 def _write_config(
     cfg: dict,
     out_path: pathlib.Path,
     beaker_dataset_id: str | None,
     existing_only: bool,
+    wandb_run_names: set[str] | None = None,
 ) -> None:
     if existing_only and not out_path.exists():
         print(f"Skipped {out_path.name}")
         return
+    if wandb_run_names is not None:
+        stem = out_path.stem
+        if CONFIG_PREFIX and stem.startswith(CONFIG_PREFIX):
+            stem = stem[len(CONFIG_PREFIX):]
+        if stem in wandb_run_names:
+            print(f"Skipped {out_path.name} (run exists in wandb)")
+            return
     if beaker_dataset_id is not None:
         header = f"# arg: --dataset {beaker_dataset_id}:/checkpoints\n"
     else:
@@ -59,6 +89,7 @@ def generate_finetune_config(
     epochs: int,
     lr: float,
     existing_only: bool,
+    wandb_run_names: set[str] | None = None,
 ) -> None:
     out_path = HERE / f"{source_path.stem}-v2-finetune.yaml"
 
@@ -86,7 +117,7 @@ def generate_finetune_config(
     cfg["optimization"]["scheduler"] = _build_scheduler(epochs)
     cfg["max_epochs"] = epochs
 
-    _write_config(cfg, out_path, beaker_dataset_id, existing_only)
+    _write_config(cfg, out_path, beaker_dataset_id, existing_only, wandb_run_names)
 
 
 def main() -> None:
@@ -126,10 +157,24 @@ def main() -> None:
         action="store_true",
         help="Only rewrite fine-tuning configs that already exist.",
     )
+    parser.add_argument(
+        "--skip-wandb",
+        action="store_true",
+        help=(
+            f"Skip configs whose run name already exists in "
+            f"{WANDB_ENTITY}/{WANDB_PROJECT}."
+        ),
+    )
     args = parser.parse_args()
 
     with open(args.source_map) as f:
         source_map: dict[str, str] | None = json.load(f)
+
+    wandb_run_names: set[str] | None = None
+    if args.skip_wandb:
+        print(f"Fetching run names from {WANDB_ENTITY}/{WANDB_PROJECT}...")
+        wandb_run_names = _fetch_wandb_run_names()
+        print(f"Found {len(wandb_run_names)} existing runs.")
 
     source_configs = sorted(
         p
@@ -146,6 +191,7 @@ def main() -> None:
             args.epochs,
             args.lr,
             args.existing_only,
+            wandb_run_names,
         )
 
 

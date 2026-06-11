@@ -88,6 +88,7 @@ def _apply_common_settings(
         step_cfg.pop("input_dropout", None)
     if not noise_conditioning:
         step_cfg["builder"]["config"]["noise_embed_dim"] = 0
+        step_cfg["builder"]["config"]["noise_type"] = "gaussian"
     step_cfg["residual_prediction"] = False
     step_cfg["include_channel_mask_inputs"] = True
     if gmr_on:
