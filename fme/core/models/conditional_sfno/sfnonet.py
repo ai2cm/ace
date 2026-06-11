@@ -89,6 +89,13 @@ class SFNONetConfig:
             the l=0 (global mean) spherical harmonic coefficient, so that
             global mean changes can only result from local operations
             (norms, MLPs, skip connections).
+        clip_latent_global_means: If True, the per-channel spatial mean of the
+            post-encoder latent representation is tracked during training and,
+            during eval, the latent is shifted so that mean falls within the
+            observed envelope (a no-op for inputs whose mean is already
+            inside it). The envelope is reset at the start of each training
+            epoch (lazily, on the next training-mode forward) via
+            ``request_latent_global_mean_envelope_reset``.
     """
 
     embed_dim: int = 256
@@ -117,6 +124,7 @@ class SFNONetConfig:
     spectral_lora_rank: int = 0
     spectral_lora_alpha: float | None = None
     filter_preserves_global_mean: bool = False
+    clip_latent_global_means: bool = False
 
 
 # heuristic for finding theta_cutoff
@@ -689,10 +697,36 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         else:
             self.norm_big_skip = NoLayerNorm()
 
+        self._clip_latent_global_means = params.clip_latent_global_means
+        if self._clip_latent_global_means:
+            self.register_buffer(
+                "_gm_min",
+                torch.full((1, self.embed_dim, 1, 1), float("inf")),
+            )
+            self.register_buffer(
+                "_gm_max",
+                torch.full((1, self.embed_dim, 1, 1), float("-inf")),
+            )
+            # Lazy reset flag: when True, the next training-mode forward
+            # fills the envelope with sentinels before applying its own
+            # update. Kept as a plain attribute (not a buffer) so it does
+            # not persist across checkpoint round-trips; the trainer is
+            # responsible for re-requesting a reset at epoch boundaries.
+            self._gm_reset_pending: bool = False
+
     @torch.jit.ignore
     def no_weight_decay(self):  # pragma: no cover
         """Helper"""
         return {"pos_embed", "cls_token"}
+
+    def request_latent_global_mean_envelope_reset(self) -> None:
+        """Mark the envelope to be reset on the next training-mode forward.
+
+        The reset is lazy so that any eval/inference calls between this
+        request and the next training forward still use the prior envelope.
+        """
+        if self._clip_latent_global_means:
+            self._gm_reset_pending = True
 
     def _forward_features(self, x: torch.Tensor, context: Context):
         for blk in self.blocks:
@@ -720,6 +754,30 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         # maybe clean the padding just in case
 
         x = self.pos_drop(x)
+
+        if self._clip_latent_global_means:
+            global_means = x.mean(dim=(-2, -1), keepdim=True)
+            if self.training:
+                with torch.no_grad():
+                    if self._gm_reset_pending:
+                        self._gm_min.fill_(float("inf"))
+                        self._gm_max.fill_(float("-inf"))
+                        self._gm_reset_pending = False
+                    batch_min = global_means.detach().amin(dim=0, keepdim=True)
+                    batch_max = global_means.detach().amax(dim=0, keepdim=True)
+                    dist = Distributed.get_instance()
+                    dist.reduce_min(batch_min)
+                    dist.reduce_max(batch_max)
+                    self._gm_min.copy_(torch.minimum(self._gm_min, batch_min))
+                    self._gm_max.copy_(torch.maximum(self._gm_max, batch_max))
+            elif torch.isfinite(self._gm_max).all():
+                clipped = torch.clamp(global_means, min=self._gm_min, max=self._gm_max)
+                # Shift x by the clip residual so its per-channel spatial
+                # mean falls within the envelope observed during the most
+                # recent training epoch (the envelope is reset each epoch,
+                # so a loaded checkpoint carries its final epoch's envelope).
+                # No-op when the mean is already inside the envelope.
+                x = x + (clipped - global_means)
 
         x = self._forward_features(x, context)
 
