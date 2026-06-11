@@ -4,6 +4,7 @@
 
 import abc
 import math
+from typing import final
 
 import torch
 
@@ -39,6 +40,7 @@ class FilterBasis(metaclass=abc.ABCMeta):
         else:
             return f"{class_name}()"
 
+    @final
     def extra_repr(self):
         return f"kernel_shape={self.kernel_shape}"
 

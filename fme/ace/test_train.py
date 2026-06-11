@@ -36,7 +36,7 @@ from fme.ace.registry.test_hpx import (
     up_sampling_block_config,
 )
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
-from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
+from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig
 from fme.ace.stepper.single_module import (
     CheckpointStepperConfig,
     StepperConfig,
@@ -54,7 +54,7 @@ from fme.ace.testing import (
     MonthlyReferenceData,
     patch_cm4_solar_constant,
     save_nd_netcdf,
-    save_scalar_netcdf,
+    save_stats_netcdfs,
     save_stepper_checkpoint,
 )
 from fme.ace.train.train import build_trainer, prepare_directory
@@ -183,6 +183,11 @@ def _get_test_yaml_files(
             output_layer,
             n_channels=[4, 8, 16],
         )
+        # HEALPix conv padding equals the dilation, and padding cannot exceed
+        # the face size. The deepest UNet level has 2x2 faces for the 8x8
+        # test data, so dilations must be capped at 2.
+        encoder = dataclasses.replace(encoder, dilations=[1, 2, 2])
+        decoder = dataclasses.replace(decoder, dilations=[2, 2, 1])
         net_config = dict(
             encoder=encoder,
             decoder=decoder,
@@ -488,7 +493,6 @@ def _setup(
     derived_forcings=None,
     use_schedule: bool = False,
     validate_using_ema: bool = False,
-    stats_std_fill_value: float | None = None,
     multi_validation: bool = False,
     use_variable_masking: bool = False,
 ):
@@ -519,8 +523,8 @@ def _setup(
     if use_healpix:
         hpx_coords = HEALPixCoordinates(
             face=torch.Tensor(np.arange(12)),
-            width=torch.Tensor(np.arange(16)),
-            height=torch.Tensor(np.arange(16)),
+            width=torch.Tensor(np.arange(8)),
+            height=torch.Tensor(np.arange(8)),
         )
         dim_sizes = get_sizes(spatial_dims=hpx_coords, n_time=n_time)
     else:
@@ -553,14 +557,10 @@ def _setup(
             variable_names=partial_names,
             timestep_days=timestep_days,
         )
-    save_scalar_netcdf(
+    save_stats_netcdfs(
         stats_dir / "stats-mean.nc",
-        variable_names=all_variable_names,
-    )
-    save_scalar_netcdf(
         stats_dir / "stats-stddev.nc",
         variable_names=all_variable_names,
-        fill_value=stats_std_fill_value,
     )
 
     monthly_dim_sizes: DimSizes
@@ -627,6 +627,7 @@ _TRAIN_AND_INFERENCE_CASES = [
             nettype="NoiseConditionedSFNO",
             crps_training=True,
             use_schedule=True,
+            validate_using_ema=True,
         ),
         id="SFNO-crps-schedule",
     ),
@@ -658,15 +659,6 @@ _TRAIN_AND_INFERENCE_CASES = [
             "ignore:Metadata for each ensemble member:UserWarning"
         ),
     ),
-    pytest.param(
-        TrainAndInferenceTestSettings(
-            nettype="NoiseConditionedSFNO",
-            crps_training=True,
-            use_schedule=True,
-            validate_using_ema=True,
-        ),
-        id="SFNO-crps-schedule-ema",
-    ),
 ]
 
 
@@ -679,14 +671,19 @@ def test_train_and_inference(
     """Ensure that training and standalone inference run without errors."""
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
-    # need multi-year to cover annual aggregator
+    # Inline inference must reach forward step 20 for the default step-20
+    # metrics, and the annual aggregator requires more than 730 days of
+    # inference data. 20 forward steps (even, as required by
+    # forward_steps_in_memory=2) at 40-day spacing gives 21 timesteps
+    # spanning 840 days and three calendar years. Two initial conditions at
+    # indices 0 and 1 require two extra timesteps of data on disk.
     train_config, inference_config = _setup(
         tmp_path,
         settings.nettype,
         log_to_wandb=True,
-        timestep_days=20,
-        n_time=int(366 * 3 / 20 + 1),
-        inference_forward_steps=int(366 * 3 / 20 / 2 - 1) * 2,  # must be even
+        timestep_days=40,
+        n_time=22,
+        inference_forward_steps=20,
         use_healpix=settings.use_healpix,
         crps_training=settings.crps_training,
         save_per_epoch_diagnostics=True,
@@ -1072,9 +1069,9 @@ def test_train_without_inline_inference(tmp_path, very_fast_only: bool):
         tmp_path,
         nettype,
         log_to_wandb=True,
-        timestep_days=20,
-        n_time=int(366 * 3 / 20 + 1),
-        inference_forward_steps=int(366 * 3 / 20 / 2 - 1) * 2,  # must be even
+        timestep_days=40,
+        n_time=22,
+        inference_forward_steps=20,  # must be even
         use_healpix=False,
         crps_training=crps_training,
         save_per_epoch_diagnostics=True,
@@ -1098,28 +1095,17 @@ def test_train_without_inline_inference(tmp_path, very_fast_only: bool):
 
 
 @pytest.mark.skipif(torch.cuda.is_available(), reason="flaky on GPU")
-@pytest.mark.parametrize(
-    "insolation_config",
-    [
-        pytest.param(
-            InsolationConfig("DSWRFtoa", ValueConfig(1360.0)),
-            id="solar-constant-as-value",
-        ),
-        pytest.param(
-            InsolationConfig("DSWRFtoa", NameConfig("solar_constant")),
-            id="solar-constant-as-name",
-        ),
-    ],
-)
-def test_train_and_inference_with_derived_forcings(
-    tmp_path, insolation_config: InsolationConfig, very_fast_only: bool
-):
+def test_train_and_inference_with_derived_forcings(tmp_path, very_fast_only: bool):
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
 
     nettype = "SphericalFourierNeuralOperatorNet"
     crps_training = False
     log_validation_maps = False
+    # The solar-constant-as-name case exercises the more complex path (loading
+    # the solar constant from data on disk); the as-value alternative is
+    # covered by unit tests in test_insolation.py and test_derived_forcings.py.
+    insolation_config = InsolationConfig("DSWRFtoa", NameConfig("solar_constant"))
     derived_forcings = DerivedForcingsConfig(insolation_config)
     train_config, inference_config = _setup(
         tmp_path,
@@ -1132,7 +1118,6 @@ def test_train_and_inference_with_derived_forcings(
         crps_training=crps_training,
         log_validation_maps=log_validation_maps,
         derived_forcings=derived_forcings,
-        stats_std_fill_value=1.0,
     )
     with patch_cm4_solar_constant(1.0):
         with mock_wandb() as wandb:

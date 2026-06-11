@@ -1,3 +1,5 @@
+import dataclasses
+import re
 from collections.abc import Collection, Mapping
 from typing import Any
 
@@ -50,6 +52,50 @@ def _get_map_caption(key: str, data: torch.Tensor) -> str:
     vmin, vmax = data.min(), data.max()
     caption = f"{key},  mean: {avg:.4g}, min: {vmin:.4g}, max: {vmax:.4g}"
     return caption
+
+
+def _get_complement_percentile_prefix(prefix):
+    """
+    Given a prefix containing a percentile value, return a prefix with
+    100 minus that percentile. Returns None if no percentile pattern is found.
+    Ex. "prediction_frac_of_target/99.9999th-percentile"
+        -> "prediction_frac_of_target/0.0001th-percentile", or
+        "some_var/percentile/99.9999" -> "some_var/percentile/0.0001".
+    """
+    match = re.search(
+        r"(\d+(?:\.\d+)?)(?:th)?[-_/]percentile|percentile[-_/](\d+(?:\.\d+)?)",
+        prefix,
+    )
+    if match is None:
+        return None
+    if match.group(1) is not None:
+        num_str = match.group(1)
+        num_start, num_end = match.start(1), match.end(1)
+    else:
+        num_str = match.group(2)
+        num_start, num_end = match.start(2), match.end(2)
+    complement = 100 - float(num_str)
+    if "." in num_str:
+        decimal_places = len(num_str.split(".")[1])
+        complement_str = f"{complement:.{decimal_places}f}"
+    else:
+        complement_str = str(int(complement))
+    return prefix[:num_start] + complement_str + prefix[num_end:]
+
+
+def _get_channel_mean_scalar_metric(metrics, prefix="metrics/relative_crps_bicubic"):
+    # This ensures that left tailed extreme values are also considered
+    # in checkpoint selection if 99.x percentile is used as metric
+    prefixes = [prefix]
+    if "percentile" in prefix:
+        complement = _get_complement_percentile_prefix(prefix)
+        if complement is not None and complement != prefix:
+            prefixes.append(complement)
+    channel_metric = [v for k, v in metrics.items() if any(p in k for p in prefixes)]
+    if len(channel_metric) == 0:
+        return float("inf")
+    else:
+        return sum(channel_metric) / len(channel_metric)
 
 
 class RelativeCRPSInterpAggregator:
@@ -266,6 +312,10 @@ class GenerationAggregator:
         ssim_kwargs: Mapping[str, Any] | None = None,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
         include_positional_comparisons: bool = True,
+        histogram_ckpt_selection_metric: str = (
+            "histogram/prediction_frac_of_target/99.9999th-percentile"
+        ),
+        best_ckpt_selection_metric: str = "metrics/relative_crps_bicubic",
     ) -> None:
         self._agg = Aggregator(
             dims,
@@ -301,6 +351,9 @@ class GenerationAggregator:
             self._single_sample_aggregators.append(
                 MeanMapAggregator(variable_metadata, name="single_sample_time_mean")
             )
+        self._histogram_ckpt_selection_metric = histogram_ckpt_selection_metric
+        self._best_ckpt_selection_metric = best_ckpt_selection_metric
+        self._wandb_logs: Mapping[str, Any] | None = None
 
     @torch.no_grad()
     def record_batch(
@@ -341,16 +394,17 @@ class GenerationAggregator:
         """
         Get the wandb output to log from all sub aggregators.
         """
-        ret = {**self._agg.get_wandb(prefix)}
-        for comparison in self._probabilistic_comparisons:
-            ret.update(comparison.get_wandb(prefix))
-        for coarse_comparison in self._probabilistic_coarse_comparisons:
-            ret.update(coarse_comparison.get_wandb(prefix))
-        ret.update(self._latent_step_aggregator.get_wandb(prefix))
-        for single_sample_record in self._single_sample_aggregators:
-            ret.update(single_sample_record.get_wandb(prefix))
-
-        return ret
+        if self._wandb_logs is None:
+            ret = {**self._agg.get_wandb(prefix)}
+            for comparison in self._probabilistic_comparisons:
+                ret.update(comparison.get_wandb(prefix))
+            for coarse_comparison in self._probabilistic_coarse_comparisons:
+                ret.update(coarse_comparison.get_wandb(prefix))
+            ret.update(self._latent_step_aggregator.get_wandb(prefix))
+            for single_sample_record in self._single_sample_aggregators:
+                ret.update(single_sample_record.get_wandb(prefix))
+            self._wandb_logs = ret
+        return self._wandb_logs
 
     def get_dataset(self) -> xr.Dataset:
         """
@@ -362,3 +416,45 @@ class GenerationAggregator:
             if hasattr(agg, "get_dataset"):
                 ds = ds.merge(agg.get_dataset())
         return ds
+
+    def get_summary(self, prefix: str = "") -> "GenerationSummary":
+        logs = self.get_wandb(prefix)
+        return GenerationSummary(
+            logs=logs,
+            validation_loss=self.get_validation_loss(),
+            histogram_tail_metric=self.get_histogram_tail_metric(),
+        )
+
+    def get_validation_loss(self) -> float:
+        """Scalar to minimize for best-validation checkpoint selection."""
+        return _get_channel_mean_scalar_metric(
+            self.get_wandb(),
+            self._best_ckpt_selection_metric,
+        )
+
+    def get_histogram_tail_metric(self) -> float:
+        """Scalar to minimize for best-histogram-tail checkpoint selection."""
+        value = _get_channel_mean_scalar_metric(
+            self.get_wandb(),
+            self._histogram_ckpt_selection_metric,
+        )
+        if "frac_of_target" in self._histogram_ckpt_selection_metric:
+            # frac_of_target metrics are best at 1.0, not 0.0
+            value = abs(1.0 - value)
+        return value
+
+
+@dataclasses.dataclass
+class GenerationSummary:
+    """Summary returned by GenerationAggregator.
+
+    Attributes:
+        logs: Metrics dict suitable for wandb logging.
+        validation_loss: Scalar to minimize for best-validation checkpoint.
+        histogram_tail_metric: Scalar to minimize for best-histogram-tail
+            checkpoint.
+    """
+
+    logs: Mapping[str, Any]
+    validation_loss: float
+    histogram_tail_metric: float
