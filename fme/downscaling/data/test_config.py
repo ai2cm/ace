@@ -288,14 +288,26 @@ def test_PairedDataLoaderConfig_includes_merge(tmp_path, very_fast_only: bool):
     assert batch.fine.data["var0"].shape == (2, 6, 6)
 
 
-def test_PairedDataLoaderConfig_prime_meridian_crossing(tmp_path):
-    """PairedDataLoaderConfig must not fail on a prime merdidian crossing
+@pytest.mark.parametrize(
+    "scale_factor",
+    [
+        pytest.param(2, id="even-factor"),
+        pytest.param(3, id="odd-factor-half-cell-anchor"),
+    ],
+)
+def test_PairedDataLoaderConfig_prime_meridian_crossing(tmp_path, scale_factor):
+    """PairedDataLoaderConfig must not fail on a prime meridian crossing
     in the longitude coordinates.  To pass, the fine and coarse
     datasets must be correctly rolled such that the subset preserves the
     scale factor between them.
-    """
 
-    scale_factor = 2
+    The odd scale factor is the non-trivial case: the config rolls the fine
+    grid using a half-coarse-cell anchor, while HorizontalSubsetDataset
+    re-derives its roll from the adjusted fine extent (an integer number of
+    fine cells). For odd factors these anchors differ by half a fine cell, so
+    this guards that the two independent rolls still agree (see
+    _roll_lons_to_extent_convention).
+    """
     paths = global_data_paths_helper(tmp_path, scale_factor=scale_factor)
     requirements = DataRequirements(
         fine_names=["var0"],
