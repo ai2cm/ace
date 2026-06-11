@@ -46,6 +46,7 @@ UNITS = {
     "eastward_wind_at_ten_meters": "m/s",
     "northward_wind_at_ten_meters": "m/s",
     "wind_speed": "m/s",
+    "air_temperature_at_two_meters": "K",
 }
 
 
@@ -139,7 +140,7 @@ def get_coarse_data(path: str | None, time_sel: slice | None = TIME_SEL) -> xr.D
         prate = xr.open_zarr(f"{gcs_root}/fluxes_2d.zarr").sel(time=time_sel)[
             "PRATEsfc"
         ]
-        prmsl = xr.open_zarr(f"{gcs_root}/PRMSL").sel(time=time_sel)["PRMSL"]
+        prmsl = xr.open_zarr(f"{gcs_root}/PRMSL.zarr").sel(time=time_sel)["PRMSL"]
         return xr.merge([phys, prate, prmsl])
 
 
