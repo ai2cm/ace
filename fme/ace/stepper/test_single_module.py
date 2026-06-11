@@ -2608,7 +2608,7 @@ def test_train_on_batch_masked_output_only_variable_has_zero_loss_count():
 
 
 def test_train_on_batch_masked_forcing_repeats_mask_across_ensemble():
-    """NaN forcing for a masked sample does not produce NaN loss in ensemble training."""
+    """NaN forcing for a masked sample does not produce NaN loss in ensemble."""
     n_samples, n_ensemble = 2, 2
     data = get_data(["a", "b"], n_samples=n_samples, n_time=2).data
     data.data["b"][1] = torch.nan
