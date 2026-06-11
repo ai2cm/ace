@@ -1736,7 +1736,7 @@ class TestBuildInferenceCallback:
         return InferenceTask(
             name=name,
             data=data,
-            aggregator_factory=lambda: aggregator,
+            aggregator_factory=lambda epoch: aggregator,
             epoch_set=epoch_set,
             weight=weight,
         )
