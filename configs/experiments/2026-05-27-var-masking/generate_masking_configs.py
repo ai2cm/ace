@@ -51,6 +51,7 @@ N_FORWARD_STEPS = [1, 2]
 # (name_suffix, input_dropout_config_or_None)
 MASK_CONFIGS: list[tuple[str, dict | None]] = [
     ("mask10", {"kind": "uniform", "min_vars": 1, "max_vars": 10}),
+    ("mask5", {"kind": "uniform", "min_vars": 1, "max_vars": 5}),
     ("mask0", None),
 ]
 
@@ -200,10 +201,7 @@ def generate_configs(
                                 iid=iid,
                                 noise_conditioning=noise_conditioning,
                             )
-                            if not noise_conditioning:
-                                cfg["optimization"]["max_grad_norm"] = 0.3
-                            else:
-                                cfg["optimization"].pop("max_grad_norm", None)
+                            cfg["optimization"].pop("max_grad_norm", None)
                             cfg["stepper_training"]["n_forward_steps"] = n_steps
                             loss_type = cfg["stepper_training"]["loss"]["type"]
                             cfg["stepper_training"]["optimize_last_step_only"] = (
