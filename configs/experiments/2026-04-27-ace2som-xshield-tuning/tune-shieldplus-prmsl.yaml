@@ -22,7 +22,7 @@ inference:
         - '2036-01-01T00:00:00'
       dataset:
         data_path: /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset
-        file_pattern: 1xCO2-ic_0003.zarr
+        file_pattern: 1xCO2-ic_0004.zarr
         engine: zarr
       num_data_workers: 1
     aggregator:
@@ -43,7 +43,7 @@ inference:
         - '2036-01-01T00:00:00'
       dataset:
         data_path: /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset
-        file_pattern: 2xCO2-ic_0003.zarr
+        file_pattern: 2xCO2-ic_0004.zarr
         engine: zarr
       num_data_workers: 1
     aggregator:
@@ -64,7 +64,7 @@ inference:
         - '2036-01-01T00:00:00'
       dataset:
         data_path: /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset
-        file_pattern: 4xCO2-ic_0003.zarr
+        file_pattern: 4xCO2-ic_0004.zarr
         engine: zarr
       num_data_workers: 1
     aggregator:
