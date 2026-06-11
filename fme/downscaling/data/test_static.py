@@ -3,14 +3,13 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
 
 from .static import StaticInput, StaticInputs, _load_coords_from_ds
 
 
 def _make_coords(n=4):
-    from fme.core.coordinates import LatLonCoordinates
-
     return LatLonCoordinates(
         lat=torch.arange(n, dtype=torch.float32),
         lon=torch.arange(n, dtype=torch.float32),
@@ -182,8 +181,6 @@ def test__load_coords_from_ds():
 
 def test_StaticInputs_roll_shifts_data_and_coords():
     """StaticInputs.roll produces correctly rolled data and monotonic shifted coords."""
-    from fme.core.coordinates import LatLonCoordinates
-
     # 1-degree global grid: 0.5, 1.5, ..., 359.5
     n_lon = 360
     lon = torch.arange(n_lon, dtype=torch.float32) + 0.5
