@@ -246,11 +246,10 @@ def _compute_ocean_vertical_coarsening(
 ) -> xr.Dataset:
     """Thickness-weighted vertical coarsening of 3-D ocean variables.
 
-    Returns a flat Dataset with per-level 2-D fields, masks, and depth
-    scalars — ready for direct merging into the output.
+    Returns a flat Dataset with per-level 2-D fields and passthrough
+    2-D variables.  Masks and depth scalars are handled separately
+    by ``_extract_invariant_fields`` and ``_build_per_level_masks``.
     """
-    depths = ds[vdim].values
-
     coarsened: dict[str, xr.DataArray] = {}
 
     for i, (start, end) in enumerate(interface_indices):
@@ -265,39 +264,12 @@ def _compute_ocean_vertical_coarsening(
             coarsened_da.attrs["long_name"] = f"{long_name} level-{i}"
             coarsened[f"{name}_{i}"] = coarsened_da
 
-        # Per-level mask from coarsened data validity
-        ref = None
-        for vn in vars_3d:
-            key = f"{vn}_{i}"
-            if key in coarsened:
-                ref = coarsened[key]
-                break
-        if ref is not None:
-            mask_i = ref.isel(time=0).notnull().astype(np.float32)
-        else:
-            ho_total = ho_slice.sum(vdim, skipna=True)
-            mask_i = (ho_total.isel(time=0) > 0).astype(np.float32)
-        mask_i.attrs = {"long_name": f"ocean mask level-{i}"}
-        coarsened[f"mask_{i}"] = mask_i
-
-        level_depths = depths[start:end]
-        coarsened[f"idepth_{i}"] = xr.DataArray(
-            float(np.mean(level_depths)),
-            attrs={"units": "meters", "long_name": f"Depth at level-{i}"},
-        )
-
     # Pass through 2-D variables
     for name in ds.data_vars:
         if name in vars_3d or name == thickness_name:
             continue
         if vdim not in ds[name].dims:
             coarsened[name] = ds[name]
-
-    # Surface mask + related fields
-    mask_2d = coarsened["mask_0"].astype(np.float32)
-    mask_2d.attrs = {"long_name": "ocean mask", "units": "0 if land, 1 if ocean"}
-    coarsened["mask_2d"] = mask_2d
-    coarsened.update(_build_land_sea_fractions(mask_2d))
 
     return xr.Dataset(coarsened)
 
@@ -636,6 +608,14 @@ def _process_chunk(
         VDIM,
     )
 
+    # Add per-level masks, surface mask, and land/sea fractions using
+    # the shared helpers (single source of mask generation logic).
+    level_masks = _build_per_level_masks(mask_3d, VDIM, vertical_coarsening_indices)
+    for name, mask_da in level_masks.items():
+        ds_levels[name] = mask_da
+    ds_levels["mask_2d"] = mask_2d
+    ds_levels.update(_build_land_sea_fractions(mask_2d))
+
     # Collect 2-D ocean variables
     ocean_2d_names = [
         n
@@ -783,10 +763,6 @@ def _process_chunk(
         stray = [c for c in d.coords if c not in keep_coords and c not in d.dims]
         cleaned.append(d.drop_vars(stray) if stray else d)
     ds = xr.merge(cleaned, join="inner")
-
-    if "land_fraction" not in ds:
-        fractions = _build_land_sea_fractions(mask_2d)
-        ds["land_fraction"] = fractions["land_fraction"]
 
     # --- Insert NaN on land ---
     # Atmospheric forcing variables are valid globally (FV3 is a global
