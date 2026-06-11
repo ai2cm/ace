@@ -183,7 +183,11 @@ while read TRAIN_EXPER; do
     fi
 
     # Validate config (use relative path)
-    python -m $FME_MODULE_VALIDATE --config_type evaluator "$CONFIG_PATH_REL" --override $OVERRIDE_ARGS
+    # Re-tokenize OVERRIDE_ARGS via eval so single quotes in the input file group
+    # list/dict values with spaces into single argv elements (literal quotes read
+    # from the file are otherwise ignored by word-splitting).
+    eval "OVERRIDE_ARGV=($OVERRIDE_ARGS)"
+    python -m $FME_MODULE_VALIDATE --config_type evaluator "$CONFIG_PATH_REL" --override "${OVERRIDE_ARGV[@]}"
 
     # Run gantry command unless in dry-run mode
     if [[ "$DRY_RUN" != "true" ]]; then
@@ -210,7 +214,7 @@ while read TRAIN_EXPER; do
             --budget ai2/atec-climate \
             --system-python \
             --install "pip install --no-deps ." \
-            -- python -I -m $FME_MODULE_EVALUATOR "$CONFIG_PATH_REL" --override $OVERRIDE_ARGS
+            -- python -I -m $FME_MODULE_EVALUATOR "$CONFIG_PATH_REL" --override "${OVERRIDE_ARGV[@]}"
         echo
     fi
 done <"$INPUT_PATH"
