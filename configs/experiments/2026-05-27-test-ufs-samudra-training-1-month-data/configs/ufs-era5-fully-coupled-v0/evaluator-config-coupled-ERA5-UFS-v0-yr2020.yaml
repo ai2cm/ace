@@ -39,7 +39,24 @@ aggregator:
 data_writer:
   ocean:
     save_prediction_files: false
-    save_monthly_files: false
+    save_monthly_files: true
+    names:
+    - sst
+    - zos
+    - thetao_0
+    - vo_0
+    - uo_0
   atmosphere:
     save_prediction_files: false
-    save_monthly_files: false
+    save_monthly_files: true
+    names:
+    - DLWRFsfc
+    - DSWRFsfc
+    - ULWRFsfc
+    - USWRFsfc
+    - LHTFLsfc
+    - SHTFLsfc
+    - PRATEsfc
+    - eastward_surface_stress
+    - northward_surface_stress
+    - total_frozen_precipitation_rate

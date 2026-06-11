@@ -17,6 +17,21 @@ OUTPUT_DIR = (
     "./configs/ufs-era5-fully-coupled-v0"  # os.path.dirname(os.path.abspath(__file__))
 )
 
+# Samudra next_step_forcing_names, using ACE atmosphere output names
+# (wind stress renamed from *_surface_wind_stress to *_surface_stress).
+SAMUDRA_ATMOSPHERE_FLUX_NAMES = [
+    "DLWRFsfc",
+    "DSWRFsfc",
+    "ULWRFsfc",
+    "USWRFsfc",
+    "LHTFLsfc",
+    "SHTFLsfc",
+    "PRATEsfc",
+    "eastward_surface_stress",
+    "northward_surface_stress",
+    "total_frozen_precipitation_rate",
+]
+
 # ==============================
 # HELPERS
 # ==============================
@@ -106,11 +121,19 @@ def make_config(times):
         "data_writer": {
             "ocean": {
                 "save_prediction_files": False,
-                "save_monthly_files": False,
+                "save_monthly_files": True,
+                "names": [
+                    "sst",
+                    "zos",
+                    "thetao_0",
+                    "vo_0",
+                    "uo_0",
+                ],
             },
             "atmosphere": {
                 "save_prediction_files": False,
-                "save_monthly_files": False,
+                "save_monthly_files": True,
+                "names": SAMUDRA_ATMOSPHERE_FLUX_NAMES,
             },
         },
     }
