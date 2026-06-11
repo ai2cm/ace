@@ -57,9 +57,6 @@ class SwinTransformerBuilder(ModuleConfig):
             a scalar embedding requires a wrapper that populates
             ``context.embedding_scalar`` (analogous to ``NoiseConditionedModel``
             for diffusion timesteps), which does not yet exist; leave at 0.
-        embed_dim_labels: Label conditioning dimension. When 0 and the dataset
-            has labels, it defaults to the number of labels, which is the
-            dimension the registry feeds the model.
         use_cpb_scaling: When True (default), requires 1D latitude coordinates
             and applies cos-lat scaling to CPB longitude offsets. Set to False
             to use plain log-spaced CPB offsets (Swin V2 style) without a
@@ -75,7 +72,6 @@ class SwinTransformerBuilder(ModuleConfig):
     use_skip: bool = True
     mlp_layer: str = "mlp"
     embed_dim_scalar: int = 0
-    embed_dim_labels: int = 0
     cpb_hidden_dim: int = 64
     padding_conf: TensorPaddingConfig | None = None
     use_cpb_scaling: bool = True
@@ -90,31 +86,10 @@ class SwinTransformerBuilder(ModuleConfig):
         n_out_channels: int,
         dataset_info: DatasetInfo,
     ) -> nn.Module:
-        return self._build(
-            n_in_channels=n_in_channels,
-            n_out_channels=n_out_channels,
-            dataset_info=dataset_info,
-            enable_label_conditioning=len(dataset_info.all_labels) > 0
-            or self.embed_dim_labels > 0,
-        )
-
-    def _build(
-        self,
-        n_in_channels: int,
-        n_out_channels: int,
-        dataset_info: DatasetInfo,
-        enable_label_conditioning: bool,
-    ) -> nn.Module:
         n_labels = len(dataset_info.all_labels)
-        embed_dim_labels = self.embed_dim_labels
-        if not enable_label_conditioning:
-            embed_dim_labels = 0
-        elif n_labels > 0 and embed_dim_labels == 0:
-            # The registry feeds one-hot labels of dimension n_labels.
-            embed_dim_labels = n_labels
         context_config = ContextConfig(
             embed_dim_scalar=self.embed_dim_scalar,
-            embed_dim_labels=embed_dim_labels,
+            embed_dim_labels=n_labels,
             embed_dim_noise=0,
             embed_dim_pos=0,
         )
@@ -183,8 +158,6 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             When > 0, a shared ``Linear(n_labels, label_embed_dim)`` layer maps
             one-hot labels before downstream CLN conditioning.
             When 0 (default), one-hot labels are used directly.
-            Label conditioning is enabled only when the selector is conditional,
-            or when building directly with dataset labels.
         use_cpb_scaling: When True (default), requires 1D latitude coordinates
             and applies cos-lat scaling to CPB longitude offsets. Set to False
             to use plain log-spaced CPB offsets (Swin V2 style) without a
@@ -215,28 +188,9 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
         n_out_channels: int,
         dataset_info: DatasetInfo,
     ) -> nn.Module:
-        return self._build(
-            n_in_channels=n_in_channels,
-            n_out_channels=n_out_channels,
-            dataset_info=dataset_info,
-            enable_label_conditioning=len(dataset_info.all_labels) > 0
-            or self.label_embed_dim > 0,
-        )
-
-    def _build(
-        self,
-        n_in_channels: int,
-        n_out_channels: int,
-        dataset_info: DatasetInfo,
-        enable_label_conditioning: bool,
-    ) -> nn.Module:
-        n_dataset_labels = len(dataset_info.all_labels)
-        n_labels = n_dataset_labels if enable_label_conditioning else 0
-        label_embed_dim = self.label_embed_dim if enable_label_conditioning else 0
-        if label_embed_dim > 0:
-            effective_label_dim = self.label_embed_dim
-        else:
-            effective_label_dim = n_labels
+        n_labels = len(dataset_info.all_labels)
+        label_embed_dim = self.label_embed_dim
+        effective_label_dim = label_embed_dim if label_embed_dim > 0 else n_labels
         context_config = ContextConfig(
             embed_dim_scalar=0,
             embed_dim_labels=effective_label_dim,
