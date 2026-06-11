@@ -10,10 +10,16 @@ CONFIG_PATH=${4}
 beaker dataset fetch ${EXISTING_RESULTS_ATMOS_DATASET} --prefix config.yaml
 mv ./config.yaml ./atmos-config.yaml
 sed -i '' 's/statsdata/atmos_stats/g' ./atmos-config.yaml
+yq -i '.stepper.step.config.normalization.network.global_means_path = "/atmos_stats/centering.nc"' ./atmos-config.yaml
+yq -i '.stepper.step.config.normalization.network.global_stds_path = "/atmos_stats/scaling-full-field.nc"' ./atmos-config.yaml
+yq -i '.stepper.step.config.normalization.residual.global_means_path = "/atmos_stats/centering.nc"' ./atmos-config.yaml
+yq -i '.stepper.step.config.normalization.residual.global_stds_path = "/atmos_stats/scaling-residual.nc"' ./atmos-config.yaml
 
 beaker dataset fetch ${EXISTING_RESULTS_OCEAN_DATASET} --prefix config.yaml
 mv ./config.yaml ./ocean-config.yaml
 sed -i '' 's/statsdata/ocean_stats/g' ./ocean-config.yaml
+yq -i '.stepper.step.config.normalization.network.global_means_path = "/ocean_stats/centering.nc"' ./ocean-config.yaml
+yq -i '.stepper.step.config.normalization.network.global_stds_path = "/ocean_stats/scaling-full-field.nc"' ./ocean-config.yaml
 
 # Remove training-specific fields from loaded stepper configs
 yq -i 'del(.stepper.loss, .stepper.optimize_last_step_only, .stepper.n_ensemble, .stepper.parameter_init, .stepper.train_n_forward_steps)' ./ocean-config.yaml
