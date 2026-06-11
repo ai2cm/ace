@@ -9,10 +9,12 @@ from fme.core.device import get_device
 from .static import StaticInput, StaticInputs, _load_coords_from_ds
 
 
-def _make_coords(n=4):
+def _make_coords(n=4, n_lat=None, n_lon=None, offset=0.0):
+    n_lat = n if n_lat is None else n_lat
+    n_lon = n if n_lon is None else n_lon
     return LatLonCoordinates(
-        lat=torch.arange(n, dtype=torch.float32),
-        lon=torch.arange(n, dtype=torch.float32),
+        lat=torch.arange(n_lat, dtype=torch.float32) + offset,
+        lon=torch.arange(n_lon, dtype=torch.float32) + offset,
     )
 
 
@@ -183,9 +185,7 @@ def test_StaticInputs_roll_shifts_data_and_coords():
     """StaticInputs.roll produces correctly rolled data and monotonic shifted coords."""
     # 1-degree global grid: 0.5, 1.5, ..., 359.5
     n_lon = 360
-    lon = torch.arange(n_lon, dtype=torch.float32) + 0.5
-    lat = torch.tensor([0.5], dtype=torch.float32)
-    coords = LatLonCoordinates(lat=lat, lon=lon)
+    coords = _make_coords(n_lat=1, n_lon=n_lon, offset=0.5)
     data = torch.arange(n_lon, dtype=torch.float32).unsqueeze(0)  # values = index
     static = StaticInputs(fields=[StaticInput(data)], coords=coords)
 
