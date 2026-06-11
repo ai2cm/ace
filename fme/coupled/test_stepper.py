@@ -691,6 +691,31 @@ OCN_FRAC_OSIC = CoupledOceanFractionConfig(
 )
 
 
+def test_coupled_ocean_fraction_config_uses_configured_land_fraction_name():
+    config = CoupledOceanFractionConfig(
+        sea_ice_fraction_name="ocean_sea_ice_fraction",
+        land_fraction_name="LANDFRAC",
+        sea_ice_fraction_name_in_atmosphere="ICEFRAC",
+    )
+    land_fraction = torch.tensor([0.2])
+    ocean_sea_ice_fraction = torch.tensor([0.5])
+
+    ocean_data = config.build_ocean_data(
+        forcings_from_ocean={"ocean_sea_ice_fraction": ocean_sea_ice_fraction},
+        atmos_forcing_data={"LANDFRAC": land_fraction},
+    )
+
+    torch.testing.assert_close(ocean_data.land_fraction, land_fraction)
+    torch.testing.assert_close(
+        ocean_data.sea_ice_fraction,
+        ocean_sea_ice_fraction * (1 - land_fraction),
+    )
+    torch.testing.assert_close(
+        ocean_data.ocean_fraction,
+        1 - land_fraction - ocean_sea_ice_fraction * (1 - land_fraction),
+    )
+
+
 # Shared parametrization data for testing various data requirements
 DATA_REQUIREMENTS_TEST_CASES = [
     pytest.param(

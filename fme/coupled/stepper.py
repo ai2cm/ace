@@ -41,7 +41,7 @@ from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.loss import StepLossConfig
 from fme.core.ocean import OceanConfig
-from fme.core.ocean_data import OceanData
+from fme.core.ocean_data import OCEAN_FIELD_NAME_PREFIXES, OceanData
 from fme.core.optimization import NullOptimization
 from fme.core.tensors import add_ensemble_dim, unfold_ensemble_dim
 from fme.core.timing import GlobalTimer
@@ -151,7 +151,18 @@ class CoupledOceanFractionConfig:
         # fill nans with 0s
         sea_ice_frac = torch.nan_to_num(forcings_from_ocean[sea_ice_frac_name])
         land_frac = atmos_forcing_data[land_frac_name]
-        return OceanData({land_frac_name: land_frac, sea_ice_frac_name: sea_ice_frac})
+        ocean_field_name_prefixes = {
+            k: list(v) for k, v in OCEAN_FIELD_NAME_PREFIXES.items()
+        }
+        ocean_field_name_prefixes["land_fraction"] = [land_frac_name]
+        if sea_ice_frac_name == "sea_ice_fraction":
+            ocean_field_name_prefixes["sea_ice_fraction"] = [sea_ice_frac_name]
+        else:
+            ocean_field_name_prefixes["ocean_sea_ice_fraction"] = [sea_ice_frac_name]
+        return OceanData(
+            {land_frac_name: land_frac, sea_ice_frac_name: sea_ice_frac},
+            ocean_field_name_prefixes=ocean_field_name_prefixes,
+        )
 
 
 def _load_stepper_weights_and_history_factory(
