@@ -90,6 +90,7 @@ class Optimization(OptimizationABC):
         get_checkpoint: Callable[
             [int], Checkpoint | NoCheckpoint
         ] = lambda _: NoCheckpoint(),
+        max_grad_norm: float | None = None,
     ):
         if optimizer_type == "FusedAdam":
             self.optimizer = torch.optim.AdamW(parameters, lr=lr, fused=True, **kwargs)
@@ -108,6 +109,7 @@ class Optimization(OptimizationABC):
         self._accumulated_loss = torch.tensor(0.0, device=get_device())
         self._use_gradient_accumulation = use_gradient_accumulation
         self._get_checkpoint = get_checkpoint
+        self._max_grad_norm = max_grad_norm
 
     def checkpoint(self, module: nn.Module, step: int) -> nn.Module:
         return self._get_checkpoint(step)(module)
@@ -176,6 +178,15 @@ class Optimization(OptimizationABC):
         else:
             loss.backward()
 
+    def _clip_gradients(self):
+        if self._max_grad_norm is not None:
+            if self.gscaler is not None:
+                self.gscaler.unscale_(self.optimizer)
+            params = itertools.chain.from_iterable(
+                group["params"] for group in self.optimizer.param_groups
+            )
+            torch.nn.utils.clip_grad_norm_(params, self._max_grad_norm)
+
     def _step_weights(self):
         if self.gscaler is not None:
             self.gscaler.step(self.optimizer)
@@ -185,6 +196,7 @@ class Optimization(OptimizationABC):
     def step_weights(self):
         if not self._use_gradient_accumulation:
             self._backward(self._accumulated_loss)
+        self._clip_gradients()
         self._step_weights()
         self.optimizer.zero_grad()
         if self.gscaler is not None:
@@ -288,6 +300,10 @@ class OptimizationConfig:
             to accumulate gradients differently when this is enabled, such as by
             detaching the computational graph between steps. See the documentation of
             your stepper (e.g. Stepper) for more details.
+        max_grad_norm: Maximum norm for gradient clipping. If None, no gradient
+            clipping is applied. When set, gradients are clipped to this global
+            norm before each optimizer step. Compatible with automatic mixed
+            precision.
         resume_optimizer_ckpt_path: Optional path to a training checkpoint
             (``ckpt.tar``) whose per-parameter optimizer running state (e.g.
             Adam moment estimates) and grad scaler state should be loaded into
@@ -306,6 +322,7 @@ class OptimizationConfig:
         default_factory=lambda: SchedulerConfig()
     )
     use_gradient_accumulation: bool = False
+    max_grad_norm: float | None = None
     checkpoint: CheckpointConfig = dataclasses.field(
         default_factory=lambda: CheckpointConfig()
     )
@@ -337,6 +354,7 @@ class OptimizationConfig:
             kwargs=self.kwargs,
             use_gradient_accumulation=self.use_gradient_accumulation,
             get_checkpoint=self.checkpoint.build,
+            max_grad_norm=self.max_grad_norm,
         )
         if self.resume_optimizer_ckpt_path is not None:
             _load_finetune_optimization_state(

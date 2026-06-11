@@ -419,7 +419,7 @@ def test_sequential_scheduler_reload():
 
 
 def _build_optimization(
-    parameters, lr=0.001, optimizer_type="Adam", max_epochs=10
+    parameters, lr=0.001, optimizer_type="Adam", max_epochs=10, max_grad_norm=None
 ) -> Optimization:
     """Helper to construct an Optimization with common test defaults."""
     return Optimization(
@@ -430,7 +430,12 @@ def _build_optimization(
         scheduler=SchedulerConfig(),
         enable_automatic_mixed_precision=False,
         kwargs={},
+        max_grad_norm=max_grad_norm,
     )
+
+
+def _grad_norm(model: nn.Module) -> float:
+    return sum(p.grad.norm() ** 2 for p in model.parameters() if p.grad is not None) ** 0.5
 
 
 def test_set_learning_rate():
@@ -848,3 +853,37 @@ def test_scheduler_step_timing():
         lr_after_iteration == initial_lr
     ), "LR should not change on per-iteration step when step_each_iteration=False"
     assert lr_after_epoch < initial_lr, "LR should decrease after per-epoch step"
+
+
+@pytest.mark.parametrize("max_grad_norm,expect_clipped", [(0.01, True), (None, False)])
+def test_gradient_clipping(max_grad_norm, expect_clipped):
+    """step_weights clips the global gradient norm to max_grad_norm when set."""
+    torch.manual_seed(0)
+    model = nn.Linear(10, 1).to(fme.get_device())
+    optimization = _build_optimization(model.parameters(), max_grad_norm=max_grad_norm)
+
+    x = torch.ones(1, 10).to(fme.get_device()) * 1e4  # large input → large gradients
+    optimization.accumulate_loss(model(x).sum())
+
+    captured = []
+    original_step = optimization.optimizer.step
+
+    def capturing_step(*args, **kwargs):
+        captured.append(_grad_norm(model))
+        return original_step(*args, **kwargs)
+
+    optimization.optimizer.step = capturing_step
+    optimization.step_weights()
+
+    assert len(captured) == 1
+    if expect_clipped:
+        assert captured[0] <= max_grad_norm + 1e-5
+    else:
+        assert captured[0] > 0.01  # unclipped gradient is large
+
+
+def test_optimization_config_passes_max_grad_norm():
+    """OptimizationConfig.max_grad_norm is wired through to Optimization."""
+    model = nn.Linear(1, 1).to(fme.get_device())
+    opt = OptimizationConfig(max_grad_norm=1.5).build(nn.ModuleList([model]), max_epochs=1)
+    assert opt._max_grad_norm == 1.5
