@@ -24,10 +24,12 @@ run_eval() {
     --task-name "$job_name" \
     --description "Coupled ERA5+UFS ensemble fine-tuning evaluator" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-    --workspace ai2/climate-titan \
-    --priority normal \
-    --preemptible \
+    --workspace ai2/ace \
+    --priority high \
+    --not-preemptible \
     --cluster ai2/titan \
+    --cluster ai2/saturn \
+    --cluster ai2/ceres \
     --weka climate-default:/climate-default \
     --env WANDB_USERNAME="$BEAKER_USERNAME" \
     --env WANDB_NAME="$job_name" \
