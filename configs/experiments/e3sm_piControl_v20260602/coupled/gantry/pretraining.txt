@@ -1,0 +1,2 @@
+group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|exisiting_results_atmos_dataset|exisiting_results_ocean_dataset
+ft-v20260602-E3SMv3-piControl-zltomfxg-l6ktf4nj-early|rs0|ocean-emulator-e3sm|zltomfxg|best_inference_ckpt|ace-eamv3|l6ktf4nj|best_inference_ckpt|train|high|titan|4|600GiB|1|ai2/climate-titan|seed=0|01KTSX9WS9VNXM8907GF9BP55S|01KTSVV6R07HDW4AFCQS6XKW6J

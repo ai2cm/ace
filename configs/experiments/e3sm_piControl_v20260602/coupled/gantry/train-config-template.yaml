@@ -1,0 +1,240 @@
+experiment_dir: /results
+save_checkpoint: true
+save_best_inference_epoch_checkpoints: true
+checkpoint_every_n_batches: 100
+log_train_every_n_batches: 10
+validate_using_ema: true
+evaluate_before_training: true
+ema:
+  decay: 0.9995
+  faster_decay_at_start: false
+max_epochs: 40
+inference:
+  - name: inference
+    weight: 1.0
+    n_coupled_steps: 880
+    coupled_steps_in_memory: 2
+    loader:
+      num_data_workers: 2
+      dataset:
+        ocean:
+          merge:
+            - data_path: /climate-default
+              file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-ocean.zarr
+              engine: zarr
+            - data_path: /climate-default
+              file_pattern: 2026-06-02-E3SMv3-piControl-ocean-105yr-5D-average.zarr
+              engine: zarr
+        atmosphere:
+          merge:
+            - data_path: /climate-default
+              file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-atmosphere.zarr
+              engine: zarr
+            - data_path: /climate-default
+              file_pattern: 2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H.zarr
+              engine: zarr
+      start_indices:
+        times:
+          - '0425-01-03T12:00:00'
+          - '0436-01-03T12:00:00'
+          - '0447-01-03T12:00:00'
+          - '0458-01-03T12:00:00'
+          - '0469-01-03T12:00:00'
+          - '0480-01-03T12:00:00'
+          - '0491-01-03T12:00:00'
+          - '0502-01-03T12:00:00'
+    aggregator:
+      log_zonal_mean_images: false
+      log_histograms: false
+  - name: 12yr_test
+    n_coupled_steps: 880
+    epochs:
+      start: 0
+      step: 5
+    coupled_steps_in_memory: 2
+    aggregator:
+      log_zonal_mean_images: false
+      log_histograms: false
+    loader:
+      num_data_workers: 2
+      dataset:
+        ocean:
+          merge:
+            - data_path: /climate-default
+              file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-ocean.zarr
+              engine: zarr
+            - data_path: /climate-default
+              file_pattern: 2026-06-02-E3SMv3-piControl-ocean-105yr-5D-average.zarr
+              engine: zarr
+        atmosphere:
+          merge:
+            - data_path: /climate-default
+              file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-atmosphere.zarr
+              engine: zarr
+            - data_path: /climate-default
+              file_pattern: 2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H.zarr
+              engine: zarr
+      start_indices:
+        times:
+          - '0515-01-03T12:00:00'
+          - '0515-06-02T12:00:00'
+          - '0515-11-04T12:00:00'
+          - '0516-04-03T12:00:00'
+          - '0516-09-05T12:00:00'
+          - '0517-02-02T12:00:00'
+          - '0517-07-02T12:00:00'
+          - '0518-01-03T12:00:00'
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-e3smv3
+  entity: ai2cm
+  metrics_log_dir: /results/metrics
+train_loader:
+  batch_size: 8
+  num_data_workers: 2
+  prefetch_factor: 2
+  strict_ensemble: false
+  dataset:
+    ocean:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-ocean.zarr
+          engine: zarr
+          subset:
+            start_time: '0425-01-03T12:00:00'
+            stop_time: '0515-01-01T12:00:00'
+        - data_path: /climate-default
+          file_pattern: 2026-06-02-E3SMv3-piControl-ocean-105yr-5D-average.zarr
+          engine: zarr
+          subset:
+            start_time: '0425-01-03T12:00:00'
+            stop_time: '0515-01-03T12:00:00'
+    atmosphere:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-atmosphere.zarr
+          engine: zarr
+          subset:
+            start_time: '0425-01-03T12:00:00'
+            stop_time: '0515-01-03T12:00:00'
+        - data_path: /climate-default
+          file_pattern: 2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H.zarr
+          engine: zarr
+          subset:
+            start_time: '0425-01-03T12:00:00'
+            stop_time: '0515-01-03T12:00:00'
+validation:
+  loader:
+    batch_size: 16
+    num_data_workers: 2
+    prefetch_factor: 2
+    dataset:
+      ocean:
+        merge:
+          - data_path: /climate-default
+            file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-ocean.zarr
+            engine: zarr
+            subset:
+              start_time: '0515-01-03T12:00:00'
+              stop_time: '0520-01-03T12:00:00'
+          - data_path: /climate-default
+            file_pattern: 2026-06-02-E3SMv3-piControl-ocean-105yr-5D-average.zarr
+            engine: zarr
+            subset:
+              start_time: '0515-01-03T12:00:00'
+              stop_time: '0520-01-03T12:00:00'
+      atmosphere:
+        merge:
+          - data_path: /climate-default
+            file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-atmosphere.zarr
+            engine: zarr
+            subset:
+              start_time: '0515-01-03T12:00:00'
+              stop_time: '0520-01-03T12:00:00'
+          - data_path: /climate-default
+            file_pattern: 2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H.zarr
+            engine: zarr
+            subset:
+              start_time: '0515-01-03T12:00:00'
+              stop_time: '0520-01-03T12:00:00'
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.00001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+  scheduler:
+    schedulers:
+      - type: LinearLR
+        step_each_iteration: true
+        kwargs:
+          start_factor: 0.01
+          end_factor: 1
+          total_iters: 3000
+      - type: ConstantLR
+        step_each_iteration: true
+    milestones: [3000]
+stepper_training:
+  n_coupled_steps: 4
+  n_ensemble: 2
+  ocean:
+    parameter_init:
+      weights_path: /ocean_ckpt.tar
+    loss_contributions:
+      weight: 1.0
+      n_steps:
+        outcomes:
+          - steps: 0
+            probability: 0.1
+          - steps: 1
+            probability: 0.3
+          - steps: 2
+            probability: 0.3
+          - steps: 4
+            probability: 0.3
+      optimize_last_step_only: false
+    loss:
+      type: EnsembleLoss
+      kwargs:
+        crps_weight: 0.9
+        energy_score_weight: 0.1
+  atmosphere:
+    parameter_init:
+      weights_path: /atmos_ckpt.tar
+    loss_contributions:
+      weight: 1.0
+      n_steps:
+        outcomes:
+          - steps: 0
+            probability: 0.025
+          - steps: 1
+            probability: 0.29
+          - steps: 2
+            probability: 0.29
+          - steps: 4
+            probability: 0.29
+          - steps: 21
+            probability: 0.1
+          - steps: 41
+            probability: 0.05
+      optimize_last_step_only: true
+    loss:
+      type: EnsembleLoss
+      kwargs:
+        crps_weight: 0.9
+        energy_score_weight: 0.1
+stepper:
+  ocean_fraction_prediction:
+    land_fraction_name: LANDFRAC
+    sea_ice_fraction_name_in_atmosphere: ICEFRAC
+  sst_name: sst
+  ocean:
+    timedelta: 5D
+    # stepper added by job_runner/create_coupled_train_config.sh
+  atmosphere:
+    timedelta: 6h
+    # stepper added by job_runner/create_coupled_train_config.sh
