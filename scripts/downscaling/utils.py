@@ -30,8 +30,12 @@ def fetch_beaker_dataset(
     if cache_dir is not None:
         cached = Path(cache_dir).expanduser() / dataset_id
         if cached.is_dir() and any(cached.iterdir()):
+            print(f"Using cached dataset at {cached}")
             return str(cached)
         target_dir = str(cached)
+        print(f"Downloading dataset to cache at {target_dir}")
+    else:
+        print(f"Downloading dataset to {target_dir}")
 
     Path(target_dir).mkdir(parents=True, exist_ok=True)
     cmd = ["beaker", "dataset", "fetch", dataset_id, "--output", target_dir]
