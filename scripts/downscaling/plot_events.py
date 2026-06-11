@@ -17,6 +17,7 @@ Requires:
 """
 
 import argparse
+import datetime
 import math
 import re
 import tempfile
@@ -29,6 +30,7 @@ import cftime
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
+import yaml
 from cartopy.feature import ShapelyFeature
 from cartopy.io import shapereader
 from cartopy.mpl.gridliner import LATITUDE_FORMATTER, LONGITUDE_FORMATTER
@@ -263,8 +265,25 @@ def filename_to_datetime(filename: str) -> cftime.DatetimeJulian:
         int(match.group(1)),
         int(match.group(2)),
         int(match.group(3)),
-        int(match.group(4) or 12),
+        int(match.group(4) or 0),
     )
+
+
+def load_event_dates(data_dir: str | Path) -> dict[str, cftime.DatetimeJulian]:
+    """Map event name (the .nc filename stem) to its date from the evaluator
+    config.yaml saved alongside the event files."""
+    config_path = Path(data_dir) / "config.yaml"
+    if not config_path.is_file():
+        return {}
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+    dates = {}
+    for event in config.get("events", []):
+        dt = datetime.datetime.fromisoformat(event["date"])
+        dates[event["name"]] = cftime.DatetimeJulian(
+            dt.year, dt.month, dt.day, dt.hour, dt.minute
+        )
+    return dates
 
 
 def add_wind_speed(ds: xr.Dataset) -> xr.Dataset:
@@ -319,6 +338,8 @@ def main():
             print(f"No event files found in dataset {beaker_id} (searched {data_dir})")
             return
 
+        event_dates = load_event_dates(data_dir)
+
         print(f"Found {len(event_files)} event file(s)")
 
         for event_name, nc_file in event_files.items():
@@ -328,9 +349,13 @@ def main():
             print(f"Processing: {nc_file.name} -> {output_event_dir}")
 
             event = xr.open_dataset(nc_file)
-            event = merge_coarse(
-                event, coarse, datetime=filename_to_datetime(nc_file.name)
-            )
+            event_date = event_dates.get(nc_file.stem)
+            if event_date is None:
+                print(
+                    f"  {nc_file.stem} not in config.yaml; parsing date from filename"
+                )
+                event_date = filename_to_datetime(nc_file.name)
+            event = merge_coarse(event, coarse, datetime=event_date)
             event = add_wind_speed(event)
             variables = detect_variable_pairs(event)
             if args.variables is not None:
