@@ -145,7 +145,11 @@ while read FINETUNING; do
     fi
 
     # Validate config (use relative path)
-    python -m fme.ace.validate_config "$CONFIG_PATH_REL" --config_type train --override $OVERRIDE_ARGS
+    # Re-tokenize OVERRIDE_ARGS via eval so single quotes in finetuning.txt group
+    # list/dict values with spaces into single argv elements (literal quotes read
+    # from the file are otherwise ignored by word-splitting).
+    eval "OVERRIDE_ARGV=($OVERRIDE_ARGS)"
+    python -m fme.ace.validate_config "$CONFIG_PATH_REL" --config_type train --override "${OVERRIDE_ARGV[@]}"
 
     # Commit config if changed (use absolute path)
     git_commit_and_push_with_dry_run "$CONFIG_PATH" "${JOB_NAME}" "$GIT_BRANCH"
