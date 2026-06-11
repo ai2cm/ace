@@ -773,7 +773,9 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             elif torch.isfinite(self._gm_max).all():
                 clipped = torch.clamp(global_means, min=self._gm_min, max=self._gm_max)
                 # Shift x by the clip residual so its per-channel spatial
-                # mean falls within the envelope observed during training.
+                # mean falls within the envelope observed during the most
+                # recent training epoch (the envelope is reset each epoch,
+                # so a loaded checkpoint carries its final epoch's envelope).
                 # No-op when the mean is already inside the envelope.
                 x = x + (clipped - global_means)
 
