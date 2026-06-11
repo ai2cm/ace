@@ -107,7 +107,7 @@ def get_trainer_model_config():
         ),
     ],
 )
-@pytest.mark.medium
+@pytest.mark.medium_duration
 def test_evaluator_runs(
     tmp_path,
     evaluator_model_config,

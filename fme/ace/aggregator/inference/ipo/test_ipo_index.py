@@ -174,7 +174,7 @@ class TestIPORegionalAccumulator:
 
 
 class TestPairedIPOIndexAggregator:
-    @pytest.mark.medium
+    @pytest.mark.medium_duration
     def test_get_logs_returns_expected_keys(self):
         """Test that get_logs returns the expected metric keys for long runs."""
         lat = torch.linspace(-60.0, 60.0, 13)
@@ -225,7 +225,7 @@ class TestPairedIPOIndexAggregator:
         assert any("ipo_tpi_power_spectrum" in k for k in logs)
         assert not any("ipo_tpi_std_ratio" in k for k in logs)
 
-    @pytest.mark.medium
+    @pytest.mark.medium_duration
     def test_get_logs_empty_for_short_rollout(self):
         """Rollouts shorter than the minimum should not report IPO metrics."""
         lat = torch.linspace(-60.0, 60.0, 13)

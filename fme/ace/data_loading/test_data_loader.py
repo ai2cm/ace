@@ -261,7 +261,7 @@ def test_xarray_loader(tmp_path):
 
 @pytest.mark.parametrize(
     "workers, force_zarr_engine_used",
-    [(0, False), (0, True), pytest.param(1, True, marks=pytest.mark.medium)],
+    [(0, False), (0, True), pytest.param(1, True, marks=pytest.mark.medium_duration)],
 )
 def test_xarray_loader_scheduled_epoch(
     tmp_path,
@@ -505,7 +505,7 @@ def test_loader_n_repeats_but_not_infer_timestep_error(tmp_path):
 
 @pytest.mark.parametrize(
     "num_data_workers, force_forkserver",
-    [(0, False), (3, False), pytest.param(3, True, marks=pytest.mark.medium)],
+    [(0, False), (3, False), pytest.param(3, True, marks=pytest.mark.medium_duration)],
 )
 def test_inference_data_loader(tmp_path, num_data_workers: int, force_forkserver: bool):
     _create_dataset_on_disk(tmp_path, n_times=14)

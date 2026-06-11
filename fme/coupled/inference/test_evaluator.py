@@ -323,7 +323,7 @@ def test_evaluator_n_coupled_steps_divisible_by_coupled_steps_in_memory():
         (2, 1, 2, False, True),
     ],
 )
-@pytest.mark.medium
+@pytest.mark.medium_duration
 def test_evaluator_inference(
     tmp_path: pathlib.Path,
     n_coupled_steps: int,

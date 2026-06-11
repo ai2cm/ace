@@ -30,7 +30,7 @@ def write_ensemble_dataset(
         )
 
 
-@pytest.mark.medium
+@pytest.mark.medium_duration
 def test_write_monthly_data(tmp_path: pathlib.Path):
     all_names = ["a", "b"]
     horizontal = [DimSize("lat", 8), DimSize("lon", 4)]

@@ -60,7 +60,7 @@ def pytest_configure(config):
     )
     config.addinivalue_line(
         "markers",
-        "medium: not very fast test, deselected when --very-fast is given",
+        "medium_duration: not very fast test, deselected when --very-fast is given",
     )
 
 
@@ -73,7 +73,7 @@ def pytest_collection_modifyitems(config, items):
     selected = []
     for item in items:
         if item.get_closest_marker("slow") is not None or (
-            very_fast_only and item.get_closest_marker("medium") is not None
+            very_fast_only and item.get_closest_marker("medium_duration") is not None
         ):
             deselected.append(item)
         else:

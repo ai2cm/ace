@@ -157,7 +157,7 @@ def test_inference_n_coupled_steps_divisible_by_coupled_steps_in_memory():
         (3, 1, 2),
     ],
 )
-@pytest.mark.medium
+@pytest.mark.medium_duration
 def test_inference(
     tmp_path: pathlib.Path,
     n_coupled_steps: int,
@@ -235,7 +235,7 @@ def test_inference(
         1,
     ],
 )
-@pytest.mark.medium
+@pytest.mark.medium_duration
 def test_inference_with_empty_ocean_forcing(
     tmp_path: pathlib.Path,
     atmosphere_times_offset: int,

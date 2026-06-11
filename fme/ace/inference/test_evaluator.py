@@ -842,7 +842,7 @@ def test_compute_derived_quantities(has_required_fields):
         assert not existence_check
 
 
-@pytest.mark.medium
+@pytest.mark.medium_duration
 def test_derived_metrics_run_without_errors(tmp_path: pathlib.Path):
     """Checks that derived metrics are computed during inferece without errors."""
     n_forward_steps = 2
@@ -1220,7 +1220,7 @@ def test_resolve_variable_metadata(
         pytest.param(NameConfig("solar_constant"), id="solar-constant-as-name"),
     ],
 )
-@pytest.mark.medium
+@pytest.mark.medium_duration
 def test_evaluator_with_derived_forcings(
     tmp_path: pathlib.Path,
     solar_constant: NameConfig | ValueConfig,
@@ -1294,7 +1294,7 @@ def test_evaluator_with_derived_forcings(
     assert insolation_name not in ds
 
 
-@pytest.mark.medium
+@pytest.mark.medium_duration
 def test_evaluator_with_non_local_experiment_dir(tmp_path: pathlib.Path):
     # Use an in-memory filesystem for the experiment directory to test using
     # an experiment_dir on a non-local filesystem.

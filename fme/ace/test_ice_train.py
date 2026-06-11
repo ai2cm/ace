@@ -405,7 +405,7 @@ def _setup(
     return train_config_filename, inference_config_filename
 
 
-@pytest.mark.medium
+@pytest.mark.medium_duration
 def test_train_and_inference(tmp_path):
     """Ensure that ACE Ice training and subsequent standalone inference run."""
     train_config, inference_config = _setup(tmp_path)

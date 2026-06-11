@@ -665,7 +665,7 @@ _TRAIN_AND_INFERENCE_CASES = [
 ]
 
 
-@pytest.mark.medium
+@pytest.mark.medium_duration
 @pytest.mark.parametrize("settings", _TRAIN_AND_INFERENCE_CASES)
 def test_train_and_inference(
     tmp_path,
@@ -794,7 +794,7 @@ def test_train_and_inference(
     assert np.sum(np.isnan(ds_target["baz"].values)) == 0
 
 
-@pytest.mark.medium
+@pytest.mark.medium_duration
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
 def test_resume(tmp_path, nettype):
     """Make sure the training is resumed from a checkpoint when restarted."""
@@ -840,7 +840,7 @@ def _get_reproducible_trainer(config_dict, seed):
     return build_trainer(builders, config)
 
 
-@pytest.mark.medium
+@pytest.mark.medium_duration
 @pytest.mark.parametrize("nettype", ["NoiseConditionedSFNO"])
 def test_set_seed(tmp_path, nettype):
     """Test that set_seed leads to identical training outcomes."""
@@ -869,7 +869,7 @@ def test_set_seed(tmp_path, nettype):
     )
 
 
-@pytest.mark.medium
+@pytest.mark.medium_duration
 @pytest.mark.parametrize("nettype", ["NoiseConditionedSFNO"])
 @pytest.mark.parametrize("save_type", ["restart", "all"])
 def test_restore_checkpoint(
@@ -1047,7 +1047,7 @@ def test_copy_weights_after_batch(tmp_path, nettype):
     train_main(yaml_config=fine_tuning_config)
 
 
-@pytest.mark.medium
+@pytest.mark.medium_duration
 def test_train_without_inline_inference(tmp_path):
     nettype = "SphericalFourierNeuralOperatorNet"
     crps_training = False
@@ -1095,7 +1095,7 @@ def test_train_without_inline_inference(tmp_path):
         ),
     ],
 )
-@pytest.mark.medium
+@pytest.mark.medium_duration
 def test_train_and_inference_with_derived_forcings(
     tmp_path, insolation_config: InsolationConfig
 ):

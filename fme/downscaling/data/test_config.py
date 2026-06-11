@@ -46,7 +46,7 @@ def test_DataLoaderConfig_mpcontext(
     assert loader_config._mp_context() == expected
 
 
-@pytest.mark.medium
+@pytest.mark.medium_duration
 def test_DataLoaderConfig_build(tmp_path):
     # TODO: this test can be removed after future PRs add a no-target
     # run script integration test that covers this functionality.
@@ -109,7 +109,7 @@ def test_PairedDataLoaderConfig_sample_with_replacement(tmp_path):
     assert len(data.loader) == n_sample
 
 
-@pytest.mark.medium
+@pytest.mark.medium_duration
 def test_DataLoaderConfig_includes_merge(tmp_path):
     """Test DataLoaderConfig with coarse as
     [XarrayDataConfig, MergeNoConcatDatasetConfig]."""
@@ -187,7 +187,7 @@ def test_paired_config_raise_error_on_deprecated_topography():
         )
 
 
-@pytest.mark.medium
+@pytest.mark.medium_duration
 def test_PairedDataLoaderConfig_includes_merge(tmp_path):
     paths = data_paths_helper(tmp_path, num_timesteps=4)
     requirements = DataRequirements(

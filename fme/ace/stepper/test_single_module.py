@@ -1688,7 +1688,7 @@ LOAD_STEPPER_TESTS = {
     list(LOAD_STEPPER_TESTS.values()),
     ids=list(LOAD_STEPPER_TESTS.keys()),
 )
-@pytest.mark.medium
+@pytest.mark.medium_duration
 def test_load_stepper_and_load_stepper_config(
     tmp_path: pathlib.Path,
     serialized_ocean_config: OceanConfig | None,
@@ -1786,7 +1786,7 @@ def validate_stepper_prescribed_prognostic_names(
     assert config.prescribed_prognostic_names == expected
 
 
-@pytest.mark.medium
+@pytest.mark.medium_duration
 def test_load_stepper_with_prescribed_prognostic_override(tmp_path: pathlib.Path):
     """Loading with StepperOverrideConfig(prescribed_prognostic_names=...) applies the
     override."""

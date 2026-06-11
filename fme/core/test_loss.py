@@ -46,7 +46,7 @@ def test_loss_builds_and_runs(global_mean_type):
     assert all(isinstance(c, LossComponent) for c in result)
 
 
-@pytest.mark.medium
+@pytest.mark.medium_duration
 def test_spectral_energy_score():
     torch.manual_seed(0)
     DEVICE = get_device()
@@ -738,7 +738,7 @@ def test_per_channel_losses_are_distinct_mse():
     assert channel_losses["var_a"].loss < channel_losses["var_b"].loss
 
 
-@pytest.mark.medium
+@pytest.mark.medium_duration
 def test_energy_score_preweighting_preserves_total():
     """Verify the pre-weighted spectral tensor's mean matches the old scalar."""
     torch.manual_seed(42)

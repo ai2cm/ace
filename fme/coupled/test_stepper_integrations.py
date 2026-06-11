@@ -138,7 +138,7 @@ def test_stepper_gradient_accumulation_integration():
     assert ocean_module.mock_caller.call_count == 2
 
 
-@pytest.mark.medium
+@pytest.mark.medium_duration
 @pytest.mark.parametrize("from_coupled_stepper_state", [True, False])
 def test_stepper_parameter_init_integration(
     tmp_path: pathlib.Path, from_coupled_stepper_state: bool

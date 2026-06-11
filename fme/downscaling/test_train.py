@@ -184,7 +184,7 @@ def default_trainer_config(
         "multiple_input_multiple_out",
     ],
 )
-@pytest.mark.medium
+@pytest.mark.medium_duration
 def test_train_main_only(
     in_names,
     out_names,
@@ -200,7 +200,7 @@ def test_train_main_only(
         main(config_path=config_path)
 
 
-@pytest.mark.medium
+@pytest.mark.medium_duration
 def test_train_main_logs(default_trainer_config, tmp_path):
     """Check that training loop records the appropriate logs."""
 
@@ -225,7 +225,7 @@ def test_train_main_logs(default_trainer_config, tmp_path):
         assert len(keys) > 5 or keys == set(["train/batch_loss"])
 
 
-@pytest.mark.medium
+@pytest.mark.medium_duration
 def test_restore_checkpoint(default_trainer_config, tmp_path):
     config = dacite.from_dict(data_class=TrainerConfig, data=default_trainer_config)
     trainer1 = config.build()
@@ -260,7 +260,7 @@ def test_restore_checkpoint(default_trainer_config, tmp_path):
     )
 
 
-@pytest.mark.medium
+@pytest.mark.medium_duration
 def test_resume(default_trainer_config, tmp_path):
     """Make sure the training is resumed from a checkpoint when restarted."""
 

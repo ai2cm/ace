@@ -266,7 +266,7 @@ def _write_test_yaml_files(
         (3, True),  # CRPS training with EnsembleLoss
     ],
 )
-@pytest.mark.medium
+@pytest.mark.medium_duration
 def test_train_and_inference(tmp_path, loss_atmos_n_steps, crps_training: bool):
     """Ensure that coupled training and standalone inference run without errors."""
     set_seed(42 + loss_atmos_n_steps)

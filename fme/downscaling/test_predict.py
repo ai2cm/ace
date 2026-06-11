@@ -100,7 +100,7 @@ def create_predictor_config(
     return out_path, f"{paths.fine}/data.nc"
 
 
-@pytest.mark.medium
+@pytest.mark.medium_duration
 def test_predictor_runs(tmp_path):
     n_samples = 2
     coarse_shape = (4, 4)
@@ -138,7 +138,7 @@ def test_predictor_runs(tmp_path):
     assert os.path.exists(f"{predictor_config['experiment_dir']}/test_event.nc")
 
 
-@pytest.mark.medium
+@pytest.mark.medium_duration
 def test_predictor_renaming(
     tmp_path,
 ):
