@@ -1,0 +1,32 @@
+experiment_dir: /results
+n_forward_steps: 20
+forward_steps_in_memory: 20
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+      - '0211-01-03T12:00:00'
+  dataset:
+    merge:
+      - data_path: /climate-default
+        file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-ocean.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr
+        engine: zarr
+  num_data_workers: 4
+aggregator:
+  compute_uncorrected_metrics: true
+  zonal_mean:
+    enabled: false
+  histogram:
+    enabled: false
+data_writer:
+  save_prediction_files: true
+  save_monthly_files: false
