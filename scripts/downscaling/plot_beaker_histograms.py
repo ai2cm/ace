@@ -178,11 +178,10 @@ def main():
     print(f"Fetching beaker dataset: {beaker_id}")
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        fetch_beaker_dataset(beaker_id, temp_dir)
-
-        event_files = find_event_files(temp_dir)
+        data_dir = fetch_beaker_dataset(beaker_id, temp_dir)
+        event_files = find_event_files(data_dir)
         if not event_files:
-            print(f"No event files found in dataset {beaker_id}")
+            print(f"No event files found in dataset {beaker_id} (searched {data_dir})")
             return
 
         print(f"Found {len(event_files)} event file(s)")
