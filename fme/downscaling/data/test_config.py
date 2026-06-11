@@ -5,6 +5,7 @@ from pathlib import Path
 import cftime
 import numpy as np
 import pytest
+import torch
 import xarray as xr
 
 from fme.core.dataset.merged import MergeNoConcatDatasetConfig
@@ -21,7 +22,11 @@ from fme.downscaling.typing_ import FineResCoarseResPair
 
 
 def _write_global_nc(path: Path, n_lat: int, n_lon: int, num_timesteps: int) -> None:
-    """Write a minimal NetCDF with global (0-360) lon coords and lat in 0-8 range."""
+    """Write a minimal NetCDF with global (0-360) lon coords and lat in 0-8 range.
+
+    Each grid point's value encodes its source longitude (broadcast across time
+    and lat), so a roll of the data can be checked against the rolled lon coords.
+    """
     time_coord = [
         cftime.DatetimeProlepticGregorian(2000, 1, 1) + datetime.timedelta(days=i)
         for i in range(num_timesteps)
@@ -34,7 +39,12 @@ def _write_global_nc(path: Path, n_lat: int, n_lon: int, num_timesteps: int) -> 
     lats = np.array(
         [lat_spacing / 2 + i * lat_spacing for i in range(n_lat)], dtype=np.float32
     )
-    data = np.zeros((num_timesteps, n_lat, n_lon), dtype=np.float32)
+
+    data = (
+        np.broadcast_to(lons[None, None, :], (num_timesteps, n_lat, n_lon))
+        .astype(np.float32)
+        .copy()
+    )
     ds = xr.Dataset(
         {
             "var0": xr.DataArray(data, dims=["time", "lat", "lon"]),
@@ -335,3 +345,11 @@ def test_PairedDataLoaderConfig_prime_meridian_crossing(tmp_path, scale_factor):
         batch.coarse.data["var0"].shape[-1] * scale_factor
         == batch.fine.data["var0"].shape[-1]
     )
+
+    # Each value encodes its source longitude, so after the roll every lat row of
+    # the data must still equal that grid's (rolled) lon coordinate.
+    for grid in (batch.coarse, batch.fine):
+        lon = grid.latlon_coordinates.lon[0].cpu()  # batch members are identical
+        values = grid.data["var0"][0].cpu()  # (n_lat, n_lon)
+        expected = lon.unsqueeze(0).expand_as(values)
+        assert torch.allclose(values % 360.0, expected % 360.0, atol=1e-3)
