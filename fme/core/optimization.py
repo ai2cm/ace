@@ -90,7 +90,9 @@ class Optimization(OptimizationABC):
         get_checkpoint: Callable[
             [int], Checkpoint | NoCheckpoint
         ] = lambda _: NoCheckpoint(),
+        max_grad_norm: float | None = None,
     ):
+        self._max_grad_norm = max_grad_norm
         if optimizer_type == "FusedAdam":
             self.optimizer = torch.optim.AdamW(parameters, lr=lr, fused=True, **kwargs)
         elif optimizer_type == "Adam":
@@ -177,6 +179,15 @@ class Optimization(OptimizationABC):
             loss.backward()
 
     def _step_weights(self):
+        if self._max_grad_norm is not None:
+            if self.gscaler is not None:
+                self.gscaler.unscale_(self.optimizer)
+            torch.nn.utils.clip_grad_norm_(
+                itertools.chain.from_iterable(
+                    g["params"] for g in self.optimizer.param_groups
+                ),
+                max_norm=self._max_grad_norm,
+            )
         if self.gscaler is not None:
             self.gscaler.step(self.optimizer)
         else:
@@ -296,6 +307,9 @@ class OptimizationConfig:
             ``betas``, ...) and scheduler are kept; only the running state is
             transferred. Intended for non-resuming jobs; preemption resume in
             the Trainer overrides this state via ``Optimization.load_state``.
+        max_grad_norm: Maximum global gradient norm for clipping before each
+            optimizer step. ``None`` disables clipping (default, backward
+            compatible).
     """
 
     optimizer_type: Literal["Adam", "AdamW", "FusedAdam"] = "Adam"
@@ -310,6 +324,7 @@ class OptimizationConfig:
         default_factory=lambda: CheckpointConfig()
     )
     resume_optimizer_ckpt_path: str | None = None
+    max_grad_norm: float | None = None
 
     def __post_init__(self):
         if self.optimizer_type == "FusedAdam":
@@ -337,6 +352,7 @@ class OptimizationConfig:
             kwargs=self.kwargs,
             use_gradient_accumulation=self.use_gradient_accumulation,
             get_checkpoint=self.checkpoint.build,
+            max_grad_norm=self.max_grad_norm,
         )
         if self.resume_optimizer_ckpt_path is not None:
             _load_finetune_optimization_state(

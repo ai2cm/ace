@@ -433,6 +433,27 @@ def _build_optimization(
     )
 
 
+def test_gradient_clipping():
+    torch.manual_seed(0)
+    model = nn.Linear(10, 1, bias=False).to(fme.get_device())
+    optimization = Optimization(
+        parameters=model.parameters(),
+        optimizer_type="Adam",
+        lr=0.001,
+        max_epochs=10,
+        scheduler=SchedulerConfig(),
+        enable_automatic_mixed_precision=False,
+        kwargs={},
+        max_grad_norm=1.0,
+    )
+    x = torch.ones(1, 10).to(fme.get_device()) * 1000.0
+    loss = model(x).sum()
+    loss.backward()
+    assert model.weight.grad.norm().item() > 1.0
+    optimization._step_weights()
+    assert model.weight.grad.norm().item() <= 1.0 + 1e-6
+
+
 def test_set_learning_rate():
     model = nn.Linear(1, 1).to(fme.get_device())
     optimization = _build_optimization(model.parameters())
