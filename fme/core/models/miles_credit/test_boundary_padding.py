@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from fme.core.models.boundary_padding import TensorPadding
+from fme.core.models.miles_credit.boundary_padding import TensorPadding
 
 
 @pytest.mark.parametrize("pad_lat", [(1, 0), (0, 2), (0, 0)])

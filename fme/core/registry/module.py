@@ -47,22 +47,6 @@ class ModuleConfig(abc.ABC):
         """
         ...
 
-    def build_for_selector(
-        self,
-        n_in_channels: int,
-        n_out_channels: int,
-        dataset_info: DatasetInfo,
-        conditional: bool,
-    ) -> nn.Module:
-        """
-        Build a nn.Module for a ModuleSelector, including selector-level flags.
-        """
-        return self.build(
-            n_in_channels=n_in_channels,
-            n_out_channels=n_out_channels,
-            dataset_info=dataset_info,
-        )
-
     @property
     def has_time_conditioning(self) -> bool:
         """Whether the built module accepts ``forward_time`` in its forward call."""
@@ -232,11 +216,10 @@ class ModuleSelector:
             label_encoding = LabelEncoding(sorted(list(dataset_info.all_labels)))
         else:
             label_encoding = None
-        module = self._instance.build_for_selector(
+        module = self._instance.build(
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
             dataset_info=dataset_info,
-            conditional=self.conditional,
         )
         return Module(module, label_encoding, self._instance.has_time_conditioning)
 
