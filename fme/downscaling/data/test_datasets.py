@@ -314,16 +314,13 @@ def test_horizontal_subset_prime_meridian_spanning_positive_convention():
     data_tensor = torch.arange(n_lon, dtype=torch.float).unsqueeze(0).unsqueeze(0)
     data_tensor = data_tensor.expand(1, 1, n_lat, n_lon).clone()
 
-    def make_dataset(lon_interval):
-        return _make_horizontal_subset_dataset(
-            coords=coords,
-            data_tensor=data_tensor,
-            lat_interval=ClosedInterval(float("-inf"), float("inf")),
-            lon_interval=lon_interval,
-        )
-
     # (270, 405): stop > 360 convention — coords preserved in that convention
-    ds_positive = make_dataset(ClosedInterval(270.0, 405.0))
+    ds_positive = _make_horizontal_subset_dataset(
+        coords=coords,
+        data_tensor=data_tensor,
+        lat_interval=ClosedInterval(float("-inf"), float("inf")),
+        lon_interval=ClosedInterval(270.0, 405.0),
+    )
     assert ds_positive.subset_latlon_coordinates.lon.shape == (4,)
     expected_lons = torch.tensor([270.0, 315.0, 360.0, 405.0])
     assert torch.allclose(ds_positive.subset_latlon_coordinates.lon, expected_lons)
