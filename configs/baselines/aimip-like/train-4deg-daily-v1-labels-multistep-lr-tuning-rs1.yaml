@@ -73,6 +73,7 @@ inference:
             - northward_wind_1
             - northward_wind_3
             - northward_wind_7
+            - total_water_path
         - step: 5
           target: norm
           name: day_5_norm
