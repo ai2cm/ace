@@ -140,6 +140,24 @@ run_training() {
 # run_training "train-4deg-daily-v1-era5-only-fg8-residual.yaml" "train-4deg-daily-v1-era5-only-fg8-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
 # run_training "train-4deg-daily-v1-era5-only-256.yaml" "train-4deg-daily-v1-era5-only-256-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
 
-# --- Wave 14: era5-only-residual with eval-time global-mean relaxation of specific_total_water_0 toward its normalization mean, e-folding timescales of 200 and 100 steps (Jupiter+Titan, high) ---
-run_training "train-4deg-daily-v1-era5-only-residual-q0-tau200.yaml" "train-4deg-daily-v1-era5-only-residual-q0-tau200-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
-run_training "train-4deg-daily-v1-era5-only-residual-q0-tau100.yaml" "train-4deg-daily-v1-era5-only-residual-q0-tau100-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# --- Wave 14: era5-only-residual with eval-time global-mean relaxation of specific_total_water_0 toward its normalization mean, e-folding timescales of 200 and 100 steps (Jupiter+Titan, high) --- [launched, running]
+# run_training "train-4deg-daily-v1-era5-only-residual-q0-tau200.yaml" "train-4deg-daily-v1-era5-only-residual-q0-tau200-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-residual-q0-tau100.yaml" "train-4deg-daily-v1-era5-only-residual-q0-tau100-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# --- Wave 15: relaunch of the two least-progressed Wave 12/13 jobs (<5 epochs) with both clusters enabled to escape Jupiter contention (Jupiter+Titan, high) --- [launched, queued]
+# sr0p25-residual was at epoch 2; the -8b9d era5-only-residual rerun never started. Old Jupiter-only experiments stopped; relaunched here from d471739.
+# run_training "train-4deg-daily-v1-era5-only-sr0p25-residual.yaml" "train-4deg-daily-v1-era5-only-sr0p25-residual-rs0-d471" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-residual.yaml" "train-4deg-daily-v1-era5-only-residual-rs0-d471" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# --- Wave 16: era5-only-residual + qsat-scaled shared global-mean removal (residual counterpart of the Wave 10 era5-only-qsat-scaling run) (Jupiter+Titan, high) --- [launched, running]
+# run_training "train-4deg-daily-v1-era5-only-qsat-scaling-residual.yaml" "train-4deg-daily-v1-era5-only-qsat-scaling-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# --- Wave 17: era5-only CRPS/finite-diff CRPS/energy-score loss-weight sweep (Jupiter+Titan, high) --- [launched]
+# c4d4e2  crps 0.4 / fd_crps 0.4 / energy 0.2  (non-residual)
+# c5d4e1  crps 0.5 / fd_crps 0.4 / energy 0.1  (non-residual)
+# c7d2e1  crps 0.7 / fd_crps 0.2 / energy 0.1  (non-residual, lr 0.0001 baseline without lr_tuning; -2156 suffix because original c7d2e1-rs0 used the now-renamed c7d2e1-lr-tuning config)
+# c7d2e1-qsat-scaling  c7d2e1 weights on top of the qsat-scaling base
+# run_training "train-4deg-daily-v1-era5-only-c4d4e2.yaml" "train-4deg-daily-v1-era5-only-c4d4e2-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-c5d4e1.yaml" "train-4deg-daily-v1-era5-only-c5d4e1-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-c7d2e1.yaml" "train-4deg-daily-v1-era5-only-c7d2e1-rs0-2156" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-c7d2e1-qsat-scaling.yaml" "train-4deg-daily-v1-era5-only-c7d2e1-qsat-scaling-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
