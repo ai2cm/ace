@@ -1,4 +1,4 @@
-seed: 0
+seed: 1
 experiment_dir: /results
 save_checkpoint: true
 checkpoint_every_n_batches: 5000
@@ -314,9 +314,10 @@ optimization:
         total_iters: 150
       step_each_iteration: false
     milestones: []
+  max_grad_norm: 1.0
 stepper_training:
   n_ensemble: 2
-  n_forward_steps: 1
+  n_forward_steps: 2
   optimize_last_step_only: true
   loss:
     type: EnsembleLoss
@@ -493,6 +494,6 @@ stepper:
       input_dropout:
         kind: uniform
         min_vars: 1
-        max_vars: 5
+        max_vars: 10
         shared_across_ensemble: false
       include_channel_mask_inputs: true
