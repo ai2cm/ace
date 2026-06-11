@@ -13,7 +13,9 @@ import yaml
 ZARR_PATH = "gs://vcm-ml-intermediate/2026-06-03-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr/"
 YEAR_START = 2010
 YEAR_END = 2020  # inclusive
-OUTPUT_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR = (
+    "./configs/ufs-era5-fully-coupled-v0"  # os.path.dirname(os.path.abspath(__file__))
+)
 
 # ==============================
 # HELPERS
@@ -22,9 +24,11 @@ OUTPUT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def format_time(t):
     """
-    Format datetime or cftime object to:
+    Format datetime, cftime, or numpy datetime64 to:
     '1994-01-03T12:00:00'.
     """
+    if isinstance(t, np.datetime64):
+        t = datetime.utcfromtimestamp(t.astype("datetime64[s]").astype(int))
     return (
         f"{t.year:04d}-"
         f"{t.month:02d}-"
@@ -56,8 +60,7 @@ def find_closest_times(ds, year):
             ideal = np.datetime64(datetime(year_, month, day))
 
         # Compute absolute difference
-        diff = np.abs(time - ideal)
-        idx = diff.argmin().item()
+        idx = int(np.argmin(np.abs(time.values - ideal)))
 
         closest = time_vals[idx]
         selected_times.append(format_time(closest))

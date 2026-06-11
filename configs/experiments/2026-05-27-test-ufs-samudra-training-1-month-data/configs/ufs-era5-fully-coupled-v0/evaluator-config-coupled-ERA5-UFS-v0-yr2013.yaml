@@ -1,0 +1,45 @@
+experiment_dir: /results
+n_coupled_steps: 147
+coupled_steps_in_memory: 1
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-ufs
+  entity: ai2cm
+loader:
+  num_data_workers: 4
+  dataset:
+    ocean:
+      data_path: /climate-default
+      file_pattern: 2026-06-03-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
+      engine: zarr
+    atmosphere:
+      data_path: /climate-default
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+  start_indices:
+    times:
+    - '2012-12-29T12:00:00'
+    - '2013-02-02T12:00:00'
+    - '2013-02-27T12:00:00'
+    - '2013-03-29T12:00:00'
+    - '2013-04-28T12:00:00'
+    - '2013-06-02T12:00:00'
+    - '2013-07-02T12:00:00'
+    - '2013-08-01T12:00:00'
+    - '2013-08-31T12:00:00'
+    - '2013-09-30T12:00:00'
+    - '2013-10-30T12:00:00'
+    - '2013-11-29T12:00:00'
+aggregator:
+  log_zonal_mean_images: true
+  log_histograms: true
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: false
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: false

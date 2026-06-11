@@ -48,7 +48,7 @@ run_eval() {
 for year in $(seq 2010 2020); do
     year_str=$(printf "%04d" "$year")
 
-    run_eval "evaluator-config-coupled-ERA5-UFS-v0-yr${year_str}.yaml" \
+    run_eval "./configs/ufs-era5-fully-coupled-v0/evaluator-config-coupled-ERA5-UFS-v0-yr${year_str}.yaml" \
              "${BASE_JOB_NAME}-yr${year_str}" \
              "$EXISTING_RESULTS_DATASET"
 done
