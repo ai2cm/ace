@@ -149,38 +149,8 @@ stepper:
       corrector:
         type: ocean_corrector
         config:
-          force_positive_names:
-            - so_0
-            - so_1
-            - so_2
-            - so_3
-            - so_4
-            - so_5
-            - so_6
-            - so_7
-            - so_8
-            - so_9
-            - so_10
-            - so_11
-            - so_12
-            - so_13
-            - so_14
-            - so_15
-            - so_16
-            - so_17
-            - so_18
-            - sea_ice_volume
-          sea_ice_fraction_correction:
-            sea_ice_fraction_name: ocean_sea_ice_fraction
-            land_fraction_name: land_fraction
-            remove_negative_ocean_fraction: false
-            zero_where_ice_free_names:
-              - sea_ice_volume
-              - sfdsi
-              - UI
-              - VI
-          surface_energy_flux_correction:
-            method: prescribed
+          force_positive_names: []
+          sea_ice_fraction_correction: null
       next_step_forcing_names:
         - DLWRFsfc
         - DSWRFsfc
