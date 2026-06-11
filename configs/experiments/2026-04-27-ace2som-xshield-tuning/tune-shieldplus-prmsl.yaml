@@ -25,8 +25,44 @@ inference:
         file_pattern: 1xCO2-ic_0004.zarr
         engine: zarr
       num_data_workers: 1
-    aggregator:
-      log_histograms: true
+    aggregator: &inference_aggregator
+      mean_denorm:
+        target: denorm
+        variables: &log_variables
+          - PRESsfc
+          - PRMSL
+          - PRATEsfc
+          - UGRD10m
+          - VGRD10m
+          - TMP2m
+      mean_norm:
+        target: norm
+        variables: *log_variables
+      step_means:
+        - step: 20
+          target: denorm
+          variables: *log_variables
+        - step: 20
+          target: norm
+          variables: *log_variables
+      power_spectrum:
+        variables: *log_variables
+        plot_variables: *log_variables
+      zonal_mean:
+        variables: *log_variables
+      time_mean_denorm:
+        target: denorm
+        variables: *log_variables
+      time_mean_norm:
+        target: norm
+        variables: *log_variables
+      histogram:
+        enabled: true
+        variables: *log_variables
+        percentile_variables:
+          - PRATEsfc
+      annual:
+        variables: *log_variables
   - name: 2xC02
     n_forward_steps: 7300
     forward_steps_in_memory: 10
@@ -46,8 +82,7 @@ inference:
         file_pattern: 2xCO2-ic_0004.zarr
         engine: zarr
       num_data_workers: 1
-    aggregator:
-      log_histograms: true
+    aggregator: *inference_aggregator
   - name: 4xC02
     n_forward_steps: 7300
     forward_steps_in_memory: 10
@@ -67,8 +102,7 @@ inference:
         file_pattern: 4xCO2-ic_0004.zarr
         engine: zarr
       num_data_workers: 1
-    aggregator:
-      log_histograms: true
+    aggregator: *inference_aggregator
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -176,6 +210,15 @@ validation:
         subset:
           start_time: '2038-01-01'
           stop_time: '2038-12-31'
+  aggregator:
+    snapshot:
+      enabled: false
+    mean_map:
+      enabled: false
+    power_spectrum:
+      enabled: false
+    ensemble_denorm:
+      log_mean_maps: false
 optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001
