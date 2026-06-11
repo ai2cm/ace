@@ -94,8 +94,10 @@ class SFNONetConfig:
             Conv1x1 down-projection is applied before forward_transform and
             a Conv1x1 up-projection is applied after inverse_transform, so
             the SHT and the (modes_lat x C x C) per-mode weight all operate
-            on round(embed_dim * spectral_ratio) channels. Only supported
-            for filter_type='linear'.
+            on round(embed_dim * spectral_ratio) channels. When
+            filter_residual is enabled, the round-trip residual also passes
+            through the projections. Only supported for filter_type='linear'
+            and incompatible with local_blocks.
         clip_latent_global_means: If True, the per-channel spatial mean of the
             post-encoder latent representation is tracked during training and,
             during eval, the latent is shifted so that mean falls within the
@@ -150,6 +152,26 @@ class SFNONetConfig:
                 "spectral_ratio < 1, since the l=0 mode is sandwiched between "
                 "the pre/post channel projections."
             )
+        if self.spectral_ratio < 1.0 and self.local_blocks:
+            raise NotImplementedError(
+                "spectral_ratio < 1 is not supported with local_blocks, since "
+                "local (DISCO) blocks have no spectral filter to bottleneck."
+            )
+        if self.spectral_ratio < 1.0:
+            spectral_channels = round(self.embed_dim * self.spectral_ratio)
+            if spectral_channels < 1:
+                raise ValueError(
+                    f"spectral_ratio={self.spectral_ratio} with "
+                    f"embed_dim={self.embed_dim} produces fewer than 1 "
+                    "spectral channel."
+                )
+            if spectral_channels % self.filter_num_groups != 0:
+                raise ValueError(
+                    f"spectral_ratio={self.spectral_ratio} with "
+                    f"embed_dim={self.embed_dim} yields {spectral_channels} "
+                    "spectral channels, which is not divisible by "
+                    f"filter_num_groups={self.filter_num_groups}."
+                )
 
 
 # heuristic for finding theta_cutoff

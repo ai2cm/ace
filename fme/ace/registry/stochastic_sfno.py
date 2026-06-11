@@ -250,8 +250,10 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             spectral filter's SHT and per-mode complex weight. When < 1, a
             Conv1x1 down-projection is applied before forward_transform and
             an up-projection after inverse_transform, reducing both the SHT
-            cost and the size of the per-mode complex weight tensor. Only
-            supported for filter_type='linear'.
+            cost and the size of the per-mode complex weight tensor. When
+            filter_residual is enabled, the round-trip residual also passes
+            through the projections. Only supported for filter_type='linear'
+            and incompatible with local_blocks.
         clip_latent_global_means: If True, the per-channel spatial mean of
             the post-encoder latent representation is tracked during
             training and, in eval, the latent is shifted so that mean falls
@@ -328,6 +330,26 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
                 "filter_preserves_global_mean is not supported with "
                 "spectral_ratio < 1."
             )
+        if self.spectral_ratio < 1.0 and self.local_blocks:
+            raise NotImplementedError(
+                "spectral_ratio < 1 is not supported with local_blocks, since "
+                "local (DISCO) blocks have no spectral filter to bottleneck."
+            )
+        if self.spectral_ratio < 1.0:
+            spectral_channels = round(self.embed_dim * self.spectral_ratio)
+            if spectral_channels < 1:
+                raise ValueError(
+                    f"spectral_ratio={self.spectral_ratio} with "
+                    f"embed_dim={self.embed_dim} produces fewer than 1 "
+                    "spectral channel."
+                )
+            if spectral_channels % self.filter_num_groups != 0:
+                raise ValueError(
+                    f"spectral_ratio={self.spectral_ratio} with "
+                    f"embed_dim={self.embed_dim} yields {spectral_channels} "
+                    "spectral channels, which is not divisible by "
+                    f"filter_num_groups={self.filter_num_groups}."
+                )
 
     def build(
         self,

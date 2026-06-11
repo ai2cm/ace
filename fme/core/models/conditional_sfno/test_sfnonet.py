@@ -388,6 +388,29 @@ def test_sfnonet_spectral_ratio_rejects_preserve_global_mean():
         )
 
 
+def test_sfnonet_spectral_ratio_rejects_local_blocks():
+    with pytest.raises(NotImplementedError, match="local_blocks"):
+        SFNONetConfig(
+            embed_dim=16,
+            num_layers=2,
+            filter_type="linear",
+            spectral_ratio=0.5,
+            local_blocks=[0],
+        )
+
+
+def test_sfnonet_spectral_ratio_rejects_indivisible_groups():
+    # 8 * 0.25 -> 2 spectral channels, not divisible by filter_num_groups=4
+    with pytest.raises(ValueError, match="filter_num_groups"):
+        SFNONetConfig(
+            embed_dim=8,
+            num_layers=2,
+            filter_type="linear",
+            spectral_ratio=0.25,
+            filter_num_groups=4,
+        )
+
+
 def test_filter_preserves_global_mean_allows_grad():
     torch.manual_seed(0)
     input_channels = 2

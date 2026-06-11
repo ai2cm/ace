@@ -180,6 +180,20 @@ def test_spectral_ratio_default_unchanged():
     assert baseline_params == default_params
 
 
+def test_spectral_ratio_filter_residual_passes_through_projections():
+    torch.manual_seed(0)
+    embed_dim = 8
+    n_lat, n_lon = 12, 24
+    conv = _make_conv(embed_dim, n_lat, n_lon, spectral_ratio=0.5, filter_residual=True)
+    x = torch.randn(2, embed_dim, n_lat, n_lon)
+    y, residual = conv(x)
+    assert y.shape == (2, embed_dim, n_lat, n_lon)
+    assert residual.shape == x.shape
+    # The round-trip residual is bottlenecked through pre/post projections,
+    # so it must differ from the input.
+    assert not torch.equal(residual, x)
+
+
 def test_spectral_ratio_validation():
     embed_dim = 8
     with pytest.raises(ValueError, match="spectral_ratio"):
