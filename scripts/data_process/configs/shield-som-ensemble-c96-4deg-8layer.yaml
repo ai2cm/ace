@@ -22,10 +22,10 @@ runs:
   4xCO2-ic_0003: gs://vcm-ml-raw-flexible-retention/2024-07-03-C96-SHiELD-SOM/regridded-zarrs/gaussian_grid_45_by_90/4xCO2-ic_0003
   4xCO2-ic_0004: gs://vcm-ml-raw-flexible-retention/2024-07-03-C96-SHiELD-SOM/regridded-zarrs/gaussian_grid_45_by_90/4xCO2-ic_0004
   4xCO2-ic_0005: gs://vcm-ml-raw-flexible-retention/2024-07-03-C96-SHiELD-SOM/regridded-zarrs/gaussian_grid_45_by_90/4xCO2-ic_0005
-data_output_directory: gs://vcm-ml-intermediate/2026-01-28-vertically-resolved-4deg-c96-shield-som-ensemble-fme-dataset
+data_output_directory: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-4deg-c96-shield-som-ensemble-fme-dataset
 stats:
-  output_directory: gs://vcm-ml-intermediate/2026-01-28-vertically-resolved-4deg-c96-shield-som-ensemble-fme-dataset-stats
-  beaker_dataset: 2026-01-28-vertically-resolved-4deg-fme-c96-shield-som-ensemble-dataset-stats
+  output_directory: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-4deg-c96-shield-som-ensemble-fme-dataset-stats
+  beaker_dataset: 2026-06-08-vertically-resolved-4deg-fme-c96-shield-som-ensemble-dataset-stats
   # These datasets already exclude the one-year divergence period for each
   # ensemble member, so we can use data from all times when computing the
   # stats.
@@ -91,6 +91,7 @@ dataset_computation:
       - eastward_wind
       - pressure_thickness_of_atmospheric_layer
       - PRESsfc
+      - PRMSL
       - HGTsfc
       - column_soil_moisture
       - soil_moisture_0
@@ -129,8 +130,8 @@ dataset_computation:
     total_frozen_precip_rate: None
 time_coarsen:
   factor: 4
-  data_output_directory: gs://vcm-ml-intermediate/2026-01-28-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset
-  stats_output_directory: gs://vcm-ml-intermediate/2026-01-28-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset-stats
+  data_output_directory: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset
+  stats_output_directory: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset-stats
   snapshot_names:
     - PRESsfc
     - Q2m

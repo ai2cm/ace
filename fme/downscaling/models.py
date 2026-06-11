@@ -242,10 +242,15 @@ class DiffusionModelConfig:
         rename: dict[str, str] | None = None,
         static_inputs: StaticInputs | None = None,
     ) -> "DiffusionModel":
-        invert_rename = {v: k for k, v in (rename or {}).items()}
-        orig_in_names = [invert_rename.get(name, name) for name in self.in_names]
-        orig_out_names = [invert_rename.get(name, name) for name in self.out_names]
-        normalizer = self.normalization.build(orig_in_names, orig_out_names, rename)
+        # self.in_names / self.out_names are the ORIGINAL (training-time) names
+        # keying the normalization means/stds. `rename` translates them to the
+        # runtime names exposed by the built DiffusionModel. All rename
+        # application happens here: normalizer keys, in_names, out_names. The
+        # DiffusionModel itself just stores what it is given.
+        rename_map = rename or {}
+        in_names = [rename_map.get(n, n) for n in self.in_names]
+        out_names = [rename_map.get(n, n) for n in self.out_names]
+        normalizer = self.normalization.build(self.in_names, self.out_names, rename)
         loss = self.loss.build(gridded_operations=None)
         # We always use standard score normalization, so sigma_data is
         # always 1.0. See below for standard score normalization:
@@ -253,7 +258,7 @@ class DiffusionModelConfig:
         sigma_data = 1.0
 
         num_static_in_channels = len(static_inputs.fields) if static_inputs else 0
-        n_in_channels = len(self.in_names) + num_static_in_channels
+        n_in_channels = len(in_names) + num_static_in_channels
         if self.use_fine_topography and (
             not static_inputs or len(static_inputs.fields) == 0
         ):
@@ -271,7 +276,7 @@ class DiffusionModelConfig:
 
         module = self.module.build(
             n_in_channels=n_in_channels,
-            n_out_channels=len(self.out_names),
+            n_out_channels=len(out_names),
             coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
             sigma_data=sigma_data,
@@ -287,6 +292,8 @@ class DiffusionModelConfig:
             downscale_factor=downscale_factor,
             sigma_data=sigma_data,
             full_fine_coords=full_fine_coords,
+            in_names=in_names,
+            out_names=out_names,
             static_inputs=static_inputs,
         )
 
@@ -344,15 +351,21 @@ class DiffusionModel:
         downscale_factor: int,
         sigma_data: float,
         full_fine_coords: LatLonCoordinates,
+        in_names: list[str],
+        out_names: list[str],
         static_inputs: StaticInputs | None = None,
     ) -> None:
         """
         Args:
-            config: The configuration object for the diffusion model.
+            config: The configuration object for the diffusion model. Holds the
+                original training-time ``in_names``/``out_names``; the runtime
+                names are passed separately because rename is applied in
+                ``DiffusionModelConfig.build``.
             module: The neural network module used for downscaling. Note: this
                 should *not* be DistributedDataParallel since it is wrapped by
                 it in this init method.
             normalizer: The normalizer object used for data normalization.
+                Built with the rename already applied to its keys.
             loss: The loss function used for training the model.
             coarse_shape: The height (lat) and width (lon) of the
                 coarse-resolution input data used to train the model
@@ -363,6 +376,10 @@ class DiffusionModel:
                 model preconditioning.
             full_fine_coords: The full fine-resolution domain coordinates.
                 Serves as the canonical source of truth for the model output grid.
+            in_names: Runtime input variable names (i.e. ``rename`` already
+                applied to ``config.in_names``).
+            out_names: Runtime output variable names (i.e. ``rename`` already
+                applied to ``config.out_names``).
             static_inputs: Static inputs to the model. May be None when
                 no static data is needed. If present, coordinates
                 must match full_fine_coords.
@@ -374,14 +391,16 @@ class DiffusionModel:
         self.module = dist.wrap_module(module.to(get_device()))
         self.normalizer = normalizer
         self.loss = loss
-        self.in_packer = Packer(config.in_names)
-        self.out_packer = Packer(config.out_names)
         self.config = config
+        self.in_names = in_names
+        self.out_names = out_names
+        self.in_packer = Packer(self.in_names)
+        self.out_packer = Packer(self.out_names)
         self._channel_axis = -3
         self.full_fine_coords = full_fine_coords.to(get_device())
         self.static_inputs = static_inputs.to_device() if static_inputs else None
         self._loss_weight_tensor = _build_variable_loss_weight_tensor(
-            config.loss_weights.output_channels, config.out_names
+            config.loss_weights.output_channels, self.out_names
         )
 
     @property
@@ -669,11 +688,18 @@ class DiffusionModel:
     def from_state(
         cls,
         state: Mapping[str, Any],
+        rename: dict[str, str] | None = None,
     ) -> "DiffusionModel":
         """
         Reconstruct model from state (used during training checkpoint resumption).
         Requires full_fine_coords in state. For old checkpoints without it, use
         CheckpointModelConfig with fine_coordinates_path for backwards compatibility.
+
+        Args:
+            state: Saved DiffusionModel state from ``get_state``.
+            rename: Optional ``{original: renamed}`` mapping to apply at build
+                time. Not stored in ``state``; supply it here if the caller
+                needs the reloaded model to expose renamed runtime names.
         """
         static_inputs_state = state.get("static_inputs")
         static_inputs = (
@@ -699,6 +725,7 @@ class DiffusionModel:
             state["coarse_shape"],
             state["downscale_factor"],
             full_fine_coords=full_fine_coords,
+            rename=rename,
             static_inputs=static_inputs,
         )
         model.module.load_state_dict(state["module"], strict=True)
@@ -707,8 +734,8 @@ class DiffusionModel:
     @cached_property
     def metadata(self):
         return DiffusionModelMetadata(
-            in_names=self.config.in_names,
-            out_names=self.config.out_names,
+            in_names=self.in_names,
+            out_names=self.out_names,
             coarse_shape=self.coarse_shape,
             downscale_factor=self.downscale_factor,
             sigma_data=self.sigma_data,
@@ -765,7 +792,6 @@ class CheckpointModelConfig:
         # For config validation testing, we don't want to load immediately
         # so we defer until build or properties are accessed.
         self._checkpoint_is_loaded = False
-        self._rename = self.rename or {}
         if "module" in (self.model_updates or {}):
             raise ValueError("'module' cannot be updated in model_updates.")
         if self.fine_topography_path is not None:
@@ -781,14 +807,6 @@ class CheckpointModelConfig:
             checkpoint_data = torch.load(
                 self.checkpoint_path, map_location="cpu", weights_only=False
             )
-            checkpoint_data["model"]["config"]["in_names"] = [
-                self._rename.get(name, name)
-                for name in checkpoint_data["model"]["config"]["in_names"]
-            ]
-            checkpoint_data["model"]["config"]["out_names"] = [
-                self._rename.get(name, name)
-                for name in checkpoint_data["model"]["config"]["out_names"]
-            ]
             self._checkpoint_data = checkpoint_data
             self._checkpoint_is_loaded = True
             if self.model_updates is not None:
@@ -800,6 +818,7 @@ class CheckpointModelConfig:
     def _get_coords_backwards_compatible(
         coords_from_state: dict | None,
         fine_coordinates_path: str | None,
+        static_inputs: StaticInputs | None,
     ) -> LatLonCoordinates:
         if coords_from_state and fine_coordinates_path:
             raise ValueError(
@@ -813,25 +832,28 @@ class CheckpointModelConfig:
                 lon=coords_from_state["lon"].to(get_device(), copy=True),
             )
         elif fine_coordinates_path is not None:
-            return load_coords_from_path(fine_coordinates_path)
+            return load_coords_from_path(fine_coordinates_path).to(get_device())
+        elif static_inputs is not None:
+            return static_inputs.coords
         else:
             raise ValueError(
-                "No fine coordinates found in checkpoint state and no "
-                "fine_coordinates_path provided. One of these must be provided to "
-                "load the model using CheckpointModelConfig."
+                "No fine coordinates found in checkpoint state or static inputs, "
+                "and no fine_coordinates_path provided. One of these must be "
+                "provided to load the model using CheckpointModelConfig."
             )
 
     def build(
         self,
     ) -> DiffusionModel:
         checkpoint_model: dict = self._checkpoint["model"]
-        full_fine_coords = self._get_coords_backwards_compatible(
-            checkpoint_model.get("full_fine_coords"),
-            self.fine_coordinates_path,
-        )
         static_inputs = StaticInputs.from_state_backwards_compatible(
             state=checkpoint_model.get("static_inputs") or {},
             static_inputs_config=self.static_inputs or {},
+        )
+        full_fine_coords = self._get_coords_backwards_compatible(
+            checkpoint_model.get("full_fine_coords"),
+            self.fine_coordinates_path,
+            static_inputs,
         )
         model = _CheckpointModelConfigSelector.from_state(
             self._checkpoint["model"]["config"]
@@ -839,7 +861,7 @@ class CheckpointModelConfig:
             coarse_shape=self._checkpoint["model"]["coarse_shape"],
             downscale_factor=self._checkpoint["model"]["downscale_factor"],
             full_fine_coords=full_fine_coords,
-            rename=self._rename,
+            rename=self.rename,
             static_inputs=static_inputs,
         )
         model.module.load_state_dict(self._checkpoint["model"]["module"])
@@ -861,8 +883,14 @@ class CheckpointModelConfig:
 
     @property
     def in_names(self):
-        return self._checkpoint["model"]["config"]["in_names"]
+        rename = self.rename or {}
+        return [
+            rename.get(n, n) for n in self._checkpoint["model"]["config"]["in_names"]
+        ]
 
     @property
     def out_names(self):
-        return self._checkpoint["model"]["config"]["out_names"]
+        rename = self.rename or {}
+        return [
+            rename.get(n, n) for n in self._checkpoint["model"]["config"]["out_names"]
+        ]

@@ -132,7 +132,9 @@ def distributed_context():
 
 
 @pytest.fixture(autouse=True, scope="function")
-def enforce_timeout(skip_slow, very_fast_only, pdb_enabled, no_timeout):
+def enforce_timeout(
+    skip_slow, very_fast_only, pdb_enabled, no_timeout, _serialize_when_needed
+):
     if pdb_enabled or no_timeout:
         yield  # Do not enforce timeout if we are debugging
         return

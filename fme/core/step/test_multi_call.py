@@ -25,7 +25,7 @@ def test_multi_call(include_multi_call_in_loss: bool):
 
     def _step(args: StepArgs, wrapper=lambda x: x):
         prediction = {k: args.input["CO2"].detach().clone() for k in output_names}
-        return prediction
+        return prediction, args.stepper_state
 
     config = MultiCallStepConfig(
         wrapped_step=StepSelector(
@@ -53,7 +53,7 @@ def test_multi_call(include_multi_call_in_loss: bool):
             "b": torch.randn(1, 2, 3, 4),
             "CO2": torch.randn(1, 2, 3, 4),
         }
-        out = step.step(
+        out, _ = step.step(
             args=StepArgs(
                 input=input,
                 next_step_input_data={},
