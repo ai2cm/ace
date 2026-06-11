@@ -202,7 +202,7 @@ def generate_configs(
                                 noise_conditioning=noise_conditioning,
                             )
                             if iid:
-                                cfg["seed"] = 2
+                                cfg["seed"] = 3
                                 cfg["optimization"]["max_grad_norm"] = 0.5
                             else:
                                 cfg["optimization"].pop("max_grad_norm", None)
