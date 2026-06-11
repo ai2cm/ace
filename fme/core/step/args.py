@@ -1,5 +1,7 @@
 from collections.abc import Callable
 
+import torch
+
 from fme.core.labels import BatchLabels
 from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorMapping
@@ -35,12 +37,14 @@ class StepArgs:
         labels: BatchLabels | None = None,
         data_mask: TensorMapping | None = None,
         stepper_state: StepperState | None = None,
+        forward_time: torch.Tensor | None = None,
     ):
         self.input = input
         self.next_step_input_data = next_step_input_data
         self.labels = labels
         self.data_mask = data_mask
         self.stepper_state = stepper_state
+        self.forward_time = forward_time
 
     def apply_input_process_func(
         self, func: Callable[[TensorMapping], TensorMapping]
@@ -53,4 +57,5 @@ class StepArgs:
             labels=self.labels,
             data_mask=self.data_mask,
             stepper_state=self.stepper_state,
+            forward_time=self.forward_time,
         )

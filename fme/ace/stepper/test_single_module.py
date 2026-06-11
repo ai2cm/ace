@@ -2596,6 +2596,60 @@ def test_train_on_batch_masked_variable_has_zero_loss_count():
     assert stepped.per_channel_losses["a"].count == n_samples
 
 
+def test_train_on_batch_masked_output_only_variable_has_zero_loss_count():
+    """Masked diagnostic/output-only variable contributes 0 samples to loss."""
+    torch.manual_seed(0)
+    n_steps = 1
+    n_samples = 4
+    data_with_ic: BatchData = get_data(
+        ["a", "b"], n_samples=n_samples, n_time=n_steps + 1
+    ).data
+    data_with_ic.data_mask = {
+        "a": torch.ones(n_samples, dtype=torch.bool, device=DEVICE),
+        "b": torch.zeros(n_samples, dtype=torch.bool, device=DEVICE),
+    }
+    config = _get_stepper_config(["a"], ["a", "b"], module_name="RepeatChannel")
+    stepper = _get_train_stepper(config, loss=StepLossConfig(type="MSE"))
+    stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
+    assert stepped.per_channel_losses is not None
+    assert stepped.per_channel_losses["b"].count == 0
+    assert stepped.per_channel_losses["a"].count == n_samples
+
+
+def test_train_on_batch_masked_forcing_repeats_mask_across_ensemble():
+    """Masked forcing is zeroed for every ensemble member during training."""
+    torch.manual_seed(0)
+    n_steps = 1
+    n_samples = 2
+    n_ensemble = 3
+    data_with_ic: BatchData = get_data(
+        ["a", "b"], n_samples=n_samples, n_time=n_steps + 1
+    ).data
+    data_with_ic.data["b"][1] = torch.nan
+    data_with_ic.data_mask = {
+        "b": torch.tensor([True, False], dtype=torch.bool, device=DEVICE),
+    }
+    config = _get_stepper_config(["a", "b"], ["a"], module_name="ChannelSum")
+    loss = StepLossConfig(
+        type="EnsembleLoss",
+        kwargs={"crps_weight": 1.0, "energy_score_weight": 0.0},
+    )
+    stepper = _get_train_stepper(config, loss=loss, n_ensemble=n_ensemble)
+    stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
+
+    assert not torch.isnan(stepped.metrics["loss"])
+    assert not torch.isnan(stepped.gen_data["a"]).any()
+    wrapped_module = stepper.modules[0]
+    module = getattr(wrapped_module, "module", wrapped_module)
+    last_input = getattr(module, "last_input")
+    assert last_input is not None
+    b_channel = last_input.detach()[:, 1]
+    b_channel = b_channel.reshape(n_samples, n_ensemble, *b_channel.shape[1:])
+    expected_present = data_with_ic.data["b"][0, 0].expand_as(b_channel[0])
+    torch.testing.assert_close(b_channel[0], expected_present)
+    torch.testing.assert_close(b_channel[1], torch.zeros_like(b_channel[1]))
+
+
 def test_predict_with_data_mask_zeros_masked_forcing():
     """Masked forcing variable is zeroed in normalized space before the forward pass."""
     n_steps = 1

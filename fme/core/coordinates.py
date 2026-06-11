@@ -586,6 +586,10 @@ class HorizontalCoordinates(abc.ABC):
     def shape(self) -> tuple[int, ...]:
         pass
 
+    @property
+    def lat_1d(self) -> torch.Tensor | None:
+        return None
+
     @abc.abstractmethod
     def localize(self: HC) -> HC:
         """Return a copy with coordinates sliced to the local spatial chunk.
@@ -704,6 +708,10 @@ class LatLonCoordinates(HorizontalCoordinates):
 
     def get_state(self) -> TensorMapping:
         return {"lat": self.lat, "lon": self.lon}
+
+    @property
+    def lat_1d(self) -> torch.Tensor:
+        return self.lat
 
 
 @dataclasses.dataclass

@@ -20,12 +20,14 @@ def test_apply_input_process_func_propagates_metadata():
             global_dry_air_mass=torch.ones(n_batch, 1, 1),
         ),
     )
+    forward_time = torch.tensor([[3.0, 6.0]] * n_batch)
     args = StepArgs(
         input=input_data,
         next_step_input_data=next_step,
         labels=labels,
         data_mask=data_mask,
         stepper_state=stepper_state,
+        forward_time=forward_time,
     )
 
     def double(tensors):
@@ -44,6 +46,7 @@ def test_apply_input_process_func_propagates_metadata():
     for name in data_mask:
         torch.testing.assert_close(result.data_mask[name], data_mask[name])
     assert result.stepper_state is stepper_state
+    assert result.forward_time is forward_time
 
     known_attrs = {
         "input",
@@ -51,6 +54,7 @@ def test_apply_input_process_func_propagates_metadata():
         "labels",
         "data_mask",
         "stepper_state",
+        "forward_time",
     }
     actual_attrs = {
         name

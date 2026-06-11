@@ -1091,6 +1091,7 @@ class Stepper:
             forcing_data.labels,
             data_mask=forcing_data.data_mask,
             stepper_state=ic_batch_data.stepper_state,
+            time=forcing_data.time,
         )
 
     @property
@@ -1108,6 +1109,7 @@ class Stepper:
         labels: BatchLabels | None,
         data_mask: TensorMapping | None = None,
         stepper_state: StepperState | None = None,
+        time: xr.DataArray | None = None,
     ) -> Generator[tuple[TensorDict, StepperState | None], None, None]:
         state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
         for step in range(n_forward_steps):
@@ -1125,6 +1127,19 @@ class Stepper:
             }
             input_data = {**state, **input_forcing}
 
+            forward_time: torch.Tensor | None = None
+            if time is not None:
+                step_time = time[:, step]
+                if hasattr(step_time, "dt"):
+                    device = next(iter(state.values())).device
+                    month = torch.tensor(
+                        step_time.dt.month.values, dtype=torch.float32, device=device
+                    )
+                    hour = torch.tensor(
+                        step_time.dt.hour.values, dtype=torch.float32, device=device
+                    )
+                    forward_time = torch.stack([month, hour], dim=-1)
+
             def checkpoint(module):
                 return optimizer.checkpoint(module, step=step)
 
@@ -1136,6 +1151,7 @@ class Stepper:
                         labels=labels,
                         data_mask=data_mask,
                         stepper_state=stepper_state,
+                        forward_time=forward_time,
                     ),
                     wrapper=checkpoint,
                 )
@@ -1657,8 +1673,9 @@ class TrainStepper(
             n_forward_steps,
             optimization,
             labels=input_ensemble_data.labels,
-            data_mask=input_ensemble_data.data_mask,
+            data_mask=forcing_ensemble_data.data_mask,
             stepper_state=input_ensemble_data.stepper_state,
+            time=forcing_ensemble_data.time,
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)
@@ -1686,7 +1703,7 @@ class TrainStepper(
                     gen_step=gen_step,
                     target_step=target_step,
                     step=step,
-                    data_mask=input_batch_data.data_mask,
+                    data_mask=data.data_mask,
                     optimize=optimize_step,
                     metrics=metrics,
                     weighted_sums=weighted_sums,
