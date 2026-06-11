@@ -202,8 +202,8 @@ def generate_configs(
                                 noise_conditioning=noise_conditioning,
                             )
                             if iid:
-                                cfg["seed"] = 1
-                                cfg["optimization"]["max_grad_norm"] = 1.0
+                                cfg["seed"] = 2
+                                cfg["optimization"]["max_grad_norm"] = 0.5
                             else:
                                 cfg["optimization"].pop("max_grad_norm", None)
                             cfg["stepper_training"]["n_forward_steps"] = n_steps
