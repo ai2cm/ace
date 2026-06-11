@@ -50,7 +50,9 @@ def _write_global_nc(path: Path, n_lat: int, n_lon: int, num_timesteps: int) -> 
     ds.to_netcdf(path, format="NETCDF4_CLASSIC")
 
 
-def global_data_paths_helper(tmp_path: Path, num_timesteps: int = 4):
+def global_data_paths_helper(
+    tmp_path: Path, num_timesteps: int = 4, scale_factor: int = 2
+) -> FineResCoarseResPair[str]:
     """Like data_paths_helper but with global (0-360) lon coordinates.
 
     Coarse is 4 lat × 8 lon (45° lon spacing), fine is 8 lat × 16 lon
@@ -59,8 +61,17 @@ def global_data_paths_helper(tmp_path: Path, num_timesteps: int = 4):
     """
     fine_path = tmp_path / "fine" / "data.nc"
     coarse_path = tmp_path / "coarse" / "data.nc"
-    _write_global_nc(fine_path, n_lat=8, n_lon=16, num_timesteps=num_timesteps)
-    _write_global_nc(coarse_path, n_lat=4, n_lon=8, num_timesteps=num_timesteps)
+    coarse_n_lon = 8
+    coarse_n_lat = 4
+    _write_global_nc(
+        fine_path,
+        n_lat=coarse_n_lat * scale_factor,
+        n_lon=coarse_n_lon * scale_factor,
+        num_timesteps=num_timesteps,
+    )
+    _write_global_nc(
+        coarse_path, n_lat=coarse_n_lat, n_lon=coarse_n_lon, num_timesteps=num_timesteps
+    )
     return FineResCoarseResPair[str](
         fine=str(tmp_path / "fine"), coarse=str(tmp_path / "coarse")
     )
@@ -278,14 +289,14 @@ def test_PairedDataLoaderConfig_includes_merge(tmp_path, very_fast_only: bool):
 
 
 def test_PairedDataLoaderConfig_prime_meridian_crossing(tmp_path):
-    """PairedDataLoaderConfig must not raise a scale-factor error for a
-    lon_extent that crosses the prime meridian (lon_start < 0).
-
-    Regression test for the bug where adjust_fine_coord_range received
-    unrolled (0-360) coordinates, causing coarse_min to snap to ~0 instead
-    of the correct negative value, making the fine lon selection too narrow.
+    """PairedDataLoaderConfig must not fail on a prime merdidian crossing
+    in the longitude coordinates.  To pass, the fine and coarse
+    datasets must be correctly rolled such that the subset preserves the
+    scale factor between them.
     """
-    paths = global_data_paths_helper(tmp_path)
+
+    scale_factor = 2
+    paths = global_data_paths_helper(tmp_path, scale_factor=scale_factor)
     requirements = DataRequirements(
         fine_names=["var0"],
         coarse_names=["var0"],
@@ -301,12 +312,14 @@ def test_PairedDataLoaderConfig_prime_meridian_crossing(tmp_path):
         lat_extent=ClosedInterval(1.0, 4.0),
         lon_extent=ClosedInterval(-22.5, 22.5),
     )
-    # Before the fix this raised:
-    #   ValueError: Fine and coarse datasets must have the same scale factor
-    #   between lat and lon dimensions.
+
     data = data_config.build(requirements=requirements, train=False)
     batch = next(iter(data.loader))
-    # coarse: 2 lat pts in [1,4], 2 lon pts in [-22.5,22.5] (with overlap padding)
-    # fine: 4 lat pts, 4 lon pts (2× scale factor)
-    assert batch.coarse.data["var0"].shape[-2] * 2 == batch.fine.data["var0"].shape[-2]
-    assert batch.coarse.data["var0"].shape[-1] * 2 == batch.fine.data["var0"].shape[-1]
+    assert (
+        batch.coarse.data["var0"].shape[-2] * scale_factor
+        == batch.fine.data["var0"].shape[-2]
+    )
+    assert (
+        batch.coarse.data["var0"].shape[-1] * scale_factor
+        == batch.fine.data["var0"].shape[-1]
+    )
