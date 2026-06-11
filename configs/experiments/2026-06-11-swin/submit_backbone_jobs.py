@@ -1,10 +1,10 @@
-"""Submit a gantry training job for each generated var-masking config.
+"""Submit a gantry training job for each generated backbone config.
 
-Each config produced by generate_masking_configs.py is submitted via
+Each config produced by generate_backbone_configs.py is submitted via
 run-ace-train.sh, which validates the config and calls gantry.
 
 Usage:
-    python submit_mask_jobs.py [--dry-run] [--beaker-workspace WORKSPACE]
+    python submit_backbone_jobs.py [--dry-run] [--beaker-workspace WORKSPACE]
                                [--beaker-cluster CLUSTER [CLUSTER ...]]
                                [--beaker-priority PRIORITY]
 """
@@ -23,7 +23,7 @@ WANDB_GROUP = "ace2-backbones-2026-06-11"
 CONFIGS = sorted(
     path.name
     for path in HERE.glob("*.yaml")
-    if path.name.startswith("ace-train-config-4deg-AIMIP-") and "-mask" in path.name
+    if path.name.startswith("ace-train-config-4deg-AIMIP-")
 )
 
 
@@ -67,7 +67,7 @@ def main() -> None:
         config_path = HERE / config_filename
         if not config_path.exists():
             raise FileNotFoundError(
-                f"{config_filename} not found — run generate_masking_configs.py first"
+                f"{config_filename} not found — run generate_backbone_configs.py first"
             )
         job_name = config_to_job_name(config_filename)
         cmd = [str(RUN_SCRIPT), config_filename, job_name, WANDB_GROUP]

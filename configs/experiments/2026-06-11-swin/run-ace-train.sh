@@ -6,9 +6,9 @@ SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the reposi
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username by default
 WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
-WANDB_PROJECT=${WANDB_PROJECT:-VarMasking}
+WANDB_PROJECT=${WANDB_PROJECT:-Backbones2}
 BEAKER_WORKSPACE=${BEAKER_WORKSPACE:-ai2/ace}
-BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/titan ai2/saturn ai2/jupiter ai2/ceres"}
+BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/titan ai2/jupiter ai2/ceres"}
 BEAKER_PRIORITY=${BEAKER_PRIORITY:-high}
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=2
