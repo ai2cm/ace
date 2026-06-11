@@ -6,3 +6,5 @@
 1pct_nosmooth_0256to0350-plusOHC-nsff|rs0|01KTDWHTXNP6FN16F60XJ39DPY|run_ic0211_20steps|best_inference_ckpt|high|--min-runtime 20m
 
 1pct_nosmooth_0256to0350-optPre_plusOHC_excl_seaice-nsff|rs0|01KTDWJ86W0KH0RCY57880AECV|run_ic0211_20steps|best_inference_ckpt|high|--min-runtime 20m
+
+1pct_nosmooth_0256to0350-nsff-ft_correctOHC|rs0|01KTW2KHKPK5HGP6T7VAWC9PJT|training|best_inference_ckpt|normal|--min-runtime 8h
