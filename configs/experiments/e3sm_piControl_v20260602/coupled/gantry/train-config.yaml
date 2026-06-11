@@ -1,0 +1,644 @@
+experiment_dir: /results
+save_checkpoint: true
+save_best_inference_epoch_checkpoints: true
+checkpoint_every_n_batches: 100
+log_train_every_n_batches: 10
+validate_using_ema: true
+evaluate_before_training: true
+ema:
+  decay: 0.9995
+  faster_decay_at_start: false
+max_epochs: 40
+inference:
+  - name: inference
+    weight: 1.0
+    n_coupled_steps: 880
+    coupled_steps_in_memory: 2
+    loader:
+      num_data_workers: 2
+      dataset:
+        ocean:
+          merge:
+            - data_path: /climate-default
+              file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-ocean.zarr
+              engine: zarr
+            - data_path: /climate-default
+              file_pattern: 2026-06-02-E3SMv3-piControl-ocean-105yr-5D-average.zarr
+              engine: zarr
+        atmosphere:
+          merge:
+            - data_path: /climate-default
+              file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-atmosphere.zarr
+              engine: zarr
+            - data_path: /climate-default
+              file_pattern: 2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H.zarr
+              engine: zarr
+      start_indices:
+        times:
+          - '0425-01-03T12:00:00'
+          - '0436-01-03T12:00:00'
+          - '0447-01-03T12:00:00'
+          - '0458-01-03T12:00:00'
+          - '0469-01-03T12:00:00'
+          - '0480-01-03T12:00:00'
+          - '0491-01-03T12:00:00'
+          - '0502-01-03T12:00:00'
+    aggregator:
+      log_zonal_mean_images: false
+      log_histograms: false
+  - name: 12yr_test
+    n_coupled_steps: 880
+    epochs:
+      start: 0
+      step: 5
+    coupled_steps_in_memory: 2
+    aggregator:
+      log_zonal_mean_images: false
+      log_histograms: false
+    loader:
+      num_data_workers: 2
+      dataset:
+        ocean:
+          merge:
+            - data_path: /climate-default
+              file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-ocean.zarr
+              engine: zarr
+            - data_path: /climate-default
+              file_pattern: 2026-06-02-E3SMv3-piControl-ocean-105yr-5D-average.zarr
+              engine: zarr
+        atmosphere:
+          merge:
+            - data_path: /climate-default
+              file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-atmosphere.zarr
+              engine: zarr
+            - data_path: /climate-default
+              file_pattern: 2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H.zarr
+              engine: zarr
+      start_indices:
+        times:
+          - '0515-01-03T12:00:00'
+          - '0515-06-02T12:00:00'
+          - '0515-11-04T12:00:00'
+          - '0516-04-03T12:00:00'
+          - '0516-09-05T12:00:00'
+          - '0517-02-02T12:00:00'
+          - '0517-07-02T12:00:00'
+          - '0518-01-03T12:00:00'
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-e3smv3
+  entity: ai2cm
+  metrics_log_dir: /results/metrics
+train_loader:
+  batch_size: 8
+  num_data_workers: 2
+  prefetch_factor: 2
+  strict_ensemble: false
+  dataset:
+    ocean:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-ocean.zarr
+          engine: zarr
+          subset:
+            start_time: '0425-01-03T12:00:00'
+            stop_time: '0515-01-01T12:00:00'
+        - data_path: /climate-default
+          file_pattern: 2026-06-02-E3SMv3-piControl-ocean-105yr-5D-average.zarr
+          engine: zarr
+          subset:
+            start_time: '0425-01-03T12:00:00'
+            stop_time: '0515-01-03T12:00:00'
+    atmosphere:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-atmosphere.zarr
+          engine: zarr
+          subset:
+            start_time: '0425-01-03T12:00:00'
+            stop_time: '0515-01-03T12:00:00'
+        - data_path: /climate-default
+          file_pattern: 2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H.zarr
+          engine: zarr
+          subset:
+            start_time: '0425-01-03T12:00:00'
+            stop_time: '0515-01-03T12:00:00'
+validation:
+  loader:
+    batch_size: 16
+    num_data_workers: 2
+    prefetch_factor: 2
+    dataset:
+      ocean:
+        merge:
+          - data_path: /climate-default
+            file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-ocean.zarr
+            engine: zarr
+            subset:
+              start_time: '0515-01-03T12:00:00'
+              stop_time: '0520-01-03T12:00:00'
+          - data_path: /climate-default
+            file_pattern: 2026-06-02-E3SMv3-piControl-ocean-105yr-5D-average.zarr
+            engine: zarr
+            subset:
+              start_time: '0515-01-03T12:00:00'
+              stop_time: '0520-01-03T12:00:00'
+      atmosphere:
+        merge:
+          - data_path: /climate-default
+            file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-atmosphere.zarr
+            engine: zarr
+            subset:
+              start_time: '0515-01-03T12:00:00'
+              stop_time: '0520-01-03T12:00:00'
+          - data_path: /climate-default
+            file_pattern: 2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H.zarr
+            engine: zarr
+            subset:
+              start_time: '0515-01-03T12:00:00'
+              stop_time: '0520-01-03T12:00:00'
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.00001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+  scheduler:
+    schedulers:
+      - type: LinearLR
+        step_each_iteration: true
+        kwargs:
+          start_factor: 0.01
+          end_factor: 1
+          total_iters: 3000
+      - type: ConstantLR
+        step_each_iteration: true
+    milestones: [3000]
+stepper_training:
+  n_coupled_steps: 4
+  n_ensemble: 2
+  ocean:
+    parameter_init:
+      weights_path: /ocean_ckpt.tar
+    loss_contributions:
+      weight: 1.0
+      n_steps:
+        outcomes:
+          - steps: 0
+            probability: 0.1
+          - steps: 1
+            probability: 0.3
+          - steps: 2
+            probability: 0.3
+          - steps: 4
+            probability: 0.3
+      optimize_last_step_only: false
+    loss:
+      type: EnsembleLoss
+      kwargs:
+        crps_weight: 0.9
+        energy_score_weight: 0.1
+  atmosphere:
+    parameter_init:
+      weights_path: /atmos_ckpt.tar
+    loss_contributions:
+      weight: 1.0
+      n_steps:
+        outcomes:
+          - steps: 0
+            probability: 0.025
+          - steps: 1
+            probability: 0.29
+          - steps: 2
+            probability: 0.29
+          - steps: 4
+            probability: 0.29
+          - steps: 21
+            probability: 0.1
+          - steps: 41
+            probability: 0.05
+      optimize_last_step_only: true
+    loss:
+      type: EnsembleLoss
+      kwargs:
+        crps_weight: 0.9
+        energy_score_weight: 0.1
+stepper:
+  ocean_fraction_prediction:
+    land_fraction_name: LANDFRAC
+    sea_ice_fraction_name_in_atmosphere: ICEFRAC
+    sea_ice_fraction_name: ocean_sea_ice_fraction
+  sst_name: sst
+  ocean:
+    timedelta: 5D
+    # stepper added by job_runner/create_coupled_train_config.sh
+
+    stepper:
+      input_masking:
+        mask_value: 0
+        fill_value: 0
+        exclude_names_and_prefixes:
+          - LANDFRAC
+      step:
+        type: single_module
+        config:
+          builder:
+            type: Samudra
+            config:
+              ch_width:
+                - 280
+                - 380
+                - 480
+                - 520
+              dilation:
+                - 1
+                - 2
+                - 4
+                - 8
+              n_layers:
+                - 1
+                - 1
+                - 1
+                - 1
+              norm: instance
+              upscale_factor: 2
+              checkpoint_strategy: all
+          normalization:
+            network:
+              global_means_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-06-02-E3SMv3-piControl-105yr-coupled-stats/ocean/centering.nc
+              global_stds_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-06-02-E3SMv3-piControl-105yr-coupled-stats/ocean/scaling-full-field.nc
+          corrector:
+            type: ocean_corrector
+            config:
+              force_positive_names:
+                - salinityCoarsened_0
+                - salinityCoarsened_1
+                - salinityCoarsened_2
+                - salinityCoarsened_3
+                - salinityCoarsened_4
+                - salinityCoarsened_5
+                - salinityCoarsened_6
+                - salinityCoarsened_7
+                - salinityCoarsened_8
+                - salinityCoarsened_9
+                - salinityCoarsened_10
+                - salinityCoarsened_11
+                - salinityCoarsened_12
+                - salinityCoarsened_13
+                - salinityCoarsened_14
+                - salinityCoarsened_15
+                - salinityCoarsened_16
+                - salinityCoarsened_17
+                - salinityCoarsened_18
+                - iceVolumeTotal
+              sea_ice_fraction_correction:
+                sea_ice_fraction_name: ocean_sea_ice_fraction
+                land_fraction_name: LANDFRAC
+                remove_negative_ocean_fraction: false
+                zero_where_ice_free_names:
+                  - iceVolumeTotal
+                  - iceVolumeTotal
+          next_step_forcing_names:
+            - TAUX
+            - TAUY
+            - surface_precipitation_rate
+            - frozen_precipitation_rate
+            - FLUS
+            - FSUS
+            - FLDS
+            - FSDS
+            - LHFLX
+            - SHFLX
+          in_names:
+            - LANDFRAC
+            - sea_surface_fraction
+            - TAUX
+            - TAUY
+            - surface_precipitation_rate
+            - frozen_precipitation_rate
+            - FLUS
+            - FSUS
+            - FLDS
+            - FSDS
+            - LHFLX
+            - SHFLX
+            - sst
+            - ssh
+            - salinityCoarsened_0
+            - salinityCoarsened_1
+            - salinityCoarsened_2
+            - salinityCoarsened_3
+            - salinityCoarsened_4
+            - salinityCoarsened_5
+            - salinityCoarsened_6
+            - salinityCoarsened_7
+            - salinityCoarsened_8
+            - salinityCoarsened_9
+            - salinityCoarsened_10
+            - salinityCoarsened_11
+            - salinityCoarsened_12
+            - salinityCoarsened_13
+            - salinityCoarsened_14
+            - salinityCoarsened_15
+            - salinityCoarsened_16
+            - salinityCoarsened_17
+            - salinityCoarsened_18
+            - temperatureCoarsened_0
+            - temperatureCoarsened_1
+            - temperatureCoarsened_2
+            - temperatureCoarsened_3
+            - temperatureCoarsened_4
+            - temperatureCoarsened_5
+            - temperatureCoarsened_6
+            - temperatureCoarsened_7
+            - temperatureCoarsened_8
+            - temperatureCoarsened_9
+            - temperatureCoarsened_10
+            - temperatureCoarsened_11
+            - temperatureCoarsened_12
+            - temperatureCoarsened_13
+            - temperatureCoarsened_14
+            - temperatureCoarsened_15
+            - temperatureCoarsened_16
+            - temperatureCoarsened_17
+            - temperatureCoarsened_18
+            - velocityZonalCoarsened_0
+            - velocityZonalCoarsened_1
+            - velocityZonalCoarsened_2
+            - velocityZonalCoarsened_3
+            - velocityZonalCoarsened_4
+            - velocityZonalCoarsened_5
+            - velocityZonalCoarsened_6
+            - velocityZonalCoarsened_7
+            - velocityZonalCoarsened_8
+            - velocityZonalCoarsened_9
+            - velocityZonalCoarsened_10
+            - velocityZonalCoarsened_11
+            - velocityZonalCoarsened_12
+            - velocityZonalCoarsened_13
+            - velocityZonalCoarsened_14
+            - velocityZonalCoarsened_15
+            - velocityZonalCoarsened_16
+            - velocityZonalCoarsened_17
+            - velocityZonalCoarsened_18
+            - velocityMeridionalCoarsened_0
+            - velocityMeridionalCoarsened_1
+            - velocityMeridionalCoarsened_2
+            - velocityMeridionalCoarsened_3
+            - velocityMeridionalCoarsened_4
+            - velocityMeridionalCoarsened_5
+            - velocityMeridionalCoarsened_6
+            - velocityMeridionalCoarsened_7
+            - velocityMeridionalCoarsened_8
+            - velocityMeridionalCoarsened_9
+            - velocityMeridionalCoarsened_10
+            - velocityMeridionalCoarsened_11
+            - velocityMeridionalCoarsened_12
+            - velocityMeridionalCoarsened_13
+            - velocityMeridionalCoarsened_14
+            - velocityMeridionalCoarsened_15
+            - velocityMeridionalCoarsened_16
+            - velocityMeridionalCoarsened_17
+            - velocityMeridionalCoarsened_18
+            - ocean_sea_ice_fraction
+            - iceVolumeTotal
+          out_names:
+            - sst
+            - ssh
+            - salinityCoarsened_0
+            - salinityCoarsened_1
+            - salinityCoarsened_2
+            - salinityCoarsened_3
+            - salinityCoarsened_4
+            - salinityCoarsened_5
+            - salinityCoarsened_6
+            - salinityCoarsened_7
+            - salinityCoarsened_8
+            - salinityCoarsened_9
+            - salinityCoarsened_10
+            - salinityCoarsened_11
+            - salinityCoarsened_12
+            - salinityCoarsened_13
+            - salinityCoarsened_14
+            - salinityCoarsened_15
+            - salinityCoarsened_16
+            - salinityCoarsened_17
+            - salinityCoarsened_18
+            - temperatureCoarsened_0
+            - temperatureCoarsened_1
+            - temperatureCoarsened_2
+            - temperatureCoarsened_3
+            - temperatureCoarsened_4
+            - temperatureCoarsened_5
+            - temperatureCoarsened_6
+            - temperatureCoarsened_7
+            - temperatureCoarsened_8
+            - temperatureCoarsened_9
+            - temperatureCoarsened_10
+            - temperatureCoarsened_11
+            - temperatureCoarsened_12
+            - temperatureCoarsened_13
+            - temperatureCoarsened_14
+            - temperatureCoarsened_15
+            - temperatureCoarsened_16
+            - temperatureCoarsened_17
+            - temperatureCoarsened_18
+            - velocityZonalCoarsened_0
+            - velocityZonalCoarsened_1
+            - velocityZonalCoarsened_2
+            - velocityZonalCoarsened_3
+            - velocityZonalCoarsened_4
+            - velocityZonalCoarsened_5
+            - velocityZonalCoarsened_6
+            - velocityZonalCoarsened_7
+            - velocityZonalCoarsened_8
+            - velocityZonalCoarsened_9
+            - velocityZonalCoarsened_10
+            - velocityZonalCoarsened_11
+            - velocityZonalCoarsened_12
+            - velocityZonalCoarsened_13
+            - velocityZonalCoarsened_14
+            - velocityZonalCoarsened_15
+            - velocityZonalCoarsened_16
+            - velocityZonalCoarsened_17
+            - velocityZonalCoarsened_18
+            - velocityMeridionalCoarsened_0
+            - velocityMeridionalCoarsened_1
+            - velocityMeridionalCoarsened_2
+            - velocityMeridionalCoarsened_3
+            - velocityMeridionalCoarsened_4
+            - velocityMeridionalCoarsened_5
+            - velocityMeridionalCoarsened_6
+            - velocityMeridionalCoarsened_7
+            - velocityMeridionalCoarsened_8
+            - velocityMeridionalCoarsened_9
+            - velocityMeridionalCoarsened_10
+            - velocityMeridionalCoarsened_11
+            - velocityMeridionalCoarsened_12
+            - velocityMeridionalCoarsened_13
+            - velocityMeridionalCoarsened_14
+            - velocityMeridionalCoarsened_15
+            - velocityMeridionalCoarsened_16
+            - velocityMeridionalCoarsened_17
+            - velocityMeridionalCoarsened_18
+            - ocean_sea_ice_fraction
+            - iceVolumeTotal
+  atmosphere:
+    timedelta: 6h
+    # stepper added by job_runner/create_coupled_train_config.sh
+
+    stepper:
+      step:
+        type: single_module
+        config:
+          residual_prediction: false
+          builder:
+            type: NoiseConditionedSFNO
+            config:
+              embed_dim: 384
+              noise_embed_dim: 64
+              noise_type: isotropic
+              filter_type: linear
+              use_mlp: true
+              num_layers: 8
+              operator_type: dhconv
+              separable: false
+              spectral_layers: 3
+              spectral_transform: sht
+              affine_norms: true
+          normalization:
+            network:
+              global_means_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-06-02-E3SMv3-piControl-105yr-coupled-stats/uncoupled_atmosphere/centering.nc
+              global_stds_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-06-02-E3SMv3-piControl-105yr-coupled-stats/uncoupled_atmosphere/scaling-full-field.nc
+            residual:
+              global_means_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-06-02-E3SMv3-piControl-105yr-coupled-stats/uncoupled_atmosphere/centering.nc
+              global_stds_path: /pscratch/sd/e/elynnwu/fme-dataset/2026-06-02-E3SMv3-piControl-105yr-coupled-stats/uncoupled_atmosphere/scaling-residual.nc
+          ocean:
+            surface_temperature_name: TS
+            ocean_fraction_name: OCNFRAC
+            interpolate: true
+          corrector:
+            total_energy_budget_correction:
+              method: constant_temperature
+              constant_unaccounted_heating: 0.09
+            conserve_dry_air: true
+            moisture_budget_correction: advection_and_precipitation
+            force_positive_names:
+              - STW_0
+              - STW_1
+              - STW_2
+              - STW_3
+              - STW_4
+              - STW_5
+              - STW_6
+              - STW_7
+              - surface_precipitation_rate
+              - frozen_precipitation_rate
+              - FLUS
+              - FLUT
+              - FLDS
+              - FSDS
+              - FSUS
+              - FSUTOA
+          next_step_forcing_names:
+            - SOLIN
+          in_names:
+            - LANDFRAC
+            - OCNFRAC
+            - ICEFRAC
+            - PHIS
+            - SOLIN
+            - PS
+            - TS
+            - T_0
+            - T_1
+            - T_2
+            - T_3
+            - T_4
+            - T_5
+            - T_6
+            - T_7
+            - STW_0
+            - STW_1
+            - STW_2
+            - STW_3
+            - STW_4
+            - STW_5
+            - STW_6
+            - STW_7
+            - U_0
+            - U_1
+            - U_2
+            - U_3
+            - U_4
+            - U_5
+            - U_6
+            - U_7
+            - V_0
+            - V_1
+            - V_2
+            - V_3
+            - V_4
+            - V_5
+            - V_6
+            - V_7
+            - Qat2m
+            - Uat10m
+            - Vat10m
+            - Tat2m
+          out_names:
+            - PS
+            - TS
+            - T_0
+            - T_1
+            - T_2
+            - T_3
+            - T_4
+            - T_5
+            - T_6
+            - T_7
+            - STW_0
+            - STW_1
+            - STW_2
+            - STW_3
+            - STW_4
+            - STW_5
+            - STW_6
+            - STW_7
+            - U_0
+            - U_1
+            - U_2
+            - U_3
+            - U_4
+            - U_5
+            - U_6
+            - U_7
+            - V_0
+            - V_1
+            - V_2
+            - V_3
+            - V_4
+            - V_5
+            - V_6
+            - V_7
+            - LHFLX
+            - SHFLX
+            - surface_precipitation_rate
+            - frozen_precipitation_rate
+            - FLUS
+            - FLUT
+            - FLDS
+            - FSDS
+            - FSUS
+            - FSUTOA
+            - DTENDTTW
+            - TAUX
+            - TAUY
+            - Qat2m
+            - Uat10m
+            - Vat10m
+            - Tat2m
