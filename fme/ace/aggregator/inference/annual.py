@@ -322,7 +322,9 @@ def get_r2(da: xr.DataArray, reference: xr.DataArray) -> float:
 
 
 def get_rmse(da: xr.DataArray, reference: xr.DataArray) -> float:
-    """Compute the RMSE of the data compared to the reference over years."""
+    """Compute the RMSE of the data compared to the reference over years,
+    ignoring NaN values (e.g. gap years filled in by reindexing).
+    """
     ref_data = reference.sel(year=da.year)
     return float(np.sqrt(np.nanmean((da - ref_data).values ** 2)))
 
