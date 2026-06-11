@@ -1406,6 +1406,14 @@ class Stepper:
         for module in self.modules:
             module.train()
 
+    def set_epoch(self, epoch: int) -> None:
+        for module in self.modules:
+            for submodule in module.modules():
+                request_reset = getattr(
+                    submodule, "request_latent_global_mean_envelope_reset", None
+                )
+                if callable(request_reset):
+                    request_reset()
 
 
 @dataclasses.dataclass
@@ -1791,6 +1799,9 @@ class TrainStepper(
     def set_train(self) -> None:
         self._loss_schedule.set_train()
         self._stepper.set_train()
+
+    def set_epoch(self, epoch: int) -> None:
+        self._stepper.set_epoch(epoch)
 
 
 def get_serialized_stepper_vertical_coordinate(
