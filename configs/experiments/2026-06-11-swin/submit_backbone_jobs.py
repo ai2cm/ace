@@ -58,7 +58,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--beaker-priority",
-        default="urgent",
+        default="high",
         help="Beaker job priority (default: high).",
     )
     args = parser.parse_args()
