@@ -754,18 +754,13 @@ class DiffusionModel:
         """
         Number of positions to roll the fine grid (and the lon_start it aligns to)
         so the fine cells stay aligned to coarse_lon's coarse cells.
-
-        coarse_lon is the actual coarse domain grid, so it already carries the
-        convention to align to. The roll is anchored on the western coarse-cell
-        *edge* (half a coarse cell below coarse_lon.min(), which is a cell *center*)
-        so the fine grid rolls by a whole number of coarse cells and its cells stay
-        aligned to the coarse cells. Anchoring on the center instead would roll by an
-        extra downscale_factor // 2 fine points, splitting the boundary coarse cell
-        across the seam.
         """
         lon_start = float(coarse_lon.min())
         fine_lon = self.full_fine_coords.lon
         fine_spacing = float(fine_lon[1] - fine_lon[0])
+        # Anchor on the western coarse-cell *edge* (not its center, lon_start) so
+        # the roll is a whole number of coarse cells; anchoring on the center
+        # would split the boundary coarse cell across the seam.
         western_edge = lon_start - self.downscale_factor * fine_spacing / 2.0
         return find_roll_anchor(fine_lon, western_edge), lon_start
 
