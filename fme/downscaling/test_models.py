@@ -574,13 +574,23 @@ def test_with_rolled_lon_shifts_coords_and_shares_weights():
     # Reconstruction wraps a fresh module around the SAME raw weights.
     assert rolled.module is not model.module
     assert next(rolled.module.parameters()) is next(model.module.parameters())
-    assert not torch.equal(rolled.full_fine_coords.lon, model.full_fine_coords.lon)
     assert torch.all(rolled.full_fine_coords.lon[1:] > rolled.full_fine_coords.lon[:-1])
     assert rolled.full_fine_coords.lon[0].item() < 0
-    assert rolled.static_inputs is not None
-    # Compare against model.static_inputs (on-device) rather than the CPU-side original
-    assert not torch.equal(
-        rolled.static_inputs.fields[0].data, model.static_inputs.fields[0].data
+
+    # Value-level check that coords and static data rolled together, lon-only.
+    # The roll amount is recovered from the coords; the static field encodes its
+    # original flat index, so a coord/data roll mismatch or an accidental lat
+    # roll changes values. Compare against model.static_inputs (on-device)
+    # rather than the CPU-side original.
+    orig_lon = model.full_fine_coords.lon
+    rolled_lon = rolled.full_fine_coords.lon
+    roll = int(torch.argmin(torch.abs(orig_lon - rolled_lon[0] % 360.0)).item())
+    assert roll > 0
+    assert torch.allclose(rolled_lon % 360.0, torch.roll(orig_lon, -roll) % 360.0)
+    assert model.static_inputs is not None and rolled.static_inputs is not None
+    assert torch.equal(
+        rolled.static_inputs.fields[0].data,
+        torch.roll(model.static_inputs.fields[0].data, -roll, dims=-1),
     )
 
     # Guards against accidental double-rolling: the second roll resolves to 0
