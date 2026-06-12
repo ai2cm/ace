@@ -305,6 +305,7 @@ validation:
 optimization:
   enable_automatic_mixed_precision: false
   lr: 3.0e-4
+  max_grad_norm: 1.0
   optimizer_type: FusedAdam
   use_gradient_accumulation: true
   no_weight_decay_bias_and_norm: true
@@ -332,57 +333,61 @@ stepper_training:
   loss:
     type: MSE
     weights:
-      # Surface: non-T2m variables get 0.1 (TMP2m and surface_temperature default to 1.0)
-      UGRD10m: 0.1
-      VGRD10m: 0.1
-      PRESsfc: 0.1
-      Q2m: 0.1
-      LHTFLsfc: 0.1
-      SHTFLsfc: 0.1
-      PRATEsfc: 0.1
-      ULWRFsfc: 0.1
-      ULWRFtoa: 0.1
-      DLWRFsfc: 0.1
-      DSWRFsfc: 0.1
-      USWRFsfc: 0.1
-      USWRFtoa: 0.1
-      tendency_of_total_water_path_due_to_advection: 0.1
-      # Level variables (pressure-proportional weights; level 0=top ~50hPa, level 7=bottom ~1000hPa)
-      air_temperature_0: 0.16
-      air_temperature_1: 0.32
-      air_temperature_2: 0.65
-      air_temperature_3: 0.81
-      air_temperature_4: 1.62
-      air_temperature_5: 2.27
-      air_temperature_6: 2.75
-      air_temperature_7: 3.24
-      specific_total_water_0: 0.16
-      specific_total_water_1: 0.32
-      specific_total_water_2: 0.65
-      specific_total_water_3: 0.81
-      specific_total_water_4: 1.62
-      specific_total_water_5: 2.27
-      specific_total_water_6: 2.75
-      specific_total_water_7: 3.24
-      eastward_wind_0: 0.16
-      eastward_wind_1: 0.32
-      eastward_wind_2: 0.65
-      eastward_wind_3: 0.81
-      eastward_wind_4: 1.62
-      eastward_wind_5: 2.27
-      eastward_wind_6: 2.75
-      eastward_wind_7: 3.24
-      northward_wind_0: 0.16
-      northward_wind_1: 0.32
-      northward_wind_2: 0.65
-      northward_wind_3: 0.81
-      northward_wind_4: 1.62
-      northward_wind_5: 2.27
-      northward_wind_6: 2.75
-      northward_wind_7: 3.24
+      # ACE multiplies weights into the normalized fields before the MSE, so each
+      # coefficient enters the squared error as w^2. Values below are square roots
+      # of the intended ArchesWeather/GraphCast linear coefficients (mythos_review.md
+      # item 1): surface non-T2m 0.1, levels pressure-proportional 0.16..3.24.
+      # Surface: non-T2m variables get sqrt(0.1) (TMP2m and surface_temperature default to 1.0)
+      UGRD10m: 0.3162
+      VGRD10m: 0.3162
+      PRESsfc: 0.3162
+      Q2m: 0.3162
+      LHTFLsfc: 0.3162
+      SHTFLsfc: 0.3162
+      PRATEsfc: 0.3162
+      ULWRFsfc: 0.3162
+      ULWRFtoa: 0.3162
+      DLWRFsfc: 0.3162
+      DSWRFsfc: 0.3162
+      USWRFsfc: 0.3162
+      USWRFtoa: 0.3162
+      tendency_of_total_water_path_due_to_advection: 0.3162
+      # Level variables: sqrt of pressure-proportional weights (level 0=top ~50hPa, level 7=bottom ~1000hPa)
+      air_temperature_0: 0.4
+      air_temperature_1: 0.5657
+      air_temperature_2: 0.8062
+      air_temperature_3: 0.9
+      air_temperature_4: 1.2728
+      air_temperature_5: 1.5067
+      air_temperature_6: 1.6583
+      air_temperature_7: 1.8
+      specific_total_water_0: 0.4
+      specific_total_water_1: 0.5657
+      specific_total_water_2: 0.8062
+      specific_total_water_3: 0.9
+      specific_total_water_4: 1.2728
+      specific_total_water_5: 1.5067
+      specific_total_water_6: 1.6583
+      specific_total_water_7: 1.8
+      eastward_wind_0: 0.4
+      eastward_wind_1: 0.5657
+      eastward_wind_2: 0.8062
+      eastward_wind_3: 0.9
+      eastward_wind_4: 1.2728
+      eastward_wind_5: 1.5067
+      eastward_wind_6: 1.6583
+      eastward_wind_7: 1.8
+      northward_wind_0: 0.4
+      northward_wind_1: 0.5657
+      northward_wind_2: 0.8062
+      northward_wind_3: 0.9
+      northward_wind_4: 1.2728
+      northward_wind_5: 1.5067
+      northward_wind_6: 1.6583
+      northward_wind_7: 1.8
       # Diagnostics at specific pressure levels
-      TMP850: 2.75
-      h500: 1.62
+      TMP850: 1.6583
+      h500: 1.2728
 stepper:
   step:
     type: single_module
@@ -391,7 +396,9 @@ stepper:
       # swin_diff.md item 6: 2-step input (previous state concatenation)
       n_ic_timesteps: 2
       builder:
-        # swin_diff.md item 9: axis_attn (2D axial self-attention replacing ColumnMixer)
+        # axis_attn disabled: AxialAttentionMixer is global spatial axial attention,
+        # not ArchesWeather's cross-level attention; in the 2D layout the default
+        # ColumnMixer is the closer analog (mythos_review.md item 5)
         type: SwinTransformer
         config:
           embed_dim: 256
@@ -408,7 +415,7 @@ stepper:
           drop_path_rate: 0.2
           use_skip: true
           mlp_layer: swiglu
-          axis_attn: true
+          axis_attn: false
           padding_conf:
             activate: true
             mode: earth

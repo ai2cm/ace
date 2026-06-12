@@ -23,8 +23,7 @@ WANDB_GROUP = "ace2-backbones-2026-06-11"
 CONFIGS = sorted(
     path.name
     for path in HERE.glob("*.yaml")
-    if path.name.startswith("ace-train-config-4deg-AIMIP-")
-    and ("hybrid" in path.name or "-lr" in path.name)
+    if path.name.startswith("ace-train-config-4deg-AIMIP-") and ("swin" in path.name)
 )
 
 
@@ -33,7 +32,7 @@ def config_to_job_name(config_filename: str) -> str:
     # → ace2-backbone
     stem = pathlib.Path(config_filename).stem  # strip .yaml
     suffix = stem.removeprefix("ace-train-config-4deg-AIMIP-")
-    return f"ace2-backbone-{suffix}"
+    return f"ace2-backbone-{suffix}-v2"
 
 
 def main() -> None:
@@ -45,13 +44,13 @@ def main() -> None:
     )
     parser.add_argument(
         "--beaker-workspace",
-        default="ai2/climate-titan",
+        default="ai2/ace",
         help="Beaker workspace to submit jobs to (default: ai2/ace).",
     )
     parser.add_argument(
         "--beaker-cluster",
         nargs="+",
-        default=["ai2/titan"],
+        default=["ai2/titan", "ai2/jupiter", "ai2/ceres"],
         metavar="CLUSTER",
         help=(
             "Beaker cluster(s) to target (default: ai2/titan" "ai2/jupiter ai2/ceres)."

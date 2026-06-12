@@ -455,8 +455,8 @@ def test_tanc_swin_time_conditioning_affects_output():
     optimizer.step()
     optimizer.zero_grad()
 
-    time_jan = torch.tensor([[1.0, 0.0], [1.0, 0.0]], device=fme.get_device())
-    time_jul = torch.tensor([[7.0, 0.0], [7.0, 0.0]], device=fme.get_device())
+    time_jan = torch.tensor([[15.0, 0.0], [15.0, 0.0]], device=fme.get_device())
+    time_jul = torch.tensor([[196.0, 0.0], [196.0, 0.0]], device=fme.get_device())
     # Fix noise by setting noise convs to deterministic (eval mode still resamples,
     # so compare means over many samples or just check not identical on average).
     with torch.no_grad():

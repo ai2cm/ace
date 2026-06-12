@@ -2768,3 +2768,50 @@ def test_predict_generator_with_n_ic_timesteps_2_and_forcing():
         + forcing_data_tensor[:, 0]
     )
     torch.testing.assert_close(output.data["a"][:, 0], expected_step0)
+
+
+def test_predict_generator_forward_time_is_dayofyear_and_hour():
+    """forward_time threaded to step is (day-of-year, hour) of the input step's
+    time. Day-of-year rather than month follows the ArchesWeatherAIMIP
+    conditioning ablation."""
+    n_steps = 3
+    n_samples = 2
+    img_shape = (5, 5)
+
+    config = _get_stepper_config(["a"], ["a"], module_name="ChannelSum")
+    stepper = config.get_stepper(get_dataset_info())
+
+    # Daily steps across a (leap) year boundary: doy 365, 366, then 1.
+    index = xr.date_range(
+        "2000-12-30T06:00:00", freq="D", periods=n_steps + 1, use_cftime=True
+    )
+    time = xr.DataArray(np.stack(n_samples * [index]), dims=["sample", "time"])
+    full_data = BatchData.new_on_device(
+        data={"a": torch.rand(n_samples, n_steps + 1, *img_shape, device=DEVICE)},
+        time=time,
+        labels=None,
+    )
+    input_state = full_data.get_start(prognostic_names=["a"], n_ic_timesteps=1)
+    forcing_data = BatchData.new_on_device(data={}, time=time, labels=None)
+
+    captured: list[torch.Tensor | None] = []
+    original_step = stepper.step
+
+    def capturing_step(args, wrapper=lambda x: x):
+        captured.append(args.forward_time)
+        return original_step(args, wrapper=wrapper)
+
+    stepper.step = capturing_step
+    stepper.predict(input_state, forcing_data)
+
+    assert len(captured) == n_steps
+    expected_dayofyear = [365.0, 366.0, 1.0]
+    for step, forward_time in enumerate(captured):
+        assert forward_time is not None
+        torch.testing.assert_close(
+            forward_time,
+            torch.tensor(
+                [[expected_dayofyear[step], 6.0]] * n_samples,
+                device=forward_time.device,
+            ),
+        )

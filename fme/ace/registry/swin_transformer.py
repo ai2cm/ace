@@ -76,11 +76,13 @@ class _ContextWrappedModule(nn.Module):
 class _TimeConditionedContextWrappedModule(nn.Module):
     """Wraps SwinTransformerNet to accept (x, labels, forward_time).
 
-    Embeds the per-step calendar month and hour-of-day via two separate
+    Embeds the per-step day-of-year and hour-of-day via two separate
     ``TimestepEmbedder`` modules (DiT-style sinusoidal + MLP), sums the
     embeddings, and passes the result as ``context.embedding_scalar`` for
-    AdaLN conditioning.  When ``forward_time`` is None a zero embedding is
-    used so the model degrades gracefully.
+    AdaLN conditioning.  Day-of-year rather than month follows the
+    ArchesWeatherAIMIP ablation, where month conditioning is distinctly
+    worse.  When ``forward_time`` is None a zero embedding is used so the
+    model degrades gracefully.
 
     Args:
         module: The underlying ``SwinTransformerNet``.
@@ -99,7 +101,7 @@ class _TimeConditionedContextWrappedModule(nn.Module):
         super().__init__()
         self.module = module
         self.embed_dim_scalar = embed_dim_scalar
-        self.month_embedder = TimestepEmbedder(
+        self.dayofyear_embedder = TimestepEmbedder(
             embed_dim_scalar, frequency_embedding_size
         )
         self.hour_embedder = TimestepEmbedder(
@@ -113,10 +115,10 @@ class _TimeConditionedContextWrappedModule(nn.Module):
         forward_time: torch.Tensor | None = None,
     ) -> torch.Tensor:
         if forward_time is not None:
-            month = forward_time[:, 0]
+            dayofyear = forward_time[:, 0]
             hour = forward_time[:, 1]
-            embedding_scalar: torch.Tensor = self.month_embedder(
-                month
+            embedding_scalar: torch.Tensor = self.dayofyear_embedder(
+                dayofyear
             ) + self.hour_embedder(hour)
         else:
             embedding_scalar = torch.zeros(
@@ -152,7 +154,8 @@ class SwinTransformerBuilder(ModuleConfig):
         embed_dim_scalar: Scalar conditioning dimension.  When > 0, AdaLN
             conditioning is enabled but ``context.embedding_scalar`` must be
             populated by the caller.  Use ``TimeConditionedSwinTransformer``
-            instead for automatic month/hour conditioning; leave at 0 here.
+            instead for automatic day-of-year/hour conditioning; leave at 0
+            here.
         embed_dim_labels: Label conditioning dimension. When 0 and the dataset
             has labels, it defaults to the number of labels, which is the
             dimension the registry feeds the model.
@@ -395,10 +398,10 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
 @ModuleSelector.register("TimeConditionedSwinTransformer")
 @dataclasses.dataclass
 class TimeConditionedSwinTransformerBuilder(ModuleConfig):
-    """Swin U-Net conditioned on calendar month and hour-of-day via AdaLN.
+    """Swin U-Net conditioned on day-of-year and hour-of-day via AdaLN.
 
     Wraps ``SwinTransformerNet`` in ``_TimeConditionedContextWrappedModule``
-    which embeds the per-step ``(month, hour)`` pair through two
+    which embeds the per-step ``(dayofyear, hour)`` pair through two
     ``TimestepEmbedder`` modules (DiT-style sinusoidal features + MLP) and
     injects the summed embedding as ``context.embedding_scalar`` for
     per-block AdaLN modulation.  The timestamp is extracted automatically
@@ -529,7 +532,7 @@ class _TimeAndNoiseConditionedWrapper(nn.Module):
     """Wraps SwinTransformerNet to accept (x, labels, forward_time) with hybrid
     conditioning.
 
-    Embeds ``(month, hour)`` via ``TimestepEmbedder`` modules into
+    Embeds ``(dayofyear, hour)`` via ``TimestepEmbedder`` modules into
     ``context.embedding_scalar`` (for per-block AdaLN) and samples a fresh
     Gaussian noise field into ``context.noise`` (for per-block CLN) on each
     forward pass.  This gives genuinely stochastic ensemble members while
@@ -555,7 +558,7 @@ class _TimeAndNoiseConditionedWrapper(nn.Module):
         self.module = module
         self.embed_dim_scalar = embed_dim_scalar
         self.embed_dim_noise = embed_dim_noise
-        self.month_embedder = TimestepEmbedder(
+        self.dayofyear_embedder = TimestepEmbedder(
             embed_dim_scalar, frequency_embedding_size
         )
         self.hour_embedder = TimestepEmbedder(
@@ -570,10 +573,10 @@ class _TimeAndNoiseConditionedWrapper(nn.Module):
     ) -> torch.Tensor:
         B, _, H, W = x.shape
         if forward_time is not None:
-            month = forward_time[:, 0]
+            dayofyear = forward_time[:, 0]
             hour = forward_time[:, 1]
-            embedding_scalar: torch.Tensor = self.month_embedder(
-                month
+            embedding_scalar: torch.Tensor = self.dayofyear_embedder(
+                dayofyear
             ) + self.hour_embedder(hour)
         else:
             embedding_scalar = torch.zeros(
@@ -596,8 +599,9 @@ class _TimeAndNoiseConditionedWrapper(nn.Module):
 class TimeAndNoiseConditionedSwinTransformerBuilder(ModuleConfig):
     """Swin U-Net with AdaLN time conditioning and CLN noise conditioning (hybrid).
 
-    Combines the time conditioning of ``TimeConditionedSwinTransformer`` (month
-    and hour-of-day via DiT-style AdaLN) with the stochastic noise conditioning
+    Combines the time conditioning of ``TimeConditionedSwinTransformer``
+    (day-of-year and hour-of-day via DiT-style AdaLN) with the stochastic noise
+    conditioning
     of ``NoiseConditionedSwinTransformer`` (per-block Gaussian noise via CLN).
     Each forward pass samples a fresh noise field so multiple calls on the same
     input produce genuinely different outputs, enabling CRPS / ensemble training.

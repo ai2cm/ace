@@ -1148,13 +1148,15 @@ class Stepper:
                 step_time = time[:, step]
                 if hasattr(step_time, "dt"):
                     device = next(iter(state.values())).device
-                    month = torch.tensor(
-                        step_time.dt.month.values, dtype=torch.float32, device=device
+                    dayofyear = torch.tensor(
+                        step_time.dt.dayofyear.values,
+                        dtype=torch.float32,
+                        device=device,
                     )
                     hour = torch.tensor(
                         step_time.dt.hour.values, dtype=torch.float32, device=device
                     )
-                    forward_time = torch.stack([month, hour], dim=-1)
+                    forward_time = torch.stack([dayofyear, hour], dim=-1)
 
             def checkpoint(module):
                 return optimizer.checkpoint(module, step=step)

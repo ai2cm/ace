@@ -1,0 +1,13 @@
+# Mythos Review Fixes — Implementation Summary
+
+All three fixes are implemented, tested, and pass pre-commit (ruff, ruff-format, mypy). The changes are uncommitted on `exp/alexey3` for your review.
+
+**1. Loss weight scaling** (review item 1): ACE applies `weights` to the normalized fields, so coefficients enter the MSE as w². In the four MSE configs (`swin`, `swin-lr`, `tc-swin`, `tc-swin-lr`) I replaced the weight tables with the square roots of the intended ArchesWeather linear coefficients (surface 0.1 → 0.3162, levels 0.16…3.24 → 0.4…1.8, `TMP850` → 1.6583, `h500` → 1.2728), with a comment explaining the semantics. The four `nc`/`hybrid` configs keep their values unchanged — CRPS and the energy score are 1-homogeneous, so field weights already enter those losses linearly; I documented that in their comments. The sfno configs use the classic ACE weight table (intentionally in ACE semantics), so I left them alone. A script verified every MSE table entry squares back to the intended linear coefficient.
+
+**2. Time conditioning** (review item 3): switched from (month, hour) to (day-of-year, hour) per the AIMIP ablation. `predict_generator` in `fme/ace/stepper/single_module.py:1148` now emits `dt.dayofyear` instead of `dt.month`, and both swin wrappers (`_TimeConditionedContextWrappedModule`, `_TimeAndNoiseConditionedWrapper`) got `month_embedder` renamed to `dayofyear_embedder` with docstrings updated. Since this code exists only on this branch (not on `main`), there are no release checkpoints to keep compatible — the rename is clean. I added `test_predict_generator_forward_time_is_dayofyear_and_hour`, which steps daily across the 2000→2001 leap-year boundary and asserts the step receives doy 365, 366, 1 with hour 6.
+
+**3. axis_attn** (review item 5): set `axis_attn: false` in all 8 swin configs, replacing the "swin_diff item 9" comment with one explaining that `AxialAttentionMixer` is global spatial attention with no ArchesWeather counterpart and that the default `ColumnMixer` is the honest 2D analog of cross-level attention. I also corrected the misleading "port of ArchesWeather's axis_attn" docstrings in `swin_layers.py` (the feature itself is kept, available as a deliberate ablation arm).
+
+Tests: 59 swin registry/model tests, the full 124-test stepper file, and step-args tests all pass on CPU.
+
+One review item not in this round but worth flagging since it was priority 1: `max_grad_norm: 1.0` is still only in the two hybrid configs — the other six swin/sfno configs still lack gradient clipping. The SST/SIC supervision, shift-mask, and RPFT items also remain open.

@@ -229,8 +229,13 @@ class _SelfAttention(nn.Module):
 class AxialAttentionMixer(nn.Module):
     """2D axial self-attention with learnable positional embeddings.
 
-    A zero-dependency port of ArchesWeather's ``axis_attn`` component adapted
-    for ACE's 2D ``(B, H, W, C)`` layout.  Replicates exactly:
+    A zero-dependency port of the ``axial-attention`` library modules that
+    ArchesWeather builds its ``axis_attn`` from, applied here to ACE's 2D
+    ``(B, H, W, C)`` layout. Note the result is *not* ArchesWeather's
+    ``axis_attn``: there it is 1D cross-level attention over the 8 vertical
+    tokens per spatial location, whereas this attends globally along the H
+    and W spatial axes — an architectural addition with no ArchesWeather
+    counterpart. Replicates exactly:
 
     * ``AxialPositionalEmbedding(dim, shape=(H, W), emb_dim_index=-1)`` —
       a ``(1, H, 1, dim)`` per-row parameter and a ``(1, 1, W, dim)``
@@ -361,8 +366,12 @@ class SwinTransformerBlock(nn.Module):
     Two sub-blocks: window attention (with a column-interaction mixer folded into
     its output) followed by an MLP. When ``axis_attn=False`` (default) the mixer
     is a simple ``ColumnMixer`` (pointwise linear); when ``axis_attn=True`` it is
-    replaced by ``AxialAttentionMixer``, a zero-dependency port of ArchesWeather's
-    ``axis_attn`` component that applies independent H- and W-axis self-attention.
+    replaced by ``AxialAttentionMixer``, which applies independent global H- and
+    W-axis self-attention. Note this is *not* equivalent to ArchesWeather's
+    ``axis_attn`` (cross-level attention over the 8 vertical tokens): in ACE's 2D
+    layout levels are stacked in channels and cross-level interaction is already
+    dense in every linear layer, so ``ColumnMixer`` is the closer 2D analog and
+    ``AxialAttentionMixer`` adds global spatial attention Arches does not have.
 
     In ``"adaln"`` mode, AdaLN scale/shift is applied after each norm and a gate
     scales each residual branch. In ``"cln"`` mode, ``ConditionalLayerNorm`` is
@@ -389,8 +398,8 @@ class SwinTransformerBlock(nn.Module):
         context_config: Required when ``conditioning="cln"`` or ``"hybrid"``;
             passed to each ``ConditionalLayerNorm``.
         axis_attn: When ``True``, replace the ``ColumnMixer`` with
-            ``AxialAttentionMixer`` (2D axial self-attention matching
-            ArchesWeather's ``axis_attn``).
+            ``AxialAttentionMixer`` (global 2D axial self-attention; an
+            addition beyond ArchesWeather, not its cross-level ``axis_attn``).
     """
 
     def __init__(

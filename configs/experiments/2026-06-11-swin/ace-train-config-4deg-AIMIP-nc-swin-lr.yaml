@@ -305,6 +305,7 @@ validation:
 optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001
+  max_grad_norm: 1.0
   optimizer_type: FusedAdam
   use_gradient_accumulation: true
   no_weight_decay_bias_and_norm: true
@@ -336,6 +337,10 @@ stepper_training:
       crps_weight: 0.9
       energy_score_weight: 0.1
     weights:
+      # ACE multiplies weights into the normalized fields before the loss. CRPS and
+      # the energy score are 1-homogeneous, so these coefficients enter the loss
+      # linearly and the ArchesWeather/GraphCast table is used as-is (unlike the MSE
+      # configs, where square roots are needed; see mythos_review.md item 1).
       # Surface: non-T2m variables get 0.1 (TMP2m and surface_temperature default to 1.0)
       UGRD10m: 0.1
       VGRD10m: 0.1
@@ -395,7 +400,9 @@ stepper:
       # swin_diff.md item 6: 2-step input (previous state concatenation)
       n_ic_timesteps: 2
       builder:
-        # swin_diff.md item 9: axis_attn (2D axial self-attention replacing ColumnMixer)
+        # axis_attn disabled: AxialAttentionMixer is global spatial axial attention,
+        # not ArchesWeather's cross-level attention; in the 2D layout the default
+        # ColumnMixer is the closer analog (mythos_review.md item 5)
         type: NoiseConditionedSwinTransformer
         config:
           embed_dim: 256
@@ -412,7 +419,7 @@ stepper:
           drop_path_rate: 0.2
           use_skip: true
           mlp_layer: swiglu
-          axis_attn: true
+          axis_attn: false
           noise_embed_dim: 256
           padding_conf:
             activate: true
