@@ -85,11 +85,18 @@ class CoupledOceanFractionConfig:
     Configuration for computing ocean fraction from the ocean-predicted sea ice
     fraction.
 
+    The configured land fraction name is used to read the atmosphere forcing,
+    then passed to OceanData as its canonical land_fraction field. The configured
+    sea ice fraction name must be registered in OCEAN_FIELD_NAME_PREFIXES as
+    either sea_ice_fraction or ocean_sea_ice_fraction.
+
     Parameters:
         sea_ice_fraction_name: Name of the sea ice fraction field in the ocean
-            data. Must be an ocean prognostic variable. If the atmosphere uses
-            the same name as an ML forcing then the generated sea ice fraction
-            is also passed as an input to the atmosphere.
+            data. Must be an ocean prognostic variable and must be registered in
+            OCEAN_FIELD_NAME_PREFIXES as either sea_ice_fraction or
+            ocean_sea_ice_fraction. If the atmosphere uses the same name as an
+            ML forcing then the generated sea ice fraction is also passed as an
+            input to the atmosphere.
         land_fraction_name: Name of the land fraction field in the atmosphere
             data. If needed, will be passed to the ocean stepper as a forcing.
         sea_ice_fraction_name_in_atmosphere: Name of the sea ice fraction field in
@@ -100,6 +107,21 @@ class CoupledOceanFractionConfig:
     sea_ice_fraction_name: str
     land_fraction_name: str
     sea_ice_fraction_name_in_atmosphere: str | None = None
+
+    def __post_init__(self):
+        self._get_canonical_sea_ice_fraction_name()
+
+    def _get_canonical_sea_ice_fraction_name(self) -> str:
+        sea_ice_frac_name = self.sea_ice_fraction_name
+        if sea_ice_frac_name in OCEAN_FIELD_NAME_PREFIXES["sea_ice_fraction"]:
+            return "sea_ice_fraction"
+        elif sea_ice_frac_name in OCEAN_FIELD_NAME_PREFIXES["ocean_sea_ice_fraction"]:
+            return "ocean_sea_ice_fraction"
+        else:
+            raise ValueError(
+                f"CoupledOceanFractionConfig expected {sea_ice_frac_name} to be "
+                "registered in OCEAN_FIELD_NAME_PREFIXES as a sea ice fraction."
+            )
 
     def validate_ocean_prognostic_names(self, prognostic_names: Iterable[str]):
         if self.sea_ice_fraction_name not in prognostic_names:
@@ -152,19 +174,10 @@ class CoupledOceanFractionConfig:
         # fill nans with 0s
         sea_ice_frac = torch.nan_to_num(forcings_from_ocean[sea_ice_frac_name])
         land_frac = atmos_forcing_data[land_frac_name]
-        if sea_ice_frac_name in OCEAN_FIELD_NAME_PREFIXES["sea_ice_fraction"]:
-            canonical_sea_ice_frac_name = "sea_ice_fraction"
-        elif sea_ice_frac_name in OCEAN_FIELD_NAME_PREFIXES["ocean_sea_ice_fraction"]:
-            canonical_sea_ice_frac_name = "ocean_sea_ice_fraction"
-        else:
-            raise ValueError(
-                f"CoupledOceanFractionConfig expected {sea_ice_frac_name} to be "
-                "registered in OCEAN_FIELD_NAME_PREFIXES as a sea ice fraction."
-            )
         return OceanData(
             {
                 "land_fraction": land_frac,
-                canonical_sea_ice_frac_name: sea_ice_frac,
+                self._get_canonical_sea_ice_fraction_name(): sea_ice_frac,
             }
         )
 
