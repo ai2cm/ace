@@ -4,8 +4,37 @@
 
 | Cluster | Priority | Limit (GPUs) | Committed | Active now | Free vs cap |
 |---------|----------|--------------|-----------|-----------|-------------|
-| Jupiter (ai2/ace) | high | 16 | 9 | 9 | 7 |
+| Jupiter (ai2/ace) | high | 16 | 10 | 2 | 14 nominal (heavily contended) |
 | Titan (ai2/climate-titan) | urgent | 4 | 0 | 0 | 4 |
+
+_**Reconcile cycle (2026-06-11 22:08 → 2026-06-12 01:38 UTC):** 1 newly finished —
+**qsat-scaling-residual-rs0** (Wave 16, 9vwhs0uh, 01:13 UTC ec=0, 60ep, bvl 0.1424, bie 0.0628 healthy
+— qsat-scaling + residual combo works, closes out Wave 16; it resumed after the 22:07 preemption and
+completed). No failures. Contention unchanged: still only **c4d4e2-rs0 and labels-c7d2e1-rs0 running
+(2 active)**; 8 queued including all 3 Wave 18 jobs (never started — the concurrent-inference speed A/B
+has not begun). Titan remains idle (0/4). Last reconciled with Beaker: 2026-06-12 01:38 UTC._
+
+_**Reconcile cycle (2026-06-11 18:43 → 22:08 UTC):** 1 newly finished — **labels-rollout-rs0** (Wave 7,
+5to8ym26, 20:04 UTC ec=0, 60ep, bvl 0.1642, bie 0.0516 healthy; closes out Wave 7). No failures. **A
+preemption wave hit Jupiter right at reconcile time** (job statuses were flipping between queries):
+7 of the 8 still-running jobs were preempted back to queued — Wave 17 c5d4e1/c7d2e1-2156/
+c7d2e1-qsat-scaling, Wave 16 qsat-scaling-residual, Wave 15 residual-rs0-d471, Wave 7
+labels-multistep-rs1 — leaving only **c4d4e2-rs0 and labels-c7d2e1-rs0 running (2 active)**. The 3 Wave
+18 launches remain queued (never started). 9 queued total; all queued jobs except labels-multistep-rs1
+are dual-cluster and can land on idle Titan. Last reconciled with Beaker: 2026-06-11 22:08 UTC._
+
+_**Wave 18 launched (2026-06-11 ~21:30 UTC):** reruns of era5-only and era5-only-residual with improved
+inference config (commit b1d6360f3): new **10year_insample** (ICs 1995-01-01..08, inside the 1995-2013
+training chunk) now drives checkpoint selection (weight 1.0) while the out-of-sample 10year (2015 ICs)
+drops to weight 0.0; new **long_46year_constant_co2** holds global_mean_co2 at its 1979 IC value via
+loader persistence_names (existing feature — no code change needed). rs0 pair launched from b1d6360
+pre-merge; then **feature/concurrent-inline-inference merged** (26917b9af; conflicts resolved in
+test_batch_data.py, semantic fixes: aggregator_factory(epoch) arity in test_trainer.py, restored
+inference log-key overlap guard — label-union merging preserved per 096742b25; 547 tests pass) and
+**era5-only-rs1-38f7** launched from 38f707b as the concurrent-inference speed A/B vs rs0-b1d6 (configs
+identical except seed; rs1 regenerated without the old ensemble_metrics). Concurrent inference is
+automatic for tasks sharing (forward_steps_in_memory, n_ensemble_per_ic): both 10years + both 46years
+form one group of 4._
 
 _All jobs are 1 GPU each. **Reconcile cycle (2026-06-11 15:43 → 18:43 UTC, ~3h):** 4 newly finished, all
 ec=0/60ep/healthy — **sr0p25-residual-rs0-d471** (Wave 15, xs34zfva, 18:01 UTC, bvl 0.1314, bie 0.0514 —
@@ -40,18 +69,19 @@ slots; the two -d471 Wave 15 dual-cluster jobs landed on Jupiter, not Titan. Las
 Status legend: **running** / **queued** (waiting for slot) / **finished** /
 **failed** (exited nonzero) / **canceled** (never started, superseded).
 
-## Running / queued (Jupiter+Titan, high, 1 GPU each) — 9 committed (9 running, 0 queued) vs 16 cap
+## Running / queued (Jupiter+Titan, high, 1 GPU each) — 10 committed (2 running, 8 queued) vs 16 cap
 
 | Name | Config | Beaker Experiment | wandb ID | Status | Notes |
 |------|--------|-------------------|----------|--------|-------|
+| train-4deg-daily-v1-era5-only-rs0-b1d6 | era5-only.yaml | [01KTW7BP8GN5H1QJKP7KVPC0HX](https://beaker.org/ex/01KTW7BP8GN5H1QJKP7KVPC0HX) | pending | queued | Wave 18; era5-only rerun with improved inference config (10year_insample drives checkpoint selection; long_46year_constant_co2 holds CO2 at 1979 IC value); launched from b1d6360 PRE concurrent-inline-inference merge — sequential-inference side of the speed A/B vs rs1-38f7 |
+| train-4deg-daily-v1-era5-only-residual-rs0-b1d6 | era5-only-residual.yaml | [01KTW7C5VT904W9K2YTEM5QRTT](https://beaker.org/ex/01KTW7C5VT904W9K2YTEM5QRTT) | pending | queued | Wave 18; era5-only-residual rerun with improved inference config (same as rs0-b1d6) + EMA epoch checkpoints; launched from b1d6360 |
+| train-4deg-daily-v1-era5-only-rs1-38f7 | era5-only-rs1.yaml | [01KTW8SSBBEZ1J79C8HBYKDPPK](https://beaker.org/ex/01KTW8SSBBEZ1J79C8HBYKDPPK) | pending | queued | Wave 18; seed-1 replicate of rs0-b1d6 (config identical except seed, ensemble_metrics dropped) launched from 38f707b POST concurrent-inline-inference merge (26917b9af) — concurrent-inference side of the speed A/B; both 10years + both 46years batch through one BatchedPredictor |
 | train-4deg-daily-v1-era5-only-c4d4e2-rs0 | era5-only-c4d4e2.yaml | [01KTVH0CPQKJS2HYFERVMJP7YB](https://beaker.org/ex/01KTVH0CPQKJS2HYFERVMJP7YB) | pending | running | Wave 17; era5-only (non-residual) + CRPS/fd-CRPS/energy loss weights 0.4/0.4/0.2; total_water_path in restricted outputs; dual-cluster (Jupiter+Titan) high; launched from 2156170 at 2026-06-11 14:30 UTC |
-| train-4deg-daily-v1-era5-only-c5d4e1-rs0 | era5-only-c5d4e1.yaml | [01KTVH0TY5V0EDXGK1WQD6D9GA](https://beaker.org/ex/01KTVH0TY5V0EDXGK1WQD6D9GA) | pending | running | Wave 17; era5-only (non-residual) + CRPS/fd-CRPS/energy loss weights 0.5/0.4/0.1; total_water_path in restricted outputs; dual-cluster (Jupiter+Titan) high; launched from 2156170 at 2026-06-11 14:30 UTC |
-| train-4deg-daily-v1-era5-only-c7d2e1-rs0-2156 | era5-only-c7d2e1.yaml | [01KTVH196G07C92HN1HAATKP2Q](https://beaker.org/ex/01KTVH196G07C92HN1HAATKP2Q) | pending | running | Wave 17; era5-only (non-residual) + CRPS/fd-CRPS/energy loss weights 0.7/0.2/0.1 (matches the finished Wave 8 c7d2e1-rs0 but without lr_tuning, lr 0.0001 directly); total_water_path in restricted outputs; dual-cluster (Jupiter+Titan) high; launched from 2156170 at 2026-06-11 14:30 UTC. -2156 suffix because the original c7d2e1-rs0 name belongs to the now-renamed c7d2e1-lr-tuning config |
-| train-4deg-daily-v1-era5-only-c7d2e1-qsat-scaling-rs0 | era5-only-c7d2e1-qsat-scaling.yaml | [01KTVH1Q5ZX1M07M8S6YW5684J](https://beaker.org/ex/01KTVH1Q5ZX1M07M8S6YW5684J) | pending | running | Wave 17; era5-only-qsat-scaling base + c7d2e1 loss weights 0.7/0.2/0.1; total_water_path in restricted outputs; dual-cluster (Jupiter+Titan) high; launched from 2156170 at 2026-06-11 14:30 UTC |
-| train-4deg-daily-v1-era5-only-qsat-scaling-residual-rs0 | era5-only-qsat-scaling-residual.yaml | [01KTS0D92SPJ7KQS9W06J3H9CP](https://beaker.org/ex/01KTS0D92SPJ7KQS9W06J3H9CP) | pending | running | Wave 16; residual counterpart of the Wave 10 era5-only-qsat-scaling run — era5-only-residual + qsat-scaled shared global-mean removal on specific_total_water_0-7, LHTFLsfc, PRATEsfc, tendency_of_total_water_path_due_to_advection, Q2m; EMA epoch checkpoints on 46-year inference epochs; dual-cluster (Jupiter+Titan) high; launched from a4f8998 at 2026-06-10 12:43 UTC |
-| train-4deg-daily-v1-era5-only-residual-rs0 (-d471) | era5-only-residual.yaml | [01KTRNGPCAC23D1TRX7K1SW1B7](https://beaker.org/ex/01KTRNGPCAC23D1TRX7K1SW1B7) | pending | running | Wave 15; rerun of the finished Titan era5-only-residual-rs0 (seed 0), now saving EMA epoch checkpoints on the 46-year inference epochs (1,6,...,56) via ema_checkpoint_save_epochs {start:1,step:5} to recover the well-performing earlier checkpoint. Relaunch with **both clusters (Jupiter+Titan)**; original Jupiter-only -8b9d 01KTPST5 (never started) stopped; launched from d471739 at 2026-06-10 11:44 UTC |
-| train-4deg-daily-v1-labels-rollout-rs0 | labels-rollout.yaml | [01KTKR69KY5VS2VGZT4MXKBC4G](https://beaker.org/ex/01KTKR69KY5VS2VGZT4MXKBC4G) | pending | running | Wave 7; non-residual labels + aggressive rollout (50/30/20); launched 13:55 from b49787a |
-| train-4deg-daily-v1-labels-multistep-rs1 | labels-multistep-rs1.yaml | [01KTKR76ZY39DT6BNRNCYF9VXF](https://beaker.org/ex/01KTKR76ZY39DT6BNRNCYF9VXF) | pending | running | Wave 7; seed-1 replicate of labels-multistep; launched 13:55 from b49787a |
+| train-4deg-daily-v1-era5-only-c5d4e1-rs0 | era5-only-c5d4e1.yaml | [01KTVH0TY5V0EDXGK1WQD6D9GA](https://beaker.org/ex/01KTVH0TY5V0EDXGK1WQD6D9GA) | pending | queued | Wave 17; era5-only (non-residual) + CRPS/fd-CRPS/energy loss weights 0.5/0.4/0.1; total_water_path in restricted outputs; dual-cluster (Jupiter+Titan) high; launched from 2156170 at 2026-06-11 14:30 UTC; preempted back to queued at 2026-06-11 22:07 UTC |
+| train-4deg-daily-v1-era5-only-c7d2e1-rs0-2156 | era5-only-c7d2e1.yaml | [01KTVH196G07C92HN1HAATKP2Q](https://beaker.org/ex/01KTVH196G07C92HN1HAATKP2Q) | pending | queued | Wave 17; era5-only (non-residual) + CRPS/fd-CRPS/energy loss weights 0.7/0.2/0.1 (matches the finished Wave 8 c7d2e1-rs0 but without lr_tuning, lr 0.0001 directly); total_water_path in restricted outputs; dual-cluster (Jupiter+Titan) high; launched from 2156170 at 2026-06-11 14:30 UTC. -2156 suffix because the original c7d2e1-rs0 name belongs to the now-renamed c7d2e1-lr-tuning config; preempted back to queued at 2026-06-11 22:07 UTC |
+| train-4deg-daily-v1-era5-only-c7d2e1-qsat-scaling-rs0 | era5-only-c7d2e1-qsat-scaling.yaml | [01KTVH1Q5ZX1M07M8S6YW5684J](https://beaker.org/ex/01KTVH1Q5ZX1M07M8S6YW5684J) | pending | queued | Wave 17; era5-only-qsat-scaling base + c7d2e1 loss weights 0.7/0.2/0.1; total_water_path in restricted outputs; dual-cluster (Jupiter+Titan) high; launched from 2156170 at 2026-06-11 14:30 UTC; preempted back to queued at 2026-06-11 22:07 UTC |
+| train-4deg-daily-v1-era5-only-residual-rs0 (-d471) | era5-only-residual.yaml | [01KTRNGPCAC23D1TRX7K1SW1B7](https://beaker.org/ex/01KTRNGPCAC23D1TRX7K1SW1B7) | pending | queued | Wave 15; rerun of the finished Titan era5-only-residual-rs0 (seed 0), now saving EMA epoch checkpoints on the 46-year inference epochs (1,6,...,56) via ema_checkpoint_save_epochs {start:1,step:5} to recover the well-performing earlier checkpoint. Relaunch with **both clusters (Jupiter+Titan)**; original Jupiter-only -8b9d 01KTPST5 (never started) stopped; launched from d471739 at 2026-06-10 11:44 UTC; preempted back to queued at 2026-06-11 22:07 UTC |
+| train-4deg-daily-v1-labels-multistep-rs1 | labels-multistep-rs1.yaml | [01KTKR76ZY39DT6BNRNCYF9VXF](https://beaker.org/ex/01KTKR76ZY39DT6BNRNCYF9VXF) | pending | queued | Wave 7; seed-1 replicate of labels-multistep; launched 13:55 from b49787a; preempted back to queued at 2026-06-11 22:07 UTC |
 | train-4deg-daily-v1-labels-c7d2e1-rs0 | labels-c7d2e1.yaml | [01KTM5M39C7E03GTBTWS05H90H](https://beaker.org/ex/01KTM5M39C7E03GTBTWS05H90H) | pending | running | Wave 8; non-residual labels + finite-diff CRPS loss (crps 0.7 / fd-crps 0.2 / energy 0.1), 1-step, fg=1 |
 
 ## Finished — Wave 2 (Jupiter, high)
@@ -91,6 +121,7 @@ Status legend: **running** / **queued** (waiting for slot) / **finished** /
 | train-4deg-daily-v1-labels-fg8-rs0 | labels-fg8.yaml | [01KTKR7N7GZT04H89DP3KANR6Y](https://beaker.org/ex/01KTKR7N7GZT04H89DP3KANR6Y) | [099k85z6](https://wandb.ai/ai2cm/ace/runs/099k85z6) | finished | Wave 7; non-residual labels + filter_num_groups=8, 1-step (vs era5-only-fg8 label contrast); completed 60 epochs, finalized 2026-06-11 10:59 UTC ec=0; best_val_loss 0.11773, best_inference_error 0.0517 (healthy) |
 | train-4deg-daily-v1-labels-384-multistep-rs0 | labels-384-multistep.yaml | [01KTKR6RPH4X1QQX1WV4T2J47E](https://beaker.org/ex/01KTKR6RPH4X1QQX1WV4T2J47E) | [ouk9l16e](https://wandb.ai/ai2cm/ace/runs/ouk9l16e) | finished | Wave 7; non-residual labels + multistep + embed_dim 384; completed 60 epochs, finalized 2026-06-11 06:49 UTC ec=0; best_val_loss 0.13307, best_inference_error 0.0585 (healthy) |
 | train-4deg-daily-v1-labels-multistep-rs0 | labels-multistep.yaml | [01KTKR5VCCBGHZZDH8R8R9XVHS](https://beaker.org/ex/01KTKR5VCCBGHZZDH8R8R9XVHS) | [n2utlc8s](https://wandb.ai/ai2cm/ace/runs/n2utlc8s) | finished | Wave 7; non-residual labels + multistep rollout (80/15/5); launched 13:55 from b49787a; completed 60 epochs, finalized 2026-06-11 16:10 UTC ec=0; best_val_loss 0.1257, **best_inference_error 0.0449 (lowest on the board)** — multistep + labels combo is the strongest non-residual configuration so far |
+| train-4deg-daily-v1-labels-rollout-rs0 | labels-rollout.yaml | [01KTKR69KY5VS2VGZT4MXKBC4G](https://beaker.org/ex/01KTKR69KY5VS2VGZT4MXKBC4G) | [5to8ym26](https://wandb.ai/ai2cm/ace/runs/5to8ym26) | finished | Wave 7; non-residual labels + aggressive rollout (50/30/20); launched 13:55 from b49787a; completed 60 epochs, finalized 2026-06-11 20:04 UTC ec=0; best_val_loss 0.1642, best_inference_error 0.0516 (healthy — closes out Wave 7) |
 
 ## Finished — Wave 8 (Jupiter, high; finite-diff CRPS loss)
 
@@ -140,6 +171,12 @@ Status legend: **running** / **queued** (waiting for slot) / **finished** /
 |------|--------|-------------------|----------|--------|-------|
 | train-4deg-daily-v1-labels-residual-lr-tuning-rs1 (-76dc) | labels-residual-lr-tuning-rs1.yaml | [01KTHFFBCC839PY4J5RDW3YD27](https://beaker.org/ex/01KTHFFBCC839PY4J5RDW3YD27) | [y5tmv4lf](https://wandb.ai/ai2cm/ace/runs/y5tmv4lf) | finished | Wave 6; relaunch of c1bc after epoch=None fix (commit 76dc6836d); completed 60 epochs, finalized 2026-06-10 04:54 UTC ec=0; best_val_loss 0.11458, best_inference_error 0.08810 (fix confirmed — no recurrence of the assert epoch is not None crash) |
 | train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-rs0 (-76dc) | labels-residual-winds-anomaly-tend-reg.yaml | [01KTHFEX200WK2DS8NE70ZNK5Z](https://beaker.org/ex/01KTHFEX200WK2DS8NE70ZNK5Z) | [s4nmhbca](https://wandb.ai/ai2cm/ace/runs/s4nmhbca) | finished | Wave 6; relaunch of 92b1 after epoch=None fix (commit 76dc6836d); completed 60 epochs, finalized 2026-06-10 07:05 UTC ec=0; best_val_loss 0.11656, **best_inference_error 13.99 (blowup)** — fix held (no epoch=None crash), but confirms the winds-anomaly + tend-reg residual variant still diverges at inference, consistent with the other anomaly-perturbation siblings |
+
+## Finished — Wave 16 (Jupiter+Titan, high; qsat-scaling + residual)
+
+| Name | Config | Beaker Experiment | wandb ID | Status | Notes |
+|------|--------|-------------------|----------|--------|-------|
+| train-4deg-daily-v1-era5-only-qsat-scaling-residual-rs0 | era5-only-qsat-scaling-residual.yaml | [01KTS0D92SPJ7KQS9W06J3H9CP](https://beaker.org/ex/01KTS0D92SPJ7KQS9W06J3H9CP) | [9vwhs0uh](https://wandb.ai/ai2cm/ace/runs/9vwhs0uh) | finished | Wave 16; era5-only-residual + qsat-scaled shared global-mean removal (specific_total_water_0-7, LHTFLsfc, PRATEsfc, tendency_of_total_water_path_due_to_advection, Q2m) + EMA epoch checkpoints; launched from a4f8998 at 2026-06-10 12:43 UTC; completed 60 epochs, finalized 2026-06-12 01:13 UTC ec=0; best_val_loss 0.1424, best_inference_error 0.0628 (healthy — qsat-scaling and residual compose fine; compare 9vwhs0uh vs plain residual a0tt7761 and qsat-scaling eiots9f1) |
 
 ## Finished — Wave 15 (Jupiter+Titan, high; dual-cluster relaunches of stalled Wave 12/13 jobs)
 
