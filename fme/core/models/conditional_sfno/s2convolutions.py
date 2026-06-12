@@ -31,6 +31,79 @@ from .contractions import (
 )
 
 
+def validate_spectral_ratio(
+    spectral_ratio: float,
+    channels: int,
+    num_groups: int,
+    *,
+    channels_name: str = "embed_dim",
+    num_groups_name: str = "filter_num_groups",
+    filter_type: str | None = None,
+    preserves_global_mean: bool = False,
+    global_mean_arg_name: str = "filter_preserves_global_mean",
+    local_blocks: bool = False,
+) -> int:
+    """Validate ``spectral_ratio`` and return the resulting spectral channel count.
+
+    ``spectral_ratio`` controls the bottleneck width of the linear spectral
+    filter: the SHT and per-mode complex weight operate on
+    ``round(channels * spectral_ratio)`` channels. This helper centralizes the
+    config-time validation shared by ``SpectralConvS2``, ``SFNONetConfig``, and
+    the ``NoiseConditionedSFNOBuilder`` registry config so the rules live in one
+    place; each caller still invokes it so its own API stays self-validating.
+
+    Args:
+        spectral_ratio: fraction of ``channels`` participating in the filter;
+            must be in (0, 1].
+        channels: full latent channel width (``embed_dim`` / ``in_channels``).
+        num_groups: number of filter groups the spectral channels must divide.
+        channels_name: name of ``channels`` to use in error messages.
+        num_groups_name: name of ``num_groups`` to use in error messages.
+        filter_type: if given, ``spectral_ratio < 1`` requires ``"linear"``.
+        preserves_global_mean: if True, ``spectral_ratio < 1`` is rejected.
+        global_mean_arg_name: name of the global-mean flag for error messages.
+        local_blocks: if True, ``spectral_ratio < 1`` is rejected.
+
+    Returns:
+        The number of spectral channels, ``round(channels * spectral_ratio)``.
+    """
+    if not 0.0 < spectral_ratio <= 1.0:
+        raise ValueError(f"spectral_ratio must be in (0, 1], got {spectral_ratio}.")
+    spectral_channels = round(channels * spectral_ratio)
+    if spectral_ratio < 1.0:
+        if filter_type is not None and filter_type != "linear":
+            raise NotImplementedError(
+                "spectral_ratio < 1 is only supported for filter_type='linear', "
+                f"got filter_type='{filter_type}'."
+            )
+        if preserves_global_mean:
+            # The l=0 mode is sandwiched between the pre/post channel
+            # projections, so the original C-channel global mean is not
+            # recoverable from the spectral_channels-wide bottleneck.
+            raise NotImplementedError(
+                f"{global_mean_arg_name} is not supported with spectral_ratio < 1, "
+                "since the l=0 mode is sandwiched between the pre/post channel "
+                "projections."
+            )
+        if local_blocks:
+            raise NotImplementedError(
+                "spectral_ratio < 1 is not supported with local_blocks, since "
+                "local (DISCO) blocks have no spectral filter to bottleneck."
+            )
+        if spectral_channels < 1:
+            raise ValueError(
+                f"spectral_ratio={spectral_ratio} with {channels_name}={channels} "
+                "produces fewer than 1 spectral channel."
+            )
+        if spectral_channels % num_groups != 0:
+            raise ValueError(
+                f"spectral_ratio={spectral_ratio} with {channels_name}={channels} "
+                f"yields {spectral_channels} spectral channels, which is not "
+                f"divisible by {num_groups_name}={num_groups}."
+            )
+    return spectral_channels
+
+
 @torch.jit.script
 def _contract_lora(
     lora_A: torch.Tensor,
@@ -104,28 +177,15 @@ class SpectralConvS2(nn.Module):
                 "Currently only in_channels == out_channels is supported."
             )
 
-        if not 0.0 < spectral_ratio <= 1.0:
-            raise ValueError(f"spectral_ratio must be in (0, 1], got {spectral_ratio}.")
-        spectral_channels = round(in_channels * spectral_ratio)
-        if spectral_channels < 1:
-            raise ValueError(
-                f"spectral_ratio={spectral_ratio} with in_channels={in_channels} "
-                "produces fewer than 1 spectral channel."
-            )
-        if spectral_channels % num_groups != 0:
-            raise ValueError(
-                f"spectral_ratio={spectral_ratio} with in_channels={in_channels} "
-                f"yields {spectral_channels} spectral channels, which is not "
-                f"divisible by num_groups={num_groups}."
-            )
-        if spectral_ratio < 1.0 and preserve_global_mean:
-            # preserve_global_mean copies the l=0 coefficient through unchanged,
-            # but with spectral_ratio < 1 the l=0 mode is sandwiched between Q
-            # and P projections so the original C-channel global mean is not
-            # recoverable from the spectral_channels-wide bottleneck.
-            raise NotImplementedError(
-                "preserve_global_mean is not supported with spectral_ratio < 1."
-            )
+        spectral_channels = validate_spectral_ratio(
+            spectral_ratio,
+            in_channels,
+            num_groups,
+            channels_name="in_channels",
+            num_groups_name="num_groups",
+            preserves_global_mean=preserve_global_mean,
+            global_mean_arg_name="preserve_global_mean",
+        )
 
         assert in_channels % num_groups == 0
         assert out_channels % num_groups == 0

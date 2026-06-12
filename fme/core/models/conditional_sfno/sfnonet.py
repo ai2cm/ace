@@ -40,7 +40,7 @@ from .layers import (
     DropPath,
 )
 from .lora import LoRAConv2d
-from .s2convolutions import SpectralConvS2
+from .s2convolutions import SpectralConvS2, validate_spectral_ratio
 from .makani.spectral_convolution import SpectralConv
 
 
@@ -137,41 +137,14 @@ class SFNONetConfig:
     clip_latent_global_means: bool = False
 
     def __post_init__(self):
-        if not 0.0 < self.spectral_ratio <= 1.0:
-            raise ValueError(
-                f"spectral_ratio must be in (0, 1], got {self.spectral_ratio}."
-            )
-        if self.spectral_ratio < 1.0 and self.filter_type != "linear":
-            raise NotImplementedError(
-                "spectral_ratio < 1 is only supported for filter_type='linear', "
-                f"got filter_type='{self.filter_type}'."
-            )
-        if self.spectral_ratio < 1.0 and self.filter_preserves_global_mean:
-            raise NotImplementedError(
-                "filter_preserves_global_mean is not supported with "
-                "spectral_ratio < 1, since the l=0 mode is sandwiched between "
-                "the pre/post channel projections."
-            )
-        if self.spectral_ratio < 1.0 and self.local_blocks:
-            raise NotImplementedError(
-                "spectral_ratio < 1 is not supported with local_blocks, since "
-                "local (DISCO) blocks have no spectral filter to bottleneck."
-            )
-        if self.spectral_ratio < 1.0:
-            spectral_channels = round(self.embed_dim * self.spectral_ratio)
-            if spectral_channels < 1:
-                raise ValueError(
-                    f"spectral_ratio={self.spectral_ratio} with "
-                    f"embed_dim={self.embed_dim} produces fewer than 1 "
-                    "spectral channel."
-                )
-            if spectral_channels % self.filter_num_groups != 0:
-                raise ValueError(
-                    f"spectral_ratio={self.spectral_ratio} with "
-                    f"embed_dim={self.embed_dim} yields {spectral_channels} "
-                    "spectral channels, which is not divisible by "
-                    f"filter_num_groups={self.filter_num_groups}."
-                )
+        validate_spectral_ratio(
+            self.spectral_ratio,
+            self.embed_dim,
+            self.filter_num_groups,
+            filter_type=self.filter_type,
+            preserves_global_mean=self.filter_preserves_global_mean,
+            local_blocks=bool(self.local_blocks),
+        )
 
 
 # heuristic for finding theta_cutoff
