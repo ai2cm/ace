@@ -435,7 +435,9 @@ def _build_optimization(
 
 
 def _grad_norm(model: nn.Module) -> float:
-    return sum(p.grad.norm() ** 2 for p in model.parameters() if p.grad is not None) ** 0.5
+    return (
+        sum(p.grad.norm() ** 2 for p in model.parameters() if p.grad is not None) ** 0.5
+    )
 
 
 def test_set_learning_rate():
@@ -885,5 +887,7 @@ def test_gradient_clipping(max_grad_norm, expect_clipped):
 def test_optimization_config_passes_max_grad_norm():
     """OptimizationConfig.max_grad_norm is wired through to Optimization."""
     model = nn.Linear(1, 1).to(fme.get_device())
-    opt = OptimizationConfig(max_grad_norm=1.5).build(nn.ModuleList([model]), max_epochs=1)
+    opt = OptimizationConfig(max_grad_norm=1.5).build(
+        nn.ModuleList([model]), max_epochs=1
+    )
     assert opt._max_grad_norm == 1.5
