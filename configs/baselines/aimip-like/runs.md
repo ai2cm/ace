@@ -4,8 +4,25 @@
 
 | Cluster | Priority | Limit (GPUs) | Committed | Active now | Free vs cap |
 |---------|----------|--------------|-----------|-----------|-------------|
-| Jupiter (ai2/ace) | high | 16 | 10 | 2 | 14 nominal (heavily contended) |
+| Jupiter (ai2/ace) | high | 16 | 2 | 2 | 14 nominal |
 | Titan (ai2/climate-titan) | urgent | 4 | 0 | 0 | 4 |
+
+_**Reconcile cycle (2026-06-12 01:38 → 21:30 UTC, ~20h):** 6 newly finished, all ec=0/60ep/healthy —
+**residual-rs0-d471** (Wave 15, 7dns8usm, 04:14 UTC, bvl 0.1419, bie 0.0819 — EMA epoch checkpoints
+1,6,...,56 saved for probing), **c4d4e2-rs0** (Wave 17, eq6k2iim, 05:36 UTC, bvl 0.1494, bie 0.0554),
+**labels-multistep-rs1** (Wave 7, ueyis0mn, 07:09 UTC, bvl 0.1261, **bie 0.0614 vs rs0's 0.0449 — large
+seed spread on the identical config**; closes out Wave 7), **labels-c7d2e1-rs0** (Wave 8, mw7786q5,
+07:58 UTC, bvl 0.1138, bie 0.0644; closes out Wave 8), **c7d2e1-qsat-scaling-rs0** (Wave 17, u7akao02,
+11:52 UTC, bvl 0.1415, bie 0.0523), **c7d2e1-rs0-2156** (Wave 17, g1o09n3l, 16:14 UTC, bvl 0.1412,
+bie 0.0565). **3 newly failed — all of Wave 18** (rs0-b1d6 7zh0q8bx 02:42, rs1-38f7 y0qfkswg 05:21,
+residual-rs0-b1d6 kzj51jxj 05:22 UTC): identical ec=1 startup crash before epoch 1 — pin-memory
+`RuntimeError` ("more than one element of the written-to tensor refers to a single memory location ...
+clone()") in batch_data.py pin_memory during inference-data loading at trainer build; common factor is
+the b1d6360 improved inference config (suspect: long_46year_constant_co2 persistence_names handing
+pin_memory a broadcast view); the concurrent-inference speed A/B never began. 2 running: **sr0p50-rs0**
+(45/60, bvl 0.1366, bie 0.0540 so far — resumed well past its ~epoch-20 crash point, node-flake
+diagnosis holding) and **c5d4e1-rs0** (34/60, bvl 0.1398). Committed drops 10 → 2. Titan remains idle
+(0/4). Last reconciled with Beaker: 2026-06-12 21:30 UTC._
 
 _**Reconcile cycle (2026-06-11 22:08 → 2026-06-12 01:38 UTC):** 1 newly finished —
 **qsat-scaling-residual-rs0** (Wave 16, 9vwhs0uh, 01:13 UTC ec=0, 60ep, bvl 0.1424, bie 0.0628 healthy
