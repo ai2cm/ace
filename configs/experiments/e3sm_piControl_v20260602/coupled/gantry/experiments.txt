@@ -1,10 +1,4 @@
 
-ft-v20260602-E3SMv3-piControl-zltomfxg-l6ktf4nj-early|rs0|01KTTFXP3S17T7FT16FD84959K|training|best_inference_ckpt|normal|--min-runtime 8h
-
-ft-v20260602-E3SMv3-piControl-zltomfxg-l6ktf4nj-early|rs0|01KTTJP3NJVTZ6GQGQ5CQY2W8A|training|best_inference_ckpt|normal|--min-runtime 8h
-
-ft-v20260602-E3SMv3-piControl-zltomfxg-l6ktf4nj-early|rs0|01KTTKGE4XMTNFFB0N1YV9E9NF|training|best_inference_ckpt|normal|--min-runtime 8h
-
-ft-v20260602-E3SMv3-piControl-zltomfxg-l6ktf4nj-early|rs0|01KTTN14GMX2CAQR4E422NJ6HJ|training|best_inference_ckpt|normal|--min-runtime 8h
+ft-v20260602-E3SMv3-piControl-zltomfxg-l6ktf4nj-early-epoch-5|rs0|01KTTN14GMX2CAQR4E422NJ6HJ|run_ICx1-105yr|best_inference_ckpt|urgent|--min-runtime 8h||01KTTN14PGQYS6YKTQBJEBQ6ST|ai2/climate-titan|b200
 
 ft-v20260602-E3SMv3-piControl-r4xg0ssl-l6ktf4nj-early|rs0|01KTWH9SXTS348G6P0XV4XFEAG|training|best_inference_ckpt|normal|--min-runtime 8h
