@@ -327,10 +327,14 @@ optimization:
     milestones:
     - 2
 stepper_training:
-  n_ensemble: 1
+  n_ensemble: 2
   n_forward_steps: 1
+  optimize_last_step_only: true
   loss:
-    type: MSE
+    type: EnsembleLoss
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
     weights:
       # Surface: non-T2m variables get 0.1 (TMP2m and surface_temperature default to 1.0)
       UGRD10m: 0.1

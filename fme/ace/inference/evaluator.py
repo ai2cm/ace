@@ -356,6 +356,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             total_forward_steps=config.n_forward_steps,
             window_requirements=window_requirements,
             initial_condition=initial_condition_requirements,
+            n_ic_timesteps=stepper_config.n_ic_timesteps,
         )
         if config.n_ensemble_per_ic > 1:
             ic = data.initial_condition.as_batch_data()
@@ -455,6 +456,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             total_forward_steps=config.n_forward_steps,
             window_requirements=window_requirements,
             initial_condition=initial_condition_requirements,
+            n_ic_timesteps=stepper_config.n_ic_timesteps,
         )
         if config.n_ensemble_per_ic > 1:
             ic = prediction_data.initial_condition.as_batch_data()

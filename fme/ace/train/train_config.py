@@ -138,12 +138,14 @@ class InlineInferenceConfig:
         self,
         window_requirements: DataRequirements,
         initial_condition: PrognosticStateDataRequirements,
+        n_ic_timesteps: int = 1,
     ) -> InferenceGriddedData:
         data = get_inference_data(
             config=self.loader,
             total_forward_steps=self.n_forward_steps,
             window_requirements=window_requirements,
             initial_condition=initial_condition,
+            n_ic_timesteps=n_ic_timesteps,
         )
         if self.n_ensemble_per_ic > 1:
             ic = data.initial_condition.as_batch_data()
@@ -465,6 +467,7 @@ class TrainBuilders:
             data = entry.get_inference_data(
                 window_requirements=window_requirements,
                 initial_condition=self.config.stepper_config.get_prognostic_state_data_requirements(),
+                n_ic_timesteps=self.config.stepper_config.n_ic_timesteps,
             )
             dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
             entries.append((entry, data, dataset_info, name))

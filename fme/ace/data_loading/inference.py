@@ -210,6 +210,7 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
         surface_temperature_name: str | None = None,
         ocean_fraction_name: str | None = None,
         label_encoding: LabelEncoding | None = None,
+        n_ic_timesteps: int = 1,
     ):
         """
         Parameters:
@@ -247,8 +248,9 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
             properties = dataset.properties
         self._properties = properties
         self._dataset = dataset
+        self._n_ic_timesteps = n_ic_timesteps
         self._forward_steps_in_memory = (
-            requirements.n_timesteps_schedule.get_value(0) - 1
+            requirements.n_timesteps_schedule.get_value(0) - n_ic_timesteps
         )  # during inference, schedules are ignored
         self._total_forward_steps = total_forward_steps
         self._perturbations = config.perturbations
@@ -263,7 +265,7 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
             self._start_indices = config.start_indices.as_indices()
         self._dataset.validate_inference_length(
             max_start_index=max(self._start_indices),
-            max_window_len=total_forward_steps + 1,
+            max_window_len=total_forward_steps + n_ic_timesteps,
         )
         if isinstance(self._properties.horizontal_coordinates, LatLonCoordinates):
             self._lats, self._lons = self._properties.horizontal_coordinates.meshgrid
@@ -297,7 +299,9 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
             if i_member % dist.total_data_parallel_ranks != dist.data_parallel_rank:
                 continue
             i_window_start = i_start + self._start_indices[i_member]
-            i_window_end = i_window_start + self._forward_steps_in_memory + 1
+            i_window_end = (
+                i_window_start + self._forward_steps_in_memory + self._n_ic_timesteps
+            )
             if i_window_end > (
                 self._total_forward_steps + self._start_indices[i_member]
             ):
@@ -362,13 +366,13 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
         try:
             self._dataset.validate_inference_length(
                 max_start_index=max(self._start_indices),
-                max_window_len=self._total_forward_steps + 1,
+                max_window_len=self._total_forward_steps + self._n_ic_timesteps,
             )
         except ValueError as e:
             raise ValueError(
                 f"The number of forward inference steps ({self._total_forward_steps}) "
                 "must be less than or equal to the number of possible steps "
-                f"in dataset after the last initial condition's "
+                "in dataset after the last initial condition's "
                 "start index."
             ) from e
 

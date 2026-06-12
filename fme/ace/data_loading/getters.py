@@ -172,6 +172,7 @@ def get_inference_data(
     surface_temperature_name: str | None = None,
     ocean_fraction_name: str | None = None,
     _force_forkserver: bool = False,
+    n_ic_timesteps: int = 1,
 ) -> InferenceGriddedData:
     """
     Args:
@@ -191,6 +192,8 @@ def get_inference_data(
         _force_forkserver: Whether to force using forkserver multiprocessing context.
             This is useful for debugging or testing in cases where forkserver is not
             the default, but should generally be unused in production code.
+        n_ic_timesteps: Number of initial condition timesteps the stepper requires.
+            Used to correctly compute the stride between inference batches.
 
     Returns:
         A data loader for inference with coordinates and metadata.
@@ -202,6 +205,7 @@ def get_inference_data(
         surface_temperature_name=surface_temperature_name,
         ocean_fraction_name=ocean_fraction_name,
         label_override=label_override,
+        n_ic_timesteps=n_ic_timesteps,
     )
     properties = dataset.properties
 
