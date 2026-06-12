@@ -351,39 +351,39 @@ stepper_training:
       USWRFsfc: 0.1
       USWRFtoa: 0.1
       tendency_of_total_water_path_due_to_advection: 0.1
-      # Level variables (pressure-proportional weights)
-      air_temperature_0: 3.24
-      air_temperature_1: 2.75
-      air_temperature_2: 2.27
-      air_temperature_3: 1.62
-      air_temperature_4: 0.81
-      air_temperature_5: 0.65
-      air_temperature_6: 0.32
-      air_temperature_7: 0.16
-      specific_total_water_0: 3.24
-      specific_total_water_1: 2.75
-      specific_total_water_2: 2.27
-      specific_total_water_3: 1.62
-      specific_total_water_4: 0.81
-      specific_total_water_5: 0.65
-      specific_total_water_6: 0.32
-      specific_total_water_7: 0.16
-      eastward_wind_0: 3.24
-      eastward_wind_1: 2.75
-      eastward_wind_2: 2.27
-      eastward_wind_3: 1.62
-      eastward_wind_4: 0.81
-      eastward_wind_5: 0.65
-      eastward_wind_6: 0.32
-      eastward_wind_7: 0.16
-      northward_wind_0: 3.24
-      northward_wind_1: 2.75
-      northward_wind_2: 2.27
-      northward_wind_3: 1.62
-      northward_wind_4: 0.81
-      northward_wind_5: 0.65
-      northward_wind_6: 0.32
-      northward_wind_7: 0.16
+      # Level variables (pressure-proportional weights; level 0=top ~50hPa, level 7=bottom ~1000hPa)
+      air_temperature_0: 0.16
+      air_temperature_1: 0.32
+      air_temperature_2: 0.65
+      air_temperature_3: 0.81
+      air_temperature_4: 1.62
+      air_temperature_5: 2.27
+      air_temperature_6: 2.75
+      air_temperature_7: 3.24
+      specific_total_water_0: 0.16
+      specific_total_water_1: 0.32
+      specific_total_water_2: 0.65
+      specific_total_water_3: 0.81
+      specific_total_water_4: 1.62
+      specific_total_water_5: 2.27
+      specific_total_water_6: 2.75
+      specific_total_water_7: 3.24
+      eastward_wind_0: 0.16
+      eastward_wind_1: 0.32
+      eastward_wind_2: 0.65
+      eastward_wind_3: 0.81
+      eastward_wind_4: 1.62
+      eastward_wind_5: 2.27
+      eastward_wind_6: 2.75
+      eastward_wind_7: 3.24
+      northward_wind_0: 0.16
+      northward_wind_1: 0.32
+      northward_wind_2: 0.65
+      northward_wind_3: 0.81
+      northward_wind_4: 1.62
+      northward_wind_5: 2.27
+      northward_wind_6: 2.75
+      northward_wind_7: 3.24
       # Diagnostics at specific pressure levels
       TMP850: 2.75
       h500: 1.62
