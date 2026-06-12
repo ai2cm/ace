@@ -5,7 +5,7 @@ from torch import nn
 
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 from fme.ace.registry.stochastic_sfno import NoiseConditionedModel
-from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
+from fme.core.dataset_info import DatasetInfo
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
 from fme.core.models.miles_credit.boundary_padding import TensorPaddingConfig
 from fme.core.models.swin_transformer import SwinTransformerNet
@@ -119,23 +119,20 @@ class SwinTransformerBuilder(ModuleConfig):
             embed_dim_pos=0,
         )
         if self.use_cpb_scaling:
-            try:
-                lat_coords = dataset_info.horizontal_coordinates.lat_1d
-            except MissingDatasetInfo:
-                raise ValueError(
-                    "SwinTransformer requires 1D latitude coordinates for cos-lat CPB "
-                    "scaling, but the dataset provides none. Non-lat-lon grids such as "
-                    "HEALPix are not supported. Set use_cpb_scaling=False to disable "
-                    "this requirement."
-                ) from None
+            lat_coords = dataset_info.lat_1d
             if lat_coords is None:
                 raise ValueError(
                     "SwinTransformer requires 1D latitude coordinates for cos-lat CPB "
-                    "scaling, but this coordinate type returns None for lat_1d. "
+                    "scaling. Non-lat-lon grids such as HEALPix are not supported. "
                     "Set use_cpb_scaling=False to disable this requirement."
                 )
         else:
             lat_coords = None
+        padding_conf = (
+            dataclasses.asdict(self.padding_conf)
+            if self.padding_conf is not None
+            else None
+        )
         net = SwinTransformerNet(
             in_chans=n_in_channels,
             out_chans=n_out_channels,
@@ -151,9 +148,7 @@ class SwinTransformerBuilder(ModuleConfig):
             mlp_layer=self.mlp_layer,
             cpb_hidden_dim=self.cpb_hidden_dim,
             lat_coords=lat_coords,
-            padding_conf=dataclasses.asdict(self.padding_conf)
-            if self.padding_conf is not None
-            else None,
+            padding_conf=padding_conf,
         )
         return _ContextWrappedModule(net)
 
@@ -244,23 +239,20 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             embed_dim_pos=0,
         )
         if self.use_cpb_scaling:
-            try:
-                lat_coords = dataset_info.horizontal_coordinates.lat_1d
-            except MissingDatasetInfo:
-                raise ValueError(
-                    "SwinTransformer requires 1D latitude coordinates for cos-lat CPB "
-                    "scaling, but the dataset provides none. Non-lat-lon grids such as "
-                    "HEALPix are not supported. Set use_cpb_scaling=False to disable "
-                    "this requirement."
-                ) from None
+            lat_coords = dataset_info.lat_1d
             if lat_coords is None:
                 raise ValueError(
                     "SwinTransformer requires 1D latitude coordinates for cos-lat CPB "
-                    "scaling, but this coordinate type returns None for lat_1d. "
+                    "scaling. Non-lat-lon grids such as HEALPix are not supported. "
                     "Set use_cpb_scaling=False to disable this requirement."
                 )
         else:
             lat_coords = None
+        padding_conf = (
+            dataclasses.asdict(self.padding_conf)
+            if self.padding_conf is not None
+            else None
+        )
         net = SwinTransformerNet(
             in_chans=n_in_channels,
             out_chans=n_out_channels,
@@ -277,9 +269,7 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             conditioning="cln",
             cpb_hidden_dim=self.cpb_hidden_dim,
             lat_coords=lat_coords,
-            padding_conf=dataclasses.asdict(self.padding_conf)
-            if self.padding_conf is not None
-            else None,
+            padding_conf=padding_conf,
         )
         return NoiseConditionedModel(
             net,

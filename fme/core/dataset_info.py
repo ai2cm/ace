@@ -3,6 +3,8 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
+import torch
+
 from fme.core.atmosphere_data import HasAtmosphereVerticalIntegral
 from fme.core.coordinates import (
     HorizontalCoordinates,
@@ -187,6 +189,12 @@ class DatasetInfo:
         if self._horizontal_coordinates is None:
             raise MissingDatasetInfo("horizontal_coordinates")
         return self._horizontal_coordinates
+
+    @property
+    def lat_1d(self) -> torch.Tensor | None:
+        if self._horizontal_coordinates is None:
+            return None
+        return self._horizontal_coordinates.lat_1d
 
     @property
     def vertical_coordinate(self) -> VerticalCoordinate:
