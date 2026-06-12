@@ -303,10 +303,14 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
                 i_window_start + self._forward_steps_in_memory + self._n_ic_timesteps
             )
             if i_window_end > (
-                self._total_forward_steps + self._start_indices[i_member]
+                self._total_forward_steps
+                + self._start_indices[i_member]
+                + self._n_ic_timesteps
             ):
                 i_window_end = (
-                    self._total_forward_steps + self._start_indices[i_member] + 1
+                    self._total_forward_steps
+                    + self._start_indices[i_member]
+                    + self._n_ic_timesteps
                 )
             window_time_slice = slice(i_window_start, i_window_end)
             tensors, time, labels, epoch, missing_names = (

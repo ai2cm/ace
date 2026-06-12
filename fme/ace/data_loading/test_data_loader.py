@@ -566,6 +566,44 @@ def test_inference_data_loader(
     assert initial_condition.data["foo"].shape == (batch_size, 1, 16, 32)
 
 
+def test_inference_data_loader_n_ic_timesteps_window_size(tmp_path):
+    """Regression test: window must not be truncated when n_ic_timesteps>1.
+
+    With n_ic_timesteps=2 and total_forward_steps==forward_steps_in_memory the
+    cap formula previously used +1 instead of +n_ic_timesteps, cutting the
+    window short and causing step-mean metrics to record zero batches.
+    """
+    n_ic_timesteps = 2
+    n_forward_steps = 5
+    _create_dataset_on_disk(tmp_path, n_times=n_ic_timesteps + n_forward_steps + 2)
+    config = InferenceDataLoaderConfig(
+        dataset=XarrayDataConfig(data_path=tmp_path, n_repeats=1),
+        start_indices=InferenceInitialConditionIndices(
+            first=0, n_initial_conditions=1, interval=1
+        ),
+        num_data_workers=0,
+    )
+    window_requirements = DataRequirements(
+        names=["foo", "bar"],
+        n_timesteps=n_forward_steps + n_ic_timesteps,
+    )
+    initial_condition_requirements = PrognosticStateDataRequirements(
+        names=["foo"],
+        n_timesteps=n_ic_timesteps,
+    )
+    data = get_inference_data(
+        config,
+        total_forward_steps=n_forward_steps,
+        window_requirements=window_requirements,
+        initial_condition=initial_condition_requirements,
+        n_ic_timesteps=n_ic_timesteps,
+    )
+    batch_data = next(iter(data.loader))
+    # The batch must contain n_ic_timesteps + n_forward_steps timesteps, not
+    # n_ic_timesteps + n_forward_steps - 1 (which the old cap formula produced).
+    assert batch_data.time.sizes["time"] == n_ic_timesteps + n_forward_steps
+
+
 @pytest.fixture(params=["julian", "proleptic_gregorian", "noleap"])
 def calendar(request):
     """
