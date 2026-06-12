@@ -422,5 +422,4 @@ class SeparateRadiationStep(StepABC):
         """
         self.module.load_state(state["module"])
         self.radiation_module.load_state(state["radiation_module"])
-        if "corrector" in state:
-            self._load_corrector_state(state["corrector"])
+        self._load_corrector_state(state.get("corrector", {}))

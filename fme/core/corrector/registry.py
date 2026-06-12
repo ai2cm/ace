@@ -36,12 +36,16 @@ class CorrectorConfigABC(abc.ABC):
         """
         return dict(state)
 
+    @final
     def get_corrector(
         self,
         dataset_info: DatasetInfo,
     ) -> "CorrectorABC":
+        corrector = self._get_corrector(dataset_info)
+        if self.corrector_disabled_epochs == 0:
+            return corrector
         return EpochScheduledCorrector(
-            wrapped=self._get_corrector(dataset_info),
+            wrapped=corrector,
             disabled_epochs=self.corrector_disabled_epochs,
         )
 
@@ -53,30 +57,34 @@ class CorrectorConfigABC(abc.ABC):
 
 
 class CorrectorABC(abc.ABC):
+    @abc.abstractmethod
     def train(self, mode: bool = True) -> "CorrectorABC":
         """Set the corrector to training or evaluation mode."""
-        self._training = mode
-        return self
+        ...
 
+    @final
     def eval(self) -> "CorrectorABC":
         """Set the corrector to evaluation mode."""
         return self.train(False)
 
+    @abc.abstractmethod
     def set_epoch(self, epoch: int) -> None:
         """Called by the stepper at the start of each training epoch."""
-        pass
+        ...
 
+    @abc.abstractmethod
     def get_state(self) -> dict[str, Any]:
         """
         Return corrector checkpoint state.
 
         Correctors without checkpointed state can return an empty dict.
         """
-        return {}
+        ...
 
+    @abc.abstractmethod
     def load_state(self, state: dict[str, Any]) -> None:
         """Load corrector checkpoint state."""
-        pass
+        ...
 
     @abc.abstractmethod
     def __call__(
@@ -132,10 +140,13 @@ class EpochScheduledCorrector(CorrectorABC):
         return state
 
     def load_state(self, state: dict[str, Any]) -> None:
+        if self._disabled_epochs > 0 and "corrector_disabled" not in state:
+            raise ValueError(
+                "EpochScheduledCorrector state is missing 'corrector_disabled'"
+            )
         if "corrector_disabled" in state:
             self._corrector_disabled = state["corrector_disabled"]
-        if "wrapped" in state:
-            self._wrapped.load_state(state["wrapped"])
+        self._wrapped.load_state(state.get("wrapped", {}))
 
     def __call__(
         self,

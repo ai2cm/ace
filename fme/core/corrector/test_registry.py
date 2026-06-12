@@ -37,3 +37,12 @@ def test_corrector_configs_support_disabled_epochs(config):
     corrector = config.get_corrector(_get_dataset_info())
 
     assert isinstance(corrector, EpochScheduledCorrector)
+
+
+def test_scheduled_corrector_requires_state_when_disabled_epochs_configured():
+    corrector = AtmosphereCorrectorConfig(corrector_disabled_epochs=1).get_corrector(
+        _get_dataset_info()
+    )
+
+    with pytest.raises(ValueError, match="corrector_disabled"):
+        corrector.load_state({})

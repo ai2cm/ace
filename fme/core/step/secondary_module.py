@@ -457,5 +457,4 @@ class SecondaryModuleStep(StepABC):
         self.secondary_module.load_state(state["secondary_module"])
         if "secondary_decoder" in state:
             self.secondary_decoder.load_module_state(state["secondary_decoder"])
-        if "corrector" in state:
-            self._load_corrector_state(state["corrector"])
+        self._load_corrector_state(state.get("corrector", {}))

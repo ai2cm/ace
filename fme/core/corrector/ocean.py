@@ -166,6 +166,18 @@ class OceanCorrector(CorrectorABC):
         self._vertical_coordinate = vertical_coordinate
         self._timestep = timestep
 
+    def train(self, mode: bool = True) -> "OceanCorrector":
+        return self
+
+    def set_epoch(self, epoch: int) -> None:
+        pass
+
+    def get_state(self) -> dict[str, Any]:
+        return {}
+
+    def load_state(self, state: dict[str, Any]) -> None:
+        pass
+
     def __call__(
         self,
         input_data: TensorMapping,

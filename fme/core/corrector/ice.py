@@ -1,5 +1,6 @@
 import dataclasses
 import datetime
+from typing import Any
 
 import torch
 
@@ -212,6 +213,18 @@ class IceCorrector(CorrectorABC):
         self._config = config
         self._gridded_operations = gridded_operations
         self._timestep = timestep
+
+    def train(self, mode: bool = True) -> "IceCorrector":
+        return self
+
+    def set_epoch(self, epoch: int) -> None:
+        pass
+
+    def get_state(self) -> dict[str, Any]:
+        return {}
+
+    def load_state(self, state: dict[str, Any]) -> None:
+        pass
 
     def __call__(
         self,

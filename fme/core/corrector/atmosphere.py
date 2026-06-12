@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 from collections.abc import Callable
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 import torch
 
@@ -170,6 +170,18 @@ class AtmosphereCorrector(CorrectorABC):
             self._dry_air_precision = torch.float32
         else:
             self._dry_air_precision = torch.float64
+
+    def train(self, mode: bool = True) -> "AtmosphereCorrector":
+        return self
+
+    def set_epoch(self, epoch: int) -> None:
+        pass
+
+    def get_state(self) -> dict[str, Any]:
+        return {}
+
+    def load_state(self, state: dict[str, Any]) -> None:
+        pass
 
     def __call__(
         self,

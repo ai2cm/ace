@@ -448,8 +448,7 @@ class SingleModuleStep(StepABC):
         self.module.load_state(module)
         if "secondary_decoder" in state:
             self.secondary_decoder.load_module_state(state["secondary_decoder"])
-        if "corrector" in state:
-            self._load_corrector_state(state["corrector"])
+        self._load_corrector_state(state.get("corrector", {}))
 
 
 def _apply_input_mask(input_norm: TensorDict, data_mask: TensorMapping) -> TensorDict:

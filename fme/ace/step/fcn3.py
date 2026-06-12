@@ -507,5 +507,4 @@ class FCN3Step(StepABC):
             state: The state to load.
         """
         self.module.load_state_dict(state["module"])
-        if "corrector" in state:
-            self._load_corrector_state(state["corrector"])
+        self._load_corrector_state(state.get("corrector", {}))
