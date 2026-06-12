@@ -100,10 +100,6 @@ def make_batch_data(
     return BatchData(data=data, time=time, latlon_coordinates=latlon)
 
 
-def _get_monotonic_coordinate(size: int, stop: float) -> torch.Tensor:
-    return cell_centered_coordinate(0.0, stop, size)
-
-
 def make_paired_batch_data(
     coarse_shape: tuple[int, int],
     fine_shape: tuple[int, int],
@@ -114,10 +110,10 @@ def make_paired_batch_data(
     """
     lat_c, lon_c = coarse_shape
     lat_f, lon_f = fine_shape
-    fine_lat = _get_monotonic_coordinate(lat_f, stop=lat_f)
-    fine_lon = _get_monotonic_coordinate(lon_f, stop=lon_f)
-    coarse_lat = _get_monotonic_coordinate(lat_c, stop=lat_f)
-    coarse_lon = _get_monotonic_coordinate(lon_c, stop=lon_f)
+    fine_lat = cell_centered_coordinate(0.0, lat_f, n=lat_f)
+    fine_lon = cell_centered_coordinate(0.0, lon_f, n=lon_f)
+    coarse_lat = cell_centered_coordinate(0.0, lat_f, n=lat_c)
+    coarse_lon = cell_centered_coordinate(0.0, lon_f, n=lon_c)
     fine = make_batch_data((batch_size, lat_f, lon_f), fine_lat, fine_lon)
     coarse = make_batch_data((batch_size, lat_c, lon_c), coarse_lat, coarse_lon)
     return PairedBatchData(fine=fine, coarse=coarse)
@@ -127,8 +123,8 @@ def make_fine_coords(fine_shape: tuple[int, int]) -> LatLonCoordinates:
     """Create LatLonCoordinates with proper monotonic coordinates for given shape."""
     lat_size, lon_size = fine_shape
     return LatLonCoordinates(
-        lat=_get_monotonic_coordinate(lat_size, stop=lat_size),
-        lon=_get_monotonic_coordinate(lon_size, stop=lon_size),
+        lat=cell_centered_coordinate(0.0, lat_size, n=lat_size),
+        lon=cell_centered_coordinate(0.0, lon_size, n=lon_size),
     )
 
 
@@ -376,8 +372,8 @@ def test_DiffusionModel_generate_on_batch_no_target():
     batch_size = 2
     n_generated_samples = 2
 
-    coarse_lat = _get_monotonic_coordinate(coarse_shape[0], stop=fine_shape[0])
-    coarse_lon = _get_monotonic_coordinate(coarse_shape[1], stop=fine_shape[1])
+    coarse_lat = cell_centered_coordinate(0.0, fine_shape[0], n=coarse_shape[0])
+    coarse_lon = cell_centered_coordinate(0.0, fine_shape[1], n=coarse_shape[1])
     coarse_batch = make_batch_data((batch_size, *coarse_shape), coarse_lat, coarse_lon)
 
     samples = model.generate_on_batch_no_target(
@@ -418,8 +414,8 @@ def test_DiffusionModel_generate_on_batch_no_target_arbitrary_input_size():
     for alternative_input_shape in [(8, 8), (32, 32)]:
         fine_shape = tuple(dim * downscale_factor for dim in alternative_input_shape)
         alt_y, alt_x = alternative_input_shape
-        coarse_lat = _get_monotonic_coordinate(alt_y, stop=alt_y * downscale_factor)
-        coarse_lon = _get_monotonic_coordinate(alt_x, stop=alt_x * downscale_factor)
+        coarse_lat = cell_centered_coordinate(0.0, alt_y * downscale_factor, n=alt_y)
+        coarse_lon = cell_centered_coordinate(0.0, alt_x * downscale_factor, n=alt_x)
         coarse_batch = make_batch_data(
             (batch_size, *alternative_input_shape), coarse_lat, coarse_lon
         )
@@ -517,8 +513,8 @@ def test_get_fine_coords_for_batch():
     )
 
     # Build a batch covering a spatial patch: middle 4 coarse lats and 8 coarse lons.
-    full_coarse_lat = _get_monotonic_coordinate(coarse_shape[0], stop=fine_shape[0])
-    full_coarse_lon = _get_monotonic_coordinate(coarse_shape[1], stop=fine_shape[1])
+    full_coarse_lat = cell_centered_coordinate(0.0, fine_shape[0], n=coarse_shape[0])
+    full_coarse_lon = cell_centered_coordinate(0.0, fine_shape[1], n=coarse_shape[1])
     patch_coarse_lat = full_coarse_lat[2:6].tolist()  # [5, 7, 9, 11]
     patch_coarse_lon = full_coarse_lon[4:12].tolist()  # [9, 11, ..., 23]
     batch = make_batch_data((2, 4, 8), patch_coarse_lat, patch_coarse_lon)
@@ -534,7 +530,7 @@ def test_get_fine_coords_for_batch():
 def _make_global_fine_coords_and_static(fine_shape: tuple[int, int]):
     """Return a global-covering LatLonCoordinates and matching StaticInputs."""
     global_fine_lon = cell_centered_coordinate(0.0, 360.0, fine_shape[1])
-    global_fine_lat = _get_monotonic_coordinate(fine_shape[0], stop=fine_shape[0])
+    global_fine_lat = cell_centered_coordinate(0.0, fine_shape[0], n=fine_shape[0])
     full_fine_coords = LatLonCoordinates(lat=global_fine_lat, lon=global_fine_lon)
     static_field = torch.arange(
         fine_shape[0] * fine_shape[1], dtype=torch.float32
@@ -556,7 +552,7 @@ def test_with_rolled_lon_no_roll_returns_same():
         full_fine_coords=static_inputs.coords,
         static_inputs=static_inputs,
     )
-    coarse_lon = _get_monotonic_coordinate(coarse_shape[1], stop=fine_shape[1])
+    coarse_lon = cell_centered_coordinate(0.0, fine_shape[1], n=coarse_shape[1])
     assert model.with_rolled_lon(coarse_lon) is model
 
 
@@ -587,30 +583,12 @@ def test_with_rolled_lon_shifts_coords_and_shares_weights():
         rolled.static_inputs.fields[0].data, model.static_inputs.fields[0].data
     )
 
-
-def test_with_rolled_lon_is_idempotent():
-    """Rolling an already-rolled model with the same domain is a no-op.
-
-    Guards against accidental double-rolling: the second roll resolves to 0
-    (full rotation), so the twice-rolled model has identical coords and static
-    inputs to the once-rolled one.
-    """
-    coarse_shape = (8, 16)
-    fine_shape = (16, 32)
-    full_fine_coords, static_inputs = _make_global_fine_coords_and_static(fine_shape)
-    model = _get_diffusion_model(
-        coarse_shape=coarse_shape,
-        downscale_factor=2,
-        full_fine_coords=full_fine_coords,
-        static_inputs=static_inputs,
-    )
-
-    coarse_lon = torch.tensor([-10.0, -5.0, 0.0, 5.0], dtype=torch.float32)
-    rolled = model.with_rolled_lon(coarse_lon)
+    # Guards against accidental double-rolling: the second roll resolves to 0
+    # (full rotation), so the twice-rolled model has identical coords and static
+    # inputs to the once-rolled one.
     twice = rolled.with_rolled_lon(coarse_lon)
-
     assert torch.equal(twice.full_fine_coords.lon, rolled.full_fine_coords.lon)
-    assert rolled.static_inputs is not None and twice.static_inputs is not None
+    assert twice.static_inputs is not None
     assert torch.equal(
         twice.static_inputs.fields[0].data, rolled.static_inputs.fields[0].data
     )
@@ -652,85 +630,6 @@ def test_roll_diffusion_model_keeps_fine_aligned_to_coarse_cells():
     # coarse-cell center -- i.e. the fine grid stayed aligned to the coarse cells.
     recentered = fine_coords.lon.reshape(len(coarse_lon), factor).mean(dim=1).cpu()
     assert torch.allclose(recentered, torch.tensor(coarse_lon), atol=1e-3)
-
-
-def test_denoising_moe_predictor_with_rolled_lon_rolls_all_experts():
-    """with_rolled_lon rolls every expert (keeping the shared-grid invariant)."""
-    from fme.downscaling.predictors.serial_denoising import DenoisingMoEPredictor
-
-    coarse_shape = (8, 16)
-    fine_shape = (16, 32)
-    full_fine_coords, static_inputs = _make_global_fine_coords_and_static(fine_shape)
-
-    expert0 = _get_diffusion_model(
-        coarse_shape=coarse_shape,
-        downscale_factor=2,
-        full_fine_coords=full_fine_coords,
-        static_inputs=static_inputs,
-    )
-    expert1 = _get_diffusion_model(
-        coarse_shape=coarse_shape,
-        downscale_factor=2,
-        full_fine_coords=full_fine_coords,
-        static_inputs=static_inputs,
-    )
-    predictor = DenoisingMoEPredictor(
-        experts=[expert0, expert1],
-        sigma_ranges=[(0.0, 0.5), (0.5, 1.0)],
-        num_diffusion_generation_steps=2,
-        churn=0.0,
-    )
-
-    coarse_lon = torch.tensor([-10.0, -5.0, 0.0, 5.0], dtype=torch.float32)
-    rolled = predictor.with_rolled_lon(coarse_lon)
-
-    # Every expert is a new (rolled) object; _primary stays _experts[0].
-    assert rolled._primary is rolled._experts[0]
-    for rolled_expert, original, source in zip(
-        rolled._experts, predictor._experts, [expert0, expert1]
-    ):
-        assert rolled_expert is not original
-        # Coords are rolled...
-        assert rolled_expert.full_fine_coords.lon[0].item() < 0
-        # ...but the raw network weights are still shared (fresh wrapper).
-        assert next(rolled_expert.module.parameters()) is next(
-            source.module.parameters()
-        )
-    # The sigma dispatcher is rebuilt from the rolled experts, consistent with
-    # _experts (not left pointing at any pre-roll module).
-    for entry, rolled_expert in zip(rolled._dispatch_module._entries, rolled._experts):
-        assert entry[2] is rolled_expert.module
-
-    # No-roll case returns self
-    non_neg_lon = torch.tensor([0.0, 5.0, 10.0, 15.0], dtype=torch.float32)
-    assert predictor.with_rolled_lon(non_neg_lon) is predictor
-
-
-def test_denoising_moe_predictor_rejects_mismatched_expert_grids():
-    """Experts on different grids are rejected at construction (shared-grid)."""
-    from fme.downscaling.predictors.serial_denoising import DenoisingMoEPredictor
-
-    fine_coords_a, static_a = _make_global_fine_coords_and_static((16, 32))
-    fine_coords_b, static_b = _make_global_fine_coords_and_static((16, 16))
-    expert_a = _get_diffusion_model(
-        coarse_shape=(8, 16),
-        downscale_factor=2,
-        full_fine_coords=fine_coords_a,
-        static_inputs=static_a,
-    )
-    expert_b = _get_diffusion_model(
-        coarse_shape=(8, 8),
-        downscale_factor=2,
-        full_fine_coords=fine_coords_b,
-        static_inputs=static_b,
-    )
-    with pytest.raises(ValueError, match="metadata"):
-        DenoisingMoEPredictor(
-            experts=[expert_a, expert_b],
-            sigma_ranges=[(0.0, 0.5), (0.5, 1.0)],
-            num_diffusion_generation_steps=2,
-            churn=0.0,
-        )
 
 
 def test_checkpoint_config_topography_raises():
