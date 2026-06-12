@@ -345,11 +345,12 @@ def test_build_aligned_subset_pair_preserves_scale_factor_across_seam(
     assert len(fine_coords.lat) == scale_factor * len(coarse_coords.lat)
     assert len(fine_coords.lon) == scale_factor * len(coarse_coords.lon)
 
-    # Data values are the original longitudes, shifted only in position by the
-    # roll, while the subset coords are in the requested interval's convention; mod
-    # 360 compares them as the same physical longitude. This is the value-level
-    # check at the odd factor -- where the config-side and dataset-side rolls use
-    # different anchors -- which the scale-factor count alone could not catch.
+    # Values encode source longitudes, so data must match the subset's rolled lon
+    # coords mod 360. The rolls being checked use different anchors: at
+    # scale_factor=3, _roll_lons_to_extent_convention anchors the fine roll at
+    # -45.0 (lon_start - coarse_spacing/2) while HorizontalSubsetDataset anchors
+    # at the adjusted fine extent start, -37.5. A misalignment from that
+    # half-fine-cell difference would pass the count checks above.
     for subset, coords in (
         (fine_subset, fine_coords),
         (coarse_subset, coarse_coords),
@@ -388,11 +389,9 @@ def test_PairedDataLoaderConfig_prime_meridian_crossing(tmp_path):
     data = data_config.build(requirements=requirements, train=False)
     batch = next(iter(data.loader))
 
-    # The data values are the original longitudes, shifted only in position by the
-    # roll (torch.roll never remaps values), while latlon_coordinates is expressed
-    # in the requested interval's convention (e.g. original 337.5 -> -22.5).
-    # Comparing mod 360 checks the two still refer to the same physical longitude
-    # despite living in different 360-degree windows.
+    # Values encode source longitudes, so data must match the rolled lon coords
+    # mod 360 (e.g. original 337.5 -> coord -22.5); see the value-level check in
+    # test_build_aligned_subset_pair_preserves_scale_factor_across_seam.
     for grid in (batch.coarse, batch.fine):
         lon = grid.latlon_coordinates.lon[0].cpu()  # batch members are identical
         values = grid.data["var0"][0].cpu()  # (n_lat, n_lon)
