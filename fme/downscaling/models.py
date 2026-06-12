@@ -774,14 +774,19 @@ class DiffusionModel:
         Return a new model with full_fine_coords and static_inputs rolled to match
         coarse_lon's longitude convention, sharing the network weights.
 
+        Models with rolled longitude are useful when inference region crosses
+        the prime meridian, where we want to ensure we can grab proper slices
+        from the static inputs and provide the right coordinates for the outputs.
+
         Returns self unchanged when coarse_lon does not cross the prime meridian.
-        The new model is built through the constructor (rather than a shallow copy)
-        so its coords are re-validated and derived state is rebuilt fresh; the raw
-        module is unwrapped and passed so __init__ re-wraps it exactly once.
         """
         if not coords_require_lon_roll(coarse_lon):
             return self
         roll_amount, lon_start = self._lon_roll_amount(coarse_lon)
+
+        # The new model is built through the constructor (rather than a shallow copy)
+        # so its coords are re-validated and derived state is rebuilt fresh; the raw
+        # module is unwrapped and passed so __init__ re-wraps it exactly once.
         return DiffusionModel(
             config=self.config,
             module=self.module.module,
