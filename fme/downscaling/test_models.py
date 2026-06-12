@@ -28,6 +28,7 @@ from fme.downscaling.models import (
 )
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.noise import LogNormalNoiseDistribution
+from fme.downscaling.test_utils import cell_centered_coordinate
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 
@@ -100,9 +101,7 @@ def make_batch_data(
 
 
 def _get_monotonic_coordinate(size: int, stop: float) -> torch.Tensor:
-    bounds = torch.linspace(0, stop, size + 1)
-    coord = (bounds[:-1] + bounds[1:]) / 2
-    return coord
+    return cell_centered_coordinate(0.0, stop, size)
 
 
 def make_paired_batch_data(
@@ -534,8 +533,7 @@ def test_get_fine_coords_for_batch():
 
 def _make_global_fine_coords_and_static(fine_shape: tuple[int, int]):
     """Return a global-covering LatLonCoordinates and matching StaticInputs."""
-    step = 360 / fine_shape[1]
-    global_fine_lon = torch.arange(fine_shape[1]) * step + step / 2
+    global_fine_lon = cell_centered_coordinate(0.0, 360.0, fine_shape[1])
     global_fine_lat = _get_monotonic_coordinate(fine_shape[0], stop=fine_shape[0])
     full_fine_coords = LatLonCoordinates(lat=global_fine_lat, lon=global_fine_lon)
     static_field = torch.arange(

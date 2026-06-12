@@ -24,7 +24,7 @@ from fme.downscaling.data import (
     coords_require_lon_roll,
     find_roll_anchor,
     load_coords_from_path,
-    roll_latlon_coords,
+    roll_lon_coords,
 )
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
@@ -790,8 +790,9 @@ class DiffusionModel:
             coarse_shape=self.coarse_shape,
             downscale_factor=self.downscale_factor,
             sigma_data=self.sigma_data,
-            full_fine_coords=roll_latlon_coords(
-                self.full_fine_coords, roll_amount, lon_start
+            full_fine_coords=LatLonCoordinates(
+                lat=self.full_fine_coords.lat,
+                lon=roll_lon_coords(self.full_fine_coords.lon, roll_amount, lon_start),
             ),
             in_names=self.in_names,
             out_names=self.out_names,
