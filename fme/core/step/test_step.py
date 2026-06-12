@@ -1621,31 +1621,122 @@ def test_n_ic_timesteps_2_uses_history_in_step():
         assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
 
 
-def test_n_ic_timesteps_2_validation_errors():
-    """n_ic_timesteps > 1 is incompatible with global_mean_removal and channel masks."""
+@pytest.mark.parametrize(
+    "removal",
+    [
+        PerChannelGlobalMeanRemovalConfig(field_names=["a", "b"]),
+        PerChannelGlobalMeanRemovalConfig(field_names=["a", "b"], append_as_input=True),
+        SharedGlobalMeanRemovalConfig(reference_field="a", field_names=["a", "b"]),
+        SharedGlobalMeanRemovalConfig(
+            reference_field="a", field_names=["a", "b"], append_as_input=True
+        ),
+    ],
+    ids=[
+        "per_channel",
+        "per_channel_append_as_input",
+        "shared",
+        "shared_append_as_input",
+    ],
+)
+def test_n_ic_timesteps_2_with_global_mean_removal(removal):
+    """n_ic_timesteps=2 works with global_mean_removal; each IC timestep gets
+    its own independent global-mean offset."""
     in_names = ["a", "b"]
     out_names = ["a", "b"]
+    means = {"a": 280.0, "b": 280.0}
+    stds = {"a": 5.0, "b": 5.0}
+    normalization = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(means=means, stds=stds),
+    )
+    config = SingleModuleStepConfig(
+        builder=ModuleSelector(
+            type="SphericalFourierNeuralOperatorNet",
+            config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+        ),
+        in_names=in_names,
+        out_names=out_names,
+        normalization=normalization,
+        global_mean_removal=removal,
+        n_ic_timesteps=2,
+    )
+    step = get_step(
+        StepSelector(type="single_module", config=dataclasses.asdict(config)),
+        DEFAULT_IMG_SHAPE,
+    )
+    n_samples = 2
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    history_data = get_tensor_dict(in_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+    output, _ = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step,
+            labels=None,
+            history=[history_data],
+        ),
+    )
+    for name in out_names:
+        assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
+
+
+def test_n_ic_timesteps_2_with_include_channel_mask_inputs():
+    """n_ic_timesteps=2 works with include_channel_mask_inputs; the mask is
+    replicated once per IC timestep so the total channel count is consistent."""
+    in_names = ["forcing_shared", "forcing_rad"]
+    out_names = ["diagnostic_main", "diagnostic_rad"]
     normalization = get_network_and_loss_normalization_config(
         names=list(set(in_names + out_names))
     )
-    with pytest.raises(ValueError, match="global_mean_removal"):
-        SingleModuleStepConfig(
-            builder=ModuleSelector(type="MLP", config={}),
-            in_names=in_names,
-            out_names=out_names,
-            normalization=normalization,
-            n_ic_timesteps=2,
-            global_mean_removal=PerChannelGlobalMeanRemovalConfig(field_names=in_names),
+    config = SingleModuleStepConfig(
+        builder=ModuleSelector(
+            type="SphericalFourierNeuralOperatorNet",
+            config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+        ),
+        in_names=in_names,
+        out_names=out_names,
+        normalization=normalization,
+        include_channel_mask_inputs=True,
+        n_ic_timesteps=2,
+    )
+    step = get_step(
+        StepSelector(type="single_module", config=dataclasses.asdict(config)),
+        DEFAULT_IMG_SHAPE,
+    )
+    n_samples = 4
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    history_data = get_tensor_dict(in_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+    data_mask = {
+        "forcing_shared": torch.tensor(
+            [True, True, False, False], device=fme.get_device()
         )
-    with pytest.raises(ValueError, match="include_channel_mask_inputs"):
-        SingleModuleStepConfig(
-            builder=ModuleSelector(type="MLP", config={}),
-            in_names=in_names,
-            out_names=out_names,
-            normalization=normalization,
-            n_ic_timesteps=2,
-            include_channel_mask_inputs=True,
-        )
+    }
+    output_no_mask, _ = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step,
+            labels=None,
+            history=[history_data],
+            data_mask=None,
+        ),
+    )
+    output_with_mask, _ = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step,
+            labels=None,
+            history=[history_data],
+            data_mask=data_mask,
+        ),
+    )
+    for name in out_names:
+        assert output_with_mask[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
+        torch.testing.assert_close(output_with_mask[name][:2], output_no_mask[name][:2])
+        assert not torch.allclose(output_with_mask[name][2:], output_no_mask[name][2:])
 
 
 def test_n_ic_timesteps_2_from_state_roundtrip():

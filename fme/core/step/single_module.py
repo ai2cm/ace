@@ -95,14 +95,6 @@ class SingleModuleStepConfig(StepConfigABC):
             raise ValueError(
                 f"n_ic_timesteps must be at least 1, got {self.n_ic_timesteps}"
             )
-        if self.n_ic_timesteps > 1 and self.global_mean_removal is not None:
-            raise ValueError(
-                "n_ic_timesteps > 1 is not supported with global_mean_removal"
-            )
-        if self.n_ic_timesteps > 1 and self.include_channel_mask_inputs:
-            raise ValueError(
-                "n_ic_timesteps > 1 is not supported with include_channel_mask_inputs"
-            )
         if self.global_mean_removal is not None:
             self.global_mean_removal.validate_names(self.in_names, self.out_names)
         for name in self.prescribed_prognostic_names:
@@ -395,7 +387,16 @@ class SingleModuleStep(StepABC):
             if args.history:
                 history_tensors = []
                 for hist_state in args.history:
-                    hist_norm = self._normalizer.normalize(hist_state)
+                    hist_shifted, hist_gmr_state = (
+                        self._global_mean_removal.forward_transform(
+                            hist_state, args.data_mask
+                        )
+                    )
+                    hist_norm = self._normalizer.normalize(hist_shifted)
+                    hist_norm = {
+                        **hist_norm,
+                        **self._global_mean_removal.extras_normalized(hist_gmr_state),
+                    }
                     if args.data_mask is not None:
                         hist_norm = apply_input_mask(hist_norm, args.data_mask)
                     history_tensors.append(
@@ -408,7 +409,13 @@ class SingleModuleStep(StepABC):
                 mask_dict = _build_channel_mask_dict(
                     self.in_packer.names, args.data_mask, input_tensor
                 )
-                mask_tensor = self.in_packer.pack(mask_dict, axis=self.CHANNEL_DIM)
+                single_mask_tensor = self.in_packer.pack(
+                    mask_dict, axis=self.CHANNEL_DIM
+                )
+                mask_tensor = torch.cat(
+                    [single_mask_tensor] * self._config.n_ic_timesteps,
+                    dim=self.CHANNEL_DIM,
+                )
                 input_tensor = torch.cat(
                     [input_tensor, mask_tensor], dim=self.CHANNEL_DIM
                 )
