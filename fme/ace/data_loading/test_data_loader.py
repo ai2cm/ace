@@ -962,6 +962,35 @@ def test_inference_persistence_names(tmp_path):
     assert not torch.all(first_item["bar"] == second_item["bar"])
 
 
+def test_inference_persistence_names_tensors_support_pin_memory(tmp_path):
+    """Persisted variables must not be stride-0 expanded views.
+
+    The DataLoader pin-memory thread allocates a pinned tensor with the same
+    strides and copies into it, which fails for tensors with overlapping
+    memory ("more than one element of the written-to tensor refers to a
+    single memory location").
+    """
+    _create_dataset_on_disk(tmp_path, n_times=14)
+
+    config = InferenceDataLoaderConfig(
+        dataset=XarrayDataConfig(data_path=tmp_path),
+        start_indices=ExplicitIndices([0, 3]),
+        persistence_names=["foo"],
+    )
+    window_requirements = DataRequirements(
+        names=["foo", "bar"],
+        n_timesteps=3,
+    )
+    dataset = InferenceDataset(
+        config,
+        9,
+        requirements=window_requirements,
+    )
+    foo = dataset[0].data["foo"]
+    # same layout-preserving copy that torch.utils.data pin_memory performs
+    torch.empty_strided(foo.size(), foo.stride()).copy_(foo)
+
+
 def test_inference_dataset_label_override_without_dataset_labels(tmp_path):
     _create_dataset_on_disk(tmp_path, n_times=14)
     config = InferenceDataLoaderConfig(
