@@ -100,9 +100,14 @@ def regress_logs(
         assert set(raw_logs.keys()) == set(raw_logs_loaded.keys())
         for key, value in raw_logs.items():
             value = value.cpu() if isinstance(value, torch.Tensor) else value
-            torch.testing.assert_close(
-                value, raw_logs_loaded[key], rtol=1e-3, atol=1e-3
-            )
+            if isinstance(value, torch.Tensor) and value.dtype == torch.uint8:
+                # uint8 image tensors; allow ±2 to tolerate rendering differences
+                # across matplotlib versions (e.g. colormapping changes in 3.11).
+                torch.testing.assert_close(value, raw_logs_loaded[key], rtol=0, atol=2)
+            else:
+                torch.testing.assert_close(
+                    value, raw_logs_loaded[key], rtol=1e-3, atol=1e-3
+                )
 
 
 def test_logs_regression():
