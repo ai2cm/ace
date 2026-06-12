@@ -277,6 +277,7 @@ class OneStepMeanMetricConfig:
     def build(self, ctx: OneStepBuildContext) -> OneStepMetricBuildResult:
         agg = MeanAggregator(
             ctx.ops,
+            target_time=ctx.n_ic_steps,
             target=self.target,
             include_bias=self.include_bias,
             include_grad_mag_percent_diff=self.include_grad_mag_percent_diff,

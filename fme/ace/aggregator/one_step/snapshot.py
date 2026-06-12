@@ -33,15 +33,20 @@ class SnapshotAggregator:
     }
 
     def __init__(
-        self, dims: list[str], metadata: Mapping[str, VariableMetadata] | None = None
+        self,
+        dims: list[str],
+        metadata: Mapping[str, VariableMetadata] | None = None,
+        target_time: int = 1,
     ):
         """
         Args:
             dims: Dimensions of the data.
             metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
+            target_time: Time index of the predicted step to snapshot.
         """
         self._dims = dims
+        self._target_time = target_time
         if metadata is None:
             self._metadata: Mapping[str, VariableMetadata] = {}
         else:
@@ -65,7 +70,7 @@ class SnapshotAggregator:
     def _get_data(self) -> tuple[TensorMapping, TensorMapping, TensorMapping]:
         time_dim = 1
         input_time = 0
-        target_time = 1
+        target_time = self._target_time
         gen, target, input = {}, {}, {}
         for name in self._gen_data.keys():
             # use first sample in batch
@@ -172,5 +177,6 @@ class OneStepSnapshotMetricConfig:
         agg = SnapshotAggregator(
             ctx.horizontal_coordinates.dims,
             ctx.variable_metadata,
+            target_time=ctx.n_ic_steps,
         )
         return OneStepMetricBuildResult(deterministic=agg)

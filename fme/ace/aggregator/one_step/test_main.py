@@ -292,6 +292,51 @@ def test_hierarchical_enable_disable():
     assert any("mean" in k for k in logs)
 
 
+def test_n_ic_steps_2_no_zero_division():
+    """Regression test: with n_ic_steps=2 the aggregator must measure RMSE at the
+    predicted step (index 2), not at an IC step where gen==target (RMSE=0)."""
+    nx, ny = 2, 2
+    batch_size = 2
+    # 2 IC timesteps + 1 prediction timestep
+    n_time = 3
+    ds_info = get_ds_info(nx, ny)
+    loss_scaling = {"a": torch.tensor(1.0)}
+    agg = build_one_step_aggregator(
+        metrics=[
+            OneStepMeanMetricConfig(target="denorm"),
+            OneStepMeanMetricConfig(
+                target="norm",
+                include_bias=False,
+                include_grad_mag_percent_diff=False,
+            ),
+        ],
+        dataset_info=ds_info,
+        save_diagnostics=False,
+        loss_scaling=loss_scaling,
+        n_ic_steps=2,
+    )
+    # IC timesteps (indices 0 and 1) are identical in gen and target.
+    # Prediction timestep (index 2) is different.
+    ic_data = torch.zeros(batch_size, 1, 2, nx, ny, device=get_device())
+    pred_target = torch.ones(batch_size, 1, 1, nx, ny, device=get_device())
+    pred_gen = torch.zeros(batch_size, 1, 1, nx, ny, device=get_device())
+    target_data = EnsembleTensorDict({"a": torch.cat([ic_data, pred_target], dim=2)})
+    gen_data = EnsembleTensorDict({"a": torch.cat([ic_data, pred_gen], dim=2)})
+    agg.record_batch(
+        batch=TrainOutput(
+            metrics={"loss": 1.0},
+            target_data=target_data,
+            gen_data=gen_data,
+            time=xr.DataArray(np.zeros((batch_size, n_time)), dims=["sample", "time"]),
+            normalize=lambda x: x,
+        ),
+    )
+    # get_summary calls _get_loss_scaled_mse_components; would crash with
+    # ZeroDivisionError if target_time were still pointing at an IC step
+    summary = agg.get_summary(label="test")
+    assert summary.logs["test/mean/weighted_rmse/a"] > 0.0
+
+
 @pytest.mark.parametrize(
     "kwargs,match",
     [

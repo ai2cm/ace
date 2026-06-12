@@ -146,6 +146,7 @@ def build_one_step_aggregator(
     channel_mean_names: Sequence[str] | None = None,
     raise_on_unsupported: bool = True,
     include_default_ensemble: bool = True,
+    n_ic_steps: int = 1,
 ) -> OneStepAggregator:
     _validate_no_duplicate_names(metrics)
     ctx = OneStepBuildContext(
@@ -153,6 +154,7 @@ def build_one_step_aggregator(
         horizontal_coordinates=dataset_info.horizontal_coordinates,
         variable_metadata=dataset_info.variable_metadata,
         channel_mean_names=channel_mean_names,
+        n_ic_steps=n_ic_steps,
     )
 
     deterministic_aggregators: dict[str, Aggregator] = {}
@@ -178,7 +180,7 @@ def build_one_step_aggregator(
     if not ensemble_aggregators and include_default_ensemble:
         ensemble_aggregators["ensemble"] = get_one_step_ensemble_aggregator(
             gridded_operations=ctx.ops,
-            target_time=1,
+            target_time=n_ic_steps,
             metadata=ctx.variable_metadata,
         )
 
@@ -289,6 +291,7 @@ class OneStepAggregatorConfig:
         output_dir: str | None = None,
         loss_scaling: TensorMapping | None = None,
         channel_mean_names: Sequence[str] | None = None,
+        n_ic_steps: int = 1,
     ) -> OneStepAggregator:
         return build_one_step_aggregator(
             metrics=self._get_metrics(),
@@ -299,6 +302,7 @@ class OneStepAggregatorConfig:
             channel_mean_names=channel_mean_names,
             raise_on_unsupported=False,
             include_default_ensemble=False,
+            n_ic_steps=n_ic_steps,
         )
 
 
@@ -349,6 +353,7 @@ class LegacyFlagOneStepAggregatorConfig:
         output_dir: str | None = None,
         loss_scaling: TensorMapping | None = None,
         channel_mean_names: Sequence[str] | None = None,
+        n_ic_steps: int = 1,
     ) -> OneStepAggregator:
         return build_one_step_aggregator(
             metrics=self._get_metrics(),
@@ -358,4 +363,5 @@ class LegacyFlagOneStepAggregatorConfig:
             loss_scaling=loss_scaling,
             channel_mean_names=channel_mean_names,
             raise_on_unsupported=False,
+            n_ic_steps=n_ic_steps,
         )

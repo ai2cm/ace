@@ -124,7 +124,9 @@ class OneStepSpectrumMetricConfig:
     def build(self, ctx: OneStepBuildContext) -> OneStepMetricBuildResult:
         try:
             flood_fill = SmoothFloodFill(num_steps=4)
-            agg = SpectrumAggregator(ctx.ops, nan_fill_fn=flood_fill)
+            agg = SpectrumAggregator(
+                ctx.ops, target_time=ctx.n_ic_steps, nan_fill_fn=flood_fill
+            )
         except NotImplementedError as e:
             raise MetricNotSupportedError(str(e)) from e
         return OneStepMetricBuildResult(deterministic=agg)

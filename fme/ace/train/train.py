@@ -97,6 +97,7 @@ def get_validation_callback(
     loss_names: Sequence[str] | None,
     save_per_epoch_diagnostics: bool,
     output_dir: str,
+    n_ic_steps: int = 1,
 ) -> ValidationCallback:
     tasks: list[ValidationTask] = [
         ValidationTask(
@@ -110,6 +111,7 @@ def get_validation_callback(
                 loss_names=loss_names,
                 save_per_epoch_diagnostics=save_per_epoch_diagnostics,
                 output_dir=output_dir,
+                n_ic_steps=n_ic_steps,
             ),
             weight=entry_config.weight,
         )
@@ -126,6 +128,7 @@ def _make_ace_validation_aggregator_factory(
     loss_names: Sequence[str] | None,
     save_per_epoch_diagnostics: bool,
     output_dir: str,
+    n_ic_steps: int = 1,
 ):
     def factory():
         return entry_config.aggregator.build(
@@ -134,6 +137,7 @@ def _make_ace_validation_aggregator_factory(
             save_diagnostics=save_per_epoch_diagnostics,
             output_dir=os.path.join(output_dir, name),
             channel_mean_names=loss_names,
+            n_ic_steps=n_ic_steps,
         )
 
     return factory
@@ -145,6 +149,7 @@ def get_validate_stepper_callback(
     loss_scaling: dict[str, torch.Tensor] | None,
     loss_names: Sequence[str] | None,
     validate_using_ema: bool,
+    n_ic_steps: int = 1,
 ) -> ValidateStepper:
     # LR tuning passes trial stepper/EMA instances distinct from the Trainer's
     # own stepper, so this callback manages its own EMA via run_validation_loop
@@ -158,6 +163,7 @@ def get_validate_stepper_callback(
                 save_diagnostics=False,
                 output_dir="",
                 channel_mean_names=loss_names,
+                n_ic_steps=n_ic_steps,
             )
             run_validation_loop(
                 stepper=stepper,
@@ -293,6 +299,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         loss_names=loss_names,
         save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
         output_dir=config.output_dir,
+        n_ic_steps=stepper.n_ic_timesteps,
     )
 
     validate_stepper: ValidateStepper | None = None
@@ -303,6 +310,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
             loss_scaling=loss_scaling,
             loss_names=loss_names,
             validate_using_ema=config.validate_using_ema,
+            n_ic_steps=stepper.n_ic_timesteps,
         )
 
     inference_callback = get_inference_callback(

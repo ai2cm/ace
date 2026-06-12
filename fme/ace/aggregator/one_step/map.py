@@ -29,15 +29,20 @@ class MapAggregator:
     }
 
     def __init__(
-        self, dims: list[str], metadata: Mapping[str, VariableMetadata] | None = None
+        self,
+        dims: list[str],
+        metadata: Mapping[str, VariableMetadata] | None = None,
+        target_time: int = 1,
     ):
         """
         Args:
             dims: Dimensions of the data.
             metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
+            target_time: Time index of the predicted step to average.
         """
         self._dims = dims
+        self._target_time = target_time
         if metadata is None:
             self._metadata: Mapping[str, VariableMetadata] = {}
         else:
@@ -56,9 +61,9 @@ class MapAggregator:
         gen_data_norm: TensorMapping,
     ):
         time_dim = 1
-        # note that we are only using the first timestep
+        # note that we are only using the first predicted timestep
         # see https://github.com/ai2cm/full-model/issues/1005
-        target_time = 1
+        target_time = self._target_time
         self._loss = loss
         for name in target_data:
             if name in self._target_data:
@@ -170,5 +175,6 @@ class OneStepMapMetricConfig:
         agg = MapAggregator(
             ctx.horizontal_coordinates.dims,
             ctx.variable_metadata,
+            target_time=ctx.n_ic_steps,
         )
         return OneStepMetricBuildResult(deterministic=agg)

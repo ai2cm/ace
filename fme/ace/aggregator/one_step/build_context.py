@@ -50,6 +50,7 @@ class OneStepBuildContext:
     horizontal_coordinates: HorizontalCoordinates
     variable_metadata: Mapping[str, VariableMetadata] | None
     channel_mean_names: Sequence[str] | None
+    n_ic_steps: int = 1
 
 
 @dataclasses.dataclass

@@ -520,7 +520,7 @@ class OneStepEnsembleMetricConfig:
             ensemble=get_one_step_ensemble_aggregator(
                 gridded_operations=ctx.ops,
                 log_mean_maps=self.log_mean_maps,
-                target_time=1,
+                target_time=ctx.n_ic_steps,
                 metadata=ctx.variable_metadata,
                 target=self.target,
                 channel_mean_names=(
