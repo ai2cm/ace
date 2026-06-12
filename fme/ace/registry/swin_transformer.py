@@ -7,8 +7,8 @@ from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 from fme.ace.registry.stochastic_sfno import NoiseConditionedModel
 from fme.core.dataset_info import DatasetInfo
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
-from fme.core.models.miles_credit.boundary_padding import TensorPaddingConfig
 from fme.core.models.swin_transformer import SwinTransformerNet
+from fme.core.models.swin_transformer.boundary_padding import TensorPaddingConfig
 
 
 class _ContextWrappedModule(nn.Module):
