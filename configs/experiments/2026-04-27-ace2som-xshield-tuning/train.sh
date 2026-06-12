@@ -11,7 +11,7 @@ BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
 WANDB_GROUP=ace
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=4
+N_GPUS=8
 STATS_DATASET=andrep/2026-06-08-vertically-resolved-1deg-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-stats
 PRE_TRAINED_WEIGHTS_PATH=/pre-trained-weights/training_checkpoints/best_ckpt.tar
 SEED_OFFSET=10
@@ -20,6 +20,8 @@ cd $REPO_ROOT
 
 # two different ACE2SOM seeds
 PRE_TRAINED_WEIGHTS_DATASETS=("01KHJ5F1M6YKVZESPZAAVVD6G8" "01KHCEF1SBYCZCGDM78N1CJC3H")
+
+PARTIAL_TUNED=("01KTWDTVRWZJ4V64VAZJMFZJ4Y")
 
 # tuned on XSHiELD, 1-1, seed 0
 #TUNED_DATASET=01KQD8NF9HQD1QY2X0S132YH72
@@ -54,7 +56,7 @@ for seed in {0..0}; do
         --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
         --env-secret WANDB_API_KEY=wandb-api-key-annak \
         --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-        --dataset ${PRE_TRAINED_WEIGHTS_DATASETS[$seed]}:/pre-trained-weights \
+        --dataset ${PARTIAL_TUNED[$seed]}:/pre-trained-weights \
         --dataset $STATS_DATASET:/statsdata \
         --gpus $N_GPUS \
         --shared-memory 400GiB \

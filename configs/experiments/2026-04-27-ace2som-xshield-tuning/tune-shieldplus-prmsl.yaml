@@ -49,7 +49,7 @@ inference:
         variables: *log_variables
         plot_variables: *log_variables
       zonal_mean:
-        variables: *log_variables
+        enabled: false
       time_mean_denorm:
         target: denorm
         variables: *log_variables
