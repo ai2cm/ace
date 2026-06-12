@@ -5,6 +5,7 @@ import xarray as xr
 
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
+from fme.downscaling.data.utils import find_roll_anchor
 
 from .static import StaticInput, StaticInputs, _load_coords_from_ds
 
@@ -182,16 +183,22 @@ def test__load_coords_from_ds():
 
 
 def test_StaticInputs_roll_shifts_data_and_coords():
-    """StaticInputs.roll produces correctly rolled data and monotonic shifted coords."""
+    """StaticInputs.roll produces correctly rolled data and monotonic shifted coords.
+
+    The roll amount is derived via find_roll_anchor, as production callers do, so
+    the test covers the contract that an anchor-derived roll paired with the same
+    lon_start yields aligned data and coordinates.
+    """
     # 1-degree global grid: 0.5, 1.5, ..., 359.5
     n_lon = 360
     coords = _make_coords(n_lat=1, n_lon=n_lon, offset=0.5)
     data = torch.arange(n_lon, dtype=torch.float32).unsqueeze(0)  # values = index
     static = StaticInputs(fields=[StaticInput(data)], coords=coords)
 
-    # Roll so domain starts at -5.5°: start_360=354.5, roll=(coords<354.5).sum()=354
-    roll_amount = 354
+    # Roll so domain starts at -5.5°: first coord >= 354.5 (index 354) lands at 0
     lon_start = -5.5
+    roll_amount = find_roll_anchor(static.coords.lon, lon_start)
+    assert roll_amount == 354
     rolled = static.roll(roll_amount, lon_start)
 
     # Data: original index 354 (value=354) should be at index 0 after rolling
@@ -201,3 +208,13 @@ def test_StaticInputs_roll_shifts_data_and_coords():
     # Coordinates should be monotonically increasing and start near lon_start
     assert torch.all(rolled.coords.lon[1:] > rolled.coords.lon[:-1])
     assert rolled.coords.lon[0].item() == pytest.approx(354.5 - 360)  # = -5.5
+
+    # Coordinate and data values stay paired: value k sits at lon k + 0.5 (mod 360)
+    assert torch.allclose(rolled.coords.lon % 360.0, rolled.fields[0].data[0] + 0.5)
+
+
+def test_StaticInputs_roll_zero_is_identity():
+    static = StaticInputs(
+        fields=[StaticInput(torch.randn(4, 4))], coords=_make_coords(n=4)
+    )
+    assert static.roll(0, lon_start=0.0) is static
