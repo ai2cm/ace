@@ -187,7 +187,7 @@ class IceBudgetCorrectionConfig:
 class IceCorrectorConfig(CorrectorConfigABC):
     budget_correction: IceBudgetCorrectionConfig | None = None
 
-    def get_corrector(
+    def _get_corrector(
         self,
         dataset_info: DatasetInfo,
     ) -> "IceCorrector":

@@ -2139,8 +2139,10 @@ def _get_force_positive_stepper(corrector_disabled_epochs: int) -> Stepper:
     return _get_stepper(
         ["a"],
         ["a"],
-        corrector=AtmosphereCorrectorConfig(force_positive_names=["a"]),
-        corrector_disabled_epochs=corrector_disabled_epochs,
+        corrector=AtmosphereCorrectorConfig(
+            force_positive_names=["a"],
+            corrector_disabled_epochs=corrector_disabled_epochs,
+        ),
     )
 
 

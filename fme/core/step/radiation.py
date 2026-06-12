@@ -404,10 +404,14 @@ class SeparateRadiationStep(StepABC):
         Returns:
             The state of the ML modules.
         """
-        return {
+        state = {
             "module": self.module.get_state(),
             "radiation_module": self.radiation_module.get_state(),
         }
+        corrector_state = self._get_corrector_state()
+        if len(corrector_state) > 0:
+            state["corrector"] = corrector_state
+        return state
 
     def load_state(self, state: dict[str, Any]) -> None:
         """
@@ -418,3 +422,5 @@ class SeparateRadiationStep(StepABC):
         """
         self.module.load_state(state["module"])
         self.radiation_module.load_state(state["radiation_module"])
+        if "corrector" in state:
+            self._load_corrector_state(state["corrector"])

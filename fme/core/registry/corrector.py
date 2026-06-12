@@ -2,7 +2,11 @@ import dataclasses
 from collections.abc import Mapping
 from typing import Any, ClassVar  # noqa: UP035
 
-from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
+from fme.core.corrector.registry import (
+    CorrectorABC,
+    CorrectorConfigABC,
+    EpochScheduledCorrector,
+)
 from fme.core.dataset_info import DatasetInfo
 
 from .registry import Registry
@@ -34,6 +38,7 @@ class CorrectorSelector(CorrectorConfigABC):
     registry: ClassVar[Registry[CorrectorConfigABC]] = Registry[CorrectorConfigABC]()
 
     def __post_init__(self):
+        super().__post_init__()
         self._corrector_config_instance = self.registry.get(self.type, self.config)
 
     @classmethod
@@ -46,6 +51,18 @@ class CorrectorSelector(CorrectorConfigABC):
         return set(cls.registry._types.keys())
 
     def get_corrector(
+        self,
+        dataset_info: DatasetInfo,
+    ) -> CorrectorABC:
+        corrector = self._corrector_config_instance.get_corrector(dataset_info)
+        if self.corrector_disabled_epochs == 0:
+            return corrector
+        return EpochScheduledCorrector(
+            wrapped=corrector,
+            disabled_epochs=self.corrector_disabled_epochs,
+        )
+
+    def _get_corrector(
         self,
         dataset_info: DatasetInfo,
     ) -> CorrectorABC:

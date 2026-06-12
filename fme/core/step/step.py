@@ -255,12 +255,29 @@ class StepABC(abc.ABC):
         self._training = mode
         for module in self.modules:
             module.train(mode)
+        self._set_corrector_train_mode(mode)
         return self
 
     @final
     def eval(self) -> "StepABC":
         """Set the step (and all submodules) to evaluation mode."""
         return self.train(False)
+
+    def _set_corrector_train_mode(self, mode: bool) -> None:
+        corrector = getattr(self, "_corrector", None)
+        if corrector is not None:
+            corrector.train(mode)
+
+    def _get_corrector_state(self) -> dict[str, Any]:
+        corrector = getattr(self, "_corrector", None)
+        if corrector is None:
+            return {}
+        return corrector.get_state()
+
+    def _load_corrector_state(self, state: dict[str, Any]) -> None:
+        corrector = getattr(self, "_corrector", None)
+        if corrector is not None:
+            corrector.load_state(state)
 
     @final
     def get_loss_normalizer(
@@ -380,11 +397,12 @@ class StepABC(abc.ABC):
     def set_epoch(self, epoch: int) -> None:
         """Called by the stepper at the start of each training epoch.
 
-        Default implementation is a no-op. Override to update per-epoch
-        behavior, e.g. epoch-dependent corrector enablement. Steps which
-        wrap another step must forward the call to the wrapped step.
+        Default implementation forwards to the corrector, if present. Steps
+        which wrap another step must forward the call to the wrapped step.
         """
-        pass
+        corrector = getattr(self, "_corrector", None)
+        if corrector is not None:
+            corrector.set_epoch(epoch)
 
     @abc.abstractmethod
     def get_state(self) -> dict[str, Any]:

@@ -1563,9 +1563,9 @@ def test_step_train_eval_toggle_propagates_to_modules():
     assert not step._training
 
 
-def test_corrector_disabled_not_in_state_by_default():
+def test_corrector_state_not_in_state_by_default():
     step = get_step(get_single_module_selector(), DEFAULT_IMG_SHAPE)
-    assert "corrector_disabled" not in step.get_state()
+    assert "corrector" not in step.get_state()
 
 
 def test_multi_call_step_forwards_set_epoch():
@@ -1578,3 +1578,21 @@ def test_multi_call_step_forwards_set_epoch():
     step = MultiCallStep(wrapped_step=wrapped_step, config=config)
     step.set_epoch(3)
     wrapped_step.set_epoch.assert_called_once_with(3)
+
+
+def test_multi_call_step_forwards_train_eval():
+    wrapped_step = unittest.mock.MagicMock(spec=StepABC)
+    wrapped_step.modules = nn.ModuleList()
+    config = MultiCallStepConfig(
+        wrapped_step=get_single_module_selector(),
+        config=None,
+        include_multi_call_in_loss=False,
+    )
+    step = MultiCallStep(wrapped_step=wrapped_step, config=config)
+
+    step.eval()
+    wrapped_step.train.assert_called_once_with(False)
+
+    wrapped_step.train.reset_mock()
+    step.train()
+    wrapped_step.train.assert_called_once_with(True)

@@ -436,11 +436,15 @@ class SecondaryModuleStep(StepABC):
         Returns:
             The state of the stepper.
         """
-        return {
+        state = {
             "module": self.module.get_state(),
             "secondary_module": self.secondary_module.get_state(),
             "secondary_decoder": self.secondary_decoder.get_module_state(),
         }
+        corrector_state = self._get_corrector_state()
+        if len(corrector_state) > 0:
+            state["corrector"] = corrector_state
+        return state
 
     def load_state(self, state: dict[str, Any]) -> None:
         """
@@ -453,3 +457,5 @@ class SecondaryModuleStep(StepABC):
         self.secondary_module.load_state(state["secondary_module"])
         if "secondary_decoder" in state:
             self.secondary_decoder.load_module_state(state["secondary_decoder"])
+        if "corrector" in state:
+            self._load_corrector_state(state["corrector"])

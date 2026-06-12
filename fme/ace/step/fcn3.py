@@ -491,9 +491,13 @@ class FCN3Step(StepABC):
         Returns:
             The state of the stepper.
         """
-        return {
+        state = {
             "module": self.module.state_dict(),
         }
+        corrector_state = self._get_corrector_state()
+        if len(corrector_state) > 0:
+            state["corrector"] = corrector_state
+        return state
 
     def load_state(self, state: dict[str, Any]) -> None:
         """
@@ -503,3 +507,5 @@ class FCN3Step(StepABC):
             state: The state to load.
         """
         self.module.load_state_dict(state["module"])
+        if "corrector" in state:
+            self._load_corrector_state(state["corrector"])
