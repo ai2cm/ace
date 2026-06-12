@@ -64,7 +64,11 @@ def _write_global_nc(path: Path, n_lat: int, n_lon: int, num_timesteps: int) -> 
 
 
 def global_data_paths_helper(
-    tmp_path: Path, num_timesteps: int = 4, scale_factor: int = 2
+    tmp_path: Path,
+    coarse_n_lat: int = 4,
+    coarse_n_lon: int = 8,
+    num_timesteps: int = 4,
+    scale_factor: int = 2,
 ) -> FineResCoarseResPair[str]:
     """Like data_paths_helper but with global (0-360) lon coordinates.
 
@@ -74,8 +78,6 @@ def global_data_paths_helper(
     """
     fine_path = tmp_path / "fine" / "data.nc"
     coarse_path = tmp_path / "coarse" / "data.nc"
-    coarse_n_lon = 8
-    coarse_n_lat = 4
     _write_global_nc(
         fine_path,
         n_lat=coarse_n_lat * scale_factor,
@@ -298,6 +300,17 @@ def test_PairedDataLoaderConfig_includes_merge(tmp_path):
     assert batch.fine.data["var0"].shape == (2, 6, 6)
 
 
+def _assert_lon_in_extent_convention(
+    lon: torch.Tensor, lon_extent: ClosedInterval, margin: float = 0.0
+) -> None:
+    """Assert subset lon coords are in the requested extent's convention.
+    The fine grid may extend up to half a coarse cell beyond it (the
+    adjust_fine_coord_range margin).
+    """
+    assert lon.min() >= lon_extent.start - margin
+    assert lon.max() <= lon_extent.stop + margin
+
+
 @pytest.mark.parametrize(
     "scale_factor",
     [
@@ -316,7 +329,10 @@ def test_build_aligned_subset_pair_preserves_scale_factor_across_seam(
     integer number of fine cells). For odd factors these anchors differ by half a
     fine cell, so this guards that the two independent rolls still agree.
     """
-    paths = global_data_paths_helper(tmp_path, scale_factor=scale_factor)
+    coarse_n_lon = 8
+    paths = global_data_paths_helper(
+        tmp_path, coarse_n_lon=coarse_n_lon, scale_factor=scale_factor
+    )
     n_timesteps = IntSchedule.from_constant(1)
     dataset_fine, properties_fine = build_from_config_sequence(
         configs=[XarrayDataConfig(paths.fine)],
@@ -331,19 +347,26 @@ def test_build_aligned_subset_pair_preserves_scale_factor_across_seam(
         strict_ensemble=False,
     )
 
+    lon_extent = ClosedInterval(-22.5, 22.5)
     fine_subset, coarse_subset = _build_aligned_subset_pair(
         dataset_fine=dataset_fine,
         properties_fine=properties_fine,
         dataset_coarse=dataset_coarse,
         properties_coarse=properties_coarse,
         lat_extent=ClosedInterval(1.0, 4.0),
-        lon_extent=ClosedInterval(-22.5, 22.5),
+        lon_extent=lon_extent,
     )
 
     coarse_coords = coarse_subset.subset_latlon_coordinates
     fine_coords = fine_subset.subset_latlon_coordinates
     assert len(fine_coords.lat) == scale_factor * len(coarse_coords.lat)
     assert len(fine_coords.lon) == scale_factor * len(coarse_coords.lon)
+
+    coarse_spacing = 360.0 / coarse_n_lon
+    _assert_lon_in_extent_convention(coarse_coords.lon, lon_extent)
+    _assert_lon_in_extent_convention(
+        fine_coords.lon, lon_extent, margin=coarse_spacing / 2
+    )
 
     # Values encode source longitudes, so data must match the subset's rolled lon
     # coords mod 360. The rolls being checked use different anchors: at
@@ -359,8 +382,8 @@ def test_build_aligned_subset_pair_preserves_scale_factor_across_seam(
     ):
         data_dict, *_ = subset[0]
         data = data_dict["var0"]  # (..., n_lat, n_lon); values == source lon
-        expected = coords.lon.reshape(*([1] * (data.ndim - 1)), -1)
-        assert torch.allclose(data % 360.0, expected % 360.0, atol=1e-3)
+        # coords.lon broadcasts against the trailing lon dim of data
+        assert torch.allclose(data % 360.0, coords.lon % 360.0, atol=1e-3)
 
 
 def test_PairedDataLoaderConfig_prime_meridian_crossing(tmp_path):
@@ -371,13 +394,17 @@ def test_PairedDataLoaderConfig_prime_meridian_crossing(tmp_path):
     (rolled) lon coordinate. Scale-factor preservation across downscale factors is
     covered by test_build_aligned_subset_pair_preserves_scale_factor_across_seam.
     """
-    paths = global_data_paths_helper(tmp_path)
+    coarse_n_lon = 8
+    paths = global_data_paths_helper(
+        tmp_path, coarse_n_lon=coarse_n_lon, scale_factor=2
+    )
     requirements = DataRequirements(
         fine_names=["var0"],
         coarse_names=["var0"],
         n_timesteps=1,
         use_fine_topography=False,
     )
+    lon_extent = ClosedInterval(-22.5, 22.5)
     data_config = PairedDataLoaderConfig(
         fine=[XarrayDataConfig(paths.fine)],
         coarse=[XarrayDataConfig(paths.coarse)],
@@ -385,7 +412,7 @@ def test_PairedDataLoaderConfig_prime_meridian_crossing(tmp_path):
         num_data_workers=0,
         strict_ensemble=False,
         lat_extent=ClosedInterval(1.0, 4.0),
-        lon_extent=ClosedInterval(-22.5, 22.5),
+        lon_extent=lon_extent,
     )
 
     data = data_config.build(requirements=requirements, train=False)
@@ -394,8 +421,10 @@ def test_PairedDataLoaderConfig_prime_meridian_crossing(tmp_path):
     # Values encode source longitudes, so data must match the rolled lon coords
     # mod 360 (e.g. original 337.5 -> coord -22.5); see the value-level check in
     # test_build_aligned_subset_pair_preserves_scale_factor_across_seam.
-    for grid in (batch.coarse, batch.fine):
+    coarse_spacing = 360.0 / coarse_n_lon
+    for grid, margin in ((batch.coarse, 0.0), (batch.fine, coarse_spacing / 2)):
         lon = grid.latlon_coordinates.lon[0].cpu()  # batch members are identical
+        _assert_lon_in_extent_convention(lon, lon_extent, margin=margin)
         values = grid.data["var0"][0].cpu()  # (n_lat, n_lon)
-        expected = lon.unsqueeze(0).expand_as(values)
-        assert torch.allclose(values % 360.0, expected % 360.0, atol=1e-3)
+        # lon broadcasts against the trailing lon dim of values
+        assert torch.allclose(values % 360.0, lon % 360.0, atol=1e-3)
