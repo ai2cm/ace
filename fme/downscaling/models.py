@@ -818,6 +818,7 @@ class CheckpointModelConfig:
     def _get_coords_backwards_compatible(
         coords_from_state: dict | None,
         fine_coordinates_path: str | None,
+        static_inputs: StaticInputs | None,
     ) -> LatLonCoordinates:
         if coords_from_state and fine_coordinates_path:
             raise ValueError(
@@ -832,24 +833,27 @@ class CheckpointModelConfig:
             )
         elif fine_coordinates_path is not None:
             return load_coords_from_path(fine_coordinates_path).to(get_device())
+        elif static_inputs is not None:
+            return static_inputs.coords
         else:
             raise ValueError(
-                "No fine coordinates found in checkpoint state and no "
-                "fine_coordinates_path provided. One of these must be provided to "
-                "load the model using CheckpointModelConfig."
+                "No fine coordinates found in checkpoint state or static inputs, "
+                "and no fine_coordinates_path provided. One of these must be "
+                "provided to load the model using CheckpointModelConfig."
             )
 
     def build(
         self,
     ) -> DiffusionModel:
         checkpoint_model: dict = self._checkpoint["model"]
-        full_fine_coords = self._get_coords_backwards_compatible(
-            checkpoint_model.get("full_fine_coords"),
-            self.fine_coordinates_path,
-        )
         static_inputs = StaticInputs.from_state_backwards_compatible(
             state=checkpoint_model.get("static_inputs") or {},
             static_inputs_config=self.static_inputs or {},
+        )
+        full_fine_coords = self._get_coords_backwards_compatible(
+            checkpoint_model.get("full_fine_coords"),
+            self.fine_coordinates_path,
+            static_inputs,
         )
         model = _CheckpointModelConfigSelector.from_state(
             self._checkpoint["model"]["config"]
