@@ -754,6 +754,9 @@ class DiffusionModel:
         """
         Number of positions to roll the fine grid (and the lon_start it aligns to)
         so the fine cells stay aligned to coarse_lon's coarse cells.
+
+        Assumes a uniformly spaced fine grid; validated by roll_lon_coords when
+        the roll is applied.
         """
         lon_start = float(coarse_lon.min())
         fine_lon = self.full_fine_coords.lon
@@ -774,6 +777,10 @@ class DiffusionModel:
         from the static inputs and provide the right coordinates for the outputs.
 
         Returns self unchanged when coarse_lon does not cross the prime meridian.
+
+        Intended for inference only: rebuilding wraps the module in a second
+        DistributedDataParallel under torch distributed, which is a hazard for
+        gradient-synchronized training.
         """
         if not coords_require_lon_roll(coarse_lon):
             return self
