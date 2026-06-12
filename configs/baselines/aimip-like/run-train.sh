@@ -161,3 +161,12 @@ run_training() {
 # run_training "train-4deg-daily-v1-era5-only-c5d4e1.yaml" "train-4deg-daily-v1-era5-only-c5d4e1-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
 # run_training "train-4deg-daily-v1-era5-only-c7d2e1.yaml" "train-4deg-daily-v1-era5-only-c7d2e1-rs0-2156" 1 ai2/ace high "ai2/jupiter ai2/titan"
 # run_training "train-4deg-daily-v1-era5-only-c7d2e1-qsat-scaling.yaml" "train-4deg-daily-v1-era5-only-c7d2e1-qsat-scaling-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# --- Wave 18: era5-only + era5-only-residual reruns with improved inference config (Jupiter+Titan, high) ---
+# New inference sections: 10year_insample (1995-2004, in-sample, drives checkpoint selection) and
+# long_46year_constant_co2 (CO2 held at 1979 IC value via persistence_names). rs0 launched pre-merge of
+# feature/concurrent-inline-inference; rs1 (seed 1) launched post-merge as a concurrent-inference speed A/B.
+# run_training "train-4deg-daily-v1-era5-only.yaml" "train-4deg-daily-v1-era5-only-rs0-b1d6" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-residual.yaml" "train-4deg-daily-v1-era5-only-residual-rs0-b1d6" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# rs1 launched post-merge of feature/concurrent-inline-inference (26917b9af) as the concurrent-inference speed A/B vs rs0-b1d6
+# run_training "train-4deg-daily-v1-era5-only-rs1.yaml" "train-4deg-daily-v1-era5-only-rs1-38f7" 1 ai2/ace high "ai2/jupiter ai2/titan"
