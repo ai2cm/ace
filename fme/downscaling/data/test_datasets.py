@@ -269,67 +269,44 @@ def test_horizontal_subset(
     assert dataset.subset_latlon_coordinates.lon.shape == (expected_n_lon,)
 
 
-def test_horizontal_subset_prime_meridian_spanning():
-    """HorizontalSubsetDataset must handle lon intervals that cross 0°/360°."""
+@pytest.mark.parametrize(
+    "lon_interval,expected_lons",
+    [
+        pytest.param((-90.0, 45.0), [-90.0, -45.0, 0.0, 45.0], id="negative-start"),
+        pytest.param((270.0, 405.0), [270.0, 315.0, 360.0, 405.0], id="stop-past-360"),
+    ],
+)
+def test_horizontal_subset_prime_meridian_spanning(lon_interval, expected_lons):
+    """HorizontalSubsetDataset must handle lon intervals that cross 0°/360°.
+
+    (-90, 45) and (270, 405) select the same physical data; coordinates are
+    returned in whichever convention the caller supplied.
+    """
     # 8-point longitude grid in 0–360° convention, 45° spacing
     lons = torch.tensor([0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0])
     n_lat, n_lon = 4, 8
-    coords = LatLonCoordinates(
-        lat=torch.linspace(0.0, 1.0, n_lat),
-        lon=lons,
-    )
+    coords = LatLonCoordinates(lat=torch.linspace(0.0, 1.0, n_lat), lon=lons)
     # Data: lon index encodes original position so we can verify the roll
     data_tensor = torch.arange(n_lon, dtype=torch.float).unsqueeze(0).unsqueeze(0)
     data_tensor = data_tensor.expand(1, 1, n_lat, n_lon).clone()
 
-    # Interval [-90, 45] spans 0° on a 0–360° grid (270°→45° going through 0°)
     dataset = _make_horizontal_subset_dataset(
         coords=coords,
         data_tensor=data_tensor,
         lat_interval=ClosedInterval(float("-inf"), float("inf")),
-        lon_interval=ClosedInterval(-90.0, 45.0),
+        lon_interval=ClosedInterval(*lon_interval),
     )
 
-    # Expect 4 lon points: 270°→-90°, 315°→-45°, 0°→0°, 45°→45°
     assert dataset.subset_latlon_coordinates.lon.shape == (4,)
-    expected_lons = torch.tensor([-90.0, -45.0, 0.0, 45.0])
-    assert torch.allclose(dataset.subset_latlon_coordinates.lon, expected_lons)
+    assert torch.allclose(
+        dataset.subset_latlon_coordinates.lon, torch.tensor(expected_lons)
+    )
 
     subset, _, _, _, _ = dataset[0]
     assert subset["x"].shape == (1, 1, n_lat, 4)
     # Data values should correspond to original lon indices 6, 7, 0, 1
     expected_vals = torch.tensor([6.0, 7.0, 0.0, 1.0])
     assert torch.allclose(subset["x"][0, 0, 0], expected_vals)
-
-
-def test_horizontal_subset_prime_meridian_spanning_positive_convention():
-    """stop > 360 triggers the same roll as the equivalent negative-start interval.
-
-    (270, 405) and (-90, 45) select the same physical data; coordinates are
-    returned in whichever convention the caller supplied.
-    """
-    lons = torch.tensor([0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0])
-    n_lat, n_lon = 4, 8
-    coords = LatLonCoordinates(lat=torch.linspace(0.0, 1.0, n_lat), lon=lons)
-    data_tensor = torch.arange(n_lon, dtype=torch.float).unsqueeze(0).unsqueeze(0)
-    data_tensor = data_tensor.expand(1, 1, n_lat, n_lon).clone()
-
-    # (270, 405): stop > 360 convention — coords preserved in that convention
-    ds_positive = _make_horizontal_subset_dataset(
-        coords=coords,
-        data_tensor=data_tensor,
-        lat_interval=ClosedInterval(float("-inf"), float("inf")),
-        lon_interval=ClosedInterval(270.0, 405.0),
-    )
-    assert ds_positive.subset_latlon_coordinates.lon.shape == (4,)
-    expected_lons = torch.tensor([270.0, 315.0, 360.0, 405.0])
-    assert torch.allclose(ds_positive.subset_latlon_coordinates.lon, expected_lons)
-
-    pos_subset, _, _, _, _ = ds_positive[0]
-    assert pos_subset["x"].shape == (1, 1, n_lat, 4)
-    # Same physical data as (-90, 45): original lon indices 6, 7, 0, 1
-    expected_vals = torch.tensor([6.0, 7.0, 0.0, 1.0])
-    assert torch.allclose(pos_subset["x"][0, 0, 0], expected_vals)
 
 
 def test_batch_data_from_sequence():
