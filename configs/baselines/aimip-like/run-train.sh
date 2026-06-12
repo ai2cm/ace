@@ -170,3 +170,11 @@ run_training() {
 # run_training "train-4deg-daily-v1-era5-only-residual.yaml" "train-4deg-daily-v1-era5-only-residual-rs0-b1d6" 1 ai2/ace high "ai2/jupiter ai2/titan"
 # rs1 launched post-merge of feature/concurrent-inline-inference (26917b9af) as the concurrent-inference speed A/B vs rs0-b1d6
 # run_training "train-4deg-daily-v1-era5-only-rs1.yaml" "train-4deg-daily-v1-era5-only-rs1-38f7" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# --- Wave 18 relaunch: all three -b1d6/-38f7 runs crashed at first inline inference on the
+# persistence_names pin-memory bug (stride-0 expand_as view; fixed in PR #1270). Sequential side (-5a96)
+# relaunched from branch exp/aimip-like-wave18-seq = b1d6360 + fix, WITHOUT concurrent-inline-inference;
+# concurrent side (-612f) relaunched from this branch (612f560f0 = fix cherry-picked post-merge).
+# run_training "train-4deg-daily-v1-era5-only.yaml" "train-4deg-daily-v1-era5-only-rs0-5a96" 1 ai2/ace high "ai2/jupiter ai2/titan"  # from exp/aimip-like-wave18-seq
+# run_training "train-4deg-daily-v1-era5-only-residual.yaml" "train-4deg-daily-v1-era5-only-residual-rs0-5a96" 1 ai2/ace high "ai2/jupiter ai2/titan"  # from exp/aimip-like-wave18-seq
+# run_training "train-4deg-daily-v1-era5-only-rs1.yaml" "train-4deg-daily-v1-era5-only-rs1-612f" 1 ai2/ace high "ai2/jupiter ai2/titan"
