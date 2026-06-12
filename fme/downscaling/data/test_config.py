@@ -349,8 +349,10 @@ def test_build_aligned_subset_pair_preserves_scale_factor_across_seam(
     # coords mod 360. The rolls being checked use different anchors: at
     # scale_factor=3, _roll_lons_to_extent_convention anchors the fine roll at
     # -45.0 (lon_start - coarse_spacing/2) while HorizontalSubsetDataset anchors
-    # at the adjusted fine extent start, -37.5. A misalignment from that
-    # half-fine-cell difference would pass the count checks above.
+    # at the adjusted fine extent start, -37.5. The mismatch is harmless because
+    # adjust_fine_coord_range snaps the extent to fine grid points, and no fine
+    # point lies between the two anchors -- both select the same first fine point
+    # (-37.5). This check would catch the off-by-one if they ever diverged.
     for subset, coords in (
         (fine_subset, fine_coords),
         (coarse_subset, coarse_coords),
