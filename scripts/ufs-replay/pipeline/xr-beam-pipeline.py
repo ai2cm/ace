@@ -554,6 +554,7 @@ def _process_chunk(
     source_grid_atmo: xr.Dataset,
     nn_fill_map: dict[str, tuple[np.ndarray, np.ndarray]] | None = None,
     mask_3d: xr.DataArray | None = None,
+    sea_fraction: xr.DataArray | None = None,
 ) -> xr.Dataset:
     """Process one time-chunk of ocean + atmosphere data.
 
@@ -613,13 +614,23 @@ def _process_chunk(
         VDIM,
     )
 
-    # Add per-level masks, surface mask, and land/sea fractions using
-    # the shared helpers (single source of mask generation logic).
+    # Add per-level masks, surface mask, and land/sea fractions.
     level_masks = _build_per_level_masks(mask_3d, VDIM, vertical_coarsening_indices)
     for name, mask_da in level_masks.items():
         ds_levels[name] = mask_da
     ds_levels["mask_2d"] = mask_2d
-    ds_levels.update(_build_land_sea_fractions(mask_2d))
+
+    # Use precomputed fractional sea_fraction (from conservatively
+    # regridded native mask) or fall back to binary mask_2d.
+    if sea_fraction is not None:
+        ssf = sea_fraction.astype(np.float32)
+        ssf.attrs = {"long_name": "sea surface fraction", "units": "fraction"}
+        land_frac = (1.0 - sea_fraction).astype(np.float32)
+        land_frac.attrs = {"long_name": "land fraction", "units": "fraction"}
+        ds_levels["sea_surface_fraction"] = ssf
+        ds_levels["land_fraction"] = land_frac
+    else:
+        ds_levels.update(_build_land_sea_fractions(mask_2d))
 
     # Collect 2-D ocean variables
     ocean_2d_names = [
@@ -943,6 +954,7 @@ def process_ocean_chunk(
     time_coarsen_factor=1,
     nn_fill_map=None,
     mask_3d=None,
+    sea_fraction=None,
 ):
     """Beam-compatible processing function: (key, ds) → (new_key, output_ds).
 
@@ -999,6 +1011,7 @@ def process_ocean_chunk(
         src_atmo,
         nn_fill_map=nn_fill_map,
         mask_3d=mask_3d,
+        sea_fraction=sea_fraction,
     )
 
     # Update key for output dimensions
@@ -1025,10 +1038,11 @@ def _extract_invariant_fields(
     output_grid: str,
     vertical_coarsening_indices: Sequence[Sequence[int]],
     source_grid_ocean: xr.Dataset,
-) -> xr.Dataset:
+) -> tuple[xr.Dataset, xr.DataArray, xr.DataArray]:
     """Extract time-invariant fields from the ocean data.
 
-    Returns scalar fields (idepth_*) and 2-D spatial fields (mask_*,
+    Returns (invariant_ds, mask_3d, sea_fraction) where invariant_ds
+    contains scalar fields (idepth_*) and 2-D spatial fields (mask_*,
     land_fraction, sea_surface_fraction, deptho) without a time dimension.
     These are written once to the zarr store during template creation,
     not streamed through the Beam pipeline.
@@ -1050,12 +1064,28 @@ def _extract_invariant_fields(
             attrs={"units": "meters", "long_name": f"Depth interface {i + 1}"},
         )
 
-    # 2-D spatial invariant fields: derive from a single regridded
-    # ocean timestep (mask, land_fraction, sea_surface_fraction, deptho).
+    # 2-D spatial invariant fields: derive from a single ocean timestep.
     ds_ocean_1t = ds_ocean.isel(time=0).load()
 
-    # Regrid to get the output-grid mask
+    # Build the native-resolution binary mask BEFORE regridding.
+    # Conservatively regridding this binary mask gives fractional
+    # sea_surface_fraction at coastal cells (e.g., 0.7 if 70% of the
+    # 0.25° source cells within a 1° target cell are ocean).
+    native_mask_3d, native_mask_2d = _build_3d_mask(ds_ocean_1t, VDIM)
+
     if output_grid:
+        # Regrid native binary mask → fractional ocean coverage
+        native_mask_ds = xr.Dataset({"mask_2d": native_mask_2d})
+        frac_ds = _regrid_dataset(
+            native_mask_ds,
+            output_grid,
+            source_grid_ocean,
+            skipna=False,
+            na_thres=1.0,
+        )
+        sea_fraction = frac_ds["mask_2d"].clip(0, 1).astype(np.float32)
+
+        # Regrid ocean data for building binary masks from NaN pattern
         ds_ocean_1t = _regrid_dataset(
             ds_ocean_1t,
             output_grid,
@@ -1063,13 +1093,21 @@ def _extract_invariant_fields(
             skipna=True,
             na_thres=1.0,
         )
+    else:
+        sea_fraction = native_mask_2d
 
-    # Build masks using shared helpers
+    # Binary masks for NaN insertion (from regridded NaN pattern)
     mask_3d, mask_2d = _build_3d_mask(ds_ocean_1t, VDIM)
     level_masks = _build_per_level_masks(mask_3d, VDIM, vertical_coarsening_indices)
     invariant.update(level_masks)
     invariant["mask_2d"] = mask_2d
-    invariant.update(_build_land_sea_fractions(mask_2d))
+
+    # Fractional land/sea fractions from regridded native mask
+    land_frac = (1.0 - sea_fraction).astype(np.float32)
+    land_frac.attrs = {"long_name": "land fraction", "units": "fraction"}
+    sea_fraction.attrs = {"long_name": "sea surface fraction", "units": "fraction"}
+    invariant["land_fraction"] = land_frac
+    invariant["sea_surface_fraction"] = sea_fraction
 
     # deptho
     depth_name = "depth" if "depth" in ds_ocean_1t else "deptho"
@@ -1078,7 +1116,7 @@ def _extract_invariant_fields(
         deptho.attrs = {"long_name": "Sea Floor Depth Below Geoid", "units": "m"}
         invariant["deptho"] = deptho
 
-    return xr.Dataset(invariant), mask_3d
+    return xr.Dataset(invariant), mask_3d, sea_fraction
 
 
 def _make_template(
@@ -1088,18 +1126,24 @@ def _make_template(
     vertical_coarsening_indices: Sequence[Sequence[int]],
     time_coarsen_factor: int,
     output_time: list,
-) -> tuple[xr.Dataset, dict[str, tuple[np.ndarray, np.ndarray]], xr.DataArray]:
+) -> tuple[
+    xr.Dataset,
+    dict[str, tuple[np.ndarray, np.ndarray]],
+    xr.DataArray,
+    xr.DataArray,
+]:
     """Eagerly process one ocean timestep to build the output zarr template.
 
-    Returns (template, nn_fill_map, mask_3d) where nn_fill_map and mask_3d
-    are precomputed invariant data to be reused by every Beam worker.
+    Returns (template, nn_fill_map, mask_3d, sea_fraction) where
+    nn_fill_map, mask_3d, and sea_fraction are precomputed invariant
+    data to be reused by every Beam worker.
     """
     logging.info("Building template from first timestep")
 
     # Extract scalar (idepth_*) and 2-D spatial (mask_*, land_fraction,
     # etc.) invariant fields — all without a time dimension.
     src_ocean = _make_source_grid(ds_ocean.isel(time=0).load())
-    invariant, mask_3d = _extract_invariant_fields(
+    invariant, mask_3d, sea_fraction = _extract_invariant_fields(
         ds_ocean,
         output_grid,
         vertical_coarsening_indices,
@@ -1132,6 +1176,7 @@ def _make_template(
         src_atmo,
         nn_fill_map={},  # empty map → no fill applied, no fallback
         mask_3d=mask_3d,
+        sea_fraction=sea_fraction,
     )
     processed = processed.drop_encoding()
 
@@ -1159,7 +1204,7 @@ def _make_template(
         if name not in template:
             template[name] = invariant[name]
 
-    return template, nn_fill_map, mask_3d
+    return template, nn_fill_map, mask_3d, sea_fraction
 
 
 # ---------------------------------------------------------------------------
@@ -1382,7 +1427,7 @@ def main():
 
     # --- Build template ---
     logging.info("Generating template")
-    template, nn_fill_map, mask_3d = _make_template(
+    template, nn_fill_map, mask_3d, sea_fraction = _make_template(
         ds_ocean,
         ds_atmo,
         args.output_grid,
@@ -1411,6 +1456,7 @@ def main():
                 time_coarsen_factor=time_coarsen_factor,
                 nn_fill_map=nn_fill_map,
                 mask_3d=mask_3d,
+                sea_fraction=sea_fraction,
             )
             | xbeam.ConsolidateChunks(output_shards)
             | xbeam.ChunksToZarr(
