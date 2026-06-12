@@ -152,17 +152,20 @@ class CoupledOceanFractionConfig:
         # fill nans with 0s
         sea_ice_frac = torch.nan_to_num(forcings_from_ocean[sea_ice_frac_name])
         land_frac = atmos_forcing_data[land_frac_name]
-        ocean_field_name_prefixes = {
-            k: list(v) for k, v in OCEAN_FIELD_NAME_PREFIXES.items()
-        }
-        ocean_field_name_prefixes["land_fraction"] = [land_frac_name]
-        if sea_ice_frac_name == "sea_ice_fraction":
-            ocean_field_name_prefixes["sea_ice_fraction"] = [sea_ice_frac_name]
+        if sea_ice_frac_name in OCEAN_FIELD_NAME_PREFIXES["sea_ice_fraction"]:
+            canonical_sea_ice_frac_name = "sea_ice_fraction"
+        elif sea_ice_frac_name in OCEAN_FIELD_NAME_PREFIXES["ocean_sea_ice_fraction"]:
+            canonical_sea_ice_frac_name = "ocean_sea_ice_fraction"
         else:
-            ocean_field_name_prefixes["ocean_sea_ice_fraction"] = [sea_ice_frac_name]
+            raise ValueError(
+                f"CoupledOceanFractionConfig expected {sea_ice_frac_name} to be "
+                "registered in OCEAN_FIELD_NAME_PREFIXES as a sea ice fraction."
+            )
         return OceanData(
-            {land_frac_name: land_frac, sea_ice_frac_name: sea_ice_frac},
-            ocean_field_name_prefixes=ocean_field_name_prefixes,
+            {
+                "land_fraction": land_frac,
+                canonical_sea_ice_frac_name: sea_ice_frac,
+            }
         )
 
 

@@ -715,6 +715,25 @@ def test_coupled_ocean_fraction_config_uses_configured_land_fraction_name():
     )
 
 
+def test_coupled_ocean_fraction_config_requires_registered_sea_ice_fraction_name():
+    config = CoupledOceanFractionConfig(
+        sea_ice_fraction_name="ICEFRAC",
+        land_fraction_name="LANDFRAC",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "CoupledOceanFractionConfig expected ICEFRAC to be registered "
+            "in OCEAN_FIELD_NAME_PREFIXES"
+        ),
+    ):
+        config.build_ocean_data(
+            forcings_from_ocean={"ICEFRAC": torch.tensor([0.5])},
+            atmos_forcing_data={"LANDFRAC": torch.tensor([0.2])},
+        )
+
+
 # Shared parametrization data for testing various data requirements
 DATA_REQUIREMENTS_TEST_CASES = [
     pytest.param(
