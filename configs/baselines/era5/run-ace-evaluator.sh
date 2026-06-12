@@ -62,13 +62,18 @@ job_group="${base_name}-era5"
 # Beaker result dataset ID from the training job (beaker experiment get ... | jq ...)
 
 
-run_evaluator "ace-evaluator-config.yaml" \
-  "$base_name-era5-eval-multi-step-ft-inverse-ace2-channel-weightings-rs0" \
-  "$job_group" \
-  "01KT9RWQH2C3JQ4EY4N3M5FYBJ"
+# run_evaluator "ace-evaluator-config.yaml" \
+#   "$base_name-era5-eval-multi-step-ft-inverse-ace2-channel-weightings-rs0" \
+#   "$job_group" \
+#   "01KT9RWQH2C3JQ4EY4N3M5FYBJ"
 
-run_evaluator "ace-evaluator-config.yaml" \
-  "$base_name-era5-eval-multi-step-ft-no-var-weighting-rs0" \
+# run_evaluator "ace-evaluator-config.yaml" \
+#   "$base_name-era5-eval-multi-step-ft-no-var-weighting-rs0" \
+#   "$job_group" \
+#   "01KSVC6YS7C18SGYV4VPZYZ232"
+
+run_evaluator "ace-evaluator-config-10day.yaml" \
+  "$base_name-era5-eval-multi-step-ft-no-var-weighting-rs0-10day-forecast" \
   "$job_group" \
   "01KSVC6YS7C18SGYV4VPZYZ232"
 
