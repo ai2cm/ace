@@ -110,6 +110,7 @@ class Optimization(OptimizationABC):
         self._use_gradient_accumulation = use_gradient_accumulation
         self._get_checkpoint = get_checkpoint
         self._max_grad_norm = max_grad_norm
+        self._last_grad_norm: float | None = None
 
     def checkpoint(self, module: nn.Module, step: int) -> nn.Module:
         return self._get_checkpoint(step)(module)
@@ -179,13 +180,16 @@ class Optimization(OptimizationABC):
             loss.backward()
 
     def _clip_gradients(self):
+        self._last_grad_norm = None
         if self._max_grad_norm is not None:
             if self.gscaler is not None:
                 self.gscaler.unscale_(self.optimizer)
             params = itertools.chain.from_iterable(
                 group["params"] for group in self.optimizer.param_groups
             )
-            torch.nn.utils.clip_grad_norm_(params, self._max_grad_norm)
+            self._last_grad_norm = torch.nn.utils.clip_grad_norm_(
+                params, self._max_grad_norm
+            ).item()
 
     def _step_weights(self):
         if self.gscaler is not None:
@@ -303,7 +307,9 @@ class OptimizationConfig:
         max_grad_norm: Maximum norm for gradient clipping. If None, no gradient
             clipping is applied. When set, gradients are clipped to this global
             norm before each optimizer step. Compatible with automatic mixed
-            precision.
+            precision. When use_gradient_accumulation is enabled, clipping is
+            applied to the full N-step accumulated gradient (i.e. the gradient
+            the optimizer sees), not per accumulation sub-step.
         resume_optimizer_ckpt_path: Optional path to a training checkpoint
             (``ckpt.tar``) whose per-parameter optimizer running state (e.g.
             Adam moment estimates) and grad scaler state should be loaded into

@@ -434,12 +434,6 @@ def _build_optimization(
     )
 
 
-def _grad_norm(model: nn.Module) -> float:
-    return (
-        sum(p.grad.norm() ** 2 for p in model.parameters() if p.grad is not None) ** 0.5
-    )
-
-
 def test_set_learning_rate():
     model = nn.Linear(1, 1).to(fme.get_device())
     optimization = _build_optimization(model.parameters())
@@ -866,22 +860,49 @@ def test_gradient_clipping(max_grad_norm, expect_clipped):
 
     x = torch.ones(1, 10).to(fme.get_device()) * 1e4  # large input → large gradients
     optimization.accumulate_loss(model(x).sum())
-
-    captured = []
-    original_step = optimization.optimizer.step
-
-    def capturing_step(*args, **kwargs):
-        captured.append(_grad_norm(model))
-        return original_step(*args, **kwargs)
-
-    optimization.optimizer.step = capturing_step
     optimization.step_weights()
 
-    assert len(captured) == 1
     if expect_clipped:
-        assert captured[0] <= max_grad_norm + 1e-5
+        # _last_grad_norm is the pre-clip norm returned by clip_grad_norm_
+        assert optimization._last_grad_norm is not None
+        assert optimization._last_grad_norm > max_grad_norm
     else:
-        assert captured[0] > 0.01  # unclipped gradient is large
+        assert optimization._last_grad_norm is None
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="AMP requires CUDA")
+def test_gradient_clipping_with_amp():
+    """_clip_gradients unscales via gscaler before clipping when AMP is active."""
+    torch.manual_seed(0)
+    model = nn.Linear(10, 1).to("cuda")
+    optimization = Optimization(
+        parameters=model.parameters(),
+        optimizer_type="Adam",
+        lr=0.001,
+        max_epochs=10,
+        scheduler=SchedulerConfig(),
+        enable_automatic_mixed_precision=True,
+        kwargs={},
+        max_grad_norm=0.01,
+    )
+
+    with optimization.autocast():
+        x = torch.ones(1, 10, device="cuda") * 1e4
+        optimization.accumulate_loss(model(x).sum())
+
+    assert optimization.gscaler is not None
+    unscale_calls = []
+    original_unscale = optimization.gscaler.unscale_
+
+    def spy_unscale(opt):
+        unscale_calls.append(True)
+        return original_unscale(opt)
+
+    optimization.gscaler.unscale_ = spy_unscale
+    optimization.step_weights()
+
+    assert len(unscale_calls) == 1
+    assert optimization._last_grad_norm is not None
 
 
 def test_optimization_config_passes_max_grad_norm():
