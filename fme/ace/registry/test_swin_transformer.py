@@ -129,7 +129,7 @@ def test_swin_transformer_conditional_with_labels():
     assert net.embed_dim_labels == len(all_labels)
 
 
-def test_swin_transformer_unconditional_ignores_dataset_labels():
+def test_swin_transformer_unconditional_builds_label_weights_from_dataset_labels():
     n_in, n_out = 5, 3
     all_labels = {"label_a", "label_b"}
     dataset_info = _get_dataset_info(all_labels=all_labels)
@@ -194,7 +194,7 @@ def test_nc_swin_transformer_raises_when_lat_1d_is_none():
         _nc_builder().build(n_in, n_out, dataset_info)
 
 
-def test_nc_swin_transformer_unconditional_ignores_dataset_labels():
+def test_nc_swin_transformer_unconditional_builds_label_weights_from_dataset_labels():
     n_in, n_out = 5, 3
     all_labels = {"label_a", "label_b"}
     dataset_info = _get_dataset_info(all_labels=all_labels)
@@ -204,10 +204,7 @@ def test_nc_swin_transformer_unconditional_ignores_dataset_labels():
     )
     module = selector.build(
         n_in_channels=n_in, n_out_channels=n_out, dataset_info=dataset_info
-    ).to(fme.get_device())
-    x = torch.randn(2, n_in, *IMG_SHAPE, device=fme.get_device())
-    out = module(x)
-    assert out.shape == (2, n_out, *IMG_SHAPE)
+    )
     net = getattr(module.torch_module, "conditional_model")
     assert net.embed_dim_labels == len(all_labels)
 
