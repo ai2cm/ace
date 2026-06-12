@@ -983,7 +983,8 @@ def test_inference_persistence_names_tensors_support_pin_memory(tmp_path):
     )
     foo = dataset[0].data["foo"]
     # same layout-preserving copy that torch.utils.data pin_memory performs
-    torch.empty_strided(foo.size(), foo.stride()).copy_(foo)
+    result = torch.empty_strided(foo.size(), foo.stride()).copy_(foo)
+    torch.testing.assert_close(result, foo)
 
 
 def test_inference_dataset_label_override_without_dataset_labels(tmp_path):
