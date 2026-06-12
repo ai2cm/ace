@@ -509,11 +509,9 @@ def _setup(
     return train_config_filename, inference_config_filename
 
 
-def test_train_and_inference(tmp_path, very_fast_only: bool):
+@pytest.mark.medium_duration
+def test_train_and_inference(tmp_path):
     """Ensure that ACE Ocean training and subsequent standalone inference run."""
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-
     train_config, inference_config = _setup(tmp_path)
 
     with mock_wandb() as wandb:
