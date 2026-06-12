@@ -304,11 +304,10 @@ validation:
 # swin_diff.md item 3: cosine-with-warmup schedule stepped per-iteration
 optimization:
   enable_automatic_mixed_precision: false
-  lr: 3.0e-4
+  lr: 0.0001
   optimizer_type: FusedAdam
   use_gradient_accumulation: true
   no_weight_decay_bias_and_norm: true
-  max_grad_norm: 1.0
   kwargs:
     weight_decay: 0.05
     betas:
@@ -328,14 +327,10 @@ optimization:
     milestones:
     - 2
 stepper_training:
-  n_ensemble: 2
+  n_ensemble: 1
   n_forward_steps: 1
-  optimize_last_step_only: true
   loss:
-    type: EnsembleLoss
-    kwargs:
-      crps_weight: 0.9
-      energy_score_weight: 0.1
+    type: MSE
     weights:
       # Surface: non-T2m variables get 0.1 (TMP2m and surface_temperature default to 1.0)
       UGRD10m: 0.1
@@ -397,7 +392,7 @@ stepper:
       n_ic_timesteps: 2
       builder:
         # swin_diff.md item 9: axis_attn (2D axial self-attention replacing ColumnMixer)
-        type: TimeAndNoiseConditionedSwinTransformer
+        type: TimeConditionedSwinTransformer
         config:
           embed_dim: 256
           depth_multiplier: 4
@@ -415,7 +410,6 @@ stepper:
           mlp_layer: swiglu
           axis_attn: true
           embed_dim_scalar: 256
-          noise_embed_dim: 256
           frequency_embedding_size: 256
           padding_conf:
             activate: true

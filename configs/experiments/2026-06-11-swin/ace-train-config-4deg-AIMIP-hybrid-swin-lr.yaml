@@ -304,7 +304,7 @@ validation:
 # swin_diff.md item 3: cosine-with-warmup schedule stepped per-iteration
 optimization:
   enable_automatic_mixed_precision: false
-  lr: 3.0e-4
+  lr: 0.0001
   optimizer_type: FusedAdam
   use_gradient_accumulation: true
   no_weight_decay_bias_and_norm: true

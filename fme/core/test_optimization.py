@@ -419,7 +419,7 @@ def test_sequential_scheduler_reload():
 
 
 def _build_optimization(
-    parameters, lr=0.001, optimizer_type="Adam", max_epochs=10
+    parameters, lr=0.001, optimizer_type="Adam", max_epochs=10, max_grad_norm=None
 ) -> Optimization:
     """Helper to construct an Optimization with common test defaults."""
     return Optimization(
@@ -430,6 +430,7 @@ def _build_optimization(
         scheduler=SchedulerConfig(),
         enable_automatic_mixed_precision=False,
         kwargs={},
+        max_grad_norm=max_grad_norm,
     )
 
 
@@ -901,3 +902,66 @@ def test_no_weight_decay_bias_and_norm_false_single_group():
     )
     opt = config.build(torch.nn.ModuleList([model]), max_epochs=1)
     assert len(opt.optimizer.param_groups) == 1
+
+
+@pytest.mark.parametrize("max_grad_norm,expect_clipped", [(0.01, True), (None, False)])
+def test_gradient_clipping(max_grad_norm, expect_clipped):
+    """step_weights clips the global gradient norm to max_grad_norm when set."""
+    torch.manual_seed(0)
+    model = nn.Linear(10, 1).to(fme.get_device())
+    optimization = _build_optimization(model.parameters(), max_grad_norm=max_grad_norm)
+
+    x = torch.ones(1, 10).to(fme.get_device()) * 1e4  # large input → large gradients
+    optimization.accumulate_loss(model(x).sum())
+    optimization.step_weights()
+
+    if expect_clipped:
+        # _last_grad_norm is the pre-clip norm returned by clip_grad_norm_
+        assert optimization._last_grad_norm is not None
+        assert optimization._last_grad_norm > max_grad_norm
+    else:
+        assert optimization._last_grad_norm is None
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="AMP requires CUDA")
+def test_gradient_clipping_with_amp():
+    """_clip_gradients unscales via gscaler before clipping when AMP is active."""
+    torch.manual_seed(0)
+    model = nn.Linear(10, 1).to("cuda")
+    optimization = Optimization(
+        parameters=model.parameters(),
+        optimizer_type="Adam",
+        lr=0.001,
+        max_epochs=10,
+        scheduler=SchedulerConfig(),
+        enable_automatic_mixed_precision=True,
+        kwargs={},
+        max_grad_norm=0.01,
+    )
+
+    with optimization.autocast():
+        x = torch.ones(1, 10, device="cuda") * 1e4
+        optimization.accumulate_loss(model(x).sum())
+
+    assert optimization.gscaler is not None
+    unscale_calls = []
+    original_unscale = optimization.gscaler.unscale_
+
+    def spy_unscale(opt):
+        unscale_calls.append(True)
+        return original_unscale(opt)
+
+    optimization.gscaler.unscale_ = spy_unscale
+    optimization.step_weights()
+
+    assert len(unscale_calls) == 1
+    assert optimization._last_grad_norm is not None
+
+
+def test_optimization_config_passes_max_grad_norm():
+    """OptimizationConfig.max_grad_norm is wired through to Optimization."""
+    model = nn.Linear(1, 1).to(fme.get_device())
+    opt = OptimizationConfig(max_grad_norm=1.5).build(
+        nn.ModuleList([model]), max_epochs=1
+    )
+    assert opt._max_grad_norm == 1.5
