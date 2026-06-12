@@ -12,15 +12,6 @@ from fme.core.typing_ import TensorDict, TensorMapping
 
 @dataclasses.dataclass
 class CorrectorConfigABC(abc.ABC):
-    corrector_disabled_epochs: int = dataclasses.field(default=0, kw_only=True)
-
-    def __post_init__(self):
-        if self.corrector_disabled_epochs < 0:
-            raise ValueError(
-                "corrector_disabled_epochs must be non-negative, got "
-                f"{self.corrector_disabled_epochs}"
-            )
-
     @classmethod
     @final
     def from_state(cls, state: Mapping[str, Any]) -> Self:
@@ -36,11 +27,26 @@ class CorrectorConfigABC(abc.ABC):
         """
         return dict(state)
 
-    @final
+    @abc.abstractmethod
     def get_corrector(
         self,
         dataset_info: DatasetInfo,
-    ) -> "CorrectorABC":
+    ) -> "CorrectorABC": ...
+
+
+@dataclasses.dataclass
+class EpochScheduledCorrectorConfigABC(CorrectorConfigABC):
+    corrector_disabled_epochs: int = dataclasses.field(default=0, kw_only=True)
+
+    def __post_init__(self):
+        if self.corrector_disabled_epochs < 0:
+            raise ValueError(
+                "corrector_disabled_epochs must be non-negative, got "
+                f"{self.corrector_disabled_epochs}"
+            )
+
+    @final
+    def get_corrector(self, dataset_info: DatasetInfo) -> "CorrectorABC":
         corrector = self._get_corrector(dataset_info)
         if self.corrector_disabled_epochs == 0:
             return corrector

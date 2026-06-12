@@ -2,14 +2,18 @@ import dataclasses
 from collections.abc import Mapping
 from typing import Any, ClassVar  # noqa: UP035
 
-from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
+from fme.core.corrector.registry import (
+    CorrectorABC,
+    CorrectorConfigABC,
+    EpochScheduledCorrectorConfigABC,
+)
 from fme.core.dataset_info import DatasetInfo
 
 from .registry import Registry
 
 
 @dataclasses.dataclass
-class CorrectorSelector(CorrectorConfigABC):
+class CorrectorSelector(EpochScheduledCorrectorConfigABC):
     """
     A dataclass containing all the information needed to build a
     CorrectorConfigABC, including the type of the CorrectorConfigABC and the

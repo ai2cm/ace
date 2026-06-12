@@ -420,6 +420,14 @@ class SingleModuleStep(StepABC):
     def get_regularizer_loss(self):
         return torch.tensor(0.0)
 
+    def train(self, mode: bool = True) -> StepABC:
+        super().train(mode)
+        self._corrector.train(mode)
+        return self
+
+    def set_epoch(self, epoch: int) -> None:
+        self._corrector.set_epoch(epoch)
+
     def get_state(self):
         """
         Returns:
@@ -429,7 +437,7 @@ class SingleModuleStep(StepABC):
             "module": self.module.get_state(),
             "secondary_decoder": self.secondary_decoder.get_module_state(),
         }
-        corrector_state = self._get_corrector_state()
+        corrector_state = self._corrector.get_state()
         if len(corrector_state) > 0:
             state["corrector"] = corrector_state
         return state
@@ -448,7 +456,7 @@ class SingleModuleStep(StepABC):
         self.module.load_state(module)
         if "secondary_decoder" in state:
             self.secondary_decoder.load_module_state(state["secondary_decoder"])
-        self._load_corrector_state(state.get("corrector", {}))
+        self._corrector.load_state(state.get("corrector", {}))
 
 
 def _apply_input_mask(input_norm: TensorDict, data_mask: TensorMapping) -> TensorDict:

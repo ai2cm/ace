@@ -4,7 +4,7 @@ from typing import Any
 
 import torch
 
-from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
+from fme.core.corrector.registry import CorrectorABC, EpochScheduledCorrectorConfigABC
 from fme.core.corrector.state import CorrectorState
 from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import GriddedOperations
@@ -185,7 +185,7 @@ class IceBudgetCorrectionConfig:
 
 @CorrectorSelector.register("ice_corrector")
 @dataclasses.dataclass
-class IceCorrectorConfig(CorrectorConfigABC):
+class IceCorrectorConfig(EpochScheduledCorrectorConfigABC):
     budget_correction: IceBudgetCorrectionConfig | None = None
 
     def _get_corrector(

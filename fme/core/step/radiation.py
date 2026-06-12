@@ -399,6 +399,14 @@ class SeparateRadiationStep(StepABC):
     def get_regularizer_loss(self) -> torch.Tensor:
         return torch.tensor(0.0)
 
+    def train(self, mode: bool = True) -> StepABC:
+        super().train(mode)
+        self._corrector.train(mode)
+        return self
+
+    def set_epoch(self, epoch: int) -> None:
+        self._corrector.set_epoch(epoch)
+
     def get_state(self):
         """
         Returns:
@@ -408,7 +416,7 @@ class SeparateRadiationStep(StepABC):
             "module": self.module.get_state(),
             "radiation_module": self.radiation_module.get_state(),
         }
-        corrector_state = self._get_corrector_state()
+        corrector_state = self._corrector.get_state()
         if len(corrector_state) > 0:
             state["corrector"] = corrector_state
         return state
@@ -422,4 +430,4 @@ class SeparateRadiationStep(StepABC):
         """
         self.module.load_state(state["module"])
         self.radiation_module.load_state(state["radiation_module"])
-        self._load_corrector_state(state.get("corrector", {}))
+        self._corrector.load_state(state.get("corrector", {}))

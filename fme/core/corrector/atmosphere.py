@@ -12,7 +12,7 @@ from fme.core.atmosphere_data import (
     compute_layer_thickness,
 )
 from fme.core.constants import GRAVITY, SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME
-from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
+from fme.core.corrector.registry import CorrectorABC, EpochScheduledCorrectorConfigABC
 from fme.core.corrector.state import CorrectorState
 from fme.core.corrector.utils import force_positive
 from fme.core.dataset_info import DatasetInfo
@@ -41,7 +41,7 @@ class EnergyBudgetConfig:
 
 @CorrectorSelector.register("atmosphere_corrector")
 @dataclasses.dataclass
-class AtmosphereCorrectorConfig(CorrectorConfigABC):
+class AtmosphereCorrectorConfig(EpochScheduledCorrectorConfigABC):
     r"""
     Configuration for the post-step state corrector.
 
