@@ -580,8 +580,7 @@ def test_with_rolled_lon_shifts_coords_and_shares_weights():
     # Value-level check that coords and static data rolled together, lon-only.
     # The roll amount is recovered from the coords; the static field encodes its
     # original flat index, so a coord/data roll mismatch or an accidental lat
-    # roll changes values. Compare against model.static_inputs (on-device)
-    # rather than the CPU-side original.
+    # roll changes values.
     orig_lon = model.full_fine_coords.lon
     rolled_lon = rolled.full_fine_coords.lon
     roll = int(torch.argmin(torch.abs(orig_lon - rolled_lon[0] % 360.0)).item())
