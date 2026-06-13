@@ -212,7 +212,7 @@ while read TRAIN_EXPER; do
             --dataset-secret google-credentials:/tmp/google_application_credentials.json \
             "${CHECKPOINT_DATASET_ARGS[@]}" \
             --gpus 1 \
-            --shared-memory 20GiB \
+            --shared-memory 40GiB \
             --budget ai2/atec-climate \
             --system-python \
             --install "pip install --no-deps ." \
