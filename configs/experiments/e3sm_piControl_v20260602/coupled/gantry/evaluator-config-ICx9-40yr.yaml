@@ -1,6 +1,6 @@
 experiment_dir: /results
 n_coupled_steps: 2919
-coupled_steps_in_memory: 2
+coupled_steps_in_memory: 3
 checkpoint_path: /ckpt.tar
 data_writer:
   ocean:
