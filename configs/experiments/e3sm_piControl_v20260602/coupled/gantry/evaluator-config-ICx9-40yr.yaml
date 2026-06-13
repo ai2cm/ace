@@ -1,0 +1,52 @@
+experiment_dir: /results
+n_coupled_steps: 2919
+coupled_steps_in_memory: 2
+checkpoint_path: /ckpt.tar
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: false
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: true
+    names:
+      - surface_temperature
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-e3smv3
+  entity: ai2cm
+aggregator:
+  log_zonal_mean_images: true
+  log_histograms: true
+loader:
+  num_data_workers: 4
+  dataset:
+    atmosphere:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-atmosphere.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H.zarr
+          engine: zarr
+    ocean:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-06-02-E3SMv3-piControl-ocean-105yr-5D-average.zarr
+          engine: zarr
+  start_indices:
+    times:
+      - '0425-01-03T12:00:00'
+      - '0432-01-03T12:00:00'
+      - '0439-01-03T12:00:00'
+      - '0446-01-03T12:00:00'
+      - '0453-01-03T12:00:00'
+      - '0460-01-03T12:00:00'
+      - '0467-01-03T12:00:00'
+      - '0474-01-03T12:00:00'
+      - '0481-01-03T12:00:00'
