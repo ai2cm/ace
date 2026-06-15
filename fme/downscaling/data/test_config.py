@@ -20,7 +20,7 @@ from fme.downscaling.data.config import (
 )
 from fme.downscaling.data.utils import ClosedInterval
 from fme.downscaling.requirements import DataRequirements
-from fme.downscaling.test_utils import data_paths_helper
+from fme.downscaling.test_utils import cell_centered_coordinate, data_paths_helper
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 
@@ -34,14 +34,8 @@ def _write_global_nc(path: Path, n_lat: int, n_lon: int, num_timesteps: int) -> 
         cftime.DatetimeProlepticGregorian(2000, 1, 1) + datetime.timedelta(days=i)
         for i in range(num_timesteps)
     ]
-    lon_spacing = 360.0 / n_lon
-    lat_spacing = 8.0 / n_lat
-    lons = np.array(
-        [lon_spacing / 2 + i * lon_spacing for i in range(n_lon)], dtype=np.float32
-    )
-    lats = np.array(
-        [lat_spacing / 2 + i * lat_spacing for i in range(n_lat)], dtype=np.float32
-    )
+    lons = cell_centered_coordinate(0.0, 360.0, n_lon).numpy()
+    lats = cell_centered_coordinate(0.0, 8.0, n_lat).numpy()
 
     data = (
         np.broadcast_to(lons[None, None, :], (num_timesteps, n_lat, n_lon))
