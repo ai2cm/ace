@@ -399,6 +399,7 @@ class BatchData:
         horizontal_dims: list[str] | None = None,
         label_encoding: LabelEncoding | None = None,
         allow_missing_variables: bool = False,
+        n_ensemble: int = 1,
     ) -> "BatchData":
         (
             sample_data,
@@ -429,6 +430,7 @@ class BatchData:
             labels=labels,
             horizontal_dims=horizontal_dims,
             epoch=sample_epochs[0],
+            n_ensemble=n_ensemble,
             data_mask=data_mask,
         )
 

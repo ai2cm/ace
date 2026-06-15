@@ -738,6 +738,48 @@ def test_get_forcing_data(tmp_path, n_initial_conditions):
     )
 
 
+@pytest.mark.parametrize("n_ensemble", [1, 3])
+def test_get_forcing_data_broadcasts_ensemble_flag(tmp_path, n_ensemble):
+    """Forcing built from an ensemble-tiled initial condition must carry the
+    initial condition's ``n_ensemble``.
+
+    Standalone inference broadcasts the initial condition to ``n_ensemble``
+    members before building forcing, so ``get_forcing_data`` already produces
+    one forcing window per tiled sample. If the resulting forcing reported
+    ``n_ensemble == 1`` it would mismatch the initial condition, and
+    ``predict_paired`` would broadcast the already-tiled forcing a second time
+    (the standalone double-broadcast bug, an ``n_ensemble**2`` blowup).
+    """
+    calendar = "proleptic_gregorian"
+    total_forward_steps = 5
+    forward_steps_in_memory = 2
+    n_initial_conditions = 2
+    # forcing dataset starts 2 steps before initial condition time of 1970-01-01
+    _create_dataset_on_disk(tmp_path, calendar=calendar, n_times=10, timestep_start=-2)
+    config = ForcingDataLoaderConfig(dataset=XarrayDataConfig(data_path=tmp_path))
+    window_requirements = DataRequirements(
+        names=["foo"],
+        n_timesteps=forward_steps_in_memory + 1,
+    )
+    # mirror get_initial_condition: tile the IC across ensemble members
+    initial_condition = BatchData.new_for_testing(
+        names=["foo"],
+        n_samples=n_initial_conditions,
+        n_timesteps=1,
+        t_initial=cftime.datetime(1970, 1, 1),
+        calendar=calendar,
+    ).broadcast_ensemble(n_ensemble=n_ensemble)
+    data = get_forcing_data(
+        config,
+        total_forward_steps,
+        window_requirements=window_requirements,
+        initial_condition=PrognosticState(initial_condition),
+    )
+    batch_data = next(iter(data.loader))
+    assert batch_data.n_ensemble == n_ensemble
+    assert batch_data.data["foo"].shape[0] == n_initial_conditions * n_ensemble
+
+
 def test_inference_loader_raises_if_subset():
     with pytest.raises(ValueError):
         InferenceDataLoaderConfig(

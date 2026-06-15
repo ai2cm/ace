@@ -210,6 +210,7 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
         surface_temperature_name: str | None = None,
         ocean_fraction_name: str | None = None,
         label_encoding: LabelEncoding | None = None,
+        n_ensemble: int = 1,
     ):
         """
         Parameters:
@@ -222,6 +223,10 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
             surface_temperature_name: Name of the surface temperature variable.
             ocean_fraction_name: Name of the ocean fraction variable.
             label_encoding: Label encoding to use for the labels.
+            n_ensemble: Number of ensemble members the batches represent. Used to
+                stamp the forcing batches when the start indices already enumerate
+                one window per ensemble-tiled initial condition, so that the
+                stepper does not broadcast the forcing a second time.
         """
         if label_encoding is None and config.available_labels is not None:
             label_encoding = LabelEncoding(labels=sorted(list(config.available_labels)))
@@ -255,6 +260,7 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
         self._surface_temperature_name = surface_temperature_name
         self._ocean_fraction_name = ocean_fraction_name
         self._n_initial_conditions = config.n_initial_conditions
+        self._n_ensemble = n_ensemble
         if isinstance(config.start_indices, TimestampList):
             self._start_indices = config.start_indices.as_indices(
                 self._dataset.all_times
@@ -333,6 +339,7 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
             horizontal_dims=list(self.properties.horizontal_coordinates.dims),
             label_encoding=self._label_encoding,
             allow_missing_variables=self._allow_missing_variables,
+            n_ensemble=self._n_ensemble,
         )
 
     def __getitem__(self, index) -> BatchData:
