@@ -39,7 +39,11 @@ from fme.core.step.single_module import (
 )
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.typing_ import TensorDict
-from fme.core.var_masking import PerVariableMaskingConfig, UniformMaskingConfig
+from fme.core.var_masking import (
+    CO2_NAME,
+    PerVariableMaskingConfig,
+    UniformMaskingConfig,
+)
 
 from .radiation import SeparateRadiationStepConfig
 
@@ -1850,3 +1854,112 @@ def test_input_dropout_ensemble_members_share_mask():
     assert (
         grouped == grouped[:, :1]
     ).all(), "All ensemble members of a base sample must see the same dropout mask"
+
+
+def _make_co2_dropout_step(
+    input_dropout: UniformMaskingConfig | PerVariableMaskingConfig,
+) -> SingleModuleStep:
+    in_names = ["forcing_shared", CO2_NAME]
+    out_names = ["diagnostic_main", "diagnostic_rad"]
+    normalization = get_network_and_loss_normalization_config(
+        names=list(set(in_names + out_names))
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+                ),
+                in_names=in_names,
+                out_names=out_names,
+                normalization=normalization,
+                input_dropout=input_dropout,
+            )
+        ),
+    )
+    step = get_step(config, DEFAULT_IMG_SHAPE)
+    assert isinstance(step, SingleModuleStep)
+    return step
+
+
+def _captured_input_zeroed_columns(
+    step: SingleModuleStep, n_samples: int
+) -> torch.Tensor:
+    """Run one train step and return a per-channel "all zero" boolean mask."""
+    step.module.torch_module.train()
+    captured: list[torch.Tensor] = []
+
+    def _pre_hook(module, args):
+        captured.append(args[0].detach().cpu())
+
+    handle = step.module.torch_module.register_forward_pre_hook(_pre_hook)
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+    try:
+        step.step(
+            args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
+        )
+    finally:
+        handle.remove()
+    # [batch, n_in_channels]: which input channels are entirely zeroed.
+    n_in = len(step.in_packer.names)
+    return (captured[0][:, :n_in] == 0).flatten(2).all(dim=2)
+
+
+@pytest.mark.parametrize(
+    "make_dropout",
+    [
+        lambda **kw: UniformMaskingConfig(min_vars=0, max_vars=0, **kw),
+        lambda **kw: PerVariableMaskingConfig(rate=0.0, **kw),
+    ],
+    ids=["uniform", "per_variable"],
+)
+def test_co2_dropout_only_co2_dropped(make_dropout):
+    """co2_rate=1.0 with a zero base rate zeroes only the CO2 channel."""
+    step = _make_co2_dropout_step(make_dropout(co2_rate=1.0))
+    co2_idx = step.in_packer.names.index(CO2_NAME)
+    zeroed = _captured_input_zeroed_columns(step, n_samples=4)
+    assert zeroed[:, co2_idx].all()
+    other = zeroed[:, [i for i in range(zeroed.shape[1]) if i != co2_idx]]
+    assert not other.any()
+
+
+@pytest.mark.parametrize(
+    "make_dropout",
+    [
+        lambda **kw: UniformMaskingConfig(min_vars=2, max_vars=2, **kw),
+        lambda **kw: PerVariableMaskingConfig(rate=1.0, **kw),
+    ],
+    ids=["uniform", "per_variable"],
+)
+def test_co2_dropout_co2_only_survivor(make_dropout):
+    """co2_rate=0.0 with a full base rate keeps only the CO2 channel."""
+    step = _make_co2_dropout_step(make_dropout(co2_rate=0.0))
+    co2_idx = step.in_packer.names.index(CO2_NAME)
+    zeroed = _captured_input_zeroed_columns(step, n_samples=4)
+    assert not zeroed[:, co2_idx].any()
+    other = zeroed[:, [i for i in range(zeroed.shape[1]) if i != co2_idx]]
+    assert other.all()
+
+
+def test_co2_rate_without_co2_in_names_raises_at_construction():
+    in_names = ["forcing_shared", "forcing_rad"]
+    out_names = ["diagnostic_main", "diagnostic_rad"]
+    normalization = get_network_and_loss_normalization_config(
+        names=list(set(in_names + out_names))
+    )
+    with pytest.raises(ValueError, match=CO2_NAME):
+        SingleModuleStepConfig(
+            builder=ModuleSelector(
+                type="SphericalFourierNeuralOperatorNet",
+                config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+            ),
+            in_names=in_names,
+            out_names=out_names,
+            normalization=normalization,
+            input_dropout=PerVariableMaskingConfig(co2_rate=0.5),
+        )

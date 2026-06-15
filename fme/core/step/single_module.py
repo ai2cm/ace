@@ -112,6 +112,8 @@ class SingleModuleStepConfig(StepConfigABC):
                 raise ValueError(
                     f"next_step_forcing_name is an output variable: '{name}'"
                 )
+        if self.input_dropout is not None:
+            self.input_dropout.validate_names(self.in_names)
         if self.secondary_decoder is not None:
             for name in self.secondary_decoder.secondary_diagnostic_names:
                 if name in self.in_names:
@@ -400,6 +402,7 @@ class SingleModuleStep(StepABC):
                     batch_size,
                     input_tensor.device,
                     n_ensemble=args.n_ensemble,
+                    channel_names=self.in_packer.names,
                 )
                 input_tensor = input_tensor * channel_mask.view(
                     batch_size, n_channels, 1, 1
