@@ -553,6 +553,7 @@ def test_with_rolled_lon_no_roll_returns_same():
         static_inputs=static_inputs,
     )
     coarse_lon = cell_centered_coordinate(0.0, fine_shape[1], n=coarse_shape[1])
+    assert model._is_longitude_rolled is False
     assert model.with_rolled_lon(coarse_lon) is model
 
 
@@ -570,6 +571,10 @@ def test_with_rolled_lon_shifts_coords_and_shares_weights():
 
     coarse_lon = torch.tensor([-10.0, -5.0, 0.0, 5.0], dtype=torch.float32)
     rolled = model.with_rolled_lon(coarse_lon)
+
+    # The rolled model is flagged inference-only; the original is left unmarked.
+    assert model._is_longitude_rolled is False
+    assert rolled._is_longitude_rolled is True
 
     # Reconstruction wraps a fresh module around the SAME raw weights.
     assert rolled.module is not model.module
@@ -601,6 +606,28 @@ def test_with_rolled_lon_shifts_coords_and_shares_weights():
     assert torch.equal(
         twice.static_inputs.fields[0].data, rolled.static_inputs.fields[0].data
     )
+
+
+def test_train_on_batch_raises_for_rolled_model():
+    """A longitude-rolled model is inference only and must reject training."""
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    batch_size = 2
+    full_fine_coords, static_inputs = _make_global_fine_coords_and_static(fine_shape)
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=full_fine_coords,
+        static_inputs=static_inputs,
+    )
+
+    coarse_lon = torch.tensor([-10.0, -5.0, 0.0, 5.0], dtype=torch.float32)
+    rolled = model.with_rolled_lon(coarse_lon)
+
+    batch = make_paired_batch_data(coarse_shape, fine_shape, batch_size)
+    optimization = OptimizationConfig().build(modules=[rolled.module], max_epochs=2)
+    with pytest.raises(RuntimeError, match="longitude-rolled"):
+        rolled.train_on_batch(batch, optimization)
 
 
 def test_roll_diffusion_model_keeps_fine_aligned_to_coarse_cells():

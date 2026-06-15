@@ -402,6 +402,8 @@ class DiffusionModel:
         self._channel_axis = -3
         self.full_fine_coords = full_fine_coords.to(get_device())
         self.static_inputs = static_inputs.to_device() if static_inputs else None
+        # Set True only by with_rolled_lon (inference only); guards train_on_batch.
+        self._is_longitude_rolled = False
         self._loss_weight_tensor = _build_variable_loss_weight_tensor(
             config.loss_weights.output_channels, self.out_names
         )
@@ -495,6 +497,12 @@ class DiffusionModel:
         optimizer: Optimization | NullOptimization,
     ) -> ModelOutputs:
         """Performs a denoising training step on a batch of data."""
+        if self._is_longitude_rolled:
+            raise RuntimeError(
+                "Cannot train a longitude-rolled DiffusionModel. with_rolled_lon "
+                "is intended for inference only; rolled models share weights and "
+                "would corrupt gradient synchronization under distributed training."
+            )
         _static_inputs = self._subset_static_if_available(batch.coarse)
         coarse, fine = batch.coarse.data, batch.fine.data
         inputs_norm = self._get_input_from_coarse(coarse, _static_inputs)
@@ -789,7 +797,7 @@ class DiffusionModel:
         # The new model is built through the constructor (rather than a shallow copy)
         # so its coords are re-validated and derived state is rebuilt fresh; the raw
         # module is unwrapped and passed so __init__ re-wraps it exactly once.
-        return DiffusionModel(
+        rolled = DiffusionModel(
             config=self.config,
             module=self.module.module,
             normalizer=self.normalizer,
@@ -809,6 +817,8 @@ class DiffusionModel:
                 else None
             ),
         )
+        rolled._is_longitude_rolled = True
+        return rolled
 
 
 @dataclasses.dataclass
