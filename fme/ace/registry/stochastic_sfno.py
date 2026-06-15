@@ -8,6 +8,7 @@ import torch
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed.distributed import Distributed
+from fme.core.models.conditional_sfno.s2convolutions import validate_spectral_ratio
 from fme.core.models.conditional_sfno.sfnonet import (
     Context,
     ContextConfig,
@@ -246,6 +247,14 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             the l=0 (global mean) spherical harmonic coefficient, so that
             global mean changes can only result from local operations
             (norms, MLPs, skip connections).
+        spectral_ratio: Fraction of embed_dim that participates in the
+            spectral filter's SHT and per-mode complex weight. When < 1, a
+            Conv1x1 down-projection is applied before forward_transform and
+            an up-projection after inverse_transform, reducing both the SHT
+            cost and the size of the per-mode complex weight tensor. When
+            filter_residual is enabled, the round-trip residual also passes
+            through the projections. Only supported for filter_type='linear'
+            and incompatible with local_blocks.
         clip_latent_global_means: If True, the per-channel spatial mean of
             the post-encoder latent representation is tracked during
             training and, in eval, the latent is shifted so that mean falls
@@ -291,6 +300,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     spectral_lora_rank: int = 0
     spectral_lora_alpha: float | None = None
     filter_preserves_global_mean: bool = False
+    spectral_ratio: float = 1.0
     clip_latent_global_means: bool = False
 
     def __post_init__(self):
@@ -307,6 +317,14 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
                 "Only 'dhconv' operator_type is supported for "
                 "NoiseConditionedSFNO models."
             )
+        validate_spectral_ratio(
+            self.spectral_ratio,
+            self.embed_dim,
+            self.filter_num_groups,
+            filter_type=self.filter_type,
+            preserves_global_mean=self.filter_preserves_global_mean,
+            local_blocks=bool(self.local_blocks),
+        )
 
     def build(
         self,
@@ -343,6 +361,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             spectral_lora_rank=self.spectral_lora_rank,
             spectral_lora_alpha=self.spectral_lora_alpha,
             filter_preserves_global_mean=self.filter_preserves_global_mean,
+            spectral_ratio=self.spectral_ratio,
             clip_latent_global_means=self.clip_latent_global_means,
         )
         sfno_net = get_lat_lon_sfnonet(

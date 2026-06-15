@@ -22,5 +22,6 @@ from .utils import (
     coords_require_lon_roll,
     expand_and_fold_tensor,
     find_roll_anchor,
+    roll_lon_coords,
     scale_tuple,
 )
