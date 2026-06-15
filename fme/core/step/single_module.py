@@ -27,6 +27,7 @@ from fme.core.step.global_mean_removal import (
     GlobalMeanRemovalConfigUnion,
     GlobalMeanRemovalState,
     NoGlobalMeanRemoval,
+    extra_channel_source_field,
 )
 from fme.core.step.secondary_decoder import (
     NoSecondaryDecoder,
@@ -509,8 +510,13 @@ def _build_channel_mask_dict(
     device = packed_input.device
     result: TensorDict = {}
     for name in in_names:
-        if data_mask is not None and name in data_mask:
-            mask_1d = data_mask[name].to(device=device, dtype=torch.float)
+        # GMR sentinel channels share their source field's mask: the extra
+        # value is already zeroed in forward_transform when the source is
+        # masked, so the mask channel must agree rather than default to 1.
+        source = extra_channel_source_field(name)
+        lookup_name = source if source is not None else name
+        if data_mask is not None and lookup_name in data_mask:
+            mask_1d = data_mask[lookup_name].to(device=device, dtype=torch.float)
             result[name] = mask_1d.view(batch, 1, 1).expand(batch, *spatial)
         else:
             result[name] = torch.ones(batch, *spatial, device=device)
@@ -575,15 +581,13 @@ def step_with_adjustments(
         network_input, gmr_state = global_mean_removal.forward_transform(
             input, data_mask
         )
-    else:
-        network_input = dict(input)
-    input_norm = normalizer.normalize(network_input)
-    if global_mean_removal is not None:
-        assert gmr_state is not None
+        input_norm = normalizer.normalize(network_input)
         # Synthetic GMR channels are produced in normalized space; merge
         # them in after normalization so the network sees a single uniform
         # input dict.
         input_norm = {**input_norm, **global_mean_removal.extras_normalized(gmr_state)}
+    else:
+        input_norm = normalizer.normalize(input)
     output_norm = network_calls(input_norm)
     if residual_prediction:
         output_norm = add_names(input_norm, output_norm, prognostic_names)

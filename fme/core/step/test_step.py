@@ -1139,6 +1139,24 @@ def test_build_channel_mask_dict_partial_mask():
     assert (result["b"] == 1.0).all()
 
 
+def test_build_channel_mask_dict_gmr_extra_inherits_source_mask():
+    # The GMR sentinel channel `__gmr_extra__a` must inherit `a`'s mask
+    # because its value is zeroed in forward_transform when `a` is masked;
+    # otherwise the network sees a 0-valued extra with a 1-valued mask
+    # (i.e. contradictory "present" signal on a masked sample).
+    packed = torch.zeros(2, 4, 4, 8)
+    data_mask = {"a": torch.tensor([True, False])}
+    result = _build_channel_mask_dict(
+        ["a", "b", "__gmr_extra__a", "__gmr_extra__b"], data_mask, packed
+    )
+    assert result["a"][0, 0, 0] == 1.0
+    assert result["a"][1, 0, 0] == 0.0
+    assert result["__gmr_extra__a"][0, 0, 0] == 1.0
+    assert result["__gmr_extra__a"][1, 0, 0] == 0.0
+    assert (result["b"] == 1.0).all()
+    assert (result["__gmr_extra__b"] == 1.0).all()
+
+
 def test_step_with_include_channel_mask_inputs():
     normalization = get_network_and_loss_normalization_config(
         names=["forcing_shared", "forcing_rad", "diagnostic_main", "diagnostic_rad"],

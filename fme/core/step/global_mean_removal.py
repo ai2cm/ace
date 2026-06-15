@@ -33,6 +33,18 @@ def _extra_channel_name(field: str) -> str:
     return f"{_EXTRA_CHANNEL_PREFIX}{field}"
 
 
+def extra_channel_source_field(name: str) -> str | None:
+    """Return the source field for a GMR sentinel name, or None if not a sentinel.
+
+    GMR synthetic input channels are named ``__gmr_extra__<source_field>``;
+    they share their source field's data mask because their values are
+    derived from that field and are zeroed when it is masked.
+    """
+    if name.startswith(_EXTRA_CHANNEL_PREFIX):
+        return name[len(_EXTRA_CHANNEL_PREFIX) :]
+    return None
+
+
 @dataclasses.dataclass
 class GlobalMeanRemovalState:
     """Opaque token produced by ``forward_transform`` and consumed by the
@@ -95,7 +107,6 @@ class GlobalMeanRemoval(abc.ABC):
 
     @property
     def n_extra_input_channels(self) -> int:
-        """Number of extra channels appended to the network input."""
         return len(self.extra_channel_names)
 
     @abc.abstractmethod
