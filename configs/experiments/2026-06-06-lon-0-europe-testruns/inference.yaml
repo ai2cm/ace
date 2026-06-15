@@ -7,7 +7,7 @@ data:
   - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
     engine: zarr
     file_pattern: 100km.zarr
-  batch_size: 4
+  batch_size: 2
   num_data_workers: 2
   strict_ensemble: false
 patch:
@@ -17,6 +17,7 @@ patch:
 outputs:
 - name: europe-may-2023
   n_ens: 2
+  save_vars: ["PRATEsfc"]
   max_samples_per_gpu: 2
   time_range:
     start_time: "2023-05-01T00:00:00"
@@ -29,6 +30,7 @@ outputs:
     stop: 30.0
 - name: europe-20230505
   n_ens: 2
+  save_vars: ["PRATEsfc"]
   max_samples_per_gpu: 2
   event_time: "2023-05-05T12:00:00"
   lat_extent:
