@@ -587,8 +587,10 @@ class HorizontalCoordinates(abc.ABC):
         pass
 
     @property
+    @abc.abstractmethod
     def lat_1d(self) -> torch.Tensor | None:
-        return None
+        """1D latitude coordinates, or None if the grid has no 1D latitude."""
+        pass
 
     @abc.abstractmethod
     def localize(self: HC) -> HC:
@@ -870,6 +872,10 @@ class HEALPixCoordinates(HorizontalCoordinates):
 
     def get_state(self) -> TensorMapping:
         return {"face": self.face, "height": self.height, "width": self.width}
+
+    @property
+    def lat_1d(self) -> None:
+        return None
 
 
 @dataclasses.dataclass

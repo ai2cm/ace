@@ -5,7 +5,7 @@ from torch import nn
 
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 from fme.ace.registry.stochastic_sfno import NoiseConditionedModel
-from fme.core.dataset_info import DatasetInfo
+from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
 from fme.core.models.swin_transformer import SwinTransformerNet
 from fme.core.models.swin_transformer.boundary_padding import TensorPaddingConfig
@@ -94,13 +94,14 @@ class SwinTransformerBuilder(ModuleConfig):
             embed_dim_pos=0,
         )
         if self.use_cpb_scaling:
-            lat_coords = dataset_info.lat_1d
-            if lat_coords is None:
+            try:
+                lat_coords = dataset_info.lat_1d
+            except MissingDatasetInfo as err:
                 raise ValueError(
                     "SwinTransformer requires 1D latitude coordinates for cos-lat CPB "
                     "scaling. Non-lat-lon grids such as HEALPix are not supported. "
                     "Set use_cpb_scaling=False to disable this requirement."
-                )
+                ) from err
         else:
             lat_coords = None
         padding_conf = (
@@ -193,13 +194,14 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             embed_dim_pos=0,
         )
         if self.use_cpb_scaling:
-            lat_coords = dataset_info.lat_1d
-            if lat_coords is None:
+            try:
+                lat_coords = dataset_info.lat_1d
+            except MissingDatasetInfo as err:
                 raise ValueError(
                     "SwinTransformer requires 1D latitude coordinates for cos-lat CPB "
                     "scaling. Non-lat-lon grids such as HEALPix are not supported. "
                     "Set use_cpb_scaling=False to disable this requirement."
-                )
+                ) from err
         else:
             lat_coords = None
         padding_conf = (
