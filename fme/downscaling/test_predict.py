@@ -212,7 +212,7 @@ def test_predictor_runs_seam_crossing(tmp_path, cls):
         downscaler = cls(**kwargs)
 
     # The real coarse coords cross the seam, so the entrypoint rolls the model.
-    assert coords_require_lon_roll(data.coarse_latlon_coords.lon)
+    assert coords_require_lon_roll(data.coarse_extent_latlon_coords.lon)
     generation_model = downscaler._get_generation_model()
     assert generation_model is not model  # a real roll produced a new model
     assert float(generation_model.full_fine_coords.lon.min()) < 0.0

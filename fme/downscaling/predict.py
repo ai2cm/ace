@@ -111,7 +111,7 @@ class EventDownscaler:
         self.save_generated_samples = save_generated_samples
 
     def _get_generation_model(self):
-        coarse_lon = self.data.coarse_latlon_coords.lon
+        coarse_lon = self.data.coarse_extent_latlon_coords.lon
         # No-op when coarse_lon does not cross the prime meridian.
         base_model = self.model.with_rolled_lon(coarse_lon)
         if self.patch.needs_patch_predictor:
@@ -185,7 +185,7 @@ class Downscaler:
         self.patch = patch
 
     def _get_generation_model(self):
-        coarse_lon = self.data.coarse_latlon_coords.lon
+        coarse_lon = self.data.coarse_extent_latlon_coords.lon
         # No-op when coarse_lon does not cross the prime meridian.
         base_model = self.model.with_rolled_lon(coarse_lon)
         if self.patch.needs_patch_predictor:

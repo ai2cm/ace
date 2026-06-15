@@ -112,7 +112,7 @@ class Downscaler:
         """Execute the generation loop for this output."""
         logging.info(f"Generating downscaled outputs for output: {output.name}")
 
-        coarse_coords = output.data.coarse_latlon_coords
+        coarse_coords = output.data.coarse_extent_latlon_coords
         input_shape = (len(coarse_coords.lat), len(coarse_coords.lon))
         model = self._get_generation_model(
             input_shape=input_shape, output=output, coarse_lon=coarse_coords.lon

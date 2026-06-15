@@ -298,7 +298,7 @@ class SliceWorkItemGriddedData:
     all_times: xr.CFTimeIndex
     dtype: torch.dtype
     max_output_shape: tuple[int, ...]
-    coarse_latlon_coords: LatLonCoordinates
+    coarse_extent_latlon_coords: LatLonCoordinates  # coarse subset coordinates
 
     # TODO: currently no protocol or ABC for gridded data objects
     #       if we want to unify, we will need one and just raise

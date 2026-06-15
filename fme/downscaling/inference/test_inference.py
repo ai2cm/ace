@@ -211,7 +211,7 @@ def test_run_target_generation_skips_padding_items(
     mock_work_item.batch.lat_interval = ClosedInterval(1.0, 8.0)
     mock_work_item.batch.lon_interval = ClosedInterval(1.0, 8.0)
     mock_output_target.data.get_generator.return_value = iter([mock_work_item])
-    mock_output_target.data.coarse_latlon_coords = LatLonCoordinates(
+    mock_output_target.data.coarse_extent_latlon_coords = LatLonCoordinates(
         lat=torch.arange(16, dtype=torch.float32),
         lon=torch.arange(16, dtype=torch.float32),
     )

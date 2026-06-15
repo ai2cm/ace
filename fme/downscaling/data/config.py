@@ -382,7 +382,7 @@ class DataLoaderConfig:
             dims=example.latlon_coordinates.dims,
             variable_metadata=dataset.variable_metadata,
             all_times=all_times,
-            coarse_latlon_coords=example.latlon_coordinates,
+            coarse_extent_latlon_coords=example.latlon_coordinates,
         )
 
 
@@ -601,7 +601,7 @@ class PairedDataLoaderConfig:
             variable_metadata=variable_metadata,
             all_times=all_times,
             fine_coords=get_latlon_coords_from_properties(properties_fine),
-            coarse_latlon_coords=example.coarse.latlon_coordinates,
+            coarse_extent_latlon_coords=example.coarse.latlon_coordinates,
         )
 
     def _get_sampler(
