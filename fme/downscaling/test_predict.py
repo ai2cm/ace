@@ -1,21 +1,29 @@
 import os
-from unittest.mock import MagicMock
 
 import pytest
 import torch
 import yaml
 
 from fme.core.coordinates import LatLonCoordinates
+from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.testing.wandb import mock_wandb
 from fme.downscaling import predict
-from fme.downscaling.data import load_static_inputs
+from fme.downscaling.data import (
+    ClosedInterval,
+    DataLoaderConfig,
+    StaticInputs,
+    coords_require_lon_roll,
+    load_static_inputs,
+)
+from fme.downscaling.data.test_config import global_data_paths_helper
 from fme.downscaling.models import DiffusionModelConfig, PairedNormalizationConfig
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.predictors import PatchPredictionConfig
+from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.test_models import LinearDownscaling
-from fme.downscaling.test_utils import data_paths_helper
+from fme.downscaling.test_utils import cell_centered_coordinate, data_paths_helper
 
 
 class LinearDownscalingDiffusion(LinearDownscaling):
@@ -141,6 +149,83 @@ def test_predictor_runs(tmp_path):
     assert os.path.exists(f"{predictor_config['experiment_dir']}/test_event.nc")
 
 
+def _build_seam_crossing_model_and_data(tmp_path):
+    """A real (4, 4) model on a global fine grid plus a seam-crossing GriddedData.
+
+    Global coarse grid is 4 lat x 8 lon (45 deg spacing); a (-90, 90) lon extent
+    selects 4 of 8 coarse cells across the seam, matching the (4, 4) model so no
+    patching is needed. No HGTsfc field, so StaticInputs is empty and the model
+    runs with use_fine_topography=False.
+    """
+    coarse_shape = (4, 4)
+    downscale_factor = 2
+    fine_shape = (
+        coarse_shape[0] * downscale_factor,
+        coarse_shape[1] * downscale_factor,
+    )
+    paths = global_data_paths_helper(tmp_path)
+
+    full_fine_coords = LatLonCoordinates(
+        lat=cell_centered_coordinate(0.0, 8.0, fine_shape[0]),
+        lon=cell_centered_coordinate(0.0, 360.0, fine_shape[1]),
+    )
+    model = get_model_config(
+        coarse_shape, downscale_factor, use_fine_topography=False
+    ).build(
+        coarse_shape=coarse_shape,
+        downscale_factor=downscale_factor,
+        full_fine_coords=full_fine_coords,
+        static_inputs=StaticInputs(fields=[], coords=full_fine_coords),
+    )
+    data = DataLoaderConfig(
+        coarse=[XarrayDataConfig(str(paths.coarse))],
+        batch_size=2,
+        num_data_workers=0,
+        strict_ensemble=False,
+        lat_extent=ClosedInterval(0.0, 8.0),
+        lon_extent=ClosedInterval(-90.0, 90.0),
+    ).build(
+        requirements=DataRequirements(
+            fine_names=[], coarse_names=["var0", "var1"], n_timesteps=1
+        ),
+    )
+    return model, data, fine_shape
+
+
+@pytest.mark.parametrize("cls", [predict.Downscaler, predict.EventDownscaler])
+def test_predictor_runs_seam_crossing(tmp_path, cls):
+    """Confirm the predict entrypoints roll the model end-to-end on real data (no
+    mocks): the real coarse coords cross the prime meridian, with_rolled_lon
+    produces a rolled model, and generation runs clean in the rolled convention.
+    """
+    model, data, fine_shape = _build_seam_crossing_model_and_data(tmp_path)
+    kwargs = dict(
+        data=data,
+        model=model,
+        experiment_dir=str(tmp_path / "output"),
+        n_samples=2,
+        patch=PatchPredictionConfig(),  # region matches model, so no patching
+    )
+    if cls is predict.EventDownscaler:
+        downscaler = cls(event_name="evt", **kwargs)
+    else:
+        downscaler = cls(**kwargs)
+
+    # The real coarse coords cross the seam, so the entrypoint rolls the model.
+    assert coords_require_lon_roll(data.coarse_latlon_coords.lon)
+    generation_model = downscaler._get_generation_model()
+    assert generation_model is not model  # a real roll produced a new model
+    assert float(generation_model.full_fine_coords.lon.min()) < 0.0
+
+    # Generation runs clean on a real batch, in the rolled convention.
+    batch = next(iter(data.get_generator()))
+    fine_coords = generation_model.get_fine_coords_for_batch(batch)
+    assert float(fine_coords.lon.min()) < 0.0
+    outputs = generation_model.generate_on_batch_no_target(batch, n_samples=2)
+    for value in outputs.values():
+        assert value.shape[-2:] == fine_shape
+
+
 @pytest.mark.medium_duration
 def test_predictor_renaming(
     tmp_path,
@@ -181,59 +266,3 @@ def test_predictor_renaming(
     )
     with mock_wandb():
         predict.main(str(predictor_config_path))
-
-
-def _mock_downscaler(coarse_lon, cls):
-    """Build a Downscaler/EventDownscaler over a mock model whose with_rolled_lon
-    returns a distinct sentinel, so we can observe that _get_generation_model
-    delegates to it. Uses default (no-op) patching so the base model is returned
-    directly rather than wrapped in a PatchPredictor.
-    """
-    rolled_model = MagicMock(name="rolled_model")
-    model = MagicMock(name="model")
-    model.with_rolled_lon.return_value = rolled_model
-    data = MagicMock()
-    data.coarse_latlon_coords = LatLonCoordinates(
-        lat=torch.tensor([0.0, 1.0]), lon=coarse_lon
-    )
-    data.shape = (2, len(coarse_lon))
-    kwargs = dict(
-        data=data,
-        model=model,
-        experiment_dir="unused",
-        n_samples=1,
-        patch=PatchPredictionConfig(),
-    )
-    if cls is predict.EventDownscaler:
-        downscaler = cls(event_name="evt", **kwargs)
-    else:
-        downscaler = cls(**kwargs)
-    return downscaler, model, rolled_model
-
-
-@pytest.mark.parametrize("cls", [predict.Downscaler, predict.EventDownscaler])
-def test_get_generation_model_rolls_for_seam_crossing_domain(cls):
-    """A coarse domain west of 0° triggers with_rolled_lon on the model."""
-    coarse_lon = torch.tensor([-10.0, -5.0, 0.0, 5.0])
-    downscaler, model, rolled_model = _mock_downscaler(coarse_lon, cls)
-
-    result = downscaler._get_generation_model()
-
-    model.with_rolled_lon.assert_called_once()
-    assert torch.equal(model.with_rolled_lon.call_args[0][0], coarse_lon)
-    assert result is rolled_model
-
-
-@pytest.mark.parametrize("cls", [predict.Downscaler, predict.EventDownscaler])
-def test_get_generation_model_delegates_roll_for_in_range_domain(cls):
-    """The entrypoint delegates to with_rolled_lon even for an in-range domain;
-    the no-op is handled inside the model (test_with_rolled_lon_no_roll_returns_same).
-    """
-    coarse_lon = torch.tensor([0.0, 5.0, 10.0, 15.0])
-    downscaler, model, rolled_model = _mock_downscaler(coarse_lon, cls)
-
-    result = downscaler._get_generation_model()
-
-    model.with_rolled_lon.assert_called_once()
-    assert torch.equal(model.with_rolled_lon.call_args[0][0], coarse_lon)
-    assert result is rolled_model

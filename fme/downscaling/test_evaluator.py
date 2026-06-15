@@ -2,7 +2,6 @@ import os
 import unittest.mock
 from collections.abc import Mapping
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 import torch
@@ -16,11 +15,16 @@ from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import OptimizationConfig
 from fme.core.testing.wandb import mock_wandb
 from fme.downscaling import evaluator
-from fme.downscaling.data import PairedDataLoaderConfig
-from fme.downscaling.models import DiffusionModelConfig, PairedNormalizationConfig
+from fme.downscaling.data import ClosedInterval, PairedDataLoaderConfig, StaticInputs
+from fme.downscaling.data.test_config import global_data_paths_helper
+from fme.downscaling.models import (
+    CheckpointModelConfig,
+    DiffusionModelConfig,
+    PairedNormalizationConfig,
+)
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.test_models import LinearDownscaling
-from fme.downscaling.test_utils import data_paths_helper
+from fme.downscaling.test_utils import cell_centered_coordinate, data_paths_helper
 from fme.downscaling.train import TrainerConfig
 
 
@@ -95,6 +99,95 @@ def get_trainer_model_config():
     )
 
 
+def _seam_crossing_model_config(fine_shape: tuple[int, int]) -> DiffusionModelConfig:
+    """A (4, 4)-patch model config whose module fits the seam-crossing fine shape."""
+    return DiffusionModelConfig(
+        DiffusionModuleRegistrySelector(
+            "prebuilt",
+            {
+                "module": LinearDownscalingDiffusion(
+                    factor=1,
+                    fine_img_shape=fine_shape,
+                    n_channels_in=2,
+                    n_channels_out=2,
+                )
+            },
+            expects_interpolated_input=True,
+        ),
+        loss=LossConfig("NaN"),
+        in_names=["var0", "var1"],
+        out_names=["var0", "var1"],
+        normalization=PairedNormalizationConfig(
+            NormalizationConfig(
+                means={"var0": 0.0, "var1": 0.0}, stds={"var0": 1.0, "var1": 1.0}
+            ),
+            NormalizationConfig(
+                means={"var0": 0.0, "var1": 0.0}, stds={"var0": 1.0, "var1": 1.0}
+            ),
+        ),
+        p_mean=0,
+        p_std=1,
+        sigma_min=1,
+        sigma_max=2,
+        churn=1,
+        num_diffusion_generation_steps=2,
+        predict_residual=True,
+        use_fine_topography=False,
+    )
+
+
+def test_evaluator_rolls_for_seam_crossing(tmp_path):
+    """The evaluator entrypoint rolls the model end-to-end on real data (no mocks):
+    a seam-crossing PairedGriddedData yields coarse coords that cross the prime
+    meridian, and _build_default_evaluator returns a model rolled to that
+    convention. Global coarse grid is 4 lat x 8 lon (45 deg spacing); a (-90, 90)
+    lon extent selects 4 of 8 coarse cells across the seam, matching the (4, 4)
+    model so no patching is needed.
+    """
+    coarse_shape = (4, 4)
+    downscale_factor = 2
+    fine_shape = (
+        coarse_shape[0] * downscale_factor,
+        coarse_shape[1] * downscale_factor,
+    )
+    paths = global_data_paths_helper(tmp_path)
+
+    full_fine_coords = LatLonCoordinates(
+        lat=cell_centered_coordinate(0.0, 8.0, fine_shape[0]),
+        lon=cell_centered_coordinate(0.0, 360.0, fine_shape[1]),
+    )
+    model = _seam_crossing_model_config(fine_shape).build(
+        coarse_shape=coarse_shape,
+        downscale_factor=downscale_factor,
+        full_fine_coords=full_fine_coords,
+        static_inputs=StaticInputs(fields=[], coords=full_fine_coords),
+    )
+    experiment_dir = tmp_path / "output"
+    experiment_dir.mkdir()
+    checkpoint_path = experiment_dir / "latest.ckpt"
+    torch.save({"model": model.get_state()}, checkpoint_path)
+
+    config = evaluator.EvaluatorConfig(
+        model=CheckpointModelConfig(checkpoint_path=str(checkpoint_path)),
+        experiment_dir=str(experiment_dir),
+        data=PairedDataLoaderConfig(
+            fine=[XarrayDataConfig(paths.fine)],
+            coarse=[XarrayDataConfig(paths.coarse)],
+            batch_size=2,
+            num_data_workers=0,
+            strict_ensemble=False,
+            lat_extent=ClosedInterval(0.0, 8.0),
+            lon_extent=ClosedInterval(-90.0, 90.0),
+        ),
+        logging=LoggingConfig(),
+    )
+
+    built = config._build_default_evaluator()
+
+    # A real roll moved the model's fine grid into the seam-crossing convention.
+    assert float(built.model.full_fine_coords.lon.min()) < 0.0
+
+
 @pytest.mark.parametrize(
     "evaluator_model_config, num_samples",
     [
@@ -159,85 +252,3 @@ def test_evaluator_runs(
         with mock_wandb():
             evaluator.main(str(evaluator_config_path))
     mock_get_gen_agg_wandb.assert_called()
-
-
-def _mock_evaluator_config(coarse_lon, monkeypatch):
-    """EvaluatorConfig over mocked model/data configs, with Evaluator and
-    EventEvaluator patched to capture the model that gets handed to them. The
-    mock model's with_rolled_lon returns a distinct sentinel so we can observe
-    that the build methods delegate to it. Default (no-op) patching means the
-    rolled base model is passed through unwrapped.
-    """
-    rolled_model = MagicMock(name="rolled_model")
-    rolled_model.coarse_shape = (4, 4)
-    model = MagicMock(name="model")
-    model.coarse_shape = (4, 4)
-    model.with_rolled_lon.return_value = rolled_model
-
-    model_config = MagicMock(name="model_config")
-    model_config.build.return_value = model
-
-    dataset = MagicMock(name="dataset")
-    dataset.coarse_latlon_coords = LatLonCoordinates(
-        lat=torch.tensor([0.0, 1.0]), lon=coarse_lon
-    )
-    dataset.coarse_shape = (4, 4)
-
-    data_config = MagicMock(name="data_config")
-    data_config.build.return_value = dataset
-
-    config = evaluator.EvaluatorConfig(
-        model=model_config,
-        experiment_dir="unused",
-        data=data_config,
-        logging=MagicMock(),
-    )
-
-    captured: dict[str, Any] = {}
-
-    def _capture(**kwargs):
-        captured.update(kwargs)
-        return MagicMock()
-
-    monkeypatch.setattr(evaluator, "Evaluator", _capture)
-    monkeypatch.setattr(evaluator, "EventEvaluator", _capture)
-    return config, model, rolled_model, dataset, captured
-
-
-@pytest.mark.parametrize("crossing", [True, False])
-def test_build_default_evaluator_rolls_for_seam_crossing(monkeypatch, crossing):
-    coarse_lon = (
-        torch.tensor([-10.0, -5.0, 0.0, 5.0])
-        if crossing
-        else torch.tensor([0.0, 5.0, 10.0, 15.0])
-    )
-    config, model, rolled_model, _, captured = _mock_evaluator_config(
-        coarse_lon, monkeypatch
-    )
-
-    config._build_default_evaluator()
-
-    # The entrypoint always delegates to with_rolled_lon regardless of whether the
-    # domain crosses the seam; the no-op for in-range domains is handled inside the
-    # model (see test_with_rolled_lon_no_roll_returns_same).
-    model.with_rolled_lon.assert_called_once()
-    assert torch.equal(model.with_rolled_lon.call_args[0][0], coarse_lon)
-    assert captured["model"] is rolled_model
-
-
-def test_build_event_evaluator_rolls_for_seam_crossing(monkeypatch):
-    coarse_lon = torch.tensor([-10.0, -5.0, 0.0, 5.0])
-    config, model, rolled_model, dataset, captured = _mock_evaluator_config(
-        coarse_lon, monkeypatch
-    )
-    event_config = MagicMock()
-    event_config.get_paired_gridded_data.return_value = dataset
-    event_config.name = "evt"
-    event_config.n_samples = 1
-    event_config.save_generated_samples = False
-
-    config._build_event_evaluator(event_config)
-
-    model.with_rolled_lon.assert_called_once()
-    assert torch.equal(model.with_rolled_lon.call_args[0][0], coarse_lon)
-    assert captured["model"] is rolled_model
