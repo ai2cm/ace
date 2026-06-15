@@ -194,10 +194,7 @@ class DatasetInfo:
     def lat_1d(self) -> torch.Tensor:
         if self._horizontal_coordinates is None:
             raise MissingDatasetInfo("horizontal_coordinates")
-        lat = self._horizontal_coordinates.lat_1d
-        if lat is None:
-            raise MissingDatasetInfo("lat_1d")
-        return lat
+        return self._horizontal_coordinates.lat_1d
 
     @property
     def vertical_coordinate(self) -> VerticalCoordinate:

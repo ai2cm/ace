@@ -588,8 +588,12 @@ class HorizontalCoordinates(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def lat_1d(self) -> torch.Tensor | None:
-        """1D latitude coordinates, or None if the grid has no 1D latitude."""
+    def lat_1d(self) -> torch.Tensor:
+        """1D latitude coordinates.
+
+        Raises ``MissingDatasetInfo`` for grids that have no clean
+        1-dimensional latitude representation.
+        """
         pass
 
     @abc.abstractmethod
@@ -874,8 +878,13 @@ class HEALPixCoordinates(HorizontalCoordinates):
         return {"face": self.face, "height": self.height, "width": self.width}
 
     @property
-    def lat_1d(self) -> None:
-        return None
+    def lat_1d(self) -> torch.Tensor:
+        from fme.core.dataset_info import MissingDatasetInfo
+
+        raise MissingDatasetInfo(
+            "lat_1d (HEALPixCoordinates uses 12 tiles and has no clean "
+            "1-dimensional representation for latitude)"
+        )
 
 
 @dataclasses.dataclass

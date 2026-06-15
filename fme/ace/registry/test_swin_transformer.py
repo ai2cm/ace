@@ -82,7 +82,7 @@ def test_swin_transformer_raises_without_lat_coords():
         _builder().build(n_in, n_out, dataset_info)
 
 
-def test_swin_transformer_raises_when_lat_1d_is_none():
+def test_swin_transformer_raises_for_healpix():
     n_in, n_out = 5, 3
     nside = 4
     healpix_coords = HEALPixCoordinates(
@@ -181,7 +181,7 @@ def test_nc_swin_transformer_raises_without_lat_coords():
         _nc_builder().build(n_in, n_out, dataset_info)
 
 
-def test_nc_swin_transformer_raises_when_lat_1d_is_none():
+def test_nc_swin_transformer_raises_for_healpix():
     n_in, n_out = 5, 3
     nside = 4
     healpix_coords = HEALPixCoordinates(
