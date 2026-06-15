@@ -226,6 +226,7 @@ def get_inference_callback(
             split_output=lambda sd, sizes: sd.split(sizes),
             split_state=lambda ps, sizes: ps.split(sizes),
             sample_size_of_state=lambda ic: ic.as_batch_data().time.shape[0],
+            batch_key_of_forcing=lambda forcing: forcing.n_timesteps,
         )
 
     return build_inference_callback(
