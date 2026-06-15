@@ -11,7 +11,7 @@ import torch
 
 from fme.core import metrics
 from fme.core.constants import EARTH_RADIUS, GRAVITY
-from fme.core.dataset_info import MissingDatasetInfo
+from fme.core.dataset_info_errors import MissingDatasetInfo
 from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
