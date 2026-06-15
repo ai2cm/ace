@@ -1,5 +1,5 @@
 import logging
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Hashable, Iterator, Sequence
 from typing import Any, Generic, Protocol, TypeVar
 
 from fme.core.generics.aggregator import InferenceAggregatorABC, InferenceLogs
@@ -113,12 +113,23 @@ class BatchedPredictor(Generic[PS_I, FD_I, SD_I]):
         split_output: Callable[[SD_I, Sequence[int]], list[SD_I]],
         split_state: Callable[[PS_I, Sequence[int]], list[PS_I]],
         sample_size_of_state: Callable[[PS_I], int],
+        batch_key_of_forcing: Callable[[FD_I], Hashable] = lambda _forcing: None,
     ):
         """``sample_size_of_state`` returns the per-call sample count from the
         initial condition. Take it from the IC, not the forcing, because some
         steppers broadcast a small forcing up to a larger IC (e.g. per-IC
         ensemble members) before stepping, and the split must match the
         post-broadcast output.
+
+        ``batch_key_of_forcing`` returns a key identifying which submissions can
+        share one forward pass: only forcing windows with equal keys are
+        concatenated together. Concurrent runs of different lengths reach their
+        short final window in different rounds, so a full window of one run and
+        the short final window of another can be submitted in the same round;
+        those windows have different shapes and cannot be concatenated. Keying
+        on the window shape (e.g. its number of timesteps) splits such a round
+        into one forward pass per distinct shape. The default keys everything
+        the same, preserving single-forward-pass behavior.
         """
         self._base_predict = base_predict
         self._concat_ic = concat_ic
@@ -126,9 +137,11 @@ class BatchedPredictor(Generic[PS_I, FD_I, SD_I]):
         self._split_output = split_output
         self._split_state = split_state
         self._sample_size_of_state = sample_size_of_state
+        self._batch_key_of_forcing = batch_key_of_forcing
         self._pending_ic: list[PS_I] = []
         self._pending_forcing: list[FD_I] = []
         self._sample_sizes: list[int] = []
+        self._batch_keys: list[Hashable] = []
         self._compute_derived_variables: bool | None = None
         self._results: list[tuple[SD_I, PS_I]] | None = None
 
@@ -160,6 +173,7 @@ class BatchedPredictor(Generic[PS_I, FD_I, SD_I]):
         self._pending_ic.append(initial_condition)
         self._pending_forcing.append(forcing)
         self._sample_sizes.append(self._sample_size_of_state(initial_condition))
+        self._batch_keys.append(self._batch_key_of_forcing(forcing))
         return PredictionPromise(self, slot_id)
 
     def _ensure_flushed(self) -> None:
@@ -169,24 +183,41 @@ class BatchedPredictor(Generic[PS_I, FD_I, SD_I]):
             raise RuntimeError(
                 "Cannot flush BatchedPredictor with no pending submissions."
             )
-        if len(self._pending_ic) == 1:
-            sd, new_state = self._base_predict(
-                self._pending_ic[0],
-                self._pending_forcing[0],
+        # Partition submissions into groups whose forcing windows share a batch
+        # key, so each forward pass only concatenates windows of the same shape.
+        # A single group (the common case, including all-equal keys) runs one
+        # forward pass; mismatched windows in a round (e.g. one run's short
+        # final window beside another's full window) each get their own pass.
+        groups: dict[Hashable, list[int]] = {}
+        for slot_id, key in enumerate(self._batch_keys):
+            groups.setdefault(key, []).append(slot_id)
+
+        result_by_slot: dict[int, tuple[SD_I, PS_I]] = {}
+        for slot_ids in groups.values():
+            if len(slot_ids) == 1:
+                (slot_id,) = slot_ids
+                sd, new_state = self._base_predict(
+                    self._pending_ic[slot_id],
+                    self._pending_forcing[slot_id],
+                    compute_derived_variables=bool(self._compute_derived_variables),
+                )
+                result_by_slot[slot_id] = (sd, new_state)
+                continue
+            merged_ic = self._concat_ic([self._pending_ic[i] for i in slot_ids])
+            merged_forcing = self._concat_forcing(
+                [self._pending_forcing[i] for i in slot_ids]
+            )
+            merged_sd, merged_state = self._base_predict(
+                merged_ic,
+                merged_forcing,
                 compute_derived_variables=bool(self._compute_derived_variables),
             )
-            self._results = [(sd, new_state)]
-            return
-        merged_ic = self._concat_ic(self._pending_ic)
-        merged_forcing = self._concat_forcing(self._pending_forcing)
-        merged_sd, merged_state = self._base_predict(
-            merged_ic,
-            merged_forcing,
-            compute_derived_variables=bool(self._compute_derived_variables),
-        )
-        outputs = self._split_output(merged_sd, self._sample_sizes)
-        states = self._split_state(merged_state, self._sample_sizes)
-        self._results = list(zip(outputs, states))
+            sizes = [self._sample_sizes[i] for i in slot_ids]
+            outputs = self._split_output(merged_sd, sizes)
+            states = self._split_state(merged_state, sizes)
+            for slot_id, sd, new_state in zip(slot_ids, outputs, states):
+                result_by_slot[slot_id] = (sd, new_state)
+        self._results = [result_by_slot[i] for i in range(len(self._pending_ic))]
 
     def _get_result(self, slot_id: int) -> tuple[SD_I, PS_I]:
         if self._results is None:
@@ -197,6 +228,7 @@ class BatchedPredictor(Generic[PS_I, FD_I, SD_I]):
         self._pending_ic = []
         self._pending_forcing = []
         self._sample_sizes = []
+        self._batch_keys = []
         self._compute_derived_variables = None
         self._results = None
 
