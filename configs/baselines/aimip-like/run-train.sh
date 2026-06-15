@@ -1,0 +1,172 @@
+
+#!/bin/bash
+
+set -e
+
+SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
+BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
+WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
+REPO_ROOT=$(git rev-parse --show-toplevel)
+
+cd "$REPO_ROOT"
+
+run_training() {
+  local config_filename="$1"
+  local job_name="$2"
+  local N_GPUS="$3"
+  local WORKSPACE="${4:-ai2/climate-titan}"
+  local PRIORITY="${5:-urgent}"
+  local CLUSTER="${6:-ai2/titan}"  # space-separated list allowed, e.g. "ai2/jupiter ai2/titan"
+  local CONFIG_PATH="$SCRIPT_PATH/$config_filename"
+
+  # Expand the (possibly multi-value) cluster list into repeated --cluster flags
+  local cluster_args=()
+  for c in $CLUSTER; do
+    cluster_args+=(--cluster "$c")
+  done
+
+  python -m fme.ace.validate_config --config_type train "$CONFIG_PATH"
+
+  # Extract additional args from config header
+  local extra_args=()
+  while IFS= read -r line; do
+    [[ "$line" =~ ^#\ arg:\ (.*) ]] && extra_args+=(${BASH_REMATCH[1]})
+  done < "$CONFIG_PATH"
+
+  gantry run \
+    --name "$job_name" \
+    --description 'Run ACE training (AIMIP-like baseline)' \
+    --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
+    --workspace "$WORKSPACE" \
+    --priority "$PRIORITY" \
+    "${cluster_args[@]}" \
+    --env WANDB_USERNAME="$WANDB_USERNAME" \
+    --env WANDB_NAME="$job_name" \
+    --env WANDB_JOB_TYPE=training \
+    --env WANDB_RUN_GROUP= \
+    --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
+    --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
+    --dataset-secret google-credentials:/tmp/google_application_credentials.json \
+    --gpus "$N_GPUS" \
+    --shared-memory 400GiB \
+    --weka climate-default:/climate-default \
+    --budget ai2/atec-climate \
+    --allow-dirty \
+    --system-python \
+    --install "pip install --no-deps ." \
+    "${extra_args[@]}" \
+    -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train "$CONFIG_PATH"
+}
+
+# --- Wave 1 (climate-titan, urgent) ---
+# run_training "train-4deg-daily-v1-era5-only.yaml" "train-4deg-daily-v1-era5-only-rs0" 1
+# run_training "train-4deg-daily-v1-labels.yaml" "train-4deg-daily-v1-labels-rs0" 1
+# run_training "train-4deg-daily-v1-era5-only-residual.yaml" "train-4deg-daily-v1-era5-only-residual-rs0" 1
+# run_training "train-4deg-daily-v1-era5-only-lr-tuning.yaml" "train-4deg-daily-v1-era5-only-lr-tuning-rs0" 1
+
+# --- Wave 2 (Jupiter, high) --- [canceled by user]
+# run_training "train-4deg-daily-v1-labels-384-lr-tuning.yaml" "train-4deg-daily-v1-labels-384-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-labels-384-residual-lr-tuning.yaml" "train-4deg-daily-v1-labels-384-residual-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-era5-only-384-residual-lr-tuning.yaml" "train-4deg-daily-v1-era5-only-384-residual-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-era5-only-rs1.yaml" "train-4deg-daily-v1-era5-only-rs1" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-era5-only-lr-tuning-rs1.yaml" "train-4deg-daily-v1-era5-only-lr-tuning-rs1" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-labels-residual-lr-tuning-rs1.yaml" "train-4deg-daily-v1-labels-residual-lr-tuning-rs1" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-era5-only-256-lr-tuning.yaml" "train-4deg-daily-v1-era5-only-256-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
+
+# --- Wave 3: Residual drift fixes (Jupiter, high) ---
+# run_training "train-4deg-daily-v1-era5-only-residual-winds-anomaly-ft.yaml" "train-4deg-daily-v1-era5-only-residual-winds-anomaly-ft-rs0" 1 ai2/ace high ai2/jupiter  # already running
+# run_training "train-4deg-daily-v1-era5-only-residual-all-anomaly-ft.yaml" "train-4deg-daily-v1-era5-only-residual-all-anomaly-ft-rs0" 1 ai2/ace high ai2/jupiter  # already running
+# --- Wave 3b: tend-reg relaunch after gradient-accumulation backward fix (21f54000f) --- [finished]
+# run_training "train-4deg-daily-v1-era5-only-residual-tend-reg-ft.yaml" "train-4deg-daily-v1-era5-only-residual-tend-reg-ft-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-era5-only-residual-winds-anomaly-tend-reg-ft.yaml" "train-4deg-daily-v1-era5-only-residual-winds-anomaly-tend-reg-ft-rs0" 1 ai2/ace high ai2/jupiter
+
+# --- Wave 4: label-conditioned (ERA5 + c96-shield) residual, tend-reg weight 0.05, from-scratch 60ep (Jupiter, high) --- [running]
+# run_training "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-lr-tuning.yaml" "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-multistep-lr-tuning.yaml" "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-multistep-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-labels-residual-all-anomaly-tend-reg-multistep-lr-tuning.yaml" "train-4deg-daily-v1-labels-residual-all-anomaly-tend-reg-multistep-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-labels-residual-tend-reg-lr-tuning.yaml" "train-4deg-daily-v1-labels-residual-tend-reg-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
+
+# --- Wave 5: residual ablations on tend-reg 0.05, from-scratch 60ep (Jupiter, high) ---
+# 1) ERA5-only winds-anomaly control (no labels) to isolate the label effect
+# 2) labels + winds+temperature anomaly  3) labels + winds-anomaly + embed_dim 384  4) labels + winds-anomaly + aggressive rollout
+# run_training "train-4deg-daily-v1-era5-only-residual-winds-anomaly-tend-reg-lr-tuning.yaml" "train-4deg-daily-v1-era5-only-residual-winds-anomaly-tend-reg-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-labels-residual-winds-temp-anomaly-tend-reg-lr-tuning.yaml" "train-4deg-daily-v1-labels-residual-winds-temp-anomaly-tend-reg-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-384-lr-tuning.yaml" "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-384-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-rollout-lr-tuning.yaml" "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-rollout-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
+
+# --- Wave 6: relaunch of 92b1 + c1bc after epoch=None LR-tuning/loss-schedule fix (76dc6836d) (Jupiter, high) --- [running]
+# run_training "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-lr-tuning.yaml" "train-4deg-daily-v1-labels-residual-winds-anomaly-tend-reg-lr-tuning-rs0-76dc" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-labels-residual-lr-tuning-rs1.yaml" "train-4deg-daily-v1-labels-residual-lr-tuning-rs1-76dc" 1 ai2/ace high ai2/jupiter
+
+# --- Wave 7: non-residual label-conditioned study + filter_num_groups=8 probe (Jupiter, high) ---
+# Does label-conditioning need residual once the recipe is modernized (lr-tuning + multistep rollout)?
+# 1-4) non-residual labels: multistep, aggressive rollout, embed_dim 384, seed-1 replicate
+# 5) labels + filter_num_groups 8 (1-step, vs finished labels-lr-tuning fg=1 baseline)
+# 6) era5-only (no labels) + filter_num_groups 8 (1-step), label-vs-not contrast at fg8
+# run_training "train-4deg-daily-v1-labels-multistep-lr-tuning.yaml" "train-4deg-daily-v1-labels-multistep-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-labels-rollout-lr-tuning.yaml" "train-4deg-daily-v1-labels-rollout-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-labels-384-multistep-lr-tuning.yaml" "train-4deg-daily-v1-labels-384-multistep-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-labels-multistep-lr-tuning-rs1.yaml" "train-4deg-daily-v1-labels-multistep-lr-tuning-rs1" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-labels-fg8-lr-tuning.yaml" "train-4deg-daily-v1-labels-fg8-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-era5-only-fg8-lr-tuning.yaml" "train-4deg-daily-v1-era5-only-fg8-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
+
+# --- Wave 8: finite-difference CRPS loss (crps 0.7 / fd-crps 0.2 / energy 0.1), 1-step, fg=1 (Jupiter, high) ---
+# labels-vs-era5-only contrast at the new loss weighting (same two-way split as the fg8 probe, without fg8)
+# run_training "train-4deg-daily-v1-labels-c7d2e1-lr-tuning.yaml" "train-4deg-daily-v1-labels-c7d2e1-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
+# run_training "train-4deg-daily-v1-era5-only-c7d2e1-lr-tuning.yaml" "train-4deg-daily-v1-era5-only-c7d2e1-lr-tuning-rs0" 1 ai2/ace high ai2/jupiter
+
+# --- Wave 9: era5-only residual with CO2 excluded from inputs (Jupiter, high; intentionally over cap) ---
+# run_training "train-4deg-daily-v1-era5-only-no-co2-residual.yaml" "train-4deg-daily-v1-era5-only-no-co2-residual-rs0" 1 ai2/ace high ai2/jupiter
+
+# --- Wave 10: era5-only with qsat-scaled shared global-mean removal on humidity-impacted fields (Jupiter, high; intentionally over cap) ---
+# specific_total_water_0-7, LHTFLsfc, PRATEsfc, tendency_of_total_water_path_due_to_advection, Q2m scaled by qsat ratio; needs merge of feature/qsat-scaled-shared-global-mean-removal (commit 0ed51f4d3)
+# run_training "train-4deg-daily-v1-era5-only-qsat-scaling.yaml" "train-4deg-daily-v1-era5-only-qsat-scaling-rs0" 1 ai2/ace high ai2/jupiter
+
+# --- Wave 11: era5-only qsat-scaling + CO2 excluded from inputs (Jupiter, high; intentionally over cap) ---
+# run_training "train-4deg-daily-v1-era5-only-no-co2-qsat-scaling.yaml" "train-4deg-daily-v1-era5-only-no-co2-qsat-scaling-rs0" 1 ai2/ace high ai2/jupiter
+
+# --- Wave 12: rerun era5-only-residual (seed 0) on Jupiter, now saving EMA epoch checkpoints on the 46-year inference epochs (1,6,...,56) to recover the well-performing earlier checkpoint --- [launched, queued]
+# run_training "train-4deg-daily-v1-era5-only-residual.yaml" "train-4deg-daily-v1-era5-only-residual-rs0" 1 ai2/ace high ai2/jupiter
+
+# --- Wave 13: spectral-ratio + embed_dim + filter_num_groups study (Jupiter, high) ---
+# 1-2) era5-only (non-residual) spectral_ratio 0.5 / 0.25 (no epoch checkpoints)
+# 3-6) era5-only-residual variants WITH EMA epoch checkpoints on the 46-year inference epochs: embed_dim 256, embed_dim 384, spectral_ratio 0.25, filter_num_groups 8
+# 7) era5-only embed_dim 256 (non-residual) clean counterpart to the finished clean 384-rs0 (no epoch checkpoints)
+# run_training "train-4deg-daily-v1-era5-only-sr0p50.yaml" "train-4deg-daily-v1-era5-only-sr0p50-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-sr0p25.yaml" "train-4deg-daily-v1-era5-only-sr0p25-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-256-residual.yaml" "train-4deg-daily-v1-era5-only-256-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-384-residual.yaml" "train-4deg-daily-v1-era5-only-384-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-sr0p25-residual.yaml" "train-4deg-daily-v1-era5-only-sr0p25-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-fg8-residual.yaml" "train-4deg-daily-v1-era5-only-fg8-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-256.yaml" "train-4deg-daily-v1-era5-only-256-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# --- Wave 14: era5-only-residual with eval-time global-mean relaxation of specific_total_water_0 toward its normalization mean, e-folding timescales of 200 and 100 steps (Jupiter+Titan, high) --- [launched, running]
+# run_training "train-4deg-daily-v1-era5-only-residual-q0-tau200.yaml" "train-4deg-daily-v1-era5-only-residual-q0-tau200-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-residual-q0-tau100.yaml" "train-4deg-daily-v1-era5-only-residual-q0-tau100-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# --- Wave 15: relaunch of the two least-progressed Wave 12/13 jobs (<5 epochs) with both clusters enabled to escape Jupiter contention (Jupiter+Titan, high) --- [launched, queued]
+# sr0p25-residual was at epoch 2; the -8b9d era5-only-residual rerun never started. Old Jupiter-only experiments stopped; relaunched here from d471739.
+# run_training "train-4deg-daily-v1-era5-only-sr0p25-residual.yaml" "train-4deg-daily-v1-era5-only-sr0p25-residual-rs0-d471" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-residual.yaml" "train-4deg-daily-v1-era5-only-residual-rs0-d471" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# --- Wave 16: era5-only-residual + qsat-scaled shared global-mean removal (residual counterpart of the Wave 10 era5-only-qsat-scaling run) (Jupiter+Titan, high) --- [launched, running]
+# run_training "train-4deg-daily-v1-era5-only-qsat-scaling-residual.yaml" "train-4deg-daily-v1-era5-only-qsat-scaling-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# --- Wave 17: era5-only CRPS/finite-diff CRPS/energy-score loss-weight sweep (Jupiter+Titan, high) --- [launched]
+# c4d4e2  crps 0.4 / fd_crps 0.4 / energy 0.2  (non-residual)
+# c5d4e1  crps 0.5 / fd_crps 0.4 / energy 0.1  (non-residual)
+# c7d2e1  crps 0.7 / fd_crps 0.2 / energy 0.1  (non-residual, lr 0.0001 baseline without lr_tuning; -2156 suffix because original c7d2e1-rs0 used the now-renamed c7d2e1-lr-tuning config)
+# c7d2e1-qsat-scaling  c7d2e1 weights on top of the qsat-scaling base
+# run_training "train-4deg-daily-v1-era5-only-c4d4e2.yaml" "train-4deg-daily-v1-era5-only-c4d4e2-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-c5d4e1.yaml" "train-4deg-daily-v1-era5-only-c5d4e1-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-c7d2e1.yaml" "train-4deg-daily-v1-era5-only-c7d2e1-rs0-2156" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-c7d2e1-qsat-scaling.yaml" "train-4deg-daily-v1-era5-only-c7d2e1-qsat-scaling-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# --- Wave 18: era5-only + era5-only-residual reruns with improved inference config (Jupiter+Titan, high) ---
+# New inference sections: 10year_insample (1995-2004, in-sample, drives checkpoint selection) and
+# long_46year_constant_co2 (CO2 held at 1979 IC value via persistence_names). rs0 launched pre-merge of
+# feature/concurrent-inline-inference; rs1 (seed 1) launched post-merge as a concurrent-inference speed A/B.
+# run_training "train-4deg-daily-v1-era5-only.yaml" "train-4deg-daily-v1-era5-only-rs0-b1d6" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-residual.yaml" "train-4deg-daily-v1-era5-only-residual-rs0-b1d6" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# rs1 launched post-merge of feature/concurrent-inline-inference (26917b9af) as the concurrent-inference speed A/B vs rs0-b1d6
+# run_training "train-4deg-daily-v1-era5-only-rs1.yaml" "train-4deg-daily-v1-era5-only-rs1-38f7" 1 ai2/ace high "ai2/jupiter ai2/titan"
