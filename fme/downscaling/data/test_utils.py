@@ -49,6 +49,17 @@ def test_compute_lon_roll(lon_start, lon_stop, expected_roll):
     )
 
 
+def test_find_roll_anchor_from_interval_rejects_non_0_360_grid():
+    """Interval rolling assumes [0, 360); a [-180, 180) grid must fail loudly.
+
+    Otherwise an interval crossing the 180° antimeridian on such a grid would not
+    trigger a roll and would silently subselect only part of the region.
+    """
+    coords = torch.arange(-179.5, 180.0, 1.0)  # [-179.5, ..., 179.5]
+    with pytest.raises(ValueError, match=r"\[0, 360\)"):
+        find_roll_anchor_from_interval(coords, ClosedInterval(170.0, 190.0))
+
+
 @pytest.mark.parametrize(
     "lon, expected",
     [
