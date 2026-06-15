@@ -20,7 +20,6 @@ from fme.downscaling.data import (
     ClosedInterval,
     DataLoaderConfig,
     GriddedData,
-    coords_require_lon_roll,
     enforce_lat_bounds,
 )
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
@@ -113,10 +112,8 @@ class EventDownscaler:
 
     def _get_generation_model(self):
         coarse_lon = self.data.coarse_latlon_coords.lon
-        if coords_require_lon_roll(coarse_lon):
-            base_model = self.model.with_rolled_lon(coarse_lon)
-        else:
-            base_model = self.model
+        # No-op when coarse_lon does not cross the prime meridian.
+        base_model = self.model.with_rolled_lon(coarse_lon)
         if self.patch.needs_patch_predictor:
             return PatchPredictor(
                 base_model,
@@ -189,10 +186,8 @@ class Downscaler:
 
     def _get_generation_model(self):
         coarse_lon = self.data.coarse_latlon_coords.lon
-        if coords_require_lon_roll(coarse_lon):
-            base_model = self.model.with_rolled_lon(coarse_lon)
-        else:
-            base_model = self.model
+        # No-op when coarse_lon does not cross the prime meridian.
+        base_model = self.model.with_rolled_lon(coarse_lon)
         if self.patch.needs_patch_predictor:
             return PatchPredictor(
                 model=base_model,

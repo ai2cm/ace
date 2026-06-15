@@ -11,7 +11,7 @@ from fme.core.cli import prepare_directory
 from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
 
-from ..data import DataLoaderConfig, coords_require_lon_roll
+from ..data import DataLoaderConfig
 from ..models import CheckpointModelConfig, DiffusionModel
 from ..predictors import (
     DenoisingMoEBundledConfig,
@@ -69,10 +69,8 @@ class Downscaler:
         the user to use patching for larger domains because that provides better
         generations.
         """
-        if coords_require_lon_roll(coarse_lon):
-            base_model = self.model.with_rolled_lon(coarse_lon)
-        else:
-            base_model = self.model
+        # No-op when coarse_lon does not cross the prime meridian.
+        base_model = self.model.with_rolled_lon(coarse_lon)
         model_patch_shape = base_model.coarse_shape
 
         if model_patch_shape == input_shape:

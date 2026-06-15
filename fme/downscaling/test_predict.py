@@ -185,9 +185,9 @@ def test_predictor_renaming(
 
 def _mock_downscaler(coarse_lon, cls):
     """Build a Downscaler/EventDownscaler over a mock model whose with_rolled_lon
-    returns a distinct sentinel, so we can observe the seam-crossing roll branch
-    of _get_generation_model. Uses default (no-op) patching so the base model is
-    returned directly rather than wrapped in a PatchPredictor.
+    returns a distinct sentinel, so we can observe that _get_generation_model
+    delegates to it. Uses default (no-op) patching so the base model is returned
+    directly rather than wrapped in a PatchPredictor.
     """
     rolled_model = MagicMock(name="rolled_model")
     model = MagicMock(name="model")
@@ -225,12 +225,15 @@ def test_get_generation_model_rolls_for_seam_crossing_domain(cls):
 
 
 @pytest.mark.parametrize("cls", [predict.Downscaler, predict.EventDownscaler])
-def test_get_generation_model_no_roll_for_in_range_domain(cls):
-    """An in-range coarse domain leaves the model unrolled."""
+def test_get_generation_model_delegates_roll_for_in_range_domain(cls):
+    """The entrypoint delegates to with_rolled_lon even for an in-range domain;
+    the no-op is handled inside the model (test_with_rolled_lon_no_roll_returns_same).
+    """
     coarse_lon = torch.tensor([0.0, 5.0, 10.0, 15.0])
-    downscaler, model, _ = _mock_downscaler(coarse_lon, cls)
+    downscaler, model, rolled_model = _mock_downscaler(coarse_lon, cls)
 
     result = downscaler._get_generation_model()
 
-    model.with_rolled_lon.assert_not_called()
-    assert result is model
+    model.with_rolled_lon.assert_called_once()
+    assert torch.equal(model.with_rolled_lon.call_args[0][0], coarse_lon)
+    assert result is rolled_model

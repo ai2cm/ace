@@ -165,8 +165,8 @@ def _mock_evaluator_config(coarse_lon, monkeypatch):
     """EvaluatorConfig over mocked model/data configs, with Evaluator and
     EventEvaluator patched to capture the model that gets handed to them. The
     mock model's with_rolled_lon returns a distinct sentinel so we can observe
-    the seam-crossing roll branch in the build methods. Default (no-op) patching
-    means the (possibly rolled) base model is passed through unwrapped.
+    that the build methods delegate to it. Default (no-op) patching means the
+    rolled base model is passed through unwrapped.
     """
     rolled_model = MagicMock(name="rolled_model")
     rolled_model.coarse_shape = (4, 4)
@@ -217,13 +217,12 @@ def test_build_default_evaluator_rolls_for_seam_crossing(monkeypatch, crossing):
 
     config._build_default_evaluator()
 
-    if crossing:
-        model.with_rolled_lon.assert_called_once()
-        assert torch.equal(model.with_rolled_lon.call_args[0][0], coarse_lon)
-        assert captured["model"] is rolled_model
-    else:
-        model.with_rolled_lon.assert_not_called()
-        assert captured["model"] is model
+    # The entrypoint always delegates to with_rolled_lon regardless of whether the
+    # domain crosses the seam; the no-op for in-range domains is handled inside the
+    # model (see test_with_rolled_lon_no_roll_returns_same).
+    model.with_rolled_lon.assert_called_once()
+    assert torch.equal(model.with_rolled_lon.call_args[0][0], coarse_lon)
+    assert captured["model"] is rolled_model
 
 
 def test_build_event_evaluator_rolls_for_seam_crossing(monkeypatch):

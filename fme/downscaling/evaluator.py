@@ -15,7 +15,6 @@ from fme.downscaling.aggregators import GenerationAggregator, PairedSampleAggreg
 from fme.downscaling.data import (
     PairedDataLoaderConfig,
     PairedGriddedData,
-    coords_require_lon_roll,
     enforce_lat_bounds,
 )
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
@@ -202,8 +201,8 @@ class EvaluatorConfig:
             requirements=self.model.data_requirements,
         )
         coarse_lon = dataset.coarse_latlon_coords.lon
-        if coords_require_lon_roll(coarse_lon):
-            model = model.with_rolled_lon(coarse_lon)
+        # No-op when coarse_lon does not cross the prime meridian.
+        model = model.with_rolled_lon(coarse_lon)
         evaluator_model: DiffusionModel | DenoisingMoEPredictor | PatchPredictor
         if self.patch.divide_generation and self.patch.composite_prediction:
             evaluator_model = PatchPredictor(
@@ -241,8 +240,8 @@ class EvaluatorConfig:
             requirements=self.model.data_requirements,
         )
         coarse_lon = dataset.coarse_latlon_coords.lon
-        if coords_require_lon_roll(coarse_lon):
-            model = model.with_rolled_lon(coarse_lon)
+        # No-op when coarse_lon does not cross the prime meridian.
+        model = model.with_rolled_lon(coarse_lon)
         if (dataset.coarse_shape[0] > model.coarse_shape[0]) or (
             dataset.coarse_shape[1] > model.coarse_shape[1]
         ):
