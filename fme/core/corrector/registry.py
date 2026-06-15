@@ -12,6 +12,28 @@ from fme.core.typing_ import TensorDict, TensorMapping
 
 @dataclasses.dataclass
 class CorrectorConfigABC(abc.ABC):
+    """Base for corrector configs.
+
+    Subclasses implement ``_get_corrector``. The ``corrector_disabled_epochs``
+    option is handled here: ``get_corrector`` wraps the built corrector in an
+    ``EpochScheduledCorrector`` when it is greater than zero.
+
+    Parameters:
+        corrector_disabled_epochs: Number of initial training epochs during
+            which the corrector is not applied to train-mode steps. The
+            corrector is always applied in eval mode (validation, inline
+            inference and standalone inference).
+    """
+
+    corrector_disabled_epochs: int = dataclasses.field(default=0, kw_only=True)
+
+    def __post_init__(self):
+        if self.corrector_disabled_epochs < 0:
+            raise ValueError(
+                "corrector_disabled_epochs must be non-negative, got "
+                f"{self.corrector_disabled_epochs}"
+            )
+
     @classmethod
     @final
     def from_state(cls, state: Mapping[str, Any]) -> Self:
@@ -26,24 +48,6 @@ class CorrectorConfigABC(abc.ABC):
         optional to implement this method on subclasses.
         """
         return dict(state)
-
-    @abc.abstractmethod
-    def get_corrector(
-        self,
-        dataset_info: DatasetInfo,
-    ) -> "CorrectorABC": ...
-
-
-@dataclasses.dataclass
-class EpochScheduledCorrectorConfigABC(CorrectorConfigABC):
-    corrector_disabled_epochs: int = dataclasses.field(default=0, kw_only=True)
-
-    def __post_init__(self):
-        if self.corrector_disabled_epochs < 0:
-            raise ValueError(
-                "corrector_disabled_epochs must be non-negative, got "
-                f"{self.corrector_disabled_epochs}"
-            )
 
     @final
     def get_corrector(self, dataset_info: DatasetInfo) -> "CorrectorABC":
@@ -63,34 +67,35 @@ class EpochScheduledCorrectorConfigABC(CorrectorConfigABC):
 
 
 class CorrectorABC(abc.ABC):
-    @abc.abstractmethod
     def train(self, mode: bool = True) -> "CorrectorABC":
-        """Set the corrector to training or evaluation mode."""
-        ...
+        """Set the corrector to training or evaluation mode.
+
+        Default implementation is a no-op: a stateless corrector behaves
+        identically in both modes. Override to vary behavior by mode.
+        """
+        return self
 
     @final
     def eval(self) -> "CorrectorABC":
         """Set the corrector to evaluation mode."""
         return self.train(False)
 
-    @abc.abstractmethod
     def set_epoch(self, epoch: int) -> None:
-        """Called by the stepper at the start of each training epoch."""
-        ...
+        """Called by the stepper at the start of each training epoch.
 
-    @abc.abstractmethod
+        Default implementation is a no-op.
+        """
+
     def get_state(self) -> dict[str, Any]:
-        """
-        Return corrector checkpoint state.
+        """Return corrector checkpoint state.
 
-        Correctors without checkpointed state can return an empty dict.
+        Correctors without checkpointed state return an empty dict, which is
+        the default implementation.
         """
-        ...
+        return {}
 
-    @abc.abstractmethod
     def load_state(self, state: dict[str, Any]) -> None:
-        """Load corrector checkpoint state."""
-        ...
+        """Load corrector checkpoint state. Default implementation is a no-op."""
 
     @abc.abstractmethod
     def __call__(
@@ -117,6 +122,10 @@ class CorrectorABC(abc.ABC):
 
 
 class EpochScheduledCorrector(CorrectorABC):
+    """Wrap a corrector so it is skipped for train-mode steps during the first
+    ``disabled_epochs`` training epochs, while always being applied in eval mode.
+    """
+
     def __init__(self, wrapped: CorrectorABC, disabled_epochs: int):
         if disabled_epochs < 0:
             raise ValueError(
@@ -124,6 +133,9 @@ class EpochScheduledCorrector(CorrectorABC):
             )
         self._wrapped = wrapped
         self._disabled_epochs = disabled_epochs
+        # Assume the first epoch until set_epoch is called, so the wrapped
+        # corrector is disabled for train-mode steps taken before the trainer
+        # signals an epoch boundary.
         self._corrector_disabled = disabled_epochs > 0
         self._training = True
 
@@ -139,6 +151,9 @@ class EpochScheduledCorrector(CorrectorABC):
     def get_state(self) -> dict[str, Any]:
         state: dict[str, Any] = {}
         if self._disabled_epochs > 0:
+            # persisted so that mid-epoch resume, which does not signal an
+            # epoch boundary via set_epoch, keeps the corrector state of the
+            # interrupted epoch
             state["corrector_disabled"] = self._corrector_disabled
         wrapped_state = self._wrapped.get_state()
         if len(wrapped_state) > 0:

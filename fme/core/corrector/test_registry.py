@@ -11,6 +11,7 @@ from fme.core.corrector.registry import CorrectorABC, EpochScheduledCorrector
 from fme.core.corrector.state import CorrectorState
 from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import LatLonOperations
+from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -35,9 +36,38 @@ def test_corrector_disabled_epochs_must_be_non_negative():
         IceCorrectorConfig(corrector_disabled_epochs=1),
     ],
 )
-def test_corrector_configs_support_disabled_epochs(config):
+def test_corrector_configs_wrap_when_disabled_epochs_set(config):
     corrector = config.get_corrector(_get_dataset_info())
+    assert isinstance(corrector, EpochScheduledCorrector)
 
+
+def test_corrector_not_wrapped_when_disabled_epochs_zero():
+    corrector = AtmosphereCorrectorConfig().get_corrector(_get_dataset_info())
+    assert not isinstance(corrector, EpochScheduledCorrector)
+    # the bare corrector inherits the base no-op lifecycle methods
+    assert corrector.train(False) is corrector
+    corrector.set_epoch(5)  # no-op, must not raise
+    assert corrector.get_state() == {}
+    corrector.load_state({"ignored": 1})  # no-op, must not raise
+
+
+def test_corrector_selector_rejects_disabled_epochs():
+    # corrector_disabled_epochs must be set on the wrapped corrector config,
+    # not on the selector, to avoid two places that could schedule.
+    with pytest.raises(ValueError, match="not on the CorrectorSelector"):
+        CorrectorSelector(
+            type="atmosphere_corrector",
+            config={},
+            corrector_disabled_epochs=1,
+        )
+
+
+def test_corrector_selector_disabled_epochs_set_on_wrapped_config():
+    selector = CorrectorSelector(
+        type="atmosphere_corrector",
+        config={"corrector_disabled_epochs": 1},
+    )
+    corrector = selector.get_corrector(_get_dataset_info())
     assert isinstance(corrector, EpochScheduledCorrector)
 
 
@@ -45,7 +75,6 @@ def test_scheduled_corrector_requires_state_when_disabled_epochs_configured():
     corrector = AtmosphereCorrectorConfig(corrector_disabled_epochs=1).get_corrector(
         _get_dataset_info()
     )
-
     with pytest.raises(ValueError, match="corrector_disabled"):
         corrector.load_state({})
 
@@ -55,6 +84,7 @@ class _LifecycleRecordingCorrector(CorrectorABC):
         self.train_modes: list[bool] = []
         self.epochs: list[int] = []
         self.loaded_state: dict[str, object] | None = None
+        self.n_calls = 0
 
     def train(self, mode: bool = True) -> "_LifecycleRecordingCorrector":
         self.train_modes.append(mode)
@@ -76,6 +106,7 @@ class _LifecycleRecordingCorrector(CorrectorABC):
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
     ) -> tuple[TensorDict, CorrectorState | None]:
+        self.n_calls += 1
         return dict(gen_data), corrector_state
 
 
@@ -95,3 +126,25 @@ def test_scheduled_corrector_forwards_lifecycle_and_state():
         "wrapped": {"wrapped_value": 3},
     }
     assert wrapped.loaded_state == {"wrapped_value": 3}
+
+
+def test_scheduled_corrector_skips_wrapped_in_train_during_disabled_epochs():
+    wrapped = _LifecycleRecordingCorrector()
+    corrector = EpochScheduledCorrector(wrapped=wrapped, disabled_epochs=1)
+
+    # epoch 1, train mode: wrapped corrector is skipped
+    corrector.train(True)
+    corrector.set_epoch(1)
+    corrector({}, {}, {}, None)
+    assert wrapped.n_calls == 0
+
+    # eval mode always applies the wrapped corrector, even during epoch 1
+    corrector.eval()
+    corrector({}, {}, {}, None)
+    assert wrapped.n_calls == 1
+
+    # epoch 2, train mode: wrapped corrector is applied again
+    corrector.train(True)
+    corrector.set_epoch(2)
+    corrector({}, {}, {}, None)
+    assert wrapped.n_calls == 2

@@ -2147,7 +2147,7 @@ def test_get_serialized_stepper_vertical_coordinate():
     assert isinstance(vertical_coordinate, VerticalCoordinate)
 
 
-def _get_force_positive_stepper(corrector_disabled_epochs: int) -> Stepper:
+def _get_scheduled_force_positive_stepper(corrector_disabled_epochs: int) -> Stepper:
     return _get_stepper(
         ["a"],
         ["a"],
@@ -2171,8 +2171,8 @@ def _step_negative_input(stepper: Stepper) -> tuple[torch.Tensor, torch.Tensor]:
     return output["a"], input_data["a"] + 1
 
 
-def test_corrector_disabled_epochs():
-    stepper = _get_force_positive_stepper(corrector_disabled_epochs=1)
+def test_scheduled_corrector_disabled_during_first_epoch():
+    stepper = _get_scheduled_force_positive_stepper(corrector_disabled_epochs=1)
 
     stepper.set_train()
     stepper.set_epoch(1)
@@ -2190,15 +2190,19 @@ def test_corrector_disabled_epochs():
     torch.testing.assert_close(output, torch.zeros_like(raw_prediction))
 
 
-def test_corrector_applied_in_train_mode_by_default():
-    stepper = _get_force_positive_stepper(corrector_disabled_epochs=0)
+def test_unwrapped_corrector_applied_in_train_mode():
+    stepper = _get_stepper(
+        ["a"],
+        ["a"],
+        corrector=AtmosphereCorrectorConfig(force_positive_names=["a"]),
+    )
     stepper.set_train()
     output, raw_prediction = _step_negative_input(stepper)
     torch.testing.assert_close(output, torch.zeros_like(raw_prediction))
 
 
-def test_corrector_disabled_state_restored_on_resume():
-    stepper = _get_force_positive_stepper(corrector_disabled_epochs=1)
+def test_scheduled_corrector_disabled_state_restored_on_resume():
+    stepper = _get_scheduled_force_positive_stepper(corrector_disabled_epochs=1)
     stepper.set_train()
     stepper.set_epoch(2)
     state = stepper.get_state()
@@ -2206,7 +2210,7 @@ def test_corrector_disabled_state_restored_on_resume():
     # a freshly-built stepper assumes the first epoch, so the corrector is
     # disabled for train-mode steps until load_state restores the state of
     # the interrupted epoch (mid-epoch resume does not call set_epoch)
-    resumed = _get_force_positive_stepper(corrector_disabled_epochs=1)
+    resumed = _get_scheduled_force_positive_stepper(corrector_disabled_epochs=1)
     resumed.set_train()
     output, raw_prediction = _step_negative_input(resumed)
     torch.testing.assert_close(output, raw_prediction)
