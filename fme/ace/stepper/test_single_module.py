@@ -7,7 +7,7 @@ import unittest
 import unittest.mock
 from collections import namedtuple
 from collections.abc import Iterable, Mapping
-from typing import Any, Literal
+from typing import Literal
 from unittest.mock import patch
 
 import cftime
@@ -1293,18 +1293,6 @@ class _RecordingCorrector(CorrectorABC):
     def __init__(self):
         self.call_count = 0
         self.seen_states: list[CorrectorState | None] = []
-
-    def train(self, mode: bool = True) -> "_RecordingCorrector":
-        return self
-
-    def set_epoch(self, epoch: int) -> None:
-        pass
-
-    def get_state(self) -> dict[str, Any]:
-        return {}
-
-    def load_state(self, state: dict[str, Any]) -> None:
-        pass
 
     def __call__(
         self,

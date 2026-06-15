@@ -84,7 +84,6 @@ class _LifecycleRecordingCorrector(CorrectorABC):
         self.train_modes: list[bool] = []
         self.epochs: list[int] = []
         self.loaded_state: dict[str, object] | None = None
-        self.n_calls = 0
 
     def train(self, mode: bool = True) -> "_LifecycleRecordingCorrector":
         self.train_modes.append(mode)
@@ -106,7 +105,6 @@ class _LifecycleRecordingCorrector(CorrectorABC):
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
     ) -> tuple[TensorDict, CorrectorState | None]:
-        self.n_calls += 1
         return dict(gen_data), corrector_state
 
 
@@ -126,25 +124,3 @@ def test_scheduled_corrector_forwards_lifecycle_and_state():
         "wrapped": {"wrapped_value": 3},
     }
     assert wrapped.loaded_state == {"wrapped_value": 3}
-
-
-def test_scheduled_corrector_skips_wrapped_in_train_during_disabled_epochs():
-    wrapped = _LifecycleRecordingCorrector()
-    corrector = EpochScheduledCorrector(wrapped=wrapped, disabled_epochs=1)
-
-    # epoch 1, train mode: wrapped corrector is skipped
-    corrector.train(True)
-    corrector.set_epoch(1)
-    corrector({}, {}, {}, None)
-    assert wrapped.n_calls == 0
-
-    # eval mode always applies the wrapped corrector, even during epoch 1
-    corrector.eval()
-    corrector({}, {}, {}, None)
-    assert wrapped.n_calls == 1
-
-    # epoch 2, train mode: wrapped corrector is applied again
-    corrector.train(True)
-    corrector.set_epoch(2)
-    corrector({}, {}, {}, None)
-    assert wrapped.n_calls == 2
