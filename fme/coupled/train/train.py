@@ -161,6 +161,10 @@ def get_inference_callback(
             sample_size_of_state=lambda ic: (
                 ic.as_batch_data().ocean_data.time.shape[0]
             ),
+            batch_key_of_forcing=lambda forcing: (
+                forcing.ocean_data.n_timesteps,
+                forcing.atmosphere_data.n_timesteps,
+            ),
         )
 
     return build_inference_callback(

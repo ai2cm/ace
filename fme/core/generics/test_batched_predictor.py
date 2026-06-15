@@ -23,9 +23,15 @@ from fme.core.timing import GlobalTimer
 
 @dataclass
 class FakeFD:
-    """Fake forcing-data batch: a list of integers, one per sample."""
+    """Fake forcing-data batch: a list of integers, one per sample.
+
+    ``n_timesteps`` stands in for the window's time length: like the real
+    ``BatchData.cat``, ``_concat_fd`` refuses to concatenate windows whose
+    ``n_timesteps`` differ.
+    """
 
     samples: list[int]
+    n_timesteps: int = 1
 
 
 @dataclass
@@ -44,9 +50,15 @@ class FakeSD:
 
 def _concat_fd(items: Sequence[FakeFD]) -> FakeFD:
     out: list[int] = []
+    n_timesteps = items[0].n_timesteps
     for item in items:
+        if item.n_timesteps != n_timesteps:
+            raise ValueError(
+                "Cannot cat FakeFD with different n_timesteps: "
+                f"{n_timesteps} != {item.n_timesteps}"
+            )
         out.extend(item.samples)
-    return FakeFD(samples=out)
+    return FakeFD(samples=out, n_timesteps=n_timesteps)
 
 
 def _concat_ps(items: Sequence[FakePS]) -> FakePS:
@@ -104,6 +116,20 @@ def _make_predictor() -> BatchedPredictor[FakePS, FakeFD, FakeSD]:
     )
 
 
+def _make_keyed_predictor() -> BatchedPredictor[FakePS, FakeFD, FakeSD]:
+    """Like ``_make_predictor`` but keys forward passes on window length, so
+    only forcing windows of equal ``n_timesteps`` are batched together."""
+    return BatchedPredictor(
+        base_predict=_fake_predict,
+        concat_ic=_concat_ps,
+        concat_forcing=_concat_fd,
+        split_output=_split_sd,
+        split_state=_split_ps,
+        sample_size_of_state=_sample_size_of_state,
+        batch_key_of_forcing=lambda forcing: forcing.n_timesteps,
+    )
+
+
 def test_single_submission_resolves_to_underlying_predict():
     predictor = _make_predictor()
     promise = predictor.submit(FakePS(samples=[10]), FakeFD(samples=[1]))
@@ -128,6 +154,26 @@ def test_two_submissions_share_one_forward_pass():
     assert sd2.samples == [22, 33]
     assert ps1.samples == [11]
     assert ps2.samples == [22, 33]
+
+
+def test_submissions_with_different_keys_use_separate_forward_passes():
+    """Windows whose batch keys differ cannot be concatenated, so each distinct
+    key gets its own forward pass; results stay aligned to their slots."""
+    predictor = _make_keyed_predictor()
+    mock_base = unittest.mock.MagicMock(side_effect=_fake_predict)
+    predictor._base_predict = mock_base
+    # Slots 0 and 2 share key (n_timesteps=74); slot 1 has key n_timesteps=3.
+    p0 = predictor.submit(FakePS(samples=[10]), FakeFD(samples=[1], n_timesteps=74))
+    p1 = predictor.submit(FakePS(samples=[20]), FakeFD(samples=[2], n_timesteps=3))
+    p2 = predictor.submit(FakePS(samples=[30]), FakeFD(samples=[3], n_timesteps=74))
+    sd0, _ = p0.resolve()
+    sd1, _ = p1.resolve()
+    sd2, _ = p2.resolve()
+    # One pass for the two n_timesteps=74 windows, one for the n_timesteps=3 one.
+    assert mock_base.call_count == 2
+    assert sd0.samples == [11]
+    assert sd1.samples == [22]
+    assert sd2.samples == [33]
 
 
 def test_resolve_is_idempotent():
@@ -321,6 +367,56 @@ def test_run_concurrent_inference_heterogeneous_lengths():
     assert mock_base.call_count == 3
     assert [b.samples for b in agg_short.batches] == [[1]]
     assert [b.samples for b in agg_long.batches] == [[110], [120], [130]]
+
+
+def test_run_concurrent_inference_mismatched_window_shapes():
+    """Regression for the rs1 crash: a shorter run reaches its short final
+    window in the same round a longer run still has a full window. Those windows
+    have different shapes (n_timesteps), so concatenating them must not be
+    attempted; each shape gets its own forward pass in that round."""
+    predictor = _make_keyed_predictor()
+    mock_base = unittest.mock.MagicMock(side_effect=_fake_predict)
+    predictor._base_predict = mock_base
+    # "short" runs two full windows then a short final window (n_timesteps 3).
+    data_short = SimpleInferenceData(
+        initial_condition=FakePS(samples=[0]),
+        loader=[
+            FakeFD(samples=[1], n_timesteps=74),
+            FakeFD(samples=[1], n_timesteps=74),
+            FakeFD(samples=[1], n_timesteps=3),
+        ],
+    )
+    # "long" runs four full windows; its window in round 3 is still full.
+    data_long = SimpleInferenceData(
+        initial_condition=FakePS(samples=[100]),
+        loader=[FakeFD(samples=[10], n_timesteps=74) for _ in range(4)],
+    )
+    agg_short = _FakeAggregator()
+    agg_long = _FakeAggregator()
+    entries = [
+        ConcurrentInferenceEntry(
+            name="short",
+            data=data_short,
+            aggregator=agg_short,
+            writer=NullDataWriter(),
+            record_logs=lambda logs: None,
+        ),
+        ConcurrentInferenceEntry(
+            name="long",
+            data=data_long,
+            aggregator=agg_long,
+            writer=NullDataWriter(),
+            record_logs=lambda logs: None,
+        ),
+    ]
+    with GlobalTimer():
+        run_concurrent_inference(predictor, entries)
+    # Rounds 1-2: one batched pass each (both full). Round 3: short's final
+    # window (n_timesteps=3) and long's full window split into two passes.
+    # Round 4: long alone. Total 1 + 1 + 2 + 1 = 5.
+    assert mock_base.call_count == 5
+    assert [b.samples for b in agg_short.batches] == [[1], [2], [3]]
+    assert [b.samples for b in agg_long.batches] == [[110], [120], [130], [140]]
 
 
 def test_run_concurrent_inference_writes_initial_and_restart():
