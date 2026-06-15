@@ -11,6 +11,7 @@ import torch
 
 from fme.core import metrics
 from fme.core.constants import EARTH_RADIUS, GRAVITY
+from fme.core.dataset_info import MissingDatasetInfo
 from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
@@ -879,8 +880,6 @@ class HEALPixCoordinates(HorizontalCoordinates):
 
     @property
     def lat_1d(self) -> torch.Tensor:
-        from fme.core.dataset_info import MissingDatasetInfo
-
         raise MissingDatasetInfo(
             "lat_1d (HEALPixCoordinates uses 12 tiles and has no clean "
             "1-dimensional representation for latitude)"
