@@ -40,7 +40,7 @@ from .layers import (
     DropPath,
 )
 from .lora import LoRAConv2d
-from .s2convolutions import SpectralConvS2
+from .s2convolutions import SpectralConvS2, validate_spectral_ratio
 from .makani.spectral_convolution import SpectralConv
 
 
@@ -89,6 +89,15 @@ class SFNONetConfig:
             the l=0 (global mean) spherical harmonic coefficient, so that
             global mean changes can only result from local operations
             (norms, MLPs, skip connections).
+        spectral_ratio: Fraction of embed_dim that participates in the
+            spectral filter's SHT and per-mode complex weight. When < 1, a
+            Conv1x1 down-projection is applied before forward_transform and
+            a Conv1x1 up-projection is applied after inverse_transform, so
+            the SHT and the (modes_lat x C x C) per-mode weight all operate
+            on round(embed_dim * spectral_ratio) channels. When
+            filter_residual is enabled, the round-trip residual also passes
+            through the projections. Only supported for filter_type='linear'
+            and incompatible with local_blocks.
         clip_latent_global_means: If True, the per-channel spatial mean of the
             post-encoder latent representation is tracked during training and,
             during eval, the latent is shifted so that mean falls within the
@@ -124,7 +133,18 @@ class SFNONetConfig:
     spectral_lora_rank: int = 0
     spectral_lora_alpha: float | None = None
     filter_preserves_global_mean: bool = False
+    spectral_ratio: float = 1.0
     clip_latent_global_means: bool = False
+
+    def __post_init__(self):
+        validate_spectral_ratio(
+            self.spectral_ratio,
+            self.embed_dim,
+            self.filter_num_groups,
+            filter_type=self.filter_type,
+            preserves_global_mean=self.filter_preserves_global_mean,
+            local_blocks=bool(self.local_blocks),
+        )
 
 
 # heuristic for finding theta_cutoff
@@ -169,6 +189,7 @@ class SpectralFilterLayer(nn.Module):
         lora_rank: int = 0,
         lora_alpha: float | None = None,
         preserve_global_mean: bool = False,
+        spectral_ratio: float = 1.0,
     ):
         super(SpectralFilterLayer, self).__init__()
 
@@ -178,6 +199,11 @@ class SpectralFilterLayer(nn.Module):
         if preserve_global_mean and filter_type != "linear":
             raise NotImplementedError(
                 "preserve_global_mean is only supported for linear filter type."
+            )
+
+        if spectral_ratio < 1.0 and filter_type != "linear":
+            raise NotImplementedError(
+                "spectral_ratio < 1 is only supported for filter_type='linear'."
             )
 
         if filter_type == "non-linear":
@@ -196,6 +222,7 @@ class SpectralFilterLayer(nn.Module):
                 lora_alpha=lora_alpha,
                 num_groups=num_groups,
                 preserve_global_mean=preserve_global_mean,
+                spectral_ratio=spectral_ratio,
             )
         elif filter_type == "makani-linear":
             self.filter = SpectralConv(
@@ -266,6 +293,7 @@ class FourierNeuralOperatorBlock(nn.Module):
         spectral_lora_rank: int = 0,
         spectral_lora_alpha: float | None = None,
         filter_preserves_global_mean: bool = False,
+        spectral_ratio: float = 1.0,
     ):
         super(FourierNeuralOperatorBlock, self).__init__()
 
@@ -292,6 +320,7 @@ class FourierNeuralOperatorBlock(nn.Module):
             lora_rank=spectral_lora_rank,
             lora_alpha=spectral_lora_alpha,
             preserve_global_mean=filter_preserves_global_mean,
+            spectral_ratio=spectral_ratio,
         )
 
         if inner_skip == "linear":
@@ -541,6 +570,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         self.spectral_lora_rank = params.spectral_lora_rank
         self.spectral_lora_alpha = params.spectral_lora_alpha
         self.filter_preserves_global_mean = params.filter_preserves_global_mean
+        self.spectral_ratio = params.spectral_ratio
 
         self.trans_down = trans_down
         self.itrans_up = itrans_up
@@ -647,6 +677,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                 spectral_lora_rank=self.spectral_lora_rank,
                 spectral_lora_alpha=self.spectral_lora_alpha,
                 filter_preserves_global_mean=self.filter_preserves_global_mean,
+                spectral_ratio=self.spectral_ratio,
             )
 
             self.blocks.append(block)
