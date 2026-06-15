@@ -178,3 +178,9 @@ run_training() {
 # run_training "train-4deg-daily-v1-era5-only.yaml" "train-4deg-daily-v1-era5-only-rs0-5a96" 1 ai2/ace high "ai2/jupiter ai2/titan"  # from exp/aimip-like-wave18-seq
 # run_training "train-4deg-daily-v1-era5-only-residual.yaml" "train-4deg-daily-v1-era5-only-residual-rs0-5a96" 1 ai2/ace high "ai2/jupiter ai2/titan"  # from exp/aimip-like-wave18-seq
 # run_training "train-4deg-daily-v1-era5-only-rs1.yaml" "train-4deg-daily-v1-era5-only-rs1-612f" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# --- Wave 18 rs1 relaunch: -612f crashed before epoch 1 on the concurrent-inference
+# BatchData.cat mismatch (a run's short final window catted with another run's full window;
+# n_timesteps 3 != 74). Fixed by partitioning each batched forward pass by window shape (PR #1279,
+# merged here at 59ed0bf3c). Relaunched from this branch as the concurrent-inference speed A/B vs rs0-b1d6.
+# run_training "train-4deg-daily-v1-era5-only-rs1.yaml" "train-4deg-daily-v1-era5-only-rs1-59ed" 1 ai2/ace high "ai2/jupiter ai2/titan"
