@@ -370,8 +370,8 @@ def test_run_concurrent_inference_heterogeneous_lengths():
 
 
 def test_run_concurrent_inference_mismatched_window_shapes():
-    """Regression for the rs1 crash: a shorter run reaches its short final
-    window in the same round a longer run still has a full window. Those windows
+    """Regression: a shorter run reaches its short final window in the same
+    round a longer run still has a full window. Those windows
     have different shapes (n_timesteps), so concatenating them must not be
     attempted; each shape gets its own forward pass in that round."""
     predictor = _make_keyed_predictor()
