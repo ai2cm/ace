@@ -11,7 +11,7 @@ from fme.core.constants import (
     LATENT_HEAT_OF_VAPORIZATION,
     SPECIFIC_HEAT_OF_SEA_WATER_CM4,
 )
-from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
+from fme.core.corrector.registry import CorrectorABC, EpochScheduledCorrectorConfigABC
 from fme.core.corrector.state import CorrectorState
 from fme.core.corrector.utils import force_positive
 from fme.core.dataset_info import DatasetInfo
@@ -111,7 +111,7 @@ class SurfaceEnergyFluxCorrectionConfig:
 
 @CorrectorSelector.register("ocean_corrector")
 @dataclasses.dataclass
-class OceanCorrectorConfig(CorrectorConfigABC):
+class OceanCorrectorConfig(EpochScheduledCorrectorConfigABC):
     force_positive_names: list[str] = dataclasses.field(default_factory=list)
     sea_ice_fraction_correction: SeaIceFractionConfig | None = None
     surface_energy_flux_correction: SurfaceEnergyFluxCorrectionConfig | None = None
@@ -141,7 +141,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     )
         return state_copy
 
-    def get_corrector(
+    def _get_corrector(
         self,
         dataset_info: DatasetInfo,
     ) -> "OceanCorrector":
@@ -165,6 +165,18 @@ class OceanCorrector(CorrectorABC):
         self._gridded_operations = gridded_operations
         self._vertical_coordinate = vertical_coordinate
         self._timestep = timestep
+
+    def train(self, mode: bool = True) -> "OceanCorrector":
+        return self
+
+    def set_epoch(self, epoch: int) -> None:
+        pass
+
+    def get_state(self) -> dict[str, Any]:
+        return {}
+
+    def load_state(self, state: dict[str, Any]) -> None:
+        pass
 
     def __call__(
         self,

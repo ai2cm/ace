@@ -245,7 +245,6 @@ class StepABC(abc.ABC):
     def config(self) -> StepConfigABC:
         pass
 
-    @final
     def train(self, mode: bool = True) -> "StepABC":
         """Set the step (and all submodules) to training mode.
 
@@ -380,9 +379,8 @@ class StepABC(abc.ABC):
     def set_epoch(self, epoch: int) -> None:
         """Called by the stepper at the start of each training epoch.
 
-        Default implementation is a no-op. Override to update per-epoch
-        behavior, e.g. epoch-dependent corrector enablement. Steps which
-        wrap another step must forward the call to the wrapped step.
+        Default implementation is a no-op. Steps which wrap another step must
+        forward the call to the wrapped step.
         """
         pass
 

@@ -1,9 +1,10 @@
 import dataclasses
 import datetime
+from typing import Any
 
 import torch
 
-from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
+from fme.core.corrector.registry import CorrectorABC, EpochScheduledCorrectorConfigABC
 from fme.core.corrector.state import CorrectorState
 from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import GriddedOperations
@@ -184,10 +185,10 @@ class IceBudgetCorrectionConfig:
 
 @CorrectorSelector.register("ice_corrector")
 @dataclasses.dataclass
-class IceCorrectorConfig(CorrectorConfigABC):
+class IceCorrectorConfig(EpochScheduledCorrectorConfigABC):
     budget_correction: IceBudgetCorrectionConfig | None = None
 
-    def get_corrector(
+    def _get_corrector(
         self,
         dataset_info: DatasetInfo,
     ) -> "IceCorrector":
@@ -212,6 +213,18 @@ class IceCorrector(CorrectorABC):
         self._config = config
         self._gridded_operations = gridded_operations
         self._timestep = timestep
+
+    def train(self, mode: bool = True) -> "IceCorrector":
+        return self
+
+    def set_epoch(self, epoch: int) -> None:
+        pass
+
+    def get_state(self) -> dict[str, Any]:
+        return {}
+
+    def load_state(self, state: dict[str, Any]) -> None:
+        pass
 
     def __call__(
         self,

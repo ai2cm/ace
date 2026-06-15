@@ -2,14 +2,18 @@ import dataclasses
 from collections.abc import Mapping
 from typing import Any, ClassVar  # noqa: UP035
 
-from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
+from fme.core.corrector.registry import (
+    CorrectorABC,
+    CorrectorConfigABC,
+    EpochScheduledCorrectorConfigABC,
+)
 from fme.core.dataset_info import DatasetInfo
 
 from .registry import Registry
 
 
 @dataclasses.dataclass
-class CorrectorSelector(CorrectorConfigABC):
+class CorrectorSelector(EpochScheduledCorrectorConfigABC):
     """
     A dataclass containing all the information needed to build a
     CorrectorConfigABC, including the type of the CorrectorConfigABC and the
@@ -34,6 +38,7 @@ class CorrectorSelector(CorrectorConfigABC):
     registry: ClassVar[Registry[CorrectorConfigABC]] = Registry[CorrectorConfigABC]()
 
     def __post_init__(self):
+        super().__post_init__()
         self._corrector_config_instance = self.registry.get(self.type, self.config)
 
     @classmethod
@@ -45,7 +50,7 @@ class CorrectorSelector(CorrectorConfigABC):
         """This class method is used to expose all available types of Correctors."""
         return set(cls.registry._types.keys())
 
-    def get_corrector(
+    def _get_corrector(
         self,
         dataset_info: DatasetInfo,
     ) -> CorrectorABC:
