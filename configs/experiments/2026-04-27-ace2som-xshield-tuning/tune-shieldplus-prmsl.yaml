@@ -7,8 +7,8 @@ ema:
 max_epochs: 40
 inference:
   - name: 1xC02
-    n_forward_steps: 7300
-    forward_steps_in_memory: 10
+    n_forward_steps: 1460
+    forward_steps_in_memory: 20
     loader:
       start_indices:
         times:
