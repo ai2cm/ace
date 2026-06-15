@@ -6,7 +6,7 @@
 # Reference: Schreck et al., npj Clim Atmos Sci 8, 239 (2025).
 #   https://doi.org/10.1038/s41612-025-01125-6
 #
-# Copyright [2025] [NSF NCAR MILES group]
+# Copyright 2025 NSF NCAR MILES group
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
