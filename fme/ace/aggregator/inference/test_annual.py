@@ -12,6 +12,8 @@ import fme
 from fme.ace.aggregator.inference.annual import (
     GlobalMeanAnnualAggregator,
     PairedGlobalMeanAnnualAggregator,
+    get_r2,
+    get_rmse,
 )
 from fme.ace.aggregator.inference.data import InferenceBatchData
 from fme.ace.testing import DimSizes, MonthlyReferenceData
@@ -184,12 +186,42 @@ def test_paired_annual_aggregator_with_nans(tmpdir):
         annual_mean_series, expected_series, rtol=1e-4, atol=1e-7
     )
     logs = agg.get_logs(label="test")
+    assert not np.isnan(logs["test/rmse/a"])
     for source in ["target", "gen"]:
         r2 = logs[f"test/r2/a_{source}"]
         assert not np.isnan(r2)
         big_r2 = 50  # account for small denominators
         assert r2 > -big_r2  # can be -inf if NaNs improperly handled
         assert r2 < 1
+
+
+def test_get_rmse_ignores_nan_gap_years():
+    # gap years from reindexing show up as NaN in both series; the RMSE over
+    # the remaining years must match a hand-computed value, not propagate NaN.
+    years = [2000, 2001, 2002, 2003]
+    da = xr.DataArray([1.0, np.nan, 3.0, 5.0], dims=["year"], coords={"year": years})
+    reference = xr.DataArray(
+        [1.0, 2.0, 2.0, 2.0], dims=["year"], coords={"year": years}
+    )
+    # squared errors over the non-NaN years 2000/2002/2003: 0, 1, 9 -> mean 10/3
+    expected = float(np.sqrt(10.0 / 3.0))
+    np.testing.assert_allclose(get_rmse(da, reference), expected, rtol=1e-12)
+
+
+def test_get_r2_ignores_nan_gap_years():
+    # get_r2 sees the same NaN gap years as get_rmse and must ignore them
+    # rather than returning NaN.
+    years = [2000, 2001, 2002, 2003]
+    da = xr.DataArray([1.0, np.nan, 3.0, 5.0], dims=["year"], coords={"year": years})
+    reference = xr.DataArray(
+        [1.0, 2.0, 2.0, 2.0], dims=["year"], coords={"year": years}
+    )
+    # over the non-NaN years 2000/2002/2003: ref mean 5/3,
+    # SS_ref = (1-5/3)^2 + (2-5/3)^2 + (2-5/3)^2 = 2/3; SS_pred = 0+1+9 = 10
+    expected = float(1 - 10.0 / (2.0 / 3.0))
+    result = get_r2(da, reference)
+    assert not np.isnan(result)
+    np.testing.assert_allclose(result, expected, rtol=1e-12)
 
 
 @pytest.mark.parametrize("use_mock_distributed", [False, True])

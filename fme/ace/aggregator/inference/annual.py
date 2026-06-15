@@ -113,8 +113,6 @@ class PairedGlobalMeanAnnualAggregator:
             if gen.sizes["year"] > 1:
                 target_ensemble_mean = target[name].mean("sample")
                 gen_ensemble_mean = gen[name].mean("sample")
-                # RMSE of the predicted ensemble-mean annual evolution against
-                # the target ensemble-mean annual evolution
                 metrics[f"rmse/{name}"] = get_rmse(
                     gen_ensemble_mean, target_ensemble_mean
                 )
@@ -314,10 +312,15 @@ def _add_dataarray(da1: xr.DataArray, da2: xr.DataArray):
 
 
 def get_r2(da: xr.DataArray, reference: xr.DataArray) -> float:
-    """Compute the R2 value of the target compared to the reference."""
+    """Compute the R2 value of the data compared to the reference over years,
+    ignoring NaN values (e.g. gap years filled in by reindexing).
+    """
     ref_data = reference.sel(year=da.year)
-    SS_ref = np.sum((ref_data.values - np.mean(ref_data.values)) ** 2)
-    SS_pred = np.sum((da - ref_data).values ** 2)
+    valid = ~(np.isnan(da.values) | np.isnan(ref_data.values))
+    ref_valid = ref_data.values[valid]
+    pred_valid = da.values[valid]
+    SS_ref = np.sum((ref_valid - np.mean(ref_valid)) ** 2)
+    SS_pred = np.sum((pred_valid - ref_valid) ** 2)
     return float(1 - SS_pred / SS_ref)
 
 
