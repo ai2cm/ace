@@ -11,7 +11,7 @@ BEAKER_WORKSPACE=${BEAKER_WORKSPACE:-ai2/ace}
 BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/titan ai2/jupiter ai2/ceres"}
 BEAKER_PRIORITY=${BEAKER_PRIORITY:-high}
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=2
+N_GPUS=4
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
