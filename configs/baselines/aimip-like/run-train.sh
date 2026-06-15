@@ -73,11 +73,15 @@ run_training() {
 # with the 10year_insample + long_46year_constant_co2 eval loops), changed
 # only by: max_epochs 60 -> 120, the swept knob(s), and seed.
 #
-# Grid (11 runs, 1 GPU each, embed_dim 512, ~120 epochs):
+# global_mean_co2 is in next_step_forcing_names (prescribed forcing, not
+# prognostic) for every config below.
+#
+# Grid (12 runs, 1 GPU each, ~120 epochs; embed_dim 512 unless noted):
 #   baseline (fg1, sr1.0):      seeds 0, 1, 2
 #   spectral_ratio sweep:       sr 0.50, sr 0.25            (seed 0)
 #   filter_num_groups sweep:    fg 4, fg 8, fg 16           (seed 0)
 #   intersection:               fg8xsr0.25, fg8xsr0.50, fg4xsr0.25 (seed 0)
+#   large-model + deep spectral cut: embed_dim 1024, sr 0.125 (seed 0)
 # Select on validation skill; accept if inference is not significantly worse.
 # =============================================================================
 
@@ -99,3 +103,6 @@ run_training "train-4deg-daily-v1-era5-only-fg16-residual.yaml" "train-4deg-dail
 run_training "train-4deg-daily-v1-era5-only-fg8-sr0p25-residual.yaml" "train-4deg-daily-v1-era5-only-fg8-sr0p25-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
 run_training "train-4deg-daily-v1-era5-only-fg8-sr0p50-residual.yaml" "train-4deg-daily-v1-era5-only-fg8-sr0p50-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
 run_training "train-4deg-daily-v1-era5-only-fg4-sr0p25-residual.yaml" "train-4deg-daily-v1-era5-only-fg4-sr0p25-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# --- Wave 5: embed_dim 1024 + spectral_ratio 0.125 (seed 0) (Jupiter+Titan, high) ---
+run_training "train-4deg-daily-v1-era5-only-n1024-sr0p125-residual.yaml" "train-4deg-daily-v1-era5-only-n1024-sr0p125-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
