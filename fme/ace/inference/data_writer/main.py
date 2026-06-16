@@ -39,6 +39,11 @@ class DataWriterConfig:
             containing the predictions and target values.
         save_monthly_files: Whether to enable writing of netCDF files
             containing the monthly predictions and target values.
+        save_correction_files: Whether to enable writing of a netCDF file
+            (``autoregressive_corrections.nc``) containing the denormalized
+            correction time series (``output - uncorrected``, in physical units)
+            for the corrector-modified variables. Empty when the stepper has no
+            corrector. Respects ``names`` and ``time_coarsen``.
         names: Names of variables to save in the prediction and monthly
             netCDF files.
         time_coarsen: Configuration for time coarsening of written outputs to the
@@ -49,13 +54,20 @@ class DataWriterConfig:
 
     save_prediction_files: bool = True
     save_monthly_files: bool = True
+    save_correction_files: bool = False
     names: Sequence[str] | None = None
     time_coarsen: TimeCoarsenConfig | None = None
     files: list[FileWriterConfig] | None = None
 
     def __post_init__(self):
         if (
-            not any([self.save_prediction_files, self.save_monthly_files])
+            not any(
+                [
+                    self.save_prediction_files,
+                    self.save_monthly_files,
+                    self.save_correction_files,
+                ]
+            )
             and self.names is not None
         ):
             warnings.warn(
@@ -94,6 +106,7 @@ class DataWriterConfig:
             coords=coords,
             enable_prediction_netcdfs=self.save_prediction_files,
             enable_monthly_netcdfs=self.save_monthly_files,
+            enable_correction_netcdfs=self.save_correction_files,
             save_names=self.names,
             time_coarsen=self.time_coarsen,
             dataset_metadata=dataset_metadata,
@@ -139,6 +152,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
         enable_monthly_netcdfs: bool,
         save_names: Sequence[str] | None,
         dataset_metadata: DatasetMetadata,
+        enable_correction_netcdfs: bool = False,
         time_coarsen: TimeCoarsenConfig | None = None,
         files: list[FileWriterConfig] | None = None,
     ):
@@ -158,6 +172,8 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
             save_names: Names of variables to save in the prediction
                 and monthly netCDF files.
             dataset_metadata: Metadata for the dataset.
+            enable_correction_netcdfs: Whether to enable writing of a netCDF file
+                containing the denormalized correction time series.
             time_coarsen: Configuration for time coarsening of written outputs.
             files: Configurations for individual data writers.
 
@@ -172,6 +188,23 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
             if time_coarsen is not None:
                 return time_coarsen.build_paired(data_writer)
             return data_writer
+
+        # The correction series is single-source (not target/prediction paired),
+        # so it uses the unpaired RawDataWriter and time-coarsen wrapper.
+        self._correction_writer: TimeCoarsen | RawDataWriter | None = None
+        if enable_correction_netcdfs:
+            correction_writer: TimeCoarsen | RawDataWriter = RawDataWriter(
+                path=path,
+                label="autoregressive_corrections",
+                initial_condition_times=initial_condition_times,
+                save_names=save_names,
+                variable_metadata=variable_metadata,
+                coords=coords,
+                dataset_metadata=dataset_metadata,
+            )
+            if time_coarsen is not None:
+                correction_writer = time_coarsen.build(correction_writer)
+            self._correction_writer = correction_writer
 
         if enable_prediction_netcdfs:
             self._writers.append(
@@ -245,6 +278,15 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                 prediction=dict(batch.prediction),
                 batch_time=batch.time,
             )
+        if self._correction_writer is not None and batch.uncorrected:
+            correction = {
+                name: batch.prediction[name] - uncorrected
+                for name, uncorrected in batch.uncorrected.items()
+            }
+            self._correction_writer.append_batch(
+                data=correction,
+                batch_time=batch.time,
+            )
 
     def flush(self):
         """
@@ -252,10 +294,14 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
         """
         for writer in self._writers:
             writer.flush()
+        if self._correction_writer is not None:
+            self._correction_writer.flush()
 
     def finalize(self):
         for writer in self._writers:
             writer.finalize()
+        if self._correction_writer is not None:
+            self._correction_writer.finalize()
 
 
 def _write(

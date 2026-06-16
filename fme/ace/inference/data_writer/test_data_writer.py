@@ -688,6 +688,152 @@ class TestDataWriter:
                 np.testing.assert_equal(ds.time.values, expected_time)
 
 
+def test_data_writer_config_save_correction_files_default_off():
+    assert DataWriterConfig().save_correction_files is False
+
+
+def test_data_writer_config_save_names_allows_correction_only():
+    # names with only correction files enabled should not warn.
+    DataWriterConfig(
+        names=["temp"],
+        save_prediction_files=False,
+        save_monthly_files=False,
+        save_correction_files=True,
+    )
+
+
+@pytest.mark.parametrize("coarsen_factor", [None, 2])
+def test_paired_writer_saves_correction_files(tmp_path, coarsen_factor):
+    calendar = "julian"
+    n_ic = 2
+    n_time = 4
+    start_time = (2020, 1, 1, 0, 0, 0)
+    initial_condition_times = get_initial_condition_times(start_time, calendar, n_ic)
+    coords = {"lat": np.arange(4), "lon": np.arange(5)}
+    shape = (n_ic, n_time, 4, 5)
+    prediction = {"temp": torch.rand(shape), "pressure": torch.rand(shape)}
+    reference = {"temp": torch.rand(shape), "pressure": torch.rand(shape)}
+    # Only "temp" is corrector-modified.
+    uncorrected = {"temp": torch.rand(shape)}
+    expected_correction = (prediction["temp"] - uncorrected["temp"]).numpy()
+
+    batch_time = xr.concat(
+        [
+            xr.DataArray(
+                xr.date_range(
+                    CALENDAR_CFTIME[calendar](2020, 1, 1, 0, 0, 0),
+                    periods=n_time,
+                    freq="6h",
+                    calendar=calendar,
+                    use_cftime=True,
+                ).values,
+                dims="time",
+            )
+            for _ in range(n_ic)
+        ],
+        dim="sample",
+    )
+    paired = PairedData(
+        prediction=prediction,
+        reference=reference,
+        time=batch_time,
+        uncorrected=uncorrected,
+        labels=BatchLabels.new_from_set(set(), n_samples=n_ic, device=get_device()),
+    )
+
+    writer = PairedDataWriter(
+        str(tmp_path),
+        initial_condition_times=initial_condition_times,
+        n_timesteps=n_time,
+        timestep=TIMESTEP,
+        variable_metadata={"temp": VariableMetadata(units="K", long_name="Temp")},
+        coords=coords,
+        enable_prediction_netcdfs=False,
+        enable_monthly_netcdfs=False,
+        enable_correction_netcdfs=True,
+        save_names=None,
+        dataset_metadata=DatasetMetadata(),
+        time_coarsen=(
+            None
+            if coarsen_factor is None
+            else TimeCoarsenConfig(coarsen_factor=coarsen_factor)
+        ),
+    )
+    writer.append_batch(batch=paired)
+    writer.finalize()
+
+    with xr.open_dataset(
+        tmp_path / "autoregressive_corrections.nc", decode_timedelta=False
+    ) as ds:
+        # Only the corrector-modified variable is written.
+        assert "temp" in ds
+        assert "pressure" not in ds
+        if coarsen_factor is None:
+            np.testing.assert_allclose(
+                ds["temp"].values, expected_correction, rtol=1e-5
+            )
+        else:
+            expected_coarse = expected_correction.reshape(
+                n_ic, n_time // coarsen_factor, -1, 4, 5
+            ).mean(axis=2)
+            np.testing.assert_allclose(ds["temp"].values, expected_coarse, rtol=1e-5)
+        # physical-unit metadata is preserved.
+        assert ds["temp"].attrs["units"] == "K"
+
+
+def test_paired_writer_correction_file_empty_without_corrector(tmp_path):
+    calendar = "julian"
+    n_ic, n_time = 2, 3
+    initial_condition_times = get_initial_condition_times(
+        (2020, 1, 1, 0, 0, 0), calendar, n_ic
+    )
+    shape = (n_ic, n_time, 4, 5)
+    prediction = {"temp": torch.rand(shape)}
+    batch_time = xr.concat(
+        [
+            xr.DataArray(
+                xr.date_range(
+                    CALENDAR_CFTIME[calendar](2020, 1, 1, 0, 0, 0),
+                    periods=n_time,
+                    freq="6h",
+                    calendar=calendar,
+                    use_cftime=True,
+                ).values,
+                dims="time",
+            )
+            for _ in range(n_ic)
+        ],
+        dim="sample",
+    )
+    paired = PairedData(
+        prediction=prediction,
+        reference=prediction,
+        time=batch_time,
+        uncorrected={},  # no corrector ran
+        labels=BatchLabels.new_from_set(set(), n_samples=n_ic, device=get_device()),
+    )
+    writer = PairedDataWriter(
+        str(tmp_path),
+        initial_condition_times=initial_condition_times,
+        n_timesteps=n_time,
+        timestep=TIMESTEP,
+        variable_metadata={},
+        coords={"lat": np.arange(4), "lon": np.arange(5)},
+        enable_prediction_netcdfs=False,
+        enable_monthly_netcdfs=False,
+        enable_correction_netcdfs=True,
+        save_names=None,
+        dataset_metadata=DatasetMetadata(),
+    )
+    writer.append_batch(batch=paired)
+    writer.finalize()
+    dataset = Dataset(tmp_path / "autoregressive_corrections.nc", "r")
+    try:
+        assert "temp" not in dataset.variables
+    finally:
+        dataset.close()
+
+
 def test_data_writer_validate_filenames_duplicate():
     config1 = FileWriterConfig(
         label="region1",
