@@ -58,7 +58,7 @@ import signal
 import sys
 import time
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Hashable, Mapping, Sequence
 from typing import Any, ClassVar, Generic, Protocol, TypeVar
 
 import torch
@@ -73,7 +73,12 @@ from fme.core.generics.aggregator import (
     InferenceSummary,
 )
 from fme.core.generics.data import GriddedDataABC, InferenceDataABC
-from fme.core.generics.inference import run_inference
+from fme.core.generics.inference import (
+    BatchedPredictor,
+    ConcurrentInferenceEntry,
+    run_concurrent_inference,
+    run_inference,
+)
 from fme.core.generics.lr_tuning import (
     LRTuningConfig,
     ValidateStepper,
@@ -876,6 +881,10 @@ class InferenceTask(Generic[PS, FD, SD]):
         epoch_set: Epochs on which this task should run.
         weight: Contribution weight for the combined checkpoint-selection error.
             Zero means the task runs but does not contribute to the metric.
+        concurrent_group: Tasks sharing this key are eligible to run through a
+            single batched forward pass per step. ``None`` disables concurrent
+            batching for this task. Ignored when no ``build_batched_predictor``
+            is supplied to ``build_inference_callback``.
     """
 
     name: str
@@ -883,14 +892,22 @@ class InferenceTask(Generic[PS, FD, SD]):
     aggregator_factory: Callable[[], InferenceAggregatorABC[PS, SD]]
     epoch_set: frozenset[int]
     weight: float = 0.0
+    concurrent_group: Hashable | None = None
 
 
 def build_inference_callback(
     tasks: Sequence[InferenceTask[PS, FD, SD]],
     inference_epochs: Sequence[int],
     stepper: TrainStepperABC[PS, BD, FD, SD, TO],
+    build_batched_predictor: (Callable[[], BatchedPredictor[PS, FD, SD]] | None) = None,
 ) -> InferenceCallback:
-    """Build an ``InferenceCallback`` shared between ACE and coupled training."""
+    """Build an ``InferenceCallback`` shared between ACE and coupled training.
+
+    When ``build_batched_predictor`` is supplied, tasks that share a non-None
+    ``concurrent_group`` are run together through a single ``BatchedPredictor``
+    so each forward pass covers all of them. Tasks with ``concurrent_group=None``
+    or unique groups fall back to the sequential ``inference_one_epoch`` path.
+    """
     inference_epochs_set = set(inference_epochs)
 
     def inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
@@ -900,18 +917,44 @@ def build_inference_callback(
         if not active_tasks:
             return {}, None
 
+        groups: dict[Hashable, list[InferenceTask[PS, FD, SD]]] = {}
+        solo_tasks: list[InferenceTask[PS, FD, SD]] = []
+        if build_batched_predictor is None:
+            solo_tasks = list(active_tasks)
+        else:
+            for task in active_tasks:
+                if task.concurrent_group is None:
+                    solo_tasks.append(task)
+                else:
+                    groups.setdefault(task.concurrent_group, []).append(task)
+
+        summaries: dict[str, InferenceSummary] = {}
+
+        for task in solo_tasks:
+            summaries[task.name] = _run_inference_task_sequential(
+                task=task, stepper=stepper, epoch=epoch
+            )
+        for group_tasks in groups.values():
+            if len(group_tasks) == 1:
+                task = group_tasks[0]
+                summaries[task.name] = _run_inference_task_sequential(
+                    task=task, stepper=stepper, epoch=epoch
+                )
+                continue
+            assert build_batched_predictor is not None  # narrowed by branch above
+            summaries.update(
+                _run_inference_tasks_concurrent(
+                    tasks=group_tasks,
+                    stepper=stepper,
+                    epoch=epoch,
+                    predictor=build_batched_predictor(),
+                )
+            )
+
         all_logs: dict[str, Any] = {}
         weighted_error: float | None = None
         for task in active_tasks:
-            aggregator = task.aggregator_factory()
-            summary = inference_one_epoch(
-                stepper=stepper,
-                validation_context=contextlib.nullcontext,
-                dataset=task.data,
-                aggregator=aggregator,
-                label=task.name,
-                epoch=epoch,
-            )
+            summary = summaries[task.name]
             overlap = all_logs.keys() & summary.logs.keys()
             if overlap:
                 raise RuntimeError(
@@ -932,6 +975,52 @@ def build_inference_callback(
         return all_logs, weighted_error
 
     return inference_callback
+
+
+def _run_inference_task_sequential(
+    task: InferenceTask[PS, FD, SD],
+    stepper: TrainStepperABC[PS, BD, FD, SD, TO],
+    epoch: int,
+) -> InferenceSummary:
+    aggregator = task.aggregator_factory()
+    return inference_one_epoch(
+        stepper=stepper,
+        validation_context=contextlib.nullcontext,
+        dataset=task.data,
+        aggregator=aggregator,
+        label=task.name,
+        epoch=epoch,
+    )
+
+
+def _run_inference_tasks_concurrent(
+    tasks: Sequence[InferenceTask[PS, FD, SD]],
+    stepper: TrainStepperABC[PS, BD, FD, SD, TO],
+    epoch: int,
+    predictor: BatchedPredictor[PS, FD, SD],
+) -> dict[str, InferenceSummary]:
+    aggregators = {t.name: t.aggregator_factory() for t in tasks}
+    entries: list[ConcurrentInferenceEntry[PS, FD, SD]] = [
+        ConcurrentInferenceEntry(
+            name=t.name,
+            data=t.data,
+            aggregator=aggregators[t.name],
+        )
+        for t in tasks
+    ]
+    stepper.set_eval()
+    with torch.no_grad(), GlobalTimer():
+        run_concurrent_inference(predictor, entries)
+    out: dict[str, InferenceSummary] = {}
+    for task in tasks:
+        aggregator = aggregators[task.name]
+        logging.info(f"Starting flush of reduced diagnostics to disk for {task.name!r}")
+        aggregator.flush_diagnostics(subdir=f"epoch_{epoch:04d}")
+        logging.info(f"Getting inline inference aggregator summary for {task.name!r}")
+        summary = aggregator.get_summary()
+        prefixed_logs = {f"{task.name}/{k}": v for k, v in summary.logs.items()}
+        out[task.name] = InferenceSummary(logs=prefixed_logs, loss=summary.loss)
+    return out
 
 
 def _restore_checkpoint(trainer: Trainer, checkpoint_path):
