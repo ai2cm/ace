@@ -57,7 +57,7 @@ from fme.core.step.multi_call import (
     replace_multi_call,
 )
 from fme.core.step.single_module import SingleModuleStepConfig
-from fme.core.step.step import StepABC, StepSelector
+from fme.core.step.step import StepABC, StepOutput, StepSelector
 from fme.core.stepper_state import StepperState
 from fme.core.tensors import (
     add_ensemble_dim,
@@ -487,7 +487,7 @@ def process_ensemble_prediction_generator_list(
 
 
 def process_prediction_generator_list(
-    output_list: list[tuple[TensorDict, StepperState | None]],
+    output_list: list[StepOutput],
     time: xr.DataArray,
     n_ensemble: int,
     labels: BatchLabels | None = None,
@@ -497,10 +497,12 @@ def process_prediction_generator_list(
 
     Attaches the terminal stepper_state (from the last entry in
     ``output_list``) to the returned BatchData so it can propagate to the
-    next ``Stepper.predict`` call.
+    next ``Stepper.predict`` call. The per-step ``uncorrected`` shadows are not
+    stacked here; ``Stepper.predict`` attaches the uncorrected series to the
+    final returned prediction after time-windowing.
     """
-    output_dicts = [item[0] for item in output_list]
-    terminal_state = output_list[-1][1] if output_list else None
+    output_dicts = [step_output.output for step_output in output_list]
+    terminal_state = output_list[-1].stepper_state if output_list else None
     output_timeseries = stack_list_of_tensor_dicts(output_dicts, time_dim=1)
     return BatchData.new_on_device(
         data=output_timeseries,
@@ -1074,7 +1076,7 @@ class Stepper:
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> tuple[TensorDict, StepperState | None]:
+    ) -> StepOutput:
         """
         Step the model forward one timestep given input data.
 
@@ -1083,13 +1085,20 @@ class Stepper:
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
-            A tuple ``(output, stepper_state)`` where ``output`` is the
-            denormalized data at the next time step and ``stepper_state`` is
-            the per-sample state to thread into the next call (or ``None``).
+            A ``StepOutput`` carrying the denormalized output at the next
+            timestep, the per-sample ``stepper_state`` to thread into the next
+            call (or ``None``), and the pre-correction values of any
+            corrector-modified variables.
         """
         args = args.apply_input_process_func(self._input_process_func)
-        output, stepper_state = self._step_obj.step(args=args, wrapper=wrapper)
-        return self._output_process_func(output), stepper_state
+        step_output = self._step_obj.step(args=args, wrapper=wrapper)
+        # The output process func (e.g. spatial masking) is name-preserving and
+        # applied per-variable, so it is safe to apply to the uncorrected subset.
+        return StepOutput(
+            output=self._output_process_func(step_output.output),
+            stepper_state=step_output.stepper_state,
+            uncorrected=self._output_process_func(step_output.uncorrected),
+        )
 
     def get_prediction_generator(
         self,
@@ -1097,7 +1106,7 @@ class Stepper:
         forcing_data: BatchData,
         n_forward_steps: int,
         optimizer: OptimizationABC,
-    ) -> Generator[tuple[TensorDict, StepperState | None], None, None]:
+    ) -> Generator[StepOutput, None, None]:
         """
         Predict multiple steps forward given initial condition and forcing data.
 
@@ -1114,7 +1123,7 @@ class Stepper:
             optimizer: The optimizer to use for updating the module.
 
         Returns:
-            Generator yielding (output, stepper_state) tuples at each timestep.
+            Generator yielding a ``StepOutput`` at each timestep.
         """
         ic_batch_data = initial_condition.as_batch_data()
         if ic_batch_data.labels != forcing_data.labels:
@@ -1149,7 +1158,7 @@ class Stepper:
         labels: BatchLabels | None,
         data_mask: TensorMapping | None = None,
         stepper_state: StepperState | None = None,
-    ) -> Generator[tuple[TensorDict, StepperState | None], None, None]:
+    ) -> Generator[StepOutput, None, None]:
         state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
         for step in range(n_forward_steps):
             input_forcing = {
@@ -1170,7 +1179,7 @@ class Stepper:
                 return optimizer.checkpoint(module, step=step)
 
             with optimizer.autocast():
-                state, stepper_state = self.step(
+                step_output = self.step(
                     StepArgs(
                         input=input_data,
                         next_step_input_data=next_step_input_dict,
@@ -1180,8 +1189,10 @@ class Stepper:
                     ),
                     wrapper=checkpoint,
                 )
-            yield state, stepper_state
-            state = optimizer.detach_if_using_gradient_accumulation(state)
+            stepper_state = step_output.stepper_state
+            yield step_output
+            # The rollout always feeds the corrected output forward as state.
+            state = optimizer.detach_if_using_gradient_accumulation(step_output.output)
 
     def predict(
         self,
@@ -1241,6 +1252,13 @@ class Stepper:
                     NullOptimization(),
                 )
             )
+        # The uncorrected shadows are a per-output-timestep diagnostic series
+        # (no initial-condition entry), so we stack them once here and attach to
+        # the final prediction below, after the IC-windowing pipeline runs on
+        # ``data``. Empty dict when no corrector modified any variable.
+        uncorrected = stack_list_of_tensor_dicts(
+            [step_output.uncorrected for step_output in output_list], time_dim=1
+        )
         data = process_prediction_generator_list(
             output_list,
             time=forcing_data.time[:, self.n_ic_timesteps :],
@@ -1266,6 +1284,7 @@ class Stepper:
             labels=data.labels,
             n_ensemble=data.n_ensemble,
             stepper_state=data.stepper_state,
+            uncorrected=uncorrected,
         )
         return data, prognostic_state
 
@@ -1446,6 +1465,15 @@ class Stepper:
     def set_train(self) -> None:
         for module in self.modules:
             module.train()
+
+    def set_epoch(self, epoch: int) -> None:
+        for module in self.modules:
+            for submodule in module.modules():
+                request_reset = getattr(
+                    submodule, "request_latent_global_mean_envelope_reset", None
+                )
+                if callable(request_reset):
+                    request_reset()
 
 
 @dataclasses.dataclass
@@ -1714,7 +1742,7 @@ class TrainStepper(
                 contextlib.nullcontext() if optimize_step else torch.no_grad()
             )
             with grad_context:
-                gen_step, _ = next(output_iterator)
+                gen_step = next(output_iterator).output
                 gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
                 output_list.append(gen_step)
                 target_step = add_ensemble_dim(
@@ -1831,6 +1859,9 @@ class TrainStepper(
     def set_train(self) -> None:
         self._loss_schedule.set_train()
         self._stepper.set_train()
+
+    def set_epoch(self, epoch: int) -> None:
+        self._stepper.set_epoch(epoch)
 
 
 def get_serialized_stepper_vertical_coordinate(

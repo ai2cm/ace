@@ -20,6 +20,7 @@ _METADATA_FIELDS = {
     "labels",
     "data_mask",
     "stepper_state",
+    "uncorrected",
 }
 _NON_METADATA_FIELDS = {"data", "time"}
 
@@ -50,6 +51,10 @@ def assert_metadata_equal(
             dict(b.data_mask) if b.data_mask is not None else None,
         )
     _assert_stepper_state_equal_up_to_device(a.stepper_state, b.stepper_state)
+    _assert_tensor_mapping_equal_up_to_device(
+        dict(a.uncorrected) if a.uncorrected is not None else None,
+        dict(b.uncorrected) if b.uncorrected is not None else None,
+    )
 
 
 def _assert_stepper_state_equal_up_to_device(
@@ -106,7 +111,7 @@ def assert_batchdata_equal_up_to_device(a: BatchData, b: BatchData) -> None:
                     va.tensor.cpu(),
                     vb.tensor.cpu(),
                 )
-        elif field.name == "data_mask":
+        elif field.name in ("data_mask", "uncorrected"):
             _assert_tensor_mapping_equal_up_to_device(va, vb)
         elif field.name == "stepper_state":
             _assert_stepper_state_equal_up_to_device(va, vb)
@@ -137,7 +142,7 @@ def assert_paired_data_equal_up_to_device(a: PairedData, b: PairedData) -> None:
                     va.tensor.cpu(),
                     vb.tensor.cpu(),
                 )
-        elif field.name == "data_mask":
+        elif field.name in ("data_mask", "uncorrected"):
             _assert_tensor_mapping_equal_up_to_device(va, vb)
         else:
             assert va == vb

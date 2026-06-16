@@ -11,6 +11,7 @@ from torch import nn
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.corrector.state import CorrectorState
+from fme.core.corrector.utils import captured_before
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
@@ -34,7 +35,7 @@ from fme.core.step.secondary_decoder import (
     SecondaryDecoder,
     SecondaryDecoderConfig,
 )
-from fme.core.step.step import StepABC, StepConfigABC, StepSelector
+from fme.core.step.step import StepABC, StepConfigABC, StepOutput, StepSelector
 from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -378,7 +379,7 @@ class SingleModuleStep(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> tuple[TensorDict, StepperState | None]:
+    ) -> StepOutput:
         def network_call(input_norm: TensorDict) -> TensorDict:
             if args.data_mask is not None:
                 input_norm = _apply_input_mask(input_norm, args.data_mask)
@@ -511,7 +512,7 @@ def step_with_adjustments(
     global_mean_removal: GlobalMeanRemoval | None = None,
     data_mask: TensorMapping | None = None,
     stepper_state: StepperState | None = None,
-) -> tuple[TensorDict, StepperState | None]:
+) -> StepOutput:
     """
     Step the model forward one timestep given input data.
 
@@ -546,8 +547,10 @@ def step_with_adjustments(
             ``StepperState``. Pass-through unchanged when no corrector is set.
 
     Returns:
-        A tuple ``(output, stepper_state)`` where ``output`` is the
-        denormalized data at the next time step.
+        A ``StepOutput`` whose ``output`` is the denormalized data at the next
+        time step, ``stepper_state`` is the (possibly updated) per-sample state,
+        and ``uncorrected`` holds the detached pre-correction values of any
+        corrector-modified variables (empty when no corrector ran).
     """
     if prescribed_prognostic_names is None:
         prescribed_prognostic_names = []
@@ -570,13 +573,23 @@ def step_with_adjustments(
     if global_mean_removal is not None:
         assert gmr_state is not None
         output = global_mean_removal.inverse_transform(output, gmr_state)
+    uncorrected: TensorDict = {}
     if corrector is not None:
         corrector_state: CorrectorState | None = (
             stepper_state.corrector_state if stepper_state is not None else None
         )
+        pre_correction = output
         output, corrector_state = corrector(
             input, output, next_step_input_data, corrector_state
         )
+        # Tap the corrector boundary: capture the pre-correction values of
+        # exactly the variables it modified (ocean and prescribed-prognostic
+        # adjustments run after and are intentionally excluded). Detached
+        # unconditionally here: unused on the train path, so this avoids
+        # retaining the autograd graph. The correction is output - uncorrected.
+        uncorrected = {
+            k: v.detach() for k, v in captured_before(pre_correction, output).items()
+        }
         if corrector_state is not None:
             stepper_state = StepperState(corrector_state=corrector_state)
     if ocean is not None:
@@ -588,4 +601,6 @@ def step_with_adjustments(
             raise ValueError(
                 f"prescribed_prognostic_name '{name}' not in next_step_input_data"
             )
-    return output, stepper_state
+    return StepOutput(
+        output=output, stepper_state=stepper_state, uncorrected=uncorrected
+    )

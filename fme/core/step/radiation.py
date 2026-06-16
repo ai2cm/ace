@@ -20,8 +20,7 @@ from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.single_module import step_with_adjustments
-from fme.core.step.step import StepABC, StepConfigABC, StepSelector
-from fme.core.stepper_state import StepperState
+from fme.core.step.step import StepABC, StepConfigABC, StepOutput, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -352,7 +351,7 @@ class SeparateRadiationStep(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> tuple[TensorDict, StepperState | None]:
+    ) -> StepOutput:
         def network_calls(input_norm: TensorDict) -> TensorDict:
             radiation_input_tensor = self.radiation_in_packer.pack(
                 input_norm, axis=self.CHANNEL_DIM

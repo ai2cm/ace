@@ -11,10 +11,9 @@ from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinate
 from fme.core.dataset_info import DatasetInfo
 from fme.core.ocean import OceanConfig
 from fme.core.step.args import StepArgs
-from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorDict, TensorMapping
 
-from .step import StepABC, StepConfigABC, StepSelector
+from .step import StepABC, StepConfigABC, StepOutput, StepSelector
 
 
 class MockStep(StepABC):
@@ -63,7 +62,7 @@ class MockStep(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> tuple[TensorDict, StepperState | None]:
+    ) -> StepOutput:
         raise NotImplementedError()
 
     def get_state(self):

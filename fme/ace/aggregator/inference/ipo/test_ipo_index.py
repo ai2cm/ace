@@ -174,11 +174,8 @@ class TestIPORegionalAccumulator:
 
 
 class TestPairedIPOIndexAggregator:
-    def test_get_logs_returns_expected_keys(
-        self, very_fast_only: bool, monkeypatch: pytest.MonkeyPatch
-    ):
-        if very_fast_only:
-            pytest.skip("Skipping non-fast tests")
+    @pytest.mark.medium_duration
+    def test_get_logs_returns_expected_keys(self, monkeypatch: pytest.MonkeyPatch):
         """Test that get_logs returns the expected metric keys for long runs."""
         # Patch the minimum-length threshold so the "long run" behavior can be
         # exercised with far less data than the production 80-year minimum.
@@ -235,11 +232,8 @@ class TestPairedIPOIndexAggregator:
         assert any("ipo_tpi_power_spectrum" in k for k in logs)
         assert not any("ipo_tpi_std_ratio" in k for k in logs)
 
-    def test_get_logs_empty_for_short_rollout(
-        self, very_fast_only: bool, monkeypatch: pytest.MonkeyPatch
-    ):
-        if very_fast_only:
-            pytest.skip("Skipping non-fast tests")
+    @pytest.mark.medium_duration
+    def test_get_logs_empty_for_short_rollout(self, monkeypatch: pytest.MonkeyPatch):
         """Rollouts shorter than the minimum should not report IPO metrics."""
         # Patch the minimum-length threshold so the "short run" behavior can be
         # exercised with far less data than the production 80-year minimum.

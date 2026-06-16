@@ -36,6 +36,7 @@ from fme.core.step.multi_call import MultiCallConfig, MultiCallStepConfig
 from fme.core.step.secondary_decoder import SecondaryDecoderConfig
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
+from fme.core.testing import trivial_network_and_loss_normalization
 from fme.core.typing_ import TensorDict
 
 DEFAULT_IMG_SHAPE = (45, 90)
@@ -48,12 +49,7 @@ def get_network_and_loss_normalization_config(
     dir: pathlib.Path | None = None,
 ) -> NetworkAndLossNormalizationConfig:
     if dir is None:
-        return NetworkAndLossNormalizationConfig(
-            network=NormalizationConfig(
-                means={name: 0.0 for name in names},
-                stds={name: 1.0 for name in names},
-            ),
-        )
+        return trivial_network_and_loss_normalization(names)
     else:
         return NetworkAndLossNormalizationConfig(
             network=NormalizationConfig(
@@ -456,12 +452,12 @@ def test_step_regression(
     input_data = dist.scatter_spatial(input_data, img_shape)
     next_step_input_data = dist.scatter_spatial(next_step_input_data, img_shape)
 
-    output, _ = step.step(
+    output = step.step(
         args=StepArgs(
             input=input_data, next_step_input_data=next_step_input_data, labels=labels
         ),
         wrapper=lambda x: x,
-    )
+    ).output
 
     # Gather local outputs back to global for comparison
     output = dist.gather_spatial(output, img_shape)
