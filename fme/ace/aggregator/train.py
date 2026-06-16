@@ -112,6 +112,7 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
                 include_grad_mag_percent_diff=False,
             )
         self._ensemble_aggregator: _EnsembleAggregator | None = None
+        self._n_ensemble_batches = 0
         if config.ensemble_metrics:
             self._ensemble_aggregator = _EnsembleAggregator(
                 gridded_operations=operations,
@@ -132,11 +133,12 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
         ):
             self._per_channel_losses.record(batch.per_channel_losses)
 
-        if self._ensemble_aggregator is not None:
+        if self._ensemble_aggregator is not None and batch.n_ensemble > 1:
             self._ensemble_aggregator.record_batch(
                 target_data=batch.target_data,
                 gen_data=batch.gen_data,
             )
+            self._n_ensemble_batches += 1
 
         folded_gen_data, n_ensemble = fold_ensemble_dim(batch.gen_data)
         folded_target_data = fold_sized_ensemble_dim(batch.target_data, n_ensemble)
@@ -154,7 +156,7 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
                 logs.update(
                     {f"{label}/{k}": v for k, v in aggregator.get_logs(name).items()}
                 )
-            if self._ensemble_aggregator is not None:
+            if self._ensemble_aggregator is not None and self._n_ensemble_batches > 0:
                 logs.update(
                     {
                         f"{label}/{k}": v
