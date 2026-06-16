@@ -287,28 +287,56 @@ def get_train_dataset(
     into a short-horizon target dataset and a long-horizon forcing dataset
     that are merged via TimePaddedMergedDataset.
     """
-    ocean: torch.utils.data.Dataset
-    ocean, ocean_properties = config.ocean.build(
-        requirements.ocean_requirements.names,
-        requirements.ocean_requirements.n_timesteps_schedule,
+    ocean_properties = None
+    ocean = None
+    if config.ocean is not None:
+        ocean: torch.utils.data.Dataset
+        ocean, ocean_properties = config.ocean.build(
+            requirements.ocean_requirements.names,
+            requirements.ocean_requirements.n_timesteps_schedule,
+        )
+    atmosphere_properties = None
+    atmosphere = None
+    if config.atmosphere is not None:
+        atmos_target, atmos_target_properties = config.atmosphere.build(
+            requirements.atmosphere_target_requirements.names,
+            requirements.atmosphere_target_requirements.n_timesteps_schedule,
+        )
+        atmos_forcing, atmos_forcing_properties = config.atmosphere.build(
+            requirements.atmosphere_forcing_requirements.names,
+            requirements.atmosphere_forcing_requirements.n_timesteps_schedule,
+        )
+        # canonical = the long (forcing) horizon, since it provides the time
+        # coordinate that downstream code uses
+        atmosphere = TimePaddedMergedDataset([atmos_forcing, atmos_target])
+        atmosphere_properties = atmos_forcing_properties.copy()
+        atmosphere_properties.update_merged_dataset(atmos_target_properties)
+    ice_properties = None
+    ice = None
+    if config.ice is not None:
+        ice_target, ice_target_properties = config.ice.build(
+            requirements.ice_target_requirements.names,
+            requirements.ice_target_requirements.n_timesteps_schedule,
+        )
+        ice_forcing, ice_forcing_properties = config.ice.build(
+            requirements.ice_forcing_requirements.names,
+            requirements.ice_forcing_requirements.n_timesteps_schedule,
+        )
+        # canonical = the long (forcing) horizon, since it provides the time
+        # coordinate that downstream code uses
+        ice = TimePaddedMergedDataset([ice_forcing, ice_target])
+        ice_properties = ice_forcing_properties.copy()
+        ice_properties.update_merged_dataset(ice_target_properties)
+    
+    properties = CoupledDatasetProperties(
+        ocean=ocean_properties,
+        ice=ice_properties,
+        atmosphere=atmosphere_properties
     )
-    atmos_target, atmos_target_properties = config.atmosphere.build(
-        requirements.atmosphere_target_requirements.names,
-        requirements.atmosphere_target_requirements.n_timesteps_schedule,
-    )
-    atmos_forcing, atmos_forcing_properties = config.atmosphere.build(
-        requirements.atmosphere_forcing_requirements.names,
-        requirements.atmosphere_forcing_requirements.n_timesteps_schedule,
-    )
-    # canonical = the long (forcing) horizon, since it provides the time
-    # coordinate that downstream code uses
-    atmosphere = TimePaddedMergedDataset([atmos_forcing, atmos_target])
-    atmosphere_properties = atmos_forcing_properties.copy()
-    atmosphere_properties.update_merged_dataset(atmos_target_properties)
-    properties = CoupledDatasetProperties(ocean_properties, atmosphere_properties)
     dataset = CoupledDataset(
         ocean=ocean,
         atmosphere=atmosphere,
+        ice=ice,
         properties=properties,
         n_steps_fast=requirements.n_steps_fast,
     )

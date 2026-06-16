@@ -1902,7 +1902,7 @@ class CoupledStepper:
                 )
         for name, tensor in forcings_from_ice.items():
             # set ice invalid points to 0 based on the ice masking
-            mask = self._ice_mask_provider.get_mask_tensor_for(name)
+            mask = self._ice_spatial_mask_provider.get_mask_tensor_for(name)
             if mask is not None:
                 mask = mask.expand(tensor.shape)
                 forcings_from_ice[name] = tensor.where(mask != 0, 0)
@@ -2363,28 +2363,29 @@ class CoupledStepper:
             )
             ice_steps = []
 
-            # predict and yield ice steps
-            for i_inner, ice_step in enumerate(ice_generator):
+             # predict and yield ice steps
+            for i_inner in range(self.n_inner_steps):
+                ice_step_num = i_outer * self.n_inner_steps + i_inner
+                ice_step, _ = next(ice_generator)
                 yield ComponentStepPrediction(
                     realm="ice",
                     data=ice_step,
-                    step=(i_outer * self.n_inner_steps + i_inner),
+                    step=ice_step_num,
                 )
                 ice_step = optimizer.detach_if_using_gradient_accumulation(ice_step)
                 ice_steps.append(ice_step)
 
-            ocean_window = forcing_data.ocean_data.select_time_slice(
-                slice(i_outer, i_outer + self.n_ic_timesteps + 1)
-            )
             ice_gen = stack_list_of_tensor_dicts(
                 ice_steps, self.ice.TIME_DIM
             )
-
             ice_data_forcings = ice_window.select_time_slice(
                 time_slice=slice(
                     self.ice.n_ic_timesteps,
                     self.n_inner_steps + self.ice.n_ic_timesteps,
                 )
+            )
+            ocean_window = forcing_data.ocean_data.select_time_slice(
+                slice(i_outer, i_outer + self.n_ic_timesteps + 1)
             )
             ocean_forcings = BatchData(
                 data=self._get_ocean_forcings(
@@ -2396,7 +2397,7 @@ class CoupledStepper:
                 labels=ocean_window.labels,
             )
             # predict and yield a single ocean step
-            ocean_step = next(
+            ocean_step, _ = next(
                 iter(
                     self.ocean.get_prediction_generator(
                         ocean_ic_state,
@@ -2413,28 +2414,25 @@ class CoupledStepper:
             )
 
             # prepare ic states for next coupled step
+            ice_ic_data = {
+                k: v.unsqueeze(self.ice.TIME_DIM)
+                for k, v in ice_steps[-1].items()
+            }
             ice_ic_state = PrognosticState(
                 BatchData(
-                    data=optimizer.detach_if_using_gradient_accumulation(
-                        {
-                            k: v.unsqueeze(self.ice.TIME_DIM)
-                            for k, v in ice_steps[-1].items()
-                        }
-                    ),
+                    data=optimizer.detach_if_using_gradient_accumulation(ice_ic_data),
                     time=ice_window.time.isel(
                         time=slice(-self.ice.n_ic_timesteps, None)
                     ),
                     labels=ice_window.labels,
                 )
             )
+            ocean_ic_data = {
+                k: v.unsqueeze(self.ocean.TIME_DIM) for k, v in ocean_step.items()
+            }
             ocean_ic_state = PrognosticState(
                 BatchData(
-                    data=optimizer.detach_if_using_gradient_accumulation(
-                        {
-                            k: v.unsqueeze(self.ocean.TIME_DIM)
-                            for k, v in ocean_step.items()
-                        }
-                    ),
+                    data=optimizer.detach_if_using_gradient_accumulation(ocean_ic_data),
                     time=ocean_window.time.isel(time=slice(-self.n_ic_timesteps, None)),
                     labels=ocean_window.labels,
                 )
@@ -2483,13 +2481,13 @@ class CoupledStepper:
             atmos_forcings = BatchData(
                 data=self._get_atmosphere_forcings(
                     atmos_data=atmos_window.data,
-                    ice_ic=ice_ic_state.as_batch_data().data,
+                    ocean_ic=ocean_ic_state.as_batch_data().data,
                 ),
                 time=atmos_window.time,
                 labels=atmos_window.labels,
             )
-            # prescribe the initial condition TS state  
-            atmos_ic_state = self._prescribe_ic_ts(
+            # prescribe the initial condition SST state
+            atmos_ic_state = self._prescribe_ic_sst(
                 atmos_ic_state,
                 atmos_forcings.select_time_slice(
                     slice(None, self.atmosphere.n_ic_timesteps)
@@ -2504,27 +2502,28 @@ class CoupledStepper:
             atmos_steps = []
 
             # predict and yield atmosphere steps
-            for i_inner, atmos_step in enumerate(atmos_generator):
+            for i_inner in range(self.n_inner_steps):
+                atmos_step_num = i_outer * self.n_inner_steps + i_inner
+                atmos_step, _ = next(atmos_generator)
                 yield ComponentStepPrediction(
                     realm="atmosphere",
                     data=atmos_step,
-                    step=(i_outer * self.n_inner_steps + i_inner),
+                    step=atmos_step_num,
                 )
                 atmos_step = optimizer.detach_if_using_gradient_accumulation(atmos_step)
                 atmos_steps.append(atmos_step)
 
-            ice_window = forcing_data.ice_data.select_time_slice(
-                slice(i_outer, i_outer + self.n_ic_timesteps + 1)
-            )
             atmos_gen = stack_list_of_tensor_dicts(
                 atmos_steps, self.atmosphere.TIME_DIM
             )
-
             atmos_data_forcings = atmos_window.select_time_slice(
                 time_slice=slice(
                     self.atmosphere.n_ic_timesteps,
                     self.n_inner_steps + self.atmosphere.n_ic_timesteps,
                 )
+            )
+            ice_window = forcing_data.ice_data.select_time_slice(
+                slice(i_outer, i_outer + self.n_ic_timesteps + 1)
             )
             ice_forcings = BatchData(
                 data=self._get_ice_forcings(
@@ -2536,7 +2535,7 @@ class CoupledStepper:
                 labels=ice_window.labels,
             )
             # predict and yield a single ocean step
-            ice_step = next(
+            ice_step, _ = next(
                 iter(
                     self.ice.get_prediction_generator(
                         ice_ic_state,
@@ -2553,28 +2552,25 @@ class CoupledStepper:
             )
 
             # prepare ic states for next coupled step
+            atmos_ic_data = {
+                k: v.unsqueeze(self.atmosphere.TIME_DIM)
+                for k, v in atmos_steps[-1].items()
+            }
             atmos_ic_state = PrognosticState(
                 BatchData(
-                    data=optimizer.detach_if_using_gradient_accumulation(
-                        {
-                            k: v.unsqueeze(self.atmosphere.TIME_DIM)
-                            for k, v in atmos_steps[-1].items()
-                        }
-                    ),
+                    data=optimizer.detach_if_using_gradient_accumulation(atmos_ic_data),
                     time=atmos_window.time.isel(
                         time=slice(-self.atmosphere.n_ic_timesteps, None)
                     ),
                     labels=atmos_window.labels,
                 )
             )
+            ice_ic_data = {
+                k: v.unsqueeze(self.ice.TIME_DIM) for k, v in ice_step.items()
+            }
             ice_ic_state = PrognosticState(
                 BatchData(
-                    data=optimizer.detach_if_using_gradient_accumulation(
-                        {
-                            k: v.unsqueeze(self.ice.TIME_DIM)
-                            for k, v in ice_step.items()
-                        }
-                    ),
+                    data=optimizer.detach_if_using_gradient_accumulation(ice_ic_data),
                     time=ice_window.time.isel(time=slice(-self.n_ic_timesteps, None)),
                     labels=ice_window.labels,
                 )
@@ -2694,44 +2690,47 @@ class CoupledStepper:
             ice_steps = []
 
             # predict and yield atmosphere steps
-            for i_inner, atmos_step in enumerate(atmos_generator):
+            for i_inner in range(self.n_inner_steps):
+                atmos_step_num = i_outer * self.n_inner_steps + i_inner
+                atmos_step, _ = next(atmos_generator)
                 yield ComponentStepPrediction(
                     realm="atmosphere",
                     data=atmos_step,
-                    step=(i_outer * self.n_inner_steps + i_inner),
+                    step=atmos_step_num,
                 )
                 atmos_step = optimizer.detach_if_using_gradient_accumulation(atmos_step)
                 atmos_steps.append(atmos_step)
 
+                ice_step_num = i_outer * self.n_inner_steps + i_inner
+                ice_step, _ = next(ice_generator)
                 yield ComponentStepPrediction(
                     realm="ice",
-                    data=ice_generator[i_inner],
-                    step=(i_outer * self.n_inner_steps + i_inner),
+                    data=ice_step,
+                    step=ice_step_num,
                 )
-                ice_step = optimizer.detach_if_using_gradient_accumulation(ice_generator[i_inner])
+                ice_step = optimizer.detach_if_using_gradient_accumulation(ice_step)
                 ice_steps.append(ice_step)
 
-            ocean_window = forcing_data.ocean_data.select_time_slice(
-                slice(i_outer, i_outer + self.n_ic_timesteps + 1)
-            )
             atmos_gen = stack_list_of_tensor_dicts(
                 atmos_steps, self.atmosphere.TIME_DIM
             )
-            ice_gen = stack_list_of_tensor_dicts(
-                ice_steps, self.ice.TIME_DIM
-            )
-
             atmos_data_forcings = atmos_window.select_time_slice(
                 time_slice=slice(
                     self.atmosphere.n_ic_timesteps,
                     self.n_inner_steps + self.atmosphere.n_ic_timesteps,
                 )
             )
+            ice_gen = stack_list_of_tensor_dicts(
+                ice_steps, self.ice.TIME_DIM
+            )
             ice_data_forcings = ice_window.select_time_slice(
                 time_slice=slice(
                     self.ice.n_ic_timesteps,
                     self.n_inner_steps + self.ice.n_ic_timesteps,
                 )
+            )
+            ocean_window = forcing_data.ocean_data.select_time_slice(
+                slice(i_outer, i_outer + self.n_ic_timesteps + 1)
             )
             ocean_forcings = BatchData(
                 data=self._get_ocean_forcings(
@@ -2745,7 +2744,7 @@ class CoupledStepper:
                 labels=ocean_window.labels,
             )
             # predict and yield a single ocean step
-            ocean_step = next(
+            ocean_step, _ = next(
                 iter(
                     self.ocean.get_prediction_generator(
                         ocean_ic_state,
@@ -2762,42 +2761,35 @@ class CoupledStepper:
             )
 
             # prepare ic states for next coupled step
+            atmos_ic_data = {
+                k: v.unsqueeze(self.atmosphere.TIME_DIM)
+                for k, v in atmos_steps[-1].items()
+            }
             atmos_ic_state = PrognosticState(
                 BatchData(
-                    data=optimizer.detach_if_using_gradient_accumulation(
-                        {
-                            k: v.unsqueeze(self.atmosphere.TIME_DIM)
-                            for k, v in atmos_steps[-1].items()
-                        }
-                    ),
+                    data=optimizer.detach_if_using_gradient_accumulation(atmos_ic_data),
                     time=atmos_window.time.isel(
                         time=slice(-self.atmosphere.n_ic_timesteps, None)
                     ),
                     labels=atmos_window.labels,
                 )
             )
+            ice_ic_data = {
+                k: v.unsqueeze(self.ice.TIME_DIM) for k, v in ice_step.items()
+            }
             ice_ic_state = PrognosticState(
                 BatchData(
-                    data=optimizer.detach_if_using_gradient_accumulation(
-                        {
-                            k: v.unsqueeze(self.ice.TIME_DIM)
-                            for k, v in ice_steps[-1].items()
-                        }
-                    ),
-                    time=ice_window.time.isel(
-                        time=slice(-self.ice.n_ic_timesteps, None)
-                    ),
+                    data=optimizer.detach_if_using_gradient_accumulation(ice_ic_data),
+                    time=ice_window.time.isel(time=slice(-self.n_ic_timesteps, None)),
                     labels=ice_window.labels,
                 )
             )
+            ocean_ic_data = {
+                k: v.unsqueeze(self.ocean.TIME_DIM) for k, v in ocean_step.items()
+            }
             ocean_ic_state = PrognosticState(
                 BatchData(
-                    data=optimizer.detach_if_using_gradient_accumulation(
-                        {
-                            k: v.unsqueeze(self.ocean.TIME_DIM)
-                            for k, v in ocean_step.items()
-                        }
-                    ),
+                    data=optimizer.detach_if_using_gradient_accumulation(ocean_ic_data),
                     time=ocean_window.time.isel(time=slice(-self.n_ic_timesteps, None)),
                     labels=ocean_window.labels,
                 )
@@ -3409,32 +3401,129 @@ class CoupledTrainStepperConfig:
                 names and timesteps.
 
         """
-        long_atmos_n = self.n_coupled_steps * stepper_config.n_inner_steps + 1
-        atmos_n_steps_max = self.component_n_steps_max.atmosphere
-        if atmos_n_steps_max is None:
-            short_atmos_n = long_atmos_n
+        if self.atmosphere is None:
+            long_ice_n = self.n_coupled_steps * stepper_config.n_inner_steps + 1
+            ice_n_steps_max = self.component_n_steps_max.ice
+            if ice_n_steps_max is None:
+                short_ice_n = long_ice_n
+            else:
+                # +1 for n_ic_timesteps (asserted to be 1 in CoupledStepper.__init__)
+                short_ice_n = ice_n_steps_max + 1
+            ice_forcing_names = list(stepper_config.ice_forcing_exogenous_names)
+            ice_target_names = list(
+                set(stepper_config.all_names.ice) - set(ice_forcing_names)
+            )
+            return CoupledTrainDataRequirements(
+                ocean_timestep=stepper_config.ocean_timestep,
+                ocean_requirements=DataRequirements(
+                    names=stepper_config.all_names.ocean,
+                    n_timesteps=self.n_coupled_steps + 1,
+                ),
+                ice_timestep=stepper_config.ice_timestep,
+                ice_target_requirements=DataRequirements(
+                    names=ice_target_names, n_timesteps=short_ice_n
+                ),
+                ice_forcing_requirements=DataRequirements(
+                    names=ice_forcing_names, n_timesteps=long_ice_n
+                ),
+            )
+        elif self.ice is None:
+            long_atmos_n = self.n_coupled_steps * stepper_config.n_inner_steps + 1
+            atmos_n_steps_max = self.component_n_steps_max.atmosphere
+            if atmos_n_steps_max is None:
+                short_atmos_n = long_atmos_n
+            else:
+                # +1 for n_ic_timesteps (asserted to be 1 in CoupledStepper.__init__)
+                short_atmos_n = atmos_n_steps_max + 1
+            atmos_forcing_names = list(stepper_config.atmosphere_forcing_exogenous_names)
+            atmos_target_names = list(
+                set(stepper_config.all_names.atmosphere) - set(atmos_forcing_names)
+            )
+            return CoupledTrainDataRequirements(
+                ocean_timestep=stepper_config.ocean_timestep,
+                ocean_requirements=DataRequirements(
+                    names=stepper_config.all_names.ocean,
+                    n_timesteps=self.n_coupled_steps + 1,
+                ),
+                atmosphere_timestep=stepper_config.atmosphere_timestep,
+                atmosphere_target_requirements=DataRequirements(
+                    names=atmos_target_names, n_timesteps=short_atmos_n
+                ),
+                atmosphere_forcing_requirements=DataRequirements(
+                    names=atmos_forcing_names, n_timesteps=long_atmos_n
+                ),
+            )
+        elif self.ocean is None:
+            long_atmos_n = self.n_coupled_steps * stepper_config.n_inner_steps + 1
+            atmos_n_steps_max = self.component_n_steps_max.atmosphere
+            if atmos_n_steps_max is None:
+                short_atmos_n = long_atmos_n
+            else:
+                # +1 for n_ic_timesteps (asserted to be 1 in CoupledStepper.__init__)
+                short_atmos_n = atmos_n_steps_max + 1
+            atmos_forcing_names = list(stepper_config.atmosphere_forcing_exogenous_names)
+            atmos_target_names = list(
+                set(stepper_config.all_names.atmosphere) - set(atmos_forcing_names)
+            )
+            return CoupledTrainDataRequirements(
+                ice_timestep=stepper_config.ice_timestep,
+                ice_requirements=DataRequirements(
+                    names=stepper_config.all_names.ice,
+                    n_timesteps=self.n_coupled_steps + 1,
+                ),
+                atmosphere_timestep=stepper_config.atmosphere_timestep,
+                atmosphere_target_requirements=DataRequirements(
+                    names=atmos_target_names, n_timesteps=short_atmos_n
+                ),
+                atmosphere_forcing_requirements=DataRequirements(
+                    names=atmos_forcing_names, n_timesteps=long_atmos_n
+                ),
+            )
         else:
-            # +1 for n_ic_timesteps (asserted to be 1 in CoupledStepper.__init__)
-            short_atmos_n = atmos_n_steps_max + 1
-        forcing_names = list(stepper_config.atmosphere_forcing_exogenous_names)
-        target_names = list(
-            set(stepper_config.all_names.atmosphere) - set(forcing_names)
-        )
-        return CoupledTrainDataRequirements(
-            ocean_timestep=stepper_config.ocean_timestep,
-            ocean_requirements=DataRequirements(
-                names=stepper_config.all_names.ocean,
-                n_timesteps=self.n_coupled_steps + 1,
-            ),
-            atmosphere_timestep=stepper_config.atmosphere_timestep,
-            atmosphere_target_requirements=DataRequirements(
-                names=target_names, n_timesteps=short_atmos_n
-            ),
-            atmosphere_forcing_requirements=DataRequirements(
-                names=forcing_names, n_timesteps=long_atmos_n
-            ),
-        )
+            long_atmos_n = self.n_coupled_steps * stepper_config.n_inner_steps + 1
+            atmos_n_steps_max = self.component_n_steps_max.atmosphere
+            if atmos_n_steps_max is None:
+                short_atmos_n = long_atmos_n
+            else:
+                # +1 for n_ic_timesteps (asserted to be 1 in CoupledStepper.__init__)
+                short_atmos_n = atmos_n_steps_max + 1
+            atmos_forcing_names = list(stepper_config.atmosphere_forcing_exogenous_names)
+            atmos_target_names = list(
+                set(stepper_config.all_names.atmosphere) - set(atmos_forcing_names)
+            )
+            ice_n_steps_max = self.component_n_steps_max.ice
+            if ice_n_steps_max is None:
+                short_ice_n = long_atmos_n
+            else:
+                # +1 for n_ic_timesteps (asserted to be 1 in CoupledStepper.__init__)
+                short_ice_n = ice_n_steps_max + 1
+            ice_forcing_names = list(stepper_config.ice_forcing_exogenous_names)
+            ice_target_names = list(
+                set(stepper_config.all_names.ice) - set(ice_forcing_names)
+            )
+            return CoupledTrainDataRequirements(
+                ocean_timestep=stepper_config.ocean_timestep,
+                ocean_requirements=DataRequirements(
+                    names=stepper_config.all_names.ocean,
+                    n_timesteps=self.n_coupled_steps + 1,
+                ),
+                atmosphere_timestep=stepper_config.atmosphere_timestep,
+                atmosphere_target_requirements=DataRequirements(
+                    names=atmos_target_names, n_timesteps=short_atmos_n
+                ),
+                atmosphere_forcing_requirements=DataRequirements(
+                    names=atmos_forcing_names, n_timesteps=long_atmos_n
+                ),
+                ice_timestep=stepper_config.ice_timestep,
+                ice_target_requirements=DataRequirements(
+                    names=ice_target_names, n_timesteps=short_ice_n
+                ),
+                ice_forcing_requirements=DataRequirements(
+                    names=ice_forcing_names, n_timesteps=long_atmos_n
+                ),
+            )
 
+        
     def _build_loss(
         self, stepper: CoupledStepper, n_coupled_steps: int
     ) -> CoupledStepperTrainLoss:

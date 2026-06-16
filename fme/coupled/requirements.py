@@ -93,7 +93,7 @@ class CoupledDataRequirements:
             ice_timestep=self.ice_timestep,
         )
 
-        if self.atmosphere is None:
+        if self.atmosphere_timestep is None:
             fast_n_timesteps = (
                 self.ice_requirements.n_timesteps_schedule.get_value(0)
             )
@@ -161,6 +161,7 @@ class CoupledTrainDataRequirements:
     atmosphere_target_requirements: DataRequirements | None = None
     atmosphere_forcing_requirements: DataRequirements | None = None
     ice_timestep: datetime.timedelta | None = None
+    ice_requirements: DataRequirements | None = None
     ice_target_requirements: DataRequirements | None = None
     ice_forcing_requirements: DataRequirements | None = None
 

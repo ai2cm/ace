@@ -102,7 +102,7 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
             ice = DatasetInfo(
                 horizontal_coordinates=self._ice.horizontal_coordinates,
                 vertical_coordinate=self._ice.vertical_coordinate,
-                mask_provider=self._ice.mask_provider,
+                spatial_mask_provider=self._ice.spatial_mask_provider,
                 timestep=self._ice.timestep,
                 variable_metadata=self._properties.variable_metadata,
             )

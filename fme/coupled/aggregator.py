@@ -196,13 +196,13 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
             if batch.atmosphere is not None:
                 self._num_channels_atmos = len(batch.atmosphere.gen_data)
         self._loss += batch.total_metrics["loss"]
-        if "ocean" in self._aggregators:
+        if self._aggregators["ocean"] is not None:
             self._aggregators["ocean"].record_batch(batch.ocean)
             self._loss_ocean += batch.ocean.metrics["loss/ocean"]
-        if "ice" in self._aggregators:
+        if self._aggregators["ice"] is not None:
             self._aggregators["ice"].record_batch(batch.ice)
             self._loss_ice += batch.ice.metrics["loss/ice"]
-        if "atmosphere" in self._aggregators:
+        if self._aggregators["atmosphere"] is not None:
             self._aggregators["atmosphere"].record_batch(batch.atmosphere)
             self._loss_atmos += batch.atmosphere.metrics["loss/atmosphere"]
         self._n_batches += 1
@@ -216,7 +216,7 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
             label: Label to prepend to all log keys.
         """
         prefix = f"{label}/mean_norm/weighted_rmse"
-        if "atmosphere" not in self._aggregators:
+        if self._aggregators["atmosphere"] is None:
             if self._num_channels_ocean is None or self._num_channels_ice is None:
                 raise ValueError("No data recorded.")
             ocean_logs = self._aggregators["ocean"].get_logs(label)
@@ -248,7 +248,7 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
             logs[f"{label}/mean/loss/ice"] = float(
                 self._dist.reduce_mean(loss_ice.detach()).cpu().numpy()
             )
-        elif "ice" not in self._aggregators:
+        elif self._aggregators["ice"] is None:
             if self._num_channels_ocean is None or self._num_channels_atmos is None:
                 raise ValueError("No data recorded.")
             ocean_logs = self._aggregators["ocean"].get_logs(label)
@@ -280,7 +280,7 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
             logs[f"{label}/mean/loss/atmosphere"] = float(
                 self._dist.reduce_mean(loss_atmos.detach()).cpu().numpy()
             )
-        elif "ocean" not in self._aggregators:
+        elif self._aggregators["ocean"] is None:
             if self._num_channels_ice is None or self._num_channels_atmos is None:
                 raise ValueError("No data recorded.")
             ice_logs = self._aggregators["ice"].get_logs(label)
@@ -508,7 +508,7 @@ class InferenceEvaluatorAggregatorConfig:
                 include_nino34=True,
                 n_timesteps=n_timesteps_ocean,
                 timestep=dataset_info.ocean.timestep,
-                log_zonal_mean_images=log_zonal_mean_images,
+                log_zonal_mean_images=self.log_zonal_mean_images,
             )
     
             ocean_agg = build_inference_evaluator_aggregator(
@@ -533,7 +533,7 @@ class InferenceEvaluatorAggregatorConfig:
                 include_nino34=False,
                 n_timesteps=n_timesteps_ice,
                 timestep=dataset_info.ice.timestep,
-                log_zonal_mean_images=log_zonal_mean_images,
+                log_zonal_mean_images=self.log_zonal_mean_images,
             )
 
             ice_agg = build_inference_evaluator_aggregator(

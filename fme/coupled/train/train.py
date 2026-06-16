@@ -166,19 +166,66 @@ def _make_coupled_aggregator_factory(
 ):
     def factory():
         batch = next(iter(data.loader))
-        initial_times = batch.ocean_data.time.isel(time=0)
-        n_timesteps_ocean = entry_config.n_coupled_steps + stepper.ocean.n_ic_timesteps
-        n_timesteps_atmosphere = (
-            entry_config.n_coupled_steps * stepper.n_inner_steps
-            + stepper.atmosphere.n_ic_timesteps
-        )
+        if stepper.atmosphere is None:
+            initial_times = batch.ocean_data.time.isel(time=0)
+            n_timesteps_atmosphere = None
+            n_timesteps_ocean = entry_config.n_coupled_steps + stepper.ocean.n_ic_timesteps
+            n_timesteps_ice = (
+                entry_config.n_coupled_steps * stepper.n_inner_steps
+                + stepper.ice.n_ic_timesteps
+            )
+            ice_norm = stepper.ice.normalizer.normalize
+            ocn_norm = stepper.ocean.normalizer.normalize
+            atmos_norm = None
+        elif stepper.ice is None:
+            initial_times = batch.ocean_data.time.isel(time=0)
+            n_timesteps_ice = None
+            n_timesteps_ocean = entry_config.n_coupled_steps + stepper.ocean.n_ic_timesteps
+            n_timesteps_atmosphere = (
+                entry_config.n_coupled_steps * stepper.n_inner_steps
+                + stepper.atmosphere.n_ic_timesteps
+            )
+            ice_norm = None
+            ocn_norm = stepper.ocean.normalizer.normalize
+            atmos_norm = stepper.atmosphere.normalizer.normalize
+        elif stepper.ocean is None:
+            initial_times = batch.ice_data.time.isel(time=0)
+            n_timesteps_ice = (
+                entry_config.n_coupled_steps * stepper.n_inner_steps
+                + stepper.ice.n_ic_timesteps
+            )
+            n_timesteps_atmosphere = (
+                entry_config.n_coupled_steps * stepper.n_inner_steps
+                + stepper.atmosphere.n_ic_timesteps
+            )
+            n_timesteps_ocean = None
+            ice_norm = stepper.ice.normalizer.normalize
+            ocn_norm = None
+            atmos_norm = stepper.atmosphere.normalizer.normalize
+        else:
+            initial_times = batch.ocean_data.time.isel(time=0)
+            n_timesteps_ocean = entry_config.n_coupled_steps + stepper.ocean.n_ic_timesteps
+            n_timesteps_atmosphere = (
+                entry_config.n_coupled_steps * stepper.n_inner_steps
+                + stepper.atmosphere.n_ic_timesteps
+            )
+            n_timesteps_ice = (
+                entry_config.n_coupled_steps * stepper.n_inner_steps
+                + stepper.ice.n_ic_timesteps
+            )
+            ice_norm = stepper.ice.normalizer.normalize
+            ocn_norm = stepper.ocean.normalizer.normalize
+            atmos_norm = stepper.atmosphere.normalizer.normalize
+
         return entry_config.aggregator.build(
             dataset_info=dataset_info,
             n_timesteps_ocean=n_timesteps_ocean,
             n_timesteps_atmosphere=n_timesteps_atmosphere,
+            n_timesteps_ice=n_timesteps_ice,
             initial_time=initial_times,
-            ocean_normalize=stepper.ocean.normalizer.normalize,
-            atmosphere_normalize=stepper.atmosphere.normalizer.normalize,
+            ocean_normalize=ocn_norm,
+            atmosphere_normalize=atmos_norm,
+            ice_normalize=ice_norm,
             save_diagnostics=save_per_epoch_diagnostics,
             output_dir=os.path.join(output_dir, name),
         )
