@@ -911,7 +911,14 @@ def _average_atmo_chunk(
         ds_atmo = ds_atmo.drop_vars(accum_vars)
         ds_atmo["total_frozen_precipitation_rate"] = frozen_rate
 
-    ds_atmo_6h = ds_atmo.resample(time="6h", closed="right", label="right").mean()
+    # Average consecutive pairs of 3h snapshots → 6h.  coarsen is
+    # preferred over resample because the atmo data is regularly spaced
+    # and coarsen always produces equal-sized groups (resample can create
+    # uneven bins at boundaries).  Label with the first timestamp of
+    # each pair so that the result aligns with ocean times.
+    atmo_times_orig = ds_atmo.time.values
+    ds_atmo_6h = ds_atmo.coarsen(time=2, boundary="trim").mean()
+    ds_atmo_6h = ds_atmo_6h.assign_coords(time=atmo_times_orig[::2])
 
     common_times = sorted(set(ds_atmo_6h.time.values) & set(ocean_times.values))
 
