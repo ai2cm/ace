@@ -28,6 +28,7 @@ from fme.downscaling.models import (
 )
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.noise import LogNormalNoiseDistribution
+from fme.downscaling.test_utils import cell_centered_coordinate
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 
@@ -99,12 +100,6 @@ def make_batch_data(
     return BatchData(data=data, time=time, latlon_coordinates=latlon)
 
 
-def _get_monotonic_coordinate(size: int, stop: float) -> torch.Tensor:
-    bounds = torch.linspace(0, stop, size + 1)
-    coord = (bounds[:-1] + bounds[1:]) / 2
-    return coord
-
-
 def make_paired_batch_data(
     coarse_shape: tuple[int, int],
     fine_shape: tuple[int, int],
@@ -115,10 +110,10 @@ def make_paired_batch_data(
     """
     lat_c, lon_c = coarse_shape
     lat_f, lon_f = fine_shape
-    fine_lat = _get_monotonic_coordinate(lat_f, stop=lat_f)
-    fine_lon = _get_monotonic_coordinate(lon_f, stop=lon_f)
-    coarse_lat = _get_monotonic_coordinate(lat_c, stop=lat_f)
-    coarse_lon = _get_monotonic_coordinate(lon_c, stop=lon_f)
+    fine_lat = cell_centered_coordinate(0.0, lat_f, n=lat_f)
+    fine_lon = cell_centered_coordinate(0.0, lon_f, n=lon_f)
+    coarse_lat = cell_centered_coordinate(0.0, lat_f, n=lat_c)
+    coarse_lon = cell_centered_coordinate(0.0, lon_f, n=lon_c)
     fine = make_batch_data((batch_size, lat_f, lon_f), fine_lat, fine_lon)
     coarse = make_batch_data((batch_size, lat_c, lon_c), coarse_lat, coarse_lon)
     return PairedBatchData(fine=fine, coarse=coarse)
@@ -128,8 +123,8 @@ def make_fine_coords(fine_shape: tuple[int, int]) -> LatLonCoordinates:
     """Create LatLonCoordinates with proper monotonic coordinates for given shape."""
     lat_size, lon_size = fine_shape
     return LatLonCoordinates(
-        lat=_get_monotonic_coordinate(lat_size, stop=lat_size),
-        lon=_get_monotonic_coordinate(lon_size, stop=lon_size),
+        lat=cell_centered_coordinate(0.0, lat_size, n=lat_size),
+        lon=cell_centered_coordinate(0.0, lon_size, n=lon_size),
     )
 
 
@@ -377,8 +372,8 @@ def test_DiffusionModel_generate_on_batch_no_target():
     batch_size = 2
     n_generated_samples = 2
 
-    coarse_lat = _get_monotonic_coordinate(coarse_shape[0], stop=fine_shape[0])
-    coarse_lon = _get_monotonic_coordinate(coarse_shape[1], stop=fine_shape[1])
+    coarse_lat = cell_centered_coordinate(0.0, fine_shape[0], n=coarse_shape[0])
+    coarse_lon = cell_centered_coordinate(0.0, fine_shape[1], n=coarse_shape[1])
     coarse_batch = make_batch_data((batch_size, *coarse_shape), coarse_lat, coarse_lon)
 
     samples = model.generate_on_batch_no_target(
@@ -419,8 +414,8 @@ def test_DiffusionModel_generate_on_batch_no_target_arbitrary_input_size():
     for alternative_input_shape in [(8, 8), (32, 32)]:
         fine_shape = tuple(dim * downscale_factor for dim in alternative_input_shape)
         alt_y, alt_x = alternative_input_shape
-        coarse_lat = _get_monotonic_coordinate(alt_y, stop=alt_y * downscale_factor)
-        coarse_lon = _get_monotonic_coordinate(alt_x, stop=alt_x * downscale_factor)
+        coarse_lat = cell_centered_coordinate(0.0, alt_y * downscale_factor, n=alt_y)
+        coarse_lon = cell_centered_coordinate(0.0, alt_x * downscale_factor, n=alt_x)
         coarse_batch = make_batch_data(
             (batch_size, *alternative_input_shape), coarse_lat, coarse_lon
         )
@@ -518,8 +513,8 @@ def test_get_fine_coords_for_batch():
     )
 
     # Build a batch covering a spatial patch: middle 4 coarse lats and 8 coarse lons.
-    full_coarse_lat = _get_monotonic_coordinate(coarse_shape[0], stop=fine_shape[0])
-    full_coarse_lon = _get_monotonic_coordinate(coarse_shape[1], stop=fine_shape[1])
+    full_coarse_lat = cell_centered_coordinate(0.0, fine_shape[0], n=coarse_shape[0])
+    full_coarse_lon = cell_centered_coordinate(0.0, fine_shape[1], n=coarse_shape[1])
     patch_coarse_lat = full_coarse_lat[2:6].tolist()  # [5, 7, 9, 11]
     patch_coarse_lon = full_coarse_lon[4:12].tolist()  # [9, 11, ..., 23]
     batch = make_batch_data((2, 4, 8), patch_coarse_lat, patch_coarse_lon)
@@ -530,6 +525,147 @@ def test_get_fine_coords_for_batch():
     expected_lon = model.full_fine_coords.lon[8:24]
     assert torch.allclose(result.lat, expected_lat)
     assert torch.allclose(result.lon, expected_lon)
+
+
+def _make_global_fine_coords_and_static(fine_shape: tuple[int, int]):
+    """Return a global-covering LatLonCoordinates and matching StaticInputs."""
+    global_fine_lon = cell_centered_coordinate(0.0, 360.0, fine_shape[1])
+    global_fine_lat = cell_centered_coordinate(0.0, fine_shape[0], n=fine_shape[0])
+    full_fine_coords = LatLonCoordinates(lat=global_fine_lat, lon=global_fine_lon)
+    static_field = torch.arange(
+        fine_shape[0] * fine_shape[1], dtype=torch.float32
+    ).reshape(*fine_shape)
+    static_inputs = StaticInputs(
+        fields=[StaticInput(static_field)], coords=full_fine_coords
+    )
+    return full_fine_coords, static_inputs
+
+
+def test_with_rolled_lon_no_roll_returns_same():
+    """with_rolled_lon returns the original model when no roll is needed."""
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    static_inputs = make_static_inputs(fine_shape)
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=static_inputs.coords,
+        static_inputs=static_inputs,
+    )
+    coarse_lon = cell_centered_coordinate(0.0, fine_shape[1], n=coarse_shape[1])
+    assert model._is_longitude_rolled is False
+    assert model.with_rolled_lon(coarse_lon) is model
+
+
+def test_with_rolled_lon_shifts_coords_and_shares_weights():
+    """with_rolled_lon: new model with rolled coords, shared network weights."""
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    full_fine_coords, static_inputs = _make_global_fine_coords_and_static(fine_shape)
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=full_fine_coords,
+        static_inputs=static_inputs,
+    )
+
+    coarse_lon = torch.tensor([-10.0, -5.0, 0.0, 5.0], dtype=torch.float32)
+    rolled = model.with_rolled_lon(coarse_lon)
+
+    # The rolled model is flagged inference-only; the original is left unmarked.
+    assert model._is_longitude_rolled is False
+    assert rolled._is_longitude_rolled is True
+
+    # Reconstruction wraps a fresh module around the SAME raw weights.
+    assert rolled.module is not model.module
+    assert next(rolled.module.parameters()) is next(model.module.parameters())
+    assert torch.all(rolled.full_fine_coords.lon[1:] > rolled.full_fine_coords.lon[:-1])
+    assert rolled.full_fine_coords.lon[0].item() < 0
+
+    # Value-level check that coords and static data rolled together, lon-only.
+    # The roll amount is recovered from the coords; the static field encodes its
+    # original flat index, so a coord/data roll mismatch or an accidental lat
+    # roll changes values.
+    orig_lon = model.full_fine_coords.lon
+    rolled_lon = rolled.full_fine_coords.lon
+    roll = int(torch.argmin(torch.abs(orig_lon - rolled_lon[0] % 360.0)).item())
+    assert roll > 0
+    assert torch.allclose(rolled_lon % 360.0, torch.roll(orig_lon, -roll) % 360.0)
+    assert model.static_inputs is not None and rolled.static_inputs is not None
+    assert torch.equal(
+        rolled.static_inputs.fields[0].data,
+        torch.roll(model.static_inputs.fields[0].data, -roll, dims=-1),
+    )
+
+    # Guards against accidental double-rolling: the second roll resolves to 0
+    # (full rotation), so the twice-rolled model has identical coords and static
+    # inputs to the once-rolled one.
+    twice = rolled.with_rolled_lon(coarse_lon)
+    assert torch.equal(twice.full_fine_coords.lon, rolled.full_fine_coords.lon)
+    assert twice.static_inputs is not None
+    assert torch.equal(
+        twice.static_inputs.fields[0].data, rolled.static_inputs.fields[0].data
+    )
+
+
+def test_train_on_batch_raises_for_rolled_model():
+    """A longitude-rolled model is inference only and must reject training."""
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    batch_size = 2
+    full_fine_coords, static_inputs = _make_global_fine_coords_and_static(fine_shape)
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=full_fine_coords,
+        static_inputs=static_inputs,
+    )
+
+    coarse_lon = torch.tensor([-10.0, -5.0, 0.0, 5.0], dtype=torch.float32)
+    rolled = model.with_rolled_lon(coarse_lon)
+
+    batch = make_paired_batch_data(coarse_shape, fine_shape, batch_size)
+    optimization = OptimizationConfig().build(modules=[rolled.module], max_epochs=2)
+    with pytest.raises(RuntimeError, match="longitude-rolled"):
+        rolled.train_on_batch(batch, optimization)
+
+
+def test_roll_diffusion_model_keeps_fine_aligned_to_coarse_cells():
+    """A seam-crossing domain must roll the fine grid by whole coarse cells.
+
+    The roll is anchored on the western coarse-cell edge, not its center. If it
+    anchored on the center it would roll an extra downscale_factor // 2 fine
+    points, leaving no fine margin below the western coarse cell -- which makes
+    get_fine_coords_for_batch raise -- and splitting that cell across the seam.
+    """
+    coarse_shape = (4, 8)
+    fine_shape = (16, 32)
+    factor = 4
+    full_fine_coords, static_inputs = _make_global_fine_coords_and_static(fine_shape)
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=factor,
+        full_fine_coords=full_fine_coords,
+        static_inputs=static_inputs,
+    )
+
+    # Four of the eight global 45-degree coarse cells, crossing the 0/360 seam and
+    # expressed in negative convention (physically 292.5, 337.5 and 22.5, 67.5).
+    # Coarse-lat centers [6, 10] are interior, leaving fine margin above and below.
+    coarse_lat = [6.0, 10.0]
+    coarse_lon = [-67.5, -22.5, 22.5, 67.5]
+    batch = make_batch_data(
+        (1, len(coarse_lat), len(coarse_lon)), coarse_lat, coarse_lon
+    )
+
+    rolled = model.with_rolled_lon(torch.tensor(coarse_lon, dtype=torch.float32))
+    # Anchoring on the cell center would leave no margin and raise here.
+    fine_coords = rolled.get_fine_coords_for_batch(batch)
+
+    # Each coarse cell is covered by exactly `factor` fine cells whose mean is the
+    # coarse-cell center -- i.e. the fine grid stayed aligned to the coarse cells.
+    recentered = fine_coords.lon.reshape(len(coarse_lon), factor).mean(dim=1).cpu()
+    assert torch.allclose(recentered, torch.tensor(coarse_lon), atol=1e-3)
 
 
 def test_checkpoint_config_topography_raises():

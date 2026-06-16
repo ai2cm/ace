@@ -1,3 +1,4 @@
+from .batch_data import get_batch_data
 from .fv3gfs_data import (
     DimSize,
     DimSizes,
