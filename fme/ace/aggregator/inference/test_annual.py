@@ -10,7 +10,6 @@ import xarray as xr
 
 import fme
 from fme.ace.aggregator.inference.annual import (
-    AnnualMetricConfig,
     GlobalMeanAnnualAggregator,
     PairedGlobalMeanAnnualAggregator,
     get_crps,
@@ -121,7 +120,7 @@ def test_paired_annual_aggregator(tmpdir):
 
 @pytest.mark.parametrize(
     "report_crps,report_rmse",
-    [(True, True), (True, False), (False, True)],
+    [(True, True), (True, False), (False, True), (False, False)],
 )
 def test_paired_annual_aggregator_metric_toggles(tmpdir, report_crps, report_rmse):
     agg = _record_paired_annual_aggregator(
@@ -133,15 +132,6 @@ def test_paired_annual_aggregator_metric_toggles(tmpdir, report_crps, report_rms
     # the annual-evolution plot and R2 are reported regardless of the toggles
     assert "test/a" in logs
     assert "test/r2/a_target" in logs
-
-
-def test_annual_metric_config_requires_a_metric():
-    # each metric can be toggled independently...
-    AnnualMetricConfig(report_crps=True, report_rmse=False)
-    AnnualMetricConfig(report_crps=False, report_rmse=True)
-    # ...but disabling both leaves no reference-free skill measure to report
-    with pytest.raises(ValueError, match="at least one of CRPS or RMSE"):
-        AnnualMetricConfig(report_crps=False, report_rmse=False)
 
 
 def test_paired_annual_aggregator_with_nans(tmpdir):
@@ -278,8 +268,9 @@ def test_get_r2_ignores_nan_gap_years():
 
 
 def test_get_crps_ignores_nan_gap_years():
-    # gap years from reindexing show up as NaN; the CRPS over the remaining
-    # years must match a hand-computed value, not propagate NaN.
+    # gap years from reindexing show up as NaN in either the prediction or the
+    # reference; the CRPS over the remaining years must match a hand-computed
+    # value, not propagate NaN.
     years = [2000, 2001, 2002, 2003]
     da = xr.DataArray(
         [[1.0, np.nan, 3.0, 5.0], [2.0, np.nan, 4.0, 6.0]],
@@ -287,14 +278,14 @@ def test_get_crps_ignores_nan_gap_years():
         coords={"year": years},
     )
     reference = xr.DataArray(
-        [1.0, 2.0, 2.0, 2.0], dims=["year"], coords={"year": years}
+        [1.0, 2.0, 2.0, np.nan], dims=["year"], coords={"year": years}
     )
     # fair CRPS per year (2 members) is mean_i|x_i - y| - 0.5 |x_0 - x_1|:
     #   2000: members [1, 2], y=1 -> (0 + 1)/2 - 0.5 * 1 = 0.0
     #   2002: members [3, 4], y=2 -> (1 + 2)/2 - 0.5 * 1 = 1.0
-    #   2003: members [5, 6], y=2 -> (3 + 4)/2 - 0.5 * 1 = 3.0
-    # mean over the non-NaN years 2000/2002/2003: (0 + 1 + 3)/3 = 4/3
-    expected = 4.0 / 3.0
+    # 2001 is dropped (NaN prediction) and 2003 is dropped (NaN reference):
+    #   mean over the remaining years 2000/2002: (0 + 1)/2 = 0.5
+    expected = 0.5
     result = get_crps(da, reference)
     assert not np.isnan(result)
     np.testing.assert_allclose(result, expected, rtol=1e-6)

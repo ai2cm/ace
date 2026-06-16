@@ -123,9 +123,6 @@ class PairedGlobalMeanAnnualAggregator:
                         gen_ensemble_mean, target_ensemble_mean
                     )
                 if self._report_crps:
-                    # CRPS treats the generated ensemble as the forecast and the
-                    # target ensemble mean as the verifying observation, mirroring
-                    # how RMSE compares against that same ensemble mean.
                     metrics[f"crps/{name}"] = get_crps(gen[name], target_ensemble_mean)
                 # compute R2 values
                 if ref is not None:
@@ -425,15 +422,6 @@ class AnnualMetricConfig:
     strict: bool = False
     report_crps: bool = True
     report_rmse: bool = True
-
-    def __post_init__(self):
-        if not (self.report_crps or self.report_rmse):
-            raise ValueError(
-                "AnnualMetricConfig must report at least one of CRPS or RMSE; "
-                "both report_crps and report_rmse are False. These are the only "
-                "skill measures the paired annual aggregator reports without "
-                "external reference data."
-            )
 
     def get_name(self) -> str:
         return self.name
