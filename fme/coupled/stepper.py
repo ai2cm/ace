@@ -44,6 +44,7 @@ from fme.core.loss import StepLoss, StepLossConfig
 from fme.core.ocean import OceanConfig
 from fme.core.ocean_data import OceanData
 from fme.core.optimization import NullOptimization
+from fme.core.step.step import StepOutput
 from fme.core.tensors import add_ensemble_dim, unfold_ensemble_dim
 from fme.core.timing import GlobalTimer
 from fme.core.training_history import TrainingHistory, TrainingJob
@@ -1087,7 +1088,9 @@ class CoupledStepper:
             # predict and yield atmosphere steps
             for i_inner in range(self.n_inner_steps):
                 atmos_step_num = i_outer * self.n_inner_steps + i_inner
-                atmos_step, _ = next(atmos_generator)
+                # The coupled stepper feeds corrected outputs forward; the
+                # uncorrected shadow is unused here (deferred to a later PR).
+                atmos_step = next(atmos_generator).output
                 yield ComponentStepPrediction(
                     realm="atmosphere",
                     data=atmos_step,
@@ -1118,7 +1121,7 @@ class CoupledStepper:
                 labels=ocean_window.labels,
             )
             # predict and yield a single ocean step
-            ocean_step, _ = next(
+            ocean_step = next(
                 iter(
                     self.ocean.get_prediction_generator(
                         ocean_ic_state,
@@ -1127,7 +1130,7 @@ class CoupledStepper:
                         optimizer=optimizer,
                     )
                 )
-            )
+            ).output
             yield ComponentStepPrediction(
                 realm="ocean",
                 data=ocean_step,
@@ -1165,14 +1168,22 @@ class CoupledStepper:
         forcing_data: CoupledBatchData,
     ) -> CoupledBatchData:
         atmos_data = process_prediction_generator_list(
-            [(x.data, None) for x in output_list if x.realm == "atmosphere"],
+            [
+                StepOutput(output=x.data, stepper_state=None)
+                for x in output_list
+                if x.realm == "atmosphere"
+            ],
             time=forcing_data.atmosphere_data.time[:, self.atmosphere.n_ic_timesteps :],
             horizontal_dims=forcing_data.atmosphere_data.horizontal_dims,
             labels=forcing_data.atmosphere_data.labels,
             n_ensemble=forcing_data.atmosphere_data.n_ensemble,
         )
         ocean_data = process_prediction_generator_list(
-            [(x.data, None) for x in output_list if x.realm == "ocean"],
+            [
+                StepOutput(output=x.data, stepper_state=None)
+                for x in output_list
+                if x.realm == "ocean"
+            ],
             time=forcing_data.ocean_data.time[:, self.ocean.n_ic_timesteps :],
             horizontal_dims=forcing_data.ocean_data.horizontal_dims,
             labels=forcing_data.ocean_data.labels,

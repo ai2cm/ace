@@ -974,6 +974,47 @@ def test_stepper_corrector(
             assert stepped.gen_data[name][:, :, 1:].min() >= 0.0
 
 
+def test_predict_returns_uncorrected_shadow():
+    """`predict` exposes the detached pre-correction series on the prediction.
+
+    Acceptance: prediction BatchData carries ``uncorrected`` for the
+    corrector-modified variables, the rollout still feeds the corrected output
+    forward (so corrected != uncorrected), and the shadow is detached.
+    """
+    n_forward_steps = 4
+    train_stepper, batch_data, _, _ = _get_corrector_stepper_and_data(
+        terms_to_modify="advection_and_precipitation",
+        force_positive_names=["specific_total_water_0"],
+        n_forward_steps=n_forward_steps,
+    )
+    stepper = train_stepper._stepper
+    prognostic_names = stepper.prognostic_names
+    input_data = batch_data.get_start(prognostic_names, stepper.n_ic_timesteps)
+    output, _ = stepper.predict(input_data, batch_data)
+
+    assert output.uncorrected is not None
+    # conserve_dry_air modifies surface pressure every step.
+    assert "PRESsfc" in output.uncorrected
+    assert set(output.uncorrected).issubset(set(output.data))
+    # The uncorrected series is aligned with the prediction (no IC timestep).
+    assert output.uncorrected["PRESsfc"].shape[1] == n_forward_steps
+    # The rollout feeds the corrected output forward, so corrected != uncorrected.
+    assert not torch.allclose(output.data["PRESsfc"], output.uncorrected["PRESsfc"])
+    # The shadow is detached from the autograd graph.
+    for tensor in output.uncorrected.values():
+        assert not tensor.requires_grad
+
+
+def test_predict_without_corrector_has_empty_uncorrected():
+    """A corrector-free stepper still sets ``uncorrected`` (to an empty mapping)."""
+    stepper = _get_stepper(["a"], ["a"])
+    n_steps = 3
+    input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=[])
+    forcing_data.data = {}
+    output, _ = stepper.predict(input_data, forcing_data)
+    assert output.uncorrected == {}
+
+
 def _get_stepper_config(
     in_names: list[str],
     out_names: list[str],
@@ -1080,9 +1121,9 @@ def test_step():
     n_samples = 3
     input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
 
-    output, _ = stepper.step(
+    output = stepper.step(
         StepArgs(input=input_data, next_step_input_data={}, labels=None)
-    )
+    ).output
 
     torch.testing.assert_close(output["a"], input_data["a"] + 1)
     torch.testing.assert_close(output["b"], input_data["b"] + 1)
@@ -1092,9 +1133,9 @@ def test_step_with_diagnostic():
     stepper = _get_stepper(["a"], ["a", "c"], module_name="RepeatChannel")
     n_samples = 3
     input_data = {"a": torch.rand(n_samples, 5, 5).to(DEVICE)}
-    output, _ = stepper.step(
+    output = stepper.step(
         StepArgs(input=input_data, next_step_input_data={}, labels=None)
-    )
+    ).output
     torch.testing.assert_close(output["a"], input_data["a"])
     torch.testing.assert_close(output["c"], input_data["a"])
 
@@ -1110,9 +1151,9 @@ def test_step_with_forcing_and_diagnostic(residual_prediction):
     )
     n_samples = 3
     input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
-    output, _ = stepper.step(
+    output = stepper.step(
         StepArgs(input=input_data, next_step_input_data={}, labels=None)
-    )
+    ).output
     if residual_prediction:
         expected_a_output = 2 * input_data["a"] + 1 - norm_mean
     else:
@@ -1128,9 +1169,9 @@ def test_step_with_prescribed_ocean():
     )
     input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
     ocean_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "mask"]}
-    output, _ = stepper.step(
+    output = stepper.step(
         StepArgs(input=input_data, next_step_input_data=ocean_data, labels=None)
-    )
+    ).output
     expected_a_output = torch.where(
         torch.round(ocean_data["mask"]).to(int) == 1,
         ocean_data["a"],

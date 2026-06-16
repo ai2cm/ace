@@ -119,6 +119,13 @@ class BatchData:
             (today only the corrector). ``None`` when no state has been
             seeded; the data loader never sets this — it is populated only
             by ``Stepper.predict`` to thread state across prediction windows.
+        uncorrected: Pre-correction values of the corrector-modified variables,
+            as a sparse time series aligned with ``data``. ``None`` except on
+            the prediction ``BatchData`` returned by ``Stepper.predict``, where
+            it is populated (an empty mapping when no corrector modified any
+            variable). Used to evaluate corrector reliance; the correction is
+            ``data - uncorrected``. Not preserved across time-windowing
+            operations (it is attached only after the prediction is assembled).
     """
 
     data: TensorMapping
@@ -131,6 +138,7 @@ class BatchData:
     n_ensemble: int = 1
     data_mask: TensorMapping | None = None
     stepper_state: StepperState | None = None
+    uncorrected: TensorMapping | None = None
 
     @classmethod
     def new_for_testing(
@@ -239,6 +247,11 @@ class BatchData:
                 if self.stepper_state is not None
                 else None
             ),
+            uncorrected=(
+                {k: v.to(device) for k, v in self.uncorrected.items()}
+                if self.uncorrected is not None
+                else None
+            ),
         )
 
     def scatter_spatial(self, global_img_shape: tuple[int, int]) -> "BatchData":
@@ -253,6 +266,11 @@ class BatchData:
             n_ensemble=self.n_ensemble,
             data_mask=self.data_mask,
             stepper_state=self.stepper_state,
+            uncorrected=(
+                dist.scatter_spatial(dict(self.uncorrected), global_img_shape)
+                if self.uncorrected is not None
+                else None
+            ),
         )
 
     def to_cpu(self) -> "BatchData":
@@ -270,6 +288,11 @@ class BatchData:
             ),
             stepper_state=(
                 self.stepper_state.to_cpu() if self.stepper_state is not None else None
+            ),
+            uncorrected=(
+                {k: v.cpu() for k, v in self.uncorrected.items()}
+                if self.uncorrected is not None
+                else None
             ),
         )
 
@@ -292,6 +315,7 @@ class BatchData:
         n_ensemble: int = 1,
         data_mask: TensorMapping | None = None,
         stepper_state: StepperState | None = None,
+        uncorrected: TensorMapping | None = None,
     ) -> "BatchData":
         _check_device(data, torch.device("cpu"))
         if labels is not None:
@@ -314,6 +338,7 @@ class BatchData:
             n_ensemble=n_ensemble,
             data_mask=data_mask,
             stepper_state=stepper_state,
+            uncorrected=uncorrected,
             **kwargs,
         )
 
@@ -328,6 +353,7 @@ class BatchData:
         n_ensemble: int = 1,
         data_mask: TensorMapping | None = None,
         stepper_state: StepperState | None = None,
+        uncorrected: TensorMapping | None = None,
     ) -> "BatchData":
         """
         Move the data to the current global device specified by get_device().
@@ -350,6 +376,7 @@ class BatchData:
             n_ensemble=n_ensemble,
             data_mask=data_mask,
             stepper_state=stepper_state,
+            uncorrected=uncorrected,
             **kwargs,
         )
 
@@ -623,6 +650,10 @@ class BatchData:
             }
         if self.stepper_state is not None:
             self.stepper_state.pin_memory()
+        if self.uncorrected is not None:
+            self.uncorrected = {
+                name: tensor.pin_memory() for name, tensor in self.uncorrected.items()
+            }
         return self
 
 
@@ -637,6 +668,11 @@ class PairedData:
     time: xr.DataArray
     labels: BatchLabels | None = None
     n_ensemble: int = 1
+    uncorrected: TensorMapping | None = None
+    """Pre-correction values of corrector-modified prediction variables, aligned
+    with ``prediction``. ``None`` when the prediction carried no uncorrected
+    shadow; an empty mapping when a corrector ran but modified nothing. Exposed
+    for downstream correction metrics."""
 
     @property
     def forcing(self) -> TensorMapping:
@@ -668,12 +704,22 @@ class PairedData:
                 torch.repeat_interleave(self.labels.tensor, n_ensemble, dim=0),
                 self.labels.names,
             )
+        if self.uncorrected is None:
+            uncorrected = None
+        else:
+            uncorrected = {
+                k: v.to(get_device())
+                for k, v in repeat_interleave_batch_dim(
+                    self.uncorrected, n_ensemble
+                ).items()
+            }
         return PairedData(
             prediction={k: v.to(get_device()) for k, v in prediction.items()},
             reference={k: v.to(get_device()) for k, v in reference.items()},
             time=time,
             labels=labels,
             n_ensemble=n_ensemble,
+            uncorrected=uncorrected,
         )
 
     def as_ensemble_tensor_dicts(
@@ -708,6 +754,7 @@ class PairedData:
             labels=prediction.labels,
             time=prediction.time,
             n_ensemble=prediction.n_ensemble,
+            uncorrected=prediction.uncorrected,
         )
 
     @classmethod
