@@ -196,27 +196,33 @@ def test_paired_annual_aggregator_with_nans(tmpdir):
 
 
 def test_get_rmse_ignores_nan_gap_years():
-    # gap years from reindexing show up as NaN in both series; the RMSE over
+    # gap years from reindexing show up as NaN; a year is dropped when either
+    # series is NaN (2001 only in da, 2004 only in reference), and the RMSE over
     # the remaining years must match a hand-computed value, not propagate NaN.
-    years = [2000, 2001, 2002, 2003]
-    da = xr.DataArray([1.0, np.nan, 3.0, 5.0], dims=["year"], coords={"year": years})
-    reference = xr.DataArray(
-        [1.0, 2.0, 2.0, 2.0], dims=["year"], coords={"year": years}
+    years = [2000, 2001, 2002, 2003, 2004]
+    da = xr.DataArray(
+        [1.0, np.nan, 3.0, 5.0, 2.0], dims=["year"], coords={"year": years}
     )
-    # squared errors over the non-NaN years 2000/2002/2003: 0, 1, 9 -> mean 10/3
+    reference = xr.DataArray(
+        [1.0, 2.0, 2.0, 2.0, np.nan], dims=["year"], coords={"year": years}
+    )
+    # squared errors over the valid years 2000/2002/2003: 0, 1, 9 -> mean 10/3
     expected = float(np.sqrt(10.0 / 3.0))
     np.testing.assert_allclose(get_rmse(da, reference), expected, rtol=1e-12)
 
 
 def test_get_r2_ignores_nan_gap_years():
     # get_r2 sees the same NaN gap years as get_rmse and must ignore them
-    # rather than returning NaN.
-    years = [2000, 2001, 2002, 2003]
-    da = xr.DataArray([1.0, np.nan, 3.0, 5.0], dims=["year"], coords={"year": years})
-    reference = xr.DataArray(
-        [1.0, 2.0, 2.0, 2.0], dims=["year"], coords={"year": years}
+    # rather than returning NaN, dropping a year when either series is NaN
+    # (2001 only in da, 2004 only in reference).
+    years = [2000, 2001, 2002, 2003, 2004]
+    da = xr.DataArray(
+        [1.0, np.nan, 3.0, 5.0, 2.0], dims=["year"], coords={"year": years}
     )
-    # over the non-NaN years 2000/2002/2003: ref mean 5/3,
+    reference = xr.DataArray(
+        [1.0, 2.0, 2.0, 2.0, np.nan], dims=["year"], coords={"year": years}
+    )
+    # over the valid years 2000/2002/2003: ref mean 5/3,
     # SS_ref = (1-5/3)^2 + (2-5/3)^2 + (2-5/3)^2 = 2/3; SS_pred = 0+1+9 = 10
     expected = float(1 - 10.0 / (2.0 / 3.0))
     result = get_r2(da, reference)
