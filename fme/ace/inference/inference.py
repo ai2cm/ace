@@ -309,7 +309,6 @@ def run_inference_from_config(config: InferenceConfig):
             config.initial_condition.get_dataset(),
             stepper_config.prognostic_names,
             labels=config.labels,
-            n_ensemble=config.n_ensemble_per_ic,
         )
         stepper = config.load_stepper()
         stepper.set_eval()
@@ -323,6 +322,18 @@ def run_inference_from_config(config: InferenceConfig):
             ocean_fraction_name=stepper.ocean_fraction_name,
             label_override=config.labels,
         )
+        # Broadcast the initial condition across ensemble members only after the
+        # forcing loader is built, mirroring the evaluator path. The forcing then
+        # has one window per initial condition (n_ensemble=1) and predict_paired
+        # broadcasts it exactly once to match the ensemble-broadcast initial
+        # condition. Broadcasting before get_forcing_data would tile the forcing
+        # start times too, and predict_paired would broadcast the already-tiled
+        # forcing a second time (the standalone double-broadcast bug).
+        if config.n_ensemble_per_ic > 1:
+            ic = data.initial_condition.as_batch_data()
+            data._initial_condition = PrognosticState(
+                ic.broadcast_ensemble(config.n_ensemble_per_ic)
+            )
 
         if not config.allow_incompatible_dataset:
             try:
