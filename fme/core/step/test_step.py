@@ -1,5 +1,4 @@
 import dataclasses
-import datetime
 import pathlib
 import tempfile
 import unittest
@@ -15,9 +14,7 @@ import fme
 from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
 from fme.ace.step.fcn3 import FCN3Config, FCN3Selector, FCN3StepConfig
 from fme.ace.testing.fv3gfs_data import get_scalar_dataset
-from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
-from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed.distributed import Distributed
 from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.labels import BatchLabels
@@ -38,6 +35,7 @@ from fme.core.step.single_module import (
     _build_channel_mask_dict,
 )
 from fme.core.step.step import StepABC, StepSelector
+from fme.core.testing import get_dataset_info, trivial_network_and_loss_normalization
 from fme.core.typing_ import TensorDict
 
 from .radiation import SeparateRadiationStepConfig
@@ -50,12 +48,7 @@ def get_network_and_loss_normalization_config(
     dir: pathlib.Path | None = None,
 ) -> NetworkAndLossNormalizationConfig:
     if dir is None:
-        return NetworkAndLossNormalizationConfig(
-            network=NormalizationConfig(
-                means={name: 0.0 for name in names},
-                stds={name: 1.0 for name in names},
-            ),
-        )
+        return trivial_network_and_loss_normalization(names)
     else:
         return NetworkAndLossNormalizationConfig(
             network=NormalizationConfig(
@@ -480,7 +473,6 @@ HAS_NEXT_STEP_FORCING_NAME_CASES = [
         id="separate_radiation",
     ),
 ]
-TIMESTEP = datetime.timedelta(hours=6)
 
 
 def get_tensor_dict(
@@ -503,19 +495,10 @@ def get_step(
     init_weights: Callable[[list[nn.Module]], None] = lambda _: None,
     all_labels: set[str] | None = None,
 ) -> StepABC:
-    device = fme.get_device()
-    horizontal_coordinate = LatLonCoordinates(
-        lat=torch.zeros(img_shape[0], device=device),
-        lon=torch.zeros(img_shape[1], device=device),
-    )
-    vertical_coordinate = HybridSigmaPressureCoordinate(
-        ak=torch.arange(7, device=device), bk=torch.arange(7, device=device)
-    )
-    dataset_info = DatasetInfo(
-        horizontal_coordinates=horizontal_coordinate,
-        vertical_coordinate=vertical_coordinate,
-        timestep=TIMESTEP,
+    dataset_info = get_dataset_info(
+        img_shape=img_shape,
         all_labels=all_labels,
+        device=fme.get_device(),
     )
     return selector.get_step(dataset_info, init_weights)
 
@@ -1470,12 +1453,7 @@ def test_step_per_channel_global_mean_removal_with_channel_masks():
     in_names = ["forcing_shared", "forcing_rad"]
     out_names = ["diagnostic_main", "diagnostic_rad"]
     all_names = list(set(in_names + out_names))
-    normalization = NetworkAndLossNormalizationConfig(
-        network=NormalizationConfig(
-            means={name: 0.0 for name in all_names},
-            stds={name: 1.0 for name in all_names},
-        ),
-    )
+    normalization = trivial_network_and_loss_normalization(all_names)
     removal = PerChannelGlobalMeanRemovalConfig(
         field_names=in_names, append_as_input=True
     )
