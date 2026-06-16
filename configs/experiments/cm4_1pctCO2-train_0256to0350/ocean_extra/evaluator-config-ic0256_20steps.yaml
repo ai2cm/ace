@@ -1,0 +1,35 @@
+experiment_dir: /results
+# 20 ocean steps x 5-day timestep = 100 days. Short run to study early,
+# persistent SST bias / sea-ice loss without a 40-year rollout.
+n_forward_steps: 20
+forward_steps_in_memory: 20
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+      # First in-sample IC (start of the 0256-0350 training window).
+      - '0256-01-03T12:00:00'
+  dataset:
+    merge:
+      - data_path: /climate-default
+        file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-ocean.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr
+        engine: zarr
+  num_data_workers: 4
+aggregator:
+  log_zonal_mean_images: false
+  log_histograms: true
+data_writer:
+  save_prediction_files: true
+  save_monthly_files: false
+  # #1284: save denormalized per-step corrections so the uncorrected state can
+  # be reconstructed as (corrected - correction). Mandatory for this analysis.
+  save_correction_files: true
