@@ -184,3 +184,10 @@ run_training() {
 # n_timesteps 3 != 74). Fixed by partitioning each batched forward pass by window shape (PR #1279,
 # merged here at 59ed0bf3c). Relaunched from this branch as the concurrent-inference speed A/B vs rs0-b1d6.
 # run_training "train-4deg-daily-v1-era5-only-rs1.yaml" "train-4deg-daily-v1-era5-only-rs1-59ed" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# --- Wave 18 rs1 relaunch: -59ed crashed before epoch 1 on a SECOND concurrent-inference
+# bug -- broadcast_ensemble tiled the time coordinate while repeat-interleaving the data, so the
+# weather tasks (8 ICs on distinct start dates, n_ensemble_per_ic=8) misaligned data vs time:
+# "ValueError: Forcing data must have the same time coordinate as the batch data." Fixed by
+# repeat-interleaving time to match the data ordering (PR #1282, cherry-picked here at 05b8a88c).
+# run_training "train-4deg-daily-v1-era5-only-rs1.yaml" "train-4deg-daily-v1-era5-only-rs1-05b8" 1 ai2/ace high "ai2/jupiter ai2/titan"
