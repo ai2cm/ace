@@ -21,7 +21,7 @@ OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
         "sea_ice_thickness": ["HI"],
         "sea_ice_volume": ["sea_ice_volume"],
         "ocean_sea_ice_fraction": ["ocean_sea_ice_fraction"],
-        "land_fraction": ["land_fraction"],
+        "land_fraction": ["land_fraction", "LANDFRAC"],
         "net_downward_surface_heat_flux": ["hfds"],
         "net_downward_surface_heat_flux_total_area": ["hfds_total_area"],
         "geothermal_heat_flux": ["hfgeou"],
