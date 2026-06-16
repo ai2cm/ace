@@ -25,8 +25,7 @@ from fme.core.step.secondary_decoder import (
     SecondaryDecoderConfig,
 )
 from fme.core.step.single_module import step_with_adjustments
-from fme.core.step.step import StepABC, StepConfigABC, StepSelector
-from fme.core.stepper_state import StepperState
+from fme.core.step.step import StepABC, StepConfigABC, StepOutput, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -387,7 +386,7 @@ class SecondaryModuleStep(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> tuple[TensorDict, StepperState | None]:
+    ) -> StepOutput:
         def network_call(input_norm: TensorDict) -> TensorDict:
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
             output_tensor = self.module.wrap_module(wrapper)(

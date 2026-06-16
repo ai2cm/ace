@@ -12,8 +12,7 @@ from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
 from fme.core.step._multi_call import MultiCall, MultiCallConfig, StepMethod
 from fme.core.step.args import StepArgs
-from fme.core.step.step import StepABC, StepConfigABC, StepSelector
-from fme.core.stepper_state import StepperState
+from fme.core.step.step import StepABC, StepConfigABC, StepOutput, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -302,15 +301,24 @@ class MultiCallStep(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[torch.nn.Module], torch.nn.Module] = lambda x: x,
-    ) -> tuple[TensorDict, StepperState | None]:
-        state, stepper_state = self._wrapped_step.step(
+    ) -> StepOutput:
+        wrapped = self._wrapped_step.step(
             args=args,
             wrapper=wrapper,
         )
+        output = wrapped.output
         if self._multi_call is not None:
-            multi_called_outputs, _ = self._multi_call.step(args=args, wrapper=wrapper)
-            state = {**multi_called_outputs, **state}
-        return state, stepper_state
+            # Multi-call produces only diagnostic outputs (not corrected), so the
+            # uncorrected shadow comes entirely from the wrapped step.
+            multi_called_outputs = self._multi_call.step(
+                args=args, wrapper=wrapper
+            ).output
+            output = {**multi_called_outputs, **output}
+        return StepOutput(
+            output=output,
+            stepper_state=wrapped.stepper_state,
+            uncorrected=wrapped.uncorrected,
+        )
 
     def get_state(self) -> dict[str, Any]:
         """

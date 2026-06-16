@@ -14,7 +14,7 @@ from .multi_call import (
     _extend_normalizer_with_multi_call_outputs,
     replace_multi_call,
 )
-from .step import StepSelector
+from .step import StepOutput, StepSelector
 from .test_step_registry import MockStep, MockStepConfig
 
 
@@ -25,7 +25,7 @@ def test_multi_call(include_multi_call_in_loss: bool):
 
     def _step(args: StepArgs, wrapper=lambda x: x):
         prediction = {k: args.input["CO2"].detach().clone() for k in output_names}
-        return prediction, args.stepper_state
+        return StepOutput(output=prediction, stepper_state=args.stepper_state)
 
     config = MultiCallStepConfig(
         wrapped_step=StepSelector(
@@ -53,14 +53,14 @@ def test_multi_call(include_multi_call_in_loss: bool):
             "b": torch.randn(1, 2, 3, 4),
             "CO2": torch.randn(1, 2, 3, 4),
         }
-        out, _ = step.step(
+        out = step.step(
             args=StepArgs(
                 input=input,
                 next_step_input_data={},
                 labels=None,
             ),
             wrapper=lambda x: x,
-        )
+        ).output
     torch.testing.assert_close(out["b"], input["CO2"])
     torch.testing.assert_close(out["c"], input["CO2"])
     torch.testing.assert_close(out["c_doubled_co2"], input["CO2"] * 2)

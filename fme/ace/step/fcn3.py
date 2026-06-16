@@ -24,8 +24,7 @@ from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.single_module import step_with_adjustments
-from fme.core.step.step import StepABC, StepConfigABC, StepSelector
-from fme.core.stepper_state import StepperState
+from fme.core.step.step import StepABC, StepConfigABC, StepOutput, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
@@ -444,7 +443,7 @@ class FCN3Step(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> tuple[TensorDict, StepperState | None]:
+    ) -> StepOutput:
         if args.labels is not None:
             raise ValueError("Labels are not supported for FCN3")
 

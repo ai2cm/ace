@@ -16,6 +16,30 @@ from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
+@dataclasses.dataclass
+class StepOutput:
+    """The result of stepping a model forward one timestep.
+
+    Attributes:
+        output: The denormalized output data at the next timestep, after all
+            adjustments (corrector, ocean, prescribed prognostics) are applied.
+        stepper_state: The per-sample state to thread into the next step call,
+            or ``None``. Unchanged passthrough semantics relative to the prior
+            ``(output, stepper_state)`` tuple return.
+        uncorrected: The pre-correction values of exactly the variables the
+            corrector modified. Empty if no corrector ran or none were modified,
+            so consumers need no None checks. This is a sparse "shadow" of
+            ``output`` used to evaluate how much the stepper relies on the
+            corrector; the correction is derivable as ``output - uncorrected``.
+            Note ocean and prescribed-prognostic adjustments run after the
+            corrector and are not reflected here.
+    """
+
+    output: TensorDict
+    stepper_state: StepperState | None
+    uncorrected: TensorDict = dataclasses.field(default_factory=dict)
+
+
 # Children still need to decorate with @dataclass, otherwise
 # they will be a dataclass with no dataclass fields.
 @dataclasses.dataclass
@@ -340,7 +364,7 @@ class StepABC(abc.ABC):
         self: SelfType,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> tuple[TensorDict, StepperState | None]:
+    ) -> StepOutput:
         """
         Step the model forward one timestep given input data.
 
@@ -349,9 +373,10 @@ class StepABC(abc.ABC):
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
-            A tuple ``(output, stepper_state)`` where ``output`` is the
-            denormalized data at the next time step and ``stepper_state`` is
-            the per-sample state to thread into the next call (or ``None``).
+            A ``StepOutput`` carrying the denormalized output data at the next
+            timestep, the per-sample ``stepper_state`` to thread into the next
+            call (or ``None``), and the pre-correction values of any
+            corrector-modified variables.
         """
         pass
 
