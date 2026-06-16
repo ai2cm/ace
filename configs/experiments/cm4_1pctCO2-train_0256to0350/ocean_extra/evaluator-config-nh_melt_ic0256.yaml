@@ -1,0 +1,50 @@
+experiment_dir: /results
+# 36 ocean steps x 5-day timestep = 180 days (half-year). Anchored at the NH
+# sea-ice maximum (~Mar 4, DOY 63) so the window runs NH max->min (melt season,
+# the loss symptom) while SH runs min->max (growth). First in-sample IC 0256.
+# Half-year length lets the per-hemisphere volume trajectory reach the seasonal
+# minimum, so plateau-vs-drift is observable within one melt season.
+n_forward_steps: 36
+forward_steps_in_memory: 36
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+      # NH max ~Mar 4 (DOY 63, on the DOY=3 mod 5 grid). First in-sample year
+      # (start of the 0256-0350 training window).
+      - '0256-03-04T12:00:00'
+  dataset:
+    merge:
+      - data_path: /climate-default
+        file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-ocean.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr
+        engine: zarr
+  num_data_workers: 4
+aggregator:
+  log_zonal_mean_images: false
+  log_histograms: true
+data_writer:
+  save_prediction_files: true
+  save_monthly_files: false
+  # #1284: save denormalized per-step corrections so the uncorrected state can
+  # be reconstructed as (corrected - correction). Mandatory for this analysis.
+  save_correction_files: true
+  # Subset to the variables the analysis needs (more/longer runs than the
+  # 20-step configs, so keep downloads small). Targets are saved alongside.
+  names:
+    - sst
+    - thetao_0          # coarsened top layer the OHC correction scales (thetao_k * r)
+    - sea_ice_volume
+    - ocean_sea_ice_fraction
+    - UI                # sea-ice velocity: separate dynamic (advected) from thermodynamic loss
+    - VI
+    - sfdsi             # sea-ice salt flux: thermodynamic mass-change signature (melt/growth)
+    - hfds_total_area
