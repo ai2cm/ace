@@ -358,6 +358,13 @@ class TrainOutput(TrainOutputABC):
                     f"target_data can only have one ensemble member, got {v.shape[1]}"
                 )
 
+    @property
+    def n_ensemble(self) -> int:
+        """The number of ensemble members in the generated data."""
+        for v in self.gen_data.values():
+            return v.shape[1]
+        raise ValueError("gen_data is empty, ensemble member count is not defined")
+
     def ensemble_derive_func(
         self, data: EnsembleTensorDict, forcing_data: TensorMapping
     ) -> EnsembleTensorDict:
