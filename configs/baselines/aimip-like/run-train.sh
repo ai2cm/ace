@@ -62,12 +62,14 @@ run_training() {
 # Task: research/tasks/2026-06-15-residual-config-hyperparameter-sweep.md
 # Investigation: 2026-06-12-residual-recipe-selection
 #
-# Branch: experiment/2026-06-15-residual-config-sweep, cut from ace main
-# (6bb72fa53) with NO extra code commits -- main already has residual
-# prediction, spectral_ratio, clip_latent_global_means, and the
-# persistence_names constant-CO2 inference loop. Inference therefore runs
-# sequentially (the concurrent-inline-inference BatchedPredictor path is NOT
-# pulled in; it is what crashed in the aimip-like Wave 18 reruns).
+# Branch: experiment/2026-06-15-residual-config-sweep, cut from ace main --
+# main already has residual prediction, spectral_ratio,
+# clip_latent_global_means, and the persistence_names constant-CO2 inference
+# loop. Merged on top: feature/concurrent-inline-inference (reconciled onto
+# main's #1227 InferenceSummary interface) so inline inference batches
+# concurrently, and fix/broadcast-ensemble-time-ordering (c54bc54cd), whose
+# block-ordered broadcast_ensemble is required for concurrent inference with
+# n_ensemble_per_ic > 1 (otherwise it crashes on a time-coordinate mismatch).
 #
 # All configs derive from the latest era5-only-residual config (the version
 # with the 10year_insample + long_46year_constant_co2 eval loops), changed
@@ -85,24 +87,25 @@ run_training() {
 # Select on validation skill; accept if inference is not significantly worse.
 # =============================================================================
 
+# --- LAUNCHED 2026-06-16 to ai2/ace from commit 77418ebd4 (12 jobs, 1 GPU each, jupiter+titan high). Lines commented to prevent re-submission; see experiment records for beaker/wandb links. ---
 # --- Wave 1: baseline residual, 3 seeds (Jupiter+Titan, high) ---
-run_training "train-4deg-daily-v1-era5-only-residual.yaml"      "train-4deg-daily-v1-era5-only-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
-run_training "train-4deg-daily-v1-era5-only-residual-rs1.yaml"  "train-4deg-daily-v1-era5-only-residual-rs1" 1 ai2/ace high "ai2/jupiter ai2/titan"
-run_training "train-4deg-daily-v1-era5-only-residual-rs2.yaml"  "train-4deg-daily-v1-era5-only-residual-rs2" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-residual.yaml"      "train-4deg-daily-v1-era5-only-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-residual-rs1.yaml"  "train-4deg-daily-v1-era5-only-residual-rs1" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-residual-rs2.yaml"  "train-4deg-daily-v1-era5-only-residual-rs2" 1 ai2/ace high "ai2/jupiter ai2/titan"
 
 # --- Wave 2: spectral_ratio sweep (seed 0) (Jupiter+Titan, high) ---
-run_training "train-4deg-daily-v1-era5-only-sr0p50-residual.yaml" "train-4deg-daily-v1-era5-only-sr0p50-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
-run_training "train-4deg-daily-v1-era5-only-sr0p25-residual.yaml" "train-4deg-daily-v1-era5-only-sr0p25-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-sr0p50-residual.yaml" "train-4deg-daily-v1-era5-only-sr0p50-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-sr0p25-residual.yaml" "train-4deg-daily-v1-era5-only-sr0p25-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
 
 # --- Wave 3: filter_num_groups sweep (seed 0) (Jupiter+Titan, high) ---
-run_training "train-4deg-daily-v1-era5-only-fg4-residual.yaml"  "train-4deg-daily-v1-era5-only-fg4-residual-rs0"  1 ai2/ace high "ai2/jupiter ai2/titan"
-run_training "train-4deg-daily-v1-era5-only-fg8-residual.yaml"  "train-4deg-daily-v1-era5-only-fg8-residual-rs0"  1 ai2/ace high "ai2/jupiter ai2/titan"
-run_training "train-4deg-daily-v1-era5-only-fg16-residual.yaml" "train-4deg-daily-v1-era5-only-fg16-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-fg4-residual.yaml"  "train-4deg-daily-v1-era5-only-fg4-residual-rs0"  1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-fg8-residual.yaml"  "train-4deg-daily-v1-era5-only-fg8-residual-rs0"  1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-fg16-residual.yaml" "train-4deg-daily-v1-era5-only-fg16-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
 
 # --- Wave 4: fg x sr intersection (seed 0) (Jupiter+Titan, high) ---
-run_training "train-4deg-daily-v1-era5-only-fg8-sr0p25-residual.yaml" "train-4deg-daily-v1-era5-only-fg8-sr0p25-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
-run_training "train-4deg-daily-v1-era5-only-fg8-sr0p50-residual.yaml" "train-4deg-daily-v1-era5-only-fg8-sr0p50-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
-run_training "train-4deg-daily-v1-era5-only-fg4-sr0p25-residual.yaml" "train-4deg-daily-v1-era5-only-fg4-sr0p25-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-fg8-sr0p25-residual.yaml" "train-4deg-daily-v1-era5-only-fg8-sr0p25-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-fg8-sr0p50-residual.yaml" "train-4deg-daily-v1-era5-only-fg8-sr0p50-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-fg4-sr0p25-residual.yaml" "train-4deg-daily-v1-era5-only-fg4-sr0p25-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
 
 # --- Wave 5: embed_dim 1024 + spectral_ratio 0.125 (seed 0) (Jupiter+Titan, high) ---
-run_training "train-4deg-daily-v1-era5-only-n1024-sr0p125-residual.yaml" "train-4deg-daily-v1-era5-only-n1024-sr0p125-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-n1024-sr0p125-residual.yaml" "train-4deg-daily-v1-era5-only-n1024-sr0p125-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
