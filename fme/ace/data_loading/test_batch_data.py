@@ -571,7 +571,11 @@ def test_broadcast_ensemble(n_ensemble):
 
 @pytest.mark.parametrize("n_ensemble", [2, 3])
 def test_broadcast_ensemble_aligns_distinct_sample_times(n_ensemble):
-    """Regression for the concurrent-inference rs1 crash (-59ed).
+    """Regression for a concurrent inline-inference crash.
+
+    First seen when a 4deg-daily training run crashed at the end of its first
+    epoch's inline inference (beaker
+    https://beaker.org/ex/01KV6P5MG100PTXNV436HD40AY).
 
     ``broadcast_ensemble`` expands the data with ``repeat_interleave`` (block
     ordering: sample ``s`` lands at positions ``[s * n_ensemble,
