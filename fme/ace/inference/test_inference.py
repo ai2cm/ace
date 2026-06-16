@@ -284,14 +284,17 @@ def test_get_initial_condition(n_ensemble):
     assert batch_data.time.shape == (sample * n_ensemble, 1)
     initial_times = batch_data.time.isel(time=0)
     assert initial_times.shape == (sample * n_ensemble,)
-    assert initial_times[0] == 0
-    assert initial_times[1] == 5
+    # broadcast_ensemble uses block ordering: sample s occupies positions
+    # [s * n_ensemble, (s + 1) * n_ensemble) in both data and time, so they
+    # stay aligned even when samples carry distinct times.
+    expected_times = np.repeat(time_da.values, n_ensemble)
+    np.testing.assert_array_equal(initial_times.values, expected_times)
     assert batch_data.data["prog"].shape == (sample * n_ensemble, 1, 16, 32)
-    for i in range(n_ensemble):
-        np.testing.assert_allclose(
-            batch_data.data["prog"][i::n_ensemble, ...].squeeze(dim=1).cpu().numpy(),
-            data["prog"].values,
-        )
+    expected_prog = np.repeat(data["prog"].values, n_ensemble, axis=0)
+    np.testing.assert_allclose(
+        batch_data.data["prog"].squeeze(dim=1).cpu().numpy(),
+        expected_prog,
+    )
     assert batch_data.time.isel(time=0).equals(initial_times)
 
 
