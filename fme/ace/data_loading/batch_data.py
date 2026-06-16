@@ -14,6 +14,7 @@ from fme.core.dataset.dataset import DatasetItem
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.labels import BatchLabels, LabelEncoding
+from fme.core.step.metrics import StepperMetrics, null_stepper_metrics
 from fme.core.stepper_state import StepperState
 from fme.core.tensors import repeat_interleave_batch_dim, unfold_ensemble_dim
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
@@ -119,6 +120,10 @@ class BatchData:
             (today only the corrector). ``None`` when no state has been
             seeded; the data loader never sets this — it is populated only
             by ``Stepper.predict`` to thread state across prediction windows.
+        stepper_metrics: Opaque per-step metrics payload owned by the Step
+            implementation, stacked over the prediction window. Defaults to an
+            empty (Null) payload; the data loader never sets this — it is
+            populated only by ``Stepper.predict``.
     """
 
     data: TensorMapping
@@ -131,6 +136,9 @@ class BatchData:
     n_ensemble: int = 1
     data_mask: TensorMapping | None = None
     stepper_state: StepperState | None = None
+    stepper_metrics: StepperMetrics = dataclasses.field(
+        default_factory=null_stepper_metrics
+    )
 
     @classmethod
     def new_for_testing(
@@ -239,6 +247,7 @@ class BatchData:
                 if self.stepper_state is not None
                 else None
             ),
+            stepper_metrics=self.stepper_metrics.to_device(),
         )
 
     def scatter_spatial(self, global_img_shape: tuple[int, int]) -> "BatchData":
@@ -253,6 +262,7 @@ class BatchData:
             n_ensemble=self.n_ensemble,
             data_mask=self.data_mask,
             stepper_state=self.stepper_state,
+            stepper_metrics=self.stepper_metrics,
         )
 
     def to_cpu(self) -> "BatchData":
@@ -271,6 +281,7 @@ class BatchData:
             stepper_state=(
                 self.stepper_state.to_cpu() if self.stepper_state is not None else None
             ),
+            stepper_metrics=self.stepper_metrics.to_cpu(),
         )
 
     @classmethod
@@ -292,6 +303,7 @@ class BatchData:
         n_ensemble: int = 1,
         data_mask: TensorMapping | None = None,
         stepper_state: StepperState | None = None,
+        stepper_metrics: StepperMetrics | None = None,
     ) -> "BatchData":
         _check_device(data, torch.device("cpu"))
         if labels is not None:
@@ -314,6 +326,11 @@ class BatchData:
             n_ensemble=n_ensemble,
             data_mask=data_mask,
             stepper_state=stepper_state,
+            stepper_metrics=(
+                stepper_metrics
+                if stepper_metrics is not None
+                else null_stepper_metrics()
+            ),
             **kwargs,
         )
 
@@ -328,6 +345,7 @@ class BatchData:
         n_ensemble: int = 1,
         data_mask: TensorMapping | None = None,
         stepper_state: StepperState | None = None,
+        stepper_metrics: StepperMetrics | None = None,
     ) -> "BatchData":
         """
         Move the data to the current global device specified by get_device().
@@ -350,6 +368,11 @@ class BatchData:
             n_ensemble=n_ensemble,
             data_mask=data_mask,
             stepper_state=stepper_state,
+            stepper_metrics=(
+                stepper_metrics
+                if stepper_metrics is not None
+                else null_stepper_metrics()
+            ),
             **kwargs,
         )
 
@@ -461,6 +484,7 @@ class BatchData:
             n_ensemble=self.n_ensemble,
             data_mask=self.data_mask,
             stepper_state=self.stepper_state,
+            stepper_metrics=self.stepper_metrics,
         )
 
     def remove_initial_condition(self: SelfType, n_ic_timesteps: int) -> SelfType:
@@ -478,6 +502,7 @@ class BatchData:
             n_ensemble=self.n_ensemble,
             data_mask=self.data_mask,
             stepper_state=self.stepper_state,
+            stepper_metrics=self.stepper_metrics,
         )
 
     def subset_names(self: SelfType, names: Collection[str]) -> SelfType:
@@ -497,6 +522,7 @@ class BatchData:
             n_ensemble=self.n_ensemble,
             data_mask=data_mask,
             stepper_state=self.stepper_state,
+            stepper_metrics=self.stepper_metrics,
         )
 
     def get_start(
@@ -536,6 +562,7 @@ class BatchData:
             n_ensemble=self.n_ensemble,
             data_mask=self.data_mask,
             stepper_state=self.stepper_state,
+            stepper_metrics=self.stepper_metrics,
         )
 
     def prepend(self: SelfType, initial_condition: PrognosticState) -> SelfType:
@@ -561,6 +588,7 @@ class BatchData:
             n_ensemble=self.n_ensemble,
             data_mask=self.data_mask,
             stepper_state=self.stepper_state,
+            stepper_metrics=self.stepper_metrics,
         )
 
     def broadcast_ensemble(self: SelfType, n_ensemble: int) -> SelfType:
@@ -605,6 +633,7 @@ class BatchData:
                 if self.stepper_state is not None
                 else None
             ),
+            stepper_metrics=self.stepper_metrics.broadcast_ensemble(n_ensemble),
         )
 
     def pin_memory(self: SelfType) -> SelfType:
@@ -623,6 +652,7 @@ class BatchData:
             }
         if self.stepper_state is not None:
             self.stepper_state.pin_memory()
+        self.stepper_metrics = self.stepper_metrics.pin_memory()
         return self
 
 

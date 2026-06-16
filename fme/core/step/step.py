@@ -12,8 +12,30 @@ from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
 from fme.core.registry.registry import Registry
 from fme.core.step.args import StepArgs
+from fme.core.step.metrics import NullStepMetrics, StepMetrics
 from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorDict, TensorMapping
+
+
+@dataclasses.dataclass
+class StepOutput:
+    """The result of stepping a model forward one timestep.
+
+    Attributes:
+        output: The denormalized output data at the next timestep, after all
+            adjustments (corrector, ocean, prescribed prognostics) are applied.
+        stepper_state: The per-sample state to thread into the next step call,
+            or ``None``. Unchanged passthrough semantics relative to the prior
+            ``(output, stepper_state)`` tuple return.
+        metrics: An opaque, step-implementation-specific payload of extra
+            per-step quantities for that step's loss and aggregator to consume
+            (e.g. pre-correction values at a corrector boundary). Defaults to
+            ``NullStepMetrics`` so generic consumers need no branches.
+    """
+
+    output: TensorDict
+    stepper_state: StepperState | None
+    metrics: StepMetrics = dataclasses.field(default_factory=NullStepMetrics)
 
 
 # Children still need to decorate with @dataclass, otherwise
@@ -340,7 +362,7 @@ class StepABC(abc.ABC):
         self: SelfType,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> tuple[TensorDict, StepperState | None]:
+    ) -> StepOutput:
         """
         Step the model forward one timestep given input data.
 
@@ -349,9 +371,9 @@ class StepABC(abc.ABC):
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
-            A tuple ``(output, stepper_state)`` where ``output`` is the
-            denormalized data at the next time step and ``stepper_state`` is
-            the per-sample state to thread into the next call (or ``None``).
+            A ``StepOutput`` carrying the denormalized output data at the next
+            timestep, the per-sample ``stepper_state`` to thread into the next
+            call (or ``None``), and an opaque ``metrics`` payload.
         """
         pass
 

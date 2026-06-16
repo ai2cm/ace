@@ -34,7 +34,7 @@ from fme.core.step.secondary_decoder import (
     SecondaryDecoder,
     SecondaryDecoderConfig,
 )
-from fme.core.step.step import StepABC, StepConfigABC, StepSelector
+from fme.core.step.step import StepABC, StepConfigABC, StepOutput, StepSelector
 from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -378,7 +378,7 @@ class SingleModuleStep(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> tuple[TensorDict, StepperState | None]:
+    ) -> StepOutput:
         def network_call(input_norm: TensorDict) -> TensorDict:
             if args.data_mask is not None:
                 input_norm = _apply_input_mask(input_norm, args.data_mask)
@@ -511,7 +511,7 @@ def step_with_adjustments(
     global_mean_removal: GlobalMeanRemoval | None = None,
     data_mask: TensorMapping | None = None,
     stepper_state: StepperState | None = None,
-) -> tuple[TensorDict, StepperState | None]:
+) -> StepOutput:
     """
     Step the model forward one timestep given input data.
 
@@ -546,8 +546,8 @@ def step_with_adjustments(
             ``StepperState``. Pass-through unchanged when no corrector is set.
 
     Returns:
-        A tuple ``(output, stepper_state)`` where ``output`` is the
-        denormalized data at the next time step.
+        A ``StepOutput`` whose ``output`` is the denormalized data at the next
+        time step. ``metrics`` defaults to ``NullStepMetrics``.
     """
     if prescribed_prognostic_names is None:
         prescribed_prognostic_names = []
@@ -588,4 +588,4 @@ def step_with_adjustments(
             raise ValueError(
                 f"prescribed_prognostic_name '{name}' not in next_step_input_data"
             )
-    return output, stepper_state
+    return StepOutput(output=output, stepper_state=stepper_state)

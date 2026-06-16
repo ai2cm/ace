@@ -57,14 +57,14 @@ def test_multi_call():
     initial_condition = {"temperature": torch.ones(shape)}
     co2_data = {"CO2": torch.full(shape, co2_value)}
 
-    output, _ = multi_call.step(
+    output = multi_call.step(
         args=StepArgs(
             input=initial_condition | co2_data,
             next_step_input_data={},
             labels=None,
         ),
         wrapper=lambda x: x,
-    )
+    ).output
 
     assert set(output) == set(config.names)
     for name in config.output_names:

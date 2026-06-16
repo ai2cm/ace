@@ -20,6 +20,7 @@ _METADATA_FIELDS = {
     "labels",
     "data_mask",
     "stepper_state",
+    "stepper_metrics",
 }
 _NON_METADATA_FIELDS = {"data", "time"}
 
@@ -50,6 +51,7 @@ def assert_metadata_equal(
             dict(b.data_mask) if b.data_mask is not None else None,
         )
     _assert_stepper_state_equal_up_to_device(a.stepper_state, b.stepper_state)
+    assert a.stepper_metrics == b.stepper_metrics
 
 
 def _assert_stepper_state_equal_up_to_device(

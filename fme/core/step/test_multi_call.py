@@ -53,14 +53,14 @@ def test_multi_call(include_multi_call_in_loss: bool):
             "b": torch.randn(1, 2, 3, 4),
             "CO2": torch.randn(1, 2, 3, 4),
         }
-        out, _ = step.step(
+        out = step.step(
             args=StepArgs(
                 input=input,
                 next_step_input_data={},
                 labels=None,
             ),
             wrapper=lambda x: x,
-        )
+        ).output
     torch.testing.assert_close(out["b"], input["CO2"])
     torch.testing.assert_close(out["c"], input["CO2"])
     torch.testing.assert_close(out["c_doubled_co2"], input["CO2"] * 2)
