@@ -13,6 +13,7 @@ import xarray as xr
 from torch import nn
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
+from fme.ace.data_loading.step_diagnostics import StepDiagnostics
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
 from fme.ace.stepper.loss_schedule import LossSchedule
@@ -1209,6 +1210,17 @@ class Stepper:
                     NullOptimization(),
                 )
             )
+        # The per-step uncorrected shadows form a per-output-timestep diagnostic
+        # series (no initial-condition entry), aligned with the forward steps. We
+        # stack them once into the time-aware carriage container and attach it to
+        # the final prediction below, after the IC-windowing pipeline (which
+        # leaves the series forward-step aligned again). Empty mapping when no
+        # corrector modified any variable.
+        step_diagnostics = StepDiagnostics(
+            uncorrected=stack_list_of_tensor_dicts(
+                [step_output.uncorrected for step_output in output_list], time_dim=1
+            )
+        )
         data = process_prediction_generator_list(
             output_list,
             time=forcing_data.time[:, self.n_ic_timesteps :],
@@ -1234,6 +1246,7 @@ class Stepper:
             labels=data.labels,
             n_ensemble=data.n_ensemble,
             stepper_state=data.stepper_state,
+            step_diagnostics=step_diagnostics,
         )
         return data, prognostic_state
 

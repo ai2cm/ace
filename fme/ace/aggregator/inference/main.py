@@ -9,6 +9,7 @@ import torch
 import xarray as xr
 
 from fme.ace.data_loading.batch_data import PairedData, PrognosticState
+from fme.ace.data_loading.step_diagnostics import get_uncorrected
 from fme.core.coordinates import HorizontalCoordinates, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.diagnostics import get_reduced_diagnostics, write_reduced_diagnostics
@@ -28,6 +29,12 @@ from ..one_step.ensemble import EnsembleMetricConfig, SelectStepEnsembleAggregat
 from ..one_step.reduced import StepMeanMetricConfig
 from .annual import AnnualMetricConfig, GlobalMeanAnnualAggregator
 from .build_context import MetricBuildContext, MetricNotSupportedError
+from .correction import (
+    CorrectionMeanAggregator,
+    CorrectionRecorder,
+    CorrectionTimeMeanAggregator,
+    build_correction_aggregators,
+)
 from .data import InferenceBatchData, MetricBuildResult, SubAggregator, TimeSeriesLogs
 from .enso import RegionalIndexAggregator
 from .enso.dynamic_index import EnsoIndexMetricConfig
@@ -96,6 +103,7 @@ def build_inference_evaluator_aggregator(
     n_ensemble_per_ic: int = 1,
     enable_time_series: bool = True,
     raise_on_unsupported: bool = True,
+    log_correction_metrics: bool = True,
 ) -> "InferenceEvaluatorAggregator":
     _validate_no_duplicate_names(metrics)
     if save_diagnostics and output_dir is None:
@@ -152,6 +160,16 @@ def build_inference_evaluator_aggregator(
         if result.ensemble is not None:
             ensemble_aggregators[name] = result.ensemble
 
+    if log_correction_metrics:
+        correction = build_correction_aggregators(
+            gridded_operations=dataset_info.gridded_operations,
+            n_timesteps=n_timesteps,
+            variable_metadata=dataset_info.variable_metadata,
+            enable_time_series=enable_time_series,
+        )
+    else:
+        correction = None
+
     return InferenceEvaluatorAggregator(
         aggregators=aggregators,
         time_series_aggregators=time_series_aggregators,
@@ -162,6 +180,8 @@ def build_inference_evaluator_aggregator(
         output_dir=output_dir,
         n_ensemble_per_ic=n_ensemble_per_ic,
         ensemble_aggregators=ensemble_aggregators,
+        correction_time_mean=None if correction is None else correction.time_mean,
+        correction_time_series=(None if correction is None else correction.time_series),
     )
 
 
@@ -201,6 +221,11 @@ class InferenceEvaluatorAggregatorConfig:
         ipo_index: Interdecadal Pacific Oscillation index metrics.
         monthly_reference_data: Path to monthly reference data to compare against.
         time_mean_reference_data: Path to reference time means to compare against.
+        log_correction_metrics: Whether to log normalized-space metrics of the
+            corrector's correction (``output - uncorrected``) under the
+            ``time_mean_norm`` and ``mean_norm`` label groups. Defaults on; has
+            no effect when the stepper has no corrector (the uncorrected
+            prediction is then empty and the correction aggregators stay silent).
     """
 
     mean_denorm: MeanMetricConfig = dataclasses.field(
@@ -249,6 +274,7 @@ class InferenceEvaluatorAggregatorConfig:
     )
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
+    log_correction_metrics: bool = True
 
     def __post_init__(self):
         if self.mean_denorm.target != "denorm":
@@ -318,6 +344,7 @@ class InferenceEvaluatorAggregatorConfig:
             n_ensemble_per_ic=n_ensemble_per_ic,
             enable_time_series=enable_time_series,
             raise_on_unsupported=False,
+            log_correction_metrics=self.log_correction_metrics,
         )
 
 
@@ -500,6 +527,8 @@ class InferenceEvaluatorAggregator(
         output_dir: str | None = None,
         n_ensemble_per_ic: int = 1,
         ensemble_aggregators: dict[str, SelectStepEnsembleAggregator] | None = None,
+        correction_time_mean: CorrectionTimeMeanAggregator | None = None,
+        correction_time_series: CorrectionMeanAggregator | None = None,
     ):
         if save_diagnostics and output_dir is None:
             raise ValueError("Output directory must be set to save diagnostics")
@@ -515,6 +544,11 @@ class InferenceEvaluatorAggregator(
         if n_ensemble_per_ic > 1:
             summary_aggregators.update(self._ensemble_aggregators)
         self._summary_aggregators = summary_aggregators
+        self._correction = CorrectionRecorder(
+            normalize=normalize,
+            time_mean=correction_time_mean,
+            time_series=correction_time_series,
+        )
         self._coords = coords
         self.n_ic_steps = n_ic_steps
         self._normalize = normalize
@@ -547,6 +581,11 @@ class InferenceEvaluatorAggregator(
         )
         for aggregator in self._aggregators.values():
             aggregator.record_batch(batch)
+        self._correction.record(
+            prediction=data.prediction,
+            uncorrected=get_uncorrected(data.step_diagnostics),
+            i_time_start=self._n_timesteps_seen,
+        )
         if self.n_ensemble_per_ic > 1:
             unfolded_target_data, unfolded_prediction_data = (
                 data.as_ensemble_tensor_dicts(data.n_ensemble)
@@ -616,6 +655,7 @@ class InferenceEvaluatorAggregator(
         for name, aggregator in self._summary_aggregators.items():
             logging.info(f"Getting summary logs for {name} aggregator")
             logs.update(aggregator.get_logs(label=name))
+        logs.update(self._correction.summary_logs())
         loss = logs.get("time_mean_norm/rmse/channel_mean")
         return InferenceSummary(logs=logs, loss=loss)
 
@@ -648,13 +688,14 @@ class InferenceEvaluatorAggregator(
         logs = {}
         for name, aggregator in self._time_series_aggregators.items():
             logs.update(aggregator.get_logs(label=name, step_slice=step_slice))
+        logs.update(self._correction.time_series_logs(step_slice))
         return to_inference_logs(logs)
 
     @torch.no_grad()
     def flush_diagnostics(self, subdir: str | None = None):
         if self._save_diagnostics:
             reduced_diagnostics = get_reduced_diagnostics(
-                sub_aggregators=self._aggregators,
+                sub_aggregators={**self._aggregators, **self._correction.diagnostics()},
                 coords=self._coords,
             )
             if self._output_dir is not None:
@@ -707,10 +748,19 @@ class InferenceAggregatorConfig:
     Parameters:
         time_mean_reference_data: Path to reference time means to compare against.
         log_global_mean_time_series: Whether to log global mean time series metrics.
+        log_correction_metrics: Whether to log normalized-space metrics of the
+            corrector's correction (``output - uncorrected``) under newly
+            introduced ``time_mean_norm`` and ``mean_norm`` label groups (which
+            otherwise do not exist for no-target inference, as it has no
+            reference data). Defaults on; has no effect when the stepper has no
+            corrector. Correction metrics are computed in normalized space, so
+            they are only built when the stepper's network normalizer is passed
+            to ``build``; otherwise this flag has no effect.
     """
 
     time_mean_reference_data: str | None = None
     log_global_mean_time_series: bool = True
+    log_correction_metrics: bool = True
 
     def build(
         self,
@@ -718,6 +768,7 @@ class InferenceAggregatorConfig:
         n_timesteps: int,
         output_dir: str | None = None,
         save_diagnostics: bool = True,
+        normalize: Callable[[TensorMapping], TensorDict] | None = None,
     ) -> "InferenceAggregator":
         if self.time_mean_reference_data is not None:
             time_means = xr.open_dataset(
@@ -778,12 +829,32 @@ class InferenceAggregatorConfig:
                 regional_mean=gridded_operations.regional_area_weighted_mean,
             )
 
+        if self.log_correction_metrics and normalize is not None:
+            correction = build_correction_aggregators(
+                gridded_operations=gridded_operations,
+                n_timesteps=n_timesteps,
+                variable_metadata=dataset_info.variable_metadata,
+                enable_time_series=True,
+            )
+            correction_time_mean: CorrectionTimeMeanAggregator | None = (
+                correction.time_mean
+            )
+            correction_time_series: CorrectionMeanAggregator | None = (
+                correction.time_series
+            )
+        else:
+            correction_time_mean = None
+            correction_time_series = None
+
         return InferenceAggregator(
             aggregators=aggregators,
             time_series_aggregators=time_series_aggregators,
             coords=horizontal_coordinates.coords,
             save_diagnostics=save_diagnostics,
             output_dir=output_dir,
+            normalize=normalize,
+            correction_time_mean=correction_time_mean,
+            correction_time_series=correction_time_series,
         )
 
 
@@ -807,6 +878,9 @@ class InferenceAggregator(
         coords: Mapping[str, np.ndarray],
         save_diagnostics: bool = True,
         output_dir: str | None = None,
+        normalize: Callable[[TensorMapping], TensorDict] | None = None,
+        correction_time_mean: CorrectionTimeMeanAggregator | None = None,
+        correction_time_series: CorrectionMeanAggregator | None = None,
     ):
         if save_diagnostics and output_dir is None:
             raise ValueError("Output directory must be set to save diagnostics")
@@ -817,10 +891,17 @@ class InferenceAggregator(
             for name, agg in aggregators.items()
             if name not in time_series_aggregators
         }
+        self._correction = CorrectionRecorder(
+            normalize=normalize if normalize is not None else (lambda x: dict(x)),
+            time_mean=correction_time_mean,
+            time_series=correction_time_series,
+        )
         self._coords = coords
         self._save_diagnostics = save_diagnostics
         self._output_dir = output_dir
-        self._log_time_series = len(time_series_aggregators) > 0
+        self._log_time_series = (
+            len(time_series_aggregators) > 0 or correction_time_series is not None
+        )
         self._n_timesteps_seen = 0
 
     @property
@@ -844,6 +925,11 @@ class InferenceAggregator(
         )
         for aggregator in self._aggregators.values():
             aggregator.record_batch(batch)
+        self._correction.record(
+            prediction=data.prediction,
+            uncorrected=get_uncorrected(data.step_diagnostics),
+            i_time_start=self._n_timesteps_seen,
+        )
         n_times = data.time.shape[1]
         logs = self._get_inference_logs_slice(
             step_slice=slice(self._n_timesteps_seen, self._n_timesteps_seen + n_times),
@@ -880,6 +966,7 @@ class InferenceAggregator(
         for name, aggregator in self._summary_aggregators.items():
             logging.info(f"Getting summary logs for {name} aggregator")
             logs.update(aggregator.get_logs(label=name))
+        logs.update(self._correction.summary_logs())
         return InferenceSummary(logs=logs, loss=None)
 
     def get_summary_logs(self) -> InferenceLog:
@@ -891,6 +978,7 @@ class InferenceAggregator(
         logs = {}
         for name, aggregator in self._aggregators.items():
             logs.update(aggregator.get_logs(label=name))
+        logs.update(self._correction.summary_logs())
         return logs
 
     @torch.no_grad()
@@ -916,13 +1004,14 @@ class InferenceAggregator(
         logs = {}
         for name, aggregator in self._time_series_aggregators.items():
             logs.update(aggregator.get_logs(label=name, step_slice=step_slice))
+        logs.update(self._correction.time_series_logs(step_slice))
         return to_inference_logs(logs)
 
     @torch.no_grad()
     def flush_diagnostics(self, subdir: str | None = None):
         if self._save_diagnostics:
             reduced_diagnostics = get_reduced_diagnostics(
-                sub_aggregators=self._aggregators,
+                sub_aggregators={**self._aggregators, **self._correction.diagnostics()},
                 coords=self._coords,
             )
             if self._output_dir is not None:

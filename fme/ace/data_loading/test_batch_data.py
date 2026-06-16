@@ -5,7 +5,13 @@ import pytest
 import torch
 import xarray as xr
 
-from fme.ace.data_loading.batch_data import BatchData, PairedData, _collate_with_masking
+from fme.ace.data_loading.batch_data import (
+    BatchData,
+    PairedData,
+    PrognosticState,
+    _collate_with_masking,
+)
+from fme.ace.data_loading.step_diagnostics import StepDiagnostics
 from fme.core.corrector.state import CorrectorState
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
@@ -20,6 +26,7 @@ _METADATA_FIELDS = {
     "labels",
     "data_mask",
     "stepper_state",
+    "step_diagnostics",
 }
 _NON_METADATA_FIELDS = {"data", "time"}
 
@@ -50,6 +57,14 @@ def assert_metadata_equal(
             dict(b.data_mask) if b.data_mask is not None else None,
         )
     _assert_stepper_state_equal_up_to_device(a.stepper_state, b.stepper_state)
+    _assert_step_diagnostics_equal_up_to_device(a.step_diagnostics, b.step_diagnostics)
+
+
+def _assert_step_diagnostics_equal_up_to_device(a, b) -> None:
+    if a is None or b is None:
+        assert a is None and b is None
+        return
+    _assert_tensor_mapping_equal_up_to_device(dict(a.uncorrected), dict(b.uncorrected))
 
 
 def _assert_stepper_state_equal_up_to_device(
@@ -110,6 +125,8 @@ def assert_batchdata_equal_up_to_device(a: BatchData, b: BatchData) -> None:
             _assert_tensor_mapping_equal_up_to_device(va, vb)
         elif field.name == "stepper_state":
             _assert_stepper_state_equal_up_to_device(va, vb)
+        elif field.name == "step_diagnostics":
+            _assert_step_diagnostics_equal_up_to_device(va, vb)
         else:
             assert va == vb
 
@@ -139,6 +156,8 @@ def assert_paired_data_equal_up_to_device(a: PairedData, b: PairedData) -> None:
                 )
         elif field.name == "data_mask":
             _assert_tensor_mapping_equal_up_to_device(va, vb)
+        elif field.name == "step_diagnostics":
+            _assert_step_diagnostics_equal_up_to_device(va, vb)
         else:
             assert va == vb
 
@@ -1039,3 +1058,238 @@ def test_stepper_state_pin_memory():
     p = state.corrector_state.global_dry_air_mass
     assert p is not None
     assert p.is_pinned()
+
+
+# ---------------------------------------------------------------------------
+# StepDiagnostics carriage: it must survive (and stay time-aligned through)
+# every structure-preserving method on BatchData and PairedData. The
+# parametrization is the point: a future method that forgets to thread the
+# container fails here. Mirrors the stepper_state threading assertions above.
+# ---------------------------------------------------------------------------
+
+
+def _batch_data_with_step_diagnostics(
+    names: list[str],
+    n_samples: int,
+    n_times: int,
+    n_lat: int = 8,
+    n_lon: int = 16,
+    device: torch.device | None = None,
+) -> BatchData:
+    """BatchData carrying a populated, time-encoded StepDiagnostics.
+
+    The carried series is sparse (one corrector-modified variable) and each
+    timestep is stamped with its step index, so slicing methods can be verified
+    by content as well as shape.
+    """
+    if device is None:
+        device = torch.device("cpu")
+    data = {
+        name: torch.randn(n_samples, n_times, n_lat, n_lon, device=device)
+        for name in names
+    }
+    step_index = torch.arange(n_times, dtype=torch.float32, device=device)
+    uncorrected = {
+        names[0]: step_index.reshape(1, n_times, 1, 1)
+        .expand(n_samples, n_times, n_lat, n_lon)
+        .clone()
+    }
+    time = xr.DataArray(
+        np.broadcast_to(np.arange(n_times), (n_samples, n_times)).copy(),
+        dims=["sample", "time"],
+    )
+    return BatchData(
+        data=data,
+        time=time,
+        horizontal_dims=["lat", "lon"],
+        step_diagnostics=StepDiagnostics(uncorrected=uncorrected),
+    )
+
+
+@pytest.mark.parametrize(
+    "method",
+    [
+        "to_device",
+        "to_cpu",
+        "broadcast_ensemble",
+        "subset_names",
+        "compute_derived_variables",
+        "select_time_slice",
+        "remove_initial_condition",
+        "get_start",
+        "get_end",
+        "prepend",
+    ],
+)
+def test_step_diagnostics_survives_structure_preserving_method(method: str):
+    n_samples, n_times, n_ic = 2, 4, 1
+    names = ["a", "b"]
+    bd = _batch_data_with_step_diagnostics(names, n_samples, n_times)
+    ic = PrognosticState(
+        BatchData(
+            data={name: torch.randn(n_samples, n_ic, 8, 16) for name in names},
+            time=xr.DataArray(
+                np.broadcast_to(-np.arange(n_ic) - 1, (n_samples, n_ic)).copy(),
+                dims=["sample", "time"],
+            ),
+            horizontal_dims=["lat", "lon"],
+        )
+    )
+
+    if method == "to_device":
+        result = bd.to_device()
+    elif method == "to_cpu":
+        result = bd.to_cpu()
+    elif method == "broadcast_ensemble":
+        result = bd.broadcast_ensemble(3)
+    elif method == "subset_names":
+        result = bd.subset_names({"a"})
+    elif method == "compute_derived_variables":
+        result = bd.compute_derived_variables(lambda data, forcing: {}, bd)
+    elif method == "select_time_slice":
+        result = bd.select_time_slice(slice(1, 3))
+    elif method == "remove_initial_condition":
+        result = bd.remove_initial_condition(n_ic)
+    elif method == "get_start":
+        result = bd.get_start({"a"}, n_ic).as_batch_data()
+    elif method == "get_end":
+        result = bd.get_end({"a"}, n_ic).as_batch_data()
+    elif method == "prepend":
+        result = bd.prepend(ic)
+    else:
+        raise AssertionError(f"unhandled method {method}")
+
+    sd = result.step_diagnostics
+    assert sd is not None, f"{method} dropped step_diagnostics"
+    assert set(sd.uncorrected) == {"a"}
+    # The carried series stays aligned (sample, time) with the resulting data.
+    n_result_samples, n_result_time = result.time.shape
+    for tensor in sd.uncorrected.values():
+        assert tensor.shape[0] == n_result_samples
+        assert tensor.shape[1] == n_result_time
+
+    # Content checks: the time-touching methods slice/pad the stamped step index.
+    step_index = sd.uncorrected["a"][:, :, 0, 0].cpu()
+    if method == "select_time_slice":
+        torch.testing.assert_close(step_index[0], torch.tensor([1.0, 2.0]))
+    elif method == "remove_initial_condition":
+        torch.testing.assert_close(
+            step_index[0], torch.arange(n_ic, n_times, dtype=torch.float32)
+        )
+    elif method == "get_start":
+        torch.testing.assert_close(
+            step_index[0], torch.arange(0, n_ic, dtype=torch.float32)
+        )
+    elif method == "get_end":
+        torch.testing.assert_close(
+            step_index[0], torch.arange(n_times - n_ic, n_times, dtype=torch.float32)
+        )
+    elif method == "prepend":
+        assert torch.isnan(step_index[0, :n_ic]).all()
+        torch.testing.assert_close(
+            step_index[0, n_ic:], torch.arange(n_times, dtype=torch.float32)
+        )
+
+
+def test_step_diagnostics_preserved_when_absent():
+    """Structure-preserving methods leave an absent container absent."""
+    bd = get_batch_data(
+        ["a", "b"], n_samples=2, n_times=4, horizontal_dims=["lat", "lon"]
+    )
+    assert bd.step_diagnostics is None
+    assert bd.select_time_slice(slice(1, 3)).step_diagnostics is None
+    assert bd.compute_derived_variables(lambda d, f: {}, bd).step_diagnostics is None
+    assert bd.broadcast_ensemble(2).step_diagnostics is None
+
+
+@pytest.mark.parametrize("method", ["broadcast_ensemble", "from_batch_data"])
+def test_paired_data_step_diagnostics_survives(method: str):
+    n_samples, n_times = 2, 4
+    names = ["a", "b"]
+    prediction = _batch_data_with_step_diagnostics(
+        names, n_samples, n_times, device=get_device()
+    )
+    reference = get_batch_data(
+        names, n_samples=n_samples, n_times=n_times, horizontal_dims=["lat", "lon"]
+    )
+    # Align time coords so from_batch_data accepts the pair.
+    reference = BatchData(
+        data=reference.data,
+        time=prediction.time,
+        horizontal_dims=reference.horizontal_dims,
+    )
+    paired = PairedData.from_batch_data(prediction=prediction, reference=reference)
+    assert paired.step_diagnostics is not None
+
+    if method == "from_batch_data":
+        result = paired
+    elif method == "broadcast_ensemble":
+        result = paired.broadcast_ensemble(3)
+    else:
+        raise AssertionError(f"unhandled method {method}")
+
+    sd = result.step_diagnostics
+    assert sd is not None, f"{method} dropped step_diagnostics"
+    assert set(sd.uncorrected) == {"a"}
+    n_result_samples, n_result_time = result.time.shape
+    for tensor in sd.uncorrected.values():
+        assert tensor.shape[0] == n_result_samples
+        assert tensor.shape[1] == n_result_time
+
+
+def test_paired_data_new_constructors_carry_step_diagnostics():
+    n_samples, n_times = 2, 3
+    device = get_device()
+    prediction = {"a": torch.randn(n_samples, n_times, 8, 16, device=device)}
+    reference = {"a": torch.randn(n_samples, n_times, 8, 16, device=device)}
+    time = xr.DataArray(np.zeros((n_samples, n_times)), dims=["sample", "time"])
+    sd = StepDiagnostics(
+        uncorrected={"a": torch.randn(n_samples, n_times, 8, 16, device=device)}
+    )
+    on_device = PairedData.new_on_device(
+        prediction=prediction, reference=reference, time=time, step_diagnostics=sd
+    )
+    assert on_device.step_diagnostics is sd
+    cpu_pred = {k: v.cpu() for k, v in prediction.items()}
+    cpu_ref = {k: v.cpu() for k, v in reference.items()}
+    cpu_sd = StepDiagnostics(uncorrected={"a": sd.uncorrected["a"].cpu()})
+    on_cpu = PairedData.new_on_cpu(
+        prediction=cpu_pred, reference=cpu_ref, time=time, step_diagnostics=cpu_sd
+    )
+    assert on_cpu.step_diagnostics is cpu_sd
+
+
+def test_step_diagnostics_post_init_validates_sample_dim():
+    """A container whose leading dim disagrees with the batch fails fast."""
+    with pytest.raises(ValueError, match="step_diagnostics leading dim"):
+        BatchData(
+            data={"a": torch.randn(2, 3, 8, 16)},
+            time=xr.DataArray(np.zeros((2, 3)), dims=["sample", "time"]),
+            horizontal_dims=["lat", "lon"],
+            step_diagnostics=StepDiagnostics(
+                uncorrected={"a": torch.randn(5, 3, 8, 16)}
+            ),
+        )
+
+
+@pytest.mark.parallel
+def test_step_diagnostics_scatter_spatial():
+    n_samples, n_times, n_lat, n_lon = 2, 3, 8, 16
+    bd = _batch_data_with_step_diagnostics(["a", "b"], n_samples, n_times, n_lat, n_lon)
+    scattered = bd.scatter_spatial((n_lat, n_lon))
+    sd = scattered.step_diagnostics
+    assert sd is not None
+    # The carried series is scattered to the same local spatial chunk as data.
+    assert sd.uncorrected["a"].shape == scattered.data["a"].shape
+    assert sd.uncorrected["a"].shape[:2] == (n_samples, n_times)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="pin_memory requires CUDA")
+def test_step_diagnostics_pin_memory():
+    bd = _batch_data_with_step_diagnostics(
+        ["a", "b"], n_samples=2, n_times=3, device=torch.device("cpu")
+    )
+    pinned = bd.pin_memory()
+    assert pinned.step_diagnostics is not None
+    for tensor in pinned.step_diagnostics.uncorrected.values():
+        assert tensor.is_pinned()
