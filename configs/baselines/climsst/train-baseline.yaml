@@ -22,7 +22,8 @@ inference:
         data_path: /climate-default/2023-08-11-vertically-resolved-1deg-fme-ensemble-dataset/ic_0011
       num_data_workers: 4
     aggregator:
-      log_histograms: true
+      histogram:
+        enabled: true
       time_mean_reference_data: /statsdata/time-mean.nc
 logging:
   log_to_screen: true
@@ -57,14 +58,15 @@ train_loader:
       subset: *subset
     - data_path: /climate-default/2023-08-11-vertically-resolved-1deg-fme-ensemble-dataset/ic_0010
       subset: *subset
-validation_loader:
-  batch_size: 128
-  num_data_workers: 4
-  prefetch_factor: 4
-  dataset:
-    data_path: /climate-default/2023-08-11-vertically-resolved-1deg-fme-ensemble-dataset/ic_0011
-    subset:
-      stop: 1456
+validation:
+  loader:
+    batch_size: 128
+    num_data_workers: 4
+    prefetch_factor: 4
+    dataset:
+      data_path: /climate-default/2023-08-11-vertically-resolved-1deg-fme-ensemble-dataset/ic_0011
+      subset:
+        stop: 1456
 optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001
@@ -108,6 +110,8 @@ stepper:
           separable: false
           spectral_layers: 3
           spectral_transform: sht
+          affine_norms: true
+          normalize_big_skip: true
       normalization:
         network:
           global_means_path: /statsdata/centering.nc

@@ -10,6 +10,7 @@ import torch
 import xarray as xr
 
 from fme.ace.aggregator.plotting import get_cmap_limits, plot_imshow, plot_paneled_data
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
@@ -17,7 +18,7 @@ from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorDict
 from fme.core.wandb import WandB
 
-from ..build_context import MetricBuildContext
+from ..build_context import MetricBuildContext, MetricNotSupportedError
 from ..data import InferenceBatchData, MetricBuildResult
 from .historical_index import INDEX_CALENDAR, NINO34_INDEX
 
@@ -251,8 +252,10 @@ class EnsoCoefficientEvaluatorAggregator:
         images, metrics = {}, {}
         for name in gen_coefficients.keys():
             if name in self._variable_metadata:
-                caption_name = self._variable_metadata[name].long_name
-                caption_units = self._variable_metadata[name].units
+                caption_name = self._variable_metadata[name].display_long_name(name)
+                caption_units = self._variable_metadata[name].display_units(
+                    "unknown units"
+                )
             else:
                 caption_name = name
                 caption_units = "unknown units"
@@ -327,8 +330,8 @@ class EnsoCoefficientEvaluatorAggregator:
 
     def _get_var_attrs(self, name: str) -> dict[str, str]:
         if name in self._variable_metadata:
-            attrs_name = self._variable_metadata[name].long_name
-            attrs_units = self._variable_metadata[name].units
+            attrs_name = self._variable_metadata[name].display_long_name(name)
+            attrs_units = self._variable_metadata[name].display_units("unknown units")
         else:
             attrs_name = name
             attrs_units = "unknown units"
@@ -460,13 +463,24 @@ def reduce_data(dist: Distributed, rank_tensor_dict: TensorDict) -> TensorDict |
 
 @dataclasses.dataclass
 class EnsoCoefficientMetricConfig:
-    type: Literal["enso_coefficient"] = "enso_coefficient"
     name: str = "enso_coefficient"
+    enabled: bool = True
+    strict: bool = False
 
     def get_name(self) -> str:
         return self.name
 
     def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        if not isinstance(ctx.horizontal_coordinates, LatLonCoordinates):
+            raise MetricNotSupportedError(
+                "enso_coefficient metric requires LatLonCoordinates."
+            )
+        total_duration = ctx.n_timesteps * ctx.timestep
+        if total_duration <= datetime.timedelta(days=1800):
+            raise MetricNotSupportedError(
+                f"enso_coefficient metric requires > ~5 years of data, "
+                f"got {total_duration.days} days"
+            )
         return MetricBuildResult(
             aggregator=EnsoCoefficientEvaluatorAggregator(
                 ctx.initial_time,

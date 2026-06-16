@@ -182,6 +182,79 @@ def test_paired_spherical_power_spectrum_aggregator(report_plot: bool):
         assert "spectrum/a" not in result
 
 
+def _record_two_variables(
+    agg: PairedSphericalPowerSpectrumAggregator, nlat: int, nlon: int
+):
+    """Push one batch through ``agg`` for two distinct variables. Helper for
+    the directional-bias and plot-variables tests below — both want a
+    populated aggregator state and the same fixture twice would be churn."""
+    data = {
+        "a": torch.randn(2, 3, nlat, nlon, device=fme.get_device()),
+        "b": torch.randn(2, 3, nlat, nlon, device=fme.get_device()),
+    }
+    agg.record_batch(
+        InferenceBatchData(
+            prediction=data,
+            prediction_norm={},
+            target=data,
+            target_norm={},
+            time=make_dummy_time(2, 3),
+            i_time_start=0,
+        )
+    )
+
+
+@pytest.mark.parametrize("report_directional_bias", [True, False])
+def test_paired_spherical_power_spectrum_directional_bias_flag(
+    report_directional_bias: bool,
+):
+    """When ``report_directional_bias=False``, the per-variable
+    ``positive_norm_bias`` and ``negative_norm_bias`` scalars are not
+    emitted. ``mean_abs_norm_bias`` and ``smallest_scale_norm_bias``
+    are unaffected.
+    """
+    nlat, nlon = 8, 16
+    agg = PairedSphericalPowerSpectrumAggregator(
+        get_gridded_operations(nlat, nlon),
+        report_plot=False,
+        report_directional_bias=report_directional_bias,
+    )
+    _record_two_variables(agg, nlat, nlon)
+    result = agg.get_logs("spectrum")
+    keys = set(result)
+    if report_directional_bias:
+        assert "spectrum/positive_norm_bias/a" in keys
+        assert "spectrum/negative_norm_bias/a" in keys
+    else:
+        assert not any(k.startswith("spectrum/positive_norm_bias/") for k in keys)
+        assert not any(k.startswith("spectrum/negative_norm_bias/") for k in keys)
+    # ``mean_abs_norm_bias`` is the directional pair's summary; always emitted.
+    assert "spectrum/mean_abs_norm_bias/a" in keys
+    assert "spectrum/smallest_scale_norm_bias/a" in keys
+
+
+def test_paired_spherical_power_spectrum_plot_variables_filter():
+    """``plot_variables`` restricts which variables get per-variable
+    spectrum-pair PNGs while leaving scalar metrics intact for every
+    variable. This is the key property: cohort-wide scalar comparisons
+    stay cheap while plot output is capped at the named subset.
+    """
+    nlat, nlon = 8, 16
+    agg = PairedSphericalPowerSpectrumAggregator(
+        get_gridded_operations(nlat, nlon),
+        report_plot=True,
+        plot_variables=["a"],
+    )
+    _record_two_variables(agg, nlat, nlon)
+    result = agg.get_logs("spectrum")
+    # Plot only for "a".
+    assert isinstance(result["spectrum/a"], plt.Figure)
+    assert "spectrum/b" not in result
+    # Scalars for BOTH variables.
+    assert "spectrum/mean_abs_norm_bias/a" in result
+    assert "spectrum/mean_abs_norm_bias/b" in result
+
+
 @pytest.mark.parametrize(
     "gen_spectrum, target_spectrum, expected_positive_bias, expected_negative_bias",
     [

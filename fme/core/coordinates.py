@@ -11,12 +11,17 @@ import torch
 
 from fme.core import metrics
 from fme.core.constants import EARTH_RADIUS, GRAVITY
+from fme.core.dataset_info_errors import MissingDatasetInfo
 from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
-from fme.core.mask_provider import MaskProvider, MaskProviderABC, NullMaskProvider
 from fme.core.ocean_derived_variables import compute_ocean_derived_quantities
+from fme.core.spatial_mask_provider import (
+    NullSpatialMaskProvider,
+    SpatialMaskProvider,
+    SpatialMaskProviderABC,
+)
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.winds import lon_lat_to_xyz
 
@@ -567,7 +572,7 @@ class HorizontalCoordinates(abc.ABC):
 
     @abc.abstractmethod
     def get_gridded_operations(
-        self, mask_provider: MaskProviderABC = NullMaskProvider
+        self, spatial_mask_provider: SpatialMaskProviderABC = NullSpatialMaskProvider
     ) -> GriddedOperations:
         pass
 
@@ -580,6 +585,16 @@ class HorizontalCoordinates(abc.ABC):
     @property
     @abc.abstractmethod
     def shape(self) -> tuple[int, ...]:
+        pass
+
+    @property
+    @abc.abstractmethod
+    def lat_1d(self) -> torch.Tensor:
+        """1D latitude coordinates.
+
+        Raises ``MissingDatasetInfo`` for grids that have no clean
+        1-dimensional latitude representation.
+        """
         pass
 
     @abc.abstractmethod
@@ -619,8 +634,8 @@ class LatLonCoordinates(HorizontalCoordinates):
             return False
         if self.lat.shape != other.lat.shape or self.lon.shape != other.lon.shape:
             return False
-        lat_eq = torch.allclose(self.lat, other.lat)
-        lon_eq = torch.allclose(self.lon, other.lon)
+        lat_eq = torch.allclose(self.lat.cpu(), other.lat.cpu())
+        lon_eq = torch.allclose(self.lon.cpu(), other.lon.cpu())
         return lat_eq and lon_eq
 
     def __repr__(self) -> str:
@@ -678,9 +693,9 @@ class LatLonCoordinates(HorizontalCoordinates):
             return "legendre-gauss"
 
     def get_gridded_operations(
-        self, mask_provider: MaskProviderABC = NullMaskProvider
+        self, spatial_mask_provider: SpatialMaskProviderABC = NullSpatialMaskProvider
     ) -> LatLonOperations:
-        return LatLonOperations(self.area_weights, mask_provider)
+        return LatLonOperations(self.area_weights, spatial_mask_provider)
 
     @property
     def meshgrid(self) -> tuple[torch.Tensor, torch.Tensor]:
@@ -700,6 +715,10 @@ class LatLonCoordinates(HorizontalCoordinates):
 
     def get_state(self) -> TensorMapping:
         return {"lat": self.lat, "lon": self.lon}
+
+    @property
+    def lat_1d(self) -> torch.Tensor:
+        return self.lat
 
 
 @dataclasses.dataclass
@@ -812,22 +831,23 @@ class HEALPixCoordinates(HorizontalCoordinates):
         return None
 
     def get_gridded_operations(
-        self, mask_provider: MaskProviderABC = NullMaskProvider
+        self, spatial_mask_provider: SpatialMaskProviderABC = NullSpatialMaskProvider
     ) -> HEALPixOperations:
         # this code is necessary because when no masks are in a given dataset, we return
-        # an empty MaskProvider instead of the NullMaskProvider.
-        if mask_provider == NullMaskProvider:
+        # an empty SpatialMaskProvider instead of the NullSpatialMaskProvider.
+        if spatial_mask_provider == NullSpatialMaskProvider:
             null_mask = True
-        elif isinstance(mask_provider, MaskProvider):
-            null_mask = len(mask_provider.masks) == 0
+        elif isinstance(spatial_mask_provider, SpatialMaskProvider):
+            null_mask = len(spatial_mask_provider.masks) == 0
         else:
             raise TypeError(
-                f"Don't know how to handle given mask_provider: {mask_provider}"
+                "Don't know how to handle given spatial_mask_provider: "
+                f"{spatial_mask_provider}"
             )
         if not (null_mask):
             raise NotImplementedError(
                 "HEALPixCoordinates does not support a mask provider. "
-                "Use NullMaskProvider when getting gridded operations "
+                "Use NullSpatialMaskProvider when getting gridded operations "
                 "for HEALPixCoordinates."
             )
         return HEALPixOperations(self.nside)
@@ -857,6 +877,13 @@ class HEALPixCoordinates(HorizontalCoordinates):
 
     def get_state(self) -> TensorMapping:
         return {"face": self.face, "height": self.height, "width": self.width}
+
+    @property
+    def lat_1d(self) -> torch.Tensor:
+        raise MissingDatasetInfo(
+            "lat_1d (HEALPixCoordinates uses 12 tiles and has no clean "
+            "1-dimensional representation for latitude)"
+        )
 
 
 @dataclasses.dataclass

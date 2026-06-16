@@ -79,6 +79,7 @@ class _Stepper(TrainStepperABC["None", "_BatchData", "None", "None", "_TrainOutp
         data: "_BatchData",
         optimization: OptimizationABC,
         compute_derived_variables: bool = False,
+        evaluate_all_steps: bool = False,
     ) -> _TrainOutput:
         x = torch.ones(1, 1, device=get_device())
         loss = self._modules[0](x).sum()
@@ -105,6 +106,9 @@ class _Stepper(TrainStepperABC["None", "_BatchData", "None", "None", "_TrainOutp
         pass
 
     def set_train(self) -> None:
+        pass
+
+    def seed_eval(self, seed: int) -> None:
         pass
 
     def update_training_history(self, training_job: TrainingJob) -> None:

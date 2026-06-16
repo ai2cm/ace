@@ -35,7 +35,7 @@ class CollateFn:
     horizontal_dims: List[str]
 
     def __call__(self, samples: Sequence[DatasetItem]) -> "BatchData":
-        sample_data, sample_time, _, epoch = zip(*samples)
+        sample_data, sample_time, _, epoch, _ = zip(*samples)
         batch_data = default_collate(sample_data)
         batch_time = xr.concat(sample_time, dim="sample")
         if not all(epoch[0] == e for e in epoch):

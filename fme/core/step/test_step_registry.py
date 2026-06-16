@@ -3,6 +3,7 @@ import datetime
 from collections.abc import Callable
 from unittest.mock import MagicMock
 
+import dacite
 import torch
 from torch import nn
 
@@ -10,6 +11,7 @@ from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinate
 from fme.core.dataset_info import DatasetInfo
 from fme.core.ocean import OceanConfig
 from fme.core.step.args import StepArgs
+from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorDict, TensorMapping
 
 from .step import StepABC, StepConfigABC, StepSelector
@@ -61,7 +63,7 @@ class MockStep(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
+    ) -> tuple[TensorDict, StepperState | None]:
         raise NotImplementedError()
 
     def get_state(self):
@@ -124,6 +126,17 @@ class MockStepConfig(StepConfigABC):
 
     def load(self):
         pass
+
+    def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
+        pass
+
+    @property
+    def allow_missing_variables(self) -> bool:
+        return False
+
+    @classmethod
+    def from_state(cls, state) -> "MockStepConfig":
+        return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
 
 
 def test_register():

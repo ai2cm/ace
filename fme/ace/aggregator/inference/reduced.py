@@ -319,7 +319,7 @@ class MeanAggregator:
                 datum.var_name, VariableMetadata("unknown_units", datum.var_name)
             )
             data_vars[datum.get_xarray_key()] = xr.DataArray(
-                datum.data, dims=["forecast_step"], attrs=metadata._asdict()
+                datum.data, dims=["forecast_step"], attrs=metadata.as_attrs()
             )
 
         if len(data_vars.values()) > 0:
@@ -503,7 +503,7 @@ class SingleTargetMeanAggregator:
                 datum.var_name, VariableMetadata("unknown_units", datum.var_name)
             )
             data_vars[datum.get_xarray_key()] = xr.DataArray(
-                datum.data, dims=["forecast_step"], attrs=metadata._asdict()
+                datum.data, dims=["forecast_step"], attrs=metadata.as_attrs()
             )
 
         n_forecast_steps = len(next(iter(data_vars.values())))
@@ -513,10 +513,11 @@ class SingleTargetMeanAggregator:
 
 @dataclasses.dataclass
 class MeanMetricConfig:
-    type: Literal["mean"] = "mean"
     variables: list[str] | None = None
     name: str | None = None
     target: Literal["denorm", "norm"] = "denorm"
+    enabled: bool = True
+    strict: bool = False
 
     def __post_init__(self):
         if self.name is None:

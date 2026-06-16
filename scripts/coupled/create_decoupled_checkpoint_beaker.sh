@@ -52,6 +52,6 @@ python -u create_decoupled_checkpoint.py \
     --input_path "$OUTPUT_DIR/$DATASET_ID/$PREFIX" \
     --output_path "$CKPT_PATH"
 
-beaker dataset create -b ai2/climate "$OUTPUT_DIR/$UUID" --desc "$DESCRIPTION"
+beaker dataset create -b ai2/atec-climate "$OUTPUT_DIR/$UUID" --desc "$DESCRIPTION"
 
 exit 0

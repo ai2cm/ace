@@ -1,7 +1,6 @@
 import dataclasses
 import logging
 from collections.abc import Callable, Mapping
-from typing import Literal
 
 import numpy as np
 import torch
@@ -144,6 +143,12 @@ class ZonalMeanAggregator:
         self.logged_batch_skip = False
         self._buffer_target: TensorDict | None = None
         self._buffer_gen: TensorDict | None = None
+        # Global time index of the first recorded batch. Coarsening groups are
+        # aligned to this origin rather than to absolute index 0, since
+        # inference begins recording after the initial condition has advanced
+        # the global time counter by ``n_ic_steps``, which may not be a multiple
+        # of the coarsening factor.
+        self._i_time_offset: int | None = None
 
     def record_batch(
         self,
@@ -161,6 +166,15 @@ class ZonalMeanAggregator:
             self._gen_data = self._initialize_zeros_zonal_mean_from_batch(
                 gen_data, self._n_timesteps
             )
+
+        if self._i_time_offset is None:
+            self._i_time_offset = i_time_start
+        # Align coarsening groups to the first recorded timestep rather than to
+        # absolute index 0, so that a recording origin that is not a multiple of
+        # the coarsening factor (e.g. after ``n_ic_steps`` initial condition
+        # steps) does not misalign the destination slice from the coarsened
+        # source.
+        i_time_start = i_time_start - self._i_time_offset
 
         window_steps = next(iter(target_data.values())).shape[1]
 
@@ -192,43 +206,64 @@ class ZonalMeanAggregator:
             i_time_start + window_steps
         ) - self.last_step * self.time_coarsening_factor
 
-        buffer = {}
-        for name, tensor in target_data.items():
-            if name in self._target_data:
-                if self._buffer_target:
-                    tensor = torch.cat(
-                        [
-                            self._buffer_target[name],
-                            tensor[:, 0 : window_steps - buffer_size, :],
-                        ],
-                        dim=self._time_dim,
-                    )
-                self._target_data[name][:, time_slice, :] += self._coarsen_tensor(
-                    self._zonal_mean(tensor)
-                )
-                if buffer_size > 0:
-                    buffer[name] = tensor[:, -buffer_size:, :]
-        self._buffer_target = buffer
+        # number of (zonal-meaned) timesteps consumed into complete coarsening
+        # groups by this window, including any steps carried over in the buffer.
+        n_coarsened_steps = (
+            time_slice.stop - time_slice.start
+        ) * self.time_coarsening_factor
 
-        buffer = {}
-        for name, tensor in gen_data.items():
-            if name in self._gen_data:
-                if self._buffer_gen:
-                    tensor = torch.cat(
-                        [
-                            self._buffer_gen[name],
-                            tensor[:, 0 : window_steps - buffer_size, :],
-                        ],
-                        dim=self._time_dim,
-                    )
-                self._gen_data[name][:, time_slice, :] += self._coarsen_tensor(
-                    self._zonal_mean(tensor)
-                )
-                if buffer_size > 0:
-                    buffer[name] = tensor[:, -buffer_size:, :]
-        self._buffer_gen = buffer
+        self._buffer_target = self._accumulate(
+            self._target_data,
+            target_data,
+            self._buffer_target,
+            time_slice,
+            n_coarsened_steps,
+            buffer_size,
+        )
+        self._buffer_gen = self._accumulate(
+            self._gen_data,
+            gen_data,
+            self._buffer_gen,
+            time_slice,
+            n_coarsened_steps,
+            buffer_size,
+        )
 
         self._n_batches[:, time_slice, :] += 1
+
+    def _accumulate(
+        self,
+        accumulator: TensorDict,
+        data: TensorMapping,
+        buffer: TensorDict | None,
+        time_slice: slice,
+        n_coarsened_steps: int,
+        buffer_size: int,
+    ) -> TensorDict:
+        """Coarsen a window and accumulate it into ``accumulator``.
+
+        Any leftover timesteps from the previous window held in ``buffer`` are
+        prepended before coarsening. The leftover steps of the combined window
+        that do not fill a complete coarsening group are returned as the new
+        buffer. Coarsening is applied after the zonal mean; since the zonal mean
+        acts independently per timestep this is equivalent to coarsening the raw
+        field but avoids buffering the full longitudinal data.
+        """
+        new_buffer: TensorDict = {}
+        for name, tensor in data.items():
+            if name not in accumulator:
+                continue
+            zonal_mean = self._zonal_mean(tensor)
+            if buffer is not None and name in buffer:
+                zonal_mean = torch.cat([buffer[name], zonal_mean], dim=self._time_dim)
+            accumulator[name][:, time_slice, :] += self._coarsen_tensor(
+                zonal_mean.narrow(self._time_dim, 0, n_coarsened_steps)
+            )
+            if buffer_size > 0:
+                new_buffer[name] = zonal_mean.narrow(
+                    self._time_dim, n_coarsened_steps, buffer_size
+                )
+        return new_buffer
 
     def _get_data(self) -> dict[str, _RawData]:
         if self._gen_data is None or self._target_data is None:
@@ -280,7 +315,7 @@ class ZonalMeanAggregator:
     def get_dataset(self) -> xr.Dataset:
         data = {
             k.replace("/", "-"): xr.DataArray(
-                v.datum, dims=("forecast_step", "lat"), attrs=v.metadata._asdict()
+                v.datum, dims=("forecast_step", "lat"), attrs=v.metadata.as_attrs()
             )
             for k, v in self._get_data().items()
         }
@@ -290,8 +325,8 @@ class ZonalMeanAggregator:
 
     def _get_caption(self, key: str, varname: str) -> str:
         if varname in self._variable_metadata:
-            caption_name = self._variable_metadata[varname].long_name
-            units = self._variable_metadata[varname].units
+            caption_name = self._variable_metadata[varname].display_long_name(varname)
+            units = self._variable_metadata[varname].display_units()
         else:
             caption_name, units = varname, "unknown_units"
         caption = self._captions[key].format(name=caption_name, units=units)
@@ -321,10 +356,11 @@ class ZonalMeanAggregator:
 
 @dataclasses.dataclass
 class ZonalMeanMetricConfig:
-    type: Literal["zonal_mean"] = "zonal_mean"
     variables: list[str] | None = None
     name: str = "zonal_mean"
     zonal_mean_max_size: int = 4096
+    enabled: bool = True
+    strict: bool = False
 
     def get_name(self) -> str:
         return self.name

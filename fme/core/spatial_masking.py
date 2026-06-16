@@ -1,11 +1,11 @@
 import collections
 import dataclasses
-import re
 from collections.abc import Callable
 from typing import Literal, Protocol, runtime_checkable
 
 import torch
 
+from fme.core.name_and_prefix_matcher import NameAndPrefixMatcher
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -32,20 +32,20 @@ def replace_on_mask(
 
 
 @runtime_checkable
-class HasGetMaskTensorFor(Protocol):
-    def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]: ...
+class HasGetSpatialMask(Protocol):
+    def build_output_spatial_masker(self) -> Callable[[TensorMapping], TensorDict]: ...
 
     def get_mask_tensor_for(self, name: str) -> torch.Tensor | None:
         """Get the mask for a specific variable name."""
         ...
 
-    def to(self, device: str) -> "HasGetMaskTensorFor": ...
+    def to(self, device: str) -> "HasGetSpatialMask": ...
 
 
 @dataclasses.dataclass
-class StaticMaskingConfig:
+class StaticSpatialMaskingConfig:
     """
-    Replace static masked regions with a fill value.
+    Replace static spatially masked regions with a fill value.
 
     Parameters:
         mask_value: Value of the mask variable in masked regions. Either 0 or 1.
@@ -67,40 +67,41 @@ class StaticMaskingConfig:
                 f"mask_value must be either 0 or 1, but got {self.mask_value}"
             )
 
-    def build(self, mask: HasGetMaskTensorFor, means: TensorMapping | None = None):
+    def build(self, mask: HasGetSpatialMask, means: TensorMapping | None = None):
         """
-        Build StaticMasking.
+        Build StaticSpatialMasking.
 
         """
+        exclude = NameAndPrefixMatcher(self.exclude_names_and_prefixes)
         if isinstance(self.fill_value, float):
-            return StaticMasking(
+            return StaticSpatialMasking(
                 mask_value=self.mask_value,
                 fill_value=collections.defaultdict(
                     lambda: torch.as_tensor(self.fill_value)
                 ),
                 mask=mask,
-                exclude_names_and_prefixes=self.exclude_names_and_prefixes,
+                exclude=exclude,
             )
         if means is None:
             raise ValueError(
                 "fill_values mapping required by build unless configured "
                 "fill_value is a float."
             )
-        return StaticMasking(
+        return StaticSpatialMasking(
             mask_value=self.mask_value,
             fill_value=means,
             mask=mask,
-            exclude_names_and_prefixes=self.exclude_names_and_prefixes,
+            exclude=exclude,
         )
 
 
-class StaticMasking:
+class StaticSpatialMasking:
     def __init__(
         self,
         mask_value: int,
         fill_value: float | TensorMapping,
-        mask: HasGetMaskTensorFor,
-        exclude_names_and_prefixes: list[str] | None = None,
+        mask: HasGetSpatialMask,
+        exclude: NameAndPrefixMatcher = NameAndPrefixMatcher(),
     ):
         if isinstance(fill_value, float):
             fill_mapping: TensorMapping = collections.defaultdict(
@@ -111,25 +112,10 @@ class StaticMasking:
         self._fill_mapping = fill_mapping
         self._mask_value = mask_value
         self._mask = mask
-        self._exclude_regex = self._build_regex(exclude_names_and_prefixes)
+        self._exclude = exclude
 
-    def _build_regex(self, names_and_prefixes: list[str] | None) -> str | None:
-        if names_and_prefixes:
-            regex = []
-            for name in names_and_prefixes:
-                if name.endswith("_"):
-                    regex.append(rf"^{name}\d+$")
-                elif not re.match(r".+_\d+$", name):
-                    regex.append(f"^{name}$")
-                    regex.append(rf"^{name}_\d+$")
-                else:
-                    regex.append(rf"^{name}$")
-            return r"|".join(regex)
-        return None
-
-    def _masks(self, name: str):
-        exclude = self._exclude_regex and re.match(self._exclude_regex, name)
-        return not exclude
+    def _masks(self, name: str) -> bool:
+        return not self._exclude.match(name)
 
     def __call__(self, data: TensorMapping) -> TensorDict:
         """
@@ -150,7 +136,7 @@ class StaticMasking:
                 fill_value = self._fill_mapping[name]
             except KeyError as err:
                 raise KeyError(
-                    "StaticMasking was initialized with a fill_value mapping "
+                    "StaticSpatialMasking was initialized with a fill_value mapping "
                     f"but the mapping is missing key '{name}'."
                 ) from err
             fill = torch.full_like(tensor, fill_value)
@@ -165,6 +151,6 @@ class StaticMasking:
         return data_
 
 
-class NullMasking:
+class NullSpatialMasking:
     def __call__(self, data: TensorMapping) -> TensorDict:
         return dict(data)

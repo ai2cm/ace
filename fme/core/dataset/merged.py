@@ -1,6 +1,7 @@
 import dataclasses
 from collections.abc import Sequence
 
+import torch
 import xarray as xr
 
 from fme.core.dataset.concat import ConcatDatasetConfig
@@ -47,8 +48,9 @@ class MergedXarrayDataset(DatasetABC):
         tensors: TensorDict = {}
         labels = None
         epochs = []
+        missing: frozenset[str] | None = None
         for dataset in self.datasets:
-            ds_tensors, time, ds_labels, ds_epoch = dataset[idx]
+            ds_tensors, time, ds_labels, ds_epoch, ds_missing = dataset[idx]
             if labels is None:
                 labels = ds_labels
             else:
@@ -56,20 +58,25 @@ class MergedXarrayDataset(DatasetABC):
                     labels = labels.union(ds_labels)
             tensors.update(ds_tensors)
             epochs.append(ds_epoch)
+            if ds_missing is not None:
+                missing = (missing or frozenset()).union(ds_missing)
         if not all(epoch == epochs[0] for epoch in epochs):
             raise ValueError(
                 "All datasets in a merged dataset must have the same epoch."
             )
-        return tensors, time, labels, epochs[0]
+        return tensors, time, labels, epochs[0], missing
 
     def get_sample_by_time_slice(self, time_slice: slice) -> DatasetItem:
         tensors: TensorDict = {}
+        missing: frozenset[str] | None = None
         for dataset in self.datasets:
-            ds_tensors, time, labels, epoch = dataset.get_sample_by_time_slice(
-                time_slice
+            ds_tensors, time, labels, epoch, ds_missing = (
+                dataset.get_sample_by_time_slice(time_slice)
             )
             tensors.update(ds_tensors)
-        return tensors, time, labels, epoch
+            if ds_missing is not None:
+                missing = (missing or frozenset()).union(ds_missing)
+        return tensors, time, labels, epoch, missing
 
     @property
     def all_times(self) -> xr.CFTimeIndex:
@@ -122,6 +129,181 @@ class MergedXarrayDataset(DatasetABC):
             dataset.set_epoch(epoch)
 
 
+class TimePaddedMergedDataset(DatasetABC):
+    """Merge datasets with disjoint variable names that may have different
+    ``sample_n_times`` along the leading time dimension.
+
+    The "canonical" sub-dataset is the one with the largest ``sample_n_times``
+    (the first such if there are ties). It provides the returned ``time``
+    coordinate, ``labels``, and ``epoch``. Tensors from shorter sub-datasets
+    are NaN-padded along the leading time dimension to match the canonical
+    length, so the returned ``TensorDict`` has a consistent leading time size
+    across all variables.
+
+    All sub-datasets must share ``sample_start_times``. Variable names across
+    sub-datasets must be disjoint.
+
+    ``get_sample_by_time_slice`` is left unpadded: the slice length passed in
+    by the caller is the length each sub-dataset reads from disk, so all
+    tensors come back with the same leading length. Padding only occurs for
+    ``__getitem__``, which uses each sub-dataset's own ``sample_n_times``.
+    """
+
+    def __init__(self, datasets: Sequence[DatasetABC]):
+        if len(datasets) == 0:
+            raise ValueError("Must provide at least one dataset.")
+        self.datasets = datasets
+
+        combined_names = [
+            item for dataset in self.datasets for item in dataset[0][0].keys()
+        ]
+        if len(combined_names) != len(set(combined_names)):
+            duplicates = list(
+                {item for item in combined_names if combined_names.count(item) > 1}
+            )
+            raise ValueError(
+                "Variable names must be unique across merged datasets. "
+                f"Duplicates found: {duplicates}"
+            )
+
+        self._local_epoch: int = -1
+        self._global_epoch = torch.tensor(-1)
+        self._recompute_canonical()
+
+    def _ensure_epoch_synchronized(self):
+        if self._local_epoch != self._global_epoch.item():
+            self._local_epoch = int(self._global_epoch.item())
+            self._recompute_canonical()
+
+    def _recompute_canonical(self):
+        self._sample_n_times = max(d.sample_n_times for d in self.datasets)
+        self._canonical_idx = max(
+            range(len(self.datasets)),
+            key=lambda i: self.datasets[i].sample_n_times,
+        )
+        self._sample_start_times = self.datasets[self._canonical_idx].sample_start_times
+        n_canonical = len(self._sample_start_times)
+        for dataset in self.datasets:
+            other_starts = dataset.sample_start_times
+            if len(other_starts) < n_canonical or not other_starts[:n_canonical].equals(
+                self._sample_start_times
+            ):
+                raise ValueError(
+                    "All datasets in a TimePaddedMergedDataset must share "
+                    "sample start times: the canonical (longest sample_n_times) "
+                    "dataset's sample_start_times must be a prefix of every "
+                    "other sub-dataset's sample_start_times."
+                )
+
+    def _pad_tensors(self, tensors: TensorDict, n_short: int) -> TensorDict:
+        if n_short == self._sample_n_times:
+            return tensors
+        pad_len = self._sample_n_times - n_short
+        padded: TensorDict = {}
+        for k, v in tensors.items():
+            pad_shape = list(v.shape)
+            pad_shape[0] = pad_len
+            nan_pad = torch.full(pad_shape, float("nan"), dtype=v.dtype)
+            padded[k] = torch.cat([v, nan_pad], dim=0)
+        return padded
+
+    def __getitem__(self, idx: int) -> DatasetItem:
+        self._ensure_epoch_synchronized()
+        tensors: TensorDict = {}
+        epochs: list[int | None] = []
+        canonical_time: xr.DataArray | None = None
+        canonical_labels: set[str] | None = None
+        canonical_epoch: int | None = None
+        all_missing: set[str] = set()
+        for i, dataset in enumerate(self.datasets):
+            ds_tensors, time, ds_labels, ds_epoch, ds_missing = dataset[idx]
+            tensors.update(self._pad_tensors(ds_tensors, dataset.sample_n_times))
+            epochs.append(ds_epoch)
+            if ds_missing is not None:
+                all_missing.update(ds_missing)
+            if i == self._canonical_idx:
+                canonical_time = time
+                canonical_labels = ds_labels
+                canonical_epoch = ds_epoch
+        if not all(epoch == epochs[0] for epoch in epochs):
+            raise ValueError(
+                "All datasets in a TimePaddedMergedDataset must have the same epoch."
+            )
+        assert canonical_time is not None
+        missing_names = frozenset(all_missing) if all_missing else None
+        return tensors, canonical_time, canonical_labels, canonical_epoch, missing_names
+
+    def get_sample_by_time_slice(self, time_slice: slice) -> DatasetItem:
+        self._ensure_epoch_synchronized()
+        tensors: TensorDict = {}
+        canonical_time: xr.DataArray | None = None
+        canonical_labels: set[str] | None = None
+        canonical_epoch: int | None = None
+        all_missing: set[str] = set()
+        for i, dataset in enumerate(self.datasets):
+            ds_tensors, time, ds_labels, ds_epoch, ds_missing = (
+                dataset.get_sample_by_time_slice(time_slice)
+            )
+            tensors.update(ds_tensors)
+            if ds_missing is not None:
+                all_missing.update(ds_missing)
+            if i == self._canonical_idx:
+                canonical_time = time
+                canonical_labels = ds_labels
+                canonical_epoch = ds_epoch
+        assert canonical_time is not None
+        missing_names = frozenset(all_missing) if all_missing else None
+        return tensors, canonical_time, canonical_labels, canonical_epoch, missing_names
+
+    @property
+    def all_times(self) -> xr.CFTimeIndex:
+        self._ensure_epoch_synchronized()
+        return self.datasets[self._canonical_idx].all_times
+
+    @property
+    def sample_start_times(self) -> xr.CFTimeIndex:
+        self._ensure_epoch_synchronized()
+        return self._sample_start_times
+
+    @property
+    def sample_n_times(self) -> int:
+        self._ensure_epoch_synchronized()
+        return self._sample_n_times
+
+    def validate_inference_length(self, max_start_index: int, max_window_len: int):
+        for dataset in self.datasets:
+            dataset.validate_inference_length(max_start_index, max_window_len)
+
+    @property
+    def properties(self) -> DatasetProperties:
+        data_properties: DatasetProperties | None = None
+        for dataset in self.datasets:
+            if data_properties is None:
+                data_properties = dataset.properties
+            else:
+                data_properties.update_merged_dataset(dataset.properties)
+        if data_properties is None:
+            raise ValueError("No dataset available to determine properties")
+        return data_properties
+
+    def enable_shared_memory(self):
+        if not self._global_epoch.is_shared():
+            self._global_epoch = self._global_epoch.share_memory_()
+        for dataset in self.datasets:
+            dataset.enable_shared_memory()
+
+    def set_global_epoch_tensor(self, tensor):
+        self._global_epoch = tensor
+        for dataset in self.datasets:
+            dataset.set_global_epoch_tensor(tensor)
+
+    def set_epoch(self, epoch: int):
+        for dataset in self.datasets:
+            dataset.set_epoch(epoch)
+        self._global_epoch.fill_(epoch)
+        self._ensure_epoch_synchronized()
+
+
 @dataclasses.dataclass
 class MergeDatasetConfig(DatasetConfigABC):
     """
@@ -147,11 +329,13 @@ class MergeDatasetConfig(DatasetConfigABC):
         self,
         names: Sequence[str],
         n_timesteps: IntSchedule,
+        allow_missing_variables: bool = False,
     ):
         return get_merged_datasets(
             self,
             names,
             n_timesteps,
+            allow_missing_variables=allow_missing_variables,
         )
 
     @property
@@ -190,11 +374,13 @@ class MergeNoConcatDatasetConfig(DatasetConfigABC):
         self,
         names: Sequence[str],
         n_timesteps: IntSchedule,
+        allow_missing_variables: bool = False,
     ) -> tuple[MergedXarrayDataset, DatasetProperties]:
         return get_merged_datasets(
             MergeDatasetConfig(merge=self.merge),
             names,
             n_timesteps,
+            allow_missing_variables=allow_missing_variables,
         )
 
     @property
@@ -216,6 +402,7 @@ def get_merged_datasets(
     merged_config: MergeDatasetConfig | MergeNoConcatDatasetConfig,
     names: Sequence[str],
     n_timesteps: IntSchedule,
+    allow_missing_variables: bool = False,
 ) -> tuple[MergedXarrayDataset, DatasetProperties]:
     merged_xarray_datasets = []
     merged_properties: DatasetProperties | None = None
@@ -228,11 +415,12 @@ def get_merged_datasets(
         ) = config.build(
             per_dataset_names[config_counter],
             n_timesteps,
+            allow_missing_variables=allow_missing_variables,
         )
         merged_xarray_datasets.append(current_source_xarray_dataset)
 
         if merged_properties is None:
-            merged_properties = current_source_properties
+            merged_properties = current_source_properties.copy()
         else:
             merged_properties.update_merged_dataset(current_source_properties)
         config_counter += 1

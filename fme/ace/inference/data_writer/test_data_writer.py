@@ -1,5 +1,4 @@
 import datetime
-from typing import NamedTuple
 
 import cftime
 import numpy as np
@@ -21,6 +20,7 @@ from fme.ace.inference.data_writer.main import (
 from fme.ace.inference.data_writer.raw import get_batch_lead_time_microseconds
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.ace.inference.data_writer.zarr import ZarrWriterConfig
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.labels import BatchLabels
 from fme.core.typing_ import TensorMapping
@@ -94,10 +94,6 @@ def get_paired_data(
 
 
 class TestDataWriter:
-    class VariableMetadata(NamedTuple):
-        units: str
-        long_name: str
-
     @pytest.fixture(params=["julian", "proleptic_gregorian", "noleap"])
     def calendar(self, request):
         """
@@ -140,8 +136,8 @@ class TestDataWriter:
     @pytest.fixture
     def sample_metadata(self):
         return {
-            "temp": self.VariableMetadata(units="K", long_name="Temperature"),
-            "humidity": self.VariableMetadata(units="%", long_name="Relative Humidity"),
+            "temp": VariableMetadata(units="K", long_name="Temperature"),
+            "humidity": VariableMetadata(units="%", long_name="Relative Humidity"),
         }
 
     @pytest.fixture

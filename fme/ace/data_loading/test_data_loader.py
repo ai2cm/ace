@@ -44,7 +44,7 @@ from fme.core.dataset.schedule import IntMilestone, IntSchedule
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.device import using_gpu
 from fme.core.distributed.distributed import Distributed
-from fme.core.mask_provider import MaskProvider
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.testing.regression import validate_tensor_dict
 from fme.core.typing_ import Slice
 
@@ -260,17 +260,15 @@ def test_xarray_loader(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "workers, force_zarr_engine_used", [(0, False), (0, True), (1, True)]
+    "workers, force_zarr_engine_used",
+    [(0, False), (0, True), pytest.param(1, True, marks=pytest.mark.medium_duration)],
 )
 def test_xarray_loader_scheduled_epoch(
     tmp_path,
     force_zarr_engine_used: bool,
     workers: int,
-    very_fast_only: bool,
 ):
     """Checks that vertical coordinates are present."""
-    if very_fast_only and workers > 0:
-        pytest.skip("Skipping non-fast tests")
     _create_dataset_on_disk(tmp_path, n_times=4)
     config = DataLoaderConfig(
         dataset=ConcatDatasetConfig(
@@ -506,13 +504,10 @@ def test_loader_n_repeats_but_not_infer_timestep_error(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "num_data_workers, force_forkserver", [(0, False), (3, False), (3, True)]
+    "num_data_workers, force_forkserver",
+    [(0, False), (3, False), pytest.param(3, True, marks=pytest.mark.medium_duration)],
 )
-def test_inference_data_loader(
-    tmp_path, num_data_workers: int, force_forkserver: bool, very_fast_only: bool
-):
-    if very_fast_only and force_forkserver:
-        pytest.skip("Skipping non-fast tests")
+def test_inference_data_loader(tmp_path, num_data_workers: int, force_forkserver: bool):
     _create_dataset_on_disk(tmp_path, n_times=14)
     batch_size = 2
     step = 7
@@ -962,6 +957,36 @@ def test_inference_persistence_names(tmp_path):
     assert not torch.all(first_item["bar"] == second_item["bar"])
 
 
+def test_inference_persistence_names_tensors_support_pin_memory(tmp_path):
+    """Persisted variables must not be stride-0 expanded views.
+
+    The DataLoader pin-memory thread allocates a pinned tensor with the same
+    strides and copies into it, which fails for tensors with overlapping
+    memory ("more than one element of the written-to tensor refers to a
+    single memory location").
+    """
+    _create_dataset_on_disk(tmp_path, n_times=14)
+
+    config = InferenceDataLoaderConfig(
+        dataset=XarrayDataConfig(data_path=tmp_path),
+        start_indices=ExplicitIndices([0, 3]),
+        persistence_names=["foo"],
+    )
+    window_requirements = DataRequirements(
+        names=["foo", "bar"],
+        n_timesteps=3,
+    )
+    dataset = InferenceDataset(
+        config,
+        9,
+        requirements=window_requirements,
+    )
+    foo = dataset[0].data["foo"]
+    # same layout-preserving copy that torch.utils.data pin_memory performs
+    result = torch.empty_strided(foo.size(), foo.stride()).copy_(foo)
+    torch.testing.assert_close(result, foo)
+
+
 def test_inference_dataset_label_override_without_dataset_labels(tmp_path):
     _create_dataset_on_disk(tmp_path, n_times=14)
     config = InferenceDataLoaderConfig(
@@ -1214,7 +1239,7 @@ def test_localize_properties():
     mask_tensor = torch.arange(n_lat * n_lon, dtype=torch.float32).reshape(
         1, n_lat, n_lon
     )
-    mask_provider = MaskProvider(masks={"mask_test": mask_tensor})
+    spatial_mask_provider = SpatialMaskProvider(masks={"mask_test": mask_tensor})
     timestep = datetime.timedelta(hours=6)
     metadata = {"temp": VariableMetadata(units="K", long_name="Temperature")}
     vertical = NullVerticalCoordinate()
@@ -1222,7 +1247,7 @@ def test_localize_properties():
         variable_metadata=metadata,
         vertical_coordinate=vertical,
         horizontal_coordinates=coords,
-        mask_provider=mask_provider,
+        spatial_mask_provider=spatial_mask_provider,
         timestep=timestep,
         is_remote=False,
         all_labels=None,
@@ -1251,8 +1276,8 @@ def test_localize_properties():
         assert combined_lon == lon.tolist(), "lon coverage incomplete or has gaps"
 
     # Gather local masks to root and verify they tile to the global mask.
-    assert isinstance(local.mask_provider, MaskProvider)
-    local_mask = local.mask_provider.masks["mask_test"]
+    assert isinstance(local.spatial_mask_provider, SpatialMaskProvider)
+    local_mask = local.spatial_mask_provider.masks["mask_test"]
     h_slice, w_slice = dist.get_local_slices((n_lat, n_lon))
     all_slices = dist.gather_object((h_slice, w_slice))
     all_masks = dist.gather_object(local_mask.tolist())
@@ -1279,12 +1304,12 @@ def _global_properties():
     metadata = {"temp": VariableMetadata(units="K", long_name="Temperature")}
     vertical = NullVerticalCoordinate()
     mask = torch.ones(n_lat, n_lon)
-    mask_provider = MaskProvider(masks={"mask_land": mask})
+    spatial_mask_provider = SpatialMaskProvider(masks={"mask_land": mask})
     return DatasetProperties(
         variable_metadata=metadata,
         vertical_coordinate=vertical,
         horizontal_coordinates=coords,
-        mask_provider=mask_provider,
+        spatial_mask_provider=spatial_mask_provider,
         timestep=timestep,
         is_remote=False,
         all_labels=None,
@@ -1305,9 +1330,9 @@ def _assert_dataset_info_uses_global_properties(dataset_info, props):
     # vertical_coordinate type must match
     assert type(dataset_info.vertical_coordinate) is type(props.vertical_coordinate)
 
-    # mask_provider must have the same keys as the global (non-localized) one
-    info_masks = dataset_info.mask_provider.masks
-    prop_masks = props.mask_provider.masks
+    # spatial_mask_provider must have the same keys as the global (non-localized) one
+    info_masks = dataset_info.spatial_mask_provider.masks
+    prop_masks = props.spatial_mask_provider.masks
     assert set(info_masks.keys()) == set(prop_masks.keys())
     for key in prop_masks:
         assert info_masks[key].shape == prop_masks[key].shape
@@ -1373,3 +1398,80 @@ def test_inference_gridded_data_dataset_info_not_localized(_global_properties):
         local_shape = inference.horizontal_coordinates.shape[-2:]
         assert local_shape != (N_LAT, N_LON)
         assert inference.dataset_info.img_shape == (N_LAT, N_LON)
+
+
+def test_gridded_data_with_variable_masking_concat(tmp_path):
+    dir_a = tmp_path / "a"
+    dir_a.mkdir()
+    _create_dataset_on_disk(
+        dir_a,
+        n_times=2,
+        in_variable_names=["foo", "bar"],
+        out_variable_names=["foo", "bar"],
+    )
+    dir_b = tmp_path / "b"
+    dir_b.mkdir()
+    _create_dataset_on_disk(
+        dir_b, n_times=2, in_variable_names=["foo"], out_variable_names=["foo"]
+    )
+    config = DataLoaderConfig(
+        dataset=ConcatDatasetConfig(
+            concat=[
+                XarrayDataConfig(data_path=str(dir_a)),
+                XarrayDataConfig(data_path=str(dir_b)),
+            ],
+            strict=False,
+        ),
+        batch_size=2,
+    )
+    requirements = DataRequirements(
+        names=["foo", "bar"],
+        n_timesteps=2,
+        allow_missing_variables=True,
+    )
+    data = get_gridded_data(config, train=False, requirements=requirements)
+    batch = next(iter(data.loader))
+    assert isinstance(batch, BatchData)
+    assert "foo" in batch.data
+    assert "bar" in batch.data
+    assert batch.data_mask is not None
+    assert "foo" in batch.data_mask
+    assert batch.data_mask["foo"].all()
+    assert "bar" in batch.data_mask
+    assert batch.data_mask["bar"].any()
+    assert not batch.data_mask["bar"].all()
+
+
+def test_inference_data_loader_excludes_variable_absent_from_all_samples(tmp_path):
+    _create_dataset_on_disk(
+        tmp_path, n_times=14, in_variable_names=["foo"], out_variable_names=["foo"]
+    )
+    config = InferenceDataLoaderConfig(
+        dataset=XarrayDataConfig(data_path=tmp_path, n_repeats=1),
+        start_indices=InferenceInitialConditionIndices(
+            first=0, n_initial_conditions=2, interval=5
+        ),
+        num_data_workers=0,
+    )
+    window_requirements = DataRequirements(
+        names=["foo", "nonexistent_var"],
+        n_timesteps=4,
+        allow_missing_variables=True,
+    )
+    initial_condition = PrognosticStateDataRequirements(names=["foo"], n_timesteps=1)
+    data = get_inference_data(
+        config,
+        total_forward_steps=6,
+        window_requirements=window_requirements,
+        initial_condition=initial_condition,
+    )
+    batch_data = next(iter(data.loader))
+    assert isinstance(batch_data, BatchData)
+    assert "foo" in batch_data.data
+    assert batch_data.data["foo"].shape == (2, 4, N_LAT, N_LON)
+    assert "nonexistent_var" in batch_data.data
+    assert batch_data.data["nonexistent_var"].shape == (2, 4, N_LAT, N_LON)
+    assert torch.isnan(batch_data.data["nonexistent_var"]).all()
+    assert batch_data.data_mask is not None
+    assert batch_data.data_mask["foo"].all()
+    assert not batch_data.data_mask["nonexistent_var"].any()

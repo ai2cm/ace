@@ -16,13 +16,12 @@
 # limitations under the License.
 
 import dataclasses
-from typing import List, Optional, Sequence
+from typing import List, Literal, Optional, Sequence
 
+import torch as th
 import torch.nn as nn
 
-from fme.ace.models.healpix.healpix_activations import DownsamplingBlockConfig
-
-from .healpix_blocks import ConvBlockConfig
+from .healpix_blocks import ConvBlockConfig, DownsamplingBlockConfig
 
 
 @dataclasses.dataclass
@@ -38,7 +37,10 @@ class UNetEncoderConfig:
         n_layers: Number of layers in each block, by default (2, 2, 1).
         dilations: List of dilation rates for the layers, by default None.
         enable_nhwc: Flag to enable NHWC data format, by default False.
-        enable_healpixpad: Flag to enable HEALPix padding, by default False.
+        hpx_padding_mode: HEALPix padding backend (``"earth2grid"``, ``"karlbauer"``,
+            or ``"isolatitude"``), by default ``"earth2grid"``.
+        nside: Face height/width per encoder level (shallowest to deepest), or
+            ``None`` to omit per-level padding resolution.
     """
 
     conv_block: ConvBlockConfig
@@ -48,7 +50,8 @@ class UNetEncoderConfig:
     n_layers: List[int] = dataclasses.field(default_factory=lambda: [2, 2, 1])
     dilations: Optional[list] = None
     enable_nhwc: bool = False
-    enable_healpixpad: bool = False
+    hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid"
+    nside: Optional[Sequence[int]] = None
 
     def build(self) -> nn.Module:
         """
@@ -65,7 +68,8 @@ class UNetEncoderConfig:
             n_layers=self.n_layers,
             dilations=self.dilations,
             enable_nhwc=self.enable_nhwc,
-            enable_healpixpad=self.enable_healpixpad,
+            hpx_padding_mode=self.hpx_padding_mode,
+            nside=self.nside,
         )
 
 
@@ -81,7 +85,10 @@ class UNetEncoder(nn.Module):
         n_layers: Sequence = (2, 2, 1),
         dilations: Optional[list] = None,
         enable_nhwc: bool = False,
-        enable_healpixpad: bool = False,
+        hpx_padding_mode: Literal[
+            "earth2grid", "karlbauer", "isolatitude"
+        ] = "earth2grid",
+        nside: Optional[Sequence[int]] = None,
     ):
         """
         Args:
@@ -92,48 +99,77 @@ class UNetEncoder(nn.Module):
             n_layers:, # of layers to use for the convolutional blocks
             dilations: list of dilations to use for the the convolutional blocks
             enable_nhwc: if channel last format should be used
-            enable_healpixpad: if healpixpad library should be used (true if installed)
+            hpx_padding_mode: HEALPix padding backend. Default ``"earth2grid"``;
+                also supports ``"karlbauer"`` and ``"isolatitude"``.
+            nside: Face height/width per encoder level (shallowest to deepest). Length
+                must match ``len(n_channels)`` when set.
         """
         super().__init__()
         self.n_channels = n_channels
+        self.hpx_padding_mode = hpx_padding_mode
 
         if dilations is None:
-            # Defaults to [1, 1, 1...] in accordance with the number of unet levels
             dilations = [1 for _ in range(len(n_channels))]
 
-        # Build encoder
+        nside_levels: Optional[tuple[int, ...]] = None
+        if nside is not None:
+            nside_levels = tuple(int(v) for v in nside)
+            if len(nside_levels) != len(n_channels):
+                raise ValueError(
+                    f"nside length must match encoder levels; got {len(nside_levels)} "
+                    f"vs {len(n_channels)}"
+                )
+
+        conv_tpl = dataclasses.replace(conv_block)
+        down_tpl = dataclasses.replace(down_sampling_block)
+        down_factor = down_tpl.downsample_spatial_factor()
+
         old_channels = input_channels
         self.encoder = []
         for n, curr_channel in enumerate(n_channels):
-            modules = list()
+            modules: List[nn.Module] = []
             if n > 0:
-                down_sampling_block.enable_nhwc = enable_nhwc
-                down_sampling_block.enable_healpixpad = enable_healpixpad
-                modules.append(
-                    down_sampling_block.build()  # Shapes are not used in these calls.
+                if nside_levels is not None:
+                    coarse, fine = nside_levels[n - 1], nside_levels[n]
+                    if coarse != fine * down_factor:
+                        raise ValueError(
+                            f"encoder nside[{n - 1}]={coarse} must equal "
+                            f"nside[{n}] * downsample factor ({down_factor}), "
+                            f"but nside[{n}]={fine}"
+                        )
+                down_cfg = dataclasses.replace(
+                    down_tpl,
+                    enable_nhwc=enable_nhwc,
+                    hpx_padding_mode=hpx_padding_mode,
+                    nside=None if nside_levels is None else nside_levels[n - 1],
+                    in_channels=old_channels,
                 )
+                modules.append(down_cfg.build())
 
-            # Set up conv block
-            conv_block.in_channels = old_channels
-            conv_block.latent_channels = curr_channel
-            conv_block.out_channels = curr_channel
-            conv_block.dilation = dilations[n]
-            conv_block.n_layers = n_layers[n]
-            conv_block.enable_nhwc = enable_nhwc
-            conv_block.enable_healpixpad = enable_healpixpad
-            modules.append(conv_block.build())  # Shapes are not used in these calls.
+            conv_cfg = dataclasses.replace(
+                conv_tpl,
+                in_channels=old_channels,
+                latent_channels=curr_channel,
+                out_channels=curr_channel,
+                dilation=dilations[n],
+                n_layers=n_layers[n],
+                enable_nhwc=enable_nhwc,
+                hpx_padding_mode=hpx_padding_mode,
+                nside=None if nside_levels is None else nside_levels[n],
+            )
+            modules.append(conv_cfg.build())
             old_channels = curr_channel
 
             self.encoder.append(nn.Sequential(*modules))
 
         self.encoder = nn.ModuleList(self.encoder)
 
-    def forward(self, inputs: Sequence) -> Sequence:
+    def forward(self, inputs: th.Tensor) -> Sequence[th.Tensor]:
         """
         Forward pass of the HEALPix Unet encoder
 
         Args:
-            inputs: The inputs to enccode
+            inputs: The inputs to encode
 
         Returns:
             The encoded values
@@ -143,7 +179,3 @@ class UNetEncoder(nn.Module):
             outputs.append(layer(inputs))
             inputs = outputs[-1]
         return outputs
-
-    def reset(self):
-        """Resets the state of the decoder layers"""
-        pass

@@ -2,7 +2,7 @@ import dataclasses
 import datetime
 from collections.abc import Callable, Mapping
 from functools import partial
-from typing import Any, Literal, Optional
+from typing import Any, Optional
 
 import numpy as np
 import torch
@@ -16,7 +16,7 @@ from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorMapping
 
 from ..plotting import plot_mean_and_samples
-from .build_context import MetricBuildContext, maybe_filter
+from .build_context import MetricBuildContext, MetricNotSupportedError, maybe_filter
 from .data import InferenceBatchData, MetricBuildResult, SubAggregator
 
 
@@ -91,8 +91,8 @@ class PairedGlobalMeanAnnualAggregator:
                 continue
 
             if name in self.variable_metadata:
-                long_name = self.variable_metadata[name].long_name
-                units = self.variable_metadata[name].units
+                long_name = self.variable_metadata[name].display_long_name(name)
+                units = self.variable_metadata[name].display_units("unknown units")
             else:
                 long_name = name
                 units = "unknown units"
@@ -113,6 +113,9 @@ class PairedGlobalMeanAnnualAggregator:
             if gen.sizes["year"] > 1:
                 target_ensemble_mean = target[name].mean("sample")
                 gen_ensemble_mean = gen[name].mean("sample")
+                metrics[f"rmse/{name}"] = get_rmse(
+                    gen_ensemble_mean, target_ensemble_mean
+                )
                 # compute R2 values
                 if ref is not None:
                     r2_target = get_r2(target_ensemble_mean, ref.mean)
@@ -235,8 +238,8 @@ class GlobalMeanAnnualAggregator:
                 continue
 
             if name in self.variable_metadata:
-                long_name = self.variable_metadata[name].long_name
-                units = self.variable_metadata[name].units
+                long_name = self.variable_metadata[name].display_long_name(name)
+                units = self.variable_metadata[name].display_units("unknown units")
             else:
                 long_name = name
                 units = "unknown units"
@@ -309,11 +312,24 @@ def _add_dataarray(da1: xr.DataArray, da2: xr.DataArray):
 
 
 def get_r2(da: xr.DataArray, reference: xr.DataArray) -> float:
-    """Compute the R2 value of the target compared to the reference."""
+    """Compute the R2 value of the data compared to the reference over years,
+    ignoring NaN values (e.g. gap years filled in by reindexing).
+    """
     ref_data = reference.sel(year=da.year)
-    SS_ref = np.sum((ref_data.values - np.mean(ref_data.values)) ** 2)
-    SS_pred = np.sum((da - ref_data).values ** 2)
+    valid = ~(np.isnan(da.values) | np.isnan(ref_data.values))
+    ref_valid = ref_data.values[valid]
+    pred_valid = da.values[valid]
+    SS_ref = np.sum((ref_valid - np.mean(ref_valid)) ** 2)
+    SS_pred = np.sum((pred_valid - ref_valid) ** 2)
     return float(1 - SS_pred / SS_ref)
+
+
+def get_rmse(da: xr.DataArray, reference: xr.DataArray) -> float:
+    """Compute the RMSE of the data compared to the reference over years,
+    ignoring NaN values (e.g. gap years filled in by reindexing).
+    """
+    ref_data = reference.sel(year=da.year)
+    return float(np.sqrt(np.nanmean((da - ref_data).values ** 2)))
 
 
 def _gather_sample_datasets(
@@ -372,15 +388,22 @@ def _get_min_samples(timestep: datetime.timedelta) -> int:
 
 @dataclasses.dataclass
 class AnnualMetricConfig:
-    type: Literal["annual"] = "annual"
     variables: list[str] | None = None
     name: str = "annual"
     reference_data: str | None = None
+    enabled: bool = True
+    strict: bool = False
 
     def get_name(self) -> str:
         return self.name
 
     def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        total_duration = ctx.n_timesteps * ctx.timestep
+        if total_duration <= datetime.timedelta(days=730):
+            raise MetricNotSupportedError(
+                f"annual metric requires > ~2 years of data, "
+                f"got {total_duration.days} days"
+            )
         if self.reference_data is not None:
             ref = xr.open_dataset(self.reference_data, decode_timedelta=False)
         else:

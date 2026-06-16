@@ -16,11 +16,18 @@ from fme.core.typing_ import Slice
 from fme.core.weight_ops import CopyWeightsConfig
 from fme.coupled.aggregator import InferenceEvaluatorAggregatorConfig
 from fme.coupled.data_loading.config import CoupledDataLoaderConfig
-from fme.coupled.data_loading.getters import get_gridded_data, get_inference_data
+from fme.coupled.data_loading.getters import (
+    get_gridded_data,
+    get_gridded_train_data,
+    get_inference_data,
+)
 from fme.coupled.data_loading.gridded_data import GriddedData, InferenceGriddedData
 from fme.coupled.data_loading.inference import InferenceDataLoaderConfig
 from fme.coupled.dataset_info import CoupledDatasetInfo
-from fme.coupled.requirements import CoupledDataRequirements
+from fme.coupled.requirements import (
+    CoupledDataRequirements,
+    CoupledTrainDataRequirements,
+)
 from fme.coupled.stepper import (
     CoupledStepperConfig,
     CoupledTrainStepper,
@@ -29,14 +36,13 @@ from fme.coupled.stepper import (
 from fme.coupled.typing_ import CoupledOptionalInt
 
 
-def _validate_loss_n_steps(
+def _validate_n_steps(
     n_coupled_steps: int,
     n_inner_steps: int,
     component_n_steps_max: CoupledOptionalInt,
 ) -> None:
-    """Ensure each component's ``LossContributionsConfig.n_steps`` upper bound
-    fits within the rollout horizon implied by ``n_coupled_steps`` and the
-    atmosphere/ocean step ratio.
+    """Ensure each component's ``n_steps`` upper bound fits within the rollout
+    horizon implied by ``n_coupled_steps`` and the atmosphere/ocean step ratio.
 
     Raises:
         ValueError: If either component's ``n_steps_max`` exceeds its limit.
@@ -49,7 +55,7 @@ def _validate_loss_n_steps(
         and component_n_steps_max.ocean > n_coupled_steps
     ):
         errors.append(
-            f"ocean loss_contributions.n_steps max "
+            f"ocean n_steps max "
             f"({component_n_steps_max.ocean}) exceeds n_coupled_steps "
             f"({n_coupled_steps})."
         )
@@ -58,15 +64,38 @@ def _validate_loss_n_steps(
         and component_n_steps_max.atmosphere > atmos_limit
     ):
         errors.append(
-            f"atmosphere loss_contributions.n_steps max "
+            f"atmosphere n_steps max "
             f"({component_n_steps_max.atmosphere}) exceeds n_coupled_steps * "
             f"n_inner_steps ({n_coupled_steps} * {n_inner_steps} = "
             f"{atmos_limit})."
         )
     if errors:
-        raise ValueError(
-            "Incompatible LossContributionsConfig n_steps: " + " ".join(errors)
-        )
+        raise ValueError("Incompatible n_steps: " + " ".join(errors))
+
+
+@dataclasses.dataclass
+class InlineValidationConfig:
+    """
+    Parameters:
+        loader: configuration for the data loader used during validation
+        name: name used as wandb log prefix and output subdirectory. If None,
+            defaults to "val" when there is a single validation config
+            and "val_{i}" when there are multiple. Note: adding a second
+            unnamed config will rename the first from "val" to
+            "val_0", changing its wandb keys and output directory.
+        weight: weight for this validation's loss in the combined checkpoint
+            selection metric. Must be non-negative.
+    """
+
+    loader: CoupledDataLoaderConfig
+    name: str | None = None
+    weight: float = 1.0
+
+    def __post_init__(self):
+        if self.weight < 0:
+            raise ValueError(
+                f"InlineValidationConfig weight must be non-negative, got {self.weight}"
+            )
 
 
 @dataclasses.dataclass
@@ -130,7 +159,10 @@ class TrainConfig:
 
     Attributes:
         train_loader: Configuration for the coupled training data loader.
-        validation_loader: Configuration for the coupled validation data loader.
+        validation: Configuration(s) for inline validation runs. Accepts a single
+            InlineValidationConfig or a list of them. The weighted sum of each
+            run's loss is used for checkpoint selection. Each entry can specify
+            a name (used as wandb log prefix) and weight.
         stepper: Configuration for the coupled stepper.
         optimization: Configuration for the optimization.
         logging: Configuration for logging.
@@ -185,7 +217,7 @@ class TrainConfig:
     """
 
     train_loader: CoupledDataLoaderConfig
-    validation_loader: CoupledDataLoaderConfig
+    validation: InlineValidationConfig | list[InlineValidationConfig]
     stepper: CoupledStepperConfig
     stepper_training: CoupledTrainStepperConfig
     optimization: OptimizationConfig
@@ -217,10 +249,15 @@ class TrainConfig:
     _RESERVED_NAMES = {"train", "val"}
 
     def __post_init__(self):
-        resolved_names = self.inference_names
-        if len(resolved_names) != len(set(resolved_names)):
-            raise ValueError(f"Duplicate inference names: {resolved_names}")
-        reserved_overlap = set(resolved_names) & self._RESERVED_NAMES
+        if not self.validation_list:
+            raise ValueError("At least one validation entry is required.")
+        resolved_validation_names = self.validation_names
+        if len(resolved_validation_names) != len(set(resolved_validation_names)):
+            raise ValueError(f"Duplicate validation names: {resolved_validation_names}")
+        resolved_inference_names = self.inference_names
+        if len(resolved_inference_names) != len(set(resolved_inference_names)):
+            raise ValueError(f"Duplicate inference names: {resolved_inference_names}")
+        reserved_overlap = set(resolved_inference_names) & self._RESERVED_NAMES
         if reserved_overlap:
             raise ValueError(
                 f"Inference names {sorted(reserved_overlap)} collide with "
@@ -231,7 +268,7 @@ class TrainConfig:
                 "lr_tuning and optimization.scheduler cannot both be specified; "
                 "lr_tuning is an alternative form of learning rate scheduling"
             )
-        _validate_loss_n_steps(
+        _validate_n_steps(
             n_coupled_steps=self.stepper_training.n_coupled_steps,
             n_inner_steps=self.stepper.n_inner_steps,
             component_n_steps_max=self.stepper_training.component_n_steps_max,
@@ -260,6 +297,25 @@ class TrainConfig:
     @property
     def train_evaluation_batches(self) -> int:
         return self.train_evaluation_samples // self.train_loader.batch_size
+
+    @property
+    def validation_list(self) -> list[InlineValidationConfig]:
+        if isinstance(self.validation, InlineValidationConfig):
+            return [self.validation]
+        return self.validation
+
+    @property
+    def validation_names(self) -> list[str]:
+        validation = self.validation_list
+        names = []
+        for i, entry in enumerate(validation):
+            if entry.name is not None:
+                names.append(entry.name)
+            elif len(validation) == 1:
+                names.append("val")
+            else:
+                names.append(f"val_{i}")
+        return names
 
     @property
     def inference_list(self) -> list[InlineInferenceConfig]:
@@ -299,26 +355,37 @@ class TrainBuilders:
     def __init__(self, config: TrainConfig):
         self.config = config
 
-    def _get_train_window_data_requirements(self) -> CoupledDataRequirements:
+    def _get_train_window_data_requirements(self) -> CoupledTrainDataRequirements:
+        return self.config.stepper_training.get_train_window_data_requirements(
+            self.config.stepper
+        )
+
+    def _get_valid_window_data_requirements(self) -> CoupledDataRequirements:
         return self.config.stepper.get_evaluation_window_data_requirements(
             self.config.n_coupled_steps
         )
 
     def get_train_data(self) -> GriddedData:
         data_requirements = self._get_train_window_data_requirements()
-        return get_gridded_data(
+        return get_gridded_train_data(
             self.config.train_loader,
             requirements=data_requirements,
-            train=True,
         )
 
-    def get_validation_data(self) -> GriddedData:
-        data_requirements = self._get_train_window_data_requirements()
-        return get_gridded_data(
-            self.config.validation_loader,
-            requirements=data_requirements,
-            train=False,
-        )
+    def get_validation_data(
+        self,
+    ) -> list[tuple[InlineValidationConfig, GriddedData, str]]:
+        data_requirements = self._get_valid_window_data_requirements()
+        names = self.config.validation_names
+        entries: list[tuple[InlineValidationConfig, GriddedData, str]] = []
+        for entry, name in zip(self.config.validation_list, names):
+            data = get_gridded_data(
+                entry.loader,
+                requirements=data_requirements,
+                train=False,
+            )
+            entries.append((entry, data, name))
+        return entries
 
     def get_inference_data(
         self,
