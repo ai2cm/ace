@@ -284,8 +284,13 @@ def test_get_initial_condition(n_ensemble):
     assert batch_data.time.shape == (sample * n_ensemble, 1)
     initial_times = batch_data.time.isel(time=0)
     assert initial_times.shape == (sample * n_ensemble,)
-    assert initial_times[0] == 0
-    assert initial_times[1] == 5
+    # broadcast_ensemble uses block ordering (repeat_interleave): each input
+    # sample's ensemble members are contiguous, so the time coordinate is the
+    # per-sample times repeat-interleaved ([0, 0, 0, 5, 5, 5] for n_ensemble=3),
+    # not tiled ([0, 5, 0, 5, 0, 5]). Time must follow the same order as the data.
+    np.testing.assert_array_equal(
+        initial_times.values, np.repeat(time_da.values, n_ensemble)
+    )
     assert batch_data.data["prog"].shape == (sample * n_ensemble, 1, 16, 32)
     for i in range(n_ensemble):
         np.testing.assert_allclose(
