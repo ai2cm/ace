@@ -141,7 +141,7 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
     force_positive_names: list[str] = dataclasses.field(default_factory=list)
     total_energy_budget_correction: EnergyBudgetConfig | None = None
 
-    def get_corrector(
+    def _get_corrector(
         self,
         dataset_info: DatasetInfo,
     ) -> "AtmosphereCorrector":

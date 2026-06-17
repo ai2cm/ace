@@ -86,6 +86,8 @@ aggregator:
     reference_data: null
     enabled: true
     strict: false
+    report_crps: true
+    report_rmse: true
   enso_index:
     name: enso_index
     enabled: true
