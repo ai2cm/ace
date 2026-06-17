@@ -28,7 +28,20 @@ aggregator:
 data_writer:
   ocean:
     save_prediction_files: false
-    save_monthly_files: false
+    save_monthly_files: true
+    names:
+    # near-surface ocean variables
+    - sst
+    - ssu
+    - ssv
+    - zos
+    - so_0
+    - thetao_0
+    - uo_0
+    - vo_0
+    # sea ice variables
+    - ocean_sea_ice_fraction
+    - sea_ice_volume
   atmosphere:
     save_prediction_files: false
     save_monthly_files: false
