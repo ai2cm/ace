@@ -28,9 +28,18 @@ run_benchmark() {
   local PRIORITY="${3:-urgent}"
   local CLUSTER="${4:-ai2/titan}"
 
-  local cluster_args=()
+  # NOTE on node isolation: gantry's --weka auto-adds a `cluster` constraint,
+  # and Beaker rejects `cluster` + `hostname` together, so we cannot pin a host
+  # while mounting weka data. That is fine here: each job runs BOTH code paths
+  # back-to-back in one process on one dedicated GPU, so the
+  # sequential-vs-concurrent A/B is never co-located (the confound the 2026-06-16
+  # log reanalysis hit), and the headline forward/aggregator numbers are
+  # CUDA-event GPU times, robust to a sibling job on another GPU of the host. To
+  # truly place the two repeat-jobs on distinct hosts, submit them and check
+  # `beaker experiment get ... node`, stopping/resubmitting until they differ.
+  local placement_args=()
   for c in $CLUSTER; do
-    cluster_args+=(--cluster "$c")
+    placement_args+=(--cluster "$c")
   done
 
   gantry run \
@@ -39,7 +48,7 @@ run_benchmark() {
     --beaker-image "$(cat "$REPO_ROOT"/latest_deps_only_image.txt)" \
     --workspace "$WORKSPACE" \
     --priority "$PRIORITY" \
-    "${cluster_args[@]}" \
+    "${placement_args[@]}" \
     --gpus 1 \
     --shared-memory 400GiB \
     --weka climate-default:/climate-default \
@@ -47,6 +56,7 @@ run_benchmark() {
     --allow-dirty \
     --system-python \
     --install "pip install --no-deps ." \
+    --yes --no-logs --timeout 0 \
     -- python -I -m fme.ace.train.benchmark_inline_inference \
         "$CONFIG" \
         --repeats "$REPEATS" \
@@ -57,6 +67,7 @@ run_benchmark() {
         --output-json "/results/bench-${job_name}.json"
 }
 
-# One job per node (titan B200, urgent). Two jobs to clear node-to-node variance.
-run_benchmark "cinf-timing-bench-n1"
-run_benchmark "cinf-timing-bench-n2"
+# Two jobs (titan B200, urgent) for node-to-node variance. Each job runs both
+# code paths internally, so there is never a co-located seq-vs-concurrent A/B.
+run_benchmark "cinf-timing-bench-r1"
+run_benchmark "cinf-timing-bench-r2"
