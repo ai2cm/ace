@@ -144,11 +144,11 @@ def test_ssr_identical_members_gives_negative_one():
     torch.testing.assert_close(got, torch.full_like(got, -1.0), atol=1e-6, rtol=0.0)
 
 
-def test_ssr_prescribed_cell_is_nan_but_zero_spread_with_error_is_negative_one():
+def test_ssr_prescribed_cell_is_zero_but_zero_spread_with_error_is_negative_one():
     """A prescribed/forced cell (members identical AND equal to the target, e.g.
-    SST over ocean) has an undefined 0/0 spread-skill ratio and must be NaN, so
-    it can be excluded from area-weighted means. A genuine zero-spread cell with
-    nonzero ensemble-mean error must still give -1."""
+    SST over ocean) has a 0/0 spread-skill ratio; by convention it is reported
+    as 0 (perfectly calibrated), not the -1 floor. A genuine zero-spread cell
+    with nonzero ensemble-mean error must still give -1."""
     torch.manual_seed(0)
     metric = SSRBiasMetric()
     n_batch, n_sample, n_time, n_y, n_x = 10, 3, 1, 2, 2
@@ -160,17 +160,20 @@ def test_ssr_prescribed_cell_is_nan_but_zero_spread_with_error_is_negative_one()
     gen[..., 0] = target[..., 0]
     metric.record(target=target, gen=gen)
     got = metric.get()
-    assert torch.isnan(got[..., 0]).all(), f"prescribed column not NaN: {got}"
+    torch.testing.assert_close(
+        got[..., 0], torch.zeros_like(got[..., 0]), atol=1e-6, rtol=0.0
+    )
     torch.testing.assert_close(
         got[..., 1], torch.full_like(got[..., 1], -1.0), atol=1e-6, rtol=0.0
     )
 
 
-def test_aggregator_ssr_bias_excludes_prescribed_cells_from_scalar():
-    """The scalar area-weighted ssr_bias must exclude prescribed (NaN) cells
-    rather than letting them drag the mean toward the -1 floor or turn it NaN.
-    With uniform area weights the scalar must equal the mean over only the
-    cells where the ensemble actually forecasts."""
+def test_aggregator_ssr_bias_prescribed_cells_do_not_pull_scalar_to_negative_one():
+    """Prescribed cells (0/0) contribute the calibrated value 0 to the scalar
+    area-weighted ssr_bias rather than the -1 floor, so a mostly-prescribed
+    field is not dragged toward -1. With uniform area weights the scalar must
+    equal the plain mean of the per-cell metric (prescribed cells counted as
+    0)."""
     torch.manual_seed(0)
     n_batch, n_sample, n_time, n_y, n_x = 50, 4, 1, 2, 4
     area_weights = torch.ones([n_y, n_x], device=get_device())
@@ -189,11 +192,14 @@ def test_aggregator_ssr_bias_excludes_prescribed_cells_from_scalar():
     )
     scalar = float(agg.get_logs(label="metrics")["metrics/ssr_bias/a"])
     assert math.isfinite(scalar)
+    # not pinned to the -1 floor by the prescribed half
+    assert scalar > -0.5, scalar
 
-    # expected: ssr_bias averaged over the forecasting (right-half) cells only
-    active = SSRBiasMetric()
-    active.record(target=target[..., 2:], gen=gen[..., 2:])
-    expected = float(torch.nanmean(active.get()))
+    # with uniform weights the scalar is the plain mean of the per-cell field,
+    # where the prescribed cells contribute 0 (not -1)
+    field = SSRBiasMetric()
+    field.record(target=target, gen=gen)
+    expected = float(field.get().mean())
     assert math.isclose(scalar, expected, rel_tol=1e-5, abs_tol=1e-5), (
         scalar,
         expected,

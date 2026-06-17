@@ -176,15 +176,19 @@ class SSRBiasMetric(ReducedMetric):
         ssr_bias = torch.where(
             skill > 0, spread / skill - 1, torch.full_like(spread, -1.0)
         )
-        # Prescribed/forced cells have neither spread nor skill, so the
-        # spread-skill ratio is a genuine 0/0 and thus undefined. Mark them NaN
-        # so they are excluded from the area-weighted means rather than pinned
-        # to the -1 floor, which would otherwise dominate the scalar global
-        # average of a mostly-prescribed field (e.g. surface temperature, where
-        # SST is prescribed over the ~70% of the surface that is ocean).
-        return torch.where(
-            self._prescribed, torch.full_like(spread, float("nan")), ssr_bias
-        )
+        # Prescribed/forced cells (every ensemble member equals the target, e.g.
+        # SST over ocean) have neither spread nor skill, so the spread-skill
+        # ratio is a genuine 0/0. By convention report 0 there -- zero spread is
+        # exactly right for zero error, i.e. perfectly calibrated -- rather than
+        # the -1 floor that spread / skill - 1 takes in the zero-spread limit,
+        # which would otherwise dominate the scalar global average of a
+        # mostly-prescribed field (surface temperature is prescribed over the
+        # ~70% of the surface that is ocean). This cannot be detected from
+        # (total_variance == 0) & (total_unbiased_mse == 0): the unbiased MSE is
+        # not exactly zero at prescribed cells because averaging the identical
+        # members leaves a ~1e-15 rounding residue, so it is detected on the raw
+        # values in ``record`` (see ``_add_prescribed``), before that mean.
+        return torch.where(self._prescribed, torch.zeros_like(spread), ssr_bias)
 
 
 class _EnsembleAggregator:
@@ -228,11 +232,6 @@ class _EnsembleAggregator:
         self._log_mean_maps = log_mean_maps
         self._metadata = metadata
         self._diverging_metrics = {"ssr_bias"}
-        # Metrics that can be NaN at cells where they are undefined (ssr_bias is
-        # NaN over prescribed/forced regions with neither spread nor skill).
-        # Those cells must be excluded from the area-weighted mean rather than
-        # propagating NaN into the scalar.
-        self._nan_excluding_metrics = {"ssr_bias"}
         self._target = target
         self._channel_mean_names = channel_mean_names
         self._report_variables = (
@@ -299,23 +298,6 @@ class _EnsembleAggregator:
         caption = f"{caption_name} ({units})"
         return caption
 
-    def _area_weighted_mean_skipna(
-        self, data: torch.Tensor, name: str | None = None
-    ) -> torch.Tensor:
-        """Area-weighted mean that excludes NaN cells from both the weighted
-        sum and the normalizing weight, so undefined cells (e.g. ssr_bias over
-        prescribed regions) neither contribute nor turn the result into NaN.
-        Returns NaN only if every cell is NaN.
-        """
-        valid = torch.isfinite(data)
-        weighted_values = self._gridded_operations.area_weighted_sum(
-            torch.where(valid, data, torch.zeros_like(data)), name=name
-        )
-        total_weight = self._gridded_operations.area_weighted_sum(
-            valid.to(data.dtype), name=name
-        )
-        return weighted_values / total_weight
-
     def _get_data(self):
         if self._variable_metrics is None or self._n_batches == 0:
             raise ValueError("No batches have been recorded.")
@@ -327,13 +309,11 @@ class _EnsembleAggregator:
                 metric_value = self._dist.reduce_mean(
                     self._variable_metrics[metric][key].get()
                 )
-                if metric in self._nan_excluding_metrics:
-                    scalar = self._area_weighted_mean_skipna(metric_value, name=key)
-                else:
-                    scalar = self._gridded_operations.area_weighted_mean(
-                        metric_value, name=key
-                    )
-                data[f"{metric}/{key}"] = scalar.cpu().numpy()
+                data[f"{metric}/{key}"] = (
+                    self._gridded_operations.area_weighted_mean(metric_value, name=key)
+                    .cpu()
+                    .numpy()
+                )
                 if self._log_mean_maps:
                     data[f"{metric}/mean_map/{key}"] = plot_paneled_data(
                         [[metric_value.cpu().numpy()]],
