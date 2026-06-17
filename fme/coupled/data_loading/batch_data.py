@@ -34,6 +34,25 @@ class CoupledPrognosticState:
             self.ocean_data.as_batch_data(), self.atmosphere_data.as_batch_data()
         )
 
+    @classmethod
+    def cat(
+        cls, states: Sequence["CoupledPrognosticState"]
+    ) -> "CoupledPrognosticState":
+        """Concatenate coupled prognostic states along the sample dimension."""
+        return cls(
+            ocean_data=PrognosticState.cat([s.ocean_data for s in states]),
+            atmosphere_data=PrognosticState.cat([s.atmosphere_data for s in states]),
+        )
+
+    def split(self, sample_sizes: Sequence[int]) -> list["CoupledPrognosticState"]:
+        """Split along the sample dimension into the given sample sizes."""
+        ocean_split = self.ocean_data.split(sample_sizes)
+        atmos_split = self.atmosphere_data.split(sample_sizes)
+        return [
+            CoupledPrognosticState(ocean_data=o, atmosphere_data=a)
+            for o, a in zip(ocean_split, atmos_split)
+        ]
+
 
 @dataclasses.dataclass
 class CoupledBatchData:
@@ -154,6 +173,23 @@ class CoupledBatchData:
         self.atmosphere_data = self.atmosphere_data.pin_memory()
         return self
 
+    @classmethod
+    def cat(cls, batches: Sequence["CoupledBatchData"]) -> "CoupledBatchData":
+        """Concatenate along the sample dimension."""
+        return cls(
+            ocean_data=BatchData.cat([b.ocean_data for b in batches]),
+            atmosphere_data=BatchData.cat([b.atmosphere_data for b in batches]),
+        )
+
+    def split(self, sample_sizes: Sequence[int]) -> list["CoupledBatchData"]:
+        """Split along the sample dimension into the given sample sizes."""
+        ocean_split = self.ocean_data.split(sample_sizes)
+        atmos_split = self.atmosphere_data.split(sample_sizes)
+        return [
+            self.__class__(ocean_data=o, atmosphere_data=a)
+            for o, a in zip(ocean_split, atmos_split)
+        ]
+
 
 @dataclasses.dataclass
 class CoupledPairedData:
@@ -198,3 +234,20 @@ class CoupledPairedData:
                 labels=prediction.atmosphere_data.labels,
             ),
         )
+
+    @classmethod
+    def cat(cls, batches: Sequence["CoupledPairedData"]) -> "CoupledPairedData":
+        """Concatenate along the sample dimension."""
+        return cls(
+            ocean_data=PairedData.cat([b.ocean_data for b in batches]),
+            atmosphere_data=PairedData.cat([b.atmosphere_data for b in batches]),
+        )
+
+    def split(self, sample_sizes: Sequence[int]) -> list["CoupledPairedData"]:
+        """Split along the sample dimension into the given sample sizes."""
+        ocean_split = self.ocean_data.split(sample_sizes)
+        atmos_split = self.atmosphere_data.split(sample_sizes)
+        return [
+            CoupledPairedData(ocean_data=o, atmosphere_data=a)
+            for o, a in zip(ocean_split, atmos_split)
+        ]
