@@ -6,7 +6,7 @@
 set -e
 
 
-CONFIG_FILENAME="ace-evaluator-4k.yaml"
+CONFIG_FILENAME="ace-evaluator-control.yaml"
 
 SCRIPT_PATH=$(git rev-parse --show-prefix)
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME

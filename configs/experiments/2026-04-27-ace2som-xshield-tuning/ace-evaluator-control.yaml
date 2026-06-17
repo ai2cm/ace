@@ -1,5 +1,5 @@
 experiment_dir: /results
-n_forward_steps: 1460
+n_forward_steps: 7300
 forward_steps_in_memory: 73
 checkpoint_path: /ckpt.tar
 logging:
@@ -11,7 +11,7 @@ logging:
 loader:
   start_indices:
     times:
-      - '2017-01-01T00:00:00'
+      - '2014-01-01T00:00:00'
   dataset:
     data_path: /climate-default/
     file_pattern: 2025-09-11-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
