@@ -1241,6 +1241,30 @@ def test_batchdata_split_wrong_sum_raises():
         a.split([1, 2])
 
 
+def test_batchdata_cat_and_split_roundtrips_stepper_state():
+    """cat/split must carry per-sample stepper_state so corrector state
+    propagates through batched (concurrent) prediction exactly as in the
+    sequential path."""
+    a = _batch_data_with_stepper_state(n_samples=2)
+    b = _batch_data_with_stepper_state(n_samples=3)
+    cat = BatchData.cat([a, b])
+    assert cat.stepper_state is not None
+    assert cat.stepper_state.corrector_state is not None
+    mass = cat.stepper_state.corrector_state.global_dry_air_mass
+    assert mass is not None and mass.shape == (5, 1, 1)
+    pieces = cat.split([2, 3])
+    assert_batchdata_equal_up_to_device(pieces[0], a)
+    assert_batchdata_equal_up_to_device(pieces[1], b)
+
+
+def test_batchdata_cat_inconsistent_stepper_state_presence_raises():
+    a = _batch_data_with_stepper_state(n_samples=2)
+    b = _batch_data_with_stepper_state(n_samples=2)
+    b.stepper_state = None
+    with pytest.raises(ValueError, match="stepper_state"):
+        BatchData.cat([a, b])
+
+
 def test_prognostic_state_cat_and_split_roundtrip():
     a = get_batch_data(
         names=["foo"], n_samples=2, n_times=2, horizontal_dims=["lat", "lon"]

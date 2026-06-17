@@ -577,11 +577,12 @@ class BatchData:
         """Concatenate a sequence of BatchData along the sample dimension.
 
         All inputs must share variable names, ``horizontal_dims``, ``epoch``,
-        ``n_ensemble``, ``n_timesteps``, and whether labels and data_mask are
-        present. Label names may differ across inputs: the result uses the
-        sorted union of all label names, with each input conformed to that
-        encoding before concatenation. Tensors must already be on the same
-        device.
+        ``n_ensemble``, ``n_timesteps``, and whether labels, data_mask, and
+        stepper_state are present. Label names may differ across inputs: the
+        result uses the sorted union of all label names, with each input
+        conformed to that encoding before concatenation. Any per-sample
+        ``stepper_state`` is concatenated along the sample dim so it propagates
+        through batched prediction. Tensors must already be on the same device.
         """
         if len(batches) == 0:
             raise ValueError("Cannot cat an empty sequence of BatchData.")
@@ -623,6 +624,10 @@ class BatchData:
                 raise ValueError(
                     "Cannot cat BatchData with inconsistent data_mask presence."
                 )
+            if (b.stepper_state is None) != (first.stepper_state is None):
+                raise ValueError(
+                    "Cannot cat BatchData with inconsistent stepper_state presence."
+                )
         data = {k: torch.cat([b.data[k] for b in batches], dim=0) for k in first.data}
         time = xr.concat([b.time for b in batches], dim="sample")
         if first.labels is None:
@@ -641,6 +646,12 @@ class BatchData:
                 )
                 for k in first.data_mask
             }
+        if first.stepper_state is None:
+            stepper_state = None
+        else:
+            stepper_state = StepperState.cat(
+                [b.stepper_state for b in batches if b.stepper_state is not None]
+            )
         return cls(
             data=data,
             time=time,
@@ -649,6 +660,7 @@ class BatchData:
             epoch=first.epoch,
             n_ensemble=first.n_ensemble,
             data_mask=data_mask,
+            stepper_state=stepper_state,
         )
 
     def split(self: SelfType, sample_sizes: Sequence[int]) -> list[SelfType]:
@@ -661,9 +673,13 @@ class BatchData:
             )
         if len(sample_sizes) == 1:
             return [self]
+        if self.stepper_state is None:
+            stepper_states: list[StepperState | None] = [None] * len(sample_sizes)
+        else:
+            stepper_states = list(self.stepper_state.split(sample_sizes))
         out: list[SelfType] = []
         start = 0
-        for size in sample_sizes:
+        for size, stepper_state in zip(sample_sizes, stepper_states):
             end = start + size
             data = {k: v[start:end] for k, v in self.data.items()}
             time = self.time.isel(sample=slice(start, end))
@@ -684,6 +700,7 @@ class BatchData:
                     epoch=self.epoch,
                     n_ensemble=self.n_ensemble,
                     data_mask=data_mask,
+                    stepper_state=stepper_state,
                 )
             )
             start = end

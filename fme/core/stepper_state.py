@@ -11,6 +11,7 @@ payloads owned by their respective components.
 """
 
 import dataclasses
+from collections.abc import Sequence
 
 from fme.core.corrector.state import CorrectorState
 
@@ -61,3 +62,29 @@ class StepperState:
         if self.corrector_state is not None:
             return self.corrector_state.sample_dim_size()
         return None
+
+    @classmethod
+    def cat(cls, states: "Sequence[StepperState]") -> "StepperState":
+        """Concatenate stepper states along the sample dimension.
+
+        Inputs must agree on which sub-states are present (all ``None`` or all
+        not-``None``); a present sub-state is concatenated along the sample dim.
+        """
+        corrector_states = [s.corrector_state for s in states]
+        present = [c for c in corrector_states if c is not None]
+        if not present:
+            return cls()
+        if len(present) != len(corrector_states):
+            raise ValueError(
+                "Cannot cat StepperState with inconsistent corrector_state presence."
+            )
+        return cls(corrector_state=CorrectorState.cat(present))
+
+    def split(self, sample_sizes: "Sequence[int]") -> "list[StepperState]":
+        """Split along the sample dimension into the given sample sizes."""
+        if self.corrector_state is None:
+            return [StepperState() for _ in sample_sizes]
+        return [
+            StepperState(corrector_state=c)
+            for c in self.corrector_state.split(sample_sizes)
+        ]

@@ -6,6 +6,7 @@ window to the next.
 """
 
 import dataclasses
+from collections.abc import Sequence
 
 import torch
 
@@ -66,3 +67,29 @@ class CorrectorState:
         if self.global_dry_air_mass is not None:
             return self.global_dry_air_mass.shape[0]
         return None
+
+    @classmethod
+    def cat(cls, states: "Sequence[CorrectorState]") -> "CorrectorState":
+        """Concatenate corrector states along the sample dimension.
+
+        Inputs must agree on which fields are present (all ``None`` or all
+        not-``None`` for each field); a present field is concatenated along
+        dim 0.
+        """
+        masses = [s.global_dry_air_mass for s in states]
+        present = [m for m in masses if m is not None]
+        if not present:
+            return cls()
+        if len(present) != len(masses):
+            raise ValueError(
+                "Cannot cat CorrectorState with inconsistent global_dry_air_mass "
+                "presence."
+            )
+        return cls(global_dry_air_mass=torch.cat(present, dim=0))
+
+    def split(self, sample_sizes: "Sequence[int]") -> "list[CorrectorState]":
+        """Split along the sample dimension into the given sample sizes."""
+        if self.global_dry_air_mass is None:
+            return [CorrectorState() for _ in sample_sizes]
+        pieces = torch.split(self.global_dry_air_mass, list(sample_sizes), dim=0)
+        return [CorrectorState(global_dry_air_mass=p) for p in pieces]
