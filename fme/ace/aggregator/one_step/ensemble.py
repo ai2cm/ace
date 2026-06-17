@@ -117,6 +117,7 @@ class SSRBiasMetric(ReducedMetric):
     def __init__(self):
         self._total_unbiased_mse = None
         self._total_variance = None
+        self._prescribed = None
         self._n_batches = 0
 
     def record(self, target: torch.Tensor, gen: torch.Tensor):
@@ -126,7 +127,21 @@ class SSRBiasMetric(ReducedMetric):
         variance = gen.var(dim=1, unbiased=True).mean(dim=(0, 1))
         self._add_unbiased_mse(mse, variance, num_ensemble)
         self._add_variance(variance)
+        self._add_prescribed(target, gen)
         self._n_batches += 1
+
+    def _add_prescribed(self, target: torch.Tensor, gen: torch.Tensor):
+        # A cell is "prescribed"/forced when every ensemble member exactly
+        # equals the target in every recorded batch (e.g. SST over ocean, where
+        # the prescriber overwrites the prediction with the reference value for
+        # all members). There the spread-skill ratio is a genuine 0/0 and so
+        # undefined. This is detected on the raw values, before the ensemble
+        # mean is taken, so floating-point error in (sum / n) does not mask it.
+        batch_prescribed = torch.eq(gen, target).all(dim=1).all(dim=(0, 1))
+        if self._prescribed is None:
+            self._prescribed = batch_prescribed
+        else:
+            self._prescribed = self._prescribed & batch_prescribed
 
     def _add_unbiased_mse(
         self, mse: torch.Tensor, variance: torch.Tensor, num_ensemble: int
@@ -143,7 +158,11 @@ class SSRBiasMetric(ReducedMetric):
         self._total_variance += variance
 
     def get(self) -> torch.Tensor:
-        if self._total_unbiased_mse is None or self._total_variance is None:
+        if (
+            self._total_unbiased_mse is None
+            or self._total_variance is None
+            or self._prescribed is None
+        ):
             raise ValueError("No batches have been recorded.")
         spread = self._total_variance.sqrt()
         # Clamp to avoid NaN from sqrt of negative values. The unbiased MSE
@@ -151,9 +170,21 @@ class SSRBiasMetric(ReducedMetric):
         # ensembles or few batches, producing negative values at some grid
         # cells that do not indicate spread truly exceeding skill.
         skill = torch.clamp(self._total_unbiased_mse, min=0.0).sqrt()
-        # When skill is zero (clamped or genuinely perfect), SSR is undefined.
-        # Use -1 as the convention (equivalent to zero spread).
-        return torch.where(skill > 0, spread / skill - 1, torch.tensor(-1.0))
+        # When skill is zero but spread is not, SSR is undefined; -1 is the
+        # convention there (it is also the exact value of spread / skill - 1 in
+        # the genuine zero-spread, nonzero-skill underdispersive limit).
+        ssr_bias = torch.where(
+            skill > 0, spread / skill - 1, torch.full_like(spread, -1.0)
+        )
+        # Prescribed/forced cells have neither spread nor skill, so the
+        # spread-skill ratio is a genuine 0/0 and thus undefined. Mark them NaN
+        # so they are excluded from the area-weighted means rather than pinned
+        # to the -1 floor, which would otherwise dominate the scalar global
+        # average of a mostly-prescribed field (e.g. surface temperature, where
+        # SST is prescribed over the ~70% of the surface that is ocean).
+        return torch.where(
+            self._prescribed, torch.full_like(spread, float("nan")), ssr_bias
+        )
 
 
 class _EnsembleAggregator:
@@ -197,6 +228,11 @@ class _EnsembleAggregator:
         self._log_mean_maps = log_mean_maps
         self._metadata = metadata
         self._diverging_metrics = {"ssr_bias"}
+        # Metrics that can be NaN at cells where they are undefined (ssr_bias is
+        # NaN over prescribed/forced regions with neither spread nor skill).
+        # Those cells must be excluded from the area-weighted mean rather than
+        # propagating NaN into the scalar.
+        self._nan_excluding_metrics = {"ssr_bias"}
         self._target = target
         self._channel_mean_names = channel_mean_names
         self._report_variables = (
@@ -263,6 +299,23 @@ class _EnsembleAggregator:
         caption = f"{caption_name} ({units})"
         return caption
 
+    def _area_weighted_mean_skipna(
+        self, data: torch.Tensor, name: str | None = None
+    ) -> torch.Tensor:
+        """Area-weighted mean that excludes NaN cells from both the weighted
+        sum and the normalizing weight, so undefined cells (e.g. ssr_bias over
+        prescribed regions) neither contribute nor turn the result into NaN.
+        Returns NaN only if every cell is NaN.
+        """
+        valid = torch.isfinite(data)
+        weighted_values = self._gridded_operations.area_weighted_sum(
+            torch.where(valid, data, torch.zeros_like(data)), name=name
+        )
+        total_weight = self._gridded_operations.area_weighted_sum(
+            valid.to(data.dtype), name=name
+        )
+        return weighted_values / total_weight
+
     def _get_data(self):
         if self._variable_metrics is None or self._n_batches == 0:
             raise ValueError("No batches have been recorded.")
@@ -274,11 +327,13 @@ class _EnsembleAggregator:
                 metric_value = self._dist.reduce_mean(
                     self._variable_metrics[metric][key].get()
                 )
-                data[f"{metric}/{key}"] = (
-                    self._gridded_operations.area_weighted_mean(metric_value, name=key)
-                    .cpu()
-                    .numpy()
-                )
+                if metric in self._nan_excluding_metrics:
+                    scalar = self._area_weighted_mean_skipna(metric_value, name=key)
+                else:
+                    scalar = self._gridded_operations.area_weighted_mean(
+                        metric_value, name=key
+                    )
+                data[f"{metric}/{key}"] = scalar.cpu().numpy()
                 if self._log_mean_maps:
                     data[f"{metric}/mean_map/{key}"] = plot_paneled_data(
                         [[metric_value.cpu().numpy()]],

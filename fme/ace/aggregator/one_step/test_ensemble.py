@@ -1,3 +1,5 @@
+import math
+
 import pytest
 import torch
 
@@ -140,6 +142,62 @@ def test_ssr_identical_members_gives_negative_one():
     metric.record(target=target, gen=gen)
     got = metric.get()
     torch.testing.assert_close(got, torch.full_like(got, -1.0), atol=1e-6, rtol=0.0)
+
+
+def test_ssr_prescribed_cell_is_nan_but_zero_spread_with_error_is_negative_one():
+    """A prescribed/forced cell (members identical AND equal to the target, e.g.
+    SST over ocean) has an undefined 0/0 spread-skill ratio and must be NaN, so
+    it can be excluded from area-weighted means. A genuine zero-spread cell with
+    nonzero ensemble-mean error must still give -1."""
+    torch.manual_seed(0)
+    metric = SSRBiasMetric()
+    n_batch, n_sample, n_time, n_y, n_x = 10, 3, 1, 2, 2
+    target = get_tensor((n_batch, 1, n_time, n_y, n_x))
+    # zero spread everywhere: every ensemble member identical
+    single_pred = get_tensor((n_batch, 1, n_time, n_y, n_x))
+    gen = single_pred.expand(n_batch, n_sample, n_time, n_y, n_x).clone()
+    # left column: members also equal the target -> zero skill too (prescribed)
+    gen[..., 0] = target[..., 0]
+    metric.record(target=target, gen=gen)
+    got = metric.get()
+    assert torch.isnan(got[..., 0]).all(), f"prescribed column not NaN: {got}"
+    torch.testing.assert_close(
+        got[..., 1], torch.full_like(got[..., 1], -1.0), atol=1e-6, rtol=0.0
+    )
+
+
+def test_aggregator_ssr_bias_excludes_prescribed_cells_from_scalar():
+    """The scalar area-weighted ssr_bias must exclude prescribed (NaN) cells
+    rather than letting them drag the mean toward the -1 floor or turn it NaN.
+    With uniform area weights the scalar must equal the mean over only the
+    cells where the ensemble actually forecasts."""
+    torch.manual_seed(0)
+    n_batch, n_sample, n_time, n_y, n_x = 50, 4, 1, 2, 4
+    area_weights = torch.ones([n_y, n_x], device=get_device())
+    agg = _EnsembleAggregator(
+        gridded_operations=LatLonOperations(area_weights),
+        log_mean_maps=False,
+        target="denorm",
+    )
+    target = torch.randn(n_batch, 1, n_time, n_y, n_x, device=get_device())
+    gen = torch.randn(n_batch, n_sample, n_time, n_y, n_x, device=get_device())
+    # left half of the grid prescribed: every member equals the target
+    gen[..., :2] = target[..., :2]
+    agg.record_batch(
+        target_data=EnsembleTensorDict({"a": target}),
+        gen_data=EnsembleTensorDict({"a": gen}),
+    )
+    scalar = float(agg.get_logs(label="metrics")["metrics/ssr_bias/a"])
+    assert math.isfinite(scalar)
+
+    # expected: ssr_bias averaged over the forecasting (right-half) cells only
+    active = SSRBiasMetric()
+    active.record(target=target[..., 2:], gen=gen[..., 2:])
+    expected = float(torch.nanmean(active.get()))
+    assert math.isclose(scalar, expected, rel_tol=1e-5, abs_tol=1e-5), (
+        scalar,
+        expected,
+    )
 
 
 @pytest.mark.parametrize("n_sample", [2, 10])
