@@ -42,18 +42,19 @@ train_loader:
     subset:
       start_time: '1969-01-01'
       stop_time: '2005-12-31'
-validation_loader:
-  batch_size: 32
-  num_data_workers: 2
-  prefetch_factor: 2
-  time_buffer: 20
-  dataset:
-    data_path: /scratch/cimes/wg4031/Emulator_data/Ice/
-    file_pattern: 1958-2022.OM41deg_FloeNet_6hourly_Julian.zarr
-    engine: zarr
-    subset:
-      start_time: '2016-01-01'
-      stop_time: '2022-12-31'
+validation:
+  loader:
+    batch_size: 32
+    num_data_workers: 2
+    prefetch_factor: 2
+    time_buffer: 20
+    dataset:
+      data_path: /scratch/cimes/wg4031/Emulator_data/Ice/
+      file_pattern: 1958-2022.OM41deg_FloeNet_6hourly_Julian.zarr
+      engine: zarr
+      subset:
+        start_time: '2016-01-01'
+        stop_time: '2022-12-31'
 train_aggregator:
   spherical_power_spectrum: false
   weighted_rmse: false
