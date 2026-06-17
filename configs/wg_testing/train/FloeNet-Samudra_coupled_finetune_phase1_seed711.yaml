@@ -70,31 +70,32 @@ train_loader:
       fill_nans:
         method: "constant"
         value: 0.0
-validation_loader:
-  batch_size: 8
-  num_data_workers: 2
-  prefetch_factor: 2
-  dataset:
-    ocean:
-      data_path: /scratch/cimes/wg4031/Emulator_data/Ocean/
-      file_pattern: 1958-2022.OM41deg_Samudra_5daily_means_NoLeap.zarr
-      engine: zarr
-      subset:
-        start_time: '2016-01-03T12:00:00'
-        stop_time: '2022-12-27T12:00:00'
-      fill_nans:
-        method: "constant"
-        value: 0.0
-    ice:
-      data_path: /scratch/cimes/wg4031/Emulator_data/Ice/
-      file_pattern: 1958-2022.OM41deg_FloeNet_6hourly_NoLeap.zarr
-      engine: zarr
-      subset:
-        start_time: '2016-01-03T12:00:00'
-        stop_time: '2022-12-27T12:00:00'
-      fill_nans:
-        method: "constant"
-        value: 0.0
+validation:
+  loader:
+    batch_size: 8
+    num_data_workers: 2
+    prefetch_factor: 2
+    dataset:
+      ocean:
+        data_path: /scratch/cimes/wg4031/Emulator_data/Ocean/
+        file_pattern: 1958-2022.OM41deg_Samudra_5daily_means_NoLeap.zarr
+        engine: zarr
+        subset:
+          start_time: '2016-01-03T12:00:00'
+          stop_time: '2022-12-27T12:00:00'
+        fill_nans:
+          method: "constant"
+          value: 0.0
+      ice:
+        data_path: /scratch/cimes/wg4031/Emulator_data/Ice/
+        file_pattern: 1958-2022.OM41deg_FloeNet_6hourly_NoLeap.zarr
+        engine: zarr
+        subset:
+          start_time: '2016-01-03T12:00:00'
+          stop_time: '2022-12-27T12:00:00'
+        fill_nans:
+          method: "constant"
+          value: 0.0
 optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001

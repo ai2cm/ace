@@ -16,7 +16,7 @@ from fme.ace.aggregator.one_step.ensemble import (
 )
 from fme.ace.stepper import TrainOutput
 from fme.core.dataset_info import DatasetInfo
-from fme.core.generics.aggregator import AggregatorABC
+from fme.core.generics.aggregator import AggregatorABC, AggregatorSummary
 from fme.core.tensors import fold_ensemble_dim, fold_sized_ensemble_dim
 from fme.core.typing_ import EnsembleTensorDict, TensorMapping
 
@@ -96,29 +96,26 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
             self._ensemble_recorded = True
 
     @torch.no_grad()
-    def get_logs(self, label: str):
-        """
-        Returns logs as can be reported to WandB.
-
-        Args:
-            label: Label to prepend to all log keys.
-        """
-        deterministic_logs = self._deterministic_aggregator.get_logs(label)
-        deterministic_logs.update(self._per_step_losses.get_logs(label))
+    def get_summary(self, label: str) -> AggregatorSummary:
+        det_summary = self._deterministic_aggregator.get_summary(label)
+        logs = dict(det_summary.logs)
+        logs.update(self._per_step_losses.get_logs(label))
         if self._ensemble_recorded and self._ensemble_aggregators:
             stochastic_logs: dict = {}
             for agg_name, ensemble_aggregator in self._ensemble_aggregators.items():
                 for k, v in ensemble_aggregator.get_logs(label=agg_name).items():
                     stochastic_logs[f"{label}/{k}"] = v
-            if len(set(deterministic_logs.keys()) & set(stochastic_logs.keys())) > 0:
+            if len(set(logs.keys()) & set(stochastic_logs.keys())) > 0:
                 raise ValueError(
                     "Stochastic and deterministic logs have overlapping keys, "
                     f"stochastic logs: {stochastic_logs}, "
-                    f"deterministic logs: {deterministic_logs}"
+                    f"deterministic logs: {logs}"
                 )
-            return {**deterministic_logs, **stochastic_logs}
-        else:
-            return deterministic_logs
+            logs.update(stochastic_logs)
+        return AggregatorSummary(logs=logs, loss=det_summary.loss)
+
+    def get_logs(self, label: str):
+        return self.get_summary(label).logs
 
     @torch.no_grad()
     def flush_diagnostics(self, subdir: str | None = None):

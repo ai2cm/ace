@@ -15,7 +15,7 @@ from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.data_loading.inference import ExplicitIndices, ForcingDataLoaderConfig
 from fme.ace.data_loading.test_data_loader import _get_coords
 from fme.ace.requirements import DataRequirements
-from fme.ace.testing import save_scalar_netcdf
+from fme.ace.testing import save_stats_netcdfs
 from fme.core.coordinates import (
     HorizontalCoordinates,
     OptionalDepthCoordinate,
@@ -358,8 +358,11 @@ def create_coupled_data_on_disk(
     stats_dir = data_dir / "stats"
     stats_dir.mkdir()
     all_names = list(set(ocean_names + atmosphere_names))
-    save_scalar_netcdf(stats_dir / "means.nc", variable_names=all_names)
-    save_scalar_netcdf(stats_dir / "stds.nc", variable_names=all_names)
+    save_stats_netcdfs(
+        stats_dir / "means.nc",
+        stats_dir / "stds.nc",
+        variable_names=all_names,
+    )
     return MockCoupledData(
         ocean=MockComponentData(
             ds=ocean_ds,

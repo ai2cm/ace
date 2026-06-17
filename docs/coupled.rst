@@ -108,6 +108,6 @@ The top-level configuration is the :class:`fme.coupled.InferenceConfig` class.
 Information for :class:`fme.coupled.CoupledInitialConditionConfig`
 ------------------------------------------------------------------
 
-Initial condition configuration is similar to standalone ACE as documtned in :ref:`inference config <inference-config>`,
+Initial condition configuration is similar to standalone ACE as documented in :ref:`inference config <inference-config>`,
 but in coupled configuration, `start_indices` correspond to the **ocean** initial condition file
 , and the atmosphere initial condition file must contain the same time stamps.
