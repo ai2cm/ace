@@ -18,6 +18,11 @@ EVAL_SUITE_CONFIG_PREFIX = "ace-eval-suite-config-4deg-AIMIP-"
 DEFAULT_CHECKPOINT_PATH = "/ckpt.tar"
 DEFAULT_SOURCE_MAP = str(HERE / "wandb_to_beaker_map.json")
 
+# Mapping of training run name -> Beaker result dataset ID, loaded from the
+# source map. Consumed by submit_eval_jobs.py to locate each run's checkpoints.
+with open(DEFAULT_SOURCE_MAP) as _f:
+    TRAINING_RESULT_DATASETS: dict[str, str] = json.load(_f)
+
 
 def source_config_to_run_name(config_filename: str) -> str:
     stem = pathlib.Path(config_filename).stem
@@ -191,7 +196,9 @@ def main() -> None:
     source_configs = sorted(
         p
         for p in HERE.glob("*-mask*.yaml")
-        if p.name.startswith(CONFIG_PREFIX) and not p.name.endswith("-finetune.yaml")
+        if p.name.startswith(CONFIG_PREFIX)
+        and not p.name.endswith("-finetune.yaml")
+        and not p.name.endswith("-cooldown.yaml")
     )
 
     for source_path in source_configs:
