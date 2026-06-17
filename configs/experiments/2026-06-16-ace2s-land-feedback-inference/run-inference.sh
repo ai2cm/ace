@@ -24,7 +24,7 @@ CM4_RS0=01KTYXNSJX90Y5E2CQ6SV8K37D
 CM4_RS1=01KTWGH2VEZ4DNXXF1H5FTJK1S
 
 submit() {
-    local config="$1" ckpt="$2" job="$3"
+    local config="$1" ckpt="$2" job="$3" segments="${4:-1}"
     if [ -n "$SELECT" ] && [[ "$config" != *"$SELECT"* ]] && [[ "$job" != *"$SELECT"* ]]; then
         return 0
     fi
@@ -36,12 +36,8 @@ submit() {
         --description "ACE2S land-feedback inference: ${config%.yaml}" \
         --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
         --workspace ai2/ace \
-        --priority normal \
-        --not-preemptible \
-        --cluster ai2/saturn \
-        --cluster ai2/ceres \
-        --cluster ai2/jupiter \
-        --cluster ai2/prometheus \
+        --priority high \
+        --preemptible \
         --cluster ai2/titan \
         --env WANDB_USERNAME="$WANDB_USERNAME" \
         --env WANDB_NAME="$job" \
@@ -57,15 +53,17 @@ submit() {
         --budget ai2/atec-climate \
         --system-python \
         --install "pip install --no-deps ." \
-        -- python -I -m fme.ace.inference "$config_path"
+        -- python -I -m fme.ace.inference "$config_path" --segments "$segments"
 }
 
 cd "$REPO_ROOT"  # so the config paths resolve regardless of where this is run from
 
-submit pilot-era5.yaml         "$ERA5"    ace2s-lf-pilot-era5
-submit frameworkA-era5.yaml    "$ERA5"    ace2s-lf-fwA-era5
-submit frameworkA-cm4-rs0.yaml "$CM4_RS0" ace2s-lf-fwA-cm4-rs0
-submit frameworkA-cm4-rs1.yaml "$CM4_RS1" ace2s-lf-fwA-cm4-rs1
-submit frameworkB-era5.yaml    "$ERA5"    ace2s-lf-fwB-era5
-submit frameworkB-cm4-rs0.yaml "$CM4_RS0" ace2s-lf-fwB-cm4-rs0
-submit frameworkB-cm4-rs1.yaml "$CM4_RS1" ace2s-lf-fwB-cm4-rs1
+# 4th arg = number of time-segments (total steps = segments x config n_forward_steps); resumable
+# (completed segment_NNNN/ folders are skipped on resubmit). Sized so each segment fits the 8h cap.
+# submit pilot-era5.yaml         "$ERA5"    ace2s-lf-pilot-era5    1
+submit frameworkA-era5.yaml    "$ERA5"    ace2s-lf-fwA-era5       4    # 4 x 20yr = 80yr
+submit frameworkA-cm4-rs0.yaml "$CM4_RS0" ace2s-lf-fwA-cm4-rs0   10    # 10 x 20yr = 200yr
+submit frameworkA-cm4-rs1.yaml "$CM4_RS1" ace2s-lf-fwA-cm4-rs1   10
+submit frameworkB-era5.yaml    "$ERA5"    ace2s-lf-fwB-era5      10    # 10 x ~146 steps = 1yr
+submit frameworkB-cm4-rs0.yaml "$CM4_RS0" ace2s-lf-fwB-cm4-rs0   10
+submit frameworkB-cm4-rs1.yaml "$CM4_RS1" ace2s-lf-fwB-cm4-rs1   10

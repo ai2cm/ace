@@ -1,13 +1,13 @@
 experiment_dir: gs://vcm-ml-intermediate/2026-06-16-ace2s-land-feedback-inference/frameworkB-era5
-n_forward_steps: 1460
-forward_steps_in_memory: 1
+n_forward_steps: 146
+forward_steps_in_memory: 2
 checkpoint_path: /ckpt.tar
 n_ensemble_per_ic: 2
 logging:
   log_to_screen: true
   log_to_wandb: true
   log_to_file: false
-  project: ace2s-land-feedback
+  project: ace
 initial_condition:
   path: /climate-default/2026-03-19-era5-1deg-8layer-1940-2025.zarr
   engine: zarr

@@ -1,13 +1,13 @@
 experiment_dir: gs://vcm-ml-intermediate/2026-06-16-ace2s-land-feedback-inference/frameworkB-cm4-rs1
-n_forward_steps: 1460
-forward_steps_in_memory: 1
+n_forward_steps: 146
+forward_steps_in_memory: 2
 checkpoint_path: /ckpt.tar
 n_ensemble_per_ic: 2
 logging:
   log_to_screen: true
   log_to_wandb: true
   log_to_file: false
-  project: ace2s-land-feedback
+  project: ace
 initial_condition:
   path: /climate-default/2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
   engine: zarr
