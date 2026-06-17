@@ -38,17 +38,6 @@ group|tag|exper_id|status|ckpt_type|priority|min_runtime|override|results_datase
 
 1pct_nosmooth_0256to0350-hfds_prescribed-ft_correctOHC|rs0|01KKDHDK6TDS01C8X4VBVDT94C|trained|best_inference_ckpt|high|--min-runtime 30m|||ai2/ace|a100+h100|
 
-# Melt-season-anchored half-year (36-step) runs for the per-hemisphere sea-ice
-# loss analysis. NH max ~Mar 4, SH max ~Sep 20; each carries one hemisphere
-# through its full melt season (max->min) and the other through growth.
-1pct_nosmooth_0256to0350-hfds_prescribed-ft_correctOHC|rs0|01KKDHDK6TDS01C8X4VBVDT94C|run_nh_melt_ic0211|best_inference_ckpt|high|--min-runtime 30m|||ai2/ace|a100+h100|
-
-1pct_nosmooth_0256to0350-hfds_prescribed-ft_correctOHC|rs0|01KKDHDK6TDS01C8X4VBVDT94C|run_nh_melt_ic0256|best_inference_ckpt|high|--min-runtime 30m|||ai2/ace|a100+h100|
-
-1pct_nosmooth_0256to0350-hfds_prescribed-ft_correctOHC|rs0|01KKDHDK6TDS01C8X4VBVDT94C|run_sh_melt_ic0211|best_inference_ckpt|high|--min-runtime 30m|||ai2/ace|a100+h100|
-
-1pct_nosmooth_0256to0350-hfds_prescribed-ft_correctOHC|rs0|01KKDHDK6TDS01C8X4VBVDT94C|run_sh_melt_ic0256|best_inference_ckpt|high|--min-runtime 30m|||ai2/ace|a100+h100|
-
 1pct_nosmooth_0256to0350-hfds_prescribed-ft_OHC_OSC|rs0|01KKZ29EDG5X7KN4EMSP102Y8D|training|best_inference_ckpt|normal|--not-preemptible
 
 1pct_nosmooth_0256to0350-hfds_prescribed-ft_gqmfjs2j_w_OSC|rs0|01KKZMVVTGNKZ1P2M3W48PS5R2|training|best_inference_ckpt|normal|--not-preemptible
@@ -58,3 +47,39 @@ ace-samudra-coupled-cm4-8ez70kzy-decoupled_samudra|||trained|best_inference_ckpt
 1pct_nosmooth_0256to0350-hfds_prescribed-ft_correctOHC|rs0|01KRCAGJ64R8WXVE2542S0RBP6|training|best_inference_ckpt|normal|--min-runtime 8h
 
 1pct_nosmooth_0256to0350-hfds_prescribed-ft_correctOHC_slowEMA_wu2k|rs0|01KRCCZBF3Q85P5EE1YRXZWDVP|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# ===========================================================================
+# Missing ICx1 (ic0211, 2920-step / 40-yr out-of-sample) evals for the
+# samudra-cm4 corrector/optim run comparison (PRD:
+# .scratch/samudra-cm4-corrector-run-comparison, issue 01). All reuse
+# ocean_extra/evaluator-config-ICx1.yaml: the forcing ablation and the
+# corrector/optim differences are baked into each checkpoint, not the eval
+# config (the ablation dirs' ICx1 configs differ only in cosmetic aggregator
+# keys). best_inference_ckpt.tar verified present in each result dataset
+# [2026-06-16]. results_dataset (col 9) pre-filled = the final beaker job's
+# result, so launch needs no re-resolution. Prepared by agent; James launches.
+
+# -- OHC-off cohort --
+1pct_nosmooth_0256to0350-precorrector_optim|rs0|01KT2SR554EEX28Q567HDGB6D9|run_ICx1|best_inference_ckpt|high|--min-runtime 30m||01KT4H5BESHYQCPF90C2P9G287|ai2/ace|a100+h100|
+
+# -- OHC-on cohort --
+1pct_nosmooth_0256to0350-plusOHC|rs0|01KTSH40JGFAJH2KE7V68Q3AXB|run_ICx1|best_inference_ckpt|high|--min-runtime 30m||01KTYWZW4QCSEP763H3DNFHEE3|ai2/ace|a100+h100|
+
+# OHC-on cohort ANCHOR (gqmfjs2j): standalone ocean-only ICx1 was missing
+# (only a 140yr eval exists). Needed so issue-02 OHC-on deltas have an anchor.
+# NOTE: beyond issue 01's original missing-eval list -- launch is James's call.
+1pct_nosmooth_0256to0350-hfds_prescribed-ft_correctOHC|rs0|01KKDHDK6TDS01C8X4VBVDT94C|run_ICx1|best_inference_ckpt|high|--min-runtime 30m|||ai2/ace|a100+h100|
+
+# -- Forcing ablations (vs no_correctors baseline; issue 05) --
+1pct_nosmooth_0256to0350-no_up-no_correctors|rs0|01KTWCT15287251H5ZTH67Q571|run_ICx1|best_inference_ckpt|high|--min-runtime 30m||01KV4C3P7P4X5J13XBPDMM6NBT|ai2/ace|a100+h100|
+
+1pct_nosmooth_0256to0350-no_sw-no_correctors|rs0|01KTWCW8TCSVF0CDVRJG1WE1NH|run_ICx1|best_inference_ckpt|high|--min-runtime 30m||01KV1TWGHVYRFNKCNXEK1R9M5F|ai2/ace|a100+h100|
+
+1pct_nosmooth_0256to0350-no_down-no_correctors|rs0|01KTWD07W9GEG0N9RFNRWC0DED|run_ICx1|best_inference_ckpt|high|--min-runtime 30m||01KV78NE3P15KYQJK22VFYEKK6|ai2/ace|a100+h100|
+
+# no_lw-no_correctors: training STILL RUNNING [2026-06-16] (beaker
+# 01KTWCXWNYRWTX1AGYFDMCN1CK, wandb pny4vw6x). Row prepared but NOT armed --
+# status is "wait_ICx1" so evaluate.sh skips it. James: once training
+# finalizes, change "wait_ICx1" -> "run_ICx1" (col 9 left empty so the result
+# dataset auto-resolves from the final job) and launch.
+1pct_nosmooth_0256to0350-no_lw-no_correctors|rs0|01KTWCXWNYRWTX1AGYFDMCN1CK|wait_ICx1|best_inference_ckpt|high|--min-runtime 30m|||ai2/ace|a100+h100|
