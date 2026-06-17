@@ -1,0 +1,2 @@
+
+ft-determinisitc-v20260602-E3SMv3-piControl-zltomfxg-l6ktf4nj|rs0|01KVBDHE4A42W5X5EQHWS0S8JF|training|best_inference_ckpt|normal|--min-runtime 8h
