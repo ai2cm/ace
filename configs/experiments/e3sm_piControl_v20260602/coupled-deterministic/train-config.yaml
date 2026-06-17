@@ -180,7 +180,6 @@ optimization:
     milestones: [3000]
 stepper_training:
   n_coupled_steps: 4
-  n_ensemble: 2
   ocean:
     parameter_init:
       weights_path: /ocean_ckpt.tar
