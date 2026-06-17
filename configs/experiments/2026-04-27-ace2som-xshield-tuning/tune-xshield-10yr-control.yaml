@@ -91,7 +91,7 @@ stepper_training:
       specific_total_water_0: 0.05
       specific_total_water_1: 0.025
       specific_total_water_2: 0.5
-      PRATEsfc: 10
+      PRATEsfc: 2
       h500: 10
       TMP850: 5
       Q2m: 0.5
