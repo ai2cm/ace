@@ -29,6 +29,15 @@ from fme.core.step.global_mean_removal import (
     NoGlobalMeanRemoval,
     extra_channel_source_field,
 )
+from fme.core.step.saturation_normalization import (
+    SaturationNormalization,
+    SaturationNormalizationConfig,
+    SaturationNormalizationState,
+    add_identity_names,
+    build_saturation_normalization,
+    derived_normalization_names,
+    resolve_all_fields,
+)
 from fme.core.step.secondary_decoder import (
     NoSecondaryDecoder,
     SecondaryDecoder,
@@ -71,6 +80,12 @@ class SingleModuleStepConfig(StepConfigABC):
             from fields before normalization and restoring them after
             denormalization. Supports shared (single reference field) or
             per-channel removal, with optional extra input channels.
+        saturation_normalization: Optional list of rules expressing humidity
+            fields in a relative-humidity-like ``q / q_sat`` space (saturation
+            specific humidity from the input temperature, surface pressure, and
+            vertical coordinate). Each rule independently controls which fields,
+            whether the network predicts in ``q / q_sat`` space, and whether the
+            input carries the RH-like channel (none/replace/append).
     """
 
     builder: ModuleSelector
@@ -87,11 +102,42 @@ class SingleModuleStepConfig(StepConfigABC):
     residual_prediction: bool = False
     include_channel_mask_inputs: bool = False
     global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
+    saturation_normalization: list[SaturationNormalizationConfig] | None = None
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
         if self.global_mean_removal is not None:
             self.global_mean_removal.validate_names(self.in_names, self.out_names)
+        if self.saturation_normalization is not None:
+            # resolve_all_fields validates each rule and rejects a field (or its
+            # derived RH channel) appearing in more than one rule.
+            saturation_fields = resolve_all_fields(
+                self.saturation_normalization, self.in_names, self.out_names
+            )
+            qsat_scaled_names = set(
+                getattr(self.global_mean_removal, "qsat_scaled_names", []) or []
+            )
+            overlap = {f.name for f in saturation_fields} & qsat_scaled_names
+            if overlap:
+                raise ValueError(
+                    "saturation_normalization fields must not overlap "
+                    f"global_mean_removal qsat_scaled_names; got {sorted(overlap)}."
+                )
+            if self.residual_prediction:
+                # Residual prediction adds the input to the output in network
+                # space, so a prognostic field predicted in RH must also be fed
+                # in RH (and vice versa) for the residual base to be well-defined.
+                in_set, out_set = set(self.in_names), set(self.out_names)
+                for field in saturation_fields:
+                    prognostic = field.name in in_set and field.name in out_set
+                    if prognostic and field.rh_out != field.rh_in:
+                        raise ValueError(
+                            "saturation_normalization with residual_prediction "
+                            f"requires prognostic field '{field.name}' to be RH on "
+                            "both input and output: prediction=True must pair with "
+                            f"input='replace'. Got prediction={field.rh_out}, "
+                            f"input replaces q={field.rh_in}."
+                        )
         for name in self.prescribed_prognostic_names:
             if name not in self.out_names:
                 raise ValueError(
@@ -134,10 +180,14 @@ class SingleModuleStepConfig(StepConfigABC):
             extra_names = []
         if extra_residual_scaled_names is None:
             extra_residual_scaled_names = []
-        return self.normalization.get_loss_normalizer(
+        loss_normalizer = self.normalization.get_loss_normalizer(
             names=self._normalize_names + extra_names,
             residual_scaled_names=self.prognostic_names + extra_residual_scaled_names,
         )
+        # Derived RH channels are O(1) and need identity statistics in the loss
+        # scaler too (they are otherwise dropped, as the normalizer filters to
+        # known names).
+        return add_identity_names(loss_normalizer, self.saturation_derived_names)
 
     @classmethod
     def from_state(cls, state) -> "SingleModuleStepConfig":
@@ -150,6 +200,18 @@ class SingleModuleStepConfig(StepConfigABC):
     def _normalize_names(self):
         """Names of variables which require normalization. I.e. inputs/outputs."""
         return list(set(self.in_names).union(self.output_names))
+
+    @property
+    def saturation_derived_names(self) -> list[str]:
+        """Derived RH channel names (internal), which need identity normalizer
+        statistics in the network and loss normalizers.
+        """
+        if self.saturation_normalization is None:
+            return []
+        fields = resolve_all_fields(
+            self.saturation_normalization, self.in_names, self.out_names
+        )
+        return derived_normalization_names(fields)
 
     @property
     def input_names(self) -> list[str]:
@@ -235,6 +297,9 @@ class SingleModuleStepConfig(StepConfigABC):
         logging.info("Initializing stepper from provided config")
         corrector = self.corrector.get_corrector(dataset_info)
         normalizer = self.normalization.get_network_normalizer(self._normalize_names)
+        # Register the derived RH channels (identity) so they survive the
+        # normalizer's name filter on the network input and output.
+        normalizer = add_identity_names(normalizer, self.saturation_derived_names)
         return SingleModuleStep(
             config=self,
             dataset_info=dataset_info,
@@ -281,17 +346,31 @@ class SingleModuleStep(StepABC):
             )
         else:
             self._global_mean_removal = NoGlobalMeanRemoval()
-        # Synthetic GMR channels are packed alongside real inputs so they
-        # flow through the packer and channel-mask machinery uniformly.
-        packed_in_names = (
-            list(config.in_names) + self._global_mean_removal.extra_channel_names
+        self._saturation_normalization: SaturationNormalization | None = (
+            build_saturation_normalization(
+                config.saturation_normalization,
+                dataset_info.atmosphere_vertical_coordinate,
+                config.in_names,
+                config.out_names,
+            )
         )
+        # Saturation normalization carries replaced/appended/predicted humidity
+        # under derived RH channel names; the packers use those derived names
+        # while the public in/out name lists stay in physical q space.
+        in_names = list(config.in_names)
+        out_names = list(config.out_names)
+        if self._saturation_normalization is not None:
+            in_names = self._saturation_normalization.input_packer_names(in_names)
+            out_names = self._saturation_normalization.output_packer_names(out_names)
+        # Synthetic GMR channels are packed alongside real inputs so they flow
+        # through the packer and channel-mask machinery uniformly.
+        packed_in_names = in_names + self._global_mean_removal.extra_channel_names
         n_in_channels = len(packed_in_names)
         if config.include_channel_mask_inputs:
             n_in_channels *= 2
-        n_out_channels = len(config.out_names)
+        n_out_channels = len(out_names)
         self.in_packer = Packer(packed_in_names)
-        self.out_packer = Packer(config.out_names)
+        self.out_packer = Packer(out_names)
         self._normalizer = normalizer
         if config.ocean is not None:
             self.ocean: Ocean | None = config.ocean.build(
@@ -402,6 +481,14 @@ class SingleModuleStep(StepABC):
             output_dict.update(secondary_output_dict)
             return output_dict
 
+        # Residual prediction adds the input to the output in network space, so
+        # prognostic fields predicted in RH use their derived channel name there.
+        prognostic_names = self.prognostic_names
+        if self._saturation_normalization is not None:
+            prognostic_names = self._saturation_normalization.residual_names(
+                prognostic_names
+            )
+
         return step_with_adjustments(
             input=args.input,
             next_step_input_data=args.next_step_input_data,
@@ -410,9 +497,10 @@ class SingleModuleStep(StepABC):
             corrector=self._corrector,
             ocean=self.ocean,
             residual_prediction=self._config.residual_prediction,
-            prognostic_names=self.prognostic_names,
+            prognostic_names=prognostic_names,
             prescribed_prognostic_names=self._config.prescribed_prognostic_names,
             global_mean_removal=self._global_mean_removal,
+            saturation_normalization=self._saturation_normalization,
             data_mask=args.data_mask,
             stepper_state=args.stepper_state,
         )
@@ -509,6 +597,7 @@ def step_with_adjustments(
     prognostic_names: list[str],
     prescribed_prognostic_names: list[str] | None = None,
     global_mean_removal: GlobalMeanRemoval | None = None,
+    saturation_normalization: SaturationNormalization | None = None,
     data_mask: TensorMapping | None = None,
     stepper_state: StepperState | None = None,
 ) -> tuple[TensorDict, StepperState | None]:
@@ -538,6 +627,10 @@ def step_with_adjustments(
             before the normalizer and ``inverse_transform`` after
             denormalization but before the corrector/ocean/prescribed steps,
             so those adjustments operate in physical space.
+        saturation_normalization: Optional transform that expresses humidity
+            fields in a relative-humidity-like ``q / q_sat`` space. Applied to
+            the (post-GMR) network input before normalization and inverted on
+            the denormalized output before global mean removal is inverted.
         data_mask: Per-variable boolean masks passed to
             ``global_mean_removal.forward_transform``.
         stepper_state: Per-sample state carried across step calls. The
@@ -552,21 +645,32 @@ def step_with_adjustments(
     if prescribed_prognostic_names is None:
         prescribed_prognostic_names = []
     gmr_state: GlobalMeanRemovalState | None = None
+    network_input: TensorMapping = input
     if global_mean_removal is not None:
         network_input, gmr_state = global_mean_removal.forward_transform(
             input, data_mask
         )
-        input_norm = normalizer.normalize(network_input)
-        # Synthetic GMR channels are produced in normalized space; merge
-        # them in after normalization so the network sees a single uniform
-        # input dict.
+    sat_state: SaturationNormalizationState | None = None
+    if saturation_normalization is not None:
+        # q_sat is computed from the raw (pre-GMR) input; the RH-like values are
+        # written into the post-GMR network input (humidity fields are forbidden
+        # from overlapping GMR, so they are unchanged by it).
+        network_input, sat_state = saturation_normalization.forward_transform(
+            input, network_input
+        )
+    input_norm = normalizer.normalize(network_input)
+    # Synthetic GMR channels are produced in normalized space; merge them in
+    # after normalization so the network sees a single uniform input dict.
+    if global_mean_removal is not None:
+        assert gmr_state is not None
         input_norm = {**input_norm, **global_mean_removal.extras_normalized(gmr_state)}
-    else:
-        input_norm = normalizer.normalize(input)
     output_norm = network_calls(input_norm)
     if residual_prediction:
         output_norm = add_names(input_norm, output_norm, prognostic_names)
     output = normalizer.denormalize(output_norm)
+    if saturation_normalization is not None:
+        assert sat_state is not None
+        output = saturation_normalization.inverse_transform(output, sat_state)
     if global_mean_removal is not None:
         assert gmr_state is not None
         output = global_mean_removal.inverse_transform(output, gmr_state)
