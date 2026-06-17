@@ -109,3 +109,14 @@ run_training() {
 
 # --- Wave 5: embed_dim 1024 + spectral_ratio 0.125 (seed 0) (Jupiter+Titan, high) ---
 # run_training "train-4deg-daily-v1-era5-only-n1024-sr0p125-residual.yaml" "train-4deg-daily-v1-era5-only-n1024-sr0p125-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# --- Wave 6: complete the fg x sr grid (seed 0, embed_dim 512) (Jupiter+Titan, high) ---
+# Fills the missing cells of the fg {4,8,16} x sr {0.5, 0.25, 0.125} grid at
+# embed_dim 512. Already covered by Wave 4: fg4xsr0.25, fg8xsr0.25, fg8xsr0.50.
+# (n1024xsr0.125 is embed_dim 1024, not part of this 512 grid.) 6 new runs:
+run_training "train-4deg-daily-v1-era5-only-fg4-sr0p50-residual.yaml"   "train-4deg-daily-v1-era5-only-fg4-sr0p50-residual-rs0"   1 ai2/ace high "ai2/jupiter ai2/titan"
+run_training "train-4deg-daily-v1-era5-only-fg4-sr0p125-residual.yaml"  "train-4deg-daily-v1-era5-only-fg4-sr0p125-residual-rs0"  1 ai2/ace high "ai2/jupiter ai2/titan"
+run_training "train-4deg-daily-v1-era5-only-fg8-sr0p125-residual.yaml"  "train-4deg-daily-v1-era5-only-fg8-sr0p125-residual-rs0"  1 ai2/ace high "ai2/jupiter ai2/titan"
+run_training "train-4deg-daily-v1-era5-only-fg16-sr0p50-residual.yaml"  "train-4deg-daily-v1-era5-only-fg16-sr0p50-residual-rs0"  1 ai2/ace high "ai2/jupiter ai2/titan"
+run_training "train-4deg-daily-v1-era5-only-fg16-sr0p25-residual.yaml"  "train-4deg-daily-v1-era5-only-fg16-sr0p25-residual-rs0"  1 ai2/ace high "ai2/jupiter ai2/titan"
+run_training "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual.yaml" "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
