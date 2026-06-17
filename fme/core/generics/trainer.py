@@ -942,7 +942,7 @@ def _run_inference_task_sequential(
     stepper: TrainStepperABC[PS, BD, FD, SD, TO],
     epoch: int,
 ) -> InferenceSummary:
-    """Run a single inference task through the sequential ``run_inference`` path."""
+    """Run one inference task through the sequential ``inference_one_epoch`` path."""
     aggregator = task.aggregator_factory()
     return inference_one_epoch(
         stepper=stepper,
