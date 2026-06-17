@@ -10,9 +10,13 @@
 
 set -e
 
-SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to repo root
-REPO_ROOT=$(git rev-parse --show-toplevel)
+# Derive paths from the script's own location (works regardless of cwd), so the
+# config path passed to the job is correct repo-relative when the cloned job
+# runs from the repo root.
+SCRIPT_DIR_ABS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(git -C "$SCRIPT_DIR_ABS" rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
+SCRIPT_PATH="${SCRIPT_DIR_ABS#"$REPO_ROOT"/}"  # repo-relative dir of this script
 
 CONFIG="$SCRIPT_PATH/bench-pair-era5-4deg-daily.yaml"
 
@@ -21,6 +25,7 @@ REPEATS="${REPEATS:-3}"
 WARMUP="${WARMUP:-1}"
 MAX_WINDOWS="${MAX_WINDOWS:-0}"   # 0 = full production length
 MODES="${MODES:-sequential,concurrent}"
+SUFFIX="${SUFFIX:-}"   # appended to job names to avoid beaker name collisions
 
 run_benchmark() {
   local job_name="$1"
@@ -69,5 +74,5 @@ run_benchmark() {
 
 # Two jobs (titan B200, urgent) for node-to-node variance. Each job runs both
 # code paths internally, so there is never a co-located seq-vs-concurrent A/B.
-run_benchmark "cinf-timing-bench-r1"
-run_benchmark "cinf-timing-bench-r2"
+run_benchmark "cinf-timing-bench-r1${SUFFIX}"
+run_benchmark "cinf-timing-bench-r2${SUFFIX}"
