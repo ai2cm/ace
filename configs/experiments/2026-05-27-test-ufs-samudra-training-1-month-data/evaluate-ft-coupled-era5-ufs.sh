@@ -37,5 +37,6 @@ gantry run \
     --shared-memory 50GiB \
     --budget ai2/atec-climate \
     --system-python \
+    --allow-dirty \
     --install "pip install --no-deps ." \
     -- python -I -m fme.coupled.evaluator "$CONFIG_PATH"
