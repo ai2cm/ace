@@ -31,6 +31,79 @@ from .contractions import (
 )
 
 
+def validate_spectral_ratio(
+    spectral_ratio: float,
+    channels: int,
+    num_groups: int,
+    *,
+    channels_name: str = "embed_dim",
+    num_groups_name: str = "filter_num_groups",
+    filter_type: str | None = None,
+    preserves_global_mean: bool = False,
+    global_mean_arg_name: str = "filter_preserves_global_mean",
+    local_blocks: bool = False,
+) -> int:
+    """Validate ``spectral_ratio`` and return the resulting spectral channel count.
+
+    ``spectral_ratio`` controls the bottleneck width of the linear spectral
+    filter: the SHT and per-mode complex weight operate on
+    ``round(channels * spectral_ratio)`` channels. This helper centralizes the
+    config-time validation shared by ``SpectralConvS2``, ``SFNONetConfig``, and
+    the ``NoiseConditionedSFNOBuilder`` registry config so the rules live in one
+    place; each caller still invokes it so its own API stays self-validating.
+
+    Args:
+        spectral_ratio: fraction of ``channels`` participating in the filter;
+            must be in (0, 1].
+        channels: full latent channel width (``embed_dim`` / ``in_channels``).
+        num_groups: number of filter groups the spectral channels must divide.
+        channels_name: name of ``channels`` to use in error messages.
+        num_groups_name: name of ``num_groups`` to use in error messages.
+        filter_type: if given, ``spectral_ratio < 1`` requires ``"linear"``.
+        preserves_global_mean: if True, ``spectral_ratio < 1`` is rejected.
+        global_mean_arg_name: name of the global-mean flag for error messages.
+        local_blocks: if True, ``spectral_ratio < 1`` is rejected.
+
+    Returns:
+        The number of spectral channels, ``round(channels * spectral_ratio)``.
+    """
+    if not 0.0 < spectral_ratio <= 1.0:
+        raise ValueError(f"spectral_ratio must be in (0, 1], got {spectral_ratio}.")
+    spectral_channels = round(channels * spectral_ratio)
+    if spectral_ratio < 1.0:
+        if filter_type is not None and filter_type != "linear":
+            raise NotImplementedError(
+                "spectral_ratio < 1 is only supported for filter_type='linear', "
+                f"got filter_type='{filter_type}'."
+            )
+        if preserves_global_mean:
+            # The l=0 mode is sandwiched between the pre/post channel
+            # projections, so the original C-channel global mean is not
+            # recoverable from the spectral_channels-wide bottleneck.
+            raise NotImplementedError(
+                f"{global_mean_arg_name} is not supported with spectral_ratio < 1, "
+                "since the l=0 mode is sandwiched between the pre/post channel "
+                "projections."
+            )
+        if local_blocks:
+            raise NotImplementedError(
+                "spectral_ratio < 1 is not supported with local_blocks, since "
+                "local (DISCO) blocks have no spectral filter to bottleneck."
+            )
+        if spectral_channels < 1:
+            raise ValueError(
+                f"spectral_ratio={spectral_ratio} with {channels_name}={channels} "
+                "produces fewer than 1 spectral channel."
+            )
+        if spectral_channels % num_groups != 0:
+            raise ValueError(
+                f"spectral_ratio={spectral_ratio} with {channels_name}={channels} "
+                f"yields {spectral_channels} spectral channels, which is not "
+                f"divisible by {num_groups_name}={num_groups}."
+            )
+    return spectral_channels
+
+
 @torch.jit.script
 def _contract_lora(
     lora_A: torch.Tensor,
@@ -95,6 +168,7 @@ class SpectralConvS2(nn.Module):
         lora_rank: int = 0,
         lora_alpha: float | None = None,
         preserve_global_mean: bool = False,
+        spectral_ratio: float = 1.0,
     ):  # pragma: no cover
         super(SpectralConvS2, self).__init__()
 
@@ -102,6 +176,16 @@ class SpectralConvS2(nn.Module):
             raise NotImplementedError(
                 "Currently only in_channels == out_channels is supported."
             )
+
+        spectral_channels = validate_spectral_ratio(
+            spectral_ratio,
+            in_channels,
+            num_groups,
+            channels_name="in_channels",
+            num_groups_name="num_groups",
+            preserves_global_mean=preserve_global_mean,
+            global_mean_arg_name="preserve_global_mean",
+        )
 
         assert in_channels % num_groups == 0
         assert out_channels % num_groups == 0
@@ -130,15 +214,34 @@ class SpectralConvS2(nn.Module):
         self._preserve_global_mean = preserve_global_mean
         self._has_global_mean = l_start == 0
 
-        scale = math.sqrt(1 / (in_channels)) * torch.ones(self.modes_lat, 1, 1, 2)
+        # When spectral_ratio < 1, the SHT and per-mode complex weight operate
+        # on a reduced spectral_channels = round(in_channels * spectral_ratio)
+        # latent width via real Conv1x1 projections before forward_transform
+        # and after inverse_transform. By commutativity of channel-wise linear
+        # maps with spatial transforms, this is equivalent to factoring each
+        # per-mode C x C complex weight as Q W'_l P with shared P, Q across l.
+        self.spectral_ratio = spectral_ratio
+        self.spectral_channels = spectral_channels
+        if spectral_ratio < 1.0:
+            self.pre_proj: nn.Conv2d | None = nn.Conv2d(
+                in_channels, spectral_channels, kernel_size=1, bias=False
+            )
+            self.post_proj: nn.Conv2d | None = nn.Conv2d(
+                spectral_channels, out_channels, kernel_size=1, bias=False
+            )
+        else:
+            self.pre_proj = None
+            self.post_proj = None
+
+        scale = math.sqrt(1 / (spectral_channels)) * torch.ones(self.modes_lat, 1, 1, 2)
         # seemingly the first weight is not really complex, so we need to account for that
         scale[0, :] *= math.sqrt(2.0)
 
         weight_shape = [
             num_groups,
             self.modes_lat,
-            out_channels // num_groups,
-            in_channels // num_groups,
+            spectral_channels // num_groups,
+            spectral_channels // num_groups,
         ]
 
         self.weight = nn.Parameter(scale * torch.randn(*weight_shape, 2))
@@ -151,7 +254,7 @@ class SpectralConvS2(nn.Module):
                     num_groups,
                     self.modes_lat,
                     lora_rank,
-                    in_channels // num_groups,
+                    spectral_channels // num_groups,
                     2,
                 )
             )
@@ -159,7 +262,7 @@ class SpectralConvS2(nn.Module):
                 torch.zeros(
                     num_groups,
                     self.modes_lat,
-                    out_channels // num_groups,
+                    spectral_channels // num_groups,
                     lora_rank,
                     2,
                 )
@@ -200,8 +303,8 @@ class SpectralConvS2(nn.Module):
         # check if the weight is in the old shape (group, in_channels, out_channels, nlat, 2)
         if weight.ndim == 5 and weight.shape == (
             module.num_groups,
-            module.in_channels // module.num_groups,
-            module.out_channels // module.num_groups,
+            module.spectral_channels // module.num_groups,
+            module.spectral_channels // module.num_groups,
             module.modes_lat,
             2,
         ):
@@ -216,7 +319,7 @@ class SpectralConvS2(nn.Module):
             and lora_A.shape
             == (
                 module.num_groups,
-                module.in_channels // module.num_groups,
+                module.spectral_channels // module.num_groups,
                 module.lora_rank,
                 module.modes_lat,
                 2,
@@ -233,7 +336,7 @@ class SpectralConvS2(nn.Module):
             == (
                 module.num_groups,
                 module.lora_rank,
-                module.out_channels // module.num_groups,
+                module.spectral_channels // module.num_groups,
                 module.modes_lat,
                 2,
             )
@@ -259,8 +362,8 @@ class SpectralConvS2(nn.Module):
         weight = state_dict[key]
 
         ungrouped_shape = (
-            module.in_channels,
-            module.out_channels,
+            module.spectral_channels,
+            module.spectral_channels,
             module.modes_lat,
             2,
         )
@@ -274,12 +377,17 @@ class SpectralConvS2(nn.Module):
         x = x.float()
 
         with torch.amp.autocast("cuda", enabled=False):
+            if self.pre_proj is not None:
+                with timer.child("pre_proj"):
+                    x = self.pre_proj(x)
             with timer.child("forward_transform"):
                 x = self.forward_transform(x.float())
             if self._round_trip_residual:
                 with timer.child("round_trip_residual"):
                     x = x.contiguous()
                     residual = self.inverse_transform(x)
+                    if self.post_proj is not None:
+                        residual = self.post_proj(residual)
                     residual = residual.to(dtype)
 
         B, C, H, W = x.shape
@@ -307,12 +415,15 @@ class SpectralConvS2(nn.Module):
             xp = xp + self.lora_scaling * lora_update
             if self._preserve_global_mean and self._has_global_mean:
                 xp = torch.cat([x[..., :1, :], xp[..., 1:, :]], dim=-2)
-            xp = xp.reshape(B, self.out_channels, H, W)
+            xp = xp.reshape(B, self.spectral_channels, H, W)
             x = xp.contiguous()
 
         with torch.amp.autocast("cuda", enabled=False):
             with timer.child("inverse_transform"):
                 x = self.inverse_transform(x)
+            if self.post_proj is not None:
+                with timer.child("post_proj"):
+                    x = self.post_proj(x)
 
         if hasattr(self, "bias"):
             with timer.child("add_bias"):

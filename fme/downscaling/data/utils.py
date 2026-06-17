@@ -132,6 +132,24 @@ def _validate_monotonic_lon(lon_coords: torch.Tensor) -> None:
         )
 
 
+def _validate_lon_in_0_360_convention(lon_coords: torch.Tensor) -> None:
+    """Raise if lon_coords are not in the [0, 360) convention.
+
+    Interval-based rolling decides whether a region wraps the prime meridian from
+    fixed 0/360 thresholds (see _requires_lon_roll). That is only correct for grids
+    in the [0, 360) convention: on a [-180, 180) grid an interval crossing the 180°
+    antimeridian would not be detected and would silently subselect only part of
+    the requested region. Enforce the precondition so such a grid fails loudly.
+    """
+    lon_min = float(lon_coords.min())
+    lon_max = float(lon_coords.max())
+    if lon_min < 0.0 or lon_max > 360.0:
+        raise ValueError(
+            "Longitude coordinates must be in the [0, 360) convention for interval "
+            f"subselection; got range [{lon_min:.4f}, {lon_max:.4f}]."
+        )
+
+
 def _requires_lon_roll(start: float, stop: float) -> bool:
     """
     Return True if the longitude interval [start, stop] crosses the prime meridian.
@@ -186,6 +204,7 @@ def find_roll_anchor_from_interval(
         lon_coords: 1-D tensor of monotonically increasing longitudes (e.g. 0–360°).
         lon_interval: The desired longitude interval.
     """
+    _validate_lon_in_0_360_convention(lon_coords)
     lon_start, lon_stop = lon_interval.finite_values
     if not _requires_lon_roll(lon_start, lon_stop):
         return 0
