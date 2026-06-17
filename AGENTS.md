@@ -48,6 +48,17 @@ not validate cross-backend correctness.
 
 ## Code Guidelines for Agents
 
+### Committing
+
+When committing changes, do not include Co-Authored-By: Claude in the commit message. This is because Claude bears no accountability or responsibility for the changes, the user is the sole author accountable.
+
+When committing to a branch that has an open PR, check whether the PR description needs to be updated to reflect the changes.
+When amending a PR description, make sure it still reflects the change _from main_, not the change from a previous, ephemeral state of the PR.
+
+### PR description template
+
+When making PRs, use the template that exists in the repo under .github/pull_request_template.md, if one exists.
+
 ### Commit/PR process
 
 Changes that will go to main should be made in branches so that PRs can be made for review.
