@@ -57,13 +57,27 @@ validation:
       subset:
         start_time: '2023-01-01'
         stop_time: '2023-07-01'
+# optimization:
+#   enable_automatic_mixed_precision: false
+#   lr: 0.0001
+#   optimizer_type: FusedAdam
+#   use_gradient_accumulation: true
+#   kwargs:
+#     weight_decay: 0.01
 optimization:
   enable_automatic_mixed_precision: false
-  lr: 0.0001
+  lr: 0.00003                 # lowered peak (was 0.0001)
   optimizer_type: FusedAdam
   use_gradient_accumulation: true
   kwargs:
     weight_decay: 0.01
+  scheduler:
+    type: LinearLR
+    step_each_iteration: true   # ramp per batch, not per epoch
+    kwargs:
+      start_factor: 0.01        # start at 1% of peak LR
+      end_factor: 1.0           # reach full peak LR
+      total_iters: 500          # over 500 iterations
 stepper_training:
   parameter_init:
     weights_path: /ckpt.tar
@@ -101,7 +115,7 @@ stepper_training:
       DSWRFsfc: 2
       USWRFtoa: 2
       tendency_of_total_water_path_due_to_advection: 0.5
-      PRESsfc: 3
+      #PRESsfc: 3
     kwargs:
       crps_weight: 0.9
       energy_score_weight: 0.1
