@@ -582,6 +582,13 @@ class BatchData:
         sorted union of all label names, with each input conformed to that
         encoding before concatenation. Tensors must already be on the same
         device.
+
+        Note: ``stepper_state`` is not propagated (the result has
+        ``stepper_state=None``); concurrent inference reseeds per-window
+        corrector state from the prognostic data, so the inference initial
+        conditions passed here do not carry it. ``cat``/``split`` would need to
+        learn to concatenate/slice it before they could be used on states that
+        do.
         """
         if len(batches) == 0:
             raise ValueError("Cannot cat an empty sequence of BatchData.")
@@ -652,7 +659,10 @@ class BatchData:
         )
 
     def split(self: SelfType, sample_sizes: Sequence[int]) -> list[SelfType]:
-        """Split into pieces with the given sample sizes along the sample dim."""
+        """Split into pieces with the given sample sizes along the sample dim.
+
+        Like ``cat``, this does not carry ``stepper_state`` onto the pieces.
+        """
         n_samples = self.time.shape[0]
         total = sum(sample_sizes)
         if total != n_samples:
