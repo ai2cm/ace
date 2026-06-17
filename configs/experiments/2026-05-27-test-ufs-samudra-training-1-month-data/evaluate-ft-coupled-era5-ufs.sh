@@ -4,7 +4,7 @@ set -e
 
 JOB_NAME="ft-coupled-era5-ufs-stochastic-5day-ocean-evaluator"
 JOB_GROUP="ufs-replay-ocean"
-EXISTING_RESULTS_DATASET="01KTMD1TRMSFN4FHP19CZAST62"
+EXISTING_RESULTS_DATASET="01KTRY5AH5HAWVCGW8QG9A4THH"
 CONFIG_FILENAME="evaluator-ft-coupled-era5-ufs.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH="${SCRIPT_PATH}${CONFIG_FILENAME}"
