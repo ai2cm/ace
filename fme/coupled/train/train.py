@@ -12,6 +12,7 @@ from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.distributed import Distributed
 from fme.core.ema import EMATracker
 from fme.core.generics.data import GriddedDataABC
+from fme.core.generics.inference import BatchedPredictor
 from fme.core.generics.lr_tuning import ValidateStepper
 from fme.core.generics.train_stepper import TrainStepperABC
 from fme.core.generics.trainer import (
@@ -25,6 +26,7 @@ from fme.core.generics.trainer import (
 )
 from fme.core.generics.validation import run_validation_loop
 from fme.coupled.aggregator import OneStepAggregator, TrainAggregator
+from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
 from fme.coupled.data_loading.gridded_data import InferenceGriddedData
 from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.stepper import CoupledTrainOutput, CoupledTrainStepper
@@ -143,13 +145,31 @@ def get_inference_callback(
                 ),
                 epoch_set=frozenset(inference_epoch_sets[i]),
                 weight=entry_config.weight,
+                concurrent_group=(entry_config.coupled_steps_in_memory,),
             )
+        )
+
+    def build_predictor() -> BatchedPredictor:
+        return BatchedPredictor(
+            base_predict=stepper.predict_paired,
+            concat_ic=CoupledPrognosticState.cat,
+            concat_forcing=CoupledBatchData.cat,
+            split_output=lambda sd, sizes: sd.split(sizes),
+            split_state=lambda ps, sizes: ps.split(sizes),
+            sample_size_of_state=lambda ic: (
+                ic.as_batch_data().ocean_data.time.shape[0]
+            ),
+            batch_key_of_forcing=lambda forcing: (
+                forcing.ocean_data.n_timesteps,
+                forcing.atmosphere_data.n_timesteps,
+            ),
         )
 
     return build_inference_callback(
         tasks=tasks,
         inference_epochs=inference_epochs,
         stepper=stepper,
+        build_batched_predictor=build_predictor,
     )
 
 
