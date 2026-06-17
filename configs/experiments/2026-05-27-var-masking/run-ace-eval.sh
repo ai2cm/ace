@@ -36,7 +36,7 @@ cd $REPO_ROOT && gantry run \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace "$BEAKER_WORKSPACE" \
     --priority "$BEAKER_PRIORITY" \
-    --not-preemptible \
+    --preemptible \
     "${cluster_args[@]}" \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$JOB_NAME" \
