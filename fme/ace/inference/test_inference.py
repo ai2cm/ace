@@ -110,7 +110,8 @@ def save_stepper(
     torch.save({"stepper": stepper.get_state()}, path)
 
 
-def test_inference_entrypoint(tmp_path: pathlib.Path):
+@pytest.mark.parametrize("n_ensemble_per_ic", [1, 2])
+def test_inference_entrypoint(tmp_path: pathlib.Path, n_ensemble_per_ic: int):
     forward_steps_in_memory = 2
     # NOTE: number of inputs and outputs has to be the same for the PlusOne
     # stepper module to work properly
@@ -189,8 +190,9 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
             files=[FileWriterConfig("autoregressive")],
         ),
         allow_incompatible_dataset=False,
-        n_ensemble_per_ic=1,
+        n_ensemble_per_ic=n_ensemble_per_ic,
     )
+    n_initial_conditions = initial_condition.sizes["sample"]
     config_filename = tmp_path / "config.yaml"
     with open(config_filename, "w") as f:
         yaml.dump(dataclasses.asdict(config), f)
@@ -241,10 +243,17 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
     # forcings not in
     assert "DSWRFtoa" not in ds
     assert "forcing_var" not in ds
-    assert ds["prog"].sizes == {"time": 4, "sample": 2, "lat": 16, "lon": 32}
-    np.testing.assert_allclose(
-        ds["prog"].isel(time=0).values, initial_condition["prog"].values + 1
-    )
+    n_samples = n_initial_conditions * n_ensemble_per_ic
+    assert ds["prog"].sizes == {
+        "time": 4,
+        "sample": n_samples,
+        "lat": 16,
+        "lon": 32,
+    }
+    # the initial condition is tiled across ensemble members (each repeated
+    # n_ensemble_per_ic times along the sample dimension)
+    expected_ic = np.repeat(initial_condition["prog"].values, n_ensemble_per_ic, axis=0)
+    np.testing.assert_allclose(ds["prog"].isel(time=0).values, expected_ic + 1)
     np.testing.assert_allclose(
         ds["prog"].isel(time=1).values, ds["prog"].isel(time=0).values + 1, rtol=1e-6
     )
@@ -284,8 +293,13 @@ def test_get_initial_condition(n_ensemble):
     assert batch_data.time.shape == (sample * n_ensemble, 1)
     initial_times = batch_data.time.isel(time=0)
     assert initial_times.shape == (sample * n_ensemble,)
-    assert initial_times[0] == 0
-    assert initial_times[1] == 5
+    # broadcast_ensemble uses block ordering (repeat_interleave): each input
+    # sample's ensemble members are contiguous, so the time coordinate is the
+    # per-sample times repeat-interleaved ([0, 0, 0, 5, 5, 5] for n_ensemble=3),
+    # not tiled ([0, 5, 0, 5, 0, 5]). Time must follow the same order as the data.
+    np.testing.assert_array_equal(
+        initial_times.values, np.repeat(time_da.values, n_ensemble)
+    )
     assert batch_data.data["prog"].shape == (sample * n_ensemble, 1, 16, 32)
     for i in range(n_ensemble):
         np.testing.assert_allclose(
