@@ -3,7 +3,7 @@
 set -e
 
 
-CONFIG_FILENAME="tune-shieldplus-prmsl.yaml"
+CONFIG_FILENAME="tune-xshield-10yr-control.yaml"
 
 SCRIPT_PATH=$(git rev-parse --show-prefix)
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -13,7 +13,6 @@ WANDB_GROUP=ace
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=8
 STATS_DATASET=andrep/2026-06-08-vertically-resolved-1deg-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-stats
-PRE_TRAINED_WEIGHTS_PATH=/pre-trained-weights/training_checkpoints/best_ckpt.tar
 SEED_OFFSET=10
 
 cd $REPO_ROOT
@@ -36,7 +35,7 @@ PARTIAL_TUNED=("01KTWDTVRWZJ4V64VAZJMFZJ4Y")
 #        --dataset ${PRE_TRAINED_WEIGHTS_DATASETS[$seed]}:/pre-trained-weights \
 for seed in {0..0}; do
     #job_name="ace2som-xshield-tune-1yr-even-split-single-decoder-seed${seed}"
-    job_name="ace2s-shieldplus-tune-prmsl-seed${seed}"
+    job_name="ace2s-shieldplus-tune-xshield-10yr-control-seed${seed}"
     fine_tune_seed=$((seed + SEED_OFFSET))
     override="seed=${fine_tune_seed}"
     python -m fme.ace.validate_config --config_type train $CONFIG_PATH --override $override
@@ -56,7 +55,7 @@ for seed in {0..0}; do
         --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
         --env-secret WANDB_API_KEY=wandb-api-key-annak \
         --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-        --dataset ${PARTIAL_TUNED[$seed]}:/pre-trained-weights \
+        --dataset ${PRE_TRAINED_WEIGHTS_DATASETS[$seed]}:training_checkpoints/best_ckpt.tar:/ckpt.tar \
         --dataset $STATS_DATASET:/statsdata \
         --gpus $N_GPUS \
         --shared-memory 400GiB \

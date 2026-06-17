@@ -65,7 +65,7 @@ optimization:
     weight_decay: 0.01
 stepper_training:
   parameter_init:
-    weights_path: /pre-trained-weights/training_checkpoints/best_ckpt.tar
+    weights_path: /ckpt.tar
   n_ensemble: 2
   n_forward_steps:
     outcomes:
