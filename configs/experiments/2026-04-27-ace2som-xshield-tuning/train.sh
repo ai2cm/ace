@@ -35,7 +35,7 @@ PARTIAL_TUNED=("01KTWDTVRWZJ4V64VAZJMFZJ4Y")
 #        --dataset ${PRE_TRAINED_WEIGHTS_DATASETS[$seed]}:/pre-trained-weights \
 for seed in {0..0}; do
     #job_name="ace2som-xshield-tune-1yr-even-split-single-decoder-seed${seed}"
-    job_name="ace2s-shieldplus-tune-xshield-10yr-control-precipwgt2-seed${seed}"
+    job_name="ace2s-shieldplus-tune-xshield-10yr-control-lrscheduler-seed${seed}"
     fine_tune_seed=$((seed + SEED_OFFSET))
     override="seed=${fine_tune_seed}"
     python -m fme.ace.validate_config --config_type train $CONFIG_PATH --override $override
