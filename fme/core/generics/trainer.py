@@ -890,7 +890,12 @@ def build_inference_callback(
     inference_epochs: Sequence[int],
     stepper: TrainStepperABC[PS, BD, FD, SD, TO],
 ) -> InferenceCallback:
-    """Build an ``InferenceCallback`` shared between ACE and coupled training."""
+    """Build an ``InferenceCallback`` shared between ACE and coupled training.
+
+    Each active task is run through the sequential ``inference_one_epoch`` path
+    and produces an ``InferenceSummary``; the per-task summaries are then
+    combined into the epoch's logs and weighted checkpoint-selection error.
+    """
     inference_epochs_set = set(inference_epochs)
 
     def inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
@@ -900,18 +905,16 @@ def build_inference_callback(
         if not active_tasks:
             return {}, None
 
+        per_task_summaries: dict[str, InferenceSummary] = {}
+        for task in active_tasks:
+            per_task_summaries[task.name] = _run_inference_task_sequential(
+                task=task, stepper=stepper, epoch=epoch
+            )
+
         all_logs: dict[str, Any] = {}
         weighted_error: float | None = None
         for task in active_tasks:
-            aggregator = task.aggregator_factory()
-            summary = inference_one_epoch(
-                stepper=stepper,
-                validation_context=contextlib.nullcontext,
-                dataset=task.data,
-                aggregator=aggregator,
-                label=task.name,
-                epoch=epoch,
-            )
+            summary = per_task_summaries[task.name]
             overlap = all_logs.keys() & summary.logs.keys()
             if overlap:
                 raise RuntimeError(
@@ -932,6 +935,23 @@ def build_inference_callback(
         return all_logs, weighted_error
 
     return inference_callback
+
+
+def _run_inference_task_sequential(
+    task: InferenceTask[PS, FD, SD],
+    stepper: TrainStepperABC[PS, BD, FD, SD, TO],
+    epoch: int,
+) -> InferenceSummary:
+    """Run a single inference task through the sequential ``run_inference`` path."""
+    aggregator = task.aggregator_factory()
+    return inference_one_epoch(
+        stepper=stepper,
+        validation_context=contextlib.nullcontext,
+        dataset=task.data,
+        aggregator=aggregator,
+        label=task.name,
+        epoch=epoch,
+    )
 
 
 def _restore_checkpoint(trainer: Trainer, checkpoint_path):
