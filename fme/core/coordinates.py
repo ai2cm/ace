@@ -11,6 +11,7 @@ import torch
 
 from fme.core import metrics
 from fme.core.constants import EARTH_RADIUS, GRAVITY
+from fme.core.dataset_info_errors import MissingDatasetInfo
 from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
@@ -586,6 +587,16 @@ class HorizontalCoordinates(abc.ABC):
     def shape(self) -> tuple[int, ...]:
         pass
 
+    @property
+    @abc.abstractmethod
+    def lat_1d(self) -> torch.Tensor:
+        """1D latitude coordinates.
+
+        Raises ``MissingDatasetInfo`` for grids that have no clean
+        1-dimensional latitude representation.
+        """
+        pass
+
     @abc.abstractmethod
     def localize(self: HC) -> HC:
         """Return a copy with coordinates sliced to the local spatial chunk.
@@ -704,6 +715,10 @@ class LatLonCoordinates(HorizontalCoordinates):
 
     def get_state(self) -> TensorMapping:
         return {"lat": self.lat, "lon": self.lon}
+
+    @property
+    def lat_1d(self) -> torch.Tensor:
+        return self.lat
 
 
 @dataclasses.dataclass
@@ -862,6 +877,13 @@ class HEALPixCoordinates(HorizontalCoordinates):
 
     def get_state(self) -> TensorMapping:
         return {"face": self.face, "height": self.height, "width": self.width}
+
+    @property
+    def lat_1d(self) -> torch.Tensor:
+        raise MissingDatasetInfo(
+            "lat_1d (HEALPixCoordinates uses 12 tiles and has no clean "
+            "1-dimensional representation for latitude)"
+        )
 
 
 @dataclasses.dataclass
