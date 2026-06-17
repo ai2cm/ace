@@ -485,14 +485,26 @@ class FCN3Step(StepABC):
     def get_regularizer_loss(self):
         return torch.tensor(0.0)
 
+    def train(self, mode: bool = True) -> StepABC:
+        super().train(mode)
+        self._corrector.train(mode)
+        return self
+
+    def set_epoch(self, epoch: int) -> None:
+        self._corrector.set_epoch(epoch)
+
     def get_state(self):
         """
         Returns:
             The state of the stepper.
         """
-        return {
+        state = {
             "module": self.module.state_dict(),
         }
+        corrector_state = self._corrector.get_state()
+        if len(corrector_state) > 0:
+            state["corrector"] = corrector_state
+        return state
 
     def load_state(self, state: dict[str, Any]) -> None:
         """
@@ -502,3 +514,4 @@ class FCN3Step(StepABC):
             state: The state to load.
         """
         self.module.load_state_dict(state["module"])
+        self._corrector.load_state(state.get("corrector", {}))
