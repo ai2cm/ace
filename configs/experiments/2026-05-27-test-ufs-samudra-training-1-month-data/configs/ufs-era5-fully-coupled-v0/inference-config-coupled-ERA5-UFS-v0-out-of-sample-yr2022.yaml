@@ -42,6 +42,7 @@ forcing_loader:
       data_path: /climate-default
       file_pattern: 2026-06-03-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
       engine: zarr
+      n_repeats: 2
 aggregator:
   log_global_mean_time_series: true
 data_writer:

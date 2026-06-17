@@ -34,6 +34,13 @@ DATA_PATH = "/climate-default"
 OCEAN_FILE = "2026-06-03-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr"
 ATMOSPHERE_FILE = "2026-03-19-era5-1deg-8layer-1940-2025.zarr"
 
+# Number of times to repeat the ocean forcing dataset in time. The ocean is
+# prognostic, but its static forcing fields (e.g. land_fraction,
+# sea_surface_fraction, deptho) are read from this dataset. Repeating extends
+# the dataset's time axis so the run window can start near the end of the
+# ocean record without exceeding the available timesteps.
+OCEAN_FORCING_N_REPEATS = 2
+
 # Samudra next_step_forcing_names, using ACE atmosphere output names
 # (wind stress renamed from *_surface_wind_stress to *_surface_stress).
 SAMUDRA_ATMOSPHERE_FLUX_NAMES = [
@@ -127,6 +134,9 @@ def make_config(times):
             },
             "start_indices": {"times": times},
         },
+        # The ocean is prognostic, but its static forcing fields are read from
+        # the ocean forcing dataset, so it is included here. n_repeats extends
+        # the ocean time axis past the inference window (see OCEAN_FORCING_N_REPEATS).
         "forcing_loader": {
             "num_data_workers": 4,
             "atmosphere": {
@@ -141,6 +151,7 @@ def make_config(times):
                     "data_path": DATA_PATH,
                     "file_pattern": OCEAN_FILE,
                     "engine": "zarr",
+                    "n_repeats": OCEAN_FORCING_N_REPEATS,
                 },
             },
         },
