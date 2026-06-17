@@ -17,6 +17,12 @@ from ..inference.build_context import MetricBuildContext, MetricNotSupportedErro
 from ..inference.data import MetricBuildResult
 from .build_context import OneStepBuildContext, OneStepMetricBuildResult
 
+# A zero-spread cell whose unbiased MSE is below this fraction of the field's
+# largest unbiased MSE is treated as prescribed/forced (a genuine 0/0). The
+# rounding residue left by averaging identical ensemble members is many orders
+# of magnitude smaller than this, while any genuine skill is far larger.
+_PRESCRIBED_MSE_RTOL = 1e-6
+
 
 def get_gen_shape(gen_data: TensorMapping):
     for name in gen_data:
@@ -117,7 +123,6 @@ class SSRBiasMetric(ReducedMetric):
     def __init__(self):
         self._total_unbiased_mse = None
         self._total_variance = None
-        self._prescribed = None
         self._n_batches = 0
 
     def record(self, target: torch.Tensor, gen: torch.Tensor):
@@ -127,21 +132,7 @@ class SSRBiasMetric(ReducedMetric):
         variance = gen.var(dim=1, unbiased=True).mean(dim=(0, 1))
         self._add_unbiased_mse(mse, variance, num_ensemble)
         self._add_variance(variance)
-        self._add_prescribed(target, gen)
         self._n_batches += 1
-
-    def _add_prescribed(self, target: torch.Tensor, gen: torch.Tensor):
-        # A cell is "prescribed"/forced when every ensemble member exactly
-        # equals the target in every recorded batch (e.g. SST over ocean, where
-        # the prescriber overwrites the prediction with the reference value for
-        # all members). There the spread-skill ratio is a genuine 0/0 and so
-        # undefined. This is detected on the raw values, before the ensemble
-        # mean is taken, so floating-point error in (sum / n) does not mask it.
-        batch_prescribed = torch.eq(gen, target).all(dim=1).all(dim=(0, 1))
-        if self._prescribed is None:
-            self._prescribed = batch_prescribed
-        else:
-            self._prescribed = self._prescribed & batch_prescribed
 
     def _add_unbiased_mse(
         self, mse: torch.Tensor, variance: torch.Tensor, num_ensemble: int
@@ -158,11 +149,7 @@ class SSRBiasMetric(ReducedMetric):
         self._total_variance += variance
 
     def get(self) -> torch.Tensor:
-        if (
-            self._total_unbiased_mse is None
-            or self._total_variance is None
-            or self._prescribed is None
-        ):
+        if self._total_unbiased_mse is None or self._total_variance is None:
             raise ValueError("No batches have been recorded.")
         spread = self._total_variance.sqrt()
         # Clamp to avoid NaN from sqrt of negative values. The unbiased MSE
@@ -177,18 +164,23 @@ class SSRBiasMetric(ReducedMetric):
             skill > 0, spread / skill - 1, torch.full_like(spread, -1.0)
         )
         # Prescribed/forced cells (every ensemble member equals the target, e.g.
-        # SST over ocean) have neither spread nor skill, so the spread-skill
-        # ratio is a genuine 0/0. By convention report 0 there -- zero spread is
-        # exactly right for zero error, i.e. perfectly calibrated -- rather than
-        # the -1 floor that spread / skill - 1 takes in the zero-spread limit,
-        # which would otherwise dominate the scalar global average of a
-        # mostly-prescribed field (surface temperature is prescribed over the
-        # ~70% of the surface that is ocean). This cannot be detected from
-        # (total_variance == 0) & (total_unbiased_mse == 0): the unbiased MSE is
-        # not exactly zero at prescribed cells because averaging the identical
-        # members leaves a ~1e-15 rounding residue, so it is detected on the raw
-        # values in ``record`` (see ``_add_prescribed``), before that mean.
-        return torch.where(self._prescribed, torch.zeros_like(spread), ssr_bias)
+        # SST over ocean) have exactly zero spread and, up to rounding, zero
+        # ensemble-mean error, so the spread-skill ratio is a genuine 0/0. By
+        # convention report 0 there -- zero spread is exactly right for zero
+        # error, i.e. perfectly calibrated -- rather than the -1 floor that
+        # spread / skill - 1 takes in the zero-spread limit, which would
+        # otherwise dominate the scalar global average of a mostly-prescribed
+        # field (surface temperature is prescribed over the ~70% of the surface
+        # that is ocean). total_variance is exactly 0 at these cells, but the
+        # unbiased MSE is not -- averaging the identical members leaves a tiny
+        # rounding residue -- so it is compared against a small fraction of the
+        # field's largest unbiased MSE (the residue is many orders of magnitude
+        # below any genuine skill).
+        mse_floor = _PRESCRIBED_MSE_RTOL * skill.square().max()
+        prescribed = (self._total_variance == 0) & (
+            self._total_unbiased_mse <= mse_floor
+        )
+        return torch.where(prescribed, torch.zeros_like(spread), ssr_bias)
 
 
 class _EnsembleAggregator:
