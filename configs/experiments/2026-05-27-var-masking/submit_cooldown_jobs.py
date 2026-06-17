@@ -30,7 +30,8 @@ CONFIGS = sorted(
 def config_to_job_name(config_filename: str) -> str:
     stem = pathlib.Path(config_filename).stem
     suffix = stem.removeprefix("ace-train-config-4deg-AIMIP-")
-    return f"ace2-var-mask-{suffix}"
+    suffix = suffix.removesuffix("-cooldown")
+    return f"ace2-var-mask-{suffix}-v4-cooldown"
 
 
 def main() -> None:
