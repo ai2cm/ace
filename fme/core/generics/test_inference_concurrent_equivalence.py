@@ -14,8 +14,16 @@ effectively fully concurrent and so never exercise the sequential reference
 path. The two scenarios below cover exactly those cases:
 
 * a heterogeneous-length pair -- a short task reaching its final window in the
-  same round a longer task submits a full window, and
-* an ensemble task (``n_ensemble_per_ic > 1``) on distinct start dates.
+  same round a longer task submits a full window (#1279 window-shape
+  partitioning), and
+* two tasks on distinct per-sample start dates batched together in one
+  concurrent group, so the cat/split round trip must preserve each sample's
+  start date (the #1282 broadcast_ensemble fix was a time-coordinate ordering
+  bug of this kind).
+
+Both scenarios assert that the concurrent path really shared forward passes
+(fewer ``predict`` calls than sequential), so they cannot pass by silently
+falling back to per-task inference.
 """
 
 import dataclasses
@@ -48,7 +56,6 @@ from fme.core.timing import GlobalTimer
 IN_NAMES = ["forcing", "prognostic"]
 OUT_NAMES = ["prognostic", "diagnostic"]
 ALL_NAMES = list(set(IN_NAMES + OUT_NAMES))
-FORCING_NAMES = sorted(set(IN_NAMES) - set(OUT_NAMES))
 N_LAT, N_LON, NZ = 2, 4, 3
 
 
@@ -142,11 +149,9 @@ class _RecordingAggregator(InferenceAggregatorABC):
     """
 
     def __init__(self):
-        self.initial_condition: PrognosticState | None = None
         self.batches: list[PairedData] = []
 
     def record_initial_condition(self, initial_condition):
-        self.initial_condition = initial_condition
         return []
 
     def record_batch(self, data: PairedData):
@@ -279,25 +284,35 @@ def test_concurrent_equals_sequential_heterogeneous_lengths():
     assert con_calls == 4
 
 
-def test_concurrent_equals_sequential_ensemble_distinct_start_dates():
-    """A weather-like task with n_ensemble_per_ic > 1 on distinct start dates.
+def test_concurrent_equals_sequential_distinct_start_dates():
+    """Two tasks on distinct per-sample start dates, batched in one group.
 
-    Distinct per-sample start times exercise the broadcast_ensemble
-    time-coordinate ordering fixed in #1282, which the concurrent cat/split
-    must preserve.
+    Both tasks submit equal-shape windows every round, so the concurrent path
+    cats their samples into a single forward pass. The samples carry distinct
+    per-sample start dates (mirroring an ensemble laid out over multiple
+    initial-condition dates, e.g. n_ic dates x n_ensemble_per_ic members), so
+    the cat/split round trip must keep each sample paired with its own start
+    date -- exactly the time-coordinate ordering that #1282 got wrong.
     """
     stepper = _make_stepper()
-    # Two distinct initial-condition dates, each broadcast to two ensemble
-    # members (n_ic=2, n_ensemble_per_ic=2 => 4 samples). The per-sample start
-    # offsets mirror the broadcast_ensemble layout (repeat_interleave over the
-    # date dimension), so the cat/split round trip must preserve each sample's
-    # distinct start date.
-    ic, windows = _make_windows(
-        n_samples=4,
-        window_timesteps=[2, 2],
-        start_offsets=[0, 0, 7, 7],
+    # Two initial-condition dates, each with two members (4 samples), with
+    # distinct per-sample start offsets so a misordered cat/split would corrupt
+    # the per-sample time coordinate.
+    ic_a, windows_a = _make_windows(
+        n_samples=4, window_timesteps=[2, 2], start_offsets=[0, 0, 30, 30]
     )
-    tasks = {"weather": (ic, windows)}
-    seq_aggs, seq_summaries, _ = _run_sequential(stepper, tasks)
-    con_aggs, con_summaries, _ = _run_concurrent(stepper, tasks)
+    ic_b, windows_b = _make_windows(
+        n_samples=4, window_timesteps=[2, 2], start_offsets=[100, 100, 130, 130]
+    )
+    tasks = {
+        "weather_a": (ic_a, windows_a),
+        "weather_b": (ic_b, windows_b),
+    }
+    seq_aggs, seq_summaries, seq_calls = _run_sequential(stepper, tasks)
+    con_aggs, con_summaries, con_calls = _run_concurrent(stepper, tasks)
     _assert_tasks_equivalent(seq_aggs, seq_summaries, con_aggs, con_summaries)
+    # Sequential: 2 windows x 2 tasks = 4 forward passes. Concurrent cats the
+    # two tasks' equal-shape windows into one pass per round (2 total), so the
+    # distinct-start-date samples really went through the concurrent cat/split.
+    assert seq_calls == 4
+    assert con_calls == 2
