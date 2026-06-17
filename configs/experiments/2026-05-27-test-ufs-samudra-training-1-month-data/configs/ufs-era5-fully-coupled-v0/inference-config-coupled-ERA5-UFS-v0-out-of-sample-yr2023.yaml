@@ -1,0 +1,70 @@
+experiment_dir: /results
+n_coupled_steps: 147
+coupled_steps_in_memory: 1
+checkpoint_path: /ckpt.tar
+n_ensemble_per_ic: 1
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-ufs
+  entity: ai2cm
+initial_condition:
+  ocean:
+    path: /climate-default/2026-06-03-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
+    engine: zarr
+  atmosphere:
+    path: /climate-default/2026-03-19-era5-1deg-8layer-1940-2025.zarr
+    engine: zarr
+  start_indices:
+    times:
+    - '2023-01-01T12:00:00'
+    - '2023-01-31T12:00:00'
+    - '2023-03-02T12:00:00'
+    - '2023-04-01T12:00:00'
+    - '2023-05-01T12:00:00'
+    - '2023-05-31T12:00:00'
+    - '2023-06-30T12:00:00'
+    - '2023-07-30T12:00:00'
+    - '2023-08-29T12:00:00'
+    - '2023-09-28T12:00:00'
+    - '2023-10-08T12:00:00'
+    - '2023-10-08T12:00:00'
+forcing_loader:
+  num_data_workers: 4
+  atmosphere:
+    dataset:
+      data_path: /climate-default
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+  ocean:
+    dataset:
+      data_path: /climate-default
+      file_pattern: 2026-06-03-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
+      engine: zarr
+aggregator:
+  log_global_mean_time_series: true
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: true
+    names:
+    - sst
+    - zos
+    - thetao_0
+    - vo_0
+    - uo_0
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: true
+    names:
+    - DLWRFsfc
+    - DSWRFsfc
+    - ULWRFsfc
+    - USWRFsfc
+    - LHTFLsfc
+    - SHTFLsfc
+    - PRATEsfc
+    - eastward_surface_stress
+    - northward_surface_stress
+    - total_frozen_precipitation_rate
