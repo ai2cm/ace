@@ -2507,6 +2507,59 @@ def test_train_on_batch_masked_variable_has_zero_loss_count():
     assert stepped.per_channel_losses["a"].count == n_samples
 
 
+def test_train_on_batch_masked_output_only_variable_has_zero_loss_count():
+    """Masked output-only variable contributes 0 samples to loss."""
+    n_samples = 4
+    data = get_data(["a", "b"], n_samples=n_samples, n_time=2).data
+    data.data_mask = {
+        "a": torch.ones(n_samples, dtype=torch.bool, device=DEVICE),
+        "b": torch.zeros(n_samples, dtype=torch.bool, device=DEVICE),
+    }
+    config = _get_stepper_config(["a"], ["a", "b"], module_name="RepeatChannel")
+    stepper = _get_train_stepper(config, loss=StepLossConfig(type="MSE"))
+    stepped = stepper.train_on_batch(data=data, optimization=NullOptimization())
+    assert stepped.per_channel_losses is not None
+    assert stepped.per_channel_losses["b"].count == 0
+    assert stepped.per_channel_losses["a"].count == n_samples
+
+
+def test_train_on_batch_masked_forcing_repeats_mask_across_ensemble():
+    """NaN forcing for a masked sample does not produce NaN loss in ensemble."""
+    n_samples, n_ensemble = 2, 2
+    data = get_data(["a", "b"], n_samples=n_samples, n_time=2).data
+    data.data["b"][1] = torch.nan
+    data.data_mask = {"b": torch.tensor([True, False], dtype=torch.bool, device=DEVICE)}
+    config = _get_stepper_config(["a", "b"], ["a"], module_name="ChannelSum")
+    stepper = _get_train_stepper(
+        config,
+        loss=StepLossConfig(
+            type="EnsembleLoss",
+            kwargs={"crps_weight": 1.0, "energy_score_weight": 0.0},
+        ),
+        n_ensemble=n_ensemble,
+    )
+    stepped = stepper.train_on_batch(data=data, optimization=NullOptimization())
+    assert not torch.isnan(stepped.metrics["loss"])
+
+
+def test_train_on_batch_unmasked_nan_forcing_produces_nan_loss_in_ensemble():
+    """NaN forcing without a mask propagates to NaN loss in ensemble training."""
+    n_samples, n_ensemble = 2, 2
+    data = get_data(["a", "b"], n_samples=n_samples, n_time=2).data
+    data.data["b"][1] = torch.nan
+    config = _get_stepper_config(["a", "b"], ["a"], module_name="ChannelSum")
+    stepper = _get_train_stepper(
+        config,
+        loss=StepLossConfig(
+            type="EnsembleLoss",
+            kwargs={"crps_weight": 1.0, "energy_score_weight": 0.0},
+        ),
+        n_ensemble=n_ensemble,
+    )
+    stepped = stepper.train_on_batch(data=data, optimization=NullOptimization())
+    assert torch.isnan(stepped.metrics["loss"])
+
+
 def test_predict_with_data_mask_zeros_masked_forcing():
     """Masked forcing variable is zeroed in normalized space before the forward pass."""
     n_steps = 1
