@@ -12,7 +12,7 @@ inference:
   epochs:
     start: 0
     step: 5
-  n_forward_steps: 3652
+  n_forward_steps: 16794
   forward_steps_in_memory: 73
   n_ensemble_per_ic: 1
   loader:
