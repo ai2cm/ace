@@ -533,7 +533,7 @@ stepper:
         append_as_input: true
       input_dropout:
         kind: per_variable
-        rate: 0.11
-        co2_rate: 0.9
+        rate: 0.33
+        co2_rate: 0.8
       include_channel_mask_inputs: true
 pre_cooldown_checkpoint_epoch: 142

@@ -534,7 +534,6 @@ stepper:
       input_dropout:
         kind: uniform
         min_vars: 0
-        max_vars: 20
-        co2_rate: 0.9
+        max_vars: 30
       include_channel_mask_inputs: true
 pre_cooldown_checkpoint_epoch: 142

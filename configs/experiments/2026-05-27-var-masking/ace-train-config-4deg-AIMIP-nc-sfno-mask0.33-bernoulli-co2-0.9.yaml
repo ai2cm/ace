@@ -532,9 +532,8 @@ stepper:
         kind: shared
         append_as_input: true
       input_dropout:
-        kind: uniform
-        min_vars: 0
-        max_vars: 20
-        co2_rate: 0.8
+        kind: per_variable
+        rate: 0.33
+        co2_rate: 0.9
       include_channel_mask_inputs: true
 pre_cooldown_checkpoint_epoch: 142

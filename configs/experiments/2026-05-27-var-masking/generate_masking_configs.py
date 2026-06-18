@@ -70,8 +70,10 @@ DOSE_RESPONSE_RUNS: list[tuple[str, str]] = [
     ("mask5", "co2-default"),
     ("mask10", "co2-default"),  # anchor
     ("mask20", "co2-default"),
+    ("mask30", "co2-default"),
     ("mask0.11", "co2-default"),  # bernoulli ~ uniform mask10, family check
     ("mask0.22", "co2-default"),  # bernoulli ~ uniform mask20, family check
+    ("mask0.33", "co2-default"),  # bernoulli ~ uniform mask30, family check
 ]
 # co2 sweep at each anchor mask.
 NC_SFNO_RUNS: list[tuple[str, str]] = DOSE_RESPONSE_RUNS + [
