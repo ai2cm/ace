@@ -1,9 +1,10 @@
-"""Generate fine-tuning configs from var-masking training configs.
+"""Generate cooldown configs from var-masking training configs.
 
-For each *-mask*.yaml config in this directory, produces a corresponding
-*-finetune.yaml that loads weights from a finished training run and adapts
-the model back to the full-input distribution via a short polynomial-decay
-cooldown (no input_dropout).
+For each *-mask*.yaml training config in this directory, produces a
+corresponding *-cooldown.yaml that loads the pre-cooldown checkpoint saved at
+epoch 142 (training_checkpoints/pre_cooldown_ckpt.tar) and re-runs the final
+8-epoch PolynomialLR cooldown with masking disabled (no input_dropout). This
+isolates the effect of the cooldown phase from the input-masking schedule.
 """
 
 import argparse
@@ -21,9 +22,15 @@ WANDB_SUFFIX = "-v4"  # stripped from wandb run names before comparison
 CONFIG_PREFIX = (
     "ace-train-config-4deg-AIMIP-"  # stripped from config stems before comparison
 )
-DEFAULT_CHECKPOINT_NAME = "training_checkpoints/best_ckpt.tar"
-DEFAULT_EPOCHS = 10
+DEFAULT_CHECKPOINT_NAME = "training_checkpoints/pre_cooldown_ckpt.tar"
+DEFAULT_EPOCHS = 8
 DEFAULT_LR = 0.0001
+
+
+def source_config_to_run_name(config_filename: str) -> str:
+    stem = pathlib.Path(config_filename).stem
+    suffix = stem.removeprefix(CONFIG_PREFIX)
+    return f"{WANDB_PREFIX}{suffix}{WANDB_SUFFIX}"
 
 
 def _build_scheduler(epochs: int) -> dict:
@@ -82,7 +89,7 @@ def _write_config(
     print(f"Wrote {out_path.name}")
 
 
-def generate_finetune_config(
+def generate_cooldown_config(
     source_path: pathlib.Path,
     source_map: dict[str, str] | None,
     checkpoint_name: str,
@@ -91,17 +98,18 @@ def generate_finetune_config(
     existing_only: bool,
     wandb_run_names: set[str] | None = None,
 ) -> None:
-    out_path = HERE / f"{source_path.stem}-v2-finetune.yaml"
+    out_path = HERE / f"{source_path.stem}-cooldown.yaml"
 
     beaker_dataset_id = None
     if source_map is not None:
-        beaker_dataset_id = source_map.get(source_path.name)
+        beaker_dataset_id = source_map.get(source_config_to_run_name(source_path.name))
 
     with source_path.open() as f:
         cfg = yaml.safe_load(f)
 
     cfg = copy.deepcopy(cfg)
 
+    # No new pre-cooldown checkpoint during this short run.
     cfg["pre_cooldown_checkpoint_epoch"] = None
 
     if "stepper_training" not in cfg:
@@ -110,6 +118,7 @@ def generate_finetune_config(
         "weights_path": f"/checkpoints/{checkpoint_name}"
     }
 
+    # No masking during the cooldown.
     step_cfg = cfg["stepper"]["step"]["config"]
     step_cfg.pop("input_dropout", None)
 
@@ -144,18 +153,18 @@ def main() -> None:
         "--epochs",
         type=int,
         default=DEFAULT_EPOCHS,
-        help=f"Fine-tuning epoch count (default: {DEFAULT_EPOCHS}).",
+        help=f"Cooldown epoch count (default: {DEFAULT_EPOCHS}).",
     )
     parser.add_argument(
         "--lr",
         type=float,
         default=DEFAULT_LR,
-        help=f"Base LR for fine-tuning (default: {DEFAULT_LR}).",
+        help=f"Base LR for the cooldown (default: {DEFAULT_LR}).",
     )
     parser.add_argument(
         "--existing-only",
         action="store_true",
-        help="Only rewrite fine-tuning configs that already exist.",
+        help="Only rewrite cooldown configs that already exist.",
     )
     parser.add_argument(
         "--skip-wandb",
@@ -180,11 +189,12 @@ def main() -> None:
         p
         for p in HERE.glob("*-mask*.yaml")
         if not p.name.endswith("-finetune.yaml")
+        and not p.name.endswith("-cooldown.yaml")
         and p.name.startswith("ace-train-config-")
     )
 
     for source_path in source_configs:
-        generate_finetune_config(
+        generate_cooldown_config(
             source_path,
             source_map,
             args.checkpoint_name,

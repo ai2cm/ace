@@ -7,6 +7,7 @@ job runs all entries in the suite under one WandB run.
 
 import argparse
 import copy
+import json
 import pathlib
 
 import yaml
@@ -15,33 +16,12 @@ from generate_masking_configs import CONFIG_PREFIX, WANDB_PREFIX, WANDB_SUFFIX
 HERE = pathlib.Path(__file__).parent
 EVAL_SUITE_CONFIG_PREFIX = "ace-eval-suite-config-4deg-AIMIP-"
 DEFAULT_CHECKPOINT_PATH = "/ckpt.tar"
+DEFAULT_SOURCE_MAP = str(HERE / "wandb_to_beaker_map.json")
 
-TRAINING_RESULT_DATASETS = {
-    "ace2-var-mask-nc-sfno-mask0.11-bernoulli-co2-0.4-v4": (
-        "01KV6QX2NW2PVGJ1SYCT992WWZ"
-    ),
-    "ace2-var-mask-nc-sfno-mask0-uniform-co2-default-v4": (
-        "01KV6QWTMDNX0GGD4XY0CSYTX1"
-    ),
-    "ace2-var-mask-nc-sfno-mask0.11-bernoulli-co2-default-v4": (
-        "01KV6RGHGET37DCC83SJPNNS16"
-    ),
-    "ace2-var-mask-nc-sfno-mask0.11-bernoulli-co2-0.8-v4": (
-        "01KV6RG9W0JFGWB6Q1ZE3A7Z5R"
-    ),
-    "ace2-var-mask-nc-sfno-mask10-uniform-co2-0.8-v4": ("01KV6RGZJPZ3PE2V016ZA398WV"),
-    "ace2-var-mask-nc-sfno-mask10-uniform-co2-0.4-v4": ("01KV6RGRKSNJ5PAVACP89MQGZH"),
-    "ace2-var-mask-nc-sfno-mask20-uniform-co2-default-v4": (
-        "01KV6RHDFZDCHBHD0522KKGFV7"
-    ),
-    "ace2-var-mask-nc-sfno-mask10-uniform-co2-default-v4": (
-        "01KV6RH6BAFGVHA9V5H9VX5A0E"
-    ),
-    "ace2-var-mask-nc-sfno-mask5-uniform-co2-default-v4": (
-        "01KV6RHMHN3ATB1HY2V7YFZD03"
-    ),
-    "ace2-var-mask-sfno-mask0-uniform-co2-default-v4": ("01KV6RHVGGHX21N9NJK3Y42CJR"),
-}
+# Mapping of training run name -> Beaker result dataset ID, loaded from the
+# source map. Consumed by submit_eval_jobs.py to locate each run's checkpoints.
+with open(DEFAULT_SOURCE_MAP) as _f:
+    TRAINING_RESULT_DATASETS: dict[str, str] = json.load(_f)
 
 
 def source_config_to_run_name(config_filename: str) -> str:
@@ -157,12 +137,13 @@ def _write_config(
 
 def generate_eval_config(
     source_path: pathlib.Path,
+    source_map: dict[str, str],
     inference_names: list[str] | None,
     checkpoint_path: str,
     existing_only: bool,
 ) -> None:
     source_run_name = source_config_to_run_name(source_path.name)
-    source_dataset_id = TRAINING_RESULT_DATASETS.get(source_run_name)
+    source_dataset_id = source_map.get(source_run_name)
     if source_dataset_id is None:
         raise KeyError(
             f"No training result dataset ID configured for run {source_run_name!r}"
@@ -194,21 +175,36 @@ def main() -> None:
         help=f"Path to the mounted checkpoint (default: {DEFAULT_CHECKPOINT_PATH}).",
     )
     parser.add_argument(
+        "--source-map",
+        metavar="PATH",
+        default=DEFAULT_SOURCE_MAP,
+        help=(
+            "JSON file mapping training run name → Beaker dataset ID"
+            f" (default: {DEFAULT_SOURCE_MAP})."
+        ),
+    )
+    parser.add_argument(
         "--existing-only",
         action="store_true",
         help="Only rewrite evaluator configs that already exist.",
     )
     args = parser.parse_args()
 
+    with open(args.source_map) as f:
+        source_map: dict[str, str] = json.load(f)
+
     source_configs = sorted(
         p
         for p in HERE.glob("*-mask*.yaml")
-        if p.name.startswith(CONFIG_PREFIX) and not p.name.endswith("-finetune.yaml")
+        if p.name.startswith(CONFIG_PREFIX)
+        and not p.name.endswith("-finetune.yaml")
+        and not p.name.endswith("-cooldown.yaml")
     )
 
     for source_path in source_configs:
         generate_eval_config(
             source_path=source_path,
+            source_map=source_map,
             inference_names=args.inference_name,
             checkpoint_path=args.checkpoint_path,
             existing_only=args.existing_only,
