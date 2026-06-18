@@ -1,11 +1,12 @@
 import dataclasses
 from collections.abc import Callable, Sequence
-from typing import TypeVar
+from typing import TypeVar, cast
 
 import numpy as np
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.core.coordinates import NullDeriveFn
+from fme.core.dataset.dataset import DatasetItem
 from fme.core.labels import LabelEncoding
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.coupled.data_loading.data_typing import CoupledDatasetItem
@@ -139,7 +140,7 @@ class CoupledBatchData:
         ocean_data = None
         if ocean_horizontal_dims is not None:
             ocean_data = BatchData.from_sample_tuples(
-                [x.ocean for x in samples],
+                [cast(DatasetItem, x.ocean) for x in samples],
                 horizontal_dims=ocean_horizontal_dims,
                 sample_dim_name=sample_dim_name,
                 label_encoding=ocean_label_encoding,
@@ -147,7 +148,7 @@ class CoupledBatchData:
         ice_data = None
         if ice_horizontal_dims is not None:
             ice_data = BatchData.from_sample_tuples(
-                [x.ice for x in samples],
+                [cast(DatasetItem, x.ice) for x in samples],
                 horizontal_dims=ice_horizontal_dims,
                 sample_dim_name=sample_dim_name,
                 label_encoding=ice_label_encoding,
@@ -155,7 +156,7 @@ class CoupledBatchData:
         atmosphere_data = None
         if atmosphere_horizontal_dims is not None:
             atmosphere_data = BatchData.from_sample_tuples(
-                [x.atmosphere for x in samples],
+                [cast(DatasetItem, x.atmosphere) for x in samples],
                 horizontal_dims=atmosphere_horizontal_dims,
                 sample_dim_name=sample_dim_name,
                 label_encoding=atmosphere_label_encoding,
@@ -171,18 +172,21 @@ class CoupledBatchData:
         """
         ocean_data = None
         if self.ocean_data is not None:
+            assert requirements.ocean is not None
             ocean_data = self.ocean_data.get_start(
                 requirements.ocean.names,
                 requirements.ocean.n_timesteps,
             )
         ice_data = None
         if self.ice_data is not None:
+            assert requirements.ice is not None
             ice_data = self.ice_data.get_start(
                 requirements.ice.names,
                 requirements.ice.n_timesteps,
             )
         atmosphere_data = None
         if self.atmosphere_data is not None:
+            assert requirements.atmosphere is not None
             atmosphere_data = self.atmosphere_data.get_start(
                 requirements.atmosphere.names,
                 requirements.atmosphere.n_timesteps,
@@ -194,12 +198,15 @@ class CoupledBatchData:
     def prepend(self: SelfType, initial_condition: CoupledPrognosticState) -> SelfType:
         ocean_data = None
         if self.ocean_data is not None:
+            assert initial_condition.ocean_data is not None
             ocean_data = self.ocean_data.prepend(initial_condition.ocean_data)
         ice_data = None
         if self.ice_data is not None:
+            assert initial_condition.ice_data is not None
             ice_data = self.ice_data.prepend(initial_condition.ice_data)
         atmosphere_data = None
         if self.atmosphere_data is not None:
+            assert initial_condition.atmosphere_data is not None
             atmosphere_data = self.atmosphere_data.prepend(
                 initial_condition.atmosphere_data
             )
@@ -215,12 +222,15 @@ class CoupledBatchData:
     ) -> SelfType:
         ocean_data = None
         if self.ocean_data is not None:
+            assert n_ic_timesteps_ocean is not None
             ocean_data = self.ocean_data.remove_initial_condition(n_ic_timesteps_ocean)
         ice_data = None
         if self.ice_data is not None:
+            assert n_ic_timesteps_ice is not None
             ice_data = self.ice_data.remove_initial_condition(n_ic_timesteps_ice)
         atmosphere_data = None
         if self.atmosphere_data is not None:
+            assert n_ic_timesteps_atmosphere is not None
             atmosphere_data = self.atmosphere_data.remove_initial_condition(
                 n_ic_timesteps_atmosphere
             )
@@ -240,6 +250,8 @@ class CoupledBatchData:
     ) -> SelfType:
         ocean_data = None
         if self.ocean_data is not None:
+            assert ocean_derive_func is not None
+            assert forcing_data.ocean_data is not None
             ocean_data = self.ocean_data.compute_derived_variables(
                 ocean_derive_func, forcing_data.ocean_data
             )
@@ -248,11 +260,15 @@ class CoupledBatchData:
             if isinstance(ice_derive_func, NullDeriveFn):
                 ice_data = self.ice_data
             else:
+                assert ice_derive_func is not None
+                assert forcing_data.ice_data is not None
                 ice_data = self.ice_data.compute_derived_variables(
                     ice_derive_func, forcing_data.ice_data
                 )
         atmosphere_data = None
         if self.atmosphere_data is not None:
+            assert atmosphere_derive_func is not None
+            assert forcing_data.atmosphere_data is not None
             atmosphere_data = self.atmosphere_data.compute_derived_variables(
                 atmosphere_derive_func, forcing_data.atmosphere_data
             )
@@ -289,6 +305,7 @@ class CoupledPairedData:
     ) -> "CoupledPairedData":
         ocean_data = None
         if prediction.ocean_data is not None:
+            assert reference.ocean_data is not None
             if not np.all(
                 prediction.ocean_data.time.values == reference.ocean_data.time.values
             ):
@@ -303,6 +320,7 @@ class CoupledPairedData:
             )
         ice_data = None
         if prediction.ice_data is not None:
+            assert reference.ice_data is not None
             if not np.all(
                 prediction.ice_data.time.values == reference.ice_data.time.values
             ):
@@ -317,6 +335,7 @@ class CoupledPairedData:
             )
         atmosphere_data = None
         if prediction.atmosphere_data is not None:
+            assert reference.atmosphere_data is not None
             if not np.all(
                 prediction.atmosphere_data.time.values
                 == reference.atmosphere_data.time.values

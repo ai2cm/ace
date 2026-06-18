@@ -24,7 +24,7 @@ class CoupledDatasetInfo:
         self.atmosphere = atmosphere
 
     @property
-    def ocean_spatial_mask_provider(self) -> HasGetSpatialMask:
+    def ocean_spatial_mask_provider(self) -> HasGetSpatialMask | None:
         if self.ocean is not None:
             try:
                 return self.ocean.spatial_mask_provider
@@ -34,7 +34,7 @@ class CoupledDatasetInfo:
             return None
 
     @property
-    def ice_spatial_mask_provider(self) -> HasGetSpatialMask:
+    def ice_spatial_mask_provider(self) -> HasGetSpatialMask | None:
         if self.ice is not None:
             try:
                 return self.ice.spatial_mask_provider
@@ -53,21 +53,27 @@ class CoupledDatasetInfo:
 
     def get_state(self) -> dict[Literal["ocean", "ice", "atmosphere"], dict[str, Any]]:
         if self.atmosphere is None:
-            ds = {
+            assert self.ocean is not None
+            assert self.ice is not None
+            ds: dict[Literal["ocean", "ice", "atmosphere"], dict[str, Any]] = {
                 "ocean": self.ocean.get_state(),
                 "ice": self.ice.get_state(),
             }
         elif self.ice is None:
+            assert self.ocean is not None
             ds = {
                 "ocean": self.ocean.get_state(),
                 "atmosphere": self.atmosphere.get_state(),
             }
         elif self.ocean is None:
+            assert self.ice is not None
             ds = {
                 "ice": self.ice.get_state(),
                 "atmosphere": self.atmosphere.get_state(),
             }
         else:
+            assert self.ocean is not None
+            assert self.ice is not None
             ds = {
                 "ocean": self.ocean.get_state(),
                 "ice": self.ice.get_state(),
@@ -78,21 +84,27 @@ class CoupledDatasetInfo:
     @property
     def horizontal_coordinates(self) -> CoupledHorizontalCoordinates:
         if self.atmosphere is None:
+            assert self.ocean is not None
+            assert self.ice is not None
             return CoupledHorizontalCoordinates(
                 ocean=self.ocean.horizontal_coordinates,
                 ice=self.ice.horizontal_coordinates,
             )
         elif self.ice is None:
+            assert self.ocean is not None
             return CoupledHorizontalCoordinates(
                 ocean=self.ocean.horizontal_coordinates,
                 atmosphere=self.atmosphere.horizontal_coordinates,
             )
         elif self.ocean is None:
+            assert self.ice is not None
             return CoupledHorizontalCoordinates(
                 ice=self.ice.horizontal_coordinates,
                 atmosphere=self.atmosphere.horizontal_coordinates,
             )
         else:
+            assert self.ocean is not None
+            assert self.ice is not None
             return CoupledHorizontalCoordinates(
                 ocean=self.ocean.horizontal_coordinates,
                 ice=self.ice.horizontal_coordinates,

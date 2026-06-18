@@ -88,21 +88,24 @@ def get_dataset(
     ocean_reqs = requirements.ocean_requirements
     ice_reqs = requirements.ice_requirements
     atmosphere_reqs = requirements.atmosphere_requirements
-    ocean = None  #: torch.utils.data.Dataset
-    ice = None  #: torch.utils.data.Dataset
-    atmosphere = None  #: #torch.utils.data.Dataset
+    ocean: torch.utils.data.Dataset | None = None
+    ice: torch.utils.data.Dataset | None = None
+    atmosphere: torch.utils.data.Dataset | None = None
     ocean_properties = None
     ice_properties = None
     atmosphere_properties = None
     if ocean_reqs is not None:
+        assert config.ocean is not None
         ocean, ocean_properties = config.ocean.build(
             ocean_reqs.names, ocean_reqs.n_timesteps_schedule
         )
     if ice_reqs is not None:
+        assert config.ice is not None
         ice, ice_properties = config.ice.build(
             ice_reqs.names, ice_reqs.n_timesteps_schedule
         )
     if atmosphere_reqs is not None:
+        assert config.atmosphere is not None
         atmosphere, atmosphere_properties = config.atmosphere.build(
             atmosphere_reqs.names, atmosphere_reqs.n_timesteps_schedule
         )
@@ -286,9 +289,9 @@ def get_train_dataset(
     that are merged via TimePaddedMergedDataset.
     """
     ocean_properties = None
-    ocean = None
+    ocean: torch.utils.data.Dataset | None = None
     if config.ocean is not None:
-        ocean: torch.utils.data.Dataset
+        assert requirements.ocean_requirements is not None
         ocean, ocean_properties = config.ocean.build(
             requirements.ocean_requirements.names,
             requirements.ocean_requirements.n_timesteps_schedule,
@@ -296,6 +299,8 @@ def get_train_dataset(
     atmosphere_properties = None
     atmosphere = None
     if config.atmosphere is not None:
+        assert requirements.atmosphere_target_requirements is not None
+        assert requirements.atmosphere_forcing_requirements is not None
         atmos_target, atmos_target_properties = config.atmosphere.build(
             requirements.atmosphere_target_requirements.names,
             requirements.atmosphere_target_requirements.n_timesteps_schedule,
@@ -312,6 +317,8 @@ def get_train_dataset(
     ice_properties = None
     ice = None
     if config.ice is not None:
+        assert requirements.ice_target_requirements is not None
+        assert requirements.ice_forcing_requirements is not None
         ice_target, ice_target_properties = config.ice.build(
             requirements.ice_target_requirements.names,
             requirements.ice_target_requirements.n_timesteps_schedule,
@@ -378,6 +385,7 @@ def get_inference_data(
 ) -> InferenceGriddedData:
     initial_time = None
     if isinstance(initial_condition, CoupledPrognosticState):
+        assert initial_condition.ocean_data is not None
         initial_time = (
             initial_condition.ocean_data.as_batch_data().time
         )  # used only if no ocean forcing is specified
@@ -463,16 +471,20 @@ def get_forcing_data(
         A data loader for forcing data with coordinates and metadata.
     """
     if config.ocean is not None:
+        assert initial_condition.ocean_data is not None
         initial_time = initial_condition.ocean_data.as_batch_data().time
     elif (config.ocean is None) & (config.ice is not None):
+        assert initial_condition.ice_data is not None
         initial_time = initial_condition.ice_data.as_batch_data().time
     if initial_time.shape[1] != 1:
         raise NotImplementedError("code assumes initial time only has 1 timestep")
     if config.ocean is None:
+        assert window_requirements.ocean_timestep is not None
         available_times = _make_available_times_from_initial_time(
             initial_time, total_coupled_steps, window_requirements.ocean_timestep
         )
     else:
+        assert window_requirements.ocean_requirements is not None
         if isinstance(config.ocean.dataset, XarrayDataConfig):
             available_times = XarrayDataset(
                 config.ocean.dataset,

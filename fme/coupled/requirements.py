@@ -57,9 +57,12 @@ def _validate_fast_n_timesteps(
         ice_timestep=ice_timestep,
     )
     if ocean_timestep is not None:
+        assert ocean_requirements is not None
         slow_n_steps = ocean_requirements.n_timesteps_schedule.get_value(0)
         slow_dt = ocean_timestep
     else:
+        assert ice_requirements is not None
+        assert ice_timestep is not None
         slow_n_steps = ice_requirements.n_timesteps_schedule.get_value(0)
         slow_dt = ice_timestep
     expected_n_steps = (slow_n_steps - 1) * n_steps_fast + 1
@@ -67,6 +70,7 @@ def _validate_fast_n_timesteps(
     if atmosphere_timestep is not None:
         fast_dt = atmosphere_timestep
     else:
+        assert ice_timestep is not None
         fast_dt = ice_timestep
 
     if fast_n_timesteps != expected_n_steps:
@@ -98,8 +102,10 @@ class CoupledDataRequirements:
         )
 
         if self.atmosphere_timestep is None:
+            assert self.ice_requirements is not None
             fast_n_timesteps = self.ice_requirements.n_timesteps_schedule.get_value(0)
         else:
+            assert self.atmosphere_requirements is not None
             fast_n_timesteps = (
                 self.atmosphere_requirements.n_timesteps_schedule.get_value(0)
             )
@@ -175,6 +181,8 @@ class CoupledTrainDataRequirements:
         )
 
         if self.atmosphere_timestep is None:
+            assert self.ice_forcing_requirements is not None
+            assert self.ice_target_requirements is not None
             # check that the ice forcing window is consistent with the ocean window
             forcing_n_timesteps = (
                 self.ice_forcing_requirements.n_timesteps_schedule.get_value(0)
@@ -187,6 +195,8 @@ class CoupledTrainDataRequirements:
             target_names = set(self.ice_target_requirements.names)
             forcing_names = set(self.ice_forcing_requirements.names)
         else:
+            assert self.atmosphere_forcing_requirements is not None
+            assert self.atmosphere_target_requirements is not None
             # check that the atmos forcing window is consistent with the ocean window
             forcing_n_timesteps = (
                 self.atmosphere_forcing_requirements.n_timesteps_schedule.get_value(0)

@@ -65,6 +65,18 @@ class CoupledConcatDatasetConfig:
     def coupled_configs(self) -> Sequence[CoupledDatasetConfig]:
         return self.concat
 
+    @property
+    def atmosphere(self) -> XarrayDataConfig | MergeNoConcatDatasetConfig | None:
+        return self.concat[0].atmosphere if self.concat else None
+
+    @property
+    def ice(self) -> XarrayDataConfig | MergeNoConcatDatasetConfig | None:
+        return self.concat[0].ice if self.concat else None
+
+    @property
+    def ocean(self) -> XarrayDataConfig | MergeNoConcatDatasetConfig | None:
+        return self.concat[0].ocean if self.concat else None
+
 
 @dataclasses.dataclass
 class CoupledDataLoaderConfig:
@@ -109,7 +121,11 @@ class CoupledDataLoaderConfig:
         if self.dataset.atmosphere is None:
             return None
         return accumulate_labels(
-            [ds.atmosphere.available_labels for ds in self.dataset.coupled_configs]
+            [
+                ds.atmosphere.available_labels
+                for ds in self.dataset.coupled_configs
+                if ds.atmosphere is not None
+            ]
         )
 
     @property
@@ -120,7 +136,11 @@ class CoupledDataLoaderConfig:
         if self.dataset.ice is None:
             return None
         return accumulate_labels(
-            [ds.ice.available_labels for ds in self.dataset.coupled_configs]
+            [
+                ds.ice.available_labels
+                for ds in self.dataset.coupled_configs
+                if ds.ice is not None
+            ]
         )
 
     @property
@@ -131,7 +151,11 @@ class CoupledDataLoaderConfig:
         if self.dataset.ocean is None:
             return None
         return accumulate_labels(
-            [ds.ocean.available_labels for ds in self.dataset.coupled_configs]
+            [
+                ds.ocean.available_labels
+                for ds in self.dataset.coupled_configs
+                if ds.ocean is not None
+            ]
         )
 
     @property

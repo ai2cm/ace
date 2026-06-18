@@ -556,6 +556,9 @@ def test_coupled_data_loader(tmp_path, atmosphere_times_offset: int):
     atmos_ds = ics[ic_idx].atmosphere.ds
     sample = data._loader._dataset[sample_idx]  # type: ignore
     assert isinstance(sample, CoupledDatasetItem)
+    assert sample.ocean is not None
+    assert sample.ice is not None
+    assert sample.atmosphere is not None
     ocean_sample_init_time = sample.ocean[1].isel(time=0).item()
     ice_sample_init_time = sample.ice[1].isel(time=0).item()
     atmos_sample_init_time = sample.atmosphere[1].isel(time=0).item()
@@ -755,6 +758,9 @@ def test_coupled_data_loader_merge_no_concat(tmp_path):
 
     data = get_gridded_data(config, False, coupled_requirements)
     batch = next(iter(data.loader))
+    assert batch.ocean_data is not None
+    assert batch.ice_data is not None
+    assert batch.atmosphere_data is not None
     assert set(batch.ocean_data.data.keys()) == set(ocean_names)
     assert set(batch.ice_data.data.keys()) == set(ice_names)
     assert set(batch.atmosphere_data.data.keys()) == set(atmos_names)
@@ -864,6 +870,9 @@ def test_get_forcing_data(tmp_path, n_initial_conditions):
     )
     batch_data = next(iter(data.loader))
     assert isinstance(batch_data, CoupledBatchData)
+    assert batch_data.ocean_data is not None
+    assert batch_data.atmosphere_data is not None
+    assert batch_data.ice_data is not None
     assert isinstance(batch_data.ocean_data.data["bar"], torch.Tensor)
     assert isinstance(batch_data.atmosphere_data.data["foo"], torch.Tensor)
     assert isinstance(batch_data.ice_data.data["baz"], torch.Tensor)
@@ -894,6 +903,9 @@ def test_get_forcing_data(tmp_path, n_initial_conditions):
     assert batch_data.ocean_data.time.dt.calendar == calendar
     assert batch_data.ice_data.time.dt.calendar == calendar
     assert batch_data.atmosphere_data.time.dt.calendar == calendar
+    assert data.initial_condition.ocean_data is not None
+    assert data.initial_condition.ice_data is not None
+    assert data.initial_condition.atmosphere_data is not None
     xr.testing.assert_equal(
         data.initial_condition.ocean_data.as_batch_data().time,
         ocean_initial_condition.time,

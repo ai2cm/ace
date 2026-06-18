@@ -1,5 +1,6 @@
 import dataclasses
 import datetime
+from typing import cast
 
 import numpy as np
 import torch
@@ -31,6 +32,7 @@ class CoupledCoords:
     @property
     def ocean(self) -> dict[str, np.ndarray]:
         if self.ocean_horizontal is not None:
+            assert self.ocean_vertical is not None
             return {**self.ocean_vertical, **self.ocean_horizontal}
         else:
             raise AttributeError("Ocean component is None")
@@ -47,6 +49,7 @@ class CoupledCoords:
     @property
     def atmosphere(self) -> dict[str, np.ndarray]:
         if self.atmosphere_horizontal is not None:
+            assert self.atmosphere_vertical is not None
             return {**self.atmosphere_vertical, **self.atmosphere_horizontal}
         else:
             raise AttributeError("Atmosphere component is None")
@@ -163,17 +166,17 @@ class CoupledDatasetProperties:
         ice_hcoord = None
         atmos_hcoord = None
         if self.ocean is not None:
-            ocean_vcoord = ocean.vertical_coordinate
-            ocean_hcoord = ocean.horizontal_coordinates
-            assert isinstance(ocean_vcoord, OptionalDepthCoordinate)
+            ocean_vcoord = cast(OptionalDepthCoordinate, self.ocean.vertical_coordinate)
+            ocean_hcoord = self.ocean.horizontal_coordinates
         if self.ice is not None:
-            ice_vcoord = ice.vertical_coordinate
-            ice_hcoord = ice.horizontal_coordinates
-            assert isinstance(ice_vcoord, OptionalDepthCoordinate)
+            ice_vcoord = cast(OptionalDepthCoordinate, self.ice.vertical_coordinate)
+            ice_hcoord = self.ice.horizontal_coordinates
         if self.atmosphere is not None:
-            atmos_vcoord = atmosphere.vertical_coordinate
-            atmos_hcoord = atmosphere.horizontal_coordinates
-            assert isinstance(atmos_vcoord, OptionalHybridSigmaPressureCoordinate)
+            atmos_vcoord = cast(
+                OptionalHybridSigmaPressureCoordinate,
+                self.atmosphere.vertical_coordinate,
+            )
+            atmos_hcoord = self.atmosphere.horizontal_coordinates
 
         self._vertical_coordinate = CoupledVerticalCoordinate(
             ocean_vcoord, ice_vcoord, atmos_vcoord
@@ -184,16 +187,19 @@ class CoupledDatasetProperties:
 
     @property
     def atmosphere_timestep(self) -> datetime.timedelta:
+        assert self.atmosphere is not None
         assert self.atmosphere.timestep is not None
         return self.atmosphere.timestep
 
     @property
     def ocean_timestep(self) -> datetime.timedelta:
+        assert self.ocean is not None
         assert self.ocean.timestep is not None
         return self.ocean.timestep
 
     @property
     def ice_timestep(self) -> datetime.timedelta:
+        assert self.ice is not None
         assert self.ice.timestep is not None
         return self.ice.timestep
 
@@ -226,14 +232,18 @@ class CoupledDatasetProperties:
     @property
     def is_remote(self) -> bool:
         if self.atmosphere is None:
+            assert self.ocean is not None
+            assert self.ice is not None
             remote_ocean = self.ocean.is_remote
             remote_ice = self.ice.is_remote
             remote = remote_ocean or remote_ice
         elif self.ice is None:
+            assert self.ocean is not None
             remote_atmos = self.atmosphere.is_remote
             remote_ocean = self.ocean.is_remote
             remote = remote_atmos or remote_ocean
         elif self.ocean is None:
+            assert self.ice is not None
             remote_ice = self.ice.is_remote
             remote_atmos = self.atmosphere.is_remote
             remote = remote_ice or remote_atmos
@@ -264,12 +274,18 @@ class CoupledDatasetProperties:
         ice_hcoord = None
         ice_vcoord = None
         if self.ocean is not None:
+            assert self.vertical_coordinate.ocean is not None
+            assert self.horizontal_coordinates.ocean is not None
             ocean_vcoord = self.vertical_coordinate.ocean.coords
             ocean_hcoord = dict(self.horizontal_coordinates.ocean.coords)
         if self.ice is not None:
+            assert self.vertical_coordinate.ice is not None
+            assert self.horizontal_coordinates.ice is not None
             ice_vcoord = self.vertical_coordinate.ice.coords
             ice_hcoord = dict(self.horizontal_coordinates.ice.coords)
         if self.atmosphere is not None:
+            assert self.vertical_coordinate.atmosphere is not None
+            assert self.horizontal_coordinates.atmosphere is not None
             atmos_vcoord = self.vertical_coordinate.atmosphere.coords
             atmos_hcoord = dict(self.horizontal_coordinates.atmosphere.coords)
         return CoupledCoords(
@@ -303,10 +319,13 @@ class CoupledDatasetProperties:
                 "Horizontal coordinates must be the same for both datasets."
             )
         if self.atmosphere is not None:
+            assert other.atmosphere is not None
             self.atmosphere.update(other.atmosphere)
         if self.ocean is not None:
+            assert other.ocean is not None
             self.ocean.update(other.ocean)
         if self.ice is not None:
+            assert other.ice is not None
             self.ice.update(other.ice)
 
 
@@ -341,10 +360,12 @@ class CoupledDataset:
             if properties.ocean_timestep != properties.ice_timestep * n_steps_fast:
                 raise ValueError(
                     "Ocean and Ice timesteps must be consistent with "
-                    f"n_steps_fast, got ocean timestep {properties.ocean.timestep} "
-                    f"and ice timestep {properties.ice.timestep} "
+                    f"n_steps_fast, got ocean timestep {properties.ocean_timestep} "
+                    f"and ice timestep {properties.ice_timestep} "
                     f"with n_steps_fast={n_steps_fast}."
                 )
+            assert self._ocean is not None
+            assert self._ice is not None
             ocean_time = self._ocean[0][1].isel(time=0).item()
             ice_time = self._ice[0][1].isel(time=0).item()
             if ocean_time != ice_time:
@@ -360,10 +381,11 @@ class CoupledDataset:
             ):
                 raise ValueError(
                     "Ocean and Atmosphere timesteps must be consistent with "
-                    f"n_steps_fast, got ocean timestep {properties.ocean.timestep} "
-                    f"and atmosphere timestep {properties.atmosphere.timestep} "
+                    f"n_steps_fast, got ocean timestep {properties.ocean_timestep} "
+                    f"and atmosphere timestep {properties.atmosphere_timestep} "
                     f"with n_steps_fast={n_steps_fast}."
                 )
+            assert self._ocean is not None
             ocean_time = self._ocean[0][1].isel(time=0).item()
             atmos_time = self._atmosphere[0][1].isel(time=0).item()
             if ocean_time != atmos_time:
@@ -376,9 +398,10 @@ class CoupledDataset:
             if properties.ice_timestep != properties.atmosphere_timestep:
                 raise ValueError(
                     "Ice and Atmosphere timesteps must be consistent, "
-                    f"got ice timestep {properties.ice.timestep} "
-                    f"and atmosphere timestep {properties.atmosphere.timestep}."
+                    f"got ice timestep {properties.ice_timestep} "
+                    f"and atmosphere timestep {properties.atmosphere_timestep}."
                 )
+            assert self._ice is not None
             ice_time = self._ice[0][1].isel(time=0).item()
             atmos_time = self._atmosphere[0][1].isel(time=0).item()
             if ice_time != atmos_time:
@@ -391,8 +414,8 @@ class CoupledDataset:
             if properties.ice_timestep != properties.atmosphere_timestep:
                 raise ValueError(
                     "Ice and Atmosphere timesteps must be consistent, "
-                    f"got ice timestep {properties.ice.timestep} "
-                    f"and atmosphere timestep {properties.atmosphere.timestep}."
+                    f"got ice timestep {properties.ice_timestep} "
+                    f"and atmosphere timestep {properties.atmosphere_timestep}."
                 )
             if (
                 properties.ocean_timestep
@@ -400,10 +423,12 @@ class CoupledDataset:
             ):
                 raise ValueError(
                     "Ocean and Atmosphere timesteps must be consistent with "
-                    f"n_steps_fast, got ocean timestep {properties.ocean.timestep} "
-                    f"and atmosphere timestep {properties.atmosphere.timestep} "
+                    f"n_steps_fast, got ocean timestep {properties.ocean_timestep} "
+                    f"and atmosphere timestep {properties.atmosphere_timestep} "
                     f"with n_steps_fast={n_steps_fast}."
                 )
+            assert self._ice is not None
+            assert self._ocean is not None
             ice_time = self._ice[0][1].isel(time=0).item()
             ocean_time = self._ocean[0][1].isel(time=0).item()
             atmos_time = self._atmosphere[0][1].isel(time=0).item()
@@ -434,22 +459,32 @@ class CoupledDataset:
     @property
     def all_ic_times(self) -> xr.CFTimeIndex:
         if self._atmosphere is None:
+            assert self._ocean is not None
             return self._ocean.sample_start_times
         elif self._ice is None:
+            assert self._ocean is not None
             return self._ocean.sample_start_times
         elif self._ocean is None:
+            assert self._ice is not None
             return self._ice.sample_start_times
         else:
+            assert self._ocean is not None
             return self._ocean.sample_start_times
 
     def __len__(self):
         if self._atmosphere is None:
+            assert self._ocean is not None
+            assert self._ice is not None
             return min([len(self._ocean), len(self._ice)])
         elif self._ice is None:
+            assert self._ocean is not None
             return min([len(self._ocean), len(self._atmosphere)])
         elif self._ocean is None:
+            assert self._ice is not None
             return min([len(self._ice), len(self._atmosphere)])
         else:
+            assert self._ocean is not None
+            assert self._ice is not None
             return min([len(self._ocean), len(self._ice), len(self._atmosphere)])
 
     def __getitem__(self, idx: int) -> CoupledDatasetItem:
@@ -467,6 +502,8 @@ class CoupledDataset:
 
     def validate_inference_length(self, max_start_index: int, max_window_len: int):
         if self._atmosphere is None:
+            assert self._ocean is not None
+            assert self._ice is not None
             try:
                 self._ocean.validate_inference_length(max_start_index, max_window_len)
             except ValueError as e:
@@ -484,6 +521,7 @@ class CoupledDataset:
                     "The ice dataset has an insufficient number of timepoints."
                 ) from e
         elif self._ice is None:
+            assert self._ocean is not None
             try:
                 self._ocean.validate_inference_length(max_start_index, max_window_len)
             except ValueError as e:
@@ -501,6 +539,7 @@ class CoupledDataset:
                     "The atmosphere dataset has an insufficient number of timepoints."
                 ) from e
         elif self._ocean is None:
+            assert self._ice is not None
             try:
                 self._ice.validate_inference_length(max_start_index, max_window_len)
             except ValueError as e:
@@ -518,6 +557,8 @@ class CoupledDataset:
                     "The atmosphere dataset has an insufficient number of timepoints."
                 ) from e
         else:
+            assert self._ocean is not None
+            assert self._ice is not None
             try:
                 self._ocean.validate_inference_length(max_start_index, max_window_len)
             except ValueError as e:

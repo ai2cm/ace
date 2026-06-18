@@ -104,6 +104,9 @@ def test_inference_dataset(
         mock_data: MockCoupledData,
         atmos_ic_time_offset: int,
     ):
+        assert batch.ocean_data is not None
+        assert batch.ice_data is not None
+        assert batch.atmosphere_data is not None
         ocean_data = batch.ocean_data.data[_OCEAN_NAME].cpu().numpy()
         ice_data = batch.ice_data.data[_ICE_NAME].cpu().numpy()
         atmos_data = batch.atmosphere_data.data[_ATMOS_NAME].cpu().numpy()
@@ -409,6 +412,9 @@ def test_no_target_inference_with_n_repeats(tmp_path):
     all_ice_times_seen = set()
     for batch_idx, batch in enumerate(batches):
         assert isinstance(batch, CoupledBatchData)
+        assert batch.atmosphere_data is not None
+        assert batch.ocean_data is not None
+        assert batch.ice_data is not None
         atmos_times = batch.atmosphere_data.time.isel(sample=0).values
         ocean_times = batch.ocean_data.time.isel(sample=0).values
         ice_times = batch.ice_data.time.isel(sample=0).values
@@ -499,12 +505,15 @@ def test_no_target_inference_with_n_repeats(tmp_path):
 
     # Last atmos time of the last batch equals IC + total rollout (catches
     # off-by-one or shift introduced by update_subset).
+    # also need assert for batches[-1].atmosphere_data
+    assert batches[-1].atmosphere_data is not None
     last_atmos_times = batches[-1].atmosphere_data.time.isel(sample=0).values
     expected_last = ic_time + _TOTAL_COUPLED_STEPS * mock_data.ocean.timestep
     assert last_atmos_times[-1] == expected_last
 
     # Last ice time of the last batch equals IC + total rollout (catches
     # off-by-one or shift introduced by update_subset).
+    assert batches[-1].ice_data is not None
     last_ice_times = batches[-1].ice_data.time.isel(sample=0).values
     expected_last = ic_time + _TOTAL_COUPLED_STEPS * mock_data.ocean.timestep
     assert last_ice_times[-1] == expected_last
@@ -536,6 +545,8 @@ def test_no_target_inference_with_n_repeats(tmp_path):
         f"this test configuration is not exercising the seam."
     )
     for batch in batches:
+        assert batch.atmosphere_data is not None
+        assert batch.ice_data is not None
         atmos_times = batch.atmosphere_data.time.isel(sample=0).values
         atmos_values = batch.atmosphere_data.data[_ATMOS_NAME][0].cpu().numpy()
         ice_times = batch.ice_data.time.isel(sample=0).values

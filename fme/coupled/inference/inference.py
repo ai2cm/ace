@@ -187,6 +187,8 @@ class InferenceConfig:
             "ocean": dataset_metadata,
             "atmosphere": dataset_metadata,
         }
+        assert data.ocean_timestep is not None
+        assert data.atmosphere_timestep is not None
         return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
             initial_condition_times=data.initial_time.to_numpy(),

@@ -246,6 +246,8 @@ class InferenceEvaluatorConfig:
             "ocean": dataset_metadata,
             "atmosphere": dataset_metadata,
         }
+        assert data.ocean_timestep is not None
+        assert data.atmosphere_timestep is not None
         return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
             initial_condition_times=data.initial_time.to_numpy(),
@@ -339,6 +341,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     aggregator_config: InferenceEvaluatorAggregatorConfig = config.aggregator
     batch = next(iter(data.loader))
+    assert batch.ocean_data is not None
     initial_time = batch.ocean_data.time.isel(time=0)
     variable_metadata = get_derived_variable_metadata() | data.variable_metadata
     dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)

@@ -624,6 +624,8 @@ class CoupledStepperConfig:
         atmosphere_parameter_initializer: ParameterInitializer | None = None,
     ):
         logging.info("Initializing coupler")
+        assert dataset_info.ocean is not None
+        assert dataset_info.atmosphere is not None
         return CoupledStepper(
             config=self,
             ocean=self._get_ocean_stepper(
@@ -725,6 +727,8 @@ class CoupledTrainOutput(TrainOutputABC):
         Args:
             initial_condition: Initial condition data.
         """
+        assert initial_condition.ocean_data is not None
+        assert initial_condition.atmosphere_data is not None
         return CoupledTrainOutput(
             total_metrics=self.total_metrics,
             ocean=self.ocean.prepend_initial_condition(
@@ -953,6 +957,7 @@ class CoupledStepper:
             )
         for name, tensor in forcings_from_ocean.items():
             # set ocean invalid points to 0 based on the ocean masking
+            assert self._ocean_spatial_mask_provider is not None
             mask = self._ocean_spatial_mask_provider.get_mask_tensor_for(name)
             if mask is not None:
                 mask = mask.expand(tensor.shape)
@@ -1056,6 +1061,10 @@ class CoupledStepper:
         forcing_data: CoupledBatchData,
         optimizer: OptimizationABC,
     ) -> Generator[ComponentStepPrediction, None, None]:
+        assert initial_condition.atmosphere_data is not None
+        assert initial_condition.ocean_data is not None
+        assert forcing_data.ocean_data is not None
+        assert forcing_data.atmosphere_data is not None
         if (
             initial_condition.atmosphere_data.as_batch_data().n_timesteps
             != self.atmosphere.n_ic_timesteps
@@ -1191,6 +1200,8 @@ class CoupledStepper:
         output_list: list[ComponentStepPrediction],
         forcing_data: CoupledBatchData,
     ) -> CoupledBatchData:
+        assert forcing_data.atmosphere_data is not None
+        assert forcing_data.ocean_data is not None
         atmos_data = process_prediction_generator_list(
             [(x.data, None) for x in output_list if x.realm == "atmosphere"],
             time=forcing_data.atmosphere_data.time[:, self.atmosphere.n_ic_timesteps :],
@@ -1246,6 +1257,8 @@ class CoupledStepper:
         Predict multiple steps forward given initial condition and reference data.
         """
         gen_data = self._predict(initial_condition, forcing, compute_derived_variables)
+        assert forcing.atmosphere_data is not None
+        assert forcing.ocean_data is not None
         atmos_forward_data = self.atmosphere.get_forward_data(
             forcing.atmosphere_data, compute_derived_variables=compute_derived_variables
         )
@@ -1872,11 +1885,15 @@ class CoupledTrainStepper(
         evaluate_all_steps: bool = False,
     ) -> list[ComponentEnsembleStepPrediction]:
         n_ensemble = self._config.n_ensemble
+        assert data.ocean_data is not None
+        assert data.atmosphere_data is not None
         data_ensemble = CoupledBatchData(
             ocean_data=data.ocean_data.broadcast_ensemble(n_ensemble),
             atmosphere_data=data.atmosphere_data.broadcast_ensemble(n_ensemble),
         )
         # get initial condition prognostic variables
+        assert data_ensemble.atmosphere_data is not None
+        assert data_ensemble.ocean_data is not None
         input_data = CoupledPrognosticState(
             atmosphere_data=data_ensemble.atmosphere_data.get_start(
                 self.atmosphere.prognostic_names, self.n_ic_timesteps
@@ -1965,6 +1982,8 @@ class CoupledTrainStepper(
                 the stochastically-sampled range toward the accumulated loss.
 
         """
+        assert data.atmosphere_data is not None
+        assert data.ocean_data is not None
         atmos_forward_data = self.atmosphere.get_forward_data(
             data.atmosphere_data,
             compute_derived_variables=False,
