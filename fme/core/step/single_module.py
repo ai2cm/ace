@@ -383,12 +383,9 @@ class SingleModuleStep(StepABC):
             if args.data_mask is not None:
                 input_norm = _apply_input_mask(input_norm, args.data_mask)
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
-            # Fail loud if a NaN survives to the network input. This only happens
-            # when an input variable contains NaN that was neither covered by
-            # data_mask nor filled by fill_nans_on_normalize, which otherwise
-            # propagates silently to a NaN loss with no clue which variable (or
-            # that masking was the cause) -- see PR #1262. Gated on grad-enabled
-            # so the no_grad inference/eval rollout hot path pays no sync cost.
+            # Fail loud if a NaN survives masking/normalization to the network
+            # input (cf. PR #1262). Gated on grad-enabled so the no_grad
+            # inference/eval rollout hot path pays no device-sync cost.
             if torch.is_grad_enabled() and torch.isnan(input_tensor).any():
                 _raise_input_nan_error(input_norm)
             if self._config.include_channel_mask_inputs:
@@ -428,15 +425,26 @@ class SingleModuleStep(StepABC):
     def get_regularizer_loss(self):
         return torch.tensor(0.0)
 
+    def train(self, mode: bool = True) -> StepABC:
+        super().train(mode)
+        self._corrector.train(mode)
+        return self
+
+    def set_epoch(self, epoch: int) -> None:
+        self._corrector.set_epoch(epoch)
+
     def get_state(self):
         """
         Returns:
             The state of the stepper.
         """
-        state = {
+        state: dict[str, Any] = {
             "module": self.module.get_state(),
             "secondary_decoder": self.secondary_decoder.get_module_state(),
         }
+        corrector_state = self._corrector.get_state()
+        if len(corrector_state) > 0:
+            state["corrector"] = corrector_state
         return state
 
     def load_state(self, state: dict[str, Any]) -> None:
@@ -453,6 +461,7 @@ class SingleModuleStep(StepABC):
         self.module.load_state(module)
         if "secondary_decoder" in state:
             self.secondary_decoder.load_module_state(state["secondary_decoder"])
+        self._corrector.load_state(state.get("corrector", {}))
 
 
 def _raise_input_nan_error(input_norm: TensorMapping) -> None:
