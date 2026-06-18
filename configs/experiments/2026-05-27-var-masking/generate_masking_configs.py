@@ -45,16 +45,17 @@ CO2_FIELD = "global_mean_co2"
 # Mask catalog: name_segment -> (mask_type_segment, base_input_dropout_without_co2)
 MASK_CATALOG: dict[str, tuple[str, dict]] = {
     f"mask{n}": ("uniform", {"kind": "uniform", "min_vars": 0, "max_vars": n})
-    for n in (0, 5, 10, 20)
+    for n in (0, 5, 10, 20, 30)
 } | {
     f"mask{rate}": ("bernoulli", {"kind": "per_variable", "rate": rate})
-    for rate in (0.055, 0.11, 0.22)
+    for rate in (0.055, 0.11, 0.22, 0.33)
 }
 
 # CO2 catalog: name_segment -> co2_rate (None = default, no override)
 CO2_CATALOG: dict[str, float | None] = {
     "co2-0.4": 0.4,
     "co2-0.8": 0.8,
+    "co2-0.9": 0.9,
     "co2-default": None,
 }
 
@@ -62,14 +63,15 @@ CO2_CATALOG: dict[str, float | None] = {
 # nc-sfno: mask dose-response at co2-default (uniform 0/5/10/20 + one bernoulli
 # robustness point), then a co2 sweep at each anchor mask. sfno: baseline only.
 # (mask_name, co2_name) pairs.
-ANCHOR_MASKS: list[str] = ["mask10", "mask0.11"]
-CO2_ABLATIONS: list[str] = ["co2-0.4", "co2-0.8"]
+ANCHOR_MASKS: list[str] = ["mask10", "mask0.11", "mask20", "mask0.22", "mask30", "mask0.33"]
+CO2_ABLATIONS: list[str] = ["co2-0.4", "co2-0.8", "co2-0.9"]
 DOSE_RESPONSE_RUNS: list[tuple[str, str]] = [
     ("mask0", "co2-default"),
     ("mask5", "co2-default"),
     ("mask10", "co2-default"),  # anchor
     ("mask20", "co2-default"),
     ("mask0.11", "co2-default"),  # bernoulli ~ uniform mask10, family check
+    ("mask0.22", "co2-default"),  # bernoulli ~ uniform mask20, family check
 ]
 # co2 sweep at each anchor mask.
 NC_SFNO_RUNS: list[tuple[str, str]] = DOSE_RESPONSE_RUNS + [
