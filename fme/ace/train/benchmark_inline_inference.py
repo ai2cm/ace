@@ -86,6 +86,7 @@ class PhaseTimer:
         self.wall = 0.0  # seconds
         self.gpu = 0.0  # seconds (CUDA-event time; 0 on CPU)
         self.count = 0
+        self.values: list[float] = []  # per-call time (gpu if cuda else wall)
 
     @contextlib.contextmanager
     def measure(self):
@@ -98,12 +99,16 @@ class PhaseTimer:
         try:
             yield
         finally:
+            dt_gpu = 0.0
             if self.use_cuda:
                 end_evt.record()
                 torch.cuda.synchronize()
-                self.gpu += start_evt.elapsed_time(end_evt) / 1000.0
-            self.wall += time.perf_counter() - t0
+                dt_gpu = start_evt.elapsed_time(end_evt) / 1000.0
+                self.gpu += dt_gpu
+            dt_wall = time.perf_counter() - t0
+            self.wall += dt_wall
             self.count += 1
+            self.values.append(dt_gpu if self.use_cuda else dt_wall)
 
     def as_dict(self) -> dict:
         return {"wall": self.wall, "gpu": self.gpu, "count": self.count}
@@ -167,6 +172,7 @@ def run_sequential(
     """Run each task on its own (mirrors run_inference, one task at a time)."""
     per_task_windows: dict[str, int] = {}
     per_task_samples: dict[str, int] = {}
+    per_task_forward_windows: dict[str, list[float]] = {}
     for task in tasks:
         aggregator = task.aggregator_factory(epoch)
         data = task.data
@@ -179,6 +185,7 @@ def run_sequential(
         ]
         loader = iter(data.loader)
         state = data.initial_condition
+        fwd_start = len(timers[FORWARD].values)
         i = 0
         while max_windows <= 0 or i < max_windows:
             with timers[DATA_LOADING].measure():
@@ -194,8 +201,13 @@ def run_sequential(
                 aggregator.record_batch(data=output)
             i += 1
         per_task_windows[task.name] = i
+        per_task_forward_windows[task.name] = list(timers[FORWARD].values[fwd_start:])
         _flush_and_summarize(task.name, aggregator, timers, epoch)
-    return {"windows": per_task_windows, "samples_per_window": per_task_samples}
+    return {
+        "windows": per_task_windows,
+        "samples_per_window": per_task_samples,
+        "forward_windows": per_task_forward_windows,
+    }
 
 
 def run_concurrent(
@@ -217,8 +229,11 @@ def run_concurrent(
     per_task_windows: dict[str, int] = {}
     per_task_samples: dict[str, int] = {}
     max_batch_samples = 0
+    forward_rounds: list[dict] = []
     for group_tasks in groups.values():
         predictor = build_predictor(stepper)
+        fwd_start = len(timers[FORWARD].values)
+        round_meta: list[dict] = []
         aggregators = {t.name: t.aggregator_factory(epoch) for t in group_tasks}
         loopers = {t.name: LazyLooper(predictor, t.data) for t in group_tasks}
         for task in group_tasks:
@@ -245,9 +260,10 @@ def run_concurrent(
                     submitted.append(name)
             if not submitted:
                 break
-            max_batch_samples = max(
-                max_batch_samples,
-                sum(per_task_samples[name] for name in submitted),
+            batch_samples = sum(per_task_samples[name] for name in submitted)
+            max_batch_samples = max(max_batch_samples, batch_samples)
+            round_meta.append(
+                {"n_active": len(submitted), "batch_samples": batch_samples}
             )
             # The first commit triggers the single batched forward pass for the
             # whole round; the rest just fetch their slice.
@@ -264,10 +280,13 @@ def run_concurrent(
 
         for task in group_tasks:
             _flush_and_summarize(task.name, aggregators[task.name], timers, epoch)
+        for meta_r, t in zip(round_meta, timers[FORWARD].values[fwd_start:]):
+            forward_rounds.append({**meta_r, "gpu": t})
     return {
         "windows": per_task_windows,
         "samples_per_window": per_task_samples,
         "max_concurrent_batch_samples": max_batch_samples,
+        "forward_rounds": forward_rounds,
     }
 
 
@@ -471,6 +490,7 @@ def _build_report(
             "tasks": meta,
         },
         "per_mode": {},
+        "per_window": {m: [r["info"] for r in results[m]] for m in modes},
     }
     phases = PHASE_ORDER + ["forward_total", "aggregator_total"]
     for m in modes:
