@@ -60,19 +60,20 @@ CO2_CATALOG: dict[str, float | None] = {
 
 # One-factor-at-a-time design. Anchor = mask10-uniform / co2-default.
 # nc-sfno: mask dose-response at co2-default (uniform 0/5/10/20 + one bernoulli
-# robustness point), then co2 sweep at the anchor mask. sfno: baseline only.
+# robustness point), then a co2 sweep at each anchor mask. sfno: baseline only.
 # (mask_name, co2_name) pairs.
-ANCHOR_MASK = "mask10"
-NC_SFNO_RUNS: list[tuple[str, str]] = [
+ANCHOR_MASKS: list[str] = ["mask10", "mask0.11"]
+CO2_ABLATIONS: list[str] = ["co2-0.4", "co2-0.8"]
+DOSE_RESPONSE_RUNS: list[tuple[str, str]] = [
     ("mask0", "co2-default"),
     ("mask5", "co2-default"),
     ("mask10", "co2-default"),  # anchor
     ("mask20", "co2-default"),
     ("mask0.11", "co2-default"),  # bernoulli ~ uniform mask10, family check
-    (ANCHOR_MASK, "co2-0.4"),
-    (ANCHOR_MASK, "co2-0.8"),
-    ("mask0.11", "co2-0.4"),
-    ("mask0.11", "co2-0.8"),
+]
+# co2 sweep at each anchor mask.
+NC_SFNO_RUNS: list[tuple[str, str]] = DOSE_RESPONSE_RUNS + [
+    (mask_name, co2_name) for mask_name in ANCHOR_MASKS for co2_name in CO2_ABLATIONS
 ]
 SFNO_RUNS: list[tuple[str, str]] = [
     ("mask0", "co2-default"),
