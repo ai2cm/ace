@@ -2612,14 +2612,14 @@ def test_step_masked_nan_input_does_not_raise():
     input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
     input_data["b"][1] = torch.nan
     data_mask = {"b": torch.tensor([True, False], dtype=torch.bool, device=DEVICE)}
-    output, _ = stepper.step(
+    output = stepper.step(
         StepArgs(
             input=input_data,
             next_step_input_data={},
             labels=None,
             data_mask=data_mask,
         )
-    )
+    ).output
     assert not torch.isnan(output["a"]).any()
 
 
