@@ -166,7 +166,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     )
         return state_copy
 
-    def get_corrector(
+    def _get_corrector(
         self,
         dataset_info: DatasetInfo,
     ) -> "OceanCorrector":
