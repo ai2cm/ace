@@ -18,6 +18,7 @@ class ValidateStepper(Protocol):
         self,
         stepper: TrainStepperABC,
         ema: EMATracker,
+        epoch: int,
     ) -> float:
         """Validate a stepper and return the validation loss."""
         ...
@@ -62,6 +63,7 @@ def run_lr_tuning_trial(
     copy_ema: Callable[[torch.nn.ModuleList], EMATracker],
     config: LRTuningConfig,
     current_lr: float,
+    epoch: int,
     validate_stepper: ValidateStepper,
 ) -> float | None:
     """
@@ -86,6 +88,10 @@ def run_lr_tuning_trial(
             current EMA state but tracking the given modules. Called twice.
         config: The LR tuning configuration.
         current_lr: The current learning rate.
+        epoch: The epoch the trial is training for. Forwarded to
+            ``validate_stepper`` so the validation data is advanced to the same
+            epoch as the trial's training forks (e.g. so an epoch-based loss
+            schedule selects the matching n_forward_steps distribution).
         validate_stepper: Callback that validates a stepper and returns the
             validation loss. Called twice (baseline and candidate).
 
@@ -118,8 +124,8 @@ def run_lr_tuning_trial(
         candidate_stepper.train_on_batch(batch, candidate_opt)
         candidate_ema(candidate_stepper.modules)
 
-    baseline_val_loss = validate_stepper(baseline_stepper, baseline_ema)
-    candidate_val_loss = validate_stepper(candidate_stepper, candidate_ema)
+    baseline_val_loss = validate_stepper(baseline_stepper, baseline_ema, epoch)
+    candidate_val_loss = validate_stepper(candidate_stepper, candidate_ema, epoch)
 
     threshold = baseline_val_loss - config.improvement_threshold * baseline_val_loss
 
