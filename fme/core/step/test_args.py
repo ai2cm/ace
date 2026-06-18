@@ -20,6 +20,10 @@ def test_apply_input_process_func_propagates_metadata():
             global_dry_air_mass=torch.ones(n_batch, 1, 1),
         ),
     )
+    input_dropout_mask = {
+        "a": torch.ones(n_batch, dtype=torch.bool),
+        "b": torch.zeros(n_batch, dtype=torch.bool),
+    }
     args = StepArgs(
         input=input_data,
         next_step_input_data=next_step,
@@ -27,6 +31,7 @@ def test_apply_input_process_func_propagates_metadata():
         data_mask=data_mask,
         stepper_state=stepper_state,
         n_ensemble=3,
+        input_dropout_mask=input_dropout_mask,
     )
 
     def double(tensors):
@@ -46,6 +51,12 @@ def test_apply_input_process_func_propagates_metadata():
         torch.testing.assert_close(result.data_mask[name], data_mask[name])
     assert result.stepper_state is stepper_state
     assert result.n_ensemble == 3
+    # input_dropout_mask is preserved unchanged, not transformed by the func.
+    assert result.input_dropout_mask is not None
+    for name in input_dropout_mask:
+        torch.testing.assert_close(
+            result.input_dropout_mask[name], input_dropout_mask[name]
+        )
 
     known_attrs = {
         "input",
@@ -54,6 +65,7 @@ def test_apply_input_process_func_propagates_metadata():
         "data_mask",
         "stepper_state",
         "n_ensemble",
+        "input_dropout_mask",
     }
     actual_attrs = {
         name

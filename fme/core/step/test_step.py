@@ -1828,3 +1828,108 @@ def test_input_dropout_ensemble_members_share_mask():
     assert (
         grouped == grouped[:, :1]
     ).all(), "All ensemble members of a base sample must see the same dropout mask"
+
+
+def _make_single_module_step(
+    input_dropout: UniformMaskingConfig | PerVariableMaskingConfig | None,
+) -> SingleModuleStep:
+    in_names = ["forcing_shared", "forcing_rad"]
+    out_names = ["diagnostic_main", "diagnostic_rad"]
+    normalization = get_network_and_loss_normalization_config(
+        names=list(set(in_names + out_names))
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+                ),
+                in_names=in_names,
+                out_names=out_names,
+                normalization=normalization,
+                input_dropout=input_dropout,
+            )
+        ),
+    )
+    step = get_step(config, DEFAULT_IMG_SHAPE)
+    assert isinstance(step, SingleModuleStep)
+    return step
+
+
+def test_make_input_dropout_mask_shape_and_dtype():
+    step = _make_single_module_step(PerVariableMaskingConfig(rate=0.5))
+    step.module.torch_module.train()
+    batch_size = 4
+    mask = step.make_input_dropout_mask(batch_size, fme.get_device())
+    assert mask is not None
+    # keyed by packed input channel names, one [batch] bool tensor each
+    assert set(mask.keys()) == set(step.in_packer.names)
+    for name in step.in_packer.names:
+        assert mask[name].shape == (batch_size,)
+        assert mask[name].dtype == torch.bool
+
+
+def test_make_input_dropout_mask_none_when_unset():
+    step = _make_single_module_step(None)
+    step.module.torch_module.train()
+    assert step.make_input_dropout_mask(4, fme.get_device()) is None
+    assert step.has_input_dropout() is False
+
+
+def test_make_input_dropout_mask_none_in_eval_mode():
+    step = _make_single_module_step(PerVariableMaskingConfig(rate=0.5))
+    step.module.torch_module.eval()
+    # configured, but eval mode disables dropout sampling
+    assert step.make_input_dropout_mask(4, fme.get_device()) is None
+    # has_input_dropout is mode-independent
+    assert step.has_input_dropout() is True
+
+
+def test_make_input_dropout_mask_includes_gmr_extras():
+    step = _make_gmr_input_dropout_step(rate=0.5, include_channel_mask_inputs=False)
+    step.module.torch_module.train()
+    mask = step.make_input_dropout_mask(2, fme.get_device())
+    assert mask is not None
+    # GMR extra sentinel channels are independently maskable
+    assert set(mask.keys()) == set(step.in_packer.names)
+    assert len(step.in_packer.names) == 4
+
+
+def test_input_dropout_mask_not_passed_to_global_mean_removal():
+    """Synthetic dropout is applied late (after GMR); GMR sees only data_mask.
+
+    Supplying input_dropout_mask via StepArgs must not change GMR's output,
+    which depends only on the real data_mask.
+    """
+    step = _make_gmr_input_dropout_step(rate=1.0, include_channel_mask_inputs=False)
+    step.module.torch_module.eval()  # disable any in-step sampling
+    n_samples = 2
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+    dropout_mask = {
+        name: torch.zeros(n_samples, dtype=torch.bool, device=fme.get_device())
+        for name in step.in_packer.names
+    }
+    out_with_mask, _ = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step,
+            labels=None,
+            input_dropout_mask=dropout_mask,
+        )
+    )
+    out_without_mask, _ = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step,
+            labels=None,
+        )
+    )
+    # Late dropout zeros normalized inputs, so outputs generally differ; the
+    # point of this test is that the step runs without GMR raising on a
+    # "missing" reference field, because GMR never receives the synthetic mask.
+    assert set(out_with_mask) == set(out_without_mask)

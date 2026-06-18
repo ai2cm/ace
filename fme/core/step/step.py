@@ -335,6 +335,33 @@ class StepABC(abc.ABC):
         """
         pass
 
+    def make_input_dropout_mask(
+        self, batch_size: int, device: torch.device
+    ) -> TensorMapping | None:
+        """
+        Sample a synthetic input-dropout presence mask, if configured.
+
+        The returned mapping is keyed by this Step's packed input channel
+        names, with ``[batch_size]`` bool values (True = present, False =
+        synthetically dropped). This is a sampling hook, not application: the
+        sampled mask is passed back to the Step via
+        ``StepArgs.input_dropout_mask``.
+
+        Returns ``None`` when input dropout is not configured, or when the
+        Step's module is in eval mode (dropout is training-only). Because the
+        result is mode-dependent and random, use ``has_input_dropout`` to
+        detect configuration instead of this method.
+        """
+        return None
+
+    def has_input_dropout(self) -> bool:
+        """
+        Whether this Step has input dropout configured.
+
+        Non-random and mode-independent, unlike ``make_input_dropout_mask``.
+        """
+        return False
+
     @abc.abstractmethod
     def step(
         self: SelfType,

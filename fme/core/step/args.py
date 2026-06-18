@@ -31,6 +31,14 @@ class StepArgs:
             with ensemble members interleaved (matching repeat_interleave).
             Used to ensure all ensemble members of a base sample share the
             same variable mask.
+        input_dropout_mask: Synthetic training-only input presence mask. Keys
+            are the receiving Step's packed input channel names, values are
+            ``[n_batch]`` bool tensors where True means present and False means
+            synthetically dropped. Distinct from ``data_mask`` (which marks
+            genuinely-absent variables consumed by preprocessing and loss
+            masking): this mask only corrupts inputs to the network. It is
+            preserved through input processing but not transformed by it, and
+            is applied late inside the Step, just before the module call.
     """
 
     def __init__(
@@ -41,6 +49,7 @@ class StepArgs:
         data_mask: TensorMapping | None = None,
         stepper_state: StepperState | None = None,
         n_ensemble: int = 1,
+        input_dropout_mask: TensorMapping | None = None,
     ):
         self.input = input
         self.next_step_input_data = next_step_input_data
@@ -48,6 +57,7 @@ class StepArgs:
         self.data_mask = data_mask
         self.stepper_state = stepper_state
         self.n_ensemble = n_ensemble
+        self.input_dropout_mask = input_dropout_mask
 
     def apply_input_process_func(
         self, func: Callable[[TensorMapping], TensorMapping]
@@ -61,4 +71,5 @@ class StepArgs:
             data_mask=self.data_mask,
             stepper_state=self.stepper_state,
             n_ensemble=self.n_ensemble,
+            input_dropout_mask=self.input_dropout_mask,
         )

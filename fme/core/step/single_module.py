@@ -387,6 +387,8 @@ class SingleModuleStep(StepABC):
         def network_call(input_norm: TensorDict) -> TensorDict:
             if args.data_mask is not None:
                 input_norm = _apply_input_mask(input_norm, args.data_mask)
+            if args.input_dropout_mask is not None:
+                input_norm = _apply_input_mask(input_norm, args.input_dropout_mask)
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
             channel_mask: torch.Tensor | None = None
             if (
@@ -406,7 +408,10 @@ class SingleModuleStep(StepABC):
                 ).to(dtype=input_tensor.dtype)
             if self._config.include_channel_mask_inputs:
                 mask_dict = _build_channel_mask_dict(
-                    self.in_packer.names, args.data_mask, input_tensor
+                    self.in_packer.names,
+                    args.data_mask,
+                    input_tensor,
+                    args.input_dropout_mask,
                 )
                 mask_tensor = self.in_packer.pack(mask_dict, axis=self.CHANNEL_DIM)
                 if channel_mask is not None:
@@ -441,6 +446,20 @@ class SingleModuleStep(StepABC):
             data_mask=args.data_mask,
             stepper_state=args.stepper_state,
         )
+
+    def make_input_dropout_mask(
+        self, batch_size: int, device: torch.device
+    ) -> TensorMapping | None:
+        if self._config.input_dropout is None:
+            return None
+        if not self.module.torch_module.training:
+            return None
+        names = self.in_packer.names
+        mask = self._config.input_dropout.sample_mask(len(names), batch_size, device)
+        return {name: mask[:, i] for i, name in enumerate(names)}
+
+    def has_input_dropout(self) -> bool:
+        return self._config.input_dropout is not None
 
     def get_regularizer_loss(self):
         return torch.tensor(0.0)
@@ -492,6 +511,7 @@ def _build_channel_mask_dict(
     in_names: list[str],
     data_mask: TensorMapping | None,
     packed_input: torch.Tensor,
+    input_dropout_mask: TensorMapping | None = None,
 ) -> TensorDict:
     """Build a dict of per-variable spatial mask tensors.
 
@@ -500,10 +520,17 @@ def _build_channel_mask_dict(
     The caller is responsible for packing this dict into the correct
     channel order.
 
+    The indicator value is the AND-combined presence of the real
+    ``data_mask`` (genuinely-absent variables) and the synthetic
+    ``input_dropout_mask``: a channel is present only if it is both really
+    present and not synthetically dropped.
+
     Args:
-        in_names: Input variable names.
+        in_names: Packed input channel names (incl. GMR extra sentinels).
         data_mask: Per-variable boolean masks of shape ``[batch]``, or None.
         packed_input: The packed input tensor, used to infer shape and device.
+        input_dropout_mask: Per-channel synthetic dropout presence masks of
+            shape ``[batch]`` keyed by packed channel name, or None.
     """
     batch = packed_input.shape[0]
     spatial = packed_input.shape[-2:]
@@ -516,10 +543,18 @@ def _build_channel_mask_dict(
         source = extra_channel_source_field(name)
         lookup_name = source if source is not None else name
         if data_mask is not None and lookup_name in data_mask:
-            mask_1d = data_mask[lookup_name].to(device=device, dtype=torch.float)
-            result[name] = mask_1d.view(batch, 1, 1).expand(batch, *spatial)
+            real = data_mask[lookup_name].to(device=device).bool()
         else:
-            result[name] = torch.ones(batch, *spatial, device=device)
+            real = torch.ones(batch, device=device, dtype=torch.bool)
+        # Synthetic dropout is keyed by packed channel name directly (GMR
+        # extras are independently maskable), not by the source field.
+        if input_dropout_mask is not None and name in input_dropout_mask:
+            synthetic = input_dropout_mask[name].to(device=device).bool()
+            combined = real & synthetic
+        else:
+            combined = real
+        mask_1d = combined.to(dtype=torch.float)
+        result[name] = mask_1d.view(batch, 1, 1).expand(batch, *spatial)
     return result
 
 

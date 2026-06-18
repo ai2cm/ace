@@ -918,6 +918,14 @@ class Stepper:
         """
         return self._step_obj.prescribe_sst(mask_data, gen_data, target_data)
 
+    def make_input_dropout_mask(
+        self, batch_size: int, device: torch.device
+    ) -> TensorMapping | None:
+        return self._step_obj.make_input_dropout_mask(batch_size, device)
+
+    def has_input_dropout(self) -> bool:
+        return self._step_obj.has_input_dropout()
+
     @property
     def training_dataset_info(self) -> DatasetInfo:
         return self._dataset_info
