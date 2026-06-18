@@ -7,32 +7,25 @@ import torch
 @dataclasses.dataclass
 class UniformMaskingConfig:
     """
-    Masks a uniformly sampled count of channels per sample.
+    Masks a uniformly sampled count of masked variables per sample.
 
     Parameters:
-        min_vars: Minimum number of channels to mask. Defaults to 1.
-        max_vars: Maximum number of channels to mask. "max" resolves to the
-            total number of input channels.
+        max_masked_vars: Maximum number of masked variables. "max" resolves to
+            the total number of input channels. The number of masked variables
+            is sampled uniformly from ``[0, max_masked_vars]`` per sample, so a
+            sample may have no masked variables.
     """
 
     kind: Literal["uniform"] = "uniform"
-    min_vars: int = 1
-    max_vars: int | str = "max"
+    max_masked_vars: int | str = "max"
 
     def __post_init__(self):
-        if not isinstance(self.min_vars, int) or self.min_vars < 0:
-            raise ValueError(
-                f"min_vars must be a non-negative int, got {self.min_vars!r}"
-            )
-        if self.max_vars != "max" and (
-            not isinstance(self.max_vars, int) or self.max_vars < 0
+        if self.max_masked_vars != "max" and (
+            not isinstance(self.max_masked_vars, int) or self.max_masked_vars < 0
         ):
             raise ValueError(
-                f"max_vars must be a non-negative int or 'max', got {self.max_vars!r}"
-            )
-        if isinstance(self.max_vars, int) and self.min_vars > self.max_vars:
-            raise ValueError(
-                f"min_vars ({self.min_vars}) must be <= max_vars ({self.max_vars})"
+                "max_masked_vars must be a non-negative int or 'max', got "
+                f"{self.max_masked_vars!r}"
             )
 
     def sample_mask(
@@ -40,29 +33,24 @@ class UniformMaskingConfig:
         n_channels: int,
         batch_size: int,
         device: torch.device,
-        n_ensemble: int = 1,
     ) -> torch.Tensor:
         """
         Sample a boolean presence mask of shape ``[batch_size, n_channels]``.
 
         ``True`` means the channel is present; ``False`` means it is dropped.
-
-        When ``n_ensemble > 1``, masks are sampled for ``batch_size //
-        n_ensemble`` base samples and then repeated so that every ensemble
-        member belonging to the same base sample receives the same mask.
+        The number of masked variables per sample is drawn uniformly from
+        ``[0, max_masked_vars]``.
         """
-        base_batch_size = _get_base_batch_size(batch_size, n_ensemble)
-        mask = _sample_uniform(self, n_channels, base_batch_size, device)
-        return _repeat_ensemble_mask(mask, n_ensemble)
+        return _sample_uniform(self, n_channels, batch_size, device)
 
 
 @dataclasses.dataclass
 class PerVariableMaskingConfig:
     """
-    Masks each channel independently with a fixed Bernoulli rate.
+    Masks each variable independently with a fixed Bernoulli rate.
 
     Parameters:
-        rate: Probability that any single channel is masked for a given sample.
+        rate: Probability that any single variable is masked for a given sample.
     """
 
     kind: Literal["per_variable"] = "per_variable"
@@ -77,36 +65,16 @@ class PerVariableMaskingConfig:
         n_channels: int,
         batch_size: int,
         device: torch.device,
-        n_ensemble: int = 1,
     ) -> torch.Tensor:
         """
         Sample a boolean presence mask of shape ``[batch_size, n_channels]``.
 
         ``True`` means the channel is present; ``False`` means it is dropped.
-
-        When ``n_ensemble > 1``, masks are sampled for ``batch_size //
-        n_ensemble`` base samples and then repeated so that every ensemble
-        member belonging to the same base sample receives the same mask.
         """
-        base_batch_size = _get_base_batch_size(batch_size, n_ensemble)
-        mask = _sample_per_variable(self, n_channels, base_batch_size, device)
-        return _repeat_ensemble_mask(mask, n_ensemble)
+        return _sample_per_variable(self, n_channels, batch_size, device)
 
 
 VariableMaskingConfig = UniformMaskingConfig | PerVariableMaskingConfig
-
-
-def _get_base_batch_size(batch_size: int, n_ensemble: int) -> int:
-    if batch_size % n_ensemble != 0:
-        raise ValueError(
-            f"batch_size ({batch_size}) must be divisible by n_ensemble ({n_ensemble})"
-        )
-    return batch_size // n_ensemble
-
-
-def _repeat_ensemble_mask(mask: torch.Tensor, n_ensemble: int) -> torch.Tensor:
-    """Repeat each row of mask n_ensemble times (interleaved)."""
-    return torch.repeat_interleave(mask, n_ensemble, dim=0)
 
 
 def _sample_uniform(
@@ -115,12 +83,14 @@ def _sample_uniform(
     batch_size: int,
     device: torch.device,
 ) -> torch.Tensor:
-    min_n = config.min_vars
-    max_n = n_channels if config.max_vars == "max" else int(config.max_vars)
+    max_n = (
+        n_channels if config.max_masked_vars == "max" else int(config.max_masked_vars)
+    )
     max_n = min(max_n, n_channels)
-    # For each sample, draw a random count then assign random ranks to channels.
-    # Channels whose rank < n_masks[i] are masked (False); the rest are kept (True).
-    n_masks = torch.randint(min_n, max_n + 1, (batch_size,), device=device)
+    # For each sample, draw a random count of masked variables in [0, max_n]
+    # then assign random ranks to channels. Channels whose rank < n_masks[i]
+    # are masked (False); the rest are kept (True).
+    n_masks = torch.randint(0, max_n + 1, (batch_size,), device=device)
     noise = torch.rand(batch_size, n_channels, device=device)
     # rank[i, j] = ordinal rank of channel j within sample i (0 = first masked)
     rank = noise.argsort(dim=1).argsort(dim=1)

@@ -16,39 +16,43 @@ def test_per_variable_masking_config_rate_validation():
 
 
 def test_uniform_masking_config_validation():
-    with pytest.raises(ValueError, match="min_vars"):
-        UniformMaskingConfig(min_vars=-1)
-    with pytest.raises(ValueError, match="max_vars"):
-        UniformMaskingConfig(max_vars=-1)
-    with pytest.raises(ValueError, match="min_vars"):
-        UniformMaskingConfig(min_vars=5, max_vars=2)
+    with pytest.raises(ValueError, match="max_masked_vars"):
+        UniformMaskingConfig(max_masked_vars=-1)
 
 
 def test_uniform_mask_shape_and_dtype():
-    config = UniformMaskingConfig(min_vars=1, max_vars=3)
+    config = UniformMaskingConfig(max_masked_vars=3)
     mask = config.sample_mask(n_channels=10, batch_size=4, device=torch.device("cpu"))
     assert mask.shape == (4, 10)
     assert mask.dtype == torch.bool
 
 
 def test_uniform_mask_counts_in_range():
-    config = UniformMaskingConfig(min_vars=2, max_vars=4)
+    config = UniformMaskingConfig(max_masked_vars=4)
     n_channels = 8
     batch_size = 64
     mask = config.sample_mask(n_channels, batch_size, torch.device("cpu"))
-    # number of masked (False) channels per sample should be in [2, 4]
+    # number of masked (False) variables per sample should be in [0, 4]
     n_masked = (~mask).sum(dim=1)
-    assert (n_masked >= 2).all()
+    assert (n_masked >= 0).all()
     assert (n_masked <= 4).all()
 
 
-def test_uniform_mask_defaults_min_max():
+def test_uniform_mask_minimum_masked_count_is_zero():
+    """A window may now have no masked variables (min count dropped to 0)."""
+    config = UniformMaskingConfig(max_masked_vars=2)
+    mask = config.sample_mask(n_channels=5, batch_size=512, device=torch.device("cpu"))
+    n_masked = (~mask).sum(dim=1)
+    assert (n_masked == 0).any(), "some samples should have zero masked variables"
+
+
+def test_uniform_mask_defaults_max():
     n_channels = 5
     batch_size = 16
     config = UniformMaskingConfig()
     mask = config.sample_mask(n_channels, batch_size, torch.device("cpu"))
     n_masked = (~mask).sum(dim=1)
-    assert (n_masked >= 1).all()
+    assert (n_masked >= 0).all()
     assert (n_masked <= n_channels).all()
 
 
@@ -69,46 +73,6 @@ def test_per_variable_mask_rate_one_drops_all():
     config = PerVariableMaskingConfig(rate=1.0)
     mask = config.sample_mask(n_channels=20, batch_size=32, device=torch.device("cpu"))
     assert not mask.any()
-
-
-def test_uniform_mask_ensemble_members_share_mask():
-    n_samples, n_ensemble, n_channels = 6, 3, 8
-    config = UniformMaskingConfig(min_vars=1, max_vars=3)
-    mask = config.sample_mask(
-        n_channels,
-        batch_size=n_samples * n_ensemble,
-        device=torch.device("cpu"),
-        n_ensemble=n_ensemble,
-    )
-    assert mask.shape == (n_samples * n_ensemble, n_channels)
-    grouped = mask.view(n_samples, n_ensemble, n_channels)
-    assert (
-        grouped == grouped[:, :1, :]
-    ).all(), "All ensemble members of a base sample must share the same mask"
-
-
-def test_per_variable_mask_ensemble_members_share_mask():
-    n_samples, n_ensemble, n_channels = 6, 3, 8
-    config = PerVariableMaskingConfig(rate=0.5)
-    mask = config.sample_mask(
-        n_channels,
-        batch_size=n_samples * n_ensemble,
-        device=torch.device("cpu"),
-        n_ensemble=n_ensemble,
-    )
-    assert mask.shape == (n_samples * n_ensemble, n_channels)
-    grouped = mask.view(n_samples, n_ensemble, n_channels)
-    assert (
-        grouped == grouped[:, :1, :]
-    ).all(), "All ensemble members of a base sample must share the same mask"
-
-
-def test_sample_mask_raises_on_indivisible_batch():
-    config = UniformMaskingConfig()
-    with pytest.raises(ValueError, match="divisible"):
-        config.sample_mask(
-            n_channels=4, batch_size=7, device=torch.device("cpu"), n_ensemble=3
-        )
 
 
 def test_variable_masking_config_is_union_of_sub_configs():
