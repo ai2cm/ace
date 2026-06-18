@@ -24,7 +24,7 @@ CONFIGS = sorted(
     path.name
     for path in HERE.glob("*.yaml")
     if path.name.startswith("ace-train-config-4deg-AIMIP-")
-    and ("nc-swin" in path.name or "hybrid-swin" in path.name)
+    and ("sfno" in path.name)
 )
 
 
