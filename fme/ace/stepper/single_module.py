@@ -1689,11 +1689,7 @@ class TrainStepper(
                 "Initial condition and forcing data must have the same labels, "
                 f"got {input_batch_data.labels} and {data.labels}."
             )
-        # Sample the synthetic input-dropout mask on the pre-broadcast (n_base)
-        # batch, then repeat-interleave it to the folded ensemble batch so all
-        # ensemble members of a base sample share the same mask. The hook is
-        # called unconditionally: it returns None when input dropout is unset
-        # or when the modules are in eval mode (e.g. NullOptimization).
+        # Sample and broadcast the synthetic input-dropout mask for the ensemble batch.
         sample_tensor = next(iter(input_batch_data.data.values()))
         input_dropout_mask = _repeat_interleaved_tensor_mapping(
             self._stepper.make_input_dropout_mask(

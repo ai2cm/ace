@@ -915,7 +915,6 @@ class CoupledStepper:
                 data=atmos_ic_data,
                 time=forcing_ic_batch.time,
                 labels=forcing_ic_batch.labels,
-                n_ensemble=forcing_ic_batch.n_ensemble,
             )
         )
 
@@ -1096,7 +1095,6 @@ class CoupledStepper:
                 ),
                 time=atmos_window.time,
                 labels=atmos_window.labels,
-                n_ensemble=atmos_window.n_ensemble,
             )
             # prescribe the initial condition SST state
             atmos_ic_state = self._prescribe_ic_sst(
@@ -1145,7 +1143,6 @@ class CoupledStepper:
                 ),
                 time=ocean_window.time,
                 labels=ocean_window.labels,
-                n_ensemble=ocean_window.n_ensemble,
             )
             # predict and yield a single ocean step
             ocean_step, _ = next(
@@ -1176,7 +1173,6 @@ class CoupledStepper:
                         time=slice(-self.atmosphere.n_ic_timesteps, None)
                     ),
                     labels=atmos_window.labels,
-                    n_ensemble=atmos_window.n_ensemble,
                 )
             )
             ocean_ic_data = {
@@ -1187,7 +1183,6 @@ class CoupledStepper:
                     data=optimizer.detach_if_using_gradient_accumulation(ocean_ic_data),
                     time=ocean_window.time.isel(time=slice(-self.n_ic_timesteps, None)),
                     labels=ocean_window.labels,
-                    n_ensemble=ocean_window.n_ensemble,
                 )
             )
 

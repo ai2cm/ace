@@ -217,8 +217,7 @@ class TorchDistributed(DistributedBackend):
         return tensor
 
     def broadcast_spatial(self, tensor: torch.Tensor) -> torch.Tensor:
-        # Data-parallel only (no tiles): every rank holds distinct samples, so
-        # no agreement across a spatial group is needed.
+        # No-op: data-parallel mode, no spatial communication needed.
         return tensor
 
     def weighted_mean(

@@ -399,10 +399,7 @@ class ModelTorchDistributed(DistributedBackend):
 
     def broadcast_spatial(self, tensor: torch.Tensor) -> torch.Tensor:
         if self._h_size > 1 or self._w_size > 1:
-            # Overwrite co-ranks' values with the spatial-group root's so the
-            # tensor is identical across tiles of the same sample. Broadcast
-            # over the spatial group only, never the whole world, so
-            # data-parallel ranks keep their distinct values.
+            # Broadcast tensor over spatial group so all tiles get the root's value.
             src = torch.distributed.get_global_rank(self._spatial_group, 0)
             torch.distributed.broadcast(tensor, src, group=self._spatial_group)
         return tensor

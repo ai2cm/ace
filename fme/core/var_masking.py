@@ -87,12 +87,10 @@ def _sample_uniform(
         n_channels if config.max_masked_vars == "max" else int(config.max_masked_vars)
     )
     max_n = min(max_n, n_channels)
-    # For each sample, draw a random count of masked variables in [0, max_n]
-    # then assign random ranks to channels. Channels whose rank < n_masks[i]
-    # are masked (False); the rest are kept (True).
+    # Draw a random count of masked vars per sample in [0, max_n].
     n_masks = torch.randint(0, max_n + 1, (batch_size,), device=device)
     noise = torch.rand(batch_size, n_channels, device=device)
-    # rank[i, j] = ordinal rank of channel j within sample i (0 = first masked)
+    # rank[i, j]: ordinal rank of channel j in sample i.
     rank = noise.argsort(dim=1).argsort(dim=1)
     return rank >= n_masks.unsqueeze(1)
 
