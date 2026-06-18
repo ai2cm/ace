@@ -306,6 +306,14 @@ class MultiCallStep(StepABC):
     def has_input_dropout(self) -> bool:
         return self._wrapped_step.has_input_dropout()
 
+    def train(self, mode: bool = True) -> StepABC:
+        super().train(mode)
+        self._wrapped_step.train(mode)
+        return self
+
+    def set_epoch(self, epoch: int) -> None:
+        self._wrapped_step.set_epoch(epoch)
+
     def step(
         self,
         args: StepArgs,

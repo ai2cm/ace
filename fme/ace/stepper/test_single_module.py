@@ -2237,6 +2237,79 @@ def test_get_serialized_stepper_vertical_coordinate():
     assert isinstance(vertical_coordinate, VerticalCoordinate)
 
 
+def _get_scheduled_force_positive_stepper(corrector_disabled_epochs: int) -> Stepper:
+    return _get_stepper(
+        ["a"],
+        ["a"],
+        corrector=AtmosphereCorrectorConfig(
+            force_positive_names=["a"],
+            corrector_disabled_epochs=corrector_disabled_epochs,
+        ),
+    )
+
+
+def _step_negative_input(stepper: Stepper) -> tuple[torch.Tensor, torch.Tensor]:
+    """Step on all-negative input and return (output, raw prediction).
+
+    The stepper adds one to its input, so the raw prediction is negative
+    everywhere and the force-positive corrector clamps it to zero.
+    """
+    input_data = {"a": torch.full((3, 5, 5), -5.0, device=DEVICE)}
+    output, _ = stepper.step(
+        StepArgs(input=input_data, next_step_input_data={}, labels=None)
+    )
+    return output["a"], input_data["a"] + 1
+
+
+def test_scheduled_corrector_disabled_during_first_epoch():
+    stepper = _get_scheduled_force_positive_stepper(corrector_disabled_epochs=1)
+
+    stepper.set_train()
+    stepper.set_epoch(1)
+    output, raw_prediction = _step_negative_input(stepper)
+    torch.testing.assert_close(output, raw_prediction)
+
+    # the corrector is still applied in eval mode (validation/inference)
+    stepper.set_eval()
+    output, raw_prediction = _step_negative_input(stepper)
+    torch.testing.assert_close(output, torch.zeros_like(raw_prediction))
+
+    stepper.set_train()
+    stepper.set_epoch(2)
+    output, raw_prediction = _step_negative_input(stepper)
+    torch.testing.assert_close(output, torch.zeros_like(raw_prediction))
+
+
+def test_unwrapped_corrector_applied_in_train_mode():
+    stepper = _get_stepper(
+        ["a"],
+        ["a"],
+        corrector=AtmosphereCorrectorConfig(force_positive_names=["a"]),
+    )
+    stepper.set_train()
+    output, raw_prediction = _step_negative_input(stepper)
+    torch.testing.assert_close(output, torch.zeros_like(raw_prediction))
+
+
+def test_scheduled_corrector_disabled_state_restored_on_resume():
+    stepper = _get_scheduled_force_positive_stepper(corrector_disabled_epochs=1)
+    stepper.set_train()
+    stepper.set_epoch(2)
+    state = stepper.get_state()
+
+    # a freshly-built stepper assumes the first epoch, so the corrector is
+    # disabled for train-mode steps until load_state restores the state of
+    # the interrupted epoch (mid-epoch resume does not call set_epoch)
+    resumed = _get_scheduled_force_positive_stepper(corrector_disabled_epochs=1)
+    resumed.set_train()
+    output, raw_prediction = _step_negative_input(resumed)
+    torch.testing.assert_close(output, raw_prediction)
+
+    resumed.load_state(state)
+    output, raw_prediction = _step_negative_input(resumed)
+    torch.testing.assert_close(output, torch.zeros_like(raw_prediction))
+
+
 def _get_stepper_with_input_masking(
     dataset_info_has_spatial_mask_provider: bool = True,
 ):
@@ -2681,6 +2754,106 @@ def test_train_on_batch_masked_variable_has_zero_loss_count():
     assert stepped.per_channel_losses is not None
     assert stepped.per_channel_losses["b"].count == 0
     assert stepped.per_channel_losses["a"].count == n_samples
+
+
+def test_train_on_batch_unmasked_nan_forcing_raises():
+    """A NaN forcing not covered by data_mask raises a located error.
+
+    Without the guard this silently propagates to a NaN loss with no
+    indication that an unmasked forcing variable was the cause (cf. PR #1262).
+    """
+    n_samples = 2
+    data: BatchData = get_data(["a", "b"], n_samples=n_samples, n_time=2).data
+    data.data["b"][1] = torch.nan  # NaN forcing, no data_mask to cover it
+    config = _get_stepper_config(["a", "b"], ["a"], module_name="ChannelSum")
+    stepper = _get_train_stepper(config, loss=StepLossConfig(type="MSE"))
+    with pytest.raises(ValueError, match=r"NaN found in network input.*\bb\b"):
+        stepper.train_on_batch(data=data, optimization=NullOptimization())
+
+
+def test_step_unmasked_nan_input_raises():
+    """A NaN input not covered by data_mask raises a located error in step()."""
+    stepper = _get_stepper(["a", "b"], ["a"], module_name="ChannelSum")
+    n_samples = 2
+    input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
+    input_data["b"][1] = torch.nan
+    with pytest.raises(ValueError, match=r"NaN found in network input.*\bb\b"):
+        stepper.step(StepArgs(input=input_data, next_step_input_data={}, labels=None))
+
+
+def test_step_masked_nan_input_does_not_raise():
+    """A NaN input covered by data_mask is zeroed, so the guard does not fire."""
+    stepper = _get_stepper(["a", "b"], ["a"], module_name="ChannelSum")
+    n_samples = 2
+    input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
+    input_data["b"][1] = torch.nan
+    data_mask = {"b": torch.tensor([True, False], dtype=torch.bool, device=DEVICE)}
+    output, _ = stepper.step(
+        StepArgs(
+            input=input_data,
+            next_step_input_data={},
+            labels=None,
+            data_mask=data_mask,
+        )
+    )
+    assert not torch.isnan(output["a"]).any()
+
+
+def test_train_on_batch_masked_output_only_variable_has_zero_loss_count():
+    """Masked output-only variable contributes 0 samples to loss."""
+    n_samples = 4
+    data = get_data(["a", "b"], n_samples=n_samples, n_time=2).data
+    data.data_mask = {
+        "a": torch.ones(n_samples, dtype=torch.bool, device=DEVICE),
+        "b": torch.zeros(n_samples, dtype=torch.bool, device=DEVICE),
+    }
+    config = _get_stepper_config(["a"], ["a", "b"], module_name="RepeatChannel")
+    stepper = _get_train_stepper(config, loss=StepLossConfig(type="MSE"))
+    stepped = stepper.train_on_batch(data=data, optimization=NullOptimization())
+    assert stepped.per_channel_losses is not None
+    assert stepped.per_channel_losses["b"].count == 0
+    assert stepped.per_channel_losses["a"].count == n_samples
+
+
+def test_train_on_batch_masked_forcing_repeats_mask_across_ensemble():
+    """NaN forcing for a masked sample does not produce NaN loss in ensemble."""
+    n_samples, n_ensemble = 2, 2
+    data = get_data(["a", "b"], n_samples=n_samples, n_time=2).data
+    data.data["b"][1] = torch.nan
+    data.data_mask = {"b": torch.tensor([True, False], dtype=torch.bool, device=DEVICE)}
+    config = _get_stepper_config(["a", "b"], ["a"], module_name="ChannelSum")
+    stepper = _get_train_stepper(
+        config,
+        loss=StepLossConfig(
+            type="EnsembleLoss",
+            kwargs={"crps_weight": 1.0, "energy_score_weight": 0.0},
+        ),
+        n_ensemble=n_ensemble,
+    )
+    stepped = stepper.train_on_batch(data=data, optimization=NullOptimization())
+    assert not torch.isnan(stepped.metrics["loss"])
+
+
+def test_train_on_batch_unmasked_nan_forcing_raises_in_ensemble():
+    """NaN forcing without a mask raises a located error in ensemble training.
+
+    Before the network-input guard (PR #1297) this silently propagated to a
+    NaN loss; the guard now raises a located error instead.
+    """
+    n_samples, n_ensemble = 2, 2
+    data = get_data(["a", "b"], n_samples=n_samples, n_time=2).data
+    data.data["b"][1] = torch.nan
+    config = _get_stepper_config(["a", "b"], ["a"], module_name="ChannelSum")
+    stepper = _get_train_stepper(
+        config,
+        loss=StepLossConfig(
+            type="EnsembleLoss",
+            kwargs={"crps_weight": 1.0, "energy_score_weight": 0.0},
+        ),
+        n_ensemble=n_ensemble,
+    )
+    with pytest.raises(ValueError, match=r"NaN found in network input.*\bb\b"):
+        stepper.train_on_batch(data=data, optimization=NullOptimization())
 
 
 def test_predict_with_data_mask_zeros_masked_forcing():
