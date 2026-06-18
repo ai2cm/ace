@@ -390,22 +390,6 @@ class SingleModuleStep(StepABC):
             if args.input_dropout_mask is not None:
                 input_norm = _apply_input_mask(input_norm, args.input_dropout_mask)
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
-            channel_mask: torch.Tensor | None = None
-            if (
-                self._config.input_dropout is not None
-                and self.module.torch_module.training
-            ):
-                batch_size = input_tensor.shape[0]
-                n_channels = input_tensor.shape[self.CHANNEL_DIM]
-                channel_mask = self._config.input_dropout.sample_mask(
-                    n_channels,
-                    batch_size,
-                    input_tensor.device,
-                    n_ensemble=args.n_ensemble,
-                )
-                input_tensor = input_tensor * channel_mask.view(
-                    batch_size, n_channels, 1, 1
-                ).to(dtype=input_tensor.dtype)
             if self._config.include_channel_mask_inputs:
                 mask_dict = _build_channel_mask_dict(
                     self.in_packer.names,
@@ -414,10 +398,6 @@ class SingleModuleStep(StepABC):
                     args.input_dropout_mask,
                 )
                 mask_tensor = self.in_packer.pack(mask_dict, axis=self.CHANNEL_DIM)
-                if channel_mask is not None:
-                    mask_tensor = mask_tensor * channel_mask.view(
-                        channel_mask.shape[0], n_channels, 1, 1
-                    ).to(dtype=mask_tensor.dtype)
                 input_tensor = torch.cat(
                     [input_tensor, mask_tensor], dim=self.CHANNEL_DIM
                 )

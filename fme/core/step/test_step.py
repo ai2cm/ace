@@ -24,6 +24,7 @@ from fme.core.step.args import StepArgs
 from fme.core.step.global_mean_removal import (
     PerChannelGlobalMeanRemovalConfig,
     SharedGlobalMeanRemovalConfig,
+    extra_channel_source_field,
 )
 from fme.core.step.multi_call import MultiCallConfig, MultiCallStepConfig
 from fme.core.step.secondary_decoder import SecondaryDecoderConfig
@@ -1523,137 +1524,159 @@ def test_step_shared_global_mean_removal_raises_on_masked_reference():
         )
 
 
-def _make_input_dropout_step(
-    input_dropout: UniformMaskingConfig | PerVariableMaskingConfig,
-) -> SingleModuleStep:
-    in_names = ["forcing_shared", "forcing_rad"]
-    out_names = ["diagnostic_main", "diagnostic_rad"]
-    normalization = get_network_and_loss_normalization_config(
-        names=list(set(in_names + out_names))
-    )
-    config = StepSelector(
-        type="single_module",
-        config=dataclasses.asdict(
-            SingleModuleStepConfig(
-                builder=ModuleSelector(
-                    type="SphericalFourierNeuralOperatorNet",
-                    config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
-                ),
-                in_names=in_names,
-                out_names=out_names,
-                normalization=normalization,
-                input_dropout=input_dropout,
-            )
-        ),
-    )
-    step = get_step(config, DEFAULT_IMG_SHAPE)
-    assert isinstance(step, SingleModuleStep)
-    return step
+def _full_drop_mask(step: SingleModuleStep, n_samples: int) -> TensorDict:
+    """A concrete input_dropout mask that drops every packed input channel."""
+    return {
+        name: torch.zeros(n_samples, dtype=torch.bool, device=fme.get_device())
+        for name in step.in_packer.names
+    }
 
 
-def test_input_dropout_disabled_in_eval_mode():
-    """Output is deterministic in eval mode regardless of input_dropout config."""
-    step = _make_input_dropout_step(UniformMaskingConfig(min_vars=1, max_vars=1))
-    step.module.torch_module.eval()
-    n_samples = 4
-    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
-    next_step = get_tensor_dict(
-        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
-    )
-    out1, _ = step.step(
-        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
-    )
-    out2, _ = step.step(
-        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
-    )
-    for name in step.out_names:
-        torch.testing.assert_close(out1[name], out2[name])
+def test_input_dropout_mask_zeros_inputs():
+    """A supplied input_dropout_mask deterministically zeros masked inputs.
 
-
-def test_input_dropout_active_in_train_mode():
-    """With rate=1.0 all inputs are zeroed, so outputs differ from no-dropout."""
-    step = _make_input_dropout_step(PerVariableMaskingConfig(rate=1.0))
-    step.module.torch_module.train()
-    n_samples = 4
-    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
-    next_step = get_tensor_dict(
-        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
-    )
-
-    step_no_dropout = _make_input_dropout_step(PerVariableMaskingConfig(rate=0.0))
-    step_no_dropout.module.torch_module.train()
-    # Copy weights so only the masking differs
-    step_no_dropout.module.torch_module.load_state_dict(
-        step.module.torch_module.state_dict()
-    )
-
-    out_dropout, _ = step.step(
-        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
-    )
-    out_no_dropout, _ = step_no_dropout.step(
-        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
-    )
-    differs = any(
-        not torch.allclose(out_dropout[name], out_no_dropout[name])
-        for name in step.out_names
-    )
-    assert differs, "rate=1.0 dropout should produce different outputs from rate=0.0"
-
-
-def test_input_dropout_with_channel_mask_inputs():
-    """With include_channel_mask_inputs=True, rate=1.0 produces different outputs
-    than rate=0.0 with the same weights.
+    A full-drop mask must change outputs versus no mask; an all-present mask
+    must reproduce the no-mask output exactly.
     """
-    in_names = ["forcing_shared", "forcing_rad"]
-    out_names = ["diagnostic_main", "diagnostic_rad"]
-    normalization = get_network_and_loss_normalization_config(
-        names=list(set(in_names + out_names))
-    )
-
-    def _make_with_mask(rate: float) -> SingleModuleStep:
-        config = StepSelector(
-            type="single_module",
-            config=dataclasses.asdict(
-                SingleModuleStepConfig(
-                    builder=ModuleSelector(
-                        type="SphericalFourierNeuralOperatorNet",
-                        config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
-                    ),
-                    in_names=in_names,
-                    out_names=out_names,
-                    normalization=normalization,
-                    include_channel_mask_inputs=True,
-                    input_dropout=PerVariableMaskingConfig(rate=rate),
-                )
-            ),
-        )
-        step = get_step(config, DEFAULT_IMG_SHAPE)
-        assert isinstance(step, SingleModuleStep)
-        return step
-
-    step_full = _make_with_mask(rate=1.0)
-    step_none = _make_with_mask(rate=0.0)
-    step_full.module.torch_module.train()
-    step_none.module.torch_module.train()
-    step_none.module.torch_module.load_state_dict(
-        step_full.module.torch_module.state_dict()
-    )
-
+    step = _make_single_module_step(PerVariableMaskingConfig(rate=0.5))
+    step.module.torch_module.eval()  # module determinism; late dropout still applies
     n_samples = 4
-    input_data = get_tensor_dict(step_full.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
     next_step = get_tensor_dict(
-        step_full.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
-    out_full, _ = step_full.step(
-        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
+
+    def _run(mask):
+        out, _ = step.step(
+            args=StepArgs(
+                input=input_data,
+                next_step_input_data=next_step,
+                labels=None,
+                input_dropout_mask=mask,
+            )
+        )
+        return out
+
+    out_none = _run(None)
+    out_full_drop = _run(_full_drop_mask(step, n_samples))
+    out_all_present = _run(
+        {
+            name: torch.ones(n_samples, dtype=torch.bool, device=fme.get_device())
+            for name in step.in_packer.names
+        }
     )
-    out_none, _ = step_none.step(
-        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
+    assert any(
+        not torch.allclose(out_full_drop[name], out_none[name])
+        for name in step.out_names
+    ), "full-drop mask should change outputs"
+    for name in step.out_names:
+        torch.testing.assert_close(out_all_present[name], out_none[name])
+
+
+def test_input_dropout_mask_indicator_reflects_combined_presence():
+    """With include_channel_mask_inputs, the indicator equals real & synthetic.
+
+    Inspect the indicator half of the packed network input: a channel dropped
+    by input_dropout_mask must have indicator 0 and a zeroed data channel; an
+    undropped channel must have indicator 1.
+    """
+    step = _make_single_module_step(
+        PerVariableMaskingConfig(rate=0.5), include_channel_mask_inputs=True
     )
-    differs = any(
-        not torch.allclose(out_full[name], out_none[name]) for name in out_names
+    step.module.torch_module.eval()
+    n_samples = 2
+    in_names = step.in_packer.names
+    n_channels = len(in_names)
+    # Drop the first channel only.
+    dropout_mask = {
+        name: torch.full(
+            (n_samples,),
+            i != 0,
+            dtype=torch.bool,
+            device=fme.get_device(),
+        )
+        for i, name in enumerate(in_names)
+    }
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
-    assert differs, "rate=1.0 should produce different outputs from rate=0.0"
+
+    captured: list[torch.Tensor] = []
+
+    def _pre_hook(module, args):
+        captured.append(args[0].detach().cpu())
+
+    handle = step.module.torch_module.register_forward_pre_hook(_pre_hook)
+    try:
+        step.step(
+            args=StepArgs(
+                input=input_data,
+                next_step_input_data=next_step,
+                labels=None,
+                input_dropout_mask=dropout_mask,
+            )
+        )
+    finally:
+        handle.remove()
+
+    packed = captured[0]
+    data_half = packed[:, :n_channels]
+    indicator_half = packed[:, n_channels:]
+    # Dropped channel 0: indicator 0 and data zeroed; others: indicator 1.
+    assert (indicator_half[:, 0] == 0.0).all()
+    assert (data_half[:, 0] == 0.0).all()
+    assert (indicator_half[:, 1:] == 1.0).all()
+
+
+def test_input_dropout_mask_and_combine_with_data_mask():
+    """AND-combine: data_mask=0 wins even when dropout leaves the channel present.
+
+    Guards against fallback-priority resurrecting a genuinely-missing variable.
+    """
+    step = _make_single_module_step(
+        PerVariableMaskingConfig(rate=0.5), include_channel_mask_inputs=True
+    )
+    step.module.torch_module.eval()
+    n_samples = 2
+    in_names = step.in_packer.names
+    n_channels = len(in_names)
+    # Channel 0 is genuinely missing (data_mask=0) but not synthetically dropped.
+    data_mask = {
+        in_names[0]: torch.zeros(n_samples, dtype=torch.bool, device=fme.get_device()),
+    }
+    dropout_mask = {
+        name: torch.ones(n_samples, dtype=torch.bool, device=fme.get_device())
+        for name in in_names
+    }
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+
+    captured: list[torch.Tensor] = []
+
+    def _pre_hook(module, args):
+        captured.append(args[0].detach().cpu())
+
+    handle = step.module.torch_module.register_forward_pre_hook(_pre_hook)
+    try:
+        step.step(
+            args=StepArgs(
+                input=input_data,
+                next_step_input_data=next_step,
+                labels=None,
+                data_mask=data_mask,
+                input_dropout_mask=dropout_mask,
+            )
+        )
+    finally:
+        handle.remove()
+
+    packed = captured[0]
+    # combined present = real(0) & synthetic(1) = 0 -> indicator 0, input zeroed
+    assert (packed[:, n_channels] == 0.0).all()  # indicator for channel 0
+    assert (packed[:, 0] == 0.0).all()  # data channel 0 zeroed
 
 
 def _make_gmr_input_dropout_step(rate: float, include_channel_mask_inputs: bool):
@@ -1690,148 +1713,70 @@ def _make_gmr_input_dropout_step(rate: float, include_channel_mask_inputs: bool)
     return step
 
 
-def test_input_dropout_masks_gmr_extra_channels():
-    """input_dropout is applied to all packed channels including GMR extras.
+def test_input_dropout_mask_gmr_extras_independently_maskable():
+    """GMR extra channels are dropped independently; the indicator agrees.
 
-    With rate=1.0 all four channels (2 named + 2 GMR extras) are zeroed, so
-    train-mode outputs must differ from rate=0.0 with the same weights.
+    Drop only one GMR extra sentinel channel via input_dropout_mask and verify
+    that exactly that packed channel is zeroed and its indicator is 0, while the
+    other channels remain present.
     """
-    step_full = _make_gmr_input_dropout_step(
-        rate=1.0, include_channel_mask_inputs=False
+    step = _make_gmr_input_dropout_step(rate=0.5, include_channel_mask_inputs=True)
+    step.module.torch_module.eval()
+    names = step.in_packer.names
+    assert len(names) == 4  # 2 named + 2 GMR extras
+    n_channels = len(names)
+    # Identify a GMR extra sentinel channel to drop in isolation.
+    gmr_index = next(
+        i
+        for i, name in enumerate(names)
+        if extra_channel_source_field(name) is not None
     )
-    step_none = _make_gmr_input_dropout_step(
-        rate=0.0, include_channel_mask_inputs=False
-    )
-    # Verify GMR extras are packed alongside named inputs (4 total channels).
-    assert len(step_full.in_packer.names) == 4
-    step_full.module.torch_module.train()
-    step_none.module.torch_module.train()
-    step_none.module.torch_module.load_state_dict(
-        step_full.module.torch_module.state_dict()
-    )
-
     n_samples = 2
-    input_data = get_tensor_dict(step_full.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    dropout_mask = {
+        name: torch.full(
+            (n_samples,),
+            i != gmr_index,
+            dtype=torch.bool,
+            device=fme.get_device(),
+        )
+        for i, name in enumerate(names)
+    }
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
     next_step = get_tensor_dict(
-        step_full.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
-    )
-    out_full, _ = step_full.step(
-        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
-    )
-    out_none, _ = step_none.step(
-        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
-    )
-    differs = any(
-        not torch.allclose(out_full[name], out_none[name])
-        for name in step_full.out_names
-    )
-    assert differs, "rate=1.0 should zero all channels including GMR extras"
-
-
-def test_input_dropout_with_channel_mask_inputs_and_gmr():
-    """With include_channel_mask_inputs=True and GMR extras, rate=1.0 produces
-    different outputs than rate=0.0 with the same weights.
-    """
-    step_full = _make_gmr_input_dropout_step(rate=1.0, include_channel_mask_inputs=True)
-    step_none = _make_gmr_input_dropout_step(rate=0.0, include_channel_mask_inputs=True)
-    # 2 named + 2 GMR extras = 4 packed input channels.
-    assert len(step_full.in_packer.names) == 4
-    step_full.module.torch_module.train()
-    step_none.module.torch_module.train()
-    step_none.module.torch_module.load_state_dict(
-        step_full.module.torch_module.state_dict()
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
 
-    n_samples = 2
-    input_data = get_tensor_dict(step_full.input_names, DEFAULT_IMG_SHAPE, n_samples)
-    next_step = get_tensor_dict(
-        step_full.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
-    )
-    out_full, _ = step_full.step(
-        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
-    )
-    out_none, _ = step_none.step(
-        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None)
-    )
-    differs = any(
-        not torch.allclose(out_full[name], out_none[name])
-        for name in step_full.out_names
-    )
-    assert differs, "rate=1.0 should produce different outputs from rate=0.0"
-
-
-def test_input_dropout_ensemble_members_share_mask():
-    """With n_ensemble > 1, all ensemble members of a base sample see the same mask.
-
-    We verify this by inspecting the mask-indicator channels that the network
-    receives when include_channel_mask_inputs=True. Those channels reflect the
-    input_dropout mask directly (0.0 = dropped, 1.0 = present) and must be
-    identical across ensemble members belonging to the same base sample.
-    """
-    n_base, n_ensemble = 4, 3
-    in_names = ["forcing_shared", "forcing_rad"]
-    out_names = ["diagnostic_main", "diagnostic_rad"]
-    normalization = get_network_and_loss_normalization_config(
-        names=list(set(in_names + out_names))
-    )
-    config = StepSelector(
-        type="single_module",
-        config=dataclasses.asdict(
-            SingleModuleStepConfig(
-                builder=ModuleSelector(
-                    type="SphericalFourierNeuralOperatorNet",
-                    config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
-                ),
-                in_names=in_names,
-                out_names=out_names,
-                normalization=normalization,
-                include_channel_mask_inputs=True,
-                input_dropout=PerVariableMaskingConfig(rate=0.5),
-            )
-        ),
-    )
-    step = get_step(config, DEFAULT_IMG_SHAPE)
-    assert isinstance(step, SingleModuleStep)
-    step.module.torch_module.train()
-
-    # Hook to capture the raw input tensor passed to the torch module
     captured: list[torch.Tensor] = []
 
     def _pre_hook(module, args):
         captured.append(args[0].detach().cpu())
 
     handle = step.module.torch_module.register_forward_pre_hook(_pre_hook)
-
-    base_input = get_tensor_dict(in_names, DEFAULT_IMG_SHAPE, n_base)
-    base_next = get_tensor_dict(step.next_step_input_names, DEFAULT_IMG_SHAPE, n_base)
-
-    def _repeat(d, repeats):
-        return {k: v.repeat_interleave(repeats, dim=0) for k, v in d.items()}
-
     try:
         step.step(
             args=StepArgs(
-                input=_repeat(base_input, n_ensemble),
-                next_step_input_data=_repeat(base_next, n_ensemble),
+                input=input_data,
+                next_step_input_data=next_step,
                 labels=None,
-                n_ensemble=n_ensemble,
+                input_dropout_mask=dropout_mask,
             )
         )
     finally:
         handle.remove()
 
-    assert len(captured) > 0
-    # Second half of channels are mask indicators reflecting the dropout mask.
-    n_channels = len(in_names)
-    mask_indicators = captured[0][:, n_channels:, 0, 0]  # [batch, n_channels]
-    grouped = mask_indicators.view(n_base, n_ensemble, n_channels)
-    assert (
-        grouped == grouped[:, :1]
-    ).all(), "All ensemble members of a base sample must see the same dropout mask"
+    packed = captured[0]
+    data_half = packed[:, :n_channels]
+    indicator_half = packed[:, n_channels:]
+    # Only the targeted GMR extra channel is dropped.
+    assert (data_half[:, gmr_index] == 0.0).all()
+    assert (indicator_half[:, gmr_index] == 0.0).all()
+    other = [i for i in range(n_channels) if i != gmr_index]
+    assert (indicator_half[:, other] == 1.0).all()
 
 
 def _make_single_module_step(
     input_dropout: UniformMaskingConfig | PerVariableMaskingConfig | None,
+    include_channel_mask_inputs: bool = False,
 ) -> SingleModuleStep:
     in_names = ["forcing_shared", "forcing_rad"]
     out_names = ["diagnostic_main", "diagnostic_rad"]
@@ -1849,6 +1794,7 @@ def _make_single_module_step(
                 in_names=in_names,
                 out_names=out_names,
                 normalization=normalization,
+                include_channel_mask_inputs=include_channel_mask_inputs,
                 input_dropout=input_dropout,
             )
         ),

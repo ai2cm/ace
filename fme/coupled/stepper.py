@@ -1056,7 +1056,6 @@ class CoupledStepper:
         initial_condition: CoupledPrognosticState,
         forcing_data: CoupledBatchData,
         optimizer: OptimizationABC,
-        n_ensemble: int | None = None,
     ) -> Generator[ComponentStepPrediction, None, None]:
         if (
             initial_condition.atmosphere_data.as_batch_data().n_timesteps
@@ -1076,42 +1075,6 @@ class CoupledStepper:
                 "Ocean initial condition must have "
                 f"{self.n_ic_timesteps} timesteps, got "
                 f"{initial_condition.ocean_data.as_batch_data().n_timesteps}."
-            )
-        ic_batch_data = initial_condition.as_batch_data()
-        if (
-            ic_batch_data.atmosphere_data.n_ensemble
-            != ic_batch_data.ocean_data.n_ensemble
-        ):
-            raise ValueError(
-                "Atmosphere and ocean initial condition data must have the same "
-                "n_ensemble, got "
-                f"{ic_batch_data.atmosphere_data.n_ensemble} and "
-                f"{ic_batch_data.ocean_data.n_ensemble}."
-            )
-        if (
-            forcing_data.atmosphere_data.n_ensemble
-            != forcing_data.ocean_data.n_ensemble
-        ):
-            raise ValueError(
-                "Atmosphere and ocean forcing data must have the same n_ensemble, "
-                f"got {forcing_data.atmosphere_data.n_ensemble} and "
-                f"{forcing_data.ocean_data.n_ensemble}."
-            )
-        if (
-            ic_batch_data.atmosphere_data.n_ensemble
-            != forcing_data.atmosphere_data.n_ensemble
-        ):
-            raise ValueError(
-                "Initial condition and forcing data must have the same n_ensemble, "
-                f"got {ic_batch_data.atmosphere_data.n_ensemble} and "
-                f"{forcing_data.atmosphere_data.n_ensemble}."
-            )
-        if n_ensemble is None:
-            n_ensemble = forcing_data.atmosphere_data.n_ensemble
-        elif n_ensemble != forcing_data.atmosphere_data.n_ensemble:
-            raise ValueError(
-                "n_ensemble argument must match forcing_data n_ensemble, "
-                f"got {n_ensemble} and {forcing_data.atmosphere_data.n_ensemble}."
             )
         atmos_ic_state = initial_condition.atmosphere_data
         ocean_ic_state = initial_condition.ocean_data
@@ -1147,7 +1110,6 @@ class CoupledStepper:
                 atmos_forcings,
                 self.n_inner_steps,
                 optimizer,
-                n_ensemble=n_ensemble,
             )
             atmos_steps = []
 
@@ -1193,7 +1155,6 @@ class CoupledStepper:
                         ocean_forcings,
                         n_forward_steps=1,
                         optimizer=optimizer,
-                        n_ensemble=n_ensemble,
                     )
                 )
             )
@@ -1809,6 +1770,21 @@ class CoupledTrainStepper(
         self._stepper = stepper
         self._config = config
         self._loss = self._config._build_loss(stepper, config.n_coupled_steps)
+        # Input dropout is sampled in the uncoupled training layer's
+        # _accumulate_loss; the coupled training route never calls the
+        # make_input_dropout_mask hook, so a configured input_dropout would
+        # silently do nothing. Fail loud rather than no-op.
+        for realm, component in (
+            ("atmosphere", stepper.atmosphere),
+            ("ocean", stepper.ocean),
+        ):
+            if component.has_input_dropout():
+                raise ValueError(
+                    f"input_dropout is configured on the {realm} component step, "
+                    "but input_dropout is not supported for coupled training. "
+                    "Use uncoupled training, or remove input_dropout from the "
+                    f"{realm} step config."
+                )
 
     @property
     def ocean(self) -> Stepper:
@@ -1933,7 +1909,6 @@ class CoupledTrainStepper(
             input_data,
             data_ensemble,
             optimization,
-            n_ensemble=n_ensemble,
         )
         output_iterator = iter(output_generator)
         output_list: list[ComponentEnsembleStepPrediction] = []

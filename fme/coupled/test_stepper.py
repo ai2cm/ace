@@ -4,7 +4,7 @@ import datetime
 from collections import namedtuple
 from collections.abc import Iterable
 from typing import Literal
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
 import torch
@@ -30,7 +30,7 @@ from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
 from fme.core.testing import trivial_network_and_loss_normalization
-from fme.core.typing_ import TensorDict
+from fme.core.var_masking import PerVariableMaskingConfig
 from fme.coupled.dataset_info import CoupledDatasetInfo
 
 from .data_loading.batch_data import (
@@ -1206,6 +1206,7 @@ def get_stepper_config(
     ocean_timedelta: str = OCEAN_TIMEDELTA,
     atmosphere_timedelta: str = ATMOS_TIMEDELTA,
     ocean_fraction_prediction: CoupledOceanFractionConfig | None = None,
+    atmosphere_input_dropout: PerVariableMaskingConfig | None = None,
 ):
     # CoupledStepper requires that both component datasets include prognostic
     # surface temperature variables and that the atmosphere data includes an
@@ -1245,6 +1246,7 @@ def get_stepper_config(
                                 surface_temperature_name=sfc_temp_name_in_atmosphere_data,
                                 ocean_fraction_name=ocean_fraction_name,
                             ),
+                            input_dropout=atmosphere_input_dropout,
                         ),
                     ),
                 ),
@@ -1291,6 +1293,7 @@ def get_stepper_and_batch(
     atmosphere_builder: ModuleSelector | None = None,
     ocean_timedelta: str = OCEAN_TIMEDELTA,
     atmosphere_timedelta: str = ATMOS_TIMEDELTA,
+    atmosphere_input_dropout: PerVariableMaskingConfig | None = None,
 ):
     all_ocean_names = set(ocean_in_names + ocean_out_names)
     all_atmos_names = set(atmosphere_in_names + atmosphere_out_names)
@@ -1325,6 +1328,7 @@ def get_stepper_and_batch(
         # n_forward_times_atmosphere = 2 * n_forward_times_ocean
         ocean_timedelta=ocean_timedelta,
         atmosphere_timedelta=atmosphere_timedelta,
+        atmosphere_input_dropout=atmosphere_input_dropout,
     )
     dataset_info = CoupledDatasetInfoBuilder(
         vcoord=coupled_data.vertical_coord
@@ -1362,9 +1366,14 @@ def get_train_stepper_and_batch(
     return train_stepper, coupled_data, config, dataset_info
 
 
-def test_get_prediction_generator_preserves_n_ensemble():
-    n_ensemble = 3
-    coupler, coupled_data, _, _ = get_stepper_and_batch(
+def test_coupled_training_with_input_dropout_raises():
+    """input_dropout is unsupported for coupled training and must fail loud.
+
+    The coupled training route never calls make_input_dropout_mask, so a
+    configured input_dropout would silently do nothing; constructing the
+    CoupledTrainStepper must raise instead.
+    """
+    _, _, config, dataset_info = get_stepper_and_batch(
         ocean_in_names=["sst"],
         ocean_out_names=["sst"],
         atmosphere_in_names=["surface_temperature", "ocean_fraction"],
@@ -1372,85 +1381,15 @@ def test_get_prediction_generator_preserves_n_ensemble():
         n_forward_times_ocean=1,
         n_forward_times_atmosphere=2,
         n_samples=2,
+        atmosphere_input_dropout=PerVariableMaskingConfig(rate=0.5),
     )
-    data = CoupledBatchData(
-        ocean_data=coupled_data.data.ocean_data.broadcast_ensemble(n_ensemble),
-        atmosphere_data=coupled_data.data.atmosphere_data.broadcast_ensemble(
-            n_ensemble
-        ),
+    train_stepper_config = CoupledTrainStepperConfig(
+        n_coupled_steps=1,
+        ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
+        atmosphere=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
     )
-    input_data = CoupledPrognosticState(
-        atmosphere_data=data.atmosphere_data.get_start(
-            coupler.atmosphere.prognostic_names,
-            coupler.atmosphere.n_ic_timesteps,
-        ),
-        ocean_data=data.ocean_data.get_start(
-            coupler.ocean.prognostic_names,
-            coupler.ocean.n_ic_timesteps,
-        ),
-    )
-    observed: list[tuple[str, int, int, int | None]] = []
-
-    def _get_step_data(initial_condition, names: list[str]) -> TensorDict:
-        ic_batch = initial_condition.as_batch_data()
-        return {name: ic_batch.data[name].select(1, -1) for name in names}
-
-    def _atmos_generator(
-        initial_condition,
-        forcing_data,
-        n_forward_steps,
-        optimizer,
-        n_ensemble=None,
-    ):
-        observed.append(
-            (
-                "atmosphere",
-                initial_condition.as_batch_data().n_ensemble,
-                forcing_data.n_ensemble,
-                n_ensemble,
-            )
-        )
-        for _ in range(n_forward_steps):
-            yield (
-                _get_step_data(initial_condition, coupler.atmosphere.prognostic_names),
-                None,
-            )
-
-    def _ocean_generator(
-        initial_condition,
-        forcing_data,
-        n_forward_steps,
-        optimizer,
-        n_ensemble=None,
-    ):
-        observed.append(
-            (
-                "ocean",
-                initial_condition.as_batch_data().n_ensemble,
-                forcing_data.n_ensemble,
-                n_ensemble,
-            )
-        )
-        for _ in range(n_forward_steps):
-            yield (
-                _get_step_data(initial_condition, coupler.ocean.prognostic_names),
-                None,
-            )
-
-    with (
-        patch.object(
-            coupler.atmosphere,
-            "get_prediction_generator",
-            _atmos_generator,
-        ),
-        patch.object(coupler.ocean, "get_prediction_generator", _ocean_generator),
-    ):
-        list(coupler.get_prediction_generator(input_data, data, NullOptimization()))
-
-    assert observed == [
-        ("atmosphere", n_ensemble, n_ensemble, n_ensemble),
-        ("ocean", n_ensemble, n_ensemble, n_ensemble),
-    ]
+    with pytest.raises(ValueError, match="input_dropout is not supported"):
+        train_stepper_config.get_train_stepper(config, dataset_info)
 
 
 @pytest.mark.parametrize(

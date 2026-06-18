@@ -1326,48 +1326,122 @@ def test_predict_with_forcing(n_ensemble):
     assert new_input_state.time.equals(output.time[:, -1:])
 
 
-def test_get_prediction_generator_infers_n_ensemble_for_input_dropout():
-    n_ensemble = 3
-    n_steps = 1
-    stepper = _get_stepper(
-        ["a"],
-        ["a"],
-        module_name="ChannelSum",
-        include_channel_mask_inputs=True,
-        input_dropout=PerVariableMaskingConfig(rate=0.5),
-    )
-    stepper.set_train()
-    input_data, forcing_data = get_data_for_predict(
-        n_steps, forcing_names=[], n_ensemble=n_ensemble
-    )
-    observed_n_ensemble: list[int] = []
+class _DummyParamModule(torch.nn.Module):
+    """Returns the first output channel; has a parameter so Adam can build."""
 
-    def _sample_mask(
-        self,
-        n_channels: int,
-        batch_size: int,
-        device: torch.device,
-        n_ensemble: int = 1,
-    ) -> torch.Tensor:
-        observed_n_ensemble.append(n_ensemble)
-        return torch.ones(batch_size, n_channels, dtype=torch.bool, device=device)
+    def __init__(self):
+        super().__init__()
+        self.dummy = torch.nn.Parameter(torch.zeros(1))
 
-    with patch.object(
-        PerVariableMaskingConfig,
-        "sample_mask",
-        autospec=True,
-        side_effect=_sample_mask,
-    ):
-        list(
-            stepper.get_prediction_generator(
-                input_data,
-                forcing_data,
-                n_steps,
-                NullOptimization(),
-            )
+    def forward(self, x):
+        return x[:, :1] + 0.0 * self.dummy
+
+
+def test_input_dropout_ensemble_members_share_mask():
+    """Training layer samples one mask per base sample, shared across ensemble.
+
+    With include_channel_mask_inputs=True the indicator channels reflect the
+    dropout mask; ensemble members of a base sample must see identical
+    indicators.
+    """
+    torch.manual_seed(0)
+    n_base, n_ensemble, n_steps = 4, 3, 1
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": _DummyParamModule()}
+                    ),
+                    in_names=["a"],
+                    out_names=["a"],
+                    normalization=trivial_network_and_loss_normalization(["a"]),
+                    include_channel_mask_inputs=True,
+                    input_dropout=PerVariableMaskingConfig(rate=0.5),
+                )
+            ),
+        ),
+    )
+    stepper = _get_train_stepper(
+        config, n_ensemble=n_ensemble, loss=StepLossConfig(type="MSE")
+    )
+    data = get_data(["a"], n_samples=n_base, n_time=n_steps + 1).data
+
+    captured: list[torch.Tensor] = []
+
+    def _pre_hook(module, args):
+        captured.append(args[0].detach().cpu())
+
+    handle = stepper.modules[0].register_forward_pre_hook(_pre_hook)
+    optimization = OptimizationConfig().build(
+        modules=list(stepper.modules), max_epochs=1
+    )
+    try:
+        stepper.train_on_batch(data, optimization=optimization)
+    finally:
+        handle.remove()
+
+    assert captured, "module should have been called in train mode"
+    packed = captured[0]  # [n_base * n_ensemble, 2, lat, lon]
+    n_channels = 1  # single input "a"; second half is the indicator
+    indicators = packed[:, n_channels:, 0, 0]  # [batch, 1]
+    grouped = indicators.view(n_base, n_ensemble, n_channels)
+    assert (
+        grouped == grouped[:, :1]
+    ).all(), "ensemble members of a base sample must share the dropout mask"
+
+
+def test_input_dropout_eval_mode_training_batch_applies_no_dropout():
+    """A NullOptimization train_on_batch (eval mode) applies no input dropout.
+
+    The make_input_dropout_mask hook returns None in eval mode, so the result
+    must match a stepper with no input_dropout configured.
+    """
+    n_steps = 2
+
+    def _run(input_dropout):
+        torch.manual_seed(0)
+        stepper = _get_stepper(
+            ["a"],
+            ["a"],
+            input_dropout=input_dropout,
         )
+        data = get_data(["a"], n_samples=3, n_time=n_steps + 1).data
+        train_stepper = _init_train_stepper(
+            stepper, loss=StepLossConfig(type="MSE"), n_forward_steps=n_steps
+        )
+        return train_stepper.train_on_batch(
+            data, optimization=NullOptimization()
+        ).gen_data
 
-    assert observed_n_ensemble == [n_ensemble]
+    out_dropout = _run(PerVariableMaskingConfig(rate=1.0))
+    out_none = _run(None)
+    for name in out_none:
+        torch.testing.assert_close(out_dropout[name], out_none[name])
+
+
+def test_input_dropout_inactive_in_inference():
+    """Serialized input_dropout does not affect the inference predict path.
+
+    predict never fires make_input_dropout_mask, so output matches a stepper
+    with no input_dropout configured (same weights).
+    """
+    n_steps = 3
+
+    def _run(input_dropout):
+        torch.manual_seed(0)
+        stepper = _get_stepper(["a"], ["a"], input_dropout=input_dropout)
+        stepper.set_train()  # even in train mode, predict applies no dropout
+        input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=[])
+        forcing_data.data = {}
+        output, _ = stepper.predict(input_data, forcing_data)
+        return output.data
+
+    out_dropout = _run(PerVariableMaskingConfig(rate=1.0))
+    out_none = _run(None)
+    for name in out_none:
+        torch.testing.assert_close(out_dropout[name], out_none[name])
 
 
 @pytest.mark.parametrize(
