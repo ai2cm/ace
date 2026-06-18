@@ -38,6 +38,7 @@ from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.testing import trivial_network_and_loss_normalization
 from fme.core.typing_ import TensorDict
+from fme.core.var_masking import PerVariableMaskingConfig
 
 DEFAULT_IMG_SHAPE = (45, 90)
 
@@ -463,3 +464,54 @@ def test_step_regression(
     output = dist.gather_spatial(output, img_shape)
 
     cache_step_output(output, DATA_DIR / f"{case_name}_output.pt")
+
+
+@pytest.mark.parallel
+def test_input_dropout_mask_identical_across_spatial_tiles():
+    """The sampled input-dropout mask must be identical across spatial tiles.
+
+    All spatial co-ranks hold the same samples but advance ``torch.rand``
+    independently; without the spatial broadcast each tile would mask different
+    channels and corrupt the sample.  We force RNG divergence by seeding each
+    rank with its global rank, then verify ranks within a spatial group receive
+    identical masks while letting data-parallel groups differ.
+    """
+    dist = Distributed.get_instance()
+    n_dp = dist.total_data_parallel_ranks
+    spatial_size = dist.world_size // n_dp
+    in_names = ["a", "b", "c", "d"]
+    out_names = ["a", "b", "c", "d"]
+    selector = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+                ),
+                in_names=in_names,
+                out_names=out_names,
+                normalization=get_network_and_loss_normalization_config(in_names),
+                input_dropout=PerVariableMaskingConfig(rate=0.5),
+            )
+        ),
+    )
+    step = get_step(selector, DEFAULT_IMG_SHAPE)
+    for module in step.modules:
+        module.train()
+    # Force per-rank RNG divergence to mimic real spatial-parallel training.
+    torch.manual_seed(dist.rank)
+    batch_size = 3
+    mask = step.make_input_dropout_mask(batch_size, fme.get_device())
+    assert mask is not None
+    stacked = torch.stack([mask[name].float() for name in in_names])  # [C, batch]
+    gathered = dist.gather(stacked)
+    if dist.is_root():
+        assert gathered is not None
+        assert len(gathered) == dist.world_size
+        for group_start in range(0, dist.world_size, spatial_size):
+            root = gathered[group_start].to(fme.get_device())
+            for offset in range(spatial_size):
+                torch.testing.assert_close(
+                    gathered[group_start + offset].to(fme.get_device()), root
+                )

@@ -216,6 +216,11 @@ class TorchDistributed(DistributedBackend):
     def spatial_reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
         return tensor
 
+    def broadcast_spatial(self, tensor: torch.Tensor) -> torch.Tensor:
+        # Data-parallel only (no tiles): every rank holds distinct samples, so
+        # no agreement across a spatial group is needed.
+        return tensor
+
     def weighted_mean(
         self,
         data: torch.Tensor,

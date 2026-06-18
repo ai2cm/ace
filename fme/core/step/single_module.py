@@ -436,6 +436,12 @@ class SingleModuleStep(StepABC):
             return None
         names = self.in_packer.names
         mask = self._config.input_dropout.sample_mask(len(names), batch_size, device)
+        # The mask is per-sample with no spatial dim, so it cannot be sliced
+        # per-tile. Under spatial/model parallelism every co-rank holds the same
+        # samples but advances torch.rand independently; broadcast the spatial
+        # root's mask so all tiles of a sample agree. Data-parallel ranks keep
+        # distinct masks (the backend broadcasts over the spatial group only).
+        mask = Distributed.get_instance().broadcast_spatial(mask)
         return {name: mask[:, i] for i, name in enumerate(names)}
 
     def has_input_dropout(self) -> bool:
