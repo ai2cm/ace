@@ -21,7 +21,7 @@ from .atmosphere import (
     _force_conserve_total_energy,
     _force_zero_global_mean_moisture_advection,
 )
-from .utils import force_positive
+from .utils import force_positive, replace_value_keep_gradient
 
 TIMESTEP = datetime.timedelta(hours=6)
 
@@ -287,6 +287,32 @@ def test_force_positive():
     torch.testing.assert_close(new_min, torch.tensor(0.0))
     # Ensure other variables are not modified
     torch.testing.assert_close(fixed_data["bar"], data["bar"])
+
+
+def test_replace_value_keep_gradient():
+    x = torch.tensor([-1.0, 0.5, 2.0], requires_grad=True)
+    new_value = torch.clamp(x, min=0.0)
+    out = replace_value_keep_gradient(x, new_value)
+    # forward: exactly the projected (clamped) value
+    torch.testing.assert_close(out, torch.tensor([0.0, 0.5, 2.0]))
+    # backward: identity gradient everywhere, including the clamped tail
+    out.sum().backward()
+    torch.testing.assert_close(x.grad, torch.ones_like(x))
+
+
+def test_force_positive_keep_gradient_passes_gradient_on_clamped_cells():
+    # A clamped-negative input gets zero gradient with a plain clamp, but a
+    # nonzero (identity) gradient when keep_gradient=True.
+    x_plain = torch.tensor([-2.0, 1.0], requires_grad=True)
+    force_positive({"foo": x_plain}, ["foo"])["foo"].sum().backward()
+    torch.testing.assert_close(x_plain.grad, torch.tensor([0.0, 1.0]))
+
+    x_ste = torch.tensor([-2.0, 1.0], requires_grad=True)
+    fixed = force_positive({"foo": x_ste}, ["foo"], keep_gradient=True)
+    # forward value is still clamped
+    torch.testing.assert_close(fixed["foo"], torch.tensor([0.0, 1.0]))
+    fixed["foo"].sum().backward()
+    torch.testing.assert_close(x_ste.grad, torch.tensor([1.0, 1.0]))
 
 
 def _get_corrector_test_input(

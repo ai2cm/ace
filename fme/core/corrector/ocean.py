@@ -17,7 +17,7 @@ from fme.core.corrector.registry import (
     CorrectorConfigABC,
 )
 from fme.core.corrector.state import CorrectorState
-from fme.core.corrector.utils import ForcePositive
+from fme.core.corrector.utils import ForcePositive, replace_value_keep_gradient
 from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.ocean_data import HasOceanDepthIntegral, OceanData
@@ -55,12 +55,17 @@ class SeaIceFractionConfig:
     remove_negative_ocean_fraction: bool = True
 
     def __call__(
-        self, gen_data: TensorMapping, input_data: TensorMapping
+        self,
+        gen_data: TensorMapping,
+        input_data: TensorMapping,
+        keep_gradient: bool = False,
     ) -> TensorDict:
         out = {**gen_data}
-        out[self.sea_ice_fraction_name] = torch.clamp(
-            out[self.sea_ice_fraction_name], min=0.0, max=1.0
-        )
+        sif = out[self.sea_ice_fraction_name]
+        clamped_sif = torch.clamp(sif, min=0.0, max=1.0)
+        if keep_gradient:
+            clamped_sif = replace_value_keep_gradient(sif, clamped_sif)
+        out[self.sea_ice_fraction_name] = clamped_sif
         if self.remove_negative_ocean_fraction:
             negative_ocean_fraction = (
                 1
@@ -68,7 +73,12 @@ class SeaIceFractionConfig:
                 - input_data[self.land_fraction_name]
             )
             negative_ocean_fraction = negative_ocean_fraction.clip(max=0)
-            out[self.sea_ice_fraction_name] += negative_ocean_fraction
+            rebalanced_sif = out[self.sea_ice_fraction_name] + negative_ocean_fraction
+            if keep_gradient:
+                rebalanced_sif = replace_value_keep_gradient(
+                    out[self.sea_ice_fraction_name], rebalanced_sif
+                )
+            out[self.sea_ice_fraction_name] = rebalanced_sif
         for name in self.zero_where_ice_free_names:
             out[name] = gen_data[name] * (out[self.sea_ice_fraction_name] > 0.0)
         return out
@@ -126,9 +136,13 @@ class SeaIceFractionCorrection:
     Wraps ``SeaIceFractionConfig`` so the corrector applies the operation
     without reading config fields. ``forcing_data`` and ``corrector_state`` are
     unused and passed through.
+
+    If ``keep_gradient`` is True, the clamp and rebalance are applied with a
+    straight-through estimator so out-of-range cells still get a learning signal.
     """
 
     config: SeaIceFractionConfig
+    keep_gradient: bool = False
 
     def __call__(
         self,
@@ -137,7 +151,10 @@ class SeaIceFractionCorrection:
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
     ) -> tuple[TensorDict, CorrectorState | None]:
-        return self.config(gen_data, input_data), corrector_state
+        return (
+            self.config(gen_data, input_data, keep_gradient=self.keep_gradient),
+            corrector_state,
+        )
 
 
 @dataclasses.dataclass
@@ -204,6 +221,11 @@ class OceanCorrectorConfig(CorrectorConfigABC):
     sea_ice_fraction_correction: SeaIceFractionConfig | None = None
     surface_energy_flux_correction: SurfaceEnergyFluxCorrectionConfig | None = None
     ocean_heat_content_correction: OceanHeatContentBudgetConfig | None = None
+    keep_gradient_through_clamps: bool = False
+    """If True, apply the corrector's hard clamps (``force_positive`` and the
+    ``sea_ice_fraction_correction`` bound/rebalance) with a straight-through
+    estimator: the forward value is still clamped, but gradient flows as if the
+    clamp had not happened, so out-of-range cells still get a learning signal."""
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
@@ -249,10 +271,18 @@ class OceanCorrectorConfig(CorrectorConfigABC):
         timestep_seconds = timestep.total_seconds()
         corrections: list[Correction] = []
         if len(self.force_positive_names) > 0:
-            corrections.append(ForcePositive(self.force_positive_names))
+            corrections.append(
+                ForcePositive(
+                    self.force_positive_names,
+                    keep_gradient=self.keep_gradient_through_clamps,
+                )
+            )
         if self.sea_ice_fraction_correction is not None:
             corrections.append(
-                SeaIceFractionCorrection(self.sea_ice_fraction_correction)
+                SeaIceFractionCorrection(
+                    self.sea_ice_fraction_correction,
+                    keep_gradient=self.keep_gradient_through_clamps,
+                )
             )
         if self.surface_energy_flux_correction is not None:
             corrections.append(
