@@ -4,3 +4,5 @@ ft-v20260602-E3SMv3-piControl-zltomfxg-l6ktf4nj-early-epoch-5|rs0|01KTTN14GMX2CA
 ft-v20260602-E3SMv3-piControl-r4xg0ssl-l6ktf4nj-early|rs0|01KTWH9SXTS348G6P0XV4XFEAG|training|best_inference_ckpt|normal|--min-runtime 8h
 
 ft-v20260602-E3SMv3-piControl-zltomfxg-l6ktf4nj-epoch-24|rs0|01KTTN14GMX2CAQR4E422NJ6HJ|run_ICx1-105yr|best_inference_ckpt|urgent|--min-runtime 8h||01KTY9P4JV0XH8YBQ0K4Y0FCXA|ai2/climate-titan|b200
+
+ft-v20260602-E3SMv3-piControl-8v5nro2x-jlzakbmi|rs0|01KVEJANR6EZYF85NGT0HPJGTY|training|best_inference_ckpt|normal|--min-runtime 8h
