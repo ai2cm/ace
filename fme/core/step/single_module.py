@@ -384,6 +384,11 @@ class SingleModuleStep(StepABC):
             if args.data_mask is not None:
                 input_norm = _apply_input_mask(input_norm, args.data_mask)
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
+            # Fail loud if a NaN survives masking/normalization to the network
+            # input (cf. PR #1262). Gated on grad-enabled so the no_grad
+            # inference/eval rollout hot path pays no device-sync cost.
+            if torch.is_grad_enabled() and torch.isnan(input_tensor).any():
+                _raise_input_nan_error(input_norm)
             if self._config.include_channel_mask_inputs:
                 mask_dict = _build_channel_mask_dict(
                     self.in_packer.names, args.data_mask, input_tensor
@@ -458,6 +463,22 @@ class SingleModuleStep(StepABC):
         if "secondary_decoder" in state:
             self.secondary_decoder.load_module_state(state["secondary_decoder"])
         self._corrector.load_state(state.get("corrector", {}))
+
+
+def _raise_input_nan_error(input_norm: TensorMapping) -> None:
+    """Raise a located error naming the input variable(s) that still hold NaN.
+
+    Called only once the cheap packed-tensor NaN check has fired, so the
+    per-variable scan here is off the hot path.
+    """
+    nan_names = sorted(k for k, v in input_norm.items() if torch.isnan(v).any())
+    raise ValueError(
+        "NaN found in network input for variable(s) "
+        f"{nan_names} after input masking and normalization. An input/forcing "
+        "variable likely contains NaN that is not covered by data_mask; ensure "
+        "the data_mask passed to the stepper includes every input variable that "
+        "may be masked (cf. PR #1262), or enable fill_nans_on_normalize."
+    )
 
 
 def _apply_input_mask(input_norm: TensorDict, data_mask: TensorMapping) -> TensorDict:
