@@ -23,6 +23,7 @@ CONFIG_PREFIX = (
     "ace-train-config-4deg-AIMIP-"  # stripped from config stems before comparison
 )
 DEFAULT_CHECKPOINT_NAME = "training_checkpoints/pre_cooldown_ckpt.tar"
+BEST_INFERENCE_CHECKPOINT_NAME = "training_checkpoints/best_inference_ckpt.tar"
 DEFAULT_EPOCHS = 8
 DEFAULT_LR = 0.0001
 
@@ -46,20 +47,32 @@ def _build_scheduler(epochs: int) -> dict:
     }
 
 
+COOLDOWN_SUFFIXES = ("-bestinfcooldown", "-cooldown")
+
+
 def _fetch_wandb_run_names() -> set[str]:
-    import wandb  # lazy import: only needed with --skip-wandb
+    import wandb  # lazy import: only needed with --delete-if-in-wandb
 
     api = wandb.Api()
     runs = api.runs(f"{WANDB_ENTITY}/{WANDB_PROJECT}")
-    names = set()
-    for run in runs:
-        name = run.name
-        if WANDB_PREFIX and name.startswith(WANDB_PREFIX):
-            name = name[len(WANDB_PREFIX) :]
-        if WANDB_SUFFIX and name.endswith(WANDB_SUFFIX):
-            name = name[: -len(WANDB_SUFFIX)]
-        names.add(name)
-    return names
+    return {run.name for run in runs}
+
+
+def _out_path_to_run_name(out_path: pathlib.Path) -> str:
+    """Reconstruct the wandb run name for a generated cooldown config.
+
+    Config stem: {CONFIG_PREFIX}{base}{cooldown_suffix}
+    Run name:    {WANDB_PREFIX}{base}{WANDB_SUFFIX}{cooldown_suffix}
+    (the -v4 version tag sits before the cooldown suffix).
+    """
+    stem = out_path.stem
+    if CONFIG_PREFIX and stem.startswith(CONFIG_PREFIX):
+        stem = stem[len(CONFIG_PREFIX) :]
+    for cooldown_suffix in COOLDOWN_SUFFIXES:
+        if stem.endswith(cooldown_suffix):
+            base = stem[: -len(cooldown_suffix)]
+            return f"{WANDB_PREFIX}{base}{WANDB_SUFFIX}{cooldown_suffix}"
+    return f"{WANDB_PREFIX}{stem}{WANDB_SUFFIX}"
 
 
 def _write_config(
@@ -69,16 +82,17 @@ def _write_config(
     existing_only: bool,
     wandb_run_names: set[str] | None = None,
 ) -> None:
+    if wandb_run_names is not None:
+        if _out_path_to_run_name(out_path) in wandb_run_names:
+            if out_path.exists():
+                out_path.unlink()
+                print(f"Deleted {out_path.name} (run exists in wandb)")
+            else:
+                print(f"Skipped {out_path.name} (run exists in wandb, no file)")
+            return
     if existing_only and not out_path.exists():
         print(f"Skipped {out_path.name}")
         return
-    if wandb_run_names is not None:
-        stem = out_path.stem
-        if CONFIG_PREFIX and stem.startswith(CONFIG_PREFIX):
-            stem = stem[len(CONFIG_PREFIX) :]
-        if stem in wandb_run_names:
-            print(f"Skipped {out_path.name} (run exists in wandb)")
-            return
     if beaker_dataset_id is not None:
         header = f"# arg: --dataset {beaker_dataset_id}:/checkpoints\n"
     else:
@@ -97,8 +111,9 @@ def generate_cooldown_config(
     lr: float,
     existing_only: bool,
     wandb_run_names: set[str] | None = None,
+    suffix: str = "-cooldown",
 ) -> None:
-    out_path = HERE / f"{source_path.stem}-cooldown.yaml"
+    out_path = HERE / f"{source_path.stem}{suffix}.yaml"
 
     beaker_dataset_id = None
     if source_map is not None:
@@ -167,10 +182,10 @@ def main() -> None:
         help="Only rewrite cooldown configs that already exist.",
     )
     parser.add_argument(
-        "--skip-wandb",
+        "--delete-if-in-wandb",
         action="store_true",
         help=(
-            f"Skip configs whose run name already exists in "
+            f"Delete cooldown configs whose run name already exists in "
             f"{WANDB_ENTITY}/{WANDB_PROJECT}."
         ),
     )
@@ -180,7 +195,7 @@ def main() -> None:
         source_map: dict[str, str] | None = json.load(f)
 
     wandb_run_names: set[str] | None = None
-    if args.skip_wandb:
+    if args.delete_if_in_wandb:
         print(f"Fetching run names from {WANDB_ENTITY}/{WANDB_PROJECT}...")
         wandb_run_names = _fetch_wandb_run_names()
         print(f"Found {len(wandb_run_names)} existing runs.")
@@ -190,19 +205,26 @@ def main() -> None:
         for p in HERE.glob("*-mask*.yaml")
         if not p.name.endswith("-finetune.yaml")
         and not p.name.endswith("-cooldown.yaml")
+        and not p.name.endswith("-bestinfcooldown.yaml")
         and p.name.startswith("ace-train-config-")
     )
 
+    variants = [
+        (args.checkpoint_name, "-cooldown"),
+        (BEST_INFERENCE_CHECKPOINT_NAME, "-bestinfcooldown"),
+    ]
     for source_path in source_configs:
-        generate_cooldown_config(
-            source_path,
-            source_map,
-            args.checkpoint_name,
-            args.epochs,
-            args.lr,
-            args.existing_only,
-            wandb_run_names,
-        )
+        for checkpoint_name, suffix in variants:
+            generate_cooldown_config(
+                source_path,
+                source_map,
+                checkpoint_name,
+                args.epochs,
+                args.lr,
+                args.existing_only,
+                wandb_run_names,
+                suffix,
+            )
 
 
 if __name__ == "__main__":

@@ -22,7 +22,7 @@ WANDB_GROUP = "ace2-var-masking-cooldown-2026-06-17"
 
 CONFIGS = sorted(
     path.name
-    for path in HERE.glob("*-cooldown.yaml")
+    for path in HERE.glob("*cooldown.yaml")
     if path.name.startswith("ace-train-config-4deg-AIMIP-")
 )
 
@@ -30,7 +30,10 @@ CONFIGS = sorted(
 def config_to_job_name(config_filename: str) -> str:
     stem = pathlib.Path(config_filename).stem
     suffix = stem.removeprefix("ace-train-config-4deg-AIMIP-")
-    suffix = suffix.removesuffix("-cooldown")
+    for cooldown_suffix in ("-bestinfcooldown", "-cooldown"):
+        if suffix.endswith(cooldown_suffix):
+            base = suffix.removesuffix(cooldown_suffix)
+            return f"ace2-var-mask-{base}-v4{cooldown_suffix}"
     return f"ace2-var-mask-{suffix}-v4-cooldown"
 
 

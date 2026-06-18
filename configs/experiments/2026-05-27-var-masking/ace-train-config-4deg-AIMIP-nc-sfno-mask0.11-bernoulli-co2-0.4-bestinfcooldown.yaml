@@ -1,4 +1,4 @@
-# arg: --dataset 01KV6RH6BAFGVHA9V5H9VX5A0E:/checkpoints
+# arg: --dataset 01KV6QX2NW2PVGJ1SYCT992WWZ:/checkpoints
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
@@ -370,7 +370,7 @@ stepper_training:
       crps_weight: 0.9
       energy_score_weight: 0.1
   parameter_init:
-    weights_path: /checkpoints/training_checkpoints/pre_cooldown_ckpt.tar
+    weights_path: /checkpoints/training_checkpoints/best_inference_ckpt.tar
 stepper:
   step:
     type: single_module
