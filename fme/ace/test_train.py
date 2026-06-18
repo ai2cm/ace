@@ -167,6 +167,7 @@ def _get_test_yaml_files(
     partial_train_data_path: pathlib.Path | None = None,
     batch_size: int = 2,
     sample_with_replacement: int | None = 10,
+    save_correction_files: bool = False,
     lr_tuning: LRTuningConfig | None = None,
 ):
     if derived_forcings is None:
@@ -440,6 +441,7 @@ def _get_test_yaml_files(
         data_writer=DataWriterConfig(
             save_monthly_files=False,
             save_prediction_files=False,
+            save_correction_files=save_correction_files,
             files=[FileWriterConfig("autoregressive")],
         ),
         aggregator=InferenceEvaluatorAggregatorConfig(),
@@ -505,6 +507,7 @@ def _setup(
     validate_using_ema: bool = False,
     multi_validation: bool = False,
     use_variable_masking: bool = False,
+    save_correction_files: bool = False,
     lr_tuning: LRTuningConfig | None = None,
 ):
     if not path.exists():
@@ -616,6 +619,7 @@ def _setup(
         validate_using_ema=validate_using_ema,
         multi_validation=multi_validation,
         partial_train_data_path=partial_data_dir,
+        save_correction_files=save_correction_files,
         lr_tuning=lr_tuning,
     )
     return train_config_filename, inference_config_filename
@@ -806,6 +810,66 @@ def test_train_and_inference(
         tmp_path / "results" / "autoregressive_target.nc", decode_timedelta=False
     )
     assert np.sum(np.isnan(ds_target["baz"].values)) == 0
+
+
+@pytest.mark.medium_duration
+def test_train_and_inference_correction_metrics(tmp_path):
+    """A corrector-equipped stepper logs correction metrics end to end.
+
+    The plain SFNO setup wires an ``AtmosphereCorrectorConfig(conserve_dry_air=
+    True)`` corrector that modifies ``PRESsfc``, so ``StepOutput.uncorrected`` is
+    non-empty and correction metrics are produced. Inline training inference logs
+    only the time-mean correction metrics (its per-step time series are dropped);
+    standalone inference additionally logs the per-step series and writes
+    ``autoregressive_corrections.nc``.
+    """
+    train_config, inference_config = _setup(
+        tmp_path,
+        nettype="SphericalFourierNeuralOperatorNet",
+        log_to_wandb=True,
+        n_time=10,
+        inference_forward_steps=2,
+        save_per_epoch_diagnostics=True,
+        save_correction_files=True,
+    )
+    with mock_wandb() as wandb:
+        train_main(yaml_config=train_config)
+        epoch_logs = wandb.get_logs()[-1]
+
+    # Inline training inference: time-mean correction metrics are present...
+    assert "inference_0/time_mean_norm/correction_magnitude/PRESsfc" in epoch_logs
+    assert "inference_0/time_mean_norm/correction_magnitude/channel_mean" in epoch_logs
+    # ...but the per-step time series are dropped (inline disables time series).
+    assert not any(
+        k.startswith("inference_0/") and "weighted_correction" in k for k in epoch_logs
+    )
+    # The signed correction time-mean map is flushed to diagnostics.
+    inline_dir = tmp_path / "results" / "output" / "inference_0" / "epoch_0001"
+    assert (inline_dir / "time_mean_norm_correction_diagnostics.nc").exists()
+
+    (tmp_path / "stats" / "stats-mean.nc").unlink()
+    (tmp_path / "stats" / "stats-stddev.nc").unlink()
+
+    with mock_wandb() as wandb:
+        wandb.configure(log_to_wandb=True)
+        inference_evaluator_main(yaml_config=inference_config)
+        inference_logs = wandb.get_logs()
+
+    all_keys: set[str] = set()
+    for log in inference_logs:
+        all_keys.update(log.keys())
+    # Standalone inference: time-mean summary metric and per-step time series
+    # (the standalone evaluator logs under the "inference/" prefix).
+    assert "inference/time_mean_norm/correction_magnitude/PRESsfc" in all_keys
+    assert "inference/mean_norm/weighted_correction_magnitude/PRESsfc" in all_keys
+    assert "inference/mean_norm/weighted_correction_std/PRESsfc" in all_keys
+
+    # The denormalized correction file is written for the corrected variable.
+    corrections_path = tmp_path / "results" / "autoregressive_corrections.nc"
+    assert corrections_path.exists()
+    with xr.open_dataset(corrections_path, decode_timedelta=False) as ds_corr:
+        assert "PRESsfc" in ds_corr
+        assert np.sum(np.isnan(ds_corr["PRESsfc"].values)) == 0
 
 
 @pytest.mark.medium_duration
