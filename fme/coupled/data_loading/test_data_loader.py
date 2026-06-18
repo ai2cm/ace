@@ -62,7 +62,7 @@ def _save_netcdf(
     dim_sizes,
     variable_names,
     calendar,
-    realm: Literal["ocean", "atmosphere"],
+    realm: Literal["ocean", "ice", "atmosphere"],
     timestep_size=1,
     timestep_start=0,
     nz=3,
@@ -120,6 +120,13 @@ def _save_netcdf(
                         mask == 1, masked_fill_value
                     )
             data_vars[f"idepth_{i}"] = float(i)
+    if realm == "ice":
+        dim_sizes_to_use = dim_sizes_without_time
+        data = np.ones(tuple(dim_sizes_to_use.values()))
+        data[0, 0] = 0.0
+        names = [name for name in data_vars if name != "mask_2d"]
+        for name in names:
+            data_vars[name] = data_vars[name].where(data == 1, masked_fill_value)
     ds = xr.Dataset(data_vars=data_vars, coords=coords)
     ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
     return ds
@@ -164,6 +171,7 @@ class MockComponentData:
 @dataclasses.dataclass
 class MockCoupledData:
     ocean: MockComponentData
+    ice: MockComponentData
     atmosphere: MockComponentData
 
     @property
@@ -171,18 +179,23 @@ class MockCoupledData:
         return len(self.ocean.ds["time"])
 
     @property
+    def n_times_ice(self):
+        return len(self.ice.ds["time"])
+
+    @property
     def n_times_atmosphere(self):
         return len(self.atmosphere.ds["time"])
 
     @property
     def img_shape(self) -> tuple[int, int]:
-        # NOTE: assumes atmosphere has same img_shape
+        # NOTE: assumes atmosphere and ice have same img_shape
         return self.ocean.ds[next(iter(self.ocean.ds.data_vars))].shape[-2:]
 
     @property
     def hcoord(self) -> CoupledHorizontalCoordinates:
         return CoupledHorizontalCoordinates(
             ocean=self.ocean.hcoord,
+            ice=self.ice.hcoord,
             atmosphere=self.atmosphere.hcoord,
         )
 
@@ -190,6 +203,7 @@ class MockCoupledData:
     def vcoord(self) -> CoupledVerticalCoordinate:
         return CoupledVerticalCoordinate(
             ocean=cast(OptionalDepthCoordinate, self.ocean.vcoord),
+            ice=cast(OptionalDepthCoordinate, self.ice.vcoord),
             atmosphere=cast(
                 OptionalHybridSigmaPressureCoordinate, self.atmosphere.vcoord
             ),
@@ -199,22 +213,30 @@ class MockCoupledData:
     def dataset_config(self) -> CoupledDatasetConfig:
         return CoupledDatasetConfig(
             ocean=XarrayDataConfig(str(self.ocean.data_dir)),
+            ice=XarrayDataConfig(str(self.ice.data_dir)),
             atmosphere=XarrayDataConfig(str(self.atmosphere.data_dir)),
         )
 
     def get_dataset_config_with_kwargs(
         self,
         ocean_kwargs: dict[str, Any] | None = None,
+        ice_kwargs: dict[str, Any] | None = None,
         atmos_kwargs: dict[str, Any] | None = None,
     ) -> CoupledDatasetConfig:
         if ocean_kwargs is None:
             ocean_kwargs = {}
+        if ice_kwargs is None:
+            ice_kwargs = {}
         if atmos_kwargs is None:
             atmos_kwargs = {}
         return CoupledDatasetConfig(
             ocean=XarrayDataConfig(
                 data_path=str(self.ocean.data_dir),
                 **ocean_kwargs,
+            ),
+            ice=XarrayDataConfig(
+                data_path=str(self.ice.data_dir),
+                **ice_kwargs,
             ),
             atmosphere=XarrayDataConfig(
                 data_path=str(self.atmosphere.data_dir),
@@ -236,48 +258,67 @@ class MockCoupledData:
             spatial_mask_provider=self.ocean.spatial_mask_provider,
             timestep=self.ocean.timestep,
         )
+        ice_info = DatasetInfo(
+            horizontal_coordinates=self.ice.hcoord,
+            vertical_coordinate=self.ice.vcoord,
+            spatial_mask_provider=self.ice.spatial_mask_provider,
+            timestep=self.ice.timestep,
+        )
         atmos_info = DatasetInfo(
             horizontal_coordinates=self.atmosphere.hcoord,
             vertical_coordinate=self.atmosphere.vcoord,
             spatial_mask_provider=self.atmosphere.spatial_mask_provider,
             timestep=self.atmosphere.timestep,
         )
-        return CoupledDatasetInfo(ocean=ocean_info, atmosphere=atmos_info)
+        return CoupledDatasetInfo(ocean=ocean_info, atmosphere=atmos_info, ice=ice_info)
 
 
 def create_coupled_data_on_disk(
     data_dir: pathlib.Path,
     n_forward_times_ocean: int,
+    n_forward_times_ice: int,
     n_forward_times_atmosphere: int,
     ocean_names: list[str],
+    ice_names: list[str],
     atmosphere_names: list[str],
     atmosphere_start_time_offset_from_ocean: int = 0,
+    ice_start_time_offset_from_ocean: int = 0,
     n_levels_ocean: int = 2,
     n_levels_atmosphere: int = 2,
     ocean_timestep_size_in_days: int | None = None,
     masked_fill_value: float = float("nan"),
 ) -> MockCoupledData:
-    """Create synthetic coupled ocean-atmosphere data on disk for testing.
+    """Create synthetic coupled ocean-ice-atmosphere data on disk for testing.
 
-    Creates netCDF files with random data for ocean and atmosphere components,
-    along with statistics files. The ocean and atmosphere can have different
-    timesteps, and the atmosphere can optionally start earlier than the ocean.
+    Creates netCDF files with random data for ocean, ice, and atmosphere components,
+    along with statistics files. The ocean, ice and atmosphere can have different
+    timesteps, and the atmosphere and ice can optionally start earlier than the ocean.
 
     Args:
         data_dir: Directory where data will be written. Will create subdirectories
-            ocean/, atmos/, and stats/.
+            ocean/, ice/, atmos/, and stats/.
         n_forward_times_ocean: Number of forward timesteps for ocean data.
             Total ocean timesteps will be n_forward_times_ocean + 1 (including IC).
+        n_forward_times_ice: Number of forward timesteps for ice
+            data. Must be a multiple of n_forward_times_ocean. Total ice
+            timesteps will be n_forward_times_ice + 1 +
+            ice_start_time_offset_from_ocean.
         n_forward_times_atmosphere: Number of forward timesteps for atmosphere
             data. Must be a multiple of n_forward_times_ocean. Total atmosphere
             timesteps will be n_forward_times_atmosphere + 1 +
             atmosphere_start_time_offset_from_ocean.
         ocean_names: List of variable names to create in the ocean dataset.
+        ice_names: List of variable names to create in the ice dataset.
         atmosphere_names: List of variable names to create in the atmosphere dataset.
         atmosphere_start_time_offset_from_ocean: Non-negative integer offset in
             atmosphere timesteps. When 0, ocean and atmosphere start at the same time
             (1970-01-01). When positive, atmosphere starts earlier by this many
             atmosphere timesteps. For example, with offset=1, atmosphere starts at
+            1969-12-31 while ocean starts at 1970-01-01. Default is 0.
+        ice_start_time_offset_from_ocean: Non-negative integer offset in
+            ice timesteps. When 0, ocean and ice start at the same time
+            (1970-01-01). When positive, ice starts earlier by this many
+            ice timesteps. For example, with offset=1, ice starts at
             1969-12-31 while ocean starts at 1970-01-01. Default is 0.
         n_levels_ocean: Number of ocean depth levels. Default is 2.
         n_levels_atmosphere: Number of atmosphere vertical levels. Default is 2.
@@ -288,11 +329,11 @@ def create_coupled_data_on_disk(
             target comparison tests).
 
     Returns:
-        MockCoupledData containing the created ocean and atmosphere datasets,
+        MockCoupledData containing the created ocean, ice, and atmosphere datasets,
         along with paths to data and statistics files.
 
     Note:
-        The atmosphere timestep is fixed at 1 day. If not provided, the ocean
+        The atmosphere and ice timesteps are fixed at 1 day. If not provided, the ocean
         timestep is automatically calculated as
         (n_forward_times_atmosphere / n_forward_times_ocean) days to ensure the
         datasets span the same total time period.
@@ -328,6 +369,28 @@ def create_coupled_data_on_disk(
         masked_fill_value=masked_fill_value,
     )
 
+    ice_dir = data_dir / "ice"
+    ice_dir.mkdir()
+    n_times_ice = n_forward_times_ice + 1 + ice_start_time_offset_from_ocean
+    # ice initial time may be earlier than ocean's
+    timestep_start_ice = -ice_start_time_offset_from_ocean
+    ice_dim_sizes = {
+        "time": n_times_ice,
+        "lat": N_LAT,
+        "lon": N_LON,
+    }
+    ice_ds = _save_netcdf(
+        filename=ice_dir / "data.nc",
+        dim_sizes=ice_dim_sizes,
+        variable_names=ice_names,
+        calendar="proleptic_gregorian",
+        realm="ice",
+        timestep_size=1,
+        timestep_start=timestep_start_ice,
+        nz=1,
+        masked_fill_value=masked_fill_value,
+    )
+
     atmos_dir = data_dir / "atmos"
     atmos_dir.mkdir()
     n_times_atmos = (
@@ -353,11 +416,12 @@ def create_coupled_data_on_disk(
     )
     # _save_netcdf creates integer times in units of "days since 1970-01-01"
     timedelta_atmos = "1D"
+    timedelta_ice = "1D"
     timedelta_ocean = f"{ocean_timestep_size}D"
 
     stats_dir = data_dir / "stats"
     stats_dir.mkdir()
-    all_names = list(set(ocean_names + atmosphere_names))
+    all_names = list(set(ocean_names + atmosphere_names + ice_names))
     save_stats_netcdfs(
         stats_dir / "means.nc",
         stats_dir / "stds.nc",
@@ -370,6 +434,13 @@ def create_coupled_data_on_disk(
             means_path=str(stats_dir / "means.nc"),
             stds_path=str(stats_dir / "stds.nc"),
             timedelta=timedelta_ocean,
+        ),
+        ice=MockComponentData(
+            ds=ice_ds,
+            data_dir=str(ice_dir),
+            means_path=str(stats_dir / "means.nc"),
+            stds_path=str(stats_dir / "stds.nc"),
+            timedelta=timedelta_ice,
         ),
         atmosphere=MockComponentData(
             ds=atmos_ds,
@@ -388,6 +459,7 @@ def test_coupled_data_loader(tmp_path, atmosphere_times_offset: int):
     # Create datasets with fast and slow timesteps.
     ocean_names = ["bar"]
     atmos_names = ["foo"]
+    ice_names = ["baz"]
 
     n_ics = 2
     ics = []
@@ -398,18 +470,24 @@ def test_coupled_data_loader(tmp_path, atmosphere_times_offset: int):
         ic = create_coupled_data_on_disk(
             ic_path,
             n_forward_times_ocean=2,
+            n_forward_times_ice=4,
             n_forward_times_atmosphere=4,
             ocean_names=ocean_names,
             atmosphere_names=atmos_names,
+            ice_names=ice_names,
             atmosphere_start_time_offset_from_ocean=atmosphere_times_offset,
+            ice_start_time_offset_from_ocean=atmosphere_times_offset,
         )
         ics.append(ic)
 
     # subset atmosphere data to align with beginning of ocean data
+    # keep ice aligned with atmosphere for simplicity
     if atmosphere_times_offset > 0:
         atmos_data_subset = Slice(start=atmosphere_times_offset)
+        ice_data_subset = Slice(start=atmosphere_times_offset)
     else:
         atmos_data_subset = Slice()
+        ice_data_subset = Slice()
 
     config = CoupledDataLoaderConfig(
         dataset=CoupledConcatDatasetConfig(
@@ -417,6 +495,10 @@ def test_coupled_data_loader(tmp_path, atmosphere_times_offset: int):
                 CoupledDatasetConfig(
                     ocean=XarrayDataConfig(
                         data_path=ics[i].ocean.data_dir,
+                    ),
+                    ice=XarrayDataConfig(
+                        data_path=ics[i].ice.data_dir,
+                        subset=ice_data_subset,
                     ),
                     atmosphere=XarrayDataConfig(
                         data_path=ics[i].atmosphere.data_dir,
@@ -433,6 +515,8 @@ def test_coupled_data_loader(tmp_path, atmosphere_times_offset: int):
     coupled_requirements = CoupledDataRequirements(
         ocean_timestep=datetime.timedelta(days=2),
         ocean_requirements=DataRequirements(ocean_names, n_timesteps=2),
+        ice_timestep=datetime.timedelta(days=1),
+        ice_requirements=DataRequirements(ice_names, n_timesteps=3),
         atmosphere_timestep=datetime.timedelta(days=1),
         atmosphere_requirements=DataRequirements(atmos_names, n_timesteps=3),
     )
@@ -442,14 +526,18 @@ def test_coupled_data_loader(tmp_path, atmosphere_times_offset: int):
     assert data.n_batches == 2 * n_ics  # 2 samples per IC
     for batch in data.loader:
         ocean_data = batch.ocean_data
+        ice_data = batch.ice_data
         atmosphere_data = batch.atmosphere_data
         assert isinstance(ocean_data, BatchData)
+        assert isinstance(ice_data, BatchData)
         assert isinstance(atmosphere_data, BatchData)
         assert len(ocean_data.time.isel(sample=0).values) == 2  # IC + 1 forward step
+        assert len(ice_data.time.isel(sample=0).values) == 3  # IC + 2 forward steps
         assert (
             len(atmosphere_data.time.isel(sample=0).values) == 3
         )  # IC + 2 forward steps
         assert set(ocean_data.data.keys()) == set(ocean_names)
+        assert set(ice_data.data.keys()) == set(ice_names)
         assert set(atmosphere_data.data.keys()) == set(atmos_names)
         # initial condition times should match:
         assert ocean_data.time.isel(time=0) == atmosphere_data.time.isel(time=0)
@@ -458,26 +546,38 @@ def test_coupled_data_loader(tmp_path, atmosphere_times_offset: int):
         # check data matches expectations
         assert ocean_data.data["bar"].shape[1] == 2
         assert atmosphere_data.data["foo"].shape[1] == 3
+        assert ice_data.data["baz"].shape[1] == 3
 
     # check that the sample data matches
     ic_idx = 0
     sample_idx = 1
     ocean_ds = ics[ic_idx].ocean.ds
+    ice_ds = ics[ic_idx].ice.ds
     atmos_ds = ics[ic_idx].atmosphere.ds
     sample = data._loader._dataset[sample_idx]  # type: ignore
     assert isinstance(sample, CoupledDatasetItem)
     ocean_sample_init_time = sample.ocean[1].isel(time=0).item()
+    ice_sample_init_time = sample.ice[1].isel(time=0).item()
     atmos_sample_init_time = sample.atmosphere[1].isel(time=0).item()
 
-    # we already checked for matching ocean/atmos sample init times above, now
-    # checking that they match times at the right positions in each dataset
+    # we already checked for matching ocean/ice/atmos sample init times above,
+    # now checking that they match times at the right positions in each dataset
     assert ocean_sample_init_time == ocean_ds.isel(time=1)["time"].item()
+    assert (
+        ice_sample_init_time
+        == ice_ds.isel(time=2 + atmosphere_times_offset)["time"].item()
+    )
     assert (
         atmos_sample_init_time
         == atmos_ds.isel(time=2 + atmosphere_times_offset)["time"].item()
     )
 
     expected_ocean = ocean_ds["bar"].isel(time=slice(1, 3)).values
+    expected_ice = (
+        ice_ds["baz"]
+        .isel(time=slice(2 + atmosphere_times_offset, 5 + atmosphere_times_offset))
+        .values
+    )
     expected_atmos = (
         atmos_ds["foo"]
         .isel(time=slice(2 + atmosphere_times_offset, 5 + atmosphere_times_offset))
@@ -486,6 +586,7 @@ def test_coupled_data_loader(tmp_path, atmosphere_times_offset: int):
     # check that
     assert np.allclose(sample.ocean[0]["bar"].cpu().numpy(), expected_ocean)
     assert np.allclose(sample.atmosphere[0]["foo"].cpu().numpy(), expected_atmos)
+    assert np.allclose(sample.ice[0]["baz"].cpu().numpy(), expected_ice)
 
 
 def test_zarr_engine_used_true():
@@ -494,12 +595,16 @@ def test_zarr_engine_used_true():
             concat=[
                 CoupledDatasetConfig(
                     ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
+                    ice=XarrayDataConfig(
+                        data_path="ice", file_pattern="data.zarr", engine="zarr"
+                    ),
                     atmosphere=XarrayDataConfig(
                         data_path="atmos", file_pattern="data.zarr", engine="zarr"
                     ),
                 ),
                 CoupledDatasetConfig(
                     ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
+                    ice=XarrayDataConfig(data_path="ice", engine="netcdf4"),
                     atmosphere=XarrayDataConfig(data_path="atmos", engine="netcdf4"),
                 ),
             ]
@@ -513,6 +618,7 @@ def test_zarr_engine_used_false():
     config = CoupledDataLoaderConfig(
         dataset=CoupledDatasetConfig(
             ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
+            ice=XarrayDataConfig(data_path="ice", engine="netcdf4"),
             atmosphere=XarrayDataConfig(data_path="atmos", engine="netcdf4"),
         ),
         batch_size=1,
@@ -524,6 +630,9 @@ def test_zarr_engine_used_true_inference():
     config = InferenceDataLoaderConfig(
         dataset=CoupledDatasetWithOptionalOceanConfig(
             ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
+            ice=XarrayDataConfig(
+                data_path="ice", file_pattern="data.zarr", engine="zarr"
+            ),
             atmosphere=XarrayDataConfig(
                 data_path="atmos", file_pattern="data.zarr", engine="zarr"
             ),
@@ -537,6 +646,7 @@ def test_zarr_engine_used_false_inference():
     config = InferenceDataLoaderConfig(
         dataset=CoupledDatasetWithOptionalOceanConfig(
             ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
+            ice=XarrayDataConfig(data_path="ice", engine="netcdf4"),
             atmosphere=XarrayDataConfig(data_path="atmos", engine="netcdf4"),
         ),
         start_indices=ExplicitIndices([0]),
@@ -546,8 +656,10 @@ def test_zarr_engine_used_false_inference():
 
 def test_coupled_data_loader_merge_no_concat(tmp_path):
     ocean_names = ["var_ocean_1", "var_ocean_2"]
+    ice_names = ["var_ice_1", "var_ice_2"]
     atmos_names = ["var_atmos_1", "var_atmos_2"]
     n_forward_times_ocean = 2
+    n_forward_times_ice = 4
     n_forward_times_atmosphere = 4
 
     data_path = tmp_path / "data"
@@ -560,10 +672,18 @@ def test_coupled_data_loader_merge_no_concat(tmp_path):
     ocean_dir_part1.mkdir()
     ocean_dir_part2.mkdir()
 
+    ice_dir = data_path / "ice"
+    ice_dir.mkdir()
+
     atmos_dir = data_path / "atmos"
     atmos_dir.mkdir()
 
     ocean_dim_sizes = {"time": n_forward_times_ocean + 1, "lat": N_LAT, "lon": N_LON}
+    ice_dim_sizes = {
+        "time": n_forward_times_ice + 1,
+        "lat": N_LAT,
+        "lon": N_LON,
+    }
     atmos_dim_sizes = {
         "time": n_forward_times_atmosphere + 1,
         "lat": N_LAT,
@@ -573,6 +693,7 @@ def test_coupled_data_loader_merge_no_concat(tmp_path):
     ocean_timestep_size = n_forward_times_atmosphere // n_forward_times_ocean
 
     ocean_config: MergeNoConcatDatasetConfig | XarrayDataConfig
+    ice_config: MergeNoConcatDatasetConfig | XarrayDataConfig
     atmos_config: MergeNoConcatDatasetConfig | XarrayDataConfig
     _save_netcdf(
         filename=ocean_dir_part1 / "data.nc",
@@ -591,6 +712,13 @@ def test_coupled_data_loader_merge_no_concat(tmp_path):
         timestep_size=ocean_timestep_size,
     )
     _save_netcdf(
+        filename=ice_dir / "data.nc",
+        dim_sizes=ice_dim_sizes,
+        variable_names=ice_names,
+        calendar="proleptic_gregorian",
+        realm="ice",
+    )
+    _save_netcdf(
         filename=atmos_dir / "data.nc",
         dim_sizes=atmos_dim_sizes,
         variable_names=atmos_names,
@@ -603,12 +731,14 @@ def test_coupled_data_loader_merge_no_concat(tmp_path):
             XarrayDataConfig(data_path=str(ocean_dir_part2)),
         ]
     )
+    ice_config = XarrayDataConfig(data_path=str(ice_dir))
     atmos_config = XarrayDataConfig(data_path=str(atmos_dir))
 
     # test CoupledDataLoaderConfig
     config = CoupledDataLoaderConfig(
         dataset=CoupledDatasetConfig(
             ocean=ocean_config,
+            ice=ice_config,
             atmosphere=atmos_config,
         ),
         batch_size=1,
@@ -617,6 +747,8 @@ def test_coupled_data_loader_merge_no_concat(tmp_path):
     coupled_requirements = CoupledDataRequirements(
         ocean_timestep=datetime.timedelta(days=ocean_timestep_size),
         ocean_requirements=DataRequirements(ocean_names, n_timesteps=2),
+        ice_timestep=datetime.timedelta(days=1),
+        ice_requirements=DataRequirements(ice_names, n_timesteps=3),
         atmosphere_timestep=datetime.timedelta(days=1),
         atmosphere_requirements=DataRequirements(atmos_names, n_timesteps=3),
     )
@@ -624,12 +756,14 @@ def test_coupled_data_loader_merge_no_concat(tmp_path):
     data = get_gridded_data(config, False, coupled_requirements)
     batch = next(iter(data.loader))
     assert set(batch.ocean_data.data.keys()) == set(ocean_names)
+    assert set(batch.ice_data.data.keys()) == set(ice_names)
     assert set(batch.atmosphere_data.data.keys()) == set(atmos_names)
 
     # test InferenceDataLoaderConfig
     inference_config = InferenceDataLoaderConfig(
         dataset=CoupledDatasetWithOptionalOceanConfig(
             ocean=ocean_config,
+            ice=ice_config,
             atmosphere=atmos_config,
         ),
         start_indices=ExplicitIndices([0]),
@@ -648,6 +782,7 @@ def test_coupled_data_loader_merge_no_concat(tmp_path):
 
     inference_batch = next(iter(loader))
     assert set(inference_batch.ocean_data.data.keys()) == set(ocean_names)
+    assert set(inference_batch.ice_data.data.keys()) == set(ice_names)
     assert set(inference_batch.atmosphere_data.data.keys()) == set(atmos_names)
 
 
@@ -656,7 +791,9 @@ def test_get_forcing_data(tmp_path, n_initial_conditions):
     calendar = "proleptic_gregorian"
     ocean_names = ["bar"]
     atmos_names = ["foo"]
+    ice_names = ["baz"]
     n_forward_times_ocean = 4
+    n_forward_times_ice = 8
     n_forward_times_atmosphere = 8
     inner_steps = 2
     total_coupled_steps = 2
@@ -664,15 +801,19 @@ def test_get_forcing_data(tmp_path, n_initial_conditions):
     create_coupled_data_on_disk(
         tmp_path,
         n_forward_times_ocean=n_forward_times_ocean,
+        n_forward_times_ice=n_forward_times_ice,
         n_forward_times_atmosphere=n_forward_times_atmosphere,
         ocean_names=ocean_names,
+        ice_names=ice_names,
         atmosphere_names=atmos_names,
         atmosphere_start_time_offset_from_ocean=0,
+        ice_start_time_offset_from_ocean=0,
     )
     config = CoupledForcingDataLoaderConfig(
         atmosphere=ForcingDataLoaderConfig(
             XarrayDataConfig(data_path=tmp_path / "atmos")
         ),
+        ice=ForcingDataLoaderConfig(XarrayDataConfig(data_path=tmp_path / "ice")),
         ocean=ForcingDataLoaderConfig(XarrayDataConfig(data_path=tmp_path / "ocean")),
     )
     ocean_timestep_size = n_forward_times_atmosphere / n_forward_times_ocean
@@ -681,6 +822,10 @@ def test_get_forcing_data(tmp_path, n_initial_conditions):
         ocean_requirements=DataRequirements(
             ocean_names, n_timesteps=coupled_steps_in_memory + 1
         ),
+        ice_timestep=datetime.timedelta(days=1),
+        ice_requirements=DataRequirements(
+            ice_names, n_timesteps=coupled_steps_in_memory * inner_steps + 1
+        ),
         atmosphere_timestep=datetime.timedelta(days=1),
         atmosphere_requirements=DataRequirements(
             atmos_names, n_timesteps=coupled_steps_in_memory * inner_steps + 1
@@ -688,6 +833,13 @@ def test_get_forcing_data(tmp_path, n_initial_conditions):
     )
     atmos_initial_condition = BatchData.new_for_testing(
         names=atmos_names,
+        n_samples=n_initial_conditions,
+        n_timesteps=1,
+        t_initial=cftime.datetime(1970, 1, 1),
+        calendar=calendar,
+    )
+    ice_initial_condition = BatchData.new_for_testing(
+        names=ice_names,
         n_samples=n_initial_conditions,
         n_timesteps=1,
         t_initial=cftime.datetime(1970, 1, 1),
@@ -707,32 +859,48 @@ def test_get_forcing_data(tmp_path, n_initial_conditions):
         initial_condition=CoupledPrognosticState(
             ocean_data=PrognosticState(ocean_initial_condition),
             atmosphere_data=PrognosticState(atmos_initial_condition),
+            ice_data=PrognosticState(ice_initial_condition),
         ),  # type: ignore
     )
     batch_data = next(iter(data.loader))
     assert isinstance(batch_data, CoupledBatchData)
     assert isinstance(batch_data.ocean_data.data["bar"], torch.Tensor)
     assert isinstance(batch_data.atmosphere_data.data["foo"], torch.Tensor)
+    assert isinstance(batch_data.ice_data.data["baz"], torch.Tensor)
     assert batch_data.ocean_data.data["bar"].shape[0] == n_initial_conditions
     assert batch_data.ocean_data.data["bar"].shape[1] == total_coupled_steps + 1
+    assert batch_data.ice_data.data["baz"].shape[0] == n_initial_conditions
     assert batch_data.atmosphere_data.data["foo"].shape[0] == n_initial_conditions
     assert (
         batch_data.atmosphere_data.data["foo"].shape[1]
         == total_coupled_steps * inner_steps + 1
     )
+    assert (
+        batch_data.ice_data.data["baz"].shape[1]
+        == total_coupled_steps * inner_steps + 1
+    )
     assert list(batch_data.ocean_data.time.dims) == ["sample", "time"]
     assert list(batch_data.atmosphere_data.time.dims) == ["sample", "time"]
+    assert list(batch_data.ice_data.time.dims) == ["sample", "time"]
     xr.testing.assert_allclose(
         batch_data.ocean_data.time[:, 0], ocean_initial_condition.time[:, 0]
+    )
+    xr.testing.assert_allclose(
+        batch_data.ice_data.time[:, 0], ice_initial_condition.time[:, 0]
     )
     xr.testing.assert_allclose(
         batch_data.atmosphere_data.time[:, 0], atmos_initial_condition.time[:, 0]
     )
     assert batch_data.ocean_data.time.dt.calendar == calendar
+    assert batch_data.ice_data.time.dt.calendar == calendar
     assert batch_data.atmosphere_data.time.dt.calendar == calendar
     xr.testing.assert_equal(
         data.initial_condition.ocean_data.as_batch_data().time,
         ocean_initial_condition.time,
+    )
+    xr.testing.assert_equal(
+        data.initial_condition.ice_data.as_batch_data().time,
+        ice_initial_condition.time,
     )
     xr.testing.assert_equal(
         data.initial_condition.atmosphere_data.as_batch_data().time,
@@ -741,6 +909,10 @@ def test_get_forcing_data(tmp_path, n_initial_conditions):
     np.testing.assert_allclose(
         data.initial_condition.ocean_data.as_batch_data().data["bar"].cpu().numpy(),
         ocean_initial_condition.data["bar"].cpu().numpy(),
+    )
+    np.testing.assert_allclose(
+        data.initial_condition.ice_data.as_batch_data().data["baz"].cpu().numpy(),
+        ice_initial_condition.data["baz"].cpu().numpy(),
     )
     np.testing.assert_allclose(
         data.initial_condition.atmosphere_data.as_batch_data()

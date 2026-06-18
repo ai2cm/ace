@@ -59,9 +59,18 @@ class InferenceDataLoaderConfig:
             ds.zarr_engine_used for ds in self.dataset.data_configs if ds is not None
         )
         # issue warning if subset is used in the atmosphere dataset
-        if self.dataset.atmosphere.subset != Slice(None, None, None):
+        if (
+            self.dataset.atmosphere is not None
+            and self.dataset.atmosphere.subset != Slice(None, None, None)
+        ):
             raise ValueError(
                 "'subset' cannot be used in the atmosphere dataset during inference."
+            )
+        if self.dataset.ice is not None and self.dataset.ice.subset != Slice(
+            None, None, None
+        ):
+            raise ValueError(
+                "'subset' cannot be used in the ice dataset during inference."
             )
         if self.dataset.ocean is not None and self.dataset.ocean.subset != Slice(
             None, None, None
@@ -92,34 +101,114 @@ class InferenceDataset(torch.utils.data.Dataset):
         initial_time: xr.DataArray | None = None,
     ):
         ocean_reqs = requirements.ocean_requirements
+        ice_reqs = requirements.ice_requirements
         atmosphere_reqs = requirements.atmosphere_requirements
         ocean: ComponentDatasetType | DummyDataset
-        atmosphere: ComponentDatasetType
+        ice: ComponentDatasetType | DummyDataset
+        atmosphere: ComponentDatasetType | DummyDataset
 
-        if config.dataset.ocean is not None:
-            ocean, ocean_properties = config.dataset.ocean.build(
-                ocean_reqs.names, ocean_reqs.n_timesteps_schedule
+        ocean = None
+        ocean_properties = None
+        ice = None
+        ice_properties = None
+        atmosphere = None
+        atmosphere_properties = None
+        if config.dataset.atmosphere is None:
+            if config.dataset.ocean is not None:
+                ocean, ocean_properties = config.dataset.ocean.build(
+                    ocean_reqs.names, ocean_reqs.n_timesteps_schedule
+                )
+            else:
+                assert dataset_info is not None
+                ocean, ocean_properties = _make_dummy_ocean_forcing(
+                    dataset_info=dataset_info,
+                    initial_time=initial_time,
+                    total_coupled_steps=total_coupled_steps,
+                    ocean_reqs=ocean_reqs,
+                )
+            ocean_properties = self._update_ocean_mask(ocean_properties, dataset_info)
+            config.dataset.ice.update_subset(TimeSlice(start_time=ocean.first_time))
+            ice, ice_properties = config.dataset.ice.build(
+                ice_reqs.names, ice_reqs.n_timesteps_schedule
+            )
+        elif config.dataset.ice is None:
+            if config.dataset.ocean is not None:
+                ocean, ocean_properties = config.dataset.ocean.build(
+                    ocean_reqs.names, ocean_reqs.n_timesteps_schedule
+                )
+            else:
+                assert dataset_info is not None
+                ocean, ocean_properties = _make_dummy_ocean_forcing(
+                    dataset_info=dataset_info,
+                    initial_time=initial_time,
+                    total_coupled_steps=total_coupled_steps,
+                    ocean_reqs=ocean_reqs,
+                )
+            ocean_properties = self._update_ocean_mask(ocean_properties, dataset_info)
+            config.dataset.atmosphere.update_subset(
+                TimeSlice(start_time=ocean.first_time)
+            )
+            atmosphere, atmosphere_properties = config.dataset.atmosphere.build(
+                atmosphere_reqs.names, atmosphere_reqs.n_timesteps_schedule
+            )
+        elif config.dataset.ocean is None:
+            if config.dataset.ice is not None:
+                ice, ice_properties = config.dataset.ice.build(
+                    ice_reqs.names, ice_reqs.n_timesteps_schedule
+                )
+            else:
+                assert dataset_info is not None
+                ice, ice_properties = _make_dummy_ice_forcing(
+                    dataset_info=dataset_info,
+                    initial_time=initial_time,
+                    total_coupled_steps=total_coupled_steps,
+                    ice_reqs=ice_reqs,
+                )
+            config.dataset.atmosphere.update_subset(
+                TimeSlice(start_time=ice.first_time)
+            )
+            atmosphere, atmosphere_properties = config.dataset.atmosphere.build(
+                atmosphere_reqs.names, atmosphere_reqs.n_timesteps_schedule
             )
         else:
-            assert dataset_info is not None
-            ocean, ocean_properties = _make_dummy_ocean_forcing(
-                dataset_info=dataset_info,
-                initial_time=initial_time,
-                total_coupled_steps=total_coupled_steps,
-                ocean_reqs=ocean_reqs,
+            if config.dataset.ocean is not None:
+                ocean, ocean_properties = config.dataset.ocean.build(
+                    ocean_reqs.names, ocean_reqs.n_timesteps_schedule
+                )
+            else:
+                assert dataset_info is not None
+                ocean, ocean_properties = _make_dummy_ocean_forcing(
+                    dataset_info=dataset_info,
+                    initial_time=initial_time,
+                    total_coupled_steps=total_coupled_steps,
+                    ocean_reqs=ocean_reqs,
+                )
+            ocean_properties = self._update_ocean_mask(ocean_properties, dataset_info)
+            config.dataset.ice.update_subset(TimeSlice(start_time=ocean.first_time))
+            config.dataset.atmosphere.update_subset(
+                TimeSlice(start_time=ocean.first_time)
             )
-        ocean_properties = self._update_ocean_mask(ocean_properties, dataset_info)
-        config.dataset.atmosphere.update_subset(TimeSlice(start_time=ocean.first_time))
-        atmosphere, atmosphere_properties = config.dataset.atmosphere.build(
-            atmosphere_reqs.names, atmosphere_reqs.n_timesteps_schedule
+            ice, ice_properties = config.dataset.ice.build(
+                ice_reqs.names, ice_reqs.n_timesteps_schedule
+            )
+            atmosphere, atmosphere_properties = config.dataset.atmosphere.build(
+                atmosphere_reqs.names, atmosphere_reqs.n_timesteps_schedule
+            )
+
+        properties = CoupledDatasetProperties(
+            ocean=ocean_properties,
+            atmosphere=atmosphere_properties,
+            ice=ice_properties,
         )
-        properties = CoupledDatasetProperties(ocean_properties, atmosphere_properties)
+
         dataset = CoupledDataset(
             ocean=ocean,
             atmosphere=atmosphere,
+            ice=ice,
             properties=properties,
             n_steps_fast=requirements.n_steps_fast,
         )
+
         self._dataset = dataset
         self._properties = properties
         self._coupled_steps_in_memory = (
@@ -174,15 +263,26 @@ class InferenceDataset(torch.utils.data.Dataset):
                 continue
             i_window_start = i_start + self._start_indices[i_member]
             samples.append(self._dataset[i_window_start])
+
+        ocean_dims = None
+        ice_dims = None
+        atmosphere_dims = None
+        if self._dataset._ocean is not None:
+            ocean_dims = list(self.properties.horizontal_coordinates.ocean.dims)
+        if self._dataset._ice is not None:
+            ice_dims = list(self.properties.horizontal_coordinates.ice.dims)
+        if self._dataset._atmosphere is not None:
+            atmosphere_dims = list(
+                self.properties.horizontal_coordinates.atmosphere.dims
+            )
+
         return CoupledBatchData.collate_fn(
             samples,
-            ocean_horizontal_dims=list(
-                self.properties.horizontal_coordinates.ocean.dims
-            ),
-            atmosphere_horizontal_dims=list(
-                self.properties.horizontal_coordinates.atmosphere.dims
-            ),
+            ocean_horizontal_dims=ocean_dims,
+            ice_horizontal_dims=ice_dims,
+            atmosphere_horizontal_dims=atmosphere_dims,
             ocean_label_encoding=None,
+            ice_label_encoding=None,
             atmosphere_label_encoding=None,
         )
 
@@ -208,7 +308,8 @@ class InferenceDataset(torch.utils.data.Dataset):
 
 @dataclasses.dataclass
 class CoupledForcingDataLoaderConfig:
-    atmosphere: ForcingDataLoaderConfig
+    atmosphere: ForcingDataLoaderConfig | None = None
+    ice: ForcingDataLoaderConfig | None = None
     ocean: ForcingDataLoaderConfig | None = None
     num_data_workers: int = 0
 
@@ -216,18 +317,21 @@ class CoupledForcingDataLoaderConfig:
         self,
         start_indices: ExplicitIndices,
     ):
-        if self.ocean is None:
-            return InferenceDataLoaderConfig(
-                dataset=CoupledDatasetWithOptionalOceanConfig(
-                    atmosphere=self.atmosphere.dataset,
-                ),
-                start_indices=start_indices,
-                num_data_workers=self.num_data_workers,
-            )
+        ice = None
+        ocean = None
+        atmosphere = None
+        if self.atmosphere is not None:
+            atmosphere = self.atmosphere.dataset
+        if self.ice is not None:
+            ice = self.ice.dataset
+        if self.ocean is not None:
+            ocean = self.ocean.dataset
+
         return InferenceDataLoaderConfig(
             dataset=CoupledDatasetWithOptionalOceanConfig(
-                atmosphere=self.atmosphere.dataset,
-                ocean=self.ocean.dataset,
+                ice=ice,
+                ocean=ocean,
+                atmosphere=atmosphere,
             ),
             start_indices=start_indices,
             num_data_workers=self.num_data_workers,
@@ -259,3 +363,30 @@ def _make_dummy_ocean_forcing(
         labels=None,
     )
     return ocean, ocean_property
+
+
+def _make_dummy_ice_forcing(
+    dataset_info: CoupledDatasetInfo,
+    initial_time: xr.DataArray,
+    total_coupled_steps: int,
+    ice_reqs: DataRequirements,
+) -> tuple[DummyDataset, DatasetProperties]:
+    ice_property = DatasetProperties(
+        variable_metadata=dict(dataset_info.ice.variable_metadata),
+        vertical_coordinate=dataset_info.ice.vertical_coordinate,
+        horizontal_coordinates=dataset_info.ice.horizontal_coordinates,
+        mask_provider=dataset_info.ice.mask_provider,
+        timestep=dataset_info.ice.timestep,
+        is_remote=False,
+        all_labels=set(),
+    )
+    ts = dataset_info.ice.timestep
+    ice = DummyDataset(
+        start_time=initial_time.squeeze().values.flat[0],
+        end_time=initial_time.squeeze().values.flat[-1] + ts * total_coupled_steps,
+        timestep=ts,
+        n_timesteps=ice_reqs.n_timesteps_schedule,
+        horizontal_coordinates=dataset_info.ice.horizontal_coordinates,
+        labels=None,
+    )
+    return ice, ice_property

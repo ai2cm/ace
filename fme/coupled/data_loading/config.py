@@ -12,17 +12,19 @@ class CoupledDatasetConfig:
     """
     Parameters:
         ocean: Configuration for the ocean dataset.
+        ice: Configuration for the ocean dataset.
         atmosphere: Configuration for the atmosphere dataset.
     """
 
-    ocean: XarrayDataConfig | MergeNoConcatDatasetConfig
-    atmosphere: XarrayDataConfig | MergeNoConcatDatasetConfig
+    ocean: XarrayDataConfig | MergeNoConcatDatasetConfig | None = None
+    ice: XarrayDataConfig | MergeNoConcatDatasetConfig | None = None
+    atmosphere: XarrayDataConfig | MergeNoConcatDatasetConfig | None = None
 
     @property
     def data_configs(
         self,
-    ) -> Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig]:
-        return [self.ocean, self.atmosphere]
+    ) -> Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig | None]:
+        return [self.ocean, self.ice, self.atmosphere]
 
     @property
     def coupled_configs(self) -> Sequence["CoupledDatasetConfig"]:
@@ -34,17 +36,19 @@ class CoupledDatasetWithOptionalOceanConfig:
     """
     Parameters:
         ocean: Optional configuration for the ocean dataset.
-        atmosphere: Configuration for the atmosphere dataset.
+        ice: Optional configuration for the ice dataset.
+        atmosphere: Optional Configuration for the atmosphere dataset.
     """
 
-    atmosphere: XarrayDataConfig | MergeNoConcatDatasetConfig
+    atmosphere: XarrayDataConfig | MergeNoConcatDatasetConfig | None = None
+    ice: XarrayDataConfig | MergeNoConcatDatasetConfig | None = None
     ocean: XarrayDataConfig | MergeNoConcatDatasetConfig | None = None
 
     @property
     def data_configs(
         self,
     ) -> Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig | None]:
-        return [self.ocean, self.atmosphere]
+        return [self.ocean, self.ice, self.atmosphere]
 
 
 @dataclasses.dataclass
@@ -102,8 +106,21 @@ class CoupledDataLoaderConfig:
         """
         Return the labels that are available in the atmosphere dataset.
         """
+        if self.dataset.atmosphere is None:
+            return None
         return accumulate_labels(
             [ds.atmosphere.available_labels for ds in self.dataset.coupled_configs]
+        )
+
+    @property
+    def ice_available_labels(self) -> set[str] | None:
+        """
+        Return the labels that are available in the ice dataset.
+        """
+        if self.dataset.ice is None:
+            return None
+        return accumulate_labels(
+            [ds.ice.available_labels for ds in self.dataset.coupled_configs]
         )
 
     @property
@@ -111,6 +128,8 @@ class CoupledDataLoaderConfig:
         """
         Return the labels that are available in the ocean dataset.
         """
+        if self.dataset.ocean is None:
+            return None
         return accumulate_labels(
             [ds.ocean.available_labels for ds in self.dataset.coupled_configs]
         )
