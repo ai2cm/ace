@@ -55,6 +55,73 @@ def test_ocean_corrector_force_positive():
         assert torch.all(x >= 0.0)
 
 
+def test_sea_ice_fraction_keep_gradient_passes_gradient_through_clamp():
+    config = SeaIceFractionConfig(
+        sea_ice_fraction_name="sea_ice_fraction",
+        land_fraction_name="land_fraction",
+        remove_negative_ocean_fraction=False,
+    )
+    input_data = {"land_fraction": torch.zeros(IMG_SHAPE, device=DEVICE)}
+    # values both below 0 and above 1 so the clamp saturates at both ends
+    raw = torch.tensor([-0.5, 0.3, 1.5], device=DEVICE)
+
+    sif_plain = raw.clone().requires_grad_(True)
+    config({"sea_ice_fraction": sif_plain}, input_data)[
+        "sea_ice_fraction"
+    ].sum().backward()
+    # plain clamp: zero gradient where saturated, one in the interior
+    torch.testing.assert_close(
+        sif_plain.grad, torch.tensor([0.0, 1.0, 0.0], device=DEVICE)
+    )
+
+    sif_ste = raw.clone().requires_grad_(True)
+    out = config({"sea_ice_fraction": sif_ste}, input_data, keep_gradient=True)
+    # forward value is still clamped to [0, 1]
+    torch.testing.assert_close(
+        out["sea_ice_fraction"], torch.tensor([0.0, 0.3, 1.0], device=DEVICE)
+    )
+    out["sea_ice_fraction"].sum().backward()
+    torch.testing.assert_close(sif_ste.grad, torch.ones_like(raw))
+
+
+def test_ocean_corrector_keep_gradient_through_clamps_forward_unchanged():
+    # The straight-through flag must not change forward values; only gradients.
+    torch.manual_seed(0)
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    timestep = datetime.timedelta(seconds=3600)
+    sif = SeaIceFractionConfig(
+        sea_ice_fraction_name="sea_ice_fraction",
+        land_fraction_name="land_fraction",
+    )
+    input_data = {
+        "land_fraction": torch.ones(IMG_SHAPE, device=DEVICE) * 0.3,
+    }
+    gen_data = {
+        "so_0": torch.randn(IMG_SHAPE, device=DEVICE),
+        "sea_ice_fraction": torch.randn(IMG_SHAPE, device=DEVICE),
+    }
+    baseline = OceanCorrector(
+        OceanCorrectorConfig(
+            force_positive_names=["so_0"], sea_ice_fraction_correction=sif
+        ),
+        ops,
+        None,
+        timestep,
+    )(input_data, gen_data, {}, None)[0]
+    ste = OceanCorrector(
+        OceanCorrectorConfig(
+            force_positive_names=["so_0"],
+            sea_ice_fraction_correction=sif,
+            keep_gradient_through_clamps=True,
+        ),
+        ops,
+        None,
+        timestep,
+    )(input_data, gen_data, {}, None)[0]
+    for name in baseline:
+        torch.testing.assert_close(baseline[name], ste[name])
+
+
 def test_ocean_corrector_has_no_negative_ocean_fraction():
     config = OceanCorrectorConfig(
         sea_ice_fraction_correction=SeaIceFractionConfig(
