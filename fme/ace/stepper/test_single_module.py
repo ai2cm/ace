@@ -1392,6 +1392,63 @@ def test_input_dropout_ensemble_members_share_mask():
     ).all(), "ensemble members of a base sample must share the dropout mask"
 
 
+def test_input_dropout_mask_constant_across_rollout_steps():
+    """Training layer samples one dropout mask per rollout, not per step."""
+    n_base, n_ensemble, n_steps = 3, 1, 3
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": _DummyParamModule()}
+                    ),
+                    in_names=["a"],
+                    out_names=["a"],
+                    normalization=trivial_network_and_loss_normalization(["a"]),
+                    include_channel_mask_inputs=True,
+                    input_dropout=PerVariableMaskingConfig(rate=0.5),
+                )
+            ),
+        ),
+    )
+    stepper = _get_train_stepper(
+        config, n_ensemble=n_ensemble, loss=StepLossConfig(type="MSE")
+    )
+    data = get_data(["a"], n_samples=n_base, n_time=n_steps + 1).data
+    base_mask = torch.tensor([True, False, True], dtype=torch.bool, device=DEVICE)
+    expected = base_mask.repeat_interleave(n_ensemble).view(n_base, n_ensemble)
+
+    def _fixed_input_dropout_mask(batch_size, device):
+        assert batch_size == n_base
+        return {"a": base_mask.to(device)}
+
+    captured: list[torch.Tensor] = []
+
+    def _pre_hook(module, args):
+        captured.append(args[0].detach().cpu())
+
+    handle = stepper.modules[0].register_forward_pre_hook(_pre_hook)
+    optimization = OptimizationConfig().build(
+        modules=list(stepper.modules), max_epochs=1
+    )
+    try:
+        with patch.object(
+            stepper._stepper,
+            "make_input_dropout_mask",
+            side_effect=_fixed_input_dropout_mask,
+        ) as make_mask:
+            stepper.train_on_batch(data, optimization=optimization)
+    finally:
+        handle.remove()
+
+    assert make_mask.call_count == 1
+    assert len(captured) == n_steps
+    for packed in captured:
+        indicators = packed[:, 1:, 0, 0].view(n_base, n_ensemble)
+        torch.testing.assert_close(indicators.bool(), expected.cpu())
+
+
 def test_input_dropout_eval_mode_training_batch_applies_no_dropout():
     """A NullOptimization train_on_batch (eval mode) applies no input dropout.
 
