@@ -125,6 +125,10 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
         total_energy_budget_correction: If not None, force the generated data to
             conserve an idealized version of total energy using the provided
             configuration.
+        keep_gradient_through_clamps: If True, apply the ``force_positive`` clamp
+            with a straight-through estimator: the forward value is still clamped
+            to be non-negative, but gradient flows as if the clamp had not
+            happened, so clamped-negative cells still get a learning signal.
     """
 
     conserve_dry_air: bool = False
@@ -140,6 +144,7 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
     ) = None
     force_positive_names: list[str] = dataclasses.field(default_factory=list)
     total_energy_budget_correction: EnergyBudgetConfig | None = None
+    keep_gradient_through_clamps: bool = False
 
     def get_corrector(
         self,
@@ -182,7 +187,11 @@ class AtmosphereCorrector(CorrectorABC):
         if len(self._config.force_positive_names) > 0:
             # do this step before imposing other conservation correctors, since
             # otherwise it could end up creating violations of those constraints.
-            gen_data = force_positive(gen_data, self._config.force_positive_names)
+            gen_data = force_positive(
+                gen_data,
+                self._config.force_positive_names,
+                keep_gradient=self._config.keep_gradient_through_clamps,
+            )
         if self._config.conserve_dry_air:
             if self._vertical_coordinate is None:
                 raise ValueError(
