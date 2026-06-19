@@ -29,6 +29,7 @@ from ..one_step.reduced import StepMeanMetricConfig
 from .annual import AnnualMetricConfig, GlobalMeanAnnualAggregator
 from .build_context import MetricBuildContext, MetricNotSupportedError
 from .data import InferenceBatchData, MetricBuildResult, SubAggregator, TimeSeriesLogs
+from .dry_fraction import DryFractionMetricConfig
 from .enso import RegionalIndexAggregator
 from .enso.dynamic_index import EnsoIndexMetricConfig
 from .enso.enso_coefficient import EnsoCoefficientMetricConfig
@@ -63,6 +64,7 @@ MetricConfig = (
     | EnsoCoefficientMetricConfig
     | EnsembleMetricConfig
     | IpoIndexMetricConfig
+    | DryFractionMetricConfig
 )
 
 
@@ -199,6 +201,9 @@ class InferenceEvaluatorAggregatorConfig:
         enso_index: ENSO index metrics.
         enso_coefficient: ENSO regression coefficient metrics.
         ipo_index: Interdecadal Pacific Oscillation index metrics.
+        dry_fraction: Area-weighted fraction of dry (<= threshold) cells.
+            Disabled by default. Temporary diagnostic for the
+            keep_gradient_through_clamps investigation.
         monthly_reference_data: Path to monthly reference data to compare against.
         time_mean_reference_data: Path to reference time means to compare against.
     """
@@ -247,6 +252,9 @@ class InferenceEvaluatorAggregatorConfig:
     ipo_index: IpoIndexMetricConfig = dataclasses.field(
         default_factory=IpoIndexMetricConfig
     )
+    dry_fraction: DryFractionMetricConfig = dataclasses.field(
+        default_factory=DryFractionMetricConfig
+    )
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
 
@@ -287,6 +295,7 @@ class InferenceEvaluatorAggregatorConfig:
             self.enso_index,
             self.enso_coefficient,
             self.ipo_index,
+            self.dry_fraction,
         ]
         return [m for m in all_metrics if m.enabled]
 
