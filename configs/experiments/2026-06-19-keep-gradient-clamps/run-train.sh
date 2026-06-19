@@ -28,6 +28,8 @@ run_training() {
   gantry run \
     --name "$job_name" \
     --description 'A/B keep_gradient_through_clamps (precip), 1-GPU 4deg' \
+    --yes \
+    --timeout 0 \
     --beaker-image "$(cat "$REPO_ROOT"/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
     --priority high \
