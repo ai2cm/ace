@@ -67,23 +67,40 @@ CONDITIONAL_BUILDERS = [
 
 
 class Module:
-    def __init__(self, module: nn.Module, label_encoding: LabelEncoding | None):
+    def __init__(
+        self,
+        module: nn.Module,
+        label_encoding: LabelEncoding | None,
+        wants_channel_mask: bool = False,
+    ):
         self._module = module
         self._label_encoding = label_encoding
+        self._wants_channel_mask = wants_channel_mask
 
     def __call__(
-        self, input: torch.Tensor, labels: BatchLabels | None = None
+        self,
+        input: torch.Tensor,
+        labels: BatchLabels | None = None,
+        channel_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         if labels is not None and self._label_encoding is None:
             raise TypeError("Labels are not allowed for unconditional models")
 
+        # channel_mask is forwarded independently of the labels gating, so
+        # mask-only conditioning works when n_labels == 0 and labels is None.
+        kwargs: dict[str, torch.Tensor] = {}
         if self._label_encoding is not None:
             if labels is None:
                 raise TypeError("Labels are required for conditional models")
             encoded_labels = labels.conform_to_encoding(self._label_encoding)
-            return self._module(input, labels=encoded_labels.tensor)
-        else:
-            return self._module(input)
+            kwargs["labels"] = encoded_labels.tensor
+        if channel_mask is not None:
+            kwargs["channel_mask"] = channel_mask
+        return self._module(input, **kwargs)
+
+    @property
+    def wants_channel_mask(self) -> bool:
+        return self._wants_channel_mask
 
     @property
     def torch_module(self) -> nn.Module:
@@ -112,10 +129,14 @@ class Module:
         self._module.load_state_dict(state)
 
     def wrap_module(self, callable: Callable[[nn.Module], nn.Module]) -> "Module":
-        return Module(callable(self._module), self._label_encoding)
+        return Module(
+            callable(self._module), self._label_encoding, self._wants_channel_mask
+        )
 
     def to(self, device: torch.device) -> "Module":
-        return Module(self._module.to(device), self._label_encoding)
+        return Module(
+            self._module.to(device), self._label_encoding, self._wants_channel_mask
+        )
 
 
 @dataclasses.dataclass
@@ -198,7 +219,10 @@ class ModuleSelector:
             n_out_channels=n_out_channels,
             dataset_info=dataset_info,
         )
-        return Module(module, label_encoding)
+        wants_channel_mask = getattr(
+            self.module_config, "condition_on_channel_mask", False
+        )
+        return Module(module, label_encoding, wants_channel_mask)
 
     @classmethod
     def get_available_types(cls):

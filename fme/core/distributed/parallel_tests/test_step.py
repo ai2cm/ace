@@ -34,7 +34,7 @@ from fme.core.registry import ModuleSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallConfig, MultiCallStepConfig
 from fme.core.step.secondary_decoder import SecondaryDecoderConfig
-from fme.core.step.single_module import SingleModuleStepConfig
+from fme.core.step.single_module import SingleModuleStep, SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.testing import trivial_network_and_loss_normalization
 from fme.core.typing_ import TensorDict
@@ -99,6 +99,42 @@ def get_single_module_noise_conditioned_selector(
                     secondary_diagnostic_names=["diagnostic_rad"],
                     network=ModuleSelector(type="MLP", config={}),
                 ),
+                normalization=normalization,
+            ),
+        ),
+    )
+
+
+def get_single_module_channel_mask_conditioned_selector(
+    dir: pathlib.Path | None = None,
+) -> StepSelector:
+    normalization = get_network_and_loss_normalization_config(
+        names=[
+            "forcing_shared",
+            "forcing_rad",
+            "diagnostic_main",
+        ],
+        dir=dir,
+    )
+    return StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="NoiseConditionedSFNO",
+                    config=dataclasses.asdict(
+                        NoiseConditionedSFNOBuilder(
+                            embed_dim=4,
+                            noise_embed_dim=4,
+                            noise_type="isotropic",
+                            num_layers=2,
+                            local_blocks=[0],
+                            condition_on_channel_mask=True,
+                        )
+                    ),
+                ),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main"],
                 normalization=normalization,
             ),
         ),
@@ -209,6 +245,9 @@ def get_multi_call_selector(
 SELECTOR_GETTERS = {
     "sm_with_atmos_corr": get_single_module_with_atmosphere_corrector_selector,
     "sm_noise_conditioned": get_single_module_noise_conditioned_selector,
+    "sm_channel_mask_conditioned": (
+        get_single_module_channel_mask_conditioned_selector
+    ),
     "multi_call": get_multi_call_selector,
 }
 
@@ -506,6 +545,91 @@ def test_input_dropout_mask_identical_across_spatial_tiles():
     assert mask is not None
     stacked = torch.stack([mask[name].float() for name in in_names])  # [C, batch]
     gathered = dist.gather(stacked)
+    if dist.is_root():
+        assert gathered is not None
+        assert len(gathered) == dist.world_size
+        for group_start in range(0, dist.world_size, spatial_size):
+            root = gathered[group_start].to(fme.get_device())
+            for offset in range(spatial_size):
+                torch.testing.assert_close(
+                    gathered[group_start + offset].to(fme.get_device()), root
+                )
+
+
+@pytest.mark.parallel
+def test_channel_mask_film_on_dropout_identical_across_spatial_tiles():
+    """FiLM channel_mask under input_dropout must agree across spatial tiles.
+
+    The presence vector fed to FiLM is built from the (already
+    spatially-broadcast) input_dropout_mask combined with data_mask. Since it is
+    per-sample with no spatial dim, all co-ranks of a spatial group must see an
+    identical Context.channel_mask, while data-parallel groups may differ.
+    """
+    dist = Distributed.get_instance()
+    n_dp = dist.total_data_parallel_ranks
+    spatial_size = dist.world_size // n_dp
+    normalization = get_network_and_loss_normalization_config(
+        names=["forcing_shared", "forcing_rad", "diagnostic_main"],
+    )
+    # Channel-mask FiLM SFNO with input_dropout to drive synthetic presence.
+    selector = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="NoiseConditionedSFNO",
+                    config=dataclasses.asdict(
+                        NoiseConditionedSFNOBuilder(
+                            embed_dim=4,
+                            noise_embed_dim=4,
+                            noise_type="isotropic",
+                            num_layers=2,
+                            local_blocks=[0],
+                            condition_on_channel_mask=True,
+                        )
+                    ),
+                ),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main"],
+                normalization=normalization,
+                input_dropout=PerVariableMaskingConfig(rate=0.5),
+            ),
+        ),
+    )
+    step = get_step(selector, DEFAULT_IMG_SHAPE)
+    assert isinstance(step, SingleModuleStep)
+    for module in step.modules:
+        module.train()
+
+    captured: dict[str, torch.Tensor] = {}
+    conditional_model = step.module.torch_module.module.conditional_model
+
+    def hook(module, args):
+        captured["channel_mask"] = args[1].channel_mask.detach()
+
+    conditional_model.register_forward_pre_hook(hook)
+
+    # Force per-rank RNG divergence to mimic real spatial-parallel training.
+    torch.manual_seed(dist.rank)
+    batch_size = 3
+    dropout_mask = step.make_input_dropout_mask(batch_size, fme.get_device())
+    assert dropout_mask is not None
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, batch_size)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, batch_size
+    )
+    input_data = dist.scatter_spatial(input_data, DEFAULT_IMG_SHAPE)
+    next_step_input_data = dist.scatter_spatial(next_step_input_data, DEFAULT_IMG_SHAPE)
+    step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+            input_dropout_mask=dropout_mask,
+        ),
+    )
+    mask = captured["channel_mask"]  # [batch, n_in_channels]
+    gathered = dist.gather(mask)
     if dist.is_root():
         assert gathered is not None
         assert len(gathered) == dist.world_size

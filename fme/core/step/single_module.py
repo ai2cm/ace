@@ -95,6 +95,15 @@ class SingleModuleStepConfig(StepConfigABC):
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
+        builder_wants_channel_mask = getattr(
+            self.builder.module_config, "condition_on_channel_mask", False
+        )
+        if self.include_channel_mask_inputs and builder_wants_channel_mask:
+            raise ValueError(
+                "include_channel_mask_inputs (concat path) and the SFNO builder's "
+                "condition_on_channel_mask (FiLM path) are mutually exclusive; "
+                "enable at most one."
+            )
         if self.global_mean_removal is not None:
             self.global_mean_removal.validate_names(self.in_names, self.out_names)
         for name in self.prescribed_prognostic_names:
@@ -310,6 +319,9 @@ class SingleModuleStep(StepABC):
             dataset_info=dataset_info,
         )
         self.module = module.to(get_device())
+        # Runtime source of truth for whether to build + pass the per-sample
+        # presence vector (set by the builder's condition_on_channel_mask flag).
+        self._wants_channel_mask = self.module.wants_channel_mask
 
         dist = Distributed.get_instance()
 
@@ -406,9 +418,20 @@ class SingleModuleStep(StepABC):
                 input_tensor = torch.cat(
                     [input_tensor, mask_tensor], dim=self.CHANNEL_DIM
                 )
+            channel_mask = None
+            if self._wants_channel_mask:
+                channel_mask = _build_channel_presence_vector(
+                    self.in_packer.names,
+                    args.data_mask,
+                    args.input_dropout_mask,
+                    input_tensor.shape[0],
+                    input_tensor.device,
+                    input_tensor.dtype,
+                )
             output_tensor = self.module.wrap_module(wrapper)(
                 input_tensor,
                 labels=args.labels,
+                channel_mask=channel_mask,
             )
             output_dict = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
             secondary_output_dict = self.secondary_decoder.wrap_module(wrapper)(
@@ -526,6 +549,58 @@ def _apply_input_mask(input_norm: TensorDict, data_mask: TensorMapping) -> Tenso
     return result
 
 
+def _build_channel_presence_vector(
+    in_names: list[str],
+    data_mask: TensorMapping | None,
+    input_dropout_mask: TensorMapping | None,
+    batch: int,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    """Build a per-sample channel presence vector.
+
+    Returns a ``[batch, len(in_names)]`` float tensor (1.0 = present, 0.0 =
+    masked). Column ``i`` corresponds to ``in_names[i]``, so the column order
+    matches ``in_names`` exactly.
+
+    The presence value is the AND-combined presence of the real ``data_mask``
+    (genuinely-absent variables) and the synthetic ``input_dropout_mask``: a
+    channel is present only if it is both really present and not synthetically
+    dropped. This is the same combination ``_build_channel_mask_dict`` uses for
+    the concat indicators, so the FiLM and concat paths condition on an
+    identical presence signal.
+
+    Args:
+        in_names: Input variable names, in channel order.
+        data_mask: Per-variable boolean masks of shape ``[batch]``, or None.
+        input_dropout_mask: Per-channel synthetic dropout presence masks of
+            shape ``[batch]`` keyed by packed channel name, or None.
+        batch: Batch size.
+        device: Device on which to build the tensor.
+        dtype: Dtype of the resulting tensor.
+    """
+    columns: list[torch.Tensor] = []
+    for name in in_names:
+        # GMR sentinel channels share their source field's mask: the extra
+        # value is already zeroed in forward_transform when the source is
+        # masked, so the mask column must agree rather than default to 1.
+        source = extra_channel_source_field(name)
+        lookup_name = source if source is not None else name
+        if data_mask is not None and lookup_name in data_mask:
+            real = data_mask[lookup_name].to(device=device).bool()
+        else:
+            real = torch.ones(batch, device=device, dtype=torch.bool)
+        # Synthetic dropout is keyed by packed channel name directly (GMR
+        # extras are independently maskable), not by the source field.
+        if input_dropout_mask is not None and name in input_dropout_mask:
+            synthetic = input_dropout_mask[name].to(device=device).bool()
+            combined = real & synthetic
+        else:
+            combined = real
+        columns.append(combined.to(dtype=dtype))
+    return torch.stack(columns, dim=1)
+
+
 def _build_channel_mask_dict(
     in_names: list[str],
     data_mask: TensorMapping | None,
@@ -554,26 +629,14 @@ def _build_channel_mask_dict(
     batch = packed_input.shape[0]
     spatial = packed_input.shape[-2:]
     device = packed_input.device
+    # 1 name = 1 channel here (n_in_channels == len(in_names)), so each
+    # presence column expands to one spatial mask channel.
+    presence = _build_channel_presence_vector(
+        in_names, data_mask, input_dropout_mask, batch, device, torch.float
+    )
     result: TensorDict = {}
-    for name in in_names:
-        # GMR sentinel channels share their source field's mask: the extra
-        # value is already zeroed in forward_transform when the source is
-        # masked, so the mask channel must agree rather than default to 1.
-        source = extra_channel_source_field(name)
-        lookup_name = source if source is not None else name
-        if data_mask is not None and lookup_name in data_mask:
-            real = data_mask[lookup_name].to(device=device).bool()
-        else:
-            real = torch.ones(batch, device=device, dtype=torch.bool)
-        # Synthetic dropout is keyed by packed channel name directly (GMR
-        # extras are independently maskable), not by the source field.
-        if input_dropout_mask is not None and name in input_dropout_mask:
-            synthetic = input_dropout_mask[name].to(device=device).bool()
-            combined = real & synthetic
-        else:
-            combined = real
-        mask_1d = combined.to(dtype=torch.float)
-        result[name] = mask_1d.view(batch, 1, 1).expand(batch, *spatial)
+    for i, name in enumerate(in_names):
+        result[name] = presence[:, i].view(batch, 1, 1).expand(batch, *spatial)
     return result
 
 

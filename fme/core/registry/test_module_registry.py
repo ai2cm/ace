@@ -82,6 +82,37 @@ def test_module_selector_raises_with_bad_config():
         ModuleSelector(type="mock", config={"non_existent_key": 1})
 
 
+class RecordingModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.param = torch.nn.Parameter(torch.zeros(1))
+        self.last_kwargs: dict[str, Any] | None = None
+
+    def forward(self, input, **kwargs):
+        self.last_kwargs = kwargs
+        return input
+
+
+def test_module_forwards_channel_mask_without_labels():
+    """channel_mask is forwarded even when n_labels == 0 and labels is None."""
+    torch_module = RecordingModule()
+    module = Module(torch_module, label_encoding=None, wants_channel_mask=True)
+    input = torch.zeros(2, 3, 4, 4)
+    channel_mask = torch.ones(2, 3)
+    module(input, labels=None, channel_mask=channel_mask)
+    last_kwargs = torch_module.last_kwargs
+    assert last_kwargs is not None
+    assert "labels" not in last_kwargs
+    torch.testing.assert_close(last_kwargs["channel_mask"], channel_mask)
+
+
+def test_module_preserves_wants_channel_mask():
+    module = Module(RecordingModule(), label_encoding=None, wants_channel_mask=True)
+    assert module.wants_channel_mask
+    assert module.to(torch.device("cpu")).wants_channel_mask
+    assert module.wrap_module(lambda m: m).wants_channel_mask
+
+
 def get_dbc2925_ncsfno_module() -> tuple[ModuleSelector, Module]:
     img_shape = (9, 18)
     n_in_channels = 5

@@ -68,6 +68,29 @@ def test_noise_conditioned_sfno_conditioning():
     assert context.noise.shape == (batch_size, n_noise, img_shape[0], img_shape[1])
 
 
+def test_noise_conditioned_sfno_channel_mask():
+    """channel_mask is threaded into Context, independent of labels."""
+    mock_sfno = unittest.mock.MagicMock()
+    img_shape = (32, 64)
+    n_channels = 3
+    model = NoiseConditionedSFNO(
+        conditional_model=mock_sfno,
+        img_shape=img_shape,
+        embed_dim_noise=8,
+        embed_dim_pos=0,
+        n_labels=0,
+    )
+    batch_size = 2
+    x = torch.randn(batch_size, n_channels, img_shape[0], img_shape[1])
+    channel_mask = torch.tensor([[1.0, 0.0, 1.0], [1.0, 1.0, 0.0]])
+    _ = model(x, channel_mask=channel_mask)
+    args, _ = mock_sfno.call_args
+    context = args[1]
+    assert isinstance(context, Context)
+    assert context.labels is None
+    torch.testing.assert_close(context.channel_mask, channel_mask)
+
+
 def test_noise_conditioned_sfno_onehot_labels():
     """When label_embed_dim=0, one-hot labels pass through directly."""
     mock_sfno = unittest.mock.MagicMock()

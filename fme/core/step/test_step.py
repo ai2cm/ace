@@ -34,6 +34,7 @@ from fme.core.step.single_module import (
     SingleModuleStepConfig,
     _apply_input_mask,
     _build_channel_mask_dict,
+    _build_channel_presence_vector,
 )
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.testing import get_dataset_info, trivial_network_and_loss_normalization
@@ -1139,6 +1140,292 @@ def test_build_channel_mask_dict_gmr_extra_inherits_source_mask():
     assert result["__gmr_extra__a"][1, 0, 0] == 0.0
     assert (result["b"] == 1.0).all()
     assert (result["__gmr_extra__b"] == 1.0).all()
+
+
+def test_build_channel_presence_vector():
+    data_mask = {
+        "a": torch.tensor([True, False, True]),
+        "b": torch.tensor([False, True, True]),
+    }
+    presence = _build_channel_presence_vector(
+        ["a", "b"],
+        data_mask,
+        None,
+        batch=3,
+        device=torch.device("cpu"),
+        dtype=torch.float,
+    )
+    assert presence.shape == (3, 2)
+    expected = torch.tensor(
+        [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+    )
+    torch.testing.assert_close(presence, expected)
+
+
+def test_build_channel_presence_vector_no_data_mask():
+    presence = _build_channel_presence_vector(
+        ["x", "y", "z"],
+        None,
+        None,
+        batch=2,
+        device=torch.device("cpu"),
+        dtype=torch.float,
+    )
+    assert presence.shape == (2, 3)
+    assert (presence == 1.0).all()
+
+
+def test_build_channel_presence_vector_gmr_extra_inherits_source_mask():
+    # GMR sentinel column must inherit its source field's mask.
+    data_mask = {"a": torch.tensor([True, False])}
+    presence = _build_channel_presence_vector(
+        ["a", "b", "__gmr_extra__a"],
+        data_mask,
+        None,
+        batch=2,
+        device=torch.device("cpu"),
+        dtype=torch.float,
+    )
+    # column 0 (a) and column 2 (__gmr_extra__a) both follow a's mask
+    torch.testing.assert_close(presence[:, 0], presence[:, 2])
+    torch.testing.assert_close(presence[:, 0], torch.tensor([1.0, 0.0]))
+    torch.testing.assert_close(presence[:, 1], torch.tensor([1.0, 1.0]))
+
+
+def test_build_channel_presence_vector_and_combines_input_dropout():
+    # A channel present in data_mask but dropped by input_dropout_mask yields a
+    # 0.0 column; a channel absent in data_mask stays 0.0 regardless of dropout.
+    data_mask = {
+        "a": torch.tensor([True, True]),
+        "b": torch.tensor([False, False]),
+    }
+    input_dropout_mask = {
+        "a": torch.tensor([True, False]),
+        "b": torch.tensor([True, True]),
+    }
+    presence = _build_channel_presence_vector(
+        ["a", "b"],
+        data_mask,
+        input_dropout_mask,
+        batch=2,
+        device=torch.device("cpu"),
+        dtype=torch.float,
+    )
+    # a: present & (kept, dropped) -> (1, 0); b: absent -> (0, 0)
+    expected = torch.tensor([[1.0, 0.0], [0.0, 0.0]])
+    torch.testing.assert_close(presence, expected)
+
+
+def _get_channel_mask_conditioned_selector() -> StepSelector:
+    normalization = get_network_and_loss_normalization_config(
+        names=["forcing_shared", "forcing_rad", "diagnostic_main"],
+    )
+    return StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="NoiseConditionedSFNO",
+                    config=dataclasses.asdict(
+                        NoiseConditionedSFNOBuilder(
+                            embed_dim=4,
+                            noise_embed_dim=4,
+                            noise_type="gaussian",
+                            num_layers=2,
+                            local_blocks=[0],
+                            condition_on_channel_mask=True,
+                        )
+                    ),
+                ),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main"],
+                normalization=normalization,
+            ),
+        ),
+    )
+
+
+def test_step_condition_on_channel_mask_not_doubled_and_passes_mask():
+    config = _get_channel_mask_conditioned_selector()
+    img_shape = DEFAULT_IMG_SHAPE
+    n_samples = 3
+    step = get_step(config, img_shape)
+    assert isinstance(step, SingleModuleStep)
+    # FiLM path must not double the input channel count (concat path only).
+    assert step.module.wants_channel_mask
+    assert len(step.in_packer.names) == 2
+
+    # Spy on the wrapped module to capture the Context.channel_mask it receives.
+    # torch_module is the distributed DummyWrapper around the NoiseConditionedModel.
+    captured: dict[str, torch.Tensor | None] = {}
+    sfno_wrapper = step.module.torch_module.module
+
+    def hook(module, args):
+        # conditional_model is called as (x, context)
+        captured["channel_mask"] = args[1].channel_mask
+
+    sfno_wrapper.conditional_model.register_forward_pre_hook(hook)
+
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples
+    )
+    data_mask = {
+        "forcing_shared": torch.tensor([True, True, False], device=fme.get_device()),
+    }
+    step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+            data_mask=data_mask,
+        ),
+    )
+    mask = captured["channel_mask"]
+    assert mask is not None
+    assert mask.shape == (n_samples, len(step.in_packer.names))
+    # forcing_shared is column 0 (in_names order), masked on sample 2.
+    assert mask[0, 0] == 1.0
+    assert mask[2, 0] == 0.0
+    assert (mask[:, 1] == 1.0).all()
+
+
+def test_step_condition_on_channel_mask_conflicts_with_include():
+    normalization = get_network_and_loss_normalization_config(
+        names=["forcing_shared", "forcing_rad", "diagnostic_main"],
+    )
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        SingleModuleStepConfig(
+            builder=ModuleSelector(
+                type="NoiseConditionedSFNO",
+                config=dataclasses.asdict(
+                    NoiseConditionedSFNOBuilder(
+                        embed_dim=4,
+                        noise_embed_dim=4,
+                        num_layers=2,
+                        local_blocks=[0],
+                        condition_on_channel_mask=True,
+                    )
+                ),
+            ),
+            in_names=["forcing_shared", "forcing_rad"],
+            out_names=["diagnostic_main"],
+            normalization=normalization,
+            include_channel_mask_inputs=True,
+        )
+
+
+def test_step_condition_on_channel_mask_allows_input_dropout():
+    """input_dropout (Step-side augmentation) is orthogonal to the FiLM flag.
+
+    Constructing with both must not raise: synthetic dropout signalled via FiLM
+    is the target use case.
+    """
+    normalization = get_network_and_loss_normalization_config(
+        names=["forcing_shared", "forcing_rad", "diagnostic_main"],
+    )
+    # Should not raise.
+    SingleModuleStepConfig(
+        builder=ModuleSelector(
+            type="NoiseConditionedSFNO",
+            config=dataclasses.asdict(
+                NoiseConditionedSFNOBuilder(
+                    embed_dim=4,
+                    noise_embed_dim=4,
+                    num_layers=2,
+                    local_blocks=[0],
+                    condition_on_channel_mask=True,
+                )
+            ),
+        ),
+        in_names=["forcing_shared", "forcing_rad"],
+        out_names=["diagnostic_main"],
+        normalization=normalization,
+        input_dropout=PerVariableMaskingConfig(rate=0.5),
+    )
+
+
+def test_step_condition_on_channel_mask_films_on_input_dropout():
+    """Dropout -> FiLM end to end.
+
+    With condition_on_channel_mask=True and input_dropout configured, a
+    StepArgs.input_dropout_mask that drops a known channel must make that
+    channel's Context.channel_mask column 0.0 while data_mask-present columns
+    stay 1.0. Proves FiLM conditions on the combined (data_mask &
+    input_dropout_mask) presence, the new combination this stacks on.
+    """
+    normalization = get_network_and_loss_normalization_config(
+        names=["forcing_shared", "forcing_rad", "diagnostic_main"],
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="NoiseConditionedSFNO",
+                    config=dataclasses.asdict(
+                        NoiseConditionedSFNOBuilder(
+                            embed_dim=4,
+                            noise_embed_dim=4,
+                            noise_type="gaussian",
+                            num_layers=2,
+                            local_blocks=[0],
+                            condition_on_channel_mask=True,
+                        )
+                    ),
+                ),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main"],
+                normalization=normalization,
+                input_dropout=PerVariableMaskingConfig(rate=0.5),
+            ),
+        ),
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    n_samples = 3
+    step = get_step(config, img_shape)
+    assert isinstance(step, SingleModuleStep)
+    step.module.torch_module.train()
+
+    captured: dict[str, torch.Tensor | None] = {}
+    sfno_wrapper = step.module.torch_module.module
+
+    def hook(module, args):
+        captured["channel_mask"] = args[1].channel_mask
+
+    sfno_wrapper.conditional_model.register_forward_pre_hook(hook)
+
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples
+    )
+    in_names = step.in_packer.names
+    # Drop forcing_rad (column 1) on every sample; keep forcing_shared present.
+    dropout_mask = {
+        name: torch.full(
+            (n_samples,),
+            name != "forcing_rad",
+            dtype=torch.bool,
+            device=fme.get_device(),
+        )
+        for name in in_names
+    }
+    step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+            input_dropout_mask=dropout_mask,
+        ),
+    )
+    mask = captured["channel_mask"]
+    assert mask is not None
+    assert mask.shape == (n_samples, len(in_names))
+    rad_col = in_names.index("forcing_rad")
+    shared_col = in_names.index("forcing_shared")
+    # Dropped channel -> 0.0; data_mask-present (undropped) channel -> 1.0.
+    assert (mask[:, rad_col] == 0.0).all()
+    assert (mask[:, shared_col] == 1.0).all()
 
 
 def test_step_with_include_channel_mask_inputs():
