@@ -534,6 +534,5 @@ stepper:
         append_as_input: true
       input_dropout:
         kind: uniform
-        min_vars: 0
-        max_vars: 5
+        max_masked_vars: 5
 pre_cooldown_checkpoint_epoch: 142

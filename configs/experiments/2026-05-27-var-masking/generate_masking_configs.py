@@ -44,7 +44,7 @@ CO2_FIELD = "global_mean_co2"
 
 # Mask catalog: name_segment -> (mask_type_segment, base_input_dropout_without_co2)
 MASK_CATALOG: dict[str, tuple[str, dict]] = {
-    f"mask{n}": ("uniform", {"kind": "uniform", "min_vars": 0, "max_vars": n})
+    f"mask{n}": ("uniform", {"kind": "uniform", "max_masked_vars": n})
     for n in (0, 5, 10, 20, 30)
 } | {
     f"mask{rate}": ("bernoulli", {"kind": "per_variable", "rate": rate})
