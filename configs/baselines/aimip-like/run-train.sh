@@ -131,6 +131,7 @@ run_training() {
 # Isolates how much shared temperature normalization (+ appended global-mean
 # temperature channel) helps, especially constant-CO2 rollout behavior.
 # Investigation: 2026-06-12-residual-recipe-selection
+# --- LAUNCHED 2026-06-19 to ai2/ace from commit 7da131dfd (2 jobs, 1 GPU each, jupiter+titan high). Lines commented to prevent re-submission; see experiment records for beaker/wandb links. ---
 # --- Jupiter+Titan, high ---
-run_training "train-4deg-daily-v1-era5-only.yaml"         "train-4deg-daily-v1-era5-only"         1 ai2/ace high "ai2/jupiter ai2/titan"
-run_training "train-4deg-daily-v1-era5-only-no-tnorm.yaml" "train-4deg-daily-v1-era5-only-no-tnorm" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only.yaml"         "train-4deg-daily-v1-era5-only"         1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-no-tnorm.yaml" "train-4deg-daily-v1-era5-only-no-tnorm" 1 ai2/ace high "ai2/jupiter ai2/titan"
