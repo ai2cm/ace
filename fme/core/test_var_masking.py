@@ -77,3 +77,47 @@ def test_per_variable_mask_rate_one_drops_all():
 
 def test_variable_masking_config_is_union_of_sub_configs():
     assert VariableMaskingConfig == UniformMaskingConfig | PerVariableMaskingConfig
+
+
+def test_co2_rate_validation():
+    with pytest.raises(ValueError, match="co2_rate"):
+        PerVariableMaskingConfig(rate=0.5, co2_rate=-0.1)
+    with pytest.raises(ValueError, match="co2_rate"):
+        UniformMaskingConfig(max_masked_vars=2, co2_rate=1.1)
+
+
+def test_co2_rate_overrides_co2_channel_per_variable():
+    # rate=0.0 keeps everything; co2_rate=1.0 drops only the CO2 column.
+    names = ["a", "global_mean_co2", "b"]
+    config = PerVariableMaskingConfig(rate=0.0, co2_rate=1.0)
+    mask = config.sample_mask(
+        len(names), batch_size=16, device=torch.device("cpu"), channel_names=names
+    )
+    co2_idx = names.index("global_mean_co2")
+    assert not mask[:, co2_idx].any(), "CO2 channel should always be dropped"
+    other = [i for i in range(len(names)) if i != co2_idx]
+    assert mask[:, other].all(), "non-CO2 channels should be kept"
+
+
+def test_co2_rate_overrides_co2_channel_uniform():
+    # max_masked_vars=0 keeps everything; co2_rate=1.0 drops only the CO2 column.
+    names = ["a", "b", "global_mean_co2"]
+    config = UniformMaskingConfig(max_masked_vars=0, co2_rate=1.0)
+    mask = config.sample_mask(
+        len(names), batch_size=16, device=torch.device("cpu"), channel_names=names
+    )
+    co2_idx = names.index("global_mean_co2")
+    assert not mask[:, co2_idx].any()
+    other = [i for i in range(len(names)) if i != co2_idx]
+    assert mask[:, other].all()
+
+
+def test_co2_rate_requires_co2_channel():
+    config = PerVariableMaskingConfig(rate=0.5, co2_rate=0.5)
+    with pytest.raises(ValueError, match="global_mean_co2"):
+        config.sample_mask(
+            n_channels=3,
+            batch_size=4,
+            device=torch.device("cpu"),
+            channel_names=["a", "b", "c"],
+        )

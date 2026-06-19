@@ -463,7 +463,9 @@ class SingleModuleStep(StepABC):
         if not self.module.torch_module.training:
             return None
         names = self.in_packer.names
-        mask = self._config.input_dropout.sample_mask(len(names), batch_size, device)
+        mask = self._config.input_dropout.sample_mask(
+            len(names), batch_size, device, channel_names=list(names)
+        )
         # The mask is per-sample with no spatial dim, so it cannot be sliced
         # per-tile. Under spatial/model parallelism every co-rank holds the same
         # samples but advances torch.rand independently; broadcast the spatial
