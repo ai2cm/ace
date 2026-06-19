@@ -121,3 +121,16 @@ run_training() {
 # run_training "train-4deg-daily-v1-era5-only-fg16-sr0p50-residual.yaml"  "train-4deg-daily-v1-era5-only-fg16-sr0p50-residual-rs0"  1 ai2/ace high "ai2/jupiter ai2/titan"
 # run_training "train-4deg-daily-v1-era5-only-fg16-sr0p25-residual.yaml"  "train-4deg-daily-v1-era5-only-fg16-sr0p25-residual-rs0"  1 ai2/ace high "ai2/jupiter ai2/titan"
 # run_training "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual.yaml" "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# =============================================================================
+# Wave 7: non-residual v1 baselines for the shared-temperature-normalization
+# ablation (seed 0, embed_dim 512, ~120 epochs). Both derive from the era5-only
+# residual baseline config, changed only by residual_prediction true -> false
+# and (for -no-tnorm) removal of the global_mean_removal block; inference config
+# is identical to the sweep. Validation aggregator ensemble metrics enabled.
+# Isolates how much shared temperature normalization (+ appended global-mean
+# temperature channel) helps, especially constant-CO2 rollout behavior.
+# Investigation: 2026-06-12-residual-recipe-selection
+# --- Jupiter+Titan, high ---
+run_training "train-4deg-daily-v1-era5-only.yaml"         "train-4deg-daily-v1-era5-only"         1 ai2/ace high "ai2/jupiter ai2/titan"
+run_training "train-4deg-daily-v1-era5-only-no-tnorm.yaml" "train-4deg-daily-v1-era5-only-no-tnorm" 1 ai2/ace high "ai2/jupiter ai2/titan"
