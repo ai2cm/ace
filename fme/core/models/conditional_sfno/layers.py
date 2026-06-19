@@ -40,6 +40,7 @@ class ContextConfig:
     embed_dim_labels: int
     embed_dim_noise: int
     embed_dim_pos: int
+    embed_dim_mask: int = 0
 
 
 @dataclasses.dataclass
@@ -57,12 +58,16 @@ class Context:
             or learned label embeddings depending on model configuration.
         noise: The 2D noise embedding to condition on. The last
             three dimensions are (channels, height, width).
+        channel_mask: The per-sample channel presence vector to condition on,
+            of shape (batch_size, embed_dim_mask). 1.0 = present, 0.0 = masked.
+            Independent of labels; may be provided when n_labels == 0.
     """
 
     embedding_scalar: torch.Tensor | None
     embedding_pos: torch.Tensor | None
     labels: torch.Tensor | None
     noise: torch.Tensor | None
+    channel_mask: torch.Tensor | None = None
 
     def __post_init__(self):
         if (
@@ -73,6 +78,8 @@ class Context:
             raise ValueError("noise must have 2 more dimensions than embedding_scalar")
         if self.labels is not None and self.labels.ndim != 2:
             raise ValueError("labels must have 2 dimensions")
+        if self.channel_mask is not None and self.channel_mask.ndim != 2:
+            raise ValueError("channel_mask must have 2 dimensions")
 
     def asdict(self) -> dict[str, torch.Tensor | None]:
         return {
@@ -80,6 +87,7 @@ class Context:
             "embedding_pos": self.embedding_pos,
             "labels": self.labels,
             "noise": self.noise,
+            "channel_mask": self.channel_mask,
         }
 
     @classmethod
@@ -89,6 +97,7 @@ class Context:
             embedding_pos=data.get("embedding_pos"),
             labels=data.get("labels"),
             noise=data.get("noise"),
+            channel_mask=data.get("channel_mask"),
         )
 
 
@@ -163,6 +172,7 @@ class ConditionalLayerNorm(nn.Module):
         self.embed_dim_labels = context_config.embed_dim_labels
         self.embed_dim_pos = context_config.embed_dim_pos
         self.embed_dim_noise = context_config.embed_dim_noise
+        self.embed_dim_mask = context_config.embed_dim_mask
         self.epsilon = epsilon
         if self.embed_dim_scalar > 0:
             self.W_scale: nn.Linear | None = nn.Linear(
@@ -180,6 +190,16 @@ class ConditionalLayerNorm(nn.Module):
         else:
             self.W_scale_labels = None
             self.W_bias_labels = None
+        if self.embed_dim_mask > 0:
+            self.W_scale_mask: nn.Linear | None = nn.Linear(
+                self.embed_dim_mask, self.n_channels
+            )
+            self.W_bias_mask: nn.Linear | None = nn.Linear(
+                self.embed_dim_mask, self.n_channels
+            )
+        else:
+            self.W_scale_mask = None
+            self.W_bias_mask = None
         if self.embed_dim_noise > 0:
             # no bias as it is already handled in the non-2d layers
             self.W_scale_2d = nn.Conv2d(
@@ -231,6 +251,12 @@ class ConditionalLayerNorm(nn.Module):
         if self.W_bias_labels is not None:
             torch.nn.init.constant_(self.W_bias_labels.weight, 0.0)
             torch.nn.init.constant_(self.W_bias_labels.bias, 0.0)
+        if self.W_scale_mask is not None:
+            torch.nn.init.constant_(self.W_scale_mask.weight, 0.0)
+            torch.nn.init.constant_(self.W_scale_mask.bias, 0.0)
+        if self.W_bias_mask is not None:
+            torch.nn.init.constant_(self.W_bias_mask.weight, 0.0)
+            torch.nn.init.constant_(self.W_bias_mask.bias, 0.0)
         # no bias on 2d layers as it is already handled in the non-2d layers
         if self.W_scale_2d is not None:
             torch.nn.init.constant_(self.W_scale_2d.weight, 0.0)
@@ -266,6 +292,10 @@ class ConditionalLayerNorm(nn.Module):
             self.W_scale_labels is not None or self.W_bias_labels is not None
         ):
             raise ValueError("labels must be provided")
+        if context.channel_mask is None and (
+            self.W_scale_mask is not None or self.W_bias_mask is not None
+        ):
+            raise ValueError("channel_mask must be provided")
         with timer.child("compute_scaling_and_bias"):
             if self.W_scale is not None:
                 if context.embedding_scalar is None:
@@ -299,6 +329,14 @@ class ConditionalLayerNorm(nn.Module):
                 ).unsqueeze(-1)
             if self.W_bias_labels is not None:
                 bias = bias + self.W_bias_labels(context.labels).unsqueeze(
+                    -1
+                ).unsqueeze(-1)
+            if self.W_scale_mask is not None:
+                scale = scale + self.W_scale_mask(context.channel_mask).unsqueeze(
+                    -1
+                ).unsqueeze(-1)
+            if self.W_bias_mask is not None:
+                bias = bias + self.W_bias_mask(context.channel_mask).unsqueeze(
                     -1
                 ).unsqueeze(-1)
             if self.W_bias_2d is not None:

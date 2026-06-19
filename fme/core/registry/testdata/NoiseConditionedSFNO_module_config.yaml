@@ -5,6 +5,7 @@ checkpointing: 0
 clip_latent_global_means: true
 complex_activation: real
 complex_network: true
+condition_on_channel_mask: false
 context_pos_embed_dim: 0
 data_grid: legendre-gauss
 embed_dim: 8

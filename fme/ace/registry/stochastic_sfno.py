@@ -126,7 +126,10 @@ class NoiseConditionedModel(torch.nn.Module):
             self.pos_embed = None
 
     def forward(
-        self, x: torch.Tensor, labels: torch.Tensor | None = None
+        self,
+        x: torch.Tensor,
+        labels: torch.Tensor | None = None,
+        channel_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         x = x.reshape(-1, *x.shape[-3:])
         if self._inverse_sht is not None:
@@ -168,6 +171,7 @@ class NoiseConditionedModel(torch.nn.Module):
                 embedding_pos=embedding_pos,
                 labels=labels,
                 noise=noise,
+                channel_mask=channel_mask,
             ),
         )
 
@@ -261,6 +265,14 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             within the observed envelope (no-op when it already does).
             Bounds the global-mean of the latent the transformer blocks see
             at inference to the range observed in training.
+        condition_on_channel_mask: If True, inject the per-sample channel
+            presence vector (1.0 = present, 0.0 = masked) as FiLM conditioning
+            through conditional layer normalization, instead of concatenating
+            spatial mask channels onto the network input. Sizes a CLN
+            conditioning input of dim ``n_in_channels`` and advertises
+            ``wants_channel_mask=True`` so the Step builds and passes the
+            presence vector. Mutually exclusive with the Step's
+            ``include_channel_mask_inputs``.
     """
 
     spectral_transform: Literal["sht"] = "sht"
@@ -302,6 +314,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     filter_preserves_global_mean: bool = False
     spectral_ratio: float = 1.0
     clip_latent_global_means: bool = False
+    condition_on_channel_mask: bool = False
 
     def __post_init__(self):
         if self.context_pos_embed_dim > 0 and self.pos_embed:
@@ -375,6 +388,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
                 embed_dim_pos=self.context_pos_embed_dim,
                 embed_dim_noise=self.noise_embed_dim,
                 embed_dim_labels=effective_label_dim,
+                embed_dim_mask=(n_in_channels if self.condition_on_channel_mask else 0),
             ),
         )
         if self.noise_type == "isotropic":

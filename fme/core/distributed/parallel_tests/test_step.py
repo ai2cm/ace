@@ -104,6 +104,42 @@ def get_single_module_noise_conditioned_selector(
     )
 
 
+def get_single_module_channel_mask_conditioned_selector(
+    dir: pathlib.Path | None = None,
+) -> StepSelector:
+    normalization = get_network_and_loss_normalization_config(
+        names=[
+            "forcing_shared",
+            "forcing_rad",
+            "diagnostic_main",
+        ],
+        dir=dir,
+    )
+    return StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="NoiseConditionedSFNO",
+                    config=dataclasses.asdict(
+                        NoiseConditionedSFNOBuilder(
+                            embed_dim=4,
+                            noise_embed_dim=4,
+                            noise_type="isotropic",
+                            num_layers=2,
+                            local_blocks=[0],
+                            condition_on_channel_mask=True,
+                        )
+                    ),
+                ),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main"],
+                normalization=normalization,
+            ),
+        ),
+    )
+
+
 def get_single_module_with_atmosphere_corrector_selector(
     dir: pathlib.Path | None = None,
 ) -> StepSelector:
@@ -208,6 +244,9 @@ def get_multi_call_selector(
 SELECTOR_GETTERS = {
     "sm_with_atmos_corr": get_single_module_with_atmosphere_corrector_selector,
     "sm_noise_conditioned": get_single_module_noise_conditioned_selector,
+    "sm_channel_mask_conditioned": (
+        get_single_module_channel_mask_conditioned_selector
+    ),
     "multi_call": get_multi_call_selector,
 }
 

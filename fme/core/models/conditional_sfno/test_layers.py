@@ -99,6 +99,69 @@ def test_conditional_layer_norm(
         )
 
 
+def _mask_cln(n_channels: int, img_shape: tuple[int, int], embed_dim_mask: int):
+    return ConditionalLayerNorm(
+        n_channels,
+        img_shape,
+        context_config=ContextConfig(
+            embed_dim_scalar=0,
+            embed_dim_labels=0,
+            embed_dim_noise=0,
+            embed_dim_pos=0,
+            embed_dim_mask=embed_dim_mask,
+        ),
+    ).to(get_device())
+
+
+def test_channel_mask_zero_init_is_identity_across_masks():
+    """At init the mask linears are zero, so different masks give same output."""
+    n_channels, img_shape, embed_dim_mask = 32, (8, 16), 5
+    device = get_device()
+    cln = _mask_cln(n_channels, img_shape, embed_dim_mask)
+    x = torch.randn(2, n_channels, *img_shape, device=device)
+    mask_a = torch.ones(2, embed_dim_mask, device=device)
+    mask_b = torch.zeros(2, embed_dim_mask, device=device)
+    out_a = cln(x, _mask_context(mask_a))
+    out_b = cln(x, _mask_context(mask_b))
+    torch.testing.assert_close(out_a, out_b)
+
+
+def test_channel_mask_changes_output_after_weights_set():
+    n_channels, img_shape, embed_dim_mask = 32, (8, 16), 5
+    device = get_device()
+    cln = _mask_cln(n_channels, img_shape, embed_dim_mask)
+    torch.nn.init.normal_(cln.W_scale_mask.weight)
+    torch.nn.init.normal_(cln.W_bias_mask.weight)
+    x = torch.randn(2, n_channels, *img_shape, device=device)
+    mask_a = torch.ones(2, embed_dim_mask, device=device)
+    mask_b = torch.zeros(2, embed_dim_mask, device=device)
+    out_a = cln(x, _mask_context(mask_a))
+    out_b = cln(x, _mask_context(mask_b))
+    assert not torch.allclose(out_a, out_b)
+
+
+def test_channel_mask_missing_raises():
+    cln = _mask_cln(32, (8, 16), 5)
+    x = torch.randn(2, 32, 8, 16, device=get_device())
+    with pytest.raises(ValueError, match="channel_mask must be provided"):
+        cln(x, _mask_context(None))
+
+
+def test_context_channel_mask_ndim_guard():
+    with pytest.raises(ValueError, match="channel_mask must have 2 dimensions"):
+        _mask_context(torch.ones(2, 5, 1, device=get_device()))
+
+
+def _mask_context(channel_mask: torch.Tensor | None) -> Context:
+    return Context(
+        embedding_scalar=None,
+        embedding_pos=None,
+        labels=None,
+        noise=None,
+        channel_mask=channel_mask,
+    )
+
+
 @pytest.mark.parametrize("embed_dim_scalar", [9, 0])
 @pytest.mark.parametrize("embed_dim_noise", [10, 0])
 @pytest.mark.parametrize("embed_dim_labels", [11, 0])
