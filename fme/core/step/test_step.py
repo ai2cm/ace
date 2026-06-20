@@ -25,7 +25,7 @@ from fme.core.step.global_mean_removal import (
     PerChannelGlobalMeanRemovalConfig,
     SharedGlobalMeanRemovalConfig,
 )
-from fme.core.step.multi_call import MultiCallConfig, MultiCallStepConfig
+from fme.core.step.multi_call import MultiCallConfig, MultiCallStep, MultiCallStepConfig
 from fme.core.step.secondary_decoder import SecondaryDecoderConfig
 from fme.core.step.secondary_module import SecondaryModuleStepConfig
 from fme.core.step.single_module import (
@@ -1520,3 +1520,73 @@ def test_step_shared_global_mean_removal_raises_on_masked_reference():
                 data_mask=data_mask,
             ),
         )
+
+
+def test_step_train_eval_toggle_propagates_to_modules():
+    step = get_step(get_single_module_selector(), DEFAULT_IMG_SHAPE)
+
+    assert all(module.training for module in step.modules)
+    assert step._training
+
+    step.eval()
+    assert all(not module.training for module in step.modules)
+    assert not step._training
+
+    step.train()
+    assert all(module.training for module in step.modules)
+    assert step._training
+
+    step.train(False)
+    assert all(not module.training for module in step.modules)
+    assert not step._training
+
+
+def test_corrector_state_not_in_state_by_default():
+    step = get_step(get_single_module_selector(), DEFAULT_IMG_SHAPE)
+    assert "corrector" not in step.get_state()
+
+
+def test_load_state_calls_corrector_with_empty_state_when_missing():
+    selector = get_single_module_selector()
+    config = dict(selector.config)
+    config["corrector"] = {
+        **config["corrector"],
+        "corrector_disabled_epochs": 1,
+    }
+    selector = StepSelector(type=selector.type, config=config)
+    step = get_step(selector, DEFAULT_IMG_SHAPE)
+    state = step.get_state()
+    del state["corrector"]
+
+    with pytest.raises(ValueError, match="corrector_disabled"):
+        step.load_state(state)
+
+
+def test_multi_call_step_forwards_set_epoch():
+    wrapped_step = unittest.mock.MagicMock(spec=StepABC)
+    config = MultiCallStepConfig(
+        wrapped_step=get_single_module_selector(),
+        config=None,
+        include_multi_call_in_loss=False,
+    )
+    step = MultiCallStep(wrapped_step=wrapped_step, config=config)
+    step.set_epoch(3)
+    wrapped_step.set_epoch.assert_called_once_with(3)
+
+
+def test_multi_call_step_forwards_train_eval():
+    wrapped_step = unittest.mock.MagicMock(spec=StepABC)
+    wrapped_step.modules = nn.ModuleList()
+    config = MultiCallStepConfig(
+        wrapped_step=get_single_module_selector(),
+        config=None,
+        include_multi_call_in_loss=False,
+    )
+    step = MultiCallStep(wrapped_step=wrapped_step, config=config)
+
+    step.eval()
+    wrapped_step.train.assert_called_once_with(False)
+
+    wrapped_step.train.reset_mock()
+    step.train()
+    wrapped_step.train.assert_called_once_with(True)

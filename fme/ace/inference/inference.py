@@ -444,3 +444,6 @@ def run_segmented_inference(config: InferenceConfig, segments: int):
         config_copy.initial_condition = InitialConditionConfig(
             path=restart_path, engine="netcdf4"
         )
+        # The restart already holds the broadcasted ensemble as its sample dim, so
+        # later segments must not broadcast again (would give n_ensemble**2 samples).
+        config_copy.n_ensemble_per_ic = 1

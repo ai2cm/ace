@@ -277,3 +277,26 @@ def test_run_segmented_inference(tmp_path, monkeypatch):
             with open(os.path.join(segment_dir, WRITTEN_WANDB_NAME_FILENAME)) as f:
                 assert f.read() == f"run_name-segment_{i:04d}"
         assert mock.call_count == 3
+
+
+def test_segmented_inference_does_not_rebroadcast_ensemble(tmp_path, monkeypatch):
+    # The first segment broadcasts the singleton IC to n_ensemble members; the
+    # restart it writes already carries that ensemble as its sample dimension.
+    # Later segments must therefore run with n_ensemble_per_ic=1 -- otherwise the
+    # ensemble is broadcast again, giving n_ensemble**2 samples and OOMing the GPU.
+    n_ensemble_seen: list[int] = []
+
+    def mock(config: fme.ace.InferenceConfig):
+        n_ensemble_seen.append(config.n_ensemble_per_ic)
+        _run_inference_from_config_mock(config)
+
+    config = _get_mock_config(str(tmp_path))
+    config.n_ensemble_per_ic = 3
+    monkeypatch.setenv("WANDB_NAME", "run_name")
+    with unittest.mock.patch(
+        "fme.ace.inference.inference.run_inference_from_config", new=mock
+    ):
+        run_segmented_inference(config, 3)
+
+    # segment 0 broadcasts (3); segments 1 and 2 reuse the restart's ensemble (1)
+    assert n_ensemble_seen == [3, 1, 1]
