@@ -121,3 +121,16 @@ run_training() {
 # run_training "train-4deg-daily-v1-era5-only-fg16-sr0p50-residual.yaml"  "train-4deg-daily-v1-era5-only-fg16-sr0p50-residual-rs0"  1 ai2/ace high "ai2/jupiter ai2/titan"
 # run_training "train-4deg-daily-v1-era5-only-fg16-sr0p25-residual.yaml"  "train-4deg-daily-v1-era5-only-fg16-sr0p25-residual-rs0"  1 ai2/ace high "ai2/jupiter ai2/titan"
 # run_training "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual.yaml" "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# --- Wave 7: extend the grid into deeper spectral cuts (seed 0, embed_dim 512) (Jupiter+Titan, high) ---
+# Intersect filter_num_groups {8,16,32,64} with the two deepest spectral cuts:
+# spectral_ratio 0.125 -> 64 spectral channels (ws64) and 0.0625 -> 32 (ws32),
+# at embed_dim 512. Run names use the wsNN convention (latent spectral width)
+# instead of srNN. filter_num_groups must divide the channel count, so fg64xws32
+# (64 > 32) is invalid and omitted. Already covered by Wave 6: fg8xws64 and
+# fg16xws64 (the fg8/fg16-sr0p125 runs). 5 new runs.
+run_training "train-4deg-daily-v1-era5-only-fg32-ws64-residual.yaml" "train-4deg-daily-v1-era5-only-fg32-ws64-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+run_training "train-4deg-daily-v1-era5-only-fg64-ws64-residual.yaml" "train-4deg-daily-v1-era5-only-fg64-ws64-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+run_training "train-4deg-daily-v1-era5-only-fg8-ws32-residual.yaml"  "train-4deg-daily-v1-era5-only-fg8-ws32-residual-rs0"  1 ai2/ace high "ai2/jupiter ai2/titan"
+run_training "train-4deg-daily-v1-era5-only-fg16-ws32-residual.yaml" "train-4deg-daily-v1-era5-only-fg16-ws32-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+run_training "train-4deg-daily-v1-era5-only-fg32-ws32-residual.yaml" "train-4deg-daily-v1-era5-only-fg32-ws32-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
