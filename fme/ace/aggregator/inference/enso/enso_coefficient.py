@@ -252,8 +252,10 @@ class EnsoCoefficientEvaluatorAggregator:
         images, metrics = {}, {}
         for name in gen_coefficients.keys():
             if name in self._variable_metadata:
-                caption_name = self._variable_metadata[name].long_name
-                caption_units = self._variable_metadata[name].units
+                caption_name = self._variable_metadata[name].display_long_name(name)
+                caption_units = self._variable_metadata[name].display_units(
+                    "unknown units"
+                )
             else:
                 caption_name = name
                 caption_units = "unknown units"
@@ -328,8 +330,8 @@ class EnsoCoefficientEvaluatorAggregator:
 
     def _get_var_attrs(self, name: str) -> dict[str, str]:
         if name in self._variable_metadata:
-            attrs_name = self._variable_metadata[name].long_name
-            attrs_units = self._variable_metadata[name].units
+            attrs_name = self._variable_metadata[name].display_long_name(name)
+            attrs_units = self._variable_metadata[name].display_units("unknown units")
         else:
             attrs_name = name
             attrs_units = "unknown units"

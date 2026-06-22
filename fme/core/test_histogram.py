@@ -163,6 +163,24 @@ def test_compared_dynamic_histograms(shape, percentiles):
     all(ds.coords["source"] == ["target", "prediction"])
 
 
+def test_compared_dynamic_histograms_prediction_frac_is_prediction_over_target():
+    n_bins = 300
+    histogram = ComparedDynamicHistograms(
+        n_bins,
+        percentiles=[99.0],
+        compute_percentile_frac=True,
+    )
+    shape = (2, 8, 16)
+    target = {"x": torch.full(shape, 2.0)}
+    prediction = {"x": torch.full(shape, 4.0)}
+    histogram.record_batch(target, prediction)
+    wandb_result = histogram.get_wandb()
+
+    assert wandb_result[
+        "prediction_frac_of_target/99.0th-percentile/x"
+    ] == pytest.approx(2.0)
+
+
 @pytest.mark.parametrize(
     "target, prediction",
     [
@@ -308,3 +326,30 @@ def test_compared_dynamic_tails_histograms():
     for var in ["y", "z"]:
         assert f"0.0001th-percentile/{var}" in wandb_result
         assert f"prediction_frac_of_target/0.0001th-percentile/{var}" in wandb_result
+
+
+def test_compared_dynamic_tails_histograms_prediction_frac_is_prediction_over_target():
+    n_bins = 300
+    histogram = ComparedDynamicTailsHistograms(
+        n_bins,
+        percentiles=[99.0],
+        left_tailed_variables=["lower"],
+    )
+    shape = (2, 8, 16)
+    target = {
+        "upper": torch.full(shape, 2.0),
+        "lower": torch.full(shape, 2.0),
+    }
+    prediction = {
+        "upper": torch.full(shape, 4.0),
+        "lower": torch.full(shape, 4.0),
+    }
+    histogram.record_batch(target, prediction)
+    wandb_result = histogram.get_wandb()
+
+    assert wandb_result[
+        "prediction_frac_of_target/99.0th-percentile/upper"
+    ] == pytest.approx(2.0)
+    assert wandb_result[
+        "prediction_frac_of_target/1.0th-percentile/lower"
+    ] == pytest.approx(2.0)

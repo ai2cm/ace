@@ -12,6 +12,7 @@ from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
 from fme.core.registry.registry import Registry
 from fme.core.step.args import StepArgs
+from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -106,13 +107,14 @@ class StepConfigABC(abc.ABC):
     def get_ocean(self) -> OceanConfig | None:
         pass
 
+    @abc.abstractmethod
     def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
         """Replace prescribed prognostic names (e.g. when loading from checkpoint)."""
-        pass
 
     @property
+    @abc.abstractmethod
     def allow_missing_variables(self) -> bool:
-        return False
+        pass
 
     @abc.abstractmethod
     def load(self):
@@ -122,8 +124,9 @@ class StepConfigABC(abc.ABC):
         pass
 
     @classmethod
+    @abc.abstractmethod
     def from_state(cls, state: Mapping[str, Any]) -> Self:
-        return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
+        pass
 
 
 @dataclasses.dataclass
@@ -224,14 +227,39 @@ class StepSelector(StepConfigABC):
         self._step_config_instance.load()
         self.config = dataclasses.asdict(self._step_config_instance)
 
+    @classmethod
+    def from_state(cls, state: Mapping[str, Any]) -> Self:
+        return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
+
 
 class StepABC(abc.ABC):
     SelfType = TypeVar("SelfType", bound="StepABC")
+
+    def __init__(self) -> None:
+        # Mirrors ``torch.nn.Module.training`` so that step-level eval/train
+        # state is observable without reaching into the underlying modules.
+        self._training: bool = True
 
     @property
     @abc.abstractmethod
     def config(self) -> StepConfigABC:
         pass
+
+    def train(self, mode: bool = True) -> "StepABC":
+        """Set the step (and all submodules) to training mode.
+
+        Matches the ``torch.nn.Module.train`` signature so step instances
+        can be toggled with the same API as the modules they own.
+        """
+        self._training = mode
+        for module in self.modules:
+            module.train(mode)
+        return self
+
+    @final
+    def eval(self) -> "StepABC":
+        """Set the step (and all submodules) to evaluation mode."""
+        return self.train(False)
 
     @final
     def get_loss_normalizer(
@@ -333,7 +361,7 @@ class StepABC(abc.ABC):
         self: SelfType,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
+    ) -> tuple[TensorDict, StepperState | None]:
         """
         Step the model forward one timestep given input data.
 
@@ -342,7 +370,17 @@ class StepABC(abc.ABC):
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
-            The denormalized output data at the next time step.
+            A tuple ``(output, stepper_state)`` where ``output`` is the
+            denormalized data at the next time step and ``stepper_state`` is
+            the per-sample state to thread into the next call (or ``None``).
+        """
+        pass
+
+    def set_epoch(self, epoch: int) -> None:
+        """Called by the stepper at the start of each training epoch.
+
+        Default implementation is a no-op. Steps which wrap another step must
+        forward the call to the wrapped step.
         """
         pass
 

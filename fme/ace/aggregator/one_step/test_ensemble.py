@@ -1,3 +1,5 @@
+import math
+
 import pytest
 import torch
 
@@ -142,6 +144,64 @@ def test_ssr_identical_members_gives_negative_one():
     torch.testing.assert_close(got, torch.full_like(got, -1.0), atol=1e-6, rtol=0.0)
 
 
+def test_ssr_prescribed_cell_is_zero_but_zero_spread_with_error_is_negative_one():
+    """A prescribed cell (members identical and equal to the target) is a 0/0
+    and reports 0, while a zero-spread cell with nonzero error still gives -1."""
+    torch.manual_seed(0)
+    metric = SSRBiasMetric()
+    n_batch, n_sample, n_time, n_y, n_x = 10, 3, 1, 2, 2
+    target = get_tensor((n_batch, 1, n_time, n_y, n_x))
+    # zero spread everywhere: every ensemble member identical
+    single_pred = get_tensor((n_batch, 1, n_time, n_y, n_x))
+    gen = single_pred.expand(n_batch, n_sample, n_time, n_y, n_x).clone()
+    # left column: members also equal the target -> zero skill too (prescribed)
+    gen[..., 0] = target[..., 0]
+    metric.record(target=target, gen=gen)
+    got = metric.get()
+    torch.testing.assert_close(
+        got[..., 0], torch.zeros_like(got[..., 0]), atol=1e-6, rtol=0.0
+    )
+    torch.testing.assert_close(
+        got[..., 1], torch.full_like(got[..., 1], -1.0), atol=1e-6, rtol=0.0
+    )
+
+
+def test_aggregator_ssr_bias_prescribed_cells_do_not_pull_scalar_to_negative_one():
+    """Prescribed cells contribute 0, not the -1 floor, so a mostly-prescribed
+    field is not dragged toward -1. With uniform weights the scalar equals the
+    plain mean of the per-cell field."""
+    torch.manual_seed(0)
+    n_batch, n_sample, n_time, n_y, n_x = 50, 4, 1, 2, 4
+    area_weights = torch.ones([n_y, n_x], device=get_device())
+    agg = _EnsembleAggregator(
+        gridded_operations=LatLonOperations(area_weights),
+        log_mean_maps=False,
+        target="denorm",
+    )
+    target = torch.randn(n_batch, 1, n_time, n_y, n_x, device=get_device())
+    gen = torch.randn(n_batch, n_sample, n_time, n_y, n_x, device=get_device())
+    # left half of the grid prescribed: every member equals the target
+    gen[..., :2] = target[..., :2]
+    agg.record_batch(
+        target_data=EnsembleTensorDict({"a": target}),
+        gen_data=EnsembleTensorDict({"a": gen}),
+    )
+    scalar = float(agg.get_logs(label="metrics")["metrics/ssr_bias/a"])
+    assert math.isfinite(scalar)
+    # not pinned to the -1 floor by the prescribed half
+    assert scalar > -0.5, scalar
+
+    # with uniform weights the scalar is the plain mean of the per-cell field,
+    # where the prescribed cells contribute 0 (not -1)
+    field = SSRBiasMetric()
+    field.record(target=target, gen=gen)
+    expected = float(field.get().mean())
+    assert math.isclose(scalar, expected, rel_tol=1e-5, abs_tol=1e-5), (
+        scalar,
+        expected,
+    )
+
+
 @pytest.mark.parametrize("n_sample", [2, 10])
 def test_ensemble_mean_metric(n_sample):
     # this simple check only works for even n_sample
@@ -250,6 +310,55 @@ def test_aggregator_norm_logs_channel_mean_subset():
         torch.testing.assert_close(
             torch.tensor(float(logs[f"metrics/{metric}/channel_mean"])),
             torch.tensor(float(expected)),
+            atol=1e-6,
+            rtol=1e-6,
+        )
+
+
+def test_aggregator_report_variables_filters_per_variable_but_keeps_channel_mean():
+    torch.manual_seed(0)
+    area_weights = torch.ones([4, 4], device=get_device())
+    names = ["a", "b", "c"]
+    target = _make_ensemble_batch(names)
+    gen = _make_ensemble_batch(names)
+
+    agg_full = _EnsembleAggregator(
+        gridded_operations=LatLonOperations(area_weights),
+        log_mean_maps=False,
+        target="norm",
+        channel_mean_names=names,
+    )
+    agg_full.record_batch(
+        target_data=target,
+        gen_data=gen,
+        target_data_norm=target,
+        gen_data_norm=gen,
+    )
+    full_logs = agg_full.get_logs(label="metrics")
+
+    agg_filtered = _EnsembleAggregator(
+        gridded_operations=LatLonOperations(area_weights),
+        log_mean_maps=False,
+        target="norm",
+        channel_mean_names=names,
+        report_variables=["a"],
+    )
+    agg_filtered.record_batch(
+        target_data=target,
+        gen_data=gen,
+        target_data_norm=target,
+        gen_data_norm=gen,
+    )
+    filtered_logs = agg_filtered.get_logs(label="metrics")
+
+    for metric in ("crps", "ssr_bias", "ensemble_mean_rmse"):
+        assert f"metrics/{metric}/a" in filtered_logs
+        assert f"metrics/{metric}/b" not in filtered_logs
+        assert f"metrics/{metric}/c" not in filtered_logs
+        assert f"metrics/{metric}/channel_mean" in filtered_logs
+        torch.testing.assert_close(
+            torch.tensor(float(filtered_logs[f"metrics/{metric}/channel_mean"])),
+            torch.tensor(float(full_logs[f"metrics/{metric}/channel_mean"])),
             atol=1e-6,
             rtol=1e-6,
         )

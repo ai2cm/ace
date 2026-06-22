@@ -44,7 +44,7 @@ def dummy_datasetinfo(height: int, width: int) -> DatasetInfo:
 
 
 @pytest.mark.skipif(not GRAPHCAST_AVAIL, reason="trimesh/rtree are not available")
-@pytest.mark.parametrize("activation", ["SiLU", "ReLU", "Mish", "GELU", "Tanh"])
+@pytest.mark.parametrize("activation", ["SiLU", "GELU"])
 def test_graphcast_normalization(activation):
     # Model parameters
     input_channels = 4

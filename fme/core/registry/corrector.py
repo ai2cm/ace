@@ -34,6 +34,12 @@ class CorrectorSelector(CorrectorConfigABC):
     registry: ClassVar[Registry[CorrectorConfigABC]] = Registry[CorrectorConfigABC]()
 
     def __post_init__(self):
+        super().__post_init__()
+        if self.corrector_disabled_epochs != 0:
+            raise ValueError(
+                "corrector_disabled_epochs must be set on the wrapped corrector "
+                "config (inside `config:`), not on the CorrectorSelector."
+            )
         self._corrector_config_instance = self.registry.get(self.type, self.config)
 
     @classmethod
@@ -45,8 +51,11 @@ class CorrectorSelector(CorrectorConfigABC):
         """This class method is used to expose all available types of Correctors."""
         return set(cls.registry._types.keys())
 
-    def get_corrector(
+    def _get_corrector(
         self,
         dataset_info: DatasetInfo,
     ) -> CorrectorABC:
+        # The wrapped config's get_corrector applies its own
+        # corrector_disabled_epochs; the selector never schedules (guarded in
+        # __post_init__), so no double-wrapping is possible.
         return self._corrector_config_instance.get_corrector(dataset_info)

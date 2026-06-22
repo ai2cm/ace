@@ -17,6 +17,11 @@ from ..inference.build_context import MetricBuildContext, MetricNotSupportedErro
 from ..inference.data import MetricBuildResult
 from .build_context import OneStepBuildContext, OneStepMetricBuildResult
 
+# A zero-spread cell with unbiased MSE below this fraction of the field's
+# largest is treated as prescribed (a 0/0): the rounding residue from
+# averaging identical members sits far below this, genuine skill far above.
+_PRESCRIBED_MSE_RTOL = 1e-6
+
 
 def get_gen_shape(gen_data: TensorMapping):
     for name in gen_data:
@@ -30,6 +35,7 @@ def get_one_step_ensemble_aggregator(
     metadata: Mapping[str, VariableMetadata] | None = None,
     target: Literal["norm", "denorm"] = "denorm",
     channel_mean_names: Sequence[str] | None = None,
+    report_variables: Sequence[str] | None = None,
 ) -> "SelectStepEnsembleAggregator":
     return SelectStepEnsembleAggregator(
         aggregator=_EnsembleAggregator(
@@ -38,6 +44,7 @@ def get_one_step_ensemble_aggregator(
             metadata=metadata,
             target=target,
             channel_mean_names=channel_mean_names,
+            report_variables=report_variables,
         ),
         i_target_time=target_time,
     )
@@ -144,14 +151,26 @@ class SSRBiasMetric(ReducedMetric):
         if self._total_unbiased_mse is None or self._total_variance is None:
             raise ValueError("No batches have been recorded.")
         spread = self._total_variance.sqrt()
-        # Clamp to avoid NaN from sqrt of negative values. The unbiased MSE
-        # correction (mse - variance/n_ensemble) can overshoot with small
-        # ensembles or few batches, producing negative values at some grid
-        # cells that do not indicate spread truly exceeding skill.
+        # Clamp before sqrt: the unbiased-MSE correction (mse - variance/n)
+        # can go slightly negative with small ensembles without meaning spread
+        # truly exceeds skill.
         skill = torch.clamp(self._total_unbiased_mse, min=0.0).sqrt()
-        # When skill is zero (clamped or genuinely perfect), SSR is undefined.
-        # Use -1 as the convention (equivalent to zero spread).
-        return torch.where(skill > 0, spread / skill - 1, torch.tensor(-1.0))
+        # Zero skill with nonzero spread is undefined; use -1 by convention
+        # (also the limit of spread / skill - 1 as spread -> 0 at nonzero skill).
+        ssr_bias = torch.where(
+            skill > 0, spread / skill - 1, torch.full_like(spread, -1.0)
+        )
+        # Prescribed cells (every member equals the target, e.g. SST over ocean)
+        # are a genuine 0/0: zero spread and zero error. Report 0 (perfectly
+        # calibrated) rather than the -1 floor, which would otherwise dominate
+        # the global mean of a mostly-prescribed field. Variance is exactly 0
+        # there, but the unbiased MSE carries a tiny rounding residue, so test
+        # it against a small fraction of the field's largest MSE, not against 0.
+        mse_floor = _PRESCRIBED_MSE_RTOL * skill.square().max()
+        prescribed = (self._total_variance == 0) & (
+            self._total_unbiased_mse <= mse_floor
+        )
+        return torch.where(prescribed, torch.zeros_like(spread), ssr_bias)
 
 
 class _EnsembleAggregator:
@@ -166,6 +185,7 @@ class _EnsembleAggregator:
         metadata: Mapping[str, VariableMetadata] | None = None,
         target: Literal["norm", "denorm"] = "denorm",
         channel_mean_names: Sequence[str] | None = None,
+        report_variables: Sequence[str] | None = None,
     ):
         """
         Args:
@@ -182,6 +202,10 @@ class _EnsembleAggregator:
                 computed over all variables present in the data. Names that
                 are not present in the data raise KeyError. Ignored when
                 target is "denorm".
+            report_variables: If set, only per-variable entries for these
+                variables will appear in logs and datasets. Aggregate entries
+                like ``channel_mean`` are always included. All variables are
+                still used for channel-mean computation.
         """
         self._gridded_operations = gridded_operations
         self._n_batches = 0
@@ -192,6 +216,9 @@ class _EnsembleAggregator:
         self._diverging_metrics = {"ssr_bias"}
         self._target = target
         self._channel_mean_names = channel_mean_names
+        self._report_variables = (
+            frozenset(report_variables) if report_variables is not None else None
+        )
 
     def _get_variable_metrics(self, gen_data: TensorMapping):
         if self._variable_metrics is None:
@@ -246,8 +273,8 @@ class _EnsembleAggregator:
 
     def _get_caption(self, name: str) -> str:
         if self._metadata is not None and name in self._metadata:
-            caption_name = self._metadata[name].long_name
-            units = self._metadata[name].units
+            caption_name = self._metadata[name].display_long_name(name)
+            units = self._metadata[name].display_units()
         else:
             caption_name, units = name, "unknown_units"
         caption = f"{caption_name} ({units})"
@@ -257,8 +284,10 @@ class _EnsembleAggregator:
         if self._variable_metrics is None or self._n_batches == 0:
             raise ValueError("No batches have been recorded.")
         data: dict[str, torch.Tensor] = {}
+        all_variable_names: set[str] = set()
         for metric in sorted(self._variable_metrics):
             for key in sorted(self._variable_metrics[metric]):
+                all_variable_names.add(key)
                 metric_value = self._dist.reduce_mean(
                     self._variable_metrics[metric][key].get()
                 )
@@ -289,6 +318,13 @@ class _EnsembleAggregator:
                 if names:
                     scalars = [data[f"{metric}/{key}"] for key in names]
                     data[f"{metric}/channel_mean"] = sum(scalars) / len(scalars)
+        if self._report_variables is not None:
+            excluded = all_variable_names - self._report_variables
+            data = {
+                k: v
+                for k, v in data.items()
+                if not any(seg in excluded for seg in k.split("/"))
+            }
         return data
 
     @torch.no_grad()

@@ -35,11 +35,12 @@ from fme.ace.stepper.single_module import (
 from fme.ace.stepper.single_module import (
     load_weights_and_history as load_uncoupled_weights_and_history,
 )
+from fme.ace.stepper.time_length_probabilities import TimeLengthProbabilities
 from fme.core.dataset_info import DatasetInfo
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
-from fme.core.loss import StepLossConfig
+from fme.core.loss import StepLoss, StepLossConfig
 from fme.core.nan_diagnostics import check as _nan_check
 from fme.core.nan_diagnostics import (
     clear_stepper_context,
@@ -47,7 +48,7 @@ from fme.core.nan_diagnostics import (
     set_stepper_context,
 )
 from fme.core.ocean import OceanConfig
-from fme.core.ocean_data import OceanData
+from fme.core.ocean_data import OCEAN_FIELD_NAME_PREFIXES, OceanData
 from fme.core.optimization import NullOptimization
 from fme.core.tensors import add_ensemble_dim, unfold_ensemble_dim
 from fme.core.timing import GlobalTimer
@@ -59,7 +60,7 @@ from fme.coupled.data_loading.batch_data import (
     CoupledPrognosticState,
 )
 from fme.coupled.dataset_info import CoupledDatasetInfo
-from fme.coupled.loss import LossContributionsConfig, StepLossABC, StepPredictionABC
+from fme.coupled.loss import ComponentLossSchedule
 from fme.coupled.requirements import (
     CoupledDataRequirements,
     CoupledPrognosticStateDataRequirements,
@@ -90,11 +91,18 @@ class CoupledOceanFractionConfig:
     Configuration for computing ocean fraction from the ocean-predicted sea ice
     fraction.
 
+    The configured land fraction name is used to read the atmosphere forcing,
+    then passed to OceanData as its canonical land_fraction field. The configured
+    sea ice fraction name must be registered in OCEAN_FIELD_NAME_PREFIXES as
+    either sea_ice_fraction or ocean_sea_ice_fraction.
+
     Parameters:
         sea_ice_fraction_name: Name of the sea ice fraction field in the ocean
-            data. Must be an ocean prognostic variable. If the atmosphere uses
-            the same name as an ML forcing then the generated sea ice fraction
-            is also passed as an input to the atmosphere.
+            data. Must be an ocean prognostic variable and must be registered in
+            OCEAN_FIELD_NAME_PREFIXES as either sea_ice_fraction or
+            ocean_sea_ice_fraction. If the atmosphere uses the same name as an
+            ML forcing then the generated sea ice fraction is also passed as an
+            input to the atmosphere.
         land_fraction_name: Name of the land fraction field in the atmosphere
             data. If needed, will be passed to the ocean stepper as a forcing.
         sea_ice_fraction_name_in_atmosphere: Name of the sea ice fraction field in
@@ -105,6 +113,21 @@ class CoupledOceanFractionConfig:
     sea_ice_fraction_name: str
     land_fraction_name: str
     sea_ice_fraction_name_in_atmosphere: str | None = None
+
+    def __post_init__(self):
+        self._get_canonical_sea_ice_fraction_name()
+
+    def _get_canonical_sea_ice_fraction_name(self) -> str:
+        sea_ice_frac_name = self.sea_ice_fraction_name
+        if sea_ice_frac_name in OCEAN_FIELD_NAME_PREFIXES["sea_ice_fraction"]:
+            return "sea_ice_fraction"
+        elif sea_ice_frac_name in OCEAN_FIELD_NAME_PREFIXES["ocean_sea_ice_fraction"]:
+            return "ocean_sea_ice_fraction"
+        else:
+            raise ValueError(
+                f"CoupledOceanFractionConfig expected {sea_ice_frac_name} to be "
+                "registered in OCEAN_FIELD_NAME_PREFIXES as a sea ice fraction."
+            )
 
     def validate_ocean_prognostic_names(self, prognostic_names: Iterable[str]):
         if self.sea_ice_fraction_name not in prognostic_names:
@@ -157,7 +180,12 @@ class CoupledOceanFractionConfig:
         # fill nans with 0s
         sea_ice_frac = torch.nan_to_num(forcings_from_ocean[sea_ice_frac_name])
         land_frac = atmos_forcing_data[land_frac_name]
-        return OceanData({land_frac_name: land_frac, sea_ice_frac_name: sea_ice_frac})
+        return OceanData(
+            {
+                "land_fraction": land_frac,
+                self._get_canonical_sea_ice_fraction_name(): sea_ice_frac,
+            }
+        )
 
 
 def _load_stepper_weights_and_history_factory(
@@ -775,7 +803,7 @@ class CoupledTrainOutput(TrainOutputABC):
         }
 
 
-class ComponentStepPrediction(StepPredictionABC):
+class ComponentStepPrediction:
     def __init__(
         self,
         realm: Literal["ocean", "atmosphere"],
@@ -842,6 +870,10 @@ class CoupledStepper:
     def set_eval(self):
         self.atmosphere.set_eval()
         self.ocean.set_eval()
+
+    def set_epoch(self, epoch: int) -> None:
+        self.atmosphere.set_epoch(epoch)
+        self.ocean.set_epoch(epoch)
 
     def get_state(self):
         """
@@ -1171,7 +1203,7 @@ class CoupledStepper:
             # predict and yield atmosphere steps
             for i_inner in range(self.n_inner_steps):
                 atmos_step_num = i_outer * self.n_inner_steps + i_inner
-                atmos_step = next(atmos_generator)
+                atmos_step, _ = next(atmos_generator)
                 _nan_check(
                     f"coupled/outer={i_outer}/atmos_step={atmos_step_num}",
                     atmos_step,
@@ -1211,7 +1243,7 @@ class CoupledStepper:
             # predict and yield a single ocean step
             set_stepper_context(f"coupled/ocean outer={i_outer}")
             try:
-                ocean_step = next(
+                ocean_step, _ = next(
                     iter(
                         self.ocean.get_prediction_generator(
                             ocean_ic_state,
@@ -1269,14 +1301,14 @@ class CoupledStepper:
         forcing_data: CoupledBatchData,
     ) -> CoupledBatchData:
         atmos_data = process_prediction_generator_list(
-            [x.data for x in output_list if x.realm == "atmosphere"],
+            [(x.data, None) for x in output_list if x.realm == "atmosphere"],
             time=forcing_data.atmosphere_data.time[:, self.atmosphere.n_ic_timesteps :],
             horizontal_dims=forcing_data.atmosphere_data.horizontal_dims,
             labels=forcing_data.atmosphere_data.labels,
             n_ensemble=forcing_data.atmosphere_data.n_ensemble,
         )
         ocean_data = process_prediction_generator_list(
-            [x.data for x in output_list if x.realm == "ocean"],
+            [(x.data, None) for x in output_list if x.realm == "ocean"],
             time=forcing_data.ocean_data.time[:, self.ocean.n_ic_timesteps :],
             horizontal_dims=forcing_data.ocean_data.horizontal_dims,
             labels=forcing_data.ocean_data.labels,
@@ -1403,7 +1435,7 @@ class CoupledStepper:
         )
 
 
-class ComponentEnsembleStepPrediction(StepPredictionABC):
+class ComponentEnsembleStepPrediction:
     """Like ComponentStepPrediction but with an explicit ensemble dimension."""
 
     def __init__(
@@ -1476,14 +1508,28 @@ def _process_ensemble_output_list(
 
 
 class CoupledStepperTrainLoss:
+    """Owns per-component loss computation *and* the rollout schedule
+    (which steps are optimized, how many outer steps are required).
+    """
+
     def __init__(
         self,
-        ocean_loss: StepLossABC,
-        atmosphere_loss: StepLossABC,
+        ocean_loss: StepLoss,
+        atmosphere_loss: StepLoss,
+        ocean_schedule: ComponentLossSchedule,
+        atmosphere_schedule: ComponentLossSchedule,
     ):
-        self._loss_objs = {
+        self._loss_objs: dict[str, StepLoss] = {
             "ocean": ocean_loss,
             "atmosphere": atmosphere_loss,
+        }
+        self._schedules = {
+            "ocean": ocean_schedule,
+            "atmosphere": atmosphere_schedule,
+        }
+        self._weights = {
+            "ocean": ocean_schedule.loss_weight,
+            "atmosphere": atmosphere_schedule.loss_weight,
         }
 
     @property
@@ -1494,20 +1540,20 @@ class CoupledStepperTrainLoss:
         )
 
     def sample_n_steps(self) -> None:
-        for loss_obj in self._loss_objs.values():
-            loss_obj.sample_n_steps()
+        for schedule in self._schedules.values():
+            schedule.sample_n_steps()
 
     def seed_step_sampler(self, seed: int) -> None:
-        for i, loss_obj in enumerate(self._loss_objs.values()):
-            loss_obj.seed_rng(seed + i)
+        for i, schedule in enumerate(self._schedules.values()):
+            schedule.seed_rng(seed + i)
 
     def set_train(self) -> None:
-        for loss_obj in self._loss_objs.values():
-            loss_obj.set_train()
+        for schedule in self._schedules.values():
+            schedule.set_train()
 
     def set_eval(self) -> None:
-        for loss_obj in self._loss_objs.values():
-            loss_obj.set_eval()
+        for schedule in self._schedules.values():
+            schedule.set_eval()
 
     def n_required_outer_steps(self, n_inner_steps: int) -> int:
         """Minimum number of outer (ocean) steps needed so that every
@@ -1516,8 +1562,8 @@ class CoupledStepperTrainLoss:
         Callers must invoke ``sample_n_steps()`` beforehand for stochastic
         configs so the value reflects the current batch.
         """
-        ocean_required = self._loss_objs["ocean"].n_required_forward_steps()
-        atmos_required = self._loss_objs["atmosphere"].n_required_forward_steps()
+        ocean_required = self._schedules["ocean"].n_required_forward_steps()
+        atmos_required = self._schedules["atmosphere"].n_required_forward_steps()
         atmos_outer = -(-atmos_required // n_inner_steps)  # ceil division
         return max(ocean_required, atmos_outer)
 
@@ -1526,35 +1572,87 @@ class CoupledStepperTrainLoss:
         realm: Literal["ocean", "atmosphere"],
         step: int,
     ) -> bool:
-        return self._loss_objs[realm].step_is_optimized(step)
+        return self._schedules[realm].step_is_optimized(step)
 
     def compute_loss(
         self,
         prediction: ComponentEnsembleStepPrediction,
         target_data: TensorMapping,
     ) -> torch.Tensor:
-        return self._loss_objs[prediction.realm].compute_loss(prediction, target_data)
+        realm = prediction.realm
+        weight = self._weights[realm]
+        if weight == 0.0:
+            return torch.tensor(0.0, device=fme.get_device())
+        if not self._schedules[realm].step_is_optimized(prediction.step):
+            return torch.tensor(0.0, device=fme.get_device())
+        loss_output = self._loss_objs[realm](
+            prediction.data, target_data, prediction.step
+        )
+        return weight * loss_output.total()
 
     def __call__(
         self,
         prediction: ComponentEnsembleStepPrediction,
         target_data: TensorMapping,
     ) -> torch.Tensor | None:
-        loss_obj = self._loss_objs[prediction.realm]
-        if loss_obj.step_is_optimized(prediction.step):
-            return loss_obj(prediction, target_data)
-        return None
+        realm = prediction.realm
+        if not self._schedules[realm].step_is_optimized(prediction.step):
+            return None
+        loss_output = self._loss_objs[realm](
+            prediction.data, target_data, prediction.step
+        )
+        return self._weights[realm] * loss_output.total()
 
 
 @dataclasses.dataclass
 class ComponentTrainingConfig:
+    """Configuration for one component's training behavior within a coupled
+    stepper.
+
+    Parameters:
+        loss: The step loss function configuration (e.g. MSE, EnsembleLoss).
+        n_steps: Number of consecutive component steps in the optimization
+            window, starting from the component's first step after the initial
+            condition. Can be an int, ``None`` (the default, meaning all
+            available steps), or a ``TimeLengthProbabilities`` for stochastic
+            per-batch sampling.
+        optimize_last_step_only: If True, only the last step within the
+            training horizon defined by ``n_steps`` is optimized (i.e.
+            contributes to the loss and has gradients enabled).
+        loss_weight: Weight applied to the loss for this component.
+        parameter_init: Component-level parameter initialization.
+    """
+
     loss: StepLossConfig
-    loss_contributions: LossContributionsConfig = dataclasses.field(
-        default_factory=lambda: LossContributionsConfig()
-    )
+    n_steps: TimeLengthProbabilities | int | None = None
+    optimize_last_step_only: bool = False
+    loss_weight: float = 1.0
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
+
+    @property
+    def n_steps_max(self) -> int | None:
+        """Upper bound on the number of consecutive steps that can contribute
+        to the loss, or ``None`` if unbounded (``n_steps=None``).
+
+        For ``TimeLengthProbabilities`` this is the largest value the sampler
+        can produce.
+        """
+        if self.n_steps is None:
+            return None
+        if isinstance(self.n_steps, TimeLengthProbabilities):
+            return self.n_steps.max_n_forward_steps
+        return self.n_steps
+
+    @property
+    def loss_is_null(self) -> bool:
+        """True when this component contributes nothing to the total loss."""
+        if self.loss_weight == 0.0:
+            return True
+        if isinstance(self.n_steps_max, int) and self.n_steps_max == 0:
+            return True
+        return False
 
 
 @dataclasses.dataclass
@@ -1566,7 +1664,7 @@ class CoupledTrainStepperConfig:
         ocean: The configuration for the ocean component.
         atmosphere: The configuration for the atmosphere component.
         n_ensemble: The number of ensemble members evaluated for each training
-            batch member. Default is 2 if ocean or atmopshere loss type is
+            batch member. Default is 2 if ocean or atmosphere loss type is
             EnsembleLoss, otherwise the default is 1. Must be 2 for EnsembleLoss
             to be valid.
         parameter_init: The coupled parameter initialization configuration for
@@ -1597,13 +1695,10 @@ class CoupledTrainStepperConfig:
                     "or the component training configs' "
                     "ParameterInitializationConfig.weights_path, but not both."
                 )
-        if (
-            self.ocean.loss_contributions.is_null
-            and self.atmosphere.loss_contributions.is_null
-        ):
+        if self.ocean.loss_is_null and self.atmosphere.loss_is_null:
             raise ValueError(
-                "At least one of ocean or atmosphere loss_contributions must be "
-                "non-null (non-zero weight and non-zero n_steps)."
+                "At least one of ocean or atmosphere loss must be "
+                "non-null (non-zero loss_weight and non-zero n_steps)."
             )
         if self.n_ensemble == -1:
             use_ensemble_loss = "EnsembleLoss" in (
@@ -1622,8 +1717,8 @@ class CoupledTrainStepperConfig:
         ``CoupledStepperConfig.n_inner_steps`` and ``self.n_coupled_steps``.
         """
         return CoupledOptionalInt(
-            ocean=self.ocean.loss_contributions.n_steps_max,
-            atmosphere=self.atmosphere.loss_contributions.n_steps_max,
+            ocean=self.ocean.n_steps_max,
+            atmosphere=self.atmosphere.n_steps_max,
         )
 
     def get_train_window_data_requirements(
@@ -1681,15 +1776,24 @@ class CoupledTrainStepperConfig:
         atmos_step_loss = stepper.atmosphere.build_loss(self.atmosphere.loss)
         n_steps_limit_ocean = n_coupled_steps
         n_steps_limit_atmos = n_coupled_steps * stepper.n_inner_steps
-        ocean_loss = self.ocean.loss_contributions.build(
-            ocean_step_loss, stepper.ocean.TIME_DIM, n_steps_limit=n_steps_limit_ocean
+        ocean_schedule = ComponentLossSchedule(
+            n_steps=self.ocean.n_steps,
+            optimize_last_step_only=self.ocean.optimize_last_step_only,
+            loss_weight=self.ocean.loss_weight,
+            n_steps_limit=n_steps_limit_ocean,
         )
-        atmos_loss = self.atmosphere.loss_contributions.build(
-            atmos_step_loss,
-            stepper.atmosphere.TIME_DIM,
+        atmos_schedule = ComponentLossSchedule(
+            n_steps=self.atmosphere.n_steps,
+            optimize_last_step_only=self.atmosphere.optimize_last_step_only,
+            loss_weight=self.atmosphere.loss_weight,
             n_steps_limit=n_steps_limit_atmos,
         )
-        return CoupledStepperTrainLoss(ocean_loss, atmos_loss)
+        return CoupledStepperTrainLoss(
+            ocean_loss=ocean_step_loss,
+            atmosphere_loss=atmos_step_loss,
+            ocean_schedule=ocean_schedule,
+            atmosphere_schedule=atmos_schedule,
+        )
 
     def get_train_stepper(
         self,
@@ -1816,6 +1920,9 @@ class CoupledTrainStepper(
     def set_eval(self):
         self._stepper.set_eval()
         self._loss.set_eval()
+
+    def set_epoch(self, epoch: int) -> None:
+        self._stepper.set_epoch(epoch)
 
     def get_state(self) -> dict[str, Any]:
         return self._stepper.get_state()
