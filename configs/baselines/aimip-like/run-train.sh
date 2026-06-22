@@ -156,10 +156,25 @@ run_training() {
 #   rh-input-append: saturation_normalization [names specific_total_water_*,
 #                    prediction false, input append] -- the RH cheapest-first
 #                    probe (redundant q/qsat input channels, q predictions kept).
-# Deeper RH knobs (prediction-space, replace) are gated on the input-append read.
+# Deeper RH knobs (RH-space prediction; replace) added below as a parallel wave.
+#   rh-predict-top: saturation_normalization [names specific_total_water_0,1,
+#                    prediction true, input replace] -- RH-space prediction
+#                    scoped to the top levels (smallest RH-advection cost).
+#   rh-full:        saturation_normalization [names specific_total_water_*,
+#                    prediction true, input replace] -- full-column RH (the
+#                    replace end of the append-vs-replace contrast vs
+#                    rh-input-append). NB: under residual prediction the step
+#                    framework forbids replace-input with prediction off for a
+#                    prognostic field (rh_in must equal rh_out), so the "replace"
+#                    arm necessarily predicts in RH; replace+predict-off is not a
+#                    valid config on this base.
 # =============================================================================
 
 # --- Wave: RH/qsat moisture eval (seed 0, embed_dim 512) (Jupiter+Titan, high) ---
 # --- LAUNCHED 2026-06-22 to ai2/ace from commit 2d1738dc6 (2 jobs, 1 GPU each, jupiter+titan high). Lines commented to prevent re-submission; see experiment records for beaker/wandb links. ---
 # run_training "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-qsat-scaling.yaml"    "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-qsat-scaling-rs0"    1 ai2/ace high "ai2/jupiter ai2/titan"
 # run_training "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-rh-input-append.yaml" "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-rh-input-append-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# --- Wave: RH knob sweep steps 2+3 (seed 0, embed_dim 512) (Jupiter+Titan, high) ---
+run_training "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-rh-predict-top.yaml" "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-rh-predict-top-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+run_training "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-rh-full.yaml"        "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-rh-full-rs0"        1 ai2/ace high "ai2/jupiter ai2/titan"
