@@ -8,3 +8,5 @@ ft-v20260602-E3SMv3-piControl-zltomfxg-l6ktf4nj-epoch-24|rs0|01KTTN14GMX2CAQR4E4
 ft-v20260602-E3SMv3-piControl-8v5nro2x-jlzakbmi-epoch-4|rs0|01KVEJANR6EZYF85NGT0HPJGTY|done|best_inference_ckpt|normal|--min-runtime 8h||01KVEJANZ4QEZAPXZKF6V6XMQY|ai2/climate-titan|b200
 
 ft-v20260602-E3SMv3-piControl-zltomfxg-jlzakbmi-epoch-4|rs0|01KVM574ENY5FBDSEAZH4H9A06|run_ICx1-105yr|best_inference_ckpt|urgent|--min-runtime 8h||01KVM574QXPFH16A2E4C4911WM|ai2/climate-titan|b200
+
+ft-v20260602-E3SMv3-piControl-zltomfxg-l6ktf4nj-epoch-12|rs0|01KVRTS2BA3EKFPKRDEQF7Z5FP|training|best_inference_ckpt|normal|--min-runtime 8h
