@@ -46,6 +46,16 @@ def benchmark(fn, iters=10, warmup=1) -> BenchmarkResult:
     )
 
 
+@pytest.mark.skip(
+    reason=(
+        "Flaky: this test relies on wall-clock timing of grouped vs. ungrouped "
+        "DHConv contractions, which is sensitive to GPU contention and varies "
+        "run-to-run (e.g. failed in "
+        "https://github.com/ai2cm/ace/actions/runs/27963422691/job/82750794061). "
+        "We have no plans to refactor this code, so it does not need to run in "
+        "regular CI, but it is kept here (skipped) for reference."
+    )
+)
 @pytest.mark.skipif(
     get_device().type != "cuda",
     reason=(
