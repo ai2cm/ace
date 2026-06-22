@@ -1406,14 +1406,13 @@ class Stepper:
         return stepper
 
     def set_eval(self) -> None:
-        for module in self.modules:
-            module.eval()
+        self._step_obj.eval()
 
     def set_train(self) -> None:
-        for module in self.modules:
-            module.train()
+        self._step_obj.train()
 
     def set_epoch(self, epoch: int) -> None:
+        self._step_obj.set_epoch(epoch)
         for module in self.modules:
             for submodule in module.modules():
                 request_reset = getattr(
