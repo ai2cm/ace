@@ -30,8 +30,8 @@ class StepArgs:
             alongside its output dict.
         input_dropout_mask: Synthetic training-only input presence mask. Keys
             are the receiving Step's packed input channel names, values are
-            ``[n_batch]`` bool tensors where True means present and False means
-            synthetically dropped. Distinct from ``data_mask`` (which marks
+            ``[n_batch, n_ensemble]`` bool tensors where True means present and
+            False means synthetically dropped. Distinct from ``data_mask`` (which marks
             genuinely-absent variables consumed by preprocessing and loss
             masking): this mask only corrupts inputs to the network. It is
             preserved through input processing but not transformed by it, and

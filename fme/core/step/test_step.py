@@ -1533,7 +1533,7 @@ def test_step_shared_global_mean_removal_raises_on_masked_reference():
 def _full_drop_mask(step: SingleModuleStep, n_samples: int) -> TensorDict:
     """A concrete input_dropout mask that drops every packed input channel."""
     return {
-        name: torch.zeros(n_samples, dtype=torch.bool, device=fme.get_device())
+        name: torch.zeros(n_samples, 1, dtype=torch.bool, device=fme.get_device())
         for name in step.in_packer.names
     }
 
@@ -1567,7 +1567,7 @@ def test_input_dropout_mask_zeros_inputs():
     out_full_drop = _run(_full_drop_mask(step, n_samples))
     out_all_present = _run(
         {
-            name: torch.ones(n_samples, dtype=torch.bool, device=fme.get_device())
+            name: torch.ones(n_samples, 1, dtype=torch.bool, device=fme.get_device())
             for name in step.in_packer.names
         }
     )
@@ -1596,7 +1596,7 @@ def test_input_dropout_mask_indicator_reflects_combined_presence():
     # Drop the first channel only.
     dropout_mask = {
         name: torch.full(
-            (n_samples,),
+            (n_samples, 1),
             i != 0,
             dtype=torch.bool,
             device=fme.get_device(),
@@ -1649,10 +1649,12 @@ def test_input_dropout_mask_and_combine_with_data_mask():
     n_channels = len(in_names)
     # Channel 0 is genuinely missing (data_mask=0) but not synthetically dropped.
     data_mask = {
-        in_names[0]: torch.zeros(n_samples, dtype=torch.bool, device=fme.get_device()),
+        in_names[0]: torch.zeros(
+            n_samples, 1, dtype=torch.bool, device=fme.get_device()
+        ),
     }
     dropout_mask = {
-        name: torch.ones(n_samples, dtype=torch.bool, device=fme.get_device())
+        name: torch.ones(n_samples, 1, dtype=torch.bool, device=fme.get_device())
         for name in in_names
     }
     input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
@@ -1740,7 +1742,7 @@ def test_input_dropout_mask_gmr_extras_independently_maskable():
     n_samples = 2
     dropout_mask = {
         name: torch.full(
-            (n_samples,),
+            (n_samples, 1),
             i != gmr_index,
             dtype=torch.bool,
             device=fme.get_device(),
@@ -1863,7 +1865,7 @@ def test_input_dropout_mask_not_passed_to_global_mean_removal():
         step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
     dropout_mask = {
-        name: torch.zeros(n_samples, dtype=torch.bool, device=fme.get_device())
+        name: torch.zeros(n_samples, 1, dtype=torch.bool, device=fme.get_device())
         for name in step.in_packer.names
     }
     out_with_mask, _ = step.step(
