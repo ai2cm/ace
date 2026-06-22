@@ -125,6 +125,12 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
         total_energy_budget_correction: If not None, force the generated data to
             conserve an idealized version of total energy using the provided
             configuration.
+        clip_frozen_precipitation: If True, clip the frozen precipitation rate
+            (``total_frozen_precipitation_rate``) to be less than or equal to the
+            total precipitation rate (``PRATEsfc``) in each grid cell, since frozen
+            precipitation is a component of total precipitation. This is applied
+            after any other corrections, so the constraint holds with respect to the
+            final, corrected total precipitation rate.
     """
 
     conserve_dry_air: bool = False
@@ -140,6 +146,7 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
     ) = None
     force_positive_names: list[str] = dataclasses.field(default_factory=list)
     total_energy_budget_correction: EnergyBudgetConfig | None = None
+    clip_frozen_precipitation: bool = False
 
     def _get_corrector(
         self,
@@ -239,6 +246,8 @@ class AtmosphereCorrector(CorrectorABC):
                 method=self._config.total_energy_budget_correction.method,
                 unaccounted_heating=self._config.total_energy_budget_correction.constant_unaccounted_heating,
             )
+        if self._config.clip_frozen_precipitation:
+            gen_data = _clip_frozen_precipitation(gen_data)
         return gen_data, corrector_state
 
 
@@ -333,6 +342,26 @@ def _force_zero_global_mean_moisture_advection(
     gen.set_tendency_of_total_water_path_due_to_advection(
         gen.tendency_of_total_water_path_due_to_advection
         - mean_moisture_advection[..., None, None]
+    )
+    return gen.data
+
+
+def _clip_frozen_precipitation(gen_data: TensorMapping) -> TensorDict:
+    """
+    Clip the frozen precipitation rate to be at most the total precipitation rate.
+
+    Frozen precipitation is a component of total precipitation, so its rate cannot
+    physically exceed the total precipitation rate. This clips
+    ``total_frozen_precipitation_rate`` to ``min(total_frozen_precipitation_rate,
+    PRATEsfc)`` in each grid cell.
+
+    Args:
+        gen_data: The generated data, which must contain both the frozen
+            precipitation rate and the total precipitation rate.
+    """
+    gen = AtmosphereData(gen_data)
+    gen.set_frozen_precipitation_rate(
+        torch.minimum(gen.frozen_precipitation_rate, gen.precipitation_rate)
     )
     return gen.data
 

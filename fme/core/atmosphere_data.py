@@ -199,6 +199,9 @@ class AtmosphereData:
             except KeyError:
                 return torch.zeros_like(self.surface_pressure)
 
+    def set_frozen_precipitation_rate(self, value: torch.Tensor):
+        self._set("frozen_precipitation_rate", value)
+
     @property
     def net_surface_energy_flux_without_frozen_precip(self) -> torch.Tensor:
         return metrics.net_surface_energy_flux(

@@ -18,6 +18,7 @@ from .atmosphere import (
     AtmosphereCorrectorConfig,
     EnergyBudgetConfig,
     _adjust_gen_dry_air_to_target,
+    _clip_frozen_precipitation,
     _force_conserve_moisture,
     _force_conserve_total_energy,
     _force_zero_global_mean_moisture_advection,
@@ -288,6 +289,47 @@ def test_force_positive():
     torch.testing.assert_close(new_min, torch.tensor(0.0))
     # Ensure other variables are not modified
     torch.testing.assert_close(fixed_data["bar"], data["bar"])
+
+
+def test_clip_frozen_precipitation():
+    data = {
+        "PRATEsfc": torch.tensor([[1.0, 2.0], [3.0, 0.0]]),
+        "total_frozen_precipitation_rate": torch.tensor([[2.0, 1.0], [3.0, 0.5]]),
+    }
+    fixed_data = _clip_frozen_precipitation(data)
+    # frozen precip is clipped to total precip where it exceeds it, and left
+    # unchanged where it is already below total precip.
+    torch.testing.assert_close(
+        fixed_data["total_frozen_precipitation_rate"],
+        torch.tensor([[1.0, 1.0], [3.0, 0.0]]),
+    )
+    # total precip is unchanged
+    torch.testing.assert_close(fixed_data["PRATEsfc"], data["PRATEsfc"])
+    # the resulting frozen precip never exceeds total precip
+    assert torch.all(
+        fixed_data["total_frozen_precipitation_rate"] <= fixed_data["PRATEsfc"]
+    )
+
+
+def test_clip_frozen_precipitation_corrector_integration():
+    torch.manual_seed(0)
+    tensor_shape = (1, 5, 5)
+    config = AtmosphereCorrectorConfig(clip_frozen_precipitation=True)
+    _, _, _, vertical_coord = _get_corrector_test_input(tensor_shape)
+    ops = LatLonOperations(torch.ones(size=(tensor_shape[-2], 1)))
+    corrector = AtmosphereCorrector(
+        config, ops, vertical_coord, datetime.timedelta(seconds=3600)
+    )
+    gen_data = {
+        "PRATEsfc": torch.rand(size=tensor_shape),
+        "total_frozen_precipitation_rate": 2.0 * torch.rand(size=tensor_shape),
+    }
+    # sanity check that some frozen precip exceeds total precip before correction
+    assert torch.any(gen_data["total_frozen_precipitation_rate"] > gen_data["PRATEsfc"])
+    corrected, _ = corrector({}, gen_data, {}, None)
+    assert torch.all(
+        corrected["total_frozen_precipitation_rate"] <= corrected["PRATEsfc"]
+    )
 
 
 def _get_corrector_test_input(
