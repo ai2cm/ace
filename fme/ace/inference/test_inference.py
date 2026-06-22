@@ -301,11 +301,11 @@ def test_get_initial_condition(n_ensemble):
         initial_times.values, np.repeat(time_da.values, n_ensemble)
     )
     assert batch_data.data["prog"].shape == (sample * n_ensemble, 1, 16, 32)
-    for i in range(n_ensemble):
-        np.testing.assert_allclose(
-            batch_data.data["prog"][i::n_ensemble, ...].squeeze(dim=1).cpu().numpy(),
-            data["prog"].values,
-        )
+    expected_prog = np.repeat(data["prog"].values, n_ensemble, axis=0)
+    np.testing.assert_allclose(
+        batch_data.data["prog"].squeeze(dim=1).cpu().numpy(),
+        expected_prog,
+    )
     assert batch_data.time.isel(time=0).equals(initial_times)
 
 
