@@ -412,6 +412,14 @@ def run_segmented_inference(config: InferenceConfig, segments: int):
         multiple folders, each corresponding to one of the segments and labeled by
         the segment number.
     """
+    if config.n_ensemble_per_ic > 1:
+        raise ValueError(
+            "Ensemble inference (n_ensemble_per_ic > 1) is not supported with "
+            "segmented inference. A segment's restart already carries the "
+            "broadcasted ensemble as its sample dimension, so later segments "
+            "cannot re-broadcast it consistently. Run with n_ensemble_per_ic=1, "
+            "or run a single non-segmented inference for ensemble runs."
+        )
     logging.info(
         f"Starting segmented inference with {segments} segments. "
         f"Saving to {config.experiment_dir}."
