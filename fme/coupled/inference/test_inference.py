@@ -62,6 +62,8 @@ def _setup(
         n_levels_atmosphere=1,
         atmosphere_start_time_offset_from_ocean=atmosphere_times_offset,
     )
+    assert mock_data.ocean is not None
+    assert mock_data.atmosphere is not None
     dataset_info = CoupledDatasetInfoBuilder(
         vcoord=mock_data.vcoord,
         hcoord=mock_data.hcoord,
@@ -83,6 +85,7 @@ def _setup(
     )
     if empty_ocean_forcing:
         atmos_forcing_config = mock_data.dataset_config.atmosphere
+        assert atmos_forcing_config is not None
         forcing_loader = CoupledForcingDataLoaderConfig(
             ocean=None,
             atmosphere=ForcingDataLoaderConfig(
@@ -91,11 +94,13 @@ def _setup(
         )
     else:
         ocean_config = mock_data.dataset_config.ocean
+        atmos_forcing_config = mock_data.dataset_config.atmosphere
         assert ocean_config is not None
+        assert atmos_forcing_config is not None
         forcing_loader = CoupledForcingDataLoaderConfig(
             ocean=ForcingDataLoaderConfig(dataset=ocean_config, num_data_workers=0),
             atmosphere=ForcingDataLoaderConfig(
-                dataset=mock_data.dataset_config.atmosphere, num_data_workers=0
+                dataset=atmos_forcing_config, num_data_workers=0
             ),
         )
 

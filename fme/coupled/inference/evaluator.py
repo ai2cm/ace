@@ -339,6 +339,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     aggregator_config: InferenceEvaluatorAggregatorConfig = config.aggregator
     batch = next(iter(data.loader))
+    assert batch.ocean_data is not None
     initial_time = batch.ocean_data.time.isel(time=0)
     variable_metadata = get_derived_variable_metadata() | data.variable_metadata
     dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
