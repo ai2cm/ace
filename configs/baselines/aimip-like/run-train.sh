@@ -3,9 +3,10 @@
 set -e
 
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
-BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
-WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
 REPO_ROOT=$(git rev-parse --show-toplevel)
+# NB: do NOT set WANDB_USERNAME here. The beaker run env already carries the
+# correct value; overriding it with the beaker account name misattributes the
+# wandb run to the service account.
 
 cd "$REPO_ROOT"
 
@@ -39,7 +40,6 @@ run_training() {
     --workspace "$WORKSPACE" \
     --priority "$PRIORITY" \
     "${cluster_args[@]}" \
-    --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
     --env WANDB_RUN_GROUP= \
