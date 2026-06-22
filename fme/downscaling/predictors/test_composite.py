@@ -3,12 +3,12 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
 from fme.core.packer import Packer
 from fme.downscaling.aggregators.shape_helpers import upsample_tensor
 from fme.downscaling.data import BatchData, PairedBatchData
 from fme.downscaling.data.patching import get_patches
-from fme.downscaling.data.utils import BatchedLatLonCoordinates
 from fme.downscaling.models import ModelOutputs
 from fme.downscaling.predictors.composite import (
     PatchPredictor,
@@ -82,34 +82,24 @@ def get_paired_test_data(
             batch_size, coarse_lat_size, coarse_lon_size, device=get_device()
         )
     }
-    coarse_lat_coords = (
-        torch.linspace(0, 10, coarse_lat_size).unsqueeze(0).expand(batch_size, -1)
-    )
-    coarse_lon_coords = (
-        torch.linspace(0, 10, coarse_lon_size).unsqueeze(0).expand(batch_size, -1)
-    )
+    coarse_lat_coords = torch.linspace(0, 10, coarse_lat_size, device=get_device())
+    coarse_lon_coords = torch.linspace(0, 10, coarse_lon_size, device=get_device())
 
     fine_data = {
         "x": torch.rand(batch_size, fine_lat_size, fine_lon_size, device=get_device())
     }
-    fine_lat_coords = (
-        torch.linspace(0.0, 10.0, fine_lat_size).unsqueeze(0).expand(batch_size, -1)
-    )
-    fine_lon_coords = (
-        torch.linspace(0.0, 10.0, fine_lon_size).unsqueeze(0).expand(batch_size, -1)
-    )
+    fine_lat_coords = torch.linspace(0.0, 10.0, fine_lat_size, device=get_device())
+    fine_lon_coords = torch.linspace(0.0, 10.0, fine_lon_size, device=get_device())
     coarse_batch_data = BatchData(
         data=coarse_data,
-        latlon_coordinates=BatchedLatLonCoordinates(
+        latlon_coordinates=LatLonCoordinates(
             lat=coarse_lat_coords, lon=coarse_lon_coords
         ),
         time=xr.DataArray(np.arange(batch_size), dims=["time"]),
     )
     fine_batch_data = BatchData(
         data=fine_data,
-        latlon_coordinates=BatchedLatLonCoordinates(
-            lat=fine_lat_coords, lon=fine_lon_coords
-        ),
+        latlon_coordinates=LatLonCoordinates(lat=fine_lat_coords, lon=fine_lon_coords),
         time=xr.DataArray(np.arange(batch_size), dims=["time"]),
     )
     return PairedBatchData(coarse=coarse_batch_data, fine=fine_batch_data)
