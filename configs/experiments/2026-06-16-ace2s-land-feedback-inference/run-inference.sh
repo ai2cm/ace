@@ -62,8 +62,12 @@ cd "$REPO_ROOT"  # so the config paths resolve regardless of where this is run f
 # (completed segment_NNNN/ folders are skipped on resubmit). Sized so each segment fits the 8h cap.
 # submit pilot-era5.yaml         "$ERA5"    ace2s-lf-pilot-era5    1
 submit frameworkA-era5.yaml    "$ERA5"    ace2s-lf-fwA-era5       4    # 4 x 20yr = 80yr
-submit frameworkA-cm4-rs0.yaml "$CM4_RS0" ace2s-lf-fwA-cm4-rs0   10    # 10 x 20yr = 200yr
-submit frameworkA-cm4-rs1.yaml "$CM4_RS1" ace2s-lf-fwA-cm4-rs1   10
+# CM4-A is 9 (not 10) segments: the CM4-piControl dataset is exactly 292000 steps (200yr), but a
+# 10th segment would need start 262800 + window 29201 = 292001 > 292000 (the IC consumes one step,
+# so total forward steps must be <= dataset_steps - 1). 9 x 29200 = 262800 steps = 180yr, which is
+# ample for the climatological diagnostics. (ERA5-A is fine at 4 segments: its dataset is far longer.)
+submit frameworkA-cm4-rs0.yaml "$CM4_RS0" ace2s-lf-fwA-cm4-rs0    9    # 9 x 20yr = 180yr
+submit frameworkA-cm4-rs1.yaml "$CM4_RS1" ace2s-lf-fwA-cm4-rs1    9
 submit frameworkB-era5.yaml    "$ERA5"    ace2s-lf-fwB-era5      10    # 10 x ~146 steps = 1yr
 submit frameworkB-cm4-rs0.yaml "$CM4_RS0" ace2s-lf-fwB-cm4-rs0   10
 submit frameworkB-cm4-rs1.yaml "$CM4_RS1" ace2s-lf-fwB-cm4-rs1   10
