@@ -135,3 +135,21 @@ run_training() {
 # run_training "train-4deg-daily-v1-era5-only-fg8-ws32-residual.yaml"  "train-4deg-daily-v1-era5-only-fg8-ws32-residual-rs0"  1 ai2/ace high "ai2/jupiter ai2/titan"
 # run_training "train-4deg-daily-v1-era5-only-fg16-ws32-residual.yaml" "train-4deg-daily-v1-era5-only-fg16-ws32-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
 # run_training "train-4deg-daily-v1-era5-only-fg32-ws32-residual.yaml" "train-4deg-daily-v1-era5-only-fg32-ws32-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# =============================================================================
+# Pre-1979 ERA5 stability test (seed 0, embed_dim 512, fg16 x sr0.125 base)
+# Task: research/tasks/2026-06-16-test-whether-including-pre-1979-era5-lets-a-residual-model-train-stably.md
+# Goal: 2026-06-11-stable-long-rollouts
+#
+# The selected stable residual base (fg16 x spectral_ratio 0.125, "ws64",
+# embed_dim 512; run j8r0z322) trains on 1979-1993 + 1995-2013. This config is
+# identical except the train_loader prepends the pre-1979 back-extension
+# (1940-01-01 -> 1978-12-31) as a third concat subset -- a clean A/B on the
+# data range. Validation (1994 + 2014) and all inference eval loops are
+# unchanged so val skill and the 46-year rollout are directly comparable to the
+# base. No stitch-skip surgery: the diff diagnostic on this daily 4deg dataset
+# shows pre-1979 timestep jumps <= the un-skipped 1979-2013 baseline and no jump
+# at the documented 1946 stitches, so any instability is attributable to the
+# data range itself, not an unskipped stitch.
+# =============================================================================
+run_training "train-4deg-daily-v1-era5-only-pre1979-fg16-sr0p125-residual.yaml" "train-4deg-daily-v1-era5-only-pre1979-fg16-sr0p125-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
