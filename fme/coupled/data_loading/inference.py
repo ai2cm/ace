@@ -310,11 +310,11 @@ class InferenceDataset(torch.utils.data.Dataset):
     def __getitem__(self, index) -> CoupledBatchData:
         dist = Distributed.get_instance()
         result = self._get_batch_data(index)
-        assert result.ocean_data is not None
-        assert (
-            result.ocean_data.time.shape[0]
-            == self._n_initial_conditions // dist.world_size
-        )
+        if result.ocean_data is not None:
+            assert (
+                result.ocean_data.time.shape[0]
+                == self._n_initial_conditions // dist.world_size
+            )
         return result
 
     def __len__(self) -> int:

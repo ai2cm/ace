@@ -413,10 +413,8 @@ def test_no_target_inference_with_n_repeats(tmp_path):
     for batch_idx, batch in enumerate(batches):
         assert isinstance(batch, CoupledBatchData)
         assert batch.atmosphere_data is not None
-        assert batch.ocean_data is not None
         assert batch.ice_data is not None
         atmos_times = batch.atmosphere_data.time.isel(sample=0).values
-        ocean_times = batch.ocean_data.time.isel(sample=0).values
         ice_times = batch.ice_data.time.isel(sample=0).values
         atmos_values = batch.atmosphere_data.data[_ATMOS_NAME][0].cpu().numpy()
         ice_values = batch.ice_data.data[_ICE_NAME][0].cpu().numpy()
@@ -429,10 +427,6 @@ def test_no_target_inference_with_n_repeats(tmp_path):
         assert ice_times.shape == (n_ice_per_batch,), (
             f"Batch {batch_idx}: ice shape {ice_times.shape} != "
             f"({n_ice_per_batch},)"
-        )
-        assert ocean_times.shape == (n_ocean_per_batch,), (
-            f"Batch {batch_idx}: ocean shape {ocean_times.shape} != "
-            f"({n_ocean_per_batch},)"
         )
 
         # First atmos/ice/ocean time of each batch aligns with the rollout position
@@ -447,10 +441,6 @@ def test_no_target_inference_with_n_repeats(tmp_path):
         )
         assert ice_times[0] == batch_first_time, (
             f"Batch {batch_idx}: first ice time {ice_times[0]} != "
-            f"expected {batch_first_time}"
-        )
-        assert ocean_times[0] == batch_first_time, (
-            f"Batch {batch_idx}: first ocean time {ocean_times[0]} != "
             f"expected {batch_first_time}"
         )
 

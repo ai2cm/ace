@@ -275,16 +275,16 @@ class MockCoupledData:
 
 def create_coupled_data_on_disk(
     data_dir: pathlib.Path,
-    n_forward_times_ocean: int,
-    n_forward_times_ice: int,
-    n_forward_times_atmosphere: int,
-    ocean_names: list[str],
-    ice_names: list[str],
-    atmosphere_names: list[str],
-    atmosphere_start_time_offset_from_ocean: int = 0,
-    ice_start_time_offset_from_ocean: int = 0,
-    n_levels_ocean: int = 2,
-    n_levels_atmosphere: int = 2,
+    n_forward_times_ocean: int | None = None,
+    n_forward_times_ice: int | None = None,
+    n_forward_times_atmosphere: int | None = None,
+    ocean_names: list[str] | None = None,
+    ice_names: list[str] | None = None,
+    atmosphere_names: list[str] | None = None,
+    atmosphere_start_time_offset_from_ocean: int | None = 0,
+    ice_start_time_offset_from_ocean: int | None = 0,
+    n_levels_ocean: int | None = 2,
+    n_levels_atmosphere: int | None = 2,
     ocean_timestep_size_in_days: int | None = None,
     masked_fill_value: float = float("nan"),
 ) -> MockCoupledData:
@@ -341,115 +341,355 @@ def create_coupled_data_on_disk(
     """
     np.random.seed(0)
 
-    ocean_dir = data_dir / "ocean"
-    ocean_dir.mkdir()
-    ocean_dim_sizes = {"time": n_forward_times_ocean + 1, "lat": N_LAT, "lon": N_LON}
-    if ocean_timestep_size_in_days is None:
-        ocean_timestep_size = n_forward_times_atmosphere / n_forward_times_ocean
-    else:
-        ocean_timestep_size = ocean_timestep_size_in_days
-    if ocean_timestep_size != int(ocean_timestep_size):
-        raise ValueError(
-            "n_forward_times_atmosphere should be a multiple of n_forward_times_ocean."
+    if n_forward_times_atmosphere is None:
+        ocean_dir = data_dir / "ocean"
+        ocean_dir.mkdir()
+        ocean_dim_sizes = {
+            "time": n_forward_times_ocean + 1,
+            "lat": N_LAT,
+            "lon": N_LON,
+        }
+        if ocean_timestep_size_in_days is None:
+            assert n_forward_times_ocean is not None
+            assert n_forward_times_ice is not None
+            ocean_timestep_size = n_forward_times_ice / n_forward_times_ocean
+        else:
+            ocean_timestep_size = ocean_timestep_size_in_days
+        if ocean_timestep_size != int(ocean_timestep_size):
+            raise ValueError(
+                "n_forward_times_ice should be a multiple of n_forward_times_ocean."
+            )
+        if ice_start_time_offset_from_ocean < 0:
+            raise ValueError("ice_start_time_offset_from_ocean should be >= 0")
+        ocean_timestep_size = int(ocean_timestep_size)
+        ocean_ds = _save_netcdf(
+            filename=ocean_dir / "data.nc",
+            dim_sizes=ocean_dim_sizes,
+            variable_names=ocean_names,
+            calendar="proleptic_gregorian",
+            realm="ocean",
+            # _save_netcdf has a default timestep of 1 day which we interpret as the
+            # ice timestep, so the ocean data needs
+            timestep_size=ocean_timestep_size,
+            nz=n_levels_ocean + 1,
+            timestep_start=0,  # ocean start time fixed
+            masked_fill_value=masked_fill_value,
         )
-    if atmosphere_start_time_offset_from_ocean < 0:
-        raise ValueError("atmosphere_start_time_offset_from_ocean should be >= 0")
-    ocean_timestep_size = int(ocean_timestep_size)
-    ocean_ds = _save_netcdf(
-        filename=ocean_dir / "data.nc",
-        dim_sizes=ocean_dim_sizes,
-        variable_names=ocean_names,
-        calendar="proleptic_gregorian",
-        realm="ocean",
-        # _save_netcdf has a default timestep of 1 day which we interpret as the
-        # atmosphere timestep, so the ocean data needs
-        timestep_size=ocean_timestep_size,
-        nz=n_levels_ocean + 1,
-        timestep_start=0,  # ocean start time fixed
-        masked_fill_value=masked_fill_value,
-    )
+        ice_dir = data_dir / "ice"
+        ice_dir.mkdir()
+        n_times_ice = n_forward_times_ice + 1 + ice_start_time_offset_from_ocean
+        # ice initial time may be earlier than ocean's
+        timestep_start_ice = -ice_start_time_offset_from_ocean
+        ice_dim_sizes = {
+            "time": n_times_ice,
+            "lat": N_LAT,
+            "lon": N_LON,
+        }
+        ice_ds = _save_netcdf(
+            filename=ice_dir / "data.nc",
+            dim_sizes=ice_dim_sizes,
+            variable_names=ice_names,
+            calendar="proleptic_gregorian",
+            realm="ice",
+            timestep_size=1,
+            timestep_start=timestep_start_ice,
+            nz=1,
+            masked_fill_value=masked_fill_value,
+        )
+        timedelta_ice = "1D"
+        timedelta_ocean = f"{ocean_timestep_size}D"
 
-    ice_dir = data_dir / "ice"
-    ice_dir.mkdir()
-    n_times_ice = n_forward_times_ice + 1 + ice_start_time_offset_from_ocean
-    # ice initial time may be earlier than ocean's
-    timestep_start_ice = -ice_start_time_offset_from_ocean
-    ice_dim_sizes = {
-        "time": n_times_ice,
-        "lat": N_LAT,
-        "lon": N_LON,
-    }
-    ice_ds = _save_netcdf(
-        filename=ice_dir / "data.nc",
-        dim_sizes=ice_dim_sizes,
-        variable_names=ice_names,
-        calendar="proleptic_gregorian",
-        realm="ice",
-        timestep_size=1,
-        timestep_start=timestep_start_ice,
-        nz=1,
-        masked_fill_value=masked_fill_value,
-    )
+        stats_dir = data_dir / "stats"
+        stats_dir.mkdir()
+        all_names = list(set(ocean_names + ice_names))
+        save_stats_netcdfs(
+            stats_dir / "means.nc",
+            stats_dir / "stds.nc",
+            variable_names=all_names,
+        )
+        return MockCoupledData(
+            ocean=MockComponentData(
+                ds=ocean_ds,
+                data_dir=str(ocean_dir),
+                means_path=str(stats_dir / "means.nc"),
+                stds_path=str(stats_dir / "stds.nc"),
+                timedelta=timedelta_ocean,
+            ),
+            ice=MockComponentData(
+                ds=ice_ds,
+                data_dir=str(ice_dir),
+                means_path=str(stats_dir / "means.nc"),
+                stds_path=str(stats_dir / "stds.nc"),
+                timedelta=timedelta_ice,
+            ),
+        )
+    elif n_forward_times_ice is None:
+        ocean_dir = data_dir / "ocean"
+        ocean_dir.mkdir()
+        ocean_dim_sizes = {
+            "time": n_forward_times_ocean + 1,
+            "lat": N_LAT,
+            "lon": N_LON,
+        }
+        if ocean_timestep_size_in_days is None:
+            assert n_forward_times_ocean is not None
+            assert n_forward_times_atmosphere is not None
+            ocean_timestep_size = n_forward_times_atmosphere / n_forward_times_ocean
+        else:
+            ocean_timestep_size = ocean_timestep_size_in_days
+        if ocean_timestep_size != int(ocean_timestep_size):
+            raise ValueError(
+                "n_forward_times_atmosphere should be a multiple of n_forward_times_ocean."
+            )
+        if atmosphere_start_time_offset_from_ocean < 0:
+            raise ValueError("atmosphere_start_time_offset_from_ocean should be >= 0")
+        ocean_timestep_size = int(ocean_timestep_size)
+        ocean_ds = _save_netcdf(
+            filename=ocean_dir / "data.nc",
+            dim_sizes=ocean_dim_sizes,
+            variable_names=ocean_names,
+            calendar="proleptic_gregorian",
+            realm="ocean",
+            # _save_netcdf has a default timestep of 1 day which we interpret as the
+            # ice timestep, so the ocean data needs
+            timestep_size=ocean_timestep_size,
+            nz=n_levels_ocean + 1,
+            timestep_start=0,  # ocean start time fixed
+            masked_fill_value=masked_fill_value,
+        )
+        atmos_dir = data_dir / "atmos"
+        atmos_dir.mkdir()
+        n_times_atmos = (
+            n_forward_times_atmosphere + 1 + atmosphere_start_time_offset_from_ocean
+        )
+        # atmosphere initial time may be earlier than ocean's
+        timestep_start_atmosphere = -atmosphere_start_time_offset_from_ocean
+        atmos_dim_sizes = {
+            "time": n_times_atmos,
+            "lat": N_LAT,
+            "lon": N_LON,
+        }
+        atmos_ds = _save_netcdf(
+            filename=atmos_dir / "data.nc",
+            dim_sizes=atmos_dim_sizes,
+            variable_names=atmosphere_names,
+            calendar="proleptic_gregorian",
+            realm="atmosphere",
+            timestep_size=1,
+            timestep_start=timestep_start_atmosphere,
+            nz=n_levels_atmosphere + 1,
+            masked_fill_value=masked_fill_value,
+        )
+        timedelta_atmos = "1D"
+        timedelta_ocean = f"{ocean_timestep_size}D"
 
-    atmos_dir = data_dir / "atmos"
-    atmos_dir.mkdir()
-    n_times_atmos = (
-        n_forward_times_atmosphere + 1 + atmosphere_start_time_offset_from_ocean
-    )
-    # atmosphere initial time may be earlier than ocean's
-    timestep_start_atmosphere = -atmosphere_start_time_offset_from_ocean
-    atmos_dim_sizes = {
-        "time": n_times_atmos,
-        "lat": N_LAT,
-        "lon": N_LON,
-    }
-    atmos_ds = _save_netcdf(
-        filename=atmos_dir / "data.nc",
-        dim_sizes=atmos_dim_sizes,
-        variable_names=atmosphere_names,
-        calendar="proleptic_gregorian",
-        realm="atmosphere",
-        timestep_size=1,
-        timestep_start=timestep_start_atmosphere,
-        nz=n_levels_atmosphere + 1,
-        masked_fill_value=masked_fill_value,
-    )
-    # _save_netcdf creates integer times in units of "days since 1970-01-01"
-    timedelta_atmos = "1D"
-    timedelta_ice = "1D"
-    timedelta_ocean = f"{ocean_timestep_size}D"
+        stats_dir = data_dir / "stats"
+        stats_dir.mkdir()
+        all_names = list(set(ocean_names + atmosphere_names))
+        save_stats_netcdfs(
+            stats_dir / "means.nc",
+            stats_dir / "stds.nc",
+            variable_names=all_names,
+        )
+        return MockCoupledData(
+            ocean=MockComponentData(
+                ds=ocean_ds,
+                data_dir=str(ocean_dir),
+                means_path=str(stats_dir / "means.nc"),
+                stds_path=str(stats_dir / "stds.nc"),
+                timedelta=timedelta_ocean,
+            ),
+            atmosphere=MockComponentData(
+                ds=atmos_ds,
+                data_dir=str(atmos_dir),
+                means_path=str(stats_dir / "means.nc"),
+                stds_path=str(stats_dir / "stds.nc"),
+                timedelta=timedelta_atmos,
+            ),
+        )
+    elif n_forward_times_ocean is None:
+        ice_dir = data_dir / "ice"
+        ice_dir.mkdir()
+        n_times_ice = n_forward_times_ice + 1
+        timestep_start_ice = 0
+        ice_dim_sizes = {
+            "time": n_times_ice,
+            "lat": N_LAT,
+            "lon": N_LON,
+        }
+        ice_ds = _save_netcdf(
+            filename=ice_dir / "data.nc",
+            dim_sizes=ice_dim_sizes,
+            variable_names=ice_names,
+            calendar="proleptic_gregorian",
+            realm="ice",
+            timestep_size=1,
+            timestep_start=timestep_start_ice,
+            nz=1,
+            masked_fill_value=masked_fill_value,
+        )
+        atmos_dir = data_dir / "atmos"
+        atmos_dir.mkdir()
+        n_times_atmos = n_forward_times_atmosphere + 1
+        timestep_start_atmosphere = 0
+        atmos_dim_sizes = {
+            "time": n_times_atmos,
+            "lat": N_LAT,
+            "lon": N_LON,
+        }
+        atmos_ds = _save_netcdf(
+            filename=atmos_dir / "data.nc",
+            dim_sizes=atmos_dim_sizes,
+            variable_names=atmosphere_names,
+            calendar="proleptic_gregorian",
+            realm="atmosphere",
+            timestep_size=1,
+            timestep_start=timestep_start_atmosphere,
+            nz=n_levels_atmosphere + 1,
+            masked_fill_value=masked_fill_value,
+        )
+        timedelta_atmos = "1D"
+        timedelta_ice = "1D"
 
-    stats_dir = data_dir / "stats"
-    stats_dir.mkdir()
-    all_names = list(set(ocean_names + atmosphere_names + ice_names))
-    save_stats_netcdfs(
-        stats_dir / "means.nc",
-        stats_dir / "stds.nc",
-        variable_names=all_names,
-    )
-    return MockCoupledData(
-        ocean=MockComponentData(
-            ds=ocean_ds,
-            data_dir=str(ocean_dir),
-            means_path=str(stats_dir / "means.nc"),
-            stds_path=str(stats_dir / "stds.nc"),
-            timedelta=timedelta_ocean,
-        ),
-        ice=MockComponentData(
-            ds=ice_ds,
-            data_dir=str(ice_dir),
-            means_path=str(stats_dir / "means.nc"),
-            stds_path=str(stats_dir / "stds.nc"),
-            timedelta=timedelta_ice,
-        ),
-        atmosphere=MockComponentData(
-            ds=atmos_ds,
-            data_dir=str(atmos_dir),
-            means_path=str(stats_dir / "means.nc"),
-            stds_path=str(stats_dir / "stds.nc"),
-            timedelta=timedelta_atmos,
-        ),
-    )
+        stats_dir = data_dir / "stats"
+        stats_dir.mkdir()
+        all_names = list(set(ice_names + atmosphere_names))
+        save_stats_netcdfs(
+            stats_dir / "means.nc",
+            stats_dir / "stds.nc",
+            variable_names=all_names,
+        )
+        return MockCoupledData(
+            ice=MockComponentData(
+                ds=ice_ds,
+                data_dir=str(ice_dir),
+                means_path=str(stats_dir / "means.nc"),
+                stds_path=str(stats_dir / "stds.nc"),
+                timedelta=timedelta_ice,
+            ),
+            atmosphere=MockComponentData(
+                ds=atmos_ds,
+                data_dir=str(atmos_dir),
+                means_path=str(stats_dir / "means.nc"),
+                stds_path=str(stats_dir / "stds.nc"),
+                timedelta=timedelta_atmos,
+            ),
+        )
+    else:
+        ocean_dir = data_dir / "ocean"
+        ocean_dir.mkdir()
+        ocean_dim_sizes = {
+            "time": n_forward_times_ocean + 1,
+            "lat": N_LAT,
+            "lon": N_LON,
+        }
+        if ocean_timestep_size_in_days is None:
+            assert n_forward_times_ocean is not None
+            assert n_forward_times_atmosphere is not None
+            ocean_timestep_size = n_forward_times_atmosphere / n_forward_times_ocean
+        else:
+            ocean_timestep_size = ocean_timestep_size_in_days
+        if ocean_timestep_size != int(ocean_timestep_size):
+            raise ValueError(
+                "n_forward_times_atmosphere should be a multiple of n_forward_times_ocean."
+            )
+        if atmosphere_start_time_offset_from_ocean < 0:
+            raise ValueError("atmosphere_start_time_offset_from_ocean should be >= 0")
+        ocean_timestep_size = int(ocean_timestep_size)
+        ocean_ds = _save_netcdf(
+            filename=ocean_dir / "data.nc",
+            dim_sizes=ocean_dim_sizes,
+            variable_names=ocean_names,
+            calendar="proleptic_gregorian",
+            realm="ocean",
+            # _save_netcdf has a default timestep of 1 day which we interpret as the
+            # atmosphere timestep, so the ocean data needs
+            timestep_size=ocean_timestep_size,
+            nz=n_levels_ocean + 1,
+            timestep_start=0,  # ocean start time fixed
+            masked_fill_value=masked_fill_value,
+        )
+        assert n_forward_times_ice is not None
+        ice_dir = data_dir / "ice"
+        ice_dir.mkdir()
+        n_times_ice = n_forward_times_ice + 1 + ice_start_time_offset_from_ocean
+        # ice initial time may be earlier than ocean's
+        timestep_start_ice = -ice_start_time_offset_from_ocean
+        ice_dim_sizes = {
+            "time": n_times_ice,
+            "lat": N_LAT,
+            "lon": N_LON,
+        }
+        ice_ds = _save_netcdf(
+            filename=ice_dir / "data.nc",
+            dim_sizes=ice_dim_sizes,
+            variable_names=ice_names,
+            calendar="proleptic_gregorian",
+            realm="ice",
+            timestep_size=1,
+            timestep_start=timestep_start_ice,
+            nz=1,
+            masked_fill_value=masked_fill_value,
+        )
+        atmos_dir = data_dir / "atmos"
+        atmos_dir.mkdir()
+        n_times_atmos = (
+            n_forward_times_atmosphere + 1 + atmosphere_start_time_offset_from_ocean
+        )
+        # atmosphere initial time may be earlier than ocean's
+        timestep_start_atmosphere = -atmosphere_start_time_offset_from_ocean
+        atmos_dim_sizes = {
+            "time": n_times_atmos,
+            "lat": N_LAT,
+            "lon": N_LON,
+        }
+        atmos_ds = _save_netcdf(
+            filename=atmos_dir / "data.nc",
+            dim_sizes=atmos_dim_sizes,
+            variable_names=atmosphere_names,
+            calendar="proleptic_gregorian",
+            realm="atmosphere",
+            timestep_size=1,
+            timestep_start=timestep_start_atmosphere,
+            nz=n_levels_atmosphere + 1,
+            masked_fill_value=masked_fill_value,
+        )
+        # _save_netcdf creates integer times in units of "days since 1970-01-01"
+        timedelta_atmos = "1D"
+        timedelta_ice = "1D"
+        timedelta_ocean = f"{ocean_timestep_size}D"
+
+        stats_dir = data_dir / "stats"
+        stats_dir.mkdir()
+        all_names = list(set(ocean_names + atmosphere_names + ice_names))
+        save_stats_netcdfs(
+            stats_dir / "means.nc",
+            stats_dir / "stds.nc",
+            variable_names=all_names,
+        )
+        return MockCoupledData(
+            ocean=MockComponentData(
+                ds=ocean_ds,
+                data_dir=str(ocean_dir),
+                means_path=str(stats_dir / "means.nc"),
+                stds_path=str(stats_dir / "stds.nc"),
+                timedelta=timedelta_ocean,
+            ),
+            ice=MockComponentData(
+                ds=ice_ds,
+                data_dir=str(ice_dir),
+                means_path=str(stats_dir / "means.nc"),
+                stds_path=str(stats_dir / "stds.nc"),
+                timedelta=timedelta_ice,
+            ),
+            atmosphere=MockComponentData(
+                ds=atmos_ds,
+                data_dir=str(atmos_dir),
+                means_path=str(stats_dir / "means.nc"),
+                stds_path=str(stats_dir / "stds.nc"),
+                timedelta=timedelta_atmos,
+            ),
+        )
 
 
 @pytest.mark.parametrize("atmosphere_times_offset", [0, 1])
@@ -587,9 +827,13 @@ def test_coupled_data_loader(tmp_path, atmosphere_times_offset: int):
         .values
     )
     # check that
-    assert np.allclose(sample.ocean[0]["bar"].cpu().numpy(), expected_ocean)
-    assert np.allclose(sample.atmosphere[0]["foo"].cpu().numpy(), expected_atmos)
-    assert np.allclose(sample.ice[0]["baz"].cpu().numpy(), expected_ice)
+    assert np.allclose(
+        sample.ocean[0]["bar"].cpu().numpy(), expected_ocean, equal_nan=True
+    )
+    assert np.allclose(
+        sample.atmosphere[0]["foo"].cpu().numpy(), expected_atmos, equal_nan=True
+    )
+    assert np.allclose(sample.ice[0]["baz"].cpu().numpy(), expected_ice, equal_nan=True)
 
 
 def test_zarr_engine_used_true():

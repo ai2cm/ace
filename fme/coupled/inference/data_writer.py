@@ -86,14 +86,10 @@ class CoupledPairedDataWriter(WriterABC[CoupledPrognosticState, CoupledPairedDat
         self._atmosphere_writer = atmosphere_writer
 
     def write(self, data: CoupledPrognosticState, filename: str):
-        assert data.ocean_data is not None
-        assert data.atmosphere_data is not None
         self._ocean_writer.write(data.ocean_data, filename)
         self._atmosphere_writer.write(data.atmosphere_data, filename)
 
     def append_batch(self, batch: CoupledPairedData):
-        assert batch.ocean_data is not None
-        assert batch.atmosphere_data is not None
         self._ocean_writer.append_batch(batch.ocean_data)
         self._atmosphere_writer.append_batch(batch.atmosphere_data)
 
