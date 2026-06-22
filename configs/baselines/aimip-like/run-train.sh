@@ -152,4 +152,5 @@ run_training() {
 # at the documented 1946 stitches, so any instability is attributable to the
 # data range itself, not an unskipped stitch.
 # =============================================================================
-run_training "train-4deg-daily-v1-era5-only-pre1979-fg16-sr0p125-residual.yaml" "train-4deg-daily-v1-era5-only-pre1979-fg16-sr0p125-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# --- LAUNCHED 2026-06-22 to ai2/ace from commit 2db2b75fd (1 job, 1 GPU, jupiter+titan high). Line commented to prevent re-submission; see experiment record for beaker/wandb links. ---
+# run_training "train-4deg-daily-v1-era5-only-pre1979-fg16-sr0p125-residual.yaml" "train-4deg-daily-v1-era5-only-pre1979-fg16-sr0p125-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
