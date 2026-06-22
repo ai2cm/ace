@@ -486,7 +486,8 @@ def create_coupled_data_on_disk(
             ocean_timestep_size = ocean_timestep_size_in_days
         if ocean_timestep_size != int(ocean_timestep_size):
             raise ValueError(
-                "n_forward_times_atmosphere should be a multiple of n_forward_times_ocean."
+                f"n_forward_times_atmosphere should be a multiple of "
+                f"n_forward_times_ocean."
             )
         if atmosphere_start_time_offset_from_ocean < 0:
             raise ValueError("atmosphere_start_time_offset_from_ocean should be >= 0")
@@ -638,7 +639,8 @@ def create_coupled_data_on_disk(
             ocean_timestep_size = ocean_timestep_size_in_days
         if ocean_timestep_size != int(ocean_timestep_size):
             raise ValueError(
-                "n_forward_times_atmosphere should be a multiple of n_forward_times_ocean."
+                f"n_forward_times_atmosphere should be a multiple of "
+                f"n_forward_times_ocean."
             )
         if atmosphere_start_time_offset_from_ocean < 0:
             raise ValueError("atmosphere_start_time_offset_from_ocean should be >= 0")

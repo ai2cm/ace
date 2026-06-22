@@ -396,7 +396,6 @@ def test_no_target_inference_with_n_repeats(tmp_path):
 
     n_atmos_per_batch = _COUPLED_STEPS_IN_MEMORY * _N_INNER_STEPS + 1
     n_ice_per_batch = _COUPLED_STEPS_IN_MEMORY * _N_INNER_STEPS + 1
-    n_ocean_per_batch = _COUPLED_STEPS_IN_MEMORY + 1
     source_n_atmos_times = _N_FORWARD_ATMOS + 1  # 13
     source_n_ice_times = _N_FORWARD_ICE + 1  # 13
     atmos_source_span = mock_data.atmosphere.timestep * source_n_atmos_times

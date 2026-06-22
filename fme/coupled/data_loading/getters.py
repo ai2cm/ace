@@ -473,9 +473,13 @@ def get_forcing_data(
     if config.ocean is not None:
         assert initial_condition.ocean_data is not None
         initial_time = initial_condition.ocean_data.as_batch_data().time
-    elif (config.ocean is None) & (config.ice is not None):
+    elif config.ice is not None:
         assert initial_condition.ice_data is not None
         initial_time = initial_condition.ice_data.as_batch_data().time
+    else:
+        # atmosphere-only forcing: use ocean IC time to align the atmosphere dataset
+        assert initial_condition.ocean_data is not None
+        initial_time = initial_condition.ocean_data.as_batch_data().time
     if initial_time.shape[1] != 1:
         raise NotImplementedError("code assumes initial time only has 1 timestep")
     if config.ocean is None:
