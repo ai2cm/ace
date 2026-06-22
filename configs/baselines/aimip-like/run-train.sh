@@ -135,3 +135,30 @@ run_training() {
 # run_training "train-4deg-daily-v1-era5-only-fg8-ws32-residual.yaml"  "train-4deg-daily-v1-era5-only-fg8-ws32-residual-rs0"  1 ai2/ace high "ai2/jupiter ai2/titan"
 # run_training "train-4deg-daily-v1-era5-only-fg16-ws32-residual.yaml" "train-4deg-daily-v1-era5-only-fg16-ws32-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
 # run_training "train-4deg-daily-v1-era5-only-fg32-ws32-residual.yaml" "train-4deg-daily-v1-era5-only-fg32-ws32-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# =============================================================================
+# Climate-invariant moisture eval on the stable residual base (fg16 x ws64,
+# embed_dim 512, the selected residual recipe; wandb j8r0z322 is the plain
+# base / shared control).
+# Tasks: research/tasks/2026-06-15-retest-qsat-scaling-on-stable-residual-base.md
+#        research/tasks/2026-06-16-implement-and-evaluate-the-rh-like-q-qsat-saturation-normalized-humidity-representation.md
+#
+# Branch: experiment/rh-saturation-normalized-humidity with
+# experiment/2026-06-15-residual-config-sweep merged in -- one branch carrying
+# the RH (q/qsat) feature, qsat-scaled GMR, the concurrent-inline-inference +
+# broadcast-ordering apparatus, and the stable residual base config.
+#
+# Both variants derive from train-...-fg16-sr0p125-residual.yaml, changed only
+# by enabling one moisture knob; global_mean_co2 is kept in every config.
+#   qsat-scaling:    global_mean_removal.qsat_scaled_names on the humidity set
+#                    (specific_total_water_0-7, LHTFLsfc, PRATEsfc, twp-advection,
+#                    Q2m) -- the qsat retest treatment.
+#   rh-input-append: saturation_normalization [names specific_total_water_*,
+#                    prediction false, input append] -- the RH cheapest-first
+#                    probe (redundant q/qsat input channels, q predictions kept).
+# Deeper RH knobs (prediction-space, replace) are gated on the input-append read.
+# =============================================================================
+
+# --- Wave: RH/qsat moisture eval (seed 0, embed_dim 512) (Jupiter+Titan, high) ---
+run_training "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-qsat-scaling.yaml"    "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-qsat-scaling-rs0"    1 ai2/ace high "ai2/jupiter ai2/titan"
+run_training "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-rh-input-append.yaml" "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-rh-input-append-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
