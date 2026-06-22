@@ -197,6 +197,10 @@ class MockCoupledData:
         elif self.ice is not None:
             # NOTE: assumes atmosphere has same img_shape
             return self.ice.ds[next(iter(self.ice.ds.data_vars))].shape[-2:]
+        else:
+            assert self.atmosphere is not None
+            data = self.atmosphere.ds[next(iter(self.atmosphere.ds.data_vars))]
+            return data.shape[-2:]
 
     @property
     def hcoord(self) -> CoupledHorizontalCoordinates:
@@ -221,15 +225,15 @@ class MockCoupledData:
         ice_vcoord = None
         atmos_vcoord = None
         if self.ocean is not None:
-            ocean_vcoord = self.ocean.vcoord
+            ocean_vcoord = cast(OptionalDepthCoordinate, self.ocean.vcoord)
         if self.ice is not None:
-            ice_vcoord = self.ice.vcoord
+            ice_vcoord = cast(OptionalDepthCoordinate, self.ice.vcoord)
         if self.atmosphere is not None:
-            atmos_vcoord = self.atmosphere.vcoord
+            atmos_vcoord = cast(
+                OptionalHybridSigmaPressureCoordinate, self.atmosphere.vcoord
+            )
         return CoupledVerticalCoordinate(
-            ocean=ocean_vcoord,
-            ice=ice_vcoord,
-            atmosphere=atmos_vcoord
+            ocean=ocean_vcoord, ice=ice_vcoord, atmosphere=atmos_vcoord
         )
 
     @property
@@ -389,6 +393,15 @@ def create_coupled_data_on_disk(
     np.random.seed(0)
 
     if n_forward_times_atmosphere is None:
+        assert (
+            n_forward_times_ocean is not None
+            and n_forward_times_ice is not None
+            and ocean_names is not None
+            and ice_names is not None
+        )
+        assert isinstance(ice_start_time_offset_from_ocean, int)
+        assert isinstance(n_levels_ocean, int)
+
         ocean_dir = data_dir / "ocean"
         ocean_dir.mkdir()
         ocean_dim_sizes = {
@@ -397,8 +410,6 @@ def create_coupled_data_on_disk(
             "lon": N_LON,
         }
         if ocean_timestep_size_in_days is None:
-            assert n_forward_times_ocean is not None
-            assert n_forward_times_ice is not None
             ocean_timestep_size = n_forward_times_ice / n_forward_times_ocean
         else:
             ocean_timestep_size = ocean_timestep_size_in_days
@@ -471,6 +482,16 @@ def create_coupled_data_on_disk(
             ),
         )
     elif n_forward_times_ice is None:
+        assert (
+            n_forward_times_ocean is not None
+            and n_forward_times_atmosphere is not None
+            and ocean_names is not None
+            and atmosphere_names is not None
+        )
+        assert isinstance(atmosphere_start_time_offset_from_ocean, int)
+        assert isinstance(n_levels_ocean, int)
+        assert isinstance(n_levels_atmosphere, int)
+
         ocean_dir = data_dir / "ocean"
         ocean_dir.mkdir()
         ocean_dim_sizes = {
@@ -479,8 +500,6 @@ def create_coupled_data_on_disk(
             "lon": N_LON,
         }
         if ocean_timestep_size_in_days is None:
-            assert n_forward_times_ocean is not None
-            assert n_forward_times_atmosphere is not None
             ocean_timestep_size = n_forward_times_atmosphere / n_forward_times_ocean
         else:
             ocean_timestep_size = ocean_timestep_size_in_days
@@ -556,6 +575,14 @@ def create_coupled_data_on_disk(
             ),
         )
     elif n_forward_times_ocean is None:
+        assert (
+            n_forward_times_ice is not None
+            and n_forward_times_atmosphere is not None
+            and ice_names is not None
+            and atmosphere_names is not None
+        )
+        assert isinstance(n_levels_atmosphere, int)
+
         ice_dir = data_dir / "ice"
         ice_dir.mkdir()
         n_times_ice = n_forward_times_ice + 1
@@ -624,6 +651,19 @@ def create_coupled_data_on_disk(
             ),
         )
     else:
+        assert (
+            n_forward_times_ocean is not None
+            and n_forward_times_ice is not None
+            and n_forward_times_atmosphere is not None
+            and ocean_names is not None
+            and ice_names is not None
+            and atmosphere_names is not None
+        )
+        assert isinstance(ice_start_time_offset_from_ocean, int)
+        assert isinstance(atmosphere_start_time_offset_from_ocean, int)
+        assert isinstance(n_levels_ocean, int)
+        assert isinstance(n_levels_atmosphere, int)
+
         ocean_dir = data_dir / "ocean"
         ocean_dir.mkdir()
         ocean_dim_sizes = {
@@ -632,8 +672,6 @@ def create_coupled_data_on_disk(
             "lon": N_LON,
         }
         if ocean_timestep_size_in_days is None:
-            assert n_forward_times_ocean is not None
-            assert n_forward_times_atmosphere is not None
             ocean_timestep_size = n_forward_times_atmosphere / n_forward_times_ocean
         else:
             ocean_timestep_size = ocean_timestep_size_in_days
@@ -658,7 +696,6 @@ def create_coupled_data_on_disk(
             timestep_start=0,  # ocean start time fixed
             masked_fill_value=masked_fill_value,
         )
-        assert n_forward_times_ice is not None
         ice_dir = data_dir / "ice"
         ice_dir.mkdir()
         n_times_ice = n_forward_times_ice + 1 + ice_start_time_offset_from_ocean
@@ -778,25 +815,31 @@ def test_coupled_data_loader(tmp_path, atmosphere_times_offset: int):
         atmos_data_subset = Slice()
         ice_data_subset = Slice()
 
+    coupled_configs = []
+    for i in range(n_ics):
+        ocean_ic = ics[i].ocean
+        ice_ic = ics[i].ice
+        atmos_ic = ics[i].atmosphere
+        assert ocean_ic is not None
+        assert ice_ic is not None
+        assert atmos_ic is not None
+        coupled_configs.append(
+            CoupledDatasetConfig(
+                ocean=XarrayDataConfig(
+                    data_path=ocean_ic.data_dir,
+                ),
+                ice=XarrayDataConfig(
+                    data_path=ice_ic.data_dir,
+                    subset=ice_data_subset,
+                ),
+                atmosphere=XarrayDataConfig(
+                    data_path=atmos_ic.data_dir,
+                    subset=atmos_data_subset,
+                ),
+            )
+        )
     config = CoupledDataLoaderConfig(
-        dataset=CoupledConcatDatasetConfig(
-            concat=[
-                CoupledDatasetConfig(
-                    ocean=XarrayDataConfig(
-                        data_path=ics[i].ocean.data_dir,
-                    ),
-                    ice=XarrayDataConfig(
-                        data_path=ics[i].ice.data_dir,
-                        subset=ice_data_subset,
-                    ),
-                    atmosphere=XarrayDataConfig(
-                        data_path=ics[i].atmosphere.data_dir,
-                        subset=atmos_data_subset,
-                    ),
-                )
-                for i in range(n_ics)
-            ]
-        ),
+        dataset=CoupledConcatDatasetConfig(concat=coupled_configs),
         batch_size=1,
         num_data_workers=0,
         strict_ensemble=True,
@@ -840,9 +883,15 @@ def test_coupled_data_loader(tmp_path, atmosphere_times_offset: int):
     # check that the sample data matches
     ic_idx = 0
     sample_idx = 1
-    ocean_ds = ics[ic_idx].ocean.ds
-    ice_ds = ics[ic_idx].ice.ds
-    atmos_ds = ics[ic_idx].atmosphere.ds
+    ocean_ic = ics[ic_idx].ocean
+    ice_ic = ics[ic_idx].ice
+    atmos_ic = ics[ic_idx].atmosphere
+    assert ocean_ic is not None
+    assert ice_ic is not None
+    assert atmos_ic is not None
+    ocean_ds = ocean_ic.ds
+    ice_ds = ice_ic.ds
+    atmos_ds = atmos_ic.ds
     sample = data._loader._dataset[sample_idx]  # type: ignore
     assert isinstance(sample, CoupledDatasetItem)
     assert sample.ocean is not None

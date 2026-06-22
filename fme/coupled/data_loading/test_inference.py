@@ -40,6 +40,11 @@ def _setup(
         ice_kwargs=ice_data_config_kwargs,
         atmos_kwargs=atmos_data_config_kwargs,
     )
+
+    assert mock_data.ocean is not None
+    assert mock_data.ice is not None
+    assert mock_data.atmosphere is not None
+
     # ocean timesteps include initial condition plus total_coupled_steps
     ocean_n_timesteps = total_coupled_steps + 1  # one forward window in memory
     n_inner_steps = int(mock_data.ocean.timestep / mock_data.atmosphere.timestep)
@@ -104,9 +109,16 @@ def test_inference_dataset(
         mock_data: MockCoupledData,
         atmos_ic_time_offset: int,
     ):
-        assert batch.ocean_data is not None
-        assert batch.ice_data is not None
-        assert batch.atmosphere_data is not None
+        assert (
+            batch.ocean_data is not None
+            and batch.ice_data is not None
+            and batch.atmosphere_data is not None
+        )
+        assert (
+            mock_data.ocean is not None
+            and mock_data.ice is not None
+            and mock_data.atmosphere is not None
+        )
         ocean_data = batch.ocean_data.data[_OCEAN_NAME].cpu().numpy()
         ice_data = batch.ice_data.data[_ICE_NAME].cpu().numpy()
         atmos_data = batch.atmosphere_data.data[_ATMOS_NAME].cpu().numpy()
@@ -306,6 +318,13 @@ def test_no_target_inference_with_n_repeats(tmp_path):
         atmosphere_start_time_offset_from_ocean=0,
         ice_start_time_offset_from_ocean=0,
     )
+
+    assert (
+        mock_data.ocean is not None
+        and mock_data.ice is not None
+        and mock_data.atmosphere is not None
+    )
+
     # Sanity: ocean timestep is 4 days, atmos is 1 day.
     assert mock_data.ocean.timestep == datetime.timedelta(days=4)
     assert mock_data.ice.timestep == datetime.timedelta(days=1)
