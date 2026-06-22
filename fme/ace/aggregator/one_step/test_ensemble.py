@@ -145,10 +145,8 @@ def test_ssr_identical_members_gives_negative_one():
 
 
 def test_ssr_prescribed_cell_is_zero_but_zero_spread_with_error_is_negative_one():
-    """A prescribed/forced cell (members identical AND equal to the target, e.g.
-    SST over ocean) has a 0/0 spread-skill ratio; by convention it is reported
-    as 0 (perfectly calibrated), not the -1 floor. A genuine zero-spread cell
-    with nonzero ensemble-mean error must still give -1."""
+    """A prescribed cell (members identical and equal to the target) is a 0/0
+    and reports 0, while a zero-spread cell with nonzero error still gives -1."""
     torch.manual_seed(0)
     metric = SSRBiasMetric()
     n_batch, n_sample, n_time, n_y, n_x = 10, 3, 1, 2, 2
@@ -169,11 +167,9 @@ def test_ssr_prescribed_cell_is_zero_but_zero_spread_with_error_is_negative_one(
 
 
 def test_aggregator_ssr_bias_prescribed_cells_do_not_pull_scalar_to_negative_one():
-    """Prescribed cells (0/0) contribute the calibrated value 0 to the scalar
-    area-weighted ssr_bias rather than the -1 floor, so a mostly-prescribed
-    field is not dragged toward -1. With uniform area weights the scalar must
-    equal the plain mean of the per-cell metric (prescribed cells counted as
-    0)."""
+    """Prescribed cells contribute 0, not the -1 floor, so a mostly-prescribed
+    field is not dragged toward -1. With uniform weights the scalar equals the
+    plain mean of the per-cell field."""
     torch.manual_seed(0)
     n_batch, n_sample, n_time, n_y, n_x = 50, 4, 1, 2, 4
     area_weights = torch.ones([n_y, n_x], device=get_device())

@@ -17,10 +17,9 @@ from ..inference.build_context import MetricBuildContext, MetricNotSupportedErro
 from ..inference.data import MetricBuildResult
 from .build_context import OneStepBuildContext, OneStepMetricBuildResult
 
-# A zero-spread cell whose unbiased MSE is below this fraction of the field's
-# largest unbiased MSE is treated as prescribed/forced (a genuine 0/0). The
-# rounding residue left by averaging identical ensemble members is many orders
-# of magnitude smaller than this, while any genuine skill is far larger.
+# A zero-spread cell with unbiased MSE below this fraction of the field's
+# largest is treated as prescribed (a 0/0): the rounding residue from
+# averaging identical members sits far below this, genuine skill far above.
 _PRESCRIBED_MSE_RTOL = 1e-6
 
 
@@ -152,30 +151,21 @@ class SSRBiasMetric(ReducedMetric):
         if self._total_unbiased_mse is None or self._total_variance is None:
             raise ValueError("No batches have been recorded.")
         spread = self._total_variance.sqrt()
-        # Clamp to avoid NaN from sqrt of negative values. The unbiased MSE
-        # correction (mse - variance/n_ensemble) can overshoot with small
-        # ensembles or few batches, producing negative values at some grid
-        # cells that do not indicate spread truly exceeding skill.
+        # Clamp before sqrt: the unbiased-MSE correction (mse - variance/n)
+        # can go slightly negative with small ensembles without meaning spread
+        # truly exceeds skill.
         skill = torch.clamp(self._total_unbiased_mse, min=0.0).sqrt()
-        # When skill is zero but spread is not, SSR is undefined; -1 is the
-        # convention there (it is also the exact value of spread / skill - 1 in
-        # the genuine zero-spread, nonzero-skill underdispersive limit).
+        # Zero skill with nonzero spread is undefined; use -1 by convention
+        # (also the limit of spread / skill - 1 as spread -> 0 at nonzero skill).
         ssr_bias = torch.where(
             skill > 0, spread / skill - 1, torch.full_like(spread, -1.0)
         )
-        # Prescribed/forced cells (every ensemble member equals the target, e.g.
-        # SST over ocean) have exactly zero spread and, up to rounding, zero
-        # ensemble-mean error, so the spread-skill ratio is a genuine 0/0. By
-        # convention report 0 there -- zero spread is exactly right for zero
-        # error, i.e. perfectly calibrated -- rather than the -1 floor that
-        # spread / skill - 1 takes in the zero-spread limit, which would
-        # otherwise dominate the scalar global average of a mostly-prescribed
-        # field (surface temperature is prescribed over the ~70% of the surface
-        # that is ocean). total_variance is exactly 0 at these cells, but the
-        # unbiased MSE is not -- averaging the identical members leaves a tiny
-        # rounding residue -- so it is compared against a small fraction of the
-        # field's largest unbiased MSE (the residue is many orders of magnitude
-        # below any genuine skill).
+        # Prescribed cells (every member equals the target, e.g. SST over ocean)
+        # are a genuine 0/0: zero spread and zero error. Report 0 (perfectly
+        # calibrated) rather than the -1 floor, which would otherwise dominate
+        # the global mean of a mostly-prescribed field. Variance is exactly 0
+        # there, but the unbiased MSE carries a tiny rounding residue, so test
+        # it against a small fraction of the field's largest MSE, not against 0.
         mse_floor = _PRESCRIBED_MSE_RTOL * skill.square().max()
         prescribed = (self._total_variance == 0) & (
             self._total_unbiased_mse <= mse_floor
