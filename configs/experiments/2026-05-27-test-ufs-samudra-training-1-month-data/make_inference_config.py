@@ -115,7 +115,7 @@ def make_config(times):
         "n_coupled_steps": 147,  # 30 years with 5-day ocean steps
         "coupled_steps_in_memory": 1,
         "checkpoint_path": "/ckpt.tar",
-        "n_ensemble_per_ic": 1,
+        "n_ensemble_per_ic": 4,
         "logging": {
             "log_to_screen": True,
             "log_to_wandb": True,
