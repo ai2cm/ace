@@ -22,7 +22,6 @@ from fme.core.generics.data import SizedMap
 from fme.core.typing_ import TensorMapping
 from fme.downscaling.data.patching import Patch, get_patches
 from fme.downscaling.data.utils import (
-    BatchedLatLonCoordinates,
     ClosedInterval,
     check_leading_dim,
     expand_and_fold_tensor,
@@ -387,7 +386,7 @@ class BatchData:
 
     data: TensorMapping
     time: xr.DataArray
-    latlon_coordinates: BatchedLatLonCoordinates
+    latlon_coordinates: LatLonCoordinates
 
     def _validate(self):
         leading_dim = None
@@ -400,9 +399,16 @@ class BatchData:
             raise ValueError("Data must have at least one variable")
 
         check_leading_dim("time", self.time.shape, leading_dim)
-        check_leading_dim("lat", self.latlon_coordinates.lat.shape[:-1], leading_dim)
-        check_leading_dim("lon", self.latlon_coordinates.lon.shape[:-1], leading_dim)
-
+        if self.latlon_coordinates.lat.dim() != 1:
+            raise ValueError(
+                "Expected 1D lat coordinates, got shape "
+                f"{self.latlon_coordinates.lat.shape}"
+            )
+        if self.latlon_coordinates.lon.dim() != 1:
+            raise ValueError(
+                "Expected 1D lon coordinates, got shape "
+                f"{self.latlon_coordinates.lon.shape}"
+            )
         # TODO: temporary constraint for only 1 leading batch dimension
         if len(leading_dim) != 1:
             raise NotImplementedError("Only 1 leading batch dimension is supported")
@@ -421,12 +427,12 @@ class BatchData:
 
     @property
     def lat_interval(self) -> ClosedInterval:
-        lat = self.latlon_coordinates.lat[0]  # all batch members identical; use first
+        lat = self.latlon_coordinates.lat
         return ClosedInterval(lat.min().item(), lat.max().item())
 
     @property
     def lon_interval(self) -> ClosedInterval:
-        lon = self.latlon_coordinates.lon[0]  # all batch members identical; use first
+        lon = self.latlon_coordinates.lon
         return ClosedInterval(lon.min().item(), lon.max().item())
 
     @classmethod
@@ -435,26 +441,26 @@ class BatchData:
         items: Sequence[BatchItem],
         dim_name: str = "batch",
     ) -> Self:
-        data, times, latlon_coordinates = zip(*items)
+        data, times, coordinates = zip(*items)
 
         return cls(
             torch.utils.data.default_collate(data),
             xr.concat(times, dim_name),
-            BatchedLatLonCoordinates.from_sequence(latlon_coordinates),
+            coordinates[0],
         )
 
     def to_device(self) -> "BatchData":
         return BatchData(
             move_tensordict_to_device(self.data),
             self.time,
-            self.latlon_coordinates.to_device(),
+            self.latlon_coordinates.to(get_device()),
         )
 
     def __getitem__(self, k):
         return BatchItem(
             {key: value[k] for key, value in self.data.items()},
             self.time[k],
-            self.latlon_coordinates[k],
+            self.latlon_coordinates,
         )
 
     def __len__(self):
@@ -477,15 +483,7 @@ class BatchData:
             )
         time = self.time.expand_dims(dim={dim_name: num_samples}, axis=sample_dim)
         time = time.stack({"repeated_batch": time.dims})
-        latlon_coordinates = BatchedLatLonCoordinates(
-            lat=expand_and_fold_tensor(
-                self.latlon_coordinates.lat, num_samples, sample_dim
-            ),
-            lon=expand_and_fold_tensor(
-                self.latlon_coordinates.lon, num_samples, sample_dim
-            ),
-        )
-        return BatchData(data, time, latlon_coordinates)
+        return BatchData(data, time, self.latlon_coordinates)
 
     def latlon_slice(
         self,
@@ -496,10 +494,9 @@ class BatchData:
         # are specified as index slices rather than coordinate ranges. This is useful
         # for dividing a region into patches.
         sliced_data = {k: v[..., lat_slice, lon_slice] for k, v in self.data.items()}
-        sliced_latlon = BatchedLatLonCoordinates(
-            lat=self.latlon_coordinates.lat[..., lat_slice],
-            lon=self.latlon_coordinates.lon[..., lon_slice],
-            dims=self.latlon_coordinates.dims,
+        sliced_latlon = LatLonCoordinates(
+            lat=self.latlon_coordinates.lat[lat_slice],
+            lon=self.latlon_coordinates.lon[lon_slice],
         )
         return BatchData(
             data=sliced_data,
@@ -798,10 +795,8 @@ def patched_batch_gen_from_paired_loader(
         )
         if region_sampling is not None:
             assert fine_patches is not None  # for type checking
-            coarse_lats = batch.coarse.latlon_coordinates.lat[
-                0
-            ]  # dims are [batch, lat/lon]
-            coarse_lons = batch.coarse.latlon_coordinates.lon[0]
+            coarse_lats = batch.coarse.latlon_coordinates.lat
+            coarse_lons = batch.coarse.latlon_coordinates.lon
             indices = _sample_indices_with_region_sampling(
                 coarse_patches, coarse_lats, coarse_lons, region_sampling
             )

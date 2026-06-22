@@ -985,7 +985,7 @@ class Aggregator:
         """
         _check_batch_dims_for_recording(outputs, coarse, 3)
         if self.include_positional_comparisons:
-            self._fine_latlon_coordinates = batch.fine.latlon_coordinates[0]
+            self._fine_latlon_coordinates = batch.fine.latlon_coordinates
         target, prediction = outputs.target, outputs.prediction
         target = filter_tensor_mapping(target, prediction.keys())
 
