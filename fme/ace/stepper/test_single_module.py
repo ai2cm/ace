@@ -1079,7 +1079,7 @@ def _get_train_stepper(
 def test_step():
     stepper = _get_stepper(["a", "b"], ["a", "b"])
     n_samples = 3
-    input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
+    input_data = {x: torch.rand(n_samples, 1, 5, 5).to(DEVICE) for x in ["a", "b"]}
 
     output, _ = stepper.step(
         StepArgs(input=input_data, next_step_input_data={}, labels=None)
@@ -1092,7 +1092,7 @@ def test_step():
 def test_step_with_diagnostic():
     stepper = _get_stepper(["a"], ["a", "c"], module_name="RepeatChannel")
     n_samples = 3
-    input_data = {"a": torch.rand(n_samples, 5, 5).to(DEVICE)}
+    input_data = {"a": torch.rand(n_samples, 1, 5, 5).to(DEVICE)}
     output, _ = stepper.step(
         StepArgs(input=input_data, next_step_input_data={}, labels=None)
     )
@@ -1110,7 +1110,7 @@ def test_step_with_forcing_and_diagnostic(residual_prediction):
         residual_prediction=residual_prediction,
     )
     n_samples = 3
-    input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
+    input_data = {x: torch.rand(n_samples, 1, 5, 5).to(DEVICE) for x in ["a", "b"]}
     output, _ = stepper.step(
         StepArgs(input=input_data, next_step_input_data={}, labels=None)
     )
@@ -1123,12 +1123,44 @@ def test_step_with_forcing_and_diagnostic(residual_prediction):
     assert "c" in output
 
 
+@pytest.mark.parametrize(
+    "module_name, in_names, out_names",
+    [
+        ("ChannelSum", ["a", "b"], ["a"]),
+        ("RepeatChannel", ["a"], ["a", "c"]),
+    ],
+)
+def test_step_ensemble_members_are_independent(module_name, in_names, out_names):
+    """A ``[batch, ensemble]`` step must produce, for each ensemble member,
+    exactly what an independent single-member step on that member's data would
+    produce. This pins behavior preservation of the fold/unfold around the
+    network: ensemble members must not be mixed, and the channel dimension must
+    not be mistaken for the ensemble dimension.
+    """
+    stepper = _get_stepper(in_names, out_names, module_name=module_name)
+    n_batch, n_ensemble = 2, 3
+    input_data = {x: torch.rand(n_batch, n_ensemble, 5, 5).to(DEVICE) for x in in_names}
+    out, _ = stepper.step(
+        StepArgs(input=input_data, next_step_input_data={}, labels=None)
+    )
+    for name in out_names:
+        assert out[name].shape == (n_batch, n_ensemble, 5, 5)
+    for e in range(n_ensemble):
+        member_in = {k: v[:, e : e + 1] for k, v in input_data.items()}
+        member_out, _ = stepper.step(
+            StepArgs(input=member_in, next_step_input_data={}, labels=None)
+        )
+        assert set(member_out) == set(out)
+        for name in out:
+            torch.testing.assert_close(out[name][:, e : e + 1], member_out[name])
+
+
 def test_step_with_prescribed_ocean():
     stepper = _get_stepper(
         ["a", "b"], ["a", "b"], ocean_config=OceanConfig("a", "mask")
     )
-    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
-    ocean_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "mask"]}
+    input_data = {x: torch.rand(3, 1, 5, 5).to(DEVICE) for x in ["a", "b"]}
+    ocean_data = {x: torch.rand(3, 1, 5, 5).to(DEVICE) for x in ["a", "mask"]}
     output, _ = stepper.step(
         StepArgs(input=input_data, next_step_input_data=ocean_data, labels=None)
     )
@@ -1147,8 +1179,8 @@ def test_prescribe_sst_integration():
     stepper = _get_stepper(
         ["a", "b"], ["a", "b"], ocean_config=OceanConfig("a", "mask")
     )
-    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
-    ocean_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "mask"]}
+    input_data = {x: torch.rand(3, 1, 5, 5).to(DEVICE) for x in ["a", "b"]}
+    ocean_data = {x: torch.rand(3, 1, 5, 5).to(DEVICE) for x in ["a", "mask"]}
     prescribed_data = stepper.prescribe_sst(
         mask_data=ocean_data,
         gen_data=input_data,
@@ -1242,8 +1274,10 @@ class _RecordingCorrector(CorrectorABC):
         self.call_count += 1
         self.seen_states.append(corrector_state)
         if corrector_state is None or corrector_state.global_dry_air_mass is None:
-            n = input_data["a"].shape[0]
-            seed = input_data["a"].mean(dim=(-1, -2), keepdim=True).reshape(n, 1, 1)
+            # The corrector sees data with an explicit [batch, ensemble, ...]
+            # leading pair, so the per-sample state keeps that pair too:
+            # [batch, ensemble, 1, 1].
+            seed = input_data["a"].mean(dim=(-1, -2), keepdim=True)
             corrector_state = CorrectorState(global_dry_air_mass=seed)
         else:
             corrector_state = CorrectorState(
@@ -1279,7 +1313,10 @@ def test_predict_threads_stepper_state_across_calls():
     pres_after_1 = ic_after_1.stepper_state.corrector_state.global_dry_air_mass
     assert pres_after_1 is not None
     # n_steps invocations after seeding: seed + (n_steps - 1) increments.
-    expected = seeded_1 + float(n_steps - 1)
+    # ``seeded_1`` is in the corrector-facing [batch, ensemble, 1, 1] frame;
+    # the returned state is folded to [batch*ensemble, 1, 1], so fold the
+    # expectation (flatten the leading pair) before comparing.
+    expected = (seeded_1 + float(n_steps - 1)).flatten(0, 1)
     torch.testing.assert_close(pres_after_1, expected)
 
     # Second predict: feed back the prognostic state from call 1; corrector
@@ -1289,7 +1326,11 @@ def test_predict_threads_stepper_state_across_calls():
     first_state_call_2 = recording_corrector.seen_states[seen_before_call_2]
     assert first_state_call_2 is not None
     assert first_state_call_2.global_dry_air_mass is not None
-    torch.testing.assert_close(first_state_call_2.global_dry_air_mass, pres_after_1)
+    # The state the corrector sees is unfolded ([batch, ensemble, 1, 1]); the
+    # returned state from call 1 is folded. Fold before comparing.
+    torch.testing.assert_close(
+        first_state_call_2.global_dry_air_mass.flatten(0, 1), pres_after_1
+    )
 
     ic_after_2 = new_state_2.as_batch_data()
     assert ic_after_2.stepper_state is not None
@@ -2254,7 +2295,7 @@ def _step_negative_input(stepper: Stepper) -> tuple[torch.Tensor, torch.Tensor]:
     The stepper adds one to its input, so the raw prediction is negative
     everywhere and the force-positive corrector clamps it to zero.
     """
-    input_data = {"a": torch.full((3, 5, 5), -5.0, device=DEVICE)}
+    input_data = {"a": torch.full((3, 1, 5, 5), -5.0, device=DEVICE)}
     output, _ = stepper.step(
         StepArgs(input=input_data, next_step_input_data={}, labels=None)
     )
@@ -2775,7 +2816,7 @@ def test_step_unmasked_nan_input_raises():
     """A NaN input not covered by data_mask raises a located error in step()."""
     stepper = _get_stepper(["a", "b"], ["a"], module_name="ChannelSum")
     n_samples = 2
-    input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
+    input_data = {x: torch.rand(n_samples, 1, 5, 5).to(DEVICE) for x in ["a", "b"]}
     input_data["b"][1] = torch.nan
     with pytest.raises(ValueError, match=r"NaN found in network input.*\bb\b"):
         stepper.step(StepArgs(input=input_data, next_step_input_data={}, labels=None))
@@ -2785,9 +2826,9 @@ def test_step_masked_nan_input_does_not_raise():
     """A NaN input covered by data_mask is zeroed, so the guard does not fire."""
     stepper = _get_stepper(["a", "b"], ["a"], module_name="ChannelSum")
     n_samples = 2
-    input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
+    input_data = {x: torch.rand(n_samples, 1, 5, 5).to(DEVICE) for x in ["a", "b"]}
     input_data["b"][1] = torch.nan
-    data_mask = {"b": torch.tensor([True, False], dtype=torch.bool, device=DEVICE)}
+    data_mask = {"b": torch.tensor([[True], [False]], dtype=torch.bool, device=DEVICE)}
     output, _ = stepper.step(
         StepArgs(
             input=input_data,

@@ -22,6 +22,7 @@ from fme.core.step.args import StepArgs
 from fme.core.step.single_module import step_with_adjustments
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.stepper_state import StepperState
+from fme.core.tensors import fold_ensemble_tensor, unfold_ensemble_tensor
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -357,12 +358,18 @@ class SeparateRadiationStep(StepABC):
             radiation_input_tensor = self.radiation_in_packer.pack(
                 input_norm, axis=self.CHANNEL_DIM
             )
+            # The modules expect a single folded [batch*ensemble, channel,
+            # *spatial] sample dimension; fold the explicit ensemble dim in and
+            # unfold each output back to [batch, ensemble, ...].
+            n_ensemble = radiation_input_tensor.shape[1]
             radiation_output_tensor = self.radiation_module.wrap_module(wrapper)(
-                radiation_input_tensor, labels=args.labels
+                fold_ensemble_tensor(radiation_input_tensor, n_ensemble),
+                labels=args.labels,
             )
 
             radiation_output_norm = self.radiation_out_packer.unpack(
-                radiation_output_tensor, axis=self.CHANNEL_DIM
+                unfold_ensemble_tensor(radiation_output_tensor, n_ensemble),
+                axis=self.CHANNEL_DIM,
             )
             main_input_data = input_norm.copy()
             if self._config.detach_radiation:
@@ -374,10 +381,11 @@ class SeparateRadiationStep(StepABC):
                 main_input_data = {**input_norm, **radiation_output_norm}
             input_tensor = self.in_packer.pack(main_input_data, axis=self.CHANNEL_DIM)
             output_tensor = self.module.wrap_module(wrapper)(
-                input_tensor, labels=args.labels
+                fold_ensemble_tensor(input_tensor, n_ensemble), labels=args.labels
             )
             main_output_norm = self.out_packer.unpack(
-                output_tensor, axis=self.CHANNEL_DIM
+                unfold_ensemble_tensor(output_tensor, n_ensemble),
+                axis=self.CHANNEL_DIM,
             )
             return {
                 **radiation_output_norm,

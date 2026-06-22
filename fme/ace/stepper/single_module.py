@@ -1121,6 +1121,7 @@ class Stepper:
             forcing_data.labels,
             data_mask=forcing_data.data_mask,
             stepper_state=ic_batch_data.stepper_state,
+            n_ensemble=ic_batch_data.n_ensemble,
         )
 
     @property
@@ -1139,21 +1140,52 @@ class Stepper:
         data_mask: TensorMapping | None = None,
         stepper_state: StepperState | None = None,
         input_dropout_mask: TensorMapping | None = None,
+        n_ensemble: int = 1,
     ) -> Generator[tuple[TensorDict, StepperState | None], None, None]:
-        state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
+        # The Step operates on an explicit [batch, ensemble, *spatial] leading
+        # pair (folding the ensemble into the batch only for the network module
+        # call). The data, masks and state arrive folded as [batch*ensemble,
+        # ...]; unfold them before each Step call and fold the yielded outputs
+        # back, so the external contract of this generator stays folded.
+        unfolded_mask = (
+            unfold_ensemble_dim(dict(data_mask), n_ensemble)
+            if data_mask is not None
+            else None
+        )
+        unfolded_dropout_mask = (
+            unfold_ensemble_dim(dict(input_dropout_mask), n_ensemble)
+            if input_dropout_mask is not None
+            else None
+        )
+        stepper_state = (
+            stepper_state.unfold_ensemble(n_ensemble)
+            if stepper_state is not None
+            else None
+        )
+        # Time-slice the (still folded) forcing/IC, then unfold each per-step
+        # slice; this keeps the time dim at TIME_DIM rather than shifting it.
+        state: TensorDict = unfold_ensemble_dim(
+            {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}, n_ensemble
+        )
         for step in range(n_forward_steps):
-            input_forcing = {
-                k: (
-                    forcing_dict[k][:, step]
-                    if k not in self._step_obj.next_step_forcing_names
-                    else forcing_dict[k][:, step + 1]
-                )
-                for k in self._input_only_names
-            }
-            next_step_input_dict = {
-                k: forcing_dict[k][:, step + 1]
-                for k in self._step_obj.next_step_input_names
-            }
+            input_forcing = unfold_ensemble_dim(
+                {
+                    k: (
+                        forcing_dict[k][:, step]
+                        if k not in self._step_obj.next_step_forcing_names
+                        else forcing_dict[k][:, step + 1]
+                    )
+                    for k in self._input_only_names
+                },
+                n_ensemble,
+            )
+            next_step_input_dict = unfold_ensemble_dim(
+                {
+                    k: forcing_dict[k][:, step + 1]
+                    for k in self._step_obj.next_step_input_names
+                },
+                n_ensemble,
+            )
             input_data = {**state, **input_forcing}
 
             def checkpoint(module):
@@ -1165,13 +1197,18 @@ class Stepper:
                         input=input_data,
                         next_step_input_data=next_step_input_dict,
                         labels=labels,
-                        data_mask=data_mask,
+                        data_mask=unfolded_mask,
                         stepper_state=stepper_state,
-                        input_dropout_mask=input_dropout_mask,
+                        input_dropout_mask=unfolded_dropout_mask,
                     ),
                     wrapper=checkpoint,
                 )
-            yield state, stepper_state
+            yield (
+                fold_sized_ensemble_dim(EnsembleTensorDict(state), n_ensemble),
+                stepper_state.fold_ensemble(n_ensemble)
+                if stepper_state is not None
+                else None,
+            )
             state = optimizer.detach_if_using_gradient_accumulation(state)
 
     def predict(
@@ -1709,6 +1746,7 @@ class TrainStepper(
             data_mask=forcing_ensemble_data.data_mask,
             stepper_state=input_ensemble_data.stepper_state,
             input_dropout_mask=input_dropout_mask,
+            n_ensemble=n_ensemble,
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)

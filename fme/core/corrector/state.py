@@ -61,6 +61,32 @@ class CorrectorState:
             ),
         )
 
+    def unfold_ensemble(self, n_ensemble: int) -> "CorrectorState":
+        """Unfold a folded ``[batch * ensemble, ...]`` state into an explicit
+        ``[batch, ensemble, ...]`` leading pair, matching the layout the Step
+        operates on. Inverse of :meth:`fold_ensemble`.
+        """
+        if self.global_dry_air_mass is None:
+            return CorrectorState()
+        t = self.global_dry_air_mass
+        return CorrectorState(
+            global_dry_air_mass=t.reshape(
+                t.shape[0] // n_ensemble, n_ensemble, *t.shape[1:]
+            ),
+        )
+
+    def fold_ensemble(self, n_ensemble: int) -> "CorrectorState":
+        """Fold an explicit ``[batch, ensemble, ...]`` state back into a folded
+        ``[batch * ensemble, ...]`` sample dimension. Inverse of
+        :meth:`unfold_ensemble`.
+        """
+        if self.global_dry_air_mass is None:
+            return CorrectorState()
+        t = self.global_dry_air_mass
+        return CorrectorState(
+            global_dry_air_mass=t.reshape(t.shape[0] * n_ensemble, *t.shape[2:]),
+        )
+
     def sample_dim_size(self) -> int | None:
         """Return the leading (sample) dim of any non-None field, or None if empty."""
         if self.global_dry_air_mass is not None:

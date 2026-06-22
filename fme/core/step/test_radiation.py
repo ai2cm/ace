@@ -29,13 +29,19 @@ class AddOne(torch.nn.Module):
 
 
 def get_tensor_dict(
-    names: list[str], img_shape: tuple[int, int], n_samples: int
+    names: list[str],
+    img_shape: tuple[int, int],
+    n_samples: int,
+    n_ensemble: int = 1,
 ) -> TensorDict:
+    # The step operates on an explicit [batch, ensemble, *spatial] leading
+    # pair; build inputs with that ensemble dimension (size 1 by default).
     data_dict = {}
     device = fme.get_device()
     for name in names:
         data_dict[name] = torch.rand(
             n_samples,
+            n_ensemble,
             *img_shape,
             device=device,
         )

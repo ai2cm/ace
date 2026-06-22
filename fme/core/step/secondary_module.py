@@ -27,6 +27,11 @@ from fme.core.step.secondary_decoder import (
 from fme.core.step.single_module import step_with_adjustments
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.stepper_state import StepperState
+from fme.core.tensors import (
+    fold_ensemble_tensor,
+    unfold_ensemble_dim,
+    unfold_ensemble_tensor,
+)
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -390,17 +395,26 @@ class SecondaryModuleStep(StepABC):
     ) -> tuple[TensorDict, StepperState | None]:
         def network_call(input_norm: TensorDict) -> TensorDict:
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
-            output_tensor = self.module.wrap_module(wrapper)(
-                input_tensor,
+            # The modules expect a single folded [batch*ensemble, channel,
+            # *spatial] sample dimension; fold the explicit ensemble dim in and
+            # unfold each output back to [batch, ensemble, ...].
+            n_ensemble = input_tensor.shape[1]
+            folded_input = fold_ensemble_tensor(input_tensor, n_ensemble)
+            folded_output = self.module.wrap_module(wrapper)(
+                folded_input,
                 labels=args.labels,
             )
-            output_dict = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
+            output_dict = self.out_packer.unpack(
+                unfold_ensemble_tensor(folded_output, n_ensemble),
+                axis=self.CHANNEL_DIM,
+            )
             secondary_tensor = self.secondary_module.wrap_module(wrapper)(
-                input_tensor,
+                folded_input,
                 labels=args.labels,
             )
             secondary_dict = self.secondary_out_packer.unpack(
-                secondary_tensor, axis=self.CHANNEL_DIM
+                unfold_ensemble_tensor(secondary_tensor, n_ensemble),
+                axis=self.CHANNEL_DIM,
             )
             for name in self._config.secondary_out_names:
                 output_dict[name] = secondary_dict[name]
@@ -410,9 +424,9 @@ class SecondaryModuleStep(StepABC):
                 else:
                     output_dict[name] = input_norm[name] + secondary_dict[name]
             secondary_output_dict = self.secondary_decoder.wrap_module(wrapper)(
-                output_tensor.detach()  # detach avoids changing base outputs
+                folded_output.detach()  # detach avoids changing base outputs
             )
-            output_dict.update(secondary_output_dict)
+            output_dict.update(unfold_ensemble_dim(secondary_output_dict, n_ensemble))
             return output_dict
 
         return step_with_adjustments(
