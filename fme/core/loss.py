@@ -487,7 +487,7 @@ class EnergyScoreLoss(torch.nn.Module):
     def __init__(
         self,
         sht: Callable[[torch.Tensor], torch.Tensor],
-        spectral_whitening: str = "none",
+        spectral_whitening: Literal["none", "per_sample"] = "none",
         whitening_eps_frac: float = 0.02,
     ):
         super().__init__()
@@ -657,7 +657,7 @@ class EnsembleLoss(torch.nn.Module):
         finite_difference_crps_weight: float = 0.0,
         finite_difference_crps_levels: int = 1,
         almost_fair_crps_alpha: float = 1.0,
-        energy_score_whitening: str = "none",
+        energy_score_whitening: Literal["none", "per_sample"] = "none",
         energy_score_whitening_eps_frac: float = 0.02,
     ):
         super().__init__()
