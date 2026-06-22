@@ -3,7 +3,7 @@
 set -e
 
 JOB_GROUP="ufs-replay-ocean"
-BASE_JOB_NAME="ft-coupled-era5-ufs-stochastic-5day-ocean-inference"
+BASE_JOB_NAME="ft-coupled-era5-ufs-stochastic-5day-ocean-inference-4member-ic-ensemble"
 EXISTING_RESULTS_DATASET="01KTMD1TRMSFN4FHP19CZAST62"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
