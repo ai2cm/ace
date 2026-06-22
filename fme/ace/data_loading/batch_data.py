@@ -213,12 +213,33 @@ class BatchData:
     @property
     def ensemble_data(self) -> EnsembleTensorDict:
         """
-        Add an explicit ensemble dimension to a data tensor dict.
+        The data with an explicit ``[batch, ensemble, time, *spatial]`` layout.
 
-        Returns:
-            The tensor dict with an explicit ensemble dimension.
+        Derived from the folded ``data`` and ``n_ensemble`` (an ensemble length
+        of 1 is valid even before ``broadcast_ensemble`` is called). Consumers
+        that need the ensemble dimension should read this rather than ``data``
+        plus an ``n_ensemble`` argument.
         """
         return unfold_ensemble_dim(TensorDict(self.data), n_ensemble=self.n_ensemble)
+
+    @property
+    def ensemble_data_mask(self) -> TensorMapping | None:
+        """The per-variable ``data_mask`` with an explicit ``[batch, ensemble]``
+        layout, or ``None``. Companion to :attr:`ensemble_data`.
+        """
+        if self.data_mask is None:
+            return None
+        return unfold_ensemble_dim(dict(self.data_mask), n_ensemble=self.n_ensemble)
+
+    @property
+    def ensemble_stepper_state(self) -> "StepperState | None":
+        """The ``stepper_state`` with its per-sample tensors carrying an explicit
+        ``[batch, ensemble, ...]`` leading pair, or ``None``. Companion to
+        :attr:`ensemble_data`.
+        """
+        if self.stepper_state is None:
+            return None
+        return self.stepper_state.unfold_ensemble(self.n_ensemble)
 
     def to_device(self) -> "BatchData":
         device = get_device()
